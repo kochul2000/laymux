@@ -121,10 +121,13 @@ import {
         // Settings recovery path. Keep the renderer's neutral body name while
         // the presentation is no longer a popover.
         const keyPopoverBody = inputLayoutEditor;
+        const composerSettingsBody = $("composerSettingsEditor");
+        const settingsTabsEl = $("settingsTabs");
         const tokenKey = "laymux.remote.token";
         const keyBarKey = "laymux.remote.keybar";
         const inputModeKey = "laymux.remote.inputMode";
         const remoteDisplaySettingsKey = "laymux.remote.displaySettings";
+        const settingsPanelKey = "laymux.remote.settingsPanel";
         // Composer recall feature toggles (issues #504 / #505). Only the on/off
         // boolean is surface-local in localStorage — the past-input text itself
         // is kept in a runtime Map and never persisted (see composerHistory*).
@@ -9716,12 +9719,15 @@ import {
           return actions;
         }
 
+        // The panel already carries the section heading, so this row pairs the
+        // usage hint with Reset instead of repeating the title.
         function renderInputLayoutHeading() {
           const heading = document.createElement("div");
           heading.className = "input-layout-heading";
-          const title = document.createElement("div");
-          title.className = "key-popover-title";
-          title.textContent = "Input bar";
+          const help = document.createElement("div");
+          help.className = "key-order-help";
+          help.textContent =
+            "Hold and drag a key to move it between rows and alignments · Tap a key for move controls";
           const reset = document.createElement("button");
           reset.type = "button";
           reset.className = "key-order-reset";
@@ -9731,14 +9737,8 @@ import {
             event.stopPropagation();
             resetInputActionLayout();
           });
-          heading.append(title, reset);
+          heading.append(help, reset);
           keyPopoverBody.append(heading);
-
-          const help = document.createElement("div");
-          help.className = "key-order-help";
-          help.textContent =
-            "Hold and drag a key to move it between rows and alignments · Tap a key for move controls";
-          keyPopoverBody.append(help);
         }
 
         function renderRowEditor(row) {
@@ -10092,15 +10092,11 @@ import {
           renderHiddenSection();
           renderUserKeySection();
         }
-        // Composer settings share the Remote drawer Settings surface with the
-        // input layout. Configuration is persisted surface-locally; input text
-        // itself remains runtime-only except for explicit attachment policy.
-        function renderComposerPopoverSection() {
-          const title = document.createElement("div");
-          title.className = "key-popover-title";
-          title.textContent = "Composer";
-          keyPopoverBody.append(title);
-
+        // Composer settings own a Settings tab of their own; the section
+        // heading is in the markup, so this renders only the controls.
+        // Configuration is persisted surface-locally; input text itself remains
+        // runtime-only except for explicit attachment policy.
+        function renderComposerSettingsSection() {
           const makeToggle = (id, labelText, descText, enabled, onChange) => {
             const row = document.createElement("label");
             row.className = "key-set-row";
@@ -10125,7 +10121,7 @@ import {
             desc.className = "key-set-desc";
             desc.textContent = descText;
             row.append(cb, name, desc);
-            keyPopoverBody.append(row);
+            composerSettingsBody.append(row);
           };
 
           // Scope picker (ADR-0055): which terminals share one recall bucket.
@@ -10163,7 +10159,7 @@ import {
             renderComposerSuggestions();
           });
           scopeRow.append(scopeName, scopeSelect);
-          keyPopoverBody.append(scopeRow);
+          composerSettingsBody.append(scopeRow);
 
           makeToggle(
             "composerHistoryPopupToggle",
@@ -10227,14 +10223,72 @@ import {
               }
             });
             row.append(name, input);
-            keyPopoverBody.append(row);
+            composerSettingsBody.append(row);
           }
         }
 
         function renderKeyPopover() {
           keyPopoverBody.textContent = "";
+          composerSettingsBody.textContent = "";
           renderInputLayoutEditor();
-          renderComposerPopoverSection();
+          renderComposerSettingsSection();
+        }
+
+        // Settings is paginated: only the selected panel is in the layout, so a
+        // long section no longer buries the others under a scroll. The choice is
+        // surface-local like the rest of the Remote display preferences.
+        const SETTINGS_PANELS = ["inputBar", "composer", "display", "app"];
+
+        function loadSettingsPanel() {
+          try {
+            const stored = localStorage.getItem(settingsPanelKey);
+            return SETTINGS_PANELS.includes(stored) ? stored : SETTINGS_PANELS[0];
+          } catch (_) {
+            return SETTINGS_PANELS[0];
+          }
+        }
+
+        let activeSettingsPanel = loadSettingsPanel();
+
+        function settingsTabButtons() {
+          return [...settingsTabsEl.querySelectorAll("[data-settings-panel]")];
+        }
+
+        function setSettingsPanel(panel, persist = true) {
+          if (!SETTINGS_PANELS.includes(panel)) return;
+          activeSettingsPanel = panel;
+          for (const tab of settingsTabButtons()) {
+            const selected = tab.dataset.settingsPanel === panel;
+            tab.setAttribute("aria-selected", selected ? "true" : "false");
+            tab.classList.toggle("active", selected);
+            // Roving tabindex: the tablist is one tab stop, arrows move inside.
+            tab.tabIndex = selected ? 0 : -1;
+          }
+          for (const element of drawerSettingsView.querySelectorAll(".settings-panel")) {
+            element.hidden = element.dataset.settingsPanel !== panel;
+          }
+          if (!persist) return;
+          try {
+            localStorage.setItem(settingsPanelKey, panel);
+          } catch (_) {}
+        }
+
+        function installSettingsTabs() {
+          for (const tab of settingsTabButtons()) {
+            tab.addEventListener("click", () => setSettingsPanel(tab.dataset.settingsPanel));
+            tab.addEventListener("keydown", (event) => {
+              const offset =
+                event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+              if (!offset) return;
+              event.preventDefault();
+              const tabs = settingsTabButtons();
+              const index = tabs.indexOf(tab);
+              const next = tabs[(index + offset + tabs.length) % tabs.length];
+              setSettingsPanel(next.dataset.settingsPanel);
+              next.focus();
+            });
+          }
+          setSettingsPanel(activeSettingsPanel, false);
         }
 
         function setKeyBarVisible(visible, persist = true) {
@@ -10614,6 +10668,7 @@ import {
         renderKeyRow();
         setKeyBarVisible(keyBarConfig.expanded, false);
         renderKeyPopover();
+        installSettingsTabs();
         // The markup ships checked; the stored choice is what actually holds
         // (ADR-0132). Applied before the first connect so a device that turned
         // the row off never flashes it.

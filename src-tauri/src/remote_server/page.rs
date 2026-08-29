@@ -578,6 +578,24 @@ mod tests {
         assert!(settings_view.contains("id=\"displaySection\""));
         assert!(settings_view.contains("id=\"pcUpdateSection\""));
         assert!(settings_view.contains("id=\"installSection\""));
+        // Settings is paginated: one tablist, one panel per subject.
+        assert!(
+            settings_view.contains("id=\"settingsTabs\" class=\"settings-tabs\" role=\"tablist\"")
+        );
+        for panel in ["inputBar", "composer", "display", "app"] {
+            assert!(
+                settings_view.contains(&format!("role=\"tab\" data-settings-panel=\"{panel}\"")),
+                "settings tab for {panel} is missing"
+            );
+            assert!(
+                settings_view.contains(&format!(
+                    "class=\"settings-panel\" role=\"tabpanel\" data-settings-panel=\"{panel}\""
+                )),
+                "settings panel for {panel} is missing"
+            );
+        }
+        // Composer settings render in their own panel, not inside the input bar.
+        assert!(settings_view.contains("id=\"composerSettingsEditor\""));
 
         assert!(html.contains("id=\"drawerNotificationsButton\""));
         assert!(html.contains("id=\"drawerConnectionButton\""));
@@ -1234,7 +1252,7 @@ mod tests {
         assert!(html.contains(
             "drop.element.classList.add(drop.after ? \"drop-after\" : \"drop-before\");"
         ));
-        assert!(html.contains("title.textContent = \"Input bar\";"));
+        assert!(html.contains("function installSettingsTabs()"));
         assert!(html.contains("reset.setAttribute(\"aria-label\", \"Reset input action layout\");"));
         assert!(html.contains("`Move ${hint} to start`"));
         assert!(html.contains("chip.className = \"key-chip layout-chip\";"));
@@ -1719,8 +1737,8 @@ mod tests {
 
         // Feature toggles live in the existing key-set popover (Remote settings
         // home), accessible and aria-labelled.
-        assert!(html.contains("function renderComposerPopoverSection()"));
-        assert!(html.contains("title.textContent = \"Composer\";"));
+        assert!(html.contains("function renderComposerSettingsSection()"));
+        assert!(html.contains("<h2 class=\"nav-section-title\">Composer</h2>"));
         assert!(html.contains("\"composerHideAgentInputToggle\""));
         assert!(html.contains("\"Hide unused agent input\""));
         assert!(html.contains("function scrollTowardComposerBottom()"));
