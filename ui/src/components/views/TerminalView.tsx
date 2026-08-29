@@ -2075,6 +2075,7 @@ export function TerminalView({
       }
 
       const shadowCursor = shadowCursorRef.current;
+      const compositionPreview = compositionPreviewRef.current;
       const caretOwner = resolveVisualCaretOwner({
         opened: openedRef.current,
         focused: isFocusedRef.current,
@@ -2083,18 +2084,28 @@ export function TerminalView({
         syncOutputActive: syncOutputActiveRef.current,
         isAltBufferActive: shadowCursor.isAltBufferActive,
         viewportScrolledUp: isTerminalScrolledUp(term),
-        compositionActive: compositionPreviewRef.current.active,
+        compositionActive: compositionPreview.active,
         cursorHidden: shadowCursor.isCursorHidden,
         hasSyncFramePosition: shadowCursor.hasSyncFramePosition,
         hasPromptBoundary: shadowCursor.hasPromptBoundary,
         isInputPhase: shadowCursor.isInputPhase,
       });
+
+      // A completed composition is no longer part of the visible input surface.
+      // Clear it before synchronized-output or post-frame caret freezing can return
+      // early; otherwise the committed syllable remains over a newer xterm input row.
+      if (!compositionPreview.active) {
+        previewEl.style.opacity = "0";
+        if (previewEl.childElementCount > 0) {
+          previewEl.replaceChildren();
+        }
+        restoreHelperAnchor("composition-inactive");
+      }
       if (caretOwner === "frozen") {
         // DEC 2026 keeps the previously rendered xterm surface visible while
-        // parser state advances. The overlay is part of that surface: leave its
-        // opacity, geometry, composition preview, and helper anchor untouched
-        // until the frame closes. WSL can expose this state across rAFs because
-        // it intentionally does not hold the whole output transaction.
+        // parser state advances. Preserve the last non-composition caret opacity
+        // and geometry until the frame closes. Live composition outranks this
+        // owner and a finished preview was already cleared above.
         trace("overlay-frozen", { reason: "sync-output-active" });
         return;
       }
@@ -2102,14 +2113,6 @@ export function TerminalView({
         hideOverlay();
         trace("overlay-hidden", { reason: caretOwner, shadowCursor });
         return;
-      }
-
-      // Skip when already cleared — assigning `textContent` replaces
-      // child nodes even when the value is unchanged, and this runs on
-      // every rAF paint outside composition.
-      if (!compositionPreviewRef.current.active && previewEl.textContent) {
-        previewEl.style.opacity = "0";
-        previewEl.replaceChildren();
       }
 
       // Post-frame settle window: the shadow position right after a DEC
@@ -2120,9 +2123,7 @@ export function TerminalView({
       // Composition preview and sustained DECTCEM hide bypass the
       // freeze — see `shouldFreezeOverlayForPark` for why each must
       // reach paint immediately.
-      if (
-        shouldFreezeOverlayForPark(shadowCursorRef.current, compositionPreviewRef.current.active)
-      ) {
+      if (shouldFreezeOverlayForPark(shadowCursorRef.current, compositionPreview.active)) {
         trace("overlay-frozen", { reason: "park-pending" });
         return;
       }
@@ -2155,7 +2156,6 @@ export function TerminalView({
         caretOwner === "composition-preview" ||
         caretOwner === "sync-frame" ||
         caretOwner === "shadow-input";
-      const compositionPreview = compositionPreviewRef.current;
       let cursorX = useShadowCursor
         ? shadowCursor.cursorX
         : ((term.buffer.active as { cursorX?: number }).cursorX ?? 0);

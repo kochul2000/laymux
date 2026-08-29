@@ -988,16 +988,8 @@ export function resolveVisualCaretOwner(input: VisualCaretOwnerInput): VisualCar
   if (input.viewportScrolledUp) {
     return "hidden";
   }
-  // DEC 2026 freezes xterm's rendered surface while parser/buffer state keeps
-  // advancing. Preserve the last committed overlay DOM as part of that same
-  // visual frame. Hiding it here made WSL Codex blink whenever a Working frame
-  // crossed a PTY-write / animation-frame boundary; native Windows normally
-  // hid the bug by delivering the stabilized transaction in one write.
-  if (input.syncOutputActive) {
-    return "frozen";
-  }
-  // Composition outranks the caret policy gate below (issue #551) and the alt buffer
-  // (issue #553).
+  // Composition outranks synchronized output, the caret policy gate below
+  // (issue #551), and the alt buffer (issue #553).
   //
   // The two decisions are not the same kind of thing. `stabilizeInteractiveCursor`
   // and `overlayActivity` decide whether laymux owns the *caret* — a policy that
@@ -1019,11 +1011,20 @@ export function resolveVisualCaretOwner(input: VisualCaretOwnerInput): VisualCar
   // anchor comes from the live buffer cursor — which is exactly where vim put it.
   //
   // It stays *below* opened/focused and viewportScrolledUp: those are genuine
-  // "not visible" conditions. Synchronized output is different: geometry is not
-  // trustworthy yet, so the already-painted preview/caret is frozen above rather
-  // than hidden or recomputed.
+  // "not visible" conditions. Synchronized output freezes xterm's rendered
+  // surface, but the composition preview is the only renderer for live preedit
+  // text. Freezing that DOM can leave the previous syllable painted after the
+  // controller has advanced to the next one. Its controller-owned anchor remains
+  // authoritative while the app frame is open, so live preedit must keep painting.
   if (input.compositionActive) {
     return "composition-preview";
+  }
+  // Preserve the last committed non-composition caret as part of the frozen xterm
+  // frame. Hiding it here made WSL Codex blink whenever a Working frame crossed a
+  // PTY-write / animation-frame boundary; native Windows normally hid the bug by
+  // delivering the stabilized transaction in one write.
+  if (input.syncOutputActive) {
+    return "frozen";
   }
   if (input.isAltBufferActive) {
     return "alt-buffer";

@@ -56,6 +56,16 @@ describe("resolveVisualCaretOwner", () => {
     ).toBe("frozen");
   });
 
+  it("keeps the live composition preview ahead of synchronized output", () => {
+    expect(
+      resolveVisualCaretOwner({
+        ...baseInput,
+        syncOutputActive: true,
+        compositionActive: true,
+      }),
+    ).toBe("composition-preview");
+  });
+
   // This case used to assert "alt-buffer" — the defect in issue #553 was pinned as
   // intended behaviour, the same way #551's was. In vim the composing jamo was
   // invisible with no way to see it, because the alt buffer hid the only renderer the

@@ -4536,6 +4536,92 @@ describe("TerminalView", () => {
       },
     });
 
+    const setupWslCodexCompositionFrame = async (terminalId: string) => {
+      mockCreateTerminalSession.mockResolvedValueOnce({
+        ...sessionResult("wsl"),
+        id: terminalId,
+      });
+      render(<TerminalView instanceId={terminalId} profile="WSL" syncGroup="" isFocused />);
+      act(() => {
+        useTerminalStore.getState().updateInstanceInfo(terminalId, {
+          activity: { type: "interactiveApp", name: "Codex" },
+        });
+      });
+
+      const terminal = createdTerminals.at(-1)! as MockTerminalInstance & {
+        buffer: { active: typeof mockBufferActive };
+      };
+      const container = screen.getByTestId(`terminal-view-${terminalId}`);
+      const overlay = screen.getByTestId(`terminal-overlay-caret-${terminalId}`);
+      const preview = screen.getByTestId(`terminal-composition-preview-${terminalId}`);
+      const rect = () =>
+        ({
+          left: 0,
+          top: 0,
+          width: 800,
+          height: 480,
+          right: 800,
+          bottom: 480,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        }) as DOMRect;
+      const screenEl = document.createElement("div");
+      screenEl.className = "xterm-screen";
+      screenEl.getBoundingClientRect = rect;
+      const helper = document.createElement("textarea");
+      helper.className = "xterm-helper-textarea";
+      terminal.element.append(screenEl, helper);
+      container.getBoundingClientRect = rect;
+      await waitForTerminalInputReady();
+      await waitForStreamAttachReset();
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      terminal.buffer.active.baseY = 0;
+      terminal.buffer.active.viewportY = 0;
+      terminal.buffer.active.cursorX = 10;
+      terminal.buffer.active.cursorY = 4;
+      act(() => {
+        helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+        helper.value = "\ub2c8";
+        helper.selectionStart = 1;
+        helper.selectionEnd = 1;
+        helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\ub2c8" }));
+        helper.dispatchEvent(new Event("input"));
+      });
+      await vi.waitFor(() => {
+        expect(preview.textContent).toBe("\ub2c8");
+        expect(preview.style.transform).toBe("translate(100px, 80px)");
+        expect(overlay.style.opacity).toBe("1");
+        expect(overlay.style.transform).toBe("translate(120px, 80px)");
+        expect(helper.style.left).toBe("120px");
+        expect(helper.style.top).toBe("80px");
+      });
+
+      mockModes.synchronizedOutputMode = true;
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([2026]);
+        // A TUI repaint can park the public cursor on a footer while the
+        // composition controller still owns the input-row anchor.
+        terminal.buffer.active.cursorX = 40;
+        terminal.buffer.active.cursorY = 10;
+        const renderHandler = mockOnRender.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+        renderHandler?.();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(container).toHaveClass("terminal-sync-output-active");
+
+      const closeFrame = async () => {
+        mockModes.synchronizedOutputMode = false;
+        await act(async () => {
+          await csiHandlers.get("?:l")?.([2026]);
+        });
+      };
+      return { container, helper, overlay, preview, closeFrame };
+    };
+
     it("removes only the in-frame cursor show and refreshes after one atomic write", async () => {
       const terminalId = "t-native-stabilizer";
       mockCreateTerminalSession.mockResolvedValueOnce(sessionResult("nativeWindows"));
@@ -4726,6 +4812,66 @@ describe("TerminalView", () => {
       await act(async () => {
         await csiHandlers.get("?:l")?.([2026]);
       });
+    });
+
+    it("advances the live IME preview while a WSL Codex frame spans animation frames", async () => {
+      const { container, helper, overlay, preview, closeFrame } =
+        await setupWslCodexCompositionFrame("t-wsl-working-ime-advance");
+      try {
+        act(() => {
+          helper.dispatchEvent(new CompositionEvent("compositionend", { data: "\ub2c8" }));
+          helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+          helper.value = "\ub2c8\ub2e4";
+          helper.selectionStart = 2;
+          helper.selectionEnd = 2;
+          helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\ub2e4" }));
+          helper.dispatchEvent(new Event("input"));
+        });
+        await act(async () => {
+          const renderHandler = mockOnRender.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+          renderHandler?.();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+
+        await vi.waitFor(() => {
+          expect(container).toHaveClass("terminal-sync-output-active");
+          expect(preview.textContent).toBe("\ub2e4");
+          expect(preview.style.transform).toBe("translate(120px, 80px)");
+          expect(overlay.style.opacity).toBe("1");
+          expect(overlay.style.transform).toBe("translate(140px, 80px)");
+          expect(helper.style.left).toBe("140px");
+          expect(helper.style.top).toBe("80px");
+        });
+      } finally {
+        await closeFrame();
+      }
+    });
+
+    it("clears a finished IME preview while a WSL Codex frame spans animation frames", async () => {
+      const { container, helper, overlay, preview, closeFrame } =
+        await setupWslCodexCompositionFrame("t-wsl-working-ime-finish");
+      try {
+        const frozenOverlayOpacity = overlay.style.opacity;
+        const frozenOverlayTransform = overlay.style.transform;
+        act(() => {
+          helper.dispatchEvent(new CompositionEvent("compositionend", { data: "\ub2c8" }));
+        });
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+
+        await vi.waitFor(() => {
+          expect(container).toHaveClass("terminal-sync-output-active");
+          expect(preview.textContent).toBe("");
+          expect(preview.style.opacity).toBe("0");
+          expect(overlay.style.opacity).toBe(frozenOverlayOpacity);
+          expect(overlay.style.transform).toBe(frozenOverlayTransform);
+          expect(helper.style.left).toBe("");
+          expect(helper.style.top).toBe("");
+        });
+      } finally {
+        await closeFrame();
+      }
     });
 
     it("lets an open IME composition adopt Codex 0.145's in-frame park", async () => {
