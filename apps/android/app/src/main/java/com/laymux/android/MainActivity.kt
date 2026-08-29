@@ -2874,6 +2874,14 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private fun hasPendingCryptoOperation(): Boolean =
         pendingPairing != null || pendingDecryption != null || pairingAckInFlight || remoteConnecting
 
+    /**
+     * Every step the pairing sheet can be waiting on. The sheet turns this into
+     * its notice spinner, so "an action is refused because something is running"
+     * and "the sheet says something is running" cannot disagree.
+     */
+    private fun pairingOperationInProgress(): Boolean =
+        scanInFlight || hasPendingCryptoOperation()
+
     /** Native pairing surfaces restore disabled actions from each published state update. */
     private fun busyOperationMessage(): String = when {
         scanInFlight -> "QR 스캔이 진행 중입니다."
@@ -2990,6 +2998,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 biometricAvailability = BiometricAvailability.AVAILABLE,
                 remoteConnected = false,
                 remoteConnecting = false,
+                busy = false,
                 error = error,
                 notice = notice,
             )
@@ -3009,6 +3018,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 biometricAvailability = biometricAvailability(),
                 remoteConnected = remoteConnected(),
                 remoteConnecting = remoteConnecting(),
+                busy = pairingOperationInProgress(),
                 error = error,
                 notice = notice,
             )
@@ -3020,6 +3030,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 biometricAvailability = biometricAvailability(),
                 remoteConnected = false,
                 remoteConnecting = remoteConnecting(),
+                busy = pairingOperationInProgress(),
                 error = error ?: "저장된 페어링 정보를 읽지 못했습니다.",
                 notice = notice,
             )
