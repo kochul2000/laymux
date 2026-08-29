@@ -157,6 +157,10 @@ async function installApiMocks(
 async function openDeviceSettings(page: Page) {
   await page.locator("#navToggle").click();
   await page.locator("#drawerSettingsButton").evaluate((button) => button.click());
+  // Settings is paginated; the display preferences live on their own tab.
+  await page
+    .locator('#settingsTabs [data-settings-panel="display"]')
+    .evaluate((tab: HTMLElement) => tab.click());
   await expect(page.locator("#remoteTerminalFontSize")).toBeEnabled();
 }
 
@@ -271,7 +275,8 @@ test("디바이스 저장 실패 상태는 연결 전환 뒤에도 유지한다"
   await page.addInitScript((displaySettingsKey) => {
     const originalSetItem = Storage.prototype.setItem;
     Storage.prototype.setItem = function setItem(key, value) {
-      if (key === displaySettingsKey) throw new DOMException("storage blocked", "QuotaExceededError");
+      if (key === displaySettingsKey)
+        throw new DOMException("storage blocked", "QuotaExceededError");
       return originalSetItem.call(this, key, value);
     };
   }, DISPLAY_SETTINGS_KEY);

@@ -418,6 +418,81 @@ test.describe("Remote input action layout", () => {
     await expect(emptyState).toBeVisible();
   });
 
+  test("paginates Settings and remembers the chosen tab", async ({ page }) => {
+    await openMarkup(page);
+    await page.locator("#drawerSettingsButton").click();
+
+    // Input bar first, everything else out of the layout — that is the point of
+    // paginating: one subject at a time instead of one long scroll.
+    await expect(page.locator("#settingsPanelInputBar")).toBeVisible();
+    for (const panel of ["composer", "display", "app"]) {
+      await expect(
+        page.locator(`#drawerSettingsView [data-settings-panel="${panel}"].settings-panel`),
+      ).toBeHidden();
+    }
+    // Composer settings render in their own panel, no longer inside Input bar.
+    await expect(page.locator("#inputLayoutEditor")).not.toContainText("History sharing");
+
+    const displayTab = page.locator('#settingsTabs [data-settings-panel="display"]');
+    await displayTab.click();
+    await expect(displayTab).toHaveAttribute("aria-selected", "true");
+    await expect(page.locator("#displaySection")).toBeVisible();
+    await expect(page.locator("#settingsPanelInputBar")).toBeHidden();
+
+    // Roving tabindex: arrows move within the tablist.
+    await displayTab.press("ArrowRight");
+    await expect(page.locator("#settingsPanelApp")).toBeVisible();
+    await expect(page.locator('#settingsTabs [data-settings-panel="app"]')).toBeFocused();
+
+    await expect
+      .poll(() => page.evaluate(() => localStorage.getItem("laymux.remote.settingsPanel")))
+      .toBe("app");
+
+    await page.reload();
+    await page.setContent(remoteClientMarkupWithoutXterm());
+    await page.locator("#drawerSettingsButton").click();
+    await expect(page.locator("#settingsPanelApp")).toBeVisible();
+  });
+
+  test("keeps the Settings tab strip readable and scrollable at 240px", async ({ page }) => {
+    await openMarkup(page);
+    await page.setViewportSize({ width: 240, height: 844 });
+    await page.locator("#drawerSettingsButton").click();
+
+    // Tabs may only grow, never shrink: a squeezed tab pushes its label past
+    // its own box (nowrap, no ellipsis) instead of scrolling the strip.
+    const strip = await page.locator("#settingsTabs").evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      overflowX: getComputedStyle(element).overflowX,
+    }));
+    expect(strip.overflowX).toBe("auto");
+    expect(strip.scrollWidth).toBeGreaterThan(strip.clientWidth);
+
+    const overflowingLabels = await page
+      .locator("#settingsTabs [data-settings-panel]")
+      .evaluateAll((tabs) =>
+        tabs.filter((tab) => tab.scrollWidth > tab.clientWidth).map((tab) => tab.textContent),
+      );
+    expect(overflowingLabels).toEqual([]);
+    // The strip scrolls inside itself; the document never does.
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(240);
+  });
+
+  test("falls back to the first Settings tab for an unknown stored panel", async ({ page }) => {
+    await page.addInitScript(() =>
+      localStorage.setItem("laymux.remote.settingsPanel", "__proto__"),
+    );
+    await openMarkup(page);
+    await page.locator("#drawerSettingsButton").click();
+
+    await expect(page.locator("#settingsPanelInputBar")).toBeVisible();
+    await expect(page.locator('#settingsTabs [data-settings-panel="inputBar"]')).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
   test("preserves the Settings scroll position while placement changes rerender", async ({
     page,
   }) => {

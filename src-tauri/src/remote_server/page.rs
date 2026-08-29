@@ -99,11 +99,11 @@ const APP_FRAME_ANCESTORS_PLACEHOLDER: &str = "__APP_FRAME_ANCESTORS__";
 /// What ships if even the template's own constant form will not encode. It has
 /// to name `frame-ancestors` itself: `default-src` does not cover that
 /// directive, so `default-src 'none'` alone would leave the page framable by
-/// anyone (ADR-0214).
+/// anyone (ADR-0215).
 const LAST_RESORT_CSP: &str = "default-src 'none'; frame-ancestors 'none'";
 
 /// The origins the desktop shell's own WebView serves the app from, and the
-/// only ones allowed to frame this page (ADR-0214). Mobile mode embeds
+/// only ones allowed to frame this page (ADR-0215). Mobile mode embeds
 /// `/remote/?localApp=1` in an iframe inside that WebView, so a blanket
 /// `frame-ancestors 'none'` (ADR-0183) left the user staring at a blank
 /// overlay. `'self'` would not help: the embedder is the app origin, not the
@@ -609,6 +609,31 @@ mod tests {
         assert!(settings_view.contains("id=\"displaySection\""));
         assert!(settings_view.contains("id=\"pcUpdateSection\""));
         assert!(settings_view.contains("id=\"installSection\""));
+        // Settings is paginated: one tablist, one panel per subject.
+        assert!(
+            settings_view.contains("id=\"settingsTabs\" class=\"settings-tabs\" role=\"tablist\"")
+        );
+        for panel in ["inputBar", "composer", "display", "app"] {
+            assert!(
+                settings_view.contains(&format!("role=\"tab\" data-settings-panel=\"{panel}\"")),
+                "settings tab for {panel} is missing"
+            );
+            assert!(
+                settings_view.contains(&format!(
+                    "class=\"settings-panel\" role=\"tabpanel\" data-settings-panel=\"{panel}\""
+                )),
+                "settings panel for {panel} is missing"
+            );
+        }
+        // Composer settings render in their own panel, not inside the input bar.
+        assert!(settings_view.contains("id=\"composerSettingsEditor\""));
+        // A dot on the drawer button alone would point at a page the reader
+        // cannot see once Settings opens on whichever tab they used last, so
+        // the update dot rides down to the tab that holds the update.
+        assert!(html.contains(
+            "settingsAppTabButton.classList.toggle(\"update-available\", Boolean(availableVersion));"
+        ));
+        assert!(html.contains(".settings-tab.update-available::after"));
 
         assert!(html.contains("id=\"drawerNotificationsButton\""));
         assert!(html.contains("id=\"drawerConnectionButton\""));
@@ -978,7 +1003,7 @@ mod tests {
         assert!(html.contains("desktopModeDrawerButton.hidden = !localAppMode;"));
         // The embed greets the PC app's overlay so a frame that never came up
         // is distinguishable from one that did — a refused embed still fires
-        // `load`, so this is the host's only proof (#955, ADR-0214).
+        // `load`, so this is the host's only proof (#955, ADR-0215).
         assert!(html.contains(
             "if (localAppMode) window.parent.postMessage({ type: \"laymux:mobile-mode-ready\" }, \"*\");"
         ));
@@ -1271,7 +1296,7 @@ mod tests {
         assert!(html.contains(
             "drop.element.classList.add(drop.after ? \"drop-after\" : \"drop-before\");"
         ));
-        assert!(html.contains("title.textContent = \"Input bar\";"));
+        assert!(html.contains("function installSettingsTabs()"));
         assert!(html.contains("reset.setAttribute(\"aria-label\", \"Reset input action layout\");"));
         assert!(html.contains("`Move ${hint} to start`"));
         assert!(html.contains("chip.className = \"key-chip layout-chip\";"));
@@ -1756,8 +1781,8 @@ mod tests {
 
         // Feature toggles live in the existing key-set popover (Remote settings
         // home), accessible and aria-labelled.
-        assert!(html.contains("function renderComposerPopoverSection()"));
-        assert!(html.contains("title.textContent = \"Composer\";"));
+        assert!(html.contains("function renderComposerSettingsSection()"));
+        assert!(html.contains("<h2 class=\"nav-section-title\">Composer</h2>"));
         assert!(html.contains("\"composerHideAgentInputToggle\""));
         assert!(html.contains("\"Hide unused agent input\""));
         assert!(html.contains("function scrollTowardComposerBottom()"));

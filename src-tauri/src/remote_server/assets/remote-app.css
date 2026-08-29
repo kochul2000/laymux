@@ -669,6 +669,70 @@
         flex-direction: column;
         overflow: auto;
       }
+      /* Settings pagination (tablist under the drawer header). The strip stays
+         put while the panel scrolls, so switching subjects never requires
+         scrolling back up first. */
+      .settings-tabs {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        display: flex;
+        min-width: 0;
+        gap: 2px;
+        padding: 4px 6px 0;
+        border-bottom: 1px solid var(--border);
+        background: var(--panel);
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+      .settings-tabs::-webkit-scrollbar {
+        display: none;
+      }
+      /* `1 0 auto`, not `1 1 0`: a shrinking tab would squeeze its label past
+         its own box (no ellipsis, nowrap) and the strip's overflow would never
+         engage. Growing-only tabs fill a wide drawer and scroll a narrow one. */
+      .settings-tab {
+        flex: 1 0 auto;
+        padding: 6px 8px;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        border-radius: 0;
+        background: none;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .settings-tab:hover {
+        color: var(--text-secondary);
+      }
+      .settings-tab.active {
+        border-bottom-color: var(--accent);
+        color: var(--accent);
+      }
+      /* Same 5px status dot the drawer buttons use (ADR-0187), so the drawer
+         dot and the tab dot read as one trail to the update. */
+      .settings-tab.update-available {
+        position: relative;
+      }
+      .settings-tab.update-available::after {
+        position: absolute;
+        right: 2px;
+        top: 4px;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--yellow);
+        content: "";
+      }
+      .settings-panel {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+      }
+      .settings-panel[hidden] {
+        display: none;
+      }
       .connection-title {
         color: var(--text-secondary);
         font-size: var(--fs-xs);
@@ -862,8 +926,9 @@
         justify-content: space-between;
         gap: 8px;
       }
-      .input-layout-heading .key-popover-title {
-        margin: 0;
+      .input-layout-heading .key-order-help {
+        min-width: 0;
+        margin-top: 0;
       }
       .input-layout-zone {
         min-width: 72px;

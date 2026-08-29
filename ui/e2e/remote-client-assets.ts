@@ -55,7 +55,7 @@ export function remoteClientCsp(origin: string): string {
   return (
     template
       .replace("__WS_SOURCES__", ` ws://${host} wss://${host}`)
-      // The served allowlist is a build-fixed constant in `page.rs` (ADR-0214),
+      // The served allowlist is a build-fixed constant in `page.rs` (ADR-0215),
       // and copying it here would reintroduce exactly the cross-language drift
       // `page-csp.txt` exists to prevent. Specs load the page as a top-level
       // document, so no spec exercises this directive — `'none'` keeps the mocked
