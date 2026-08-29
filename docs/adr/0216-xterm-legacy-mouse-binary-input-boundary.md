@@ -1,6 +1,6 @@
 # 0216. xterm legacy mouse binary 입력은 플랫폼 PTY 경계에서 검증한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-29
 - Source: [issue #954](https://github.com/kochul2000/laymux/issues/954) · PR #953 리뷰 · [architecture/data-flow.md §8.8](../architecture/data-flow.md) · [architecture/api-contracts.md §14.6](../architecture/api-contracts.md) · [ADR-0054](0054-xterm-human-and-protocol-data-origin.md) · [ADR-0096](0096-terminal-human-input-write-failure-observability.md) · [ADR-0202](0202-io-commands-off-the-main-thread.md) · [Microsoft Pseudoconsoles](https://learn.microsoft.com/en-us/windows/console/pseudoconsoles)
 - Extends: ADR-0054, ADR-0096, ADR-0202
