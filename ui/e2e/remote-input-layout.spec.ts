@@ -76,6 +76,27 @@ test.describe("Remote input action layout", () => {
       )
       .toEqual(["attachment", "composer", "soft:esc"]);
 
+    const attachmentGeometry = await page.locator("#attachFile").evaluate((button) => {
+      const buttonRect = button.getBoundingClientRect();
+      const iconRect = button.querySelector("svg")!.getBoundingClientRect();
+      return {
+        buttonHeight: buttonRect.height,
+        iconWidth: iconRect.width,
+        iconHeight: iconRect.height,
+        contained:
+          iconRect.left >= buttonRect.left &&
+          iconRect.top >= buttonRect.top &&
+          iconRect.right <= buttonRect.right &&
+          iconRect.bottom <= buttonRect.bottom,
+      };
+    });
+    expect(attachmentGeometry).toEqual({
+      buttonHeight: 26,
+      iconWidth: 14,
+      iconHeight: 14,
+      contained: true,
+    });
+
     await page.getByLabel("Place Keys").selectOption("main");
     await page.locator("#keyBarToggle").click();
     await expect(page.locator("#keyRow > #focusTerminal")).toHaveCount(1);

@@ -278,6 +278,18 @@ function UpdateSection() {
 
   const [status, setStatus] = useState<AppUpdateStatus | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
+  // Backend status is process-global, so lastError can come from the startup or
+  // periodic checker. Settings only surfaces failures for an action initiated
+  // from this section; background failures remain available in the snapshot
+  // without turning into a persistent user-facing wall of transport text.
+  const explicitUpdateActionRef = useRef(false);
+
+  const settleExplicitUpdateAction = useCallback((snapshot: AppUpdateStatus) => {
+    setStatus(snapshot);
+    if (!explicitUpdateActionRef.current || snapshot.operation !== "idle") return;
+    explicitUpdateActionRef.current = false;
+    setRequestError(snapshot.lastError);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -289,7 +301,11 @@ function UpdateSection() {
       })
       .catch(() => {});
     void onAppUpdateStatusChanged((snapshot) => {
-      if (!cancelled) setStatus(snapshot);
+      if (cancelled) return;
+      if (!explicitUpdateActionRef.current && snapshot.operation === "checking") {
+        setRequestError(null);
+      }
+      settleExplicitUpdateAction(snapshot);
     })
       .then((stop) => {
         if (cancelled) stop();
@@ -301,11 +317,11 @@ function UpdateSection() {
       cancelled = true;
       unlisten?.();
     };
-  }, []);
+  }, [settleExplicitUpdateAction]);
 
   const busy = status !== null && status.operation !== "idle";
   const available = status?.availableVersion ?? null;
-  const error = requestError ?? status?.lastError ?? null;
+  const error = requestError;
   // Why the manual check cannot run right now, as the sentence to show on the
   // button itself; null when it can run. The dev-build gate is enforced in Rust
   // (a debug binary must never replace itself with a release artifact), so the
@@ -322,23 +338,27 @@ function UpdateSection() {
 
   const runCheck = useCallback(() => {
     setRequestError(null);
+    explicitUpdateActionRef.current = true;
     void checkAppUpdate()
-      .then(setStatus)
+      .then(settleExplicitUpdateAction)
       .catch((reason: unknown) => {
+        explicitUpdateActionRef.current = false;
         setRequestError(reason instanceof Error ? reason.message : String(reason));
       });
-  }, []);
+  }, [settleExplicitUpdateAction]);
 
   const runInstall = useCallback(() => {
     if (!available) return;
     if (!window.confirm(t("update.installConfirm", { version: available }))) return;
     setRequestError(null);
+    explicitUpdateActionRef.current = true;
     void installAppUpdate()
-      .then(setStatus)
+      .then(settleExplicitUpdateAction)
       .catch((reason: unknown) => {
+        explicitUpdateActionRef.current = false;
         setRequestError(reason instanceof Error ? reason.message : String(reason));
       });
-  }, [available, t]);
+  }, [available, settleExplicitUpdateAction, t]);
 
   return (
     <div>
@@ -512,7 +532,7 @@ function UpdateSection() {
         {error && (
           <p
             data-testid="update-error"
-            className="text-[11px]"
+            className="min-w-0 max-w-full break-words text-[11px] [overflow-wrap:anywhere]"
             style={{ color: "var(--claude)", margin: "0 0 8px" }}
           >
             {error}
