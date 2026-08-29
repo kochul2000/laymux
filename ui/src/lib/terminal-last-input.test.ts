@@ -37,6 +37,21 @@ describe("terminal last input", () => {
     expect(capture.push("ab\u001b[1Ac\u001b[4Kd\r")).toEqual(["abcd"]);
   });
 
+  it("ignores SGR mouse reports instead of exposing their coordinates as input", () => {
+    const capture = createDirectInputCapture();
+
+    expect(capture.push("\u001b[<35;118;41M\u001b[<35;119;41M")).toEqual([]);
+    expect(capture.push("실제 질문\u001b[<0;72;42m\r")).toEqual(["실제 질문"]);
+  });
+
+  it("ignores legacy X10 and URXVT mouse reports", () => {
+    const capture = createDirectInputCapture();
+    const x10MousePress = `\u001b[M${String.fromCharCode(32, 72, 42)}`;
+
+    expect(capture.push(`${x10MousePress}\u001b[35;72;42M`)).toEqual([]);
+    expect(capture.push("다른 TUI 입력\r")).toEqual(["다른 TUI 입력"]);
+  });
+
   it("chooses the newest shell command or agent input", () => {
     expect(
       selectTerminalLastInput({
