@@ -58,6 +58,8 @@ interface PaneControlBarProps {
   currentView: ViewInstanceConfig;
   actions: PaneControlBarActions;
   hovered: boolean;
+  /** False while a retained background workspace is display:none. */
+  isActive?: boolean;
   /**
    * Effective CWD send/receive state for indicator display.
    *
@@ -588,6 +590,7 @@ export function PaneControlBar({
   currentView,
   actions,
   hovered,
+  isActive = true,
   cwdSendOn,
   cwdReceiveOn,
   paneNumber,
@@ -636,7 +639,8 @@ export function PaneControlBar({
   const showBar = mode === "pinned" || (mode === "hover" && hovered);
   const isPinned = mode === "pinned";
   const narrowBar = paneWidth > 0 && paneWidth < 360;
-  const floatingControls = narrowBar || headerControlsOverflow;
+  const floatingControls =
+    isActive && mode !== "minimized" && (narrowBar || headerControlsOverflow);
 
   // 좁은 pane 또는 ViewHeader 충돌의 떠 있는 컨트롤 메뉴. ⋯ anchor는 어느
   // 바에 있든(pinned / hover / ViewHeader) 하나의 ref 로 위치 기준점을 공유한다.
@@ -943,6 +947,7 @@ export function PaneControlBar({
         {floatingMenuVisible && (
           <FloatingPaneControlMenu
             openReason={floatingMenuReason!}
+            ownerHovered={hovered}
             onRequestClose={closeFloatingMenu}
             triggerRef={menuBtnRef}
             paneRef={rootRef}

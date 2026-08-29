@@ -9,6 +9,8 @@ export interface SizeLike {
   width: number;
   height: number;
   scrollWidth?: number;
+  /** Full content height, retained even when the rendered box has max-height. */
+  scrollHeight?: number;
 }
 
 export interface FloatingToolbarPlacement {
@@ -73,6 +75,13 @@ export function resolveFloatingToolbarPlacement({
   const maxWidth = Math.min(viewportMaxWidth, Math.max(paneWidth, nonNegative(menu.width)));
   const constrainedX = nonNegative(menu.scrollWidth ?? menu.width) > maxWidth + 1;
   const effectiveWidth = Math.min(nonNegative(menu.width), maxWidth);
+  // ResizeObserver sees the constrained border box after max-height is applied.
+  // Keep placement decisions tied to the intrinsic content height or the menu
+  // would alternate between constrained and unconstrained on every frame.
+  const menuHeight = Math.max(
+    nonNegative(menu.height),
+    nonNegative(menu.scrollHeight ?? menu.height),
+  );
   const left = clamp(
     anchor.right - effectiveWidth,
     safeMargin,
@@ -86,7 +95,7 @@ export function resolveFloatingToolbarPlacement({
   const upBottom = anchor.top - safeGap;
   const viewportUpSpace = nonNegative(upBottom - safeMargin);
 
-  if (menu.height <= paneDownSpace) {
+  if (menuHeight <= paneDownSpace) {
     return {
       placement: "down",
       top: downTop,
@@ -98,19 +107,19 @@ export function resolveFloatingToolbarPlacement({
     };
   }
 
-  if (menu.height <= viewportUpSpace) {
+  if (menuHeight <= viewportUpSpace) {
     return {
       placement: "up",
-      top: upBottom - menu.height,
+      top: upBottom - menuHeight,
       left,
       maxWidth,
       constrained: false,
       constrainedX,
-      escapedPane: upBottom - menu.height < pane.top,
+      escapedPane: upBottom - menuHeight < pane.top,
     };
   }
 
-  if (menu.height <= viewportDownSpace) {
+  if (menuHeight <= viewportDownSpace) {
     return {
       placement: "down",
       top: downTop,

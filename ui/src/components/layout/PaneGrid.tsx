@@ -257,6 +257,7 @@ export function PaneGrid({
               paneId={pane.id}
               currentView={pane.view}
               hovered={isActive && isHovered}
+              isActive={isActive}
               cwdSendOn={cwdSendOn}
               cwdReceiveOn={cwdReceiveOn}
               paneNumber={paneNumbers?.get(pane.id)}

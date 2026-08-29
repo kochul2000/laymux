@@ -9,6 +9,7 @@ import {
 interface FloatingPaneControlMenuProps {
   children: ReactNode;
   openReason: "manual" | "hover";
+  ownerHovered: boolean;
   onRequestClose: () => void;
   triggerRef: RefObject<HTMLButtonElement | null>;
   paneRef: RefObject<HTMLDivElement | null>;
@@ -31,12 +32,14 @@ const HOVER_EXIT_GRACE_MS = 120;
 export function FloatingPaneControlMenu({
   children,
   openReason,
+  ownerHovered,
   onRequestClose,
   triggerRef,
   paneRef,
 }: FloatingPaneControlMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const lastAnchorRef = useRef<AnchorSnapshot | null>(null);
+  const didFocusManualMenuRef = useRef(false);
   const [placement, setPlacement] = useState<FloatingToolbarPlacement | null>(null);
 
   const updatePlacement = useCallback(() => {
@@ -96,7 +99,12 @@ export function FloatingPaneControlMenu({
     const next = resolveFloatingToolbarPlacement({
       anchor,
       pane: paneRect,
-      menu: { width: menuRect.width, height: menuRect.height, scrollWidth: menu.scrollWidth },
+      menu: {
+        width: menuRect.width,
+        height: menuRect.height,
+        scrollWidth: menu.scrollWidth,
+        scrollHeight: menu.scrollHeight,
+      },
       viewport: { width: window.innerWidth, height: window.innerHeight },
     });
     setPlacement((previous) =>
@@ -144,7 +152,11 @@ export function FloatingPaneControlMenu({
       onRequestClose();
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onRequestClose();
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      const trigger = triggerRef.current;
+      onRequestClose();
+      trigger?.focus({ preventScroll: true });
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("keydown", onKeyDown, true);
@@ -153,6 +165,19 @@ export function FloatingPaneControlMenu({
       document.removeEventListener("keydown", onKeyDown, true);
     };
   }, [onRequestClose, triggerRef]);
+
+  // Explicit keyboard/click opens behave like a popover: move directly into
+  // the portalled controls once geometry exists. Hover discovery must never
+  // steal focus from the View underneath it.
+  useEffect(() => {
+    if (openReason !== "manual" || !placement || didFocusManualMenuRef.current) return;
+    const firstControl = menuRef.current?.querySelector<HTMLElement>(
+      'button:not(:disabled), select:not(:disabled), input:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
+    );
+    if (!firstControl) return;
+    firstControl.focus({ preventScroll: true });
+    didFocusManualMenuRef.current = true;
+  }, [openReason, placement]);
 
   // The portal may sit outside the pane DOM subtree. Hover-opened controls stay
   // alive while the pointer owns either surface. A short grace period bridges
@@ -166,21 +191,32 @@ export function FloatingPaneControlMenu({
       window.clearTimeout(closeTimer);
       closeTimer = undefined;
     };
+    const scheduleClose = () => {
+      if (closeTimer !== undefined) return;
+      closeTimer = window.setTimeout(() => {
+        closeTimer = undefined;
+        // The pointer can reach the portal before this effect observes the
+        // pane's hover loss. CSS hover is the final ownership check when no
+        // later pointermove exists to cancel the grace timer.
+        if (menuRef.current?.matches(":hover")) return;
+        onRequestClose();
+      }, HOVER_EXIT_GRACE_MS);
+    };
     const onPointerMove = (event: PointerEvent) => {
       const target = event.target as Node;
       if (menuRef.current?.contains(target) || paneRef.current?.contains(target)) {
         cancelPendingClose();
         return;
       }
-      if (closeTimer !== undefined) return;
-      closeTimer = window.setTimeout(onRequestClose, HOVER_EXIT_GRACE_MS);
+      scheduleClose();
     };
     document.addEventListener("pointermove", onPointerMove, true);
+    if (!ownerHovered) scheduleClose();
     return () => {
       cancelPendingClose();
       document.removeEventListener("pointermove", onPointerMove, true);
     };
-  }, [onRequestClose, openReason, paneRef]);
+  }, [onRequestClose, openReason, ownerHovered, paneRef]);
 
   return createPortal(
     <div

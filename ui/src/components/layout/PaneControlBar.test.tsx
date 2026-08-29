@@ -447,6 +447,30 @@ describe("PaneControlBar", () => {
     scrollWidthSpy.mockRestore();
   });
 
+  it("closes an automatic hover toolbar after hover ownership idles without more pointer movement", async () => {
+    stubPaneWidth(200);
+    const { rerender } = render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <ViewHeader title="GitHub">Issues 0</ViewHeader>
+      </PaneControlBar>,
+    );
+
+    await screen.findByTestId("pane-control-floating-menu");
+    rerender(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={false}>
+        <ViewHeader title="GitHub">Issues 0</ViewHeader>
+      </PaneControlBar>,
+    );
+
+    // Keep the pane-to-portal crossing grace, but do not leave an idle hover
+    // surface stuck above the work area when no pointer event follows.
+    expect(screen.getByTestId("pane-control-floating-menu")).toBeInTheDocument();
+    await waitFor(
+      () => expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument(),
+      { timeout: 500 },
+    );
+  });
+
   it("keeps the narrow menu open and actionable after the pane loses hover (issue #384)", async () => {
     // Moving the cursor toward the floating menu leaves the pane hover region.
     // The menu must stay mounted so the user can actually click its buttons.
@@ -532,6 +556,83 @@ describe("PaneControlBar", () => {
     await waitFor(() =>
       expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument(),
     );
+  });
+
+  it("moves focus into a manual toolbar and restores it to the trigger on Escape", async () => {
+    stubPaneWidth(200);
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    const trigger = await screen.findByTestId("pane-control-menu-btn");
+    await user.click(trigger);
+    await waitFor(() => expect(screen.getByTestId("pane-control-view-select")).toHaveFocus());
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument(),
+    );
+    expect(trigger).toHaveFocus();
+  });
+
+  it("preserves keyboard focus when a minimized narrow pane expands into the portal", async () => {
+    stubPaneWidth(200);
+    useSettingsStore.setState((state) => ({
+      controlBar: { ...state.controlBar, defaultMode: "minimized" },
+    }));
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    const minimizedTrigger = await screen.findByTestId("pane-control-menu-btn");
+    minimizedTrigger.focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.getByTestId("pane-control-view-select")).toHaveFocus());
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("pane-control-menu-btn")).toHaveFocus();
+  });
+
+  it("discards a portalled menu while its owning workspace is inactive", async () => {
+    stubPaneWidth(200);
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true} isActive>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    await user.click(await screen.findByTestId("pane-control-menu-btn"));
+    expect(screen.getByTestId("pane-control-floating-menu")).toBeInTheDocument();
+
+    rerender(
+      <PaneControlBar
+        currentView={defaultView}
+        actions={defaultActions}
+        hovered={false}
+        isActive={false}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument();
+
+    rerender(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true} isActive>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    await screen.findByTestId("pane-control-menu-btn");
+    expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument();
   });
 
   it("does not re-open the narrow menu after widen then re-narrow (stale-open regression, issue #385)", async () => {
@@ -789,6 +890,7 @@ describe("PaneControlBar", () => {
     await user.click(screen.getByTestId("pane-control-menu-btn"));
     await user.click(screen.getByTestId("pane-control-minimize"));
     expect(screen.getByTestId("pane-control-minimized")).toBeInTheDocument();
+    expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument();
 
     // Expanding from the three-dot entry opens the same narrow menu. It must
     // retain a Minimize action so this is a reversible toggle.

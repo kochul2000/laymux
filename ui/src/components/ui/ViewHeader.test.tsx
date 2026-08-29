@@ -183,6 +183,61 @@ describe("ViewHeader with PaneControlContext", () => {
     }
   });
 
+  it("remeasures inline overflow when asynchronous header content changes at the same box size", async () => {
+    const reportHeaderControlsOverflow = vi.fn();
+    const originalResizeObserver = globalThis.ResizeObserver;
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    let contentScrollWidth = 120;
+    const clientWidthSpy = vi
+      .spyOn(HTMLElement.prototype, "clientWidth", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.dataset.testid === "view-header-content" ? 120 : 480;
+      });
+    const scrollWidthSpy = vi
+      .spyOn(HTMLElement.prototype, "scrollWidth", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.dataset.testid === "view-header-content" ? contentScrollWidth : 480;
+      });
+    const ctx = makeCtx({
+      mode: "hover",
+      hovered: true,
+      reportHeaderControlsOverflow,
+    });
+
+    try {
+      const { rerender } = renderWithCtx(
+        ctx,
+        <ViewHeader title="GitHub">
+          <button className="shrink-0">Issues 0</button>
+        </ViewHeader>,
+      );
+      await waitFor(() => expect(reportHeaderControlsOverflow).toHaveBeenCalledWith(false));
+
+      reportHeaderControlsOverflow.mockClear();
+      contentScrollWidth = 200;
+      rerender(
+        <PaneControlContext.Provider value={ctx}>
+          <ViewHeader title="GitHub">
+            <button className="shrink-0">Issues 100</button>
+          </ViewHeader>
+        </PaneControlContext.Provider>,
+      );
+
+      await waitFor(() => expect(reportHeaderControlsOverflow).toHaveBeenCalledWith(true));
+    } finally {
+      clientWidthSpy.mockRestore();
+      scrollWidthSpy.mockRestore();
+      vi.stubGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
   it("automatically opens floating hover controls while keeping the header one row high", async () => {
     const openControls = vi.fn();
     const ctx = makeCtx({

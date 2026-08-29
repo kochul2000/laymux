@@ -95,6 +95,28 @@ describe("resolveFloatingToolbarPlacement", () => {
     });
   });
 
+  it("keeps using intrinsic scroll height after the DOM has already been constrained", () => {
+    expect(
+      resolveFloatingToolbarPlacement({
+        anchor: { top: 240, right: 500, bottom: 262, left: 478 },
+        pane: { top: 220, right: 520, bottom: 300, left: 200 },
+        // This is the second ResizeObserver pass: the border box has already
+        // shrunk to maxHeight, while scrollHeight still carries the full menu.
+        menu: {
+          width: 300,
+          height: 230,
+          scrollHeight: 600,
+        },
+        viewport: { width: 900, height: 500 },
+      }),
+    ).toMatchObject({
+      placement: "up",
+      top: 8,
+      maxHeight: 230,
+      constrained: true,
+    });
+  });
+
   it("still exposes a viewport-sized scrolling surface when the anchor leaves no directional room", () => {
     expect(
       resolveFloatingToolbarPlacement({

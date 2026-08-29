@@ -55,7 +55,10 @@ export function ViewHeader({
 
   // Full controls remain inline only while the View's actual non-shrinking
   // content fits. Cache the width that failed so replacing the full controls
-  // with the small anchor cannot immediately oscillate back to inline.
+  // with the small anchor cannot immediately oscillate back to inline. Run
+  // after every commit as well as on ResizeObserver notifications: GitHub
+  // counts and other child text can change scrollWidth without changing the
+  // observed flex item's border box.
   useLayoutEffect(() => {
     const root = rootRef.current;
     const content = contentRef.current;
@@ -94,7 +97,7 @@ export function ViewHeader({
     observer.observe(content);
     if (controlsRef.current) observer.observe(controlsRef.current);
     return () => observer.disconnect();
-  }, [floatingControls, reportHeaderControlsOverflow, showPaneControls]);
+  });
 
   // Hover mode previously exposed the full controls as soon as the pane was
   // hovered. Preserve that discovery behavior when they move to a portal.
