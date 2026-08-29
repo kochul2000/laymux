@@ -37,6 +37,49 @@ describe("terminal last input", () => {
     expect(capture.push("ab\u001b[1Ac\u001b[4Kd\r")).toEqual(["abcd"]);
   });
 
+  it("ignores SGR mouse reports instead of exposing their coordinates as input", () => {
+    const capture = createDirectInputCapture();
+
+    expect(capture.push("\u001b[<35;118;41M\u001b[<35;119;41M")).toEqual([]);
+    expect(capture.push("실제 질문\u001b[<0;72;42m\r")).toEqual(["실제 질문"]);
+  });
+
+  it("keeps an SGR mouse report out across every push boundary", () => {
+    const report = "\u001b[<35;118;41M";
+
+    for (let split = 1; split < report.length; split += 1) {
+      const capture = createDirectInputCapture();
+      expect(capture.push(report.slice(0, split))).toEqual([]);
+      expect(capture.push(`${report.slice(split)}분할 뒤 질문\r`)).toEqual(["분할 뒤 질문"]);
+    }
+  });
+
+  it("does not let an incomplete escape prefix consume later plain input", () => {
+    const escapeCapture = createDirectInputCapture();
+    expect(escapeCapture.push("\u001b")).toEqual([]);
+    expect(escapeCapture.push("plain after escape\r")).toEqual(["plain after escape"]);
+
+    const csiCapture = createDirectInputCapture();
+    expect(csiCapture.push("\u001b[")).toEqual([]);
+    expect(csiCapture.push("plain after csi\r")).toEqual(["plain after csi"]);
+  });
+
+  it("drops an overlong incomplete CSI prefix without retaining unbounded state", () => {
+    const capture = createDirectInputCapture();
+
+    expect(capture.push(`\u001b[<${"1".repeat(300)}`)).toEqual([]);
+    expect(capture.push("plain after malformed report\r")).toEqual([
+      "plain after malformed report",
+    ]);
+  });
+
+  it("ignores a complete legacy URXVT mouse report", () => {
+    const capture = createDirectInputCapture();
+
+    expect(capture.push("\u001b[35;72;42M")).toEqual([]);
+    expect(capture.push("다른 TUI 입력\r")).toEqual(["다른 TUI 입력"]);
+  });
+
   it("chooses the newest shell command or agent input", () => {
     expect(
       selectTerminalLastInput({

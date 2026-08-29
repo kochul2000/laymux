@@ -1,4 +1,23 @@
 const MAX_DIRECT_INPUT_CHARS = 16 * 1024;
+const MAX_PENDING_CSI_CHARS = 256;
+const CSI_SEQUENCE_PATTERN = /^\x1b\[([0-?]*)([ -/]*)([@-~])/u;
+
+function isIncompleteCsiSequence(value: string): boolean {
+  return value === "\u001b" || /^\x1b\[[0-?]*[ -/]*$/u.test(value);
+}
+
+function shouldContinuePendingCsi(pending: string, next: string): boolean {
+  if (!next) return true;
+  if (pending === "\u001b") return next.startsWith("[");
+  if (pending === "\u001b[") {
+    const first = next.charCodeAt(0);
+    // A parameter or intermediate byte proves that this is continuing CSI.
+    // A bare final byte may instead be ordinary input after a standalone Esc/`[`.
+    return first >= 0x20 && first <= 0x3f;
+  }
+  const combined = pending + next;
+  return CSI_SEQUENCE_PATTERN.test(combined) || isIncompleteCsiSequence(combined);
+}
 
 export function normalizeSubmittedInput(value: string): string {
   return value.replace(/\s+/gu, " ").trim();
@@ -61,6 +80,7 @@ export interface DirectInputCapture {
 export function createDirectInputCapture(): DirectInputCapture {
   let value = "";
   let cursor = 0;
+  let pendingCsi = "";
 
   const insert = (text: string) => {
     value = value.slice(0, cursor) + text + value.slice(cursor);
@@ -75,30 +95,55 @@ export function createDirectInputCapture(): DirectInputCapture {
   const reset = () => {
     value = "";
     cursor = 0;
+    pendingCsi = "";
   };
 
   return {
     push(data: string) {
+      let input = data;
+      if (pendingCsi) {
+        if (!input) return [];
+        const pending = pendingCsi;
+        pendingCsi = "";
+        if (shouldContinuePendingCsi(pending, input)) input = pending + input;
+      }
+
       const submitted: string[] = [];
-      for (let index = 0; index < data.length; ) {
-        const rest = data.slice(index);
-        const csi = rest.match(/^\x1b\[([0-9;?]*)([A-Za-z~])/u);
+      for (let index = 0; index < input.length; ) {
+        const rest = input.slice(index);
+        // ECMA-48 CSI uses parameter bytes 0x30..0x3f, optional intermediate
+        // bytes 0x20..0x2f, and a final byte 0x40..0x7e. In particular, SGR
+        // mouse reports start their parameters with `<`; treating `<` as text
+        // leaked reports such as `[<35;118;41M` into the selector label.
+        const csi = rest.match(CSI_SEQUENCE_PATTERN);
         if (csi) {
           const params = csi[1];
-          const final = csi[2];
-          const amount = Math.max(1, Number.parseInt(params, 10) || 1);
-          if (final === "D") cursor = Math.max(0, cursor - amount);
-          else if (final === "C") cursor = Math.min(value.length, cursor + amount);
-          else if (final === "H" || (final === "~" && params === "1")) cursor = 0;
-          else if (final === "F" || (final === "~" && params === "4")) cursor = value.length;
-          else if (final === "~" && params === "3" && cursor < value.length) {
-            value = value.slice(0, cursor) + value.slice(cursor + 1);
-          }
+          const intermediates = csi[2];
+          const final = csi[3];
           index += csi[0].length;
+
+          const amount = Math.max(1, Number.parseInt(params, 10) || 1);
+          if (!intermediates) {
+            if (final === "D") cursor = Math.max(0, cursor - amount);
+            else if (final === "C") cursor = Math.min(value.length, cursor + amount);
+            else if (final === "H" || (final === "~" && params === "1")) cursor = 0;
+            else if (final === "F" || (final === "~" && params === "4")) cursor = value.length;
+            else if (final === "~" && params === "3" && cursor < value.length) {
+              value = value.slice(0, cursor) + value.slice(cursor + 1);
+            }
+          }
           continue;
         }
 
-        const codePoint = data.codePointAt(index);
+        if (isIncompleteCsiSequence(rest)) {
+          // xterm normally emits a complete user-control report at once, but
+          // callers of this stream model may split chunks. Keep only a small
+          // syntactically valid prefix; an overlong malformed prefix is dropped.
+          if (rest.length <= MAX_PENDING_CSI_CHARS) pendingCsi = rest;
+          break;
+        }
+
+        const codePoint = input.codePointAt(index);
         if (codePoint === undefined) break;
         const char = String.fromCodePoint(codePoint);
         index += char.length;

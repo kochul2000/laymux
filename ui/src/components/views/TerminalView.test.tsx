@@ -4233,6 +4233,33 @@ describe("TerminalView", () => {
     });
   });
 
+  it("forwards TUI mouse reports without recording them as the last direct input", async () => {
+    const terminalId = "t-human-last-input-mouse-report";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForLocalTerminalControl();
+
+    const terminal = createdTerminals.at(-1)!;
+    act(() => terminal.emitCoreData("\u001b[<35;118;41M\u001b[<35;119;41M", true));
+    await vi.waitFor(() =>
+      expect(mockWriteToTerminal).toHaveBeenCalledWith(
+        terminalId,
+        "\u001b[<35;118;41M\u001b[<35;119;41M",
+      ),
+    );
+    expect(
+      useTerminalStore.getState().instances.find((instance) => instance.id === terminalId)
+        ?.lastUserInput,
+    ).toBeUndefined();
+
+    act(() => terminal.emitCoreData("실제 질문\r", true));
+    await vi.waitFor(() => {
+      expect(
+        useTerminalStore.getState().instances.find((instance) => instance.id === terminalId)
+          ?.lastUserInput,
+      ).toBe("실제 질문");
+    });
+  });
+
   it("records a completed direct-mode shell command without waiting for OSC 133", async () => {
     const terminalId = "t-human-last-shell-command";
     render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
