@@ -917,7 +917,7 @@ test("mobile-layout Composer keeps Enter as a newline and submits with the Send 
   await expect(editor).toHaveValue("");
 
   await editor.fill("untouched draft");
-  await page.locator("#ctrlC").click();
+  await page.locator('[data-key="c-c"]').click();
   await expect.poll(() => remote.writes.length).toBe(1);
   expect(remote.writes[0]).toEqual({ leaseId: "lease-1", data: "\x03" });
   await expect(editor).toHaveValue("untouched draft");
@@ -1612,9 +1612,9 @@ test("special keys cancel the mousedown focus-theft default so the soft keyboard
   // A native tap fires mousedown before the browser moves focus. WebKit/iOS
   // only honors mousedown.preventDefault() to keep the focused textarea (and
   // its open keyboard) — pointerdown preventDefault is ignored there (#482).
-  // Every key that emits input — a soft key, the flick pad, and footer Ctrl+C —
-  // must cancel that default so focus never leaves the editor.
-  const mousedownKeys = ['[data-key="esc"]', '[data-key="dpad"]', "#ctrlC"];
+  // Every key that emits input — a soft key, the flick pad, and the ^C key in
+  // the footer — must cancel that default so focus never leaves the editor.
+  const mousedownKeys = ['[data-key="esc"]', '[data-key="dpad"]', '[data-key="c-c"]'];
   for (const selector of mousedownKeys) {
     const prevented = await page
       .locator(selector)

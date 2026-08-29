@@ -62,13 +62,15 @@ async function openRemote(
     ({ mode, attachmentZone }) => {
       localStorage.setItem("laymux.remote.inputMode", mode);
       if (attachmentZone) {
+        const placed = (zone: string) => (attachmentZone === zone ? ["attachment"] : []);
         localStorage.setItem(
           "laymux.remote.keybar",
           JSON.stringify({
+            expanded: true,
+            userKeys: [],
             zones: {
-              main: attachmentZone === "main" ? ["attachment"] : [],
-              expanded: attachmentZone === "expanded" ? ["attachment"] : [],
-              hidden: [],
+              main: { left: placed("main"), center: [], right: ["keys", "send"] },
+              expanded: { left: placed("expanded"), center: [], right: [] },
             },
           }),
         );
@@ -199,7 +201,7 @@ async function openRemote(
 test.describe("remote terminal attachments", () => {
   test("opens the file chooser after Attach file is moved to the main row", async ({ page }) => {
     const { attachments } = await openRemote(page, "composer", { attachmentZone: "main" });
-    await expect(page.locator("#mainActionRow > #attachFile")).toBeVisible();
+    await expect(page.locator('#mainActionRow [data-segment="left"] > #attachFile')).toBeVisible();
 
     await chooseAttachmentFiles(page, {
       name: "moved.txt",
