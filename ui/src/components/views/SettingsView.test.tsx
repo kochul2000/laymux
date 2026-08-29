@@ -340,6 +340,25 @@ describe("SettingsView", () => {
       expect(screen.getByTestId("update-checked-at")).toBeInTheDocument();
     });
 
+    it("hides automatic check errors until an explicit check reports one", async () => {
+      const automaticError = "https://updates.example.test/" + "automatic-error/".repeat(40);
+      mockAppUpdateStatus = { ...mockAppUpdateStatus, lastError: automaticError };
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-update"));
+      await waitFor(() => expect(screen.getByTestId("update-up-to-date")).toBeInTheDocument());
+      expect(screen.queryByTestId("update-error")).not.toBeInTheDocument();
+
+      const manualError = "https://updates.example.test/" + "manual-error/".repeat(40);
+      mockAppUpdateStatus = { ...mockAppUpdateStatus, lastError: manualError };
+      await user.click(screen.getByTestId("update-check-btn"));
+
+      const error = await screen.findByTestId("update-error");
+      expect(error).toHaveTextContent(manualError);
+      expect(error).toHaveClass("min-w-0", "max-w-full", "break-words", "[overflow-wrap:anywhere]");
+    });
+
     it("says on the button itself why a dev build cannot check", async () => {
       // The gate lives in Rust (a debug binary must not replace itself with a
       // release artifact). The complaint it produced was a UI one: the button

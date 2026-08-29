@@ -194,8 +194,11 @@
       .attachment-button {
         flex: 0 0 auto;
         display: inline-flex;
+        width: var(--key-bar-control-height);
+        height: var(--key-bar-control-height);
         align-items: center;
         justify-content: center;
+        padding: 0;
         color: var(--text-secondary);
       }
       .attachment-button:hover:not(:disabled) {
