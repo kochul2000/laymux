@@ -29,10 +29,13 @@ const UI_ROOT = process.cwd();
  * and one Settings group — taking the entry to 512,576 B. 515 kB restores the
  * same small margin rather than banking room for several more features.
  * Codex 0.150+ cursor-tail recognition and its byte-exact fail-open boundaries
- * then took the entry to 515,856 B. 518.5 kB restores 2,644 B of headroom; the
- * point of the guard is to make the next increase a conscious decision too.
+ * then took the entry to 515,856 B. Session checkpoint coordination (ADR-0222)
+ * adds the always-on lifecycle/revision fence and attribution coverage needed
+ * before update/eviction, taking the combined entry to 518,182 B. 521 kB keeps
+ * 2,818 B of headroom; the point of the guard is to make the next increase a
+ * conscious decision too.
  */
-const STARTUP_CHUNK_BUDGET_BYTES = 518_500;
+const STARTUP_CHUNK_BUDGET_BYTES = 521_000;
 
 /**
  * Ceiling for a lazily-imported **syntax grammar**. Generous because a

@@ -3,7 +3,11 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
-import { collectSettingsSnapshot } from "@/lib/settings-snapshot";
+import {
+  collectSessionCheckpoint,
+  type CollectedSessionCheckpoint,
+  type TerminalAttributionCoverage,
+} from "@/lib/settings-snapshot";
 import { interruptTerminalsOnExit } from "@/lib/interrupt-terminals-on-exit";
 import { isSettingsWriteBlocked } from "@/lib/settings-write-guard";
 
@@ -37,18 +41,147 @@ export function truncateFromEnd(data: string, maxChars: number): string {
 /** True once saveBeforeClose() starts — prevents duplicate persistSession() calls during teardown. */
 let closingDown = false;
 
+export interface SessionCheckpointOptions {
+  reason?:
+    | "mutation"
+    | "completion"
+    | "workspaceEntry"
+    | "watchdog"
+    | "eviction"
+    | "close"
+    | "update";
+  requireConclusive?: boolean;
+  terminalIds?: readonly string[];
+}
+
+export interface SessionCheckpointCommit {
+  checkpointCommitId: number;
+  frontendMutationRevision: number;
+  coverage: TerminalAttributionCoverage[];
+}
+
+const CRITICAL_OBSERVATION_SETTLE_MS = 150;
+let nextCheckpointCommitId = 1;
+let activeCheckpoint: Promise<SessionCheckpointCommit> | null = null;
+let trailingCheckpointRequested = false;
+let pendingOptions: SessionCheckpointOptions = {};
+let frontendMutationRevision = 0;
+
+export function markSessionCheckpointMutation(): void {
+  frontendMutationRevision += 1;
+}
+
 /** Reset closingDown flag (for tests only). */
 export function _resetClosingDown(): void {
   closingDown = false;
+  activeCheckpoint = null;
+  trailingCheckpointRequested = false;
+  pendingOptions = {};
+  frontendMutationRevision = 0;
 }
 
-/**
- * Core implementation: gathers state from all stores and saves to settings.json.
- */
+function mergeCheckpointOptions(
+  current: SessionCheckpointOptions,
+  next: SessionCheckpointOptions,
+): SessionCheckpointOptions {
+  return {
+    reason: next.reason ?? current.reason,
+    requireConclusive: Boolean(current.requireConclusive || next.requireConclusive),
+    terminalIds:
+      current.terminalIds || next.terminalIds
+        ? Array.from(new Set([...(current.terminalIds ?? []), ...(next.terminalIds ?? [])]))
+        : undefined,
+  };
+}
+
+function coverageForTargets(
+  checkpoint: CollectedSessionCheckpoint,
+  terminalIds?: readonly string[],
+): TerminalAttributionCoverage[] {
+  if (!terminalIds?.length) return checkpoint.coverage;
+  const targets = new Set(terminalIds);
+  return checkpoint.coverage.filter((entry) => targets.has(entry.terminalId));
+}
+
+function conclusiveFingerprint(coverage: readonly TerminalAttributionCoverage[]): string {
+  const sorted = [...coverage].sort((left, right) =>
+    left.terminalId.localeCompare(right.terminalId),
+  );
+  for (const entry of sorted) {
+    if (entry.state !== "identified" && entry.state !== "noAgent") {
+      throw new Error(
+        `Session attribution is not conclusive for ${entry.terminalId}: ${entry.state}`,
+      );
+    }
+  }
+  return JSON.stringify(sorted);
+}
+
+async function collectStableCheckpoint(
+  options: SessionCheckpointOptions,
+): Promise<CollectedSessionCheckpoint> {
+  const first = await collectSessionCheckpoint();
+  if (!options.requireConclusive) return first;
+  const firstFingerprint = conclusiveFingerprint(coverageForTargets(first, options.terminalIds));
+  await new Promise((resolve) => setTimeout(resolve, CRITICAL_OBSERVATION_SETTLE_MS));
+  const second = await collectSessionCheckpoint();
+  const secondFingerprint = conclusiveFingerprint(coverageForTargets(second, options.terminalIds));
+  if (firstFingerprint !== secondFingerprint) {
+    throw new Error("Session attribution changed while establishing a destructive-action barrier");
+  }
+  return second;
+}
+
 async function persistSessionCore(
-  snapshot?: Awaited<ReturnType<typeof collectSettingsSnapshot>>,
-): Promise<void> {
-  await saveSettings(snapshot ?? (await collectSettingsSnapshot()));
+  options: SessionCheckpointOptions,
+): Promise<SessionCheckpointCommit> {
+  const collectedRevision = frontendMutationRevision;
+  const checkpoint = await collectStableCheckpoint(options);
+  await saveSettings(checkpoint.settings);
+  return {
+    checkpointCommitId: nextCheckpointCommitId++,
+    frontendMutationRevision: collectedRevision,
+    coverage: checkpoint.coverage,
+  };
+}
+
+async function runCheckpointCoordinator(): Promise<SessionCheckpointCommit> {
+  let commit: SessionCheckpointCommit | undefined;
+  do {
+    trailingCheckpointRequested = false;
+    const options = pendingOptions;
+    pendingOptions = {};
+    commit = await persistSessionCore(options);
+    if (commit.frontendMutationRevision !== frontendMutationRevision) {
+      trailingCheckpointRequested = true;
+    }
+    // A normal trigger arriving behind a destructive barrier must not weaken
+    // the trailing pass that every waiter ultimately observes.
+    if (trailingCheckpointRequested) {
+      pendingOptions = mergeCheckpointOptions(pendingOptions, options);
+    }
+  } while (trailingCheckpointRequested);
+  return commit;
+}
+
+/** Coalesce overlap into one in-flight write plus one trailing checkpoint. */
+export function flushSessionCheckpoint(
+  options: SessionCheckpointOptions = {},
+): Promise<SessionCheckpointCommit> {
+  if (isSettingsWriteBlocked()) {
+    return Promise.reject(
+      new Error("Settings persistence is blocked until recovery is acknowledged"),
+    );
+  }
+  pendingOptions = mergeCheckpointOptions(pendingOptions, options);
+  if (activeCheckpoint) {
+    trailingCheckpointRequested = true;
+    return activeCheckpoint;
+  }
+  activeCheckpoint = runCheckpointCoordinator().finally(() => {
+    activeCheckpoint = null;
+  });
+  return activeCheckpoint;
 }
 
 /**
@@ -56,9 +189,9 @@ async function persistSessionCore(
  * Called by workspace store save actions and other persistence triggers.
  * No-op if saveBeforeClose() is already in progress (prevents duplicate saves during teardown).
  */
-export async function persistSession(): Promise<void> {
+export async function persistSession(options: SessionCheckpointOptions = {}): Promise<void> {
   if (closingDown || isSettingsWriteBlocked()) return;
-  await persistSessionCore();
+  await flushSessionCheckpoint(options);
 }
 
 /**
@@ -69,9 +202,11 @@ export async function persistSession(): Promise<void> {
 export async function saveBeforeClose(): Promise<void> {
   closingDown = true;
 
-  // Agent process/title tracking can disappear as soon as Ctrl+C returns to
-  // the shell. Fully capture the pane/session attribution before interrupting.
-  const settingsSnapshot = isSettingsWriteBlocked() ? undefined : await collectSettingsSnapshot();
+  // Drain any older write and commit the final attribution before Ctrl+C can
+  // return an agent to the shell and erase the process evidence.
+  if (!isSettingsWriteBlocked()) {
+    await flushSessionCheckpoint({ reason: "close" });
+  }
 
   // Kill-on-exit (issue #451): before serializing scrollback, send Ctrl+C to
   // running terminals so cron/agents wind down and Claude/Codex print their
@@ -106,13 +241,11 @@ export async function saveBeforeClose(): Promise<void> {
   }
 
   // 2. Persist session directly (bypasses closingDown guard)
-  cachePromises.push(persistSessionCore(settingsSnapshot));
-
-  // Wait for save + persist before cleaning — otherwise clean may race and
+  // Wait for cache writes before cleaning — otherwise clean may race and
   // delete files that are still being written.
   await Promise.allSettled(cachePromises);
 
-  // 3. Clean orphaned cache files (safe now that saves have completed)
+  // Clean orphaned cache files after all cache writes have completed.
   const activePaneIds: string[] = [];
   for (const ws of wsState.workspaces) {
     for (const p of ws.panes) if (p.id) activePaneIds.push(p.id);

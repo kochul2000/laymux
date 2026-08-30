@@ -587,23 +587,43 @@ async fn install_and_restart(
 
     let progress_manager = Arc::clone(manager);
     let progress_app = app.clone();
-    let finish_manager = Arc::clone(manager);
-    let finish_app = app.clone();
-    update
-        .download_and_install(
+    let bytes = update
+        .download(
             move |chunk_length, total_bytes| match progress_manager
                 .update_download_progress(chunk_length, total_bytes)
             {
                 Ok(status) => publish(&progress_app, &status),
                 Err(error) => tracing::warn!(%error, "failed to publish update progress"),
             },
-            move || match finish_manager.mark_installing() {
-                Ok(status) => publish(&finish_app, &status),
-                Err(error) => tracing::warn!(%error, "failed to publish installer transition"),
-            },
+            || {},
         )
         .await
         .map_err(|error| error.to_string())?;
+
+    // The verified package is now local, but no terminal has been torn down and
+    // no installer has started. Establish the final durable restore point while
+    // every live process is still observable. Freeze terminal mutations before
+    // requesting it, then keep the gate through the updater's on_before_exit
+    // child/file-lock release (ADR-0222).
+    let state = app
+        .try_state::<Arc<AppState>>()
+        .ok_or_else(|| "app state is unavailable for the update checkpoint".to_string())?;
+    state.session_checkpoint.begin_finalization()?;
+    if let Err(error) =
+        crate::session_checkpoint::request_frontend_checkpoint(app, &state, "update", true).await
+    {
+        state.session_checkpoint.cancel_finalization();
+        return Err(error);
+    }
+
+    match manager.mark_installing() {
+        Ok(status) => publish(app, &status),
+        Err(error) => tracing::warn!(%error, "failed to publish installer transition"),
+    }
+    if let Err(error) = update.install(bytes) {
+        state.session_checkpoint.cancel_finalization();
+        return Err(error.to_string());
+    }
 
     app.restart();
 }

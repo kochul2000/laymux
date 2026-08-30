@@ -1029,6 +1029,7 @@ pub fn begin_human_control_operation<'a>(
     origin: HumanControlOrigin,
     terminal_id: &str,
 ) -> Result<HumanControlPermit<'a>, String> {
+    app_state.session_checkpoint.ensure_mutations_allowed()?;
     let settings = effective_remote_settings(app_state)?;
     let timeout_seconds = effective_heartbeat_timeout_seconds(&settings);
     let mut control = app_state.remote_control.lock_or_err()?;

@@ -28,7 +28,7 @@ pub fn get_codex_session_ids(
     get_codex_session_ids_impl(session_max_age_hours, &state).map_err(|error| error.to_string())
 }
 
-fn get_codex_session_ids_impl(
+pub(crate) fn get_codex_session_ids_impl(
     session_max_age_hours: Option<u64>,
     state: &AppState,
 ) -> Result<HashMap<String, Option<String>>, crate::error::AppError> {

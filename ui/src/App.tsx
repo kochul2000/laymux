@@ -28,11 +28,13 @@ import { RemoteControlOverlay } from "@/components/layout/RemoteControlOverlay";
 import { LocalMobileModeOverlay } from "@/components/layout/LocalMobileModeOverlay";
 import { useAutoRemoteAccessPrompt } from "@/hooks/useAutoRemoteAccessPrompt";
 import { useLocalMobileModeStore } from "@/stores/local-mobile-mode-store";
+import { useSessionCheckpointLifecycle } from "@/hooks/useSessionCheckpointLifecycle";
 
 export function App() {
   useKeyboardShortcuts();
   useSyncEvents();
   const { loaded, loadStatus } = useSessionPersistence();
+  useSessionCheckpointLifecycle(loaded);
   useAutomationBridge();
   useWindowGeometry();
   useAppFocus();

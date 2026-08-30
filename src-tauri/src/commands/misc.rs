@@ -189,7 +189,7 @@ pub fn save_settings(
     state: State<Arc<AppState>>,
     app: AppHandle,
 ) -> Result<(), String> {
-    crate::settings::save_settings(&settings)?;
+    let settings = crate::settings::save_frontend_settings(&settings)?;
     let change =
         crate::remote_server::update_persistent_remote_settings(&state, &app, settings.remote)?;
     if let Some(enabled) = change.effective_enabled {

@@ -62,6 +62,9 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 /// from the `set_sleep_inhibit` command alone, never under another lock (ADR-0114).
 /// `app_update` likewise owns an isolated status mutex. Updater network and
 /// installer awaits never hold it or any ordered `AppState` lock (ADR-0174).
+/// `session_checkpoint` likewise owns only its request/ack registry; it is
+/// released before event emission or async waits and nests no ordered lock
+/// (ADR-0222).
 /// The Android pairing lifecycle mutex is outside `AppState`, but unlike those
 /// isolated registries it may nest `remote_access`: acquire it before every
 /// `AppState` lock and never enter it while holding one (ADR-0144).
@@ -199,6 +202,8 @@ pub struct AppState {
     pub sleep_inhibitor: Arc<crate::power::SleepInhibitor>,
     /// Process-global GitHub update status and operation gate (ADR-0174).
     pub app_update: Arc<crate::app_update::UpdateManager>,
+    /// Frontend checkpoint request/ack rendezvous plus update finalization gate.
+    pub session_checkpoint: crate::session_checkpoint::SessionCheckpointRuntime,
 }
 
 /// Process-global per-terminal write/exec serialization table. See
@@ -379,6 +384,7 @@ impl AppState {
             app_update: Arc::new(crate::app_update::UpdateManager::new(
                 crate::app_update::UpdateChannel::from_settings_value(&settings.update.channel),
             )),
+            session_checkpoint: crate::session_checkpoint::SessionCheckpointRuntime::default(),
         }
     }
 }

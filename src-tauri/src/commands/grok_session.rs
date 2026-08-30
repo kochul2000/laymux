@@ -131,6 +131,13 @@ pub fn get_grok_session_ids(
     session_max_age_hours: Option<u64>,
     state: State<Arc<AppState>>,
 ) -> Result<HashMap<String, Option<String>>, String> {
+    get_grok_session_ids_impl(session_max_age_hours, &state)
+}
+
+pub(crate) fn get_grok_session_ids_impl(
+    session_max_age_hours: Option<u64>,
+    state: &AppState,
+) -> Result<HashMap<String, Option<String>>, String> {
     let known: Vec<String> = {
         let k = state.known_grok_terminals.lock_or_err()?;
         k.iter().cloned().collect()
@@ -177,7 +184,7 @@ pub fn get_grok_session_ids(
         .filter_map(|(id, session)| session.map(|session| (id, session)))
         .collect(),
     );
-    match resolve_wsl_agent_processes(&state, WslAgentProvider::Grok) {
+    match resolve_wsl_agent_processes(state, WslAgentProvider::Grok) {
         Ok(attributions) => {
             for (terminal_id, process) in attributions {
                 result.insert(

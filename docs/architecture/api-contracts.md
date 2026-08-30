@@ -517,6 +517,10 @@ rollout 나이 필터는 파일의 nanosecond 수정 시각만 사용하며, 생
 
 한 TerminalView의 `lastClaudeSession`/`lastCodexSession`/`lastGrokSession`은 상호배타적으로 영속한다. 저장 시 새 provider ID를 얻으면 나머지 두 stale 키를 제거하고, `get_claude_session_ids`/`get_codex_session_ids`/`get_grok_session_ids`가 실행 중이지만 정확한 ID를 증명하지 못한 terminal을 `null`로 반환하면 세 stale 키를 모두 제거한다. backend 결과나 손편집 설정에 둘 이상이 동시에 귀속되면 provider를 추측하지 않고 셋 다 복원하지 않는다. 사용자가 누른 Restart View는 세 agent 복원을 모두 건너뛴다.
 
+체크포인트용 통합 IPC `get_terminal_session_attributions(claudeSessionMaxAgeHours,codexSessionMaxAgeHours,grokSessionMaxAgeHours)`는 live terminal ID별 `{generation,state,provider?,sessionId?}`를 반환한다([ADR-0222](../adr/0222-agent-session-checkpoint-coordinator.md)). `state`는 `identified | noAgent | activeButUnidentified | unknown`이다. provider별 command 결과와 fresh process-tree liveness를 Rust에서 합치므로 프론트 activity는 판정 입력이 아니다. exact ID 또는 권위 있는 부재만 conclusive이며, 조회 실패는 빈 map/`noAgent`로 축약하지 않는다.
+
+Rust는 내부 event `session-checkpoint-requested {requestId,reason,requireConclusive}`로 WebView 조정기에 저장을 요청하고, 프론트는 디스크 commit 뒤 `acknowledge_session_checkpoint(requestId,checkpointCommitId,error?)`를 호출한다. watchdog은 5분 cadence이고 update 요청은 20초 timeout의 critical barrier다. critical barrier는 generation을 포함한 동일한 conclusive coverage를 150ms 간격으로 두 번 얻어야 성공한다. 이 IPC는 Automation/Remote 외부 계약이 아니라 앱 내부 수명주기 계약이다.
+
 ### Grok 설정
 
 Grok Build 관련 동작(세션 복원, 셀렉터 상태 메시지 구성)을 제어한다. 실행 명령·세션 복원·상태 메시지 필드는 Codex와 공유하지만, Codex 전용 transcript 설정과 Claude 전용 `syncCwd`·`sessionLimit*`는 두지 않는다([ADR-0156](../adr/0156-grok-first-class-agent.md)).

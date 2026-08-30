@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 import { useUiStore } from "@/stores/ui-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { flushSessionCheckpoint } from "@/lib/persist-session";
+import { toTerminalId } from "@/lib/pane-ids";
 import {
   advanceHiddenTimers,
   computeHiddenPaneIds,
@@ -25,8 +27,11 @@ export function useHiddenTerminalAutoClose() {
   // Per-pane timestamp (ms) of when the pane first became hidden. Lives in a ref
   // so it survives re-renders without itself triggering renders.
   const hiddenSinceRef = useRef<Map<string, number>>(new Map());
+  const pendingEvictionsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
+    const pendingEvictions = pendingEvictionsRef.current;
+    let cancelled = false;
     const evaluate = () => {
       const timeoutSec = useSettingsStore.getState().workspaceSelector.hiddenAutoCloseSeconds;
       const ui = useUiStore.getState();
@@ -57,7 +62,62 @@ export function useHiddenTerminalAutoClose() {
         timeoutMs: timeoutSec * 1000,
       });
       hiddenSinceRef.current = hiddenSince;
-      ui.setEvictedPaneIds(evictPaneIds);
+
+      // Un-hidden panes return immediately. Newly expired panes cross a durable
+      // checkpoint barrier before WorkspaceArea unmounts their PTYs.
+      const retained = new Set([...ui.evictedPaneIds].filter((paneId) => evictPaneIds.has(paneId)));
+      if (
+        retained.size !== ui.evictedPaneIds.size ||
+        [...retained].some((paneId) => !ui.evictedPaneIds.has(paneId))
+      ) {
+        ui.setEvictedPaneIds(retained);
+      }
+      const candidates = [...evictPaneIds].filter(
+        (paneId) => !ui.evictedPaneIds.has(paneId) && !pendingEvictions.has(paneId),
+      );
+      if (candidates.length === 0) return;
+      candidates.forEach((paneId) => pendingEvictions.add(paneId));
+      void flushSessionCheckpoint({
+        reason: "eviction",
+        requireConclusive: true,
+        terminalIds: candidates.map(toTerminalId),
+      })
+        .then(() => {
+          if (cancelled) return;
+          const latestTimeoutSec =
+            useSettingsStore.getState().workspaceSelector.hiddenAutoCloseSeconds;
+          if (!latestTimeoutSec || latestTimeoutSec <= 0) return;
+          const latestUi = useUiStore.getState();
+          const latestWs = useWorkspaceStore.getState();
+          const latestPanes: HideCandidatePane[] = latestWs.workspaces.flatMap((workspace) =>
+            workspace.panes.map((pane) => ({ paneId: pane.id, workspaceId: workspace.id })),
+          );
+          const stillHidden = computeHiddenPaneIds({
+            panes: latestPanes,
+            hiddenPaneIds: latestUi.hiddenPaneIds,
+            hiddenWorkspaceIds: latestUi.hiddenWorkspaceIds,
+            activeWorkspaceId: latestWs.activeWorkspaceId,
+          });
+          const next = new Set(latestUi.evictedPaneIds);
+          const now = Date.now();
+          candidates
+            .filter((paneId) => {
+              const hiddenSince = hiddenSinceRef.current.get(paneId);
+              return (
+                stillHidden.has(paneId) &&
+                hiddenSince !== undefined &&
+                now - hiddenSince >= latestTimeoutSec * 1000
+              );
+            })
+            .forEach((paneId) => next.add(paneId));
+          latestUi.setEvictedPaneIds(next);
+        })
+        .catch((error) => {
+          console.warn("[hidden-auto-close] Session checkpoint failed; eviction deferred:", error);
+        })
+        .finally(() => {
+          candidates.forEach((paneId) => pendingEvictions.delete(paneId));
+        });
     };
 
     // Raw-state transitions are evaluated synchronously. The interval is only
@@ -89,7 +149,9 @@ export function useHiddenTerminalAutoClose() {
     });
     const timer = setInterval(evaluate, TICK_INTERVAL_MS);
     return () => {
+      cancelled = true;
       clearInterval(timer);
+      pendingEvictions.clear();
       unsubscribeUi();
       unsubscribeWorkspaces();
       unsubscribeSettings();

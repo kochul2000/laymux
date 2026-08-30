@@ -203,6 +203,7 @@ pub fn create_terminal_session(
     state: State<Arc<AppState>>,
     app: AppHandle,
 ) -> Result<TerminalSession, String> {
+    state.session_checkpoint.ensure_mutations_allowed()?;
     // Inject LX_SOCKET and LX_AUTOMATION_PORT env vars
     let mut env = Vec::new();
     if let Ok(path_lock) = state.ipc_socket_path.lock_or_err() {
@@ -1639,6 +1640,7 @@ pub fn close_terminal_session(
     state: State<Arc<AppState>>,
     app: AppHandle,
 ) -> Result<(), String> {
+    state.session_checkpoint.ensure_mutations_allowed()?;
     // Hold the terminal catalog from generation selection through all
     // id-keyed cleanup. Create performs its duplicate check and generation
     // reservation under the same lock, so close cannot consume state from a

@@ -16,6 +16,13 @@ pub fn get_claude_session_ids(
     session_max_age_hours: Option<u64>,
     state: State<Arc<AppState>>,
 ) -> Result<HashMap<String, Option<String>>, String> {
+    get_claude_session_ids_impl(session_max_age_hours, &state)
+}
+
+pub(crate) fn get_claude_session_ids_impl(
+    session_max_age_hours: Option<u64>,
+    state: &AppState,
+) -> Result<HashMap<String, Option<String>>, String> {
     let known: Vec<String> = {
         let k = state.known_claude_terminals.lock_or_err()?;
         k.iter().cloned().collect()
@@ -53,7 +60,7 @@ pub fn get_claude_session_ids(
         &known,
         remove_duplicate_attributions(candidates),
     );
-    match resolve_wsl_agent_processes(&state, WslAgentProvider::Claude) {
+    match resolve_wsl_agent_processes(state, WslAgentProvider::Claude) {
         Ok(attributions) => {
             for (terminal_id, process) in attributions {
                 result.insert(

@@ -50,6 +50,8 @@ vi.mock("@tauri-apps/api/window", () => {
 
 vi.mock("@/lib/persist-session", () => ({
   persistSession: vi.fn().mockResolvedValue(undefined),
+  flushSessionCheckpoint: vi.fn().mockResolvedValue({ checkpointCommitId: 1, coverage: [] }),
+  markSessionCheckpointMutation: vi.fn(),
   saveBeforeClose: vi.fn().mockResolvedValue(undefined),
   setBlockPersist: vi.fn(),
 }));
@@ -146,6 +148,8 @@ vi.mock("@/lib/tauri-api", () => {
       lastError: null,
     }),
     onAppUpdateStatusChanged: vi.fn().mockResolvedValue(unlisten),
+    onSessionCheckpointRequested: vi.fn().mockResolvedValue(unlisten),
+    acknowledgeSessionCheckpoint: vi.fn().mockResolvedValue(undefined),
   };
 });
 

@@ -536,6 +536,51 @@ export async function saveSettings(settings: Settings): Promise<void> {
   return invoke("save_settings", { settings });
 }
 
+export interface TerminalSessionAttribution {
+  generation: number;
+  state: "identified" | "noAgent" | "activeButUnidentified" | "unknown";
+  provider?: "claude" | "codex" | "grok";
+  sessionId?: string;
+}
+
+export async function getTerminalSessionAttributions(
+  claudeSessionMaxAgeHours?: number,
+  codexSessionMaxAgeHours?: number,
+  grokSessionMaxAgeHours?: number,
+): Promise<Record<string, TerminalSessionAttribution>> {
+  return invoke("get_terminal_session_attributions", {
+    claudeSessionMaxAgeHours,
+    codexSessionMaxAgeHours,
+    grokSessionMaxAgeHours,
+  });
+}
+
+export interface SessionCheckpointRequest {
+  requestId: number;
+  reason: "watchdog" | "update";
+  requireConclusive: boolean;
+}
+
+export function onSessionCheckpointRequested(
+  listener: (request: SessionCheckpointRequest) => void,
+): Promise<UnlistenFn> {
+  return listen<SessionCheckpointRequest>("session-checkpoint-requested", (event) => {
+    listener(event.payload);
+  });
+}
+
+export async function acknowledgeSessionCheckpoint(
+  requestId: number,
+  checkpointCommitId?: number,
+  error?: string,
+): Promise<void> {
+  return invoke("acknowledge_session_checkpoint", {
+    requestId,
+    checkpointCommitId,
+    error,
+  });
+}
+
 export async function loadMemo(key: string): Promise<string> {
   return invoke("load_memo", { key });
 }
