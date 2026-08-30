@@ -1481,26 +1481,14 @@ describe("SettingsView", () => {
     expect(useSettingsStore.getState().terminal.pathLinkOsOpenEnabled).toBe(false);
   });
 
-  // -- Terminal section: scrollbar style --
+  // -- Terminal section: fixed scrollbar layout --
 
-  it("shows scrollbar style select in terminal section", async () => {
+  it("does not expose a scrollbar style setting", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
     await user.click(screen.getByTestId("nav-terminal"));
-    expect(screen.getByTestId("scrollbar-style-select")).toBeInTheDocument();
-  });
-
-  it("scrollbar style select updates store", async () => {
-    const user = userEvent.setup();
-    render(<SettingsView />);
-
-    await user.click(screen.getByTestId("nav-terminal"));
-    const select = screen.getByTestId("scrollbar-style-select") as HTMLSelectElement;
-    await user.selectOptions(select, "separate");
-
-    await user.click(screen.getByTestId("save-settings-btn"));
-    expect(useSettingsStore.getState().terminal.scrollbarStyle).toBe("separate");
+    expect(screen.queryByTestId("scrollbar-style-select")).not.toBeInTheDocument();
   });
 
   // -- Terminal section: wheel scroll sensitivity --

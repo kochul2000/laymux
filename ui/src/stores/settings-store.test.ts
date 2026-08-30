@@ -590,8 +590,6 @@ describe("settings-store", () => {
     expect(codex.statusMessageDelimiter).toBe(" · ");
   });
 
-  // -- Scrollbar style settings --
-
   it("defaults truecolor capability advertising to enabled", () => {
     expect(useSettingsStore.getState().terminal.advertiseTrueColor).toBe(true);
   });
@@ -606,45 +604,6 @@ describe("settings-store", () => {
   it("can disable truecolor capability advertising", () => {
     useSettingsStore.getState().setTerminal({ advertiseTrueColor: false });
     expect(useSettingsStore.getState().terminal.advertiseTrueColor).toBe(false);
-  });
-
-  it("has default scrollbarStyle as overlay", () => {
-    expect(useSettingsStore.getState().terminal.scrollbarStyle).toBe("overlay");
-  });
-
-  it("setTerminal updates scrollbarStyle", () => {
-    useSettingsStore.getState().setTerminal({ scrollbarStyle: "separate" });
-    expect(useSettingsStore.getState().terminal.scrollbarStyle).toBe("separate");
-  });
-
-  it("setTerminal updates scrollbarStyle back to overlay", () => {
-    useSettingsStore.getState().setTerminal({ scrollbarStyle: "separate" });
-    useSettingsStore.getState().setTerminal({ scrollbarStyle: "overlay" });
-    expect(useSettingsStore.getState().terminal.scrollbarStyle).toBe("overlay");
-  });
-
-  it("loadFromSettings loads scrollbarStyle", () => {
-    useSettingsStore.getState().loadFromSettings({
-      terminal: {
-        copyOnSelect: true,
-        scrollbarStyle: "separate" as const,
-      },
-    });
-    expect(useSettingsStore.getState().terminal.scrollbarStyle).toBe("separate");
-  });
-
-  it("loadFromSettings fills missing scrollbarStyle with default overlay", () => {
-    useSettingsStore.getState().loadFromSettings({
-      terminal: { copyOnSelect: false } as any,
-    });
-    expect(useSettingsStore.getState().terminal.scrollbarStyle).toBe("overlay");
-  });
-
-  it("setTerminal does not affect other terminal fields when setting scrollbarStyle", () => {
-    useSettingsStore.getState().setTerminal({ scrollbarStyle: "separate" });
-    const { terminal } = useSettingsStore.getState();
-    expect(terminal.copyOnSelect).toBe(true);
-    expect(terminal.scrollbarStyle).toBe("separate");
   });
 
   // -- Wheel scroll sensitivity --

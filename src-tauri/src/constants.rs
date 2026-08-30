@@ -148,7 +148,6 @@ pub const MIN_REMOTE_HEARTBEAT_TIMEOUT_SECONDS: u64 = 30;
 
 pub const SETTINGS_LANGUAGES: &[&str] = &["system", "ko", "en"];
 pub const APP_THEME_IDS: &[&str] = &["catppuccin-mocha", "dracula", "wsl-dark", "github-light"];
-pub const TERMINAL_SCROLLBAR_STYLES: &[&str] = &["overlay", "separate"];
 /// xterm parser admission class shares (ADR-0101). Defaults are 5 (focused) /
 /// 3 (other visible) / 2 (hidden together); the sum is one admission cycle.
 pub const PARSER_ADMISSION_FOCUSED_SHARE_DEFAULT: u32 = 5;

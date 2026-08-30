@@ -7583,7 +7583,7 @@ describe("TerminalView", () => {
     }
   });
 
-  it("waits for write drain before font, DPR, and scrollbar geometry reflows", async () => {
+  it("waits for write drain before font and DPR geometry reflows", async () => {
     type DprMql = {
       listeners: Array<(event: MediaQueryListEvent) => void>;
       addEventListener: (type: string, callback: (event: MediaQueryListEvent) => void) => void;
@@ -7636,13 +7636,6 @@ describe("TerminalView", () => {
 
       act(() => {
         useOverridesStore.getState().setViewOverride("pane-geometry-write-drain", { fontSize: 20 });
-        useSettingsStore.setState({
-          ...useSettingsStore.getState(),
-          terminal: {
-            ...useSettingsStore.getState().terminal,
-            scrollbarStyle: "separate" as const,
-          },
-        });
         for (const listener of [...mqls[0].listeners]) {
           listener(new Event("change") as MediaQueryListEvent);
         }
@@ -9296,7 +9289,7 @@ describe("TerminalView", () => {
   // -- Regression: reflow triggers fired while inactive workspace is hidden --
   //
   // WorkspaceArea hides inactive workspaces via `display: none`. The font /
-  // DPR / scrollbar reflow effects run for every mounted TerminalView, so
+  // DPR reflow effects run for every mounted TerminalView, so
   // without a guard they call `fit()` on a 0×0 container — propagating
   // cols/rows=0 through `terminal.onResize` to a PTY resize ioctl — and
   // attempt an atlas rebuild against a canvas that is not painted. Both are
@@ -9479,73 +9472,6 @@ describe("TerminalView", () => {
     } finally {
       globalThis.ResizeObserver = originalResizeObserver;
       window.matchMedia = originalMatchMedia;
-    }
-  });
-
-  it("does not fit when scrollbarStyle changes while container is hidden", async () => {
-    type Observer = {
-      target: Element | null;
-      callback: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void;
-    };
-    const observers: Observer[] = [];
-    const originalResizeObserver = globalThis.ResizeObserver;
-    globalThis.ResizeObserver = class {
-      private obs: Observer;
-      constructor(cb: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void) {
-        this.obs = { target: null, callback: cb };
-        observers.push(this.obs);
-      }
-      observe(target: Element) {
-        this.obs.target = target;
-        setTimeout(() => {
-          this.obs.callback(
-            [
-              {
-                target,
-                contentRect: { width: 800, height: 600 },
-              } as unknown as ResizeObserverEntry,
-            ],
-            this as unknown as ResizeObserver,
-          );
-        }, 0);
-      }
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver;
-
-    try {
-      render(<TerminalView instanceId="t-hidden-sb" profile="PowerShell" syncGroup="" />);
-      await vi.waitFor(() => {
-        expect(mockCreateTerminalSession).toHaveBeenCalled();
-      });
-      await waitForTerminalRendererOpen();
-      const obs = observers[0];
-      const target = obs.target as Element;
-
-      // Hide.
-      act(() => {
-        obs.callback(
-          [{ target, contentRect: { width: 0, height: 0 } } as unknown as ResizeObserverEntry],
-          {} as ResizeObserver,
-        );
-      });
-
-      mockFit.mockClear();
-
-      // Scrollbar style change while hidden.
-      useSettingsStore.setState({
-        ...useSettingsStore.getState(),
-        terminal: {
-          ...useSettingsStore.getState().terminal,
-          scrollbarStyle: "separate" as const,
-        },
-      });
-
-      await new Promise((resolve) => setTimeout(resolve, 30));
-
-      expect(mockFit).not.toHaveBeenCalled();
-    } finally {
-      globalThis.ResizeObserver = originalResizeObserver;
     }
   });
 
@@ -9751,90 +9677,20 @@ describe("TerminalView", () => {
     }
   });
 
-  // -- Scrollbar style --
+  // -- Fixed scrollbar layout --
 
-  it("applies scrollbar-overlay class by default", () => {
+  it("keeps the overview ruler disabled without scrollbar mode classes", async () => {
     render(<TerminalView instanceId="t-sb1" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(createdTerminals.length).toBeGreaterThan(0);
+    });
+
+    const term = createdTerminals[createdTerminals.length - 1];
+    expect(term.options.overviewRuler).toEqual({ width: 0 });
     const container = screen.getByTestId("terminal-view-t-sb1");
-    expect(container.classList.contains("scrollbar-overlay")).toBe(true);
-    expect(container.classList.contains("scrollbar-separate")).toBe(false);
-  });
-
-  it("applies scrollbar-separate class when setting is separate", () => {
-    useSettingsStore.setState({
-      ...useSettingsStore.getState(),
-      terminal: {
-        ...useSettingsStore.getState().terminal,
-        scrollbarStyle: "separate" as const,
-      },
-    });
-
-    render(<TerminalView instanceId="t-sb2" profile="PowerShell" syncGroup="" />);
-    const container = screen.getByTestId("terminal-view-t-sb2");
-    expect(container.classList.contains("scrollbar-separate")).toBe(true);
     expect(container.classList.contains("scrollbar-overlay")).toBe(false);
-  });
-
-  it("updates xterm overviewRuler and re-fits when scrollbarStyle changes dynamically", async () => {
-    render(<TerminalView instanceId="t-sb-dyn" profile="PowerShell" syncGroup="" />);
-
-    await vi.waitFor(() => {
-      expect(mockCreateTerminalSession).toHaveBeenCalled();
-    });
-
-    mockFit.mockClear();
-
-    useSettingsStore.setState({
-      ...useSettingsStore.getState(),
-      terminal: {
-        ...useSettingsStore.getState().terminal,
-        scrollbarStyle: "separate" as const,
-      },
-    });
-
-    await vi.waitFor(() => {
-      const container = screen.getByTestId("terminal-view-t-sb-dyn");
-      expect(container.classList.contains("scrollbar-separate")).toBe(true);
-    });
-
-    await vi.waitFor(() => {
-      expect(mockFit).toHaveBeenCalled();
-    });
-  });
-
-  it("updates xterm overviewRuler when scrollbarStyle changes from separate to overlay", async () => {
-    useSettingsStore.setState({
-      ...useSettingsStore.getState(),
-      terminal: {
-        ...useSettingsStore.getState().terminal,
-        scrollbarStyle: "separate" as const,
-      },
-    });
-
-    render(<TerminalView instanceId="t-sb-rev" profile="PowerShell" syncGroup="" />);
-
-    await vi.waitFor(() => {
-      expect(mockCreateTerminalSession).toHaveBeenCalled();
-    });
-
-    mockFit.mockClear();
-
-    useSettingsStore.setState({
-      ...useSettingsStore.getState(),
-      terminal: {
-        ...useSettingsStore.getState().terminal,
-        scrollbarStyle: "overlay" as const,
-      },
-    });
-
-    await vi.waitFor(() => {
-      const container = screen.getByTestId("terminal-view-t-sb-rev");
-      expect(container.classList.contains("scrollbar-overlay")).toBe(true);
-    });
-
-    await vi.waitFor(() => {
-      expect(mockFit).toHaveBeenCalled();
-    });
+    expect(container.classList.contains("scrollbar-separate")).toBe(false);
   });
 
   // -- Wheel scroll sensitivity --
@@ -11161,21 +11017,10 @@ describe("TerminalView jump-to-bottom button (issue #349)", () => {
     expect(screen.queryByTestId("terminal-scroll-to-bottom-t-jump3")).not.toBeInTheDocument();
   });
 
-  // Issue #361: the button must clear the scrollbar slider. The slider renders at
-  // the same right-edge width in both modes and the button is positioned relative
-  // to the pane edge, so the offset (--terminal-scroll-btn-right) is the same
-  // (26px = 14px slider + 12px clearance) regardless of scrollbar mode.
-  it("uses a 26px right offset in overlay scrollbar mode", () => {
-    useSettingsStore.getState().setTerminal({ scrollbarStyle: "overlay" });
-    render(<TerminalView instanceId="t-sb-overlay" profile="PowerShell" syncGroup="" />);
-    const wrapper = screen.getByTestId("terminal-view-t-sb-overlay");
-    expect(wrapper.style.getPropertyValue("--terminal-scroll-btn-right")).toBe("26px");
-  });
-
-  it("uses the same 26px right offset in separate scrollbar mode", () => {
-    useSettingsStore.getState().setTerminal({ scrollbarStyle: "separate" });
-    render(<TerminalView instanceId="t-sb-separate" profile="PowerShell" syncGroup="" />);
-    const wrapper = screen.getByTestId("terminal-view-t-sb-separate");
+  // Issue #361: 14px scrollbar slider + 12px clearance.
+  it("uses a 26px right offset for the fixed scrollbar", () => {
+    render(<TerminalView instanceId="t-sb-fixed" profile="PowerShell" syncGroup="" />);
+    const wrapper = screen.getByTestId("terminal-view-t-sb-fixed");
     // 14px scrollbar slider + 12px clearance.
     expect(wrapper.style.getPropertyValue("--terminal-scroll-btn-right")).toBe("26px");
   });

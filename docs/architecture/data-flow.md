@@ -220,6 +220,8 @@ TerminalView의 xterm.js WebGL 렌더러는 **셀 geometry 변경**과 **옵션/
 
 atlas 는 이 pane 만의 것이 아니다 — 같은 render config 의 터미널끼리 공유되므로 아래의 모든 `clearTextureAtlas()` 는 **다른 pane 의 렌더 모델까지 무효화한다.** 그 파급 처리는 §8.20 이 소유한다.
 
+터미널 스크롤바 geometry는 설정으로 노출하지 않는다([ADR-0217](../adr/0217-fixed-terminal-scrollbar-layout.md)). `TerminalView`는 xterm v6의 `overviewRuler.width=0`을 고정한다. 현재 고정된 xterm v6와 FitAddon은 이 값을 기본 스크롤바 폭 14px로 fallback하므로 셀 격자는 같은 우측 gutter를 계속 예약하지만, overview-ruler canvas와 그 구분선은 렌더하지 않는다. 이 고정 geometry는 런타임 설정 변경이나 추가 reflow 원인이 아니다.
+
 #### Reflow 허용 조건
 
 `fit()` + `clearTextureAtlas()` + `refresh()` 조합은 비용이 크고 WebGL renderer 내부 atlas를 재생성한다. 이 경로는 다음 경우에만 호출한다.
@@ -227,7 +229,6 @@ atlas 는 이 pane 만의 것이 아니다 — 같은 render config 의 터미�
 - `fontSize` / `fontFamily` 변경: cell width/height가 바뀌므로 `fit()` 후 atlas를 재생성한다.
 - 브라우저 zoom 또는 monitor DPR 변경: glyph rasterization 해상도가 바뀌므로 atlas를 재생성한다.
 - 숨김(`display: none`, 0×0) 상태에서 실제 크기로 복귀: 숨겨진 동안 남은 stale canvas를 `clearTextureAtlas()` + `refresh()`로 즉시 복구한다. `FitAddon.proposeDimensions()`가 현재 xterm `cols/rows`와 같고 hidden 중 보류된 reflow가 없으면 buffer를 건드리는 `fit()`은 수행하지 않는다. geometry 변경이나 보류된 reflow가 있으면 guarded fit 뒤 새 geometry용 atlas를 한 번 더 재생성한다.
-- scrollbar mode처럼 terminal viewport geometry를 실제로 바꾸는 설정 변경.
 
 #### Reflow 금지 조건
 
@@ -241,19 +242,19 @@ atlas 는 이 pane 만의 것이 아니다 — 같은 render config 의 터미�
 
 #### 비활성 워크스페이스의 reflow 지연 (dirty flag)
 
-WorkspaceArea는 비활성 워크스페이스를 `display: none`으로 숨기므로 해당 TerminalView의 컨테이너는 0×0이 된다. 그러나 폰트/DPR/scrollbar 변경 effect와 matchMedia DPR 리스너는 모든 마운트된 인스턴스에서 실행되므로, 가드 없이 두면 다음 두 부작용이 발생한다.
+WorkspaceArea는 비활성 워크스페이스를 `display: none`으로 숨기므로 해당 TerminalView의 컨테이너는 0×0이 된다. 그러나 폰트/DPR 변경 effect와 matchMedia DPR 리스너는 모든 마운트된 인스턴스에서 실행되므로, 가드 없이 두면 다음 두 부작용이 발생한다.
 
 1. `fit()`이 0×0 컨테이너에서 cols/rows=0을 계산해 `terminal.onResize` → PTY resize ioctl로 전파된다 → 비활성 워크스페이스의 셸이 잘못된 크기로 SIGWINCH를 받는다.
 2. `clearTextureAtlas()` + `refresh()`는 paint가 일어나지 않는 hidden 캔버스에서 무의미하며, 진짜로 보일 때의 atlas는 여전히 stale이다.
 
 따라서 TerminalView는 두 개의 ref로 상태를 추적한다.
 
-- `isContainerHiddenRef` — ResizeObserver 콜백 종료 시 마지막 entry의 `isNowHidden` 값으로 갱신. 현재 hidden 여부를 폰트/DPR/scrollbar effect에서 동기적으로 조회할 수 있다.
+- `isContainerHiddenRef` — ResizeObserver 콜백 종료 시 마지막 entry의 `isNowHidden` 값으로 갱신. 현재 hidden 여부를 폰트/DPR effect에서 동기적으로 조회할 수 있다.
 - `reflowDirtyRef` — hidden 상태에서 위 트리거가 실행되면 즉시 reflow 대신 `true`로 마킹.
 
-ResizeObserver의 hidden→visible 분기에서는 `FitAddon.proposeDimensions()`가 계산한 grid와 dirty 상태를 먼저 구분한다. 제안된 `cols/rows`가 현재 xterm grid와 같고 `reflowDirtyRef` 및 remote-return backend dirty가 없으면 `clearTextureAtlas()` + `refresh()`만 동기적으로 수행한다. 이 경로는 xterm buffer/PTY 크기를 바꾸지 않으며 Windows output quiet gate도 기다리지 않는다. 제안 grid가 달라졌거나 hidden 중 font/DPR/scrollbar reflow가 보류됐으면 stale canvas를 `clearTextureAtlas()` + `refresh()`로 먼저 제거하되, buffer를 바꾸는 `fit()`은 write queue drain과 기존 ConPTY quiet window를 모두 거친 뒤 단일 atlas 재생성과 함께 수행한다. 늦게 도착한 이전 폭의 ConPTY repaint를 새 grid에 파싱하지 않기 위해서다. reflow dirty는 fit이 끝난 뒤 `false`로 클리어한다. 같은 integer 크기 가드도 dirty 플래그를 함께 검사해 보류된 reflow가 누락되지 않도록 한다. 이 복구 요청의 atlas 재생성 플래그는 queue drain을 기다리는 동안 뒤의 일반 resize 요청과 OR 병합되므로 유실되지 않는다. 대기 중 다시 hidden으로 전환되면 atlas 재생성과 remote-return backend resize 플래그를 각각 dirty ref로 이관한 뒤 fit 요청만 취소한다. remote-return backend dirty는 resize가 성공한 뒤에만 지우며, 거부 또는 timeout이면 visible 상태에서 최신 geometry로 재시도한다.
+ResizeObserver의 hidden→visible 분기에서는 `FitAddon.proposeDimensions()`가 계산한 grid와 dirty 상태를 먼저 구분한다. 제안된 `cols/rows`가 현재 xterm grid와 같고 `reflowDirtyRef` 및 remote-return backend dirty가 없으면 `clearTextureAtlas()` + `refresh()`만 동기적으로 수행한다. 이 경로는 xterm buffer/PTY 크기를 바꾸지 않으며 Windows output quiet gate도 기다리지 않는다. 제안 grid가 달라졌거나 hidden 중 font/DPR reflow가 보류됐으면 stale canvas를 `clearTextureAtlas()` + `refresh()`로 먼저 제거하되, buffer를 바꾸는 `fit()`은 write queue drain과 기존 ConPTY quiet window를 모두 거친 뒤 단일 atlas 재생성과 함께 수행한다. 늦게 도착한 이전 폭의 ConPTY repaint를 새 grid에 파싱하지 않기 위해서다. reflow dirty는 fit이 끝난 뒤 `false`로 클리어한다. 같은 integer 크기 가드도 dirty 플래그를 함께 검사해 보류된 reflow가 누락되지 않도록 한다. 이 복구 요청의 atlas 재생성 플래그는 queue drain을 기다리는 동안 뒤의 일반 resize 요청과 OR 병합되므로 유실되지 않는다. 대기 중 다시 hidden으로 전환되면 atlas 재생성과 remote-return backend resize 플래그를 각각 dirty ref로 이관한 뒤 fit 요청만 취소한다. remote-return backend dirty는 resize가 성공한 뒤에만 지우며, 거부 또는 timeout이면 visible 상태에서 최신 geometry로 재시도한다.
 
-이 메커니즘은 §8.4의 "0×0 hidden 상태에서 실제 크기로 복귀할 때만 atlas 재생성" 원칙을 위반하지 않는다. 오히려 hidden 동안 발생한 폰트/DPR/scrollbar 변경을 그 단일 transition에 합류시켜 reflow 호출을 추가하지 않는다.
+이 메커니즘은 §8.4의 "0×0 hidden 상태에서 실제 크기로 복귀할 때만 atlas 재생성" 원칙을 위반하지 않는다. 오히려 hidden 동안 발생한 폰트/DPR 변경을 그 단일 transition에 합류시켜 reflow 호출을 추가하지 않는다.
 
 최초 마운트의 0축 크기는 renderer 시작만 막고 terminal session 시작은 막지 않는다([ADR-0161](../adr/0161-rendererless-terminal-session-startup.md)). `TerminalView`는 xterm의 기본 `80×24` grid로 PTY를 만들고 output listener·cache/snapshot replay·rendererless checkpoint를 연결한다. xterm parser와 buffer는 `terminal.open()` 전에도 byte를 처리하므로 그 사이 출력과 Remote checkpoint가 보존된다. `ResizeObserver`가 최초 양의 폭과 높이를 보고하면 같은 xterm instance에 DOM renderer를 정확히 한 번 열고 fit/WebGL/focus를 수행한다. 0축 entry 자체로는 `fit()`이나 PTY resize를 보내지 않는다.
 
@@ -267,7 +268,7 @@ Codex/Claude 같은 TUI는 종료 시 `ESC[?1049l`, scrollback 재방출, footer
 
 따라서 reflow 요청은 반드시 `requestAnimationFrame` 단위로 coalesce하고, 같은 tick 안에서 여러 번 발생해도 마지막 요청만 실행한다. activity/cursor/theme 변경 effect는 terminal option만 갱신하고, 필요한 overlay caret 갱신은 별도 updater로 처리한다. 셀 geometry reflow는 font/DPR/실제 size transition을 담당하는 전용 effect에만 둔다.
 
-Pane divider의 ResizeObserver burst는 80ms trailing debounce로 한 번의 `fit()`으로 합친다. ResizeObserver뿐 아니라 폰트, DPR, scrollbar, remote control 복귀를 포함해 geometry를 바꾸는 모든 fit은 공통 스케줄러를 통과한다. PTY 출력과 세션 복원을 포함해 `terminal.write(data, callback)`로 전달할 데이터는 single-flight FIFO를 거친다. 모든 non-stabilized `Uint8Array`는 live/replay source와 무관하게 최대 64 KiB 조각으로 enqueue한다. 단독 live owner는 compatible 조각을 최대 256 KiB로 다시 합치되 다른 owner가 기다리는 turn은 최대 64 KiB만 합친다. replay는 각 64 KiB entry가 callback barrier라 단독이어도 합치지 않는다. cursor 안정화가 원자성을 부여한 frame은 자체 1 MiB 상한 안에서 한 write로 유지하고 string도 기존 원자 경계를 유지한다. xterm parser callback, 재시도 batch, native stabilizer transaction deadline/open lexical sequence, attach parser, exact repair가 남아 있으면 reflow를 실행하지 않고, 모두 끝나면 보류된 최신 fit을 한 번 실행한다. xterm이 backlog 제한으로 write를 동기 거부하면 materialize된 같은 batch와 buffer를 FIFO 선두에 그대로 유지하고 16ms 뒤 재시도한다. 구 v2 fallback의 screen-losing reattach는 queued old-epoch request를 폐기하고 그 waiter를 `onDiscard`로 종결하되 이미 수락된 parse callback은 기다린 뒤 `reset()`한다. production v3 fail-stop은 이 경로를 호출하지 않는다. checkpoint await 뒤 visible enqueue 전에도 attach epoch를 재검사하므로 clear 이후 stale segment가 다시 들어오지 않는다. 대기 중 fit 요청의 atlas 재생성 및 backend resize 플래그는 OR 병합한다. Windows에서는 이전 폭을 기준으로 만들어진 ConPTY 청크가 끝나도록 마지막 PTY 출력 뒤 최대 120ms의 quiet window를 추가하며, quiet-window 조건 자체만 최초 보류 시점부터 500ms 뒤 완화한다. 이 500ms는 parser/stabilizer/repair/FIFO 정확성 gate를 우회하는 전체 resize deadline이 아니다. Linux는 quiet window만 생략하고 같은 정확성 gate를 사용한다. 이는 xterm buffer reflow와 write parser가 서로 다른 grid에서 같은 active buffer를 갱신하는 충돌을 피하기 위한 순서다.
+Pane divider의 ResizeObserver burst는 80ms trailing debounce로 한 번의 `fit()`으로 합친다. ResizeObserver뿐 아니라 폰트, DPR, remote control 복귀를 포함해 geometry를 바꾸는 모든 fit은 공통 스케줄러를 통과한다. PTY 출력과 세션 복원을 포함해 `terminal.write(data, callback)`로 전달할 데이터는 single-flight FIFO를 거친다. 모든 non-stabilized `Uint8Array`는 live/replay source와 무관하게 최대 64 KiB 조각으로 enqueue한다. 단독 live owner는 compatible 조각을 최대 256 KiB로 다시 합치되 다른 owner가 기다리는 turn은 최대 64 KiB만 합친다. replay는 각 64 KiB entry가 callback barrier라 단독이어도 합치지 않는다. cursor 안정화가 원자성을 부여한 frame은 자체 1 MiB 상한 안에서 한 write로 유지하고 string도 기존 원자 경계를 유지한다. xterm parser callback, 재시도 batch, native stabilizer transaction deadline/open lexical sequence, attach parser, exact repair가 남아 있으면 reflow를 실행하지 않고, 모두 끝나면 보류된 최신 fit을 한 번 실행한다. xterm이 backlog 제한으로 write를 동기 거부하면 materialize된 같은 batch와 buffer를 FIFO 선두에 그대로 유지하고 16ms 뒤 재시도한다. 구 v2 fallback의 screen-losing reattach는 queued old-epoch request를 폐기하고 그 waiter를 `onDiscard`로 종결하되 이미 수락된 parse callback은 기다린 뒤 `reset()`한다. production v3 fail-stop은 이 경로를 호출하지 않는다. checkpoint await 뒤 visible enqueue 전에도 attach epoch를 재검사하므로 clear 이후 stale segment가 다시 들어오지 않는다. 대기 중 fit 요청의 atlas 재생성 및 backend resize 플래그는 OR 병합한다. Windows에서는 이전 폭을 기준으로 만들어진 ConPTY 청크가 끝나도록 마지막 PTY 출력 뒤 최대 120ms의 quiet window를 추가하며, quiet-window 조건 자체만 최초 보류 시점부터 500ms 뒤 완화한다. 이 500ms는 parser/stabilizer/repair/FIFO 정확성 gate를 우회하는 전체 resize deadline이 아니다. Linux는 quiet window만 생략하고 같은 정확성 gate를 사용한다. 이는 xterm buffer reflow와 write parser가 서로 다른 grid에서 같은 active buffer를 갱신하는 충돌을 피하기 위한 순서다.
 
 Remote control 복귀 fit은 `onResize`가 만드는 일반 backend 전송을 잠시 억제하고, fit이 확정한 최종 `cols/rows`를 명시적 resize 하나로 보낸다. backend resize가 성공해야 remote-return dirty를 지운다. resize가 거부되거나 1초 동안 pending이면 in-flight 상태를 해제하고 100ms 뒤 최신 geometry revision을 재시도한다. 재시도 대기 중 폰트나 container 크기가 다시 바뀌면 이전 geometry가 아니라 가장 최근 revision을 동기화한다.
 
@@ -313,9 +314,9 @@ TerminalView renderer 경로를 수정할 때는 다음 회귀 테스트를 유�
 - cursor shape/blink 변경은 option만 갱신하고 reflow를 호출하지 않는다.
 - 같은 integer size의 ResizeObserver entry는 `fit()`을 호출하지 않는다.
 - 0×0 hidden 상태에서 제안 xterm grid가 현재 `cols/rows`와 같게 복귀하면 `fit()`/PTY resize 없이 atlas clear + refresh만 수행한다.
-- hidden(0×0) 컨테이너에서 font/DPR/scrollbar 변경이 발생해도 `fit()` 및 `clearTextureAtlas()`를 즉시 호출하지 않는다 (dirty 마킹만 수행).
+- hidden(0×0) 컨테이너에서 font/DPR 변경이 발생해도 `fit()` 및 `clearTextureAtlas()`를 즉시 호출하지 않는다 (dirty 마킹만 수행).
 - hidden→visible 전환 시 stale canvas는 즉시 atlas clear + refresh하고, 실제 geometry 변경 또는 보류된 dirty는 guarded 단일 `fit() + clearTextureAtlas() + refresh()`로 소비한다. 뒤의 일반 fit이 합류하거나 대기 중 다시 hidden이 되어도 atlas/backend sync 요구를 유지한다.
-- PTY 출력 또는 세션 복원 write callback이 남아 있는 동안 ResizeObserver, font, DPR, scrollbar reflow를 실행하지 않고, queue drain 뒤 누적 플래그를 포함한 fit을 정확히 한 번 실행한다.
+- PTY 출력 또는 세션 복원 write callback이 남아 있는 동안 ResizeObserver, font, DPR reflow를 실행하지 않고, queue drain 뒤 누적 플래그를 포함한 fit을 정확히 한 번 실행한다.
 - xterm backlog가 write를 동기 거부하면 거부된 원본 청크를 유실하지 않고 parser 진행 뒤 재시도하며, 그동안 fit을 차단한다.
 - 구 v2 fallback의 screen-losing reattach는 queued old-epoch write를 폐기하면서 parsed/replay waiter를 종결하고, checkpoint await 뒤 epoch를 재검사하며, accepted in-flight parse가 끝난 뒤에만 reset하여 snapshot byte를 중복 적용하거나 attach chain을 멈추지 않는다. production v3 fail-stop은 이 reset 경로를 사용하지 않는다.
 - Windows의 120ms output quiet 조건은 최초 보류 뒤 500ms에 완화하지만 parser/stabilizer/repair/FIFO가 남아 있으면 fit을 계속 차단한다. Linux는 quiet 조건만 생략하고 같은 정확성 gate를 적용한다.

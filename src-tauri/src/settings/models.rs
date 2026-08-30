@@ -681,10 +681,6 @@ pub enum PathEllipsisMode {
     End,
 }
 
-fn default_scrollbar_style() -> String {
-    "overlay".to_string()
-}
-
 // ── Terminal settings ──
 
 fn default_burst_window_ms() -> u64 {
@@ -841,9 +837,6 @@ pub struct TerminalSettings {
     /// Automatically copy text to clipboard when selected in terminal.
     #[serde(default = "default_true")]
     pub copy_on_select: bool,
-    /// Terminal scrollbar style: "overlay" (default) or "separate".
-    #[serde(default = "default_scrollbar_style")]
-    pub scrollbar_style: String,
     /// Enable selection-based file/directory path links.
     #[serde(default = "default_true")]
     pub path_link_enabled: bool,
@@ -889,7 +882,6 @@ impl Default for TerminalSettings {
             parser_admission: ParserAdmissionSettings::default(),
             advertise_true_color: true,
             copy_on_select: true,
-            scrollbar_style: default_scrollbar_style(),
             path_link_enabled: true,
             path_link_max_length: default_path_link_max_length(),
             path_link_os_open_enabled: true,

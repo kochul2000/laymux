@@ -399,16 +399,16 @@ async function withTerminalOutputRepairWatchdog<T>(
 /** Byte-size threshold for the large paste warning dialog. */
 const LARGE_PASTE_THRESHOLD = 5120;
 
-/** "separate" 스크롤바 모드에서 xterm overviewRuler가 예약하는 거터 폭(px). */
-const SCROLLBAR_SEPARATE_GUTTER_PX = 14;
+/** xterm v6 기본 스크롤바 슬라이더와 FitAddon이 예약하는 거터 폭(px). */
+const SCROLLBAR_GUTTER_PX = 14;
 
 /**
  * jump-to-bottom 버튼의 우측 오프셋(px). 버튼은 pane 우측 끝 기준 절대위치이고,
- * xterm 스크롤바 슬라이더는 overlay/separate 모드 모두 우측 끝에 동일 폭으로
- * 렌더되므로(슬라이더 폭 ~14px), 모드와 무관하게 슬라이더를 비켜가는 단일 값을 쓴다.
+ * xterm 스크롤바 슬라이더는 우측 끝에 약 14px 폭으로 렌더되므로
+ * 슬라이더를 비켜가는 단일 값을 쓴다.
  * 14px 슬라이더 + 12px 여유 = 26px (issue #361).
  */
-const SCROLL_BTN_RIGHT_PX = SCROLLBAR_SEPARATE_GUTTER_PX + 12;
+const SCROLL_BTN_RIGHT_PX = SCROLLBAR_GUTTER_PX + 12;
 
 const textEncoder = new TextEncoder();
 
@@ -1292,11 +1292,6 @@ export function TerminalView({
         }
       : defaultTheme;
 
-    // Scrollbar overlay mode: set overviewRuler width to 0 so FitAddon
-    // does not reserve space for the scrollbar — it renders on top of content.
-    const sbStyle = settingsState.terminal.scrollbarStyle ?? "overlay";
-    const overviewRulerWidth = sbStyle === "overlay" ? 0 : SCROLLBAR_SEPARATE_GUTTER_PX;
-
     const resolvedFont = settingsState.resolveFont(
       profile,
       paneId ? useOverridesStore.getState().getViewOverride(paneId) : undefined,
@@ -1328,7 +1323,10 @@ export function TerminalView({
       theme,
       customGlyphs: true,
       rescaleOverlappingGlyphs: true,
-      overviewRuler: { width: overviewRulerWidth },
+      // Keep the scrollbar on xterm v6's default 14px gutter while suppressing
+      // the overview-ruler canvas and its separator line. FitAddon and the
+      // viewport intentionally treat zero as their default scrollbar width.
+      overviewRuler: { width: 0 },
       scrollback: 10000,
       scrollSensitivity: normalizeScrollSensitivity(
         settingsState.terminal.scrollSensitivity,
@@ -6497,26 +6495,6 @@ export function TerminalView({
     };
   }, [runTerminalRendererReflow]);
 
-  // Reactively update xterm overviewRuler width when scrollbarStyle changes
-  const scrollbarStyleForEffect = useSettingsStore((s) => s.terminal.scrollbarStyle ?? "overlay");
-  useEffect(() => {
-    const term = terminalRef.current;
-    if (!term?.options) return;
-    try {
-      const newWidth = scrollbarStyleForEffect === "overlay" ? 0 : SCROLLBAR_SEPARATE_GUTTER_PX;
-      term.options.overviewRuler = { width: newWidth };
-      // The overviewRuler option update is harmless while hidden, but
-      // fit() on a 0×0 container would PTY-resize to cols=0. Defer.
-      if (isContainerHiddenRef.current) {
-        reflowDirtyRef.current = true;
-      } else {
-        guardedTerminalFitRef.current?.({});
-      }
-    } catch {
-      /* xterm mock may not support options setter */
-    }
-  }, [scrollbarStyleForEffect]);
-
   // Wheel sensitivity is a live xterm option: a settings change applies to the
   // running terminal without a restart, and does not touch layout.
   const scrollSensitivityForEffect = useSettingsStore((s) =>
@@ -6550,11 +6528,6 @@ export function TerminalView({
   const pb = padding?.bottom ?? 8;
   const pl = padding?.left ?? 8;
 
-  // Scrollbar style: overlay (default) renders on top of terminal content,
-  // separate reserves space for the scrollbar.
-  const scrollbarStyle = useSettingsStore((s) => s.terminal.scrollbarStyle ?? "overlay");
-  const scrollbarClass = scrollbarStyle === "overlay" ? "scrollbar-overlay" : "scrollbar-separate";
-
   // Issue #361: the jump-to-bottom button is opt-out via settings (default on).
   const showScrollToBottomButtonSetting = useSettingsStore(
     (s) => s.terminal.showScrollToBottomButton ?? true,
@@ -6586,9 +6559,8 @@ export function TerminalView({
   );
 
   // Issue #361: the jump-to-bottom button must clear the scrollbar slider so
-  // they do not overlap. The slider renders at the same right-edge width in both
-  // overlay and separate modes, and the button is positioned relative to the
-  // pane edge, so the offset is mode-independent (see SCROLL_BTN_RIGHT_PX).
+  // they do not overlap. The button is positioned relative to the pane edge, so
+  // it clears the fixed right-edge slider width (see SCROLL_BTN_RIGHT_PX).
   const scrollBtnRight = SCROLL_BTN_RIGHT_PX;
 
   const wrapperStyle: CSSProperties & {
@@ -6619,7 +6591,7 @@ export function TerminalView({
       <div
         ref={wrapperRef}
         data-testid={`terminal-view-${instanceId}`}
-        className={`relative min-h-0 min-w-0 flex-1 overflow-hidden ${scrollbarClass} ${nativeCursorHidden ? "terminal-native-cursor-hidden" : ""} ${inputMode === "composer" ? "terminal-composer-active" : ""}`}
+        className={`relative min-h-0 min-w-0 flex-1 overflow-hidden ${nativeCursorHidden ? "terminal-native-cursor-hidden" : ""} ${inputMode === "composer" ? "terminal-composer-active" : ""}`}
         style={wrapperStyle}
         onFocusCapture={(event) => {
           if (

@@ -1915,18 +1915,6 @@ function TerminalSection() {
           onChange={(v) => update({ copyOnSelect: v })}
         />
 
-        <SettingRow label={t("terminal.scrollbarStyle")} desc={t("terminal.scrollbarStyleDesc")}>
-          <FocusSelect
-            data-testid="scrollbar-style-select"
-            className={inputCls}
-            value={terminal.scrollbarStyle}
-            onChange={(e) => update({ scrollbarStyle: e.target.value as "overlay" | "separate" })}
-          >
-            <option value="overlay">{t("terminal.scrollbarOverlay")}</option>
-            <option value="separate">{t("terminal.scrollbarSeparate")}</option>
-          </FocusSelect>
-        </SettingRow>
-
         <SettingRow
           label={t("terminal.scrollSensitivity")}
           desc={t("terminal.scrollSensitivityDesc")}

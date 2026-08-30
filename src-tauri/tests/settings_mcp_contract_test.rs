@@ -136,7 +136,7 @@ fn semantic_enum_and_range_errors_are_rejected() {
         &Settings::default(),
         &json!({
             "language": "xx",
-            "terminal": { "scrollbarStyle": "floating", "composerHistoryScope": "everything" },
+            "terminal": { "composerHistoryScope": "everything" },
             "profileDefaults": { "opacity": 9, "font": { "size": 100 } }
         }),
     );
@@ -144,7 +144,6 @@ fn semantic_enum_and_range_errors_are_rejected() {
     assert!(!prepared.valid);
     for path in [
         "/language",
-        "/terminal/scrollbarStyle",
         // ADR-0055: an unknown sharing scope must be rejected, not silently
         // widened to a shared bucket.
         "/terminal/composerHistoryScope",
@@ -172,6 +171,22 @@ fn the_old_sleep_prevention_mode_is_no_longer_a_setting() {
         .errors
         .iter()
         .any(|issue| issue.path == "/power/sleepPrevention"));
+}
+
+#[test]
+fn the_old_scrollbar_style_is_no_longer_a_setting() {
+    // ADR-0217 fixes the terminal scrollbar geometry. An agent still sending
+    // the removed mode selector must receive an unknown-path error.
+    let prepared = prepare_settings_update(
+        &Settings::default(),
+        &json!({ "terminal": { "scrollbarStyle": "separate" } }),
+    );
+
+    assert!(!prepared.valid);
+    assert!(prepared
+        .errors
+        .iter()
+        .any(|issue| issue.path == "/terminal/scrollbarStyle"));
 }
 
 #[test]
