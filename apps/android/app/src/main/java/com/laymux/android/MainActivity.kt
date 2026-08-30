@@ -220,6 +220,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private val remoteResourceCache = RemoteResourceCache()
     private val remoteBackGuard = RemoteBackGuard()
     private var remoteBackEvaluationGeneration: Long? = null
+    private var remoteBackWarningToast: Toast? = null
     private var remoteLoadProgress = RemoteLoadProgress()
     private lateinit var remoteLoadingOverlay: LinearLayout
     private lateinit var remoteLoadingStatus: TextView
@@ -492,6 +493,12 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     private fun dismissRemoteLayerOrGuardDisconnect() {
+        remoteBackGuard.onNativeLoadingOverlayBackPressed(
+            visible = remoteLoadingOverlay.visibility == View.VISIBLE,
+        )?.let { action ->
+            handleRemoteBackAction(action)
+            return
+        }
         if (!::webView.isInitialized || remoteBackEvaluationGeneration != null) return
         val targetWebView = webView
         val documentGeneration = secureWebViewGeneration
@@ -505,21 +512,40 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             ) {
                 return@evaluateJavascript
             }
-            when (
+            handleRemoteBackAction(
                 remoteBackGuard.onBackPressed(
                     SystemClock.elapsedRealtime(),
                     remoteLayerDismissed = result == "true",
-                )
-            ) {
-                RemoteBackGuard.Action.DISMISS -> Unit
-                RemoteBackGuard.Action.WARN -> Toast.makeText(
+                ),
+            )
+        }
+    }
+
+    private fun handleRemoteBackAction(action: RemoteBackGuard.Action) {
+        when (action) {
+            RemoteBackGuard.Action.CANCEL_CONNECTION -> {
+                clearRemoteBackWarning()
+                cancelRemoteConnection()
+            }
+            RemoteBackGuard.Action.DISMISS -> clearRemoteBackWarning()
+            RemoteBackGuard.Action.WARN -> {
+                clearRemoteBackWarning()
+                remoteBackWarningToast = Toast.makeText(
                     this@MainActivity,
                     "한 번 더 누르면 연결을 끊고 대시보드로 이동합니다.",
                     Toast.LENGTH_SHORT,
-                ).show()
-                RemoteBackGuard.Action.LEAVE -> disconnectRemote()
+                ).also { it.show() }
+            }
+            RemoteBackGuard.Action.LEAVE -> {
+                clearRemoteBackWarning()
+                disconnectRemote()
             }
         }
+    }
+
+    private fun clearRemoteBackWarning() {
+        remoteBackWarningToast?.cancel()
+        remoteBackWarningToast = null
     }
 
     /**
@@ -1025,6 +1051,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             // next visit — re-entering within the window would treat a single
             // back press as the confirmed second one.
             remoteBackGuard.reset()
+            clearRemoteBackWarning()
         }
         cloudWebView.visibility = if (layers.cloudVisible) View.VISIBLE else View.GONE
         webView.visibility = if (layers.secureVisible) View.VISIBLE else View.GONE
@@ -3232,6 +3259,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     override fun onDestroy() {
         revokeRemoteDocument()
+        clearRemoteBackWarning()
         cancelPendingFileChooser()
         if (::pairingSheet.isInitialized) pairingSheet.dismiss()
         if (::connectionSettingsDialog.isInitialized) connectionSettingsDialog.dismiss()

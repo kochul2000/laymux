@@ -43,4 +43,18 @@ class RemoteBackGuardTest {
         )
         assertEquals(RemoteBackGuard.Action.WARN, guard.onBackPressed(10_600))
     }
+
+    @Test
+    fun theNativeLoadingOverlayConsumesBackBeforeTheRemoteDocument() {
+        val guard = RemoteBackGuard(windowMillis = 2_000)
+
+        assertEquals(RemoteBackGuard.Action.WARN, guard.onBackPressed(10_000))
+        assertEquals(
+            RemoteBackGuard.Action.CANCEL_CONNECTION,
+            guard.onNativeLoadingOverlayBackPressed(visible = true),
+        )
+        // Cancelling a visible layer also disarms an earlier disconnect warning.
+        assertEquals(RemoteBackGuard.Action.WARN, guard.onBackPressed(10_500))
+        assertEquals(null, guard.onNativeLoadingOverlayBackPressed(visible = false))
+    }
 }

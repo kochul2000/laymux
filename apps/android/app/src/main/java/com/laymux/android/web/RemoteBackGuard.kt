@@ -8,7 +8,7 @@ package com.laymux.android.web
 internal class RemoteBackGuard(
     private val windowMillis: Long = DEFAULT_WINDOW_MILLIS,
 ) {
-    enum class Action { DISMISS, WARN, LEAVE }
+    enum class Action { CANCEL_CONNECTION, DISMISS, WARN, LEAVE }
 
     private var warnedAtMillis: Long? = null
 
@@ -28,6 +28,12 @@ internal class RemoteBackGuard(
             warnedAtMillis = nowMillis
             Action.WARN
         }
+    }
+
+    fun onNativeLoadingOverlayBackPressed(visible: Boolean): Action? {
+        if (!visible) return null
+        warnedAtMillis = null
+        return Action.CANCEL_CONNECTION
     }
 
     /** Leaving the Remote surface by any other path discards the pending warning. */
