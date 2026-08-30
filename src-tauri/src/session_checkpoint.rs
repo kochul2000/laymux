@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -31,6 +31,7 @@ pub struct SessionCheckpointRuntime {
     pending: Mutex<HashMap<u64, tokio::sync::oneshot::Sender<CheckpointResponse>>>,
     finalizing: AtomicBool,
     active_mutations: AtomicUsize,
+    detached_mutations: Mutex<HashSet<String>>,
 }
 
 /// Admission token held until an app-approved mutation has fully settled.
@@ -45,6 +46,7 @@ impl Default for SessionCheckpointRuntime {
             pending: Mutex::new(HashMap::new()),
             finalizing: AtomicBool::new(false),
             active_mutations: AtomicUsize::new(0),
+            detached_mutations: Mutex::new(HashSet::new()),
         }
     }
 }
@@ -83,6 +85,40 @@ impl SessionCheckpointRuntime {
             return Err("application update finalization is in progress".into());
         }
         Ok(SessionMutationPermit { runtime: self })
+    }
+
+    /// Admit a frontend action whose work can outlive the backend HTTP waiter.
+    /// It remains active until `automation_response` explicitly completes the
+    /// same request id, including responses that arrive after HTTP timeout.
+    pub fn begin_detached_mutation(&self, request_id: &str) -> Result<(), String> {
+        self.ensure_mutations_allowed()?;
+        self.active_mutations.fetch_add(1, Ordering::AcqRel);
+        if self.finalizing.load(Ordering::Acquire) {
+            self.active_mutations.fetch_sub(1, Ordering::AcqRel);
+            return Err("application update finalization is in progress".into());
+        }
+        let mut detached = match self.detached_mutations.lock_or_err() {
+            Ok(detached) => detached,
+            Err(error) => {
+                self.active_mutations.fetch_sub(1, Ordering::AcqRel);
+                return Err(error.to_string());
+            }
+        };
+        if !detached.insert(request_id.to_owned()) {
+            self.active_mutations.fetch_sub(1, Ordering::AcqRel);
+            return Err(format!(
+                "session checkpoint mutation {request_id} is already active"
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn finish_detached_mutation(&self, request_id: &str) -> Result<bool, String> {
+        let removed = self.detached_mutations.lock_or_err()?.remove(request_id);
+        if removed {
+            self.active_mutations.fetch_sub(1, Ordering::AcqRel);
+        }
+        Ok(removed)
     }
 
     pub async fn begin_finalization_and_drain(&self, state: &AppState) -> Result<(), String> {
@@ -257,6 +293,31 @@ mod tests {
             .lock_or_err()
             .unwrap()
             .clear_active_operations_for_test();
+
+        assert!(drain.await.unwrap().is_ok());
+    }
+
+    #[tokio::test]
+    async fn finalization_waits_for_a_frontend_action_past_http_timeout() {
+        let state = std::sync::Arc::new(AppState::new());
+        state
+            .session_checkpoint
+            .begin_detached_mutation("action-1")
+            .unwrap();
+        let task_state = state.clone();
+        let drain = tokio::spawn(async move {
+            task_state
+                .session_checkpoint
+                .begin_finalization_and_drain(&task_state)
+                .await
+        });
+
+        tokio::task::yield_now().await;
+        assert!(!drain.is_finished());
+        assert!(state
+            .session_checkpoint
+            .finish_detached_mutation("action-1")
+            .unwrap());
 
         assert!(drain.await.unwrap().is_ok());
     }

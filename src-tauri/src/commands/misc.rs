@@ -569,6 +569,10 @@ fn dispatch_automation_response(
     state: &AppState,
 ) -> Result<(), AppError> {
     let request_id = response.request_id;
+    state
+        .session_checkpoint
+        .finish_detached_mutation(&request_id)
+        .map_err(AppError::Other)?;
     let value = if response.success {
         response.data.unwrap_or(serde_json::Value::Null)
     } else {
@@ -1004,6 +1008,10 @@ mod tests {
     #[test]
     fn dispatch_automation_response_counts_matched_only_after_delivery() {
         let state = AppState::new();
+        state
+            .session_checkpoint
+            .begin_detached_mutation("matched")
+            .unwrap();
         let (tx, rx) = tokio::sync::oneshot::channel();
         state
             .automation_channels
@@ -1017,6 +1025,10 @@ mod tests {
         let snapshot = state.frontend_health.snapshot().unwrap();
         assert_eq!(snapshot["bridge"]["responsesMatched"], 1);
         assert_eq!(snapshot["bridge"]["responsesOrphaned"], 0);
+        assert!(!state
+            .session_checkpoint
+            .finish_detached_mutation("matched")
+            .unwrap());
     }
 
     #[test]

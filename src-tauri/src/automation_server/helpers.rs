@@ -42,26 +42,35 @@ pub async fn bridge_request(
     method: &str,
     params: serde_json::Value,
 ) -> Result<serde_json::Value, (StatusCode, Json<serde_json::Value>)> {
-    let _checkpoint_permit = (category == "action")
-        .then(|| state.app_state.session_checkpoint.begin_mutation())
-        .transpose()
-        .map_err(|error| (StatusCode::CONFLICT, Json(err_json(&error))))?;
     let request_id = uuid::Uuid::new_v4().to_string();
+    let tracks_mutation = category == "action";
+    if tracks_mutation {
+        state
+            .app_state
+            .session_checkpoint
+            .begin_detached_mutation(&request_id)
+            .map_err(|error| (StatusCode::CONFLICT, Json(err_json(&error))))?;
+    }
 
     let (tx, rx) = tokio::sync::oneshot::channel();
 
     // Store the channel
     {
-        let mut channels = state
-            .app_state
-            .automation_channels
-            .lock_or_err()
-            .map_err(|_| {
-                (
+        let mut channels = match state.app_state.automation_channels.lock_or_err() {
+            Ok(channels) => channels,
+            Err(_) => {
+                if tracks_mutation {
+                    let _ = state
+                        .app_state
+                        .session_checkpoint
+                        .finish_detached_mutation(&request_id);
+                }
+                return Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(err_json("Lock error")),
-                )
-            })?;
+                ));
+            }
+        };
         channels.insert(request_id.clone(), tx);
     }
 
@@ -86,19 +95,24 @@ pub async fn bridge_request(
         deadline_ms: emitted_at_ms.saturating_add(FRONTEND_RESPONSE_TIMEOUT.as_millis() as u64),
     };
 
-    state
-        .app_handle
-        .emit(EVENT_AUTOMATION_REQUEST, &request)
-        .map_err(|e| {
-            // Clean up channel on emit failure
-            if let Ok(mut channels) = state.app_state.automation_channels.lock_or_err() {
-                channels.remove(&request_id);
-            }
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(err_json(&format!("Event emit error: {e}"))),
-            )
-        })?;
+    if let Err(error) = state.app_handle.emit(EVENT_AUTOMATION_REQUEST, &request) {
+        // The action was never delivered, so both wait registrations can be
+        // retired immediately. Delivered actions stay admitted until their
+        // frontend response even when this HTTP waiter times out.
+        if let Ok(mut channels) = state.app_state.automation_channels.lock_or_err() {
+            channels.remove(&request_id);
+        }
+        if tracks_mutation {
+            let _ = state
+                .app_state
+                .session_checkpoint
+                .finish_detached_mutation(&request_id);
+        }
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(err_json(&format!("Event emit error: {error}"))),
+        ));
+    }
     state.app_state.frontend_health.note_request_emitted();
 
     // Wait only through the absolute deadline captured before emit. Starting a
