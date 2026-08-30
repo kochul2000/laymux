@@ -5,8 +5,9 @@ const unlisten = vi.fn();
 let nativeListener:
   | ((request: {
       requestId: number;
-      reason: "watchdog" | "update";
+      reason: "watchdog" | "update" | "eviction";
       requireConclusive: boolean;
+      terminalIds?: string[];
     }) => void)
   | undefined;
 
@@ -35,6 +36,8 @@ import {
   persistSession,
 } from "@/lib/persist-session";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useUiStore } from "@/stores/ui-store";
+import { useSettingsStore } from "@/stores/settings-store";
 import { useSessionCheckpointLifecycle } from "./useSessionCheckpointLifecycle";
 
 describe("useSessionCheckpointLifecycle", () => {
@@ -42,6 +45,8 @@ describe("useSessionCheckpointLifecycle", () => {
     nativeListener = undefined;
     vi.clearAllMocks();
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useUiStore.setState(useUiStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
   });
 
   afterEach(() => {
@@ -58,6 +63,68 @@ describe("useSessionCheckpointLifecycle", () => {
     expect(flushSessionCheckpoint).toHaveBeenCalledWith({
       reason: "update",
       requireConclusive: true,
+      terminalIds: undefined,
+    });
+  });
+
+  it("rejects an eviction checkpoint when its target became visible before ACK", async () => {
+    useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
+    renderHook(() => useSessionCheckpointLifecycle(true));
+    await vi.waitFor(() => expect(onSessionCheckpointRequested).toHaveBeenCalledTimes(1));
+
+    nativeListener?.({
+      requestId: 10,
+      reason: "eviction",
+      requireConclusive: true,
+      terminalIds: ["terminal-visible-pane"],
+    });
+
+    await vi.waitFor(() =>
+      expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(
+        10,
+        undefined,
+        "hidden terminal eviction target is no longer eligible",
+      ),
+    );
+  });
+
+  it("acks a targeted eviction while the pane remains hidden", async () => {
+    useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-hidden",
+          name: "Hidden",
+          panes: [
+            {
+              id: "p-hidden",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: null,
+    });
+    useUiStore.getState().setWorkspaceHidden("ws-hidden", true);
+    renderHook(() => useSessionCheckpointLifecycle(true));
+    await vi.waitFor(() => expect(onSessionCheckpointRequested).toHaveBeenCalledTimes(1));
+
+    nativeListener?.({
+      requestId: 11,
+      reason: "eviction",
+      requireConclusive: true,
+      terminalIds: ["terminal-p-hidden"],
+    });
+
+    await vi.waitFor(() => expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(11, 17));
+    expect(flushSessionCheckpoint).toHaveBeenCalledWith({
+      reason: "eviction",
+      requireConclusive: true,
+      terminalIds: ["terminal-p-hidden"],
     });
   });
 

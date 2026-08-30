@@ -1,7 +1,9 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, it, expect, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
 import { App } from "./App";
-import { loadSettingsValidated } from "@/lib/tauri-api";
+import { acknowledgeSettingsRecovery, loadSettingsValidated } from "@/lib/tauri-api";
+import { setBlockPersist } from "@/lib/persist-session";
 import { useLocalMobileModeStore } from "@/stores/local-mobile-mode-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useUiStore } from "@/stores/ui-store";
@@ -217,5 +219,26 @@ describe("App", () => {
     expect(useUiStore.getState().remoteAccessModalOpen).toBe(false);
     await screen.findByTestId("workspace-area", {}, { timeout: 3000 });
     expect(useUiStore.getState().remoteAccessModalOpen).toBe(false);
+  });
+
+  it("applies the backend's latest settings snapshot before recovery writes resume", async () => {
+    vi.mocked(loadSettingsValidated).mockResolvedValueOnce({
+      status: "recovered",
+      settings: loadedSettings(),
+      dropped: [],
+      warnings: [],
+      settingsPath: "C:\\config\\settings.json",
+    });
+    vi.mocked(acknowledgeSettingsRecovery).mockResolvedValueOnce({
+      ...loadedSettings(),
+      defaultProfile: "Command Prompt",
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByTestId("settings-recovery-dismiss"));
+
+    expect(useSettingsStore.getState().defaultProfile).toBe("Command Prompt");
+    expect(setBlockPersist).toHaveBeenLastCalledWith(false);
   });
 });

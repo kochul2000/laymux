@@ -355,6 +355,22 @@ export async function closeTerminalSession(id: string): Promise<void> {
   });
 }
 
+export interface HiddenTerminalEvictionResult {
+  closedTerminalIds: string[];
+  failedTerminalIds: string[];
+}
+
+/**
+ * Let the backend own the full mutation-drain -> critical checkpoint -> close
+ * transaction for hidden PTYs. The returned IDs are the only panes safe to
+ * unmount; failures remain live and are retried by the timer.
+ */
+export async function checkpointAndCloseHiddenTerminals(
+  terminalIds: readonly string[],
+): Promise<HiddenTerminalEvictionResult> {
+  return invoke("checkpoint_and_close_hidden_terminals", { terminalIds });
+}
+
 export async function getSyncGroupTerminals(groupName: string): Promise<string[]> {
   return invoke("get_sync_group_terminals", { groupName });
 }
@@ -561,8 +577,9 @@ export async function getTerminalSessionAttributions(
 
 export interface SessionCheckpointRequest {
   requestId: number;
-  reason: "watchdog" | "update";
+  reason: "watchdog" | "update" | "eviction";
   requireConclusive: boolean;
+  terminalIds?: string[];
 }
 
 export function onSessionCheckpointRequested(

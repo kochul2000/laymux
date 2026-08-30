@@ -143,9 +143,9 @@ pub(super) fn resolve_wsl_agent_processes(
         let deadline = Instant::now() + WSL_AGENT_PROBE_TIMEOUT;
         let targets = wsl_terminal_targets(state, deadline)?;
         let mut result = HashMap::new();
-        let mut lookup_failed = false;
+        let mut lookup_failed = targets.lookup_failed;
         let mut by_distro: HashMap<String, Vec<String>> = HashMap::new();
-        for (terminal_id, distro) in targets {
+        for (terminal_id, distro) in targets.targets {
             match distro {
                 Some(distro) => by_distro.entry(distro).or_default().push(terminal_id),
                 None => {

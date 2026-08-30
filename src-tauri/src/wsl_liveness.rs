@@ -254,9 +254,12 @@ pub fn refresh(state: &AppState) {
             return;
         }
     };
-    if targets.is_empty() {
+    if targets.targets.is_empty() {
         publish(WslLivenessSnapshot::default());
         return;
+    }
+    if targets.lookup_failed {
+        tracing::warn!("one or more WSL liveness targets could not resolve a distribution");
     }
 
     // A verdict is only meaningful for the PTY generation it observed, so a pane
@@ -270,7 +273,7 @@ pub fn refresh(state: &AppState) {
     };
 
     let mut by_distro: HashMap<String, Vec<String>> = HashMap::new();
-    for (terminal_id, distro) in targets {
+    for (terminal_id, distro) in targets.targets {
         // A pane whose distribution cannot be resolved gets no verdict; the
         // title/buffer heuristics keep owning it.
         let Some(distro) = distro else { continue };

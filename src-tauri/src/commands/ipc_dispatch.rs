@@ -466,6 +466,7 @@ fn write_to_group_terminals(
     _source_id: &str,
     command: &str,
 ) -> Result<(), String> {
+    let _checkpoint_permit = state.session_checkpoint.begin_mutation()?;
     let targets = {
         let terminals = state.terminals.lock_or_err()?;
         let ptys = state.pty_handles.lock_or_err()?;
@@ -527,6 +528,7 @@ fn write_cd_to_group_terminals(
     path: &str,
     claude_ids: &std::collections::HashSet<String>,
 ) -> Result<Vec<String>, String> {
+    let _checkpoint_permit = state.session_checkpoint.begin_mutation()?;
     // Extract WSL distro name for UNC path conversion (before locking terminals)
     let wsl_distro = path_utils::find_wsl_distro(state, source_id);
 
@@ -900,7 +902,54 @@ fn cleanup_stale_propagations(state: &AppState) {
 mod tests {
     use super::*;
     use crate::osc;
+    use crate::pty::PtyHandle;
     use crate::terminal::{TerminalConfig, TerminalSession};
+
+    #[test]
+    fn finalization_fence_rejects_lx_group_command_writes() {
+        let state = AppState::new();
+        state.pty_handles.lock().unwrap().insert(
+            "t1".into(),
+            PtyHandle::from_test_writer(Box::new(Vec::<u8>::new())),
+        );
+        state
+            .session_checkpoint
+            .begin_finalization_for_test()
+            .unwrap();
+
+        let result = write_to_group_terminals(&state, &["t1".into()], "", "echo blocked\n");
+
+        assert!(result.is_err());
+        state.session_checkpoint.cancel_finalization();
+    }
+
+    #[test]
+    fn finalization_fence_rejects_sync_cwd_writes() {
+        let state = AppState::new();
+        state.terminals.lock().unwrap().insert(
+            "t1".into(),
+            TerminalSession::new("t1".into(), TerminalConfig::default()),
+        );
+        state.pty_handles.lock().unwrap().insert(
+            "t1".into(),
+            PtyHandle::from_test_writer(Box::new(Vec::<u8>::new())),
+        );
+        state
+            .session_checkpoint
+            .begin_finalization_for_test()
+            .unwrap();
+
+        let result = write_cd_to_group_terminals(
+            &state,
+            &["t1".into()],
+            "source",
+            "C:\\work",
+            &std::collections::HashSet::new(),
+        );
+
+        assert!(result.is_err());
+        state.session_checkpoint.cancel_finalization();
+    }
 
     #[test]
     fn resolve_targets_from_group() {

@@ -1315,6 +1315,7 @@ pub fn write_terminal_protocol_reply_inner(
     generation: u64,
     data: &[u8],
 ) -> Result<(), String> {
+    let _checkpoint_permit = state.session_checkpoint.begin_mutation()?;
     // Resolve the exact generation-bound writer once. A late xterm callback
     // from a retired surface must neither write into nor consume one-shot state
     // from a replacement session that reused the same terminal id.
@@ -1394,6 +1395,7 @@ pub fn write_terminal_bootstrap_protocol_reply_inner(
     generation: u64,
     data: &[u8],
 ) -> Result<bool, String> {
+    let _checkpoint_permit = state.session_checkpoint.begin_mutation()?;
     let handle = state
         .pty_handles
         .lock_or_err()?
@@ -1641,6 +1643,18 @@ pub fn close_terminal_session(
     app: AppHandle,
 ) -> Result<(), String> {
     let _checkpoint_permit = state.session_checkpoint.begin_mutation()?;
+    close_terminal_session_inner(&id, &state, &app)
+}
+
+/// Close one terminal after the caller has established an equivalent or
+/// stronger lifecycle gate. Hidden eviction uses this while owning the global
+/// destructive-operation fence, so reacquiring a normal mutation permit would
+/// reject the transaction that owns the fence.
+pub(crate) fn close_terminal_session_inner(
+    id: &str,
+    state: &AppState,
+    app: &AppHandle,
+) -> Result<(), String> {
     // Hold the terminal catalog from generation selection through all
     // id-keyed cleanup. Create performs its duplicate check and generation
     // reservation under the same lock, so close cannot consume state from a
@@ -1651,23 +1665,23 @@ pub fn close_terminal_session(
     let output_retirement = terminal_output::begin_terminal_output_retirement_for_close(
         &state.terminal_protocol_states,
         &state.output_buffers,
-        &id,
+        id,
     )?;
 
-    let Some(session) = terminals.remove(&id) else {
+    let Some(session) = terminals.remove(id) else {
         drop(terminals);
         if let Some(retirement) = output_retirement {
             retirement.finish();
         }
         return Err(format!("Session '{id}' not found"));
     };
-    let handle = take_pty_handle_for_close(&state, &id);
+    let handle = take_pty_handle_for_close(state, id);
 
     // Remove from sync group
     if !session.config.sync_group.is_empty() {
         if let Ok(mut groups) = state.sync_groups.lock_or_err() {
             if let Some(group) = groups.get_mut(&session.config.sync_group) {
-                group.remove_terminal(&id);
+                group.remove_terminal(id);
                 if group.terminal_ids.is_empty() {
                     groups.remove(&session.config.sync_group);
                 }
@@ -1677,48 +1691,48 @@ pub fn close_terminal_session(
 
     // Clean up propagation flag
     if let Ok(mut propagated) = state.propagated_terminals.lock_or_err() {
-        propagated.remove(&id);
+        propagated.remove(id);
     }
 
     // Clean up Claude terminal tracking
     if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
-        known.remove(&id);
+        known.remove(id);
     }
 
     // Clean up Codex terminal tracking
     if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
-        known.remove(&id);
+        known.remove(id);
     }
 
     // Clean up Grok terminal tracking
     if let Ok(mut known) = state.known_grok_terminals.lock_or_err() {
-        known.remove(&id);
+        known.remove(id);
     }
 
     // Drop the PTY callback's detection flags. The callback closure is gone with
     // the PTY, so keeping the entry would only pin dead state and grow the table
     // over a long session.
     if let Ok(mut callback_states) = state.pty_callback_states.lock_or_err() {
-        callback_states.remove(&id);
+        callback_states.remove(id);
     }
 
     // Clean up the per-terminal write/exec lock (#427). The table is now
     // process-global on AppState, so without this it would grow unbounded as
     // terminals open and close over a long session.
     if let Ok(mut locks) = state.exec_locks.lock_or_err() {
-        locks.remove(&id);
+        locks.remove(id);
     }
 
     // Clean up interactive-app grace window (#237) so a new terminal that
     // happens to reuse this ID does not inherit stale detection.
-    activity::clear_interactive_app_grace_window(&state, &id);
+    activity::clear_interactive_app_grace_window(state, id);
     // Mirror cleanup for the recently-exited marker so a fresh terminal
     // reusing this ID does not start under a stale Claude/Codex exit
     // suppression.
-    activity::clear_interactive_app_exit_marker(&state, &id);
+    activity::clear_interactive_app_exit_marker(state, id);
     // Same reason for the guest liveness verdict, which is bound to the PTY
     // generation that produced it (ADR-0134).
-    crate::wsl_liveness::forget(&id);
+    crate::wsl_liveness::forget(id);
 
     // Clean up notifications for this terminal
     if let Ok(mut notifs) = state.notifications.lock_or_err() {
@@ -2567,6 +2581,24 @@ mod tests {
             written.lock().unwrap().as_slice(),
             b"\x1b]10;rgb:ffff/ffff/ffff\x1b\\"
         );
+    }
+
+    #[test]
+    fn finalization_fence_rejects_terminal_protocol_replies() {
+        let state = AppState::new();
+        state.pty_handles.lock().unwrap().insert(
+            "t1".into(),
+            pty::PtyHandle::from_test_writer_for_generation(Box::new(Vec::<u8>::new()), 4),
+        );
+        state
+            .session_checkpoint
+            .begin_finalization_for_test()
+            .unwrap();
+
+        let result = write_terminal_protocol_reply_inner(&state, "t1", 4, b"\x1b[?1;2c");
+
+        assert!(result.is_err());
+        state.session_checkpoint.cancel_finalization();
     }
 
     #[test]

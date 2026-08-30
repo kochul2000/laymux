@@ -2,8 +2,8 @@ import { useEffect, useRef } from "react";
 import { useUiStore } from "@/stores/ui-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
-import { flushSessionCheckpoint } from "@/lib/persist-session";
-import { toTerminalId } from "@/lib/pane-ids";
+import { checkpointAndCloseHiddenTerminals } from "@/lib/tauri-api";
+import { toPaneId, toTerminalId } from "@/lib/pane-ids";
 import {
   advanceHiddenTimers,
   computeHiddenPaneIds,
@@ -17,9 +17,10 @@ const TICK_INTERVAL_MS = 5000;
  * Auto-closes terminals that stay hidden past `workspaceSelector.hiddenAutoCloseSeconds`
  * (issue #269). The hook tracks how long each hidden pane has been hidden and,
  * once the timeout elapses, records the pane in `uiStore.evictedPaneIds`.
- * `WorkspaceArea` then stops rendering that pane, unmounting its `TerminalView`,
- * whose cleanup tears down the PTY. Un-hiding a pane drops it from the eviction
- * set, re-mounting it with a fresh PTY.
+ * A backend transaction first drains mutations, commits a critical checkpoint,
+ * and closes the PTY. `WorkspaceArea` then stops rendering only the pane IDs the
+ * backend confirmed closed. Un-hiding a pane drops it from the eviction set,
+ * re-mounting it with a fresh PTY.
  *
  * No-op (and eagerly clears any pending evictions) when the timeout is 0/disabled.
  */
@@ -33,6 +34,7 @@ export function useHiddenTerminalAutoClose() {
     const pendingEvictions = pendingEvictionsRef.current;
     let cancelled = false;
     const evaluate = () => {
+      if (cancelled) return;
       const timeoutSec = useSettingsStore.getState().workspaceSelector.hiddenAutoCloseSeconds;
       const ui = useUiStore.getState();
 
@@ -77,17 +79,30 @@ export function useHiddenTerminalAutoClose() {
       );
       if (candidates.length === 0) return;
       candidates.forEach((paneId) => pendingEvictions.add(paneId));
-      void flushSessionCheckpoint({
-        reason: "eviction",
-        requireConclusive: true,
-        terminalIds: candidates.map(toTerminalId),
-      })
-        .then(() => {
+      void checkpointAndCloseHiddenTerminals(candidates.map(toTerminalId))
+        .then(({ closedTerminalIds, failedTerminalIds }) => {
           if (cancelled) return;
+          if (failedTerminalIds.length > 0) {
+            console.warn(
+              "[hidden-auto-close] Backend kept terminals whose eviction could not complete:",
+              failedTerminalIds,
+            );
+          }
+          const latestUi = useUiStore.getState();
+          const closedPaneIds = new Set(closedTerminalIds.map(toPaneId));
+          if (closedPaneIds.size === 0) return;
+
+          // Backend close already happened. Reflect every closed PTY as evicted
+          // first, even if visibility/timeout changed while the critical
+          // checkpoint was pending; otherwise a still-mounted TerminalView
+          // would point at a dead backend session. A zero-delay re-evaluation
+          // remounts panes that are no longer eligible on the next render turn.
+          const next = new Set(latestUi.evictedPaneIds);
+          closedPaneIds.forEach((paneId) => next.add(paneId));
+          latestUi.setEvictedPaneIds(next);
+
           const latestTimeoutSec =
             useSettingsStore.getState().workspaceSelector.hiddenAutoCloseSeconds;
-          if (!latestTimeoutSec || latestTimeoutSec <= 0) return;
-          const latestUi = useUiStore.getState();
           const latestWs = useWorkspaceStore.getState();
           const latestPanes: HideCandidatePane[] = latestWs.workspaces.flatMap((workspace) =>
             workspace.panes.map((pane) => ({ paneId: pane.id, workspaceId: workspace.id })),
@@ -98,19 +113,18 @@ export function useHiddenTerminalAutoClose() {
             hiddenWorkspaceIds: latestUi.hiddenWorkspaceIds,
             activeWorkspaceId: latestWs.activeWorkspaceId,
           });
-          const next = new Set(latestUi.evictedPaneIds);
           const now = Date.now();
-          candidates
-            .filter((paneId) => {
-              const hiddenSince = hiddenSinceRef.current.get(paneId);
-              return (
-                stillHidden.has(paneId) &&
-                hiddenSince !== undefined &&
-                now - hiddenSince >= latestTimeoutSec * 1000
-              );
-            })
-            .forEach((paneId) => next.add(paneId));
-          latestUi.setEvictedPaneIds(next);
+          const needsRemount = candidates.some((paneId) => {
+            if (!closedPaneIds.has(paneId)) return false;
+            const hiddenSince = hiddenSinceRef.current.get(paneId);
+            return !(
+              latestTimeoutSec > 0 &&
+              stillHidden.has(paneId) &&
+              hiddenSince !== undefined &&
+              now - hiddenSince >= latestTimeoutSec * 1000
+            );
+          });
+          if (needsRemount) setTimeout(evaluate, 0);
         })
         .catch((error) => {
           console.warn("[hidden-auto-close] Session checkpoint failed; eviction deferred:", error);

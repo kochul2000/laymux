@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 
 vi.mock("@/lib/tauri-api", () => ({
   resetSettings: vi.fn().mockResolvedValue(undefined),
-  acknowledgeSettingsRecovery: vi.fn().mockResolvedValue(undefined),
+  acknowledgeSettingsRecovery: vi.fn(),
   getSettingsPath: vi.fn().mockResolvedValue("C:\\fallback\\settings.json"),
 }));
 
@@ -21,6 +21,7 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
+import { acknowledgeSettingsRecovery } from "@/lib/tauri-api";
 import { SettingsRecoveryModal } from "./SettingsRecoveryModal";
 import type { SettingsLoadResult } from "@/lib/tauri-api";
 
@@ -50,6 +51,7 @@ const RECOVERED: SettingsLoadResult = {
 describe("SettingsRecoveryModal — recovered status (issue #701, ADR-0119)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(acknowledgeSettingsRecovery).mockResolvedValue(RECOVERED.settings);
   });
 
   it("lists every dropped path so the user can see exactly what was lost", async () => {
@@ -104,7 +106,7 @@ describe("SettingsRecoveryModal — recovered status (issue #701, ADR-0119)", ()
     await userEvent.click(screen.getByTestId("settings-recovery-dismiss"));
 
     expect(acknowledgeSettingsRecovery).toHaveBeenCalledTimes(1);
-    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(onDismiss).toHaveBeenCalledWith(RECOVERED.settings);
   });
 
   it("keeps writes blocked when the backend cannot commit the acknowledgement", async () => {

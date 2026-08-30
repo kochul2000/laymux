@@ -23,6 +23,15 @@ struct SessionCheckpointRequest {
     request_id: u64,
     reason: &'static str,
     require_conclusive: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    terminal_ids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HiddenTerminalEvictionResult {
+    closed_terminal_ids: Vec<String>,
+    failed_terminal_ids: Vec<String>,
 }
 
 /// Backend-owned request/ack rendezvous and destructive-finalization gate.
@@ -60,7 +69,7 @@ impl Drop for SessionMutationPermit<'_> {
 impl SessionCheckpointRuntime {
     pub fn ensure_mutations_allowed(&self) -> Result<(), String> {
         if self.finalizing.load(Ordering::Acquire) {
-            Err("application update finalization is in progress".into())
+            Err("destructive session finalization is in progress".into())
         } else {
             Ok(())
         }
@@ -70,7 +79,7 @@ impl SessionCheckpointRuntime {
         self.finalizing
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .map(|_| ())
-            .map_err(|_| "application update finalization is already in progress".into())
+            .map_err(|_| "destructive session finalization is already in progress".into())
     }
 
     #[cfg(test)]
@@ -87,7 +96,7 @@ impl SessionCheckpointRuntime {
         self.active_mutations.fetch_add(1, Ordering::AcqRel);
         if self.finalizing.load(Ordering::Acquire) {
             self.active_mutations.fetch_sub(1, Ordering::AcqRel);
-            return Err("application update finalization is in progress".into());
+            return Err("destructive session finalization is in progress".into());
         }
         Ok(SessionMutationPermit { runtime: self })
     }
@@ -100,7 +109,7 @@ impl SessionCheckpointRuntime {
         self.active_mutations.fetch_add(1, Ordering::AcqRel);
         if self.finalizing.load(Ordering::Acquire) {
             self.active_mutations.fetch_sub(1, Ordering::AcqRel);
-            return Err("application update finalization is in progress".into());
+            return Err("destructive session finalization is in progress".into());
         }
         let mut detached = match self.detached_mutations.lock_or_err() {
             Ok(detached) => detached,
@@ -133,7 +142,8 @@ impl SessionCheckpointRuntime {
                 let local_drained = self.active_mutations.load(Ordering::Acquire) == 0;
                 let terminal_drained =
                     crate::remote_server::human_control_operations_drained(state)?;
-                if local_drained && terminal_drained {
+                let pty_drained = pty_control_operations_drained(state)?;
+                if local_drained && terminal_drained && pty_drained {
                     return Ok::<(), String>(());
                 }
                 tokio::time::sleep(FINALIZATION_DRAIN_POLL).await;
@@ -148,7 +158,7 @@ impl SessionCheckpointRuntime {
             }
             Err(_) => {
                 self.cancel_finalization();
-                Err("application update mutation drain timed out".into())
+                Err("destructive session mutation drain timed out".into())
             }
         }
     }
@@ -165,11 +175,34 @@ impl SessionCheckpointRuntime {
     }
 }
 
+/// A direct PTY caller may have timed out after faulting the input while its
+/// platform worker is still unwinding. Such a caller has already dropped its
+/// lexical mutation permit, so finalization must also inspect every live PTY's
+/// lifecycle completion before declaring the app quiescent.
+fn pty_control_operations_drained(state: &AppState) -> Result<bool, String> {
+    let handles: Vec<_> = state.pty_handles.lock_or_err()?.values().cloned().collect();
+    Ok(handles.iter().all(|handle| {
+        handle
+            .pending_control_completion()
+            .is_none_or(|completion| completion.is_complete())
+    }))
+}
+
 pub async fn request_frontend_checkpoint(
     app: &AppHandle,
     state: &AppState,
     reason: &'static str,
     require_conclusive: bool,
+) -> Result<u64, String> {
+    request_frontend_checkpoint_for_terminals(app, state, reason, require_conclusive, None).await
+}
+
+async fn request_frontend_checkpoint_for_terminals(
+    app: &AppHandle,
+    state: &AppState,
+    reason: &'static str,
+    require_conclusive: bool,
+    terminal_ids: Option<Vec<String>>,
 ) -> Result<u64, String> {
     let request_id = state
         .session_checkpoint
@@ -188,6 +221,7 @@ pub async fn request_frontend_checkpoint(
             request_id,
             reason,
             require_conclusive,
+            terminal_ids,
         },
     ) {
         let _ = state
@@ -229,6 +263,93 @@ pub fn acknowledge_session_checkpoint(
     state.session_checkpoint.complete(request_id, response)
 }
 
+/// Atomically protect hidden-terminal eviction with the same conservative
+/// global mutation fence used by update finalization. The backend owns the
+/// complete drain -> critical checkpoint -> PTY close sequence, so a frontend
+/// unmount cannot open a write race between the checkpoint and destruction.
+#[tauri::command]
+pub async fn checkpoint_and_close_hidden_terminals(
+    terminal_ids: Vec<String>,
+    app: AppHandle,
+    state: State<'_, std::sync::Arc<AppState>>,
+) -> Result<HiddenTerminalEvictionResult, String> {
+    let mut requested = terminal_ids;
+    requested.sort();
+    requested.dedup();
+    if requested.is_empty() {
+        return Ok(HiddenTerminalEvictionResult {
+            closed_terminal_ids: Vec::new(),
+            failed_terminal_ids: Vec::new(),
+        });
+    }
+
+    state
+        .session_checkpoint
+        .begin_finalization_and_drain(&state)
+        .await?;
+
+    let live_targets = match state.pty_handles.lock_or_err() {
+        Ok(handles) => requested
+            .iter()
+            .filter(|terminal_id| handles.contains_key(*terminal_id))
+            .cloned()
+            .collect::<Vec<_>>(),
+        Err(error) => {
+            state.session_checkpoint.cancel_finalization();
+            return Err(error.to_string());
+        }
+    };
+
+    if live_targets.is_empty() {
+        state.session_checkpoint.cancel_finalization();
+        return Ok(HiddenTerminalEvictionResult {
+            closed_terminal_ids: Vec::new(),
+            failed_terminal_ids: requested,
+        });
+    }
+
+    if let Err(error) = request_frontend_checkpoint_for_terminals(
+        &app,
+        &state,
+        "eviction",
+        true,
+        Some(live_targets.clone()),
+    )
+    .await
+    {
+        state.session_checkpoint.cancel_finalization();
+        return Err(error);
+    }
+
+    let mut closed_terminal_ids = Vec::new();
+    let mut failed_terminal_ids: Vec<_> = requested
+        .into_iter()
+        .filter(|terminal_id| !live_targets.contains(terminal_id))
+        .collect();
+    for terminal_id in live_targets {
+        let close_result =
+            crate::commands::close_terminal_session_inner(&terminal_id, &state, &app);
+        let still_present = state
+            .terminals
+            .lock_or_recover_for_discard("checking hidden terminal eviction result")
+            .contains_key(&terminal_id);
+        if close_result.is_ok() || !still_present {
+            if let Err(error) = close_result {
+                tracing::warn!(%terminal_id, %error, "hidden terminal closed with teardown warning");
+            }
+            closed_terminal_ids.push(terminal_id);
+        } else {
+            failed_terminal_ids.push(terminal_id);
+        }
+    }
+    state.session_checkpoint.cancel_finalization();
+
+    Ok(HiddenTerminalEvictionResult {
+        closed_terminal_ids,
+        failed_terminal_ids,
+    })
+}
+
 pub fn start_watchdog(app: AppHandle, state: std::sync::Arc<AppState>) {
     tauri::async_runtime::spawn(async move {
         loop {
@@ -244,6 +365,28 @@ pub fn start_watchdog(app: AppHandle, state: std::sync::Arc<AppState>) {
 mod tests {
     use super::*;
     use crate::lock_ext::MutexExt;
+    use std::io::Write;
+    use std::sync::{Arc, Condvar};
+    use std::time::Instant;
+
+    struct StuckWriter {
+        gate: Arc<(Mutex<bool>, Condvar)>,
+    }
+
+    impl Write for StuckWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            let (released, wake) = &*self.gate;
+            let mut released = released.lock().unwrap();
+            while !*released {
+                released = wake.wait(released).unwrap();
+            }
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn finalization_gate_can_be_cancelled_after_an_install_failure() {
@@ -253,6 +396,26 @@ mod tests {
         assert!(runtime.ensure_mutations_allowed().is_err());
         runtime.cancel_finalization();
         assert!(runtime.ensure_mutations_allowed().is_ok());
+    }
+
+    #[test]
+    fn eviction_checkpoint_request_serializes_its_exact_targets() {
+        let request = SessionCheckpointRequest {
+            request_id: 7,
+            reason: "eviction",
+            require_conclusive: true,
+            terminal_ids: Some(vec!["terminal-p1".into()]),
+        };
+
+        assert_eq!(
+            serde_json::to_value(request).unwrap(),
+            serde_json::json!({
+                "requestId": 7,
+                "reason": "eviction",
+                "requireConclusive": true,
+                "terminalIds": ["terminal-p1"],
+            })
+        );
     }
 
     #[tokio::test]
@@ -324,6 +487,49 @@ mod tests {
             .finish_detached_mutation("action-1")
             .unwrap());
 
+        assert!(drain.await.unwrap().is_ok());
+    }
+
+    #[tokio::test]
+    async fn finalization_waits_for_a_faulted_direct_pty_worker_completion() {
+        let state = std::sync::Arc::new(AppState::new());
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let handle = crate::pty::PtyHandle::from_test_writer(Box::new(StuckWriter {
+            gate: Arc::clone(&gate),
+        }));
+        state
+            .pty_handles
+            .lock_or_err()
+            .unwrap()
+            .insert("terminal-1".into(), handle.clone());
+
+        let writer = std::thread::spawn(move || {
+            handle.write_guarded_until(
+                b"blocked",
+                Instant::now() + Duration::from_millis(20),
+                || true,
+            )
+        });
+        let pending_deadline = Instant::now() + Duration::from_secs(1);
+        while pty_control_operations_drained(&state).unwrap() && Instant::now() < pending_deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!pty_control_operations_drained(&state).unwrap());
+
+        let task_state = state.clone();
+        let drain = tokio::spawn(async move {
+            task_state
+                .session_checkpoint
+                .begin_finalization_and_drain(&task_state)
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert!(!drain.is_finished());
+
+        let (released, wake) = &*gate;
+        *released.lock().unwrap() = true;
+        wake.notify_all();
+        assert!(writer.join().unwrap().is_err());
         assert!(drain.await.unwrap().is_ok());
     }
 }

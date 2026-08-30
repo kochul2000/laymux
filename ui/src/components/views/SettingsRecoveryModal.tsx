@@ -4,6 +4,7 @@ import {
   resetSettings,
   acknowledgeSettingsRecovery,
   getSettingsPath,
+  type Settings,
   type SettingsLoadResult,
   type ValidationWarning,
 } from "@/lib/tauri-api";
@@ -11,7 +12,7 @@ import { setBlockPersist } from "@/lib/persist-session";
 
 interface SettingsRecoveryModalProps {
   loadResult: SettingsLoadResult;
-  onDismiss: () => void;
+  onDismiss: (acknowledgedSettings?: Settings) => void;
   onReset: () => void;
 }
 
@@ -69,8 +70,8 @@ export function SettingsRecoveryModal({
     }
     setAcknowledging(true);
     try {
-      await acknowledgeSettingsRecovery();
-      onDismiss();
+      const acknowledgedSettings = await acknowledgeSettingsRecovery();
+      onDismiss(acknowledgedSettings);
     } catch (error) {
       console.error("[SettingsRecoveryModal] Recovery acknowledgement failed:", error);
       setAcknowledging(false);

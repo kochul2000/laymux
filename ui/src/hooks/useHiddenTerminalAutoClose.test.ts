@@ -6,11 +6,11 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import type { Workspace } from "@/stores/types";
 
-vi.mock("@/lib/persist-session", () => ({
-  flushSessionCheckpoint: vi.fn().mockResolvedValue({ checkpointCommitId: 1, coverage: [] }),
+vi.mock("@/lib/tauri-api", () => ({
+  checkpointAndCloseHiddenTerminals: vi.fn(),
 }));
 
-import { flushSessionCheckpoint } from "@/lib/persist-session";
+import { checkpointAndCloseHiddenTerminals } from "@/lib/tauri-api";
 
 const wsA: Workspace = {
   id: "wsA",
@@ -32,11 +32,10 @@ describe("useHiddenTerminalAutoClose", () => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
     // Active workspace is wsA; wsB is in the background and eligible for eviction.
     useWorkspaceStore.setState({ workspaces: [wsA, wsB], activeWorkspaceId: "wsA" });
-    vi.mocked(flushSessionCheckpoint).mockResolvedValue({
-      checkpointCommitId: 1,
-      frontendMutationRevision: 0,
-      coverage: [],
-    });
+    vi.mocked(checkpointAndCloseHiddenTerminals).mockImplementation(async (terminalIds) => ({
+      closedTerminalIds: [...terminalIds],
+      failedTerminalIds: [],
+    }));
   });
 
   afterEach(() => {
@@ -154,25 +153,43 @@ describe("useHiddenTerminalAutoClose", () => {
 
   it("does not evict after a pending barrier when the feature was disabled", async () => {
     let finishCheckpoint: (() => void) | undefined;
-    vi.mocked(flushSessionCheckpoint).mockImplementationOnce(
+    vi.mocked(checkpointAndCloseHiddenTerminals).mockImplementationOnce(
       () =>
         new Promise((resolve) => {
           finishCheckpoint = () =>
-            resolve({ checkpointCommitId: 2, frontendMutationRevision: 0, coverage: [] });
+            resolve({ closedTerminalIds: ["terminal-p2"], failedTerminalIds: [] });
         }),
     );
     useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
     useUiStore.getState().toggleWorkspaceHidden("wsB");
     renderHook(() => useHiddenTerminalAutoClose());
     act(() => vi.advanceTimersByTime(10_000));
-    expect(flushSessionCheckpoint).toHaveBeenCalledTimes(1);
+    expect(checkpointAndCloseHiddenTerminals).toHaveBeenCalledWith(["terminal-p2"]);
 
     act(() => useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 0 }));
     await act(async () => {
       finishCheckpoint?.();
       await Promise.resolve();
+      vi.advanceTimersByTime(0);
     });
 
     expect(useUiStore.getState().evictedPaneIds.size).toBe(0);
+  });
+
+  it("evicts only PTYs that the backend closed after its checkpoint transaction", async () => {
+    vi.mocked(checkpointAndCloseHiddenTerminals).mockResolvedValueOnce({
+      closedTerminalIds: [],
+      failedTerminalIds: ["terminal-p2"],
+    });
+    useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
+    useUiStore.getState().toggleWorkspaceHidden("wsB");
+    renderHook(() => useHiddenTerminalAutoClose());
+
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+      await Promise.resolve();
+    });
+
+    expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(false);
   });
 });
