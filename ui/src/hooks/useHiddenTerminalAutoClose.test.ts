@@ -192,4 +192,27 @@ describe("useHiddenTerminalAutoClose", () => {
 
     expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(false);
   });
+
+  it("records a backend close even if the hook unmounted while the transaction was pending", async () => {
+    let finishEviction: (() => void) | undefined;
+    vi.mocked(checkpointAndCloseHiddenTerminals).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishEviction = () =>
+            resolve({ closedTerminalIds: ["terminal-p2"], failedTerminalIds: [] });
+        }),
+    );
+    useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
+    useUiStore.getState().toggleWorkspaceHidden("wsB");
+    const { unmount } = renderHook(() => useHiddenTerminalAutoClose());
+    act(() => vi.advanceTimersByTime(10_000));
+    unmount();
+
+    await act(async () => {
+      finishEviction?.();
+      await Promise.resolve();
+    });
+
+    expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(true);
+  });
 });

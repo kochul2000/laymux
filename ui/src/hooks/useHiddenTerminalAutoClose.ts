@@ -81,7 +81,6 @@ export function useHiddenTerminalAutoClose() {
       candidates.forEach((paneId) => pendingEvictions.add(paneId));
       void checkpointAndCloseHiddenTerminals(candidates.map(toTerminalId))
         .then(({ closedTerminalIds, failedTerminalIds }) => {
-          if (cancelled) return;
           if (failedTerminalIds.length > 0) {
             console.warn(
               "[hidden-auto-close] Backend kept terminals whose eviction could not complete:",
