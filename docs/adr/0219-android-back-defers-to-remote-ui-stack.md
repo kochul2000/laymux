@@ -1,6 +1,6 @@
 # 0219. Android system back은 Remote UI stack을 순서대로 닫는다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-30
 - Source: 사용자 요구("뒤로가기 버튼이 리모트 뷰어나 리모트 메뉴를 닫게", 추가로 먼저 닫을 레이아웃 식별) · [ADR-0149](0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md) · [ADR-0184](0184-remote-file-viewer-in-page-overlay.md) · [architecture/api-contracts.md §13](../architecture/api-contracts.md)
 - Extends: [ADR-0149](0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md)의 Android thin-wrapper 입력 경계
