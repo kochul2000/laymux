@@ -106,13 +106,33 @@ type PathLinkRequest = {
 
 type CapturedTerminalWindow = typeof window & {
   Terminal: { prototype: { reset: () => void } };
-  __remoteTerm?: { cols: number; rows: number };
+  __remoteTerm?: {
+    cols: number;
+    rows: number;
+    focus: () => void;
+    hasSelection: () => boolean;
+    select: (column: number, row: number, length: number) => void;
+    clearSelection: () => void;
+    registerDecoration: (options: unknown) => unknown;
+    modes: { synchronizedOutputMode: boolean };
+    buffer: {
+      active: { getLine: (line: number) => { translateToString: () => string } | undefined };
+    };
+  };
+  __pathLinkDecorationFailureObserved?: boolean;
+};
+
+type RemoteHarnessOptions = {
+  delayedScreenRequest?: number;
+  delayedScreenResponseMs?: number;
 };
 
 type RemoteHarness = {
   requests: PathLinkRequest[];
   renderRequests: Array<Record<string, unknown>>;
+  writes: string[];
   answeredModes: Set<string>;
+  setResolvedPath: (path: string) => void;
   /** Push a delta frame so the page takes its real write path. */
   sendDelta: (text: string) => void;
 };
@@ -122,7 +142,7 @@ type RemoteHarness = {
  * the token in exactly the lines the page sent, so a wrong caret, a wrong line
  * or a stale screen produces no match instead of a lucky one.
  */
-function matchesFor(body: PathLinkRequest): Array<Record<string, unknown>> {
+function matchesFor(body: PathLinkRequest, hostPath = HOST_PATH): Array<Record<string, unknown>> {
   const matches: Array<Record<string, unknown>> = [];
   body.lines.forEach((line, lineIndex) => {
     const startIndex = line.indexOf(TOKEN);
@@ -134,7 +154,7 @@ function matchesFor(body: PathLinkRequest): Array<Record<string, unknown>> {
     }
     matches.push({
       token: TOKEN,
-      path: HOST_PATH,
+      path: hostPath,
       lineIndex,
       startIndex,
       endIndex: startIndex + TOKEN.length,
@@ -147,17 +167,19 @@ async function connectRemote(
   context: BrowserContext,
   page: Page,
   answerModes: string[],
+  options: RemoteHarnessOptions = {},
 ): Promise<RemoteHarness> {
   let liveSocket: { send: (data: string | Buffer) => void } | null = null;
-  let deltaSeq = Buffer.byteLength(
-    `${OUTPUT_LINE}
-`,
-    "utf8",
-  );
+  let deltaSeq = Buffer.byteLength(`${OUTPUT_LINE}\r\n`, "utf8");
+  let resolvedPath = HOST_PATH;
   const harness: RemoteHarness = {
     requests: [],
     renderRequests: [],
+    writes: [],
     answeredModes: new Set(),
+    setResolvedPath: (path) => {
+      resolvedPath = path;
+    },
     sendDelta: (text: string) => {
       const payload = Buffer.from(text, "utf8");
       const header = JSON.stringify({
@@ -204,20 +226,38 @@ async function connectRemote(
     if (url.pathname === "/remote/v1/terminals/terminal-1/resize") {
       return route.fulfill({ json: { resized: true } });
     }
+    if (url.pathname === "/remote/v1/terminals/terminal-1/write") {
+      const body = JSON.parse(request.postData() || "{}") as { data?: unknown };
+      if (typeof body.data === "string") {
+        harness.writes.push(body.data);
+        harness.sendDelta(body.data);
+      }
+      return route.fulfill({ json: { written: true } });
+    }
     if (url.pathname === "/remote/v1/file-viewer/status") {
       return route.fulfill({ json: { open: false, path: null } });
     }
     if (url.pathname === "/remote/v1/file-viewer/path-link") {
       const body = JSON.parse(request.postData() || "{}") as PathLinkRequest;
       harness.requests.push(body);
+      const screenRequestNumber = harness.requests.filter(
+        (entry) => entry.mode === "screen",
+      ).length;
+      if (body.mode === "screen" && screenRequestNumber === options.delayedScreenRequest) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, options.delayedScreenResponseMs ?? 2_000),
+        );
+      }
       if (!answerModes.includes(String(body.mode))) {
-        return route.fulfill({ json: { valid: false } });
+        return route.fulfill({ json: { valid: false } }).catch(() => undefined);
       }
       harness.answeredModes.add(String(body.mode));
-      const matches = matchesFor(body);
-      return route.fulfill({
-        json: matches.length > 0 ? { valid: true, matches } : { valid: false },
-      });
+      const matches = matchesFor(body, resolvedPath);
+      return route
+        .fulfill({
+          json: matches.length > 0 ? { valid: true, matches } : { valid: false },
+        })
+        .catch(() => undefined);
     }
     if (url.pathname === "/remote/v1/file-viewer/render") {
       harness.renderRequests.push(
@@ -372,7 +412,7 @@ test("a click on whitespace validates nothing", async ({ context, page }) => {
   await expect(page.locator(".remote-path-link-decoration")).toHaveCount(0);
 });
 
-test("redraws the screen underlines after a write that leaves the text unchanged", async ({
+test("keeps screen underlines while revalidating a write that leaves the text unchanged", async ({
   context,
   page,
 }) => {
@@ -383,16 +423,298 @@ test("redraws the screen underlines after a write that leaves the text unchanged
   await expect(decoration).toHaveCount(1, { timeout: 10_000 });
   const firstScans = harness.requests.filter((entry) => entry.mode === "screen").length;
 
-  // A cursor-home sequence: real output arrives (so the idle scheduler retires
-  // the underlines and rearms) while the visible text stays identical. The scan
-  // must still redraw — skipping on an equal signature with nothing drawn would
-  // lose the display until the screen happened to change.
-  harness.sendDelta("\u001b[H");
-  // Wait for the rescan itself, not for a count that is still the old scan's.
+  // A carriage return takes the real output path while leaving every
+  // underlined cell unchanged. Revalidation must keep the existing decoration
+  // while still refreshing the server-owned CWD/stat context once output stops.
+  harness.sendDelta("\r");
+  await expect(decoration).toHaveCount(1);
+  await expect
+    .poll(() => harness.requests.filter((entry) => entry.mode === "screen").length)
+    .toBe(firstScans + 1);
+  await expect(decoration).toHaveCount(1);
+});
+
+test("re-resolves an unchanged relative path after its terminal CWD changes", async ({
+  context,
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const harness = await connectRemote(context, page, ["screen"]);
+
+  const decoration = page.locator(".remote-path-link-decoration");
+  await expect(decoration).toHaveCount(1, { timeout: 10_000 });
+  const oldDecoration = await decoration.elementHandle();
+  const firstScans = harness.requests.filter((entry) => entry.mode === "screen").length;
+  const movedHostPath = "D:\\other-worktree\\src\\main.rs";
+
+  // OSC 7 can change the host-owned CWD without changing any visible cell.
+  // The next output write must not let an equal text signature keep the old
+  // absolute target indefinitely.
+  harness.setResolvedPath(movedHostPath);
+  harness.sendDelta("\r");
+  await expect(decoration).toHaveCount(1);
+  await expect
+    .poll(() => harness.requests.filter((entry) => entry.mode === "screen").length)
+    .toBe(firstScans + 1);
+  await expect.poll(() => oldDecoration?.evaluate((node) => document.contains(node))).toBe(false);
+
+  const box = await decoration.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await expect
+    .poll(() => harness.renderRequests)
+    .toEqual([{ source: "path", path: movedHostPath }]);
+});
+
+test("keeps an existing file underline while a direct Hangul commit echoes on another line", async ({
+  context,
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const harness = await connectRemote(context, page, ["screen"]);
+
+  const decoration = page.locator(".remote-path-link-decoration");
+  await expect(decoration).toHaveCount(1, { timeout: 10_000 });
+  const originalDecoration = await decoration.elementHandle();
+  const firstScans = harness.requests.filter((entry) => entry.mode === "screen").length;
+
+  await page.evaluate(() => (window as CapturedTerminalWindow).__remoteTerm?.focus());
+  // `insertText` models the already-committed Hangul payload. Native
+  // compositionstart/update/end remains an OS-IME manual check.
+  await page.keyboard.insertText("한");
+  await expect.poll(() => harness.writes).toEqual(["한"]);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as CapturedTerminalWindow).__remoteTerm?.buffer.active
+            .getLine(1)
+            ?.translateToString() || "",
+      ),
+    )
+    .toContain("한");
+
+  // The existing file cells did not change, so their exact decoration remains
+  // mounted while the changed screen is validated in the background.
+  await expect(decoration).toHaveCount(1);
   await expect
     .poll(() => harness.requests.filter((entry) => entry.mode === "screen").length, {
       timeout: 10_000,
     })
     .toBe(firstScans + 1);
+  await expect(decoration).toHaveCount(1);
+  expect(
+    await originalDecoration?.evaluate(
+      (node) => node === document.querySelector(".remote-path-link-decoration"),
+    ),
+  ).toBe(true);
+});
+
+test("keeps path underlines through a split synchronized-output repaint", async ({
+  context,
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const harness = await connectRemote(context, page, ["screen"]);
+
+  const decoration = page.locator(".remote-path-link-decoration");
   await expect(decoration).toHaveCount(1, { timeout: 10_000 });
+  const originalDecoration = await decoration.elementHandle();
+  const firstScans = harness.requests.filter((entry) => entry.mode === "screen").length;
+
+  // Codex can split a DEC 2026 repaint across output deltas. The first delta
+  // clears the path cells in xterm's in-progress buffer while the rendered
+  // frame is intentionally frozen. Revalidating that intermediate buffer would
+  // dispose the still-visible underline until the idle scan runs.
+  harness.sendDelta("\u001b[?2026h\u001b[H\u001b[2K");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as CapturedTerminalWindow).__remoteTerm?.modes.synchronizedOutputMode ?? false,
+      ),
+    )
+    .toBe(true);
+  await expect(decoration).toHaveCount(1);
+
+  harness.sendDelta(`\u001b[H${OUTPUT_LINE}\u001b[?2026l`);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as CapturedTerminalWindow).__remoteTerm?.modes.synchronizedOutputMode ?? true,
+      ),
+    )
+    .toBe(false);
+  await page.waitForTimeout(1_000);
+
+  await expect(decoration).toHaveCount(1);
+  expect(harness.requests.filter((entry) => entry.mode === "screen")).toHaveLength(firstScans + 1);
+  expect(
+    await originalDecoration?.evaluate(
+      (node) => node === document.querySelector(".remote-path-link-decoration"),
+    ),
+  ).toBe(true);
+});
+
+test("revalidates deferred path underlines after the synchronized-output safety timeout", async ({
+  context,
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const harness = await connectRemote(context, page, ["screen"]);
+
+  const decoration = page.locator(".remote-path-link-decoration");
+  await expect(decoration).toHaveCount(1, { timeout: 10_000 });
+
+  // A malformed producer may never send DEC 2026 reset. xterm eventually
+  // releases the frozen frame itself; the idle gate must then compare the now
+  // visible final buffer and retire the stale underline without another write.
+  harness.sendDelta("\u001b[?2026h\u001b[H\u001b[2K");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as CapturedTerminalWindow).__remoteTerm?.modes.synchronizedOutputMode ?? false,
+      ),
+    )
+    .toBe(true);
+  await expect(decoration).toHaveCount(1);
+
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () =>
+            (window as CapturedTerminalWindow).__remoteTerm?.modes.synchronizedOutputMode ?? true,
+        ),
+      { timeout: 5_000 },
+    )
+    .toBe(false);
+  await expect(decoration).toHaveCount(0, { timeout: 10_000 });
+});
+
+test("retries an aborted changed-screen scan before treating its signature as verified", async ({
+  context,
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const harness = await connectRemote(context, page, ["screen"], {
+    delayedScreenRequest: 2,
+    delayedScreenResponseMs: 2_000,
+  });
+
+  const decoration = page.locator(".remote-path-link-decoration");
+  await expect(decoration).toHaveCount(1, { timeout: 10_000 });
+  const originalDecoration = await decoration.elementHandle();
+
+  harness.sendDelta(TOKEN);
+  await expect
+    .poll(() => harness.requests.filter((entry) => entry.mode === "screen").length)
+    .toBe(2);
+
+  // Abort request 2 without changing its screen text. Its signature was never
+  // applied, so the next idle pass must issue request 3 instead of mistaking
+  // the surviving old underline for a complete result.
+  harness.sendDelta("\r");
+  await expect
+    .poll(() => harness.requests.filter((entry) => entry.mode === "screen").length, {
+      timeout: 10_000,
+    })
+    .toBe(3);
+  await expect(decoration).toHaveCount(2);
+  expect(await originalDecoration?.evaluate((node) => document.contains(node))).toBe(true);
+});
+
+test("fails closed when only part of a screen decoration set can be created", async ({
+  context,
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const harness = await connectRemote(context, page, ["screen"]);
+
+  const decoration = page.locator(".remote-path-link-decoration");
+  await expect(decoration).toHaveCount(1, { timeout: 10_000 });
+  const firstScans = harness.requests.filter((entry) => entry.mode === "screen").length;
+
+  await page.evaluate(() => {
+    const target = window as CapturedTerminalWindow;
+    const term = target.__remoteTerm;
+    if (!term) throw new Error("xterm instance was not captured");
+    const registerDecoration = term.registerDecoration.bind(term);
+    let failNext = true;
+    term.registerDecoration = (options) => {
+      if (failNext) {
+        failNext = false;
+        target.__pathLinkDecorationFailureObserved = true;
+        return undefined;
+      }
+      return registerDecoration(options);
+    };
+  });
+
+  // The first link is reusable; creating only the newly appended second link
+  // fails. A partial clickable scope must not survive without a verified
+  // signature.
+  harness.sendDelta(TOKEN);
+  await expect
+    .poll(() => harness.requests.filter((entry) => entry.mode === "screen").length)
+    .toBe(firstScans + 1);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as CapturedTerminalWindow).__pathLinkDecorationFailureObserved === true,
+      ),
+    )
+    .toBe(true);
+  await expect(decoration).toHaveCount(0);
+
+  // A later write retries because the incomplete result never owned the
+  // signature, and both links can then be installed.
+  harness.sendDelta("\r");
+  await expect
+    .poll(() => harness.requests.filter((entry) => entry.mode === "screen").length)
+    .toBe(firstScans + 2);
+  await expect(decoration).toHaveCount(2);
+});
+
+test("rescans dirty screen links after a live selection is cleared", async ({ context, page }) => {
+  test.setTimeout(60_000);
+  const harness = await connectRemote(context, page, ["screen"]);
+
+  const decoration = page.locator(".remote-path-link-decoration");
+  await expect(decoration).toHaveCount(1, { timeout: 10_000 });
+  const firstScans = harness.requests.filter((entry) => entry.mode === "screen").length;
+  const movedHostPath = "D:\\selected-worktree\\src\\main.rs";
+
+  await page.evaluate(() => {
+    const term = (window as CapturedTerminalWindow).__remoteTerm;
+    term?.select(0, 0, 3);
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as CapturedTerminalWindow).__remoteTerm?.hasSelection() ?? false),
+    )
+    .toBe(true);
+
+  harness.setResolvedPath(movedHostPath);
+  harness.sendDelta("\r");
+  // Selection owns discovery, but a dirty old-CWD target must fail closed
+  // instead of remaining clickable indefinitely.
+  await expect(decoration).toHaveCount(0, { timeout: 5_000 });
+  expect(harness.requests.filter((entry) => entry.mode === "screen")).toHaveLength(firstScans);
+
+  await page.evaluate(() => {
+    (window as CapturedTerminalWindow).__remoteTerm?.clearSelection();
+  });
+  await expect
+    .poll(() => harness.requests.filter((entry) => entry.mode === "screen").length)
+    .toBe(firstScans + 1);
+  await expect(decoration).toHaveCount(1);
+
+  const box = await decoration.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await expect
+    .poll(() => harness.renderRequests)
+    .toEqual([{ source: "path", path: movedHostPath }]);
 });
