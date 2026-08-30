@@ -498,6 +498,7 @@
     "codex": {
       "title": "Codex",
       "groupSessionRestore": "세션 복원",
+      "groupTranscript": "트랜스크립트",
       "groupStatusMessage": "상태 메시지",
       "command": "실행 명령",
       "commandDesc": "Codex CLI 를 실행할 명령 (플래그 포함)",
@@ -506,6 +507,8 @@
       "restoreSessionDesc": "앱 재시작 시 Codex 세션을 자동 복원",
       "sessionMaxAge": "세션 유효 기간",
       "sessionMaxAgeDesc": "이 시간보다 오래된 rollout은 무시 (0 = 무제한)",
+      "transcriptScroll": "트랜스크립트 스크롤",
+      "transcriptScrollDesc": "normal buffer 트랜스크립트에서 마우스 휠과 Remote 터치 스크롤을 방향키 탐색으로 사용",
       "statusMessageMode": "상태 메시지 모드",
       "statusMessageModeDesc": "워크스페이스 목록에서 Codex 상태 텍스트 표시 방식",
       "modeTitle": "Title만 (기본)",

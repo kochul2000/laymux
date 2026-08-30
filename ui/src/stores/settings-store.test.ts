@@ -561,6 +561,7 @@ describe("settings-store", () => {
     const { codex } = useSettingsStore.getState();
     expect(codex.restoreSession).toBe(true);
     expect(codex.sessionMaxAgeHours).toBe(24);
+    expect(codex.transcriptScrollEnabled).toBe(true);
     expect(codex.statusMessageMode).toBe("bullet-title");
     expect(codex.statusMessageDelimiter).toBe(" · ");
   });
@@ -572,9 +573,14 @@ describe("settings-store", () => {
 
   it("loadFromSettings loads codex settings", () => {
     useSettingsStore.getState().loadFromSettings({
-      codex: { statusMessageMode: "bullet", statusMessageDelimiter: " | " },
+      codex: {
+        transcriptScrollEnabled: false,
+        statusMessageMode: "bullet",
+        statusMessageDelimiter: " | ",
+      },
     });
     const { codex } = useSettingsStore.getState();
+    expect(codex.transcriptScrollEnabled).toBe(false);
     expect(codex.statusMessageMode).toBe("bullet");
     expect(codex.statusMessageDelimiter).toBe(" | ");
   });
@@ -586,6 +592,7 @@ describe("settings-store", () => {
     const { codex } = useSettingsStore.getState();
     expect(codex.restoreSession).toBe(true);
     expect(codex.sessionMaxAgeHours).toBe(24);
+    expect(codex.transcriptScrollEnabled).toBe(true);
     expect(codex.statusMessageMode).toBe("bullet-title");
     expect(codex.statusMessageDelimiter).toBe(" · ");
   });

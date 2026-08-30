@@ -207,6 +207,7 @@ describe("wheel sensitivity in application-owned terminal modes", () => {
     terminal.attachCustomWheelEventHandler(
       createCodexTranscriptWheelHandler({
         terminal,
+        isEnabled: () => true,
         isCodexActive: () => true,
         isLocalControlAllowed: () => true,
       }),
@@ -242,6 +243,7 @@ describe("wheel sensitivity in application-owned terminal modes", () => {
     terminal.attachCustomWheelEventHandler(
       createCodexTranscriptWheelHandler({
         terminal,
+        isEnabled: () => true,
         isCodexActive: () => true,
         isLocalControlAllowed: () => true,
       }),

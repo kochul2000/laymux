@@ -11,6 +11,10 @@ const ASSETS_DIR = path.resolve(__dirname, "../../../src-tauri/src/remote_server
 const PAGE_PATH = path.resolve(ASSETS_DIR, "../page.html");
 const APP_SOURCE_PATH = path.resolve(ASSETS_DIR, "remote-app.js");
 const ICON_SOURCE_PATH = path.resolve(__dirname, "./remote-icons.js");
+const CODEX_TRANSCRIPT_WHEEL_SOURCE_PATH = path.resolve(
+  __dirname,
+  "../lib/codex-transcript-wheel.ts",
+);
 const PACKAGE_LOCK_PATH = path.resolve(__dirname, "../../package-lock.json");
 
 const sourceHash = (file: string): string =>
@@ -44,6 +48,7 @@ describe("remote page bundle", () => {
       `// Source-SHA256: remote-app.js=${sourceHash("remote-app.js")}` +
         ` remote-app.css=${sourceHash("remote-app.css")}` +
         ` remote-icons.js=${fileHash(ICON_SOURCE_PATH)}` +
+        ` codex-transcript-wheel.ts=${fileHash(CODEX_TRANSCRIPT_WHEEL_SOURCE_PATH)}` +
         ` lucide-package=${packageInputHash(lock, "lucide")}`,
     );
   });

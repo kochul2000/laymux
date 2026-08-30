@@ -660,6 +660,7 @@ mod tests {
           "codex": {
             "restoreSession": false,
             "sessionMaxAgeHours": 72,
+            "transcriptScrollEnabled": false,
             "statusMessageMode": "title-bullet",
             "statusMessageDelimiter": " | "
           }
@@ -671,12 +672,14 @@ mod tests {
         );
         assert!(!settings.codex.restore_session);
         assert_eq!(settings.codex.session_max_age_hours, 72);
+        assert!(!settings.codex.transcript_scroll_enabled);
         assert_eq!(settings.codex.status_message_delimiter, " | ");
 
         let serialized = serde_json::to_string(&settings).unwrap();
         assert!(serialized.contains("\"codex\""));
         assert!(serialized.contains("\"restoreSession\":false"));
         assert!(serialized.contains("\"sessionMaxAgeHours\":72"));
+        assert!(serialized.contains("\"transcriptScrollEnabled\":false"));
         assert!(serialized.contains("\"statusMessageMode\":\"title-bullet\""));
     }
 
@@ -685,6 +688,7 @@ mod tests {
         let settings: Settings = serde_json::from_str(r#"{ "codex": {} }"#).unwrap();
         assert!(settings.codex.restore_session);
         assert_eq!(settings.codex.session_max_age_hours, 24);
+        assert!(settings.codex.transcript_scroll_enabled);
     }
 
     #[test]
@@ -700,6 +704,10 @@ mod tests {
         assert_eq!(
             contract::metadata_for_path("/codex/sessionMaxAgeHours").apply_mode,
             contract::ApplyMode::NextUse
+        );
+        assert_eq!(
+            contract::metadata_for_path("/codex/transcriptScrollEnabled").apply_mode,
+            contract::ApplyMode::Live
         );
     }
 

@@ -15,6 +15,12 @@ struct NavigationSummaryContext<'maps, 'backend, 'frontend> {
     frontend_by_id: &'maps HashMap<&'frontend str, &'frontend Value>,
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct RemoteNavigationHostState<'a> {
+    pub terminals: &'a [RemoteTerminalInfo],
+    pub codex_transcript_scroll_enabled: bool,
+}
+
 pub(super) fn build_remote_navigation_payload(
     workspaces_data: &Value,
     active_workspace_data: &Value,
@@ -22,7 +28,7 @@ pub(super) fn build_remote_navigation_payload(
     terminal_instances_data: &Value,
     notifications_data: &Value,
     ui_state_data: &Value,
-    terminals: &[RemoteTerminalInfo],
+    host_state: RemoteNavigationHostState<'_>,
 ) -> Value {
     let terminal_instances = terminal_instances_data
         .get("instances")
@@ -33,7 +39,8 @@ pub(super) fn build_remote_navigation_payload(
         .iter()
         .filter_map(|terminal| string_field(terminal, "id").map(|id| (id, terminal)))
         .collect();
-    let backend_by_id: HashMap<&str, &RemoteTerminalInfo> = terminals
+    let backend_by_id: HashMap<&str, &RemoteTerminalInfo> = host_state
+        .terminals
         .iter()
         .map(|terminal| (terminal.id.as_str(), terminal))
         .collect();
@@ -136,7 +143,8 @@ pub(super) fn build_remote_navigation_payload(
         })
         .unwrap_or_default();
 
-    let terminals = terminals
+    let terminals = host_state
+        .terminals
         .iter()
         .map(|terminal| {
             terminal_summary_value(terminal, frontend_by_id.get(terminal.id.as_str()).copied())
@@ -151,6 +159,7 @@ pub(super) fn build_remote_navigation_payload(
         "terminals": terminals,
         "notifications": notification_summaries,
         "workspaceSelector": workspace_selector,
+        "codexTranscriptScrollEnabled": host_state.codex_transcript_scroll_enabled,
         "unreadNotificationCount": unread_count(notifications, None, None),
     })
 }
@@ -805,6 +814,13 @@ mod tests {
         }
     }
 
+    fn host_state(terminals: &[RemoteTerminalInfo]) -> RemoteNavigationHostState<'_> {
+        RemoteNavigationHostState {
+            terminals,
+            codex_transcript_scroll_enabled: true,
+        }
+    }
+
     #[test]
     fn remote_terminal_payload_advertises_exact_geometry_as_unavailable() {
         let payload = serde_json::to_value(terminal("t1", "Terminal")).unwrap();
@@ -935,10 +951,14 @@ mod tests {
                 "focusedDock": "left",
                 "focusedDockPaneId": "dp1"
             }),
-            &terminals,
+            RemoteNavigationHostState {
+                terminals: &terminals,
+                codex_transcript_scroll_enabled: false,
+            },
         );
 
         assert_eq!(payload["activeWorkspaceId"], "ws-1");
+        assert_eq!(payload["codexTranscriptScrollEnabled"], false);
         assert_eq!(payload["workspaces"][0]["terminalPaneCount"], 1);
         assert_eq!(payload["workspaces"][0]["liveTerminalCount"], 1);
         assert_eq!(
@@ -1053,7 +1073,7 @@ mod tests {
                     }
                 }
             }),
-            &[],
+            host_state(&[]),
         );
 
         assert_eq!(
@@ -1112,7 +1132,7 @@ mod tests {
             &json!({ "instances": [] }),
             &json!({ "notifications": [] }),
             &json!({ "hiddenWorkspaceIds": [], "hiddenPaneIds": [] }),
-            &[],
+            host_state(&[]),
         );
 
         assert_eq!(
@@ -1180,7 +1200,7 @@ mod tests {
                 ]
             }),
             &json!({ "hiddenWorkspaceIds": [], "hiddenPaneIds": [] }),
-            &[],
+            host_state(&[]),
         );
 
         assert_eq!(
@@ -1281,7 +1301,7 @@ mod tests {
             &json!({ "instances": [] }),
             &notifications,
             &ui_state,
-            &[],
+            host_state(&[]),
         );
 
         let workspace_ids = payload["workspaces"]
@@ -1387,7 +1407,7 @@ mod tests {
             &terminal_instances_data,
             &notifications,
             &json!({ "hiddenWorkspaceIds": [], "hiddenPaneIds": [] }),
-            &[terminal("terminal-b", "Backend B")],
+            host_state(&[terminal("terminal-b", "Backend B")]),
         );
 
         let notification_ids = payload["notifications"]
@@ -1442,7 +1462,7 @@ mod tests {
                 "hiddenPaneIds": [],
                 "workspaceSelector": { "sortOrder": "manual" }
             }),
-            &[],
+            host_state(&[]),
         );
         let manual_ids = manual_payload["workspaces"]
             .as_array()
@@ -1471,7 +1491,7 @@ mod tests {
                 "hiddenPaneIds": [],
                 "workspaceSelector": { "sortOrder": "notification" }
             }),
-            &[],
+            host_state(&[]),
         );
         let notification_ids = notification_payload["workspaces"]
             .as_array()

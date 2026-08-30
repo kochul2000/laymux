@@ -9798,6 +9798,36 @@ describe("TerminalView", () => {
     expect(mockTerminalInput).toHaveBeenCalledTimes(3);
   });
 
+  it("leaves a normal-buffer Codex transcript on xterm scrollback when the convenience is off", async () => {
+    const terminalId = "t-codex-transcript-wheel-disabled";
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      codex: {
+        ...useSettingsStore.getState().codex,
+        transcriptScrollEnabled: false,
+      },
+    });
+    setMockBufferLine("/ T R A N S C R I P T / / / / / /");
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForLocalTerminalControl();
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo(terminalId, {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    const event = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaMode: WheelEvent.DOM_DELTA_LINE,
+      deltaY: 1,
+    });
+    expect(capturedWheelHandler?.(event)).toBe(true);
+    expect(event.defaultPrevented).toBe(false);
+    expect(mockConsumeWheelEvent).not.toHaveBeenCalled();
+    expect(mockTerminalInput).not.toHaveBeenCalled();
+  });
+
   // -- URL link click (issue #29) --
 
   describe("URL link click", () => {

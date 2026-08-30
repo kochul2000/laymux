@@ -9,6 +9,10 @@ import { fileURLToPath } from "url";
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ASSETS_DIR = path.resolve(SCRIPT_DIR, "../../src-tauri/src/remote_server/assets");
 const REMOTE_ICONS_SOURCE = path.resolve(SCRIPT_DIR, "../src/remote/remote-icons.js");
+const CODEX_TRANSCRIPT_WHEEL_SOURCE = path.resolve(
+  SCRIPT_DIR,
+  "../src/lib/codex-transcript-wheel.ts",
+);
 const PACKAGE_LOCK = JSON.parse(readFileSync(path.resolve(SCRIPT_DIR, "../package-lock.json")));
 
 const fileHash = (file) =>
@@ -29,9 +33,9 @@ const packageInputHash = (packageName) => {
 
 const lines = [
   "GENERATED FILE - DO NOT EDIT.",
-  "Sources: src-tauri/src/remote_server/assets/remote-app.{js,css} + ui/src/remote/remote-icons.js + lucide package-lock identity",
+  "Sources: src-tauri/src/remote_server/assets/remote-app.{js,css} + ui/src/remote/remote-icons.js + ui/src/lib/codex-transcript-wheel.ts + lucide package-lock identity",
   "Rebuild: cd ui && npm run build:remote-page",
-  `Source-SHA256: remote-app.js=${assetSourceHash("remote-app.js")} remote-app.css=${assetSourceHash("remote-app.css")} remote-icons.js=${fileHash(REMOTE_ICONS_SOURCE)} lucide-package=${packageInputHash("lucide")}`,
+  `Source-SHA256: remote-app.js=${assetSourceHash("remote-app.js")} remote-app.css=${assetSourceHash("remote-app.css")} remote-icons.js=${fileHash(REMOTE_ICONS_SOURCE)} codex-transcript-wheel.ts=${fileHash(CODEX_TRANSCRIPT_WHEEL_SOURCE)} lucide-package=${packageInputHash("lucide")}`,
   "Drift from the sources is caught by ui/src/remote/remote-page-bundle.test.ts",
 ];
 

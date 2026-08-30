@@ -1743,6 +1743,20 @@ describe("SettingsView", () => {
     });
   });
 
+  it("saves the Codex transcript scroll convenience toggle", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-codex"));
+    const toggle = screen.getByTestId("codex-transcript-scroll-toggle") as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+
+    await user.click(toggle);
+    await user.click(screen.getByTestId("save-settings-btn"));
+
+    expect(useSettingsStore.getState().codex.transcriptScrollEnabled).toBe(false);
+  });
+
   it("changing codex status message mode updates store after Save", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);

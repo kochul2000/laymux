@@ -498,6 +498,7 @@
     "codex": {
       "title": "Codex",
       "groupSessionRestore": "Session Restore",
+      "groupTranscript": "Transcript",
       "groupStatusMessage": "Status Message",
       "command": "Launch Command",
       "commandDesc": "Command used to start the Codex CLI, flags included",
@@ -506,6 +507,8 @@
       "restoreSessionDesc": "Automatically restore Codex sessions on app restart",
       "sessionMaxAge": "Session Max Age",
       "sessionMaxAgeDesc": "Ignore rollouts older than this (0 = unlimited)",
+      "transcriptScroll": "Transcript Scroll",
+      "transcriptScrollDesc": "Use mouse-wheel and Remote touch scrolling as arrow-key navigation in a normal-buffer transcript",
       "statusMessageMode": "Status Message Mode",
       "statusMessageModeDesc": "How Codex status text is shown in the workspace list",
       "modeTitle": "Title only (default)",
