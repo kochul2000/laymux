@@ -39,6 +39,7 @@ class WebSurfaceLayerPolicyTest {
         assertFalse(layers.cloudAccessible)
         assertFalse(layers.cloudBridgeEnabled)
         assertTrue(layers.remoteBridgeEnabled)
+        assertFalse(layers.cloudLoadOverlayVisible)
     }
 
     @Test
@@ -51,5 +52,24 @@ class WebSurfaceLayerPolicyTest {
         assertFalse(layers.cloudAccessible)
         assertFalse(layers.cloudBridgeEnabled)
         assertFalse(layers.remoteBridgeEnabled)
+    }
+
+    @Test
+    fun unfinishedCloudDocumentIsCoveredAndCannotUseInputAccessibilityOrBridge() {
+        listOf(
+            CloudDocumentPresentation.LOADING,
+            CloudDocumentPresentation.UNAVAILABLE,
+        ).forEach { presentation ->
+            val layers = WebSurfaceLayerPolicy.forSurface(
+                VisibleWebSurface.CLOUD,
+                presentation,
+            )
+
+            assertTrue(layers.cloudVisible)
+            assertFalse(layers.cloudInteractive)
+            assertFalse(layers.cloudAccessible)
+            assertFalse(layers.cloudBridgeEnabled)
+            assertTrue(layers.cloudLoadOverlayVisible)
+        }
     }
 }

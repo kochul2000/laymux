@@ -41,6 +41,10 @@ Android 앱은 Cargo/Tauri workspace 구성원이 아니다. Cloud WebView는 �
 landing/dashboard와 HttpOnly account session을 표시하고 Google login·PC 선택·연결 설정 진입만 좁은 native bridge에
 위임한다. Google OAuth page를 embedded WebView에서 열지 않고 Credential Manager가 받은 ID token을
 Cloud가 session-bound single-use nonce와 함께 검증한다. 이 WebView에는 E2E bridge를 설치하지 않는다.
+Cloud main document를 적재하는 동안에는 네이티브 진행 표면이 WebView를 덮고, DNS·TLS·HTTP 같은
+main-frame 실패가 나면 Chromium 기본 오류 문서 대신 네이티브 복구 표면과 `다시 시도` action을 유지한다.
+하위 자원 실패는 이 표면을 열지 않으며, 현재 main document가 성공적으로 끝난 뒤에만 Cloud bridge와
+WebView 입력을 사용할 수 있다.
 연결 실행용 네이티브 Material bottom sheet와 dashboard `…`에서 여는 별도 설정 dialog가
 QR/명시적 clipboard 붙여넣기·Keystore·pairing 상태를 소유하고, 별도 secure
 WebView는 암호화 transport로 검증한 PC Remote 문서만 표시한다. APK에는 terminal·workspace·입출력
