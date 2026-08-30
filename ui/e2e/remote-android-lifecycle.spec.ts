@@ -428,13 +428,21 @@ test("Android back dismisses the top Remote layer before the disconnect guard", 
     page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState);
   await expect.poll(async () => (await state()).outputOpens).toBe(1);
 
-  // Composer suggestions float above the terminal and must disappear before
-  // back can affect navigation or arm the native disconnect confirmation.
+  // Composer suggestions float above the terminal content, but their parent
+  // stacking context stays below the drawer. A widget can open navigation
+  // without blurring the composer, so exercise the real simultaneous state.
   const composer = page.locator("#composerInput");
   await composer.fill("echo remembered");
   await composer.press("Enter");
   await expect(composer).toHaveValue("");
   await composer.fill("echo");
+  await expect(page.locator("#composerAutocompleteList")).toBeVisible();
+
+  await page.locator("#navToggle").evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page.locator(".app")).toHaveClass(/nav-open/);
+  await expect(page.locator("#composerAutocompleteList")).toBeVisible();
+  expect(await dismissTopRemoteLayer(page)).toBe(true);
+  await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
   await expect(page.locator("#composerAutocompleteList")).toBeVisible();
   expect(await dismissTopRemoteLayer(page)).toBe(true);
   await expect(page.locator("#composerAutocompleteList")).toBeHidden();

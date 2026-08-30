@@ -18,7 +18,7 @@ Remote 문서에는 FileViewer와 drawer 외에도 더 높은 OAuth relay modal,
 **Android system back은 먼저 현재 PC 소유 Remote 문서의 단일 `dismissTopLayer()` 경계에 닫기를 위임하고, 문서가 소비하지 않은 경우에만 기존 2회 disconnect guard를 적용한다.**
 
 - Remote 문서는 `window.laymuxRemoteUi.dismissTopLayer(): boolean`만 wrapper에 노출한다. Android는 이 고정 함수를 `evaluateJavascript`로 호출하며 DOM selector, viewer mode, drawer state를 읽지 않는다.
-- 문서는 실제 stacking과 탐색 깊이에 따라 OAuth relay modal → FileViewer overlay → Composer recall/autocomplete popup → drawer 하위 화면 → workspace drawer의 열린 Dock disclosure → drawer 순서로 하나만 닫는다. 한 back이 여러 층을 건너뛰지 않는다.
+- 문서는 실제 stacking과 탐색 깊이에 따라 OAuth relay modal → FileViewer overlay → drawer 하위 화면 → workspace drawer의 열린 Dock disclosure → drawer → Composer recall/autocomplete popup 순서로 하나만 닫는다. Composer popup은 자체 z-index가 높아도 `z-index:9`인 부모 stacking context 안에 있어 drawer scrim(10)·drawer(20)보다 아래다. 한 back이 여러 층을 건너뛰지 않는다.
 - FileViewer의 system back은 explorer 경유 파일이어도 overlay 전체를 닫는다. explorer의 파일→폴더 복귀는 overlay 헤더의 명시적 back action이고, 기존 Escape·backdrop도 overlay 전체를 닫는 ADR-0198 계약과 맞춘다.
 - drawer 하위 화면은 먼저 workspace 기본 화면으로 돌아가고, 그 뒤 back이 Dock을 접거나 drawer를 닫는다. 현재 보이지 않는 drawer 내부 상태가 보이는 상위 레이어보다 먼저 소비하지 않는다.
 - 문서가 `true`를 반환하면 native disconnect guard의 과거 경고를 해제한다. 따라서 경고 뒤 레이어를 열고 back으로 닫은 다음 한 번의 back만으로 연결이 종료되지 않는다.
@@ -29,7 +29,7 @@ Remote 문서에는 FileViewer와 drawer 외에도 더 높은 OAuth relay modal,
 
 - **Android가 `fileViewerOverlay`, drawer class와 하위 view를 직접 조회한다.** 즉시 구현할 수 있지만 Remote UI 상태와 우선순위가 Kotlin에 복제되고 새 레이어마다 APK 배포가 필요해 ADR-0149의 소유권을 위반하므로 기각했다.
 - **각 레이어를 browser History API entry로 모델링하고 WebView `goBack()`을 호출한다.** browser/PWA까지 같은 입력 모델을 얻지만 bfcache·새로고침·deep link·pagehide lease 수명까지 함께 결정해야 한다. Android의 일시 레이어 닫기보다 범위가 크므로 별도 요구 없이 도입하지 않는다.
-- **FileViewer와 drawer만 닫고 나머지는 무시한다.** OAuth modal이나 Composer popup이 열린 채 아래 drawer가 닫히거나 disconnect 경고가 뜨는 stacking 역전이 생겨 기각했다.
+- **FileViewer와 drawer만 닫고 나머지는 무시한다.** OAuth modal이 열린 채 아래 viewer/drawer가 닫히거나, drawer 뒤에 남은 Composer popup에서 곧바로 disconnect 경고가 뜨는 적층 누락이 생겨 기각했다.
 - **drawer 하위 화면에서도 한 번에 drawer 전체를 닫는다.** 입력 수는 적지만 화면 안의 명시적 back action과 탐색 깊이가 system back에서만 달라지므로 하위 화면을 한 단계씩 푼다.
 
 ## Consequences

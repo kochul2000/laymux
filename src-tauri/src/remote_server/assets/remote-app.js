@@ -5710,21 +5710,23 @@ import {
             closeFileViewer();
             return true;
           }
-          if (dismissVisibleComposerSuggestions()) return true;
-          if (navToggleButton.getAttribute("aria-expanded") !== "true") return false;
-
-          // Drawer pages and its disclosure are nested navigation levels. They
-          // unwind before the drawer itself, matching their visible hierarchy.
-          if (drawerView !== "workspace") {
-            returnToWorkspaceView();
+          if (navToggleButton.getAttribute("aria-expanded") === "true") {
+            // The Composer popup's z-index is inside its parent's stacking
+            // context (9), below the drawer scrim (10) and drawer (20). A
+            // widget can open the drawer without blurring that popup, so the
+            // visible navigation hierarchy must unwind first.
+            if (drawerView !== "workspace") {
+              returnToWorkspaceView();
+              return true;
+            }
+            if (dockPanelOpen) {
+              setDockPanelOpen(false);
+              return true;
+            }
+            setNavigationOpen(false);
             return true;
           }
-          if (dockPanelOpen) {
-            setDockPanelOpen(false);
-            return true;
-          }
-          setNavigationOpen(false);
-          return true;
+          return dismissVisibleComposerSuggestions();
         }
 
         window.laymuxRemoteUi = Object.freeze({
