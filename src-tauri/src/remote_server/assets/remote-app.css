@@ -588,6 +588,12 @@
         border-color: transparent;
         background: transparent;
       }
+      /* Chromium can focus the first control when the Remote document becomes
+         the active surface. Keep that boot-time focus from drawing a stray box
+         around the menu icon; the button remains in the tab order. */
+      .menu-button:focus {
+        outline: none;
+      }
       .menu-button:hover,
       .drawer-header-button:hover,
       .desktop-mode-button:hover,

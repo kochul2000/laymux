@@ -53,6 +53,14 @@ describe("remote page bundle", () => {
     expect(js.startsWith("// GENERATED FILE - DO NOT EDIT.")).toBe(true);
   });
 
+  it("does not paint the browser focus outline on the initial navigation menu button", () => {
+    const css = readFileSync(path.join(ASSETS_DIR, "remote-app.css"), "utf8");
+    const bundledCss = readFileSync(path.join(ASSETS_DIR, "remote-app.min.css"), "utf8");
+
+    expect(css).toMatch(/\.menu-button:focus\s*\{[^}]*outline:\s*none;/s);
+    expect(bundledCss).toContain(".menu-button:focus{outline:none}");
+  });
+
   it("routes every generic Remote pictogram through the Lucide icon boundary", () => {
     const page = readFileSync(PAGE_PATH, "utf8");
     const app = readFileSync(APP_SOURCE_PATH, "utf8");
