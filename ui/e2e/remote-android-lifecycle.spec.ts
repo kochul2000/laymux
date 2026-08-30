@@ -91,9 +91,18 @@ type AndroidLifecycleWindow = typeof window & {
     onHttpResponse: (requestId: string, responseJson: string) => void;
     onNativeForeground?: () => boolean;
   };
+  laymuxRemoteUi?: {
+    dismissTopLayer: () => boolean;
+  };
   __androidLifecycleState: AndroidLifecycleState;
   __remoteDocumentSentinel?: object;
 };
+
+function dismissTopRemoteLayer(page: Page): Promise<boolean> {
+  return page.evaluate(
+    () => (window as AndroidLifecycleWindow).laymuxRemoteUi?.dismissTopLayer() ?? false,
+  );
+}
 
 async function installAndroidRemote(page: Page, options: { holdInitialClaim?: boolean } = {}) {
   await page.addInitScript(
@@ -409,6 +418,66 @@ test("the Android wrapper gets the file viewer, rendered in the Remote document"
 
   await page.locator("#fileViewerClose").click();
   await expect(page.locator("#fileViewerOverlay")).toBeHidden();
+});
+
+test("Android back dismisses the top Remote layer before the disconnect guard", async ({
+  page,
+}) => {
+  await installAndroidRemote(page);
+  const state = () =>
+    page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState);
+  await expect.poll(async () => (await state()).outputOpens).toBe(1);
+
+  // Composer suggestions float above the terminal and must disappear before
+  // back can affect navigation or arm the native disconnect confirmation.
+  const composer = page.locator("#composerInput");
+  await composer.fill("echo remembered");
+  await composer.press("Enter");
+  await expect(composer).toHaveValue("");
+  await composer.fill("echo");
+  await expect(page.locator("#composerAutocompleteList")).toBeVisible();
+  expect(await dismissTopRemoteLayer(page)).toBe(true);
+  await expect(page.locator("#composerAutocompleteList")).toBeHidden();
+
+  await page.locator("#navToggle").click();
+  await page.locator("#fileViewerPath").fill("C:\\work\\notes.txt");
+  await page.locator("#openFileViewer").click();
+  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+
+  // The OAuth confirmation is the only Remote modal that can sit above the
+  // viewer. Closing it first also cancels any native loopback listener.
+  await page.locator("#oauthRelayScrim").evaluate((scrim) => {
+    scrim.hidden = false;
+  });
+  expect(await dismissTopRemoteLayer(page)).toBe(true);
+  await expect(page.locator("#oauthRelayScrim")).toBeHidden();
+  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+
+  expect(await dismissTopRemoteLayer(page)).toBe(true);
+  await expect(page.locator("#fileViewerOverlay")).toBeHidden();
+  await expect(page.locator(".app")).toHaveClass(/nav-open/);
+
+  // Drawer subpages form a real nested level: one back returns to the Remote
+  // workspace page, while the next visible nested level (Dock) collapses before
+  // a final back closes the drawer itself.
+  await page.locator("#drawerSettingsButton").click();
+  await expect(page.locator("#drawerSettingsView")).toBeVisible();
+  expect(await dismissTopRemoteLayer(page)).toBe(true);
+  await expect(page.locator("#drawerWorkspaceView")).toBeVisible();
+  await expect(page.locator(".app")).toHaveClass(/nav-open/);
+
+  await page.locator("#dockToggle").evaluate((button: HTMLButtonElement) => {
+    button.disabled = false;
+  });
+  await page.locator("#dockToggle").click();
+  await expect(page.locator("#dockPanel")).toBeVisible();
+  expect(await dismissTopRemoteLayer(page)).toBe(true);
+  await expect(page.locator("#dockPanel")).toBeHidden();
+  await expect(page.locator(".app")).toHaveClass(/nav-open/);
+
+  expect(await dismissTopRemoteLayer(page)).toBe(true);
+  await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
+  expect(await dismissTopRemoteLayer(page)).toBe(false);
 });
 
 test("the Android wrapper saves a download through native, not the browser path", async ({

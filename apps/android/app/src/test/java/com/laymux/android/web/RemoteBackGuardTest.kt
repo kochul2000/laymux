@@ -31,4 +31,16 @@ class RemoteBackGuardTest {
         guard.reset()
         assertEquals(RemoteBackGuard.Action.WARN, guard.onBackPressed(10_500))
     }
+
+    @Test
+    fun aDismissedRemoteLayerConsumesBackAndDisarmsAnEarlierWarning() {
+        val guard = RemoteBackGuard(windowMillis = 2_000)
+
+        assertEquals(RemoteBackGuard.Action.WARN, guard.onBackPressed(10_000))
+        assertEquals(
+            RemoteBackGuard.Action.DISMISS,
+            guard.onBackPressed(10_500, remoteLayerDismissed = true),
+        )
+        assertEquals(RemoteBackGuard.Action.WARN, guard.onBackPressed(10_600))
+    }
 }

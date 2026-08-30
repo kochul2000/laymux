@@ -5696,6 +5696,41 @@ import {
           entryButton?.focus();
         }
 
+        // Android owns the system-back gesture but not the Remote UI stack
+        // (ADR-0149, ADR-0219). Keep the hierarchy in this PC-served document
+        // and expose only a boolean consumed/not-consumed boundary to native.
+        function dismissTopRemoteLayer() {
+          // Both modals have z-index 60; OAuth follows the viewer in DOM order
+          // and is therefore the topmost layer if both are present.
+          if (!oauthRelayScrim.hidden) {
+            closeOauthRelayModal();
+            return true;
+          }
+          if (!fileViewerOverlayElement.hidden) {
+            closeFileViewer();
+            return true;
+          }
+          if (dismissVisibleComposerSuggestions()) return true;
+          if (navToggleButton.getAttribute("aria-expanded") !== "true") return false;
+
+          // Drawer pages and its disclosure are nested navigation levels. They
+          // unwind before the drawer itself, matching their visible hierarchy.
+          if (drawerView !== "workspace") {
+            returnToWorkspaceView();
+            return true;
+          }
+          if (dockPanelOpen) {
+            setDockPanelOpen(false);
+            return true;
+          }
+          setNavigationOpen(false);
+          return true;
+        }
+
+        window.laymuxRemoteUi = Object.freeze({
+          dismissTopLayer: dismissTopRemoteLayer,
+        });
+
         // ── Widget strip (ADR-0124) ─────────────────────────────────────
         // The desktop owns placement and every displayed value; this client
         // only draws what `/remote/v1/widgets` hands it. Nothing here computes
