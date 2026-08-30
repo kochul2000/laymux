@@ -12,7 +12,7 @@ use crate::automation_server::ServerState;
 use crate::constants::EVENT_WORKSPACE_STATE_CHANGED;
 
 use super::lease::require_active_lease;
-use super::navigation::build_remote_navigation_payload;
+use super::navigation::{build_remote_navigation_payload, RemoteNavigationHostState};
 use super::routes::REMOTE_LEASE_HEADER;
 use super::terminal_info::remote_terminal_infos;
 use super::{internal_error, json_error};
@@ -125,7 +125,10 @@ pub(super) async fn remote_navigation(State(server): State<ServerState>) -> Resp
         &terminal_instances_data,
         &notifications_data,
         &ui_state_data,
-        &terminals,
+        RemoteNavigationHostState {
+            terminals: &terminals,
+            codex_transcript_scroll_enabled: settings.codex.transcript_scroll_enabled,
+        },
     ))
     .into_response()
 }

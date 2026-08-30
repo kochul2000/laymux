@@ -215,7 +215,7 @@ const ENTRIES: &[MetadataEntry] = &[
     },
     MetadataEntry {
         path: "/codex",
-        description: "Codex 세션 복원과 상태 메시지 표시 설정입니다.",
+        description: "Codex 세션 복원, 트랜스크립트 포인터 스크롤, 상태 메시지 표시 설정입니다.",
         sensitive: false,
         apply_mode: ApplyMode::Live,
     },
@@ -236,6 +236,12 @@ const ENTRIES: &[MetadataEntry] = &[
         description: "Codex 세션 복원 후보 rollout의 최대 수정 경과 시간입니다. 0은 나이 필터를 끕니다. 다음 세션 수집부터 적용됩니다.",
         sensitive: false,
         apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
+        path: "/codex/transcriptScrollEnabled",
+        description: "normal buffer Codex 트랜스크립트에서 데스크톱 마우스 휠과 Remote 터치/휠 스크롤을 방향키 입력으로 변환할지 정합니다. 즉시 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
     },
     MetadataEntry {
         path: "/grok",

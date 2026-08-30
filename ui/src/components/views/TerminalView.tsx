@@ -3073,6 +3073,7 @@ export function TerminalView({
     terminal.attachCustomWheelEventHandler(
       createCodexTranscriptWheelHandler({
         terminal,
+        isEnabled: () => useSettingsStore.getState().codex.transcriptScrollEnabled,
         isCodexActive: () => {
           const activity = useTerminalStore
             .getState()

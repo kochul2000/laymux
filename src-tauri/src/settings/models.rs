@@ -510,6 +510,10 @@ pub struct CodexSettings {
     /// Set to 0 to disable the age filter.
     #[serde(default = "default_session_max_age_hours")]
     pub session_max_age_hours: u64,
+    /// Whether pointer scrolling navigates a visible normal-buffer Codex
+    /// transcript with cursor-key input (default: true).
+    #[serde(default = "default_true")]
+    pub transcript_scroll_enabled: bool,
     /// Status message display mode (default: "bullet-title").
     #[serde(default)]
     pub status_message_mode: CodexStatusMessageMode,
@@ -524,6 +528,7 @@ impl Default for CodexSettings {
             command: default_codex_command(),
             restore_session: true,
             session_max_age_hours: 24,
+            transcript_scroll_enabled: true,
             status_message_mode: CodexStatusMessageMode::default(),
             status_message_delimiter: default_codex_status_message_delimiter(),
         }
@@ -546,7 +551,8 @@ pub enum GrokStatusMessageMode {
     BulletTitle,
 }
 
-/// Grok Build integration settings (ADR-0156). Same field set as Codex.
+/// Grok Build integration settings (ADR-0156). Shares Codex's launch,
+/// session-restore, and status-message fields, but not Codex-only transcript behavior.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GrokSettings {

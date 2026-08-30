@@ -3555,6 +3555,35 @@ function CodexSection() {
         </div>
       </SubGroup>
 
+      <SubGroup title={t("codex.groupTranscript")}>
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              {t("codex.transcriptScroll")}
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              {t("codex.transcriptScrollDesc")}
+            </p>
+          </div>
+          <div className="min-w-0 flex-1 pt-1">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                data-testid="codex-transcript-scroll-toggle"
+                type="checkbox"
+                checked={codex.transcriptScrollEnabled}
+                onChange={(e) => updateCodex({ transcriptScrollEnabled: e.target.checked })}
+              />
+              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                {codex.transcriptScrollEnabled ? t("common.enabled") : t("common.disabled")}
+              </span>
+            </label>
+          </div>
+        </div>
+      </SubGroup>
+
       <SubGroup title={t("codex.groupStatusMessage")}>
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">

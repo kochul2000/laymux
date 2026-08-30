@@ -23,8 +23,10 @@ type XtermWheelInternals = {
 
 export interface CodexTranscriptWheelHandlerOptions {
   terminal: Terminal;
+  isEnabled(): boolean;
   isCodexActive(): boolean;
   isLocalControlAllowed(): boolean;
+  emitInput?(sequence: string): void;
 }
 
 /**
@@ -61,6 +63,11 @@ function consumeWheelLines(terminal: Terminal, event: WheelEvent): number | unde
   );
 }
 
+function hasMouseTracking(terminal: Terminal): boolean {
+  const mode = terminal.modes.mouseTrackingMode;
+  return Boolean(mode && mode !== "none");
+}
+
 /**
  * Routes wheel rows to Codex's normal-buffer transcript pager. Returning true
  * delegates every other state to xterm's ordinary scrollback/application-mode
@@ -69,11 +76,19 @@ function consumeWheelLines(terminal: Terminal, event: WheelEvent): number | unde
  */
 export function createCodexTranscriptWheelHandler({
   terminal,
+  isEnabled,
   isCodexActive,
   isLocalControlAllowed,
+  emitInput = (sequence) => terminal.input(sequence, true),
 }: CodexTranscriptWheelHandlerOptions): (event: WheelEvent) => boolean {
   return (event) => {
-    if (!isLocalControlAllowed() || !isCodexActive() || !isCodexTranscriptPagerVisible(terminal)) {
+    if (
+      !isEnabled() ||
+      !isLocalControlAllowed() ||
+      !isCodexActive() ||
+      hasMouseTracking(terminal) ||
+      !isCodexTranscriptPagerVisible(terminal)
+    ) {
       return true;
     }
 
@@ -88,7 +103,7 @@ export function createCodexTranscriptWheelHandler({
       lines < 0 ? "A" : "B"
     }`;
     for (let row = 0; row < Math.abs(Math.trunc(lines)); row += 1) {
-      terminal.input(sequence, true);
+      emitInput(sequence);
     }
     return false;
   };

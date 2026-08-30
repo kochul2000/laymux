@@ -155,6 +155,15 @@ test.describe("SettingsView (via dock)", () => {
     await expect(sv.locator("[data-testid='nav-profile-defaults']")).toBeVisible();
   });
 
+  test("toggles Codex transcript pointer scrolling", async ({ appPage: page }) => {
+    await page.getByTestId("nav-codex").click();
+    const toggle = page.getByTestId("codex-transcript-scroll-toggle");
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toBeChecked();
+    await toggle.click();
+    await expect(toggle).not.toBeChecked();
+  });
+
   test("font face select has default value", async ({ appPage: page }) => {
     // Font inputs are in Profile Defaults section
     await page.getByTestId("nav-profile-defaults").click();

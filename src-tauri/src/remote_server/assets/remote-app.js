@@ -3,6 +3,10 @@ import {
   hydrateRemoteIcons,
   setRemoteIcon,
 } from "../../../../ui/src/remote/remote-icons.js";
+import {
+  createCodexTranscriptWheelHandler,
+  isCodexTranscriptPagerVisible,
+} from "../../../../ui/src/lib/codex-transcript-wheel.ts";
 
       (() => {
         hydrateRemoteIcons(document);
@@ -4113,6 +4117,19 @@ import {
           return bufferType === "normal" && !hasMouseTracking(term);
         }
 
+        function isCodexTranscriptScrollEnabled() {
+          return navigationState?.codexTranscriptScrollEnabled === true;
+        }
+
+        function shouldRouteCodexTranscriptScroll(term) {
+          return (
+            isCodexTranscriptScrollEnabled() &&
+            activeComposerAgentName() === "Codex" &&
+            !hasMouseTracking(term) &&
+            isCodexTranscriptPagerVisible(term)
+          );
+        }
+
         function isAlternateBufferCursorInput(term, data) {
           const bufferType = term && term.buffer && term.buffer.active && term.buffer.active.type;
           if (bufferType !== "alternate" || hasMouseTracking(term)) return false;
@@ -4289,7 +4306,9 @@ import {
         }
 
         function routeOneFingerScroll(term, deltaY, point) {
-          if (isNormalScrollbackMode(term)) {
+          if (shouldRouteCodexTranscriptScroll(term)) {
+            sendTerminalCursorScroll(term, deltaY, touchScrollSensitivity);
+          } else if (isNormalScrollbackMode(term)) {
             scrollTouchTerminal(term, deltaY, touchScrollSensitivity);
           } else if (!hasMouseTracking(term)) {
             sendTerminalCursorScroll(term, deltaY, touchScrollSensitivity);
@@ -4299,7 +4318,9 @@ import {
         }
 
         function routeTwoFingerScroll(term, deltaY, point) {
-          if (isNormalScrollbackMode(term)) {
+          if (shouldRouteCodexTranscriptScroll(term)) {
+            sendTerminalCursorScroll(term, deltaY, twoFingerScrollSensitivity);
+          } else if (isNormalScrollbackMode(term)) {
             scrollTouchTerminal(term, deltaY, twoFingerScrollSensitivity);
           } else if (!hasMouseTracking(term)) {
             sendTerminalCursorScroll(term, deltaY, twoFingerScrollSensitivity);
@@ -4896,6 +4917,16 @@ import {
             terminal.registerLinkProvider(createRemotePrLinkProvider(terminal));
           }
           terminal.open(terminalSizer);
+          terminal.attachCustomWheelEventHandler?.(
+            createCodexTranscriptWheelHandler({
+              terminal,
+              isEnabled: isCodexTranscriptScrollEnabled,
+              isCodexActive: () => activeComposerAgentName() === "Codex",
+              isLocalControlAllowed: () =>
+                terminalReplayDepth === 0 && Boolean(leaseId && activeTerminalId),
+              emitInput: enqueueDiscreteInput,
+            })
+          );
           // xterm's helper textarea ships autocorrect/autocapitalize/spellcheck
           // off but omits autocomplete, so mobile browsers offer password,
           // credit-card, and location autofill over the direct-input keyboard

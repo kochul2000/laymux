@@ -847,6 +847,8 @@ export interface CodexSettings {
   restoreSession: boolean;
   /** Maximum age (hours) for Codex rollout files. 0 = no limit. Default: 24. */
   sessionMaxAgeHours: number;
+  /** Navigate a visible normal-buffer transcript with pointer scrolling (default: true). */
+  transcriptScrollEnabled: boolean;
   /** Status message display mode (default: "bullet-title"). */
   statusMessageMode: CodexStatusMessageMode;
   /** Delimiter between bullet and title when both shown (default: " · "). */

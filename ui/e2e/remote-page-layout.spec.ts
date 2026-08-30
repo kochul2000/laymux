@@ -1439,6 +1439,260 @@ test.describe("remote mobile layout", () => {
     await flickKey(-32, 0, "\x1bOD");
   });
 
+  test("routes normal-buffer Codex transcript wheel and touch scroll to cursor input", async ({
+    page,
+  }) => {
+    const writes: string[] = [];
+    let codexTranscriptScrollEnabled = true;
+    let navigationRequestCount = 0;
+    await page.addInitScript(() => {
+      let capturedConstructor: typeof window.Terminal | undefined;
+      Object.defineProperty(window, "Terminal", {
+        configurable: true,
+        get: () => capturedConstructor,
+        set: (TerminalConstructor: typeof window.Terminal) => {
+          capturedConstructor = class extends TerminalConstructor {
+            constructor(options?: ConstructorParameters<typeof TerminalConstructor>[0]) {
+              super(options);
+              Object.defineProperty(window, "__codexTranscriptTerminal", {
+                configurable: true,
+                value: this,
+              });
+            }
+          };
+        },
+      });
+    });
+    await installRemoteClientRoutes(page);
+    await page.route("http://remote.test/remote/v1/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/remote/v1/session/claim") {
+        await route.fulfill({ json: { leaseId: "lease-1", heartbeatTimeoutSeconds: 45 } });
+        return;
+      }
+      if (url.pathname === "/remote/v1/navigation") {
+        navigationRequestCount += 1;
+        await route.fulfill({
+          json: {
+            codexTranscriptScrollEnabled,
+            terminals: [{ id: "term-1", title: "Codex", appearance: {} }],
+            activeWorkspace: {
+              focusedPaneNumber: 1,
+              panes: [
+                {
+                  paneNumber: 1,
+                  terminalId: "term-1",
+                  terminalLive: true,
+                  viewType: "TerminalView",
+                  activity: { type: "interactiveApp", name: "Codex" },
+                },
+              ],
+            },
+            workspaces: [],
+            docks: [],
+            notifications: [],
+          },
+        });
+        return;
+      }
+      if (url.pathname === "/remote/v1/terminals/term-1/write") {
+        const body = route.request().postDataJSON() as { data: string };
+        writes.push(body.data);
+      }
+      await route.fulfill({ json: {} });
+    });
+    await page.routeWebSocket(/\/remote\/v1\/terminals\/term-1\/output/, () => {});
+
+    const cdp = await page.context().newCDPSession(page);
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await expect(page.locator("#focusTerminal")).toBeEnabled();
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const terminal = (
+            window as Window & {
+              __codexTranscriptTerminal?: {
+                write(data: string, callback: () => void): void;
+              };
+            }
+          ).__codexTranscriptTerminal;
+          terminal?.write(
+            "\x1b[2J\x1b[H/ T R A N S C R I P T\r\ncontent\r\n↑/↓ to scroll",
+            resolve,
+          );
+        }),
+    );
+    await expect(page.locator(".xterm-rows")).toContainText("T R A N S C R I P T");
+
+    await page.locator(".xterm").evaluate((element) => {
+      element.dispatchEvent(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          deltaMode: WheelEvent.DOM_DELTA_LINE,
+          deltaY: 1,
+        }),
+      );
+    });
+    await expect.poll(() => writes).toEqual(["\x1b[B"]);
+    writes.length = 0;
+
+    const screenBox = await page.locator(".xterm-screen").boundingBox();
+    expect(screenBox).not.toBeNull();
+    const rows = await page.evaluate(
+      () =>
+        (
+          window as Window & {
+            __codexTranscriptTerminal?: { rows?: number };
+          }
+        ).__codexTranscriptTerminal?.rows,
+    );
+    const cellHeight = screenBox!.height / (rows || 24);
+    const x = screenBox!.x + screenBox!.width / 2;
+    const startY = screenBox!.y + screenBox!.height / 2;
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x, y: startY, id: 1 }],
+    });
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ x, y: startY - cellHeight, id: 1 }],
+    });
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await expect.poll(() => writes).toEqual(["\x1b[B"]);
+
+    writes.length = 0;
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const terminal = (
+            window as Window & {
+              __codexTranscriptTerminal?: {
+                write(data: string, callback: () => void): void;
+              };
+            }
+          ).__codexTranscriptTerminal;
+          terminal?.write("\x1b[?1000h\x1b[?1006h", resolve);
+        }),
+    );
+    await page.locator(".xterm").evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      element.dispatchEvent(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + rect.width / 2,
+          clientY: rect.top + rect.height / 2,
+          deltaMode: WheelEvent.DOM_DELTA_LINE,
+          deltaY: 1,
+        }),
+      );
+    });
+    await expect.poll(() => writes.length).toBeGreaterThan(0);
+    expect(writes.join("")).toMatch(/^\x1b\[</);
+    expect(writes).not.toContain("\x1b[B");
+
+    writes.length = 0;
+    await page.evaluate(() => {
+      const state = window as Window & {
+        __codexMouseTrackingTouchWheels?: Array<{
+          deltaMode: number;
+          deltaY: number;
+        }>;
+      };
+      state.__codexMouseTrackingTouchWheels = [];
+      document.querySelector(".xterm")?.addEventListener(
+        "wheel",
+        (event) => {
+          if (!event.isTrusted) {
+            state.__codexMouseTrackingTouchWheels?.push({
+              deltaMode: event.deltaMode,
+              deltaY: event.deltaY,
+            });
+          }
+        },
+        true,
+      );
+    });
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [
+        { x: x - 12, y: startY, id: 1 },
+        { x: x + 12, y: startY, id: 2 },
+      ],
+    });
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [
+        { x: x - 12, y: startY - cellHeight * 2, id: 1 },
+        { x: x + 12, y: startY - cellHeight * 2, id: 2 },
+      ],
+    });
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              window as Window & {
+                __codexMouseTrackingTouchWheels?: unknown[];
+              }
+            ).__codexMouseTrackingTouchWheels?.length ?? 0,
+        ),
+      )
+      .toBeGreaterThan(0);
+    const touchWheel = await page.evaluate(
+      () =>
+        (
+          window as Window & {
+            __codexMouseTrackingTouchWheels?: Array<{
+              deltaMode: number;
+              deltaY: number;
+            }>;
+          }
+        ).__codexMouseTrackingTouchWheels?.[0],
+    );
+    expect(touchWheel?.deltaMode).toBe(0);
+    expect(Math.abs(touchWheel?.deltaY ?? 0)).toBeGreaterThan(0);
+    expect(writes).not.toContain("\x1b[A");
+    expect(writes).not.toContain("\x1b[B");
+
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const terminal = (
+            window as Window & {
+              __codexTranscriptTerminal?: {
+                write(data: string, callback: () => void): void;
+              };
+            }
+          ).__codexTranscriptTerminal;
+          terminal?.write("\x1b[?1000l\x1b[?1006l", resolve);
+        }),
+    );
+    writes.length = 0;
+    codexTranscriptScrollEnabled = false;
+    const requestCountBeforeOpeningDrawer = navigationRequestCount;
+    await page.locator("#navToggle").click();
+    await expect
+      .poll(() => navigationRequestCount)
+      .toBeGreaterThan(requestCountBeforeOpeningDrawer);
+    await page.waitForTimeout(100);
+    await page.locator(".xterm").evaluate((element) => {
+      element.dispatchEvent(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          deltaMode: WheelEvent.DOM_DELTA_LINE,
+          deltaY: 1,
+        }),
+      );
+    });
+    await page.waitForTimeout(100);
+    expect(writes).toEqual([]);
+  });
+
   test("keeps accelerated alternate-buffer scrolling as discrete replay-safe writes", async ({
     page,
   }) => {

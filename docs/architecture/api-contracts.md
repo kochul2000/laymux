@@ -132,7 +132,7 @@ Remote 기기는 같은 네 값을 PC 설정과 분리해 `localStorage["laymux.
 
 일반 scrollback 은 xterm viewport 가 연속 휠 델타에 배율을 적용한다. 반면 alternate buffer의 커서키 fallback과 마우스 트래킹 TUI는 행 단위 입력만 받을 수 있으므로, 고정 xterm 6.0.0 번들은 `consumeWheelEvent`가 계산한 행 수를 버리지 않고 **그 수만큼 커서키/마우스 보고를 반복**한다. alternate-buffer 커서키는 반복 시퀀스를 한 `onData` 청크로 합치지 않고 행마다 따로 방출한다 — Windows ConPTY가 한 PTY write의 동일 커서키 반복을 하나의 console key event로 축약해 Codex transcript overlay가 1행만 움직이는 일을 막기 위해서다. `0.1` 같은 소수 배율은 pane별 remainder에 누적해 합이 한 행에 도달했을 때 전송한다. 이 보정은 postinstall exact-pattern patch로 데스크톱 ESM·CommonJS 번들과 Remote 정적 CommonJS 번들에 함께 적용하며, 패턴이 달라지면 설치를 실패시킨다. 실제 번들의 alternate-buffer·mouse-reporting 동작은 `xterm-semantics.screen.test.ts`가 고정한다.
 
-Codex가 `alternate_screen = "never"`로 transcript pager를 normal buffer에 그리면 xterm의 일반 scrollback 판정만으로는 앱 소유 화면을 구분할 수 없다([ADR-0206](../adr/0206-codex-normal-buffer-transcript-wheel-routing.md)). 데스크톱 TerminalView는 terminal activity가 Codex이고 현재 normal-buffer viewport에 `/ T R A N S C R I P T` 헤더(좁은 pane은 terminal 폭으로 잘린 prefix, 최소 `/ T R A N` 9열)가 보일 때만 custom wheel handler가 입력을 소유한다. 이때도 같은 `consumeWheelEvent`의 행 수와 DECCKM을 사용하고 각 커서키를 별도 user input으로 방출한다. Ctrl+T나 Codex keymap은 하드코딩하지 않으며, 헤더·activity·local control 또는 xterm 내부 계약이 없으면 기존 viewport 처리로 넘긴다. 따라서 일반 셸 scrollback과 alternate-buffer/mouse-reporting 경로는 바뀌지 않는다.
+Codex가 `alternate_screen = "never"`로 transcript pager를 normal buffer에 그리면 xterm의 일반 scrollback 판정만으로는 앱 소유 화면을 구분할 수 없다([ADR-0206](../adr/0206-codex-normal-buffer-transcript-wheel-routing.md), [ADR-0218](../adr/0218-codex-transcript-pointer-scroll-toggle.md)). `codex.transcriptScrollEnabled`가 켜진 경우 데스크톱 TerminalView와 Remote는 terminal activity가 Codex이고 현재 normal-buffer viewport에 `/ T R A N S C R I P T` 헤더(좁은 pane은 terminal 폭으로 잘린 prefix, 최소 `/ T R A N` 9열)가 보일 때만 포인터 스크롤을 방향키 입력으로 바꾼다. 데스크톱과 Remote 마우스 휠은 같은 `consumeWheelEvent`의 행 수와 DECCKM을 사용하고 각 커서키를 별도 user input/write로 방출한다. Remote 한 손가락·두 손가락 gesture는 각 기기의 기존 touch 감도로 픽셀을 행으로 바꾼 뒤 같은 별도 write 불변식을 지킨다. Ctrl+T나 Codex keymap은 하드코딩하지 않으며, 설정·헤더·activity·local control 또는 xterm 내부 계약이 없으면 기존 viewport 처리로 넘긴다. 따라서 일반 셸 scrollback과 alternate-buffer/mouse-reporting 경로는 바뀌지 않는다.
 
 두 표면 모두 저장 즉시 현재 xterm 옵션에 live 적용하며 fit·레이아웃을 건드리지 않는다. Remote는 host `appearance` payload에 민감도를 싣지 않고 기기 로컬 값을 `normalizeAppearance`에서 합성한다.
 
@@ -496,7 +496,7 @@ Claude session 귀속은 PTY descendant PID와 `~/.claude/sessions/<pid>.json`�
 
 ### Codex 설정
 
-Codex 관련 동작(세션 복원, 셀렉터 상태 메시지 구성)을 제어한다.
+Codex 관련 동작(세션 복원, transcript 포인터 스크롤, 셀렉터 상태 메시지 구성)을 제어한다.
 
 ```jsonc
 {
@@ -504,13 +504,14 @@ Codex 관련 동작(세션 복원, 셀렉터 상태 메시지 구성)을 제어�
     "command": "codex",                  // Codex CLI 실행 명령. 플래그 포함 가능 (기본 "codex")
     "restoreSession": true,              // 앱 재시작 시 pane을 `<command> resume <id>`로 재개 (기본 true)
     "sessionMaxAgeHours": 24,            // 이보다 오래된 rollout은 복원 제외 (0 = 나이 필터 해제, 기본 24)
+    "transcriptScrollEnabled": true,      // normal-buffer transcript 포인터 스크롤을 방향키 탐색으로 변환 (기본 true)
     "statusMessageMode": "bullet-title", // "bullet" | "title" | "title-bullet" | "bullet-title"
     "statusMessageDelimiter": " · "      // bullet·title 병기 시 구분자
   }
 }
 ```
 
-`restoreSession`/`sessionMaxAgeHours`는 세션 영속([data-flow.md §13](./data-flow.md))에서 검증된 Codex thread ID를 다음 시작 명령 `codex resume <id>`로 사용할지를 제어한다([ADR-0118](../adr/0118-codex-session-pid-attribution.md)). 저장 시에는 terminal PTY의 가장 얕은 Codex descendant PID를 얻고, Codex의 읽기 전용 `logs_*.sqlite`에서 그 PID의 현재 `process_uuid`와 thread ID를 연결한다. `state_*.sqlite`가 제공한 rollout 경로(없으면 정확한 ID가 파일명에 있는 rollout 검색)의 첫 `session_meta`를 대조해 최상위 interactive thread만 허용한다. terminal CWD와 최신 rollout은 귀속에 사용하지 않는다. 서로 다른 terminal이 같은 ID를 얻거나 DB·스키마·rollout 중 하나라도 검증되지 않으면 관련 pane은 복원하지 않는다.
+`restoreSession`/`sessionMaxAgeHours`는 세션 영속([data-flow.md §13](./data-flow.md))에서 검증된 Codex thread ID를 다음 시작 명령 `codex resume <id>`로 사용할지를 제어한다([ADR-0118](../adr/0118-codex-session-pid-attribution.md)). `transcriptScrollEnabled`는 위 normal-buffer transcript의 데스크톱 휠과 Remote 휠·터치 방향키 변환을 함께 gate한다([ADR-0218](../adr/0218-codex-transcript-pointer-scroll-toggle.md)). 저장 시에는 terminal PTY의 가장 얕은 Codex descendant PID를 얻고, Codex의 읽기 전용 `logs_*.sqlite`에서 그 PID의 현재 `process_uuid`와 thread ID를 연결한다. `state_*.sqlite`가 제공한 rollout 경로(없으면 정확한 ID가 파일명에 있는 rollout 검색)의 첫 `session_meta`를 대조해 최상위 interactive thread만 허용한다. terminal CWD와 최신 rollout은 귀속에 사용하지 않는다. 서로 다른 terminal이 같은 ID를 얻거나 DB·스키마·rollout 중 하나라도 검증되지 않으면 관련 pane은 복원하지 않는다.
 
 rollout 나이 필터는 파일의 nanosecond 수정 시각만 사용하며, 생성일인 `sessions/YYYY/MM/DD` 디렉터리명으로 미리 pruning하지 않는다. 세션 ID는 영숫자로 시작하고 이후 영숫자·`-`·`_`만 허용한다. Rust의 비구조화 startup override도 `<claude.command> --resume <id>`와 `<codex.command> resume <id>`, `<grok.command> --resume <uuid>` 세 형태만 허용한다. `restoreSession`은 다음 시작에서 resume할지만 제어하므로 꺼져 있어도 Claude/Codex/Grok의 현재 ID를 수집·보존한다. native host의 `CODEX_HOME`(rollout, 기본 host OS 사용자 홈의 `.codex`)과 `CODEX_SQLITE_HOME`(DB, 기본 `CODEX_HOME`)을 지원한다. Windows host의 WSL terminal은 자신의 distro 안에서 `LX_TERMINAL_ID`를 상속한 Linux provider PID를 선택한다. Claude/Codex/Grok가 중첩 실행됐으면 provider별 최상위가 아니라 세 provider 전체에서 유일한 최상위 agent 하나만 활성 provider로 인정한다. Claude는 해당 PID 세션 파일을 읽고, Codex는 해당 PID의 open FD 중 process `CODEX_HOME/sessions` 아래의 rollout header를 검증해 유일한 top-level thread만 저장한다. Grok는 guest `GROK_HOME`(없으면 guest `HOME/.grok`)의 `active_sessions.json`에서 그 PID와 일치하는 유효 UUID가 정확히 하나일 때만 저장한다([ADR-0120](../adr/0120-wsl-agent-session-attribution.md), [ADR-0156](../adr/0156-grok-first-class-agent.md)). native·WSL 결과를 모두 합친 뒤 같은 session ID가 둘 이상의 terminal에 귀속되면 충돌한 terminal을 전부 `null`로 만든다. 명시 distro가 잘못됐으면 bare WSL로 재해석하지 않으며, default-distro 조회와 여러 distro probe는 하나의 3초 종료 예산을 공유한다. WSL live SQLite는 Windows UNC 경계에서 WAL lock을 안전하게 공유할 수 없으므로 귀속에 사용하지 않는다. WSL에서도 CWD·최신 파일·다른 distro fallback은 허용하지 않는다.
 
@@ -518,7 +519,7 @@ rollout 나이 필터는 파일의 nanosecond 수정 시각만 사용하며, 생
 
 ### Grok 설정
 
-Grok Build 관련 동작(세션 복원, 셀렉터 상태 메시지 구성)을 제어한다. 필드 집합은 Codex와 같다 — `syncCwd`와 `sessionLimit*`는 두지 않는다([ADR-0156](../adr/0156-grok-first-class-agent.md)).
+Grok Build 관련 동작(세션 복원, 셀렉터 상태 메시지 구성)을 제어한다. 실행 명령·세션 복원·상태 메시지 필드는 Codex와 공유하지만, Codex 전용 transcript 설정과 Claude 전용 `syncCwd`·`sessionLimit*`는 두지 않는다([ADR-0156](../adr/0156-grok-first-class-agent.md)).
 
 ```jsonc
 {
@@ -540,7 +541,7 @@ Grok Build 관련 동작(세션 복원, 셀렉터 상태 메시지 구성)을 �
 
 프론트는 이 값으로 `<command> --resume <id>` / `<command> resume <id>` / `<command> --resume <uuid>` 를 만들어 `startupCommandOverride` 로 보내고, Rust 는 **디스크의 settings 에서 접두어를 다시 도출해** 그 형태와만 대조한다 — 호출자가 보낸 문자열에서 접두어를 추출하지 않으므로 사용자가 설정하지 않은 플래그는 통과하지 못한다. Claude는 `--resume`, Codex는 서브커맨드 `resume`, Grok는 플래그 `--resume`이며 Grok `<id>`는 하이픈 포함 UUID만 허용한다. 적용 시점은 `nextUse`(다음 터미널 생성)이며, 실행 중인 pane 의 명령은 바뀌지 않는다. 공백이 들어간 실행 파일 경로는 인용 문법을 두지 않아 지원하지 않는다. 이 설정은 세션 복원 경로에만 쓰이며 pane 신규 시작을 자동 기동하지 않는다.
 
-metadata apply mode는 `/codex/statusMessageMode`와 `/codex/statusMessageDelimiter`가 부모 `/codex`의 `live`를 따르고, `/grok/statusMessageMode`와 `/grok/statusMessageDelimiter`는 부모 `/grok`의 `live`를 따른다. `/codex/restoreSession`·`/codex/sessionMaxAgeHours`·`/grok/restoreSession`·`/grok/sessionMaxAgeHours`·`/claude/command`·`/codex/command`·`/grok/command`는 `nextUse`다. `restoreSession`은 다음 terminal 생성부터, 최대 나이는 다음 세션 ID 수집부터 적용된다.
+metadata apply mode는 `/codex/transcriptScrollEnabled`·`/codex/statusMessageMode`·`/codex/statusMessageDelimiter`가 부모 `/codex`의 `live`를 따르고, `/grok/statusMessageMode`와 `/grok/statusMessageDelimiter`는 부모 `/grok`의 `live`를 따른다. `/codex/restoreSession`·`/codex/sessionMaxAgeHours`·`/grok/restoreSession`·`/grok/sessionMaxAgeHours`·`/claude/command`·`/codex/command`·`/grok/command`는 `nextUse`다. transcript 스크롤은 데스크톱의 다음 휠 이벤트와 Remote의 다음 navigation snapshot부터, `restoreSession`은 다음 terminal 생성부터, 최대 나이는 다음 세션 ID 수집부터 적용된다.
 
 Claude의 `syncCwd: "command"`는 Claude Code가 제공하는 `! cd` 부모 세션 변경 계약에 의존한다. Codex shell mode는 부모 TUI CWD 변경 계약이 아니므로 Codex 설정에 같은 옵션을 두지 않고, 실행 중인 Codex pane은 다른 일반 interactive app처럼 CWD 수신에서 제외한다. `sessionLimit*`도 현재 Claude 고유 배너 파서 계약이므로 Codex에 복제하지 않는다.
 
@@ -1411,6 +1412,8 @@ Remote page에서 `resumeToken`은 문서가 살아 있는 동안 메모리에�
 PC WebView는 `remote-control-changed` Tauri event를 받아 local input overlay를 표시하고, `reclaim_remote_control` Tauri command로 언제든 lease 종료를 요청할 수 있다. reclaim·Remote release·access disable·heartbeat expiry는 owner epoch을 먼저 전환해 새 양쪽 permit을 막고, 기존 Remote I/O의 bounded cancellation acknowledgement 후에만 Local owner를 공개한다. 이 동안 status는 `active=true, transitioning=true`로 fail-closed한다. PC reclaim 완료 후에는 `heartbeatTimeoutSeconds` 동안 새 remote claim을 `409`로 거절한다. Lease timeout 기본값은 45초이고 30초 미만의 설정도 런타임에서는 30초로 clamp한다. 성공한 claim/heartbeat 시점에 현재 timeout으로 absolute monotonic deadline을 고정하며, 만료가 한 번 관측된 lease는 timeout 증가나 늦은 heartbeat로 부활하지 않는다([ADR-0027](../adr/0027-remote-connection-graceful-recovery.md), [ADR-0029](../adr/0029-detached-terminal-input-composer.md)).
 
 ### 13.3 Navigation Metadata
+
+`GET /remote/v1/navigation`의 최상위 `codexTranscriptScrollEnabled`는 호스트 `codex.transcriptScrollEnabled`의 현재 boolean 투영이며 Remote의 normal-buffer Codex transcript 휠·터치 라우팅을 gate한다([ADR-0218](../adr/0218-codex-transcript-pointer-scroll-toggle.md)).
 
 `GET /remote/v1/layouts`는 PC에 정의된 layout 목록을 읽어 Remote drawer의 생성 하위 패널에 제공한다. `POST /remote/v1/workspaces`는 `{ "layoutId": "...", "leaseId": "..." }`의 layout id를 PC 목록에서 다시 검증하고 active controller를 확인한 뒤 선택한 layout으로 워크스페이스를 생성한다. 성공 뒤에는 navigation snapshot만 다시 읽어 현재 workspace·terminal focus를 유지한다. 이 변경은 `workspace-state-changed`를 발행하고 Android E2E 내부 HTTP exact allowlist에도 포함된다([ADR-0166](../adr/0166-remote-workspace-create-action.md)).
 
