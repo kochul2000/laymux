@@ -1,6 +1,6 @@
 # 0220. path-link 수명 판정은 synchronized-output 안정 프레임에서 수행한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-30
 - Source: 사용자 요구("Codex Direct 입력에서 한글 IME 한 덩어리가 확정될 때 파일 경로 밑줄이 사라졌다가 다시 생김") · [architecture/data-flow.md §8.6](../architecture/data-flow.md) · [ADR-0188](0188-path-link-ambient-detection-triggers.md)
 - Corrects: ADR-0188의 terminal write 단위 path-link 폐기 규칙
@@ -20,9 +20,9 @@ Codex 같은 TUI는 한글 IME의 확정 문자열을 받은 뒤 화면을 DEC 2
 **path-link는 DEC 2026 synchronized-output 중간 버퍼로 수명을 판정하지 않고, 정상 reset 뒤의 write 완료 또는 xterm 안전 timeout 뒤에 관찰한 안정 프레임에서만 저장 token을 재검증한다.**
 
 - 데스크톱 `TerminalView`는 synchronized-output mode가 활성인 `onWriteParsed`에서 `pathLink.revalidate()`를 실행하지 않고 deferred 상태만 기록한다. 정상 `?2026l`은 그 physical write의 `onWriteParsed`에서 최종 버퍼를 한 번 재검증한다. 닫는 sequence가 없어 xterm의 1초 safety timeout이 mode를 내린 경우에는 기존 mode monitor가 deferred 재검증과 recovery refresh를 함께 수행한다. point 조회 memo 무효화와 IME echo 관찰은 physical write마다 계속 실행한다.
-- Remote write 완료 경로도 mode가 활성인 동안 원문 재검증을 보류하고 유휴 스캔 타이머만 다시 잡는다. 유휴 gate는 mode가 내려갈 때까지 재예약되므로 정상 reset과 safety timeout 모두 최종 버퍼 판정에 도달한다. 타이머 재예약은 진행 중인 이전 `screen` 요청만 취소하며 원문이 살아 있는 데코레이션은 폐기하지 않는다. 다만 OSC 7은 화면 셀을 바꾸지 않고 서버가 소유한 CWD를 바꿀 수 있으므로, 모든 physical write는 screen 검증 context를 dirty로 만들고 안정 프레임의 다음 유휴 스캔에서 화면 문자열이 같아도 서버 검증을 한 번 수행한다. 화면 signature는 physical write가 없었던 중복 유휴 평가만 생략한다.
+- Remote write 완료 경로도 mode가 활성인 동안 원문 재검증을 보류하고 유휴 스캔 타이머만 다시 잡는다. 유휴 gate는 mode가 내려갈 때까지 재예약되므로 정상 reset과 safety timeout 모두 최종 버퍼 판정에 도달한다. 타이머 재예약은 진행 중인 이전 `screen` 요청만 취소하며 원문이 살아 있는 데코레이션은 폐기하지 않는다. 다만 OSC 7은 화면 셀을 바꾸지 않고 서버가 소유한 CWD를 바꿀 수 있으므로, 모든 physical write는 screen 검증 context를 dirty로 만들고 안정 프레임의 다음 유휴 스캔에서 화면 문자열이 같아도 서버 검증을 한 번 수행한다. 화면 signature는 physical write가 없었던 중복 유휴 평가만 생략한다. live selection 때문에 dirty screen을 검증할 수 없으면 기존 `screen` scope를 fail closed로 폐기하고, selection change가 유휴 스캔을 다시 예약한다.
 - 안정 프레임에서는 저장한 live marker 줄·시작 셀·원문 token이 현재 셀과 다른 항목만 즉시 폐기한다. Codex의 line erase(`EL`)처럼 marker가 살아 있는 repaint에서 최종 좌표·token·path·kind가 같으면 기존 marker와 decoration을 재사용해 DOM identity를 유지한다. 이미 dispose된 marker나 decoration은 재사용하지 않는다.
-- Remote 화면 signature는 요청을 시작한 화면이 아니라 검증 응답의 모든 match가 최신 셀에 매핑되고 전체 decoration 집합이 성공적으로 적용된 뒤에만 그 집합에 결속한다. 취소된 요청은 새 signature를 획득하지 않으며, 원문이 살아 있는 기존 성공 집합의 signature는 유지한다. malformed·부분 매핑 응답이나 기존 집합의 원문 재검증 탈락은 해당 scope와 signature를 무효화해 다음 같은 화면을 검증 완료로 오인하지 않는다.
+- Remote 화면 signature는 요청을 시작한 화면이 아니라 검증 응답의 모든 match가 최신 셀에 매핑되고 전체 decoration 집합이 성공적으로 적용된 뒤에만 그 집합에 결속한다. 취소된 요청은 새 signature를 획득하지 않으며, 원문이 살아 있는 기존 성공 집합의 signature는 유지한다. malformed·부분 매핑 응답, decoration 일부 생성 실패나 기존 집합의 원문 재검증 탈락은 해당 scope와 signature를 무효화해 다음 같은 화면을 검증 완료로 오인하지 않는다.
 - 화면 signature가 바뀌어 새 batch를 검증하는 동안에도 원문 재검증을 통과한 기존 `screen` 밑줄은 유지한다. 성공 결과 적용 시 live marker·좌표·terminal·lease·capability·token·path·kind가 같은 항목은 재사용하고, 사라진 항목만 dispose하며 새 항목만 생성한다.
 - 빈 화면, invalid 응답, 요청 실패, 권한·terminal 상실은 해당 scope를 폐기한다. resize/reflow, normal/alternate buffer 전환과 xterm reset은 좌표계가 바뀌므로 기존 `screen` scope와 signature를 즉시 폐기한다.
 
@@ -42,4 +42,4 @@ Codex 같은 TUI는 한글 IME의 확정 문자열을 받은 뒤 화면을 DEC 2
 - Remote에서 physical write가 없는 중복 유휴 평가는 추가 path-link 요청과 filesystem stat을 만들지 않는다. output burst가 있으면 화면 문자열이 같아도 500ms 유휴 뒤 한 번 검증하므로, 보이지 않는 CWD 변경 뒤 상대경로가 이전 절대경로를 계속 열지 않는다. 같은 결과는 기존 decoration을 재사용해 이 검증 비용이 깜빡임으로 드러나지 않는다.
 - 링크 자체의 최종 셀 원문이 바뀌거나 marker가 사라지면 즉시 폐기한다. 안정성 개선이 stale 파일 열기를 허용하지 않는다.
 - Remote 결과 적용에는 bounded reconciliation과 성공 적용 signature가 추가된다. `screen` 후보 상한이 64이므로 선형 매칭 비용은 고정 상한 안에 있다.
-- 컴포넌트 테스트는 분할 프레임과 safety timeout의 데스크톱 deferred 재검증을 검증한다. 실제 xterm Playwright E2E는 동일 화면 write 중 decoration 유지와 서버 context 재검증, 같은 셀의 CWD별 절대경로 재해석, Direct 한글 확정 echo, 분할 DEC 2026 프레임의 decoration DOM identity, safety timeout, 취소된 화면 요청 signature 재시도를 검증한다. xterm의 synchronized-output 또는 marker 수명 계약이 바뀌면 이 결정을 재검토한다.
+- 컴포넌트 테스트는 분할 프레임과 safety timeout의 데스크톱 deferred 재검증을 검증한다. 실제 xterm Playwright E2E는 동일 화면 write 중 decoration 유지와 서버 context 재검증, 같은 셀의 CWD별 절대경로 재해석, Direct 한글 확정 echo, 분할 DEC 2026 프레임의 decoration DOM identity, safety timeout, 취소된 화면 요청 signature 재시도, decoration 부분 생성 실패의 전면 폐기, live selection 해제 뒤 dirty screen 재스캔을 검증한다. xterm의 synchronized-output 또는 marker 수명 계약이 바뀌면 이 결정을 재검토한다.

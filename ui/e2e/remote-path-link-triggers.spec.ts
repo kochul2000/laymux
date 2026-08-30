@@ -110,11 +110,16 @@ type CapturedTerminalWindow = typeof window & {
     cols: number;
     rows: number;
     focus: () => void;
+    hasSelection: () => boolean;
+    select: (column: number, row: number, length: number) => void;
+    clearSelection: () => void;
+    registerDecoration: (options: unknown) => unknown;
     modes: { synchronizedOutputMode: boolean };
     buffer: {
       active: { getLine: (line: number) => { translateToString: () => string } | undefined };
     };
   };
+  __pathLinkDecorationFailureObserved?: boolean;
 };
 
 type RemoteHarnessOptions = {
@@ -618,4 +623,98 @@ test("retries an aborted changed-screen scan before treating its signature as ve
     .toBe(3);
   await expect(decoration).toHaveCount(2);
   expect(await originalDecoration?.evaluate((node) => document.contains(node))).toBe(true);
+});
+
+test("fails closed when only part of a screen decoration set can be created", async ({
+  context,
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const harness = await connectRemote(context, page, ["screen"]);
+
+  const decoration = page.locator(".remote-path-link-decoration");
+  await expect(decoration).toHaveCount(1, { timeout: 10_000 });
+  const firstScans = harness.requests.filter((entry) => entry.mode === "screen").length;
+
+  await page.evaluate(() => {
+    const target = window as CapturedTerminalWindow;
+    const term = target.__remoteTerm;
+    if (!term) throw new Error("xterm instance was not captured");
+    const registerDecoration = term.registerDecoration.bind(term);
+    let failNext = true;
+    term.registerDecoration = (options) => {
+      if (failNext) {
+        failNext = false;
+        target.__pathLinkDecorationFailureObserved = true;
+        return undefined;
+      }
+      return registerDecoration(options);
+    };
+  });
+
+  // The first link is reusable; creating only the newly appended second link
+  // fails. A partial clickable scope must not survive without a verified
+  // signature.
+  harness.sendDelta(TOKEN);
+  await expect
+    .poll(() => harness.requests.filter((entry) => entry.mode === "screen").length)
+    .toBe(firstScans + 1);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as CapturedTerminalWindow).__pathLinkDecorationFailureObserved === true,
+      ),
+    )
+    .toBe(true);
+  await expect(decoration).toHaveCount(0);
+
+  // A later write retries because the incomplete result never owned the
+  // signature, and both links can then be installed.
+  harness.sendDelta("\r");
+  await expect
+    .poll(() => harness.requests.filter((entry) => entry.mode === "screen").length)
+    .toBe(firstScans + 2);
+  await expect(decoration).toHaveCount(2);
+});
+
+test("rescans dirty screen links after a live selection is cleared", async ({ context, page }) => {
+  test.setTimeout(60_000);
+  const harness = await connectRemote(context, page, ["screen"]);
+
+  const decoration = page.locator(".remote-path-link-decoration");
+  await expect(decoration).toHaveCount(1, { timeout: 10_000 });
+  const firstScans = harness.requests.filter((entry) => entry.mode === "screen").length;
+  const movedHostPath = "D:\\selected-worktree\\src\\main.rs";
+
+  await page.evaluate(() => {
+    const term = (window as CapturedTerminalWindow).__remoteTerm;
+    term?.select(0, 0, 3);
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as CapturedTerminalWindow).__remoteTerm?.hasSelection() ?? false),
+    )
+    .toBe(true);
+
+  harness.setResolvedPath(movedHostPath);
+  harness.sendDelta("\r");
+  // Selection owns discovery, but a dirty old-CWD target must fail closed
+  // instead of remaining clickable indefinitely.
+  await expect(decoration).toHaveCount(0, { timeout: 5_000 });
+  expect(harness.requests.filter((entry) => entry.mode === "screen")).toHaveLength(firstScans);
+
+  await page.evaluate(() => {
+    (window as CapturedTerminalWindow).__remoteTerm?.clearSelection();
+  });
+  await expect
+    .poll(() => harness.requests.filter((entry) => entry.mode === "screen").length)
+    .toBe(firstScans + 1);
+  await expect(decoration).toHaveCount(1);
+
+  const box = await decoration.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await expect
+    .poll(() => harness.renderRequests)
+    .toEqual([{ source: "path", path: movedHostPath }]);
 });

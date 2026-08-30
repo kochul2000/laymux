@@ -1213,10 +1213,11 @@ mod tests {
             "pathLinkScreenContextDirty = true;\n                      if (term.modes?.synchronizedOutputMode !== true)"
         ));
         assert!(!html.contains("pathLinkLastScreenSignature"));
-        // A live selection owns discovery, for the screen scan and for a tap.
+        // A live selection owns discovery. Point exits directly; screen uses
+        // the fail-closed dirty-context block asserted below.
         assert_eq!(
             html.matches("if (term.hasSelection?.()) return;").count(),
-            2
+            1
         );
         // Output can repaint a row in place: stable frames re-check the stored
         // token, while an in-progress DEC 2026 frame keeps the rendered link.
@@ -1229,6 +1230,13 @@ mod tests {
         assert!(html.contains("entry.decoration.isDisposed !== true"));
         assert!(html.contains("reusableEntry.selection = selection;"));
         assert!(html.contains("selections.length !== data.matches.length"));
+        assert!(html.contains("if (!setVerifiedPathLinks(scope, selections))"));
+        assert!(html.contains(
+            "if (term.hasSelection?.()) {\n            if (pathLinkScreenContextDirty) clearPathLinkScope(\"screen\");"
+        ));
+        assert!(html.contains(
+            "schedulePathLinkSelectionEvaluation();\n            // A screen scan deferred by a live selection"
+        ));
         assert_eq!(html.matches("token: match.token,").count(), 2);
         assert!(
             html.contains("caret: { lineIndex: 0, index: caretIndex }")

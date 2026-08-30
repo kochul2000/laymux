@@ -2305,7 +2305,13 @@ import {
                 clearPathLinkScope(scope);
                 return;
               }
-              if (setVerifiedPathLinks(scope, selections)) onApplied?.();
+              if (!setVerifiedPathLinks(scope, selections)) {
+                // A partially installed set has no verified signature and must
+                // not leave a subset clickable (ADR-0220).
+                clearPathLinkScope(scope);
+                return;
+              }
+              onApplied?.();
             })
             .catch(() => {
               if (revision === pathLinkRevisions[scope]) clearPathLinkScope(scope);
@@ -2392,8 +2398,13 @@ import {
             return;
           }
           revalidatePathLinkScopes();
-          // A live selection owns discovery while it exists.
-          if (term.hasSelection?.()) return;
+          // A live selection owns discovery while it exists. If output dirtied
+          // the server-owned resolution context, fail closed now; selection
+          // change re-arms discovery when the user releases it (ADR-0220).
+          if (term.hasSelection?.()) {
+            if (pathLinkScreenContextDirty) clearPathLinkScope("screen");
+            return;
+          }
           const screen = readPathLinkScreenLines(term);
           if (!screen) {
             pathLinkVerifiedScreenSignature = null;
@@ -5114,6 +5125,9 @@ import {
             // immediately, but wait for the selection to settle before the
             // HTTP -> bridge -> filesystem validation.
             schedulePathLinkSelectionEvaluation();
+            // A screen scan deferred by a live selection otherwise has no
+            // wake-up after the selection is released (ADR-0220).
+            schedulePathLinkIdleScan();
           });
           terminal.onScroll?.(() => {
             updateSelectionHandles(terminal);
