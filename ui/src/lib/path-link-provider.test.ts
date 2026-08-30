@@ -492,4 +492,31 @@ describe("createPathLinkController.revalidate (ADR-0188)", () => {
     expect(ctrl.revalidate()).toBe(1);
     expect(ctrl.getCurrent()).toEqual([]);
   });
+
+  it("xterm이 폐기한 마커는 저장된 옛 줄에 같은 원문이 있어도 폐기한다", () => {
+    const t = makeBufferTerminal({ 2: "cat src/a.ts done" });
+    vi.mocked(t.terminal.registerMarker).mockReturnValueOnce({
+      line: -1,
+      isDisposed: true,
+      dispose: vi.fn(),
+    } as never);
+    const ctrl = createPathLinkController(t.terminal, {
+      onOpenPath: vi.fn(),
+      onChangeDir: vi.fn(),
+      onOsAction: vi.fn(),
+    });
+    ctrl.setVerifiedSelections("point", [
+      {
+        bufferLine: 3,
+        startCol: 5,
+        endCol: 12,
+        absPath: "/proj/src/a.ts",
+        token: "src/a.ts",
+        isDirectory: false,
+      },
+    ]);
+
+    expect(ctrl.revalidate()).toBe(1);
+    expect(ctrl.getCurrent()).toEqual([]);
+  });
 });

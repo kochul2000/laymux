@@ -147,6 +147,11 @@ function completeMockWrite(_: string | Uint8Array, callback?: () => void): void 
 const mockWrite = vi.fn(completeMockWrite);
 const mockRefresh = vi.fn();
 const mockClearTextureAtlas = vi.fn();
+type MockPathLinkDecoration = {
+  element: HTMLElement;
+  dispose: ReturnType<typeof vi.fn>;
+};
+const mockPathLinkDecorations: MockPathLinkDecoration[] = [];
 
 // ── stream attach reset gate ────────────────────────────────────────────────
 // The output attach chain ends in `terminal.reset()`, which also rebuilds the
@@ -398,11 +403,13 @@ vi.mock("@xterm/xterm", () => ({
           toJSON: () => ({}),
         }) as DOMRect;
       document.body.appendChild(element);
-      return {
+      const decoration = {
         element,
         onRender: vi.fn(),
         dispose: vi.fn(() => element.remove()),
       };
+      mockPathLinkDecorations.push(decoration);
+      return decoration;
     });
     refresh = mockRefresh;
     // Passes itself so a test can tell *which* terminals were cleared, not just
@@ -793,6 +800,7 @@ describe("TerminalView", () => {
     oscHandlers.clear();
     escHandlers.clear();
     mockModes.synchronizedOutputMode = false;
+    mockPathLinkDecorations.length = 0;
     capturedRemoteControlChanged = null;
     capturedTerminalOutputFailStopped = null;
     mockOutputSequence = 0;
@@ -6985,6 +6993,102 @@ describe("TerminalView", () => {
     });
     expect(mockStatPaths).toHaveBeenCalledWith([String.raw`C:\work\src\main.ts`]);
     expect(outer).toHaveClass("terminal-path-link-clickable");
+  });
+
+  it("keeps a verified path decoration through a split synchronized-output repaint", async () => {
+    const originalLine = String.raw`cat C:\work\src\main.ts`;
+    setMockBufferLine(originalLine);
+    mockGetSelection.mockReturnValue("");
+    mockStatPaths.mockResolvedValue([{ exists: true, isDirectory: false }]);
+
+    render(<TerminalView instanceId="t-path-sync-frame" profile="PowerShell" syncGroup="" />);
+
+    const outer = screen.getByTestId("terminal-view-t-path-sync-frame");
+    outer.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 100, clientY: 0 }));
+    await vi.waitFor(
+      () => {
+        expect(mockStatPaths).toHaveBeenCalledTimes(1);
+        expect(mockPathLinkDecorations).toHaveLength(1);
+      },
+      { timeout: 2_000 },
+    );
+    const originalDecoration = mockPathLinkDecorations[0];
+    expect(originalDecoration.element.isConnected).toBe(true);
+
+    // Codex can split one DEC 2026 repaint across PTY output chunks. xterm's
+    // buffer already contains this cleared intermediate row, while the renderer
+    // deliberately continues showing the previous complete frame.
+    mockModes.synchronizedOutputMode = true;
+    await act(async () => {
+      await csiHandlers.get("?:h")?.([2026]);
+    });
+    setMockBufferLine("");
+    const writeParsed = mockOnWriteParsed.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+    act(() => writeParsed?.());
+
+    expect(originalDecoration.dispose).not.toHaveBeenCalled();
+    expect(originalDecoration.element.isConnected).toBe(true);
+    expect(outer).toHaveClass("terminal-path-link-clickable");
+
+    // The closing chunk restores the same path before DEC 2026 reset. The
+    // stable-frame validation must retain the exact decoration, not recreate it.
+    setMockBufferLine(originalLine);
+    mockModes.synchronizedOutputMode = false;
+    await act(async () => {
+      await csiHandlers.get("?:l")?.([2026]);
+    });
+    act(() => writeParsed?.());
+
+    expect(originalDecoration.dispose).not.toHaveBeenCalled();
+    expect(mockPathLinkDecorations).toEqual([originalDecoration]);
+    expect(originalDecoration.element.isConnected).toBe(true);
+  });
+
+  it("settles deferred path validation when synchronized output times out", async () => {
+    const originalLine = String.raw`cat C:\work\src\main.ts`;
+    setMockBufferLine(originalLine);
+    mockGetSelection.mockReturnValue("");
+    mockStatPaths.mockResolvedValue([{ exists: true, isDirectory: false }]);
+
+    render(<TerminalView instanceId="t-path-sync-timeout" profile="PowerShell" syncGroup="" />);
+
+    const outer = screen.getByTestId("terminal-view-t-path-sync-timeout");
+    outer.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 100, clientY: 0 }));
+    await vi.waitFor(
+      () => {
+        expect(mockStatPaths).toHaveBeenCalledTimes(1);
+        expect(mockPathLinkDecorations).toHaveLength(1);
+      },
+      { timeout: 2_000 },
+    );
+    const originalDecoration = mockPathLinkDecorations[0];
+
+    mockModes.synchronizedOutputMode = true;
+    await act(async () => {
+      await csiHandlers.get("?:h")?.([2026]);
+    });
+    setMockBufferLine("");
+    const writeParsed = mockOnWriteParsed.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+    act(() => writeParsed?.());
+    expect(originalDecoration.dispose).not.toHaveBeenCalled();
+
+    // A write that opened synchronized output arms TerminalView's mode monitor.
+    // The xterm mock does not parse bytes, so the parser hook above establishes
+    // the matching component state explicitly.
+    await vi.waitFor(() => expect(mockOnTerminalOutput).toHaveBeenCalled());
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    act(() => onOutput?.(new TextEncoder().encode("\x1b[?2026hframe")));
+    await vi.waitFor(() => expect(mockWrite).toHaveBeenCalled());
+
+    // xterm releases a malformed/open frame after its safety timeout without a
+    // parser reset or another onWriteParsed event. The mode monitor owns this
+    // final stable-buffer comparison.
+    mockModes.synchronizedOutputMode = false;
+    await vi.waitFor(() => expect(originalDecoration.dispose).toHaveBeenCalledTimes(1));
+    expect(originalDecoration.element.isConnected).toBe(false);
+    expect(outer).not.toHaveClass("terminal-path-link-clickable");
   });
 
   it("does not validate while the pointer keeps moving", async () => {

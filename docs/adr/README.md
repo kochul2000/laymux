@@ -237,6 +237,7 @@ ADR 이 필요한 대표 기준:
 | [0217](0217-fixed-terminal-scrollbar-layout.md) | 터미널 스크롤바는 현재의 고정 gutter·구분선 없는 단일 레이아웃만 사용한다 | Accepted |
 | [0218](0218-codex-transcript-pointer-scroll-toggle.md) | Codex transcript 포인터 스크롤 활성 여부를 호스트 설정으로 데스크톱·Remote에 공유한다 (0206 확장) | Accepted |
 | [0219](0219-android-back-defers-to-remote-ui-stack.md) | Android system back은 Remote UI stack을 순서대로 닫는다 (0149 확장) | Accepted |
+| [0220](0220-path-link-stable-frame-lifetime.md) | path-link 수명 판정은 synchronized-output 안정 프레임에서 수행한다 (0188 정정) | Accepted |
 | [0221](0221-codex-position-first-in-frame-cursor-park.md) | Codex position-first 인프레임 커서 주차도 권위 tail로 인정한다 (0076·0078 확장) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
