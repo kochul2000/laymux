@@ -219,6 +219,8 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private val remoteHttpResumeTracker = RemoteHttpResumeTracker()
     private val remoteResourceCache = RemoteResourceCache()
     private val remoteBackGuard = RemoteBackGuard()
+    private var remoteBackEvaluationGeneration: Long? = null
+    private var remoteBackWarningToast: Toast? = null
     private var remoteLoadProgress = RemoteLoadProgress()
     private lateinit var remoteLoadingOverlay: LinearLayout
     private lateinit var remoteLoadingStatus: TextView
@@ -466,9 +468,9 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     /**
-     * A system back press on the Remote surface would quit the app mid-session.
-     * First press warns, a second within the window disconnects to the
-     * dashboard; every other surface keeps the default behavior.
+     * The PC-owned Remote document gets first refusal on system back so native
+     * does not duplicate its viewer/drawer hierarchy (ADR-0219). With no
+     * dismissible page layer, the existing two-press disconnect guard applies.
      */
     private fun installRemoteBackGuard() {
         onBackPressedDispatcher.addCallback(
@@ -476,14 +478,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             object : androidx.activity.OnBackPressedCallback(true) {
                 override fun handleOnBackPressed() {
                     if (visibleWebSurface == VisibleWebSurface.REMOTE && !isDestroyed) {
-                        when (remoteBackGuard.onBackPressed(SystemClock.elapsedRealtime())) {
-                            RemoteBackGuard.Action.WARN -> Toast.makeText(
-                                this@MainActivity,
-                                "한 번 더 누르면 연결을 끊고 대시보드로 이동합니다.",
-                                Toast.LENGTH_SHORT,
-                            ).show()
-                            RemoteBackGuard.Action.LEAVE -> disconnectRemote()
-                        }
+                        dismissRemoteLayerOrGuardDisconnect()
                         return
                     }
                     isEnabled = false
@@ -495,6 +490,62 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 }
             },
         )
+    }
+
+    private fun dismissRemoteLayerOrGuardDisconnect() {
+        remoteBackGuard.onNativeLoadingOverlayBackPressed(
+            visible = remoteLoadingOverlay.visibility == View.VISIBLE,
+        )?.let { action ->
+            handleRemoteBackAction(action)
+            return
+        }
+        if (!::webView.isInitialized || remoteBackEvaluationGeneration != null) return
+        val targetWebView = webView
+        val documentGeneration = secureWebViewGeneration
+        remoteBackEvaluationGeneration = documentGeneration
+        targetWebView.evaluateJavascript(REMOTE_DISMISS_TOP_LAYER_SCRIPT) { result ->
+            if (remoteBackEvaluationGeneration == documentGeneration) {
+                remoteBackEvaluationGeneration = null
+            }
+            if (isDestroyed || targetWebView !== webView ||
+                !remoteBridgeActionsEnabled(documentGeneration)
+            ) {
+                return@evaluateJavascript
+            }
+            handleRemoteBackAction(
+                remoteBackGuard.onBackPressed(
+                    SystemClock.elapsedRealtime(),
+                    remoteLayerDismissed = result == "true",
+                ),
+            )
+        }
+    }
+
+    private fun handleRemoteBackAction(action: RemoteBackGuard.Action) {
+        when (action) {
+            RemoteBackGuard.Action.CANCEL_CONNECTION -> {
+                clearRemoteBackWarning()
+                cancelRemoteConnection()
+            }
+            RemoteBackGuard.Action.DISMISS -> clearRemoteBackWarning()
+            RemoteBackGuard.Action.WARN -> {
+                clearRemoteBackWarning()
+                remoteBackWarningToast = Toast.makeText(
+                    this@MainActivity,
+                    "한 번 더 누르면 연결을 끊고 대시보드로 이동합니다.",
+                    Toast.LENGTH_SHORT,
+                ).also { it.show() }
+            }
+            RemoteBackGuard.Action.LEAVE -> {
+                clearRemoteBackWarning()
+                disconnectRemote()
+            }
+        }
+    }
+
+    private fun clearRemoteBackWarning() {
+        remoteBackWarningToast?.cancel()
+        remoteBackWarningToast = null
     }
 
     /**
@@ -995,10 +1046,12 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         visibleWebSurface = surface
         if (surface != VisibleWebSurface.REMOTE) {
             remoteLoadingOverlay.visibility = View.GONE
+            remoteBackEvaluationGeneration = null
             // A warning armed on the Remote surface must not carry into the
             // next visit — re-entering within the window would treat a single
             // back press as the confirmed second one.
             remoteBackGuard.reset()
+            clearRemoteBackWarning()
         }
         cloudWebView.visibility = if (layers.cloudVisible) View.VISIBLE else View.GONE
         webView.visibility = if (layers.secureVisible) View.VISIBLE else View.GONE
@@ -3206,6 +3259,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     override fun onDestroy() {
         revokeRemoteDocument()
+        clearRemoteBackWarning()
         cancelPendingFileChooser()
         if (::pairingSheet.isInitialized) pairingSheet.dismiss()
         if (::connectionSettingsDialog.isInitialized) connectionSettingsDialog.dismiss()
@@ -3254,6 +3308,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         private const val OUTPUT_BRIDGE_MESSAGE: Byte = 2
         private const val OUTPUT_BRIDGE_CLOSE: Byte = 3
         private const val REMOTE_RESOURCE_TIMEOUT_SECONDS = 20L
+        private const val REMOTE_DISMISS_TOP_LAYER_SCRIPT =
+            "(function(){var ui=window.laymuxRemoteUi;" +
+                "return !!ui&&typeof ui.dismissTopLayer==='function'&&" +
+                "ui.dismissTopLayer()===true;})()"
         private const val MAX_REMOTE_PATH_LENGTH = 2_048
         private const val MAX_REMOTE_IDENTIFIER_LENGTH = 128
         private const val MAX_BRIDGE_ID_LENGTH = 64
