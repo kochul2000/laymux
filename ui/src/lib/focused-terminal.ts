@@ -1,5 +1,6 @@
 import type { TerminalInstance } from "@/stores/terminal-store";
 import type { DockPane, DockPosition, Workspace, WorkspacePane } from "@/stores/types";
+import { getPaneInstanceId } from "@/lib/view-instance-id";
 
 interface FocusedTerminalTargetState {
   workspaces: readonly Workspace[];
@@ -46,5 +47,6 @@ export function resolveFocusedTerminalPane(
 export function resolveFocusedTerminalCwd(state: FocusedTerminalCwdState): string | undefined {
   const pane = resolveFocusedTerminalPane(state);
   if (!pane) return undefined;
-  return state.terminals.find((terminal) => terminal.id === `terminal-${pane.id}`)?.cwd;
+  const instanceId = getPaneInstanceId(pane);
+  return state.terminals.find((terminal) => terminal.id === instanceId)?.cwd;
 }

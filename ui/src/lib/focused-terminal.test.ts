@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DockPane, Workspace } from "@/stores/types";
+import { getPaneInstanceId } from "./view-instance-id";
 import { resolveFocusedTerminalCwd, resolveFocusedTerminalPane } from "./focused-terminal";
 
 function workspace(id: string, paneId: string, type: "TerminalView" | "MemoView"): Workspace {
@@ -32,15 +33,16 @@ describe("focused terminal resolution", () => {
   });
 
   it("lets dock focus outrank the workspace grid", () => {
+    const focusedDockPane = dockPane("dock-pane", "TerminalView");
     const cwd = resolveFocusedTerminalCwd({
       terminals: [
         { id: "terminal-workspace-pane", cwd: "/workspace" },
-        { id: "terminal-dock-pane", cwd: "/dock" },
+        { id: getPaneInstanceId(focusedDockPane)!, cwd: "/dock" },
       ],
       workspaces: [workspace("active", "workspace-pane", "TerminalView")],
       activeWorkspaceId: "active",
       focusedPaneIndex: 0,
-      docks: [{ position: "left", panes: [dockPane("dock-pane", "TerminalView")] }],
+      docks: [{ position: "left", panes: [focusedDockPane] }],
       focusedDock: "left",
       focusedDockPaneId: "dock-pane",
     });
