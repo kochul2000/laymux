@@ -276,7 +276,7 @@ describe("persistSession", () => {
       useSettingsStore.getState().setPaste({ smart: false, imageDir: "/tmp/img" });
       useSettingsStore.getState().setControlBar({ hoverIdleSeconds: 5 });
       useSettingsStore.getState().setNotifications({ dismiss: "manual" });
-      useSettingsStore.getState().setTerminal({ copyOnSelect: false, scrollbarStyle: "separate" });
+      useSettingsStore.getState().setTerminal({ copyOnSelect: false });
       useSettingsStore.getState().setWorkspaceSelector({ pathEllipsis: "end" });
 
       await persistSession();
@@ -293,7 +293,6 @@ describe("persistSession", () => {
       expect(notifications.dismiss).toBe("manual");
       expect(terminal.copyOnSelect).toBe(false);
       expect(workspaceSelector.pathEllipsis).toBe("end");
-      expect(terminal.scrollbarStyle).toBe("separate");
     });
 
     it("claude settings survive round-trip", async () => {

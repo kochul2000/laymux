@@ -93,9 +93,6 @@ export type NotificationDismissMode = "workspace" | "paneFocus" | "manual";
 /** Path ellipsis direction: "start" truncates the beginning, "end" truncates the end. */
 export type PathEllipsisMode = "start" | "end";
 
-/** Terminal scrollbar rendering mode. */
-export type ScrollbarStyle = "overlay" | "separate";
-
 /** Pane control bar default mode. */
 export type ControlBarMode = "hover" | "pinned" | "minimized";
 
@@ -155,8 +152,6 @@ export interface TerminalSettings {
   advertiseTrueColor: boolean;
   /** Automatically copy text to clipboard when selected in terminal. */
   copyOnSelect: boolean;
-  /** Terminal scrollbar style: "overlay" renders on top of content, "separate" reserves space. */
-  scrollbarStyle: ScrollbarStyle;
   /** Issue #363: underline selected file/dir paths so a click opens the file or changes cwd. */
   pathLinkEnabled: boolean;
   /** Max selection length (chars) considered for a path link. Longer selections are ignored. */
@@ -797,7 +792,6 @@ export const DEFAULT_TERMINAL: TerminalSettings = {
   },
   advertiseTrueColor: true,
   copyOnSelect: true,
-  scrollbarStyle: "overlay",
   pathLinkEnabled: true,
   pathLinkMaxLength: 256,
   pathLinkOsOpenEnabled: true,

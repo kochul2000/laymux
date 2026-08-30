@@ -641,14 +641,6 @@
   }
 }
 
-/*
- * Terminal scrollbar styles:
- * xterm.js v6 custom scrollbar controlled via overviewRuler.width in TerminalView.
- *   - overlay (default): width = 0, FitAddon uses full container width
- *   - separate: width = 14, FitAddon reserves scrollbar space
- * CSS classes (scrollbar-overlay / scrollbar-separate) applied for test hooks only.
- */
-
 /* The helper textarea is a real DOM element in both renderers, so its OS caret
    needs a frame class independently of xterm's painted cursor (ADR-0079). */
 .terminal-sync-output-active .xterm-helper-textarea {
