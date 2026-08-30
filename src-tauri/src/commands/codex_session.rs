@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tauri::State;
 
 use super::claude_session::is_valid_session_id;
-use super::session_attribution::ProviderSessionLookup;
+use super::session_attribution::{provider_terminal_domains, ProviderSessionLookup};
 use super::wsl_agent_session::{resolve_wsl_agent_processes, WslAgentProvider};
 use crate::constants::{ENV_CODEX_HOME, ENV_CODEX_SQLITE_HOME};
 use crate::lock_ext::MutexExt;
@@ -46,19 +46,16 @@ pub(crate) fn get_codex_session_lookup_impl(
         .iter()
         .cloned()
         .collect();
-    let terminal_roots: Vec<(String, u32)> = {
-        let ptys = state.pty_handles.lock_or_err()?;
-        known
-            .iter()
-            .cloned()
-            .filter_map(|terminal_id| {
-                let child_pid = ptys.get(&terminal_id)?.child_pid()?;
-                Some((terminal_id, child_pid))
-            })
-            .collect()
-    };
+    let domains = provider_terminal_domains(&known, state)?;
+    let terminal_roots = domains.native_roots;
+    let native_terminal_ids: HashSet<String> = terminal_roots
+        .iter()
+        .map(|(terminal_id, _)| terminal_id.clone())
+        .collect();
     let mut failed_terminal_ids = HashSet::new();
-    let terminal_codex_pids: Vec<(String, u32)> =
+    let terminal_codex_pids: Vec<(String, u32)> = if terminal_roots.is_empty() {
+        Vec::new()
+    } else {
         match crate::process_tree::try_snapshot_processes() {
             Ok(snapshot) => terminal_roots
                 .into_iter()
@@ -68,11 +65,12 @@ pub(crate) fn get_codex_session_lookup_impl(
                 })
                 .collect(),
             Err(error) => {
-                failed_terminal_ids.extend(known.iter().cloned());
+                failed_terminal_ids.extend(native_terminal_ids);
                 tracing::warn!(%error, "native Codex process attribution failed");
                 Vec::new()
             }
-        };
+        }
+    };
 
     let store = CodexSessionStore::resolve();
     let mut candidates = Vec::new();
@@ -115,7 +113,7 @@ pub(crate) fn get_codex_session_lookup_impl(
             }
         }
         Err(error) => {
-            failed_terminal_ids.extend(known.iter().cloned());
+            failed_terminal_ids.extend(domains.wsl_terminal_ids);
             tracing::warn!(%error, "WSL Codex attribution failed");
         }
     }

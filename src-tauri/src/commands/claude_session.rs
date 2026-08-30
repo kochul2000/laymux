@@ -5,7 +5,7 @@ use tauri::State;
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 
-use super::session_attribution::ProviderSessionLookup;
+use super::session_attribution::{provider_terminal_domains, ProviderSessionLookup};
 use super::wsl_agent_session::{resolve_wsl_agent_processes, WslAgentProcess, WslAgentProvider};
 
 /// Resolve Claude Code session IDs for known Claude terminals.
@@ -36,17 +36,12 @@ pub(crate) fn get_claude_session_lookup_impl(
         k.iter().cloned().collect()
     };
 
-    let terminal_roots: Vec<(String, u32)> = {
-        let ptys = state.pty_handles.lock_or_err()?;
-        known
-            .iter()
-            .cloned()
-            .filter_map(|terminal_id| {
-                let child_pid = ptys.get(&terminal_id)?.child_pid()?;
-                Some((terminal_id, child_pid))
-            })
-            .collect()
-    };
+    let domains = provider_terminal_domains(&known, state)?;
+    let terminal_roots = domains.native_roots;
+    let native_terminal_ids: HashSet<String> = terminal_roots
+        .iter()
+        .map(|(terminal_id, _)| terminal_id.clone())
+        .collect();
     let mut failed_terminal_ids = HashSet::new();
     let native_descendants = if terminal_roots.is_empty() {
         Vec::new()
@@ -62,7 +57,7 @@ pub(crate) fn get_claude_session_lookup_impl(
                 })
                 .collect(),
             Err(error) => {
-                failed_terminal_ids.extend(known.iter().cloned());
+                failed_terminal_ids.extend(native_terminal_ids);
                 tracing::warn!(%error, "native Claude process attribution failed");
                 Vec::new()
             }
@@ -119,7 +114,7 @@ pub(crate) fn get_claude_session_lookup_impl(
             }
         }
         Err(error) => {
-            failed_terminal_ids.extend(known.iter().cloned());
+            failed_terminal_ids.extend(domains.wsl_terminal_ids);
             tracing::warn!(%error, "WSL Claude attribution failed");
         }
     }

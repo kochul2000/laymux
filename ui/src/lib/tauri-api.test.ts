@@ -30,6 +30,7 @@ import {
   handleLxMessage,
   loadSettings,
   acknowledgeSettingsRecovery,
+  isSettingsRecoveryAcknowledgeError,
   resetSettings,
   saveSettings,
   getRemoteAccessStatus,
@@ -527,6 +528,19 @@ describe("tauri-api", () => {
       expect(mockInvoke).toHaveBeenCalledWith("acknowledge_settings_recovery", {
         expectedRecoveryRevision: "revision-a",
       });
+    });
+
+    it("recognizes only structured recovery acknowledgement errors", () => {
+      expect(
+        isSettingsRecoveryAcknowledgeError({
+          kind: "runtimeReconcileFailed",
+          message: "runtime unavailable",
+        }),
+      ).toBe(true);
+      expect(isSettingsRecoveryAcknowledgeError(new Error("runtime unavailable"))).toBe(false);
+      expect(
+        isSettingsRecoveryAcknowledgeError({ kind: "unknown", message: "runtime unavailable" }),
+      ).toBe(false);
     });
   });
 

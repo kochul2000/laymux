@@ -5,6 +5,8 @@ import userEvent from "@testing-library/user-event";
 vi.mock("@/lib/tauri-api", () => ({
   resetSettings: vi.fn().mockResolvedValue(undefined),
   acknowledgeSettingsRecovery: vi.fn(),
+  isSettingsRecoveryAcknowledgeError: (error: unknown) =>
+    typeof error === "object" && error !== null && "kind" in error && "message" in error,
   loadSettingsValidated: vi.fn(),
   getSettingsPath: vi.fn().mockResolvedValue("C:\\fallback\\settings.json"),
 }));
@@ -158,6 +160,31 @@ describe("SettingsRecoveryModal — recovered status (issue #701, ADR-0119)", ()
     await waitFor(() => expect(consoleError).toHaveBeenCalled());
     expect(onDismiss).not.toHaveBeenCalled();
     expect(screen.getByTestId("settings-recovery-dismiss")).toBeEnabled();
+    consoleError.mockRestore();
+  });
+
+  it("keeps the modal blocked and retries when runtime reconciliation failed after commit", async () => {
+    vi.mocked(acknowledgeSettingsRecovery).mockRejectedValueOnce({
+      kind: "runtimeReconcileFailed",
+      message: "remote runtime lock poisoned",
+    });
+    const onDismiss = vi.fn();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(
+      <SettingsRecoveryModal loadResult={RECOVERED} onDismiss={onDismiss} onReset={vi.fn()} />,
+    );
+
+    await userEvent.click(screen.getByTestId("settings-recovery-dismiss"));
+
+    await waitFor(() => expect(consoleError).toHaveBeenCalled());
+    expect(loadSettingsValidated).not.toHaveBeenCalled();
+    expect(onDismiss).not.toHaveBeenCalled();
+    expect(screen.getByTestId("settings-recovery-dismiss")).toBeEnabled();
+
+    await userEvent.click(screen.getByTestId("settings-recovery-dismiss"));
+
+    await waitFor(() => expect(acknowledgeSettingsRecovery).toHaveBeenCalledTimes(2));
+    expect(onDismiss).toHaveBeenCalledWith(RECOVERED.settings);
     consoleError.mockRestore();
   });
 

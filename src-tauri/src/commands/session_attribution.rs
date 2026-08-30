@@ -33,6 +33,34 @@ pub(crate) struct ProviderSessionLookup {
     pub failed_terminal_ids: HashSet<String>,
 }
 
+pub(crate) struct ProviderTerminalDomains {
+    pub native_roots: Vec<(String, u32)>,
+    pub wsl_terminal_ids: HashSet<String>,
+}
+
+pub(crate) fn provider_terminal_domains(
+    known_terminal_ids: &[String],
+    state: &AppState,
+) -> Result<ProviderTerminalDomains, crate::error::AppError> {
+    let ptys = state.pty_handles.lock_or_err()?;
+    let mut native_roots = Vec::new();
+    let mut wsl_terminal_ids = HashSet::new();
+    for terminal_id in known_terminal_ids {
+        let Some(handle) = ptys.get(terminal_id) else {
+            continue;
+        };
+        if handle.is_wsl_backed() {
+            wsl_terminal_ids.insert(terminal_id.clone());
+        } else if let Some(child_pid) = handle.child_pid() {
+            native_roots.push((terminal_id.clone(), child_pid));
+        }
+    }
+    Ok(ProviderTerminalDomains {
+        native_roots,
+        wsl_terminal_ids,
+    })
+}
+
 fn provider_lookup_failed_for_terminal(
     terminal_id: &str,
     lookups: &[&ProviderSessionLookup],
@@ -306,6 +334,34 @@ mod tests {
             "terminal-b",
             &[&failed, &healthy]
         ));
+    }
+
+    #[test]
+    fn provider_domains_keep_wsl_terminals_out_of_native_snapshot_failures() {
+        let state = AppState::new();
+        state.pty_handles.lock().unwrap().extend([
+            (
+                "terminal-native".into(),
+                crate::pty::PtyHandle::from_test_writer(Box::new(std::io::sink()))
+                    .with_child_pid(Some(101)),
+            ),
+            (
+                "terminal-wsl".into(),
+                crate::pty::PtyHandle::from_test_writer(Box::new(std::io::sink()))
+                    .with_child_pid(Some(202))
+                    .with_wsl_backed(true),
+            ),
+        ]);
+
+        let domains =
+            provider_terminal_domains(&["terminal-native".into(), "terminal-wsl".into()], &state)
+                .unwrap();
+
+        assert_eq!(domains.native_roots, vec![("terminal-native".into(), 101)]);
+        assert_eq!(
+            domains.wsl_terminal_ids,
+            HashSet::from(["terminal-wsl".into()])
+        );
     }
 
     #[test]

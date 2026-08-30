@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import {
   resetSettings,
   acknowledgeSettingsRecovery,
+  isSettingsRecoveryAcknowledgeError,
   loadSettingsValidated,
   getSettingsPath,
   type Settings,
@@ -79,6 +80,14 @@ export function SettingsRecoveryModal({
       onDismiss(acknowledgedSettings);
     } catch (error) {
       console.error("[SettingsRecoveryModal] Recovery acknowledgement failed:", error);
+      if (isSettingsRecoveryAcknowledgeError(error) && error.kind === "runtimeReconcileFailed") {
+        // The recovered document is already committed, but backend-owned
+        // Remote/cloud runtime has not converged. Keep the reviewed revision
+        // and write block in place; pressing confirm retries the same command,
+        // whose clean-document path retries reconciliation without data loss.
+        setAcknowledging(false);
+        return;
+      }
       // A manual edit may have changed which typed values would be dropped.
       // Reload that protected document and show the new loss list; the user
       // must explicitly acknowledge this exact revision before any write.

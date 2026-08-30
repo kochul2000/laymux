@@ -9,7 +9,7 @@ use tauri::State;
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 
-use super::session_attribution::ProviderSessionLookup;
+use super::session_attribution::{provider_terminal_domains, ProviderSessionLookup};
 use super::wsl_agent_session::{resolve_wsl_agent_processes, WslAgentProvider};
 
 /// `<configured grok command> --resume <uuid>` only. Prefix is re-derived
@@ -178,43 +178,40 @@ pub(crate) fn get_grok_session_lookup_impl(
         k.iter().cloned().collect()
     };
     let home = grok_home();
-    let terminal_roots: Vec<(String, u32)> = {
-        let ptys = state.pty_handles.lock_or_err()?;
-        known
-            .iter()
-            .cloned()
-            .filter_map(|terminal_id| {
-                let child_pid = ptys.get(&terminal_id)?.child_pid()?;
-                Some((terminal_id, child_pid))
-            })
-            .collect()
-    };
+    let domains = provider_terminal_domains(&known, state)?;
+    let terminal_roots = domains.native_roots;
+    let native_terminal_ids: HashSet<String> = terminal_roots
+        .iter()
+        .map(|(terminal_id, _)| terminal_id.clone())
+        .collect();
     let mut failed_terminal_ids = HashSet::new();
     let mut candidates = Vec::new();
-    match crate::process_tree::try_snapshot_processes() {
-        Ok(snapshot) => {
-            for (terminal_id, root_pid) in terminal_roots {
-                let Some((pid, app)) =
-                    crate::process_tree::match_interactive_app_process(&snapshot, root_pid)
-                else {
-                    continue;
-                };
-                if app != "Grok" {
-                    continue;
-                }
-                match session_id_for_pid_checked(&home, pid, session_max_age_hours) {
-                    Ok(Some(session_id)) => candidates.push((terminal_id, session_id)),
-                    Ok(None) => {}
-                    Err(error) => {
-                        failed_terminal_ids.insert(terminal_id.clone());
-                        tracing::warn!(%error, "native Grok session lookup failed");
+    if !terminal_roots.is_empty() {
+        match crate::process_tree::try_snapshot_processes() {
+            Ok(snapshot) => {
+                for (terminal_id, root_pid) in terminal_roots {
+                    let Some((pid, app)) =
+                        crate::process_tree::match_interactive_app_process(&snapshot, root_pid)
+                    else {
+                        continue;
+                    };
+                    if app != "Grok" {
+                        continue;
+                    }
+                    match session_id_for_pid_checked(&home, pid, session_max_age_hours) {
+                        Ok(Some(session_id)) => candidates.push((terminal_id, session_id)),
+                        Ok(None) => {}
+                        Err(error) => {
+                            failed_terminal_ids.insert(terminal_id.clone());
+                            tracing::warn!(%error, "native Grok session lookup failed");
+                        }
                     }
                 }
             }
-        }
-        Err(error) => {
-            failed_terminal_ids.extend(known.iter().cloned());
-            tracing::warn!(%error, "native Grok process attribution failed");
+            Err(error) => {
+                failed_terminal_ids.extend(native_terminal_ids);
+                tracing::warn!(%error, "native Grok process attribution failed");
+            }
         }
     }
     let mut result = crate::process_tree::complete_agent_session_attributions(
@@ -256,7 +253,7 @@ pub(crate) fn get_grok_session_lookup_impl(
             }
         }
         Err(error) => {
-            failed_terminal_ids.extend(known.iter().cloned());
+            failed_terminal_ids.extend(domains.wsl_terminal_ids);
             tracing::warn!(%error, "WSL Grok attribution failed");
         }
     }

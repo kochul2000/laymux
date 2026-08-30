@@ -9,6 +9,13 @@ use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 use crate::terminal::{TerminalActivity, TerminalNotification, TerminalStateInfo};
 
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SettingsRecoveryAcknowledgeError {
+    RecoveryDocumentRejected { message: String },
+    RuntimeReconcileFailed { message: String },
+}
+
 #[tauri::command]
 pub fn greet(name: &str) -> String {
     format!("Hello, {}! Welcome to Laymux.", name)
@@ -170,7 +177,7 @@ pub fn acknowledge_settings_recovery(
     expected_recovery_revision: String,
     state: State<Arc<AppState>>,
     app: AppHandle,
-) -> Result<crate::settings::Settings, String> {
+) -> Result<crate::settings::Settings, SettingsRecoveryAcknowledgeError> {
     complete_settings_recovery(
         || crate::settings::acknowledge_settings_recovery(&expected_recovery_revision),
         |settings| {
@@ -224,9 +231,12 @@ fn reconcile_persistent_remote_runtime(
 fn complete_settings_recovery(
     acknowledge: impl FnOnce() -> Result<crate::settings::Settings, String>,
     reconcile_runtime: impl FnOnce(&crate::settings::Settings) -> Result<(), String>,
-) -> Result<crate::settings::Settings, String> {
-    let settings = acknowledge()?;
-    reconcile_runtime(&settings)?;
+) -> Result<crate::settings::Settings, SettingsRecoveryAcknowledgeError> {
+    let settings = acknowledge().map_err(|message| {
+        SettingsRecoveryAcknowledgeError::RecoveryDocumentRejected { message }
+    })?;
+    reconcile_runtime(&settings)
+        .map_err(|message| SettingsRecoveryAcknowledgeError::RuntimeReconcileFailed { message })?;
     Ok(settings)
 }
 
@@ -1120,7 +1130,27 @@ mod tests {
             |_| Err("runtime rejected recovered settings".into()),
         );
 
-        assert_eq!(result.unwrap_err(), "runtime rejected recovered settings");
+        assert_eq!(
+            result.unwrap_err(),
+            SettingsRecoveryAcknowledgeError::RuntimeReconcileFailed {
+                message: "runtime rejected recovered settings".into()
+            }
+        );
+    }
+
+    #[test]
+    fn recovery_acknowledgement_distinguishes_document_rejection_from_runtime_failure() {
+        let result = complete_settings_recovery(
+            || Err("recovery revision changed".into()),
+            |_| panic!("runtime reconciliation must not run after document rejection"),
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            SettingsRecoveryAcknowledgeError::RecoveryDocumentRejected {
+                message: "recovery revision changed".into()
+            }
+        );
     }
 
     #[test]

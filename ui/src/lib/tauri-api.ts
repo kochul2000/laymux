@@ -551,6 +551,21 @@ export async function acknowledgeSettingsRecovery(
   return invoke("acknowledge_settings_recovery", { expectedRecoveryRevision });
 }
 
+export type SettingsRecoveryAcknowledgeError =
+  | { kind: "recoveryDocumentRejected"; message: string }
+  | { kind: "runtimeReconcileFailed"; message: string };
+
+export function isSettingsRecoveryAcknowledgeError(
+  error: unknown,
+): error is SettingsRecoveryAcknowledgeError {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as Record<string, unknown>;
+  return (
+    typeof candidate.message === "string" &&
+    (candidate.kind === "recoveryDocumentRejected" || candidate.kind === "runtimeReconcileFailed")
+  );
+}
+
 export async function getSettingsPath(): Promise<string> {
   return invoke("get_settings_path");
 }
