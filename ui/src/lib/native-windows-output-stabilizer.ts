@@ -116,10 +116,10 @@ export class NativeWindowsOutputStabilizer {
         this.consumeControlByte(byte, output);
         return;
       case "passEscape":
-        this.consumePassEscapeByte(byte, output);
+        this.consumePassEscapeByte(byte, now, output);
         return;
       case "passCsi":
-        this.consumePassCsiByte(byte, output);
+        this.consumePassCsiByte(byte, now, output);
         return;
       case "passControl":
         output.append(byte);
@@ -169,6 +169,15 @@ export class NativeWindowsOutputStabilizer {
     const escape = this.lexical as Extract<LexicalState, { kind: "escape" }>;
     escape.bytes.push(byte);
     const control = controlStringKind(byte);
+    if (
+      byte === ESC &&
+      this.transaction &&
+      this.transaction.bytes.length >= this.maxBufferedBytes
+    ) {
+      this.failOpen(output);
+      this.lexical = { kind: "escape", bytes: [ESC], startedAt: now };
+      return;
+    }
     if (this.transaction && !this.appendHeld(byte, output)) {
       this.setPassStateAfterEscapeByte(byte);
       return;
@@ -214,6 +223,15 @@ export class NativeWindowsOutputStabilizer {
   private consumeCsiByte(byte: number, now: number, output: EmissionBuilder): void {
     const csi = this.lexical as Extract<LexicalState, { kind: "csi" }>;
     csi.bytes.push(byte);
+    if (
+      byte === ESC &&
+      this.transaction &&
+      this.transaction.bytes.length >= this.maxBufferedBytes
+    ) {
+      this.failOpen(output);
+      this.lexical = { kind: "escape", bytes: [ESC], startedAt: now };
+      return;
+    }
     if (this.transaction && !this.appendHeld(byte, output)) {
       this.setPassStateAfterCsiByte(byte, csi.bytes.length);
       return;
@@ -294,13 +312,21 @@ export class NativeWindowsOutputStabilizer {
     }
   }
 
-  private consumePassEscapeByte(byte: number, output: EmissionBuilder): void {
+  private consumePassEscapeByte(byte: number, now: number, output: EmissionBuilder): void {
+    if (byte === ESC) {
+      this.lexical = { kind: "escape", bytes: [ESC], startedAt: now };
+      return;
+    }
     output.append(byte);
     this.setPassStateAfterEscapeByte(byte);
   }
 
-  private consumePassCsiByte(byte: number, output: EmissionBuilder): void {
+  private consumePassCsiByte(byte: number, now: number, output: EmissionBuilder): void {
     const csi = this.lexical as Extract<LexicalState, { kind: "passCsi" }>;
+    if (byte === ESC) {
+      this.lexical = { kind: "escape", bytes: [ESC], startedAt: now };
+      return;
+    }
     output.append(byte);
     this.setPassStateAfterCsiByte(byte, csi.bytesSeen + 1);
   }
@@ -380,6 +406,12 @@ export class NativeWindowsOutputStabilizer {
         transaction.phase = "awaitingRestore";
         transaction.restoreStage = "hide";
         transaction.frameEndAt = now;
+      } else if (kind === "frameEndCombined") {
+        // xterm closes synchronized output for any valid private-mode reset
+        // containing 2026. Only the singleton reset can complete a strict
+        // cursor park; a combined reset must close this candidate fail-open.
+        transaction.frameEndAt = now;
+        this.failOpen(output);
       } else if (kind === "frameStart") {
         this.failOpen(output);
       } else if (transaction.inFrameParkStage !== "none") {
@@ -533,12 +565,20 @@ function isControlStringEnd(kind: ControlStringKind, previousEsc: boolean, byte:
   return (kind === "osc" && byte === BEL) || (previousEsc && byte === 0x5c);
 }
 
-type CsiKind = "frameStart" | "frameEnd" | "cursorHide" | "cursorShow" | "position" | "other";
+type CsiKind =
+  | "frameStart"
+  | "frameEnd"
+  | "frameEndCombined"
+  | "cursorHide"
+  | "cursorShow"
+  | "position"
+  | "other";
 
 function classifyCsi(bytes: readonly number[]): CsiKind {
   const text = String.fromCharCode(...bytes);
   if (text === "\x1b[?2026h") return "frameStart";
   if (text === "\x1b[?2026l") return "frameEnd";
+  if (hasPrivateModeParameter(text, "l", 2026)) return "frameEndCombined";
   if (text === "\x1b[?25l") return "cursorHide";
   if (text === "\x1b[?25h") return "cursorShow";
   const body = text.slice(2, -1);
@@ -546,6 +586,13 @@ function classifyCsi(bytes: readonly number[]): CsiKind {
   if ((final === "H" || final === "f") && /^[0-9;]*$/.test(body)) return "position";
   if (final === "G" && /^\d*$/.test(body)) return "position";
   return "other";
+}
+
+function hasPrivateModeParameter(text: string, final: "h" | "l", parameter: number): boolean {
+  if (!text.startsWith("\x1b[?") || text.at(-1) !== final) return false;
+  const body = text.slice(3, -1);
+  if (!/^[0-9;]+$/.test(body)) return false;
+  return body.split(";").some((value) => value !== "" && Number(value) === parameter);
 }
 
 function parkDeadline(transaction: Transaction, holdMs: number): number | undefined {

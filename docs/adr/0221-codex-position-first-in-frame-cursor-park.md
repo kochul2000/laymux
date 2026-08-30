@@ -44,6 +44,8 @@ out-of-frame restore는 비목표다.
 - 각 문법의 구성 토큰은 연속해야 한다. printable byte, C0, control string, position 이외
   CSI 또는 결합 private mode가 끼면 해당 후보를 취소한다. 이후 frame 안에서 새로 나타난
   정확한 suffix는 다시 후보가 될 수 있다.
+- 2026을 포함한 유효한 결합 private-mode reset은 실제 DEC 2026 frame 경계로 latch를
+  닫되, singleton strict reset으로 인정하거나 권위 metadata를 붙이지 않는다.
 - 앱 이름이나 버전 문자열로 분기하지 않는다. 정확한 바이트 suffix와 기존
   `InitialExecutionHost` gate만 근거로 사용한다.
 - Native Windows stabilizer는 어느 문법이든 reset에서 즉시 frame 전체를 tracked write

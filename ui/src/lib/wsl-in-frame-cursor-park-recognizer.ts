@@ -14,7 +14,7 @@ type InFrameParkStage =
   | "shown"
   | "showThenPositioned"
   | "positionThenShown";
-type CsiKind = "frameStart" | "frameEnd" | "cursorShow" | "position" | "other";
+type CsiKind = "frameStart" | "frameEnd" | "frameEndCombined" | "cursorShow" | "position" | "other";
 
 export interface WslCursorMetadataEmission {
   data: Uint8Array;
@@ -141,6 +141,13 @@ export class WslInFrameCursorParkRecognizer {
       this.inFrameParkStage = "none";
       return undefined;
     }
+    if (kind === "frameEndCombined") {
+      // A combined private-mode reset closes xterm's real DEC 2026 frame,
+      // but is not the singleton reset required by either strict park tail.
+      this.frameOpen = false;
+      this.inFrameParkStage = "none";
+      return undefined;
+    }
     if (!this.frameOpen) return undefined;
 
     if (kind === "cursorShow") {
@@ -201,10 +208,18 @@ function classifyCsi(bytes: readonly number[]): CsiKind {
   const text = String.fromCharCode(...bytes);
   if (text === "\x1b[?2026h") return "frameStart";
   if (text === "\x1b[?2026l") return "frameEnd";
+  if (hasPrivateModeParameter(text, "l", 2026)) return "frameEndCombined";
   if (text === "\x1b[?25h") return "cursorShow";
   const body = text.slice(2, -1);
   const final = text.at(-1);
   if ((final === "H" || final === "f") && /^[0-9;]*$/.test(body)) return "position";
   if (final === "G" && /^\d*$/.test(body)) return "position";
   return "other";
+}
+
+function hasPrivateModeParameter(text: string, final: "h" | "l", parameter: number): boolean {
+  if (!text.startsWith("\x1b[?") || text.at(-1) !== final) return false;
+  const body = text.slice(3, -1);
+  if (!/^[0-9;]+$/.test(body)) return false;
+  return body.split(";").some((value) => value !== "" && Number(value) === parameter);
 }

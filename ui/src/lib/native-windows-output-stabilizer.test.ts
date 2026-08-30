@@ -220,6 +220,27 @@ describe("NativeWindowsOutputStabilizer", () => {
     }
   });
 
+  it.each(["\x1b[?2026;25l", "\x1b[?25;2026l"])(
+    "fails open combined DEC 2026 reset %j without leaking authority outside the frame",
+    (combinedReset) => {
+      const input = "\x1b[?2026hbody" + combinedReset + "OUT\x1b[4;7H\x1b[?25h\x1b[?2026l";
+
+      for (let split = 0; split <= input.length; split += 1) {
+        const stabilizer = new NativeWindowsOutputStabilizer();
+        const emissions = [
+          ...stabilizer.push(bytes(input.slice(0, split)), 10),
+          ...stabilizer.push(bytes(input.slice(split)), 20),
+        ];
+
+        expect(text(emissions)).toBe(input);
+        expect(emissions.every((emission) => !emission.frameEndCursorAuthoritative)).toBe(true);
+        expect(emissions.every((emission) => !emission.stabilized)).toBe(true);
+        expect(emissions.some((emission) => emission.parkDeadline !== undefined)).toBe(true);
+        expect(stabilizer.deadline).toBeUndefined();
+      }
+    },
+  );
+
   it("keeps the last of repeated ESC bytes as a position opener", () => {
     const input = "\x1b[?2026hbody\x1b\x1b[4;7H\x1b[?25h\x1b[?2026l";
 
@@ -273,6 +294,59 @@ describe("NativeWindowsOutputStabilizer", () => {
       ];
 
       expect(text(emissions)).toBe(input);
+      expect(emissions.filter((emission) => emission.stabilized)).toHaveLength(1);
+      expect(
+        emissions.filter((emission) => emission.frameEndCursorAuthoritative === true),
+      ).toHaveLength(1);
+      expect(stabilizer.deadline).toBeUndefined();
+    }
+  });
+
+  it.each([
+    ["a canceled partial CSI", "\x1b[31"],
+    ["a repeated ESC", "\x1b"],
+  ])("reconsumes %s after timeout before the following frame", (_label, partial) => {
+    const previous = "\x1b[?2026hold\x1b[?2026l" + partial;
+    const following = "\x1b[?2026hnew\x1b[4;7H\x1b[?25h\x1b[?2026l";
+
+    for (let split = 0; split <= following.length; split += 1) {
+      const stabilizer = new NativeWindowsOutputStabilizer();
+      expect(text(stabilizer.push(bytes(previous), 0))).toBe("");
+      const emissions = [
+        ...stabilizer.flushExpired(50),
+        ...stabilizer.push(bytes(following.slice(0, split)), 51),
+        ...stabilizer.push(bytes(following.slice(split)), 52),
+      ];
+
+      expect(text(emissions)).toBe(previous + following);
+      expect(emissions.filter((emission) => emission.stabilized)).toHaveLength(1);
+      expect(
+        emissions.filter((emission) => emission.frameEndCursorAuthoritative === true),
+      ).toHaveLength(1);
+      expect(stabilizer.deadline).toBeUndefined();
+    }
+  });
+
+  it.each([
+    ["a canceled partial CSI already in pass-through", "\x1b[31", -1],
+    ["a canceled partial CSI on the limit boundary", "\x1b[31", 0],
+    ["a repeated ESC already in pass-through", "\x1b", -1],
+    ["a repeated ESC on the limit boundary", "\x1b", 0],
+  ])("reconsumes %s before the following frame", (_label, partial, maxBufferedBytesOffset) => {
+    const previous = "\x1b[?2026h" + "x".repeat(64) + "\x1b[?2026l" + partial;
+    const following = "\x1b[?2026hnew\x1b[4;7H\x1b[?25h\x1b[?2026l";
+
+    for (let split = 0; split <= following.length; split += 1) {
+      const stabilizer = new NativeWindowsOutputStabilizer({
+        maxBufferedBytes: bytes(previous).length + maxBufferedBytesOffset,
+      });
+      const emissions = [
+        ...stabilizer.push(bytes(previous), 0),
+        ...stabilizer.push(bytes(following.slice(0, split)), 1),
+        ...stabilizer.push(bytes(following.slice(split)), 2),
+      ];
+
+      expect(text(emissions)).toBe(previous + following);
       expect(emissions.filter((emission) => emission.stabilized)).toHaveLength(1);
       expect(
         emissions.filter((emission) => emission.frameEndCursorAuthoritative === true),

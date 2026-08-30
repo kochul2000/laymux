@@ -195,6 +195,24 @@ describe("WslInFrameCursorParkRecognizer", () => {
     }
   });
 
+  it.each(["\x1b[?2026;25l", "\x1b[?25;2026l"])(
+    "closes the frame on combined DEC 2026 reset %j without leaking authority",
+    (combinedReset) => {
+      const input = "\x1b[?2026hbody" + combinedReset + "OUT\x1b[4;7H\x1b[?25h\x1b[?2026l";
+
+      for (let split = 0; split <= input.length; split += 1) {
+        const recognizer = new WslInFrameCursorParkRecognizer();
+        const emissions = [
+          ...recognizer.push(bytes(input.slice(0, split))),
+          ...recognizer.push(bytes(input.slice(split))),
+        ];
+
+        expect(text(emissions)).toBe(input);
+        expect(emissions.every((emission) => !emission.frameEndCursorAuthoritative)).toBe(true);
+      }
+    },
+  );
+
   it.each([
     ["a canceled standalone CSI", "prefix\x1b[31\x1b[?2026hbody"],
     ["repeated standalone ESC", "prefix\x1b\x1b[?2026hbody"],
