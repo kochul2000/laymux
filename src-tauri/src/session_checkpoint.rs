@@ -41,6 +41,7 @@ pub struct SessionCheckpointRuntime {
     finalizing: AtomicBool,
     active_mutations: AtomicUsize,
     detached_mutations: Mutex<HashSet<String>>,
+    retired_pty_completions: Mutex<Vec<crate::pty_control::PtyControlCompletion>>,
 }
 
 /// Admission token held until an app-approved mutation has fully settled.
@@ -56,6 +57,7 @@ impl Default for SessionCheckpointRuntime {
             finalizing: AtomicBool::new(false),
             active_mutations: AtomicUsize::new(0),
             detached_mutations: Mutex::new(HashSet::new()),
+            retired_pty_completions: Mutex::new(Vec::new()),
         }
     }
 }
@@ -135,6 +137,22 @@ impl SessionCheckpointRuntime {
         Ok(removed)
     }
 
+    /// Preserve a faulted worker acknowledgement after its handle leaves the
+    /// live registry. The close mutation permit is still held while this is
+    /// registered, so finalization cannot observe a gap between the two.
+    pub(crate) fn quarantine_retired_pty_completion(
+        &self,
+        completion: crate::pty_control::PtyControlCompletion,
+    ) -> Result<(), String> {
+        if completion.is_complete() {
+            return Ok(());
+        }
+        let mut completions = self.retired_pty_completions.lock_or_err()?;
+        completions.retain(|pending| !pending.is_complete());
+        completions.push(completion);
+        Ok(())
+    }
+
     pub async fn begin_finalization_and_drain(&self, state: &AppState) -> Result<(), String> {
         self.begin_finalization()?;
         let drained = tokio::time::timeout(FINALIZATION_DRAIN_TIMEOUT, async {
@@ -181,11 +199,20 @@ impl SessionCheckpointRuntime {
 /// lifecycle completion before declaring the app quiescent.
 fn pty_control_operations_drained(state: &AppState) -> Result<bool, String> {
     let handles: Vec<_> = state.pty_handles.lock_or_err()?.values().cloned().collect();
-    Ok(handles.iter().all(|handle| {
+    let live_drained = handles.iter().all(|handle| {
         handle
             .pending_control_completion()
             .is_none_or(|completion| completion.is_complete())
-    }))
+    });
+    if !live_drained {
+        return Ok(false);
+    }
+    let mut retired = state
+        .session_checkpoint
+        .retired_pty_completions
+        .lock_or_err()?;
+    retired.retain(|completion| !completion.is_complete());
+    Ok(retired.is_empty())
 }
 
 pub async fn request_frontend_checkpoint(
@@ -491,7 +518,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn finalization_waits_for_a_faulted_direct_pty_worker_completion() {
+    async fn finalization_waits_for_a_retired_faulted_pty_worker_completion() {
         let state = std::sync::Arc::new(AppState::new());
         let gate = Arc::new((Mutex::new(false), Condvar::new()));
         let handle = crate::pty::PtyHandle::from_test_writer(Box::new(StuckWriter {
@@ -514,6 +541,22 @@ mod tests {
         while pty_control_operations_drained(&state).unwrap() && Instant::now() < pending_deadline {
             std::thread::sleep(Duration::from_millis(5));
         }
+        assert!(!pty_control_operations_drained(&state).unwrap());
+        let retired_handle = state
+            .pty_handles
+            .lock_or_err()
+            .unwrap()
+            .remove("terminal-1")
+            .unwrap();
+        state
+            .session_checkpoint
+            .quarantine_retired_pty_completion(
+                retired_handle
+                    .pending_control_completion()
+                    .expect("faulted worker completion"),
+            )
+            .unwrap();
+        drop(retired_handle);
         assert!(!pty_control_operations_drained(&state).unwrap());
 
         let task_state = state.clone();

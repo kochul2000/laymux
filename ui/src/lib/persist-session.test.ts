@@ -706,6 +706,28 @@ describe("persistSession", () => {
     expect(savedView.lastCodexSession).toBe("session-being-restored");
   });
 
+  it("keeps the resume grace before PTY creation has marked the session ready", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    const terminalId = `terminal-${paneId}`;
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      lastCodexSession: "session-selected-for-startup",
+    });
+    registerLiveTerminal(terminalId, { type: "shell" }, { sessionReady: false });
+    useTerminalStore.getState().updateInstanceInfo(terminalId, {
+      attributionPendingUntil: Date.now() + 15_000,
+    });
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValueOnce({
+      [terminalId]: { generation: 1, state: "noAgent" },
+    });
+
+    await persistSession();
+
+    const savedView = vi.mocked(saveSettings).mock.calls[0][0].workspaces[0].panes[0].view;
+    expect(savedView.lastCodexSession).toBe("session-selected-for-startup");
+  });
+
   it("keeps a stale agent session for a pane with no live terminal this run", async () => {
     const wsState = useWorkspaceStore.getState();
     wsState.setPaneView(0, {

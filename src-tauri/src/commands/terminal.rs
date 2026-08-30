@@ -1757,7 +1757,20 @@ pub(crate) fn close_terminal_session_inner(
         retirement.finish();
     }
     if let Some(handle) = handle {
-        handle.terminate()?;
+        let terminate_result = handle.terminate();
+        let quarantine_result = match handle.pending_control_completion() {
+            Some(completion) => state
+                .session_checkpoint
+                .quarantine_retired_pty_completion(completion),
+            None => Ok(()),
+        };
+        match (terminate_result, quarantine_result) {
+            (Err(terminate), Err(quarantine)) => {
+                return Err(format!("{terminate}; {quarantine}"));
+            }
+            (Err(error), Ok(())) | (Ok(()), Err(error)) => return Err(error),
+            (Ok(()), Ok(())) => {}
+        }
     }
 
     Ok(())

@@ -215,4 +215,32 @@ describe("useHiddenTerminalAutoClose", () => {
 
     expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(true);
   });
+
+  it("remounts a no-longer-hidden pane when an earlier effect reports a late backend close", async () => {
+    let finishEviction: (() => void) | undefined;
+    vi.mocked(checkpointAndCloseHiddenTerminals).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishEviction = () =>
+            resolve({ closedTerminalIds: ["terminal-p2"], failedTerminalIds: [] });
+        }),
+    );
+    useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
+    useUiStore.getState().toggleWorkspaceHidden("wsB");
+    const first = renderHook(() => useHiddenTerminalAutoClose());
+    act(() => vi.advanceTimersByTime(10_000));
+    first.unmount();
+
+    // Model StrictMode's effect restart, then make the pane ineligible before
+    // the transaction started by the retired effect returns.
+    const current = renderHook(() => useHiddenTerminalAutoClose());
+    act(() => useUiStore.getState().toggleWorkspaceHidden("wsB"));
+    await act(async () => {
+      finishEviction?.();
+      await Promise.resolve();
+    });
+
+    expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(false);
+    current.unmount();
+  });
 });

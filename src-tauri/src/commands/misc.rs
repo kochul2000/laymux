@@ -161,26 +161,23 @@ pub fn reset_settings(
     // The process-global updater would otherwise keep the old channel and its
     // candidate until the next periodic check (ADR-0190).
     crate::app_update::schedule_channel_recheck(app.clone(), state.app_update.clone());
-    let change = crate::remote_server::update_persistent_remote_settings(
-        &state,
-        &app,
-        default_settings.remote.clone(),
-    )?;
-    if let Some(enabled) = change.effective_enabled {
-        crate::cloud::tunnel::reconcile_cloud_tunnel_for_access(
-            state.inner().clone(),
-            app,
-            enabled,
-        );
-    } else if change.cloud_access_mode_changed {
-        crate::cloud::tunnel::restart_cloud_tunnel_for_policy_change(state.inner().clone(), app);
-    }
+    reconcile_persistent_remote_runtime(state.inner(), &app, default_settings.remote.clone())?;
     Ok(default_settings)
 }
 
 #[tauri::command(async)]
-pub fn acknowledge_settings_recovery() -> Result<crate::settings::Settings, String> {
-    crate::settings::acknowledge_settings_recovery()
+pub fn acknowledge_settings_recovery(
+    state: State<Arc<AppState>>,
+    app: AppHandle,
+) -> Result<crate::settings::Settings, String> {
+    complete_settings_recovery(crate::settings::acknowledge_settings_recovery, |settings| {
+        // The acknowledged file may have been edited while the modal was open.
+        // Reconcile backend-owned state from the exact snapshot just committed
+        // before the frontend is allowed to resume checkpoint writes.
+        reconcile_persistent_remote_runtime(state.inner(), &app, settings.remote.clone())?;
+        crate::app_update::schedule_channel_recheck(app.clone(), state.app_update.clone());
+        Ok(())
+    })
 }
 
 #[tauri::command]
@@ -195,18 +192,38 @@ pub fn save_settings(
     app: AppHandle,
 ) -> Result<(), String> {
     let settings = crate::settings::save_frontend_settings(&settings)?;
-    let change =
-        crate::remote_server::update_persistent_remote_settings(&state, &app, settings.remote)?;
+    reconcile_persistent_remote_runtime(state.inner(), &app, settings.remote)?;
+    Ok(())
+}
+
+fn reconcile_persistent_remote_runtime(
+    state: &Arc<AppState>,
+    app: &AppHandle,
+    remote: crate::settings::models::RemoteSettings,
+) -> Result<(), String> {
+    let change = crate::remote_server::update_persistent_remote_settings(state, app, remote)?;
     if let Some(enabled) = change.effective_enabled {
         crate::cloud::tunnel::reconcile_cloud_tunnel_for_access(
-            state.inner().clone(),
-            app,
+            Arc::clone(state),
+            app.clone(),
             enabled,
         );
     } else if change.cloud_access_mode_changed {
-        crate::cloud::tunnel::restart_cloud_tunnel_for_policy_change(state.inner().clone(), app);
+        crate::cloud::tunnel::restart_cloud_tunnel_for_policy_change(
+            Arc::clone(state),
+            app.clone(),
+        );
     }
     Ok(())
+}
+
+fn complete_settings_recovery(
+    acknowledge: impl FnOnce() -> Result<crate::settings::Settings, String>,
+    reconcile_runtime: impl FnOnce(&crate::settings::Settings) -> Result<(), String>,
+) -> Result<crate::settings::Settings, String> {
+    let settings = acknowledge()?;
+    reconcile_runtime(&settings)?;
+    Ok(settings)
 }
 
 #[tauri::command(async)]
@@ -1069,6 +1086,37 @@ mod tests {
     fn greet_returns_message() {
         let result = greet("Laymux");
         assert_eq!(result, "Hello, Laymux! Welcome to Laymux.");
+    }
+
+    #[test]
+    fn recovery_acknowledgement_reconciles_the_exact_committed_snapshot() {
+        let mut latest = crate::settings::Settings::default();
+        latest.remote.enabled = false;
+        latest.update.channel = "beta".into();
+        let expected = latest.clone();
+        let mut reconciled = None;
+
+        let returned = complete_settings_recovery(
+            || Ok(latest),
+            |settings| {
+                reconciled = Some(settings.clone());
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(returned, expected);
+        assert_eq!(reconciled, Some(expected));
+    }
+
+    #[test]
+    fn recovery_acknowledgement_stays_failed_when_runtime_reconciliation_fails() {
+        let result = complete_settings_recovery(
+            || Ok(crate::settings::Settings::default()),
+            |_| Err("runtime rejected recovered settings".into()),
+        );
+
+        assert_eq!(result.unwrap_err(), "runtime rejected recovered settings");
     }
 
     #[test]

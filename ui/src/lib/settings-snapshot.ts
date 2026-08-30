@@ -138,10 +138,7 @@ function collectAttributionPendingTerminalIds(): ReadonlySet<string> {
   return new Set(
     useTerminalStore
       .getState()
-      .instances.filter(
-        (instance) =>
-          instance.sessionReady !== false && (instance.attributionPendingUntil ?? 0) > now,
-      )
+      .instances.filter((instance) => (instance.attributionPendingUntil ?? 0) > now)
       .map((instance) => instance.id),
   );
 }

@@ -94,36 +94,13 @@ export function useHiddenTerminalAutoClose() {
           // Backend close already happened. Reflect every closed PTY as evicted
           // first, even if visibility/timeout changed while the critical
           // checkpoint was pending; otherwise a still-mounted TerminalView
-          // would point at a dead backend session. A zero-delay re-evaluation
-          // remounts panes that are no longer eligible on the next render turn.
+          // would point at a dead backend session. The current effect subscribes
+          // to this eviction-set transition and immediately remounts panes that
+          // are no longer eligible, even if an older StrictMode effect owns this
+          // late response.
           const next = new Set(latestUi.evictedPaneIds);
           closedPaneIds.forEach((paneId) => next.add(paneId));
           latestUi.setEvictedPaneIds(next);
-
-          const latestTimeoutSec =
-            useSettingsStore.getState().workspaceSelector.hiddenAutoCloseSeconds;
-          const latestWs = useWorkspaceStore.getState();
-          const latestPanes: HideCandidatePane[] = latestWs.workspaces.flatMap((workspace) =>
-            workspace.panes.map((pane) => ({ paneId: pane.id, workspaceId: workspace.id })),
-          );
-          const stillHidden = computeHiddenPaneIds({
-            panes: latestPanes,
-            hiddenPaneIds: latestUi.hiddenPaneIds,
-            hiddenWorkspaceIds: latestUi.hiddenWorkspaceIds,
-            activeWorkspaceId: latestWs.activeWorkspaceId,
-          });
-          const now = Date.now();
-          const needsRemount = candidates.some((paneId) => {
-            if (!closedPaneIds.has(paneId)) return false;
-            const hiddenSince = hiddenSinceRef.current.get(paneId);
-            return !(
-              latestTimeoutSec > 0 &&
-              stillHidden.has(paneId) &&
-              hiddenSince !== undefined &&
-              now - hiddenSince >= latestTimeoutSec * 1000
-            );
-          });
-          if (needsRemount) setTimeout(evaluate, 0);
         })
         .catch((error) => {
           console.warn("[hidden-auto-close] Session checkpoint failed; eviction deferred:", error);
@@ -139,7 +116,8 @@ export function useHiddenTerminalAutoClose() {
     const unsubscribeUi = useUiStore.subscribe((state, previous) => {
       if (
         state.hiddenPaneIds !== previous.hiddenPaneIds ||
-        state.hiddenWorkspaceIds !== previous.hiddenWorkspaceIds
+        state.hiddenWorkspaceIds !== previous.hiddenWorkspaceIds ||
+        state.evictedPaneIds !== previous.evictedPaneIds
       ) {
         evaluate();
       }
