@@ -1563,6 +1563,115 @@ test.describe("remote mobile layout", () => {
     await expect.poll(() => writes).toEqual(["\x1b[B"]);
 
     writes.length = 0;
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const terminal = (
+            window as Window & {
+              __codexTranscriptTerminal?: {
+                write(data: string, callback: () => void): void;
+              };
+            }
+          ).__codexTranscriptTerminal;
+          terminal?.write("\x1b[?1000h\x1b[?1006h", resolve);
+        }),
+    );
+    await page.locator(".xterm").evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      element.dispatchEvent(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + rect.width / 2,
+          clientY: rect.top + rect.height / 2,
+          deltaMode: WheelEvent.DOM_DELTA_LINE,
+          deltaY: 1,
+        }),
+      );
+    });
+    await expect.poll(() => writes.length).toBeGreaterThan(0);
+    expect(writes.join("")).toMatch(/^\x1b\[</);
+    expect(writes).not.toContain("\x1b[B");
+
+    writes.length = 0;
+    await page.evaluate(() => {
+      const state = window as Window & {
+        __codexMouseTrackingTouchWheels?: Array<{
+          deltaMode: number;
+          deltaY: number;
+        }>;
+      };
+      state.__codexMouseTrackingTouchWheels = [];
+      document.querySelector(".xterm")?.addEventListener(
+        "wheel",
+        (event) => {
+          if (!event.isTrusted) {
+            state.__codexMouseTrackingTouchWheels?.push({
+              deltaMode: event.deltaMode,
+              deltaY: event.deltaY,
+            });
+          }
+        },
+        true,
+      );
+    });
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [
+        { x: x - 12, y: startY, id: 1 },
+        { x: x + 12, y: startY, id: 2 },
+      ],
+    });
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [
+        { x: x - 12, y: startY - cellHeight * 2, id: 1 },
+        { x: x + 12, y: startY - cellHeight * 2, id: 2 },
+      ],
+    });
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              window as Window & {
+                __codexMouseTrackingTouchWheels?: unknown[];
+              }
+            ).__codexMouseTrackingTouchWheels?.length ?? 0,
+        ),
+      )
+      .toBeGreaterThan(0);
+    const touchWheel = await page.evaluate(
+      () =>
+        (
+          window as Window & {
+            __codexMouseTrackingTouchWheels?: Array<{
+              deltaMode: number;
+              deltaY: number;
+            }>;
+          }
+        ).__codexMouseTrackingTouchWheels?.[0],
+    );
+    expect(touchWheel?.deltaMode).toBe(0);
+    expect(Math.abs(touchWheel?.deltaY ?? 0)).toBeGreaterThan(0);
+    expect(writes).not.toContain("\x1b[A");
+    expect(writes).not.toContain("\x1b[B");
+
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const terminal = (
+            window as Window & {
+              __codexTranscriptTerminal?: {
+                write(data: string, callback: () => void): void;
+              };
+            }
+          ).__codexTranscriptTerminal;
+          terminal?.write("\x1b[?1000l\x1b[?1006l", resolve);
+        }),
+    );
+    writes.length = 0;
     codexTranscriptScrollEnabled = false;
     const requestCountBeforeOpeningDrawer = navigationRequestCount;
     await page.locator("#navToggle").click();

@@ -63,6 +63,11 @@ function consumeWheelLines(terminal: Terminal, event: WheelEvent): number | unde
   );
 }
 
+function hasMouseTracking(terminal: Terminal): boolean {
+  const mode = terminal.modes.mouseTrackingMode;
+  return Boolean(mode && mode !== "none");
+}
+
 /**
  * Routes wheel rows to Codex's normal-buffer transcript pager. Returning true
  * delegates every other state to xterm's ordinary scrollback/application-mode
@@ -81,6 +86,7 @@ export function createCodexTranscriptWheelHandler({
       !isEnabled() ||
       !isLocalControlAllowed() ||
       !isCodexActive() ||
+      hasMouseTracking(terminal) ||
       !isCodexTranscriptPagerVisible(terminal)
     ) {
       return true;

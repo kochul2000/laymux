@@ -4125,6 +4125,7 @@ import {
           return (
             isCodexTranscriptScrollEnabled() &&
             activeComposerAgentName() === "Codex" &&
+            !hasMouseTracking(term) &&
             isCodexTranscriptPagerVisible(term)
           );
         }

@@ -551,7 +551,8 @@ pub enum GrokStatusMessageMode {
     BulletTitle,
 }
 
-/// Grok Build integration settings (ADR-0156). Same field set as Codex.
+/// Grok Build integration settings (ADR-0156). Shares Codex's launch,
+/// session-restore, and status-message fields, but not Codex-only transcript behavior.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GrokSettings {

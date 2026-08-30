@@ -232,6 +232,37 @@ describe("wheel sensitivity in application-owned terminal modes", () => {
     expect(terminal.buffer.active.viewportY).toBe(terminal.buffer.active.baseY);
   });
 
+  it("keeps mouse-tracking wheel reports on the xterm mouse path over a transcript header", async () => {
+    const terminal = mountWheelTerminal({ scrollSensitivity: 1, fastScrollSensitivity: 5 });
+    const data: string[] = [];
+    terminal.onData((chunk) => data.push(chunk));
+    terminal.attachCustomWheelEventHandler(
+      createCodexTranscriptWheelHandler({
+        terminal,
+        isEnabled: () => true,
+        isCodexActive: () => true,
+        isLocalControlAllowed: () => true,
+      }),
+    );
+    await writeTerminal(
+      terminal,
+      "\x1b[2J\x1b[H/ T R A N S C R I P T\r\ncontent\x1b[?1000h\x1b[?1006h",
+    );
+
+    terminal.element!.dispatchEvent(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 1,
+        clientY: 1,
+        deltaMode: WheelEvent.DOM_DELTA_LINE,
+        deltaY: 1,
+      }),
+    );
+
+    expect(data).toEqual(["\x1b[<65;1;1M"]);
+  });
+
   it("recognizes the Codex transcript header clipped by a narrow pane", async () => {
     const terminal = mountWheelTerminal({
       cols: 12,

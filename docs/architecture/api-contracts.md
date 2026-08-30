@@ -519,7 +519,7 @@ rollout 나이 필터는 파일의 nanosecond 수정 시각만 사용하며, 생
 
 ### Grok 설정
 
-Grok Build 관련 동작(세션 복원, 셀렉터 상태 메시지 구성)을 제어한다. 필드 집합은 Codex와 같다 — `syncCwd`와 `sessionLimit*`는 두지 않는다([ADR-0156](../adr/0156-grok-first-class-agent.md)).
+Grok Build 관련 동작(세션 복원, 셀렉터 상태 메시지 구성)을 제어한다. 실행 명령·세션 복원·상태 메시지 필드는 Codex와 공유하지만, Codex 전용 transcript 설정과 Claude 전용 `syncCwd`·`sessionLimit*`는 두지 않는다([ADR-0156](../adr/0156-grok-first-class-agent.md)).
 
 ```jsonc
 {

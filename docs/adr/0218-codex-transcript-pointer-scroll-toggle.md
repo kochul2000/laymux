@@ -1,6 +1,6 @@
 # 0218. Codex transcript 포인터 스크롤은 호스트 설정으로 표면 간 공유한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-30
 - Source: 사용자 요구("Remote에서 Codex Ctrl+T 모드 터치 스크롤을 방향키로 바인딩하고 Settings의 Codex 섹션에서 토글"), architecture/api-contracts.md §휠 스크롤 민감도·§Codex 설정·§13.3, [ADR-0206](0206-codex-normal-buffer-transcript-wheel-routing.md), [ADR-0142](0142-wheel-scroll-sensitivity-per-surface.md)
 - Extends: [ADR-0206](0206-codex-normal-buffer-transcript-wheel-routing.md)
