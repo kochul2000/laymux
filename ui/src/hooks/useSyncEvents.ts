@@ -58,6 +58,7 @@ export function useSyncEvents() {
       message,
       level: "success",
     });
+    void persistSession({ reason: "completion" });
 
     const { activeWorkspaceId } = useWorkspaceStore.getState();
     const ideFocused = document.hasFocus();
@@ -443,6 +444,7 @@ export function useSyncEvents() {
       onTerminalActivityReconciled((entries) => {
         if (cancelled) return;
         const { updateInstanceInfo, instances } = useTerminalStore.getState();
+        let attributionChanged = false;
         for (const { terminalId, activity, activitySequence } of entries) {
           const instance = instances.find((i) => i.id === terminalId);
           // An instance the frontend does not have is a pane it never
@@ -466,7 +468,9 @@ export function useSyncEvents() {
             continue;
           }
           updateInstanceInfo(terminalId, { activity, activitySequence });
+          attributionChanged = true;
         }
+        if (attributionChanged) void persistSession({ reason: "mutation" });
       }),
     );
 

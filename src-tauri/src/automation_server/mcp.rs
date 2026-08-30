@@ -927,6 +927,10 @@ impl McpHandler {
         chunks: &[Vec<u8>],
         capture: bool,
     ) -> Result<WriteOutcome, CallToolResult> {
+        let _mutation = app_state
+            .session_checkpoint
+            .begin_mutation()
+            .map_err(|error| CallToolResult::error(vec![Content::text(error)]))?;
         // 락을 잡은 뒤, 쓰기 직전 상태를 원자적으로 샘플링한다.
         let (activity, before_seq) =
             Self::sample_activity_and_seq_from_state(app_state, terminal_id, capture)?;
@@ -1071,6 +1075,10 @@ impl McpHandler {
         expected_generation: u64,
         data: &[u8],
     ) -> Result<(u64, usize), CallToolResult> {
+        let _mutation = app_state
+            .session_checkpoint
+            .begin_mutation()
+            .map_err(|error| CallToolResult::error(vec![Content::text(error)]))?;
         let before_seq = {
             let buffers = app_state
                 .output_buffers
@@ -4461,6 +4469,39 @@ mod tests {
         assert!(before_seq > 0);
         assert_eq!(bytes_written, b"echo safe\r".len());
         assert_eq!(written.lock().unwrap().as_slice(), b"echo safe\r");
+    }
+
+    #[test]
+    fn execute_command_write_is_rejected_after_update_finalization_fence() {
+        let (state, written, generation) = execute_command_prompt_state();
+        state
+            .session_checkpoint
+            .begin_finalization_for_test()
+            .unwrap();
+
+        assert_execute_command_error_has_zero_bytes(&state, &written, generation);
+    }
+
+    #[tokio::test]
+    async fn split_terminal_write_is_rejected_after_update_finalization_fence() {
+        let (state, written, generation) = execute_command_prompt_state();
+        state
+            .session_checkpoint
+            .begin_finalization_for_test()
+            .unwrap();
+
+        let error = McpHandler::write_input_after_lock_from_state(
+            &state,
+            "t1",
+            generation,
+            &[b"new session".to_vec(), b"\r".to_vec()],
+            false,
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.is_error, Some(true));
+        assert!(written.lock().unwrap().is_empty());
     }
 
     #[test]

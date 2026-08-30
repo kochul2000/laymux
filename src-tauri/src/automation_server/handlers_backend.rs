@@ -427,26 +427,32 @@ pub async fn terminal_write(
         }
     }
 
-    let ptys = match state.app_state.pty_handles.lock_or_err() {
-        Ok(p) => p,
-        Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(err_json("Lock error")),
-            )
+    match write_terminal_direct_from_state(&state.app_state, &id, body.data.as_bytes()) {
+        Ok(()) => (StatusCode::OK, Json(ok_json("written"))),
+        Err(error) if error.contains("finalization") => {
+            (StatusCode::CONFLICT, Json(err_json(&error)))
         }
-    };
-
-    match ptys.get(&id) {
-        Some(handle) => match handle.write(body.data.as_bytes()) {
-            Ok(()) => (StatusCode::OK, Json(ok_json("written"))),
-            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(err_json(&e))),
-        },
-        None => (
-            StatusCode::NOT_FOUND,
-            Json(err_json(&format!("Terminal '{id}' not found"))),
-        ),
+        Err(error) if error.contains("not found") => {
+            (StatusCode::NOT_FOUND, Json(err_json(&error)))
+        }
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, Json(err_json(&error))),
     }
+}
+
+fn write_terminal_direct_from_state(
+    state: &crate::state::AppState,
+    terminal_id: &str,
+    data: &[u8],
+) -> Result<(), String> {
+    // If finalization started while a missing pane was prepared, admission at
+    // this last side-effect boundary rejects the write. Once admitted, drain
+    // waits until the PTY call returns.
+    let _mutation = state.session_checkpoint.begin_mutation()?;
+    let ptys = state.pty_handles.lock_or_err()?;
+    let handle = ptys
+        .get(terminal_id)
+        .ok_or_else(|| format!("Terminal '{terminal_id}' not found"))?;
+    handle.write(data)
 }
 
 pub async fn terminal_output(
@@ -632,6 +638,39 @@ pub async fn memo_get(Path(key): Path<String>) -> impl IntoResponse {
 mod tests {
     use super::*;
     use crate::automation_server::types::REGISTERED_ROUTES;
+
+    #[test]
+    fn direct_terminal_write_is_rejected_after_update_finalization_fence() {
+        let state = crate::state::AppState::new();
+        let written = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        state.pty_handles.lock().unwrap().insert(
+            "terminal-1".into(),
+            crate::pty::PtyHandle::from_test_writer(Box::new(TestWriter(written.clone()))),
+        );
+        state
+            .session_checkpoint
+            .begin_finalization_for_test()
+            .unwrap();
+
+        let error =
+            write_terminal_direct_from_state(&state, "terminal-1", b"new session\r").unwrap_err();
+
+        assert!(error.contains("finalization"), "{error}");
+        assert!(written.lock().unwrap().is_empty());
+    }
+
+    struct TestWriter(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for TestWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn health_response_format() {

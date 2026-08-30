@@ -25,9 +25,12 @@ import {
   getTerminalGeometryCapabilities,
   resizeTerminal,
   closeTerminalSession,
+  checkpointAndCloseHiddenTerminals,
   getSyncGroupTerminals,
   handleLxMessage,
   loadSettings,
+  acknowledgeSettingsRecovery,
+  isSettingsRecoveryAcknowledgeError,
   resetSettings,
   saveSettings,
   getRemoteAccessStatus,
@@ -433,6 +436,25 @@ describe("tauri-api", () => {
     });
   });
 
+  describe("checkpointAndCloseHiddenTerminals", () => {
+    it("passes the complete eviction set to the backend transaction", async () => {
+      mockInvoke.mockResolvedValue({
+        closedTerminalIds: ["terminal-p1"],
+        failedTerminalIds: ["terminal-p2"],
+      });
+
+      await expect(
+        checkpointAndCloseHiddenTerminals(["terminal-p1", "terminal-p2"]),
+      ).resolves.toEqual({
+        closedTerminalIds: ["terminal-p1"],
+        failedTerminalIds: ["terminal-p2"],
+      });
+      expect(mockInvoke).toHaveBeenCalledWith("checkpoint_and_close_hidden_terminals", {
+        terminalIds: ["terminal-p1", "terminal-p2"],
+      });
+    });
+  });
+
   describe("getSyncGroupTerminals", () => {
     it("returns terminal IDs for group", async () => {
       mockInvoke.mockResolvedValue(["t1", "t2"]);
@@ -495,6 +517,30 @@ describe("tauri-api", () => {
       await resetSettings();
 
       expect(mockInvoke).toHaveBeenCalledWith("reset_settings");
+    });
+
+    it("permits the explicit recovery acknowledgement while regular writes are blocked", async () => {
+      setBlockPersist(true);
+      mockInvoke.mockResolvedValue({ defaultProfile: "PowerShell", profiles: [] });
+
+      await acknowledgeSettingsRecovery("revision-a");
+
+      expect(mockInvoke).toHaveBeenCalledWith("acknowledge_settings_recovery", {
+        expectedRecoveryRevision: "revision-a",
+      });
+    });
+
+    it("recognizes only structured recovery acknowledgement errors", () => {
+      expect(
+        isSettingsRecoveryAcknowledgeError({
+          kind: "runtimeReconcileFailed",
+          message: "runtime unavailable",
+        }),
+      ).toBe(true);
+      expect(isSettingsRecoveryAcknowledgeError(new Error("runtime unavailable"))).toBe(false);
+      expect(
+        isSettingsRecoveryAcknowledgeError({ kind: "unknown", message: "runtime unavailable" }),
+      ).toBe(false);
     });
   });
 

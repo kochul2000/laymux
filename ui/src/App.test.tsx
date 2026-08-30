@@ -1,7 +1,9 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, it, expect, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
 import { App } from "./App";
-import { loadSettingsValidated } from "@/lib/tauri-api";
+import { acknowledgeSettingsRecovery, loadSettingsValidated } from "@/lib/tauri-api";
+import { setBlockPersist } from "@/lib/persist-session";
 import { useLocalMobileModeStore } from "@/stores/local-mobile-mode-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useUiStore } from "@/stores/ui-store";
@@ -50,6 +52,8 @@ vi.mock("@tauri-apps/api/window", () => {
 
 vi.mock("@/lib/persist-session", () => ({
   persistSession: vi.fn().mockResolvedValue(undefined),
+  flushSessionCheckpoint: vi.fn().mockResolvedValue({ checkpointCommitId: 1, coverage: [] }),
+  markSessionCheckpointMutation: vi.fn(),
   saveBeforeClose: vi.fn().mockResolvedValue(undefined),
   setBlockPersist: vi.fn(),
 }));
@@ -91,6 +95,7 @@ vi.mock("@/lib/tauri-api", () => {
       warnings: [],
     }),
     saveSettings: vi.fn().mockResolvedValue(undefined),
+    acknowledgeSettingsRecovery: vi.fn().mockResolvedValue(undefined),
     getListeningPorts: vi.fn().mockResolvedValue([]),
     getGitBranch: vi.fn().mockResolvedValue(null),
     sendOsNotification: vi.fn().mockResolvedValue(undefined),
@@ -146,6 +151,9 @@ vi.mock("@/lib/tauri-api", () => {
       lastError: null,
     }),
     onAppUpdateStatusChanged: vi.fn().mockResolvedValue(unlisten),
+    onSessionCheckpointRequested: vi.fn().mockResolvedValue(unlisten),
+    acknowledgeSessionCheckpoint: vi.fn().mockResolvedValue(undefined),
+    reportFrontendHealth: vi.fn().mockResolvedValue(undefined),
   };
 });
 
@@ -212,5 +220,27 @@ describe("App", () => {
     expect(useUiStore.getState().remoteAccessModalOpen).toBe(false);
     await screen.findByTestId("workspace-area", {}, { timeout: 3000 });
     expect(useUiStore.getState().remoteAccessModalOpen).toBe(false);
+  });
+
+  it("applies the backend's latest settings snapshot before recovery writes resume", async () => {
+    vi.mocked(loadSettingsValidated).mockResolvedValueOnce({
+      status: "recovered",
+      settings: loadedSettings(),
+      dropped: [],
+      warnings: [],
+      settingsPath: "C:\\config\\settings.json",
+      recoveryRevision: "revision-a",
+    });
+    vi.mocked(acknowledgeSettingsRecovery).mockResolvedValueOnce({
+      ...loadedSettings(),
+      defaultProfile: "Command Prompt",
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByTestId("settings-recovery-dismiss"));
+
+    expect(useSettingsStore.getState().defaultProfile).toBe("Command Prompt");
+    expect(setBlockPersist).toHaveBeenLastCalledWith(false);
   });
 });

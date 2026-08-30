@@ -7,13 +7,14 @@ use std::sync::Arc;
 use tauri::State;
 
 use super::claude_session::is_valid_session_id;
+use super::session_attribution::{provider_terminal_domains, ProviderSessionLookup};
 use super::wsl_agent_session::{resolve_wsl_agent_processes, WslAgentProvider};
 use crate::constants::{ENV_CODEX_HOME, ENV_CODEX_SQLITE_HOME};
 use crate::lock_ext::MutexExt;
-use crate::process_tree::{match_interactive_app_process, snapshot_processes};
+use crate::process_tree::match_interactive_app_process;
 use crate::state::AppState;
 
-use self::store::{find_session_from_rollout_paths, CodexSessionStore};
+use self::store::CodexSessionStore;
 
 /// Resolve Codex CLI session IDs only when the owning pane can be proven.
 ///
@@ -28,84 +29,101 @@ pub fn get_codex_session_ids(
     get_codex_session_ids_impl(session_max_age_hours, &state).map_err(|error| error.to_string())
 }
 
-fn get_codex_session_ids_impl(
+pub(crate) fn get_codex_session_ids_impl(
     session_max_age_hours: Option<u64>,
     state: &AppState,
 ) -> Result<HashMap<String, Option<String>>, crate::error::AppError> {
+    Ok(get_codex_session_lookup_impl(session_max_age_hours, state)?.attributions)
+}
+
+pub(crate) fn get_codex_session_lookup_impl(
+    session_max_age_hours: Option<u64>,
+    state: &AppState,
+) -> Result<ProviderSessionLookup, crate::error::AppError> {
     let known: Vec<String> = state
         .known_codex_terminals
         .lock_or_err()?
         .iter()
         .cloned()
         .collect();
-    let terminal_roots: Vec<(String, u32)> = {
-        let ptys = state.pty_handles.lock_or_err()?;
-        known
-            .iter()
-            .cloned()
-            .filter_map(|terminal_id| {
-                let child_pid = ptys.get(&terminal_id)?.child_pid()?;
-                Some((terminal_id, child_pid))
-            })
-            .collect()
-    };
-    let snapshot = snapshot_processes();
-    let terminal_codex_pids: Vec<(String, u32)> = if snapshot.is_empty() {
+    let domains = provider_terminal_domains(&known, state)?;
+    let terminal_roots = domains.native_roots;
+    let native_terminal_ids: HashSet<String> = terminal_roots
+        .iter()
+        .map(|(terminal_id, _)| terminal_id.clone())
+        .collect();
+    let mut failed_terminal_ids = HashSet::new();
+    let terminal_codex_pids: Vec<(String, u32)> = if terminal_roots.is_empty() {
         Vec::new()
     } else {
-        terminal_roots
-            .into_iter()
-            .filter_map(|(terminal_id, root_pid)| {
-                let (pid, app) = match_interactive_app_process(&snapshot, root_pid)?;
-                (app == "Codex").then_some((terminal_id, pid))
-            })
-            .collect()
+        match crate::process_tree::try_snapshot_processes() {
+            Ok(snapshot) => terminal_roots
+                .into_iter()
+                .filter_map(|(terminal_id, root_pid)| {
+                    let (pid, app) = match_interactive_app_process(&snapshot, root_pid)?;
+                    (app == "Codex").then_some((terminal_id, pid))
+                })
+                .collect(),
+            Err(error) => {
+                failed_terminal_ids.extend(native_terminal_ids);
+                tracing::warn!(%error, "native Codex process attribution failed");
+                Vec::new()
+            }
+        }
     };
 
     let store = CodexSessionStore::resolve();
-    let exact = assign_exact_sessions(&terminal_codex_pids, |pid| {
-        let session_id = store.find_session_for_pid(pid, session_max_age_hours);
-        if session_id.is_none() {
-            tracing::debug!(
+    let mut candidates = Vec::new();
+    for (terminal_id, pid) in &terminal_codex_pids {
+        match store.find_session_for_pid_checked(*pid, session_max_age_hours) {
+            Ok(Some(session_id)) => candidates.push((terminal_id.clone(), session_id)),
+            Ok(None) => tracing::debug!(
                 pid,
                 "Codex PID could not be attributed to a valid top-level thread"
-            );
+            ),
+            Err(error) => {
+                failed_terminal_ids.insert(terminal_id.clone());
+                tracing::warn!(pid, %error, "native Codex session lookup failed");
+            }
         }
-        session_id
-    });
+    }
+    let exact = remove_duplicate_candidates(candidates);
     let mut result = crate::process_tree::complete_agent_session_attributions(&known, exact);
     match resolve_wsl_agent_processes(state, WslAgentProvider::Codex) {
-        Ok(attributions) => {
-            for (terminal_id, process) in attributions {
-                let session_id = process.and_then(|process| {
-                    find_session_from_rollout_paths(
-                        &process.codex_rollout_paths(),
-                        session_max_age_hours,
-                    )
-                });
+        Ok(lookup) => {
+            failed_terminal_ids.extend(lookup.failed_terminal_ids);
+            for (terminal_id, process) in lookup.attributions {
+                let session_id = match process {
+                    Some(process) => {
+                        match super::codex_session::store::find_session_from_rollout_paths_checked(
+                            &process.codex_rollout_paths(),
+                            session_max_age_hours,
+                        ) {
+                            Ok(session_id) => session_id,
+                            Err(error) => {
+                                failed_terminal_ids.insert(terminal_id.clone());
+                                tracing::warn!(%error, "WSL Codex rollout lookup failed");
+                                None
+                            }
+                        }
+                    }
+                    None => None,
+                };
                 result.insert(terminal_id, session_id);
             }
         }
-        Err(error) => tracing::warn!(%error, "WSL Codex attribution failed"),
+        Err(error) => {
+            failed_terminal_ids.extend(domains.wsl_terminal_ids);
+            tracing::warn!(%error, "WSL Codex attribution failed");
+        }
     }
-    Ok(crate::process_tree::reject_duplicate_session_attributions(
-        result, "Codex",
-    ))
+    Ok(ProviderSessionLookup {
+        attributions: crate::process_tree::reject_duplicate_session_attributions(result, "Codex"),
+        failed_terminal_ids,
+    })
 }
 
-/// Build a one-to-one terminal/session assignment and reject any collision.
-/// A duplicate is evidence that attribution is not exact, so every pane in
-/// that collision is omitted instead of guessing which one owns the thread.
-fn assign_exact_sessions(
-    terminals: &[(String, u32)],
-    mut find_session: impl FnMut(u32) -> Option<String>,
-) -> HashMap<String, String> {
-    let candidates: Vec<(String, String)> = terminals
-        .iter()
-        .filter_map(|(terminal_id, pid)| {
-            find_session(*pid).map(|session_id| (terminal_id.clone(), session_id))
-        })
-        .collect();
+fn remove_duplicate_candidates(candidates: Vec<(String, String)>) -> HashMap<String, String> {
     let mut unique = HashSet::new();
     let mut duplicates = HashSet::new();
     for (_, session_id) in &candidates {
@@ -123,6 +141,23 @@ fn assign_exact_sessions(
         .into_iter()
         .filter(|(_, session_id)| !duplicates.contains(session_id))
         .collect()
+}
+
+/// Build a one-to-one terminal/session assignment and reject any collision.
+/// A duplicate is evidence that attribution is not exact, so every pane in
+/// that collision is omitted instead of guessing which one owns the thread.
+#[cfg(test)]
+fn assign_exact_sessions(
+    terminals: &[(String, u32)],
+    mut find_session: impl FnMut(u32) -> Option<String>,
+) -> HashMap<String, String> {
+    let candidates: Vec<(String, String)> = terminals
+        .iter()
+        .filter_map(|(terminal_id, pid)| {
+            find_session(*pid).map(|session_id| (terminal_id.clone(), session_id))
+        })
+        .collect();
+    remove_duplicate_candidates(candidates)
 }
 
 /// Accept only the exact `<configured codex command> resume <safe-id>` form.

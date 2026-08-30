@@ -209,6 +209,7 @@ pub(crate) struct RemoteOwnerTransition {
 /// alive, closing the frontend-status → backend-write TOCTOU window.
 pub struct HumanControlPermit<'a> {
     app_state: &'a AppState,
+    _checkpoint_permit: crate::session_checkpoint::SessionMutationPermit<'a>,
     operation_id: u64,
     owner_epoch: u64,
     deadline: Instant,
@@ -1029,6 +1030,7 @@ pub fn begin_human_control_operation<'a>(
     origin: HumanControlOrigin,
     terminal_id: &str,
 ) -> Result<HumanControlPermit<'a>, String> {
+    let checkpoint_permit = app_state.session_checkpoint.begin_mutation()?;
     let settings = effective_remote_settings(app_state)?;
     let timeout_seconds = effective_heartbeat_timeout_seconds(&settings);
     let mut control = app_state.remote_control.lock_or_err()?;
@@ -1080,6 +1082,7 @@ pub fn begin_human_control_operation<'a>(
         control.register_operation(origin.clone(), Some(terminal_id.to_string()), false);
     Ok(HumanControlPermit {
         app_state,
+        _checkpoint_permit: checkpoint_permit,
         operation_id,
         owner_epoch,
         deadline,
@@ -1087,6 +1090,12 @@ pub fn begin_human_control_operation<'a>(
         terminal_id: terminal_id.to_string(),
         finished: false,
     })
+}
+
+pub(crate) fn human_control_operations_drained(app_state: &AppState) -> Result<bool, String> {
+    let mut control = app_state.remote_control.lock_or_err()?;
+    control.prune_completed_operations();
+    Ok(!control.has_active_operations())
 }
 
 /// Atomically validates a Remote lease and registers a non-PTY mutation as an

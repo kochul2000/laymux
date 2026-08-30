@@ -4,7 +4,14 @@ import { useHiddenTerminalAutoClose } from "./useHiddenTerminalAutoClose";
 import { useUiStore } from "@/stores/ui-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { areHiddenPaneIdsEligible } from "@/lib/hidden-eviction-eligibility";
 import type { Workspace } from "@/stores/types";
+
+vi.mock("@/lib/tauri-api", () => ({
+  checkpointAndCloseHiddenTerminals: vi.fn(),
+}));
+
+import { checkpointAndCloseHiddenTerminals } from "@/lib/tauri-api";
 
 const wsA: Workspace = {
   id: "wsA",
@@ -21,10 +28,15 @@ describe("useHiddenTerminalAutoClose", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
+    vi.clearAllMocks();
     useUiStore.setState(useUiStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
     // Active workspace is wsA; wsB is in the background and eligible for eviction.
     useWorkspaceStore.setState({ workspaces: [wsA, wsB], activeWorkspaceId: "wsA" });
+    vi.mocked(checkpointAndCloseHiddenTerminals).mockImplementation(async (terminalIds) => ({
+      closedTerminalIds: [...terminalIds],
+      failedTerminalIds: [],
+    }));
   });
 
   afterEach(() => {
@@ -39,7 +51,7 @@ describe("useHiddenTerminalAutoClose", () => {
     expect(useUiStore.getState().evictedPaneIds.size).toBe(0);
   });
 
-  it("evicts a hidden background pane after the timeout", () => {
+  it("evicts a hidden background pane after the timeout", async () => {
     useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
     useUiStore.getState().toggleWorkspaceHidden("wsB");
     renderHook(() => useHiddenTerminalAutoClose());
@@ -49,7 +61,10 @@ describe("useHiddenTerminalAutoClose", () => {
     expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(false);
 
     // After the timeout: p2 is evicted, p1 (active workspace) never is.
-    act(() => vi.advanceTimersByTime(6_000));
+    await act(async () => {
+      vi.advanceTimersByTime(6_000);
+      await Promise.resolve();
+    });
     expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(true);
     expect(useUiStore.getState().evictedPaneIds.has("p1")).toBe(false);
   });
@@ -62,11 +77,14 @@ describe("useHiddenTerminalAutoClose", () => {
     expect(useUiStore.getState().evictedPaneIds.has("p1")).toBe(false);
   });
 
-  it("clears eviction when the pane is un-hidden", () => {
+  it("clears eviction when the pane is un-hidden", async () => {
     useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
     useUiStore.getState().toggleWorkspaceHidden("wsB");
     renderHook(() => useHiddenTerminalAutoClose());
-    act(() => vi.advanceTimersByTime(15_000));
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+      await Promise.resolve();
+    });
     expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(true);
 
     // Un-hide wsB -> the store subscription drops the eviction immediately.
@@ -76,12 +94,15 @@ describe("useHiddenTerminalAutoClose", () => {
     expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(false);
   });
 
-  it("resets the timestamp across hide → unhide → immediate re-hide", () => {
+  it("resets the timestamp across hide → unhide → immediate re-hide", async () => {
     useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
     const { unmount } = renderHook(() => useHiddenTerminalAutoClose());
 
     act(() => useUiStore.getState().setWorkspaceHidden("wsB", true));
-    act(() => vi.advanceTimersByTime(10_000));
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+      await Promise.resolve();
+    });
     expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(true);
 
     act(() => {
@@ -92,27 +113,36 @@ describe("useHiddenTerminalAutoClose", () => {
 
     act(() => vi.advanceTimersByTime(5_000));
     expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(false);
-    act(() => vi.advanceTimersByTime(5_000));
+    await act(async () => {
+      vi.advanceTimersByTime(5_000);
+      await Promise.resolve();
+    });
     expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(true);
     unmount();
   });
 
-  it("re-evaluates immediately when the active workspace changes", () => {
+  it("re-evaluates immediately when the active workspace changes", async () => {
     useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
     useUiStore.getState().setWorkspaceHidden("wsB", true);
     renderHook(() => useHiddenTerminalAutoClose());
-    act(() => vi.advanceTimersByTime(10_000));
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+      await Promise.resolve();
+    });
     expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(true);
 
     act(() => useWorkspaceStore.getState().setActiveWorkspace("wsB"));
     expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(false);
   });
 
-  it("clears prior evictions when the feature is disabled at runtime", () => {
+  it("clears prior evictions when the feature is disabled at runtime", async () => {
     useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
     useUiStore.getState().toggleWorkspaceHidden("wsB");
     renderHook(() => useHiddenTerminalAutoClose());
-    act(() => vi.advanceTimersByTime(15_000));
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+      await Promise.resolve();
+    });
     expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(true);
 
     act(() => {
@@ -120,5 +150,113 @@ describe("useHiddenTerminalAutoClose", () => {
       vi.advanceTimersByTime(5_000);
     });
     expect(useUiStore.getState().evictedPaneIds.size).toBe(0);
+  });
+
+  it("does not evict after a pending barrier when the feature was disabled", async () => {
+    let finishCheckpoint: (() => void) | undefined;
+    vi.mocked(checkpointAndCloseHiddenTerminals).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishCheckpoint = () =>
+            resolve({ closedTerminalIds: ["terminal-p2"], failedTerminalIds: [] });
+        }),
+    );
+    useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
+    useUiStore.getState().toggleWorkspaceHidden("wsB");
+    renderHook(() => useHiddenTerminalAutoClose());
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(checkpointAndCloseHiddenTerminals).toHaveBeenCalledWith(["terminal-p2"]);
+
+    act(() => useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 0 }));
+    await act(async () => {
+      finishCheckpoint?.();
+      await Promise.resolve();
+      vi.advanceTimersByTime(0);
+    });
+
+    expect(useUiStore.getState().evictedPaneIds.size).toBe(0);
+  });
+
+  it("withdraws a pending target when the current timeout makes it unexpired", async () => {
+    vi.mocked(checkpointAndCloseHiddenTerminals).mockImplementationOnce(
+      () => new Promise(() => undefined),
+    );
+    useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
+    useUiStore.getState().toggleWorkspaceHidden("wsB");
+    renderHook(() => useHiddenTerminalAutoClose());
+
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(areHiddenPaneIdsEligible(["p2"])).toBe(true);
+
+    act(() => useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 3_600 }));
+    expect(areHiddenPaneIdsEligible(["p2"])).toBe(false);
+  });
+
+  it("evicts only PTYs that the backend closed after its checkpoint transaction", async () => {
+    vi.mocked(checkpointAndCloseHiddenTerminals).mockResolvedValueOnce({
+      closedTerminalIds: [],
+      failedTerminalIds: ["terminal-p2"],
+    });
+    useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
+    useUiStore.getState().toggleWorkspaceHidden("wsB");
+    renderHook(() => useHiddenTerminalAutoClose());
+
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+      await Promise.resolve();
+    });
+
+    expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(false);
+  });
+
+  it("records a backend close even if the hook unmounted while the transaction was pending", async () => {
+    let finishEviction: (() => void) | undefined;
+    vi.mocked(checkpointAndCloseHiddenTerminals).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishEviction = () =>
+            resolve({ closedTerminalIds: ["terminal-p2"], failedTerminalIds: [] });
+        }),
+    );
+    useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
+    useUiStore.getState().toggleWorkspaceHidden("wsB");
+    const { unmount } = renderHook(() => useHiddenTerminalAutoClose());
+    act(() => vi.advanceTimersByTime(10_000));
+    unmount();
+
+    await act(async () => {
+      finishEviction?.();
+      await Promise.resolve();
+    });
+
+    expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(true);
+  });
+
+  it("remounts a no-longer-hidden pane when an earlier effect reports a late backend close", async () => {
+    let finishEviction: (() => void) | undefined;
+    vi.mocked(checkpointAndCloseHiddenTerminals).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishEviction = () =>
+            resolve({ closedTerminalIds: ["terminal-p2"], failedTerminalIds: [] });
+        }),
+    );
+    useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
+    useUiStore.getState().toggleWorkspaceHidden("wsB");
+    const first = renderHook(() => useHiddenTerminalAutoClose());
+    act(() => vi.advanceTimersByTime(10_000));
+    first.unmount();
+
+    // Model StrictMode's effect restart, then make the pane ineligible before
+    // the transaction started by the retired effect returns.
+    const current = renderHook(() => useHiddenTerminalAutoClose());
+    act(() => useUiStore.getState().toggleWorkspaceHidden("wsB"));
+    await act(async () => {
+      finishEviction?.();
+      await Promise.resolve();
+    });
+
+    expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(false);
+    current.unmount();
   });
 });

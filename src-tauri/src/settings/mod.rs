@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use crate::lock_ext::MutexExt;
+use sha2::{Digest, Sha256};
 
 static MEMO_LOCK: Mutex<()> = Mutex::new(());
 
@@ -126,6 +127,7 @@ fn load_settings_validated_from(path: &std::path::Path) -> SettingsLoadResult {
             dropped,
             warnings,
             settings_path: path_str,
+            recovery_revision: recovery_revision(&raw_content),
         };
     }
 
@@ -284,15 +286,155 @@ pub fn save_settings(settings: &Settings) -> Result<(), String> {
     save_settings_to(&settings_path(), settings)
 }
 
+/// Commit a frontend-owned checkpoint without overwriting cloud identity that
+/// a backend worker may have refreshed after the WebView collected its snapshot.
+pub fn save_frontend_settings(settings: &Settings) -> Result<Settings, String> {
+    save_frontend_settings_to(&settings_path(), settings)
+}
+
+/// Atomically load the latest document, mutate only caller-owned fields, and
+/// replace it while holding the settings transaction gate.
+pub fn update_settings(
+    mutate: impl FnOnce(&mut Settings) -> Result<(), String>,
+) -> Result<Settings, String> {
+    update_settings_at(&settings_path(), mutate)
+}
+
+/// Commit the leniently recovered document only after the user has reviewed
+/// the dropped paths. Background writers cannot implicitly acknowledge loss.
+pub fn acknowledge_settings_recovery(expected_recovery_revision: &str) -> Result<Settings, String> {
+    acknowledge_settings_recovery_at(&settings_path(), expected_recovery_revision)
+}
+
+fn recovery_revision(raw_content: &str) -> String {
+    Sha256::digest(raw_content.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn unacknowledged_recovery_error() -> String {
+    "Refusing to overwrite recovered settings before recovery is acknowledged".into()
+}
+
+fn update_settings_at(
+    path: &std::path::Path,
+    mutate: impl FnOnce(&mut Settings) -> Result<(), String>,
+) -> Result<Settings, String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {e}"))?;
+    }
+    let _guard = SETTINGS_WRITE_LOCK.lock_or_err()?;
+    let mut settings = if path.exists() {
+        match load_settings_validated_from(path) {
+            SettingsLoadResult::Ok { settings, .. }
+            | SettingsLoadResult::Repaired { settings, .. } => settings,
+            SettingsLoadResult::Recovered { .. } => {
+                return Err(unacknowledged_recovery_error());
+            }
+            SettingsLoadResult::ParseError { error, .. } => {
+                return Err(format!(
+                    "Refusing to overwrite an unparseable settings file: {error}"
+                ));
+            }
+        }
+    } else {
+        Settings::default()
+    };
+    mutate(&mut settings)?;
+    let json =
+        serde_json::to_string_pretty(&settings).map_err(|e| format!("Serialize error: {e}"))?;
+    write_file_atomically(path, json.as_bytes())?;
+    Ok(settings)
+}
+
+fn save_frontend_settings_to(
+    path: &std::path::Path,
+    settings: &Settings,
+) -> Result<Settings, String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {e}"))?;
+    }
+    let _guard = SETTINGS_WRITE_LOCK.lock_or_err()?;
+    let mut candidate = settings.clone();
+    if path.exists() {
+        match load_settings_validated_from(path) {
+            SettingsLoadResult::Ok {
+                settings: latest, ..
+            }
+            | SettingsLoadResult::Repaired {
+                settings: latest, ..
+            } => {
+                candidate.remote.cloud_enabled = latest.remote.cloud_enabled;
+                candidate
+                    .remote
+                    .cloud_instance_id
+                    .clone_from(&latest.remote.cloud_instance_id);
+                candidate
+                    .remote
+                    .cloud_tunnel_url
+                    .clone_from(&latest.remote.cloud_tunnel_url);
+                candidate
+                    .remote
+                    .cloud_server_base_url
+                    .clone_from(&latest.remote.cloud_server_base_url);
+            }
+            SettingsLoadResult::Recovered { .. } => {
+                return Err(unacknowledged_recovery_error());
+            }
+            SettingsLoadResult::ParseError { error, .. } => {
+                return Err(format!(
+                    "Refusing to overwrite an unparseable settings file: {error}"
+                ));
+            }
+        }
+    }
+    let json =
+        serde_json::to_string_pretty(&candidate).map_err(|e| format!("Serialize error: {e}"))?;
+    write_file_atomically(path, json.as_bytes())?;
+    Ok(candidate)
+}
+
+fn acknowledge_settings_recovery_at(
+    path: &std::path::Path,
+    expected_recovery_revision: &str,
+) -> Result<Settings, String> {
+    let _guard = SETTINGS_WRITE_LOCK.lock_or_err()?;
+    match load_settings_validated_from(path) {
+        SettingsLoadResult::Recovered {
+            settings,
+            recovery_revision,
+            ..
+        } => {
+            if recovery_revision != expected_recovery_revision {
+                return Err(
+                    "Settings recovery changed; review the latest dropped paths before acknowledging"
+                        .into(),
+                );
+            }
+            let json = serde_json::to_string_pretty(&settings)
+                .map_err(|error| format!("Serialize error: {error}"))?;
+            write_file_atomically(path, json.as_bytes())?;
+            Ok(settings)
+        }
+        SettingsLoadResult::Ok { settings, .. } | SettingsLoadResult::Repaired { settings, .. } => {
+            Ok(settings)
+        }
+        SettingsLoadResult::ParseError { error, .. } => Err(format!(
+            "Refusing to acknowledge an unparseable settings file: {error}"
+        )),
+    }
+}
+
 /// `save_settings` against an explicit path, so the write contract is testable
 /// without reaching for the real config directory.
 pub(crate) fn save_settings_to(path: &std::path::Path, settings: &Settings) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {e}"))?;
     }
+    let _guard = SETTINGS_WRITE_LOCK.lock_or_err()?;
     let json =
         serde_json::to_string_pretty(settings).map_err(|e| format!("Serialize error: {e}"))?;
-    let _guard = SETTINGS_WRITE_LOCK.lock_or_err()?;
     write_file_atomically(path, json.as_bytes())
 }
 
@@ -333,6 +475,157 @@ mod tests {
         let written = std::fs::read_to_string(&path).unwrap();
         serde_json::from_str::<serde_json::Value>(&written).expect("a whole JSON document");
         assert!(!path.with_extension("json.tmp").exists());
+    }
+
+    #[test]
+    fn frontend_checkpoint_preserves_backend_owned_cloud_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let mut latest = Settings::default();
+        latest.remote.cloud_enabled = true;
+        latest.remote.cloud_instance_id = Some("new-instance".into());
+        latest.remote.cloud_tunnel_url = Some("wss://new.example.test".into());
+        latest.remote.cloud_server_base_url = Some("https://new.example.test".into());
+        save_settings_to(&path, &latest).unwrap();
+
+        let mut stale_frontend = latest.clone();
+        stale_frontend.remote.cloud_enabled = false;
+        stale_frontend.remote.cloud_instance_id = Some("old-instance".into());
+        stale_frontend.remote.cloud_tunnel_url = None;
+        stale_frontend.remote.cloud_server_base_url = None;
+        stale_frontend.workspaces[0].name = "new workspace checkpoint".into();
+        save_frontend_settings_to(&path, &stale_frontend).unwrap();
+
+        let saved = match load_settings_validated_from(&path) {
+            SettingsLoadResult::Ok { settings, .. }
+            | SettingsLoadResult::Repaired { settings, .. }
+            | SettingsLoadResult::Recovered { settings, .. } => settings,
+            SettingsLoadResult::ParseError { error, .. } => panic!("{error}"),
+        };
+        assert!(saved.remote.cloud_enabled);
+        assert_eq!(
+            saved.remote.cloud_instance_id.as_deref(),
+            Some("new-instance")
+        );
+        assert_eq!(saved.workspaces[0].name, "new workspace checkpoint");
+    }
+
+    #[test]
+    fn path_owned_backend_update_preserves_the_latest_session_checkpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let mut checkpoint = Settings::default();
+        checkpoint.workspaces[0].name = "latest session checkpoint".into();
+        save_settings_to(&path, &checkpoint).unwrap();
+
+        let updated = update_settings_at(&path, |settings| {
+            settings.remote.cloud_enabled = true;
+            settings.remote.cloud_instance_id = Some("instance-2".into());
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(updated.workspaces[0].name, "latest session checkpoint");
+        assert_eq!(
+            updated.remote.cloud_instance_id.as_deref(),
+            Some("instance-2")
+        );
+    }
+
+    #[test]
+    fn backend_update_refuses_unacknowledged_recovered_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let original = r#"{
+          "language": "en",
+          "terminal": { "parserAdmission": { "hiddenShare": "invalid" } }
+        }"#;
+        std::fs::write(&path, original).unwrap();
+
+        let error = update_settings_at(&path, |settings| {
+            settings.remote.cloud_enabled = true;
+            Ok(())
+        })
+        .unwrap_err();
+
+        assert!(error.contains("recovery is acknowledged"), "{error}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+
+        let frontend_error = save_frontend_settings_to(&path, &Settings::default()).unwrap_err();
+        assert!(
+            frontend_error.contains("recovery is acknowledged"),
+            "{frontend_error}"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+    }
+
+    #[test]
+    fn recovery_acknowledgement_is_the_only_non_reset_path_that_unlocks_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(
+            &path,
+            r#"{
+              "language": "en",
+              "terminal": { "parserAdmission": { "hiddenShare": "invalid" } }
+            }"#,
+        )
+        .unwrap();
+
+        let recovery_revision = match load_settings_validated_from(&path) {
+            SettingsLoadResult::Recovered {
+                recovery_revision, ..
+            } => recovery_revision,
+            result => panic!("expected recovered settings, got {result:?}"),
+        };
+        let acknowledged = acknowledge_settings_recovery_at(&path, &recovery_revision).unwrap();
+        assert_eq!(acknowledged.language, "en");
+        assert!(matches!(
+            load_settings_validated_from(&path),
+            SettingsLoadResult::Ok { .. } | SettingsLoadResult::Repaired { .. }
+        ));
+
+        let updated = update_settings_at(&path, |settings| {
+            settings.remote.cloud_enabled = true;
+            Ok(())
+        })
+        .unwrap();
+        assert!(updated.remote.cloud_enabled);
+    }
+
+    #[test]
+    fn recovery_acknowledgement_rejects_unreviewed_new_dropped_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, r#"{ "language": 42, "defaultProfile": "WSL" }"#).unwrap();
+        let original_revision = match load_settings_validated_from(&path) {
+            SettingsLoadResult::Recovered {
+                recovery_revision, ..
+            } => recovery_revision,
+            result => panic!("expected recovered settings, got {result:?}"),
+        };
+
+        let manually_edited = r#"{
+          "language": "en",
+          "terminal": { "parserAdmission": { "hiddenShare": "invalid" } }
+        }"#;
+        fs::write(&path, manually_edited).unwrap();
+        let error = acknowledge_settings_recovery_at(&path, &original_revision).unwrap_err();
+
+        assert!(error.contains("review the latest dropped paths"), "{error}");
+        assert_eq!(fs::read_to_string(&path).unwrap(), manually_edited);
+        let latest = load_settings_validated_from(&path);
+        let SettingsLoadResult::Recovered {
+            dropped,
+            recovery_revision,
+            ..
+        } = latest
+        else {
+            panic!("expected latest recovered settings, got {latest:?}");
+        };
+        assert_eq!(dropped.len(), 1);
+        assert_eq!(dropped[0].path, "terminal.parserAdmission.hiddenShare");
+        acknowledge_settings_recovery_at(&path, &recovery_revision).unwrap();
     }
 
     /// Two writers racing on one path may not interleave into a torn document —
@@ -435,6 +728,7 @@ mod tests {
             dropped,
             warnings,
             settings_path,
+            recovery_revision,
         } = result
         else {
             panic!("expected Recovered, got {result:?}");
@@ -449,6 +743,7 @@ mod tests {
             Settings::default().terminal.parser_admission.hidden_share
         );
         assert_eq!(settings_path, path.display().to_string());
+        assert_eq!(recovery_revision.len(), 64);
 
         // Exactly one value was lost. Structural repairs (this file has no
         // workspaces, so the loader synthesizes one) stay out of that count.

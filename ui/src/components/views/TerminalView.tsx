@@ -50,7 +50,11 @@ import {
 import { readLineCells } from "@/lib/terminal-cell-map";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { WebglAddon } from "@xterm/addon-webgl";
-import { useTerminalStore, type TerminalActivityInfo } from "@/stores/terminal-store";
+import {
+  SESSION_ATTRIBUTION_STARTUP_GRACE_MS,
+  useTerminalStore,
+  type TerminalActivityInfo,
+} from "@/stores/terminal-store";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 import { useSettingsStore, defaultProfileDefaults } from "@/stores/settings-store";
 import { useOverridesStore, FONT_ZOOM_MIN, FONT_ZOOM_MAX } from "@/stores/overrides-store";
@@ -5818,6 +5822,12 @@ export function TerminalView({
             : shouldRestoreGrokSession && safeGrokSessionId
               ? `${grokCommand} --resume ${safeGrokSessionId}`
               : undefined;
+
+    if (startupOverride && !viewerStartup) {
+      useTerminalStore.getState().updateInstanceInfo(instanceId, {
+        attributionPendingUntil: Date.now() + SESSION_ATTRIBUTION_STARTUP_GRACE_MS,
+      });
+    }
 
     cacheRestorePromise =
       !isFreshRestart && shouldRestoreOutput && paneId

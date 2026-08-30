@@ -9,6 +9,13 @@ use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 use crate::terminal::{TerminalActivity, TerminalNotification, TerminalStateInfo};
 
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SettingsRecoveryAcknowledgeError {
+    RecoveryDocumentRejected { message: String },
+    RuntimeReconcileFailed { message: String },
+}
+
 #[tauri::command]
 pub fn greet(name: &str) -> String {
     format!("Hello, {}! Welcome to Laymux.", name)
@@ -161,21 +168,27 @@ pub fn reset_settings(
     // The process-global updater would otherwise keep the old channel and its
     // candidate until the next periodic check (ADR-0190).
     crate::app_update::schedule_channel_recheck(app.clone(), state.app_update.clone());
-    let change = crate::remote_server::update_persistent_remote_settings(
-        &state,
-        &app,
-        default_settings.remote.clone(),
-    )?;
-    if let Some(enabled) = change.effective_enabled {
-        crate::cloud::tunnel::reconcile_cloud_tunnel_for_access(
-            state.inner().clone(),
-            app,
-            enabled,
-        );
-    } else if change.cloud_access_mode_changed {
-        crate::cloud::tunnel::restart_cloud_tunnel_for_policy_change(state.inner().clone(), app);
-    }
+    reconcile_persistent_remote_runtime(state.inner(), &app, default_settings.remote.clone())?;
     Ok(default_settings)
+}
+
+#[tauri::command(async)]
+pub fn acknowledge_settings_recovery(
+    expected_recovery_revision: String,
+    state: State<Arc<AppState>>,
+    app: AppHandle,
+) -> Result<crate::settings::Settings, SettingsRecoveryAcknowledgeError> {
+    complete_settings_recovery(
+        || crate::settings::acknowledge_settings_recovery(&expected_recovery_revision),
+        |settings| {
+            // The acknowledged file may have been edited while the modal was open.
+            // Reconcile backend-owned state from the exact snapshot just committed
+            // before the frontend is allowed to resume checkpoint writes.
+            reconcile_persistent_remote_runtime(state.inner(), &app, settings.remote.clone())?;
+            crate::app_update::schedule_channel_recheck(app.clone(), state.app_update.clone());
+            Ok(())
+        },
+    )
 }
 
 #[tauri::command]
@@ -189,19 +202,42 @@ pub fn save_settings(
     state: State<Arc<AppState>>,
     app: AppHandle,
 ) -> Result<(), String> {
-    crate::settings::save_settings(&settings)?;
-    let change =
-        crate::remote_server::update_persistent_remote_settings(&state, &app, settings.remote)?;
+    let settings = crate::settings::save_frontend_settings(&settings)?;
+    reconcile_persistent_remote_runtime(state.inner(), &app, settings.remote)?;
+    Ok(())
+}
+
+fn reconcile_persistent_remote_runtime(
+    state: &Arc<AppState>,
+    app: &AppHandle,
+    remote: crate::settings::models::RemoteSettings,
+) -> Result<(), String> {
+    let change = crate::remote_server::update_persistent_remote_settings(state, app, remote)?;
     if let Some(enabled) = change.effective_enabled {
         crate::cloud::tunnel::reconcile_cloud_tunnel_for_access(
-            state.inner().clone(),
-            app,
+            Arc::clone(state),
+            app.clone(),
             enabled,
         );
     } else if change.cloud_access_mode_changed {
-        crate::cloud::tunnel::restart_cloud_tunnel_for_policy_change(state.inner().clone(), app);
+        crate::cloud::tunnel::restart_cloud_tunnel_for_policy_change(
+            Arc::clone(state),
+            app.clone(),
+        );
     }
     Ok(())
+}
+
+fn complete_settings_recovery(
+    acknowledge: impl FnOnce() -> Result<crate::settings::Settings, String>,
+    reconcile_runtime: impl FnOnce(&crate::settings::Settings) -> Result<(), String>,
+) -> Result<crate::settings::Settings, SettingsRecoveryAcknowledgeError> {
+    let settings = acknowledge().map_err(|message| {
+        SettingsRecoveryAcknowledgeError::RecoveryDocumentRejected { message }
+    })?;
+    reconcile_runtime(&settings)
+        .map_err(|message| SettingsRecoveryAcknowledgeError::RuntimeReconcileFailed { message })?;
+    Ok(settings)
 }
 
 #[tauri::command(async)]
@@ -569,6 +605,10 @@ fn dispatch_automation_response(
     state: &AppState,
 ) -> Result<(), AppError> {
     let request_id = response.request_id;
+    state
+        .session_checkpoint
+        .finish_detached_mutation(&request_id)
+        .map_err(AppError::Other)?;
     let value = if response.success {
         response.data.unwrap_or(serde_json::Value::Null)
     } else {
@@ -1004,6 +1044,10 @@ mod tests {
     #[test]
     fn dispatch_automation_response_counts_matched_only_after_delivery() {
         let state = AppState::new();
+        state
+            .session_checkpoint
+            .begin_detached_mutation("matched")
+            .unwrap();
         let (tx, rx) = tokio::sync::oneshot::channel();
         state
             .automation_channels
@@ -1017,6 +1061,10 @@ mod tests {
         let snapshot = state.frontend_health.snapshot().unwrap();
         assert_eq!(snapshot["bridge"]["responsesMatched"], 1);
         assert_eq!(snapshot["bridge"]["responsesOrphaned"], 0);
+        assert!(!state
+            .session_checkpoint
+            .finish_detached_mutation("matched")
+            .unwrap());
     }
 
     #[test]
@@ -1052,6 +1100,57 @@ mod tests {
     fn greet_returns_message() {
         let result = greet("Laymux");
         assert_eq!(result, "Hello, Laymux! Welcome to Laymux.");
+    }
+
+    #[test]
+    fn recovery_acknowledgement_reconciles_the_exact_committed_snapshot() {
+        let mut latest = crate::settings::Settings::default();
+        latest.remote.enabled = false;
+        latest.update.channel = "beta".into();
+        let expected = latest.clone();
+        let mut reconciled = None;
+
+        let returned = complete_settings_recovery(
+            || Ok(latest),
+            |settings| {
+                reconciled = Some(settings.clone());
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(returned, expected);
+        assert_eq!(reconciled, Some(expected));
+    }
+
+    #[test]
+    fn recovery_acknowledgement_stays_failed_when_runtime_reconciliation_fails() {
+        let result = complete_settings_recovery(
+            || Ok(crate::settings::Settings::default()),
+            |_| Err("runtime rejected recovered settings".into()),
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            SettingsRecoveryAcknowledgeError::RuntimeReconcileFailed {
+                message: "runtime rejected recovered settings".into()
+            }
+        );
+    }
+
+    #[test]
+    fn recovery_acknowledgement_distinguishes_document_rejection_from_runtime_failure() {
+        let result = complete_settings_recovery(
+            || Err("recovery revision changed".into()),
+            |_| panic!("runtime reconciliation must not run after document rejection"),
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            SettingsRecoveryAcknowledgeError::RecoveryDocumentRejected {
+                message: "recovery revision changed".into()
+            }
+        );
     }
 
     #[test]

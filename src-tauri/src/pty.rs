@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use crate::constants::*;
 use crate::lock_ext::MutexExt;
 #[cfg(target_os = "windows")]
-use crate::process::headless_command;
+use crate::process::{headless_command, status_with_timeout};
 use crate::pty_control::{PendingControlJob, PtyControlCompletion, PtyControlWorker};
 use crate::pty_reader::{run_interruptible_reader_loop, PtyReaderLifecycle};
 use crate::terminal::{
@@ -187,6 +187,10 @@ pub struct PtyHandle {
     /// handle is closed). Lets `terminate()` safely skip taskkill when the
     /// child has already exited on its own.
     child_exited: Arc<AtomicBool>,
+    /// Serializes publishing child exit with claiming PID-based tree kill.
+    /// The wait thread retains its OS child handle while waiting for this
+    /// mutex, so Windows cannot recycle the PID during a claimed taskkill.
+    child_exit_handshake: Arc<Mutex<()>>,
     input_faulted: Arc<AtomicBool>,
     /// Generation-bound reader wake and teardown completion. This is separate
     /// from the master so a blocking cloned output pipe can be interrupted.
@@ -230,6 +234,7 @@ impl PtyHandle {
             child_killer: Arc::new(Mutex::new(None)),
             child_pid: None,
             child_exited: Arc::new(AtomicBool::new(true)),
+            child_exit_handshake: Arc::new(Mutex::new(())),
             input_faulted: Arc::new(AtomicBool::new(false)),
             reader_lifecycle: PtyReaderLifecycle::completed_for_test(terminal_generation),
             codex_startup_color_probe: None,
@@ -489,6 +494,13 @@ impl PtyHandle {
             .then(|| self.control.completion())
     }
 
+    /// Return the worker lifecycle acknowledgement unconditionally. Handle
+    /// retirement uses this before the worker can fault so a concurrent write
+    /// cannot become invisible after the handle leaves the live registry.
+    pub(crate) fn control_completion(&self) -> PtyControlCompletion {
+        self.control.completion()
+    }
+
     fn force_input_fault(&self) -> Result<(), String> {
         if self.input_faulted.swap(true, Ordering::AcqRel) {
             return Ok(());
@@ -527,18 +539,25 @@ impl PtyHandle {
     }
 
     fn kill_child_tree(&self) -> Result<(), String> {
-        if self.child_exited.load(Ordering::Acquire) {
-            return Ok(());
-        }
+        run_with_live_child_kill_claim(&self.child_exit_handshake, &self.child_exited, || {
+            self.kill_child_tree_claimed()
+        })?
+        .unwrap_or(Ok(()))
+    }
 
+    /// Kill implementation entered only while the child-exit handshake is
+    /// held and the wait thread therefore still reserves the Windows PID.
+    fn kill_child_tree_claimed(&self) -> Result<(), String> {
         #[allow(unused_mut)]
         let mut platform_error: Option<String> = None;
         #[cfg(target_os = "windows")]
         if let Some(pid) = self.child_pid {
-            match headless_command("taskkill")
-                .args(["/PID", &pid.to_string(), "/T", "/F"])
-                .status()
-            {
+            let mut taskkill = headless_command("taskkill");
+            taskkill.args(["/PID", &pid.to_string(), "/T", "/F"]);
+            match status_with_timeout(
+                &mut taskkill,
+                Duration::from_millis(PTY_PROCESS_TREE_KILL_TIMEOUT_MS),
+            ) {
                 Ok(status) if status.success() => return Ok(()),
                 Ok(status) => {
                     tracing::debug!(pid, status = ?status.code(), "taskkill returned non-zero during PTY cleanup");
@@ -570,6 +589,24 @@ impl PtyHandle {
         }
         Ok(())
     }
+}
+
+fn run_with_live_child_kill_claim<T>(
+    handshake: &Mutex<()>,
+    child_exited: &AtomicBool,
+    action: impl FnOnce() -> T,
+) -> Result<Option<T>, String> {
+    let _claim = handshake.lock_or_err()?;
+    if child_exited.load(Ordering::Acquire) {
+        return Ok(None);
+    }
+    Ok(Some(action()))
+}
+
+fn publish_child_exit(handshake: &Mutex<()>, child_exited: &AtomicBool) -> Result<(), String> {
+    let _claim = handshake.lock_or_err()?;
+    child_exited.store(true, Ordering::Release);
+    Ok(())
 }
 
 fn wait_for_child_with_master_close_retry(
@@ -705,6 +742,8 @@ where
     let child_killer = child.clone_killer();
     let child_exited = Arc::new(AtomicBool::new(false));
     let exited_signal = Arc::clone(&child_exited);
+    let child_exit_handshake = Arc::new(Mutex::new(()));
+    let exited_handshake = Arc::clone(&child_exit_handshake);
 
     // Spawn a background thread to wait for the child process.
     // This prevents zombie processes on Unix (where unwait-ed children
@@ -720,7 +759,13 @@ where
     thread::spawn(move || {
         let mut child = child;
         let _ = child.wait();
-        exited_signal.store(true, Ordering::Release);
+        if let Err(error) = publish_child_exit(&exited_handshake, &exited_signal) {
+            // Dropping the process handle after a poisoned handshake could
+            // make a concurrent PID-based kill unsafe. Leak it instead; this
+            // is a terminal-local fail-safe on an already-corrupted path.
+            tracing::error!(%error, "child exit handshake failed; retaining process handle");
+            std::mem::forget(child);
+        }
         // `child` drops here; Windows may recycle the PID after this point.
     });
     drop(pair.slave);
@@ -745,6 +790,7 @@ where
         child_killer: Arc::new(Mutex::new(Some(child_killer))),
         child_pid,
         child_exited,
+        child_exit_handshake,
         input_faulted: Arc::new(AtomicBool::new(false)),
         reader_lifecycle: Arc::clone(&reader_lifecycle),
         codex_startup_color_probe: None,
@@ -1333,6 +1379,43 @@ printf 'RAW_BYTES:%s\r\n' "$hex"
 
         assert_eq!(close_attempts.get(), 3);
         assert!(master_closed.get());
+    }
+
+    #[test]
+    fn child_exit_publication_waits_for_an_in_flight_kill_claim() {
+        let handshake = Arc::new(Mutex::new(()));
+        let child_exited = Arc::new(AtomicBool::new(false));
+        let (kill_started_tx, kill_started_rx) = mpsc::channel();
+        let (release_kill_tx, release_kill_rx) = mpsc::channel();
+        let kill_handshake = Arc::clone(&handshake);
+        let kill_exited = Arc::clone(&child_exited);
+        let killer = thread::spawn(move || {
+            run_with_live_child_kill_claim(&kill_handshake, &kill_exited, || {
+                kill_started_tx.send(()).unwrap();
+                release_kill_rx.recv().unwrap();
+            })
+            .unwrap()
+        });
+        kill_started_rx.recv().unwrap();
+
+        let (wait_started_tx, wait_started_rx) = mpsc::channel();
+        let (wait_done_tx, wait_done_rx) = mpsc::channel();
+        let wait_handshake = Arc::clone(&handshake);
+        let wait_exited = Arc::clone(&child_exited);
+        let waiter = thread::spawn(move || {
+            wait_started_tx.send(()).unwrap();
+            publish_child_exit(&wait_handshake, &wait_exited).unwrap();
+            wait_done_tx.send(()).unwrap();
+        });
+        wait_started_rx.recv().unwrap();
+
+        assert!(wait_done_rx.try_recv().is_err());
+        assert!(!child_exited.load(Ordering::Acquire));
+        release_kill_tx.send(()).unwrap();
+
+        assert!(killer.join().unwrap().is_some());
+        waiter.join().unwrap();
+        assert!(child_exited.load(Ordering::Acquire));
     }
 
     #[test]

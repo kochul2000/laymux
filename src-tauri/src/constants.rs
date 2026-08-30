@@ -252,6 +252,9 @@ pub const ENTER_SUBMIT_CR_DELAY_MS: u64 = 300;
 pub const PTY_CONTROL_CANCEL_GRACE_MS: u64 = 250;
 /// Final bounded wait for the platform worker to acknowledge PTY termination.
 pub const PTY_CONTROL_TERMINATE_GRACE_MS: u64 = 250;
+/// Deadline for the Windows process-tree helper used during PTY teardown.
+/// A stalled `taskkill.exe` must not hold a global finalization fence forever.
+pub const PTY_PROCESS_TREE_KILL_TIMEOUT_MS: u64 = 1_000;
 /// Bound for an interruptible PTY reader to acknowledge a generation wake.
 pub const PTY_READER_WAKE_TIMEOUT_MS: u64 = 500;
 /// Bound for the generation-scoped reader lifecycle to reach terminal state

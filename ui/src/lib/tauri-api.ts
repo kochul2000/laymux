@@ -355,6 +355,22 @@ export async function closeTerminalSession(id: string): Promise<void> {
   });
 }
 
+export interface HiddenTerminalEvictionResult {
+  closedTerminalIds: string[];
+  failedTerminalIds: string[];
+}
+
+/**
+ * Let the backend own the full mutation-drain -> critical checkpoint -> close
+ * transaction for hidden PTYs. The returned IDs are the only panes safe to
+ * unmount; failures remain live and are retried by the timer.
+ */
+export async function checkpointAndCloseHiddenTerminals(
+  terminalIds: readonly string[],
+): Promise<HiddenTerminalEvictionResult> {
+  return invoke("checkpoint_and_close_hidden_terminals", { terminalIds });
+}
+
 export async function getSyncGroupTerminals(groupName: string): Promise<string[]> {
   return invoke("get_sync_group_terminals", { groupName });
 }
@@ -516,6 +532,8 @@ export type SettingsLoadResult =
       dropped: ValidationWarning[];
       warnings: ValidationWarning[];
       settingsPath: string;
+      /** SHA-256 of the exact source whose dropped paths were reviewed. */
+      recoveryRevision: string;
     }
   | { status: "parse_error"; settings: Settings; error: string; settingsPath: string };
 
@@ -527,6 +545,27 @@ export async function resetSettings(): Promise<Settings> {
   return invoke("reset_settings");
 }
 
+export async function acknowledgeSettingsRecovery(
+  expectedRecoveryRevision: string,
+): Promise<Settings> {
+  return invoke("acknowledge_settings_recovery", { expectedRecoveryRevision });
+}
+
+export type SettingsRecoveryAcknowledgeError =
+  | { kind: "recoveryDocumentRejected"; message: string }
+  | { kind: "runtimeReconcileFailed"; message: string };
+
+export function isSettingsRecoveryAcknowledgeError(
+  error: unknown,
+): error is SettingsRecoveryAcknowledgeError {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as Record<string, unknown>;
+  return (
+    typeof candidate.message === "string" &&
+    (candidate.kind === "recoveryDocumentRejected" || candidate.kind === "runtimeReconcileFailed")
+  );
+}
+
 export async function getSettingsPath(): Promise<string> {
   return invoke("get_settings_path");
 }
@@ -534,6 +573,52 @@ export async function getSettingsPath(): Promise<string> {
 export async function saveSettings(settings: Settings): Promise<void> {
   assertSettingsWriteAllowed();
   return invoke("save_settings", { settings });
+}
+
+export interface TerminalSessionAttribution {
+  generation: number;
+  state: "identified" | "noAgent" | "activeButUnidentified" | "unknown";
+  provider?: "claude" | "codex" | "grok";
+  sessionId?: string;
+}
+
+export async function getTerminalSessionAttributions(
+  claudeSessionMaxAgeHours?: number,
+  codexSessionMaxAgeHours?: number,
+  grokSessionMaxAgeHours?: number,
+): Promise<Record<string, TerminalSessionAttribution>> {
+  return invoke("get_terminal_session_attributions", {
+    claudeSessionMaxAgeHours,
+    codexSessionMaxAgeHours,
+    grokSessionMaxAgeHours,
+  });
+}
+
+export interface SessionCheckpointRequest {
+  requestId: number;
+  reason: "watchdog" | "update" | "eviction";
+  requireConclusive: boolean;
+  terminalIds?: string[];
+}
+
+export function onSessionCheckpointRequested(
+  listener: (request: SessionCheckpointRequest) => void,
+): Promise<UnlistenFn> {
+  return listen<SessionCheckpointRequest>("session-checkpoint-requested", (event) => {
+    listener(event.payload);
+  });
+}
+
+export async function acknowledgeSessionCheckpoint(
+  requestId: number,
+  checkpointCommitId?: number,
+  error?: string,
+): Promise<void> {
+  return invoke("acknowledge_session_checkpoint", {
+    requestId,
+    checkpointCommitId,
+    error,
+  });
 }
 
 export async function loadMemo(key: string): Promise<string> {

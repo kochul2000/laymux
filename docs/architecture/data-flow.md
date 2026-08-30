@@ -1309,7 +1309,7 @@ Windows·Linux release의 업데이트 상태는 Rust `UpdateManager`가 단독 
 - TerminalView 소스: `propagate_cwd_once`(`terminal-${paneId}`) → `do_sync_cwd(force=true)`.
 - FileExplorerView 소스: PTY 세션이 없어 커맨드가 실패하므로, 버튼은 `cwd-propagate-store`로 요청만 보내고 `FileExplorerView`가 자신의 `currentCwd`로 `handleLxMessage({action:"sync-cwd", force:true})`를 직접 디스패치한다.
 
-`force=true`는 **소스 측** 게이트(에코 루프·소스 activity·`cwd_send`)만 우회한다 — 소스가 "지금 전파한다"고 명시적으로 누른 행위이기 때문이다. **대상 측** 게이트는 force 여부와 무관하게 항상 유지된다: 명령 실행 중/TUI 앱이면 cd 주입을 막는 `filter_targets_not_busy`, 그리고 각 대상의 `cwd_receive` 의사를 존중하는 `filter_targets_cwd_receive`(issue #375 — 옛 동작은 force 시 이 필터를 우회해 dock 등 receive=off pane에도 강제 전파했다). strict activity 판정은 output ring뿐 아니라 known-app/grace/exit cache와 process-tree PTY registry의 건강성을 detection 전후에 확인하며, poison을 `Shell`로 축소해 source/target을 허용하지 않는다. 대상이 file explorer일 때의 추종은 백엔드 cd 주입이 아니라, `do_sync_cwd`가 `sync-cwd` 이벤트에 실어 보내는 `force` 플래그를 `FileExplorerView`가 받아 처리하되, 자신의 `cwdReceive`가 off면 force라도 무시한다(백엔드 필터와 동일한 정책). 가드·이벤트 상세는 [api-contracts.md §10](api-contracts.md)의 "1회성 CWD 전파" 참조.
+`force=true`는 **소스 측** 게이트(에코 루프·소스 activity·`cwd_send`)만 우회한다 — 소스가 "지금 전파한다"고 명시적으로 누른 행위이기 때문이다. **대상 측** 게이트는 force 여부와 무관하게 항상 유지된다: 명령 실행 중/TUI 앱이면 cd 주입을 막는 `filter_targets_not_busy`, 그리고 각 대상의 `cwd_receive` 의사를 존중하는 `filter_targets_cwd_receive`(issue #375 — 옛 동작은 force 시 이 필터를 우회해 dock 등 receive=off pane에도 강제 전파했다). strict activity 판정은 output ring뿐 아니라 known-app/grace/exit cache와 process-tree PTY registry의 건강성을 detection 전후에 확인하며, poison을 `Shell`로 축소해 source/target을 허용하지 않는다. `do_sync_cwd`의 session mutation permit은 PTY write에서 끝나지 않고 propagation marker·backend `session.cwd` 갱신·event 발행까지 유지된다. 대상이 file explorer일 때의 추종은 백엔드 cd 주입이 아니라, `do_sync_cwd`가 `sync-cwd` 이벤트에 실어 보내는 `force` 플래그를 `FileExplorerView`가 받아 처리하되, 자신의 `cwdReceive`가 off면 force라도 무시한다(백엔드 필터와 동일한 정책). 가드·이벤트 상세는 [api-contracts.md §10](api-contracts.md)의 "1회성 CWD 전파" 참조.
 
 ---
 
@@ -1363,8 +1363,8 @@ Windows·Linux release의 업데이트 상태는 Rust `UpdateManager`가 단독 
     │  App.tsx onCloseRequested 핸들러
     ▼
 [saveBeforeClose()]
-    ├─ 0. collectSettingsSnapshot()을 완료해 interrupt 전 agent 귀속을 보존
-    │     ├─ get_terminal_cwds / get_claude_session_ids / get_codex_session_ids / get_grok_session_ids
+    ├─ 0. 중앙 checkpoint coordinator를 drain해 interrupt 전 agent 귀속을 commit
+    │     ├─ get_terminal_cwds / get_terminal_session_attributions
     │     ├─ Claude: PTY descendant PID → ~/.claude/sessions/<pid>.json
     │     ├─ Codex: PTY child → 가장 얕은 Codex PID → logs DB process_uuid/thread_id
     │     ├─ Grok: PTY descendant PID ↔ `$GROK_HOME/active_sessions.json`의 `pid` 직접 일치
@@ -1373,31 +1373,42 @@ Windows·Linux release의 업데이트 상태는 Rust `UpdateManager`가 단독 
     │     ├─ Windows/WSL: distro 별 /proc probe에서 LX_TERMINAL_ID → Linux provider PID
     │     │    → Claude PID 세션 파일, Codex PID가 연 rollout FD, 또는 guest GROK_HOME의 active_sessions.json
     │     └─ state DB/rollout header로 top-level interactive thread 검증
-    │        → provider는 활성이나 정확한 ID를 증명하지 못하면 terminalId: null
-    │        → null 귀속은 해당 pane의 lastClaudeSession/lastCodexSession/lastGrokSession을 모두 제거
-    │        → 어떤 provider도 주장하지 않는 live terminal(= agent를 종료해 shell로 돌아온 pane)도 모두 제거
+    │        → PTY generation마다 Identified / NoAgent / ActiveButUnidentified / Unknown
+    │        → Identified만 정확한 provider ID를 기록, NoAgent는 세 ID를 제거
+    │        → ActiveButUnidentified는 일반 저장에서 잘못된 resume를 막기 위해 세 ID를 제거
+    │        → Unknown은 마지막 증명값을 보존하고 파괴 전 barrier를 통과하지 못함
     ├─ 1. exit.interruptTerminals이면 실행 중인 terminal에 Ctrl+C를 보내 agent 종료 출력을 기다림
     ├─ 2. 모든 TerminalView의 SerializeAddon.serialize({ excludeAltBuffer: true, excludeModes: true })
     │     → cache/terminal-output/{paneId}.dat 저장
-    ├─ 3. 사전 수집한 snapshot을 settings.json에 저장
-    │     → lastCwd·lastClaudeSession·lastCodexSession·lastGrokSession 포함(셋 중 둘 이상이면 모두 삭제)
-    └─ 4. cleanTerminalOutputCache(activePaneIds)
+    └─ 3. cleanTerminalOutputCache(activePaneIds)
           → 고아 캐시 파일 정리
     ▼
 [appWindow.destroy()]
 ```
 
-Windows host의 WSL terminal은 host process tree에 `wsl.exe`만 보이므로 native PID 귀속을 적용하지 않는다. `TerminalSession`이 소유한 distro를 결정한 뒤 bounded `wsl.exe --exec sh` probe가 해당 distro의 `/proc` 환경을 읽고, rcfile에서 상속된 `LX_TERMINAL_ID`로 pane과 top-level Claude/Codex/Grok Linux PID를 직접 연결한다. provider가 중첩됐으면 전체 Claude/Codex/Grok 후보 중 유일한 최상위 agent만 활성 provider이며, provider별로 각각 최상위를 고르지 않는다. Claude는 `<HOME>/.claude/sessions/<pid>.json`을 `\\wsl.localhost\<distro>` 경로로 읽는다. Codex는 live WAL SQLite를 Windows에서 열지 않고, 선택된 Linux PID의 `/proc/<pid>/fd` 중 `CODEX_HOME/sessions` 아래 rollout symlink만 수집해 header를 검증한다. Codex subagent·exec rollout은 제외하고 top-level ID가 하나일 때만 귀속한다. Grok는 guest 프로세스의 `GROK_HOME`(없으면 guest `HOME/.grok`)에서 `active_sessions.json`의 PID 일치를 읽고, 그 PID의 유효 UUID가 정확히 하나이며 `summary.json`이 존재하고 mtime이 age 게이트를 통과할 때만 귀속한다. Grok에는 rollout 필터가 없다. 명시 distro 파싱 실패는 default distro로 fallback하지 않고, default 조회와 모든 distro probe는 하나의 3초 deadline 안에서 끝난다. native·WSL 결과 병합 뒤 session ID 충돌도 전부 `null` 처리한다. distro·probe·provider 저장소 중 하나라도 증명할 수 없으면 CWD나 최신 파일로 추정하지 않고 `null`로 fail-closed한다([ADR-0120](../adr/0120-wsl-agent-session-attribution.md), [ADR-0156](../adr/0156-grok-first-class-agent.md)).
+Windows host의 WSL terminal은 host process tree에 `wsl.exe`만 보이므로 native PID 귀속을 적용하지 않는다. provider 조회 시작부터 `PtyHandle.is_wsl_backed()`로 native root와 WSL terminal ID를 분리하며, host process snapshot 실패는 native ID에만, WSL target/probe 실패는 해당 WSL ID에만 결부한다. `TerminalSession`이 소유한 distro를 결정한 뒤 bounded `wsl.exe --exec sh` probe가 해당 distro의 `/proc` 환경을 읽고, rcfile에서 상속된 `LX_TERMINAL_ID`로 pane과 top-level Claude/Codex/Grok Linux PID를 직접 연결한다. provider가 중첩됐으면 전체 Claude/Codex/Grok 후보 중 유일한 최상위 agent만 활성 provider이며, provider별로 각각 최상위를 고르지 않는다. Claude는 현재 live descendant PID에 해당하는 `<HOME>/.claude/sessions/<pid>.json`만 읽어 무관한 과거 파일의 손상을 전역 조회 실패로 확대하지 않는다. Codex는 live WAL SQLite를 Windows에서 열지 않고, 선택된 Linux PID의 `/proc/<pid>/fd` 중 `CODEX_HOME/sessions` 아래 rollout symlink만 수집해 header를 검증한다. Codex subagent·exec rollout은 제외하고 top-level ID가 하나일 때만 귀속한다. Grok는 guest 프로세스의 `GROK_HOME`(없으면 guest `HOME/.grok`)에서 `active_sessions.json`의 PID 일치를 읽고, 그 PID의 유효 UUID가 정확히 하나이며 `summary.json`이 존재하고 mtime이 age 게이트를 통과할 때만 귀속한다. Grok에는 rollout 필터가 없다. 명시 distro 파싱 실패는 default distro로 fallback하지 않고, default 조회와 모든 distro probe는 하나의 3초 deadline 안에서 끝난다. 이 명시/default distro 결정 자체가 실패하면 probe 대상 없음이 아니라 attribution 조회 실패(`Unknown`)로 전파한다. native·WSL 결과 병합 뒤 session ID 충돌도 전부 `null` 처리한다. live candidate에 결부된 distro·probe·provider 저장소 중 하나라도 증명할 수 없으면 CWD나 최신 파일로 추정하지 않고 `null`로 fail-closed한다([ADR-0120](../adr/0120-wsl-agent-session-attribution.md), [ADR-0156](../adr/0156-grok-first-class-agent.md)).
 
-**agent를 종료한 pane은 shell로 복원한다**([ADR-0195](../adr/0195-agent-session-cleared-on-shell-return.md)). 백엔드 귀속 맵의 키는 detector가 아직 추적하는 pane에서만 나오므로, agent를 정상 종료해 shell로 돌아온 pane은 세 맵 모두에서 사라진다. 이때 이전 실행의 세션 id를 그대로 두면 다음 기동이 사용자가 이미 종료한 agent를 resume한다. 판정 소유자는 `applyTerminalSessionFields` 한 곳이고, 입력은 `TerminalRuntimeAttribution`(백엔드 cwd·3개 귀속 맵 + live terminal 집합)이다.
+통합 attribution command는 세 provider lookup을 동시에 시작한다. 각 adapter가 독립 3초 deadline을 갖더라도 wall-clock에서 하나의 probe budget만 소비하므로 정상 close의 5초 저장 예산과 critical 이중 관측의 20초 ACK 예산을 넘기지 않는다.
 
-- live 집합의 SoT는 프론트엔드 `terminal-store` 인스턴스다(id는 `terminal-<paneId>`). `sessionReady === false`는 제외한다.
-- live인데 어떤 provider도 주장하지 않으면 세 세션 필드를 모두 삭제한다 — 그 pane은 지금 shell이다.
-- activity가 `interactiveApp`/`Claude`·`Codex`·`Grok`인 pane은 live 집합에서 빼서 값을 보존한다(detector 경쟁 = agent가 방금 시작).
-- live terminal이 없는 pane(다른 워크스페이스, 이번 실행에서 미기동)은 증명 기회를 받지 못했으므로 기존 값을 보존한다.
-- `includeRuntimeStructuralState: false`(설정 비교 경로)는 live 집합을 비워 런타임 상태를 읽지 않는 계약을 유지한다.
+**agent를 종료한 pane은 shell로 복원한다**([ADR-0195](../adr/0195-agent-session-cleared-on-shell-return.md), [ADR-0222](../adr/0222-agent-session-checkpoint-coordinator.md)). 판정 SoT는 Rust `get_terminal_session_attributions`다. 이 command는 live PTY의 generation과 native/WSL process liveness, 세 provider의 정확 귀속 결과를 한 verdict로 묶는다. 프론트 activity는 체크포인트 요청 힌트일 뿐 세션 삭제·보존 판정에 쓰지 않는다.
 
-### 13.5 시작 시퀀스
+- `Identified(provider, sessionId)`는 그 ID만 기록하고 다른 provider ID를 제거한다.
+- `NoAgent`와 `ActiveButUnidentified`는 잘못된 resume를 피하도록 일반 checkpoint에서 세 ID를 제거한다. 다만 후자는 update·eviction 같은 파괴 전 checkpoint에서는 실패로 처리한다. process enumeration, provider 파일·DB, WSL probe의 I/O·parse 실패는 provider lookup 건강 상태로 별도 전달되어 `Unknown`이 되며 기존 ID를 삭제하지 않는다.
+- process enumeration·provider 조회·IPC 실패와 아직 시작되지 않은 pane은 `Unknown`이다. 기존 ID를 보존하지만 파괴 전 checkpoint에서는 실패한다.
+- resume startup을 요청한 terminal은 startup override를 선택한 즉시(PTY 생성 응답의 `sessionReady`보다 먼저) 15초 grace를 시작하고 backend `NoAgent`와 `ActiveButUnidentified`를 `Unknown`으로 승격한다. provider process가 먼저 보였지만 session store 귀속이 아직 준비되지 않은 경우까지 포함해 workspace 진입 저장이 방금 사용한 ID를 지우지 않게 하는 bounded grace다.
+- `includeRuntimeStructuralState: false`(설정 비교 경로)는 runtime command를 호출하지 않고 기존 view 필드를 그대로 보존한다.
+
+### 13.5 체크포인트 조정과 파괴 전 barrier
+
+모든 일반 저장은 프론트 `flushSessionCheckpoint`의 단일 in-flight 경로를 지난다. 실행 중 요청은 버리지 않고 한 번의 trailing pass로 합치며, 수집 도중 `frontendMutationRevision`이 바뀌면 최신 store 상태로 다시 수집한다. 디스크 commit 뒤 별도 `checkpointCommitId`가 증가한다. provider 조회 자체가 실패한 경우 빈 map으로 축약하지 않고 `Unknown` coverage로 남긴다.
+
+Rust watchdog은 5분마다 프론트에 checkpoint를 요청한다. agent 완료 알림, backend 3초 activity reconcile에서 실제 판정이 바뀐 때, workspace 진입과 문서 foreground 복귀는 즉시 저장을 유도하는 힌트다. 앱 최초 진입·workspace 전환·foreground 복귀는 resume startup 유예가 끝나는 15초 뒤 catch-up도 한 번 예약한다. 60초 activity 전체 재발행 자체는 저장 trigger가 아니다. 따라서 `/clear`처럼 activity 이름이 그대로인 session 전환도 늦어도 watchdog의 새 provider 귀속 조회에서 발견한다.
+
+업데이트는 `download → 서명 검증 → finalization fence → 승인 mutation drain → critical checkpoint → updater on_before_exit 자식 정리/file-lock wait → install/restart` 순서다. mutation admission permit은 Local·Remote·Automation·MCP 입력, Automation frontend action과 terminal 생성/종료의 전체 수명을 덮으며 lx group command·sync-CWD 주입·xterm protocol reply도 같은 gate를 통과한다. sync-CWD permit은 PTY write 이후의 propagation marker·authoritative CWD·event까지 유지된다. Automation action은 backend HTTP waiter가 5초에 timeout되어도 frontend의 늦은 `automation_response`까지 detached permit을 유지한다. fence 이후 새 permit은 거부하고 기존 permit, controller operation, timeout/fault 뒤 아직 끝나지 않은 live PTY worker completion과 handle 제거 시 별도 격리한 retired completion을 최대 16초 기다린다. close mutation permit을 보유한 채 fault 여부와 무관한 worker completion을 live registry에서 격리 목록으로 옮기므로, 제거 뒤 fault가 발생해도 drain이 둘 사이의 공백을 관측할 수 없다. Windows process-tree helper도 1초 deadline으로 제한해 정지한 `taskkill`이 hidden eviction의 전역 fence를 무기한 붙잡지 못한다. 여러 hidden target의 유계 teardown은 병렬로 실행하고 scope guard가 모든 command 반환에서 fence를 해제하므로 fence-held 시간이 pane 수에 선형으로 늘어나지 않는다. fence 중 들어온 terminal create와 일반 TerminalView close는 admission 밖에서 취소를 기다린 뒤 normal permit으로 생성 또는 정리돼, 실패한 checkpoint 뒤 생성 요청이 유실되거나 pane 삭제와 겹친 backend PTY가 고아로 남지 않는다. critical checkpoint는 같은 terminal generation과 귀속 결과를 150ms 간격으로 두 번 관측하고 모든 live terminal이 `Identified` 또는 `NoAgent`이며 CWD 조회도 성공할 때만 ACK한다. StrictMode에서 정리된 listener가 이미 받은 request도 오류 ACK해 backend timeout까지 침묵하지 않는다. drain·checkpoint 실패 또는 timeout이면 fence를 풀고 installer를 시작하지 않는다. 숨김 terminal eviction은 backend command가 전역 fence부터 대상 critical checkpoint와 PTY close까지 한 트랜잭션으로 소유하며, 프론트는 ACK 직전 숨김 eligibility를 다시 검사한다. backend가 실제로 닫았다고 반환한 pane만 unmount하고, 동시에 visibility·timeout이 바뀐 닫힌 pane은 eviction set 전이를 현재 hook이 즉시 재평가해 remount하며, 실패한 대상은 재시도한다.
+
+Windows child wait와 PID tree kill은 handshake로 상호 배제한다. kill claim 동안 wait thread는 종료된 child의 OS handle을 유지하므로 PID가 재사용된 무관한 process에 `taskkill`이 적용되지 않는다. 숨김 eviction의 ACK 전 eligibility는 timer hook이 계산한 최신 만료 집합이다. timeout이 늘거나 hidden→visible→hidden으로 연속 숨김 epoch가 초기화되면 대상은 그 집합에서 빠지고 backend close 전에 오류 ACK된다.
+
+### 13.6 시작 시퀀스
 
 ```
 [useSessionPersistence 로드]
@@ -1472,13 +1483,13 @@ MCP/REST 쓰기
 
 **활동 상태 초기 동기화 (webview 리로드).** 백엔드 `AppState`는 webview 리로드에도 생존하므로 인터랙티브 앱 인식이 유지되지만, 프론트 활동 스토어는 리마운트로 비워진다. `useSyncEvents` 는 마운트 시 `get_terminal_states` 를 1회 호출해 살아있는 앱의 `interactiveApp` 활동을 재시드한다. 인스턴스가 늦게 등록되는 레이스는 스토어 구독으로 흡수하며, 모든 대상이 매칭되면 구독을 해제한다. 라이브 이벤트가 더 신선한 분류를 이미 적용했으면 덮어쓰지 않는다. ([ADR-0009](../adr/0009-process-tree-interactive-app-liveness.md))
 
-### 13.6 Workspace Pane ID
+### 13.7 Workspace Pane ID
 
 - Pane ID는 `pane-{uuid8}` 형식으로 생성되며 settings.json에 저장
 - 세션 간 안정적 — 캐시 파일 키로 사용
 - 기존 ID 없는 설정은 마이그레이션 시 자동 생성
 
-### 13.7 Pane 식별자 3종 (issue #256)
+### 13.8 Pane 식별자 3종 (issue #256)
 
 Pane을 가리키는 식별자는 용도가 다른 3가지가 공존한다. 혼동하지 말 것.
 

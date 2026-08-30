@@ -42,6 +42,7 @@ mod pty_reader;
 pub mod pty_trace;
 pub mod remote_server;
 pub mod remote_session;
+pub mod session_checkpoint;
 pub mod settings;
 pub mod state;
 pub mod terminal;
@@ -246,6 +247,7 @@ pub fn run() {
             }
 
             app_update::start_periodic_checks(app.handle().clone(), app_state.app_update.clone());
+            session_checkpoint::start_watchdog(app.handle().clone(), app_state.clone());
 
             app.manage(app_state);
             Ok(())
@@ -271,6 +273,7 @@ pub fn run() {
             commands::resume_terminal_output,
             commands::log_terminal_trace_batch,
             commands::close_terminal_session,
+            session_checkpoint::checkpoint_and_close_hidden_terminals,
             commands::mark_claude_terminal,
             commands::mark_codex_terminal,
             commands::mark_grok_terminal,
@@ -280,6 +283,7 @@ pub fn run() {
             commands::get_claude_session_ids,
             commands::get_codex_session_ids,
             commands::get_grok_session_ids,
+            commands::get_terminal_session_attributions,
             commands::get_sync_group_terminals,
             commands::handle_lx_message,
             commands::list_system_monospace_fonts,
@@ -321,6 +325,7 @@ pub fn run() {
             commands::get_home_directory,
             commands::get_automation_info,
             commands::load_settings_validated,
+            commands::acknowledge_settings_recovery,
             commands::reset_settings,
             commands::get_settings_path,
             commands::subscribe_usage_probe,
@@ -348,6 +353,7 @@ pub fn run() {
             commands::get_app_update_status,
             commands::check_app_update,
             commands::install_app_update,
+            session_checkpoint::acknowledge_session_checkpoint,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

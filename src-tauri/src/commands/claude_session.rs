@@ -5,6 +5,7 @@ use tauri::State;
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 
+use super::session_attribution::{provider_terminal_domains, ProviderSessionLookup};
 use super::wsl_agent_session::{resolve_wsl_agent_processes, WslAgentProcess, WslAgentProvider};
 
 /// Resolve Claude Code session IDs for known Claude terminals.
@@ -16,68 +17,136 @@ pub fn get_claude_session_ids(
     session_max_age_hours: Option<u64>,
     state: State<Arc<AppState>>,
 ) -> Result<HashMap<String, Option<String>>, String> {
+    get_claude_session_ids_impl(session_max_age_hours, &state)
+}
+
+pub(crate) fn get_claude_session_ids_impl(
+    session_max_age_hours: Option<u64>,
+    state: &AppState,
+) -> Result<HashMap<String, Option<String>>, String> {
+    Ok(get_claude_session_lookup_impl(session_max_age_hours, state)?.attributions)
+}
+
+pub(crate) fn get_claude_session_lookup_impl(
+    session_max_age_hours: Option<u64>,
+    state: &AppState,
+) -> Result<ProviderSessionLookup, String> {
     let known: Vec<String> = {
         let k = state.known_claude_terminals.lock_or_err()?;
         k.iter().cloned().collect()
     };
 
-    // Read session files from ~/.claude/sessions/
-    let sessions_dir = resolve_claude_sessions_dir();
-    let session_files = read_claude_session_files(&sessions_dir, session_max_age_hours);
-
-    let terminal_roots: Vec<(String, u32)> = {
-        let ptys = state.pty_handles.lock_or_err()?;
-        known
-            .iter()
-            .cloned()
-            .filter_map(|terminal_id| {
-                let child_pid = ptys.get(&terminal_id)?.child_pid()?;
-                Some((terminal_id, child_pid))
-            })
-            .collect()
-    };
-    let snapshot = crate::process_tree::snapshot_processes();
-    let candidates = if snapshot.is_empty() {
+    let domains = provider_terminal_domains(&known, state)?;
+    let terminal_roots = domains.native_roots;
+    let native_terminal_ids: HashSet<String> = terminal_roots
+        .iter()
+        .map(|(terminal_id, _)| terminal_id.clone())
+        .collect();
+    let mut failed_terminal_ids = HashSet::new();
+    let native_descendants = if terminal_roots.is_empty() {
         Vec::new()
     } else {
-        terminal_roots
-            .into_iter()
-            .filter_map(|(terminal_id, root_pid)| {
-                let descendants = crate::process_tree::descendant_pids(&snapshot, root_pid);
-                find_session_by_pids(&session_files, &descendants)
-                    .map(|session_id| (terminal_id, session_id))
-            })
-            .collect()
+        match crate::process_tree::try_snapshot_processes() {
+            Ok(snapshot) => terminal_roots
+                .into_iter()
+                .map(|(terminal_id, root_pid)| {
+                    (
+                        terminal_id,
+                        crate::process_tree::descendant_pids(&snapshot, root_pid),
+                    )
+                })
+                .collect(),
+            Err(error) => {
+                failed_terminal_ids.extend(native_terminal_ids);
+                tracing::warn!(%error, "native Claude process attribution failed");
+                Vec::new()
+            }
+        }
     };
+    let relevant_native_pids: HashSet<u32> = native_descendants
+        .iter()
+        .flat_map(|(_, descendants)| descendants.iter().copied())
+        .collect();
+    let session_files = if relevant_native_pids.is_empty() {
+        Vec::new()
+    } else {
+        let sessions_dir = resolve_claude_sessions_dir();
+        let session_lookup = read_claude_session_files_for_pids_detailed(
+            &sessions_dir,
+            session_max_age_hours,
+            Some(&relevant_native_pids),
+        );
+        failed_terminal_ids.extend(affected_native_terminal_ids(
+            &native_descendants,
+            &session_lookup,
+        ));
+        session_lookup.sessions
+    };
+    let candidates = native_descendants
+        .into_iter()
+        .filter_map(|(terminal_id, descendants)| {
+            find_session_by_pids(&session_files, &descendants)
+                .map(|session_id| (terminal_id, session_id))
+        })
+        .collect();
     let mut result = crate::process_tree::complete_agent_session_attributions(
         &known,
         remove_duplicate_attributions(candidates),
     );
-    match resolve_wsl_agent_processes(&state, WslAgentProvider::Claude) {
-        Ok(attributions) => {
-            for (terminal_id, process) in attributions {
-                result.insert(
-                    terminal_id,
-                    process.and_then(|process| {
-                        find_wsl_claude_session(&process, session_max_age_hours)
-                    }),
-                );
+    match resolve_wsl_agent_processes(state, WslAgentProvider::Claude) {
+        Ok(lookup) => {
+            failed_terminal_ids.extend(lookup.failed_terminal_ids);
+            for (terminal_id, process) in lookup.attributions {
+                let session_id = match process {
+                    Some(process) => {
+                        match find_wsl_claude_session_checked(&process, session_max_age_hours) {
+                            Ok(session_id) => session_id,
+                            Err(error) => {
+                                failed_terminal_ids.insert(terminal_id.clone());
+                                tracing::warn!(%error, "WSL Claude session file lookup failed");
+                                None
+                            }
+                        }
+                    }
+                    None => None,
+                };
+                result.insert(terminal_id, session_id);
             }
         }
-        Err(error) => tracing::warn!(%error, "WSL Claude attribution failed"),
+        Err(error) => {
+            failed_terminal_ids.extend(domains.wsl_terminal_ids);
+            tracing::warn!(%error, "WSL Claude attribution failed");
+        }
     }
-    Ok(crate::process_tree::reject_duplicate_session_attributions(
-        result, "Claude",
-    ))
+    Ok(ProviderSessionLookup {
+        attributions: crate::process_tree::reject_duplicate_session_attributions(result, "Claude"),
+        failed_terminal_ids,
+    })
 }
 
-fn find_wsl_claude_session(
+fn find_wsl_claude_session_checked(
     process: &WslAgentProcess,
     session_max_age_hours: Option<u64>,
-) -> Option<String> {
-    let sessions =
-        read_claude_session_files(&process.claude_sessions_dir()?, session_max_age_hours);
-    find_session_by_pids(&sessions, &HashSet::from([process.pid]))
+) -> Result<Option<String>, String> {
+    let Some(directory) = process.claude_sessions_dir() else {
+        return Ok(None);
+    };
+    let relevant_pids = HashSet::from([process.pid]);
+    let (sessions, lookup_failed) = read_claude_session_files_for_pids_checked(
+        &directory,
+        session_max_age_hours,
+        Some(&relevant_pids),
+    );
+    if lookup_failed {
+        return Err(format!(
+            "failed to read Claude session files from {}",
+            directory.display()
+        ));
+    }
+    Ok(find_session_by_pids(
+        &sessions,
+        &HashSet::from([process.pid]),
+    ))
 }
 
 /// A parsed Claude session file entry.
@@ -138,13 +207,60 @@ fn resolve_claude_sessions_dir() -> std::path::PathBuf {
 
 /// Read and parse all Claude session files from the given directory.
 /// If `max_age_hours` is Some, sessions older than the threshold are filtered out.
+#[cfg(test)]
 fn read_claude_session_files(
     dir: &std::path::Path,
     max_age_hours: Option<u64>,
 ) -> Vec<ClaudeSessionFile> {
+    read_claude_session_files_checked(dir, max_age_hours).0
+}
+
+#[cfg(test)]
+fn read_claude_session_files_checked(
+    dir: &std::path::Path,
+    max_age_hours: Option<u64>,
+) -> (Vec<ClaudeSessionFile>, bool) {
+    read_claude_session_files_for_pids_checked(dir, max_age_hours, None)
+}
+
+fn read_claude_session_files_for_pids_checked(
+    dir: &std::path::Path,
+    max_age_hours: Option<u64>,
+    relevant_pids: Option<&HashSet<u32>>,
+) -> (Vec<ClaudeSessionFile>, bool) {
+    let lookup = read_claude_session_files_for_pids_detailed(dir, max_age_hours, relevant_pids);
+    let lookup_failed = lookup.scope_failed || !lookup.failed_pids.is_empty();
+    (lookup.sessions, lookup_failed)
+}
+
+struct ClaudeSessionFileLookup {
+    sessions: Vec<ClaudeSessionFile>,
+    failed_pids: HashSet<u32>,
+    scope_failed: bool,
+}
+
+fn read_claude_session_files_for_pids_detailed(
+    dir: &std::path::Path,
+    max_age_hours: Option<u64>,
+    relevant_pids: Option<&HashSet<u32>>,
+) -> ClaudeSessionFileLookup {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
-        Err(_) => return Vec::new(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return ClaudeSessionFileLookup {
+                sessions: Vec::new(),
+                failed_pids: HashSet::new(),
+                scope_failed: false,
+            };
+        }
+        Err(error) => {
+            tracing::warn!(path = %dir.display(), %error, "failed to read Claude sessions directory");
+            return ClaudeSessionFileLookup {
+                sessions: Vec::new(),
+                failed_pids: HashSet::new(),
+                scope_failed: true,
+            };
+        }
     };
 
     // Compute the cutoff timestamp (seconds since epoch) if max_age_hours is set.
@@ -157,13 +273,37 @@ fn read_claude_session_files(
     });
 
     let mut result = Vec::new();
-    for entry in entries.flatten() {
+    let mut failed_pids = HashSet::new();
+    let mut scope_failed = false;
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                scope_failed = true;
+                tracing::warn!(%error, "failed to read a Claude session directory entry");
+                continue;
+            }
+        };
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
         }
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+        let file_pid = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .and_then(|stem| stem.parse::<u32>().ok());
+        if let Some(relevant_pids) = relevant_pids {
+            if !file_pid.is_some_and(|pid| relevant_pids.contains(&pid)) {
+                continue;
+            }
+        }
+        match std::fs::read_to_string(&path)
+            .map_err(|error| error.to_string())
+            .and_then(|content| {
+                serde_json::from_str::<serde_json::Value>(&content)
+                    .map_err(|error| error.to_string())
+            }) {
+            Ok(val) => {
                 let pid = val.get("pid").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                 let session_id = val
                     .get("sessionId")
@@ -187,9 +327,35 @@ fn read_claude_session_files(
                     });
                 }
             }
+            Err(error) => {
+                match file_pid {
+                    Some(pid) => {
+                        failed_pids.insert(pid);
+                    }
+                    None => scope_failed = true,
+                }
+                tracing::warn!(path = %path.display(), %error, "failed to parse Claude session file");
+            }
         }
     }
-    result
+    ClaudeSessionFileLookup {
+        sessions: result,
+        failed_pids,
+        scope_failed,
+    }
+}
+
+fn affected_native_terminal_ids(
+    native_descendants: &[(String, HashSet<u32>)],
+    lookup: &ClaudeSessionFileLookup,
+) -> HashSet<String> {
+    native_descendants
+        .iter()
+        .filter(|(_, descendants)| {
+            lookup.scope_failed || !descendants.is_disjoint(&lookup.failed_pids)
+        })
+        .map(|(terminal_id, _)| terminal_id.clone())
+        .collect()
 }
 
 /// Find a Claude session ID by matching any of the given PIDs against session file PIDs.
@@ -261,6 +427,60 @@ mod tests {
         std::fs::write(tmp.path().join("bad.json"), "not valid json!").unwrap();
         let sessions = read_claude_session_files(tmp.path(), None);
         assert!(sessions.is_empty());
+        assert!(read_claude_session_files_checked(tmp.path(), None).1);
+    }
+
+    #[test]
+    fn pid_scoped_read_ignores_an_unrelated_malformed_session_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("999.json"), "not valid json!").unwrap();
+        std::fs::write(
+            tmp.path().join("123.json"),
+            r#"{"pid":123,"sessionId":"session-123","startedAt":1000}"#,
+        )
+        .unwrap();
+
+        let (sessions, lookup_failed) = read_claude_session_files_for_pids_checked(
+            tmp.path(),
+            None,
+            Some(&HashSet::from([123])),
+        );
+
+        assert!(!lookup_failed);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, "session-123");
+    }
+
+    #[test]
+    fn pid_scoped_read_reports_a_malformed_relevant_session_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("123.json"), "not valid json!").unwrap();
+
+        let (_, lookup_failed) = read_claude_session_files_for_pids_checked(
+            tmp.path(),
+            None,
+            Some(&HashSet::from([123])),
+        );
+
+        assert!(lookup_failed);
+    }
+
+    #[test]
+    fn malformed_live_pid_only_fails_its_own_terminal() {
+        let lookup = ClaudeSessionFileLookup {
+            sessions: Vec::new(),
+            failed_pids: HashSet::from([123]),
+            scope_failed: false,
+        };
+        let affected = affected_native_terminal_ids(
+            &[
+                ("terminal-a".into(), HashSet::from([100, 123])),
+                ("terminal-b".into(), HashSet::from([200, 201])),
+            ],
+            &lookup,
+        );
+
+        assert_eq!(affected, HashSet::from(["terminal-a".into()]));
     }
 
     #[test]
