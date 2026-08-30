@@ -11,10 +11,10 @@ import androidx.webkit.WebViewClientCompat
 
 internal class CloudWebViewClient(
     private val navigation: CloudNavigationPolicy,
+    private val documentGeneration: Long,
+    private val documentLoadState: CloudDocumentLoadState,
     private val onDocumentPresentationChanged: (CloudDocumentPresentation) -> Unit = {},
 ) : WebViewClientCompat() {
-    private val documentLoadState = CloudDocumentLoadState()
-
     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
         !navigation.isAllowed(request.url.toString())
 
@@ -27,11 +27,12 @@ internal class CloudWebViewClient(
             view.stopLoading()
             return
         }
-        onDocumentPresentationChanged(documentLoadState.started(url))
+        onDocumentPresentationChanged(documentLoadState.started(documentGeneration, url))
     }
 
     override fun onPageFinished(view: WebView, url: String) {
-        documentLoadState.finished(url)?.let(onDocumentPresentationChanged)
+        documentLoadState.finished(documentGeneration, url)
+            ?.let(onDocumentPresentationChanged)
     }
 
     override fun onReceivedError(
@@ -40,6 +41,7 @@ internal class CloudWebViewClient(
         error: WebResourceErrorCompat,
     ) {
         documentLoadState.failed(
+            documentGeneration,
             request.url.toString(),
             request.isForMainFrame,
         )?.let(onDocumentPresentationChanged)
@@ -51,6 +53,7 @@ internal class CloudWebViewClient(
         errorResponse: WebResourceResponse,
     ) {
         documentLoadState.failed(
+            documentGeneration,
             request.url.toString(),
             request.isForMainFrame,
         )?.let(onDocumentPresentationChanged)
@@ -59,7 +62,7 @@ internal class CloudWebViewClient(
     @Suppress("DEPRECATION")
     override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
         handler.cancel()
-        documentLoadState.failed(error.url, isMainFrame = true)
+        documentLoadState.failed(documentGeneration, error.url, isMainFrame = true)
             ?.let(onDocumentPresentationChanged)
     }
 }

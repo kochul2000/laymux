@@ -124,11 +124,13 @@ import com.laymux.android.web.CloudBridgeInput
 import com.laymux.android.web.CloudAuthClient
 import com.laymux.android.web.CloudAuthException
 import com.laymux.android.web.CloudCookieInstaller
+import com.laymux.android.web.CloudDocumentLoadState
 import com.laymux.android.web.CloudDocumentPresentation
 import com.laymux.android.web.CloudLoadOverlayView
 import com.laymux.android.web.CloudNavigationPolicy
 import com.laymux.android.web.CloudWebViewClient
 import com.laymux.android.web.ExternalUrlPolicy
+import com.laymux.android.web.beginCloudDocumentNavigation
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
@@ -221,7 +223,9 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private lateinit var remoteLoadingOverlay: LinearLayout
     private lateinit var remoteLoadingStatus: TextView
     private lateinit var cloudLoadOverlay: CloudLoadOverlayView
+    private val cloudDocumentLoadState = CloudDocumentLoadState()
     private var cloudDocumentPresentation = CloudDocumentPresentation.LOADING
+    private var cloudWebViewGeneration = 0L
     private val remoteConnectionGeneration = AtomicLong()
     private val remoteDocumentAuthority = RemoteDocumentAuthority()
     private var secureWebViewGeneration = 0L
@@ -382,7 +386,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         applySystemBarInsets(root)
         applyWebSurfaceLayers(VisibleWebSurface.CLOUD)
         installRemoteBackGuard()
-        cloudWebView.loadUrl(cloudNavigation.startUrl)
+        loadCloudDocument(cloudNavigation.startUrl, replaceWebView = false)
         // Only on a genuine cold start: a recreation (density/locale change,
         // process restore) redelivers the same VIEW intent, and replaying the
         // payload would overwrite the vault with a fresh nonce, get a 409
@@ -605,31 +609,37 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private fun createCloudWebView(): WebView = WebView(this).apply {
-        settings.javaScriptEnabled = true
-        settings.domStorageEnabled = true
-        settings.databaseEnabled = false
-        settings.allowFileAccess = false
-        settings.allowContentAccess = false
-        settings.javaScriptCanOpenWindowsAutomatically = false
-        settings.setSupportMultipleWindows(false)
-        settings.setGeolocationEnabled(false)
-        settings.mediaPlaybackRequiresUserGesture = true
-        settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-        webViewClient = CloudWebViewClient(
-            cloudNavigation,
-            ::onCloudDocumentPresentationChanged,
-        )
-        webChromeClient = JsDialogChromeClient(
-            this@MainActivity,
-            ::showWebFileChooser,
-        ).also {
-            cloudJsDialogs?.dismissActive()
-            cloudJsDialogs = it
+    private fun createCloudWebView(): WebView {
+        cloudWebViewGeneration += 1
+        val documentGeneration = cloudWebViewGeneration
+        return WebView(this).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.databaseEnabled = false
+            settings.allowFileAccess = false
+            settings.allowContentAccess = false
+            settings.javaScriptCanOpenWindowsAutomatically = false
+            settings.setSupportMultipleWindows(false)
+            settings.setGeolocationEnabled(false)
+            settings.mediaPlaybackRequiresUserGesture = true
+            settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            webViewClient = CloudWebViewClient(
+                cloudNavigation,
+                documentGeneration,
+                cloudDocumentLoadState,
+                ::onCloudDocumentPresentationChanged,
+            )
+            webChromeClient = JsDialogChromeClient(
+                this@MainActivity,
+                ::showWebFileChooser,
+            ).also {
+                cloudJsDialogs?.dismissActive()
+                cloudJsDialogs = it
+            }
+            addJavascriptInterface(cloudBridge, CLOUD_BRIDGE_NAME)
+            CookieManager.getInstance().setAcceptCookie(true)
+            CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
         }
-        addJavascriptInterface(cloudBridge, CLOUD_BRIDGE_NAME)
-        CookieManager.getInstance().setAcceptCookie(true)
-        CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
     }
 
     /**
@@ -714,8 +724,23 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     private fun retryCloudDocument() {
         if (!::cloudWebView.isInitialized || isDestroyed) return
-        onCloudDocumentPresentationChanged(CloudDocumentPresentation.LOADING)
-        cloudWebView.reload()
+        val retryUrl = cloudWebView.url
+            ?.takeIf(cloudNavigation::isAllowed)
+            ?: cloudNavigation.startUrl
+        loadCloudDocument(retryUrl, replaceWebView = true)
+    }
+
+    private fun loadCloudDocument(url: String, replaceWebView: Boolean) {
+        if (!::cloudWebView.isInitialized || isDestroyed) return
+        if (replaceWebView) replaceCloudWebView()
+        val documentGeneration = cloudWebViewGeneration
+        beginCloudDocumentNavigation(
+            state = cloudDocumentLoadState,
+            generation = documentGeneration,
+            url = url,
+            publish = ::onCloudDocumentPresentationChanged,
+            navigate = { cloudWebView.loadUrl(url) },
+        )
     }
 
     private fun updateRemoteLoadProgress(update: (RemoteLoadProgress) -> RemoteLoadProgress) {
@@ -792,7 +817,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                     cookieManager.setCookie(url, cookie, onComplete)
                 }
                 withContext(Dispatchers.IO) { cookieManager.flush() }
-                cloudWebView.loadUrl(cloudNavigation.dashboardUrl)
+                loadCloudDocument(cloudNavigation.dashboardUrl, replaceWebView = true)
             } catch (_: GetCredentialCancellationException) {
                 showCloudMessage("Google 로그인이 취소되었습니다.")
             } catch (_: GetCredentialException) {
@@ -841,8 +866,8 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         if (!::cloudWebView.isInitialized || isDestroyed) return
         if (::pairingSheet.isInitialized) pairingSheet.dismiss()
         if (::connectionSettingsDialog.isInitialized) connectionSettingsDialog.dismiss()
+        loadCloudDocument(cloudNavigation.dashboardUrl, replaceWebView = true)
         applyWebSurfaceLayers(VisibleWebSurface.CLOUD)
-        cloudWebView.loadUrl(cloudNavigation.dashboardUrl)
     }
 
     private fun showPairingSurface() {
@@ -1024,6 +1049,32 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 FrameLayout.LayoutParams.MATCH_PARENT,
             ),
         )
+    }
+
+    private fun replaceCloudWebView() {
+        if (!::root.isInitialized || !::cloudWebView.isInitialized || isDestroyed) return
+        cancelPendingFileChooser()
+        val previous = cloudWebView
+        val replacement = createCloudWebView()
+        val layers = WebSurfaceLayerPolicy.forSurface(
+            visibleWebSurface,
+            cloudDocumentPresentation,
+        )
+        replacement.visibility = if (layers.cloudVisible) View.VISIBLE else View.GONE
+        root.removeView(previous)
+        previous.removeJavascriptInterface(CLOUD_BRIDGE_NAME)
+        previous.stopLoading()
+        previous.destroy()
+        cloudWebView = replacement
+        root.addView(
+            replacement,
+            0,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        applyCloudDocumentLayers(layers)
     }
 
     private fun cloudBridgeActionsEnabled(): Boolean =

@@ -16,23 +16,29 @@ internal class CloudDocumentLoadState {
     var presentation: CloudDocumentPresentation = CloudDocumentPresentation.LOADING
         private set
 
+    private var activeGeneration: Long? = null
     private var activeUrl: String? = null
     private var activeLoadFailed = false
 
-    fun started(url: String): CloudDocumentPresentation {
+    fun started(generation: Long, url: String): CloudDocumentPresentation {
+        activeGeneration = generation
         activeUrl = url
         activeLoadFailed = false
         return setPresentation(CloudDocumentPresentation.LOADING)
     }
 
-    fun failed(url: String, isMainFrame: Boolean): CloudDocumentPresentation? {
-        if (!isMainFrame || url != activeUrl) return null
+    fun failed(
+        generation: Long,
+        url: String,
+        isMainFrame: Boolean,
+    ): CloudDocumentPresentation? {
+        if (!isMainFrame || generation != activeGeneration || url != activeUrl) return null
         activeLoadFailed = true
         return setPresentation(CloudDocumentPresentation.UNAVAILABLE)
     }
 
-    fun finished(url: String): CloudDocumentPresentation? {
-        if (url != activeUrl || activeLoadFailed) return null
+    fun finished(generation: Long, url: String): CloudDocumentPresentation? {
+        if (generation != activeGeneration || url != activeUrl || activeLoadFailed) return null
         return setPresentation(CloudDocumentPresentation.READY)
     }
 
@@ -40,4 +46,15 @@ internal class CloudDocumentLoadState {
         presentation = next
         return next
     }
+}
+
+internal fun beginCloudDocumentNavigation(
+    state: CloudDocumentLoadState,
+    generation: Long,
+    url: String,
+    publish: (CloudDocumentPresentation) -> Unit,
+    navigate: () -> Unit,
+) {
+    publish(state.started(generation, url))
+    navigate()
 }
