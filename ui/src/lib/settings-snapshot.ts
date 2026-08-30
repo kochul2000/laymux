@@ -45,6 +45,7 @@ export interface TerminalAttributionCoverage {
 export interface CollectedSessionCheckpoint {
   settings: Settings;
   coverage: TerminalAttributionCoverage[];
+  cwdLookupFailed: boolean;
   attributionLookupFailed: boolean;
 }
 
@@ -65,7 +66,10 @@ function terminalAttributionState(
   if (runtime.attributionLookupFailed) return "unknown";
   const attribution = runtime.backendAttributions[terminalId];
   if (!attribution) return "unknown";
-  if (attribution.state === "noAgent" && runtime.attributionPendingTerminalIds.has(terminalId)) {
+  if (
+    (attribution.state === "noAgent" || attribution.state === "activeButUnidentified") &&
+    runtime.attributionPendingTerminalIds.has(terminalId)
+  ) {
     return "unknown";
   }
   return attribution.state;
@@ -160,6 +164,7 @@ async function collectSessionCheckpointInternal(
       ])
     : undefined;
   const backendCwds = runtimeResults?.[0].status === "fulfilled" ? runtimeResults[0].value : {};
+  const cwdLookupFailed = includeRuntime && runtimeResults?.[0].status === "rejected";
   const backendAttributions =
     runtimeResults?.[1].status === "fulfilled" ? runtimeResults[1].value : {};
   const runtime: TerminalRuntimeAttribution = {
@@ -333,7 +338,12 @@ async function collectSessionCheckpointInternal(
   const coverage = includeRuntime
     ? [...coverageTerminalIds].map((terminalId) => terminalAttributionCoverage(terminalId, runtime))
     : [];
-  return { settings, coverage, attributionLookupFailed: runtime.attributionLookupFailed };
+  return {
+    settings,
+    coverage,
+    cwdLookupFailed,
+    attributionLookupFailed: runtime.attributionLookupFailed,
+  };
 }
 
 /** Collect settings plus the attribution confidence for every live terminal. */

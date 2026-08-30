@@ -2,6 +2,8 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const unlisten = vi.fn();
+let deferListenerRegistration = false;
+let finishListenerRegistration: (() => void) | undefined;
 let nativeListener:
   | ((request: {
       requestId: number;
@@ -12,9 +14,12 @@ let nativeListener:
   | undefined;
 
 vi.mock("@/lib/tauri-api", () => ({
-  onSessionCheckpointRequested: vi.fn().mockImplementation(async (listener) => {
+  onSessionCheckpointRequested: vi.fn().mockImplementation((listener) => {
     nativeListener = listener;
-    return unlisten;
+    if (!deferListenerRegistration) return Promise.resolve(unlisten);
+    return new Promise<() => void>((resolve) => {
+      finishListenerRegistration = () => resolve(unlisten);
+    });
   }),
   acknowledgeSessionCheckpoint: vi.fn().mockResolvedValue(undefined),
 }));
@@ -43,6 +48,8 @@ import { useSessionCheckpointLifecycle } from "./useSessionCheckpointLifecycle";
 describe("useSessionCheckpointLifecycle", () => {
   beforeEach(() => {
     nativeListener = undefined;
+    deferListenerRegistration = false;
+    finishListenerRegistration = undefined;
     vi.clearAllMocks();
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
@@ -65,6 +72,25 @@ describe("useSessionCheckpointLifecycle", () => {
       requireConclusive: true,
       terminalIds: undefined,
     });
+  });
+
+  it("error-acks a request delivered to a listener cancelled during StrictMode registration", async () => {
+    deferListenerRegistration = true;
+    const { unmount } = renderHook(() => useSessionCheckpointLifecycle(true));
+    await vi.waitFor(() => expect(nativeListener).toBeDefined());
+    unmount();
+
+    nativeListener?.({ requestId: 12, reason: "update", requireConclusive: true });
+    finishListenerRegistration?.();
+
+    await vi.waitFor(() =>
+      expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(
+        12,
+        undefined,
+        "session checkpoint listener cancelled",
+      ),
+    );
+    expect(flushSessionCheckpoint).not.toHaveBeenCalled();
   });
 
   it("rejects an eviction checkpoint when its target became visible before ACK", async () => {

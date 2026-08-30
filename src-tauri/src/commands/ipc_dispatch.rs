@@ -127,6 +127,14 @@ fn handle_lx_message_dispatch(
 
 // ── Public inner functions — callable from both LxMessage dispatch and PTY callback ──
 
+fn run_session_mutation<T>(
+    state: &AppState,
+    operation: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let _checkpoint_permit = state.session_checkpoint.begin_mutation()?;
+    operation()
+}
+
 /// Sync CWD across terminal group. Handles propagation guard, target filtering, and cd writing.
 ///
 /// `force` (issue #293): 사용자가 컨트롤 패널의 "현재 CWD 1회 전파" 버튼을
@@ -145,109 +153,112 @@ pub fn do_sync_cwd(
     target_group: Option<&str>,
     force: bool,
 ) -> Result<LxResponse, String> {
-    cleanup_stale_propagations(state);
+    run_session_mutation(state, || {
+        cleanup_stale_propagations(state);
 
-    let normalized_path = path_utils::normalize_wsl_path(path);
+        let normalized_path = path_utils::normalize_wsl_path(path);
 
-    // ── 소스 측 게이트 단일 결정점 (issue #293) ──
-    // 소스 터미널이 전파 자격이 있는지 판단하는 모든 게이트를 한곳(evaluate_source_gates)에
-    // 모은다. force=true(사용자가 컨트롤 패널에서 직접 누른 1회성 전파)이면 그 함수가
-    // 소스 측 게이트(에코 루프 가드·소스 activity·cwd_send off)를 통째로 우회한다.
-    // 새 소스 측 안전 게이트는 반드시 그 함수 안에 추가해야 force 정책이 네 곳에
-    // 분산되지 않는다. 대상 측 게이트(filter_targets_not_busy·filter_targets_cwd_receive)는
-    // force 와 무관하게 항상 유지되므로 여기서 다루지 않는다(아래 참고).
-    if let Some(suppressed) =
-        evaluate_source_gates(state, terminal_id, path, &normalized_path, force)?
-    {
-        return Ok(suppressed);
-    }
+        // ── 소스 측 게이트 단일 결정점 (issue #293) ──
+        // 소스 터미널이 전파 자격이 있는지 판단하는 모든 게이트를 한곳(evaluate_source_gates)에
+        // 모은다. force=true(사용자가 컨트롤 패널에서 직접 누른 1회성 전파)이면 그 함수가
+        // 소스 측 게이트(에코 루프 가드·소스 activity·cwd_send off)를 통째로 우회한다.
+        // 새 소스 측 안전 게이트는 반드시 그 함수 안에 추가해야 force 정책이 네 곳에
+        // 분산되지 않는다. 대상 측 게이트(filter_targets_not_busy·filter_targets_cwd_receive)는
+        // force 와 무관하게 항상 유지되므로 여기서 다루지 않는다(아래 참고).
+        if let Some(suppressed) =
+            evaluate_source_gates(state, terminal_id, path, &normalized_path, force)?
+        {
+            return Ok(suppressed);
+        }
 
-    let all_targets = resolve_target_terminals(state, terminal_id, group_id, all, target_group)?;
+        let all_targets =
+            resolve_target_terminals(state, terminal_id, group_id, all, target_group)?;
 
-    // 대상 cwd_receive 필터는 force 와 무관하게 항상 적용한다 (issue #375).
-    // force(1회성 전파)는 소스 측 게이트만 우회한다 — 소스가 "지금 전파한다"고 명시적으로
-    // 누른 행위이기 때문이다. 그러나 각 대상의 cwd_receive 는 그 pane(dock 등)의 의사이므로
-    // force 라도 존중해야 한다. CWD 전파는 force/non-force 가 동일한 대상 필터 경로를 거친다.
-    let receiving_targets = filter_targets_cwd_receive(state, &all_targets)?;
+        // 대상 cwd_receive 필터는 force 와 무관하게 항상 적용한다 (issue #375).
+        // force(1회성 전파)는 소스 측 게이트만 우회한다 — 소스가 "지금 전파한다"고 명시적으로
+        // 누른 행위이기 때문이다. 그러나 각 대상의 cwd_receive 는 그 pane(dock 등)의 의사이므로
+        // force 라도 존중해야 한다. CWD 전파는 force/non-force 가 동일한 대상 필터 경로를 거친다.
+        let receiving_targets = filter_targets_cwd_receive(state, &all_targets)?;
 
-    let settings = crate::settings::load_settings();
-    let (idle_targets, claude_ids) =
-        filter_targets_not_busy(state, &receiving_targets, &settings.claude.sync_cwd)?;
+        let settings = crate::settings::load_settings();
+        let (idle_targets, claude_ids) =
+            filter_targets_not_busy(state, &receiving_targets, &settings.claude.sync_cwd)?;
 
-    let target_terminals = filter_targets_needing_cd(state, &idle_targets, &normalized_path);
+        let target_terminals = filter_targets_needing_cd(state, &idle_targets, &normalized_path);
 
-    // 실제로 새 cd 를 주입한 대상만 반환받는다. PTY 핸들 부재·경로 변환 실패로 조용히
-    // 스킵된 대상은 여기서 제외된다(issue #296 P1).
-    let written = if target_terminals.is_empty() {
-        Vec::new()
-    } else {
-        write_cd_to_group_terminals(
-            state,
-            &target_terminals,
-            terminal_id,
-            &normalized_path,
-            &claude_ids,
-        )?
-    };
+        // 실제로 새 cd 를 주입한 대상만 반환받는다. PTY 핸들 부재·경로 변환 실패로 조용히
+        // 스킵된 대상은 여기서 제외된다(issue #296 P1).
+        let written = if target_terminals.is_empty() {
+            Vec::new()
+        } else {
+            write_cd_to_group_terminals(
+                state,
+                &target_terminals,
+                terminal_id,
+                &normalized_path,
+                &claude_ids,
+            )?
+        };
 
-    // 도착이 보장된 대상(`arrived`)의 정의 (issue #296 P1):
-    //   arrived = written ∪ already_at_cwd
-    // - `written`            : 실제로 cd 를 주입(write 성공)한 대상 = 새로 목적 CWD 로 이동.
-    // - `already_at_cwd`     : `filter_targets_needing_cd` 가 "이미 같은 cwd"라 제외한 대상
-    //                          = `idle_targets - target_terminals`. 새 cd 는 안 보냈지만
-    //                          이미 그 경로에 있으므로 도착 상태.
-    // 옛 구현은 `idle_targets` 전체를 도착으로 표기했는데, 이는 "idle 이면 cd 가 항상
-    // 도착한다"는 잘못된 전제였다. PTY 핸들이 없거나(예: file-explorer-* 백엔드 세션 없음)
-    // 경로 변환이 불가능한(file explorer 의 순수 Linux `/home/...` → distro 미상 PowerShell)
-    // 대상은 idle 이어도 실제 cd 가 나가지 않는다. 그런 대상을 도착으로 오기록하면
-    // 그 대상이 같은 경로로 재시도해도 `filter_targets_needing_cd` 가 "이미 동일 CWD"로 보고
-    // cd 를 영구히 건너뛴다. busy(Running/TUI)로 `filter_targets_not_busy` 에서 제외된 대상도
-    // 마찬가지로 도착이 아니므로 애초에 `idle_targets` 에 들지 않아 자동 제외된다.
-    let written_set: std::collections::HashSet<&String> = written.iter().collect();
-    let target_set: std::collections::HashSet<&String> = target_terminals.iter().collect();
-    let arrived: Vec<String> = idle_targets
-        .iter()
-        .filter(|id| {
-            // written(실제 주입) 또는 already_at_cwd(idle 인데 target_terminals 에 없음).
-            written_set.contains(*id) || !target_set.contains(*id)
-        })
-        .cloned()
-        .collect();
+        // 도착이 보장된 대상(`arrived`)의 정의 (issue #296 P1):
+        //   arrived = written ∪ already_at_cwd
+        // - `written`            : 실제로 cd 를 주입(write 성공)한 대상 = 새로 목적 CWD 로 이동.
+        // - `already_at_cwd`     : `filter_targets_needing_cd` 가 "이미 같은 cwd"라 제외한 대상
+        //                          = `idle_targets - target_terminals`. 새 cd 는 안 보냈지만
+        //                          이미 그 경로에 있으므로 도착 상태.
+        // 옛 구현은 `idle_targets` 전체를 도착으로 표기했는데, 이는 "idle 이면 cd 가 항상
+        // 도착한다"는 잘못된 전제였다. PTY 핸들이 없거나(예: file-explorer-* 백엔드 세션 없음)
+        // 경로 변환이 불가능한(file explorer 의 순수 Linux `/home/...` → distro 미상 PowerShell)
+        // 대상은 idle 이어도 실제 cd 가 나가지 않는다. 그런 대상을 도착으로 오기록하면
+        // 그 대상이 같은 경로로 재시도해도 `filter_targets_needing_cd` 가 "이미 동일 CWD"로 보고
+        // cd 를 영구히 건너뛴다. busy(Running/TUI)로 `filter_targets_not_busy` 에서 제외된 대상도
+        // 마찬가지로 도착이 아니므로 애초에 `idle_targets` 에 들지 않아 자동 제외된다.
+        let written_set: std::collections::HashSet<&String> = written.iter().collect();
+        let target_set: std::collections::HashSet<&String> = target_terminals.iter().collect();
+        let arrived: Vec<String> = idle_targets
+            .iter()
+            .filter(|id| {
+                // written(실제 주입) 또는 already_at_cwd(idle 인데 target_terminals 에 없음).
+                written_set.contains(*id) || !target_set.contains(*id)
+            })
+            .cloned()
+            .collect();
 
-    // 에코 가드(mark_propagated)는 실제로 새 cd 를 주입한 `written` 에만 필요하다.
-    // already_at_cwd 는 새 명령을 안 보냈으므로 에코될 것이 없다.
-    if !written.is_empty() {
-        mark_propagated(state, &written)?;
-    }
+        // 에코 가드(mark_propagated)는 실제로 새 cd 를 주입한 `written` 에만 필요하다.
+        // already_at_cwd 는 새 명령을 안 보냈으므로 에코될 것이 없다.
+        if !written.is_empty() {
+            mark_propagated(state, &written)?;
+        }
 
-    // backend `session.cwd` 갱신은 도착이 보장된 `arrived` 에만 적용한다. 변환실패/PTY부재로
-    // cd 가 안 나간 대상을 갱신하면 재시도가 영구 차단된다(위 주석 참조).
-    for tid in &arrived {
-        update_terminal_cwd(state, tid, &normalized_path);
-    }
+        // backend `session.cwd` 갱신은 도착이 보장된 `arrived` 에만 적용한다. 변환실패/PTY부재로
+        // cd 가 안 나간 대상을 갱신하면 재시도가 영구 차단된다(위 주석 참조).
+        for tid in &arrived {
+            update_terminal_cwd(state, tid, &normalized_path);
+        }
 
-    // `force`(issue #293): file explorer/viewer 처럼 평소 동기화를 꺼둔 프론트 view 가
-    // 이 1회성 전파에는 따라오도록, 프론트 리스너가 게이트를 우회할 수 있게 force 를 싣는다.
-    // targets 는 실제 도착이 보장된 `arrived`(written ∪ already_at_cwd)만 — busy·변환실패·
-    // PTY부재 대상은 도착으로 표기하지 않는다(issue #296 P1).
-    let _ = app.emit(
-        EVENT_SYNC_CWD,
-        serde_json::json!({
-            "path": normalized_path,
-            "terminalId": terminal_id,
-            "groupId": group_id,
-            "targets": arrived,
-            "force": force,
-        }),
-    );
+        // `force`(issue #293): file explorer/viewer 처럼 평소 동기화를 꺼둔 프론트 view 가
+        // 이 1회성 전파에는 따라오도록, 프론트 리스너가 게이트를 우회할 수 있게 force 를 싣는다.
+        // targets 는 실제 도착이 보장된 `arrived`(written ∪ already_at_cwd)만 — busy·변환실패·
+        // PTY부재 대상은 도착으로 표기하지 않는다(issue #296 P1).
+        let _ = app.emit(
+            EVENT_SYNC_CWD,
+            serde_json::json!({
+                "path": normalized_path,
+                "terminalId": terminal_id,
+                "groupId": group_id,
+                "targets": arrived,
+                "force": force,
+            }),
+        );
 
-    Ok(LxResponse::ok(Some(format!(
-        "sync-cwd {} to {} terminals ({} filtered by cwd_receive, {} already at cwd)",
-        normalized_path,
-        target_terminals.len(),
-        all_targets.len() - receiving_targets.len(),
-        receiving_targets.len() - target_terminals.len()
-    ))))
+        Ok(LxResponse::ok(Some(format!(
+            "sync-cwd {} to {} terminals ({} filtered by cwd_receive, {} already at cwd)",
+            normalized_path,
+            target_terminals.len(),
+            all_targets.len() - receiving_targets.len(),
+            receiving_targets.len() - target_terminals.len()
+        ))))
+    })
 }
 
 /// Sync git branch across terminal group.
@@ -528,7 +539,8 @@ fn write_cd_to_group_terminals(
     path: &str,
     claude_ids: &std::collections::HashSet<String>,
 ) -> Result<Vec<String>, String> {
-    let _checkpoint_permit = state.session_checkpoint.begin_mutation()?;
+    // The caller owns the logical sync-CWD mutation permit through its state
+    // update/event tail; do not reacquire a nested permit at the write step.
     // Extract WSL distro name for UNC path conversion (before locking terminals)
     let wsl_distro = path_utils::find_wsl_distro(state, source_id);
 
@@ -939,16 +951,57 @@ mod tests {
             .begin_finalization_for_test()
             .unwrap();
 
-        let result = write_cd_to_group_terminals(
-            &state,
-            &["t1".into()],
-            "source",
-            "C:\\work",
-            &std::collections::HashSet::new(),
-        );
+        let result = run_session_mutation(&state, || {
+            write_cd_to_group_terminals(
+                &state,
+                &["t1".into()],
+                "source",
+                "C:\\work",
+                &std::collections::HashSet::new(),
+            )
+        });
 
         assert!(result.is_err());
         state.session_checkpoint.cancel_finalization();
+    }
+
+    #[tokio::test]
+    async fn sync_cwd_mutation_permit_covers_the_post_write_tail() {
+        let state = Arc::new(AppState::new());
+        let gate = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let worker_state = Arc::clone(&state);
+        let worker_gate = Arc::clone(&gate);
+        let mutation = std::thread::spawn(move || {
+            run_session_mutation(&worker_state, || {
+                entered_tx.send(()).unwrap();
+                let (released, wake) = &*worker_gate;
+                let mut released = released.lock().unwrap();
+                while !*released {
+                    released = wake.wait(released).unwrap();
+                }
+                Ok::<(), String>(())
+            })
+        });
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap();
+
+        let drain_state = Arc::clone(&state);
+        let drain = tokio::spawn(async move {
+            drain_state
+                .session_checkpoint
+                .begin_finalization_and_drain(&drain_state)
+                .await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        assert!(!drain.is_finished());
+
+        let (released, wake) = &*gate;
+        *released.lock().unwrap() = true;
+        wake.notify_all();
+        assert!(mutation.join().unwrap().is_ok());
+        assert!(drain.await.unwrap().is_ok());
     }
 
     #[test]

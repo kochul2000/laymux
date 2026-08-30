@@ -5,7 +5,7 @@
 /// This module provides a helper that applies `CREATE_NO_WINDOW` automatically
 /// so all call sites get consistent headless behavior.
 use std::io::Read;
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, ExitStatus, Output, Stdio};
 use std::time::{Duration, Instant};
 
 /// Create a [`Command`] that will not show a console window on Windows.
@@ -101,6 +101,37 @@ pub fn output_with_timeout(command: &mut Command, timeout: Duration) -> std::io:
     })
 }
 
+/// Run a command with all stdio detached and a hard caller-side deadline.
+///
+/// This is the status-only counterpart to [`output_with_timeout`]. It avoids
+/// pipe-drain grace entirely, which is important when the caller holds a
+/// global lifecycle fence and only needs the helper's exit status.
+pub fn status_with_timeout(
+    command: &mut Command,
+    timeout: Duration,
+) -> std::io::Result<ExitStatus> {
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait()? {
+            Some(status) => return Ok(status),
+            None if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!("process timed out after {}ms", timeout.as_millis()),
+                ));
+            }
+            None => std::thread::sleep(EXIT_POLL_INTERVAL),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,5 +204,14 @@ mod tests {
         // The point of the helper: the caller is released at the deadline even
         // though `cmd.exe`'s own child keeps the pipes open long past it.
         assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn a_stalled_status_only_command_is_killed_at_the_deadline() {
+        let started = Instant::now();
+        let error = status_with_timeout(&mut slow_command(), Duration::from_millis(300))
+            .expect_err("slow status-only command must not be waited on forever");
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 }

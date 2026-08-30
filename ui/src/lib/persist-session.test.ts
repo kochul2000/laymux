@@ -706,6 +706,32 @@ describe("persistSession", () => {
     expect(savedView.lastCodexSession).toBe("session-being-restored");
   });
 
+  it("keeps a resume id when the agent is active but not identified during startup grace", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    const terminalId = `terminal-${paneId}`;
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      lastCodexSession: "session-being-restored",
+    });
+    registerLiveTerminal(terminalId, { type: "interactiveApp", name: "Codex" });
+    useTerminalStore.getState().updateInstanceInfo(terminalId, {
+      attributionPendingUntil: Date.now() + 15_000,
+    });
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValueOnce({
+      [terminalId]: {
+        generation: 1,
+        state: "activeButUnidentified",
+        provider: "codex",
+      },
+    });
+
+    await persistSession();
+
+    const savedView = vi.mocked(saveSettings).mock.calls[0][0].workspaces[0].panes[0].view;
+    expect(savedView.lastCodexSession).toBe("session-being-restored");
+  });
+
   it("keeps the resume grace before PTY creation has marked the session ready", async () => {
     const wsState = useWorkspaceStore.getState();
     const paneId = wsState.workspaces[0].panes[0].id;
@@ -996,6 +1022,25 @@ describe("persistSession", () => {
     await expect(
       flushSessionCheckpoint({ reason: "update", requireConclusive: true }),
     ).rejects.toThrow("Session attribution lookup failed");
+    expect(saveSettings).not.toHaveBeenCalled();
+  });
+
+  it("rejects a destructive checkpoint when the authoritative CWD lookup fails", async () => {
+    const paneId = useWorkspaceStore.getState().workspaces[0].panes[0].id;
+    const terminalId = `terminal-${paneId}`;
+    useWorkspaceStore.getState().setPaneView(0, {
+      type: "TerminalView",
+      lastCwd: "/old",
+    });
+    registerLiveTerminal(terminalId, { type: "shell" });
+    vi.mocked(getTerminalCwds).mockRejectedValue(new Error("CWD IPC unavailable"));
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+      [terminalId]: { generation: 1, state: "noAgent" },
+    });
+
+    await expect(
+      flushSessionCheckpoint({ reason: "update", requireConclusive: true }),
+    ).rejects.toThrow("Terminal CWD lookup failed");
     expect(saveSettings).not.toHaveBeenCalled();
   });
 

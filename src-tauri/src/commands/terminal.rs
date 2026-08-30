@@ -189,7 +189,7 @@ fn initial_execution_host_for_terminal(
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-pub fn create_terminal_session(
+pub async fn create_terminal_session(
     id: String,
     profile: String,
     cols: u16,
@@ -200,10 +200,13 @@ pub fn create_terminal_session(
     cwd: Option<String>,
     startup_command_override: Option<String>,
     viewer: Option<super::ViewerStartupRequest>,
-    state: State<Arc<AppState>>,
+    state: State<'_, Arc<AppState>>,
     app: AppHandle,
 ) -> Result<TerminalSession, String> {
-    let _checkpoint_permit = state.session_checkpoint.begin_mutation()?;
+    let _checkpoint_permit = state
+        .session_checkpoint
+        .begin_mutation_after_finalization()
+        .await;
     // Inject LX_SOCKET and LX_AUTOMATION_PORT env vars
     let mut env = Vec::new();
     if let Ok(path_lock) = state.ipc_socket_path.lock_or_err() {
@@ -1637,12 +1640,15 @@ pub fn resume_terminal_output(
 }
 
 #[tauri::command]
-pub fn close_terminal_session(
+pub async fn close_terminal_session(
     id: String,
-    state: State<Arc<AppState>>,
+    state: State<'_, Arc<AppState>>,
     app: AppHandle,
 ) -> Result<(), String> {
-    let _checkpoint_permit = state.session_checkpoint.begin_mutation()?;
+    let _checkpoint_permit = state
+        .session_checkpoint
+        .begin_mutation_after_finalization()
+        .await;
     close_terminal_session_inner(&id, &state, &app)
 }
 
@@ -1757,13 +1763,10 @@ pub(crate) fn close_terminal_session_inner(
         retirement.finish();
     }
     if let Some(handle) = handle {
+        let quarantine_result = state
+            .session_checkpoint
+            .quarantine_retired_pty_completion(handle.control_completion());
         let terminate_result = handle.terminate();
-        let quarantine_result = match handle.pending_control_completion() {
-            Some(completion) => state
-                .session_checkpoint
-                .quarantine_retired_pty_completion(completion),
-            None => Ok(()),
-        };
         match (terminate_result, quarantine_result) {
             (Err(terminate), Err(quarantine)) => {
                 return Err(format!("{terminate}; {quarantine}"));

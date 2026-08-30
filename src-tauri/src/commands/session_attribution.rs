@@ -124,6 +124,40 @@ fn require_current_generation(
     }
 }
 
+fn collect_provider_session_lookups<Claude, Codex, Grok>(
+    claude_lookup: Claude,
+    codex_lookup: Codex,
+    grok_lookup: Grok,
+) -> Result<
+    (
+        ProviderSessionLookup,
+        ProviderSessionLookup,
+        ProviderSessionLookup,
+    ),
+    String,
+>
+where
+    Claude: FnOnce() -> Result<ProviderSessionLookup, String> + Send,
+    Codex: FnOnce() -> Result<ProviderSessionLookup, String> + Send,
+    Grok: FnOnce() -> Result<ProviderSessionLookup, String> + Send,
+{
+    std::thread::scope(|scope| {
+        let claude = scope.spawn(claude_lookup);
+        let codex = scope.spawn(codex_lookup);
+        let grok = scope.spawn(grok_lookup);
+        let claude = claude
+            .join()
+            .map_err(|_| "Claude session lookup worker panicked".to_string())??;
+        let codex = codex
+            .join()
+            .map_err(|_| "Codex session lookup worker panicked".to_string())??;
+        let grok = grok
+            .join()
+            .map_err(|_| "Grok session lookup worker panicked".to_string())??;
+        Ok((claude, codex, grok))
+    })
+}
+
 /// Return one generation-bound attribution verdict for every live PTY.
 #[tauri::command(async)]
 pub fn get_terminal_session_attributions(
@@ -141,15 +175,22 @@ pub fn get_terminal_session_attributions(
         .iter()
         .map(|(terminal_id, handle)| (terminal_id.clone(), handle.terminal_generation()))
         .collect();
-    let claude = super::claude_session::get_claude_session_lookup_impl(
-        claude_session_max_age_hours,
-        &state,
+    // Each provider owns a bounded WSL probe. Run the three independent
+    // lookups together so the command consumes one probe budget rather than
+    // serially multiplying it past the five-second window-close deadline.
+    let (claude, codex, grok) = collect_provider_session_lookups(
+        || {
+            super::claude_session::get_claude_session_lookup_impl(
+                claude_session_max_age_hours,
+                &state,
+            )
+        },
+        || {
+            super::codex_session::get_codex_session_lookup_impl(codex_session_max_age_hours, &state)
+                .map_err(|error| error.to_string())
+        },
+        || super::grok_session::get_grok_session_lookup_impl(grok_session_max_age_hours, &state),
     )?;
-    let codex =
-        super::codex_session::get_codex_session_lookup_impl(codex_session_max_age_hours, &state)
-            .map_err(|error| error.to_string())?;
-    let grok =
-        super::grok_session::get_grok_session_lookup_impl(grok_session_max_age_hours, &state)?;
     let lookup_failed = claude.lookup_failed || codex.lookup_failed || grok.lookup_failed;
     let observations: Vec<(String, u64, PtyAppLiveness)> = terminals
         .into_iter()
@@ -250,5 +291,56 @@ mod tests {
         assert_eq!(attribution.generation, 8);
         assert_eq!(attribution.state, SessionAttributionState::Unknown);
         assert_eq!(attribution.session_id, None);
+    }
+
+    #[test]
+    fn provider_lookups_start_concurrently_within_one_close_budget() {
+        let gate = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let lookup =
+            |started: std::sync::mpsc::Sender<()>,
+             gate: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>| {
+                move || {
+                    started.send(()).unwrap();
+                    let (released, wake) = &*gate;
+                    let mut released = released.lock().unwrap();
+                    while !*released {
+                        released = wake.wait(released).unwrap();
+                    }
+                    Ok(ProviderSessionLookup {
+                        attributions: HashMap::new(),
+                        lookup_failed: false,
+                    })
+                }
+            };
+        let worker_gate = Arc::clone(&gate);
+        let worker = std::thread::spawn(move || {
+            collect_provider_session_lookups(
+                lookup(started_tx.clone(), Arc::clone(&worker_gate)),
+                lookup(started_tx.clone(), Arc::clone(&worker_gate)),
+                lookup(started_tx, worker_gate),
+            )
+        });
+
+        let mut started = 0;
+        for _ in 0..3 {
+            if started_rx
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .is_ok()
+            {
+                started += 1;
+            } else {
+                break;
+            }
+        }
+        let (released, wake) = &*gate;
+        *released.lock().unwrap() = true;
+        wake.notify_all();
+
+        assert!(worker.join().unwrap().is_ok());
+        assert_eq!(
+            started, 3,
+            "all provider lookups must share the time budget"
+        );
     }
 }

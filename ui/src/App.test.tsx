@@ -153,6 +153,7 @@ vi.mock("@/lib/tauri-api", () => {
     onAppUpdateStatusChanged: vi.fn().mockResolvedValue(unlisten),
     onSessionCheckpointRequested: vi.fn().mockResolvedValue(unlisten),
     acknowledgeSessionCheckpoint: vi.fn().mockResolvedValue(undefined),
+    reportFrontendHealth: vi.fn().mockResolvedValue(undefined),
   };
 });
 
@@ -228,6 +229,7 @@ describe("App", () => {
       dropped: [],
       warnings: [],
       settingsPath: "C:\\config\\settings.json",
+      recoveryRevision: "revision-a",
     });
     vi.mocked(acknowledgeSettingsRecovery).mockResolvedValueOnce({
       ...loadedSettings(),

@@ -2464,6 +2464,7 @@ fn settings_load_result_round_trip_recovered() {
             repaired: true,
         }],
         settings_path: "C:\\Users\\test\\settings.json".into(),
+        recovery_revision: "revision-a".into(),
     };
     let json = serde_json::to_string(&result).unwrap();
     assert!(json.contains("\"status\":\"recovered\""));
@@ -2471,6 +2472,7 @@ fn settings_load_result_round_trip_recovered() {
     // does not count a repair as a loss.
     assert!(json.contains("\"dropped\""));
     assert!(json.contains("\"settingsPath\""));
+    assert!(json.contains("\"recoveryRevision\""));
     let parsed: SettingsLoadResult = serde_json::from_str(&json).unwrap();
     assert_eq!(result, parsed);
 }

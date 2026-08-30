@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import {
   resetSettings,
   acknowledgeSettingsRecovery,
+  loadSettingsValidated,
   getSettingsPath,
   type Settings,
   type SettingsLoadResult,
@@ -26,19 +27,21 @@ export function SettingsRecoveryModal({
   onReset,
 }: SettingsRecoveryModalProps) {
   const { t } = useTranslation("settings");
+  const [currentLoadResult, setCurrentLoadResult] = useState(loadResult);
   const [settingsPath, setSettingsPath] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
   const [acknowledging, setAcknowledging] = useState(false);
 
-  const isParseError = loadResult.status === "parse_error";
-  const isRecovered = loadResult.status === "recovered";
+  const isParseError = currentLoadResult.status === "parse_error";
+  const isRecovered = currentLoadResult.status === "recovered";
   /** Values the user wrote and lost. Only these count as "removed". */
-  const dropped: ValidationWarning[] = isRecovered ? loadResult.dropped : [];
+  const dropped: ValidationWarning[] = isRecovered ? currentLoadResult.dropped : [];
   /** Structures the loader fixed up — reported, but not a loss. */
-  const repairs: ValidationWarning[] = isParseError ? [] : loadResult.warnings;
+  const repairs: ValidationWarning[] = isParseError ? [] : currentLoadResult.warnings;
   const warnings: ValidationWarning[] = [...dropped, ...repairs];
-  const parseError = isParseError ? loadResult.error : null;
-  const settingsPathFromResult = isParseError || isRecovered ? loadResult.settingsPath : null;
+  const parseError = isParseError ? currentLoadResult.error : null;
+  const settingsPathFromResult =
+    isParseError || isRecovered ? currentLoadResult.settingsPath : null;
 
   const handleShowPath = async () => {
     try {
@@ -70,10 +73,25 @@ export function SettingsRecoveryModal({
     }
     setAcknowledging(true);
     try {
-      const acknowledgedSettings = await acknowledgeSettingsRecovery();
+      const acknowledgedSettings = await acknowledgeSettingsRecovery(
+        currentLoadResult.recoveryRevision,
+      );
       onDismiss(acknowledgedSettings);
     } catch (error) {
       console.error("[SettingsRecoveryModal] Recovery acknowledgement failed:", error);
+      // A manual edit may have changed which typed values would be dropped.
+      // Reload that protected document and show the new loss list; the user
+      // must explicitly acknowledge this exact revision before any write.
+      try {
+        const latest = await loadSettingsValidated();
+        if (latest.status === "ok" || latest.status === "repaired") {
+          onDismiss(latest.settings);
+          return;
+        }
+        setCurrentLoadResult(latest);
+      } catch (reloadError) {
+        console.error("[SettingsRecoveryModal] Recovery reload failed:", reloadError);
+      }
       setAcknowledging(false);
     }
   };

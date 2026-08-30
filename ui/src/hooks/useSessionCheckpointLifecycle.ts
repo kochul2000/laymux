@@ -47,7 +47,20 @@ export function useSessionCheckpointLifecycle(ready: boolean): void {
     };
 
     void onSessionCheckpointRequested((request) => {
-      if (cancelled) return;
+      if (cancelled) {
+        // A listener can already be registered while its Promise is still
+        // settling. StrictMode may clean up that effect in this window, but a
+        // native request delivered to the retired callback still owns a Rust
+        // oneshot and must receive an explicit failure instead of timing out.
+        void acknowledgeSessionCheckpoint(
+          request.requestId,
+          undefined,
+          "session checkpoint listener cancelled",
+        ).catch((error) => {
+          console.warn("[session-checkpoint] Failed to reject cancelled native request:", error);
+        });
+        return;
+      }
       void flushSessionCheckpoint({
         reason: request.reason,
         requireConclusive: request.requireConclusive,

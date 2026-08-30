@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use crate::constants::*;
 use crate::lock_ext::MutexExt;
 #[cfg(target_os = "windows")]
-use crate::process::headless_command;
+use crate::process::{headless_command, status_with_timeout};
 use crate::pty_control::{PendingControlJob, PtyControlCompletion, PtyControlWorker};
 use crate::pty_reader::{run_interruptible_reader_loop, PtyReaderLifecycle};
 use crate::terminal::{
@@ -489,6 +489,13 @@ impl PtyHandle {
             .then(|| self.control.completion())
     }
 
+    /// Return the worker lifecycle acknowledgement unconditionally. Handle
+    /// retirement uses this before the worker can fault so a concurrent write
+    /// cannot become invisible after the handle leaves the live registry.
+    pub(crate) fn control_completion(&self) -> PtyControlCompletion {
+        self.control.completion()
+    }
+
     fn force_input_fault(&self) -> Result<(), String> {
         if self.input_faulted.swap(true, Ordering::AcqRel) {
             return Ok(());
@@ -535,10 +542,12 @@ impl PtyHandle {
         let mut platform_error: Option<String> = None;
         #[cfg(target_os = "windows")]
         if let Some(pid) = self.child_pid {
-            match headless_command("taskkill")
-                .args(["/PID", &pid.to_string(), "/T", "/F"])
-                .status()
-            {
+            let mut taskkill = headless_command("taskkill");
+            taskkill.args(["/PID", &pid.to_string(), "/T", "/F"]);
+            match status_with_timeout(
+                &mut taskkill,
+                Duration::from_millis(PTY_PROCESS_TREE_KILL_TIMEOUT_MS),
+            ) {
                 Ok(status) if status.success() => return Ok(()),
                 Ok(status) => {
                     tracing::debug!(pid, status = ?status.code(), "taskkill returned non-zero during PTY cleanup");

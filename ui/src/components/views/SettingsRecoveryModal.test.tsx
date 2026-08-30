@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 vi.mock("@/lib/tauri-api", () => ({
   resetSettings: vi.fn().mockResolvedValue(undefined),
   acknowledgeSettingsRecovery: vi.fn(),
+  loadSettingsValidated: vi.fn(),
   getSettingsPath: vi.fn().mockResolvedValue("C:\\fallback\\settings.json"),
 }));
 
@@ -21,7 +22,7 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
-import { acknowledgeSettingsRecovery } from "@/lib/tauri-api";
+import { acknowledgeSettingsRecovery, loadSettingsValidated } from "@/lib/tauri-api";
 import { SettingsRecoveryModal } from "./SettingsRecoveryModal";
 import type { SettingsLoadResult } from "@/lib/tauri-api";
 
@@ -29,6 +30,7 @@ const RECOVERED: SettingsLoadResult = {
   status: "recovered",
   settings: {} as never,
   settingsPath: "C:\\config\\settings.json",
+  recoveryRevision: "revision-a",
   dropped: [
     {
       path: "terminal.parserAdmission.hiddenShare",
@@ -52,6 +54,7 @@ describe("SettingsRecoveryModal — recovered status (issue #701, ADR-0119)", ()
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(acknowledgeSettingsRecovery).mockResolvedValue(RECOVERED.settings);
+    vi.mocked(loadSettingsValidated).mockResolvedValue(RECOVERED);
   });
 
   it("lists every dropped path so the user can see exactly what was lost", async () => {
@@ -106,7 +109,39 @@ describe("SettingsRecoveryModal — recovered status (issue #701, ADR-0119)", ()
     await userEvent.click(screen.getByTestId("settings-recovery-dismiss"));
 
     expect(acknowledgeSettingsRecovery).toHaveBeenCalledTimes(1);
+    expect(acknowledgeSettingsRecovery).toHaveBeenCalledWith(RECOVERED.recoveryRevision);
     expect(onDismiss).toHaveBeenCalledWith(RECOVERED.settings);
+  });
+
+  it("reloads a changed recovery revision and requires review of its latest dropped paths", async () => {
+    const latest: SettingsLoadResult = {
+      ...RECOVERED,
+      recoveryRevision: "revision-b",
+      dropped: [
+        {
+          path: "language",
+          message: "invalid language",
+          repaired: true,
+        },
+      ],
+    };
+    vi.mocked(acknowledgeSettingsRecovery).mockRejectedValueOnce(
+      new Error("Settings recovery changed"),
+    );
+    vi.mocked(loadSettingsValidated).mockResolvedValueOnce(latest);
+    const onDismiss = vi.fn();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(
+      <SettingsRecoveryModal loadResult={RECOVERED} onDismiss={onDismiss} onReset={vi.fn()} />,
+    );
+
+    await userEvent.click(screen.getByTestId("settings-recovery-dismiss"));
+
+    expect(await screen.findByText("language")).toBeInTheDocument();
+    expect(screen.queryByText("terminal.parserAdmission.hiddenShare")).not.toBeInTheDocument();
+    expect(onDismiss).not.toHaveBeenCalled();
+    expect(screen.getByTestId("settings-recovery-dismiss")).toBeEnabled();
+    consoleError.mockRestore();
   });
 
   it("keeps writes blocked when the backend cannot commit the acknowledgement", async () => {

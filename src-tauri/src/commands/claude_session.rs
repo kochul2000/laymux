@@ -36,11 +36,6 @@ pub(crate) fn get_claude_session_lookup_impl(
         k.iter().cloned().collect()
     };
 
-    // Read session files from ~/.claude/sessions/
-    let sessions_dir = resolve_claude_sessions_dir();
-    let (session_files, mut lookup_failed) =
-        read_claude_session_files_checked(&sessions_dir, session_max_age_hours);
-
     let terminal_roots: Vec<(String, u32)> = {
         let ptys = state.pty_handles.lock_or_err()?;
         known
@@ -52,21 +47,50 @@ pub(crate) fn get_claude_session_lookup_impl(
             })
             .collect()
     };
-    let candidates = match crate::process_tree::try_snapshot_processes() {
-        Ok(snapshot) => terminal_roots
-            .into_iter()
-            .filter_map(|(terminal_id, root_pid)| {
-                let descendants = crate::process_tree::descendant_pids(&snapshot, root_pid);
-                find_session_by_pids(&session_files, &descendants)
-                    .map(|session_id| (terminal_id, session_id))
-            })
-            .collect(),
-        Err(error) => {
-            lookup_failed = true;
-            tracing::warn!(%error, "native Claude process attribution failed");
-            Vec::new()
+    let mut lookup_failed = false;
+    let native_descendants = if terminal_roots.is_empty() {
+        Vec::new()
+    } else {
+        match crate::process_tree::try_snapshot_processes() {
+            Ok(snapshot) => terminal_roots
+                .into_iter()
+                .map(|(terminal_id, root_pid)| {
+                    (
+                        terminal_id,
+                        crate::process_tree::descendant_pids(&snapshot, root_pid),
+                    )
+                })
+                .collect(),
+            Err(error) => {
+                lookup_failed = true;
+                tracing::warn!(%error, "native Claude process attribution failed");
+                Vec::new()
+            }
         }
     };
+    let relevant_native_pids: HashSet<u32> = native_descendants
+        .iter()
+        .flat_map(|(_, descendants)| descendants.iter().copied())
+        .collect();
+    let session_files = if relevant_native_pids.is_empty() {
+        Vec::new()
+    } else {
+        let sessions_dir = resolve_claude_sessions_dir();
+        let (session_files, session_lookup_failed) = read_claude_session_files_for_pids_checked(
+            &sessions_dir,
+            session_max_age_hours,
+            Some(&relevant_native_pids),
+        );
+        lookup_failed |= session_lookup_failed;
+        session_files
+    };
+    let candidates = native_descendants
+        .into_iter()
+        .filter_map(|(terminal_id, descendants)| {
+            find_session_by_pids(&session_files, &descendants)
+                .map(|session_id| (terminal_id, session_id))
+        })
+        .collect();
     let mut result = crate::process_tree::complete_agent_session_attributions(
         &known,
         remove_duplicate_attributions(candidates),
@@ -109,8 +133,12 @@ fn find_wsl_claude_session_checked(
     let Some(directory) = process.claude_sessions_dir() else {
         return Ok(None);
     };
-    let (sessions, lookup_failed) =
-        read_claude_session_files_checked(&directory, session_max_age_hours);
+    let relevant_pids = HashSet::from([process.pid]);
+    let (sessions, lookup_failed) = read_claude_session_files_for_pids_checked(
+        &directory,
+        session_max_age_hours,
+        Some(&relevant_pids),
+    );
     if lookup_failed {
         return Err(format!(
             "failed to read Claude session files from {}",
@@ -189,9 +217,18 @@ fn read_claude_session_files(
     read_claude_session_files_checked(dir, max_age_hours).0
 }
 
+#[cfg(test)]
 fn read_claude_session_files_checked(
     dir: &std::path::Path,
     max_age_hours: Option<u64>,
+) -> (Vec<ClaudeSessionFile>, bool) {
+    read_claude_session_files_for_pids_checked(dir, max_age_hours, None)
+}
+
+fn read_claude_session_files_for_pids_checked(
+    dir: &std::path::Path,
+    max_age_hours: Option<u64>,
+    relevant_pids: Option<&HashSet<u32>>,
 ) -> (Vec<ClaudeSessionFile>, bool) {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
@@ -225,6 +262,15 @@ fn read_claude_session_files_checked(
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
+        }
+        if let Some(relevant_pids) = relevant_pids {
+            let file_pid = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .and_then(|stem| stem.parse::<u32>().ok());
+            if !file_pid.is_some_and(|pid| relevant_pids.contains(&pid)) {
+                continue;
+            }
         }
         match std::fs::read_to_string(&path)
             .map_err(|error| error.to_string())
@@ -335,6 +381,41 @@ mod tests {
         let sessions = read_claude_session_files(tmp.path(), None);
         assert!(sessions.is_empty());
         assert!(read_claude_session_files_checked(tmp.path(), None).1);
+    }
+
+    #[test]
+    fn pid_scoped_read_ignores_an_unrelated_malformed_session_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("999.json"), "not valid json!").unwrap();
+        std::fs::write(
+            tmp.path().join("123.json"),
+            r#"{"pid":123,"sessionId":"session-123","startedAt":1000}"#,
+        )
+        .unwrap();
+
+        let (sessions, lookup_failed) = read_claude_session_files_for_pids_checked(
+            tmp.path(),
+            None,
+            Some(&HashSet::from([123])),
+        );
+
+        assert!(!lookup_failed);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, "session-123");
+    }
+
+    #[test]
+    fn pid_scoped_read_reports_a_malformed_relevant_session_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("123.json"), "not valid json!").unwrap();
+
+        let (_, lookup_failed) = read_claude_session_files_for_pids_checked(
+            tmp.path(),
+            None,
+            Some(&HashSet::from([123])),
+        );
+
+        assert!(lookup_failed);
     }
 
     #[test]

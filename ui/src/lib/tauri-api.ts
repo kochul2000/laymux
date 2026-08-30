@@ -532,6 +532,8 @@ export type SettingsLoadResult =
       dropped: ValidationWarning[];
       warnings: ValidationWarning[];
       settingsPath: string;
+      /** SHA-256 of the exact source whose dropped paths were reviewed. */
+      recoveryRevision: string;
     }
   | { status: "parse_error"; settings: Settings; error: string; settingsPath: string };
 
@@ -543,8 +545,10 @@ export async function resetSettings(): Promise<Settings> {
   return invoke("reset_settings");
 }
 
-export async function acknowledgeSettingsRecovery(): Promise<Settings> {
-  return invoke("acknowledge_settings_recovery");
+export async function acknowledgeSettingsRecovery(
+  expectedRecoveryRevision: string,
+): Promise<Settings> {
+  return invoke("acknowledge_settings_recovery", { expectedRecoveryRevision });
 }
 
 export async function getSettingsPath(): Promise<string> {

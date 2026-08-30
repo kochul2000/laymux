@@ -167,17 +167,21 @@ pub fn reset_settings(
 
 #[tauri::command(async)]
 pub fn acknowledge_settings_recovery(
+    expected_recovery_revision: String,
     state: State<Arc<AppState>>,
     app: AppHandle,
 ) -> Result<crate::settings::Settings, String> {
-    complete_settings_recovery(crate::settings::acknowledge_settings_recovery, |settings| {
-        // The acknowledged file may have been edited while the modal was open.
-        // Reconcile backend-owned state from the exact snapshot just committed
-        // before the frontend is allowed to resume checkpoint writes.
-        reconcile_persistent_remote_runtime(state.inner(), &app, settings.remote.clone())?;
-        crate::app_update::schedule_channel_recheck(app.clone(), state.app_update.clone());
-        Ok(())
-    })
+    complete_settings_recovery(
+        || crate::settings::acknowledge_settings_recovery(&expected_recovery_revision),
+        |settings| {
+            // The acknowledged file may have been edited while the modal was open.
+            // Reconcile backend-owned state from the exact snapshot just committed
+            // before the frontend is allowed to resume checkpoint writes.
+            reconcile_persistent_remote_runtime(state.inner(), &app, settings.remote.clone())?;
+            crate::app_update::schedule_channel_recheck(app.clone(), state.app_update.clone());
+            Ok(())
+        },
+    )
 }
 
 #[tauri::command]

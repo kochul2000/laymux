@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use crate::lock_ext::MutexExt;
+use sha2::{Digest, Sha256};
 
 static MEMO_LOCK: Mutex<()> = Mutex::new(());
 
@@ -126,6 +127,7 @@ fn load_settings_validated_from(path: &std::path::Path) -> SettingsLoadResult {
             dropped,
             warnings,
             settings_path: path_str,
+            recovery_revision: recovery_revision(&raw_content),
         };
     }
 
@@ -300,8 +302,15 @@ pub fn update_settings(
 
 /// Commit the leniently recovered document only after the user has reviewed
 /// the dropped paths. Background writers cannot implicitly acknowledge loss.
-pub fn acknowledge_settings_recovery() -> Result<Settings, String> {
-    acknowledge_settings_recovery_at(&settings_path())
+pub fn acknowledge_settings_recovery(expected_recovery_revision: &str) -> Result<Settings, String> {
+    acknowledge_settings_recovery_at(&settings_path(), expected_recovery_revision)
+}
+
+fn recovery_revision(raw_content: &str) -> String {
+    Sha256::digest(raw_content.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn unacknowledged_recovery_error() -> String {
@@ -386,10 +395,23 @@ fn save_frontend_settings_to(
     Ok(candidate)
 }
 
-fn acknowledge_settings_recovery_at(path: &std::path::Path) -> Result<Settings, String> {
+fn acknowledge_settings_recovery_at(
+    path: &std::path::Path,
+    expected_recovery_revision: &str,
+) -> Result<Settings, String> {
     let _guard = SETTINGS_WRITE_LOCK.lock_or_err()?;
     match load_settings_validated_from(path) {
-        SettingsLoadResult::Recovered { settings, .. } => {
+        SettingsLoadResult::Recovered {
+            settings,
+            recovery_revision,
+            ..
+        } => {
+            if recovery_revision != expected_recovery_revision {
+                return Err(
+                    "Settings recovery changed; review the latest dropped paths before acknowledging"
+                        .into(),
+                );
+            }
             let json = serde_json::to_string_pretty(&settings)
                 .map_err(|error| format!("Serialize error: {error}"))?;
             write_file_atomically(path, json.as_bytes())?;
@@ -550,7 +572,13 @@ mod tests {
         )
         .unwrap();
 
-        let acknowledged = acknowledge_settings_recovery_at(&path).unwrap();
+        let recovery_revision = match load_settings_validated_from(&path) {
+            SettingsLoadResult::Recovered {
+                recovery_revision, ..
+            } => recovery_revision,
+            result => panic!("expected recovered settings, got {result:?}"),
+        };
+        let acknowledged = acknowledge_settings_recovery_at(&path, &recovery_revision).unwrap();
         assert_eq!(acknowledged.language, "en");
         assert!(matches!(
             load_settings_validated_from(&path),
@@ -563,6 +591,41 @@ mod tests {
         })
         .unwrap();
         assert!(updated.remote.cloud_enabled);
+    }
+
+    #[test]
+    fn recovery_acknowledgement_rejects_unreviewed_new_dropped_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, r#"{ "language": 42, "defaultProfile": "WSL" }"#).unwrap();
+        let original_revision = match load_settings_validated_from(&path) {
+            SettingsLoadResult::Recovered {
+                recovery_revision, ..
+            } => recovery_revision,
+            result => panic!("expected recovered settings, got {result:?}"),
+        };
+
+        let manually_edited = r#"{
+          "language": "en",
+          "terminal": { "parserAdmission": { "hiddenShare": "invalid" } }
+        }"#;
+        fs::write(&path, manually_edited).unwrap();
+        let error = acknowledge_settings_recovery_at(&path, &original_revision).unwrap_err();
+
+        assert!(error.contains("review the latest dropped paths"), "{error}");
+        assert_eq!(fs::read_to_string(&path).unwrap(), manually_edited);
+        let latest = load_settings_validated_from(&path);
+        let SettingsLoadResult::Recovered {
+            dropped,
+            recovery_revision,
+            ..
+        } = latest
+        else {
+            panic!("expected latest recovered settings, got {latest:?}");
+        };
+        assert_eq!(dropped.len(), 1);
+        assert_eq!(dropped[0].path, "terminal.parserAdmission.hiddenShare");
+        acknowledge_settings_recovery_at(&path, &recovery_revision).unwrap();
     }
 
     /// Two writers racing on one path may not interleave into a torn document —
@@ -665,6 +728,7 @@ mod tests {
             dropped,
             warnings,
             settings_path,
+            recovery_revision,
         } = result
         else {
             panic!("expected Recovered, got {result:?}");
@@ -679,6 +743,7 @@ mod tests {
             Settings::default().terminal.parser_admission.hidden_share
         );
         assert_eq!(settings_path, path.display().to_string());
+        assert_eq!(recovery_revision.len(), 64);
 
         // Exactly one value was lost. Structural repairs (this file has no
         // workspaces, so the loader synthesizes one) stay out of that count.

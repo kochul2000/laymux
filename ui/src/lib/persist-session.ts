@@ -123,6 +123,9 @@ function conclusiveFingerprint(
   checkpoint: CollectedSessionCheckpoint,
   terminalIds?: readonly string[],
 ): string {
+  if (checkpoint.cwdLookupFailed) {
+    throw new Error("Terminal CWD lookup failed");
+  }
   if (checkpoint.attributionLookupFailed) {
     throw new Error("Session attribution lookup failed");
   }

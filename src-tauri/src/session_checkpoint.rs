@@ -49,6 +49,19 @@ pub struct SessionMutationPermit<'a> {
     runtime: &'a SessionCheckpointRuntime,
 }
 
+/// Hidden eviction always releases its reversible finalization fence, including
+/// early errors and task panics. A successful updater deliberately does not use
+/// this guard because process shutdown owns that fence afterward.
+struct ScopedFinalization<'a> {
+    runtime: &'a SessionCheckpointRuntime,
+}
+
+impl Drop for ScopedFinalization<'_> {
+    fn drop(&mut self) {
+        self.runtime.cancel_finalization();
+    }
+}
+
 impl Default for SessionCheckpointRuntime {
     fn default() -> Self {
         Self {
@@ -101,6 +114,21 @@ impl SessionCheckpointRuntime {
             return Err("destructive session finalization is in progress".into());
         }
         Ok(SessionMutationPermit { runtime: self })
+    }
+
+    /// TerminalView cleanup cannot remain mounted to retry a close rejected by
+    /// a transient destructive fence. Keep that close outside the admitted set
+    /// until finalization is cancelled, then acquire the normal race-safe
+    /// permit. A successful updater exits the process with the waiter still
+    /// parked, while a failed checkpoint releases it to dispose the orphaned
+    /// backend PTY.
+    pub async fn begin_mutation_after_finalization(&self) -> SessionMutationPermit<'_> {
+        loop {
+            if let Ok(permit) = self.begin_mutation() {
+                return permit;
+            }
+            tokio::time::sleep(FINALIZATION_DRAIN_POLL).await;
+        }
     }
 
     /// Admit a frontend action whose work can outlive the backend HTTP waiter.
@@ -314,6 +342,9 @@ pub async fn checkpoint_and_close_hidden_terminals(
         .session_checkpoint
         .begin_finalization_and_drain(&state)
         .await?;
+    let _finalization = ScopedFinalization {
+        runtime: &state.session_checkpoint,
+    };
 
     let live_targets = match state.pty_handles.lock_or_err() {
         Ok(handles) => requested
@@ -321,41 +352,45 @@ pub async fn checkpoint_and_close_hidden_terminals(
             .filter(|terminal_id| handles.contains_key(*terminal_id))
             .cloned()
             .collect::<Vec<_>>(),
-        Err(error) => {
-            state.session_checkpoint.cancel_finalization();
-            return Err(error.to_string());
-        }
+        Err(error) => return Err(error.to_string()),
     };
 
     if live_targets.is_empty() {
-        state.session_checkpoint.cancel_finalization();
         return Ok(HiddenTerminalEvictionResult {
             closed_terminal_ids: Vec::new(),
             failed_terminal_ids: requested,
         });
     }
 
-    if let Err(error) = request_frontend_checkpoint_for_terminals(
+    request_frontend_checkpoint_for_terminals(
         &app,
         &state,
         "eviction",
         true,
         Some(live_targets.clone()),
     )
+    .await?;
+
+    let close_state = std::sync::Arc::clone(state.inner());
+    let close_app = app.clone();
+    let close_results = tauri::async_runtime::spawn_blocking(move || {
+        run_hidden_close_batch(live_targets, |terminal_id| {
+            crate::commands::close_terminal_session_inner(terminal_id, &close_state, &close_app)
+        })
+    })
     .await
-    {
-        state.session_checkpoint.cancel_finalization();
-        return Err(error);
-    }
+    .map_err(|error| format!("hidden terminal close worker failed: {error}"))?;
 
     let mut closed_terminal_ids = Vec::new();
     let mut failed_terminal_ids: Vec<_> = requested
         .into_iter()
-        .filter(|terminal_id| !live_targets.contains(terminal_id))
+        .filter(|terminal_id| {
+            !close_results
+                .iter()
+                .any(|(live_terminal_id, _)| live_terminal_id == terminal_id)
+        })
         .collect();
-    for terminal_id in live_targets {
-        let close_result =
-            crate::commands::close_terminal_session_inner(&terminal_id, &state, &app);
+    for (terminal_id, close_result) in close_results {
         let still_present = state
             .terminals
             .lock_or_recover_for_discard("checking hidden terminal eviction result")
@@ -369,11 +404,40 @@ pub async fn checkpoint_and_close_hidden_terminals(
             failed_terminal_ids.push(terminal_id);
         }
     }
-    state.session_checkpoint.cancel_finalization();
 
     Ok(HiddenTerminalEvictionResult {
         closed_terminal_ids,
         failed_terminal_ids,
+    })
+}
+
+fn run_hidden_close_batch(
+    terminal_ids: Vec<String>,
+    close: impl Fn(&str) -> Result<(), String> + Sync,
+) -> Vec<(String, Result<(), String>)> {
+    std::thread::scope(|scope| {
+        let close = &close;
+        terminal_ids
+            .into_iter()
+            .map(|terminal_id| {
+                let panic_terminal_id = terminal_id.clone();
+                let worker = scope.spawn(move || {
+                    let result = close(&terminal_id);
+                    (terminal_id, result)
+                });
+                (panic_terminal_id, worker)
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|(terminal_id, worker)| {
+                worker.join().unwrap_or_else(|_| {
+                    (
+                        terminal_id,
+                        Err("hidden terminal close worker panicked".into()),
+                    )
+                })
+            })
+            .collect()
     })
 }
 
@@ -398,10 +462,14 @@ mod tests {
 
     struct StuckWriter {
         gate: Arc<(Mutex<bool>, Condvar)>,
+        entered: Option<std::sync::mpsc::Sender<()>>,
     }
 
     impl Write for StuckWriter {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if let Some(entered) = self.entered.take() {
+                let _ = entered.send(());
+            }
             let (released, wake) = &*self.gate;
             let mut released = released.lock().unwrap();
             while !*released {
@@ -445,6 +513,37 @@ mod tests {
         );
     }
 
+    #[test]
+    fn hidden_terminal_teardowns_start_in_parallel() {
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let worker_gate = Arc::clone(&gate);
+        let worker = std::thread::spawn(move || {
+            run_hidden_close_batch(vec!["t1".into(), "t2".into(), "t3".into()], |_| {
+                started_tx.send(()).unwrap();
+                let (released, wake) = &*worker_gate;
+                let mut released = released.lock().unwrap();
+                while !*released {
+                    released = wake.wait(released).unwrap();
+                }
+                Ok(())
+            })
+        });
+
+        for _ in 0..3 {
+            started_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("every hidden terminal teardown should start before any finishes");
+        }
+        let (released, wake) = &*gate;
+        *released.lock().unwrap() = true;
+        wake.notify_all();
+
+        let results = worker.join().unwrap();
+        assert_eq!(results.len(), 3);
+        assert!(results.into_iter().all(|(_, result)| result.is_ok()));
+    }
+
     #[tokio::test]
     async fn finalization_waits_for_an_admitted_mutation_to_finish() {
         let state = std::sync::Arc::new(AppState::new());
@@ -463,6 +562,34 @@ mod tests {
         drop(permit);
 
         assert!(drain.await.unwrap().is_ok());
+    }
+
+    #[tokio::test]
+    async fn terminal_close_admission_waits_for_a_cancelled_finalization() {
+        let state = std::sync::Arc::new(AppState::new());
+        state
+            .session_checkpoint
+            .begin_finalization_for_test()
+            .unwrap();
+        let task_state = state.clone();
+        let waiting_close = tokio::spawn(async move {
+            let permit = task_state
+                .session_checkpoint
+                .begin_mutation_after_finalization()
+                .await;
+            drop(permit);
+            Ok::<(), String>(())
+        });
+
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        assert!(!waiting_close.is_finished());
+
+        state.session_checkpoint.cancel_finalization();
+        assert!(tokio::time::timeout(Duration::from_secs(1), waiting_close)
+            .await
+            .expect("close admission should wake after cancellation")
+            .unwrap()
+            .is_ok());
     }
 
     #[tokio::test]
@@ -521,8 +648,10 @@ mod tests {
     async fn finalization_waits_for_a_retired_faulted_pty_worker_completion() {
         let state = std::sync::Arc::new(AppState::new());
         let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
         let handle = crate::pty::PtyHandle::from_test_writer(Box::new(StuckWriter {
             gate: Arc::clone(&gate),
+            entered: Some(entered_tx),
         }));
         state
             .pty_handles
@@ -537,11 +666,9 @@ mod tests {
                 || true,
             )
         });
-        let pending_deadline = Instant::now() + Duration::from_secs(1);
-        while pty_control_operations_drained(&state).unwrap() && Instant::now() < pending_deadline {
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        assert!(!pty_control_operations_drained(&state).unwrap());
+        entered_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("platform writer should start before close");
         let retired_handle = state
             .pty_handles
             .lock_or_err()
@@ -550,13 +677,11 @@ mod tests {
             .unwrap();
         state
             .session_checkpoint
-            .quarantine_retired_pty_completion(
-                retired_handle
-                    .pending_control_completion()
-                    .expect("faulted worker completion"),
-            )
+            .quarantine_retired_pty_completion(retired_handle.control_completion())
             .unwrap();
+        let _ = retired_handle.terminate();
         drop(retired_handle);
+        assert!(writer.join().unwrap().is_err());
         assert!(!pty_control_operations_drained(&state).unwrap());
 
         let task_state = state.clone();
@@ -572,7 +697,6 @@ mod tests {
         let (released, wake) = &*gate;
         *released.lock().unwrap() = true;
         wake.notify_all();
-        assert!(writer.join().unwrap().is_err());
         assert!(drain.await.unwrap().is_ok());
     }
 }

@@ -522,9 +522,11 @@ describe("tauri-api", () => {
       setBlockPersist(true);
       mockInvoke.mockResolvedValue({ defaultProfile: "PowerShell", profiles: [] });
 
-      await acknowledgeSettingsRecovery();
+      await acknowledgeSettingsRecovery("revision-a");
 
-      expect(mockInvoke).toHaveBeenCalledWith("acknowledge_settings_recovery");
+      expect(mockInvoke).toHaveBeenCalledWith("acknowledge_settings_recovery", {
+        expectedRecoveryRevision: "revision-a",
+      });
     });
   });
 

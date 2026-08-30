@@ -51,6 +51,9 @@ pub enum SettingsLoadResult {
         dropped: Vec<ValidationWarning>,
         warnings: Vec<ValidationWarning>,
         settings_path: String,
+        /// SHA-256 of the exact source text whose losses were shown. Recovery
+        /// acknowledgement is a compare-and-swap against this revision.
+        recovery_revision: String,
     },
     /// JSON could not be parsed at all. Default settings are provided.
     #[serde(rename = "parse_error")]
