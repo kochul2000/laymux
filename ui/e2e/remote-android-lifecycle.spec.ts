@@ -62,9 +62,11 @@ type AndroidLifecycleState = {
   fileViewerRequests: Array<{ method: string; path: string; body: unknown }>;
   heldRequestId: string | null;
   heldOauthBeginRequestId: string | null;
+  heldOauthForwardRequestId: string | null;
   holdNextClaim: boolean;
   holdNextNavigation: boolean;
   holdNextOauthBegin: boolean;
+  holdNextOauthForward: boolean;
   navigationRequests: number;
   nativeOauthBegins: Array<{
     authUrl: string;
@@ -74,6 +76,7 @@ type AndroidLifecycleState = {
   }>;
   nativeOauthCancels: number;
   oauthBeginRequests: number;
+  oauthForwardRequests: Array<{ leaseId: string; sessionId: string; pathAndQuery: string }>;
   outputOpens: number;
   renderRequests: number;
   savedFiles: Array<{ name: string; mediaType: string; base64: string }>;
@@ -111,6 +114,10 @@ type AndroidLifecycleWindow = typeof window & {
   };
   laymuxRemoteUi?: {
     dismissTopLayer: () => boolean;
+  };
+  laymuxOauthRelay?: {
+    onCallback: (pathAndQuery: string) => void;
+    onError: (message: string) => void;
   };
   __androidLifecycleState: AndroidLifecycleState;
   __remoteDocumentSentinel?: object;
@@ -160,13 +167,16 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
         fileViewerRequests: [],
         heldRequestId: null,
         heldOauthBeginRequestId: null,
+        heldOauthForwardRequestId: null,
         holdNextClaim: holdInitialClaim,
         holdNextNavigation: false,
         holdNextOauthBegin: false,
+        holdNextOauthForward: false,
         navigationRequests: 0,
         nativeOauthBegins: [],
         nativeOauthCancels: 0,
         oauthBeginRequests: 0,
+        oauthForwardRequests: [],
         outputOpens: 0,
         renderRequests: 0,
         savedFiles: [],
@@ -294,7 +304,27 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
               state.heldOauthBeginRequestId = requestId;
               return;
             }
-            body = { sessionId: "oauth-session-1", port: 4321, expiresInSeconds: 600 };
+            body = {
+              sessionId: `oauth-session-${state.oauthBeginRequests}`,
+              port: 4321,
+              expiresInSeconds: 600,
+            };
+          }
+          if (path === "/remote/v1/oauth-relay/forward") {
+            const request = bodyJson
+              ? (JSON.parse(bodyJson) as {
+                  leaseId: string;
+                  sessionId: string;
+                  pathAndQuery: string;
+                })
+              : { leaseId: "", sessionId: "", pathAndQuery: "" };
+            state.oauthForwardRequests.push(request);
+            if (state.holdNextOauthForward) {
+              state.holdNextOauthForward = false;
+              state.heldOauthForwardRequestId = requestId;
+              return;
+            }
+            body = { status: 200, contentType: "text/plain", body: "ok" };
           }
           setTimeout(() => {
             target.laymuxAndroidE2e?.onHttpResponse(
@@ -591,6 +621,62 @@ test("Android back invalidates an OAuth relay that is still registering", async 
   expect((await state()).nativeOauthBegins).toEqual([]);
   expect((await state()).nativeOauthCancels).toBe(1);
   await expect(page.locator("#oauthRelayScrim")).toBeHidden();
+});
+
+test("a stale OAuth forward cannot clear a newer relay opened after back", async ({ page }) => {
+  await installAndroidRemote(page);
+  const state = () =>
+    page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState);
+  await expect.poll(async () => (await state()).outputOpens).toBe(1);
+
+  const activateOauth = async (url: string) => {
+    await page.evaluate((nextUrl) => {
+      const target = window as AndroidLifecycleWindow;
+      if (!target.__activateRemoteUrl) throw new Error("Remote URL activation was not captured");
+      target.__activateRemoteUrl(nextUrl);
+    }, url);
+    await expect(page.locator("#oauthRelayScrim")).toBeVisible();
+    await page.locator("#oauthRelayStart").click();
+  };
+  const authUrl =
+    "https://login.example/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A4321%2Fcallback";
+
+  await activateOauth(authUrl);
+  await expect.poll(async () => (await state()).nativeOauthBegins).toHaveLength(1);
+  await page.evaluate(() => {
+    const target = window as AndroidLifecycleWindow;
+    target.__androidLifecycleState.holdNextOauthForward = true;
+    target.laymuxOauthRelay?.onCallback("/callback?code=old");
+  });
+  await expect.poll(async () => (await state()).oauthForwardRequests).toHaveLength(1);
+
+  expect(await dismissTopRemoteLayer(page)).toBe(true);
+  await expect(page.locator("#oauthRelayScrim")).toBeHidden();
+  await activateOauth(authUrl);
+  await expect.poll(async () => (await state()).nativeOauthBegins).toHaveLength(2);
+
+  await page.evaluate(async () => {
+    const target = window as AndroidLifecycleWindow;
+    const requestId = target.__androidLifecycleState.heldOauthForwardRequestId;
+    if (!requestId) throw new Error("OAuth forward request was not retained");
+    target.laymuxAndroidE2e?.onHttpResponse(
+      requestId,
+      JSON.stringify({
+        kind: "http",
+        status: 200,
+        body: { status: 200, contentType: "text/plain", body: "ok" },
+      }),
+    );
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    target.laymuxOauthRelay?.onCallback("/callback?code=new");
+  });
+
+  await expect.poll(async () => (await state()).oauthForwardRequests).toHaveLength(2);
+  expect((await state()).oauthForwardRequests).toEqual([
+    { leaseId: "lease-1", sessionId: "oauth-session-1", pathAndQuery: "/callback?code=old" },
+    { leaseId: "lease-1", sessionId: "oauth-session-2", pathAndQuery: "/callback?code=new" },
+  ]);
+  await expect(page.locator("#oauthRelayStatus")).toContainText("200");
 });
 
 test("the Android wrapper saves a download through native, not the browser path", async ({

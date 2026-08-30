@@ -3348,6 +3348,10 @@ import {
         let oauthRelayForwarding = false;
         let oauthRelayRevision = 0;
 
+        function oauthRelayIntentIsCurrent(revision) {
+          return oauthRelayRevision === revision && !oauthRelayScrim.hidden;
+        }
+
         // Returns the desktop loopback listener a valid installed-app OAuth
         // URL redirects to, or null when the link is anything else.
         function parseOauthLoopbackRedirect(url) {
@@ -3502,6 +3506,7 @@ import {
           oauthRelayRevision += 1;
           oauthRelayPendingUrl = url;
           oauthRelaySession = null;
+          oauthRelayForwarding = false;
           oauthRelayCallbackInput.value = "";
           oauthRelayScrim.hidden = false;
           oauthRelayManualRow.hidden = true;
@@ -3539,11 +3544,7 @@ import {
             });
           } catch (error) {
             if (popup) popup.close();
-            if (
-              oauthRelayRevision !== revision ||
-              oauthRelayPendingUrl !== url ||
-              oauthRelayScrim.hidden
-            ) {
+            if (!oauthRelayIntentIsCurrent(revision) || oauthRelayPendingUrl !== url) {
               return;
             }
             setOauthRelayStatus(error.message || String(error), "error");
@@ -3554,11 +3555,7 @@ import {
           // Closing with system back or the modal button invalidates the
           // user's intent even if the PC registration response was already in
           // flight. Never reopen a native/browser surface from that stale turn.
-          if (
-            oauthRelayRevision !== revision ||
-            oauthRelayPendingUrl !== url ||
-            oauthRelayScrim.hidden
-          ) {
+          if (!oauthRelayIntentIsCurrent(revision) || oauthRelayPendingUrl !== url) {
             if (popup) popup.close();
             return;
           }
@@ -3595,10 +3592,14 @@ import {
           }
         }
 
-        async function forwardOauthCallback(pathAndQuery) {
+        async function forwardOauthCallback(pathAndQuery, revision = oauthRelayRevision) {
           const session = oauthRelaySession;
-          if (!session || oauthRelayForwarding) return null;
+          if (!session || oauthRelayForwarding || !oauthRelayIntentIsCurrent(revision)) {
+            return null;
+          }
           oauthRelayForwarding = true;
+          const operationIsCurrent = () =>
+            oauthRelayIntentIsCurrent(revision) && oauthRelaySession === session;
           try {
             const result = await remoteFetch("/remote/v1/oauth-relay/forward", {
               method: "POST",
@@ -3609,9 +3610,11 @@ import {
                 leaseId,
               }),
             });
+            if (!operationIsCurrent()) return null;
             oauthRelaySession = null;
             return result;
           } catch (error) {
+            if (!operationIsCurrent()) return null;
             // A server answer means the one-shot session is spent; a pure
             // transport failure (E2E session still resuming after the OS
             // browser) leaves it intact so the caller can retry.
@@ -3620,13 +3623,14 @@ import {
             }
             throw error;
           } finally {
-            oauthRelayForwarding = false;
+            if (oauthRelayRevision === revision) oauthRelayForwarding = false;
           }
         }
 
         async function forwardPastedOauthCallback() {
+          const revision = oauthRelayRevision;
           const session = oauthRelaySession;
-          if (!session) return;
+          if (!session || !oauthRelayIntentIsCurrent(revision)) return;
           let pathAndQuery = null;
           try {
             const pasted = new URL(oauthRelayCallbackInput.value.trim());
@@ -3649,13 +3653,15 @@ import {
           }
           setOauthRelayStatus(tRelay("forwardingPaste"));
           try {
-            const result = await forwardOauthCallback(pathAndQuery);
+            const result = await forwardOauthCallback(pathAndQuery, revision);
+            if (!oauthRelayIntentIsCurrent(revision)) return;
             if (!result) return;
             setOauthRelayStatus(
               tRelay("successAnswered", { status: result.status }),
               "success",
             );
           } catch (error) {
+            if (!oauthRelayIntentIsCurrent(revision)) return;
             setOauthRelayStatus(error.message || String(error), "error");
           }
         }
@@ -3667,6 +3673,8 @@ import {
         // with backoff before giving up.
         window.laymuxOauthRelay = {
           onCallback(pathAndQuery) {
+            const revision = oauthRelayRevision;
+            if (!oauthRelayIntentIsCurrent(revision)) return;
             (async () => {
               setOauthRelayStatus(tRelay("forwarding"));
               // A transport failure can drop the *response* after the forward
@@ -3677,8 +3685,13 @@ import {
               // so the retry can tell the two apart.
               let sent = false;
               for (let attempt = 0; attempt < 4; attempt += 1) {
+                if (!oauthRelayIntentIsCurrent(revision)) return;
                 try {
-                  const result = await forwardOauthCallback(String(pathAndQuery));
+                  const result = await forwardOauthCallback(
+                    String(pathAndQuery),
+                    revision,
+                  );
+                  if (!oauthRelayIntentIsCurrent(revision)) return;
                   if (result) {
                     setOauthRelayStatus(
                       tRelay("successAnswered", { status: result.status }),
@@ -3696,6 +3709,7 @@ import {
                   }
                   return;
                 } catch (error) {
+                  if (!oauthRelayIntentIsCurrent(revision)) return;
                   if (error && typeof error.status === "number") {
                     // A server answer to a retry that says the session is gone
                     // means an earlier send already delivered it.
@@ -3714,10 +3728,12 @@ import {
                   );
                 }
               }
+              if (!oauthRelayIntentIsCurrent(revision)) return;
               setOauthRelayStatus(tRelay("couldNotConfirm"), "error");
             })();
           },
           onError(message) {
+            if (oauthRelayScrim.hidden) return;
             setOauthRelayStatus(String(message), "error");
           },
         };
