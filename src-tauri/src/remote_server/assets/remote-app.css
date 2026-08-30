@@ -683,6 +683,10 @@
         top: 0;
         z-index: 1;
         display: flex;
+        /* The long Input bar panel must scroll instead of taking this flex
+           item's height. Without an explicit zero shrink factor, the strip
+           collapses to its padding and the tabs disappear on short screens. */
+        flex: 0 0 auto;
         min-width: 0;
         gap: 2px;
         padding: 4px 6px 0;

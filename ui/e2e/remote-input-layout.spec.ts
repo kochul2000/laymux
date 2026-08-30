@@ -454,6 +454,40 @@ test.describe("Remote input action layout", () => {
     await expect(page.locator("#settingsPanelApp")).toBeVisible();
   });
 
+  test("keeps the Settings tab strip visible above a long Input bar panel", async ({ page }) => {
+    await openMarkup(page);
+    await page.setViewportSize({ width: 390, height: 390 });
+    await page.locator("#drawerSettingsButton").click();
+
+    const settingsView = page.locator("#drawerSettingsView");
+    const settingsTabs = page.locator("#settingsTabs");
+    const readGeometry = () =>
+      settingsTabs.evaluate((tabs) => {
+        const tab = tabs.querySelector<HTMLElement>("[data-settings-panel]");
+        const view = tabs.parentElement;
+        const tabsRect = tabs.getBoundingClientRect();
+        const viewRect = view?.getBoundingClientRect();
+        return {
+          tabsHeight: tabsRect.height,
+          firstTabHeight: tab?.getBoundingClientRect().height ?? 0,
+          tabsTop: tabsRect.top,
+          viewTop: viewRect?.top ?? 0,
+        };
+      });
+
+    const initial = await readGeometry();
+    expect(initial.tabsHeight).toBeGreaterThan(30);
+    expect(initial.firstTabHeight).toBeGreaterThan(20);
+
+    await settingsView.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    const scrolled = await readGeometry();
+    expect(scrolled.tabsHeight).toBe(initial.tabsHeight);
+    expect(scrolled.firstTabHeight).toBe(initial.firstTabHeight);
+    expect(Math.abs(scrolled.tabsTop - scrolled.viewTop)).toBeLessThanOrEqual(1);
+  });
+
   test("keeps the Settings tab strip readable and scrollable at 240px", async ({ page }) => {
     await openMarkup(page);
     await page.setViewportSize({ width: 240, height: 844 });
