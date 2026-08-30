@@ -2504,7 +2504,7 @@ export function TerminalView({
     // *without* ever parking would keep the overlay frozen indefinitely. Codex
     // parks after every frame (the whole reason this layer exists) and
     // `isOverlayCaretActivity` is Codex-only, so there is no exposure
-    // today. Codex 0.145's authoritative in-frame park never enters this
+    // today. Codex's authoritative strict in-frame parks never enter this
     // pending state — revisit if another ratatui TUI joins the overlay set.
     const armParkSettleTimer = () => {
       cancelParkSettleTimer();
@@ -2661,7 +2661,7 @@ export function TerminalView({
             if (shadowCursorRef.current.parkPending) {
               startParkSettleTimer(currentParsingParkDeadline);
             } else {
-              // Codex 0.145 parks inside the frame, so there is no follow-up
+              // Codex strict tails park inside the frame, so there is no follow-up
               // chunk to await and no prior settle timer may survive it.
               clearParkSettleTimer();
             }

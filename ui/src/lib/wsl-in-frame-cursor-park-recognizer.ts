@@ -8,8 +8,13 @@ type LexicalState =
   | { kind: "escape"; bytes: number[]; startOffset: number }
   | { kind: "csi"; bytes: number[]; startOffset: number }
   | { kind: "control"; control: ControlStringKind; previousEsc: boolean };
-type InFrameParkStage = "none" | "shown" | "positioned";
-type CsiKind = "frameStart" | "frameEnd" | "cursorShow" | "position" | "other";
+type InFrameParkStage =
+  | "none"
+  | "positionsBeforeShow"
+  | "shown"
+  | "showThenPositioned"
+  | "positionThenShown";
+type CsiKind = "frameStart" | "frameEnd" | "frameEndCombined" | "cursorShow" | "position" | "other";
 
 export interface WslCursorMetadataEmission {
   data: Uint8Array;
@@ -18,7 +23,8 @@ export interface WslCursorMetadataEmission {
 }
 
 /**
- * Read-only recognizer for Codex's strict in-frame cursor park on WSL.
+ * Read-only recognizer for Codex's show-first and position-first strict
+ * in-frame cursor parks on WSL (ADR-0078, ADR-0221).
  *
  * WSL output must remain byte-for-byte pass-through: unlike the native Windows
  * stabilizer, this class never holds, removes, or reorders bytes. It only splits
@@ -73,7 +79,7 @@ export class WslInFrameCursorParkRecognizer {
       case "escape":
         return this.consumeEscapeByte(byte, offset);
       case "csi":
-        return this.consumeCsiByte(byte);
+        return this.consumeCsiByte(byte, offset);
       case "control": {
         const control = this.lexical;
         if (isControlStringEnd(control.control, control.previousEsc, byte)) {
@@ -111,7 +117,7 @@ export class WslInFrameCursorParkRecognizer {
     return undefined;
   }
 
-  private consumeCsiByte(byte: number): number | undefined {
+  private consumeCsiByte(byte: number, offset: number): number | undefined {
     const csi = this.lexical as Extract<LexicalState, { kind: "csi" }>;
     csi.bytes.push(byte);
     if (byte >= 0x40 && byte <= 0x7e) {
@@ -122,7 +128,8 @@ export class WslInFrameCursorParkRecognizer {
     const isParameterOrIntermediate = byte >= 0x20 && byte <= 0x3f;
     if (!isParameterOrIntermediate || csi.bytes.length > MAX_CSI_BYTES) {
       this.inFrameParkStage = "none";
-      this.lexical = { kind: "normal" };
+      this.lexical =
+        byte === ESC ? { kind: "escape", bytes: [byte], startOffset: offset } : { kind: "normal" };
     }
     return undefined;
   }
@@ -134,21 +141,36 @@ export class WslInFrameCursorParkRecognizer {
       this.inFrameParkStage = "none";
       return undefined;
     }
+    if (kind === "frameEndCombined") {
+      // A combined private-mode reset closes xterm's real DEC 2026 frame,
+      // but is not the singleton reset required by either strict park tail.
+      this.frameOpen = false;
+      this.inFrameParkStage = "none";
+      return undefined;
+    }
     if (!this.frameOpen) return undefined;
 
     if (kind === "cursorShow") {
-      this.inFrameParkStage = "shown";
+      this.inFrameParkStage =
+        this.inFrameParkStage === "positionsBeforeShow" ||
+        this.inFrameParkStage === "showThenPositioned"
+          ? "positionThenShown"
+          : "shown";
       return undefined;
     }
-    if (
-      kind === "position" &&
-      (this.inFrameParkStage === "shown" || this.inFrameParkStage === "positioned")
-    ) {
-      this.inFrameParkStage = "positioned";
+    if (kind === "position") {
+      this.inFrameParkStage =
+        this.inFrameParkStage === "shown" ||
+        this.inFrameParkStage === "showThenPositioned" ||
+        this.inFrameParkStage === "positionThenShown"
+          ? "showThenPositioned"
+          : "positionsBeforeShow";
       return undefined;
     }
     if (kind === "frameEnd") {
-      const authoritative = this.inFrameParkStage === "positioned";
+      const authoritative =
+        this.inFrameParkStage === "showThenPositioned" ||
+        this.inFrameParkStage === "positionThenShown";
       this.frameOpen = false;
       this.inFrameParkStage = "none";
       return authoritative ? tokenStartOffset : undefined;
@@ -186,10 +208,18 @@ function classifyCsi(bytes: readonly number[]): CsiKind {
   const text = String.fromCharCode(...bytes);
   if (text === "\x1b[?2026h") return "frameStart";
   if (text === "\x1b[?2026l") return "frameEnd";
+  if (hasPrivateModeParameter(text, "l", 2026)) return "frameEndCombined";
   if (text === "\x1b[?25h") return "cursorShow";
   const body = text.slice(2, -1);
   const final = text.at(-1);
   if ((final === "H" || final === "f") && /^[0-9;]*$/.test(body)) return "position";
   if (final === "G" && /^\d*$/.test(body)) return "position";
   return "other";
+}
+
+function hasPrivateModeParameter(text: string, final: "h" | "l", parameter: number): boolean {
+  if (!text.startsWith("\x1b[?") || text.at(-1) !== final) return false;
+  const body = text.slice(3, -1);
+  if (!/^[0-9;]+$/.test(body)) return false;
+  return body.split(";").some((value) => value !== "" && Number(value) === parameter);
 }

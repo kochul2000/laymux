@@ -27,10 +27,12 @@ const UI_ROOT = process.cwd();
  * 510 kB kept roughly that same small margin. Sleep prevention (ADR-0114) then
  * added ~2.6 kB of always-visible chrome — a top-bar toggle, its coordinator,
  * and one Settings group — taking the entry to 512,576 B. 515 kB restores the
- * same small margin rather than banking room for several more features: the
+ * same small margin rather than banking room for several more features.
+ * Codex 0.150+ cursor-tail recognition and its byte-exact fail-open boundaries
+ * then took the entry to 515,856 B. 518.5 kB restores 2,644 B of headroom; the
  * point of the guard is to make the next increase a conscious decision too.
  */
-const STARTUP_CHUNK_BUDGET_BYTES = 515_000;
+const STARTUP_CHUNK_BUDGET_BYTES = 518_500;
 
 /**
  * Ceiling for a lazily-imported **syntax grammar**. Generous because a

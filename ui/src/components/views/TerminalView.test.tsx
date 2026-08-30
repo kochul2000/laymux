@@ -4763,7 +4763,10 @@ describe("TerminalView", () => {
       await vi.waitFor(() => expect(mockRefresh).toHaveBeenCalledTimes(2));
     });
 
-    it("flushes Codex 0.145's in-frame cursor park in the same xterm write", async () => {
+    it.each([
+      ["0.145", "\x1b[?2026hbody\x1b[26;58H\x1b[?25h\x1b[24;3H\x1b[?2026l"],
+      ["0.150+", "\x1b[?2026hbody\x1b[26;58H\x1b[24;3H\x1b[?25h\x1b[?2026l"],
+    ])("flushes Codex %s's in-frame cursor park in the same xterm write", async (_version, raw) => {
       const terminalId = "t-native-in-frame-park";
       mockCreateTerminalSession.mockResolvedValueOnce({
         ...sessionResult("nativeWindows"),
@@ -4775,89 +4778,91 @@ describe("TerminalView", () => {
       const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
         | ((data: Uint8Array) => void)
         | undefined;
-      const raw = "\x1b[?2026hbody\x1b[26;58H\x1b[?25h\x1b[24;3H\x1b[?2026l";
-      const expected = "\x1b[?2026hbody\x1b[26;58H\x1b[?25h\x1b[24;3H\x1b[?2026l";
 
       act(() => onOutput?.(new TextEncoder().encode(raw)));
 
       expect(mockWrite).toHaveBeenCalledTimes(1);
-      expect(new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array)).toBe(expected);
+      expect(new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array)).toBe(raw);
     });
 
-    it("does not send WSL Codex 0.145's in-frame park through the legacy settle timeout", async () => {
-      localStorage.setItem("laymux:cursor-trace", "1");
-      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-      const terminalId = "t-wsl-in-frame-park";
-      try {
-        mockCreateTerminalSession.mockResolvedValueOnce({
-          ...sessionResult("wsl"),
-          id: terminalId,
-        });
-        render(<TerminalView instanceId={terminalId} profile="WSL" syncGroup="" />);
-        await waitForTerminalInputReady();
-        act(() => {
-          useTerminalStore.getState().updateInstanceInfo(terminalId, {
-            activity: { type: "interactiveApp", name: "Codex" },
+    it.each([
+      ["0.145", "\x1b[?2026hbody\x1b[24;58H\x1b[?25h\x1b[6;5H\x1b[?2026l"],
+      ["0.150+", "\x1b[?2026hbody\x1b[24;58H\x1b[6;5H\x1b[?25h\x1b[?2026l"],
+    ])(
+      "does not send WSL Codex %s's in-frame park through the legacy settle timeout",
+      async (_version, raw) => {
+        localStorage.setItem("laymux:cursor-trace", "1");
+        const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+        const terminalId = "t-wsl-in-frame-park";
+        try {
+          mockCreateTerminalSession.mockResolvedValueOnce({
+            ...sessionResult("wsl"),
+            id: terminalId,
           });
-        });
+          render(<TerminalView instanceId={terminalId} profile="WSL" syncGroup="" />);
+          await waitForTerminalInputReady();
+          act(() => {
+            useTerminalStore.getState().updateInstanceInfo(terminalId, {
+              activity: { type: "interactiveApp", name: "Codex" },
+            });
+          });
 
-        const terminal = createdTerminals.at(-1)! as MockTerminalInstance & {
-          buffer: { active: typeof mockBufferActive };
-        };
-        const rawSet = mockRegisterCsiHandler.mock.calls.find(
-          (call) =>
-            (call[0] as { prefix?: string; final: string }).prefix === "?" &&
-            (call[0] as { prefix?: string; final: string }).final === "h",
-        )?.[1] as ((params: readonly number[]) => boolean) | undefined;
-        const rawReset = mockRegisterCsiHandler.mock.calls.find(
-          (call) =>
-            (call[0] as { prefix?: string; final: string }).prefix === "?" &&
-            (call[0] as { prefix?: string; final: string }).final === "l",
-        )?.[1] as ((params: readonly number[]) => boolean) | undefined;
-        expect(rawSet).toBeTypeOf("function");
-        expect(rawReset).toBeTypeOf("function");
+          const terminal = createdTerminals.at(-1)! as MockTerminalInstance & {
+            buffer: { active: typeof mockBufferActive };
+          };
+          const rawSet = mockRegisterCsiHandler.mock.calls.find(
+            (call) =>
+              (call[0] as { prefix?: string; final: string }).prefix === "?" &&
+              (call[0] as { prefix?: string; final: string }).final === "h",
+          )?.[1] as ((params: readonly number[]) => boolean) | undefined;
+          const rawReset = mockRegisterCsiHandler.mock.calls.find(
+            (call) =>
+              (call[0] as { prefix?: string; final: string }).prefix === "?" &&
+              (call[0] as { prefix?: string; final: string }).final === "l",
+          )?.[1] as ((params: readonly number[]) => boolean) | undefined;
+          expect(rawSet).toBeTypeOf("function");
+          expect(rawReset).toBeTypeOf("function");
 
-        mockWrite.mockClear();
-        mockWrite.mockImplementation(function (data, callback?: () => void) {
-          const parsed =
-            typeof data === "string" ? data : new TextDecoder().decode(data as Uint8Array);
-          if (parsed.includes("\x1b[?2026h")) rawSet?.([2026]);
-          if (parsed.includes("\x1b[?25h")) {
-            terminal.buffer.active.cursorX = 58;
-            terminal.buffer.active.cursorY = 23;
-            rawSet?.([25]);
-          }
-          if (parsed.includes("\x1b[6;5H")) {
-            terminal.buffer.active.cursorX = 4;
-            terminal.buffer.active.cursorY = 5;
-          }
-          if (parsed.includes("\x1b[?2026l")) rawReset?.([2026]);
-          callback?.();
-        });
-        const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
-          | ((data: Uint8Array) => void)
-          | undefined;
+          mockWrite.mockClear();
+          mockWrite.mockImplementation(function (data, callback?: () => void) {
+            const parsed =
+              typeof data === "string" ? data : new TextDecoder().decode(data as Uint8Array);
+            if (parsed.includes("\x1b[?2026h")) rawSet?.([2026]);
+            if (parsed.includes("\x1b[?25h")) {
+              terminal.buffer.active.cursorX = 58;
+              terminal.buffer.active.cursorY = 23;
+              rawSet?.([25]);
+            }
+            if (parsed.includes("\x1b[6;5H")) {
+              terminal.buffer.active.cursorX = 4;
+              terminal.buffer.active.cursorY = 5;
+            }
+            if (parsed.includes("\x1b[?2026l")) rawReset?.([2026]);
+            callback?.();
+          });
+          const onOutput = mockOnTerminalOutput.mock.calls.find(
+            ([id]) => id === terminalId,
+          )?.[1] as ((data: Uint8Array) => void) | undefined;
 
-        vi.useFakeTimers();
-        act(() => {
-          onOutput?.(
-            new TextEncoder().encode("\x1b[?2026hbody\x1b[24;58H\x1b[?25h\x1b[6;5H\x1b[?2026l"),
+          vi.useFakeTimers();
+          act(() => {
+            onOutput?.(new TextEncoder().encode(raw));
+          });
+          await act(async () => {
+            vi.advanceTimersByTime(60);
+          });
+
+          const settleTraces = logSpy.mock.calls.filter(
+            (call) => typeof call[0] === "string" && call[0].includes("park-settle-timeout"),
           );
-        });
-        await act(async () => {
-          vi.advanceTimersByTime(60);
-        });
-
-        const settleTraces = logSpy.mock.calls.filter(
-          (call) => typeof call[0] === "string" && call[0].includes("park-settle-timeout"),
-        );
-        expect(settleTraces).toHaveLength(0);
-      } finally {
-        vi.useRealTimers();
-        logSpy.mockRestore();
-        localStorage.removeItem("laymux:cursor-trace");
-      }
-    });
+          expect(settleTraces).toHaveLength(0);
+        } finally {
+          vi.useRealTimers();
+          logSpy.mockRestore();
+          localStorage.removeItem("laymux:cursor-trace");
+        }
+      },
+    );
 
     it("keeps the painted WSL Codex caret frozen while a Working frame spans animation frames", async () => {
       const terminalId = "t-wsl-working-caret";
