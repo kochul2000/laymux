@@ -178,6 +178,11 @@ pub fn reset_settings(
     Ok(default_settings)
 }
 
+#[tauri::command(async)]
+pub fn acknowledge_settings_recovery() -> Result<crate::settings::Settings, String> {
+    crate::settings::acknowledge_settings_recovery()
+}
+
 #[tauri::command]
 pub fn get_settings_path() -> Result<String, String> {
     Ok(crate::settings::settings_path().display().to_string())

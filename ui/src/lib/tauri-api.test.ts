@@ -28,6 +28,7 @@ import {
   getSyncGroupTerminals,
   handleLxMessage,
   loadSettings,
+  acknowledgeSettingsRecovery,
   resetSettings,
   saveSettings,
   getRemoteAccessStatus,
@@ -495,6 +496,15 @@ describe("tauri-api", () => {
       await resetSettings();
 
       expect(mockInvoke).toHaveBeenCalledWith("reset_settings");
+    });
+
+    it("permits the explicit recovery acknowledgement while regular writes are blocked", async () => {
+      setBlockPersist(true);
+      mockInvoke.mockResolvedValue({ defaultProfile: "PowerShell", profiles: [] });
+
+      await acknowledgeSettingsRecovery();
+
+      expect(mockInvoke).toHaveBeenCalledWith("acknowledge_settings_recovery");
     });
   });
 

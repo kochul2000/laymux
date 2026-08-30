@@ -1391,7 +1391,7 @@ Windows host의 WSL terminal은 host process tree에 `wsl.exe`만 보이므로 n
 **agent를 종료한 pane은 shell로 복원한다**([ADR-0195](../adr/0195-agent-session-cleared-on-shell-return.md), [ADR-0222](../adr/0222-agent-session-checkpoint-coordinator.md)). 판정 SoT는 Rust `get_terminal_session_attributions`다. 이 command는 live PTY의 generation과 native/WSL process liveness, 세 provider의 정확 귀속 결과를 한 verdict로 묶는다. 프론트 activity는 체크포인트 요청 힌트일 뿐 세션 삭제·보존 판정에 쓰지 않는다.
 
 - `Identified(provider, sessionId)`는 그 ID만 기록하고 다른 provider ID를 제거한다.
-- `NoAgent`와 `ActiveButUnidentified`는 잘못된 resume를 피하도록 일반 checkpoint에서 세 ID를 제거한다. 다만 후자는 update·eviction 같은 파괴 전 checkpoint에서는 실패로 처리한다.
+- `NoAgent`와 `ActiveButUnidentified`는 잘못된 resume를 피하도록 일반 checkpoint에서 세 ID를 제거한다. 다만 후자는 update·eviction 같은 파괴 전 checkpoint에서는 실패로 처리한다. process enumeration, provider 파일·DB, WSL probe의 I/O·parse 실패는 provider lookup 건강 상태로 별도 전달되어 `Unknown`이 되며 기존 ID를 삭제하지 않는다.
 - process enumeration·provider 조회·IPC 실패와 아직 시작되지 않은 pane은 `Unknown`이다. 기존 ID를 보존하지만 파괴 전 checkpoint에서는 실패한다.
 - resume startup을 요청한 terminal은 15초 동안 backend `NoAgent`를 `Unknown`으로 승격한다. provider가 뜨기 전 workspace 진입 저장이 방금 사용한 ID를 지우지 않게 하는 bounded grace다.
 - `includeRuntimeStructuralState: false`(설정 비교 경로)는 runtime command를 호출하지 않고 기존 view 필드를 그대로 보존한다.

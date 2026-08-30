@@ -28,6 +28,11 @@ pub struct TerminalSessionAttribution {
     session_id: Option<String>,
 }
 
+pub(crate) struct ProviderSessionLookup {
+    pub attributions: HashMap<String, Option<String>>,
+    pub lookup_failed: bool,
+}
+
 fn classify_attribution(
     generation: u64,
     terminal_id: &str,
@@ -35,7 +40,11 @@ fn classify_attribution(
     codex: &HashMap<String, Option<String>>,
     grok: &HashMap<String, Option<String>>,
     liveness: PtyAppLiveness,
+    lookup_failed: bool,
 ) -> TerminalSessionAttribution {
+    if lookup_failed {
+        return unknown_attribution(generation);
+    }
     let claims = [
         ("claude", claude.get(terminal_id)),
         ("codex", codex.get(terminal_id)),
@@ -132,12 +141,16 @@ pub fn get_terminal_session_attributions(
         .iter()
         .map(|(terminal_id, handle)| (terminal_id.clone(), handle.terminal_generation()))
         .collect();
-    let claude =
-        super::claude_session::get_claude_session_ids_impl(claude_session_max_age_hours, &state)?;
+    let claude = super::claude_session::get_claude_session_lookup_impl(
+        claude_session_max_age_hours,
+        &state,
+    )?;
     let codex =
-        super::codex_session::get_codex_session_ids_impl(codex_session_max_age_hours, &state)
+        super::codex_session::get_codex_session_lookup_impl(codex_session_max_age_hours, &state)
             .map_err(|error| error.to_string())?;
-    let grok = super::grok_session::get_grok_session_ids_impl(grok_session_max_age_hours, &state)?;
+    let grok =
+        super::grok_session::get_grok_session_lookup_impl(grok_session_max_age_hours, &state)?;
+    let lookup_failed = claude.lookup_failed || codex.lookup_failed || grok.lookup_failed;
     let observations: Vec<(String, u64, PtyAppLiveness)> = terminals
         .into_iter()
         .map(|(terminal_id, generation)| {
@@ -155,8 +168,15 @@ pub fn get_terminal_session_attributions(
     Ok(observations
         .into_iter()
         .map(|(terminal_id, generation, liveness)| {
-            let attribution =
-                classify_attribution(generation, &terminal_id, &claude, &codex, &grok, liveness);
+            let attribution = classify_attribution(
+                generation,
+                &terminal_id,
+                &claude.attributions,
+                &codex.attributions,
+                &grok.attributions,
+                liveness,
+                lookup_failed,
+            );
             let attribution = require_current_generation(
                 attribution,
                 current_generations.get(&terminal_id).copied(),
@@ -179,6 +199,7 @@ mod tests {
             &HashMap::from([("terminal-a".into(), Some("session-2".into()))]),
             &HashMap::new(),
             PtyAppLiveness::Running("Codex"),
+            false,
         );
         assert_eq!(attribution.generation, 7);
         assert_eq!(attribution.state, SessionAttributionState::Identified);
@@ -194,8 +215,25 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             PtyAppLiveness::Unknown,
+            false,
         );
         assert_eq!(attribution.state, SessionAttributionState::Unknown);
+    }
+
+    #[test]
+    fn provider_lookup_failure_is_not_collapsed_to_destructive_absence() {
+        let attribution = classify_attribution(
+            4,
+            "terminal-a",
+            &HashMap::from([("terminal-a".into(), None)]),
+            &HashMap::new(),
+            &HashMap::new(),
+            PtyAppLiveness::Running("Claude"),
+            true,
+        );
+
+        assert_eq!(attribution.state, SessionAttributionState::Unknown);
+        assert_eq!(attribution.session_id, None);
     }
 
     #[test]

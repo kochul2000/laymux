@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 vi.mock("@/lib/tauri-api", () => ({
   resetSettings: vi.fn().mockResolvedValue(undefined),
+  acknowledgeSettingsRecovery: vi.fn().mockResolvedValue(undefined),
   getSettingsPath: vi.fn().mockResolvedValue("C:\\fallback\\settings.json"),
 }));
 
@@ -94,6 +95,7 @@ describe("SettingsRecoveryModal — recovered status (issue #701, ADR-0119)", ()
   });
 
   it("hands the acknowledgement back to the caller, which releases the write block", async () => {
+    const { acknowledgeSettingsRecovery } = await import("@/lib/tauri-api");
     const onDismiss = vi.fn();
     render(
       <SettingsRecoveryModal loadResult={RECOVERED} onDismiss={onDismiss} onReset={vi.fn()} />,
@@ -101,7 +103,25 @@ describe("SettingsRecoveryModal — recovered status (issue #701, ADR-0119)", ()
 
     await userEvent.click(screen.getByTestId("settings-recovery-dismiss"));
 
+    expect(acknowledgeSettingsRecovery).toHaveBeenCalledTimes(1);
     expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps writes blocked when the backend cannot commit the acknowledgement", async () => {
+    const { acknowledgeSettingsRecovery } = await import("@/lib/tauri-api");
+    vi.mocked(acknowledgeSettingsRecovery).mockRejectedValueOnce(new Error("disk busy"));
+    const onDismiss = vi.fn();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(
+      <SettingsRecoveryModal loadResult={RECOVERED} onDismiss={onDismiss} onReset={vi.fn()} />,
+    );
+
+    await userEvent.click(screen.getByTestId("settings-recovery-dismiss"));
+
+    await waitFor(() => expect(consoleError).toHaveBeenCalled());
+    expect(onDismiss).not.toHaveBeenCalled();
+    expect(screen.getByTestId("settings-recovery-dismiss")).toBeEnabled();
+    consoleError.mockRestore();
   });
 
   it("keeps the repaired status on its own copy", () => {

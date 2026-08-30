@@ -527,6 +527,10 @@ export async function resetSettings(): Promise<Settings> {
   return invoke("reset_settings");
 }
 
+export async function acknowledgeSettingsRecovery(): Promise<Settings> {
+  return invoke("acknowledge_settings_recovery");
+}
+
 export async function getSettingsPath(): Promise<string> {
   return invoke("get_settings_path");
 }

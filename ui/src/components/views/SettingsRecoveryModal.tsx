@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   resetSettings,
+  acknowledgeSettingsRecovery,
   getSettingsPath,
   type SettingsLoadResult,
   type ValidationWarning,
@@ -26,6 +27,7 @@ export function SettingsRecoveryModal({
   const { t } = useTranslation("settings");
   const [settingsPath, setSettingsPath] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
+  const [acknowledging, setAcknowledging] = useState(false);
 
   const isParseError = loadResult.status === "parse_error";
   const isRecovered = loadResult.status === "recovered";
@@ -57,6 +59,21 @@ export function SettingsRecoveryModal({
       console.error("[SettingsRecoveryModal] Reset failed:", err);
       setBlockPersist(false);
       setResetting(false);
+    }
+  };
+
+  const handleDismiss = async () => {
+    if (!isRecovered) {
+      onDismiss();
+      return;
+    }
+    setAcknowledging(true);
+    try {
+      await acknowledgeSettingsRecovery();
+      onDismiss();
+    } catch (error) {
+      console.error("[SettingsRecoveryModal] Recovery acknowledgement failed:", error);
+      setAcknowledging(false);
     }
   };
 
@@ -214,11 +231,13 @@ export function SettingsRecoveryModal({
             {resetting ? t("recovery.resetting") : t("recovery.resetToDefault")}
           </button>
           <button
-            onClick={onDismiss}
+            onClick={handleDismiss}
+            disabled={acknowledging}
             className="rounded px-4 py-1.5 text-sm"
             style={{
               background: "var(--accent, #89b4fa)",
               color: "var(--bg-base, #1e1e2e)",
+              opacity: acknowledging ? 0.5 : 1,
             }}
             data-testid="settings-recovery-dismiss"
           >

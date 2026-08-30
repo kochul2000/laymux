@@ -77,6 +77,7 @@ mod main_thread_io {
                 "list_system_monospace_fonts",
                 "load_settings",
                 "load_settings_validated",
+                "acknowledge_settings_recovery",
                 "reset_settings",
                 "save_settings",
                 "load_memo",

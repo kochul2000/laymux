@@ -84,6 +84,12 @@ Agent 세션 복원점은 현재 창의 정상 close에서 프론트엔드가 se
 - **정상 window close**는 metadata checkpoint를 optional terminal interrupt보다 먼저 확정하고, interrupt 뒤 scrollback cache를 저장하는 기존 두 단계 순서를 유지한다. 이미 실행 중인 일반 checkpoint와 trailing 요청까지 drain한다. 사용자의 명시적 close를 영구히 막지 않도록 기존 유계 close wait 안에서 시도하고, 실패·timeout이면 마지막으로 성공한 checkpoint를 보존한 채 종료하는 best-effort 정책을 사용한다.
 - callback을 실행할 수 없는 process kill·OS crash는 마지막 성공 checkpoint 이후의 변경을 잃을 수 있다. 최대 경과시간은 이 손실 상한을 줄이는 복구 목표이며, 전원 상실까지의 물리 저장 내구성은 별도 결정이다.
 
+### 리뷰에서 확정한 실패 보존과 승인 경계
+
+- Automation REST의 direct terminal write와 MCP `write_to_terminal`/`execute_command`도 공통 mutation admission을 통과한다. permit은 실제 PTY write와 분할 body/CR 지연이 끝날 때까지 유지하며, finalization fence 이후 도착한 입력은 side effect 전에 거절한다.
+- provider 조회기는 attribution map과 별도로 조회 건강 상태를 반환한다. process enumeration, native/WSL session file·DB parse/I/O, WSL probe 중 하나라도 실패하면 통합 판정은 영향 범위를 파괴적 부재로 축약하지 않고 `Unknown`으로 만든다. 따라서 일반 checkpoint는 기존 ID를 보존하고 critical checkpoint는 실패한다.
+- `Recovered` settings는 frontend checkpoint와 cloud pairing/disconnect를 포함한 일반 backend transaction 모두가 덮어쓸 수 없다. 사용자가 복구 모달에서 명시적으로 승인하면 `acknowledge_settings_recovery`가 복구 결과를 atomic replace하여 write-block을 해제하며, 명시적 reset은 별도 복구 경로로 유지한다.
+
 ## Alternatives Considered
 
 - **기존 `persistSession()`을 update·완료·workspace·timer에서 더 자주 호출한다.** 변경량은 작지만 async snapshot 완료 역전, whole-settings lost update, 조회 실패와 부재의 혼동을 그대로 증폭한다. 잘못된 복원점을 더 자주 확정할 수 있어 기각한다.

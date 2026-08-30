@@ -324,6 +324,7 @@ pub fn run() {
             commands::get_home_directory,
             commands::get_automation_info,
             commands::load_settings_validated,
+            commands::acknowledge_settings_recovery,
             commands::reset_settings,
             commands::get_settings_path,
             commands::subscribe_usage_probe,

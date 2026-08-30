@@ -73,6 +73,11 @@ impl SessionCheckpointRuntime {
             .map_err(|_| "application update finalization is already in progress".into())
     }
 
+    #[cfg(test)]
+    pub(crate) fn begin_finalization_for_test(&self) -> Result<(), String> {
+        self.begin_finalization()
+    }
+
     pub fn cancel_finalization(&self) {
         self.finalizing.store(false, Ordering::Release);
     }

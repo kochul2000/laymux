@@ -5,6 +5,7 @@ use tauri::State;
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 
+use super::session_attribution::ProviderSessionLookup;
 use super::wsl_agent_session::{resolve_wsl_agent_processes, WslAgentProcess, WslAgentProvider};
 
 /// Resolve Claude Code session IDs for known Claude terminals.
@@ -23,6 +24,13 @@ pub(crate) fn get_claude_session_ids_impl(
     session_max_age_hours: Option<u64>,
     state: &AppState,
 ) -> Result<HashMap<String, Option<String>>, String> {
+    Ok(get_claude_session_lookup_impl(session_max_age_hours, state)?.attributions)
+}
+
+pub(crate) fn get_claude_session_lookup_impl(
+    session_max_age_hours: Option<u64>,
+    state: &AppState,
+) -> Result<ProviderSessionLookup, String> {
     let known: Vec<String> = {
         let k = state.known_claude_terminals.lock_or_err()?;
         k.iter().cloned().collect()
@@ -30,7 +38,8 @@ pub(crate) fn get_claude_session_ids_impl(
 
     // Read session files from ~/.claude/sessions/
     let sessions_dir = resolve_claude_sessions_dir();
-    let session_files = read_claude_session_files(&sessions_dir, session_max_age_hours);
+    let (session_files, mut lookup_failed) =
+        read_claude_session_files_checked(&sessions_dir, session_max_age_hours);
 
     let terminal_roots: Vec<(String, u32)> = {
         let ptys = state.pty_handles.lock_or_err()?;
@@ -43,48 +52,75 @@ pub(crate) fn get_claude_session_ids_impl(
             })
             .collect()
     };
-    let snapshot = crate::process_tree::snapshot_processes();
-    let candidates = if snapshot.is_empty() {
-        Vec::new()
-    } else {
-        terminal_roots
+    let candidates = match crate::process_tree::try_snapshot_processes() {
+        Ok(snapshot) => terminal_roots
             .into_iter()
             .filter_map(|(terminal_id, root_pid)| {
                 let descendants = crate::process_tree::descendant_pids(&snapshot, root_pid);
                 find_session_by_pids(&session_files, &descendants)
                     .map(|session_id| (terminal_id, session_id))
             })
-            .collect()
+            .collect(),
+        Err(error) => {
+            lookup_failed = true;
+            tracing::warn!(%error, "native Claude process attribution failed");
+            Vec::new()
+        }
     };
     let mut result = crate::process_tree::complete_agent_session_attributions(
         &known,
         remove_duplicate_attributions(candidates),
     );
     match resolve_wsl_agent_processes(state, WslAgentProvider::Claude) {
-        Ok(attributions) => {
-            for (terminal_id, process) in attributions {
-                result.insert(
-                    terminal_id,
-                    process.and_then(|process| {
-                        find_wsl_claude_session(&process, session_max_age_hours)
-                    }),
-                );
+        Ok(lookup) => {
+            lookup_failed |= lookup.lookup_failed;
+            for (terminal_id, process) in lookup.attributions {
+                let session_id = match process {
+                    Some(process) => {
+                        match find_wsl_claude_session_checked(&process, session_max_age_hours) {
+                            Ok(session_id) => session_id,
+                            Err(error) => {
+                                lookup_failed = true;
+                                tracing::warn!(%error, "WSL Claude session file lookup failed");
+                                None
+                            }
+                        }
+                    }
+                    None => None,
+                };
+                result.insert(terminal_id, session_id);
             }
         }
-        Err(error) => tracing::warn!(%error, "WSL Claude attribution failed"),
+        Err(error) => {
+            lookup_failed = true;
+            tracing::warn!(%error, "WSL Claude attribution failed");
+        }
     }
-    Ok(crate::process_tree::reject_duplicate_session_attributions(
-        result, "Claude",
-    ))
+    Ok(ProviderSessionLookup {
+        attributions: crate::process_tree::reject_duplicate_session_attributions(result, "Claude"),
+        lookup_failed,
+    })
 }
 
-fn find_wsl_claude_session(
+fn find_wsl_claude_session_checked(
     process: &WslAgentProcess,
     session_max_age_hours: Option<u64>,
-) -> Option<String> {
-    let sessions =
-        read_claude_session_files(&process.claude_sessions_dir()?, session_max_age_hours);
-    find_session_by_pids(&sessions, &HashSet::from([process.pid]))
+) -> Result<Option<String>, String> {
+    let Some(directory) = process.claude_sessions_dir() else {
+        return Ok(None);
+    };
+    let (sessions, lookup_failed) =
+        read_claude_session_files_checked(&directory, session_max_age_hours);
+    if lookup_failed {
+        return Err(format!(
+            "failed to read Claude session files from {}",
+            directory.display()
+        ));
+    }
+    Ok(find_session_by_pids(
+        &sessions,
+        &HashSet::from([process.pid]),
+    ))
 }
 
 /// A parsed Claude session file entry.
@@ -145,13 +181,25 @@ fn resolve_claude_sessions_dir() -> std::path::PathBuf {
 
 /// Read and parse all Claude session files from the given directory.
 /// If `max_age_hours` is Some, sessions older than the threshold are filtered out.
+#[cfg(test)]
 fn read_claude_session_files(
     dir: &std::path::Path,
     max_age_hours: Option<u64>,
 ) -> Vec<ClaudeSessionFile> {
+    read_claude_session_files_checked(dir, max_age_hours).0
+}
+
+fn read_claude_session_files_checked(
+    dir: &std::path::Path,
+    max_age_hours: Option<u64>,
+) -> (Vec<ClaudeSessionFile>, bool) {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
-        Err(_) => return Vec::new(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return (Vec::new(), false),
+        Err(error) => {
+            tracing::warn!(path = %dir.display(), %error, "failed to read Claude sessions directory");
+            return (Vec::new(), true);
+        }
     };
 
     // Compute the cutoff timestamp (seconds since epoch) if max_age_hours is set.
@@ -164,13 +212,27 @@ fn read_claude_session_files(
     });
 
     let mut result = Vec::new();
-    for entry in entries.flatten() {
+    let mut lookup_failed = false;
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                lookup_failed = true;
+                tracing::warn!(%error, "failed to read a Claude session directory entry");
+                continue;
+            }
+        };
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
         }
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+        match std::fs::read_to_string(&path)
+            .map_err(|error| error.to_string())
+            .and_then(|content| {
+                serde_json::from_str::<serde_json::Value>(&content)
+                    .map_err(|error| error.to_string())
+            }) {
+            Ok(val) => {
                 let pid = val.get("pid").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                 let session_id = val
                     .get("sessionId")
@@ -194,9 +256,13 @@ fn read_claude_session_files(
                     });
                 }
             }
+            Err(error) => {
+                lookup_failed = true;
+                tracing::warn!(path = %path.display(), %error, "failed to parse Claude session file");
+            }
         }
     }
-    result
+    (result, lookup_failed)
 }
 
 /// Find a Claude session ID by matching any of the given PIDs against session file PIDs.
@@ -268,6 +334,7 @@ mod tests {
         std::fs::write(tmp.path().join("bad.json"), "not valid json!").unwrap();
         let sessions = read_claude_session_files(tmp.path(), None);
         assert!(sessions.is_empty());
+        assert!(read_claude_session_files_checked(tmp.path(), None).1);
     }
 
     #[test]

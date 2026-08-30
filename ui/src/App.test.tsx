@@ -93,6 +93,7 @@ vi.mock("@/lib/tauri-api", () => {
       warnings: [],
     }),
     saveSettings: vi.fn().mockResolvedValue(undefined),
+    acknowledgeSettingsRecovery: vi.fn().mockResolvedValue(undefined),
     getListeningPorts: vi.fn().mockResolvedValue([]),
     getGitBranch: vi.fn().mockResolvedValue(null),
     sendOsNotification: vi.fn().mockResolvedValue(undefined),
