@@ -10,26 +10,11 @@ import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { SESSION_ATTRIBUTION_STARTUP_GRACE_MS } from "@/stores/terminal-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import { useUiStore } from "@/stores/ui-store";
-import { computeHiddenPaneIds } from "@/lib/hidden-auto-close";
+import { areHiddenPaneIdsEligible } from "@/lib/hidden-eviction-eligibility";
 import { toPaneId } from "@/lib/pane-ids";
 
 function hiddenEvictionTargetsRemainEligible(terminalIds: readonly string[]): boolean {
-  if (useSettingsStore.getState().workspaceSelector.hiddenAutoCloseSeconds <= 0) return false;
-  const workspaces = useWorkspaceStore.getState();
-  const ui = useUiStore.getState();
-  const hiddenPaneIds = computeHiddenPaneIds({
-    panes: workspaces.workspaces.flatMap((workspace) =>
-      workspace.panes.map((pane) => ({ paneId: pane.id, workspaceId: workspace.id })),
-    ),
-    hiddenPaneIds: ui.hiddenPaneIds,
-    hiddenWorkspaceIds: ui.hiddenWorkspaceIds,
-    activeWorkspaceId: workspaces.activeWorkspaceId,
-  });
-  return (
-    terminalIds.length > 0 &&
-    terminalIds.every((terminalId) => hiddenPaneIds.has(toPaneId(terminalId)))
-  );
+  return areHiddenPaneIdsEligible(terminalIds.map(toPaneId));
 }
 
 /** Connect native watchdog/update barriers and workspace-entry hints to one coordinator. */

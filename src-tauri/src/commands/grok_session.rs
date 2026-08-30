@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -189,7 +189,7 @@ pub(crate) fn get_grok_session_lookup_impl(
             })
             .collect()
     };
-    let mut lookup_failed = false;
+    let mut failed_terminal_ids = HashSet::new();
     let mut candidates = Vec::new();
     match crate::process_tree::try_snapshot_processes() {
         Ok(snapshot) => {
@@ -206,14 +206,14 @@ pub(crate) fn get_grok_session_lookup_impl(
                     Ok(Some(session_id)) => candidates.push((terminal_id, session_id)),
                     Ok(None) => {}
                     Err(error) => {
-                        lookup_failed = true;
+                        failed_terminal_ids.insert(terminal_id.clone());
                         tracing::warn!(%error, "native Grok session lookup failed");
                     }
                 }
             }
         }
         Err(error) => {
-            lookup_failed = true;
+            failed_terminal_ids.extend(known.iter().cloned());
             tracing::warn!(%error, "native Grok process attribution failed");
         }
     }
@@ -232,7 +232,7 @@ pub(crate) fn get_grok_session_lookup_impl(
     );
     match resolve_wsl_agent_processes(state, WslAgentProvider::Grok) {
         Ok(lookup) => {
-            lookup_failed |= lookup.lookup_failed;
+            failed_terminal_ids.extend(lookup.failed_terminal_ids);
             for (terminal_id, process) in lookup.attributions {
                 let session_id = match process {
                     Some(process) => match process.grok_home_dir() {
@@ -243,7 +243,7 @@ pub(crate) fn get_grok_session_lookup_impl(
                         ) {
                             Ok(session_id) => session_id,
                             Err(error) => {
-                                lookup_failed = true;
+                                failed_terminal_ids.insert(terminal_id.clone());
                                 tracing::warn!(%error, "WSL Grok session lookup failed");
                                 None
                             }
@@ -256,13 +256,13 @@ pub(crate) fn get_grok_session_lookup_impl(
             }
         }
         Err(error) => {
-            lookup_failed = true;
+            failed_terminal_ids.extend(known.iter().cloned());
             tracing::warn!(%error, "WSL Grok attribution failed");
         }
     }
     Ok(ProviderSessionLookup {
         attributions: crate::process_tree::reject_duplicate_session_attributions(result, "Grok"),
-        lookup_failed,
+        failed_terminal_ids,
     })
 }
 

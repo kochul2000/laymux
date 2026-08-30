@@ -9,6 +9,7 @@ import {
   computeHiddenPaneIds,
   type HideCandidatePane,
 } from "@/lib/hidden-auto-close";
+import { claimHiddenEvictionEligibility } from "@/lib/hidden-eviction-eligibility";
 
 /** How often (ms) the hidden-timer is re-evaluated. */
 const TICK_INTERVAL_MS = 5000;
@@ -31,6 +32,7 @@ export function useHiddenTerminalAutoClose() {
   const pendingEvictionsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
+    const eligibility = claimHiddenEvictionEligibility();
     const pendingEvictions = pendingEvictionsRef.current;
     let cancelled = false;
     const evaluate = () => {
@@ -41,6 +43,7 @@ export function useHiddenTerminalAutoClose() {
       // Disabled: clear timers + any prior evictions so terminals re-mount.
       if (!timeoutSec || timeoutSec <= 0) {
         hiddenSinceRef.current = new Map();
+        eligibility.publish(new Set());
         if (ui.evictedPaneIds.size > 0) ui.setEvictedPaneIds(new Set());
         return;
       }
@@ -64,6 +67,7 @@ export function useHiddenTerminalAutoClose() {
         timeoutMs: timeoutSec * 1000,
       });
       hiddenSinceRef.current = hiddenSince;
+      eligibility.publish(evictPaneIds);
 
       // Un-hidden panes return immediately. Newly expired panes cross a durable
       // checkpoint barrier before WorkspaceArea unmounts their PTYs.
@@ -146,6 +150,7 @@ export function useHiddenTerminalAutoClose() {
       unsubscribeUi();
       unsubscribeWorkspaces();
       unsubscribeSettings();
+      eligibility.release();
     };
   }, []);
 }

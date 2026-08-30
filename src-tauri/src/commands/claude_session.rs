@@ -47,7 +47,7 @@ pub(crate) fn get_claude_session_lookup_impl(
             })
             .collect()
     };
-    let mut lookup_failed = false;
+    let mut failed_terminal_ids = HashSet::new();
     let native_descendants = if terminal_roots.is_empty() {
         Vec::new()
     } else {
@@ -62,7 +62,7 @@ pub(crate) fn get_claude_session_lookup_impl(
                 })
                 .collect(),
             Err(error) => {
-                lookup_failed = true;
+                failed_terminal_ids.extend(known.iter().cloned());
                 tracing::warn!(%error, "native Claude process attribution failed");
                 Vec::new()
             }
@@ -76,13 +76,16 @@ pub(crate) fn get_claude_session_lookup_impl(
         Vec::new()
     } else {
         let sessions_dir = resolve_claude_sessions_dir();
-        let (session_files, session_lookup_failed) = read_claude_session_files_for_pids_checked(
+        let session_lookup = read_claude_session_files_for_pids_detailed(
             &sessions_dir,
             session_max_age_hours,
             Some(&relevant_native_pids),
         );
-        lookup_failed |= session_lookup_failed;
-        session_files
+        failed_terminal_ids.extend(affected_native_terminal_ids(
+            &native_descendants,
+            &session_lookup,
+        ));
+        session_lookup.sessions
     };
     let candidates = native_descendants
         .into_iter()
@@ -97,14 +100,14 @@ pub(crate) fn get_claude_session_lookup_impl(
     );
     match resolve_wsl_agent_processes(state, WslAgentProvider::Claude) {
         Ok(lookup) => {
-            lookup_failed |= lookup.lookup_failed;
+            failed_terminal_ids.extend(lookup.failed_terminal_ids);
             for (terminal_id, process) in lookup.attributions {
                 let session_id = match process {
                     Some(process) => {
                         match find_wsl_claude_session_checked(&process, session_max_age_hours) {
                             Ok(session_id) => session_id,
                             Err(error) => {
-                                lookup_failed = true;
+                                failed_terminal_ids.insert(terminal_id.clone());
                                 tracing::warn!(%error, "WSL Claude session file lookup failed");
                                 None
                             }
@@ -116,13 +119,13 @@ pub(crate) fn get_claude_session_lookup_impl(
             }
         }
         Err(error) => {
-            lookup_failed = true;
+            failed_terminal_ids.extend(known.iter().cloned());
             tracing::warn!(%error, "WSL Claude attribution failed");
         }
     }
     Ok(ProviderSessionLookup {
         attributions: crate::process_tree::reject_duplicate_session_attributions(result, "Claude"),
-        lookup_failed,
+        failed_terminal_ids,
     })
 }
 
@@ -230,12 +233,38 @@ fn read_claude_session_files_for_pids_checked(
     max_age_hours: Option<u64>,
     relevant_pids: Option<&HashSet<u32>>,
 ) -> (Vec<ClaudeSessionFile>, bool) {
+    let lookup = read_claude_session_files_for_pids_detailed(dir, max_age_hours, relevant_pids);
+    let lookup_failed = lookup.scope_failed || !lookup.failed_pids.is_empty();
+    (lookup.sessions, lookup_failed)
+}
+
+struct ClaudeSessionFileLookup {
+    sessions: Vec<ClaudeSessionFile>,
+    failed_pids: HashSet<u32>,
+    scope_failed: bool,
+}
+
+fn read_claude_session_files_for_pids_detailed(
+    dir: &std::path::Path,
+    max_age_hours: Option<u64>,
+    relevant_pids: Option<&HashSet<u32>>,
+) -> ClaudeSessionFileLookup {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return (Vec::new(), false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return ClaudeSessionFileLookup {
+                sessions: Vec::new(),
+                failed_pids: HashSet::new(),
+                scope_failed: false,
+            };
+        }
         Err(error) => {
             tracing::warn!(path = %dir.display(), %error, "failed to read Claude sessions directory");
-            return (Vec::new(), true);
+            return ClaudeSessionFileLookup {
+                sessions: Vec::new(),
+                failed_pids: HashSet::new(),
+                scope_failed: true,
+            };
         }
     };
 
@@ -249,12 +278,13 @@ fn read_claude_session_files_for_pids_checked(
     });
 
     let mut result = Vec::new();
-    let mut lookup_failed = false;
+    let mut failed_pids = HashSet::new();
+    let mut scope_failed = false;
     for entry in entries {
         let entry = match entry {
             Ok(entry) => entry,
             Err(error) => {
-                lookup_failed = true;
+                scope_failed = true;
                 tracing::warn!(%error, "failed to read a Claude session directory entry");
                 continue;
             }
@@ -263,11 +293,11 @@ fn read_claude_session_files_for_pids_checked(
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
         }
+        let file_pid = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .and_then(|stem| stem.parse::<u32>().ok());
         if let Some(relevant_pids) = relevant_pids {
-            let file_pid = path
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .and_then(|stem| stem.parse::<u32>().ok());
             if !file_pid.is_some_and(|pid| relevant_pids.contains(&pid)) {
                 continue;
             }
@@ -303,12 +333,34 @@ fn read_claude_session_files_for_pids_checked(
                 }
             }
             Err(error) => {
-                lookup_failed = true;
+                match file_pid {
+                    Some(pid) => {
+                        failed_pids.insert(pid);
+                    }
+                    None => scope_failed = true,
+                }
                 tracing::warn!(path = %path.display(), %error, "failed to parse Claude session file");
             }
         }
     }
-    (result, lookup_failed)
+    ClaudeSessionFileLookup {
+        sessions: result,
+        failed_pids,
+        scope_failed,
+    }
+}
+
+fn affected_native_terminal_ids(
+    native_descendants: &[(String, HashSet<u32>)],
+    lookup: &ClaudeSessionFileLookup,
+) -> HashSet<String> {
+    native_descendants
+        .iter()
+        .filter(|(_, descendants)| {
+            lookup.scope_failed || !descendants.is_disjoint(&lookup.failed_pids)
+        })
+        .map(|(terminal_id, _)| terminal_id.clone())
+        .collect()
 }
 
 /// Find a Claude session ID by matching any of the given PIDs against session file PIDs.
@@ -416,6 +468,24 @@ mod tests {
         );
 
         assert!(lookup_failed);
+    }
+
+    #[test]
+    fn malformed_live_pid_only_fails_its_own_terminal() {
+        let lookup = ClaudeSessionFileLookup {
+            sessions: Vec::new(),
+            failed_pids: HashSet::from([123]),
+            scope_failed: false,
+        };
+        let affected = affected_native_terminal_ids(
+            &[
+                ("terminal-a".into(), HashSet::from([100, 123])),
+                ("terminal-b".into(), HashSet::from([200, 201])),
+            ],
+            &lookup,
+        );
+
+        assert_eq!(affected, HashSet::from(["terminal-a".into()]));
     }
 
     #[test]

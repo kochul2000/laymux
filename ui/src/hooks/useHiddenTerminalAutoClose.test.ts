@@ -4,6 +4,7 @@ import { useHiddenTerminalAutoClose } from "./useHiddenTerminalAutoClose";
 import { useUiStore } from "@/stores/ui-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { areHiddenPaneIdsEligible } from "@/lib/hidden-eviction-eligibility";
 import type { Workspace } from "@/stores/types";
 
 vi.mock("@/lib/tauri-api", () => ({
@@ -174,6 +175,21 @@ describe("useHiddenTerminalAutoClose", () => {
     });
 
     expect(useUiStore.getState().evictedPaneIds.size).toBe(0);
+  });
+
+  it("withdraws a pending target when the current timeout makes it unexpired", async () => {
+    vi.mocked(checkpointAndCloseHiddenTerminals).mockImplementationOnce(
+      () => new Promise(() => undefined),
+    );
+    useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
+    useUiStore.getState().toggleWorkspaceHidden("wsB");
+    renderHook(() => useHiddenTerminalAutoClose());
+
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(areHiddenPaneIdsEligible(["p2"])).toBe(true);
+
+    act(() => useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 3_600 }));
+    expect(areHiddenPaneIdsEligible(["p2"])).toBe(false);
   });
 
   it("evicts only PTYs that the backend closed after its checkpoint transaction", async () => {

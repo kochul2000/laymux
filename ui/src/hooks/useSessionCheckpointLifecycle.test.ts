@@ -43,6 +43,7 @@ import {
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { claimHiddenEvictionEligibility } from "@/lib/hidden-eviction-eligibility";
 import { useSessionCheckpointLifecycle } from "./useSessionCheckpointLifecycle";
 
 describe("useSessionCheckpointLifecycle", () => {
@@ -115,6 +116,8 @@ describe("useSessionCheckpointLifecycle", () => {
   });
 
   it("acks a targeted eviction while the pane remains hidden", async () => {
+    const eligibility = claimHiddenEvictionEligibility();
+    eligibility.publish(new Set(["p-hidden"]));
     useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
     useWorkspaceStore.setState({
       workspaces: [
@@ -152,6 +155,41 @@ describe("useSessionCheckpointLifecycle", () => {
       requireConclusive: true,
       terminalIds: ["terminal-p-hidden"],
     });
+    eligibility.release();
+  });
+
+  it("rejects an eviction when a longer timeout makes the target unexpired before ACK", async () => {
+    let finishCheckpoint: (() => void) | undefined;
+    vi.mocked(flushSessionCheckpoint).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishCheckpoint = () =>
+            resolve({ checkpointCommitId: 17, frontendMutationRevision: 4, coverage: [] });
+        }),
+    );
+    const eligibility = claimHiddenEvictionEligibility();
+    eligibility.publish(new Set(["p-hidden"]));
+    useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
+    renderHook(() => useSessionCheckpointLifecycle(true));
+    await vi.waitFor(() => expect(onSessionCheckpointRequested).toHaveBeenCalledTimes(1));
+
+    nativeListener?.({
+      requestId: 13,
+      reason: "eviction",
+      requireConclusive: true,
+      terminalIds: ["terminal-p-hidden"],
+    });
+    eligibility.publish(new Set());
+    finishCheckpoint?.();
+
+    await vi.waitFor(() =>
+      expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(
+        13,
+        undefined,
+        "hidden terminal eviction target is no longer eligible",
+      ),
+    );
+    eligibility.release();
   });
 
   it("marks structural revisions and checkpoints workspace entry", async () => {

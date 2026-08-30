@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -30,7 +30,16 @@ pub struct TerminalSessionAttribution {
 
 pub(crate) struct ProviderSessionLookup {
     pub attributions: HashMap<String, Option<String>>,
-    pub lookup_failed: bool,
+    pub failed_terminal_ids: HashSet<String>,
+}
+
+fn provider_lookup_failed_for_terminal(
+    terminal_id: &str,
+    lookups: &[&ProviderSessionLookup],
+) -> bool {
+    lookups
+        .iter()
+        .any(|lookup| lookup.failed_terminal_ids.contains(terminal_id))
 }
 
 fn classify_attribution(
@@ -191,7 +200,6 @@ pub fn get_terminal_session_attributions(
         },
         || super::grok_session::get_grok_session_lookup_impl(grok_session_max_age_hours, &state),
     )?;
-    let lookup_failed = claude.lookup_failed || codex.lookup_failed || grok.lookup_failed;
     let observations: Vec<(String, u64, PtyAppLiveness)> = terminals
         .into_iter()
         .map(|(terminal_id, generation)| {
@@ -209,6 +217,8 @@ pub fn get_terminal_session_attributions(
     Ok(observations
         .into_iter()
         .map(|(terminal_id, generation, liveness)| {
+            let lookup_failed =
+                provider_lookup_failed_for_terminal(&terminal_id, &[&claude, &codex, &grok]);
             let attribution = classify_attribution(
                 generation,
                 &terminal_id,
@@ -278,6 +288,27 @@ mod tests {
     }
 
     #[test]
+    fn provider_lookup_failure_is_scoped_to_the_affected_terminal() {
+        let failed = ProviderSessionLookup {
+            attributions: HashMap::from([("terminal-b".into(), None)]),
+            failed_terminal_ids: HashSet::from(["terminal-b".into()]),
+        };
+        let healthy = ProviderSessionLookup {
+            attributions: HashMap::from([("terminal-a".into(), Some("session-a".into()))]),
+            failed_terminal_ids: HashSet::new(),
+        };
+
+        assert!(!provider_lookup_failed_for_terminal(
+            "terminal-a",
+            &[&failed, &healthy]
+        ));
+        assert!(provider_lookup_failed_for_terminal(
+            "terminal-b",
+            &[&failed, &healthy]
+        ));
+    }
+
+    #[test]
     fn generation_change_degrades_to_unknown() {
         let attribution = require_current_generation(
             TerminalSessionAttribution {
@@ -309,7 +340,7 @@ mod tests {
                     }
                     Ok(ProviderSessionLookup {
                         attributions: HashMap::new(),
-                        lookup_failed: false,
+                        failed_terminal_ids: HashSet::new(),
                     })
                 }
             };

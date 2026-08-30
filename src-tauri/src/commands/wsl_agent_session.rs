@@ -72,7 +72,7 @@ pub(super) struct WslAgentProcess {
 
 pub(super) struct WslAgentProcessLookup {
     pub attributions: HashMap<String, Option<WslAgentProcess>>,
-    pub lookup_failed: bool,
+    pub failed_terminal_ids: HashSet<String>,
 }
 
 impl WslAgentProcess {
@@ -131,7 +131,7 @@ pub(super) fn resolve_wsl_agent_processes(
         let _ = (state, provider);
         return Ok(WslAgentProcessLookup {
             attributions: HashMap::new(),
-            lookup_failed: false,
+            failed_terminal_ids: HashSet::new(),
         });
     }
 
@@ -143,7 +143,16 @@ pub(super) fn resolve_wsl_agent_processes(
         let deadline = Instant::now() + WSL_AGENT_PROBE_TIMEOUT;
         let targets = wsl_terminal_targets(state, deadline)?;
         let mut result = HashMap::new();
-        let mut lookup_failed = targets.lookup_failed;
+        let mut failed_terminal_ids = HashSet::new();
+        if targets.lookup_failed {
+            failed_terminal_ids.extend(
+                targets
+                    .targets
+                    .iter()
+                    .filter(|(_, distro)| distro.is_none())
+                    .map(|(terminal_id, _)| terminal_id.clone()),
+            );
+        }
         let mut by_distro: HashMap<String, Vec<String>> = HashMap::new();
         for (terminal_id, distro) in targets.targets {
             match distro {
@@ -164,7 +173,7 @@ pub(super) fn resolve_wsl_agent_processes(
                 Ok(entries) => entries,
                 Err(error) => {
                     tracing::warn!(%distro, %error, "WSL agent process probe failed closed");
-                    lookup_failed = true;
+                    failed_terminal_ids.extend(terminal_ids.iter().cloned());
                     for terminal_id in terminal_ids {
                         result.insert(terminal_id, None);
                     }
@@ -194,7 +203,7 @@ pub(super) fn resolve_wsl_agent_processes(
         }
         Ok(WslAgentProcessLookup {
             attributions: result,
-            lookup_failed,
+            failed_terminal_ids,
         })
     }
 }
