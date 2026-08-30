@@ -11,6 +11,8 @@ import { useNotificationStore } from "@/stores/notification-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore, type TerminalInstance } from "@/stores/terminal-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useGridStore } from "@/stores/grid-store";
+import { useDockStore } from "@/stores/dock-store";
 import { defaultWidgets, type WidgetInstance } from "@/lib/widget-placement";
 import { buildRemoteWidgetSnapshot } from "./widget-snapshot";
 
@@ -67,7 +69,10 @@ describe("buildRemoteWidgetSnapshot", () => {
     });
     useSettingsStore.setState({ widgets: defaultWidgets() });
     useTerminalStore.setState(useTerminalStore.getInitialState());
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useWorkspaceStore.setState({ activeWorkspaceId: "ws-1" });
+    useGridStore.setState(useGridStore.getInitialState());
+    useDockStore.setState(useDockStore.getInitialState());
     useNotificationStore.setState({ notifications: [] });
   });
 
@@ -236,8 +241,27 @@ describe("buildRemoteWidgetSnapshot", () => {
   });
 
   it("carries the focused terminal's path plus the full path to copy", async () => {
+    useWorkspaceStore.setState({
+      activeWorkspaceId: "ws-1",
+      workspaces: [
+        {
+          id: "ws-1",
+          name: "Current",
+          panes: [
+            {
+              id: "current",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView" },
+            },
+          ],
+        },
+      ],
+    });
     useTerminalStore.setState({
-      instances: [terminal({ id: "t1", isFocused: true, cwd: "/home/dev/projects/laymux" })],
+      instances: [terminal({ id: "terminal-current", cwd: "/home/dev/projects/laymux" })],
     });
     placeWidgets({ topBar: { left: [widget("c", "cwd")], right: [] } });
 
@@ -246,6 +270,63 @@ describe("buildRemoteWidgetSnapshot", () => {
     if (item.kind !== "text") throw new Error("expected a text item");
     expect(item.copyText).toBe("/home/dev/projects/laymux");
     expect(item.text).toContain("laymux");
+  });
+
+  it("uses the active workspace pane instead of stale terminal focus metadata", async () => {
+    useWorkspaceStore.setState({
+      activeWorkspaceId: "ws-current",
+      workspaces: [
+        {
+          id: "ws-stale",
+          name: "Stale",
+          panes: [
+            {
+              id: "stale",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView" },
+            },
+          ],
+        },
+        {
+          id: "ws-current",
+          name: "Current",
+          panes: [
+            {
+              id: "current",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView" },
+            },
+          ],
+        },
+      ],
+    });
+    useTerminalStore.setState({
+      instances: [
+        terminal({
+          id: "terminal-stale",
+          workspaceId: "ws-stale",
+          isFocused: true,
+          cwd: "/home/dev/stale",
+        }),
+        terminal({
+          id: "terminal-current",
+          workspaceId: "ws-current",
+          cwd: "/home/dev/current",
+        }),
+      ],
+    });
+    placeWidgets({ topBar: { left: [widget("c", "cwd")], right: [] } });
+
+    const [item] = (await buildRemoteWidgetSnapshot(NOW)).items;
+
+    if (item.kind !== "text") throw new Error("expected a text item");
+    expect(item.copyText).toBe("/home/dev/current");
   });
 
   it("says there is nothing to copy when no terminal is focused", async () => {
