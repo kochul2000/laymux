@@ -20,6 +20,7 @@ Remote 문서에는 FileViewer와 drawer 외에도 더 높은 OAuth relay modal,
 - native Remote loading/cancel overlay는 secure WebView보다 위에 있으므로 JavaScript 평가보다 먼저 `cancelRemoteConnection()`으로 닫고 입력을 소비한다. 이때도 과거 disconnect 경고를 해제한다.
 - Remote 문서는 `window.laymuxRemoteUi.dismissTopLayer(): boolean`만 wrapper에 노출한다. Android는 이 고정 함수를 `evaluateJavascript`로 호출하며 DOM selector, viewer mode, drawer state를 읽지 않는다.
 - 문서는 실제 stacking과 탐색 깊이에 따라 OAuth relay modal → FileViewer overlay → drawer 하위 화면 → workspace drawer의 열린 Dock disclosure → drawer → Composer recall/autocomplete popup 순서로 하나만 닫는다. Composer popup은 자체 z-index가 높아도 `z-index:9`인 부모 stacking context 안에 있어 drawer scrim(10)·drawer(20)보다 아래다. 한 back이 여러 층을 건너뛰지 않는다.
+- OAuth relay modal 닫기는 진행 중인 begin 작업의 UI revision을 무효화한다. 늦게 도착한 등록 성공·실패는 native relay, OS browser 또는 browser popup을 열거나 닫힌 modal 상태를 다시 쓰지 않는다.
 - FileViewer의 system back은 explorer 경유 파일이어도 overlay 전체를 닫는다. explorer의 파일→폴더 복귀는 overlay 헤더의 명시적 back action이고, 기존 Escape·backdrop도 overlay 전체를 닫는 ADR-0198 계약과 맞춘다.
 - drawer 하위 화면은 먼저 workspace 기본 화면으로 돌아가고, 그 뒤 back이 Dock을 접거나 drawer를 닫는다. 현재 보이지 않는 drawer 내부 상태가 보이는 상위 레이어보다 먼저 소비하지 않는다.
 - 문서가 `true`를 반환하면 native disconnect guard의 과거 경고를 해제한다. 따라서 경고 뒤 레이어를 열고 back으로 닫은 다음 한 번의 back만으로 연결이 종료되지 않는다.
@@ -38,5 +39,5 @@ Remote 문서에는 FileViewer와 drawer 외에도 더 높은 OAuth relay modal,
 - Remote 연결 중이거나 FileViewer·OAuth 확인·Composer 추천·Remote navigation을 사용한 뒤 system back이 현재 맥락을 먼저 취소·닫고, 닫을 레이어가 없을 때만 연결 이탈 경고가 나타난다.
 - PC Remote 문서가 레이어 목록과 우선순위의 SoT로 남아 browser와 Android가 서로 다른 DOM 해석을 갖지 않는다. 다만 `laymuxRemoteUi.dismissTopLayer`라는 좁은 wrapper 계약을 변경할 때는 PC 자산과 APK 호환 fallback을 함께 검토해야 한다.
 - 비동기 JavaScript 평가만큼 back 처리가 지연되며, 평가 중 연타는 무시된다. 이는 한 입력으로 여러 층을 닫거나 곧바로 연결까지 종료하는 것보다 안전한 방향이다.
-- Playwright는 실제 Composer popup, OAuth/FileViewer stacking, drawer 하위 화면·Dock·drawer 순서를 고정하고, Android 단위 테스트는 native loading overlay와 문서 레이어 소비가 pending disconnect 경고를 해제하는지 검증한다. Android compile과 Remote asset drift 검증이 native 호출과 배포 bundle의 연결을 보장한다.
+- Playwright는 실제 Composer popup, OAuth/FileViewer stacking, drawer 하위 화면·Dock·drawer 순서와 OAuth begin 응답 지연 중 back 취소를 고정하고, Android 단위 테스트는 native loading overlay와 문서 레이어 소비가 pending disconnect 경고를 해제하는지 검증한다. Android compile과 Remote asset drift 검증이 native 호출과 배포 bundle의 연결을 보장한다.
 - Remote가 새 modal·popover·disclosure를 추가하면 stacking상 system back 대상인지 판단해 같은 단일 함수와 테스트를 갱신한다. browser/PWA back도 같은 stack을 써야 한다는 요구가 생기면 History API 수명은 별도 ADR로 재검토한다.

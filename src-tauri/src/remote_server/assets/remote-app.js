@@ -3346,6 +3346,7 @@ import {
         let oauthRelaySession = null; // { sessionId, port, path }
         let oauthRelayPendingUrl = null; // URL awaiting the user's explicit start
         let oauthRelayForwarding = false;
+        let oauthRelayRevision = 0;
 
         // Returns the desktop loopback listener a valid installed-app OAuth
         // URL redirects to, or null when the link is anything else.
@@ -3475,6 +3476,7 @@ import {
         })();
 
         function closeOauthRelayModal() {
+          oauthRelayRevision += 1;
           oauthRelayScrim.hidden = true;
           oauthRelaySession = null;
           oauthRelayPendingUrl = null;
@@ -3497,6 +3499,7 @@ import {
         // waits for the user's explicit start.
         function startOauthRelay(url) {
           const redirect = parseOauthLoopbackRedirect(url);
+          oauthRelayRevision += 1;
           oauthRelayPendingUrl = url;
           oauthRelaySession = null;
           oauthRelayCallbackInput.value = "";
@@ -3513,6 +3516,7 @@ import {
         async function beginOauthRelayFlow() {
           const url = oauthRelayPendingUrl;
           if (!url || oauthRelaySession) return;
+          const revision = oauthRelayRevision;
           const redirect = parseOauthLoopbackRedirect(url);
           const native = nativeOauthRelayAvailable();
           // Open the window inside the click's transient activation: strict
@@ -3535,9 +3539,27 @@ import {
             });
           } catch (error) {
             if (popup) popup.close();
+            if (
+              oauthRelayRevision !== revision ||
+              oauthRelayPendingUrl !== url ||
+              oauthRelayScrim.hidden
+            ) {
+              return;
+            }
             setOauthRelayStatus(error.message || String(error), "error");
             // Leave the pending URL so the user can retry from the button.
             oauthRelayStartButton.hidden = false;
+            return;
+          }
+          // Closing with system back or the modal button invalidates the
+          // user's intent even if the PC registration response was already in
+          // flight. Never reopen a native/browser surface from that stale turn.
+          if (
+            oauthRelayRevision !== revision ||
+            oauthRelayPendingUrl !== url ||
+            oauthRelayScrim.hidden
+          ) {
+            if (popup) popup.close();
             return;
           }
           oauthRelaySession = {

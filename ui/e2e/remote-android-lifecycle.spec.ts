@@ -61,9 +61,19 @@ type AndroidLifecycleState = {
   heartbeatRequests: number;
   fileViewerRequests: Array<{ method: string; path: string; body: unknown }>;
   heldRequestId: string | null;
+  heldOauthBeginRequestId: string | null;
   holdNextClaim: boolean;
   holdNextNavigation: boolean;
+  holdNextOauthBegin: boolean;
   navigationRequests: number;
+  nativeOauthBegins: Array<{
+    authUrl: string;
+    path: string;
+    port: string;
+    sessionId: string;
+  }>;
+  nativeOauthCancels: number;
+  oauthBeginRequests: number;
   outputOpens: number;
   renderRequests: number;
   savedFiles: Array<{ name: string; mediaType: string; base64: string }>;
@@ -82,7 +92,15 @@ type AndroidLifecycleWindow = typeof window & {
     setRemoteLease: (leaseId: string | null) => void;
     saveRemoteFile: (name: string, mediaType: string, base64: string) => void;
     disconnectRemote: () => void;
+    beginOauthRelay: (
+      sessionId: string,
+      port: string,
+      path: string,
+      authUrl: string,
+    ) => void;
+    cancelOauthRelay: () => void;
   };
+  __activateRemoteUrl?: (uri: string) => void;
   LaymuxOutputTransport: {
     onmessage: ((event: { data: ArrayBuffer }) => void) | null;
     postMessage: (message: string) => void;
@@ -110,15 +128,45 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
       localStorage.setItem("laymux.remote.inputMode", "composer");
 
       const target = window as AndroidLifecycleWindow;
+      type TerminalOptions = {
+        linkHandler?: {
+          activate?: (event: MouseEvent, uri: string) => void;
+        };
+      };
+      type TerminalConstructor = new (options?: TerminalOptions) => object;
+      Object.defineProperty(target, "Terminal", {
+        configurable: true,
+        set(value: TerminalConstructor) {
+          class CapturingTerminal extends value {
+            constructor(options?: TerminalOptions) {
+              const activate = options?.linkHandler?.activate;
+              if (activate) {
+                target.__activateRemoteUrl = (uri) => activate(new MouseEvent("click"), uri);
+              }
+              super(options);
+            }
+          }
+          Object.defineProperty(target, "Terminal", {
+            configurable: true,
+            value: CapturingTerminal,
+            writable: true,
+          });
+        },
+      });
       const state: AndroidLifecycleState = {
         cancelledRequests: 0,
         claimRequests: 0,
         heartbeatRequests: 0,
         fileViewerRequests: [],
         heldRequestId: null,
+        heldOauthBeginRequestId: null,
         holdNextClaim: holdInitialClaim,
         holdNextNavigation: false,
+        holdNextOauthBegin: false,
         navigationRequests: 0,
+        nativeOauthBegins: [],
+        nativeOauthCancels: 0,
+        oauthBeginRequests: 0,
         outputOpens: 0,
         renderRequests: 0,
         savedFiles: [],
@@ -239,6 +287,15 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
             }
             body = remoteNavigation;
           }
+          if (path === "/remote/v1/oauth-relay/begin") {
+            state.oauthBeginRequests += 1;
+            if (state.holdNextOauthBegin) {
+              state.holdNextOauthBegin = false;
+              state.heldOauthBeginRequestId = requestId;
+              return;
+            }
+            body = { sessionId: "oauth-session-1", port: 4321, expiresInSeconds: 600 };
+          }
           setTimeout(() => {
             target.laymuxAndroidE2e?.onHttpResponse(
               requestId,
@@ -256,6 +313,12 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
           state.savedFiles.push({ name, mediaType, base64 });
         },
         disconnectRemote() {},
+        beginOauthRelay(sessionId, port, path, authUrl) {
+          state.nativeOauthBegins.push({ sessionId, port, path, authUrl });
+        },
+        cancelOauthRelay() {
+          state.nativeOauthCancels += 1;
+        },
       };
     },
     { remoteNavigation: navigation, holdInitialClaim: options.holdInitialClaim ?? false },
@@ -486,6 +549,48 @@ test("Android back dismisses the top Remote layer before the disconnect guard", 
   expect(await dismissTopRemoteLayer(page)).toBe(true);
   await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
   expect(await dismissTopRemoteLayer(page)).toBe(false);
+});
+
+test("Android back invalidates an OAuth relay that is still registering", async ({ page }) => {
+  await installAndroidRemote(page);
+  const state = () =>
+    page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState);
+  await expect.poll(async () => (await state()).outputOpens).toBe(1);
+
+  const authUrl =
+    "https://login.example/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A4321%2Fcallback";
+  await page.evaluate((url) => {
+    const target = window as AndroidLifecycleWindow;
+    target.__androidLifecycleState.holdNextOauthBegin = true;
+    if (!target.__activateRemoteUrl) throw new Error("Remote URL activation was not captured");
+    target.__activateRemoteUrl(url);
+  }, authUrl);
+  await expect(page.locator("#oauthRelayScrim")).toBeVisible();
+
+  await page.locator("#oauthRelayStart").click();
+  await expect.poll(async () => (await state()).oauthBeginRequests).toBe(1);
+  expect(await dismissTopRemoteLayer(page)).toBe(true);
+  await expect(page.locator("#oauthRelayScrim")).toBeHidden();
+
+  await page.evaluate(async () => {
+    const target = window as AndroidLifecycleWindow;
+    const requestId = target.__androidLifecycleState.heldOauthBeginRequestId;
+    if (!requestId) throw new Error("OAuth begin request was not retained");
+    target.laymuxAndroidE2e?.onHttpResponse(
+      requestId,
+      JSON.stringify({
+        kind: "http",
+        status: 200,
+        body: { sessionId: "oauth-session-1", port: 4321, expiresInSeconds: 600 },
+      }),
+    );
+    // Let the awaiting begin flow run before observing whether it launched native.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  });
+
+  expect((await state()).nativeOauthBegins).toEqual([]);
+  expect((await state()).nativeOauthCancels).toBe(1);
+  await expect(page.locator("#oauthRelayScrim")).toBeHidden();
 });
 
 test("the Android wrapper saves a download through native, not the browser path", async ({
