@@ -96,9 +96,13 @@ export interface PathLinkController {
  */
 function tokenStillAtRange(
   terminal: Terminal,
-  entry: { selection: VerifiedPathSelection; marker?: IMarker },
+  entry: { selection: VerifiedPathSelection; marker?: IMarker; decoration?: IDecoration },
 ): boolean {
   try {
+    // xterm disposes markers (and their decorations) when the coordinate itself
+    // is invalidated, for example by a full display erase. Falling back to the
+    // stored line in that case creates a zombie entry with no underline DOM.
+    if (entry.marker?.isDisposed === true || entry.decoration?.isDisposed === true) return false;
     const markerLine = entry.marker && !entry.marker.isDisposed ? entry.marker.line : undefined;
     const absoluteLine = markerLine ?? entry.selection.bufferLine - 1;
     const line = terminal.buffer.active.getLine(absoluteLine);

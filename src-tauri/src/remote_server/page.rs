@@ -1181,8 +1181,9 @@ mod tests {
         assert!(html.contains("mode: \"selection\","));
     }
 
-    /// ADR-0188: the tap/click (`point`) and idle-screen (`screen`) triggers are
-    /// part of the page contract, each bounded to one batch per trigger.
+    /// ADR-0188/0220: the tap/click (`point`) and idle-screen (`screen`) triggers
+    /// are bounded, and screen decoration lifetime follows stable rendered
+    /// content instead of individual output writes.
     #[test]
     fn remote_page_html_contains_point_and_idle_screen_path_link_triggers() {
         let html = remote_client_source();
@@ -1199,25 +1200,35 @@ mod tests {
         assert!(html.contains("queuePathLinkPointEvaluation(point)"));
         // Output pushes the idle scan out instead of scanning mid-stream.
         assert!(html.contains("schedulePathLinkIdleScan();"));
-        // An unchanged screen must not re-run the filesystem batch — but the
-        // skip only holds while the previous scan is still drawn, otherwise the
-        // idle scheduler's retire would drop the display for good.
+        // Only a successfully applied decoration set owns a screen signature;
+        // an aborted request cannot suppress the next validation.
+        assert!(html.contains("signature === pathLinkVerifiedScreenSignature"));
+        assert!(html.contains("!pathLinkScreenContextDirty"));
+        assert!(html.contains("pathLinkScopes.screen.length > 0"));
+        assert!(html.contains("pathLinkVerifiedScreenSignature = signature;"));
+        assert!(html.contains("pathLinkScreenContextDirty = false;"));
+        // A physical write can carry an invisible OSC 7 CWD transition, so an
+        // equal cell signature must still refresh the server-owned path context.
         assert!(html.contains(
-            "if (signature === pathLinkLastScreenSignature && pathLinkScopes.screen.length > 0)"
+            "pathLinkScreenContextDirty = true;\n                      if (term.modes?.synchronizedOutputMode !== true)"
         ));
+        assert!(!html.contains("pathLinkLastScreenSignature"));
         // A live selection owns discovery, for the screen scan and for a tap.
         assert_eq!(
             html.matches("if (term.hasSelection?.()) return;").count(),
             2
         );
-        // Output can repaint a row in place: the surviving scopes are re-checked
-        // against their stored token instead of being trusted.
+        // Output can repaint a row in place: stable frames re-check the stored
+        // token, while an in-progress DEC 2026 frame keeps the rendered link.
         assert!(html.contains("function revalidatePathLinkScopes()"));
         assert!(html.contains("function pathLinkEntryStillOnScreen(entry)"));
-        assert!(html.contains(
-            "revalidatePathLinkScopes();
-                      schedulePathLinkIdleScan();"
-        ));
+        assert!(html.contains("term.modes?.synchronizedOutputMode === true"));
+        assert!(html.contains("term.modes?.synchronizedOutputMode !== true"));
+        // Equal links keep their live marker/decoration DOM identity.
+        assert!(html.contains("function samePathLinkEntry(entry, right)"));
+        assert!(html.contains("entry.decoration.isDisposed !== true"));
+        assert!(html.contains("reusableEntry.selection = selection;"));
+        assert!(html.contains("selections.length !== data.matches.length"));
         assert_eq!(html.matches("token: match.token,").count(), 2);
         assert!(
             html.contains("caret: { lineIndex: 0, index: caretIndex }")

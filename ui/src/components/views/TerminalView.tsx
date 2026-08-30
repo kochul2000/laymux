@@ -1514,6 +1514,19 @@ export function TerminalView({
       wrapperRef.current?.classList.toggle("terminal-path-link-clickable", active);
     };
 
+    // ADR-0220: xterm mutates its buffer while a DEC 2026 frame is still hidden
+    // from the renderer. Comparing a decoration with that intermediate buffer
+    // would dispose a link that remains visible in the last complete frame. A
+    // normal reset settles through `onWriteParsed`; xterm's one-second safety
+    // timeout has no closing parse callback, so the mode monitor settles the
+    // deferred comparison when it observes the mode fall instead.
+    let pathLinkRevalidationDeferred = false;
+    const revalidatePathLinksAtStableFrame = () => {
+      pathLinkRevalidationDeferred = false;
+      const droppedPathLinks = pathLink.revalidate();
+      if (droppedPathLinks > 0) setPathLinkCursor(false);
+    };
+
     // 검증된 링크를 비우고(있으면) 밑줄 데코레이션을 거둔다. 선택 해제/변경 공통
     // 경로. 새 선택은 point 밑줄도 무효화한다 — 같은 지점에 두 밑줄이 겹치지
     // 않게 하는 ADR-0188 규칙이다.
@@ -1800,6 +1813,7 @@ export function TerminalView({
         // render without a parser reset. Its debounced render may run before or
         // after this rAF monitor; release the gate and request one recovery paint.
         // The render service coalesces both requests when they meet in one frame.
+        if (pathLinkRevalidationDeferred) revalidatePathLinksAtStableFrame();
         terminal.refresh(0, terminal.rows - 1);
       }
     };
@@ -2698,14 +2712,14 @@ export function TerminalView({
       scheduleShadowCursorSync();
     });
     const writeParsedDisposable = terminal.onWriteParsed(() => {
-      // ADR-0188: 화면 재출력은 밑줄 아래 텍스트를 바꿀 수 있다. 남아 있는
-      // 링크의 원문을 다시 확인해 어긋난 것만 거둔다(항목이 없으면 즉시 반환).
-      const droppedPathLinks = pathLink.revalidate();
+      // ADR-0188/0220: 안정된 화면에서는 밑줄 아래 원문이 달라진 항목만
+      // 거둔다. DEC 2026 중간 버퍼는 아직 표시된 화면이 아니므로 보류한다.
+      if (syncOutputActiveRef.current) pathLinkRevalidationDeferred = true;
+      else revalidatePathLinksAtStableFrame();
       // 출력이 왔으면 이전 음성 결과("여긴 파일 아님")도 더 이상 못 믿는다 —
       // memo 만 잊고 진행 중 조회는 살린다. 여기서 revision 까지 올리면 출력이
       // 잦은 pane 에서 hover 결과가 매번 폐기돼 밑줄이 영원히 안 켜진다.
       pathLinkPoint.forget();
-      if (droppedPathLinks > 0) setPathLinkCursor(false);
       if (compositionPreviewRef.current.active) {
         // The shadow cursor stays frozen for the composition, but the *text* the
         // app just echoed is a fact, and it is the only thing that knows where an

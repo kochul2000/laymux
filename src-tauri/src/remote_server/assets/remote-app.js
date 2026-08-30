@@ -306,7 +306,13 @@ import {
         let pathLinkAborts = { selection: null, point: null, screen: null };
         let pathLinkEvaluationTimer = null;
         let pathLinkIdleScanTimer = null;
-        let pathLinkLastScreenSignature = null;
+        // The signature is owned by the screen decoration set that was
+        // successfully applied, never merely by a request that was started.
+        let pathLinkVerifiedScreenSignature = null;
+        // Visible text alone does not capture the server-owned resolution
+        // context: OSC 7 can change CWD without changing a cell. Every physical
+        // write therefore dirties that context until one idle scan succeeds.
+        let pathLinkScreenContextDirty = true;
         let pathLinkPress = null;
         let terminal = null;
         // The xterm instance is reused across disconnects and pane switches.
@@ -1893,15 +1899,17 @@ import {
           );
         }
 
+        function disposePathLinkEntry(entry) {
+          try {
+            entry.decoration?.dispose?.();
+          } catch (_) {}
+          try {
+            entry.marker?.dispose?.();
+          } catch (_) {}
+        }
+
         function disposePathLinkScope(scope) {
-          for (const entry of pathLinkScopes[scope]) {
-            try {
-              entry.decoration?.dispose?.();
-            } catch (_) {}
-            try {
-              entry.marker?.dispose?.();
-            } catch (_) {}
-          }
+          for (const entry of pathLinkScopes[scope]) disposePathLinkEntry(entry);
           pathLinkScopes[scope] = [];
         }
 
@@ -1919,6 +1927,10 @@ import {
         function clearPathLinkScope(scope) {
           abortPathLinkScope(scope);
           disposePathLinkScope(scope);
+          if (scope === "screen") {
+            pathLinkVerifiedScreenSignature = null;
+            pathLinkScreenContextDirty = true;
+          }
           // A press in flight keeps its own validated path, terminal and lease.
           // Output arriving mid-tap must not swallow the tap the user already
           // started on an underline; the pointerup check still gates it.
@@ -1943,7 +1955,8 @@ import {
             clearTimeout(pathLinkIdleScanTimer);
             pathLinkIdleScanTimer = null;
           }
-          pathLinkLastScreenSignature = null;
+          pathLinkVerifiedScreenSignature = null;
+          pathLinkScreenContextDirty = true;
           clearPathLinkVisuals();
         }
 
@@ -1965,10 +1978,11 @@ import {
         }
 
         // The screen scan owns "output stopped" (ADR-0188): every write pushes
-        // the timer out and retires the previous screen underlines, so a scan
-        // only happens on a screen that stayed still.
+        // the timer out, but content revalidation owns underline retirement.
+        // Keeping valid entries mounted prevents direct-input echo from
+        // blinking unrelated file links (ADR-0220).
         function schedulePathLinkIdleScan() {
-          clearPathLinkScope("screen");
+          abortPathLinkScope("screen");
           if (pathLinkIdleScanTimer !== null) clearTimeout(pathLinkIdleScanTimer);
           pathLinkIdleScanTimer = setTimeout(() => {
             pathLinkIdleScanTimer = null;
@@ -2027,14 +2041,27 @@ import {
         }
 
         function setVerifiedPathLinks(scope, selections) {
-          disposePathLinkScope(scope);
+          const previousEntries = pathLinkScopes[scope];
+          pathLinkScopes[scope] = [];
           const term = terminal;
           if (!term) {
-            clearPathLinkVisuals();
-            return;
+            for (const entry of previousEntries) disposePathLinkEntry(entry);
+            updatePathLinkClickableState();
+            return false;
           }
 
           for (const selection of selections) {
+            const reusableIndex = previousEntries.findIndex((entry) =>
+              samePathLinkEntry(entry, selection)
+            );
+            if (reusableIndex >= 0) {
+              const reusableEntry = previousEntries.splice(reusableIndex, 1)[0];
+              // A marker can move when scrollback trims. Keep its DOM identity,
+              // but refresh the stored absolute line to the live scan result.
+              reusableEntry.selection = selection;
+              pathLinkScopes[scope].push(reusableEntry);
+              continue;
+            }
             let marker = null;
             try {
               const buffer = term.buffer.active;
@@ -2063,7 +2090,37 @@ import {
               console.warn("[remotePathLink] decoration failed:", error);
             }
           }
+          for (const entry of previousEntries) disposePathLinkEntry(entry);
           updatePathLinkClickableState();
+          return pathLinkScopes[scope].length === selections.length;
+        }
+
+        function livePathLinkBufferLine(entry) {
+          const marker = entry?.marker;
+          if (!marker || marker.isDisposed === true || typeof marker.line !== "number") {
+            return null;
+          }
+          return marker.line + 1;
+        }
+
+        function samePathLinkEntry(entry, right) {
+          const left = entry?.selection;
+          const liveBufferLine = livePathLinkBufferLine(entry);
+          return Boolean(
+            left &&
+            right &&
+            entry.decoration &&
+            entry.decoration.isDisposed !== true &&
+            liveBufferLine === right.bufferLine &&
+            left.startCol === right.startCol &&
+            left.endCol === right.endCol &&
+            left.terminalId === right.terminalId &&
+            left.leaseId === right.leaseId &&
+            left.fileViewerToken === right.fileViewerToken &&
+            left.token === right.token &&
+            left.path === right.path &&
+            left.kind === right.kind
+          );
         }
 
         function evaluatePathLinkSelection() {
@@ -2173,7 +2230,14 @@ import {
         // 0-based absolute buffer line that `lines[0]` was read from, so a later
         // scroll cannot shift the mapping (a scrollback trim is caught by the
         // per-match text check in `mapRemoteLinePathRange`).
-        function requestLineScopedPathLinks(scope, baseLine, lines, caret, maxMatches) {
+        function requestLineScopedPathLinks(
+          scope,
+          baseLine,
+          lines,
+          caret,
+          maxMatches,
+          onApplied
+        ) {
           const term = terminal;
           const requestTerminalId = activeTerminalId;
           const requestLeaseId = leaseId;
@@ -2233,7 +2297,15 @@ import {
                 clearPathLinkScope(scope);
                 return;
               }
-              setVerifiedPathLinks(scope, selections);
+              // A screen signature may only describe the complete response.
+              // If even one match became malformed or no longer maps to the
+              // requested cells, fail closed instead of blessing a partial
+              // decoration set and suppressing every later identical scan.
+              if (selections.length !== data.matches.length) {
+                clearPathLinkScope(scope);
+                return;
+              }
+              if (setVerifiedPathLinks(scope, selections)) onApplied?.();
             })
             .catch(() => {
               if (revision === pathLinkRevisions[scope]) clearPathLinkScope(scope);
@@ -2305,29 +2377,51 @@ import {
         }
 
         function evaluatePathLinkScreen() {
-          clearPathLinkScope("screen");
           const term = terminal;
-          if (!term || !activeTerminalId || !leaseId || !fileViewerToken) return;
+          if (!term || !activeTerminalId || !leaseId || !fileViewerToken) {
+            clearPathLinkScope("screen");
+            return;
+          }
+          // DEC 2026 freezes the rendered frame while xterm's buffer keeps
+          // advancing through an intermediate repaint. Never compare link text
+          // with that unrendered buffer. Keep polling so xterm's safety timeout
+          // also reaches one stable-frame validation when no closing write
+          // callback arrives (ADR-0220; terminal flicker reference).
+          if (term.modes?.synchronizedOutputMode === true) {
+            schedulePathLinkIdleScan();
+            return;
+          }
+          revalidatePathLinkScopes();
           // A live selection owns discovery while it exists.
           if (term.hasSelection?.()) return;
           const screen = readPathLinkScreenLines(term);
-          if (!screen) return;
-          const signature = `${screen.baseLine}\n${screen.lines.join("\n")}`;
-          // Writes that leave the visible text identical (cursor moves, repaints
-          // of the same frame) must not re-run the filesystem batch.
-          // ...but only while the previous scan's underlines are still on
-          // screen: the idle scheduler retires them before this runs, so an
-          // unconditional skip would drop the display until the screen changed.
-          if (signature === pathLinkLastScreenSignature && pathLinkScopes.screen.length > 0) {
+          if (!screen) {
+            pathLinkVerifiedScreenSignature = null;
+            clearPathLinkScope("screen");
             return;
           }
-          pathLinkLastScreenSignature = signature;
+          const signature = `${screen.baseLine}\n${screen.lines.join("\n")}`;
+          // Duplicate idle evaluations with no intervening physical write keep
+          // the verified decoration set without another filesystem batch. A
+          // write dirties the server-owned context even when cells stay equal,
+          // because an invisible OSC 7 may have changed CWD (ADR-0220).
+          if (
+            !pathLinkScreenContextDirty &&
+            signature === pathLinkVerifiedScreenSignature &&
+            pathLinkScopes.screen.length > 0
+          ) {
+            return;
+          }
           requestLineScopedPathLinks(
             "screen",
             screen.baseLine,
             screen.lines,
             null,
-            REMOTE_PATH_LINK_MAX_SCREEN_CANDIDATES
+            REMOTE_PATH_LINK_MAX_SCREEN_CANDIDATES,
+            () => {
+              pathLinkVerifiedScreenSignature = signature;
+              pathLinkScreenContextDirty = false;
+            }
           );
         }
 
@@ -2344,6 +2438,7 @@ import {
           let dropped = 0;
           for (const scope of PATH_LINK_SCOPES) {
             const kept = [];
+            let scopeDropped = 0;
             for (const entry of pathLinkScopes[scope]) {
               if (pathLinkEntryStillOnScreen(entry)) {
                 kept.push(entry);
@@ -2356,8 +2451,13 @@ import {
                 entry.marker?.dispose?.();
               } catch (_) {}
               dropped += 1;
+              scopeDropped += 1;
             }
             pathLinkScopes[scope] = kept;
+            if (scope === "screen" && scopeDropped > 0) {
+              pathLinkVerifiedScreenSignature = null;
+              pathLinkScreenContextDirty = true;
+            }
           }
           if (dropped > 0) updatePathLinkClickableState();
         }
@@ -2367,10 +2467,8 @@ import {
          * trims), so it wins over the line the range was created from.
          */
         function pathLinkEntryStillOnScreen(entry) {
-          const markerLine =
-            entry.marker && entry.marker.isDisposed !== true ? entry.marker.line : undefined;
-          const bufferLine =
-            typeof markerLine === "number" ? markerLine + 1 : entry.selection.bufferLine;
+          const bufferLine = livePathLinkBufferLine(entry);
+          if (bufferLine === null) return false;
           const line = terminal?.buffer?.active?.getLine?.(bufferLine - 1);
           if (!line) return false;
           const { text, columns } = reconstructRemoteLinkLine(line);
@@ -5003,7 +5101,8 @@ import {
             schedulePathLinkSelectionEvaluation();
             // Reflow moves every cell: the previous screen scan is void and its
             // signature must not suppress the rescan (ADR-0188).
-            pathLinkLastScreenSignature = null;
+            clearPathLinkScope("screen");
+            pathLinkVerifiedScreenSignature = null;
             schedulePathLinkIdleScan();
             queueResize(cols, rows);
           });
@@ -5042,7 +5141,8 @@ import {
           terminal.buffer?.onBufferChange?.(() => {
             schedulePathLinkSelectionEvaluation();
             // Alternate-buffer switches replace the visible screen wholesale.
-            pathLinkLastScreenSignature = null;
+            clearPathLinkScope("screen");
+            pathLinkVerifiedScreenSignature = null;
             schedulePathLinkIdleScan();
             scheduleTerminalFit(Boolean(activeTerminalId));
           });
@@ -7793,11 +7893,14 @@ import {
                     term.write(payload, () => {
                       if (guardInput) terminalReplayDepth -= 1;
                       scheduleTerminalRefresh();
-                      // ADR-0188: output invalidates the screen underlines and
-                      // pushes the idle scan out; a still screen gets one scan.
-                      // The other scopes survive output, so their text is
-                      // re-checked rather than trusted.
-                      revalidatePathLinkScopes();
+                      // A DEC 2026 frame mutates xterm's buffer before it lets
+                      // the user see that state. Revalidate only at a stable
+                      // frame boundary; otherwise a split Codex repaint would
+                      // retire a still-rendered underline mid-frame (ADR-0220).
+                      pathLinkScreenContextDirty = true;
+                      if (term.modes?.synchronizedOutputMode !== true) {
+                        revalidatePathLinkScopes();
+                      }
                       schedulePathLinkIdleScan();
                       resolve();
                     });
