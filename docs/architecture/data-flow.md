@@ -1402,7 +1402,7 @@ Windows host의 WSL terminal은 host process tree에 `wsl.exe`만 보이므로 n
 
 Rust watchdog은 5분마다 프론트에 checkpoint를 요청한다. agent 완료 알림, backend 3초 activity reconcile에서 실제 판정이 바뀐 때, workspace 진입과 문서 foreground 복귀는 즉시 저장을 유도하는 힌트다. 앱 최초 진입·workspace 전환·foreground 복귀는 resume startup 유예가 끝나는 15초 뒤 catch-up도 한 번 예약한다. 60초 activity 전체 재발행 자체는 저장 trigger가 아니다. 따라서 `/clear`처럼 activity 이름이 그대로인 session 전환도 늦어도 watchdog의 새 provider 귀속 조회에서 발견한다.
 
-업데이트는 `download → 서명 검증 → finalization fence → critical checkpoint → updater on_before_exit 자식 정리/file-lock wait → install/restart` 순서다. critical checkpoint는 같은 terminal generation과 귀속 결과를 150ms 간격으로 두 번 관측하고 모든 live terminal이 `Identified` 또는 `NoAgent`일 때만 ACK한다. fence 이후 Local·Remote·Automation·MCP 입력, Automation frontend action과 terminal 생성/종료는 거부된다. checkpoint 실패·timeout이면 fence를 풀고 installer를 시작하지 않는다. 숨김 terminal eviction도 대상 terminal의 critical checkpoint가 성공한 뒤에만 pane을 unmount한다.
+업데이트는 `download → 서명 검증 → finalization fence → 승인 mutation drain → critical checkpoint → updater on_before_exit 자식 정리/file-lock wait → install/restart` 순서다. mutation admission permit은 Local·Remote·Automation·MCP 입력, Automation frontend action과 terminal 생성/종료의 전체 수명을 덮는다. fence 이후 새 permit은 거부하고 기존 permit 및 격리된 PTY completion을 최대 16초 기다린다. critical checkpoint는 같은 terminal generation과 귀속 결과를 150ms 간격으로 두 번 관측하고 모든 live terminal이 `Identified` 또는 `NoAgent`일 때만 ACK한다. drain·checkpoint 실패 또는 timeout이면 fence를 풀고 installer를 시작하지 않는다. 숨김 terminal eviction도 대상 terminal의 critical checkpoint가 성공한 뒤에만 pane을 unmount한다.
 
 ### 13.6 시작 시퀀스
 

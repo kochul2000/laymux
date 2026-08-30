@@ -608,7 +608,10 @@ async fn install_and_restart(
     let state = app
         .try_state::<Arc<AppState>>()
         .ok_or_else(|| "app state is unavailable for the update checkpoint".to_string())?;
-    state.session_checkpoint.begin_finalization()?;
+    state
+        .session_checkpoint
+        .begin_finalization_and_drain(&state)
+        .await?;
     if let Err(error) =
         crate::session_checkpoint::request_frontend_checkpoint(app, &state, "update", true).await
     {

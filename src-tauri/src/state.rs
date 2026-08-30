@@ -62,9 +62,9 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 /// from the `set_sleep_inhibit` command alone, never under another lock (ADR-0114).
 /// `app_update` likewise owns an isolated status mutex. Updater network and
 /// installer awaits never hold it or any ordered `AppState` lock (ADR-0174).
-/// `session_checkpoint` likewise owns only its request/ack registry; it is
-/// released before event emission or async waits and nests no ordered lock
-/// (ADR-0222).
+/// `session_checkpoint` likewise owns only its request/ack registry and atomic
+/// mutation admission count; its finalization drain acquires `remote_control`
+/// only after the checkpoint registry lock is released (ADR-0222).
 /// The Android pairing lifecycle mutex is outside `AppState`, but unlike those
 /// isolated registries it may nest `remote_access`: acquire it before every
 /// `AppState` lock and never enter it while holding one (ADR-0144).

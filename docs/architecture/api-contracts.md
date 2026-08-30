@@ -519,7 +519,7 @@ rollout 나이 필터는 파일의 nanosecond 수정 시각만 사용하며, 생
 
 체크포인트용 통합 IPC `get_terminal_session_attributions(claudeSessionMaxAgeHours,codexSessionMaxAgeHours,grokSessionMaxAgeHours)`는 live terminal ID별 `{generation,state,provider?,sessionId?}`를 반환한다([ADR-0222](../adr/0222-agent-session-checkpoint-coordinator.md)). `state`는 `identified | noAgent | activeButUnidentified | unknown`이다. provider별 command 결과와 fresh process-tree liveness를 Rust에서 합치므로 프론트 activity는 판정 입력이 아니다. exact ID 또는 권위 있는 부재만 conclusive이며, 조회 실패는 빈 map/`noAgent`로 축약하지 않는다.
 
-Rust는 내부 event `session-checkpoint-requested {requestId,reason,requireConclusive}`로 WebView 조정기에 저장을 요청하고, 프론트는 디스크 commit 뒤 `acknowledge_session_checkpoint(requestId,checkpointCommitId,error?)`를 호출한다. watchdog은 5분 cadence이고 update 요청은 20초 timeout의 critical barrier다. critical barrier는 generation을 포함한 동일한 conclusive coverage를 150ms 간격으로 두 번 얻어야 성공한다. 이 IPC는 Automation/Remote 외부 계약이 아니라 앱 내부 수명주기 계약이다.
+Rust는 내부 event `session-checkpoint-requested {requestId,reason,requireConclusive}`로 WebView 조정기에 저장을 요청하고, 프론트는 디스크 commit 뒤 `acknowledge_session_checkpoint(requestId,checkpointCommitId,error?)`를 호출한다. watchdog은 5분 cadence이고 update 요청은 20초 timeout의 critical barrier다. update fence는 새 mutation admission을 거부하고 기존 permit/PTY completion을 최대 16초 drain한 뒤 이 event를 보낸다. critical barrier는 generation을 포함한 동일한 conclusive coverage를 150ms 간격으로 두 번 얻어야 성공한다. 이 IPC는 Automation/Remote 외부 계약이 아니라 앱 내부 수명주기 계약이다.
 
 ### Grok 설정
 

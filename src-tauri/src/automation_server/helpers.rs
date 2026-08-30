@@ -42,13 +42,10 @@ pub async fn bridge_request(
     method: &str,
     params: serde_json::Value,
 ) -> Result<serde_json::Value, (StatusCode, Json<serde_json::Value>)> {
-    if category == "action" {
-        state
-            .app_state
-            .session_checkpoint
-            .ensure_mutations_allowed()
-            .map_err(|error| (StatusCode::CONFLICT, Json(err_json(&error))))?;
-    }
+    let _checkpoint_permit = (category == "action")
+        .then(|| state.app_state.session_checkpoint.begin_mutation())
+        .transpose()
+        .map_err(|error| (StatusCode::CONFLICT, Json(err_json(&error))))?;
     let request_id = uuid::Uuid::new_v4().to_string();
 
     let (tx, rx) = tokio::sync::oneshot::channel();
