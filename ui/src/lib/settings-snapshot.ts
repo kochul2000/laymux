@@ -45,6 +45,7 @@ export interface TerminalAttributionCoverage {
 export interface CollectedSessionCheckpoint {
   settings: Settings;
   coverage: TerminalAttributionCoverage[];
+  attributionLookupFailed: boolean;
 }
 
 type SavedTerminalView = { type: string; [key: string]: unknown };
@@ -335,7 +336,7 @@ async function collectSessionCheckpointInternal(
   const coverage = includeRuntime
     ? [...coverageTerminalIds].map((terminalId) => terminalAttributionCoverage(terminalId, runtime))
     : [];
-  return { settings, coverage };
+  return { settings, coverage, attributionLookupFailed: runtime.attributionLookupFailed };
 }
 
 /** Collect settings plus the attribution confidence for every live terminal. */

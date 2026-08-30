@@ -84,13 +84,29 @@ function mergeCheckpointOptions(
   current: SessionCheckpointOptions,
   next: SessionCheckpointOptions,
 ): SessionCheckpointOptions {
+  const currentCritical = Boolean(current.requireConclusive);
+  const nextCritical = Boolean(next.requireConclusive);
+  let terminalIds: string[] | undefined;
+  if (currentCritical && nextCritical) {
+    // Missing/empty targets mean every live terminal. "All" dominates a
+    // narrower eviction scope when an update barrier overlaps it.
+    terminalIds =
+      !current.terminalIds?.length || !next.terminalIds?.length
+        ? undefined
+        : Array.from(new Set([...current.terminalIds, ...next.terminalIds]));
+  } else if (currentCritical) {
+    terminalIds = current.terminalIds?.length ? [...current.terminalIds] : undefined;
+  } else if (nextCritical) {
+    terminalIds = next.terminalIds?.length ? [...next.terminalIds] : undefined;
+  } else if (current.terminalIds || next.terminalIds) {
+    terminalIds = Array.from(
+      new Set([...(current.terminalIds ?? []), ...(next.terminalIds ?? [])]),
+    );
+  }
   return {
     reason: next.reason ?? current.reason,
-    requireConclusive: Boolean(current.requireConclusive || next.requireConclusive),
-    terminalIds:
-      current.terminalIds || next.terminalIds
-        ? Array.from(new Set([...(current.terminalIds ?? []), ...(next.terminalIds ?? [])]))
-        : undefined,
+    requireConclusive: currentCritical || nextCritical,
+    terminalIds,
   };
 }
 
@@ -103,7 +119,14 @@ function coverageForTargets(
   return checkpoint.coverage.filter((entry) => targets.has(entry.terminalId));
 }
 
-function conclusiveFingerprint(coverage: readonly TerminalAttributionCoverage[]): string {
+function conclusiveFingerprint(
+  checkpoint: CollectedSessionCheckpoint,
+  terminalIds?: readonly string[],
+): string {
+  if (checkpoint.attributionLookupFailed) {
+    throw new Error("Session attribution lookup failed");
+  }
+  const coverage = coverageForTargets(checkpoint, terminalIds);
   const sorted = [...coverage].sort((left, right) =>
     left.terminalId.localeCompare(right.terminalId),
   );
@@ -122,10 +145,10 @@ async function collectStableCheckpoint(
 ): Promise<CollectedSessionCheckpoint> {
   const first = await collectSessionCheckpoint();
   if (!options.requireConclusive) return first;
-  const firstFingerprint = conclusiveFingerprint(coverageForTargets(first, options.terminalIds));
+  const firstFingerprint = conclusiveFingerprint(first, options.terminalIds);
   await new Promise((resolve) => setTimeout(resolve, CRITICAL_OBSERVATION_SETTLE_MS));
   const second = await collectSessionCheckpoint();
-  const secondFingerprint = conclusiveFingerprint(coverageForTargets(second, options.terminalIds));
+  const secondFingerprint = conclusiveFingerprint(second, options.terminalIds);
   if (firstFingerprint !== secondFingerprint) {
     throw new Error("Session attribution changed while establishing a destructive-action barrier");
   }

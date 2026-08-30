@@ -927,6 +927,34 @@ describe("persistSession", () => {
     expect(getTerminalSessionAttributions).toHaveBeenCalledTimes(4);
   });
 
+  it("does not narrow an all-terminal update barrier to an overlapping eviction target", async () => {
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+      "terminal-target": { generation: 1, state: "noAgent" },
+      "terminal-unresolved": { generation: 1, state: "activeButUnidentified" },
+    });
+    let finishFirstSave: (() => void) | undefined;
+    vi.mocked(saveSettings).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishFirstSave = resolve;
+        }),
+    );
+
+    const eviction = flushSessionCheckpoint({
+      reason: "eviction",
+      requireConclusive: true,
+      terminalIds: ["terminal-target"],
+    });
+    await vi.waitFor(() => expect(saveSettings).toHaveBeenCalledTimes(1));
+    const update = flushSessionCheckpoint({ reason: "update", requireConclusive: true });
+    finishFirstSave?.();
+
+    await expect(Promise.all([eviction, update])).rejects.toThrow(
+      "Session attribution is not conclusive for terminal-unresolved",
+    );
+    expect(saveSettings).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects a destructive checkpoint when an active agent has no stable session id", async () => {
     const paneId = useWorkspaceStore.getState().workspaces[0].panes[0].id;
     registerLiveTerminal(`terminal-${paneId}`, { type: "interactiveApp", name: "Codex" });
@@ -935,6 +963,17 @@ describe("persistSession", () => {
     await expect(
       flushSessionCheckpoint({ reason: "update", requireConclusive: true }),
     ).rejects.toThrow("not conclusive");
+    expect(saveSettings).not.toHaveBeenCalled();
+  });
+
+  it("rejects a destructive checkpoint when attribution lookup fails before terminals register", async () => {
+    vi.mocked(getTerminalSessionAttributions).mockRejectedValueOnce(
+      new Error("attribution IPC unavailable"),
+    );
+
+    await expect(
+      flushSessionCheckpoint({ reason: "update", requireConclusive: true }),
+    ).rejects.toThrow("Session attribution lookup failed");
     expect(saveSettings).not.toHaveBeenCalled();
   });
 
