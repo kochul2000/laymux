@@ -46,6 +46,11 @@ import {
   DEFAULT_SCROLL_SENSITIVITY,
 } from "../lib/scroll-sensitivity";
 import { DEFAULT_PANE_CLEAR } from "../lib/pane-clear";
+import {
+  DEFAULT_LINK_ACTIVATION,
+  normalizeLinkActivation,
+  type LinkActivationMode,
+} from "../lib/link-activation";
 
 /** Re-export so settings consumers can import the language type from one place. */
 export type { LanguageSetting };
@@ -166,6 +171,17 @@ export interface TerminalSettings {
    * class (see `HARD_CONFIRM_EXTENSIONS`) still asks.
    */
   pathLinkOsOpenConfirm: boolean;
+  /**
+   * ADR-0224: how a click/tap on a URL link executes — `"immediate"` opens at
+   * once (current behavior), `"chip"` shows an action chip and opens only from
+   * it. The #352 Shift/Alt TUI bypass stays immediate in both modes.
+   */
+  urlLinkActivation: LinkActivationMode;
+  /**
+   * ADR-0224: how a click/tap on a verified path underline executes. Ctrl /
+   * Ctrl+Shift keep going straight to the host OS in both modes (ADR-0100).
+   */
+  pathLinkActivation: LinkActivationMode;
   /** Show the floating jump-to-bottom button while scrolled up into scrollback (issue #361). */
   showScrollToBottomButton: boolean;
   /**
@@ -796,6 +812,8 @@ export const DEFAULT_TERMINAL: TerminalSettings = {
   pathLinkMaxLength: 256,
   pathLinkOsOpenEnabled: true,
   pathLinkOsOpenConfirm: true,
+  urlLinkActivation: DEFAULT_LINK_ACTIVATION,
+  pathLinkActivation: DEFAULT_LINK_ACTIVATION,
   showScrollToBottomButton: true,
   scrollSensitivity: DEFAULT_SCROLL_SENSITIVITY,
   fastScrollSensitivity: DEFAULT_FAST_SCROLL_SENSITIVITY,
@@ -1656,7 +1674,17 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
         }
       : undefined;
     const paste = data.paste ? { ...DEFAULT_PASTE, ...data.paste } : undefined;
-    const terminal = data.terminal ? { ...DEFAULT_TERMINAL, ...data.terminal } : undefined;
+    // ADR-0224: 손으로 편집한 settings.json 이나 원격 patch 가 허용값 밖의 문자열을
+    // 남길 수 있다. 백엔드 검증이 거부하지만, 이미 디스크에 있는 값은 여기까지 온다 —
+    // 링크 실행 게이트는 fail closed 가 아니라 현행 동작(즉발)으로 떨어뜨린다.
+    const terminal = data.terminal
+      ? {
+          ...DEFAULT_TERMINAL,
+          ...data.terminal,
+          urlLinkActivation: normalizeLinkActivation(data.terminal.urlLinkActivation),
+          pathLinkActivation: normalizeLinkActivation(data.terminal.pathLinkActivation),
+        }
+      : undefined;
     const controlBar = data.controlBar ? { ...DEFAULT_CONTROL_BAR, ...data.controlBar } : undefined;
     const usage = data.usage
       ? {

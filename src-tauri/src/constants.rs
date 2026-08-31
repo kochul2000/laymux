@@ -168,6 +168,11 @@ pub const MIN_SCROLL_SENSITIVITY: f32 = 0.1;
 pub const MAX_SCROLL_SENSITIVITY: f32 = 20.0;
 /// Composer past-input history sharing scope (ADR-0055).
 pub const COMPOSER_HISTORY_SCOPES: &[&str] = &["global", "workspace", "pane"];
+/// Link execution gate (ADR-0224). `immediate` keeps the single-gesture open;
+/// `chip` shows an action chip and executes only from it. Order is display order.
+pub const LINK_ACTIVATION_MODES: &[&str] = &[LINK_ACTIVATION_IMMEDIATE, LINK_ACTIVATION_CHIP];
+pub const LINK_ACTIVATION_IMMEDIATE: &str = "immediate";
+pub const LINK_ACTIVATION_CHIP: &str = "chip";
 pub const PASTE_PATH_SEPARATORS: &[&str] = &["space", "newline", "comma", "semicolon"];
 pub const CONTROL_BAR_MODES: &[&str] = &["hover", "pinned", "minimized"];
 pub const NOTIFICATION_DISMISS_MODES: &[&str] = &["workspace", "paneFocus", "manual"];

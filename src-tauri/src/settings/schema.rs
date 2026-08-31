@@ -124,6 +124,18 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::Live,
     },
     MetadataEntry {
+        path: "/terminal/urlLinkActivation",
+        description: "URL 링크를 클릭·탭했을 때의 실행 방식입니다. \"immediate\"(기본)는 즉시 브라우저를 열고, \"chip\"은 링크 옆에 액션 칩을 띄워 사용자가 고른 뒤에만 실행합니다. 즉시 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
+        path: "/terminal/pathLinkActivation",
+        description: "검증된 파일·디렉터리 경로 밑줄을 클릭·탭했을 때의 실행 방식입니다. \"immediate\"(기본)는 즉시 뷰어/CWD 이동을 수행하고, \"chip\"은 액션 칩을 띄웁니다. Ctrl / Ctrl+Shift 클릭은 두 모드 모두 칩 없이 호스트 OS 로 직행합니다. 즉시 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
         path: "/paste",
         description: "클립보드와 smart paste 동작 설정입니다.",
         sensitive: false,
