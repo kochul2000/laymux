@@ -32,6 +32,8 @@ describe("desktop updater release contract", () => {
     );
 
     expect(workflow).toContain("workflow_dispatch:");
+    expect(workflow).toContain("publish_android:");
+    expect(workflow).toContain("default: false");
     expect(workflow).not.toContain("types: [published]");
     expect(workflow).toContain("git merge-base --is-ancestor");
     expect(workflow).toContain('release_json="$(gh api --method POST');
@@ -68,12 +70,18 @@ describe("desktop updater release contract", () => {
     expect(workflow).toContain("needs: [prepare, publish]");
     expect(workflow).toContain("scripts/release/channel-manifest.mjs");
     expect(workflow).toContain("BRANCH: release-channels");
-    // Both channels gate on the Android job rather than tolerating a skip.
-    expect(workflow).not.toContain("needs.android.result == 'skipped'");
+    // Android may be intentionally omitted, but a requested Android artifact is
+    // still a hard publish gate.
+    expect(workflow).toContain("needs.android.result == 'skipped'");
+    expect(workflow).toContain("needs.prepare.outputs.publish_android == 'false'");
+    expect(workflow).toContain("needs.prepare.outputs.publish_android == 'true'");
     expect(workflow).not.toContain("needs.prepare.outputs.prerelease == 'false'");
-    // The tag grammar has one owner (the shared encoder); the workflow only
-    // pairs the tag with the dispatched channel and checks both version files.
+    // General tag grammar is independent of Android's tighter versionCode
+    // bounds; the encoder runs only for an Android publication.
+    expect(workflow).toContain("release-version.mjs --validate");
     expect(workflow).toContain("scripts/release/android-version-code.mjs");
+    expect(workflow).toContain('--publish-android "$PUBLISH_ANDROID"');
+    expect(workflow).toContain("Android release inputs changed since");
     expect(workflow).toContain("src-tauri/Cargo.toml version");
     // Neither channel may be a 404 by the time a channel-aware build is latest,
     // so seeding gates publish instead of trailing it.

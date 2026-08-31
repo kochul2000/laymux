@@ -5,7 +5,11 @@ import {
   androidReleaseVersion,
   ANDROID_VERSION_CODE_MAX,
 } from "../release/android-version-code.mjs";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 
 import {
   ALL_CHANNEL_FILES,
@@ -16,6 +20,7 @@ import {
   parseReleaseVersion,
   planAndroidChannelWrites,
   planChannelWrites,
+  planReleaseChannelWrites,
   validateAndroidChannelManifest,
   validateChannelManifest,
 } from "../release/channel-manifest.mjs";
@@ -438,6 +443,132 @@ check(
       currentStableVersion: "0.10.18",
     });
     return writes.length === 0;
+  })(),
+);
+
+check(
+  "Android 미발행 릴리스는 데스크톱만 전진시킨다",
+  (() => {
+    const plan = planReleaseChannelWrites({
+      version: "0.12.5",
+      prerelease: false,
+      seedStable: false,
+      publishAndroid: false,
+      currentDesktopBetaVersion: "0.12.4",
+      currentDesktopStableVersion: "0.12.4",
+      currentAndroidBetaVersion: "0.12.4",
+      currentAndroidStableVersion: "0.12.4",
+    });
+    return (
+      plan.desktop.length === 2 &&
+      plan.android.length === 0 &&
+      plan.desktop.includes("desktop-stable.json") &&
+      plan.desktop.includes("desktop-beta.json")
+    );
+  })(),
+);
+
+check(
+  "Android 발행 릴리스는 두 계열을 함께 전진시킨다",
+  (() => {
+    const plan = planReleaseChannelWrites({
+      version: "0.12.5",
+      prerelease: false,
+      seedStable: false,
+      publishAndroid: true,
+      currentDesktopBetaVersion: "0.12.4",
+      currentDesktopStableVersion: "0.12.4",
+      currentAndroidBetaVersion: "0.12.4",
+      currentAndroidStableVersion: "0.12.4",
+    });
+    return plan.desktop.length === 2 && plan.android.length === 2;
+  })(),
+);
+
+check(
+  "부트스트랩은 발견한 마지막 Android APK로 채널을 시딩한다",
+  (() => {
+    const plan = planReleaseChannelWrites({
+      version: "0.12.4",
+      prerelease: false,
+      seedStable: true,
+      publishAndroid: true,
+      currentDesktopBetaVersion: null,
+      currentDesktopStableVersion: null,
+      currentAndroidBetaVersion: null,
+      currentAndroidStableVersion: null,
+    });
+    return plan.desktop.length === 2 && plan.android.length === 2;
+  })(),
+);
+
+check(
+  "Android 미발행 CLI는 기존 Android 매니페스트를 그대로 보존한다",
+  (() => {
+    const directory = mkdtempSync(path.join(tmpdir(), "laymux-channels-"));
+    try {
+      const manifestPath = path.join(directory, "latest.json");
+      const androidStablePath = path.join(
+        directory,
+        ANDROID_STABLE_CHANNEL_FILE,
+      );
+      const androidBetaPath = path.join(directory, ANDROID_BETA_CHANNEL_FILE);
+      const oldAndroid = `${JSON.stringify(
+        buildAndroidChannelManifest({
+          tag: "v0.12.4",
+          owner: OWNER,
+          repo: REPO,
+          pubDate: "2026-08-30T00:00:00Z",
+        }),
+        null,
+        2,
+      )}\n`;
+      writeFileSync(
+        manifestPath,
+        JSON.stringify(manifestFor("v0.12.5", "0.12.5")),
+      );
+      writeFileSync(
+        path.join(directory, "desktop-stable.json"),
+        JSON.stringify(manifestFor("v0.12.4", "0.12.4")),
+      );
+      writeFileSync(
+        path.join(directory, "desktop-beta.json"),
+        JSON.stringify(manifestFor("v0.12.4", "0.12.4")),
+      );
+      writeFileSync(androidStablePath, oldAndroid);
+      writeFileSync(androidBetaPath, oldAndroid);
+
+      const script = fileURLToPath(
+        new URL("../release/channel-manifest.mjs", import.meta.url),
+      );
+      const result = spawnSync(
+        process.execPath,
+        [
+          script,
+          "--tag",
+          "v0.12.5",
+          "--prerelease",
+          "false",
+          "--publish-android",
+          "false",
+          "--manifest",
+          manifestPath,
+          "--channel-dir",
+          directory,
+        ],
+        { encoding: "utf8" },
+      );
+      return (
+        result.status === 0 &&
+        readFileSync(androidStablePath, "utf8") === oldAndroid &&
+        readFileSync(androidBetaPath, "utf8") === oldAndroid &&
+        JSON.parse(
+          readFileSync(path.join(directory, "desktop-stable.json"), "utf8"),
+        ).version === "0.12.5"
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   })(),
 );
 

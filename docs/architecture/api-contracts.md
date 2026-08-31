@@ -610,7 +610,7 @@ OS 절전 진입을 막는 정책이다(issue #727·#733, [ADR-0114](../adr/0114
 
 #### Android 채널 매니페스트
 
-Android 앱은 같은 브랜치의 별도 파일로 자기 채널을 따라가며, 설치는 하지 않고 릴리스 페이지로 넘긴다([ADR-0197](../adr/0197-android-update-channel-release-handoff.md)).
+Android 앱은 같은 브랜치의 별도 파일로 자기 채널을 따라가며, 설치는 하지 않고 릴리스 페이지로 넘긴다([ADR-0223](../adr/0223-android-release-advances-only-with-apk.md)).
 
 ```jsonc
 // release-channels 브랜치의 android-stable.json / android-beta.json
@@ -624,8 +624,9 @@ Android 앱은 같은 브랜치의 별도 파일로 자기 채널을 따라가�
 }
 ```
 
-- **내용은 전부 발행 tag 에서 파생한다.** `scripts/release/android-channel-manifest.mjs` 의 `buildAndroidChannelManifest` 가 만들고 `validateAndroidChannelManifest` 가 커밋 전에 검증한다(버전↔tag, versionCode↔인코딩, 세 URL↔저장소·tag·asset 이름, `pubDate` 파싱). 릴리스 job 이 손으로 채우는 필드는 없다.
-- **네 파일이 한 커밋이다.** `planChannelUpdates` 가 계열별로 각자 호출되므로(`planChannelWrites`·`planAndroidChannelWrites`) 데스크톱이 no-op 인 재실행에서도 뒤처진 Android 파일은 전진한다. `publish-channel-commit.sh` 는 트리를 통째로 만들기 때문에 채널 job 은 네 파일을 모두 내려받아야 하고, 부트스트랩 job 은 `desktop-stable.json` 과 `android-stable.json` 이 **모두** 있을 때만 시딩을 건너뛴다.
+- **내용은 전부 실제 APK를 발행한 tag 에서 파생한다.** `scripts/release/android-channel-manifest.mjs` 의 `buildAndroidChannelManifest` 가 만들고 `validateAndroidChannelManifest` 가 커밋 전에 검증한다(버전↔tag, versionCode↔인코딩, 세 URL↔저장소·tag·asset 이름, `pubDate` 파싱). 릴리스 job 이 손으로 채우는 필드는 없다.
+- **Android 채널은 APK를 발행할 때만 전진한다.** release dispatch의 `publish_android`는 기본 false다. false이면 Android job을 skip하고 `planReleaseChannelWrites`가 Android 쓰기를 빈 배열로 계산해 두 Android 파일을 그대로 둔다. true이면 기존 서명·단위 테스트·release build·signer fingerprint 검증이 모두 publish gate다. false인데 현재 Android 채널 tag 이후 `app/src/main`·Gradle release 설정·ProGuard·wrapper 입력이 바뀌었으면 prepare가 draft 생성 전에 거절한다.
+- **네 파일은 한 트리 커밋에 보존한다.** `publish-channel-commit.sh`가 트리를 통째로 만들기 때문에 채널 job은 네 파일을 모두 내려받는다. Android 미발행 릴리스의 커밋에서는 desktop 파일만 전진하고 Android 파일 내용은 변하지 않는다. 부트스트랩 job은 `desktop-stable.json`과 `android-stable.json`이 모두 있을 때만 시딩을 건너뛰며, 복구할 때는 최신 desktop stable과 올바른 APK asset이 있는 최신 Android stable tag를 독립적으로 사용한다.
 - **클라이언트가 다시 검사한다.** `AndroidUpdateManifests.parse` 가 채널별 버전 문법(stable 은 `x.y.z` 만)과 `releaseUrl` 문법(`https://github.com/kochul2000/laymux/releases/tag/` + `v?<version>`, 경로·질의 추가 금지)을 확인하고, 어긋나면 후보 대신 확인 오류를 남긴다. `apkUrl`·`apkSha256Url` 은 이 클라이언트가 읽지 않으므로 없어도 통과한다.
 - **채널 SoT 는 기기-로컬**(`SharedPreferencesUpdateStore`, 기본 stable, 알 수 없는 값은 stable)이며 데스크톱 `settings.json` 을 상속하지 않는다. 채널 변경은 즉시 1회 확인을 트리거하고, 확인 중 채널이 바뀌면 옛 채널의 응답은 버린다.
 - **확인 주기는 6시간**(`UpdateSchedule`), 트리거는 `onStart` 와 설정 섹션의 수동 확인(throttle 무시)뿐이다. 실패는 확인 시각을 갱신하지 않는다. debug 빌드와 파싱 불가 `versionName` 은 비활성이며, 실기 검증은 `LAYMUX_ANDROID_UPDATE_CHECK=1` 빌드와 `laymux.previewUpdateBanner` intent extra 로 한다.

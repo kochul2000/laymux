@@ -1,15 +1,14 @@
 #!/usr/bin/env node
-// 채널 매니페스트 검증과 쓰기 계획 (ADR-0190·ADR-0197).
+// 채널 매니페스트 검증과 쓰기 계획 (ADR-0190·ADR-0223).
 //
 // 채널 파일은 `release-channels` 브랜치의 `desktop-stable.json`·`desktop-beta.json`
 // 이며 각 파일은 해당 채널 최신 릴리스의 Tauri updater manifest 전문이다.
 // 커밋 전에 여기서 검증한다 — 부분 매니페스트나 저장소 밖 URL 이 채널에 노출되면
 // 서명 검증 이전 단계에서 이미 사용자를 엉뚱한 릴리스로 보낸다.
 //
-// 같은 커밋에 Android 채널 파일(`android-stable.json`·`android-beta.json`)도
-// 함께 올린다(ADR-0197). 스키마는 다르지만 전진성·쓰기 계획 규칙은 같은 코드를
-// 쓴다 — 부분 갱신은 "데스크톱은 새 버전, 폰은 옛 버전"을 채널이 주장하는
-// 상태를 노출한다.
+// 같은 트리 커밋에 Android 채널 파일(`android-stable.json`·`android-beta.json`)도
+// 보존한다. Android 파일은 APK를 명시적으로 발행한 릴리스에서만 전진하며,
+// 그 밖의 릴리스에서는 이전 내용을 유지한다(ADR-0223).
 //
 // 불변식: beta 채널은 항상 stable 이상을 가리킨다. stable 발행은 beta 파일을
 // 더 높은 버전으로만 전진시키고, prerelease 는 beta 파일을 후퇴시킬 수 없다.
@@ -114,7 +113,7 @@ export function validateChannelManifest(
 /**
  * 이번 발행이 갱신할 채널을 정한다. 계열(데스크톱·Android)마다 현재 파일 버전이
  * 다를 수 있으므로 계열별로 각자 호출한다 — 한쪽 계열의 no-op 판정이 뒤처진
- * 다른 계열을 방치하면 그 채널은 영구히 옛 버전을 가리킨다 (ADR-0197).
+ * 다른 계열을 방치하면 그 채널은 영구히 옛 버전을 가리킨다 (ADR-0223).
  * @param {{version: string, prerelease: boolean, currentBetaVersion: string|null, currentStableVersion: string|null}} input
  * @returns {string[]} `"stable"`·`"beta"` 중 갱신할 채널
  */
@@ -188,7 +187,7 @@ export function planChannelWrites(input) {
 }
 
 /**
- * Android 채널 파일 쓰기 계획 (ADR-0197). 데스크톱과 같은 규칙을 쓰되 현재
+ * Android 채널 파일 쓰기 계획 (ADR-0223). 데스크톱과 같은 규칙을 쓰되 현재
  * 버전은 Android 파일에서 읽은 값을 넣는다.
  * @returns {string[]} 갱신할 파일명
  */
@@ -198,6 +197,39 @@ export function planAndroidChannelWrites(input) {
       ? ANDROID_STABLE_CHANNEL_FILE
       : ANDROID_BETA_CHANNEL_FILE,
   );
+}
+
+/**
+ * 한 릴리스에서 실제로 전진시킬 제품 계열을 계산한다 (ADR-0223).
+ * Android 미발행은 채널을 지우거나 현재 데스크톱 버전으로 위장하지 않고 no-op 이다.
+ */
+export function planReleaseChannelWrites({
+  version,
+  prerelease,
+  publishAndroid,
+  androidVersion = version,
+  androidPrerelease = prerelease,
+  currentDesktopBetaVersion,
+  currentDesktopStableVersion,
+  currentAndroidBetaVersion,
+  currentAndroidStableVersion,
+}) {
+  return {
+    desktop: planChannelWrites({
+      version,
+      prerelease,
+      currentBetaVersion: currentDesktopBetaVersion,
+      currentStableVersion: currentDesktopStableVersion,
+    }),
+    android: publishAndroid
+      ? planAndroidChannelWrites({
+          version: androidVersion,
+          prerelease: androidPrerelease,
+          currentBetaVersion: currentAndroidBetaVersion,
+          currentStableVersion: currentAndroidStableVersion,
+        })
+      : [],
+  };
 }
 
 /** 채널 디렉터리에서 현재 beta 매니페스트 버전을 읽는다. 없으면 null. */
@@ -232,11 +264,17 @@ function main(argv) {
   const args = parseArgs(argv);
   // `prerelease` is required, not defaulted: a missing or misspelled flag would
   // otherwise silently take the stable path and overwrite the stable channel.
-  const required = ["tag", "manifest", "channel-dir", "prerelease"];
+  const required = [
+    "tag",
+    "manifest",
+    "channel-dir",
+    "prerelease",
+    "publish-android",
+  ];
   for (const key of required) {
     if (!args[key]) {
       console.error(
-        `사용: node scripts/release/channel-manifest.mjs --tag <tag> --prerelease <true|false> --manifest <path> --channel-dir <dir> [--owner o --repo r] [--seed-stable] [--pub-date <iso8601>]`,
+        `사용: node scripts/release/channel-manifest.mjs --tag <tag> --prerelease <true|false> --publish-android <true|false> --manifest <path> --channel-dir <dir> [--owner o --repo r] [--seed-stable] [--pub-date <iso8601>] [--android-tag <tag>] [--android-pub-date <iso8601>]`,
       );
       process.exit(2);
     }
@@ -247,9 +285,19 @@ function main(argv) {
     );
     process.exit(2);
   }
+  if (
+    args["publish-android"] !== "true" &&
+    args["publish-android"] !== "false"
+  ) {
+    console.error(
+      `--publish-android 는 true 또는 false 여야 한다: ${args["publish-android"]}`,
+    );
+    process.exit(2);
+  }
   const owner = args.owner ?? "kochul2000";
   const repo = args.repo ?? "laymux";
   const prerelease = args.prerelease === "true";
+  const publishAndroid = args["publish-android"] === "true";
   const channelDir = args["channel-dir"];
   // Bootstrap: write the current stable manifest into both channel files so
   // neither channel is ever a 404 (ADR-0190).
@@ -267,54 +315,68 @@ function main(argv) {
     process.exit(2);
   }
 
-  // The Android manifest is derived from the tag, not supplied: nothing in it is
-  // knowable only at build time, and a hand-filled field is a chance for the
-  // version and the URLs to disagree (ADR-0197).
-  const androidManifest = buildAndroidChannelManifest({
-    tag: args.tag,
-    owner,
-    repo,
-    pubDate: args["pub-date"] ?? new Date().toISOString(),
-  });
-  validateAndroidChannelManifest(androidManifest, {
-    tag: args.tag,
-    owner,
-    repo,
-    channel: prerelease ? "beta" : "stable",
+  const androidTag = args["android-tag"] ?? args.tag;
+  const parsedAndroidVersion = parseReleaseVersion(androidTag);
+  const androidPrerelease = parsedAndroidVersion.beta !== null;
+  if (seedStable && androidPrerelease) {
+    console.error("Android stable 시딩에는 정식 Android tag 가 필요하다");
+    process.exit(2);
+  }
+
+  // Each family reads its own current versions. Android publication is explicit:
+  // a desktop-only release leaves both Android files byte-for-byte untouched.
+  const writes = planReleaseChannelWrites({
+    version,
+    prerelease,
+    publishAndroid,
+    androidVersion: parsedAndroidVersion.version,
+    androidPrerelease,
+    currentDesktopBetaVersion: readChannelVersion(
+      channelDir,
+      BETA_CHANNEL_FILE,
+    ),
+    currentDesktopStableVersion: seedStable
+      ? null
+      : readChannelVersion(channelDir, STABLE_CHANNEL_FILE),
+    currentAndroidBetaVersion: readChannelVersion(
+      channelDir,
+      ANDROID_BETA_CHANNEL_FILE,
+    ),
+    currentAndroidStableVersion: seedStable
+      ? null
+      : readChannelVersion(channelDir, ANDROID_STABLE_CHANNEL_FILE),
   });
 
-  // Each family reads its own current versions. A branch seeded before Android
-  // files existed has none, and reusing the desktop plan would let the desktop's
-  // idempotent no-op leave the Android channel behind forever.
   const plan = [
     {
-      writes: planChannelWrites({
-        version,
-        prerelease,
-        currentBetaVersion: readChannelVersion(channelDir, BETA_CHANNEL_FILE),
-        // Seeding ignores the missing stable file (that is the point) but still
-        // must not pull a beta channel that is already ahead back to stable.
-        currentStableVersion: seedStable
-          ? null
-          : readChannelVersion(channelDir, STABLE_CHANNEL_FILE),
-      }),
+      writes: writes.desktop,
       content: `${JSON.stringify(manifest, null, 2)}\n`,
     },
-    {
-      writes: planAndroidChannelWrites({
-        version,
-        prerelease,
-        currentBetaVersion: readChannelVersion(
-          channelDir,
-          ANDROID_BETA_CHANNEL_FILE,
-        ),
-        currentStableVersion: seedStable
-          ? null
-          : readChannelVersion(channelDir, ANDROID_STABLE_CHANNEL_FILE),
-      }),
-      content: `${JSON.stringify(androidManifest, null, 2)}\n`,
-    },
   ];
+
+  if (publishAndroid) {
+    // Android fields remain wholly derived from the tag whose APK was actually
+    // published. During bootstrap this may be older than the desktop seed tag.
+    const androidManifest = buildAndroidChannelManifest({
+      tag: androidTag,
+      owner,
+      repo,
+      pubDate:
+        args["android-pub-date"] ??
+        args["pub-date"] ??
+        new Date().toISOString(),
+    });
+    validateAndroidChannelManifest(androidManifest, {
+      tag: androidTag,
+      owner,
+      repo,
+      channel: androidPrerelease ? "beta" : "stable",
+    });
+    plan.push({
+      writes: writes.android,
+      content: `${JSON.stringify(androidManifest, null, 2)}\n`,
+    });
+  }
 
   for (const { writes, content } of plan) {
     for (const file of writes) {

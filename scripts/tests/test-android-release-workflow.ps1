@@ -29,7 +29,9 @@ $requiredWorkflowTokens = @(
     "*-beta.*)",
     "src-tauri/Cargo.toml version",
     "scripts/release/channel-manifest.mjs",
-    "release-channels"
+    "release-channels",
+    "publish_android:",
+    '--publish-android "$PUBLISH_ANDROID"'
 )
 foreach ($token in $requiredWorkflowTokens) {
     if (-not $workflow.Contains($token)) {
@@ -61,13 +63,22 @@ if ($workflow.Contains('gh release create') -or $workflow.Contains('/releases/ta
     throw "draft release identity must come from the create response, not a tag lookup"
 }
 
-# ADR-0190: the Android job must run for prereleases too, and publish must gate
-# on it rather than tolerate a skip.
+# Android publication is explicit for both channels. A requested Android build
+# remains a hard gate; only an intentional omission may be skipped.
 if ($workflow.Contains("needs.prepare.outputs.prerelease == 'false'")) {
     throw "Android job must not be limited to stable releases"
 }
-if ($workflow.Contains("needs.android.result == 'skipped'")) {
-    throw "publish must require the Android job, not tolerate a skipped one"
+if (-not $workflow.Contains("needs.android.result == 'skipped'")) {
+    throw "publish must tolerate an intentional Android omission"
+}
+if (-not $workflow.Contains("needs.prepare.outputs.publish_android == 'false'")) {
+    throw "a skipped Android job must be tied to publish_android=false"
+}
+if (-not $workflow.Contains("needs.prepare.outputs.publish_android == 'true'")) {
+    throw "the Android job must run when publish_android=true"
+}
+if (-not $workflow.Contains("Android release inputs changed since")) {
+    throw "unchanged-Android releases need a source-change guard"
 }
 if (-not $workflow.Contains('--bundles')) {
     throw "prerelease desktop builds must limit bundles (rpm/deb reject semver prereleases)"
@@ -118,8 +129,11 @@ foreach ($file in @("android-stable.json", "android-beta.json")) {
         throw "publish-channel-commit.sh must include $file in the tree"
     }
 }
-if (-not $workflow.Contains('grep -qxF "Laymux-Android-$seed_version.apk"')) {
-    throw "seeding must refuse a release whose Android APK was never published"
+if (-not $workflow.Contains('"Laymux-Android-" + $version + ".apk"')) {
+    throw "seeding must discover a release whose Android APK was actually published"
+}
+if (-not $workflow.Contains('--android-tag "$android_seed_tag"')) {
+    throw "desktop and Android bootstrap tags must be independently selectable"
 }
 if (-not $workflow.Contains('--pub-date')) {
     throw "the Android manifest pubDate must come from the release, not the runner clock"

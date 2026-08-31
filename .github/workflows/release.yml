@@ -12,6 +12,11 @@ on:
         required: true
         default: false
         type: boolean
+      publish_android:
+        description: "Build and publish Android APK (required when Android release inputs changed)"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -27,6 +32,7 @@ jobs:
       release_id: ${{ steps.release.outputs.release_id }}
       tag: ${{ steps.release.outputs.tag }}
       prerelease: ${{ steps.release.outputs.prerelease }}
+      publish_android: ${{ steps.release.outputs.publish_android }}
       commit_sha: ${{ steps.release.outputs.commit_sha }}
 
     steps:
@@ -43,6 +49,7 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           RELEASE_TAG: ${{ inputs.tag }}
           PRERELEASE: ${{ inputs.prerelease }}
+          PUBLISH_ANDROID: ${{ inputs.publish_android }}
         run: |
           set -euo pipefail
 
@@ -56,12 +63,11 @@ jobs:
             exit 1
           }
 
-          # Both channels now feed a client updater, so both tags must satisfy the
-          # client's tag<->version contract (ADR-0190). The tag *form* is checked
-          # once, by the shared encoder below — duplicating the grammar here would
-          # let the two copies drift. This only pairs the tag with the channel the
-          # dispatcher asked for.
+          # Both channels feed a client updater, so every tag satisfies the shared
+          # release grammar. Android's tighter versionCode bounds are checked only
+          # when an APK is actually requested (ADR-0223).
           version="${RELEASE_TAG#v}"
+          node scripts/release/release-version.mjs --validate "$RELEASE_TAG"
           case "$version" in
             *-beta.*)
               [[ "$PRERELEASE" == "true" ]] || {
@@ -92,9 +98,11 @@ jobs:
             exit 1
           }
 
-          # Reject a version the Android versionCode encoding cannot carry
-          # before any artifact is built.
-          node scripts/release/android-version-code.mjs "$RELEASE_TAG"
+          if [[ "$PUBLISH_ANDROID" == "true" ]]; then
+            # Reject a version the Android versionCode encoding cannot carry
+            # before any artifact is built.
+            node scripts/release/android-version-code.mjs "$RELEASE_TAG"
+          fi
 
           # Channel forwardness is checked *before* anything is published. If the
           # only check lived in the channel job, a version lower than the current
@@ -123,6 +131,35 @@ jobs:
             }
           fi
 
+          # Skipping Android is safe only while the release APK inputs are
+          # unchanged from the Android channel's current artifact. Test/debug-only
+          # sources are intentionally outside this release-input allowlist.
+          if [[ "$PUBLISH_ANDROID" == "false" ]]; then
+            android_channel="stable"
+            [[ "$PRERELEASE" == "true" ]] && android_channel="beta"
+            android_body="$(gh api "repos/$GITHUB_REPOSITORY/contents/android-$android_channel.json?ref=release-channels" --jq '.content')"
+            android_manifest="$(printf '%s' "$android_body" | base64 -d)"
+            android_release_tag="$(jq -er '.releaseUrl | split("/")[-1]' <<<"$android_manifest")"
+            git rev-parse --verify "refs/tags/$android_release_tag^{commit}" >/dev/null || {
+              echo "Android channel tag is unavailable locally: $android_release_tag" >&2
+              exit 1
+            }
+            android_release_inputs=(
+              apps/android/app/src/main
+              apps/android/app/build.gradle.kts
+              apps/android/app/proguard-rules.pro
+              apps/android/build.gradle.kts
+              apps/android/settings.gradle.kts
+              apps/android/gradle.properties
+              apps/android/gradle/wrapper/gradle-wrapper.properties
+            )
+            if ! git diff --quiet "$android_release_tag"..."$GITHUB_SHA" -- "${android_release_inputs[@]}"; then
+              echo "Android release inputs changed since $android_release_tag; dispatch again with publish_android=true" >&2
+              git diff --name-only "$android_release_tag"..."$GITHUB_SHA" -- "${android_release_inputs[@]}" >&2
+              exit 1
+            fi
+          fi
+
           existing_release_id="$(
             gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
               jq -rs --arg tag "$RELEASE_TAG" \
@@ -149,6 +186,7 @@ jobs:
           echo "release_id=$release_id" >>"$GITHUB_OUTPUT"
           echo "tag=$RELEASE_TAG" >>"$GITHUB_OUTPUT"
           echo "prerelease=$PRERELEASE" >>"$GITHUB_OUTPUT"
+          echo "publish_android=$PUBLISH_ANDROID" >>"$GITHUB_OUTPUT"
           echo "commit_sha=$GITHUB_SHA" >>"$GITHUB_OUTPUT"
 
   build:
@@ -223,6 +261,7 @@ jobs:
 
   android:
     needs: prepare
+    if: needs.prepare.outputs.publish_android == 'true'
     runs-on: ubuntu-latest
     env:
       ANDROID_APP_SIGNING_CERT_SHA256: ${{ vars.ANDROID_APP_SIGNING_CERT_SHA256 }}
@@ -368,15 +407,16 @@ jobs:
           # The condition is "every stable file exists", not "the branch exists":
           # a branch seeded before the Android channel existed holds no Android
           # file, and a channel-aware app would then get a 404 from its fixed
-          # endpoint until the next release (ADR-0197).
+          # endpoint until the next release (ADR-0223).
           if gh api "repos/$GITHUB_REPOSITORY/contents/desktop-stable.json?ref=$BRANCH" >/dev/null 2>&1 &&
             gh api "repos/$GITHUB_REPOSITORY/contents/android-stable.json?ref=$BRANCH" >/dev/null 2>&1; then
             echo "channel branch already seeded"
             exit 0
           fi
 
-          # Seed from the release that is currently latest: that is what the
-          # stable channel means right now, and it keeps beta valid too.
+          # Desktop seeds from the latest stable release. Android may intentionally
+          # lag, so recover it from the newest stable release that actually has the
+          # correctly named APK asset (ADR-0223).
           seed_tag="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name' 2>/dev/null)" || seed_tag=""
           [[ -n "$seed_tag" && "$seed_tag" != "null" ]] || {
             echo "No stable release to seed the channel branch from" >&2
@@ -393,34 +433,54 @@ jobs:
             fi
           done
 
-          # An Android manifest pointing at a release page whose APK was never
-          # published is worse than a 404: the phone would send the user to a
-          # release with nothing to install (ADR-0197).
-          # Not `gh ... | grep -q`: with pipefail, grep exiting on the first match
-          # SIGPIPEs gh and the pipeline reports 141 even though the asset is there.
-          seed_version="${seed_tag#v}"
-          seed_assets="$(gh release view "$seed_tag" --json assets --jq '.assets[].name')"
-          grep -qxF "Laymux-Android-$seed_version.apk" <<<"$seed_assets" || {
-            echo "Seed release $seed_tag has no Android APK asset" >&2
+          android_seed_json="$(
+            gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
+              jq -sc '
+                [.[][]
+                  | select(.draft == false and .prerelease == false)
+                  | . as $release
+                  | ($release.tag_name | sub("^v"; "")) as $version
+                  | select(any($release.assets[]?; .name == ("Laymux-Android-" + $version + ".apk")))]
+                | sort_by(.published_at) | reverse | first
+              '
+          )"
+          android_seed_tag="$(jq -er '.tag_name' <<<"$android_seed_json")" || {
+            echo "No stable release with an Android APK is available for channel seeding" >&2
             exit 1
           }
+          android_seed_published="$(jq -er '.published_at' <<<"$android_seed_json")"
 
           seed_manifest="$RUNNER_TEMP/seed-latest.json"
           gh release download "$seed_tag" --pattern latest.json --output "$seed_manifest" --clobber
           seed_published="$(gh release view "$seed_tag" --json publishedAt --jq '.publishedAt')"
           node scripts/release/channel-manifest.mjs \
             --tag "$seed_tag" --prerelease false --seed-stable true \
+            --publish-android true --android-tag "$android_seed_tag" \
             --manifest "$seed_manifest" --channel-dir "$channels" \
-            --pub-date "$seed_published" \
+            --pub-date "$seed_published" --android-pub-date "$android_seed_published" \
             --owner "${GITHUB_REPOSITORY%%/*}" --repo "${GITHUB_REPOSITORY##*/}"
 
           bash "$GITHUB_WORKSPACE/scripts/release/publish-channel-commit.sh" \
             "$channels" "$BRANCH" "seed channel manifests from $seed_tag"
 
   publish:
-    # Both channels gate on every required job. A beta that ships the desktop
-    # ahead of its APK strands phones on a compat version bump (ADR-0190).
+    # A requested Android artifact is a hard gate. An intentional omission is
+    # allowed only after prepare proved the Android release inputs are unchanged.
     needs: [prepare, build, android, channel_bootstrap]
+    if: >-
+      ${{
+        always() &&
+        needs.prepare.result == 'success' &&
+        needs.build.result == 'success' &&
+        needs.channel_bootstrap.result == 'success' &&
+        (
+          needs.android.result == 'success' ||
+          (
+            needs.android.result == 'skipped' &&
+            needs.prepare.outputs.publish_android == 'false'
+          )
+        )
+      }}
     runs-on: ubuntu-latest
     steps:
       - name: Publish complete release
@@ -454,13 +514,13 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.commit_sha }}
 
-
       - name: Update channel manifests
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
           PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          PUBLISH_ANDROID: ${{ needs.prepare.outputs.publish_android }}
           BRANCH: release-channels
         run: |
           set -euo pipefail
@@ -474,7 +534,7 @@ jobs:
           # guaranteed to exist by the bootstrap job that gates publish.
           # Every file must be downloaded, not only the ones this release writes:
           # the publish step rebuilds the whole tree, so a file missing from the
-          # directory is deleted from the branch (ADR-0197).
+          # directory is deleted from the branch (ADR-0223).
           # Again: exit status, not output. A 404 body on stdout would be written
           # as if it were a manifest.
           for file in desktop-stable.json desktop-beta.json android-stable.json android-beta.json; do
@@ -496,6 +556,7 @@ jobs:
           written="$(node "$GITHUB_WORKSPACE/scripts/release/channel-manifest.mjs" \
             --tag "$RELEASE_TAG" \
             --prerelease "$PRERELEASE" \
+            --publish-android "$PUBLISH_ANDROID" \
             --manifest "$manifest" \
             --channel-dir "$channels" \
             --pub-date "$published_at" \

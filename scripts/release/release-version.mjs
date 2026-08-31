@@ -56,18 +56,25 @@ export function compareReleaseVersions(a, b) {
 }
 
 /**
- * CLI: `node scripts/release/release-version.mjs --newer <candidate> --than <current>`
+ * CLI:
+ * - `node scripts/release/release-version.mjs --validate <candidate>`
+ * - `node scripts/release/release-version.mjs --newer <candidate> --than <current>`
  *
  * exit 0 이면 candidate 가 current 보다 크다. 릴리스 전진성을 **게시 전에**
  * 확인하는 데 쓴다 — 채널 파일을 쓰는 시점에야 후퇴를 잡으면 이미 낮은 버전이
  * latest 로 공개되고 Android 는 그것을 업그레이드로 받는다 (ADR-0190).
  */
 function main(argv) {
+  const validateIndex = argv.indexOf("--validate");
+  if (validateIndex >= 0) {
+    parseReleaseVersion(argv[validateIndex + 1]);
+    return;
+  }
   const index = argv.indexOf("--newer");
   const thanIndex = argv.indexOf("--than");
   if (index < 0 || thanIndex < 0) {
     console.error(
-      "사용: node scripts/release/release-version.mjs --newer <candidate> --than <current>",
+      "사용: node scripts/release/release-version.mjs --validate <candidate> | --newer <candidate> --than <current>",
     );
     process.exit(2);
   }
