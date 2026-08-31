@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import type { LinkActivationMode } from "./link-activation";
 import { createPathLinkClickHandlers, PATH_LINK_CLICK_SLOP } from "./path-link-click";
 
 function makeEvent(
@@ -29,23 +30,27 @@ function setup(
     osOpenEnabled?: boolean;
     confirmAlways?: boolean;
     confirmResult?: boolean;
+    activation?: LinkActivationMode;
   } = {},
 ) {
   const activate = vi.fn();
   const confirm = vi.fn(() => options.confirmResult ?? true);
   const onOsHandoffSettled = vi.fn();
+  const showChip = vi.fn();
   const handlers = createPathLinkClickHandlers({
     getSelectionAt: () =>
       options.inside === false ? null : options.target === undefined ? FILE : options.target,
     getSettings: () => ({
       osOpenEnabled: options.osOpenEnabled ?? true,
       confirmAlways: options.confirmAlways ?? true,
+      activation: options.activation ?? "immediate",
     }),
     confirm,
     activate,
+    showChip,
     onOsHandoffSettled,
   });
-  return { ...handlers, activate, confirm, onOsHandoffSettled };
+  return { ...handlers, activate, confirm, onOsHandoffSettled, showChip };
 }
 
 describe("createPathLinkClickHandlers — event ownership", () => {
@@ -210,5 +215,75 @@ describe("createPathLinkClickHandlers — confirmation gate", () => {
     dir.onMouseUp(makeEvent({ ctrlKey: true }));
     expect(dir.confirm).not.toHaveBeenCalled();
     expect(dir.activate).toHaveBeenCalledWith(DIR, "osOpen");
+  });
+});
+
+// -- ADR-0224: chip 모드 --
+
+describe("createPathLinkClickHandlers — chip mode arms instead of executing", () => {
+  it("shows a chip and executes nothing on a plain click", () => {
+    for (const target of [FILE, DIR]) {
+      const h = setup({ target, activation: "chip" });
+      const down = makeEvent();
+      h.onMouseDown(down);
+      // 칩 모드의 클릭은 "관찰"이다 — 이벤트를 종결하지 않는다.
+      expect(down.preventDefault).not.toHaveBeenCalled();
+      expect(down.stopImmediatePropagation).not.toHaveBeenCalled();
+      h.onMouseUp(makeEvent());
+
+      expect(h.activate).not.toHaveBeenCalled();
+      expect(h.confirm).not.toHaveBeenCalled();
+      expect(h.showChip).toHaveBeenCalledTimes(1);
+      const [chipTarget, actions, point] = h.showChip.mock.calls[0];
+      expect(chipTarget).toBe(target);
+      expect(actions).toEqual(
+        target === FILE ? ["viewer", "osOpen", "copy"] : ["changeDir", "osOpen", "copy"],
+      );
+      expect(point).toEqual({ clientX: 100, clientY: 50 });
+    }
+  });
+
+  it("keeps the Ctrl / Ctrl+Shift bypass immediate in chip mode", () => {
+    const open = setup({ activation: "chip" });
+    open.onMouseDown(makeEvent({ ctrlKey: true }));
+    open.onMouseUp(makeEvent({ ctrlKey: true }));
+    expect(open.showChip).not.toHaveBeenCalled();
+    expect(open.activate).toHaveBeenCalledWith(FILE, "osOpen");
+
+    const reveal = setup({ activation: "chip" });
+    reveal.onMouseDown(makeEvent({ ctrlKey: true, shiftKey: true }));
+    reveal.onMouseUp(makeEvent({ ctrlKey: true, shiftKey: true }));
+    expect(reveal.showChip).not.toHaveBeenCalled();
+    expect(reveal.activate).toHaveBeenCalledWith(FILE, "osReveal");
+  });
+
+  it("still ends the mousedown for the bypass combinations", () => {
+    const h = setup({ activation: "chip" });
+    const e = makeEvent({ ctrlKey: true });
+    h.onMouseDown(e);
+    expect(e.preventDefault).toHaveBeenCalled();
+    expect(e.stopImmediatePropagation).toHaveBeenCalled();
+  });
+
+  it("drops the OS action from the chip when the OS open feature is off", () => {
+    const h = setup({ activation: "chip", osOpenEnabled: false });
+    h.onMouseDown(makeEvent());
+    h.onMouseUp(makeEvent());
+    expect(h.showChip.mock.calls[0][1]).toEqual(["viewer", "copy"]);
+  });
+
+  it("does not show a chip for a drag", () => {
+    const h = setup({ activation: "chip" });
+    h.onMouseDown(makeEvent());
+    h.onMouseUp(makeEvent({ clientX: 100 + PATH_LINK_CLICK_SLOP + 1 }));
+    expect(h.showChip).not.toHaveBeenCalled();
+    expect(h.activate).not.toHaveBeenCalled();
+  });
+
+  it("does not show a chip outside the underline", () => {
+    const h = setup({ activation: "chip", inside: false });
+    h.onMouseDown(makeEvent());
+    h.onMouseUp(makeEvent());
+    expect(h.showChip).not.toHaveBeenCalled();
   });
 });

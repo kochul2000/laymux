@@ -744,6 +744,44 @@
   display: none;
 }
 
+/* ADR-0224: 링크 액션 칩. `chip` 모드에서 클릭은 링크를 열지 않고 이 칩을 띄우며,
+   버튼을 눌러야 실행된다. 힌트 라벨과 달리 입력을 받으므로 pointer-events 를
+   켜 둔다. 위치는 TerminalView 가 계산한다(힌트 라벨과 같은 좌표계). */
+.terminal-link-chip {
+  position: absolute;
+  z-index: 7;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-surface);
+  box-shadow: 0 2px 8px var(--backdrop-light);
+  white-space: nowrap;
+}
+
+.terminal-link-chip[hidden] {
+  display: none;
+}
+
+.terminal-link-chip-action {
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.terminal-link-chip-action:hover,
+.terminal-link-chip-action:focus-visible {
+  background: var(--hover-bg-strong);
+  outline: none;
+}
+
 .terminal-overlay-caret {
   position: absolute;
   top: 0;

@@ -34,8 +34,15 @@ const UI_ROOT = process.cwd();
  * before update/eviction, taking the combined entry to 518,182 B. 521 kB keeps
  * 2,818 B of headroom; the point of the guard is to make the next increase a
  * conscious decision too.
+ *
+ * The link activation gate (ADR-0224) then added three always-loaded modules —
+ * the gesture→result mapping, the action chip's DOM view and its lifetime
+ * session — plus the chip's labels and one Settings group's strings in both
+ * locales, taking the entry to 525,051 B. Korean copy costs 3 bytes a
+ * character, so the strings are about a third of that. 528 kB restores the same
+ * ~3 kB margin rather than banking room for the next feature.
  */
-const STARTUP_CHUNK_BUDGET_BYTES = 521_000;
+const STARTUP_CHUNK_BUDGET_BYTES = 528_000;
 
 /**
  * Ceiling for a lazily-imported **syntax grammar**. Generous because a
