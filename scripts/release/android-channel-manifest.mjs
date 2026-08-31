@@ -1,11 +1,12 @@
-// Android 채널 매니페스트 스키마와 검증 (ADR-0197).
+// Android 채널 매니페스트 스키마와 검증 (ADR-0223, ADR-0197 계승).
 //
 // 파일은 `release-channels` 브랜치의 `android-stable.json`·`android-beta.json`
-// 이며 데스크톱 매니페스트와 같은 커밋으로 올라간다. Tauri updater manifest 가
+// 이며 채널 브랜치의 데스크톱 매니페스트와 같은 트리 커밋에 보존된다. APK를
+// 발행하지 않은 릴리스에서는 내용이 전진하지 않는다. Tauri updater manifest 가
 // 아니라 이 결정이 정의하는 스키마다 — 폰이 실제로 필요한 것은 서명 검증
 // 대상이 아니라 "어느 릴리스 페이지로 보내는가" 이기 때문이다.
 //
-// 매니페스트 내용은 전부 발행 tag 에서 파생한다. 손으로 채우는 필드를 두면
+// 매니페스트 내용은 전부 실제 APK를 발행한 tag 에서 파생한다. 손으로 채우는 필드를 두면
 // 버전과 URL 이 어긋난 매니페스트를 만들 자유도가 생긴다.
 
 import { androidReleaseVersion } from "./android-version-code.mjs";

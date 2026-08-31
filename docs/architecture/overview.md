@@ -99,7 +99,7 @@ Windows·Linux 데스크톱 release는 `stable`·`beta` 두 채널을 가지며,
 prerelease를 가리키는 고정 alias가 없다. release workflow는 main 계보와 tag/app version(`tauri.conf.json`
 + `Cargo.toml`)을 검증한 뒤 draft Release에 두 플랫폼 bundle과 updater artifact를 만들고 GitHub Actions
 secret의 private key로 서명한다. prerelease는 tag가 `v?x.y.z-beta.N`이어야 하고 데스크톱 번들을
-NSIS·AppImage로 제한한다(RPM `Version`은 `-`를 담을 수 없다). 데스크톱과 Android job이 모두 성공한
+NSIS·AppImage로 제한한다(RPM `Version`은 `-`를 담을 수 없다). 필요한 artifact job이 모두 성공한
 뒤에만 publish로 승격하고, 그 뒤 `channels` job이 발행된 릴리스의 `latest.json`을 검증해 채널 파일을
 갱신한다(stable 발행은 beta 파일을 더 높은 버전으로만 전진시킨다). 앱은 대응 public key를 고정해 검증된
 artifact만 설치한다. `releases/latest/download/latest.json`은 채널을 모르는 구버전 앱 경로로 유지한다.
@@ -109,11 +109,14 @@ artifact만 설치한다. `releases/latest/download/latest.json`은 채널을 �
 
 Android 앱도 같은 브랜치의 `android-<channel>.json`으로 자기 채널을 따라간다. 이 매니페스트는 Tauri updater
 manifest가 아니라 `version`·`versionCode`·`releaseUrl`·`apkUrl`·`apkSha256Url`·`pubDate`를 담는 별도 스키마이며,
-내용 전부를 발행 tag에서 파생한다(`scripts/release/android-channel-manifest.mjs`). 네 파일은 한 커밋으로 올라가고
-계열별 전진성을 각각 계산하므로 한쪽만 뒤처지지 않으며, 부트스트랩 job은 네 파일이 모두 있을 때만 시딩을 건너뛴다.
+내용 전부를 **실제로 APK를 발행한 tag**에서 파생한다(`scripts/release/android-channel-manifest.mjs`). release dispatch의
+`publish_android` 기본값은 false이고, false이면 Android job과 매니페스트 전진을 함께 생략한다. 다만 마지막 Android
+채널 tag 이후 release APK 입력이 바뀌었으면 prepare가 누락을 거절한다. 채널 브랜치의 네 파일은 계속 한 트리 커밋에
+있지만 Android 미발행 릴리스에서는 두 Android 파일을 그대로 보존한다. 부트스트랩은 최신 desktop stable과 실제 APK가
+있는 최신 Android stable을 독립적으로 찾아 시딩한다([ADR-0223](../adr/0223-android-release-advances-only-with-apk.md)).
 폰이 따라갈 채널은 데스크톱 설정을 상속하지 않는 기기-로컬 값(`SharedPreferencesUpdateStore`)이고, 앱은 후보를
 찾으면 배너와 연결 설정의 업데이트 섹션으로 알린 뒤 GitHub 릴리스 페이지로 넘긴다 — APK 다운로드·설치는 하지 않는다
-(`apps/android/.../update/`, [ADR-0197](../adr/0197-android-update-channel-release-handoff.md)).
+(`apps/android/.../update/`, [ADR-0223](../adr/0223-android-release-advances-only-with-apk.md)).
 
 ---
 

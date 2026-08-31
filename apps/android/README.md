@@ -85,8 +85,10 @@ GitHub `release` workflow는 다음 repository secret을 사용한다.
 
 공개 repository variable `ANDROID_APP_SIGNING_CERT_SHA256`은 기대 signer 인증서를 고정하고,
 `ANDROID_GOOGLE_WEB_CLIENT_ID`는 production Credential Manager audience를 주입한다. workflow는 JVM
-테스트와 minified release build 뒤 `apksigner` 검증을 통과한 universal APK와 SHA-256 checksum을
-같은 GitHub Release에 첨부한다. 앱 서명 keystore와 비밀번호의 오프라인 복구본은 서로 분리해
+`publish_android=true`로 dispatch한 릴리스에서만 JVM 테스트와 minified release build 뒤 `apksigner`
+검증을 통과한 universal APK와 SHA-256 checksum을 같은 GitHub Release에 첨부한다. false이면 마지막
+Android 채널 버전을 유지하되, 그 tag 이후 release APK 입력이 바뀐 경우 workflow가 누락을 거절한다
+([ADR-0223](../../docs/adr/0223-android-release-advances-only-with-apk.md)). 앱 서명 keystore와 비밀번호의 오프라인 복구본은 서로 분리해
 보관하며 GitHub secret을 유일한 사본으로 사용하지 않는다. Play upload key/AAB workflow는 Play
 Console 등록 뒤 별도로 연결한다.
 

@@ -1,6 +1,6 @@
 # 0197. Android 앱은 기기-로컬 채널 설정으로 릴리스 채널을 따라가고 업데이트는 GitHub 릴리스 페이지로 넘긴다
 
-- Status: Accepted
+- Status: Superseded by [0223](0223-android-release-advances-only-with-apk.md)
 - Date: 2026-08-24
 - Source: 사용자 요구("안드로이드로 똑같이 채널을 stable 과 beta 따라가게 pc 랑 똑같이 해줘. 그래서 해당 github 릴리즈 페이지까지 이동하도록") · [ADR-0190](0190-update-release-channels.md) · [ADR-0174](0174-github-signed-desktop-self-update.md) · [ADR-0172](0172-android-e2e-compat-version-gate.md)
 - Extends: ADR-0190 — ADR-0190 이 후속 ADR 로 분리한 "Android 앱의 자체 업데이트와 그에 필요한 Android 채널 설정"을 확정한다. ADR-0190 의 결정(채널 두 개, 채널 매니페스트가 SoT, versionCode 슬롯 인코딩, 게시 게이트)은 정정하지 않는다.
