@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { readFileSync } from "fs";
 import path from "path";
 import { describe, expect, it } from "vitest";
+import { decideLinkActivation } from "../lib/link-activation";
 
 // The Rust remote server serves the committed minified artifacts, so an edit
 // to the readable sources without `npm run build:remote-page` would silently
@@ -103,6 +104,34 @@ describe("remote page bundle", () => {
     ]) {
       expect(shell.getElementById(id)?.querySelector("[data-remote-icon]")).not.toBeNull();
     }
+  });
+
+  // ADR-0224: the Remote page cannot import the desktop mapping module, so its
+  // chip action lists are a hand copy. Pin that copy to `decideLinkActivation`'s
+  // Remote answers here — a drift would silently give Remote a different chip
+  // (or, worse, an action ADR-0045 forbids it).
+  it("keeps the Remote chip actions in step with the shared activation mapping", () => {
+    const app = readFileSync(APP_SOURCE_PATH, "utf8");
+    const body = app.match(/function linkChipActions\(kind\) \{([\s\S]*?)\n {8}\}/)?.[1];
+    expect(body).toBeDefined();
+
+    for (const target of ["url", "file", "directory"] as const) {
+      const decided = decideLinkActivation({ mode: "chip", surface: "remote", target });
+      expect(decided.kind).toBe("show-chip");
+      const actions = decided.kind === "show-chip" ? decided.actions : [];
+      const literal = `[${actions.map((action) => `"${action}"`).join(", ")}]`;
+      expect(body).toContain(literal);
+      // Remote never gets a host-process action or cwd propagation.
+      for (const forbidden of ["osOpen", "osReveal", "changeDir"]) {
+        expect(actions).not.toContain(forbidden);
+        expect(body).not.toContain(`"${forbidden}"`);
+      }
+    }
+
+    // `immediate` stays the fallback for anything that is not exactly "chip".
+    expect(app).toContain('return value === "chip" ? "chip" : "immediate";');
+    // The browser action must keep going through the validated opener (ADR-0162).
+    expect(app).toMatch(/if \(action === "browser"\) \{[\s\S]*?openRemoteUrl\(target\.value\);/);
   });
 
   it("keeps the desktop and Remote Lucide packages on the same icon version", () => {

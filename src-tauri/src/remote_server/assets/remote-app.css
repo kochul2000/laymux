@@ -1912,6 +1912,43 @@
       #terminal.remote-path-link-clickable .xterm-screen {
         cursor: pointer;
       }
+      /* ADR-0224 링크 액션 칩. `chip` 모드에서 탭은 링크를 열지 않고 이 칩을
+         띄우며, 버튼을 눌러야 실행된다. 위치는 remote-app.js 가 #terminal
+         기준 픽셀로 넣는다(선택 핸들과 같은 좌표계). */
+      .remote-link-chip {
+        position: absolute;
+        z-index: 13;
+        display: flex;
+        gap: 2px;
+        padding: 2px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--bg-overlay);
+        box-shadow: 0 2px 8px #00000059;
+        white-space: nowrap;
+      }
+      .remote-link-chip[hidden] {
+        display: none;
+      }
+      .remote-link-chip-action {
+        /* 터치 표면이므로 라벨보다 탭 영역이 우선이다. */
+        min-height: 32px;
+        padding: 6px 10px;
+        border: 0;
+        border-radius: var(--radius-md);
+        background: transparent;
+        color: var(--text-primary);
+        font: inherit;
+        font-size: 12px;
+        line-height: 1.4;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+      .remote-link-chip-action:active,
+      .remote-link-chip-action:focus-visible {
+        background: #ffffff14;
+        outline: none;
+      }
       .xterm-helper-textarea {
         font-size: 16px;
       }
