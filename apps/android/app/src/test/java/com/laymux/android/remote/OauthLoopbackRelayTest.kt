@@ -10,6 +10,7 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.ConnectException
 import java.net.InetAddress
+import java.net.Inet6Address
 import java.net.ServerSocket
 import java.net.Socket
 import java.nio.charset.StandardCharsets
@@ -33,10 +34,12 @@ class OauthLoopbackRelayTest {
         lifetimeMs: Long = 60_000,
         callbacks: LinkedBlockingQueue<String> = LinkedBlockingQueue(),
         errors: LinkedBlockingQueue<String> = LinkedBlockingQueue(),
+        bindAddress: InetAddress = InetAddress.getByName("127.0.0.1"),
     ): Triple<OauthLoopbackRelay, LinkedBlockingQueue<String>, LinkedBlockingQueue<String>> {
         val started = OauthLoopbackRelay(
             port = port,
             expectedPath = expectedPath,
+            bindAddress = bindAddress,
             onCallback = { pathAndQuery -> callbacks.add(pathAndQuery) },
             onError = { message -> errors.add(message) },
             lifetimeMs = lifetimeMs,
@@ -47,7 +50,7 @@ class OauthLoopbackRelayTest {
     }
 
     private fun request(port: Int, requestLine: String): Pair<Socket, BufferedReader> {
-        val socket = Socket(InetAddress.getLoopbackAddress(), port)
+        val socket = Socket(InetAddress.getByName("127.0.0.1"), port)
         socket.soTimeout = 5_000
         socket.getOutputStream().write(
             "$requestLine\r\nhost: localhost:$port\r\n\r\n".toByteArray(StandardCharsets.US_ASCII),
@@ -57,10 +60,51 @@ class OauthLoopbackRelayTest {
     }
 
     private fun connectionRefused(port: Int): Boolean = try {
-        Socket(InetAddress.getLoopbackAddress(), port).close()
+        Socket(InetAddress.getByName("127.0.0.1"), port).close()
         false
     } catch (_: ConnectException) {
         true
+    }
+
+    @Test
+    fun `redirect host selects the matching loopback address family`() {
+        val aws =
+            "https://oidc.us-east-1.amazonaws.com/authorize?" +
+                "redirect_uri=http%3A%2F%2F127.0.0.1%3A33853%2Foauth%2Fcallback"
+        assertEquals(
+            "127.0.0.1",
+            oauthLoopbackBindAddress(aws, 33853, "/oauth/callback")?.hostAddress,
+        )
+
+        val localhost =
+            "https://login.example/authorize?" +
+                "redirect_uri=http%3A%2F%2Flocalhost%3A4321%2Fcallback"
+        assertEquals(
+            "127.0.0.1",
+            oauthLoopbackBindAddress(localhost, 4321, "/callback")?.hostAddress,
+        )
+
+        val ipv6 =
+            "https://login.example/authorize?" +
+                "redirect_uri=http%3A%2F%2F%5B%3A%3A1%5D%3A4321%2Fcallback"
+        assertTrue(oauthLoopbackBindAddress(ipv6, 4321, "/callback") is Inet6Address)
+    }
+
+    @Test
+    fun `redirect target must match the registered port and path`() {
+        val authUrl =
+            "https://login.example/authorize?" +
+                "redirect_uri=http%3A%2F%2Flocalhost%3A4321%2Fcallback"
+        assertNull(oauthLoopbackBindAddress(authUrl, 4322, "/callback"))
+        assertNull(oauthLoopbackBindAddress(authUrl, 4321, "/other"))
+        assertNull(
+            oauthLoopbackBindAddress(
+                "https://login.example/authorize?" +
+                    "redirect_uri=http%3A%2F%2Fevil.example%3A4321%2Fcallback",
+                4321,
+                "/callback",
+            ),
+        )
     }
 
     @Test
@@ -116,6 +160,7 @@ class OauthLoopbackRelayTest {
             val blocked = OauthLoopbackRelay(
                 port = taken.localPort,
                 expectedPath = "/",
+                bindAddress = InetAddress.getByName("127.0.0.1"),
                 onCallback = { },
                 onError = { },
             )
