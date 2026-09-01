@@ -1,6 +1,6 @@
 # 0224. 링크 실행은 activation 설정으로 게이트하고, deliberate 모드는 액션 칩으로 명시 실행한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-01
 - Source: 사용자 요구("file, url 실행이 한번에 들어가는 게 아니라 쉬프트나 컨트롤 등을 하게 옵션을 주면 좋겠다", "리모트는 어떻게 클릭? 한번 더? 롱클릭?", "칩 대신 하단 시트는 별로다", "URL 은 칩 경유/즉시를 세팅으로 선택"), [architecture/data-flow.md §8.6](../architecture/data-flow.md)
 - 관계:
