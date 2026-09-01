@@ -1481,6 +1481,38 @@ describe("SettingsView", () => {
     expect(useSettingsStore.getState().terminal.pathLinkOsOpenEnabled).toBe(false);
   });
 
+  // -- Terminal section: link activation gate (ADR-0224) --
+
+  it("defaults both link activation selects to immediate", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-terminal"));
+    expect(screen.getByTestId("url-link-activation-select")).toHaveValue("immediate");
+    expect(screen.getByTestId("path-link-activation-select")).toHaveValue("immediate");
+  });
+
+  it("persists each link activation mode independently on Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-terminal"));
+    fireEvent.change(screen.getByTestId("path-link-activation-select"), {
+      target: { value: "chip" },
+    });
+    await user.click(screen.getByTestId("save-settings-btn"));
+
+    expect(useSettingsStore.getState().terminal.pathLinkActivation).toBe("chip");
+    // ADR-0224: 키 2개는 독립이다 — 경로를 칩으로 바꿔도 URL 은 즉발로 남는다.
+    expect(useSettingsStore.getState().terminal.urlLinkActivation).toBe("immediate");
+
+    fireEvent.change(screen.getByTestId("url-link-activation-select"), {
+      target: { value: "chip" },
+    });
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().terminal.urlLinkActivation).toBe("chip");
+  });
+
   // -- Terminal section: fixed scrollbar layout --
 
   it("does not expose a scrollbar style setting", async () => {

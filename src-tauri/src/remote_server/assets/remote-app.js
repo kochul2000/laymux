@@ -1941,6 +1941,9 @@ import {
           for (const scope of PATH_LINK_SCOPES) disposePathLinkScope(scope);
           pathLinkPress = null;
           terminalHost.classList.remove("remote-path-link-clickable");
+          // ADR-0224: every wide reset — terminal/lease switch, disconnect,
+          // xterm reset, teardown — takes the chip with it.
+          dismissLinkChip();
         }
 
         // Full reset: terminal/lease switch, disconnect, xterm reset — every
@@ -2444,6 +2447,9 @@ import {
          * buffer when nothing is drawn.
          */
         function revalidatePathLinkScopes() {
+          // ADR-0224: the chip shares this stable frame's judgment, and a URL
+          // chip has no scope entry to be found below — judge it first.
+          revalidateLinkChip();
           if (!PATH_LINK_SCOPES.some((scope) => pathLinkScopes[scope].length > 0)) return;
           if (!terminal) return;
           let dropped = 0;
@@ -2506,6 +2512,15 @@ import {
         function handlePathLinkPointerDown(event) {
           pathLinkPress = null;
           if (event.button !== 0 || event.isPrimary === false) return;
+          // ADR-0224: the chip floats over the terminal at absolute coordinates
+          // and `pathLinkAtPoint` is a rect test that ignores z-order, so a chip
+          // button drawn just below the tap can sit on the *next* row's
+          // underline. Arming that underline here would let the window-capture
+          // pointerup fire before the chip's own click — opening a viewer the
+          // user never asked for, or swapping the chip target out from under the
+          // button that was pressed. A tap that started inside the chip is the
+          // chip's, full stop.
+          if (linkChipContains(event.target)) return;
           const current = pathLinkAtPoint(event.clientX, event.clientY);
           // Remember the press even off an underline: a mouse click on plain
           // text is a `point` trigger (touch goes through handleTouchTap).
@@ -2541,6 +2556,11 @@ import {
           ) {
             return;
           }
+          // ADR-0224 `chip` mode: the tap opens nothing and arms a chip instead.
+          if (remoteLinkActivation("path") === "chip") {
+            showLinkChipForPathLink(press, { clientX: event.clientX, clientY: event.clientY });
+            return;
+          }
           // A directory link opens as an explorer listing, a file link renders
           // (ADR-0198). Desktop routes directories to cwd propagation instead,
           // but Remote has no local explorer pane to propagate into.
@@ -2561,6 +2581,334 @@ import {
             pathLinkAtPoint(event.clientX, event.clientY) !== null
           );
         }
+
+        // --- Link action chip (ADR-0224) -----------------------------------
+        // `chip` activation turns a tap on a link into "arm, then execute": the
+        // tap opens nothing and puts a small chip beside the link, and only the
+        // chip's button runs the action. Discovery (underlines, point/screen
+        // scans) is never gated — in either mode.
+        //
+        // The chip carries no host-process action and no cwd propagation. It is
+        // a different presentation of the actions Remote already has, not a new
+        // execution surface (ADR-0045). The host owns both mode settings and
+        // ships them in the navigation payload (same path as ADR-0218).
+
+        const LINK_CHIP_GAP_PX = 6;
+        const LINK_CHIP_EDGE_PX = 4;
+
+        let linkChipTarget = null;
+        let linkChipElement = null;
+
+        function remoteLinkActivation(kind) {
+          const value =
+            kind === "url"
+              ? navigationState?.urlLinkActivation
+              : navigationState?.pathLinkActivation;
+          return value === "chip" ? "chip" : "immediate";
+        }
+
+        function linkChipActions(kind) {
+          if (kind === "url") return ["browser", "copy"];
+          if (kind === "directory") return ["explorer", "copy"];
+          return ["viewer", "copy"];
+        }
+
+        function linkChipActionLabel(action, kind) {
+          if (action === "browser") return "Open in browser";
+          if (action === "explorer") return "Open explorer";
+          if (action === "viewer") return "Open viewer";
+          return kind === "url" ? "Copy URL" : "Copy path";
+        }
+
+        function ensureLinkChipElement() {
+          if (linkChipElement) return linkChipElement;
+          const el = document.createElement("div");
+          el.className = "remote-link-chip";
+          el.hidden = true;
+          // The chip owns its own taps: reaching the terminal would start a
+          // selection and trip the outside-tap dismissal on the way.
+          el.addEventListener("pointerdown", (event) => event.stopPropagation());
+          el.addEventListener("click", (event) => {
+            const button = event.target?.closest?.("[data-link-chip-action]");
+            if (!button) return;
+            event.preventDefault();
+            event.stopPropagation();
+            runLinkChipAction(button.dataset.linkChipAction);
+          });
+          terminalHost.append(el);
+          linkChipElement = el;
+          return el;
+        }
+
+        function linkChipContains(node) {
+          return Boolean(linkChipElement && node instanceof Node && linkChipElement.contains(node));
+        }
+
+        function dismissLinkChip() {
+          const previous = linkChipTarget;
+          linkChipTarget = null;
+          if (linkChipElement) linkChipElement.hidden = true;
+          // The marker only exists to follow this chip's row — retire it with it.
+          try {
+            previous?.marker?.dispose?.();
+          } catch (_) {}
+        }
+
+        /**
+         * A marker follows the target row as the scrollback trims, exactly as an
+         * underline's marker does (`livePathLinkBufferLine`). Without it the chip
+         * would re-check a frozen absolute line while the underline re-checks the
+         * live one, and the two would judge different rows — the very split
+         * ADR-0224 §3 ("the chip shares the underline's lifetime") forbids.
+         */
+        function registerLinkChipMarker(bufferLine) {
+          const term = terminal;
+          if (!term || !(bufferLine >= 1)) return null;
+          try {
+            const buffer = term.buffer.active;
+            const cursorAbsoluteLine = (buffer.baseY || 0) + (buffer.cursorY || 0);
+            const offset = Math.trunc(bufferLine - 1 - cursorAbsoluteLine);
+            if (!Number.isFinite(offset)) return null;
+            return term.registerMarker(offset) || null;
+          } catch (_) {
+            return null;
+          }
+        }
+
+        // One chip at a time: a new activation replaces the previous one.
+        function showLinkChip(target, point) {
+          const actions = linkChipActions(target.kind);
+          if (actions.length === 0) return;
+          const el = ensureLinkChipElement();
+          // Replacing is dismissing: retire the outgoing chip's marker first.
+          dismissLinkChip();
+          linkChipTarget = { ...target, marker: registerLinkChipMarker(target.bufferLine) };
+          el.replaceChildren(
+            ...actions.map((action) => {
+              const button = document.createElement("button");
+              button.type = "button";
+              button.className = "remote-link-chip-action";
+              button.dataset.linkChipAction = action;
+              button.textContent = linkChipActionLabel(action, target.kind);
+              return button;
+            })
+          );
+          el.hidden = false;
+          positionLinkChip(el, point);
+        }
+
+        // Below the tap by default (the finger is on the link), flipped above
+        // when the bottom edge has no room, clamped inside the host either way.
+        function positionLinkChip(el, point) {
+          const hostRect = terminalHost.getBoundingClientRect();
+          const width = el.offsetWidth;
+          const height = el.offsetHeight;
+          let top = point.clientY - hostRect.top + LINK_CHIP_GAP_PX;
+          if (top + height > hostRect.height - LINK_CHIP_EDGE_PX) {
+            top = point.clientY - hostRect.top - height - LINK_CHIP_GAP_PX;
+          }
+          if (top < LINK_CHIP_EDGE_PX) top = LINK_CHIP_EDGE_PX;
+          let left = point.clientX - hostRect.left;
+          const maxLeft = hostRect.width - width - LINK_CHIP_EDGE_PX;
+          if (left > maxLeft) left = maxLeft;
+          if (left < LINK_CHIP_EDGE_PX) left = LINK_CHIP_EDGE_PX;
+          el.style.top = `${Math.round(top)}px`;
+          el.style.left = `${Math.round(left)}px`;
+        }
+
+        function runLinkChipAction(action) {
+          const target = linkChipTarget;
+          dismissLinkChip();
+          if (!target || !action) return;
+          if (action === "copy") {
+            writeClipboardText(target.value).catch((err) =>
+              setStatus(`Copy failed: ${err.message || err}`, true)
+            );
+            return;
+          }
+          if (action === "browser") {
+            // ADR-0162 unchanged: the same validated opener and the same native
+            // bridge, only reached after the user picked the action.
+            openRemoteUrl(target.value);
+            return;
+          }
+          // The capability that validated this path must still be the live one —
+          // a lease or terminal switch between the tap and the chip's button
+          // must not open a path from another pane.
+          if (
+            activeTerminalId !== target.terminalId ||
+            leaseId !== target.leaseId ||
+            fileViewerToken !== target.fileViewerToken
+          ) return;
+          if (action === "explorer") {
+            openFileExplorerOverlay({ path: target.value });
+            return;
+          }
+          if (action === "viewer") openFileViewerOverlay(target.value);
+        }
+
+        /**
+         * The chip's current 1-based buffer line. The marker wins when it is
+         * alive (the underline rule), and a disposed marker means the coordinate
+         * itself is gone — the same fail-closed answer `pathLinkEntryStillOnScreen`
+         * gives. Only a chip that never got a marker falls back to its capture.
+         */
+        function liveLinkChipBufferLine(target) {
+          if (!target) return null;
+          const marker = target.marker;
+          if (marker) {
+            if (marker.isDisposed === true || typeof marker.line !== "number") return null;
+            return marker.line + 1;
+          }
+          return target.bufferLine >= 1 ? target.bufferLine : null;
+        }
+
+        function linkChipTokenStillOnScreen(target) {
+          const bufferLine = liveLinkChipBufferLine(target);
+          if (bufferLine === null) return false;
+          const line = terminal?.buffer?.active?.getLine?.(bufferLine - 1);
+          if (!line) return false;
+          const { text, columns } = reconstructRemoteLinkLine(line);
+          const offset = columns.indexOf(target.startCol);
+          if (offset < 0) return false;
+          return text.slice(offset, offset + target.token.length) === target.token;
+        }
+
+        // The chip's lifetime is the underline's lifetime — the same stable-frame
+        // judgment (ADR-0220), not a rule of its own. A URL has no underline
+        // entry, so the capture taken when the chip opened stands in for it.
+        function revalidateLinkChip() {
+          if (!linkChipTarget) return;
+          if (linkChipTokenStillOnScreen(linkChipTarget)) return;
+          dismissLinkChip();
+        }
+
+        function handleLinkChipKeyDown(event) {
+          if (!linkChipTarget || event.key !== "Escape") return;
+          event.preventDefault();
+          event.stopPropagation();
+          dismissLinkChip();
+        }
+
+        function handleLinkChipOutsidePointerDown(event) {
+          if (!linkChipTarget) return;
+          if (linkChipContains(event.target)) return;
+          dismissLinkChip();
+        }
+
+        // A validated underline tap in `chip` mode. The press already captured
+        // the entry's (line, columns, token), so the chip re-uses that instead
+        // of holding a decoration this very tap's selection change may dispose.
+        function showLinkChipForPathLink(press, point) {
+          showLinkChip(
+            {
+              kind: press.kind === "directory" ? "directory" : "file",
+              value: press.path,
+              bufferLine: press.bufferLine,
+              startCol: press.startCol,
+              endCol: press.endCol,
+              token: press.token,
+              terminalId: press.terminalId,
+              leaseId: press.leaseId,
+              fileViewerToken: press.fileViewerToken,
+            },
+            point
+          );
+        }
+
+        // Every URL activation path (OSC 8 linkHandler, WebLinksAddon plain
+        // text, the `#123` provider) goes through this one gate.
+        function activateRemoteUrlLink(uri, event, range) {
+          if (remoteLinkActivation("url") !== "chip") {
+            openRemoteUrl(uri);
+            return;
+          }
+          const point = event
+            ? { clientX: event.clientX, clientY: event.clientY }
+            : { clientX: 0, clientY: 0 };
+          const target = captureUrlLinkChipTarget(uri, point, range);
+          // No capture, no chip — opening nothing is the fail-closed side of
+          // "arm, don't execute" (see captureUrlLinkChipTarget).
+          if (!target) return;
+          showLinkChip(target, point);
+        }
+
+        /**
+         * Returns null when the cell range cannot be pinned down. WebLinksAddon
+         * hands over no range, so the URL is found again on the tapped row; when
+         * the on-screen text differs from the resolved uri (a row-wrapped link,
+         * say) that search fails. Capturing the single tapped cell instead would
+         * make any row that happens to show that one character pass the liveness
+         * re-check, keeping the chip alive over a repaint that erased the URL. A
+         * missing chip is the honest outcome — the tap executes nothing either
+         * way, which is exactly what `chip` mode promises.
+         */
+        function captureUrlLinkChipTarget(uri, point, range) {
+          const term = terminal;
+          let bufferLine = range?.start?.y ?? 0;
+          let startCol = range?.start?.x ?? 1;
+          let endCol = range?.end?.x ?? term?.cols ?? 1;
+          const coords = term ? touchCellCoords(term, point) : null;
+          if (coords) {
+            const tappedLine = coords.y + 1; // 1-based buffer line
+            const column = coords.x + 1;
+            if (range) {
+              // A link wrapped across rows keeps only the row that was tapped.
+              if (tappedLine >= range.start.y && tappedLine <= range.end.y) {
+                bufferLine = tappedLine;
+                startCol = tappedLine === range.start.y ? range.start.x : 1;
+                endCol = tappedLine === range.end.y ? range.end.x : term.cols;
+              }
+            } else {
+              // WebLinksAddon hands over no range — find the URL on the row.
+              const found = findRemoteTokenCellRange(term, tappedLine, uri, column);
+              if (!found) return null;
+              bufferLine = tappedLine;
+              startCol = found.startCol;
+              endCol = found.endCol;
+            }
+          } else if (!range) {
+            // Neither coordinates nor a range — nothing to re-check later.
+            return null;
+          }
+          const token = readRemoteCellRangeText(term, bufferLine, startCol, endCol);
+          if (token.length === 0) return null;
+          return { kind: "url", value: uri, bufferLine, startCol, endCol, token };
+        }
+
+        function findRemoteTokenCellRange(term, bufferLine, token, column) {
+          const line = term?.buffer?.active?.getLine?.(bufferLine - 1);
+          if (!line || !token) return null;
+          const { text, columns, endColumns } = reconstructRemoteLinkLine(line);
+          let from = 0;
+          for (;;) {
+            const offset = text.indexOf(token, from);
+            if (offset < 0) return null;
+            const startCol = columns[offset];
+            const endCol = endColumns[offset + token.length - 1];
+            if (
+              startCol !== undefined &&
+              endCol !== undefined &&
+              column >= startCol &&
+              column <= endCol
+            ) {
+              return { startCol, endCol };
+            }
+            from = offset + 1;
+          }
+        }
+
+        function readRemoteCellRangeText(term, bufferLine, startCol, endCol) {
+          const line = bufferLine >= 1 ? term?.buffer?.active?.getLine?.(bufferLine - 1) : null;
+          if (!line) return "";
+          const { text, columns, endColumns } = reconstructRemoteLinkLine(line);
+          let out = "";
+          for (let offset = 0; offset < text.length; offset += 1) {
+            if (columns[offset] >= startCol && endColumns[offset] <= endCol) out += text[offset];
+          }
+          return out;
+        }
+        // --- end Link action chip ------------------------------------------
 
         function loadPreferredInputMode() {
           try {
@@ -3918,18 +4266,20 @@ import {
                 const startX = columns[match.startOffset];
                 const endX = columns[match.endOffset];
                 if (startX === undefined || endX === undefined) return [];
+                const range = {
+                  start: { x: startX, y: bufferLineNumber },
+                  end: { x: endX, y: bufferLineNumber },
+                };
                 return [{
-                  range: {
-                    start: { x: startX, y: bufferLineNumber },
-                    end: { x: endX, y: bufferLineNumber },
-                  },
+                  range,
                   text: `#${match.number}`,
-                  activate: () => {
+                  activate: (event) => {
                     if (
                       repoRevision !== githubRepoRequestRevision ||
                       activeGithubRepoBase !== repoBase
                     ) return;
-                    openRemoteUrl(`${repoBase}/issues/${match.number}`);
+                    // ADR-0224: an issue token is a URL link — same gate.
+                    activateRemoteUrlLink(`${repoBase}/issues/${match.number}`, event, range);
                   },
                 }];
               });
@@ -3982,7 +4332,9 @@ import {
             // non-HTTP rejection enabled and route accepted web links through
             // the same safe browser opener as plain-text links.
             linkHandler: {
-              activate: (_event, uri) => openRemoteUrl(uri),
+              // ADR-0224: the activation gate decides whether this opens now or
+              // arms a chip. xterm's range becomes the chip's lifetime capture.
+              activate: (event, uri, range) => activateRemoteUrlLink(uri, event, range),
               allowNonHttpProtocols: false,
             },
           };
@@ -5015,8 +5367,8 @@ import {
           // OSC 8 links still use linkHandler and the Rust asset test guards
           // the production bundle. Plain-text link activation degrades only.
           if (WebLinksAddonCtor) {
-            const webLinksAddon = new WebLinksAddonCtor((_event, uri) =>
-              openRemoteUrl(uri)
+            const webLinksAddon = new WebLinksAddonCtor((event, uri) =>
+              activateRemoteUrlLink(uri, event)
             );
             terminal.loadAddon(webLinksAddon);
           }
@@ -5110,6 +5462,9 @@ import {
           });
           terminal.onResize(({ cols, rows }) => {
             schedulePathLinkSelectionEvaluation();
+            // ADR-0224: reflow moves every cell, so the chip's captured range
+            // no longer means anything.
+            dismissLinkChip();
             // Reflow moves every cell: the previous screen scan is void and its
             // signature must not suppress the rescan (ADR-0188).
             clearPathLinkScope("screen");
@@ -5121,6 +5476,11 @@ import {
             updateTerminalControls();
             updateSelectionHandles(terminal);
             if (!terminal.hasSelection()) lastCopiedSelection = "";
+            // ADR-0224: *starting* a selection dismisses the chip. Clearing one
+            // does not — the window-capture pointerup that arms a chip runs
+            // before xterm settles its selection, so keying off every change
+            // would kill the chip on the very tap that opened it.
+            if (terminal.hasSelection()) dismissLinkChip();
             // Dragging emits one event per changed cell. Clear stale visuals
             // immediately, but wait for the selection to settle before the
             // HTTP -> bridge -> filesystem validation.
@@ -5133,6 +5493,9 @@ import {
             updateSelectionHandles(terminal);
             updateScrollToBottomButton(terminal);
             scheduleCropTransform();
+            // ADR-0224: the chip is parked at absolute host coordinates and does
+            // not follow a marker, so a scroll retires it.
+            dismissLinkChip();
             // A new viewport is a new screen to scan once it settles (ADR-0188).
             schedulePathLinkIdleScan();
             // Only a viewport that *arrives* at row 0 under a gesture counts as
@@ -11073,6 +11436,11 @@ import {
         terminalHost.addEventListener("mousemove", handlePathLinkMouseMove);
         window.addEventListener("pointerup", handlePathLinkPointerUp, true);
         window.addEventListener("pointercancel", handlePathLinkPointerCancel, true);
+        // ADR-0224: a tap outside the chip, or Escape, dismisses it. Both are
+        // capture-phase so the terminal cannot swallow them first; the chip's own
+        // taps are recognised by containment, not by stopPropagation.
+        window.addEventListener("pointerdown", handleLinkChipOutsidePointerDown, true);
+        window.addEventListener("keydown", handleLinkChipKeyDown, true);
         // xterm completes a mouse selection from a document-level mouseup handler.
         // Listen at the same boundary so releasing an outside-terminal drag still
         // schedules the copy after every listener for this event has run.
@@ -11515,6 +11883,8 @@ import {
           terminalHost.removeEventListener("mousemove", handlePathLinkMouseMove);
           window.removeEventListener("pointerup", handlePathLinkPointerUp, true);
           window.removeEventListener("pointercancel", handlePathLinkPointerCancel, true);
+          window.removeEventListener("pointerdown", handleLinkChipOutsidePointerDown, true);
+          window.removeEventListener("keydown", handleLinkChipKeyDown, true);
           clearPathLinkSelection();
           closeFileViewer();
         });

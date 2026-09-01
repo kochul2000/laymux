@@ -136,7 +136,11 @@ fn semantic_enum_and_range_errors_are_rejected() {
         &Settings::default(),
         &json!({
             "language": "xx",
-            "terminal": { "composerHistoryScope": "everything" },
+            "terminal": {
+                "composerHistoryScope": "everything",
+                "urlLinkActivation": "sheet",
+                "pathLinkActivation": "double-click"
+            },
             "profileDefaults": { "opacity": 9, "font": { "size": 100 } }
         }),
     );
@@ -147,6 +151,10 @@ fn semantic_enum_and_range_errors_are_rejected() {
         // ADR-0055: an unknown sharing scope must be rejected, not silently
         // widened to a shared bucket.
         "/terminal/composerHistoryScope",
+        // ADR-0224: 링크 실행 게이트는 두 값만 있다. 알 수 없는 모드를 조용히
+        // "immediate" 로 흡수하면 사용자는 칩을 켠 줄 알고 계속 즉발을 겪는다.
+        "/terminal/urlLinkActivation",
+        "/terminal/pathLinkActivation",
         "/profileDefaults/opacity",
         "/profileDefaults/font/size",
     ] {
@@ -705,6 +713,42 @@ fn rust_settings_model_preserves_frontend_owned_fields() {
     assert_eq!(serialized["terminal"]["pathLinkMaxLength"], 1024);
     assert_eq!(serialized["terminal"]["pathLinkOsOpenConfirm"], false);
     assert_eq!(serialized["terminal"]["pathLinkOsOpenEnabled"], true);
+}
+
+#[test]
+fn link_activation_defaults_to_immediate_and_round_trips_chip() {
+    // ADR-0224: 기본값은 현행 동작(즉발)이다. 두 키는 독립이므로 한쪽만 chip 으로
+    // 올려도 다른 쪽이 따라 올라가지 않는다.
+    let defaults = Settings::default().terminal;
+    assert_eq!(defaults.url_link_activation, "immediate");
+    assert_eq!(defaults.path_link_activation, "immediate");
+
+    let settings: Settings = serde_json::from_value(json!({
+        "terminal": { "pathLinkActivation": "chip" }
+    }))
+    .unwrap();
+    assert_eq!(settings.terminal.path_link_activation, "chip");
+    assert_eq!(settings.terminal.url_link_activation, "immediate");
+
+    let serialized = serde_json::to_value(settings).unwrap();
+    assert_eq!(serialized["terminal"]["pathLinkActivation"], "chip");
+    assert_eq!(serialized["terminal"]["urlLinkActivation"], "immediate");
+}
+
+#[test]
+fn link_activation_metadata_applies_live() {
+    // 두 키는 즉시 적용이다 — 다음 pane 을 열 때까지 기다리지 않는다.
+    for path in [
+        "/terminal/urlLinkActivation",
+        "/terminal/pathLinkActivation",
+    ] {
+        let metadata = metadata_for_path(path);
+        assert_eq!(metadata.apply_mode, ApplyMode::Live, "{path}");
+        assert!(metadata.writable, "{path}");
+        assert!(!metadata.sensitive, "{path}");
+        // 부모(/terminal) 설명을 물려받지 않고 자기 문구를 갖는다.
+        assert!(metadata.description.contains("chip"), "{path}");
+    }
 }
 
 #[test]

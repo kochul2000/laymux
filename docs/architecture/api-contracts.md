@@ -164,6 +164,33 @@ settings store 가 누락값을 `true`로 보완한다([ADR-0100](../adr/0100-pa
 `resolve_address_path_following_symlinks` 로 산출하며, 커맨드는 프로세스 spawn 실패만 오류로
 보고한다(Windows `explorer.exe` 는 성공해도 0 이 아닌 종료 코드를 반환하므로 종료 코드를 보지 않는다).
 
+### 링크 실행 게이트 (activation)
+
+```jsonc
+{
+  "terminal": {
+    "urlLinkActivation": "immediate", // 기본값. "immediate" | "chip"
+    "pathLinkActivation": "immediate" // 기본값. "immediate" | "chip"
+  }
+}
+```
+
+두 enum 은 **실행**만 게이트하고 발견(파싱·밑줄)은 어느 값에서도 게이트하지
+않는다([ADR-0224](../adr/0224-link-activation-chip-gate.md)). `urlLinkActivation` 은 URL 로 귀결되는
+링크 전부(OSC 8·평문 URL·들여쓰기 하드랩 결합·`#123` 이슈 토큰), `pathLinkActivation` 은 검증된
+파일·디렉터리 밑줄을 담당한다. 대상별로 독립이므로 한쪽만 `chip` 으로 올릴 수 있고, 조합값을 가진
+단일 키는 만들지 않는다. `chip` 에서 실행 제스처(클릭·탭)는 링크를 열지 않고 액션 칩을 띄우며 칩의
+액션만 실행한다 — desktop 파일=뷰어·OS 로 열기·경로 복사, 디렉터리=CWD 이동·파일 관리자·복사,
+URL=브라우저·복사이고, Remote 는 같은 목록에서 OS 열기와 CWD 전파가 빠진다(ADR-0045).
+
+허용값은 `constants.rs` 의 `LINK_ACTIVATION_MODES` 가 소유하고 `validate_settings` 가
+`/terminal/urlLinkActivation`·`/terminal/pathLinkActivation` 로 보고한다. 이미 디스크에 있는 값은
+검증을 우회할 수 있으므로 프론트엔드 settings store 는 허용값 밖 문자열을 `"immediate"` 로 정규화한다
+(fail closed 가 아니라 현행 동작으로 떨어뜨린다). 데스크톱 수정자 바이패스(ADR-0100 의 Ctrl 계열,
+#352 의 Shift/Alt)는 두 값과 무관하게 즉발이다. Remote 는 두 값을 `/remote/v1/navigation` 응답의
+`urlLinkActivation`·`pathLinkActivation` 로 받는다(ADR-0218 과 같은 전파 경로) — 호스트 설정이
+정본이고 Remote 는 기기 로컬 사본을 갖지 않는다.
+
 ### 사용량 모니터 설정
 
 ```jsonc

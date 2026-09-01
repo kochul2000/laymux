@@ -300,7 +300,8 @@ describe("createIndentedLinkProvider", () => {
     expect(links[0].text).toBe("https://example.com/path?q=1&foo=bar&baz=qux&end=true");
     expect(links[0].range).toEqual({ start: { x: 8, y: 1 }, end: { x: 20, y: 2 } });
 
+    // ADR-0224: 액션 칩을 띄우려면 활성화 이벤트와 버퍼 범위가 함께 필요하다.
     links[0].activate();
-    expect(onClick).toHaveBeenCalledWith(links[0].text);
+    expect(onClick).toHaveBeenCalledWith(links[0].text, undefined, links[0].range);
   });
 });

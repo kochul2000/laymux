@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import type { LinkActivationMode } from "./link-activation";
 import { createPathLinkClickHandlers, PATH_LINK_CLICK_SLOP } from "./path-link-click";
 
 function makeEvent(
@@ -29,23 +30,30 @@ function setup(
     osOpenEnabled?: boolean;
     confirmAlways?: boolean;
     confirmResult?: boolean;
+    activation?: LinkActivationMode;
+    /** 이 target 값에서 온 이벤트를 "칩 자신의 이벤트"로 본다. */
+    chipNode?: unknown;
   } = {},
 ) {
   const activate = vi.fn();
   const confirm = vi.fn(() => options.confirmResult ?? true);
   const onOsHandoffSettled = vi.fn();
+  const showChip = vi.fn();
   const handlers = createPathLinkClickHandlers({
+    isChipEvent: (e) => options.chipNode !== undefined && e.target === options.chipNode,
     getSelectionAt: () =>
       options.inside === false ? null : options.target === undefined ? FILE : options.target,
     getSettings: () => ({
       osOpenEnabled: options.osOpenEnabled ?? true,
       confirmAlways: options.confirmAlways ?? true,
+      activation: options.activation ?? "immediate",
     }),
     confirm,
     activate,
+    showChip,
     onOsHandoffSettled,
   });
-  return { ...handlers, activate, confirm, onOsHandoffSettled };
+  return { ...handlers, activate, confirm, onOsHandoffSettled, showChip };
 }
 
 describe("createPathLinkClickHandlers — event ownership", () => {
@@ -210,5 +218,117 @@ describe("createPathLinkClickHandlers — confirmation gate", () => {
     dir.onMouseUp(makeEvent({ ctrlKey: true }));
     expect(dir.confirm).not.toHaveBeenCalled();
     expect(dir.activate).toHaveBeenCalledWith(DIR, "osOpen");
+  });
+});
+
+// -- ADR-0224: chip 모드 --
+
+describe("createPathLinkClickHandlers — chip mode arms instead of executing", () => {
+  it("shows a chip and executes nothing on a plain click", () => {
+    for (const target of [FILE, DIR]) {
+      const h = setup({ target, activation: "chip" });
+      const down = makeEvent();
+      h.onMouseDown(down);
+      // 칩 모드의 클릭은 "관찰"이다 — 이벤트를 종결하지 않는다.
+      expect(down.preventDefault).not.toHaveBeenCalled();
+      expect(down.stopImmediatePropagation).not.toHaveBeenCalled();
+      h.onMouseUp(makeEvent());
+
+      expect(h.activate).not.toHaveBeenCalled();
+      expect(h.confirm).not.toHaveBeenCalled();
+      expect(h.showChip).toHaveBeenCalledTimes(1);
+      const [chipTarget, actions, point] = h.showChip.mock.calls[0];
+      expect(chipTarget).toBe(target);
+      expect(actions).toEqual(
+        target === FILE ? ["viewer", "osOpen", "copy"] : ["changeDir", "osOpen", "copy"],
+      );
+      expect(point).toEqual({ clientX: 100, clientY: 50 });
+    }
+  });
+
+  it("keeps the Ctrl / Ctrl+Shift bypass immediate in chip mode", () => {
+    const open = setup({ activation: "chip" });
+    open.onMouseDown(makeEvent({ ctrlKey: true }));
+    open.onMouseUp(makeEvent({ ctrlKey: true }));
+    expect(open.showChip).not.toHaveBeenCalled();
+    expect(open.activate).toHaveBeenCalledWith(FILE, "osOpen");
+
+    const reveal = setup({ activation: "chip" });
+    reveal.onMouseDown(makeEvent({ ctrlKey: true, shiftKey: true }));
+    reveal.onMouseUp(makeEvent({ ctrlKey: true, shiftKey: true }));
+    expect(reveal.showChip).not.toHaveBeenCalled();
+    expect(reveal.activate).toHaveBeenCalledWith(FILE, "osReveal");
+  });
+
+  it("still ends the mousedown for the bypass combinations", () => {
+    const h = setup({ activation: "chip" });
+    const e = makeEvent({ ctrlKey: true });
+    h.onMouseDown(e);
+    expect(e.preventDefault).toHaveBeenCalled();
+    expect(e.stopImmediatePropagation).toHaveBeenCalled();
+  });
+
+  it("drops the OS action from the chip when the OS open feature is off", () => {
+    const h = setup({ activation: "chip", osOpenEnabled: false });
+    h.onMouseDown(makeEvent());
+    h.onMouseUp(makeEvent());
+    expect(h.showChip.mock.calls[0][1]).toEqual(["viewer", "copy"]);
+  });
+
+  it("does not show a chip for a drag", () => {
+    const h = setup({ activation: "chip" });
+    h.onMouseDown(makeEvent());
+    h.onMouseUp(makeEvent({ clientX: 100 + PATH_LINK_CLICK_SLOP + 1 }));
+    expect(h.showChip).not.toHaveBeenCalled();
+    expect(h.activate).not.toHaveBeenCalled();
+  });
+
+  it("does not show a chip outside the underline", () => {
+    const h = setup({ activation: "chip", inside: false });
+    h.onMouseDown(makeEvent());
+    h.onMouseUp(makeEvent());
+    expect(h.showChip).not.toHaveBeenCalled();
+  });
+});
+
+// -- ADR-0224: 칩 버튼이 밑줄 위에 겹칠 때 --
+
+describe("createPathLinkClickHandlers — a press never arms from the chip itself", () => {
+  const CHIP = { chipButton: true };
+
+  // 칩은 탭 지점 바로 아래에 그려지므로 다음 줄의 밑줄과 겹칠 수 있고, 밑줄
+  // hit-test 는 z-order 를 보지 않는다. 칩 버튼을 누른 mousedown 이 그 밑줄을
+  // 무장하면 window mouseup 이 칩의 click 보다 먼저 실행된다.
+  it("immediate 모드: 겹친 밑줄이 열리지 않는다", () => {
+    const h = setup({ chipNode: CHIP });
+    h.onMouseDown(makeEvent({ target: CHIP }));
+    h.onMouseUp(makeEvent({ target: CHIP }));
+    expect(h.activate).not.toHaveBeenCalled();
+    expect(h.confirm).not.toHaveBeenCalled();
+  });
+
+  it("chip 모드: 칩 대상이 교체되지 않는다", () => {
+    const h = setup({ activation: "chip", chipNode: CHIP });
+    h.onMouseDown(makeEvent({ target: CHIP }));
+    h.onMouseUp(makeEvent({ target: CHIP }));
+    expect(h.showChip).not.toHaveBeenCalled();
+    expect(h.activate).not.toHaveBeenCalled();
+  });
+
+  it("수정자 조합도 칩 위에서는 이벤트를 종결하지 않는다", () => {
+    const h = setup({ chipNode: CHIP });
+    const e = makeEvent({ target: CHIP, ctrlKey: true });
+    h.onMouseDown(e);
+    expect(e.preventDefault).not.toHaveBeenCalled();
+    expect(e.stopImmediatePropagation).not.toHaveBeenCalled();
+    h.onMouseUp(makeEvent({ target: CHIP, ctrlKey: true }));
+    expect(h.activate).not.toHaveBeenCalled();
+  });
+
+  it("칩 밖 클릭은 그대로 밑줄을 무장한다", () => {
+    const h = setup({ chipNode: CHIP });
+    h.onMouseDown(makeEvent({ target: { terminalCell: true } }));
+    h.onMouseUp(makeEvent({ target: { terminalCell: true } }));
+    expect(h.activate).toHaveBeenCalledWith(FILE, "viewer");
   });
 });

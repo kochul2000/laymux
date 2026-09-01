@@ -75,6 +75,26 @@ export function decidePathLinkClickAction(
 }
 
 /**
+ * 액션 칩(ADR-0224)이 고른 액션을 path-link 라우팅 액션으로 옮긴다. 칩에는
+ * 클립보드 복사·브라우저 열기처럼 path-link 컨트롤러가 모르는 액션도 있으므로,
+ * 그 경우 null 을 돌려 호출부가 자기 경로로 처리하게 한다.
+ */
+export function pathLinkActionForChipAction(action: string): PathLinkClickAction | null {
+  switch (action) {
+    case "viewer":
+      return "viewer";
+    case "changeDir":
+      return "changeDir";
+    case "osOpen":
+      return "osOpen";
+    case "osReveal":
+      return "osReveal";
+    default:
+      return null;
+  }
+}
+
+/**
  * 밑줄 hover 힌트에 쓸 i18n 키. 수정자 클릭은 발견성이 없으므로 밑줄 위에서
  * "Ctrl / Ctrl+Shift 로 무엇을 할 수 있는지" 를 알린다. 기능이 꺼져 있으면
  * 알릴 것이 없으므로 null(라벨 표시 안 함).

@@ -94,6 +94,7 @@ import {
   isSafeAgentCommand,
   resolveAgentCommand,
 } from "@/lib/agent-command";
+import type { LinkActivationMode } from "@/lib/link-activation";
 import { FocusInput, FocusSelect } from "@/components/ui/FormControls";
 import { inputCls, inputStyle } from "@/components/ui/form-control-styles";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
@@ -2015,6 +2016,40 @@ function TerminalSection() {
           checked={terminal.pathLinkOsOpenConfirm}
           onChange={(v) => update({ pathLinkOsOpenConfirm: v })}
         />
+      </SubGroup>
+
+      {/* ADR-0224: 실행 게이트는 URL 과 경로를 따로 고른다. 발견(밑줄)은 어느
+          모드에서도 게이트되지 않으므로 여기에 노출하지 않는다. */}
+      <SubGroup title={t("terminal.linkActivationGroup")}>
+        <SettingRow
+          label={t("terminal.urlLinkActivation")}
+          desc={t("terminal.urlLinkActivationDesc")}
+        >
+          <FocusSelect
+            data-testid="url-link-activation-select"
+            className={inputCls}
+            value={terminal.urlLinkActivation}
+            onChange={(e) => update({ urlLinkActivation: e.target.value as LinkActivationMode })}
+          >
+            <option value="immediate">{t("terminal.linkActivationImmediate")}</option>
+            <option value="chip">{t("terminal.linkActivationChip")}</option>
+          </FocusSelect>
+        </SettingRow>
+
+        <SettingRow
+          label={t("terminal.pathLinkActivation")}
+          desc={t("terminal.pathLinkActivationDesc")}
+        >
+          <FocusSelect
+            data-testid="path-link-activation-select"
+            className={inputCls}
+            value={terminal.pathLinkActivation}
+            onChange={(e) => update({ pathLinkActivation: e.target.value as LinkActivationMode })}
+          >
+            <option value="immediate">{t("terminal.linkActivationImmediate")}</option>
+            <option value="chip">{t("terminal.linkActivationChip")}</option>
+          </FocusSelect>
+        </SettingRow>
       </SubGroup>
 
       <SubGroup title={t("terminal.exitGroup")}>

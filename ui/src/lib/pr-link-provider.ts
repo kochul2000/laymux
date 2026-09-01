@@ -59,10 +59,16 @@ export function findPrTokens(text: string): PrMatch[] {
  *   GitHub repo. Read synchronously on each provideLinks call so the provider
  *   tracks CWD changes without re-registration.
  * @param onClickPr - Invoked with the matched number when a link is activated.
+ *   The activation `MouseEvent` and the token's buffer range come along so the
+ *   caller can gate execution behind an action chip (ADR-0224).
  */
 export function createPrLinkProvider(
   terminal: Terminal,
-  onClickPr: (prNumber: number) => void,
+  onClickPr: (
+    prNumber: number,
+    event?: MouseEvent,
+    range?: { start: { x: number; y: number }; end: { x: number; y: number } },
+  ) => void,
   getRepoBase: () => string | null,
 ): ILinkProvider {
   return {
@@ -98,13 +104,14 @@ export function createPrLinkProvider(
         const startX = columns[match.startCol - 1];
         const endX = endColumns[match.endCol - 1];
         if (startX === undefined || endX === undefined) continue; // out-of-range guard
+        const range = {
+          start: { x: startX, y: bufferLineNumber },
+          end: { x: endX, y: bufferLineNumber },
+        };
         links.push({
-          range: {
-            start: { x: startX, y: bufferLineNumber },
-            end: { x: endX, y: bufferLineNumber },
-          },
+          range,
           text: `#${match.number}`,
-          activate: () => onClickPr(match.number),
+          activate: (event) => onClickPr(match.number, event, range),
         });
       }
 

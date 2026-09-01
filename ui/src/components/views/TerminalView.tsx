@@ -11,7 +11,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { ChevronDownIcon } from "@/components/ui/icons";
 import i18n from "@/i18n";
-import { Terminal } from "@xterm/xterm";
+import { Terminal, type IMarker } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -33,10 +33,18 @@ import {
   shouldEnableTerminalWebgl,
 } from "@/lib/terminal-view-runtime";
 import { createPathLinkController, type VerifiedPathSelection } from "@/lib/path-link-provider";
-import { pathLinkHintKey } from "@/lib/path-link-os-open";
+import { pathLinkHintKey, pathLinkActionForChipAction } from "@/lib/path-link-os-open";
 import { osHandoffConfirmKey } from "@/lib/os-handoff";
-import { createPathLinkClickHandlers, PATH_LINK_CLICK_SLOP } from "@/lib/path-link-click";
+import {
+  createPathLinkClickHandlers,
+  passOsHandoffGate,
+  PATH_LINK_CLICK_SLOP,
+} from "@/lib/path-link-click";
 import { createPathLinkHint } from "@/lib/path-link-hint";
+import { linkChipLabelKey, type LinkChipAction } from "@/lib/link-activation";
+import { createLinkChip, type LinkChipAnchor } from "@/lib/link-chip";
+import { createLinkChipSession, type LinkChipTargetShape } from "@/lib/link-chip-session";
+import { captureUrlChipRange, liveChipBufferLine } from "@/lib/link-chip-capture";
 import { createPathLinkPointEvaluator, PATH_LINK_HOVER_DWELL_MS } from "@/lib/path-link-point";
 import {
   extractPathCandidatesFromSelection,
@@ -47,7 +55,7 @@ import {
   pathSelectionLimits,
   resolveOverlappingRanges,
 } from "@/lib/path-link-detect";
-import { readLineCells } from "@/lib/terminal-cell-map";
+import { readCellRangeText, readLineCells } from "@/lib/terminal-cell-map";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { WebglAddon } from "@xterm/addon-webgl";
 import {
@@ -1351,9 +1359,11 @@ export function TerminalView({
       // dialog inside the Tauri webview. Route them through the same
       // openExternal path as plain-text links so they open the OS browser
       // (issue #345).
+      // ADR-0224: 실행은 activation 설정을 통과한다. `chip` 모드면 여기서 열지
+      // 않고 칩을 띄운다. xterm 이 주는 range 는 칩 수명 판정의 캡처가 된다.
       linkHandler: {
-        activate: (_event, uri) => {
-          openExternal(uri).catch(() => {});
+        activate: (event, uri, range) => {
+          activateUrlLink(uri, event, range);
         },
       },
     });
@@ -1366,8 +1376,8 @@ export function TerminalView({
     activateTerminalUnicodeProvider(terminal);
 
     const fitAddon = new FitAddon();
-    const webLinksAddon = new WebLinksAddon((_event, uri) => {
-      openExternal(uri).catch(() => {});
+    const webLinksAddon = new WebLinksAddon((event, uri) => {
+      activateUrlLink(uri, event);
     });
 
     terminal.loadAddon(fitAddon);
@@ -1431,7 +1441,7 @@ export function TerminalView({
     terminal.registerLinkProvider(
       createIndentedLinkProvider(
         terminal,
-        (uri) => openExternal(uri).catch(() => {}),
+        (uri, event, range) => activateUrlLink(uri, event, range),
         () => useSettingsStore.getState().paste.linkJoin,
       ),
     );
@@ -1445,9 +1455,9 @@ export function TerminalView({
     terminal.registerLinkProvider(
       createPrLinkProvider(
         terminal,
-        (n) => {
+        (n, event, range) => {
           const base = repoBaseRef.current;
-          if (base) openExternal(`${base}/issues/${n}`).catch(() => {});
+          if (base) activateUrlLink(`${base}/issues/${n}`, event, range);
         },
         () => repoBaseRef.current,
       ),
@@ -1510,6 +1520,179 @@ export function TerminalView({
     });
     pathLinkControllerRef.current = pathLink;
 
+    // ADR-0224 액션 칩. `chip` 모드에서 클릭은 링크를 열지 않고 이 칩을 띄우며,
+    // 칩의 버튼을 눌러야 실행된다. 칩은 surface-local UI 상태이므로 스토어에도
+    // localStorage 에도 넣지 않고(ADR-0004) 이 effect 가 소유한다. 수명 판정은
+    // 밑줄과 같은 "캡처한 컬럼 범위에 원문이 남아 있는가"이며, 그 판정 시점은
+    // ADR-0220 의 안정 프레임을 그대로 공유한다(별도 수명 규칙을 만들지 않는다).
+    type TerminalLinkChipTarget = LinkChipTargetShape & {
+      /** path 대상의 원본 검증 선택. URL 칩에는 없다. */
+      selection?: VerifiedPathSelection;
+      /**
+       * 칩이 사는 동안 대상 줄을 따라가는 마커. 밑줄이 저장한 라인 번호가 아니라
+       * 마커의 현재 라인을 믿는 것과 같은 이유다(`path-link-provider` 의
+       * `tokenStillAtRange`) — scrollback trim 은 절대 라인 번호를 밀어내므로,
+       * 동결된 번호로 재검사하면 밑줄과 칩이 서로 다른 줄을 본다. 마커 등록에
+       * 실패했으면 undefined 이고 그때만 캡처한 번호로 떨어진다.
+       */
+      marker?: IMarker;
+    };
+    const linkChipView = createLinkChip(wrapperRef.current);
+    /** 칩 대상 줄을 따라갈 마커. 버퍼 밖이거나 등록에 실패하면 undefined. */
+    const registerChipMarker = (bufferLine: number): IMarker | undefined => {
+      try {
+        const buffer = terminal.buffer.active;
+        const cursorAbsY = (buffer.baseY ?? 0) + (buffer.cursorY ?? 0);
+        const offset = Math.trunc(bufferLine - 1 - cursorAbsY);
+        if (!Number.isFinite(offset)) return undefined;
+        return terminal.registerMarker(offset) ?? undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    const readPathLinkClickSettings = () => {
+      const terminalSettings = useSettingsStore.getState().terminal;
+      return {
+        osOpenEnabled: terminalSettings.pathLinkOsOpenEnabled,
+        confirmAlways: terminalSettings.pathLinkOsOpenConfirm,
+        activation: terminalSettings.pathLinkActivation,
+      };
+    };
+    const confirmOsHandoff = ({ path }: { path: string }) =>
+      window.confirm(i18n.t(osHandoffConfirmKey(path), { ns: "common", path }));
+    /** 1-based 버퍼 라인의 셀. 라인이 없으면 null. */
+    const readChipLineCells = (bufferLine: number) => {
+      const line = terminalRef.current?.buffer.active.getLine(bufferLine - 1);
+      return line ? readLineCells(line) : null;
+    };
+    /** 캡처한 (라인, 컬럼 범위) 에 지금 쓰여 있는 문자열. 라인을 못 읽으면 null. */
+    const readChipRangeText = (target: TerminalLinkChipTarget): string | null => {
+      // 마커가 라인의 정본이다 — 밑줄 재검증과 같은 규칙(link-chip-capture 주석).
+      const bufferLine = liveChipBufferLine(target);
+      if (bufferLine === null) return null;
+      const cells = readChipLineCells(bufferLine);
+      if (!cells) return null;
+      return readCellRangeText(cells, target.startCol, target.endCol);
+    };
+    const linkChip = createLinkChipSession<TerminalLinkChipTarget>({
+      view: linkChipView,
+      labelFor: (action, kind) => i18n.t(linkChipLabelKey(action, kind), { ns: "common" }),
+      isTokenAlive: (target) => readChipRangeText(target) === target.token,
+      // 칩이 사라지면 그 줄을 따라가던 마커도 함께 거둔다(교체·실행 포함).
+      onDismiss: (target) => target.marker?.dispose(),
+      run: (target, action) => {
+        if (action === "copy") {
+          clipboardWriteText(target.value).catch((err) => {
+            console.warn(`[linkChip] ${instanceId} 복사 실패:`, err);
+          });
+          return;
+        }
+        if (action === "browser") {
+          openExternal(target.value).catch(() => {});
+          return;
+        }
+        const selection = target.selection;
+        const pathAction = pathLinkActionForChipAction(action);
+        if (!selection || !pathAction) return;
+        // ADR-0100 의 확인 정책은 칩에서도 똑같이 통과한다 — 칩은 기존 액션의
+        // 표시 방식일 뿐이고, 하드 클래스 확인은 모드·경로와 무관하다.
+        if (
+          !passOsHandoffGate(selection, pathAction, {
+            getSettings: readPathLinkClickSettings,
+            confirm: confirmOsHandoff,
+            onOsHandoffSettled: () => terminalRef.current?.focus(),
+          })
+        ) {
+          return;
+        }
+        pathLink.activate(selection, pathAction);
+      },
+    });
+    /** 칩 기준 사각형 — 사용자가 방금 누른 지점이 곧 링크 위다. */
+    const chipAnchorAt = (point: { clientX: number; clientY: number }): LinkChipAnchor => ({
+      left: point.clientX,
+      right: point.clientX,
+      top: point.clientY,
+      bottom: point.clientY,
+    });
+    const openLinkChip = (
+      target: TerminalLinkChipTarget,
+      actions: readonly LinkChipAction[],
+      point: { clientX: number; clientY: number },
+    ) => {
+      linkChip.open({
+        target: { ...target, marker: registerChipMarker(target.bufferLine) },
+        anchor: chipAnchorAt(point),
+        actions,
+      });
+    };
+
+    /**
+     * URL 링크 활성화의 단일 관문(ADR-0224). `immediate` 면 기존처럼 즉시 열고,
+     * `chip` 이면 아무것도 열지 않고 칩을 띄운다.
+     *
+     * #352 수정자 우회는 이 함수를 거치지 않는다 — 수정자 자체가 명시적 제스처
+     * 이므로 모드와 무관하게 즉발이다(ADR-0224 Decision 4).
+     *
+     * 함수 선언인 이유: xterm 옵션(`linkHandler`)과 addon 핸들러가 이 지점보다
+     * 위에서 클로저를 만든다. 호이스팅으로 그 클로저들이 같은 관문을 부른다.
+     */
+    function activateUrlLink(
+      uri: string,
+      event?: MouseEvent,
+      range?: { start: { x: number; y: number }; end: { x: number; y: number } },
+    ) {
+      if (useSettingsStore.getState().terminal.urlLinkActivation !== "chip") {
+        openExternal(uri).catch(() => {});
+        return;
+      }
+      const target = captureUrlChipTarget(uri, event, range);
+      // 캡처에 실패하면 칩을 띄우지 않는다 — 아무것도 실행하지 않는 쪽이
+      // `chip` 모드의 fail closed 다(captureUrlChipTarget 주석 참고).
+      if (!target) return;
+      const point = event
+        ? { clientX: event.clientX, clientY: event.clientY }
+        : { clientX: 0, clientY: 0 };
+      openLinkChip(target, ["browser", "copy"], point);
+    }
+
+    /**
+     * URL 칩의 대상 캡처. URL 은 밑줄 엔트리가 없으므로 칩 생성 시점의
+     * (버퍼 라인, 컬럼 범위, 원문)을 잡아 두고 path 와 같은 판정을 적용한다.
+     * 여러 줄에 걸친 링크는 사용자가 클릭한 줄의 구간만 캡처한다.
+     *
+     * **셀 범위를 확정하지 못하면 null 이다.** `WebLinksAddon` 은 범위를 주지
+     * 않으므로 클릭한 줄에서 URL 을 되찾는데, 화면 원문과 uri 가 다르면(줄바꿈
+     * 결합 등) 못 찾는다. 그때 클릭 셀 한 칸만 캡처하면 그 한 글자가 아무 줄에서나
+     * 우연히 일치해 재검사를 통과하고, URL 이 지워진 화면에서도 칩이 살아남는다.
+     * 한 칸짜리 가짜 캡처를 만드느니 칩을 포기한다 — 클릭이 아무것도 실행하지
+     * 않는 것이 `chip` 모드의 계약이고, 즉시 열고 싶으면 #352 Shift/Alt 우회가
+     * 모드와 무관하게 남아 있다.
+     */
+    function captureUrlChipTarget(
+      uri: string,
+      event?: MouseEvent,
+      range?: { start: { x: number; y: number }; end: { x: number; y: number } },
+    ): TerminalLinkChipTarget | null {
+      const t = terminalRef.current ?? terminal;
+      const coords = event ? getClickCellCoords(t, event) : null;
+      let clicked: { bufferLine: number; col: number } | undefined;
+      if (coords) {
+        const [col, viewportRow] = coords; // 1-based
+        const viewportY = (t.buffer.active as { viewportY?: number }).viewportY ?? 0;
+        clicked = { bufferLine: viewportY + viewportRow, col };
+      }
+      const capture = captureUrlChipRange({
+        uri,
+        cols: t.cols,
+        clicked,
+        range,
+        readCells: readChipLineCells,
+      });
+      if (!capture) return null;
+      return { kind: "url", value: uri, ...capture };
+    }
+
     // 검증된 경로가 선택돼 클릭 가능할 때 포인터(손가락) 커서를 호스트에 직접
     // 적용한다. xterm 의 링크 hover 포인터는 *활성 텍스트 선택* 위에서는 선택
     // 커서(I-beam)에 밀려 적용되지 않으므로(우리 모델은 항상 선택이 떠 있다),
@@ -1529,6 +1712,9 @@ export function TerminalView({
       pathLinkRevalidationDeferred = false;
       const droppedPathLinks = pathLink.revalidate();
       if (droppedPathLinks > 0) setPathLinkCursor(false);
+      // ADR-0224: 칩 수명은 밑줄 수명에 종속한다 — 같은 안정 프레임에서 같은
+      // 판정을 받는다(별도 수명 규칙을 만들지 않는다).
+      linkChip.revalidate();
     };
 
     // 검증된 링크를 비우고(있으면) 밑줄 데코레이션을 거둔다. 선택 해제/변경 공통
@@ -1538,6 +1724,10 @@ export function TerminalView({
       setPathLinkCursor(false);
       pathLinkHint.hide();
       pathLink.clear();
+      // ADR-0224: 선택 시작/변경은 칩을 소멸시킨다. 칩을 띄운 클릭의 선택 해제는
+      // 이보다 먼저 도착하므로(document mouseup → window mouseup) 자기 칩을
+      // 지우지 않는다.
+      linkChip.dismiss("selection");
     };
 
     // ADR-0188 `point` 트리거. hover dwell 과 이동 없는 클릭이 공유하며, 포인터
@@ -2857,6 +3047,9 @@ export function TerminalView({
       // 잡는다. 스크롤 뒤 포인터가 멈춰 있으면 라벨만 옛 좌표에 남으므로 감춘다
       // (다음 mousemove 가 필요하면 다시 그린다).
       pathLinkHint.hide();
+      // ADR-0224: 칩은 링크 옆 절대 좌표에 떠 있고 마커를 따라가지 않는다.
+      // 스크롤은 칩을 소멸시킨다(캡처한 라인 번호가 밀리는 경합도 함께 닫힌다).
+      linkChip.dismiss("scroll");
     });
     // Issue #530: 앱 비활성화(Alt-Tab 등)에서 webview 가 helper textarea 의 실제
     // DOM focus 를 body/null 로 떨어뜨려도 store 의 pane focus 는 그대로이므로
@@ -3130,13 +3323,14 @@ export function TerminalView({
       setPathLinkCursor(inside);
       // #687: 수정자 클릭은 발견성이 없으므로, 밑줄 위에 있을 때만 무엇을 할 수
       // 있는지 라벨로 알린다. 기능이 꺼져 있으면 알릴 것이 없다.
+      // ADR-0224: `chip` 모드에서는 칩 자체가 액션 목록을 보여 주므로 hover 힌트
+      // 라벨을 대체한다. `immediate` 모드의 라벨은 그대로다.
       const sel = hit?.selection ?? null;
-      const hintKey = sel
-        ? pathLinkHintKey(
-            sel.isDirectory,
-            useSettingsStore.getState().terminal.pathLinkOsOpenEnabled,
-          )
-        : null;
+      const terminalSettings = useSettingsStore.getState().terminal;
+      const hintKey =
+        sel && terminalSettings.pathLinkActivation !== "chip"
+          ? pathLinkHintKey(sel.isDirectory, terminalSettings.pathLinkOsOpenEnabled)
+          : null;
       if (rect && hintKey) pathLinkHint.show(rect, i18n.t(hintKey, { ns: "common" }));
       else pathLinkHint.hide();
       // ADR-0188: 포인터가 멈추면 그 지점 하나를 검증한다(밑줄 위면 생략).
@@ -3146,6 +3340,20 @@ export function TerminalView({
       cancelPathLinkHoverDwell();
       pathLinkHint.hide();
     };
+    // ADR-0224: Esc 는 칩을 닫는다. 칩이 떠 있을 때만 소비하므로(그 외에는 false)
+    // TUI 로 가는 평소의 Esc 는 그대로 흐른다. capture 단계여야 xterm 이 먼저
+    // PTY 로 보내 버리지 않는다.
+    const handleLinkChipKeyDown = (event: KeyboardEvent) => {
+      if (!linkChip.handleKeyDown(event.key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    // 칩 밖 클릭/탭도 칩을 닫는다. 칩 안(버튼)이면 유지한다.
+    const handleLinkChipOutsidePointerDown = (event: PointerEvent) => {
+      linkChip.handlePointerDown(event.target);
+    };
+    outerEl?.addEventListener("keydown", handleLinkChipKeyDown, true);
+    window.addEventListener("pointerdown", handleLinkChipOutsidePointerDown, true);
     outerEl?.addEventListener("keydown", handleKeyDown);
     outerEl?.addEventListener("mousemove", handleMouseMove);
     outerEl?.addEventListener("mouseleave", handleMouseLeave);
@@ -3166,16 +3374,29 @@ export function TerminalView({
     // 스토어·i18n·터미널 포커스만 주입해 배선한다.
     const pathLinkClick = createPathLinkClickHandlers<VerifiedPathSelection>({
       getSelectionAt: (x, y) => pathLink.getHit(x, y)?.selection ?? null,
-      getSettings: () => {
-        const terminalSettings = useSettingsStore.getState().terminal;
-        return {
-          osOpenEnabled: terminalSettings.pathLinkOsOpenEnabled,
-          confirmAlways: terminalSettings.pathLinkOsOpenConfirm,
-        };
-      },
-      confirm: ({ path }) =>
-        window.confirm(i18n.t(osHandoffConfirmKey(path), { ns: "common", path })),
+      getSettings: readPathLinkClickSettings,
+      confirm: confirmOsHandoff,
       activate: (sel, action) => pathLink.activate(sel, action),
+      // 칩은 밑줄 hit-test 사각형과 겹칠 수 있고 hit-test 는 z-order 를 보지
+      // 않는다. 칩 버튼에서 출발한 mousedown 은 밑줄 press 를 무장시키지 않는다.
+      isChipEvent: (e) => linkChipView.contains(e.target),
+      // ADR-0224 `chip` 모드: 실행하지 않고 칩을 띄운다. 밑줄 데코레이션은 이
+      // 클릭이 선택을 지우면서 이미 폐기됐을 수 있으므로, 칩은 데코레이션을
+      // 참조하지 않고 검증 선택이 들고 있는 (라인, 컬럼 범위, 원문)을 캡처한다.
+      showChip: (sel, actions, point) =>
+        openLinkChip(
+          {
+            kind: sel.isDirectory ? "directory" : "file",
+            value: sel.absPath,
+            bufferLine: sel.bufferLine,
+            startCol: sel.startCol,
+            endCol: sel.endCol,
+            token: sel.token,
+            selection: sel,
+          },
+          actions,
+          point,
+        ),
       // mousedown 을 preventDefault 했고 네이티브 대화상자가 포커스를 가져가므로,
       // 진행·취소 어느 쪽이든 터미널 포커스를 되돌려 준다.
       onOsHandoffSettled: () => terminalRef.current?.focus(),
@@ -5915,6 +6136,9 @@ export function TerminalView({
       const { width, height } = entries[0].contentRect;
       // #687: reflow 뒤 라벨 좌표는 더 이상 밑줄과 맞지 않는다(스크롤과 동일 이유).
       pathLinkHint.hide();
+      // ADR-0224: resize·reflow 는 셀 좌표계를 바꾼다 → 칩도 소멸한다. pane 을
+      // 감추는 워크스페이스 전환도 0×0 entry 로 여기 도달한다.
+      linkChip.dismiss("resize");
       const isNowHidden = width === 0 || height === 0;
       isContainerHiddenRef.current = isNowHidden;
       // A pending debounced fit must never run against a hidden container.
@@ -6107,6 +6331,11 @@ export function TerminalView({
       outerEl?.removeEventListener("mousemove", handleMouseMove);
       outerEl?.removeEventListener("mouseleave", handleMouseLeave);
       pathLinkHint.dispose();
+      // ADR-0224: terminal 폐기는 칩도 함께 거둔다.
+      outerEl?.removeEventListener("keydown", handleLinkChipKeyDown, true);
+      window.removeEventListener("pointerdown", handleLinkChipOutsidePointerDown, true);
+      linkChip.dismiss("dispose");
+      linkChipView.dispose();
       outerEl?.removeEventListener("pointerdown", handlePointerDown);
       outerEl?.removeEventListener("mousedown", handlePathLinkMouseDown, true);
       window.removeEventListener("mouseup", handlePathLinkMouseUp);

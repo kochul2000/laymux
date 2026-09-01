@@ -357,6 +357,25 @@ Codex overlay caret의 DEC 2026 프레임 안/밖 판정은 xterm.js 렌더 모�
 
 ### 8.6 링크 활성화 (평문 / OSC 8 / TUI 우회)
 
+**실행 게이트가 모든 분기 앞에 있다**([ADR-0224](../adr/0224-link-activation-chip-gate.md)). `terminal.urlLinkActivation`·`terminal.pathLinkActivation`(각각 `"immediate"`(기본) | `"chip"`)이 아래 분기를 **언제** 실행할지 정한다. 발견(파싱·밑줄·hover dwell·유휴 스캔)은 어느 값에서도 게이트되지 않는다 — 아래 표의 "무엇을 여는가"는 그대로이고, `chip` 에서는 그 액션이 클릭 즉시가 아니라 액션 칩의 버튼에서 일어난다.
+
+| 대상 | `immediate`(기본) | `chip` |
+| --- | --- | --- |
+| URL(평문·OSC 8·들여쓰기 결합·`#123`) | 클릭 즉시 브라우저 | 칩 → 브라우저 열기 · URL 복사 |
+| 파일 밑줄 (desktop) | 클릭 즉시 뷰어 | 칩 → 뷰어 · OS 로 열기 · 경로 복사 |
+| 디렉터리 밑줄 (desktop) | 클릭 즉시 CWD 전파 | 칩 → CWD 이동 · 파일 관리자 · 경로 복사 |
+| 파일·디렉터리 밑줄 (Remote) | 탭 즉시 뷰어 / 탐색기 | 칩 → 뷰어 또는 탐색기 · 경로 복사 |
+| URL (Remote) | 탭 즉시 브라우저 | 칩 → 브라우저 열기 · URL 복사 |
+| **Ctrl / Ctrl+Shift 밑줄 클릭** | OS 열기 / reveal(ADR-0100) | **동일 — 칩 없이 직행** |
+| **#352 Shift/Alt 클릭** | 즉시 브라우저 | **동일 — 즉발 유지** |
+
+- 제스처→결과 매핑은 `ui/src/lib/link-activation.ts`(`decideLinkActivation`)가 소유한다. 수정자 바이패스가 모드보다 앞선 판정이고, 그 결과 `chip` 모드에서도 파워유저 경로는 한 번에 실행된다. `pathLinkOsOpenEnabled` 가 꺼져 있으면 칩에서도 OS 액션이 빠진다 — 칩은 기존 액션의 표시 방식일 뿐 새 실행 표면이 아니다.
+- desktop 칩은 `createLinkChip`(DOM 뷰, `.terminal-link-chip`)과 `createLinkChipSession`(수명·라우팅)으로 나뉘고, `TerminalView` 는 배선만 한다. URL 활성화 네 경로(xterm `linkHandler`, `WebLinksAddon`, 들여쓰기 provider, `#123` provider)는 모두 `activateUrlLink` 관문 하나를 지난다. 칩의 "OS 로 열기"는 클릭 경로와 같은 `passOsHandoffGate`(하드 클래스 확인 포함)를 통과한다.
+- **한 번에 칩 하나.** 새 실행 제스처가 기존 칩을 교체한다. 소멸 조건은 Esc, 칩 밖 클릭/탭, 스크롤, 선택 시작, resize/reflow, terminal·lease·워크스페이스 전환, 그리고 대상 원문이 폐기될 때다. 수명 판정은 밑줄과 같은 안정 프레임 계약([ADR-0220](../adr/0220-path-link-stable-frame-lifetime.md))을 공유한다 — 칩 생성 시점의 (버퍼 라인, 컬럼 범위, 원문)을 캡처하고 그 프레임마다 같은 범위를 다시 읽어 비교한다(`readCellRangeText`). **라인의 정본은 칩마다 등록한 마커다** — scrollback trim 이 절대 라인 번호를 밀어내므로 동결된 번호로 재검사하면 밑줄과 칩이 서로 다른 줄을 본다(밑줄의 `tokenStillAtRange` 와 같은 규칙). 마커가 폐기됐으면 좌표 자체가 무효이므로 캡처 번호로 되돌아가지 않고 칩을 거둔다. URL 은 밑줄 엔트리가 없어 이 캡처가 엔트리를 대신하고, **셀 범위를 확정하지 못하면 칩을 아예 띄우지 않는다** — `WebLinksAddon` 은 범위를 주지 않아 클릭한 줄에서 URL 을 되찾는데, 못 찾았다고 클릭한 셀 한 칸만 캡처하면 그 한 글자가 아무 줄에서나 우연히 일치해 재검사를 통과한다(순수 규칙은 `ui/src/lib/link-chip-capture.ts`). 칩은 settings 에도 localStorage 에도 저장하지 않는 surface-local 상태다.
+- **칩 자신의 클릭/탭은 밑줄 press 를 무장시키지 않는다.** 칩은 링크 바로 아래에 절대 좌표로 떠 있고 밑줄 hit-test 는 z-order 를 보지 않는 사각형 검사(`getHit`/`pathLinkAtPoint`)라, 칩 버튼이 다음 줄의 밑줄과 겹칠 수 있다. 그 상태의 버튼 클릭은 밑줄 press 를 무장시키고, 무장된 press 는 window 단계에서 칩의 click 보다 **먼저** 실행된다(`immediate` 모드면 엉뚱한 대상이 열리고, `chip` 모드면 칩 대상이 교체된 뒤 눌린 버튼의 액션이 새 대상에 적용된다). 두 surface 모두 밑줄 조회 앞에서 칩 containment 로 물러난다(desktop `isChipEvent`, Remote `linkChipContains`) — 칩의 `stopPropagation` 은 bubble 단계라 capture·window 리스너보다 늦으므로 소유권 근거가 되지 못한다.
+- `chip` 모드에서는 칩이 액션 목록을 직접 보여 주므로 ADR-0100 의 hover 힌트 라벨을 표시하지 않는다. `immediate` 모드의 라벨은 그대로다.
+- Remote 는 같은 계약을 `remote-app.js` 의 chip 모듈로 구현한다(모듈 경계를 넘는 손복사이므로 액션 목록은 `remote-page-bundle.test.ts` 가 `decideLinkActivation` 의 remote 응답에 고정한다). Remote 칩에 OS 열기·CWD 전파는 없고(ADR-0045), "브라우저 열기"는 기존 `openRemoteUrl`(Android `LaymuxNative` bridge 포함, [ADR-0162](../adr/0162-android-remote-link-opens-os-browser.md))을 그대로 부른다. 미검증 문구 탭 = `point` 발견, 롱프레스·더블탭 = 단어 선택은 불변이다. 두 모드 값은 `/remote/v1/navigation` 응답에 실려 온다([ADR-0218](../adr/0218-codex-transcript-pointer-scroll-toggle.md)과 같은 경로).
+
 데스크톱 터미널 내 URL 클릭은 모두 `openExternal`(`@/lib/tauri-api`)로 OS 브라우저를 연다(webview 내 `window.open` 금지).
 
 - **평문 URL** — `WebLinksAddon`의 핸들러가 `openExternal`로 라우팅.
@@ -385,7 +404,7 @@ Codex overlay caret의 DEC 2026 프레임 안/밖 판정은 xterm.js 렌더 모�
     - 순수 로직은 두 곳으로 나뉜다([ADR-0193](../adr/0193-viewer-os-handoff-buttons.md)) — **트리거 고유 입력 계약**(`decidePathLinkClickAction`/`isOsHandoffAction`/`osHandoffModeForAction`/`pathLinkHintKey`)은 `ui/src/lib/path-link-os-open.ts`, **트리거와 무관한 확인 정책**(`HARD_CONFIRM_EXTENSIONS`/`requiresHardConfirm`/`needsOsHandoffConfirm`/`osHandoffConfirmKey`)은 `ui/src/lib/os-handoff.ts`가 소유한다(FileViewer 버튼이 같은 정책을 공유한다). mousedown·mouseup 상태 기계는 주입형 `createPathLinkClickHandlers`(`path-link-click.ts`), 라우팅은 `createPathLinkController.activate(sel, action)`, 실행은 데스크톱 전용 커맨드 `open_in_os`다(Automation/MCP/Remote 미노출). `TerminalView`는 스토어·i18n·포커스만 주입해 배선한다.
     - **발견성**: 밑줄 위에 포인터가 있는 동안 `createPathLinkHint`(`path-link-hint.ts`)가 `Ctrl`/`Ctrl+Shift`로 무엇을 할 수 있는지 라벨(`.terminal-path-link-hint`)로 알린다. 라벨은 `pointer-events: none`이고 위쪽 공간이 없으면 아래로 뒤집으며 host 폭 안으로 클램프한다. `pathLinkOsOpenEnabled`가 꺼져 있으면 표시하지 않는다.
     - **Windows `explorer.exe` 인자**: `reveal`은 `/select,"<path>"` 형태를 **raw 커맨드라인**으로 넘긴다. explorer는 `CommandLineToArgvW`를 쓰지 않아 표준 이스케이프가 `/select,<공백 포함 경로>` 전체를 따옴표로 묶으면 스위치를 인식하지 못하고 기본 폴더를 연다(실기 확인). `open`은 인자 하나뿐이라 표준 이스케이프로 충분하다. 후행 구분자는 `normalize_target`이 루트를 제외하고 정리한다.
-  - 클릭 분기(수정자 없음): 파일이면 `useFileViewerStore.openFileViewer`로 통합 뷰어를 연다. 디렉토리면 그 경로를 새 cwd로 **제안**해 기존 중앙화 전파 경로(`do_sync_cwd`)에 그대로 태운다 — `FileExplorer.navigateTo`와 동일하게 ① origin으로 **비-터미널 sentinel**(`${instanceId}__pathlink`)을 넘겨 백엔드가 소스의 tracked cwd를 발명(`ipc_dispatch.rs`의 `update_terminal_cwd`)하거나 소스를 대상에서 제외하지 않게 하고(클릭한 pane도 특별취급 없이 일반 대상), ② **`force`를 넣지 않아** `filter_targets_cwd_receive`가 적용되어 **`cwd_receive`를 켠 pane(클릭한 pane 포함)만** 이동한다(dock·다른 pane 동일 정책). `force: true`는 `cwd_receive`를 무시하므로 쓰지 않는다. 셸별 경로 변환(POSIX↔UNC↔Windows)은 백엔드 `write_cd_to_group_terminals`가 프로파일별로 처리한다.
+  - 클릭 분기(수정자 없음, `pathLinkActivation: "immediate"`): 파일이면 `useFileViewerStore.openFileViewer`로 통합 뷰어를 연다. 디렉토리면 그 경로를 새 cwd로 **제안**해 기존 중앙화 전파 경로(`do_sync_cwd`)에 그대로 태운다 — `FileExplorer.navigateTo`와 동일하게 ① origin으로 **비-터미널 sentinel**(`${instanceId}__pathlink`)을 넘겨 백엔드가 소스의 tracked cwd를 발명(`ipc_dispatch.rs`의 `update_terminal_cwd`)하거나 소스를 대상에서 제외하지 않게 하고(클릭한 pane도 특별취급 없이 일반 대상), ② **`force`를 넣지 않아** `filter_targets_cwd_receive`가 적용되어 **`cwd_receive`를 켠 pane(클릭한 pane 포함)만** 이동한다(dock·다른 pane 동일 정책). `force: true`는 `cwd_receive`를 무시하므로 쓰지 않는다. 셸별 경로 변환(POSIX↔UNC↔Windows)은 백엔드 `write_cd_to_group_terminals`가 프로파일별로 처리한다.
   - 순수 로직은 `ui/src/lib/path-link-detect.ts`(`extractPathCandidatesFromSelection`/`trimSelectionToPath`/`joinCwdPath`/`normalizeMsysCwd`/`mapSelectionCandidateToPathRange`/`decidePathLinkAction`)에 분리해 단위 테스트로 덮는다.
   - **Windows cwd 처리**: git-bash/MSYS 셸이 cwd를 `/d/PycharmProjects/...` 형태로 보고하면, 상대경로 조합 후 백엔드 `resolve_address_path`가 선행 `/`를 WSL로 오인(`\\wsl.localhost\...`)해 검증이 실패한다. 이를 막기 위해 `joinCwdPath`가 조합 직전 `normalizeMsysCwd`로 MSYS cwd(`^/<drive>/...`, 단 `/mnt/` 제외)를 Windows 드라이브 경로(`X:\...`)로 변환한다(백엔드 전역 동작은 변경하지 않음). PowerShell cwd(`D:\...`)·POSIX(`/home/...`)·WSL UNC(`\\wsl.localhost\...`)는 그대로 동작한다(단위 테스트로 보장).
   - **와이드 문자 보정**(#691) — 밑줄 폭의 단위는 문자 수가 아니라 **셀 수**다. 한글·CJK·전각은 한 글자가 2셀, 이모지는 UTF-16 2칸이 1셀 쌍이라 UTF-16 길이로 계산하면 밑줄이 절반만 그어지거나(경로가 한글일 때) 왼쪽으로 밀린다(앞에 한글이 있을 때). `TerminalView`가 각 후보 줄의 실제 셀(`readLineCells`)을 `mapSelectionCandidateToPathRange`에 넘기고, 그 안에서 `reconstructLine`의 `columns`(시작 셀)·`endColumns`(끝 셀, 와이드는 +1)로 원문 offset을 셀 범위로 바꾼다. 기존 exact 단일 선택용 `mapSelectionToPathRange`도 같은 셀 맵을 유지한다.

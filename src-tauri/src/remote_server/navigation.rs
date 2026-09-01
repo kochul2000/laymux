@@ -19,6 +19,10 @@ struct NavigationSummaryContext<'maps, 'backend, 'frontend> {
 pub(super) struct RemoteNavigationHostState<'a> {
     pub terminals: &'a [RemoteTerminalInfo],
     pub codex_transcript_scroll_enabled: bool,
+    /// ADR-0224 링크 실행 게이트("immediate" | "chip"). 호스트 설정이 정본이고
+    /// Remote 페이지는 자기 표면의 탭 처리에만 쓴다(ADR-0218 과 같은 경로).
+    pub url_link_activation: &'a str,
+    pub path_link_activation: &'a str,
 }
 
 pub(super) fn build_remote_navigation_payload(
@@ -160,6 +164,8 @@ pub(super) fn build_remote_navigation_payload(
         "notifications": notification_summaries,
         "workspaceSelector": workspace_selector,
         "codexTranscriptScrollEnabled": host_state.codex_transcript_scroll_enabled,
+        "urlLinkActivation": host_state.url_link_activation,
+        "pathLinkActivation": host_state.path_link_activation,
         "unreadNotificationCount": unread_count(notifications, None, None),
     })
 }
@@ -818,6 +824,8 @@ mod tests {
         RemoteNavigationHostState {
             terminals,
             codex_transcript_scroll_enabled: true,
+            url_link_activation: "immediate",
+            path_link_activation: "immediate",
         }
     }
 
@@ -954,11 +962,16 @@ mod tests {
             RemoteNavigationHostState {
                 terminals: &terminals,
                 codex_transcript_scroll_enabled: false,
+                url_link_activation: "chip",
+                path_link_activation: "immediate",
             },
         );
 
         assert_eq!(payload["activeWorkspaceId"], "ws-1");
         assert_eq!(payload["codexTranscriptScrollEnabled"], false);
+        // ADR-0224: 두 키는 독립이므로 payload 도 따로 실린다.
+        assert_eq!(payload["urlLinkActivation"], "chip");
+        assert_eq!(payload["pathLinkActivation"], "immediate");
         assert_eq!(payload["workspaces"][0]["terminalPaneCount"], 1);
         assert_eq!(payload["workspaces"][0]["liveTerminalCount"], 1);
         assert_eq!(

@@ -119,8 +119,11 @@ describe("createPrLinkProvider", () => {
       end: { x: 8, y: 1 },
     });
 
-    links[0].activate();
-    expect(onClick).toHaveBeenCalledWith(123);
+    // ADR-0224: 활성화 이벤트와 버퍼 범위도 함께 넘긴다 — 액션 칩이 뜰 자리와
+    // 재검사할 셀 범위를 호출부가 알아야 한다.
+    const event = { clientX: 1, clientY: 2 } as MouseEvent;
+    links[0].activate(event);
+    expect(onClick).toHaveBeenCalledWith(123, event, links[0].range);
   });
 
   it("returns undefined when the line has no token", () => {
@@ -165,6 +168,6 @@ describe("createPrLinkProvider", () => {
       end: { x: 7, y: 1 },
     });
     links[0].activate();
-    expect(onClick).toHaveBeenCalledWith(123);
+    expect(onClick).toHaveBeenCalledWith(123, undefined, links[0].range);
   });
 });

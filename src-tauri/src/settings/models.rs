@@ -857,6 +857,15 @@ pub struct TerminalSettings {
     /// class. Turning this off still confirms directly executable extensions.
     #[serde(default = "default_true")]
     pub path_link_os_open_confirm: bool,
+    /// How a click/tap on a URL link executes — "immediate" (default, open at
+    /// once) or "chip" (show an action chip and open only from it), ADR-0224.
+    #[serde(default = "default_link_activation")]
+    pub url_link_activation: String,
+    /// How a click/tap on a verified file/directory path underline executes —
+    /// "immediate" (default) or "chip" (ADR-0224). Ctrl / Ctrl+Shift keep going
+    /// straight to the host OS in both modes (ADR-0100).
+    #[serde(default = "default_link_activation")]
+    pub path_link_activation: String,
     /// Show the floating jump-to-bottom button while scrolled up.
     #[serde(default = "default_true")]
     pub show_scroll_to_bottom_button: bool,
@@ -892,6 +901,8 @@ impl Default for TerminalSettings {
             path_link_max_length: default_path_link_max_length(),
             path_link_os_open_enabled: true,
             path_link_os_open_confirm: true,
+            url_link_activation: default_link_activation(),
+            path_link_activation: default_link_activation(),
             show_scroll_to_bottom_button: true,
             scroll_sensitivity: default_scroll_sensitivity(),
             fast_scroll_sensitivity: default_fast_scroll_sensitivity(),
@@ -904,6 +915,12 @@ impl Default for TerminalSettings {
 
 fn default_path_link_max_length() -> u32 {
     256
+}
+
+/// ADR-0224: both activation keys default to the current behavior, so an
+/// existing install keeps opening links on the first click until it opts in.
+fn default_link_activation() -> String {
+    crate::constants::LINK_ACTIVATION_IMMEDIATE.to_string()
 }
 
 fn default_scroll_sensitivity() -> f32 {
