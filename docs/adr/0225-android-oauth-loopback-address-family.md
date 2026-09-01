@@ -41,4 +41,3 @@ Remote OAuth relay는 데스크톱 CLI가 auth URL의 `redirect_uri`에 넣은 l
 - 네이티브가 auth URL과 port/path를 다시 결속하므로 수정이 임의 local host·port로 향하는 bridge나 SSRF primitive를 만들지 않는다.
 - 이미 설치된 OkHttp URL parser를 재사용하며 새 의존성·설정·마이그레이션은 없다.
 - JVM 테스트는 AWS 형태 IPv4, `localhost`, IPv6 literal, port/path 불일치와 non-loopback 거부를 고정한다. Android 전체 unit suite와 debug APK build로 bridge 호출부까지 컴파일 검증한다.
-
