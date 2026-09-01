@@ -502,6 +502,17 @@ jobs:
     # (ADR-0190). Runs only after the release is fully published so a channel can
     # never point at a draft or an incomplete artifact set.
     needs: [prepare, publish]
+    # publish is if-gated to run when android is intentionally skipped
+    # (desktop-only release, ADR-0223). Without a matching override here the
+    # skipped android job propagates through publish's needs chain and skips
+    # this job too, so a desktop-only release never advances the channel
+    # manifests the updater reads (observed on v0.12.6).
+    if: >-
+      ${{
+        always() &&
+        needs.prepare.result == 'success' &&
+        needs.publish.result == 'success'
+      }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
