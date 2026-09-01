@@ -2512,6 +2512,15 @@ import {
         function handlePathLinkPointerDown(event) {
           pathLinkPress = null;
           if (event.button !== 0 || event.isPrimary === false) return;
+          // ADR-0224: the chip floats over the terminal at absolute coordinates
+          // and `pathLinkAtPoint` is a rect test that ignores z-order, so a chip
+          // button drawn just below the tap can sit on the *next* row's
+          // underline. Arming that underline here would let the window-capture
+          // pointerup fire before the chip's own click — opening a viewer the
+          // user never asked for, or swapping the chip target out from under the
+          // button that was pressed. A tap that started inside the chip is the
+          // chip's, full stop.
+          if (linkChipContains(event.target)) return;
           const current = pathLinkAtPoint(event.clientX, event.clientY);
           // Remember the press even off an underline: a mouse click on plain
           // text is a `point` trigger (touch goes through handleTouchTap).
@@ -2636,8 +2645,34 @@ import {
         }
 
         function dismissLinkChip() {
+          const previous = linkChipTarget;
           linkChipTarget = null;
           if (linkChipElement) linkChipElement.hidden = true;
+          // The marker only exists to follow this chip's row — retire it with it.
+          try {
+            previous?.marker?.dispose?.();
+          } catch (_) {}
+        }
+
+        /**
+         * A marker follows the target row as the scrollback trims, exactly as an
+         * underline's marker does (`livePathLinkBufferLine`). Without it the chip
+         * would re-check a frozen absolute line while the underline re-checks the
+         * live one, and the two would judge different rows — the very split
+         * ADR-0224 §3 ("the chip shares the underline's lifetime") forbids.
+         */
+        function registerLinkChipMarker(bufferLine) {
+          const term = terminal;
+          if (!term || !(bufferLine >= 1)) return null;
+          try {
+            const buffer = term.buffer.active;
+            const cursorAbsoluteLine = (buffer.baseY || 0) + (buffer.cursorY || 0);
+            const offset = Math.trunc(bufferLine - 1 - cursorAbsoluteLine);
+            if (!Number.isFinite(offset)) return null;
+            return term.registerMarker(offset) || null;
+          } catch (_) {
+            return null;
+          }
         }
 
         // One chip at a time: a new activation replaces the previous one.
@@ -2645,7 +2680,9 @@ import {
           const actions = linkChipActions(target.kind);
           if (actions.length === 0) return;
           const el = ensureLinkChipElement();
-          linkChipTarget = target;
+          // Replacing is dismissing: retire the outgoing chip's marker first.
+          dismissLinkChip();
+          linkChipTarget = { ...target, marker: registerLinkChipMarker(target.bufferLine) };
           el.replaceChildren(
             ...actions.map((action) => {
               const button = document.createElement("button");
@@ -2710,9 +2747,26 @@ import {
           if (action === "viewer") openFileViewerOverlay(target.value);
         }
 
+        /**
+         * The chip's current 1-based buffer line. The marker wins when it is
+         * alive (the underline rule), and a disposed marker means the coordinate
+         * itself is gone — the same fail-closed answer `pathLinkEntryStillOnScreen`
+         * gives. Only a chip that never got a marker falls back to its capture.
+         */
+        function liveLinkChipBufferLine(target) {
+          if (!target) return null;
+          const marker = target.marker;
+          if (marker) {
+            if (marker.isDisposed === true || typeof marker.line !== "number") return null;
+            return marker.line + 1;
+          }
+          return target.bufferLine >= 1 ? target.bufferLine : null;
+        }
+
         function linkChipTokenStillOnScreen(target) {
-          if (!target || target.bufferLine < 1) return false;
-          const line = terminal?.buffer?.active?.getLine?.(target.bufferLine - 1);
+          const bufferLine = liveLinkChipBufferLine(target);
+          if (bufferLine === null) return false;
+          const line = terminal?.buffer?.active?.getLine?.(bufferLine - 1);
           if (!line) return false;
           const { text, columns } = reconstructRemoteLinkLine(line);
           const offset = columns.indexOf(target.startCol);
@@ -2772,9 +2826,23 @@ import {
           const point = event
             ? { clientX: event.clientX, clientY: event.clientY }
             : { clientX: 0, clientY: 0 };
-          showLinkChip(captureUrlLinkChipTarget(uri, point, range), point);
+          const target = captureUrlLinkChipTarget(uri, point, range);
+          // No capture, no chip — opening nothing is the fail-closed side of
+          // "arm, don't execute" (see captureUrlLinkChipTarget).
+          if (!target) return;
+          showLinkChip(target, point);
         }
 
+        /**
+         * Returns null when the cell range cannot be pinned down. WebLinksAddon
+         * hands over no range, so the URL is found again on the tapped row; when
+         * the on-screen text differs from the resolved uri (a row-wrapped link,
+         * say) that search fails. Capturing the single tapped cell instead would
+         * make any row that happens to show that one character pass the liveness
+         * re-check, keeping the chip alive over a repaint that erased the URL. A
+         * missing chip is the honest outcome — the tap executes nothing either
+         * way, which is exactly what `chip` mode promises.
+         */
         function captureUrlLinkChipTarget(uri, point, range) {
           const term = terminal;
           let bufferLine = range?.start?.y ?? 0;
@@ -2793,20 +2861,19 @@ import {
               }
             } else {
               // WebLinksAddon hands over no range — find the URL on the row.
-              bufferLine = tappedLine;
               const found = findRemoteTokenCellRange(term, tappedLine, uri, column);
-              startCol = found ? found.startCol : column;
-              endCol = found ? found.endCol : column;
+              if (!found) return null;
+              bufferLine = tappedLine;
+              startCol = found.startCol;
+              endCol = found.endCol;
             }
+          } else if (!range) {
+            // Neither coordinates nor a range — nothing to re-check later.
+            return null;
           }
-          return {
-            kind: "url",
-            value: uri,
-            bufferLine,
-            startCol,
-            endCol,
-            token: readRemoteCellRangeText(term, bufferLine, startCol, endCol),
-          };
+          const token = readRemoteCellRangeText(term, bufferLine, startCol, endCol);
+          if (token.length === 0) return null;
+          return { kind: "url", value: uri, bufferLine, startCol, endCol, token };
         }
 
         function findRemoteTokenCellRange(term, bufferLine, token, column) {
