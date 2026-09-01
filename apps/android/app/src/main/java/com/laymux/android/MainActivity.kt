@@ -90,6 +90,7 @@ import com.laymux.android.remote.OauthLoopbackRelay
 import com.laymux.android.remote.RemoteHttpRequestRegistry
 import com.laymux.android.remote.RemoteHttpResumeTracker
 import com.laymux.android.remote.RemoteSession
+import com.laymux.android.remote.oauthLoopbackBindAddress
 import com.laymux.android.remote.remoteHttpBodyWithinLimit
 import com.laymux.android.update.AppUpdateController
 import com.laymux.android.update.AvailableUpdate
@@ -1312,6 +1313,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             return
         }
         val url = ExternalUrlPolicy.browsableUrl(authUrl) ?: return
+        val bindAddress = oauthLoopbackBindAddress(url, port, expectedPath) ?: return
         runOnUiThread {
             if (!remoteBridgeActionsEnabled(documentGeneration)) return@runOnUiThread
             oauthRelay?.stop()
@@ -1319,6 +1321,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             val relay = OauthLoopbackRelay(
                 port = port,
                 expectedPath = expectedPath,
+                bindAddress = bindAddress,
                 onCallback = { pathAndQuery ->
                     deliverOauthCallback(documentGeneration, pathAndQuery)
                 },

@@ -9,6 +9,33 @@ import java.net.Socket
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+
+// Android's getLoopbackAddress() is always ::1, so choose the address family
+// from the validated redirect instead of relying on the platform default.
+private val IPV4_LOOPBACK_ADDRESS = InetAddress.getByName("127.0.0.1")
+private val IPV6_LOOPBACK_ADDRESS = InetAddress.getByName("::1")
+
+internal fun oauthLoopbackBindAddress(
+    authUrl: String,
+    expectedPort: Int,
+    expectedPath: String,
+): InetAddress? {
+    val auth = authUrl.toHttpUrlOrNull() ?: return null
+    if (auth.scheme != "https") return null
+    val redirect = auth.queryParameter("redirect_uri")?.toHttpUrlOrNull() ?: return null
+    if (redirect.scheme != "http" ||
+        redirect.port != expectedPort ||
+        redirect.encodedPath != expectedPath
+    ) {
+        return null
+    }
+    return when (redirect.host.lowercase()) {
+        "localhost", "127.0.0.1" -> IPV4_LOOPBACK_ADDRESS
+        "::1" -> IPV6_LOOPBACK_ADDRESS
+        else -> null
+    }
+}
 
 /**
  * Phone-side half of the OAuth loopback relay (ADR-0175).
@@ -34,6 +61,7 @@ import kotlin.concurrent.thread
 class OauthLoopbackRelay(
     private val port: Int,
     private val expectedPath: String,
+    private val bindAddress: InetAddress,
     private val onCallback: (pathAndQuery: String) -> Unit,
     private val onError: (message: String) -> Unit,
     private val lifetimeMs: Long = DEFAULT_LIFETIME_MS,
@@ -46,7 +74,7 @@ class OauthLoopbackRelay(
     fun start(): Boolean {
         val socket = try {
             ServerSocket().apply {
-                bind(InetSocketAddress(InetAddress.getLoopbackAddress(), port), BACKLOG)
+                bind(InetSocketAddress(bindAddress, port), BACKLOG)
             }
         } catch (_: IOException) {
             return false
