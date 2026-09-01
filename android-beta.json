@@ -1,8 +1,8 @@
 {
-  "version": "0.12.5",
-  "versionCode": 120059,
-  "releaseUrl": "https://github.com/kochul2000/laymux/releases/tag/v0.12.5",
-  "apkUrl": "https://github.com/kochul2000/laymux/releases/download/v0.12.5/Laymux-Android-0.12.5.apk",
-  "apkSha256Url": "https://github.com/kochul2000/laymux/releases/download/v0.12.5/Laymux-Android-0.12.5.apk.sha256",
-  "pubDate": "2026-08-31T01:53:56Z"
+  "version": "0.12.7",
+  "versionCode": 120079,
+  "releaseUrl": "https://github.com/kochul2000/laymux/releases/tag/v0.12.7",
+  "apkUrl": "https://github.com/kochul2000/laymux/releases/download/v0.12.7/Laymux-Android-0.12.7.apk",
+  "apkSha256Url": "https://github.com/kochul2000/laymux/releases/download/v0.12.7/Laymux-Android-0.12.7.apk.sha256",
+  "pubDate": "2026-09-01T12:09:13Z"
 }
