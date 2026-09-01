@@ -11,7 +11,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { ChevronDownIcon } from "@/components/ui/icons";
 import i18n from "@/i18n";
-import { Terminal } from "@xterm/xterm";
+import { Terminal, type IMarker } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -41,9 +41,10 @@ import {
   PATH_LINK_CLICK_SLOP,
 } from "@/lib/path-link-click";
 import { createPathLinkHint } from "@/lib/path-link-hint";
-import { linkChipLabelKey, type LinkAction } from "@/lib/link-activation";
+import { linkChipLabelKey, type LinkChipAction } from "@/lib/link-activation";
 import { createLinkChip, type LinkChipAnchor } from "@/lib/link-chip";
 import { createLinkChipSession, type LinkChipTargetShape } from "@/lib/link-chip-session";
+import { captureUrlChipRange, liveChipBufferLine } from "@/lib/link-chip-capture";
 import { createPathLinkPointEvaluator, PATH_LINK_HOVER_DWELL_MS } from "@/lib/path-link-point";
 import {
   extractPathCandidatesFromSelection,
@@ -54,7 +55,7 @@ import {
   pathSelectionLimits,
   resolveOverlappingRanges,
 } from "@/lib/path-link-detect";
-import { findTokenCellRange, readCellRangeText, readLineCells } from "@/lib/terminal-cell-map";
+import { readCellRangeText, readLineCells } from "@/lib/terminal-cell-map";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { WebglAddon } from "@xterm/addon-webgl";
 import {
@@ -1527,8 +1528,28 @@ export function TerminalView({
     type TerminalLinkChipTarget = LinkChipTargetShape & {
       /** path 대상의 원본 검증 선택. URL 칩에는 없다. */
       selection?: VerifiedPathSelection;
+      /**
+       * 칩이 사는 동안 대상 줄을 따라가는 마커. 밑줄이 저장한 라인 번호가 아니라
+       * 마커의 현재 라인을 믿는 것과 같은 이유다(`path-link-provider` 의
+       * `tokenStillAtRange`) — scrollback trim 은 절대 라인 번호를 밀어내므로,
+       * 동결된 번호로 재검사하면 밑줄과 칩이 서로 다른 줄을 본다. 마커 등록에
+       * 실패했으면 undefined 이고 그때만 캡처한 번호로 떨어진다.
+       */
+      marker?: IMarker;
     };
     const linkChipView = createLinkChip(wrapperRef.current);
+    /** 칩 대상 줄을 따라갈 마커. 버퍼 밖이거나 등록에 실패하면 undefined. */
+    const registerChipMarker = (bufferLine: number): IMarker | undefined => {
+      try {
+        const buffer = terminal.buffer.active;
+        const cursorAbsY = (buffer.baseY ?? 0) + (buffer.cursorY ?? 0);
+        const offset = Math.trunc(bufferLine - 1 - cursorAbsY);
+        if (!Number.isFinite(offset)) return undefined;
+        return terminal.registerMarker(offset) ?? undefined;
+      } catch {
+        return undefined;
+      }
+    };
     const readPathLinkClickSettings = () => {
       const terminalSettings = useSettingsStore.getState().terminal;
       return {
@@ -1539,18 +1560,26 @@ export function TerminalView({
     };
     const confirmOsHandoff = ({ path }: { path: string }) =>
       window.confirm(i18n.t(osHandoffConfirmKey(path), { ns: "common", path }));
+    /** 1-based 버퍼 라인의 셀. 라인이 없으면 null. */
+    const readChipLineCells = (bufferLine: number) => {
+      const line = terminalRef.current?.buffer.active.getLine(bufferLine - 1);
+      return line ? readLineCells(line) : null;
+    };
     /** 캡처한 (라인, 컬럼 범위) 에 지금 쓰여 있는 문자열. 라인을 못 읽으면 null. */
     const readChipRangeText = (target: TerminalLinkChipTarget): string | null => {
-      const t = terminalRef.current;
-      if (!t || target.bufferLine < 1) return null;
-      const line = t.buffer.active.getLine(target.bufferLine - 1);
-      if (!line) return null;
-      return readCellRangeText(readLineCells(line), target.startCol, target.endCol);
+      // 마커가 라인의 정본이다 — 밑줄 재검증과 같은 규칙(link-chip-capture 주석).
+      const bufferLine = liveChipBufferLine(target);
+      if (bufferLine === null) return null;
+      const cells = readChipLineCells(bufferLine);
+      if (!cells) return null;
+      return readCellRangeText(cells, target.startCol, target.endCol);
     };
     const linkChip = createLinkChipSession<TerminalLinkChipTarget>({
       view: linkChipView,
       labelFor: (action, kind) => i18n.t(linkChipLabelKey(action, kind), { ns: "common" }),
       isTokenAlive: (target) => readChipRangeText(target) === target.token,
+      // 칩이 사라지면 그 줄을 따라가던 마커도 함께 거둔다(교체·실행 포함).
+      onDismiss: (target) => target.marker?.dispose(),
       run: (target, action) => {
         if (action === "copy") {
           clipboardWriteText(target.value).catch((err) => {
@@ -1588,10 +1617,14 @@ export function TerminalView({
     });
     const openLinkChip = (
       target: TerminalLinkChipTarget,
-      actions: readonly LinkAction[],
+      actions: readonly LinkChipAction[],
       point: { clientX: number; clientY: number },
     ) => {
-      linkChip.open({ target, anchor: chipAnchorAt(point), actions });
+      linkChip.open({
+        target: { ...target, marker: registerChipMarker(target.bufferLine) },
+        anchor: chipAnchorAt(point),
+        actions,
+      });
     };
 
     /**
@@ -1614,6 +1647,9 @@ export function TerminalView({
         return;
       }
       const target = captureUrlChipTarget(uri, event, range);
+      // 캡처에 실패하면 칩을 띄우지 않는다 — 아무것도 실행하지 않는 쪽이
+      // `chip` 모드의 fail closed 다(captureUrlChipTarget 주석 참고).
+      if (!target) return;
       const point = event
         ? { clientX: event.clientX, clientY: event.clientY }
         : { clientX: 0, clientY: 0 };
@@ -1624,40 +1660,37 @@ export function TerminalView({
      * URL 칩의 대상 캡처. URL 은 밑줄 엔트리가 없으므로 칩 생성 시점의
      * (버퍼 라인, 컬럼 범위, 원문)을 잡아 두고 path 와 같은 판정을 적용한다.
      * 여러 줄에 걸친 링크는 사용자가 클릭한 줄의 구간만 캡처한다.
+     *
+     * **셀 범위를 확정하지 못하면 null 이다.** `WebLinksAddon` 은 범위를 주지
+     * 않으므로 클릭한 줄에서 URL 을 되찾는데, 화면 원문과 uri 가 다르면(줄바꿈
+     * 결합 등) 못 찾는다. 그때 클릭 셀 한 칸만 캡처하면 그 한 글자가 아무 줄에서나
+     * 우연히 일치해 재검사를 통과하고, URL 이 지워진 화면에서도 칩이 살아남는다.
+     * 한 칸짜리 가짜 캡처를 만드느니 칩을 포기한다 — 클릭이 아무것도 실행하지
+     * 않는 것이 `chip` 모드의 계약이고, 즉시 열고 싶으면 #352 Shift/Alt 우회가
+     * 모드와 무관하게 남아 있다.
      */
     function captureUrlChipTarget(
       uri: string,
       event?: MouseEvent,
       range?: { start: { x: number; y: number }; end: { x: number; y: number } },
-    ): TerminalLinkChipTarget {
+    ): TerminalLinkChipTarget | null {
       const t = terminalRef.current ?? terminal;
-      const buffer = t.buffer.active;
-      let bufferLine = range?.start.y ?? 0;
-      let startCol = range?.start.x ?? 1;
-      let endCol = range?.end.x ?? t.cols;
       const coords = event ? getClickCellCoords(t, event) : null;
+      let clicked: { bufferLine: number; col: number } | undefined;
       if (coords) {
         const [col, viewportRow] = coords; // 1-based
-        const viewportY = (buffer as { viewportY?: number }).viewportY ?? 0;
-        const clickedLine = viewportY + viewportRow; // 1-based 버퍼 라인
-        if (range) {
-          if (clickedLine >= range.start.y && clickedLine <= range.end.y) {
-            bufferLine = clickedLine;
-            startCol = clickedLine === range.start.y ? range.start.x : 1;
-            endCol = clickedLine === range.end.y ? range.end.x : t.cols;
-          }
-        } else {
-          // WebLinksAddon 은 범위를 주지 않는다 — 클릭한 줄에서 되찾는다.
-          bufferLine = clickedLine;
-          const line = buffer.getLine(clickedLine - 1);
-          const found = line ? findTokenCellRange(readLineCells(line), uri, col) : null;
-          startCol = found?.startCol ?? col;
-          endCol = found?.endCol ?? col;
-        }
+        const viewportY = (t.buffer.active as { viewportY?: number }).viewportY ?? 0;
+        clicked = { bufferLine: viewportY + viewportRow, col };
       }
-      const line = bufferLine >= 1 ? buffer.getLine(bufferLine - 1) : undefined;
-      const token = line ? readCellRangeText(readLineCells(line), startCol, endCol) : "";
-      return { kind: "url", value: uri, bufferLine, startCol, endCol, token };
+      const capture = captureUrlChipRange({
+        uri,
+        cols: t.cols,
+        clicked,
+        range,
+        readCells: readChipLineCells,
+      });
+      if (!capture) return null;
+      return { kind: "url", value: uri, ...capture };
     }
 
     // 검증된 경로가 선택돼 클릭 가능할 때 포인터(손가락) 커서를 호스트에 직접
@@ -3344,6 +3377,9 @@ export function TerminalView({
       getSettings: readPathLinkClickSettings,
       confirm: confirmOsHandoff,
       activate: (sel, action) => pathLink.activate(sel, action),
+      // 칩은 밑줄 hit-test 사각형과 겹칠 수 있고 hit-test 는 z-order 를 보지
+      // 않는다. 칩 버튼에서 출발한 mousedown 은 밑줄 press 를 무장시키지 않는다.
+      isChipEvent: (e) => linkChipView.contains(e.target),
       // ADR-0224 `chip` 모드: 실행하지 않고 칩을 띄운다. 밑줄 데코레이션은 이
       // 클릭이 선택을 지우면서 이미 폐기됐을 수 있으므로, 칩은 데코레이션을
       // 참조하지 않고 검증 선택이 들고 있는 (라인, 컬럼 범위, 원문)을 캡처한다.

@@ -14,7 +14,7 @@
  *     전환, resize 도 칩을 소멸시킨다.
  */
 
-import type { LinkAction, LinkTargetKind } from "./link-activation";
+import type { LinkChipAction, LinkTargetKind } from "./link-activation";
 import type { LinkChipAnchor, LinkChipItem } from "./link-chip";
 
 /** 칩이 소멸한 이유. 로깅·테스트 가독성용이며 동작은 모두 같다(감춘다). */
@@ -61,22 +61,28 @@ export interface LinkChipSessionDeps<T extends LinkChipTargetShape> {
     show: (anchor: LinkChipAnchor, items: readonly LinkChipItem[]) => void;
     hide: () => void;
     contains: (node: unknown) => boolean;
-    onSelect: (handler: (action: LinkAction) => void) => void;
+    onSelect: (handler: (action: LinkChipAction) => void) => void;
   };
   /** 액션 라벨(i18n). */
-  labelFor: (action: LinkAction, kind: LinkTargetKind) => string;
+  labelFor: (action: LinkChipAction, kind: LinkTargetKind) => string;
   /** 선택된 액션을 실행한다. 확인 게이트는 여기(호출부)가 소유한다. */
-  run: (target: T, action: LinkAction) => void;
+  run: (target: T, action: LinkChipAction) => void;
   /**
    * 캡처한 원문이 캡처한 자리에 아직 있는지. `revalidate()` 가 이 값으로만
    * 판정한다 — 안정 프레임 여부는 호출부(ADR-0220 소유자)가 정한다.
    */
   isTokenAlive: (target: T) => boolean;
+  /**
+   * 대상이 더 이상 현재 칩이 아닐 때(소멸·교체·액션 실행) 정확히 한 번 호출된다.
+   * 칩이 살아 있는 동안만 붙잡는 자원 — 라인을 따라가는 xterm 마커 — 을 여기서
+   * 되돌린다. 세션은 그 자원이 무엇인지 알지 못한다.
+   */
+  onDismiss?: (target: T) => void;
 }
 
 export interface LinkChipSession<T extends LinkChipTargetShape> {
   /** 칩을 띄운다(기존 칩은 교체). 액션 목록이 비면 아무것도 하지 않는다. */
-  open: (input: { target: T; anchor: LinkChipAnchor; actions: readonly LinkAction[] }) => void;
+  open: (input: { target: T; anchor: LinkChipAnchor; actions: readonly LinkChipAction[] }) => void;
   /** 칩이 떠 있는지. */
   isOpen: () => boolean;
   /** 현재 대상(없으면 null). */
@@ -104,8 +110,10 @@ export function createLinkChipSession<T extends LinkChipTargetShape>(
   let current: T | null = null;
 
   const hide = (): void => {
+    const previous = current;
     current = null;
     deps.view.hide();
+    if (previous) deps.onDismiss?.(previous);
   };
 
   const session: LinkChipSession<T> = {
@@ -115,6 +123,8 @@ export function createLinkChipSession<T extends LinkChipTargetShape>(
         if (current) hide();
         return;
       }
+      // 교체도 소멸이다 — 밀려나는 대상의 자원을 먼저 되돌린다.
+      if (current) hide();
       current = target;
       deps.view.show(
         anchor,

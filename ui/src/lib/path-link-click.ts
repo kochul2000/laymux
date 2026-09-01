@@ -7,7 +7,7 @@
  * 여기서는 순수한 상태 기계만 돌린다. `TerminalView` 는 배선만 한다.
  */
 
-import type { LinkAction, LinkActivationMode, LinkActivationResult } from "./link-activation";
+import type { LinkActivationMode, LinkActivationResult, LinkChipAction } from "./link-activation";
 import { decideLinkActivation } from "./link-activation";
 import { needsOsHandoffConfirm } from "./os-handoff";
 import type { PathLinkClickAction } from "./path-link-os-open";
@@ -29,6 +29,8 @@ export interface PathLinkClickTarget {
 /** 핸들러가 실제로 읽는 마우스 이벤트 필드만 추린 형태. */
 export interface PathLinkMouseEvent {
   button: number;
+  /** 이벤트가 출발한 노드. 액션 칩 자신의 클릭을 알아보는 데만 쓴다. */
+  target?: unknown;
   clientX: number;
   clientY: number;
   ctrlKey: boolean;
@@ -65,9 +67,21 @@ export interface PathLinkClickDeps<T extends PathLinkClickTarget> {
    */
   showChip: (
     target: T,
-    actions: readonly LinkAction[],
+    actions: readonly LinkChipAction[],
     point: { clientX: number; clientY: number },
   ) => void;
+  /**
+   * 이 이벤트가 액션 칩 자신에서 왔는지.
+   *
+   * 칩은 터미널 wrapper 위에 절대 좌표로 떠 있고 밑줄 hit-test 는 z-order 를
+   * 보지 않는 사각형 검사다(`path-link-provider.getHit`). 칩이 탭 지점 바로
+   * 아래에 그려지므로 칩 버튼이 **다음 줄의 밑줄과 겹칠 수 있고**, 그 상태로
+   * 버튼을 누르면 이 핸들러가 아래 깔린 밑줄을 press 로 무장한다. 무장된
+   * press 는 window mouseup 에서 칩의 click 보다 **먼저** 실행되므로
+   * (immediate 모드) 엉뚱한 뷰어가 열리거나 (chip 모드) 칩 대상이 교체된 뒤
+   * 눌린 버튼의 액션이 새 대상에 적용된다. 칩에서 온 이벤트는 여기서 끝낸다.
+   */
+  isChipEvent: (event: PathLinkMouseEvent) => boolean;
   /**
    * 호스트 OS 위임 경로가 끝났을 때(진행·취소 **모두**) 호출. mousedown 을
    * preventDefault 해 포커스가 이동하지 않았고 네이티브 확인 대화상자가
@@ -136,6 +150,8 @@ export function createPathLinkClickHandlers<T extends PathLinkClickTarget>(
     onMouseDown: (e) => {
       press = null;
       if (e.button !== 0) return;
+      // 칩 자신의 클릭은 밑줄 press 를 무장시키지 않는다(deps.isChipEvent 주석).
+      if (deps.isChipEvent(e)) return;
       const target = deps.getSelectionAt(e.clientX, e.clientY);
       if (!target) return;
 

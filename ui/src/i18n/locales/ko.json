@@ -338,7 +338,7 @@
       "linkChipChangeDir": "디렉토리 이동",
       "linkChipExplorer": "탐색기 열기",
       "linkChipOsOpen": "OS로 열기",
-      "linkChipOsReveal": "파일 관리자에서 열기",
+      "linkChipOsOpenDir": "파일 관리자에서 열기",
       "linkChipBrowser": "브라우저 열기",
       "linkChipCopyPath": "경로 복사",
       "linkChipCopyUrl": "URL 복사",

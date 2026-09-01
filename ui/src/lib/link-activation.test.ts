@@ -6,11 +6,22 @@ import {
   linkChipLabelKey,
   normalizeLinkActivation,
   type LinkActivationMode,
+  type LinkChipAction,
   type LinkSurface,
   type LinkTargetKind,
 } from "./link-activation";
 
 const NO_MODS = { ctrlKey: false, shiftKey: false, altKey: false, metaKey: false };
+
+/** 칩 버튼이 될 수 있는 액션 전부 — `osReveal` 은 바이패스 전용이라 빠진다. */
+const CHIP_ACTIONS = [
+  "viewer",
+  "changeDir",
+  "explorer",
+  "osOpen",
+  "browser",
+  "copy",
+] as const satisfies readonly LinkChipAction[];
 
 describe("normalizeLinkActivation", () => {
   it("defaults to immediate so an existing install keeps opening on first click", () => {
@@ -250,24 +261,34 @@ describe("linkChipLabelKey", () => {
     expect(linkChipLabelKey("copy", "url")).toBe("terminal.linkChipCopyUrl");
     expect(linkChipLabelKey("copy", "file")).toBe("terminal.linkChipCopyPath");
     expect(linkChipLabelKey("copy", "directory")).toBe("terminal.linkChipCopyPath");
-    // 디렉터리의 OS 열기는 곧 파일 관리자에서 열기다.
-    expect(linkChipLabelKey("osOpen", "directory")).toBe("terminal.linkChipOsReveal");
+    // 디렉터리를 OS 로 여는 것은 곧 그 폴더를 파일 관리자로 여는 것이다.
+    expect(linkChipLabelKey("osOpen", "directory")).toBe("terminal.linkChipOsOpenDir");
     expect(linkChipLabelKey("osOpen", "file")).toBe("terminal.linkChipOsOpen");
   });
 
   it("gives every chip action a label key", () => {
-    for (const action of [
-      "viewer",
-      "changeDir",
-      "explorer",
-      "osOpen",
-      "osReveal",
-      "browser",
-      "copy",
-    ] as const) {
+    for (const action of CHIP_ACTIONS) {
       for (const target of ["url", "file", "directory"] as const) {
         expect(linkChipLabelKey(action, target)).toMatch(/^terminal\.linkChip/);
       }
     }
+  });
+
+  it("has a label for exactly the actions a chip can show", () => {
+    // `osReveal`(Ctrl+Shift 의 선택 표시)은 바이패스 전용이라 칩에 오르지 않는다 —
+    // 라벨 매핑에도 없어야 로케일에 소비자 없는 문구가 남지 않는다.
+    const shown = new Set<string>();
+    for (const mode of LINK_ACTIVATION_MODES) {
+      for (const surface of ["desktop", "remote"] as const) {
+        for (const target of ["url", "file", "directory"] as const) {
+          for (const osOpenEnabled of [true, false]) {
+            const result = decideLinkActivation({ mode, surface, target, osOpenEnabled });
+            if (result.kind === "show-chip") for (const a of result.actions) shown.add(a);
+          }
+        }
+      }
+    }
+    expect([...shown].sort()).toEqual([...CHIP_ACTIONS].sort());
+    expect(shown.has("osReveal")).toBe(false);
   });
 });

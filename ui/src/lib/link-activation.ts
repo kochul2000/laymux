@@ -55,6 +55,15 @@ export type LinkAction =
   | "browser"
   | "copy";
 
+/**
+ * 칩 버튼이 될 수 있는 액션. `osReveal`(Ctrl+Shift 의 "파일 관리자에서 선택
+ * 표시")은 **수정자 바이패스 전용**이라 칩에 오르지 않는다 — 칩 대상의 액션
+ * 목록은 대상 종류가 정하고, 디렉터리의 "파일 관리자에서 열기"는 `osOpen` 이
+ * 디렉터리에 적용된 결과다(ADR-0100 Decision 2). 타입으로 못박아 두면 라벨
+ * 매핑에 죽은 문구가 생기지 않는다.
+ */
+export type LinkChipAction = Exclude<LinkAction, "osReveal">;
+
 export interface LinkActivationInput {
   /** 대상에 해당하는 activation 설정값. */
   mode: LinkActivationMode;
@@ -73,7 +82,7 @@ export type LinkActivationResult =
   /** 즉시 실행. `bypass` 는 "모드와 무관한 수정자 직행"인지. */
   | { kind: "open-direct"; action: LinkAction; bypass: boolean }
   /** 실행하지 않고 칩을 띄운다. 최소 하나의 액션을 담는다. */
-  | { kind: "show-chip"; actions: readonly LinkAction[] }
+  | { kind: "show-chip"; actions: readonly LinkChipAction[] }
   /** 표현할 액션이 없다. */
   | { kind: "none" };
 
@@ -81,7 +90,7 @@ export type LinkActivationResult =
  * `immediate` 모드의 액션 — 현행 동작 그대로.
  * 파일=뷰어, 디렉터리=desktop 은 cwd 전파·Remote 는 탐색기, URL=브라우저.
  */
-function immediateAction(target: LinkTargetKind, surface: LinkSurface): LinkAction {
+function immediateAction(target: LinkTargetKind, surface: LinkSurface): LinkChipAction {
   if (target === "url") return "browser";
   if (target === "file") return "viewer";
   return surface === "desktop" ? "changeDir" : "explorer";
@@ -98,9 +107,9 @@ function chipActions(
   target: LinkTargetKind,
   surface: LinkSurface,
   osOpenEnabled: boolean,
-): LinkAction[] {
+): LinkChipAction[] {
   if (target === "url") return ["browser", "copy"];
-  const actions: LinkAction[] = [immediateAction(target, surface)];
+  const actions: LinkChipAction[] = [immediateAction(target, surface)];
   if (surface === "desktop" && osOpenEnabled) actions.push("osOpen");
   actions.push("copy");
   return actions;
@@ -152,10 +161,13 @@ export function decideLinkActivation(input: LinkActivationInput): LinkActivation
 
 /**
  * 칩 버튼 라벨의 i18n 키. 액션 하나가 대상 종류에 따라 다른 문구를 쓰는 경우가
- * 있어(디렉터리의 `osOpen` = "파일 관리자에서 열기", `copy` = 경로/URL) 매핑을
+ * 있어(디렉터리의 `osOpen` = 폴더를 파일 관리자로 열기, `copy` = 경로/URL) 매핑을
  * 여기 한 곳에 둔다. 네임스페이스는 `common`.
+ *
+ * `osReveal`(선택 표시)은 칩에 오르지 않으므로(`LinkChipAction`) 여기에도 없다 —
+ * 소비자 없는 문구가 로케일에 남지 않게 타입이 강제한다.
  */
-export function linkChipLabelKey(action: LinkAction, target: LinkTargetKind): string {
+export function linkChipLabelKey(action: LinkChipAction, target: LinkTargetKind): string {
   switch (action) {
     case "viewer":
       return "terminal.linkChipViewer";
@@ -164,9 +176,8 @@ export function linkChipLabelKey(action: LinkAction, target: LinkTargetKind): st
     case "explorer":
       return "terminal.linkChipExplorer";
     case "osOpen":
-      return target === "directory" ? "terminal.linkChipOsReveal" : "terminal.linkChipOsOpen";
-    case "osReveal":
-      return "terminal.linkChipOsReveal";
+      // 디렉터리를 OS 로 여는 것은 곧 파일 관리자로 그 폴더를 여는 것이다.
+      return target === "directory" ? "terminal.linkChipOsOpenDir" : "terminal.linkChipOsOpen";
     case "browser":
       return "terminal.linkChipBrowser";
     case "copy":

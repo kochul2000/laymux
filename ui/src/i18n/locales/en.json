@@ -338,7 +338,7 @@
       "linkChipChangeDir": "Change directory",
       "linkChipExplorer": "Open in explorer",
       "linkChipOsOpen": "Open in the OS",
-      "linkChipOsReveal": "Show in file manager",
+      "linkChipOsOpenDir": "Open in file manager",
       "linkChipBrowser": "Open in browser",
       "linkChipCopyPath": "Copy path",
       "linkChipCopyUrl": "Copy URL",

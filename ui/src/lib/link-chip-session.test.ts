@@ -38,16 +38,19 @@ function setup(options: { alive?: boolean } = {}) {
     }),
   };
   const run = vi.fn();
+  const onDismiss = vi.fn();
   const session = createLinkChipSession({
     view,
     labelFor: (action, kind) => `${kind}:${action}`,
     run,
     isTokenAlive: () => alive,
+    onDismiss,
   });
   return {
     session,
     view,
     run,
+    onDismiss,
     shown,
     select: (action: LinkAction) => selectHandler?.(action),
     setAlive: (value: boolean) => {
@@ -81,6 +84,9 @@ describe("createLinkChipSession — opening", () => {
 
     expect(h.session.target()).toBe(URL_TARGET);
     expect(h.view.show).toHaveBeenCalledTimes(2);
+    // 교체도 소멸이다 — 밀려난 대상의 자원(줄을 따라가던 마커)을 되돌린다.
+    expect(h.onDismiss).toHaveBeenCalledTimes(1);
+    expect(h.onDismiss).toHaveBeenCalledWith(FILE);
   });
 
   it("shows nothing when there is no action to offer", () => {
@@ -157,8 +163,30 @@ describe("createLinkChipSession — dismissal", () => {
   it("does nothing on dismiss or revalidate when no chip is open", () => {
     h.session.dismiss("escape");
     h.view.hide.mockClear();
+    h.onDismiss.mockClear();
     h.session.dismiss("escape");
     h.session.revalidate();
     expect(h.view.hide).not.toHaveBeenCalled();
+    expect(h.onDismiss).not.toHaveBeenCalled();
+  });
+
+  it("hands the target back exactly once on every exit path", () => {
+    // 칩이 살아 있는 동안만 붙잡는 자원(마커)이 새지 않아야 한다.
+    for (const exit of [
+      (s: typeof h) => s.session.dismiss("scroll"),
+      (s: typeof h) => s.session.handleKeyDown("Escape"),
+      (s: typeof h) => s.session.handlePointerDown("terminal-cell"),
+      (s: typeof h) => s.select("viewer"),
+      (s: typeof h) => {
+        s.setAlive(false);
+        s.session.revalidate();
+      },
+    ]) {
+      const each = setup();
+      each.session.open({ target: FILE, anchor: ANCHOR, actions: ["viewer", "copy"] });
+      exit(each);
+      expect(each.onDismiss).toHaveBeenCalledTimes(1);
+      expect(each.onDismiss).toHaveBeenCalledWith(FILE);
+    }
   });
 });

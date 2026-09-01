@@ -10,7 +10,7 @@
  * 이 모듈은 "그려라 / 감춰라 / 이 노드가 내 안인가" 세 가지만 안다.
  */
 
-import type { LinkAction } from "./link-activation";
+import type { LinkChipAction } from "./link-activation";
 
 /** 칩과 링크 사이 간격(px). */
 const GAP = 6;
@@ -27,7 +27,7 @@ export interface LinkChipAnchor {
 
 /** 칩 버튼 하나. */
 export interface LinkChipItem {
-  action: LinkAction;
+  action: LinkChipAction;
   label: string;
 }
 
@@ -41,7 +41,7 @@ export interface LinkChipView {
   /** 주어진 노드가 칩 안(또는 칩 자신)인지 — 칩 밖 클릭 판정용. */
   contains: (node: unknown) => boolean;
   /** 버튼 클릭 콜백을 등록한다(하나만 유지). */
-  onSelect: (handler: (action: LinkAction) => void) => void;
+  onSelect: (handler: (action: LinkChipAction) => void) => void;
   /** 요소를 제거한다. effect cleanup 용. */
   dispose: () => void;
 }
@@ -72,13 +72,14 @@ export function createLinkChip(host: HTMLElement | null): LinkChipView {
   el.hidden = true;
   host.appendChild(el);
 
-  let handler: ((action: LinkAction) => void) | null = null;
+  let handler: ((action: LinkChipAction) => void) | null = null;
 
-  // 버튼 클릭은 칩이 소유한다 — 터미널로 흘러가면 xterm 이 선택을 지우고
-  // 밖-클릭 소멸까지 함께 트리거된다.
-  el.addEventListener("mousedown", (event) => {
-    event.stopPropagation();
-  });
+  // 칩은 터미널 wrapper 의 자식이고, 이 칩을 위협하는 리스너(path-link 의
+  // mousedown, 칩 밖-클릭 소멸)는 전부 **capture 단계나 window** 에 달려 있다.
+  // 그러므로 여기서 bubble 단계에 stopPropagation 을 걸어도 그것들보다 먼저
+  // 돌 수 없다 — 칩 소유권은 그 리스너들이 `contains()` 로 자기 이벤트를
+  // 알아보고 물러나는 방식으로 성립한다(`isChipEvent`/`linkChipContains`).
+  // 아래 click 핸들러의 종결은 그 뒤에 오는 wrapper bubble 소비자만 막는다.
   el.addEventListener("click", (event) => {
     const button = (event.target as HTMLElement | null)?.closest<HTMLElement>(
       "[data-link-chip-action]",
@@ -86,7 +87,7 @@ export function createLinkChip(host: HTMLElement | null): LinkChipView {
     if (!button) return;
     event.preventDefault();
     event.stopPropagation();
-    const action = button.dataset.linkChipAction as LinkAction | undefined;
+    const action = button.dataset.linkChipAction as LinkChipAction | undefined;
     if (action) handler?.(action);
   });
 

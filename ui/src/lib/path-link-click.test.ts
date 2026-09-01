@@ -31,6 +31,8 @@ function setup(
     confirmAlways?: boolean;
     confirmResult?: boolean;
     activation?: LinkActivationMode;
+    /** 이 target 값에서 온 이벤트를 "칩 자신의 이벤트"로 본다. */
+    chipNode?: unknown;
   } = {},
 ) {
   const activate = vi.fn();
@@ -38,6 +40,7 @@ function setup(
   const onOsHandoffSettled = vi.fn();
   const showChip = vi.fn();
   const handlers = createPathLinkClickHandlers({
+    isChipEvent: (e) => options.chipNode !== undefined && e.target === options.chipNode,
     getSelectionAt: () =>
       options.inside === false ? null : options.target === undefined ? FILE : options.target,
     getSettings: () => ({
@@ -285,5 +288,47 @@ describe("createPathLinkClickHandlers — chip mode arms instead of executing", 
     h.onMouseDown(makeEvent());
     h.onMouseUp(makeEvent());
     expect(h.showChip).not.toHaveBeenCalled();
+  });
+});
+
+// -- ADR-0224: 칩 버튼이 밑줄 위에 겹칠 때 --
+
+describe("createPathLinkClickHandlers — a press never arms from the chip itself", () => {
+  const CHIP = { chipButton: true };
+
+  // 칩은 탭 지점 바로 아래에 그려지므로 다음 줄의 밑줄과 겹칠 수 있고, 밑줄
+  // hit-test 는 z-order 를 보지 않는다. 칩 버튼을 누른 mousedown 이 그 밑줄을
+  // 무장하면 window mouseup 이 칩의 click 보다 먼저 실행된다.
+  it("immediate 모드: 겹친 밑줄이 열리지 않는다", () => {
+    const h = setup({ chipNode: CHIP });
+    h.onMouseDown(makeEvent({ target: CHIP }));
+    h.onMouseUp(makeEvent({ target: CHIP }));
+    expect(h.activate).not.toHaveBeenCalled();
+    expect(h.confirm).not.toHaveBeenCalled();
+  });
+
+  it("chip 모드: 칩 대상이 교체되지 않는다", () => {
+    const h = setup({ activation: "chip", chipNode: CHIP });
+    h.onMouseDown(makeEvent({ target: CHIP }));
+    h.onMouseUp(makeEvent({ target: CHIP }));
+    expect(h.showChip).not.toHaveBeenCalled();
+    expect(h.activate).not.toHaveBeenCalled();
+  });
+
+  it("수정자 조합도 칩 위에서는 이벤트를 종결하지 않는다", () => {
+    const h = setup({ chipNode: CHIP });
+    const e = makeEvent({ target: CHIP, ctrlKey: true });
+    h.onMouseDown(e);
+    expect(e.preventDefault).not.toHaveBeenCalled();
+    expect(e.stopImmediatePropagation).not.toHaveBeenCalled();
+    h.onMouseUp(makeEvent({ target: CHIP, ctrlKey: true }));
+    expect(h.activate).not.toHaveBeenCalled();
+  });
+
+  it("칩 밖 클릭은 그대로 밑줄을 무장한다", () => {
+    const h = setup({ chipNode: CHIP });
+    h.onMouseDown(makeEvent({ target: { terminalCell: true } }));
+    h.onMouseUp(makeEvent({ target: { terminalCell: true } }));
+    expect(h.activate).toHaveBeenCalledWith(FILE, "viewer");
   });
 });
