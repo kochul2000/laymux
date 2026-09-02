@@ -11092,6 +11092,7 @@ import {
                   if (
                     resizeTerminalId !== activeTerminalId ||
                     resizeLeaseId !== leaseId ||
+                    resizeTimer !== null ||
                     lastResizeKey !== resizeKey
                   ) return;
                   lastResizeKey = "";
