@@ -10,6 +10,7 @@ pub use validation::{SettingsLoadResult, ValidationWarning};
 
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use crate::lock_ext::MutexExt;
@@ -31,6 +32,7 @@ static MEMO_LOCK: Mutex<()> = Mutex::new(());
 static SETTINGS_WRITE_LOCK: Mutex<()> = Mutex::new(());
 /// Keeps the dedicated Composer mutation event in the same order as its disk writes.
 static COMPOSER_STAR_UPDATE_LOCK: Mutex<()> = Mutex::new(());
+static COMPOSER_STAR_REVISION: AtomicU64 = AtomicU64::new(0);
 
 fn lock_memo_gate(lock: &Mutex<()>) -> Result<std::sync::MutexGuard<'_, ()>, String> {
     Ok(lock.lock_or_err()?)
@@ -304,8 +306,22 @@ pub fn update_settings(
 
 pub(crate) const COMPOSER_STARRED_ENTRIES_FULL_ERROR: &str = "Composer starred entry limit reached";
 
-pub fn composer_starred_entries() -> Vec<String> {
-    load_settings().terminal.composer_starred_entries
+pub(crate) struct ComposerStarredSnapshot {
+    pub entries: Option<Vec<String>>,
+    pub revision: u64,
+}
+
+pub(crate) fn composer_starred_snapshot(
+    known_revision: Option<u64>,
+) -> Result<ComposerStarredSnapshot, String> {
+    let _guard = COMPOSER_STAR_UPDATE_LOCK.lock_or_err()?;
+    let revision = COMPOSER_STAR_REVISION.load(Ordering::SeqCst);
+    let entries = if known_revision == Some(revision) {
+        None
+    } else {
+        Some(load_settings().terminal.composer_starred_entries)
+    };
+    Ok(ComposerStarredSnapshot { entries, revision })
 }
 
 pub fn update_composer_starred_entry(
@@ -313,10 +329,28 @@ pub fn update_composer_starred_entry(
     starred: bool,
     committed: impl FnOnce(&[String]),
 ) -> Result<Vec<String>, String> {
+    let snapshot = update_composer_starred_entry_snapshot(text, starred, committed)?;
+    Ok(snapshot.entries.unwrap_or_default())
+}
+
+pub(crate) fn update_composer_starred_entry_snapshot(
+    text: &str,
+    starred: bool,
+    committed: impl FnOnce(&[String]),
+) -> Result<ComposerStarredSnapshot, String> {
     let _guard = COMPOSER_STAR_UPDATE_LOCK.lock_or_err()?;
-    let entries = update_composer_starred_entry_at(&settings_path(), text, starred)?;
+    let (entries, changed) =
+        update_composer_starred_entry_at_with_change(&settings_path(), text, starred)?;
+    let revision = if changed {
+        COMPOSER_STAR_REVISION.fetch_add(1, Ordering::SeqCst) + 1
+    } else {
+        COMPOSER_STAR_REVISION.load(Ordering::SeqCst)
+    };
     committed(&entries);
-    Ok(entries)
+    Ok(ComposerStarredSnapshot {
+        entries: Some(entries),
+        revision,
+    })
 }
 
 fn update_composer_starred_entry_at(
@@ -324,14 +358,24 @@ fn update_composer_starred_entry_at(
     text: &str,
     starred: bool,
 ) -> Result<Vec<String>, String> {
+    Ok(update_composer_starred_entry_at_with_change(path, text, starred)?.0)
+}
+
+fn update_composer_starred_entry_at_with_change(
+    path: &std::path::Path,
+    text: &str,
+    starred: bool,
+) -> Result<(Vec<String>, bool), String> {
+    let mut changed = false;
     let settings = update_settings_at(path, |settings| {
-        mutate_composer_starred_entries(
+        changed = mutate_composer_starred_entries(
             &mut settings.terminal.composer_starred_entries,
             text,
             starred,
-        )
+        )?;
+        Ok(())
     })?;
-    Ok(settings.terminal.composer_starred_entries)
+    Ok((settings.terminal.composer_starred_entries, changed))
 }
 
 pub(crate) fn validate_composer_starred_entry(text: &str) -> Result<(), String> {
@@ -348,20 +392,22 @@ fn mutate_composer_starred_entries(
     entries: &mut Vec<String>,
     text: &str,
     starred: bool,
-) -> Result<(), String> {
-    validate_composer_starred_entry(text)?;
+) -> Result<bool, String> {
     if starred {
+        validate_composer_starred_entry(text)?;
         if entries.iter().any(|entry| entry == text) {
-            return Ok(());
+            return Ok(false);
         }
         if entries.len() >= crate::constants::COMPOSER_STARRED_ENTRIES_MAX {
             return Err(COMPOSER_STARRED_ENTRIES_FULL_ERROR.into());
         }
         entries.push(text.to_string());
+        Ok(true)
     } else {
+        let previous_len = entries.len();
         entries.retain(|entry| entry != text);
+        Ok(entries.len() != previous_len)
     }
-    Ok(())
 }
 
 /// Commit the leniently recovered document only after the user has reviewed
@@ -622,6 +668,12 @@ mod tests {
             entries.len(),
             crate::constants::COMPOSER_STARRED_ENTRIES_MAX
         );
+
+        let oversized = "x".repeat(crate::constants::COMPOSER_STARRED_ENTRY_MAX_BYTES + 1);
+        let mut invalid_entries = vec![String::new(), oversized.clone()];
+        assert!(mutate_composer_starred_entries(&mut invalid_entries, "", false).is_ok());
+        assert!(mutate_composer_starred_entries(&mut invalid_entries, &oversized, false).is_ok());
+        assert!(invalid_entries.is_empty());
     }
 
     #[test]
@@ -629,6 +681,14 @@ mod tests {
         let metadata = contract::metadata_for_path("/terminal/composerStarredEntries");
         assert!(!metadata.writable);
         assert!(metadata.sensitive);
+    }
+
+    #[test]
+    fn composer_star_snapshot_omits_an_unchanged_list() {
+        let revision = COMPOSER_STAR_REVISION.load(Ordering::SeqCst);
+        let snapshot = composer_starred_snapshot(Some(revision)).unwrap();
+        assert_eq!(snapshot.revision, revision);
+        assert!(snapshot.entries.is_none());
     }
 
     #[test]

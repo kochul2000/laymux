@@ -21,6 +21,7 @@ Composer history는 셸에 입력한 비밀번호 같은 문자열이 페이지 
 - 별표 목록은 backend settings transaction이 소유한다. 전용 IPC `set_composer_starred_entry(text, starred)`와 Remote API `GET /remote/v1/composer/starred`, `POST /remote/v1/composer/starred`만 수정·조회 진입점으로 사용한다. 일반 settings patch에서는 `/terminal/composerStarredEntries`를 read-only로 취급하고 frontend checkpoint는 디스크의 최신 목록을 보존한다.
 - 전용 mutation은 atomic load-modify-replace 뒤 최신 전체 목록을 반환하고 `composer-starred-entries-changed` Tauri event를 보낸다. Desktop store는 command 응답과 event로 수렴한다. 따라서 Remote가 변경한 직후에도 Desktop Settings가 같은 목록을 보며, stale frontend checkpoint가 Remote 변경을 덮지 않는다.
 - Remote 두 endpoint는 bearer/IP/origin guard뿐 아니라 현재 controller lease를 요구한다. Remote는 lease를 얻은 뒤 호스트 목록을 읽고, 토글 성공 응답으로 자기 메모리를 갱신한다. 별도 `localStorage` 사본은 만들지 않는다.
+- 별표 mutation마다 호스트 runtime revision을 단조 증가시킨다. Remote는 heartbeat 성공 뒤 현재 revision으로 조건부 조회하며, 같은 revision이면 목록을 생략한 응답을 받고 새 revision일 때만 전체 목록을 교체한다. 늦게 도착한 더 낮은 revision 응답은 무시한다.
 - 자동완성은 현재 prefix와 일치하는 별표 항목을 최신 별표부터 먼저 내고, 남은 자리를 현재 scope의 runtime history 최신순으로 채운다. 두 출처의 같은 문자열은 한 번만 보이며 기존 최대 표시 개수와 exact-query 제외 규칙은 유지한다.
 - Desktop과 Remote는 공용 Lucide `Star` 아이콘 경계로 각 recall/자동완성 행의 별표 상태와 토글을 표시한다. 별표 버튼 조작은 그 행을 draft로 선택하지 않고 textarea focus를 유지한다.
 - Desktop Settings의 Terminal 섹션은 전체 목록과 직접 추가·삭제 action을 제공한다. 이 action은 일반 Settings 초안과 분리된 전용 mutation으로 즉시 저장한다.
@@ -37,6 +38,7 @@ Composer history는 셸에 입력한 비밀번호 같은 문자열이 페이지 
 
 - 별표는 앱 재시작과 workspace 전환 뒤에도 남고, 어느 surface에서 바꿔도 같은 호스트 목록으로 수렴한다.
 - 명시적으로 저장한 문자열은 민감정보일 수 있으므로 settings introspection에서는 이 필드를 sensitive로 표시하고 일반 patch에서 숨긴다. 사용자는 Desktop Settings 목록에서 이를 검토·삭제할 수 있다.
+- 수동 편집으로 생긴 빈 값·중복·크기/개수 초과는 settings load에서 ordered set 불변식으로 복구하고 경고한다. 삭제 mutation은 기존 invalid 항목도 제거할 수 있도록 추가 때만 입력 제한을 검사한다.
 - backend-owned 필드가 하나 늘어나므로 frontend checkpoint 보존 테스트, IPC/Remote lease·validation 테스트, Desktop/Remote 별표 interaction 테스트가 필요하다.
-- Remote는 claim 뒤 별표 목록 조회 한 번을 추가한다. 조회 실패는 terminal 제어 자체를 끊지 않고 그 문서 수명에서 별표 후보만 사용할 수 없게 한다.
+- Remote는 claim 뒤 전체 목록을 읽고 heartbeat 성공 뒤 revision 조건부 조회를 추가한다. 조회 실패는 terminal 제어 자체를 끊지 않고 직전 목록을 유지한다.
 - Settings 목록 UI는 별도 저장 모델이나 migration 없이 이 ordered set과 전용 mutation을 그대로 사용한다.

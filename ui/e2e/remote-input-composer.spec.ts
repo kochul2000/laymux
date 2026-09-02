@@ -16,6 +16,10 @@ type NavigationRequest = {
   respond: () => Promise<void>;
 };
 
+type ComposerStarRead = {
+  respond: () => Promise<void>;
+};
+
 type RemoteState = {
   inputs: InputRequest[];
   writes: Array<{ leaseId: string; data: string }>;
@@ -23,6 +27,8 @@ type RemoteState = {
   navigations: NavigationRequest[];
   claims: Array<{ clientName?: string; claimReservationId?: string }>;
   starredEntries: string[];
+  composerStarReads: ComposerStarRead[];
+  starRevision: number;
 };
 
 const pane = (terminalId: string, paneNumber: number, cwd: string, isFocused: boolean) => ({
@@ -488,6 +494,7 @@ async function installRemotePage(
     claimReservationTtlMs?: number;
     width?: number;
     starredEntries?: string[];
+    holdInitialComposerStars?: boolean;
   },
 ): Promise<RemoteState> {
   const state: RemoteState = {
@@ -497,6 +504,8 @@ async function installRemotePage(
     navigations: [],
     claims: [],
     starredEntries: [...(options.starredEntries ?? [])],
+    composerStarReads: [],
+    starRevision: 0,
   };
   let remainingClaimBusyResponses = options.claimBusyResponses ?? 0;
   await page.setViewportSize({ width: options.width ?? 390, height: 844 });
@@ -544,11 +553,36 @@ async function installRemotePage(
           text: string;
           starred: boolean;
         };
-        state.starredEntries = body.starred
+        const nextEntries = body.starred
           ? [...new Set([...state.starredEntries, body.text])]
           : state.starredEntries.filter((entry) => entry !== body.text);
+        if (nextEntries.join("\0") !== state.starredEntries.join("\0")) {
+          state.starredEntries = nextEntries;
+          state.starRevision += 1;
+        }
+        await route.fulfill({
+          json: { entries: state.starredEntries, revision: state.starRevision },
+        });
+        return;
       }
-      await route.fulfill({ json: { entries: state.starredEntries } });
+      const revisionParam = url.searchParams.get("revision");
+      const knownRevision = revisionParam == null ? null : Number(revisionParam);
+      const payload =
+        knownRevision === state.starRevision
+          ? { revision: state.starRevision }
+          : { entries: [...state.starredEntries], revision: state.starRevision };
+      if (options.holdInitialComposerStars && state.composerStarReads.length === 0) {
+        await new Promise<void>((done) => {
+          state.composerStarReads.push({
+            respond: async () => {
+              await route.fulfill({ json: payload });
+              done();
+            },
+          });
+        });
+        return;
+      }
+      await route.fulfill({ json: payload });
       return;
     }
     if (url.pathname === "/remote/v1/navigation") {
@@ -1903,6 +1937,30 @@ test("Remote autocomplete reads and toggles the host-global persistent star list
   await editor.fill("ec");
   await dropdown.getByRole("button", { name: "Star: echo runtime" }).click();
   await expect.poll(() => remote.starredEntries).toEqual(["echo runtime"]);
+});
+
+test("Remote refreshes Desktop star changes and ignores a stale earlier read", async ({ page }) => {
+  const remote = await installRemotePage(page, {
+    coarse: false,
+    width: 1280,
+    starredEntries: ["echo initial"],
+    holdInitialComposerStars: true,
+  });
+  await connect(page);
+  await enterComposerMode(page);
+  await expect.poll(() => remote.composerStarReads.length).toBe(1);
+
+  remote.starredEntries = ["echo desktop"];
+  remote.starRevision += 1;
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+
+  const editor = page.locator("#composerInput");
+  const options = page.locator("#composerAutocompleteList").locator('[role="option"]');
+  await editor.fill("ec");
+  await expect(options).toHaveText(["echo desktop"]);
+
+  await remote.composerStarReads[0].respond();
+  await expect(options).toHaveText(["echo desktop"]);
 });
 
 test("recall history is in-memory only and never written to any persistent store", async ({

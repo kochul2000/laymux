@@ -364,6 +364,7 @@ import {
         // cannot leak through a recall surface after the page unloads.
         const composerHistoryByScopeKey = new Map();
         let composerStarredEntries = [];
+        let composerStarsRevision = -1;
         const MAX_COMPOSER_HISTORY = 200;
         const DEFAULT_COMPOSER_HISTORY_POPUP_ITEMS = 8;
         const DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS = 8;
@@ -3237,14 +3238,12 @@ import {
         }
 
         async function loadComposerStars(activeLeaseId) {
+          const revisionQuery =
+            composerStarsRevision >= 0 ? `&revision=${composerStarsRevision}` : "";
           const data = await remoteFetch(
-            `/remote/v1/composer/starred?leaseId=${encodeURIComponent(activeLeaseId)}`
+            `/remote/v1/composer/starred?leaseId=${encodeURIComponent(activeLeaseId)}${revisionQuery}`
           );
-          if (leaseId !== activeLeaseId) return;
-          composerStarredEntries = Array.isArray(data.entries)
-            ? data.entries.filter((entry) => typeof entry === "string")
-            : [];
-          renderComposerSuggestions();
+          installComposerStars(data, activeLeaseId);
         }
 
         async function updateComposerStar(text, starred) {
@@ -3254,8 +3253,27 @@ import {
             method: "POST",
             body: JSON.stringify({ leaseId: activeLeaseId, text, starred }),
           });
-          if (leaseId !== activeLeaseId) return;
-          composerStarredEntries = Array.isArray(data.entries) ? data.entries : [];
+          installComposerStars(data, activeLeaseId);
+        }
+
+        function installComposerStars(data, activeLeaseId) {
+          const revision = Number(data?.revision);
+          if (
+            leaseId !== activeLeaseId ||
+            !Number.isSafeInteger(revision) ||
+            revision < composerStarsRevision ||
+            !Array.isArray(data.entries)
+          ) {
+            return;
+          }
+          composerStarsRevision = revision;
+          composerStarredEntries = data.entries.filter((entry) => typeof entry === "string");
+          renderComposerSuggestions();
+        }
+
+        function resetComposerStars() {
+          composerStarsRevision = -1;
+          composerStarredEntries = [];
           renderComposerSuggestions();
         }
 
@@ -5697,6 +5715,9 @@ import {
             clearTransientConnectionNotice(
               "heartbeat",
               activeTerminalId ? `Connected to ${activeTerminalId}` : "Connected."
+            );
+            void loadComposerStars(heartbeatLeaseId).catch((error) =>
+              console.warn("Failed to refresh Composer stars", error)
             );
           } catch (err) {
             if (leaseId === heartbeatLeaseId && heartbeatAbortController === controller) throw err;
@@ -11246,6 +11267,7 @@ import {
           // reconnect would skip its own return trip (issue #561). The stashed resume
           // capability above is what lets the reclaim follow the release drain.
           leaseId = null;
+          resetComposerStars();
         }
 
         async function requestDesktopMode() {
@@ -11281,6 +11303,7 @@ import {
           finishHistoryExpansion();
           resetHistoryExpansion(null);
           leaseId = null;
+          resetComposerStars();
           if (androidE2eMode) window.LaymuxNative.setRemoteLease(null);
           fileViewerToken = null;
           closeFileViewer();

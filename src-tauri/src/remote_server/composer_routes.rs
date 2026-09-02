@@ -15,6 +15,7 @@ use super::{internal_error, json_error};
 #[serde(rename_all = "camelCase")]
 pub(super) struct ComposerStarredQuery {
     lease_id: Option<String>,
+    revision: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -27,7 +28,9 @@ pub(super) struct ComposerStarredUpdate {
 
 #[derive(Debug, Serialize)]
 struct ComposerStarredResponse {
-    entries: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    entries: Option<Vec<String>>,
+    revision: u64,
 }
 
 pub(super) async fn remote_composer_starred(
@@ -37,8 +40,17 @@ pub(super) async fn remote_composer_starred(
     if let Err(response) = require_active_lease(&server.app_state, query.lease_id.as_deref()) {
         return response;
     }
-    match tokio::task::spawn_blocking(crate::settings::composer_starred_entries).await {
-        Ok(entries) => Json(ComposerStarredResponse { entries }).into_response(),
+    match tokio::task::spawn_blocking(move || {
+        crate::settings::composer_starred_snapshot(query.revision)
+    })
+    .await
+    {
+        Ok(Ok(snapshot)) => Json(ComposerStarredResponse {
+            entries: snapshot.entries,
+            revision: snapshot.revision,
+        })
+        .into_response(),
+        Ok(Err(error)) => internal_error(error),
         Err(error) => internal_error(error),
     }
 }
@@ -50,14 +62,16 @@ pub(super) async fn remote_composer_starred_update(
     if let Err(response) = require_active_lease(&server.app_state, body.lease_id.as_deref()) {
         return response;
     }
-    if let Err(error) = crate::settings::validate_composer_starred_entry(&body.text) {
-        return json_error(StatusCode::BAD_REQUEST, &error);
+    if body.starred {
+        if let Err(error) = crate::settings::validate_composer_starred_entry(&body.text) {
+            return json_error(StatusCode::BAD_REQUEST, &error);
+        }
     }
 
     let text = body.text;
     let app_handle = server.app_handle.clone();
     let result = tokio::task::spawn_blocking(move || {
-        crate::settings::update_composer_starred_entry(&text, body.starred, |entries| {
+        crate::settings::update_composer_starred_entry_snapshot(&text, body.starred, |entries| {
             if let Err(error) = app_handle.emit(EVENT_COMPOSER_STARRED_ENTRIES_CHANGED, entries) {
                 tracing::warn!(%error, "failed to emit composer starred entries change");
             }
@@ -65,7 +79,11 @@ pub(super) async fn remote_composer_starred_update(
     })
     .await;
     match result {
-        Ok(Ok(entries)) => Json(ComposerStarredResponse { entries }).into_response(),
+        Ok(Ok(snapshot)) => Json(ComposerStarredResponse {
+            entries: snapshot.entries,
+            revision: snapshot.revision,
+        })
+        .into_response(),
         Ok(Err(error)) if error == crate::settings::COMPOSER_STARRED_ENTRIES_FULL_ERROR => {
             json_error(StatusCode::BAD_REQUEST, &error)
         }

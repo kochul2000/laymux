@@ -1678,7 +1678,10 @@ mod tests {
         assert!(html.contains("if (!entry || entry === query || seen.has(entry)) continue;"));
         assert!(html.contains("if (!entry.toLowerCase().startsWith(needle)) continue;"));
         assert!(html.contains("let composerStarredEntries = [];"));
+        assert!(html.contains("let composerStarsRevision = -1;"));
         assert!(html.contains("/remote/v1/composer/starred?leaseId="));
+        assert!(html.contains("&revision=${composerStarsRevision}"));
+        assert!(html.contains("Failed to refresh Composer stars"));
         assert!(html.contains("setRemoteIcon(star, \"Star\""));
 
         // History is a RUNTIME-ONLY Map keyed by scope bucket (ADR-0029
