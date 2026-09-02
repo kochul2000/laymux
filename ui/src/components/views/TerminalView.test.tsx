@@ -3300,7 +3300,7 @@ describe("TerminalView", () => {
     expect(useTerminalStartupStore.getState().activePaneId).toBe("pane-second");
   });
 
-  it("starts the PTY and rendererless output attach when the first measured size is zero", async () => {
+  it("reconciles the fitted grid after rendererless startup becomes locally controllable", async () => {
     type Observer = {
       target: Element | null;
       callback: ResizeObserverCallback;
@@ -3335,6 +3335,21 @@ describe("TerminalView", () => {
       );
     };
 
+    let resolveSession!: (value: Awaited<ReturnType<typeof mockCreateTerminalSession>>) => void;
+    mockCreateTerminalSession.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSession = resolve;
+        }),
+    );
+    let resolveStatus!: (value: { active: boolean }) => void;
+    mockGetRemoteControlStatus.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveStatus = resolve;
+        }),
+    );
+
     try {
       render(
         <TerminalView
@@ -3348,6 +3363,8 @@ describe("TerminalView", () => {
       const observer = observers[0];
       const terminal = createdTerminals[0] as unknown as {
         open: ReturnType<typeof vi.fn>;
+        cols: number;
+        rows: number;
       };
 
       act(() => resize(observer, 0, 600));
@@ -3364,14 +3381,49 @@ describe("TerminalView", () => {
           undefined,
           undefined,
         );
-        expect(mockAttachTerminalOutput).toHaveBeenCalledWith("terminal-pane-zero-size");
       });
       expect(terminal.open).not.toHaveBeenCalled();
 
+      mockFit.mockImplementationOnce(() => {
+        terminal.cols = 300;
+        terminal.rows = 5;
+        capturedResizeHandler?.({ cols: 300, rows: 5 });
+      });
       act(() => resize(observer, 800, 600));
 
       expect(terminal.open).toHaveBeenCalledTimes(1);
       expect(mockCreateTerminalSession).toHaveBeenCalledTimes(1);
+      expect(mockResizeTerminal).not.toHaveBeenCalled();
+
+      await act(async () => {
+        resolveSession({
+          id: "terminal-pane-zero-size",
+          title: "Terminal",
+          initialExecutionHost: "unknown",
+          config: {
+            profile: "PowerShell",
+            cols: 80,
+            rows: 24,
+            sync_group: "",
+            env: [],
+            advertise_true_color: true,
+          },
+        });
+        await Promise.resolve();
+      });
+      await vi.waitFor(() => {
+        expect(mockAttachTerminalOutput).toHaveBeenCalledWith("terminal-pane-zero-size");
+      });
+      expect(mockResizeTerminal).not.toHaveBeenCalled();
+
+      await act(async () => {
+        resolveStatus({ active: false });
+        await Promise.resolve();
+      });
+
+      await vi.waitFor(() => {
+        expect(mockResizeTerminal).toHaveBeenCalledWith("terminal-pane-zero-size", 300, 5);
+      });
     } finally {
       globalThis.ResizeObserver = originalResizeObserver;
     }
@@ -7912,15 +7964,6 @@ describe("TerminalView", () => {
   });
 
   it("resends the latest PC geometry when it changes during remote-return sync", async () => {
-    let resolveFirstResize: (() => void) | undefined;
-    mockResizeTerminal.mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveFirstResize = resolve;
-        }),
-    );
-    mockResizeTerminal.mockResolvedValue(undefined);
-
     render(
       <TerminalView
         instanceId="t-remote-latest-geometry"
@@ -7934,7 +7977,18 @@ describe("TerminalView", () => {
       expect(capturedRemoteControlChanged).toBeTruthy();
     });
     await waitForTerminalRendererOpen();
+    await vi.waitFor(() => {
+      expect(mockResizeTerminal).toHaveBeenCalledWith("t-remote-latest-geometry", 80, 24);
+    });
     mockResizeTerminal.mockClear();
+    let resolveFirstResize: (() => void) | undefined;
+    mockResizeTerminal.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveFirstResize = resolve;
+        }),
+    );
+    mockResizeTerminal.mockResolvedValue(undefined);
 
     act(() => {
       capturedRemoteControlChanged?.({ active: true });
