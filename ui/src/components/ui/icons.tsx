@@ -50,6 +50,7 @@ import {
   Settings,
   Slash,
   Square,
+  Star,
   TriangleAlert,
   Upload,
   X,
@@ -282,6 +283,10 @@ export function SlashIcon(props: IconProps) {
 
 export function SquareIcon(props: IconProps) {
   return renderIcon(Square, props);
+}
+
+export function StarIcon(props: IconProps) {
+  return renderIcon(Star, props);
 }
 
 export function WarningIcon(props: IconProps) {

@@ -330,6 +330,50 @@ fn validate_profile_enums(
 }
 
 fn validate_terminal(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
+    if settings.terminal.composer_starred_entries.len()
+        > crate::constants::COMPOSER_STARRED_ENTRIES_MAX
+    {
+        issue(
+            issues,
+            "too_many_items",
+            "/terminal/composerStarredEntries",
+            format!(
+                "Composer 별표는 최대 {}개까지 저장할 수 있습니다.",
+                crate::constants::COMPOSER_STARRED_ENTRIES_MAX
+            ),
+        );
+    }
+    let mut starred = HashSet::new();
+    for (index, entry) in settings
+        .terminal
+        .composer_starred_entries
+        .iter()
+        .enumerate()
+    {
+        let path = format!("/terminal/composerStarredEntries/{index}");
+        if entry.is_empty() {
+            issue(
+                issues,
+                "required",
+                path,
+                "Composer 별표는 비어 있을 수 없습니다.".into(),
+            );
+        } else if entry.len() > crate::constants::COMPOSER_STARRED_ENTRY_MAX_BYTES {
+            issue(
+                issues,
+                "too_large",
+                path,
+                "Composer 별표가 너무 큽니다.".into(),
+            );
+        } else if !starred.insert(entry) {
+            issue(
+                issues,
+                "duplicate",
+                path,
+                "Composer 별표가 중복됩니다.".into(),
+            );
+        }
+    }
     range_scroll_sensitivity(
         issues,
         "/terminal/scrollSensitivity",

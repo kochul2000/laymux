@@ -888,6 +888,10 @@ pub struct TerminalSettings {
     /// Composer: suggest matching past inputs as an autocomplete dropdown while typing (issue #505).
     #[serde(default = "default_true")]
     pub composer_autocomplete: bool,
+    /// Explicitly starred Composer entries, shared across every workspace and
+    /// surface on this host (ADR-0226).
+    #[serde(default)]
+    pub composer_starred_entries: Vec<String>,
 }
 
 impl Default for TerminalSettings {
@@ -909,6 +913,7 @@ impl Default for TerminalSettings {
             composer_history_scope: default_composer_history_scope(),
             composer_history_popup: true,
             composer_autocomplete: true,
+            composer_starred_entries: Vec::new(),
         }
     }
 }

@@ -3,7 +3,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::body::{to_bytes, Body};
 use axum::extract::{ConnectInfo, State};
-use axum::http::{header, HeaderValue, Method, Request, StatusCode};
+use axum::http::{header, HeaderValue, Method, Request, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -497,12 +497,23 @@ fn revalidate_cached_file_viewer_request(
 }
 
 fn http_path_allowed(method: &Method, path: &str) -> bool {
+    if method == Method::GET {
+        if let Ok(uri) = path.parse::<Uri>() {
+            if uri.scheme().is_none()
+                && uri.authority().is_none()
+                && uri.path() == "/remote/v1/composer/starred"
+            {
+                return true;
+            }
+        }
+    }
     if invalid_inner_path(path) {
         return false;
     }
     match (method, path) {
         (&Method::GET, "/remote/v1/session/status")
         | (&Method::GET, "/remote/v1/navigation")
+        | (&Method::GET, "/remote/v1/composer/starred")
         | (&Method::GET, "/remote/v1/layouts")
         | (&Method::GET, "/remote/v1/widgets")
         | (&Method::GET, "/remote/v1/update")
@@ -512,6 +523,7 @@ fn http_path_allowed(method: &Method, path: &str) -> bool {
         | (&Method::POST, "/remote/v1/session/release")
         | (&Method::POST, "/remote/v1/navigation/spatial")
         | (&Method::POST, "/remote/v1/navigation/notification")
+        | (&Method::POST, "/remote/v1/composer/starred")
         | (&Method::POST, "/remote/v1/workspaces")
         | (&Method::POST, "/remote/v1/workspaces/active")
         | (&Method::POST, "/remote/v1/file-viewer/status")
@@ -750,6 +762,14 @@ mod tests {
     fn inner_http_allowlist_rejects_e2e_recursion_and_path_escaping() {
         assert!(http_path_allowed(&Method::GET, "/remote/v1/terminals"));
         assert!(http_path_allowed(&Method::GET, "/remote/v1/navigation"));
+        assert!(http_path_allowed(
+            &Method::GET,
+            "/remote/v1/composer/starred?leaseId=lease-1"
+        ));
+        assert!(http_path_allowed(
+            &Method::POST,
+            "/remote/v1/composer/starred"
+        ));
         assert!(http_path_allowed(&Method::GET, "/remote/v1/layouts"));
         assert!(http_path_allowed(&Method::GET, "/remote/v1/update"));
         assert!(http_path_allowed(&Method::POST, "/remote/v1/update/check"));

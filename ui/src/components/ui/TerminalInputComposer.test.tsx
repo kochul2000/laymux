@@ -10,6 +10,8 @@ const labels: TerminalInputComposerLabels = {
   resize: "Resize input area",
   history: "Recent inputs",
   autocomplete: "Input suggestions",
+  star: "Star",
+  unstar: "Unstar",
 };
 
 function renderComposer(
@@ -711,6 +713,31 @@ describe("TerminalInputComposer", () => {
       fireEvent.mouseDown(screen.getByText("git checkout"));
       expect(onTextChange).toHaveBeenCalledWith("git checkout");
       expect(screen.queryByTestId("composer-autocomplete")).not.toBeInTheDocument();
+    });
+
+    it("toggles a persistent star without selecting or closing the suggestion", () => {
+      const onTextChange = vi.fn();
+      const onToggleStar = vi.fn();
+      renderComposer({
+        text: "git",
+        autocompleteEnabled: true,
+        history,
+        starredEntries: ["git checkout"],
+        onToggleStar,
+        onTextChange,
+      });
+
+      const star = screen.getByRole("button", { name: "Star: git push" });
+      const unstar = screen.getByRole("button", { name: "Unstar: git checkout" });
+      expect(star).toHaveAttribute("aria-pressed", "false");
+      expect(unstar).toHaveAttribute("aria-pressed", "true");
+
+      fireEvent.mouseDown(star);
+      fireEvent.click(star);
+
+      expect(onToggleStar).toHaveBeenCalledWith("git push", true);
+      expect(onTextChange).not.toHaveBeenCalled();
+      expect(screen.getByTestId("composer-autocomplete")).toBeInTheDocument();
     });
 
     it("lets ArrowUp fall through to edge history recall when no suggestion is active", () => {

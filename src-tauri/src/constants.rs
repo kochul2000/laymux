@@ -30,6 +30,13 @@ pub const EVENT_GROK_USAGE_SNAPSHOT_CHANGED: &str = "grok-usage-snapshot-changed
 /// asked for it — the watchdog re-acquiring or losing one (ADR-0114).
 pub const EVENT_SLEEP_INHIBIT_CHANGED: &str = "sleep-inhibit-changed";
 pub const EVENT_APP_UPDATE_STATUS_CHANGED: &str = "app-update-status-changed";
+pub const EVENT_COMPOSER_STARRED_ENTRIES_CHANGED: &str = "composer-starred-entries-changed";
+
+/// Explicitly persisted Composer entries (ADR-0226).
+pub const COMPOSER_STARRED_ENTRIES_MAX: usize = 200;
+pub const COMPOSER_STARRED_ENTRY_MAX_BYTES: usize = 16 * 1024;
+pub const REMOTE_COMPOSER_STARRED_REQUEST_MAX_BYTES: usize =
+    COMPOSER_STARRED_ENTRY_MAX_BYTES * 6 + 1024;
 pub const GITHUB_UPDATE_HOST: &str = "github.com";
 pub const GITHUB_UPDATE_OWNER: &str = "kochul2000";
 pub const GITHUB_UPDATE_REPOSITORY: &str = "laymux";

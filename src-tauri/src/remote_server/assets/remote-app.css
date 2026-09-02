@@ -490,19 +490,43 @@
         display: none;
       }
       .composer-suggest-item {
+        display: flex;
+        align-items: center;
         overflow: hidden;
-        padding: 5px 8px;
         border-radius: var(--radius-md);
         color: var(--text-primary);
+      }
+      .composer-suggest-pick {
+        min-width: 0;
+        flex: 1;
+        overflow: hidden;
+        padding: 5px 8px;
+        border: 0;
+        background: transparent;
+        color: inherit;
         cursor: pointer;
         text-overflow: ellipsis;
+        text-align: left;
         white-space: nowrap;
       }
       .composer-suggest-item:hover {
         background: var(--hover-bg);
       }
-      .composer-suggest-item[aria-selected="true"] {
+      .composer-suggest-item.is-active {
         background: var(--accent-20);
+      }
+      .composer-suggest-star {
+        flex: 0 0 auto;
+        margin-right: 5px;
+        padding: 3px;
+        border: 0;
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--text-secondary);
+        cursor: pointer;
+      }
+      .composer-suggest-star[aria-pressed="true"] {
+        color: var(--accent);
       }
       /* Flush editor (mirrors desktop): no outer margin / parent padding, no
          border or rounding — it fills the strip under the divider. */

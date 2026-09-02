@@ -30,6 +30,7 @@ pub const READ_ONLY_SETTINGS_PATHS: &[&str] = &[
     "/remote/cloudInstanceId",
     "/remote/cloudTunnelUrl",
     "/remote/cloudServerBaseUrl",
+    "/terminal/composerStarredEntries",
 ];
 
 const ENTRIES: &[MetadataEntry] = &[
@@ -85,6 +86,12 @@ const ENTRIES: &[MetadataEntry] = &[
         path: "/terminal",
         description: "터미널 렌더링·선택·스크롤 동작 설정입니다.",
         sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
+        path: "/terminal/composerStarredEntries",
+        description: "사용자가 명시적으로 저장한 Composer 별표 목록입니다.",
+        sensitive: true,
         apply_mode: ApplyMode::Live,
     },
     MetadataEntry {

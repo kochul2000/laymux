@@ -175,7 +175,7 @@ import { useNotificationStore } from "@/stores/notification-store";
 import { resolveWorkspaceId } from "@/lib/workspace-utils";
 import { OutputIdleDetector } from "@/lib/output-idle-detector";
 import { SerializeAddon } from "@xterm/addon-serialize";
-import { loadTerminalOutputCache } from "@/lib/tauri-api";
+import { loadTerminalOutputCache, setComposerStarredEntry } from "@/lib/tauri-api";
 import {
   registerTerminalSerializer,
   unregisterTerminalSerializer,
@@ -6811,6 +6811,9 @@ export function TerminalView({
   const composerAutocompleteEnabled = useSettingsStore(
     (s) => s.terminal.composerAutocomplete ?? true,
   );
+  const composerStarredEntries = useSettingsStore(
+    (s) => s.terminal.composerStarredEntries ?? [],
+  );
 
   // Issue #361: the jump-to-bottom button must clear the scrollbar slider so
   // they do not overlap. The button is positioned relative to the pane edge, so
@@ -6945,6 +6948,8 @@ export function TerminalView({
           resize: t("terminal.composerResize"),
           history: t("terminal.composerHistory"),
           autocomplete: t("terminal.composerAutocomplete"),
+          star: t("terminal.composerStar"),
+          unstar: t("terminal.composerUnstar"),
         }}
         textareaRef={composerTextareaRef}
         inFlight={composerDraft.inFlight !== null}
@@ -6955,6 +6960,7 @@ export function TerminalView({
         atShellPrompt={atShellPrompt}
         historyPopupEnabled={composerHistoryPopupEnabled}
         autocompleteEnabled={composerAutocompleteEnabled}
+        starredEntries={composerStarredEntries}
         history={readComposerHistory(composerHistoryKey)}
         historyScopeKey={composerHistoryKey}
         onTextChange={(text) => {
@@ -6968,6 +6974,13 @@ export function TerminalView({
         onProxyPaste={pasteComposerProxy}
         onCompositionCommit={commitComposerComposition}
         onHistory={navigateComposerHistory}
+        onToggleStar={(entry, starred) => {
+          void setComposerStarredEntry(entry, starred)
+            .then((entries) =>
+              useSettingsStore.getState().setTerminal({ composerStarredEntries: entries }),
+            )
+            .catch((error) => console.warn("Failed to update Composer star", error));
+        }}
       />
     </div>
   );

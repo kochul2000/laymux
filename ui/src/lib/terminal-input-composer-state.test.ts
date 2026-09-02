@@ -259,6 +259,15 @@ describe("selectComposerAutocompleteSuggestions (issue #505)", () => {
       DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS,
     );
   });
+
+  it("prioritizes global starred entries before runtime history and de-duplicates both sources", () => {
+    expect(
+      selectComposerAutocompleteSuggestions(["git status", "git push", "git diff"], "git", 4, [
+        "git checkout",
+        "git push",
+      ]),
+    ).toEqual(["git push", "git checkout", "git diff", "git status"]);
+  });
 });
 
 describe("desktop composer height preference", () => {

@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::activity;
 use crate::automation_server::AutomationResponse;
@@ -205,6 +205,19 @@ pub fn save_settings(
     let settings = crate::settings::save_frontend_settings(&settings)?;
     reconcile_persistent_remote_runtime(state.inner(), &app, settings.remote)?;
     Ok(())
+}
+
+#[tauri::command(async)]
+pub fn set_composer_starred_entry(
+    text: String,
+    starred: bool,
+    app: AppHandle,
+) -> Result<Vec<String>, String> {
+    crate::settings::update_composer_starred_entry(&text, starred, |entries| {
+        if let Err(error) = app.emit(EVENT_COMPOSER_STARRED_ENTRIES_CHANGED, entries) {
+            tracing::warn!(%error, "failed to emit composer starred entries change");
+        }
+    })
 }
 
 fn reconcile_persistent_remote_runtime(

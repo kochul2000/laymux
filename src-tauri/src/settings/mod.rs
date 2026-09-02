@@ -29,6 +29,8 @@ static MEMO_LOCK: Mutex<()> = Mutex::new(());
 /// no place in the `AppState` lock order (api-contracts.md §14.3). Holding it
 /// across an `AppState` lock is what would break that — do not.
 static SETTINGS_WRITE_LOCK: Mutex<()> = Mutex::new(());
+/// Keeps the dedicated Composer mutation event in the same order as its disk writes.
+static COMPOSER_STAR_UPDATE_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock_memo_gate(lock: &Mutex<()>) -> Result<std::sync::MutexGuard<'_, ()>, String> {
     Ok(lock.lock_or_err()?)
@@ -300,6 +302,68 @@ pub fn update_settings(
     update_settings_at(&settings_path(), mutate)
 }
 
+pub(crate) const COMPOSER_STARRED_ENTRIES_FULL_ERROR: &str = "Composer starred entry limit reached";
+
+pub fn composer_starred_entries() -> Vec<String> {
+    load_settings().terminal.composer_starred_entries
+}
+
+pub fn update_composer_starred_entry(
+    text: &str,
+    starred: bool,
+    committed: impl FnOnce(&[String]),
+) -> Result<Vec<String>, String> {
+    let _guard = COMPOSER_STAR_UPDATE_LOCK.lock_or_err()?;
+    let entries = update_composer_starred_entry_at(&settings_path(), text, starred)?;
+    committed(&entries);
+    Ok(entries)
+}
+
+fn update_composer_starred_entry_at(
+    path: &std::path::Path,
+    text: &str,
+    starred: bool,
+) -> Result<Vec<String>, String> {
+    let settings = update_settings_at(path, |settings| {
+        mutate_composer_starred_entries(
+            &mut settings.terminal.composer_starred_entries,
+            text,
+            starred,
+        )
+    })?;
+    Ok(settings.terminal.composer_starred_entries)
+}
+
+pub(crate) fn validate_composer_starred_entry(text: &str) -> Result<(), String> {
+    if text.is_empty() {
+        return Err("Composer starred entry cannot be empty".into());
+    }
+    if text.len() > crate::constants::COMPOSER_STARRED_ENTRY_MAX_BYTES {
+        return Err("Composer starred entry is too large".into());
+    }
+    Ok(())
+}
+
+fn mutate_composer_starred_entries(
+    entries: &mut Vec<String>,
+    text: &str,
+    starred: bool,
+) -> Result<(), String> {
+    validate_composer_starred_entry(text)?;
+    if starred {
+        if entries.iter().any(|entry| entry == text) {
+            return Ok(());
+        }
+        if entries.len() >= crate::constants::COMPOSER_STARRED_ENTRIES_MAX {
+            return Err(COMPOSER_STARRED_ENTRIES_FULL_ERROR.into());
+        }
+        entries.push(text.to_string());
+    } else {
+        entries.retain(|entry| entry != text);
+    }
+    Ok(())
+}
+
 /// Commit the leniently recovered document only after the user has reviewed
 /// the dropped paths. Background writers cannot implicitly acknowledge loss.
 pub fn acknowledge_settings_recovery(expected_recovery_revision: &str) -> Result<Settings, String> {
@@ -378,6 +442,10 @@ fn save_frontend_settings_to(
                     .remote
                     .cloud_server_base_url
                     .clone_from(&latest.remote.cloud_server_base_url);
+                candidate
+                    .terminal
+                    .composer_starred_entries
+                    .clone_from(&latest.terminal.composer_starred_entries);
             }
             SettingsLoadResult::Recovered { .. } => {
                 return Err(unacknowledged_recovery_error());
@@ -508,6 +576,59 @@ mod tests {
             Some("new-instance")
         );
         assert_eq!(saved.workspaces[0].name, "new workspace checkpoint");
+    }
+
+    #[test]
+    fn composer_stars_are_atomic_and_a_stale_frontend_checkpoint_cannot_revert_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let mut stale_frontend = Settings::default();
+        stale_frontend.workspaces[0].name = "new workspace checkpoint".into();
+        save_settings_to(&path, &stale_frontend).unwrap();
+
+        let entries = update_composer_starred_entry_at(&path, "git status", true).unwrap();
+        assert_eq!(entries, ["git status"]);
+
+        save_frontend_settings_to(&path, &stale_frontend).unwrap();
+        let saved = match load_settings_validated_from(&path) {
+            SettingsLoadResult::Ok { settings, .. }
+            | SettingsLoadResult::Repaired { settings, .. }
+            | SettingsLoadResult::Recovered { settings, .. } => settings,
+            SettingsLoadResult::ParseError { error, .. } => panic!("{error}"),
+        };
+        assert_eq!(saved.terminal.composer_starred_entries, ["git status"]);
+        assert_eq!(saved.workspaces[0].name, "new workspace checkpoint");
+
+        let entries = update_composer_starred_entry_at(&path, "git status", false).unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn composer_star_validation_rejects_blank_oversized_and_over_capacity_entries() {
+        let mut entries = Vec::new();
+        assert!(mutate_composer_starred_entries(&mut entries, "", true).is_err());
+        assert!(mutate_composer_starred_entries(
+            &mut entries,
+            &"x".repeat(crate::constants::COMPOSER_STARRED_ENTRY_MAX_BYTES + 1),
+            true,
+        )
+        .is_err());
+
+        entries.extend(
+            (0..crate::constants::COMPOSER_STARRED_ENTRIES_MAX).map(|index| format!("cmd-{index}")),
+        );
+        assert!(mutate_composer_starred_entries(&mut entries, "one-too-many", true).is_err());
+        assert_eq!(
+            entries.len(),
+            crate::constants::COMPOSER_STARRED_ENTRIES_MAX
+        );
+    }
+
+    #[test]
+    fn composer_stars_are_sensitive_and_read_only_to_generic_settings_patches() {
+        let metadata = contract::metadata_for_path("/terminal/composerStarredEntries");
+        assert!(!metadata.writable);
+        assert!(metadata.sensitive);
     }
 
     #[test]

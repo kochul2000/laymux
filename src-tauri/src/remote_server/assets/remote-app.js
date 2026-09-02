@@ -363,6 +363,7 @@ import {
         // it in memory means passwords or other secrets typed into a shell
         // cannot leak through a recall surface after the page unloads.
         const composerHistoryByScopeKey = new Map();
+        let composerStarredEntries = [];
         const MAX_COMPOSER_HISTORY = 200;
         const DEFAULT_COMPOSER_HISTORY_POPUP_ITEMS = 8;
         const DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS = 8;
@@ -3075,19 +3076,22 @@ import {
         function selectComposerAutocompleteSuggestions(
           history,
           query,
-          max = DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS
+          max = DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS,
+          starredEntries = []
         ) {
           if (max <= 0 || query.length === 0) return [];
           const needle = query.toLowerCase();
           const seen = new Set();
           const entries = [];
-          for (let i = history.length - 1; i >= 0; i -= 1) {
-            const entry = history[i];
-            if (!entry || entry === query || seen.has(entry)) continue;
-            if (!entry.toLowerCase().startsWith(needle)) continue;
-            seen.add(entry);
-            entries.push(entry);
-            if (entries.length >= max) break;
+          for (const source of [starredEntries, history]) {
+            for (let i = source.length - 1; i >= 0; i -= 1) {
+              const entry = source[i];
+              if (!entry || entry === query || seen.has(entry)) continue;
+              if (!entry.toLowerCase().startsWith(needle)) continue;
+              seen.add(entry);
+              entries.push(entry);
+              if (entries.length >= max) return entries;
+            }
           }
           return entries;
         }
@@ -3129,7 +3133,8 @@ import {
           return selectComposerAutocompleteSuggestions(
             readComposerHistory(),
             draft.text,
-            DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS
+            DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS,
+            composerStarredEntries
           );
         }
 
@@ -3191,19 +3196,67 @@ import {
           listEl.textContent = "";
           entries.forEach((entry, index) => {
             const item = document.createElement("li");
-            item.className = "composer-suggest-item";
-            item.id = `${listEl.id}-option-${index}`;
-            item.setAttribute("role", "option");
-            item.setAttribute("aria-selected", index === activeIndex ? "true" : "false");
+            item.className = `composer-suggest-item${index === activeIndex ? " is-active" : ""}`;
+            item.setAttribute("role", "none");
             item.title = entry;
-            item.textContent = entry;
+
+            const pick = document.createElement("button");
+            pick.type = "button";
+            pick.className = "composer-suggest-pick";
+            pick.id = `${listEl.id}-option-${index}`;
+            pick.setAttribute("role", "option");
+            pick.setAttribute("aria-selected", index === activeIndex ? "true" : "false");
+            pick.textContent = entry;
             // mousedown (not click) so the textarea keeps focus through the pick.
-            item.addEventListener("mousedown", (event) => {
+            pick.addEventListener("mousedown", (event) => {
               event.preventDefault();
               onPick(entry);
             });
+
+            const starred = composerStarredEntries.includes(entry);
+            const star = document.createElement("button");
+            star.type = "button";
+            star.className = "composer-suggest-star";
+            star.setAttribute("aria-label", `${starred ? "Unstar" : "Star"}: ${entry}`);
+            star.setAttribute("aria-pressed", starred ? "true" : "false");
+            star.title = starred ? "Unstar" : "Star";
+            setRemoteIcon(star, "Star", { size: 13, fill: starred ? "currentColor" : "none" });
+            star.addEventListener("mousedown", (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            });
+            star.addEventListener("click", (event) => {
+              event.stopPropagation();
+              updateComposerStar(entry, !starred).catch((error) =>
+                setStatus(error.message || String(error), true)
+              );
+            });
+            item.append(pick, star);
             listEl.append(item);
           });
+        }
+
+        async function loadComposerStars(activeLeaseId) {
+          const data = await remoteFetch(
+            `/remote/v1/composer/starred?leaseId=${encodeURIComponent(activeLeaseId)}`
+          );
+          if (leaseId !== activeLeaseId) return;
+          composerStarredEntries = Array.isArray(data.entries)
+            ? data.entries.filter((entry) => typeof entry === "string")
+            : [];
+          renderComposerSuggestions();
+        }
+
+        async function updateComposerStar(text, starred) {
+          const activeLeaseId = leaseId;
+          if (!activeLeaseId) return;
+          const data = await remoteFetch("/remote/v1/composer/starred", {
+            method: "POST",
+            body: JSON.stringify({ leaseId: activeLeaseId, text, starred }),
+          });
+          if (leaseId !== activeLeaseId) return;
+          composerStarredEntries = Array.isArray(data.entries) ? data.entries : [];
+          renderComposerSuggestions();
         }
 
         function renderComposerSuggestions() {
@@ -8790,6 +8843,11 @@ import {
             fileViewerToken = status.fileViewerToken || null;
             setConnected(true);
             startHeartbeat(status.heartbeatTimeoutSeconds || DEFAULT_HEARTBEAT_TIMEOUT_SECONDS);
+            // Star suggestions are optional enhancement data. A transient read
+            // failure must not hold the controller claim or terminal attach.
+            void loadComposerStars(leaseId).catch((error) =>
+              console.warn("Failed to load Composer stars", error)
+            );
             // Widgets need the token, not the lease (ADR-0124): losing control
             // to the host later does not take the indicators away.
             startWidgetPolling();
