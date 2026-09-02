@@ -11086,7 +11086,22 @@ import {
             // A hold that began after this was queued still owns the geometry.
             if (outputAttachGeometryGeneration !== null || attachGeometryHolds > 0) return;
             lastResizeKey = resizeKey;
-            resizeTerminal(resizeTerminalId, resizeLeaseId, cols, rows).catch((err) => setStatus(`Resize failed: ${err.message}`, true));
+            resizeTerminal(resizeTerminalId, resizeLeaseId, cols, rows).catch((err) => {
+              if (err.message === "destructive session finalization is in progress") {
+                setTimeout(() => {
+                  if (
+                    resizeTerminalId !== activeTerminalId ||
+                    resizeLeaseId !== leaseId ||
+                    resizeTimer !== null ||
+                    lastResizeKey !== resizeKey
+                  ) return;
+                  lastResizeKey = "";
+                  queueResize(cols, rows);
+                }, 500);
+                return;
+              }
+              setStatus(`Resize failed: ${err.message}`, true);
+            });
           }, 120);
         }
 
