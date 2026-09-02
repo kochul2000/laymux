@@ -100,6 +100,15 @@ describe("SettingsView", () => {
       if (cmd === "get_cloud_status") {
         return Promise.resolve(mockCloudStatus);
       }
+      if (cmd === "set_composer_starred_entry") {
+        const text = String(args?.text ?? "");
+        const entries = useSettingsStore.getState().terminal.composerStarredEntries;
+        return Promise.resolve(
+          args?.starred
+            ? [...new Set([...entries, text])]
+            : entries.filter((entry) => entry !== text),
+        );
+      }
       if (cmd === "cloud_connect_start") {
         mockCloudStatus = { connected: false, instanceId: "instance-2", lastError: null };
         return Promise.resolve(mockCloudStatus);
@@ -1358,6 +1367,29 @@ describe("SettingsView", () => {
     await user.click(saveBtn);
 
     expect(useSettingsStore.getState().terminal.copyOnSelect).toBe(false);
+  });
+
+  it("lists, adds, and removes host-global Composer stars immediately", async () => {
+    const user = userEvent.setup();
+    useSettingsStore.getState().setTerminal({ composerStarredEntries: ["git status"] });
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-terminal"));
+    expect(screen.getByTestId("composer-starred-entry-0")).toHaveTextContent("git status");
+
+    await user.type(screen.getByTestId("composer-starred-entry-input"), "git push");
+    await user.click(screen.getByTestId("composer-starred-entry-add"));
+    await waitFor(() =>
+      expect(useSettingsStore.getState().terminal.composerStarredEntries).toEqual([
+        "git status",
+        "git push",
+      ]),
+    );
+
+    await user.click(screen.getByTestId("composer-starred-entry-remove-0"));
+    await waitFor(() =>
+      expect(useSettingsStore.getState().terminal.composerStarredEntries).toEqual(["git push"]),
+    );
   });
 
   // -- Terminal section: kill-on-exit (issue #451) --

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 
 use super::models::{Settings, WorkspacePane};
@@ -84,6 +86,7 @@ pub fn validate_and_repair(settings: &mut Settings) -> Vec<ValidationWarning> {
     validate_layouts(settings, &mut warnings);
     validate_docks(settings, &mut warnings);
     validate_profile_references(settings, &mut warnings);
+    validate_composer_starred_entries(settings, &mut warnings);
 
     // Ensure at least one workspace exists
     if settings.workspaces.is_empty() {
@@ -102,6 +105,29 @@ pub fn validate_and_repair(settings: &mut Settings) -> Vec<ValidationWarning> {
     }
 
     warnings
+}
+
+fn validate_composer_starred_entries(
+    settings: &mut Settings,
+    warnings: &mut Vec<ValidationWarning>,
+) {
+    let entries = &mut settings.terminal.composer_starred_entries;
+    let original_len = entries.len();
+    let mut seen = HashSet::new();
+    entries.retain(|entry| {
+        !entry.is_empty()
+            && entry.len() <= crate::constants::COMPOSER_STARRED_ENTRY_MAX_BYTES
+            && seen.insert(entry.clone())
+    });
+    entries.truncate(crate::constants::COMPOSER_STARRED_ENTRIES_MAX);
+    if entries.len() != original_len {
+        warnings.push(ValidationWarning {
+            path: "terminal.composerStarredEntries".into(),
+            message: "유효하지 않거나 중복된 Composer 별표를 제거하고 최대 개수로 제한했습니다."
+                .into(),
+            repaired: true,
+        });
+    }
 }
 
 fn validate_workspaces(settings: &mut Settings, warnings: &mut Vec<ValidationWarning>) {
@@ -533,6 +559,35 @@ mod tests {
         let mut settings = Settings::default();
         let warnings = validate_and_repair(&mut settings);
         assert!(warnings.is_empty(), "warnings: {warnings:?}");
+    }
+
+    #[test]
+    fn composer_stars_repair_invalid_duplicates_and_capacity_overflow() {
+        let mut settings = Settings::default();
+        settings.terminal.composer_starred_entries = vec![
+            String::new(),
+            "x".repeat(crate::constants::COMPOSER_STARRED_ENTRY_MAX_BYTES + 1),
+            "keep".into(),
+            "keep".into(),
+        ];
+        settings.terminal.composer_starred_entries.extend(
+            (0..crate::constants::COMPOSER_STARRED_ENTRIES_MAX).map(|index| format!("cmd-{index}")),
+        );
+
+        let warnings = validate_and_repair(&mut settings);
+
+        assert_eq!(
+            settings.terminal.composer_starred_entries.len(),
+            crate::constants::COMPOSER_STARRED_ENTRIES_MAX
+        );
+        assert_eq!(settings.terminal.composer_starred_entries[0], "keep");
+        assert_eq!(
+            settings.terminal.composer_starred_entries.last().unwrap(),
+            "cmd-198"
+        );
+        assert!(warnings.iter().any(|warning| {
+            warning.path == "terminal.composerStarredEntries" && warning.repaired
+        }));
     }
 
     // ── Pane 좌표 범위 검증 ──

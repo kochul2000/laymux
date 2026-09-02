@@ -16,6 +16,7 @@ import {
   writeComposerHeight,
   type InputMode,
 } from "@/lib/terminal-input-composer-state";
+import { StarIcon } from "@/components/ui/icons";
 
 export interface TerminalInputComposerLabels {
   editor: string;
@@ -24,6 +25,8 @@ export interface TerminalInputComposerLabels {
   history: string;
   /** Accessible name for the as-you-type autocomplete suggestion list (issue #505). */
   autocomplete: string;
+  star: string;
+  unstar: string;
 }
 
 export interface TerminalInputComposerProps {
@@ -94,6 +97,9 @@ export interface TerminalInputComposerProps {
    * appears; Tab (or arrows + Enter) accepts one.
    */
   autocompleteEnabled?: boolean;
+  /** Host-global explicitly persisted entries (ADR-0226). */
+  starredEntries?: readonly string[];
+  onToggleStar?: (entry: string, starred: boolean) => void;
   /** Maximum number of suggestions shown in the autocomplete dropdown. */
   maxAutocompleteItems?: number;
   className?: string;
@@ -139,6 +145,8 @@ export function TerminalInputComposer({
   historyScopeKey,
   maxHistoryItems = DEFAULT_COMPOSER_HISTORY_POPUP_ITEMS,
   autocompleteEnabled = false,
+  starredEntries = [],
+  onToggleStar,
   maxAutocompleteItems = DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS,
   className,
   testId,
@@ -187,7 +195,12 @@ export function TerminalInputComposer({
   // lists are mutually exclusive by construction and never fight for keys.
   const autocompleteSuggestions =
     autocompleteEnabled && text.length > 0
-      ? selectComposerAutocompleteSuggestions(history ?? [], text, maxAutocompleteItems)
+      ? selectComposerAutocompleteSuggestions(
+          history ?? [],
+          text,
+          maxAutocompleteItems,
+          starredEntries,
+        )
       : [];
   // Escape / blur dismiss the dropdown until the next keystroke reopens it.
   // Bucket-tagged like the popup state: a scope switch re-arms it.
@@ -224,6 +237,32 @@ export function TerminalInputComposer({
   const commitAutocompleteEntry = (entry: string | undefined) => {
     dismissAutocomplete();
     if (entry != null) onTextChange(entry);
+  };
+
+  const renderStarButton = (entry: string) => {
+    const starred = starredEntries.includes(entry);
+    const action = starred ? labels.unstar : labels.star;
+    if (!onToggleStar) return null;
+    return (
+      <button
+        type="button"
+        aria-label={`${action}: ${entry}`}
+        aria-pressed={starred}
+        title={action}
+        className="shrink-0 rounded p-0.5"
+        style={{ color: starred ? "var(--accent)" : "var(--text-secondary)" }}
+        onMouseDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggleStar(entry, !starred);
+        }}
+      >
+        <StarIcon size={13} fill={starred ? "currentColor" : "none"} />
+      </button>
+    );
   };
 
   const [height, setHeightState] = useState(() => readComposerHeight());
@@ -458,21 +497,27 @@ export function TerminalInputComposer({
               // Entries can repeat only across different indices post-dedupe, so
               // index is a stable key for this ephemeral list.
               key={`${index}-${entry}`}
-              id={`${childTestId("history")}-option-${index}`}
-              data-testid={childTestId(`history-option-${index}`)}
-              role="option"
-              aria-selected={index === historyIndex}
-              title={entry}
-              className="terminal-input-composer-history-item cursor-pointer truncate whitespace-nowrap rounded px-2 py-1"
+              role="none"
+              className="terminal-input-composer-history-item flex items-center gap-1 rounded"
               style={index === historyIndex ? { background: "var(--accent-20)" } : undefined}
               onMouseEnter={() => setHistoryIndex(index)}
-              // mousedown (not click) so the textarea keeps focus through the pick.
-              onMouseDown={(event) => {
-                event.preventDefault();
-                commitHistoryEntry(entry);
-              }}
             >
-              {entry}
+              <button
+                type="button"
+                id={`${childTestId("history")}-option-${index}`}
+                data-testid={childTestId(`history-option-${index}`)}
+                role="option"
+                aria-selected={index === historyIndex}
+                title={entry}
+                className="min-w-0 flex-1 cursor-pointer truncate whitespace-nowrap px-2 py-1 text-left"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  commitHistoryEntry(entry);
+                }}
+              >
+                {entry}
+              </button>
+              {renderStarButton(entry)}
             </li>
           ))}
         </ul>
@@ -494,23 +539,29 @@ export function TerminalInputComposer({
             <li
               // Post-dedupe entries are unique, so the value is a stable key.
               key={`${index}-${entry}`}
-              id={`${childTestId("autocomplete")}-option-${index}`}
-              data-testid={childTestId(`autocomplete-option-${index}`)}
-              role="option"
-              aria-selected={index === activeAutocompleteIndex}
-              title={entry}
-              className="terminal-input-composer-history-item cursor-pointer truncate whitespace-nowrap rounded px-2 py-1"
+              role="none"
+              className="terminal-input-composer-history-item flex items-center gap-1 rounded"
               style={
                 index === activeAutocompleteIndex ? { background: "var(--accent-20)" } : undefined
               }
               onMouseEnter={() => setAutocompleteIndex(index)}
-              // mousedown (not click) so the textarea keeps focus through the pick.
-              onMouseDown={(event) => {
-                event.preventDefault();
-                commitAutocompleteEntry(entry);
-              }}
             >
-              {entry}
+              <button
+                type="button"
+                id={`${childTestId("autocomplete")}-option-${index}`}
+                data-testid={childTestId(`autocomplete-option-${index}`)}
+                role="option"
+                aria-selected={index === activeAutocompleteIndex}
+                title={entry}
+                className="min-w-0 flex-1 cursor-pointer truncate whitespace-nowrap px-2 py-1 text-left"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  commitAutocompleteEntry(entry);
+                }}
+              >
+                {entry}
+              </button>
+              {renderStarButton(entry)}
             </li>
           ))}
         </ul>
