@@ -3934,6 +3934,7 @@ export function TerminalView({
       if (
         cancelled ||
         remoteResizeSyncInFlight ||
+        !terminalSessionReady ||
         !localTerminalControlAllowed() ||
         cols <= 0 ||
         rows <= 0
@@ -6084,6 +6085,7 @@ export function TerminalView({
           stabilizeNativeWindowsOutput = shouldStabilizeInitialExecutionHost(initialExecutionHost);
           terminalSessionReady = true;
           if (cancelled) return;
+          if (remoteReturnResizeDirtyRef.current) startRemoteResizeSync();
           useTerminalStore.getState().updateInstanceInfo(instanceId, {
             sessionReady: true,
             // The backend seeds the session CWD from the PTY's actual start
