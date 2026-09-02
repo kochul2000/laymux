@@ -3934,6 +3934,7 @@ export function TerminalView({
       if (
         cancelled ||
         remoteResizeSyncInFlight ||
+        !terminalSessionReady ||
         !localTerminalControlAllowed() ||
         cols <= 0 ||
         rows <= 0
@@ -6084,6 +6085,7 @@ export function TerminalView({
           stabilizeNativeWindowsOutput = shouldStabilizeInitialExecutionHost(initialExecutionHost);
           terminalSessionReady = true;
           if (cancelled) return;
+          if (remoteReturnResizeDirtyRef.current) startRemoteResizeSync();
           useTerminalStore.getState().updateInstanceInfo(instanceId, {
             sessionReady: true,
             // The backend seeds the session CWD from the PTY's actual start
@@ -6189,7 +6191,10 @@ export function TerminalView({
         // rebuild this terminal twice per clear.
         registerAtlasRebuilder(instanceId, rebuildRendererForForeignClear);
 
-        performTerminalFit({});
+        // The PTY started rendererless at xterm's default 80x24. Treat the
+        // first fitted grid as authoritative and reuse the acknowledged retry
+        // path so neither PTY readiness nor the owner-status gate can lose it.
+        performTerminalFit({ syncBackendResize: true });
         openedRef.current = true;
         // Sync viewport-dependent UI once on mount. onScroll only fires on
         // subsequent viewport moves, so a terminal restored (or reattached)
@@ -6571,6 +6576,7 @@ export function TerminalView({
     remoteControlReleaseRevisionRef.current = remoteControlSnapshot.releaseRevision;
     const statusKnown = remoteControlStatus !== null;
     const remoteActive = remoteControlStatus?.active ?? false;
+    const backendResizePending = remoteReturnResizeDirtyRef.current;
     remoteControlStatusKnownRef.current = statusKnown;
     remoteControlActiveRef.current = remoteActive;
     localControlAvailableRef.current = statusKnown && !remoteActive;
@@ -6580,7 +6586,7 @@ export function TerminalView({
     if (
       !statusKnown ||
       remoteActive ||
-      (!wasActive && !remoteWasReleased) ||
+      (!wasActive && !remoteWasReleased && !backendResizePending) ||
       !term ||
       !openedRef.current
     ) {

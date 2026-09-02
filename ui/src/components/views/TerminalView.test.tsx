@@ -3300,82 +3300,154 @@ describe("TerminalView", () => {
     expect(useTerminalStartupStore.getState().activePaneId).toBe("pane-second");
   });
 
-  it("starts the PTY and rendererless output attach when the first measured size is zero", async () => {
-    type Observer = {
-      target: Element | null;
-      callback: ResizeObserverCallback;
-    };
-    const observers: Observer[] = [];
-    const originalResizeObserver = globalThis.ResizeObserver;
-    globalThis.ResizeObserver = class {
-      private readonly observer: Observer;
+  it.each(["session", "status"] as const)(
+    "reconciles the fitted grid when %s readiness resolves last",
+    async (lastReadyGate) => {
+      type Observer = {
+        target: Element | null;
+        callback: ResizeObserverCallback;
+      };
+      const observers: Observer[] = [];
+      const originalResizeObserver = globalThis.ResizeObserver;
+      globalThis.ResizeObserver = class {
+        private readonly observer: Observer;
 
-      constructor(callback: ResizeObserverCallback) {
-        this.observer = { target: null, callback };
-        observers.push(this.observer);
-      }
+        constructor(callback: ResizeObserverCallback) {
+          this.observer = { target: null, callback };
+          observers.push(this.observer);
+        }
 
-      observe(target: Element) {
-        this.observer.target = target;
-      }
+        observe(target: Element) {
+          this.observer.target = target;
+        }
 
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver;
+        unobserve() {}
+        disconnect() {}
+      } as unknown as typeof ResizeObserver;
 
-    const resize = (observer: Observer, width: number, height: number) => {
-      observer.callback(
-        [
-          {
-            target: observer.target as Element,
-            contentRect: { width, height },
-          } as unknown as ResizeObserverEntry,
-        ],
-        {} as ResizeObserver,
-      );
-    };
-
-    try {
-      render(
-        <TerminalView
-          instanceId="terminal-pane-zero-size"
-          paneId="pane-zero-size"
-          profile="PowerShell"
-          syncGroup=""
-        />,
-      );
-      expect(observers).toHaveLength(1);
-      const observer = observers[0];
-      const terminal = createdTerminals[0] as unknown as {
-        open: ReturnType<typeof vi.fn>;
+      const resize = (observer: Observer, width: number, height: number) => {
+        observer.callback(
+          [
+            {
+              target: observer.target as Element,
+              contentRect: { width, height },
+            } as unknown as ResizeObserverEntry,
+          ],
+          {} as ResizeObserver,
+        );
       };
 
-      act(() => resize(observer, 0, 600));
+      let resolveSession!: (value: Awaited<ReturnType<typeof mockCreateTerminalSession>>) => void;
+      mockCreateTerminalSession.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSession = resolve;
+          }),
+      );
+      let resolveStatus!: (value: { active: boolean }) => void;
+      mockGetRemoteControlStatus.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveStatus = resolve;
+          }),
+      );
 
-      await vi.waitFor(() => {
-        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
-          "terminal-pane-zero-size",
-          "PowerShell",
-          80,
-          24,
-          "",
-          true,
-          true,
-          undefined,
-          undefined,
+      try {
+        render(
+          <TerminalView
+            instanceId="terminal-pane-zero-size"
+            paneId="pane-zero-size"
+            profile="PowerShell"
+            syncGroup=""
+          />,
         );
-        expect(mockAttachTerminalOutput).toHaveBeenCalledWith("terminal-pane-zero-size");
-      });
-      expect(terminal.open).not.toHaveBeenCalled();
+        expect(observers).toHaveLength(1);
+        const observer = observers[0];
+        const terminal = createdTerminals[0] as unknown as {
+          open: ReturnType<typeof vi.fn>;
+          cols: number;
+          rows: number;
+        };
 
-      act(() => resize(observer, 800, 600));
+        act(() => resize(observer, 0, 600));
 
-      expect(terminal.open).toHaveBeenCalledTimes(1);
-      expect(mockCreateTerminalSession).toHaveBeenCalledTimes(1);
-    } finally {
-      globalThis.ResizeObserver = originalResizeObserver;
-    }
-  });
+        await vi.waitFor(() => {
+          expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+            "terminal-pane-zero-size",
+            "PowerShell",
+            80,
+            24,
+            "",
+            true,
+            true,
+            undefined,
+            undefined,
+          );
+        });
+        expect(terminal.open).not.toHaveBeenCalled();
+
+        mockFit.mockImplementationOnce(() => {
+          terminal.cols = 300;
+          terminal.rows = 5;
+          capturedResizeHandler?.({ cols: 300, rows: 5 });
+        });
+        act(() => resize(observer, 800, 600));
+
+        expect(terminal.open).toHaveBeenCalledTimes(1);
+        expect(mockCreateTerminalSession).toHaveBeenCalledTimes(1);
+        expect(mockResizeTerminal).not.toHaveBeenCalled();
+
+        const settleSession = async () => {
+          await act(async () => {
+            resolveSession({
+              id: "terminal-pane-zero-size",
+              title: "Terminal",
+              initialExecutionHost: "unknown",
+              config: {
+                profile: "PowerShell",
+                cols: 80,
+                rows: 24,
+                sync_group: "",
+                env: [],
+                advertise_true_color: true,
+              },
+            });
+            await Promise.resolve();
+          });
+          await vi.waitFor(() => {
+            expect(mockAttachTerminalOutput).toHaveBeenCalledWith("terminal-pane-zero-size");
+          });
+        };
+        const settleStatus = async () => {
+          await act(async () => {
+            resolveStatus({ active: false });
+            await Promise.resolve();
+          });
+        };
+
+        if (lastReadyGate === "status") {
+          await settleSession();
+          expect(mockResizeTerminal).not.toHaveBeenCalled();
+          await settleStatus();
+        } else {
+          await settleStatus();
+          await act(async () => {
+            await new Promise<void>((resolve) => {
+              requestAnimationFrame(() => setTimeout(resolve, 0));
+            });
+          });
+          expect(mockResizeTerminal).not.toHaveBeenCalled();
+          await settleSession();
+        }
+
+        await vi.waitFor(() => {
+          expect(mockResizeTerminal).toHaveBeenCalledWith("terminal-pane-zero-size", 300, 5);
+        });
+      } finally {
+        globalThis.ResizeObserver = originalResizeObserver;
+      }
+    },
+  );
 
   it("releases the global startup slot when PTY creation fails", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -7912,15 +7984,6 @@ describe("TerminalView", () => {
   });
 
   it("resends the latest PC geometry when it changes during remote-return sync", async () => {
-    let resolveFirstResize: (() => void) | undefined;
-    mockResizeTerminal.mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveFirstResize = resolve;
-        }),
-    );
-    mockResizeTerminal.mockResolvedValue(undefined);
-
     render(
       <TerminalView
         instanceId="t-remote-latest-geometry"
@@ -7934,7 +7997,18 @@ describe("TerminalView", () => {
       expect(capturedRemoteControlChanged).toBeTruthy();
     });
     await waitForTerminalRendererOpen();
+    await vi.waitFor(() => {
+      expect(mockResizeTerminal).toHaveBeenCalledWith("t-remote-latest-geometry", 80, 24);
+    });
     mockResizeTerminal.mockClear();
+    let resolveFirstResize: (() => void) | undefined;
+    mockResizeTerminal.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveFirstResize = resolve;
+        }),
+    );
+    mockResizeTerminal.mockResolvedValue(undefined);
 
     act(() => {
       capturedRemoteControlChanged?.({ active: true });
