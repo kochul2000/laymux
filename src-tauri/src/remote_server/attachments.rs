@@ -80,6 +80,7 @@ impl From<std::io::Error> for AttachmentError {
 #[derive(Debug, PartialEq, Eq)]
 enum AttachmentKind {
     Image(&'static str),
+    Document(&'static str),
     Text(String),
 }
 
@@ -325,6 +326,9 @@ fn classify_attachment(
     if let Some(extension) = sniff_image_extension(bytes) {
         return Ok(AttachmentKind::Image(extension));
     }
+    if let Some(extension) = sniff_document_extension(bytes) {
+        return Ok(AttachmentKind::Document(extension));
+    }
 
     let mime_type = mime_type.trim().to_ascii_lowercase();
     let original_extension = file_extension(original_name);
@@ -335,7 +339,7 @@ fn classify_attachment(
             .is_some_and(|extension| TEXT_EXTENSIONS.contains(&extension));
     if !text_declared {
         return Err(AttachmentError::Invalid(
-            "only image and text attachments are supported".into(),
+            "only image, text, PDF, DOCX, and PPTX attachments are supported".into(),
         ));
     }
     if bytes.contains(&0) || std::str::from_utf8(bytes).is_err() {
@@ -360,6 +364,27 @@ fn sniff_image_extension(bytes: &[u8]) -> Option<&'static str> {
         Some("webp")
     } else if bytes.starts_with(b"BM") {
         Some("bmp")
+    } else {
+        None
+    }
+}
+
+/// PDF by header, DOCX/PPTX by their OOXML package structure. OOXML is a ZIP
+/// archive whose central directory lists part names in plain text, so the
+/// package type is readable from the bytes without walking the archive. The
+/// caller's file name and MIME type are not trusted for the extension.
+fn sniff_document_extension(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"%PDF-") {
+        return Some("pdf");
+    }
+    if !bytes.starts_with(b"PK\x03\x04") {
+        return None;
+    }
+    let contains = |needle: &[u8]| bytes.windows(needle.len()).any(|window| window == needle);
+    if contains(b"word/document.xml") {
+        Some("docx")
+    } else if contains(b"ppt/presentation.xml") {
+        Some("pptx")
     } else {
         None
     }
@@ -390,7 +415,7 @@ fn attachment_file_name(original_name: &str, kind: &AttachmentKind) -> String {
         safe_stem.push_str("attachment");
     }
     let extension = match kind {
-        AttachmentKind::Image(extension) => *extension,
+        AttachmentKind::Image(extension) | AttachmentKind::Document(extension) => *extension,
         AttachmentKind::Text(extension) => extension.as_str(),
     };
     format!("remote-{}-{safe_stem}.{extension}", Uuid::new_v4())

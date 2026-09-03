@@ -56,8 +56,51 @@ fn rejects_unsupported_binary_content() {
         classify_attachment("archive.zip", "application/zip", b"PK\x03\x04binary").unwrap_err();
     assert_eq!(
         error,
-        AttachmentError::Invalid("only image and text attachments are supported".into())
+        AttachmentError::Invalid(
+            "only image, text, PDF, DOCX, and PPTX attachments are supported".into()
+        )
     );
+}
+
+#[test]
+fn accepts_signature_checked_documents_and_ignores_the_caller_extension() {
+    assert_eq!(
+        classify_attachment(
+            "report.bin",
+            "application/octet-stream",
+            b"%PDF-1.7\n%binary"
+        ),
+        Ok(AttachmentKind::Document("pdf"))
+    );
+    let docx = [
+        b"PK\x03\x04".as_slice(),
+        b"\x00zip\x00word/document.xml\x00",
+    ]
+    .concat();
+    assert_eq!(
+        classify_attachment("memo.bin", "", &docx),
+        Ok(AttachmentKind::Document("docx"))
+    );
+    let pptx = [
+        b"PK\x03\x04".as_slice(),
+        b"\x00zip\x00ppt/presentation.xml\x00",
+    ]
+    .concat();
+    assert_eq!(
+        classify_attachment("deck.docx", "application/octet-stream", &pptx),
+        Ok(AttachmentKind::Document("pptx"))
+    );
+}
+
+#[test]
+fn rejects_zip_archives_renamed_as_office_documents() {
+    let error = classify_attachment(
+        "fake.docx",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        b"PK\x03\x04\x00not-an-office-package\x00",
+    )
+    .unwrap_err();
+    assert!(matches!(error, AttachmentError::Invalid(_)));
 }
 
 #[test]

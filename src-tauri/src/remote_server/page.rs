@@ -1645,6 +1645,7 @@ mod tests {
         assert!(html.contains("id=\"attachmentInput\""));
         assert!(html.contains("accept=\"image/*,text/*,"));
         assert!(html.contains("/attachments`"));
+        assert!(html.contains(",.pdf,.docx,.pptx,application/pdf,"));
         assert!(html.contains("REMOTE_ATTACHMENT_MAX_BYTES = 1024 * 1024"));
         assert!(html.contains("REMOTE_LONG_TEXT_ATTACHMENT_THRESHOLD_BYTES = 5 * 1024"));
         assert!(html.contains("function attachRemoteFiles(files, options = {})"));
