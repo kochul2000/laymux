@@ -282,6 +282,13 @@ pub const REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_FILES: usize = 1024;
 /// Slack for the non-`data` fields of one Remote attachment JSON body
 /// (lease id, bounded file name and MIME type, JSON syntax).
 pub const REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES: usize = 16 * 1024;
+/// Cloud relay bound for one browser HTTP request body forwarded over the
+/// tunnel (laymux-server `TUNNEL_HTTP_REQUEST_BYTES_LIMIT`). Attachments that
+/// arrive through the relay are capped to what fits under it (ADR-0226).
+pub const CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT: usize = 16 * 1024 * 1024;
+/// Cloud relay bound for one Android E2E RPC envelope (laymux-server
+/// `ANDROID_E2E_RPC_BODY_LIMIT`, `POST /api/android/e2e/rpc`).
+pub const CLOUD_RELAY_ANDROID_E2E_RPC_BODY_LIMIT: usize = 2 * 1024 * 1024;
 /// Startup cleanup age for Remote attachment cache files.
 pub const REMOTE_TERMINAL_ATTACHMENT_MAX_AGE_DAYS: u64 = 7;
 

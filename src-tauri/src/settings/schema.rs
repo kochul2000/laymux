@@ -347,7 +347,7 @@ const ENTRIES: &[MetadataEntry] = &[
     },
     MetadataEntry {
         path: "/remote/attachmentMaxMib",
-        description: "Remote 클라이언트가 첨부할 수 있는 최대 파일 크기(MiB, 1~10)입니다. 첨부 요청 body 상한, Android E2E RPC envelope 상한, 첨부 캐시 quota(최대 크기의 64배)가 이 값에서 유도됩니다. 다음 첨부부터 적용됩니다.",
+        description: "Remote 클라이언트가 첨부할 수 있는 최대 파일 크기(MiB, 1~10)입니다. 첨부 요청 body 상한, Android E2E RPC envelope 상한, 첨부 캐시 quota(최대 크기의 64배)가 이 값에서 유도됩니다. Cloud relay를 거치는 요청은 relay payload 상한(브라우저 약 11 MiB, Android 앱 1 MiB)이 더 작으면 그 값으로 제한되고 Tailscale 직결을 안내합니다. 다음 첨부부터 적용됩니다.",
         sensitive: false,
         apply_mode: ApplyMode::NextUse,
     },

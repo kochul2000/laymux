@@ -207,14 +207,41 @@ import {
         // Host attachment policy (ADR-0226) rides on every claim answer; the
         // defaults only cover hosts that predate the field.
         let remoteAttachmentMaxBytes = DEFAULT_REMOTE_ATTACHMENT_MAX_BYTES;
+        // The host setting and, when this session rides the Cloud relay, the
+        // relay payload bound that actually binds this path.
+        let remoteAttachmentHostMaxBytes = DEFAULT_REMOTE_ATTACHMENT_MAX_BYTES;
+        let remoteAttachmentRelayMaxBytes = null;
         const REMOTE_ATTACHMENT_DEFAULT_ACCEPT = attachmentInput.getAttribute("accept") || "";
+        function attachmentMibLabel(bytes) {
+          return `${Math.round(bytes / (1024 * 1024))} MiB`;
+        }
         function remoteAttachmentLimitLabel() {
-          return `${Math.round(remoteAttachmentMaxBytes / (1024 * 1024))} MiB`;
+          return attachmentMibLabel(remoteAttachmentMaxBytes);
+        }
+        /** Why an attachment of this size is refused, naming the relay when it binds. */
+        function remoteAttachmentTooLargeMessage(subject) {
+          if (
+            remoteAttachmentRelayMaxBytes !== null &&
+            remoteAttachmentRelayMaxBytes < remoteAttachmentHostMaxBytes
+          ) {
+            return (
+              `${subject} exceeds the Cloud relay payload limit of ` +
+              `${attachmentMibLabel(remoteAttachmentRelayMaxBytes)}. Connect through Tailscale ` +
+              `(direct Remote) to attach up to ${attachmentMibLabel(remoteAttachmentHostMaxBytes)}.`
+            );
+          }
+          return `${subject} exceeds the ${remoteAttachmentLimitLabel()} attachment limit.`;
         }
         function applyRemoteAttachmentPolicy(policy) {
           if (!policy || typeof policy !== "object") return;
           const maxBytes = Number(policy.maxBytes);
           if (Number.isFinite(maxBytes) && maxBytes > 0) remoteAttachmentMaxBytes = maxBytes;
+          const hostMaxBytes = Number(policy.hostMaxBytes);
+          remoteAttachmentHostMaxBytes =
+            Number.isFinite(hostMaxBytes) && hostMaxBytes > 0 ? hostMaxBytes : remoteAttachmentMaxBytes;
+          const relayMaxBytes = Number(policy.relayMaxBytes);
+          remoteAttachmentRelayMaxBytes =
+            Number.isFinite(relayMaxBytes) && relayMaxBytes > 0 ? relayMaxBytes : null;
           if (policy.allowAllExtensions) {
             attachmentInput.removeAttribute("accept");
             return;
@@ -8974,7 +9001,7 @@ import {
 
         async function uploadRemoteAttachment(snapshot, file, signal) {
           if (file.size > remoteAttachmentMaxBytes) {
-            throw new Error(`${file.name} exceeds the ${remoteAttachmentLimitLabel()} attachment limit.`);
+            throw new Error(remoteAttachmentTooLargeMessage(file.name));
           }
           const data = await blobBase64(file);
           return remoteFetch(
@@ -9207,7 +9234,7 @@ import {
           const activeLeaseId = leaseId;
           if (shouldConvertLongTextToAttachment(text)) {
             if (attachmentTextByteLength(text) > remoteAttachmentMaxBytes) {
-              setStatus(`Pasted text exceeds the ${remoteAttachmentLimitLabel()} attachment limit.`, true);
+              setStatus(remoteAttachmentTooLargeMessage("Pasted text"), true);
               return;
             }
             if (attachmentUploadInFlight) {
@@ -11663,7 +11690,7 @@ import {
           if (!text || !shouldConvertLongTextToAttachment(text)) return;
           if (attachmentTextByteLength(text) > remoteAttachmentMaxBytes) {
             setStatus(
-              `Pasted text exceeds the ${remoteAttachmentLimitLabel()} attachment limit and was kept in the composer.`,
+              `${remoteAttachmentTooLargeMessage("Pasted text")} The text was kept in the composer.`,
               false,
               true,
             );

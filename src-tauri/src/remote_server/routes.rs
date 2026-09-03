@@ -325,9 +325,13 @@ async fn remote_health() -> Response {
     .into_response()
 }
 
-async fn remote_session_status(State(server): State<ServerState>) -> Response {
+async fn remote_session_status(
+    State(server): State<ServerState>,
+    transport: Option<axum::Extension<super::RemoteTransport>>,
+) -> Response {
+    let transport = transport.map(|axum::Extension(transport)| transport);
     let attachments = match effective_remote_settings(&server.app_state) {
-        Ok(settings) => super::attachments::AttachmentPolicy::from_settings(&settings),
+        Ok(settings) => super::attachments::AttachmentPolicy::from_settings(&settings, transport),
         Err(err) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, &err),
     };
     match get_remote_control_status(&server.app_state) {
@@ -474,7 +478,7 @@ fn attempt_claim_with_context(
         status: status_from_state(current, timeout_seconds),
         resume_token,
         file_viewer_token,
-        attachments: super::attachments::AttachmentPolicy::from_settings(settings),
+        attachments: super::attachments::AttachmentPolicy::from_settings(settings, None),
     }))
 }
 
@@ -512,9 +516,11 @@ async fn remote_session_claim(
     State(server): State<ServerState>,
     ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
     request_context: Option<axum::Extension<AndroidE2eRequestContext>>,
+    transport: Option<axum::Extension<super::RemoteTransport>>,
     Json(body): Json<ClaimRequest>,
 ) -> Response {
     let remote_addr = addr.to_string();
+    let transport = transport.map(|axum::Extension(transport)| transport);
     // A lease claimed through an E2E session must not outlive that session:
     // a reconnecting phone otherwise fights its own dead lease with 409s
     // until the heartbeat timeout (ADR-0170). Dead-lease cleanup consults the
@@ -578,8 +584,17 @@ async fn remote_session_claim(
     };
 
     match attempt {
-        ClaimAttempt::Granted(response) => {
+        ClaimAttempt::Granted(mut response) => {
             emit_remote_control_status(&server.app_handle, &response.status);
+            // The attempt runs under the owner lock without transport
+            // knowledge; the relay-aware policy (ADR-0226) is filled in here.
+            match effective_remote_settings(&server.app_state) {
+                Ok(settings) => {
+                    response.attachments =
+                        super::attachments::AttachmentPolicy::from_settings(&settings, transport);
+                }
+                Err(err) => return internal_error(err),
+            }
             Json(*response).into_response()
         }
         ClaimAttempt::Rejected(response) => response,

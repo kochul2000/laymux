@@ -16,6 +16,7 @@ use uuid::Uuid;
 
 use crate::automation_server::ServerState;
 use crate::constants::{
+    CLOUD_RELAY_ANDROID_E2E_RPC_BODY_LIMIT, CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT,
     REMOTE_TERMINAL_ATTACHMENT_CACHE_FILES_OF_MAX_SIZE, REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_FILES,
     REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES,
 };
@@ -25,7 +26,9 @@ use crate::settings::models::{RemoteSettings, MAX_REMOTE_ATTACHMENT_MIB};
 use super::access::effective_remote_settings;
 use super::lease::begin_remote_lease_mutation;
 use super::routes::lease_id_from_headers;
-use super::{internal_error, json_error};
+use super::{internal_error, json_error, RemoteTransport};
+
+const MIB: usize = 1024 * 1024;
 
 const ATTACHMENT_DIR_NAME: &str = "remote-attachments";
 const MAX_FILE_NAME_CHARS: usize = 160;
@@ -69,8 +72,7 @@ struct RemoteTerminalAttachmentResponse {
 #[derive(Debug, PartialEq, Eq)]
 enum AttachmentError {
     Invalid(String),
-    /// Carries the configured limit in MiB for the error message.
-    TooLarge(usize),
+    TooLarge,
     QuotaExceeded,
     Io(String),
 }
@@ -90,24 +92,37 @@ enum AttachmentKind {
     Opaque(String),
 }
 
-/// Host attachment policy derived from `remote.*` settings (ADR-0226). The
-/// same shape is published to Remote clients in the session status so the
-/// browser can size its own checks and file chooser to the host.
+/// Host attachment policy derived from `remote.*` settings (ADR-0226), capped
+/// to what the transport that carried the request can relay. The same shape
+/// is published to Remote clients in the claim/status answers so the browser
+/// sizes its own checks, messages and file chooser to this host and path.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AttachmentPolicy {
+    /// Effective bound for this request path: `min(host, relay)`.
     pub max_bytes: usize,
+    /// The host's configured bound, reachable over Direct/Tailscale Remote.
+    pub host_max_bytes: usize,
+    /// Cloud relay payload bound for this path, when the request came through it.
+    pub relay_max_bytes: Option<usize>,
     pub allow_all_extensions: bool,
     pub extra_extensions: Vec<String>,
 }
 
 impl AttachmentPolicy {
-    pub(crate) fn from_settings(settings: &RemoteSettings) -> Self {
-        let max_mib = settings
+    pub(crate) fn from_settings(
+        settings: &RemoteSettings,
+        transport: Option<RemoteTransport>,
+    ) -> Self {
+        let host_max_bytes = settings
             .attachment_max_mib
-            .clamp(1, MAX_REMOTE_ATTACHMENT_MIB) as usize;
+            .clamp(1, MAX_REMOTE_ATTACHMENT_MIB) as usize
+            * MIB;
+        let relay_max_bytes = transport.and_then(relay_attachment_cap);
         Self {
-            max_bytes: max_mib * 1024 * 1024,
+            max_bytes: relay_max_bytes.map_or(host_max_bytes, |relay| relay.min(host_max_bytes)),
+            host_max_bytes,
+            relay_max_bytes,
             allow_all_extensions: settings.attachment_allow_all_extensions,
             extra_extensions: settings
                 .attachment_extra_extensions
@@ -118,12 +133,26 @@ impl AttachmentPolicy {
         }
     }
 
-    fn max_mib(&self) -> usize {
-        self.max_bytes / (1024 * 1024)
+    fn cache_quota_bytes(&self) -> usize {
+        self.host_max_bytes * REMOTE_TERMINAL_ATTACHMENT_CACHE_FILES_OF_MAX_SIZE
     }
 
-    fn cache_quota_bytes(&self) -> usize {
-        self.max_bytes * REMOTE_TERMINAL_ATTACHMENT_CACHE_FILES_OF_MAX_SIZE
+    /// Whether the Cloud relay, not the host setting, is the binding bound.
+    fn relay_limited(&self) -> bool {
+        self.relay_max_bytes
+            .is_some_and(|relay| relay < self.host_max_bytes)
+    }
+
+    fn too_large_message(&self) -> String {
+        if self.relay_limited() {
+            format!(
+                "attachment exceeds the Cloud relay payload limit of {} MiB. Connect through Tailscale (direct Remote) to use this host's {} MiB limit.",
+                self.max_bytes / MIB,
+                self.host_max_bytes / MIB
+            )
+        } else {
+            format!("attachment exceeds the {} MiB limit", self.max_bytes / MIB)
+        }
     }
 
     fn permits_opaque(&self, extension: Option<&str>) -> bool {
@@ -148,10 +177,12 @@ pub(crate) fn is_valid_attachment_extension(extension: &str) -> bool {
 pub(super) async fn remote_terminal_attachment(
     State(server): State<ServerState>,
     AxumPath(id): AxumPath<String>,
+    transport: Option<axum::Extension<RemoteTransport>>,
     request: Request,
 ) -> Response {
+    let transport = transport.map(|axum::Extension(transport)| transport);
     let policy = match effective_remote_settings(&server.app_state) {
-        Ok(settings) => AttachmentPolicy::from_settings(&settings),
+        Ok(settings) => AttachmentPolicy::from_settings(&settings, transport),
         Err(error) => return no_store(internal_error(error)),
     };
     let (parts, raw_body) = request.into_parts();
@@ -162,7 +193,7 @@ pub(super) async fn remote_terminal_attachment(
         Err(_) => {
             return no_store(json_error(
                 StatusCode::PAYLOAD_TOO_LARGE,
-                &too_large_message(policy.max_mib()),
+                &policy.too_large_message(),
             ))
         }
     };
@@ -201,7 +232,7 @@ pub(super) async fn remote_terminal_attachment(
     if body.data.len() > encoded_attachment_limit(policy.max_bytes) {
         return no_store(json_error(
             StatusCode::PAYLOAD_TOO_LARGE,
-            &too_large_message(policy.max_mib()),
+            &policy.too_large_message(),
         ));
     }
 
@@ -217,7 +248,7 @@ pub(super) async fn remote_terminal_attachment(
     if bytes.len() > policy.max_bytes {
         return no_store(json_error(
             StatusCode::PAYLOAD_TOO_LARGE,
-            &too_large_message(policy.max_mib()),
+            &policy.too_large_message(),
         ));
     }
 
@@ -238,14 +269,15 @@ pub(super) async fn remote_terminal_attachment(
         Ok(directory) => directory,
         Err(error) => return no_store(internal_error(error)),
     };
+    let worker_policy = policy.clone();
     let saved = tokio::task::spawn_blocking(move || {
         save_attachment_to_dir(
             &attachment_dir,
             &file_name,
             &mime_type,
             &bytes,
-            &policy,
-            policy.cache_quota_bytes(),
+            &worker_policy,
+            worker_policy.cache_quota_bytes(),
             REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_FILES,
         )
         .map(|path| terminal_visible_path(&path, &profile))
@@ -257,7 +289,7 @@ pub(super) async fn remote_terminal_attachment(
         Ok(Ok(path)) => {
             no_store(Json(RemoteTerminalAttachmentResponse { path, byte_length }).into_response())
         }
-        Ok(Err(error)) => attachment_error_response(error),
+        Ok(Err(error)) => attachment_error_response(error, &policy),
         Err(error) => no_store(internal_error(format!(
             "attachment storage worker failed: {error}"
         ))),
@@ -275,13 +307,13 @@ fn terminal_profile(
         .map(|session| session.config.profile.clone()))
 }
 
-fn attachment_error_response(error: AttachmentError) -> Response {
+fn attachment_error_response(error: AttachmentError, policy: &AttachmentPolicy) -> Response {
     let response = match error {
         AttachmentError::Invalid(message) => {
             json_error(StatusCode::UNSUPPORTED_MEDIA_TYPE, &message)
         }
-        AttachmentError::TooLarge(max_mib) => {
-            json_error(StatusCode::PAYLOAD_TOO_LARGE, &too_large_message(max_mib))
+        AttachmentError::TooLarge => {
+            json_error(StatusCode::PAYLOAD_TOO_LARGE, &policy.too_large_message())
         }
         AttachmentError::QuotaExceeded => json_error(
             StatusCode::INSUFFICIENT_STORAGE,
@@ -299,8 +331,30 @@ fn no_store(mut response: Response) -> Response {
     response
 }
 
-fn too_large_message(max_mib: usize) -> String {
-    format!("attachment exceeds the {max_mib} MiB limit")
+/// Largest decoded attachment the Cloud relay can carry on this path, floored
+/// to whole MiB so the bound reads cleanly in messages. Direct/Tailscale paths
+/// have no relay in between and return `None`.
+fn relay_attachment_cap(transport: RemoteTransport) -> Option<usize> {
+    let request_limit = match transport {
+        RemoteTransport::CloudRelayBrowser => CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT,
+        RemoteTransport::AndroidE2e {
+            via_cloud_relay: true,
+        } => {
+            // Invert `android_e2e_rpc_body_limit`: strip the envelope slack and
+            // the outer base64url layer to get the inner attachment JSON bound.
+            (CLOUD_RELAY_ANDROID_E2E_RPC_BODY_LIMIT
+                - REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES)
+                / 4
+                * 3
+                - REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES
+        }
+        RemoteTransport::AndroidE2e {
+            via_cloud_relay: false,
+        } => return None,
+    };
+    // Invert `attachment_request_limit`: strip the JSON slack and the base64 layer.
+    let decoded = (request_limit - REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES) / 4 * 3;
+    Some((decoded / MIB).max(1) * MIB)
 }
 
 /// Base64 length of the largest decoded attachment the policy allows.
@@ -344,7 +398,7 @@ fn save_attachment_to_dir(
     quota_files: usize,
 ) -> Result<PathBuf, AttachmentError> {
     if bytes.len() > policy.max_bytes {
-        return Err(AttachmentError::TooLarge(policy.max_mib()));
+        return Err(AttachmentError::TooLarge);
     }
     let kind = classify_attachment(original_name, mime_type, bytes, policy)?;
     let output_name = attachment_file_name(original_name, &kind);
@@ -570,7 +624,7 @@ fn cleanup_stale_attachments_in(directory: &Path, max_age_days: u64) -> Result<u
         .map_err(|error| error.to_string())?;
     ensure_private_attachment_directory(directory).map_err(|error| match error {
         AttachmentError::Io(message) | AttachmentError::Invalid(message) => message,
-        AttachmentError::TooLarge(_) => "Remote attachment is too large".into(),
+        AttachmentError::TooLarge => "Remote attachment is too large".into(),
         AttachmentError::QuotaExceeded => "Remote attachment cache is full".into(),
     })?;
     let max_age = Duration::from_secs(max_age_days.saturating_mul(24 * 60 * 60));

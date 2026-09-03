@@ -426,7 +426,7 @@
       "addCustomHost": "Add Host",
       "groupAttachments": "Attachments",
       "attachmentMaxMib": "Max Attachment Size (MiB)",
-      "attachmentMaxMibDesc": "Largest file a Remote client may attach, 1–10 MiB. Built-in types are images, UTF-8 text, PDF, DOCX and PPTX. Larger values also raise the Cloud tunnel and Android E2E request bounds accordingly.",
+      "attachmentMaxMibDesc": "Largest file a Remote client may attach, 1–10 MiB. Built-in types are images, UTF-8 text, PDF, DOCX and PPTX. Requests through the Cloud relay are also capped by the relay payload limit (about 11 MiB for browsers, 1 MiB for the Android app); the page then suggests connecting over Tailscale.",
       "attachmentAllowAllExtensions": "Allow Any File Type",
       "attachmentAllowAllExtensionsDesc": "Accept every file type as an opaque binary attachment. Files are stored under the app cache with their sanitized extension and never opened by the host.",
       "attachmentExtraExtensions": "Extra Extensions",

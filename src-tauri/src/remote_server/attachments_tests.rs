@@ -5,7 +5,7 @@ use tempfile::tempdir;
 use super::*;
 
 fn default_policy() -> AttachmentPolicy {
-    AttachmentPolicy::from_settings(&RemoteSettings::default())
+    AttachmentPolicy::from_settings(&RemoteSettings::default(), None)
 }
 
 fn policy_with(allow_all: bool, extra: &[&str]) -> AttachmentPolicy {
@@ -173,7 +173,7 @@ fn policy_from_settings_clamps_the_limit_and_drops_invalid_extensions() {
         attachment_extra_extensions: vec!["xlsx".into(), ".zip".into(), "TAR".into(), "".into()],
         ..RemoteSettings::default()
     };
-    let policy = AttachmentPolicy::from_settings(&settings);
+    let policy = AttachmentPolicy::from_settings(&settings, None);
     assert_eq!(
         policy.max_bytes,
         MAX_REMOTE_ATTACHMENT_MIB as usize * 1024 * 1024
@@ -186,7 +186,7 @@ fn policy_from_settings_clamps_the_limit_and_drops_invalid_extensions() {
 
     settings.attachment_max_mib = 0;
     assert_eq!(
-        AttachmentPolicy::from_settings(&settings).max_bytes,
+        AttachmentPolicy::from_settings(&settings, None).max_bytes,
         1024 * 1024
     );
 }
@@ -206,7 +206,7 @@ fn enforces_file_and_cache_size_bounds() {
             usize::MAX,
             usize::MAX,
         ),
-        Err(AttachmentError::TooLarge(1))
+        Err(AttachmentError::TooLarge)
     );
 
     fs::write(directory.path().join("existing.txt"), b"12345678").unwrap();
@@ -323,4 +323,64 @@ fn wsl_profiles_receive_a_guest_visible_path() {
         terminal_visible_path(Path::new(r"C:\Users\test\file.txt"), "Ubuntu (WSL)"),
         "/mnt/c/Users/test/file.txt"
     );
+}
+
+#[test]
+fn cloud_relay_paths_cap_the_policy_and_name_tailscale_in_the_message() {
+    let settings = RemoteSettings {
+        attachment_max_mib: MAX_REMOTE_ATTACHMENT_MIB,
+        ..RemoteSettings::default()
+    };
+    let host = MAX_REMOTE_ATTACHMENT_MIB as usize * MIB;
+
+    let direct = AttachmentPolicy::from_settings(&settings, None);
+    assert_eq!((direct.max_bytes, direct.relay_max_bytes), (host, None));
+    assert!(!direct.relay_limited());
+    assert_eq!(
+        direct.too_large_message(),
+        "attachment exceeds the 10 MiB limit"
+    );
+
+    let direct_e2e = AttachmentPolicy::from_settings(
+        &settings,
+        Some(RemoteTransport::AndroidE2e {
+            via_cloud_relay: false,
+        }),
+    );
+    assert_eq!(
+        (direct_e2e.max_bytes, direct_e2e.relay_max_bytes),
+        (host, None)
+    );
+
+    // The relay forwards up to 16 MiB of browser request body, so the 10 MiB
+    // host maximum still fits; the relay bound is reported but not binding.
+    let browser =
+        AttachmentPolicy::from_settings(&settings, Some(RemoteTransport::CloudRelayBrowser));
+    assert_eq!(browser.max_bytes, host);
+    assert!(browser.relay_max_bytes.is_some_and(|relay| relay >= host));
+    assert!(!browser.relay_limited());
+
+    // The relay caps the Android E2E RPC envelope at 2 MiB, which leaves room
+    // for a 1 MiB attachment after both base64 layers.
+    let android = AttachmentPolicy::from_settings(
+        &settings,
+        Some(RemoteTransport::AndroidE2e {
+            via_cloud_relay: true,
+        }),
+    );
+    assert_eq!(
+        (android.max_bytes, android.relay_max_bytes),
+        (MIB, Some(MIB))
+    );
+    assert_eq!(android.host_max_bytes, host);
+    assert!(android.relay_limited());
+    let message = android.too_large_message();
+    assert!(
+        message.contains("Cloud relay payload limit of 1 MiB"),
+        "{message}"
+    );
+    assert!(message.contains("Tailscale"), "{message}");
+    assert!(message.contains("10 MiB"), "{message}");
+    // Quota follows the host maximum, not the path the request took.
+    assert_eq!(android.cache_quota_bytes(), direct.cache_quota_bytes());
 }

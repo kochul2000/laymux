@@ -1645,6 +1645,9 @@ fn build_internal_remote_request(request: IncomingHttpRequest) -> Result<Request
         .body(Body::from(request.body))
         .map_err(|e| AppError::Other(format!("Failed to build tunneled request: {e}")))?;
     request.extensions_mut().insert(TunnelAuthorized);
+    request
+        .extensions_mut()
+        .insert(remote_server::RemoteTransport::CloudRelayBrowser);
     request.extensions_mut().insert(ConnectInfo(SocketAddr::new(
         IpAddr::V4(Ipv4Addr::LOCALHOST),
         0,

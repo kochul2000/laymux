@@ -25,8 +25,9 @@ ADR-0181은 Remote 터미널 첨부를 signature가 확인되는 이미지와 NU
 3. `attachmentExtraExtensions`(소문자, 점 없이, 영문·숫자 1~16자)에 든 확장자는 내용 검사 없이 그 확장자로 저장한다. `attachmentAllowAllExtensions=true`이면 모든 파일을 받되 확장자가 위 규칙에 맞지 않으면 `bin`으로 저장한다. 이때도 signature가 확인되는 이미지·문서는 여전히 signature 확장자로 저장해 저장 이름이 내용과 어긋나지 않게 한다. 이 두 설정은 host 사용자가 명시적으로 켠 정책이므로 ADR-0181의 "임의 binary 업로드" 비목표를 host opt-in으로 정정한다.
 4. `attachmentMaxMib`는 1~10이며 기본 1이다. 서버는 이 값을 매 요청마다 읽어 decoded bytes, base64 `data` 길이, 요청 JSON body(base64 길이 + 16 KiB slack)를 검사한다. route의 axum 기본 body limit은 끄고 handler가 직접 body를 읽는다. cache quota는 상한의 64배(기본 64 MiB)로 유도해 "최대 크기 파일 64개"라는 비율을 유지한다.
 5. 상한이 10 MiB인 이유는 Cloud tunnel의 HTTP 요청 상한 16 MiB다. 10 MiB의 base64 JSON은 약 13.4 MiB로 그 안에 들어간다. tunnel의 stream pending 상한은 16 MiB로, frame queue는 256개(64 KiB × 256)로, socket pending 상한은 32 MiB로 올린다. Android E2E RPC envelope 상한은 "10 MiB 첨부 JSON을 한 번 더 AEAD·base64url로 감싼 크기"에서 유도한 상수(약 18.7 MiB)이며 Android native bridge의 body 문자열 상한도 같은 식으로 맞춘다. Android E2E envelope는 paired device의 encrypted session이 있어야 열리므로 static 상한을 둔다.
-6. 정책은 claim 응답과 `/session/status` 응답에 `attachments:{maxBytes,allowAllExtensions,extraExtensions}`로 실린다. page는 이 값으로 사전 크기 검사·오류 문구·`input[type=file]`의 `accept`를 맞춘다(allow-all이면 `accept`를 제거, extra는 `.ext`로 덧붙임). `accept`는 UX 필터일 뿐이며 서버 판정이 유일한 경계다. 서버는 settings 변경을 즉시 따르고, page의 사전 검사는 다음 claim부터 갱신된다.
-7. `describe_settings`/schema metadata는 세 키를 `NextUse`로 노출한다. semantic validation은 범위 밖 MiB와 규칙에 맞지 않는 확장자를 issue로 보고하고, 서버 정책은 범위를 clamp하며 잘못된 확장자는 무시한다.
+6. **Cloud relay를 거친 요청은 relay의 payload 상한을 지킨다.** 요청이 어느 transport로 들어왔는지는 router extension `RemoteTransport`가 말한다: Cloud tunnel이 넘긴 브라우저 요청은 `CloudRelayBrowser`, Android E2E RPC envelope에서 풀어낸 내부 요청은 `AndroidE2e{via_cloud_relay}`(envelope 자체가 tunnel로 왔는지로 판정), Direct/Tailscale 브라우저 요청은 marker 없음. 정책의 실효 상한은 `min(host 설정, relay 상한)`이며 relay 상한은 laymux-server 상수를 미러한 값에서 유도한다 — 브라우저 경로는 `TUNNEL_HTTP_REQUEST_BYTES_LIMIT`(16 MiB)에서 base64·slack을 벗겨 약 11 MiB(host cap 10 MiB보다 크므로 구속하지 않음), Android E2E 경로는 `ANDROID_E2E_RPC_BODY_LIMIT`(2 MiB)에서 두 겹의 base64·slack을 벗겨 1 MiB다. relay 상한이 host 설정보다 작아 실제로 구속할 때 초과 요청은 "Cloud relay payload limit" 때문이라고 설명하고 Tailscale(direct Remote)로 접속하면 host 상한까지 쓸 수 있다고 안내한다. relay 상수가 바뀌면 desktop의 미러 상수를 함께 갱신한다.
+7. 정책은 claim 응답과 `/session/status` 응답에 `attachments:{maxBytes,hostMaxBytes,relayMaxBytes,allowAllExtensions,extraExtensions}`로 실린다. `maxBytes`는 그 경로의 실효 상한, `hostMaxBytes`는 host 설정, `relayMaxBytes`는 relay 경로일 때만 값이 있다. page는 이 값으로 사전 크기 검사·오류 문구(relay가 구속하면 같은 Tailscale 안내)·`input[type=file]`의 `accept`를 맞춘다(allow-all이면 `accept`를 제거, extra는 `.ext`로 덧붙임). `accept`는 UX 필터일 뿐이며 서버 판정이 유일한 경계다. 서버는 settings 변경을 즉시 따르고, page의 사전 검사는 다음 claim부터 갱신된다.
+8. `describe_settings`/schema metadata는 세 키를 `NextUse`로 노출한다. semantic validation은 범위 밖 MiB와 규칙에 맞지 않는 확장자를 issue로 보고하고, 서버 정책은 범위를 clamp하며 잘못된 확장자는 무시한다.
 
 ## Alternatives Considered
 
@@ -40,7 +41,7 @@ ADR-0181은 Remote 터미널 첨부를 signature가 확인되는 이미지와 NU
 
 - Remote에서 PDF·DOCX·PPTX와 host가 허용한 확장자를 CLI 에이전트에 host path로 넘길 수 있고, 상한을 10 MiB까지 올릴 수 있다.
 - allow-all과 extra extension은 host cache에 임의 binary가 남는다는 뜻이다. 파일은 여전히 private directory·UUID 이름·quota·7일 cleanup 아래에 있고 host가 열지 않는다. 이 위험은 host 사용자가 켠 정책의 명시적 비용이다.
-- 상한을 올린 host는 그 크기의 요청 body를 lease 보유자에게서 받을 수 있다. tunnel·E2E 경계는 상한에 맞춰 커지며, Cloud relay 서버 자체의 요청 상한은 이 저장소 밖이므로 relay가 더 낮으면 Cloud 경로에서 먼저 실패한다.
-- Android native bridge 상한은 앱 업데이트가 있어야 반영된다. 구버전 앱은 1.5 MiB를 넘는 첨부를 bridge에서 거절한다.
+- 상한을 올린 host는 그 크기의 요청 body를 lease 보유자에게서 받을 수 있다. desktop의 tunnel·E2E 경계는 상한에 맞춰 커진다. Cloud relay 자체의 상한은 이 저장소 밖이므로 desktop이 미러 상수로 지킨다: 브라우저 경로는 10 MiB까지 그대로 통과하고, Android 앱이 Cloud로 접속하면 1 MiB에서 막히며 Tailscale 안내를 받는다. relay 상한이 바뀌면 미러 상수만 갱신하면 되고, relay가 미러보다 낮아지면 relay 쪽 413이 먼저 나타난다.
+- Android native bridge 상한은 앱 업데이트가 있어야 반영된다. 구버전 앱은 1.5 MiB를 넘는 첨부를 bridge에서 거절한다. Cloud 경로에서는 page의 사전 검사가 1 MiB에서 먼저 막으므로 bridge 상한은 Tailscale Direct 경로에서만 의미가 있다.
 - DOCX/PPTX 판정은 두 번의 substring 검색이다. DOCM·PPTM 같은 macro 변형은 같은 main part 이름을 가지므로 `.docx`/`.pptx`로 저장된다. CLI가 host path로 읽는 용도에서는 문제가 없다.
 - 테스트는 PDF header, DOCX/PPTX part 이름 판정, `.docx` 이름의 임의 ZIP 거절, extra extension·allow-all의 opaque 저장, settings clamp·필터, transport 상한이 최대 첨부를 덮는지를 단위 테스트로 고정한다.

@@ -43,7 +43,7 @@ pub(crate) use android_e2e_output::{
     E2E_OUTPUT_MAX_ENCRYPTED_RECORD_BYTES, E2E_OUTPUT_OPEN_RECORD_LIMIT,
 };
 pub(crate) use attachments::{cleanup_stale_attachments, is_valid_attachment_extension};
-pub(crate) use auth::TunnelAuthorized;
+pub(crate) use auth::{RemoteTransport, TunnelAuthorized};
 pub(crate) use lease::{
     active_lease_matches_with_timeout, begin_human_control_operation,
     human_control_operations_drained, HumanControlOrigin, HumanControlPermit,
