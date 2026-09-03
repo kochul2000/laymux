@@ -888,6 +888,10 @@ pub struct TerminalSettings {
     /// Composer: suggest matching past inputs as an autocomplete dropdown while typing (issue #505).
     #[serde(default = "default_true")]
     pub composer_autocomplete: bool,
+    /// Explicitly starred Composer entries, shared across every workspace and
+    /// surface on this host (ADR-0226).
+    #[serde(default)]
+    pub composer_starred_entries: Vec<String>,
 }
 
 impl Default for TerminalSettings {
@@ -909,6 +913,7 @@ impl Default for TerminalSettings {
             composer_history_scope: default_composer_history_scope(),
             composer_history_popup: true,
             composer_autocomplete: true,
+            composer_starred_entries: Vec::new(),
         }
     }
 }
@@ -1860,7 +1865,7 @@ pub struct RemoteSettings {
     /// on a device where a screen row matters more, and never touches placement.
     #[serde(default = "default_remote_widgets")]
     pub widgets: bool,
-    /// Largest decoded Remote attachment in MiB (1..=10, ADR-0226). The
+    /// Largest decoded Remote attachment in MiB (1..=10, ADR-0227). The
     /// attachment JSON body bound, the Android E2E RPC envelope bound and the
     /// attachment cache quota all derive from this value.
     #[serde(default = "default_remote_attachment_max_mib")]

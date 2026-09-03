@@ -575,6 +575,16 @@ export async function saveSettings(settings: Settings): Promise<void> {
   return invoke("save_settings", { settings });
 }
 
+export async function setComposerStarredEntry(text: string, starred: boolean): Promise<string[]> {
+  return invoke("set_composer_starred_entry", { text, starred });
+}
+
+export function onComposerStarredEntriesChanged(
+  callback: (entries: string[]) => void,
+): Promise<UnlistenFn> {
+  return listen<string[]>("composer-starred-entries-changed", (event) => callback(event.payload));
+}
+
 export interface TerminalSessionAttribution {
   generation: number;
   state: "identified" | "noAgent" | "activeButUnidentified" | "unknown";

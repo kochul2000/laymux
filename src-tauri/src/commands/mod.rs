@@ -80,6 +80,7 @@ mod main_thread_io {
                 "acknowledge_settings_recovery",
                 "reset_settings",
                 "save_settings",
+                "set_composer_starred_entry",
                 "load_memo",
                 "save_memo",
                 "get_listening_ports",

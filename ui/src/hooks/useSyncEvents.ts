@@ -14,6 +14,7 @@ import {
   onTerminalTitleChanged,
   onTerminalOutputActivity,
   onTerminalActivityReconciled,
+  onComposerStarredEntriesChanged,
   markClaudeTerminal,
   getTerminalStates,
   type TerminalOutputActivitySource,
@@ -32,6 +33,7 @@ import { isStaleActivity } from "@/lib/activity-order";
 import { extractCodexTitleMessage } from "@/lib/codex-activity-handler";
 import { resolveWorkspaceId } from "@/lib/workspace-utils";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
+import { useSettingsStore } from "@/stores/settings-store";
 
 const CWD_PERSIST_DEBOUNCE_MS = 2000;
 const OUTPUT_ACTIVE_RESET_MS = 2000;
@@ -178,6 +180,13 @@ export function useSyncEvents() {
         }
       });
     }
+
+    trackListener(
+      onComposerStarredEntriesChanged((entries) => {
+        if (cancelled) return;
+        useSettingsStore.getState().setTerminal({ composerStarredEntries: entries });
+      }),
+    );
 
     trackListener(
       onClaudeTerminalDetected((terminalId) => {

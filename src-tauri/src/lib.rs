@@ -289,6 +289,7 @@ pub fn run() {
             commands::list_system_monospace_fonts,
             commands::load_settings,
             commands::save_settings,
+            commands::set_composer_starred_entry,
             commands::load_memo,
             commands::save_memo,
             commands::open_settings_file,

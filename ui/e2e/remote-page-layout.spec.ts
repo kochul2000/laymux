@@ -1219,6 +1219,7 @@ test.describe("remote mobile layout", () => {
             main: { left: [], center: [], right: ["keyboard", "keys"] },
             expanded: {
               left: [
+                "q",
                 "esc",
                 "tab",
                 "stab",
@@ -1312,6 +1313,7 @@ test.describe("remote mobile layout", () => {
     await expect(helperTextarea).toBeFocused();
 
     const fixedCases = [
+      { id: "q", sequence: "q" },
       { id: "esc", sequence: "\x1b" },
       { id: "tab", sequence: "\t" },
       { id: "stab", sequence: "\x1b[Z" },
@@ -1351,6 +1353,7 @@ test.describe("remote mobile layout", () => {
       .locator("#keyRow .key-btn")
       .evaluateAll((buttons) => buttons.map((button) => (button as HTMLButtonElement).dataset.key));
     expect(renderedKeyIds).toEqual([
+      "q",
       "esc",
       "tab",
       "stab",
@@ -2089,9 +2092,9 @@ test.describe("remote mobile layout", () => {
     await page.setContent(remoteClientMarkupWithoutXterm());
     const app = page.locator(".app");
 
-    // Default Keys row placement: navPad + Esc/Tab/Shift+Tab/flick pad on the
-    // left, ^J ^U ^T ^L on the right.
-    await expect(page.locator("#keyRow .key-btn")).toHaveCount(9);
+    // Default Keys row placement: navPad + Tab/Shift+Tab on the left, then
+    // ^U ^L ^T ^J + flick pad + PgUp/PgDn on the right.
+    await expect(page.locator("#keyRow .key-btn")).toHaveCount(10);
     await expect(page.locator("#keyBar")).toBeHidden();
     await page.locator("#keyBarToggle").click();
     await expect(page.locator("#keyBar")).toBeVisible();

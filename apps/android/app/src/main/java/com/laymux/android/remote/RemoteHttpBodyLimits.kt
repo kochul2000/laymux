@@ -1,7 +1,7 @@
 package com.laymux.android.remote
 
 /**
- * Largest configurable desktop attachment (`remote.attachmentMaxMib`, ADR-0226) as a
+ * Largest configurable desktop attachment (`remote.attachmentMaxMib`, ADR-0227) as a
  * base64 JSON body: 10 MiB decoded, base64-expanded, plus the desktop's 16 KiB slack for
  * the non-data fields. Matches `attachment_request_limit` in the desktop attachments route.
  */

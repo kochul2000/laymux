@@ -19,7 +19,7 @@ const REMOTE_TOKEN_HEADER: &str = "x-laymux-remote-token";
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct TunnelAuthorized;
 
-/// Which transport carried a Remote request into the router (ADR-0226). The
+/// Which transport carried a Remote request into the router (ADR-0227). The
 /// extension is absent for Direct/Tailscale browser requests. Handlers use it
 /// to size payload policy to what the Cloud relay can carry on that path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

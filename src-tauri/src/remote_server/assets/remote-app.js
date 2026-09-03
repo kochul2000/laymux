@@ -204,7 +204,7 @@ import {
           twoFingerScrollSensitivity: 5,
         });
         const DEFAULT_REMOTE_ATTACHMENT_MAX_BYTES = 1024 * 1024;
-        // Host attachment policy (ADR-0226) rides on every claim answer; the
+        // Host attachment policy (ADR-0227) rides on every claim answer; the
         // defaults only cover hosts that predate the field.
         let remoteAttachmentMaxBytes = DEFAULT_REMOTE_ATTACHMENT_MAX_BYTES;
         // The host setting and, when this session rides the Cloud relay, the
@@ -415,6 +415,8 @@ import {
         // it in memory means passwords or other secrets typed into a shell
         // cannot leak through a recall surface after the page unloads.
         const composerHistoryByScopeKey = new Map();
+        let composerStarredEntries = [];
+        let composerStarsRevision = -1;
         const MAX_COMPOSER_HISTORY = 200;
         const DEFAULT_COMPOSER_HISTORY_POPUP_ITEMS = 8;
         const DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS = 8;
@@ -3127,19 +3129,22 @@ import {
         function selectComposerAutocompleteSuggestions(
           history,
           query,
-          max = DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS
+          max = DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS,
+          starredEntries = []
         ) {
           if (max <= 0 || query.length === 0) return [];
           const needle = query.toLowerCase();
           const seen = new Set();
           const entries = [];
-          for (let i = history.length - 1; i >= 0; i -= 1) {
-            const entry = history[i];
-            if (!entry || entry === query || seen.has(entry)) continue;
-            if (!entry.toLowerCase().startsWith(needle)) continue;
-            seen.add(entry);
-            entries.push(entry);
-            if (entries.length >= max) break;
+          for (const source of [starredEntries, history]) {
+            for (let i = source.length - 1; i >= 0; i -= 1) {
+              const entry = source[i];
+              if (!entry || entry === query || seen.has(entry)) continue;
+              if (!entry.toLowerCase().startsWith(needle)) continue;
+              seen.add(entry);
+              entries.push(entry);
+              if (entries.length >= max) return entries;
+            }
           }
           return entries;
         }
@@ -3181,7 +3186,8 @@ import {
           return selectComposerAutocompleteSuggestions(
             readComposerHistory(),
             draft.text,
-            DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS
+            DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS,
+            composerStarredEntries
           );
         }
 
@@ -3243,19 +3249,84 @@ import {
           listEl.textContent = "";
           entries.forEach((entry, index) => {
             const item = document.createElement("li");
-            item.className = "composer-suggest-item";
-            item.id = `${listEl.id}-option-${index}`;
-            item.setAttribute("role", "option");
-            item.setAttribute("aria-selected", index === activeIndex ? "true" : "false");
+            item.className = `composer-suggest-item${index === activeIndex ? " is-active" : ""}`;
+            item.setAttribute("role", "none");
             item.title = entry;
-            item.textContent = entry;
+
+            const pick = document.createElement("button");
+            pick.type = "button";
+            pick.className = "composer-suggest-pick";
+            pick.id = `${listEl.id}-option-${index}`;
+            pick.setAttribute("role", "option");
+            pick.setAttribute("aria-selected", index === activeIndex ? "true" : "false");
+            pick.textContent = entry;
             // mousedown (not click) so the textarea keeps focus through the pick.
-            item.addEventListener("mousedown", (event) => {
+            pick.addEventListener("mousedown", (event) => {
               event.preventDefault();
               onPick(entry);
             });
+
+            const starred = composerStarredEntries.includes(entry);
+            const star = document.createElement("button");
+            star.type = "button";
+            star.className = "composer-suggest-star";
+            star.setAttribute("aria-label", `${starred ? "Unstar" : "Star"}: ${entry}`);
+            star.setAttribute("aria-pressed", starred ? "true" : "false");
+            star.title = starred ? "Unstar" : "Star";
+            setRemoteIcon(star, "Star", { size: 13, fill: starred ? "currentColor" : "none" });
+            star.addEventListener("mousedown", (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            });
+            star.addEventListener("click", (event) => {
+              event.stopPropagation();
+              updateComposerStar(entry, !starred).catch((error) =>
+                setStatus(error.message || String(error), true)
+              );
+            });
+            item.append(pick, star);
             listEl.append(item);
           });
+        }
+
+        async function loadComposerStars(activeLeaseId) {
+          const revisionQuery =
+            composerStarsRevision >= 0 ? `&revision=${composerStarsRevision}` : "";
+          const data = await remoteFetch(
+            `/remote/v1/composer/starred?leaseId=${encodeURIComponent(activeLeaseId)}${revisionQuery}`
+          );
+          installComposerStars(data, activeLeaseId);
+        }
+
+        async function updateComposerStar(text, starred) {
+          const activeLeaseId = leaseId;
+          if (!activeLeaseId) return;
+          const data = await remoteFetch("/remote/v1/composer/starred", {
+            method: "POST",
+            body: JSON.stringify({ leaseId: activeLeaseId, text, starred }),
+          });
+          installComposerStars(data, activeLeaseId);
+        }
+
+        function installComposerStars(data, activeLeaseId) {
+          const revision = Number(data?.revision);
+          if (
+            leaseId !== activeLeaseId ||
+            !Number.isSafeInteger(revision) ||
+            revision < composerStarsRevision ||
+            !Array.isArray(data.entries)
+          ) {
+            return;
+          }
+          composerStarsRevision = revision;
+          composerStarredEntries = data.entries.filter((entry) => typeof entry === "string");
+          renderComposerSuggestions();
+        }
+
+        function resetComposerStars() {
+          composerStarsRevision = -1;
+          composerStarredEntries = [];
+          renderComposerSuggestions();
         }
 
         function renderComposerSuggestions() {
@@ -5696,6 +5767,9 @@ import {
             clearTransientConnectionNotice(
               "heartbeat",
               activeTerminalId ? `Connected to ${activeTerminalId}` : "Connected."
+            );
+            void loadComposerStars(heartbeatLeaseId).catch((error) =>
+              console.warn("Failed to refresh Composer stars", error)
             );
           } catch (err) {
             if (leaseId === heartbeatLeaseId && heartbeatAbortController === controller) throw err;
@@ -8843,6 +8917,11 @@ import {
             setConnected(true);
             startHeartbeat(status.heartbeatTimeoutSeconds || DEFAULT_HEARTBEAT_TIMEOUT_SECONDS);
             applyRemoteAttachmentPolicy(status.attachments);
+            // Star suggestions are optional enhancement data. A transient read
+            // failure must not hold the controller claim or terminal attach.
+            void loadComposerStars(leaseId).catch((error) =>
+              console.warn("Failed to load Composer stars", error)
+            );
             // Widgets need the token, not the lease (ADR-0124): losing control
             // to the host later does not take the indicators away.
             startWidgetPolling();
@@ -9338,6 +9417,7 @@ import {
           navNext: { label: "P↓", nav: ["spatial", "next"], hint: "Next pane (spatial order)" },
           notifRecent: { label: "N←", nav: ["notification", "recent"], navBadge: true, hint: "Most recent unread alert" },
           notifOldest: { label: "N→", nav: ["notification", "oldest"], navBadge: true, hint: "Oldest unread alert" },
+          q: { label: "Q", seq: "q" },
           esc: { label: "Esc", seq: "\x1b" },
           tab: { label: "Tab", seq: "\t" },
           stab: { label: "⇧Tab", seq: "\x1b[Z" },
@@ -9374,7 +9454,7 @@ import {
         };
         // Stable listing order for the built-in keys.
         const KEY_ORDER = [
-          "navPad", "navPrev", "navNext", "notifRecent", "notifOldest",
+          "navPad", "navPrev", "navNext", "notifRecent", "notifOldest", "q",
           "esc", "tab", "stab", "dpad", "up", "down", "left", "right", "home", "end",
           "enter", "bksp", "ins", "del", "pgup", "pgdn",
           "c-c", "c-j", "c-u", "c-t", "c-l",
@@ -9387,7 +9467,7 @@ import {
         const KEY_CATEGORIES = [
           { id: "step", name: "Pane/Alert nav", keys: ["navPad", "navPrev", "navNext", "notifRecent", "notifOldest"] },
           { id: "nav", name: "Navigation", keys: ["esc", "tab", "stab", "dpad", "up", "down", "left", "right", "home", "end"] },
-          { id: "edit", name: "Editing", keys: ["enter", "bksp", "ins", "del", "pgup", "pgdn"] },
+          { id: "edit", name: "Editing", keys: ["q", "enter", "bksp", "ins", "del", "pgup", "pgdn"] },
           { id: "ctrl", name: "Ctrl keys", keys: ["c-c", "c-j", "c-u", "c-t", "c-l"] },
           { id: "fn", name: "Function", keys: ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"] },
         ];
@@ -9430,11 +9510,24 @@ import {
           expanded: false,
           userKeys: [],
           zones: {
-            main: { left: ["soft:c-c"], center: [], right: ["keyboard", "keys", "send"] },
-            expanded: {
-              left: ["composer", "soft:navPad", "soft:esc", "soft:tab", "soft:stab", "soft:dpad"],
+            main: {
+              left: ["soft:c-c", "soft:q", "soft:esc"],
               center: [],
-              right: ["soft:c-j", "soft:c-u", "soft:c-t", "soft:c-l"],
+              right: ["keyboard", "keys", "send"],
+            },
+            expanded: {
+              left: ["composer", "soft:navPad", "soft:tab", "soft:stab"],
+              center: [],
+              right: [
+                "soft:c-u",
+                "soft:c-l",
+                "soft:c-t",
+                "soft:c-j",
+                "soft:dpad",
+                "soft:pgup",
+                "soft:pgdn",
+                "attachment",
+              ],
             },
           },
         };
@@ -11241,6 +11334,7 @@ import {
           // reconnect would skip its own return trip (issue #561). The stashed resume
           // capability above is what lets the reclaim follow the release drain.
           leaseId = null;
+          resetComposerStars();
         }
 
         async function requestDesktopMode() {
@@ -11276,6 +11370,7 @@ import {
           finishHistoryExpansion();
           resetHistoryExpansion(null);
           leaseId = null;
+          resetComposerStars();
           if (androidE2eMode) window.LaymuxNative.setRemoteLease(null);
           fileViewerToken = null;
           closeFileViewer();

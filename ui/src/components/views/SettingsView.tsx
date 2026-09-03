@@ -49,6 +49,7 @@ import {
   openExternal,
   type AppUpdateStatus,
   getRemoteAccessStatus,
+  setComposerStarredEntry,
   setRemoteRuntimeAccess,
   type CloudStatus,
   type ExtensionViewer,
@@ -1817,9 +1818,27 @@ function TerminalSection() {
   const { t } = useTranslation("settings");
   const storeTerminal = useSettingsStore((s) => s.terminal);
   const setTerminal = useSettingsStore((s) => s.setTerminal);
-  const [terminal, setDraftTerminal] = useDraft("terminal", storeTerminal, (v) => setTerminal(v));
+  const [composerStarredEntries, storeTerminalDraft] = useMemo(() => {
+    const { composerStarredEntries, ...draft } = storeTerminal;
+    return [composerStarredEntries, draft] as const;
+  }, [storeTerminal]);
+  const [terminal, setDraftTerminal] = useDraft("terminal", storeTerminalDraft, (v) =>
+    setTerminal(v),
+  );
   const update = (partial: Partial<typeof terminal>) =>
     setDraftTerminal((prev) => ({ ...prev, ...partial }));
+  const [newComposerStar, setNewComposerStar] = useState("");
+  const [composerStarError, setComposerStarError] = useState("");
+  const updateComposerStar = async (text: string, starred: boolean) => {
+    setComposerStarError("");
+    try {
+      const entries = await setComposerStarredEntry(text, starred);
+      setTerminal({ composerStarredEntries: entries });
+      if (starred) setNewComposerStar("");
+    } catch (error) {
+      setComposerStarError(String(error));
+    }
+  };
 
   // Exit behavior (issue #451) lives under the top-level `exit` key but is
   // edited here in the Terminal section since it interrupts terminals.
@@ -1907,6 +1926,65 @@ function TerminalSection() {
           checked={terminal.composerAutocomplete}
           onChange={(v) => update({ composerAutocomplete: v })}
         />
+
+        <SettingRow
+          label={t("terminal.composerStarredEntries")}
+          desc={t("terminal.composerStarredEntriesDesc")}
+        >
+          <div className="flex gap-2">
+            <textarea
+              data-testid="composer-starred-entry-input"
+              className={`${inputCls} min-h-16 flex-1 resize-y`}
+              style={inputStyle}
+              value={newComposerStar}
+              placeholder={t("terminal.composerStarredEntryPlaceholder")}
+              onChange={(event) => setNewComposerStar(event.target.value)}
+            />
+            <Button
+              data-testid="composer-starred-entry-add"
+              icon={<PlusIcon size={12} />}
+              disabled={!newComposerStar}
+              onClick={() => void updateComposerStar(newComposerStar, true)}
+            >
+              {t("terminal.composerStarredEntryAdd")}
+            </Button>
+          </div>
+          {composerStarError && (
+            <p role="alert" className="mt-1 text-xs" style={{ color: "var(--red)" }}>
+              {composerStarError}
+            </p>
+          )}
+          {composerStarredEntries.length === 0 ? (
+            <p className="mt-2 text-xs" style={{ color: "var(--text-secondary)" }}>
+              {t("terminal.composerStarredEntriesEmpty")}
+            </p>
+          ) : (
+            <ul className="mt-2 max-h-48 list-none overflow-y-auto p-0">
+              {composerStarredEntries.map((entry, index) => (
+                <li
+                  key={entry}
+                  data-testid={`composer-starred-entry-${index}`}
+                  className="flex items-start gap-2 border-t py-1.5 first:border-t-0"
+                  style={{ borderColor: "var(--border)" }}
+                >
+                  <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-xs">
+                    {entry}
+                  </span>
+                  <button
+                    type="button"
+                    data-testid={`composer-starred-entry-remove-${index}`}
+                    aria-label={`${t("terminal.composerStarredEntryRemove")}: ${entry}`}
+                    title={t("terminal.composerStarredEntryRemove")}
+                    className="shrink-0 rounded p-1"
+                    onClick={() => void updateComposerStar(entry, false)}
+                  >
+                    <XIcon size={12} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </SettingRow>
 
         <ToggleRow
           label={t("terminal.copyOnSelect")}

@@ -175,7 +175,7 @@ import { useNotificationStore } from "@/stores/notification-store";
 import { resolveWorkspaceId } from "@/lib/workspace-utils";
 import { OutputIdleDetector } from "@/lib/output-idle-detector";
 import { SerializeAddon } from "@xterm/addon-serialize";
-import { loadTerminalOutputCache } from "@/lib/tauri-api";
+import { loadTerminalOutputCache, setComposerStarredEntry } from "@/lib/tauri-api";
 import {
   registerTerminalSerializer,
   unregisterTerminalSerializer,
@@ -3934,6 +3934,7 @@ export function TerminalView({
       if (
         cancelled ||
         remoteResizeSyncInFlight ||
+        !terminalSessionReady ||
         !localTerminalControlAllowed() ||
         cols <= 0 ||
         rows <= 0
@@ -6084,6 +6085,7 @@ export function TerminalView({
           stabilizeNativeWindowsOutput = shouldStabilizeInitialExecutionHost(initialExecutionHost);
           terminalSessionReady = true;
           if (cancelled) return;
+          if (remoteReturnResizeDirtyRef.current) startRemoteResizeSync();
           useTerminalStore.getState().updateInstanceInfo(instanceId, {
             sessionReady: true,
             // The backend seeds the session CWD from the PTY's actual start
@@ -6189,7 +6191,10 @@ export function TerminalView({
         // rebuild this terminal twice per clear.
         registerAtlasRebuilder(instanceId, rebuildRendererForForeignClear);
 
-        performTerminalFit({});
+        // The PTY started rendererless at xterm's default 80x24. Treat the
+        // first fitted grid as authoritative and reuse the acknowledged retry
+        // path so neither PTY readiness nor the owner-status gate can lose it.
+        performTerminalFit({ syncBackendResize: true });
         openedRef.current = true;
         // Sync viewport-dependent UI once on mount. onScroll only fires on
         // subsequent viewport moves, so a terminal restored (or reattached)
@@ -6571,6 +6576,7 @@ export function TerminalView({
     remoteControlReleaseRevisionRef.current = remoteControlSnapshot.releaseRevision;
     const statusKnown = remoteControlStatus !== null;
     const remoteActive = remoteControlStatus?.active ?? false;
+    const backendResizePending = remoteReturnResizeDirtyRef.current;
     remoteControlStatusKnownRef.current = statusKnown;
     remoteControlActiveRef.current = remoteActive;
     localControlAvailableRef.current = statusKnown && !remoteActive;
@@ -6580,7 +6586,7 @@ export function TerminalView({
     if (
       !statusKnown ||
       remoteActive ||
-      (!wasActive && !remoteWasReleased) ||
+      (!wasActive && !remoteWasReleased && !backendResizePending) ||
       !term ||
       !openedRef.current
     ) {
@@ -6811,6 +6817,9 @@ export function TerminalView({
   const composerAutocompleteEnabled = useSettingsStore(
     (s) => s.terminal.composerAutocomplete ?? true,
   );
+  const composerStarredEntries = useSettingsStore(
+    (s) => s.terminal.composerStarredEntries ?? [],
+  );
 
   // Issue #361: the jump-to-bottom button must clear the scrollbar slider so
   // they do not overlap. The button is positioned relative to the pane edge, so
@@ -6945,6 +6954,8 @@ export function TerminalView({
           resize: t("terminal.composerResize"),
           history: t("terminal.composerHistory"),
           autocomplete: t("terminal.composerAutocomplete"),
+          star: t("terminal.composerStar"),
+          unstar: t("terminal.composerUnstar"),
         }}
         textareaRef={composerTextareaRef}
         inFlight={composerDraft.inFlight !== null}
@@ -6955,6 +6966,7 @@ export function TerminalView({
         atShellPrompt={atShellPrompt}
         historyPopupEnabled={composerHistoryPopupEnabled}
         autocompleteEnabled={composerAutocompleteEnabled}
+        starredEntries={composerStarredEntries}
         history={readComposerHistory(composerHistoryKey)}
         historyScopeKey={composerHistoryKey}
         onTextChange={(text) => {
@@ -6968,6 +6980,13 @@ export function TerminalView({
         onProxyPaste={pasteComposerProxy}
         onCompositionCommit={commitComposerComposition}
         onHistory={navigateComposerHistory}
+        onToggleStar={(entry, starred) => {
+          void setComposerStarredEntry(entry, starred)
+            .then((entries) =>
+              useSettingsStore.getState().setTerminal({ composerStarredEntries: entries }),
+            )
+            .catch((error) => console.warn("Failed to update Composer star", error));
+        }}
       />
     </div>
   );

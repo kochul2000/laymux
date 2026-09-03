@@ -92,7 +92,7 @@ enum AttachmentKind {
     Opaque(String),
 }
 
-/// Host attachment policy derived from `remote.*` settings (ADR-0226), capped
+/// Host attachment policy derived from `remote.*` settings (ADR-0227), capped
 /// to what the transport that carried the request can relay. The same shape
 /// is published to Remote clients in the claim/status answers so the browser
 /// sizes its own checks, messages and file chooser to this host and path.

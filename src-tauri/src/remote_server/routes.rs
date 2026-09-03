@@ -32,6 +32,7 @@ use super::assets::{
 };
 use super::attachments::remote_terminal_attachment;
 use super::auth::remote_guard;
+use super::composer_routes::{remote_composer_starred, remote_composer_starred_update};
 use super::font_assets::FONT_ROUTE_PATH;
 use super::github_repo_routes::remote_terminal_github_repo;
 use super::lease::{
@@ -84,7 +85,7 @@ struct ClaimResponse {
     status: RemoteControlStatus,
     resume_token: String,
     file_viewer_token: String,
-    /// Host attachment policy (ADR-0226) so the page sizes its checks and
+    /// Host attachment policy (ADR-0227) so the page sizes its checks and
     /// file chooser to this host instead of a built-in constant.
     attachments: super::attachments::AttachmentPolicy,
 }
@@ -178,6 +179,14 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         )
         .route("/remote/v1/session/release", post(remote_session_release))
         .route("/remote/v1/navigation", get(remote_navigation))
+        .route(
+            "/remote/v1/composer/starred",
+            get(remote_composer_starred)
+                .post(remote_composer_starred_update)
+                .layer(DefaultBodyLimit::max(
+                    crate::constants::REMOTE_COMPOSER_STARRED_REQUEST_MAX_BYTES,
+                )),
+        )
         .route("/remote/v1/layouts", get(remote_layouts_list))
         // Lease-free like `navigation`: the strip only reads (ADR-0124).
         .route("/remote/v1/widgets", get(remote_widgets))
@@ -237,7 +246,7 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         .route(
             "/remote/v1/terminals/{id}/attachments",
             // The handler bounds the body itself from `remote.attachmentMaxMib`
-            // (ADR-0226); axum's static default limit would cap it at 2 MiB.
+            // (ADR-0227); axum's static default limit would cap it at 2 MiB.
             post(remote_terminal_attachment).layer(DefaultBodyLimit::disable()),
         )
         .route(
@@ -587,7 +596,7 @@ async fn remote_session_claim(
         ClaimAttempt::Granted(mut response) => {
             emit_remote_control_status(&server.app_handle, &response.status);
             // The attempt runs under the owner lock without transport
-            // knowledge; the relay-aware policy (ADR-0226) is filled in here.
+            // knowledge; the relay-aware policy (ADR-0227) is filled in here.
             match effective_remote_settings(&server.app_state) {
                 Ok(settings) => {
                     response.attachments =

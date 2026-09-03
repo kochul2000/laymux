@@ -1,4 +1,4 @@
-# 0226. Remote 첨부는 signature 확인된 문서를 받고, 크기 상한과 추가 허용 종류는 host settings가 정한다
+# 0227. Remote 첨부는 signature 확인된 문서를 받고, 크기 상한과 추가 허용 종류는 host settings가 정한다
 
 - Status: Proposed
 - Date: 2026-09-03

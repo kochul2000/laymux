@@ -65,7 +65,7 @@ const ENCODING_BASE64: &str = "base64";
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
 const OUTBOUND_QUEUE_SIZE: usize = 256;
-// 64 KiB relay frames: sized so one 16 MiB HTTP request body fits (ADR-0226).
+// 64 KiB relay frames: sized so one 16 MiB HTTP request body fits (ADR-0227).
 const STREAM_QUEUE_MAX_SIZE: usize = 256;
 const STREAM_PENDING_BYTES_LIMIT: usize = 16 * 1024 * 1024;
 const MAX_ACTIVE_STREAMS: usize = 128;

@@ -6,6 +6,7 @@ mod appearance;
 mod assets;
 mod attachments;
 mod auth;
+mod composer_routes;
 mod font_assets;
 mod github_repo_routes;
 mod lease;

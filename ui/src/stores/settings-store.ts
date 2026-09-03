@@ -201,6 +201,8 @@ export interface TerminalSettings {
   composerHistoryPopup: boolean;
   /** Composer: suggest matching past inputs as an autocomplete dropdown while typing (issue #505). */
   composerAutocomplete: boolean;
+  /** Explicitly persisted Composer entries shared by every workspace and surface (ADR-0226). */
+  composerStarredEntries: string[];
 }
 
 /** Pane control bar behavior. */
@@ -823,6 +825,7 @@ export const DEFAULT_TERMINAL: TerminalSettings = {
   composerHistoryScope: DEFAULT_COMPOSER_HISTORY_SCOPE,
   composerHistoryPopup: true,
   composerAutocomplete: true,
+  composerStarredEntries: [],
 };
 
 export const DEFAULT_CONTROL_BAR: ControlBarSettings = {

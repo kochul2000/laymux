@@ -30,6 +30,13 @@ pub const EVENT_GROK_USAGE_SNAPSHOT_CHANGED: &str = "grok-usage-snapshot-changed
 /// asked for it — the watchdog re-acquiring or losing one (ADR-0114).
 pub const EVENT_SLEEP_INHIBIT_CHANGED: &str = "sleep-inhibit-changed";
 pub const EVENT_APP_UPDATE_STATUS_CHANGED: &str = "app-update-status-changed";
+pub const EVENT_COMPOSER_STARRED_ENTRIES_CHANGED: &str = "composer-starred-entries-changed";
+
+/// Explicitly persisted Composer entries (ADR-0226).
+pub const COMPOSER_STARRED_ENTRIES_MAX: usize = 200;
+pub const COMPOSER_STARRED_ENTRY_MAX_BYTES: usize = 16 * 1024;
+pub const REMOTE_COMPOSER_STARRED_REQUEST_MAX_BYTES: usize =
+    COMPOSER_STARRED_ENTRY_MAX_BYTES * 6 + 1024;
 pub const GITHUB_UPDATE_HOST: &str = "github.com";
 pub const GITHUB_UPDATE_OWNER: &str = "kochul2000";
 pub const GITHUB_UPDATE_REPOSITORY: &str = "laymux";
@@ -274,7 +281,7 @@ pub const REMOTE_OWNER_TRANSITION_TIMEOUT_MS: u64 = 750;
 pub const TERMINAL_STRUCTURED_INPUT_MAX_BYTES: usize = 1024 * 1024;
 
 /// Remote attachment cache quota expressed in attachments of the configured
-/// maximum size (`remote.attachmentMaxMib`, ADR-0226): 64 MiB at the 1 MiB default.
+/// maximum size (`remote.attachmentMaxMib`, ADR-0227): 64 MiB at the 1 MiB default.
 pub const REMOTE_TERMINAL_ATTACHMENT_CACHE_FILES_OF_MAX_SIZE: usize = 64;
 /// Maximum regular-file count retained in the Remote attachment cache. This
 /// also bounds zero-byte attachments and the cost of cache scans.
@@ -284,7 +291,7 @@ pub const REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_FILES: usize = 1024;
 pub const REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES: usize = 16 * 1024;
 /// Cloud relay bound for one browser HTTP request body forwarded over the
 /// tunnel (laymux-server `TUNNEL_HTTP_REQUEST_BYTES_LIMIT`). Attachments that
-/// arrive through the relay are capped to what fits under it (ADR-0226).
+/// arrive through the relay are capped to what fits under it (ADR-0227).
 pub const CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT: usize = 16 * 1024 * 1024;
 /// Cloud relay bound for one Android E2E RPC envelope (laymux-server
 /// `ANDROID_E2E_RPC_BODY_LIMIT`, `POST /api/android/e2e/rpc`).

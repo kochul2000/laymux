@@ -225,18 +225,21 @@ export function selectComposerAutocompleteSuggestions(
   history: readonly string[],
   query: string,
   max = DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS,
+  starredEntries: readonly string[] = [],
 ): string[] {
   if (max <= 0 || query.length === 0) return [];
   const needle = query.toLowerCase();
   const seen = new Set<string>();
   const entries: string[] = [];
-  for (let i = history.length - 1; i >= 0; i -= 1) {
-    const entry = history[i];
-    if (!entry || entry === query || seen.has(entry)) continue;
-    if (!entry.toLowerCase().startsWith(needle)) continue;
-    seen.add(entry);
-    entries.push(entry);
-    if (entries.length >= max) break;
+  for (const source of [starredEntries, history]) {
+    for (let i = source.length - 1; i >= 0; i -= 1) {
+      const entry = source[i];
+      if (!entry || entry === query || seen.has(entry)) continue;
+      if (!entry.toLowerCase().startsWith(needle)) continue;
+      seen.add(entry);
+      entries.push(entry);
+      if (entries.length >= max) return entries;
+    }
   }
   return entries;
 }
