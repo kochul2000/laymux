@@ -30,6 +30,18 @@ function renderedActions(page: Page, row: "mainActionRow" | "keyRow") {
   );
 }
 
+function renderedSegmentActions(
+  page: Page,
+  row: "mainActionRow" | "keyRow",
+  name: "left" | "center" | "right",
+) {
+  return segment(page, row, name)
+    .locator("[data-input-action]:visible")
+    .evaluateAll((elements) =>
+      elements.map((element) => (element as HTMLElement).dataset.inputAction),
+    );
+}
+
 function storedConfig(page: Page) {
   return page.evaluate((key) => JSON.parse(localStorage.getItem(key) || "{}"), STORAGE_KEY);
 }
@@ -76,10 +88,16 @@ test.describe("Remote input action layout", () => {
     await openMarkup(page);
 
     await expect
-      .poll(() => renderedActions(page, "mainActionRow"))
-      .toEqual(["soft:c-c", "keyboard", "keys", "send"]);
+      .poll(() => renderedSegmentActions(page, "mainActionRow", "left"))
+      .toEqual(["soft:c-c", "soft:q", "soft:esc"]);
+    await expect
+      .poll(() => renderedSegmentActions(page, "mainActionRow", "center"))
+      .toEqual([]);
+    await expect
+      .poll(() => renderedSegmentActions(page, "mainActionRow", "right"))
+      .toEqual(["keyboard", "keys", "send"]);
     await expect(page.locator('#mainActionRow [data-key="c-c"]')).toHaveText("^C");
-    await expect(page.locator("#attachFile")).toBeHidden();
+    await expect(page.locator('#mainActionRow [data-key="q"]')).toHaveText("Q");
 
     // ^C hugs the left edge and the input controls hug the right — the whole
     // point of segments once the row is wider than its contents.
@@ -101,8 +119,27 @@ test.describe("Remote input action layout", () => {
 
     await page.locator("#keyBarToggle").click();
     await expect(page.locator("#keyBar")).toBeVisible();
-    await expect(segment(page, "keyRow", "left")).toContainText("P↕N↔");
-    await expect(segment(page, "keyRow", "right")).toContainText("^L");
+    await expect
+      .poll(() => renderedSegmentActions(page, "keyRow", "left"))
+      .toEqual([
+        "composer",
+        "soft:navPad",
+        "soft:tab",
+        "soft:stab",
+      ]);
+    await expect.poll(() => renderedSegmentActions(page, "keyRow", "center")).toEqual([]);
+    await expect
+      .poll(() => renderedSegmentActions(page, "keyRow", "right"))
+      .toEqual([
+        "soft:c-u",
+        "soft:c-l",
+        "soft:c-t",
+        "soft:c-j",
+        "soft:dpad",
+        "soft:pgup",
+        "soft:pgdn",
+        "attachment",
+      ]);
     await expect(page.locator("#keyBarSettings")).toHaveCount(0);
     await expect(page.locator("#keyPopover")).toHaveCount(0);
 
@@ -131,7 +168,9 @@ test.describe("Remote input action layout", () => {
     await expect(segment(page, "keyRow", "center").locator("#focusTerminal")).toHaveCount(1);
 
     await place(page, "soft:c-c", "Ctrl+C (interrupt)", "main:right");
-    await expect.poll(() => renderedActions(page, "mainActionRow")).toEqual(["keys", "soft:c-c"]);
+    await expect
+      .poll(() => renderedActions(page, "mainActionRow"))
+      .toEqual(["soft:q", "soft:esc", "keys", "soft:c-c"]);
 
     // Hidden round trip: unplacing hides the button, replacing restores it.
     await place(page, "soft:c-c", "Ctrl+C (interrupt)", "hidden");
@@ -140,7 +179,7 @@ test.describe("Remote input action layout", () => {
     await expect(segment(page, "mainActionRow", "left")).toContainText("^C");
 
     const zones = (await storedConfig(page)).zones;
-    expect(zones.main.left).toEqual(["soft:c-c"]);
+    expect(zones.main.left).toEqual(["soft:q", "soft:esc", "soft:c-c"]);
     expect(zones.main.right).toEqual(["keys", "send"]);
     expect(zones.expanded.center).toEqual(["keyboard"]);
 
@@ -172,7 +211,7 @@ test.describe("Remote input action layout", () => {
     await dragChipOnto(page, "soft:tab", "soft:c-c", true);
     await expect
       .poll(() => renderedActions(page, "mainActionRow"))
-      .toEqual(["soft:c-c", "soft:tab", "keyboard", "keys"]);
+      .toEqual(["soft:c-c", "soft:tab", "soft:q", "soft:esc", "keyboard", "keys"]);
   });
 
   test("keeps Keys out of the row it opens and closes the bar when it is unplaced", async ({
@@ -266,14 +305,14 @@ test.describe("Remote input action layout", () => {
     // inventing an alignment the user never chose.
     await expect
       .poll(() => renderedActions(page, "mainActionRow"))
-      .toEqual(["soft:c-c", "keyboard", "keys"]);
+      .toEqual(["soft:c-c", "soft:q", "soft:esc", "keyboard", "keys"]);
     await expect(page.locator('[data-input-action="soft:c-a"]')).toHaveCount(0);
     await expect(page.locator("#composerSend")).toBeHidden();
 
     // `expanded` is validated on its own, so the bar stays open across the
     // zones reset.
     await expect(page.locator("#keyBar")).toBeVisible();
-    await expect(page.locator('#keyRow [data-input-action="soft:esc"]')).toHaveCount(1);
+    await expect(page.locator('#keyRow [data-input-action="soft:tab"]')).toHaveCount(1);
     await page.locator("#inputModeToggle").click();
     await expect(page.locator("#composerSend")).toBeVisible();
     await page.locator("#inputModeToggle").click();

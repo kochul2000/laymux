@@ -1352,7 +1352,8 @@ mod tests {
         assert!(html.contains("data-flick-direction=\"right\""));
         assert!(html.contains("data-flick-direction=\"down\""));
         assert!(html.contains("data-flick-direction=\"left\""));
-        // A representative fixed sequence: Tab, Delete, and F1 (SS3).
+        // Representative fixed sequences: q, Tab, Delete, and F1 (SS3).
+        assert!(html.contains("q: { label: \"Q\", seq: \"q\" }"));
         assert!(html.contains("tab: { label: \"Tab\", seq: \"\\t\" }"));
         assert!(html.contains("stab: { label: \"⇧Tab\", seq: \"\\x1b[Z\" }"));
         assert!(html.contains("end: { label: \"End\", cursor: \"F\" }"));
@@ -1419,10 +1420,10 @@ mod tests {
         );
         assert!(html.contains("<div class=\"action-segment\" data-segment=\"center\"></div>"));
         assert!(html.contains("class=\"action-segment\" data-segment=\"right\""));
-        // Default placement: interrupt on the left, input controls on the right.
-        assert!(html.contains(
-            "main: { left: [\"soft:c-c\"], center: [], right: [\"keyboard\", \"keys\", \"send\"] },"
-        ));
+        // Default placement: the compact command keys stay left and the input
+        // controls stay right.
+        assert!(html.contains("left: [\"soft:c-c\", \"soft:q\", \"soft:esc\"],"));
+        assert!(html.contains("right: [\"keyboard\", \"keys\", \"send\"],"));
         assert!(html.contains("function normalizeInputLayoutConfig(raw)"));
         assert!(html.contains("function normalizeInputZones(raw, knownIds)"));
         // No migration path: anything that is not the v2 shape resets.
