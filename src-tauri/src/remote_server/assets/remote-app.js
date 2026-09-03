@@ -9364,6 +9364,7 @@ import {
           navNext: { label: "P↓", nav: ["spatial", "next"], hint: "Next pane (spatial order)" },
           notifRecent: { label: "N←", nav: ["notification", "recent"], navBadge: true, hint: "Most recent unread alert" },
           notifOldest: { label: "N→", nav: ["notification", "oldest"], navBadge: true, hint: "Oldest unread alert" },
+          q: { label: "Q", seq: "q" },
           esc: { label: "Esc", seq: "\x1b" },
           tab: { label: "Tab", seq: "\t" },
           stab: { label: "⇧Tab", seq: "\x1b[Z" },
@@ -9400,7 +9401,7 @@ import {
         };
         // Stable listing order for the built-in keys.
         const KEY_ORDER = [
-          "navPad", "navPrev", "navNext", "notifRecent", "notifOldest",
+          "navPad", "navPrev", "navNext", "notifRecent", "notifOldest", "q",
           "esc", "tab", "stab", "dpad", "up", "down", "left", "right", "home", "end",
           "enter", "bksp", "ins", "del", "pgup", "pgdn",
           "c-c", "c-j", "c-u", "c-t", "c-l",
@@ -9413,7 +9414,7 @@ import {
         const KEY_CATEGORIES = [
           { id: "step", name: "Pane/Alert nav", keys: ["navPad", "navPrev", "navNext", "notifRecent", "notifOldest"] },
           { id: "nav", name: "Navigation", keys: ["esc", "tab", "stab", "dpad", "up", "down", "left", "right", "home", "end"] },
-          { id: "edit", name: "Editing", keys: ["enter", "bksp", "ins", "del", "pgup", "pgdn"] },
+          { id: "edit", name: "Editing", keys: ["q", "enter", "bksp", "ins", "del", "pgup", "pgdn"] },
           { id: "ctrl", name: "Ctrl keys", keys: ["c-c", "c-j", "c-u", "c-t", "c-l"] },
           { id: "fn", name: "Function", keys: ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"] },
         ];
@@ -9456,11 +9457,24 @@ import {
           expanded: false,
           userKeys: [],
           zones: {
-            main: { left: ["soft:c-c"], center: [], right: ["keyboard", "keys", "send"] },
-            expanded: {
-              left: ["composer", "soft:navPad", "soft:esc", "soft:tab", "soft:stab", "soft:dpad"],
+            main: {
+              left: ["soft:c-c", "soft:q", "soft:esc"],
               center: [],
-              right: ["soft:c-j", "soft:c-u", "soft:c-t", "soft:c-l"],
+              right: ["keyboard", "keys", "send"],
+            },
+            expanded: {
+              left: ["composer", "soft:navPad", "soft:tab", "soft:stab"],
+              center: [],
+              right: [
+                "soft:c-u",
+                "soft:c-l",
+                "soft:c-t",
+                "soft:c-j",
+                "soft:dpad",
+                "soft:pgup",
+                "soft:pgdn",
+                "attachment",
+              ],
             },
           },
         };
