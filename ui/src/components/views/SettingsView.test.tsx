@@ -2512,6 +2512,26 @@ describe("SettingsView", () => {
       expect(useSettingsStore.getState().remote.preferredHost).toBe("");
     });
 
+    it("normalizes attachment extensions and clamps the max attachment size", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+      const input = (await screen.findByTestId(
+        "remote-settings-attachment-extension-input",
+      )) as HTMLInputElement;
+      await user.type(input, ".PDF ");
+      await user.click(screen.getByTestId("remote-settings-attachment-extension-add"));
+      expect(input.value).toBe("");
+
+      const maxMib = screen.getByTestId("remote-settings-attachment-max-mib") as HTMLInputElement;
+      fireEvent.change(maxMib, { target: { value: "25" } });
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      expect(useSettingsStore.getState().remote.attachmentExtraExtensions).toEqual(["pdf"]);
+      expect(useSettingsStore.getState().remote.attachmentMaxMib).toBe(10);
+    });
+
     it("reconciles backend access status after disabling startup remote access", async () => {
       useSettingsStore.getState().setRemote({ enabled: true, authToken: "secret" });
       useRemoteAccessStore.getState().setStatus(remoteAccessStatus(false));

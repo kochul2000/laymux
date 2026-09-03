@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
-use axum::extract::{Path as AxumPath, State};
-use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::body::to_bytes;
+use axum::extract::{Path as AxumPath, Request, State};
+use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -15,11 +16,13 @@ use uuid::Uuid;
 
 use crate::automation_server::ServerState;
 use crate::constants::{
-    REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_BYTES, REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_FILES,
-    REMOTE_TERMINAL_ATTACHMENT_MAX_BYTES,
+    REMOTE_TERMINAL_ATTACHMENT_CACHE_FILES_OF_MAX_SIZE, REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_FILES,
+    REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES,
 };
 use crate::lock_ext::MutexExt;
+use crate::settings::models::{RemoteSettings, MAX_REMOTE_ATTACHMENT_MIB};
 
+use super::access::effective_remote_settings;
 use super::lease::begin_remote_lease_mutation;
 use super::routes::lease_id_from_headers;
 use super::{internal_error, json_error};
@@ -66,7 +69,8 @@ struct RemoteTerminalAttachmentResponse {
 #[derive(Debug, PartialEq, Eq)]
 enum AttachmentError {
     Invalid(String),
-    TooLarge,
+    /// Carries the configured limit in MiB for the error message.
+    TooLarge(usize),
     QuotaExceeded,
     Io(String),
 }
@@ -82,18 +86,101 @@ enum AttachmentKind {
     Image(&'static str),
     Document(&'static str),
     Text(String),
+    /// Stored as-is because the host opted in by extension or allow-all.
+    Opaque(String),
+}
+
+/// Host attachment policy derived from `remote.*` settings (ADR-0226). The
+/// same shape is published to Remote clients in the session status so the
+/// browser can size its own checks and file chooser to the host.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AttachmentPolicy {
+    pub max_bytes: usize,
+    pub allow_all_extensions: bool,
+    pub extra_extensions: Vec<String>,
+}
+
+impl AttachmentPolicy {
+    pub(crate) fn from_settings(settings: &RemoteSettings) -> Self {
+        let max_mib = settings
+            .attachment_max_mib
+            .clamp(1, MAX_REMOTE_ATTACHMENT_MIB) as usize;
+        Self {
+            max_bytes: max_mib * 1024 * 1024,
+            allow_all_extensions: settings.attachment_allow_all_extensions,
+            extra_extensions: settings
+                .attachment_extra_extensions
+                .iter()
+                .filter(|extension| is_valid_attachment_extension(extension))
+                .cloned()
+                .collect(),
+        }
+    }
+
+    fn max_mib(&self) -> usize {
+        self.max_bytes / (1024 * 1024)
+    }
+
+    fn cache_quota_bytes(&self) -> usize {
+        self.max_bytes * REMOTE_TERMINAL_ATTACHMENT_CACHE_FILES_OF_MAX_SIZE
+    }
+
+    fn permits_opaque(&self, extension: Option<&str>) -> bool {
+        self.allow_all_extensions
+            || extension.is_some_and(|extension| {
+                self.extra_extensions
+                    .iter()
+                    .any(|allowed| allowed == extension)
+            })
+    }
+}
+
+/// Extensions are stored into a file name, so only lowercase ASCII
+/// alphanumerics of bounded length are accepted from settings or callers.
+pub(crate) fn is_valid_attachment_extension(extension: &str) -> bool {
+    (1..=16).contains(&extension.len())
+        && extension
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
 }
 
 pub(super) async fn remote_terminal_attachment(
     State(server): State<ServerState>,
     AxumPath(id): AxumPath<String>,
-    headers: HeaderMap,
-    Json(body): Json<RemoteTerminalAttachmentRequest>,
+    request: Request,
 ) -> Response {
+    let policy = match effective_remote_settings(&server.app_state) {
+        Ok(settings) => AttachmentPolicy::from_settings(&settings),
+        Err(error) => return no_store(internal_error(error)),
+    };
+    let (parts, raw_body) = request.into_parts();
+    // The body bound follows the configured maximum, so the route itself
+    // disables axum's static default limit.
+    let raw = match to_bytes(raw_body, attachment_request_limit(policy.max_bytes)).await {
+        Ok(raw) => raw,
+        Err(_) => {
+            return no_store(json_error(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                &too_large_message(policy.max_mib()),
+            ))
+        }
+    };
+    let body: RemoteTerminalAttachmentRequest = match serde_json::from_slice(&raw) {
+        Ok(body) => body,
+        Err(_) => {
+            return no_store(json_error(
+                StatusCode::BAD_REQUEST,
+                "attachment request body is not valid JSON",
+            ))
+        }
+    };
+    drop(raw);
+
     let lease_id = body
         .lease_id
         .as_deref()
-        .or_else(|| lease_id_from_headers(&headers));
+        .or_else(|| lease_id_from_headers(&parts.headers));
     let permit = match begin_remote_lease_mutation(&server.app_state, lease_id) {
         Ok(permit) => permit,
         Err(response) => return no_store(response),
@@ -111,10 +198,10 @@ pub(super) async fn remote_terminal_attachment(
             "attachment MIME type is too long",
         ));
     }
-    if body.data.len() > encoded_attachment_limit() {
+    if body.data.len() > encoded_attachment_limit(policy.max_bytes) {
         return no_store(json_error(
             StatusCode::PAYLOAD_TOO_LARGE,
-            "attachment exceeds the 1 MiB limit",
+            &too_large_message(policy.max_mib()),
         ));
     }
 
@@ -127,10 +214,10 @@ pub(super) async fn remote_terminal_attachment(
             ))
         }
     };
-    if bytes.len() > REMOTE_TERMINAL_ATTACHMENT_MAX_BYTES {
+    if bytes.len() > policy.max_bytes {
         return no_store(json_error(
             StatusCode::PAYLOAD_TOO_LARGE,
-            "attachment exceeds the 1 MiB limit",
+            &too_large_message(policy.max_mib()),
         ));
     }
 
@@ -157,7 +244,8 @@ pub(super) async fn remote_terminal_attachment(
             &file_name,
             &mime_type,
             &bytes,
-            REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_BYTES,
+            &policy,
+            policy.cache_quota_bytes(),
             REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_FILES,
         )
         .map(|path| terminal_visible_path(&path, &profile))
@@ -192,10 +280,9 @@ fn attachment_error_response(error: AttachmentError) -> Response {
         AttachmentError::Invalid(message) => {
             json_error(StatusCode::UNSUPPORTED_MEDIA_TYPE, &message)
         }
-        AttachmentError::TooLarge => json_error(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "attachment exceeds the 1 MiB limit",
-        ),
+        AttachmentError::TooLarge(max_mib) => {
+            json_error(StatusCode::PAYLOAD_TOO_LARGE, &too_large_message(max_mib))
+        }
         AttachmentError::QuotaExceeded => json_error(
             StatusCode::INSUFFICIENT_STORAGE,
             "remote attachment cache is full",
@@ -212,8 +299,29 @@ fn no_store(mut response: Response) -> Response {
     response
 }
 
-const fn encoded_attachment_limit() -> usize {
-    REMOTE_TERMINAL_ATTACHMENT_MAX_BYTES.div_ceil(3) * 4
+fn too_large_message(max_mib: usize) -> String {
+    format!("attachment exceeds the {max_mib} MiB limit")
+}
+
+/// Base64 length of the largest decoded attachment the policy allows.
+const fn encoded_attachment_limit(max_bytes: usize) -> usize {
+    max_bytes.div_ceil(3) * 4
+}
+
+/// JSON body bound for one attachment request at the given decoded maximum.
+pub(crate) const fn attachment_request_limit(max_bytes: usize) -> usize {
+    encoded_attachment_limit(max_bytes) + REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES
+}
+
+/// Body bound for the Android E2E RPC envelope. The attachment JSON rides
+/// inside the plaintext RPC record, which is AEAD-sealed and base64url-encoded
+/// once more, so the bound is sized for the largest configurable attachment.
+pub(crate) const fn android_e2e_rpc_body_limit() -> usize {
+    let max_bytes = MAX_REMOTE_ATTACHMENT_MIB as usize * 1024 * 1024;
+    (attachment_request_limit(max_bytes) + REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES)
+        .div_ceil(3)
+        * 4
+        + REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES
 }
 
 fn attachment_dir_under(cache_dir: &Path) -> PathBuf {
@@ -231,13 +339,14 @@ fn save_attachment_to_dir(
     original_name: &str,
     mime_type: &str,
     bytes: &[u8],
+    policy: &AttachmentPolicy,
     quota_bytes: usize,
     quota_files: usize,
 ) -> Result<PathBuf, AttachmentError> {
-    if bytes.len() > REMOTE_TERMINAL_ATTACHMENT_MAX_BYTES {
-        return Err(AttachmentError::TooLarge);
+    if bytes.len() > policy.max_bytes {
+        return Err(AttachmentError::TooLarge(policy.max_mib()));
     }
-    let kind = classify_attachment(original_name, mime_type, bytes)?;
+    let kind = classify_attachment(original_name, mime_type, bytes, policy)?;
     let output_name = attachment_file_name(original_name, &kind);
     let _store_guard = ATTACHMENT_STORE_LOCK
         .lock_or_err()
@@ -322,6 +431,7 @@ fn classify_attachment(
     original_name: &str,
     mime_type: &str,
     bytes: &[u8],
+    policy: &AttachmentPolicy,
 ) -> Result<AttachmentKind, AttachmentError> {
     if let Some(extension) = sniff_image_extension(bytes) {
         return Ok(AttachmentKind::Image(extension));
@@ -337,20 +447,27 @@ fn classify_attachment(
         || original_extension
             .as_deref()
             .is_some_and(|extension| TEXT_EXTENSIONS.contains(&extension));
-    if !text_declared {
-        return Err(AttachmentError::Invalid(
-            "only image, text, PDF, DOCX, and PPTX attachments are supported".into(),
-        ));
+    let text_valid = !bytes.contains(&0) && std::str::from_utf8(bytes).is_ok();
+    if text_declared && text_valid {
+        let extension = original_extension
+            .filter(|extension| TEXT_EXTENSIONS.contains(&extension.as_str()))
+            .unwrap_or_else(|| "txt".into());
+        return Ok(AttachmentKind::Text(extension));
     }
-    if bytes.contains(&0) || std::str::from_utf8(bytes).is_err() {
+    if policy.permits_opaque(original_extension.as_deref()) {
+        let extension = original_extension
+            .filter(|extension| is_valid_attachment_extension(extension))
+            .unwrap_or_else(|| "bin".into());
+        return Ok(AttachmentKind::Opaque(extension));
+    }
+    if text_declared {
         return Err(AttachmentError::Invalid(
             "text attachments must contain valid UTF-8 without NUL bytes".into(),
         ));
     }
-    let extension = original_extension
-        .filter(|extension| TEXT_EXTENSIONS.contains(&extension.as_str()))
-        .unwrap_or_else(|| "txt".into());
-    Ok(AttachmentKind::Text(extension))
+    Err(AttachmentError::Invalid(
+        "only image, text, PDF, DOCX, PPTX and host-allowed extensions are supported".into(),
+    ))
 }
 
 fn sniff_image_extension(bytes: &[u8]) -> Option<&'static str> {
@@ -416,7 +533,7 @@ fn attachment_file_name(original_name: &str, kind: &AttachmentKind) -> String {
     }
     let extension = match kind {
         AttachmentKind::Image(extension) | AttachmentKind::Document(extension) => *extension,
-        AttachmentKind::Text(extension) => extension.as_str(),
+        AttachmentKind::Text(extension) | AttachmentKind::Opaque(extension) => extension.as_str(),
     };
     format!("remote-{}-{safe_stem}.{extension}", Uuid::new_v4())
 }
@@ -453,7 +570,7 @@ fn cleanup_stale_attachments_in(directory: &Path, max_age_days: u64) -> Result<u
         .map_err(|error| error.to_string())?;
     ensure_private_attachment_directory(directory).map_err(|error| match error {
         AttachmentError::Io(message) | AttachmentError::Invalid(message) => message,
-        AttachmentError::TooLarge => "Remote attachment is too large".into(),
+        AttachmentError::TooLarge(_) => "Remote attachment is too large".into(),
         AttachmentError::QuotaExceeded => "Remote attachment cache is full".into(),
     })?;
     let max_age = Duration::from_secs(max_age_days.saturating_mul(24 * 60 * 60));

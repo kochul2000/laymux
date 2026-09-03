@@ -4,6 +4,18 @@ use tempfile::tempdir;
 
 use super::*;
 
+fn default_policy() -> AttachmentPolicy {
+    AttachmentPolicy::from_settings(&RemoteSettings::default())
+}
+
+fn policy_with(allow_all: bool, extra: &[&str]) -> AttachmentPolicy {
+    AttachmentPolicy {
+        allow_all_extensions: allow_all,
+        extra_extensions: extra.iter().map(|value| value.to_string()).collect(),
+        ..default_policy()
+    }
+}
+
 #[test]
 fn accepts_signature_checked_images_and_uses_the_detected_extension() {
     let directory = tempdir().unwrap();
@@ -12,6 +24,7 @@ fn accepts_signature_checked_images_and_uses_the_detected_extension() {
         "camera.bin",
         "application/octet-stream",
         b"\x89PNG\r\n\x1a\n",
+        &default_policy(),
         1024,
         usize::MAX,
     )
@@ -32,6 +45,7 @@ fn accepts_utf8_text_and_sanitizes_the_caller_file_name() {
         "../bad path/프롬프트.md",
         "text/markdown",
         "한글 prompt".as_bytes(),
+        &default_policy(),
         1024,
         usize::MAX,
     )
@@ -46,18 +60,24 @@ fn accepts_utf8_text_and_sanitizes_the_caller_file_name() {
 
 #[test]
 fn rejects_binary_content_disguised_as_text() {
-    let error = classify_attachment("notes.txt", "text/plain", &[0xff, 0x00]).unwrap_err();
+    let error = classify_attachment("notes.txt", "text/plain", &[0xff, 0x00], &default_policy())
+        .unwrap_err();
     assert!(matches!(error, AttachmentError::Invalid(_)));
 }
 
 #[test]
 fn rejects_unsupported_binary_content() {
-    let error =
-        classify_attachment("archive.zip", "application/zip", b"PK\x03\x04binary").unwrap_err();
+    let error = classify_attachment(
+        "archive.zip",
+        "application/zip",
+        b"PK\x03\x04binary",
+        &default_policy(),
+    )
+    .unwrap_err();
     assert_eq!(
         error,
         AttachmentError::Invalid(
-            "only image, text, PDF, DOCX, and PPTX attachments are supported".into()
+            "only image, text, PDF, DOCX, PPTX and host-allowed extensions are supported".into()
         )
     );
 }
@@ -68,7 +88,8 @@ fn accepts_signature_checked_documents_and_ignores_the_caller_extension() {
         classify_attachment(
             "report.bin",
             "application/octet-stream",
-            b"%PDF-1.7\n%binary"
+            b"%PDF-1.7\n%binary",
+            &default_policy(),
         ),
         Ok(AttachmentKind::Document("pdf"))
     );
@@ -78,7 +99,7 @@ fn accepts_signature_checked_documents_and_ignores_the_caller_extension() {
     ]
     .concat();
     assert_eq!(
-        classify_attachment("memo.bin", "", &docx),
+        classify_attachment("memo.bin", "", &docx, &default_policy()),
         Ok(AttachmentKind::Document("docx"))
     );
     let pptx = [
@@ -87,7 +108,12 @@ fn accepts_signature_checked_documents_and_ignores_the_caller_extension() {
     ]
     .concat();
     assert_eq!(
-        classify_attachment("deck.docx", "application/octet-stream", &pptx),
+        classify_attachment(
+            "deck.docx",
+            "application/octet-stream",
+            &pptx,
+            &default_policy()
+        ),
         Ok(AttachmentKind::Document("pptx"))
     );
 }
@@ -98,25 +124,89 @@ fn rejects_zip_archives_renamed_as_office_documents() {
         "fake.docx",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         b"PK\x03\x04\x00not-an-office-package\x00",
+        &default_policy(),
     )
     .unwrap_err();
     assert!(matches!(error, AttachmentError::Invalid(_)));
 }
 
 #[test]
+fn host_allowed_extensions_are_stored_as_opaque_binary() {
+    let policy = policy_with(false, &["xlsx"]);
+    assert_eq!(
+        classify_attachment("Budget.XLSX", "application/zip", b"PK\x03\x04\x00", &policy),
+        Ok(AttachmentKind::Opaque("xlsx".into()))
+    );
+    // Only the listed extension is opened up; everything else keeps the
+    // signature/text rules.
+    assert!(classify_attachment("data.bin", "", b"\x00\x01", &policy).is_err());
+}
+
+#[test]
+fn allow_all_accepts_anything_and_falls_back_to_bin() {
+    let policy = policy_with(true, &[]);
+    assert_eq!(
+        classify_attachment("blob", "application/octet-stream", b"\x00\x01", &policy),
+        Ok(AttachmentKind::Opaque("bin".into()))
+    );
+    assert_eq!(
+        classify_attachment("weird.t@r", "", b"\x00", &policy),
+        Ok(AttachmentKind::Opaque("bin".into()))
+    );
+    // A text-declared file with invalid UTF-8 is no longer rejected: the host
+    // asked for everything, so it is kept under its own extension.
+    assert_eq!(
+        classify_attachment("notes.txt", "text/plain", &[0xff, 0x00], &policy),
+        Ok(AttachmentKind::Opaque("txt".into()))
+    );
+    // Signature-checked kinds still win so the stored extension stays honest.
+    assert_eq!(
+        classify_attachment("photo.dat", "", b"\x89PNG\r\n\x1a\n", &policy),
+        Ok(AttachmentKind::Image("png"))
+    );
+}
+
+#[test]
+fn policy_from_settings_clamps_the_limit_and_drops_invalid_extensions() {
+    let mut settings = RemoteSettings {
+        attachment_max_mib: 99,
+        attachment_extra_extensions: vec!["xlsx".into(), ".zip".into(), "TAR".into(), "".into()],
+        ..RemoteSettings::default()
+    };
+    let policy = AttachmentPolicy::from_settings(&settings);
+    assert_eq!(
+        policy.max_bytes,
+        MAX_REMOTE_ATTACHMENT_MIB as usize * 1024 * 1024
+    );
+    assert_eq!(policy.extra_extensions, vec!["xlsx".to_string()]);
+    assert_eq!(
+        policy.cache_quota_bytes(),
+        policy.max_bytes * REMOTE_TERMINAL_ATTACHMENT_CACHE_FILES_OF_MAX_SIZE
+    );
+
+    settings.attachment_max_mib = 0;
+    assert_eq!(
+        AttachmentPolicy::from_settings(&settings).max_bytes,
+        1024 * 1024
+    );
+}
+
+#[test]
 fn enforces_file_and_cache_size_bounds() {
     let directory = tempdir().unwrap();
-    let oversized = vec![b'a'; REMOTE_TERMINAL_ATTACHMENT_MAX_BYTES + 1];
+    let policy = default_policy();
+    let oversized = vec![b'a'; policy.max_bytes + 1];
     assert_eq!(
         save_attachment_to_dir(
             directory.path(),
             "large.txt",
             "text/plain",
             &oversized,
+            &policy,
             usize::MAX,
             usize::MAX,
         ),
-        Err(AttachmentError::TooLarge)
+        Err(AttachmentError::TooLarge(1))
     );
 
     fs::write(directory.path().join("existing.txt"), b"12345678").unwrap();
@@ -126,6 +216,7 @@ fn enforces_file_and_cache_size_bounds() {
             "next.txt",
             "text/plain",
             b"1234",
+            &policy,
             10,
             usize::MAX,
         ),
@@ -145,6 +236,7 @@ fn enforces_cache_file_count_bound_for_empty_attachments() {
             "third.txt",
             "text/plain",
             b"",
+            &default_policy(),
             usize::MAX,
             2,
         ),
@@ -173,6 +265,7 @@ fn attachment_directory_is_private() {
         "empty.txt",
         "text/plain",
         b"",
+        &default_policy(),
         usize::MAX,
         usize::MAX,
     )
@@ -201,8 +294,26 @@ fn cleanup_removes_only_regular_files_older_than_the_cutoff() {
 
 #[test]
 fn encoded_limit_covers_exact_decoded_maximum() {
-    let bytes = vec![0u8; REMOTE_TERMINAL_ATTACHMENT_MAX_BYTES];
-    assert_eq!(BASE64.encode(bytes).len(), encoded_attachment_limit());
+    for max_bytes in [
+        1024 * 1024,
+        MAX_REMOTE_ATTACHMENT_MIB as usize * 1024 * 1024,
+    ] {
+        let bytes = vec![0u8; max_bytes];
+        assert_eq!(
+            BASE64.encode(bytes).len(),
+            encoded_attachment_limit(max_bytes)
+        );
+    }
+}
+
+#[test]
+fn transport_bounds_cover_the_largest_configurable_attachment() {
+    let max_bytes = MAX_REMOTE_ATTACHMENT_MIB as usize * 1024 * 1024;
+    let request_limit = attachment_request_limit(max_bytes);
+    assert!(request_limit > encoded_attachment_limit(max_bytes));
+    // The attachment JSON is sealed and base64url-encoded once more inside
+    // the Android E2E RPC envelope.
+    assert!(android_e2e_rpc_body_limit() >= request_limit.div_ceil(3) * 4);
 }
 
 #[cfg(target_os = "windows")]

@@ -65,10 +65,11 @@ const ENCODING_BASE64: &str = "base64";
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
 const OUTBOUND_QUEUE_SIZE: usize = 256;
-const STREAM_QUEUE_MAX_SIZE: usize = 64;
-const STREAM_PENDING_BYTES_LIMIT: usize = 4 * 1024 * 1024;
+// 64 KiB relay frames: sized so one 16 MiB HTTP request body fits (ADR-0226).
+const STREAM_QUEUE_MAX_SIZE: usize = 256;
+const STREAM_PENDING_BYTES_LIMIT: usize = 16 * 1024 * 1024;
 const MAX_ACTIVE_STREAMS: usize = 128;
-const SOCKET_PENDING_BYTES_LIMIT: usize = 16 * 1024 * 1024;
+const SOCKET_PENDING_BYTES_LIMIT: usize = 32 * 1024 * 1024;
 const HTTP_REQUEST_BYTES_LIMIT: usize = 16 * 1024 * 1024;
 const HTTP_RESPONSE_BYTES_LIMIT: usize = 16 * 1024 * 1024;
 const BACKPRESSURE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -1044,7 +1045,9 @@ async fn tunnel_presence_payload(cloud_access_mode: CloudAccessMode) -> Value {
     let tailscale_url = get_remote_host_candidates()
         .await
         .ok()
-        .and_then(|candidates| tailscale_direct_url_from_candidates(&candidates, automation_port()));
+        .and_then(|candidates| {
+            tailscale_direct_url_from_candidates(&candidates, automation_port())
+        });
     tunnel_presence_payload_value(cloud_access_mode, tailscale_url)
 }
 
@@ -1087,10 +1090,7 @@ fn cloud_stream_allowed(mode: CloudAccessMode, payload: &StreamOpenPayload) -> b
     )
 }
 
-fn tailscale_direct_url_from_candidates(
-    candidates: &[HostCandidate],
-    port: u16,
-) -> Option<String> {
+fn tailscale_direct_url_from_candidates(candidates: &[HostCandidate], port: u16) -> Option<String> {
     let host = candidates
         .iter()
         .find(|candidate| candidate.kind == "tailscale")?
@@ -3249,7 +3249,10 @@ mod tests {
         assert_eq!(error.frame_type, FRAME_STREAM_ERROR);
         assert_eq!(error_code(&error), Some("cloud_remote_policy_denied"));
         assert_eq!(
-            error.payload.as_ref().and_then(|value| value.get("retryable")),
+            error
+                .payload
+                .as_ref()
+                .and_then(|value| value.get("retryable")),
             Some(&Value::Bool(false))
         );
         assert!(active_streams.is_empty());

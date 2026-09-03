@@ -84,6 +84,18 @@ struct ClaimResponse {
     status: RemoteControlStatus,
     resume_token: String,
     file_viewer_token: String,
+    /// Host attachment policy (ADR-0226) so the page sizes its checks and
+    /// file chooser to this host instead of a built-in constant.
+    attachments: super::attachments::AttachmentPolicy,
+}
+
+/// `/session/status` answer: the control status plus the attachment policy.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionStatusResponse {
+    #[serde(flatten)]
+    status: RemoteControlStatus,
+    attachments: super::attachments::AttachmentPolicy,
 }
 
 #[derive(Debug, Deserialize)]
@@ -153,7 +165,9 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         )
         .route(
             "/remote/v1/e2e/rpc",
-            post(remote_android_e2e_rpc).layer(DefaultBodyLimit::max(2 * 1024 * 1024)),
+            post(remote_android_e2e_rpc).layer(DefaultBodyLimit::max(
+                super::attachments::android_e2e_rpc_body_limit(),
+            )),
         )
         .route(ANDROID_E2E_OUTPUT_PATH, get(remote_android_e2e_output_ws))
         .route("/remote/v1/session/status", get(remote_session_status))
@@ -222,9 +236,9 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         )
         .route(
             "/remote/v1/terminals/{id}/attachments",
-            post(remote_terminal_attachment).layer(DefaultBodyLimit::max(
-                crate::constants::REMOTE_TERMINAL_ATTACHMENT_REQUEST_MAX_BYTES,
-            )),
+            // The handler bounds the body itself from `remote.attachmentMaxMib`
+            // (ADR-0226); axum's static default limit would cap it at 2 MiB.
+            post(remote_terminal_attachment).layer(DefaultBodyLimit::disable()),
         )
         .route(
             "/remote/v1/terminals/{id}/resize",
@@ -312,8 +326,16 @@ async fn remote_health() -> Response {
 }
 
 async fn remote_session_status(State(server): State<ServerState>) -> Response {
+    let attachments = match effective_remote_settings(&server.app_state) {
+        Ok(settings) => super::attachments::AttachmentPolicy::from_settings(&settings),
+        Err(err) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, &err),
+    };
     match get_remote_control_status(&server.app_state) {
-        Ok(status) => Json(status).into_response(),
+        Ok(status) => Json(SessionStatusResponse {
+            status,
+            attachments,
+        })
+        .into_response(),
         Err(err) => json_error(StatusCode::INTERNAL_SERVER_ERROR, &err),
     }
 }
@@ -452,6 +474,7 @@ fn attempt_claim_with_context(
         status: status_from_state(current, timeout_seconds),
         resume_token,
         file_viewer_token,
+        attachments: super::attachments::AttachmentPolicy::from_settings(settings),
     }))
 }
 

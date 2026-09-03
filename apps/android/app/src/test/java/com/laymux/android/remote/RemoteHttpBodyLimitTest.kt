@@ -7,8 +7,8 @@ import org.junit.Test
 
 class RemoteHttpBodyLimitTest {
     @Test
-    fun oneMibAttachmentJsonFitsTheNativeBridgeLimit() {
-        val encoded = Base64.getEncoder().encodeToString(ByteArray(1024 * 1024))
+    fun largestConfigurableAttachmentJsonFitsTheNativeBridgeLimit() {
+        val encoded = Base64.getEncoder().encodeToString(ByteArray(MAX_REMOTE_ATTACHMENT_BYTES))
         val body =
             """{"leaseId":"lease","fileName":"attachment.txt","mimeType":"text/plain","data":"$encoded"}"""
 

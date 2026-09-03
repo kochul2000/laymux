@@ -766,6 +766,9 @@ const DEFAULT_REMOTE: RemoteSettings = {
   cloudAccessMode: "browserAndE2e",
   serveTerminalFont: false,
   widgets: true,
+  attachmentMaxMib: 1,
+  attachmentAllowAllExtensions: false,
+  attachmentExtraExtensions: [],
 };
 
 export const DEFAULT_FONT: FontSettings = { face: "Cascadia Mono", size: 14, weight: "normal" };
