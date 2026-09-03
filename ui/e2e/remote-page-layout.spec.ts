@@ -1219,6 +1219,7 @@ test.describe("remote mobile layout", () => {
             main: { left: [], center: [], right: ["keyboard", "keys"] },
             expanded: {
               left: [
+                "q",
                 "esc",
                 "tab",
                 "stab",
@@ -1312,6 +1313,7 @@ test.describe("remote mobile layout", () => {
     await expect(helperTextarea).toBeFocused();
 
     const fixedCases = [
+      { id: "q", sequence: "q" },
       { id: "esc", sequence: "\x1b" },
       { id: "tab", sequence: "\t" },
       { id: "stab", sequence: "\x1b[Z" },
@@ -1351,6 +1353,7 @@ test.describe("remote mobile layout", () => {
       .locator("#keyRow .key-btn")
       .evaluateAll((buttons) => buttons.map((button) => (button as HTMLButtonElement).dataset.key));
     expect(renderedKeyIds).toEqual([
+      "q",
       "esc",
       "tab",
       "stab",

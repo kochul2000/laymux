@@ -30,6 +30,18 @@ function renderedActions(page: Page, row: "mainActionRow" | "keyRow") {
   );
 }
 
+function renderedSegmentActions(
+  page: Page,
+  row: "mainActionRow" | "keyRow",
+  name: "left" | "center" | "right",
+) {
+  return segment(page, row, name)
+    .locator("[data-input-action]:visible")
+    .evaluateAll((elements) =>
+      elements.map((element) => (element as HTMLElement).dataset.inputAction),
+    );
+}
+
 function storedConfig(page: Page) {
   return page.evaluate((key) => JSON.parse(localStorage.getItem(key) || "{}"), STORAGE_KEY);
 }
@@ -76,8 +88,14 @@ test.describe("Remote input action layout", () => {
     await openMarkup(page);
 
     await expect
-      .poll(() => renderedActions(page, "mainActionRow"))
-      .toEqual(["soft:c-c", "soft:q", "soft:esc", "keyboard", "keys", "send"]);
+      .poll(() => renderedSegmentActions(page, "mainActionRow", "left"))
+      .toEqual(["soft:c-c", "soft:q", "soft:esc"]);
+    await expect
+      .poll(() => renderedSegmentActions(page, "mainActionRow", "center"))
+      .toEqual([]);
+    await expect
+      .poll(() => renderedSegmentActions(page, "mainActionRow", "right"))
+      .toEqual(["keyboard", "keys", "send"]);
     await expect(page.locator('#mainActionRow [data-key="c-c"]')).toHaveText("^C");
     await expect(page.locator('#mainActionRow [data-key="q"]')).toHaveText("Q");
 
@@ -102,12 +120,17 @@ test.describe("Remote input action layout", () => {
     await page.locator("#keyBarToggle").click();
     await expect(page.locator("#keyBar")).toBeVisible();
     await expect
-      .poll(() => renderedActions(page, "keyRow"))
+      .poll(() => renderedSegmentActions(page, "keyRow", "left"))
       .toEqual([
         "composer",
         "soft:navPad",
         "soft:tab",
         "soft:stab",
+      ]);
+    await expect.poll(() => renderedSegmentActions(page, "keyRow", "center")).toEqual([]);
+    await expect
+      .poll(() => renderedSegmentActions(page, "keyRow", "right"))
+      .toEqual([
         "soft:c-u",
         "soft:c-l",
         "soft:c-t",
