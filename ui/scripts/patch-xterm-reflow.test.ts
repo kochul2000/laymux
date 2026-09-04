@@ -23,8 +23,21 @@ const commonJsCompositionKeypressOwner =
 const compositionGenerationFinalizer =
   "_flushCompositionGeneration(t){if(t.done)return;for(;this._pendingCompositionGenerations.length>0;)";
 const compositionObservationList = "observations:[]";
+const compositionEndCommitData = "committed:this._compositionEndDataAllowed?e:void 0";
+const compositionBlurFlush =
+  "blur(){this._compositionEndDataAllowed=!1,this._flushPendingCompositionGenerations()}";
+const compositionEndDataEnabledAtStart = "this._compositionEndDataAllowed=!0";
+const compositionBlurHandoff =
+  '_handleTextAreaBlur(){this._compositionHelper.blur(),this.textarea.value=""';
+const compositionCancelledFlush = "if(e.cancelled){if(e===t)break;continue}";
+const compositionCancelledObservationReject =
+  "e&&!e.done&&!e.cancelled?(e.observations.push(t),!0):!1";
+const compositionGenerationSnapshot =
+  "t&&t.valueSnapshot===null&&(t.valueSnapshot=this._textarea.value)";
+const compositionSnapshotCandidate =
+  "s=e.valueSnapshot===null?this._textarea.value:e.valueSnapshot,r=i>s.length&&e.committed&&s.includes(e.committed)?s:s.substring(i)";
 const compositionCandidateFirstFold =
-  'let n=r,o="",l=!1;for(const t of e.observations)l?n=this._mergeCompositionData(n,t,!0):n.includes(t)?(o&&(n=this._mergeCompositionData(n,o)),l=!0):o=this._mergeCompositionData(t,o);l||!o||(n=this._mergeCompositionData(n,o))';
+  'let n=this._mergeCompositionData(r,e.committed||""),o="",l=!1;for(const t of e.observations)l?n=this._mergeCompositionData(n,t,!0):n.includes(t)?(o&&(n=this._mergeCompositionData(n,o)),l=!0):o=this._mergeCompositionData(t,o);l||!o||(n=this._mergeCompositionData(n,o))';
 const compositionAnchoredTieOrder = "i>s||o&&i===s?t+e.substring(i):e+t.substring(s)";
 const staleMergedObservationState = 'observed:""';
 const staleMergedObservationQueue = "e.observed=this._mergeCompositionData(t,e.observed)";
@@ -43,6 +56,10 @@ const commonJsDuplicatedCompositionKeypressHandoff =
   "this._compositionHelper.keypress(t)||this._compositionHelper.keypress(t)?this.cancel(e,!0)";
 const moduleCompositionInputHandoff = "if(this._compositionHelper.input(i))";
 const commonJsCompositionInputHandoff = "if(this._compositionHelper.input(t))";
+const moduleCompositionEndDataHandoff =
+  '"compositionend",t=>this._compositionHelper.compositionend(t.data)';
+const commonJsCompositionEndDataHandoff =
+  '"compositionend",(e=>this._compositionHelper.compositionend(e.data))';
 const staleSingleGenerationState = "_pendingKeypressData";
 const moduleUnreconciledKeypressSend =
   "this._showCursor(),this.coreService.triggerDataEvent(i,!0),this._keyPressHandled=!0";
@@ -102,8 +119,26 @@ describe("pinned xterm bundle patches", () => {
     expect(commonJsSource).toContain(compositionGenerationFinalizer);
     expect(moduleSource).toContain(compositionObservationList);
     expect(commonJsSource).toContain(compositionObservationList);
+    expect(moduleSource).toContain(compositionEndCommitData);
+    expect(commonJsSource).toContain(compositionEndCommitData);
+    expect(moduleSource).toContain(compositionBlurFlush);
+    expect(commonJsSource).toContain(compositionBlurFlush);
+    expect(moduleSource).toContain(compositionEndDataEnabledAtStart);
+    expect(commonJsSource).toContain(compositionEndDataEnabledAtStart);
+    expect(moduleSource).toContain(compositionBlurHandoff);
+    expect(commonJsSource).toContain(compositionBlurHandoff);
+    expect(moduleSource).toContain(compositionCancelledFlush);
+    expect(commonJsSource).toContain(compositionCancelledFlush);
+    expect(moduleSource).toContain(compositionCancelledObservationReject);
+    expect(commonJsSource).toContain(compositionCancelledObservationReject);
+    expect(moduleSource).toContain(compositionGenerationSnapshot);
+    expect(commonJsSource).toContain(compositionGenerationSnapshot);
+    expect(moduleSource).toContain(compositionSnapshotCandidate);
+    expect(commonJsSource).toContain(compositionSnapshotCandidate);
     expect(moduleSource).toContain(compositionCandidateFirstFold);
     expect(commonJsSource).toContain(compositionCandidateFirstFold);
+    expect(moduleSource).toContain(moduleCompositionEndDataHandoff);
+    expect(commonJsSource).toContain(commonJsCompositionEndDataHandoff);
     expect(moduleSource).toContain(compositionAnchoredTieOrder);
     expect(commonJsSource).toContain(compositionAnchoredTieOrder);
     expect(moduleSource).toContain(compositionBoundaryOwner);

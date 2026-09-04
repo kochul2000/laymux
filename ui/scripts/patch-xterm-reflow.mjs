@@ -23,7 +23,7 @@ const moduleDisableStdinPatched = "if(this._optionsService.rawOptions.disableStd
 const commonJsDisableStdinPatched = "if(this._optionsService.rawOptions.disableStdin&&t)return;";
 
 // xterm 6.0.0 can expose one composition commit through textarea input,
-// keypress, and the deferred finalizer. Keep those observations in one
+// keypress, compositionend.data, and the deferred finalizer. Keep those observations in one
 // generation-scoped CompositionHelper queue so rapid consecutive commits do
 // not clear or consume each other's state. The single-generation merge started
 // as a backport of stablyai/orca#9235; the input handoff and generation queue
@@ -49,10 +49,18 @@ const commonJsCompositionKeypressLegacy =
   "return 229!==e.keyCode||(this._handleAnyTextareaChanges(),!1)}keypress(e){return!!this._isSendingComposition&&(this._pendingKeypressData+=e,!0)}_finalizeComposition(e){";
 const moduleCompositionObservationOwner =
   "return t.keyCode===229?(this._handleAnyTextareaChanges(),!1):!0}keypress(t){return this._queueCompositionObservation(t)}input(t){return this._queueCompositionObservation(t)}_finalizeComposition(t){";
+const moduleCompositionObservationOwnerEndData = moduleCompositionObservationOwner.replace(
+  "_finalizeComposition(t){",
+  "_finalizeComposition(t,e){",
+);
 const commonJsCompositionObservationOwnerLegacy =
   "return 229!==e.keyCode||(this._handleAnyTextareaChanges(),!1)}keypress(e){return this._queueCompositionObservation(e)}input(e){return this._queueCompositionObservation(e)}_finalizeComposition(e){";
 const commonJsCompositionObservationOwner =
   "return 229!==e.keyCode||(this._handleAnyTextareaChanges(),!1)}keypress(e){return this._queueCompositionObservation(e)}input(e){return this._queueCompositionObservation(e)}_finalizeComposition(t){";
+const commonJsCompositionObservationOwnerEndData = commonJsCompositionObservationOwner.replace(
+  "_finalizeComposition(t){",
+  "_finalizeComposition(t,e){",
+);
 
 const moduleCompositionPendingResetOriginal =
   "let e={start:this._compositionPosition.start,end:this._compositionPosition.end};this._isSendingComposition=!0";
@@ -87,8 +95,62 @@ const commonJsCompositionFinalizeLegacy =
   compositionReconcileMethod;
 const compositionGenerationMethodsMergedObservations =
   '_finalizeComposition(t){this._compositionView.classList.remove("active");const e=this._isComposing;if(this._isComposing=!1,t){const t={start:this._compositionPosition.start,end:this._compositionPosition.end,valueEnd:null,alreadySentLength:this._dataAlreadySent.length,observed:"",done:!1};this._pendingCompositionGenerations.push(t),this._isSendingComposition=!0,setTimeout(()=>this._flushCompositionGeneration(t),0)}else{this._flushPendingCompositionGenerations();if(e){const t=this._textarea.value.substring(this._compositionPosition.start,this._compositionPosition.end);t.length>0&&this._coreService.triggerDataEvent(t,!0)}}}_boundPendingComposition(){const t=this._pendingCompositionGenerations[this._pendingCompositionGenerations.length-1];t&&t.valueEnd===null&&(t.valueEnd=this._textarea.value.length)}_queueCompositionObservation(t){const e=this._pendingCompositionGenerations[this._pendingCompositionGenerations.length-1];return e&&!e.done?(e.observed=this._mergeCompositionData(t,e.observed),!0):!1}_flushPendingCompositionGenerations(){const t=this._pendingCompositionGenerations[this._pendingCompositionGenerations.length-1];t?this._flushCompositionGeneration(t):this._isSendingComposition=!1}_flushCompositionGeneration(t){if(t.done)return;for(;this._pendingCompositionGenerations.length>0;){const e=this._pendingCompositionGenerations.shift();e.done=!0;const i=e.start+e.alreadySentLength,s=e.valueEnd===null?this._textarea.value.length:e.valueEnd,r=this._textarea.value.substring(i,Math.max(i,s)),n=this._mergeCompositionData(r,e.observed);if(n.length>0&&this._coreService.triggerDataEvent(n,!0),e===t)break}this._isSendingComposition=this._pendingCompositionGenerations.length>0}_mergeCompositionData(t,e){if(!t.includes(e))if(e.includes(t))t=e;else{let i=Math.min(t.length,e.length);for(;i>0&&!t.endsWith(e.substring(0,i));)i--;let s=Math.min(t.length,e.length);for(;s>0&&!e.endsWith(t.substring(0,s));)s--;t=i>s?t+e.substring(i):e+t.substring(s)}return t}';
-const compositionGenerationMethods =
+const compositionGenerationMethodsWithoutEndData =
   '_finalizeComposition(t){this._compositionView.classList.remove("active");const e=this._isComposing;if(this._isComposing=!1,t){const t={start:this._compositionPosition.start,end:this._compositionPosition.end,valueEnd:null,alreadySentLength:this._dataAlreadySent.length,observations:[],done:!1};this._pendingCompositionGenerations.push(t),this._isSendingComposition=!0,setTimeout(()=>this._flushCompositionGeneration(t),0)}else{this._flushPendingCompositionGenerations();if(e){const t=this._textarea.value.substring(this._compositionPosition.start,this._compositionPosition.end);t.length>0&&this._coreService.triggerDataEvent(t,!0)}}}_boundPendingComposition(){const t=this._pendingCompositionGenerations[this._pendingCompositionGenerations.length-1];t&&t.valueEnd===null&&(t.valueEnd=this._textarea.value.length)}_queueCompositionObservation(t){const e=this._pendingCompositionGenerations[this._pendingCompositionGenerations.length-1];return e&&!e.done?(e.observations.push(t),!0):!1}_flushPendingCompositionGenerations(){const t=this._pendingCompositionGenerations[this._pendingCompositionGenerations.length-1];t?this._flushCompositionGeneration(t):this._isSendingComposition=!1}_flushCompositionGeneration(t){if(t.done)return;for(;this._pendingCompositionGenerations.length>0;){const e=this._pendingCompositionGenerations.shift();e.done=!0;const i=e.start+e.alreadySentLength,s=e.valueEnd===null?this._textarea.value.length:e.valueEnd,r=this._textarea.value.substring(i,Math.max(i,s));let n=r,o="",l=!1;for(const t of e.observations)l?n=this._mergeCompositionData(n,t,!0):n.includes(t)?(o&&(n=this._mergeCompositionData(n,o)),l=!0):o=this._mergeCompositionData(t,o);l||!o||(n=this._mergeCompositionData(n,o));if(n.length>0&&this._coreService.triggerDataEvent(n,!0),e===t)break}this._isSendingComposition=this._pendingCompositionGenerations.length>0}_mergeCompositionData(t,e,o=!1){if(!t.includes(e))if(e.includes(t))t=e;else{let i=Math.min(t.length,e.length);for(;i>0&&!t.endsWith(e.substring(0,i));)i--;let s=Math.min(t.length,e.length);for(;s>0&&!e.endsWith(t.substring(0,s));)s--;t=i>s||o&&i===s?t+e.substring(i):e+t.substring(s)}return t}';
+const compositionGenerationMethodsWithEndData =
+  '_finalizeComposition(t,e){this._compositionView.classList.remove("active");const i=this._isComposing;if(this._isComposing=!1,t){const t={start:this._compositionPosition.start,end:this._compositionPosition.end,valueEnd:null,alreadySentLength:this._dataAlreadySent.length,committed:e,observations:[],done:!1};this._pendingCompositionGenerations.push(t),this._isSendingComposition=!0,setTimeout(()=>this._flushCompositionGeneration(t),0)}else{this._flushPendingCompositionGenerations();if(i){const t=this._textarea.value.substring(this._compositionPosition.start,this._compositionPosition.end);t.length>0&&this._coreService.triggerDataEvent(t,!0)}}}_boundPendingComposition(){const t=this._pendingCompositionGenerations[this._pendingCompositionGenerations.length-1];t&&t.valueEnd===null&&(t.valueEnd=this._textarea.value.length)}_queueCompositionObservation(t){const e=this._pendingCompositionGenerations[this._pendingCompositionGenerations.length-1];return e&&!e.done?(e.observations.push(t),!0):!1}_flushPendingCompositionGenerations(){const t=this._pendingCompositionGenerations[this._pendingCompositionGenerations.length-1];t?this._flushCompositionGeneration(t):this._isSendingComposition=!1}_flushCompositionGeneration(t){if(t.done)return;for(;this._pendingCompositionGenerations.length>0;){const e=this._pendingCompositionGenerations.shift();e.done=!0;const i=e.start+e.alreadySentLength,s=e.valueEnd===null?this._textarea.value.length:e.valueEnd,r=this._textarea.value.substring(i,Math.max(i,s));let n=this._textarea.ownerDocument.activeElement===this._textarea?this._mergeCompositionData(r,e.committed||""):r,o="",l=!1;for(const t of e.observations)l?n=this._mergeCompositionData(n,t,!0):n.includes(t)?(o&&(n=this._mergeCompositionData(n,o)),l=!0):o=this._mergeCompositionData(t,o);l||!o||(n=this._mergeCompositionData(n,o));if(n.length>0&&this._coreService.triggerDataEvent(n,!0),e===t)break}this._isSendingComposition=this._pendingCompositionGenerations.length>0}_mergeCompositionData(t,e,o=!1){if(!t.includes(e))if(e.includes(t))t=e;else{let i=Math.min(t.length,e.length);for(;i>0&&!t.endsWith(e.substring(0,i));)i--;let s=Math.min(t.length,e.length);for(;s>0&&!e.endsWith(t.substring(0,s));)s--;t=i>s||o&&i===s?t+e.substring(i):e+t.substring(s)}return t}';
+const compositionGenerationMethods = compositionGenerationMethodsWithEndData
+  .replace("valueEnd:null", "valueSnapshot:null")
+  .replace(
+    "committed:e,observations:[]",
+    "committed:this._compositionEndDataAllowed?e:void 0,cancelled:!this._compositionEndDataAllowed,observations:[]",
+  )
+  .replace(
+    "}}_boundPendingComposition(){",
+    "}}blur(){this._compositionEndDataAllowed=!1,this._flushPendingCompositionGenerations()}_boundPendingComposition(){",
+  )
+  .replace(
+    "t&&t.valueEnd===null&&(t.valueEnd=this._textarea.value.length)",
+    "t&&t.valueSnapshot===null&&(t.valueSnapshot=this._textarea.value)",
+  )
+  .replace(
+    "return e&&!e.done?(e.observations.push(t),!0):!1",
+    "return e&&!e.done&&!e.cancelled?(e.observations.push(t),!0):!1",
+  )
+  .replace("e.done=!0;const i=", "e.done=!0;if(e.cancelled){if(e===t)break;continue}const i=")
+  .replace(
+    "s=e.valueEnd===null?this._textarea.value.length:e.valueEnd,r=this._textarea.value.substring(i,Math.max(i,s))",
+    "s=e.valueSnapshot===null?this._textarea.value:e.valueSnapshot,r=i>s.length&&e.committed&&s.includes(e.committed)?s:s.substring(i)",
+  )
+  .replace(
+    'let n=this._textarea.ownerDocument.activeElement===this._textarea?this._mergeCompositionData(r,e.committed||""):r',
+    'let n=this._mergeCompositionData(r,e.committed||"")',
+  );
+const compositionGenerationAcceptedTexts = [
+  compositionGenerationMethods,
+  compositionGenerationMethodsWithEndData,
+  compositionGenerationMethodsWithoutEndData,
+  compositionGenerationMethodsMergedObservations,
+];
+const compositionGenerationUpgradeTexts = [
+  compositionGenerationMethodsWithEndData,
+  compositionGenerationMethodsWithoutEndData,
+  compositionGenerationMethodsMergedObservations,
+];
+
+const compositionEndOriginal = "compositionend(){this._finalizeComposition(!0)}";
+const compositionEndPatched = "compositionend(t){this._finalizeComposition(!0,t)}";
+const moduleCompositionEndListenerOriginal =
+  'this._register(L(this.textarea,"compositionend",()=>this._compositionHelper.compositionend()))';
+const moduleCompositionEndListenerPatched =
+  'this._register(L(this.textarea,"compositionend",t=>this._compositionHelper.compositionend(t.data)))';
+const commonJsCompositionEndListenerOriginal =
+  'this._register((0,I.addDisposableListener)(this.textarea,"compositionend",(()=>this._compositionHelper.compositionend())))';
+const commonJsCompositionEndListenerPatched =
+  'this._register((0,I.addDisposableListener)(this.textarea,"compositionend",(e=>this._compositionHelper.compositionend(e.data))))';
+const compositionBlurOriginal = '_handleTextAreaBlur(){this.textarea.value=""';
+const compositionBlurPatched =
+  '_handleTextAreaBlur(){this._compositionHelper.blur(),this.textarea.value=""';
 
 const compositionStartOriginal =
   "compositionstart(){this._isComposing=!0,this._compositionPosition.start=this._textarea.value.length";
@@ -96,6 +158,8 @@ const compositionStartBoundOnly =
   "compositionstart(){this._boundPendingComposition(),this._isComposing=!0,this._compositionPosition.start=this._textarea.value.length";
 const compositionStartPatched =
   "compositionstart(){this._boundPendingComposition(),this._compositionEpoch=(this._compositionEpoch||0)+1,this._isComposing=!0,this._compositionPosition.start=this._textarea.value.length";
+const compositionStartEndDataPatched =
+  "compositionstart(){this._boundPendingComposition(),this._compositionEpoch=(this._compositionEpoch||0)+1,this._compositionEndDataAllowed=!0,this._isComposing=!0,this._compositionPosition.start=this._textarea.value.length";
 const compositionStartRemotePatched =
   "compositionstart(){this._compositionEpoch=(this._compositionEpoch||0)+1,this._isComposing=!0,this._compositionPosition.start=this._textarea.value.length";
 
@@ -289,25 +353,25 @@ await patchBundle(moduleTarget, [
     name: "composition keypress owner",
     originalText: moduleCompositionKeypressOriginal,
     patchedText: moduleCompositionKeypressLegacy,
-    acceptedTexts: [moduleCompositionObservationOwner],
+    acceptedTexts: [moduleCompositionObservationOwner, moduleCompositionObservationOwnerEndData],
   },
   {
     name: "composition pending reset",
     originalText: moduleCompositionPendingResetOriginal,
     patchedText: moduleCompositionPendingResetLegacy,
-    acceptedTexts: [compositionGenerationMethods, compositionGenerationMethodsMergedObservations],
+    acceptedTexts: compositionGenerationAcceptedTexts,
   },
   {
     name: "composition deferred send",
     originalText: moduleCompositionDeferredSendOriginal,
     patchedText: moduleCompositionDeferredSendLegacy,
-    acceptedTexts: [compositionGenerationMethods, compositionGenerationMethodsMergedObservations],
+    acceptedTexts: compositionGenerationAcceptedTexts,
   },
   {
     name: "composition immediate send",
     originalText: moduleCompositionImmediateSendOriginal,
     patchedText: moduleCompositionImmediateSendLegacy,
-    acceptedTexts: [compositionGenerationMethods, compositionGenerationMethodsMergedObservations],
+    acceptedTexts: compositionGenerationAcceptedTexts,
   },
   {
     name: "terminal composition keypress handoff",
@@ -324,23 +388,34 @@ await patchBundle(moduleTarget, [
     name: "composition observation owner",
     originalText: moduleCompositionKeypressLegacy,
     patchedText: moduleCompositionObservationOwner,
+    acceptedTexts: [moduleCompositionObservationOwnerEndData],
   },
   {
     name: "composition generation finalizer",
     originalText: moduleCompositionFinalizeLegacy,
     patchedText: compositionGenerationMethods,
-    upgradeTexts: [compositionGenerationMethodsMergedObservations],
+    upgradeTexts: compositionGenerationUpgradeTexts,
+  },
+  {
+    name: "compositionend commit data",
+    originalText: compositionEndOriginal,
+    patchedText: compositionEndPatched,
+  },
+  {
+    name: "terminal compositionend data handoff",
+    originalText: moduleCompositionEndListenerOriginal,
+    patchedText: moduleCompositionEndListenerPatched,
+  },
+  {
+    name: "terminal composition blur flush",
+    originalText: compositionBlurOriginal,
+    patchedText: compositionBlurPatched,
   },
   {
     name: "composition generation boundary",
     originalText: compositionStartOriginal,
-    patchedText: compositionStartPatched,
-    acceptedTexts: [compositionStartPatched, compositionStartBoundOnly],
-  },
-  {
-    name: "composition generation boundary epoch upgrade",
-    originalText: compositionStartBoundOnly,
-    patchedText: compositionStartPatched,
+    patchedText: compositionStartEndDataPatched,
+    upgradeTexts: [compositionStartPatched, compositionStartBoundOnly],
   },
   {
     name: "terminal composition input handoff",
@@ -379,25 +454,28 @@ await patchBundle(commonJsTarget, [
     name: "composition keypress owner",
     originalText: commonJsCompositionKeypressOriginal,
     patchedText: commonJsCompositionKeypressLegacy,
-    acceptedTexts: [commonJsCompositionObservationOwner],
+    acceptedTexts: [
+      commonJsCompositionObservationOwner,
+      commonJsCompositionObservationOwnerEndData,
+    ],
   },
   {
     name: "composition pending reset",
     originalText: commonJsCompositionPendingResetOriginal,
     patchedText: commonJsCompositionPendingResetLegacy,
-    acceptedTexts: [compositionGenerationMethods, compositionGenerationMethodsMergedObservations],
+    acceptedTexts: compositionGenerationAcceptedTexts,
   },
   {
     name: "composition deferred send",
     originalText: commonJsCompositionDeferredSendOriginal,
     patchedText: commonJsCompositionDeferredSendLegacy,
-    acceptedTexts: [compositionGenerationMethods, compositionGenerationMethodsMergedObservations],
+    acceptedTexts: compositionGenerationAcceptedTexts,
   },
   {
     name: "composition immediate send",
     originalText: commonJsCompositionImmediateSendOriginal,
     patchedText: commonJsCompositionImmediateSendLegacy,
-    acceptedTexts: [compositionGenerationMethods, compositionGenerationMethodsMergedObservations],
+    acceptedTexts: compositionGenerationAcceptedTexts,
   },
   {
     name: "terminal composition keypress handoff",
@@ -414,24 +492,37 @@ await patchBundle(commonJsTarget, [
     name: "composition observation owner",
     originalText: commonJsCompositionKeypressLegacy,
     patchedText: commonJsCompositionObservationOwnerLegacy,
-    acceptedTexts: [commonJsCompositionObservationOwner],
+    acceptedTexts: [
+      commonJsCompositionObservationOwner,
+      commonJsCompositionObservationOwnerEndData,
+    ],
   },
   {
     name: "composition generation finalizer",
     originalText: commonJsCompositionFinalizeLegacy,
     patchedText: compositionGenerationMethods,
-    upgradeTexts: [compositionGenerationMethodsMergedObservations],
+    upgradeTexts: compositionGenerationUpgradeTexts,
+  },
+  {
+    name: "compositionend commit data",
+    originalText: compositionEndOriginal,
+    patchedText: compositionEndPatched,
+  },
+  {
+    name: "terminal compositionend data handoff",
+    originalText: commonJsCompositionEndListenerOriginal,
+    patchedText: commonJsCompositionEndListenerPatched,
+  },
+  {
+    name: "terminal composition blur flush",
+    originalText: compositionBlurOriginal,
+    patchedText: compositionBlurPatched,
   },
   {
     name: "composition generation boundary",
     originalText: compositionStartOriginal,
-    patchedText: compositionStartPatched,
-    acceptedTexts: [compositionStartPatched, compositionStartBoundOnly],
-  },
-  {
-    name: "composition generation boundary epoch upgrade",
-    originalText: compositionStartBoundOnly,
-    patchedText: compositionStartPatched,
+    patchedText: compositionStartEndDataPatched,
+    upgradeTexts: [compositionStartPatched, compositionStartBoundOnly],
   },
   {
     name: "terminal composition input handoff",

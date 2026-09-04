@@ -766,30 +766,28 @@ export function createImeCompositionController(
     // A blur mid-composition leaves this controller (and the preview box) stuck in
     // "composing" until the next focus cycle, so it still has to reset.
     //
-    // But resetting alone *loses the syllable* (issue #555). Measured against a real
-    // `Terminal`: on blur xterm clears the helper textarea and sends nothing, leaving
-    // its own `_isComposing` true; a `compositionend` arriving after the blur cannot
-    // recover it either, because the finalizer's slice source is already empty. For
-    // Korean — and CJK generally — a focus change is a commit, not a cancel, so the
-    // text the user could see has to reach the PTY.
+    // But resetting alone *loses an unfinished syllable* (issue #555). The patched
+    // xterm blur handler now flushes every completed generation before clearing the
+    // helper textarea. A still-active composition has no generation to flush and a
+    // `compositionend` arriving after blur is deliberately ignored, so this controller
+    // still commits the text the user could see. For Korean — and CJK generally — a
+    // focus change is a commit, not a cancel.
     //
-    // Phase alone is NOT the discriminator — measured. WebView2 + Windows IME fires
-    // `compositionend` *before* the blur, so the real sequence is end → blur → flush:
-    // the blur lands inside xterm's deferred finalize window, clears the textarea, and
-    // the finalizer then slices an empty string. The controller is in
-    // `pending-finalize` there, and the syllable is lost exactly as if no
-    // `compositionend` had arrived at all.
+    // Phase alone is NOT the discriminator. WebView2 + Windows IME can fire
+    // `compositionend` before blur, leaving this controller in `pending-finalize` even
+    // though xterm's earlier blur listener has just flushed that generation.
     //
-    // What separates "xterm will send it" from "xterm can no longer send it" is
-    // xterm's own pending flag at blur time:
+    // What separates "xterm already sent it" from a compatibility fallback is xterm's
+    // pending flag after that listener ran:
     //
-    //   end → blur → flush   pending true   textarea already ""   → doomed, commit
-    //   end → flush → blur   pending false  already on the wire   → do not commit
+    //   end → blur           pending false  synchronously flushed → do not commit
+    //   end → timer → blur   pending false  already on the wire   → do not commit
+    //   pending remains true               older contract         → commit fallback
     //
-    // Two texts can be in danger at once. A carry-over ends one syllable and starts the
-    // next in the same tick, so a blur can catch a doomed pending send *and* a live
-    // composition. The doomed one is `lastFinalizedText` — not `state.text`, which by
-    // then holds the newer syllable.
+    // A carry-over can still expose two texts at once. The patched helper flushes the
+    // finalized FIFO first and this controller commits only the live composition. If a
+    // pending generation survives for compatibility, its text is `lastFinalizedText` —
+    // not `state.text`, which already holds the newer syllable.
     //
     // Neither comes from the textarea: xterm clears it in its own blur handler, which
     // is registered first (at `terminal.open()`), so reading it here would depend on
