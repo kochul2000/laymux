@@ -65,12 +65,14 @@ const ENCODING_BASE64: &str = "base64";
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
 const OUTBOUND_QUEUE_SIZE: usize = 256;
-// 64 KiB relay frames: sized so one 16 MiB HTTP request body fits (ADR-0227).
-const STREAM_QUEUE_MAX_SIZE: usize = 256;
+// The relay forwards each ASGI body chunk as one frame, so a 16 MiB request
+// body can arrive as thousands of small frames; bound the count from the byte
+// bound instead of guessing a frame size (ADR-0227).
+const STREAM_QUEUE_MAX_SIZE: usize = HTTP_REQUEST_BYTES_LIMIT / (4 * 1024);
 const STREAM_PENDING_BYTES_LIMIT: usize = 16 * 1024 * 1024;
 const MAX_ACTIVE_STREAMS: usize = 128;
 const SOCKET_PENDING_BYTES_LIMIT: usize = 32 * 1024 * 1024;
-const HTTP_REQUEST_BYTES_LIMIT: usize = 16 * 1024 * 1024;
+const HTTP_REQUEST_BYTES_LIMIT: usize = crate::constants::CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT;
 const HTTP_RESPONSE_BYTES_LIMIT: usize = 16 * 1024 * 1024;
 const BACKPRESSURE_TIMEOUT: Duration = Duration::from_secs(5);
 const LEASE_CHECK_MS: u64 = 500;

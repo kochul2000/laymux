@@ -166,9 +166,9 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         )
         .route(
             "/remote/v1/e2e/rpc",
-            post(remote_android_e2e_rpc).layer(DefaultBodyLimit::max(
-                super::attachments::android_e2e_rpc_body_limit(),
-            )),
+            // The handler bounds the envelope itself from the host's attachment
+            // maximum (ADR-0227) instead of a static limit.
+            post(remote_android_e2e_rpc).layer(DefaultBodyLimit::disable()),
         )
         .route(ANDROID_E2E_OUTPUT_PATH, get(remote_android_e2e_output_ws))
         .route("/remote/v1/session/status", get(remote_session_status))
@@ -530,6 +530,12 @@ async fn remote_session_claim(
 ) -> Response {
     let remote_addr = addr.to_string();
     let transport = transport.map(|axum::Extension(transport)| transport);
+    // Read the transport-aware attachment policy (ADR-0227) before touching
+    // lease state so a settings read failure cannot grant a lease behind a 500.
+    let attachments = match effective_remote_settings(&server.app_state) {
+        Ok(settings) => super::attachments::AttachmentPolicy::from_settings(&settings, transport),
+        Err(err) => return internal_error(err),
+    };
     // A lease claimed through an E2E session must not outlive that session:
     // a reconnecting phone otherwise fights its own dead lease with 409s
     // until the heartbeat timeout (ADR-0170). Dead-lease cleanup consults the
@@ -596,14 +602,8 @@ async fn remote_session_claim(
         ClaimAttempt::Granted(mut response) => {
             emit_remote_control_status(&server.app_handle, &response.status);
             // The attempt runs under the owner lock without transport
-            // knowledge; the relay-aware policy (ADR-0227) is filled in here.
-            match effective_remote_settings(&server.app_state) {
-                Ok(settings) => {
-                    response.attachments =
-                        super::attachments::AttachmentPolicy::from_settings(&settings, transport);
-                }
-                Err(err) => return internal_error(err),
-            }
+            // knowledge; the relay-aware policy read above replaces it here.
+            response.attachments = attachments;
             Json(*response).into_response()
         }
         ClaimAttempt::Rejected(response) => response,

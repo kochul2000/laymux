@@ -1879,7 +1879,14 @@ pub struct RemoteSettings {
     pub attachment_extra_extensions: Vec<String>,
 }
 
-pub const MAX_REMOTE_ATTACHMENT_MIB: u32 = 10;
+/// Extensions end up in a cache file name, so settings and callers may only
+/// supply lowercase ASCII alphanumerics of bounded length (ADR-0227).
+pub fn is_valid_attachment_extension(extension: &str) -> bool {
+    (1..=16).contains(&extension.len())
+        && extension
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+}
 
 fn default_remote_attachment_max_mib() -> u32 {
     1

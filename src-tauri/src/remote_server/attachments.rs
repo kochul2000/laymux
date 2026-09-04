@@ -16,12 +16,13 @@ use uuid::Uuid;
 
 use crate::automation_server::ServerState;
 use crate::constants::{
+    remote_attachment_encoded_limit, remote_attachment_request_limit,
     CLOUD_RELAY_ANDROID_E2E_RPC_BODY_LIMIT, CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT,
     REMOTE_TERMINAL_ATTACHMENT_CACHE_FILES_OF_MAX_SIZE, REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_FILES,
-    REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES,
+    REMOTE_TERMINAL_ATTACHMENT_MAX_MIB, REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES,
 };
 use crate::lock_ext::MutexExt;
-use crate::settings::models::{RemoteSettings, MAX_REMOTE_ATTACHMENT_MIB};
+use crate::settings::models::{is_valid_attachment_extension, RemoteSettings};
 
 use super::access::effective_remote_settings;
 use super::lease::begin_remote_lease_mutation;
@@ -116,7 +117,7 @@ impl AttachmentPolicy {
     ) -> Self {
         let host_max_bytes = settings
             .attachment_max_mib
-            .clamp(1, MAX_REMOTE_ATTACHMENT_MIB) as usize
+            .clamp(1, REMOTE_TERMINAL_ATTACHMENT_MAX_MIB) as usize
             * MIB;
         let relay_max_bytes = transport.and_then(relay_attachment_cap);
         Self {
@@ -165,15 +166,6 @@ impl AttachmentPolicy {
     }
 }
 
-/// Extensions are stored into a file name, so only lowercase ASCII
-/// alphanumerics of bounded length are accepted from settings or callers.
-pub(crate) fn is_valid_attachment_extension(extension: &str) -> bool {
-    (1..=16).contains(&extension.len())
-        && extension
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
-}
-
 pub(super) async fn remote_terminal_attachment(
     State(server): State<ServerState>,
     AxumPath(id): AxumPath<String>,
@@ -188,7 +180,7 @@ pub(super) async fn remote_terminal_attachment(
     let (parts, raw_body) = request.into_parts();
     // The body bound follows the configured maximum, so the route itself
     // disables axum's static default limit.
-    let raw = match to_bytes(raw_body, attachment_request_limit(policy.max_bytes)).await {
+    let raw = match to_bytes(raw_body, remote_attachment_request_limit(policy.max_bytes)).await {
         Ok(raw) => raw,
         Err(_) => {
             return no_store(json_error(
@@ -229,7 +221,7 @@ pub(super) async fn remote_terminal_attachment(
             "attachment MIME type is too long",
         ));
     }
-    if body.data.len() > encoded_attachment_limit(policy.max_bytes) {
+    if body.data.len() > remote_attachment_encoded_limit(policy.max_bytes) {
         return no_store(json_error(
             StatusCode::PAYLOAD_TOO_LARGE,
             &policy.too_large_message(),
@@ -355,27 +347,6 @@ fn relay_attachment_cap(transport: RemoteTransport) -> Option<usize> {
     // Invert `attachment_request_limit`: strip the JSON slack and the base64 layer.
     let decoded = (request_limit - REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES) / 4 * 3;
     Some((decoded / MIB).max(1) * MIB)
-}
-
-/// Base64 length of the largest decoded attachment the policy allows.
-const fn encoded_attachment_limit(max_bytes: usize) -> usize {
-    max_bytes.div_ceil(3) * 4
-}
-
-/// JSON body bound for one attachment request at the given decoded maximum.
-pub(crate) const fn attachment_request_limit(max_bytes: usize) -> usize {
-    encoded_attachment_limit(max_bytes) + REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES
-}
-
-/// Body bound for the Android E2E RPC envelope. The attachment JSON rides
-/// inside the plaintext RPC record, which is AEAD-sealed and base64url-encoded
-/// once more, so the bound is sized for the largest configurable attachment.
-pub(crate) const fn android_e2e_rpc_body_limit() -> usize {
-    let max_bytes = MAX_REMOTE_ATTACHMENT_MIB as usize * 1024 * 1024;
-    (attachment_request_limit(max_bytes) + REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES)
-        .div_ceil(3)
-        * 4
-        + REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES
 }
 
 fn attachment_dir_under(cache_dir: &Path) -> PathBuf {

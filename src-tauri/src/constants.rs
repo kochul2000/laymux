@@ -296,6 +296,37 @@ pub const CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT: usize = 16 * 1024 * 1024;
 /// Cloud relay bound for one Android E2E RPC envelope (laymux-server
 /// `ANDROID_E2E_RPC_BODY_LIMIT`, `POST /api/android/e2e/rpc`).
 pub const CLOUD_RELAY_ANDROID_E2E_RPC_BODY_LIMIT: usize = 2 * 1024 * 1024;
+/// Upper bound of `remote.attachmentMaxMib` (ADR-0227). The Cloud relay forwards
+/// at most 16 MiB of request body, which fits this many decoded MiB after base64.
+pub const REMOTE_TERMINAL_ATTACHMENT_MAX_MIB: u32 = 10;
+/// Base64 length of the largest decoded attachment a policy allows.
+pub const fn remote_attachment_encoded_limit(max_bytes: usize) -> usize {
+    max_bytes.div_ceil(3) * 4
+}
+/// JSON body bound for one attachment request at the given decoded maximum.
+pub const fn remote_attachment_request_limit(max_bytes: usize) -> usize {
+    remote_attachment_encoded_limit(max_bytes) + REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES
+}
+/// Largest inner request plaintext an Android E2E envelope may carry: the
+/// attachment JSON at the configurable cap plus the `PlainRequest` wrapper.
+pub const ANDROID_E2E_MAX_REQUEST_PLAINTEXT_BYTES: usize =
+    remote_attachment_request_limit(REMOTE_TERMINAL_ATTACHMENT_MAX_MIB as usize * 1024 * 1024)
+        + REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES;
+/// Body bound for one Android E2E RPC envelope carrying an attachment of the
+/// given decoded maximum: the inner plaintext is AEAD-sealed and base64url-
+/// encoded once more. Never below the 2 MiB the envelope always allowed.
+pub const fn android_e2e_rpc_body_limit(max_bytes: usize) -> usize {
+    let derived = (remote_attachment_request_limit(max_bytes)
+        + REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES)
+        .div_ceil(3)
+        * 4
+        + REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES;
+    if derived > 2 * 1024 * 1024 {
+        derived
+    } else {
+        2 * 1024 * 1024
+    }
+}
 /// Startup cleanup age for Remote attachment cache files.
 pub const REMOTE_TERMINAL_ATTACHMENT_MAX_AGE_DAYS: u64 = 7;
 

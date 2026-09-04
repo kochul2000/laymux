@@ -513,7 +513,7 @@ fn validate_remote(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
             "remote.enabled=true이면 authToken이 필요합니다.".into(),
         );
     }
-    if !(1..=crate::settings::models::MAX_REMOTE_ATTACHMENT_MIB)
+    if !(1..=crate::constants::REMOTE_TERMINAL_ATTACHMENT_MAX_MIB)
         .contains(&remote.attachment_max_mib)
     {
         issue(
@@ -522,12 +522,12 @@ fn validate_remote(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
             "/remote/attachmentMaxMib",
             format!(
                 "attachmentMaxMib must be between 1 and {}.",
-                crate::settings::models::MAX_REMOTE_ATTACHMENT_MIB
+                crate::constants::REMOTE_TERMINAL_ATTACHMENT_MAX_MIB
             ),
         );
     }
     for (index, extension) in remote.attachment_extra_extensions.iter().enumerate() {
-        if !crate::remote_server::is_valid_attachment_extension(extension) {
+        if !super::models::is_valid_attachment_extension(extension) {
             issue(
                 issues,
                 "invalid_value",

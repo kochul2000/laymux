@@ -2443,8 +2443,11 @@ function normalizeAttachmentExtensions(list: string[]): string[] {
   return [...seen];
 }
 
+/** Mirrors `REMOTE_TERMINAL_ATTACHMENT_MAX_MIB` in src-tauri/src/constants.rs. */
+const MAX_REMOTE_ATTACHMENT_MIB = 10;
+
 function clampAttachmentMaxMib(value: unknown): number {
-  return Math.min(10, Math.max(1, Math.trunc(Number(value) || 1)));
+  return Math.min(MAX_REMOTE_ATTACHMENT_MIB, Math.max(1, Math.trunc(Number(value) || 1)));
 }
 
 function toRemoteSectionDraft(remote: RemoteSettings): RemoteSectionDraft {
@@ -3038,7 +3041,7 @@ function RemoteConnectionSection() {
               data-testid="remote-settings-attachment-max-mib"
               type="number"
               min={1}
-              max={10}
+              max={MAX_REMOTE_ATTACHMENT_MIB}
               step={1}
               className={inputCls}
               inputStyle={{ width: 110 }}

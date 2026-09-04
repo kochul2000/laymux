@@ -17,7 +17,7 @@ use crate::android_e2e::{
     CipherEnvelope, E2eError, EstablishRequest,
 };
 use crate::automation_server::ServerState;
-use crate::constants::MAX_ANDROID_E2E_FILE_VIEWER_RESPONSE_BYTES;
+use crate::constants::{android_e2e_rpc_body_limit, MAX_ANDROID_E2E_FILE_VIEWER_RESPONSE_BYTES};
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 use crate::remote_server::{RemoteTransport, TunnelAuthorized};
@@ -133,7 +133,7 @@ pub(super) async fn remote_android_e2e_establish(
 pub(super) async fn remote_android_e2e_rpc(
     State(server): State<ServerState>,
     transport: Option<axum::Extension<RemoteTransport>>,
-    Json(envelope): Json<CipherEnvelope>,
+    request: Request<Body>,
 ) -> Response {
     // The envelope reached us either through the Cloud relay tunnel or over
     // Tailscale Direct; the inner request inherits that so payload policy can
@@ -142,6 +142,34 @@ pub(super) async fn remote_android_e2e_rpc(
         transport,
         Some(axum::Extension(RemoteTransport::CloudRelayBrowser))
     );
+    // The envelope bound follows the host's attachment maximum (ADR-0227) so a
+    // 1 MiB host never buffers the 10 MiB-sized envelope; the route disables
+    // axum's static default limit for this.
+    let envelope_limit = match effective_remote_settings(&server.app_state) {
+        Ok(settings) => android_e2e_rpc_body_limit(
+            super::attachments::AttachmentPolicy::from_settings(&settings, None).host_max_bytes,
+        ),
+        Err(error) => return no_store(internal_error(error)),
+    };
+    let raw = match to_bytes(request.into_body(), envelope_limit).await {
+        Ok(raw) => raw,
+        Err(_) => {
+            return no_store(json_error(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "Android E2E envelope exceeds the request limit",
+            ))
+        }
+    };
+    let envelope: CipherEnvelope = match serde_json::from_slice(&raw) {
+        Ok(envelope) => envelope,
+        Err(_) => {
+            return no_store(json_error(
+                StatusCode::BAD_REQUEST,
+                "Android E2E envelope is not valid JSON",
+            ))
+        }
+    };
+    drop(raw);
     let session = match server.app_state.android_e2e.session(
         &envelope.instance_id,
         &envelope.session_id,

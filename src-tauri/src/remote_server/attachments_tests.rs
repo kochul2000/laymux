@@ -176,7 +176,7 @@ fn policy_from_settings_clamps_the_limit_and_drops_invalid_extensions() {
     let policy = AttachmentPolicy::from_settings(&settings, None);
     assert_eq!(
         policy.max_bytes,
-        MAX_REMOTE_ATTACHMENT_MIB as usize * 1024 * 1024
+        REMOTE_TERMINAL_ATTACHMENT_MAX_MIB as usize * 1024 * 1024
     );
     assert_eq!(policy.extra_extensions, vec!["xlsx".to_string()]);
     assert_eq!(
@@ -296,24 +296,30 @@ fn cleanup_removes_only_regular_files_older_than_the_cutoff() {
 fn encoded_limit_covers_exact_decoded_maximum() {
     for max_bytes in [
         1024 * 1024,
-        MAX_REMOTE_ATTACHMENT_MIB as usize * 1024 * 1024,
+        REMOTE_TERMINAL_ATTACHMENT_MAX_MIB as usize * 1024 * 1024,
     ] {
         let bytes = vec![0u8; max_bytes];
         assert_eq!(
             BASE64.encode(bytes).len(),
-            encoded_attachment_limit(max_bytes)
+            remote_attachment_encoded_limit(max_bytes)
         );
     }
 }
 
 #[test]
 fn transport_bounds_cover_the_largest_configurable_attachment() {
-    let max_bytes = MAX_REMOTE_ATTACHMENT_MIB as usize * 1024 * 1024;
-    let request_limit = attachment_request_limit(max_bytes);
-    assert!(request_limit > encoded_attachment_limit(max_bytes));
+    let max_bytes = REMOTE_TERMINAL_ATTACHMENT_MAX_MIB as usize * 1024 * 1024;
+    let request_limit = remote_attachment_request_limit(max_bytes);
+    assert!(request_limit > remote_attachment_encoded_limit(max_bytes));
     // The attachment JSON is sealed and base64url-encoded once more inside
     // the Android E2E RPC envelope.
-    assert!(android_e2e_rpc_body_limit() >= request_limit.div_ceil(3) * 4);
+    assert!(
+        crate::constants::android_e2e_rpc_body_limit(max_bytes) >= request_limit.div_ceil(3) * 4
+    );
+    // The decrypted inner request must hold that JSON plus the PlainRequest wrapper.
+    assert!(crate::constants::ANDROID_E2E_MAX_REQUEST_PLAINTEXT_BYTES > request_limit);
+    // A 1 MiB host keeps the envelope at the 2 MiB the route always allowed.
+    assert_eq!(crate::constants::android_e2e_rpc_body_limit(MIB), 2 * MIB);
 }
 
 #[cfg(target_os = "windows")]
@@ -328,10 +334,10 @@ fn wsl_profiles_receive_a_guest_visible_path() {
 #[test]
 fn cloud_relay_paths_cap_the_policy_and_name_tailscale_in_the_message() {
     let settings = RemoteSettings {
-        attachment_max_mib: MAX_REMOTE_ATTACHMENT_MIB,
+        attachment_max_mib: REMOTE_TERMINAL_ATTACHMENT_MAX_MIB,
         ..RemoteSettings::default()
     };
-    let host = MAX_REMOTE_ATTACHMENT_MIB as usize * MIB;
+    let host = REMOTE_TERMINAL_ATTACHMENT_MAX_MIB as usize * MIB;
 
     let direct = AttachmentPolicy::from_settings(&settings, None);
     assert_eq!((direct.max_bytes, direct.relay_max_bytes), (host, None));
