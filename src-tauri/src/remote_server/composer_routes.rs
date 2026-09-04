@@ -22,14 +22,33 @@ pub(super) struct ComposerStarredQuery {
 #[serde(rename_all = "camelCase")]
 pub(super) struct ComposerStarredUpdate {
     lease_id: Option<String>,
-    text: String,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    value: Option<String>,
     starred: bool,
+    label: Option<String>,
+    send: Option<bool>,
+    previous_value: Option<String>,
+}
+
+impl ComposerStarredUpdate {
+    fn resolve_value(&self) -> Result<String, &'static str> {
+        match (&self.value, &self.text) {
+            (Some(value), Some(text)) if value != text => {
+                Err("Composer starred entry text and value must match")
+            }
+            (Some(value), _) => Ok(value.clone()),
+            (None, Some(text)) => Ok(text.clone()),
+            (None, None) => Ok(String::new()),
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
 struct ComposerStarredResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
-    entries: Option<Vec<String>>,
+    entries: Option<Vec<crate::settings::ComposerStarredEntry>>,
     revision: u64,
 }
 
@@ -62,20 +81,36 @@ pub(super) async fn remote_composer_starred_update(
     if let Err(response) = require_active_lease(&server.app_state, body.lease_id.as_deref()) {
         return response;
     }
+    let value = match body.resolve_value() {
+        Ok(value) => value,
+        Err(error) => return json_error(StatusCode::BAD_REQUEST, error),
+    };
     if body.starred {
-        if let Err(error) = crate::settings::validate_composer_starred_entry(&body.text) {
+        if let Err(error) = crate::settings::validate_composer_starred_entry(&value) {
+            return json_error(StatusCode::BAD_REQUEST, &error);
+        }
+    }
+    if let Some(label) = body.label.as_deref() {
+        if let Err(error) = crate::settings::validate_composer_starred_label(label) {
             return json_error(StatusCode::BAD_REQUEST, &error);
         }
     }
 
-    let text = body.text;
     let app_handle = server.app_handle.clone();
     let result = tokio::task::spawn_blocking(move || {
-        crate::settings::update_composer_starred_entry_snapshot(&text, body.starred, |entries| {
-            if let Err(error) = app_handle.emit(EVENT_COMPOSER_STARRED_ENTRIES_CHANGED, entries) {
-                tracing::warn!(%error, "failed to emit composer starred entries change");
-            }
-        })
+        crate::settings::update_composer_starred_entry_snapshot(
+            &value,
+            body.starred,
+            body.label.as_deref(),
+            body.send,
+            body.previous_value.as_deref(),
+            |entries| {
+                if let Err(error) = app_handle.emit(EVENT_COMPOSER_STARRED_ENTRIES_CHANGED, entries)
+                {
+                    tracing::warn!(%error, "failed to emit composer starred entries change");
+                }
+            },
+        )
     })
     .await;
     match result {
@@ -84,7 +119,10 @@ pub(super) async fn remote_composer_starred_update(
             revision: snapshot.revision,
         })
         .into_response(),
-        Ok(Err(error)) if error == crate::settings::COMPOSER_STARRED_ENTRIES_FULL_ERROR => {
+        Ok(Err(error))
+            if error == crate::settings::COMPOSER_STARRED_ENTRIES_FULL_ERROR
+                || error == crate::settings::COMPOSER_STARRED_ENTRY_DUPLICATE_ERROR =>
+        {
             json_error(StatusCode::BAD_REQUEST, &error)
         }
         Ok(Err(error)) => internal_error(error),

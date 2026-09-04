@@ -528,6 +528,71 @@
       .composer-suggest-star[aria-pressed="true"] {
         color: var(--accent);
       }
+      .composer-suggest-send {
+        margin-left: 4px;
+        color: var(--text-secondary);
+      }
+      .composer-star-editor-scrim {
+        position: fixed;
+        inset: 0;
+        z-index: 55;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        background: #0000008c;
+      }
+      .composer-star-editor-scrim[hidden] {
+        display: none;
+      }
+      .composer-star-editor-dialog {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        width: min(440px, 100%);
+        padding: 14px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        background: var(--bg-base);
+      }
+      .composer-star-editor-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .composer-star-editor-title {
+        color: var(--text);
+        font-size: var(--fs-sm);
+        font-weight: 700;
+      }
+      .composer-star-editor-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+      }
+      .composer-star-editor-field textarea {
+        min-height: 72px;
+        resize: vertical;
+      }
+      .composer-star-editor-send {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text-primary);
+        font-size: var(--fs-sm);
+      }
+      .composer-star-editor-error {
+        color: var(--danger);
+        font-size: var(--fs-xs);
+      }
+      .composer-star-editor-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
       /* Flush editor (mirrors desktop): no outer margin / parent padding, no
          border or rounding — it fills the strip under the divider. */
       .composer-input {

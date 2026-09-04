@@ -9,6 +9,11 @@ import type { SyncCwdConfig, SyncCwdDefaults } from "./sync-cwd-config";
 import type { TerminalActivityInfo } from "@/stores/terminal-store";
 import type { InitialExecutionHost } from "./terminal-execution-host";
 import { assertSettingsWriteAllowed } from "./settings-write-guard";
+import {
+  normalizeComposerStarredEntries,
+  type ComposerStarredEntry,
+  type ComposerStarredEntryInput,
+} from "./terminal-input-composer-state";
 
 export type { SyncCwdConfig, SyncCwdDefaults } from "./sync-cwd-config";
 
@@ -168,8 +173,7 @@ export interface TerminalOutputAttachFailStoppedPayload {
 }
 
 export type TerminalOutputAttachResult =
-  | TerminalOutputAttachmentPayload
-  | TerminalOutputAttachFailStoppedPayload;
+  TerminalOutputAttachmentPayload | TerminalOutputAttachFailStoppedPayload;
 
 export interface TerminalOutputDeltaPayload {
   generation: number;
@@ -211,13 +215,7 @@ export async function acknowledgeTerminalOutputEnvelope(
 }
 
 export type TerminalOutputEnvelopeRepairStatus =
-  | "idle"
-  | "eventPending"
-  | "exact"
-  | "stale"
-  | "alreadyReceipted"
-  | "mismatch"
-  | "exhausted";
+  "idle" | "eventPending" | "exact" | "stale" | "alreadyReceipted" | "mismatch" | "exhausted";
 
 export interface TerminalOutputEnvelopeRepairResponse {
   status: TerminalOutputEnvelopeRepairStatus;
@@ -575,14 +573,30 @@ export async function saveSettings(settings: Settings): Promise<void> {
   return invoke("save_settings", { settings });
 }
 
-export async function setComposerStarredEntry(text: string, starred: boolean): Promise<string[]> {
-  return invoke("set_composer_starred_entry", { text, starred });
+export type ComposerStarredEntryPatch = {
+  text: string;
+  starred: boolean;
+  label?: string;
+  send?: boolean;
+  previousText?: string;
+};
+
+export async function setComposerStarredEntry(
+  text: string | ComposerStarredEntryPatch,
+  starred?: boolean,
+): Promise<ComposerStarredEntry[]> {
+  const patch: ComposerStarredEntryPatch =
+    typeof text === "string" ? { text, starred: starred === true } : text;
+  const entries = await invoke<ComposerStarredEntryInput[]>("set_composer_starred_entry", patch);
+  return normalizeComposerStarredEntries(entries);
 }
 
 export function onComposerStarredEntriesChanged(
-  callback: (entries: string[]) => void,
+  callback: (entries: ComposerStarredEntry[]) => void,
 ): Promise<UnlistenFn> {
-  return listen<string[]>("composer-starred-entries-changed", (event) => callback(event.payload));
+  return listen<ComposerStarredEntryInput[]>("composer-starred-entries-changed", (event) =>
+    callback(normalizeComposerStarredEntries(event.payload)),
+  );
 }
 
 export interface TerminalSessionAttribution {
@@ -823,12 +837,7 @@ export interface GithubRepoSnapshot {
 
 /** Every mutating action the GitHub view may ask the backend to run. */
 export type GithubItemAction =
-  | "issue.close"
-  | "issue.closeNotPlanned"
-  | "pr.merge"
-  | "pr.squash"
-  | "pr.rebase"
-  | "pr.close";
+  "issue.close" | "issue.closeNotPlanned" | "pr.merge" | "pr.squash" | "pr.rebase" | "pr.close";
 
 /**
  * Read the shared open issue/PR snapshot for the repository containing
@@ -1052,13 +1061,7 @@ export interface ViewerSettings {
 
 /** Palette tokens offered for the `#123` emphasis. Names, so themes still own the hue. */
 export type GithubNumberColor =
-  | "yellow"
-  | "accent"
-  | "green"
-  | "red"
-  | "primary"
-  | "secondary"
-  | "muted";
+  "yellow" | "accent" | "green" | "red" | "primary" | "secondary" | "muted";
 
 export interface GithubSettings {
   /** Tab shown when the view first mounts. */

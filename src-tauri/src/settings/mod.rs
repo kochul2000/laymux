@@ -305,9 +305,11 @@ pub fn update_settings(
 }
 
 pub(crate) const COMPOSER_STARRED_ENTRIES_FULL_ERROR: &str = "Composer starred entry limit reached";
+pub(crate) const COMPOSER_STARRED_ENTRY_DUPLICATE_ERROR: &str =
+    "Composer starred entry already exists";
 
 pub(crate) struct ComposerStarredSnapshot {
-    pub entries: Option<Vec<String>>,
+    pub entries: Option<Vec<ComposerStarredEntry>>,
     pub revision: u64,
 }
 
@@ -325,22 +327,41 @@ pub(crate) fn composer_starred_snapshot(
 }
 
 pub fn update_composer_starred_entry(
-    text: &str,
+    value: &str,
     starred: bool,
-    committed: impl FnOnce(&[String]),
-) -> Result<Vec<String>, String> {
-    let snapshot = update_composer_starred_entry_snapshot(text, starred, committed)?;
+    label: Option<&str>,
+    send: Option<bool>,
+    previous_value: Option<&str>,
+    committed: impl FnOnce(&[ComposerStarredEntry]),
+) -> Result<Vec<ComposerStarredEntry>, String> {
+    let snapshot = update_composer_starred_entry_snapshot(
+        value,
+        starred,
+        label,
+        send,
+        previous_value,
+        committed,
+    )?;
     Ok(snapshot.entries.unwrap_or_default())
 }
 
 pub(crate) fn update_composer_starred_entry_snapshot(
-    text: &str,
+    value: &str,
     starred: bool,
-    committed: impl FnOnce(&[String]),
+    label: Option<&str>,
+    send: Option<bool>,
+    previous_value: Option<&str>,
+    committed: impl FnOnce(&[ComposerStarredEntry]),
 ) -> Result<ComposerStarredSnapshot, String> {
     let _guard = COMPOSER_STAR_UPDATE_LOCK.lock_or_err()?;
-    let (entries, changed) =
-        update_composer_starred_entry_at_with_change(&settings_path(), text, starred)?;
+    let (entries, changed) = update_composer_starred_entry_at_with_change(
+        &settings_path(),
+        value,
+        starred,
+        label,
+        send,
+        previous_value,
+    )?;
     let revision = if changed {
         COMPOSER_STAR_REVISION.fetch_add(1, Ordering::SeqCst) + 1
     } else {
@@ -355,59 +376,142 @@ pub(crate) fn update_composer_starred_entry_snapshot(
 
 fn update_composer_starred_entry_at(
     path: &std::path::Path,
-    text: &str,
+    value: &str,
     starred: bool,
-) -> Result<Vec<String>, String> {
-    Ok(update_composer_starred_entry_at_with_change(path, text, starred)?.0)
+    label: Option<&str>,
+    send: Option<bool>,
+    previous_value: Option<&str>,
+) -> Result<Vec<ComposerStarredEntry>, String> {
+    Ok(update_composer_starred_entry_at_with_change(
+        path,
+        value,
+        starred,
+        label,
+        send,
+        previous_value,
+    )?
+    .0)
 }
 
 fn update_composer_starred_entry_at_with_change(
     path: &std::path::Path,
-    text: &str,
+    value: &str,
     starred: bool,
-) -> Result<(Vec<String>, bool), String> {
+    label: Option<&str>,
+    send: Option<bool>,
+    previous_value: Option<&str>,
+) -> Result<(Vec<ComposerStarredEntry>, bool), String> {
     let mut changed = false;
     let settings = update_settings_at(path, |settings| {
         changed = mutate_composer_starred_entries(
             &mut settings.terminal.composer_starred_entries,
-            text,
+            value,
             starred,
+            label,
+            send,
+            previous_value,
         )?;
         Ok(())
     })?;
     Ok((settings.terminal.composer_starred_entries, changed))
 }
 
-pub(crate) fn validate_composer_starred_entry(text: &str) -> Result<(), String> {
-    if text.is_empty() {
+pub(crate) fn validate_composer_starred_entry(value: &str) -> Result<(), String> {
+    if value.is_empty() {
         return Err("Composer starred entry cannot be empty".into());
     }
-    if text.len() > crate::constants::COMPOSER_STARRED_ENTRY_MAX_BYTES {
+    if value.len() > crate::constants::COMPOSER_STARRED_ENTRY_MAX_BYTES {
         return Err("Composer starred entry is too large".into());
     }
     Ok(())
 }
 
-fn mutate_composer_starred_entries(
-    entries: &mut Vec<String>,
-    text: &str,
-    starred: bool,
-) -> Result<bool, String> {
-    if starred {
-        validate_composer_starred_entry(text)?;
-        if entries.iter().any(|entry| entry == text) {
-            return Ok(false);
-        }
-        if entries.len() >= crate::constants::COMPOSER_STARRED_ENTRIES_MAX {
-            return Err(COMPOSER_STARRED_ENTRIES_FULL_ERROR.into());
-        }
-        entries.push(text.to_string());
-        Ok(true)
-    } else {
-        let previous_len = entries.len();
-        entries.retain(|entry| entry != text);
-        Ok(entries.len() != previous_len)
+pub(crate) fn validate_composer_starred_label(label: &str) -> Result<(), String> {
+    if label.len() > crate::constants::COMPOSER_STARRED_ENTRY_LABEL_MAX_BYTES {
+        return Err("Composer starred entry label is too large".into());
     }
+    Ok(())
+}
+
+fn mutate_composer_starred_entries(
+    entries: &mut Vec<ComposerStarredEntry>,
+    value: &str,
+    starred: bool,
+    label: Option<&str>,
+    send: Option<bool>,
+    previous_value: Option<&str>,
+) -> Result<bool, String> {
+    if !starred {
+        let remove_value = previous_value
+            .filter(|text| !text.is_empty())
+            .unwrap_or(value);
+        let previous_len = entries.len();
+        entries.retain(|entry| entry.value != remove_value && entry.value != value);
+        return Ok(entries.len() != previous_len);
+    }
+
+    validate_composer_starred_entry(value)?;
+    if let Some(label) = label {
+        validate_composer_starred_label(label)?;
+    }
+
+    let identity = previous_value
+        .filter(|text| !text.is_empty())
+        .unwrap_or(value);
+    if let Some(index) = entries.iter().position(|entry| entry.value == identity) {
+        if value != identity && entries.iter().any(|entry| entry.value == value) {
+            return Err(COMPOSER_STARRED_ENTRY_DUPLICATE_ERROR.into());
+        }
+        return Ok(apply_composer_starred_metadata(
+            &mut entries[index],
+            value,
+            label,
+            send,
+        ));
+    }
+    if let Some(index) = entries.iter().position(|entry| entry.value == value) {
+        return Ok(apply_composer_starred_metadata(
+            &mut entries[index],
+            value,
+            label,
+            send,
+        ));
+    }
+    if entries.len() >= crate::constants::COMPOSER_STARRED_ENTRIES_MAX {
+        return Err(COMPOSER_STARRED_ENTRIES_FULL_ERROR.into());
+    }
+    entries.push(ComposerStarredEntry {
+        value: value.to_string(),
+        label: label.unwrap_or("").to_string(),
+        send: send.unwrap_or(false),
+    });
+    Ok(true)
+}
+
+fn apply_composer_starred_metadata(
+    entry: &mut ComposerStarredEntry,
+    value: &str,
+    label: Option<&str>,
+    send: Option<bool>,
+) -> bool {
+    let mut changed = false;
+    if entry.value != value {
+        entry.value = value.to_string();
+        changed = true;
+    }
+    if let Some(label) = label {
+        if entry.label != label {
+            entry.label = label.to_string();
+            changed = true;
+        }
+    }
+    if let Some(send) = send {
+        if entry.send != send {
+            entry.send = send;
+            changed = true;
+        }
+    }
+    changed
 }
 
 /// Commit the leniently recovered document only after the user has reviewed
@@ -632,8 +736,9 @@ mod tests {
         stale_frontend.workspaces[0].name = "new workspace checkpoint".into();
         save_settings_to(&path, &stale_frontend).unwrap();
 
-        let entries = update_composer_starred_entry_at(&path, "git status", true).unwrap();
-        assert_eq!(entries, ["git status"]);
+        let entries =
+            update_composer_starred_entry_at(&path, "git status", true, None, None, None).unwrap();
+        assert_eq!(entries, [ComposerStarredEntry::from_value("git status")]);
 
         save_frontend_settings_to(&path, &stale_frontend).unwrap();
         let saved = match load_settings_validated_from(&path) {
@@ -642,38 +747,135 @@ mod tests {
             | SettingsLoadResult::Recovered { settings, .. } => settings,
             SettingsLoadResult::ParseError { error, .. } => panic!("{error}"),
         };
-        assert_eq!(saved.terminal.composer_starred_entries, ["git status"]);
+        assert_eq!(
+            saved.terminal.composer_starred_entries,
+            [ComposerStarredEntry::from_value("git status")]
+        );
         assert_eq!(saved.workspaces[0].name, "new workspace checkpoint");
 
-        let entries = update_composer_starred_entry_at(&path, "git status", false).unwrap();
+        let entries =
+            update_composer_starred_entry_at(&path, "git status", false, None, None, None).unwrap();
         assert!(entries.is_empty());
     }
 
     #[test]
     fn composer_star_validation_rejects_blank_oversized_and_over_capacity_entries() {
         let mut entries = Vec::new();
-        assert!(mutate_composer_starred_entries(&mut entries, "", true).is_err());
+        assert!(mutate_composer_starred_entries(&mut entries, "", true, None, None, None).is_err());
         assert!(mutate_composer_starred_entries(
             &mut entries,
             &"x".repeat(crate::constants::COMPOSER_STARRED_ENTRY_MAX_BYTES + 1),
             true,
+            None,
+            None,
+            None,
         )
         .is_err());
 
         entries.extend(
-            (0..crate::constants::COMPOSER_STARRED_ENTRIES_MAX).map(|index| format!("cmd-{index}")),
+            (0..crate::constants::COMPOSER_STARRED_ENTRIES_MAX)
+                .map(|index| ComposerStarredEntry::from_value(format!("cmd-{index}"))),
         );
-        assert!(mutate_composer_starred_entries(&mut entries, "one-too-many", true).is_err());
+        assert!(mutate_composer_starred_entries(
+            &mut entries,
+            "one-too-many",
+            true,
+            None,
+            None,
+            None
+        )
+        .is_err());
         assert_eq!(
             entries.len(),
             crate::constants::COMPOSER_STARRED_ENTRIES_MAX
         );
 
         let oversized = "x".repeat(crate::constants::COMPOSER_STARRED_ENTRY_MAX_BYTES + 1);
-        let mut invalid_entries = vec![String::new(), oversized.clone()];
-        assert!(mutate_composer_starred_entries(&mut invalid_entries, "", false).is_ok());
-        assert!(mutate_composer_starred_entries(&mut invalid_entries, &oversized, false).is_ok());
+        let mut invalid_entries = vec![
+            ComposerStarredEntry::from_value(""),
+            ComposerStarredEntry::from_value(oversized.clone()),
+        ];
+        assert!(
+            mutate_composer_starred_entries(&mut invalid_entries, "", false, None, None, None)
+                .is_ok()
+        );
+        assert!(mutate_composer_starred_entries(
+            &mut invalid_entries,
+            &oversized,
+            false,
+            None,
+            None,
+            None
+        )
+        .is_ok());
         assert!(invalid_entries.is_empty());
+    }
+
+    #[test]
+    fn composer_star_objects_accept_legacy_strings_and_update_label_send_in_place() {
+        let parsed: Vec<ComposerStarredEntry> =
+            serde_json::from_str(r#"["git status",{"value":"git push","label":"gp","send":true}]"#)
+                .unwrap();
+        assert_eq!(
+            parsed,
+            [
+                ComposerStarredEntry::from_value("git status"),
+                ComposerStarredEntry {
+                    value: "git push".into(),
+                    label: "gp".into(),
+                    send: true,
+                }
+            ]
+        );
+        assert_eq!(
+            serde_json::to_value(&parsed[0]).unwrap(),
+            serde_json::json!({ "value": "git status" })
+        );
+
+        let mut entries = vec![ComposerStarredEntry::from_value("git status")];
+        assert!(mutate_composer_starred_entries(
+            &mut entries,
+            "git pull",
+            true,
+            Some("gpl"),
+            Some(true),
+            Some("git status"),
+        )
+        .unwrap());
+        assert_eq!(
+            entries,
+            [ComposerStarredEntry {
+                value: "git pull".into(),
+                label: "gpl".into(),
+                send: true,
+            }]
+        );
+
+        let oversized_label =
+            "x".repeat(crate::constants::COMPOSER_STARRED_ENTRY_LABEL_MAX_BYTES + 1);
+        assert!(mutate_composer_starred_entries(
+            &mut entries,
+            "git pull",
+            true,
+            Some(oversized_label.as_str()),
+            None,
+            None,
+        )
+        .is_err());
+
+        entries.push(ComposerStarredEntry::from_value("git push"));
+        assert_eq!(
+            mutate_composer_starred_entries(
+                &mut entries,
+                "git push",
+                true,
+                None,
+                None,
+                Some("git pull"),
+            )
+            .unwrap_err(),
+            COMPOSER_STARRED_ENTRY_DUPLICATE_ERROR
+        );
     }
 
     #[test]

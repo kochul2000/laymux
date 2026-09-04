@@ -115,9 +115,10 @@ fn validate_composer_starred_entries(
     let original_len = entries.len();
     let mut seen = HashSet::new();
     entries.retain(|entry| {
-        !entry.is_empty()
-            && entry.len() <= crate::constants::COMPOSER_STARRED_ENTRY_MAX_BYTES
-            && seen.insert(entry.clone())
+        !entry.value.is_empty()
+            && entry.value.len() <= crate::constants::COMPOSER_STARRED_ENTRY_MAX_BYTES
+            && entry.label.len() <= crate::constants::COMPOSER_STARRED_ENTRY_LABEL_MAX_BYTES
+            && seen.insert(entry.value.clone())
     });
     entries.truncate(crate::constants::COMPOSER_STARRED_ENTRIES_MAX);
     if entries.len() != original_len {
@@ -565,13 +566,16 @@ mod tests {
     fn composer_stars_repair_invalid_duplicates_and_capacity_overflow() {
         let mut settings = Settings::default();
         settings.terminal.composer_starred_entries = vec![
-            String::new(),
-            "x".repeat(crate::constants::COMPOSER_STARRED_ENTRY_MAX_BYTES + 1),
-            "keep".into(),
-            "keep".into(),
+            ComposerStarredEntry::from_value(""),
+            ComposerStarredEntry::from_value(
+                "x".repeat(crate::constants::COMPOSER_STARRED_ENTRY_MAX_BYTES + 1),
+            ),
+            ComposerStarredEntry::from_value("keep"),
+            ComposerStarredEntry::from_value("keep"),
         ];
         settings.terminal.composer_starred_entries.extend(
-            (0..crate::constants::COMPOSER_STARRED_ENTRIES_MAX).map(|index| format!("cmd-{index}")),
+            (0..crate::constants::COMPOSER_STARRED_ENTRIES_MAX)
+                .map(|index| ComposerStarredEntry::from_value(format!("cmd-{index}"))),
         );
 
         let warnings = validate_and_repair(&mut settings);
@@ -580,10 +584,13 @@ mod tests {
             settings.terminal.composer_starred_entries.len(),
             crate::constants::COMPOSER_STARRED_ENTRIES_MAX
         );
-        assert_eq!(settings.terminal.composer_starred_entries[0], "keep");
+        assert_eq!(
+            settings.terminal.composer_starred_entries[0],
+            ComposerStarredEntry::from_value("keep")
+        );
         assert_eq!(
             settings.terminal.composer_starred_entries.last().unwrap(),
-            "cmd-198"
+            &ComposerStarredEntry::from_value("cmd-198")
         );
         assert!(warnings.iter().any(|warning| {
             warning.path == "terminal.composerStarredEntries" && warning.repaired

@@ -1,9 +1,12 @@
 import { useState } from "react";
-import { cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { TerminalInputComposer, type TerminalInputComposerLabels } from "./TerminalInputComposer";
-import type { InputMode } from "@/lib/terminal-input-composer-state";
+import {
+  COMPOSER_STARRED_EDITOR_LONG_PRESS_MS,
+  type InputMode,
+} from "@/lib/terminal-input-composer-state";
 
 const labels: TerminalInputComposerLabels = {
   editor: "Terminal input",
@@ -12,6 +15,13 @@ const labels: TerminalInputComposerLabels = {
   autocomplete: "Input suggestions",
   star: "Star",
   unstar: "Unstar",
+  starredEditor: "Edit starred input",
+  starredLabel: "Label",
+  starredValue: "Value",
+  starredSend: "Send on pick",
+  starredSendDesc: "Selecting this suggestion also submits it.",
+  starredSave: "Save",
+  starredCancel: "Cancel",
 };
 
 function renderComposer(
@@ -713,6 +723,53 @@ describe("TerminalInputComposer", () => {
       fireEvent.mouseDown(screen.getByText("git checkout"));
       expect(onTextChange).toHaveBeenCalledWith("git checkout");
       expect(screen.queryByTestId("composer-autocomplete")).not.toBeInTheDocument();
+    });
+
+    it("sends after filling when the starred suggestion is marked to send", () => {
+      const onSend = vi.fn();
+      const onTextChange = vi.fn();
+      renderComposer({
+        text: "gs",
+        autocompleteEnabled: true,
+        starredEntries: [{ value: "git status", label: "gs", send: true }],
+        onSend,
+        onTextChange,
+      });
+
+      fireEvent.mouseDown(screen.getByRole("option", { name: /gs/ }));
+      expect(onTextChange).toHaveBeenCalledWith("git status");
+      expect(onSend).toHaveBeenCalledTimes(1);
+    });
+
+    it("opens the starred editor on a long press instead of picking", () => {
+      vi.useFakeTimers();
+      try {
+        const onTextChange = vi.fn();
+        const onUpsertStarredEntry = vi.fn();
+        renderComposer({
+          text: "git",
+          autocompleteEnabled: true,
+          history,
+          onTextChange,
+          onUpsertStarredEntry,
+        });
+        const option = screen.getByTestId("composer-autocomplete-option-0");
+        fireEvent.pointerDown(option, {
+          pointerId: 1,
+          clientX: 10,
+          clientY: 10,
+          button: 0,
+        });
+        act(() => {
+          vi.advanceTimersByTime(COMPOSER_STARRED_EDITOR_LONG_PRESS_MS);
+        });
+        expect(screen.getByTestId("composer-starred-editor")).toBeInTheDocument();
+        expect(onTextChange).not.toHaveBeenCalled();
+        fireEvent.pointerUp(option, { pointerId: 1, clientX: 10, clientY: 10, button: 0 });
+        expect(onTextChange).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("toggles a persistent star without selecting or closing the suggestion", () => {

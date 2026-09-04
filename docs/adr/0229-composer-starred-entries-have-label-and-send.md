@@ -1,6 +1,6 @@
 # 0229. Composer 별표 항목은 라벨·전송 여부를 가진다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-04
 - Source: 사용자 요구(자동완성 선택에 Enter/Send를 포함, Settings에서 항목별 라벨·값·전송 편집, 자동완성 롱클릭으로 같은 편집기 열기) · [ADR-0226](0226-composer-stars-are-host-global-persistent-state.md) · [ADR-0034](0034-single-send-terminal-composer.md) · [ADR-0219](0219-android-back-defers-to-remote-ui-stack.md) · [data-flow §8.8](../architecture/data-flow.md)
 - Amends: [ADR-0226](0226-composer-stars-are-host-global-persistent-state.md)의 원소 타입 `string[]`과 exact-query 제외 문장, 그리고 “별표 버튼만 영속 복사한다”는 진입점 문장만 대체한다. 호스트 전역 소유권·전용 mutation·patch read-only·checkpoint 보존·lease/revision 조회는 유지한다. [ADR-0219](0219-android-back-defers-to-remote-ui-stack.md)의 `dismissTopLayer()` 순서에 별표 편집기를 FileViewer와 drawer 하위 화면 사이에 삽입한다.

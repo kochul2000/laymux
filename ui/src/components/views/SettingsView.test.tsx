@@ -103,11 +103,32 @@ describe("SettingsView", () => {
       if (cmd === "set_composer_starred_entry") {
         const text = String(args?.text ?? "");
         const entries = useSettingsStore.getState().terminal.composerStarredEntries;
-        return Promise.resolve(
-          args?.starred
-            ? [...new Set([...entries, text])]
-            : entries.filter((entry) => entry !== text),
-        );
+        if (!args?.starred) {
+          return Promise.resolve(entries.filter((entry) => entry.value !== text));
+        }
+        const previousText = typeof args?.previousText === "string" ? args.previousText : undefined;
+        const next = {
+          value: text,
+          label: typeof args?.label === "string" ? args.label : "",
+          send: args?.send === true,
+        };
+        const identity = previousText || text;
+        const index = entries.findIndex((entry) => entry.value === identity);
+        if (index >= 0) {
+          return Promise.resolve(
+            entries.map((entry, i) =>
+              i === index
+                ? {
+                    value: text,
+                    label: typeof args?.label === "string" ? args.label : entry.label,
+                    send: typeof args?.send === "boolean" ? args.send : entry.send,
+                  }
+                : entry,
+            ),
+          );
+        }
+        if (entries.some((entry) => entry.value === text)) return Promise.resolve(entries);
+        return Promise.resolve([...entries, next]);
       }
       if (cmd === "cloud_connect_start") {
         mockCloudStatus = { connected: false, instanceId: "instance-2", lastError: null };
@@ -1381,14 +1402,36 @@ describe("SettingsView", () => {
     await user.click(screen.getByTestId("composer-starred-entry-add"));
     await waitFor(() =>
       expect(useSettingsStore.getState().terminal.composerStarredEntries).toEqual([
-        "git status",
-        "git push",
+        { value: "git status", label: "", send: false },
+        { value: "git push", label: "", send: false },
       ]),
     );
 
     await user.click(screen.getByTestId("composer-starred-entry-remove-0"));
     await waitFor(() =>
-      expect(useSettingsStore.getState().terminal.composerStarredEntries).toEqual(["git push"]),
+      expect(useSettingsStore.getState().terminal.composerStarredEntries).toEqual([
+        { value: "git push", label: "", send: false },
+      ]),
+    );
+  });
+
+  it("edits a starred Composer entry label, value, and send flag immediately", async () => {
+    const user = userEvent.setup();
+    useSettingsStore.getState().setTerminal({ composerStarredEntries: ["git status"] });
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-terminal"));
+    await user.click(screen.getByTestId("composer-starred-entry-edit-0"));
+    const label = screen.getByTestId("composer-starred-editor-label");
+    await user.clear(label);
+    await user.type(label, "gs");
+    await user.click(screen.getByTestId("composer-starred-editor-send"));
+    await user.click(screen.getByTestId("composer-starred-editor-save"));
+
+    await waitFor(() =>
+      expect(useSettingsStore.getState().terminal.composerStarredEntries).toEqual([
+        { value: "git status", label: "gs", send: true },
+      ]),
     );
   });
 

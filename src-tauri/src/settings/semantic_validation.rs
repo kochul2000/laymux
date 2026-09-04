@@ -351,26 +351,34 @@ fn validate_terminal(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
         .enumerate()
     {
         let path = format!("/terminal/composerStarredEntries/{index}");
-        if entry.is_empty() {
+        if entry.value.is_empty() {
             issue(
                 issues,
                 "required",
-                path,
+                format!("{path}/value"),
                 "Composer 별표는 비어 있을 수 없습니다.".into(),
             );
-        } else if entry.len() > crate::constants::COMPOSER_STARRED_ENTRY_MAX_BYTES {
+        } else if entry.value.len() > crate::constants::COMPOSER_STARRED_ENTRY_MAX_BYTES {
             issue(
                 issues,
                 "too_large",
-                path,
+                format!("{path}/value"),
                 "Composer 별표가 너무 큽니다.".into(),
             );
-        } else if !starred.insert(entry) {
+        } else if !starred.insert(entry.value.as_str()) {
             issue(
                 issues,
                 "duplicate",
-                path,
+                format!("{path}/value"),
                 "Composer 별표가 중복됩니다.".into(),
+            );
+        }
+        if entry.label.len() > crate::constants::COMPOSER_STARRED_ENTRY_LABEL_MAX_BYTES {
+            issue(
+                issues,
+                "too_large",
+                format!("{path}/label"),
+                "Composer 별표 라벨이 너무 깁니다.".into(),
             );
         }
     }

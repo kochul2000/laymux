@@ -211,13 +211,23 @@ pub fn save_settings(
 pub fn set_composer_starred_entry(
     text: String,
     starred: bool,
+    label: Option<String>,
+    send: Option<bool>,
+    previous_text: Option<String>,
     app: AppHandle,
-) -> Result<Vec<String>, String> {
-    crate::settings::update_composer_starred_entry(&text, starred, |entries| {
-        if let Err(error) = app.emit(EVENT_COMPOSER_STARRED_ENTRIES_CHANGED, entries) {
-            tracing::warn!(%error, "failed to emit composer starred entries change");
-        }
-    })
+) -> Result<Vec<crate::settings::ComposerStarredEntry>, String> {
+    crate::settings::update_composer_starred_entry(
+        &text,
+        starred,
+        label.as_deref(),
+        send,
+        previous_text.as_deref(),
+        |entries| {
+            if let Err(error) = app.emit(EVENT_COMPOSER_STARRED_ENTRIES_CHANGED, entries) {
+                tracing::warn!(%error, "failed to emit composer starred entries change");
+            }
+        },
+    )
 }
 
 fn reconcile_persistent_remote_runtime(

@@ -26,7 +26,7 @@ type RemoteState = {
   focuses: FocusRequest[];
   navigations: NavigationRequest[];
   claims: Array<{ clientName?: string; claimReservationId?: string }>;
-  starredEntries: string[];
+  starredEntries: Array<{ value: string; label: string; send: boolean }>;
   composerStarReads: ComposerStarRead[];
   starRevision: number;
 };
@@ -493,17 +493,23 @@ async function installRemotePage(
     claimRetryAfterMs?: number;
     claimReservationTtlMs?: number;
     width?: number;
-    starredEntries?: string[];
+    starredEntries?: Array<string | { value: string; label?: string; send?: boolean }>;
     holdInitialComposerStars?: boolean;
   },
 ): Promise<RemoteState> {
+  const toStarred = (
+    entry: string | { value: string; label?: string; send?: boolean },
+  ): { value: string; label: string; send: boolean } =>
+    typeof entry === "string"
+      ? { value: entry, label: "", send: false }
+      : { value: entry.value, label: entry.label ?? "", send: entry.send === true };
   const state: RemoteState = {
     inputs: [],
     writes: [],
     focuses: [],
     navigations: [],
     claims: [],
-    starredEntries: [...(options.starredEntries ?? [])],
+    starredEntries: (options.starredEntries ?? []).map(toStarred),
     composerStarReads: [],
     starRevision: 0,
   };
@@ -550,14 +556,32 @@ async function installRemotePage(
     if (url.pathname === "/remote/v1/composer/starred") {
       if (route.request().method() === "POST") {
         const body = route.request().postDataJSON() as {
-          text: string;
+          value?: string;
+          text?: string;
           starred: boolean;
+          label?: string;
+          send?: boolean;
+          previousValue?: string;
         };
-        const nextEntries = body.starred
-          ? [...new Set([...state.starredEntries, body.text])]
-          : state.starredEntries.filter((entry) => entry !== body.text);
-        if (nextEntries.join("\0") !== state.starredEntries.join("\0")) {
-          state.starredEntries = nextEntries;
+        const value = body.value || body.text || "";
+        const previous = [...state.starredEntries];
+        if (!body.starred) {
+          state.starredEntries = state.starredEntries.filter((entry) => entry.value !== value);
+        } else if (value) {
+          const identity = body.previousValue || value;
+          const existing = state.starredEntries.find((entry) => entry.value === identity);
+          const next = {
+            value,
+            label: body.label ?? existing?.label ?? "",
+            send: body.send ?? existing?.send ?? false,
+          };
+          const index = state.starredEntries.findIndex((entry) => entry.value === identity);
+          if (index >= 0) state.starredEntries[index] = next;
+          else if (!state.starredEntries.some((entry) => entry.value === value)) {
+            state.starredEntries.push(next);
+          }
+        }
+        if (JSON.stringify(previous) !== JSON.stringify(state.starredEntries)) {
           state.starRevision += 1;
         }
         await route.fulfill({
@@ -1911,6 +1935,37 @@ test("as-you-type autocomplete suggests prefixes; plain Enter still sends, arrow
   await expect(editor).toHaveValue("echo two");
 });
 
+test("starred autocomplete can send on pick and long-press opens the editor", async ({ page }) => {
+  const remote = await installRemotePage(page, {
+    coarse: false,
+    width: 1280,
+    starredEntries: [{ value: "git status", label: "gs", send: true }],
+  });
+  await connect(page);
+  await enterComposerMode(page);
+  const editor = page.locator("#composerInput");
+  const autocomplete = page.locator("#composerAutocompleteList");
+
+  await editor.fill("gs");
+  await expect(autocomplete).toBeVisible();
+  await expect(autocomplete.locator('[role="option"]')).toContainText(["gs"]);
+  await autocomplete.locator('[role="option"]').first().dispatchEvent("pointerdown");
+  await autocomplete.locator('[role="option"]').first().dispatchEvent("pointerup");
+  await expect.poll(() => remote.inputs.length).toBe(1);
+  expect(remote.inputs[0].body.text).toBe("git status");
+  expect(remote.inputs[0].body.submit).toBe(true);
+
+  await editor.fill("gs");
+  await expect(autocomplete).toBeVisible();
+  await autocomplete.locator('[role="option"]').first().dispatchEvent("pointerdown");
+  await page.waitForTimeout(550);
+  await expect(page.locator("#composerStarEditorScrim")).toBeVisible();
+  await expect(page.locator("#composerStarEditorLabel")).toHaveValue("gs");
+  await expect(page.locator("#composerStarEditorValue")).toHaveValue("git status");
+  await expect(page.locator("#composerStarEditorSend")).toBeChecked();
+  expect(remote.inputs).toHaveLength(1);
+});
+
 test("Remote autocomplete reads and toggles the host-global persistent star list", async ({
   page,
 }) => {
@@ -1936,7 +1991,9 @@ test("Remote autocomplete reads and toggles the host-global persistent star list
   await sendComposerLine(page, remote, editor, "echo runtime", 1);
   await editor.fill("ec");
   await dropdown.getByRole("button", { name: "Star: echo runtime" }).click();
-  await expect.poll(() => remote.starredEntries).toEqual(["echo runtime"]);
+  await expect
+    .poll(() => remote.starredEntries)
+    .toEqual([{ value: "echo runtime", label: "", send: false }]);
 });
 
 test("Remote refreshes Desktop star changes and ignores a stale earlier read", async ({ page }) => {
@@ -1950,7 +2007,7 @@ test("Remote refreshes Desktop star changes and ignores a stale earlier read", a
   await enterComposerMode(page);
   await expect.poll(() => remote.composerStarReads.length).toBe(1);
 
-  remote.starredEntries = ["echo desktop"];
+  remote.starredEntries = [{ value: "echo desktop", label: "", send: false }];
   remote.starRevision += 1;
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
 

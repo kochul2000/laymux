@@ -11,11 +11,19 @@ import {
   readComposerHeight,
   selectComposerHistoryEntries,
   selectComposerAutocompleteSuggestions,
+  composerSuggestionDisplay,
+  isComposerStarred,
+  normalizeComposerStarredEntries,
+  COMPOSER_STARRED_EDITOR_LONG_PRESS_MS,
   DEFAULT_COMPOSER_HISTORY_POPUP_ITEMS,
   DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS,
   writeComposerHeight,
+  type ComposerStarredEntry,
+  type ComposerStarredEntryInput,
+  type ComposerAutocompleteSuggestion,
   type InputMode,
 } from "@/lib/terminal-input-composer-state";
+import { ComposerStarredEntryEditor } from "@/components/ui/ComposerStarredEntryEditor";
 import { StarIcon } from "@/components/ui/icons";
 
 export interface TerminalInputComposerLabels {
@@ -27,6 +35,13 @@ export interface TerminalInputComposerLabels {
   autocomplete: string;
   star: string;
   unstar: string;
+  starredEditor: string;
+  starredLabel: string;
+  starredValue: string;
+  starredSend: string;
+  starredSendDesc: string;
+  starredSave: string;
+  starredCancel: string;
 }
 
 export interface TerminalInputComposerProps {
@@ -97,9 +112,10 @@ export interface TerminalInputComposerProps {
    * appears; Tab (or arrows + Enter) accepts one.
    */
   autocompleteEnabled?: boolean;
-  /** Host-global explicitly persisted entries (ADR-0226). */
-  starredEntries?: readonly string[];
+  /** Host-global explicitly persisted entries (ADR-0226, ADR-0229). */
+  starredEntries?: readonly ComposerStarredEntryInput[];
   onToggleStar?: (entry: string, starred: boolean) => void;
+  onUpsertStarredEntry?: (entry: ComposerStarredEntry, previousValue?: string) => void;
   /** Maximum number of suggestions shown in the autocomplete dropdown. */
   maxAutocompleteItems?: number;
   className?: string;
@@ -147,6 +163,7 @@ export function TerminalInputComposer({
   autocompleteEnabled = false,
   starredEntries = [],
   onToggleStar,
+  onUpsertStarredEntry,
   maxAutocompleteItems = DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS,
   className,
   testId,
@@ -234,13 +251,34 @@ export function TerminalInputComposer({
     setAutocompleteDismissed(true);
     setAutocompleteIndex(-1);
   };
-  const commitAutocompleteEntry = (entry: string | undefined) => {
+  const commitAutocompleteEntry = (suggestion: ComposerAutocompleteSuggestion | undefined) => {
     dismissAutocomplete();
-    if (entry != null) onTextChange(entry);
+    if (suggestion == null) return;
+    onTextChange(suggestion.value);
+    if (suggestion.send && !actionDisabled) onSend();
+  };
+  const [starredEditor, setStarredEditor] = useState<{
+    previousValue?: string;
+    entry: ComposerStarredEntry;
+  } | null>(null);
+  const openStarredEditor = (suggestion: ComposerAutocompleteSuggestion) => {
+    if (!onUpsertStarredEntry) return;
+    const existing = normalizeComposerStarredEntries(starredEntries).find(
+      (entry) => entry.value === suggestion.value,
+    );
+    dismissAutocomplete();
+    setStarredEditor({
+      previousValue: existing?.value,
+      entry: existing ?? {
+        value: suggestion.value,
+        label: suggestion.label,
+        send: suggestion.send,
+      },
+    });
   };
 
   const renderStarButton = (entry: string) => {
-    const starred = starredEntries.includes(entry);
+    const starred = isComposerStarred(starredEntries, entry);
     const action = starred ? labels.unstar : labels.star;
     if (!onToggleStar) return null;
     return (
@@ -535,10 +573,10 @@ export function TerminalInputComposer({
             color: "var(--text-primary)",
           }}
         >
-          {autocompleteSuggestions.map((entry, index) => (
+          {autocompleteSuggestions.map((suggestion, index) => (
             <li
               // Post-dedupe entries are unique, so the value is a stable key.
-              key={`${index}-${entry}`}
+              key={`${index}-${suggestion.value}`}
               role="none"
               className="terminal-input-composer-history-item flex items-center gap-1 rounded"
               style={
@@ -552,16 +590,54 @@ export function TerminalInputComposer({
                 data-testid={childTestId(`autocomplete-option-${index}`)}
                 role="option"
                 aria-selected={index === activeAutocompleteIndex}
-                title={entry}
+                title={suggestion.value}
                 className="min-w-0 flex-1 cursor-pointer truncate whitespace-nowrap px-2 py-1 text-left"
                 onMouseDown={(event) => {
                   event.preventDefault();
-                  commitAutocompleteEntry(entry);
+                  if (!onUpsertStarredEntry) commitAutocompleteEntry(suggestion);
+                }}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  if (!onUpsertStarredEntry) return;
+                  const target = event.currentTarget;
+                  const startX = event.clientX;
+                  const startY = event.clientY;
+                  let fired = false;
+                  const timer = window.setTimeout(() => {
+                    fired = true;
+                    openStarredEditor(suggestion);
+                  }, COMPOSER_STARRED_EDITOR_LONG_PRESS_MS);
+                  const stop = () => {
+                    window.clearTimeout(timer);
+                    target.removeEventListener("pointerup", onUp);
+                    target.removeEventListener("pointercancel", onCancel);
+                    target.removeEventListener("pointermove", onMove);
+                  };
+                  const onMove = (move: globalThis.PointerEvent) => {
+                    if (Math.hypot(move.clientX - startX, move.clientY - startY) > 8) stop();
+                  };
+                  const onUp = () => {
+                    stop();
+                    if (!fired) commitAutocompleteEntry(suggestion);
+                  };
+                  const onCancel = () => stop();
+                  target.addEventListener("pointerup", onUp);
+                  target.addEventListener("pointercancel", onCancel);
+                  target.addEventListener("pointermove", onMove);
                 }}
               >
-                {entry}
+                {composerSuggestionDisplay(suggestion)}
+                {suggestion.send ? (
+                  <span
+                    aria-hidden="true"
+                    className="ml-1"
+                    style={{ color: "var(--text-secondary)" }}
+                  >
+                    ↵
+                  </span>
+                ) : null}
               </button>
-              {renderStarButton(entry)}
+              {renderStarButton(suggestion.value)}
             </li>
           ))}
         </ul>
@@ -652,6 +728,25 @@ export function TerminalInputComposer({
         }}
         onKeyDown={handleEditorKeyDown}
       />
+      {starredEditor ? (
+        <ComposerStarredEntryEditor
+          title={labels.starredEditor}
+          initial={starredEditor.entry}
+          labels={{
+            label: labels.starredLabel,
+            value: labels.starredValue,
+            send: labels.starredSend,
+            sendDesc: labels.starredSendDesc,
+            save: labels.starredSave,
+            cancel: labels.starredCancel,
+          }}
+          onClose={() => setStarredEditor(null)}
+          onSave={(entry) => {
+            onUpsertStarredEntry?.(entry, starredEditor.previousValue);
+            setStarredEditor(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
