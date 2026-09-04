@@ -364,6 +364,18 @@ describe("patched xterm composition keypress reconciliation", () => {
     expect(emitted.join("")).toBe("수정을 해야 할거 아냐");
   });
 
+  it("keeps consecutive generations separate when the next composition replaces the textarea", async () => {
+    const { emitted, textarea } = openTerminal();
+
+    startComposition(textarea, "가");
+    endComposition(textarea, "가");
+    startComposition(textarea, "나");
+    endComposition(textarea, "나");
+    await flushEventLoop();
+
+    expect(emitted.join("")).toBe("가나");
+  });
+
   it("flushes input-first reconciliation once before an interleaved ordinary keydown", async () => {
     const { emitted, textarea } = openTerminal();
     startComposition(textarea, "한");

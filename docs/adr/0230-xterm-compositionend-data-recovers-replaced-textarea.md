@@ -19,7 +19,8 @@ xterm 6.0.0의 숨은 helper textarea에는 이미 PTY로 보낸 IME 확정 문�
 
 - CoreBrowserTerminal의 `compositionend` listener는 이벤트의 `data`를 CompositionHelper에 넘긴다. helper는 delayed finalizer가 만드는 generation record에 그 값을 함께 저장한다.
 - flush 시 helper textarea가 계속 focus를 소유하면 textarea slice와 `compositionend.data`를 기존 양방향 포함·suffix-prefix merge로 먼저 합친다. 낡은 시작점이 만든 빈 값이나 확정값의 suffix는 전체 확정값으로 복구되고, propagation 사이 들어온 비조합 suffix는 유지된다. 이후 ADR-0093의 input·keypress observation fold를 그대로 적용한다.
-- flush 전에 helper가 blur됐으면 `compositionend.data`를 사용하지 않고 기존 slice를 유지한다. 이 경계는 issue #555의 TerminalView blur fallback이 소유하므로 xterm이 같은 값을 함께 복구해 이중 전송하지 않는다.
+- 새 `compositionstart`는 직전 pending generation의 textarea 문자열 자체를 스냅샷한다. 길이만 고정한 뒤 flush에서 live textarea를 다시 읽지 않으므로 다음 조합이 전체 값을 교체해도 이전 세대에 새 문자열이 섞이지 않는다.
+- CoreBrowserTerminal의 blur handler는 textarea를 비우기 전에 현재 조합을 event-data 비허용 상태로 만들고 모든 pending generation을 취소한다. 취소 세대는 slice·event data·input/keypress 관측을 모두 내보내지 않으며, 단순 refocus로 되살리지 않고 새 `compositionstart`만 새 세대를 허용한다. 이 경계는 issue #555의 TerminalView blur fallback이 소유하므로 `compositionend → input → blur → refocus → delayed flush`에서도 xterm이 같은 값을 함께 복구해 이중 전송하지 않는다.
 - `compositionend.data`가 비었거나 없는 합성 호출은 기존 textarea slice로 떨어진다. `compositionend` 없이 keydown이 호출하는 immediate finalize는 기존 범위 slice를 유지한다.
 - xterm 6.0.0 ESM·CommonJS exact bundle patch와 설치 계약 테스트를 함께 갱신한다. 실제 설치된 `Terminal` 회귀 테스트가 잔여 textarea → 전체 교체 → 확정 순서를 `onData`까지 고정한다.
 

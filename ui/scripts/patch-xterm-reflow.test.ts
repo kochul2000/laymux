@@ -23,7 +23,17 @@ const commonJsCompositionKeypressOwner =
 const compositionGenerationFinalizer =
   "_flushCompositionGeneration(t){if(t.done)return;for(;this._pendingCompositionGenerations.length>0;)";
 const compositionObservationList = "observations:[]";
-const compositionEndCommitData = "committed:e";
+const compositionEndCommitData = "committed:this._compositionEndDataAllowed?e:void 0";
+const compositionEndBlurInvalidation =
+  "blur(){this._compositionEndDataAllowed=!1;for(const t of this._pendingCompositionGenerations)t.cancelled=!0}";
+const compositionEndDataEnabledAtStart = "this._compositionEndDataAllowed=!0";
+const compositionBlurHandoff =
+  '_handleTextAreaBlur(){this._compositionHelper.blur(),this.textarea.value=""';
+const compositionCancelledFlush = "if(e.cancelled){if(e===t)break;continue}";
+const compositionGenerationSnapshot =
+  "t&&t.valueSnapshot===null&&(t.valueSnapshot=this._textarea.value)";
+const compositionSnapshotCandidate =
+  "s=e.valueSnapshot===null?this._textarea.value:e.valueSnapshot,r=s.substring(i)";
 const compositionCandidateFirstFold =
   'let n=this._textarea.ownerDocument.activeElement===this._textarea?this._mergeCompositionData(r,e.committed||""):r,o="",l=!1;for(const t of e.observations)l?n=this._mergeCompositionData(n,t,!0):n.includes(t)?(o&&(n=this._mergeCompositionData(n,o)),l=!0):o=this._mergeCompositionData(t,o);l||!o||(n=this._mergeCompositionData(n,o))';
 const compositionAnchoredTieOrder = "i>s||o&&i===s?t+e.substring(i):e+t.substring(s)";
@@ -109,6 +119,18 @@ describe("pinned xterm bundle patches", () => {
     expect(commonJsSource).toContain(compositionObservationList);
     expect(moduleSource).toContain(compositionEndCommitData);
     expect(commonJsSource).toContain(compositionEndCommitData);
+    expect(moduleSource).toContain(compositionEndBlurInvalidation);
+    expect(commonJsSource).toContain(compositionEndBlurInvalidation);
+    expect(moduleSource).toContain(compositionEndDataEnabledAtStart);
+    expect(commonJsSource).toContain(compositionEndDataEnabledAtStart);
+    expect(moduleSource).toContain(compositionBlurHandoff);
+    expect(commonJsSource).toContain(compositionBlurHandoff);
+    expect(moduleSource).toContain(compositionCancelledFlush);
+    expect(commonJsSource).toContain(compositionCancelledFlush);
+    expect(moduleSource).toContain(compositionGenerationSnapshot);
+    expect(commonJsSource).toContain(compositionGenerationSnapshot);
+    expect(moduleSource).toContain(compositionSnapshotCandidate);
+    expect(commonJsSource).toContain(compositionSnapshotCandidate);
     expect(moduleSource).toContain(compositionCandidateFirstFold);
     expect(commonJsSource).toContain(compositionCandidateFirstFold);
     expect(moduleSource).toContain(moduleCompositionEndDataHandoff);

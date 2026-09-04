@@ -257,6 +257,50 @@ describe("xterm blur contract during composition (issue #555)", () => {
     expect(data).toEqual([]);
     expect(readPendingCompositionSend(terminal)?.pending).toBe(false);
   });
+
+  it("does not recover event data after blur even if the helper is refocused", async () => {
+    const { terminal, helper } = mountTerminal();
+    const data: string[] = [];
+    terminal.onData((d) => data.push(d));
+
+    helper.focus();
+    helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    helper.value = "\uac00";
+    helper.selectionStart = 1;
+    helper.selectionEnd = 1;
+    helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uac00" }));
+    helper.dispatchEvent(new Event("input"));
+    helper.dispatchEvent(new CompositionEvent("compositionend", { data: "\uac00" }));
+
+    helper.blur();
+    helper.focus();
+    await flushFinalizer();
+
+    expect(data).toEqual([]);
+  });
+
+  it("does not emit a queued input observation after blur fallback takes ownership", async () => {
+    const { terminal, helper } = mountTerminal();
+    const data: string[] = [];
+    terminal.onData((d) => data.push(d));
+
+    helper.focus();
+    helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    helper.value = "\uac00";
+    helper.selectionStart = 1;
+    helper.selectionEnd = 1;
+    helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uac00" }));
+    helper.dispatchEvent(new CompositionEvent("compositionend", { data: "\uac00" }));
+    helper.dispatchEvent(
+      new InputEvent("input", { data: "\uac00", inputType: "insertText", bubbles: true }),
+    );
+
+    helper.blur();
+    await flushFinalizer();
+
+    expect(data).toEqual([]);
+  });
+
   it("does send it when compositionend comes before the blur", async () => {
     // The ordering where xterm really does send. The controller stays out of this path
     // by reading xterm's pending flag — NOT by its own phase, which is
