@@ -246,9 +246,9 @@ describe("selectComposerAutocompleteSuggestions (issue #505)", () => {
   it("matches a starred label prefix as well as the insert value", () => {
     expect(
       selectComposerAutocompleteSuggestions(["git status"], "gs", 8, [
-        { value: "git status", label: "gs", send: false },
+        { value: "git status", label: " gs ", send: false },
       ]),
-    ).toEqual([{ value: "git status", label: "gs", send: false }]);
+    ).toEqual([{ value: "git status", label: " gs ", send: false }]);
   });
 
   it("returns nothing when no entry starts with the query", () => {

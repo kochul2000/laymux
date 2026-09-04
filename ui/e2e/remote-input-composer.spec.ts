@@ -1939,7 +1939,7 @@ test("starred autocomplete can send on pick and long-press opens the editor", as
   const remote = await installRemotePage(page, {
     coarse: false,
     width: 1280,
-    starredEntries: [{ value: "git status", label: "gs", send: true }],
+    starredEntries: [{ value: "git status", label: " gs ", send: true }],
   });
   await connect(page);
   await enterComposerMode(page);
@@ -1959,7 +1959,7 @@ test("starred autocomplete can send on pick and long-press opens the editor", as
   await autocomplete.locator('[role="option"]').first().dispatchEvent("pointerdown");
   await page.waitForTimeout(550);
   await expect(page.locator("#composerStarEditorScrim")).toBeVisible();
-  await expect(page.locator("#composerStarEditorLabel")).toHaveValue("gs");
+  await expect(page.locator("#composerStarEditorLabel")).toHaveValue(" gs ");
   await expect(page.locator("#composerStarEditorValue")).toHaveValue("git status");
   await expect(page.locator("#composerStarEditorSend")).toBeChecked();
   expect(remote.inputs).toHaveLength(1);
@@ -1969,6 +1969,8 @@ test("starred autocomplete can send on pick and long-press opens the editor", as
   await expect
     .poll(() => remote.starredEntries)
     .toEqual([{ value: "git status ", label: "gs", send: true }]);
+  await expect(page.locator("#composerStarEditorScrim")).toBeHidden();
+  await expect(editor).toBeFocused();
 });
 
 test("Remote autocomplete reads and toggles the host-global persistent star list", async ({

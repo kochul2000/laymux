@@ -303,7 +303,9 @@ export function selectComposerAutocompleteSuggestions(
     if (!value || seen.has(value)) return false;
     if (value === query && !send) return false;
     const valueMatch = value.toLowerCase().startsWith(needle);
-    const labelMatch = label.length > 0 && label.toLowerCase().startsWith(needle);
+    const normalizedLabel = label.trim();
+    const labelMatch =
+      normalizedLabel.length > 0 && normalizedLabel.toLowerCase().startsWith(needle);
     if (!valueMatch && !labelMatch) return false;
     seen.add(value);
     entries.push({ value, label, send });

@@ -1682,9 +1682,8 @@ mod tests {
         assert!(html.contains("function selectComposerHistoryEntries(history, max"));
         assert!(html.contains("function selectComposerAutocompleteSuggestions("));
         assert!(html.contains("if (value === query && !send) return false;"));
-        assert!(html.contains(
-            "const labelMatch = label.length > 0 && label.toLowerCase().startsWith(needle);"
-        ));
+        assert!(html.contains("const normalizedLabel = label.trim();"));
+        assert!(html.contains("normalizedLabel.toLowerCase().startsWith(needle)"));
         assert!(html.contains("let composerStarredEntries = [];"));
         assert!(html.contains("let composerStarsRevision = -1;"));
         assert!(html.contains("id=\"composerStarEditorScrim\""));
