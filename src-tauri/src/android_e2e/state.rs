@@ -39,7 +39,12 @@ const PAIRING_ID_BYTES: usize = 16;
 const CLIENT_NONCE_BYTES: usize = 16;
 // Leaves room for bounded Remote resources after inner encoding while keeping
 // the decrypted allocation below the public 6 MiB envelope limit.
-const MAX_PLAINTEXT_BYTES: usize = 4 * 1024 * 1024;
+const MAX_RESPONSE_PLAINTEXT_BYTES: usize = 4 * 1024 * 1024;
+// Inner requests carry the Remote attachment JSON, so the request plaintext
+// bound follows the largest configurable attachment (ADR-0227) instead of the
+// response bound.
+const MAX_REQUEST_PLAINTEXT_BYTES: usize =
+    crate::constants::ANDROID_E2E_MAX_REQUEST_PLAINTEXT_BYTES;
 
 #[derive(Default)]
 pub struct AndroidE2eState {
@@ -598,7 +603,7 @@ impl AndroidE2eSession {
             "response": dispatch_result.response,
         }))
         .map_err(AppError::from)?;
-        if response_bytes.len() > MAX_PLAINTEXT_BYTES {
+        if response_bytes.len() > MAX_RESPONSE_PLAINTEXT_BYTES {
             return Err(E2eError::Internal(AppError::Other(
                 "Android E2E response exceeded plaintext limit".into(),
             )));
@@ -643,7 +648,7 @@ fn decrypt_plain_request(keys: &SessionKeys, envelope: &CipherEnvelope) -> Resul
         &envelope.ciphertext,
     )
     .map_err(|_| E2eError::Invalid)?;
-    if plaintext.len() > MAX_PLAINTEXT_BYTES {
+    if plaintext.len() > MAX_REQUEST_PLAINTEXT_BYTES {
         return Err(E2eError::Invalid);
     }
     serde_json::from_slice(&plaintext).map_err(|_| E2eError::Invalid)

@@ -19,6 +19,18 @@ const REMOTE_TOKEN_HEADER: &str = "x-laymux-remote-token";
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct TunnelAuthorized;
 
+/// Which transport carried a Remote request into the router (ADR-0227). The
+/// extension is absent for Direct/Tailscale browser requests. Handlers use it
+/// to size payload policy to what the Cloud relay can carry on that path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RemoteTransport {
+    /// Browser request forwarded by the Cloud relay over the WSS tunnel.
+    CloudRelayBrowser,
+    /// Inner HTTP request unwrapped from an Android E2E RPC envelope. The
+    /// envelope itself arrived via the Cloud relay or Tailscale Direct.
+    AndroidE2e { via_cloud_relay: bool },
+}
+
 pub(crate) async fn remote_guard(
     State(server): State<ServerState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -563,11 +575,7 @@ mod tests {
         let response =
             check_remote_base_access(&settings, "192.168.1.10:1".parse().unwrap()).unwrap();
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
-        assert!(check_remote_base_access(
-            &settings,
-            "100.100.10.20:1".parse().unwrap()
-        )
-        .is_none());
+        assert!(check_remote_base_access(&settings, "100.100.10.20:1".parse().unwrap()).is_none());
     }
 
     #[test]
@@ -787,11 +795,7 @@ mod tests {
             ),
             AndroidTailscaleE2eDecision::NotAndroidE2e
         ));
-        assert!(check_remote_base_access(
-            &settings,
-            "127.0.0.1:43100".parse().unwrap(),
-        )
-        .is_none());
+        assert!(check_remote_base_access(&settings, "127.0.0.1:43100".parse().unwrap(),).is_none());
         assert!(remote_token_matches(
             request.headers(),
             request.uri(),

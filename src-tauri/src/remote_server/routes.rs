@@ -85,6 +85,18 @@ struct ClaimResponse {
     status: RemoteControlStatus,
     resume_token: String,
     file_viewer_token: String,
+    /// Host attachment policy (ADR-0227) so the page sizes its checks and
+    /// file chooser to this host instead of a built-in constant.
+    attachments: super::attachments::AttachmentPolicy,
+}
+
+/// `/session/status` answer: the control status plus the attachment policy.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionStatusResponse {
+    #[serde(flatten)]
+    status: RemoteControlStatus,
+    attachments: super::attachments::AttachmentPolicy,
 }
 
 #[derive(Debug, Deserialize)]
@@ -154,7 +166,9 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         )
         .route(
             "/remote/v1/e2e/rpc",
-            post(remote_android_e2e_rpc).layer(DefaultBodyLimit::max(2 * 1024 * 1024)),
+            // The handler bounds the envelope itself from the host's attachment
+            // maximum (ADR-0227) instead of a static limit.
+            post(remote_android_e2e_rpc).layer(DefaultBodyLimit::disable()),
         )
         .route(ANDROID_E2E_OUTPUT_PATH, get(remote_android_e2e_output_ws))
         .route("/remote/v1/session/status", get(remote_session_status))
@@ -231,9 +245,9 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         )
         .route(
             "/remote/v1/terminals/{id}/attachments",
-            post(remote_terminal_attachment).layer(DefaultBodyLimit::max(
-                crate::constants::REMOTE_TERMINAL_ATTACHMENT_REQUEST_MAX_BYTES,
-            )),
+            // The handler bounds the body itself from `remote.attachmentMaxMib`
+            // (ADR-0227); axum's static default limit would cap it at 2 MiB.
+            post(remote_terminal_attachment).layer(DefaultBodyLimit::disable()),
         )
         .route(
             "/remote/v1/terminals/{id}/resize",
@@ -320,9 +334,21 @@ async fn remote_health() -> Response {
     .into_response()
 }
 
-async fn remote_session_status(State(server): State<ServerState>) -> Response {
+async fn remote_session_status(
+    State(server): State<ServerState>,
+    transport: Option<axum::Extension<super::RemoteTransport>>,
+) -> Response {
+    let transport = transport.map(|axum::Extension(transport)| transport);
+    let attachments = match effective_remote_settings(&server.app_state) {
+        Ok(settings) => super::attachments::AttachmentPolicy::from_settings(&settings, transport),
+        Err(err) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, &err),
+    };
     match get_remote_control_status(&server.app_state) {
-        Ok(status) => Json(status).into_response(),
+        Ok(status) => Json(SessionStatusResponse {
+            status,
+            attachments,
+        })
+        .into_response(),
         Err(err) => json_error(StatusCode::INTERNAL_SERVER_ERROR, &err),
     }
 }
@@ -461,6 +487,7 @@ fn attempt_claim_with_context(
         status: status_from_state(current, timeout_seconds),
         resume_token,
         file_viewer_token,
+        attachments: super::attachments::AttachmentPolicy::from_settings(settings, None),
     }))
 }
 
@@ -498,9 +525,17 @@ async fn remote_session_claim(
     State(server): State<ServerState>,
     ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
     request_context: Option<axum::Extension<AndroidE2eRequestContext>>,
+    transport: Option<axum::Extension<super::RemoteTransport>>,
     Json(body): Json<ClaimRequest>,
 ) -> Response {
     let remote_addr = addr.to_string();
+    let transport = transport.map(|axum::Extension(transport)| transport);
+    // Read the transport-aware attachment policy (ADR-0227) before touching
+    // lease state so a settings read failure cannot grant a lease behind a 500.
+    let attachments = match effective_remote_settings(&server.app_state) {
+        Ok(settings) => super::attachments::AttachmentPolicy::from_settings(&settings, transport),
+        Err(err) => return internal_error(err),
+    };
     // A lease claimed through an E2E session must not outlive that session:
     // a reconnecting phone otherwise fights its own dead lease with 409s
     // until the heartbeat timeout (ADR-0170). Dead-lease cleanup consults the
@@ -564,8 +599,11 @@ async fn remote_session_claim(
     };
 
     match attempt {
-        ClaimAttempt::Granted(response) => {
+        ClaimAttempt::Granted(mut response) => {
             emit_remote_control_status(&server.app_handle, &response.status);
+            // The attempt runs under the owner lock without transport
+            // knowledge; the relay-aware policy read above replaces it here.
+            response.attachments = attachments;
             Json(*response).into_response()
         }
         ClaimAttempt::Rejected(response) => response,

@@ -92,6 +92,7 @@ import com.laymux.android.remote.RemoteHttpResumeTracker
 import com.laymux.android.remote.RemoteSession
 import com.laymux.android.remote.oauthLoopbackBindAddress
 import com.laymux.android.remote.remoteHttpBodyWithinLimit
+import com.laymux.android.remote.remoteHttpRequestPlaintext
 import com.laymux.android.update.AppUpdateController
 import com.laymux.android.update.AvailableUpdate
 import com.laymux.android.update.SharedPreferencesUpdateStore
@@ -2435,13 +2436,12 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                         return@execute
                     }
                     resumeAttempt = currentResumeAttempt
+                    // Splice the validated body JSON verbatim: re-serializing through
+                    // org.json would escape "/" in base64 payloads and inflate the
+                    // plaintext past the desktop bound derived from the page bytes.
                     val response = e2eRemoteClient.rpc(
                         session,
-                        JSONObject()
-                            .put("kind", "http")
-                            .put("method", method.uppercase())
-                            .put("path", path)
-                            .put("body", body ?: JSONObject.NULL),
+                        remoteHttpRequestPlaintext(method, path, body?.let { bodyJson }),
                     )
                     val normalizedResponse = normalizeHttpResponse(response)
                     if (remoteHttpRequestIsCurrent(ticket, session, connectionGeneration)) {

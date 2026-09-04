@@ -513,6 +513,31 @@ fn validate_remote(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
             "remote.enabled=true이면 authToken이 필요합니다.".into(),
         );
     }
+    if !(1..=crate::constants::REMOTE_TERMINAL_ATTACHMENT_MAX_MIB)
+        .contains(&remote.attachment_max_mib)
+    {
+        issue(
+            issues,
+            "out_of_range",
+            "/remote/attachmentMaxMib",
+            format!(
+                "attachmentMaxMib must be between 1 and {}.",
+                crate::constants::REMOTE_TERMINAL_ATTACHMENT_MAX_MIB
+            ),
+        );
+    }
+    for (index, extension) in remote.attachment_extra_extensions.iter().enumerate() {
+        if !super::models::is_valid_attachment_extension(extension) {
+            issue(
+                issues,
+                "invalid_value",
+                format!("/remote/attachmentExtraExtensions/{index}"),
+                format!(
+                    "'{extension}'은(는) 유효한 확장자가 아닙니다. 점 없이 소문자 영문·숫자 1~16자만 허용합니다."
+                ),
+            );
+        }
+    }
     if remote.heartbeat_timeout_seconds < 30 {
         issue(
             issues,

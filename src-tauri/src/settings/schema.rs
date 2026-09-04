@@ -353,6 +353,24 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::Live,
     },
     MetadataEntry {
+        path: "/remote/attachmentMaxMib",
+        description: "Remote 클라이언트가 첨부할 수 있는 최대 파일 크기(MiB, 1~10)입니다. 첨부 요청 body 상한, Android E2E RPC envelope 상한, 첨부 캐시 quota(최대 크기의 64배)가 이 값에서 유도됩니다. Cloud relay를 거치는 요청은 relay payload 상한이 더 작으면 그 값으로 제한되고 Tailscale 직결을 안내합니다(실효 상한은 연결 시 page에 전달됩니다). 다음 첨부부터 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
+        path: "/remote/attachmentAllowAllExtensions",
+        description: "모든 파일 형식을 내용 검사 없이 Remote 첨부로 받을지 여부입니다. 끄면 signature가 확인되는 이미지·PDF·DOCX·PPTX, UTF-8 텍스트, attachmentExtraExtensions만 허용합니다. 다음 첨부부터 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
+        path: "/remote/attachmentExtraExtensions",
+        description: "기본 종류 외에 그대로 저장할 확장자 목록입니다(소문자, 점 없이, 영문·숫자 1~16자). 내용 검사 없이 해당 확장자로 저장합니다. 다음 첨부부터 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
         path: "/remote/authToken",
         description: "Direct Remote browser가 사용하는 bearer token입니다. 응답에는 원문을 노출하지 않으며 ***REDACTED***를 다시 보내면 기존 값을 유지합니다.",
         sensitive: true,

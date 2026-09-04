@@ -17,10 +17,10 @@ use crate::android_e2e::{
     CipherEnvelope, E2eError, EstablishRequest,
 };
 use crate::automation_server::ServerState;
-use crate::constants::MAX_ANDROID_E2E_FILE_VIEWER_RESPONSE_BYTES;
+use crate::constants::{android_e2e_rpc_body_limit, MAX_ANDROID_E2E_FILE_VIEWER_RESPONSE_BYTES};
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
-use crate::remote_server::TunnelAuthorized;
+use crate::remote_server::{RemoteTransport, TunnelAuthorized};
 
 use super::access::effective_remote_settings;
 use super::lease::{
@@ -132,8 +132,44 @@ pub(super) async fn remote_android_e2e_establish(
 
 pub(super) async fn remote_android_e2e_rpc(
     State(server): State<ServerState>,
-    Json(envelope): Json<CipherEnvelope>,
+    transport: Option<axum::Extension<RemoteTransport>>,
+    request: Request<Body>,
 ) -> Response {
+    // The envelope reached us either through the Cloud relay tunnel or over
+    // Tailscale Direct; the inner request inherits that so payload policy can
+    // respect the relay's own bounds (ADR-0227).
+    let via_cloud_relay = matches!(
+        transport,
+        Some(axum::Extension(RemoteTransport::CloudRelayBrowser))
+    );
+    // The envelope bound follows the host's attachment maximum (ADR-0227) so a
+    // 1 MiB host never buffers the 10 MiB-sized envelope; the route disables
+    // axum's static default limit for this.
+    let envelope_limit = match effective_remote_settings(&server.app_state) {
+        Ok(settings) => android_e2e_rpc_body_limit(
+            super::attachments::AttachmentPolicy::from_settings(&settings, None).host_max_bytes,
+        ),
+        Err(error) => return no_store(internal_error(error)),
+    };
+    let raw = match to_bytes(request.into_body(), envelope_limit).await {
+        Ok(raw) => raw,
+        Err(_) => {
+            return no_store(json_error(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "Android E2E envelope exceeds the request limit",
+            ))
+        }
+    };
+    let envelope: CipherEnvelope = match serde_json::from_slice(&raw) {
+        Ok(envelope) => envelope,
+        Err(_) => {
+            return no_store(json_error(
+                StatusCode::BAD_REQUEST,
+                "Android E2E envelope is not valid JSON",
+            ))
+        }
+    };
+    drop(raw);
     let session = match server.app_state.android_e2e.session(
         &envelope.instance_id,
         &envelope.session_id,
@@ -152,7 +188,9 @@ pub(super) async fn remote_android_e2e_rpc(
             .process(
                 envelope,
                 || unix_time_now().map_err(E2eError::Internal),
-                move |context, request| dispatch_plain_request(dispatch_server, context, request),
+                move |context, request| {
+                    dispatch_plain_request(dispatch_server, context, request, via_cloud_relay)
+                },
                 move |context, request, guard| {
                     revalidate_cached_file_viewer_request(&replay_server, context, request, &guard)
                 },
@@ -205,6 +243,7 @@ async fn dispatch_plain_request(
     server: ServerState,
     request_context: AndroidE2eRequestContext,
     value: Value,
+    via_cloud_relay: bool,
 ) -> Result<AndroidE2eDispatchResult, AppError> {
     let request: PlainRequest = serde_json::from_value(value)
         .map_err(|_| AppError::Other("Android E2E plaintext request is invalid".into()))?;
@@ -213,7 +252,15 @@ async fn dispatch_plain_request(
             dispatch_resource(server, &path).await?,
         )),
         PlainRequest::Http { method, path, body } => {
-            dispatch_http(server, request_context, &method, &path, body).await
+            dispatch_http(
+                server,
+                request_context,
+                &method,
+                &path,
+                body,
+                RemoteTransport::AndroidE2e { via_cloud_relay },
+            )
+            .await
         }
         PlainRequest::BackgroundTransition { lease_id } => {
             if !valid_remote_identifier(&lease_id) {
@@ -337,6 +384,7 @@ async fn dispatch_http(
     method: &str,
     path: &str,
     mut body: Option<Value>,
+    transport: RemoteTransport,
 ) -> Result<AndroidE2eDispatchResult, AppError> {
     let method = method
         .parse::<Method>()
@@ -369,6 +417,7 @@ async fn dispatch_http(
         .body(Body::from(encoded_body))
         .map_err(|error| AppError::Other(format!("Android E2E request build failed: {error}")))?;
     request.extensions_mut().insert(TunnelAuthorized);
+    request.extensions_mut().insert(transport);
     request.extensions_mut().insert(request_context);
     if let Some(proof) = file_viewer_proof {
         request.extensions_mut().insert(proof);

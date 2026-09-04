@@ -2428,7 +2428,27 @@ type RemoteConnectionSettings = RemoteSettings;
 type RemoteSectionDraft = RemoteConnectionSettings & {
   allowedIpsText: string;
   customHostInput: string;
+  attachmentExtensionInput: string;
 };
+
+const ATTACHMENT_EXTENSION_RE = /^[a-z0-9]{1,16}$/;
+
+/** Lowercase, strip leading dots, drop invalid entries, dedupe (order kept). */
+function normalizeAttachmentExtensions(list: string[]): string[] {
+  const seen = new Set<string>();
+  for (const raw of list) {
+    const ext = raw.trim().replace(/^\.+/, "").toLowerCase();
+    if (ATTACHMENT_EXTENSION_RE.test(ext)) seen.add(ext);
+  }
+  return [...seen];
+}
+
+/** Mirrors `REMOTE_TERMINAL_ATTACHMENT_MAX_MIB` in src-tauri/src/constants.rs. */
+const MAX_REMOTE_ATTACHMENT_MIB = 10;
+
+function clampAttachmentMaxMib(value: unknown): number {
+  return Math.min(MAX_REMOTE_ATTACHMENT_MIB, Math.max(1, Math.trunc(Number(value) || 1)));
+}
 
 function toRemoteSectionDraft(remote: RemoteSettings): RemoteSectionDraft {
   return {
@@ -2452,13 +2472,22 @@ function toRemoteSectionDraft(remote: RemoteSettings): RemoteSectionDraft {
     cloudAccessMode: remote.cloudAccessMode,
     serveTerminalFont: remote.serveTerminalFont,
     widgets: remote.widgets,
+    attachmentMaxMib: remote.attachmentMaxMib,
+    attachmentAllowAllExtensions: remote.attachmentAllowAllExtensions,
+    attachmentExtraExtensions: remote.attachmentExtraExtensions,
     allowedIpsText: formatAllowedIps(remote.allowedIps),
     customHostInput: "",
+    attachmentExtensionInput: "",
   };
 }
 
 function toRemoteSettings(draft: RemoteSectionDraft): RemoteConnectionSettings {
-  const { allowedIpsText, customHostInput: _customHostInput, ...remote } = draft;
+  const {
+    allowedIpsText,
+    customHostInput: _customHostInput,
+    attachmentExtensionInput: _attachmentExtensionInput,
+    ...remote
+  } = draft;
   const allowedIps = parseAllowedIps(allowedIpsText);
   const customHosts = normalizeCustomHosts(remote.customHosts);
   return {
@@ -2473,6 +2502,8 @@ function toRemoteSettings(draft: RemoteSectionDraft): RemoteConnectionSettings {
       900,
       Math.max(0, Math.trunc(Number(remote.androidBackgroundLeaseSeconds) || 0)),
     ),
+    attachmentMaxMib: clampAttachmentMaxMib(remote.attachmentMaxMib),
+    attachmentExtraExtensions: normalizeAttachmentExtensions(remote.attachmentExtraExtensions),
   };
 }
 
@@ -2579,6 +2610,24 @@ function RemoteConnectionSection() {
     update({
       customHosts,
       ...(remote.preferredHost === host ? { preferredHost: "" } : {}),
+    });
+  };
+
+  const handleAddAttachmentExtension = () => {
+    update({
+      attachmentExtraExtensions: normalizeAttachmentExtensions([
+        ...remote.attachmentExtraExtensions,
+        remote.attachmentExtensionInput,
+      ]),
+      attachmentExtensionInput: "",
+    });
+  };
+
+  const handleRemoveAttachmentExtension = (ext: string) => {
+    update({
+      attachmentExtraExtensions: remote.attachmentExtraExtensions.filter(
+        (candidate) => candidate !== ext,
+      ),
     });
   };
 
@@ -2983,6 +3032,102 @@ function RemoteConnectionSection() {
           checked={remote.widgets}
           onChange={(value) => update({ widgets: value })}
         />
+      </SubGroup>
+
+      <SubGroup title={t("remote.groupAttachments")}>
+        <SettingRow label={t("remote.attachmentMaxMib")} desc={t("remote.attachmentMaxMibDesc")}>
+          <div className="flex items-center gap-2">
+            <FocusInput
+              data-testid="remote-settings-attachment-max-mib"
+              type="number"
+              min={1}
+              max={MAX_REMOTE_ATTACHMENT_MIB}
+              step={1}
+              className={inputCls}
+              inputStyle={{ width: 110 }}
+              value={remote.attachmentMaxMib}
+              onChange={(event) =>
+                // Only the lower bound while typing so "1" → "5" can be entered;
+                // the upper bound is applied on save (toRemoteSettings).
+                update({
+                  attachmentMaxMib: Math.max(1, Math.trunc(Number(event.target.value) || 1)),
+                })
+              }
+            />
+            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+              MiB
+            </span>
+          </div>
+        </SettingRow>
+        <ToggleRow
+          label={t("remote.attachmentAllowAllExtensions")}
+          desc={t("remote.attachmentAllowAllExtensionsDesc")}
+          testid="remote-settings-attachment-allow-all"
+          checked={remote.attachmentAllowAllExtensions}
+          onChange={(value) => update({ attachmentAllowAllExtensions: value })}
+        />
+        <SettingRow
+          label={t("remote.attachmentExtraExtensions")}
+          desc={t("remote.attachmentExtraExtensionsDesc")}
+        >
+          <div className="flex min-w-0 flex-col gap-2">
+            <div className="flex min-w-0 gap-2">
+              <FocusInput
+                data-testid="remote-settings-attachment-extension-input"
+                className={inputCls}
+                placeholder={t("remote.attachmentExtensionPlaceholder")}
+                value={remote.attachmentExtensionInput}
+                onChange={(event) => update({ attachmentExtensionInput: event.target.value })}
+              />
+              <button
+                type="button"
+                data-testid="remote-settings-attachment-extension-add"
+                onClick={handleAddAttachmentExtension}
+                className="hover-bg shrink-0 rounded px-3 py-1.5 text-xs"
+                style={{
+                  color: "var(--accent)",
+                  background: "transparent",
+                  border: "1px solid var(--border)",
+                  cursor: "pointer",
+                }}
+              >
+                {t("remote.addAttachmentExtension")}
+              </button>
+            </div>
+            {remote.attachmentExtraExtensions.length > 0 && (
+              <div className="flex flex-col gap-1">
+                {remote.attachmentExtraExtensions.map((ext) => (
+                  <div key={ext} className="flex items-center gap-2 text-[12px]">
+                    <code
+                      className="min-w-0 flex-1 truncate rounded px-2 py-1"
+                      style={{
+                        color: "var(--text-primary)",
+                        background: "var(--bg-base)",
+                        border: "1px solid var(--border)",
+                      }}
+                    >
+                      {ext}
+                    </code>
+                    <button
+                      type="button"
+                      data-testid={`remote-settings-attachment-extension-remove-${ext}`}
+                      onClick={() => handleRemoveAttachmentExtension(ext)}
+                      className="hover-bg shrink-0 rounded px-2 py-1 text-[11px]"
+                      style={{
+                        color: "var(--red)",
+                        background: "transparent",
+                        border: "1px solid var(--border)",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {t("common.remove")}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </SettingRow>
       </SubGroup>
     </div>
   );

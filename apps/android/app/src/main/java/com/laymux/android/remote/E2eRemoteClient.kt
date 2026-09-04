@@ -78,8 +78,12 @@ internal class E2eRemoteClient(
         }
     }
 
-    fun rpc(session: RemoteSession, plaintext: JSONObject): JSONObject {
-        val pending = session.prepareRequest(plaintext.toString())
+    fun rpc(session: RemoteSession, plaintext: JSONObject): JSONObject =
+        rpc(session, plaintext.toString())
+
+    /** Sends an already-serialized plaintext so caller-provided JSON bytes are not re-escaped. */
+    fun rpc(session: RemoteSession, plaintextJson: String): JSONObject {
+        val pending = session.prepareRequest(plaintextJson)
         return executePending(session, pending)
     }
 
