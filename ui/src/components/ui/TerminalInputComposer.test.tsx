@@ -728,17 +728,53 @@ describe("TerminalInputComposer", () => {
     it("sends after filling when the starred suggestion is marked to send", () => {
       const onSend = vi.fn();
       const onTextChange = vi.fn();
+      const onUpsertStarredEntry = vi.fn();
       renderComposer({
         text: "gs",
         autocompleteEnabled: true,
         starredEntries: [{ value: "git status", label: "gs", send: true }],
         onSend,
         onTextChange,
+        onUpsertStarredEntry,
       });
 
-      fireEvent.mouseDown(screen.getByRole("option", { name: /gs/ }));
+      const option = screen.getByRole("option", { name: /gs/ });
+      fireEvent.pointerDown(option, {
+        pointerId: 1,
+        clientX: 10,
+        clientY: 10,
+        button: 0,
+        isPrimary: true,
+      });
+      fireEvent.pointerUp(option, {
+        pointerId: 1,
+        clientX: 10,
+        clientY: 10,
+        button: 0,
+        isPrimary: true,
+      });
       expect(onTextChange).toHaveBeenCalledWith("git status");
       expect(onSend).toHaveBeenCalledTimes(1);
+    });
+
+    it("ignores a non-primary pointer on a send suggestion", () => {
+      const onSend = vi.fn();
+      const onTextChange = vi.fn();
+      const onUpsertStarredEntry = vi.fn();
+      renderComposer({
+        text: "gs",
+        autocompleteEnabled: true,
+        starredEntries: [{ value: "git status", label: "gs", send: true }],
+        onSend,
+        onTextChange,
+        onUpsertStarredEntry,
+      });
+
+      const option = screen.getByRole("option", { name: /gs/ });
+      fireEvent.pointerDown(option, { pointerId: 1, clientX: 10, clientY: 10, button: 2 });
+      fireEvent.pointerUp(option, { pointerId: 1, clientX: 10, clientY: 10, button: 2 });
+      expect(onTextChange).not.toHaveBeenCalled();
+      expect(onSend).not.toHaveBeenCalled();
     });
 
     it("opens the starred editor on a long press instead of picking", () => {
@@ -759,13 +795,20 @@ describe("TerminalInputComposer", () => {
           clientX: 10,
           clientY: 10,
           button: 0,
+          isPrimary: true,
         });
         act(() => {
           vi.advanceTimersByTime(COMPOSER_STARRED_EDITOR_LONG_PRESS_MS);
         });
         expect(screen.getByTestId("composer-starred-editor")).toBeInTheDocument();
         expect(onTextChange).not.toHaveBeenCalled();
-        fireEvent.pointerUp(option, { pointerId: 1, clientX: 10, clientY: 10, button: 0 });
+        fireEvent.pointerUp(option, {
+          pointerId: 1,
+          clientX: 10,
+          clientY: 10,
+          button: 0,
+          isPrimary: true,
+        });
         expect(onTextChange).not.toHaveBeenCalled();
       } finally {
         vi.useRealTimers();

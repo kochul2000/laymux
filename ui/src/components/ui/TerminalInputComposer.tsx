@@ -593,34 +593,58 @@ export function TerminalInputComposer({
                 title={suggestion.value}
                 className="min-w-0 flex-1 cursor-pointer truncate whitespace-nowrap px-2 py-1 text-left"
                 onMouseDown={(event) => {
+                  if (event.button !== 0) return;
                   event.preventDefault();
                   if (!onUpsertStarredEntry) commitAutocompleteEntry(suggestion);
                 }}
                 onPointerDown={(event) => {
-                  event.preventDefault();
+                  if (event.button !== 0) return;
+                  if (event.isPrimary === false && event.pointerType) return;
                   if (!onUpsertStarredEntry) return;
                   const target = event.currentTarget;
+                  const pointerId = event.pointerId;
                   const startX = event.clientX;
                   const startY = event.clientY;
                   let fired = false;
+                  let moved = false;
+                  try {
+                    target.setPointerCapture(pointerId);
+                  } catch {
+                    /* jsdom */
+                  }
                   const timer = window.setTimeout(() => {
                     fired = true;
                     openStarredEditor(suggestion);
                   }, COMPOSER_STARRED_EDITOR_LONG_PRESS_MS);
                   const stop = () => {
                     window.clearTimeout(timer);
+                    try {
+                      target.releasePointerCapture(pointerId);
+                    } catch {
+                      /* already released */
+                    }
                     target.removeEventListener("pointerup", onUp);
                     target.removeEventListener("pointercancel", onCancel);
                     target.removeEventListener("pointermove", onMove);
                   };
                   const onMove = (move: globalThis.PointerEvent) => {
-                    if (Math.hypot(move.clientX - startX, move.clientY - startY) > 8) stop();
+                    if (move.pointerId !== pointerId) return;
+                    if (Math.hypot(move.clientX - startX, move.clientY - startY) > 8) {
+                      moved = true;
+                      stop();
+                    }
                   };
-                  const onUp = () => {
+                  const onUp = (up: globalThis.PointerEvent) => {
+                    if (up.pointerId !== pointerId) return;
                     stop();
-                    if (!fired) commitAutocompleteEntry(suggestion);
+                    if (fired || moved) return;
+                    up.preventDefault();
+                    commitAutocompleteEntry(suggestion);
                   };
-                  const onCancel = () => stop();
+                  const onCancel = (cancel: globalThis.PointerEvent) => {
+                    if (cancel.pointerId !== pointerId) return;
+                    stop();
+                  };
                   target.addEventListener("pointerup", onUp);
                   target.addEventListener("pointercancel", onCancel);
                   target.addEventListener("pointermove", onMove);

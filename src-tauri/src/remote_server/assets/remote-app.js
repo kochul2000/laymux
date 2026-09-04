@@ -3309,28 +3309,46 @@ import {
         function bindComposerLongPress(pick, suggestion) {
           pick.addEventListener("pointerdown", (event) => {
             if (event.button != null && event.button !== 0) return;
-            event.preventDefault();
+            if (event.isPrimary === false && event.pointerType) return;
+            const pointerId = event.pointerId;
             const startX = event.clientX;
             const startY = event.clientY;
             let fired = false;
+            let moved = false;
+            try {
+              pick.setPointerCapture(pointerId);
+            } catch (_) {}
             const timer = window.setTimeout(() => {
               fired = true;
               openComposerStarEditor(suggestion);
             }, COMPOSER_STARRED_EDITOR_LONG_PRESS_MS);
             const stop = () => {
               window.clearTimeout(timer);
+              try {
+                pick.releasePointerCapture(pointerId);
+              } catch (_) {}
               pick.removeEventListener("pointerup", onUp);
               pick.removeEventListener("pointercancel", onCancel);
               pick.removeEventListener("pointermove", onMove);
             };
             const onMove = (move) => {
-              if (Math.hypot(move.clientX - startX, move.clientY - startY) > 8) stop();
+              if (move.pointerId !== pointerId) return;
+              if (Math.hypot(move.clientX - startX, move.clientY - startY) > 8) {
+                moved = true;
+                stop();
+              }
             };
-            const onUp = () => {
+            const onUp = (up) => {
+              if (up.pointerId !== pointerId) return;
               stop();
-              if (!fired) commitComposerAutocompleteEntry(suggestion);
+              if (fired || moved) return;
+              up.preventDefault();
+              commitComposerAutocompleteEntry(suggestion);
             };
-            const onCancel = () => stop();
+            const onCancel = (cancel) => {
+              if (cancel.pointerId !== pointerId) return;
+              stop();
+            };
             pick.addEventListener("pointerup", onUp);
             pick.addEventListener("pointercancel", onCancel);
             pick.addEventListener("pointermove", onMove);
