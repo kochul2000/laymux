@@ -32,11 +32,12 @@ pub const EVENT_SLEEP_INHIBIT_CHANGED: &str = "sleep-inhibit-changed";
 pub const EVENT_APP_UPDATE_STATUS_CHANGED: &str = "app-update-status-changed";
 pub const EVENT_COMPOSER_STARRED_ENTRIES_CHANGED: &str = "composer-starred-entries-changed";
 
-/// Explicitly persisted Composer entries (ADR-0226).
+/// Explicitly persisted Composer entries (ADR-0226, ADR-0229).
 pub const COMPOSER_STARRED_ENTRIES_MAX: usize = 200;
 pub const COMPOSER_STARRED_ENTRY_MAX_BYTES: usize = 16 * 1024;
+pub const COMPOSER_STARRED_ENTRY_LABEL_MAX_BYTES: usize = 256;
 pub const REMOTE_COMPOSER_STARRED_REQUEST_MAX_BYTES: usize =
-    COMPOSER_STARRED_ENTRY_MAX_BYTES * 6 + 1024;
+    COMPOSER_STARRED_ENTRY_MAX_BYTES * 6 * 3 + COMPOSER_STARRED_ENTRY_LABEL_MAX_BYTES * 6 + 1024;
 pub const GITHUB_UPDATE_HOST: &str = "github.com";
 pub const GITHUB_UPDATE_OWNER: &str = "kochul2000";
 pub const GITHUB_UPDATE_REPOSITORY: &str = "laymux";
@@ -640,6 +641,24 @@ pub const SLEEP_INHIBIT_STDERR_CAPTURE_LIMIT: usize = 4096;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn composer_star_request_limit_accepts_every_maximum_escaped_field() {
+        let value = "\0".repeat(COMPOSER_STARRED_ENTRY_MAX_BYTES);
+        let label = "\0".repeat(COMPOSER_STARRED_ENTRY_LABEL_MAX_BYTES);
+        let body = serde_json::to_vec(&serde_json::json!({
+            "leaseId": "lease",
+            "value": value,
+            "text": value,
+            "previousValue": value,
+            "starred": true,
+            "label": label,
+            "send": true,
+        }))
+        .unwrap();
+
+        assert!(body.len() <= REMOTE_COMPOSER_STARRED_REQUEST_MAX_BYTES);
+    }
 
     #[test]
     fn propagation_timeout_is_positive() {

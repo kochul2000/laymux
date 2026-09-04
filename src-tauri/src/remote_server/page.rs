@@ -1678,13 +1678,33 @@ mod tests {
 
         // Pure selection helpers ported from the desktop
         // terminal-input-composer-state.ts (case-insensitive prefix, newest
-        // first, de-duped, blank-skipping, exact-query excluded, capped).
+        // first, de-duped, blank-skipping, exact value skipped unless send, capped).
         assert!(html.contains("function selectComposerHistoryEntries(history, max"));
         assert!(html.contains("function selectComposerAutocompleteSuggestions("));
-        assert!(html.contains("if (!entry || entry === query || seen.has(entry)) continue;"));
-        assert!(html.contains("if (!entry.toLowerCase().startsWith(needle)) continue;"));
+        assert!(html.contains("if (value === query && !send) return false;"));
+        assert!(html.contains("const normalizedLabel = label.trim();"));
+        assert!(html.contains("normalizedLabel.toLowerCase().startsWith(needle)"));
         assert!(html.contains("let composerStarredEntries = [];"));
         assert!(html.contains("let composerStarsRevision = -1;"));
+        assert!(html.contains("id=\"composerStarEditorScrim\""));
+        assert!(html.contains("function openComposerStarEditor(suggestion)"));
+        assert!(html.contains("if (suggestion.send) commitComposer();"));
+        assert!(html.contains("COMPOSER_STARRED_EDITOR_LONG_PRESS_MS = 500"));
+        let dismiss_start = html.find("function dismissTopRemoteLayer()").unwrap();
+        let dismiss_region = &html[dismiss_start..];
+        let file_viewer_dismiss = dismiss_region
+            .find("!fileViewerOverlayElement.hidden")
+            .unwrap();
+        let star_editor_dismiss = dismiss_region
+            .find("composerStarEditorScrim && !composerStarEditorScrim.hidden")
+            .unwrap();
+        let drawer_dismiss = dismiss_region
+            .find("navToggleButton.getAttribute(\"aria-expanded\")")
+            .unwrap();
+        assert!(
+            file_viewer_dismiss < star_editor_dismiss && star_editor_dismiss < drawer_dismiss,
+            "star editor must dismiss after FileViewer and before the drawer"
+        );
         assert!(html.contains("/remote/v1/composer/starred?leaseId="));
         assert!(html.contains("&revision=${composerStarsRevision}"));
         assert!(html.contains("Failed to refresh Composer stars"));

@@ -90,7 +90,7 @@ const ENTRIES: &[MetadataEntry] = &[
     },
     MetadataEntry {
         path: "/terminal/composerStarredEntries",
-        description: "사용자가 명시적으로 저장한 Composer 별표 목록입니다.",
+        description: "사용자가 명시적으로 저장한 Composer 별표 목록입니다. 각 항목은 {value,label,send}이며 레거시 문자열은 빈 라벨·send=false로 읽습니다.",
         sensitive: true,
         apply_mode: ApplyMode::Live,
     },

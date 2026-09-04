@@ -79,10 +79,13 @@ import {
   usesArrowWildcard,
 } from "@/lib/keybinding-registry";
 import { toSupportedCursorShape } from "@/lib/cursor-settings";
+import { ComposerStarredEntryEditor } from "@/components/ui/ComposerStarredEntryEditor";
 import {
+  composerSuggestionDisplay,
   readDesktopInputModePreference,
   writeDesktopInputModePreference,
   type ComposerHistoryScope,
+  type ComposerStarredEntry,
   type InputMode,
 } from "@/lib/terminal-input-composer-state";
 import type { PastePathSeparator } from "@/lib/smart-text";
@@ -1829,15 +1832,36 @@ function TerminalSection() {
     setDraftTerminal((prev) => ({ ...prev, ...partial }));
   const [newComposerStar, setNewComposerStar] = useState("");
   const [composerStarError, setComposerStarError] = useState("");
-  const updateComposerStar = async (text: string, starred: boolean) => {
+  const [composerStarEditor, setComposerStarEditor] = useState<{
+    previousValue?: string;
+    entry: ComposerStarredEntry;
+  } | null>(null);
+  const updateComposerStar = async (
+    text: string,
+    starred: boolean,
+    extra?: { label?: string; send?: boolean; previousText?: string },
+  ) => {
     setComposerStarError("");
     try {
-      const entries = await setComposerStarredEntry(text, starred);
+      const entries = await setComposerStarredEntry({
+        text,
+        starred,
+        ...extra,
+      });
       setTerminal({ composerStarredEntries: entries });
       if (starred) setNewComposerStar("");
+      setComposerStarEditor(null);
     } catch (error) {
       setComposerStarError(String(error));
     }
+  };
+  const starredEditorLabels = {
+    label: t("terminal.composerStarredEntryLabel"),
+    value: t("terminal.composerStarredEntryValue"),
+    send: t("terminal.composerStarredEntrySend"),
+    sendDesc: t("terminal.composerStarredEntrySendDesc"),
+    save: t("terminal.composerStarredEntrySave"),
+    cancel: t("terminal.composerStarredEntryCancel"),
   };
 
   // Exit behavior (issue #451) lives under the top-level `exit` key but is
@@ -1960,31 +1984,80 @@ function TerminalSection() {
             </p>
           ) : (
             <ul className="mt-2 max-h-48 list-none overflow-y-auto p-0">
-              {composerStarredEntries.map((entry, index) => (
-                <li
-                  key={entry}
-                  data-testid={`composer-starred-entry-${index}`}
-                  className="flex items-start gap-2 border-t py-1.5 first:border-t-0"
-                  style={{ borderColor: "var(--border)" }}
-                >
-                  <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-xs">
-                    {entry}
-                  </span>
-                  <button
-                    type="button"
-                    data-testid={`composer-starred-entry-remove-${index}`}
-                    aria-label={`${t("terminal.composerStarredEntryRemove")}: ${entry}`}
-                    title={t("terminal.composerStarredEntryRemove")}
-                    className="shrink-0 rounded p-1"
-                    onClick={() => void updateComposerStar(entry, false)}
+              {composerStarredEntries.map((entry, index) => {
+                const display = composerSuggestionDisplay(entry);
+                return (
+                  <li
+                    key={entry.value}
+                    data-testid={`composer-starred-entry-${index}`}
+                    className="flex items-start gap-2 border-t py-1.5 first:border-t-0"
+                    style={{ borderColor: "var(--border)" }}
                   >
-                    <XIcon size={12} />
-                  </button>
-                </li>
-              ))}
+                    <button
+                      type="button"
+                      data-testid={`composer-starred-entry-edit-${index}`}
+                      className="min-w-0 flex-1 rounded px-0.5 py-0.5 text-left"
+                      onClick={() => {
+                        setComposerStarError("");
+                        setComposerStarEditor({ previousValue: entry.value, entry });
+                      }}
+                    >
+                      <span className="block whitespace-pre-wrap break-words text-xs">
+                        {display}
+                        {entry.send ? (
+                          <span
+                            className="ml-1"
+                            style={{ color: "var(--accent)" }}
+                            title={t("terminal.composerStarredEntrySendBadge")}
+                          >
+                            ↵
+                          </span>
+                        ) : null}
+                      </span>
+                      {entry.label.trim() && entry.label.trim() !== entry.value ? (
+                        <span
+                          className="mt-0.5 block whitespace-pre-wrap break-words text-[11px]"
+                          style={{ color: "var(--text-secondary)" }}
+                        >
+                          {entry.value}
+                        </span>
+                      ) : null}
+                    </button>
+                    <button
+                      type="button"
+                      data-testid={`composer-starred-entry-remove-${index}`}
+                      aria-label={`${t("terminal.composerStarredEntryRemove")}: ${entry.value}`}
+                      title={t("terminal.composerStarredEntryRemove")}
+                      className="shrink-0 rounded p-1"
+                      onClick={() => void updateComposerStar(entry.value, false)}
+                    >
+                      <XIcon size={12} />
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </SettingRow>
+        {composerStarEditor ? (
+          <ComposerStarredEntryEditor
+            title={t("terminal.composerStarredEntryEdit")}
+            initial={composerStarEditor.entry}
+            error={composerStarError}
+            labels={starredEditorLabels}
+            onClose={() => {
+              setComposerStarEditor(null);
+              setComposerStarError("");
+            }}
+            onSave={(entry) =>
+              void updateComposerStar(entry.value, true, {
+                label: entry.label,
+                send: entry.send,
+                previousText: composerStarEditor.previousValue,
+              })
+            }
+          />
+        ) : null}
 
         <ToggleRow
           label={t("terminal.copyOnSelect")}
@@ -3519,10 +3592,7 @@ function ClaudeSection() {
               onChange={(e) =>
                 updateClaude({
                   statusMessageMode: e.target.value as
-                    | "bullet"
-                    | "title"
-                    | "bullet-title"
-                    | "title-bullet",
+                    "bullet" | "title" | "bullet-title" | "title-bullet",
                 })
               }
             >
@@ -3863,10 +3933,7 @@ function CodexSection() {
               onChange={(e) =>
                 updateCodex({
                   statusMessageMode: e.target.value as
-                    | "bullet"
-                    | "title"
-                    | "bullet-title"
-                    | "title-bullet",
+                    "bullet" | "title" | "bullet-title" | "title-bullet",
                 })
               }
             >
@@ -4006,10 +4073,7 @@ function GrokSection() {
           onChange={(e) =>
             updateGrok({
               statusMessageMode: e.target.value as
-                | "bullet"
-                | "title"
-                | "bullet-title"
-                | "title-bullet",
+                "bullet" | "title" | "bullet-title" | "title-bullet",
             })
           }
         >
@@ -4161,10 +4225,7 @@ function FileExplorerSection() {
             <div className="grid grid-cols-2 gap-2">
               {(["Top", "Right", "Bottom", "Left"] as const).map((dir) => {
                 const key = `padding${dir}` as
-                  | "paddingTop"
-                  | "paddingRight"
-                  | "paddingBottom"
-                  | "paddingLeft";
+                  "paddingTop" | "paddingRight" | "paddingBottom" | "paddingLeft";
                 return (
                   <label key={dir} className="flex items-center gap-1.5">
                     <span className="w-12 text-[11px]" style={{ color: "var(--text-secondary)" }}>
@@ -4374,10 +4435,7 @@ function ViewerSection() {
             <div className="grid grid-cols-2 gap-2">
               {(["Top", "Right", "Bottom", "Left"] as const).map((dir) => {
                 const key = `padding${dir}` as
-                  | "paddingTop"
-                  | "paddingRight"
-                  | "paddingBottom"
-                  | "paddingLeft";
+                  "paddingTop" | "paddingRight" | "paddingBottom" | "paddingLeft";
                 return (
                   <label key={dir} className="flex items-center gap-1.5">
                     <span className="w-12 text-[11px]" style={{ color: "var(--text-secondary)" }}>
@@ -5308,10 +5366,7 @@ function MemoSection() {
             <div className="grid grid-cols-2 gap-2">
               {(["Top", "Right", "Bottom", "Left"] as const).map((dir) => {
                 const key = `padding${dir}` as
-                  | "paddingTop"
-                  | "paddingRight"
-                  | "paddingBottom"
-                  | "paddingLeft";
+                  "paddingTop" | "paddingRight" | "paddingBottom" | "paddingLeft";
                 return (
                   <label key={dir} className="flex items-center gap-1.5">
                     <span className="w-12 text-[11px]" style={{ color: "var(--text-secondary)" }}>

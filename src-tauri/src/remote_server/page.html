@@ -408,6 +408,31 @@
         </div>
       </div>
     </div>
+    <div id="composerStarEditorScrim" class="composer-star-editor-scrim" hidden>
+      <div class="composer-star-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="composerStarEditorTitle">
+        <div class="composer-star-editor-header">
+          <div id="composerStarEditorTitle" class="composer-star-editor-title">Edit starred input</div>
+          <button id="composerStarEditorClose" type="button" aria-label="Close">Close</button>
+        </div>
+        <label class="composer-star-editor-field">
+          <span>Label</span>
+          <input id="composerStarEditorLabel" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        </label>
+        <label class="composer-star-editor-field">
+          <span>Value</span>
+          <textarea id="composerStarEditorValue" spellcheck="false"></textarea>
+        </label>
+        <label class="composer-star-editor-send">
+          <input id="composerStarEditorSend" type="checkbox" />
+          <span>Send on pick</span>
+        </label>
+        <div id="composerStarEditorError" class="composer-star-editor-error" hidden></div>
+        <div class="composer-star-editor-actions">
+          <button id="composerStarEditorCancel" type="button">Cancel</button>
+          <button id="composerStarEditorSave" class="primary" type="button">Save</button>
+        </div>
+      </div>
+    </div>
     <!-- OAuth loopback relay (ADR-0175). Shown when a terminal link is an
          installed-app OAuth flow: the provider redirects to the desktop's
          localhost listener, so the redirect is relayed back to the PC. -->

@@ -6817,9 +6817,7 @@ export function TerminalView({
   const composerAutocompleteEnabled = useSettingsStore(
     (s) => s.terminal.composerAutocomplete ?? true,
   );
-  const composerStarredEntries = useSettingsStore(
-    (s) => s.terminal.composerStarredEntries ?? [],
-  );
+  const composerStarredEntries = useSettingsStore((s) => s.terminal.composerStarredEntries ?? []);
 
   // Issue #361: the jump-to-bottom button must clear the scrollbar slider so
   // they do not overlap. The button is positioned relative to the pane edge, so
@@ -6956,6 +6954,13 @@ export function TerminalView({
           autocomplete: t("terminal.composerAutocomplete"),
           star: t("terminal.composerStar"),
           unstar: t("terminal.composerUnstar"),
+          starredEditor: t("terminal.composerStarredEditor"),
+          starredLabel: t("terminal.composerStarredLabel"),
+          starredValue: t("terminal.composerStarredValue"),
+          starredSend: t("terminal.composerStarredSend"),
+          starredSendDesc: t("terminal.composerStarredSendDesc"),
+          starredSave: t("terminal.composerStarredSave"),
+          starredCancel: t("terminal.composerStarredCancel"),
         }}
         textareaRef={composerTextareaRef}
         inFlight={composerDraft.inFlight !== null}
@@ -6986,6 +6991,17 @@ export function TerminalView({
               useSettingsStore.getState().setTerminal({ composerStarredEntries: entries }),
             )
             .catch((error) => console.warn("Failed to update Composer star", error));
+        }}
+        onUpsertStarredEntry={(entry, previousValue) => {
+          return setComposerStarredEntry({
+            text: entry.value,
+            starred: true,
+            label: entry.label,
+            send: entry.send,
+            previousText: previousValue,
+          }).then((entries) =>
+            useSettingsStore.getState().setTerminal({ composerStarredEntries: entries }),
+          );
         }}
       />
     </div>

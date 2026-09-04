@@ -213,33 +213,111 @@ export function selectComposerHistoryEntries(
  */
 export const DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS = 8;
 
+/** Long-press delay that opens the starred-entry editor from an autocomplete row. */
+export const COMPOSER_STARRED_EDITOR_LONG_PRESS_MS = 500;
+
+/** Host-global persisted Composer shortcut (ADR-0229). */
+export type ComposerStarredEntry = {
+  value: string;
+  label: string;
+  send: boolean;
+};
+
+/** One as-you-type suggestion: history rows have empty label and send=false. */
+export type ComposerAutocompleteSuggestion = {
+  value: string;
+  label: string;
+  send: boolean;
+};
+
+export type ComposerStarredEntryInput = string | Partial<ComposerStarredEntry> | null | undefined;
+
+export function composerStarredEntryValue(entry: ComposerStarredEntryInput): string {
+  if (typeof entry === "string") return entry;
+  return typeof entry?.value === "string" ? entry.value : "";
+}
+
+export function normalizeComposerStarredEntry(
+  raw: ComposerStarredEntryInput,
+): ComposerStarredEntry | null {
+  if (typeof raw === "string") {
+    if (!raw) return null;
+    return { value: raw, label: "", send: false };
+  }
+  if (!raw || typeof raw !== "object") return null;
+  const value = typeof raw.value === "string" ? raw.value : "";
+  if (!value) return null;
+  return {
+    value,
+    label: typeof raw.label === "string" ? raw.label : "",
+    send: raw.send === true,
+  };
+}
+
+export function normalizeComposerStarredEntries(
+  raw: readonly ComposerStarredEntryInput[] | null | undefined,
+): ComposerStarredEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const entries: ComposerStarredEntry[] = [];
+  for (const item of raw) {
+    const entry = normalizeComposerStarredEntry(item);
+    if (!entry || seen.has(entry.value)) continue;
+    seen.add(entry.value);
+    entries.push(entry);
+  }
+  return entries;
+}
+
+export function isComposerStarred(
+  entries: readonly ComposerStarredEntryInput[] | null | undefined,
+  value: string,
+): boolean {
+  if (!value) return false;
+  return (entries ?? []).some((entry) => composerStarredEntryValue(entry) === value);
+}
+
+export function composerSuggestionDisplay(suggestion: { label: string; value: string }): string {
+  const label = suggestion.label.trim();
+  return label || suggestion.value;
+}
+
 /**
- * As-you-type autocomplete suggestions for the Composer (issue #505). Given the
- * terminal's Composer history (oldest→newest) and the current draft `query`,
- * returns the most-recent-first, de-duplicated past entries that begin with the
- * query (case-insensitive), skipping blanks, the exact query itself (nothing to
- * complete), and capping at `max`. An empty query yields nothing — an empty
- * draft is the Tab recall popup's domain, so the two never show at once.
+ * As-you-type autocomplete suggestions for the Composer (issue #505, ADR-0229).
+ * Starred objects are newest-first and beat runtime history. A row matches the
+ * query on value or label prefix (case-insensitive). Exact value matches are
+ * skipped unless `send` is set — then picking still submits. An empty query
+ * yields nothing so this list never shares the Tab recall popup.
  */
 export function selectComposerAutocompleteSuggestions(
   history: readonly string[],
   query: string,
   max = DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS,
-  starredEntries: readonly string[] = [],
-): string[] {
+  starredEntries: readonly ComposerStarredEntryInput[] = [],
+): ComposerAutocompleteSuggestion[] {
   if (max <= 0 || query.length === 0) return [];
   const needle = query.toLowerCase();
   const seen = new Set<string>();
-  const entries: string[] = [];
-  for (const source of [starredEntries, history]) {
-    for (let i = source.length - 1; i >= 0; i -= 1) {
-      const entry = source[i];
-      if (!entry || entry === query || seen.has(entry)) continue;
-      if (!entry.toLowerCase().startsWith(needle)) continue;
-      seen.add(entry);
-      entries.push(entry);
-      if (entries.length >= max) return entries;
-    }
+  const entries: ComposerAutocompleteSuggestion[] = [];
+  const consider = (value: string, label: string, send: boolean): boolean => {
+    if (!value || seen.has(value)) return false;
+    if (value === query && !send) return false;
+    const valueMatch = value.toLowerCase().startsWith(needle);
+    const normalizedLabel = label.trim();
+    const labelMatch =
+      normalizedLabel.length > 0 && normalizedLabel.toLowerCase().startsWith(needle);
+    if (!valueMatch && !labelMatch) return false;
+    seen.add(value);
+    entries.push({ value, label, send });
+    return entries.length >= max;
+  };
+  const starred = normalizeComposerStarredEntries(starredEntries);
+  for (let i = starred.length - 1; i >= 0; i -= 1) {
+    const entry = starred[i];
+    if (consider(entry.value, entry.label, entry.send)) return entries;
+  }
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    if (consider(history[i] ?? "", "", false)) return entries;
   }
   return entries;
 }

@@ -46,8 +46,10 @@ const UI_ROOT = process.cwd();
  * attachment settings raised the base entry to 530,081 B without moving this
  * gate. The shared file-kind icon mapping adds 264 B, taking it to 530,345 B.
  * 533 kB restores 2,655 B of headroom instead of banking room for more work.
+ * Composer starred-entry labels, send metadata and the shared editor take the
+ * combined entry to 536,758 B. 540 kB keeps the same small margin.
  */
-const STARTUP_CHUNK_BUDGET_BYTES = 533_000;
+const STARTUP_CHUNK_BUDGET_BYTES = 540_000;
 
 /**
  * Ceiling for a lazily-imported **syntax grammar**. Generous because a

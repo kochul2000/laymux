@@ -1,5 +1,5 @@
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::constants::{
     DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS, PARSER_ADMISSION_FOCUSED_SHARE_DEFAULT,
@@ -827,6 +827,56 @@ impl ParserAdmissionSettings {
     }
 }
 
+/// One host-global Composer shortcut (ADR-0226, ADR-0229).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ComposerStarredEntry {
+    pub value: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub send: bool,
+}
+
+impl ComposerStarredEntry {
+    pub fn from_value(value: impl Into<String>) -> Self {
+        Self {
+            value: value.into(),
+            label: String::new(),
+            send: false,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ComposerStarredEntry {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        match value {
+            serde_json::Value::String(text) => Ok(Self::from_value(text)),
+            serde_json::Value::Object(_) => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Raw {
+                    value: String,
+                    #[serde(default)]
+                    label: String,
+                    #[serde(default)]
+                    send: bool,
+                }
+                let raw: Raw = serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+                Ok(Self {
+                    value: raw.value,
+                    label: raw.label,
+                    send: raw.send,
+                })
+            }
+            other => Err(serde::de::Error::custom(format!(
+                "Composer starred entry must be a string or object, got {other}"
+            ))),
+        }
+    }
+}
+
 /// Terminal behavior & rendering settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -889,9 +939,9 @@ pub struct TerminalSettings {
     #[serde(default = "default_true")]
     pub composer_autocomplete: bool,
     /// Explicitly starred Composer entries, shared across every workspace and
-    /// surface on this host (ADR-0226).
+    /// surface on this host (ADR-0226, ADR-0229).
     #[serde(default)]
-    pub composer_starred_entries: Vec<String>,
+    pub composer_starred_entries: Vec<ComposerStarredEntry>,
 }
 
 impl Default for TerminalSettings {

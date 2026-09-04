@@ -27,7 +27,9 @@ import { defaultWidgets, normalizeWidgets, type WidgetsSettings } from "../lib/w
 import { TERMINAL_WRITE_DEFAULT_CLASS_SHARE } from "../lib/terminal-write-fair-scheduler";
 import {
   DEFAULT_COMPOSER_HISTORY_SCOPE,
+  normalizeComposerStarredEntries,
   type ComposerHistoryScope,
+  type ComposerStarredEntry,
 } from "../lib/terminal-input-composer-state";
 import {
   DEFAULT_SLEEP_PREVENTION_AXES,
@@ -201,8 +203,8 @@ export interface TerminalSettings {
   composerHistoryPopup: boolean;
   /** Composer: suggest matching past inputs as an autocomplete dropdown while typing (issue #505). */
   composerAutocomplete: boolean;
-  /** Explicitly persisted Composer entries shared by every workspace and surface (ADR-0226). */
-  composerStarredEntries: string[];
+  /** Explicitly persisted Composer entries shared by every workspace and surface (ADR-0226, ADR-0229). */
+  composerStarredEntries: ComposerStarredEntry[];
 }
 
 /** Pane control bar behavior. */
@@ -389,12 +391,7 @@ export type {
  * The xterm.js UI only renders a narrower subset via SupportedCursorShape.
  */
 export type CursorShape =
-  | "bar"
-  | "underscore"
-  | "filledBox"
-  | "emptyBox"
-  | "doubleUnderscore"
-  | "vintage";
+  "bar" | "underscore" | "filledBox" | "emptyBox" | "doubleUnderscore" | "vintage";
 export type SupportedCursorShape = "bar" | "underscore" | "filledBox";
 export type BellStyle = "audible" | "none" | "window" | "taskbar" | "all";
 export type CloseOnExit = "automatic" | "graceful" | "always" | "never";
@@ -1384,7 +1381,13 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
 
   setTerminal: (data) =>
     set((state) => ({
-      terminal: { ...state.terminal, ...data },
+      terminal: {
+        ...state.terminal,
+        ...data,
+        composerStarredEntries: normalizeComposerStarredEntries(
+          data.composerStarredEntries ?? state.terminal.composerStarredEntries,
+        ),
+      },
     })),
 
   setControlBar: (data) =>
@@ -1689,6 +1692,9 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           ...data.terminal,
           urlLinkActivation: normalizeLinkActivation(data.terminal.urlLinkActivation),
           pathLinkActivation: normalizeLinkActivation(data.terminal.pathLinkActivation),
+          composerStarredEntries: normalizeComposerStarredEntries(
+            data.terminal.composerStarredEntries,
+          ),
         }
       : undefined;
     const controlBar = data.controlBar ? { ...DEFAULT_CONTROL_BAR, ...data.controlBar } : undefined;

@@ -213,16 +213,16 @@ describe("selectComposerAutocompleteSuggestions (issue #505)", () => {
   it("returns newest-first prefix matches for the current query", () => {
     // History holds two "npm install"; only the most recent occurrence is kept.
     expect(selectComposerAutocompleteSuggestions(history, "npm")).toEqual([
-      "npm install",
-      "npm test",
-      "npm run build",
+      { value: "npm install", label: "", send: false },
+      { value: "npm test", label: "", send: false },
+      { value: "npm run build", label: "", send: false },
     ]);
   });
 
   it("matches case-insensitively while preserving the stored casing", () => {
     expect(selectComposerAutocompleteSuggestions(["Git Push", "git pull"], "git")).toEqual([
-      "git pull",
-      "Git Push",
+      { value: "git pull", label: "", send: false },
+      { value: "Git Push", label: "", send: false },
     ]);
   });
 
@@ -235,20 +235,38 @@ describe("selectComposerAutocompleteSuggestions (issue #505)", () => {
     expect(selectComposerAutocompleteSuggestions(["git status"], "git status")).toEqual([]);
   });
 
+  it("keeps an exact value match when the starred row is marked to send", () => {
+    expect(
+      selectComposerAutocompleteSuggestions(["git status"], "git status", 8, [
+        { value: "git status", label: "", send: true },
+      ]),
+    ).toEqual([{ value: "git status", label: "", send: true }]);
+  });
+
+  it("matches a starred label prefix as well as the insert value", () => {
+    expect(
+      selectComposerAutocompleteSuggestions(["git status"], "gs", 8, [
+        { value: "git status", label: " gs ", send: false },
+      ]),
+    ).toEqual([{ value: "git status", label: " gs ", send: false }]);
+  });
+
   it("returns nothing when no entry starts with the query", () => {
     expect(selectComposerAutocompleteSuggestions(history, "docker")).toEqual([]);
   });
 
   it("skips blank entries", () => {
-    expect(selectComposerAutocompleteSuggestions(["", "ls -la", ""], "ls")).toEqual(["ls -la"]);
+    expect(selectComposerAutocompleteSuggestions(["", "ls -la", ""], "ls")).toEqual([
+      { value: "ls -la", label: "", send: false },
+    ]);
   });
 
   it("caps the list at the requested maximum and returns nothing for a non-positive cap", () => {
     const many = Array.from({ length: 20 }, (_, i) => `cmd-${i}`);
     expect(selectComposerAutocompleteSuggestions(many, "cmd", 3)).toEqual([
-      "cmd-19",
-      "cmd-18",
-      "cmd-17",
+      { value: "cmd-19", label: "", send: false },
+      { value: "cmd-18", label: "", send: false },
+      { value: "cmd-17", label: "", send: false },
     ]);
     expect(selectComposerAutocompleteSuggestions(many, "cmd", 0)).toEqual([]);
   });
@@ -266,7 +284,12 @@ describe("selectComposerAutocompleteSuggestions (issue #505)", () => {
         "git checkout",
         "git push",
       ]),
-    ).toEqual(["git push", "git checkout", "git diff", "git status"]);
+    ).toEqual([
+      { value: "git push", label: "", send: false },
+      { value: "git checkout", label: "", send: false },
+      { value: "git diff", label: "", send: false },
+      { value: "git status", label: "", send: false },
+    ]);
   });
 });
 
@@ -693,7 +716,7 @@ describe("입력 내용 in-memory only 보장 (보안: 비밀번호 등 누출 �
 
     // They return derived, in-memory views of the input...
     expect(popup).toContain(SECRETS[0]);
-    expect(suggestions).toContain(SECRETS[0]);
+    expect(suggestions.map((s) => s.value)).toContain(SECRETS[0]);
     // ...without persisting anything.
     expect(setItemSpy).not.toHaveBeenCalled();
     expect(serializeStorage(localStorage)).not.toContain(SECRETS[0]);

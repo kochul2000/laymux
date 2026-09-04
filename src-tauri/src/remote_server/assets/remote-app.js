@@ -64,6 +64,15 @@ import {
         const composerInput = $("composerInput");
         const composerHistoryList = $("composerHistoryList");
         const composerAutocompleteList = $("composerAutocompleteList");
+        const composerStarEditorScrim = $("composerStarEditorScrim");
+        const composerStarEditorLabel = $("composerStarEditorLabel");
+        const composerStarEditorValue = $("composerStarEditorValue");
+        const composerStarEditorSend = $("composerStarEditorSend");
+        const composerStarEditorError = $("composerStarEditorError");
+        const composerStarEditorSave = $("composerStarEditorSave");
+        const composerStarEditorCancel = $("composerStarEditorCancel");
+        const composerStarEditorClose = $("composerStarEditorClose");
+        let composerStarEditorPreviousValue = null;
         const workspaceSection = $("workspaceSection");
         const hiddenWorkspaceSection = $("hiddenWorkspaceSection");
         const newWorkspaceButton = $("newWorkspace");
@@ -418,6 +427,43 @@ import {
         const composerHistoryByScopeKey = new Map();
         let composerStarredEntries = [];
         let composerStarsRevision = -1;
+        const COMPOSER_STARRED_EDITOR_LONG_PRESS_MS = 500;
+
+        function normalizeComposerStarredEntry(raw) {
+          if (typeof raw === "string") {
+            return raw ? { value: raw, label: "", send: false } : null;
+          }
+          if (!raw || typeof raw !== "object" || typeof raw.value !== "string" || !raw.value) {
+            return null;
+          }
+          return {
+            value: raw.value,
+            label: typeof raw.label === "string" ? raw.label : "",
+            send: raw.send === true,
+          };
+        }
+
+        function normalizeComposerStarredEntries(raw) {
+          if (!Array.isArray(raw)) return [];
+          const seen = new Set();
+          const entries = [];
+          for (const item of raw) {
+            const entry = normalizeComposerStarredEntry(item);
+            if (!entry || seen.has(entry.value)) continue;
+            seen.add(entry.value);
+            entries.push(entry);
+          }
+          return entries;
+        }
+
+        function isComposerStarred(value) {
+          return composerStarredEntries.some((entry) => entry.value === value);
+        }
+
+        function composerSuggestionDisplay(suggestion) {
+          const label = typeof suggestion.label === "string" ? suggestion.label.trim() : "";
+          return label || suggestion.value;
+        }
         const MAX_COMPOSER_HISTORY = 200;
         const DEFAULT_COMPOSER_HISTORY_POPUP_ITEMS = 8;
         const DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS = 8;
@@ -3137,15 +3183,25 @@ import {
           const needle = query.toLowerCase();
           const seen = new Set();
           const entries = [];
-          for (const source of [starredEntries, history]) {
-            for (let i = source.length - 1; i >= 0; i -= 1) {
-              const entry = source[i];
-              if (!entry || entry === query || seen.has(entry)) continue;
-              if (!entry.toLowerCase().startsWith(needle)) continue;
-              seen.add(entry);
-              entries.push(entry);
-              if (entries.length >= max) return entries;
-            }
+          const consider = (value, label, send) => {
+            if (!value || seen.has(value)) return false;
+            if (value === query && !send) return false;
+            const valueMatch = value.toLowerCase().startsWith(needle);
+            const normalizedLabel = label.trim();
+            const labelMatch =
+              normalizedLabel.length > 0 && normalizedLabel.toLowerCase().startsWith(needle);
+            if (!valueMatch && !labelMatch) return false;
+            seen.add(value);
+            entries.push({ value, label, send });
+            return entries.length >= max;
+          };
+          const starred = normalizeComposerStarredEntries(starredEntries);
+          for (let i = starred.length - 1; i >= 0; i -= 1) {
+            const entry = starred[i];
+            if (consider(entry.value, entry.label, entry.send)) return entries;
+          }
+          for (let i = history.length - 1; i >= 0; i -= 1) {
+            if (consider(history[i] || "", "", false)) return entries;
           }
           return entries;
         }
@@ -3240,19 +3296,77 @@ import {
           renderComposerSuggestions();
         }
 
-        function commitComposerAutocompleteEntry(entry) {
+        function commitComposerAutocompleteEntry(suggestion) {
           dismissComposerAutocomplete();
-          if (entry != null) setComposerDraftText(entry);
+          if (suggestion != null) {
+            setComposerDraftText(suggestion.value);
+            if (suggestion.send) commitComposer();
+          }
           renderComposerSuggestions();
         }
 
-        function buildComposerSuggestList(listEl, entries, activeIndex, onPick) {
+        function suggestionFromHistory(entry) {
+          return { value: entry, label: "", send: false };
+        }
+
+        function bindComposerLongPress(pick, suggestion) {
+          pick.addEventListener("pointerdown", (event) => {
+            if (event.button != null && event.button !== 0) return;
+            if (event.isPrimary === false && event.pointerType) return;
+            const pointerId = event.pointerId;
+            const startX = event.clientX;
+            const startY = event.clientY;
+            let fired = false;
+            let moved = false;
+            try {
+              pick.setPointerCapture(pointerId);
+            } catch (_) {}
+            const timer = window.setTimeout(() => {
+              fired = true;
+              openComposerStarEditor(suggestion);
+            }, COMPOSER_STARRED_EDITOR_LONG_PRESS_MS);
+            const stop = () => {
+              window.clearTimeout(timer);
+              try {
+                pick.releasePointerCapture(pointerId);
+              } catch (_) {}
+              pick.removeEventListener("pointerup", onUp);
+              pick.removeEventListener("pointercancel", onCancel);
+              pick.removeEventListener("pointermove", onMove);
+            };
+            const onMove = (move) => {
+              if (move.pointerId !== pointerId) return;
+              if (Math.hypot(move.clientX - startX, move.clientY - startY) > 8) {
+                moved = true;
+                stop();
+              }
+            };
+            const onUp = (up) => {
+              if (up.pointerId !== pointerId) return;
+              stop();
+              if (fired || moved) return;
+              up.preventDefault();
+              commitComposerAutocompleteEntry(suggestion);
+            };
+            const onCancel = (cancel) => {
+              if (cancel.pointerId !== pointerId) return;
+              stop();
+            };
+            pick.addEventListener("pointerup", onUp);
+            pick.addEventListener("pointercancel", onCancel);
+            pick.addEventListener("pointermove", onMove);
+          });
+        }
+
+        function buildComposerSuggestList(listEl, entries, activeIndex, onPick, longPress) {
           listEl.textContent = "";
-          entries.forEach((entry, index) => {
+          entries.forEach((raw, index) => {
+            const suggestion =
+              typeof raw === "string" ? suggestionFromHistory(raw) : raw;
             const item = document.createElement("li");
             item.className = `composer-suggest-item${index === activeIndex ? " is-active" : ""}`;
             item.setAttribute("role", "none");
-            item.title = entry;
+            item.title = suggestion.value;
 
             const pick = document.createElement("button");
             pick.type = "button";
@@ -3260,18 +3374,33 @@ import {
             pick.id = `${listEl.id}-option-${index}`;
             pick.setAttribute("role", "option");
             pick.setAttribute("aria-selected", index === activeIndex ? "true" : "false");
-            pick.textContent = entry;
-            // mousedown (not click) so the textarea keeps focus through the pick.
-            pick.addEventListener("mousedown", (event) => {
-              event.preventDefault();
-              onPick(entry);
-            });
+            pick.textContent = composerSuggestionDisplay(suggestion);
+            if (suggestion.send) {
+              const mark = document.createElement("span");
+              mark.className = "composer-suggest-send";
+              mark.setAttribute("aria-hidden", "true");
+              mark.textContent = "↵";
+              pick.append(mark);
+            }
+            if (longPress) {
+              pick.addEventListener("mousedown", (event) => event.preventDefault());
+              bindComposerLongPress(pick, suggestion);
+            } else {
+              // mousedown (not click) so the textarea keeps focus through the pick.
+              pick.addEventListener("mousedown", (event) => {
+                event.preventDefault();
+                onPick(raw);
+              });
+            }
 
-            const starred = composerStarredEntries.includes(entry);
+            const starred = isComposerStarred(suggestion.value);
             const star = document.createElement("button");
             star.type = "button";
             star.className = "composer-suggest-star";
-            star.setAttribute("aria-label", `${starred ? "Unstar" : "Star"}: ${entry}`);
+            star.setAttribute(
+              "aria-label",
+              `${starred ? "Unstar" : "Star"}: ${suggestion.value}`
+            );
             star.setAttribute("aria-pressed", starred ? "true" : "false");
             star.title = starred ? "Unstar" : "Star";
             setRemoteIcon(star, "Star", { size: 13, fill: starred ? "currentColor" : "none" });
@@ -3281,7 +3410,7 @@ import {
             });
             star.addEventListener("click", (event) => {
               event.stopPropagation();
-              updateComposerStar(entry, !starred).catch((error) =>
+              updateComposerStar(suggestion.value, !starred).catch((error) =>
                 setStatus(error.message || String(error), true)
               );
             });
@@ -3299,12 +3428,18 @@ import {
           installComposerStars(data, activeLeaseId);
         }
 
-        async function updateComposerStar(text, starred) {
+        async function updateComposerStar(value, starred, extra = {}) {
           const activeLeaseId = leaseId;
           if (!activeLeaseId) return;
           const data = await remoteFetch("/remote/v1/composer/starred", {
             method: "POST",
-            body: JSON.stringify({ leaseId: activeLeaseId, text, starred }),
+            body: JSON.stringify({
+              leaseId: activeLeaseId,
+              value,
+              text: value,
+              starred,
+              ...extra,
+            }),
           });
           installComposerStars(data, activeLeaseId);
         }
@@ -3314,19 +3449,90 @@ import {
           if (
             leaseId !== activeLeaseId ||
             !Number.isSafeInteger(revision) ||
-            revision < composerStarsRevision ||
-            !Array.isArray(data.entries)
+            revision < composerStarsRevision
           ) {
             return;
           }
+          if (!Array.isArray(data.entries)) {
+            if (revision > composerStarsRevision) composerStarsRevision = revision;
+            return;
+          }
           composerStarsRevision = revision;
-          composerStarredEntries = data.entries.filter((entry) => typeof entry === "string");
+          composerStarredEntries = normalizeComposerStarredEntries(data.entries);
           renderComposerSuggestions();
         }
+
+        function closeComposerStarEditor() {
+          if (!composerStarEditorScrim) return;
+          composerStarEditorScrim.hidden = true;
+          composerStarEditorPreviousValue = null;
+          if (composerStarEditorError) {
+            composerStarEditorError.hidden = true;
+            composerStarEditorError.textContent = "";
+          }
+          focusCurrentInputSurface();
+        }
+
+        function openComposerStarEditor(suggestion) {
+          if (!composerStarEditorScrim || !suggestion) return;
+          dismissComposerAutocomplete();
+          renderComposerSuggestions();
+          const existing = composerStarredEntries.find((entry) => entry.value === suggestion.value);
+          composerStarEditorPreviousValue = existing ? existing.value : null;
+          const entry = existing || {
+            value: suggestion.value,
+            label: suggestion.label || "",
+            send: suggestion.send === true,
+          };
+          composerStarEditorLabel.value = entry.label;
+          composerStarEditorValue.value = entry.value;
+          composerStarEditorSend.checked = entry.send;
+          if (composerStarEditorError) {
+            composerStarEditorError.hidden = true;
+            composerStarEditorError.textContent = "";
+          }
+          composerStarEditorScrim.hidden = false;
+          try {
+            composerStarEditorLabel.focus();
+            composerStarEditorLabel.select();
+          } catch (_) {}
+        }
+
+        async function saveComposerStarEditor() {
+          const value = composerStarEditorValue.value || "";
+          if (!value) return;
+          try {
+            await updateComposerStar(value, true, {
+              label: (composerStarEditorLabel.value || "").trim(),
+              send: composerStarEditorSend.checked,
+              previousValue: composerStarEditorPreviousValue || undefined,
+            });
+            closeComposerStarEditor();
+          } catch (error) {
+            if (composerStarEditorError) {
+              composerStarEditorError.hidden = false;
+              composerStarEditorError.textContent = error.message || String(error);
+            } else {
+              setStatus(error.message || String(error), true);
+            }
+          }
+        }
+
+        composerStarEditorSave?.addEventListener("click", () => {
+          saveComposerStarEditor().catch((error) =>
+            setStatus(error.message || String(error), true)
+          );
+        });
+        composerStarEditorCancel?.addEventListener("click", closeComposerStarEditor);
+        composerStarEditorClose?.addEventListener("click", closeComposerStarEditor);
+        composerStarEditorScrim?.addEventListener("click", (event) => {
+          if (event.target === composerStarEditorScrim) closeComposerStarEditor();
+        });
 
         function resetComposerStars() {
           composerStarsRevision = -1;
           composerStarredEntries = [];
+          closeComposerStarEditor();
           renderComposerSuggestions();
         }
 
@@ -3350,7 +3556,8 @@ import {
               composerHistoryList,
               historyEntries,
               composerHistoryIndex,
-              commitComposerHistoryEntry
+              commitComposerHistoryEntry,
+              false
             );
           } else if (composerHistoryList.childElementCount) {
             composerHistoryList.textContent = "";
@@ -3362,7 +3569,8 @@ import {
               composerAutocompleteList,
               suggestions,
               activeAutocompleteIndex,
-              commitComposerAutocompleteEntry
+              commitComposerAutocompleteEntry,
+              true
             );
           } else if (composerAutocompleteList.childElementCount) {
             composerAutocompleteList.textContent = "";
@@ -6426,6 +6634,10 @@ import {
           }
           if (!fileViewerOverlayElement.hidden) {
             closeFileViewer();
+            return true;
+          }
+          if (composerStarEditorScrim && !composerStarEditorScrim.hidden) {
+            closeComposerStarEditor();
             return true;
           }
           if (navToggleButton.getAttribute("aria-expanded") === "true") {
