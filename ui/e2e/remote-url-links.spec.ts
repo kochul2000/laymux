@@ -159,9 +159,11 @@ type RemoteTerminalWindow = typeof window & {
     cols: number;
     rows: number;
     getSelection: () => string;
+    textarea?: HTMLTextAreaElement;
   };
   __copiedSelections?: string[];
   __openedExternalUrls?: string[];
+  __focusSteals?: { helperFocus: number; composerBlur: number };
 };
 
 /**
@@ -578,20 +580,20 @@ test.describe("touch URL activation", () => {
       .toEqual(["bravo om"]);
   });
 
-  test("long press selection keeps composer focus and does not scroll", async ({
-    context,
-    page,
-  }) => {
+  async function connectRemoteWithWords(
+    context: BrowserContext,
+    page: import("@playwright/test").Page,
+    inputMode: "composer" | "direct",
+  ) {
     await installRemoteMocks(context);
-    await page.addInitScript(() => {
-      localStorage.setItem("laymux.remote.inputMode", "composer");
-    });
+    await page.addInitScript((mode) => {
+      localStorage.setItem("laymux.remote.inputMode", mode);
+    }, inputMode);
     await page.routeWebSocket(/\/remote\/v1\/terminals\/terminal-1\/output/, (socket) => {
       const { header, payload } = snapshotFrames(snapshotText);
       socket.send(header);
       socket.send(payload);
     });
-
     await page.goto("http://remote.test/remote/#token=remote-secret");
     await page.evaluate(() => {
       const target = window as RemoteTerminalWindow;
@@ -613,12 +615,32 @@ test.describe("touch URL activation", () => {
         ),
       )
       .toContain("Words: alpha bravo omega");
+  }
 
-    const composer = page.locator("#composerInput");
-    await expect(composer).toBeVisible();
-    await composer.focus();
-    await expect(composer).toBeFocused();
+  async function installFocusStealCounters(page: import("@playwright/test").Page) {
+    await page.evaluate(() => {
+      const target = window as RemoteTerminalWindow;
+      const textarea = target.__remoteTerm?.textarea;
+      const composer = document.getElementById("composerInput");
+      const counts = { helperFocus: 0, composerBlur: 0 };
+      target.__focusSteals = counts;
+      if (textarea) {
+        const original = textarea.focus.bind(textarea);
+        textarea.focus = function focus(options?: FocusOptions) {
+          counts.helperFocus += 1;
+          return original(options);
+        };
+      }
+      composer?.addEventListener("blur", () => {
+        counts.composerBlur += 1;
+      });
+    });
+  }
 
+  async function longPressBravoCell(
+    context: BrowserContext,
+    page: import("@playwright/test").Page,
+  ) {
     await page.waitForTimeout(250);
     const screenBox = await page.locator(".xterm-screen").boundingBox();
     expect(screenBox).not.toBeNull();
@@ -630,16 +652,29 @@ test.describe("touch URL activation", () => {
     const cellHeight = screenBox!.height / geometry.rows;
     const x = screenBox!.x + ("Words: alpha ".length + 2.5) * cellWidth;
     const y = screenBox!.y + 7.5 * cellHeight;
-    const viewportYBefore = await page.evaluate(
-      () => (window as RemoteTerminalWindow).__remoteTerm?.buffer.active.viewportY ?? 0,
-    );
     const cdp = await context.newCDPSession(page);
-
     await cdp.send("Input.dispatchTouchEvent", {
       type: "touchStart",
       touchPoints: [{ x, y }],
     });
     await page.waitForTimeout(550);
+    return { cdp, screenBox: screenBox!, cellWidth, x, y };
+  }
+
+  test("long press selection keeps composer focus and does not scroll", async ({
+    context,
+    page,
+  }) => {
+    await connectRemoteWithWords(context, page, "composer");
+
+    const composer = page.locator("#composerInput");
+    await expect(composer).toBeVisible();
+    await composer.focus();
+    await expect(composer).toBeFocused();
+    await installFocusStealCounters(page);
+
+    const beforeBox = await page.locator(".xterm-screen").boundingBox();
+    const { cdp, screenBox, cellWidth, y } = await longPressBravoCell(context, page);
 
     await expect
       .poll(() =>
@@ -647,13 +682,14 @@ test.describe("touch URL activation", () => {
       )
       .toBe("bravo");
     await expect(composer).toBeFocused();
-    expect(
-      await page.evaluate(
-        () => (window as RemoteTerminalWindow).__remoteTerm?.buffer.active.viewportY ?? 0,
-      ),
-    ).toBe(viewportYBefore);
+    expect(await page.evaluate(() => (window as RemoteTerminalWindow).__focusSteals)).toEqual({
+      helperFocus: 0,
+      composerBlur: 0,
+    });
+    const afterSeedBox = await page.locator(".xterm-screen").boundingBox();
+    expect(afterSeedBox).toEqual(beforeBox);
 
-    const dragX = screenBox!.x + 21.1 * cellWidth;
+    const dragX = screenBox.x + 21.1 * cellWidth;
     await cdp.send("Input.dispatchTouchEvent", {
       type: "touchMove",
       touchPoints: [{ x: dragX, y }],
@@ -665,12 +701,53 @@ test.describe("touch URL activation", () => {
       )
       .toBe("bravo om");
     await expect(composer).toBeFocused();
-    expect(
-      await page.evaluate(
-        () => (window as RemoteTerminalWindow).__remoteTerm?.buffer.active.viewportY ?? 0,
-      ),
-    ).toBe(viewportYBefore);
+    expect(await page.evaluate(() => (window as RemoteTerminalWindow).__focusSteals)).toEqual({
+      helperFocus: 0,
+      composerBlur: 0,
+    });
 
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  });
+
+  test("long press selection does not raise composer or helper focus", async ({
+    context,
+    page,
+  }) => {
+    await connectRemoteWithWords(context, page, "composer");
+    await expect(page.locator("#composerInput")).not.toBeFocused();
+    await installFocusStealCounters(page);
+
+    const { cdp } = await longPressBravoCell(context, page);
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as RemoteTerminalWindow).__remoteTerm?.getSelection() || ""),
+      )
+      .toBe("bravo");
+    await expect(page.locator("#composerInput")).not.toBeFocused();
+    expect(await page.evaluate(() => (window as RemoteTerminalWindow).__focusSteals)).toEqual({
+      helperFocus: 0,
+      composerBlur: 0,
+    });
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  });
+
+  test("long press selection keeps direct helper textarea focus", async ({ context, page }) => {
+    await connectRemoteWithWords(context, page, "direct");
+    const helper = page.locator(".xterm-helper-textarea");
+    await helper.focus();
+    await expect(helper).toBeFocused();
+    await installFocusStealCounters(page);
+
+    const { cdp } = await longPressBravoCell(context, page);
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as RemoteTerminalWindow).__remoteTerm?.getSelection() || ""),
+      )
+      .toBe("bravo");
+    await expect(helper).toBeFocused();
+    expect(
+      await page.evaluate(() => (window as RemoteTerminalWindow).__focusSteals?.helperFocus),
+    ).toBe(0);
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   });
 });
