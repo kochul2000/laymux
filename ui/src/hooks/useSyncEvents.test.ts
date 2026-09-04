@@ -4,6 +4,7 @@ import { useSyncEvents } from "./useSyncEvents";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useSettingsStore } from "@/stores/settings-store";
 
 vi.mock("@/lib/persist-session", () => ({
   persistSession: vi.fn().mockResolvedValue(undefined),
@@ -22,6 +23,7 @@ const mockOnTerminalCwdChanged = vi.fn();
 const mockOnTerminalTitleChanged = vi.fn();
 const mockOnTerminalOutputActivity = vi.fn();
 const mockOnTerminalActivityReconciled = vi.fn();
+const mockOnComposerStarredEntriesChanged = vi.fn();
 const mockMarkClaudeTerminal = vi.fn().mockResolvedValue(true);
 
 const mockSendDesktopNotification = vi.fn().mockResolvedValue(undefined);
@@ -40,6 +42,8 @@ vi.mock("@/lib/tauri-api", () => ({
   onTerminalTitleChanged: (...args: unknown[]) => mockOnTerminalTitleChanged(...args),
   onTerminalOutputActivity: (...args: unknown[]) => mockOnTerminalOutputActivity(...args),
   onTerminalActivityReconciled: (...args: unknown[]) => mockOnTerminalActivityReconciled(...args),
+  onComposerStarredEntriesChanged: (...args: unknown[]) =>
+    mockOnComposerStarredEntriesChanged(...args),
   markClaudeTerminal: (...args: unknown[]) => mockMarkClaudeTerminal(...args),
   getTerminalStates: (...args: unknown[]) => mockGetTerminalStates(...args),
   sendOsNotification: vi.fn().mockResolvedValue(undefined),
@@ -57,6 +61,7 @@ describe("useSyncEvents", () => {
   beforeEach(() => {
     useTerminalStore.setState(useTerminalStore.getInitialState());
     useNotificationStore.setState(useNotificationStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
     vi.clearAllMocks();
 
     // Set up mock return values (unlisten functions)
@@ -72,6 +77,7 @@ describe("useSyncEvents", () => {
     mockOnTerminalTitleChanged.mockResolvedValue(unlisten);
     mockOnTerminalOutputActivity.mockResolvedValue(unlisten);
     mockOnTerminalActivityReconciled.mockResolvedValue(unlisten);
+    mockOnComposerStarredEntriesChanged.mockResolvedValue(unlisten);
     mockGetTerminalSerializeMap.mockReturnValue(new Map());
   });
 
@@ -93,6 +99,20 @@ describe("useSyncEvents", () => {
   it("registers set-tab-title listener on mount", () => {
     renderHook(() => useSyncEvents());
     expect(mockOnSetTabTitle).toHaveBeenCalledWith(expect.any(Function));
+  });
+
+  it("applies Composer starred-entry events to the settings store", () => {
+    renderHook(() => useSyncEvents());
+
+    act(() => {
+      mockOnComposerStarredEntriesChanged.mock.calls[0][0]([
+        { value: "git status", label: "gs", send: true },
+      ]);
+    });
+
+    expect(useSettingsStore.getState().terminal.composerStarredEntries).toEqual([
+      { value: "git status", label: "gs", send: true },
+    ]);
   });
 
   it("updates terminal cwd on sync-cwd event", () => {
