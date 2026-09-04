@@ -2079,6 +2079,12 @@
         touch-action: none;
         user-select: none;
       }
+      /* Same reason as the flick pad: a repeating key owns the whole gesture,
+         so the scrolling key row must not steal it on a few px of drift. */
+      .key-repeat-btn {
+        touch-action: none;
+        user-select: none;
+      }
       .key-flick-btn.flicking {
         border-color: var(--accent-50);
         background: var(--accent-12);
