@@ -204,11 +204,17 @@ describe("xterm blur contract during composition (issue #555)", () => {
     expect(readXtermComposing(terminal)).toBe(true);
   });
 
-  it("cannot recover the text from a compositionend that arrives after the blur", async () => {
-    // Slice source already empty, so the deferred finalizer has nothing to send.
+  it("ignores a late compositionend without swallowing fresh input after refocus", async () => {
     const { terminal, helper } = mountTerminal();
     const data: string[] = [];
     terminal.onData((d) => data.push(d));
+    const controller = createImeCompositionController({
+      getCols: () => 80,
+      getAnchor: () => ({ cursorX: 0, cursorAbsY: 0 }),
+      getXtermPendingSend: () => readPendingCompositionSend(terminal)?.pending ?? false,
+      onCommit: (text) => data.push(text),
+    });
+    controller.bind(helper);
 
     helper.focus();
     helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
@@ -218,12 +224,17 @@ describe("xterm blur contract during composition (issue #555)", () => {
     helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uac00" }));
     helper.dispatchEvent(new Event("input"));
     helper.blur();
-    await flushFinalizer();
 
     helper.dispatchEvent(new CompositionEvent("compositionend", { data: "\uac00" }));
+    helper.focus();
+    helper.value = "a";
+    helper.dispatchEvent(
+      new InputEvent("input", { data: "a", inputType: "insertText", bubbles: true }),
+    );
     await flushFinalizer();
 
-    expect(data).toEqual([]);
+    expect(data.join("")).toBe("\uac00a");
+    controller.dispose();
   });
 
   it("flushes finalized text before blur clears the textarea", async () => {
@@ -287,6 +298,7 @@ describe("xterm blur contract during composition (issue #555)", () => {
     });
     controller.bind(helper);
 
+    helper.value = "이미 보낸 긴 잔여물";
     helper.focus();
     helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
     helper.value = "\uac00";

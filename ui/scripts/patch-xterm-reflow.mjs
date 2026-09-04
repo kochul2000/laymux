@@ -113,10 +113,14 @@ const compositionGenerationMethods = compositionGenerationMethodsWithEndData
     "t&&t.valueEnd===null&&(t.valueEnd=this._textarea.value.length)",
     "t&&t.valueSnapshot===null&&(t.valueSnapshot=this._textarea.value)",
   )
+  .replace(
+    "return e&&!e.done?(e.observations.push(t),!0):!1",
+    "return e&&!e.done&&!e.cancelled?(e.observations.push(t),!0):!1",
+  )
   .replace("e.done=!0;const i=", "e.done=!0;if(e.cancelled){if(e===t)break;continue}const i=")
   .replace(
     "s=e.valueEnd===null?this._textarea.value.length:e.valueEnd,r=this._textarea.value.substring(i,Math.max(i,s))",
-    "s=e.valueSnapshot===null?this._textarea.value:e.valueSnapshot,r=s.substring(i)",
+    "s=e.valueSnapshot===null?this._textarea.value:e.valueSnapshot,r=i>s.length&&e.committed&&s.includes(e.committed)?s:s.substring(i)",
   )
   .replace(
     'let n=this._textarea.ownerDocument.activeElement===this._textarea?this._mergeCompositionData(r,e.committed||""):r',

@@ -30,10 +30,12 @@ const compositionEndDataEnabledAtStart = "this._compositionEndDataAllowed=!0";
 const compositionBlurHandoff =
   '_handleTextAreaBlur(){this._compositionHelper.blur(),this.textarea.value=""';
 const compositionCancelledFlush = "if(e.cancelled){if(e===t)break;continue}";
+const compositionCancelledObservationReject =
+  "e&&!e.done&&!e.cancelled?(e.observations.push(t),!0):!1";
 const compositionGenerationSnapshot =
   "t&&t.valueSnapshot===null&&(t.valueSnapshot=this._textarea.value)";
 const compositionSnapshotCandidate =
-  "s=e.valueSnapshot===null?this._textarea.value:e.valueSnapshot,r=s.substring(i)";
+  "s=e.valueSnapshot===null?this._textarea.value:e.valueSnapshot,r=i>s.length&&e.committed&&s.includes(e.committed)?s:s.substring(i)";
 const compositionCandidateFirstFold =
   'let n=this._mergeCompositionData(r,e.committed||""),o="",l=!1;for(const t of e.observations)l?n=this._mergeCompositionData(n,t,!0):n.includes(t)?(o&&(n=this._mergeCompositionData(n,o)),l=!0):o=this._mergeCompositionData(t,o);l||!o||(n=this._mergeCompositionData(n,o))';
 const compositionAnchoredTieOrder = "i>s||o&&i===s?t+e.substring(i):e+t.substring(s)";
@@ -127,6 +129,8 @@ describe("pinned xterm bundle patches", () => {
     expect(commonJsSource).toContain(compositionBlurHandoff);
     expect(moduleSource).toContain(compositionCancelledFlush);
     expect(commonJsSource).toContain(compositionCancelledFlush);
+    expect(moduleSource).toContain(compositionCancelledObservationReject);
+    expect(commonJsSource).toContain(compositionCancelledObservationReject);
     expect(moduleSource).toContain(compositionGenerationSnapshot);
     expect(commonJsSource).toContain(compositionGenerationSnapshot);
     expect(moduleSource).toContain(compositionSnapshotCandidate);
