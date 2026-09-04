@@ -304,7 +304,12 @@ import {
 import { TerminalParserAdmission, terminalParserPriority } from "@/lib/terminal-parser-admission";
 
 type TerminalWriteCallbackFailureStage =
-  "metrics" | "monitor" | "consumer" | "refresh" | "drain" | "unknown";
+  | "metrics"
+  | "monitor"
+  | "consumer"
+  | "refresh"
+  | "drain"
+  | "unknown";
 
 const TERMINAL_WRITE_CALLBACK_STAGE_COUNTER: Record<
   TerminalWriteCallbackFailureStage,
@@ -6988,17 +6993,15 @@ export function TerminalView({
             .catch((error) => console.warn("Failed to update Composer star", error));
         }}
         onUpsertStarredEntry={(entry, previousValue) => {
-          void setComposerStarredEntry({
+          return setComposerStarredEntry({
             text: entry.value,
             starred: true,
             label: entry.label,
             send: entry.send,
             previousText: previousValue,
-          })
-            .then((entries) =>
-              useSettingsStore.getState().setTerminal({ composerStarredEntries: entries }),
-            )
-            .catch((error) => console.warn("Failed to update Composer star", error));
+          }).then((entries) =>
+            useSettingsStore.getState().setTerminal({ composerStarredEntries: entries }),
+          );
         }}
       />
     </div>

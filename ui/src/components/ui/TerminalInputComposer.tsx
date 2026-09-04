@@ -115,7 +115,10 @@ export interface TerminalInputComposerProps {
   /** Host-global explicitly persisted entries (ADR-0226, ADR-0229). */
   starredEntries?: readonly ComposerStarredEntryInput[];
   onToggleStar?: (entry: string, starred: boolean) => void;
-  onUpsertStarredEntry?: (entry: ComposerStarredEntry, previousValue?: string) => void;
+  onUpsertStarredEntry?: (
+    entry: ComposerStarredEntry,
+    previousValue?: string,
+  ) => void | Promise<void>;
   /** Maximum number of suggestions shown in the autocomplete dropdown. */
   maxAutocompleteItems?: number;
   className?: string;
@@ -261,12 +264,14 @@ export function TerminalInputComposer({
     previousValue?: string;
     entry: ComposerStarredEntry;
   } | null>(null);
+  const [starredEditorError, setStarredEditorError] = useState("");
   const openStarredEditor = (suggestion: ComposerAutocompleteSuggestion) => {
     if (!onUpsertStarredEntry) return;
     const existing = normalizeComposerStarredEntries(starredEntries).find(
       (entry) => entry.value === suggestion.value,
     );
     dismissAutocomplete();
+    setStarredEditorError("");
     setStarredEditor({
       previousValue: existing?.value,
       entry: existing ?? {
@@ -275,6 +280,16 @@ export function TerminalInputComposer({
         send: suggestion.send,
       },
     });
+  };
+  const saveStarredEditor = async (entry: ComposerStarredEntry) => {
+    if (!starredEditor || !onUpsertStarredEntry) return;
+    setStarredEditorError("");
+    try {
+      await onUpsertStarredEntry(entry, starredEditor.previousValue);
+      setStarredEditor(null);
+    } catch (error) {
+      setStarredEditorError(String(error));
+    }
   };
 
   const renderStarButton = (entry: string) => {
@@ -756,6 +771,7 @@ export function TerminalInputComposer({
         <ComposerStarredEntryEditor
           title={labels.starredEditor}
           initial={starredEditor.entry}
+          error={starredEditorError}
           labels={{
             label: labels.starredLabel,
             value: labels.starredValue,
@@ -764,11 +780,11 @@ export function TerminalInputComposer({
             save: labels.starredSave,
             cancel: labels.starredCancel,
           }}
-          onClose={() => setStarredEditor(null)}
-          onSave={(entry) => {
-            onUpsertStarredEntry?.(entry, starredEditor.previousValue);
+          onClose={() => {
             setStarredEditor(null);
+            setStarredEditorError("");
           }}
+          onSave={(entry) => void saveStarredEditor(entry)}
         />
       ) : null}
     </div>

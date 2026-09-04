@@ -446,7 +446,7 @@ fn mutate_composer_starred_entries(
             .filter(|text| !text.is_empty())
             .unwrap_or(value);
         let previous_len = entries.len();
-        entries.retain(|entry| entry.value != remove_value && entry.value != value);
+        entries.retain(|entry| entry.value != remove_value);
         return Ok(entries.len() != previous_len);
     }
 
@@ -455,9 +455,8 @@ fn mutate_composer_starred_entries(
         validate_composer_starred_label(label)?;
     }
 
-    let identity = previous_value
-        .filter(|text| !text.is_empty())
-        .unwrap_or(value);
+    let previous_identity = previous_value.filter(|text| !text.is_empty());
+    let identity = previous_identity.unwrap_or(value);
     if let Some(index) = entries.iter().position(|entry| entry.value == identity) {
         if value != identity && entries.iter().any(|entry| entry.value == value) {
             return Err(COMPOSER_STARRED_ENTRY_DUPLICATE_ERROR.into());
@@ -470,6 +469,9 @@ fn mutate_composer_starred_entries(
         ));
     }
     if let Some(index) = entries.iter().position(|entry| entry.value == value) {
+        if previous_identity.is_some() {
+            return Err(COMPOSER_STARRED_ENTRY_DUPLICATE_ERROR.into());
+        }
         return Ok(apply_composer_starred_metadata(
             &mut entries[index],
             value,
@@ -829,7 +831,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_value(&parsed[0]).unwrap(),
-            serde_json::json!({ "value": "git status" })
+            serde_json::json!({ "value": "git status", "label": "", "send": false })
         );
 
         let mut entries = vec![ComposerStarredEntry::from_value("git status")];
@@ -876,6 +878,33 @@ mod tests {
             .unwrap_err(),
             COMPOSER_STARRED_ENTRY_DUPLICATE_ERROR
         );
+
+        entries.remove(0);
+        assert_eq!(
+            mutate_composer_starred_entries(
+                &mut entries,
+                "git push",
+                true,
+                Some("overwritten"),
+                None,
+                Some("git pull"),
+            )
+            .unwrap_err(),
+            COMPOSER_STARRED_ENTRY_DUPLICATE_ERROR
+        );
+        assert_eq!(entries[0].label, "");
+
+        entries.insert(0, ComposerStarredEntry::from_value("git pull"));
+        assert!(mutate_composer_starred_entries(
+            &mut entries,
+            "git push",
+            false,
+            None,
+            None,
+            Some("git pull"),
+        )
+        .unwrap());
+        assert_eq!(entries, [ComposerStarredEntry::from_value("git push")]);
     }
 
     #[test]

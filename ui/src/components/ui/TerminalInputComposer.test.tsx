@@ -815,6 +815,39 @@ describe("TerminalInputComposer", () => {
       }
     });
 
+    it("keeps the starred editor and draft visible when saving fails", async () => {
+      vi.useFakeTimers();
+      try {
+        const onUpsertStarredEntry = vi.fn().mockRejectedValue(new Error("save failed"));
+        renderComposer({
+          text: "git",
+          autocompleteEnabled: true,
+          history,
+          onUpsertStarredEntry,
+        });
+        const option = screen.getByTestId("composer-autocomplete-option-0");
+        fireEvent.pointerDown(option, {
+          pointerId: 1,
+          clientX: 10,
+          clientY: 10,
+          button: 0,
+          isPrimary: true,
+        });
+        act(() => vi.advanceTimersByTime(COMPOSER_STARRED_EDITOR_LONG_PRESS_MS));
+        fireEvent.change(screen.getByTestId("composer-starred-editor-label"), {
+          target: { value: "kept label" },
+        });
+
+        await act(async () => fireEvent.click(screen.getByTestId("composer-starred-editor-save")));
+
+        expect(screen.getByTestId("composer-starred-editor")).toBeInTheDocument();
+        expect(screen.getByRole("alert")).toHaveTextContent("save failed");
+        expect(screen.getByTestId("composer-starred-editor-label")).toHaveValue("kept label");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("toggles a persistent star without selecting or closing the suggestion", () => {
       const onTextChange = vi.fn();
       const onToggleStar = vi.fn();

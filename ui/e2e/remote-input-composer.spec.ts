@@ -1949,8 +1949,7 @@ test("starred autocomplete can send on pick and long-press opens the editor", as
   await editor.fill("gs");
   await expect(autocomplete).toBeVisible();
   await expect(autocomplete.locator('[role="option"]')).toContainText(["gs"]);
-  await autocomplete.locator('[role="option"]').first().dispatchEvent("pointerdown");
-  await autocomplete.locator('[role="option"]').first().dispatchEvent("pointerup");
+  await autocomplete.locator('[role="option"]').first().click();
   await expect.poll(() => remote.inputs.length).toBe(1);
   expect(remote.inputs[0].body.text).toBe("git status");
   expect(remote.inputs[0].body.submit).toBe(true);
@@ -1964,6 +1963,12 @@ test("starred autocomplete can send on pick and long-press opens the editor", as
   await expect(page.locator("#composerStarEditorValue")).toHaveValue("git status");
   await expect(page.locator("#composerStarEditorSend")).toBeChecked();
   expect(remote.inputs).toHaveLength(1);
+
+  await page.locator("#composerStarEditorValue").fill("git status ");
+  await page.locator("#composerStarEditorSave").click();
+  await expect
+    .poll(() => remote.starredEntries)
+    .toEqual([{ value: "git status ", label: "gs", send: true }]);
 });
 
 test("Remote autocomplete reads and toggles the host-global persistent star list", async ({

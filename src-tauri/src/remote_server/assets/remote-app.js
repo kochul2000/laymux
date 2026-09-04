@@ -3380,6 +3380,7 @@ import {
               pick.append(mark);
             }
             if (longPress) {
+              pick.addEventListener("mousedown", (event) => event.preventDefault());
               bindComposerLongPress(pick, suggestion);
             } else {
               // mousedown (not click) so the textarea keeps focus through the pick.
@@ -3494,7 +3495,7 @@ import {
         }
 
         async function saveComposerStarEditor() {
-          const value = (composerStarEditorValue.value || "").trimEnd();
+          const value = composerStarEditorValue.value || "";
           if (!value) return;
           try {
             await updateComposerStar(value, true, {

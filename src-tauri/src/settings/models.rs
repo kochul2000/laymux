@@ -832,9 +832,9 @@ impl ParserAdmissionSettings {
 #[serde(rename_all = "camelCase")]
 pub struct ComposerStarredEntry {
     pub value: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default)]
     pub label: String,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default)]
     pub send: bool,
 }
 
