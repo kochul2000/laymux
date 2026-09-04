@@ -1440,6 +1440,63 @@ test.describe("remote mobile layout", () => {
     await flickKey(32, 0, "\x1bOC");
     await flickKey(0, 32, "\x1bOB");
     await flickKey(-32, 0, "\x1bOD");
+
+    // Press-and-hold streams repeats while the key is down; the release still
+    // sends its one `click` like every tap above. So this only has to show the
+    // stream, that it stops on release, and that a non-cursor key like ^C never
+    // joins in.
+    const holdKey = async (id: string, dx: number, dy: number, holdMs: number) => {
+      const button = page.locator(`[data-key="${id}"]`);
+      await button.scrollIntoViewIfNeeded();
+      const box = await button.boundingBox();
+      expect(box).not.toBeNull();
+      const x = box!.x + box!.width / 2;
+      const y = box!.y + box!.height / 2;
+      const writeIndex = writes.length;
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchStart",
+        touchPoints: [{ x, y, id: 1 }],
+      });
+      if (dx || dy) {
+        await cdp.send("Input.dispatchTouchEvent", {
+          type: "touchMove",
+          touchPoints: [{ x: x + dx, y: y + dy, id: 1 }],
+        });
+      }
+      await page.waitForTimeout(holdMs);
+      const during = writes.slice(writeIndex);
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await page.waitForTimeout(200);
+      const settled = writes.length;
+      await page.waitForTimeout(200);
+      // Releasing ends the repeat: no write arrives in the second window.
+      expect(writes.length).toBe(settled);
+      return { during, total: writes.slice(writeIndex) };
+    };
+
+    // Count sequences rather than writes: 12 ms input coalescing can pack two
+    // repeats into one body. 400 ms delay + 60 ms interval means a 600 ms hold
+    // streams several sends even on a slow runner.
+    const streamOf = (sent: string[], sequence: string) => {
+      const joined = sent.join("");
+      return { count: joined.split(sequence).length - 1, rest: joined.split(sequence).join("") };
+    };
+
+    const heldArrow = streamOf((await holdKey("left", 0, 0, 600)).total, "\x1bOD");
+    expect(heldArrow.count).toBeGreaterThanOrEqual(3);
+    expect(heldArrow.rest).toBe("");
+
+    // Same for the flick pad while the finger rests on a direction.
+    const heldPad = streamOf((await holdKey("dpad", 0, -32, 600)).total, "\x1bOA");
+    expect(heldPad.count).toBeGreaterThanOrEqual(3);
+    expect(heldPad.rest).toBe("");
+
+    // A non-cursor key never repeats: holding ^C sends nothing until release,
+    // and the release is the same single interrupt a tap sends.
+    const heldInterrupt = await holdKey("c-c", 0, 0, 600);
+    expect(heldInterrupt.during).toEqual([]);
+    expect(heldInterrupt.total.join("")).toBe("\x03");
+    await expect(helperTextarea).toBeFocused();
   });
 
   test("routes normal-buffer Codex transcript wheel and touch scroll to cursor input", async ({

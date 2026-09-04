@@ -9489,6 +9489,13 @@ import {
         };
         const KEY_FLICK_THRESHOLD_PX = 18;
         const KEY_ORDER_HOLD_MS = 180;
+        // Press-and-hold auto-repeat for cursor movement, the same shape a
+        // hardware keyboard uses: one send on press, a pause long enough that a
+        // deliberate tap never repeats, then a steady stream until release. The
+        // interval stays well above the 12 ms input coalescing window so each
+        // repeat reaches the terminal as its own write.
+        const KEY_REPEAT_DELAY_MS = 400;
+        const KEY_REPEAT_INTERVAL_MS = 60;
         let selectedInputActionId = "";
 
         function ownProperty(value, key) {
@@ -9881,7 +9888,52 @@ import {
           // Keep the focused input surface (and its open keyboard) while the key
           // is sent. Click remains the accessible activation path.
           keepInputSurfaceFocus(button);
+          // Only cursor keys (arrows/Home/End) repeat while held: they are the
+          // ones a single tap cannot finish. Everything else stays one-shot so a
+          // resting thumb can never fire ^C, Enter or a user key twice.
+          if (keyDef(id)?.cursor) {
+            installKeyRepeat(button, () => sendKey(id, button));
+            return;
+          }
           button.addEventListener("click", () => sendKey(id, button));
+        }
+
+        // Hold-to-repeat for one soft key. `click` stays the one and only
+        // one-shot path — pointer, keyboard and assistive activation all keep
+        // sending exactly once — and the hold only adds the repeats that run
+        // before the release. Pointer capture guarantees the matching pointerup
+        // even when the finger slides off the key, and pointercancel (a pan on
+        // the scrolling key row, an interrupted touch) stops the stream the same
+        // way a release does.
+        function installKeyRepeat(button, send) {
+          let heldPointerId = null;
+          let delayTimer = 0;
+          let repeatTimer = 0;
+          const stop = () => {
+            window.clearTimeout(delayTimer);
+            window.clearInterval(repeatTimer);
+            delayTimer = 0;
+            repeatTimer = 0;
+            heldPointerId = null;
+          };
+          button.addEventListener("pointerdown", (event) => {
+            if (button.disabled || !event.isPrimary || event.button !== 0) return;
+            stop();
+            heldPointerId = event.pointerId;
+            button.setPointerCapture(event.pointerId);
+            delayTimer = window.setTimeout(() => {
+              send();
+              repeatTimer = window.setInterval(send, KEY_REPEAT_INTERVAL_MS);
+            }, KEY_REPEAT_DELAY_MS);
+          });
+          const release = (event) => {
+            if (heldPointerId === event.pointerId) stop();
+          };
+          button.addEventListener("pointerup", release);
+          button.addEventListener("pointercancel", release);
+          // A long press must not raise the platform context menu over the key.
+          button.addEventListener("contextmenu", (event) => event.preventDefault());
+          button.addEventListener("click", () => send());
         }
 
         function directionFromFlick(deltaX, deltaY) {
@@ -9921,8 +9973,37 @@ import {
           }
         }
 
-        function installDirectionalFlick(button, onDirection = (direction) => sendKey(direction)) {
+        // A repeatable pad hold-repeats the direction the finger rests on. Only
+        // the byte-writing arrow pad opts in; the nav pad's directions are
+        // controller steps (a pane switch, an alert jump) where a stream of
+        // repeats would be destructive, not faster.
+        function installDirectionalFlick(button, onDirection, repeatable = false) {
           let gesture = null;
+
+          const stopFlickRepeat = () => {
+            if (!gesture) return;
+            window.clearTimeout(gesture.delayTimer);
+            window.clearInterval(gesture.repeatTimer);
+            gesture.delayTimer = 0;
+            gesture.repeatTimer = 0;
+          };
+
+          // Resting on a direction repeats it like a held arrow key. Moving to a
+          // different direction restarts the delay, so a slow flick across the
+          // pad still sends exactly once on release.
+          const armFlickRepeat = (direction) => {
+            if (!repeatable || !gesture || gesture.direction === direction) return;
+            stopFlickRepeat();
+            gesture.direction = direction;
+            if (!direction) return;
+            gesture.delayTimer = window.setTimeout(() => {
+              onDirection(direction);
+              gesture.repeatTimer = window.setInterval(
+                () => onDirection(direction),
+                KEY_REPEAT_INTERVAL_MS,
+              );
+            }, KEY_REPEAT_DELAY_MS);
+          };
 
           // The gesture handler below cancels the pointerdown default; pair it
           // with the mousedown guard so WebKit/iOS also keeps the input surface
@@ -9932,7 +10013,14 @@ import {
           button.addEventListener("pointerdown", (event) => {
             if (button.disabled || !event.isPrimary || event.button !== 0) return;
             event.preventDefault();
-            gesture = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+            gesture = {
+              pointerId: event.pointerId,
+              x: event.clientX,
+              y: event.clientY,
+              direction: "",
+              delayTimer: 0,
+              repeatTimer: 0,
+            };
             button.setPointerCapture(event.pointerId);
             button.classList.add("flicking");
             showKeyFlickHint(button);
@@ -9946,6 +10034,7 @@ import {
               event.clientY - gesture.y
             );
             showKeyFlickHint(button, direction);
+            armFlickRepeat(direction);
           });
 
           const finishFlick = (event, shouldSend) => {
@@ -9955,6 +10044,7 @@ import {
               event.clientX - gesture.x,
               event.clientY - gesture.y
             );
+            stopFlickRepeat();
             gesture = null;
             button.classList.remove("flicking");
             hideKeyFlickHint();
@@ -10047,8 +10137,8 @@ import {
           if (def.flick) {
             btn.classList.add("key-flick-btn");
             btn.setAttribute("aria-label", "Flick for arrow key: up, right, down, or left");
-            btn.title = "Flick up, right, down, or left";
-            installDirectionalFlick(btn);
+            btn.title = "Flick up, right, down, or left — hold to repeat";
+            installDirectionalFlick(btn, (direction) => sendKey(direction), true);
           } else if (def.navFlick) {
             btn.classList.add("key-flick-btn");
             btn.setAttribute(
