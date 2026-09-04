@@ -936,6 +936,9 @@ mod tests {
         assert!(touch_focus.contains("focusedElement !== terminal?.textarea"));
         assert!(touch_focus.contains("focusedElement !== document.body"));
         assert!(html.contains("function startTouchSelection(term, element, pointerId)"));
+        assert!(html.contains("function withPreservedInputSurfaceFocus(run)"));
+        assert!(html.contains("function restorePreservedInputSurfaceFocus(surface)"));
+        assert!(html.contains("textarea.focus = function preserveInputSurfaceFocus() {}"));
         assert!(html.contains("function extendTouchSelection(term, gesture, point)"));
         assert!(html.contains("function handleSelectionMouseupAfterInteraction()"));
         assert!(html.contains("touchGesture.forceSelection,\n            2"));
