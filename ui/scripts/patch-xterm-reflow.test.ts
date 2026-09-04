@@ -24,8 +24,8 @@ const compositionGenerationFinalizer =
   "_flushCompositionGeneration(t){if(t.done)return;for(;this._pendingCompositionGenerations.length>0;)";
 const compositionObservationList = "observations:[]";
 const compositionEndCommitData = "committed:this._compositionEndDataAllowed?e:void 0";
-const compositionEndBlurInvalidation =
-  "blur(){this._compositionEndDataAllowed=!1;const t=this._pendingCompositionGenerations,e=t[t.length-1];if(e){e.cancelled=!0;const i=t[t.length-2];i&&this._flushCompositionGeneration(i)}}";
+const compositionBlurFlush =
+  "blur(){this._compositionEndDataAllowed=!1,this._flushPendingCompositionGenerations()}";
 const compositionEndDataEnabledAtStart = "this._compositionEndDataAllowed=!0";
 const compositionBlurHandoff =
   '_handleTextAreaBlur(){this._compositionHelper.blur(),this.textarea.value=""';
@@ -119,8 +119,8 @@ describe("pinned xterm bundle patches", () => {
     expect(commonJsSource).toContain(compositionObservationList);
     expect(moduleSource).toContain(compositionEndCommitData);
     expect(commonJsSource).toContain(compositionEndCommitData);
-    expect(moduleSource).toContain(compositionEndBlurInvalidation);
-    expect(commonJsSource).toContain(compositionEndBlurInvalidation);
+    expect(moduleSource).toContain(compositionBlurFlush);
+    expect(commonJsSource).toContain(compositionBlurFlush);
     expect(moduleSource).toContain(compositionEndDataEnabledAtStart);
     expect(commonJsSource).toContain(compositionEndDataEnabledAtStart);
     expect(moduleSource).toContain(compositionBlurHandoff);

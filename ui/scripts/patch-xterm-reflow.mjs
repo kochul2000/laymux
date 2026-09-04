@@ -107,7 +107,7 @@ const compositionGenerationMethods = compositionGenerationMethodsWithEndData
   )
   .replace(
     "}}_boundPendingComposition(){",
-    "}}blur(){this._compositionEndDataAllowed=!1;const t=this._pendingCompositionGenerations,e=t[t.length-1];if(e){e.cancelled=!0;const i=t[t.length-2];i&&this._flushCompositionGeneration(i)}}_boundPendingComposition(){",
+    "}}blur(){this._compositionEndDataAllowed=!1,this._flushPendingCompositionGenerations()}_boundPendingComposition(){",
   )
   .replace(
     "t&&t.valueEnd===null&&(t.valueEnd=this._textarea.value.length)",
@@ -403,7 +403,7 @@ await patchBundle(moduleTarget, [
     patchedText: moduleCompositionEndListenerPatched,
   },
   {
-    name: "terminal composition blur invalidation",
+    name: "terminal composition blur flush",
     originalText: compositionBlurOriginal,
     patchedText: compositionBlurPatched,
   },
@@ -510,7 +510,7 @@ await patchBundle(commonJsTarget, [
     patchedText: commonJsCompositionEndListenerPatched,
   },
   {
-    name: "terminal composition blur invalidation",
+    name: "terminal composition blur flush",
     originalText: compositionBlurOriginal,
     patchedText: compositionBlurPatched,
   },
