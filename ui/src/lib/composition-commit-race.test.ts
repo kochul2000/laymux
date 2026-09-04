@@ -192,7 +192,7 @@ describe("xterm blur contract during composition (issue #555)", () => {
     helper.dispatchEvent(new Event("input"));
     expect(helper.value).toBe("\uac00");
 
-    helper.dispatchEvent(new Event("blur"));
+    helper.blur();
     await flushFinalizer();
 
     // Nothing reached the PTY, and the only copy of the text is gone.
@@ -216,7 +216,7 @@ describe("xterm blur contract during composition (issue #555)", () => {
     helper.selectionEnd = 1;
     helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uac00" }));
     helper.dispatchEvent(new Event("input"));
-    helper.dispatchEvent(new Event("blur"));
+    helper.blur();
     await flushFinalizer();
 
     helper.dispatchEvent(new CompositionEvent("compositionend", { data: "\uac00" }));
@@ -248,7 +248,7 @@ describe("xterm blur contract during composition (issue #555)", () => {
     // The send is scheduled but has not run.
     expect(readPendingCompositionSend(terminal)?.pending).toBe(true);
 
-    helper.dispatchEvent(new Event("blur"));
+    helper.blur();
     // Still pending, and the source xterm would slice is already gone.
     expect(readPendingCompositionSend(terminal)?.pending).toBe(true);
     expect(helper.value).toBe("");
@@ -271,7 +271,7 @@ describe("xterm blur contract during composition (issue #555)", () => {
     await flushFinalizer();
     expect(data).toEqual(["\uac00"]);
 
-    helper.dispatchEvent(new Event("blur"));
+    helper.blur();
     await flushFinalizer();
 
     // Still exactly once — the blur itself adds nothing.

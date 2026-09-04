@@ -335,6 +335,35 @@ describe("patched xterm composition keypress reconciliation", () => {
     expect(emitted.join("")).toBe("한글");
   });
 
+  it("keeps the full commit when Windows IME replaces retained textarea text", async () => {
+    const { emitted, textarea } = openTerminal();
+    textarea.focus();
+    textarea.value = "이미 전송된 긴 입력";
+    textarea.selectionStart = textarea.value.length;
+    textarea.selectionEnd = textarea.value.length;
+
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    textarea.value += "수";
+    textarea.dispatchEvent(
+      new CompositionEvent("compositionupdate", { data: "수", bubbles: true }),
+    );
+    await flushEventLoop();
+
+    // Windows TSF can select the whole helper textarea and replace it. The
+    // composition start offset now points beyond the new value.
+    textarea.value = "수정을 해야 할거 아냐";
+    textarea.selectionStart = 0;
+    textarea.selectionEnd = textarea.value.length;
+    textarea.dispatchEvent(
+      new CompositionEvent("compositionupdate", { data: textarea.value, bubbles: true }),
+    );
+    await flushEventLoop();
+    endComposition(textarea, textarea.value);
+    await flushEventLoop();
+
+    expect(emitted.join("")).toBe("수정을 해야 할거 아냐");
+  });
+
   it("flushes input-first reconciliation once before an interleaved ordinary keydown", async () => {
     const { emitted, textarea } = openTerminal();
     startComposition(textarea, "한");
