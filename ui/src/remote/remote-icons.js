@@ -16,8 +16,10 @@ import {
   File,
   Folder,
   FolderOpen,
+  FolderUp,
   Hourglass,
   Keyboard,
+  Link,
   LoaderCircle,
   Menu,
   Minus,
@@ -57,8 +59,10 @@ const ICONS = Object.freeze({
   File,
   Folder,
   FolderOpen,
+  FolderUp,
   Hourglass,
   Keyboard,
+  Link,
   LoaderCircle,
   Menu,
   Minus,
@@ -151,4 +155,12 @@ const COMMAND_STATUS_ICONS = Object.freeze({
 
 export function commandStatusIconName(status) {
   return COMMAND_STATUS_ICONS[status] || null;
+}
+
+/** Keep in lockstep with `ui/src/lib/file-kind-icon.ts`. */
+export function fileKindIconName(entry, isParent = false) {
+  if (isParent) return "FolderUp";
+  if (entry && entry.isDirectory) return "Folder";
+  if (entry && entry.isSymlink) return "Link";
+  return "File";
 }

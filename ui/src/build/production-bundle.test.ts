@@ -41,8 +41,13 @@ const UI_ROOT = process.cwd();
  * locales, taking the entry to 525,051 B. Korean copy costs 3 bytes a
  * character, so the strings are about a third of that. 528 kB restores the same
  * ~3 kB margin rather than banking room for the next feature.
+ *
+ * Later link-chip liveness, host-global Composer starred commands and Remote
+ * attachment settings raised the base entry to 530,081 B without moving this
+ * gate. The shared file-kind icon mapping adds 264 B, taking it to 530,345 B.
+ * 533 kB restores 2,655 B of headroom instead of banking room for more work.
  */
-const STARTUP_CHUNK_BUDGET_BYTES = 528_000;
+const STARTUP_CHUNK_BUDGET_BYTES = 533_000;
 
 /**
  * Ceiling for a lazily-imported **syntax grammar**. Generous because a
