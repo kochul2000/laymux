@@ -1445,7 +1445,7 @@ test.describe("remote mobile layout", () => {
     // sends its one `click` like every tap above. So this only has to show the
     // stream, that it stops on release, and that a non-cursor key like ^C never
     // joins in.
-    const holdKey = async (id: string, dx: number, dy: number, holdMs: number) => {
+    const holdKey = async (id: string, dx: number, dy: number, holdMs: number, drift = 0) => {
       const button = page.locator(`[data-key="${id}"]`);
       await button.scrollIntoViewIfNeeded();
       const box = await button.boundingBox();
@@ -1463,7 +1463,17 @@ test.describe("remote mobile layout", () => {
           touchPoints: [{ x: x + dx, y: y + dy, id: 1 }],
         });
       }
-      await page.waitForTimeout(holdMs);
+      // A thumb never rests perfectly still. The key row scrolls horizontally,
+      // so a few px of drift must not let the browser claim the touch as a pan
+      // and cancel the pointer out from under the repeat.
+      for (let step = 1; drift && step <= 3; step += 1) {
+        await page.waitForTimeout(holdMs / 4);
+        await cdp.send("Input.dispatchTouchEvent", {
+          type: "touchMove",
+          touchPoints: [{ x: x + dx + (step % 2 ? drift : -drift), y: y + dy, id: 1 }],
+        });
+      }
+      await page.waitForTimeout(drift ? holdMs / 4 : holdMs);
       const during = writes.slice(writeIndex);
       await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
       await page.waitForTimeout(200);
@@ -1475,25 +1485,30 @@ test.describe("remote mobile layout", () => {
     };
 
     // Count sequences rather than writes: 12 ms input coalescing can pack two
-    // repeats into one body. 400 ms delay + 60 ms interval means a 600 ms hold
-    // streams several sends even on a slow runner.
+    // repeats into one body. 400 ms delay + 60 ms interval means a 900 ms hold
+    // streams roughly nine sends, so a stalled runner still clears the floor.
     const streamOf = (sent: string[], sequence: string) => {
       const joined = sent.join("");
       return { count: joined.split(sequence).length - 1, rest: joined.split(sequence).join("") };
     };
 
-    const heldArrow = streamOf((await holdKey("left", 0, 0, 600)).total, "\x1bOD");
+    const heldArrow = streamOf((await holdKey("left", 0, 0, 900)).total, "\x1bOD");
     expect(heldArrow.count).toBeGreaterThanOrEqual(3);
     expect(heldArrow.rest).toBe("");
 
+    // The same hold with the thumb wandering 20 px keeps streaming.
+    const driftedArrow = streamOf((await holdKey("left", 0, 0, 900, 20)).total, "\x1bOD");
+    expect(driftedArrow.count).toBeGreaterThanOrEqual(3);
+    expect(driftedArrow.rest).toBe("");
+
     // Same for the flick pad while the finger rests on a direction.
-    const heldPad = streamOf((await holdKey("dpad", 0, -32, 600)).total, "\x1bOA");
+    const heldPad = streamOf((await holdKey("dpad", 0, -32, 900)).total, "\x1bOA");
     expect(heldPad.count).toBeGreaterThanOrEqual(3);
     expect(heldPad.rest).toBe("");
 
     // A non-cursor key never repeats: holding ^C sends nothing until release,
     // and the release is the same single interrupt a tap sends.
-    const heldInterrupt = await holdKey("c-c", 0, 0, 600);
+    const heldInterrupt = await holdKey("c-c", 0, 0, 900);
     expect(heldInterrupt.during).toEqual([]);
     expect(heldInterrupt.total.join("")).toBe("\x03");
     await expect(helperTextarea).toBeFocused();

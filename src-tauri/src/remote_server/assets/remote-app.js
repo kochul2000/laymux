@@ -9945,6 +9945,8 @@ import {
           // ones a single tap cannot finish. Everything else stays one-shot so a
           // resting thumb can never fire ^C, Enter or a user key twice.
           if (keyDef(id)?.cursor) {
+            button.classList.add("key-repeat-btn");
+            button.title = `${button.title} — hold to repeat`;
             installKeyRepeat(button, () => sendKey(id, button));
             return;
           }
@@ -10050,6 +10052,7 @@ import {
             gesture.direction = direction;
             if (!direction) return;
             gesture.delayTimer = window.setTimeout(() => {
+              if (!gesture) return;
               onDirection(direction);
               gesture.repeatTimer = window.setInterval(
                 () => onDirection(direction),
@@ -10066,6 +10069,7 @@ import {
           button.addEventListener("pointerdown", (event) => {
             if (button.disabled || !event.isPrimary || event.button !== 0) return;
             event.preventDefault();
+            stopFlickRepeat();
             gesture = {
               pointerId: event.pointerId,
               x: event.clientX,
