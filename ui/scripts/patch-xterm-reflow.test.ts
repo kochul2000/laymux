@@ -25,7 +25,7 @@ const compositionGenerationFinalizer =
 const compositionObservationList = "observations:[]";
 const compositionEndCommitData = "committed:this._compositionEndDataAllowed?e:void 0";
 const compositionEndBlurInvalidation =
-  "blur(){this._compositionEndDataAllowed=!1;for(const t of this._pendingCompositionGenerations)t.cancelled=!0}";
+  "blur(){this._compositionEndDataAllowed=!1;const t=this._pendingCompositionGenerations,e=t[t.length-1];if(e){e.cancelled=!0;const i=t[t.length-2];i&&this._flushCompositionGeneration(i)}}";
 const compositionEndDataEnabledAtStart = "this._compositionEndDataAllowed=!0";
 const compositionBlurHandoff =
   '_handleTextAreaBlur(){this._compositionHelper.blur(),this.textarea.value=""';
@@ -35,7 +35,7 @@ const compositionGenerationSnapshot =
 const compositionSnapshotCandidate =
   "s=e.valueSnapshot===null?this._textarea.value:e.valueSnapshot,r=s.substring(i)";
 const compositionCandidateFirstFold =
-  'let n=this._textarea.ownerDocument.activeElement===this._textarea?this._mergeCompositionData(r,e.committed||""):r,o="",l=!1;for(const t of e.observations)l?n=this._mergeCompositionData(n,t,!0):n.includes(t)?(o&&(n=this._mergeCompositionData(n,o)),l=!0):o=this._mergeCompositionData(t,o);l||!o||(n=this._mergeCompositionData(n,o))';
+  'let n=this._mergeCompositionData(r,e.committed||""),o="",l=!1;for(const t of e.observations)l?n=this._mergeCompositionData(n,t,!0):n.includes(t)?(o&&(n=this._mergeCompositionData(n,o)),l=!0):o=this._mergeCompositionData(t,o);l||!o||(n=this._mergeCompositionData(n,o))';
 const compositionAnchoredTieOrder = "i>s||o&&i===s?t+e.substring(i):e+t.substring(s)";
 const staleMergedObservationState = 'observed:""';
 const staleMergedObservationQueue = "e.observed=this._mergeCompositionData(t,e.observed)";

@@ -11,16 +11,16 @@ xterm 6.0.0의 숨은 helper textarea에는 이미 PTY로 보낸 IME 확정 문�
 
 설치된 실제 xterm을 사용한 결정적 재현에서 helper에 이전 입력을 남긴 뒤 `수정을 해야 할거 아냐`로 전체 교체하면 `onData`에는 `냐`만 나왔다. 조합 중에는 Laymux preview가 보이지만 확정 byte가 PTY로 전달되지 않으므로 사용자는 입력이 느리게 나타났다가 지워진 것으로 보게 된다.
 
-범위는 `compositionend`가 있는 Direct IME 확정과 ADR-0093 세대별 중복 방지 큐다. clipboard paste의 단일 structured write, PTY write 실패, 출력 parser 적체, blur fallback은 비목표다.
+범위는 `compositionend`가 있는 Direct IME 확정, ADR-0093 세대별 중복 방지 큐, 기존 TerminalView blur fallback과의 소유권 경계다. fallback 자체의 상태 계약, clipboard paste의 단일 structured write, PTY write 실패, 출력 parser 적체는 바꾸지 않는다.
 
 ## Decision
 
 **`compositionend.data`를 해당 조합 generation의 확정 후보로 보존하고, textarea slice와 기존 ordered merge한 값을 input·keypress 관측 조정의 기준으로 사용한다.**
 
 - CoreBrowserTerminal의 `compositionend` listener는 이벤트의 `data`를 CompositionHelper에 넘긴다. helper는 delayed finalizer가 만드는 generation record에 그 값을 함께 저장한다.
-- flush 시 helper textarea가 계속 focus를 소유하면 textarea slice와 `compositionend.data`를 기존 양방향 포함·suffix-prefix merge로 먼저 합친다. 낡은 시작점이 만든 빈 값이나 확정값의 suffix는 전체 확정값으로 복구되고, propagation 사이 들어온 비조합 suffix는 유지된다. 이후 ADR-0093의 input·keypress observation fold를 그대로 적용한다.
+- flush 시 취소되지 않은 generation은 textarea slice와 `compositionend.data`를 기존 양방향 포함·suffix-prefix merge로 먼저 합친다. 낡은 시작점이나 비어 있는 스냅샷이 만든 빈 값, 확정값의 suffix는 전체 확정값으로 복구되고 propagation 사이 들어온 비조합 suffix는 유지된다. blur fallback이 소유한 최신 세대는 merge 전에 취소되므로 중복되지 않는다. 이후 ADR-0093의 input·keypress observation fold를 그대로 적용한다.
 - 새 `compositionstart`는 직전 pending generation의 textarea 문자열 자체를 스냅샷한다. 길이만 고정한 뒤 flush에서 live textarea를 다시 읽지 않으므로 다음 조합이 전체 값을 교체해도 이전 세대에 새 문자열이 섞이지 않는다.
-- CoreBrowserTerminal의 blur handler는 textarea를 비우기 전에 현재 조합을 event-data 비허용 상태로 만들고 모든 pending generation을 취소한다. 취소 세대는 slice·event data·input/keypress 관측을 모두 내보내지 않으며, 단순 refocus로 되살리지 않고 새 `compositionstart`만 새 세대를 허용한다. 이 경계는 issue #555의 TerminalView blur fallback이 소유하므로 `compositionend → input → blur → refocus → delayed flush`에서도 xterm이 같은 값을 함께 복구해 이중 전송하지 않는다.
+- CoreBrowserTerminal의 blur handler는 textarea를 비우기 전에 현재 조합을 event-data 비허용 상태로 만든다. pending generation이 여럿이면 스냅샷된 앞 세대들을 그 handler 안에서 FIFO로 먼저 flush하고, 가장 최신 세대만 취소해 issue #555의 TerminalView blur fallback에 넘긴다. 취소 세대의 slice·event data·input/keypress 관측은 모두 폐기되고 단순 refocus로 되살아나지 않으며, 새 `compositionstart`만 새 세대를 허용한다. 따라서 연속 확정 뒤 blur에서도 앞 세대→최신 fallback 순서를 보존하고 `compositionend → input → blur → refocus → delayed flush`에서도 같은 값을 이중 전송하지 않는다.
 - `compositionend.data`가 비었거나 없는 합성 호출은 기존 textarea slice로 떨어진다. `compositionend` 없이 keydown이 호출하는 immediate finalize는 기존 범위 slice를 유지한다.
 - xterm 6.0.0 ESM·CommonJS exact bundle patch와 설치 계약 테스트를 함께 갱신한다. 실제 설치된 `Terminal` 회귀 테스트가 잔여 textarea → 전체 교체 → 확정 순서를 `onData`까지 고정한다.
 

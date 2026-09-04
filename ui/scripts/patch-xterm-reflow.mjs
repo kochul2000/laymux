@@ -107,7 +107,7 @@ const compositionGenerationMethods = compositionGenerationMethodsWithEndData
   )
   .replace(
     "}}_boundPendingComposition(){",
-    "}}blur(){this._compositionEndDataAllowed=!1;for(const t of this._pendingCompositionGenerations)t.cancelled=!0}_boundPendingComposition(){",
+    "}}blur(){this._compositionEndDataAllowed=!1;const t=this._pendingCompositionGenerations,e=t[t.length-1];if(e){e.cancelled=!0;const i=t[t.length-2];i&&this._flushCompositionGeneration(i)}}_boundPendingComposition(){",
   )
   .replace(
     "t&&t.valueEnd===null&&(t.valueEnd=this._textarea.value.length)",
@@ -117,6 +117,10 @@ const compositionGenerationMethods = compositionGenerationMethodsWithEndData
   .replace(
     "s=e.valueEnd===null?this._textarea.value.length:e.valueEnd,r=this._textarea.value.substring(i,Math.max(i,s))",
     "s=e.valueSnapshot===null?this._textarea.value:e.valueSnapshot,r=s.substring(i)",
+  )
+  .replace(
+    'let n=this._textarea.ownerDocument.activeElement===this._textarea?this._mergeCompositionData(r,e.committed||""):r',
+    'let n=this._mergeCompositionData(r,e.committed||"")',
   );
 const compositionGenerationAcceptedTexts = [
   compositionGenerationMethods,

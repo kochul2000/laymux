@@ -5,6 +5,7 @@ import {
   XTERM_PENDING_COMPOSITION_FIELDS,
   readPendingCompositionSend,
 } from "./xterm-pending-composition";
+import { createImeCompositionController } from "./ime-composition-controller";
 import { createTerminalFocusOwnership } from "./terminal-focus-ownership";
 
 function stubMatchMedia() {
@@ -299,6 +300,28 @@ describe("xterm blur contract during composition (issue #555)", () => {
     await flushFinalizer();
 
     expect(data).toEqual([]);
+  });
+
+  it("preserves pending FIFO order when blur fallback owns the newest generation", async () => {
+    const { terminal, helper } = mountTerminal();
+    const data: string[] = [];
+    terminal.onData((text) => data.push(text));
+    const controller = createImeCompositionController({
+      getCols: () => 80,
+      getAnchor: () => ({ cursorX: 0, cursorAbsY: 0 }),
+      getXtermPendingSend: () => readPendingCompositionSend(terminal)?.pending ?? false,
+      onCommit: (text) => data.push(text),
+    });
+    controller.bind(helper);
+
+    composeAndCommit(helper, "가");
+    helper.value = "";
+    composeAndCommit(helper, "나");
+    helper.blur();
+    await flushFinalizer();
+
+    expect(data.join("")).toBe("가나");
+    controller.dispose();
   });
 
   it("does send it when compositionend comes before the blur", async () => {
