@@ -4582,6 +4582,7 @@ import {
         }
 
         function fallbackCopyText(text) {
+          const surface = inputSurfaceFocused() ? document.activeElement : null;
           const textarea = document.createElement("textarea");
           textarea.value = text;
           textarea.setAttribute("readonly", "");
@@ -4597,6 +4598,7 @@ import {
             return false;
           } finally {
             textarea.remove();
+            restorePreservedInputSurfaceFocus(surface);
           }
         }
 

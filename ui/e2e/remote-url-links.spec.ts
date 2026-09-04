@@ -587,7 +587,15 @@ test.describe("touch URL activation", () => {
   ) {
     await installRemoteMocks(context);
     await page.addInitScript((mode) => {
+      const target = window as RemoteTerminalWindow;
       localStorage.setItem("laymux.remote.inputMode", mode);
+      target.__copiedSelections = [];
+      document.execCommand = (command) => {
+        if (command !== "copy") return false;
+        const source = document.activeElement;
+        target.__copiedSelections?.push(source instanceof HTMLTextAreaElement ? source.value : "");
+        return true;
+      };
     }, inputMode);
     await page.routeWebSocket(/\/remote\/v1\/terminals\/terminal-1\/output/, (socket) => {
       const { header, payload } = snapshotFrames(snapshotText);
@@ -635,6 +643,12 @@ test.describe("touch URL activation", () => {
         counts.composerBlur += 1;
       });
     });
+  }
+
+  async function expectSelectionCopied(page: import("@playwright/test").Page, selection: string) {
+    await expect
+      .poll(() => page.evaluate(() => (window as RemoteTerminalWindow).__copiedSelections))
+      .toEqual([selection]);
   }
 
   async function longPressBravoCell(
@@ -707,6 +721,8 @@ test.describe("touch URL activation", () => {
     });
 
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await expectSelectionCopied(page, "bravo om");
+    await expect(composer).toBeFocused();
   });
 
   test("long press selection does not raise composer or helper focus", async ({
@@ -729,6 +745,8 @@ test.describe("touch URL activation", () => {
       composerBlur: 0,
     });
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await expectSelectionCopied(page, "bravo");
+    await expect(page.locator("#composerInput")).not.toBeFocused();
   });
 
   test("long press selection keeps direct helper textarea focus", async ({ context, page }) => {
@@ -749,5 +767,7 @@ test.describe("touch URL activation", () => {
       await page.evaluate(() => (window as RemoteTerminalWindow).__focusSteals?.helperFocus),
     ).toBe(0);
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await expectSelectionCopied(page, "bravo");
+    await expect(helper).toBeFocused();
   });
 });
