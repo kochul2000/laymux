@@ -3047,7 +3047,11 @@ function RemoteConnectionSection() {
               inputStyle={{ width: 110 }}
               value={remote.attachmentMaxMib}
               onChange={(event) =>
-                update({ attachmentMaxMib: clampAttachmentMaxMib(event.target.value) })
+                // Only the lower bound while typing so "1" → "5" can be entered;
+                // the upper bound is applied on save (toRemoteSettings).
+                update({
+                  attachmentMaxMib: Math.max(1, Math.trunc(Number(event.target.value) || 1)),
+                })
               }
             />
             <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
