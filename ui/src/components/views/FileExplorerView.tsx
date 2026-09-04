@@ -31,6 +31,7 @@ import {
   FolderUpIcon,
   LinkIcon,
 } from "@/components/ui/icons";
+import { fileKindIconName } from "@/lib/file-kind-icon";
 
 export interface FileExplorerViewProps {
   instanceId: string;
@@ -44,6 +45,19 @@ export interface FileExplorerViewProps {
   lastCwd?: string;
   /** Override file activation when the explorer is hosted inside another UI. */
   onOpenFile?: (path: string) => unknown;
+}
+
+function FileKindRowIcon({ entry, isParent }: { entry: DirEntry; isParent: boolean }) {
+  switch (fileKindIconName(entry, isParent)) {
+    case "FolderUp":
+      return <FolderUpIcon size={13} />;
+    case "Folder":
+      return <FolderIcon size={13} />;
+    case "Link":
+      return <LinkIcon size={13} />;
+    case "File":
+      return <FileIcon size={13} />;
+  }
 }
 
 export function FileExplorerView({
@@ -804,15 +818,7 @@ export function FileExplorerView({
               onDoubleClick={() => handleItemDoubleClick(i)}
             >
               <span className="flex min-w-0 items-center gap-1 text-xs">
-                {entry.name === ".." ? (
-                  <FolderUpIcon size={13} />
-                ) : entry.isDirectory ? (
-                  <FolderIcon size={13} />
-                ) : entry.isSymlink ? (
-                  <LinkIcon size={13} />
-                ) : (
-                  <FileIcon size={13} />
-                )}
+                <FileKindRowIcon entry={entry} isParent={entry.name === ".."} />
                 <span className="truncate">
                   {entry.name === ".." ? ".." : entry.isDirectory ? `${entry.name}/` : entry.name}
                 </span>

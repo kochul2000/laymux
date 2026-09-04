@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import type { ArchiveEntry } from "@/lib/tauri-api";
 import { formatBytes, pluralize } from "@/lib/preview/format";
 import { PreviewNotice } from "./PreviewNotice";
-import { ChevronDownIcon, FolderIcon } from "@/components/ui/icons";
+import { ChevronDownIcon, FileIcon, FolderIcon } from "@/components/ui/icons";
+import { fileKindIconName } from "@/lib/file-kind-icon";
 
 type SortKey = "name" | "size";
 
@@ -109,7 +110,11 @@ export function ArchivePreview({
                       userSelect: "none",
                     }}
                   >
-                    {entry.isDirectory && <FolderIcon size={12} />}
+                    {fileKindIconName(entry) === "Folder" ? (
+                      <FolderIcon size={12} />
+                    ) : (
+                      <FileIcon size={12} />
+                    )}
                   </span>
                   <span style={{ color: entry.isDirectory ? "var(--accent)" : undefined }}>
                     {entry.name}
