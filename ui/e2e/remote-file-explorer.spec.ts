@@ -29,6 +29,13 @@ const file = (name: string, path: string, size = 24): ListingEntry => ({
   isSymlink: false,
   size,
 });
+const symlink = (name: string, path: string, size = 8): ListingEntry => ({
+  name,
+  path,
+  isDirectory: false,
+  isSymlink: true,
+  size,
+});
 
 const LISTINGS: Record<
   string,
@@ -44,6 +51,7 @@ const LISTINGS: Record<
       dir("denied", "/home/user/denied"),
       file("<img src=x onerror=alert(1)>.txt", "/home/user/<img src=x onerror=alert(1)>.txt"),
       file("notes.txt", "/home/user/notes.txt"),
+      symlink("current", "/home/user/current"),
     ],
     truncated: false,
   },
@@ -169,11 +177,27 @@ test("the header folder button appears with the capability and lists the cwd", a
   await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user");
 
   const rows = page.locator(".file-viewer-directory-row");
-  await expect(rows).toHaveCount(7); // ".." + four dirs + two files
+  await expect(rows).toHaveCount(8); // ".." + four dirs + two files + symlink
   await expect(rows.nth(0)).toHaveText("..");
   await expect(rows.nth(1)).toContainText("repo");
   // A hostile entry name stays text, never markup.
   await expect(rows.nth(5)).toContainText("<img src=x onerror=alert(1)>.txt");
+  await expect(rows.nth(0).locator("[data-remote-icon-name=FolderUp]")).toHaveCount(1);
+  await expect(
+    page
+      .locator(".file-viewer-directory-row", { hasText: "repo" })
+      .locator("[data-remote-icon-name=Folder]"),
+  ).toHaveCount(1);
+  await expect(
+    page
+      .locator(".file-viewer-directory-row", { hasText: "notes.txt" })
+      .locator("[data-remote-icon-name=File]"),
+  ).toHaveCount(1);
+  await expect(
+    page
+      .locator(".file-viewer-directory-row", { hasText: "current" })
+      .locator("[data-remote-icon-name=Link]"),
+  ).toHaveCount(1);
 
   // Zoom and download are file-mode affordances — hidden, not disabled.
   await expect(page.locator("#fileViewerZoom")).toBeHidden();

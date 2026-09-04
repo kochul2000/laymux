@@ -1,5 +1,6 @@
 import {
   commandStatusIconName,
+  fileKindIconName,
   hydrateRemoteIcons,
   setRemoteIcon,
 } from "../../../../ui/src/remote/remote-icons.js";
@@ -1778,7 +1779,7 @@ import {
           const icon = document.createElement("span");
           icon.className = "file-viewer-directory-icon";
           icon.setAttribute("aria-hidden", "true");
-          setRemoteIcon(icon, entry.isDirectory ? "Folder" : "File");
+          setRemoteIcon(icon, fileKindIconName(entry, isParent));
           const name = document.createElement("span");
           name.className = "file-viewer-directory-name";
           name.textContent = entry.name;

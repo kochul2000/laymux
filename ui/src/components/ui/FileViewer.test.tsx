@@ -591,7 +591,14 @@ describe("FileViewer", () => {
       render(<FileViewer {...baseProps} path="/w/bundle.zip" />);
     });
 
-    expect(screen.getAllByTestId("archive-preview-row")).toHaveLength(2);
+    const rows = screen.getAllByTestId("archive-preview-row");
+    expect(rows).toHaveLength(2);
+    const fileRow = rows.find((row) => row.textContent?.includes("main.rs"));
+    const dirRow = rows.find(
+      (row) => row.textContent?.includes("src/") && !row.textContent?.includes("main.rs"),
+    );
+    expect(fileRow?.querySelector(".lucide-file")).toBeTruthy();
+    expect(dirRow?.querySelector(".lucide-folder")).toBeTruthy();
     expect(screen.getByTestId("archive-preview-truncated")).toHaveTextContent(
       "Showing the first 2 of 5,000 entries.",
     );

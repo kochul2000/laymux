@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
+import { fileKindIconName as desktopFileKindIconName } from "../lib/file-kind-icon";
 import {
   commandStatusIconName,
   createRemoteIcon,
+  fileKindIconName,
   hydrateRemoteIcons,
   setRemoteIcon,
 } from "./remote-icons.js";
@@ -52,5 +54,19 @@ describe("Remote Lucide icon boundary", () => {
     ["—", "Minus"],
   ])("maps the Remote status contract %s at the render boundary", (status, icon) => {
     expect(commandStatusIconName(status)).toBe(icon);
+  });
+
+  it("maps directory rows with the same names as the desktop explorer", () => {
+    const cases = [
+      [{ isDirectory: true }, true],
+      [{ isDirectory: true, isSymlink: true }, false],
+      [{ isDirectory: false, isSymlink: true }, false],
+      [{ isDirectory: false, isSymlink: false }, false],
+    ] as const;
+    for (const [entry, isParent] of cases) {
+      expect(fileKindIconName(entry, isParent)).toBe(desktopFileKindIconName(entry, isParent));
+    }
+    expect(createRemoteIcon("FolderUp").getAttribute("data-remote-icon-name")).toBe("FolderUp");
+    expect(createRemoteIcon("Link").getAttribute("data-remote-icon-name")).toBe("Link");
   });
 });
