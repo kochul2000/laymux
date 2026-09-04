@@ -151,7 +151,10 @@ type RemoteTerminalWindow = typeof window & {
   Terminal: { prototype: { reset: () => void } };
   __remoteTerm?: {
     buffer: {
-      active: { getLine: (line: number) => { translateToString: () => string } | undefined };
+      active: {
+        getLine: (line: number) => { translateToString: () => string } | undefined;
+        viewportY?: number;
+      };
     };
     cols: number;
     rows: number;
@@ -573,5 +576,101 @@ test.describe("touch URL activation", () => {
     await expect
       .poll(() => page.evaluate(() => (window as RemoteTerminalWindow).__copiedSelections))
       .toEqual(["bravo om"]);
+  });
+
+  test("long press selection keeps composer focus and does not scroll", async ({
+    context,
+    page,
+  }) => {
+    await installRemoteMocks(context);
+    await page.addInitScript(() => {
+      localStorage.setItem("laymux.remote.inputMode", "composer");
+    });
+    await page.routeWebSocket(/\/remote\/v1\/terminals\/terminal-1\/output/, (socket) => {
+      const { header, payload } = snapshotFrames(snapshotText);
+      socket.send(header);
+      socket.send(payload);
+    });
+
+    await page.goto("http://remote.test/remote/#token=remote-secret");
+    await page.evaluate(() => {
+      const target = window as RemoteTerminalWindow;
+      const originalReset = target.Terminal.prototype.reset;
+      target.Terminal.prototype.reset = function resetCapturingInstance() {
+        target.__remoteTerm = this as never;
+        return originalReset.call(this);
+      };
+    });
+    await page.locator("#connect").click();
+    await expect(page.locator("#status")).toHaveText("Main · Pane 1");
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as RemoteTerminalWindow).__remoteTerm?.buffer.active
+              .getLine(7)
+              ?.translateToString() || "",
+        ),
+      )
+      .toContain("Words: alpha bravo omega");
+
+    const composer = page.locator("#composerInput");
+    await expect(composer).toBeVisible();
+    await composer.focus();
+    await expect(composer).toBeFocused();
+
+    await page.waitForTimeout(250);
+    const screenBox = await page.locator(".xterm-screen").boundingBox();
+    expect(screenBox).not.toBeNull();
+    const geometry = await page.evaluate(() => {
+      const term = (window as RemoteTerminalWindow).__remoteTerm;
+      return { cols: term?.cols || 1, rows: term?.rows || 1 };
+    });
+    const cellWidth = screenBox!.width / geometry.cols;
+    const cellHeight = screenBox!.height / geometry.rows;
+    const x = screenBox!.x + ("Words: alpha ".length + 2.5) * cellWidth;
+    const y = screenBox!.y + 7.5 * cellHeight;
+    const viewportYBefore = await page.evaluate(
+      () => (window as RemoteTerminalWindow).__remoteTerm?.buffer.active.viewportY ?? 0,
+    );
+    const cdp = await context.newCDPSession(page);
+
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x, y }],
+    });
+    await page.waitForTimeout(550);
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as RemoteTerminalWindow).__remoteTerm?.getSelection() || ""),
+      )
+      .toBe("bravo");
+    await expect(composer).toBeFocused();
+    expect(
+      await page.evaluate(
+        () => (window as RemoteTerminalWindow).__remoteTerm?.buffer.active.viewportY ?? 0,
+      ),
+    ).toBe(viewportYBefore);
+
+    const dragX = screenBox!.x + 21.1 * cellWidth;
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ x: dragX, y }],
+    });
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as RemoteTerminalWindow).__remoteTerm?.getSelection() || ""),
+      )
+      .toBe("bravo om");
+    await expect(composer).toBeFocused();
+    expect(
+      await page.evaluate(
+        () => (window as RemoteTerminalWindow).__remoteTerm?.buffer.active.viewportY ?? 0,
+      ),
+    ).toBe(viewportYBefore);
+
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   });
 });

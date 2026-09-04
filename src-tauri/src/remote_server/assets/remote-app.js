@@ -4743,10 +4743,53 @@ import {
           });
         }
 
+        // xterm's element `mousedown` always calls helper `textarea.focus()`
+        // (`CoreBrowserTerminal`). Selection synthesis must not steal the
+        // current input-surface focus: losing composer/direct IME dismisses
+        // the keyboard, IME padding / visualViewport / crop then jump, and
+        // the just-seeded cell range is no longer under the finger. Restoring
+        // only the previously focused node keeps selection's no-IME behavior
+        // when nothing was focused.
+        function restorePreservedInputSurfaceFocus(surface) {
+          if (!surface || surface === document.activeElement || typeof surface.focus !== "function") {
+            return;
+          }
+          try {
+            surface.focus({ preventScroll: true });
+          } catch (_) {
+            surface.focus();
+          }
+        }
+
+        function withPreservedInputSurfaceFocus(run) {
+          const surface = document.activeElement;
+          const textarea = terminal && terminal.textarea;
+          const originalFocus = textarea ? textarea.focus : null;
+          if (textarea && originalFocus) {
+            try {
+              textarea.focus = function preserveInputSurfaceFocus() {};
+            } catch (_) {
+              // Some hosts freeze the native focus function on the instance.
+            }
+          }
+          try {
+            return run();
+          } finally {
+            if (textarea && originalFocus && textarea.focus !== originalFocus) {
+              try {
+                textarea.focus = originalFocus;
+              } catch (_) {}
+            }
+            restorePreservedInputSurfaceFocus(surface);
+          }
+        }
+
         function dispatchTouchSelectionMouse(target, type, point, forceSelection, detail, buttons) {
-          target.dispatchEvent(
-            touchSelectionMouseEvent(type, point, forceSelection, detail, buttons)
-          );
+          withPreservedInputSurfaceFocus(() => {
+            target.dispatchEvent(
+              touchSelectionMouseEvent(type, point, forceSelection, detail, buttons)
+            );
+          });
         }
 
         function activateTouchLink(term, element, point) {
