@@ -1865,6 +1865,31 @@ pub struct RemoteSettings {
     /// on a device where a screen row matters more, and never touches placement.
     #[serde(default = "default_remote_widgets")]
     pub widgets: bool,
+    /// Largest decoded Remote attachment in MiB (1..=10, ADR-0227). The
+    /// attachment JSON body bound, the Android E2E RPC envelope bound and the
+    /// attachment cache quota all derive from this value.
+    #[serde(default = "default_remote_attachment_max_mib")]
+    pub attachment_max_mib: u32,
+    /// Accept every file type as an opaque binary attachment instead of only
+    /// the signature-checked images/documents and UTF-8 text.
+    #[serde(default)]
+    pub attachment_allow_all_extensions: bool,
+    /// Extra extensions (lowercase, no dot) accepted as opaque binary attachments.
+    #[serde(default)]
+    pub attachment_extra_extensions: Vec<String>,
+}
+
+/// Extensions end up in a cache file name, so settings and callers may only
+/// supply lowercase ASCII alphanumerics of bounded length (ADR-0227).
+pub fn is_valid_attachment_extension(extension: &str) -> bool {
+    (1..=16).contains(&extension.len())
+        && extension
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+}
+
+fn default_remote_attachment_max_mib() -> u32 {
+    1
 }
 
 fn default_remote_bind_address() -> String {
@@ -1943,6 +1968,9 @@ impl Default for RemoteSettings {
             cloud_access_mode: CloudAccessMode::default(),
             serve_terminal_font: false,
             widgets: default_remote_widgets(),
+            attachment_max_mib: default_remote_attachment_max_mib(),
+            attachment_allow_all_extensions: false,
+            attachment_extra_extensions: Vec::new(),
         }
     }
 }

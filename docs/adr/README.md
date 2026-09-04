@@ -244,7 +244,8 @@ ADR 이 필요한 대표 기준:
 | [0224](0224-link-activation-chip-gate.md) | 링크 실행은 activation 설정으로 게이트하고, deliberate 모드는 액션 칩으로 명시 실행한다 (0188 확장) | Accepted |
 | [0225](0225-android-oauth-loopback-address-family.md) | Android OAuth loopback listener는 redirect 주소 패밀리를 따른다 (0175 Android bind 정정) | Accepted |
 | [0226](0226-composer-stars-are-host-global-persistent-state.md) | Composer 별표는 Desktop·Remote가 공유하는 호스트 전역 영구 상태다 (0029·0055 확장) | Accepted |
-| [0227](0227-remote-cursor-key-hold-repeat.md) | Remote 커서 키는 누르는 동안 자동 반복하고, 나머지 소프트 키는 1회 입력을 유지한다 (0213 확장) | Accepted |
+| [0227](0227-remote-document-attachments.md) | Remote 첨부는 signature 확인된 문서를 받고, 크기 상한과 추가 허용 종류는 host settings가 정한다 (0181 확장) | Accepted |
+| [0228](0228-remote-cursor-key-hold-repeat.md) | Remote 커서 키는 누르는 동안 자동 반복하고, 나머지 소프트 키는 1회 입력을 유지한다 (0213 확장) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

@@ -1182,6 +1182,12 @@ export interface RemoteSettings {
   serveTerminalFont: boolean;
   /** Mirror the desktop's placed widgets onto the remote strip (ADR-0124). */
   widgets: boolean;
+  /** Largest Remote attachment a client may upload, in MiB (1..10). */
+  attachmentMaxMib: number;
+  /** Accept any file type as an opaque binary attachment. */
+  attachmentAllowAllExtensions: boolean;
+  /** Extra extensions stored as opaque binaries beyond image/text/PDF/DOCX/PPTX (lowercase, no dot). */
+  attachmentExtraExtensions: string[];
 }
 
 export interface Settings {

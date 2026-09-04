@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
-use axum::extract::{Path as AxumPath, State};
-use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::body::to_bytes;
+use axum::extract::{Path as AxumPath, Request, State};
+use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -15,14 +16,20 @@ use uuid::Uuid;
 
 use crate::automation_server::ServerState;
 use crate::constants::{
-    REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_BYTES, REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_FILES,
-    REMOTE_TERMINAL_ATTACHMENT_MAX_BYTES,
+    remote_attachment_encoded_limit, remote_attachment_request_limit,
+    CLOUD_RELAY_ANDROID_E2E_RPC_BODY_LIMIT, CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT,
+    REMOTE_TERMINAL_ATTACHMENT_CACHE_FILES_OF_MAX_SIZE, REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_FILES,
+    REMOTE_TERMINAL_ATTACHMENT_MAX_MIB, REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES,
 };
 use crate::lock_ext::MutexExt;
+use crate::settings::models::{is_valid_attachment_extension, RemoteSettings};
 
+use super::access::effective_remote_settings;
 use super::lease::begin_remote_lease_mutation;
 use super::routes::lease_id_from_headers;
-use super::{internal_error, json_error};
+use super::{internal_error, json_error, RemoteTransport};
+
+const MIB: usize = 1024 * 1024;
 
 const ATTACHMENT_DIR_NAME: &str = "remote-attachments";
 const MAX_FILE_NAME_CHARS: usize = 160;
@@ -80,19 +87,123 @@ impl From<std::io::Error> for AttachmentError {
 #[derive(Debug, PartialEq, Eq)]
 enum AttachmentKind {
     Image(&'static str),
+    Document(&'static str),
     Text(String),
+    /// Stored as-is because the host opted in by extension or allow-all.
+    Opaque(String),
+}
+
+/// Host attachment policy derived from `remote.*` settings (ADR-0227), capped
+/// to what the transport that carried the request can relay. The same shape
+/// is published to Remote clients in the claim/status answers so the browser
+/// sizes its own checks, messages and file chooser to this host and path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AttachmentPolicy {
+    /// Effective bound for this request path: `min(host, relay)`.
+    pub max_bytes: usize,
+    /// The host's configured bound, reachable over Direct/Tailscale Remote.
+    pub host_max_bytes: usize,
+    /// Cloud relay payload bound for this path, when the request came through it.
+    pub relay_max_bytes: Option<usize>,
+    pub allow_all_extensions: bool,
+    pub extra_extensions: Vec<String>,
+}
+
+impl AttachmentPolicy {
+    pub(crate) fn from_settings(
+        settings: &RemoteSettings,
+        transport: Option<RemoteTransport>,
+    ) -> Self {
+        let host_max_bytes = settings
+            .attachment_max_mib
+            .clamp(1, REMOTE_TERMINAL_ATTACHMENT_MAX_MIB) as usize
+            * MIB;
+        let relay_max_bytes = transport.and_then(relay_attachment_cap);
+        Self {
+            max_bytes: relay_max_bytes.map_or(host_max_bytes, |relay| relay.min(host_max_bytes)),
+            host_max_bytes,
+            relay_max_bytes,
+            allow_all_extensions: settings.attachment_allow_all_extensions,
+            extra_extensions: settings
+                .attachment_extra_extensions
+                .iter()
+                .filter(|extension| is_valid_attachment_extension(extension))
+                .cloned()
+                .collect(),
+        }
+    }
+
+    fn cache_quota_bytes(&self) -> usize {
+        self.host_max_bytes * REMOTE_TERMINAL_ATTACHMENT_CACHE_FILES_OF_MAX_SIZE
+    }
+
+    /// Whether the Cloud relay, not the host setting, is the binding bound.
+    fn relay_limited(&self) -> bool {
+        self.relay_max_bytes
+            .is_some_and(|relay| relay < self.host_max_bytes)
+    }
+
+    fn too_large_message(&self) -> String {
+        if self.relay_limited() {
+            format!(
+                "attachment exceeds the Cloud relay payload limit of {} MiB. Connect through Tailscale (direct Remote) to use this host's {} MiB limit.",
+                self.max_bytes / MIB,
+                self.host_max_bytes / MIB
+            )
+        } else {
+            format!("attachment exceeds the {} MiB limit", self.max_bytes / MIB)
+        }
+    }
+
+    fn permits_opaque(&self, extension: Option<&str>) -> bool {
+        self.allow_all_extensions
+            || extension.is_some_and(|extension| {
+                self.extra_extensions
+                    .iter()
+                    .any(|allowed| allowed == extension)
+            })
+    }
 }
 
 pub(super) async fn remote_terminal_attachment(
     State(server): State<ServerState>,
     AxumPath(id): AxumPath<String>,
-    headers: HeaderMap,
-    Json(body): Json<RemoteTerminalAttachmentRequest>,
+    transport: Option<axum::Extension<RemoteTransport>>,
+    request: Request,
 ) -> Response {
+    let transport = transport.map(|axum::Extension(transport)| transport);
+    let policy = match effective_remote_settings(&server.app_state) {
+        Ok(settings) => AttachmentPolicy::from_settings(&settings, transport),
+        Err(error) => return no_store(internal_error(error)),
+    };
+    let (parts, raw_body) = request.into_parts();
+    // The body bound follows the configured maximum, so the route itself
+    // disables axum's static default limit.
+    let raw = match to_bytes(raw_body, remote_attachment_request_limit(policy.max_bytes)).await {
+        Ok(raw) => raw,
+        Err(_) => {
+            return no_store(json_error(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                &policy.too_large_message(),
+            ))
+        }
+    };
+    let body: RemoteTerminalAttachmentRequest = match serde_json::from_slice(&raw) {
+        Ok(body) => body,
+        Err(_) => {
+            return no_store(json_error(
+                StatusCode::BAD_REQUEST,
+                "attachment request body is not valid JSON",
+            ))
+        }
+    };
+    drop(raw);
+
     let lease_id = body
         .lease_id
         .as_deref()
-        .or_else(|| lease_id_from_headers(&headers));
+        .or_else(|| lease_id_from_headers(&parts.headers));
     let permit = match begin_remote_lease_mutation(&server.app_state, lease_id) {
         Ok(permit) => permit,
         Err(response) => return no_store(response),
@@ -110,10 +221,10 @@ pub(super) async fn remote_terminal_attachment(
             "attachment MIME type is too long",
         ));
     }
-    if body.data.len() > encoded_attachment_limit() {
+    if body.data.len() > remote_attachment_encoded_limit(policy.max_bytes) {
         return no_store(json_error(
             StatusCode::PAYLOAD_TOO_LARGE,
-            "attachment exceeds the 1 MiB limit",
+            &policy.too_large_message(),
         ));
     }
 
@@ -126,10 +237,10 @@ pub(super) async fn remote_terminal_attachment(
             ))
         }
     };
-    if bytes.len() > REMOTE_TERMINAL_ATTACHMENT_MAX_BYTES {
+    if bytes.len() > policy.max_bytes {
         return no_store(json_error(
             StatusCode::PAYLOAD_TOO_LARGE,
-            "attachment exceeds the 1 MiB limit",
+            &policy.too_large_message(),
         ));
     }
 
@@ -150,13 +261,15 @@ pub(super) async fn remote_terminal_attachment(
         Ok(directory) => directory,
         Err(error) => return no_store(internal_error(error)),
     };
+    let worker_policy = policy.clone();
     let saved = tokio::task::spawn_blocking(move || {
         save_attachment_to_dir(
             &attachment_dir,
             &file_name,
             &mime_type,
             &bytes,
-            REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_BYTES,
+            &worker_policy,
+            worker_policy.cache_quota_bytes(),
             REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_FILES,
         )
         .map(|path| terminal_visible_path(&path, &profile))
@@ -168,7 +281,7 @@ pub(super) async fn remote_terminal_attachment(
         Ok(Ok(path)) => {
             no_store(Json(RemoteTerminalAttachmentResponse { path, byte_length }).into_response())
         }
-        Ok(Err(error)) => attachment_error_response(error),
+        Ok(Err(error)) => attachment_error_response(error, &policy),
         Err(error) => no_store(internal_error(format!(
             "attachment storage worker failed: {error}"
         ))),
@@ -186,15 +299,14 @@ fn terminal_profile(
         .map(|session| session.config.profile.clone()))
 }
 
-fn attachment_error_response(error: AttachmentError) -> Response {
+fn attachment_error_response(error: AttachmentError, policy: &AttachmentPolicy) -> Response {
     let response = match error {
         AttachmentError::Invalid(message) => {
             json_error(StatusCode::UNSUPPORTED_MEDIA_TYPE, &message)
         }
-        AttachmentError::TooLarge => json_error(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "attachment exceeds the 1 MiB limit",
-        ),
+        AttachmentError::TooLarge => {
+            json_error(StatusCode::PAYLOAD_TOO_LARGE, &policy.too_large_message())
+        }
         AttachmentError::QuotaExceeded => json_error(
             StatusCode::INSUFFICIENT_STORAGE,
             "remote attachment cache is full",
@@ -211,8 +323,30 @@ fn no_store(mut response: Response) -> Response {
     response
 }
 
-const fn encoded_attachment_limit() -> usize {
-    REMOTE_TERMINAL_ATTACHMENT_MAX_BYTES.div_ceil(3) * 4
+/// Largest decoded attachment the Cloud relay can carry on this path, floored
+/// to whole MiB so the bound reads cleanly in messages. Direct/Tailscale paths
+/// have no relay in between and return `None`.
+fn relay_attachment_cap(transport: RemoteTransport) -> Option<usize> {
+    let request_limit = match transport {
+        RemoteTransport::CloudRelayBrowser => CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT,
+        RemoteTransport::AndroidE2e {
+            via_cloud_relay: true,
+        } => {
+            // Invert `android_e2e_rpc_body_limit`: strip the envelope slack and
+            // the outer base64url layer to get the inner attachment JSON bound.
+            (CLOUD_RELAY_ANDROID_E2E_RPC_BODY_LIMIT
+                - REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES)
+                / 4
+                * 3
+                - REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES
+        }
+        RemoteTransport::AndroidE2e {
+            via_cloud_relay: false,
+        } => return None,
+    };
+    // Invert `attachment_request_limit`: strip the JSON slack and the base64 layer.
+    let decoded = (request_limit - REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES) / 4 * 3;
+    Some((decoded / MIB).max(1) * MIB)
 }
 
 fn attachment_dir_under(cache_dir: &Path) -> PathBuf {
@@ -230,13 +364,14 @@ fn save_attachment_to_dir(
     original_name: &str,
     mime_type: &str,
     bytes: &[u8],
+    policy: &AttachmentPolicy,
     quota_bytes: usize,
     quota_files: usize,
 ) -> Result<PathBuf, AttachmentError> {
-    if bytes.len() > REMOTE_TERMINAL_ATTACHMENT_MAX_BYTES {
+    if bytes.len() > policy.max_bytes {
         return Err(AttachmentError::TooLarge);
     }
-    let kind = classify_attachment(original_name, mime_type, bytes)?;
+    let kind = classify_attachment(original_name, mime_type, bytes, policy)?;
     let output_name = attachment_file_name(original_name, &kind);
     let _store_guard = ATTACHMENT_STORE_LOCK
         .lock_or_err()
@@ -321,9 +456,13 @@ fn classify_attachment(
     original_name: &str,
     mime_type: &str,
     bytes: &[u8],
+    policy: &AttachmentPolicy,
 ) -> Result<AttachmentKind, AttachmentError> {
     if let Some(extension) = sniff_image_extension(bytes) {
         return Ok(AttachmentKind::Image(extension));
+    }
+    if let Some(extension) = sniff_document_extension(bytes) {
+        return Ok(AttachmentKind::Document(extension));
     }
 
     let mime_type = mime_type.trim().to_ascii_lowercase();
@@ -333,20 +472,27 @@ fn classify_attachment(
         || original_extension
             .as_deref()
             .is_some_and(|extension| TEXT_EXTENSIONS.contains(&extension));
-    if !text_declared {
-        return Err(AttachmentError::Invalid(
-            "only image and text attachments are supported".into(),
-        ));
+    let text_valid = !bytes.contains(&0) && std::str::from_utf8(bytes).is_ok();
+    if text_declared && text_valid {
+        let extension = original_extension
+            .filter(|extension| TEXT_EXTENSIONS.contains(&extension.as_str()))
+            .unwrap_or_else(|| "txt".into());
+        return Ok(AttachmentKind::Text(extension));
     }
-    if bytes.contains(&0) || std::str::from_utf8(bytes).is_err() {
+    if policy.permits_opaque(original_extension.as_deref()) {
+        let extension = original_extension
+            .filter(|extension| is_valid_attachment_extension(extension))
+            .unwrap_or_else(|| "bin".into());
+        return Ok(AttachmentKind::Opaque(extension));
+    }
+    if text_declared {
         return Err(AttachmentError::Invalid(
             "text attachments must contain valid UTF-8 without NUL bytes".into(),
         ));
     }
-    let extension = original_extension
-        .filter(|extension| TEXT_EXTENSIONS.contains(&extension.as_str()))
-        .unwrap_or_else(|| "txt".into());
-    Ok(AttachmentKind::Text(extension))
+    Err(AttachmentError::Invalid(
+        "only image, text, PDF, DOCX, PPTX and host-allowed extensions are supported".into(),
+    ))
 }
 
 fn sniff_image_extension(bytes: &[u8]) -> Option<&'static str> {
@@ -360,6 +506,27 @@ fn sniff_image_extension(bytes: &[u8]) -> Option<&'static str> {
         Some("webp")
     } else if bytes.starts_with(b"BM") {
         Some("bmp")
+    } else {
+        None
+    }
+}
+
+/// PDF by header, DOCX/PPTX by their OOXML package structure. OOXML is a ZIP
+/// archive whose central directory lists part names in plain text, so the
+/// package type is readable from the bytes without walking the archive. The
+/// caller's file name and MIME type are not trusted for the extension.
+fn sniff_document_extension(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"%PDF-") {
+        return Some("pdf");
+    }
+    if !bytes.starts_with(b"PK\x03\x04") {
+        return None;
+    }
+    let contains = |needle: &[u8]| bytes.windows(needle.len()).any(|window| window == needle);
+    if contains(b"word/document.xml") {
+        Some("docx")
+    } else if contains(b"ppt/presentation.xml") {
+        Some("pptx")
     } else {
         None
     }
@@ -390,8 +557,8 @@ fn attachment_file_name(original_name: &str, kind: &AttachmentKind) -> String {
         safe_stem.push_str("attachment");
     }
     let extension = match kind {
-        AttachmentKind::Image(extension) => *extension,
-        AttachmentKind::Text(extension) => extension.as_str(),
+        AttachmentKind::Image(extension) | AttachmentKind::Document(extension) => *extension,
+        AttachmentKind::Text(extension) | AttachmentKind::Opaque(extension) => extension.as_str(),
     };
     format!("remote-{}-{safe_stem}.{extension}", Uuid::new_v4())
 }

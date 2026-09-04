@@ -280,16 +280,53 @@ pub const REMOTE_OWNER_TRANSITION_TIMEOUT_MS: u64 = 750;
 /// API, including bracketed-paste markers and an optional submit CR.
 pub const TERMINAL_STRUCTURED_INPUT_MAX_BYTES: usize = 1024 * 1024;
 
-/// Maximum decoded image/text payload accepted by one Remote terminal attachment.
-/// One MiB remains below the Android E2E RPC envelope after both base64 layers.
-pub const REMOTE_TERMINAL_ATTACHMENT_MAX_BYTES: usize = 1024 * 1024;
-/// Maximum regular-file bytes retained in the app-owned Remote attachment cache.
-pub const REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
+/// Remote attachment cache quota expressed in attachments of the configured
+/// maximum size (`remote.attachmentMaxMib`, ADR-0227): 64 MiB at the 1 MiB default.
+pub const REMOTE_TERMINAL_ATTACHMENT_CACHE_FILES_OF_MAX_SIZE: usize = 64;
 /// Maximum regular-file count retained in the Remote attachment cache. This
 /// also bounds zero-byte attachments and the cost of cache scans.
 pub const REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_FILES: usize = 1024;
-/// JSON envelope bound for one base64-encoded Remote terminal attachment.
-pub const REMOTE_TERMINAL_ATTACHMENT_REQUEST_MAX_BYTES: usize = 1536 * 1024;
+/// Slack for the non-`data` fields of one Remote attachment JSON body
+/// (lease id, bounded file name and MIME type, JSON syntax).
+pub const REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES: usize = 16 * 1024;
+/// Cloud relay bound for one browser HTTP request body forwarded over the
+/// tunnel (laymux-server `TUNNEL_HTTP_REQUEST_BYTES_LIMIT`). Attachments that
+/// arrive through the relay are capped to what fits under it (ADR-0227).
+pub const CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT: usize = 16 * 1024 * 1024;
+/// Cloud relay bound for one Android E2E RPC envelope (laymux-server
+/// `ANDROID_E2E_RPC_BODY_LIMIT`, `POST /api/android/e2e/rpc`).
+pub const CLOUD_RELAY_ANDROID_E2E_RPC_BODY_LIMIT: usize = 2 * 1024 * 1024;
+/// Upper bound of `remote.attachmentMaxMib` (ADR-0227). The Cloud relay forwards
+/// at most 16 MiB of request body, which fits this many decoded MiB after base64.
+pub const REMOTE_TERMINAL_ATTACHMENT_MAX_MIB: u32 = 10;
+/// Base64 length of the largest decoded attachment a policy allows.
+pub const fn remote_attachment_encoded_limit(max_bytes: usize) -> usize {
+    max_bytes.div_ceil(3) * 4
+}
+/// JSON body bound for one attachment request at the given decoded maximum.
+pub const fn remote_attachment_request_limit(max_bytes: usize) -> usize {
+    remote_attachment_encoded_limit(max_bytes) + REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES
+}
+/// Largest inner request plaintext an Android E2E envelope may carry: the
+/// attachment JSON at the configurable cap plus the `PlainRequest` wrapper.
+pub const ANDROID_E2E_MAX_REQUEST_PLAINTEXT_BYTES: usize =
+    remote_attachment_request_limit(REMOTE_TERMINAL_ATTACHMENT_MAX_MIB as usize * 1024 * 1024)
+        + REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES;
+/// Body bound for one Android E2E RPC envelope carrying an attachment of the
+/// given decoded maximum: the inner plaintext is AEAD-sealed and base64url-
+/// encoded once more. Never below the 2 MiB the envelope always allowed.
+pub const fn android_e2e_rpc_body_limit(max_bytes: usize) -> usize {
+    let derived = (remote_attachment_request_limit(max_bytes)
+        + REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES)
+        .div_ceil(3)
+        * 4
+        + REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES;
+    if derived > 2 * 1024 * 1024 {
+        derived
+    } else {
+        2 * 1024 * 1024
+    }
+}
 /// Startup cleanup age for Remote attachment cache files.
 pub const REMOTE_TERMINAL_ATTACHMENT_MAX_AGE_DAYS: u64 = 7;
 
