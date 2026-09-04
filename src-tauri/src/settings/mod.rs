@@ -307,6 +307,8 @@ pub fn update_settings(
 pub(crate) const COMPOSER_STARRED_ENTRIES_FULL_ERROR: &str = "Composer starred entry limit reached";
 pub(crate) const COMPOSER_STARRED_ENTRY_DUPLICATE_ERROR: &str =
     "Composer starred entry already exists";
+pub(crate) const COMPOSER_STARRED_ENTRY_NOT_FOUND_ERROR: &str =
+    "Composer starred entry no longer exists";
 
 pub(crate) struct ComposerStarredSnapshot {
     pub entries: Option<Vec<ComposerStarredEntry>>,
@@ -478,6 +480,9 @@ fn mutate_composer_starred_entries(
             label,
             send,
         ));
+    }
+    if previous_identity.is_some() {
+        return Err(COMPOSER_STARRED_ENTRY_NOT_FOUND_ERROR.into());
     }
     if entries.len() >= crate::constants::COMPOSER_STARRED_ENTRIES_MAX {
         return Err(COMPOSER_STARRED_ENTRIES_FULL_ERROR.into());
@@ -894,7 +899,25 @@ mod tests {
         );
         assert_eq!(entries[0].label, "");
 
-        entries.insert(0, ComposerStarredEntry::from_value("git pull"));
+        entries.clear();
+        assert_eq!(
+            mutate_composer_starred_entries(
+                &mut entries,
+                "git push",
+                true,
+                Some("gp"),
+                Some(true),
+                Some("git pull"),
+            )
+            .unwrap_err(),
+            COMPOSER_STARRED_ENTRY_NOT_FOUND_ERROR
+        );
+        assert!(entries.is_empty());
+
+        entries.extend([
+            ComposerStarredEntry::from_value("git pull"),
+            ComposerStarredEntry::from_value("git push"),
+        ]);
         assert!(mutate_composer_starred_entries(
             &mut entries,
             "git push",

@@ -41,8 +41,10 @@ const UI_ROOT = process.cwd();
  * locales, taking the entry to 525,051 B. Korean copy costs 3 bytes a
  * character, so the strings are about a third of that. 528 kB restores the same
  * ~3 kB margin rather than banking room for the next feature.
+ * Composer starred-entry labels, send metadata and the shared editor take the
+ * entry to 536,494 B. 540 kB keeps the same small margin.
  */
-const STARTUP_CHUNK_BUDGET_BYTES = 528_000;
+const STARTUP_CHUNK_BUDGET_BYTES = 540_000;
 
 /**
  * Ceiling for a lazily-imported **syntax grammar**. Generous because a

@@ -11,6 +11,9 @@ use crate::constants::EVENT_COMPOSER_STARRED_ENTRIES_CHANGED;
 use super::lease::require_active_lease;
 use super::{internal_error, json_error};
 
+const COMPOSER_STARRED_ENTRY_VALUE_REQUIRED_ERROR: &str =
+    "Composer starred entry value is required";
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct ComposerStarredQuery {
@@ -40,7 +43,7 @@ impl ComposerStarredUpdate {
             }
             (Some(value), _) => Ok(value.clone()),
             (None, Some(text)) => Ok(text.clone()),
-            (None, None) => Ok(String::new()),
+            (None, None) => Err(COMPOSER_STARRED_ENTRY_VALUE_REQUIRED_ERROR),
         }
     }
 }
@@ -121,11 +124,27 @@ pub(super) async fn remote_composer_starred_update(
         .into_response(),
         Ok(Err(error))
             if error == crate::settings::COMPOSER_STARRED_ENTRIES_FULL_ERROR
-                || error == crate::settings::COMPOSER_STARRED_ENTRY_DUPLICATE_ERROR =>
+                || error == crate::settings::COMPOSER_STARRED_ENTRY_DUPLICATE_ERROR
+                || error == crate::settings::COMPOSER_STARRED_ENTRY_NOT_FOUND_ERROR =>
         {
             json_error(StatusCode::BAD_REQUEST, &error)
         }
         Ok(Err(error)) => internal_error(error),
         Err(error) => internal_error(error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn composer_starred_update_requires_text_or_value() {
+        let update: ComposerStarredUpdate = serde_json::from_str(r#"{"starred":false}"#).unwrap();
+
+        assert_eq!(
+            update.resolve_value(),
+            Err(COMPOSER_STARRED_ENTRY_VALUE_REQUIRED_ERROR)
+        );
     }
 }
