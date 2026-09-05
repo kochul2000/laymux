@@ -5494,6 +5494,7 @@ import {
               lastY: point.clientY,
               forceSelection: false,
               selectionSeed: null,
+              movedBeyondTapSlop: false,
               longPressTimer: null,
               scrollRemainderPx: 0,
             };
@@ -5525,6 +5526,7 @@ import {
               const movedY = point.clientY - touchGesture.startPoint.clientY;
               const openingDistance = touchGesture.edge === "left" ? movedX : -movedX;
               if (Math.hypot(movedX, movedY) > INTERNAL_TOUCH_SCROLL_SLOP_PX) {
+                touchGesture.movedBeyondTapSlop = true;
                 clearTouchLongPressTimer();
               }
               if (
@@ -5588,6 +5590,7 @@ import {
             clearTouchLongPressTimer();
             if (
               touchGesture.mode === "pending" &&
+              !touchGesture.movedBeyondTapSlop &&
               touchDistance(touchGesture.startPoint, point) <= INTERNAL_TOUCH_SCROLL_SLOP_PX
             ) {
               handleTouchTap(term, element, point);

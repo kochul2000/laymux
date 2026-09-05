@@ -228,8 +228,8 @@ async function flickTerminalEdge(page: Page, edge: "left" | "right") {
   }, edge);
 }
 
-async function tapTerminalLeftEdge(page: Page) {
-  await page.locator("#terminal .xterm").evaluate((element) => {
+async function touchTerminalLeftEdge(page: Page, moves: number[] = []) {
+  await page.locator("#terminal .xterm").evaluate((element, distances) => {
     const target = element as HTMLElement;
     const rect = target.getBoundingClientRect();
     target.setPointerCapture = () => {};
@@ -248,8 +248,23 @@ async function tapTerminalLeftEdge(page: Page) {
       screenY: rect.top + rect.height / 2,
     };
     target.dispatchEvent(new PointerEvent("pointerdown", init));
-    target.dispatchEvent(new PointerEvent("pointerup", init));
-  });
+    for (const distance of distances) {
+      target.dispatchEvent(
+        new PointerEvent("pointermove", {
+          ...init,
+          clientX: clientX + distance,
+          screenX: clientX + distance,
+        }),
+      );
+    }
+    target.dispatchEvent(
+      new PointerEvent("pointerup", {
+        ...init,
+        clientX: clientX + (distances.at(-1) ?? 0),
+        screenX: clientX + (distances.at(-1) ?? 0),
+      }),
+    );
+  }, moves);
 }
 
 test("the header folder button appears with the capability and lists the cwd", async ({
@@ -457,7 +472,10 @@ test("the device-local setting disables both terminal edge flicks", async ({ con
   await expect(page.locator("#fileViewerOverlay")).toBeHidden();
 });
 
-test("an enabled edge gesture still preserves a plain terminal tap", async ({ context, page }) => {
+test("edge gestures preserve taps without treating a returned drag as one", async ({
+  context,
+  page,
+}) => {
   await installRemoteExplorerMocks(context, true);
   await page.addInitScript(() => localStorage.setItem("laymux.remote.inputMode", "direct"));
   await page.setViewportSize({ width: 390, height: 720 });
@@ -466,8 +484,15 @@ test("an enabled edge gesture still preserves a plain terminal tap", async ({ co
   await page
     .locator(".xterm-helper-textarea")
     .evaluate((input: HTMLTextAreaElement) => input.blur());
-  await tapTerminalLeftEdge(page);
+  await touchTerminalLeftEdge(page);
 
   await expect(page.locator(".xterm-helper-textarea")).toBeFocused();
+  await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
+
+  await page
+    .locator(".xterm-helper-textarea")
+    .evaluate((input: HTMLTextAreaElement) => input.blur());
+  await touchTerminalLeftEdge(page, [20, 0]);
+  await expect(page.locator(".xterm-helper-textarea")).not.toBeFocused();
   await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
 });
