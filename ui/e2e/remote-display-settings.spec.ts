@@ -8,6 +8,9 @@ const deviceSettings = {
   terminalFontSize: 19,
   composerFontSize: 26,
   menuFontSize: 17,
+  navigationPinned: false,
+  navigationWidth: 300,
+  navigationPinCutoff: 720,
   composerIdleOpacity: 45,
   composerFocusedOpacity: 75,
   composerActiveOpacity: 95,
@@ -178,6 +181,9 @@ test("원격 화면 설정은 연결 전부터 기기 localStorage에서 읽고 
   await expect(page.locator("#remoteTerminalFontSize")).toHaveValue("19");
   await expect(page.locator("#remoteComposerFontSize")).toHaveValue("26");
   await expect(page.locator("#remoteMenuFontSize")).toHaveValue("17");
+  await expect(page.locator("#remoteNavigationPinned")).not.toBeChecked();
+  await expect(page.locator("#remoteNavigationWidth")).toHaveValue("300");
+  await expect(page.locator("#remoteNavigationPinCutoff")).toHaveValue("720");
   await expect(page.locator("#remoteSnapshotMaxKib")).toHaveValue("64");
   await expect(page.locator("#remoteScrollSensitivity")).toHaveValue("2.5");
   await expect(page.locator("#remoteFastScrollSensitivity")).toHaveValue("8");
@@ -201,6 +207,101 @@ test("원격 화면 설정은 연결 전부터 기기 localStorage에서 읽고 
       ),
     )
     .toBe("26px");
+});
+
+test("워크스페이스 메뉴는 너비를 공유하고 컷오프보다 넓을 때만 고정된다", async ({ page }) => {
+  const displayRequests: string[] = [];
+  await installApiMocks(page, displayRequests);
+  await page.setViewportSize({ width: 900, height: 800 });
+  await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), {
+    key: DISPLAY_SETTINGS_KEY,
+    value: { ...deviceSettings, navigationPinned: true },
+  });
+
+  await page.goto("http://remote.test/remote/");
+
+  await expect(page.locator(".app")).toHaveClass(/nav-pinned/);
+  await expect(page.locator("#navigationPanel")).toHaveCSS("width", "300px");
+  await expect(page.locator("#navScrim")).toBeHidden();
+  expect(
+    await page.evaluate(() => {
+      const remoteUi = (
+        window as typeof window & {
+          laymuxRemoteUi: { dismissTopLayer: () => boolean };
+        }
+      ).laymuxRemoteUi;
+      return [remoteUi.dismissTopLayer(), remoteUi.dismissTopLayer()];
+    }),
+  ).toEqual([true, false]);
+
+  await page.setViewportSize({ width: 720, height: 800 });
+  await expect(page.locator(".app")).not.toHaveClass(/nav-pinned/);
+  await expect(page.locator("#navigationPanel")).toHaveCSS("width", "300px");
+
+  await page.setViewportSize({ width: 721, height: 800 });
+  await expect(page.locator(".app")).toHaveClass(/nav-pinned/);
+
+  await page.locator("#drawerSettingsButton").evaluate((button) => button.click());
+  await page
+    .locator('#settingsTabs [data-settings-panel="display"]')
+    .evaluate((tab: HTMLElement) => tab.click());
+  await page.locator("#remoteNavigationWidth").fill("280");
+  await page.locator("#remoteNavigationWidth").blur();
+  await expect(page.locator("#navigationPanel")).toHaveCSS("width", "280px");
+
+  await page.locator("#remoteNavigationPinCutoff").fill("800");
+  await page.locator("#remoteNavigationPinCutoff").blur();
+  await expect(page.locator(".app")).not.toHaveClass(/nav-pinned/);
+  await page.locator("#remoteNavigationPinCutoff").fill("720");
+  await page.locator("#remoteNavigationPinCutoff").blur();
+  await expect(page.locator(".app")).toHaveClass(/nav-pinned/);
+
+  await page.locator("#remoteNavigationPinned").uncheck();
+  await expect(page.locator(".app")).not.toHaveClass(/nav-pinned/);
+  await expect(page.locator("#navigationPanel")).toHaveCSS("width", "280px");
+  await expect
+    .poll(() =>
+      page.evaluate((key) => JSON.parse(localStorage.getItem(key) || "null"), DISPLAY_SETTINGS_KEY),
+    )
+    .toMatchObject({
+      navigationPinned: false,
+      navigationWidth: 280,
+      navigationPinCutoff: 720,
+    });
+  expect(displayRequests).toEqual([]);
+});
+
+test("잘못된 워크스페이스 메뉴 숫자 설정은 안전한 기본값으로 복구한다", async ({ page }) => {
+  const displayRequests: string[] = [];
+  await installApiMocks(page, displayRequests);
+  await page.setViewportSize({ width: 500, height: 800 });
+  await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), {
+    key: DISPLAY_SETTINGS_KEY,
+    value: {
+      ...deviceSettings,
+      navigationPinned: true,
+      navigationWidth: null,
+      navigationPinCutoff: false,
+    },
+  });
+
+  await page.goto("http://remote.test/remote/");
+  await expect(page.locator(".app")).not.toHaveClass(/nav-pinned/);
+  await page.locator("#drawerSettingsButton").evaluate((button) => button.click());
+  await page
+    .locator('#settingsTabs [data-settings-panel="display"]')
+    .evaluate((tab: HTMLElement) => tab.click());
+
+  await expect(page.locator("#remoteNavigationWidth")).toHaveValue("360");
+  await expect(page.locator("#remoteNavigationPinCutoff")).toHaveValue("720");
+  await page.locator("#remoteNavigationWidth").fill("");
+  await page.locator("#remoteNavigationWidth").blur();
+  await expect
+    .poll(() =>
+      page.evaluate((key) => JSON.parse(localStorage.getItem(key) || "null"), DISPLAY_SETTINGS_KEY),
+    )
+    .toMatchObject({ navigationWidth: 360, navigationPinCutoff: 720 });
+  expect(displayRequests).toEqual([]);
 });
 
 test("기기의 terminal 옵션과 checkpoint 예산을 최초 attach에 적용한다", async ({ page }) => {

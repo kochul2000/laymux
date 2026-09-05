@@ -707,6 +707,9 @@ mod tests {
         assert!(html.contains("id=\"remoteTerminalFontSize\""));
         assert!(html.contains("id=\"remoteComposerFontSize\""));
         assert!(html.contains("id=\"remoteMenuFontSize\""));
+        assert!(html.contains("id=\"remoteNavigationPinned\""));
+        assert!(html.contains("id=\"remoteNavigationWidth\""));
+        assert!(html.contains("id=\"remoteNavigationPinCutoff\""));
         assert!(html.contains("id=\"remoteComposerIdleOpacity\""));
         assert!(html.contains("id=\"remoteComposerFocusedOpacity\""));
         assert!(html.contains("id=\"remoteComposerActiveOpacity\""));
@@ -721,11 +724,16 @@ mod tests {
         assert!(html.contains("terminalFontSize"));
         assert!(html.contains("composerFontSize"));
         assert!(html.contains("menuFontSize"));
+        assert!(html.contains("navigationPinned"));
+        assert!(html.contains("navigationWidth"));
+        assert!(html.contains("navigationPinCutoff"));
         assert!(html.contains("composerIdleOpacity"));
         assert!(html.contains("composerFocusedOpacity"));
         assert!(html.contains("composerActiveOpacity"));
         assert!(html.contains("--remote-composer-font-size"));
         assert!(html.contains("--remote-menu-font-size"));
+        assert!(html.contains("--remote-navigation-width"));
+        assert!(html.contains("window.innerWidth > remoteDisplaySettings.navigationPinCutoff"));
         assert!(html.contains("--remote-composer-idle-opacity"));
         assert!(html.contains("--remote-composer-focused-opacity"));
         assert!(html.contains("--remote-composer-active-opacity"));

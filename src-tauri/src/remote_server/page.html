@@ -226,6 +226,27 @@
                 <input id="remoteMenuFontSize" type="number" min="6" max="72" step="1" />
               <span class="nav-number-unit">px</span>
               </label>
+              <label class="nav-toggle-row" for="remoteNavigationPinned">
+                <input id="remoteNavigationPinned" type="checkbox" />
+                <span class="nav-toggle-name">Pin workspace menu</span>
+                <span class="nav-toggle-desc">Keep beside the terminal when wide enough</span>
+              </label>
+              <label class="nav-number-row" for="remoteNavigationWidth">
+                <span class="nav-number-copy">
+                  <span class="nav-toggle-name">Workspace menu width</span>
+                  <span class="nav-number-desc">Pinned and floating menu</span>
+                </span>
+                <input id="remoteNavigationWidth" type="number" min="200" max="720" step="1" />
+                <span class="nav-number-unit">px</span>
+              </label>
+              <label class="nav-number-row" for="remoteNavigationPinCutoff">
+                <span class="nav-number-copy">
+                  <span class="nav-toggle-name">Pin width cutoff</span>
+                  <span class="nav-number-desc">At or below this width, use the floating menu</span>
+                </span>
+                <input id="remoteNavigationPinCutoff" type="number" min="320" max="2560" step="1" />
+                <span class="nav-number-unit">px</span>
+              </label>
               <label class="nav-number-row" for="remoteSnapshotMaxKib">
                 <span class="nav-number-copy">
                   <span class="nav-toggle-name">Initial history</span>
