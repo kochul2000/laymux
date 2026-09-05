@@ -1,6 +1,6 @@
 # 0231. 숨김 자동 종료의 입력 차단은 대상 terminal에 한정한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-05
 - Source: 사용자 보고(숨김 이후 장시간 입력 유실, 미진입 복원 예정 pane), [조사 기록](../hidden-eviction-input-loss-investigation.md), [data-flow §13.5](../architecture/data-flow.md)
 - Amends: [ADR-0222](0222-agent-session-checkpoint-coordinator.md)의 숨김 eviction 전역 입력 차단. 업데이트의 전역 차단과 결론적 checkpoint 요구는 유지한다.
@@ -27,4 +27,4 @@ UI는 PTY 생성 완료가 관측된 hidden terminal만 자동 종료 요청 대
 
 ## Consequences
 
-실패하는 숨김 정리 중에도 unrelated terminal 입력이 유지된다. terminal permit과 전역 permit의 drain 경계를 함께 검증해야 한다. 다중 pane generic 명령은 아직 eviction 동안 제한된다. 업데이트가 진행 중인 eviction을 기다리는 시간은 기존 bounded drain 예산을 따른다. 세션 복원 포맷·설정 migration은 없다. 대상 입력 drain, unrelated raw/paste, 취소, update 경합, 미진입 pane 제외를 테스트와 dev에서 검증한다.
+실패하는 숨김 정리 중에도 unrelated Desktop/Remote human 입력과 protocol reply가 유지된다. terminal permit과 전역 permit의 drain 경계를 함께 검증해야 한다. 다중 pane generic 명령뿐 아니라 Automation REST direct write와 MCP write/execute도 기존 generic admission을 유지하므로 eviction 동안 제한된다. 업데이트가 진행 중인 eviction을 기다리는 시간은 기존 bounded drain 예산을 따른다. 세션 복원 포맷·설정 migration은 없다. 대상 입력 drain, unrelated raw/paste, 취소, update 경합, 미진입 pane 제외를 테스트와 dev에서 검증한다.

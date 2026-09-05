@@ -1431,6 +1431,8 @@ Rust watchdog은 5분마다 프론트에 checkpoint를 요청한다. agent 완�
 
 숨김 자동 종료는 PTY 생성 완료(`sessionReady=true`)인 pane만 요청하며, backend도 live handle이 없는 요청은 fence 없이 반환한다. [ADR-0231](../adr/0231-hidden-eviction-target-scoped-input-admission.md)의 대상별 admission은 human raw/structured/binary 입력과 protocol reply의 terminal ID에 결부된다. 대상의 승인 입력, 기존 generic mutation과 대상 worker completion만 drain하므로 unrelated pane의 입력은 계속 흐른다. 다중 terminal을 변경하는 generic mutation과 생성/종료는 scope 동안 여전히 admission이 제한된다. scope는 오류·취소에도 RAII로 해제된다. 업데이트의 전역 fence는 별도이며 신규 eviction을 막고 진행 중인 eviction과 모든 terminal 입력을 bounded drain한다. 미진입 pane의 저장된 resume ID는 보존하고 live coverage에 없는 pane을 critical 실패로 추가하지 않는다.
 
+위 입력 허용은 Desktop/Remote human 입력 및 protocol reply 경로에 적용한다. Automation REST direct write와 MCP write/execute는 기존 generic admission을 유지하므로 unrelated terminal 대상이어도 숨김 정리 중 거절될 수 있다.
+
 Windows child wait와 PID tree kill은 handshake로 상호 배제한다. kill claim 동안 wait thread는 종료된 child의 OS handle을 유지하므로 PID가 재사용된 무관한 process에 `taskkill`이 적용되지 않는다. 숨김 eviction의 ACK 전 eligibility는 timer hook이 계산한 최신 만료 집합이다. timeout이 늘거나 hidden→visible→hidden으로 연속 숨김 epoch가 초기화되면 대상은 그 집합에서 빠지고 backend close 전에 오류 ACK된다.
 
 ### 13.6 시작 시퀀스

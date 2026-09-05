@@ -41,4 +41,4 @@ ADR: [0231 숨김 정리 대상별 입력 admission](adr/0231-hidden-eviction-ta
 
 재실행은 별도 임시 `APPDATA`와 `WEBVIEW2_USER_DATA_FOLDER`를 지정한 dev에서만 수행한다. `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9229`로 `cargo tauri dev`를 실행한 뒤 Windows의 `ui/`에서 `node scripts/repro-hidden-eviction.mjs`를 실행한다. 스크립트는 테스트 workspace를 생성하므로 일상 사용 중인 dev 프로필을 쓰지 않는다. 종료는 같은 `APPDATA`를 지정하고 `bash scripts/kill-dev.sh`로 한다.
 
-최종 검사: UI 전체 4,862개, 관련 UI 재검사 87개, Rust checkpoint 관련 14개, UI build·ESLint·workspace/all-targets clippy `-D warnings` 통과. Rust 전체는 2,033개 통과, 원격 페이지 HTML 문자열 검사 4개 실패했다. 실패한 `remote_server::page` 테스트 및 입력 HTML/JS/CSS는 최신 main과 동일하며 이번 변경에서 수정하지 않았다.
+최종 검사: UI 전체 4,862개, 관련 UI 재검사 87개, Rust checkpoint 관련 14개, UI build·ESLint·workspace/all-targets clippy `-D warnings` 통과. Rust 전체는 2,033개 통과, 원격 페이지 HTML 문자열 검사 4개 실패했다. 실패한 `remote_server::page` 테스트 및 입력 HTML/JS/CSS는 최신 main과 동일하며 이번 변경에서 수정하지 않았다. 머지 리뷰에서 base `853e27b2`를 별도 detached worktree로 체크아웃해 해당 모듈 58개를 실행했고, 같은 네 assertion이 실패했다(54 passed / 4 failed). 이 실패는 이번 PR의 회귀가 아니며 전체 스위트 성공으로 보고하지 않는다.

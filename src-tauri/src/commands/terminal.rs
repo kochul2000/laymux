@@ -1653,8 +1653,8 @@ pub async fn close_terminal_session(
 }
 
 /// Close one terminal after the caller has established an equivalent or
-/// stronger lifecycle gate. Hidden eviction uses this while owning the global
-/// destructive-operation fence, so reacquiring a normal mutation permit would
+/// stronger lifecycle gate. Hidden eviction uses this while owning the target
+/// lifecycle fence, so reacquiring a normal mutation permit would
 /// reject the transaction that owns the fence.
 pub(crate) fn close_terminal_session_inner(
     id: &str,
