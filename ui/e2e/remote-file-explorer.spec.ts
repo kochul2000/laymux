@@ -75,7 +75,7 @@ const LISTINGS: Record<
   },
 };
 
-async function installRemoteExplorerMocks(context: BrowserContext) {
+async function installRemoteExplorerMocks(context: BrowserContext, withTerminal = false) {
   const listRequests: Array<{
     lease: string | null;
     fileViewerCapability: string | null;
@@ -105,12 +105,52 @@ async function installRemoteExplorerMocks(context: BrowserContext) {
       return route.fulfill({ json: { ok: true } });
     }
     if (url.pathname === "/remote/v1/navigation") {
+      const pane = {
+        id: "pane-1",
+        location: "workspace",
+        workspaceId: "ws-1",
+        paneIndex: 0,
+        paneNumber: 1,
+        viewType: "TerminalView",
+        terminalId: "terminal-1",
+        terminalLive: true,
+        title: "Shell",
+        profile: "PowerShell",
+        cwd: "/home/user",
+        activity: { type: "shell" },
+        isFocused: true,
+        hidden: false,
+        collapsed: false,
+        x: 0,
+        y: 0,
+        w: 1,
+        h: 1,
+      };
       return route.fulfill({
         json: {
-          activeWorkspace: null,
-          workspaces: [],
+          activeWorkspace: withTerminal ? { id: "ws-1", name: "Main", panes: [pane] } : null,
+          workspaces: withTerminal
+            ? [{ id: "ws-1", name: "Main", isActive: true, hidden: false, panes: [pane] }]
+            : [],
           docks: [],
-          terminals: [],
+          terminals: withTerminal
+            ? [
+                {
+                  id: "terminal-1",
+                  title: "Shell",
+                  profile: "PowerShell",
+                  cwd: "/home/user",
+                  workspaceId: "ws-1",
+                  paneNumber: 1,
+                  appearance: {
+                    fontFamily: "'Cascadia Mono', 'Consolas', monospace",
+                    cursorStyle: "bar",
+                    cursorWidth: 1,
+                    theme: {},
+                  },
+                },
+              ]
+            : [],
           workspaceSelector: { display: {}, pathEllipsis: "start" },
           notifications: [],
           unreadNotificationCount: 0,
@@ -145,15 +185,47 @@ async function installRemoteExplorerMocks(context: BrowserContext) {
     }
     return route.fulfill({ status: 404, json: { error: "not mocked" } });
   });
+  if (withTerminal) {
+    await context.routeWebSocket(/\/remote\/v1\/terminals\/terminal-1\/output/, () => {});
+  }
 
   return { listRequests, renderRequests };
 }
 
-async function connectRemote(page: Page) {
-  await page.goto("http://remote.test/remote/");
+async function connectRemote(page: Page, localApp = false) {
+  await page.goto(`http://remote.test/remote/${localApp ? "?localApp=1" : ""}`);
   await page.locator("#token").fill("remote-secret");
   await page.locator("#connect").click();
   await expect(page.locator("#exit")).toBeEnabled();
+}
+
+async function flickTerminalEdge(page: Page, edge: "left" | "right") {
+  await page.locator("#terminal .xterm").evaluate((element, selectedEdge) => {
+    const target = element as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    target.setPointerCapture = () => {};
+    target.releasePointerCapture = () => {};
+    target.hasPointerCapture = () => false;
+    const startX = selectedEdge === "left" ? rect.left + 1 : rect.right - 1;
+    const endX = startX + (selectedEdge === "left" ? 80 : -80);
+    const dispatch = (type: string, clientX: number) =>
+      target.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          pointerId: 41,
+          pointerType: "touch",
+          isPrimary: true,
+          clientX,
+          clientY: rect.top + rect.height / 2,
+          screenX: clientX,
+          screenY: rect.top + rect.height / 2,
+        }),
+      );
+    dispatch("pointerdown", startX);
+    dispatch("pointermove", endX);
+    dispatch("pointerup", endX);
+  }, edge);
 }
 
 test("the header folder button appears with the capability and lists the cwd", async ({
@@ -316,4 +388,47 @@ test("the explorer works at a mobile viewport", async ({ context, page }) => {
   expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
   await row.click();
   await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user/repo");
+});
+
+test("mobile terminal edge flicks open workspaces on the left and files on the right", async ({
+  context,
+  page,
+}) => {
+  const { listRequests } = await installRemoteExplorerMocks(context, true);
+  await page.setViewportSize({ width: 390, height: 720 });
+  await connectRemote(page, true);
+
+  await flickTerminalEdge(page, "left");
+  await expect(page.locator(".app")).toHaveClass(/nav-open/);
+  await page.locator("#navScrim").evaluate((button: HTMLButtonElement) => button.click());
+
+  await flickTerminalEdge(page, "right");
+  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+  await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user");
+  expect(listRequests.at(-1)?.body).toEqual({
+    source: "terminalCwd",
+    terminalId: "terminal-1",
+  });
+});
+
+test("the device-local setting disables both terminal edge flicks", async ({ context, page }) => {
+  await installRemoteExplorerMocks(context, true);
+  await page.setViewportSize({ width: 390, height: 720 });
+  await connectRemote(page, true);
+
+  await page.locator("#navToggle").click();
+  await page.locator("#drawerSettingsButton").click();
+  await page.locator("#settingsTabDisplay").click();
+  const toggle = page.locator("#edgeSwipeDrawersToggle");
+  await expect(toggle).toBeChecked();
+  await toggle.uncheck();
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("laymux.remote.edgeSwipeDrawers")))
+    .toBe("0");
+  await page.locator("#navToggle").click();
+
+  await flickTerminalEdge(page, "left");
+  await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
+  await flickTerminalEdge(page, "right");
+  await expect(page.locator("#fileViewerOverlay")).toBeHidden();
 });

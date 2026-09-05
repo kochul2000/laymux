@@ -701,6 +701,20 @@ mod tests {
     }
 
     #[test]
+    fn remote_page_html_offers_device_local_terminal_edge_flicks() {
+        let html = remote_client_source();
+
+        assert!(html.contains("id=\"edgeSwipeDrawersToggle\""));
+        assert!(html.contains("const edgeSwipeDrawersKey = \"laymux.remote.edgeSwipeDrawers\";"));
+        assert!(
+            html.contains("let edgeSwipeDrawersEnabled = loadLocalToggle(edgeSwipeDrawersKey);")
+        );
+        assert!(html.contains("mode: \"edgeNavigation\","));
+        assert!(html.contains("if (edge === \"left\") setNavigationOpen(true);"));
+        assert!(html.contains("openCurrentFileExplorer();"));
+    }
+
+    #[test]
     fn remote_page_html_owns_display_settings_in_device_storage() {
         let html = remote_client_source();
 
@@ -1772,12 +1786,12 @@ mod tests {
         // Only the on/off feature toggles are surface-local persisted state.
         assert!(html.contains("laymux.remote.composerHistoryPopup"));
         assert!(html.contains("laymux.remote.composerAutocomplete"));
-        assert!(html.contains("function loadComposerToggle(key)"));
+        assert!(html.contains("function loadLocalToggle(key)"));
         assert!(html.contains("return localStorage.getItem(key) !== \"0\";"));
         assert!(html.contains("localStorage.setItem(key, enabled ? \"1\" : \"0\");"));
         // Toggles default ON to match the desktop composer (non-destructive).
-        assert!(html.contains("loadComposerToggle(composerHistoryPopupKey)"));
-        assert!(html.contains("loadComposerToggle(composerAutocompleteKey)"));
+        assert!(html.contains("loadLocalToggle(composerHistoryPopupKey)"));
+        assert!(html.contains("loadLocalToggle(composerAutocompleteKey)"));
 
         // #504 popup needs an EMPTY draft; #505 autocomplete needs a NON-empty
         // draft — mutually exclusive by construction so they never fight.
