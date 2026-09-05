@@ -908,7 +908,7 @@ describe("PaneControlBar", () => {
         <div>content</div>
       </PaneControlBar>,
     );
-    await user.click(screen.getByTestId("pane-control-minimize"));
+    await user.click(screen.getByRole("button", { name: "컨트롤바 숨기기" }));
     expect(screen.getByTestId("pane-control-minimized")).toBeInTheDocument();
     expect(screen.getByTestId("pane-control-menu-btn")).toBeInTheDocument();
   });

@@ -18,6 +18,7 @@ import {
   EyeIcon,
   EyeOffIcon,
   KeyboardIcon,
+  MinusIcon,
   PencilIcon,
   PinIcon,
   RefreshIcon,
@@ -473,9 +474,9 @@ function BarContent({
         <BarBtn
           testId="pane-control-minimize"
           onClick={() => onSetMode("minimized")}
-          title="Minimize"
+          title="컨트롤바 숨기기"
         >
-          <EllipsisIcon size={12} />
+          <MinusIcon size={12} />
         </BarBtn>
       )}
     </div>
