@@ -50,6 +50,7 @@ import {
         const desktopModeHeaderButton = $("desktopModeHeader");
         const desktopModeDrawerButton = $("desktopModeDrawer");
         const navScrim = $("navScrim");
+        const navigationPanel = $("navigationPanel");
         const connectButton = $("connect");
         const exitButton = $("exit");
         const refreshButton = $("refresh");
@@ -543,7 +544,7 @@ import {
         const INTERNAL_TOUCH_TAP_SLOP_PX = 18;
         const INTERNAL_TOUCH_MULTI_TAP_DELAY_MS = 320;
         const EDGE_SWIPE_HIT_PX = 24;
-        const EDGE_SWIPE_OPEN_PX = 56;
+        const EDGE_SWIPE_DISTANCE_PX = 56;
         const OUTPUT_RECONNECT_INITIAL_DELAY_MS = 250;
         const OUTPUT_RECONNECT_MAX_DELAY_MS = 5000;
         // The host may spend up to three 5-second frontend-bridge attempts
@@ -4917,6 +4918,40 @@ import {
           return event.pointerType === "touch" || event.pointerType === "pen";
         }
 
+        function installHorizontalFlickDismiss(element, direction, enabled, dismiss) {
+          let gesture = null;
+          element.addEventListener("pointerdown", (event) => {
+            if (!isTouchPointer(event) || !mobileLayout || !edgeSwipeDrawersEnabled || !enabled()) return;
+            if (gesture) {
+              gesture = null;
+              return;
+            }
+            gesture = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+          });
+          element.addEventListener("pointermove", (event) => {
+            if (!gesture || event.pointerId !== gesture.pointerId) return;
+            const movedX = event.clientX - gesture.x;
+            const movedY = event.clientY - gesture.y;
+            const distance = movedX * direction;
+            if (distance >= EDGE_SWIPE_DISTANCE_PX && distance > Math.abs(movedY) * 1.25) {
+              event.preventDefault();
+              gesture = null;
+              dismiss();
+            } else if (
+              distance < -INTERNAL_TOUCH_SCROLL_SLOP_PX ||
+              (Math.abs(movedY) > INTERNAL_TOUCH_SCROLL_SLOP_PX &&
+                Math.abs(movedY) > Math.abs(movedX))
+            ) {
+              gesture = null;
+            }
+          }, { passive: false });
+          const finish = (event) => {
+            if (gesture && event.pointerId === gesture.pointerId) gesture = null;
+          };
+          element.addEventListener("pointerup", finish);
+          element.addEventListener("pointercancel", finish);
+        }
+
         function touchPointFromEvent(event) {
           return {
             screenX: event.screenX,
@@ -5531,7 +5566,7 @@ import {
                 clearTouchLongPressTimer();
               }
               if (
-                openingDistance >= EDGE_SWIPE_OPEN_PX &&
+                openingDistance >= EDGE_SWIPE_DISTANCE_PX &&
                 openingDistance > Math.abs(movedY) * 1.25
               ) {
                 const edge = touchGesture.edge;
@@ -12018,6 +12053,12 @@ import {
           clearNotifications().catch((err) => setStatus(`Clear failed: ${err.message}`, true));
         });
         navScrim.addEventListener("click", () => setNavigationOpen(false));
+        installHorizontalFlickDismiss(
+          navigationPanel,
+          -1,
+          () => !remoteNavigationPinnedForViewport(),
+          () => setNavigationOpen(false),
+        );
         drawerBackButton.addEventListener("click", returnToWorkspaceView);
         drawerNotificationsButton.addEventListener("click", () => openDrawerSubview("notifications"));
         drawerConnectionButton.addEventListener("click", () => openDrawerSubview("connection"));
@@ -12083,6 +12124,12 @@ import {
           // user reading, selecting or scrolling the file.
           if (event.target === fileViewerOverlayElement) closeFileViewer();
         });
+        installHorizontalFlickDismiss(
+          fileViewerDirectoryElement,
+          1,
+          () => !fileViewerDirectoryElement.hidden,
+          closeFileViewer,
+        );
         fileViewerZoomOutButton.addEventListener("click", () => adjustFileViewerZoom(-1));
         fileViewerZoomInButton.addEventListener("click", () => adjustFileViewerZoom(1));
         fileViewerZoomResetButton.addEventListener("click", () => {

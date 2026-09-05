@@ -228,6 +228,30 @@ async function flickTerminalEdge(page: Page, edge: "left" | "right") {
   }, edge);
 }
 
+async function flickSurface(page: Page, selector: string, distance: number) {
+  await page.locator(selector).evaluate((element, movedX) => {
+    const target = element as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    const startX = rect.left + rect.width / 2;
+    const clientY = rect.top + rect.height / 2;
+    const dispatch = (type: string, clientX: number) =>
+      target.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          pointerId: 43,
+          pointerType: "touch",
+          isPrimary: true,
+          clientX,
+          clientY,
+        }),
+      );
+    dispatch("pointerdown", startX);
+    dispatch("pointermove", startX + movedX);
+    dispatch("pointerup", startX + movedX);
+  }, distance);
+}
+
 async function touchTerminalLeftEdge(page: Page, moves: number[] = []) {
   await page.locator("#terminal .xterm").evaluate((element, distances) => {
     const target = element as HTMLElement;
@@ -448,6 +472,25 @@ test("mobile terminal edge flicks open workspaces on the left and files on the r
     source: "terminalCwd",
     terminalId: "terminal-1",
   });
+});
+
+test("opposite mobile flicks close the workspace menu and file explorer", async ({
+  context,
+  page,
+}) => {
+  await installRemoteExplorerMocks(context, true);
+  await page.setViewportSize({ width: 390, height: 720 });
+  await connectRemote(page, true);
+
+  await flickTerminalEdge(page, "left");
+  await expect(page.locator(".app")).toHaveClass(/nav-open/);
+  await flickSurface(page, "#navigationPanel", -80);
+  await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
+
+  await flickTerminalEdge(page, "right");
+  await expect(page.locator("#fileViewerDirectory")).toBeVisible();
+  await flickSurface(page, "#fileViewerDirectory", 80);
+  await expect(page.locator("#fileViewerOverlay")).toBeHidden();
 });
 
 test("the device-local setting disables both terminal edge flicks", async ({ context, page }) => {
