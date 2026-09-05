@@ -53,6 +53,7 @@ pub(crate) fn get_codex_session_lookup_impl(
         .map(|(terminal_id, _)| terminal_id.clone())
         .collect();
     let mut failed_terminal_ids = HashSet::new();
+    let mut missing_rollout_terminal_ids = HashSet::new();
     let terminal_codex_pids: Vec<(String, u32)> = if terminal_roots.is_empty() {
         Vec::new()
     } else {
@@ -95,6 +96,9 @@ pub(crate) fn get_codex_session_lookup_impl(
             for (terminal_id, process) in lookup.attributions {
                 let session_id = match process {
                     Some(process) => {
+                        if process.rollout_paths.is_empty() {
+                            missing_rollout_terminal_ids.insert(terminal_id.clone());
+                        }
                         match super::codex_session::store::find_session_from_rollout_paths_checked(
                             &process.codex_rollout_paths(),
                             session_max_age_hours,
@@ -120,6 +124,7 @@ pub(crate) fn get_codex_session_lookup_impl(
     Ok(ProviderSessionLookup {
         attributions: crate::process_tree::reject_duplicate_session_attributions(result, "Codex"),
         failed_terminal_ids,
+        missing_rollout_terminal_ids,
     })
 }
 

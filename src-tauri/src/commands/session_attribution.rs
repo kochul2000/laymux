@@ -12,6 +12,7 @@ use crate::state::AppState;
 #[serde(rename_all = "camelCase")]
 pub enum SessionAttributionState {
     Identified,
+    RestorePending,
     NoAgent,
     ActiveButUnidentified,
     Unknown,
@@ -31,6 +32,8 @@ pub struct TerminalSessionAttribution {
 pub(crate) struct ProviderSessionLookup {
     pub attributions: HashMap<String, Option<String>>,
     pub failed_terminal_ids: HashSet<String>,
+    /// Exact WSL Codex process with no rollout FD, not a rejected/ambiguous candidate.
+    pub missing_rollout_terminal_ids: HashSet<String>,
 }
 
 pub(crate) struct ProviderTerminalDomains {
@@ -150,6 +153,59 @@ fn unknown_attribution(generation: u64) -> TerminalSessionAttribution {
     }
 }
 
+fn apply_unconsumed_restore(
+    mut attribution: TerminalSessionAttribution,
+    handle: &crate::pty::PtyHandle,
+    missing_rollout: bool,
+) -> TerminalSessionAttribution {
+    if handle.terminal_generation() != attribution.generation {
+        return unknown_attribution(attribution.generation);
+    }
+    let Some((provider, session_id)) = handle.unconsumed_session_restore() else {
+        return attribution;
+    };
+    match attribution.state {
+        SessionAttributionState::NoAgent => {}
+        SessionAttributionState::ActiveButUnidentified
+            if attribution.provider == Some(provider) && missing_rollout => {}
+        SessionAttributionState::Unknown => return attribution,
+        _ => {
+            handle.consume_session_restore();
+            return attribution;
+        }
+    }
+    attribution.state = SessionAttributionState::RestorePending;
+    attribution.provider = Some(provider);
+    attribution.session_id = Some(session_id.to_owned());
+    attribution
+}
+
+fn reject_duplicate_restore_checkpoints(
+    attributions: &mut HashMap<String, TerminalSessionAttribution>,
+    handles: &HashMap<String, crate::pty::PtyHandle>,
+) {
+    let mut counts = HashMap::new();
+    for attribution in attributions.values() {
+        if let (Some(provider), Some(id)) = (attribution.provider, &attribution.session_id) {
+            *counts.entry((provider, id.clone())).or_insert(0) += 1;
+        }
+    }
+    for (terminal_id, attribution) in attributions {
+        if attribution.state == SessionAttributionState::RestorePending
+            && attribution
+                .provider
+                .zip(attribution.session_id.clone())
+                .is_some_and(|key| counts.get(&key).is_some_and(|count| *count > 1))
+        {
+            if let Some(handle) = handles.get(terminal_id) {
+                handle.consume_session_restore();
+            }
+            attribution.state = SessionAttributionState::ActiveButUnidentified;
+            attribution.session_id = None;
+        }
+    }
+}
+
 fn require_current_generation(
     attribution: TerminalSessionAttribution,
     current_generation: Option<u64>,
@@ -235,14 +291,9 @@ pub fn get_terminal_session_attributions(
             (terminal_id, generation, liveness)
         })
         .collect();
-    let current_generations: HashMap<String, u64> = state
-        .pty_handles
-        .lock_or_err()?
-        .iter()
-        .map(|(terminal_id, handle)| (terminal_id.clone(), handle.terminal_generation()))
-        .collect();
+    let current_handles = state.pty_handles.lock_or_err()?.clone();
 
-    Ok(observations
+    let mut attributions = observations
         .into_iter()
         .map(|(terminal_id, generation, liveness)| {
             let lookup_failed =
@@ -258,176 +309,24 @@ pub fn get_terminal_session_attributions(
             );
             let attribution = require_current_generation(
                 attribution,
-                current_generations.get(&terminal_id).copied(),
+                current_handles
+                    .get(&terminal_id)
+                    .map(|handle| handle.terminal_generation()),
             );
+            let attribution = match current_handles.get(&terminal_id) {
+                Some(handle) => apply_unconsumed_restore(
+                    attribution,
+                    handle,
+                    codex.missing_rollout_terminal_ids.contains(&terminal_id),
+                ),
+                None => attribution,
+            };
             (terminal_id, attribution)
         })
-        .collect())
+        .collect();
+    reject_duplicate_restore_checkpoints(&mut attributions, &current_handles);
+    Ok(attributions)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn exact_claim_wins_and_is_bound_to_generation() {
-        let attribution = classify_attribution(
-            7,
-            "terminal-a",
-            &HashMap::new(),
-            &HashMap::from([("terminal-a".into(), Some("session-2".into()))]),
-            &HashMap::new(),
-            PtyAppLiveness::Running("Codex"),
-            false,
-        );
-        assert_eq!(attribution.generation, 7);
-        assert_eq!(attribution.state, SessionAttributionState::Identified);
-        assert_eq!(attribution.session_id.as_deref(), Some("session-2"));
-    }
-
-    #[test]
-    fn unknown_process_snapshot_is_not_collapsed_to_no_agent() {
-        let attribution = classify_attribution(
-            3,
-            "terminal-a",
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-            PtyAppLiveness::Unknown,
-            false,
-        );
-        assert_eq!(attribution.state, SessionAttributionState::Unknown);
-    }
-
-    #[test]
-    fn provider_lookup_failure_is_not_collapsed_to_destructive_absence() {
-        let attribution = classify_attribution(
-            4,
-            "terminal-a",
-            &HashMap::from([("terminal-a".into(), None)]),
-            &HashMap::new(),
-            &HashMap::new(),
-            PtyAppLiveness::Running("Claude"),
-            true,
-        );
-
-        assert_eq!(attribution.state, SessionAttributionState::Unknown);
-        assert_eq!(attribution.session_id, None);
-    }
-
-    #[test]
-    fn provider_lookup_failure_is_scoped_to_the_affected_terminal() {
-        let failed = ProviderSessionLookup {
-            attributions: HashMap::from([("terminal-b".into(), None)]),
-            failed_terminal_ids: HashSet::from(["terminal-b".into()]),
-        };
-        let healthy = ProviderSessionLookup {
-            attributions: HashMap::from([("terminal-a".into(), Some("session-a".into()))]),
-            failed_terminal_ids: HashSet::new(),
-        };
-
-        assert!(!provider_lookup_failed_for_terminal(
-            "terminal-a",
-            &[&failed, &healthy]
-        ));
-        assert!(provider_lookup_failed_for_terminal(
-            "terminal-b",
-            &[&failed, &healthy]
-        ));
-    }
-
-    #[test]
-    fn provider_domains_keep_wsl_terminals_out_of_native_snapshot_failures() {
-        let state = AppState::new();
-        state.pty_handles.lock().unwrap().extend([
-            (
-                "terminal-native".into(),
-                crate::pty::PtyHandle::from_test_writer(Box::new(std::io::sink()))
-                    .with_child_pid(Some(101)),
-            ),
-            (
-                "terminal-wsl".into(),
-                crate::pty::PtyHandle::from_test_writer(Box::new(std::io::sink()))
-                    .with_child_pid(Some(202))
-                    .with_wsl_backed(true),
-            ),
-        ]);
-
-        let domains =
-            provider_terminal_domains(&["terminal-native".into(), "terminal-wsl".into()], &state)
-                .unwrap();
-
-        assert_eq!(domains.native_roots, vec![("terminal-native".into(), 101)]);
-        assert_eq!(
-            domains.wsl_terminal_ids,
-            HashSet::from(["terminal-wsl".into()])
-        );
-    }
-
-    #[test]
-    fn generation_change_degrades_to_unknown() {
-        let attribution = require_current_generation(
-            TerminalSessionAttribution {
-                generation: 8,
-                state: SessionAttributionState::Identified,
-                provider: Some("codex"),
-                session_id: Some("session-before-restart".into()),
-            },
-            Some(9),
-        );
-        assert_eq!(attribution.generation, 8);
-        assert_eq!(attribution.state, SessionAttributionState::Unknown);
-        assert_eq!(attribution.session_id, None);
-    }
-
-    #[test]
-    fn provider_lookups_start_concurrently_within_one_close_budget() {
-        let gate = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
-        let (started_tx, started_rx) = std::sync::mpsc::channel();
-        let lookup =
-            |started: std::sync::mpsc::Sender<()>,
-             gate: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>| {
-                move || {
-                    started.send(()).unwrap();
-                    let (released, wake) = &*gate;
-                    let mut released = released.lock().unwrap();
-                    while !*released {
-                        released = wake.wait(released).unwrap();
-                    }
-                    Ok(ProviderSessionLookup {
-                        attributions: HashMap::new(),
-                        failed_terminal_ids: HashSet::new(),
-                    })
-                }
-            };
-        let worker_gate = Arc::clone(&gate);
-        let worker = std::thread::spawn(move || {
-            collect_provider_session_lookups(
-                lookup(started_tx.clone(), Arc::clone(&worker_gate)),
-                lookup(started_tx.clone(), Arc::clone(&worker_gate)),
-                lookup(started_tx, worker_gate),
-            )
-        });
-
-        let mut started = 0;
-        for _ in 0..3 {
-            if started_rx
-                .recv_timeout(std::time::Duration::from_secs(1))
-                .is_ok()
-            {
-                started += 1;
-            } else {
-                break;
-            }
-        }
-        let (released, wake) = &*gate;
-        *released.lock().unwrap() = true;
-        wake.notify_all();
-
-        assert!(worker.join().unwrap().is_ok());
-        assert_eq!(
-            started, 3,
-            "all provider lookups must share the time budget"
-        );
-    }
-}
+mod tests;

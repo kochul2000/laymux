@@ -170,6 +170,7 @@ pub(crate) fn chunked_write_to_guarded(
 /// Handle to a running PTY process, providing write and resize capabilities.
 #[derive(Clone)]
 pub struct PtyHandle {
+    session_restore: Option<Arc<PendingSessionRestore>>,
     /// Owns the writer on one terminal-specific FIFO thread.
     control: Arc<PtyControlWorker>,
     /// Independent lifecycle handle: it is never protected by the writer
@@ -209,7 +210,43 @@ pub struct PtyHandle {
     wsl_backed: bool,
 }
 
+struct PendingSessionRestore {
+    provider: &'static str,
+    session_id: String,
+    consumed: AtomicBool,
+}
+
 impl PtyHandle {
+    pub(crate) fn with_session_restore(mut self, restore: Option<(&'static str, String)>) -> Self {
+        self.session_restore = restore.map(|(provider, session_id)| {
+            Arc::new(PendingSessionRestore {
+                provider,
+                session_id,
+                consumed: AtomicBool::new(false),
+            })
+        });
+        self
+    }
+
+    pub(crate) fn unconsumed_session_restore(&self) -> Option<(&'static str, &str)> {
+        let restore = self.session_restore.as_ref()?;
+        (!restore.consumed.load(Ordering::Acquire))
+            .then_some((restore.provider, restore.session_id.as_str()))
+    }
+
+    pub(crate) fn consume_session_restore(&self) {
+        if let Some(restore) = &self.session_restore {
+            restore.consumed.store(true, Ordering::Release);
+        }
+    }
+
+    /// Only the generation-checked protocol reply commands may use this path.
+    pub(crate) fn write_protocol_reply(&self, data: &[u8]) -> Result<(), String> {
+        self.ensure_input_healthy()?;
+        let deadline = Instant::now() + Duration::from_millis(PTY_CONTROL_JOB_TIMEOUT_MS);
+        let pending = self.control.submit_write(data, false, deadline)?;
+        self.await_enqueued_control_job(pending, deadline, || true)
+    }
     /// Time budget `terminate()` gives the shell to exit on its own after the
     /// PTY is closed before falling back to a forced kill. Polled in small
     /// steps so well-behaved shells return almost immediately.
@@ -228,6 +265,7 @@ impl PtyHandle {
     ) -> Self {
         let master = Arc::new(Mutex::new(None));
         Self {
+            session_restore: None,
             control: PtyControlWorker::spawn(writer, Arc::clone(&master))
                 .expect("test PTY control worker"),
             master,
@@ -375,6 +413,9 @@ impl PtyHandle {
         deadline: Instant,
     ) -> Result<PendingControlJob, String> {
         self.ensure_input_healthy()?;
+        if !data.is_empty() || submit {
+            self.consume_session_restore();
+        }
         self.control.submit_write(data, submit, deadline)
     }
 
@@ -785,6 +826,7 @@ where
     let master = Arc::new(Mutex::new(Some(pair.master)));
     let control = PtyControlWorker::spawn(writer, Arc::clone(&master))?;
     let handle = PtyHandle {
+        session_restore: None,
         control,
         master,
         child_killer: Arc::new(Mutex::new(Some(child_killer))),

@@ -30,6 +30,7 @@ interface CollectSettingsSnapshotOptions {
 
 export type TerminalAttributionState =
   | "identified"
+  | "restorePending"
   | "noAgent"
   | "activeButUnidentified"
   | "unknown";
@@ -81,7 +82,7 @@ function terminalAttributionCoverage(
 ): TerminalAttributionCoverage {
   const state = terminalAttributionState(terminalId, runtime);
   const identified = runtime.backendAttributions[terminalId];
-  if (state !== "identified") {
+  if (state !== "identified" && state !== "restorePending") {
     return {
       terminalId,
       state,
