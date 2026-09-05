@@ -294,6 +294,24 @@ test("a checkpoint without older rows stops the client from asking again", async
   expect(attaches).toHaveLength(2);
 });
 
+test("a newer status outlives the history limit notice", async ({ page }) => {
+  const attaches: Attach[] = [];
+  await installRemoteMocks(page, { ownerKib: 4, scrollbackKib: 4 }, attaches);
+  await connectAndCaptureTerminal(page);
+
+  await expect.poll(() => baseY(page)).toBeGreaterThan(0);
+  await pullToTop(page);
+  await expect(page.locator("#status")).toHaveText("No earlier output is available.");
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, "execCommand", { value: () => true });
+  });
+  await page.locator("#copyPaneId").click();
+  await expect(page.locator("#status")).toHaveText("Copied lx:pane:Main:1");
+  await page.waitForTimeout(2_500);
+  await expect(page.locator("#status")).toHaveText("Copied lx:pane:Main:1");
+});
+
 test("a wheel pull while already parked at the top asks on its own", async ({ page }) => {
   // At row 0 xterm scrolls nothing, so `onScroll` never fires: the wheel
   // handler is the only thing that can carry this gesture.
