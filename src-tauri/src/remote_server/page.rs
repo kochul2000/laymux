@@ -709,7 +709,8 @@ mod tests {
         assert!(
             html.contains("let edgeSwipeDrawersEnabled = loadLocalToggle(edgeSwipeDrawersKey);")
         );
-        assert!(html.contains("mode: \"edgeNavigation\","));
+        assert!(html.contains("touchGesture.mode === \"pending\" && touchGesture.edge"));
+        assert!(html.contains("clearTouchLongPressTimer();"));
         assert!(html.contains("if (edge === \"left\") setNavigationOpen(true);"));
         assert!(html.contains("openCurrentFileExplorer();"));
     }

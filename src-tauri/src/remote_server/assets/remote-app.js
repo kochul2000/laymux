@@ -5486,23 +5486,10 @@ import {
                     ? "right"
                     : null
                 : null;
-            if (edge) {
-              touchGesture = {
-                pointerId: event.pointerId,
-                mode: "edgeNavigation",
-                edge,
-                startPoint: point,
-                lastY: point.clientY,
-                forceSelection: false,
-                selectionSeed: null,
-                longPressTimer: null,
-                scrollRemainderPx: 0,
-              };
-              return;
-            }
             touchGesture = {
               pointerId: event.pointerId,
               mode: "pending",
+              edge,
               startPoint: point,
               lastY: point.clientY,
               forceSelection: false,
@@ -5533,15 +5520,19 @@ import {
 
             if (!touchGesture || event.pointerId !== touchGesture.pointerId) return;
 
-            if (touchGesture.mode === "edgeNavigation") {
+            if (touchGesture.mode === "pending" && touchGesture.edge) {
               const movedX = point.clientX - touchGesture.startPoint.clientX;
               const movedY = point.clientY - touchGesture.startPoint.clientY;
               const openingDistance = touchGesture.edge === "left" ? movedX : -movedX;
+              if (Math.hypot(movedX, movedY) > INTERNAL_TOUCH_SCROLL_SLOP_PX) {
+                clearTouchLongPressTimer();
+              }
               if (
                 openingDistance >= EDGE_SWIPE_OPEN_PX &&
                 openingDistance > Math.abs(movedY) * 1.25
               ) {
                 const edge = touchGesture.edge;
+                clearTouchLongPressTimer();
                 touchGesture.mode = "edgeOpened";
                 if (edge === "left") setNavigationOpen(true);
                 else openCurrentFileExplorer();
@@ -5550,11 +5541,10 @@ import {
                 (Math.abs(movedY) > INTERNAL_TOUCH_SCROLL_SLOP_PX &&
                   Math.abs(movedY) > Math.abs(movedX))
               ) {
-                touchGesture.mode = "scrolling";
-                touchGesture.lastY = point.clientY;
-                routeOneFingerScroll(term, movedY, point);
+                touchGesture.edge = null;
+              } else {
+                return;
               }
-              return;
             }
 
             if (touchGesture.mode === "edgeOpened") return;
@@ -5596,7 +5586,10 @@ import {
             }
             if (!touchGesture || event.pointerId !== touchGesture.pointerId) return;
             clearTouchLongPressTimer();
-            if (touchGesture.mode === "pending") {
+            if (
+              touchGesture.mode === "pending" &&
+              touchDistance(touchGesture.startPoint, point) <= INTERNAL_TOUCH_SCROLL_SLOP_PX
+            ) {
               handleTouchTap(term, element, point);
             }
             resetTouchGesture(element);

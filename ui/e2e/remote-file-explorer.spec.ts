@@ -228,6 +228,30 @@ async function flickTerminalEdge(page: Page, edge: "left" | "right") {
   }, edge);
 }
 
+async function tapTerminalLeftEdge(page: Page) {
+  await page.locator("#terminal .xterm").evaluate((element) => {
+    const target = element as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    target.setPointerCapture = () => {};
+    target.releasePointerCapture = () => {};
+    target.hasPointerCapture = () => false;
+    const clientX = rect.left + 1;
+    const init = {
+      bubbles: true,
+      cancelable: true,
+      pointerId: 42,
+      pointerType: "touch",
+      isPrimary: true,
+      clientX,
+      clientY: rect.top + rect.height / 2,
+      screenX: clientX,
+      screenY: rect.top + rect.height / 2,
+    };
+    target.dispatchEvent(new PointerEvent("pointerdown", init));
+    target.dispatchEvent(new PointerEvent("pointerup", init));
+  });
+}
+
 test("the header folder button appears with the capability and lists the cwd", async ({
   context,
   page,
@@ -431,4 +455,19 @@ test("the device-local setting disables both terminal edge flicks", async ({ con
   await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
   await flickTerminalEdge(page, "right");
   await expect(page.locator("#fileViewerOverlay")).toBeHidden();
+});
+
+test("an enabled edge gesture still preserves a plain terminal tap", async ({ context, page }) => {
+  await installRemoteExplorerMocks(context, true);
+  await page.addInitScript(() => localStorage.setItem("laymux.remote.inputMode", "direct"));
+  await page.setViewportSize({ width: 390, height: 720 });
+  await connectRemote(page, true);
+
+  await page
+    .locator(".xterm-helper-textarea")
+    .evaluate((input: HTMLTextAreaElement) => input.blur());
+  await tapTerminalLeftEdge(page);
+
+  await expect(page.locator(".xterm-helper-textarea")).toBeFocused();
+  await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
 });
