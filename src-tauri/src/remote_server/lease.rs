@@ -209,7 +209,7 @@ pub(crate) struct RemoteOwnerTransition {
 /// alive, closing the frontend-status → backend-write TOCTOU window.
 pub struct HumanControlPermit<'a> {
     app_state: &'a AppState,
-    _checkpoint_permit: crate::session_checkpoint::SessionMutationPermit<'a>,
+    _checkpoint_permit: crate::session_checkpoint::TerminalMutationPermit<'a>,
     operation_id: u64,
     owner_epoch: u64,
     deadline: Instant,
@@ -1030,7 +1030,9 @@ pub fn begin_human_control_operation<'a>(
     origin: HumanControlOrigin,
     terminal_id: &str,
 ) -> Result<HumanControlPermit<'a>, String> {
-    let checkpoint_permit = app_state.session_checkpoint.begin_mutation()?;
+    let checkpoint_permit = app_state
+        .session_checkpoint
+        .begin_terminal_mutation(terminal_id)?;
     let settings = effective_remote_settings(app_state)?;
     let timeout_seconds = effective_heartbeat_timeout_seconds(&settings);
     let mut control = app_state.remote_control.lock_or_err()?;

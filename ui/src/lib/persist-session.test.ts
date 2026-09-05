@@ -145,6 +145,36 @@ describe("persistSession", () => {
     vi.mocked(interruptTerminalsOnExit).mockResolvedValue(undefined);
   });
 
+  it("allows an update with a never-started pane and preserves its saved session", async () => {
+    const ws = useWorkspaceStore.getState();
+    ws.setPaneView(0, { type: "TerminalView", lastCodexSession: "saved-unvisited-session" });
+    const id = `terminal-${ws.workspaces[0].panes[0].id}`;
+    registerLiveTerminal(id, { type: "shell" }, { sessionReady: false });
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({});
+    const commit = await flushSessionCheckpoint({ reason: "update", requireConclusive: true });
+    expect(commit.coverage).toEqual([]);
+    expect(
+      vi.mocked(saveSettings).mock.calls.at(-1)?.[0].workspaces[0].panes[0].view,
+    ).toMatchObject({ lastCodexSession: "saved-unvisited-session" });
+  });
+
+  it("repeatedly refuses to evict a live hidden terminal whose attribution remains unknown", async () => {
+    const id = "terminal-hidden-unknown";
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+      [id]: { generation: 1, state: "unknown" },
+    });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await expect(
+        flushSessionCheckpoint({
+          reason: "eviction",
+          requireConclusive: true,
+          terminalIds: [id],
+        }),
+      ).rejects.toThrow(`Session attribution is not conclusive for ${id}: unknown`);
+    }
+    expect(saveSettings).not.toHaveBeenCalled();
+  });
+
   it("calls saveSettings with current state from all stores", async () => {
     await persistSession();
 

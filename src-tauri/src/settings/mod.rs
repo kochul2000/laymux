@@ -376,6 +376,7 @@ pub(crate) fn update_composer_starred_entry_snapshot(
     })
 }
 
+#[cfg(test)]
 fn update_composer_starred_entry_at(
     path: &std::path::Path,
     value: &str,

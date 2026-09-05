@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useUiStore } from "@/stores/ui-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useTerminalStore } from "@/stores/terminal-store";
 import { checkpointAndCloseHiddenTerminals } from "@/lib/tauri-api";
 import { toPaneId, toTerminalId } from "@/lib/pane-ids";
 import {
@@ -78,8 +79,17 @@ export function useHiddenTerminalAutoClose() {
       ) {
         ui.setEvictedPaneIds(retained);
       }
+      const readyTerminalIds = new Set(
+        useTerminalStore
+          .getState()
+          .instances.filter((instance) => instance.sessionReady === true)
+          .map((instance) => instance.id),
+      );
       const candidates = [...evictPaneIds].filter(
-        (paneId) => !ui.evictedPaneIds.has(paneId) && !pendingEvictions.has(paneId),
+        (paneId) =>
+          readyTerminalIds.has(toTerminalId(paneId)) &&
+          !ui.evictedPaneIds.has(paneId) &&
+          !pendingEvictions.has(paneId),
       );
       if (candidates.length === 0) return;
       candidates.forEach((paneId) => pendingEvictions.add(paneId));

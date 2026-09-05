@@ -1318,7 +1318,7 @@ pub fn write_terminal_protocol_reply_inner(
     generation: u64,
     data: &[u8],
 ) -> Result<(), String> {
-    let _checkpoint_permit = state.session_checkpoint.begin_mutation()?;
+    let _checkpoint_permit = state.session_checkpoint.begin_terminal_mutation(id)?;
     // Resolve the exact generation-bound writer once. A late xterm callback
     // from a retired surface must neither write into nor consume one-shot state
     // from a replacement session that reused the same terminal id.
@@ -1398,7 +1398,7 @@ pub fn write_terminal_bootstrap_protocol_reply_inner(
     generation: u64,
     data: &[u8],
 ) -> Result<bool, String> {
-    let _checkpoint_permit = state.session_checkpoint.begin_mutation()?;
+    let _checkpoint_permit = state.session_checkpoint.begin_terminal_mutation(id)?;
     let handle = state
         .pty_handles
         .lock_or_err()?

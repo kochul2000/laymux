@@ -4,6 +4,7 @@ import { useHiddenTerminalAutoClose } from "./useHiddenTerminalAutoClose";
 import { useUiStore } from "@/stores/ui-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useTerminalStore } from "@/stores/terminal-store";
 import { areHiddenPaneIdsEligible } from "@/lib/hidden-eviction-eligibility";
 import type { Workspace } from "@/stores/types";
 
@@ -31,6 +32,14 @@ describe("useHiddenTerminalAutoClose", () => {
     vi.clearAllMocks();
     useUiStore.setState(useUiStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
+    useTerminalStore.setState({ instances: [] });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p2",
+      profile: "PowerShell",
+      syncGroup: "wsB",
+      workspaceId: "wsB",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-p2", { sessionReady: true });
     // Active workspace is wsA; wsB is in the background and eligible for eviction.
     useWorkspaceStore.setState({ workspaces: [wsA, wsB], activeWorkspaceId: "wsA" });
     vi.mocked(checkpointAndCloseHiddenTerminals).mockImplementation(async (terminalIds) => ({
@@ -41,6 +50,72 @@ describe("useHiddenTerminalAutoClose", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("characterizes repeated failed eviction across two hours without revisiting the pane", async () => {
+    // Model persistent checkpoint failure and retry occupancy, not input loss.
+    // Scoped backend admission keeps unrelated input usable during requests.
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let inFlight = false;
+    let inFlightSamples = 0;
+    let samples = 0;
+    vi.mocked(checkpointAndCloseHiddenTerminals).mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          inFlight = true;
+          setTimeout(() => {
+            inFlight = false;
+            reject(new Error("Session attribution is not conclusive for terminal-p2: unknown"));
+          }, 3_000);
+        }),
+    );
+    useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 600 });
+    useUiStore.getState().toggleWorkspaceHidden("wsB");
+    const { unmount } = renderHook(() => useHiddenTerminalAutoClose());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(599_000);
+    });
+    expect(checkpointAndCloseHiddenTerminals).not.toHaveBeenCalled();
+    const sampleTimer = setInterval(() => {
+      samples += 1;
+      if (inFlight) inFlightSamples += 1;
+    }, 100);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2 * 60 * 60 * 1_000);
+    });
+    clearInterval(sampleTimer);
+    expect(vi.mocked(checkpointAndCloseHiddenTerminals).mock.calls.length).toBeGreaterThan(1_400);
+    expect(inFlightSamples / samples).toBeGreaterThan(0.55);
+    console.info("hidden-eviction diagnostic", {
+      simulatedHours: 2,
+      attempts: vi.mocked(checkpointAndCloseHiddenTerminals).mock.calls.length,
+      inFlightSamples,
+      samples,
+      inFlightFraction: inFlightSamples / samples,
+    });
+    expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(false);
+    unmount();
+    await vi.advanceTimersByTimeAsync(5_000);
+    warning.mockRestore();
+  });
+
+  it("does not request eviction for a never-started hidden pane", async () => {
+    useTerminalStore.getState().updateInstanceInfo("terminal-p2", { sessionReady: false });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(checkpointAndCloseHiddenTerminals).mockResolvedValue({
+      closedTerminalIds: [],
+      failedTerminalIds: ["terminal-p2"],
+    });
+    useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
+    useUiStore.getState().toggleWorkspaceHidden("wsB");
+    const { unmount } = renderHook(() => useHiddenTerminalAutoClose());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(checkpointAndCloseHiddenTerminals).not.toHaveBeenCalled();
+    expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(false);
+    unmount();
+    warning.mockRestore();
   });
 
   it("does nothing when the timeout is disabled (0)", () => {
