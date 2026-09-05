@@ -284,6 +284,7 @@ test("a checkpoint without older rows stops the client from asking again", async
 
   await expect(page.locator("#status")).toHaveText("No earlier output is available.");
   expect(attaches).toHaveLength(2);
+  await expect(page.locator("#status")).toHaveText("Main · Pane 1", { timeout: 3_000 });
 
   // A second pull at the top must not reopen the socket once the desktop has
   // shown it has nothing older at this budget.

@@ -293,6 +293,7 @@ import {
         let outputHistoryTerminalId = null;
         let outputHistoryExhausted = false;
         let historyExpansion = null;
+        let historyExpansionLimitNoticeTimer = null;
         // Serialized size of the screen checkpoint the surface currently shows.
         // A deeper budget must produce a bigger one, or there is nothing older.
         let outputSnapshotBytes = 0;
@@ -546,6 +547,7 @@ import {
         // much slack still counts as "the budget was the limit".
         const HISTORY_EXPANSION_BUDGET_SLACK_BYTES = 8 * 1024;
         const HISTORY_EXPANSION_BUSY_STATUS = "Loading earlier output…";
+        const HISTORY_EXPANSION_LIMIT_NOTICE_MS = 2000;
         // How long a scroll gesture keeps vouching for viewport movement.
         const TERMINAL_USER_SCROLL_WINDOW_MS = 1500;
         // Automatic transport recovery keeps the expanded budget while the
@@ -8362,6 +8364,13 @@ import {
         function reportHistoryExpansionLimit(message) {
           if (transientConnectionNoticeVisible) return;
           setStatus(message, false, true);
+          if (historyExpansionLimitNoticeTimer) clearTimeout(historyExpansionLimitNoticeTimer);
+          historyExpansionLimitNoticeTimer = setTimeout(() => {
+            historyExpansionLimitNoticeTimer = null;
+            if (statusTextEl.textContent === message) {
+              restoreStatusAfterHistoryExpansion();
+            }
+          }, HISTORY_EXPANSION_LIMIT_NOTICE_MS);
         }
 
         function restoreStatusAfterHistoryExpansion() {
