@@ -4850,23 +4850,23 @@ import {
         }
 
         function fallbackCopyText(text) {
-          const surface = inputSurfaceFocused() ? document.activeElement : null;
-          const textarea = document.createElement("textarea");
-          textarea.value = text;
-          textarea.setAttribute("readonly", "");
-          textarea.style.position = "fixed";
-          textarea.style.left = "-9999px";
-          textarea.style.top = "0";
-          document.body.append(textarea);
-          textarea.focus();
-          textarea.select();
+          // Supply the copy payload without borrowing focus. Even a synchronous
+          // blur/refocus can dismiss an open IME or reopen a system-dismissed one.
+          let copied = false;
+          const onCopy = (event) => {
+            if (!event.clipboardData) return;
+            event.clipboardData.setData("text/plain", text);
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            copied = true;
+          };
+          document.addEventListener("copy", onCopy, true);
           try {
-            return Boolean(document.execCommand && document.execCommand("copy"));
+            return Boolean(document.execCommand && document.execCommand("copy") && copied);
           } catch (_) {
             return false;
           } finally {
-            textarea.remove();
-            restorePreservedInputSurfaceFocus(surface);
+            document.removeEventListener("copy", onCopy, true);
           }
         }
 
@@ -5277,9 +5277,6 @@ import {
         }
 
         function handleTouchTap(term, element, point) {
-          if (currentInputMode() === "direct") {
-            term.focus?.();
-          }
           const now = Date.now();
           const isSameTapCluster =
             now - lastTouchTap.time <= INTERNAL_TOUCH_MULTI_TAP_DELAY_MS &&
@@ -5298,6 +5295,10 @@ import {
           }
 
           if (activateTouchLink(term, element, point)) return;
+
+          if (currentInputMode() === "direct") {
+            term.focus?.();
+          }
 
           if (term.hasSelection && term.hasSelection()) {
             term.clearSelection();
@@ -5589,6 +5590,7 @@ import {
             if (!touchGesture || event.pointerId !== touchGesture.pointerId) return;
             clearTouchLongPressTimer();
             if (
+              event.type === "pointerup" &&
               touchGesture.mode === "pending" &&
               !touchGesture.movedBeyondTapSlop &&
               touchDistance(touchGesture.startPoint, point) <= INTERNAL_TOUCH_SCROLL_SLOP_PX
@@ -12095,6 +12097,15 @@ import {
         // to stop the browser zooming the page instead of the file.
         fileViewerBodyElement.addEventListener("wheel", handleFileViewerWheel, { passive: false });
         terminalHost.addEventListener("pointerdown", handlePathLinkPointerDown, true);
+        terminalHost.addEventListener("contextmenu", (event) => {
+          // A native long-press menu reaches xterm's right-click handler even
+          // when pointerdown was cancelled. That handler focuses/selects the
+          // helper textarea. Touch selection and its handles already own copy.
+          if (!isTouchPointer(event) && !touchGesture && !selectionHandleDrag &&
+              !(coarsePointer && !event.pointerType)) return;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }, true);
         terminalHost.addEventListener("mousemove", handlePathLinkMouseMove);
         window.addEventListener("pointerup", handlePathLinkPointerUp, true);
         window.addEventListener("pointercancel", handlePathLinkPointerCancel, true);

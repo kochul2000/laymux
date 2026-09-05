@@ -69,6 +69,26 @@ const plainUrl = "https://links.example/plain";
 const oscUrl = "https://links.example/osc";
 const repoBase = "https://github.com/owner/repo";
 
+// Observe the native copy event and payload; keep the real execCommand so a
+// fallback that cannot copy without focusing an editor fails in the browser.
+function recordNativeCopies() {
+  const target = window as RemoteTerminalWindow;
+  target.__copiedSelections = [];
+  window.addEventListener(
+    "copy",
+    (event) => {
+      const data = event.clipboardData;
+      if (!data) return;
+      const setData = data.setData.bind(data);
+      data.setData = (format, text) => {
+        if (format === "text/plain") target.__copiedSelections?.push(text);
+        setData(format, text);
+      };
+    },
+    true,
+  );
+}
+
 const snapshotText = [
   `Plain: ${plainUrl}`,
   "",
@@ -164,6 +184,7 @@ type RemoteTerminalWindow = typeof window & {
   __copiedSelections?: string[];
   __openedExternalUrls?: string[];
   __focusSteals?: { helperFocus: number; composerBlur: number };
+  __focusChanges?: string[];
 };
 
 /**
@@ -496,16 +517,7 @@ test.describe("touch URL activation", () => {
 
   test("long press selects a word and drag extends it by cell", async ({ context, page }) => {
     await installRemoteMocks(context);
-    await page.addInitScript(() => {
-      const target = window as RemoteTerminalWindow;
-      target.__copiedSelections = [];
-      document.execCommand = (command) => {
-        if (command !== "copy") return false;
-        const source = document.activeElement;
-        target.__copiedSelections?.push(source instanceof HTMLTextAreaElement ? source.value : "");
-        return true;
-      };
-    });
+    await page.addInitScript(recordNativeCopies);
     await page.routeWebSocket(/\/remote\/v1\/terminals\/terminal-1\/output/, (socket) => {
       const { header, payload } = snapshotFrames(snapshotText);
       socket.send(header);
@@ -586,16 +598,9 @@ test.describe("touch URL activation", () => {
     inputMode: "composer" | "direct",
   ) {
     await installRemoteMocks(context);
+    await page.addInitScript(recordNativeCopies);
     await page.addInitScript((mode) => {
-      const target = window as RemoteTerminalWindow;
       localStorage.setItem("laymux.remote.inputMode", mode);
-      target.__copiedSelections = [];
-      document.execCommand = (command) => {
-        if (command !== "copy") return false;
-        const source = document.activeElement;
-        target.__copiedSelections?.push(source instanceof HTMLTextAreaElement ? source.value : "");
-        return true;
-      };
     }, inputMode);
     await page.routeWebSocket(/\/remote\/v1\/terminals\/terminal-1\/output/, (socket) => {
       const { header, payload } = snapshotFrames(snapshotText);
@@ -675,6 +680,199 @@ test.describe("touch URL activation", () => {
     return { cdp, screenBox: screenBox!, cellWidth, x, y };
   }
 
+  for (const mode of ["composer", "direct"] as const) {
+    const states =
+      mode === "composer"
+        ? ["unfocused", "open", "dismissed", "collapsed", "composing"]
+        : ["unfocused", "open", "dismissed"];
+    for (const state of states) {
+      for (const clipboard of ["native-fallback", "api-success", "api-rejected"] as const) {
+        test(`${mode} ${state} ${clipboard}: selection and both handles never change input focus`, async ({
+          context,
+          page,
+        }) => {
+          await connectRemoteWithWords(context, page, mode);
+          const surface = page.locator(
+            mode === "composer" ? "#composerInput" : ".xterm-helper-textarea",
+          );
+          if (state !== "unfocused") await surface.focus();
+          if (state === "collapsed") await page.locator("#focusTerminal").click();
+          if (mode === "composer" && state !== "collapsed") {
+            await surface.evaluate((element) => {
+              const input = element as HTMLTextAreaElement;
+              input.value = "draft 한글";
+              input.setSelectionRange(2, 5);
+              input.dispatchEvent(new Event("input", { bubbles: true }));
+            });
+          }
+          if (state === "composing") {
+            await surface.dispatchEvent("compositionstart", { data: "ㅎ" });
+          }
+          // Focus can remain after system Back hides the IME. Geometry is only
+          // an input here; headless Chromium does not run an OS soft keyboard.
+          await page.evaluate(
+            ({ state, clipboard }) => {
+              Object.defineProperty(navigator, "virtualKeyboard", {
+                configurable: true,
+                value: {
+                  boundingRect: { height: state === "open" || state === "composing" ? 280 : 0 },
+                },
+              });
+              if (clipboard !== "native-fallback") {
+                Object.defineProperty(window, "isSecureContext", {
+                  configurable: true,
+                  value: true,
+                });
+                Object.defineProperty(navigator, "clipboard", {
+                  configurable: true,
+                  value: {
+                    writeText: async (text: string) => {
+                      if (clipboard === "api-rejected") {
+                        await new Promise((resolve) => setTimeout(resolve, 30));
+                        throw new DOMException("Denied", "NotAllowedError");
+                      }
+                      (window as RemoteTerminalWindow).__copiedSelections?.push(text);
+                    },
+                  },
+                });
+              }
+              const changes: string[] = [];
+              (window as RemoteTerminalWindow).__focusChanges = changes;
+              for (const name of ["focus", "blur"] as const) {
+                const original = HTMLElement.prototype[name];
+                HTMLElement.prototype[name] = function (options?: FocusOptions) {
+                  changes.push(`${name}():${this.id || this.className || this.tagName}`);
+                  original.call(this, options);
+                };
+                document.addEventListener(
+                  name,
+                  (event) => {
+                    changes.push(`${name}:${(event.target as HTMLElement).id}`);
+                  },
+                  true,
+                );
+              }
+            },
+            { state, clipboard },
+          );
+          const before = await surface.evaluate((element) => {
+            const input = element as HTMLTextAreaElement;
+            return { value: input.value, start: input.selectionStart, end: input.selectionEnd };
+          });
+          const { cdp, screenBox, cellWidth, y } = await longPressBravoCell(context, page);
+          // Android/WebKit can also dispatch a native context menu for a hold;
+          // xterm's right-click handler must not borrow the helper textarea.
+          await page.locator(".xterm-screen").dispatchEvent("contextmenu", {
+            clientX: screenBox.x + 15 * cellWidth,
+            clientY: y,
+            button: 2,
+          });
+          await cdp.send("Input.dispatchTouchEvent", {
+            type: "touchMove",
+            touchPoints: [{ x: screenBox.x + 21.1 * cellWidth, y }],
+          });
+          await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+          await expectSelectionCopied(page, "bravo om");
+          for (const role of ["start", "end"]) {
+            const box = await page.locator(`[data-handle="${role}"]`).boundingBox();
+            expect(box).not.toBeNull();
+            const point = { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 };
+            await cdp.send("Input.dispatchTouchEvent", {
+              type: "touchStart",
+              touchPoints: [point],
+            });
+            await cdp.send("Input.dispatchTouchEvent", {
+              type: "touchMove",
+              touchPoints: [{ x: point.x + 3 * cellWidth, y }],
+            });
+            await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+          }
+          await expect
+            .poll(() =>
+              page.evaluate(() => (window as RemoteTerminalWindow).__copiedSelections?.length),
+            )
+            .toBe(3);
+          for (const pointerType of ["touch", "pen"]) {
+            await page.locator(".xterm-screen").evaluate((element, pointerType) => {
+              element.dispatchEvent(
+                new PointerEvent("contextmenu", {
+                  bubbles: true,
+                  cancelable: true,
+                  pointerType,
+                }),
+              );
+            }, pointerType);
+          }
+          expect(
+            await page.evaluate(() => (window as RemoteTerminalWindow).__focusChanges),
+          ).toEqual([]);
+          if (mode === "composer") {
+            expect(
+              await surface.evaluate((element) => {
+                const input = element as HTMLTextAreaElement;
+                return { value: input.value, start: input.selectionStart, end: input.selectionEnd };
+              }),
+            ).toEqual(before);
+          }
+        });
+      }
+    }
+
+    test(`${mode}: cancelled pending touch never becomes an input tap`, async ({
+      context,
+      page,
+    }) => {
+      await connectRemoteWithWords(context, page, mode);
+      const screen = page.locator(".xterm-screen");
+      const box = await screen.boundingBox();
+      const point = {
+        pointerId: 9,
+        pointerType: "touch",
+        clientX: box!.x + 20,
+        clientY: box!.y + 20,
+      };
+      await screen.dispatchEvent("pointerdown", point);
+      await screen.dispatchEvent("pointercancel", point);
+      await expect(page.locator("#composerInput")).not.toBeFocused();
+      await expect(page.locator(".xterm-helper-textarea")).not.toBeFocused();
+    });
+
+    test(`${mode}: double and triple taps preserve the first tap's input focus`, async ({
+      context,
+      page,
+    }) => {
+      await connectRemoteWithWords(context, page, mode);
+      const box = (await page.locator(".xterm-screen").boundingBox())!;
+      const geometry = await page.evaluate(() => {
+        const term = (window as RemoteTerminalWindow).__remoteTerm!;
+        return { cols: term.cols, rows: term.rows };
+      });
+      const tap = () =>
+        page.touchscreen.tap(
+          box.x + (15 * box.width) / geometry.cols,
+          box.y + (7.5 * box.height) / geometry.rows,
+        );
+      await tap();
+      const surface = page.locator(
+        mode === "composer" ? "#composerInput" : ".xterm-helper-textarea",
+      );
+      await expect(surface).toBeFocused();
+      await installFocusStealCounters(page);
+      await tap();
+      await tap();
+      await expect(surface).toBeFocused();
+      expect(await page.evaluate(() => (window as RemoteTerminalWindow).__focusSteals)).toEqual({
+        helperFocus: 0,
+        composerBlur: 0,
+      });
+      await expect
+        .poll(() =>
+          page.evaluate(() => (window as RemoteTerminalWindow).__remoteTerm?.getSelection()),
+        )
+        .toContain("Words: alpha bravo omega");
+    });
+  }
+
   test("long press selection keeps composer focus and does not scroll", async ({
     context,
     page,
@@ -723,6 +921,10 @@ test.describe("touch URL activation", () => {
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
     await expectSelectionCopied(page, "bravo om");
     await expect(composer).toBeFocused();
+    expect(await page.evaluate(() => (window as RemoteTerminalWindow).__focusSteals)).toEqual({
+      helperFocus: 0,
+      composerBlur: 0,
+    });
   });
 
   test("long press selection does not raise composer or helper focus", async ({
@@ -769,5 +971,8 @@ test.describe("touch URL activation", () => {
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
     await expectSelectionCopied(page, "bravo");
     await expect(helper).toBeFocused();
+    expect(
+      await page.evaluate(() => (window as RemoteTerminalWindow).__focusSteals?.helperFocus),
+    ).toBe(0);
   });
 });
