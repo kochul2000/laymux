@@ -32,8 +32,9 @@ pub struct TerminalSessionAttribution {
 pub(crate) struct ProviderSessionLookup {
     pub attributions: HashMap<String, Option<String>>,
     pub failed_terminal_ids: HashSet<String>,
-    /// Exact WSL Codex process with no rollout FD, not a rejected/ambiguous candidate.
-    pub missing_rollout_terminal_ids: HashSet<String>,
+    /// Present only after observing a Codex candidate. True means exact WSL
+    /// process with no rollout FD; false is not eligible for restore fallback.
+    pub rollout_absence: HashMap<String, bool>,
 }
 
 pub(crate) struct ProviderTerminalDomains {
@@ -156,7 +157,7 @@ fn unknown_attribution(generation: u64) -> TerminalSessionAttribution {
 fn apply_unconsumed_restore(
     mut attribution: TerminalSessionAttribution,
     handle: &crate::pty::PtyHandle,
-    missing_rollout: bool,
+    missing_rollout: Option<bool>,
 ) -> TerminalSessionAttribution {
     if handle.terminal_generation() != attribution.generation {
         return unknown_attribution(attribution.generation);
@@ -167,7 +168,14 @@ fn apply_unconsumed_restore(
     match attribution.state {
         SessionAttributionState::NoAgent => {}
         SessionAttributionState::ActiveButUnidentified
-            if attribution.provider == Some(provider) && missing_rollout => {}
+            if attribution.provider == Some(provider) && missing_rollout == Some(true) => {}
+        SessionAttributionState::ActiveButUnidentified
+            if provider == "codex"
+                && attribution.provider == Some(provider)
+                && missing_rollout.is_none() =>
+        {
+            return unknown_attribution(attribution.generation);
+        }
         SessionAttributionState::Unknown => return attribution,
         _ => {
             handle.consume_session_restore();
@@ -317,7 +325,7 @@ pub fn get_terminal_session_attributions(
                 Some(handle) => apply_unconsumed_restore(
                     attribution,
                     handle,
-                    codex.missing_rollout_terminal_ids.contains(&terminal_id),
+                    codex.rollout_absence.get(&terminal_id).copied(),
                 ),
                 None => attribution,
             };

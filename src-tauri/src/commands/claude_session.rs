@@ -121,7 +121,7 @@ pub(crate) fn get_claude_session_lookup_impl(
     Ok(ProviderSessionLookup {
         attributions: crate::process_tree::reject_duplicate_session_attributions(result, "Claude"),
         failed_terminal_ids,
-        missing_rollout_terminal_ids: HashSet::new(),
+        rollout_absence: HashMap::new(),
     })
 }
 

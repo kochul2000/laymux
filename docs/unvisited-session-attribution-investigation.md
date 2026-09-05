@@ -26,6 +26,8 @@ ADR: [0232](adr/0232-unconsumed-resume-checkpoint.md). 기존 startup 대기의 
 
 ## 수정 후 dev 검증
 
+PR #999 독립 리뷰 후 추가 검증: provider probe에는 후보가 없고 fresh liveness에서 처음 Codex가 보이는 시차가 pending을 소비하던 P2를 회귀 테스트 RED→GREEN으로 수정했다. 관측 map의 key 부재는 Unknown/미소비, 명시적 후보 비적격은 기존대로 처리한다. Rust command 451 tests와 strict clippy 통과. dev PID 21972(`1df564b0` + 수정 diff)에서 아래 전체 시나리오를 다시 통과했다.
+
 격리 APPDATA `.tmp/unconsumed-resume-dev`, dev 19281/PID 84528, worktree `D:\PycharmProjects\laymux`, base `167ecb8a` + 이 브랜치 working diff로 검증했다. fixture는 `ui/scripts/fixtures/idle-codex.py`이며 configured Codex command로 등록한 뒤 실제 create IPC에 `resume saved-unvisited-session`을 전달했다. provider/API는 호출하지 않으며 실제 Codex 버전의 파일 생성 시점을 재현했다고 주장하지 않는다.
 
 - frontend 미등록·미방문 pane의 PTY가 실제 WSL에서 fixture를 실행하고 READY 출력 발생.

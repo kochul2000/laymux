@@ -1,6 +1,40 @@
 use super::*;
 
 #[test]
+fn startup_between_probe_and_liveness_does_not_consume_resume() {
+    let handle =
+        crate::pty::PtyHandle::from_test_writer_for_generation(Box::new(std::io::sink()), 7)
+            .with_session_restore(Some(("codex", "saved-session".into())));
+    let between_observations = classify_attribution(
+        7,
+        "t",
+        &HashMap::new(),
+        &HashMap::new(),
+        &HashMap::new(),
+        PtyAppLiveness::Running("Codex"),
+        false,
+    );
+    assert_eq!(
+        apply_unconsumed_restore(between_observations, &handle, None).state,
+        SessionAttributionState::Unknown
+    );
+    assert!(handle.unconsumed_session_restore().is_some());
+    let observed = classify_attribution(
+        7,
+        "t",
+        &HashMap::new(),
+        &HashMap::from([("t".into(), None)]),
+        &HashMap::new(),
+        PtyAppLiveness::Running("Codex"),
+        false,
+    );
+    assert_eq!(
+        apply_unconsumed_restore(observed, &handle, Some(true)).state,
+        SessionAttributionState::RestorePending
+    );
+}
+
+#[test]
 fn unidentified_is_not_itself_evidence_of_a_missing_rollout() {
     let handle =
         crate::pty::PtyHandle::from_test_writer_for_generation(Box::new(std::io::sink()), 7)
@@ -15,7 +49,7 @@ fn unidentified_is_not_itself_evidence_of_a_missing_rollout() {
         false,
     );
     assert_eq!(
-        apply_unconsumed_restore(unresolved, &handle, false).state,
+        apply_unconsumed_restore(unresolved, &handle, Some(false)).state,
         SessionAttributionState::ActiveButUnidentified
     );
     assert!(handle.unconsumed_session_restore().is_none());
@@ -95,18 +129,18 @@ fn unconsumed_resume_survives_missing_attribution_but_not_input() {
             false,
         )
     };
-    let verdict = apply_unconsumed_restore(pending(), &handle, true);
+    let verdict = apply_unconsumed_restore(pending(), &handle, Some(true));
     assert_eq!(verdict.state, SessionAttributionState::RestorePending);
     assert_eq!(verdict.session_id.as_deref(), Some("saved-session"));
     handle.write_protocol_reply(b"\x1b[0n").unwrap();
     assert_eq!(
-        apply_unconsumed_restore(pending(), &handle, true).state,
+        apply_unconsumed_restore(pending(), &handle, Some(true)).state,
         SessionAttributionState::RestorePending
     );
     // Same writer used by local, Remote and Automation; no focus involved.
     handle.clone().write(b"new work\r").unwrap();
     assert_eq!(
-        apply_unconsumed_restore(pending(), &handle, true).state,
+        apply_unconsumed_restore(pending(), &handle, Some(true)).state,
         SessionAttributionState::ActiveButUnidentified
     );
 }
@@ -126,7 +160,7 @@ fn observed_session_consumes_resume_and_never_falls_back_afterwards() {
         false,
     );
     assert_eq!(
-        apply_unconsumed_restore(identified, &handle, true)
+        apply_unconsumed_restore(identified, &handle, Some(true))
             .session_id
             .as_deref(),
         Some("current-session")
@@ -141,7 +175,7 @@ fn observed_session_consumes_resume_and_never_falls_back_afterwards() {
         false,
     );
     assert_eq!(
-        apply_unconsumed_restore(missing, &handle, true).state,
+        apply_unconsumed_restore(missing, &handle, Some(true)).state,
         SessionAttributionState::ActiveButUnidentified
     );
 }
@@ -168,7 +202,7 @@ fn resume_does_not_bypass_unknown_conflict_or_replacement_generation() {
         crate::pty::PtyHandle::from_test_writer_for_generation(Box::new(std::io::sink()), 7)
             .with_session_restore(Some(("codex", "saved-session".into())));
     assert_eq!(
-        apply_unconsumed_restore(unknown_attribution(7), &handle, true).state,
+        apply_unconsumed_restore(unknown_attribution(7), &handle, Some(true)).state,
         SessionAttributionState::Unknown
     );
     assert!(handle.unconsumed_session_restore().is_some());
@@ -182,14 +216,14 @@ fn resume_does_not_bypass_unknown_conflict_or_replacement_generation() {
         false,
     );
     assert_eq!(
-        apply_unconsumed_restore(shell.clone(), &handle, true).state,
+        apply_unconsumed_restore(shell.clone(), &handle, Some(true)).state,
         SessionAttributionState::RestorePending
     );
     let replacement =
         crate::pty::PtyHandle::from_test_writer_for_generation(Box::new(std::io::sink()), 8)
             .with_session_restore(Some(("codex", "replacement".into())));
     assert_eq!(
-        apply_unconsumed_restore(shell, &replacement, true).state,
+        apply_unconsumed_restore(shell, &replacement, Some(true)).state,
         SessionAttributionState::Unknown
     );
     assert!(replacement.unconsumed_session_restore().is_some());
@@ -203,7 +237,7 @@ fn resume_does_not_bypass_unknown_conflict_or_replacement_generation() {
         false,
     );
     assert_eq!(
-        apply_unconsumed_restore(conflicting, &handle, true).state,
+        apply_unconsumed_restore(conflicting, &handle, Some(true)).state,
         SessionAttributionState::ActiveButUnidentified
     );
     assert!(handle.unconsumed_session_restore().is_none());
@@ -244,12 +278,12 @@ fn provider_lookup_failure_is_scoped_to_the_affected_terminal() {
     let failed = ProviderSessionLookup {
         attributions: HashMap::from([("terminal-b".into(), None)]),
         failed_terminal_ids: HashSet::from(["terminal-b".into()]),
-        missing_rollout_terminal_ids: HashSet::new(),
+        rollout_absence: HashMap::new(),
     };
     let healthy = ProviderSessionLookup {
         attributions: HashMap::from([("terminal-a".into(), Some("session-a".into()))]),
         failed_terminal_ids: HashSet::new(),
-        missing_rollout_terminal_ids: HashSet::new(),
+        rollout_absence: HashMap::new(),
     };
 
     assert!(!provider_lookup_failed_for_terminal(
@@ -322,7 +356,7 @@ fn provider_lookups_start_concurrently_within_one_close_budget() {
             Ok(ProviderSessionLookup {
                 attributions: HashMap::new(),
                 failed_terminal_ids: HashSet::new(),
-                missing_rollout_terminal_ids: HashSet::new(),
+                rollout_absence: HashMap::new(),
             })
         }
     };

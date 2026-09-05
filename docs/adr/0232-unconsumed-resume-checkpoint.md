@@ -1,6 +1,6 @@
 # 0232. 입력 전 복원 요청은 generation에 결부된 복원점으로 보존한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-05
 - Source: 사용자 보고(미진입 pane의 업데이트 `activeButUnidentified` 실패), 이전 세션 보존 요구, architecture/data-flow.md §13, ADR-0222
 - Amends: ADR-0222의 startup 대기와 파괴 전 checkpoint 허용 판정
@@ -17,6 +17,7 @@ Remote의 pane 선택도 desktop workspace를 활성화한다. 따라서 직접 
 - 건강한 `NoAgent`, 또는 정확히 선택된 WSL Codex process에 rollout FD가 없다는 추가 증거가 있는 동일 provider의 `ActiveButUnidentified` 관측에만 `RestorePending(provider, sessionId)`를 반환한다. 단순한 미식별 결과는 파일 미생성의 증거가 아니다. native와 다른 provider의 실행 중 미식별 상태는 이번 범위에서 예외를 적용하지 않는다. 이는 현재 세션의 정확한 식별이 아니라, 아직 소비하지 않은 기존 복원 요청을 유지하는 판정이다.
 - 첫 일반 입력은 enqueue 전에 복원점 사용을 영구 중단한다. Local·Remote·Automation·MCP·sync CWD 모두 같은 PTY 쓰기 경로를 따른다. 실패하거나 일부만 전송된 입력도 보수적으로 소비한 것으로 본다. 별도 protocol-reply 경로와 resize는 소비하지 않는다.
 - 정확한 귀속 또는 다른 provider/복수 provider 관측도 기존 요청을 소비한다. 이후 미식별 상태로 돌아가도 이전 요청으로 후퇴하지 않는다. 조회 실패는 우회하지 않는다.
+- Codex provider probe가 아직 후보를 보지 못했지만 뒤의 fresh liveness에서 실행이 보이는 startup 관측 시차는 `Unknown`으로 남기고 복원점을 소비하지 않는다. 미관측은 명시적 후보 거부와 구분하며 다음 관측이 정확한 process/FD 부재를 증명할 기회를 보존한다.
 - materialized 후보의 검증 실패·중복·모호한 process 선택은 missing-rollout 증거를 만들지 않는다. 최종 snapshot에서 다른 pane의 정확한 ID 또는 pending ID와 같은 provider/ID를 주장하는 pending 복원점도 거부하고 소비한다. 정확히 식별된 다른 pane의 판정은 유지한다.
 - `RestorePending`은 일반 저장에서 해당 요청 ID를 유지한다. 기존 finalization fence와 generation/provider/ID 이중 안정 관측을 만족하면 update·eviction도 허용한다.
 - 신규 CLI, profile startup, viewer, 명시적 fresh restart에는 이 증거가 없다. 저장된 ID 또는 세션 파일 부재만으로 예외를 만들지 않는다. 다른 프로세스의 CWD·최신 파일을 추측하지 않는다.
