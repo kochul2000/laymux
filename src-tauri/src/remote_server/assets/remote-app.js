@@ -166,6 +166,7 @@ import {
         // all; this only says whether *this* browser spends a chrome row on
         // them. Defaults on, so only an explicit "0" hides the strip.
         const widgetStripKey = "laymux.remote.widgetStrip";
+        const edgeSwipeDrawersKey = "laymux.remote.edgeSwipeDrawers";
         const spatialExcludedPaneIdsKey = "laymux.remote.spatialExcludedPaneIds";
         const spatialExcludedWorkspaceIdsKey = "laymux.remote.spatialExcludedWorkspaceIds";
         // Secret resume capability issued by a successful claim. It lives in
@@ -494,9 +495,10 @@ import {
         // Feature on/off toggles are configuration (not content), so they are
         // the only composer-recall state allowed in localStorage. Default on to
         // match the desktop composer and stay non-destructive.
-        let composerHistoryPopupEnabled = loadComposerToggle(composerHistoryPopupKey);
-        let composerAutocompleteEnabled = loadComposerToggle(composerAutocompleteKey);
-        let composerHideAgentInputEnabled = loadComposerToggle(composerHideAgentInputKey);
+        let composerHistoryPopupEnabled = loadLocalToggle(composerHistoryPopupKey);
+        let composerAutocompleteEnabled = loadLocalToggle(composerAutocompleteKey);
+        let composerHideAgentInputEnabled = loadLocalToggle(composerHideAgentInputKey);
+        let edgeSwipeDrawersEnabled = loadLocalToggle(edgeSwipeDrawersKey);
         let composerHiddenAgentInputLines = loadComposerHiddenAgentInputLines();
         let composerAgentInputHideFrame = null;
         let composerAgentInputHideRequest = null;
@@ -540,6 +542,8 @@ import {
         const INTERNAL_TOUCH_SCROLL_SLOP_PX = 8;
         const INTERNAL_TOUCH_TAP_SLOP_PX = 18;
         const INTERNAL_TOUCH_MULTI_TAP_DELAY_MS = 320;
+        const EDGE_SWIPE_HIT_PX = 24;
+        const EDGE_SWIPE_OPEN_PX = 56;
         const OUTPUT_RECONNECT_INITIAL_DELAY_MS = 250;
         const OUTPUT_RECONNECT_MAX_DELAY_MS = 5000;
         // The host may spend up to three 5-second frontend-bridge attempts
@@ -1778,6 +1782,14 @@ import {
         // the host bridge resolves the terminal's cwd (home as fallback) and
         // completes every entry's absolute path, so this surface owns no path
         // syntax at all.
+        function openCurrentFileExplorer() {
+          openFileExplorerOverlay(
+            activeTerminalId
+              ? { source: "terminalCwd", terminalId: activeTerminalId }
+              : { source: "terminalCwd" },
+          );
+        }
+
         function openFileExplorerOverlay(request) {
           if (!leaseId || !fileViewerToken || !request) return;
           const requestRevision = ++fileViewerRequestRevision;
@@ -3074,10 +3086,8 @@ import {
           } catch (_) {}
         }
 
-        // Composer recall toggles default ON; only an explicit "0" turns them
-        // off. These booleans are configuration, so persisting them is allowed
-        // (unlike the recall text itself, which stays in memory only).
-        function loadComposerToggle(key) {
+        // Surface-local toggles default ON; only an explicit "0" turns them off.
+        function loadLocalToggle(key) {
           try {
             return localStorage.getItem(key) !== "0";
           } catch (_) {
@@ -3139,7 +3149,7 @@ import {
           ]);
         }
 
-        function saveComposerToggle(key, enabled) {
+        function saveLocalToggle(key, enabled) {
           try {
             localStorage.setItem(key, enabled ? "1" : "0");
           } catch (_) {}
@@ -5467,13 +5477,25 @@ import {
               return;
             }
             if (touchGesture !== null) return;
+            const rect = element.getBoundingClientRect();
+            const navigationOpen = navToggleButton.getAttribute("aria-expanded") === "true";
+            const edge =
+              edgeSwipeDrawersEnabled && mobileLayout && !navigationOpen && fileViewerOverlayElement.hidden
+                ? point.clientX <= rect.left + EDGE_SWIPE_HIT_PX
+                  ? "left"
+                  : leaseId && fileViewerToken && point.clientX >= rect.right - EDGE_SWIPE_HIT_PX
+                    ? "right"
+                    : null
+                : null;
             touchGesture = {
               pointerId: event.pointerId,
               mode: "pending",
+              edge,
               startPoint: point,
               lastY: point.clientY,
               forceSelection: false,
               selectionSeed: null,
+              movedBeyondTapSlop: false,
               longPressTimer: null,
               scrollRemainderPx: 0,
             };
@@ -5499,6 +5521,36 @@ import {
             }
 
             if (!touchGesture || event.pointerId !== touchGesture.pointerId) return;
+
+            if (touchGesture.mode === "pending" && touchGesture.edge) {
+              const movedX = point.clientX - touchGesture.startPoint.clientX;
+              const movedY = point.clientY - touchGesture.startPoint.clientY;
+              const openingDistance = touchGesture.edge === "left" ? movedX : -movedX;
+              if (Math.hypot(movedX, movedY) > INTERNAL_TOUCH_SCROLL_SLOP_PX) {
+                touchGesture.movedBeyondTapSlop = true;
+                clearTouchLongPressTimer();
+              }
+              if (
+                openingDistance >= EDGE_SWIPE_OPEN_PX &&
+                openingDistance > Math.abs(movedY) * 1.25
+              ) {
+                const edge = touchGesture.edge;
+                clearTouchLongPressTimer();
+                touchGesture.mode = "edgeOpened";
+                if (edge === "left") setNavigationOpen(true);
+                else openCurrentFileExplorer();
+              } else if (
+                openingDistance < -INTERNAL_TOUCH_SCROLL_SLOP_PX ||
+                (Math.abs(movedY) > INTERNAL_TOUCH_SCROLL_SLOP_PX &&
+                  Math.abs(movedY) > Math.abs(movedX))
+              ) {
+                touchGesture.edge = null;
+              } else {
+                return;
+              }
+            }
+
+            if (touchGesture.mode === "edgeOpened") return;
 
             if (touchGesture.mode === "pending") {
               const movedX = point.clientX - touchGesture.startPoint.clientX;
@@ -5537,7 +5589,12 @@ import {
             }
             if (!touchGesture || event.pointerId !== touchGesture.pointerId) return;
             clearTouchLongPressTimer();
-            if (event.type === "pointerup" && touchGesture.mode === "pending") {
+            if (
+              event.type === "pointerup" &&
+              touchGesture.mode === "pending" &&
+              !touchGesture.movedBeyondTapSlop &&
+              touchDistance(touchGesture.startPoint, point) <= INTERNAL_TOUCH_SCROLL_SLOP_PX
+            ) {
               handleTouchTap(term, element, point);
             }
             resetTouchGesture(element);
@@ -6747,6 +6804,7 @@ import {
         const widgetStripLeftEl = $("widgetStripLeft");
         const widgetStripRightEl = $("widgetStripRight");
         const widgetStripToggle = $("widgetStripToggle");
+        const edgeSwipeDrawersToggle = $("edgeSwipeDrawersToggle");
         // Fixed and client-owned: the strip is a viewer, not probe demand, so it
         // has no business following `usage.*.refreshSeconds`. Fast enough for
         // the activity and notification counts, which are the parts that move.
@@ -11343,7 +11401,7 @@ import {
             composerHistoryPopupEnabled,
             (checked) => {
               composerHistoryPopupEnabled = checked;
-              saveComposerToggle(composerHistoryPopupKey, checked);
+              saveLocalToggle(composerHistoryPopupKey, checked);
               if (!checked) composerHistoryOpen = false;
               renderComposerSuggestions();
             }
@@ -11355,7 +11413,7 @@ import {
             composerAutocompleteEnabled,
             (checked) => {
               composerAutocompleteEnabled = checked;
-              saveComposerToggle(composerAutocompleteKey, checked);
+              saveLocalToggle(composerAutocompleteKey, checked);
               renderComposerSuggestions();
             }
           );
@@ -11366,7 +11424,7 @@ import {
             composerHideAgentInputEnabled,
             (checked) => {
               composerHideAgentInputEnabled = checked;
-              saveComposerToggle(composerHideAgentInputKey, checked);
+              saveLocalToggle(composerHideAgentInputKey, checked);
               if (checked) hideActiveAgentInputForComposer();
               else revealActiveAgentInput();
             }
@@ -11877,11 +11935,16 @@ import {
         // (ADR-0132). Applied before the first connect so a device that turned
         // the row off never flashes it.
         widgetStripToggle.checked = widgetStripAllowed;
+        edgeSwipeDrawersToggle.checked = edgeSwipeDrawersEnabled;
         applyRemoteDisplaySettings(remoteDisplaySettings);
         updateRemoteDisplaySettingsControls();
 
         widgetStripToggle.addEventListener("change", () => {
           setWidgetStripAllowed(widgetStripToggle.checked);
+        });
+        edgeSwipeDrawersToggle.addEventListener("change", () => {
+          edgeSwipeDrawersEnabled = edgeSwipeDrawersToggle.checked;
+          saveLocalToggle(edgeSwipeDrawersKey, edgeSwipeDrawersEnabled);
         });
         remoteTerminalFontSizeInput.addEventListener("change", () => {
           saveRemoteDisplaySettings();
@@ -11993,11 +12056,7 @@ import {
         fileExplorerHeaderButton.addEventListener("click", () => {
           // Open where the user is working. Without an attached terminal the
           // bridge falls back to the host home directory.
-          openFileExplorerOverlay(
-            activeTerminalId
-              ? { source: "terminalCwd", terminalId: activeTerminalId }
-              : { source: "terminalCwd" },
-          );
+          openCurrentFileExplorer();
         });
         fileViewerBackButton.addEventListener("click", () => {
           // Back re-requests the listing rather than restoring a cache: the
