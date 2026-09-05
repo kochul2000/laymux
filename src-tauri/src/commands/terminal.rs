@@ -123,6 +123,21 @@ enum ValidatedStartupOverride {
     Grok(String),
 }
 
+impl ValidatedStartupOverride {
+    fn session_restore(&self) -> Option<(&'static str, String)> {
+        let (provider, command) = match self {
+            Self::Claude(command) => ("claude", command),
+            Self::Codex(command) => ("codex", command),
+            Self::Grok(command) => ("grok", command),
+        };
+        // Validation already requires the final token to be one safe resume ID.
+        command
+            .split_whitespace()
+            .last()
+            .map(|id| (provider, id.to_owned()))
+    }
+}
+
 #[derive(Debug, Eq, PartialEq)]
 struct TerminalStartupPlan {
     command: String,
@@ -262,6 +277,13 @@ pub async fn create_terminal_session(
             None
         }
     });
+    let session_restore = if viewer_startup.is_empty() {
+        validated_override
+            .as_ref()
+            .and_then(ValidatedStartupOverride::session_restore)
+    } else {
+        None
+    };
     let profile_startup = matched_profile
         .map(|p| p.startup_command.clone())
         .unwrap_or_default();
@@ -999,7 +1021,8 @@ pub async fn create_terminal_session(
     let pty_handle = spawned_pty
         .handle
         .with_codex_startup_color_probe(codex_startup_color_probe)
-        .with_bootstrap_da_reply(bootstrap_da_reply);
+        .with_bootstrap_da_reply(bootstrap_da_reply)
+        .with_session_restore(session_restore);
 
     // Startup output can fail before the spawned handle is published. The
     // callback has already stopped its reader and marked this exact generation;
@@ -1376,7 +1399,7 @@ pub fn write_terminal_protocol_reply_inner(
             "terminal protocol reply"
         );
     }
-    handle.write(data)
+    handle.write_protocol_reply(data)
 }
 
 /// Offer xterm's Primary Device Attributes response generated while parsing an
@@ -1429,7 +1452,7 @@ pub fn write_terminal_bootstrap_protocol_reply_inner(
             "terminal bootstrap protocol reply"
         );
     }
-    handle.write(data)?;
+    handle.write_protocol_reply(data)?;
     Ok(true)
 }
 
@@ -2499,6 +2522,28 @@ mod tests {
         )
         .is_err());
         assert_eq!(*written.lock().unwrap(), before_rejections);
+    }
+
+    #[test]
+    fn remote_input_consumes_resume_but_protocol_and_rejected_local_input_do_not() {
+        let state = AppState::new();
+        enable_test_remote_access(&state);
+        let handle = pty::PtyHandle::from_test_writer_for_generation(Box::new(std::io::sink()), 7)
+            .with_session_restore(Some(("codex", "saved-session".into())));
+        state
+            .pty_handles
+            .lock_or_err()
+            .unwrap()
+            .insert("t1".into(), handle.clone());
+        set_test_remote_lease(&state, "lease-1");
+        write_terminal_protocol_reply_inner(&state, "t1", 7, b"\x1b[0n").unwrap();
+        assert!(handle.unconsumed_session_restore().is_some());
+        assert!(
+            write_to_terminal_inner(&state, "t1", b"rejected", HumanControlOrigin::Local).is_err()
+        );
+        assert!(handle.unconsumed_session_restore().is_some());
+        write_to_terminal_inner(&state, "t1", b"new work", remote_origin("lease-1")).unwrap();
+        assert!(handle.unconsumed_session_restore().is_none());
     }
 
     #[test]

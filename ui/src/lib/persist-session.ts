@@ -134,7 +134,11 @@ function conclusiveFingerprint(
     left.terminalId.localeCompare(right.terminalId),
   );
   for (const entry of sorted) {
-    if (entry.state !== "identified" && entry.state !== "noAgent") {
+    if (
+      entry.state !== "identified" &&
+      entry.state !== "noAgent" &&
+      entry.state !== "restorePending"
+    ) {
       throw new Error(
         `Session attribution is not conclusive for ${entry.terminalId}: ${entry.state}`,
       );

@@ -260,6 +260,7 @@ pub(crate) fn get_grok_session_lookup_impl(
     Ok(ProviderSessionLookup {
         attributions: crate::process_tree::reject_duplicate_session_attributions(result, "Grok"),
         failed_terminal_ids,
+        rollout_absence: HashMap::new(),
     })
 }
 

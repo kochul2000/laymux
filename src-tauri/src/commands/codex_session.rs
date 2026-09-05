@@ -53,6 +53,7 @@ pub(crate) fn get_codex_session_lookup_impl(
         .map(|(terminal_id, _)| terminal_id.clone())
         .collect();
     let mut failed_terminal_ids = HashSet::new();
+    let mut rollout_absence = HashMap::new();
     let terminal_codex_pids: Vec<(String, u32)> = if terminal_roots.is_empty() {
         Vec::new()
     } else {
@@ -75,6 +76,8 @@ pub(crate) fn get_codex_session_lookup_impl(
     let store = CodexSessionStore::resolve();
     let mut candidates = Vec::new();
     for (terminal_id, pid) in &terminal_codex_pids {
+        // Native candidates are observed, but have no WSL missing-FD evidence.
+        rollout_absence.insert(terminal_id.clone(), false);
         match store.find_session_for_pid_checked(*pid, session_max_age_hours) {
             Ok(Some(session_id)) => candidates.push((terminal_id.clone(), session_id)),
             Ok(None) => tracing::debug!(
@@ -93,6 +96,12 @@ pub(crate) fn get_codex_session_lookup_impl(
         Ok(lookup) => {
             failed_terminal_ids.extend(lookup.failed_terminal_ids);
             for (terminal_id, process) in lookup.attributions {
+                rollout_absence.insert(
+                    terminal_id.clone(),
+                    process
+                        .as_ref()
+                        .is_some_and(|process| process.rollout_paths.is_empty()),
+                );
                 let session_id = match process {
                     Some(process) => {
                         match super::codex_session::store::find_session_from_rollout_paths_checked(
@@ -120,6 +129,7 @@ pub(crate) fn get_codex_session_lookup_impl(
     Ok(ProviderSessionLookup {
         attributions: crate::process_tree::reject_duplicate_session_attributions(result, "Codex"),
         failed_terminal_ids,
+        rollout_absence,
     })
 }
 

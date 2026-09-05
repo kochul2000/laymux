@@ -158,6 +158,76 @@ describe("persistSession", () => {
     ).toMatchObject({ lastCodexSession: "saved-unvisited-session" });
   });
 
+  it("preserves an unconsumed resume and allows update without a frontend visit", async () => {
+    const ws = useWorkspaceStore.getState();
+    ws.setPaneView(0, { type: "TerminalView", lastCodexSession: "saved-session" });
+    const id = `terminal-${ws.workspaces[0].panes[0].id}`;
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+      [id]: {
+        generation: 7,
+        provider: "codex",
+        state: "restorePending",
+        sessionId: "saved-session",
+      },
+    });
+    const commit = await flushSessionCheckpoint({ reason: "update", requireConclusive: true });
+    expect(commit.coverage).toEqual([
+      {
+        terminalId: id,
+        generation: 7,
+        provider: "codex",
+        state: "restorePending",
+        sessionId: "saved-session",
+      },
+    ]);
+    expect(
+      vi.mocked(saveSettings).mock.calls.at(-1)?.[0].workspaces[0].panes[0].view,
+    ).toMatchObject({ lastCodexSession: "saved-session" });
+  });
+
+  it.each(["generation", "sessionId", "state"] as const)(
+    "rejects a pending resume whose %s changes across update observations",
+    async (field) => {
+      const id = "terminal-restore-race";
+      const first = {
+        generation: 7,
+        provider: "codex" as const,
+        state: "restorePending" as const,
+        sessionId: "saved-session",
+      };
+      const changed = {
+        ...first,
+        [field]:
+          field === "generation"
+            ? 8
+            : field === "sessionId"
+              ? "different-session"
+              : "activeButUnidentified",
+      };
+      vi.mocked(getTerminalSessionAttributions)
+        .mockResolvedValueOnce({ [id]: first })
+        .mockResolvedValueOnce({ [id]: changed });
+      await expect(
+        flushSessionCheckpoint({ reason: "update", requireConclusive: true }),
+      ).rejects.toThrow();
+      expect(saveSettings).not.toHaveBeenCalled();
+    },
+  );
+
+  it("reproduces update refusal for an unfocused live Codex without a durable session", async () => {
+    const id = "terminal-unfocused-codex";
+    // No frontend instance/focus is needed: the backend live catalog is authoritative.
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+      [id]: { generation: 1, provider: "codex", state: "activeButUnidentified" },
+    });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await expect(
+        flushSessionCheckpoint({ reason: "update", requireConclusive: true }),
+      ).rejects.toThrow(`Session attribution is not conclusive for ${id}: activeButUnidentified`);
+    }
+    expect(saveSettings).not.toHaveBeenCalled();
+  });
+
   it("repeatedly refuses to evict a live hidden terminal whose attribution remains unknown", async () => {
     const id = "terminal-hidden-unknown";
     vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
