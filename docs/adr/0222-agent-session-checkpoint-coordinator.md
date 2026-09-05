@@ -1,6 +1,7 @@
 # 0222. Agent 세션 복원점은 통합 귀속 스냅샷과 수명주기 체크포인트로 확정한다
 
 - Status: Accepted
+- Superseded by: [ADR-0231](0231-hidden-eviction-target-scoped-input-admission.md), 숨김 eviction의 전역 입력 차단 범위에 한정한다.
 - Date: 2026-08-31
 - Source: 사용자 보고("Remote에서 업데이트하면 최신이 아닌 이전 agent 세션으로 복원된다")와 후속 요구("완료·워크스페이스 진입·장주기 저장 및 activity 재검증"), [architecture/data-flow.md §9·§10.6·§13](../architecture/data-flow.md), [architecture/overview.md §3.2](../architecture/overview.md), [ADR-0118](0118-codex-session-pid-attribution.md), [ADR-0120](0120-wsl-agent-session-attribution.md), [ADR-0195](0195-agent-session-cleared-on-shell-return.md), [ADR-0174](0174-github-signed-desktop-self-update.md), [ADR-0201](0201-update-install-releases-child-file-locks.md)
 - Amends: [ADR-0118](0118-codex-session-pid-attribution.md)·[ADR-0120](0120-wsl-agent-session-attribution.md)의 관측 불가 처리, [ADR-0195](0195-agent-session-cleared-on-shell-return.md)의 agent 부재 판정 SoT, [ADR-0201](0201-update-install-releases-child-file-locks.md)의 updater `on_before_exit` 전용 자식 정리 시점을 정정한다. PID 기반 정확 귀속, CWD 추정 금지, 충돌 시 복원 금지, 권위 있게 agent가 사라진 pane의 세션 삭제, 앱 소유 자식 정리와 Windows file-lock wait는 유지한다.

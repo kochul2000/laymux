@@ -248,6 +248,7 @@ ADR 이 필요한 대표 기준:
 | [0228](0228-remote-cursor-key-hold-repeat.md) | Remote 커서 키는 누르는 동안 자동 반복하고, 나머지 소프트 키는 1회 입력을 유지한다 (0213 확장) | Accepted |
 | [0229](0229-composer-starred-entries-have-label-and-send.md) | Composer 별표 항목은 라벨·전송 여부를 가진다 (0226의 원소 타입·exact-query·영속 진입점 정정, 0219 dismiss 순서 확장) | Accepted |
 | [0230](0230-xterm-compositionend-data-recovers-replaced-textarea.md) | textarea가 통째로 교체된 조합 확정은 compositionend 데이터로 복구한다 (0093 확장) | Accepted |
+| [0231](0231-hidden-eviction-target-scoped-input-admission.md) | 숨김 자동 종료의 입력 차단은 대상 terminal에 한정한다 (0222 정정) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

@@ -1815,6 +1815,8 @@ discard helper는 좁은 allowlist다. 현재 호출자는 terminal-output sessi
 
 activity bulk snapshot은 `terminals → output_buffers → per-ring → known app/grace/exit caches → pty_handles` 순서로 읽고 오류를 `Result`로 반환한다. strict control detector는 표시용 detector 전후에 이 건강성을 검증해 registry/ring/activity cache/PTY poison을 빈 states, `Shell`, 전체 sync-CWD target 또는 MCP `null`/빈 capture로 합성하지 않는다. MCP의 PTY 존재 확인도 poison을 not-found로 바꾸지 않으며, 입력 side effect 뒤의 관찰 실패는 side-effect metadata를 가진 tool error로 구분한다.
 
+checkpoint runtime의 terminal permit·eviction guard `Drop`도 discard-only cleanup으로 승인 카운트 제거와 대상 집합 해제만 수행한다([ADR-0231](../adr/0231-hidden-eviction-target-scoped-input-admission.md)). poison은 유지하여 후속 admission은 계속 실패한다. admission mutex를 보유한 채 다른 AppState 락을 획득하지 않는다.
+
 **락 획득 순서**: `state.rs`에 문서화된 번호 순서를 반드시 따른다. 역순 획득은 데드락을 유발한다.
 
 ```
