@@ -39,6 +39,7 @@ vi.mock("@/lib/terminal-serialize-registry", () => ({
 import {
   persistSession,
   flushSessionCheckpoint,
+  markSessionCheckpointMutation,
   saveBeforeClose,
   _resetClosingDown,
   truncateFromEnd,
@@ -143,6 +144,138 @@ describe("persistSession", () => {
       },
     );
     vi.mocked(interruptTerminalsOnExit).mockResolvedValue(undefined);
+  });
+
+  it.each([
+    ["workspace", "claude", "lastClaudeSession"],
+    ["workspace", "codex", "lastCodexSession"],
+    ["workspace", "grok", "lastGrokSession"],
+    ["dock", "claude", "lastClaudeSession"],
+    ["dock", "codex", "lastCodexSession"],
+    ["dock", "grok", "lastGrokSession"],
+  ] as const)(
+    "%s pane keeps the latest %s checkpoint after its PTY disappears",
+    async (surface, provider, field) => {
+      const view = {
+        type: "TerminalView" as const,
+        lastCodexSession: "old-session",
+        lastCwd: "/old",
+      };
+      useWorkspaceStore.getState().setPaneView(0, view);
+      const dock = useDockStore.getState().getDock("left")!;
+      useDockStore.getState().setDockPaneView("left", dock.panes[0].id, view);
+      const getPane = () =>
+        surface === "workspace"
+          ? useWorkspaceStore.getState().workspaces[0].panes[0]
+          : useDockStore.getState().getDock("left")!.panes[0];
+      const id = `terminal-${getPane().id}`;
+      vi.mocked(getTerminalCwds).mockResolvedValue({ [id]: "/latest" });
+      vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+        [id]: { generation: 1, state: "identified", provider, sessionId: "latest-session" },
+      });
+      await flushSessionCheckpoint({
+        reason: "eviction",
+        requireConclusive: true,
+        terminalIds: [id],
+      });
+
+      // The backend has closed the hidden PTY; the next checkpoint has no attribution.
+      vi.mocked(getTerminalCwds).mockResolvedValue({});
+      vi.mocked(getTerminalSessionAttributions).mockResolvedValue({});
+      await persistSession();
+      const saved = vi.mocked(saveSettings).mock.calls.at(-1)![0];
+      const savedPane =
+        surface === "workspace"
+          ? saved.workspaces[0].panes[0]
+          : saved.docks!.find((entry) => entry.position === "left")!.panes![0];
+      expect(savedPane.view).toEqual({
+        type: "TerminalView",
+        [field]: "latest-session",
+        lastCwd: "/latest",
+      });
+      // A remount consumes the view from the live store, without reloading settings.json.
+      expect(getPane().view).toEqual(savedPane.view);
+    },
+  );
+
+  it.each(["noAgent", "activeButUnidentified"] as const)(
+    "does not resurrect IDs cleared by a committed %s verdict when lookup later fails",
+    async (state) => {
+      const ws = useWorkspaceStore.getState();
+      ws.setPaneView(0, {
+        type: "TerminalView",
+        lastClaudeSession: "old-claude",
+        lastCodexSession: "old-codex",
+        lastGrokSession: "old-grok",
+      });
+      const id = `terminal-${ws.workspaces[0].panes[0].id}`;
+      vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+        [id]: { generation: 1, state },
+      });
+      await persistSession();
+      vi.mocked(getTerminalSessionAttributions).mockRejectedValueOnce(
+        new Error("probe unavailable"),
+      );
+      await persistSession();
+      expect(vi.mocked(saveSettings).mock.calls.at(-1)![0].workspaces[0].panes[0].view).toEqual({
+        type: "TerminalView",
+      });
+      expect(useWorkspaceStore.getState().workspaces[0].panes[0].view).toEqual({
+        type: "TerminalView",
+      });
+    },
+  );
+
+  it("publishes metadata only after a successful save and preserves concurrent view edits", async () => {
+    const ws = useWorkspaceStore.getState();
+    ws.setPaneView(0, { type: "TerminalView", lastCodexSession: "old-session" });
+    const getPane = () => useWorkspaceStore.getState().workspaces[0].panes[0];
+    const original = getPane().view;
+    const id = `terminal-${getPane().id}`;
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+      [id]: { generation: 1, state: "identified", provider: "codex", sessionId: "latest-session" },
+    });
+    vi.mocked(saveSettings).mockRejectedValueOnce(new Error("disk full"));
+    await expect(persistSession()).rejects.toThrow("disk full");
+    expect(getPane().view).toBe(original);
+
+    let finishSave: (() => void) | undefined;
+    vi.mocked(saveSettings).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+    const pending = persistSession();
+    await vi.waitFor(() => expect(finishSave).toBeDefined());
+    expect(getPane().view).toBe(original);
+    const replacement = {
+      type: "TerminalView" as const,
+      profile: "new-profile",
+      lastCodexSession: "user-selected-session",
+    };
+    ws.setPaneView(0, replacement);
+    finishSave!();
+    await pending;
+    expect(getPane().view).toBe(replacement);
+  });
+
+  it("settles metadata publication with lifecycle revision tracking and no redundant store updates", async () => {
+    const ws = useWorkspaceStore.getState();
+    ws.setPaneView(0, { type: "TerminalView", lastCodexSession: "old-session" });
+    const id = `terminal-${ws.workspaces[0].panes[0].id}`;
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+      [id]: { generation: 1, state: "identified", provider: "codex", sessionId: "latest-session" },
+    });
+    const onMutation = vi.fn(markSessionCheckpointMutation);
+    const unsubscribe = useWorkspaceStore.subscribe(onMutation);
+    try {
+      await persistSession();
+      expect(onMutation).toHaveBeenCalledTimes(1);
+      expect(saveSettings).toHaveBeenCalledTimes(2);
+    } finally {
+      unsubscribe();
+    }
   });
 
   it("allows an update with a never-started pane and preserves its saved session", async () => {

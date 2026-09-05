@@ -2,6 +2,7 @@ import { saveSettings, saveTerminalOutputCache, cleanTerminalOutputCache } from 
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
+import type { ViewInstanceConfig, WorkspacePane } from "@/stores/types";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 import {
   collectSessionCheckpoint,
@@ -61,6 +62,12 @@ export interface SessionCheckpointCommit {
 }
 
 const CRITICAL_OBSERVATION_SETTLE_MS = 150;
+const SESSION_VIEW_FIELDS = [
+  "lastCwd",
+  "lastClaudeSession",
+  "lastCodexSession",
+  "lastGrokSession",
+] as const;
 let nextCheckpointCommitId = 1;
 let activeCheckpoint: Promise<SessionCheckpointCommit> | null = null;
 let trailingCheckpointRequested = false;
@@ -166,8 +173,52 @@ async function persistSessionCore(
   options: SessionCheckpointOptions,
 ): Promise<SessionCheckpointCommit> {
   const collectedRevision = frontendMutationRevision;
+  const sourceViews = new Map(
+    [...useWorkspaceStore.getState().workspaces, ...useDockStore.getState().docks]
+      .flatMap((group) => group.panes)
+      .map((pane) => [pane.id, pane.view]),
+  );
   const checkpoint = await collectStableCheckpoint(options);
   await saveSettings(checkpoint.settings);
+  // Unknown attribution and hidden-pane remounts read these views. Publish only
+  // committed metadata, otherwise a later save can resurrect startup-era IDs.
+  const savedViews = new Map(
+    [...checkpoint.settings.workspaces, ...(checkpoint.settings.docks ?? [])]
+      .flatMap((group) => group.panes ?? [])
+      .map((pane) => [pane.id, pane.view]),
+  );
+  function updateGroups<T extends { panes: WorkspacePane[] }>(groups: T[]): T[] {
+    const updated = groups.map((group) => {
+      const panes = group.panes.map((pane) => {
+        const saved = savedViews.get(pane.id);
+        if (
+          pane.view.type !== "TerminalView" ||
+          pane.view !== sourceViews.get(pane.id) ||
+          !saved ||
+          SESSION_VIEW_FIELDS.every((key) => pane.view[key] === saved[key])
+        )
+          return pane;
+        const view: ViewInstanceConfig = { ...pane.view };
+        for (const key of SESSION_VIEW_FIELDS) {
+          if (saved[key] === undefined) delete view[key];
+          else view[key] = saved[key];
+        }
+        return { ...pane, view };
+      });
+      return panes.every((pane, index) => pane === group.panes[index])
+        ? group
+        : { ...group, panes };
+    });
+    return updated.every((group, index) => group === groups[index]) ? groups : updated;
+  }
+  useWorkspaceStore.setState((state) => {
+    const workspaces = updateGroups(state.workspaces);
+    return workspaces === state.workspaces ? state : { workspaces };
+  });
+  useDockStore.setState((state) => {
+    const docks = updateGroups(state.docks);
+    return docks === state.docks ? state : { docks };
+  });
   return {
     checkpointCommitId: nextCheckpointCommitId++,
     frontendMutationRevision: collectedRevision,
