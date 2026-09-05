@@ -34,7 +34,7 @@ export interface PaneControlContextValue {
   /** 모드 변경 */
   onSetMode: (m: ControlBarMode) => void;
   /** Open the floating controls menu when controls are collapsed. */
-  openControls?: (reason?: "manual" | "hover") => void;
+  openControls?: () => void;
   /** ViewHeader가 마운트되면 호출 — PaneControlBar 자체 바 렌더 억제 */
   registerHeader: () => void;
   /** ViewHeader가 언마운트되면 호출 */

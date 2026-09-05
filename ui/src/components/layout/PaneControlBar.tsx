@@ -272,7 +272,6 @@ function ViewSelect({
         color: "var(--text-primary)",
         border: `1px solid ${sepClr}`,
         borderRadius: "var(--radius-sm)",
-        outline: "none",
         maxWidth: 110,
         colorScheme: "dark",
       }}
@@ -347,7 +346,7 @@ function BarContent({
       data-testid={testId}
       className={`flex shrink-0 items-center gap-0.5 ${
         wrapped
-          ? "w-full min-w-0 max-w-full flex-wrap [justify-content:safe_flex-end]"
+          ? "w-full min-w-0 max-w-full flex-wrap gap-1 [justify-content:safe_flex-end]"
           : "justify-end"
       }`}
       onClick={(e) => e.stopPropagation()}
@@ -504,14 +503,13 @@ function FloatingControlAnchor({
         data-testid="pane-control-menu-btn"
         aria-expanded={menuOpen}
         onClick={onToggleMenu}
-        className="hover-bg-strong flex cursor-pointer items-center justify-center rounded"
+        className="pane-control-anchor hover-bg-strong flex cursor-pointer items-center justify-center"
         style={{
           width: BTN_MIN_W,
           height: BTN_MIN_W,
-          background: "var(--backdrop-light)",
-          color: "var(--text-secondary)",
-          border: `1px solid ${borderClr}`,
-          borderRadius: "var(--radius-sm)",
+          background: menuOpen ? "var(--hover-bg-strong)" : undefined,
+          color: menuOpen ? "var(--text-primary)" : "var(--text-secondary)",
+          border: "none",
           transition: "background var(--transition-fast)",
         }}
         title="Pane controls"
@@ -655,7 +653,7 @@ export function PaneControlBar({
   const [headerControlsOverflow, setHeaderControlsOverflow] = useState(false);
   const [leftBarContent, setLeftBarContentState] = useState<ReactNode>(null);
   const [inputModeToggle, setInputModeToggleState] = useState<PaneInputModeToggle | null>(null);
-  const [floatingMenuReason, setFloatingMenuReason] = useState<"manual" | "hover" | null>(null);
+  const [floatingMenuOpen, setFloatingMenuOpen] = useState(false);
   const showBar = mode === "pinned" || (mode === "hover" && hovered);
   const isPinned = mode === "pinned";
   const narrowBar = paneWidth > 0 && paneWidth < 360;
@@ -681,19 +679,13 @@ export function PaneControlBar({
       if (menuBtnRef.current === node) menuBtnRef.current = null;
     };
   }, []);
-  const closeFloatingMenu = useCallback(() => setFloatingMenuReason(null), []);
-  const toggleFloatingMenu = useCallback(() => {
-    // Clicking an automatically opened hover toolbar makes it explicit instead
-    // of closing it under the pointer. A second click closes the manual menu.
-    setFloatingMenuReason((reason) => (reason === "manual" ? null : "manual"));
-  }, []);
-  const openControls = useCallback((reason: "manual" | "hover" = "manual") => {
-    setFloatingMenuReason((current) => (current === "manual" ? current : reason));
-  }, []);
+  const closeFloatingMenu = useCallback(() => setFloatingMenuOpen(false), []);
+  const toggleFloatingMenu = useCallback(() => setFloatingMenuOpen((open) => !open), []);
+  const openControls = useCallback(() => setFloatingMenuOpen(true), []);
   // When no responsive rule needs the anchor anymore, discard stale open state
   // so a later resize cannot resurrect an old menu.
-  if (!floatingControls && floatingMenuReason) setFloatingMenuReason(null);
-  const floatingMenuVisible = floatingControls && floatingMenuReason != null;
+  if (!floatingControls && floatingMenuOpen) setFloatingMenuOpen(false);
+  const floatingMenuVisible = floatingControls && floatingMenuOpen;
 
   // pane swap 드래그 속성(issue #386). 현재 보이는 바 컨테이너(pinned/hover/ViewHeader)에
   // 동일하게 적용한다. 빈 영역에서 시작한 드래그만 swap 으로 처리(아래 헬퍼 참조).
@@ -748,7 +740,7 @@ export function PaneControlBar({
     () =>
       floatingControls ? (
         <FloatingControlAnchor
-          menuOpen={floatingMenuReason != null}
+          menuOpen={floatingMenuOpen}
           onToggleMenu={toggleFloatingMenu}
           buttonRef={setMenuBtnRef}
         />
@@ -771,7 +763,7 @@ export function PaneControlBar({
       mode,
       setMode,
       floatingControls,
-      floatingMenuReason,
+      floatingMenuOpen,
       toggleFloatingMenu,
       setMenuBtnRef,
       cwdSendOn,
@@ -874,7 +866,7 @@ export function PaneControlBar({
             )}
             {narrowBar ? (
               <FloatingControlAnchor
-                menuOpen={floatingMenuReason != null}
+                menuOpen={floatingMenuOpen}
                 onToggleMenu={toggleFloatingMenu}
                 buttonRef={setMenuBtnRef}
               />
@@ -930,7 +922,7 @@ export function PaneControlBar({
               )}
               {narrowBar ? (
                 <FloatingControlAnchor
-                  menuOpen={floatingMenuReason != null}
+                  menuOpen={floatingMenuOpen}
                   onToggleMenu={toggleFloatingMenu}
                   buttonRef={setMenuBtnRef}
                 />
@@ -956,7 +948,7 @@ export function PaneControlBar({
               onExpand={() => {
                 setMode("hover");
                 if (narrowBar) {
-                  setFloatingMenuReason("manual");
+                  setFloatingMenuOpen(true);
                 }
               }}
             />
@@ -967,8 +959,6 @@ export function PaneControlBar({
             overflow/stacking context 밖으로 portal 되어 작업영역 크기를 바꾸지 않는다. */}
         {floatingMenuVisible && (
           <FloatingPaneControlMenu
-            openReason={floatingMenuReason!}
-            ownerHovered={hovered}
             onRequestClose={closeFloatingMenu}
             triggerRef={menuBtnRef}
             paneRef={rootRef}

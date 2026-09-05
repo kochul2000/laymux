@@ -72,9 +72,9 @@ test.describe("GitHubView", () => {
     await expect(panel).toHaveAttribute("data-placement", "up");
   });
 
-  test("overflowing pane controls float without shrinking the GitHub work area", async ({
+  test("overflowing pane controls open only on click without shrinking the GitHub work area", async ({
     appPage: page,
-  }) => {
+  }, testInfo) => {
     await openGitHubViewInSecondPane(page);
     // Split while the fixture is at its normal desktop size, then reproduce
     // the responsive collision. This leaves enough width for the GitHub tabs
@@ -96,6 +96,10 @@ test.describe("GitHubView", () => {
 
     await pane.hover({ position: { x: 12, y: 12 } });
     const toolbar = page.getByTestId("pane-control-floating-menu");
+    await expect(toolbar).toHaveCount(0);
+    expect(await list.boundingBox()).toEqual(listBefore);
+    await page.screenshot({ path: testInfo.outputPath("pane-menu-hover.png") });
+    await pane.getByTestId("pane-control-menu-btn").click();
     await expect(toolbar).toBeVisible();
     await expect(toolbar).toHaveAttribute("role", "toolbar");
     const trigger = pane.getByTestId("pane-control-menu-btn");
@@ -163,6 +167,8 @@ test.describe("GitHubView", () => {
     expect(wrappedBox).not.toBeNull();
     if (wrappedBox) expect(wrappedBox.height).toBeGreaterThan(24);
 
+    await page.screenshot({ path: testInfo.outputPath("pane-menu-open.png") });
+
     // Every action remains rendered and geometrically contained by the
     // wrapped surface, rather than being clipped or dropped at the pane edge.
     for (const testId of [
@@ -203,6 +209,20 @@ test.describe("GitHubView", () => {
       expect(toolbarAfterCrossing.x).toBeCloseTo(toolbarBox.x, 0);
       expect(toolbarAfterCrossing.y).toBeCloseTo(toolbarBox.y, 0);
     }
+
+    // A roomier header still overflows, but the menu needs only its content width.
+    await pane.evaluate((element) => {
+      element.style.width = "380px";
+    });
+    await pane.hover({ position: { x: 12, y: 12 } });
+    await expect(toolbar).toBeVisible();
+    await expect.poll(async () => (await toolbar.boundingBox())?.width ?? 380).toBeLessThan(380);
+    await page.screenshot({ path: testInfo.outputPath("pane-menu-compact.png") });
+    await page.keyboard.press("Escape");
+    await expect(toolbar).toHaveCount(0);
+    await page.mouse.move(2, 2);
+    await pane.hover({ position: { x: 12, y: 12 } });
+    await expect(toolbar).toHaveCount(0);
   });
 
   test("keeps an intrinsically wide control reachable from a 100px pane and narrower viewport", async ({
@@ -220,10 +240,9 @@ test.describe("GitHubView", () => {
 
     const toolbar = page.getByTestId("pane-control-floating-menu");
     const trigger = pane.getByTestId("pane-control-menu-btn");
-    await expect(toolbar).toBeVisible();
-    // Make the menu explicit so viewport resizing cannot be mistaken for a
-    // pointer-exit close while this geometry is inspected.
+    await expect(toolbar).toHaveCount(0);
     await trigger.click();
+    await expect(toolbar).toBeVisible();
     const select = toolbar.getByTestId("pane-control-view-select");
     await expect(select).toBeVisible();
 
