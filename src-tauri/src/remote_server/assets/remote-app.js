@@ -1179,6 +1179,12 @@ import {
         }
 
         function normalizeRemoteNavigationSize(value, fallback, min, max) {
+          if (
+            (typeof value !== "number" && typeof value !== "string") ||
+            (typeof value === "string" && value.trim() === "")
+          ) {
+            return fallback;
+          }
           const parsed = Number(value);
           if (!Number.isFinite(parsed)) return fallback;
           return Math.min(max, Math.max(min, Math.floor(parsed)));

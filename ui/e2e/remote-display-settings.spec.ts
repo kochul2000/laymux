@@ -271,6 +271,39 @@ test("워크스페이스 메뉴는 너비를 공유하고 컷오프보다 넓을
   expect(displayRequests).toEqual([]);
 });
 
+test("잘못된 워크스페이스 메뉴 숫자 설정은 안전한 기본값으로 복구한다", async ({ page }) => {
+  const displayRequests: string[] = [];
+  await installApiMocks(page, displayRequests);
+  await page.setViewportSize({ width: 500, height: 800 });
+  await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), {
+    key: DISPLAY_SETTINGS_KEY,
+    value: {
+      ...deviceSettings,
+      navigationPinned: true,
+      navigationWidth: null,
+      navigationPinCutoff: false,
+    },
+  });
+
+  await page.goto("http://remote.test/remote/");
+  await expect(page.locator(".app")).not.toHaveClass(/nav-pinned/);
+  await page.locator("#drawerSettingsButton").evaluate((button) => button.click());
+  await page
+    .locator('#settingsTabs [data-settings-panel="display"]')
+    .evaluate((tab: HTMLElement) => tab.click());
+
+  await expect(page.locator("#remoteNavigationWidth")).toHaveValue("360");
+  await expect(page.locator("#remoteNavigationPinCutoff")).toHaveValue("720");
+  await page.locator("#remoteNavigationWidth").fill("");
+  await page.locator("#remoteNavigationWidth").blur();
+  await expect
+    .poll(() =>
+      page.evaluate((key) => JSON.parse(localStorage.getItem(key) || "null"), DISPLAY_SETTINGS_KEY),
+    )
+    .toMatchObject({ navigationWidth: 360, navigationPinCutoff: 720 });
+  expect(displayRequests).toEqual([]);
+});
+
 test("기기의 terminal 옵션과 checkpoint 예산을 최초 attach에 적용한다", async ({ page }) => {
   const displayRequests: string[] = [];
   const outputUrls: string[] = [];
