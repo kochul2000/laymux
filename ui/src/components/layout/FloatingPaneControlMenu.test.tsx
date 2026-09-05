@@ -35,13 +35,7 @@ function Harness() {
       <button ref={triggerRef} data-testid="owner-trigger">
         controls
       </button>
-      <FloatingPaneControlMenu
-        openReason="manual"
-        ownerHovered={true}
-        onRequestClose={vi.fn()}
-        triggerRef={triggerRef}
-        paneRef={paneRef}
-      >
+      <FloatingPaneControlMenu onRequestClose={vi.fn()} triggerRef={triggerRef} paneRef={paneRef}>
         <button>first action</button>
         <button>second action</button>
       </FloatingPaneControlMenu>
@@ -163,7 +157,7 @@ describe("FloatingPaneControlMenu", () => {
         return rect({ top: -10, right: 16, bottom: 26, left: 0 });
       }
       if (this.dataset.testid === "pane-control-floating-menu") {
-        const width = Number.parseFloat(this.style.width || "100");
+        const width = Math.min(100, Number.parseFloat(this.style.maxWidth || "100"));
         const height = Number.parseFloat(this.style.maxHeight || "100");
         return rect({ top: 0, right: width, bottom: height, left: 0 });
       }

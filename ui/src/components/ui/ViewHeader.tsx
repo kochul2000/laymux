@@ -51,7 +51,6 @@ export function ViewHeader({
   const showPaneControls = ctx && (ctx.mode === "pinned" || (ctx.mode === "hover" && ctx.hovered));
   const showMinimizedBtn = ctx && ctx.mode === "minimized" && ctx.hovered;
   const floatingControls = ctx?.floatingControls ?? false;
-  const openControls = ctx?.openControls;
 
   // Full controls remain inline only while the View's actual non-shrinking
   // content fits. Cache the width that failed so replacing the full controls
@@ -98,16 +97,6 @@ export function ViewHeader({
     if (controlsRef.current) observer.observe(controlsRef.current);
     return () => observer.disconnect();
   });
-
-  // Hover mode previously exposed the full controls as soon as the pane was
-  // hovered. Preserve that discovery behavior when they move to a portal.
-  // Pinned mode keeps the compact anchor and opens explicitly, avoiding a
-  // permanent overlay over the View body.
-  useLayoutEffect(() => {
-    if (floatingControls && ctx?.mode === "hover" && ctx.hovered) {
-      openControls?.("hover");
-    }
-  }, [ctx?.hovered, ctx?.mode, floatingControls, openControls]);
 
   // Views with their own header used to keep a 28px bar even when their pane
   // was minimized. Keep the header registered (so PaneControlBar does not add

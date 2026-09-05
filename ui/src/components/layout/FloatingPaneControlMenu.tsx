@@ -9,8 +9,6 @@ import {
 
 interface FloatingPaneControlMenuProps {
   children: ReactNode;
-  openReason: "manual" | "hover";
-  ownerHovered: boolean;
   onRequestClose: () => void;
   triggerRef: RefObject<HTMLButtonElement | null>;
   paneRef: RefObject<HTMLDivElement | null>;
@@ -22,8 +20,6 @@ interface AnchorSnapshot {
   paneRight: number;
 }
 
-const HOVER_EXIT_GRACE_MS = 120;
-
 /**
  * Portalled pane toolbar that cannot be clipped by a pane's overflow/stacking
  * context. It wraps before placement, prefers the pane row below its anchor,
@@ -32,8 +28,6 @@ const HOVER_EXIT_GRACE_MS = 120;
  */
 export function FloatingPaneControlMenu({
   children,
-  openReason,
-  ownerHovered,
   onRequestClose,
   triggerRef,
   paneRef,
@@ -89,7 +83,7 @@ export function FloatingPaneControlMenu({
     const horizontalMargin = resolveFloatingToolbarAxisMargin(window.innerWidth);
     const safeViewportWidth = Math.max(0, window.innerWidth - horizontalMargin * 2);
     const paneMaxWidth = Math.min(Math.max(0, paneRect.width), safeViewportWidth);
-    menu.style.width = `${paneMaxWidth}px`;
+    menu.style.width = "max-content";
     menu.style.maxWidth = `${paneMaxWidth}px`;
     let menuRect = menu.getBoundingClientRect();
     if (menu.scrollWidth > menuRect.width + 1) {
@@ -150,7 +144,7 @@ export function FloatingPaneControlMenu({
     };
   }, [paneRef, triggerRef, updatePlacement]);
 
-  // Outside click / Escape are shared by explicit and hover-opened toolbars.
+  // Dismiss explicit controls without affecting clicks inside the portal.
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
@@ -159,13 +153,6 @@ export function FloatingPaneControlMenu({
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      const menuOwnsFocus = menuRef.current?.contains(document.activeElement) ?? false;
-      if (openReason === "hover" && !menuOwnsFocus) {
-        // Discovery-only hover UI does not own the keyboard. Close it without
-        // consuming Escape or moving focus away from the View handling the key.
-        onRequestClose();
-        return;
-      }
       event.preventDefault();
       // Hover-mode anchors can unmount while the pointer crosses into this
       // body portal. Capture the stable owner pane as the keyboard fallback so
@@ -180,59 +167,19 @@ export function FloatingPaneControlMenu({
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("keydown", onKeyDown, true);
     };
-  }, [onRequestClose, openReason, paneRef, triggerRef]);
+  }, [onRequestClose, paneRef, triggerRef]);
 
   // Explicit keyboard/click opens behave like a popover: move directly into
-  // the portalled controls once geometry exists. Hover discovery must never
-  // steal focus from the View underneath it.
+  // the portalled controls once geometry exists.
   useEffect(() => {
-    if (openReason !== "manual" || !placement || didFocusManualMenuRef.current) return;
+    if (!placement || didFocusManualMenuRef.current) return;
     const firstControl = menuRef.current?.querySelector<HTMLElement>(
       'button:not(:disabled), select:not(:disabled), input:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
     );
     if (!firstControl) return;
     firstControl.focus({ preventScroll: true });
     didFocusManualMenuRef.current = true;
-  }, [openReason, placement]);
-
-  // The portal may sit outside the pane DOM subtree. Hover-opened controls stay
-  // alive while the pointer owns either surface. A short grace period bridges
-  // the intentional placement gap, whose underlying DOM owns one pointermove
-  // while the user crosses from the pane into the portalled surface.
-  useEffect(() => {
-    if (openReason !== "hover") return;
-    let closeTimer: number | undefined;
-    const cancelPendingClose = () => {
-      if (closeTimer === undefined) return;
-      window.clearTimeout(closeTimer);
-      closeTimer = undefined;
-    };
-    const scheduleClose = () => {
-      if (closeTimer !== undefined) return;
-      closeTimer = window.setTimeout(() => {
-        closeTimer = undefined;
-        // The pointer can reach the portal before this effect observes the
-        // pane's hover loss. CSS hover is the final ownership check when no
-        // later pointermove exists to cancel the grace timer.
-        if (menuRef.current?.matches(":hover")) return;
-        onRequestClose();
-      }, HOVER_EXIT_GRACE_MS);
-    };
-    const onPointerMove = (event: PointerEvent) => {
-      const target = event.target as Node;
-      if (menuRef.current?.contains(target) || paneRef.current?.contains(target)) {
-        cancelPendingClose();
-        return;
-      }
-      scheduleClose();
-    };
-    document.addEventListener("pointermove", onPointerMove, true);
-    if (!ownerHovered) scheduleClose();
-    return () => {
-      cancelPendingClose();
-      document.removeEventListener("pointermove", onPointerMove, true);
-    };
-  }, [onRequestClose, openReason, ownerHovered, paneRef]);
+  }, [placement]);
 
   return createPortal(
     <div
@@ -242,23 +189,20 @@ export function FloatingPaneControlMenu({
       data-constrained={placement?.constrained ? "true" : undefined}
       data-constrained-x={placement?.constrainedX ? "true" : undefined}
       data-escaped-pane={placement?.escapedPane ? "true" : undefined}
-      className="fixed z-50 p-1"
+      className="pane-control-popover fixed z-50 p-2"
       role="toolbar"
       aria-label="Pane controls"
       style={{
         top: placement?.top ?? 0,
         left: placement?.left ?? 0,
-        width: placement?.maxWidth ?? "max-content",
+        width: "max-content",
         maxWidth: placement?.maxWidth ?? "calc(100vw - 16px)",
         maxHeight: placement?.maxHeight,
         overflowX: placement?.constrainedX ? "auto" : "visible",
         overflowY: placement?.constrained ? "auto" : "visible",
         visibility: placement ? "visible" : "hidden",
-        background: "var(--bar-bg-hover)",
-        border: "1px solid var(--separator-bg)",
-        borderRadius: "var(--radius-sm)",
-        boxShadow: "0 8px 18px #00000059",
-        backdropFilter: "blur(8px)",
+        background: "var(--bg-overlay)",
+        border: "1px solid var(--border)",
       }}
       onClick={(event) => event.stopPropagation()}
     >

@@ -238,7 +238,7 @@ describe("ViewHeader with PaneControlContext", () => {
     }
   });
 
-  it("automatically opens floating hover controls while keeping the header one row high", async () => {
+  it("keeps floating hover controls closed while keeping the header one row high", async () => {
     const openControls = vi.fn();
     const ctx = makeCtx({
       mode: "hover",
@@ -248,7 +248,7 @@ describe("ViewHeader with PaneControlContext", () => {
     });
     renderWithCtx(ctx, <ViewHeader testId="header">GitHub</ViewHeader>);
 
-    await waitFor(() => expect(openControls).toHaveBeenCalledWith("hover"));
+    expect(openControls).not.toHaveBeenCalled();
     expect(screen.getByTestId("header")).toHaveClass("ui-toolbar");
     expect(screen.getByTestId("mock-pane-controls")).toBeInTheDocument();
   });

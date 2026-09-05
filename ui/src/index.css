@@ -604,6 +604,16 @@
     backdrop-filter: blur(8px);
   }
 
+  .pane-control-popover {
+    box-shadow: 0 4px 14px var(--backdrop-heavy);
+  }
+
+  .pane-control-anchor:focus-visible,
+  .pane-control-popover :is(button, select):focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+  }
+
   /* Toolbar (28px header bar) */
   .ui-toolbar {
     display: flex;
