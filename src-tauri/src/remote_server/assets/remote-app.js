@@ -29,6 +29,9 @@ import {
         const remoteTerminalFontSizeInput = $("remoteTerminalFontSize");
         const remoteComposerFontSizeInput = $("remoteComposerFontSize");
         const remoteMenuFontSizeInput = $("remoteMenuFontSize");
+        const remoteNavigationPinnedInput = $("remoteNavigationPinned");
+        const remoteNavigationWidthInput = $("remoteNavigationWidth");
+        const remoteNavigationPinCutoffInput = $("remoteNavigationPinCutoff");
         const remoteComposerIdleOpacityInput = $("remoteComposerIdleOpacity");
         const remoteComposerFocusedOpacityInput = $("remoteComposerFocusedOpacity");
         const remoteComposerActiveOpacityInput = $("remoteComposerActiveOpacity");
@@ -198,12 +201,19 @@ import {
         const REMOTE_COMPOSER_OPACITY_MAX = 100;
         const REMOTE_SNAPSHOT_MAX_KIB_MIN = 1;
         const REMOTE_SNAPSHOT_MAX_KIB_MAX = 1024;
+        const REMOTE_NAVIGATION_WIDTH_MIN = 200;
+        const REMOTE_NAVIGATION_WIDTH_MAX = 720;
+        const REMOTE_NAVIGATION_PIN_CUTOFF_MIN = 320;
+        const REMOTE_NAVIGATION_PIN_CUTOFF_MAX = 2560;
         const SCROLL_SENSITIVITY_MIN = 0.1;
         const SCROLL_SENSITIVITY_MAX = 20;
         const DEFAULT_REMOTE_DISPLAY_SETTINGS = Object.freeze({
           terminalFontSize: 14,
           composerFontSize: 16,
           menuFontSize: 13,
+          navigationPinned: false,
+          navigationWidth: 360,
+          navigationPinCutoff: 720,
           composerIdleOpacity: 55,
           composerFocusedOpacity: 80,
           composerActiveOpacity: 100,
@@ -585,6 +595,7 @@ import {
           }
           remoteViewportHeight = height;
           document.documentElement.style.setProperty("--remote-viewport-height", `${Math.round(height)}px`);
+          syncRemoteNavigationLayout();
           scheduleTerminalFit();
         }
 
@@ -1167,6 +1178,12 @@ import {
           );
         }
 
+        function normalizeRemoteNavigationSize(value, fallback, min, max) {
+          const parsed = Number(value);
+          if (!Number.isFinite(parsed)) return fallback;
+          return Math.min(max, Math.max(min, Math.floor(parsed)));
+        }
+
         function normalizeRemoteDisplaySettings(settings = {}) {
           const composerOpacities = normalizeRemoteComposerOpacities(settings);
           return {
@@ -1181,6 +1198,19 @@ import {
             menuFontSize: normalizeRemoteFontSize(
               settings.menuFontSize,
               DEFAULT_REMOTE_DISPLAY_SETTINGS.menuFontSize,
+            ),
+            navigationPinned: settings.navigationPinned === true,
+            navigationWidth: normalizeRemoteNavigationSize(
+              settings.navigationWidth,
+              DEFAULT_REMOTE_DISPLAY_SETTINGS.navigationWidth,
+              REMOTE_NAVIGATION_WIDTH_MIN,
+              REMOTE_NAVIGATION_WIDTH_MAX,
+            ),
+            navigationPinCutoff: normalizeRemoteNavigationSize(
+              settings.navigationPinCutoff,
+              DEFAULT_REMOTE_DISPLAY_SETTINGS.navigationPinCutoff,
+              REMOTE_NAVIGATION_PIN_CUTOFF_MIN,
+              REMOTE_NAVIGATION_PIN_CUTOFF_MAX,
             ),
             ...composerOpacities,
             snapshotMaxKib: normalizeRemoteSnapshotMaxKib(
@@ -1244,6 +1274,9 @@ import {
           remoteTerminalFontSizeInput.value = String(normalized.terminalFontSize);
           remoteComposerFontSizeInput.value = String(normalized.composerFontSize);
           remoteMenuFontSizeInput.value = String(normalized.menuFontSize);
+          remoteNavigationPinnedInput.checked = normalized.navigationPinned;
+          remoteNavigationWidthInput.value = String(normalized.navigationWidth);
+          remoteNavigationPinCutoffInput.value = String(normalized.navigationPinCutoff);
           remoteComposerIdleOpacityInput.value = String(normalized.composerIdleOpacity);
           remoteComposerFocusedOpacityInput.value = String(
             normalized.composerFocusedOpacity,
@@ -1266,6 +1299,11 @@ import {
             "--remote-menu-font-size",
             `${normalized.menuFontSize}px`,
           );
+          document.documentElement.style.setProperty(
+            "--remote-navigation-width",
+            `${normalized.navigationWidth}px`,
+          );
+          syncRemoteNavigationLayout();
           document.documentElement.style.setProperty(
             "--remote-composer-idle-opacity",
             String(normalized.composerIdleOpacity / 100),
@@ -1294,6 +1332,9 @@ import {
             terminalFontSize: remoteTerminalFontSizeInput.value,
             composerFontSize: remoteComposerFontSizeInput.value,
             menuFontSize: remoteMenuFontSizeInput.value,
+            navigationPinned: remoteNavigationPinnedInput.checked,
+            navigationWidth: remoteNavigationWidthInput.value,
+            navigationPinCutoff: remoteNavigationPinCutoffInput.value,
             composerIdleOpacity: remoteComposerIdleOpacityInput.value,
             composerFocusedOpacity: remoteComposerFocusedOpacityInput.value,
             composerActiveOpacity: remoteComposerActiveOpacityInput.value,
@@ -6555,13 +6596,35 @@ import {
 
         function setNavigationOpen(open) {
           if (open) setDrawerView(leaseId ? "workspace" : "connection");
-          document.querySelector(".app").classList.toggle("nav-open", open);
-          navToggleButton.setAttribute("aria-expanded", String(open));
-          navToggleButton.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
-          navScrim.hidden = !open;
-          if (open) startNavigationViewPolling();
+          const pinned = remoteNavigationPinnedForViewport();
+          const nextOpen = open || pinned;
+          document.querySelector(".app").classList.toggle("nav-open", nextOpen);
+          navToggleButton.setAttribute("aria-expanded", String(nextOpen));
+          navToggleButton.setAttribute("aria-label", nextOpen ? "Close navigation" : "Open navigation");
+          navScrim.hidden = !nextOpen || pinned;
+          if (nextOpen) startNavigationViewPolling();
           else stopNavigationViewPolling();
           scheduleTerminalFit(Boolean(activeTerminalId));
+        }
+
+        function remoteNavigationPinnedForViewport() {
+          return (
+            remoteDisplaySettings.navigationPinned &&
+            window.innerWidth > remoteDisplaySettings.navigationPinCutoff
+          );
+        }
+
+        function syncRemoteNavigationLayout() {
+          const app = document.querySelector(".app");
+          const pinned = remoteNavigationPinnedForViewport();
+          const open = app.classList.contains("nav-open") || pinned;
+          app.classList.toggle("nav-pinned", pinned);
+          app.classList.toggle("nav-open", open);
+          navToggleButton.setAttribute("aria-expanded", String(open));
+          navToggleButton.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
+          navScrim.hidden = !open || pinned;
+          if (open) startNavigationViewPolling();
+          else stopNavigationViewPolling();
         }
 
         function setDrawerView(view) {
@@ -6655,8 +6718,10 @@ import {
               setDockPanelOpen(false);
               return true;
             }
-            setNavigationOpen(false);
-            return true;
+            if (!remoteNavigationPinnedForViewport()) {
+              setNavigationOpen(false);
+              return true;
+            }
           }
           return dismissVisibleComposerSuggestions();
         }
@@ -11818,6 +11883,15 @@ import {
           saveRemoteDisplaySettings();
         });
         remoteMenuFontSizeInput.addEventListener("change", () => {
+          saveRemoteDisplaySettings();
+        });
+        remoteNavigationPinnedInput.addEventListener("change", () => {
+          saveRemoteDisplaySettings();
+        });
+        remoteNavigationWidthInput.addEventListener("change", () => {
+          saveRemoteDisplaySettings();
+        });
+        remoteNavigationPinCutoffInput.addEventListener("change", () => {
           saveRemoteDisplaySettings();
         });
         remoteComposerIdleOpacityInput.addEventListener("change", () => {

@@ -45,6 +45,7 @@
         --remote-composer-focused-opacity: 0.8;
         --remote-composer-active-opacity: 1;
         --remote-menu-font-size: 13px;
+        --remote-navigation-width: 360px;
         /* Compact controls in the Remote header share one border-box height. */
         --header-control-height: 26px;
         --key-bar-control-height: 26px;
@@ -633,7 +634,7 @@
         position: absolute;
         inset: 0 auto 0 0;
         z-index: 20;
-        width: min(360px, calc(100vw - 28px));
+        width: min(var(--remote-navigation-width), calc(100vw - 28px));
         min-width: 0;
         min-height: 0;
         display: flex;
@@ -648,6 +649,25 @@
       }
       .app.nav-open .navigation-panel {
         transform: translateX(0);
+      }
+      .app.nav-pinned .remote-body {
+        grid-template-columns: var(--remote-navigation-width) minmax(0, 1fr);
+      }
+      .app.nav-pinned .navigation-panel {
+        position: relative;
+        inset: auto;
+        grid-column: 1;
+        grid-row: 1;
+        width: var(--remote-navigation-width);
+        box-shadow: none;
+        transform: none;
+      }
+      .app.nav-pinned .terminal-shell {
+        grid-column: 2;
+        grid-row: 1;
+      }
+      .app.nav-pinned .menu-button {
+        display: none;
       }
       .nav-scrim {
         position: absolute;
