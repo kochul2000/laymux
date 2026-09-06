@@ -1736,8 +1736,9 @@ import {
           focusCurrentInputSurface();
         }
 
-        function openFileViewerOverlay(path, explorerReturnPath = null) {
+        function openFileViewerOverlay(path, explorerReturnPath) {
           if (!leaseId || !fileViewerToken || !path) return;
+          const openedFromExplorer = explorerReturnPath !== undefined;
           const requestRevision = ++fileViewerRequestRevision;
           const requestLeaseId = leaseId;
           const requestFileViewerToken = fileViewerToken;
@@ -1751,11 +1752,11 @@ import {
           // Back exists only for a file reached through the explorer; a terminal
           // path-link has no folder context to return to (ADR-0198).
           fileViewerDirectoryPath = null;
-          fileViewerExplorerReturnPath = explorerReturnPath;
+          fileViewerExplorerReturnPath = explorerReturnPath || null;
           fileViewerBackButton.hidden = !explorerReturnPath;
           // Keep the explorer path controls available until rendering succeeds,
           // so a rejected path can be corrected without reopening the explorer.
-          fileViewerSection.hidden = !explorerReturnPath;
+          fileViewerSection.hidden = !openedFromExplorer;
           fileViewerDownloadButton.hidden = false;
           fileViewerDownloadInFlight = false;
           applyFileViewerDownloadState();
@@ -1806,6 +1807,7 @@ import {
 
         function openFileExplorerOverlay(request) {
           if (!leaseId || !fileViewerToken || !request) return;
+          const explorerFallbackPath = fileViewerDirectoryPath || fileViewerExplorerReturnPath;
           const requestRevision = ++fileViewerRequestRevision;
           const requestLeaseId = leaseId;
           const requestFileViewerToken = fileViewerToken;
@@ -1850,6 +1852,8 @@ import {
               if (await fileViewerControlLost(error)) return;
               if (requestRevision !== fileViewerRequestRevision) return;
               hideFileViewerContent();
+              fileViewerExplorerReturnPath = explorerFallbackPath;
+              fileViewerBackButton.hidden = !explorerFallbackPath;
               fileViewerSection.hidden = false;
               setFileViewerMessage(
                 error instanceof Error ? error.message : String(error),

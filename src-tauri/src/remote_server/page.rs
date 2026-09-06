@@ -1119,7 +1119,8 @@ mod tests {
         // The viewer renders in this document (ADR-0184): no second tab, so no
         // `window.open`, no credential handshake, and no viewer bootstrap route.
         assert!(html.contains("id=\"fileViewerOverlay\""));
-        assert!(html.contains("function openFileViewerOverlay(path, explorerReturnPath = null)"));
+        assert!(html.contains("function openFileViewerOverlay(path, explorerReturnPath)"));
+        assert!(html.contains("const openedFromExplorer = explorerReturnPath !== undefined;"));
         assert!(html.contains("function closeFileViewer()"));
         assert!(html.contains("function fileViewerFetch("));
         assert!(html.contains("fileViewerAuthorization: {"));

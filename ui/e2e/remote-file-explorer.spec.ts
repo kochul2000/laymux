@@ -446,6 +446,14 @@ test("empty, truncated and failing listings are reported", async ({ context, pag
   await page.locator(".file-viewer-directory-row.parent").click();
   await page.locator(".file-viewer-directory-row", { hasText: "denied" }).click();
   await expect(page.locator("#fileViewerMessage")).toContainText("Cannot read directory");
+  await expect(page.locator("#fileViewerSection")).toBeVisible();
+  await expect(page.locator("#fileViewerBack")).toBeVisible();
+
+  await page.locator("#fileViewerPath").fill("/home/user/missing.txt");
+  await page.locator("#openFileViewer").click();
+  await expect(page.locator("#fileViewerMessage")).toContainText("Cannot read file");
+  await expect(page.locator("#fileViewerSection")).toBeVisible();
+  await expect(page.locator("#fileViewerBack")).toBeVisible();
 });
 
 test("closing the explorer clears its state", async ({ context, page }) => {
