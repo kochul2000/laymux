@@ -72,7 +72,8 @@ pairing seed wrapping key는 기본적으로 강한 생체 인증을 암호 연�
 회전하고 명시적 폐기와 cloud disconnect는 record를 삭제한다. 확인된 seed는 사용자가 생체 인증으로
 승인할 때만 메모리 전용 방향별 key로 파생된다. foreground의 성공한 암호화 RPC마다 15분 비활성
 timeout이 갱신된다. background에서는 통신을 중지하고 현재 deadline까지 최대 15분간 key를 보존해
-복귀 시 같은 session을 재개하며, 만료 뒤에는 폐기한다. Android native transport가 고정 relay route에
+복귀 시 같은 session을 재개한다. 만료 뒤에는 key를 폐기하되 선택한 PC와 Remote surface를 유지한 채
+보호 정책에 따라 다시 인증해 새 session을 열고, 재인증이 불가능하거나 취소·실패한 때만 Cloud dashboard로 돌아간다. Android native transport가 고정 relay route에
 AES-256-GCM ciphertext envelope만 보내고, PC 소유 Remote UI는 Android wrapper mode에서 같은 기능 코드를
 native HTTP bridge와 binary output adapter에 연결한다([ADR-0149](../adr/0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md),
 [ADR-0159](../adr/0159-android-e2e-websocket-output-transport.md)). Cloud dashboard가

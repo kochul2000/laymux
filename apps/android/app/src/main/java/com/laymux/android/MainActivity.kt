@@ -3203,6 +3203,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         flushPendingOauthCallback()
         if (::webView.isInitialized) {
             if (remoteSession == null &&
+                !remoteConnecting &&
                 webView.url?.startsWith(
                     "https://${LocalContentWebViewClient.REMOTE_WRAPPER_HOST}/",
                 ) == true

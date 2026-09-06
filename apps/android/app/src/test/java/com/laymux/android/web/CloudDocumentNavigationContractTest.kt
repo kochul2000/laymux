@@ -25,6 +25,17 @@ class CloudDocumentNavigationContractTest {
         )
     }
 
+    @Test
+    fun foregroundReauthenticationIsNotCanceledByDashboardRecovery() {
+        val activity = source("java/com/laymux/android/MainActivity.kt").readText()
+
+        assertTrue(
+            Regex(
+                """if\s*\(\s*remoteSession == null &&\s*!remoteConnecting &&\s*webView[.]url""",
+            ).containsMatchIn(activity),
+        )
+    }
+
     private fun source(relative: String): File {
         val candidates = listOf(
             File("src/main", relative),
