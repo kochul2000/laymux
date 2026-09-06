@@ -83,6 +83,47 @@ async function dragChipOnto(page: Page, sourceId: string, targetId: string, toRi
 }
 
 test.describe("Remote input action layout", () => {
+  test("행별 버튼 크기를 즉시 적용하고 이동·복원·기본값을 유지한다", async ({ page }) => {
+    await openMarkup(page);
+    await page.locator("#keyBarToggle").click();
+    const mainKey = page.locator('#mainActionRow [data-key="c-c"]');
+    const keysKey = page.locator('#keyRow [data-key="tab"]');
+    const height = (target: ReturnType<Page["locator"]>) =>
+      target.evaluate((element) => element.getBoundingClientRect().height);
+    const mainHeight = await height(mainKey);
+    const keysHeight = await height(keysKey);
+    await page.locator("#drawerSettingsButton").click();
+    await expect(page.locator("#remoteMainButtonScale")).toHaveText("100%");
+    for (let i = 0; i < 6; i++)
+      await page.getByRole("button", { name: "Increase Main button size", exact: true }).click();
+    for (let i = 0; i < 2; i++)
+      await page.getByRole("button", { name: "Decrease Keys button size", exact: true }).click();
+    await expect(page.locator("#remoteMainButtonScale")).toHaveText("160%");
+    await expect(page.locator("#remoteKeysButtonScale")).toHaveText("80%");
+    await expect(
+      page.getByRole("button", { name: "Increase Main button size", exact: true }),
+    ).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "Decrease Keys button size", exact: true }),
+    ).toBeDisabled();
+    expect(await height(mainKey)).toBeGreaterThan(mainHeight * 1.4);
+    expect(await height(keysKey)).toBeCloseTo(keysHeight * 0.8, 0);
+    await place(page, "soft:c-c", "Ctrl+C (interrupt)", "expanded:center");
+    expect(await height(page.locator('#keyRow [data-key="c-c"]'))).toBeCloseTo(keysHeight * 0.8, 0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+    await page.reload();
+    await page.setContent(remoteClientMarkupWithoutXterm());
+    await expect(page.locator("#remoteMainButtonScale")).toHaveText("160%");
+    await expect(page.locator("#remoteKeysButtonScale")).toHaveText("80%");
+    await page.locator("#drawerSettingsButton").click();
+    await page.getByRole("button", { name: "Reset button sizes", exact: true }).click();
+    await expect(page.locator("#remoteMainButtonScale")).toHaveText("100%");
+    await expect(page.locator("#remoteKeysButtonScale")).toHaveText("100%");
+    expect(
+      await page.evaluate(() => JSON.parse(localStorage.getItem("laymux.remote.displaySettings")!)),
+    ).toMatchObject({ mainButtonScale: 100, keysButtonScale: 100 });
+  });
+
   test("defaults to segment-aligned rows and keeps 390px chrome on one row", async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem("laymux.remote.inputMode", "composer"));
     await openMarkup(page);

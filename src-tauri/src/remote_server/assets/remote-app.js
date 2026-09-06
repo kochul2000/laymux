@@ -220,6 +220,8 @@ import {
           terminalFontSize: 14,
           composerFontSize: 16,
           menuFontSize: 13,
+          mainButtonScale: 100,
+          keysButtonScale: 100,
           navigationPinned: false,
           navigationWidth: 360,
           navigationPinCutoff: 720,
@@ -1217,6 +1219,8 @@ import {
               DEFAULT_REMOTE_DISPLAY_SETTINGS.menuFontSize,
             ),
             navigationPinned: settings.navigationPinned === true,
+            mainButtonScale: normalizeRemoteButtonScale(settings.mainButtonScale),
+            keysButtonScale: normalizeRemoteButtonScale(settings.keysButtonScale),
             navigationWidth: normalizeRemoteNavigationSize(
               settings.navigationWidth,
               DEFAULT_REMOTE_DISPLAY_SETTINGS.navigationWidth,
@@ -1283,6 +1287,12 @@ import {
         ) {
           remoteDisplaySettingsStatus.textContent = message;
           remoteDisplaySettingsStatus.classList.toggle("error", error);
+          $("remoteButtonSizeStatus").textContent = message;
+          $("remoteButtonSizeStatus").classList.toggle("error", error);
+        }
+
+        function normalizeRemoteButtonScale(value) {
+          return Math.round(normalizeRemoteNavigationSize(value, 100, 80, 160) / 10) * 10;
         }
 
         function applyRemoteDisplaySettings(settings) {
@@ -1297,6 +1307,14 @@ import {
           remoteTerminalFontSizeInput.value = String(normalized.terminalFontSize);
           remoteComposerFontSizeInput.value = String(normalized.composerFontSize);
           remoteMenuFontSizeInput.value = String(normalized.menuFontSize);
+          $("remoteMainButtonScale").textContent = `${normalized.mainButtonScale}%`;
+          $("remoteKeysButtonScale").textContent = `${normalized.keysButtonScale}%`;
+          document.documentElement.style.setProperty("--remote-main-button-scale", String(normalized.mainButtonScale / 100));
+          document.documentElement.style.setProperty("--remote-keys-button-scale", String(normalized.keysButtonScale / 100));
+          document.querySelectorAll("[data-button-scale]").forEach((button) => {
+            const value = normalized[button.dataset.buttonScale];
+            button.disabled = Number(button.dataset.step) < 0 ? value <= 80 : value >= 160;
+          });
           remoteNavigationPinnedInput.checked = normalized.navigationPinned;
           navigationPinButton.setAttribute("aria-pressed", String(normalized.navigationPinned));
           const navigationPinLabel = normalized.navigationPinned
@@ -1363,6 +1381,7 @@ import {
 
         function saveRemoteDisplaySettings() {
           const normalized = normalizeRemoteDisplaySettings({
+            ...remoteDisplaySettings,
             terminalFontSize: remoteTerminalFontSizeInput.value,
             composerFontSize: remoteComposerFontSizeInput.value,
             menuFontSize: remoteMenuFontSizeInput.value,
@@ -12008,6 +12027,20 @@ import {
           saveRemoteDisplaySettings();
         });
         remoteMenuFontSizeInput.addEventListener("change", () => {
+          saveRemoteDisplaySettings();
+        });
+        document.querySelectorAll("[data-button-scale]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const field = button.dataset.buttonScale;
+            remoteDisplaySettings[field] = normalizeRemoteButtonScale(
+              remoteDisplaySettings[field] + Number(button.dataset.step),
+            );
+            saveRemoteDisplaySettings();
+          });
+        });
+        $("resetButtonSizes").addEventListener("click", () => {
+          remoteDisplaySettings.mainButtonScale = DEFAULT_REMOTE_DISPLAY_SETTINGS.mainButtonScale;
+          remoteDisplaySettings.keysButtonScale = DEFAULT_REMOTE_DISPLAY_SETTINGS.keysButtonScale;
           saveRemoteDisplaySettings();
         });
         remoteNavigationPinnedInput.addEventListener("change", () => {
