@@ -229,27 +229,29 @@ async function flickTerminalEdge(page: Page, edge: "left" | "right") {
 }
 
 async function flickSurface(page: Page, selector: string, distance: number) {
-  await page.locator(selector).evaluate((element, movedX) => {
-    const target = element as HTMLElement;
-    const rect = target.getBoundingClientRect();
-    const startX = rect.left + rect.width / 2;
-    const clientY = rect.top + rect.height / 2;
-    const dispatch = (type: string, clientX: number) =>
-      target.dispatchEvent(
-        new PointerEvent(type, {
-          bubbles: true,
-          cancelable: true,
-          pointerId: 43,
-          pointerType: "touch",
-          isPrimary: true,
-          clientX,
-          clientY,
-        }),
-      );
-    dispatch("pointerdown", startX);
-    dispatch("pointermove", startX + movedX);
-    dispatch("pointerup", startX + movedX);
-  }, distance);
+  const target = page.locator(selector);
+  await expect(target).toBeVisible();
+  // Wait for the drawer transition before hit-testing native touch input.
+  await target.click({ trial: true });
+  const box = (await target.boundingBox())!;
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x, y, id: 1 }],
+    });
+    for (let step = 1; step <= 8; step += 1) {
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x: x + (distance * step) / 8, y, id: 1 }],
+      });
+    }
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  } finally {
+    await cdp.detach();
+  }
 }
 
 async function touchTerminalLeftEdge(page: Page, moves: number[] = []) {
@@ -481,14 +483,76 @@ test("opposite mobile flicks close the workspace menu and file explorer", async 
   await installRemoteExplorerMocks(context, true);
   await page.setViewportSize({ width: 390, height: 720 });
   await connectRemote(page, true);
+  await expect(page.locator("#swipeCloseDrawersToggle")).toBeChecked();
 
   await flickTerminalEdge(page, "left");
   await expect(page.locator(".app")).toHaveClass(/nav-open/);
-  await flickSurface(page, "#navigationPanel", -80);
+  await flickSurface(page, "#workspaceList", -80);
   await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
 
   await flickTerminalEdge(page, "right");
   await expect(page.locator("#fileViewerDirectory")).toBeVisible();
+  await flickSurface(page, "#fileViewerDirectory", 80);
+  await expect(page.locator("#fileViewerOverlay")).toBeHidden();
+});
+
+test("swipe opening and closing are independent device-local settings", async ({
+  context,
+  page,
+}) => {
+  await installRemoteExplorerMocks(context, true);
+  await page.addInitScript(() => {
+    if (localStorage.getItem("laymux.remote.swipeCloseDrawers") === null) {
+      localStorage.setItem("laymux.remote.swipeCloseDrawers", "0");
+    }
+  });
+  await page.setViewportSize({ width: 390, height: 720 });
+  await connectRemote(page, true);
+
+  await flickTerminalEdge(page, "left");
+  await flickSurface(page, "#workspaceList", -80);
+  await expect(page.locator(".app")).toHaveClass(/nav-open/);
+  await page.locator("#navToggle").click();
+  await flickTerminalEdge(page, "right");
+  await flickSurface(page, "#fileViewerDirectory", 80);
+  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await page.locator("#navToggle").click();
+  await page.locator("#drawerSettingsButton").click();
+  await page.locator("#settingsTabDisplay").click();
+  const openToggle = page.getByRole("checkbox", { name: "Swipe to open", exact: false });
+  const closeToggle = page.getByRole("checkbox", { name: "Swipe to close", exact: false });
+  await expect(openToggle).toBeChecked();
+  await expect(closeToggle).not.toBeChecked();
+  await openToggle.uncheck();
+  await closeToggle.check();
+  await expect
+    .poll(() =>
+      page.evaluate(() => ({
+        open: localStorage.getItem("laymux.remote.edgeSwipeDrawers"),
+        close: localStorage.getItem("laymux.remote.swipeCloseDrawers"),
+      })),
+    )
+    .toEqual({ open: "0", close: "1" });
+
+  await page.reload();
+  await expect(page.locator("#exit")).toBeEnabled();
+  await page.locator("#navToggle").click();
+  await page.locator("#drawerSettingsButton").click();
+  await page.locator("#settingsTabDisplay").click();
+  await expect(openToggle).not.toBeChecked();
+  await expect(closeToggle).toBeChecked();
+  await page.locator("#navToggle").click();
+  await flickTerminalEdge(page, "left");
+  await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
+  await flickTerminalEdge(page, "right");
+  await expect(page.locator("#fileViewerOverlay")).toBeHidden();
+
+  await page.locator("#navToggle").click();
+  await flickSurface(page, "#workspaceList", -80);
+  await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
+  await page.locator("#fileExplorerHeader").click();
   await flickSurface(page, "#fileViewerDirectory", 80);
   await expect(page.locator("#fileViewerOverlay")).toBeHidden();
 });

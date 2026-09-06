@@ -168,6 +168,7 @@ import {
         // them. Defaults on, so only an explicit "0" hides the strip.
         const widgetStripKey = "laymux.remote.widgetStrip";
         const edgeSwipeDrawersKey = "laymux.remote.edgeSwipeDrawers";
+        const swipeCloseDrawersKey = "laymux.remote.swipeCloseDrawers";
         const spatialExcludedPaneIdsKey = "laymux.remote.spatialExcludedPaneIds";
         const spatialExcludedWorkspaceIdsKey = "laymux.remote.spatialExcludedWorkspaceIds";
         // Secret resume capability issued by a successful claim. It lives in
@@ -500,6 +501,7 @@ import {
         let composerAutocompleteEnabled = loadLocalToggle(composerAutocompleteKey);
         let composerHideAgentInputEnabled = loadLocalToggle(composerHideAgentInputKey);
         let edgeSwipeDrawersEnabled = loadLocalToggle(edgeSwipeDrawersKey);
+        let swipeCloseDrawersEnabled = loadLocalToggle(swipeCloseDrawersKey);
         let composerHiddenAgentInputLines = loadComposerHiddenAgentInputLines();
         let composerAgentInputHideFrame = null;
         let composerAgentInputHideRequest = null;
@@ -4921,7 +4923,7 @@ import {
         function installHorizontalFlickDismiss(element, direction, enabled, dismiss) {
           let gesture = null;
           element.addEventListener("pointerdown", (event) => {
-            if (!isTouchPointer(event) || !mobileLayout || !edgeSwipeDrawersEnabled || !enabled()) return;
+            if (!isTouchPointer(event) || !mobileLayout || !swipeCloseDrawersEnabled || !enabled()) return;
             if (gesture) {
               gesture = null;
               return;
@@ -6840,6 +6842,7 @@ import {
         const widgetStripRightEl = $("widgetStripRight");
         const widgetStripToggle = $("widgetStripToggle");
         const edgeSwipeDrawersToggle = $("edgeSwipeDrawersToggle");
+        const swipeCloseDrawersToggle = $("swipeCloseDrawersToggle");
         // Fixed and client-owned: the strip is a viewer, not probe demand, so it
         // has no business following `usage.*.refreshSeconds`. Fast enough for
         // the activity and notification counts, which are the parts that move.
@@ -11971,6 +11974,7 @@ import {
         // the row off never flashes it.
         widgetStripToggle.checked = widgetStripAllowed;
         edgeSwipeDrawersToggle.checked = edgeSwipeDrawersEnabled;
+        swipeCloseDrawersToggle.checked = swipeCloseDrawersEnabled;
         applyRemoteDisplaySettings(remoteDisplaySettings);
         updateRemoteDisplaySettingsControls();
 
@@ -11980,6 +11984,10 @@ import {
         edgeSwipeDrawersToggle.addEventListener("change", () => {
           edgeSwipeDrawersEnabled = edgeSwipeDrawersToggle.checked;
           saveLocalToggle(edgeSwipeDrawersKey, edgeSwipeDrawersEnabled);
+        });
+        swipeCloseDrawersToggle.addEventListener("change", () => {
+          swipeCloseDrawersEnabled = swipeCloseDrawersToggle.checked;
+          saveLocalToggle(swipeCloseDrawersKey, swipeCloseDrawersEnabled);
         });
         remoteTerminalFontSizeInput.addEventListener("change", () => {
           saveRemoteDisplaySettings();
