@@ -36,6 +36,26 @@ class CloudDocumentNavigationContractTest {
         )
     }
 
+    @Test
+    fun timerExpiredSessionReauthenticatesFromTheRemoteSurface() {
+        val activity = source("java/com/laymux/android/MainActivity.kt").readText()
+
+        assertTrue(
+            Regex(
+                """remoteSession\s*\?:\s*run\s*\{\s*if\s*\(visibleWebSurface == VisibleWebSurface[.]REMOTE\)\s*\{\s*reauthenticateExpiredRemote\(\)""",
+            ).containsMatchIn(activity),
+        )
+        assertEquals(
+            3,
+            Regex("expireRemoteSessionInBackground[(]session[)]").findAll(activity).count(),
+        )
+        assertTrue(
+            Regex(
+                """private fun expireRemoteSessionInBackground\(session: RemoteSession\)\s*\{\s*runOnUiThread\s*\{""",
+            ).containsMatchIn(activity),
+        )
+    }
+
     private fun source(relative: String): File {
         val candidates = listOf(
             File("src/main", relative),
