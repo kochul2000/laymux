@@ -98,6 +98,7 @@ const snapshotText = [
   "Ignored: abc#12 #fff v1.2#3",
   "Wide: 가 #45",
   "Words: alpha bravo omega",
+  "Spaces: alpha   omega",
   "",
 ].join("\r\n");
 
@@ -185,6 +186,7 @@ type RemoteTerminalWindow = typeof window & {
   __openedExternalUrls?: string[];
   __focusSteals?: { helperFocus: number; composerBlur: number };
   __focusChanges?: string[];
+  __terminalFocusAttempts?: number;
 };
 
 /**
@@ -650,15 +652,31 @@ test.describe("touch URL activation", () => {
     });
   }
 
+  async function installTerminalFocusAttemptCounter(page: import("@playwright/test").Page) {
+    await page.evaluate(() => {
+      const target = window as RemoteTerminalWindow;
+      const core = (target.__remoteTerm as unknown as { _core?: { focus?: () => void } })?._core;
+      if (!core?.focus) throw new Error("xterm core focus is unavailable");
+      target.__terminalFocusAttempts = 0;
+      const original = core.focus.bind(core);
+      core.focus = () => {
+        target.__terminalFocusAttempts = (target.__terminalFocusAttempts || 0) + 1;
+        original();
+      };
+    });
+  }
+
   async function expectSelectionCopied(page: import("@playwright/test").Page, selection: string) {
     await expect
       .poll(() => page.evaluate(() => (window as RemoteTerminalWindow).__copiedSelections))
       .toEqual([selection]);
   }
 
-  async function longPressBravoCell(
+  async function longPressCell(
     context: BrowserContext,
     page: import("@playwright/test").Page,
+    column: number,
+    row: number,
   ) {
     await page.waitForTimeout(250);
     const screenBox = await page.locator(".xterm-screen").boundingBox();
@@ -669,8 +687,8 @@ test.describe("touch URL activation", () => {
     });
     const cellWidth = screenBox!.width / geometry.cols;
     const cellHeight = screenBox!.height / geometry.rows;
-    const x = screenBox!.x + ("Words: alpha ".length + 2.5) * cellWidth;
-    const y = screenBox!.y + 7.5 * cellHeight;
+    const x = screenBox!.x + column * cellWidth;
+    const y = screenBox!.y + row * cellHeight;
     const cdp = await context.newCDPSession(page);
     await cdp.send("Input.dispatchTouchEvent", {
       type: "touchStart",
@@ -679,6 +697,9 @@ test.describe("touch URL activation", () => {
     await page.waitForTimeout(550);
     return { cdp, screenBox: screenBox!, cellWidth, x, y };
   }
+
+  const longPressBravoCell = (context: BrowserContext, page: import("@playwright/test").Page) =>
+    longPressCell(context, page, "Words: alpha ".length + 2.5, 7.5);
 
   for (const mode of ["composer", "direct"] as const) {
     const states =
@@ -759,6 +780,7 @@ test.describe("touch URL activation", () => {
             const input = element as HTMLTextAreaElement;
             return { value: input.value, start: input.selectionStart, end: input.selectionEnd };
           });
+          await installTerminalFocusAttemptCounter(page);
           const { cdp, screenBox, cellWidth, y } = await longPressBravoCell(context, page);
           // Android/WebKit can also dispatch a native context menu for a hold;
           // xterm's right-click handler must not borrow the helper textarea.
@@ -806,6 +828,9 @@ test.describe("touch URL activation", () => {
           expect(
             await page.evaluate(() => (window as RemoteTerminalWindow).__focusChanges),
           ).toEqual([]);
+          expect(
+            await page.evaluate(() => (window as RemoteTerminalWindow).__terminalFocusAttempts),
+          ).toBe(0);
           if (mode === "composer") {
             expect(
               await surface.evaluate((element) => {
@@ -872,6 +897,34 @@ test.describe("touch URL activation", () => {
         .toContain("Words: alpha bravo omega");
     });
   }
+
+  test("whitespace long press keeps a dismissed composer keyboard down", async ({
+    context,
+    page,
+  }) => {
+    await connectRemoteWithWords(context, page, "composer");
+    const composer = page.locator("#composerInput");
+    await composer.focus();
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, "virtualKeyboard", {
+        configurable: true,
+        value: { boundingRect: { height: 0 } },
+      });
+    });
+    await installTerminalFocusAttemptCounter(page);
+
+    const { cdp } = await longPressCell(context, page, "Spaces: alpha".length + 1.5, 8.5);
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as RemoteTerminalWindow).__remoteTerm?.getSelection() || ""),
+      )
+      .toBe("   ");
+    await expect(composer).toBeFocused();
+    expect(
+      await page.evaluate(() => (window as RemoteTerminalWindow).__terminalFocusAttempts),
+    ).toBe(0);
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  });
 
   test("long press selection keeps composer focus and does not scroll", async ({
     context,
