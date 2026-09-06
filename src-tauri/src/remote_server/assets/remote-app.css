@@ -1128,6 +1128,12 @@
         padding: 3px 6px;
         font-size: var(--fs-xs);
       }
+      .user-key-escape-buttons {
+        display: flex;
+        flex: 1 1 auto;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
       .user-key-shift {
         flex: 0 0 auto;
         gap: 4px;

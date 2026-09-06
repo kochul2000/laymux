@@ -424,6 +424,38 @@ test.describe("Remote input action layout", () => {
     await expect(page.locator('#keyRow [data-input-action^="soft:u-"]')).toHaveText("C→");
   });
 
+  test("inserts common raw escapes without requiring a backslash key", async ({ page }) => {
+    await openMarkup(page);
+    await page.locator("#drawerSettingsButton").click();
+    await page.getByLabel("Custom key kind").selectOption("raw");
+
+    const sequence = page.getByLabel("Custom key sequence");
+    await page.getByLabel("Custom key label").fill("Run");
+    for (const [name, value] of [
+      ["Esc", "\\e"],
+      ["Enter", "\\r"],
+      ["Tab", "\\t"],
+      ["LF", "\\n"],
+      ["Hex", "\\x"],
+      ["Backslash", "\\\\"],
+    ]) {
+      await sequence.fill("");
+      await page.getByRole("button", { name: `Insert ${name} escape` }).click();
+      await expect(sequence).toHaveValue(value);
+      await expect(sequence).toBeFocused();
+    }
+    await sequence.fill("run");
+    await page.getByRole("button", { name: "Insert Enter escape" }).click();
+    await expect(sequence).toHaveValue("run\\r");
+    await page.getByRole("button", { name: "Add custom key" }).click();
+
+    await expect
+      .poll(async () =>
+        ((await storedConfig(page)).userKeys || []).map((entry: { seq: string }) => entry.seq),
+      )
+      .toEqual(["run\r"]);
+  });
+
   test("updates the Keys-row empty state when Send becomes visible in Composer", async ({
     page,
   }) => {

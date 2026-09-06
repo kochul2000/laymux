@@ -11324,6 +11324,41 @@ import {
             seqRow.append(seqName, seqInput);
             form.append(seqRow);
 
+            const escapeRow = document.createElement("div");
+            escapeRow.className = "user-key-row";
+            const escapeLabel = document.createElement("span");
+            escapeLabel.className = "user-key-label";
+            escapeLabel.textContent = "Insert";
+            const escapeButtons = document.createElement("div");
+            escapeButtons.className = "user-key-escape-buttons";
+            for (const [label, token] of [
+              ["Esc", "\\e"],
+              ["Enter", "\\r"],
+              ["Tab", "\\t"],
+              ["LF", "\\n"],
+              ["Hex", "\\x"],
+              ["\\", "\\\\"],
+            ]) {
+              const button = document.createElement("button");
+              button.type = "button";
+              button.className = "key-order-action";
+              button.textContent = label;
+              button.title = token;
+              button.setAttribute("aria-label", `Insert ${label === "\\" ? "Backslash" : label} escape`);
+              keepInputSurfaceFocus(button);
+              button.addEventListener("click", (event) => {
+                event.stopPropagation();
+                const start = seqInput.selectionStart ?? seqInput.value.length;
+                const end = seqInput.selectionEnd ?? start;
+                seqInput.setRangeText(token, start, end, "end");
+                userKeyRawSequence = seqInput.value;
+                seqInput.focus({ preventScroll: true });
+              });
+              escapeButtons.append(button);
+            }
+            escapeRow.append(escapeLabel, escapeButtons);
+            form.append(escapeRow);
+
             const hint = document.createElement("div");
             hint.className = "user-key-preview";
             hint.textContent = "Escapes: \\e \\xNN \\r \\n \\t \\0 \\\\";
