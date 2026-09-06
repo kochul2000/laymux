@@ -271,6 +271,40 @@ test("워크스페이스 메뉴는 너비를 공유하고 컷오프보다 넓을
   expect(displayRequests).toEqual([]);
 });
 
+test("상단 핀 아이콘은 설정과 같은 워크스페이스 메뉴 고정 값을 토글한다", async ({ page }) => {
+  const displayRequests: string[] = [];
+  await installApiMocks(page, displayRequests);
+  await page.setViewportSize({ width: 900, height: 800 });
+  await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), {
+    key: DISPLAY_SETTINGS_KEY,
+    value: deviceSettings,
+  });
+
+  await page.goto("http://remote.test/remote/");
+
+  const pin = page.locator("#navigationPin");
+  await expect(pin.locator('svg[data-remote-icon-name="Pin"]')).toHaveCount(1);
+  await expect(pin).toHaveAttribute("aria-pressed", "false");
+  await expect(pin).toHaveAttribute("aria-label", "Pin workspace menu");
+
+  await pin.click();
+  await expect(page.locator(".app")).toHaveClass(/nav-pinned/);
+  await expect(pin).toHaveAttribute("aria-pressed", "true");
+  await expect(pin).toHaveAttribute("aria-label", "Unpin workspace menu");
+  await expect(page.locator("#remoteNavigationPinned")).toBeChecked();
+  await expect
+    .poll(() =>
+      page.evaluate((key) => JSON.parse(localStorage.getItem(key) || "null"), DISPLAY_SETTINGS_KEY),
+    )
+    .toMatchObject({ navigationPinned: true });
+
+  await pin.click();
+  await expect(page.locator(".app")).not.toHaveClass(/nav-pinned/);
+  await expect(pin).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator("#remoteNavigationPinned")).not.toBeChecked();
+  expect(displayRequests).toEqual([]);
+});
+
 test("잘못된 워크스페이스 메뉴 숫자 설정은 안전한 기본값으로 복구한다", async ({ page }) => {
   const displayRequests: string[] = [];
   await installApiMocks(page, displayRequests);

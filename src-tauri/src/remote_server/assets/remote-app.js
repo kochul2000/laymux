@@ -15,6 +15,7 @@ import {
         const tokenInput = $("token");
         const clientNameInput = $("clientName");
         const navToggleButton = $("navToggle");
+        const navigationPinButton = $("navigationPin");
         const drawerTitle = $("drawerTitle");
         const drawerBackButton = $("drawerBack");
         const drawerNotificationsButton = $("drawerNotificationsButton");
@@ -1288,6 +1289,12 @@ import {
           remoteComposerFontSizeInput.value = String(normalized.composerFontSize);
           remoteMenuFontSizeInput.value = String(normalized.menuFontSize);
           remoteNavigationPinnedInput.checked = normalized.navigationPinned;
+          navigationPinButton.setAttribute("aria-pressed", String(normalized.navigationPinned));
+          const navigationPinLabel = normalized.navigationPinned
+            ? "Unpin workspace menu"
+            : "Pin workspace menu";
+          navigationPinButton.setAttribute("aria-label", navigationPinLabel);
+          navigationPinButton.title = navigationPinLabel;
           remoteNavigationWidthInput.value = String(normalized.navigationWidth);
           remoteNavigationPinCutoffInput.value = String(normalized.navigationPinCutoff);
           remoteComposerIdleOpacityInput.value = String(normalized.composerIdleOpacity);
@@ -12075,6 +12082,11 @@ import {
         navToggleButton.addEventListener("click", () => {
           const open = navToggleButton.getAttribute("aria-expanded") !== "true";
           setNavigationOpen(open);
+        });
+        keepInputSurfaceFocus(navigationPinButton);
+        navigationPinButton.addEventListener("click", () => {
+          remoteNavigationPinnedInput.checked = !remoteNavigationPinnedInput.checked;
+          saveRemoteDisplaySettings();
         });
         hiddenWorkspaceToggle.addEventListener("click", () => {
           openDrawerSubview("hidden");
