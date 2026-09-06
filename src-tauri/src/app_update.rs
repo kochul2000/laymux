@@ -20,6 +20,9 @@ use crate::constants::{
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 
+#[path = "app_update_retry.rs"]
+mod retry;
+
 const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 const INITIAL_UPDATE_CHECK_DELAY: Duration = Duration::from_secs(5);
 
@@ -456,7 +459,9 @@ async fn check_channel_once(
     }
 
     let result = match channel_updater(app, channel) {
-        Ok(updater) => updater.check().await.map_err(|error| error.to_string()),
+        Ok(updater) => retry::check(|| updater.check())
+            .await
+            .map_err(|error| error.to_string()),
         Err(error) => Err(error),
     };
 
@@ -568,7 +573,7 @@ async fn install_and_restart(
     // and keep the files the installer must overwrite (ADR-0201). Blocking here
     // delays the installer by exactly as long as the teardown needs.
     let guard_app = app.clone();
-    let update = channel_updater_builder(app, channel)?
+    let updater = channel_updater_builder(app, channel)?
         .on_before_exit(move || match guard_app.try_state::<Arc<AppState>>() {
             Some(state) => crate::update_install_guard::release_installer_file_locks(&state),
             // Nothing to tear down without the state, and panicking inside the
@@ -577,8 +582,8 @@ async fn install_and_restart(
             None => tracing::warn!("app state is unavailable; installing without a teardown"),
         })
         .build()
-        .map_err(|error| error.to_string())?
-        .check()
+        .map_err(|error| error.to_string())?;
+    let update = retry::check(|| updater.check())
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "the pending update is no longer available".to_string())?;

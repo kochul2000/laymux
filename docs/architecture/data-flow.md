@@ -1280,7 +1280,7 @@ Windows·Linux release의 업데이트 상태는 Rust `UpdateManager`가 단독 
 
 ```text
 [앱 시작 + 5초 / 이후 6시간 / desktop·Automation·Remote 수동 확인]
-    → GitHub latest Release의 latest.json 조회
+    → 선택 채널의 desktop-<channel>.json 조회(실패하면 1초 뒤 1회 재시도)
     → manifest x.y.z와 download URL의 GitHub tag v?x.y.z가 일치하는지 검증
     → UpdateManager snapshot 갱신
     → app-update-status-changed event
@@ -1289,7 +1289,7 @@ Windows·Linux release의 업데이트 상태는 Rust `UpdateManager`가 단독 
 
 [desktop 확인 대화상자 / Automation 호출 / active Remote lease의 install]
     → operation=downloading으로 요청 수락·호출자에게 즉시 응답
-    → GitHub latest를 다시 확인
+    → 수락한 채널을 다시 확인(실패하면 1초 뒤 1회 재시도)
     → 같은 x.y.z 버전인지 재검증
     → artifact download + 고정 public key 서명 검증
     → operation=installing
@@ -1297,6 +1297,8 @@ Windows·Linux release의 업데이트 상태는 Rust `UpdateManager`가 단독 
 ```
 
 확인·다운로드·설치는 동시에 하나만 수행한다. 확인 실패는 이미 발견한 `availableVersion`을 지우지 않고 `lastError`만 남긴다. 배포 workflow는 main 계보와 stable tag/app version을 먼저 검증하고 draft Release에 모든 artifact를 모은 뒤 성공한 경우에만 publish/latest로 승격한다. 앱도 updater manifest의 `x.y.z`와 download URL의 GitHub Release tag `v?x.y.z`가 일치하지 않으면 무시하며, 설치 직전 latest가 사용자가 승인한 버전과 달라져도 설치하지 않는다. Remote install은 active controller lease의 mutation permit을 요청 수락 시점에만 요구한다. 수락된 뒤의 서명 검증·설치는 lease 만료나 재시작에 따른 연결 종료와 독립적으로 완주한다. Android E2E wrapper가 이 API를 호출하더라도 업데이트되는 대상은 PC이고 APK 자체 업데이트 흐름은 없다.
+
+매니페스트 조회는 자동·수동 확인과 설치 직전 재확인 모두 첫 실패 후 1초 뒤 한 번 더 시도한다. 재시도 중에는 기존 operation을 유지하고 첫 오류를 `lastError`나 상태 이벤트로 게시하지 않는다. 두 번째 조회도 실패한 경우에만 최종 오류를 기록한다. 정상 응답은 재조회하지 않으며, 채널 전환 시 오래된 응답 폐기·버전/URL 대조·서명 검증과 다운로드/설치 실패 처리는 기존 계약을 유지한다.
 
 ---
 
