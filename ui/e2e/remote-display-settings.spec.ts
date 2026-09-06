@@ -271,7 +271,9 @@ test("워크스페이스 메뉴는 너비를 공유하고 컷오프보다 넓을
   expect(displayRequests).toEqual([]);
 });
 
-test("상단 핀 아이콘은 설정과 같은 워크스페이스 메뉴 고정 값을 토글한다", async ({ page }) => {
+test("메뉴 도구 줄의 핀 아이콘은 설정과 같은 워크스페이스 메뉴 고정 값을 토글한다", async ({
+  page,
+}) => {
   const displayRequests: string[] = [];
   await installApiMocks(page, displayRequests);
   await page.setViewportSize({ width: 900, height: 800 });
@@ -282,7 +284,15 @@ test("상단 핀 아이콘은 설정과 같은 워크스페이스 메뉴 고정 
 
   await page.goto("http://remote.test/remote/");
 
-  const pin = page.locator("#navigationPin");
+  await page.locator("#token").fill("test-token");
+  await page.locator("#connect").click();
+  await page.locator("#navToggle").click();
+  const pin = page.locator(".drawer-header-actions #navigationPin");
+  await expect(page.locator("header #navigationPin")).toHaveCount(0);
+  await expect(pin).toBeVisible();
+  const pinBox = await pin.boundingBox();
+  const plusBox = await page.locator("#newWorkspace").boundingBox();
+  expect(pinBox!.y).toBe(plusBox!.y);
   await expect(pin.locator('svg[data-remote-icon-name="Pin"]')).toHaveCount(1);
   await expect(pin).toHaveAttribute("aria-pressed", "false");
   await expect(pin).toHaveAttribute("aria-label", "Pin workspace menu");
@@ -292,6 +302,7 @@ test("상단 핀 아이콘은 설정과 같은 워크스페이스 메뉴 고정 
   await expect(pin).toHaveAttribute("aria-pressed", "true");
   await expect(pin).toHaveAttribute("aria-label", "Unpin workspace menu");
   await expect(page.locator("#remoteNavigationPinned")).toBeChecked();
+  await page.screenshot({ path: "../.screenshots/remote-pin-toolbar-wide.png" });
   await expect
     .poll(() =>
       page.evaluate((key) => JSON.parse(localStorage.getItem(key) || "null"), DISPLAY_SETTINGS_KEY),
@@ -302,6 +313,9 @@ test("상단 핀 아이콘은 설정과 같은 워크스페이스 메뉴 고정 
   await expect(page.locator(".app")).not.toHaveClass(/nav-pinned/);
   await expect(pin).toHaveAttribute("aria-pressed", "false");
   await expect(page.locator("#remoteNavigationPinned")).not.toBeChecked();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(pin).toBeVisible();
+  await page.screenshot({ path: "../.screenshots/remote-pin-toolbar-mobile.png" });
   expect(displayRequests).toEqual([]);
 });
 
