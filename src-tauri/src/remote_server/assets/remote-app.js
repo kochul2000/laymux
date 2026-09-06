@@ -540,7 +540,6 @@ import {
         let selectionHandles = null;
         let selectionHandleDrag = null;
         let lastCopiedSelection = "";
-        let suppressSelectionMouseupAfterInteraction = false;
 
         // UX contract: long press. This delay is only the local gesture threshold.
         const INTERNAL_TOUCH_LONG_PRESS_DELAY_MS = 500;
@@ -5291,33 +5290,20 @@ import {
           }
         }
 
-        function startTouchSelection(term, element, pointerId) {
+        function startTouchSelection(term, pointerId) {
           if (!touchGesture || touchGesture.pointerId !== pointerId || touchGesture.mode !== "pending") return;
           touchGesture.mode = "selecting";
-          touchGesture.forceSelection = shouldForceTouchSelection(term);
           touchGesture.scrollRemainderPx = 0;
-          // A stationary long press should create a useful selection immediately.
-          // xterm uses click detail=2 for word mode (the same path as a desktop
-          // double-click). Finish that synthetic click immediately so later
-          // touch movement can extend the captured word by individual cells.
-          dispatchTouchSelectionMouse(
-            element,
-            "mousedown",
-            touchGesture.startPoint,
-            touchGesture.forceSelection,
-            2
-          );
-          suppressSelectionMouseupAfterInteraction = true;
-          try {
-            dispatchTouchSelectionMouse(
-              document,
-              "mouseup",
-              touchGesture.startPoint,
-              touchGesture.forceSelection,
-              2
+          // Do not dispatch xterm's element `mousedown`: CoreBrowserTerminal
+          // always focuses its helper textarea, and a focus request alone can
+          // reopen a system-dismissed Android IME. The pinned xterm selection
+          // service owns the exact word rules without that input side effect.
+          term.clearSelection();
+          const selectionService = term._core && term._core._selectionService;
+          if (selectionService && typeof selectionService.rightClickSelect === "function") {
+            selectionService.rightClickSelect(
+              touchSelectionMouseEvent("mousedown", touchGesture.startPoint, false, 2, 0)
             );
-          } finally {
-            suppressSelectionMouseupAfterInteraction = false;
           }
           const selection = term.getSelectionPosition && term.getSelectionPosition();
           touchGesture.selectionSeed = selection
@@ -5417,7 +5403,6 @@ import {
         }
 
         function handleSelectionMouseupAfterInteraction() {
-          if (suppressSelectionMouseupAfterInteraction) return;
           copySelectionAfterInteraction();
         }
 
@@ -5515,7 +5500,6 @@ import {
             mode: "twoFingerScrolling",
             startPoint: center,
             lastY: center.clientY,
-            forceSelection: false,
             longPressTimer: null,
             scrollRemainderPx: 0,
           };
@@ -5555,14 +5539,13 @@ import {
               edge,
               startPoint: point,
               lastY: point.clientY,
-              forceSelection: false,
               selectionSeed: null,
               movedBeyondTapSlop: false,
               longPressTimer: null,
               scrollRemainderPx: 0,
             };
             touchGesture.longPressTimer = window.setTimeout(
-              () => startTouchSelection(term, element, event.pointerId),
+              () => startTouchSelection(term, event.pointerId),
               INTERNAL_TOUCH_LONG_PRESS_DELAY_MS
             );
           }, pointerOptions);

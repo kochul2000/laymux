@@ -185,6 +185,7 @@ type RemoteTerminalWindow = typeof window & {
   __openedExternalUrls?: string[];
   __focusSteals?: { helperFocus: number; composerBlur: number };
   __focusChanges?: string[];
+  __terminalFocusAttempts?: number;
 };
 
 /**
@@ -650,6 +651,22 @@ test.describe("touch URL activation", () => {
     });
   }
 
+  async function installTerminalFocusAttemptCounter(page: import("@playwright/test").Page) {
+    await page.evaluate(() => {
+      const target = window as RemoteTerminalWindow;
+      const core = (
+        target.__remoteTerm as unknown as { _core?: { focus?: () => void } }
+      )?._core;
+      if (!core?.focus) throw new Error("xterm core focus is unavailable");
+      target.__terminalFocusAttempts = 0;
+      const original = core.focus.bind(core);
+      core.focus = () => {
+        target.__terminalFocusAttempts = (target.__terminalFocusAttempts || 0) + 1;
+        original();
+      };
+    });
+  }
+
   async function expectSelectionCopied(page: import("@playwright/test").Page, selection: string) {
     await expect
       .poll(() => page.evaluate(() => (window as RemoteTerminalWindow).__copiedSelections))
@@ -759,6 +776,7 @@ test.describe("touch URL activation", () => {
             const input = element as HTMLTextAreaElement;
             return { value: input.value, start: input.selectionStart, end: input.selectionEnd };
           });
+          await installTerminalFocusAttemptCounter(page);
           const { cdp, screenBox, cellWidth, y } = await longPressBravoCell(context, page);
           // Android/WebKit can also dispatch a native context menu for a hold;
           // xterm's right-click handler must not borrow the helper textarea.
@@ -806,6 +824,9 @@ test.describe("touch URL activation", () => {
           expect(
             await page.evaluate(() => (window as RemoteTerminalWindow).__focusChanges),
           ).toEqual([]);
+          expect(
+            await page.evaluate(() => (window as RemoteTerminalWindow).__terminalFocusAttempts),
+          ).toBe(0);
           if (mode === "composer") {
             expect(
               await surface.evaluate((element) => {
