@@ -2536,6 +2536,16 @@
         font-size: var(--fs-xs);
         text-align: center;
       }
+      @media (max-width: 360px) {
+        .file-viewer-header {
+          gap: 4px;
+          padding-inline: 6px;
+        }
+        .file-viewer-zoom-level,
+        #fileViewerZoomReset {
+          display: none;
+        }
+      }
       .file-viewer-body {
         flex: 1 1 auto;
         min-width: 0;

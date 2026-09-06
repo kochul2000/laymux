@@ -461,6 +461,7 @@ test("direct path open lives in the explorer and returns to its directory", asyn
   await expect(page.locator("#fileViewerSection")).toBeVisible();
   await expect(page.locator("#fileViewerMessage")).toContainText("Cannot read file");
   await expect(page.locator("#fileViewerBack")).toBeVisible();
+  await expect(page.locator("#fileViewerCopyPath")).toBeHidden();
 });
 
 test("empty, truncated and failing listings are reported", async ({ context, page }) => {

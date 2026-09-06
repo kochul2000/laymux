@@ -1750,7 +1750,7 @@ import {
           fileViewerZoomElement.hidden = true;
           fileViewerTitleElement.textContent = path;
           fileViewerTitleElement.title = path;
-          fileViewerCopyPathButton.hidden = false;
+          fileViewerCopyPathButton.hidden = true;
           fileViewerPath = path;
           // Back exists only for a file reached through the explorer; a terminal
           // path-link has no folder context to return to (ADR-0198).
@@ -1780,6 +1780,7 @@ import {
                 return;
               }
               renderFileViewerPayload(payload);
+              fileViewerCopyPathButton.hidden = false;
             })
             .catch(async (error) => {
               if (requestRevision !== fileViewerRequestRevision) return;
