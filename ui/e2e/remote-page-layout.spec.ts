@@ -514,6 +514,7 @@ test.describe("remote mobile layout", () => {
     await expect(page.locator("#widgetStripToggle")).toBeEnabled();
     await page.locator("#drawerBack").click();
     await expect(page.locator("#drawerSettingsButton")).toBeFocused();
+    await page.locator("#drawerSettingsButton").click();
     await page.locator("#drawerConnectionButton").click();
     await expect(page.locator("#drawerBack")).toBeFocused();
 
@@ -554,6 +555,7 @@ test.describe("remote mobile layout", () => {
     await expect(page.locator("#drawerSettingsButton")).toBeFocused();
     await expect(page.locator("#drawerWorkspaceView")).toBeVisible();
 
+    await page.locator("#drawerSettingsButton").click();
     await page.locator("#drawerConnectionButton").click();
     await expect(page.locator("#drawerBack")).toBeFocused();
     await expect(page.locator("#drawerConnectionView")).toBeVisible();
@@ -877,6 +879,10 @@ test.describe("remote mobile layout", () => {
     expect(narrowHeader.headerScrollWidth).toBe(narrowHeader.headerClientWidth);
     expect(narrowHeader.actionLeft).toBeGreaterThanOrEqual(narrowHeader.headerLeft);
     expect(narrowHeader.actionRight).toBeLessThanOrEqual(narrowHeader.headerRight);
+    const narrowPin = await page.locator("#navigationPin").boundingBox();
+    expect(narrowPin!.x).toBeGreaterThanOrEqual(narrowHeader.headerLeft);
+    expect(narrowPin!.x + narrowPin!.width).toBeLessThanOrEqual(narrowHeader.actionLeft);
+    await page.screenshot({ path: "../.screenshots/remote-pin-toolbar-180.png" });
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(180);
     expect(controls.visibilityRequests.at(-1)).toEqual({
       path: "/remote/v1/workspaces/ws-b/visibility",

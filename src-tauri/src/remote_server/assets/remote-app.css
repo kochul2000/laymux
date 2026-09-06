@@ -750,6 +750,7 @@
         flex: 0 0 auto;
         align-items: center;
         justify-content: space-between;
+        gap: 4px;
         padding: 0 6px 0 9px;
         border-bottom: 1px solid var(--border);
       }
@@ -863,6 +864,12 @@
       }
       .settings-panel[hidden] {
         display: none;
+      }
+      .settings-connection-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin: 8px;
       }
       .connection-title {
         color: var(--text-secondary);
@@ -2024,9 +2031,14 @@
         }
         .drawer-header-actions {
           width: 100%;
+          flex-shrink: 1;
           min-width: 0;
           justify-content: space-between;
           gap: 0;
+        }
+        .drawer-header-actions > button {
+          flex-shrink: 1;
+          min-width: 0;
         }
         .drawer-header-button,
         .desktop-mode-button {

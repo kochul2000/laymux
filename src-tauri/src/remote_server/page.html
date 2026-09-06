@@ -35,9 +35,6 @@
         <button id="navToggle" class="menu-button" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="navigationPanel">
           <span data-remote-icon="Menu" data-icon-size="18"></span>
         </button>
-        <button id="navigationPin" class="navigation-pin-button" type="button" aria-label="Pin workspace menu" aria-pressed="false" title="Pin workspace menu">
-          <span data-remote-icon="Pin"></span>
-        </button>
         <button id="copyPaneId" class="copy-pane-button" type="button" hidden aria-label="Copy pane identifier" title="Copy pane identifier (lx:pane:...)">
           <span data-remote-icon="Copy"></span>
         </button>
@@ -67,6 +64,9 @@
           <button id="navScrim" class="nav-scrim" type="button" aria-label="Close navigation" hidden></button>
           <aside id="navigationPanel" class="navigation-panel" aria-label="Remote navigation">
             <div class="drawer-header">
+              <button id="navigationPin" class="drawer-header-button navigation-pin-button" type="button" aria-label="Pin workspace menu" aria-pressed="false" title="Pin workspace menu">
+                <span data-remote-icon="Pin"></span>
+              </button>
               <div class="drawer-heading">
                 <div id="drawerTitle" class="drawer-title">Remote</div>
               </div>
@@ -80,9 +80,6 @@
                 </button>
                 <button id="drawerNotificationsButton" class="drawer-header-button drawer-notification-button" type="button" aria-label="Open notifications" title="Notifications" disabled>
                   <span data-remote-icon="Bell"></span>
-                </button>
-                <button id="drawerConnectionButton" class="drawer-header-button" type="button" aria-label="Open connection" title="Connection">
-                  <span data-remote-icon="Plug"></span>
                 </button>
                 <button id="drawerSettingsButton" class="drawer-header-button" type="button" aria-label="Open settings" title="Settings">
                   <span data-remote-icon="Settings"></span>
@@ -141,6 +138,11 @@
               </section>
             </div><!-- /drawerConnectionView -->
             <div id="drawerSettingsView" class="drawer-view" hidden>
+              <section class="nav-section" aria-label="Connection">
+                <button id="drawerConnectionButton" class="settings-connection-button" type="button" aria-label="Open connection" title="Connection">
+                  <span data-remote-icon="Plug"></span> Connection
+                </button>
+              </section>
               <!-- Settings grew past one scroll: the sections are paginated so a
                    short screen shows one subject at a time. -->
               <div id="settingsTabs" class="settings-tabs" role="tablist" aria-label="Settings sections">
