@@ -95,12 +95,7 @@ type AndroidLifecycleWindow = typeof window & {
     setRemoteLease: (leaseId: string | null) => void;
     saveRemoteFile: (name: string, mediaType: string, base64: string) => void;
     disconnectRemote: () => void;
-    beginOauthRelay: (
-      sessionId: string,
-      port: string,
-      path: string,
-      authUrl: string,
-    ) => void;
+    beginOauthRelay: (sessionId: string, port: string, path: string, authUrl: string) => void;
     cancelOauthRelay: () => void;
   };
   __activateRemoteUrl?: (uri: string) => void;
@@ -279,6 +274,9 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
           }
           if (path === "/remote/v1/file-viewer/status") {
             body = { open: true, path: "C:\\work\\notes.txt" };
+          }
+          if (path === "/remote/v1/file-viewer/list") {
+            body = { path: "C:\\work", parent: "C:\\", entries: [], truncated: false };
           }
           if (path === "/remote/v1/file-viewer/render") {
             state.renderRequests += 1;
@@ -467,9 +465,8 @@ test("the Android wrapper gets the file viewer, rendered in the Remote document"
     page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState);
   await expect.poll(async () => (await state()).outputOpens).toBe(1);
 
-  // The section used to be hidden here: the wrapper WebView has no second
-  // window, so the old new-tab viewer could never work (ADR-0184).
-  await page.locator("#navToggle").click();
+  // Android uses the same in-overlay explorer and path controls as browsers.
+  await page.locator("#fileExplorerHeader").click();
   await expect(page.locator("#fileViewerSection")).toBeVisible();
   await page.locator("#pullHostFileViewerPath").click();
   await expect(page.locator("#fileViewerPath")).toHaveValue("C:\\work\\notes.txt");
@@ -540,7 +537,7 @@ test("Android back dismisses the top Remote layer before the disconnect guard", 
   expect(await dismissTopRemoteLayer(page)).toBe(true);
   await expect(page.locator("#composerAutocompleteList")).toBeHidden();
 
-  await page.locator("#navToggle").click();
+  await page.locator("#fileExplorerHeader").click();
   await page.locator("#fileViewerPath").fill("C:\\work\\notes.txt");
   await page.locator("#openFileViewer").click();
   await expect(page.locator("#fileViewerOverlay")).toBeVisible();
@@ -556,6 +553,9 @@ test("Android back dismisses the top Remote layer before the disconnect guard", 
 
   expect(await dismissTopRemoteLayer(page)).toBe(true);
   await expect(page.locator("#fileViewerOverlay")).toBeHidden();
+  await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
+
+  await page.locator("#navToggle").click();
   await expect(page.locator(".app")).toHaveClass(/nav-open/);
 
   // Drawer subpages form a real nested level: one back returns to the Remote
@@ -687,7 +687,7 @@ test("the Android wrapper saves a download through native, not the browser path"
     page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState);
   await expect.poll(async () => (await state()).outputOpens).toBe(1);
 
-  await page.locator("#navToggle").click();
+  await page.locator("#fileExplorerHeader").click();
   await page.locator("#fileViewerPath").fill("C:\\work\\notes.txt");
   await page.locator("#openFileViewer").click();
   await expect(page.locator("#fileViewerOverlay")).toBeVisible();

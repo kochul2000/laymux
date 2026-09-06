@@ -93,19 +93,6 @@
               </div>
             </div>
             <div id="drawerWorkspaceView" class="drawer-view">
-              <section id="fileViewerSection" class="nav-section locked" aria-label="File viewer">
-              <h2 class="nav-section-title">File viewer</h2>
-              <div class="file-viewer-panel">
-                <div class="file-viewer-path-row">
-                  <input id="fileViewerPath" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Host file path" placeholder="Host file path" disabled />
-                </div>
-                <div class="file-viewer-actions">
-                  <button id="pullHostFileViewerPath" type="button" aria-label="Use current host viewer path" disabled>From host</button>
-                  <button id="openFileViewer" type="button" disabled>Open viewer</button>
-                </div>
-                <div id="fileViewerStatus" class="file-viewer-status">Connect to open a host file.</div>
-              </div>
-              </section>
               <section id="workspaceSection" class="nav-section locked">
               <div id="workspaceList" class="nav-list"></div>
               </section>
@@ -404,13 +391,18 @@
         class="file-viewer-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="Host file viewer"
+        aria-label="Host files"
       >
         <header class="file-viewer-header">
           <button id="fileViewerBack" class="file-viewer-back" type="button" hidden aria-label="Back to the folder" title="Back to the folder">
             <span data-remote-icon="ChevronLeft"></span>
           </button>
-          <div id="fileViewerTitle" class="file-viewer-title" title=""></div>
+          <div class="file-viewer-title-slot">
+            <div id="fileViewerTitle" class="file-viewer-title" title=""></div>
+            <button id="fileViewerCopyPath" class="file-viewer-copy-path" type="button" hidden aria-label="Copy path" title="Copy path">
+              <span data-remote-icon="Copy"></span>
+            </button>
+          </div>
           <div id="fileViewerZoom" class="file-viewer-zoom" hidden>
             <button id="fileViewerZoomOut" type="button" aria-label="Zoom out">
               <span data-remote-icon="ZoomOut"></span>
@@ -422,10 +414,20 @@
             <button id="fileViewerZoomReset" type="button" aria-label="Reset zoom">Reset</button>
           </div>
           <button id="fileViewerDownload" class="file-viewer-download" type="button">Download</button>
-          <button id="fileViewerClose" class="file-viewer-close" type="button" aria-label="Close the file viewer">
+          <button id="fileViewerClose" class="file-viewer-close" type="button" aria-label="Close host files">
             <span data-remote-icon="X"></span>
           </button>
         </header>
+        <section id="fileViewerSection" class="file-viewer-open-panel locked" aria-label="Open host file by path" hidden>
+          <div class="file-viewer-panel">
+            <div class="file-viewer-path-row">
+              <input id="fileViewerPath" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Host file path" placeholder="Host file path" disabled />
+              <button id="pullHostFileViewerPath" type="button" aria-label="Use current host viewer path" disabled>From host</button>
+              <button id="openFileViewer" type="button" disabled>Open</button>
+            </div>
+            <div id="fileViewerStatus" class="file-viewer-status">Connect to open a host file.</div>
+          </div>
+        </section>
         <div id="fileViewerBody" class="file-viewer-body">
           <div id="fileViewerMessage" class="file-viewer-message">Loading file…</div>
           <pre id="fileViewerText" class="file-viewer-text" hidden></pre>
