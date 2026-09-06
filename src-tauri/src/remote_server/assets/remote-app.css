@@ -936,8 +936,9 @@
       }
       .file-viewer-panel {
         display: grid;
-        gap: 7px;
-        padding: 0 8px 9px;
+        gap: 6px;
+        padding: 8px 10px;
+        background: var(--bg-surface);
         border-bottom: 1px solid var(--border);
       }
       .file-viewer-status {
@@ -952,18 +953,16 @@
         color: var(--danger);
       }
       .file-viewer-path-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        gap: 6px;
         min-width: 0;
       }
       .file-viewer-path-row input {
         min-width: 0;
         width: 100%;
       }
-      .file-viewer-actions {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 6px;
-      }
-      .file-viewer-actions button {
+      .file-viewer-path-row button {
         min-width: 0;
       }
       .nav-section + .nav-section {
@@ -2000,6 +1999,14 @@
           min-height: 64px;
           margin: 0;
           padding: 6px 8px;
+        }
+      }
+      @media (max-width: 360px) {
+        .file-viewer-path-row {
+          grid-template-columns: 1fr 1fr;
+        }
+        .file-viewer-path-row input {
+          grid-column: 1 / -1;
         }
       }
       @media (max-width: 240px) {

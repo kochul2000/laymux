@@ -174,6 +174,9 @@ async function installRemoteExplorerMocks(context: BrowserContext, withTerminal 
     if (url.pathname === "/remote/v1/file-viewer/render") {
       const body = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
       renderRequests.push(body);
+      if (String(body.path || "").endsWith("missing.txt")) {
+        return route.fulfill({ status: 502, json: { error: "Cannot read file: missing" } });
+      }
       return route.fulfill({
         json: {
           kind: "text",
@@ -389,15 +392,36 @@ test("navigates into a directory, opens a file and Back re-requests the listing"
   await expect(page.locator("#fileViewerDownload")).toBeHidden();
 });
 
-test("a file opened outside the explorer has no Back button", async ({ context, page }) => {
-  await installRemoteExplorerMocks(context);
+test("direct path open lives in the explorer and returns to its directory", async ({
+  context,
+  page,
+}) => {
+  const { listRequests } = await installRemoteExplorerMocks(context);
   await connectRemote(page);
 
-  await page.locator("#navToggle").click();
+  await expect(page.locator("#drawerWorkspaceView #fileViewerSection")).toHaveCount(0);
+  await page.locator("#fileExplorerHeader").click();
+  await expect(page.locator("#fileViewerOverlay #fileViewerSection")).toBeVisible();
+
   await page.locator("#fileViewerPath").fill("/home/user/notes.txt");
   await page.locator("#openFileViewer").click();
   await expect(page.locator("#fileViewerText")).toHaveText("fn main() {}");
-  await expect(page.locator("#fileViewerBack")).toBeHidden();
+  await expect(page.locator("#fileViewerSection")).toBeHidden();
+  await expect(page.locator("#fileViewerBack")).toBeVisible();
+
+  await page.locator("#fileViewerBack").click();
+  await expect(page.locator("#fileViewerSection")).toBeVisible();
+  await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user");
+  expect(listRequests.map((item) => item.body)).toEqual([
+    { source: "terminalCwd" },
+    { path: "/home/user" },
+  ]);
+
+  await page.locator("#fileViewerPath").fill("/home/user/missing.txt");
+  await page.locator("#openFileViewer").click();
+  await expect(page.locator("#fileViewerSection")).toBeVisible();
+  await expect(page.locator("#fileViewerMessage")).toContainText("Cannot read file");
+  await expect(page.locator("#fileViewerBack")).toBeVisible();
 });
 
 test("empty, truncated and failing listings are reported", async ({ context, page }) => {

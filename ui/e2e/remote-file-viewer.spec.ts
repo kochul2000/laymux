@@ -61,6 +61,11 @@ async function installRemoteViewerMocks(
         },
       });
     }
+    if (url.pathname === "/remote/v1/file-viewer/list") {
+      return route.fulfill({
+        json: { path: "C:\\work", parent: "C:\\", entries: [], truncated: false },
+      });
+    }
     if (url.pathname === "/remote/v1/file-viewer/status") {
       statusRequestCount += 1;
       expect(await request.headerValue("x-laymux-remote-file-viewer")).toBe("viewer-481");
@@ -154,6 +159,11 @@ async function connectRemote(page: import("@playwright/test").Page) {
   await expect(page.locator("#exit")).toBeEnabled();
 }
 
+async function openRemoteFileExplorer(page: import("@playwright/test").Page) {
+  await page.locator("#fileExplorerHeader").click();
+  await expect(page.locator("#fileViewerOverlay #fileViewerSection")).toBeVisible();
+}
+
 test("renders a lease-gated host file in this document, not a second tab", async ({
   context,
   page,
@@ -162,7 +172,7 @@ test("renders a lease-gated host file in this document, not a second tab", async
     await installRemoteViewerMocks(context);
   await connectRemote(page);
 
-  await page.locator("#navToggle").click();
+  await openRemoteFileExplorer(page);
   await page.waitForTimeout(100);
   expect(statusRequestCount()).toBe(0);
   await expect(page.locator("#fileViewerPath")).toHaveValue("");
@@ -203,7 +213,7 @@ test("renders a lease-gated host file in this document, not a second tab", async
 test("Escape closes the viewer instead of reaching the terminal", async ({ context, page }) => {
   await installRemoteViewerMocks(context);
   await connectRemote(page);
-  await page.locator("#navToggle").click();
+  await openRemoteFileExplorer(page);
   await page.locator("#fileViewerPath").fill("C:\\work\\notes.txt");
   await page.locator("#openFileViewer").click();
 
@@ -221,7 +231,7 @@ test("Escape closes the viewer instead of reaching the terminal", async ({ conte
 test("the backdrop closes the viewer but the file itself does not", async ({ context, page }) => {
   await installRemoteViewerMocks(context);
   await connectRemote(page);
-  await page.locator("#navToggle").click();
+  await openRemoteFileExplorer(page);
   await page.locator("#fileViewerPath").fill("C:\\work\\notes.txt");
   await page.locator("#openFileViewer").click();
 
@@ -238,7 +248,7 @@ test("the backdrop closes the viewer but the file itself does not", async ({ con
 test("zoom applies to an image and resets between files", async ({ context, page }) => {
   await installRemoteViewerMocks(context);
   await connectRemote(page);
-  await page.locator("#navToggle").click();
+  await openRemoteFileExplorer(page);
   await page.locator("#fileViewerPath").fill("C:\\work\\shot.png");
   await page.locator("#openFileViewer").click();
 
@@ -259,6 +269,7 @@ test("zoom applies to an image and resets between files", async ({ context, page
   await expect(page.locator("#fileViewerZoomLevel")).toHaveText("100%");
 
   await page.locator("#fileViewerClose").click();
+  await openRemoteFileExplorer(page);
   await page.locator("#fileViewerPath").fill("C:\\work\\blob.bin");
   await page.locator("#openFileViewer").click();
   await expect(page.locator("#fileViewerBinary")).toHaveText(
@@ -271,7 +282,7 @@ test("zoom applies to an image and resets between files", async ({ context, page
 test("a stale render never lands in the overlay of a newer file", async ({ context, page }) => {
   await installRemoteViewerMocks(context, { renderDelayMs: 300 });
   await connectRemote(page);
-  await page.locator("#navToggle").click();
+  await openRemoteFileExplorer(page);
   await page.locator("#fileViewerPath").fill("C:\\work\\first.txt");
   await page.locator("#openFileViewer").click();
   await expect(page.locator("#fileViewerOverlay")).toBeVisible();
@@ -287,7 +298,7 @@ test("a stale render never lands in the overlay of a newer file", async ({ conte
 test("keeps a newer edit when a host path request finishes", async ({ context, page }) => {
   const { firstStatusResponse } = await installRemoteViewerMocks(context, { statusDelayMs: 200 });
   await connectRemote(page);
-  await page.locator("#navToggle").click();
+  await openRemoteFileExplorer(page);
 
   await page.locator("#fileViewerPath").fill("C:\\work\\draft.txt");
   await page.locator("#pullHostFileViewerPath").click();
@@ -304,7 +315,7 @@ test("keeps a newer edit when a host path request finishes", async ({ context, p
 test("does not open a path while IME is committing Enter", async ({ context, page }) => {
   const { renderRequests } = await installRemoteViewerMocks(context);
   await connectRemote(page);
-  await page.locator("#navToggle").click();
+  await openRemoteFileExplorer(page);
   const input = page.locator("#fileViewerPath");
   await input.fill("C:\\work\\한글.md");
 
@@ -315,15 +326,16 @@ test("does not open a path while IME is committing Enter", async ({ context, pag
     element.dispatchEvent(event);
   });
 
-  await expect(page.locator("#fileViewerOverlay")).toBeHidden();
+  await expect(page.locator("#fileViewerOverlay #fileViewerSection")).toBeVisible();
+  await expect(page.locator("#fileViewerText")).toBeHidden();
   expect(renderRequests).toEqual([]);
 });
 
-test("keeps the file viewer drawer usable at mobile width", async ({ context, page }) => {
+test("keeps the explorer path controls usable at mobile width", async ({ context, page }) => {
   await installRemoteViewerMocks(context);
   await page.setViewportSize({ width: 320, height: 640 });
   await connectRemote(page);
-  await page.locator("#navToggle").click();
+  await openRemoteFileExplorer(page);
   await page
     .locator("#fileViewerPath")
     .fill("/tmp/a very long file name that must stay inside.txt");
@@ -353,7 +365,7 @@ test("keeps the file viewer drawer usable at mobile width", async ({ context, pa
 test("downloads the host bytes, not the rendered preview", async ({ context, page }) => {
   const { downloadRequests } = await installRemoteViewerMocks(context);
   await connectRemote(page);
-  await page.locator("#navToggle").click();
+  await openRemoteFileExplorer(page);
   // An HTML file is the case that matters: `render` replaces its source with a
   // sanitized preview document, so a save built from the overlay would write
   // the wrong bytes.
@@ -378,7 +390,7 @@ test("downloads the host bytes, not the rendered preview", async ({ context, pag
 test("a download failure is reported without closing the viewer", async ({ context, page }) => {
   await installRemoteViewerMocks(context, { downloadStatus: 413 });
   await connectRemote(page);
-  await page.locator("#navToggle").click();
+  await openRemoteFileExplorer(page);
   await page.locator("#fileViewerPath").fill("C:\\work\\huge.bin");
   await page.locator("#openFileViewer").click();
   await expect(page.locator("#fileViewerOverlay")).toBeVisible();

@@ -1094,10 +1094,17 @@ mod tests {
     fn remote_page_html_contains_in_page_file_viewer() {
         let html = remote_client_source();
         assert!(html.contains("id=\"fileViewerSection\""));
+        let drawer_end = html
+            .find("</div><!-- /drawerWorkspaceView -->")
+            .expect("workspace drawer closes");
+        let file_viewer_section = html
+            .find("id=\"fileViewerSection\"")
+            .expect("file viewer path controls exist");
+        assert!(file_viewer_section > drawer_end);
         assert!(html.contains(
             "id=\"fileViewerPath\" type=\"text\" autocomplete=\"off\" autocapitalize=\"off\""
         ));
-        assert!(html.contains("id=\"openFileViewer\" type=\"button\" disabled>Open viewer"));
+        assert!(html.contains("id=\"openFileViewer\" type=\"button\" disabled>Open"));
         assert!(html.contains("id=\"pullHostFileViewerPath\""));
         assert!(html.contains(">From host</button>"));
         assert!(!html.contains("id=\"openCurrentFileViewer\""));
@@ -1135,9 +1142,8 @@ mod tests {
         assert!(!html.contains("laymux:file-viewer-ready"));
         assert!(!html.contains("laymux:file-viewer-session"));
         assert!(!html.contains("Popup blocked. Allow popups and try again."));
-        // The Android wrapper has no second window, which is why the section was
-        // hidden there. In-page rendering removes the reason.
-        assert!(!html.contains("fileViewerSection.hidden = true;"));
+        assert!(html.contains("fileViewerSection.hidden = true;"));
+        assert!(html.contains("fileViewerSection.hidden = false;"));
     }
 
     #[test]
