@@ -1430,7 +1430,7 @@ Windows host의 WSL terminal은 host process tree에 `wsl.exe`만 보이므로 n
 
 모든 일반 저장은 프론트 `flushSessionCheckpoint`의 단일 in-flight 경로를 지난다. 실행 중 요청은 버리지 않고 한 번의 trailing pass로 합치며, 수집 도중 `frontendMutationRevision`이 바뀌면 최신 store 상태로 다시 수집한다. 디스크 commit 뒤 별도 `checkpointCommitId`가 증가한다. provider 조회 자체가 실패한 경우 빈 map으로 축약하지 않고 `Unknown` coverage로 남긴다.
 
-checkpoint 저장 성공 후에는 수집 시작 시점과 같은 view를 가진 workspace·dock pane의 `lastCwd`와 세 provider의 `last*Session` 필드를 메모리에도 반영한다(삭제 포함). 따라서 이후 `Unknown` 조회나 숨김 PTY 종료 뒤 저장·재마운트는 마지막 commit된 복원점을 사용하며, 앱 기동 때 읽은 과거 값으로 되돌아가지 않는다. 저장 실패 시에는 반영하지 않고, 저장 중 교체·삭제된 view와 현재 레이아웃·포커스는 보존한다. 값이 같은 pane·컨테이너 참조는 유지해 metadata 반영으로 생긴 revision의 trailing checkpoint가 다시 store 변경을 만들지 않게 한다. 이는 ADR-0222의 마지막 commit 보존 규칙을 적용하는 것이며, 아직 한 번도 시작하지 않은 pane의 기존 복원점도 그대로 보존한다.
+checkpoint 저장 성공 후에는 수집 시작 시점과 같은 view를 가진 workspace·dock pane의 `lastCwd`와 세 provider의 `last*Session` 필드를 메모리에도 반영한다(삭제 포함). 따라서 이후 `Unknown` 조회나 숨김 PTY 종료 뒤 저장·재마운트는 마지막 commit된 복원점을 사용하며, 앱 기동 때 읽은 과거 값으로 되돌아가지 않는다. 저장 실패 시에는 반영하지 않고, 저장 중 교체·삭제된 view와 현재 레이아웃·포커스는 보존한다. 값이 같은 pane·컨테이너 참조는 유지하고, 동기 metadata 게시에 따른 revision 증가분은 이미 저장한 commit에 포함해 자체 게시만으로 provider 조회를 반복하지 않는다. 수집·저장 중 발생한 실제 변경은 계속 trailing checkpoint를 요구한다. 이는 ADR-0222의 마지막 commit 보존 규칙을 적용하는 것이며, 아직 한 번도 시작하지 않은 pane의 기존 복원점도 그대로 보존한다.
 
 Rust watchdog은 5분마다 프론트에 checkpoint를 요청한다. agent 완료 알림, backend 3초 activity reconcile에서 실제 판정이 바뀐 때, workspace 진입과 문서 foreground 복귀는 즉시 저장을 유도하는 힌트다. 앱 최초 진입·workspace 전환·foreground 복귀는 resume startup 유예가 끝나는 15초 뒤 catch-up도 한 번 예약한다. 60초 activity 전체 재발행 자체는 저장 trigger가 아니다. 따라서 `/clear`처럼 activity 이름이 그대로인 session 전환도 늦어도 watchdog의 새 provider 귀속 조회에서 발견한다.
 

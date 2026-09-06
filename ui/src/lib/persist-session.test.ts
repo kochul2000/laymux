@@ -272,9 +272,74 @@ describe("persistSession", () => {
     try {
       await persistSession();
       expect(onMutation).toHaveBeenCalledTimes(1);
-      expect(saveSettings).toHaveBeenCalledTimes(2);
+      expect(saveSettings).toHaveBeenCalledTimes(1);
     } finally {
       unsubscribe();
+    }
+  });
+
+  it("saves output within the close budget when a WSL probe takes three seconds", async () => {
+    vi.useFakeTimers();
+    const ws = useWorkspaceStore.getState();
+    ws.setPaneView(0, { type: "TerminalView", lastCodexSession: "old-session" });
+    const paneId = ws.workspaces[0].panes[0].id;
+    vi.mocked(getTerminalSessionAttributions).mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      return {
+        [`terminal-${paneId}`]: {
+          generation: 1,
+          state: "identified",
+          provider: "codex",
+          sessionId: "latest-session",
+        },
+        "terminal-wsl": { generation: 2, state: "unknown" },
+      };
+    });
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(new Map([[paneId, () => "latest-output"]]));
+    const unsubscribe = useWorkspaceStore.subscribe(markSessionCheckpointMutation);
+    const closing = saveBeforeClose();
+    try {
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(saveTerminalOutputCache).toHaveBeenCalledWith(paneId, "latest-output");
+      expect(getTerminalSessionAttributions).toHaveBeenCalledTimes(1);
+    } finally {
+      unsubscribe();
+      await vi.runAllTimersAsync();
+      await closing;
+      vi.useRealTimers();
+    }
+  });
+
+  it("still saves a trailing checkpoint for a view edit during disk commit", async () => {
+    const ws = useWorkspaceStore.getState();
+    ws.setPaneView(0, { type: "TerminalView", lastCodexSession: "old-session" });
+    const id = `terminal-${ws.workspaces[0].panes[0].id}`;
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+      [id]: { generation: 1, state: "identified", provider: "codex", sessionId: "latest-session" },
+    });
+    let finishSave: (() => void) | undefined;
+    vi.mocked(saveSettings).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+    const unsubscribe = useWorkspaceStore.subscribe(markSessionCheckpointMutation);
+    const saving = persistSession();
+    try {
+      await vi.waitFor(() => expect(finishSave).toBeDefined());
+      ws.setPaneView(1, { type: "MemoView", label: "new-view" });
+      finishSave!();
+      await saving;
+      expect(saveSettings).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(saveSettings).mock.calls.at(-1)![0].workspaces[0].panes[1].view).toEqual({
+        type: "MemoView",
+        label: "new-view",
+      });
+    } finally {
+      unsubscribe();
+      finishSave?.();
+      await saving;
     }
   });
 

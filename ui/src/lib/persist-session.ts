@@ -211,6 +211,7 @@ async function persistSessionCore(
     });
     return updated.every((group, index) => group === groups[index]) ? groups : updated;
   }
+  const revisionBeforePublication = frontendMutationRevision;
   useWorkspaceStore.setState((state) => {
     const workspaces = updateGroups(state.workspaces);
     return workspaces === state.workspaces ? state : { workspaces };
@@ -219,9 +220,13 @@ async function persistSessionCore(
     const docks = updateGroups(state.docks);
     return docks === state.docks ? state : { docks };
   });
+  // These synchronous notifications publish metadata already saved above.
+  // Count them in this commit so slow probes do not run twice at close. Any
+  // mutation during collection/save still differs and requires a trailing pass.
+  const publicationRevision = frontendMutationRevision - revisionBeforePublication;
   return {
     checkpointCommitId: nextCheckpointCommitId++,
-    frontendMutationRevision: collectedRevision,
+    frontendMutationRevision: collectedRevision + publicationRevision,
     coverage: checkpoint.coverage,
   };
 }
