@@ -46,6 +46,7 @@ pub const GITHUB_UPDATE_REPOSITORY: &str = "laymux";
 /// (ADR-0190). GitHub has no stable alias for the latest prerelease.
 pub const UPDATE_CHANNEL_MANIFEST_BRANCH: &str = "release-channels";
 pub const UPDATE_CHANNEL_MANIFEST_HOST: &str = "raw.githubusercontent.com";
+pub const UPDATE_CHECK_RETRY_DELAY: Duration = Duration::from_secs(1);
 /// The installer cannot overwrite a file some child process still holds, so the
 /// install path tears its children down and then waits for the bundled runtime
 /// to become writable before handing over (ADR-0201). The ceiling is generous
