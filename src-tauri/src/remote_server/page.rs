@@ -968,7 +968,10 @@ mod tests {
                 .unwrap();
         let touch_selection = &html[touch_selection_start..touch_selection_end];
         assert!(touch_selection.contains("term.clearSelection();"));
-        assert!(touch_selection.contains("selectionService.rightClickSelect("));
+        assert!(
+            touch_selection.contains("selectionService._selectWordAtCursor(selectionEvent, true)")
+        );
+        assert!(touch_selection.contains("selectionService._fireEventIfSelectionChanged();"));
         assert!(!touch_selection.contains("dispatchTouchSelectionMouse("));
         assert!(!touch_selection.contains("touchGesture.forceSelection"));
         assert!(html.contains("function withPreservedInputSurfaceFocus(run)"));

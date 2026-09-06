@@ -5300,10 +5300,20 @@ import {
           // service owns the exact word rules without that input side effect.
           term.clearSelection();
           const selectionService = term._core && term._core._selectionService;
-          if (selectionService && typeof selectionService.rightClickSelect === "function") {
-            selectionService.rightClickSelect(
-              touchSelectionMouseEvent("mousedown", touchGesture.startPoint, false, 2, 0)
-            );
+          const selectionEvent = touchSelectionMouseEvent(
+            "mousedown",
+            touchGesture.startPoint,
+            false,
+            2,
+            0
+          );
+          if (
+            selectionService &&
+            typeof selectionService._selectWordAtCursor === "function" &&
+            selectionService._selectWordAtCursor(selectionEvent, true)
+          ) {
+            selectionService.refresh(true);
+            selectionService._fireEventIfSelectionChanged();
           }
           const selection = term.getSelectionPosition && term.getSelectionPosition();
           touchGesture.selectionSeed = selection
