@@ -1,6 +1,6 @@
 # 0234. Remote 사용자 키는 Enter 제출 의도를 별도로 저장한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-06
 - Source: 사용자 요구(raw sequence의 줄바꿈과 Send Enter 체크박스 분리); [api-contracts §13.4](../architecture/api-contracts.md); [ADR-0213](0213-remote-input-action-segment-placement-and-user-keys.md); [ADR-0034](0034-single-send-terminal-composer.md)
 - Amends: ADR-0213의 모든 사용자 키를 raw write로 전송한다는 결정
