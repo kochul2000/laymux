@@ -687,6 +687,7 @@
       .desktop-mode-button,
       .copy-pane-button,
       .file-explorer-button,
+      .navigation-pin-button,
       .spatial-exclusion-button {
         width: 28px;
         height: var(--header-control-height);
@@ -709,6 +710,7 @@
       .desktop-mode-button:hover,
       .copy-pane-button:hover,
       .file-explorer-button:hover,
+      .navigation-pin-button:hover,
       .spatial-exclusion-button:hover {
         background: var(--hover-bg);
       }
@@ -717,6 +719,14 @@
       }
       .file-explorer-button {
         color: var(--text-secondary);
+      }
+      .navigation-pin-button {
+        color: var(--text-secondary);
+      }
+      .navigation-pin-button[aria-pressed="true"] {
+        border-color: var(--accent-50);
+        background: var(--accent-20);
+        color: var(--accent);
       }
       .spatial-exclusion-button {
         color: var(--text-secondary);
@@ -1993,6 +2003,11 @@
         }
       }
       @media (max-width: 240px) {
+        .app > header {
+          gap: 0;
+          padding-right: 1px;
+          padding-left: 1px;
+        }
         .drawer-header {
           padding-right: 1px;
           padding-left: 1px;
