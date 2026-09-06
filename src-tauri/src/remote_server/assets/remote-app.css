@@ -146,10 +146,37 @@
       .input-action-row::-webkit-scrollbar {
         display: none;
       }
-      /* No `min-width: 0` here: that would zero out the grid track's automatic
-         minimum, letting a full segment shrink past its content and overlap its
-         neighbour instead of scrolling the row. The scroll container is the row,
-         which does carry `min-width: 0`. */
+      .input-action-row {
+        --input-button-scale: var(--remote-main-button-scale, 1);
+      }
+      .button-size-controls {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        grid-column: 2 / -1;
+      }
+      .button-size-controls output {
+        min-width: 4ch;
+        text-align: center;
+      }
+      .key-row {
+        --input-button-scale: var(--remote-keys-button-scale, 1);
+      }
+      .input-action-row, .key-row {
+        --key-bar-control-height: calc(26px * var(--input-button-scale));
+        --fs-sm: calc(11px * var(--input-button-scale));
+        --fs-md: calc(13px * var(--input-button-scale));
+        font-size: var(--fs-md);
+      }
+      .input-action-row .remote-icon, .key-row .remote-icon {
+        width: calc(14px * var(--input-button-scale));
+        height: calc(14px * var(--input-button-scale));
+      }
+      .action-segment .composer-send .remote-icon {
+        width: calc(20px * var(--input-button-scale));
+        height: calc(20px * var(--input-button-scale));
+      }
+      /* Keep segment minimums content-sized so overflowing rows scroll. */
       .action-segment {
         display: flex;
         align-items: center;
@@ -169,7 +196,7 @@
          visual line instead of centring a shorter key against taller ones. */
       footer .action-segment > .key-btn {
         height: auto;
-        padding: 5px 9px;
+        padding: calc(5px * var(--input-button-scale, 1)) calc(9px * var(--input-button-scale, 1));
       }
       label {
         display: flex;
@@ -191,7 +218,7 @@
       button {
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
-        padding: 5px 9px;
+        padding: calc(5px * var(--input-button-scale, 1)) calc(9px * var(--input-button-scale, 1));
         background: var(--panel-2);
         color: var(--text);
         cursor: pointer;
@@ -215,7 +242,7 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        padding: 5px 9px;
+        padding: calc(5px * var(--input-button-scale, 1)) calc(9px * var(--input-button-scale, 1));
         border: 1px solid var(--accent);
         border-radius: var(--radius-md);
         background: var(--accent);
@@ -408,7 +435,7 @@
         flex: 0 0 auto;
         align-items: center;
         justify-content: center;
-        width: 34px;
+        width: calc(34px * var(--input-button-scale, 1));
         height: var(--key-bar-control-height);
         padding: 0;
         border: 1px solid var(--border);
@@ -1981,15 +2008,15 @@
           width: 0;
           min-width: 0;
           overflow: hidden;
-          padding-left: 4px;
-          padding-right: 4px;
+          padding-left: calc(4px * var(--input-button-scale, 1));
+          padding-right: calc(4px * var(--input-button-scale, 1));
           text-overflow: ellipsis;
           white-space: nowrap;
         }
         footer .action-segment > button {
           width: auto;
-          min-width: 54px;
-          flex: 1 0 54px;
+          min-width: calc(54px * var(--input-button-scale));
+          flex: 1 0 calc(54px * var(--input-button-scale));
         }
         /* Send joins the equal split — its base flex: 0 0 auto outranks the
            rule above and would collapse against width: 0, clipping the icon. */
@@ -2182,9 +2209,9 @@
       .key-btn {
         position: relative;
         flex: 0 0 auto;
-        min-width: 34px;
+        min-width: calc(34px * var(--input-button-scale, 1));
         height: var(--key-bar-control-height);
-        padding: 4px 9px;
+        padding: calc(4px * var(--input-button-scale, 1)) calc(9px * var(--input-button-scale, 1));
         background: var(--panel-2);
         color: var(--text);
         font-size: var(--fs-sm);
@@ -2209,7 +2236,7 @@
         background: var(--accent-12);
       }
       .key-flick-btn {
-        min-width: 42px;
+        min-width: calc(42px * var(--input-button-scale, 1));
         touch-action: none;
         user-select: none;
       }

@@ -380,6 +380,8 @@ Remote 기기 로컬 표시 설정의 저장 형태는 다음과 같다. 이 객
   "terminalFontSize": 14,          // 6~72px
   "composerFontSize": 16,          // 6~72px
   "menuFontSize": 13,              // 6~72px
+  "mainButtonScale": 100,         // Main 행 버튼 크기, 80~160%, 10 단위
+  "keysButtonScale": 100,         // Keys 행 버튼 크기, 80~160%, 10 단위
   "composerIdleOpacity": 55,       // 20~100, 5 단위
   "composerFocusedOpacity": 80,    // Idle ≤ Focused ≤ Active
   "composerActiveOpacity": 100,
@@ -1558,6 +1560,8 @@ Remote terminal control은 상태 소유권을 세 범주로 나눈다([ADR-0015
 | controller owner 상태 | active input writer, active resize writer, workspace/pane focus request 권한 | active lease가 있으면 remote가 owner이고, lease가 없으면 PC가 owner다. owner가 아닌 surface는 PTY write/resize를 보내지 않는다. |
 
 Remote 표시·조작 선호의 SoT는 각 기기의 `localStorage["laymux.remote.displaySettings"]`다([ADR-0209](../adr/0209-remote-display-preferences-are-device-local.md)). terminal/composer/menu 글자 크기(기본 14/16/13, 6~72), Composer Idle/Focused/Active 불투명도(55/80/100, 20~100, 5 단위, `Idle ≤ Focused ≤ Active`), checkpoint 최초 예산(4 KiB, 1~1024), wheel/fast wheel/한 손가락/두 손가락 민감도(1/5/1/5, 0.1~20)를 한 JSON 객체로 저장한다. terminal 값은 Remote xterm cell에만 적용하고 desktop profile 크기는 바꾸지 않으며, composer 값은 textarea와 history/autocomplete 목록에 함께 적용한다. menu 값은 drawer의 기준 글자 크기로 `--fs-xs/--fs-sm/--fs-md` 토큰과 em 기반 텍스트·배지를 비례 스케일한다. 저장은 controller lease나 연결을 요구하지 않고 현재 문서의 CSS 변수, xterm option, 터치 지역 상태에 즉시 적용한다. `snapshotMaxKib`는 다음 최초·사용자 지시 attach부터 `historyKib`로 전송된다.
+
+Main·Keys 행의 버튼 크기는 `mainButtonScale`·`keysButtonScale`(기본 100%, 80~160%, 10 단위)로 같은 기기 로컬 표시 설정에 저장한다. `Settings → Input bar`의 −/+/기본값 복원은 연결 전에도 동작하며 글자·아이콘·높이·최소 너비·버튼 안쪽 여백을 즉시 조절한다. 버튼은 배치된 행의 배율을 상속하고 좌·중·우 배치와 행 내부 가로 스크롤을 유지한다. 저장 실패 시 현재 화면에는 적용하고 같은 탭에 오류를 표시한다. 기존 fit/resize 경로가 변경된 터미널 영역을 반영한다. 높이만 줄면 normal buffer는 ADR-0038에 따라 rows를 유지하고 crop하며, 폭 변경·높이 증가·alternate buffer는 기존처럼 fit한다. PC 설정·Remote API 계약은 바꾸지 않는다(ADR-0209 직접 적용).
 
 보이는 Remote Composer의 불투명도 상태는 raw 상태를 한 함수에서 다음 우선순위로 계산한다. 입력이 disabled면 `idle`, 초안·history/autocomplete 목록·IME 조합·전송 중 하나라도 활성화되면 `active`, 빈 textarea가 DOM focus를 가지면 `focused`, 나머지는 `idle`이다. `.terminal-composer[data-opacity-state]`가 이 결과를 반영하고 surface 전체에 해당 CSS 변수 값을 적용한다. Composer는 terminal shell의 별도 행을 차지하지 않고 terminal host 하단 위에 겹치는 overlay다. terminal cell surface는 Composer 뒤까지 전체 높이로 렌더되므로 낮은 opacity에서 실제 출력이 비치며, Composer 표시·숨김과 높이 조절은 terminal geometry를 바꾸지 않는다([ADR-0203](../adr/0203-remote-composer-overlays-terminal-output.md)). Direct mode와 접힌 Composer는 계속 `hidden`이다. Active 기본값은 100%라 입력과 추천 목록을 완전히 불투명하게 유지한다.
 

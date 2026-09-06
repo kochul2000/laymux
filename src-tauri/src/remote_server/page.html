@@ -154,6 +154,24 @@
               <div id="settingsPanelInputBar" class="settings-panel" role="tabpanel" data-settings-panel="inputBar" aria-labelledby="settingsTabInputBar">
               <section id="inputLayoutSection" class="nav-section" aria-label="Input bar">
               <h2 class="nav-section-title">Input bar</h2>
+              <div class="nav-number-row">
+                <span class="nav-number-copy">Main button size</span>
+                <div class="button-size-controls">
+                <button type="button" data-button-scale="mainButtonScale" data-step="-10" aria-label="Decrease Main button size">−</button>
+                <output id="remoteMainButtonScale" aria-live="polite">100%</output>
+                <button type="button" data-button-scale="mainButtonScale" data-step="10" aria-label="Increase Main button size">+</button>
+                </div>
+              </div>
+              <div class="nav-number-row">
+                <span class="nav-number-copy">Keys button size</span>
+                <div class="button-size-controls">
+                <button type="button" data-button-scale="keysButtonScale" data-step="-10" aria-label="Decrease Keys button size">−</button>
+                <output id="remoteKeysButtonScale" aria-live="polite">100%</output>
+                <button type="button" data-button-scale="keysButtonScale" data-step="10" aria-label="Increase Keys button size">+</button>
+                </div>
+              </div>
+              <button id="resetButtonSizes" type="button">Reset button sizes</button>
+              <div id="remoteButtonSizeStatus" class="nav-settings-status" role="status"></div>
               <div class="nav-settings-status">Choose each action's row and order on this device.</div>
               <div id="inputLayoutEditor" class="input-layout-editor"></div>
               </section>

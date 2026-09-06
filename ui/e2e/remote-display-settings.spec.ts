@@ -8,6 +8,8 @@ const deviceSettings = {
   terminalFontSize: 19,
   composerFontSize: 26,
   menuFontSize: 17,
+  mainButtonScale: 120,
+  keysButtonScale: 90,
   navigationPinned: false,
   navigationWidth: 300,
   navigationPinCutoff: 720,
@@ -477,4 +479,87 @@ test("디바이스 저장 실패 상태는 연결 전환 뒤에도 유지한다"
     "Could not save on this device.",
   );
   expect(displayRequests).toEqual([]);
+});
+
+test("버튼 크기는 기존 terminal crop을 유지하고 모바일·가로 화면 안에서 스크롤한다", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const requests: string[] = [];
+  await installApiMocks(page, requests);
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.locator("#connect").click();
+  await expect(page.locator("#terminal .xterm-rows")).toBeVisible();
+  const rowCount = () => page.locator("#terminal .xterm-rows > div").count();
+  await expect.poll(rowCount).toBeGreaterThan(5);
+  const before = await rowCount();
+  const hostHeight = await page.locator("#terminal").evaluate((host) => host.clientHeight);
+  await page.locator("#keyBarToggle").click();
+  await page.locator("#navToggle").click();
+  await page.locator("#drawerSettingsButton").click();
+  for (const row of ["Main", "Keys"]) {
+    for (let i = 0; i < 6; i++) {
+      await page.getByRole("button", { name: `Increase ${row} button size`, exact: true }).click();
+    }
+  }
+  await page.screenshot({ path: testInfo.outputPath("button-size-settings.png") });
+  for (const control of await page.locator(".button-size-controls").all()) {
+    const centres = await control.locator("button, output").evaluateAll((items) =>
+      items.map((item) => {
+        const box = item.getBoundingClientRect();
+        return box.top + box.height / 2;
+      }),
+    );
+    expect(Math.max(...centres) - Math.min(...centres)).toBeLessThan(1);
+  }
+  await page.locator("#drawerBack").click();
+  if ((await page.locator("#navToggle").getAttribute("aria-expanded")) === "true") {
+    await page.locator("#navToggle").click();
+  }
+  // ADR-0038: height-only shrink crops the normal buffer without resizing PTY rows.
+  await expect
+    .poll(() => page.locator("#terminal").evaluate((host) => host.clientHeight))
+    .toBeLessThan(hostHeight);
+  expect(await rowCount()).toBe(before);
+  for (const width of [390, 844]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 390 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+    for (const id of ["mainActionRow", "keyRow"]) {
+      const sizes = await page.locator(`#${id}`).evaluate((row) => {
+        row.scrollLeft = row.scrollWidth;
+        return { scroll: row.scrollLeft, width: row.clientWidth, content: row.scrollWidth };
+      });
+      if (sizes.content > sizes.width) expect(sizes.scroll).toBeGreaterThan(0);
+    }
+    await page.screenshot({ path: testInfo.outputPath(`button-size-${width}.png`) });
+  }
+  await expect.poll(rowCount).toBeLessThan(before);
+  expect(requests).toEqual([]);
+});
+
+test("잘못된 버튼 배율을 정규화하고 저장 실패에도 현재 화면은 적용한다", async ({ page }) => {
+  await installApiMocks(page, []);
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "laymux.remote.displaySettings",
+      JSON.stringify({ mainButtonScale: 999, keysButtonScale: null }),
+    );
+    Storage.prototype.setItem = () => {
+      throw new DOMException("blocked", "QuotaExceededError");
+    };
+  });
+  await page.goto("http://remote.test/remote/");
+  await page.locator("#drawerSettingsButton").click();
+  await expect(page.locator("#remoteMainButtonScale")).toHaveText("160%");
+  await expect(page.locator("#remoteKeysButtonScale")).toHaveText("100%");
+  await page.getByRole("button", { name: "Decrease Main button size", exact: true }).click();
+  await expect(page.locator("#remoteMainButtonScale")).toHaveText("150%");
+  await expect(page.locator("#remoteButtonSizeStatus")).toHaveText(
+    "Could not save on this device.",
+  );
+  expect(
+    await page
+      .locator("#mainActionRow")
+      .evaluate((row) => getComputedStyle(row).getPropertyValue("--input-button-scale").trim()),
+  ).toBe("1.5");
 });
