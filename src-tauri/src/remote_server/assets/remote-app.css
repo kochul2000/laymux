@@ -1194,6 +1194,7 @@
       .pc-update-notes {
         max-height: 96px;
         overflow: auto;
+        touch-action: pan-y;
         white-space: pre-wrap;
         color: var(--muted);
         font-size: var(--fs-sm);
@@ -1219,6 +1220,8 @@
         flex: 1 1 auto;
         flex-direction: column;
         overflow-y: auto;
+        /* Nested scrollers must preserve horizontal pointer events themselves. */
+        touch-action: pan-y;
       }
       .hidden-workspace-toggle {
         position: relative;
@@ -1235,6 +1238,7 @@
       }
       .hidden-workspace-shelf {
         overflow-y: auto;
+        touch-action: pan-y;
         background: var(--bg-surface);
         padding: 3px 5px;
       }
@@ -1493,6 +1497,7 @@
       .notification-list {
         min-height: 0;
         overflow-y: auto;
+        touch-action: pan-y;
       }
       .notification-group-title {
         display: flex;
