@@ -143,7 +143,7 @@ export function trimPathToken(raw: string): { text: string; leading: number } {
  */
 function trimPathTail(raw: string): string {
   // 뒤쪽 닫는 괄호/따옴표 제거.
-  let text = raw.replace(/[)"'`\]}>]+$/, "");
+  let text = raw.replace(/[)"'`\]}>.,;:]+$/, "");
 
   // 후행 문장부호(마침표/쉼표/세미콜론/콜론) 먼저 제거 — `file:42:5:` 처럼
   // 줄번호 뒤에 콜론이 더 붙은 grep 출력을 정리한다.
