@@ -174,6 +174,9 @@ async function installRemoteExplorerMocks(context: BrowserContext, withTerminal 
     if (url.pathname === "/remote/v1/file-viewer/render") {
       const body = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
       renderRequests.push(body);
+      if (String(body.path || "").endsWith("missing.txt")) {
+        return route.fulfill({ status: 502, json: { error: "Cannot read file: missing" } });
+      }
       return route.fulfill({
         json: {
           kind: "text",
@@ -313,6 +316,45 @@ test("the header folder button appears with the capability and lists the cwd", a
   await expect(overlay).toBeVisible();
   await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user");
 
+  const pathBounds = await page.locator("#fileViewerTitle").evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    return {
+      selectableWidth: element.getBoundingClientRect().width,
+      textWidth: range.getBoundingClientRect().width,
+    };
+  });
+  expect(pathBounds.selectableWidth).toBeLessThanOrEqual(pathBounds.textWidth + 1);
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: (command: string) => {
+        if (command !== "copy") return false;
+        const clipboardData = new DataTransfer();
+        document.dispatchEvent(
+          new ClipboardEvent("copy", {
+            clipboardData,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        (window as typeof window & { __copiedPath?: string }).__copiedPath =
+          clipboardData.getData("text/plain");
+        return true;
+      },
+    });
+  });
+  await page.locator("#fileViewerCopyPath").click();
+  await expect(page.locator("#status")).toHaveText("Copied /home/user");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as typeof window & { __copiedPath?: string }).__copiedPath,
+      ),
+    )
+    .toBe("/home/user");
+
   const rows = page.locator(".file-viewer-directory-row");
   await expect(rows).toHaveCount(8); // ".." + four dirs + two files + symlink
   await expect(rows.nth(0)).toHaveText("..");
@@ -389,15 +431,37 @@ test("navigates into a directory, opens a file and Back re-requests the listing"
   await expect(page.locator("#fileViewerDownload")).toBeHidden();
 });
 
-test("a file opened outside the explorer has no Back button", async ({ context, page }) => {
-  await installRemoteExplorerMocks(context);
+test("direct path open lives in the explorer and returns to its directory", async ({
+  context,
+  page,
+}) => {
+  const { listRequests } = await installRemoteExplorerMocks(context);
   await connectRemote(page);
 
-  await page.locator("#navToggle").click();
+  await expect(page.locator("#drawerWorkspaceView #fileViewerSection")).toHaveCount(0);
+  await page.locator("#fileExplorerHeader").click();
+  await expect(page.locator("#fileViewerOverlay #fileViewerSection")).toBeVisible();
+
   await page.locator("#fileViewerPath").fill("/home/user/notes.txt");
   await page.locator("#openFileViewer").click();
   await expect(page.locator("#fileViewerText")).toHaveText("fn main() {}");
-  await expect(page.locator("#fileViewerBack")).toBeHidden();
+  await expect(page.locator("#fileViewerSection")).toBeHidden();
+  await expect(page.locator("#fileViewerBack")).toBeVisible();
+
+  await page.locator("#fileViewerBack").click();
+  await expect(page.locator("#fileViewerSection")).toBeVisible();
+  await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user");
+  expect(listRequests.map((item) => item.body)).toEqual([
+    { source: "terminalCwd" },
+    { path: "/home/user" },
+  ]);
+
+  await page.locator("#fileViewerPath").fill("/home/user/missing.txt");
+  await page.locator("#openFileViewer").click();
+  await expect(page.locator("#fileViewerSection")).toBeVisible();
+  await expect(page.locator("#fileViewerMessage")).toContainText("Cannot read file");
+  await expect(page.locator("#fileViewerBack")).toBeVisible();
+  await expect(page.locator("#fileViewerCopyPath")).toBeHidden();
 });
 
 test("empty, truncated and failing listings are reported", async ({ context, page }) => {
@@ -422,6 +486,14 @@ test("empty, truncated and failing listings are reported", async ({ context, pag
   await page.locator(".file-viewer-directory-row.parent").click();
   await page.locator(".file-viewer-directory-row", { hasText: "denied" }).click();
   await expect(page.locator("#fileViewerMessage")).toContainText("Cannot read directory");
+  await expect(page.locator("#fileViewerSection")).toBeVisible();
+  await expect(page.locator("#fileViewerBack")).toBeVisible();
+
+  await page.locator("#fileViewerPath").fill("/home/user/missing.txt");
+  await page.locator("#openFileViewer").click();
+  await expect(page.locator("#fileViewerMessage")).toContainText("Cannot read file");
+  await expect(page.locator("#fileViewerSection")).toBeVisible();
+  await expect(page.locator("#fileViewerBack")).toBeVisible();
 });
 
 test("closing the explorer clears its state", async ({ context, page }) => {
@@ -453,6 +525,7 @@ test("the explorer works at a mobile viewport", async ({ context, page }) => {
   expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
   await row.click();
   await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user/repo");
+  await expect(page.locator("#fileViewerCopyPath")).toBeVisible();
 });
 
 test("mobile terminal edge flicks open workspaces on the left and files on the right", async ({

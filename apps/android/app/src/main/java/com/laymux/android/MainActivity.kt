@@ -2063,6 +2063,16 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             biometricAvailability() == BiometricAvailability.AVAILABLE
     }
 
+    private fun reauthenticateExpiredRemote() {
+        if (canReauthenticateExpiredRemote()) {
+            showCloudMessage("보안 세션이 잠겨 다시 인증이 필요합니다.")
+            connectRemote(reauthFallback = { showCloudDashboard() })
+        } else {
+            showCloudDashboard()
+            showCloudMessage("15분 동안 사용하지 않아 보안 세션이 잠겼습니다.")
+        }
+    }
+
     fun connectRemote(reauthFallback: (() -> Unit)? = null) {
         if (scanInFlight || hasPendingCryptoOperation() || remoteOpeningSession != null) {
             notifyPairingChanged(error = busyOperationMessage())
@@ -2713,7 +2723,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         if (remoteLifecycleActive || remoteSession !== session) return
         val delaySeconds = session.inactivitySecondsRemaining()
         if (delaySeconds == 0L) {
-            closeRemoteSession()
+            expireRemoteSessionInBackground(session)
             return
         }
         try {
@@ -2721,7 +2731,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 {
                     if (remoteLifecycleActive || remoteSession !== session) return@schedule
                     if (session.isExpired()) {
-                        closeRemoteSession()
+                        expireRemoteSessionInBackground(session)
                     } else {
                         scheduleBackgroundSessionExpiry(session)
                     }
@@ -2730,12 +2740,23 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 TimeUnit.SECONDS,
             )
         } catch (_: RejectedExecutionException) {
-            if (remoteSession === session) closeRemoteSession()
+            expireRemoteSessionInBackground(session)
+        }
+    }
+
+    private fun expireRemoteSessionInBackground(session: RemoteSession) {
+        runOnUiThread {
+            if (!remoteLifecycleActive && remoteSession === session) closeRemoteSession()
         }
     }
 
     private fun resumeRemoteSessionAfterBackground() {
-        val session = remoteSession ?: return
+        val session = remoteSession ?: run {
+            if (visibleWebSurface == VisibleWebSurface.REMOTE) {
+                reauthenticateExpiredRemote()
+            }
+            return
+        }
         remoteBackgroundExpiry?.cancel(false)
         remoteBackgroundExpiry = null
         if (!session.resumeFromBackground()) {
@@ -2745,13 +2766,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             // re-establishes, and showRemoteSurface() reattaches via the desktop
             // checkpoint. A canceled/failed re-auth falls back to the dashboard.
             closeRemoteSession()
-            if (canReauthenticateExpiredRemote()) {
-                showCloudMessage("보안 세션이 잠겨 다시 인증이 필요합니다.")
-                connectRemote(reauthFallback = { showCloudDashboard() })
-            } else {
-                showCloudDashboard()
-                showCloudMessage("15분 동안 사용하지 않아 보안 세션이 잠겼습니다.")
-            }
+            reauthenticateExpiredRemote()
             return
         }
         val connectionGeneration = remoteConnectionGeneration.incrementAndGet()
@@ -3203,6 +3218,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         flushPendingOauthCallback()
         if (::webView.isInitialized) {
             if (remoteSession == null &&
+                !remoteConnecting &&
                 webView.url?.startsWith(
                     "https://${LocalContentWebViewClient.REMOTE_WRAPPER_HOST}/",
                 ) == true

@@ -104,6 +104,7 @@ import {
         const openFileViewerButton = $("openFileViewer");
         const fileViewerOverlayElement = $("fileViewerOverlay");
         const fileViewerTitleElement = $("fileViewerTitle");
+        const fileViewerCopyPathButton = $("fileViewerCopyPath");
         const fileViewerZoomElement = $("fileViewerZoom");
         const fileViewerZoomLevelElement = $("fileViewerZoomLevel");
         const fileViewerZoomOutButton = $("fileViewerZoomOut");
@@ -1663,6 +1664,7 @@ import {
         }
 
         function renderFileViewerPayload(payload) {
+          fileViewerSection.hidden = true;
           hideFileViewerContent();
           fileViewerMessageElement.hidden = true;
           fileViewerKind = null;
@@ -1717,6 +1719,7 @@ import {
         function closeFileViewer() {
           fileViewerRequestRevision += 1;
           fileViewerOverlayElement.hidden = true;
+          fileViewerSection.hidden = true;
           fileViewerKind = null;
           fileViewerDirectoryPath = null;
           fileViewerExplorerReturnPath = null;
@@ -1727,6 +1730,7 @@ import {
           fileViewerZoomElement.hidden = true;
           fileViewerTitleElement.textContent = "";
           fileViewerTitleElement.title = "";
+          fileViewerCopyPathButton.hidden = true;
           fileViewerPath = null;
           fileViewerDownloadButton.hidden = false;
           fileViewerDownloadInFlight = false;
@@ -1734,8 +1738,9 @@ import {
           focusCurrentInputSurface();
         }
 
-        function openFileViewerOverlay(path, explorerReturnPath = null) {
+        function openFileViewerOverlay(path, explorerReturnPath) {
           if (!leaseId || !fileViewerToken || !path) return;
+          const openedFromExplorer = explorerReturnPath !== undefined;
           const requestRevision = ++fileViewerRequestRevision;
           const requestLeaseId = leaseId;
           const requestFileViewerToken = fileViewerToken;
@@ -1745,13 +1750,16 @@ import {
           fileViewerZoomElement.hidden = true;
           fileViewerTitleElement.textContent = path;
           fileViewerTitleElement.title = path;
+          fileViewerCopyPathButton.hidden = true;
           fileViewerPath = path;
-          // Back exists only for a file reached through the explorer; every
-          // other entry point (drawer path, path-link) has no folder to return
-          // to (ADR-0198).
+          // Back exists only for a file reached through the explorer; a terminal
+          // path-link has no folder context to return to (ADR-0198).
           fileViewerDirectoryPath = null;
-          fileViewerExplorerReturnPath = explorerReturnPath;
+          fileViewerExplorerReturnPath = explorerReturnPath || null;
           fileViewerBackButton.hidden = !explorerReturnPath;
+          // Keep the explorer path controls available until rendering succeeds,
+          // so a rejected path can be corrected without reopening the explorer.
+          fileViewerSection.hidden = !openedFromExplorer;
           fileViewerDownloadButton.hidden = false;
           fileViewerDownloadInFlight = false;
           applyFileViewerDownloadState();
@@ -1772,6 +1780,7 @@ import {
                 return;
               }
               renderFileViewerPayload(payload);
+              fileViewerCopyPathButton.hidden = false;
             })
             .catch(async (error) => {
               if (requestRevision !== fileViewerRequestRevision) return;
@@ -1802,6 +1811,7 @@ import {
 
         function openFileExplorerOverlay(request) {
           if (!leaseId || !fileViewerToken || !request) return;
+          const explorerFallbackPath = fileViewerDirectoryPath || fileViewerExplorerReturnPath;
           const requestRevision = ++fileViewerRequestRevision;
           const requestLeaseId = leaseId;
           const requestFileViewerToken = fileViewerToken;
@@ -1811,10 +1821,12 @@ import {
           fileViewerZoomElement.hidden = true;
           fileViewerTitleElement.textContent = request.path || "Host files";
           fileViewerTitleElement.title = request.path || "";
+          fileViewerCopyPathButton.hidden = true;
           fileViewerPath = null;
           fileViewerDirectoryPath = null;
           fileViewerExplorerReturnPath = null;
           fileViewerBackButton.hidden = true;
+          fileViewerSection.hidden = true;
           // Directory mode has nothing to download — hide the affordance
           // instead of leaving a disabled button (ADR-0198, ADR-0192).
           fileViewerDownloadButton.hidden = true;
@@ -1845,6 +1857,9 @@ import {
               if (await fileViewerControlLost(error)) return;
               if (requestRevision !== fileViewerRequestRevision) return;
               hideFileViewerContent();
+              fileViewerExplorerReturnPath = explorerFallbackPath;
+              fileViewerBackButton.hidden = !explorerFallbackPath;
+              fileViewerSection.hidden = false;
               setFileViewerMessage(
                 error instanceof Error ? error.message : String(error),
                 true,
@@ -1863,8 +1878,11 @@ import {
           fileViewerZoomElement.hidden = true;
           fileViewerDownloadButton.hidden = true;
           fileViewerDirectoryPath = payload.path;
+          fileViewerSection.hidden = false;
+          renderFileViewerState();
           fileViewerTitleElement.textContent = payload.path;
           fileViewerTitleElement.title = payload.path;
+          fileViewerCopyPathButton.hidden = false;
           // A new listing starts at its top; the previous directory's scroll
           // offset must not carry over into a shorter or unrelated list.
           fileViewerBodyElement.scrollTop = 0;
@@ -12140,13 +12158,25 @@ import {
             openFileViewerButton.disabled
           ) return;
           event.preventDefault();
-          openFileViewerOverlay(fileViewerPathInput.value.trim());
+          openFileViewerOverlay(
+            fileViewerPathInput.value.trim(),
+            fileViewerDirectoryPath || fileViewerExplorerReturnPath,
+          );
         });
         openFileViewerButton.addEventListener("click", () => {
           const path = fileViewerPathInput.value.trim();
-          if (path) openFileViewerOverlay(path);
+          if (path) {
+            openFileViewerOverlay(path, fileViewerDirectoryPath || fileViewerExplorerReturnPath);
+          }
         });
         fileViewerCloseButton.addEventListener("click", closeFileViewer);
+        fileViewerCopyPathButton.addEventListener("click", () => {
+          const path = fileViewerPath || fileViewerDirectoryPath;
+          if (!path) return;
+          writeClipboardText(path)
+            .then(() => setStatus(`Copied ${path}`))
+            .catch((err) => setStatus(`Copy failed: ${err.message || err}`, true));
+        });
         fileViewerDownloadButton.addEventListener("click", downloadCurrentFileViewerFile);
         fileExplorerHeaderButton.addEventListener("click", () => {
           // Open where the user is working. Without an attached terminal the
