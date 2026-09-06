@@ -320,6 +320,22 @@ test.describe("remote mobile layout", () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(180);
   });
 
+  test("keeps every header action inside the narrowest Remote viewport", async ({ page }) => {
+    await page.locator(".app > header button").evaluateAll((buttons) => {
+      buttons.forEach((button) => {
+        button.hidden = false;
+      });
+    });
+    await page.setViewportSize({ width: 180, height: 844 });
+
+    const header = await page.locator(".app > header").evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(header.scrollWidth).toBe(header.clientWidth);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(180);
+  });
+
   test("keeps terminal metadata out of the footer in wide landscape", async ({ page }) => {
     await page.setViewportSize({ width: 700, height: 390 });
 

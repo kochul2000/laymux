@@ -2003,6 +2003,11 @@
         }
       }
       @media (max-width: 240px) {
+        .app > header {
+          gap: 0;
+          padding-right: 1px;
+          padding-left: 1px;
+        }
         .drawer-header {
           padding-right: 1px;
           padding-left: 1px;
