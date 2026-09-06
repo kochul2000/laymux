@@ -115,6 +115,23 @@ export function readPathLinkLines(
   return result;
 }
 
+/** 선택 원문과 대조해 끝점만으로 복원할 수 없는 직사각형 범위를 제외한다. */
+export function readPathLinkSelection(
+  buffer: PathLinkBuffer,
+  position: SelectionPos,
+  selection: string,
+): PathLinkLine[] {
+  const lines = readPathLinkLines(buffer, position.start.y, position.end.y + 1, position);
+  // Column selections cannot be recovered from endpoints alone. Reject ranges
+  // that include unselected text, allowing only layout whitespace differences.
+  return lines
+    .map((line) => line.text)
+    .join("")
+    .replace(/\s/g, "") === selection.replace(/\s/g, "")
+    ? lines
+    : [];
+}
+
 /** 후보 하나를 여러 물리 줄의 밑줄로 나누되, 모두 같은 파일을 가리킨다. */
 export function mapPathLinkParts(
   line: PathLinkLine,
@@ -151,10 +168,19 @@ export function pathLinkPartsCurrent(
 ): boolean {
   return (
     parts.length > 0 &&
-    parts.every((part) => {
+    parts.every((part, index) => {
       const line = buffer.getLine(part.bufferLine - 1 + rowDelta);
       if (!line || line.length !== part.rowWidth || Boolean(line.isWrapped) !== part.isWrapped)
         return false;
+      if (index > 0 && !line.isWrapped) {
+        const previous = buffer.getLine(part.bufferLine - 2 + rowDelta);
+        if (
+          parts[index - 1].bufferLine !== part.bufferLine - 1 ||
+          !previous ||
+          hardWrapIndent(previous, line) === null
+        )
+          return false;
+      }
       const { text, columns, endColumns } = reconstructLine(readLineCells(line));
       const start = columns.indexOf(part.startCol);
       const end = start + part.token.length - 1;

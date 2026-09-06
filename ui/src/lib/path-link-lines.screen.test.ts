@@ -1,12 +1,36 @@
 import { afterEach, expect, it } from "vitest";
 import { createScreenTerminal, type ScreenTerminal } from "@/test/screen/xterm-screen";
-import { readPathLinkLines, mapPathLinkParts, pathLinkPartsCurrent } from "./path-link-lines";
+import {
+  readPathLinkLines,
+  readPathLinkSelection,
+  mapPathLinkParts,
+  pathLinkPartsCurrent,
+} from "./path-link-lines";
 import { extractPathCandidatesFromScreen, pathScreenLimits } from "./path-link-detect";
 import { createPathLinkPointEvaluator } from "./path-link-point";
 import { createPathLinkController } from "./path-link-provider";
 
 const screens: ScreenTerminal[] = [];
-afterEach(() => screens.splice(0).forEach((s) => s.dispose()));
+afterEach(() => {
+  screens.splice(0).forEach((s) => s.dispose());
+  document.body.replaceChildren();
+});
+function enableSelection(s: ScreenTerminal) {
+  if (!window.matchMedia)
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: () => ({
+        matches: false,
+        addEventListener() {},
+        removeEventListener() {},
+        addListener() {},
+        removeListener() {},
+      }),
+    });
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  s.terminal.open(host);
+}
 async function setup(output: string, cols = 20) {
   const s = createScreenTerminal({ cols, rows: 12, scrollback: 30 });
   screens.push(s);
@@ -72,6 +96,55 @@ it("뒷줄이 바뀌면 앞줄을 포함한 전체 링크가 무효다", async (
   const found = paths(s)[0];
   await s.write("\x1b[2;1HWRONG");
   expect(pathLinkPartsCurrent(s.terminal.buffer.active, found.parts)).toBe(false);
+});
+
+it("직사각형 선택 밖의 경로는 검사하지 않는다", async () => {
+  const s = await setup("pick /outside-one.md\r\npick /outside-two.md", 40);
+  enableSelection(s);
+  const service = (
+    s.terminal as unknown as {
+      _core: {
+        _selectionService: {
+          _activeSelectionMode: number;
+          _model: {
+            selectionStart: number[];
+            selectionEnd: number[];
+          };
+        };
+      };
+    }
+  )._core._selectionService;
+  service._activeSelectionMode = 3;
+  service._model.selectionStart = [0, 0];
+  service._model.selectionEnd = [4, 1];
+  const selected = s.terminal.getSelection();
+  expect(selected.replace(/\r\n/g, "\n")).toBe("pick\npick");
+  expect(
+    readPathLinkSelection(s.terminal.buffer.active, s.terminal.getSelectionPosition()!, selected),
+  ).toEqual([]);
+});
+
+it.each(["soft", "hard"])("실제 %s 선택 원문은 줄바꿈 복원을 허용한다", async (wrap) => {
+  const s = await setup(
+    "  ADR (/D:/repo/docs/" + (wrap === "hard" ? "\r\n  " : "") + "adr/file.md).",
+    21,
+  );
+  enableSelection(s);
+  s.terminal.select(7, 0, 25 + (wrap === "hard" ? 2 : 0));
+  const lines = readPathLinkSelection(
+    s.terminal.buffer.active,
+    s.terminal.getSelectionPosition()!,
+    s.terminal.getSelection(),
+  );
+  expect(lines[0]?.text).toBe("/D:/repo/docs/adr/file.md");
+});
+
+it("hard wrap의 들여쓰기 조건이 바뀌면 전체 링크를 폐기한다", async () => {
+  const s = await setup("  ADR (/D:/repo/docs/\r\n  adr/decision.md).", 21);
+  const parts = paths(s)[0].parts;
+  expect(pathLinkPartsCurrent(s.terminal.buffer.active, parts)).toBe(true);
+  await s.write("\x1b[2;1Hx ");
+  expect(pathLinkPartsCurrent(s.terminal.buffer.active, parts)).toBe(false);
 });
 
 it("desktop point는 뒷줄에서도 전체 경로만 조회하고 모든 조각을 함께 폐기한다", async () => {

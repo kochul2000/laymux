@@ -54,7 +54,11 @@ import {
   pathSelectionLimits,
   resolveOverlappingRanges,
 } from "@/lib/path-link-detect";
-import { readPathLinkLines, mapPathLinkParts, pathLinkPartsCurrent } from "@/lib/path-link-lines";
+import {
+  readPathLinkSelection,
+  mapPathLinkParts,
+  pathLinkPartsCurrent,
+} from "@/lib/path-link-lines";
 import { readCellRangeText, readLineCells } from "@/lib/terminal-cell-map";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -1844,7 +1848,7 @@ export function TerminalView({
         clearPathLinkSelection();
         return;
       }
-      const lines = readPathLinkLines(t.buffer.active, pos.start.y, pos.end.y + 1, pos);
+      const lines = readPathLinkSelection(t.buffer.active, pos, selection);
       const candidates = extractPathCandidatesFromSelection(
         lines.map((line) => line.text).join("\n"),
         pathSelectionLimits(settings.pathLinkMaxLength),
@@ -1888,12 +1892,7 @@ export function TerminalView({
           if (t.getSelection() !== selection) return;
           const livePosition = t.getSelectionPosition();
           if (!livePosition) return;
-          const liveLines = readPathLinkLines(
-            t.buffer.active,
-            livePosition.start.y,
-            livePosition.end.y + 1,
-            livePosition,
-          );
+          const liveLines = readPathLinkSelection(t.buffer.active, livePosition, selection);
           if (
             JSON.stringify(liveLines.map((l) => l.text)) !==
             JSON.stringify(lines.map((l) => l.text))

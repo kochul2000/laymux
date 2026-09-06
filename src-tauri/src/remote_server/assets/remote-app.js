@@ -1,4 +1,4 @@
-import { readPathLinkLines, mapPathLinkParts, pathLinkPartsCurrent, PATH_LINK_CONTEXT_ROWS } from "../../../../ui/src/lib/path-link-lines.ts";
+import { readPathLinkSelection, readPathLinkLines, mapPathLinkParts, pathLinkPartsCurrent, PATH_LINK_CONTEXT_ROWS } from "../../../../ui/src/lib/path-link-lines.ts";
 import {
   commandStatusIconName,
   fileKindIconName,
@@ -2283,9 +2283,9 @@ import {
           if (!selection || selection.length > REMOTE_PATH_LINK_MAX_SELECTION_LENGTH) return;
           const position = term.getSelectionPosition?.();
           if (!position || position.end.y - position.start.y >= REMOTE_PATH_LINK_MAX_SELECTION_LINES) return;
-          const logicalLines = readPathLinkLines(term.buffer.active, position.start.y, position.end.y + 1, position);
+          const logicalLines = readPathLinkSelection(term.buffer.active, position, selection);
           const selectionLines = logicalLines.map((line) => line.text);
-          if (selectionLines.length > REMOTE_PATH_LINK_MAX_SELECTION_LINES) return;
+          if (!selectionLines.length || selectionLines.length > REMOTE_PATH_LINK_MAX_SELECTION_LINES) return;
           const abortController = typeof AbortController === "function" ? new AbortController() : null;
           pathLinkAborts.selection = abortController;
 
@@ -2331,7 +2331,7 @@ import {
               // Resize/reflow and scrollback trim can move a still-identical
               // selection while the bridge performs its filesystem stat. Use
               // the live xterm coordinates, never the pre-request snapshot.
-              const liveLines = readPathLinkLines(term.buffer.active, currentPosition.start.y, currentPosition.end.y + 1, currentPosition);
+              const liveLines = readPathLinkSelection(term.buffer.active, currentPosition, selection);
               if (JSON.stringify(liveLines.map((line) => line.text)) !== JSON.stringify(selectionLines)) return;
               const selections = matches.flatMap((match) => {
                 const parts = mapPathLinkParts(liveLines[match.lineIndex], { ...match, text: match.token });
