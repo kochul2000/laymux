@@ -44,6 +44,7 @@ import {
         const remoteTwoFingerScrollSensitivityInput = $(
           "remoteTwoFingerScrollSensitivity",
         );
+        const remoteSelectionHandleSizeInput = $("remoteSelectionHandleSize");
         const remoteDisplaySettingsStatus = $("remoteDisplaySettingsStatus");
         const pcUpdateStatusElement = $("pcUpdateStatus");
         const pcUpdateNotes = $("pcUpdateNotes");
@@ -211,6 +212,8 @@ import {
         const REMOTE_NAVIGATION_WIDTH_MAX = 720;
         const REMOTE_NAVIGATION_PIN_CUTOFF_MIN = 320;
         const REMOTE_NAVIGATION_PIN_CUTOFF_MAX = 2560;
+        const REMOTE_SELECTION_HANDLE_SIZE_MIN = 14;
+        const REMOTE_SELECTION_HANDLE_SIZE_MAX = 32;
         const SCROLL_SENSITIVITY_MIN = 0.1;
         const SCROLL_SENSITIVITY_MAX = 20;
         const DEFAULT_REMOTE_DISPLAY_SETTINGS = Object.freeze({
@@ -228,6 +231,7 @@ import {
           fastScrollSensitivity: 5,
           touchScrollSensitivity: 1,
           twoFingerScrollSensitivity: 5,
+          selectionHandleSize: 22,
         });
         const DEFAULT_REMOTE_ATTACHMENT_MAX_BYTES = 1024 * 1024;
         // Host attachment policy (ADR-0227) rides on every claim answer; the
@@ -1246,6 +1250,12 @@ import {
               settings.twoFingerScrollSensitivity,
               DEFAULT_REMOTE_DISPLAY_SETTINGS.twoFingerScrollSensitivity,
             ),
+            selectionHandleSize: normalizeRemoteNavigationSize(
+              settings.selectionHandleSize,
+              DEFAULT_REMOTE_DISPLAY_SETTINGS.selectionHandleSize,
+              REMOTE_SELECTION_HANDLE_SIZE_MIN,
+              REMOTE_SELECTION_HANDLE_SIZE_MAX,
+            ),
           };
         }
 
@@ -1310,6 +1320,7 @@ import {
           remoteTwoFingerScrollSensitivityInput.value = String(
             normalized.twoFingerScrollSensitivity,
           );
+          remoteSelectionHandleSizeInput.value = String(normalized.selectionHandleSize);
           document.documentElement.style.setProperty(
             "--remote-composer-font-size",
             `${normalized.composerFontSize}px`,
@@ -1321,6 +1332,10 @@ import {
           document.documentElement.style.setProperty(
             "--remote-navigation-width",
             `${normalized.navigationWidth}px`,
+          );
+          document.documentElement.style.setProperty(
+            "--touch-selection-handle-size",
+            `${normalized.selectionHandleSize}px`,
           );
           syncRemoteNavigationLayout();
           document.documentElement.style.setProperty(
@@ -1362,6 +1377,7 @@ import {
             fastScrollSensitivity: remoteFastScrollSensitivityInput.value,
             touchScrollSensitivity: remoteTouchScrollSensitivityInput.value,
             twoFingerScrollSensitivity: remoteTwoFingerScrollSensitivityInput.value,
+            selectionHandleSize: remoteSelectionHandleSizeInput.value,
           });
           const persisted = persistDeviceDisplaySettings(normalized);
           applyRemoteDisplaySettings(normalized);
@@ -12025,6 +12041,9 @@ import {
           saveRemoteDisplaySettings();
         });
         remoteTwoFingerScrollSensitivityInput.addEventListener("change", () => {
+          saveRemoteDisplaySettings();
+        });
+        remoteSelectionHandleSizeInput.addEventListener("change", () => {
           saveRemoteDisplaySettings();
         });
         checkPcUpdateButton.addEventListener("click", () => {

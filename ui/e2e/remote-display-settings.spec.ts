@@ -19,6 +19,7 @@ const deviceSettings = {
   fastScrollSensitivity: 8,
   touchScrollSensitivity: 1.5,
   twoFingerScrollSensitivity: 6,
+  selectionHandleSize: 24,
 };
 
 const workspacePane = {
@@ -189,6 +190,7 @@ test("원격 화면 설정은 연결 전부터 기기 localStorage에서 읽고 
   await expect(page.locator("#remoteFastScrollSensitivity")).toHaveValue("8");
   await expect(page.locator("#remoteTouchScrollSensitivity")).toHaveValue("1.5");
   await expect(page.locator("#remoteTwoFingerScrollSensitivity")).toHaveValue("6");
+  await expect(page.locator("#remoteSelectionHandleSize")).toHaveValue("24");
   await expect(page.locator("#remoteDisplaySettingsStatus")).toHaveText("Saved on this device.");
 
   await page.locator("#remoteTerminalFontSize").fill("22");
@@ -207,6 +209,23 @@ test("원격 화면 설정은 연결 전부터 기기 localStorage에서 읽고 
       ),
     )
     .toBe("26px");
+
+  await page.locator("#remoteSelectionHandleSize").fill("28");
+  await page.locator("#remoteSelectionHandleSize").blur();
+  await expect
+    .poll(() =>
+      page.evaluate((key) => JSON.parse(localStorage.getItem(key) || "null"), DISPLAY_SETTINGS_KEY),
+    )
+    .toMatchObject({ ...deviceSettings, terminalFontSize: 22, selectionHandleSize: 28 });
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue(
+          "--touch-selection-handle-size",
+        ),
+      ),
+    )
+    .toBe("28px");
 });
 
 test("워크스페이스 메뉴는 너비를 공유하고 컷오프보다 넓을 때만 고정된다", async ({ page }) => {

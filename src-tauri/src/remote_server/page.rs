@@ -734,6 +734,7 @@ mod tests {
         assert!(html.contains("id=\"remoteFastScrollSensitivity\""));
         assert!(html.contains("id=\"remoteTouchScrollSensitivity\""));
         assert!(html.contains("id=\"remoteTwoFingerScrollSensitivity\""));
+        assert!(html.contains("id=\"remoteSelectionHandleSize\""));
         assert!(html.contains("laymux.remote.displaySettings"));
         assert!(!html.contains("/remote/v1/display-settings"));
         assert!(html.contains("Saved on this device."));
@@ -749,6 +750,7 @@ mod tests {
         assert!(html.contains("--remote-composer-font-size"));
         assert!(html.contains("--remote-menu-font-size"));
         assert!(html.contains("--remote-navigation-width"));
+        assert!(html.contains("--touch-selection-handle-size"));
         assert!(html.contains("window.innerWidth > remoteDisplaySettings.navigationPinCutoff"));
         assert!(html.contains("--remote-composer-idle-opacity"));
         assert!(html.contains("--remote-composer-focused-opacity"));

@@ -46,6 +46,7 @@
         --remote-composer-active-opacity: 1;
         --remote-menu-font-size: 13px;
         --remote-navigation-width: 360px;
+        --touch-selection-handle-size: 22px;
         /* Compact controls in the Remote header share one border-box height. */
         --header-control-height: 26px;
         --key-bar-control-height: 26px;
@@ -2130,14 +2131,15 @@
         position: absolute;
         z-index: 12;
         display: none;
-        width: 18px;
-        height: 18px;
+        width: var(--touch-selection-handle-size);
+        height: var(--touch-selection-handle-size);
         border: 2px solid var(--terminal-bg);
-        border-radius: 50%;
+        border-radius: 50% 50% 50% 0;
         background: var(--accent);
         box-shadow: 0 2px 8px #00000059;
         touch-action: none;
-        transform: translate(-50%, -50%);
+        /* (sqrt(2) - 1) / 2 keeps the rotated tip at the selection boundary. */
+        transform: translate(-50%, 20.71%) rotate(135deg);
       }
       /* --- Special key toolbar (soft keys) ---
          A client-side row of buttons that send terminal escape sequences via

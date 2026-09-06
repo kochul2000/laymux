@@ -572,6 +572,11 @@ test.describe("touch URL activation", () => {
         page.evaluate(() => (window as RemoteTerminalWindow).__remoteTerm?.getSelection() || ""),
       )
       .toBe("bravo");
+    const handle = page.locator('.touch-selection-handle[data-handle="start"]');
+    await expect(handle).toBeVisible();
+    await expect(handle).toHaveCSS("width", "22px");
+    await expect(handle).toHaveCSS("border-bottom-left-radius", "0px");
+    await page.screenshot({ path: "../.screenshots/remote-selection-handle.png" });
     expect(await page.evaluate(() => (window as RemoteTerminalWindow).__copiedSelections)).toEqual(
       [],
     );
