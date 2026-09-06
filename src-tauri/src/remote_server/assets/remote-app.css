@@ -2477,8 +2477,15 @@
         border-bottom: 1px solid var(--border);
         background: var(--bg-surface);
       }
-      .file-viewer-title {
+      .file-viewer-title-slot {
+        display: flex;
         flex: 1 1 auto;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+      }
+      .file-viewer-title {
+        flex: 0 1 auto;
         min-width: 0;
         overflow: hidden;
         color: var(--muted);
@@ -2497,6 +2504,7 @@
         gap: 4px;
       }
       .file-viewer-zoom button,
+      .file-viewer-copy-path,
       .file-viewer-download,
       .file-viewer-close {
         display: inline-flex;
@@ -2513,6 +2521,7 @@
         line-height: 1;
       }
       .file-viewer-zoom button:hover,
+      .file-viewer-copy-path:hover,
       .file-viewer-download:hover,
       .file-viewer-close:hover {
         background: var(--hover-bg);

@@ -397,7 +397,12 @@
           <button id="fileViewerBack" class="file-viewer-back" type="button" hidden aria-label="Back to the folder" title="Back to the folder">
             <span data-remote-icon="ChevronLeft"></span>
           </button>
-          <div id="fileViewerTitle" class="file-viewer-title" title=""></div>
+          <div class="file-viewer-title-slot">
+            <div id="fileViewerTitle" class="file-viewer-title" title=""></div>
+            <button id="fileViewerCopyPath" class="file-viewer-copy-path" type="button" hidden aria-label="Copy path" title="Copy path">
+              <span data-remote-icon="Copy"></span>
+            </button>
+          </div>
           <div id="fileViewerZoom" class="file-viewer-zoom" hidden>
             <button id="fileViewerZoomOut" type="button" aria-label="Zoom out">
               <span data-remote-icon="ZoomOut"></span>

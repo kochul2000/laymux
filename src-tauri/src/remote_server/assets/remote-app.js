@@ -104,6 +104,7 @@ import {
         const openFileViewerButton = $("openFileViewer");
         const fileViewerOverlayElement = $("fileViewerOverlay");
         const fileViewerTitleElement = $("fileViewerTitle");
+        const fileViewerCopyPathButton = $("fileViewerCopyPath");
         const fileViewerZoomElement = $("fileViewerZoom");
         const fileViewerZoomLevelElement = $("fileViewerZoomLevel");
         const fileViewerZoomOutButton = $("fileViewerZoomOut");
@@ -1729,6 +1730,7 @@ import {
           fileViewerZoomElement.hidden = true;
           fileViewerTitleElement.textContent = "";
           fileViewerTitleElement.title = "";
+          fileViewerCopyPathButton.hidden = true;
           fileViewerPath = null;
           fileViewerDownloadButton.hidden = false;
           fileViewerDownloadInFlight = false;
@@ -1748,6 +1750,7 @@ import {
           fileViewerZoomElement.hidden = true;
           fileViewerTitleElement.textContent = path;
           fileViewerTitleElement.title = path;
+          fileViewerCopyPathButton.hidden = false;
           fileViewerPath = path;
           // Back exists only for a file reached through the explorer; a terminal
           // path-link has no folder context to return to (ADR-0198).
@@ -1817,6 +1820,7 @@ import {
           fileViewerZoomElement.hidden = true;
           fileViewerTitleElement.textContent = request.path || "Host files";
           fileViewerTitleElement.title = request.path || "";
+          fileViewerCopyPathButton.hidden = true;
           fileViewerPath = null;
           fileViewerDirectoryPath = null;
           fileViewerExplorerReturnPath = null;
@@ -1877,6 +1881,7 @@ import {
           renderFileViewerState();
           fileViewerTitleElement.textContent = payload.path;
           fileViewerTitleElement.title = payload.path;
+          fileViewerCopyPathButton.hidden = false;
           // A new listing starts at its top; the previous directory's scroll
           // offset must not carry over into a shorter or unrelated list.
           fileViewerBodyElement.scrollTop = 0;
@@ -12165,6 +12170,13 @@ import {
           }
         });
         fileViewerCloseButton.addEventListener("click", closeFileViewer);
+        fileViewerCopyPathButton.addEventListener("click", () => {
+          const path = fileViewerPath || fileViewerDirectoryPath;
+          if (!path) return;
+          writeClipboardText(path)
+            .then(() => setStatus(`Copied ${path}`))
+            .catch((err) => setStatus(`Copy failed: ${err.message || err}`, true));
+        });
         fileViewerDownloadButton.addEventListener("click", downloadCurrentFileViewerFile);
         fileExplorerHeaderButton.addEventListener("click", () => {
           // Open where the user is working. Without an attached terminal the

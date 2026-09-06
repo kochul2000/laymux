@@ -316,6 +316,45 @@ test("the header folder button appears with the capability and lists the cwd", a
   await expect(overlay).toBeVisible();
   await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user");
 
+  const pathBounds = await page.locator("#fileViewerTitle").evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    return {
+      selectableWidth: element.getBoundingClientRect().width,
+      textWidth: range.getBoundingClientRect().width,
+    };
+  });
+  expect(pathBounds.selectableWidth).toBeLessThanOrEqual(pathBounds.textWidth + 1);
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: (command: string) => {
+        if (command !== "copy") return false;
+        const clipboardData = new DataTransfer();
+        document.dispatchEvent(
+          new ClipboardEvent("copy", {
+            clipboardData,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        (window as typeof window & { __copiedPath?: string }).__copiedPath =
+          clipboardData.getData("text/plain");
+        return true;
+      },
+    });
+  });
+  await page.locator("#fileViewerCopyPath").click();
+  await expect(page.locator("#status")).toHaveText("Copied /home/user");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as typeof window & { __copiedPath?: string }).__copiedPath,
+      ),
+    )
+    .toBe("/home/user");
+
   const rows = page.locator(".file-viewer-directory-row");
   await expect(rows).toHaveCount(8); // ".." + four dirs + two files + symlink
   await expect(rows.nth(0)).toHaveText("..");
@@ -485,6 +524,7 @@ test("the explorer works at a mobile viewport", async ({ context, page }) => {
   expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
   await row.click();
   await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user/repo");
+  await expect(page.locator("#fileViewerCopyPath")).toBeVisible();
 });
 
 test("mobile terminal edge flicks open workspaces on the left and files on the right", async ({
