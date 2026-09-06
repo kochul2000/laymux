@@ -959,13 +959,23 @@ mod tests {
         assert!(touch_focus.contains("!fileViewerOverlayElement.hidden"));
         assert!(touch_focus.contains("focusedElement !== terminal?.textarea"));
         assert!(touch_focus.contains("focusedElement !== document.body"));
-        assert!(html.contains("function startTouchSelection(term, element, pointerId)"));
+        let touch_selection_start = html
+            .find("function startTouchSelection(term, pointerId)")
+            .unwrap();
+        let touch_selection_end = touch_selection_start
+            + html[touch_selection_start..]
+                .find("function triggerTouchTapSelection")
+                .unwrap();
+        let touch_selection = &html[touch_selection_start..touch_selection_end];
+        assert!(touch_selection.contains("term.clearSelection();"));
+        assert!(touch_selection.contains("selectionService.rightClickSelect("));
+        assert!(!touch_selection.contains("dispatchTouchSelectionMouse("));
+        assert!(!touch_selection.contains("touchGesture.forceSelection"));
         assert!(html.contains("function withPreservedInputSurfaceFocus(run)"));
         assert!(html.contains("function restorePreservedInputSurfaceFocus(surface)"));
         assert!(html.contains("textarea.focus = function preserveInputSurfaceFocus() {}"));
         assert!(html.contains("function extendTouchSelection(term, gesture, point)"));
         assert!(html.contains("function handleSelectionMouseupAfterInteraction()"));
-        assert!(html.contains("touchGesture.forceSelection,\n            2"));
         assert!(html.contains("touchGesture.selectionSeed = selection"));
         assert!(html.contains("if (!isTouchPointer(event)) return;"));
         assert!(!html.contains("activePointerId !== null || event.isPrimary === false"));
