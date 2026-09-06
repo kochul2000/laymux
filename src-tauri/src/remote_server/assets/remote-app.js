@@ -6785,7 +6785,6 @@ import {
           hiddenWorkspaceToggle.hidden =
             nextView !== "workspace" || hiddenWorkspaceCount === 0;
           drawerNotificationsButton.hidden = nextView !== "workspace";
-          drawerConnectionButton.hidden = nextView !== "workspace";
           drawerSettingsButton.hidden = nextView !== "workspace" && nextView !== "connection";
         }
 
@@ -6793,7 +6792,7 @@ import {
           if (view === "hidden") return hiddenWorkspaceToggle;
           if (view === "notifications") return drawerNotificationsButton;
           if (view === "create") return newWorkspaceButton;
-          if (view === "connection") return drawerConnectionButton;
+          if (view === "connection") return drawerSettingsButton;
           if (view === "settings") return drawerSettingsButton;
           return null;
         }
