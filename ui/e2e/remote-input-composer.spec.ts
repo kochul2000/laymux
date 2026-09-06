@@ -761,6 +761,47 @@ async function terminalScrollDistance(page: Page) {
   });
 }
 
+test("custom Send Enter uses structured submit while raw keys retain their bytes and order", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "laymux.remote.keybar",
+      JSON.stringify({
+        userKeys: [
+          { id: "u-raw", label: "Raw", seq: "before\n" },
+          { id: "u-send", label: "Run", seq: "run\n", submit: true },
+          { id: "u-after", label: "After", seq: "after", submit: "true" },
+        ],
+        zones: {
+          main: { left: ["soft:u-raw", "soft:u-send", "soft:u-after"], center: [], right: [] },
+          expanded: { left: [], center: [], right: [] },
+        },
+      }),
+    );
+  });
+  const state = await installRemotePage(page, { coarse: true, holdInputs: true });
+  await connect(page);
+  const requests: string[] = [];
+  page.on("request", (request) => {
+    if (/\/(write|input)$/.test(new URL(request.url()).pathname)) {
+      requests.push(new URL(request.url()).pathname.split("/").at(-1)!);
+    }
+  });
+  await page.locator('[data-key="u-raw"]').click();
+  await page.locator('[data-key="u-send"]').click();
+  await page.locator('[data-key="u-after"]').click();
+  await expect.poll(() => state.inputs.length).toBe(1);
+  expect(state.writes.map((write) => write.data)).toEqual(["before\n"]);
+  await state.inputs[0].respond();
+  await expect.poll(() => state.writes.length).toBe(2);
+  expect(state.inputs.map((input) => input.body)).toEqual([
+    { leaseId: "lease-1", text: "run\n", submit: true },
+  ]);
+  expect(state.writes.map((write) => write.data)).toEqual(["before\n", "after"]);
+  expect(requests).toEqual(["write", "input", "write"]);
+});
+
 test("fine-pointer PC and coarse-pointer mobile can both toggle and persist the preferred mode", async ({
   page,
 }) => {
