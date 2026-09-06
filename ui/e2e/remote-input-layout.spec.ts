@@ -90,9 +90,7 @@ test.describe("Remote input action layout", () => {
     await expect
       .poll(() => renderedSegmentActions(page, "mainActionRow", "left"))
       .toEqual(["soft:c-c", "soft:q", "soft:esc"]);
-    await expect
-      .poll(() => renderedSegmentActions(page, "mainActionRow", "center"))
-      .toEqual([]);
+    await expect.poll(() => renderedSegmentActions(page, "mainActionRow", "center")).toEqual([]);
     await expect
       .poll(() => renderedSegmentActions(page, "mainActionRow", "right"))
       .toEqual(["keyboard", "keys", "send"]);
@@ -121,12 +119,7 @@ test.describe("Remote input action layout", () => {
     await expect(page.locator("#keyBar")).toBeVisible();
     await expect
       .poll(() => renderedSegmentActions(page, "keyRow", "left"))
-      .toEqual([
-        "composer",
-        "soft:navPad",
-        "soft:tab",
-        "soft:stab",
-      ]);
+      .toEqual(["composer", "soft:navPad", "soft:tab", "soft:stab"]);
     await expect.poll(() => renderedSegmentActions(page, "keyRow", "center")).toEqual([]);
     await expect
       .poll(() => renderedSegmentActions(page, "keyRow", "right"))
@@ -422,6 +415,32 @@ test.describe("Remote input action layout", () => {
     await page.reload();
     await page.setContent(remoteClientMarkupWithoutXterm());
     await expect(page.locator('#keyRow [data-input-action^="soft:u-"]')).toHaveText("C→");
+  });
+
+  test("persists explicit Send Enter independently from raw newline bytes", async ({ page }) => {
+    await openMarkup(page);
+    await page.locator("#drawerSettingsButton").click();
+    await page.getByLabel("Custom key kind").selectOption("raw");
+    await expect(page.getByLabel("Send Enter")).not.toBeChecked();
+    await page.getByLabel("Custom key label").fill("Run");
+    await page.getByLabel("Custom key sequence").fill("run\\n");
+    await page.getByLabel("Send Enter").check();
+    await page.getByRole("button", { name: "Add custom key" }).click();
+    await expect(page.getByLabel("Send Enter")).not.toBeChecked();
+    const [key] = (await storedConfig(page)).userKeys;
+    expect(key).toMatchObject({ label: "Run", seq: "run\n", submit: true });
+    await page.reload();
+    await page.setContent(remoteClientMarkupWithoutXterm());
+    await page.locator("#drawerSettingsButton").click();
+    await page.getByLabel("Custom key kind").selectOption("raw");
+    await page.getByLabel("Custom key label").fill("Raw");
+    await page.getByLabel("Custom key sequence").fill("run\\n");
+    await page.getByRole("button", { name: "Add custom key" }).click();
+    expect((await storedConfig(page)).userKeys).toEqual([
+      key,
+      expect.objectContaining({ label: "Raw", seq: "run\n", submit: false }),
+    ]);
+    await page.screenshot({ path: "test-results/remote-raw-send-enter.png" });
   });
 
   test("inserts common raw escapes without requiring a backslash key", async ({ page }) => {
