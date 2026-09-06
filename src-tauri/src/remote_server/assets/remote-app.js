@@ -9802,12 +9802,14 @@ import {
           );
         }
 
-        function queueInputWrite(data, inputTerminalId, inputLeaseId) {
+        function queueInputWrite(data, inputTerminalId, inputLeaseId, submit = false) {
           inputWriteChain = inputWriteChain
             .catch(() => {})
             .then(() => {
               if (inputTerminalId !== activeTerminalId || inputLeaseId !== leaseId) return;
-              return writeToTerminal(inputTerminalId, inputLeaseId, data);
+              return submit
+                ? writeTerminalInput(inputTerminalId, inputLeaseId, data, true)
+                : writeToTerminal(inputTerminalId, inputLeaseId, data);
             })
             .catch((err) => setStatus(err.message, true));
         }
@@ -10052,7 +10054,7 @@ import {
             if (!trimmed || trimmed.length > USER_KEY_LABEL_MAX) continue;
             if (!seq || seq.length > USER_KEY_SEQ_MAX) continue;
             seen.add(id);
-            keys.push({ id, label: trimmed, seq });
+            keys.push({ id, label: trimmed, seq, submit: ownProperty(entry, "submit") === true });
           }
           return keys;
         }
@@ -10276,7 +10278,7 @@ import {
         }
 
         // Returns an error message, or "" when the key was registered.
-        function addUserKey(label, seq) {
+        function addUserKey(label, seq, submit = false) {
           if (keyBarConfig.userKeys.length >= USER_KEY_MAX) {
             return `At most ${USER_KEY_MAX} custom keys.`;
           }
@@ -10288,7 +10290,7 @@ import {
             return `Sequence must be 1-${USER_KEY_SEQ_MAX} characters.`;
           }
           const id = createUserKeyId();
-          keyBarConfig.userKeys.push({ id, label: trimmed, seq });
+          keyBarConfig.userKeys.push({ id, label: trimmed, seq, submit });
           rebuildUserKeyIndex();
           // A key nobody can reach is not registered in any useful sense, so a
           // fresh key lands exactly where a tapped hidden chip does.
@@ -10377,7 +10379,14 @@ import {
             return;
           }
           const seq = keySequence(def);
-          if (seq) enqueueInput(seq);
+          if (!seq) return;
+          if (def.submit === true) {
+            if (!leaseId || !activeTerminalId || !composerReady) return;
+            flushPendingInput();
+            queueInputWrite(seq, activeTerminalId, leaseId, true);
+          } else {
+            enqueueInput(seq);
+          }
         }
 
         // A toolbar/key button must never pull focus off the active input
@@ -11137,6 +11146,7 @@ import {
         let userKeyComboBase = "a";
         let userKeyRawLabel = "";
         let userKeyRawSequence = "";
+        let userKeyRawSubmit = false;
         let userKeyFormError = "";
 
         const COMBO_BASE_LETTERS = "abcdefghijklmnopqrstuvwxyz".split("");
@@ -11193,19 +11203,22 @@ import {
           }
           const label = userKeyRawLabel;
           const rawSequence = userKeyRawSequence;
+          const submit = userKeyRawSubmit;
           userKeyRawLabel = "";
           userKeyRawSequence = "";
-          const error = addUserKey(label, parsed.seq);
+          userKeyRawSubmit = false;
+          const error = addUserKey(label, parsed.seq, submit);
           if (!error) return;
           userKeyRawLabel = label;
           userKeyRawSequence = rawSequence;
+          userKeyRawSubmit = submit;
           userKeyFormError = error;
           renderInputSettingsPreservingScroll();
         }
 
         // Registering a key is deliberately a client-side affair: it produces the
-        // same `{label, seq}` shape a built-in key has and rides the existing
-        // write path, so nothing about the Remote API changes.
+        // built-in key shape, with optional structured submit through the
+        // existing input path. No new Remote endpoint is needed.
         function renderUserKeySection() {
           const title = document.createElement("div");
           title.className = "key-popover-title";
@@ -11383,10 +11396,25 @@ import {
             escapeRow.append(escapeLabel, escapeButtons);
             form.append(escapeRow);
 
+            const enterRow = document.createElement("label");
+            enterRow.className = "user-key-row";
+            const enterCheckbox = document.createElement("input");
+            enterCheckbox.type = "checkbox";
+            enterCheckbox.checked = userKeyRawSubmit;
+            enterCheckbox.addEventListener("change", () => {
+              userKeyRawSubmit = enterCheckbox.checked;
+            });
+            enterRow.append(enterCheckbox, "Send Enter");
+            form.append(enterRow);
+
             const hint = document.createElement("div");
             hint.className = "user-key-preview";
             hint.textContent = "Escapes: \\e \\xNN \\r \\n \\t \\0 \\\\";
             form.append(hint);
+            const enterHint = document.createElement("div");
+            enterHint.className = "user-key-preview";
+            enterHint.textContent = "Send Enter sends the sequence as text, then presses Enter, like Send. Leave off for raw control bytes.";
+            form.append(enterHint);
           }
 
           const submitRow = document.createElement("div");
