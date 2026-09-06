@@ -351,7 +351,7 @@ test("keeps the explorer path controls usable at mobile width", async ({ context
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
 
   await page.locator("#openFileViewer").click();
-  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+  await expect(page.locator("#fileViewerText")).toBeVisible();
   // The overlay is the reading surface on a phone: it must not push the page
   // sideways, and the header must stay on one line.
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
@@ -360,6 +360,17 @@ test("keeps the explorer path controls usable at mobile width", async ({ context
     scrollWidth: element.scrollWidth,
   }));
   expect(header.scrollWidth).toBe(header.clientWidth);
+  const headerItems = await page.locator(".file-viewer-header").evaluate((element) => {
+    const bounds = (selector: string) =>
+      element.querySelector(selector)?.getBoundingClientRect().toJSON();
+    return {
+      title: bounds("#fileViewerTitle"),
+      copy: bounds("#fileViewerCopyPath"),
+      zoom: bounds("#fileViewerZoom"),
+    };
+  });
+  expect(headerItems.title?.width ?? 0).toBeGreaterThan(0);
+  expect(headerItems.copy!.right).toBeLessThanOrEqual(headerItems.zoom!.left);
 });
 
 test("downloads the host bytes, not the rendered preview", async ({ context, page }) => {
