@@ -287,12 +287,14 @@ test("메뉴 도구 줄의 핀 아이콘은 설정과 같은 워크스페이스 
   await page.locator("#token").fill("test-token");
   await page.locator("#connect").click();
   await page.locator("#navToggle").click();
-  const pin = page.locator(".drawer-header-actions #navigationPin");
+  const pin = page.locator(".drawer-header > #navigationPin");
   await expect(page.locator("header #navigationPin")).toHaveCount(0);
   await expect(pin).toBeVisible();
   const pinBox = await pin.boundingBox();
   const plusBox = await page.locator("#newWorkspace").boundingBox();
   expect(pinBox!.y).toBe(plusBox!.y);
+  const titleBox = await page.locator("#drawerTitle").boundingBox();
+  expect(pinBox!.x + pinBox!.width).toBeLessThanOrEqual(titleBox!.x);
   await expect(pin.locator('svg[data-remote-icon-name="Pin"]')).toHaveCount(1);
   await expect(pin).toHaveAttribute("aria-pressed", "false");
   await expect(pin).toHaveAttribute("aria-label", "Pin workspace menu");
@@ -316,6 +318,14 @@ test("메뉴 도구 줄의 핀 아이콘은 설정과 같은 워크스페이스 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(pin).toBeVisible();
   await page.screenshot({ path: "../.screenshots/remote-pin-toolbar-mobile.png" });
+  await expect(page.locator(".drawer-header #drawerConnectionButton")).toHaveCount(0);
+  await page.locator("#drawerSettingsButton").click();
+  await expect(page.locator("#drawerSettingsView #drawerConnectionButton")).toBeVisible();
+  await page.screenshot({ path: "../.screenshots/remote-connection-settings-mobile.png" });
+  await page.locator("#drawerConnectionButton").click();
+  await expect(page.locator("#drawerConnectionView")).toBeVisible();
+  await page.locator("#drawerBack").click();
+  await expect(page.locator("#drawerSettingsButton")).toBeFocused();
   expect(displayRequests).toEqual([]);
 });
 
