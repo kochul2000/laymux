@@ -4,6 +4,14 @@ import type { CellInfo } from "./terminal-cell-map";
 
 const asciiCells = (text: string): CellInfo[] => [...text].map((chars) => ({ chars, width: 1 }));
 
+const cellLine = (cells: CellInfo[]) => ({
+  length: cells.length,
+  isWrapped: false,
+  getCell: (x: number) =>
+    cells[x] && { getChars: () => cells[x].chars, getWidth: () => cells[x].width },
+});
+const asciiLine = (text: string) => cellLine(asciiCells(text));
+
 interface Harness {
   deps: PathLinkPointDeps;
   statPaths: ReturnType<typeof vi.fn>;
@@ -29,7 +37,7 @@ function harness(
     getCwd: () => cwd,
     // clientX 를 1-based 컬럼으로, clientY 를 절대 버퍼 라인으로 쓰는 단순 매핑.
     resolveCell: (clientX, clientY) => ({ col: clientX, absoluteLine: clientY }),
-    readLine: (absoluteLine) => (absoluteLine === 4 ? asciiCells(line) : null),
+    readLine: (absoluteLine) => (absoluteLine === 4 ? asciiLine(line) : undefined),
     statPaths,
     isVerifiedAt: () => verified,
     apply,
@@ -190,7 +198,7 @@ describe("createPathLinkPointEvaluator (ADR-0188 point 트리거)", () => {
       getSettings: () => ({ enabled: true, maxPathLength: 256 }),
       getCwd: () => "/proj",
       resolveCell: (clientX, clientY) => ({ col: clientX, absoluteLine: clientY }),
-      readLine: () => asciiCells("cat src/a.ts"),
+      readLine: () => asciiLine("cat src/a.ts"),
       statPaths,
       isVerifiedAt: () => false,
       apply,
@@ -219,7 +227,7 @@ describe("createPathLinkPointEvaluator (ADR-0188 point 트리거)", () => {
       getSettings: () => ({ enabled: true, maxPathLength: 256 }),
       getCwd: () => "/proj",
       resolveCell: (clientX, clientY) => ({ col: clientX, absoluteLine: clientY }),
-      readLine: () => asciiCells("run G:/a b/x.exe end"),
+      readLine: () => asciiLine("run G:/a b/x.exe end"),
       statPaths,
       isVerifiedAt: () => false,
       apply,
@@ -256,7 +264,7 @@ describe("createPathLinkPointEvaluator (ADR-0188 point 트리거)", () => {
       getSettings: () => ({ enabled: true, maxPathLength: 256 }),
       getCwd: () => "/proj",
       resolveCell: (clientX, clientY) => ({ col: clientX, absoluteLine: clientY }),
-      readLine: () => asciiCells("G:/my dir name"),
+      readLine: () => asciiLine("G:/my dir name"),
       statPaths,
       isVerifiedAt: () => false,
       apply,
@@ -275,11 +283,8 @@ describe("createPathLinkPointEvaluator (ADR-0188 point 트리거)", () => {
     const evaluator = createPathLinkPointEvaluator({
       ...h.deps,
       // "한 src/a.ts" — 한글(셀 1~2) + 공백(3) + 토큰(셀 4~11).
-      readLine: () => [
-        { chars: "한", width: 2 },
-        { chars: "", width: 0 },
-        ...asciiCells(" src/a.ts"),
-      ],
+      readLine: () =>
+        cellLine([{ chars: "한", width: 2 }, { chars: "", width: 0 }, ...asciiCells(" src/a.ts")]),
     });
 
     await evaluator.evaluateAt(6, 4);
@@ -302,7 +307,7 @@ describe("createPathLinkPointEvaluator 상수", () => {
       getSettings: () => ({ enabled: true, maxPathLength: 256 }),
       getCwd: () => cwd,
       resolveCell: (clientX, clientY) => ({ col: clientX, absoluteLine: clientY }),
-      readLine: () => asciiCells("cat src/a.ts"),
+      readLine: () => asciiLine("cat src/a.ts"),
       statPaths: () =>
         new Promise((resolve) => {
           release = resolve;
@@ -334,7 +339,7 @@ describe("createPathLinkPointEvaluator 중복 조회 방지 (ADR-0188)", () => {
       getSettings: () => ({ enabled: true, maxPathLength: 256 }),
       getCwd: () => "/proj",
       resolveCell: (clientX, clientY) => ({ col: clientX, absoluteLine: clientY }),
-      readLine: () => asciiCells("cat src/a.ts"),
+      readLine: () => asciiLine("cat src/a.ts"),
       statPaths,
       isVerifiedAt: () => false,
       apply,
@@ -363,7 +368,7 @@ describe("createPathLinkPointEvaluator 중복 조회 방지 (ADR-0188)", () => {
       getSettings: () => ({ enabled: true, maxPathLength: 256 }),
       getCwd: () => "/proj",
       resolveCell: (clientX, clientY) => ({ col: clientX, absoluteLine: clientY }),
-      readLine: () => asciiCells("cat src/a.ts"),
+      readLine: () => asciiLine("cat src/a.ts"),
       statPaths,
       isVerifiedAt: () => false,
       apply,
@@ -401,7 +406,7 @@ describe("createPathLinkPointEvaluator 중복 조회 방지 (ADR-0188)", () => {
       getSettings: () => ({ enabled: true, maxPathLength: 256 }),
       getCwd: () => "/proj",
       resolveCell: (clientX, clientY) => ({ col: clientX, absoluteLine: clientY }),
-      readLine: () => asciiCells("cat src/a.ts"),
+      readLine: () => asciiLine("cat src/a.ts"),
       statPaths,
       isVerifiedAt: () => false,
       apply,

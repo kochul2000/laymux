@@ -1,3 +1,4 @@
+import { readPathLinkSelection, readPathLinkLines, mapPathLinkParts, pathLinkPartsCurrent, PATH_LINK_CONTEXT_ROWS } from "../../../../ui/src/lib/path-link-lines.ts";
 import {
   commandStatusIconName,
   fileKindIconName,
@@ -370,8 +371,6 @@ import {
         const REMOTE_PATH_LINK_MAX_SELECTION_LINES = 8;
         const REMOTE_PATH_LINK_MAX_SELECTION_MATCHES = 16;
         // ADR-0188 screen trigger: one viewport, bounded rows/chars/candidates.
-        const REMOTE_PATH_LINK_MAX_SCREEN_LINES = 64;
-        const REMOTE_PATH_LINK_MAX_SCREEN_CHARS = 8192;
         const REMOTE_PATH_LINK_MAX_SCREEN_CANDIDATES = 64;
         const REMOTE_PATH_LINK_IDLE_SCAN_DELAY_MS = 500;
         const PATH_LINK_CLICK_SLOP_PX = 4;
@@ -2182,56 +2181,6 @@ import {
           }, REMOTE_PATH_LINK_IDLE_SCAN_DELAY_MS);
         }
 
-        function mapRemotePathLinkRange(position, match) {
-          const selectionBaseCol0 = match.lineIndex === 0 ? position.start.x : 0;
-          const bufferLine = position.start.y + match.lineIndex + 1;
-          const line = terminal?.buffer?.active?.getLine?.(bufferLine - 1);
-          if (line) {
-            const { text, columns, endColumns } = reconstructRemoteLinkLine(line);
-            const selectionStartCell = selectionBaseCol0 + 1;
-            const selectionStartOffset = endColumns.findIndex((column) => column >= selectionStartCell);
-            if (selectionStartOffset >= 0) {
-              const startOffset = selectionStartOffset + match.startIndex;
-              const endOffset = selectionStartOffset + match.endIndex - 1;
-              if (
-                text.slice(startOffset, endOffset + 1) === match.token &&
-                columns[startOffset] !== undefined &&
-                endColumns[endOffset] !== undefined
-              ) {
-                return {
-                  bufferLine,
-                  startCol: columns[startOffset],
-                  endCol: endColumns[endOffset],
-                };
-              }
-            }
-          }
-          return {
-            bufferLine,
-            startCol: selectionBaseCol0 + match.startIndex + 1,
-            endCol: selectionBaseCol0 + match.endIndex,
-          };
-        }
-
-        // Line-scoped modes (`point`, `screen`) carry whole-line offsets, so the
-        // token must still sit on those cells. No string fallback here: if the
-        // line moved under the request, drawing anything would mislabel it.
-        function mapRemoteLinePathRange(bufferLine, match) {
-          const line = terminal?.buffer?.active?.getLine?.(bufferLine - 1);
-          if (!line) return null;
-          const { text, columns, endColumns } = reconstructRemoteLinkLine(line);
-          const startOffset = match.startIndex;
-          const endOffset = match.endIndex - 1;
-          if (
-            text.slice(startOffset, endOffset + 1) !== match.token ||
-            columns[startOffset] === undefined ||
-            endColumns[endOffset] === undefined
-          ) {
-            return null;
-          }
-          return { bufferLine, startCol: columns[startOffset], endCol: endColumns[endOffset] };
-        }
-
         function setVerifiedPathLinks(scope, selections) {
           const previousEntries = pathLinkScopes[scope];
           pathLinkScopes[scope] = [];
@@ -2332,9 +2281,11 @@ import {
 
           const selection = term.getSelection();
           if (!selection || selection.length > REMOTE_PATH_LINK_MAX_SELECTION_LENGTH) return;
-          if (!term.getSelectionPosition?.()) return;
-          const selectionLines = selection.split(/\r?\n/);
-          if (selectionLines.length > REMOTE_PATH_LINK_MAX_SELECTION_LINES) return;
+          const position = term.getSelectionPosition?.();
+          if (!position || position.end.y - position.start.y >= REMOTE_PATH_LINK_MAX_SELECTION_LINES) return;
+          const logicalLines = readPathLinkSelection(term.buffer.active, position, selection);
+          const selectionLines = logicalLines.map((line) => line.text);
+          if (!selectionLines.length || selectionLines.length > REMOTE_PATH_LINK_MAX_SELECTION_LINES) return;
           const abortController = typeof AbortController === "function" ? new AbortController() : null;
           pathLinkAborts.selection = abortController;
 
@@ -2380,17 +2331,19 @@ import {
               // Resize/reflow and scrollback trim can move a still-identical
               // selection while the bridge performs its filesystem stat. Use
               // the live xterm coordinates, never the pre-request snapshot.
-              setVerifiedPathLinks("selection", matches.map((match) => ({
-                ...mapRemotePathLinkRange(currentPosition, match),
-                terminalId: requestTerminalId,
-                leaseId: requestLeaseId,
-                fileViewerToken: requestFileViewerToken,
-                // The literal the underline covers: output can repaint the row in
-                // place, and only the text tells us the link went stale.
-                token: match.token,
-                path: match.path,
-                kind: match.kind === "directory" ? "directory" : "file",
-              })));
+              const liveLines = readPathLinkSelection(term.buffer.active, currentPosition, selection);
+              if (JSON.stringify(liveLines.map((line) => line.text)) !== JSON.stringify(selectionLines)) return;
+              const selections = matches.flatMap((match) => {
+                const parts = mapPathLinkParts(liveLines[match.lineIndex], { ...match, text: match.token });
+                if (!pathLinkPartsCurrent(term.buffer.active, parts)) return [];
+                return parts.map((part) => ({
+                  ...part, pathParts: parts,
+                  terminalId: requestTerminalId, leaseId: requestLeaseId,
+                  fileViewerToken: requestFileViewerToken,
+                  path: match.path, kind: match.kind === "directory" ? "directory" : "file",
+                }));
+              });
+              setVerifiedPathLinks("selection", selections);
             })
             .catch(() => {
               if (revision === pathLinkRevisions.selection) clearPathLinkScope("selection");
@@ -2418,14 +2371,11 @@ import {
           );
         }
 
-        // Shared request path for the line-scoped triggers. `baseLine` is the
-        // 0-based absolute buffer line that `lines[0]` was read from, so a later
-        // scroll cannot shift the mapping (a scrollback trim is caught by the
-        // per-match text check in `mapRemoteLinePathRange`).
+        // Logical text goes to the host; physical cell maps stay on this surface.
+        // Validate every part before applying the response as one complete set.
         function requestLineScopedPathLinks(
           scope,
-          baseLine,
-          lines,
+          logicalLines,
           caret,
           maxMatches,
           onApplied
@@ -2437,6 +2387,7 @@ import {
           abortPathLinkScope(scope);
           const revision = pathLinkRevisions[scope];
           if (!term || !requestTerminalId || !requestLeaseId || !requestFileViewerToken) return;
+          const lines = logicalLines.map((line) => line.text);
           const body = { terminalId: requestTerminalId, mode: scope, lines };
           if (caret) body.caret = caret;
           const abortController = typeof AbortController === "function" ? new AbortController() : null;
@@ -2470,32 +2421,15 @@ import {
               }
               const selections = [];
               for (const match of data.matches) {
-                if (!isValidPathLinkMatch(match, lines)) continue;
-                const range = mapRemoteLinePathRange(baseLine + match.lineIndex + 1, match);
-                if (!range) continue;
-                selections.push({
-                  ...range,
-                  terminalId: requestTerminalId,
-                  leaseId: requestLeaseId,
+                if (!isValidPathLinkMatch(match, lines)) { clearPathLinkScope(scope); return; }
+                const parts = mapPathLinkParts(logicalLines[match.lineIndex], { ...match, text: match.token });
+                if (!pathLinkPartsCurrent(term.buffer.active, parts)) { clearPathLinkScope(scope); return; }
+                selections.push(...parts.map((part) => ({
+                  ...part, pathParts: parts,
+                  terminalId: requestTerminalId, leaseId: requestLeaseId,
                   fileViewerToken: requestFileViewerToken,
-                  // The literal the underline covers: output can repaint the row in
-                  // place, and only the text tells us the link went stale.
-                  token: match.token,
-                  path: match.path,
-                  kind: match.kind === "directory" ? "directory" : "file",
-                });
-              }
-              if (selections.length === 0) {
-                clearPathLinkScope(scope);
-                return;
-              }
-              // A screen signature may only describe the complete response.
-              // If even one match became malformed or no longer maps to the
-              // requested cells, fail closed instead of blessing a partial
-              // decoration set and suppressing every later identical scan.
-              if (selections.length !== data.matches.length) {
-                clearPathLinkScope(scope);
-                return;
+                  path: match.path, kind: match.kind === "directory" ? "directory" : "file",
+                })));
               }
               if (!setVerifiedPathLinks(scope, selections)) {
                 // A partially installed set has no verified signature and must
@@ -2533,45 +2467,23 @@ import {
           if (pathLinkAtPoint(point.clientX, point.clientY)) return;
           const coords = touchCellCoords(term, point);
           if (!coords) return;
-          const line = term.buffer?.active?.getLine?.(coords.y);
+          const lines = readPathLinkLines(term.buffer.active,
+            coords.y - PATH_LINK_CONTEXT_ROWS, coords.y + PATH_LINK_CONTEXT_ROWS + 1);
+          const line = lines.find((line) => line.points.some((p) => p.row === coords.y));
           if (!line) return;
-          const { text, columns, endColumns } = reconstructRemoteLinkLine(line);
-          const column = coords.x + 1;
-          let caretIndex = -1;
-          for (let offset = 0; offset < columns.length; offset += 1) {
-            if (columns[offset] <= column && column <= endColumns[offset]) {
-              caretIndex = offset;
-              break;
-            }
-          }
+          const caretIndex = line.points.findIndex((p) => p.row === coords.y && p.col <= coords.x + 1 && coords.x + 1 <= p.endCol);
           if (caretIndex < 0) return;
-          const lineText = text.replace(/\s+$/, "");
-          if (!lineText || caretIndex >= lineText.length) return;
-          requestLineScopedPathLinks(
-            "point",
-            coords.y,
-            [lineText],
-            { lineIndex: 0, index: caretIndex },
-            1
-          );
+          requestLineScopedPathLinks("point", [line], { lineIndex: 0, index: caretIndex }, 1);
         }
 
         function readPathLinkScreenLines(term) {
           const buffer = term.buffer?.active;
           if (!buffer) return null;
-          const baseLine = buffer.viewportY || 0;
-          const rows = Math.min(term.rows || 0, REMOTE_PATH_LINK_MAX_SCREEN_LINES);
-          if (rows <= 0) return null;
-          const lines = [];
-          let chars = 0;
-          for (let row = 0; row < rows; row += 1) {
-            const line = buffer.getLine?.(baseLine + row);
-            const text = line ? reconstructRemoteLinkLine(line).text.replace(/\s+$/, "") : "";
-            chars += text.length;
-            if (chars > REMOTE_PATH_LINK_MAX_SCREEN_CHARS) break;
-            lines.push(text);
-          }
-          return lines.some((text) => text.length > 0) ? { baseLine, lines } : null;
+          const baseLine = Math.max(0, (buffer.viewportY || 0) - PATH_LINK_CONTEXT_ROWS);
+          const end = (buffer.viewportY || 0) + (term.rows || 0) + PATH_LINK_CONTEXT_ROWS;
+          const logicalLines = readPathLinkLines(buffer, baseLine, end);
+          const lines = logicalLines.map((line) => line.text);
+          return lines.some((text) => text.length > 0) ? { baseLine, lines, logicalLines } : null;
         }
 
         function evaluatePathLinkScreen() {
@@ -2603,7 +2515,7 @@ import {
             clearPathLinkScope("screen");
             return;
           }
-          const signature = `${screen.baseLine}\n${screen.lines.join("\n")}`;
+          const signature = JSON.stringify(screen.logicalLines);
           // Duplicate idle evaluations with no intervening physical write keep
           // the verified decoration set without another filesystem batch. A
           // write dirties the server-owned context even when cells stay equal,
@@ -2617,8 +2529,7 @@ import {
           }
           requestLineScopedPathLinks(
             "screen",
-            screen.baseLine,
-            screen.lines,
+            screen.logicalLines,
             null,
             REMOTE_PATH_LINK_MAX_SCREEN_CANDIDATES,
             () => {
@@ -2675,6 +2586,8 @@ import {
         function pathLinkEntryStillOnScreen(entry) {
           const bufferLine = livePathLinkBufferLine(entry);
           if (bufferLine === null) return false;
+          if (entry.selection.pathParts) return pathLinkPartsCurrent(terminal.buffer.active,
+            entry.selection.pathParts, bufferLine - entry.selection.bufferLine);
           const line = terminal?.buffer?.active?.getLine?.(bufferLine - 1);
           if (!line) return false;
           const { text, columns } = reconstructRemoteLinkLine(line);
@@ -2955,6 +2868,8 @@ import {
         function linkChipTokenStillOnScreen(target) {
           const bufferLine = liveLinkChipBufferLine(target);
           if (bufferLine === null) return false;
+          if (target.pathParts) return pathLinkPartsCurrent(terminal.buffer.active,
+            target.pathParts, bufferLine - target.bufferLine);
           const line = terminal?.buffer?.active?.getLine?.(bufferLine - 1);
           if (!line) return false;
           const { text, columns } = reconstructRemoteLinkLine(line);
@@ -2997,6 +2912,7 @@ import {
               startCol: press.startCol,
               endCol: press.endCol,
               token: press.token,
+              pathParts: press.pathParts,
               terminalId: press.terminalId,
               leaseId: press.leaseId,
               fileViewerToken: press.fileViewerToken,

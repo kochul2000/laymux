@@ -6914,6 +6914,7 @@ describe("TerminalView", () => {
 
   it("validates a selected path only once after the pointer drag ends", async () => {
     mockGetSelection.mockReturnValue(String.raw`C:\work\src\main.ts`);
+    setMockBufferLine(String.raw`C:\work\src\main.ts`);
     mockGetSelectionPosition.mockReturnValue({
       start: { x: 0, y: 0 },
       end: { x: 19, y: 0 },
@@ -6955,6 +6956,7 @@ describe("TerminalView", () => {
 
   it("invalidates the previous path link as soon as a new pointer drag moves", async () => {
     mockGetSelection.mockReturnValue(String.raw`C:\work\src\main.ts`);
+    setMockBufferLine(String.raw`C:\work\src\main.ts`);
     mockGetSelectionPosition.mockReturnValue({
       start: { x: 0, y: 0 },
       end: { x: 19, y: 0 },
@@ -6994,6 +6996,7 @@ describe("TerminalView", () => {
 
   it("discards an in-flight path stat when a new pointer gesture starts", async () => {
     mockGetSelection.mockReturnValue(String.raw`C:\work\src\main.ts`);
+    setMockBufferLine(String.raw`C:\work\src\main.ts`);
     mockGetSelectionPosition.mockReturnValue({
       start: { x: 0, y: 0 },
       end: { x: 19, y: 0 },
@@ -7302,6 +7305,7 @@ describe("TerminalView", () => {
 
   it("does not validate a path after the pointer selection gesture is cancelled", async () => {
     mockGetSelection.mockReturnValue(String.raw`C:\work\src\main.ts`);
+    setMockBufferLine(String.raw`C:\work\src\main.ts`);
     mockGetSelectionPosition.mockReturnValue({
       start: { x: 0, y: 0 },
       end: { x: 19, y: 0 },

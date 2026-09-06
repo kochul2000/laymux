@@ -16,12 +16,17 @@ import {
   decidePathLinkAction,
   extractPathCandidatesAtOffset,
   joinCwdPath,
-  mapLineCandidateToPathRange,
   pathPointLimits,
   resolveOverlappingRanges,
 } from "./path-link-detect";
 import type { VerifiedPathSelection } from "./path-link-provider";
-import { reconstructLine, type CellInfo } from "./terminal-cell-map";
+import {
+  readPathLinkLines,
+  mapPathLinkParts,
+  pathLinkPartsCurrent,
+  PATH_LINK_CONTEXT_ROWS,
+  type PathLinkBuffer,
+} from "./path-link-lines";
 
 /**
  * hover 가 "멈췄다"고 볼 시간(ms). 읽는 동안 포인터가 지나가는 토큰마다
@@ -36,8 +41,8 @@ export interface PathLinkPointDeps {
   getCwd: () => string | undefined;
   /** 화면 좌표 → 1-based 컬럼 + 0-based 절대 버퍼 라인. 실패하면 null. */
   resolveCell: (clientX: number, clientY: number) => { col: number; absoluteLine: number } | null;
-  /** 0-based 절대 버퍼 라인의 셀. 없으면 null. */
-  readLine: (absoluteLine: number) => CellInfo[] | null;
+  /** 0-based 절대 버퍼 라인의 셀과 wrap 정보. 없으면 undefined. */
+  readLine: PathLinkBuffer["getLine"];
   /** bounded batch stat(트리거당 배치 1건, 후보 상수 개 — ADR-0191). */
   statPaths: (paths: string[]) => Promise<Array<{ exists: boolean; isDirectory: boolean }>>;
   /** 이미 검증된 밑줄 위인지 — 그러면 재평가하지 않는다. */
@@ -60,14 +65,6 @@ export interface PathLinkPointEvaluator {
    * 잦은 pane 에서 hover 가 밑줄을 영원히 못 켠다.
    */
   forget: () => void;
-}
-
-/** 1-based 컬럼을 덮는 UTF-16 offset. 없으면 -1. */
-function offsetAtColumn(columns: number[], endColumns: number[], col: number): number {
-  for (let offset = 0; offset < columns.length; offset++) {
-    if (columns[offset] <= col && col <= endColumns[offset]) return offset;
-  }
-  return -1;
 }
 
 export function createPathLinkPointEvaluator(deps: PathLinkPointDeps): PathLinkPointEvaluator {
@@ -118,19 +115,23 @@ export function createPathLinkPointEvaluator(deps: PathLinkPointDeps): PathLinkP
         clearPoint();
         return;
       }
-      const cells = deps.readLine(cell.absoluteLine);
-      if (!cells || cells.length === 0) {
-        clearPoint();
-        return;
-      }
-      const { text, columns, endColumns } = reconstructLine(cells);
-      const offset = offsetAtColumn(columns, endColumns, cell.col);
-      if (offset < 0) {
+      const buffer = { getLine: deps.readLine };
+      const lines = readPathLinkLines(
+        buffer,
+        cell.absoluteLine - PATH_LINK_CONTEXT_ROWS,
+        cell.absoluteLine + PATH_LINK_CONTEXT_ROWS + 1,
+      );
+      const line = lines.find((line) => line.points.some((p) => p.row === cell.absoluteLine));
+      const offset =
+        line?.points.findIndex(
+          (p) => p.row === cell.absoluteLine && p.col <= cell.col && cell.col <= p.endCol,
+        ) ?? -1;
+      if (!line || offset < 0) {
         clearPoint();
         return;
       }
       const candidates = extractPathCandidatesAtOffset(
-        text,
+        line.text,
         offset,
         pathPointLimits(settings.maxPathLength),
       );
@@ -206,12 +207,19 @@ export function createPathLinkPointEvaluator(deps: PathLinkPointDeps): PathLinkP
         return;
       }
       deps.apply(
-        resolved.map(({ candidate, absPath, isDirectory }) => ({
-          ...mapLineCandidateToPathRange(cell.absoluteLine + 1, candidate, cells),
-          absPath,
-          token: candidate.text,
-          isDirectory,
-        })),
+        resolved.flatMap(({ candidate, absPath, isDirectory }) => {
+          const parts = mapPathLinkParts(line, candidate);
+          if (!pathLinkPartsCurrent(buffer, parts)) return [];
+          return parts.map(({ bufferLine, startCol, endCol, token }) => ({
+            bufferLine,
+            startCol,
+            endCol,
+            token,
+            absPath,
+            isDirectory,
+            ...(parts.length > 1 ? { pathParts: parts } : {}),
+          }));
+        }),
       );
     },
   };
