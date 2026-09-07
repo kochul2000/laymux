@@ -231,14 +231,19 @@ async function flickTerminalEdge(page: Page, edge: "left" | "right") {
   }, edge);
 }
 
-async function flickSurface(page: Page, selector: string, distance: number) {
+async function flickSurface(
+  page: Page,
+  selector: string,
+  distance: number,
+  edge?: "left" | "right",
+) {
   const target = page.locator(selector);
   await expect(target).toBeVisible();
   // Wait for the drawer transition before hit-testing native touch input.
   await target.click({ trial: true });
   const box = (await target.boundingBox())!;
-  const x = box.x + box.width / 2;
-  const y = box.y + box.height / 2;
+  const x = edge ? box.x + (edge === "left" ? 1 : box.width - 1) : box.x + box.width / 2;
+  const y = box.y + (edge ? 30 : box.height / 2);
   const cdp = await page.context().newCDPSession(page);
   try {
     await cdp.send("Input.dispatchTouchEvent", {
@@ -294,6 +299,38 @@ async function touchTerminalLeftEdge(page: Page, moves: number[] = []) {
       }),
     );
   }, moves);
+}
+
+for (const edge of ["left", "right"] as const) {
+  test(`blank terminal background opens the ${edge === "left" ? "menu" : "viewer"}`, async ({
+    context,
+    page,
+  }, testInfo) => {
+    await installRemoteExplorerMocks(context, true);
+    await page.setViewportSize({ width: 390, height: 720 });
+    await connectRemote(page, true);
+    await expect(page.locator("#terminal .xterm")).toBeVisible();
+    // Reproduce the exposed wrapper above a tail-anchored xterm crop.
+    await page.locator("#terminalSizer").evaluate((element) => {
+      element.style.setProperty("height", "100%", "important");
+      element.style.setProperty("top", "200px", "important");
+    });
+    await expect
+      .poll(() =>
+        page.locator("#terminal").evaluate((element, side) => {
+          const box = element.getBoundingClientRect();
+          return document.elementFromPoint(
+            box.x + (side === "left" ? 1 : box.width - 1),
+            box.y + 30,
+          )?.id;
+        }, edge),
+      )
+      .toBe("terminalViewport");
+    await flickSurface(page, "#terminal", edge === "left" ? 80 : -80, edge);
+    if (edge === "left") await expect(page.locator(".app")).toHaveClass(/nav-open/);
+    else await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath(`blank-${edge}-opened.png`) });
+  });
 }
 
 test("the header folder button appears with the capability and lists the cwd", async ({
