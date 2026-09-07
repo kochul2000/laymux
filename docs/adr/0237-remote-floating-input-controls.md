@@ -1,6 +1,6 @@
 # 0237. Remote 플로팅 입력은 기기 로컬 배치와 기존 액션을 공유한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-07
 - Source: 사용자 요구(방향키 2종·임의 개수 탭 버튼·상단바 액션), [api-contracts.md §13.4](../architecture/api-contracts.md#134-terminal-control)
 - 관계: ADR-0213의 행 배치 모델과 ADR-0228의 방향키 반복 정책을 확장한다.
