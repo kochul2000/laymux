@@ -31,6 +31,7 @@ interface CollectSettingsSnapshotOptions {
 export type TerminalAttributionState =
   | "identified"
   | "restorePending"
+  | "fresh"
   | "noAgent"
   | "activeButUnidentified"
   | "unknown";
@@ -82,7 +83,7 @@ function terminalAttributionCoverage(
 ): TerminalAttributionCoverage {
   const state = terminalAttributionState(terminalId, runtime);
   const identified = runtime.backendAttributions[terminalId];
-  if (state !== "identified" && state !== "restorePending") {
+  if (state !== "identified" && state !== "restorePending" && state !== "fresh") {
     return {
       terminalId,
       state,
@@ -111,6 +112,14 @@ function applyTerminalSessionFields(
 
   const attribution = terminalAttributionState(terminalId, runtime);
   if (attribution === "unknown") {
+    return savedView;
+  }
+  delete savedView.lastAgentFresh;
+  if (attribution === "fresh") {
+    delete savedView.lastClaudeSession;
+    delete savedView.lastCodexSession;
+    delete savedView.lastGrokSession;
+    savedView.lastAgentFresh = runtime.backendAttributions[terminalId].provider;
     return savedView;
   }
 

@@ -120,6 +120,7 @@ fn apply_claude_title_state(
 enum ValidatedStartupOverride {
     Claude(String),
     Codex(String),
+    CodexFresh(String),
     Grok(String),
 }
 
@@ -128,6 +129,7 @@ impl ValidatedStartupOverride {
         let (provider, command) = match self {
             Self::Claude(command) => ("claude", command),
             Self::Codex(command) => ("codex", command),
+            Self::CodexFresh(_) => return None,
             Self::Grok(command) => ("grok", command),
         };
         // Validation already requires the final token to be one safe resume ID.
@@ -159,7 +161,10 @@ fn plan_terminal_startup(
     }
 
     match validated_override {
-        Some(ValidatedStartupOverride::Codex(command)) => {
+        Some(
+            ValidatedStartupOverride::Codex(command)
+            | ValidatedStartupOverride::CodexFresh(command),
+        ) => {
             let codex_launcher_host = InitialExecutionHost::classify_spawn_target(
                 command.split_whitespace().next(),
                 windows,
@@ -266,7 +271,17 @@ pub async fn create_terminal_session(
     // commands. The launch command prefix is re-derived from settings here, so a
     // caller cannot smuggle flags the user did not configure.
     let validated_override = startup_command_override.and_then(|command| {
-        if super::is_valid_claude_startup_command_override(&command, &settings.claude.command) {
+        if command
+            == crate::settings::agent_command::resolve_agent_command(
+                &settings.codex.command,
+                crate::settings::agent_command::DEFAULT_CODEX_COMMAND,
+            )
+        {
+            Some(ValidatedStartupOverride::CodexFresh(command))
+        } else if super::is_valid_claude_startup_command_override(
+            &command,
+            &settings.claude.command,
+        ) {
             Some(ValidatedStartupOverride::Claude(command))
         } else if super::is_valid_codex_startup_command_override(&command, &settings.codex.command)
         {

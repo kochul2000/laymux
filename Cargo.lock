@@ -2176,7 +2176,7 @@ dependencies = [
 
 [[package]]
 name = "laymux"
-version = "0.12.20"
+version = "0.12.21"
 dependencies = [
  "aes-gcm",
  "axum",
@@ -2226,6 +2226,15 @@ dependencies = [
  "windows-sys 0.59.0",
  "zeroize",
  "zip 8.6.0",
+]
+
+[[package]]
+name = "laymux-wsl-codex-probe"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

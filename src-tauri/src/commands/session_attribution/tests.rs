@@ -1,6 +1,30 @@
 use super::*;
 
 #[test]
+fn fresh_requires_exact_noncolliding_codex_identity() {
+    let id = "new-empty".to_owned();
+    let identified = TerminalSessionAttribution {
+        generation: 7,
+        state: SessionAttributionState::Identified,
+        provider: Some("codex"),
+        session_id: Some(id.clone()),
+    };
+    assert_eq!(
+        apply_fresh(identified.clone(), Some(&id)).state,
+        SessionAttributionState::Fresh
+    );
+    assert_eq!(
+        apply_fresh(identified, Some(&"different".into())).state,
+        SessionAttributionState::Identified
+    );
+    let unknown = unknown_attribution(7);
+    assert_eq!(
+        apply_fresh(unknown, Some(&id)).state,
+        SessionAttributionState::Unknown
+    );
+}
+
+#[test]
 fn startup_between_probe_and_liveness_does_not_consume_resume() {
     let handle =
         crate::pty::PtyHandle::from_test_writer_for_generation(Box::new(std::io::sink()), 7)
@@ -279,11 +303,13 @@ fn provider_lookup_failure_is_scoped_to_the_affected_terminal() {
         attributions: HashMap::from([("terminal-b".into(), None)]),
         failed_terminal_ids: HashSet::from(["terminal-b".into()]),
         rollout_absence: HashMap::new(),
+        fresh_sessions: HashMap::new(),
     };
     let healthy = ProviderSessionLookup {
         attributions: HashMap::from([("terminal-a".into(), Some("session-a".into()))]),
         failed_terminal_ids: HashSet::new(),
         rollout_absence: HashMap::new(),
+        fresh_sessions: HashMap::new(),
     };
 
     assert!(!provider_lookup_failed_for_terminal(
@@ -357,6 +383,7 @@ fn provider_lookups_start_concurrently_within_one_close_budget() {
                 attributions: HashMap::new(),
                 failed_terminal_ids: HashSet::new(),
                 rollout_absence: HashMap::new(),
+                fresh_sessions: HashMap::new(),
             })
         }
     };

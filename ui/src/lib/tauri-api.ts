@@ -601,7 +601,13 @@ export function onComposerStarredEntriesChanged(
 
 export interface TerminalSessionAttribution {
   generation: number;
-  state: "identified" | "restorePending" | "noAgent" | "activeButUnidentified" | "unknown";
+  state:
+    | "identified"
+    | "restorePending"
+    | "fresh"
+    | "noAgent"
+    | "activeButUnidentified"
+    | "unknown";
   provider?: "claude" | "codex" | "grok";
   sessionId?: string;
 }

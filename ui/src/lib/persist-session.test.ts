@@ -356,6 +356,36 @@ describe("persistSession", () => {
     ).toMatchObject({ lastCodexSession: "saved-unvisited-session" });
   });
 
+  it("checkpoints a proven empty Codex without retaining the old resume ID", async () => {
+    const ws = useWorkspaceStore.getState();
+    ws.setPaneView(0, { type: "TerminalView", lastCodexSession: "old-session" });
+    const id = `terminal-${ws.workspaces[0].panes[0].id}`;
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+      [id]: { generation: 7, provider: "codex", state: "fresh", sessionId: "new-empty" },
+    });
+    await flushSessionCheckpoint({ reason: "update", requireConclusive: true });
+    const view = vi.mocked(saveSettings).mock.calls.at(-1)?.[0].workspaces[0].panes[0].view;
+    expect(view).toMatchObject({ lastAgentFresh: "codex" });
+    expect(view).not.toHaveProperty("lastCodexSession");
+    expect(useWorkspaceStore.getState().workspaces[0].panes[0].view).toMatchObject({
+      lastAgentFresh: "codex",
+    });
+  });
+
+  it("rejects two different empty sessions across the checkpoint barrier", async () => {
+    const id = "terminal-fresh-race";
+    vi.mocked(getTerminalSessionAttributions)
+      .mockResolvedValueOnce({
+        [id]: { generation: 7, provider: "codex", state: "fresh", sessionId: "empty-a" },
+      })
+      .mockResolvedValueOnce({
+        [id]: { generation: 7, provider: "codex", state: "fresh", sessionId: "empty-b" },
+      });
+    await expect(
+      flushSessionCheckpoint({ reason: "update", requireConclusive: true }),
+    ).rejects.toThrow();
+  });
+
   it("preserves an unconsumed resume and allows update without a frontend visit", async () => {
     const ws = useWorkspaceStore.getState();
     ws.setPaneView(0, { type: "TerminalView", lastCodexSession: "saved-session" });

@@ -67,6 +67,7 @@ const SESSION_VIEW_FIELDS = [
   "lastClaudeSession",
   "lastCodexSession",
   "lastGrokSession",
+  "lastAgentFresh",
 ] as const;
 let nextCheckpointCommitId = 1;
 let activeCheckpoint: Promise<SessionCheckpointCommit> | null = null;
@@ -144,7 +145,8 @@ function conclusiveFingerprint(
     if (
       entry.state !== "identified" &&
       entry.state !== "noAgent" &&
-      entry.state !== "restorePending"
+      entry.state !== "restorePending" &&
+      entry.state !== "fresh"
     ) {
       throw new Error(
         `Session attribution is not conclusive for ${entry.terminalId}: ${entry.state}`,

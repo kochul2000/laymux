@@ -1,4 +1,6 @@
+mod lifecycle;
 mod store;
+mod wsl;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -33,7 +35,15 @@ pub(crate) fn get_codex_session_ids_impl(
     session_max_age_hours: Option<u64>,
     state: &AppState,
 ) -> Result<HashMap<String, Option<String>>, crate::error::AppError> {
-    Ok(get_codex_session_lookup_impl(session_max_age_hours, state)?.attributions)
+    let mut lookup = get_codex_session_lookup_impl(session_max_age_hours, state)?;
+    // The legacy ID-only command cannot express a fresh launch. Never expose
+    // an unpersisted ID as a resumable conversation through that projection.
+    for terminal_id in lookup.fresh_sessions.keys() {
+        if let Some(id) = lookup.attributions.get_mut(terminal_id) {
+            *id = None;
+        }
+    }
+    Ok(lookup.attributions)
 }
 
 pub(crate) fn get_codex_session_lookup_impl(
@@ -54,6 +64,8 @@ pub(crate) fn get_codex_session_lookup_impl(
         .collect();
     let mut failed_terminal_ids = HashSet::new();
     let mut rollout_absence = HashMap::new();
+    let mut fresh_sessions = HashMap::new();
+    let deadline = std::time::Instant::now() + crate::constants::WSL_AGENT_PROBE_TIMEOUT;
     let terminal_codex_pids: Vec<(String, u32)> = if terminal_roots.is_empty() {
         Vec::new()
     } else {
@@ -78,8 +90,13 @@ pub(crate) fn get_codex_session_lookup_impl(
     for (terminal_id, pid) in &terminal_codex_pids {
         // Native candidates are observed, but have no WSL missing-FD evidence.
         rollout_absence.insert(terminal_id.clone(), false);
-        match store.find_session_for_pid_checked(*pid, session_max_age_hours) {
-            Ok(Some(session_id)) => candidates.push((terminal_id.clone(), session_id)),
+        match store.find_selection_for_pid_checked(*pid, session_max_age_hours) {
+            Ok(Some(session)) => {
+                if session.fresh {
+                    fresh_sessions.insert(terminal_id.clone(), session.id.clone());
+                }
+                candidates.push((terminal_id.clone(), session.id));
+            }
             Ok(None) => tracing::debug!(
                 pid,
                 "Codex PID could not be attributed to a valid top-level thread"
@@ -104,11 +121,27 @@ pub(crate) fn get_codex_session_lookup_impl(
                 );
                 let session_id = match process {
                     Some(process) => {
-                        match super::codex_session::store::find_session_from_rollout_paths_checked(
-                            &process.codex_rollout_paths(),
-                            session_max_age_hours,
-                        ) {
-                            Ok(session_id) => session_id,
+                        let selection = crate::wsl_probe::remaining_timeout(deadline)
+                            .ok_or_else(|| "Codex WSL deadline expired".to_owned())
+                            .and_then(|timeout| wsl::read_rows(&process, &terminal_id, timeout))
+                            .and_then(|rows| {
+                                let Some(selection) = lifecycle::select(&rows) else {
+                                    return Ok(None);
+                                };
+                                let home = process
+                                    .codex_home_dir()
+                                    .ok_or_else(|| "invalid WSL Codex home".to_owned())?;
+                                CodexSessionStore::for_guest(home)
+                                    .resolve_selection(selection, session_max_age_hours)
+                            });
+                        match selection {
+                            Ok(Some(session)) => {
+                                if session.fresh {
+                                    fresh_sessions.insert(terminal_id.clone(), session.id.clone());
+                                }
+                                Some(session.id)
+                            }
+                            Ok(None) => None,
                             Err(error) => {
                                 failed_terminal_ids.insert(terminal_id.clone());
                                 tracing::warn!(%error, "WSL Codex rollout lookup failed");
@@ -130,6 +163,7 @@ pub(crate) fn get_codex_session_lookup_impl(
         attributions: crate::process_tree::reject_duplicate_session_attributions(result, "Codex"),
         failed_terminal_ids,
         rollout_absence,
+        fresh_sessions,
     })
 }
 

@@ -189,8 +189,26 @@ jobs:
           echo "publish_android=$PUBLISH_ANDROID" >>"$GITHUB_OUTPUT"
           echo "commit_sha=$GITHUB_SHA" >>"$GITHUB_OUTPUT"
 
-  build:
+  wsl-probe:
     needs: prepare
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.commit_sha }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test and build static WSL companion
+        run: |
+          cargo test --locked -p laymux-wsl-codex-probe
+          bash scripts/build-wsl-probe.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wsl-codex-probe
+          path: src-tauri/gen/wsl/laymux-wsl-codex-probe
+          if-no-files-found: error
+
+  build:
+    needs: [prepare, wsl-probe]
     strategy:
       fail-fast: false
       # tauri-action merges each platform into the release's latest.json.
@@ -220,6 +238,13 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Download bundled WSL companion
+        if: runner.os == 'Windows'
+        uses: actions/download-artifact@v4
+        with:
+          name: wsl-codex-probe
+          path: src-tauri/gen/wsl
 
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'

@@ -10369,6 +10369,14 @@ describe("TerminalView", () => {
       });
     });
 
+    it("starts Codex without resume for a proven empty checkpoint", async () => {
+      render(
+        <TerminalView instanceId="t-codex-fresh" profile="PowerShell" lastAgentFresh="codex" />,
+      );
+      await vi.waitFor(() => expect(mockCreateTerminalSession).toHaveBeenCalled());
+      expect(mockCreateTerminalSession.mock.calls.at(-1)?.[8]).toBe("codex");
+    });
+
     it("passes codex resume when lastCodexSession is set", async () => {
       render(
         <TerminalView
