@@ -361,14 +361,17 @@
             <section id="terminalComposer" class="terminal-composer" aria-label="Terminal input composer" hidden>
               <ul id="composerHistoryList" class="composer-suggest-list" role="listbox" aria-label="Recent terminal input" hidden></ul>
               <ul id="composerAutocompleteList" class="composer-suggest-list" role="listbox" aria-label="Terminal input suggestions" hidden></ul>
-              <textarea
+              <div
+                role="textbox"
+                aria-multiline="true"
+                contenteditable="false"
                 id="composerInput"
                 class="composer-input"
                 aria-label="Compose terminal input"
                 autocomplete="off"
                 autocapitalize="off"
                 spellcheck="false"
-              ></textarea>
+              ></div>
             </section>
           </div>
         </div>

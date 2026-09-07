@@ -1200,7 +1200,7 @@ test.describe("remote mobile layout", () => {
     await page.locator("#terminal .xterm").tap();
     await expect(editor).toBeFocused();
     await page.keyboard.type("real xterm touch");
-    await expect(editor).toHaveValue("real xterm touch");
+    await expect(editor).toHaveText("real xterm touch");
 
     outputSocket!.send(
       JSON.stringify({
@@ -1222,7 +1222,7 @@ test.describe("remote mobile layout", () => {
     outputSocket!.send(Buffer.alloc(0));
     await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
     await expect(editor).toBeFocused();
-    await expect(editor).toHaveValue("real xterm touch");
+    await expect(editor).toHaveText("real xterm touch");
   });
 
   test("keeps terminal keyboard focus while sending every soft-key sequence", async ({ page }) => {

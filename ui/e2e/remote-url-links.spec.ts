@@ -1,5 +1,46 @@
-import { expect, test, type BrowserContext } from "@playwright/test";
+import { expect, test, type BrowserContext, type Locator } from "@playwright/test";
 import { fulfillRemoteClientAsset } from "./remote-client-assets";
+
+async function setComposerSelection(editor: Locator, text: string, start: number, end: number) {
+  await editor.evaluate(
+    (element, value) => {
+      element.textContent = value.text;
+      const textNode = element.firstChild!;
+      const range = document.createRange();
+      range.setStart(textNode, value.start);
+      range.setEnd(textNode, value.end);
+      window.getSelection()!.removeAllRanges();
+      window.getSelection()!.addRange(range);
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+    },
+    { text, start, end },
+  );
+}
+
+async function composerSelection(editor: Locator) {
+  return editor.evaluate((element) => {
+    const selected = window.getSelection();
+    const range = selected?.rangeCount ? selected.getRangeAt(0) : null;
+    if (
+      !range ||
+      !element.contains(range.startContainer) ||
+      !element.contains(range.endContainer)
+    ) {
+      return { text: element.textContent ?? "", start: -1, end: -1 };
+    }
+    const offset = (container: Node, boundary: number) => {
+      const prefix = document.createRange();
+      prefix.selectNodeContents(element);
+      prefix.setEnd(container, boundary);
+      return prefix.toString().length;
+    };
+    return {
+      text: element.textContent ?? "",
+      start: offset(range.startContainer, range.startOffset),
+      end: offset(range.endContainer, range.endOffset),
+    };
+  });
+}
 
 const navigation = {
   activeWorkspace: {
@@ -731,12 +772,7 @@ function registerTouchUrlTests(platform: string) {
           if (state !== "unfocused") await surface.focus();
           if (state === "collapsed") await page.locator("#focusTerminal").click();
           if (mode === "composer" && state !== "collapsed") {
-            await surface.evaluate((element) => {
-              const input = element as HTMLTextAreaElement;
-              input.value = "draft 한글";
-              input.setSelectionRange(2, 5);
-              input.dispatchEvent(new Event("input", { bubbles: true }));
-            });
+            await setComposerSelection(surface, "draft 한글", 2, 5);
           }
           if (state === "composing") {
             await surface.dispatchEvent("compositionstart", { data: "ㅎ" });
@@ -788,10 +824,7 @@ function registerTouchUrlTests(platform: string) {
             },
             { state, clipboard },
           );
-          const before = await surface.evaluate((element) => {
-            const input = element as HTMLTextAreaElement;
-            return { value: input.value, start: input.selectionStart, end: input.selectionEnd };
-          });
+          const before = mode === "composer" ? await composerSelection(surface) : null;
           await installTerminalFocusAttemptCounter(page);
           const { cdp, screenBox, cellWidth, y } = await longPressBravoCell(context, page);
           // Android/WebKit can also dispatch a native context menu for a hold;
@@ -844,12 +877,7 @@ function registerTouchUrlTests(platform: string) {
             await page.evaluate(() => (window as RemoteTerminalWindow).__terminalFocusAttempts),
           ).toBe(0);
           if (mode === "composer") {
-            expect(
-              await surface.evaluate((element) => {
-                const input = element as HTMLTextAreaElement;
-                return { value: input.value, start: input.selectionStart, end: input.selectionEnd };
-              }),
-            ).toEqual(before);
+            expect(await composerSelection(surface)).toEqual(before);
           }
         });
       }
@@ -987,7 +1015,7 @@ function registerTouchUrlTests(platform: string) {
         path: `../.screenshots/remote-selection-magnifier-${platform}-${role}.png`,
       });
       await expect(composer).toBeFocused();
-      await expect(composer).toHaveValue("draft 한글");
+      await expect(composer).toHaveText("draft 한글");
       expect(await page.evaluate(() => (window as RemoteTerminalWindow).__focusSteals)).toEqual({
         helperFocus: 0,
         composerBlur: 0,

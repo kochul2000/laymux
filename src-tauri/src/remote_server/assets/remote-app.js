@@ -1,3 +1,4 @@
+import { createComposerEditor } from "../../../../ui/src/remote/composer-editor.js";
 import { readPathLinkSelection, readPathLinkLines, mapPathLinkParts, pathLinkPartsCurrent, PATH_LINK_CONTEXT_ROWS } from "../../../../ui/src/lib/path-link-lines.ts";
 import {
   commandStatusIconName,
@@ -69,6 +70,7 @@ import {
         const terminalMetaEl = $("terminalMeta");
         const terminalComposer = $("terminalComposer");
         const composerInput = $("composerInput");
+        const composerEditor = createComposerEditor(composerInput);
         const composerHistoryList = $("composerHistoryList");
         const composerAutocompleteList = $("composerAutocompleteList");
         const composerStarEditorScrim = $("composerStarEditorScrim");
@@ -3309,7 +3311,7 @@ import {
           return true;
         }
 
-        // Fill the draft (and textarea) from a recall pick without routing
+        // Fill the draft and editor from a recall pick without routing
         // through the input event, so the input handler's re-arm logic does not
         // fire. Caret goes to the end so the user can keep typing.
         function setComposerDraftText(text) {
@@ -3319,10 +3321,11 @@ import {
             draft.text = text;
             draft.revision += 1;
           }
-          if (composerInput.value !== text) composerInput.value = text;
-          const end = composerInput.value.length;
+          draft.attachments = [];
+          composerEditor.setDraft(draft);
+          const end = composerEditor.value.length;
           try {
-            composerInput.setSelectionRange(end, end);
+            composerEditor.setSelectionRange(end, end);
           } catch (_) {}
           updateComposerControls();
         }
@@ -3423,7 +3426,7 @@ import {
               pick.addEventListener("mousedown", (event) => event.preventDefault());
               bindComposerLongPress(pick, suggestion);
             } else {
-              // mousedown (not click) so the textarea keeps focus through the pick.
+              // mousedown (not click) so the editor keeps focus through the pick.
               pick.addEventListener("mousedown", (event) => {
                 event.preventDefault();
                 onPick(raw);
@@ -3643,7 +3646,7 @@ import {
         }
 
         function composerOpacityState() {
-          if (composerInput.disabled) return "idle";
+          if (composerEditor.disabled) return "idle";
           const draft = composerDraft();
           if (
             Boolean(draft?.text) ||
@@ -3677,7 +3680,7 @@ import {
               !composerCollapsed &&
               !attachmentUploadInFlight,
           );
-          composerInput.disabled = !canEdit || attachmentUploadInFlight;
+          composerEditor.disabled = !canEdit || attachmentUploadInFlight;
           terminalComposer.dataset.canSend = canCommit ? "true" : "false";
           composerSendButton.disabled = !canCommit;
           const canAttach = Boolean(
@@ -3698,7 +3701,7 @@ import {
           if (!leaseId || !activeTerminalId) return;
           if (currentInputMode() === "direct") {
             terminal?.focus?.();
-          } else if (!composerCollapsed && !composerInput.disabled) {
+          } else if (!composerCollapsed && !composerEditor.disabled) {
             // A collapsed editor must not regain focus behind the user's back
             // (reconnect, attach-ready) — only the Keyboard button restores it.
             composerInput.focus({ preventScroll: true });
@@ -3725,7 +3728,7 @@ import {
               activeTerminalId !== tappedTerminalId ||
               currentInputMode() !== "composer" ||
               composerCollapsed ||
-              composerInput.disabled ||
+              composerEditor.disabled ||
               !fileViewerOverlayElement.hidden
             ) {
               return;
@@ -3799,8 +3802,7 @@ import {
           inputModeToggleButton.setAttribute("aria-label", inputModeActionLabel);
           setRemoteIcon(inputModeIcon, composerMode ? "Pencil" : "Keyboard");
 
-          const nextText = draft ? draft.text : "";
-          if (composerInput.value !== nextText) composerInput.value = nextText;
+          composerEditor.setDraft(draft);
 
           if (terminal) {
             if (composerMode) {
@@ -9497,8 +9499,8 @@ import {
             mode: currentInputMode(),
             revision: draft?.revision ?? 0,
             text: draft?.text ?? "",
-            selectionStart: composerInput.selectionStart ?? draft?.text.length ?? 0,
-            selectionEnd: composerInput.selectionEnd ?? draft?.text.length ?? 0,
+            selectionStart: composerEditor.selectionStart ?? draft?.text.length ?? 0,
+            selectionEnd: composerEditor.selectionEnd ?? draft?.text.length ?? 0,
           };
         }
 
@@ -9542,7 +9544,7 @@ import {
           return `"${normalized.replaceAll('"', '\\"')}"`;
         }
 
-        function insertComposerAttachmentText(snapshot, insertion) {
+        function insertComposerAttachmentText(snapshot, insertion, attachments = []) {
           const draft = composerDraft(snapshot.terminalId);
           if (!draft) return;
           const snapshotStillCurrent =
@@ -9557,13 +9559,19 @@ import {
           const after = draft.text.slice(end);
           const leadingSpace = before && !/\s$/.test(before) ? " " : "";
           const trailingSpace = after && !/^\s/.test(after) ? " " : "";
+          const insertedLength = leadingSpace.length + insertion.length + trailingSpace.length;
+          draft.attachments = [
+            ...(draft.attachments || []).filter((item) => item.end <= start),
+            ...attachments.map((item) => ({ ...item, start: start + leadingSpace.length + item.start, end: start + leadingSpace.length + item.end })),
+            ...(draft.attachments || []).filter((item) => item.start >= end).map((item) => ({ ...item, start: item.start + insertedLength - (end - start), end: item.end + insertedLength - (end - start) })),
+          ];
           draft.text = `${before}${leadingSpace}${insertion}${trailingSpace}${after}`;
           draft.revision += 1;
           if (activeTerminalId === snapshot.terminalId) {
             resetComposerSuggestions();
             renderInputSurface();
             const caret = before.length + leadingSpace.length + insertion.length;
-            composerInput.setSelectionRange(caret, caret);
+            composerEditor.setSelectionRange(caret, caret);
           }
         }
 
@@ -9629,6 +9637,8 @@ import {
           );
           try {
             const paths = [];
+            const attachments = [];
+            let pathOffset = 0;
             for (const file of files) {
               const response = await uploadRemoteAttachment(
                 snapshot,
@@ -9636,7 +9646,10 @@ import {
                 attempt.abortController.signal,
               );
               if (attachmentUploadAttempt?.token !== attempt.token) return false;
-              paths.push(formatAttachmentPath(response.path));
+              const path = formatAttachmentPath(response.path);
+              paths.push(path);
+              attachments.push({ start: pathOffset, end: pathOffset + path.length, path, name: file.name, image: file.type.startsWith("image/") });
+              pathOffset += path.length + 1;
             }
             if (
               snapshot.terminalId !== activeTerminalId ||
@@ -9646,7 +9659,7 @@ import {
             }
             const insertion = paths.join(" ");
             if (snapshot.mode === "composer") {
-              insertComposerAttachmentText(snapshot, insertion);
+              insertComposerAttachmentText(snapshot, insertion, attachments);
             } else {
               await writeTerminalInput(
                 snapshot.terminalId,
@@ -9791,6 +9804,7 @@ import {
                 draft.text === submission.text
               ) {
                 draft.text = "";
+                draft.attachments = [];
                 draft.revision += 1;
               }
               if (activeTerminalId === terminalId) {
@@ -12501,8 +12515,10 @@ import {
         });
         composerInput.addEventListener("input", () => {
           const draft = composerDraft();
-          if (!draft || draft.text === composerInput.value) return;
-          draft.text = composerInput.value;
+          if (!draft) return;
+          if (draft.text === composerEditor.value && JSON.stringify(draft.attachments || []) === JSON.stringify(composerEditor.attachments)) return;
+          draft.text = composerEditor.value;
+          draft.attachments = composerEditor.attachments;
           draft.revision += 1;
           // Manual editing closes the Tab recall popup and re-arms autocomplete
           // (undo a prior Escape), clearing any active selection so the fresh
@@ -12516,13 +12532,19 @@ import {
         composerInput.addEventListener("paste", (event) => {
           if (currentInputMode() !== "composer") return;
           const text = event.clipboardData?.getData("text/plain") || "";
-          if (!text || !shouldConvertLongTextToAttachment(text)) return;
+          if (!text || !shouldConvertLongTextToAttachment(text)) {
+            event.preventDefault();
+            composerEditor.replaceSelection(text);
+            return;
+          }
           if (attachmentTextByteLength(text) > remoteAttachmentMaxBytes) {
             setStatus(
               `${remoteAttachmentTooLargeMessage("Pasted text")} The text was kept in the composer.`,
               false,
               true,
             );
+            event.preventDefault();
+            composerEditor.replaceSelection(text);
             return;
           }
           if (attachmentUploadInFlight) {
@@ -12536,7 +12558,11 @@ import {
             return;
           }
           const snapshot = attachmentSelectionSnapshot();
-          if (!snapshot || !composerReady) return;
+          if (!snapshot || !composerReady) {
+            event.preventDefault();
+            composerEditor.replaceSelection(text);
+            return;
+          }
           event.preventDefault();
           event.stopImmediatePropagation();
           void attachRemoteFiles([longTextAttachmentFile(text)], {
