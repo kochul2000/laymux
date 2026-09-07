@@ -5565,9 +5565,12 @@ import {
           if (!element || element.dataset.touchSelectionBridge === "true") return;
           element.dataset.touchSelectionBridge = "true";
 
+          // The crop can expose blank viewport above xterm; it must receive
+          // the same edge-opening gestures as the rendered terminal rows.
+          const surface = $("terminalViewport");
           const pointerOptions = { passive: false };
 
-          element.addEventListener("pointerdown", (event) => {
+          surface.addEventListener("pointerdown", (event) => {
             if (!isTouchPointer(event)) return;
             const point = rememberTouchPointer(event);
             event.preventDefault();
@@ -5578,7 +5581,7 @@ import {
               return;
             }
             if (touchGesture !== null) return;
-            const rect = element.getBoundingClientRect();
+            const rect = surface.getBoundingClientRect();
             const navigationOpen = navToggleButton.getAttribute("aria-expanded") === "true";
             const edge =
               edgeSwipeDrawersEnabled && mobileLayout && !navigationOpen && fileViewerOverlayElement.hidden
@@ -5605,7 +5608,7 @@ import {
             );
           }, pointerOptions);
 
-          element.addEventListener("pointermove", (event) => {
+          surface.addEventListener("pointermove", (event) => {
             if (!isTouchPointer(event) || !touchPointers.has(event.pointerId)) return;
             const point = rememberTouchPointer(event);
             event.preventDefault();
@@ -5703,8 +5706,8 @@ import {
             copySelectionAfterInteraction();
           };
 
-          element.addEventListener("pointerup", finishTouchSelection, pointerOptions);
-          element.addEventListener("pointercancel", finishTouchSelection, pointerOptions);
+          surface.addEventListener("pointerup", finishTouchSelection, pointerOptions);
+          surface.addEventListener("pointercancel", finishTouchSelection, pointerOptions);
         }
 
         // CSI query sequences whose only effect is to make the terminal emit a
