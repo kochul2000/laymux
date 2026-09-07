@@ -23,6 +23,7 @@ async function openRemote(
   page: Page,
   inputMode: "composer" | "direct",
   options: {
+    failFirstTerminalInput?: boolean;
     failFirstAttachment?: boolean;
     stallFirstAttachment?: boolean;
     stallFirstTerminalInput?: boolean;
@@ -144,6 +145,10 @@ async function openRemote(
     }
     if (url.pathname === "/remote/v1/terminals/term-1/input") {
       terminalInputs.push(route.request().postDataJSON() as TerminalInputRequest);
+      if (options.failFirstTerminalInput && terminalInputs.length === 1) {
+        await route.fulfill({ status: 500, json: { error: "forced input failure" } });
+        return;
+      }
       if (options.stallFirstTerminalInput && terminalInputs.length === 1) {
         await firstTerminalInputGate;
       }
@@ -199,6 +204,248 @@ async function openRemote(
 }
 
 test.describe("remote terminal attachments", () => {
+  test("preserves a chip-adjacent Hangul selection during composition", async ({ page }) => {
+    await openRemote(page, "composer");
+    const editor = page.locator("#composerInput");
+    await chooseAttachmentFiles(page, [
+      { name: "first.png", mimeType: "image/png", buffer: Buffer.from("first") },
+      { name: "second.png", mimeType: "image/png", buffer: Buffer.from("second") },
+    ]);
+    await editor.focus();
+    await editor
+      .locator(".composer-attachment")
+      .last()
+      .evaluate((chip) => {
+        const range = document.createRange();
+        range.setStartAfter(chip);
+        range.collapse(true);
+        window.getSelection()!.removeAllRanges();
+        window.getSelection()!.addRange(range);
+      });
+    await page.keyboard.insertText(" 한글");
+    await editor.evaluate((element) => {
+      const text = [...element.childNodes].find((node) => node.textContent?.includes("한글"))!;
+      const range = document.createRange();
+      range.setStart(text, text.textContent!.length - 2);
+      range.setEnd(text, text.textContent!.length);
+      window.getSelection()!.removeAllRanges();
+      window.getSelection()!.addRange(range);
+      element.dispatchEvent(new CompositionEvent("compositionstart", { data: "한" }));
+      element.dispatchEvent(new CompositionEvent("compositionupdate", { data: "한글" }));
+      element.dispatchEvent(
+        new InputEvent("input", { bubbles: true, data: "한글", isComposing: true }),
+      );
+    });
+
+    await expect(editor.locator(".composer-attachment")).toHaveText(["Image 1", "Image 2"]);
+    await expect(editor).toHaveText("Image 1 Image 2 한글");
+    expect(await editor.evaluate(() => window.getSelection()?.toString())).toBe("한글");
+    await editor.dispatchEvent("compositionend", { data: "한글" });
+    await editor
+      .locator(".composer-attachment")
+      .first()
+      .evaluate((chip) => {
+        const range = document.createRange();
+        range.selectNode(chip);
+        window.getSelection()!.removeAllRanges();
+        window.getSelection()!.addRange(range);
+      });
+    await editor.press("Backspace");
+    await expect(editor.locator(".composer-attachment")).toHaveText(["Image"]);
+  });
+
+  test("replaces a selected attachment and copies its original path", async ({ page }) => {
+    const { terminalInputs } = await openRemote(page, "composer");
+    const editor = page.locator("#composerInput");
+    await chooseAttachmentFiles(page, [
+      { name: "one.txt", mimeType: "text/plain", buffer: Buffer.from("one") },
+      { name: "two.txt", mimeType: "text/plain", buffer: Buffer.from("two") },
+    ]);
+    await expect(editor.locator(".composer-attachment")).toHaveCount(2);
+    await editor
+      .locator(".composer-attachment")
+      .first()
+      .evaluate((chip) => {
+        const range = document.createRange();
+        range.selectNode(chip);
+        window.getSelection()!.removeAllRanges();
+        window.getSelection()!.addRange(range);
+      });
+    await chooseAttachmentFiles(page, {
+      name: "new.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("new"),
+    });
+    await expect(editor.locator(".composer-attachment")).toHaveText(["new.txt", "two.txt"]);
+    const copied = await editor.evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      window.getSelection()!.removeAllRanges();
+      window.getSelection()!.addRange(range);
+      const clipboardData = new DataTransfer();
+      element.dispatchEvent(
+        new ClipboardEvent("copy", { bubbles: true, cancelable: true, clipboardData }),
+      );
+      return clipboardData.getData("text/plain");
+    });
+    expect(copied).toBe("C:\\Temp\\remote-3-new.txt C:\\Temp\\remote-2-two.txt");
+    await editor.press("Backspace");
+    await expect(editor.locator(".composer-attachment")).toHaveCount(0);
+    await page.keyboard.insertText("삭제 완료");
+    await editor.press("Enter");
+    await expect.poll(() => terminalInputs.length).toBe(1);
+    expect(terminalInputs[0].text).toBe("삭제 완료");
+  });
+
+  test("moves across a chip and deletes it forwards without touching its neighbours", async ({
+    page,
+  }) => {
+    const { terminalInputs } = await openRemote(page, "composer");
+    const editor = page.locator("#composerInput");
+    await chooseAttachmentFiles(page, [
+      { name: "one.txt", mimeType: "text/plain", buffer: Buffer.from("one") },
+      { name: "two.txt", mimeType: "text/plain", buffer: Buffer.from("two") },
+    ]);
+    await expect(editor.locator(".composer-attachment")).toHaveCount(2);
+    await editor.press("ArrowLeft");
+    await editor.press("Delete");
+    await expect(editor.locator(".composer-attachment")).toHaveText(["one.txt"]);
+    await editor.press("ArrowLeft");
+    await editor.press("ArrowLeft");
+    await page.keyboard.insertText("앞 ");
+    await editor.press("Enter");
+    await expect.poll(() => terminalInputs.length).toBe(1);
+    expect(terminalInputs[0].text).toBe("앞 C:\\Temp\\remote-1-one.txt ");
+  });
+
+  test("mobile beforeinput removes a selected chip with text and preserves the remaining file", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const { terminalInputs } = await openRemote(page, "composer");
+    const editor = page.locator("#composerInput");
+    await editor.fill("비교해줘 ");
+    await chooseAttachmentFiles(page, [
+      { name: "screen.png", mimeType: "image/png", buffer: Buffer.from("image") },
+      {
+        name: "기획서의아주긴파일명이있는최종수정본.pdf",
+        mimeType: "application/pdf",
+        buffer: Buffer.from("pdf"),
+      },
+    ]);
+    await expect(editor.locator(".composer-attachment")).toHaveCount(2);
+    await page.screenshot({ path: "test-results/remote-attachment-chips-mobile.png" });
+    await editor.evaluate((element) => {
+      const range = document.createRange();
+      range.setStart(element, 0);
+      range.setEndAfter(element.querySelector(".composer-attachment")!);
+      window.getSelection()!.removeAllRanges();
+      window.getSelection()!.addRange(range);
+      element.dispatchEvent(
+        new InputEvent("beforeinput", {
+          bubbles: true,
+          cancelable: true,
+          inputType: "deleteContentBackward",
+        }),
+      );
+    });
+    await expect(editor.locator(".composer-attachment")).toHaveCount(1);
+    await editor.press("Enter");
+    await expect.poll(() => terminalInputs.length).toBe(1);
+    expect(terminalInputs[0].text).toBe(
+      " C:\\Temp\\remote-2-기획서의아주긴파일명이있는최종수정본.pdf",
+    );
+  });
+
+  test("preserves chips on failed send and quotes the original path on retry", async ({ page }) => {
+    const { terminalInputs } = await openRemote(page, "composer", { failFirstTerminalInput: true });
+    const editor = page.locator("#composerInput");
+    await chooseAttachmentFiles(page, {
+      name: "a b.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("text"),
+    });
+    await expect(editor.locator(".composer-attachment")).toHaveText(["a b.txt"]);
+    await editor.press("Enter");
+    await expect(page.locator("#status")).toContainText("Input failed");
+    await expect(editor.locator(".composer-attachment")).toHaveCount(1);
+    await page.keyboard.insertText(" 확인해줘");
+    await editor.press("Enter");
+    await expect.poll(() => terminalInputs.length).toBe(2);
+    expect(terminalInputs[1].text).toBe('"C:\\Temp\\remote-1-a b.txt" 확인해줘');
+    await expect(editor).toBeEmpty();
+  });
+
+  test("retains attachment identity when text is edited during a send and input mode changes", async ({
+    page,
+  }) => {
+    const { terminalInputs, releaseFirstTerminalInput } = await openRemote(page, "composer", {
+      stallFirstTerminalInput: true,
+    });
+    const editor = page.locator("#composerInput");
+    await chooseAttachmentFiles(page, {
+      name: "notes.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("text"),
+    });
+    await expect(editor.locator(".composer-attachment")).toHaveCount(1);
+    await editor.press("Enter");
+    await expect.poll(() => terminalInputs.length).toBe(1);
+    await page.keyboard.insertText(" 다음 질문");
+    releaseFirstTerminalInput();
+    await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
+    await page.locator("#keyBarToggle").click();
+    await page.locator("#inputModeToggle").click();
+    await page.locator("#inputModeToggle").click();
+    await expect(editor).toHaveText("notes.txt 다음 질문");
+    await expect(editor.locator(".composer-attachment")).toHaveCount(1);
+    await editor.press("Enter");
+    await expect.poll(() => terminalInputs.length).toBe(2);
+    expect(terminalInputs[1].text).toBe("C:\\Temp\\remote-1-notes.txt 다음 질문");
+  });
+
+  test("pastes paths and HTML as plain text without creating attachments", async ({ page }) => {
+    const { terminalInputs } = await openRemote(page, "composer");
+    const editor = page.locator("#composerInput");
+    await editor.focus();
+    await editor.evaluate((element) => {
+      const clipboardData = new DataTransfer();
+      clipboardData.setData("text/plain", "C:\\normal.txt\n<Image>");
+      clipboardData.setData("text/html", '<span class="composer-attachment">forged</span>');
+      element.dispatchEvent(
+        new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData }),
+      );
+    });
+    await expect(editor.locator(".composer-attachment")).toHaveCount(0);
+    await editor.press("Enter");
+    await expect.poll(() => terminalInputs.length).toBe(1);
+    expect(terminalInputs[0].text).toBe("C:\\normal.txt\n<Image>");
+  });
+
+  test("renders one atomic inline chip per file and sends only the remaining paths", async ({
+    page,
+  }) => {
+    const { terminalInputs } = await openRemote(page, "composer");
+    const editor = page.locator("#composerInput");
+    await editor.fill("비교해줘");
+    await chooseAttachmentFiles(page, [
+      { name: "first.png", mimeType: "image/png", buffer: Buffer.from("image") },
+      { name: "second.png", mimeType: "image/png", buffer: Buffer.from("image") },
+      { name: "기획서.pdf", mimeType: "application/pdf", buffer: Buffer.from("pdf") },
+    ]);
+    await expect(editor.locator(".composer-attachment")).toHaveCount(3);
+    await expect(editor).toHaveText("비교해줘 Image 1 Image 2 기획서.pdf");
+    await expect(editor.locator("button")).toHaveCount(0);
+    await editor.press("Backspace");
+    await expect(editor.locator(".composer-attachment")).toHaveCount(2);
+    await editor.press("Enter");
+    await expect.poll(() => terminalInputs.length).toBe(1);
+    expect(terminalInputs[0].text).toBe(
+      "비교해줘 C:\\Temp\\remote-1-first.png C:\\Temp\\remote-2-second.png ",
+    );
+    await expect(editor).toBeEmpty();
+  });
+
   test("opens the file chooser after Attach file is moved to the main row", async ({ page }) => {
     const { attachments } = await openRemote(page, "composer", { attachmentZone: "main" });
     await expect(page.locator('#mainActionRow [data-segment="left"] > #attachFile')).toBeVisible();
@@ -210,7 +457,7 @@ test.describe("remote terminal attachments", () => {
     });
 
     await expect.poll(() => attachments.length).toBe(1);
-    await expect(page.locator("#composerInput")).toHaveValue("C:\\Temp\\remote-1-moved.txt");
+    await expect(page.locator("#composerInput")).toHaveText("moved.txt");
   });
 
   test("uploads selected image and text files and inserts their host paths into the composer", async ({
@@ -237,9 +484,7 @@ test.describe("remote terminal attachments", () => {
       { fileName: "pixel.png", mimeType: "image/png" },
     ]);
     expect(Buffer.from(attachments[0].data, "base64").toString("utf8")).toBe("remote notes");
-    await expect(page.locator("#composerInput")).toHaveValue(
-      "C:\\Temp\\remote-1-notes.txt C:\\Temp\\remote-2-pixel.png",
-    );
+    await expect(page.locator("#composerInput")).toHaveText("notes.txt Image");
     expect(terminalInputs).toEqual([]);
   });
 
@@ -257,7 +502,7 @@ test.describe("remote terminal attachments", () => {
     });
 
     await expect.poll(() => attachments.length).toBe(1);
-    await expect(page.locator("#composerInput")).toHaveValue("C:\\Temp\\remote-1-android.txt");
+    await expect(page.locator("#composerInput")).toHaveText("android.txt");
   });
 
   test("does not carry a chooser focus retry into a replacement lease", async ({ page }) => {
@@ -284,7 +529,7 @@ test.describe("remote terminal attachments", () => {
     await page.waitForTimeout(300);
 
     expect(attachments).toEqual([]);
-    await expect(page.locator("#composerInput")).toHaveValue("");
+    await expect(page.locator("#composerInput")).toHaveText("");
     await page.locator("#attachmentInput").evaluate((element: HTMLInputElement) => {
       element.dispatchEvent(new Event("change", { bubbles: true }));
     });
@@ -310,7 +555,7 @@ test.describe("remote terminal attachments", () => {
     expect(attachments[0].fileName).toBe("pasted-text.txt");
     expect(attachments[0].mimeType).toBe("text/plain");
     expect(Buffer.from(attachments[0].data, "base64").toString("utf8")).toBe(pastedText);
-    await expect(page.locator("#composerInput")).toHaveValue("C:\\Temp\\remote-1-pasted-text.txt");
+    await expect(page.locator("#composerInput")).toHaveText("pasted-text.txt");
     expect(terminalInputs).toEqual([]);
   });
 
@@ -360,10 +605,10 @@ test.describe("remote terminal attachments", () => {
       buffer: Buffer.from("fresh", "utf8"),
     });
     await expect.poll(() => attachments.length).toBe(2);
-    await expect(page.locator("#composerInput")).toHaveValue("C:\\Temp\\remote-2-fresh.txt");
+    await expect(page.locator("#composerInput")).toHaveText("fresh.txt");
     releaseFirstAttachment();
     await page.waitForTimeout(50);
-    await expect(page.locator("#composerInput")).toHaveValue("C:\\Temp\\remote-2-fresh.txt");
+    await expect(page.locator("#composerInput")).toHaveText("fresh.txt");
     await expect(page.locator("#attachFile")).toBeEnabled();
   });
 
@@ -394,11 +639,11 @@ test.describe("remote terminal attachments", () => {
       buffer: Buffer.from("fresh", "utf8"),
     });
     await expect.poll(() => attachments.length).toBe(2);
-    await expect(page.locator("#composerInput")).toHaveValue("C:\\Temp\\remote-2-fresh.txt");
+    await expect(page.locator("#composerInput")).toHaveText("fresh.txt");
 
     releaseFirstAttachment();
     await page.waitForTimeout(50);
-    await expect(page.locator("#composerInput")).toHaveValue("C:\\Temp\\remote-2-fresh.txt");
+    await expect(page.locator("#composerInput")).toHaveText("fresh.txt");
     await expect(page.locator("#attachFile")).toBeEnabled();
   });
 

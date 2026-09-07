@@ -252,6 +252,7 @@ test.describe("remote terminal font", () => {
     // Attach and navigation refresh both re-arm the attempt.
     await page.locator("#navToggle").click();
     // Refresh lives in the drawer's connection view; the drawer opens on workspace.
+    await page.locator("#drawerSettingsButton").click();
     await page.locator("#drawerConnectionButton").click();
     await page.locator("#refresh").click();
     await expect
@@ -277,6 +278,7 @@ test.describe("remote terminal font", () => {
     await connectRemote(page);
 
     await page.locator("#navToggle").click();
+    await page.locator("#drawerSettingsButton").click();
     await page.locator("#drawerConnectionButton").click();
     for (let refresh = 0; refresh < 4; refresh += 1) {
       await page.locator("#refresh").click();

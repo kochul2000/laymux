@@ -83,6 +83,47 @@ async function dragChipOnto(page: Page, sourceId: string, targetId: string, toRi
 }
 
 test.describe("Remote input action layout", () => {
+  test("행별 버튼 크기를 즉시 적용하고 이동·복원·기본값을 유지한다", async ({ page }) => {
+    await openMarkup(page);
+    await page.locator("#keyBarToggle").click();
+    const mainKey = page.locator('#mainActionRow [data-key="c-c"]');
+    const keysKey = page.locator('#keyRow [data-key="tab"]');
+    const height = (target: ReturnType<Page["locator"]>) =>
+      target.evaluate((element) => element.getBoundingClientRect().height);
+    const mainHeight = await height(mainKey);
+    const keysHeight = await height(keysKey);
+    await page.locator("#drawerSettingsButton").click();
+    await expect(page.locator("#remoteMainButtonScale")).toHaveText("100%");
+    for (let i = 0; i < 6; i++)
+      await page.getByRole("button", { name: "Increase Main button size", exact: true }).click();
+    for (let i = 0; i < 2; i++)
+      await page.getByRole("button", { name: "Decrease Keys button size", exact: true }).click();
+    await expect(page.locator("#remoteMainButtonScale")).toHaveText("160%");
+    await expect(page.locator("#remoteKeysButtonScale")).toHaveText("80%");
+    await expect(
+      page.getByRole("button", { name: "Increase Main button size", exact: true }),
+    ).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "Decrease Keys button size", exact: true }),
+    ).toBeDisabled();
+    expect(await height(mainKey)).toBeGreaterThan(mainHeight * 1.4);
+    expect(await height(keysKey)).toBeCloseTo(keysHeight * 0.8, 0);
+    await place(page, "soft:c-c", "Ctrl+C (interrupt)", "expanded:center");
+    expect(await height(page.locator('#keyRow [data-key="c-c"]'))).toBeCloseTo(keysHeight * 0.8, 0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+    await page.reload();
+    await page.setContent(remoteClientMarkupWithoutXterm());
+    await expect(page.locator("#remoteMainButtonScale")).toHaveText("160%");
+    await expect(page.locator("#remoteKeysButtonScale")).toHaveText("80%");
+    await page.locator("#drawerSettingsButton").click();
+    await page.getByRole("button", { name: "Reset button sizes", exact: true }).click();
+    await expect(page.locator("#remoteMainButtonScale")).toHaveText("100%");
+    await expect(page.locator("#remoteKeysButtonScale")).toHaveText("100%");
+    expect(
+      await page.evaluate(() => JSON.parse(localStorage.getItem("laymux.remote.displaySettings")!)),
+    ).toMatchObject({ mainButtonScale: 100, keysButtonScale: 100 });
+  });
+
   test("defaults to segment-aligned rows and keeps 390px chrome on one row", async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem("laymux.remote.inputMode", "composer"));
     await openMarkup(page);
@@ -90,9 +131,7 @@ test.describe("Remote input action layout", () => {
     await expect
       .poll(() => renderedSegmentActions(page, "mainActionRow", "left"))
       .toEqual(["soft:c-c", "soft:q", "soft:esc"]);
-    await expect
-      .poll(() => renderedSegmentActions(page, "mainActionRow", "center"))
-      .toEqual([]);
+    await expect.poll(() => renderedSegmentActions(page, "mainActionRow", "center")).toEqual([]);
     await expect
       .poll(() => renderedSegmentActions(page, "mainActionRow", "right"))
       .toEqual(["keyboard", "keys", "send"]);
@@ -121,12 +160,7 @@ test.describe("Remote input action layout", () => {
     await expect(page.locator("#keyBar")).toBeVisible();
     await expect
       .poll(() => renderedSegmentActions(page, "keyRow", "left"))
-      .toEqual([
-        "composer",
-        "soft:navPad",
-        "soft:tab",
-        "soft:stab",
-      ]);
+      .toEqual(["composer", "soft:navPad", "soft:tab", "soft:stab"]);
     await expect.poll(() => renderedSegmentActions(page, "keyRow", "center")).toEqual([]);
     await expect
       .poll(() => renderedSegmentActions(page, "keyRow", "right"))
@@ -422,6 +456,64 @@ test.describe("Remote input action layout", () => {
     await page.reload();
     await page.setContent(remoteClientMarkupWithoutXterm());
     await expect(page.locator('#keyRow [data-input-action^="soft:u-"]')).toHaveText("C→");
+  });
+
+  test("persists explicit Send Enter independently from raw newline bytes", async ({ page }) => {
+    await openMarkup(page);
+    await page.locator("#drawerSettingsButton").click();
+    await page.getByLabel("Custom key kind").selectOption("raw");
+    await expect(page.getByLabel("Send Enter")).not.toBeChecked();
+    await page.getByLabel("Custom key label").fill("Run");
+    await page.getByLabel("Custom key sequence").fill("run\\n");
+    await page.getByLabel("Send Enter").check();
+    await page.getByRole("button", { name: "Add custom key" }).click();
+    await expect(page.getByLabel("Send Enter")).not.toBeChecked();
+    const [key] = (await storedConfig(page)).userKeys;
+    expect(key).toMatchObject({ label: "Run", seq: "run\n", submit: true });
+    await page.reload();
+    await page.setContent(remoteClientMarkupWithoutXterm());
+    await page.locator("#drawerSettingsButton").click();
+    await page.getByLabel("Custom key kind").selectOption("raw");
+    await page.getByLabel("Custom key label").fill("Raw");
+    await page.getByLabel("Custom key sequence").fill("run\\n");
+    await page.getByRole("button", { name: "Add custom key" }).click();
+    expect((await storedConfig(page)).userKeys).toEqual([
+      key,
+      expect.objectContaining({ label: "Raw", seq: "run\n", submit: false }),
+    ]);
+    await page.screenshot({ path: "test-results/remote-raw-send-enter.png" });
+  });
+
+  test("inserts common raw escapes without requiring a backslash key", async ({ page }) => {
+    await openMarkup(page);
+    await page.locator("#drawerSettingsButton").click();
+    await page.getByLabel("Custom key kind").selectOption("raw");
+
+    const sequence = page.getByLabel("Custom key sequence");
+    await page.getByLabel("Custom key label").fill("Run");
+    for (const [name, value] of [
+      ["Esc", "\\e"],
+      ["Enter", "\\r"],
+      ["Tab", "\\t"],
+      ["LF", "\\n"],
+      ["Hex", "\\x"],
+      ["Backslash", "\\\\"],
+    ]) {
+      await sequence.fill("");
+      await page.getByRole("button", { name: `Insert ${name} escape` }).click();
+      await expect(sequence).toHaveValue(value);
+      await expect(sequence).toBeFocused();
+    }
+    await sequence.fill("run");
+    await page.getByRole("button", { name: "Insert Enter escape" }).click();
+    await expect(sequence).toHaveValue("run\\r");
+    await page.getByRole("button", { name: "Add custom key" }).click();
+
+    await expect
+      .poll(async () =>
+        ((await storedConfig(page)).userKeys || []).map((entry: { seq: string }) => entry.seq),
+      )
+      .toEqual(["run\r"]);
   });
 
   test("updates the Keys-row empty state when Send becomes visible in Composer", async ({

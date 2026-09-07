@@ -419,6 +419,7 @@ test("selected desktop-valid relative file is underlined and opens Remote FileVi
   await releaseHold.started.promise;
   await page.locator("#navToggle").click();
   // Exit lives in the drawer's connection view; the drawer opens on workspace.
+  await page.locator("#drawerSettingsButton").click();
   await page.locator("#drawerConnectionButton").click();
   await page.locator("#exit").click();
   releaseHold.release.resolve();

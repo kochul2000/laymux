@@ -33,9 +33,9 @@ const packageInputHash = (packageName) => {
 
 const lines = [
   "GENERATED FILE - DO NOT EDIT.",
-  "Sources: src-tauri/src/remote_server/assets/remote-app.{js,css} + ui/src/remote/remote-icons.js + ui/src/lib/codex-transcript-wheel.ts + lucide package-lock identity",
+  "Sources: src-tauri/src/remote_server/assets/remote-app.{js,css} + ui/src/remote/{composer-editor,remote-icons}.js + ui/src/lib/codex-transcript-wheel.ts + lucide package-lock identity",
   "Rebuild: cd ui && npm run build:remote-page",
-  `Source-SHA256: remote-app.js=${assetSourceHash("remote-app.js")} remote-app.css=${assetSourceHash("remote-app.css")} remote-icons.js=${fileHash(REMOTE_ICONS_SOURCE)} codex-transcript-wheel.ts=${fileHash(CODEX_TRANSCRIPT_WHEEL_SOURCE)} lucide-package=${packageInputHash("lucide")}`,
+  `Source-SHA256: remote-app.js=${assetSourceHash("remote-app.js")} remote-app.css=${assetSourceHash("remote-app.css")} remote-icons.js=${fileHash(REMOTE_ICONS_SOURCE)} codex-transcript-wheel.ts=${fileHash(CODEX_TRANSCRIPT_WHEEL_SOURCE)} path-link-lines.ts=${fileHash(path.resolve(SCRIPT_DIR, "../src/lib/path-link-lines.ts"))} terminal-cell-map.ts=${fileHash(path.resolve(SCRIPT_DIR, "../src/lib/terminal-cell-map.ts"))} composer-editor.js=${fileHash(path.resolve(SCRIPT_DIR, "../src/remote/composer-editor.js"))} lucide-package=${packageInputHash("lucide")}`,
   "Drift from the sources is caught by ui/src/remote/remote-page-bundle.test.ts",
 ];
 

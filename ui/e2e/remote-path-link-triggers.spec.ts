@@ -294,7 +294,7 @@ async function connectRemote(
 }
 
 /** Viewport-relative centre of a character cell, from the live xterm geometry. */
-async function cellPoint(page: Page, column: number): Promise<{ x: number; y: number }> {
+async function cellPoint(page: Page, column: number, row = 0): Promise<{ x: number; y: number }> {
   const screen = page.locator(".xterm-screen");
   const box = await screen.boundingBox();
   expect(box).not.toBeNull();
@@ -305,8 +305,68 @@ async function cellPoint(page: Page, column: number): Promise<{ x: number; y: nu
   });
   const cellWidth = box!.width / geometry.cols;
   const cellHeight = box!.height / geometry.rows;
-  return { x: box!.x + cellWidth * (column + 0.5), y: box!.y + cellHeight * 0.5 };
+  return { x: box!.x + cellWidth * (column + 0.5), y: box!.y + cellHeight * (row + 0.5) };
 }
+
+for (const mode of ["screen", "point", "selection"] as const) {
+  for (const wrap of ["soft", "hard"] as const) {
+    test(`${mode}: ${wrap} 줄바꿈 경로의 뒷줄을 눌러 전체 파일을 연다`, async ({
+      context,
+      page,
+    }) => {
+      const harness = await connectRemote(context, page, [mode]);
+      const cols = await page.evaluate(() => (window as CapturedTerminalWindow).__remoteTerm!.cols);
+      const prefix = "  ADR " + "x".repeat(cols - 12) + " (";
+      const output = prefix + "src/" + (wrap === "hard" ? "\r\n  " : "") + "main.rs).";
+      harness.sendDelta("\x1b[2J\x1b[H" + output);
+      await expect
+        .poll(async () =>
+          page.evaluate(() =>
+            (window as CapturedTerminalWindow)
+              .__remoteTerm!.buffer.active.getLine(1)
+              ?.translateToString(),
+          ),
+        )
+        .toContain("main.rs");
+      if (mode === "point") {
+        const point = await cellPoint(page, wrap === "hard" ? 4 : 2, 1);
+        await page.mouse.click(point.x, point.y);
+      } else if (mode === "selection") {
+        await page.evaluate(
+          ({ start, length }) => {
+            (window as CapturedTerminalWindow).__remoteTerm!.select(start, 0, length);
+          },
+          { start: prefix.length, length: TOKEN.length + (wrap === "hard" ? 2 : 0) },
+        );
+      }
+      const decorations = page.locator(".remote-path-link-decoration");
+      await expect(decorations).toHaveCount(2);
+      expect(
+        harness.requests
+          .filter((r) => r.mode === mode)
+          .some((r) => r.lines.some((line) => line.includes(TOKEN))),
+      ).toBe(true);
+      expect(harness.renderRequests).toEqual([]);
+      if (mode === "screen" && wrap === "hard") {
+        await page.screenshot({ path: test.info().outputPath("wrapped-path-link.png") });
+      }
+      const box = await decorations.nth(1).boundingBox();
+      await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+      await expect
+        .poll(() => harness.renderRequests)
+        .toEqual([{ source: "path", path: HOST_PATH }]);
+    });
+  }
+}
+
+test("줄바꿈 경로의 뒷줄 변경은 모든 밑줄을 함께 폐기한다", async ({ context, page }) => {
+  const harness = await connectRemote(context, page, ["screen"]);
+  const cols = await page.evaluate(() => (window as CapturedTerminalWindow).__remoteTerm!.cols);
+  harness.sendDelta("\x1b[2J\x1b[H" + " ".repeat(cols - 4) + TOKEN);
+  await expect(page.locator(".remote-path-link-decoration")).toHaveCount(2);
+  harness.sendDelta("\x1b[2;1HWRONG");
+  await expect(page.locator(".remote-path-link-decoration")).toHaveCount(0);
+});
 
 test("underlines every path on the visible screen once output stops", async ({ context, page }) => {
   test.setTimeout(60_000);
@@ -339,6 +399,18 @@ test("underlines every path on the visible screen once output stops", async ({ c
 
 test.describe("mobile path-link focus ownership", () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+
+  test("모바일에서 줄바꿈된 경로의 뒷줄 탭은 전체 파일을 연다", async ({ context, page }) => {
+    const harness = await connectRemote(context, page, ["screen"]);
+    const cols = await page.evaluate(() => (window as CapturedTerminalWindow).__remoteTerm!.cols);
+    harness.sendDelta("\x1b[2J\x1b[H" + " ".repeat(cols - 4) + TOKEN);
+    const decorations = page.locator(".remote-path-link-decoration");
+    await expect(decorations).toHaveCount(2);
+    const box = await decorations.nth(1).boundingBox();
+    await page.touchscreen.tap(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await expect.poll(() => harness.renderRequests).toEqual([{ source: "path", path: HOST_PATH }]);
+    await expect(page.locator("#composerInput")).not.toBeFocused();
+  });
 
   test("opens an underlined file without focusing Composer behind the viewer", async ({
     context,

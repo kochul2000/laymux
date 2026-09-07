@@ -51,10 +51,14 @@ import {
   isPathLinkCwdCurrent,
   joinCwdPath,
   decidePathLinkAction,
-  mapSelectionCandidateToPathRange,
   pathSelectionLimits,
   resolveOverlappingRanges,
 } from "@/lib/path-link-detect";
+import {
+  readPathLinkSelection,
+  mapPathLinkParts,
+  pathLinkPartsCurrent,
+} from "@/lib/path-link-lines";
 import { readCellRangeText, readLineCells } from "@/lib/terminal-cell-map";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -1570,6 +1574,15 @@ export function TerminalView({
       // 마커가 라인의 정본이다 — 밑줄 재검증과 같은 규칙(link-chip-capture 주석).
       const bufferLine = liveChipBufferLine(target);
       if (bufferLine === null) return null;
+      if (
+        target.selection?.pathParts &&
+        !pathLinkPartsCurrent(
+          terminal.buffer.active,
+          target.selection.pathParts,
+          bufferLine - target.bufferLine,
+        )
+      )
+        return null;
       const cells = readChipLineCells(bufferLine);
       if (!cells) return null;
       return readCellRangeText(cells, target.startCol, target.endCol);
@@ -1756,8 +1769,7 @@ export function TerminalView({
       },
       readLine: (absoluteLine) => {
         const t = terminalRef.current;
-        const line = t?.buffer.active.getLine(absoluteLine);
-        return line ? readLineCells(line) : null;
+        return t?.buffer.active.getLine(absoluteLine);
       },
       statPaths,
       isVerifiedAt: (clientX, clientY) => pathLink.getHit(clientX, clientY) !== null,
@@ -1822,16 +1834,26 @@ export function TerminalView({
       const t = terminalRef.current;
       if (!t) return;
       const selection = t.getSelection();
-      const candidates = extractPathCandidatesFromSelection(
-        selection,
-        pathSelectionLimits(settings.pathLinkMaxLength),
-      );
-      if (candidates.length === 0) {
+      const pos = t.getSelectionPosition();
+      if (!pos) {
         clearPathLinkSelection();
         return;
       }
-      const pos = t.getSelectionPosition();
-      if (!pos) {
+      const limits = pathSelectionLimits(settings.pathLinkMaxLength);
+      if (
+        !selection ||
+        selection.length > limits.maxSelectionLength ||
+        pos.end.y - pos.start.y >= limits.maxLines
+      ) {
+        clearPathLinkSelection();
+        return;
+      }
+      const lines = readPathLinkSelection(t.buffer.active, pos, selection);
+      const candidates = extractPathCandidatesFromSelection(
+        lines.map((line) => line.text).join("\n"),
+        pathSelectionLimits(settings.pathLinkMaxLength),
+      );
+      if (candidates.length === 0) {
         clearPathLinkSelection();
         return;
       }
@@ -1847,14 +1869,11 @@ export function TerminalView({
           pathIndexes.set(absPath, statIndex);
           uniquePaths.push(absPath);
         }
-        const line = t.buffer.active.getLine(pos.start.y + candidate.lineIndex);
-        const lineCells = line ? readLineCells(line) : undefined;
         return [
           {
             absPath,
             statIndex,
-            token: candidate.text,
-            range: mapSelectionCandidateToPathRange(pos, candidate, lineCells),
+            candidate,
           },
         ];
       });
@@ -1870,26 +1889,46 @@ export function TerminalView({
             clearPathLinkSelection();
             return;
           }
-          const existing = pending.flatMap<VerifiedPathSelection>((item) => {
+          if (t.getSelection() !== selection) return;
+          const livePosition = t.getSelectionPosition();
+          if (!livePosition) return;
+          const liveLines = readPathLinkSelection(t.buffer.active, livePosition, selection);
+          if (
+            JSON.stringify(liveLines.map((l) => l.text)) !==
+            JSON.stringify(lines.map((l) => l.text))
+          )
+            return;
+          const existing = pending.flatMap((item) => {
             const info = infos[item.statIndex];
             const action = info ? decidePathLinkAction(info) : "none";
             if (action === "none") return [];
             return [
               {
-                ...item.range,
+                candidate: item.candidate,
                 absPath: item.absPath,
-                token: item.token,
                 isDirectory: action === "changeDir",
               },
             ];
           });
           // 공백 확장 후보(ADR-0191)는 접두끼리 겹친다 — 존재하는 것 중 같은
           // 줄의 겹치는 범위는 가장 긴 것만 남긴다(longest-existing-wins).
-          const verified = resolveOverlappingRanges(existing, (item) => ({
-            line: item.bufferLine,
-            start: item.startCol,
-            end: item.endCol + 1,
-          }));
+          const verified = resolveOverlappingRanges(existing, ({ candidate }) => ({
+            line: candidate.lineIndex,
+            start: candidate.startIndex,
+            end: candidate.endIndex,
+          })).flatMap<VerifiedPathSelection>(({ candidate, absPath, isDirectory }) => {
+            const parts = mapPathLinkParts(liveLines[candidate.lineIndex], candidate);
+            if (!pathLinkPartsCurrent(t.buffer.active, parts)) return [];
+            return parts.map(({ bufferLine, startCol, endCol, token }) => ({
+              bufferLine,
+              startCol,
+              endCol,
+              token,
+              absPath,
+              isDirectory,
+              ...(parts.length > 1 ? { pathParts: parts } : {}),
+            }));
+          });
           if (verified.length === 0) {
             clearPathLinkSelection();
             return;

@@ -1,3 +1,5 @@
+import { createComposerEditor } from "../../../../ui/src/remote/composer-editor.js";
+import { readPathLinkSelection, readPathLinkLines, mapPathLinkParts, pathLinkPartsCurrent, PATH_LINK_CONTEXT_ROWS } from "../../../../ui/src/lib/path-link-lines.ts";
 import {
   commandStatusIconName,
   fileKindIconName,
@@ -15,6 +17,7 @@ import {
         const tokenInput = $("token");
         const clientNameInput = $("clientName");
         const navToggleButton = $("navToggle");
+        const navigationPinButton = $("navigationPin");
         const drawerTitle = $("drawerTitle");
         const drawerBackButton = $("drawerBack");
         const drawerNotificationsButton = $("drawerNotificationsButton");
@@ -42,6 +45,7 @@ import {
         const remoteTwoFingerScrollSensitivityInput = $(
           "remoteTwoFingerScrollSensitivity",
         );
+        const remoteSelectionHandleSizeInput = $("remoteSelectionHandleSize");
         const remoteDisplaySettingsStatus = $("remoteDisplaySettingsStatus");
         const pcUpdateStatusElement = $("pcUpdateStatus");
         const pcUpdateNotes = $("pcUpdateNotes");
@@ -66,6 +70,7 @@ import {
         const terminalMetaEl = $("terminalMeta");
         const terminalComposer = $("terminalComposer");
         const composerInput = $("composerInput");
+        const composerEditor = createComposerEditor(composerInput);
         const composerHistoryList = $("composerHistoryList");
         const composerAutocompleteList = $("composerAutocompleteList");
         const composerStarEditorScrim = $("composerStarEditorScrim");
@@ -103,6 +108,7 @@ import {
         const openFileViewerButton = $("openFileViewer");
         const fileViewerOverlayElement = $("fileViewerOverlay");
         const fileViewerTitleElement = $("fileViewerTitle");
+        const fileViewerCopyPathButton = $("fileViewerCopyPath");
         const fileViewerZoomElement = $("fileViewerZoom");
         const fileViewerZoomLevelElement = $("fileViewerZoomLevel");
         const fileViewerZoomOutButton = $("fileViewerZoomOut");
@@ -168,6 +174,7 @@ import {
         // them. Defaults on, so only an explicit "0" hides the strip.
         const widgetStripKey = "laymux.remote.widgetStrip";
         const edgeSwipeDrawersKey = "laymux.remote.edgeSwipeDrawers";
+        const swipeCloseDrawersKey = "laymux.remote.swipeCloseDrawers";
         const spatialExcludedPaneIdsKey = "laymux.remote.spatialExcludedPaneIds";
         const spatialExcludedWorkspaceIdsKey = "laymux.remote.spatialExcludedWorkspaceIds";
         // Secret resume capability issued by a successful claim. It lives in
@@ -207,12 +214,16 @@ import {
         const REMOTE_NAVIGATION_WIDTH_MAX = 720;
         const REMOTE_NAVIGATION_PIN_CUTOFF_MIN = 320;
         const REMOTE_NAVIGATION_PIN_CUTOFF_MAX = 2560;
+        const REMOTE_SELECTION_HANDLE_SIZE_MIN = 14;
+        const REMOTE_SELECTION_HANDLE_SIZE_MAX = 32;
         const SCROLL_SENSITIVITY_MIN = 0.1;
         const SCROLL_SENSITIVITY_MAX = 20;
         const DEFAULT_REMOTE_DISPLAY_SETTINGS = Object.freeze({
           terminalFontSize: 14,
           composerFontSize: 16,
           menuFontSize: 13,
+          mainButtonScale: 100,
+          keysButtonScale: 100,
           navigationPinned: false,
           navigationWidth: 360,
           navigationPinCutoff: 720,
@@ -224,6 +235,7 @@ import {
           fastScrollSensitivity: 5,
           touchScrollSensitivity: 1,
           twoFingerScrollSensitivity: 5,
+          selectionHandleSize: 22,
         });
         const DEFAULT_REMOTE_ATTACHMENT_MAX_BYTES = 1024 * 1024;
         // Host attachment policy (ADR-0227) rides on every claim answer; the
@@ -285,6 +297,7 @@ import {
         let resumeToken = null;
         let fileViewerToken = null;
         let claimAttemptRevision = 0;
+        let exitAttemptRevision = null;
         let autoConnectTimer = null;
         let autoConnectAttempt = 0;
         let claimInFlight = false;
@@ -367,8 +380,6 @@ import {
         const REMOTE_PATH_LINK_MAX_SELECTION_LINES = 8;
         const REMOTE_PATH_LINK_MAX_SELECTION_MATCHES = 16;
         // ADR-0188 screen trigger: one viewport, bounded rows/chars/candidates.
-        const REMOTE_PATH_LINK_MAX_SCREEN_LINES = 64;
-        const REMOTE_PATH_LINK_MAX_SCREEN_CHARS = 8192;
         const REMOTE_PATH_LINK_MAX_SCREEN_CANDIDATES = 64;
         const REMOTE_PATH_LINK_IDLE_SCAN_DELAY_MS = 500;
         const PATH_LINK_CLICK_SLOP_PX = 4;
@@ -500,6 +511,7 @@ import {
         let composerAutocompleteEnabled = loadLocalToggle(composerAutocompleteKey);
         let composerHideAgentInputEnabled = loadLocalToggle(composerHideAgentInputKey);
         let edgeSwipeDrawersEnabled = loadLocalToggle(edgeSwipeDrawersKey);
+        let swipeCloseDrawersEnabled = loadLocalToggle(swipeCloseDrawersKey);
         let composerHiddenAgentInputLines = loadComposerHiddenAgentInputLines();
         let composerAgentInputHideFrame = null;
         let composerAgentInputHideRequest = null;
@@ -536,7 +548,6 @@ import {
         let selectionHandles = null;
         let selectionHandleDrag = null;
         let lastCopiedSelection = "";
-        let suppressSelectionMouseupAfterInteraction = false;
 
         // UX contract: long press. This delay is only the local gesture threshold.
         const INTERNAL_TOUCH_LONG_PRESS_DELAY_MS = 500;
@@ -1211,6 +1222,8 @@ import {
               DEFAULT_REMOTE_DISPLAY_SETTINGS.menuFontSize,
             ),
             navigationPinned: settings.navigationPinned === true,
+            mainButtonScale: normalizeRemoteButtonScale(settings.mainButtonScale),
+            keysButtonScale: normalizeRemoteButtonScale(settings.keysButtonScale),
             navigationWidth: normalizeRemoteNavigationSize(
               settings.navigationWidth,
               DEFAULT_REMOTE_DISPLAY_SETTINGS.navigationWidth,
@@ -1244,6 +1257,12 @@ import {
               settings.twoFingerScrollSensitivity,
               DEFAULT_REMOTE_DISPLAY_SETTINGS.twoFingerScrollSensitivity,
             ),
+            selectionHandleSize: normalizeRemoteNavigationSize(
+              settings.selectionHandleSize,
+              DEFAULT_REMOTE_DISPLAY_SETTINGS.selectionHandleSize,
+              REMOTE_SELECTION_HANDLE_SIZE_MIN,
+              REMOTE_SELECTION_HANDLE_SIZE_MAX,
+            ),
           };
         }
 
@@ -1271,6 +1290,12 @@ import {
         ) {
           remoteDisplaySettingsStatus.textContent = message;
           remoteDisplaySettingsStatus.classList.toggle("error", error);
+          $("remoteButtonSizeStatus").textContent = message;
+          $("remoteButtonSizeStatus").classList.toggle("error", error);
+        }
+
+        function normalizeRemoteButtonScale(value) {
+          return Math.round(normalizeRemoteNavigationSize(value, 100, 80, 160) / 10) * 10;
         }
 
         function applyRemoteDisplaySettings(settings) {
@@ -1285,7 +1310,21 @@ import {
           remoteTerminalFontSizeInput.value = String(normalized.terminalFontSize);
           remoteComposerFontSizeInput.value = String(normalized.composerFontSize);
           remoteMenuFontSizeInput.value = String(normalized.menuFontSize);
+          $("remoteMainButtonScale").textContent = `${normalized.mainButtonScale}%`;
+          $("remoteKeysButtonScale").textContent = `${normalized.keysButtonScale}%`;
+          document.documentElement.style.setProperty("--remote-main-button-scale", String(normalized.mainButtonScale / 100));
+          document.documentElement.style.setProperty("--remote-keys-button-scale", String(normalized.keysButtonScale / 100));
+          document.querySelectorAll("[data-button-scale]").forEach((button) => {
+            const value = normalized[button.dataset.buttonScale];
+            button.disabled = Number(button.dataset.step) < 0 ? value <= 80 : value >= 160;
+          });
           remoteNavigationPinnedInput.checked = normalized.navigationPinned;
+          navigationPinButton.setAttribute("aria-pressed", String(normalized.navigationPinned));
+          const navigationPinLabel = normalized.navigationPinned
+            ? "Unpin workspace menu"
+            : "Pin workspace menu";
+          navigationPinButton.setAttribute("aria-label", navigationPinLabel);
+          navigationPinButton.title = navigationPinLabel;
           remoteNavigationWidthInput.value = String(normalized.navigationWidth);
           remoteNavigationPinCutoffInput.value = String(normalized.navigationPinCutoff);
           remoteComposerIdleOpacityInput.value = String(normalized.composerIdleOpacity);
@@ -1302,6 +1341,7 @@ import {
           remoteTwoFingerScrollSensitivityInput.value = String(
             normalized.twoFingerScrollSensitivity,
           );
+          remoteSelectionHandleSizeInput.value = String(normalized.selectionHandleSize);
           document.documentElement.style.setProperty(
             "--remote-composer-font-size",
             `${normalized.composerFontSize}px`,
@@ -1313,6 +1353,10 @@ import {
           document.documentElement.style.setProperty(
             "--remote-navigation-width",
             `${normalized.navigationWidth}px`,
+          );
+          document.documentElement.style.setProperty(
+            "--touch-selection-handle-size",
+            `${normalized.selectionHandleSize}px`,
           );
           syncRemoteNavigationLayout();
           document.documentElement.style.setProperty(
@@ -1340,6 +1384,7 @@ import {
 
         function saveRemoteDisplaySettings() {
           const normalized = normalizeRemoteDisplaySettings({
+            ...remoteDisplaySettings,
             terminalFontSize: remoteTerminalFontSizeInput.value,
             composerFontSize: remoteComposerFontSizeInput.value,
             menuFontSize: remoteMenuFontSizeInput.value,
@@ -1354,6 +1399,7 @@ import {
             fastScrollSensitivity: remoteFastScrollSensitivityInput.value,
             touchScrollSensitivity: remoteTouchScrollSensitivityInput.value,
             twoFingerScrollSensitivity: remoteTwoFingerScrollSensitivityInput.value,
+            selectionHandleSize: remoteSelectionHandleSizeInput.value,
           });
           const persisted = persistDeviceDisplaySettings(normalized);
           applyRemoteDisplaySettings(normalized);
@@ -1654,6 +1700,7 @@ import {
         }
 
         function renderFileViewerPayload(payload) {
+          fileViewerSection.hidden = true;
           hideFileViewerContent();
           fileViewerMessageElement.hidden = true;
           fileViewerKind = null;
@@ -1708,6 +1755,7 @@ import {
         function closeFileViewer() {
           fileViewerRequestRevision += 1;
           fileViewerOverlayElement.hidden = true;
+          fileViewerSection.hidden = true;
           fileViewerKind = null;
           fileViewerDirectoryPath = null;
           fileViewerExplorerReturnPath = null;
@@ -1718,6 +1766,7 @@ import {
           fileViewerZoomElement.hidden = true;
           fileViewerTitleElement.textContent = "";
           fileViewerTitleElement.title = "";
+          fileViewerCopyPathButton.hidden = true;
           fileViewerPath = null;
           fileViewerDownloadButton.hidden = false;
           fileViewerDownloadInFlight = false;
@@ -1725,8 +1774,9 @@ import {
           focusCurrentInputSurface();
         }
 
-        function openFileViewerOverlay(path, explorerReturnPath = null) {
+        function openFileViewerOverlay(path, explorerReturnPath) {
           if (!leaseId || !fileViewerToken || !path) return;
+          const openedFromExplorer = explorerReturnPath !== undefined;
           const requestRevision = ++fileViewerRequestRevision;
           const requestLeaseId = leaseId;
           const requestFileViewerToken = fileViewerToken;
@@ -1736,13 +1786,16 @@ import {
           fileViewerZoomElement.hidden = true;
           fileViewerTitleElement.textContent = path;
           fileViewerTitleElement.title = path;
+          fileViewerCopyPathButton.hidden = true;
           fileViewerPath = path;
-          // Back exists only for a file reached through the explorer; every
-          // other entry point (drawer path, path-link) has no folder to return
-          // to (ADR-0198).
+          // Back exists only for a file reached through the explorer; a terminal
+          // path-link has no folder context to return to (ADR-0198).
           fileViewerDirectoryPath = null;
-          fileViewerExplorerReturnPath = explorerReturnPath;
+          fileViewerExplorerReturnPath = explorerReturnPath || null;
           fileViewerBackButton.hidden = !explorerReturnPath;
+          // Keep the explorer path controls available until rendering succeeds,
+          // so a rejected path can be corrected without reopening the explorer.
+          fileViewerSection.hidden = !openedFromExplorer;
           fileViewerDownloadButton.hidden = false;
           fileViewerDownloadInFlight = false;
           applyFileViewerDownloadState();
@@ -1763,6 +1816,7 @@ import {
                 return;
               }
               renderFileViewerPayload(payload);
+              fileViewerCopyPathButton.hidden = false;
             })
             .catch(async (error) => {
               if (requestRevision !== fileViewerRequestRevision) return;
@@ -1793,6 +1847,7 @@ import {
 
         function openFileExplorerOverlay(request) {
           if (!leaseId || !fileViewerToken || !request) return;
+          const explorerFallbackPath = fileViewerDirectoryPath || fileViewerExplorerReturnPath;
           const requestRevision = ++fileViewerRequestRevision;
           const requestLeaseId = leaseId;
           const requestFileViewerToken = fileViewerToken;
@@ -1802,10 +1857,12 @@ import {
           fileViewerZoomElement.hidden = true;
           fileViewerTitleElement.textContent = request.path || "Host files";
           fileViewerTitleElement.title = request.path || "";
+          fileViewerCopyPathButton.hidden = true;
           fileViewerPath = null;
           fileViewerDirectoryPath = null;
           fileViewerExplorerReturnPath = null;
           fileViewerBackButton.hidden = true;
+          fileViewerSection.hidden = true;
           // Directory mode has nothing to download — hide the affordance
           // instead of leaving a disabled button (ADR-0198, ADR-0192).
           fileViewerDownloadButton.hidden = true;
@@ -1836,6 +1893,9 @@ import {
               if (await fileViewerControlLost(error)) return;
               if (requestRevision !== fileViewerRequestRevision) return;
               hideFileViewerContent();
+              fileViewerExplorerReturnPath = explorerFallbackPath;
+              fileViewerBackButton.hidden = !explorerFallbackPath;
+              fileViewerSection.hidden = false;
               setFileViewerMessage(
                 error instanceof Error ? error.message : String(error),
                 true,
@@ -1854,8 +1914,11 @@ import {
           fileViewerZoomElement.hidden = true;
           fileViewerDownloadButton.hidden = true;
           fileViewerDirectoryPath = payload.path;
+          fileViewerSection.hidden = false;
+          renderFileViewerState();
           fileViewerTitleElement.textContent = payload.path;
           fileViewerTitleElement.title = payload.path;
+          fileViewerCopyPathButton.hidden = false;
           // A new listing starts at its top; the previous directory's scroll
           // offset must not carry over into a shorter or unrelated list.
           fileViewerBodyElement.scrollTop = 0;
@@ -2156,56 +2219,6 @@ import {
           }, REMOTE_PATH_LINK_IDLE_SCAN_DELAY_MS);
         }
 
-        function mapRemotePathLinkRange(position, match) {
-          const selectionBaseCol0 = match.lineIndex === 0 ? position.start.x : 0;
-          const bufferLine = position.start.y + match.lineIndex + 1;
-          const line = terminal?.buffer?.active?.getLine?.(bufferLine - 1);
-          if (line) {
-            const { text, columns, endColumns } = reconstructRemoteLinkLine(line);
-            const selectionStartCell = selectionBaseCol0 + 1;
-            const selectionStartOffset = endColumns.findIndex((column) => column >= selectionStartCell);
-            if (selectionStartOffset >= 0) {
-              const startOffset = selectionStartOffset + match.startIndex;
-              const endOffset = selectionStartOffset + match.endIndex - 1;
-              if (
-                text.slice(startOffset, endOffset + 1) === match.token &&
-                columns[startOffset] !== undefined &&
-                endColumns[endOffset] !== undefined
-              ) {
-                return {
-                  bufferLine,
-                  startCol: columns[startOffset],
-                  endCol: endColumns[endOffset],
-                };
-              }
-            }
-          }
-          return {
-            bufferLine,
-            startCol: selectionBaseCol0 + match.startIndex + 1,
-            endCol: selectionBaseCol0 + match.endIndex,
-          };
-        }
-
-        // Line-scoped modes (`point`, `screen`) carry whole-line offsets, so the
-        // token must still sit on those cells. No string fallback here: if the
-        // line moved under the request, drawing anything would mislabel it.
-        function mapRemoteLinePathRange(bufferLine, match) {
-          const line = terminal?.buffer?.active?.getLine?.(bufferLine - 1);
-          if (!line) return null;
-          const { text, columns, endColumns } = reconstructRemoteLinkLine(line);
-          const startOffset = match.startIndex;
-          const endOffset = match.endIndex - 1;
-          if (
-            text.slice(startOffset, endOffset + 1) !== match.token ||
-            columns[startOffset] === undefined ||
-            endColumns[endOffset] === undefined
-          ) {
-            return null;
-          }
-          return { bufferLine, startCol: columns[startOffset], endCol: endColumns[endOffset] };
-        }
-
         function setVerifiedPathLinks(scope, selections) {
           const previousEntries = pathLinkScopes[scope];
           pathLinkScopes[scope] = [];
@@ -2306,9 +2319,11 @@ import {
 
           const selection = term.getSelection();
           if (!selection || selection.length > REMOTE_PATH_LINK_MAX_SELECTION_LENGTH) return;
-          if (!term.getSelectionPosition?.()) return;
-          const selectionLines = selection.split(/\r?\n/);
-          if (selectionLines.length > REMOTE_PATH_LINK_MAX_SELECTION_LINES) return;
+          const position = term.getSelectionPosition?.();
+          if (!position || position.end.y - position.start.y >= REMOTE_PATH_LINK_MAX_SELECTION_LINES) return;
+          const logicalLines = readPathLinkSelection(term.buffer.active, position, selection);
+          const selectionLines = logicalLines.map((line) => line.text);
+          if (!selectionLines.length || selectionLines.length > REMOTE_PATH_LINK_MAX_SELECTION_LINES) return;
           const abortController = typeof AbortController === "function" ? new AbortController() : null;
           pathLinkAborts.selection = abortController;
 
@@ -2354,17 +2369,19 @@ import {
               // Resize/reflow and scrollback trim can move a still-identical
               // selection while the bridge performs its filesystem stat. Use
               // the live xterm coordinates, never the pre-request snapshot.
-              setVerifiedPathLinks("selection", matches.map((match) => ({
-                ...mapRemotePathLinkRange(currentPosition, match),
-                terminalId: requestTerminalId,
-                leaseId: requestLeaseId,
-                fileViewerToken: requestFileViewerToken,
-                // The literal the underline covers: output can repaint the row in
-                // place, and only the text tells us the link went stale.
-                token: match.token,
-                path: match.path,
-                kind: match.kind === "directory" ? "directory" : "file",
-              })));
+              const liveLines = readPathLinkSelection(term.buffer.active, currentPosition, selection);
+              if (JSON.stringify(liveLines.map((line) => line.text)) !== JSON.stringify(selectionLines)) return;
+              const selections = matches.flatMap((match) => {
+                const parts = mapPathLinkParts(liveLines[match.lineIndex], { ...match, text: match.token });
+                if (!pathLinkPartsCurrent(term.buffer.active, parts)) return [];
+                return parts.map((part) => ({
+                  ...part, pathParts: parts,
+                  terminalId: requestTerminalId, leaseId: requestLeaseId,
+                  fileViewerToken: requestFileViewerToken,
+                  path: match.path, kind: match.kind === "directory" ? "directory" : "file",
+                }));
+              });
+              setVerifiedPathLinks("selection", selections);
             })
             .catch(() => {
               if (revision === pathLinkRevisions.selection) clearPathLinkScope("selection");
@@ -2392,14 +2409,11 @@ import {
           );
         }
 
-        // Shared request path for the line-scoped triggers. `baseLine` is the
-        // 0-based absolute buffer line that `lines[0]` was read from, so a later
-        // scroll cannot shift the mapping (a scrollback trim is caught by the
-        // per-match text check in `mapRemoteLinePathRange`).
+        // Logical text goes to the host; physical cell maps stay on this surface.
+        // Validate every part before applying the response as one complete set.
         function requestLineScopedPathLinks(
           scope,
-          baseLine,
-          lines,
+          logicalLines,
           caret,
           maxMatches,
           onApplied
@@ -2411,6 +2425,7 @@ import {
           abortPathLinkScope(scope);
           const revision = pathLinkRevisions[scope];
           if (!term || !requestTerminalId || !requestLeaseId || !requestFileViewerToken) return;
+          const lines = logicalLines.map((line) => line.text);
           const body = { terminalId: requestTerminalId, mode: scope, lines };
           if (caret) body.caret = caret;
           const abortController = typeof AbortController === "function" ? new AbortController() : null;
@@ -2444,32 +2459,15 @@ import {
               }
               const selections = [];
               for (const match of data.matches) {
-                if (!isValidPathLinkMatch(match, lines)) continue;
-                const range = mapRemoteLinePathRange(baseLine + match.lineIndex + 1, match);
-                if (!range) continue;
-                selections.push({
-                  ...range,
-                  terminalId: requestTerminalId,
-                  leaseId: requestLeaseId,
+                if (!isValidPathLinkMatch(match, lines)) { clearPathLinkScope(scope); return; }
+                const parts = mapPathLinkParts(logicalLines[match.lineIndex], { ...match, text: match.token });
+                if (!pathLinkPartsCurrent(term.buffer.active, parts)) { clearPathLinkScope(scope); return; }
+                selections.push(...parts.map((part) => ({
+                  ...part, pathParts: parts,
+                  terminalId: requestTerminalId, leaseId: requestLeaseId,
                   fileViewerToken: requestFileViewerToken,
-                  // The literal the underline covers: output can repaint the row in
-                  // place, and only the text tells us the link went stale.
-                  token: match.token,
-                  path: match.path,
-                  kind: match.kind === "directory" ? "directory" : "file",
-                });
-              }
-              if (selections.length === 0) {
-                clearPathLinkScope(scope);
-                return;
-              }
-              // A screen signature may only describe the complete response.
-              // If even one match became malformed or no longer maps to the
-              // requested cells, fail closed instead of blessing a partial
-              // decoration set and suppressing every later identical scan.
-              if (selections.length !== data.matches.length) {
-                clearPathLinkScope(scope);
-                return;
+                  path: match.path, kind: match.kind === "directory" ? "directory" : "file",
+                })));
               }
               if (!setVerifiedPathLinks(scope, selections)) {
                 // A partially installed set has no verified signature and must
@@ -2507,45 +2505,23 @@ import {
           if (pathLinkAtPoint(point.clientX, point.clientY)) return;
           const coords = touchCellCoords(term, point);
           if (!coords) return;
-          const line = term.buffer?.active?.getLine?.(coords.y);
+          const lines = readPathLinkLines(term.buffer.active,
+            coords.y - PATH_LINK_CONTEXT_ROWS, coords.y + PATH_LINK_CONTEXT_ROWS + 1);
+          const line = lines.find((line) => line.points.some((p) => p.row === coords.y));
           if (!line) return;
-          const { text, columns, endColumns } = reconstructRemoteLinkLine(line);
-          const column = coords.x + 1;
-          let caretIndex = -1;
-          for (let offset = 0; offset < columns.length; offset += 1) {
-            if (columns[offset] <= column && column <= endColumns[offset]) {
-              caretIndex = offset;
-              break;
-            }
-          }
+          const caretIndex = line.points.findIndex((p) => p.row === coords.y && p.col <= coords.x + 1 && coords.x + 1 <= p.endCol);
           if (caretIndex < 0) return;
-          const lineText = text.replace(/\s+$/, "");
-          if (!lineText || caretIndex >= lineText.length) return;
-          requestLineScopedPathLinks(
-            "point",
-            coords.y,
-            [lineText],
-            { lineIndex: 0, index: caretIndex },
-            1
-          );
+          requestLineScopedPathLinks("point", [line], { lineIndex: 0, index: caretIndex }, 1);
         }
 
         function readPathLinkScreenLines(term) {
           const buffer = term.buffer?.active;
           if (!buffer) return null;
-          const baseLine = buffer.viewportY || 0;
-          const rows = Math.min(term.rows || 0, REMOTE_PATH_LINK_MAX_SCREEN_LINES);
-          if (rows <= 0) return null;
-          const lines = [];
-          let chars = 0;
-          for (let row = 0; row < rows; row += 1) {
-            const line = buffer.getLine?.(baseLine + row);
-            const text = line ? reconstructRemoteLinkLine(line).text.replace(/\s+$/, "") : "";
-            chars += text.length;
-            if (chars > REMOTE_PATH_LINK_MAX_SCREEN_CHARS) break;
-            lines.push(text);
-          }
-          return lines.some((text) => text.length > 0) ? { baseLine, lines } : null;
+          const baseLine = Math.max(0, (buffer.viewportY || 0) - PATH_LINK_CONTEXT_ROWS);
+          const end = (buffer.viewportY || 0) + (term.rows || 0) + PATH_LINK_CONTEXT_ROWS;
+          const logicalLines = readPathLinkLines(buffer, baseLine, end);
+          const lines = logicalLines.map((line) => line.text);
+          return lines.some((text) => text.length > 0) ? { baseLine, lines, logicalLines } : null;
         }
 
         function evaluatePathLinkScreen() {
@@ -2577,7 +2553,7 @@ import {
             clearPathLinkScope("screen");
             return;
           }
-          const signature = `${screen.baseLine}\n${screen.lines.join("\n")}`;
+          const signature = JSON.stringify(screen.logicalLines);
           // Duplicate idle evaluations with no intervening physical write keep
           // the verified decoration set without another filesystem batch. A
           // write dirties the server-owned context even when cells stay equal,
@@ -2591,8 +2567,7 @@ import {
           }
           requestLineScopedPathLinks(
             "screen",
-            screen.baseLine,
-            screen.lines,
+            screen.logicalLines,
             null,
             REMOTE_PATH_LINK_MAX_SCREEN_CANDIDATES,
             () => {
@@ -2649,6 +2624,8 @@ import {
         function pathLinkEntryStillOnScreen(entry) {
           const bufferLine = livePathLinkBufferLine(entry);
           if (bufferLine === null) return false;
+          if (entry.selection.pathParts) return pathLinkPartsCurrent(terminal.buffer.active,
+            entry.selection.pathParts, bufferLine - entry.selection.bufferLine);
           const line = terminal?.buffer?.active?.getLine?.(bufferLine - 1);
           if (!line) return false;
           const { text, columns } = reconstructRemoteLinkLine(line);
@@ -2929,6 +2906,8 @@ import {
         function linkChipTokenStillOnScreen(target) {
           const bufferLine = liveLinkChipBufferLine(target);
           if (bufferLine === null) return false;
+          if (target.pathParts) return pathLinkPartsCurrent(terminal.buffer.active,
+            target.pathParts, bufferLine - target.bufferLine);
           const line = terminal?.buffer?.active?.getLine?.(bufferLine - 1);
           if (!line) return false;
           const { text, columns } = reconstructRemoteLinkLine(line);
@@ -2971,6 +2950,7 @@ import {
               startCol: press.startCol,
               endCol: press.endCol,
               token: press.token,
+              pathParts: press.pathParts,
               terminalId: press.terminalId,
               leaseId: press.leaseId,
               fileViewerToken: press.fileViewerToken,
@@ -3332,7 +3312,7 @@ import {
           return true;
         }
 
-        // Fill the draft (and textarea) from a recall pick without routing
+        // Fill the draft and editor from a recall pick without routing
         // through the input event, so the input handler's re-arm logic does not
         // fire. Caret goes to the end so the user can keep typing.
         function setComposerDraftText(text) {
@@ -3342,10 +3322,11 @@ import {
             draft.text = text;
             draft.revision += 1;
           }
-          if (composerInput.value !== text) composerInput.value = text;
-          const end = composerInput.value.length;
+          draft.attachments = [];
+          composerEditor.setDraft(draft);
+          const end = composerEditor.value.length;
           try {
-            composerInput.setSelectionRange(end, end);
+            composerEditor.setSelectionRange(end, end);
           } catch (_) {}
           updateComposerControls();
         }
@@ -3446,7 +3427,7 @@ import {
               pick.addEventListener("mousedown", (event) => event.preventDefault());
               bindComposerLongPress(pick, suggestion);
             } else {
-              // mousedown (not click) so the textarea keeps focus through the pick.
+              // mousedown (not click) so the editor keeps focus through the pick.
               pick.addEventListener("mousedown", (event) => {
                 event.preventDefault();
                 onPick(raw);
@@ -3666,7 +3647,7 @@ import {
         }
 
         function composerOpacityState() {
-          if (composerInput.disabled) return "idle";
+          if (composerEditor.disabled) return "idle";
           const draft = composerDraft();
           if (
             Boolean(draft?.text) ||
@@ -3700,7 +3681,7 @@ import {
               !composerCollapsed &&
               !attachmentUploadInFlight,
           );
-          composerInput.disabled = !canEdit || attachmentUploadInFlight;
+          composerEditor.disabled = !canEdit || attachmentUploadInFlight;
           terminalComposer.dataset.canSend = canCommit ? "true" : "false";
           composerSendButton.disabled = !canCommit;
           const canAttach = Boolean(
@@ -3721,7 +3702,7 @@ import {
           if (!leaseId || !activeTerminalId) return;
           if (currentInputMode() === "direct") {
             terminal?.focus?.();
-          } else if (!composerCollapsed && !composerInput.disabled) {
+          } else if (!composerCollapsed && !composerEditor.disabled) {
             // A collapsed editor must not regain focus behind the user's back
             // (reconnect, attach-ready) — only the Keyboard button restores it.
             composerInput.focus({ preventScroll: true });
@@ -3748,7 +3729,7 @@ import {
               activeTerminalId !== tappedTerminalId ||
               currentInputMode() !== "composer" ||
               composerCollapsed ||
-              composerInput.disabled ||
+              composerEditor.disabled ||
               !fileViewerOverlayElement.hidden
             ) {
               return;
@@ -3822,8 +3803,7 @@ import {
           inputModeToggleButton.setAttribute("aria-label", inputModeActionLabel);
           setRemoteIcon(inputModeIcon, composerMode ? "Pencil" : "Keyboard");
 
-          const nextText = draft ? draft.text : "";
-          if (composerInput.value !== nextText) composerInput.value = nextText;
+          composerEditor.setDraft(draft);
 
           if (terminal) {
             if (composerMode) {
@@ -4921,7 +4901,7 @@ import {
         function installHorizontalFlickDismiss(element, direction, enabled, dismiss) {
           let gesture = null;
           element.addEventListener("pointerdown", (event) => {
-            if (!isTouchPointer(event) || !mobileLayout || !edgeSwipeDrawersEnabled || !enabled()) return;
+            if (!isTouchPointer(event) || !mobileLayout || !swipeCloseDrawersEnabled || !enabled()) return;
             if (gesture) {
               gesture = null;
               return;
@@ -5069,20 +5049,22 @@ import {
         function withPreservedInputSurfaceFocus(run) {
           const surface = document.activeElement;
           const textarea = terminal && terminal.textarea;
-          const originalFocus = textarea ? textarea.focus : null;
-          if (textarea && originalFocus) {
+          // Android reports Linux: xterm also calls select() for primary
+          // selection, which steals focus even when focus() is suppressed.
+          const methods = textarea ? { focus: textarea.focus, select: textarea.select } : {};
+          for (const method of Object.keys(methods)) {
             try {
-              textarea.focus = function preserveInputSurfaceFocus() {};
+              textarea[method] = function preserveInputSurfaceFocus() {};
             } catch (_) {
-              // Some hosts freeze the native focus function on the instance.
+              // Some hosts freeze native functions on the instance.
             }
           }
           try {
             return run();
           } finally {
-            if (textarea && originalFocus && textarea.focus !== originalFocus) {
+            for (const method of Object.keys(methods)) {
               try {
-                textarea.focus = originalFocus;
+                textarea[method] = methods[method];
               } catch (_) {}
             }
             restorePreservedInputSurfaceFocus(surface);
@@ -5264,33 +5246,32 @@ import {
           }
         }
 
-        function startTouchSelection(term, element, pointerId) {
+        function startTouchSelection(term, pointerId) {
           if (!touchGesture || touchGesture.pointerId !== pointerId || touchGesture.mode !== "pending") return;
           touchGesture.mode = "selecting";
-          touchGesture.forceSelection = shouldForceTouchSelection(term);
           touchGesture.scrollRemainderPx = 0;
-          // A stationary long press should create a useful selection immediately.
-          // xterm uses click detail=2 for word mode (the same path as a desktop
-          // double-click). Finish that synthetic click immediately so later
-          // touch movement can extend the captured word by individual cells.
-          dispatchTouchSelectionMouse(
-            element,
+          // Do not dispatch xterm's element `mousedown`: CoreBrowserTerminal
+          // always focuses its helper textarea, and a focus request alone can
+          // reopen a system-dismissed Android IME. The pinned xterm selection
+          // service owns the exact word rules without that input side effect.
+          term.clearSelection();
+          const selectionService = term._core && term._core._selectionService;
+          const selectionEvent = touchSelectionMouseEvent(
             "mousedown",
             touchGesture.startPoint,
-            touchGesture.forceSelection,
-            2
+            false,
+            2,
+            0
           );
-          suppressSelectionMouseupAfterInteraction = true;
-          try {
-            dispatchTouchSelectionMouse(
-              document,
-              "mouseup",
-              touchGesture.startPoint,
-              touchGesture.forceSelection,
-              2
-            );
-          } finally {
-            suppressSelectionMouseupAfterInteraction = false;
+          if (
+            selectionService &&
+            typeof selectionService._selectWordAtCursor === "function" &&
+            selectionService._selectWordAtCursor(selectionEvent, true)
+          ) {
+            // Touch copy is handled on release; Linux primary selection would
+            // focus/select the helper textarea and dismiss the composer IME.
+            selectionService.refresh();
+            selectionService._fireEventIfSelectionChanged();
           }
           const selection = term.getSelectionPosition && term.getSelectionPosition();
           touchGesture.selectionSeed = selection
@@ -5390,7 +5371,6 @@ import {
         }
 
         function handleSelectionMouseupAfterInteraction() {
-          if (suppressSelectionMouseupAfterInteraction) return;
           copySelectionAfterInteraction();
         }
 
@@ -5416,6 +5396,13 @@ import {
             handle.style.left = `${metrics.rect.left - hostRect.left + pos.x * metrics.cellWidth}px`;
             handle.style.top = `${metrics.rect.top - hostRect.top + (viewportRow + 1) * metrics.cellHeight}px`;
             handle.style.display = "block";
+            const boundaryX = metrics.rect.left + pos.x * metrics.cellWidth;
+            const viewport = window.visualViewport;
+            const left = Math.max(hostRect.left, viewport?.offsetLeft || 0);
+            const right = Math.min(hostRect.right, (viewport?.offsetLeft || 0) + (viewport?.width || window.innerWidth));
+            handle.dataset.inward = String(handle === selectionHandles.start
+              ? boundaryX - handle.offsetWidth < left
+              : boundaryX + handle.offsetWidth > right);
           };
 
           place(selectionHandles.start, selection.start);
@@ -5433,6 +5420,73 @@ import {
           terminalHost.append(start, end);
           selectionHandles = { start, end };
 
+          const magnifier = document.createElement("div");
+          magnifier.className = "touch-selection-magnifier";
+          magnifier.setAttribute("aria-hidden", "true");
+          magnifier.hidden = true;
+          document.body.append(magnifier);
+          let magnifierFrame = null;
+
+          const hideMagnifier = () => {
+            if (magnifierFrame !== null) window.cancelAnimationFrame(magnifierFrame);
+            magnifierFrame = null;
+            magnifier.hidden = true;
+            magnifier.replaceChildren();
+          };
+          const updateMagnifier = () => {
+            magnifierFrame = null;
+            const drag = selectionHandleDrag;
+            const metrics = terminalMetrics(term);
+            const rows = term.element?.querySelector(".xterm-rows");
+            if (!drag || !metrics || !rows || document.hidden) {
+              hideMagnifier();
+              return;
+            }
+            const coords = touchCellCoords(term, {
+              clientX: drag.point.clientX - drag.offsetX,
+              clientY: drag.point.clientY - drag.offsetY,
+            });
+            if (!coords) return;
+            const row = coords.y - metrics.viewportY;
+            const zoom = 1.8;
+            magnifier.hidden = false;
+            // Reuse the rendered glyph styles (including wide characters and
+            // ANSI colors), copying only the rows visible through the lens.
+            const content = document.createElement("div");
+            content.className = `${term.element.className} touch-selection-magnifier-content`;
+            const copy = rows.cloneNode(false);
+            const radius = Math.ceil(magnifier.clientHeight / (2 * zoom * metrics.cellHeight));
+            const first = Math.max(0, row - radius);
+            for (let i = first; i <= Math.min(rows.children.length - 1, row + radius); i++) {
+              copy.append(rows.children[i].cloneNode(true));
+            }
+            copy.style.position = "absolute";
+            copy.style.top = `${first * metrics.cellHeight}px`;
+            content.append(copy);
+            const selection = term.element.querySelector(".xterm-selection");
+            if (selection) content.append(selection.cloneNode(true));
+            magnifier.replaceChildren(content);
+            const viewport = window.visualViewport;
+            const left = viewport?.offsetLeft || 0;
+            const top = viewport?.offsetTop || 0;
+            const width = viewport?.width || window.innerWidth;
+            const height = viewport?.height || window.innerHeight;
+            magnifier.style.left = `${Math.max(left + 8, Math.min(left + width - magnifier.offsetWidth - 8, drag.point.clientX - magnifier.offsetWidth / 2))}px`;
+            const above = drag.point.clientY - magnifier.offsetHeight - 36;
+            const lensTop = above >= top + 8 ? above : drag.point.clientY + 36;
+            magnifier.style.top = `${Math.max(top + 8, Math.min(top + height - magnifier.offsetHeight - 8, lensTop))}px`;
+            content.style.width = `${metrics.rect.width}px`;
+            content.style.height = `${metrics.rect.height}px`;
+            content.style.transform = `translate(${magnifier.clientWidth / 2 - coords.x * metrics.cellWidth * zoom}px, ${magnifier.clientHeight / 2 - (row + 0.5) * metrics.cellHeight * zoom}px) scale(${zoom})`;
+          };
+          const scheduleMagnifier = () => {
+            if (selectionHandleDrag && magnifierFrame === null) {
+              magnifierFrame = window.requestAnimationFrame(updateMagnifier);
+            }
+          };
+          term.onRender?.(scheduleMagnifier);
+          term.onScroll?.(scheduleMagnifier);
+
           const onHandlePointerDown = (event) => {
             if (!isTouchPointer(event)) return;
             const selection = term.getSelectionPosition && term.getSelectionPosition();
@@ -5441,21 +5495,33 @@ import {
             event.stopPropagation();
             event.stopImmediatePropagation?.();
             const role = event.currentTarget.dataset.handle;
+            const metrics = terminalMetrics(term);
+            if (!metrics || selectionHandleDrag) return;
+            const boundary = selection[role];
             selectionHandleDrag = {
               pointerId: event.pointerId,
               role,
               anchor: role === "start" ? selection.end : selection.start,
+              point: touchPointFromEvent(event),
+              offsetX: event.clientX - (metrics.rect.left + boundary.x * metrics.cellWidth),
+              offsetY: event.clientY - (metrics.rect.top + (boundary.y - metrics.viewportY + 0.5) * metrics.cellHeight),
             };
             event.currentTarget.setPointerCapture?.(event.pointerId);
+            scheduleMagnifier();
           };
 
           const onHandlePointerMove = (event) => {
             if (!selectionHandleDrag || event.pointerId !== selectionHandleDrag.pointerId) return;
             event.preventDefault();
             event.stopPropagation();
-            const coords = touchCellCoords(term, touchPointFromEvent(event));
+            selectionHandleDrag.point = touchPointFromEvent(event);
+            const coords = touchCellCoords(term, {
+              clientX: event.clientX - selectionHandleDrag.offsetX,
+              clientY: event.clientY - selectionHandleDrag.offsetY,
+            });
             if (!coords) return;
             applySelectionRange(term, selectionHandleDrag.anchor, coords);
+            scheduleMagnifier();
           };
 
           const onHandlePointerUp = (event) => {
@@ -5467,6 +5533,7 @@ import {
               target.releasePointerCapture?.(event.pointerId);
             }
             selectionHandleDrag = null;
+            hideMagnifier();
             updateSelectionHandles(term);
             copySelectionAfterInteraction();
           };
@@ -5476,7 +5543,17 @@ import {
             handle.addEventListener("pointermove", onHandlePointerMove, { passive: false });
             handle.addEventListener("pointerup", onHandlePointerUp, { passive: false });
             handle.addEventListener("pointercancel", onHandlePointerUp, { passive: false });
+            handle.addEventListener("lostpointercapture", onHandlePointerUp);
           }
+          window.addEventListener("blur", () => {
+            selectionHandleDrag = null;
+            hideMagnifier();
+          });
+          document.addEventListener("visibilitychange", () => {
+            if (!document.hidden) return;
+            selectionHandleDrag = null;
+            hideMagnifier();
+          });
         }
 
         function enterTwoFingerScroll(term) {
@@ -5488,7 +5565,6 @@ import {
             mode: "twoFingerScrolling",
             startPoint: center,
             lastY: center.clientY,
-            forceSelection: false,
             longPressTimer: null,
             scrollRemainderPx: 0,
           };
@@ -5499,9 +5575,12 @@ import {
           if (!element || element.dataset.touchSelectionBridge === "true") return;
           element.dataset.touchSelectionBridge = "true";
 
+          // The crop can expose blank viewport above xterm; it must receive
+          // the same edge-opening gestures as the rendered terminal rows.
+          const surface = $("terminalViewport");
           const pointerOptions = { passive: false };
 
-          element.addEventListener("pointerdown", (event) => {
+          surface.addEventListener("pointerdown", (event) => {
             if (!isTouchPointer(event)) return;
             const point = rememberTouchPointer(event);
             event.preventDefault();
@@ -5512,7 +5591,7 @@ import {
               return;
             }
             if (touchGesture !== null) return;
-            const rect = element.getBoundingClientRect();
+            const rect = surface.getBoundingClientRect();
             const navigationOpen = navToggleButton.getAttribute("aria-expanded") === "true";
             const edge =
               edgeSwipeDrawersEnabled && mobileLayout && !navigationOpen && fileViewerOverlayElement.hidden
@@ -5528,19 +5607,18 @@ import {
               edge,
               startPoint: point,
               lastY: point.clientY,
-              forceSelection: false,
               selectionSeed: null,
               movedBeyondTapSlop: false,
               longPressTimer: null,
               scrollRemainderPx: 0,
             };
             touchGesture.longPressTimer = window.setTimeout(
-              () => startTouchSelection(term, element, event.pointerId),
+              () => startTouchSelection(term, event.pointerId),
               INTERNAL_TOUCH_LONG_PRESS_DELAY_MS
             );
           }, pointerOptions);
 
-          element.addEventListener("pointermove", (event) => {
+          surface.addEventListener("pointermove", (event) => {
             if (!isTouchPointer(event) || !touchPointers.has(event.pointerId)) return;
             const point = rememberTouchPointer(event);
             event.preventDefault();
@@ -5638,8 +5716,8 @@ import {
             copySelectionAfterInteraction();
           };
 
-          element.addEventListener("pointerup", finishTouchSelection, pointerOptions);
-          element.addEventListener("pointercancel", finishTouchSelection, pointerOptions);
+          surface.addEventListener("pointerup", finishTouchSelection, pointerOptions);
+          surface.addEventListener("pointercancel", finishTouchSelection, pointerOptions);
         }
 
         // CSI query sequences whose only effect is to make the terminal emit a
@@ -6758,7 +6836,6 @@ import {
           hiddenWorkspaceToggle.hidden =
             nextView !== "workspace" || hiddenWorkspaceCount === 0;
           drawerNotificationsButton.hidden = nextView !== "workspace";
-          drawerConnectionButton.hidden = nextView !== "workspace";
           drawerSettingsButton.hidden = nextView !== "workspace" && nextView !== "connection";
         }
 
@@ -6766,7 +6843,7 @@ import {
           if (view === "hidden") return hiddenWorkspaceToggle;
           if (view === "notifications") return drawerNotificationsButton;
           if (view === "create") return newWorkspaceButton;
-          if (view === "connection") return drawerConnectionButton;
+          if (view === "connection") return drawerSettingsButton;
           if (view === "settings") return drawerSettingsButton;
           return null;
         }
@@ -6840,6 +6917,7 @@ import {
         const widgetStripRightEl = $("widgetStripRight");
         const widgetStripToggle = $("widgetStripToggle");
         const edgeSwipeDrawersToggle = $("edgeSwipeDrawersToggle");
+        const swipeCloseDrawersToggle = $("swipeCloseDrawersToggle");
         // Fixed and client-owned: the strip is a viewer, not probe demand, so it
         // has no business following `usage.*.refreshSeconds`. Fast enough for
         // the activity and notification counts, which are the parts that move.
@@ -9422,8 +9500,8 @@ import {
             mode: currentInputMode(),
             revision: draft?.revision ?? 0,
             text: draft?.text ?? "",
-            selectionStart: composerInput.selectionStart ?? draft?.text.length ?? 0,
-            selectionEnd: composerInput.selectionEnd ?? draft?.text.length ?? 0,
+            selectionStart: composerEditor.selectionStart ?? draft?.text.length ?? 0,
+            selectionEnd: composerEditor.selectionEnd ?? draft?.text.length ?? 0,
           };
         }
 
@@ -9467,7 +9545,7 @@ import {
           return `"${normalized.replaceAll('"', '\\"')}"`;
         }
 
-        function insertComposerAttachmentText(snapshot, insertion) {
+        function insertComposerAttachmentText(snapshot, insertion, attachments = []) {
           const draft = composerDraft(snapshot.terminalId);
           if (!draft) return;
           const snapshotStillCurrent =
@@ -9482,13 +9560,19 @@ import {
           const after = draft.text.slice(end);
           const leadingSpace = before && !/\s$/.test(before) ? " " : "";
           const trailingSpace = after && !/^\s/.test(after) ? " " : "";
+          const insertedLength = leadingSpace.length + insertion.length + trailingSpace.length;
+          draft.attachments = [
+            ...(draft.attachments || []).filter((item) => item.end <= start),
+            ...attachments.map((item) => ({ ...item, start: start + leadingSpace.length + item.start, end: start + leadingSpace.length + item.end })),
+            ...(draft.attachments || []).filter((item) => item.start >= end).map((item) => ({ ...item, start: item.start + insertedLength - (end - start), end: item.end + insertedLength - (end - start) })),
+          ];
           draft.text = `${before}${leadingSpace}${insertion}${trailingSpace}${after}`;
           draft.revision += 1;
           if (activeTerminalId === snapshot.terminalId) {
             resetComposerSuggestions();
             renderInputSurface();
             const caret = before.length + leadingSpace.length + insertion.length;
-            composerInput.setSelectionRange(caret, caret);
+            composerEditor.setSelectionRange(caret, caret);
           }
         }
 
@@ -9554,6 +9638,8 @@ import {
           );
           try {
             const paths = [];
+            const attachments = [];
+            let pathOffset = 0;
             for (const file of files) {
               const response = await uploadRemoteAttachment(
                 snapshot,
@@ -9561,7 +9647,10 @@ import {
                 attempt.abortController.signal,
               );
               if (attachmentUploadAttempt?.token !== attempt.token) return false;
-              paths.push(formatAttachmentPath(response.path));
+              const path = formatAttachmentPath(response.path);
+              paths.push(path);
+              attachments.push({ start: pathOffset, end: pathOffset + path.length, path, name: file.name, image: file.type.startsWith("image/") });
+              pathOffset += path.length + 1;
             }
             if (
               snapshot.terminalId !== activeTerminalId ||
@@ -9571,7 +9660,7 @@ import {
             }
             const insertion = paths.join(" ");
             if (snapshot.mode === "composer") {
-              insertComposerAttachmentText(snapshot, insertion);
+              insertComposerAttachmentText(snapshot, insertion, attachments);
             } else {
               await writeTerminalInput(
                 snapshot.terminalId,
@@ -9716,6 +9805,7 @@ import {
                 draft.text === submission.text
               ) {
                 draft.text = "";
+                draft.attachments = [];
                 draft.revision += 1;
               }
               if (activeTerminalId === terminalId) {
@@ -9775,12 +9865,14 @@ import {
           );
         }
 
-        function queueInputWrite(data, inputTerminalId, inputLeaseId) {
+        function queueInputWrite(data, inputTerminalId, inputLeaseId, submit = false) {
           inputWriteChain = inputWriteChain
             .catch(() => {})
             .then(() => {
               if (inputTerminalId !== activeTerminalId || inputLeaseId !== leaseId) return;
-              return writeToTerminal(inputTerminalId, inputLeaseId, data);
+              return submit
+                ? writeTerminalInput(inputTerminalId, inputLeaseId, data, true)
+                : writeToTerminal(inputTerminalId, inputLeaseId, data);
             })
             .catch((err) => setStatus(err.message, true));
         }
@@ -10031,7 +10123,7 @@ import {
             if (!trimmed || trimmed.length > USER_KEY_LABEL_MAX) continue;
             if (!seq || seq.length > USER_KEY_SEQ_MAX) continue;
             seen.add(id);
-            keys.push({ id, label: trimmed, seq });
+            keys.push({ id, label: trimmed, seq, submit: ownProperty(entry, "submit") === true });
           }
           return keys;
         }
@@ -10257,7 +10349,7 @@ import {
         }
 
         // Returns an error message, or "" when the key was registered.
-        function addUserKey(label, seq) {
+        function addUserKey(label, seq, submit = false) {
           if (keyBarConfig.userKeys.length >= USER_KEY_MAX) {
             return `At most ${USER_KEY_MAX} custom keys.`;
           }
@@ -10269,7 +10361,7 @@ import {
             return `Sequence must be 1-${USER_KEY_SEQ_MAX} characters.`;
           }
           const id = createUserKeyId();
-          keyBarConfig.userKeys.push({ id, label: trimmed, seq });
+          keyBarConfig.userKeys.push({ id, label: trimmed, seq, submit });
           rebuildUserKeyIndex();
           // A key nobody can reach is not registered in any useful sense, so a
           // fresh key lands exactly where a tapped hidden chip does.
@@ -10359,7 +10451,14 @@ import {
             return;
           }
           const seq = keySequence(def);
-          if (seq) enqueueInput(seq);
+          if (!seq) return;
+          if (def.submit === true) {
+            if (!leaseId || !activeTerminalId || !composerReady) return;
+            flushPendingInput();
+            queueInputWrite(seq, activeTerminalId, leaseId, true);
+          } else {
+            enqueueInput(seq);
+          }
         }
 
         // A toolbar/key button must never pull focus off the active input
@@ -11402,6 +11501,7 @@ import {
         let userKeyComboBase = "a";
         let userKeyRawLabel = "";
         let userKeyRawSequence = "";
+        let userKeyRawSubmit = false;
         let userKeyFormError = "";
 
         const COMBO_BASE_LETTERS = "abcdefghijklmnopqrstuvwxyz".split("");
@@ -11458,19 +11558,22 @@ import {
           }
           const label = userKeyRawLabel;
           const rawSequence = userKeyRawSequence;
+          const submit = userKeyRawSubmit;
           userKeyRawLabel = "";
           userKeyRawSequence = "";
-          const error = addUserKey(label, parsed.seq);
+          userKeyRawSubmit = false;
+          const error = addUserKey(label, parsed.seq, submit);
           if (!error) return;
           userKeyRawLabel = label;
           userKeyRawSequence = rawSequence;
+          userKeyRawSubmit = submit;
           userKeyFormError = error;
           renderInputSettingsPreservingScroll();
         }
 
         // Registering a key is deliberately a client-side affair: it produces the
-        // same `{label, seq}` shape a built-in key has and rides the existing
-        // write path, so nothing about the Remote API changes.
+        // built-in key shape, with optional structured submit through the
+        // existing input path. No new Remote endpoint is needed.
         function renderUserKeySection() {
           const title = document.createElement("div");
           title.className = "key-popover-title";
@@ -11613,10 +11716,60 @@ import {
             seqRow.append(seqName, seqInput);
             form.append(seqRow);
 
+            const escapeRow = document.createElement("div");
+            escapeRow.className = "user-key-row";
+            const escapeLabel = document.createElement("span");
+            escapeLabel.className = "user-key-label";
+            escapeLabel.textContent = "Insert";
+            const escapeButtons = document.createElement("div");
+            escapeButtons.className = "user-key-escape-buttons";
+            for (const [label, token] of [
+              ["Esc", "\\e"],
+              ["Enter", "\\r"],
+              ["Tab", "\\t"],
+              ["LF", "\\n"],
+              ["Hex", "\\x"],
+              ["\\", "\\\\"],
+            ]) {
+              const button = document.createElement("button");
+              button.type = "button";
+              button.className = "key-order-action";
+              button.textContent = label;
+              button.title = token;
+              button.setAttribute("aria-label", `Insert ${label === "\\" ? "Backslash" : label} escape`);
+              keepInputSurfaceFocus(button);
+              button.addEventListener("click", (event) => {
+                event.stopPropagation();
+                const start = seqInput.selectionStart ?? seqInput.value.length;
+                const end = seqInput.selectionEnd ?? start;
+                seqInput.setRangeText(token, start, end, "end");
+                userKeyRawSequence = seqInput.value;
+                seqInput.focus({ preventScroll: true });
+              });
+              escapeButtons.append(button);
+            }
+            escapeRow.append(escapeLabel, escapeButtons);
+            form.append(escapeRow);
+
+            const enterRow = document.createElement("label");
+            enterRow.className = "user-key-row";
+            const enterCheckbox = document.createElement("input");
+            enterCheckbox.type = "checkbox";
+            enterCheckbox.checked = userKeyRawSubmit;
+            enterCheckbox.addEventListener("change", () => {
+              userKeyRawSubmit = enterCheckbox.checked;
+            });
+            enterRow.append(enterCheckbox, "Send Enter");
+            form.append(enterRow);
+
             const hint = document.createElement("div");
             hint.className = "user-key-preview";
             hint.textContent = "Escapes: \\e \\xNN \\r \\n \\t \\0 \\\\";
             form.append(hint);
+            const enterHint = document.createElement("div");
+            enterHint.className = "user-key-preview";
+            enterHint.textContent = "Send Enter sends the sequence as text, then presses Enter, like Send. Leave off for raw control bytes.";
+            form.append(enterHint);
           }
 
           const submitRow = document.createElement("div");
@@ -12078,14 +12231,22 @@ import {
         }
 
         async function exitRemote() {
+          // Repeated native Back and Exit clicks share this release. A new
+          // Connect attempt supersedes it even if that claim later fails.
+          if (exitAttemptRevision === claimAttemptRevision) return;
           // Leaving always withdraws the standing intent to hold control, even
           // when the connection has already failed and no lease remains.
           disarmAutoConnect();
           const currentLease = leaseId;
           disconnect(false);
           const exitRevision = claimAttemptRevision;
+          exitAttemptRevision = exitRevision;
           stopWidgetPolling();
-          if (currentLease) await releaseLease(currentLease).catch(() => {});
+          try {
+            if (currentLease) await releaseLease(currentLease).catch(() => {});
+          } finally {
+            if (exitAttemptRevision === exitRevision) exitAttemptRevision = null;
+          }
           // A manual reconnect supersedes this Exit while the old lease drains.
           // Never let its late continuation close or relabel the new surface.
           if (claimAttemptRevision !== exitRevision || leaseId) return;
@@ -12274,6 +12435,7 @@ import {
         // the row off never flashes it.
         widgetStripToggle.checked = widgetStripAllowed;
         edgeSwipeDrawersToggle.checked = edgeSwipeDrawersEnabled;
+        swipeCloseDrawersToggle.checked = swipeCloseDrawersEnabled;
         applyRemoteDisplaySettings(remoteDisplaySettings);
         updateRemoteDisplaySettingsControls();
 
@@ -12284,6 +12446,10 @@ import {
           edgeSwipeDrawersEnabled = edgeSwipeDrawersToggle.checked;
           saveLocalToggle(edgeSwipeDrawersKey, edgeSwipeDrawersEnabled);
         });
+        swipeCloseDrawersToggle.addEventListener("change", () => {
+          swipeCloseDrawersEnabled = swipeCloseDrawersToggle.checked;
+          saveLocalToggle(swipeCloseDrawersKey, swipeCloseDrawersEnabled);
+        });
         remoteTerminalFontSizeInput.addEventListener("change", () => {
           saveRemoteDisplaySettings();
         });
@@ -12291,6 +12457,20 @@ import {
           saveRemoteDisplaySettings();
         });
         remoteMenuFontSizeInput.addEventListener("change", () => {
+          saveRemoteDisplaySettings();
+        });
+        document.querySelectorAll("[data-button-scale]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const field = button.dataset.buttonScale;
+            remoteDisplaySettings[field] = normalizeRemoteButtonScale(
+              remoteDisplaySettings[field] + Number(button.dataset.step),
+            );
+            saveRemoteDisplaySettings();
+          });
+        });
+        $("resetButtonSizes").addEventListener("click", () => {
+          remoteDisplaySettings.mainButtonScale = DEFAULT_REMOTE_DISPLAY_SETTINGS.mainButtonScale;
+          remoteDisplaySettings.keysButtonScale = DEFAULT_REMOTE_DISPLAY_SETTINGS.keysButtonScale;
           saveRemoteDisplaySettings();
         });
         remoteNavigationPinnedInput.addEventListener("change", () => {
@@ -12326,6 +12506,9 @@ import {
         remoteTwoFingerScrollSensitivityInput.addEventListener("change", () => {
           saveRemoteDisplaySettings();
         });
+        remoteSelectionHandleSizeInput.addEventListener("change", () => {
+          saveRemoteDisplaySettings();
+        });
         checkPcUpdateButton.addEventListener("click", () => {
           loadPcUpdateStatus({ check: true }).catch(() => {});
         });
@@ -12335,6 +12518,11 @@ import {
         navToggleButton.addEventListener("click", () => {
           const open = navToggleButton.getAttribute("aria-expanded") !== "true";
           setNavigationOpen(open);
+        });
+        keepInputSurfaceFocus(navigationPinButton);
+        navigationPinButton.addEventListener("click", () => {
+          remoteNavigationPinnedInput.checked = !remoteNavigationPinnedInput.checked;
+          saveRemoteDisplaySettings();
         });
         hiddenWorkspaceToggle.addEventListener("click", () => {
           openDrawerSubview("hidden");
@@ -12389,13 +12577,25 @@ import {
             openFileViewerButton.disabled
           ) return;
           event.preventDefault();
-          openFileViewerOverlay(fileViewerPathInput.value.trim());
+          openFileViewerOverlay(
+            fileViewerPathInput.value.trim(),
+            fileViewerDirectoryPath || fileViewerExplorerReturnPath,
+          );
         });
         openFileViewerButton.addEventListener("click", () => {
           const path = fileViewerPathInput.value.trim();
-          if (path) openFileViewerOverlay(path);
+          if (path) {
+            openFileViewerOverlay(path, fileViewerDirectoryPath || fileViewerExplorerReturnPath);
+          }
         });
         fileViewerCloseButton.addEventListener("click", closeFileViewer);
+        fileViewerCopyPathButton.addEventListener("click", () => {
+          const path = fileViewerPath || fileViewerDirectoryPath;
+          if (!path) return;
+          writeClipboardText(path)
+            .then(() => setStatus(`Copied ${path}`))
+            .catch((err) => setStatus(`Copy failed: ${err.message || err}`, true));
+        });
         fileViewerDownloadButton.addEventListener("click", downloadCurrentFileViewerFile);
         fileExplorerHeaderButton.addEventListener("click", () => {
           // Open where the user is working. Without an attached terminal the
@@ -12627,8 +12827,10 @@ import {
         });
         composerInput.addEventListener("input", () => {
           const draft = composerDraft();
-          if (!draft || draft.text === composerInput.value) return;
-          draft.text = composerInput.value;
+          if (!draft) return;
+          if (draft.text === composerEditor.value && JSON.stringify(draft.attachments || []) === JSON.stringify(composerEditor.attachments)) return;
+          draft.text = composerEditor.value;
+          draft.attachments = composerEditor.attachments;
           draft.revision += 1;
           // Manual editing closes the Tab recall popup and re-arms autocomplete
           // (undo a prior Escape), clearing any active selection so the fresh
@@ -12642,13 +12844,19 @@ import {
         composerInput.addEventListener("paste", (event) => {
           if (currentInputMode() !== "composer") return;
           const text = event.clipboardData?.getData("text/plain") || "";
-          if (!text || !shouldConvertLongTextToAttachment(text)) return;
+          if (!text || !shouldConvertLongTextToAttachment(text)) {
+            event.preventDefault();
+            composerEditor.replaceSelection(text);
+            return;
+          }
           if (attachmentTextByteLength(text) > remoteAttachmentMaxBytes) {
             setStatus(
               `${remoteAttachmentTooLargeMessage("Pasted text")} The text was kept in the composer.`,
               false,
               true,
             );
+            event.preventDefault();
+            composerEditor.replaceSelection(text);
             return;
           }
           if (attachmentUploadInFlight) {
@@ -12662,7 +12870,11 @@ import {
             return;
           }
           const snapshot = attachmentSelectionSnapshot();
-          if (!snapshot || !composerReady) return;
+          if (!snapshot || !composerReady) {
+            event.preventDefault();
+            composerEditor.replaceSelection(text);
+            return;
+          }
           event.preventDefault();
           event.stopImmediatePropagation();
           void attachRemoteFiles([longTextAttachmentFile(text)], {

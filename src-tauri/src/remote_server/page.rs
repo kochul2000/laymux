@@ -734,6 +734,7 @@ mod tests {
         assert!(html.contains("id=\"remoteFastScrollSensitivity\""));
         assert!(html.contains("id=\"remoteTouchScrollSensitivity\""));
         assert!(html.contains("id=\"remoteTwoFingerScrollSensitivity\""));
+        assert!(html.contains("id=\"remoteSelectionHandleSize\""));
         assert!(html.contains("laymux.remote.displaySettings"));
         assert!(!html.contains("/remote/v1/display-settings"));
         assert!(html.contains("Saved on this device."));
@@ -749,6 +750,7 @@ mod tests {
         assert!(html.contains("--remote-composer-font-size"));
         assert!(html.contains("--remote-menu-font-size"));
         assert!(html.contains("--remote-navigation-width"));
+        assert!(html.contains("--touch-selection-handle-size"));
         assert!(html.contains("window.innerWidth > remoteDisplaySettings.navigationPinCutoff"));
         assert!(html.contains("--remote-composer-idle-opacity"));
         assert!(html.contains("--remote-composer-focused-opacity"));
@@ -959,13 +961,26 @@ mod tests {
         assert!(touch_focus.contains("!fileViewerOverlayElement.hidden"));
         assert!(touch_focus.contains("focusedElement !== terminal?.textarea"));
         assert!(touch_focus.contains("focusedElement !== document.body"));
-        assert!(html.contains("function startTouchSelection(term, element, pointerId)"));
+        let touch_selection_start = html
+            .find("function startTouchSelection(term, pointerId)")
+            .unwrap();
+        let touch_selection_end = touch_selection_start
+            + html[touch_selection_start..]
+                .find("function triggerTouchTapSelection")
+                .unwrap();
+        let touch_selection = &html[touch_selection_start..touch_selection_end];
+        assert!(touch_selection.contains("term.clearSelection();"));
+        assert!(
+            touch_selection.contains("selectionService._selectWordAtCursor(selectionEvent, true)")
+        );
+        assert!(touch_selection.contains("selectionService._fireEventIfSelectionChanged();"));
+        assert!(!touch_selection.contains("dispatchTouchSelectionMouse("));
+        assert!(!touch_selection.contains("touchGesture.forceSelection"));
         assert!(html.contains("function withPreservedInputSurfaceFocus(run)"));
         assert!(html.contains("function restorePreservedInputSurfaceFocus(surface)"));
         assert!(html.contains("textarea.focus = function preserveInputSurfaceFocus() {}"));
         assert!(html.contains("function extendTouchSelection(term, gesture, point)"));
         assert!(html.contains("function handleSelectionMouseupAfterInteraction()"));
-        assert!(html.contains("touchGesture.forceSelection,\n            2"));
         assert!(html.contains("touchGesture.selectionSeed = selection"));
         assert!(html.contains("if (!isTouchPointer(event)) return;"));
         assert!(!html.contains("activePointerId !== null || event.isPrimary === false"));
@@ -1094,10 +1109,17 @@ mod tests {
     fn remote_page_html_contains_in_page_file_viewer() {
         let html = remote_client_source();
         assert!(html.contains("id=\"fileViewerSection\""));
+        let drawer_end = html
+            .find("</div><!-- /drawerWorkspaceView -->")
+            .expect("workspace drawer closes");
+        let file_viewer_section = html
+            .find("id=\"fileViewerSection\"")
+            .expect("file viewer path controls exist");
+        assert!(file_viewer_section > drawer_end);
         assert!(html.contains(
             "id=\"fileViewerPath\" type=\"text\" autocomplete=\"off\" autocapitalize=\"off\""
         ));
-        assert!(html.contains("id=\"openFileViewer\" type=\"button\" disabled>Open viewer"));
+        assert!(html.contains("id=\"openFileViewer\" type=\"button\" disabled>Open"));
         assert!(html.contains("id=\"pullHostFileViewerPath\""));
         assert!(html.contains(">From host</button>"));
         assert!(!html.contains("id=\"openCurrentFileViewer\""));
@@ -1112,7 +1134,8 @@ mod tests {
         // The viewer renders in this document (ADR-0184): no second tab, so no
         // `window.open`, no credential handshake, and no viewer bootstrap route.
         assert!(html.contains("id=\"fileViewerOverlay\""));
-        assert!(html.contains("function openFileViewerOverlay(path, explorerReturnPath = null)"));
+        assert!(html.contains("function openFileViewerOverlay(path, explorerReturnPath)"));
+        assert!(html.contains("const openedFromExplorer = explorerReturnPath !== undefined;"));
         assert!(html.contains("function closeFileViewer()"));
         assert!(html.contains("function fileViewerFetch("));
         assert!(html.contains("fileViewerAuthorization: {"));
@@ -1135,9 +1158,8 @@ mod tests {
         assert!(!html.contains("laymux:file-viewer-ready"));
         assert!(!html.contains("laymux:file-viewer-session"));
         assert!(!html.contains("Popup blocked. Allow popups and try again."));
-        // The Android wrapper has no second window, which is why the section was
-        // hidden there. In-page rendering removes the reason.
-        assert!(!html.contains("fileViewerSection.hidden = true;"));
+        assert!(html.contains("fileViewerSection.hidden = true;"));
+        assert!(html.contains("fileViewerSection.hidden = false;"));
     }
 
     #[test]

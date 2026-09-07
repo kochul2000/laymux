@@ -50,6 +50,9 @@ describe("remote page bundle", () => {
         ` remote-app.css=${sourceHash("remote-app.css")}` +
         ` remote-icons.js=${fileHash(ICON_SOURCE_PATH)}` +
         ` codex-transcript-wheel.ts=${fileHash(CODEX_TRANSCRIPT_WHEEL_SOURCE_PATH)}` +
+        ` path-link-lines.ts=${fileHash(path.resolve(__dirname, "../lib/path-link-lines.ts"))}` +
+        ` terminal-cell-map.ts=${fileHash(path.resolve(__dirname, "../lib/terminal-cell-map.ts"))}` +
+        ` composer-editor.js=${fileHash(path.resolve(__dirname, "./composer-editor.js"))}` +
         ` lucide-package=${packageInputHash(lock, "lucide")}`,
     );
   });
@@ -162,13 +165,14 @@ describe("remote page bundle", () => {
     expect(live).toBeDefined();
     expect(live).toContain("return marker.line + 1;");
     expect(live).toMatch(/marker\.isDisposed === true[\s\S]*?return null;/);
-    // The re-check reads that line, never `target.bufferLine` directly.
+    // 셀 읽기는 live marker 기준이며, 여러 줄 조각에는 캡처 대비 이동량을 적용한다.
     const check = app.match(
       /function linkChipTokenStillOnScreen\(target\) \{([\s\S]*?)\n {8}\}/,
     )?.[1];
     expect(check).toBeDefined();
     expect(check).toContain("liveLinkChipBufferLine(target)");
-    expect(check).not.toContain("target.bufferLine");
+    expect(check).toContain("bufferLine - target.bufferLine");
+    expect(check).not.toContain("getLine?.(target.bufferLine");
     // The marker lives exactly as long as the chip does.
     expect(app).toMatch(
       /function dismissLinkChip\(\) \{[\s\S]*?previous\?\.marker\?\.dispose\?\.\(\)/,

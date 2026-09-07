@@ -320,6 +320,22 @@ test.describe("remote mobile layout", () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(180);
   });
 
+  test("keeps every header action inside the narrowest Remote viewport", async ({ page }) => {
+    await page.locator(".app > header button").evaluateAll((buttons) => {
+      buttons.forEach((button) => {
+        button.hidden = false;
+      });
+    });
+    await page.setViewportSize({ width: 180, height: 844 });
+
+    const header = await page.locator(".app > header").evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(header.scrollWidth).toBe(header.clientWidth);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(180);
+  });
+
   test("keeps terminal metadata out of the footer in wide landscape", async ({ page }) => {
     await page.setViewportSize({ width: 700, height: 390 });
 
@@ -498,6 +514,7 @@ test.describe("remote mobile layout", () => {
     await expect(page.locator("#widgetStripToggle")).toBeEnabled();
     await page.locator("#drawerBack").click();
     await expect(page.locator("#drawerSettingsButton")).toBeFocused();
+    await page.locator("#drawerSettingsButton").click();
     await page.locator("#drawerConnectionButton").click();
     await expect(page.locator("#drawerBack")).toBeFocused();
 
@@ -538,6 +555,7 @@ test.describe("remote mobile layout", () => {
     await expect(page.locator("#drawerSettingsButton")).toBeFocused();
     await expect(page.locator("#drawerWorkspaceView")).toBeVisible();
 
+    await page.locator("#drawerSettingsButton").click();
     await page.locator("#drawerConnectionButton").click();
     await expect(page.locator("#drawerBack")).toBeFocused();
     await expect(page.locator("#drawerConnectionView")).toBeVisible();
@@ -861,6 +879,10 @@ test.describe("remote mobile layout", () => {
     expect(narrowHeader.headerScrollWidth).toBe(narrowHeader.headerClientWidth);
     expect(narrowHeader.actionLeft).toBeGreaterThanOrEqual(narrowHeader.headerLeft);
     expect(narrowHeader.actionRight).toBeLessThanOrEqual(narrowHeader.headerRight);
+    const narrowPin = await page.locator("#navigationPin").boundingBox();
+    expect(narrowPin!.x).toBeGreaterThanOrEqual(narrowHeader.headerLeft);
+    expect(narrowPin!.x + narrowPin!.width).toBeLessThanOrEqual(narrowHeader.actionLeft);
+    await page.screenshot({ path: "../.screenshots/remote-pin-toolbar-180.png" });
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(180);
     expect(controls.visibilityRequests.at(-1)).toEqual({
       path: "/remote/v1/workspaces/ws-b/visibility",
@@ -1178,7 +1200,7 @@ test.describe("remote mobile layout", () => {
     await page.locator("#terminal .xterm").tap();
     await expect(editor).toBeFocused();
     await page.keyboard.type("real xterm touch");
-    await expect(editor).toHaveValue("real xterm touch");
+    await expect(editor).toHaveText("real xterm touch");
 
     outputSocket!.send(
       JSON.stringify({
@@ -1200,7 +1222,7 @@ test.describe("remote mobile layout", () => {
     outputSocket!.send(Buffer.alloc(0));
     await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
     await expect(editor).toBeFocused();
-    await expect(editor).toHaveValue("real xterm touch");
+    await expect(editor).toHaveText("real xterm touch");
   });
 
   test("keeps terminal keyboard focus while sending every soft-key sequence", async ({ page }) => {

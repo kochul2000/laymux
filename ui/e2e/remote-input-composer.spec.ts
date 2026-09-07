@@ -761,6 +761,47 @@ async function terminalScrollDistance(page: Page) {
   });
 }
 
+test("custom Send Enter uses structured submit while raw keys retain their bytes and order", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "laymux.remote.keybar",
+      JSON.stringify({
+        userKeys: [
+          { id: "u-raw", label: "Raw", seq: "before\n" },
+          { id: "u-send", label: "Run", seq: "run\n", submit: true },
+          { id: "u-after", label: "After", seq: "after", submit: "true" },
+        ],
+        zones: {
+          main: { left: ["soft:u-raw", "soft:u-send", "soft:u-after"], center: [], right: [] },
+          expanded: { left: [], center: [], right: [] },
+        },
+      }),
+    );
+  });
+  const state = await installRemotePage(page, { coarse: true, holdInputs: true });
+  await connect(page);
+  const requests: string[] = [];
+  page.on("request", (request) => {
+    if (/\/(write|input)$/.test(new URL(request.url()).pathname)) {
+      requests.push(new URL(request.url()).pathname.split("/").at(-1)!);
+    }
+  });
+  await page.locator('[data-key="u-raw"]').click();
+  await page.locator('[data-key="u-send"]').click();
+  await page.locator('[data-key="u-after"]').click();
+  await expect.poll(() => state.inputs.length).toBe(1);
+  expect(state.writes.map((write) => write.data)).toEqual(["before\n"]);
+  await state.inputs[0].respond();
+  await expect.poll(() => state.writes.length).toBe(2);
+  expect(state.inputs.map((input) => input.body)).toEqual([
+    { leaseId: "lease-1", text: "run\n", submit: true },
+  ]);
+  expect(state.writes.map((write) => write.data)).toEqual(["before\n", "after"]);
+  expect(requests).toEqual(["write", "input", "write"]);
+});
+
 test("fine-pointer PC and coarse-pointer mobile can both toggle and persist the preferred mode", async ({
   page,
 }) => {
@@ -841,19 +882,19 @@ test("terminal switches preserve isolated mode and draft state without persisten
 
   await selectTerminal(page, "C:\\two");
   await expect(page.locator("#terminalMeta")).toContainText("Shell 2");
-  await expect(editor).toHaveValue("");
+  await expect(editor).toHaveText("");
   await editor.fill("draft two");
   await clickInputModeToggle(page);
   await expect(page.locator("#terminalComposer")).toBeHidden();
 
   await selectTerminal(page, "C:\\one");
   await expect(page.locator("#terminalComposer")).toBeVisible();
-  await expect(editor).toHaveValue("draft one");
+  await expect(editor).toHaveText("draft one");
 
   await selectTerminal(page, "C:\\two");
   await expect(page.locator("#terminalComposer")).toBeHidden();
   await clickInputModeToggle(page);
-  await expect(editor).toHaveValue("draft two");
+  await expect(editor).toHaveText("draft two");
   expect(
     await page.evaluate(() => Object.keys(localStorage).filter((key) => key.includes("Draft"))),
   ).toEqual([]);
@@ -945,7 +986,7 @@ test("fine-pointer Composer sends on Enter and keeps Shift+Enter as a newline", 
 
   await editor.fill("line");
   await editor.press("Shift+Enter");
-  await expect(editor).toHaveValue("line\n");
+  await expect(editor).toHaveText("line\n");
   expect(remote.inputs).toHaveLength(0);
 
   await editor.fill("send me");
@@ -956,7 +997,7 @@ test("fine-pointer Composer sends on Enter and keeps Shift+Enter as a newline", 
     text: "send me",
     submit: true,
   });
-  await expect(editor).toHaveValue("");
+  await expect(editor).toHaveText("");
 });
 
 test("mobile-layout Composer keeps Enter as a newline and submits with the Send button", async ({
@@ -980,7 +1021,7 @@ test("mobile-layout Composer keeps Enter as a newline and submits with the Send 
 
   await editor.fill("line");
   await editor.press("Enter");
-  await expect(editor).toHaveValue("line\n");
+  await expect(editor).toHaveText("line\n");
   expect(remote.inputs).toHaveLength(0);
 
   await editor.fill("send me");
@@ -991,19 +1032,19 @@ test("mobile-layout Composer keeps Enter as a newline and submits with the Send 
     text: "send me",
     submit: true,
   });
-  await expect(editor).toHaveValue("");
+  await expect(editor).toHaveText("");
 
   await editor.fill("untouched draft");
   await page.locator('[data-key="c-c"]').click();
   await expect.poll(() => remote.writes.length).toBe(1);
   expect(remote.writes[0]).toEqual({ leaseId: "lease-1", data: "\x03" });
-  await expect(editor).toHaveValue("untouched draft");
+  await expect(editor).toHaveText("untouched draft");
 
   await page.locator("#keyBarToggle").click();
   await page.locator('[data-key="esc"]').click();
   await expect.poll(() => remote.writes.length).toBe(2);
   expect(remote.writes[1].data).toBe("\x1b");
-  await expect(editor).toHaveValue("untouched draft");
+  await expect(editor).toHaveText("untouched draft");
 });
 
 test("PC-app embedded mobile view (localApp=1) keeps the mobile send gesture on a fine pointer", async ({
@@ -1024,7 +1065,7 @@ test("PC-app embedded mobile view (localApp=1) keeps the mobile send gesture on 
 
   await editor.fill("line");
   await editor.press("Enter");
-  await expect(editor).toHaveValue("line\n");
+  await expect(editor).toHaveText("line\n");
   expect(remote.inputs).toHaveLength(0);
 
   await editor.fill("send me");
@@ -1035,7 +1076,7 @@ test("PC-app embedded mobile view (localApp=1) keeps the mobile send gesture on 
     text: "send me",
     submit: true,
   });
-  await expect(editor).toHaveValue("");
+  await expect(editor).toHaveText("");
 });
 
 test("Direct paste uses structured input only after a V1 snapshot establishes readiness", async ({
@@ -1289,18 +1330,18 @@ test("an in-flight snapshot is sent once and only clears the unchanged revision"
   await editor.fill("edited while pending");
   await remote.inputs[0].respond();
   await expect(composer).toHaveAttribute("data-can-send", "true");
-  await expect(editor).toHaveValue("edited while pending");
+  await expect(editor).toHaveText("edited while pending");
 
   await send.click();
   await expect.poll(() => remote.inputs.length).toBe(2);
   await remote.inputs[1].respond();
-  await expect(editor).toHaveValue("");
+  await expect(editor).toHaveText("");
 
   await editor.fill("preserve on failure");
   await send.click();
   await expect.poll(() => remote.inputs.length).toBe(3);
   await remote.inputs[2].respond(500);
-  await expect(editor).toHaveValue("preserve on failure");
+  await expect(editor).toHaveText("preserve on failure");
   await expect(composer).toHaveAttribute("data-can-send", "true");
 
   await editor.fill("terminal one pending");
@@ -1309,9 +1350,9 @@ test("an in-flight snapshot is sent once and only clears the unchanged revision"
   await selectTerminal(page, "C:\\two");
   await editor.fill("terminal two draft");
   await remote.inputs[3].respond();
-  await expect(editor).toHaveValue("terminal two draft");
+  await expect(editor).toHaveText("terminal two draft");
   await selectTerminal(page, "C:\\one");
-  await expect(editor).toHaveValue("");
+  await expect(editor).toHaveText("");
 });
 
 test("disconnect releases an in-flight Composer action while preserving its draft", async ({
@@ -1334,14 +1375,14 @@ test("disconnect releases an in-flight Composer action while preserving its draf
   await page.locator("#connect").evaluate((button: HTMLButtonElement) => button.click());
   await expect(page.locator("#status")).toHaveText("Main · Pane 1");
 
-  await expect(editor).toHaveValue("preserve across disconnect");
+  await expect(editor).toHaveText("preserve across disconnect");
   await expect(editor).toBeEnabled();
   await expect(composer).toHaveAttribute("data-can-send", "true");
 
   // Settle the mocked, already-aborted route so the test leaves no pending
   // Playwright handler behind. The stale response must not clear the draft.
   await remote.inputs[0].respond().catch(() => {});
-  await expect(editor).toHaveValue("preserve across disconnect");
+  await expect(editor).toHaveText("preserve across disconnect");
 });
 
 test("Composer keeps xterm unfocused and hides its inactive application cursor", async ({
@@ -1491,7 +1532,7 @@ test.describe("mobile touch Composer focus", () => {
     );
     await expect(editor).toBeFocused();
     await page.keyboard.type("touch input works");
-    await expect(editor).toHaveValue("touch input works");
+    await expect(editor).toHaveText("touch input works");
 
     await page.evaluate(() => {
       const [socket] = (window as Window & { __mockSockets: Array<{ emitSnapshot: () => void }> })
@@ -1500,7 +1541,7 @@ test.describe("mobile touch Composer focus", () => {
     });
     await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
     await expect(editor).toBeFocused();
-    await expect(editor).toHaveValue("touch input works");
+    await expect(editor).toHaveText("touch input works");
   });
 
   test("reports xterm construction failure through the connect transaction", async ({ page }) => {
@@ -1625,7 +1666,7 @@ test("Keyboard button collapses and restores the Composer editor with the soft k
   await keyboardButton.click();
   await expect(composer).toBeVisible();
   await expect(editor).toBeFocused();
-  await expect(editor).toHaveValue("draft survives collapse");
+  await expect(editor).toHaveText("draft survives collapse");
   await expect(page.locator("#composerSend")).toBeEnabled();
 });
 
@@ -1845,7 +1886,7 @@ async function sendComposerLine(
   await editor.press("Enter");
   await expect.poll(() => remote.inputs.length).toBe(expectedCount);
   expect(remote.inputs[expectedCount - 1].body.text).toBe(text);
-  await expect(editor).toHaveValue("");
+  await expect(editor).toHaveText("");
 }
 
 test("Tab on an empty draft opens the newest-first recall popup and Enter fills it (#504)", async ({
@@ -1877,7 +1918,7 @@ test("Tab on an empty draft opens the newest-first recall popup and Enter fills 
   await expect(list.locator('[role="option"]').nth(1)).toHaveAttribute("aria-selected", "true");
   await editor.press("Enter");
   await expect(list).toBeHidden();
-  await expect(editor).toHaveValue("echo two");
+  await expect(editor).toHaveText("echo two");
   // Selecting from the popup fills the draft; it must not send.
   expect(remote.inputs).toHaveLength(3);
 });
@@ -1898,11 +1939,11 @@ test("an empty-editor tap opens recall only with the keyboard up and a blank tap
   await editor.fill("echo one");
   await page.locator("#composerSend").click();
   await expect.poll(() => remote.inputs.length).toBe(1);
-  await expect(editor).toHaveValue("");
+  await expect(editor).toHaveText("");
   await editor.fill("echo two");
   await page.locator("#composerSend").click();
   await expect.poll(() => remote.inputs.length).toBe(2);
-  await expect(editor).toHaveValue("");
+  await expect(editor).toHaveText("");
 
   // DOM focus is not evidence that the soft keyboard is visible. The first
   // tap only raises the keyboard, so it must not cover the editor with recall.
@@ -1928,7 +1969,7 @@ test("an empty-editor tap opens recall only with the keyboard up and a blank tap
   // sending the draft.
   await editor.click();
   await expect(list).toBeHidden();
-  await expect(editor).toHaveValue("");
+  await expect(editor).toHaveText("");
   expect(remote.inputs).toHaveLength(2);
 
   // Open it again to verify the existing touch-friendly pick path.
@@ -1938,7 +1979,7 @@ test("an empty-editor tap opens recall only with the keyboard up and a blank tap
   // Entries commit on mousedown (touch-friendly): fills the draft, no send.
   await list.locator('[role="option"]').nth(1).dispatchEvent("mousedown");
   await expect(list).toBeHidden();
-  await expect(editor).toHaveValue("echo one");
+  await expect(editor).toHaveText("echo one");
   expect(remote.inputs).toHaveLength(2);
 
   // A tap on a NON-empty draft never opens the recall popup (autocomplete
@@ -1952,7 +1993,7 @@ test("an empty-editor tap opens recall only with the keyboard up and a blank tap
   await expect(autocomplete).toBeVisible();
   await editor.click();
   await expect(autocomplete).toBeHidden();
-  await expect(editor).toHaveValue("echo");
+  await expect(editor).toHaveText("echo");
 
   // A tap mid-IME composition never opens the popup, even on an empty draft;
   // it opens again once composition ends.
@@ -1977,7 +2018,7 @@ test("VirtualKeyboard geometry is authoritative over the viewport fallback", asy
   await editor.fill("echo one");
   await page.locator("#composerSend").click();
   await expect.poll(() => remote.inputs.length).toBe(1);
-  await expect(editor).toHaveValue("");
+  await expect(editor).toHaveText("");
 
   // A supported VirtualKeyboard API reporting zero is an explicit closed
   // signal, even while another height-only viewport change exceeds fallback
@@ -2020,7 +2061,7 @@ test("as-you-type autocomplete suggests prefixes; plain Enter still sends, arrow
   await editor.press("Enter");
   await expect.poll(() => remote.inputs.length).toBe(4);
   expect(remote.inputs[3].body.text).toBe("ec");
-  await expect(editor).toHaveValue("");
+  await expect(editor).toHaveText("");
 
   // Arrow creates a highlight; then Enter PICKS (fills) instead of sending.
   await editor.fill("ec");
@@ -2029,14 +2070,14 @@ test("as-you-type autocomplete suggests prefixes; plain Enter still sends, arrow
   await expect(dropdown.locator('[role="option"]').nth(0)).toHaveAttribute("aria-selected", "true");
   await editor.press("Enter");
   await expect(dropdown).toBeHidden();
-  await expect(editor).toHaveValue("echo two");
+  await expect(editor).toHaveText("echo two");
   expect(remote.inputs).toHaveLength(4);
 
   // Tab completes to the top suggestion with no active highlight.
   await editor.fill("ec");
   await expect(dropdown).toBeVisible();
   await editor.press("Tab");
-  await expect(editor).toHaveValue("echo two");
+  await expect(editor).toHaveText("echo two");
 });
 
 test("starred autocomplete can send on pick and long-press opens the editor", async ({ page }) => {

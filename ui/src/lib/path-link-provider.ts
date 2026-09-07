@@ -20,6 +20,7 @@ import type { Terminal, IDecoration, IMarker } from "@xterm/xterm";
 import type { OsHandoffMode } from "./os-handoff";
 import type { PathLinkClickAction } from "./path-link-os-open";
 import { readLineCells, reconstructLine } from "./terminal-cell-map";
+import { pathLinkPartsCurrent, type PathLinkPart } from "./path-link-lines";
 
 /**
  * 검증된 링크의 소유 scope(ADR-0188). 세 트리거는 서로의 밑줄을 건드리지 않고
@@ -31,6 +32,8 @@ const PATH_LINK_SCOPES: readonly PathLinkScope[] = ["selection", "point", "scree
 
 /** 검증된 선택 경로의 버퍼 범위 + 메타. */
 export interface VerifiedPathSelection {
+  /** 여러 줄 중 하나가 바뀌면 같은 경로의 모든 밑줄을 폐기한다. */
+  pathParts?: PathLinkPart[];
   /** 1-based 절대 버퍼 라인. 단일 라인 가정. */
   bufferLine: number;
   /** 1-based 시작 컬럼(inclusive). */
@@ -105,6 +108,13 @@ function tokenStillAtRange(
     if (entry.marker?.isDisposed === true || entry.decoration?.isDisposed === true) return false;
     const markerLine = entry.marker && !entry.marker.isDisposed ? entry.marker.line : undefined;
     const absoluteLine = markerLine ?? entry.selection.bufferLine - 1;
+    if (entry.selection.pathParts) {
+      return pathLinkPartsCurrent(
+        terminal.buffer.active,
+        entry.selection.pathParts,
+        absoluteLine - (entry.selection.bufferLine - 1),
+      );
+    }
     const line = terminal.buffer.active.getLine(absoluteLine);
     if (!line) return false;
     const { text, columns } = reconstructLine(readLineCells(line));

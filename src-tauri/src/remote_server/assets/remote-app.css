@@ -105,6 +105,7 @@
         --remote-composer-active-opacity: 1;
         --remote-menu-font-size: 13px;
         --remote-navigation-width: 360px;
+        --touch-selection-handle-size: 22px;
         /* Compact controls in the Remote header share one border-box height. */
         --header-control-height: 26px;
         --key-bar-control-height: 26px;
@@ -204,10 +205,37 @@
       .input-action-row::-webkit-scrollbar {
         display: none;
       }
-      /* No `min-width: 0` here: that would zero out the grid track's automatic
-         minimum, letting a full segment shrink past its content and overlap its
-         neighbour instead of scrolling the row. The scroll container is the row,
-         which does carry `min-width: 0`. */
+      .input-action-row {
+        --input-button-scale: var(--remote-main-button-scale, 1);
+      }
+      .button-size-controls {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        grid-column: 2 / -1;
+      }
+      .button-size-controls output {
+        min-width: 4ch;
+        text-align: center;
+      }
+      .key-row {
+        --input-button-scale: var(--remote-keys-button-scale, 1);
+      }
+      .input-action-row, .key-row {
+        --key-bar-control-height: calc(26px * var(--input-button-scale));
+        --fs-sm: calc(11px * var(--input-button-scale));
+        --fs-md: calc(13px * var(--input-button-scale));
+        font-size: var(--fs-md);
+      }
+      .input-action-row .remote-icon, .key-row .remote-icon {
+        width: calc(14px * var(--input-button-scale));
+        height: calc(14px * var(--input-button-scale));
+      }
+      .action-segment .composer-send .remote-icon {
+        width: calc(20px * var(--input-button-scale));
+        height: calc(20px * var(--input-button-scale));
+      }
+      /* Keep segment minimums content-sized so overflowing rows scroll. */
       .action-segment {
         display: flex;
         align-items: center;
@@ -227,7 +255,7 @@
          visual line instead of centring a shorter key against taller ones. */
       footer .action-segment > .key-btn {
         height: auto;
-        padding: 5px 9px;
+        padding: calc(5px * var(--input-button-scale, 1)) calc(9px * var(--input-button-scale, 1));
       }
       label {
         display: flex;
@@ -249,7 +277,7 @@
       button {
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
-        padding: 5px 9px;
+        padding: calc(5px * var(--input-button-scale, 1)) calc(9px * var(--input-button-scale, 1));
         background: var(--panel-2);
         color: var(--text);
         cursor: pointer;
@@ -273,7 +301,7 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        padding: 5px 9px;
+        padding: calc(5px * var(--input-button-scale, 1)) calc(9px * var(--input-button-scale, 1));
         border: 1px solid var(--accent);
         border-radius: var(--radius-md);
         background: var(--accent);
@@ -466,7 +494,7 @@
         flex: 0 0 auto;
         align-items: center;
         justify-content: center;
-        width: 34px;
+        width: calc(34px * var(--input-button-scale, 1));
         height: var(--key-bar-control-height);
         padding: 0;
         border: 1px solid var(--border);
@@ -656,6 +684,9 @@
       /* Flush editor (mirrors desktop): no outer margin / parent padding, no
          border or rounding — it fills the strip under the divider. */
       .composer-input {
+        font-family: inherit;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
         width: 100%;
         min-width: 0;
         min-height: 72px;
@@ -671,6 +702,25 @@
         line-height: 1.4;
         outline: none;
         overflow: auto;
+      }
+      .composer-attachment {
+        display: inline-flex;
+        max-width: min(24ch, 100%);
+        padding: 0 0.4em;
+        vertical-align: bottom;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-surface);
+        color: var(--text-primary);
+        font-size: 0.9em;
+      }
+      .composer-attachment-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .remote-body {
         position: relative;
@@ -746,6 +796,7 @@
       .desktop-mode-button,
       .copy-pane-button,
       .file-explorer-button,
+      .navigation-pin-button,
       .spatial-exclusion-button {
         width: 28px;
         height: var(--header-control-height);
@@ -768,6 +819,7 @@
       .desktop-mode-button:hover,
       .copy-pane-button:hover,
       .file-explorer-button:hover,
+      .navigation-pin-button:hover,
       .spatial-exclusion-button:hover {
         background: var(--hover-bg);
       }
@@ -776,6 +828,14 @@
       }
       .file-explorer-button {
         color: var(--text-secondary);
+      }
+      .navigation-pin-button {
+        color: var(--text-secondary);
+      }
+      .navigation-pin-button[aria-pressed="true"] {
+        border-color: var(--accent-50);
+        background: var(--accent-20);
+        color: var(--accent);
       }
       .spatial-exclusion-button {
         color: var(--text-secondary);
@@ -799,6 +859,7 @@
         flex: 0 0 auto;
         align-items: center;
         justify-content: space-between;
+        gap: 4px;
         padding: 0 6px 0 9px;
         border-bottom: 1px solid var(--border);
       }
@@ -913,6 +974,12 @@
       .settings-panel[hidden] {
         display: none;
       }
+      .settings-connection-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin: 8px;
+      }
       .connection-title {
         color: var(--text-secondary);
         font-size: var(--fs-xs);
@@ -985,8 +1052,9 @@
       }
       .file-viewer-panel {
         display: grid;
-        gap: 7px;
-        padding: 0 8px 9px;
+        gap: 6px;
+        padding: 8px 10px;
+        background: var(--bg-surface);
         border-bottom: 1px solid var(--border);
       }
       .file-viewer-status {
@@ -1001,18 +1069,16 @@
         color: var(--danger);
       }
       .file-viewer-path-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        gap: 6px;
         min-width: 0;
       }
       .file-viewer-path-row input {
         min-width: 0;
         width: 100%;
       }
-      .file-viewer-actions {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 6px;
-      }
-      .file-viewer-actions button {
+      .file-viewer-path-row button {
         min-width: 0;
       }
       .nav-section + .nav-section {
@@ -1187,6 +1253,12 @@
         padding: 3px 6px;
         font-size: var(--fs-xs);
       }
+      .user-key-escape-buttons {
+        display: flex;
+        flex: 1 1 auto;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
       .user-key-shift {
         flex: 0 0 auto;
         gap: 4px;
@@ -1253,6 +1325,7 @@
       .pc-update-notes {
         max-height: 96px;
         overflow: auto;
+        touch-action: pan-y;
         white-space: pre-wrap;
         color: var(--muted);
         font-size: var(--fs-sm);
@@ -1278,6 +1351,8 @@
         flex: 1 1 auto;
         flex-direction: column;
         overflow-y: auto;
+        /* Nested scrollers must preserve horizontal pointer events themselves. */
+        touch-action: pan-y;
       }
       .hidden-workspace-toggle {
         position: relative;
@@ -1294,6 +1369,7 @@
       }
       .hidden-workspace-shelf {
         overflow-y: auto;
+        touch-action: pan-y;
         background: var(--bg-surface);
         padding: 3px 5px;
       }
@@ -1552,6 +1628,7 @@
       .notification-list {
         min-height: 0;
         overflow-y: auto;
+        touch-action: pan-y;
       }
       .notification-group-title {
         display: flex;
@@ -2012,15 +2089,15 @@
           width: 0;
           min-width: 0;
           overflow: hidden;
-          padding-left: 4px;
-          padding-right: 4px;
+          padding-left: calc(4px * var(--input-button-scale, 1));
+          padding-right: calc(4px * var(--input-button-scale, 1));
           text-overflow: ellipsis;
           white-space: nowrap;
         }
         footer .action-segment > button {
           width: auto;
-          min-width: 54px;
-          flex: 1 0 54px;
+          min-width: calc(54px * var(--input-button-scale));
+          flex: 1 0 calc(54px * var(--input-button-scale));
         }
         /* Send joins the equal split — its base flex: 0 0 auto outranks the
            rule above and would collapse against width: 0, clipping the icon. */
@@ -2040,7 +2117,20 @@
           padding: 6px 8px;
         }
       }
+      @media (max-width: 360px) {
+        .file-viewer-path-row {
+          grid-template-columns: 1fr 1fr;
+        }
+        .file-viewer-path-row input {
+          grid-column: 1 / -1;
+        }
+      }
       @media (max-width: 240px) {
+        .app > header {
+          gap: 0;
+          padding-right: 1px;
+          padding-left: 1px;
+        }
         .drawer-header {
           padding-right: 1px;
           padding-left: 1px;
@@ -2050,9 +2140,14 @@
         }
         .drawer-header-actions {
           width: 100%;
+          flex-shrink: 1;
           min-width: 0;
           justify-content: space-between;
           gap: 0;
+        }
+        .drawer-header-actions > button {
+          flex-shrink: 1;
+          min-width: 0;
         }
         .drawer-header-button,
         .desktop-mode-button {
@@ -2144,14 +2239,54 @@
         position: absolute;
         z-index: 12;
         display: none;
-        width: 18px;
-        height: 18px;
+        width: var(--touch-selection-handle-size);
+        height: var(--touch-selection-handle-size);
         border: 2px solid var(--terminal-bg);
-        border-radius: 50%;
+        border-radius: 0 50% 50% 50%;
         background: var(--accent);
         box-shadow: 0 2px 8px #00000059;
         touch-action: none;
-        transform: translate(-50%, -50%);
+      }
+      .touch-selection-handle[data-handle="start"] {
+        border-radius: 50% 0 50% 50%;
+        transform: translateX(-100%);
+      }
+      .touch-selection-handle[data-handle="start"][data-inward="true"] {
+        border-radius: 0 50% 50% 50%;
+        transform: none;
+      }
+      .touch-selection-handle[data-handle="end"][data-inward="true"] {
+        border-radius: 50% 0 50% 50%;
+        transform: translateX(-100%);
+      }
+      .touch-selection-magnifier {
+        position: fixed;
+        z-index: 1000;
+        width: 168px;
+        height: 76px;
+        max-width: calc(100vw - 16px);
+        overflow: hidden;
+        border: 2px solid var(--accent);
+        border-radius: 18px;
+        background: var(--terminal-surface-bg, var(--terminal-bg));
+        box-shadow: 0 4px 16px #00000059;
+        pointer-events: none;
+        user-select: none;
+      }
+      .touch-selection-magnifier::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 20%;
+        height: 60%;
+        border-left: 1px solid var(--accent);
+      }
+      .touch-selection-magnifier-content {
+        position: absolute;
+        top: 0;
+        left: 0;
+        padding: 0;
+        transform-origin: top left;
       }
       /* --- Special key toolbar (soft keys) ---
          A client-side row of buttons that send terminal escape sequences via
@@ -2194,9 +2329,9 @@
       .key-btn {
         position: relative;
         flex: 0 0 auto;
-        min-width: 34px;
+        min-width: calc(34px * var(--input-button-scale, 1));
         height: var(--key-bar-control-height);
-        padding: 4px 9px;
+        padding: calc(4px * var(--input-button-scale, 1)) calc(9px * var(--input-button-scale, 1));
         background: var(--panel-2);
         color: var(--text);
         font-size: var(--fs-sm);
@@ -2221,7 +2356,7 @@
         background: var(--accent-12);
       }
       .key-flick-btn {
-        min-width: 42px;
+        min-width: calc(42px * var(--input-button-scale, 1));
         touch-action: none;
         user-select: none;
       }
@@ -2503,8 +2638,15 @@
         border-bottom: 1px solid var(--border);
         background: var(--bg-surface);
       }
-      .file-viewer-title {
+      .file-viewer-title-slot {
+        display: flex;
         flex: 1 1 auto;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+      }
+      .file-viewer-title {
+        flex: 0 1 auto;
         min-width: 0;
         overflow: hidden;
         color: var(--muted);
@@ -2523,6 +2665,7 @@
         gap: 4px;
       }
       .file-viewer-zoom button,
+      .file-viewer-copy-path,
       .file-viewer-download,
       .file-viewer-close {
         display: inline-flex;
@@ -2539,6 +2682,7 @@
         line-height: 1;
       }
       .file-viewer-zoom button:hover,
+      .file-viewer-copy-path:hover,
       .file-viewer-download:hover,
       .file-viewer-close:hover {
         background: var(--hover-bg);
@@ -2552,6 +2696,16 @@
         color: var(--muted);
         font-size: var(--fs-xs);
         text-align: center;
+      }
+      @media (max-width: 360px) {
+        .file-viewer-header {
+          gap: 4px;
+          padding-inline: 6px;
+        }
+        .file-viewer-zoom-level,
+        #fileViewerZoomReset {
+          display: none;
+        }
       }
       .file-viewer-body {
         flex: 1 1 auto;
