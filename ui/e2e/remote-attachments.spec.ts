@@ -204,6 +204,43 @@ async function openRemote(
 }
 
 test.describe("remote terminal attachments", () => {
+  test("preserves a chip-adjacent Hangul selection during composition", async ({ page }) => {
+    await openRemote(page, "composer");
+    const editor = page.locator("#composerInput");
+    await chooseAttachmentFiles(page, {
+      name: "notes.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("notes"),
+    });
+    await editor.focus();
+    await editor.locator(".composer-attachment").evaluate((chip) => {
+      const range = document.createRange();
+      range.setStartAfter(chip);
+      range.collapse(true);
+      window.getSelection()!.removeAllRanges();
+      window.getSelection()!.addRange(range);
+    });
+    await page.keyboard.insertText(" 한글");
+    await editor.evaluate((element) => {
+      const text = [...element.childNodes].find((node) => node.textContent?.includes("한글"))!;
+      const range = document.createRange();
+      range.setStart(text, text.textContent!.length - 2);
+      range.setEnd(text, text.textContent!.length);
+      window.getSelection()!.removeAllRanges();
+      window.getSelection()!.addRange(range);
+      element.dispatchEvent(new CompositionEvent("compositionstart", { data: "한" }));
+      element.dispatchEvent(new CompositionEvent("compositionupdate", { data: "한글" }));
+      element.dispatchEvent(
+        new InputEvent("input", { bubbles: true, data: "한글", isComposing: true }),
+      );
+    });
+
+    await expect(editor.locator(".composer-attachment")).toHaveText("notes.txt");
+    await expect(editor).toHaveText("notes.txt 한글");
+    expect(await editor.evaluate(() => window.getSelection()?.toString())).toBe("한글");
+    await editor.dispatchEvent("compositionend", { data: "한글" });
+  });
+
   test("replaces a selected attachment and copies its original path", async ({ page }) => {
     const { terminalInputs } = await openRemote(page, "composer");
     const editor = page.locator("#composerInput");

@@ -395,7 +395,7 @@ test("Android foreground resumes transport without reloading the Remote document
   await expect.poll(async () => (await state()).cancelledRequests).toBe(1);
   await expect.poll(async () => (await state()).outputOpens).toBe(2);
   await expect.poll(async () => (await state()).heartbeatRequests).toBeGreaterThan(heartbeatBefore);
-  await expect(composer).toHaveValue("draft survives background");
+  await expect(composer).toHaveText("draft survives background");
   expect(await page.evaluate(() => sessionStorage.getItem("laymux.remote.resumeToken"))).toBeNull();
   expect(
     await page.evaluate(() => Boolean((window as AndroidLifecycleWindow).__remoteDocumentSentinel)),
@@ -524,7 +524,7 @@ test("Android back dismisses the top Remote layer before the disconnect guard", 
   const composer = page.locator("#composerInput");
   await composer.fill("echo remembered");
   await composer.press("Enter");
-  await expect(composer).toHaveValue("");
+  await expect(composer).toHaveText("");
   await composer.fill("echo");
   await expect(page.locator("#composerAutocompleteList")).toBeVisible();
 

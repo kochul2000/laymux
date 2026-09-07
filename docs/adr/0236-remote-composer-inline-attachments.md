@@ -1,6 +1,6 @@
 # 0236. Remote Composer 인라인 첨부 칩
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-07
 - Source: 사용자 합의(파일별 칩, Backspace/Delete 삭제, 제거 버튼·복원 단축키 없음), ADR-0029, ADR-0181, architecture/data-flow.md §8
 - Relationship: ADR-0029의 Remote textarea 선택과 ADR-0181의 Composer 경로 표시를 확장한다.
