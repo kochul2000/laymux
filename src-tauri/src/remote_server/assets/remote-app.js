@@ -5046,20 +5046,22 @@ import {
         function withPreservedInputSurfaceFocus(run) {
           const surface = document.activeElement;
           const textarea = terminal && terminal.textarea;
-          const originalFocus = textarea ? textarea.focus : null;
-          if (textarea && originalFocus) {
+          // Android reports Linux: xterm also calls select() for primary
+          // selection, which steals focus even when focus() is suppressed.
+          const methods = textarea ? { focus: textarea.focus, select: textarea.select } : {};
+          for (const method of Object.keys(methods)) {
             try {
-              textarea.focus = function preserveInputSurfaceFocus() {};
+              textarea[method] = function preserveInputSurfaceFocus() {};
             } catch (_) {
-              // Some hosts freeze the native focus function on the instance.
+              // Some hosts freeze native functions on the instance.
             }
           }
           try {
             return run();
           } finally {
-            if (textarea && originalFocus && textarea.focus !== originalFocus) {
+            for (const method of Object.keys(methods)) {
               try {
-                textarea.focus = originalFocus;
+                textarea[method] = methods[method];
               } catch (_) {}
             }
             restorePreservedInputSurfaceFocus(surface);
@@ -5263,7 +5265,9 @@ import {
             typeof selectionService._selectWordAtCursor === "function" &&
             selectionService._selectWordAtCursor(selectionEvent, true)
           ) {
-            selectionService.refresh(true);
+            // Touch copy is handled on release; Linux primary selection would
+            // focus/select the helper textarea and dismiss the composer IME.
+            selectionService.refresh();
             selectionService._fireEventIfSelectionChanged();
           }
           const selection = term.getSelectionPosition && term.getSelectionPosition();
