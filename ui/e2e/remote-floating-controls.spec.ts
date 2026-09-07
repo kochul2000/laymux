@@ -15,6 +15,96 @@ async function open(page: Page) {
 const stored = (page: Page) =>
   page.evaluate(() => JSON.parse(localStorage.getItem("laymux.remote.keybar") || "{}").floating);
 
+test("round pads move only after a central hold and keyboard uses an icon", async ({ page }) => {
+  await open(page);
+  await expect(page.getByLabel("Arrow pad opacity")).toHaveValue("50");
+  await expect(page.getByLabel("Pane / alert pad opacity")).toHaveValue("50");
+  await page.getByLabel("Arrow pad enabled").check();
+  await page.getByLabel("Floating button action").selectOption("keyboard");
+  await page.getByRole("button", { name: "Add floating button", exact: true }).click();
+  await expect(page.getByLabel("Keyboard opacity")).toHaveValue("50");
+  await page.locator("#navToggle").click();
+  const pad = page.locator('#floatingControls [data-key="dpad"]');
+  await expect(pad.locator('[data-remote-icon-name="Move"]')).toHaveCount(1);
+  await expect(
+    page.locator('#keyRow [data-key="navPad"] [data-remote-icon-name="GamepadDirectional"]'),
+  ).toHaveCount(1);
+  await expect(page.locator(".floating-handle")).toHaveCount(0);
+  await expect(page.locator('#floatingControls [data-remote-icon-name="Keyboard"]')).toHaveCount(1);
+  await expect(pad).toHaveCSS("border-radius", "50%");
+  await page.locator("#keyBarToggle").click();
+  for (const selector of ['#keyRow [data-key="navPad"]', '#floatingControls [data-key="dpad"]']) {
+    const offset = await page.locator(selector).evaluate((button) => {
+      const b = button.getBoundingClientRect();
+      const i = button.querySelector("svg")!.getBoundingClientRect();
+      return {
+        x: i.x + i.width / 2 - b.x - b.width / 2,
+        y: i.y + i.height / 2 - b.y - b.height / 2,
+      };
+    });
+    expect(Math.abs(offset.x)).toBeLessThan(1);
+    expect(Math.abs(offset.y)).toBeLessThan(1);
+  }
+  // No lease in this DOM fixture; enable only the gesture target.
+  await pad.evaluate((button: HTMLButtonElement) => {
+    button.disabled = false;
+  });
+  await pad.hover();
+  const box = (await pad.boundingBox())!;
+  const initial = await stored(page);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x - 40, box.y + 32);
+  await page.mouse.up();
+  expect(await stored(page)).toEqual(initial);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await expect(page.locator(".floating-control.dragging")).toHaveCount(1);
+  await page.mouse.move(150, 240);
+  await page.mouse.up();
+  expect((await stored(page)).pads.dpad.y).toBeLessThan(initial.pads.dpad.y);
+});
+
+test("pad hints switch between square chevrons and arrows only during use", async ({
+  page,
+}, testInfo) => {
+  await open(page);
+  await page.getByLabel("Arrow pad enabled").check();
+  await page.getByLabel("Pane / alert pad enabled").check();
+  await page.locator("#navToggle").click();
+  await expect
+    .poll(async () => {
+      const box = (await page.locator("#navigationPanel").boundingBox())!;
+      return box.x + box.width;
+    })
+    .toBeLessThanOrEqual(0);
+  for (const [id, idle, active] of [
+    ["navPad", "GamepadDirectional", "SquareChevron"],
+    ["dpad", "Move", "Arrow"],
+  ]) {
+    const pad = page.locator(`#floatingControls [data-key="${id}"]`);
+    await expect(pad.locator(`[data-remote-icon-name="${idle}"]`)).toHaveCount(1);
+    await pad.evaluate((button: HTMLButtonElement) => {
+      button.disabled = false;
+    });
+    await pad.hover();
+    const box = (await pad.boundingBox())!;
+    await page.mouse.move(box.x + box.width * 0.85, box.y + box.height / 2);
+    await page.mouse.down();
+    await expect(page.locator("#keyFlickHint")).toBeVisible();
+    for (const direction of ["Up", "Down", "Left", "Right"]) {
+      await expect(
+        page.locator(
+          `#keyFlickHint [data-flick-direction="${direction.toLowerCase()}"] [data-remote-icon-name="${active}${direction}"]`,
+        ),
+      ).toHaveCount(1);
+    }
+    await page.screenshot({ path: testInfo.outputPath(`${id}-active.png`) });
+    await page.mouse.up();
+    await expect(page.locator("#keyFlickHint")).toBeHidden();
+  }
+});
+
 test("floating pads and repeated tap buttons persist with independent size and position", async ({
   page,
 }, testInfo) => {
@@ -22,12 +112,20 @@ test("floating pads and repeated tap buttons persist with independent size and p
   await expect(page.locator("#floatingControls > *")).toHaveCount(0);
   await page.getByLabel("Arrow pad enabled").check();
   await page.getByLabel("Pane / alert pad enabled").check();
-  await page.getByLabel("Pane / alert pad Y").fill("35");
-  await page.getByLabel("Pane / alert pad Y").dispatchEvent("change");
+  await expect(page.getByLabel("Pane / alert pad Y", { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByText("Hold the center of a pad, then drag to move.", { exact: false }),
+  ).toBeVisible();
   await page.getByLabel("Arrow pad size").fill("88");
   await page.getByLabel("Arrow pad size").dispatchEvent("change");
-  await page.getByLabel("Arrow pad X").fill("25");
-  await page.getByLabel("Arrow pad X").dispatchEvent("change");
+  await expect(page.getByLabel("Arrow pad X", { exact: true })).toHaveCount(0);
+  await page.getByLabel("Arrow pad opacity").fill("40");
+  await page.getByLabel("Arrow pad opacity").dispatchEvent("change");
+  await expect(page.locator('[data-floating-id="dpad"]')).toHaveCSS("opacity", "0.4");
+  await expect(page.locator('[data-floating-id="dpad"] button')).toHaveCSS(
+    "-webkit-tap-highlight-color",
+    "rgba(0, 0, 0, 0)",
+  );
   await page.getByLabel("Floating button action").selectOption("composer");
   await page.getByRole("button", { name: "Add floating button", exact: true }).click();
   await page.getByRole("button", { name: "Add floating button", exact: true }).click();
@@ -45,7 +143,7 @@ test("floating pads and repeated tap buttons persist with independent size and p
   await page.screenshot({ path: testInfo.outputPath("floating-controls.png") });
   await page.locator("#navToggle").click();
   await page.locator("#drawerSettingsButton").click();
-  expect(await stored(page)).toMatchObject({ pads: { dpad: { size: 88, x: 0.25 } } });
+  expect(await stored(page)).toMatchObject({ pads: { dpad: { size: 88, opacity: 0.4 } } });
   await page.getByLabel("Arrow pad enabled").uncheck();
   await expect(page.locator('#floatingControls [data-floating-id="dpad"]')).toHaveCount(0);
   await page.reload();
@@ -202,8 +300,7 @@ test("rejects unknown actions and malformed geometry without losing valid contro
   await open(page);
   await expect(page.locator("#floatingControls > *")).toHaveCount(2);
   await expect(page.getByLabel("Arrow pad size")).toHaveValue("128");
-  await expect(page.getByLabel("Arrow pad X")).toHaveValue("0");
-  await expect(page.getByLabel("Arrow pad Y")).toHaveValue("100");
+  await expect(page.getByLabel("Arrow pad opacity")).toHaveValue("50");
   await expect(
     page.getByLabel("Floating button action").locator('option[value="soft:dpad"]'),
   ).toHaveCount(0);
