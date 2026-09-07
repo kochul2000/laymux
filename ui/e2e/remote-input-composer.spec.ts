@@ -1763,6 +1763,110 @@ test("special keys cancel the mousedown focus-theft default so the soft keyboard
   await expect(editor).toBeFocused();
 });
 
+test("floating cursor tap is one-shot, pad flick sends input, and dragging sends nothing", async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "laymux.remote.keybar",
+      JSON.stringify({
+        floating: {
+          pads: { dpad: { enabled: true, size: 64, x: 0.1, y: 0.5 } },
+          buttons: [{ id: "f-up", actionId: "soft:up", enabled: true, size: 64, x: 0.9, y: 0.5 }],
+        },
+      }),
+    ),
+  );
+  const remote = await installRemotePage(page, { coarse: true });
+  await connect(page);
+  await page.locator("#focusTerminal").click();
+  const editor = page.locator("#composerInput");
+  const up = page.locator('#floatingControls [data-key="up"]');
+  await expect(up).toBeEnabled();
+  await up.click({ delay: 650 });
+  await expect.poll(() => remote.writes.map((write) => write.data)).toEqual(["\x1b[A"]);
+  await expect(editor).toBeFocused();
+  const pad = page.locator('#floatingControls [data-key="dpad"]');
+  const box = (await pad.boundingBox())!;
+  await page.mouse.move(box.x + 32, box.y + 32);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 60, box.y + 32, { steps: 3 });
+  await page.mouse.up();
+  await expect.poll(() => remote.writes.map((write) => write.data)).toEqual(["\x1b[A", "\x1b[C"]);
+  for (const control of [up, page.getByRole("button", { name: "Move Arrow pad", exact: true })]) {
+    const start = (await control.boundingBox())!;
+    await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(start.x + 20, start.y - 70, { steps: 4 });
+    await page.mouse.up();
+  }
+  await page.waitForTimeout(150);
+  expect(remote.writes).toHaveLength(2);
+  await expect(editor).toBeFocused();
+});
+
+test("floating header copies follow availability and the shared skip toggle", async ({ page }) => {
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "laymux.remote.keybar",
+      JSON.stringify({
+        floating: {
+          buttons: [
+            { id: "f-copy", actionId: "copyPane", x: 0.1, y: 0.3 },
+            { id: "f-skip", actionId: "skip", x: 0.9, y: 0.3 },
+          ],
+        },
+      }),
+    ),
+  );
+  await installRemotePage(page, { coarse: true });
+  const copy = page.locator('#floatingControls [data-action-proxy="copyPane"]');
+  const skip = page.locator('#floatingControls [data-action-proxy="skip"]');
+  await expect(copy).toBeDisabled();
+  await expect(skip).toBeDisabled();
+  await connect(page);
+  await expect(copy).toBeEnabled();
+  await expect(skip).toBeEnabled();
+  await skip.click();
+  await expect(page.locator("#spatialExclusion")).toHaveAttribute("aria-pressed", "true");
+  await expect(skip).toHaveAttribute("aria-pressed", "true");
+  await page.locator("#spatialExclusion").click();
+  await expect(skip).toHaveAttribute("aria-pressed", "false");
+});
+
+test("floating navigation pad shares spatial navigation and does not repeat on hold", async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "laymux.remote.keybar",
+      JSON.stringify({
+        floating: { pads: { navPad: { enabled: true, x: 0.5, y: 0.5 } } },
+      }),
+    ),
+  );
+  const remote = await installRemotePage(page, { coarse: true });
+  const steps: Array<{ direction: string; leaseId: string }> = [];
+  await page.route("**/remote/v1/navigation/spatial", async (route) => {
+    steps.push(route.request().postDataJSON());
+    await route.fulfill({ json: { moved: false, reason: "no_other_target" } });
+  });
+  await connect(page);
+  const pad = page.locator('#floatingControls [data-key="navPad"]');
+  await expect(pad).toBeEnabled();
+  const box = (await pad.boundingBox())!;
+  await page.mouse.move(box.x + 32, box.y + 32);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 32, box.y + 60, { steps: 3 });
+  await page.waitForTimeout(650);
+  expect(steps).toEqual([]);
+  await page.mouse.up();
+  await expect
+    .poll(() => steps)
+    .toEqual([expect.objectContaining({ direction: "next", leaseId: "lease-1" })]);
+  expect(remote.writes).toEqual([]);
+});
+
 // --- Composer recall: Tab history popup (#504) + autocomplete (#505) ---
 
 async function enterComposerMode(page: Page) {

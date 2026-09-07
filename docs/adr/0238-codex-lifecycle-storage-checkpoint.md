@@ -1,6 +1,6 @@
 # 0238. Codex 복원점은 프로세스별 대화 전환 기록으로 선택한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-07
 - Source: 사용자 요구(훅 설정 없이 빈 대화 복원), dev Windows·WSL Codex 0.153.4 실측, architecture/data-flow.md §13.5
 - Amends: ADR-0118·0120의 Codex 후보 선택, ADR-0222·0232의 결론적 체크포인트 상태
