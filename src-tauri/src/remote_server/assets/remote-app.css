@@ -2161,12 +2161,43 @@
         width: var(--touch-selection-handle-size);
         height: var(--touch-selection-handle-size);
         border: 2px solid var(--terminal-bg);
-        border-radius: 50% 50% 50% 0;
+        border-radius: 0 50% 50% 50%;
         background: var(--accent);
         box-shadow: 0 2px 8px #00000059;
         touch-action: none;
-        /* (sqrt(2) - 1) / 2 keeps the rotated tip at the selection boundary. */
-        transform: translate(-50%, 20.71%) rotate(135deg);
+      }
+      .touch-selection-handle[data-handle="start"] {
+        border-radius: 50% 0 50% 50%;
+        transform: translateX(-100%);
+      }
+      .touch-selection-magnifier {
+        position: fixed;
+        z-index: 1000;
+        width: 168px;
+        height: 76px;
+        max-width: calc(100vw - 16px);
+        overflow: hidden;
+        border: 2px solid var(--accent);
+        border-radius: 18px;
+        background: var(--terminal-surface-bg, var(--terminal-bg));
+        box-shadow: 0 4px 16px #00000059;
+        pointer-events: none;
+        user-select: none;
+      }
+      .touch-selection-magnifier::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 20%;
+        height: 60%;
+        border-left: 1px solid var(--accent);
+      }
+      .touch-selection-magnifier-content {
+        position: absolute;
+        top: 0;
+        left: 0;
+        padding: 0;
+        transform-origin: top left;
       }
       /* --- Special key toolbar (soft keys) ---
          A client-side row of buttons that send terminal escape sequences via
