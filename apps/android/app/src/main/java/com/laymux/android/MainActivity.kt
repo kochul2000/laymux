@@ -2828,12 +2828,25 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     fun disconnectRemote() {
-        showCloudDashboard()
+        if (visibleWebSurface != VisibleWebSurface.REMOTE || !::webView.isInitialized) {
+            showCloudDashboard()
+            return
+        }
+        val documentGeneration = secureWebViewGeneration
+        val targetWebView = webView
+        // The PC page owns lease release and pending input cancellation. Keep its
+        // encrypted bridge alive until Exit calls disconnectRemoteFromWeb.
+        targetWebView.evaluateJavascript(REMOTE_EXIT_SCRIPT) { result ->
+            if (isDestroyed || targetWebView !== webView ||
+                !remoteBridgeActionsEnabled(documentGeneration)
+            ) return@evaluateJavascript
+            if (result != "true") showCloudDashboard()
+        }
     }
 
     fun disconnectRemoteFromWeb(documentGeneration: Long) {
         runOnUiThread {
-            if (remoteBridgeActionsEnabled(documentGeneration)) disconnectRemote()
+            if (remoteBridgeActionsEnabled(documentGeneration)) showCloudDashboard()
         }
     }
 
@@ -3331,6 +3344,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             "(function(){var ui=window.laymuxRemoteUi;" +
                 "return !!ui&&typeof ui.dismissTopLayer==='function'&&" +
                 "ui.dismissTopLayer()===true;})()"
+        private const val REMOTE_EXIT_SCRIPT =
+            "(function(){var exit=document.getElementById('exit');" +
+                "if(!window.laymuxRemoteUi||!exit)return false;" +
+                "exit.click();return true;})()"
         private const val MAX_REMOTE_PATH_LENGTH = 2_048
         private const val MAX_REMOTE_IDENTIFIER_LENGTH = 128
         private const val MAX_BRIDGE_ID_LENGTH = 64
