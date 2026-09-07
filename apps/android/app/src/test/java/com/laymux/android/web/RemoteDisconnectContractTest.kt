@@ -2,6 +2,7 @@ package com.laymux.android.web
 
 import java.io.File
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class RemoteDisconnectContractTest {
@@ -14,9 +15,8 @@ class RemoteDisconnectContractTest {
         val disconnect = activity.substringAfter("fun disconnectRemote() {")
             .substringBefore("fun disconnectRemoteFromWeb")
         assertTrue(disconnect.contains("evaluateJavascript(REMOTE_EXIT_SCRIPT)"))
-        assertTrue(disconnect.contains("remoteDisconnectGeneration == documentGeneration"))
+        assertFalse(disconnect.contains("remoteDisconnectGeneration"))
         assertTrue(disconnect.contains("targetWebView !== webView"))
-        assertTrue(activity.contains("if (remoteLeaseId != null) remoteDisconnectGeneration = null"))
         val completion = activity.substringAfter("fun disconnectRemoteFromWeb")
             .substringBefore("/**")
         assertTrue(completion.contains(

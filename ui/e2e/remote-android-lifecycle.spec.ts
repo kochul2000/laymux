@@ -375,41 +375,73 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
   await page.goto("http://remote.test/remote/?androidE2e=1&autoConnect=1");
 }
 
-test("Android native back releases control before closing the secure session", async ({ page }) => {
-  await installAndroidRemote(page);
-  const state = () =>
-    page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState);
-  await expect.poll(async () => (await state()).outputOpens).toBe(1);
+for (const reconnectDenied of [false, true]) {
+  test(`Android native back releases control before closing the secure session (reconnect denied: ${reconnectDenied})`, async ({
+    page,
+  }) => {
+    await installAndroidRemote(page);
+    const state = () =>
+      page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState);
+    await expect.poll(async () => (await state()).outputOpens).toBe(1);
 
-  // Execute the actual WebView script shipped by the APK, against the PC bundle.
-  const activity = readFileSync(
-    new URL(
-      "../../apps/android/app/src/main/java/com/laymux/android/MainActivity.kt",
-      import.meta.url,
-    ),
-    "utf8",
-  );
-  const declaration = activity.match(
-    /private const val REMOTE_EXIT_SCRIPT =([\s\S]*?)\n        private const val/,
-  );
-  expect(declaration).not.toBeNull();
-  const script = [...declaration![1].matchAll(/"([^"\\]*(?:\\.[^"\\]*)*)"/g)]
-    .map((match) => JSON.parse(match[0]))
-    .join("");
-  expect(await page.evaluate(script)).toBe(true);
-  await expect.poll(async () => (await state()).releaseRequests).toEqual([{ leaseId: "lease-1" }]);
-  expect((await state()).disconnects).toBe(0);
-  expect(await page.evaluate(() => sessionStorage.getItem("laymux.remote.autoConnect"))).toBeNull();
-
-  await page.evaluate(() => {
-    const target = window as AndroidLifecycleWindow;
-    target.laymuxAndroidE2e!.onHttpResponse(
-      target.__androidLifecycleState.heldReleaseRequestId!,
-      JSON.stringify({ kind: "http", status: 200, body: { active: false } }),
+    // Execute the actual WebView script shipped by the APK, against the PC bundle.
+    const activity = readFileSync(
+      new URL(
+        "../../apps/android/app/src/main/java/com/laymux/android/MainActivity.kt",
+        import.meta.url,
+      ),
+      "utf8",
     );
+    const declaration = activity.match(
+      /private const val REMOTE_EXIT_SCRIPT =([\s\S]*?)\n {8}private const val/,
+    );
+    expect(declaration).not.toBeNull();
+    const script = [...declaration![1].matchAll(/"([^"\\]*(?:\\.[^"\\]*)*)"/g)]
+      .map((match) => JSON.parse(match[0]))
+      .join("");
+    expect(await page.evaluate(script)).toBe(true);
+    await expect
+      .poll(async () => (await state()).releaseRequests)
+      .toEqual([{ leaseId: "lease-1" }]);
+    expect(await page.evaluate(script)).toBe(true);
+    expect((await state()).disconnects).toBe(0);
+    expect(
+      await page.evaluate(() => sessionStorage.getItem("laymux.remote.autoConnect")),
+    ).toBeNull();
+
+    if (reconnectDenied) {
+      await page.evaluate(() => {
+        const target = window as AndroidLifecycleWindow;
+        target.__androidLifecycleState.holdNextClaim = true;
+        document.getElementById("connect")!.click();
+      });
+      await expect.poll(async () => (await state()).heldRequestId).not.toBeNull();
+      await page.evaluate(() => {
+        const target = window as AndroidLifecycleWindow;
+        target.laymuxAndroidE2e!.onHttpResponse(
+          target.__androidLifecycleState.heldRequestId!,
+          JSON.stringify({ kind: "http", status: 409, body: { error: "lease conflict" } }),
+        );
+      });
+      await expect(page.locator("#connect")).toBeEnabled();
+    }
+
+    await page.evaluate(() => {
+      const target = window as AndroidLifecycleWindow;
+      target.laymuxAndroidE2e!.onHttpResponse(
+        target.__androidLifecycleState.heldReleaseRequestId!,
+        JSON.stringify({ kind: "http", status: 200, body: { active: false } }),
+      );
+    });
+    if (reconnectDenied) {
+      // Let the superseded Exit settle; another Back must still be able to exit.
+      await expect(page.locator("#status")).toContainText("lease conflict");
+      expect((await state()).disconnects).toBe(0);
+      expect(await page.evaluate(script)).toBe(true);
+    }
+    await expect.poll(async () => (await state()).disconnects).toBe(1);
   });
-  await expect.poll(async () => (await state()).disconnects).toBe(1);
-});
+}
 
 test("Android foreground resumes transport without reloading the Remote document", async ({
   page,

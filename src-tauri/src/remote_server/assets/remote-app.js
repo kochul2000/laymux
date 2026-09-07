@@ -297,6 +297,7 @@ import {
         let resumeToken = null;
         let fileViewerToken = null;
         let claimAttemptRevision = 0;
+        let exitAttemptRevision = null;
         let autoConnectTimer = null;
         let autoConnectAttempt = 0;
         let claimInFlight = false;
@@ -11937,14 +11938,22 @@ import {
         }
 
         async function exitRemote() {
+          // Repeated native Back and Exit clicks share this release. A new
+          // Connect attempt supersedes it even if that claim later fails.
+          if (exitAttemptRevision === claimAttemptRevision) return;
           // Leaving always withdraws the standing intent to hold control, even
           // when the connection has already failed and no lease remains.
           disarmAutoConnect();
           const currentLease = leaseId;
           disconnect(false);
           const exitRevision = claimAttemptRevision;
+          exitAttemptRevision = exitRevision;
           stopWidgetPolling();
-          if (currentLease) await releaseLease(currentLease).catch(() => {});
+          try {
+            if (currentLease) await releaseLease(currentLease).catch(() => {});
+          } finally {
+            if (exitAttemptRevision === exitRevision) exitAttemptRevision = null;
+          }
           // A manual reconnect supersedes this Exit while the old lease drains.
           // Never let its late continuation close or relabel the new surface.
           if (claimAttemptRevision !== exitRevision || leaseId) return;

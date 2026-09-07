@@ -222,7 +222,6 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private val remoteResourceCache = RemoteResourceCache()
     private val remoteBackGuard = RemoteBackGuard()
     private var remoteBackEvaluationGeneration: Long? = null
-    @Volatile private var remoteDisconnectGeneration: Long? = null
     private var remoteBackWarningToast: Toast? = null
     private var remoteLoadProgress = RemoteLoadProgress()
     private lateinit var remoteLoadingOverlay: LinearLayout
@@ -1165,7 +1164,6 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     fun setRemoteLease(documentGeneration: Long, leaseId: String?) {
         if (!remoteBridgeActionsEnabled(documentGeneration)) return
         remoteLeaseId = leaseId?.takeIf { it.isNotBlank() }
-        if (remoteLeaseId != null) remoteDisconnectGeneration = null
     }
 
     /**
@@ -2835,8 +2833,6 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             return
         }
         val documentGeneration = secureWebViewGeneration
-        if (remoteDisconnectGeneration == documentGeneration) return
-        remoteDisconnectGeneration = documentGeneration
         val targetWebView = webView
         // The PC page owns lease release and pending input cancellation. Keep its
         // encrypted bridge alive until Exit calls disconnectRemoteFromWeb.
@@ -2883,7 +2879,6 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     private fun closeRemoteSession() {
-        remoteDisconnectGeneration = null
         remoteConnectionGeneration.incrementAndGet()
         remoteHttpRequests.clear()
         remoteHttpResumeTracker.clear()
