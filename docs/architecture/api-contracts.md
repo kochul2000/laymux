@@ -1682,6 +1682,8 @@ Android E2E wrapper는 native bridge가 지원하면 위 heartbeat의 `AbortSign
 
 Android native는 `onStop`에서 E2E RPC registry와 output stream을 폐기하지만 같은 Remote 문서의 JS peer는 그 사실을 관찰하지 못할 수 있다. Foreground 복구는 순차 AEAD의 pending RPC를 exact ciphertext로 먼저 완료하고, 그 응답을 원래 document request-id에 전달한 뒤 callback을 호출한다. callback은 native 실행 전에 취소되거나 queue에서 폐기된 나머지 Android HTTP Promise만 transient 실패로 끝내고 stale JS output socket을 close 상태로 전환해 위 snapshot 재접속을 시작하며, retained `leaseId`에 heartbeat를 즉시 보내 lease 반납·만료도 기존 reclaim 경로로 보낸다. 이 callback을 처리할 수 없는 혼합 버전 문서는 native가 reload한다([ADR-0163](../adr/0163-android-foreground-preserves-remote-document.md)).
 
+Remote Composer 첨부 표시([ADR-0236](../adr/0236-remote-composer-inline-attachments.md))는 contenteditable의 파일별 인라인 칩이며, 기존 `/attachments` 응답과 `/input` 요청은 변경하지 않는다. 전송·복사 시 칩은 원래 quoting된 경로로 직렬화한다. 네이티브 편집의 Backspace/Delete·선택 삭제에 첨부 원자성을 적용하고 새 단축키는 추가하지 않는다. Remote의 수직 resize와 ResizeObserver는 contenteditable 표면에 적용되며 Desktop textarea는 그대로다.
+
 ### 13.5 Widget Strip
 
 원격 클라이언트는 데스크톱에 배치된 위젯을 header 아래 한 줄 스트립에 미러한다([ADR-0124](../adr/0124-remote-widget-strip-mirrors-desktop.md)). 배치·옵션의 SoT 는 `settings.widgets` 하나이며(§10 상태 위젯 배치) 원격 전용 배치 설정은 없다.

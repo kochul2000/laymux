@@ -567,6 +567,10 @@ checkpoint가 캡처되는 동안 resize·출력·재생성이 경계를 바꾸�
 
 human-control permit은 등록 시점의 owner epoch·absolute deadline·operation id와 pre-enqueue/enqueued phase를 가진다. 같은 terminal의 PTY enqueue는 permit 등록 순서를 따르므로, 먼저 등록된 structured input이 protocol mode를 캡처하는 동안 뒤의 raw Enter·Ctrl+C·soft key·resize가 FIFO를 앞지를 수 없다. Structured input이 protocol gate를 기다리는 동안 owner 전환이 시작되면 아직 물리 큐에 들어가지 않은 permit을 취소·분리해 transition barrier가 protocol lock 소유자를 기다리지 않는다. PTY enqueue는 owner gate에서 phase 전환과 함께 직렬화하여 transition이 pre-enqueue 취소와 queued cancellation 중 하나를 반드시 선택한다. 이미 queued/running인 작업은 terminal별 bounded FIFO worker가 owner token을 각 physical operation 전후에 확인하고, 취소가 grace를 넘기면 PTY를 input-fault 격리한 뒤 worker completion을 owner barrier에 quarantine한다. reclaim·release·access disable·sticky lease expiry는 epoch을 먼저 올리고 이 acknowledgement가 drain된 뒤에만 lease를 제거해 Local owner를 공개한다.
 
+#### Remote Composer 첨부 편집
+
+[ADR-0236](../adr/0236-remote-composer-inline-attachments.md)에 따라 Remote의 입력 표면은 contenteditable이다(Desktop은 textarea 유지). terminal별 draft의 raw `text`와 `attachments`(원문 offset 범위·path·원래 파일명·이미지 여부)가 SoT이며, 편집 중 DOM을 raw text와 범위로 직렬화한다. 첨부 span은 `contenteditable=false`이고 이미지는 Image/번호, 그 외는 파일명으로 표시한다. Backspace/Delete·선택 삭제는 칩 전체를 제거하고 별도 제거 버튼·undo 바인딩은 없다. 일반 붙여넣기는 plain text만 수용하고 직접 입력한 경로는 칩으로 바꾸지 않는다. Send에는 원래 경로를 기존 quoting 그대로 보내며 성공 시 동일 revision의 text와 metadata만 함께 비운다. history는 실제 전송 원문을 보관하고 recall은 일반 텍스트다. 업로드와 전송 실패·terminal 전환·취소는 기존 draft 격리와 보존 규칙을 따른다. 칩을 제거해도 서버 파일은 기존 cache 정리 정책을 따른다.
+
 ### 8.9 앱 blur/focus 왕복의 helper textarea focus 소유권 (issue #530)
 
 pane focus 는 store 가 소유하고 `TerminalView` 의 focus effect 는 `isFocused` **변화**에만 `terminal.focus()`/`blur()` 를 호출한다. 앱이 Alt-Tab 으로 비활성화되면 WebView 가 xterm helper textarea 의 실제 DOM focus 를 `body`/`null` 로 떨어뜨릴 수 있는데, store 값은 그대로이므로 복귀 시 어떤 effect 도 재실행되지 않아 첫 키/첫 한글 조합이 유실된다. 이를 pane-local focus 소유권 기록으로 좁혀 복구한다([ADR-0057](../adr/0057-terminal-helper-focus-ownership.md)).

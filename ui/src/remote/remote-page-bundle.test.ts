@@ -52,6 +52,7 @@ describe("remote page bundle", () => {
         ` codex-transcript-wheel.ts=${fileHash(CODEX_TRANSCRIPT_WHEEL_SOURCE_PATH)}` +
         ` path-link-lines.ts=${fileHash(path.resolve(__dirname, "../lib/path-link-lines.ts"))}` +
         ` terminal-cell-map.ts=${fileHash(path.resolve(__dirname, "../lib/terminal-cell-map.ts"))}` +
+        ` composer-editor.js=${fileHash(path.resolve(__dirname, "./composer-editor.js"))}` +
         ` lucide-package=${packageInputHash(lock, "lucide")}`,
     );
   });
