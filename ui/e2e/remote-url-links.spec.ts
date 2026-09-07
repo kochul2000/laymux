@@ -444,8 +444,13 @@ test.describe("Android wrapper URL activation", () => {
   });
 });
 
-test.describe("touch URL activation", () => {
+function registerTouchUrlTests(platform: string) {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript((platform) => {
+      Object.defineProperty(navigator, "platform", { get: () => platform });
+    }, platform);
+  });
 
   test("Remote xterm opens URL and GitHub issue/PR links from a touch tap", async ({
     context,
@@ -942,6 +947,15 @@ test.describe("touch URL activation", () => {
     await composer.focus();
     await expect(composer).toBeFocused();
     await installFocusStealCounters(page);
+    await page.evaluate(() => {
+      const original = HTMLTextAreaElement.prototype.select;
+      HTMLTextAreaElement.prototype.select = function () {
+        if (this.classList.contains("xterm-helper-textarea")) {
+          this.dataset.selectionCalls = String(Number(this.dataset.selectionCalls || 0) + 1);
+        }
+        return original.call(this);
+      };
+    });
 
     const beforeBox = await page.locator(".xterm-screen").boundingBox();
     const { cdp, screenBox, cellWidth, y } = await longPressBravoCell(context, page);
@@ -958,6 +972,9 @@ test.describe("touch URL activation", () => {
     });
     const afterSeedBox = await page.locator(".xterm-screen").boundingBox();
     expect(afterSeedBox).toEqual(beforeBox);
+    await expect(page.locator(".xterm-helper-textarea")).not.toHaveAttribute(
+      "data-selection-calls",
+    );
 
     const dragX = screenBox.x + 21.1 * cellWidth;
     await cdp.send("Input.dispatchTouchEvent", {
@@ -1033,4 +1050,8 @@ test.describe("touch URL activation", () => {
       await page.evaluate(() => (window as RemoteTerminalWindow).__focusSteals?.helperFocus),
     ).toBe(0);
   });
-});
+}
+
+for (const platform of ["Win32", "Linux armv8l"]) {
+  test.describe(`touch URL activation (${platform})`, () => registerTouchUrlTests(platform));
+}
