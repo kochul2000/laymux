@@ -9917,13 +9917,19 @@ import {
           "send",
           "composer",
           "attachment",
+          "menu", "copyPane", "viewer", "skip", "desktop",
         ];
+        const HEADER_INPUT_ACTIONS = {
+          menu: "navToggle", copyPane: "copyPaneId", viewer: "fileExplorerHeader",
+          skip: "spatialExclusion", desktop: "desktopModeHeader",
+        };
         const INPUT_ACTION_LABELS = {
           keyboard: "Keyboard",
           keys: "Keys",
           send: "Send",
           composer: "Composer",
           attachment: "Attach file",
+          menu: "Menu", copyPane: "Copy pane ID", viewer: "Viewer", skip: "Skip pane", desktop: "PC mode",
         };
         const softInputActionId = (keyId) => `soft:${keyId}`;
         const softKeyIdFromAction = (actionId) =>
@@ -10074,13 +10080,15 @@ import {
           const value = raw && typeof raw === "object" ? raw : {};
           const userKeys = normalizeUserKeys(ownProperty(value, "userKeys"));
           const zones = normalizeInputZones(ownProperty(value, "zones"), knownActionIdSet(userKeys));
+          const floating = normalizeFloatingControls(ownProperty(value, "floating"), knownActionIdSet(userKeys));
           const keysPlaced = INPUT_ACTION_SEGMENTS.some((segment) =>
             zones.main[segment].includes("keys"),
-          );
+          ) || floating.buttons.some((button) => button.enabled && button.actionId === "keys");
           return {
             expanded: ownProperty(value, "expanded") === true && keysPlaced,
             userKeys,
             zones,
+            floating,
           };
         }
 
@@ -10187,7 +10195,7 @@ import {
           const targetRow = actionId === "keys" && row === "expanded" ? "main" : row;
           removeInputAction(actionId);
           if (targetRow === "hidden") {
-            if (actionId === "keys") keyBarConfig.expanded = false;
+            if (actionId === "keys" && !hasFloatingKeysToggle()) keyBarConfig.expanded = false;
           } else {
             const list = keyBarConfig.zones[targetRow][segment];
             list.splice(index < 0 || index > list.length ? list.length : index, 0, actionId);
@@ -10274,6 +10282,7 @@ import {
           keyBarConfig.userKeys = keyBarConfig.userKeys.filter((key) => key.id !== id);
           rebuildUserKeyIndex();
           removeInputAction(actionId);
+          keyBarConfig.floating.buttons = keyBarConfig.floating.buttons.filter((button) => button.actionId !== actionId);
           if (selectedInputActionId === actionId) selectedInputActionId = "";
           commitInputLayout();
         }
@@ -10485,9 +10494,13 @@ import {
             if (!direction) return;
             gesture.delayTimer = window.setTimeout(() => {
               if (!gesture) return;
+              if (!button.isConnected || button.disabled) { stopFlickRepeat(); return; }
               onDirection(direction);
               gesture.repeatTimer = window.setInterval(
-                () => onDirection(direction),
+                () => {
+                  if (!button.isConnected || button.disabled) { stopFlickRepeat(); return; }
+                  onDirection(direction);
+                },
                 KEY_REPEAT_INTERVAL_MS,
               );
             }, KEY_REPEAT_DELAY_MS);
@@ -10542,6 +10555,7 @@ import {
 
           button.addEventListener("pointerup", (event) => finishFlick(event, true));
           button.addEventListener("pointercancel", (event) => finishFlick(event, false));
+          button.addEventListener("lostpointercapture", (event) => finishFlick(event, false));
           button.addEventListener("contextmenu", (event) => event.preventDefault());
         }
 
@@ -10551,7 +10565,7 @@ import {
           const unread = unreadNotificationCount();
           if (!keyRowEl) return;
           for (const btn of document.querySelectorAll(
-            "#mainActionRow button.key-btn, #keyRow button.key-btn",
+            "#mainActionRow button.key-btn, #keyRow button.key-btn, #floatingControls button.key-btn",
           )) {
             const def = keyDef(btn.dataset.key) || {};
             if (def.nav || def.navFlick) {
@@ -10571,7 +10585,7 @@ import {
         function updateNavKeyBadge(unread) {
           let assigned = false;
           for (const btn of document.querySelectorAll(
-            "#mainActionRow button.key-btn, #keyRow button.key-btn",
+            "#mainActionRow button.key-btn, #keyRow button.key-btn, #floatingControls button.key-btn",
           )) {
             const def = keyDef(btn.dataset.key) || {};
             let badge = btn.querySelector(".key-nav-badge");
@@ -10605,6 +10619,7 @@ import {
         }
 
         function fixedInputActionElement(actionId) {
+          if (ownProperty(HEADER_INPUT_ACTIONS, actionId)) return $(HEADER_INPUT_ACTIONS[actionId]);
           return {
             keyboard: focusTerminalButton,
             keys: keyBarToggleButton,
@@ -10614,7 +10629,7 @@ import {
           }[actionId];
         }
 
-        function createSoftKeyButton(id) {
+        function createSoftKeyButton(id, tapOnly = false) {
           const def = keyDef(id);
           const btn = document.createElement("button");
           btn.type = "button";
@@ -10639,10 +10654,283 @@ import {
               const target = NAV_FLICK_TARGETS[direction];
               if (target) enqueueNavStep(btn, target[0], target[1]);
             });
+          } else if (tapOnly) {
+            keepInputSurfaceFocus(btn);
+            btn.addEventListener("click", () => sendKey(id, btn));
           } else {
             installSoftKey(btn, id);
           }
           return btn;
+        }
+
+        function floatingNumber(value, fallback, min, max) {
+          return typeof value === "number" && Number.isFinite(value)
+            ? Math.min(max, Math.max(min, value)) : fallback;
+        }
+
+        function normalizeFloatingControls(raw, knownIds) {
+          const geometry = (value, x, enabled = false) => ({
+            enabled: typeof value?.enabled === "boolean" ? value.enabled : enabled,
+            size: floatingNumber(value?.size, 64, 44, 128),
+            x: floatingNumber(value?.x, x, 0, 1),
+            y: floatingNumber(value?.y, 0.65, 0, 1),
+          });
+          const pads = {
+            dpad: geometry(raw?.pads?.dpad, 0.95),
+            navPad: geometry(raw?.pads?.navPad, 0.05),
+          };
+          const seen = new Set();
+          const buttons = [];
+          for (const item of Array.isArray(raw?.buttons) ? raw.buttons : []) {
+            if (!item || typeof item.id !== "string" || !/^f-[a-z0-9-]{1,50}$/.test(item.id) || seen.has(item.id)) continue;
+            if (!knownIds.has(item.actionId) || ["soft:dpad", "soft:navPad"].includes(item.actionId)) continue;
+            seen.add(item.id);
+            buttons.push({ id: item.id, actionId: item.actionId, ...geometry(item, 0.85, true) });
+          }
+          return { pads, buttons };
+        }
+
+        function hasFloatingKeysToggle() {
+          return keyBarConfig.floating.buttons.some((item) => item.enabled && item.actionId === "keys");
+        }
+
+        // Header actions keep their original node and listeners. All copies,
+        // including floating fixed actions, observe the same availability.
+        const actionProxyMarkup = new WeakMap();
+        function syncActionProxies() {
+          for (const button of document.querySelectorAll("[data-action-proxy]")) {
+            const actionId = button.dataset.actionProxy;
+            const source = fixedInputActionElement(actionId);
+            if (actionProxyMarkup.get(button) !== source.innerHTML) {
+              button.replaceChildren(...[...source.childNodes].map((child) => child.cloneNode(true)));
+              for (const child of button.querySelectorAll("[id]")) child.removeAttribute("id");
+              actionProxyMarkup.set(button, source.innerHTML);
+            }
+            button.disabled = source.disabled ||
+              (Boolean(ownProperty(HEADER_INPUT_ACTIONS, actionId)) && source.hidden) ||
+              (actionId === "send" && currentInputMode() !== "composer");
+            button.title = source.title || inputActionHint(actionId);
+            button.setAttribute("aria-label", source.getAttribute("aria-label") || inputActionHint(actionId));
+            for (const attr of ["aria-pressed", "aria-expanded", "aria-controls"]) {
+              const value = source.getAttribute(attr);
+              if (value === null) button.removeAttribute(attr);
+              else button.setAttribute(attr, value);
+            }
+            button.classList.toggle("active", source.classList.contains("active"));
+          }
+        }
+
+        function createActionProxy(actionId) {
+          const source = fixedInputActionElement(actionId);
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "action-proxy";
+          button.dataset.actionProxy = actionId;
+          button.dataset.inputAction = actionId;
+          keepInputSurfaceFocus(button);
+          button.addEventListener("click", () => {
+            syncActionProxies();
+            if (!button.disabled) source.click();
+          });
+          return button;
+        }
+
+        function floatingEntries() {
+          return [
+            ...Object.entries(keyBarConfig.floating.pads).map(([id, item]) => ({ id, item, actionId: `soft:${id}`, pad: true })),
+            ...keyBarConfig.floating.buttons.map((item) => ({ id: item.id, item, actionId: item.actionId, pad: false })),
+          ];
+        }
+
+        function positionFloatingControls() {
+          const layer = $("floatingControls");
+          if (!layer) return;
+          const viewport = window.visualViewport;
+          const width = viewport?.width || window.innerWidth;
+          const height = viewport?.height || window.innerHeight;
+          layer.style.left = `${(viewport?.offsetLeft || 0) + 8}px`;
+          layer.style.top = `${(viewport?.offsetTop || 0) + 40}px`;
+          layer.style.width = `${Math.max(0, width - 16)}px`;
+          layer.style.height = `${Math.max(0, height - 48)}px`;
+          for (const { id, item, pad } of floatingEntries()) {
+            const element = layer.querySelector(`[data-floating-id="${id}"]`);
+            if (!element) continue;
+            const size = Math.max(0, Math.min(item.size, layer.clientWidth, layer.clientHeight - (pad ? 28 : 0)));
+            element.style.width = `${size}px`;
+            element.style.setProperty("--floating-size", `${size}px`);
+            element.style.left = `${item.x * Math.max(0, layer.clientWidth - size)}px`;
+            element.style.top = `${item.y * Math.max(0, layer.clientHeight - size - (pad ? 28 : 0))}px`;
+          }
+        }
+
+        function installFloatingDrag(element, handle, item) {
+          let gesture = null;
+          let suppressClick = false;
+          keepInputSurfaceFocus(handle);
+          handle.addEventListener("pointerdown", (event) => {
+            if (event.isPrimary === false || event.button !== 0) return;
+            suppressClick = false;
+            gesture = { pointerId: event.pointerId, x: event.clientX, y: event.clientY,
+              left: element.offsetLeft, top: element.offsetTop, savedX: item.x, savedY: item.y, moved: false };
+            event.target.setPointerCapture(event.pointerId);
+          });
+          handle.addEventListener("pointermove", (event) => {
+            if (!gesture || event.pointerId !== gesture.pointerId) return;
+            const dx = event.clientX - gesture.x;
+            const dy = event.clientY - gesture.y;
+            if (!gesture.moved && Math.hypot(dx, dy) < 8) return;
+            gesture.moved = true;
+            suppressClick = true;
+            const layer = element.parentElement;
+            item.x = floatingNumber((gesture.left + dx) / Math.max(1, layer.clientWidth - element.offsetWidth), 0, 0, 1);
+            item.y = floatingNumber((gesture.top + dy) / Math.max(1, layer.clientHeight - element.offsetHeight), 0, 0, 1);
+            element.classList.add("dragging");
+            positionFloatingControls();
+          });
+          const finish = (event, cancelled) => {
+            if (!gesture || event.pointerId !== gesture.pointerId) return;
+            const touchTap = !cancelled && !gesture.moved && event.pointerType === "touch" && handle === element;
+            if (cancelled) {
+              item.x = gesture.savedX;
+              item.y = gesture.savedY;
+              suppressClick = true;
+            } else if (gesture.moved) saveKeyBarConfig();
+            gesture = null;
+            element.classList.remove("dragging");
+            positionFloatingControls();
+            // Captured touch drags can suppress the browser's next synthesized
+            // click. Commit a stationary touch on release, then consume any
+            // native click; keyboard/assistive clicks still run normally.
+            if (touchTap) {
+              suppressClick = true;
+              element.querySelector("button")?.click();
+            }
+          };
+          handle.addEventListener("pointerup", (event) => finish(event, false));
+          handle.addEventListener("pointercancel", (event) => finish(event, true));
+          handle.addEventListener("lostpointercapture", (event) => finish(event, true));
+          handle.addEventListener("click", (event) => {
+            if (!suppressClick || event.detail === 0) return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            suppressClick = false;
+          }, true);
+          handle.addEventListener("contextmenu", (event) => event.preventDefault());
+        }
+
+        function renderFloatingControls() {
+          let layer = $("floatingControls");
+          if (!layer) {
+            layer = document.createElement("div");
+            layer.id = "floatingControls";
+            layer.setAttribute("role", "group");
+            layer.setAttribute("aria-label", "Floating controls");
+            document.querySelector(".app").append(layer);
+          }
+          layer.replaceChildren();
+          for (const { id, item, actionId, pad } of floatingEntries()) {
+            if (!item.enabled) continue;
+            const element = document.createElement("div");
+            element.className = "floating-control";
+            element.dataset.floatingId = id;
+            const keyId = softKeyIdFromAction(actionId);
+            const button = keyId ? createSoftKeyButton(keyId, !pad) : createActionProxy(actionId);
+            if (pad) {
+              const handle = document.createElement("button");
+              handle.type = "button";
+              handle.className = "floating-handle";
+              handle.textContent = "Move";
+              handle.setAttribute("aria-label", `Move ${id === "dpad" ? "Arrow pad" : "Pane / alert pad"}`);
+              handle.title = "Drag to move; use X/Y in Floating settings for precise positioning";
+              element.append(handle);
+              installFloatingDrag(element, handle, item);
+            } else installFloatingDrag(element, element, item);
+            element.append(button);
+            layer.append(element);
+          }
+          positionFloatingControls();
+          syncActionProxies();
+        }
+
+        function renderFloatingSettings() {
+          const editor = $("floatingSettingsEditor");
+          editor.replaceChildren();
+          const update = () => {
+            saveKeyBarConfig();
+            renderFloatingControls();
+            const keyBarWasHidden = keyBar.hidden;
+            syncInputActionVisibility();
+            if (keyBar.hidden !== keyBarWasHidden) scheduleTerminalFit();
+            updateKeyBarControls();
+          };
+          for (const { item, id, actionId, pad } of floatingEntries()) {
+            const name = pad ? (id === "dpad" ? "Arrow pad" : "Pane / alert pad") : inputActionLabel(actionId);
+            const group = document.createElement("fieldset");
+            group.className = "floating-setting";
+            const legend = document.createElement("legend");
+            legend.textContent = name;
+            group.append(legend);
+            for (const [field, label, min, max] of [
+              ["enabled", "enabled", 0, 1], ["size", "size", 44, 128], ["x", "X", 0, 100], ["y", "Y", 0, 100],
+            ]) {
+              const wrapper = document.createElement("label");
+              wrapper.textContent = label === "size" ? "Size (px)" : label === "X" || label === "Y" ? `${label} (%)` : "Enabled";
+              const input = document.createElement("input");
+              input.type = field === "enabled" ? "checkbox" : "number";
+              input.setAttribute("aria-label", `${name} ${label}`);
+              const factor = field === "x" || field === "y" ? 100 : 1;
+              if (field === "enabled") input.checked = item.enabled;
+              else {
+                input.min = String(min);
+                input.max = String(max);
+                input.step = "1";
+                input.value = String(Math.round(item[field] * factor));
+              }
+              input.addEventListener("change", () => {
+                if (field === "enabled") item.enabled = input.checked;
+                else {
+                  item[field] = floatingNumber(input.valueAsNumber / factor, item[field], min / factor, max / factor);
+                  input.value = String(Math.round(item[field] * factor));
+                }
+                update();
+              });
+              wrapper.append(input);
+              group.append(wrapper);
+            }
+            if (!pad) {
+              const remove = document.createElement("button");
+              remove.type = "button";
+              remove.textContent = "Remove";
+              remove.setAttribute("aria-label", "Remove floating button");
+              remove.addEventListener("click", () => {
+                keyBarConfig.floating.buttons = keyBarConfig.floating.buttons.filter((entry) => entry.id !== id);
+                update();
+                renderFloatingSettings();
+              });
+              group.append(remove);
+            }
+            editor.append(group);
+          }
+          const picker = document.createElement("select");
+          picker.setAttribute("aria-label", "Floating button action");
+          for (const actionId of knownActionIdSet(keyBarConfig.userKeys)) {
+            if (["soft:dpad", "soft:navPad"].includes(actionId)) continue;
+            picker.add(new Option(inputActionHint(actionId), actionId));
+          }
+          const add = document.createElement("button");
+          add.type = "button";
+          add.textContent = "Add floating button";
+          add.addEventListener("click", () => {
+            const actionId = picker.value;
+            let id = `f-${Date.now().toString(36)}`;
+            while (keyBarConfig.floating.buttons.some((item) => item.id === id)) id += "x";
+            keyBarConfig.floating.buttons.push({ id, actionId,
+              enabled: true, size: 64, x: 0.85, y: Math.max(0.1, 0.8 - (keyBarConfig.floating.buttons.length % 6) * 0.12) });
+            update();
+            renderFloatingSettings();
+            $("floatingSettingsEditor").querySelector("select").value = actionId;
+          });
+          editor.append(picker, add);
         }
 
         function rowContainer(row) {
@@ -10674,11 +10962,12 @@ import {
           if (!keyBarConfig) return;
           const composerMode = currentInputMode() === "composer";
           for (const actionId of FIXED_INPUT_ACTION_IDS) {
+            if (ownProperty(HEADER_INPUT_ACTIONS, actionId)) continue;
             const element = fixedInputActionElement(actionId);
             const placed = inputActionZone(actionId) !== "hidden";
             element.hidden = !placed || (actionId === "send" && !composerMode);
           }
-          const keysVisible = inputActionZone("keys") === "main";
+          const keysVisible = inputActionZone("keys") === "main" || hasFloatingKeysToggle();
           if (!keysVisible && keyBarConfig.expanded) {
             keyBarConfig.expanded = false;
             saveKeyBarConfig();
@@ -10696,7 +10985,7 @@ import {
         function renderInputActionRows() {
           hideKeyFlickHint();
           for (const item of document.querySelectorAll(
-            "#mainActionRow .key-btn, #keyRow .key-btn, #keyRow .key-row-empty",
+            "#mainActionRow .key-btn, #keyRow .key-btn, #keyRow .key-row-empty, #mainActionRow [data-action-proxy], #keyRow [data-action-proxy]",
           )) {
             item.remove();
           }
@@ -10708,12 +10997,15 @@ import {
                 const keyId = softKeyIdFromAction(actionId);
                 const element = keyId
                   ? createSoftKeyButton(keyId)
-                  : fixedInputActionElement(actionId);
+                  : ownProperty(HEADER_INPUT_ACTIONS, actionId)
+                    ? createActionProxy(actionId)
+                    : fixedInputActionElement(actionId);
                 element.dataset.inputAction = actionId;
                 container.append(element);
               }
             }
           }
+          renderFloatingControls();
           syncInputActionVisibility();
           updateKeyBarControls();
         }
@@ -11500,12 +11792,13 @@ import {
           composerSettingsBody.textContent = "";
           renderInputLayoutEditor();
           renderComposerSettingsSection();
+          renderFloatingSettings();
         }
 
         // Settings is paginated: only the selected panel is in the layout, so a
         // long section no longer buries the others under a scroll. The choice is
         // surface-local like the rest of the Remote display preferences.
-        const SETTINGS_PANELS = ["inputBar", "composer", "display", "app"];
+        const SETTINGS_PANELS = ["inputBar", "floating", "composer", "display", "app"];
 
         function loadSettingsPanel() {
           try {
@@ -11572,7 +11865,7 @@ import {
         }
 
         function setKeyBarVisible(visible, persist = true) {
-          keyBarConfig.expanded = Boolean(visible) && inputActionZone("keys") === "main";
+          keyBarConfig.expanded = Boolean(visible) && (inputActionZone("keys") === "main" || hasFloatingKeysToggle());
           syncInputActionVisibility();
           if (persist) saveKeyBarConfig();
           scheduleTerminalFit();
@@ -11966,6 +12259,16 @@ import {
         setKeyBarVisible(keyBarConfig.expanded, false);
         renderKeyPopover();
         installSettingsTabs();
+        const actionProxyObserver = new MutationObserver(syncActionProxies);
+        for (const actionId of FIXED_INPUT_ACTION_IDS) {
+          actionProxyObserver.observe(fixedInputActionElement(actionId), {
+            childList: true, subtree: true,
+            attributes: true, attributeFilter: ["disabled", "hidden", "aria-pressed", "aria-expanded", "aria-label", "title", "class"],
+          });
+        }
+        window.addEventListener("resize", positionFloatingControls);
+        window.visualViewport?.addEventListener("resize", positionFloatingControls);
+        window.visualViewport?.addEventListener("scroll", positionFloatingControls);
         // The markup ships checked; the stored choice is what actually holds
         // (ADR-0132). Applied before the first connect so a device that turned
         // the row off never flashes it.

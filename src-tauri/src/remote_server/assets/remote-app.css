@@ -1,3 +1,62 @@
+      #floatingControls {
+        position: fixed;
+        z-index: 8;
+        pointer-events: none;
+      }
+      .floating-control {
+        position: absolute;
+        pointer-events: auto;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      .floating-control > button:not(.floating-handle) {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: var(--floating-size);
+        min-width: 0;
+        min-height: 0;
+        padding: 4px;
+        border: 1px solid var(--accent-50);
+        border-radius: var(--radius-md);
+        background: var(--bg-overlay);
+        color: var(--text-primary);
+        font-size: clamp(13px, calc(var(--floating-size) * 0.26), 26px);
+        box-shadow: 0 3px 12px var(--backdrop-light);
+        touch-action: none;
+      }
+      .floating-control > button:disabled { pointer-events: none; }
+      .floating-control .remote-icon {
+        width: calc(var(--floating-size) * 0.4);
+        height: calc(var(--floating-size) * 0.4);
+        pointer-events: none;
+      }
+      .floating-control.dragging { opacity: 0.7; }
+      .floating-handle {
+        display: block;
+        width: 100%;
+        height: 28px;
+        padding: 0;
+        cursor: grab;
+        touch-action: none;
+        border-radius: var(--radius-md) var(--radius-md) 0 0;
+        font-size: var(--fs-xs);
+      }
+      .floating-setting {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin: 0 0 12px;
+        padding: 10px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+      }
+      .floating-setting label { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+      .floating-setting input[type="number"] { width: 64px; min-width: 0; }
+      #floatingSettingsEditor > select { width: 100%; margin-bottom: 8px; }
+      .action-proxy { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
       :root {
         color-scheme: dark;
         --bg-base: #1e1e2e;
