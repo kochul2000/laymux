@@ -3311,7 +3311,7 @@ import {
           return true;
         }
 
-        // Fill the draft (and textarea) from a recall pick without routing
+        // Fill the draft and editor from a recall pick without routing
         // through the input event, so the input handler's re-arm logic does not
         // fire. Caret goes to the end so the user can keep typing.
         function setComposerDraftText(text) {
@@ -3426,7 +3426,7 @@ import {
               pick.addEventListener("mousedown", (event) => event.preventDefault());
               bindComposerLongPress(pick, suggestion);
             } else {
-              // mousedown (not click) so the textarea keeps focus through the pick.
+              // mousedown (not click) so the editor keeps focus through the pick.
               pick.addEventListener("mousedown", (event) => {
                 event.preventDefault();
                 onPick(raw);
