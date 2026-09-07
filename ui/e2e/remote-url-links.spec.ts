@@ -180,6 +180,7 @@ type RemoteTerminalWindow = typeof window & {
     cols: number;
     rows: number;
     getSelection: () => string;
+    select: (column: number, row: number, length: number) => void;
     textarea?: HTMLTextAreaElement;
   };
   __copiedSelections?: string[];
@@ -580,7 +581,8 @@ function registerTouchUrlTests(platform: string) {
     const handle = page.locator('.touch-selection-handle[data-handle="start"]');
     await expect(handle).toBeVisible();
     await expect(handle).toHaveCSS("width", "22px");
-    await expect(handle).toHaveCSS("border-bottom-left-radius", "0px");
+    await expect(handle).toHaveCSS("border-top-right-radius", "0px");
+    await expect(page.locator('[data-handle="end"]')).toHaveCSS("border-top-left-radius", "0px");
     await page.screenshot({ path: "../.screenshots/remote-selection-handle.png" });
     expect(await page.evaluate(() => (window as RemoteTerminalWindow).__copiedSelections)).toEqual(
       [],
@@ -815,7 +817,7 @@ function registerTouchUrlTests(platform: string) {
             });
             await cdp.send("Input.dispatchTouchEvent", {
               type: "touchMove",
-              touchPoints: [{ x: point.x + 3 * cellWidth, y }],
+              touchPoints: [{ x: point.x + 3 * cellWidth, y: point.y }],
             });
             await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
           }
@@ -905,6 +907,107 @@ function registerTouchUrlTests(platform: string) {
           page.evaluate(() => (window as RemoteTerminalWindow).__remoteTerm?.getSelection()),
         )
         .toContain("Words: alpha bravo omega");
+    });
+  }
+
+  test("edge handles turn inward while keeping their selection boundary", async ({
+    context,
+    page,
+  }) => {
+    await connectRemoteWithWords(context, page, "composer");
+    await page.evaluate(() => {
+      const term = (window as RemoteTerminalWindow).__remoteTerm!;
+      document.documentElement.style.setProperty("--touch-selection-handle-size", "32px");
+      term.select(0, 7, term.cols);
+    });
+    const screen = (await page.locator(".xterm-screen").boundingBox())!;
+    for (const role of ["start", "end"]) {
+      const handle = page.locator(`[data-handle="${role}"]`);
+      await expect(handle).toBeVisible();
+      await expect(handle).toHaveAttribute("data-inward", "true");
+      const box = (await handle.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(390);
+      if (role === "start") expect(box.x).toBeCloseTo(screen.x, 1);
+      else expect(box.x + box.width).toBeCloseTo(screen.x + screen.width, 1);
+      expect(
+        await handle.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          return (
+            document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2) === element
+          );
+        }),
+      ).toBe(true);
+    }
+  });
+
+  for (const role of ["start", "end"]) {
+    test(`${role} handle magnifies its boundary above the finger without moving focus`, async ({
+      context,
+      page,
+    }) => {
+      await connectRemoteWithWords(context, page, "composer");
+      const composer = page.locator("#composerInput");
+      await composer.fill("draft 한글");
+      await installFocusStealCounters(page);
+      const { cdp, cellWidth } = await longPressBravoCell(context, page);
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      const handle = page.locator(`[data-handle="${role}"]`);
+      const box = (await handle.boundingBox())!;
+      const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
+      const lens = page.locator(".touch-selection-magnifier");
+      await expect(lens).toBeVisible();
+      await expect(lens).toHaveAttribute("aria-hidden", "true");
+      await expect(lens).toHaveCSS("pointer-events", "none");
+      await expect(lens).toContainText("Words: alpha bravo omega");
+      const lensBox = (await lens.boundingBox())!;
+      expect(lensBox.y + lensBox.height).toBeLessThan(point.y - 16);
+      expect(lensBox.x).toBeGreaterThanOrEqual(0);
+      expect(lensBox.x + lensBox.width).toBeLessThanOrEqual(390);
+      // Moving one pixel from the grab point must not jump a row or a cell.
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x: point.x + 1, y: point.y }],
+      });
+      expect(
+        await page.evaluate(() => (window as RemoteTerminalWindow).__remoteTerm?.getSelection()),
+      ).toBe("bravo");
+      const delta = role === "start" ? -2 : 2;
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x: point.x + delta * cellWidth, y: point.y }],
+      });
+      await expect
+        .poll(() =>
+          page.evaluate(() => (window as RemoteTerminalWindow).__remoteTerm?.getSelection()),
+        )
+        .toBe(role === "start" ? "a bravo" : "bravo o");
+      await page.screenshot({
+        path: `../.screenshots/remote-selection-magnifier-${platform}-${role}.png`,
+      });
+      await expect(composer).toBeFocused();
+      await expect(composer).toHaveValue("draft 한글");
+      expect(await page.evaluate(() => (window as RemoteTerminalWindow).__focusSteals)).toEqual({
+        helperFocus: 0,
+        composerBlur: 0,
+      });
+      // At the top/right edges the lens stays in the visible viewport.
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x: 389, y: 5 }],
+      });
+      await expect
+        .poll(async () => {
+          const edge = (await lens.boundingBox())!;
+          return edge.x >= 0 && edge.x + edge.width <= 390 && edge.y > 5;
+        })
+        .toBe(true);
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: role === "start" ? "touchEnd" : "touchCancel",
+        touchPoints: [],
+      });
+      await expect(lens).toBeHidden();
     });
   }
 

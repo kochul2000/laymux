@@ -5393,6 +5393,13 @@ import {
             handle.style.left = `${metrics.rect.left - hostRect.left + pos.x * metrics.cellWidth}px`;
             handle.style.top = `${metrics.rect.top - hostRect.top + (viewportRow + 1) * metrics.cellHeight}px`;
             handle.style.display = "block";
+            const boundaryX = metrics.rect.left + pos.x * metrics.cellWidth;
+            const viewport = window.visualViewport;
+            const left = Math.max(hostRect.left, viewport?.offsetLeft || 0);
+            const right = Math.min(hostRect.right, (viewport?.offsetLeft || 0) + (viewport?.width || window.innerWidth));
+            handle.dataset.inward = String(handle === selectionHandles.start
+              ? boundaryX - handle.offsetWidth < left
+              : boundaryX + handle.offsetWidth > right);
           };
 
           place(selectionHandles.start, selection.start);
@@ -5410,6 +5417,73 @@ import {
           terminalHost.append(start, end);
           selectionHandles = { start, end };
 
+          const magnifier = document.createElement("div");
+          magnifier.className = "touch-selection-magnifier";
+          magnifier.setAttribute("aria-hidden", "true");
+          magnifier.hidden = true;
+          document.body.append(magnifier);
+          let magnifierFrame = null;
+
+          const hideMagnifier = () => {
+            if (magnifierFrame !== null) window.cancelAnimationFrame(magnifierFrame);
+            magnifierFrame = null;
+            magnifier.hidden = true;
+            magnifier.replaceChildren();
+          };
+          const updateMagnifier = () => {
+            magnifierFrame = null;
+            const drag = selectionHandleDrag;
+            const metrics = terminalMetrics(term);
+            const rows = term.element?.querySelector(".xterm-rows");
+            if (!drag || !metrics || !rows || document.hidden) {
+              hideMagnifier();
+              return;
+            }
+            const coords = touchCellCoords(term, {
+              clientX: drag.point.clientX - drag.offsetX,
+              clientY: drag.point.clientY - drag.offsetY,
+            });
+            if (!coords) return;
+            const row = coords.y - metrics.viewportY;
+            const zoom = 1.8;
+            magnifier.hidden = false;
+            // Reuse the rendered glyph styles (including wide characters and
+            // ANSI colors), copying only the rows visible through the lens.
+            const content = document.createElement("div");
+            content.className = `${term.element.className} touch-selection-magnifier-content`;
+            const copy = rows.cloneNode(false);
+            const radius = Math.ceil(magnifier.clientHeight / (2 * zoom * metrics.cellHeight));
+            const first = Math.max(0, row - radius);
+            for (let i = first; i <= Math.min(rows.children.length - 1, row + radius); i++) {
+              copy.append(rows.children[i].cloneNode(true));
+            }
+            copy.style.position = "absolute";
+            copy.style.top = `${first * metrics.cellHeight}px`;
+            content.append(copy);
+            const selection = term.element.querySelector(".xterm-selection");
+            if (selection) content.append(selection.cloneNode(true));
+            magnifier.replaceChildren(content);
+            const viewport = window.visualViewport;
+            const left = viewport?.offsetLeft || 0;
+            const top = viewport?.offsetTop || 0;
+            const width = viewport?.width || window.innerWidth;
+            const height = viewport?.height || window.innerHeight;
+            magnifier.style.left = `${Math.max(left + 8, Math.min(left + width - magnifier.offsetWidth - 8, drag.point.clientX - magnifier.offsetWidth / 2))}px`;
+            const above = drag.point.clientY - magnifier.offsetHeight - 36;
+            const lensTop = above >= top + 8 ? above : drag.point.clientY + 36;
+            magnifier.style.top = `${Math.max(top + 8, Math.min(top + height - magnifier.offsetHeight - 8, lensTop))}px`;
+            content.style.width = `${metrics.rect.width}px`;
+            content.style.height = `${metrics.rect.height}px`;
+            content.style.transform = `translate(${magnifier.clientWidth / 2 - coords.x * metrics.cellWidth * zoom}px, ${magnifier.clientHeight / 2 - (row + 0.5) * metrics.cellHeight * zoom}px) scale(${zoom})`;
+          };
+          const scheduleMagnifier = () => {
+            if (selectionHandleDrag && magnifierFrame === null) {
+              magnifierFrame = window.requestAnimationFrame(updateMagnifier);
+            }
+          };
+          term.onRender?.(scheduleMagnifier);
+          term.onScroll?.(scheduleMagnifier);
+
           const onHandlePointerDown = (event) => {
             if (!isTouchPointer(event)) return;
             const selection = term.getSelectionPosition && term.getSelectionPosition();
@@ -5418,21 +5492,33 @@ import {
             event.stopPropagation();
             event.stopImmediatePropagation?.();
             const role = event.currentTarget.dataset.handle;
+            const metrics = terminalMetrics(term);
+            if (!metrics || selectionHandleDrag) return;
+            const boundary = selection[role];
             selectionHandleDrag = {
               pointerId: event.pointerId,
               role,
               anchor: role === "start" ? selection.end : selection.start,
+              point: touchPointFromEvent(event),
+              offsetX: event.clientX - (metrics.rect.left + boundary.x * metrics.cellWidth),
+              offsetY: event.clientY - (metrics.rect.top + (boundary.y - metrics.viewportY + 0.5) * metrics.cellHeight),
             };
             event.currentTarget.setPointerCapture?.(event.pointerId);
+            scheduleMagnifier();
           };
 
           const onHandlePointerMove = (event) => {
             if (!selectionHandleDrag || event.pointerId !== selectionHandleDrag.pointerId) return;
             event.preventDefault();
             event.stopPropagation();
-            const coords = touchCellCoords(term, touchPointFromEvent(event));
+            selectionHandleDrag.point = touchPointFromEvent(event);
+            const coords = touchCellCoords(term, {
+              clientX: event.clientX - selectionHandleDrag.offsetX,
+              clientY: event.clientY - selectionHandleDrag.offsetY,
+            });
             if (!coords) return;
             applySelectionRange(term, selectionHandleDrag.anchor, coords);
+            scheduleMagnifier();
           };
 
           const onHandlePointerUp = (event) => {
@@ -5444,6 +5530,7 @@ import {
               target.releasePointerCapture?.(event.pointerId);
             }
             selectionHandleDrag = null;
+            hideMagnifier();
             updateSelectionHandles(term);
             copySelectionAfterInteraction();
           };
@@ -5453,7 +5540,17 @@ import {
             handle.addEventListener("pointermove", onHandlePointerMove, { passive: false });
             handle.addEventListener("pointerup", onHandlePointerUp, { passive: false });
             handle.addEventListener("pointercancel", onHandlePointerUp, { passive: false });
+            handle.addEventListener("lostpointercapture", onHandlePointerUp);
           }
+          window.addEventListener("blur", () => {
+            selectionHandleDrag = null;
+            hideMagnifier();
+          });
+          document.addEventListener("visibilitychange", () => {
+            if (!document.hidden) return;
+            selectionHandleDrag = null;
+            hideMagnifier();
+          });
         }
 
         function enterTwoFingerScroll(term) {
