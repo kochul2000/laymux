@@ -247,14 +247,30 @@ throws(
   "필수 플랫폼 키 누락은 거절",
   () => {
     const manifest = manifestFor("v0.11.0", "0.11.0");
-    delete manifest.platforms["linux-x86_64"];
+    delete manifest.platforms["windows-x86_64"];
     validateChannelManifest(manifest, {
       tag: "v0.11.0",
       owner: OWNER,
       repo: REPO,
     });
   },
-  "linux-x86_64",
+  "windows-x86_64",
+);
+
+check(
+  "Windows 단독 매니페스트를 허용한다",
+  (() => {
+    const manifest = manifestFor("v0.11.0", "0.11.0");
+    delete manifest.platforms["linux-x86_64"];
+    delete manifest.platforms["linux-x86_64-appimage"];
+    return (
+      validateChannelManifest(manifest, {
+        tag: "v0.11.0",
+        owner: OWNER,
+        repo: REPO,
+      }).version === "0.11.0"
+    );
+  })(),
 );
 
 throws(
