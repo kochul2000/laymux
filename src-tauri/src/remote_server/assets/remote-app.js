@@ -10555,6 +10555,9 @@ import {
           keyFlickHint.style.top = `${centerY}px`;
           keyFlickHint.dataset.direction = direction;
           for (const arrow of keyFlickHint.querySelectorAll("[data-flick-direction]")) {
+            const name = arrow.dataset.flickDirection;
+            const icon = `${keyDef(button.dataset.key)?.navFlick ? "SquareChevron" : "Arrow"}${name[0].toUpperCase()}${name.slice(1)}`;
+            if (arrow.firstElementChild?.dataset.remoteIconName !== icon) setRemoteIcon(arrow, icon, { size: 12 });
             arrow.classList.toggle("active", arrow.dataset.flickDirection === direction);
           }
           keyFlickHint.hidden = false;
@@ -10572,7 +10575,7 @@ import {
         // the byte-writing arrow pad opts in; the nav pad's directions are
         // controller steps (a pane switch, an alert jump) where a stream of
         // repeats would be destructive, not faster.
-        function installDirectionalFlick(button, onDirection, repeatable = false) {
+        function installDirectionalFlick(button, onDirection, repeatable = false, floating = null) {
           let gesture = null;
 
           const stopFlickRepeat = () => {
@@ -10622,6 +10625,20 @@ import {
               delayTimer: 0,
               repeatTimer: 0,
             };
+            if (floating) {
+              const rect = button.getBoundingClientRect();
+              if (Math.hypot(event.clientX - rect.x - rect.width / 2,
+                event.clientY - rect.y - rect.height / 2) <= rect.width / 4) {
+                gesture.holdTimer = window.setTimeout(() => {
+                  if (!gesture || !button.isConnected || button.disabled) return;
+                  gesture.drag = { x: floating.x, y: floating.y,
+                    left: button.parentElement.offsetLeft, top: button.parentElement.offsetTop };
+                  stopFlickRepeat();
+                  hideKeyFlickHint();
+                  button.parentElement.classList.add("dragging");
+                }, 450);
+              }
+            }
             button.setPointerCapture(event.pointerId);
             button.classList.add("flicking");
             showKeyFlickHint(button);
@@ -10630,6 +10647,19 @@ import {
           button.addEventListener("pointermove", (event) => {
             if (!gesture || event.pointerId !== gesture.pointerId) return;
             event.preventDefault();
+            if (gesture.drag) {
+              const element = button.parentElement;
+              const layer = element.parentElement;
+              floating.x = floatingNumber((gesture.drag.left + event.clientX - gesture.x) /
+                Math.max(1, layer.clientWidth - element.offsetWidth), 0, 0, 1);
+              floating.y = floatingNumber((gesture.drag.top + event.clientY - gesture.y) /
+                Math.max(1, layer.clientHeight - element.offsetHeight), 0, 0, 1);
+              positionFloatingControls();
+              return;
+            }
+            if (Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) >= 8) {
+              window.clearTimeout(gesture.holdTimer);
+            }
             const direction = directionFromFlick(
               event.clientX - gesture.x,
               event.clientY - gesture.y
@@ -10646,10 +10676,18 @@ import {
               event.clientY - gesture.y
             );
             stopFlickRepeat();
+            window.clearTimeout(gesture.holdTimer);
+            const dragged = Boolean(gesture.drag);
+            if (dragged) {
+              if (shouldSend) saveKeyBarConfig();
+              else { floating.x = gesture.drag.x; floating.y = gesture.drag.y; }
+              button.parentElement.classList.remove("dragging");
+              positionFloatingControls();
+            }
             gesture = null;
             button.classList.remove("flicking");
             hideKeyFlickHint();
-            if (shouldSend && direction) onDirection(direction);
+            if (shouldSend && !dragged && direction) onDirection(direction);
           };
 
           button.addEventListener("pointerup", (event) => finishFlick(event, true));
@@ -10728,7 +10766,7 @@ import {
           }[actionId];
         }
 
-        function createSoftKeyButton(id, tapOnly = false) {
+        function createSoftKeyButton(id, tapOnly = false, floating = null) {
           const def = keyDef(id);
           const btn = document.createElement("button");
           btn.type = "button";
@@ -10736,12 +10774,14 @@ import {
           btn.dataset.key = id;
           btn.dataset.inputAction = softInputActionId(id);
           btn.textContent = def.label;
+          if (def.navFlick) setRemoteIcon(btn, "GamepadDirectional");
+          if (def.flick) setRemoteIcon(btn, "Move");
           btn.title = def.hint || def.label;
           if (def.flick) {
             btn.classList.add("key-flick-btn");
             btn.setAttribute("aria-label", "Flick for arrow key: up, right, down, or left");
             btn.title = "Flick up, right, down, or left — hold to repeat";
-            installDirectionalFlick(btn, (direction) => sendKey(direction), true);
+            installDirectionalFlick(btn, (direction) => sendKey(direction), true, floating);
           } else if (def.navFlick) {
             btn.classList.add("key-flick-btn");
             btn.setAttribute(
@@ -10752,7 +10792,7 @@ import {
             installDirectionalFlick(btn, (direction) => {
               const target = NAV_FLICK_TARGETS[direction];
               if (target) enqueueNavStep(btn, target[0], target[1]);
-            });
+            }, false, floating);
           } else if (tapOnly) {
             keepInputSurfaceFocus(btn);
             btn.addEventListener("click", () => sendKey(id, btn));
@@ -10771,6 +10811,7 @@ import {
           const geometry = (value, x, enabled = false) => ({
             enabled: typeof value?.enabled === "boolean" ? value.enabled : enabled,
             size: floatingNumber(value?.size, 64, 44, 128),
+            opacity: floatingNumber(value?.opacity, 0.5, 0, 1),
             x: floatingNumber(value?.x, x, 0, 1),
             y: floatingNumber(value?.y, 0.65, 0, 1),
           });
@@ -10804,6 +10845,7 @@ import {
               button.replaceChildren(...[...source.childNodes].map((child) => child.cloneNode(true)));
               for (const child of button.querySelectorAll("[id]")) child.removeAttribute("id");
               actionProxyMarkup.set(button, source.innerHTML);
+              if (actionId === "keyboard" && button.closest("#floatingControls")) setRemoteIcon(button, "Keyboard");
             }
             button.disabled = source.disabled ||
               (Boolean(ownProperty(HEADER_INPUT_ACTIONS, actionId)) && source.hidden) ||
@@ -10851,14 +10893,15 @@ import {
           layer.style.top = `${(viewport?.offsetTop || 0) + 40}px`;
           layer.style.width = `${Math.max(0, width - 16)}px`;
           layer.style.height = `${Math.max(0, height - 48)}px`;
-          for (const { id, item, pad } of floatingEntries()) {
+          for (const { id, item } of floatingEntries()) {
             const element = layer.querySelector(`[data-floating-id="${id}"]`);
             if (!element) continue;
-            const size = Math.max(0, Math.min(item.size, layer.clientWidth, layer.clientHeight - (pad ? 28 : 0)));
+            const size = Math.max(0, Math.min(item.size, layer.clientWidth, layer.clientHeight));
             element.style.width = `${size}px`;
             element.style.setProperty("--floating-size", `${size}px`);
+            element.style.setProperty("--floating-opacity", item.opacity);
             element.style.left = `${item.x * Math.max(0, layer.clientWidth - size)}px`;
-            element.style.top = `${item.y * Math.max(0, layer.clientHeight - size - (pad ? 28 : 0))}px`;
+            element.style.top = `${item.y * Math.max(0, layer.clientHeight - size)}px`;
           }
         }
 
@@ -10933,17 +10976,9 @@ import {
             element.className = "floating-control";
             element.dataset.floatingId = id;
             const keyId = softKeyIdFromAction(actionId);
-            const button = keyId ? createSoftKeyButton(keyId, !pad) : createActionProxy(actionId);
-            if (pad) {
-              const handle = document.createElement("button");
-              handle.type = "button";
-              handle.className = "floating-handle";
-              handle.textContent = "Move";
-              handle.setAttribute("aria-label", `Move ${id === "dpad" ? "Arrow pad" : "Pane / alert pad"}`);
-              handle.title = "Drag to move; use X/Y in Floating settings for precise positioning";
-              element.append(handle);
-              installFloatingDrag(element, handle, item);
-            } else installFloatingDrag(element, element, item);
+            const button = keyId ? createSoftKeyButton(keyId, !pad, pad ? item : null) : createActionProxy(actionId);
+            if (pad) button.title += "; hold center to move";
+            else installFloatingDrag(element, element, item);
             element.append(button);
             layer.append(element);
           }
@@ -10970,14 +11005,14 @@ import {
             legend.textContent = name;
             group.append(legend);
             for (const [field, label, min, max] of [
-              ["enabled", "enabled", 0, 1], ["size", "size", 44, 128], ["x", "X", 0, 100], ["y", "Y", 0, 100],
+              ["enabled", "enabled", 0, 1], ["size", "size", 44, 128], ["opacity", "opacity", 0, 100],
             ]) {
               const wrapper = document.createElement("label");
-              wrapper.textContent = label === "size" ? "Size (px)" : label === "X" || label === "Y" ? `${label} (%)` : "Enabled";
+              wrapper.textContent = label === "size" ? "Size (px)" : label === "opacity" ? "Opacity (%)" : "Enabled";
               const input = document.createElement("input");
               input.type = field === "enabled" ? "checkbox" : "number";
               input.setAttribute("aria-label", `${name} ${label}`);
-              const factor = field === "x" || field === "y" ? 100 : 1;
+              const factor = field === "opacity" ? 100 : 1;
               if (field === "enabled") input.checked = item.enabled;
               else {
                 input.min = String(min);
@@ -11024,7 +11059,7 @@ import {
             let id = `f-${Date.now().toString(36)}`;
             while (keyBarConfig.floating.buttons.some((item) => item.id === id)) id += "x";
             keyBarConfig.floating.buttons.push({ id, actionId,
-              enabled: true, size: 64, x: 0.85, y: Math.max(0.1, 0.8 - (keyBarConfig.floating.buttons.length % 6) * 0.12) });
+              enabled: true, size: 64, opacity: 0.5, x: 0.85, y: Math.max(0.1, 0.8 - (keyBarConfig.floating.buttons.length % 6) * 0.12) });
             update();
             renderFloatingSettings();
             $("floatingSettingsEditor").querySelector("select").value = actionId;

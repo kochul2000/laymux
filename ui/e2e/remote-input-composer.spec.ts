@@ -1793,10 +1793,11 @@ test("floating cursor tap is one-shot, pad flick sends input, and dragging sends
   await page.mouse.move(box.x + 60, box.y + 32, { steps: 3 });
   await page.mouse.up();
   await expect.poll(() => remote.writes.map((write) => write.data)).toEqual(["\x1b[A", "\x1b[C"]);
-  for (const control of [up, page.getByRole("button", { name: "Move Arrow pad", exact: true })]) {
+  for (const control of [up, pad]) {
     const start = (await control.boundingBox())!;
     await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
     await page.mouse.down();
+    if (control === pad) await expect(page.locator(".floating-control.dragging")).toHaveCount(1);
     await page.mouse.move(start.x + 20, start.y - 70, { steps: 4 });
     await page.mouse.up();
   }
