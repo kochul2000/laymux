@@ -2229,6 +2229,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "laymux-wsl-codex-probe"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

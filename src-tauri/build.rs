@@ -15,12 +15,31 @@ fn main() {
     println!("cargo:rerun-if-changed=src/conpty_build.rs");
     println!("cargo:rerun-if-changed=src/conpty_runtime.rs");
     emit_build_metadata();
+    stage_wsl_probe();
 
     // tauri_build 가 resources 경로를 검증하므로 스테이징이 먼저 끝나야 한다.
     if stage_conpty_runtime() {
         suppress_tauri_build_runtime_copy();
     }
     tauri_build::build();
+}
+
+fn stage_wsl_probe() {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
+    assert_eq!(
+        std::env::var("CARGO_CFG_TARGET_ARCH").as_deref(),
+        Ok("x86_64"),
+        "add a matching Linux WSL probe before shipping a new Windows architecture"
+    );
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("gen/wsl/laymux-wsl-codex-probe");
+    println!("cargo:rerun-if-changed={}", source.display());
+    assert!(source.is_file(), "missing bundled WSL probe; run bash scripts/build-wsl-probe.sh on Linux/WSL before the Windows build");
+    let destination = cargo_target_profile_dir()
+        .expect("cargo profile directory")
+        .join("laymux-wsl-codex-probe");
+    copy_runtime_file(&source, &destination).expect("stage bundled WSL probe");
 }
 
 /// Inject immutable source identity without invoking `git` (and therefore

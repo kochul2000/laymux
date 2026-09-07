@@ -1436,7 +1436,9 @@ Windows host의 WSL terminal은 host process tree에 `wsl.exe`만 보이므로 n
 
 ### 13.5 체크포인트 조정과 파괴 전 barrier
 
-[ADR-0238](../adr/0238-codex-lifecycle-storage-checkpoint.md): Codex의 TUI thread/start·thread/resume 진단은 프로세스 incarnation에 결부된 현재 대화 선택 증거다. 새 대화 ID에 턴 입력·rollout이 없을 때만 `Fresh(provider, sessionId)`를 반환한다. 이중 관측에는 ID까지 포함하고 pane에는 `lastAgentFresh=codex`를 저장하여 다음 시작을 설정된 명령의 resume 없는 실행으로 만든다. WSL SQLite는 해당 distro의 python3 sqlite3로 읽으며 부재·오류는 Unknown이다. 훅이나 패키지 설치는 하지 않는다. TUI 전환 증거가 없는 native 구버전은 아래 레거시 후보 검증을 유지하며 WSL은 미식별로 남는다.
+[ADR-0238](../adr/0238-codex-lifecycle-storage-checkpoint.md): Codex의 TUI thread/start·thread/resume 진단은 프로세스 incarnation에 결부된 현재 대화 선택 증거다. 새 대화 ID에 턴 입력·rollout이 없을 때만 `Fresh(provider, sessionId)`를 반환한다. 이중 관측에는 ID까지 포함하고 pane에는 `lastAgentFresh=codex`를 저장하여 다음 시작을 설정된 명령의 resume 없는 실행으로 만든다. WSL SQLite는 앱 옆에 동봉된 정적 Linux `laymux-wsl-codex-probe`가 해당 distro 안에서 읽기 전용 트랜잭션으로 조회한다. 도구는 PID·pane marker·프로세스 이름을 검증하고 기존 3초 예산 안에 JSON을 반환한다. Python·sqlite3 실행 파일·훅·사용자 패키지 설치는 필요 없다. 도구 누락·실행 실패·조회 오류는 Unknown이다. TUI 전환 증거가 없는 native 구버전은 아래 레거시 후보 검증을 유지하며 WSL은 미식별로 남는다.
+
+Windows 빌드 전에 Linux/WSL에서 `bash scripts/build-wsl-probe.sh`를 실행한다(Rust/C 컴파일러와 readelf는 개발·CI 의존성뿐이다). `tools/wsl-codex-probe`는 기존 bundled rusqlite를 사용하며 CRT도 정적 링크한다. 스크립트는 ELF의 interpreter/NEEDED 부재를 검사하고 `src-tauri/gen/wsl/`에 스테이징한다. Windows build.rs는 도구 부재를 실패시키고 실행 파일 옆에 복사하며 NSIS resources도 같은 파일을 동봉한다. release workflow는 같은 commit의 Linux 빌드 artifact를 Windows job에 전달한다. 사용자 WSL의 PATH에서 도구를 찾거나 실행 중 다운로드하지 않는다.
 
 레거시 native Codex 후보는 정확한 rollout header 또는 같은 process UUID의 temporary-structured 진단으로 보조 스레드임이 증명된 경우만 건너뛴다. 새 후보의 rollout 누락·만료·손상·경로 중복은 이전 대화로 fallback하지 않는다. lifecycle 선택 경로에서는 늦게 도착한 이전 요청의 로그가 현재 선택을 되돌리지 않도록 요청별 첫 관측 순서를 사용한다. 일반 메시지에 인용된 span과 teardown 로그는 선택 완료 증거가 아니다.
 

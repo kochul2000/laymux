@@ -97,7 +97,7 @@ ADR: [0222](adr/0222-agent-session-checkpoint-coordinator.md). 현재 부분 수
 
 ADR: [0238](adr/0238-codex-lifecycle-storage-checkpoint.md). 위 1차의 미구현 목록 중 Codex fresh 복원과 WSL 다중 FD 선택을 구현했다. Claude·Grok adapter의 동작은 바꾸지 않았다. 특히 WSL Grok 신규 welcome 대기는 여전히 별도 범위다.
 
-Windows·WSL Codex 0.153.4에서 process_uuid에 결부된 TUI thread/start·thread/resume span으로 현재 대화를 선택한다. 이전 요청의 늦은 prewarm 및 temporary-structured 제목 생성은 현재 선택을 덮지 않는다. has_user_event나 파일 부재 단독 판정은 쓰지 않는다. WSL은 기존 python3의 sqlite3 모듈을 사용하며 설치나 훅 설정은 추가하지 않았다.
+Windows·WSL Codex 0.153.4에서 process_uuid에 결부된 TUI thread/start·thread/resume span으로 현재 대화를 선택한다. 이전 요청의 늦은 prewarm 및 temporary-structured 제목 생성은 현재 선택을 덮지 않는다. has_user_event나 파일 부재 단독 판정은 쓰지 않는다. 이 2차 실측 시점에는 WSL의 기존 Python sqlite3를 사용했으나 사용자 외부 의존성이므로 아래 3차에서 제거했다.
 
 | dev 실기 단계 | Windows native | WSL Ubuntu-22.04 |
 | --- | --- | --- |
@@ -110,3 +110,19 @@ Windows·WSL Codex 0.153.4에서 process_uuid에 결부된 TUI thread/start·thr
 구현 검증 dev PID는 86152, 재시작 검증은 23128(포트 19281, worktree fix/agent-empty-session-checkpoint). A ID는 native `01a07b1c-0034-7652-a854-b6225b851f9c`, WSL `01a07b19-d6d7-7420-95de-ab916108a3d9`다. 재시작한 빈 ID는 각각 `01a07b21-4934-7031-81f9-1aa52f063b77`, `01a07b21-4ca4-7642-9011-0457556c1c3c`이며 저장 pane은 lastAgentFresh=codex, 이전 lastCodexSession 없음이다. 실제 frontend flushSessionCheckpoint(requireConclusive=true)와 /buffer를 대조했다. installer는 실행하지 않았다. 초기 로그 준비 전/조회 실패에는 일시적으로 차단되고 재조회 후 통과했으며 이 실패를 fresh로 축약하지 않았다. 모든 dev는 kill-dev.sh로 종료했다.
 
 TDD: 늦은 B 로그가 A 재개를 덮는 테스트의 RED→GREEN, fresh를 기존 critical barrier가 거부하는 UI 테스트의 RED→GREEN을 확인했다. parser 인용·미확정 전환·턴 입력·요청 순서, fresh ID 이중 관측 불일치, 실제 TerminalView의 resume 없는 시작도 검사했다. Codex Rust 27개, UI 관련 481개 통과 후 fresh race 테스트를 추가한 저장 관련 111개가 통과했다. 전체 Rust는 2052 통과·기존 Remote HTML 8개 실패이며 strict clippy, TypeScript, 변경 UI ESLint도 통과했다.
+
+## 3차 구현: 사용자 WSL Python 의존성 제거
+
+ADR: [0238](adr/0238-codex-lifecycle-storage-checkpoint.md), Proposed 결정을 수정했다. Python probe를 삭제하고 SQLite와 CRT를 정적 링크한 Linux x64 도구를 Windows 앱에 동봉한다. 사용자 WSL에는 패키지 설치·훅 설정·런타임 다운로드가 필요 없다. 개발/CI만 Linux Rust/C 빌드 도구를 사용한다. release workflow에 같은 commit의 도구 빌드와 Windows artifact 전달을 추가했고, build.rs와 NSIS resources가 같은 바이너리를 앱 옆에 배치한다. installer 및 GitHub release workflow 자체는 실행하지 않았다.
+
+TDD 조회 테스트는 처음 실패한 뒤 Windows·Linux 각각 통과했다. 열린 WAL, 이전 PID incarnation 배제, 타 프로세스 제외, 잘못된 pane marker/프로세스 이름 거부를 검사한다. commands 462개, ConPTY 배포 회귀 15개, strict workspace/all-targets clippy도 통과했다. 정적 ELF의 INTERP/NEEDED 부재를 빌드 스크립트가 검사했고, 스테이징과 dev 앱 옆 파일 SHA-256이 일치했다. 실제 dev WSL Codex PID를 대상으로 `env -i PATH=/nonexistent <동봉 도구> <PID> <pane>`도 JSON 24행 조회에 성공했다. Python을 제거한 시스템이라고 주장하는 것이 아니라 조회 도구가 Python·PATH·동적 런타임을 사용하지 않음을 검증했다.
+
+| 정적 도구 적용 후 dev 실기 | Windows native Codex | WSL Ubuntu-22.04 Codex |
+| --- | --- | --- |
+| 신규 질문 전 | Fresh·critical checkpoint 통과 | Fresh·통과 |
+| 첫 응답 | NATIVE_STATIC_OK·Identified·통과 | WSL_STATIC_OK·Identified·통과 |
+| clear 처리 완료·질문 전 | 새 ID Fresh·통과 | 새 ID Fresh·통과 |
+| 질문 없이 이전 A 재개 | 정확한 A ID·통과 | 정확한 A ID·통과 |
+| 다시 clear·저장·실제 dev 종료/재시작 | resume 없는 새 빈 Codex·통과 | resume 없는 새 빈 Codex·통과 |
+
+실기 dev PID 12016, 재시작 PID 13732(19281). A는 native `01a07b6a-1e99-7961-abf2-73abfa01fc96`, WSL `01a07b6a-2184-78a3-9fb4-2d271ef98eb6`이다. 재시작 후 새 빈 ID는 native `01a07b6d-a3fe-7220-8796-7d2020dc0b38`, WSL `01a07b6d-a6b8-72f1-b895-ae61988d0952`였다. 실제 buffer의 빈 입력 화면과 critical checkpoint의 Fresh, lastAgentFresh=codex, 이전 lastCodexSession 부재를 대조했다. clear 입력 직후 처리/기록 전 조회는 이전 ID였고 처리 완료 후 새 ID로 전환됐다. 저장소 기록 지연에 대한 기존 관측 경계는 그대로다. 테스트 dev는 공식 kill-dev.sh로 종료했고 release 19280은 조작하지 않았다. Claude·Grok는 이번 Python 제거 수정의 대상이 아니다.

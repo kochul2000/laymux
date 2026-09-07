@@ -1,32 +1,43 @@
 use super::lifecycle::LogRow;
 use crate::commands::wsl_agent_session::WslAgentProcess;
 
-// No user paths are interpolated into the shell. The integer PID selects the
-// environment in /proc; SQLite runs in its owning OS, not over UNC locking.
+// The bundled static Linux executable owns SQLite locking inside the distro.
+// Arguments never pass through a shell or an ambient PATH lookup.
 #[cfg(windows)]
 pub(super) fn read_rows(
     process: &WslAgentProcess,
     terminal_id: &str,
     timeout: std::time::Duration,
 ) -> Result<Vec<LogRow>, String> {
-    use std::fmt::Write;
-    let mut marker = String::new();
-    for byte in terminal_id.bytes() {
-        write!(&mut marker, "{byte:02x}").map_err(|e| e.to_string())?;
+    if !crate::wsl_probe::is_safe_distro_name(&process.distro) {
+        return Err("unsafe WSL distribution name".into());
     }
-    let script = format!(
-        "python3 - {} {} <<'LAYMUX_CODEX_SQLITE'\n{}\nLAYMUX_CODEX_SQLITE",
-        process.pid,
-        marker,
-        include_str!("wsl_sqlite.py")
-    );
-    let output = crate::wsl_probe::run_probe_script(
+    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+    let helper = executable
+        .parent()
+        .ok_or("application directory missing")?
+        .join(crate::constants::WSL_CODEX_PROBE_FILE);
+    if !helper.is_file() {
+        return Err("bundled WSL Codex probe missing".into());
+    }
+    let helper =
+        crate::path_utils::windows_to_wsl_path(helper.to_str().ok_or("invalid WSL probe path")?);
+    let mut command = crate::process::headless_command("wsl.exe");
+    command.args([
+        "-d",
         &process.distro,
-        &script,
-        "laymux-codex-sqlite",
-        timeout,
-    )?;
-    serde_json::from_slice(&output).map_err(|e| format!("invalid WSL Codex diagnostics: {e}"))
+        "--exec",
+        &helper,
+        &process.pid.to_string(),
+        terminal_id,
+    ]);
+    let output =
+        crate::process::output_with_timeout(&mut command, timeout).map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err(format!("WSL Codex probe exited with {}", output.status));
+    }
+    serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("invalid WSL Codex diagnostics: {e}"))
 }
 
 #[cfg(not(windows))]

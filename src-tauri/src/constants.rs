@@ -1,5 +1,8 @@
 use std::time::Duration;
 
+/// Static Linux x64 companion, staged beside the Windows application.
+pub const WSL_CODEX_PROBE_FILE: &str = "laymux-wsl-codex-probe";
+
 // ── OS credential-store names ────────────────────────────────────
 
 pub const KEYRING_SERVICE: &str = "laymux";
