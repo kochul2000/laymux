@@ -1,6 +1,6 @@
 # 0240. 릴리스는 당분간 Windows와 Android만 배포한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-07
 - Source: 사용자 요구(Windows 설치·업데이트와 Android APK만 필요, Linux 빌드 대기 제거), [ADR-0190](0190-update-release-channels.md), [ADR-0223](0223-android-release-advances-only-with-apk.md)
 - 관계: ADR-0190의 데스크톱 배포 플랫폼 범위를 축소한다. 채널과 서명 계약은 유지한다.
