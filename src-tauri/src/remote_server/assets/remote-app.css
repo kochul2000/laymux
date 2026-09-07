@@ -715,7 +715,7 @@
         border: 1px solid var(--border);
         border-radius: var(--radius-sm);
         background: var(--bg-surface);
-        color: var(--text-primary);
+        color: var(--accent);
         font-size: 0.9em;
       }
       .composer-attachment-name {

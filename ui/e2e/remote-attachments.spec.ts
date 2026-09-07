@@ -334,6 +334,16 @@ test.describe("remote terminal attachments", () => {
       },
     ]);
     await expect(editor.locator(".composer-attachment")).toHaveCount(2);
+    await page.locator("#keyBarToggle").click();
+    await expect(page.locator("#keyBarToggle")).toHaveClass(/active/);
+    expect(
+      await editor
+        .locator(".composer-attachment")
+        .first()
+        .evaluate((chip) => getComputedStyle(chip).color),
+    ).toBe(
+      await page.locator("#keyBarToggle").evaluate((button) => getComputedStyle(button).color),
+    );
     await page.screenshot({ path: "test-results/remote-attachment-chips-mobile.png" });
     await editor.evaluate((element) => {
       const range = document.createRange();

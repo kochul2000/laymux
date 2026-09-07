@@ -3424,7 +3424,7 @@ import {
               pick.append(mark);
             }
             if (longPress) {
-              pick.addEventListener("mousedown", (event) => event.preventDefault());
+              keepInputSurfaceFocus(pick);
               bindComposerLongPress(pick, suggestion);
             } else {
               // mousedown (not click) so the editor keeps focus through the pick.
@@ -3445,8 +3445,8 @@ import {
             star.setAttribute("aria-pressed", starred ? "true" : "false");
             star.title = starred ? "Unstar" : "Star";
             setRemoteIcon(star, "Star", { size: 13, fill: starred ? "currentColor" : "none" });
+            keepInputSurfaceFocus(star);
             star.addEventListener("mousedown", (event) => {
-              event.preventDefault();
               event.stopPropagation();
             });
             star.addEventListener("click", (event) => {
