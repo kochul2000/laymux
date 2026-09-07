@@ -53,7 +53,7 @@ export const ALL_CHANNEL_FILES = [
 ];
 
 /** 클라이언트가 실제로 소비하는 플랫폼 키. 번들 접미사 키는 있으면 함께 검증한다. */
-const REQUIRED_PLATFORMS = ["windows-x86_64", "linux-x86_64"];
+const REQUIRED_PLATFORMS = ["windows-x86_64"];
 
 /**
  * 발행 tag 로 만든 updater manifest 가 채널에 올려도 되는지 검증한다.

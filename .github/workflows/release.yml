@@ -209,24 +209,8 @@ jobs:
 
   build:
     needs: [prepare, wsl-probe]
-    strategy:
-      fail-fast: false
-      # tauri-action merges each platform into the release's latest.json.
-      # Serialize uploads so two fresh platform manifests cannot clobber one another.
-      max-parallel: 1
-      matrix:
-        include:
-          - platform: windows-latest
-            target: x86_64-pc-windows-msvc
-            # RPM `Version` cannot contain `-` and deb version ordering does not
-            # match semver prerelease ordering, so a beta build is limited to the
-            # bundles whose version rules accept `x.y.z-beta.N` (ADR-0190).
-            prerelease_bundles: nsis,updater
-          - platform: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            prerelease_bundles: appimage,updater
-
-    runs-on: ${{ matrix.platform }}
+    # Linux desktop releases are paused (ADR-0240).
+    runs-on: windows-latest
 
     steps:
       - name: Checkout
@@ -237,20 +221,13 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-pc-windows-msvc
 
       - name: Download bundled WSL companion
-        if: runner.os == 'Windows'
         uses: actions/download-artifact@v4
         with:
           name: wsl-codex-probe
           path: src-tauri/gen/wsl
-
-      - name: Install Linux system dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -281,8 +258,8 @@ jobs:
           releaseDraft: true
           prerelease: ${{ needs.prepare.outputs.prerelease }}
           args: >-
-            --target ${{ matrix.target }}
-            ${{ needs.prepare.outputs.prerelease == 'true' && format('--bundles {0}', matrix.prerelease_bundles) || '' }}
+            --target x86_64-pc-windows-msvc
+            ${{ needs.prepare.outputs.prerelease == 'true' && '--bundles nsis,updater' || '' }}
 
   android:
     needs: prepare
