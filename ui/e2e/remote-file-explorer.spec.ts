@@ -386,9 +386,7 @@ test("the header folder button appears with the capability and lists the cwd", a
   await expect(page.locator("#status")).toHaveText("Copied /home/user");
   await expect
     .poll(() =>
-      page.evaluate(
-        () => (window as typeof window & { __copiedPath?: string }).__copiedPath,
-      ),
+      page.evaluate(() => (window as typeof window & { __copiedPath?: string }).__copiedPath),
     )
     .toBe("/home/user");
 
