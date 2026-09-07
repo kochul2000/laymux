@@ -1436,7 +1436,9 @@ Windows host의 WSL terminal은 host process tree에 `wsl.exe`만 보이므로 n
 
 ### 13.5 체크포인트 조정과 파괴 전 barrier
 
-native Codex의 process diagnostics 후보를 역순으로 검사할 때, 새 후보의 rollout이 아직 없거나 만료·의미 검증 실패·경로 중복이면 이전 대화로 fallback하지 않는다. 정확히 같은 ID의 rollout header에서 subagent/비대화형 exec임을 증명한 후보, 또는 같은 process UUID의 threadless `thread/start` 진단 span이 해당 ID의 `temporary-structured` 요청임을 증명한 제목 생성용 임시 스레드만 건너뛴다. 일반 메시지에 인용된 span이나 다른 프로세스의 증거는 사용하지 않는다. `/clear` 후 새 스레드가 로그에 생겼지만 첫 질문 전이라 파일이 없는 구간은 이전 ID의 `Identified`가 아니라 미식별로 남는다. 이는 빈 대화의 fresh 복원을 구현한 것이 아니며, WSL의 복수 rollout FD 선택과 별개인 stale 복원 방지다.
+[ADR-0238](../adr/0238-codex-lifecycle-storage-checkpoint.md): Codex의 TUI thread/start·thread/resume 진단은 프로세스 incarnation에 결부된 현재 대화 선택 증거다. 새 대화 ID에 턴 입력·rollout이 없을 때만 `Fresh(provider, sessionId)`를 반환한다. 이중 관측에는 ID까지 포함하고 pane에는 `lastAgentFresh=codex`를 저장하여 다음 시작을 설정된 명령의 resume 없는 실행으로 만든다. WSL SQLite는 해당 distro의 python3 sqlite3로 읽으며 부재·오류는 Unknown이다. 훅이나 패키지 설치는 하지 않는다. TUI 전환 증거가 없는 native 구버전은 아래 레거시 후보 검증을 유지하며 WSL은 미식별로 남는다.
+
+레거시 native Codex 후보는 정확한 rollout header 또는 같은 process UUID의 temporary-structured 진단으로 보조 스레드임이 증명된 경우만 건너뛴다. 새 후보의 rollout 누락·만료·손상·경로 중복은 이전 대화로 fallback하지 않는다. lifecycle 선택 경로에서는 늦게 도착한 이전 요청의 로그가 현재 선택을 되돌리지 않도록 요청별 첫 관측 순서를 사용한다. 일반 메시지에 인용된 span과 teardown 로그는 선택 완료 증거가 아니다.
 
 실행 중 미식별 상태의 예외는 WSL Codex의 **정확한 process 선택 + rollout FD 부재**를 provider adapter가 관측 map으로 전달한 경우로 제한한다. map 값 `true`는 해당 증거, `false`는 관측됐지만 예외 대상이 아닌 후보(native·모호·FD 존재), key 부재는 아직 후보를 관측하지 못했음을 뜻한다. provider probe 뒤의 fresh liveness에서 처음 Codex가 보이면 `Unknown`으로 남기고 기존 복원점을 소비하지 않는다. 일반 session ID `None`(후보 검증 실패·중복·모호한 PID 포함) 자체는 예외의 증거가 아니며, native/다른 provider에는 FD 부재 증거를 합성하지 않는다. 최종 snapshot에서 pending provider/ID가 다른 pending 또는 정확한 귀속과 중복되면 pending만 거부하고 소비한다.
 

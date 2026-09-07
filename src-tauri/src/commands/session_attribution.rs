@@ -13,6 +13,7 @@ use crate::state::AppState;
 pub enum SessionAttributionState {
     Identified,
     RestorePending,
+    Fresh,
     NoAgent,
     ActiveButUnidentified,
     Unknown,
@@ -35,6 +36,7 @@ pub(crate) struct ProviderSessionLookup {
     /// Present only after observing a Codex candidate. True means exact WSL
     /// process with no rollout FD; false is not eligible for restore fallback.
     pub rollout_absence: HashMap<String, bool>,
+    pub fresh_sessions: HashMap<String, String>,
 }
 
 pub(crate) struct ProviderTerminalDomains {
@@ -315,6 +317,7 @@ pub fn get_terminal_session_attributions(
                 liveness,
                 lookup_failed,
             );
+            let attribution = apply_fresh(attribution, codex.fresh_sessions.get(&terminal_id));
             let attribution = require_current_generation(
                 attribution,
                 current_handles
@@ -334,6 +337,20 @@ pub fn get_terminal_session_attributions(
         .collect();
     reject_duplicate_restore_checkpoints(&mut attributions, &current_handles);
     Ok(attributions)
+}
+
+fn apply_fresh(
+    mut attribution: TerminalSessionAttribution,
+    fresh: Option<&String>,
+) -> TerminalSessionAttribution {
+    if attribution.state == SessionAttributionState::Identified
+        && attribution.provider == Some("codex")
+        && fresh.is_some()
+        && attribution.session_id.as_ref() == fresh
+    {
+        attribution.state = SessionAttributionState::Fresh;
+    }
+    attribution
 }
 
 #[cfg(test)]

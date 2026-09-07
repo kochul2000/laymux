@@ -1,9 +1,15 @@
+#[cfg(test)]
 use std::collections::HashSet;
 use std::io::{BufRead, Read};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
+
+mod diagnostics;
+use diagnostics::{
+    find_process_thread_ids_checked, find_process_uuid_checked, is_temporary_thread_checked,
+};
 
 use super::resolve_codex_roots;
 use crate::commands::claude_session::is_valid_session_id;
@@ -15,6 +21,12 @@ use crate::constants::{
 pub(super) struct CodexSessionStore {
     codex_home: PathBuf,
     sqlite_home: PathBuf,
+    guest: bool,
+}
+
+pub(super) struct ResolvedSession {
+    pub id: String,
+    pub fresh: bool,
 }
 
 impl CodexSessionStore {
@@ -27,6 +39,15 @@ impl CodexSessionStore {
         Self {
             codex_home,
             sqlite_home,
+            guest: false,
+        }
+    }
+
+    pub(super) fn for_guest(codex_home: PathBuf) -> Self {
+        Self {
+            sqlite_home: codex_home.clone(),
+            codex_home,
+            guest: true,
         }
     }
 
@@ -50,11 +71,23 @@ impl CodexSessionStore {
             .flatten()
     }
 
+    #[cfg(test)]
     pub(super) fn find_session_for_pid_checked(
         &self,
         pid: u32,
         max_age_hours: Option<u64>,
     ) -> Result<Option<String>, String> {
+        Ok(self
+            .find_selection_for_pid_checked(pid, max_age_hours)?
+            .filter(|s| !s.fresh)
+            .map(|s| s.id))
+    }
+
+    pub(super) fn find_selection_for_pid_checked(
+        &self,
+        pid: u32,
+        max_age_hours: Option<u64>,
+    ) -> Result<Option<ResolvedSession>, String> {
         let Some(logs_path) =
             latest_versioned_db_checked(&self.sqlite_home, CODEX_SQLITE_LOG_PREFIX)?
         else {
@@ -64,15 +97,54 @@ impl CodexSessionStore {
         let Some((process_uuid, first_log_id)) = find_process_uuid_checked(&logs, pid)? else {
             return Ok(None);
         };
+        let rows = read_lifecycle_rows(&logs, &process_uuid, first_log_id)?;
+        if let Some(selection) = super::lifecycle::select(&rows) {
+            return self.resolve_selection(selection, max_age_hours);
+        }
         for thread_id in find_process_thread_ids_checked(&logs, &process_uuid, first_log_id)? {
             if is_temporary_thread_checked(&logs, &process_uuid, first_log_id, &thread_id)? {
                 continue;
             }
             match self.validate_session_checked(&thread_id, max_age_hours)? {
-                Some(true) => return Ok(Some(thread_id)),
+                Some(true) => {
+                    return Ok(Some(ResolvedSession {
+                        id: thread_id,
+                        fresh: false,
+                    }))
+                }
                 // Only a positively identified auxiliary thread can be skipped.
                 Some(false) => continue,
                 None => return Ok(None),
+            }
+        }
+        Ok(None)
+    }
+
+    pub(super) fn resolve_selection(
+        &self,
+        selection: super::lifecycle::Selection,
+        age: Option<u64>,
+    ) -> Result<Option<ResolvedSession>, String> {
+        let Some(id) = selection.id else {
+            return Ok(None);
+        };
+        match self.validate_session_checked(&id, age)? {
+            Some(true) => return Ok(Some(ResolvedSession { id, fresh: false })),
+            Some(false) => return Ok(None),
+            None => {}
+        }
+        if selection.can_be_fresh {
+            let mut paths = Vec::new();
+            collect_rollout_paths_checked(
+                &self.sessions_dir(),
+                CODEX_SESSION_DIRECTORY_DEPTH,
+                &id,
+                &mut paths,
+            )?;
+            if paths.is_empty() {
+                // A state row with a missing rollout is an I/O error in validation,
+                // never fresh. Invalid/expired/auxiliary files also cannot get here.
+                return Ok(Some(ResolvedSession { id, fresh: true }));
             }
         }
         Ok(None)
@@ -89,9 +161,11 @@ impl CodexSessionStore {
             return Ok(None);
         }
         let cutoff = age_cutoff(max_age_hours);
-        if let Some(state_db) =
+        if let Some(state_db) = if self.guest {
+            None
+        } else {
             latest_versioned_db_checked(&self.sqlite_home, CODEX_SQLITE_STATE_PREFIX)?
-        {
+        } {
             let state = open_read_only_checked(&state_db)?;
             if let Some(state_path) = find_rollout_path_checked(&state, session_id)? {
                 return parse_rollout_header_checked(&state_path, cutoff, session_id);
@@ -99,6 +173,26 @@ impl CodexSessionStore {
         }
         find_rollout_by_session_id_checked(&self.sessions_dir(), session_id, cutoff)
     }
+}
+
+fn read_lifecycle_rows(
+    connection: &Connection,
+    process: &str,
+    first: i64,
+) -> Result<Vec<super::lifecycle::LogRow>, String> {
+    let mut statement = connection.prepare("SELECT id, thread_id, substr(feedback_log_body,1,2048) FROM logs WHERE id>=?1 AND process_uuid=?2 AND (feedback_log_body LIKE 'app_server.request{%rpc.method=\"thread/%' OR feedback_log_body LIKE 'session_loop{%') ORDER BY id")
+        .map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map((first, process), |r| {
+            Ok(super::lifecycle::LogRow {
+                id: r.get(0)?,
+                thread_id: r.get(1)?,
+                feedback_log_body: r.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())
 }
 
 fn open_read_only_checked(path: &Path) -> Result<Connection, String> {
@@ -148,105 +242,6 @@ fn latest_versioned_db_checked(dir: &Path, prefix: &str) -> Result<Option<PathBu
         .into_iter()
         .max_by_key(|(version, _)| *version)
         .map(|(_, path)| path))
-}
-
-fn find_process_uuid_checked(
-    connection: &Connection,
-    pid: u32,
-) -> Result<Option<(String, i64)>, String> {
-    let pattern = format!("pid:{pid}:*");
-    let process_uuid: Option<String> = connection
-        .query_row(
-            "SELECT process_uuid
-             FROM logs INDEXED BY idx_logs_process_uuid_threadless_ts
-             WHERE thread_id IS NULL AND process_uuid GLOB ?1
-             ORDER BY id DESC
-             LIMIT 1",
-            [&pattern],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|error| format!("failed to query Codex process identity: {error}"))?;
-    let Some(process_uuid) = process_uuid else {
-        return Ok(None);
-    };
-    let first_log_id = connection
-        .query_row(
-            "SELECT MIN(id)
-             FROM logs INDEXED BY idx_logs_process_uuid_threadless_ts
-             WHERE thread_id IS NULL AND process_uuid = ?1
-             LIMIT 1",
-            [&process_uuid],
-            |row| row.get(0),
-        )
-        .map_err(|error| format!("failed to query Codex process start: {error}"))?;
-    Ok(Some((process_uuid, first_log_id)))
-}
-
-fn find_process_thread_ids_checked(
-    connection: &Connection,
-    process_uuid: &str,
-    first_log_id: i64,
-) -> Result<Vec<String>, String> {
-    let mut statement = connection
-        .prepare(
-            "SELECT thread_id, MAX(id) AS last_id
-             FROM logs NOT INDEXED
-             WHERE id >= ?1 AND process_uuid = ?2 AND thread_id IS NOT NULL
-             GROUP BY thread_id
-             ORDER BY last_id DESC",
-        )
-        .map_err(|error| format!("failed to prepare Codex thread query: {error}"))?;
-    let rows = statement
-        .query_map((first_log_id, process_uuid), |row| row.get::<_, String>(0))
-        .map_err(|error| format!("failed to query Codex threads: {error}"))?;
-    rows.collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|error| format!("failed to read Codex thread rows: {error}"))
-}
-
-/// Codex 0.153 emits title-generation threads without a rollout. Their own
-/// threadless startup span, not absence of a file or a model name, proves that
-/// they are temporary. Keep the evidence scoped to this process incarnation.
-fn is_temporary_thread_checked(
-    connection: &Connection,
-    process_uuid: &str,
-    first_log_id: i64,
-    thread_id: &str,
-) -> Result<bool, String> {
-    let marker = format!("startup_prewarm{{otel.name=\"startup_prewarm\" thread.id={thread_id}}}");
-    let mut statement = connection
-        .prepare(
-            "SELECT substr(feedback_log_body, 1, 2048)
-         FROM logs INDEXED BY idx_logs_process_uuid_threadless_ts
-         WHERE thread_id IS NULL AND process_uuid = ?1 AND id >= ?2
-           AND feedback_log_body LIKE 'app_server.request{%'
-           AND instr(feedback_log_body, ?3) > 0",
-        )
-        .map_err(|error| format!("failed to prepare Codex temporary thread query: {error}"))?;
-    let rows = statement
-        .query_map((process_uuid, first_log_id, &marker), |row| {
-            row.get::<_, String>(0)
-        })
-        .map_err(|error| format!("failed to query Codex temporary thread: {error}"))?;
-    for row in rows {
-        let body =
-            row.map_err(|error| format!("failed to read Codex temporary thread: {error}"))?;
-        let Some((request, spans)) = body.split_once("}:") else {
-            continue;
-        };
-        if request.contains("rpc.method=\"thread/start\"")
-            && request.contains("rpc.request_id=temporary-structured-")
-            && request.contains("app_server.client_name=\"codex-tui\"")
-            && spans.starts_with("app_server.thread_start.create_thread{")
-            && spans
-                .split(": ")
-                .next()
-                .is_some_and(|prefix| prefix.contains(&marker))
-        {
-            return Ok(true);
-        }
-    }
-    Ok(false)
 }
 
 fn find_rollout_path_checked(
@@ -302,6 +297,7 @@ pub(super) fn find_session_from_rollout_paths(
         .flatten()
 }
 
+#[cfg(test)]
 pub(super) fn find_session_from_rollout_paths_checked(
     paths: &[PathBuf],
     max_age_hours: Option<u64>,
@@ -365,6 +361,7 @@ fn parse_rollout_header_checked(
     })
 }
 
+#[cfg(test)]
 fn parse_rollout_session_id_checked(
     path: &Path,
     cutoff: Option<u128>,

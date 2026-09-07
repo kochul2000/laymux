@@ -63,7 +63,7 @@ provider 계정 설정은 기존 것을 사용했다. Grok의 기존 MCP 설정�
 
 위 표는 수정 전 진단 결과다. 아래의 후속 변경과 구분한다.
 
-## 후속 PR의 부분 수정과 남은 범위
+## 1차 후속 PR의 부분 수정과 당시 남은 범위
 
 `fix/agent-empty-session-checkpoint`, base `c023c352`에서 native Codex의 위험한 이전 ID fallback을 먼저 차단했다. 신규 후보의 파일 부재·만료·잘못된 header·중복 경로는 이전 대화를 복원할 근거가 아니다. 정확한 보조 스레드만 제외한다. 파일 없는 제목 생성 스레드는 동일 process UUID의 threadless `temporary-structured` startup span과 정확한 thread ID로 확인하며, 다른 프로세스나 일반 메시지 안의 인용은 근거로 인정하지 않는다.
 
@@ -92,3 +92,21 @@ TDD는 두 번 RED→GREEN을 확인했다.
 실행 중 WSL SQLite를 Windows에서 직접 열면 잠금 오류가 발생했다. WSL 내부의 선택적 python3/sqlite3 probe를 사용할지 사용자에게 질의했으며 아직 도입하지 않았다. 파일 부재나 미식별을 일괄적으로 빈 상태로 간주해 업데이트를 허용하지 않는다. 위 6×4 수정 전 표의 모든 결함을 고쳤다고 주장하지 않는다.
 
 ADR: [0222](adr/0222-agent-session-checkpoint-coordinator.md). 현재 부분 수정은 검증 실패를 오래된 정확 귀속으로 둔갑시키지 않는 기존 결정을 직접 적용하며 새 상태/설정/실행 계약을 추가하지 않는다. 새 ADR 불필요. 남은 fresh 복원 및 크로스플랫폼 조회 전략은 ADR-0222/0232 확장 ADR에서 별도로 고정해야 한다.
+
+## 2차 구현: 훅 없는 Codex lifecycle 저장소 판정
+
+ADR: [0238](adr/0238-codex-lifecycle-storage-checkpoint.md). 위 1차의 미구현 목록 중 Codex fresh 복원과 WSL 다중 FD 선택을 구현했다. Claude·Grok adapter의 동작은 바꾸지 않았다. 특히 WSL Grok 신규 welcome 대기는 여전히 별도 범위다.
+
+Windows·WSL Codex 0.153.4에서 process_uuid에 결부된 TUI thread/start·thread/resume span으로 현재 대화를 선택한다. 이전 요청의 늦은 prewarm 및 temporary-structured 제목 생성은 현재 선택을 덮지 않는다. has_user_event나 파일 부재 단독 판정은 쓰지 않는다. WSL은 기존 python3의 sqlite3 모듈을 사용하며 설치나 훅 설정은 추가하지 않았다.
+
+| dev 실기 단계 | Windows native | WSL Ubuntu-22.04 |
+| --- | --- | --- |
+| 신규 실행·질문 전 | Fresh·critical checkpoint 통과 | Fresh·통과 |
+| 첫 응답 | FINAL_NATIVE_A·Identified·통과 | FINAL_WSL_A·Identified·통과 |
+| clear·질문 전 | 새 ID Fresh·통과 | 새 ID Fresh·통과 |
+| 질문 없이 A 재개 | A ID Identified·통과 | A ID Identified·통과 |
+| 다시 clear→저장→dev 종료/재시작 | resume 없이 빈 Codex·Fresh·통과 | resume 없이 빈 Codex·Fresh·통과 |
+
+구현 검증 dev PID는 86152, 재시작 검증은 23128(포트 19281, worktree fix/agent-empty-session-checkpoint). A ID는 native `01a07b1c-0034-7652-a854-b6225b851f9c`, WSL `01a07b19-d6d7-7420-95de-ab916108a3d9`다. 재시작한 빈 ID는 각각 `01a07b21-4934-7031-81f9-1aa52f063b77`, `01a07b21-4ca4-7642-9011-0457556c1c3c`이며 저장 pane은 lastAgentFresh=codex, 이전 lastCodexSession 없음이다. 실제 frontend flushSessionCheckpoint(requireConclusive=true)와 /buffer를 대조했다. installer는 실행하지 않았다. 초기 로그 준비 전/조회 실패에는 일시적으로 차단되고 재조회 후 통과했으며 이 실패를 fresh로 축약하지 않았다. 모든 dev는 kill-dev.sh로 종료했다.
+
+TDD: 늦은 B 로그가 A 재개를 덮는 테스트의 RED→GREEN, fresh를 기존 critical barrier가 거부하는 UI 테스트의 RED→GREEN을 확인했다. parser 인용·미확정 전환·턴 입력·요청 순서, fresh ID 이중 관측 불일치, 실제 TerminalView의 resume 없는 시작도 검사했다. Codex Rust 27개, UI 관련 481개 통과 후 fresh race 테스트를 추가한 저장 관련 111개가 통과했다. 전체 Rust는 2052 통과·기존 Remote HTML 8개 실패이며 strict clippy, TypeScript, 변경 UI ESLint도 통과했다.

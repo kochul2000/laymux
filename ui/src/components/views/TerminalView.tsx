@@ -711,6 +711,7 @@ interface TerminalViewProps {
   lastClaudeSession?: string;
   /** Codex CLI session ID from previous session, used for `codex resume` on startup. */
   lastCodexSession?: string;
+  lastAgentFresh?: "codex";
   /** Grok Build session ID from previous session, used for `grok --resume` on startup. */
   lastGrokSession?: string;
   /** Override the startup command (takes precedence over agent session restore). */
@@ -741,6 +742,7 @@ export function TerminalView({
   onRestart,
   lastClaudeSession,
   lastCodexSession,
+  lastAgentFresh,
   lastGrokSession,
   startupCommandOverride,
   viewerStartup,
@@ -6059,9 +6061,12 @@ export function TerminalView({
       lastGrokSession && GROK_SESSION_ID_PATTERN.test(lastGrokSession)
         ? lastGrokSession
         : undefined;
-    const presentAgentSessionKeys = [lastClaudeSession, lastCodexSession, lastGrokSession].filter(
-      (value) => typeof value === "string" && value.length > 0,
-    ).length;
+    const presentAgentSessionKeys = [
+      lastClaudeSession,
+      lastCodexSession,
+      lastGrokSession,
+      lastAgentFresh,
+    ].filter((value) => typeof value === "string" && value.length > 0).length;
     const hasAgentSessionConflict = presentAgentSessionKeys > 1;
     // The launch command is configurable so a user can carry flags such as
     // `--dangerously-skip-permissions` / `--yolo` into the restored session.
@@ -6076,13 +6081,15 @@ export function TerminalView({
       ? startupCommandOverride
       : hasAgentSessionConflict
         ? undefined
-        : shouldRestoreClaudeSession && safeSessionId
-          ? `${claudeCommand} --resume ${safeSessionId}`
-          : shouldRestoreCodexSession && safeCodexSessionId
-            ? `${codexCommand} resume ${safeCodexSessionId}`
-            : shouldRestoreGrokSession && safeGrokSessionId
-              ? `${grokCommand} --resume ${safeGrokSessionId}`
-              : undefined;
+        : shouldRestoreCodexSession && lastAgentFresh === "codex"
+          ? codexCommand
+          : shouldRestoreClaudeSession && safeSessionId
+            ? `${claudeCommand} --resume ${safeSessionId}`
+            : shouldRestoreCodexSession && safeCodexSessionId
+              ? `${codexCommand} resume ${safeCodexSessionId}`
+              : shouldRestoreGrokSession && safeGrokSessionId
+                ? `${grokCommand} --resume ${safeGrokSessionId}`
+                : undefined;
 
     if (startupOverride && !viewerStartup) {
       useTerminalStore.getState().updateInstanceInfo(instanceId, {

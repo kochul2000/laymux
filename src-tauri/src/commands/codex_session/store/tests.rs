@@ -3,6 +3,43 @@ use super::*;
 const SESSION_A: &str = "019fc0d8-a862-7241-a0f5-b6a66ef4ef6f";
 const SESSION_B: &str = "019fc114-970b-7933-a31b-bbd53883b57e";
 
+#[test]
+fn proven_new_thread_without_rollout_is_fresh() {
+    let temp = tempfile::tempdir().unwrap();
+    let logs = create_logs_db(temp.path());
+    insert_log(&logs, 1, "pid:101:uuid", None);
+    insert_log(&logs, 2, "pid:101:uuid", Some(SESSION_A));
+    logs.execute("UPDATE logs SET feedback_log_body=?1 WHERE id=2",[format!("app_server.request{{rpc.method=\"thread/start\" rpc.request_id=1 app_server.client_name=\"codex-tui\"}}:thread_spawn{{}}:session_init:startup_prewarm{{otel.name=\"startup_prewarm\" thread.id={SESSION_A}}}: ready")]).unwrap();
+    let store = CodexSessionStore::new(temp.path().into(), temp.path().into());
+    assert!(
+        store
+            .find_selection_for_pid_checked(101, None)
+            .unwrap()
+            .unwrap()
+            .fresh
+    );
+}
+
+#[test]
+fn resumed_thread_wins_over_later_background_logs_from_previous_thread() {
+    let temp = tempfile::tempdir().unwrap();
+    let logs = create_logs_db(temp.path());
+    let process = "pid:101:uuid";
+    insert_log(&logs, 1, process, None);
+    write_rollout(temp.path(), SESSION_A, ",\"source\":\"cli\"");
+    write_rollout(temp.path(), SESSION_B, ",\"source\":\"cli\"");
+    insert_log(&logs, 2, process, Some(SESSION_A));
+    logs.execute("UPDATE logs SET feedback_log_body=?1 WHERE id=2", [format!(
+        "app_server.request{{rpc.method=\"thread/resume\" rpc.request_id=30 app_server.client_name=\"codex-tui\"}}:resume_thread_with_history:thread_spawn{{otel.name=\"thread_spawn\"}}:session_init:environments.resolve{{}}:shell_snapshot{{thread_id={SESSION_A}}}: snapshot ready"
+    )]).unwrap();
+    insert_log(&logs, 3, process, Some(SESSION_B));
+    let store = CodexSessionStore::new(temp.path().into(), temp.path().into());
+    assert_eq!(
+        store.find_session_for_pid(101, None).as_deref(),
+        Some(SESSION_A)
+    );
+}
+
 fn create_logs_db(dir: &Path) -> Connection {
     let connection = Connection::open(dir.join("logs_2.sqlite")).unwrap();
     connection

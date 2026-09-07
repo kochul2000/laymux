@@ -106,6 +106,7 @@ function TerminalViewWithSyncCwd({
       lastCwd={lastCwd}
       lastClaudeSession={lastClaudeSession}
       lastCodexSession={lastCodexSession}
+      lastAgentFresh={viewConfig?.lastAgentFresh === "codex" ? "codex" : undefined}
       lastGrokSession={lastGrokSession}
       restartCwd={terminalRestartCwd}
       isUserRestart={terminalRestartFresh ?? false}
