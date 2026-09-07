@@ -1436,6 +1436,8 @@ Windows host의 WSL terminal은 host process tree에 `wsl.exe`만 보이므로 n
 
 ### 13.5 체크포인트 조정과 파괴 전 barrier
 
+native Codex의 process diagnostics 후보를 역순으로 검사할 때, 새 후보의 rollout이 아직 없거나 만료·의미 검증 실패·경로 중복이면 이전 대화로 fallback하지 않는다. 정확히 같은 ID의 rollout header에서 subagent/비대화형 exec임을 증명한 후보, 또는 같은 process UUID의 threadless `thread/start` 진단 span이 해당 ID의 `temporary-structured` 요청임을 증명한 제목 생성용 임시 스레드만 건너뛴다. 일반 메시지에 인용된 span이나 다른 프로세스의 증거는 사용하지 않는다. `/clear` 후 새 스레드가 로그에 생겼지만 첫 질문 전이라 파일이 없는 구간은 이전 ID의 `Identified`가 아니라 미식별로 남는다. 이는 빈 대화의 fresh 복원을 구현한 것이 아니며, WSL의 복수 rollout FD 선택과 별개인 stale 복원 방지다.
+
 실행 중 미식별 상태의 예외는 WSL Codex의 **정확한 process 선택 + rollout FD 부재**를 provider adapter가 관측 map으로 전달한 경우로 제한한다. map 값 `true`는 해당 증거, `false`는 관측됐지만 예외 대상이 아닌 후보(native·모호·FD 존재), key 부재는 아직 후보를 관측하지 못했음을 뜻한다. provider probe 뒤의 fresh liveness에서 처음 Codex가 보이면 `Unknown`으로 남기고 기존 복원점을 소비하지 않는다. 일반 session ID `None`(후보 검증 실패·중복·모호한 PID 포함) 자체는 예외의 증거가 아니며, native/다른 provider에는 FD 부재 증거를 합성하지 않는다. 최종 snapshot에서 pending provider/ID가 다른 pending 또는 정확한 귀속과 중복되면 pending만 거부하고 소비한다.
 
 [ADR-0232](../adr/0232-unconsumed-resume-checkpoint.md)는 위 startup grace와 아래 critical 허용 판정을 확장한다. Rust가 검증한 명시적 resume 요청은 PTY handle에 generation-local로 보관한다. 첫 비프로토콜 입력 enqueue 또는 정확한 귀속/다른 provider/복수 provider 관측 전까지, 건강한 `NoAgent`나 동일 provider의 `ActiveButUnidentified`를 `RestorePending(provider, sessionId)`로 반환한다. 프론트는 이 요청 ID를 저장하고 이중 안정 관측에서도 허용한다. 방문 여부나 15초 경과로 소비하지 않으며, protocol reply와 resize도 소비하지 않는다. 일반 입력(Local·Remote·Automation·MCP·sync CWD)은 공통 PTY FIFO 진입 전에 소비한다. 조회 실패·generation 교체·신규 CLI·profile startup·viewer에는 예외를 적용하지 않는다. 따라서 저장된 ID만으로 실행 중인 임의 세션의 업데이트를 허용하지 않는다.
