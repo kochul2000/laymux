@@ -1,6 +1,6 @@
 # 0239. Remote 방향 패드는 중앙 길게 누르기로 이동하고 불투명도를 기기에 저장한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-07
 - Source: 사용자 실기 피드백과 최종 승인, [api-contracts.md §13.4](../architecture/api-contracts.md#134-terminal-control), [ADR-0237](0237-remote-floating-input-controls.md)
 - 관계: ADR-0237의 별도 손잡이·좌표 편집 정책을 대체하고 기기 로컬 불투명도를 추가한다. 액션 실행·권한·위치 소유권은 유지한다.
