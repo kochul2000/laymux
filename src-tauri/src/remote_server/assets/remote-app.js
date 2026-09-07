@@ -5393,6 +5393,13 @@ import {
             handle.style.left = `${metrics.rect.left - hostRect.left + pos.x * metrics.cellWidth}px`;
             handle.style.top = `${metrics.rect.top - hostRect.top + (viewportRow + 1) * metrics.cellHeight}px`;
             handle.style.display = "block";
+            const boundaryX = metrics.rect.left + pos.x * metrics.cellWidth;
+            const viewport = window.visualViewport;
+            const left = Math.max(hostRect.left, viewport?.offsetLeft || 0);
+            const right = Math.min(hostRect.right, (viewport?.offsetLeft || 0) + (viewport?.width || window.innerWidth));
+            handle.dataset.inward = String(handle === selectionHandles.start
+              ? boundaryX - handle.offsetWidth < left
+              : boundaryX + handle.offsetWidth > right);
           };
 
           place(selectionHandles.start, selection.start);

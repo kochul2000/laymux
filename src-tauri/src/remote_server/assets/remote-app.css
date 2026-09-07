@@ -2170,6 +2170,14 @@
         border-radius: 50% 0 50% 50%;
         transform: translateX(-100%);
       }
+      .touch-selection-handle[data-handle="start"][data-inward="true"] {
+        border-radius: 0 50% 50% 50%;
+        transform: none;
+      }
+      .touch-selection-handle[data-handle="end"][data-inward="true"] {
+        border-radius: 50% 0 50% 50%;
+        transform: translateX(-100%);
+      }
       .touch-selection-magnifier {
         position: fixed;
         z-index: 1000;

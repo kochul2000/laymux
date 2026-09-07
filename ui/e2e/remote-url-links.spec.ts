@@ -180,6 +180,7 @@ type RemoteTerminalWindow = typeof window & {
     cols: number;
     rows: number;
     getSelection: () => string;
+    select: (column: number, row: number, length: number) => void;
     textarea?: HTMLTextAreaElement;
   };
   __copiedSelections?: string[];
@@ -908,6 +909,37 @@ function registerTouchUrlTests(platform: string) {
         .toContain("Words: alpha bravo omega");
     });
   }
+
+  test("edge handles turn inward while keeping their selection boundary", async ({
+    context,
+    page,
+  }) => {
+    await connectRemoteWithWords(context, page, "composer");
+    await page.evaluate(() => {
+      const term = (window as RemoteTerminalWindow).__remoteTerm!;
+      document.documentElement.style.setProperty("--touch-selection-handle-size", "32px");
+      term.select(0, 7, term.cols);
+    });
+    const screen = (await page.locator(".xterm-screen").boundingBox())!;
+    for (const role of ["start", "end"]) {
+      const handle = page.locator(`[data-handle="${role}"]`);
+      await expect(handle).toBeVisible();
+      await expect(handle).toHaveAttribute("data-inward", "true");
+      const box = (await handle.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(390);
+      if (role === "start") expect(box.x).toBeCloseTo(screen.x, 1);
+      else expect(box.x + box.width).toBeCloseTo(screen.x + screen.width, 1);
+      expect(
+        await handle.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          return (
+            document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2) === element
+          );
+        }),
+      ).toBe(true);
+    }
+  });
 
   for (const role of ["start", "end"]) {
     test(`${role} handle magnifies its boundary above the finger without moving focus`, async ({
