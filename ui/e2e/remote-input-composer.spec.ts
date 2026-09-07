@@ -2095,10 +2095,32 @@ test("starred autocomplete can send on pick and long-press opens the editor", as
   await editor.fill("gs");
   await expect(autocomplete).toBeVisible();
   await expect(autocomplete.locator('[role="option"]')).toContainText(["gs"]);
-  await autocomplete.locator('[role="option"]').first().click();
+  const starredPick = autocomplete.locator('[role="option"]').first();
+  expect(
+    await autocomplete.locator("button").evaluateAll((buttons) =>
+      buttons.every((button, index) => {
+        const pointerId = index + 7;
+        const down = new PointerEvent("pointerdown", {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          isPrimary: true,
+          pointerId,
+          pointerType: "touch",
+        });
+        button.dispatchEvent(down);
+        button.dispatchEvent(
+          new PointerEvent("pointercancel", { bubbles: true, pointerId, pointerType: "touch" }),
+        );
+        return down.defaultPrevented;
+      }),
+    ),
+  ).toBe(true);
+  await starredPick.click();
   await expect.poll(() => remote.inputs.length).toBe(1);
   expect(remote.inputs[0].body.text).toBe("git status");
   expect(remote.inputs[0].body.submit).toBe(true);
+  await expect(editor).toBeFocused();
 
   await editor.fill("gs");
   await expect(autocomplete).toBeVisible();
