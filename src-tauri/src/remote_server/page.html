@@ -147,6 +147,7 @@
                    short screen shows one subject at a time. -->
               <div id="settingsTabs" class="settings-tabs" role="tablist" aria-label="Settings sections">
                 <button id="settingsTabInputBar" class="settings-tab" type="button" role="tab" data-settings-panel="inputBar" aria-controls="settingsPanelInputBar" aria-selected="true">Input bar</button>
+                <button id="settingsTabFloating" class="settings-tab" type="button" role="tab" data-settings-panel="floating" aria-controls="settingsPanelFloating" aria-selected="false" tabindex="-1">Floating</button>
                 <button id="settingsTabComposer" class="settings-tab" type="button" role="tab" data-settings-panel="composer" aria-controls="settingsPanelComposer" aria-selected="false" tabindex="-1">Composer</button>
                 <button id="settingsTabDisplay" class="settings-tab" type="button" role="tab" data-settings-panel="display" aria-controls="settingsPanelDisplay" aria-selected="false" tabindex="-1">Display</button>
                 <button id="settingsTabApp" class="settings-tab" type="button" role="tab" data-settings-panel="app" aria-controls="settingsPanelApp" aria-selected="false" tabindex="-1">App</button>
@@ -176,6 +177,13 @@
               <div id="inputLayoutEditor" class="input-layout-editor"></div>
               </section>
               </div><!-- /settingsPanelInputBar -->
+              <div id="settingsPanelFloating" class="settings-panel" role="tabpanel" data-settings-panel="floating" aria-labelledby="settingsTabFloating" hidden>
+                <section class="nav-section" aria-label="Floating controls">
+                  <h2 class="nav-section-title">Floating controls</h2>
+                  <div class="nav-settings-status">Drag buttons directly. Use the handle above a pad to move it; flick the pad to navigate. Positions stay on this device.</div>
+                  <div id="floatingSettingsEditor" class="input-layout-editor"></div>
+                </section>
+              </div>
               <div id="settingsPanelComposer" class="settings-panel" role="tabpanel" data-settings-panel="composer" aria-labelledby="settingsTabComposer" hidden>
               <section id="composerSection" class="nav-section" aria-label="Composer">
               <h2 class="nav-section-title">Composer</h2>
