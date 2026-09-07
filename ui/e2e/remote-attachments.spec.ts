@@ -207,19 +207,21 @@ test.describe("remote terminal attachments", () => {
   test("preserves a chip-adjacent Hangul selection during composition", async ({ page }) => {
     await openRemote(page, "composer");
     const editor = page.locator("#composerInput");
-    await chooseAttachmentFiles(page, {
-      name: "notes.txt",
-      mimeType: "text/plain",
-      buffer: Buffer.from("notes"),
-    });
+    await chooseAttachmentFiles(page, [
+      { name: "first.png", mimeType: "image/png", buffer: Buffer.from("first") },
+      { name: "second.png", mimeType: "image/png", buffer: Buffer.from("second") },
+    ]);
     await editor.focus();
-    await editor.locator(".composer-attachment").evaluate((chip) => {
-      const range = document.createRange();
-      range.setStartAfter(chip);
-      range.collapse(true);
-      window.getSelection()!.removeAllRanges();
-      window.getSelection()!.addRange(range);
-    });
+    await editor
+      .locator(".composer-attachment")
+      .last()
+      .evaluate((chip) => {
+        const range = document.createRange();
+        range.setStartAfter(chip);
+        range.collapse(true);
+        window.getSelection()!.removeAllRanges();
+        window.getSelection()!.addRange(range);
+      });
     await page.keyboard.insertText(" 한글");
     await editor.evaluate((element) => {
       const text = [...element.childNodes].find((node) => node.textContent?.includes("한글"))!;
@@ -235,10 +237,21 @@ test.describe("remote terminal attachments", () => {
       );
     });
 
-    await expect(editor.locator(".composer-attachment")).toHaveText("notes.txt");
-    await expect(editor).toHaveText("notes.txt 한글");
+    await expect(editor.locator(".composer-attachment")).toHaveText(["Image 1", "Image 2"]);
+    await expect(editor).toHaveText("Image 1 Image 2 한글");
     expect(await editor.evaluate(() => window.getSelection()?.toString())).toBe("한글");
     await editor.dispatchEvent("compositionend", { data: "한글" });
+    await editor
+      .locator(".composer-attachment")
+      .first()
+      .evaluate((chip) => {
+        const range = document.createRange();
+        range.selectNode(chip);
+        window.getSelection()!.removeAllRanges();
+        window.getSelection()!.addRange(range);
+      });
+    await editor.press("Backspace");
+    await expect(editor.locator(".composer-attachment")).toHaveText(["Image"]);
   });
 
   test("replaces a selected attachment and copies its original path", async ({ page }) => {

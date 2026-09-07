@@ -102,6 +102,16 @@ export function createComposerEditor(element) {
     element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
   }
 
+  function refreshImageLabels() {
+    const images = [...element.querySelectorAll(".composer-attachment")].filter(
+      (chip) => chips.get(chip)?.image,
+    );
+    for (const [index, chip] of images.entries()) {
+      const label = `Image${images.length > 1 ? ` ${index + 1}` : ""}`;
+      if (chip.textContent !== label) chip.textContent = label;
+    }
+  }
+
   function setDraft(draft) {
     const current = read();
     const attachments = draft?.attachments ?? [];
@@ -113,8 +123,6 @@ export function createComposerEditor(element) {
       return;
     const nodes = [];
     let offset = 0;
-    let imageIndex = 0;
-    const imageCount = attachments.filter((item) => item.image).length;
     for (const attachment of attachments) {
       nodes.push(document.createTextNode(text.slice(offset, attachment.start)));
       const chip = document.createElement("span");
@@ -122,9 +130,7 @@ export function createComposerEditor(element) {
       chip.contentEditable = "false";
       chip.title = `${attachment.name}\n${attachment.path}`;
       chip.setAttribute("aria-label", attachment.name);
-      if (attachment.image) {
-        chip.textContent = `Image${imageCount > 1 ? ` ${++imageIndex}` : ""}`;
-      } else {
+      if (!attachment.image) {
         const dot = attachment.name.lastIndexOf(".");
         const name = document.createElement("span");
         name.className = "composer-attachment-name";
@@ -141,8 +147,10 @@ export function createComposerEditor(element) {
     end.setAttribute("data-composer-end", "");
     nodes.push(end);
     element.replaceChildren(...nodes);
+    refreshImageLabels();
   }
 
+  element.addEventListener("input", refreshImageLabels);
   element.addEventListener("beforeinput", (event) => {
     if (event.isComposing || editor.disabled) return;
     if (event.inputType === "insertParagraph" || event.inputType === "insertLineBreak") {
