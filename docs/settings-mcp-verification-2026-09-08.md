@@ -74,8 +74,8 @@ node scripts/check-settings-mcp-agents.mjs
 기준 main은 `3fa04b34`, PR은 #1038이다. 다른 세션의 미커밋 변경은 포함하지 않고 별도 워크트리에서 통합했다. 최신 main의 버튼 배율 2종·선택 핸들 크기와 사용자 키 `submit`을 반영했다. 표시 기본값 전수 대조, 배율 enum 거부, 기존 사용자 키 heartbeat 수신·변경 테스트를 추가했다.
 
 - 최신 Remote 설정·플로팅·Android lifecycle·lease 전환/복구 E2E: 41개 통과.
-- 관련 UI·실제 production bundle 검사: 177개 통과. 추가 배율 거부 테스트 2개 포함 스키마 테스트도 통과.
-- Rust settings 통합: 62개 통과. Remote relay·MCP 테스트, TypeScript, 변경 파일 ESLint, 전체 clippy와 UI 빌드 통과.
+- 관련 UI·실제 production bundle 검사: 최종 main `6f461d23` 통합 후 179개 통과(배율 거부 테스트 2개 포함). Remote 번들 재생성 후 해시 검사 9개 통과.
+- Rust settings 통합: 62개 통과. Remote relay 5개·MCP 144개 테스트, TypeScript, 변경 파일 ESLint, 전체 clippy와 UI 빌드 통과.
 - 전체 UI 최초 실행: 4891개 통과, 3개 실패. 번들 해시는 최종 stamp 재생성 후 통과했고 production bundle의 동시 빌드 5초 타임아웃은 단독 재실행에서 통과했다. 남은 updater-release-contract는 main의 Windows 전용 workflow에 이미 없는 `max-parallel: 1`과 Linux target을 요구하는 기존 검사다.
 - 전체 Rust 최초 실행: 2056개 통과, 9개 실패. identity 1개는 테스트 컴파일 중 commit으로 HEAD가 바뀐 영향이며 고정 HEAD 재실행 3개 통과로 확인했다. 나머지 page.rs 8개는 main에도 없는 예전 아이콘·함수 서명·path-link 소스 문자열을 요구한다. `git show origin/main`의 page.html/remote-app.js에서 해당 문자열이 모두 없는 것을 대조했다. 이번 변경의 필수 관련 검증과 분리해 기록하며 전체 스위트 통과로 표현하지 않는다.
 
