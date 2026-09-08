@@ -1,6 +1,10 @@
 {
   "common": {
     "spreadsheet": {
+      "nothingToCopy": "No rows to copy.",
+      "selectCell": "Select a cell first.",
+      "firstPage": "This is the first page.",
+      "lastPage": "This is the last page.",
       "sheet": "Sheet",
       "readOnly": "Read only · Saved formula results",
       "loading": "Loading spreadsheet…",

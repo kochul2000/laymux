@@ -6,6 +6,7 @@ import {
   type SpreadsheetContent,
 } from "@/lib/tauri-api";
 import { PreviewNotice } from "./PreviewNotice";
+import { Button } from "../Button";
 
 const PAGE_ROWS = 50;
 const MAX_ROWS = 10_000;
@@ -147,12 +148,10 @@ function SheetTable({
             setCopyStatus(undefined);
           }}
         />
-        <button
-          type="button"
-          className="hover-bg-strong px-2 py-1"
-          style={buttonStyle}
+        <Button
           data-testid="spreadsheet-copy"
           disabled={!filtered.length || !columnCount}
+          title={!filtered.length || !columnCount ? t("spreadsheet.nothingToCopy") : undefined}
           onClick={() =>
             void copy(
               filtered
@@ -162,19 +161,17 @@ function SheetTable({
           }
         >
           {t("spreadsheet.copyRows")}
-        </button>
-        <button
-          type="button"
-          className="hover-bg-strong px-2 py-1"
-          style={buttonStyle}
+        </Button>
+        <Button
           data-testid="spreadsheet-copy-cell"
           disabled={!selected}
+          title={!selected ? t("spreadsheet.selectCell") : undefined}
           onClick={() => {
             if (selected) void copy(selected.value);
           }}
         >
           {t("spreadsheet.copyCell")}
-        </button>
+        </Button>
         <span
           role="status"
           style={{ color: copyStatus === "error" ? "var(--red)" : "var(--text-muted)" }}
@@ -271,27 +268,23 @@ function SheetTable({
         )}
       </div>
       <div className="flex flex-wrap items-center justify-end gap-2 px-3 py-2" style={toolbarStyle}>
-        <button
-          type="button"
-          className="hover-bg-strong px-2 py-1"
-          style={buttonStyle}
+        <Button
           disabled={page === 0}
+          title={page === 0 ? t("spreadsheet.firstPage") : undefined}
           onClick={() => setPage(page - 1)}
         >
           {t("spreadsheet.previous")}
-        </button>
+        </Button>
         <span>
           {page + 1} / {pageCount}
         </span>
-        <button
-          type="button"
-          className="hover-bg-strong px-2 py-1"
-          style={buttonStyle}
+        <Button
           disabled={page + 1 >= pageCount}
+          title={page + 1 >= pageCount ? t("spreadsheet.lastPage") : undefined}
           onClick={() => setPage(page + 1)}
         >
           {t("spreadsheet.next")}
-        </button>
+        </Button>
       </div>
     </>
   );
@@ -320,7 +313,6 @@ const inputStyle: React.CSSProperties = {
   border: "1px solid var(--border)",
   padding: "4px 8px",
 };
-const buttonStyle: React.CSSProperties = { border: "1px solid var(--border)" };
 const cellStyle: React.CSSProperties = {
   borderRight: "1px solid var(--border)",
   borderBottom: "1px solid var(--border)",
