@@ -218,6 +218,12 @@ import {
         const REMOTE_SELECTION_HANDLE_SIZE_MAX = 32;
         const SCROLL_SENSITIVITY_MIN = 0.1;
         const SCROLL_SENSITIVITY_MAX = 20;
+        const COMMAND_STATUS_LABELS = Object.freeze({
+          Hourglass: "Command running",
+          Check: "Command succeeded",
+          X: "Command failed",
+          Minus: "No command result",
+        });
         const DEFAULT_REMOTE_DISPLAY_SETTINGS = Object.freeze({
           terminalFontSize: 14,
           composerFontSize: 16,
@@ -7772,10 +7778,8 @@ import {
               status.className = `pane-command-status${(pane.unreadCount || 0) > 0 ? " unread" : ""}`;
               setRemoteIcon(status, statusIconName, { size: 12 });
               if (pane.selectorStatus.color) status.style.color = pane.selectorStatus.color;
-              const statusLabel = pane.selectorStatus.text || pane.lastCommand || "Command status";
               status.setAttribute("role", "img");
-              status.setAttribute("aria-label", statusLabel);
-              status.title = statusLabel;
+              status.setAttribute("aria-label", COMMAND_STATUS_LABELS[statusIconName]);
               primary.append(status);
             } else if (display.result && (pane.unreadCount || 0) > 0) {
               const unread = document.createElement("span");
