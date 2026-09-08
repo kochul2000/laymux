@@ -167,6 +167,7 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
     const appearance = screen.getByTestId("settings-group-groupAppearance");
+    expect(within(appearance).getByRole("heading", { name: "Appearance" })).toBeInTheDocument();
     expect(within(appearance).getByTestId("nav-font")).toBeInTheDocument();
     expect(within(appearance).getByTestId("nav-interface")).toBeInTheDocument();
     const input = screen.getByTestId("settings-group-groupInput");

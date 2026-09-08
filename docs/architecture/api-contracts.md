@@ -34,6 +34,7 @@ UI 다국어는 **react-i18next** 로 구현한다(이슈 #350).
 - UI 기본 폰트는 앱에 동봉한 Pretendard Variable v1.3.9다([ADR-0241](../adr/0241-bundled-pretendard-default-ui-font.md)). `ui/public/fonts/pretendard/`의 WOFF2(2,057,688바이트)와 라이선스를 함께 배포하고 `index.css`의 `@font-face`가 로컬에서 로딩한다. `--ui-font-default`는 `"Pretendard Variable", sans-serif`이며 `appearance.uiFontFamily = ""`는 이 기본값을 뜻한다. 명시한 UI 폰트는 `useAppTheme`가 앞에 붙인다. 터미널·콘텐츠 폰트와 Remote 폰트 정책은 바뀌지 않는다.
 
 - 내비게이션은 일반(시작·업데이트), 모양(폰트·인터페이스·워크스페이스·위젯), 터미널(동작·색상), 입력(붙여넣기·키 바인딩), 뷰, 에이전트, 원격, 프로필로 묶는다. 기존 Automation 섹션 ID는 유지한다.
+- 사이드바 그룹 제목은 11px 굵은 보조 텍스트와 가로 구분선으로 표시하고, 실제 메뉴는 13px 기본 텍스트와 추가 들여쓰기로 구분한다. 프로필 제목도 같은 헤더를 사용한다.
 - 설정 행은 라벨·설명과 입력을 두 열로 정렬하고, 콘텐츠 폭 460px 이하에서는 한 열로 쌓는다. 설명은 13px와 테마의 보조 텍스트 색상을 사용하며 별도 투명도로 흐리게 하지 않는다. 설정 내부 텍스트 입력·선택 상자는 최소 높이 34px와 각진 모서리를 공유한다.
 - 메뉴와 본문은 독립 스크롤 영역이며 저장·변경 취소와 변경 상태는 본문 아래에 항상 남는다. 기존 draft 저장 방식과 즉시 적용 항목은 유지한다. 액션 버튼은 [ADR-0192](../adr/0192-standard-action-button-and-disabled-affordance.md)의 공통 Button을 사용한다.
 
