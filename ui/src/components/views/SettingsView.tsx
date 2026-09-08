@@ -161,12 +161,12 @@ function SettingRow({
 }
 
 /** Sidebar group header (e.g. "Appearance", "Terminal"). */
-function NavGroupHeader({ label }: { label: string }) {
+function NavGroupHeader({ label, children }: { label: string; children?: React.ReactNode }) {
   return (
-    <div className="mt-5 px-3 pb-2">
-      <span className="text-[13px] font-semibold" style={{ color: "var(--text-secondary)" }}>
-        {label}
-      </span>
+    <div className="settings-nav-heading">
+      <h3>{label}</h3>
+      <span className="settings-nav-divider" aria-hidden="true" />
+      {children}
     </div>
   );
 }
@@ -6122,10 +6122,7 @@ export function SettingsView() {
           ))}
 
           {/* Profiles group */}
-          <div className="mt-3 flex items-center justify-between px-3 pb-1">
-            <span className="text-[13px] font-semibold" style={{ color: "var(--text-secondary)" }}>
-              {t("nav.groupProfiles")}
-            </span>
+          <NavGroupHeader label={t("nav.groupProfiles")}>
             <button
               data-testid="add-profile-btn"
               onClick={handleAddProfile}
@@ -6141,7 +6138,7 @@ export function SettingsView() {
             >
               <PlusIcon />
             </button>
-          </div>
+          </NavGroupHeader>
 
           <button
             data-testid="nav-profile-defaults"

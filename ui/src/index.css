@@ -128,13 +128,30 @@
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
+.settings-nav-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 20px 12px 6px;
+  color: var(--text-secondary);
+}
+.settings-nav-heading h3 {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.settings-nav-divider {
+  flex: 1;
+  border-top: 1px solid var(--border);
+}
 .settings-nav-button {
   display: block;
   width: 100%;
-  padding: 8px 12px;
+  padding: 8px 12px 8px 24px;
   border-left: 3px solid transparent;
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   text-align: left;
   font-size: var(--fs-md);
   cursor: pointer;
