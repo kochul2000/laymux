@@ -337,6 +337,43 @@ describe("FileViewer", () => {
     expect(screen.getByTestId("file-viewer-binary")).toHaveTextContent("2.0 KB");
   });
 
+  it("빈 SPA 본문에 PC 열기 버튼을 표시하고 원본 경로를 넘긴다", async () => {
+    const path = "/tmp/dd-presentation-r15/dd.preview.html";
+    useSettingsStore.setState({
+      terminal: { ...useSettingsStore.getState().terminal, pathLinkOsOpenConfirm: false },
+    });
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "text",
+      content: '<div id="printer-container"></div><script>mountPrinter()</script>',
+      truncated: false,
+    });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path={path} />);
+    });
+    expect(screen.getByTestId("file-viewer-html-empty")).toHaveTextContent("PC의 브라우저");
+    expect(openInOs).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("file-viewer-html-os-open"));
+    expect(openInOs).toHaveBeenCalledWith(path, "open");
+    fireEvent.click(screen.getByTestId("file-viewer-source-mode"));
+    expect(screen.getByTestId("file-viewer-text")).toHaveTextContent("mountPrinter()");
+    expect(screen.queryByTestId("file-viewer-html-os-open")).not.toBeInTheDocument();
+  });
+
+  it("빈 SPA의 PC 열기도 확인 취소 시 실행하지 않는다", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    useSettingsStore.setState({
+      terminal: { ...useSettingsStore.getState().terminal, pathLinkOsOpenConfirm: true },
+    });
+    vi.mocked(readFileForViewer).mockResolvedValue({ kind: "text", content: "", truncated: false });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/tmp/app.html" />);
+    });
+    fireEvent.click(screen.getByTestId("file-viewer-html-os-open"));
+    expect(confirmSpy).toHaveBeenCalledOnce();
+    expect(openInOs).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
   it("offers to open a binary file on this PC right where the preview would be", async () => {
     // The binary fallback is the one content kind with nothing to look at, so the
     // OS handoff is offered in the content area too, not only in the host header

@@ -36,7 +36,7 @@ describe("Remote FileViewer serialized response budget (ADR-0208)", () => {
   });
 
   it.each([
-    { nested: [null, true, false, 12.5, "quote\"slash\\line\n", "\ud800"] },
+    { nested: [null, true, false, 12.5, 'quote"slash\\line\n', "\ud800"] },
     { 한글키: "값😀", controls: "\b\t\f\r" },
     ["plain", undefined, Number.NaN, Number.POSITIVE_INFINITY],
   ])("matches JSON.stringify's exact UTF-8 byte count", (value) => {
@@ -513,6 +513,25 @@ describe("Remote FileViewer path-link bridge", () => {
 describe("Remote FileViewer render payload", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("빈 SPA도 기존 previewDocument 안에서 PC 프로그램 안내를 전달한다", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "text",
+      content: '<div id="root"></div><script>mountApp()</script>',
+      truncated: false,
+    });
+    const result = await handleRemoteFileViewerRequest("render", {
+      source: "path",
+      path: "/tmp/app.html",
+      maxBytes: 1024,
+    });
+    expect(result.data).toMatchObject({
+      kind: "text",
+      previewKind: "html",
+      previewDocument: expect.stringContaining("PC의 브라우저 등 외부 프로그램으로 열어 주세요."),
+    });
+    expect(result.data).not.toHaveProperty("content");
   });
 
   it("structured preview 종류는 previewDocument 없이 원문 텍스트로 내려간다", async () => {

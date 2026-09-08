@@ -147,8 +147,68 @@ export interface PreviewFont {
   size: number;
 }
 
+export const EMPTY_HTML_PREVIEW_MESSAGE =
+  "이 HTML은 내장 미리보기에서 표시할 내용이 없습니다. " +
+  "JavaScript 실행이 필요한 문서일 수 있습니다. PC의 브라우저 등 외부 프로그램으로 열어 주세요.";
+
 export function htmlToSafePreviewDocument(html: string, font?: PreviewFont): string {
-  return buildPreviewDocument(sanitizePreviewHtml(html), "html", font);
+  return buildHtmlPreview(html, font).documentHtml;
+}
+
+export function buildHtmlPreview(html: string, font?: PreviewFont) {
+  const safeHtml = sanitizePreviewHtml(html);
+  const { body } = new DOMParser().parseFromString(safeHtml, "text/html");
+  const empty = !hasPreviewContent(body);
+  return {
+    empty,
+    documentHtml: buildPreviewDocument(
+      empty ? `<p>${EMPTY_HTML_PREVIEW_MESSAGE}</p>` : safeHtml,
+      "html",
+      font,
+    ),
+  };
+}
+
+// ponytail: DOM + inline CSS heuristic, not pixel analysis. Loading text and
+// possible CSS drawings are content; clipping/occlusion need a rendered probe.
+function hasPreviewContent(element: HTMLElement, visible = true, zeroFont = false): boolean {
+  const style = element.style;
+  if (style.display === "none" || style.opacity === "0") {
+    return false;
+  }
+  if (style.visibility === "visible") visible = true;
+  else if (style.visibility === "hidden" || style.visibility === "collapse") visible = false;
+  if (style.fontSize && style.fontSize !== "inherit") zeroFont = parseFloat(style.fontSize) === 0;
+
+  if (visible) {
+    // These tags draw controls, markers or decorations in HTML_PREVIEW_CSS / UA CSS.
+    if (element.matches("img,input,hr,pre,code,blockquote,td,th,li,details,summary")) return true;
+    if (
+      (style.backgroundColor &&
+        style.backgroundColor !== "transparent" &&
+        !/^rgba\([^)]*,\s*0\)$/.test(style.backgroundColor)) ||
+      (style.backgroundImage && style.backgroundImage !== "none") ||
+      (style.boxShadow && style.boxShadow !== "none") ||
+      (style.outlineStyle && !["none", "hidden"].includes(style.outlineStyle)) ||
+      ["top", "right", "bottom", "left"].some((side) => {
+        const borderStyle = style.getPropertyValue(`border-${side}-style`);
+        return (
+          borderStyle &&
+          !["none", "hidden"].includes(borderStyle) &&
+          style.getPropertyValue(`border-${side}-width`) !== "0px"
+        );
+      })
+    ) {
+      return true;
+    }
+  }
+
+  // content-visibility skips descendants, but still paints this element's box.
+  if (style.contentVisibility === "hidden") return false;
+  return Array.from(element.childNodes).some((node) => {
+    if (node instanceof HTMLElement) return hasPreviewContent(node, visible, zeroFont);
+    return node.nodeType === Node.TEXT_NODE && visible && !zeroFont && !!node.textContent?.trim();
+  });
 }
 
 export function markdownToSafePreviewDocument(markdown: string, font?: PreviewFont): string {
