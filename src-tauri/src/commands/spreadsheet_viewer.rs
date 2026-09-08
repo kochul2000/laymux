@@ -200,6 +200,8 @@ fn validate_container(bytes: &[u8], ods: bool) -> Result<(), AppError> {
 fn validate_ods_repeats(bytes: &[u8]) -> Result<(), AppError> {
     use quick_xml::events::Event;
     let mut xml = quick_xml::Reader::from_reader(bytes);
+    xml.config_mut().expand_empty_elements = true;
+    let (mut depth, mut in_table, mut in_row) = (0_usize, false, false);
     let (mut rows, mut columns, mut widest) = (0_u64, 0_u64, 0_u64);
     let (mut in_cell, mut has_value) = (false, false);
     let (mut completed_cells, mut sheet_cells) = (0_u64, 0_u64);
@@ -207,10 +209,28 @@ fn validate_ods_repeats(bytes: &[u8]) -> Result<(), AppError> {
     loop {
         let mut added_text = 0_u64;
         let event = xml.read_event().map_err(parse_error)?;
-        let empty_cell = matches!(&event, Event::Empty(tag) if matches!(tag.local_name().as_ref(), b"table-cell" | b"covered-table-cell"));
+        match &event {
+            Event::Start(_) => {
+                depth += 1;
+                if depth > 256 {
+                    return Err(parse_error("ODS XML nesting exceeds the viewer limit"));
+                }
+            }
+            Event::End(_) => {
+                depth = depth
+                    .checked_sub(1)
+                    .ok_or_else(|| parse_error("invalid ODS XML"))?
+            }
+            Event::Eof if depth != 0 => return Err(parse_error("incomplete ODS XML")),
+            _ => {}
+        }
         match event {
-            Event::Start(ref tag) | Event::Empty(ref tag) => match tag.local_name().as_ref() {
-                b"table" => {
+            Event::Start(ref tag) | Event::Empty(ref tag) => match tag.name().as_ref() {
+                b"table:table" => {
+                    if in_table {
+                        return Err(parse_error("nested ODS table"));
+                    }
+                    in_table = true;
                     completed_cells = completed_cells.saturating_add(sheet_cells);
                     sheet_cells = 0;
                     rows = 0;
@@ -218,31 +238,38 @@ fn validate_ods_repeats(bytes: &[u8]) -> Result<(), AppError> {
                     has_value = false;
                     in_cell = false;
                 }
-                b"table-row" => {
-                    row_repeat = repeat_count(tag, b"number-rows-repeated")?.max(1);
+                b"table:table-row" => {
+                    if !in_table || in_row {
+                        return Err(parse_error("invalid ODS row nesting"));
+                    }
+                    in_row = true;
+                    row_repeat = repeat_count(tag, b"table:number-rows-repeated")?.max(1);
                     rows = rows.saturating_add(row_repeat);
                     columns = 0;
                     in_cell = false;
                     has_value = false;
                 }
-                b"table-cell" | b"covered-table-cell" => {
-                    column_repeat = repeat_count(tag, b"number-columns-repeated")?.max(1);
+                b"table:table-cell" | b"table:covered-table-cell" => {
+                    if !in_row || in_cell {
+                        return Err(parse_error("invalid ODS cell nesting"));
+                    }
+                    column_repeat = repeat_count(tag, b"table:number-columns-repeated")?.max(1);
                     columns = columns.saturating_add(column_repeat);
                     in_cell = true;
                     has_value = false;
                     for attr in tag.attributes() {
                         let attr = attr.map_err(parse_error)?;
                         let value_attribute = matches!(
-                            attr.key.local_name().as_ref(),
-                            b"value"
-                                | b"string-value"
-                                | b"boolean-value"
-                                | b"date-value"
-                                | b"time-value"
-                                | b"formula"
+                            attr.key.as_ref(),
+                            b"office:value"
+                                | b"office:string-value"
+                                | b"office:boolean-value"
+                                | b"office:date-value"
+                                | b"office:time-value"
+                                | b"table:formula"
                         );
                         has_value |= value_attribute;
-                        has_value |= attr.key.local_name().as_ref() == b"value-type"
+                        has_value |= attr.key.as_ref() == b"office:value-type"
                             && attr.value.as_ref() == b"string";
                         if value_attribute {
                             added_text = added_text
@@ -250,11 +277,11 @@ fn validate_ods_repeats(bytes: &[u8]) -> Result<(), AppError> {
                         }
                     }
                 }
-                b"s" if in_cell => {
-                    added_text = repeat_count(tag, b"c")?;
+                b"text:s" if in_cell => {
+                    added_text = repeat_count(tag, b"text:c")?;
                     has_value |= added_text > 0;
                 }
-                b"p" | b"tab" | b"line-break" if in_cell => {
+                b"text:p" | b"text:tab" | b"text:line-break" if in_cell => {
                     added_text = 1;
                     has_value = true;
                 }
@@ -275,11 +302,20 @@ fn validate_ods_repeats(bytes: &[u8]) -> Result<(), AppError> {
             }
             Event::End(ref tag)
                 if matches!(
-                    tag.local_name().as_ref(),
-                    b"table-cell" | b"covered-table-cell"
+                    tag.name().as_ref(),
+                    b"table:table-cell" | b"table:covered-table-cell"
                 ) =>
             {
-                in_cell = false
+                in_cell = false;
+                has_value = false;
+            }
+            Event::End(ref tag) if tag.name().as_ref() == b"table:table-row" => {
+                in_row = false;
+                has_value = false;
+            }
+            Event::End(ref tag) if tag.name().as_ref() == b"table:table" => {
+                in_table = false;
+                has_value = false;
             }
             Event::Eof => break,
             _ => {}
@@ -305,10 +341,6 @@ fn validate_ods_repeats(bytes: &[u8]) -> Result<(), AppError> {
                 return Err(parse_error("ODS repeated cells exceed the viewer limit"));
             }
         }
-        if empty_cell {
-            in_cell = false;
-            has_value = false;
-        }
     }
     Ok(())
 }
@@ -316,7 +348,7 @@ fn validate_ods_repeats(bytes: &[u8]) -> Result<(), AppError> {
 fn repeat_count(tag: &quick_xml::events::BytesStart<'_>, name: &[u8]) -> Result<u64, AppError> {
     for attr in tag.attributes() {
         let attr = attr.map_err(parse_error)?;
-        if attr.key.local_name().as_ref() == name {
+        if attr.key.as_ref() == name {
             return std::str::from_utf8(&attr.value)
                 .map_err(parse_error)?
                 .parse::<u64>()
@@ -352,25 +384,25 @@ mod tests {
 
     #[test]
     fn ods_repeated_cell_bomb_is_rejected_before_parsing() {
-        assert!(validate_ods_repeats(br#"<table><table-row number-rows-repeated="1000000"><table-cell number-columns-repeated="1000000" value="1"/></table-row></table>"#).is_err());
+        assert!(validate_ods_repeats(br#"<table:table><table:table-row table:number-rows-repeated="1000000"><table:table-cell table:number-columns-repeated="1000000" office:value="1"/></table:table-row></table:table>"#).is_err());
     }
 
     #[test]
     fn trailing_empty_ods_cells_and_whitespace_do_not_count_as_values() {
-        assert!(validate_ods_repeats(br#"<table><table-row><table-cell value="1"/><table-cell number-columns-repeated="16383"/>
-        </table-row><table-row number-rows-repeated="1048575"><table-cell number-columns-repeated="16384"/>
-        </table-row></table>"#).is_ok());
+        assert!(validate_ods_repeats(br#"<table:table><table:table-row><table:table-cell office:value="1"/><table:table-cell table:number-columns-repeated="16383"/>
+        </table:table-row><table:table-row table:number-rows-repeated="1048575"><table:table-cell table:number-columns-repeated="16384"/>
+        </table:table-row></table:table>"#).is_ok());
     }
 
     #[test]
     fn ods_space_and_string_repeats_are_bounded_before_calamine_allocates() {
-        let spaces = br#"<table><table-row><table-cell><p><s c="1000000000"/></p></table-cell></table-row></table>"#;
+        let spaces = br#"<table:table><table:table-row><table:table-cell><text:p><text:s text:c="1000000000"/></text:p></table:table-cell></table:table-row></table:table>"#;
         assert!(validate_ods_repeats(spaces)
             .unwrap_err()
             .to_string()
             .contains("text expansion"));
         let repeated = format!(
-            r#"<table><table-row number-rows-repeated="256"><table-cell number-columns-repeated="256"><p>{}</p></table-cell></table-row></table>"#,
+            r#"<table:table><table:table-row table:number-rows-repeated="256"><table:table-cell table:number-columns-repeated="256"><text:p>{}</text:p></table:table-cell></table:table-row></table:table>"#,
             "x".repeat(1025)
         );
         assert!(validate_ods_repeats(repeated.as_bytes())
@@ -381,15 +413,38 @@ mod tests {
 
     #[test]
     fn ods_empty_strings_are_cells_and_paragraph_entity_expansion_is_bounded() {
-        assert!(validate_ods_repeats(br#"<table><table-row number-rows-repeated="1048576"><table-cell number-columns-repeated="16384" value-type="string"/></table-row></table>"#).is_err());
-        for text in ["<p/>".repeat(1025), "&amp;".repeat(1025)] {
+        assert!(validate_ods_repeats(br#"<table:table><table:table-row table:number-rows-repeated="1048576"><table:table-cell table:number-columns-repeated="16384" office:value-type="string"/></table:table-row></table:table>"#).is_err());
+        for text in ["<text:p/>".repeat(1025), "&amp;".repeat(1025)] {
             let xml = format!(
-                r#"<table><table-row number-rows-repeated="256"><table-cell number-columns-repeated="256" value-type="string">{text}</table-cell></table-row></table>"#
+                r#"<table:table><table:table-row table:number-rows-repeated="256"><table:table-cell table:number-columns-repeated="256" office:value-type="string">{text}</table:table-cell></table:table-row></table:table>"#
             );
             assert!(validate_ods_repeats(xml.as_bytes())
                 .unwrap_err()
                 .to_string()
                 .contains("text expansion"));
         }
+    }
+
+    #[test]
+    fn ods_validation_requires_balanced_xml_and_valid_table_nesting() {
+        for xml in [
+            "<table:table>",
+            "<table:table><table:table-row></table:table>",
+            "<table:table><table:table-row><table:table-cell><table:table-row/></table:table-cell></table:table-row></table:table>",
+        ] {
+            assert!(validate_ods_repeats(xml.as_bytes()).is_err());
+        }
+    }
+
+    #[test]
+    fn ods_foreign_namespace_names_do_not_change_the_table_budget() {
+        let xml = format!(
+            r#"<table:table><table:table-row x:number-rows-repeated="1" table:number-rows-repeated="256"><table:table-cell table:number-columns-repeated="256" office:value-type="string"><x:table-row/><x:table-cell/><text:p>{}</text:p></table:table-cell></table:table-row></table:table>"#,
+            "x".repeat(1025)
+        );
+        assert!(validate_ods_repeats(xml.as_bytes())
+            .unwrap_err()
+            .to_string()
+            .contains("text expansion"));
     }
 }
