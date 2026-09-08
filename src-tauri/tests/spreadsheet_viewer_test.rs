@@ -30,24 +30,7 @@ fn reads_real_workbooks_in_all_four_formats_and_switches_sheets() {
 
 #[test]
 fn sparse_xlsx_coordinates_do_not_allocate_a_dense_sheet() {
-    use std::io::{Cursor, Write};
-    let source = include_bytes!("fixtures/spreadsheets/any_sheets.xlsx");
-    let mut original = zip::ZipArchive::new(Cursor::new(source)).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("sparse.XLSX");
-    let mut output = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
-    for index in 0..original.len() {
-        let mut entry = original.by_index(index).unwrap();
-        output
-            .start_file(entry.name(), zip::write::SimpleFileOptions::default())
-            .unwrap();
-        if entry.name() == "xl/worksheets/sheet1.xml" {
-            output.write_all(br#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>123</v></c></row><row r="1048576"><c r="XFD1048576"><v>999</v></c></row></sheetData></worksheet>"#).unwrap();
-        } else {
-            std::io::copy(&mut entry, &mut output).unwrap();
-        }
-    }
-    output.finish().unwrap();
+    let (_dir, path) = xlsx_with_sheet(br#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>123</v></c></row><row r="1048576"><c r="XFD1048576"><v>999</v></c></row></sheetData></worksheet>"#);
     let before = std::fs::read(&path).unwrap();
     let result = read_spreadsheet_for_viewer(path.to_string_lossy().into(), None).unwrap();
     assert_eq!(result.cells.len(), 1);
@@ -70,4 +53,35 @@ fn corrupt_and_oversized_files_are_errors() {
         .unwrap();
     let error = read_spreadsheet_for_viewer(path.to_string_lossy().into(), None).unwrap_err();
     assert!(error.contains("16 MiB"), "{error}");
+}
+
+fn xlsx_with_sheet(xml: &[u8]) -> (tempfile::TempDir, std::path::PathBuf) {
+    use std::io::{Cursor, Write};
+    let source = include_bytes!("fixtures/spreadsheets/any_sheets.xlsx");
+    let mut original = zip::ZipArchive::new(Cursor::new(source)).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("sparse.XLSX");
+    let mut output = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+    for index in 0..original.len() {
+        let mut entry = original.by_index(index).unwrap();
+        output
+            .start_file(entry.name(), zip::write::SimpleFileOptions::default())
+            .unwrap();
+        if entry.name() == "xl/worksheets/sheet1.xml" {
+            output.write_all(xml).unwrap();
+        } else {
+            std::io::copy(&mut entry, &mut output).unwrap();
+        }
+    }
+    output.finish().unwrap();
+    (dir, path)
+}
+
+#[test]
+fn stops_at_the_first_display_limit_instead_of_scanning_the_rest() {
+    let (_dir, path) = xlsx_with_sheet(br#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>123</v></c></row><row r="10001"><c r="A10001"><v>1</v></c></row><row r="10002"><c r="A10002"><v>2</v></c></row></sheetData></worksheet>"#);
+    let result = read_spreadsheet_for_viewer(path.to_string_lossy().into(), None).unwrap();
+    assert!(result.truncated);
+    assert_eq!(result.cells.len(), 1);
+    assert_eq!(result.total_rows, 10001);
 }

@@ -110,6 +110,9 @@ fn read_spreadsheet(path: &str, sheet: Option<&str>) -> Result<SpreadsheetConten
                     &Data::from(cell.get_value().clone()),
                     &mut value_bytes,
                 );
+                if result.truncated {
+                    break;
+                }
             }
         }
         Sheets::Xlsb(book) => {
@@ -122,6 +125,9 @@ fn read_spreadsheet(path: &str, sheet: Option<&str>) -> Result<SpreadsheetConten
                     &Data::from(cell.get_value().clone()),
                     &mut value_bytes,
                 );
+                if result.truncated {
+                    break;
+                }
             }
         }
         _ => {
@@ -133,6 +139,9 @@ fn read_spreadsheet(path: &str, sheet: Option<&str>) -> Result<SpreadsheetConten
                     value,
                     &mut value_bytes,
                 );
+                if result.truncated {
+                    break;
+                }
             }
         }
     }
