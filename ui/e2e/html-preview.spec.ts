@@ -80,6 +80,7 @@ for (const sandbox of ["", "allow-same-origin"]) {
         '<div id="printer-container"></div><script>mountPrinter()</script>',
         '<div id="root" style="width:100%;height:100vh"></div>',
         '<div style="display:none"><p>Report</p></div>',
+        '<div style="content-visibility:hidden"><p>Report</p></div>',
         '<div style="visibility:hidden">Report</div>',
         '<div style="opacity:0">Report</div>',
         '<div style="font-size:0">Report</div>',
@@ -93,12 +94,14 @@ for (const sandbox of ["", "allow-same-origin"]) {
     });
 
     test("로딩 문구와 CSS 도형을 정상 콘텐츠로 보존한다", async ({ page }) => {
+      const loadingFrame = await showPreview(page, "<p>Loading...</p>", sandbox);
+      await expect(loadingFrame.getByText("Loading...")).toBeVisible();
+      await expect(loadingFrame.getByText(/PC의 브라우저/)).toHaveCount(0);
       const frame = await showPreview(
         page,
-        '<p>Loading...</p><div id="drawing" style="width:80px;height:80px;background:#ff0000"></div>',
+        '<div id="drawing" style="content-visibility:hidden;width:80px;height:80px;background:#ff0000"></div>',
         sandbox,
       );
-      await expect(frame.getByText("Loading...")).toBeVisible();
       await expect(frame.locator("#drawing")).toBeVisible();
       await expect(frame.getByText(/PC의 브라우저/)).toHaveCount(0);
     });

@@ -36,7 +36,7 @@ describe("Remote FileViewer serialized response budget (ADR-0208)", () => {
   });
 
   it.each([
-    { nested: [null, true, false, 12.5, "quote\"slash\\line\n", "\ud800"] },
+    { nested: [null, true, false, 12.5, 'quote"slash\\line\n', "\ud800"] },
     { 한글키: "값😀", controls: "\b\t\f\r" },
     ["plain", undefined, Number.NaN, Number.POSITIVE_INFINITY],
   ])("matches JSON.stringify's exact UTF-8 byte count", (value) => {

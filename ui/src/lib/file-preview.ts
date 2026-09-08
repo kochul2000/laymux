@@ -173,7 +173,7 @@ export function buildHtmlPreview(html: string, font?: PreviewFont) {
 // possible CSS drawings are content; clipping/occlusion need a rendered probe.
 function hasPreviewContent(element: HTMLElement, visible = true, zeroFont = false): boolean {
   const style = element.style;
-  if (style.display === "none" || style.contentVisibility === "hidden" || style.opacity === "0") {
+  if (style.display === "none" || style.opacity === "0") {
     return false;
   }
   if (style.visibility === "visible") visible = true;
@@ -203,6 +203,8 @@ function hasPreviewContent(element: HTMLElement, visible = true, zeroFont = fals
     }
   }
 
+  // content-visibility skips descendants, but still paints this element's box.
+  if (style.contentVisibility === "hidden") return false;
   return Array.from(element.childNodes).some((node) => {
     if (node instanceof HTMLElement) return hasPreviewContent(node, visible, zeroFont);
     return node.nodeType === Node.TEXT_NODE && visible && !zeroFont && !!node.textContent?.trim();

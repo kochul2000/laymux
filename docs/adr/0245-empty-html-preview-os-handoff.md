@@ -1,6 +1,6 @@
-# 0244. 빈 HTML 미리보기는 본문에서 PC 연결 프로그램 열기를 안내한다
+# 0245. 빈 HTML 미리보기는 본문에서 PC 연결 프로그램 열기를 안내한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-08
 - Source: 사용자 제공 `dd.preview.html`의 SPA fallback과 브라우저 버튼 요구, PR #1039, [data-flow.md §8](../architecture/data-flow.md), [ADR-0193](0193-viewer-os-handoff-buttons.md)
 - Extends: ADR-0193 Decision 4의 본문 CTA 대상을 바이너리에서 빈 HTML 미리보기까지 확장한다.
