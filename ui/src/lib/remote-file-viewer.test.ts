@@ -238,6 +238,25 @@ describe("Remote FileViewer render payload", () => {
     vi.clearAllMocks();
   });
 
+  it("빈 SPA도 기존 previewDocument 안에서 PC 프로그램 안내를 전달한다", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "text",
+      content: '<div id="root"></div><script>mountApp()</script>',
+      truncated: false,
+    });
+    const result = await handleRemoteFileViewerRequest("render", {
+      source: "path",
+      path: "/tmp/app.html",
+      maxBytes: 1024,
+    });
+    expect(result.data).toMatchObject({
+      kind: "text",
+      previewKind: "html",
+      previewDocument: expect.stringContaining("PC의 브라우저 등 외부 프로그램으로 열어 주세요."),
+    });
+    expect(result.data).not.toHaveProperty("content");
+  });
+
   it("structured preview 종류는 previewDocument 없이 원문 텍스트로 내려간다", async () => {
     // ADR-0109: only the document family may become a sanitized preview
     // document. JSON/CSV/diff/log/source render as React DOM on the desktop and

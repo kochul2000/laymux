@@ -148,7 +148,19 @@ export interface PreviewFont {
 }
 
 export function htmlToSafePreviewDocument(html: string, font?: PreviewFont): string {
-  return buildPreviewDocument(sanitizePreviewHtml(html), "html", font);
+  const safeHtml = sanitizePreviewHtml(html);
+  const { body } = new DOMParser().parseFromString(safeHtml, "text/html");
+  // ponytail: structural emptiness only; preserve possible CSS-only drawings.
+  // Add rendered visibility checks if styled/hidden app shells need detection.
+  const hasContent = body.textContent?.trim() || body.querySelector("img,input,hr,[style]");
+  return buildPreviewDocument(
+    hasContent
+      ? safeHtml
+      : "<p>이 HTML은 내장 미리보기에서 표시할 내용이 없습니다.</p>" +
+          "<p>JavaScript 실행이 필요한 문서일 수 있습니다. PC의 브라우저 등 외부 프로그램으로 열어 주세요.</p>",
+    "html",
+    font,
+  );
 }
 
 export function markdownToSafePreviewDocument(markdown: string, font?: PreviewFont): string {
