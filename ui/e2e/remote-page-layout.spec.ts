@@ -766,8 +766,9 @@ test.describe("remote mobile layout", () => {
     await expect(beta.locator(".pane-env")).toHaveText("PS");
     await expect(beta.locator(".pane-activity")).toHaveText("running");
     await expect(beta.locator(".pane-path")).toHaveText("~/work/beta");
-    const commandStatus = beta.getByRole("img", { name: "Building" });
+    const commandStatus = beta.getByRole("img", { name: "Command running" });
     await expect(commandStatus).toHaveCount(1);
+    await expect(commandStatus).not.toHaveAttribute("title");
     await expect(commandStatus.locator('svg[data-remote-icon-name="Hourglass"]')).toHaveCount(1);
     await expect(beta.locator(".pane-last-input")).toHaveText("npm test");
     await expect(beta.locator(".workspace-status-line")).toHaveCount(0);
@@ -1048,7 +1049,6 @@ test.describe("remote mobile layout", () => {
     await expect(
       beta.locator('.pane-command-status svg[data-remote-icon-name="Hourglass"]'),
     ).toHaveCount(1);
-
     controls.setWorkspaceDisplay({ activity: false, result: false });
     await expect(beta.locator(".pane-activity")).toHaveCount(0, { timeout: 5000 });
     await expect(beta.locator(".pane-command-status")).toHaveCount(0);
