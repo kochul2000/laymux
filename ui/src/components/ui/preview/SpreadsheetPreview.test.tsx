@@ -1,10 +1,9 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SpreadsheetPreview } from "./SpreadsheetPreview";
-import { clipboardWriteText, readSpreadsheetForViewer } from "@/lib/tauri-api";
+import { readSpreadsheetForViewer } from "@/lib/tauri-api";
 
 vi.mock("@/lib/tauri-api", () => ({
-  clipboardWriteText: vi.fn().mockResolvedValue(undefined),
   readSpreadsheetForViewer: vi.fn(),
 }));
 
@@ -25,6 +24,7 @@ const data = {
 describe("SpreadsheetPreview", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    HTMLElement.prototype.scrollTo = vi.fn();
     vi.mocked(readSpreadsheetForViewer).mockResolvedValue(data);
   });
 
@@ -34,11 +34,11 @@ describe("SpreadsheetPreview", () => {
     expect(screen.queryByText("사과 주스")).not.toBeInTheDocument();
     fireEvent.change(screen.getByTestId("spreadsheet-search"), { target: { value: "사과" } });
     expect(screen.getByText("사과 주스")).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("spreadsheet-copy"));
-    await waitFor(() => expect(clipboardWriteText).toHaveBeenCalledWith("사과\t10\n사과 주스\t"));
+    fireEvent.click(screen.getByRole("button", { name: "Select all cells" }));
+    const copied = copySelection();
+    expect(copied).toHaveBeenCalledWith("text/plain", "사과\t10\n사과 주스\t");
     fireEvent.click(screen.getByText("10"));
-    fireEvent.click(screen.getByTestId("spreadsheet-copy-cell"));
-    await waitFor(() => expect(clipboardWriteText).toHaveBeenLastCalledWith("10"));
+    expect(copySelection()).toHaveBeenCalledWith("text/plain", "10");
   });
 
   it("switches sheets and reports empty/truncated sheets", async () => {
@@ -58,7 +58,7 @@ describe("SpreadsheetPreview", () => {
     expect(readSpreadsheetForViewer).toHaveBeenLastCalledWith("/test.ods", "빈 시트");
   });
 
-  it("preserves TSV cell boundaries and reports copy failures", async () => {
+  it("preserves TSV cell boundaries", async () => {
     vi.mocked(readSpreadsheetForViewer).mockResolvedValue({
       ...data,
       totalRows: 1,
@@ -69,13 +69,9 @@ describe("SpreadsheetPreview", () => {
     });
     render(<SpreadsheetPreview path="/test.xlsx" />);
     await screen.findByText("<script>bad</script>");
-    fireEvent.click(screen.getByTestId("spreadsheet-copy"));
-    await waitFor(() =>
-      expect(clipboardWriteText).toHaveBeenCalledWith('"a\tb\n""c"""\t<script>bad</script>'),
-    );
-    vi.mocked(clipboardWriteText).mockRejectedValueOnce(new Error("clipboard unavailable"));
-    fireEvent.click(screen.getByTestId("spreadsheet-copy"));
-    await screen.findByText("Copy failed");
+    fireEvent.click(screen.getByRole("button", { name: "Select all cells" }));
+    const copied = copySelection();
+    expect(copied).toHaveBeenCalledWith("text/plain", '"a\tb\n""c"""\t<script>bad</script>');
   });
 
   it("retains the sheet selector after a failed read so another sheet can be opened", async () => {
@@ -102,4 +98,71 @@ describe("SpreadsheetPreview", () => {
     await act(async () => finish({ ...data, cells: [{ row: 0, column: 0, value: "stale" }] }));
     expect(screen.queryByText("stale")).not.toBeInTheDocument();
   });
+});
+
+function copySelection() {
+  const setData = vi.fn();
+  fireEvent.copy(screen.getByTestId("spreadsheet-grid"), { clipboardData: { setData } });
+  return setData;
+}
+
+it("selects rows, columns and a dragged rectangle", async () => {
+  vi.mocked(readSpreadsheetForViewer).mockResolvedValue({ ...data, totalRows: 3 });
+  render(<SpreadsheetPreview path="/selection.xlsx" />);
+  await screen.findByText("상품");
+  fireEvent.click(screen.getByRole("button", { name: "Select row 2" }));
+  expect(copySelection()).toHaveBeenCalledWith("text/plain", "사과\t10");
+  fireEvent.click(screen.getByRole("button", { name: "Select column B" }));
+  expect(copySelection()).toHaveBeenCalledWith("text/plain", "\n10\n");
+  fireEvent.mouseDown(screen.getByRole("button", { name: "A1: 상품" }), { button: 0, buttons: 1 });
+  fireEvent.mouseEnter(screen.getByRole("button", { name: "B2: 10" }), { buttons: 1 });
+  fireEvent.mouseUp(window);
+  expect(copySelection()).toHaveBeenCalledWith("text/plain", "상품\t\n사과\t10");
+  expect(screen.queryByTestId("spreadsheet-pagination")).not.toBeInTheDocument();
+});
+
+it("windows a long sheet while preserving offscreen selection and resetting search", async () => {
+  HTMLElement.prototype.scrollTo = vi.fn();
+  vi.mocked(readSpreadsheetForViewer).mockResolvedValue({
+    ...data,
+    totalRows: 10000,
+    totalColumns: 1,
+    cells: [
+      { row: 0, column: 0, value: "start" },
+      { row: 9999, column: 0, value: "end" },
+    ],
+  });
+  render(<SpreadsheetPreview path="/long.xlsx" />);
+  await screen.findByText("start");
+  const grid = screen.getByTestId("spreadsheet-grid");
+  expect(grid.querySelectorAll("tbody tr[data-row]").length).toBeLessThan(50);
+  fireEvent.click(screen.getByRole("button", { name: "Select column A" }));
+  expect(copySelection()).toHaveBeenCalledWith("text/plain", "start" + "\n".repeat(9999) + "end");
+  fireEvent.scroll(grid, { target: { scrollTop: 280000 } });
+  expect(screen.getByText("end")).toBeVisible();
+  expect(screen.queryByText("start")).not.toBeInTheDocument();
+  expect(copySelection()).toHaveBeenCalledWith("text/plain", "start" + "\n".repeat(9999) + "end");
+  fireEvent.change(screen.getByTestId("spreadsheet-search"), { target: { value: "start" } });
+  expect(screen.getByText("start")).toBeVisible();
+  expect(copySelection()).not.toHaveBeenCalled();
+});
+
+it("windows wide sheets without stretching small sheets", async () => {
+  vi.mocked(readSpreadsheetForViewer).mockResolvedValue({
+    ...data,
+    totalRows: 10000,
+    totalColumns: 256,
+    cells: [
+      { row: 0, column: 0, value: "left" },
+      { row: 0, column: 255, value: "right" },
+    ],
+  });
+  render(<SpreadsheetPreview path="/wide.xlsx" />);
+  await screen.findByText("left");
+  const grid = screen.getByTestId("spreadsheet-grid");
+  expect(grid.querySelectorAll("td").length).toBeLessThan(500);
+  fireEvent.scroll(grid, { target: { scrollLeft: 36200 } });
+  expect(screen.getByText("right")).toBeVisible();
+  expect(screen.queryByText("left")).not.toBeInTheDocument();
+  expect(grid.querySelectorAll("td").length).toBeLessThan(500);
 });
