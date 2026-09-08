@@ -15,6 +15,7 @@ mod os_open;
 mod power;
 mod remote_hosts;
 mod session_attribution;
+mod spreadsheet_viewer;
 mod terminal;
 mod terminal_output_delivery;
 mod terminal_output_surface;
@@ -41,6 +42,7 @@ pub use os_open::*;
 pub use power::*;
 pub use remote_hosts::*;
 pub use session_attribution::*;
+pub use spreadsheet_viewer::*;
 pub use terminal::*;
 pub use terminal_output_surface::*;
 pub use usage::*;
@@ -57,6 +59,10 @@ pub use viewer_startup::*;
 mod main_thread_io {
     /// `(file source, commands that must carry `#[tauri::command(async)]`)`.
     const OFF_MAIN_THREAD: &[(&str, &[&str])] = &[
+        (
+            include_str!("spreadsheet_viewer.rs"),
+            &["read_spreadsheet_for_viewer"],
+        ),
         (
             include_str!("file_ops.rs"),
             &[

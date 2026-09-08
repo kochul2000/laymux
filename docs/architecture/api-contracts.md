@@ -988,6 +988,10 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 
 > 위 표 외에도 `docks/{position}/active-view·toggle·panes/{paneId}`, `settings/profile-defaults·profiles/{i}`, `workspaces/{id}/summary`, `ui/notifications`, `ui/hidden/{workspace,pane}/{id}/toggle` 등이 등록돼 있다. 전수는 위 각주의 정본을 본다.
 
+### 데스크톱 스프레드시트 IPC
+
+[ADR-0242](../adr/0242-readonly-spreadsheet-viewer.md): `read_spreadsheet_for_viewer(path: string, sheet?: string)`는 main thread 밖에서 공통 경로 해석과 파일 파싱을 수행한다. 응답은 `{sheetNames: string[], sheet: string, cells: {row: number, column: number, value: string}[], totalRows: number, totalColumns: number, truncated: boolean}`이다. 좌표는 0부터 시작하고 totalRows/totalColumns는 비어 있지 않은 셀의 마지막 절대 좌표+1이다. sheet 생략 시 첫 워크시트를 선택한다. 존재하지 않는 시트·손상·암호화·읽기 상한 초과는 오류다. 캐시나 AppState를 사용하지 않는다. Remote bridge는 이 커맨드를 호출하지 않는다. 기존 `/api/v1/ui/file-viewer`로 데스크톱 열기와 screenshot 검증을 수행한다.
+
 ### 12.4 터미널 출력 버퍼
 
 - 터미널별 1MB 링 버퍼 (AppState에 저장)
