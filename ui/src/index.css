@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+/* Pretendard v1.3.9 — SIL OFL 1.1; license distributed alongside the font. */
+@font-face {
+  font-family: "Pretendard Variable";
+  font-style: normal;
+  font-weight: 45 920;
+  font-display: swap;
+  src: url("/fonts/pretendard/PretendardVariable.woff2") format("woff2");
+}
+
 :root {
   --bg-base: #1e1e2e;
   --bg-surface: #181825;
@@ -58,6 +67,9 @@
   --fs-sm: 11px;
   --fs-md: 13px;
   --fs-lg: 15px;
+  --settings-control-height: 34px;
+  --settings-sidebar-width: 180px;
+  --settings-content-width: 840px;
 
   /* utility */
   --separator-bg: #ffffff14; /* intentionally same as --hover-bg-strong */
@@ -66,7 +78,7 @@
      --ui-font-default is the single source of truth for the built-in fallback stack
      (referenced by useAppTheme so the literal lives in one place). --ui-font is what
      the UI reads; useAppTheme overrides it at runtime from appearance.uiFontFamily. */
-  --ui-font-default: "Consolas", "Fira Code", monospace;
+  --ui-font-default: "Pretendard Variable", sans-serif;
   --ui-font: var(--ui-font-default);
   --transition-fast: 0.1s;
   --transition-list-collapse: 0.18s;
@@ -78,6 +90,74 @@
   --hidden-action-size: 24px;
   --undo-snackbar-offset: 8px;
   --terminal-composition-underline-color: currentColor;
+}
+
+/* Settings fields adapt to their modal or dock, independently of window width. */
+.settings-sidebar {
+  width: var(--settings-sidebar-width);
+}
+.settings-content {
+  container-type: inline-size;
+}
+.settings-fields > div {
+  max-width: var(--settings-content-width);
+  margin-inline: auto;
+}
+.settings-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(0, 1.4fr);
+  align-items: start;
+  gap: 16px;
+  padding-block: 12px;
+}
+.settings-row + .settings-row {
+  border-top: 1px solid var(--border);
+}
+.settings-row-label {
+  padding-top: 4px;
+  overflow-wrap: anywhere;
+}
+.settings-view
+  :is(input:not([type="checkbox"]):not([type="range"]):not([type="color"]), select, textarea) {
+  min-height: var(--settings-control-height);
+  max-width: 100%;
+  border-radius: 0;
+  font-size: var(--fs-md);
+}
+.settings-view p {
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.settings-nav-button {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border-left: 3px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  text-align: left;
+  font-size: var(--fs-md);
+  cursor: pointer;
+}
+.settings-nav-button:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+.settings-nav-button[aria-current="page"] {
+  background: var(--accent-10);
+  border-left-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.settings-nav-button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -2px;
+}
+@container (max-width: 460px) {
+  .settings-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
 }
 
 /* Reset: Tailwind v4 @layer base already provides *, ::before, ::after { margin:0; padding:0; box-sizing:border-box }.

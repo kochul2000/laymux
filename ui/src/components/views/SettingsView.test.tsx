@@ -163,6 +163,19 @@ describe("SettingsView", () => {
     expect(screen.getByTestId("settings-view")).toBeInTheDocument();
   });
 
+  it("groups related sections and exposes the active section to assistive technology", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+    const appearance = screen.getByTestId("settings-group-groupAppearance");
+    expect(within(appearance).getByTestId("nav-font")).toBeInTheDocument();
+    expect(within(appearance).getByTestId("nav-interface")).toBeInTheDocument();
+    const input = screen.getByTestId("settings-group-groupInput");
+    expect(within(input).getByTestId("nav-paste")).toBeInTheDocument();
+    await user.click(within(input).getByTestId("nav-keybindings"));
+    expect(screen.getByTestId("nav-keybindings")).toHaveAttribute("aria-current", "page");
+    expect(screen.getByTestId("nav-startup")).not.toHaveAttribute("aria-current");
+  });
+
   describe("external navigation (ui.navigateSettings)", () => {
     it("shows the section requested through the ui store", () => {
       act(() => useUiStore.getState().setSettingsNavTarget("fileExplorer"));
