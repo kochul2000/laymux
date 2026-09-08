@@ -277,6 +277,8 @@ Remote control 복귀 fit은 `onResize`가 만드는 일반 backend 전송을 �
 
 ### 데스크톱 스프레드시트 뷰어
 
+ODS는 calamine 호출 전에 전체 통합 문서의 반복 셀 영역(1,000,000셀)과 공백·문자열·문단·문자 참조의 반복 확장량(64 MiB)을 검사한다. ZIP 해제 바이트 상한만으로는 XML의 반복 지시가 만드는 할당을 제한할 수 없기 때문이다.
+
 [ADR-0242](../adr/0242-readonly-spreadsheet-viewer.md): `.xls`, `.xlsx`, `.xlsb`, `.ods`는 외부 뷰어 매핑 다음에 전용 `SpreadsheetPreview`로 연결한다. Rust calamine이 시트 목록과 선택 시트의 sparse 셀 값을 반환하고 React가 50행 페이지 표·현재 시트 검색·TSV 복사를 담당한다. 파일 변경/시트 전환의 늦은 응답은 폐기한다. 원본 16 MiB, ZIP 해제 64 MiB, 표시 10,000행·256열·100,000셀·값 4 MiB 상한을 두며 잘림은 화면에 알린다. 기존 Remote 파일 읽기와 FileViewerContent는 바꾸지 않는다.
 
 `FileViewer`는 열려 있는 파일을 호스트 OS로 넘기는 두 동작(`open`/`reveal`)을 버튼으로도 노출한다([ADR-0193](../adr/0193-viewer-os-handoff-buttons.md)). 대상 파일은 콘텐츠 종류와 무관하게 하나뿐이므로 버튼은 본문 렌더러가 아니라 오버레이 헤더(`FileViewerOverlay`)가 소유하고 — 바이너리·archive·PDF·외부 터미널 뷰어·읽기 실패에서도 같은 자리에 있다 — 미리보기가 없는 `kind: "binary"` fallback에서만 콘텐츠 자리에 라벨 버튼을 한 벌 더 그려 다음 행동을 유도한다. 터미널 path-link의 Ctrl/Ctrl+Shift 클릭과 **같은 백엔드 커맨드**(`open_in_os`)와 **같은 확인 정책**(`os-handoff.ts`)을 쓰며, 확인 대화상자·커맨드 호출·실패 상태는 `useOsHandoff` 훅이 소유한다. 확인은 `terminal.pathLinkOsOpenConfirm`을 따르지만 `terminal.pathLinkOsOpenEnabled`는 적용하지 않는다 — 그 키는 밑줄 위 수정자 클릭의 입력 소유권 스위치이고 버튼에는 그 충돌이 없다. spawn 실패는 pane에 귀속되는 알림 대신 버튼 옆 인라인 오류로 보여 주고, 그 상태는 경로로 스코프해 다른 파일로 이동하면 따라붙지 않는다. 아직 파일을 고르지 않은 prompt 모드에는 대상이 없으므로 버튼을 그리지 않는다.

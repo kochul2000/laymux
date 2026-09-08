@@ -203,7 +203,9 @@ fn validate_ods_repeats(bytes: &[u8]) -> Result<(), AppError> {
     let (mut rows, mut columns, mut widest) = (0_u64, 0_u64, 0_u64);
     let (mut in_cell, mut has_value) = (false, false);
     let (mut completed_cells, mut sheet_cells) = (0_u64, 0_u64);
+    let (mut row_repeat, mut column_repeat, mut text_bytes) = (1_u64, 1_u64, 0_u64);
     loop {
+        let mut added_text = 0_u64;
         let event = xml.read_event().map_err(parse_error)?;
         let empty_cell = matches!(&event, Event::Empty(tag) if matches!(tag.local_name().as_ref(), b"table-cell" | b"covered-table-cell"));
         match event {
@@ -217,19 +219,20 @@ fn validate_ods_repeats(bytes: &[u8]) -> Result<(), AppError> {
                     in_cell = false;
                 }
                 b"table-row" => {
-                    rows = rows.saturating_add(repeat_count(tag, b"number-rows-repeated")?);
+                    row_repeat = repeat_count(tag, b"number-rows-repeated")?.max(1);
+                    rows = rows.saturating_add(row_repeat);
                     columns = 0;
                     in_cell = false;
                     has_value = false;
                 }
                 b"table-cell" | b"covered-table-cell" => {
-                    columns =
-                        columns.saturating_add(repeat_count(tag, b"number-columns-repeated")?);
+                    column_repeat = repeat_count(tag, b"number-columns-repeated")?.max(1);
+                    columns = columns.saturating_add(column_repeat);
                     in_cell = true;
                     has_value = false;
                     for attr in tag.attributes() {
                         let attr = attr.map_err(parse_error)?;
-                        has_value |= matches!(
+                        let value_attribute = matches!(
                             attr.key.local_name().as_ref(),
                             b"value"
                                 | b"string-value"
@@ -238,12 +241,38 @@ fn validate_ods_repeats(bytes: &[u8]) -> Result<(), AppError> {
                                 | b"time-value"
                                 | b"formula"
                         );
+                        has_value |= value_attribute;
+                        has_value |= attr.key.local_name().as_ref() == b"value-type"
+                            && attr.value.as_ref() == b"string";
+                        if value_attribute {
+                            added_text = added_text
+                                .saturating_add((attr.value.len() as u64).saturating_mul(4));
+                        }
                     }
+                }
+                b"s" if in_cell => {
+                    added_text = repeat_count(tag, b"c")?;
+                    has_value |= added_text > 0;
+                }
+                b"p" | b"tab" | b"line-break" if in_cell => {
+                    added_text = 1;
+                    has_value = true;
                 }
                 _ => {}
             },
-            Event::Text(ref text) if in_cell => has_value |= !text.is_empty(),
-            Event::CData(ref text) if in_cell => has_value |= !text.is_empty(),
+            Event::Text(ref text) if in_cell => {
+                has_value |= !text.is_empty();
+                // Conservative UTF-8 bound for XML using a legacy encoding.
+                added_text = (text.len() as u64).saturating_mul(4);
+            }
+            Event::CData(ref text) if in_cell => {
+                has_value |= !text.is_empty();
+                added_text = (text.len() as u64).saturating_mul(4);
+            }
+            Event::GeneralRef(ref entity) if in_cell => {
+                has_value = true;
+                added_text = (entity.len() as u64).max(4);
+            }
             Event::End(ref tag)
                 if matches!(
                     tag.local_name().as_ref(),
@@ -254,6 +283,18 @@ fn validate_ods_repeats(bytes: &[u8]) -> Result<(), AppError> {
             }
             Event::Eof => break,
             _ => {}
+        }
+        // ODS stores text:s counts and repeated strings compactly. Calamine
+        // expands both before returning a Range, so the IPC value cap is too late.
+        text_bytes = text_bytes.saturating_add(
+            added_text
+                .saturating_mul(row_repeat)
+                .saturating_mul(column_repeat),
+        );
+        if text_bytes > MAX_INFLATED_BYTES {
+            return Err(parse_error(
+                "ODS text expansion exceeds the 64 MiB viewer limit",
+            ));
         }
         // LibreOffice writes trailing empty rows/columns up to the sheet
         // boundary. Calamine discards those, so only populated extents count.
@@ -319,5 +360,36 @@ mod tests {
         assert!(validate_ods_repeats(br#"<table><table-row><table-cell value="1"/><table-cell number-columns-repeated="16383"/>
         </table-row><table-row number-rows-repeated="1048575"><table-cell number-columns-repeated="16384"/>
         </table-row></table>"#).is_ok());
+    }
+
+    #[test]
+    fn ods_space_and_string_repeats_are_bounded_before_calamine_allocates() {
+        let spaces = br#"<table><table-row><table-cell><p><s c="1000000000"/></p></table-cell></table-row></table>"#;
+        assert!(validate_ods_repeats(spaces)
+            .unwrap_err()
+            .to_string()
+            .contains("text expansion"));
+        let repeated = format!(
+            r#"<table><table-row number-rows-repeated="256"><table-cell number-columns-repeated="256"><p>{}</p></table-cell></table-row></table>"#,
+            "x".repeat(1025)
+        );
+        assert!(validate_ods_repeats(repeated.as_bytes())
+            .unwrap_err()
+            .to_string()
+            .contains("text expansion"));
+    }
+
+    #[test]
+    fn ods_empty_strings_are_cells_and_paragraph_entity_expansion_is_bounded() {
+        assert!(validate_ods_repeats(br#"<table><table-row number-rows-repeated="1048576"><table-cell number-columns-repeated="16384" value-type="string"/></table-row></table>"#).is_err());
+        for text in ["<p/>".repeat(1025), "&amp;".repeat(1025)] {
+            let xml = format!(
+                r#"<table><table-row number-rows-repeated="256"><table-cell number-columns-repeated="256" value-type="string">{text}</table-cell></table-row></table>"#
+            );
+            assert!(validate_ods_repeats(xml.as_bytes())
+                .unwrap_err()
+                .to_string()
+                .contains("text expansion"));
+        }
     }
 }
