@@ -1,6 +1,6 @@
 # 0242. 스프레드시트는 Rust에서 읽고 데스크톱에서 값으로 표시한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-08
 - Source: 사용자 요청(셀 값·시트 전환·검색·복사), architecture/data-flow.md FileViewer, ADR-0109
 - 관계: ADR-0109의 structured 렌더러를 바이너리 스프레드시트와 검색으로 확장한다.
