@@ -121,8 +121,8 @@ it("reads another window only on demand and allows only one pending request", as
   const content = {
     ...data,
     totalRows: 100,
-    totalColumns: 1,
-    cells: [{ row: 0, column: 0, value: "first" }],
+    totalColumns: 0,
+    cells: [],
   };
   vi.mocked(openSpreadsheetForViewer).mockResolvedValueOnce({
     sessionId: "stream",
@@ -138,7 +138,7 @@ it("reads another window only on demand and allows only one pending request", as
       }),
   );
   const view = render(<SpreadsheetPreview path="/stream.xlsx" />);
-  await screen.findByText("first");
+  await screen.findByRole("table");
   expect(nextSpreadsheetForViewer).not.toHaveBeenCalled();
   const grid = screen.getByTestId("spreadsheet-grid");
   fireEvent.scroll(grid);
@@ -149,7 +149,7 @@ it("reads another window only on demand and allows only one pending request", as
       sessionId: "stream",
       loadedRows: 101,
       hasMore: false,
-      content: { ...content, cells: [{ row: 100, column: 0, value: "last" }] },
+      content: { ...content, totalColumns: 1, cells: [{ row: 100, column: 0, value: "last" }] },
     }),
   );
   fireEvent.change(screen.getByTestId("spreadsheet-search"), { target: { value: "last" } });

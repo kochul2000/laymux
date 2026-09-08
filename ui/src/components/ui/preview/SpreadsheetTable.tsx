@@ -117,7 +117,7 @@ export function SpreadsheetTable({
       cancelAnimationFrame(frame);
     };
   }, [dragging, scroller, selected?.kind]);
-  const columnCount = Math.min(data.totalColumns, MAX_COLUMNS);
+  const columnCount = Math.min(Math.max(data.totalColumns, hasMore ? 1 : 0), MAX_COLUMNS);
   const rows = useMemo(() => {
     const result = Array.from({ length: Math.min(data.totalRows, MAX_ROWS) }, (_, index) => ({
       index,
@@ -229,7 +229,14 @@ export function SpreadsheetTable({
         data-testid="spreadsheet-grid"
         data-file-viewer-body
         className="empty-view-scroll min-h-0 flex-1 overflow-auto"
-        style={{ ...bodyStyle, padding: 0 }}
+        style={{
+          ...bodyStyle,
+          padding: undefined,
+          paddingTop: 0,
+          paddingRight: 0,
+          paddingBottom: 0,
+          paddingLeft: 0,
+        }}
         onScroll={(event) => {
           setViewport({
             top: event.currentTarget.scrollTop,
