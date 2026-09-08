@@ -7,6 +7,35 @@ use laymux_lib::settings::{PaneClearBusyPolicy, Settings};
 use serde_json::json;
 
 #[test]
+fn every_settings_section_is_discoverable_including_optional_cwd_and_dynamic_widgets() {
+    let settings = Settings::default();
+    let full = select_settings_paths(&settings, &[]).unwrap();
+    let overview = describe_settings(&[]).unwrap();
+    for key in full.as_object().unwrap().keys() {
+        let path = format!("/{key}");
+        assert!(
+            overview["schema"]["properties"].get(&path).is_some(),
+            "{path}"
+        );
+        let focused = describe_settings(std::slice::from_ref(&path)).unwrap();
+        assert!(
+            focused["schema"]["properties"].get(&path).is_some(),
+            "{path}"
+        );
+        assert!(focused["metadata"].get(&path).is_some(), "{path}");
+    }
+    let cwd = describe_settings(&["/syncCwdDefaults/workspace/send".into()]).unwrap();
+    assert_eq!(
+        cwd["schema"]["properties"]["/syncCwdDefaults/workspace/send"]["type"],
+        "boolean"
+    );
+    assert!(overview["guide"]
+        .as_str()
+        .unwrap()
+        .contains("get_settings_context"));
+}
+
+#[test]
 fn nested_object_patch_preserves_unmentioned_values() {
     let current = Settings::default();
     let prepared = prepare_settings_update(
@@ -537,10 +566,14 @@ fn every_sensitive_metadata_path_is_redacted_from_settings_reads() {
 
     for path in sensitive_paths {
         let mut value = serde_json::to_value(Settings::default()).unwrap();
-        *value
+        let secret = value
             .pointer_mut(path)
-            .unwrap_or_else(|| panic!("sensitive path must exist in Settings: {path}")) =
-            json!("secret");
+            .unwrap_or_else(|| panic!("sensitive path must exist in Settings: {path}"));
+        *secret = if secret.is_array() {
+            json!([{ "value": "secret", "label": "", "send": false }])
+        } else {
+            json!("secret")
+        };
         let settings: Settings = serde_json::from_value(value).unwrap();
 
         assert_eq!(
@@ -588,6 +621,41 @@ fn json_pointer_selection_returns_only_requested_values() {
     assert_eq!(selected["/appearance/themeId"], json!("catppuccin-mocha"));
     assert_eq!(selected["/remote/authToken"], json!(REDACTED_SETTING_VALUE));
     assert_eq!(selected.as_object().unwrap().len(), 2);
+}
+
+#[test]
+fn unfiltered_settings_read_returns_the_full_redacted_snapshot() {
+    let mut settings = Settings::default();
+    settings.remote.auth_token = "secret".into();
+    let selected = select_settings_paths(&settings, &[]).unwrap();
+    assert_eq!(selected, redact_settings(&settings));
+    assert_eq!(selected["language"], "system");
+    assert_eq!(selected["remote"]["authToken"], REDACTED_SETTING_VALUE);
+}
+
+#[test]
+fn optional_settings_read_is_null_but_missing_profile_is_an_error() {
+    let settings = Settings::default();
+    let selected = select_settings_paths(&settings, &["/profiles/0/font".into()]).unwrap();
+    assert_eq!(selected["/profiles/0/font"], json!(null));
+    assert!(select_settings_paths(&settings, &["/profiles/999/font".into()]).is_err());
+}
+
+#[test]
+fn focused_settings_description_contains_only_the_requested_schema() {
+    let description = describe_settings(&["/profileDefaults/font".into()]).unwrap();
+    let encoded = serde_json::to_string(&description).unwrap();
+    assert!(
+        encoded.len() < 8000,
+        "focused font description is {} bytes",
+        encoded.len()
+    );
+    assert!(!encoded.contains("heartbeatTimeoutSeconds"));
+    assert!(encoded.contains("Cascadia Mono"));
+    assert_eq!(
+        description["metadata"]["/profileDefaults/font"]["applyMode"],
+        "live"
+    );
 }
 
 #[test]

@@ -7,6 +7,7 @@ mod assets;
 mod attachments;
 mod auth;
 mod composer_routes;
+pub(crate) mod device_settings;
 mod font_assets;
 mod github_repo_routes;
 mod lease;

@@ -1,5 +1,4 @@
 use serde::Serialize;
-use serde_json::{json, Map, Value};
 
 use super::contract::ApplyMode;
 
@@ -63,6 +62,24 @@ const ENTRIES: &[MetadataEntry] = &[
         description: "개별 프로필이 덮어쓰지 않은 터미널 기본값입니다.",
         sensitive: false,
         apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
+        path: "/profileDefaults/font",
+        description: "PC 터미널 공통 글꼴입니다. face는 글꼴 이름, size는 6~72px, weight는 normal/bold 또는 100~900입니다. profiles의 font와 pane별 임시 글자 크기가 우선합니다. 현재 터미널에도 즉시 적용됩니다. Remote 글자 크기는 기기 설정을 사용합니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
+        path: "/appearance/font",
+        description: "Memo 등 비터미널 본문의 기본 글꼴입니다. 터미널 글자 크기나 메뉴·버튼 크기는 바꾸지 않습니다. 뷰별 fontSize/fontFamily가 있으면 그것이 우선합니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
+        path: "/appearance/uiFontFamily",
+        description: "PC 메뉴·버튼·탭·목록의 글꼴 family입니다. 빈 값은 내장 기본 글꼴입니다. PC 메뉴 글자 크기 설정은 현재 제공하지 않습니다. appearance.font.size를 메뉴 크기 대신 변경하지 마세요.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
     },
     MetadataEntry {
         path: "/defaultProfile",
@@ -433,6 +450,15 @@ const ENTRIES: &[MetadataEntry] = &[
 ];
 
 pub fn metadata_for_path(path: &str) -> FieldMetadata {
+    let segments: Vec<_> = path.split('/').collect();
+    if segments.get(1) == Some(&"profiles")
+        && segments
+            .get(2)
+            .is_some_and(|index| index.parse::<usize>().is_ok())
+        && segments.get(3) == Some(&"font")
+    {
+        return metadata_for_path("/profileDefaults/font");
+    }
     let entry = ENTRIES
         .iter()
         .filter(|entry| path == entry.path || path.starts_with(&format!("{}/", entry.path)))
@@ -452,19 +478,6 @@ pub fn metadata_for_path(path: &str) -> FieldMetadata {
             apply_mode: ApplyMode::NextUse,
         },
     }
-}
-
-pub fn metadata_json(paths: &[String]) -> Value {
-    let selected: Vec<String> = if paths.is_empty() {
-        ENTRIES.iter().map(|entry| entry.path.to_string()).collect()
-    } else {
-        paths.to_vec()
-    };
-    let mut values = Map::new();
-    for path in selected {
-        values.insert(path.clone(), json!(metadata_for_path(&path)));
-    }
-    Value::Object(values)
 }
 
 pub fn is_sensitive_path(path: &str) -> bool {

@@ -69,6 +69,7 @@ impl AndroidE2eFileViewerProof {
 
 #[derive(Debug, Default)]
 pub struct RemoteControlState {
+    pub(crate) device_settings: super::device_settings::DeviceSettingsBridge,
     pub lease: Option<RemoteControlLease>,
     pub(crate) android_e2e_lease: Option<AndroidE2eLeaseTag>,
     pub reclaim_lockout_until: Option<Instant>,
