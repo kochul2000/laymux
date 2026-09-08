@@ -12,6 +12,12 @@ describe("빈 HTML 미리보기", () => {
     '<html><head><title>Report</title><script src="app.js"></script></head><body><div id="printer-container"></div><script>mountPrinter()</script></body></html>',
     '<div id="root"><!-- mount here --><span> \n </span></div>',
     "<canvas></canvas><script>draw()</script>",
+    '<div id="root" style="width:100%;height:100vh;padding:20px"></div>',
+    '<div style="display:none">App content</div>',
+    '<div style="opacity:0"><img src="data:image/png;base64,abc">App content</div>',
+    '<div style="visibility:hidden"><span>App content</span></div>',
+    '<div style="font-size:0"><span>App content</span></div>',
+    '<div style="background:transparent;border:0 solid #ff0000"></div>',
     "",
   ])("표시할 본문이 없으면 PC 프로그램으로 열도록 안내한다", (html) => {
     const preview = htmlToSafePreviewDocument(html);
@@ -26,6 +32,12 @@ describe("빈 HTML 미리보기", () => {
     '<input type="checkbox" checked>',
     "<hr>",
     '<div style="width:100px;height:100px;background:#ff0000"></div>',
+    '<div style="width:100px;height:100px;border:1px solid #ff0000"></div>',
+    '<div style="visibility:hidden"><span style="visibility:visible">Report</span></div>',
+    '<div style="font-size:0"><span style="font-size:14px">Report</span></div>',
+    '<div style="display:none">hidden</div><p>Loading...</p>',
+    "<pre></pre>",
+    "<details><p>Report</p></details>",
   ])("정적 본문이나 시각 요소가 남아 있으면 유지한다", (html) => {
     expect(htmlToSafePreviewDocument(html)).not.toContain("PC의 브라우저");
   });
