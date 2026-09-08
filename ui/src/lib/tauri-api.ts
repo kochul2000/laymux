@@ -1451,6 +1451,25 @@ export async function readSpreadsheetForViewer(
   return invoke("read_spreadsheet_for_viewer", { path, sheet: sheet ?? null });
 }
 
+export interface SpreadsheetWindow {
+  sessionId: string;
+  content: SpreadsheetContent;
+  loadedRows: number;
+  hasMore: boolean;
+}
+
+export function openSpreadsheetForViewer(path: string, sheet?: string): Promise<SpreadsheetWindow> {
+  return invoke("open_spreadsheet_for_viewer", { path, sheet: sheet ?? null });
+}
+
+export function nextSpreadsheetForViewer(sessionId: string): Promise<SpreadsheetWindow> {
+  return invoke("next_spreadsheet_for_viewer", { sessionId });
+}
+
+export function closeSpreadsheetForViewer(sessionId: string): Promise<void> {
+  return invoke("close_spreadsheet_for_viewer", { sessionId });
+}
+
 /**
  * Read a whole file for handing to the user (ADR-0185). Rejects rather than
  * truncating: a partial save is a corrupt file.

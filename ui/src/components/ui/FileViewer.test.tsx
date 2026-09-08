@@ -5,7 +5,7 @@ import {
   openExternal,
   openInOs,
   readFileForViewer,
-  readSpreadsheetForViewer,
+  openSpreadsheetForViewer,
 } from "@/lib/tauri-api";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useOverridesStore } from "@/stores/overrides-store";
@@ -13,13 +13,20 @@ import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 
 vi.mock("@/lib/tauri-api", () => ({
   clipboardWriteText: vi.fn(),
-  readSpreadsheetForViewer: vi.fn().mockResolvedValue({
-    sheetNames: ["Sheet1"],
-    sheet: "Sheet1",
-    cells: [{ row: 0, column: 0, value: "excel-cell" }],
-    totalRows: 1,
-    totalColumns: 1,
-    truncated: false,
+  closeSpreadsheetForViewer: vi.fn().mockResolvedValue(undefined),
+  nextSpreadsheetForViewer: vi.fn(),
+  openSpreadsheetForViewer: vi.fn().mockResolvedValue({
+    sessionId: "test",
+    loadedRows: 1,
+    hasMore: false,
+    content: {
+      sheetNames: ["Sheet1"],
+      sheet: "Sheet1",
+      cells: [{ row: 0, column: 0, value: "excel-cell" }],
+      totalRows: 1,
+      totalColumns: 1,
+      truncated: false,
+    },
   }),
   openExternal: vi.fn().mockResolvedValue(undefined),
   openInOs: vi.fn().mockResolvedValue(undefined),
@@ -52,7 +59,7 @@ describe("FileViewer", () => {
     async (extension) => {
       render(<FileViewer {...baseProps} path={"/book." + extension} />);
       await screen.findByText("excel-cell");
-      expect(readSpreadsheetForViewer).toHaveBeenCalledWith("/book." + extension, undefined);
+      expect(openSpreadsheetForViewer).toHaveBeenCalledWith("/book." + extension, undefined);
       expect(readFileForViewer).not.toHaveBeenCalled();
     },
   );

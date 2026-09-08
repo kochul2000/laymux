@@ -34,6 +34,22 @@ test("four spreadsheet extensions open in the viewer with sheet search and TSV c
       }
       return original(cmd, args);
     };
+    const fixtureInvoke = host.__TAURI_INTERNALS__.invoke;
+    host.__TAURI_INTERNALS__.invoke = async (cmd, args) => {
+      if (cmd === "close_spreadsheet_for_viewer") return;
+      if (cmd === "open_spreadsheet_for_viewer") {
+        const content = (await fixtureInvoke("read_spreadsheet_for_viewer", args)) as {
+          totalRows: number;
+        };
+        return {
+          sessionId: String(args.path),
+          content,
+          loadedRows: content.totalRows,
+          hasMore: false,
+        };
+      }
+      return fixtureInvoke(cmd, args);
+    };
   });
   await page.keyboard.press("Control+Shift+O");
   const path = page.getByTestId("file-viewer-overlay-path-input");
@@ -86,6 +102,7 @@ test("four spreadsheet extensions open in the viewer with sheet search and TSV c
   });
   const gridBox = await page.getByTestId("spreadsheet-grid").boundingBox();
   if (!gridBox) throw new Error("Missing grid");
+  await expect(page.getByRole("button", {name: "A1: 상품"})).toBeVisible();
   await page.mouse.move(start.x + 4, start.y + 4);
   await page.mouse.down();
   await page.mouse.move(start.x + 4, gridBox.y + gridBox.height - 3, { steps: 5 });
@@ -94,8 +111,16 @@ test("four spreadsheet extensions open in the viewer with sheet search and TSV c
     .toBeGreaterThan(0);
   await page.mouse.up();
   await page.getByTestId("spreadsheet-grid").evaluate((element) => {
-    element.scrollTop = 0;
+    element.scrollTop = 200;
   });
+  await expect
+    .poll(() =>
+      page.getByTestId("spreadsheet-grid").evaluate((grid) => {
+        const header = grid.querySelector("thead th")!;
+        return header.getBoundingClientRect().top - grid.getBoundingClientRect().top;
+      }),
+    )
+    .toBeLessThanOrEqual(1);
   await page
     .getByTestId("file-viewer-overlay")
     .screenshot({ path: "../.screenshots/spreadsheet-viewer-e2e.png" });
@@ -125,6 +150,22 @@ test("extends column selection while horizontally auto-scrolling", async ({ appP
             })),
           }
         : original(cmd, args);
+    const fixtureInvoke = host.__TAURI_INTERNALS__.invoke;
+    host.__TAURI_INTERNALS__.invoke = async (cmd, args) => {
+      if (cmd === "close_spreadsheet_for_viewer") return;
+      if (cmd === "open_spreadsheet_for_viewer") {
+        const content = (await fixtureInvoke("read_spreadsheet_for_viewer", args)) as {
+          totalRows: number;
+        };
+        return {
+          sessionId: String(args.path),
+          content,
+          loadedRows: content.totalRows,
+          hasMore: false,
+        };
+      }
+      return fixtureInvoke(cmd, args);
+    };
   });
   await page.keyboard.press("Control+Shift+O");
   await page.getByTestId("file-viewer-overlay-path-input").fill("C:/wide.xlsx");

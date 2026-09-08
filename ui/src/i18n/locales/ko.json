@@ -13,7 +13,8 @@
       "selectionSize": "선택: {{rows}}행 × {{columns}}열",
       "selectAll": "모든 셀 선택",
       "selectRow": "{{row}}행 선택",
-      "selectColumn": "{{column}}열 선택"
+      "selectColumn": "{{column}}열 선택",
+      "partialRead": "100행씩 읽습니다. 아래로 스크롤하면 다음 구간을 읽습니다. 검색·복사는 읽은 범위에 한정됩니다."
     },
     "language": {
       "system": "시스템",

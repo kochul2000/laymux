@@ -992,6 +992,9 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 
 [ADR-0242](../adr/0242-readonly-spreadsheet-viewer.md): `read_spreadsheet_for_viewer(path: string, sheet?: string)`는 main thread 밖에서 공통 경로 해석과 파일 파싱을 수행한다. 응답은 `{sheetNames: string[], sheet: string, cells: {row: number, column: number, value: string}[], totalRows: number, totalColumns: number, truncated: boolean}`이다. 좌표는 0부터 시작하고 totalRows/totalColumns는 관측한 비어 있지 않은 셀의 마지막 절대 좌표+1이다. [ADR-0244](../adr/0244-spreadsheet-selection-and-windowed-scroll.md)에 따라 표시 상한 초과 시 셀 순회를 중단하므로 truncated 응답의 크기는 전체 시트 크기를 보장하지 않는다. sheet 생략 시 첫 워크시트를 선택한다. 존재하지 않는 시트·손상·암호화·읽기 상한 초과는 오류다. 캐시나 AppState를 사용하지 않는다. Remote bridge는 이 커맨드를 호출하지 않는다. 기존 `/api/v1/ui/file-viewer`로 데스크톱 열기와 screenshot 검증을 수행한다.
 
+[ADR-0246](../adr/0246-spreadsheet-demand-driven-reading.md): UI는 `open_spreadsheet_for_viewer(path,sheet?)` / `next_spreadsheet_for_viewer(sessionId)` / `close_spreadsheet_for_viewer(sessionId)`를 사용한다. open/next 응답은 `{sessionId,content: SpreadsheetContent,loadedRows,hasMore}`이며 content.cells는 이번 구간의 절대 좌표 셀만 포함한다. loadedRows는 누적 읽기 행 수, hasMore는 추가 요청 가능 여부다. 세 커맨드는 main thread 밖에서 실행한다. Rust 작업자가 파서 소유권을 유지하고 UI가 닫기 책임을 가진다. UI는 동일 sessionId에 next 하나만 진행하며 늦은 응답은 현재 sessionId와 대조한다. 원본 파일 스냅샷은 open 때 고정되고 디스크/세션에 영속하지 않는다.
+
+
 ### 12.4 터미널 출력 버퍼
 
 - 터미널별 1MB 링 버퍼 (AppState에 저장)

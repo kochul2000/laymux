@@ -4,12 +4,14 @@ use calamine::{Data, DataType, Ods, Reader, Sheets, Xls, Xlsb, Xlsx};
 use std::io::{Cursor, Read};
 
 const MAX_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_LEGACY_SOURCE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_INFLATED_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_ZIP_ENTRIES: usize = 2_048;
-const MAX_ODS_CELLS: u64 = 1_000_000;
-const MAX_ROWS: u32 = 10_000;
+const MAX_ODS_CELLS: u64 = 100_000;
+const MAX_ODS_BYTES: u64 = 8 * 1024 * 1024;
+pub(super) const MAX_ROWS: u32 = 10_000;
 const MAX_COLUMNS: u32 = 256;
-const MAX_CELLS: usize = 100_000;
+pub(super) const MAX_CELLS: usize = 100_000;
 const MAX_VALUE_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, serde::Serialize)]
@@ -39,11 +41,13 @@ pub fn read_spreadsheet_for_viewer(
     read_spreadsheet(&path, sheet.as_deref()).map_err(String::from)
 }
 
-fn parse_error(error: impl std::fmt::Display) -> AppError {
+pub(super) fn parse_error(error: impl std::fmt::Display) -> AppError {
     AppError::Other(format!("Cannot read spreadsheet: {error}"))
 }
 
-fn read_spreadsheet(path: &str, sheet: Option<&str>) -> Result<SpreadsheetContent, AppError> {
+type OpenedWorkbook = (Sheets<Cursor<Vec<u8>>>, Vec<String>, String);
+
+pub(super) fn open_workbook(path: &str, sheet: Option<&str>) -> Result<OpenedWorkbook, AppError> {
     let resolved = path_utils::resolve_address_path_following_symlinks(path, None);
     let ext = std::path::Path::new(&resolved)
         .extension()
@@ -54,6 +58,11 @@ fn read_spreadsheet(path: &str, sheet: Option<&str>) -> Result<SpreadsheetConten
         return Err(parse_error("supported formats: xls, xlsx, xlsb, ods"));
     }
     let file = std::fs::File::open(&resolved)?;
+    if matches!(ext.as_str(), "xls" | "ods") && file.metadata()?.len() > MAX_LEGACY_SOURCE_BYTES {
+        return Err(parse_error(
+            "xls/ods require upfront parsing; only files up to 2 MiB are supported",
+        ));
+    }
     if file.metadata()?.len() > MAX_SOURCE_BYTES {
         return Err(parse_error("file exceeds the 16 MiB viewer limit"));
     }
@@ -68,7 +77,7 @@ fn read_spreadsheet(path: &str, sheet: Option<&str>) -> Result<SpreadsheetConten
     // No persistent workbook cache: switching sheets reopens the file, so a
     // changed file is never paired with cells from a previous cached version.
     let source = Cursor::new(bytes);
-    let mut book = match ext.as_str() {
+    let book = match ext.as_str() {
         "xls" => Sheets::Xls(Xls::new(source).map_err(parse_error)?),
         "xlsx" => Sheets::Xlsx(Xlsx::new(source).map_err(parse_error)?),
         "xlsb" => Sheets::Xlsb(Xlsb::new(source).map_err(parse_error)?),
@@ -87,6 +96,11 @@ fn read_spreadsheet(path: &str, sheet: Option<&str>) -> Result<SpreadsheetConten
         Some(name) => name.to_owned(),
         None => names.first().cloned().unwrap_or_default(),
     };
+    Ok((book, names, selected))
+}
+
+fn read_spreadsheet(path: &str, sheet: Option<&str>) -> Result<SpreadsheetContent, AppError> {
+    let (mut book, names, selected) = open_workbook(path, sheet)?;
     let mut result = SpreadsheetContent {
         sheet_names: names,
         sheet: selected.clone(),
@@ -149,7 +163,7 @@ fn read_spreadsheet(path: &str, sheet: Option<&str>) -> Result<SpreadsheetConten
 }
 
 impl SpreadsheetContent {
-    fn push(&mut self, (row, column): (u32, u32), data: &Data, value_bytes: &mut usize) {
+    pub(super) fn push(&mut self, (row, column): (u32, u32), data: &Data, value_bytes: &mut usize) {
         if data.is_empty() {
             return;
         }
@@ -182,21 +196,21 @@ fn validate_container(bytes: &[u8], ods: bool) -> Result<(), AppError> {
     if archive.len() > MAX_ZIP_ENTRIES {
         return Err(parse_error("too many ZIP entries"));
     }
-    let mut remaining = MAX_INFLATED_BYTES;
+    let mut remaining = if ods {
+        MAX_ODS_BYTES
+    } else {
+        MAX_INFLATED_BYTES
+    };
     for index in 0..archive.len() {
         let entry = archive.by_index(index).map_err(parse_error)?;
         if entry.size() > remaining {
-            return Err(parse_error(
-                "expanded workbook exceeds the 64 MiB viewer limit",
-            ));
+            return Err(parse_error("expanded workbook exceeds the viewer limit"));
         }
         let is_content = ods && entry.name() == "content.xml";
         let mut data = Vec::new();
         entry.take(remaining + 1).read_to_end(&mut data)?;
         if data.len() as u64 > remaining {
-            return Err(parse_error(
-                "expanded workbook exceeds the 64 MiB viewer limit",
-            ));
+            return Err(parse_error("expanded workbook exceeds the viewer limit"));
         }
         remaining -= data.len() as u64;
         if is_content {
@@ -336,9 +350,9 @@ fn validate_ods_repeats(bytes: &[u8]) -> Result<(), AppError> {
                 .saturating_mul(row_repeat)
                 .saturating_mul(column_repeat),
         );
-        if text_bytes > MAX_INFLATED_BYTES {
+        if text_bytes > MAX_ODS_BYTES {
             return Err(parse_error(
-                "ODS text expansion exceeds the 64 MiB viewer limit",
+                "ODS text expansion exceeds the 8 MiB viewer limit",
             ));
         }
         // LibreOffice writes trailing empty rows/columns up to the sheet

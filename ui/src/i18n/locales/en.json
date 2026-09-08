@@ -13,7 +13,8 @@
       "selectionSize": "Selected: {{rows}} rows × {{columns}} columns",
       "selectAll": "Select all cells",
       "selectRow": "Select row {{row}}",
-      "selectColumn": "Select column {{column}}"
+      "selectColumn": "Select column {{column}}",
+      "partialRead": "Reading 100 rows at a time. Scroll down to read more. Search and copy cover loaded rows only."
     },
     "language": {
       "system": "System",
