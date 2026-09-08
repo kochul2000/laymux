@@ -20,6 +20,7 @@ import {
   type TerminalRestartRequest,
 } from "@/stores/terminal-restart-store";
 import { resolvePaneCwd } from "@/lib/pane-cwd";
+import { runPaneClearFromUi } from "@/lib/pane-clear-action";
 
 export interface GridPane {
   id: string;
@@ -117,7 +118,7 @@ export function PaneGrid({
   const containerRef = useRef<HTMLDivElement>(null);
   const size = useContainerSize(containerRef);
   const hoverIdleSeconds = useSettingsStore((s) => s.controlBar.hoverIdleSeconds);
-  const hover = useHoverTimer(hoverIdleSeconds);
+  const hover = useHoverTimer(hoverIdleSeconds, isActive);
   // Spatial reading-order pane numbers (issue #256). Derived from geometry, never cached.
   const paneNumbers = showPaneNumbers ? computePaneNumbers(panes) : null;
 
@@ -257,6 +258,7 @@ export function PaneGrid({
               paneId={pane.id}
               currentView={pane.view}
               hovered={isActive && isHovered}
+              isActive={isActive}
               cwdSendOn={cwdSendOn}
               cwdReceiveOn={cwdReceiveOn}
               paneNumber={paneNumbers?.get(pane.id)}
@@ -272,6 +274,12 @@ export function PaneGrid({
                   : undefined,
                 onSplitH: onSplitPane ? () => onSplitPane(pane.id, "horizontal") : undefined,
                 onSplitV: onSplitPane ? () => onSplitPane(pane.id, "vertical") : undefined,
+                onClearTerminal:
+                  pane.view.type === "TerminalView"
+                    ? () => {
+                        void runPaneClearFromUi(pane.id);
+                      }
+                    : undefined,
                 onClear: onSetPaneView
                   ? () => onSetPaneView(pane.id, { type: "EmptyView" })
                   : undefined,

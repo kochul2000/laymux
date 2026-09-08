@@ -1,4 +1,4 @@
-import type { RawTerminalState } from "./activity-handler";
+import type { RawTerminalState, StatusResult } from "./activity-handler";
 import { STATUS_ICON_WORKING } from "./activity-markers";
 import { ShellActivityHandler } from "./shell-activity-handler";
 
@@ -71,7 +71,7 @@ export class GrokActivityHandler extends ShellActivityHandler {
     return isGrokWorkingTitle(title);
   }
 
-  computeStatus(raw: RawTerminalState) {
+  computeStatus(raw: RawTerminalState): StatusResult {
     if (!raw.outputActive && isGrokWorkingTitle(raw.title)) {
       return { icon: STATUS_ICON_WORKING, color: "var(--yellow)" };
     }

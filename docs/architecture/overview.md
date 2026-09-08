@@ -41,30 +41,43 @@ Android 앱은 Cargo/Tauri workspace 구성원이 아니다. Cloud WebView는 �
 landing/dashboard와 HttpOnly account session을 표시하고 Google login·PC 선택·연결 설정 진입만 좁은 native bridge에
 위임한다. Google OAuth page를 embedded WebView에서 열지 않고 Credential Manager가 받은 ID token을
 Cloud가 session-bound single-use nonce와 함께 검증한다. 이 WebView에는 E2E bridge를 설치하지 않는다.
+Cloud main document를 적재하는 동안에는 네이티브 진행 표면이 WebView를 덮고, DNS·TLS·HTTP 같은
+main-frame 실패가 나면 Chromium 기본 오류 문서 대신 네이티브 복구 표면과 `다시 시도` action을 유지한다.
+하위 자원 실패는 이 표면을 열지 않으며, 현재 main document가 성공적으로 끝난 뒤에만 Cloud bridge와
+WebView 입력을 사용할 수 있다.
 연결 실행용 네이티브 Material bottom sheet와 dashboard `…`에서 여는 별도 설정 dialog가
-QR·Keystore·pairing 상태를 소유하고, 별도 secure
+QR/명시적 clipboard 붙여넣기·Keystore·pairing 상태를 소유하고, 별도 secure
 WebView는 암호화 transport로 검증한 PC Remote 문서만 표시한다. APK에는 terminal·workspace·입출력
 표면을 포함하지 않으며, 이 기능은 사용자 PC에 설치된 Laymux의 `/remote/` 문서와 자산이 소유한다.
 Kotlin은 이 자산을 E2E RPC로 받아 검증한 뒤 app 전용 synthetic HTTPS origin에 제공한다.
 WebView의 API 요청은 native HTTP bridge가 기존 AEAD RPC로 암호화하고, terminal output은 native가
 소유한 stream별 AEAD WebSocket과 origin 제한 binary WebMessage bridge로 browser와 같은 Remote v1
 text-header/binary-body 계약을 전달한다. key와 ciphertext는 JavaScript에 노출하지 않는다.
+PC 소유 Remote main document가 4xx/5xx로 응답하거나 E2E session이 없어 문서를 제공할 수 없으면
+Android native가 실패 문서를 렌더링하지 않고 session을 닫은 뒤 Cloud dashboard로 복귀한다. 하위
+자원 실패는 main document 실패와 구분해 Remote 표면을 자동 종료하지 않는다. background 전환이나
+stale document로 취소된 fetch도 unavailable 응답과 구분해 session·document를 보존한다.
 pairing seed wrapping key는 기본적으로 강한 생체 인증을 암호 연산마다 요구하며, 명시적으로
 끄는 경우에만 별도 Keystore-only key를 사용한다. 상태 UI는 비밀이 아닌 pairing metadata만
-읽으므로 앱을 열거나 상태를 표시할 때는 생체 인증을 띄우지 않는다.
+읽으므로 앱을 열거나 상태를 표시할 때는 생체 인증을 띄우지 않는다. 지문 등 등록 생체가
+바뀌어 Android가 공유 biometric wrapping key를 영구 무효화하면 다음 암호 연산에서 이를
+감지해 그 키로 감싼 모든 PC pairing과 무효 alias를 함께 폐기한다. 새 QR/붙여넣기 저장 중
+감지한 경우에는 같은 입력에서 새 biometric key를 생성해 재pairing을 계속한다.
 데스크톱 Remote Access 모달은 cloud identity에 결합된 seed를 Rust에서 만들고 OS keyring에
-보관한 뒤 5분짜리 QR SVG만 표시한다. Android는 seed로 서명한 ACK를 cloud public origin의
+보관한 뒤 같은 5분짜리 초대를 QR SVG와 명시적 clipboard 복사 action으로 제공한다. Android는 QR을
+스캔하거나 사용자가 붙여넣은 동일 초대를 검증한 뒤 seed로 서명한 ACK를 cloud public origin의
 고정 relay route로 보내고, relay는 이를 해당 instance의 기존 WSS tunnel과 고정 desktop route로만
 전달한다. desktop은 첫 client nonce 하나를 확정하고 상호 HMAC proof를 반환한다
-([ADR-0145](../adr/0145-android-pairing-authenticated-one-time-ack.md)). 새 발급은 기존 seed를
+([ADR-0145](../adr/0145-android-pairing-authenticated-one-time-ack.md), [ADR-0212](../adr/0212-android-pairing-invitation-copy-paste.md)). 새 발급은 기존 seed를
 회전하고 명시적 폐기와 cloud disconnect는 record를 삭제한다. 확인된 seed는 사용자가 생체 인증으로
 승인할 때만 메모리 전용 방향별 key로 파생된다. foreground의 성공한 암호화 RPC마다 15분 비활성
 timeout이 갱신된다. background에서는 통신을 중지하고 현재 deadline까지 최대 15분간 key를 보존해
-복귀 시 같은 session을 재개하며, 만료 뒤에는 폐기한다. Android native transport가 고정 relay route에
+복귀 시 같은 session을 재개한다. 만료 뒤에는 key를 폐기하되 선택한 PC와 Remote surface를 유지한 채
+보호 정책에 따라 다시 인증해 새 session을 열고, 재인증이 불가능하거나 취소·실패한 때만 Cloud dashboard로 돌아간다. Android native transport가 고정 relay route에
 AES-256-GCM ciphertext envelope만 보내고, PC 소유 Remote UI는 Android wrapper mode에서 같은 기능 코드를
 native HTTP bridge와 binary output adapter에 연결한다([ADR-0149](../adr/0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md),
 [ADR-0159](../adr/0159-android-e2e-websocket-output-transport.md)). Cloud dashboard가
-선택한 instance와 저장/스캔한 QR instance가 일치해야 이 흐름에 진입한다. PC별
+선택한 instance와 저장/스캔/붙여넣은 초대의 instance가 일치해야 이 흐름에 진입한다. PC별
 `settings.remote.cloudAccessMode`는 기존 평문 Cloud browser Remote와 Android E2E를 함께 허용하거나
 Android E2E 고정 route만 허용한다. 후자는 Cloud tunnel 입구의 exact allowlist로 PC가 직접 강제하며
 Local/Tailscale Direct Remote에는 적용하지 않는다([ADR-0150](../adr/0150-desktop-owned-cloud-remote-access-policy.md)).
@@ -82,13 +95,29 @@ Google Play가 사용자에게 전달하는 최종 APK는 같은 인증서를 �
 주입하고 APK signer certificate를 고정 SHA-256 fingerprint와 대조한 뒤 APK와 checksum을 첨부한다
 ([ADR-0152](../adr/0152-android-cross-store-signing-and-release.md)).
 
-Windows·Linux 데스크톱 release는 GitHub Releases의 `latest.json`을 Tauri updater endpoint로 사용한다.
-release workflow는 main 계보와 stable tag/app version을 검증한 뒤 draft Release에 두 플랫폼 bundle과
-updater artifact를 만들고 GitHub Actions secret의 private key로 서명한다. 모든 필수 platform job이
-성공한 뒤에만 publish/latest로 승격하며, 앱은 대응 public key를 고정해 검증된 artifact만 설치한다.
-프로세스 전역 `UpdateManager`가 시작 후/6시간 주기 확인과 수동 확인·설치 상태를 소유하고 desktop WebView, Automation API, Remote UI가
-같은 snapshot을 읽는다. Android APK 자체 업데이트는 이 경로의 대상이 아니다
-([ADR-0174](../adr/0174-github-signed-desktop-self-update.md)).
+Windows·Linux 데스크톱 release는 `stable`·`beta` 두 채널을 가지며, 각 채널의 최신 릴리스는
+`release-channels` 브랜치에 커밋된 `desktop-<channel>.json` 매니페스트가 SoT다 — GitHub에는 최신
+prerelease를 가리키는 고정 alias가 없다. release workflow는 main 계보와 tag/app version(`tauri.conf.json`
++ `Cargo.toml`)을 검증한 뒤 draft Release에 두 플랫폼 bundle과 updater artifact를 만들고 GitHub Actions
+secret의 private key로 서명한다. prerelease는 tag가 `v?x.y.z-beta.N`이어야 하고 데스크톱 번들을
+NSIS·AppImage로 제한한다(RPM `Version`은 `-`를 담을 수 없다). 필요한 artifact job이 모두 성공한
+뒤에만 publish로 승격하고, 그 뒤 `channels` job이 발행된 릴리스의 `latest.json`을 검증해 채널 파일을
+갱신한다(stable 발행은 beta 파일을 더 높은 버전으로만 전진시킨다). 앱은 대응 public key를 고정해 검증된
+artifact만 설치한다. `releases/latest/download/latest.json`은 채널을 모르는 구버전 앱 경로로 유지한다.
+프로세스 전역 `UpdateManager`가 채널·시작 후/6시간 주기 확인과 수동 확인·설치 상태를 소유하고 desktop WebView, Automation API, Remote UI가
+같은 snapshot을 읽는다
+([ADR-0174](../adr/0174-github-signed-desktop-self-update.md), [ADR-0190](../adr/0190-update-release-channels.md)).
+
+Android 앱도 같은 브랜치의 `android-<channel>.json`으로 자기 채널을 따라간다. 이 매니페스트는 Tauri updater
+manifest가 아니라 `version`·`versionCode`·`releaseUrl`·`apkUrl`·`apkSha256Url`·`pubDate`를 담는 별도 스키마이며,
+내용 전부를 **실제로 APK를 발행한 tag**에서 파생한다(`scripts/release/android-channel-manifest.mjs`). release dispatch의
+`publish_android` 기본값은 false이고, false이면 Android job과 매니페스트 전진을 함께 생략한다. 다만 마지막 Android
+채널 tag 이후 release APK 입력이 바뀌었으면 prepare가 누락을 거절한다. 채널 브랜치의 네 파일은 계속 한 트리 커밋에
+있지만 Android 미발행 릴리스에서는 두 Android 파일을 그대로 보존한다. 부트스트랩은 최신 desktop stable과 실제 APK가
+있는 최신 Android stable을 독립적으로 찾아 시딩한다([ADR-0223](../adr/0223-android-release-advances-only-with-apk.md)).
+폰이 따라갈 채널은 데스크톱 설정을 상속하지 않는 기기-로컬 값(`SharedPreferencesUpdateStore`)이고, 앱은 후보를
+찾으면 배너와 연결 설정의 업데이트 섹션으로 알린 뒤 GitHub 릴리스 페이지로 넘긴다 — APK 다운로드·설치는 하지 않는다
+(`apps/android/.../update/`, [ADR-0223](../adr/0223-android-release-advances-only-with-apk.md)).
 
 ---
 
@@ -147,9 +176,10 @@ updater artifact를 만들고 GitHub Actions secret의 private key로 서명한�
 
 #### 숨김 터미널 자동 종료 (issue #269)
 
-WorkspaceSelectorView의 평상시 목록에서 quick-hide한 워크스페이스, 또는 pane 컨트롤바 토글로 숨긴 Pane이 일정 시간 이상 계속 숨겨져 있으면 해당 터미널(PTY)을 자동 종료하여 메모리/CPU를 절약한다. 숨긴 workspace는 목록 헤더의 유효 개수 chip 아래 보관함에서, 숨긴 Pane은 해당 pane 컨트롤바 토글로 복원한다([ADR-0033](../adr/0033-hidden-items-shelf-set-contract.md), [ADR-0035](../adr/0035-workspace-only-shelf-per-pane-hide-toggle.md)). Remote drawer도 같은 raw state를 편집한다. workspace는 PC와 같은 `Hidden N` 보관함과 visible 행의 eye action을 쓰고, pane은 Remote가 여러 grid를 동시에 그리지 않는 대신 각 pane 행의 eye action과 선택 불가 저강조 hidden 행으로 상태 확인·복원을 제공한다([ADR-0153](../adr/0153-remote-hidden-item-visibility-controls.md)).
+WorkspaceSelectorView의 평상시 목록에서 quick-hide한 워크스페이스, 또는 pane 컨트롤바 토글로 숨긴 Pane이 일정 시간 이상 계속 숨겨져 있으면 해당 터미널(PTY)을 자동 종료하여 메모리/CPU를 절약한다. 숨긴 workspace는 목록 헤더의 유효 개수 chip 아래 보관함에서, 숨긴 Pane은 해당 pane 컨트롤바 토글로 복원한다([ADR-0033](../adr/0033-hidden-items-shelf-set-contract.md), [ADR-0035](../adr/0035-workspace-only-shelf-per-pane-hide-toggle.md)). Remote drawer도 같은 raw state를 편집한다. workspace는 드로어 최상단의 crossed-eye 아이콘과 작은 상태 점으로 hidden 존재를 알리고 독립된 `Hidden workspaces` 하위 화면에서 복원하며, exact 개수는 접근성 이름과 title에 유지한다. visible 행의 eye action은 숨김을 담당한다. pane은 Remote가 여러 grid를 동시에 그리지 않는 대신 각 pane 행의 eye action과 선택 불가 저강조 hidden 행으로 상태 확인·복원을 제공한다([ADR-0153](../adr/0153-remote-hidden-item-visibility-controls.md), [ADR-0187](../adr/0187-remote-drawer-status-dots-and-hidden-subview.md)).
 
 - **설정**: `workspaceSelector.hiddenAutoCloseSeconds`(초, `0` = 비활성화). Rust `WorkspaceSelectorSettings`와 프론트 settings-store 양쪽에 존재하며 `settings.json`에 영구 저장된다.
+- **파괴적 action 확인 설정**: `workspaceSelector.confirmDestructiveActions`(기본 `true`)가 켜져 있으면 desktop Workspace selector의 숨기기·터미널 지우기·layout 삭제·workspace 닫기 버튼은 같은 컨트롤을 두 번 활성화해야 실행된다. Settings → Workspaces → Behavior에서 끌 수 있다([ADR-0211](../adr/0211-workspace-selector-destructive-actions-require-two-activations.md)).
 - **판정/타이머**: `lib/hidden-auto-close.ts`의 순수 함수(`computeHiddenPaneIds`, `advanceHiddenTimers`)가 "현재 숨김인 Pane"과 "타임아웃 경과 여부"를 계산한다. **활성 워크스페이스의 Pane은 절대 종료 대상이 아니다.**
 - **오케스트레이션**: `useHiddenTerminalAutoClose` 훅(AppLayout에서 1회 구동)이 hidden/active/settings raw state 변경을 즉시 평가하고, 5초 interval은 타임아웃 만료 판정에만 사용한다. 타임아웃이 지난 Pane id는 `uiStore.evictedPaneIds`에 기록하며 비활성화(`0`) 시 타이머와 기존 eviction을 즉시 클리어한다.
 - **정밀도**: 숨김 시작·해제 stamp는 raw state 전환을 구독해 즉시 기록·초기화한다. 만료 판정만 5초(`TICK_INTERVAL_MS`) tick 경계에서 수행하므로 실제 종료 시점은 설정한 타임아웃보다 최대 ~1틱(약 5초) 늦을 수 있다(리소스 절약이 목적이라 지연 자체는 무해). 또한 `Date.now()` 벽시계 기준이므로 시스템 절전→복귀 시 숨김 경과 시간을 한꺼번에 인식해 복귀 직후 evict될 수 있다(역시 의도된 동작).
@@ -186,7 +216,7 @@ Workspace (Independent)
 | 동작 | 진입점 | 범위 |
 | --- | --- | --- |
 | 워크스페이스 화면 클리어 | `Ctrl+Alt+L`(`workspace.clearTerminals`), WorkspaceSelectorView 행의 빗자루 버튼, `POST /api/v1/workspaces/{id}/clear` | 그 워크스페이스 **격자**의 `TerminalView` pane 전부. Dock 은 제외 ([ADR-0137](../adr/0137-workspace-clear-ctrl-l-broadcast.md)) |
-| 단일 pane 실제 클리어 | `Alt+L`(`pane.clearTerminal`), `POST /api/v1/panes/{paneId}/clear` | 사용자가 가리킨 `TerminalView` pane 하나. 격자와 Dock 모두 포함 ([ADR-0158](../adr/0158-activity-aware-single-pane-clear.md)) |
+| 단일 pane 실제 클리어 | `Alt+L`(`pane.clearTerminal`), pane 컨트롤 바의 빗자루 버튼, `POST /api/v1/panes/{paneId}/clear` | 사용자가 가리킨 `TerminalView` pane 하나. 격자와 Dock 모두 포함 ([ADR-0158](../adr/0158-activity-aware-single-pane-clear.md)) |
 
 워크스페이스 화면 클리어는 pane마다 `Ctrl+L`(`\x0c`) 하나를 그대로 브로드캐스트한다 — activity 판정도, 설정도 없다. 세션이 아직 없는 pane(`notReady`)만 건너뛰고, 작업 중인 pane에도 그대로 보낸다. 실행은 `ui/src/lib/workspace-clear.ts`의 `clearWorkspace()` 한 함수다.
 
@@ -294,7 +324,7 @@ View:     viewOverrides[paneId]        (localStorage: "laymux-view-overrides")
 | `UsageView` | 자유 | Claude Code 사용량 모니터. Rust `usage_probe` 가 숨은 PTY 로 `claude` 를 띄워 `/usage` 화면을 파싱한 스냅샷(세션 · 주간 all models · 주간 모델별)을 표시하고, pane 종횡비에 따라 stacked / columns / compact 배치를 자동 선택한다(`viewOverrides.usageLayout` 으로 고정 가능). 모니터링 대상 `CLAUDE_CONFIG_DIR` 은 pane view config 의 `configDir` 이며 컨트롤 바의 view 선택에서 `settings.usage.claude.configDirs` 항목으로 전환한다. 전역 설정은 Settings → Views → 사용량. pace(창 경과율)는 프론트 `lib/usage-pace.ts` 단일 구현 ([ADR-0102](../adr/0102-claude-usage-probe-headless-pty.md)) |
 | `CodexUsageView` | 자유 | Codex 사용량 모니터. 로컬 `codex app-server` rate-limit 스냅샷을 표시한다([ADR-0104](../adr/0104-codex-usage-app-server-probe.md)). |
 | `GrokUsageView` | 자유 | Grok Build 사용량 모니터. `/usage` 화면의 닫힌 행 키 `weekly` · `credits` · `payg` 를 `usage.grok.visibleRows` 로 고른다([ADR-0156](../adr/0156-grok-first-class-agent.md), [ADR-0167](../adr/0167-grok-usage-drops-legacy-monthly.md)). |
-| `FileExplorerView` | 자유 | CWD 동기화 기반 파일 탐색기. Rust `list_directory`로 디렉터리 나열, 편집 가능한 주소창(경로 직접 입력/붙여넣기 → `stat_path`로 검증 후 디렉터리 이동 또는 파일이면 부모 이동+통합 뷰어 open, #278), 파일 뷰어(텍스트/이미지/HTML·Markdown preview/source/터미널) 지원. 통합 FileViewer 오버레이도 같은 컴포넌트를 현재 파일의 부모 디렉터리에 맞춘 접이식 왼쪽 탐색기로 재사용하며, 탐색기에서 파일을 열 때 오버레이의 최대화 상태를 유지한다. `.html`·`.md`는 기본 preview와 source 토글을 제공하되, `extensionViewers`에 해당 확장자·command·profile 매핑이 있으면 그 명시적 터미널 프로필의 외부 뷰어를 우선한다(#404/#446, [ADR-0031](../adr/0031-extension-viewer-profile-path-conversion.md)). Remote Focused UI는 host path 입력과 현재 데스크톱 viewer path를 명시적으로 가져오는 `From host` action을 제공하고, `Open viewer` 클릭 시점의 exact path를 active lease와 claim 전용 FileViewer capability로 읽어 별도 브라우저 탭의 안전한 웹 renderer로 표시한다([ADR-0041](../adr/0041-remote-served-file-viewer.md), [ADR-0042](../adr/0042-remote-file-viewer-secret-capability.md)). |
+| `FileExplorerView` | 자유 | CWD 동기화 기반 파일 탐색기. Rust `list_directory`로 디렉터리 나열, 편집 가능한 주소창(경로 직접 입력/붙여넣기 → `stat_path`로 검증 후 디렉터리 이동 또는 파일이면 부모 이동+통합 뷰어 open, #278), 파일 뷰어(텍스트/이미지/HTML·Markdown preview/source/터미널) 지원. 폴더·파일·심볼릭 링크 행 아이콘은 Lucide 공용 이름(`FolderUp`/`Folder`/`Link`/`File`)이며 FileExplorer, FileViewer(오버레이 탐색기·아카이브 목록), Remote 디렉터리 목록이 같은 매핑을 쓴다([ADR-0205](../adr/0205-lucide-application-icon-source.md), [ADR-0210](../adr/0210-remote-lucide-icon-boundary.md)). 통합 FileViewer 오버레이도 같은 컴포넌트를 현재 파일의 부모 디렉터리에 맞춘 접이식 왼쪽 탐색기로 재사용하며, 탐색기에서 파일을 열 때 오버레이의 최대화 상태를 유지한다. `.html`·`.md`는 기본 preview와 source 토글을 제공하되, `extensionViewers`에 해당 확장자·command·profile 매핑이 있으면 그 명시적 터미널 프로필의 외부 뷰어를 우선한다(#404/#446, [ADR-0031](../adr/0031-extension-viewer-profile-path-conversion.md)). Remote Explorer 오버레이는 디렉터리 목록 위에 host path 입력과 현재 데스크톱 viewer path를 명시적으로 가져오는 `From host` action을 제공하고, `Open` 클릭 시점의 exact path를 active lease와 claim 전용 FileViewer capability로 읽어 같은 오버레이의 sandboxed 웹 renderer에 표시한다. browser는 전용 capability 헤더를, Android E2E는 exact session/claim에 결합된 타입화 body proof를 사용한다([ADR-0041](../adr/0041-remote-served-file-viewer.md), [ADR-0042](../adr/0042-remote-file-viewer-secret-capability.md), [ADR-0184](../adr/0184-remote-file-viewer-in-page-overlay.md), [ADR-0198](../adr/0198-remote-file-explorer-overlay.md), [ADR-0208](../adr/0208-android-e2e-file-viewer-typed-capability.md)). |
 | `IssueReporterView` | 자유 | GitHub 이슈 리포터. 제출은 `issueReporter.submit` 키바인딩(기본 `Ctrl+Enter`) |
 | `GitHubView` | 자유 | 현재 CWD 리포의 열린 이슈/PR 목록. sync group CWD 를 **수신만** 하며(컨트롤 바에 receive 토글만 노출), 백엔드의 `owner/repo` 레지스트리가 10초 주기로 `gh issue/pr list` 결과를 공유하고, 주기가 지난 요청에는 기억된 목록을 먼저 내려준 뒤 뒤에서 갱신한다([ADR-0110](../adr/0110-github-snapshot-stale-while-revalidate.md)). 행 클릭은 브라우저 열기, 링크 복사 버튼은 상시 노출(PR 행은 그 옆에 브랜치 복사 버튼 추가), `⋯` 메뉴는 이슈 close(completed/not planned)·PR merge/squash/rebase/close 를 2단계 확인으로 실행한다. `#숫자` 는 title 과 같은 크기·강조 색으로 그리며, 글꼴·크기·번호 색·표시 열·라벨 개수/폭은 전역 `settings.github` 이 소유한다([ADR-0111](../adr/0111-github-view-display-settings.md)). Issues/PRs 탭 선택은 반대로 pane 인스턴스 UI 상태(`viewOverrides.githubTab`)이고 `settings.github.defaultTab` 은 아직 고르지 않은 pane 의 씨앗값이다([ADR-0115](../adr/0115-github-view-tab-per-pane-state.md)) (#708, [ADR-0106](../adr/0106-github-list-view-repo-registry.md)) |
 | `EmptyView` | 자유 | View 미지정 상태. 실행할 View 선택 UI |

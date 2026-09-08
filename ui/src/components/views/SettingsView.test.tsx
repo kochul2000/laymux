@@ -7,6 +7,11 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }));
 
+const mockShellOpen = vi.fn().mockResolvedValue(undefined);
+vi.mock("@tauri-apps/plugin-shell", () => ({
+  open: (...args: unknown[]) => mockShellOpen(...args),
+}));
+
 vi.mock("@/lib/persist-session", () => ({
   persistSession: vi.fn().mockResolvedValue(undefined),
 }));
@@ -45,10 +50,27 @@ let mockCloudStatus = {
   lastError: null as string | null,
 };
 
+const DEFAULT_APP_UPDATE_STATUS = {
+  enabled: true,
+  channel: "stable" as const,
+  currentVersion: "0.11.0",
+  availableVersion: null as string | null,
+  notes: null as string | null,
+  publishedAt: null as string | null,
+  operation: "idle" as const,
+  downloadedBytes: 0,
+  totalBytes: null as number | null,
+  checkedAtMs: 1787385976087,
+  lastError: null as string | null,
+};
+let mockAppUpdateStatus: typeof DEFAULT_APP_UPDATE_STATUS & { channel: string } =
+  DEFAULT_APP_UPDATE_STATUS;
+
 describe("SettingsView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCloudStatus = { connected: false, instanceId: null, lastError: null };
+    mockAppUpdateStatus = DEFAULT_APP_UPDATE_STATUS;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
       if (cmd === "list_system_monospace_fonts") {
         return Promise.resolve(["Cascadia Mono", "Fira Code", "Consolas"]);
@@ -68,8 +90,45 @@ describe("SettingsView", () => {
         const runtimeToken = typeof args?.authToken === "string" ? args.authToken : "";
         return Promise.resolve(remoteAccessStatus(runtimeEnabled, runtimeToken));
       }
+      if (
+        cmd === "get_app_update_status" ||
+        cmd === "check_app_update" ||
+        cmd === "install_app_update"
+      ) {
+        return Promise.resolve(mockAppUpdateStatus);
+      }
       if (cmd === "get_cloud_status") {
         return Promise.resolve(mockCloudStatus);
+      }
+      if (cmd === "set_composer_starred_entry") {
+        const text = String(args?.text ?? "");
+        const entries = useSettingsStore.getState().terminal.composerStarredEntries;
+        if (!args?.starred) {
+          return Promise.resolve(entries.filter((entry) => entry.value !== text));
+        }
+        const previousText = typeof args?.previousText === "string" ? args.previousText : undefined;
+        const next = {
+          value: text,
+          label: typeof args?.label === "string" ? args.label : "",
+          send: args?.send === true,
+        };
+        const identity = previousText || text;
+        const index = entries.findIndex((entry) => entry.value === identity);
+        if (index >= 0) {
+          return Promise.resolve(
+            entries.map((entry, i) =>
+              i === index
+                ? {
+                    value: text,
+                    label: typeof args?.label === "string" ? args.label : entry.label,
+                    send: typeof args?.send === "boolean" ? args.send : entry.send,
+                  }
+                : entry,
+            ),
+          );
+        }
+        if (entries.some((entry) => entry.value === text)) return Promise.resolve(entries);
+        return Promise.resolve([...entries, next]);
       }
       if (cmd === "cloud_connect_start") {
         mockCloudStatus = { connected: false, instanceId: "instance-2", lastError: null };
@@ -102,6 +161,20 @@ describe("SettingsView", () => {
   it("renders settings panel", () => {
     render(<SettingsView />);
     expect(screen.getByTestId("settings-view")).toBeInTheDocument();
+  });
+
+  it("groups related sections and exposes the active section to assistive technology", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+    const appearance = screen.getByTestId("settings-group-groupAppearance");
+    expect(within(appearance).getByRole("heading", { name: "Appearance" })).toBeInTheDocument();
+    expect(within(appearance).getByTestId("nav-font")).toBeInTheDocument();
+    expect(within(appearance).getByTestId("nav-interface")).toBeInTheDocument();
+    const input = screen.getByTestId("settings-group-groupInput");
+    expect(within(input).getByTestId("nav-paste")).toBeInTheDocument();
+    await user.click(within(input).getByTestId("nav-keybindings"));
+    expect(screen.getByTestId("nav-keybindings")).toHaveAttribute("aria-current", "page");
+    expect(screen.getByTestId("nav-startup")).not.toHaveAttribute("aria-current");
   });
 
   describe("external navigation (ui.navigateSettings)", () => {
@@ -241,6 +314,152 @@ describe("SettingsView", () => {
         keepAwake: true,
         keepAwakeWhenBusy: true,
       });
+    });
+  });
+
+  describe("Updates section", () => {
+    it("shows the current version, its channel, and the release links", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-update"));
+
+      await waitFor(() =>
+        expect(screen.getByTestId("update-current-version")).toHaveTextContent("0.11.0"),
+      );
+      expect(screen.getByTestId("update-current-channel")).toBeInTheDocument();
+      expect(screen.getByTestId("update-open-current-release")).toBeInTheDocument();
+      expect(screen.getByTestId("update-open-releases")).toBeInTheDocument();
+    });
+
+    it("saves the chosen channel and warns while beta is selected", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-update"));
+      expect(screen.getByTestId("update-channel-select")).toHaveValue("stable");
+      expect(screen.queryByTestId("update-channel-beta-warning")).not.toBeInTheDocument();
+
+      await user.selectOptions(screen.getByTestId("update-channel-select"), "beta");
+      expect(screen.getByTestId("update-channel-beta-warning")).toBeInTheDocument();
+
+      await user.click(screen.getByTestId("save-settings-btn"));
+      expect(useSettingsStore.getState().update).toEqual({ channel: "beta" });
+    });
+
+    it("checks for updates right after a channel switch is saved", async () => {
+      // The periodic check is six hours away, and the backend reads the channel
+      // from the file this save just wrote (ADR-0190).
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-update"));
+      await user.selectOptions(screen.getByTestId("update-channel-select"), "beta");
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("check_app_update"));
+    });
+
+    it("does not check for updates when the channel did not change", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-interface"));
+      await user.click(screen.getByTestId("keep-awake-when-busy-toggle"));
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      await waitFor(() => expect(persistSession).toHaveBeenCalled());
+      expect(mockInvoke).not.toHaveBeenCalledWith("check_app_update");
+    });
+
+    it("checks on demand and reports being up to date", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-update"));
+      await waitFor(() => expect(screen.getByTestId("update-up-to-date")).toBeInTheDocument());
+
+      await user.click(screen.getByTestId("update-check-btn"));
+      await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("check_app_update"));
+      expect(screen.getByTestId("update-checked-at")).toBeInTheDocument();
+    });
+
+    it("hides automatic check errors until an explicit check reports one", async () => {
+      const automaticError = "https://updates.example.test/" + "automatic-error/".repeat(40);
+      mockAppUpdateStatus = { ...mockAppUpdateStatus, lastError: automaticError };
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-update"));
+      await waitFor(() => expect(screen.getByTestId("update-up-to-date")).toBeInTheDocument());
+      expect(screen.queryByTestId("update-error")).not.toBeInTheDocument();
+
+      const manualError = "https://updates.example.test/" + "manual-error/".repeat(40);
+      mockAppUpdateStatus = { ...mockAppUpdateStatus, lastError: manualError };
+      await user.click(screen.getByTestId("update-check-btn"));
+
+      const error = await screen.findByTestId("update-error");
+      expect(error).toHaveTextContent(manualError);
+      expect(error).toHaveClass("min-w-0", "max-w-full", "break-words", "[overflow-wrap:anywhere]");
+    });
+
+    it("says on the button itself why a dev build cannot check", async () => {
+      // The gate lives in Rust (a debug binary must not replace itself with a
+      // release artifact). The complaint it produced was a UI one: the button
+      // looked enabled, so a click that legitimately did nothing read as a bug.
+      mockAppUpdateStatus = { ...mockAppUpdateStatus, enabled: false };
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-update"));
+      const check = await waitFor(() => screen.getByTestId("update-check-btn"));
+      expect(check).toBeDisabled();
+      expect(check).toHaveAttribute("title", "Self-update is disabled in development builds.");
+      expect(screen.getByTestId("update-disabled-note")).toBeInTheDocument();
+
+      await user.click(check);
+      expect(mockInvoke).not.toHaveBeenCalledWith("check_app_update");
+    });
+
+    it("marks the buttons that leave the app for the browser", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-update"));
+      const openCurrent = await waitFor(() => screen.getByTestId("update-open-current-release"));
+      expect(openCurrent.querySelector("svg")).not.toBeNull();
+      expect(openCurrent).toHaveAttribute("title", "Opens in your browser");
+      expect(screen.getByTestId("update-open-releases").querySelector("svg")).not.toBeNull();
+
+      await user.click(openCurrent);
+      await waitFor(() =>
+        expect(mockShellOpen).toHaveBeenCalledWith(
+          "https://github.com/kochul2000/laymux/releases/tag/v0.11.0",
+        ),
+      );
+    });
+
+    it("shows the pending version with its release time and offers the install", async () => {
+      mockAppUpdateStatus = {
+        ...mockAppUpdateStatus,
+        availableVersion: "0.11.1-beta.1",
+        channel: "beta",
+        notes: "beta notes",
+        publishedAt: "2026-08-22T07:45:00.000Z",
+      };
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-update"));
+      await waitFor(() =>
+        expect(screen.getByTestId("update-available")).toHaveTextContent("0.11.1-beta.1"),
+      );
+      expect(screen.getByTestId("update-published-at")).toBeInTheDocument();
+      expect(screen.getByTestId("update-notes")).toHaveTextContent("beta notes");
+
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      await user.click(screen.getByTestId("update-install-btn"));
+      await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("install_app_update"));
     });
   });
 
@@ -1185,6 +1404,51 @@ describe("SettingsView", () => {
     expect(useSettingsStore.getState().terminal.copyOnSelect).toBe(false);
   });
 
+  it("lists, adds, and removes host-global Composer stars immediately", async () => {
+    const user = userEvent.setup();
+    useSettingsStore.getState().setTerminal({ composerStarredEntries: ["git status"] });
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-terminal"));
+    expect(screen.getByTestId("composer-starred-entry-0")).toHaveTextContent("git status");
+
+    await user.type(screen.getByTestId("composer-starred-entry-input"), "git push");
+    await user.click(screen.getByTestId("composer-starred-entry-add"));
+    await waitFor(() =>
+      expect(useSettingsStore.getState().terminal.composerStarredEntries).toEqual([
+        { value: "git status", label: "", send: false },
+        { value: "git push", label: "", send: false },
+      ]),
+    );
+
+    await user.click(screen.getByTestId("composer-starred-entry-remove-0"));
+    await waitFor(() =>
+      expect(useSettingsStore.getState().terminal.composerStarredEntries).toEqual([
+        { value: "git push", label: "", send: false },
+      ]),
+    );
+  });
+
+  it("edits a starred Composer entry label, value, and send flag immediately", async () => {
+    const user = userEvent.setup();
+    useSettingsStore.getState().setTerminal({ composerStarredEntries: ["git status"] });
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-terminal"));
+    await user.click(screen.getByTestId("composer-starred-entry-edit-0"));
+    const label = screen.getByTestId("composer-starred-editor-label");
+    await user.clear(label);
+    await user.type(label, "gs");
+    await user.click(screen.getByTestId("composer-starred-editor-send"));
+    await user.click(screen.getByTestId("composer-starred-editor-save"));
+
+    await waitFor(() =>
+      expect(useSettingsStore.getState().terminal.composerStarredEntries).toEqual([
+        { value: "git status", label: "gs", send: true },
+      ]),
+    );
+  });
+
   // -- Terminal section: kill-on-exit (issue #451) --
 
   it("interrupt-on-exit is off by default and its inputs are hidden", async () => {
@@ -1306,26 +1570,46 @@ describe("SettingsView", () => {
     expect(useSettingsStore.getState().terminal.pathLinkOsOpenEnabled).toBe(false);
   });
 
-  // -- Terminal section: scrollbar style --
+  // -- Terminal section: link activation gate (ADR-0224) --
 
-  it("shows scrollbar style select in terminal section", async () => {
+  it("defaults both link activation selects to immediate", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
     await user.click(screen.getByTestId("nav-terminal"));
-    expect(screen.getByTestId("scrollbar-style-select")).toBeInTheDocument();
+    expect(screen.getByTestId("url-link-activation-select")).toHaveValue("immediate");
+    expect(screen.getByTestId("path-link-activation-select")).toHaveValue("immediate");
   });
 
-  it("scrollbar style select updates store", async () => {
+  it("persists each link activation mode independently on Save", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
     await user.click(screen.getByTestId("nav-terminal"));
-    const select = screen.getByTestId("scrollbar-style-select") as HTMLSelectElement;
-    await user.selectOptions(select, "separate");
-
+    fireEvent.change(screen.getByTestId("path-link-activation-select"), {
+      target: { value: "chip" },
+    });
     await user.click(screen.getByTestId("save-settings-btn"));
-    expect(useSettingsStore.getState().terminal.scrollbarStyle).toBe("separate");
+
+    expect(useSettingsStore.getState().terminal.pathLinkActivation).toBe("chip");
+    // ADR-0224: 키 2개는 독립이다 — 경로를 칩으로 바꿔도 URL 은 즉발로 남는다.
+    expect(useSettingsStore.getState().terminal.urlLinkActivation).toBe("immediate");
+
+    fireEvent.change(screen.getByTestId("url-link-activation-select"), {
+      target: { value: "chip" },
+    });
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().terminal.urlLinkActivation).toBe("chip");
+  });
+
+  // -- Terminal section: fixed scrollbar layout --
+
+  it("does not expose a scrollbar style setting", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-terminal"));
+    expect(screen.queryByTestId("scrollbar-style-select")).not.toBeInTheDocument();
   });
 
   // -- Terminal section: wheel scroll sensitivity --
@@ -1578,6 +1862,20 @@ describe("SettingsView", () => {
       restoreSession: false,
       sessionMaxAgeHours: 72,
     });
+  });
+
+  it("saves the Codex transcript scroll convenience toggle", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-codex"));
+    const toggle = screen.getByTestId("codex-transcript-scroll-toggle") as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+
+    await user.click(toggle);
+    await user.click(screen.getByTestId("save-settings-btn"));
+
+    expect(useSettingsStore.getState().codex.transcriptScrollEnabled).toBe(false);
   });
 
   it("changing codex status message mode updates store after Save", async () => {
@@ -2156,7 +2454,7 @@ describe("SettingsView", () => {
   });
 
   describe("Remote settings sections", () => {
-    it("splits Remote navigation into connection and display sections", async () => {
+    it("keeps only host policy in PC Remote settings", async () => {
       const user = userEvent.setup();
       render(<SettingsView />);
 
@@ -2165,31 +2463,25 @@ describe("SettingsView", () => {
       expect(await screen.findByTestId("remote-settings-enabled-toggle")).toBeInTheDocument();
       expect(screen.getAllByText("Remote Connection").length).toBeGreaterThanOrEqual(1);
       expect(screen.getByTestId("remote-settings-allowed-ips-input")).toBeInTheDocument();
-
-      await user.click(screen.getByTestId("nav-remote-display"));
-
+      expect(screen.getByTestId("remote-settings-serve-terminal-font-toggle")).toBeInTheDocument();
+      expect(screen.getByTestId("remote-settings-widgets-toggle")).toBeInTheDocument();
+      expect(screen.queryByTestId("nav-remote-display")).not.toBeInTheDocument();
       expect(
-        await screen.findByTestId("remote-settings-terminal-font-size-input"),
-      ).toBeInTheDocument();
-      expect(screen.getByTestId("remote-settings-composer-font-size-input")).toBeInTheDocument();
-      expect(screen.queryByTestId("remote-settings-enabled-toggle")).not.toBeInTheDocument();
+        screen.queryByTestId("remote-settings-terminal-font-size-input"),
+      ).not.toBeInTheDocument();
     });
 
-    it("saves PC-owned Remote terminal and composer font sizes", async () => {
+    it("saves Remote host data exposure policy from Remote Connection", async () => {
       const user = userEvent.setup();
       render(<SettingsView />);
 
-      await user.click(screen.getByTestId("nav-remote-display"));
-      fireEvent.change(await screen.findByTestId("remote-settings-terminal-font-size-input"), {
-        target: { value: "18" },
-      });
-      fireEvent.change(screen.getByTestId("remote-settings-composer-font-size-input"), {
-        target: { value: "20" },
-      });
+      await user.click(screen.getByTestId("nav-remote"));
+      await user.click(await screen.findByTestId("remote-settings-serve-terminal-font-toggle"));
+      await user.click(screen.getByTestId("remote-settings-widgets-toggle"));
       await user.click(screen.getByTestId("save-settings-btn"));
 
-      expect(useSettingsStore.getState().remote.terminalFontSize).toBe(18);
-      expect(useSettingsStore.getState().remote.composerFontSize).toBe(20);
+      expect(useSettingsStore.getState().remote.serveTerminalFont).toBe(true);
+      expect(useSettingsStore.getState().remote.widgets).toBe(false);
     });
 
     it("enables startup remote access with a generated token only after Save", async () => {
@@ -2247,34 +2539,6 @@ describe("SettingsView", () => {
         "fd7a:115c:a1e0::/48",
       ]);
       expect(useSettingsStore.getState().remote.autoMobileModeMinWidth).toBe(0);
-    });
-
-    it("saves the remote wheel sensitivities without touching the desktop ones", async () => {
-      const user = userEvent.setup();
-      render(<SettingsView />);
-
-      await user.click(screen.getByTestId("nav-remote-display"));
-      const wheel = (await screen.findByTestId(
-        "remote-settings-scroll-sensitivity-input",
-      )) as HTMLInputElement;
-      fireEvent.change(wheel, { target: { value: "2.5" } });
-      const fastWheel = screen.getByTestId(
-        "remote-settings-fast-scroll-sensitivity-input",
-      ) as HTMLInputElement;
-      fireEvent.change(fastWheel, { target: { value: "50" } });
-      const touch = screen.getByTestId(
-        "remote-settings-touch-scroll-sensitivity-input",
-      ) as HTMLInputElement;
-      fireEvent.change(touch, { target: { value: "1.5" } });
-
-      await user.click(screen.getByTestId("save-settings-btn"));
-
-      const state = useSettingsStore.getState();
-      expect(state.remote.scrollSensitivity).toBe(2.5);
-      expect(state.remote.touchScrollSensitivity).toBe(1.5);
-      // Clamped to the band xterm accepts.
-      expect(state.remote.fastScrollSensitivity).toBe(20);
-      expect(state.terminal.scrollSensitivity).toBe(1);
     });
 
     it("enables Tailscale-only access and adds the required Tailnet ranges", async () => {
@@ -2335,6 +2599,26 @@ describe("SettingsView", () => {
 
       expect(useSettingsStore.getState().remote.customHosts).toEqual([]);
       expect(useSettingsStore.getState().remote.preferredHost).toBe("");
+    });
+
+    it("normalizes attachment extensions and clamps the max attachment size", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+      const input = (await screen.findByTestId(
+        "remote-settings-attachment-extension-input",
+      )) as HTMLInputElement;
+      await user.type(input, ".PDF ");
+      await user.click(screen.getByTestId("remote-settings-attachment-extension-add"));
+      expect(input.value).toBe("");
+
+      const maxMib = screen.getByTestId("remote-settings-attachment-max-mib") as HTMLInputElement;
+      fireEvent.change(maxMib, { target: { value: "25" } });
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      expect(useSettingsStore.getState().remote.attachmentExtraExtensions).toEqual(["pdf"]);
+      expect(useSettingsStore.getState().remote.attachmentMaxMib).toBe(10);
     });
 
     it("reconciles backend access status after disabling startup remote access", async () => {
@@ -2923,6 +3207,37 @@ describe("SettingsView", () => {
       const env = screen.getByTestId("ws-display-environment-toggle") as HTMLInputElement;
       expect(minimap.checked).toBe(true);
       expect(env.checked).toBe(true);
+    });
+
+    it("defaults the last input layout to per-pane and saves workspace-latest mode", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+      await user.click(screen.getByTestId("nav-workspaceDisplay"));
+
+      const select = screen.getByTestId("workspace-last-input-mode-select") as HTMLSelectElement;
+      expect(select.value).toBe("perPane");
+
+      await user.selectOptions(select, "workspaceLatest");
+      expect(useSettingsStore.getState().workspaceSelector.lastInputMode).toBe("perPane");
+
+      await user.click(screen.getByTestId("save-settings-btn"));
+      expect(useSettingsStore.getState().workspaceSelector.lastInputMode).toBe("workspaceLatest");
+    });
+
+    it("defaults destructive action confirmation on and saves an opt-out", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+      await user.click(screen.getByTestId("nav-workspaceDisplay"));
+
+      const toggle = screen.getByTestId("workspace-destructive-confirm-toggle") as HTMLInputElement;
+      expect(toggle.checked).toBe(true);
+
+      await user.click(toggle);
+      expect(toggle.checked).toBe(false);
+      expect(useSettingsStore.getState().workspaceSelector.confirmDestructiveActions).toBe(true);
+
+      await user.click(screen.getByTestId("save-settings-btn"));
+      expect(useSettingsStore.getState().workspaceSelector.confirmDestructiveActions).toBe(false);
     });
 
     it("toggling a checkbox and saving updates store", async () => {

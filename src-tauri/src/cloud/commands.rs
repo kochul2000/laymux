@@ -58,13 +58,16 @@ fn cloud_disconnect_best_effort(state: &AppState) -> CloudStatus {
             errors.push(format!("keyring delete failed: {error}"));
         }
 
-        let mut settings = crate::settings::load_settings();
-        settings.remote.cloud_enabled = false;
-        settings.remote.cloud_instance_id = None;
-        settings.remote.cloud_tunnel_url = None;
-        settings.remote.cloud_server_base_url = None;
-        match crate::settings::save_settings(&settings).map_err(AppError::Other) {
-            Ok(()) => {
+        match crate::settings::update_settings(|settings| {
+            settings.remote.cloud_enabled = false;
+            settings.remote.cloud_instance_id = None;
+            settings.remote.cloud_tunnel_url = None;
+            settings.remote.cloud_server_base_url = None;
+            Ok(())
+        })
+        .map_err(AppError::Other)
+        {
+            Ok(settings) => {
                 if let Err(error) = crate::remote_server::update_persistent_cloud_settings_snapshot(
                     state,
                     &settings.remote,

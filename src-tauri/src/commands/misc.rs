@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::activity;
 use crate::automation_server::AutomationResponse;
@@ -8,6 +8,13 @@ use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 use crate::terminal::{TerminalActivity, TerminalNotification, TerminalStateInfo};
+
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SettingsRecoveryAcknowledgeError {
+    RecoveryDocumentRejected { message: String },
+    RuntimeReconcileFailed { message: String },
+}
 
 #[tauri::command]
 pub fn greet(name: &str) -> String {
@@ -113,7 +120,7 @@ fn is_monospace(font: &font_kit::font::Font) -> bool {
     glyphs.len() == 2 && (glyphs[0] - glyphs[1]).abs() < 1.0
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_system_monospace_fonts() -> Result<Vec<String>, String> {
     use font_kit::source::SystemSource;
     let source = SystemSource::new();
@@ -139,38 +146,49 @@ pub fn list_system_monospace_fonts() -> Result<Vec<String>, String> {
     Ok(result)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn load_settings() -> Result<crate::settings::Settings, String> {
     Ok(crate::settings::load_settings())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn load_settings_validated() -> Result<crate::settings::SettingsLoadResult, String> {
     Ok(crate::settings::load_settings_validated())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn reset_settings(
     state: State<Arc<AppState>>,
     app: AppHandle,
 ) -> Result<crate::settings::Settings, String> {
     let default_settings = crate::settings::Settings::default();
     crate::settings::save_settings(&default_settings)?;
-    let change = crate::remote_server::update_persistent_remote_settings(
-        &state,
-        &app,
-        default_settings.remote.clone(),
-    )?;
-    if let Some(enabled) = change.effective_enabled {
-        crate::cloud::tunnel::reconcile_cloud_tunnel_for_access(
-            state.inner().clone(),
-            app,
-            enabled,
-        );
-    } else if change.cloud_access_mode_changed {
-        crate::cloud::tunnel::restart_cloud_tunnel_for_policy_change(state.inner().clone(), app);
-    }
+    // Reset can move the update channel (back to stable) without the frontend
+    // settings-apply path ever running — the recovery modal reloads the page.
+    // The process-global updater would otherwise keep the old channel and its
+    // candidate until the next periodic check (ADR-0190).
+    crate::app_update::schedule_channel_recheck(app.clone(), state.app_update.clone());
+    reconcile_persistent_remote_runtime(state.inner(), &app, default_settings.remote.clone())?;
     Ok(default_settings)
+}
+
+#[tauri::command(async)]
+pub fn acknowledge_settings_recovery(
+    expected_recovery_revision: String,
+    state: State<Arc<AppState>>,
+    app: AppHandle,
+) -> Result<crate::settings::Settings, SettingsRecoveryAcknowledgeError> {
+    complete_settings_recovery(
+        || crate::settings::acknowledge_settings_recovery(&expected_recovery_revision),
+        |settings| {
+            // The acknowledged file may have been edited while the modal was open.
+            // Reconcile backend-owned state from the exact snapshot just committed
+            // before the frontend is allowed to resume checkpoint writes.
+            reconcile_persistent_remote_runtime(state.inner(), &app, settings.remote.clone())?;
+            crate::app_update::schedule_channel_recheck(app.clone(), state.app_update.clone());
+            Ok(())
+        },
+    )
 }
 
 #[tauri::command]
@@ -178,33 +196,79 @@ pub fn get_settings_path() -> Result<String, String> {
     Ok(crate::settings::settings_path().display().to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_settings(
     settings: crate::settings::Settings,
     state: State<Arc<AppState>>,
     app: AppHandle,
 ) -> Result<(), String> {
-    crate::settings::save_settings(&settings)?;
-    let change =
-        crate::remote_server::update_persistent_remote_settings(&state, &app, settings.remote)?;
+    let settings = crate::settings::save_frontend_settings(&settings)?;
+    reconcile_persistent_remote_runtime(state.inner(), &app, settings.remote)?;
+    Ok(())
+}
+
+#[tauri::command(async)]
+pub fn set_composer_starred_entry(
+    text: String,
+    starred: bool,
+    label: Option<String>,
+    send: Option<bool>,
+    previous_text: Option<String>,
+    app: AppHandle,
+) -> Result<Vec<crate::settings::ComposerStarredEntry>, String> {
+    crate::settings::update_composer_starred_entry(
+        &text,
+        starred,
+        label.as_deref(),
+        send,
+        previous_text.as_deref(),
+        |entries| {
+            if let Err(error) = app.emit(EVENT_COMPOSER_STARRED_ENTRIES_CHANGED, entries) {
+                tracing::warn!(%error, "failed to emit composer starred entries change");
+            }
+        },
+    )
+}
+
+fn reconcile_persistent_remote_runtime(
+    state: &Arc<AppState>,
+    app: &AppHandle,
+    remote: crate::settings::models::RemoteSettings,
+) -> Result<(), String> {
+    let change = crate::remote_server::update_persistent_remote_settings(state, app, remote)?;
     if let Some(enabled) = change.effective_enabled {
         crate::cloud::tunnel::reconcile_cloud_tunnel_for_access(
-            state.inner().clone(),
-            app,
+            Arc::clone(state),
+            app.clone(),
             enabled,
         );
     } else if change.cloud_access_mode_changed {
-        crate::cloud::tunnel::restart_cloud_tunnel_for_policy_change(state.inner().clone(), app);
+        crate::cloud::tunnel::restart_cloud_tunnel_for_policy_change(
+            Arc::clone(state),
+            app.clone(),
+        );
     }
     Ok(())
 }
 
-#[tauri::command]
+fn complete_settings_recovery(
+    acknowledge: impl FnOnce() -> Result<crate::settings::Settings, String>,
+    reconcile_runtime: impl FnOnce(&crate::settings::Settings) -> Result<(), String>,
+) -> Result<crate::settings::Settings, SettingsRecoveryAcknowledgeError> {
+    let settings = acknowledge().map_err(|message| {
+        SettingsRecoveryAcknowledgeError::RecoveryDocumentRejected { message }
+    })?;
+    reconcile_runtime(&settings)
+        .map_err(|message| SettingsRecoveryAcknowledgeError::RuntimeReconcileFailed { message })?;
+    Ok(settings)
+}
+
+#[tauri::command(async)]
 pub fn load_memo(key: String) -> Result<String, String> {
     crate::settings::load_memo(&key)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_memo(key: String, content: String) -> Result<(), String> {
     crate::settings::save_memo(&key, &content)
 }
@@ -489,12 +553,12 @@ fn get_repo_url(shell_prefix: &str, repo: Option<&str>) -> Result<String, String
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_listening_ports() -> Vec<crate::port_detect::ListeningPort> {
     crate::port_detect::get_listening_ports()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_git_branch(working_dir: String) -> Option<String> {
     // A pane's stored cwd is in Linux form on Windows (PowerShell → `/mnt/d/…`,
     // WSL → `/home/…`). Convert to a Windows access path before touching the FS,
@@ -509,12 +573,12 @@ pub fn get_git_branch(working_dir: String) -> Option<String> {
 /// (`https://github.com/{owner}/{repo}`), or None when the path is not a
 /// GitHub-backed repo. Used by the frontend to make plain-text `#123`
 /// issue/PR references clickable (issue #439).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn resolve_git_remote(path: String) -> Option<String> {
     crate::git_watcher::resolve_github_base_from_working_dir(&path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn send_os_notification(title: String, body: String) -> Result<(), String> {
     // OS notification via the system's built-in mechanism.
     // On Windows, uses tauri notification or powershell toast.
@@ -564,6 +628,10 @@ fn dispatch_automation_response(
     state: &AppState,
 ) -> Result<(), AppError> {
     let request_id = response.request_id;
+    state
+        .session_checkpoint
+        .finish_detached_mutation(&request_id)
+        .map_err(AppError::Other)?;
     let value = if response.success {
         response.data.unwrap_or(serde_json::Value::Null)
     } else {
@@ -905,7 +973,7 @@ fn clean_terminal_output_cache_in(
 
 /// Save terminal output to the cache directory.
 /// Accepts a string (xterm.js SerializeAddon output) and writes as UTF-8 bytes.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_terminal_output_cache(pane_id: String, data: String) -> Result<(), String> {
     let cache_dir = crate::settings::cache_dir_path().ok_or("Cannot determine cache directory")?;
     save_terminal_output_cache_to(&cache_dir, &pane_id, &data)
@@ -913,14 +981,14 @@ pub fn save_terminal_output_cache(pane_id: String, data: String) -> Result<(), S
 
 /// Load terminal output from the cache directory.
 /// Returns a string (to be written back via terminal.write()).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn load_terminal_output_cache(pane_id: String) -> Result<String, String> {
     let cache_dir = crate::settings::cache_dir_path().ok_or("Cannot determine cache directory")?;
     load_terminal_output_cache_from(&cache_dir, &pane_id)
 }
 
 /// Remove orphaned cache files that don't correspond to any active pane.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn clean_terminal_output_cache(active_pane_ids: Vec<String>) -> Result<u32, String> {
     let cache_dir = crate::settings::cache_dir_path().ok_or("Cannot determine cache directory")?;
     clean_terminal_output_cache_in(&cache_dir, &active_pane_ids)
@@ -943,7 +1011,7 @@ fn window_geometry_path() -> Result<std::path::PathBuf, String> {
 }
 
 /// Save window geometry to cache.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_window_geometry(
     x: i32,
     y: i32,
@@ -964,7 +1032,7 @@ pub fn save_window_geometry(
 }
 
 /// Load window geometry from cache. Returns null if not found.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn load_window_geometry() -> Result<Option<WindowGeometry>, String> {
     let path = match window_geometry_path() {
         Ok(p) => p,
@@ -999,6 +1067,10 @@ mod tests {
     #[test]
     fn dispatch_automation_response_counts_matched_only_after_delivery() {
         let state = AppState::new();
+        state
+            .session_checkpoint
+            .begin_detached_mutation("matched")
+            .unwrap();
         let (tx, rx) = tokio::sync::oneshot::channel();
         state
             .automation_channels
@@ -1012,6 +1084,10 @@ mod tests {
         let snapshot = state.frontend_health.snapshot().unwrap();
         assert_eq!(snapshot["bridge"]["responsesMatched"], 1);
         assert_eq!(snapshot["bridge"]["responsesOrphaned"], 0);
+        assert!(!state
+            .session_checkpoint
+            .finish_detached_mutation("matched")
+            .unwrap());
     }
 
     #[test]
@@ -1047,6 +1123,57 @@ mod tests {
     fn greet_returns_message() {
         let result = greet("Laymux");
         assert_eq!(result, "Hello, Laymux! Welcome to Laymux.");
+    }
+
+    #[test]
+    fn recovery_acknowledgement_reconciles_the_exact_committed_snapshot() {
+        let mut latest = crate::settings::Settings::default();
+        latest.remote.enabled = false;
+        latest.update.channel = "beta".into();
+        let expected = latest.clone();
+        let mut reconciled = None;
+
+        let returned = complete_settings_recovery(
+            || Ok(latest),
+            |settings| {
+                reconciled = Some(settings.clone());
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(returned, expected);
+        assert_eq!(reconciled, Some(expected));
+    }
+
+    #[test]
+    fn recovery_acknowledgement_stays_failed_when_runtime_reconciliation_fails() {
+        let result = complete_settings_recovery(
+            || Ok(crate::settings::Settings::default()),
+            |_| Err("runtime rejected recovered settings".into()),
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            SettingsRecoveryAcknowledgeError::RuntimeReconcileFailed {
+                message: "runtime rejected recovered settings".into()
+            }
+        );
+    }
+
+    #[test]
+    fn recovery_acknowledgement_distinguishes_document_rejection_from_runtime_failure() {
+        let result = complete_settings_recovery(
+            || Err("recovery revision changed".into()),
+            |_| panic!("runtime reconciliation must not run after document rejection"),
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            SettingsRecoveryAcknowledgeError::RecoveryDocumentRejected {
+                message: "recovery revision changed".into()
+            }
+        );
     }
 
     #[test]

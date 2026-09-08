@@ -52,6 +52,7 @@ vi.mock("@/lib/tauri-api", () => ({
   getClaudeSessionIds: vi.fn().mockResolvedValue({}),
   getCodexSessionIds: vi.fn().mockResolvedValue({}),
   getGrokSessionIds: vi.fn().mockResolvedValue({}),
+  getTerminalSessionAttributions: vi.fn().mockResolvedValue({}),
   readFileForViewer: vi.fn(),
   reportFrontendHealth: vi.fn().mockResolvedValue(undefined),
   writeTerminalInput: vi.fn().mockResolvedValue(undefined),
@@ -1189,6 +1190,32 @@ describe("handleAsyncAutomationRequest", () => {
     });
     expect(rendered.data).toHaveProperty("previewDocument");
     expect(rendered.data).not.toHaveProperty("content");
+  });
+
+  it("bounds an Android FileViewer result before the automation response IPC", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "text",
+      content: "\0".repeat(32),
+      truncated: false,
+    });
+
+    const result = await handleAsyncAutomationRequest({
+      requestId: "file-viewer-bounded-response",
+      category: "query",
+      target: "fileViewer",
+      method: "render",
+      params: {
+        source: "path",
+        path: "/tmp/control-bytes.txt",
+        maxBytes: 2 * 1024 * 1024,
+        maxResponseBytes: 128,
+      },
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: "Remote response exceeds the viewer limit",
+    });
   });
 
   it("renders an explicit path without opening the desktop viewer", async () => {
@@ -3280,6 +3307,8 @@ describe("spatial pane numbers (issue #256)", () => {
       activityMessage: "Implementing",
       lastCommand: "codex",
       lastCommandAt: 10,
+      lastUserInput: "워크스페이스 표시를 두 줄로 바꿔줘",
+      lastUserInputAt: 20,
       cwd: "/home/codex/laymux",
     });
     useSettingsStore.getState().setCodex({
@@ -3308,6 +3337,8 @@ describe("spatial pane numbers (issue #256)", () => {
       environment: "WSL",
       activity: { label: "Codex", color: "var(--codex)" },
       cwd: "~/laymux",
+      lastInput: "워크스페이스 표시를 두 줄로 바꿔줘",
+      lastInputAt: 20,
     });
   });
 

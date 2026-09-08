@@ -199,12 +199,20 @@ function joinGroup(
 /**
  * Create an ILinkProvider for indented hard-wrapped URLs.
  *
+ * @param onClickLink - Invoked with the joined URL. The activation `MouseEvent`
+ *   and the link's buffer range come along so the caller can gate execution
+ *   behind an action chip (ADR-0224) — the chip needs a place to appear and a
+ *   cell range to re-check.
  * @param isEnabled - Called on each provideLinks invocation so the provider
  *   respects dynamic setting changes without re-registration.
  */
 export function createIndentedLinkProvider(
   terminal: Terminal,
-  onClickLink: (uri: string) => void,
+  onClickLink: (
+    uri: string,
+    event?: MouseEvent,
+    range?: { start: IBufferCellPosition; end: IBufferCellPosition },
+  ) => void,
   isEnabled: () => boolean = () => true,
 ): ILinkProvider {
   return {
@@ -239,7 +247,7 @@ export function createIndentedLinkProvider(
       const links: ILink[] = matches.map((m) => ({
         range: { start: m.range.start, end: m.range.end },
         text: m.text,
-        activate: () => onClickLink(m.text),
+        activate: (event) => onClickLink(m.text, event, m.range),
       }));
 
       callback(links);

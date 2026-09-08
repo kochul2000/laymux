@@ -1,5 +1,9 @@
 import { useTranslation } from "react-i18next";
 import { useTerminalStore } from "@/stores/terminal-store";
+import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useGridStore } from "@/stores/grid-store";
+import { useDockStore } from "@/stores/dock-store";
+import { resolveFocusedTerminalCwd } from "@/lib/focused-terminal";
 import { abbreviatePath } from "@/lib/workspace-summary";
 import { clipboardWriteText } from "@/lib/tauri-api";
 import { WidgetChrome } from "./WidgetChrome";
@@ -15,7 +19,22 @@ import { CWD_WIDGET_WIDTH } from "./widget-options";
  */
 export function CwdWidget({ instance }: WidgetComponentProps) {
   const { t } = useTranslation("settings");
-  const cwd = useTerminalStore((s) => s.instances.find((terminal) => terminal.isFocused)?.cwd);
+  const terminals = useTerminalStore((state) => state.instances);
+  const workspaces = useWorkspaceStore((state) => state.workspaces);
+  const activeWorkspaceId = useWorkspaceStore((state) => state.activeWorkspaceId);
+  const focusedPaneIndex = useGridStore((state) => state.focusedPaneIndex);
+  const docks = useDockStore((state) => state.docks);
+  const focusedDock = useDockStore((state) => state.focusedDock);
+  const focusedDockPaneId = useDockStore((state) => state.focusedDockPaneId);
+  const cwd = resolveFocusedTerminalCwd({
+    terminals,
+    workspaces,
+    activeWorkspaceId,
+    focusedPaneIndex,
+    docks,
+    focusedDock,
+    focusedDockPaneId,
+  });
 
   return (
     <WidgetChrome

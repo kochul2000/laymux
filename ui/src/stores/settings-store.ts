@@ -27,7 +27,9 @@ import { defaultWidgets, normalizeWidgets, type WidgetsSettings } from "../lib/w
 import { TERMINAL_WRITE_DEFAULT_CLASS_SHARE } from "../lib/terminal-write-fair-scheduler";
 import {
   DEFAULT_COMPOSER_HISTORY_SCOPE,
+  normalizeComposerStarredEntries,
   type ComposerHistoryScope,
+  type ComposerStarredEntry,
 } from "../lib/terminal-input-composer-state";
 import {
   DEFAULT_SLEEP_PREVENTION_AXES,
@@ -46,6 +48,11 @@ import {
   DEFAULT_SCROLL_SENSITIVITY,
 } from "../lib/scroll-sensitivity";
 import { DEFAULT_PANE_CLEAR } from "../lib/pane-clear";
+import {
+  DEFAULT_LINK_ACTIVATION,
+  normalizeLinkActivation,
+  type LinkActivationMode,
+} from "../lib/link-activation";
 
 /** Re-export so settings consumers can import the language type from one place. */
 export type { LanguageSetting };
@@ -92,9 +99,6 @@ export type NotificationDismissMode = "workspace" | "paneFocus" | "manual";
 
 /** Path ellipsis direction: "start" truncates the beginning, "end" truncates the end. */
 export type PathEllipsisMode = "start" | "end";
-
-/** Terminal scrollbar rendering mode. */
-export type ScrollbarStyle = "overlay" | "separate";
 
 /** Pane control bar default mode. */
 export type ControlBarMode = "hover" | "pinned" | "minimized";
@@ -155,8 +159,6 @@ export interface TerminalSettings {
   advertiseTrueColor: boolean;
   /** Automatically copy text to clipboard when selected in terminal. */
   copyOnSelect: boolean;
-  /** Terminal scrollbar style: "overlay" renders on top of content, "separate" reserves space. */
-  scrollbarStyle: ScrollbarStyle;
   /** Issue #363: underline selected file/dir paths so a click opens the file or changes cwd. */
   pathLinkEnabled: boolean;
   /** Max selection length (chars) considered for a path link. Longer selections are ignored. */
@@ -171,12 +173,23 @@ export interface TerminalSettings {
    * class (see `HARD_CONFIRM_EXTENSIONS`) still asks.
    */
   pathLinkOsOpenConfirm: boolean;
+  /**
+   * ADR-0224: how a click/tap on a URL link executes — `"immediate"` opens at
+   * once (current behavior), `"chip"` shows an action chip and opens only from
+   * it. The #352 Shift/Alt TUI bypass stays immediate in both modes.
+   */
+  urlLinkActivation: LinkActivationMode;
+  /**
+   * ADR-0224: how a click/tap on a verified path underline executes. Ctrl /
+   * Ctrl+Shift keep going straight to the host OS in both modes (ADR-0100).
+   */
+  pathLinkActivation: LinkActivationMode;
   /** Show the floating jump-to-bottom button while scrolled up into scrollback (issue #361). */
   showScrollToBottomButton: boolean;
   /**
    * Mouse wheel scroll multiplier for this desktop terminal (xterm
-   * `scrollSensitivity`). The Remote surface carries its own value in
-   * `remote.scrollSensitivity`.
+   * `scrollSensitivity`). Remote devices keep their own multiplier in the
+   * served page's device-local storage.
    */
   scrollSensitivity: number;
   /** Wheel multiplier while the fast-scroll modifier (Alt) is held. */
@@ -190,6 +203,8 @@ export interface TerminalSettings {
   composerHistoryPopup: boolean;
   /** Composer: suggest matching past inputs as an autocomplete dropdown while typing (issue #505). */
   composerAutocomplete: boolean;
+  /** Explicitly persisted Composer entries shared by every workspace and surface (ADR-0226, ADR-0229). */
+  composerStarredEntries: ComposerStarredEntry[];
 }
 
 /** Pane control bar behavior. */
@@ -305,6 +320,31 @@ export interface NotificationSettings {
  */
 export type PowerSettings = SleepPreventionAxes;
 
+/** Release channels this install can follow (ADR-0190). Order is display order. */
+export const UPDATE_CHANNELS = ["stable", "beta"] as const;
+export type UpdateChannel = (typeof UPDATE_CHANNELS)[number];
+
+/**
+ * Which release channel this install follows (ADR-0190). `beta` receives the
+ * test series that lands before a stable release.
+ */
+export interface UpdateSettings {
+  channel: UpdateChannel;
+}
+
+/**
+ * An unknown channel resolves to stable, matching the backend: a misread value
+ * must never move a machine onto the less-verified series.
+ */
+export function normalizeUpdateSettings(raw: Partial<UpdateSettings> | undefined): UpdateSettings {
+  const channel = raw?.channel;
+  return {
+    channel: UPDATE_CHANNELS.includes(channel as UpdateChannel)
+      ? (channel as UpdateChannel)
+      : "stable",
+  };
+}
+
 /** Which elements to display in WorkspaceSelectorView pane rows. */
 export interface WorkspaceDisplaySettings {
   minimap: boolean;
@@ -322,6 +362,10 @@ export interface WorkspaceSelectorSettings {
   sortOrder: WorkspaceSortOrder;
   /** Path ellipsis direction. "start" (default) shows the end of the path, "end" shows the beginning. */
   pathEllipsis: PathEllipsisMode;
+  /** Last submitted input layout: per terminal pane or one latest line per workspace. */
+  lastInputMode: WorkspaceLastInputMode;
+  /** Require two activations for destructive WorkspaceSelectorView controls. */
+  confirmDestructiveActions: boolean;
   /**
    * Seconds a pane/workspace must stay hidden before its terminal (PTY)
    * is automatically closed to free memory/CPU. 0 = disabled. See issue #269.
@@ -331,6 +375,9 @@ export interface WorkspaceSelectorSettings {
 
 /** Workspace sort order: "manual" = user-defined drag-drop order, "notification" = most recent notification first. */
 export type WorkspaceSortOrder = "manual" | "notification";
+
+/** Last submitted input layout in WorkspaceSelectorView (ADR-0194). */
+export type WorkspaceLastInputMode = "perPane" | "workspaceLatest";
 
 export type { ExitSettings, IssueReporterSettings, MemoSettings } from "../lib/tauri-api";
 export type {
@@ -344,12 +391,7 @@ export type {
  * The xterm.js UI only renders a narrower subset via SupportedCursorShape.
  */
 export type CursorShape =
-  | "bar"
-  | "underscore"
-  | "filledBox"
-  | "emptyBox"
-  | "doubleUnderscore"
-  | "vintage";
+  "bar" | "underscore" | "filledBox" | "emptyBox" | "doubleUnderscore" | "vintage";
 export type SupportedCursorShape = "bar" | "underscore" | "filledBox";
 export type BellStyle = "audible" | "none" | "window" | "taskbar" | "all";
 export type CloseOnExit = "automatic" | "graceful" | "always" | "never";
@@ -525,6 +567,7 @@ interface SettingsState {
   dock: DockSettings;
   notifications: NotificationSettings;
   power: PowerSettings;
+  update: UpdateSettings;
   workspaceSelector: WorkspaceSelectorSettings;
   claude: ClaudeSettings;
   codex: CodexSettings;
@@ -549,6 +592,7 @@ interface SettingsState {
   setDock: (data: Partial<DockSettings>) => void;
   setNotifications: (data: Partial<NotificationSettings>) => void;
   setPower: (data: Partial<PowerSettings>) => void;
+  setUpdate: (data: Partial<UpdateSettings>) => void;
   setWorkspaceSelector: (data: Partial<WorkspaceSelectorSettings>) => void;
   setClaude: (data: Partial<ClaudeSettings>) => void;
   setCodex: (data: Partial<CodexSettings>) => void;
@@ -617,6 +661,7 @@ interface SettingsState {
         | "dock"
         | "notifications"
         | "power"
+        | "update"
         | "workspaceSelector"
         | "claude"
         | "codex"
@@ -709,9 +754,6 @@ const DEFAULT_REMOTE: RemoteSettings = {
   heartbeatTimeoutSeconds: 45,
   androidBackgroundLeaseSeconds: 900,
   autoMobileModeMinWidth: 720,
-  snapshotMaxKib: 4,
-  terminalFontSize: 14,
-  composerFontSize: 16,
   preferredHost: "",
   customHosts: [],
   cloudEnabled: false,
@@ -723,10 +765,9 @@ const DEFAULT_REMOTE: RemoteSettings = {
   cloudAccessMode: "browserAndE2e",
   serveTerminalFont: false,
   widgets: true,
-  scrollSensitivity: DEFAULT_SCROLL_SENSITIVITY,
-  fastScrollSensitivity: DEFAULT_FAST_SCROLL_SENSITIVITY,
-  touchScrollSensitivity: DEFAULT_SCROLL_SENSITIVITY,
-  twoFingerScrollSensitivity: DEFAULT_FAST_SCROLL_SENSITIVITY,
+  attachmentMaxMib: 1,
+  attachmentAllowAllExtensions: false,
+  attachmentExtraExtensions: [],
 };
 
 export const DEFAULT_FONT: FontSettings = { face: "Cascadia Mono", size: 14, weight: "normal" };
@@ -769,17 +810,19 @@ export const DEFAULT_TERMINAL: TerminalSettings = {
   },
   advertiseTrueColor: true,
   copyOnSelect: true,
-  scrollbarStyle: "overlay",
   pathLinkEnabled: true,
   pathLinkMaxLength: 256,
   pathLinkOsOpenEnabled: true,
   pathLinkOsOpenConfirm: true,
+  urlLinkActivation: DEFAULT_LINK_ACTIVATION,
+  pathLinkActivation: DEFAULT_LINK_ACTIVATION,
   showScrollToBottomButton: true,
   scrollSensitivity: DEFAULT_SCROLL_SENSITIVITY,
   fastScrollSensitivity: DEFAULT_FAST_SCROLL_SENSITIVITY,
   composerHistoryScope: DEFAULT_COMPOSER_HISTORY_SCOPE,
   composerHistoryPopup: true,
   composerAutocomplete: true,
+  composerStarredEntries: [],
 };
 
 export const DEFAULT_CONTROL_BAR: ControlBarSettings = {
@@ -877,6 +920,8 @@ export const DEFAULT_NOTIFICATIONS: NotificationSettings = {
 
 export const DEFAULT_POWER: PowerSettings = { ...DEFAULT_SLEEP_PREVENTION_AXES };
 
+export const DEFAULT_UPDATE: UpdateSettings = { channel: "stable" };
+
 /** App-exit behavior defaults (issue #451). Interrupt is opt-in (off). */
 export const DEFAULT_EXIT: ExitSettings = {
   interruptTerminals: false,
@@ -896,6 +941,8 @@ export const DEFAULT_WORKSPACE_SELECTOR: WorkspaceSelectorSettings = {
   display: { ...DEFAULT_WORKSPACE_DISPLAY },
   sortOrder: "manual",
   pathEllipsis: "start",
+  lastInputMode: "perPane",
+  confirmDestructiveActions: true,
   hiddenAutoCloseSeconds: 0,
 };
 
@@ -1281,6 +1328,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   dock: { ...DEFAULT_DOCK },
   notifications: { ...DEFAULT_NOTIFICATIONS },
   power: { ...DEFAULT_POWER },
+  update: { ...DEFAULT_UPDATE },
   workspaceSelector: {
     ...DEFAULT_WORKSPACE_SELECTOR,
     display: { ...DEFAULT_WORKSPACE_SELECTOR.display },
@@ -1300,6 +1348,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     command: DEFAULT_CODEX_COMMAND,
     restoreSession: true,
     sessionMaxAgeHours: DEFAULT_AGENT_SESSION_MAX_AGE_HOURS,
+    transcriptScrollEnabled: true,
     statusMessageMode: "bullet-title" as const,
     statusMessageDelimiter: " · ",
   },
@@ -1332,7 +1381,13 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
 
   setTerminal: (data) =>
     set((state) => ({
-      terminal: { ...state.terminal, ...data },
+      terminal: {
+        ...state.terminal,
+        ...data,
+        composerStarredEntries: normalizeComposerStarredEntries(
+          data.composerStarredEntries ?? state.terminal.composerStarredEntries,
+        ),
+      },
     })),
 
   setControlBar: (data) =>
@@ -1353,6 +1408,11 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   setPower: (data) =>
     set((state) => ({
       power: { ...state.power, ...data },
+    })),
+
+  setUpdate: (data) =>
+    set((state) => ({
+      update: { ...state.update, ...data },
     })),
 
   setWorkspaceSelector: (data) =>
@@ -1623,7 +1683,20 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
         }
       : undefined;
     const paste = data.paste ? { ...DEFAULT_PASTE, ...data.paste } : undefined;
-    const terminal = data.terminal ? { ...DEFAULT_TERMINAL, ...data.terminal } : undefined;
+    // ADR-0224: 손으로 편집한 settings.json 이나 원격 patch 가 허용값 밖의 문자열을
+    // 남길 수 있다. 백엔드 검증이 거부하지만, 이미 디스크에 있는 값은 여기까지 온다 —
+    // 링크 실행 게이트는 fail closed 가 아니라 현행 동작(즉발)으로 떨어뜨린다.
+    const terminal = data.terminal
+      ? {
+          ...DEFAULT_TERMINAL,
+          ...data.terminal,
+          urlLinkActivation: normalizeLinkActivation(data.terminal.urlLinkActivation),
+          pathLinkActivation: normalizeLinkActivation(data.terminal.pathLinkActivation),
+          composerStarredEntries: normalizeComposerStarredEntries(
+            data.terminal.composerStarredEntries,
+          ),
+        }
+      : undefined;
     const controlBar = data.controlBar ? { ...DEFAULT_CONTROL_BAR, ...data.controlBar } : undefined;
     const usage = data.usage
       ? {
@@ -1668,8 +1741,12 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     // is not literally `true` stays off rather than acquiring an inhibitor
     // nobody asked for (ADR-0116).
     const power = data.power ? normalizeSleepPreventionAxes(data.power) : undefined;
+    // Same fail-safe as the backend: an unknown channel resolves to stable
+    // rather than showing an empty control (ADR-0190).
+    const update = data.update ? normalizeUpdateSettings(data.update) : undefined;
     // Ensure workspaceSelector settings (incl. nested display) have all fields
     const validSortOrders: WorkspaceSortOrder[] = ["manual", "notification"];
+    const validLastInputModes: WorkspaceLastInputMode[] = ["perPane", "workspaceLatest"];
     const workspaceSelector = data.workspaceSelector
       ? {
           ...DEFAULT_WORKSPACE_SELECTOR,
@@ -1678,6 +1755,13 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           sortOrder: validSortOrders.includes(data.workspaceSelector.sortOrder)
             ? data.workspaceSelector.sortOrder
             : DEFAULT_WORKSPACE_SELECTOR.sortOrder,
+          lastInputMode: validLastInputModes.includes(data.workspaceSelector.lastInputMode)
+            ? data.workspaceSelector.lastInputMode
+            : DEFAULT_WORKSPACE_SELECTOR.lastInputMode,
+          confirmDestructiveActions:
+            typeof data.workspaceSelector.confirmDestructiveActions === "boolean"
+              ? data.workspaceSelector.confirmDestructiveActions
+              : DEFAULT_WORKSPACE_SELECTOR.confirmDestructiveActions,
         }
       : undefined;
     // Ensure claude settings have all fields (backwards compat)
@@ -1700,6 +1784,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           command: DEFAULT_CODEX_COMMAND,
           restoreSession: true,
           sessionMaxAgeHours: DEFAULT_AGENT_SESSION_MAX_AGE_HOURS,
+          transcriptScrollEnabled: true,
           statusMessageMode: "bullet-title" as const,
           statusMessageDelimiter: " · ",
           ...(data.codex as Partial<CodexSettings>),
@@ -1779,6 +1864,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       dock: _rawDock,
       notifications: _rawNotifications,
       power: _rawPower,
+      update: _rawUpdate,
       workspaceSelector: _rawWorkspaceSelector,
       paneClear: _rawPaneClear,
       remote: _rawRemote,
@@ -1808,6 +1894,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(dock ? { dock } : {}),
       ...(notifications ? { notifications } : {}),
       ...(power ? { power } : {}),
+      ...(update ? { update } : {}),
       ...(workspaceSelector ? { workspaceSelector } : {}),
       ...(claude ? { claude } : {}),
       ...(codex ? { codex } : {}),

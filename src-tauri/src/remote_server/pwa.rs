@@ -31,9 +31,9 @@ pub(super) const MANIFEST_ROUTE_PATH: &str = "/remote/manifest.webmanifest";
 pub(super) const ICON_ROUTE_PATH: &str = "/remote/pwa/{file_name}";
 
 /// `scope`/`start_url` are `/remote/`, so an installed client keeps its own
-/// window for every path of the remote surface (including `/remote/viewer/`) and
-/// hands anything else back to the browser. `id` pins the app identity to that
-/// scope so a later `start_url` change does not register as a second app.
+/// window for every path of the remote surface and hands anything else back to
+/// the browser. `id` pins the app identity to that scope so a later `start_url`
+/// change does not register as a second app.
 const MANIFEST_JSON: &str = r##"{
   "id": "/remote/",
   "name": "Laymux Remote",

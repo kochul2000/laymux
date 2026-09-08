@@ -1,4 +1,4 @@
-import type { Settings } from "@/lib/tauri-api";
+import { checkAppUpdate, type Settings } from "@/lib/tauri-api";
 import { useDockStore } from "@/stores/dock-store";
 import {
   defaultProfileDefaults,
@@ -22,6 +22,10 @@ export function applySettingsSnapshot(
   const sKeybindings = rawSettings.keybindings;
   const sProfileDefaults = rawSettings.profileDefaults;
   const sViewOrder = rawSettings.viewOrder;
+  // Automation/MCP settings patches and settings.json hot-reload land here, so
+  // this is where a channel switch from anywhere but the Settings save button
+  // becomes observable (ADR-0190).
+  const previousUpdateChannel = useSettingsStore.getState().update.channel;
 
   useSettingsStore.getState().loadFromSettings({
     ...(rawSettings.language ? { language: rawSettings.language } : {}),
@@ -91,6 +95,7 @@ export function applySettingsSnapshot(
     ...(rawSettings.dock ? { dock: rawSettings.dock } : {}),
     ...(rawSettings.notifications ? { notifications: rawSettings.notifications } : {}),
     ...(rawSettings.power ? { power: rawSettings.power } : {}),
+    ...(rawSettings.update ? { update: rawSettings.update } : {}),
     ...(rawSettings.workspaceSelector ? { workspaceSelector: rawSettings.workspaceSelector } : {}),
     ...(rawSettings.claude ? { claude: rawSettings.claude } : {}),
     ...(rawSettings.codex ? { codex: rawSettings.codex } : {}),
@@ -105,6 +110,13 @@ export function applySettingsSnapshot(
     ...(rawSettings.memo ? { memo: rawSettings.memo } : {}),
     ...(rawSettings.syncCwdDefaults ? { syncCwdDefaults: rawSettings.syncCwdDefaults } : {}),
   });
+
+  if (useSettingsStore.getState().update.channel !== previousUpdateChannel) {
+    // The check adopts the channel it reads from disk, which this snapshot
+    // already reflects, so the status snapshot stops naming the old channel as
+    // soon as this lands. Failures are recorded in the update status.
+    void checkAppUpdate().catch(() => {});
+  }
 
   if (options.includeStructural === false) return;
   applyWorkspaceSnapshot(rawSettings);

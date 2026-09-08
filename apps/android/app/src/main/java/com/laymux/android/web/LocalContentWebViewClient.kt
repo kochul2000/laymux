@@ -11,8 +11,9 @@ import java.io.ByteArrayInputStream
 
 /** Serves only AEAD-authenticated PC Remote resources on the app-local synthetic origin. */
 class LocalContentWebViewClient(
-    private val remoteResourceLoader: (String) -> RemoteResourceResponse?,
+    private val remoteResourceLoader: (String) -> RemoteResourceLoadResult,
     private val onRemotePageFinished: () -> Unit = {},
+    private val onRemoteMainDocumentUnavailable: (Int) -> Unit = {},
 ) : WebViewClientCompat() {
     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
         !isAllowedOrigin(request.url)
@@ -24,11 +25,11 @@ class LocalContentWebViewClient(
     override fun shouldInterceptRequest(
         view: WebView,
         request: WebResourceRequest,
-    ): WebResourceResponse = intercept(request.url)
+    ): WebResourceResponse = intercept(request.url, request.isForMainFrame)
 
     @Suppress("DEPRECATION")
     override fun shouldInterceptRequest(view: WebView, url: String): WebResourceResponse =
-        intercept(Uri.parse(url))
+        intercept(Uri.parse(url), isMainFrame = false)
 
     override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
         if (!isAllowedOrigin(Uri.parse(url))) {
@@ -47,23 +48,40 @@ class LocalContentWebViewClient(
         handler.cancel()
     }
 
-    private fun intercept(uri: Uri): WebResourceResponse {
+    private fun intercept(uri: Uri, isMainFrame: Boolean): WebResourceResponse {
         if (isRemoteWrapperResource(uri)) {
-            val resource = remoteResourceLoader(requireNotNull(uri.encodedPath))
-            if (resource != null) {
-                return WebResourceResponse(
-                    resource.mimeType,
-                    resource.encoding,
-                    resource.status,
-                    reasonPhrase(resource.status),
-                    resource.headers,
-                    ByteArrayInputStream(resource.body),
-                )
+            val result = remoteResourceLoader(requireNotNull(uri.encodedPath))
+            notifyIfMainDocumentUnavailable(isMainFrame, result)
+            return when (result) {
+                is RemoteResourceLoadResult.Response -> result.value.toWebResourceResponse()
+                RemoteResourceLoadResult.Unavailable -> {
+                    blockedResponse(503, "E2E session unavailable")
+                }
+                RemoteResourceLoadResult.Cancelled -> {
+                    blockedResponse(503, "E2E request cancelled")
+                }
             }
-            return blockedResponse(503, "E2E session unavailable")
         }
         return blockedResponse(403, "Blocked")
     }
+
+    private fun notifyIfMainDocumentUnavailable(
+        isMainFrame: Boolean,
+        result: RemoteResourceLoadResult,
+    ) {
+        RemoteDocumentLoadPolicy.dashboardStatus(isMainFrame, result)
+            ?.let(onRemoteMainDocumentUnavailable)
+    }
+
+    private fun RemoteResourceResponse.toWebResourceResponse(): WebResourceResponse =
+        WebResourceResponse(
+            mimeType,
+            encoding,
+            status,
+            reasonPhrase(status),
+            headers,
+            ByteArrayInputStream(body),
+        )
 
     private fun blockedResponse(status: Int, reason: String): WebResourceResponse =
         WebResourceResponse(

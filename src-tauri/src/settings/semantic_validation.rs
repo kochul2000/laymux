@@ -2,14 +2,14 @@ use std::collections::HashSet;
 use std::net::IpAddr;
 
 use crate::constants::{
-    APP_THEME_IDS, COMPOSER_HISTORY_SCOPES, CONTROL_BAR_MODES, NOTIFICATION_DISMISS_MODES,
-    PARSER_ADMISSION_SHARE_MAX, PARSER_ADMISSION_SHARE_MIN, PASTE_PATH_SEPARATORS,
-    PROFILE_ANTIALIASING_MODES, PROFILE_BELL_STYLES, PROFILE_CLOSE_ON_EXIT_VALUES,
-    PROFILE_CURSOR_SHAPES, SETTINGS_LANGUAGES, TERMINAL_ACTIVITY_WIDGET_SCOPES,
-    TERMINAL_SCROLLBAR_STYLES, USAGE_WIDGET_BAR_HEIGHT_MAX, USAGE_WIDGET_BAR_HEIGHT_MIN,
-    USAGE_WIDGET_BAR_WIDTH_MAX, USAGE_WIDGET_BAR_WIDTH_MIN, USAGE_WIDGET_DISPLAY_MODES,
-    WIDGET_FONT_SIZE_MAX, WIDGET_FONT_SIZE_MIN, WIDGET_OVERFLOW_MODES, WIDGET_TYPES,
-    WORKSPACE_SORT_ORDERS,
+    APP_THEME_IDS, COMPOSER_HISTORY_SCOPES, CONTROL_BAR_MODES, LINK_ACTIVATION_MODES,
+    NOTIFICATION_DISMISS_MODES, PARSER_ADMISSION_SHARE_MAX, PARSER_ADMISSION_SHARE_MIN,
+    PASTE_PATH_SEPARATORS, PROFILE_ANTIALIASING_MODES, PROFILE_BELL_STYLES,
+    PROFILE_CLOSE_ON_EXIT_VALUES, PROFILE_CURSOR_SHAPES, SETTINGS_LANGUAGES,
+    TERMINAL_ACTIVITY_WIDGET_SCOPES, UPDATE_CHANNELS, USAGE_WIDGET_BAR_HEIGHT_MAX,
+    USAGE_WIDGET_BAR_HEIGHT_MIN, USAGE_WIDGET_BAR_WIDTH_MAX, USAGE_WIDGET_BAR_WIDTH_MIN,
+    USAGE_WIDGET_DISPLAY_MODES, WIDGET_FONT_SIZE_MAX, WIDGET_FONT_SIZE_MIN, WIDGET_OVERFLOW_MODES,
+    WIDGET_TYPES, WORKSPACE_LAST_INPUT_MODES, WORKSPACE_SORT_ORDERS,
 };
 
 use super::contract::SettingsIssue;
@@ -32,15 +32,23 @@ pub fn validate_settings(settings: &Settings) -> Vec<SettingsIssue> {
     );
     enum_value(
         &mut issues,
-        "/terminal/scrollbarStyle",
-        &settings.terminal.scrollbar_style,
-        TERMINAL_SCROLLBAR_STYLES,
-    );
-    enum_value(
-        &mut issues,
         "/terminal/composerHistoryScope",
         &settings.terminal.composer_history_scope,
         COMPOSER_HISTORY_SCOPES,
+    );
+    // ADR-0224: 두 키는 프런트엔드가 소비하지만, 허용값 밖의 문자열은 여기서
+    // 잡아야 사용자가 오타를 낸 채 "칩이 안 나온다"를 겪지 않는다.
+    enum_value(
+        &mut issues,
+        "/terminal/urlLinkActivation",
+        &settings.terminal.url_link_activation,
+        LINK_ACTIVATION_MODES,
+    );
+    enum_value(
+        &mut issues,
+        "/terminal/pathLinkActivation",
+        &settings.terminal.path_link_activation,
+        LINK_ACTIVATION_MODES,
     );
     enum_value(
         &mut issues,
@@ -62,9 +70,21 @@ pub fn validate_settings(settings: &Settings) -> Vec<SettingsIssue> {
     );
     enum_value(
         &mut issues,
+        "/update/channel",
+        &settings.update.channel,
+        UPDATE_CHANNELS,
+    );
+    enum_value(
+        &mut issues,
         "/workspaceSelector/sortOrder",
         &settings.workspace_selector.sort_order,
         WORKSPACE_SORT_ORDERS,
+    );
+    enum_value(
+        &mut issues,
+        "/workspaceSelector/lastInputMode",
+        &settings.workspace_selector.last_input_mode,
+        WORKSPACE_LAST_INPUT_MODES,
     );
 
     validate_font(&mut issues, "/appearance/font", &settings.appearance.font);
@@ -310,6 +330,58 @@ fn validate_profile_enums(
 }
 
 fn validate_terminal(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
+    if settings.terminal.composer_starred_entries.len()
+        > crate::constants::COMPOSER_STARRED_ENTRIES_MAX
+    {
+        issue(
+            issues,
+            "too_many_items",
+            "/terminal/composerStarredEntries",
+            format!(
+                "Composer 별표는 최대 {}개까지 저장할 수 있습니다.",
+                crate::constants::COMPOSER_STARRED_ENTRIES_MAX
+            ),
+        );
+    }
+    let mut starred = HashSet::new();
+    for (index, entry) in settings
+        .terminal
+        .composer_starred_entries
+        .iter()
+        .enumerate()
+    {
+        let path = format!("/terminal/composerStarredEntries/{index}");
+        if entry.value.is_empty() {
+            issue(
+                issues,
+                "required",
+                format!("{path}/value"),
+                "Composer 별표는 비어 있을 수 없습니다.".into(),
+            );
+        } else if entry.value.len() > crate::constants::COMPOSER_STARRED_ENTRY_MAX_BYTES {
+            issue(
+                issues,
+                "too_large",
+                format!("{path}/value"),
+                "Composer 별표가 너무 큽니다.".into(),
+            );
+        } else if !starred.insert(entry.value.as_str()) {
+            issue(
+                issues,
+                "duplicate",
+                format!("{path}/value"),
+                "Composer 별표가 중복됩니다.".into(),
+            );
+        }
+        if entry.label.len() > crate::constants::COMPOSER_STARRED_ENTRY_LABEL_MAX_BYTES {
+            issue(
+                issues,
+                "too_large",
+                format!("{path}/label"),
+                "Composer 별표 라벨이 너무 깁니다.".into(),
+            );
+        }
+    }
     range_scroll_sensitivity(
         issues,
         "/terminal/scrollSensitivity",
@@ -441,40 +513,6 @@ fn validate_agent_commands(settings: &Settings, issues: &mut Vec<SettingsIssue>)
 
 fn validate_remote(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
     let remote = &settings.remote;
-    range_u64(
-        issues,
-        "/remote/terminalFontSize",
-        u64::from(remote.terminal_font_size),
-        u64::from(crate::settings::models::REMOTE_FONT_SIZE_MIN),
-        u64::from(crate::settings::models::REMOTE_FONT_SIZE_MAX),
-    );
-    range_u64(
-        issues,
-        "/remote/composerFontSize",
-        u64::from(remote.composer_font_size),
-        u64::from(crate::settings::models::REMOTE_FONT_SIZE_MIN),
-        u64::from(crate::settings::models::REMOTE_FONT_SIZE_MAX),
-    );
-    range_scroll_sensitivity(
-        issues,
-        "/remote/scrollSensitivity",
-        remote.scroll_sensitivity,
-    );
-    range_scroll_sensitivity(
-        issues,
-        "/remote/fastScrollSensitivity",
-        remote.fast_scroll_sensitivity,
-    );
-    range_scroll_sensitivity(
-        issues,
-        "/remote/touchScrollSensitivity",
-        remote.touch_scroll_sensitivity,
-    );
-    range_scroll_sensitivity(
-        issues,
-        "/remote/twoFingerScrollSensitivity",
-        remote.two_finger_scroll_sensitivity,
-    );
     if remote.enabled && remote.auth_token.trim().is_empty() {
         issue(
             issues,
@@ -482,6 +520,31 @@ fn validate_remote(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
             "/remote/authToken",
             "remote.enabled=true이면 authToken이 필요합니다.".into(),
         );
+    }
+    if !(1..=crate::constants::REMOTE_TERMINAL_ATTACHMENT_MAX_MIB)
+        .contains(&remote.attachment_max_mib)
+    {
+        issue(
+            issues,
+            "out_of_range",
+            "/remote/attachmentMaxMib",
+            format!(
+                "attachmentMaxMib must be between 1 and {}.",
+                crate::constants::REMOTE_TERMINAL_ATTACHMENT_MAX_MIB
+            ),
+        );
+    }
+    for (index, extension) in remote.attachment_extra_extensions.iter().enumerate() {
+        if !super::models::is_valid_attachment_extension(extension) {
+            issue(
+                issues,
+                "invalid_value",
+                format!("/remote/attachmentExtraExtensions/{index}"),
+                format!(
+                    "'{extension}'은(는) 유효한 확장자가 아닙니다. 점 없이 소문자 영문·숫자 1~16자만 허용합니다."
+                ),
+            );
+        }
     }
     if remote.heartbeat_timeout_seconds < 30 {
         issue(
@@ -501,21 +564,6 @@ fn validate_remote(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
             format!(
                 "androidBackgroundLeaseSeconds must be between 0 and {}.",
                 crate::settings::models::MAX_ANDROID_BACKGROUND_LEASE_SECONDS
-            ),
-        );
-    }
-    if !(crate::constants::MIN_REMOTE_SNAPSHOT_MAX_KIB
-        ..=crate::constants::MAX_REMOTE_SNAPSHOT_MAX_KIB)
-        .contains(&remote.snapshot_max_kib)
-    {
-        issue(
-            issues,
-            "out_of_range",
-            "/remote/snapshotMaxKib",
-            format!(
-                "snapshotMaxKib는 {}~{} 범위여야 합니다.",
-                crate::constants::MIN_REMOTE_SNAPSHOT_MAX_KIB,
-                crate::constants::MAX_REMOTE_SNAPSHOT_MAX_KIB
             ),
         );
     }
@@ -887,13 +935,20 @@ mod tests {
     }
 
     #[test]
-    fn out_of_band_scroll_sensitivities_are_reported_on_both_surfaces() {
+    fn invalid_workspace_last_input_mode_is_reported() {
+        let mut settings = Settings::default();
+        settings.workspace_selector.last_input_mode = "raw-output".into();
+        let issues = validate_settings(&settings);
+        assert!(issues
+            .iter()
+            .any(|issue| issue.path == "/workspaceSelector/lastInputMode"));
+    }
+
+    #[test]
+    fn out_of_band_terminal_scroll_sensitivities_are_reported() {
         let mut settings = Settings::default();
         settings.terminal.scroll_sensitivity = 0.0;
         settings.terminal.fast_scroll_sensitivity = 50.0;
-        settings.remote.scroll_sensitivity = -1.0;
-        settings.remote.fast_scroll_sensitivity = f32::NAN;
-        settings.remote.touch_scroll_sensitivity = 0.0;
 
         let issues = validate_settings(&settings);
         let out_of_range: Vec<&str> = issues
@@ -904,9 +959,28 @@ mod tests {
 
         assert!(out_of_range.contains(&"/terminal/scrollSensitivity"));
         assert!(out_of_range.contains(&"/terminal/fastScrollSensitivity"));
-        assert!(out_of_range.contains(&"/remote/scrollSensitivity"));
-        assert!(out_of_range.contains(&"/remote/fastScrollSensitivity"));
-        assert!(out_of_range.contains(&"/remote/touchScrollSensitivity"));
+    }
+
+    #[test]
+    fn update_channel_accepts_only_the_two_channels() {
+        let mut settings = Settings::default();
+        assert!(validate_settings(&settings)
+            .iter()
+            .all(|issue| issue.path != "/update/channel"));
+
+        settings.update.channel = "beta".into();
+        assert!(validate_settings(&settings)
+            .iter()
+            .all(|issue| issue.path != "/update/channel"));
+
+        // A hand-edited channel is rejected on write. It is still tolerated on
+        // read (resolving to stable at runtime), which is why the field is a
+        // String rather than an enum (ADR-0190).
+        settings.update.channel = "nightly".into();
+        let issues = validate_settings(&settings);
+        assert!(issues
+            .iter()
+            .any(|issue| issue.path == "/update/channel" && issue.code == "invalid_value"));
     }
 
     #[test]

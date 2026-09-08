@@ -131,6 +131,24 @@ describe("FileExplorerView", () => {
     expect(screen.getByTestId("file-explorer-item-2")).toHaveTextContent("a.txt");
     expect(screen.getByTestId("file-explorer-item-3")).toHaveTextContent("b.txt");
     expect(screen.getByTestId("file-explorer-item-4")).toHaveTextContent("c.txt");
+    expect(
+      screen.getByTestId("file-explorer-item-0").querySelector(".lucide-folder-up"),
+    ).toBeTruthy();
+    expect(screen.getByTestId("file-explorer-item-1").querySelector(".lucide-folder")).toBeTruthy();
+    expect(screen.getByTestId("file-explorer-item-2").querySelector(".lucide-file")).toBeTruthy();
+  });
+
+  it("draws a symlink with the Lucide link glyph", async () => {
+    mockListDir([
+      { name: "notes", isDirectory: false, isSymlink: true, isExecutable: false, size: 12 },
+    ]);
+    render(<FileExplorerView {...defaultProps} />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    const row = screen.getByTestId("file-explorer-item-1");
+    expect(row).toHaveTextContent("notes");
+    expect(row.querySelector(".lucide-link")).toBeTruthy();
   });
 
   it("click selects single item", async () => {

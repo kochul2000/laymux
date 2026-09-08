@@ -561,6 +561,7 @@ describe("settings-store", () => {
     const { codex } = useSettingsStore.getState();
     expect(codex.restoreSession).toBe(true);
     expect(codex.sessionMaxAgeHours).toBe(24);
+    expect(codex.transcriptScrollEnabled).toBe(true);
     expect(codex.statusMessageMode).toBe("bullet-title");
     expect(codex.statusMessageDelimiter).toBe(" · ");
   });
@@ -572,9 +573,14 @@ describe("settings-store", () => {
 
   it("loadFromSettings loads codex settings", () => {
     useSettingsStore.getState().loadFromSettings({
-      codex: { statusMessageMode: "bullet", statusMessageDelimiter: " | " },
+      codex: {
+        transcriptScrollEnabled: false,
+        statusMessageMode: "bullet",
+        statusMessageDelimiter: " | ",
+      },
     });
     const { codex } = useSettingsStore.getState();
+    expect(codex.transcriptScrollEnabled).toBe(false);
     expect(codex.statusMessageMode).toBe("bullet");
     expect(codex.statusMessageDelimiter).toBe(" | ");
   });
@@ -586,11 +592,10 @@ describe("settings-store", () => {
     const { codex } = useSettingsStore.getState();
     expect(codex.restoreSession).toBe(true);
     expect(codex.sessionMaxAgeHours).toBe(24);
+    expect(codex.transcriptScrollEnabled).toBe(true);
     expect(codex.statusMessageMode).toBe("bullet-title");
     expect(codex.statusMessageDelimiter).toBe(" · ");
   });
-
-  // -- Scrollbar style settings --
 
   it("defaults truecolor capability advertising to enabled", () => {
     expect(useSettingsStore.getState().terminal.advertiseTrueColor).toBe(true);
@@ -608,55 +613,12 @@ describe("settings-store", () => {
     expect(useSettingsStore.getState().terminal.advertiseTrueColor).toBe(false);
   });
 
-  it("has default scrollbarStyle as overlay", () => {
-    expect(useSettingsStore.getState().terminal.scrollbarStyle).toBe("overlay");
-  });
-
-  it("setTerminal updates scrollbarStyle", () => {
-    useSettingsStore.getState().setTerminal({ scrollbarStyle: "separate" });
-    expect(useSettingsStore.getState().terminal.scrollbarStyle).toBe("separate");
-  });
-
-  it("setTerminal updates scrollbarStyle back to overlay", () => {
-    useSettingsStore.getState().setTerminal({ scrollbarStyle: "separate" });
-    useSettingsStore.getState().setTerminal({ scrollbarStyle: "overlay" });
-    expect(useSettingsStore.getState().terminal.scrollbarStyle).toBe("overlay");
-  });
-
-  it("loadFromSettings loads scrollbarStyle", () => {
-    useSettingsStore.getState().loadFromSettings({
-      terminal: {
-        copyOnSelect: true,
-        scrollbarStyle: "separate" as const,
-      },
-    });
-    expect(useSettingsStore.getState().terminal.scrollbarStyle).toBe("separate");
-  });
-
-  it("loadFromSettings fills missing scrollbarStyle with default overlay", () => {
-    useSettingsStore.getState().loadFromSettings({
-      terminal: { copyOnSelect: false } as any,
-    });
-    expect(useSettingsStore.getState().terminal.scrollbarStyle).toBe("overlay");
-  });
-
-  it("setTerminal does not affect other terminal fields when setting scrollbarStyle", () => {
-    useSettingsStore.getState().setTerminal({ scrollbarStyle: "separate" });
-    const { terminal } = useSettingsStore.getState();
-    expect(terminal.copyOnSelect).toBe(true);
-    expect(terminal.scrollbarStyle).toBe("separate");
-  });
-
   // -- Wheel scroll sensitivity --
 
-  it("defaults the wheel sensitivities to the xterm defaults", () => {
-    const { terminal, remote } = useSettingsStore.getState();
+  it("defaults the desktop wheel sensitivities to the xterm defaults", () => {
+    const { terminal } = useSettingsStore.getState();
     expect(terminal.scrollSensitivity).toBe(1);
     expect(terminal.fastScrollSensitivity).toBe(5);
-    expect(remote.scrollSensitivity).toBe(1);
-    expect(remote.fastScrollSensitivity).toBe(5);
-    // Finger drag starts as 1:1 physical scroll.
-    expect(remote.touchScrollSensitivity).toBe(1);
   });
 
   it("setTerminal updates the wheel sensitivities", () => {
@@ -666,14 +628,12 @@ describe("settings-store", () => {
     expect(terminal.fastScrollSensitivity).toBe(8);
   });
 
-  it("loadFromSettings keeps the desktop and remote wheel sensitivities separate", () => {
+  it("loadFromSettings loads the desktop wheel sensitivity", () => {
     useSettingsStore.getState().loadFromSettings({
       terminal: { scrollSensitivity: 4 } as any,
-      remote: { scrollSensitivity: 2 } as any,
     });
     const state = useSettingsStore.getState();
     expect(state.terminal.scrollSensitivity).toBe(4);
-    expect(state.remote.scrollSensitivity).toBe(2);
   });
 
   it("loadFromSettings fills missing wheel sensitivities with the defaults", () => {
@@ -684,9 +644,6 @@ describe("settings-store", () => {
     const state = useSettingsStore.getState();
     expect(state.terminal.scrollSensitivity).toBe(1);
     expect(state.terminal.fastScrollSensitivity).toBe(5);
-    expect(state.remote.scrollSensitivity).toBe(1);
-    expect(state.remote.fastScrollSensitivity).toBe(5);
-    expect(state.remote.touchScrollSensitivity).toBe(1);
   });
 
   // -- Jump-to-bottom button setting (issue #361) --
@@ -955,10 +912,53 @@ describe("settings-store", () => {
     expect(useSettingsStore.getState().workspaceSelector.sortOrder).toBe("manual");
   });
 
+  // workspaceSelector.lastInputMode (ADR-0194)
+  it("defaults lastInputMode to perPane", () => {
+    expect(useSettingsStore.getState().workspaceSelector.lastInputMode).toBe("perPane");
+  });
+
+  it("setWorkspaceSelector changes lastInputMode", () => {
+    useSettingsStore.getState().setWorkspaceSelector({ lastInputMode: "workspaceLatest" });
+    expect(useSettingsStore.getState().workspaceSelector.lastInputMode).toBe("workspaceLatest");
+  });
+
+  it("loadFromSettings fills a missing lastInputMode with perPane", () => {
+    useSettingsStore.getState().loadFromSettings({
+      workspaceSelector: { sortOrder: "manual" } as any,
+    });
+    expect(useSettingsStore.getState().workspaceSelector.lastInputMode).toBe("perPane");
+  });
+
+  it("loadFromSettings preserves workspaceLatest and rejects invalid lastInputMode values", () => {
+    useSettingsStore.getState().loadFromSettings({
+      workspaceSelector: { lastInputMode: "workspaceLatest" } as any,
+    });
+    expect(useSettingsStore.getState().workspaceSelector.lastInputMode).toBe("workspaceLatest");
+
+    useSettingsStore.getState().loadFromSettings({
+      workspaceSelector: { lastInputMode: "raw-output" } as any,
+    });
+    expect(useSettingsStore.getState().workspaceSelector.lastInputMode).toBe("perPane");
+  });
+
+  it("defaults destructive workspace actions to two-click confirmation", () => {
+    expect(useSettingsStore.getState().workspaceSelector.confirmDestructiveActions).toBe(true);
+  });
+
+  it("loads an explicit destructive-action confirmation opt-out and rejects invalid values", () => {
+    useSettingsStore.getState().loadFromSettings({
+      workspaceSelector: { confirmDestructiveActions: false } as any,
+    });
+    expect(useSettingsStore.getState().workspaceSelector.confirmDestructiveActions).toBe(false);
+
+    useSettingsStore.getState().loadFromSettings({
+      workspaceSelector: { confirmDestructiveActions: "no" } as any,
+    });
+    expect(useSettingsStore.getState().workspaceSelector.confirmDestructiveActions).toBe(true);
+  });
+
   it("has default automatic mobile mode width threshold", () => {
     expect(useSettingsStore.getState().remote.autoMobileModeMinWidth).toBe(720);
-    expect(useSettingsStore.getState().remote.terminalFontSize).toBe(14);
-    expect(useSettingsStore.getState().remote.composerFontSize).toBe(16);
     expect(useSettingsStore.getState().remote.preferredHost).toBe("");
     expect(useSettingsStore.getState().remote.customHosts).toEqual([]);
   });
@@ -980,9 +980,6 @@ describe("settings-store", () => {
     });
     expect(useSettingsStore.getState().remote.autoMobileModeMinWidth).toBe(720);
     expect(useSettingsStore.getState().remote.heartbeatTimeoutSeconds).toBe(45);
-    expect(useSettingsStore.getState().remote.snapshotMaxKib).toBe(4);
-    expect(useSettingsStore.getState().remote.terminalFontSize).toBe(14);
-    expect(useSettingsStore.getState().remote.composerFontSize).toBe(16);
     expect(useSettingsStore.getState().remote.preferredHost).toBe("");
     expect(useSettingsStore.getState().remote.customHosts).toEqual([]);
   });

@@ -10,10 +10,12 @@ import androidx.fragment.app.FragmentActivity
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.progressindicator.CircularProgressIndicator
 import com.laymux.android.R
 
 interface PairingSheetActions {
     fun scanPairingQr()
+    fun pastePairingValue()
     fun openConnectionSettings(instanceId: String)
     fun connectRemote()
     fun cancelRemoteConnection()
@@ -30,12 +32,15 @@ class PairingBottomSheet(
         val title: TextView,
         val description: TextView,
         val error: TextView,
+        val noticeRow: View,
+        val noticeSpinner: CircularProgressIndicator,
         val notice: TextView,
         val remoteSection: View,
         val connectButton: MaterialButton,
         val defaultConnectBackgroundTint: ColorStateList?,
         val defaultConnectTextColors: ColorStateList,
         val scanButton: MaterialButton,
+        val pasteButton: MaterialButton,
         val defaultScanTextColors: ColorStateList,
         val defaultScanStrokeColor: ColorStateList?,
         val defaultScanRippleColor: ColorStateList?,
@@ -91,7 +96,7 @@ class PairingBottomSheet(
         val presentation = presentPairingSheet(state)
 
         renderStatus(bound, state, presentation)
-        renderMessages(bound, state)
+        renderMessages(bound, state, presentation)
         renderRemote(bound, presentation)
         renderScan(bound, state, presentation)
     }
@@ -105,17 +110,25 @@ class PairingBottomSheet(
     private fun bind(content: View): Views {
         val scanButton = content.findViewById<MaterialButton>(R.id.pairing_scan_button)
         val connectButton = content.findViewById<MaterialButton>(R.id.pairing_connect_button)
+        val noticeSpinner =
+            content.findViewById<CircularProgressIndicator>(R.id.pairing_notice_spinner)
+        // hide() falls back to INVISIBLE by default, which would leave the
+        // spinner's 16dp gutter in front of a notice that is no longer busy.
+        noticeSpinner.setVisibilityAfterHide(View.GONE)
         return Views(
             statusBadge = content.findViewById(R.id.pairing_status_badge),
             title = content.findViewById(R.id.pairing_state_title),
             description = content.findViewById(R.id.pairing_state_description),
             error = content.findViewById(R.id.pairing_error),
+            noticeRow = content.findViewById(R.id.pairing_notice_row),
+            noticeSpinner = noticeSpinner,
             notice = content.findViewById(R.id.pairing_notice),
             remoteSection = content.findViewById(R.id.pairing_remote_section),
             connectButton = connectButton,
             defaultConnectBackgroundTint = connectButton.backgroundTintList,
             defaultConnectTextColors = connectButton.textColors,
             scanButton = scanButton,
+            pasteButton = content.findViewById(R.id.pairing_paste_button),
             defaultScanTextColors = scanButton.textColors,
             defaultScanStrokeColor = scanButton.strokeColor,
             defaultScanRippleColor = scanButton.rippleColor,
@@ -179,9 +192,18 @@ class PairingBottomSheet(
         )
     }
 
-    private fun renderMessages(bound: Views, state: PairingSheetState) {
+    private fun renderMessages(
+        bound: Views,
+        state: PairingSheetState,
+        presentation: PairingSheetPresentation,
+    ) {
         showText(bound.error, state.error)
         showText(bound.notice, state.notice)
+        bound.noticeRow.visibility =
+            if (presentation.noticeVisible) View.VISIBLE else View.GONE
+        // show()/hide() drive the indicator's own grow/shrink animation, so the
+        // spinner never freezes mid-sweep on a state update.
+        if (presentation.busy) bound.noticeSpinner.show() else bound.noticeSpinner.hide()
     }
 
     private fun showText(view: TextView, value: String?) {
@@ -250,6 +272,10 @@ class PairingBottomSheet(
             presentation.scanAction == PairingScanAction.HIDDEN
         ) View.GONE else View.VISIBLE
         bound.scanButton.isEnabled = presentation.scanEnabled
+        val pasteAvailable = presentation.scanAction == PairingScanAction.SCAN ||
+            presentation.scanAction == PairingScanAction.RESCAN
+        bound.pasteButton.visibility = if (pasteAvailable) View.VISIBLE else View.GONE
+        bound.pasteButton.isEnabled = presentation.scanEnabled
         bound.scanButton.text = activity.getString(
             when (presentation.scanAction) {
                 PairingScanAction.HIDDEN,
@@ -269,35 +295,45 @@ class PairingBottomSheet(
                 PairingScanAction.RESCAN,
                 -> {
                     bound.scanButton.isEnabled = false
+                    bound.pasteButton.isEnabled = false
                     actions.scanPairingQr()
                 }
                 PairingScanAction.HIDDEN -> Unit
             }
         }
+        bound.pasteButton.setOnClickListener {
+            bound.scanButton.isEnabled = false
+            bound.pasteButton.isEnabled = false
+            actions.pastePairingValue()
+        }
     }
 
     private fun renderScanEmphasis(bound: Views, emphasis: PairingScanEmphasis) {
         if (emphasis == PairingScanEmphasis.NEUTRAL) {
-            bound.scanButton.setTextColor(
-                requireNotNull(
-                    AppCompatResources.getColorStateList(
-                        activity,
-                        R.color.pairing_rescan_text,
+            listOf(bound.scanButton, bound.pasteButton).forEach { button ->
+                button.setTextColor(
+                    requireNotNull(
+                        AppCompatResources.getColorStateList(
+                            activity,
+                            R.color.pairing_rescan_text,
+                        ),
                     ),
-                ),
-            )
-            bound.scanButton.strokeColor = AppCompatResources.getColorStateList(
-                activity,
-                R.color.pairing_rescan_stroke,
-            )
-            bound.scanButton.rippleColor = AppCompatResources.getColorStateList(
-                activity,
-                R.color.pairing_rescan_ripple,
-            )
+                )
+                button.strokeColor = AppCompatResources.getColorStateList(
+                    activity,
+                    R.color.pairing_rescan_stroke,
+                )
+                button.rippleColor = AppCompatResources.getColorStateList(
+                    activity,
+                    R.color.pairing_rescan_ripple,
+                )
+            }
             return
         }
-        bound.scanButton.setTextColor(bound.defaultScanTextColors)
-        bound.scanButton.strokeColor = bound.defaultScanStrokeColor
-        bound.scanButton.rippleColor = bound.defaultScanRippleColor
+        listOf(bound.scanButton, bound.pasteButton).forEach { button ->
+            button.setTextColor(bound.defaultScanTextColors)
+            button.strokeColor = bound.defaultScanStrokeColor
+            button.rippleColor = bound.defaultScanRippleColor
+        }
     }
 }

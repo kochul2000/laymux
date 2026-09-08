@@ -766,30 +766,28 @@ export function createImeCompositionController(
     // A blur mid-composition leaves this controller (and the preview box) stuck in
     // "composing" until the next focus cycle, so it still has to reset.
     //
-    // But resetting alone *loses the syllable* (issue #555). Measured against a real
-    // `Terminal`: on blur xterm clears the helper textarea and sends nothing, leaving
-    // its own `_isComposing` true; a `compositionend` arriving after the blur cannot
-    // recover it either, because the finalizer's slice source is already empty. For
-    // Korean — and CJK generally — a focus change is a commit, not a cancel, so the
-    // text the user could see has to reach the PTY.
+    // But resetting alone *loses an unfinished syllable* (issue #555). The patched
+    // xterm blur handler now flushes every completed generation before clearing the
+    // helper textarea. A still-active composition has no generation to flush and a
+    // `compositionend` arriving after blur is deliberately ignored, so this controller
+    // still commits the text the user could see. For Korean — and CJK generally — a
+    // focus change is a commit, not a cancel.
     //
-    // Phase alone is NOT the discriminator — measured. WebView2 + Windows IME fires
-    // `compositionend` *before* the blur, so the real sequence is end → blur → flush:
-    // the blur lands inside xterm's deferred finalize window, clears the textarea, and
-    // the finalizer then slices an empty string. The controller is in
-    // `pending-finalize` there, and the syllable is lost exactly as if no
-    // `compositionend` had arrived at all.
+    // Phase alone is NOT the discriminator. WebView2 + Windows IME can fire
+    // `compositionend` before blur, leaving this controller in `pending-finalize` even
+    // though xterm's earlier blur listener has just flushed that generation.
     //
-    // What separates "xterm will send it" from "xterm can no longer send it" is
-    // xterm's own pending flag at blur time:
+    // What separates "xterm already sent it" from a compatibility fallback is xterm's
+    // pending flag after that listener ran:
     //
-    //   end → blur → flush   pending true   textarea already ""   → doomed, commit
-    //   end → flush → blur   pending false  already on the wire   → do not commit
+    //   end → blur           pending false  synchronously flushed → do not commit
+    //   end → timer → blur   pending false  already on the wire   → do not commit
+    //   pending remains true               older contract         → commit fallback
     //
-    // Two texts can be in danger at once. A carry-over ends one syllable and starts the
-    // next in the same tick, so a blur can catch a doomed pending send *and* a live
-    // composition. The doomed one is `lastFinalizedText` — not `state.text`, which by
-    // then holds the newer syllable.
+    // A carry-over can still expose two texts at once. The patched helper flushes the
+    // finalized FIFO first and this controller commits only the live composition. If a
+    // pending generation survives for compatibility, its text is `lastFinalizedText` —
+    // not `state.text`, which already holds the newer syllable.
     //
     // Neither comes from the textarea: xterm clears it in its own blur handler, which
     // is registered first (at `terminal.open()`), so reading it here would depend on
@@ -988,16 +986,8 @@ export function resolveVisualCaretOwner(input: VisualCaretOwnerInput): VisualCar
   if (input.viewportScrolledUp) {
     return "hidden";
   }
-  // DEC 2026 freezes xterm's rendered surface while parser/buffer state keeps
-  // advancing. Preserve the last committed overlay DOM as part of that same
-  // visual frame. Hiding it here made WSL Codex blink whenever a Working frame
-  // crossed a PTY-write / animation-frame boundary; native Windows normally
-  // hid the bug by delivering the stabilized transaction in one write.
-  if (input.syncOutputActive) {
-    return "frozen";
-  }
-  // Composition outranks the caret policy gate below (issue #551) and the alt buffer
-  // (issue #553).
+  // Composition outranks synchronized output, the caret policy gate below
+  // (issue #551), and the alt buffer (issue #553).
   //
   // The two decisions are not the same kind of thing. `stabilizeInteractiveCursor`
   // and `overlayActivity` decide whether laymux owns the *caret* — a policy that
@@ -1019,11 +1009,20 @@ export function resolveVisualCaretOwner(input: VisualCaretOwnerInput): VisualCar
   // anchor comes from the live buffer cursor — which is exactly where vim put it.
   //
   // It stays *below* opened/focused and viewportScrolledUp: those are genuine
-  // "not visible" conditions. Synchronized output is different: geometry is not
-  // trustworthy yet, so the already-painted preview/caret is frozen above rather
-  // than hidden or recomputed.
+  // "not visible" conditions. Synchronized output freezes xterm's rendered
+  // surface, but the composition preview is the only renderer for live preedit
+  // text. Freezing that DOM can leave the previous syllable painted after the
+  // controller has advanced to the next one. Its controller-owned anchor remains
+  // authoritative while the app frame is open, so live preedit must keep painting.
   if (input.compositionActive) {
     return "composition-preview";
+  }
+  // Preserve the last committed non-composition caret as part of the frozen xterm
+  // frame. Hiding it here made WSL Codex blink whenever a Working frame crossed a
+  // PTY-write / animation-frame boundary; native Windows normally hid the bug by
+  // delivering the stabilized transaction in one write.
+  if (input.syncOutputActive) {
+    return "frozen";
   }
   if (input.isAltBufferActive) {
     return "alt-buffer";

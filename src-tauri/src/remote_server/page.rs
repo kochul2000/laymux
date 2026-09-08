@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 use std::sync::OnceLock;
 
 use axum::extract::{ConnectInfo, Request, State};
-use axum::http::header;
+use axum::http::{header, HeaderMap, HeaderValue};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 
 use crate::automation_server::ServerState;
@@ -63,8 +63,8 @@ pub(crate) async fn remote_page(
     // for revalidation — without no-store, browsers heuristically cache it and
     // users need a hard refresh after every update. The heavy app bundle and
     // vendor assets it references are immutable hashed URLs (ADR-0169) instead.
-    if super::page_assets::accepts_gzip(req.headers()) {
-        return (
+    let response = if super::page_assets::accepts_gzip(req.headers()) {
+        (
             [
                 (header::CACHE_CONTROL, "no-store"),
                 (header::CONTENT_TYPE, "text/html; charset=utf-8"),
@@ -73,16 +73,164 @@ pub(crate) async fn remote_page(
             ],
             remote_page_gzip().to_vec(),
         )
-            .into_response();
+            .into_response()
+    } else {
+        (
+            [
+                (header::CACHE_CONTROL, "no-store"),
+                (header::VARY, "Accept-Encoding"),
+            ],
+            Html(remote_page_html()),
+        )
+            .into_response()
+    };
+    secure_page_response(response, req.headers())
+}
+
+/// The document policy, with `__WS_SOURCES__` resolved per request. Kept in its
+/// own file because `ui/e2e/remote-client-assets.ts` serves the mocked page
+/// under the same policy — one text file, no cross-language drift.
+const REMOTE_PAGE_CSP_TEMPLATE: &str = include_str!("page-csp.txt");
+
+const WS_SOURCES_PLACEHOLDER: &str = "__WS_SOURCES__";
+
+const APP_FRAME_ANCESTORS_PLACEHOLDER: &str = "__APP_FRAME_ANCESTORS__";
+
+/// What ships if even the template's own constant form will not encode. It has
+/// to name `frame-ancestors` itself: `default-src` does not cover that
+/// directive, so `default-src 'none'` alone would leave the page framable by
+/// anyone (ADR-0215).
+const LAST_RESORT_CSP: &str = "default-src 'none'; frame-ancestors 'none'";
+
+/// The origins the desktop shell's own WebView serves the app from, and the
+/// only ones allowed to frame this page (ADR-0215). Mobile mode embeds
+/// `/remote/?localApp=1` in an iframe inside that WebView, so a blanket
+/// `frame-ancestors 'none'` (ADR-0183) left the user staring at a blank
+/// overlay. `'self'` would not help: the embedder is the app origin, not the
+/// remote server's. Everything outside this list — every real web page — is
+/// still refused, so the clickjacking boundary the directive exists for holds.
+///
+/// `tauri://localhost` is the Linux/macOS WebView origin, `http://tauri.localhost`
+/// the Windows (WebView2) one. The Android app is not on this list and does not
+/// need to be: its wrapper loads the shell as a top-level document over HTTPS
+/// (ADR-0149), never framed. The Vite dev origin is compiled in only for debug
+/// builds; a shipped binary must not trust whatever answers on port 1420.
+const APP_FRAME_ANCESTORS: &str = if cfg!(debug_assertions) {
+    "tauri://localhost http://tauri.localhost http://localhost:1420"
+} else {
+    "tauri://localhost http://tauri.localhost"
+};
+
+/// The document carries the policy the Remote viewer document already had
+/// (ADR-0041), so host file bytes are never rendered by a document without one.
+/// `script-src 'self'` is the boundary that matters: the shell has no inline
+/// script, no inline handler and no `eval`, so it costs nothing.
+///
+/// `style-src` keeps `'unsafe-inline'` because xterm's DOM renderer appends
+/// generated `<style>` elements for cell dimensions, theme and decorations.
+/// Dropping it blanks the terminal, and CSS-only injection needs an HTML sink
+/// this page does not have — every rendered file goes into a sandboxed iframe.
+pub(super) fn secure_page_response(
+    mut response: Response,
+    request_headers: &HeaderMap,
+) -> Response {
+    let policy = REMOTE_PAGE_CSP_TEMPLATE
+        .trim_end()
+        .replace(
+            WS_SOURCES_PLACEHOLDER,
+            &websocket_csp_sources(request_headers),
+        )
+        .replace(APP_FRAME_ANCESTORS_PLACEHOLDER, APP_FRAME_ANCESTORS);
+    let headers = response.headers_mut();
+    // Fail closed. `is_bare_authority` should make an unencodable value
+    // impossible, but "the validator let something through" must not be the one
+    // case that ships the document with no policy at all — fall back to the
+    // template's own WebSocket-less form, which is a compile-time constant.
+    let value = HeaderValue::from_str(&policy)
+        .or_else(|_| {
+            HeaderValue::from_str(
+                &REMOTE_PAGE_CSP_TEMPLATE
+                    .trim_end()
+                    .replace(WS_SOURCES_PLACEHOLDER, "")
+                    .replace(APP_FRAME_ANCESTORS_PLACEHOLDER, APP_FRAME_ANCESTORS),
+            )
+        })
+        .unwrap_or_else(|_| HeaderValue::from_static(LAST_RESORT_CSP));
+    headers.insert(header::CONTENT_SECURITY_POLICY, value);
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    response
+}
+
+/// CSP3 has `'self'` cover same-origin `ws:`/`wss:`, but Safari shipped
+/// releases where it does not, and the output socket is the whole product. The
+/// `Host` authority is client-controlled, so it is echoed only when it matches
+/// the bare `host[:port]` grammar; anything else drops the WebSocket sources
+/// rather than letting a crafted header widen the policy.
+fn websocket_csp_sources(request_headers: &HeaderMap) -> String {
+    let Some(authority) = request_headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return String::new();
+    };
+    if !is_bare_authority(authority) {
+        return String::new();
     }
-    (
-        [
-            (header::CACHE_CONTROL, "no-store"),
-            (header::VARY, "Accept-Encoding"),
-        ],
-        Html(remote_page_html()),
-    )
-        .into_response()
+    format!(" ws://{authority} wss://{authority}")
+}
+
+fn is_bare_authority(value: &str) -> bool {
+    if value.is_empty() || value.len() > 255 {
+        return false;
+    }
+    let (host, port) = if let Some(rest) = value.strip_prefix('[') {
+        // IPv6 literals keep their brackets: `[::1]` or `[::1]:19281`.
+        let Some((inside, tail)) = rest.split_once(']') else {
+            return false;
+        };
+        if !inside
+            .chars()
+            .all(|ch| ch.is_ascii_hexdigit() || ch == ':' || ch == '.')
+        {
+            return false;
+        }
+        match tail {
+            "" => (inside, None),
+            _ => match tail.strip_prefix(':') {
+                Some(port) => (inside, Some(port)),
+                None => return false,
+            },
+        }
+    } else {
+        let (host, port) = match value.rsplit_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (value, None),
+        };
+        if !host.chars().all(is_authority_host_char) {
+            return false;
+        }
+        (host, port)
+    };
+    if host.is_empty() {
+        return false;
+    }
+    match port {
+        None => true,
+        Some(port) => {
+            !port.is_empty() && port.len() <= 5 && port.chars().all(|ch| ch.is_ascii_digit())
+        }
+    }
+}
+
+fn is_authority_host_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '.' || ch == '-'
 }
 
 /// The committed shell references assets as `{{ASSET:<logical name>}}`; the
@@ -196,8 +344,13 @@ mod tests {
         assert!(html.contains("if (document.visibilityState !== \"visible\") return;"));
         // Three signals for one moment: tab switch, bfcache restore, network back.
         assert!(html.contains("document.addEventListener(\"visibilitychange\", () => {"));
-        assert!(html.contains("window.addEventListener(\"pageshow\", () => maybeAutoConnect());"));
-        assert!(html.contains("window.addEventListener(\"online\", () => maybeAutoConnect());"));
+        assert!(html.contains("function resumeControlOnReturn()"));
+        assert!(
+            html.contains("window.addEventListener(\"pageshow\", () => resumeControlOnReturn());")
+        );
+        assert!(
+            html.contains("window.addEventListener(\"online\", () => resumeControlOnReturn());")
+        );
         // Connecting arms the intent; releasing on purpose withdraws it.
         assert!(html.contains("armAutoConnect();"));
         assert!(html.contains("disarmAutoConnect();"));
@@ -228,6 +381,37 @@ mod tests {
         // remembered pane, and an explicit `null` opts out of it — a reconnect
         // would then land on the focused pane instead of this tab's own.
         assert!(html.contains("await loadNavigation(undefined, {"));
+        let connect_start = html
+            .find("async function connect({ auto = false, focusInput = !auto } = {})")
+            .unwrap();
+        let connect_end = connect_start
+            + html[connect_start..]
+                .find("async function writeToTerminal")
+                .unwrap();
+        let connect = &html[connect_start..connect_end];
+        assert!(
+            !connect.contains("ensureTerminal();"),
+            "xterm must not exist before navigation establishes its terminal owner"
+        );
+        let navigation_start = html.find("async function loadNavigation(").unwrap();
+        let navigation_end = navigation_start
+            + html[navigation_start..]
+                .find("async function activateWorkspace")
+                .unwrap();
+        let navigation = &html[navigation_start..navigation_end];
+        let owner_index = navigation
+            .find("setActiveTerminal(nextTerminalId);")
+            .unwrap();
+        let terminal_index = navigation
+            .find("ensureTerminal(terminalInfo && terminalInfo.appearance);")
+            .unwrap();
+        let attach_index = navigation
+            .find("attachTerminal(activeTerminalId, {")
+            .unwrap();
+        assert!(
+            owner_index < terminal_index && terminal_index < attach_index,
+            "navigation must establish the draft owner before fallible xterm construction and attach"
+        );
         // `focusInput` is the connect() option (default `!auto`); the boot-time
         // autoConnect claim passes false so no gesture-less focus strands DOM
         // focus without a soft keyboard.
@@ -276,15 +460,15 @@ mod tests {
         assert!(html.contains("scheduleTerminalFit();"));
     }
 
-    /// The wheel multipliers ride the per-terminal option bundle and are applied
-    /// wherever the font and theme are, both at creation and on a live update.
+    /// Device-local wheel multipliers join the host appearance only when the
+    /// page builds xterm's supported option bundle.
     #[test]
-    fn remote_page_html_applies_the_served_wheel_sensitivities() {
+    fn remote_page_html_applies_the_device_wheel_sensitivities() {
         let html = remote_client_source();
         assert!(html.contains("scrollSensitivity: normalized.scrollSensitivity,"));
         assert!(html.contains("fastScrollSensitivity: normalized.fastScrollSensitivity,"));
-        // An older desktop omits the field and a hand-edited value can be out of
-        // band; xterm throws on a non-positive sensitivity, so both are absorbed.
+        // A hand-edited localStorage value can be out of band; xterm throws on
+        // a non-positive sensitivity, so the page absorbs it before applying.
         assert!(html.contains("function normalizeScrollSensitivity(value, fallback) {"));
         assert!(html.contains("if (!Number.isFinite(parsed) || parsed <= 0) return fallback;"));
     }
@@ -300,7 +484,7 @@ mod tests {
             html.contains("sendTerminalCursorScroll(term, deltaY, twoFingerScrollSensitivity);")
         );
         assert!(html.contains("function adoptTouchScrollSensitivity(appearance = {}) {"));
-        // Both the first terminal and every later appearance update adopt it.
+        // The first terminal and every local display-settings update adopt it.
         assert!(html.contains("adoptTouchScrollSensitivity(appearance);"));
         assert!(!html.contains("term.options.touchScrollSensitivity"));
     }
@@ -380,10 +564,21 @@ mod tests {
             .unwrap();
         assert!(workspace_view.contains("id=\"workspaceSection\""));
         assert!(workspace_view.contains("id=\"dockSection\""));
+        assert!(!workspace_view.contains("id=\"hiddenWorkspaceShelf\""));
         assert!(!workspace_view.contains("id=\"notificationSection\""));
         assert!(!workspace_view.contains("class=\"connection-panel\""));
         assert!(!workspace_view.contains("id=\"displaySection\""));
         assert!(!workspace_view.contains(">Workspaces</h2>"));
+
+        let hidden_view = html
+            .split("<div id=\"drawerHiddenView\"")
+            .nth(1)
+            .expect("the hidden-workspace drawer view is present")
+            .split("</div><!-- /drawerHiddenView -->")
+            .next()
+            .unwrap();
+        assert!(hidden_view.contains("id=\"hiddenWorkspaceSection\""));
+        assert!(hidden_view.contains("id=\"hiddenWorkspaceShelf\""));
 
         let notifications_view = html
             .split("<div id=\"drawerNotificationsView\"")
@@ -414,10 +609,38 @@ mod tests {
         assert!(settings_view.contains("id=\"displaySection\""));
         assert!(settings_view.contains("id=\"pcUpdateSection\""));
         assert!(settings_view.contains("id=\"installSection\""));
+        // Settings is paginated: one tablist, one panel per subject.
+        assert!(
+            settings_view.contains("id=\"settingsTabs\" class=\"settings-tabs\" role=\"tablist\"")
+        );
+        for panel in ["inputBar", "composer", "display", "app"] {
+            assert!(
+                settings_view.contains(&format!("role=\"tab\" data-settings-panel=\"{panel}\"")),
+                "settings tab for {panel} is missing"
+            );
+            assert!(
+                settings_view.contains(&format!(
+                    "class=\"settings-panel\" role=\"tabpanel\" data-settings-panel=\"{panel}\""
+                )),
+                "settings panel for {panel} is missing"
+            );
+        }
+        // Composer settings render in their own panel, not inside the input bar.
+        assert!(settings_view.contains("id=\"composerSettingsEditor\""));
+        // A dot on the drawer button alone would point at a page the reader
+        // cannot see once Settings opens on whichever tab they used last, so
+        // the update dot rides down to the tab that holds the update.
+        assert!(html.contains(
+            "settingsAppTabButton.classList.toggle(\"update-available\", Boolean(availableVersion));"
+        ));
+        assert!(html.contains(".settings-tab.update-available::after"));
 
         assert!(html.contains("id=\"drawerNotificationsButton\""));
         assert!(html.contains("id=\"drawerConnectionButton\""));
         assert!(html.contains("id=\"drawerSettingsButton\""));
+        assert!(!html.contains("id=\"hiddenWorkspaceBadge\""));
+        assert!(!html.contains("id=\"notificationBadge\""));
+        assert!(html.contains("status-indicator"));
         assert!(html.contains("id=\"drawerBack\""));
         assert!(!html.contains("id=\"navClose\""));
         assert!(!html.contains("class=\"drawer-close\""));
@@ -478,20 +701,62 @@ mod tests {
     }
 
     #[test]
-    fn remote_page_html_edits_pc_owned_terminal_and_composer_font_sizes() {
+    fn remote_page_html_offers_device_local_terminal_edge_flicks() {
+        let html = remote_client_source();
+
+        assert!(html.contains("id=\"edgeSwipeDrawersToggle\""));
+        assert!(html.contains("const edgeSwipeDrawersKey = \"laymux.remote.edgeSwipeDrawers\";"));
+        assert!(
+            html.contains("let edgeSwipeDrawersEnabled = loadLocalToggle(edgeSwipeDrawersKey);")
+        );
+        assert!(html.contains("touchGesture.mode === \"pending\" && touchGesture.edge"));
+        assert!(html.contains("touchGesture.movedBeyondTapSlop = true;"));
+        assert!(html.contains("clearTouchLongPressTimer();"));
+        assert!(html.contains("if (edge === \"left\") setNavigationOpen(true);"));
+        assert!(html.contains("openCurrentFileExplorer();"));
+    }
+
+    #[test]
+    fn remote_page_html_owns_display_settings_in_device_storage() {
         let html = remote_client_source();
 
         assert!(html.contains("id=\"remoteTerminalFontSize\""));
         assert!(html.contains("id=\"remoteComposerFontSize\""));
+        assert!(html.contains("id=\"remoteMenuFontSize\""));
+        assert!(html.contains("id=\"remoteNavigationPinned\""));
+        assert!(html.contains("id=\"remoteNavigationWidth\""));
+        assert!(html.contains("id=\"remoteNavigationPinCutoff\""));
+        assert!(html.contains("id=\"remoteComposerIdleOpacity\""));
+        assert!(html.contains("id=\"remoteComposerFocusedOpacity\""));
+        assert!(html.contains("id=\"remoteComposerActiveOpacity\""));
+        assert!(html.contains("id=\"remoteSnapshotMaxKib\""));
+        assert!(html.contains("id=\"remoteScrollSensitivity\""));
+        assert!(html.contains("id=\"remoteFastScrollSensitivity\""));
         assert!(html.contains("id=\"remoteTouchScrollSensitivity\""));
         assert!(html.contains("id=\"remoteTwoFingerScrollSensitivity\""));
-        assert!(html.contains("/remote/v1/display-settings"));
-        assert!(html.contains("method: \"PUT\""));
-        assert!(html.contains("body: JSON.stringify({"));
-        assert!(html.contains("leaseId: selectedLeaseId"));
+        assert!(html.contains("id=\"remoteSelectionHandleSize\""));
+        assert!(html.contains("laymux.remote.displaySettings"));
+        assert!(!html.contains("/remote/v1/display-settings"));
+        assert!(html.contains("Saved on this device."));
         assert!(html.contains("terminalFontSize"));
         assert!(html.contains("composerFontSize"));
+        assert!(html.contains("menuFontSize"));
+        assert!(html.contains("navigationPinned"));
+        assert!(html.contains("navigationWidth"));
+        assert!(html.contains("navigationPinCutoff"));
+        assert!(html.contains("composerIdleOpacity"));
+        assert!(html.contains("composerFocusedOpacity"));
+        assert!(html.contains("composerActiveOpacity"));
         assert!(html.contains("--remote-composer-font-size"));
+        assert!(html.contains("--remote-menu-font-size"));
+        assert!(html.contains("--remote-navigation-width"));
+        assert!(html.contains("--touch-selection-handle-size"));
+        assert!(html.contains("window.innerWidth > remoteDisplaySettings.navigationPinCutoff"));
+        assert!(html.contains("--remote-composer-idle-opacity"));
+        assert!(html.contains("--remote-composer-focused-opacity"));
+        assert!(html.contains("--remote-composer-active-opacity"));
+        assert!(html.contains("data-opacity-state"));
+        assert!(html.contains("function composerOpacityState()"));
         assert!(html.contains("applyTerminalAppearance(appearance);"));
         assert!(html.contains("scheduleTerminalFit();"));
     }
@@ -672,10 +937,50 @@ mod tests {
         assert!(html.contains("enqueueDiscreteInput(sequence, Math.abs(wholeLines));"));
         assert!(html.contains("if (isAlternateBufferCursorInput(terminal, data))"));
         assert!(html.contains("function handleTouchTap(term, element, point)"));
-        assert!(html.contains("function startTouchSelection(term, element, pointerId)"));
+        let touch_tap_start = html
+            .find("function handleTouchTap(term, element, point)")
+            .unwrap();
+        let touch_tap_end = touch_tap_start
+            + html[touch_tap_start..]
+                .find("function selectionRange")
+                .unwrap();
+        let touch_tap = &html[touch_tap_start..touch_tap_end];
+        assert!(touch_tap.contains("focusComposerFromTerminalTap();"));
+        assert!(!touch_tap.contains("focusCurrentInputSurface();"));
+        assert!(!touch_tap.contains("term.blur?.();"));
+        let touch_focus_start = html
+            .find("function focusComposerFromTerminalTap()")
+            .unwrap();
+        let touch_focus_end = touch_focus_start
+            + html[touch_focus_start..]
+                .find("function focusInputSurfaceAfterAwait")
+                .unwrap();
+        let touch_focus = &html[touch_focus_start..touch_focus_end];
+        assert!(touch_focus.contains("focusCurrentInputSurface();"));
+        assert!(touch_focus.contains("requestAnimationFrame(() => {"));
+        assert!(touch_focus.contains("!fileViewerOverlayElement.hidden"));
+        assert!(touch_focus.contains("focusedElement !== terminal?.textarea"));
+        assert!(touch_focus.contains("focusedElement !== document.body"));
+        let touch_selection_start = html
+            .find("function startTouchSelection(term, pointerId)")
+            .unwrap();
+        let touch_selection_end = touch_selection_start
+            + html[touch_selection_start..]
+                .find("function triggerTouchTapSelection")
+                .unwrap();
+        let touch_selection = &html[touch_selection_start..touch_selection_end];
+        assert!(touch_selection.contains("term.clearSelection();"));
+        assert!(
+            touch_selection.contains("selectionService._selectWordAtCursor(selectionEvent, true)")
+        );
+        assert!(touch_selection.contains("selectionService._fireEventIfSelectionChanged();"));
+        assert!(!touch_selection.contains("dispatchTouchSelectionMouse("));
+        assert!(!touch_selection.contains("touchGesture.forceSelection"));
+        assert!(html.contains("function withPreservedInputSurfaceFocus(run)"));
+        assert!(html.contains("function restorePreservedInputSurfaceFocus(surface)"));
+        assert!(html.contains("textarea.focus = function preserveInputSurfaceFocus() {}"));
         assert!(html.contains("function extendTouchSelection(term, gesture, point)"));
         assert!(html.contains("function handleSelectionMouseupAfterInteraction()"));
-        assert!(html.contains("touchGesture.forceSelection,\n            2"));
         assert!(html.contains("touchGesture.selectionSeed = selection"));
         assert!(html.contains("if (!isTouchPointer(event)) return;"));
         assert!(!html.contains("activePointerId !== null || event.isPrimary === false"));
@@ -729,7 +1034,8 @@ mod tests {
             html.contains("setBusyStatus(\"Connection interrupted. Reconnecting…\", false, true);")
         );
         assert!(html.contains(".input-mode-toggle {"));
-        assert!(html.contains("width: var(--header-control-height);"));
+        assert!(html.contains("width: 34px;"));
+        assert!(html.contains("height: var(--key-bar-control-height);"));
         assert!(!html.contains("id=\"inputModeLabel\""));
         assert!(html
             .contains("inputModeToggleButton.setAttribute(\"aria-label\", inputModeActionLabel);"));
@@ -737,6 +1043,12 @@ mod tests {
         assert!(html.contains("id=\"desktopModeDrawer\""));
         assert!(html.contains("desktopModeHeaderButton.hidden = !localAppMode;"));
         assert!(html.contains("desktopModeDrawerButton.hidden = !localAppMode;"));
+        // The embed greets the PC app's overlay so a frame that never came up
+        // is distinguishable from one that did — a refused embed still fires
+        // `load`, so this is the host's only proof (#955, ADR-0215).
+        assert!(html.contains(
+            "if (localAppMode) window.parent.postMessage({ type: \"laymux:mobile-mode-ready\" }, \"*\");"
+        ));
         assert!(!html.contains("desktopModeHeaderButton.textContent = \"Close\""));
         assert!(!html.contains("desktopModeDrawerButton.textContent = \"Close\""));
         assert!(html.contains("id=\"exit\" class=\"danger\">Exit</button>"));
@@ -772,7 +1084,7 @@ mod tests {
         assert!(html.contains("id=\"notificationSection\""));
         assert!(html.contains("id=\"drawerNotificationsButton\""));
         assert!(html.contains("id=\"notificationPanel\""));
-        assert!(html.contains("id=\"notificationBadge\""));
+        assert!(!html.contains("id=\"notificationBadge\""));
         assert!(html.contains("renderNotificationPanel(data.notifications || []"));
         assert!(html.contains("/remote/v1/notifications/mark-all-read"));
         assert!(
@@ -794,13 +1106,20 @@ mod tests {
     }
 
     #[test]
-    fn remote_page_html_contains_file_viewer_new_tab_handshake() {
+    fn remote_page_html_contains_in_page_file_viewer() {
         let html = remote_client_source();
         assert!(html.contains("id=\"fileViewerSection\""));
+        let drawer_end = html
+            .find("</div><!-- /drawerWorkspaceView -->")
+            .expect("workspace drawer closes");
+        let file_viewer_section = html
+            .find("id=\"fileViewerSection\"")
+            .expect("file viewer path controls exist");
+        assert!(file_viewer_section > drawer_end);
         assert!(html.contains(
             "id=\"fileViewerPath\" type=\"text\" autocomplete=\"off\" autocapitalize=\"off\""
         ));
-        assert!(html.contains("id=\"openFileViewer\" type=\"button\" disabled>Open viewer"));
+        assert!(html.contains("id=\"openFileViewer\" type=\"button\" disabled>Open"));
         assert!(html.contains("id=\"pullHostFileViewerPath\""));
         assert!(html.contains(">From host</button>"));
         assert!(!html.contains("id=\"openCurrentFileViewer\""));
@@ -810,14 +1129,81 @@ mod tests {
         assert!(html.contains("let fileViewerStatusRequestRevision = 0;"));
         assert!(html.contains("let fileViewerPathRevision = 0;"));
         assert!(!html.contains("refreshFileViewerStatus().catch(() => {});"));
-        assert!(html.contains("/remote/viewer/"));
-        assert!(html.contains("laymux:file-viewer-ready"));
-        assert!(html.contains("laymux:file-viewer-session"));
-        assert!(html.contains("event.origin !== window.location.origin"));
-        assert!(html.contains("fileViewerToken: session.fileViewerToken"));
         assert!(html.contains("event.isComposing ||"));
         assert!(html.contains("event.keyCode === 229 ||"));
-        assert!(!html.contains("/remote/viewer/?token="));
+        // The viewer renders in this document (ADR-0184): no second tab, so no
+        // `window.open`, no credential handshake, and no viewer bootstrap route.
+        assert!(html.contains("id=\"fileViewerOverlay\""));
+        assert!(html.contains("function openFileViewerOverlay(path, explorerReturnPath)"));
+        assert!(html.contains("const openedFromExplorer = explorerReturnPath !== undefined;"));
+        assert!(html.contains("function closeFileViewer()"));
+        assert!(html.contains("function fileViewerFetch("));
+        assert!(html.contains("fileViewerAuthorization: {"));
+        assert!(html.contains("leaseId: requestLeaseId"));
+        assert!(html.contains("fileViewerToken: requestToken"));
+        assert!(html.contains("body: { source: \"path\", path },"));
+        // Explorer mode (ADR-0198): the directory listing lives in this same
+        // overlay and reaches the host only through the lease+capability route.
+        assert!(html.contains("id=\"fileExplorerHeader\""));
+        assert!(html.contains("id=\"fileViewerDirectory\""));
+        assert!(html.contains("id=\"fileViewerBack\""));
+        assert!(html.contains("function openFileExplorerOverlay(request)"));
+        assert!(html.contains("function renderDirectoryListing(payload)"));
+        assert!(html.contains("\"/remote/v1/file-viewer/list\""));
+        // Entry names are text, never markup: a hostile file name must not
+        // become HTML in this document.
+        assert!(html.contains("name.textContent = entry.name;"));
+        assert!(!html.contains("/remote/viewer/"));
+        assert!(!html.contains("window.open(\"/remote/viewer/\""));
+        assert!(!html.contains("laymux:file-viewer-ready"));
+        assert!(!html.contains("laymux:file-viewer-session"));
+        assert!(!html.contains("Popup blocked. Allow popups and try again."));
+        assert!(html.contains("fileViewerSection.hidden = true;"));
+        assert!(html.contains("fileViewerSection.hidden = false;"));
+    }
+
+    #[test]
+    fn remote_page_file_viewer_keeps_the_sandboxed_preview_boundary() {
+        let html = remote_client_source();
+        // Same origin as the old tab (ADR-0041), so the boundary that matters is
+        // the empty sandbox: no allow-scripts, no allow-same-origin.
+        assert!(html.contains("id=\"fileViewerPreview\""));
+        assert!(html.contains("sandbox=\"\""));
+        assert!(html.contains("fileViewerPreviewElement.setAttribute(\"sandbox\", \"\");"));
+        assert!(html.contains("fileViewerPreviewElement.srcdoc = payload.previewDocument;"));
+        // Images stay a decoded `data:` URL and text stays textContent — neither
+        // path may become HTML in this document.
+        assert!(html.contains("/^data:image\\//i.test(payload.dataUrl || \"\")"));
+        assert!(html.contains("fileViewerTextElement.textContent = payload.content || \"\";"));
+        assert!(!html.contains("fileViewerTextElement.innerHTML"));
+    }
+
+    #[test]
+    fn remote_page_file_viewer_download_asks_for_bytes_not_the_rendered_payload() {
+        let html = remote_client_source();
+        assert!(html.contains("id=\"fileViewerDownload\""));
+        assert!(html.contains("function downloadCurrentFileViewerFile()"));
+        // Its own endpoint (ADR-0185): `render` hands back a sanitized preview
+        // for HTML/Markdown and no bytes at all for binary or archive kinds.
+        assert!(html.contains("/remote/v1/file-viewer/download"));
+        assert!(html.contains("function saveDownloadInBrowser(payload)"));
+        assert!(html.contains("anchor.download = payload.name;"));
+        // The wrapper WebView has no download handler, so a browser-style save
+        // is a silent no-op there and must not be attempted.
+        assert!(html.contains("window.LaymuxNative?.saveRemoteFile"));
+        assert!(html.contains("This app version cannot save files. Update the app."));
+    }
+
+    #[test]
+    fn remote_page_file_viewer_zoom_is_transient_display_state() {
+        let html = remote_client_source();
+        assert!(html.contains("const FILE_VIEWER_ZOOM_STEP = 0.25;"));
+        assert!(html.contains("function handleFileViewerPointerDown(event)"));
+        assert!(html.contains("fileViewerPointers.size === 2"));
+        assert!(html.contains("function handleFileViewerWheel(event)"));
+        assert!(html.contains("{ passive: false }"));
+        // Zoom is per-view state, never a setting: nothing persists it.
+        assert!(!html.contains("laymux.remote.fileViewerZoom"));
     }
 
     #[test]
@@ -827,21 +1213,84 @@ mod tests {
         assert!(html.contains("function evaluatePathLinkSelection()"));
         assert!(html.contains("function schedulePathLinkSelectionEvaluation("));
         assert!(html.contains("const PATH_LINK_SELECTION_DEBOUNCE_MS = 100;"));
-        assert!(html.contains("pathLinkAbortController.abort();"));
         assert!(html.contains("const currentPosition = term.getSelectionPosition?.();"));
         assert!(html.contains("data.valid !== true || !Array.isArray(data.matches)"));
-        assert!(html.contains("data.matches.length === 0 || data.matches.length > 16"));
+        assert!(html.contains("data.matches.length > REMOTE_PATH_LINK_MAX_SELECTION_MATCHES"));
         assert!(html.contains("slice(match.startIndex, match.endIndex) === match.token"));
         assert!(
             html.contains("const { text, columns, endColumns } = reconstructRemoteLinkLine(line);")
         );
         assert!(html.contains("text.slice(startOffset, endOffset + 1) === match.token"));
         assert!(html.contains("endCol: endColumns[endOffset]"));
-        assert!(html.contains("setVerifiedPathLinks(matches.map((match) => ({"));
+        assert!(html.contains("setVerifiedPathLinks(\"selection\", matches.map((match) => ({"));
         assert!(html.contains("pathLinkAtPoint(event.clientX, event.clientY)"));
         assert!(html.contains("remote-path-link-decoration"));
-        assert!(html.contains("openFileViewerTab(press.path)"));
+        assert!(html.contains("openFileViewerOverlay(press.path)"));
         assert!(html.contains("clearPathLinkSelection()"));
+        assert!(html.contains("mode: \"selection\","));
+    }
+
+    /// ADR-0188/0220: the tap/click (`point`) and idle-screen (`screen`) triggers
+    /// are bounded, and screen decoration lifetime follows stable rendered
+    /// content instead of individual output writes.
+    #[test]
+    fn remote_page_html_contains_point_and_idle_screen_path_link_triggers() {
+        let html = remote_client_source();
+        assert!(html.contains("const PATH_LINK_SCOPES = [\"selection\", \"point\", \"screen\"];"));
+        assert!(html.contains("const REMOTE_PATH_LINK_IDLE_SCAN_DELAY_MS = 500;"));
+        assert!(html.contains("const REMOTE_PATH_LINK_MAX_SCREEN_LINES = 64;"));
+        assert!(html.contains("const REMOTE_PATH_LINK_MAX_SCREEN_CHARS = 8192;"));
+        assert!(html.contains("const REMOTE_PATH_LINK_MAX_SCREEN_CANDIDATES = 64;"));
+        assert!(html.contains("function evaluatePathLinkPoint(point)"));
+        assert!(html.contains("function evaluatePathLinkScreen()"));
+        assert!(html.contains("function schedulePathLinkIdleScan()"));
+        assert!(html.contains("function requestLineScopedPathLinks("));
+        assert!(html.contains("function mapRemoteLinePathRange(bufferLine, match)"));
+        assert!(html.contains("queuePathLinkPointEvaluation(point)"));
+        // Output pushes the idle scan out instead of scanning mid-stream.
+        assert!(html.contains("schedulePathLinkIdleScan();"));
+        // Only a successfully applied decoration set owns a screen signature;
+        // an aborted request cannot suppress the next validation.
+        assert!(html.contains("signature === pathLinkVerifiedScreenSignature"));
+        assert!(html.contains("!pathLinkScreenContextDirty"));
+        assert!(html.contains("pathLinkScopes.screen.length > 0"));
+        assert!(html.contains("pathLinkVerifiedScreenSignature = signature;"));
+        assert!(html.contains("pathLinkScreenContextDirty = false;"));
+        // A physical write can carry an invisible OSC 7 CWD transition, so an
+        // equal cell signature must still refresh the server-owned path context.
+        assert!(html.contains(
+            "pathLinkScreenContextDirty = true;\n                      if (term.modes?.synchronizedOutputMode !== true)"
+        ));
+        assert!(!html.contains("pathLinkLastScreenSignature"));
+        // A live selection owns discovery. Point exits directly; screen uses
+        // the fail-closed dirty-context block asserted below.
+        assert_eq!(
+            html.matches("if (term.hasSelection?.()) return;").count(),
+            1
+        );
+        // Output can repaint a row in place: stable frames re-check the stored
+        // token, while an in-progress DEC 2026 frame keeps the rendered link.
+        assert!(html.contains("function revalidatePathLinkScopes()"));
+        assert!(html.contains("function pathLinkEntryStillOnScreen(entry)"));
+        assert!(html.contains("term.modes?.synchronizedOutputMode === true"));
+        assert!(html.contains("term.modes?.synchronizedOutputMode !== true"));
+        // Equal links keep their live marker/decoration DOM identity.
+        assert!(html.contains("function samePathLinkEntry(entry, right)"));
+        assert!(html.contains("entry.decoration.isDisposed !== true"));
+        assert!(html.contains("reusableEntry.selection = selection;"));
+        assert!(html.contains("selections.length !== data.matches.length"));
+        assert!(html.contains("if (!setVerifiedPathLinks(scope, selections))"));
+        assert!(html.contains(
+            "if (term.hasSelection?.()) {\n            if (pathLinkScreenContextDirty) clearPathLinkScope(\"screen\");"
+        ));
+        assert!(html.contains(
+            "schedulePathLinkSelectionEvaluation();\n            // A screen scan deferred by a live selection"
+        ));
+        assert_eq!(html.matches("token: match.token,").count(), 2);
+        assert!(
+            html.contains("caret: { lineIndex: 0, index: caretIndex }")
+                || html.contains("{ lineIndex: 0, index: caretIndex }")
+        );
     }
 
     #[test]
@@ -856,47 +1305,69 @@ mod tests {
         assert!(html.contains("function terminalViewportDistanceFromBottom(term)"));
         assert!(html.contains("function restoreTerminalViewport(term, distanceFromBottom)"));
         assert!(html.contains("function updateScrollToBottomButton(term = terminal)"));
-        assert!(html.contains("scrollToBottomButton.addEventListener(\"click\", () => {"));
+        assert!(html.contains("function scrollTowardComposerBottom()"));
+        // A pending Composer hide waits for the newest two-pass fit and is
+        // invalidated by any user-owned viewport movement in either direction.
+        assert!(html.contains("let terminalFitRevision = 0;"));
+        assert!(html.contains("let terminalFitSettledRevision = 0;"));
+        assert!(html.contains("function scheduleComposerAgentInputHideFlush()"));
+        assert!(html.contains("if (terminalFitSettledRevision !== terminalFitRevision) return;"));
+        assert!(html.contains("terminalFitSettledRevision = fitRevision;"));
+        assert!(html.contains("viewportInteractionRevision: terminalViewportInteractionRevision"));
+        assert!(html.contains("function markTerminalViewportInteraction()"));
+        assert!(
+            html.contains("markTerminalViewportInteraction();\n          const distanceFromBottom")
+        );
+        assert!(html.contains(
+            "scrollToBottomButton.addEventListener(\"pointerdown\", markTerminalViewportInteraction);"
+        ));
+        assert!(html.contains(
+            "scrollToBottomButton.addEventListener(\"click\", scrollTowardComposerBottom);"
+        ));
         assert!(html.contains("terminal.scrollToBottom();"));
     }
 
     #[test]
     fn remote_page_html_contains_soft_key_toolbar() {
         let html = remote_client_source();
-        // Markup: toolbar row, footer toggle, and the settings popover.
+        // Markup: toolbar row, footer toggle, and the drawer Settings editor.
         assert!(html.contains("id=\"keyBar\""));
         assert!(html.contains("id=\"keyBarToggle\""));
-        assert!(html.contains("id=\"keyBarSettings\""));
-        assert!(html.contains("id=\"keyPopover\""));
+        assert!(!html.contains("id=\"keyBarSettings\""));
+        assert!(!html.contains("id=\"keyPopover\""));
+        assert!(html.contains("id=\"inputLayoutEditor\""));
         assert!(html.contains("id=\"keyRow\""));
-        assert!(html.contains("id=\"keyRow\" class=\"key-row\" role=\"group\" aria-label=\"Special key buttons\">\n          <button id=\"keyBarSettings\""));
+        assert!(
+            html.contains("id=\"keyRow\" class=\"key-row\" role=\"group\" aria-label=\"Keys row\"")
+        );
         // Config is client-only UI state persisted to localStorage (ADR-0028).
         assert!(html.contains("laymux.remote.keybar"));
         assert!(html.contains("const DEFAULT_KEYBAR = {"));
-        assert!(html.contains("sets: [\"step\", \"nav\"],"));
-        assert!(html.contains("order: KEY_ORDER,"));
-        // Predefined sets are selectable and a custom palette exists.
+        assert!(html.contains("expanded: false,"));
+        // Placement is the only activation signal: no key sets, no custom
+        // custom-key toggle, no separate order projection.
+        assert!(!html.contains("const KEY_SETS = ["));
+        assert!(!html.contains("sets: [\"step\", \"nav\"],"));
+        assert!(!html.contains("order: KEY_ORDER,"));
+        assert!(!html.contains("function resolveKeyIds()"));
+        assert!(html.contains("const KEY_CATEGORIES = ["));
         assert!(html.contains("id: \"nav\", name: \"Navigation\""));
         assert!(html.contains("id: \"ctrl\", name: \"Ctrl keys\""));
         assert!(html.contains("id: \"fn\", name: \"Function\""));
-        assert!(html.contains("function resolveKeyIds()"));
         assert!(html.contains("function renderKeyPopover()"));
-        // Every enabled key appears in a compact sortable grid. Long-press drag
-        // is the primary path; selection exposes keyboard/accessibility moves.
-        assert!(html.contains("function moveKey(id, offset)"));
-        assert!(html.contains("return keyBarConfig.order.filter((id) => enabled.has(id));"));
+        assert!(html.contains("function renderInputLayoutEditor()"));
+        // Chips move by long-press drag across segments, rows, and the hidden section;
+        // selection exposes the keyboard/accessibility moves.
         assert!(html.contains("const KEY_ORDER_HOLD_MS = 180;"));
-        assert!(html.contains("function installKeyOrderDrag(chip, id)"));
+        assert!(html.contains("function installChipDrag(chip, actionId)"));
         assert!(html.contains("chip.classList.add(\"dragging\");"));
         assert!(html.contains(
-            "target.classList.add(gesture.afterTarget ? \"drop-after\" : \"drop-before\");"
+            "drop.element.classList.add(drop.after ? \"drop-after\" : \"drop-before\");"
         ));
-        assert!(html.contains("title.textContent = \"Key order\";"));
-        assert!(html.contains("reset.setAttribute(\"aria-label\", \"Reset key order\");"));
-        assert!(html.contains("`Move ${accessibleName} to start`"));
-        assert!(html.contains("function appendKeyToVisibleEnd(id, visibleIds)"));
-        assert!(html.contains("section.className = \"key-order-section\";"));
-        assert!(html.contains("chip.className = \"key-chip key-order-chip\";"));
+        assert!(html.contains("function installSettingsTabs()"));
+        assert!(html.contains("reset.setAttribute(\"aria-label\", \"Reset input action layout\");"));
+        assert!(html.contains("`Move ${hint} to start`"));
+        assert!(html.contains("chip.className = \"key-chip layout-chip\";"));
         // Keys reuse the existing write path via enqueueInput, no new API.
         assert!(html.contains("function sendKey(id, button = null)"));
         assert!(html.contains("if (seq) enqueueInput(seq);"));
@@ -930,7 +1401,8 @@ mod tests {
         assert!(html.contains("data-flick-direction=\"right\""));
         assert!(html.contains("data-flick-direction=\"down\""));
         assert!(html.contains("data-flick-direction=\"left\""));
-        // A representative fixed sequence: Tab, Delete, and F1 (SS3).
+        // Representative fixed sequences: q, Tab, Delete, and F1 (SS3).
+        assert!(html.contains("q: { label: \"Q\", seq: \"q\" }"));
         assert!(html.contains("tab: { label: \"Tab\", seq: \"\\t\" }"));
         assert!(html.contains("stab: { label: \"⇧Tab\", seq: \"\\x1b[Z\" }"));
         assert!(html.contains("end: { label: \"End\", cursor: \"F\" }"));
@@ -938,14 +1410,103 @@ mod tests {
         assert!(html.contains("f1: { label: \"F1\", seq: \"\\x1bOP\" }"));
         // Toggle visibility drives the hidden attribute + persistence.
         assert!(html.contains("function setKeyBarVisible(visible, persist = true)"));
-        assert!(html.contains("keyBar.hidden = !visible;"));
+        assert!(html.contains("keyBar.hidden = !keysVisible || !keyBarConfig.expanded;"));
+    }
+
+    /// Built-in Ctrl combinations are exactly ^C ^J ^U ^T ^L; the rest of the
+    /// alphabet is registered by the user instead of shipping unused.
+    #[test]
+    fn remote_page_html_ships_five_builtin_ctrl_keys_and_user_key_registration() {
+        let html = remote_client_source();
+
+        assert!(html.contains("\"c-c\": { label: \"^C\", seq: \"\\x03\""));
+        assert!(html.contains("\"c-j\": { label: \"^J\", seq: \"\\n\""));
+        assert!(html.contains("\"c-u\": { label: \"^U\", seq: \"\\x15\""));
+        assert!(html.contains("\"c-t\": { label: \"^T\", seq: \"\\x14\""));
+        assert!(html.contains("\"c-l\": { label: \"^L\", seq: \"\\x0c\""));
+        for removed in [
+            "\"c-a\"", "\"c-d\"", "\"c-e\"", "\"c-k\"", "\"c-r\"", "\"c-w\"", "\"c-z\"",
+        ] {
+            assert!(!html.contains(removed), "{removed} should no longer ship");
+        }
+        // The dedicated Ctrl+C button is gone: it duplicated the ^C soft key with
+        // a different label for the same bytes.
+        assert!(!html.contains("id=\"ctrlC\""));
+        assert!(!html.contains("\"ctrl-c\""));
+        assert!(html.contains("\"soft:c-c\""));
+
+        // User keys share the built-in lookup, so they ride the same send path.
+        assert!(html.contains("function keyDef(id)"));
+        assert!(html.contains("return userKeyIndex.get(id) || null;"));
+        assert!(html.contains("const USER_KEY_ID_PATTERN = /^u-[a-z0-9]{1,24}$/;"));
+        assert!(html.contains("const USER_KEY_LABEL_MAX = 8;"));
+        assert!(html.contains("const USER_KEY_SEQ_MAX = 32;"));
+        assert!(html.contains("const USER_KEY_MAX = 24;"));
+        assert!(html.contains("function normalizeUserKeys(raw)"));
+        assert!(html.contains("function addUserKey(label, seq)"));
+        assert!(html.contains("function removeUserKey(id)"));
+        assert!(html.contains("function comboKeySequence(modifier, base, shift)"));
+        assert!(html.contains("String.fromCharCode(letter.charCodeAt(0) & 0x1f)"));
+        assert!(html.contains("function parseKeySequenceInput(text)"));
+        assert!(html.contains("function renderUserKeySection()"));
+    }
+
+    #[test]
+    fn remote_page_html_contains_segment_input_layout_settings() {
+        let html = remote_client_source();
+
+        assert!(html.contains("id=\"mainActionRow\""));
+        assert!(html.contains("id=\"inputLayoutEditor\""));
+        assert!(html.contains("Input bar"));
+        // Both rows carry the three static alignment segments.
+        assert!(html.contains("const INPUT_ACTION_ROWS = [\"main\", \"expanded\"];"));
+        assert!(html.contains("const INPUT_ACTION_SEGMENTS = [\"left\", \"center\", \"right\"];"));
+        assert_eq!(
+            html.matches("<div class=\"action-segment\" data-segment=\"left\"></div>")
+                .count(),
+            2,
+            "both rows should render a static left segment"
+        );
+        assert!(html.contains("<div class=\"action-segment\" data-segment=\"center\"></div>"));
+        assert!(html.contains("class=\"action-segment\" data-segment=\"right\""));
+        // Default placement: the compact command keys stay left and the input
+        // controls stay right.
+        assert!(html.contains("left: [\"soft:c-c\", \"soft:q\", \"soft:esc\"],"));
+        assert!(html.contains("right: [\"keyboard\", \"keys\", \"send\"],"));
+        assert!(html.contains("function normalizeInputLayoutConfig(raw)"));
+        assert!(html.contains("function normalizeInputZones(raw, knownIds)"));
+        // No migration path: anything that is not the v2 shape resets.
+        assert!(html.contains(
+            "if (!Array.isArray(ownProperty(rawRow, segment))) return defaultInputZones();"
+        ));
+        assert!(!html.contains("function projectSoftKeyOrderFromZones(zones)"));
+        assert!(!html.contains("function syncKeyOrderProjection()"));
+        assert!(html.contains("function inputActionPlacement(actionId)"));
+        assert!(html.contains(
+            "function moveInputActionTo(actionId, row, segment, index = -1, commit = true)"
+        ));
+        assert!(html.contains("function renderInputSettingsPreservingScroll()"));
+        assert!(html.contains("function renderInputActionRows()"));
+        assert!(html.contains("function syncExpandedRowEmptyState()"));
+        assert!(html.contains("actionId !== \"send\" || composerMode"));
+        assert!(html.contains("slot.dataset.dropSegment = segment;"));
+        assert!(html.contains("slot.dataset.dropRow = row;"));
+        // Keys stays a main-row-or-hidden toggle: it cannot enter the row it opens.
+        assert!(html.contains("function canPlaceInputAction(actionId, row)"));
+        // Tapping a hidden chip is "use this", not "select this".
+        assert!(html.contains("function useInputAction(actionId)"));
+        assert!(html.contains("title.textContent = \"Hidden\";"));
+        assert!(html.contains("return actionId !== \"keys\" || row === \"main\";"));
+        assert!(html.contains("keyBarConfig.expanded = false;"));
+        assert!(!html.contains("id=\"keyBarSettings\""));
+        assert!(!html.contains("id=\"keyPopover\""));
     }
 
     #[test]
     fn remote_page_html_contains_step_navigation_keys() {
         let html = remote_client_source();
-        // Step navigation lives INSIDE the soft-key toolbar as a configurable
-        // key set (issue #474): no dedicated bar row exists.
+        // Step navigation lives INSIDE the soft-key toolbar as ordinary keys
+        // (issue #474): no dedicated bar row exists.
         assert!(!html.contains("id=\"navStepBar\""));
         // Nav action keys carry `nav: [kind, direction]` instead of a byte seq.
         assert!(html.contains("navPad: { label: \"P↕N↔\", navFlick: true, navBadge: true }"));
@@ -953,9 +1514,9 @@ mod tests {
         assert!(html.contains("navNext: { label: \"P↓\", nav: [\"spatial\", \"next\"]"));
         assert!(html.contains("notifRecent: { label: \"N←\", nav: [\"notification\", \"recent\"]"));
         assert!(html.contains("notifOldest: { label: \"N→\", nav: [\"notification\", \"oldest\"]"));
-        // Selectable via the key-set popover and enabled by default.
+        // Grouped in the hidden section, with the flick pad placed by default.
         assert!(html.contains("id: \"step\", name: \"Pane/Alert nav\""));
-        assert!(html.contains("sets: [\"step\", \"nav\"],"));
+        assert!(html.contains("\"soft:navPad\""));
         // 4-way nav flick: vertical = spatial pane step, horizontal = alerts.
         assert!(html.contains("const NAV_FLICK_TARGETS = {"));
         assert!(html.contains("up: [\"spatial\", \"prev\"]"));
@@ -1057,7 +1618,7 @@ mod tests {
         assert!(html.contains("id=\"terminalComposer\""));
         assert!(html.contains("id=\"composerInput\""));
         assert!(!html.contains("id=\"composerInsert\""));
-        // A dedicated Send button is the touch-device send affordance.
+        // A configurable Send action is available whenever Composer is active.
         assert!(html.contains("id=\"composerSend\""));
         assert!(html.contains("class=\"composer-send\""));
         assert!(html.contains(
@@ -1104,7 +1665,9 @@ mod tests {
             "if (event.isComposing || composerIsComposing || event.keyCode === 229) return;"
         ));
         assert!(html.contains("composerSendButton.addEventListener(\"click\""));
-        assert!(html.contains("composerSendButton.hidden = !(mobileLayout && composerMode)"));
+        assert!(
+            html.contains("element.hidden = !placed || (actionId === \"send\" && !composerMode);")
+        );
         assert!(html.contains("matchMedia(\"(pointer: coarse)\").matches"));
 
         // Composer actions stay closed until a valid V1 snapshot header/state +
@@ -1125,6 +1688,25 @@ mod tests {
     }
 
     #[test]
+    fn remote_page_html_contains_terminal_file_attachments() {
+        let html = remote_client_source();
+
+        assert!(html.contains("id=\"attachFile\""));
+        assert!(html.contains("id=\"attachmentInput\""));
+        assert!(html.contains("accept=\"image/*,text/*,"));
+        assert!(html.contains("/attachments`"));
+        assert!(html.contains(",.pdf,.docx,.pptx,application/pdf,"));
+        assert!(html.contains("DEFAULT_REMOTE_ATTACHMENT_MAX_BYTES = 1024 * 1024"));
+        assert!(html.contains("function applyRemoteAttachmentPolicy(policy)"));
+        assert!(html.contains("REMOTE_LONG_TEXT_ATTACHMENT_THRESHOLD_BYTES = 5 * 1024"));
+        assert!(html.contains("function attachRemoteFiles(files, options = {})"));
+        assert!(html.contains("new File([text], \"pasted-text.txt\""));
+        assert!(html.contains("composerInput.addEventListener(\"paste\""));
+        assert!(html.contains("snapshot.mode === \"composer\""));
+        assert!(html.contains("const insertion = paths.join(\" \");"));
+    }
+
+    #[test]
     fn remote_page_html_contains_composer_recall_history_and_autocomplete() {
         let html = remote_client_source();
 
@@ -1138,15 +1720,41 @@ mod tests {
             "id=\"composerAutocompleteList\" class=\"composer-suggest-list\" role=\"listbox\""
         ));
         assert!(html.contains(".composer-suggest-list {"));
-        assert!(html.contains(".composer-suggest-item[aria-selected=\"true\"] {"));
+        assert!(html.contains(".composer-suggest-item.is-active {"));
 
         // Pure selection helpers ported from the desktop
         // terminal-input-composer-state.ts (case-insensitive prefix, newest
-        // first, de-duped, blank-skipping, exact-query excluded, capped).
+        // first, de-duped, blank-skipping, exact value skipped unless send, capped).
         assert!(html.contains("function selectComposerHistoryEntries(history, max"));
         assert!(html.contains("function selectComposerAutocompleteSuggestions("));
-        assert!(html.contains("if (!entry || entry === query || seen.has(entry)) continue;"));
-        assert!(html.contains("if (!entry.toLowerCase().startsWith(needle)) continue;"));
+        assert!(html.contains("if (value === query && !send) return false;"));
+        assert!(html.contains("const normalizedLabel = label.trim();"));
+        assert!(html.contains("normalizedLabel.toLowerCase().startsWith(needle)"));
+        assert!(html.contains("let composerStarredEntries = [];"));
+        assert!(html.contains("let composerStarsRevision = -1;"));
+        assert!(html.contains("id=\"composerStarEditorScrim\""));
+        assert!(html.contains("function openComposerStarEditor(suggestion)"));
+        assert!(html.contains("if (suggestion.send) commitComposer();"));
+        assert!(html.contains("COMPOSER_STARRED_EDITOR_LONG_PRESS_MS = 500"));
+        let dismiss_start = html.find("function dismissTopRemoteLayer()").unwrap();
+        let dismiss_region = &html[dismiss_start..];
+        let file_viewer_dismiss = dismiss_region
+            .find("!fileViewerOverlayElement.hidden")
+            .unwrap();
+        let star_editor_dismiss = dismiss_region
+            .find("composerStarEditorScrim && !composerStarEditorScrim.hidden")
+            .unwrap();
+        let drawer_dismiss = dismiss_region
+            .find("navToggleButton.getAttribute(\"aria-expanded\")")
+            .unwrap();
+        assert!(
+            file_viewer_dismiss < star_editor_dismiss && star_editor_dismiss < drawer_dismiss,
+            "star editor must dismiss after FileViewer and before the drawer"
+        );
+        assert!(html.contains("/remote/v1/composer/starred?leaseId="));
+        assert!(html.contains("&revision=${composerStarsRevision}"));
+        assert!(html.contains("Failed to refresh Composer stars"));
+        assert!(html.contains("setRemoteIcon(star, \"Star\""));
 
         // History is a RUNTIME-ONLY Map keyed by scope bucket (ADR-0029
         // non-persistence boundary, ADR-0055 scope key). The sent text must never
@@ -1202,12 +1810,12 @@ mod tests {
         // Only the on/off feature toggles are surface-local persisted state.
         assert!(html.contains("laymux.remote.composerHistoryPopup"));
         assert!(html.contains("laymux.remote.composerAutocomplete"));
-        assert!(html.contains("function loadComposerToggle(key)"));
+        assert!(html.contains("function loadLocalToggle(key)"));
         assert!(html.contains("return localStorage.getItem(key) !== \"0\";"));
         assert!(html.contains("localStorage.setItem(key, enabled ? \"1\" : \"0\");"));
         // Toggles default ON to match the desktop composer (non-destructive).
-        assert!(html.contains("loadComposerToggle(composerHistoryPopupKey)"));
-        assert!(html.contains("loadComposerToggle(composerAutocompleteKey)"));
+        assert!(html.contains("loadLocalToggle(composerHistoryPopupKey)"));
+        assert!(html.contains("loadLocalToggle(composerAutocompleteKey)"));
 
         // #504 popup needs an EMPTY draft; #505 autocomplete needs a NON-empty
         // draft — mutually exclusive by construction so they never fight.
@@ -1236,7 +1844,7 @@ mod tests {
         assert!(html.contains("commitComposerHistoryEntry(historyEntries[composerHistoryIndex]);"));
 
         // Touch path: soft keyboards have no Tab key, so a tap/click on the
-        // empty editor opens the same recall popup. The handler must sit
+        // empty editor can open the same recall popup. The handler must sit
         // OUTSIDE the keydown listener (it is a pointer gesture, not a key).
         let click_block = html
             .find("composerInput.addEventListener(\"click\"")
@@ -1246,11 +1854,23 @@ mod tests {
             "tap-to-open handler must not live inside the keydown listener"
         );
         let click_region = &html[click_block..keydown_start];
-        assert!(click_region.contains("if (composerHistoryOpen) return;"));
+        assert!(click_region.contains("if (dismissVisibleComposerSuggestions()) return;"));
+        assert!(click_region.contains("if (!keyboardWasVisibleBeforeTap) return;"));
         assert!(click_region.contains("if (composerIsComposing) return;"));
         assert!(click_region.contains("const historyEntries = currentComposerHistoryEntries();"));
         assert!(click_region.contains("if (historyEntries.length === 0) return;"));
         assert!(click_region.contains("composerHistoryOpen = true;"));
+
+        // Focus alone is not a soft-keyboard signal. The page tracks a closed
+        // VisualViewport baseline per width/orientation and requires a material
+        // height loss before tap-to-open recall is armed.
+        assert!(html.contains("const SOFT_KEYBOARD_MIN_VIEWPORT_SHRINK_PX = 80;"));
+        assert!(html.contains("function remoteSoftKeyboardVisible()"));
+        assert!(html.contains("return virtualKeyboardHeight > 0;"));
+        assert!(html.contains("remoteViewportClosedHeight - remoteViewportHeight"));
+        assert!(html.contains("function dismissVisibleComposerSuggestions()"));
+        assert!(html.contains("composerInput.addEventListener(\"pointerdown\", () => {"));
+        assert!(html.contains("composerKeyboardVisibleBeforeTap = remoteSoftKeyboardVisible();"));
 
         // Recall lists reset on terminal switch, mode switch, and after a send.
         assert!(html.contains("function resetComposerSuggestions()"));
@@ -1258,8 +1878,14 @@ mod tests {
 
         // Feature toggles live in the existing key-set popover (Remote settings
         // home), accessible and aria-labelled.
-        assert!(html.contains("function renderComposerPopoverSection()"));
-        assert!(html.contains("title.textContent = \"Composer recall\";"));
+        assert!(html.contains("function renderComposerSettingsSection()"));
+        assert!(html.contains("<h2 class=\"nav-section-title\">Composer</h2>"));
+        assert!(html.contains("\"composerHideAgentInputToggle\""));
+        assert!(html.contains("\"Hide unused agent input\""));
+        assert!(html.contains("function scrollTowardComposerBottom()"));
+        assert!(html.contains("composerInput.addEventListener(\"focus\", () => {"));
+        assert!(html.contains("hideActiveAgentInputForComposer();"));
+        assert!(html.contains("updateComposerOpacityState();"));
         assert!(html.contains("\"composerHistoryPopupToggle\""));
         assert!(html.contains("\"composerAutocompleteToggle\""));
     }
@@ -1380,6 +2006,18 @@ mod tests {
         assert!(output_stream.contains("stopSocket(!reconnecting);"));
         assert!(output_stream.contains("scheduleOutputReconnect(terminalId, outputLeaseId);"));
         assert!(output_stream.contains("openOutput(terminalId, { reconnect: true });"));
+        assert!(html.contains("const OUTPUT_ATTACH_TIMEOUT_MS = 20000;"));
+        assert!(output_stream.contains("outputPhase === \"awaiting-snapshot\""));
+        assert!(output_stream.contains("settleOutputAttach();"));
+        let socket_open = output_stream
+            .split("outputSocket.onopen = () => {")
+            .nth(1)
+            .and_then(|body| body.split("outputSocket.onmessage =").next())
+            .expect("output socket open handler must exist");
+        assert!(
+            !socket_open.contains("clearTransientConnectionNotice(\"output\""),
+            "a WebSocket open is not recovery until its first snapshot lands"
+        );
         assert!(output_stream.contains("scheduleTransientConnectionNotice"));
         assert!(output_stream.contains("let resetOnNextPayload = true;"));
         assert!(!output_stream.contains("if (!reconnecting) queueTerminalReset();"));
@@ -1399,14 +2037,27 @@ mod tests {
         assert!(output_stream.contains("terminalOutputGeneration"));
         assert!(output_stream
             .contains("const focusInputOnOpen = !reconnecting && options.focusInput !== false;"));
-        assert!(output_stream.contains("if (focusInputOnOpen) focusCurrentInputSurface();"));
+        assert!(output_stream.contains("if (focusInputOnOpen) focusInputSurfaceAfterAwait();"));
         assert!(output_stream.contains("renderedTerminalId === terminalId"));
         assert!(output_stream.contains("restoreTerminalViewport(term, preservedViewportDistance);"));
         assert_eq!(
-            output_stream.matches("focusCurrentInputSurface();").count(),
+            output_stream
+                .matches("focusInputSurfaceAfterAwait();")
+                .count(),
             1,
             "snapshot completion must not refocus a dismissed input surface"
         );
+        // The attach focus goes through the pointer-gated helper (ADR-0196): a
+        // soft-keyboard device leaves the input focus to the first real gesture,
+        // so an attach that called the ungated helper would strand DOM focus
+        // without an IME and flip the Keyboard button's first tap into a dismiss.
+        assert!(
+            !output_stream.contains("focusCurrentInputSurface();"),
+            "attach must not focus an input surface outside the pointer gate"
+        );
+        assert!(html.contains(
+            "        function focusInputSurfaceAfterAwait() {\n          if (coarsePointer) return;\n          focusCurrentInputSurface();\n        }"
+        ));
         assert!(output_stream.contains("let outputTerminalMissing = false;"));
         assert!(output_stream.contains("payload === \"terminal session not found\""));
         assert!(output_stream.contains("loadNavigation(null, { focusInput: false }).catch"));
@@ -1472,7 +2123,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_page_mirrors_all_workspace_panes_status_and_bottom_summary() {
+    fn remote_page_mirrors_workspace_last_input_modes_without_old_bottom_summary() {
         let html = remote_client_source();
         let list_start = html.find("function renderWorkspaceList").unwrap();
         let item_start = html.find("function renderWorkspaceItem").unwrap();
@@ -1488,10 +2139,14 @@ mod tests {
         assert!(render_pane.contains("pane.selectorDisplay"));
         assert!(render_pane.contains("pane-command-status"));
         assert!(render_pane.contains("paneMinimapElement(panes, pane.id)"));
+        assert!(render_pane.contains("pane-last-input"));
+        assert!(render_pane.contains("selectorDisplay.lastInput"));
+        assert!(render_item.contains("workspaceLastInputMode"));
+        assert!(render_item.contains("latestWorkspaceInput"));
+        assert!(render_item.contains("workspace-last-input"));
         assert!(render_item.contains("workspace.selectorSummary"));
-        assert!(render_item.contains("workspace-status-line"));
-        assert!(render_item.contains("lastCommand"));
-        assert!(render_item.contains("latestNotification"));
+        assert!(!render_item.contains("workspace-status-line"));
+        assert!(!render_item.contains("renderWorkspaceStatusLine"));
     }
 
     #[test]
@@ -1607,5 +2262,167 @@ mod tests {
         let html = remote_client_source();
         assert!(html.contains("if (autoConnectMode && (androidE2eMode || token())) {"));
         assert!(!html.contains("if (localAppMode && autoConnectMode && token())"));
+    }
+
+    fn host_headers(host: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, HeaderValue::from_str(host).unwrap());
+        headers
+    }
+
+    fn page_policy(host: &str) -> String {
+        let response =
+            secure_page_response(Html("<!doctype html>").into_response(), &host_headers(host));
+        response
+            .headers()
+            .get(header::CONTENT_SECURITY_POLICY)
+            .expect("the Remote page must carry a CSP")
+            .to_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    #[test]
+    fn remote_page_locks_the_document_down_to_its_own_origin() {
+        let policy = page_policy("100.64.0.2:19281");
+        assert!(policy.contains("default-src 'none'"));
+        assert!(policy.contains("script-src 'self'"));
+        assert!(policy.contains("object-src 'none'"));
+        assert!(policy.contains("base-uri 'none'"));
+        // The manifest and the PWA icons are what make the installed client
+        // possible (ADR-0091); blocking them would silently un-install it.
+        assert!(policy.contains("manifest-src 'self'"));
+        assert!(policy.contains("img-src 'self' data:"));
+    }
+
+    /// Issue #955: `frame-ancestors 'none'` refused the desktop app's own
+    /// mobile-mode iframe, and the overlay's only exit lived inside the page
+    /// that never loaded — the app was unusable until it was killed.
+    #[test]
+    fn remote_page_lets_only_the_desktop_app_frame_it() {
+        let policy = page_policy("100.64.0.2:19281");
+        let frame_ancestors = policy
+            .split("frame-ancestors ")
+            .nth(1)
+            .and_then(|rest| rest.split(';').next())
+            .expect("frame-ancestors must be present");
+        assert!(!frame_ancestors.contains("__APP_FRAME_ANCESTORS__"));
+        // The two WebView origins Tauri serves the shell from.
+        assert!(frame_ancestors.contains("tauri://localhost"));
+        assert!(frame_ancestors.contains("http://tauri.localhost"));
+        // Still a closed allowlist: no wildcard, no `https:`, no web origin.
+        assert!(!frame_ancestors.contains('*'));
+        assert!(!frame_ancestors.contains("'self'"));
+        assert!(!frame_ancestors.contains("https://"));
+    }
+
+    /// `default-src` does not cover `frame-ancestors`, so the last-resort
+    /// header must name it or an unencodable policy would ship a framable page.
+    #[test]
+    fn last_resort_policy_still_refuses_framing() {
+        assert!(LAST_RESORT_CSP.contains("frame-ancestors 'none'"));
+        assert!(HeaderValue::from_str(LAST_RESORT_CSP).is_ok());
+    }
+
+    /// The Vite dev server is a development convenience, not something a
+    /// shipped binary should let frame the terminal it controls.
+    #[test]
+    fn remote_page_trusts_the_vite_dev_origin_only_in_debug_builds() {
+        let policy = page_policy("100.64.0.2:19281");
+        assert_eq!(
+            policy.contains("http://localhost:1420"),
+            cfg!(debug_assertions)
+        );
+    }
+
+    #[test]
+    fn remote_page_never_allows_inline_or_evaluated_script() {
+        let policy = page_policy("100.64.0.2:19281");
+        let script_src = policy
+            .split("script-src ")
+            .nth(1)
+            .and_then(|rest| rest.split(';').next())
+            .expect("script-src must be present");
+        assert!(!script_src.contains("unsafe-inline"));
+        assert!(!script_src.contains("unsafe-eval"));
+        // xterm's DOM renderer appends generated <style> elements, so style is
+        // the one directive that stays permissive. Keep that explicit.
+        assert!(policy.contains("style-src 'self' 'unsafe-inline'"));
+    }
+
+    #[test]
+    fn remote_page_allows_its_own_output_socket() {
+        let policy = page_policy("100.64.0.2:19281");
+        assert!(policy.contains("connect-src 'self' ws://100.64.0.2:19281 wss://100.64.0.2:19281;"));
+    }
+
+    #[test]
+    fn remote_page_keeps_a_bracketed_ipv6_host_intact() {
+        let policy = page_policy("[::1]:19281");
+        assert!(policy.contains("connect-src 'self' ws://[::1]:19281 wss://[::1]:19281;"));
+    }
+
+    #[test]
+    fn remote_page_drops_websocket_sources_for_a_crafted_host() {
+        // Host is client-controlled: a header carrying its own directives must
+        // narrow the policy, never widen it.
+        for host in [
+            "evil.example; script-src *",
+            "evil.example ws://evil.example",
+            "user@evil.example",
+            "evil.example:notaport",
+            "evil.example:",
+            "'self'",
+        ] {
+            let policy = page_policy(host);
+            assert!(
+                policy.contains("connect-src 'self';"),
+                "host {host:?} must not reach the policy: {policy}"
+            );
+            assert!(
+                !policy.contains("ws://") && !policy.contains("wss://"),
+                "host {host:?} leaked a socket source into {policy}"
+            );
+        }
+    }
+
+    #[test]
+    fn remote_page_drops_websocket_sources_without_a_host() {
+        let response =
+            secure_page_response(Html("<!doctype html>").into_response(), &HeaderMap::new());
+        let policy = response
+            .headers()
+            .get(header::CONTENT_SECURITY_POLICY)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(policy.contains("connect-src 'self';"));
+    }
+
+    #[test]
+    fn remote_page_sends_the_document_hardening_headers() {
+        let response = secure_page_response(
+            Html("<!doctype html>").into_response(),
+            &host_headers("laymux.local"),
+        );
+        assert_eq!(
+            response.headers().get(header::REFERRER_POLICY).unwrap(),
+            "no-referrer"
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(header::X_CONTENT_TYPE_OPTIONS)
+                .unwrap(),
+            "nosniff"
+        );
+    }
+
+    #[test]
+    fn remote_page_csp_template_carries_the_websocket_placeholder() {
+        // ui/e2e/remote-client-assets.ts resolves the same placeholder so the
+        // Playwright suite runs under the served policy.
+        assert!(REMOTE_PAGE_CSP_TEMPLATE.contains(WS_SOURCES_PLACEHOLDER));
+        assert!(!REMOTE_PAGE_CSP_TEMPLATE.trim_end().ends_with(';'));
     }
 }

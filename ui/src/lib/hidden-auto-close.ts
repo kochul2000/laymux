@@ -3,10 +3,9 @@
  *
  * When a pane or workspace stays hidden (via the WorkspaceSelectorView list actions)
  * for longer than the configured timeout, its terminal (PTY) is torn down to free
- * memory/CPU. Eviction is implemented by unmounting the pane's `TerminalView`
- * (WorkspaceArea stops rendering it); the existing `TerminalView` unmount cleanup
- * closes the PTY session. When the pane is un-hidden it re-mounts and a fresh PTY
- * is spawned.
+ * memory/CPU. The backend owns the critical checkpoint and PTY close transaction;
+ * only the returned closed IDs are then marked evicted so WorkspaceArea unmounts
+ * their `TerminalView`. When a pane is un-hidden it re-mounts with a fresh PTY.
  *
  * This module holds only the pure decision logic so it can be unit-tested without
  * timers, React, or Tauri. The wiring lives in `useHiddenTerminalAutoClose`.

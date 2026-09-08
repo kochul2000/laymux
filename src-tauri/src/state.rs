@@ -62,9 +62,17 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 /// from the `set_sleep_inhibit` command alone, never under another lock (ADR-0114).
 /// `app_update` likewise owns an isolated status mutex. Updater network and
 /// installer awaits never hold it or any ordered `AppState` lock (ADR-0174).
+/// `session_checkpoint` likewise owns only its request/ack registry and atomic
+/// mutation admission count; its finalization drain acquires `remote_control`
+/// only after the checkpoint registry lock is released (ADR-0222).
 /// The Android pairing lifecycle mutex is outside `AppState`, but unlike those
 /// isolated registries it may nest `remote_access`: acquire it before every
 /// `AppState` lock and never enter it while holding one (ADR-0144).
+/// The Android E2E session registry is another external predecessor. Its
+/// authorization-commit path may briefly nest `remote_access` then
+/// `remote_control`, so the complete relative order is pairing lifecycle ->
+/// Android E2E registry -> `remote_access` -> `remote_control`. Never enter the
+/// E2E registry while an ordered `AppState` lock is held (ADR-0208).
 ///
 /// ## Poison policy
 ///
@@ -152,8 +160,11 @@ pub struct AppState {
     /// Runtime cloud relay connection status. Pairing/tunnel workers update this state.
     pub cloud: Mutex<crate::cloud::CloudStatus>,
     /// Memory-only Android E2E challenges and data sessions (ADR-0146).
-    /// Its registry mutex is held only to insert/remove/clone one session Arc;
-    /// per-session async locks are never acquired while the registry is held.
+    /// Usually the registry is held only to insert/remove/clone one session
+    /// Arc. The claim authorization commit is the narrow exception: under the
+    /// pairing lifecycle predecessor it retains the registry through the
+    /// ordered `remote_access` -> `remote_control` mutation (ADR-0208).
+    /// Per-session async locks are never acquired while the registry is held.
     pub android_e2e: crate::android_e2e::AndroidE2eState,
     /// Process-global per-terminal lock table serializing `write_input` /
     /// `execute_command` on the same terminal (#314). Living on the shared
@@ -191,6 +202,8 @@ pub struct AppState {
     pub sleep_inhibitor: Arc<crate::power::SleepInhibitor>,
     /// Process-global GitHub update status and operation gate (ADR-0174).
     pub app_update: Arc<crate::app_update::UpdateManager>,
+    /// Frontend checkpoint request/ack rendezvous plus update finalization gate.
+    pub session_checkpoint: crate::session_checkpoint::SessionCheckpointRuntime,
 }
 
 /// Process-global per-terminal write/exec serialization table. See
@@ -333,6 +346,9 @@ fn try_spawn_terminal_reaper(job: TerminalTeardownJob) -> Result<(), TerminalTea
 
 impl AppState {
     pub fn new() -> Self {
+        // One read for every settings-derived initializer below: two reads would
+        // re-run validation and could observe different snapshots of the same file.
+        let settings = crate::settings::load_settings();
         Self {
             terminals: Arc::new(Mutex::new(HashMap::new())),
             sync_groups: Mutex::new(HashMap::new()),
@@ -352,7 +368,7 @@ impl AppState {
             notifications: Arc::new(Mutex::new(Vec::new())),
             notification_counter: AtomicU64::new(1),
             remote_access: Mutex::new(crate::remote_server::RemoteAccessRuntimeState::new(
-                crate::settings::load_settings().remote,
+                settings.remote.clone(),
             )),
             remote_control: Mutex::new(crate::remote_server::RemoteControlState::default()),
             cloud_tunnel: Mutex::new(None),
@@ -365,7 +381,10 @@ impl AppState {
             usage_probe: Arc::new(crate::usage_probe::UsageProbe::new()),
             grok_usage_probe: Arc::new(crate::grok_usage_probe::GrokUsageProbe::new()),
             sleep_inhibitor: Arc::new(crate::power::SleepInhibitor::new()),
-            app_update: Arc::new(crate::app_update::UpdateManager::default()),
+            app_update: Arc::new(crate::app_update::UpdateManager::new(
+                crate::app_update::UpdateChannel::from_settings_value(&settings.update.channel),
+            )),
+            session_checkpoint: crate::session_checkpoint::SessionCheckpointRuntime::default(),
         }
     }
 }
@@ -376,24 +395,44 @@ impl Default for AppState {
     }
 }
 
-impl Drop for AppState {
-    fn drop(&mut self) {
-        // Probe PTYs are intentionally absent from `pty_handles` (ADR-0102), so
-        // they need their own teardown or the `claude` children outlive the app.
+impl AppState {
+    /// Terminate every child process this app owns.
+    ///
+    /// Shutdown is not the only caller: the self-update installer cannot
+    /// overwrite the bundled ConPTY runtime while a console host spawned for a
+    /// terminal still maps it, so the install path runs the same teardown before
+    /// handing over (ADR-0201). Both paths must clean up the same set, so the
+    /// procedure has one owner.
+    ///
+    /// Probe PTYs are intentionally absent from `pty_handles` (ADR-0102), so
+    /// they need their own teardown or the `claude` children outlive the app.
+    ///
+    /// The registry is drained under the lock and terminated after it is
+    /// released: `terminate()` blocks for as long as a child takes to die, and
+    /// holding the registry for that long would stall every other PTY caller.
+    pub fn terminate_child_processes(&self) {
         if let Err(err) = self.usage_probe.shutdown_all() {
             tracing::warn!(error = %err, "usage probe cleanup during app shutdown failed");
         }
         if let Err(err) = self.grok_usage_probe.shutdown_all() {
             tracing::warn!(error = %err, "grok usage probe cleanup during app shutdown failed");
         }
-        let handles = self
+        let handles: Vec<(String, PtyHandle)> = self
             .pty_handles
-            .get_mut_or_recover_for_discard("dropping PTY handle registry");
-        for (terminal_id, handle) in handles.drain() {
+            .lock_or_recover_for_discard("draining PTY handle registry")
+            .drain()
+            .collect();
+        for (terminal_id, handle) in handles {
             if let Err(err) = handle.terminate() {
                 tracing::warn!(terminal_id, error = %err, "PTY cleanup during app shutdown failed");
             }
         }
+    }
+}
+
+impl Drop for AppState {
+    fn drop(&mut self) {
+        self.terminate_child_processes();
     }
 }
 
@@ -410,6 +449,43 @@ mod tests {
         assert!(groups.is_empty());
         let ptys = state.pty_handles.lock().unwrap();
         assert!(ptys.is_empty());
+    }
+
+    /// The update installer runs this teardown without dropping the state
+    /// (ADR-0201), so the registry must be emptied by the call itself and every
+    /// child must be gone when it returns — not left for a `Drop` that the
+    /// installer path never reaches.
+    #[test]
+    #[cfg(windows)]
+    fn terminating_child_processes_empties_the_registry_without_a_drop() {
+        use crate::pty::{spawn_pty, PtyOutputControl};
+        use crate::terminal::{TerminalConfig, TerminalSession};
+
+        let state = AppState::new();
+        let session = TerminalSession::new(
+            "terminate-child-processes".into(),
+            TerminalConfig {
+                profile: "PowerShell".into(),
+                command_line: String::new(),
+                startup_command: String::new(),
+                starting_directory: String::new(),
+                cols: 80,
+                rows: 24,
+                sync_group: "test-group".into(),
+                env: Vec::new(),
+                advertise_true_color: true,
+            },
+        );
+        let handle = spawn_pty(&session, |_| PtyOutputControl::Continue).expect("spawn");
+        state
+            .pty_handles
+            .lock()
+            .unwrap()
+            .insert(session.id.clone(), handle);
+
+        state.terminate_child_processes();
+
+        assert!(state.pty_handles.lock().unwrap().is_empty());
     }
 
     #[test]

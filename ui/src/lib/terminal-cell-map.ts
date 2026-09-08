@@ -60,6 +60,51 @@ export function reconstructLine(cells: CellInfo[]): ReconstructedLine {
   return { text, columns, endColumns };
 }
 
+/**
+ * 셀 컬럼 범위(1-based, `endCol` 포함) 안에 지금 쓰여 있는 문자열을 읽는다.
+ *
+ * 링크 액션 칩(ADR-0224)의 수명 판정용이다 — 칩 생성 시점의 (라인, 컬럼 범위,
+ * 원문)을 캡처해 두고, 안정 프레임마다 같은 범위를 다시 읽어 문자열이 같은지만
+ * 본다. path 밑줄의 `revalidate()` 와 같은 판정이며(원문이 그 자리에 남아
+ * 있는가), 밑줄 엔트리가 없는 URL 에도 그대로 적용된다.
+ */
+export function readCellRangeText(cells: CellInfo[], startCol: number, endCol: number): string {
+  const { text, columns, endColumns } = reconstructLine(cells);
+  let out = "";
+  for (let i = 0; i < text.length; i++) {
+    if (columns[i] >= startCol && endColumns[i] <= endCol) out += text[i];
+  }
+  return out;
+}
+
+/**
+ * 주어진 셀 컬럼(1-based)을 덮는 `token` 출현의 셀 범위를 찾는다. 없으면 null.
+ *
+ * URL 액션 칩(ADR-0224)이 쓴다 — `WebLinksAddon` 핸들러는 URL 문자열과 클릭
+ * 이벤트만 주고 버퍼 범위를 주지 않으므로, 클릭한 줄에서 그 URL 이 어느 셀에
+ * 있는지를 여기서 되찾는다. 같은 줄에 같은 URL 이 여러 번 있으면 클릭 지점을
+ * 덮는 출현을 고른다.
+ */
+export function findTokenCellRange(
+  cells: CellInfo[],
+  token: string,
+  col: number,
+): { startCol: number; endCol: number } | null {
+  if (token.length === 0) return null;
+  const { text, columns, endColumns } = reconstructLine(cells);
+  let from = 0;
+  for (;;) {
+    const offset = text.indexOf(token, from);
+    if (offset < 0) return null;
+    const startCol = columns[offset];
+    const endCol = endColumns[offset + token.length - 1];
+    if (startCol !== undefined && endCol !== undefined && col >= startCol && col <= endCol) {
+      return { startCol, endCol };
+    }
+    from = offset + 1;
+  }
+}
+
 /** xterm `IBufferLine` 에서 필요한 부분만. */
 export interface BufferLineLike {
   length: number;

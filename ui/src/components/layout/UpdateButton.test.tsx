@@ -21,6 +21,7 @@ import { UpdateButton } from "./UpdateButton";
 
 const status = (overrides: Partial<AppUpdateStatus> = {}): AppUpdateStatus => ({
   enabled: true,
+  channel: "stable",
   currentVersion: "0.10.13",
   availableVersion: null,
   notes: null,
@@ -63,6 +64,17 @@ describe("UpdateButton", () => {
     await user.click(button);
     expect(window.confirm).toHaveBeenCalled();
     expect(installAppUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("names the beta channel so a test build is not mistaken for a stable one", async () => {
+    render(<UpdateButton />);
+    await act(async () => {});
+
+    act(() => statusListener?.(status({ availableVersion: "0.11.0-beta.1", channel: "beta" })));
+    expect(screen.getByTestId("app-update-btn")).toHaveAttribute(
+      "aria-label",
+      expect.stringContaining("beta channel"),
+    );
   });
 
   it("shows download progress and prevents a duplicate install", async () => {

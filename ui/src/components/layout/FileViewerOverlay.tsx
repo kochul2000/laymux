@@ -3,10 +3,12 @@ import { createPortal } from "react-dom";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { FileViewer } from "@/components/ui/FileViewer";
+import { OsHandoffActions } from "@/components/ui/OsHandoffActions";
 import { FileExplorerView } from "@/components/views/FileExplorerView";
 import { FocusInput } from "@/components/ui/FormControls";
 import { resolveViewer, viewerInstanceId } from "@/lib/file-viewer";
 import { parentPath } from "@/lib/file-explorer-parse";
+import { MaximizeIcon, RestoreIcon, XIcon } from "@/components/ui/icons";
 
 /**
  * The single global floating file viewer (#277 / #279). It is rendered once at
@@ -190,6 +192,19 @@ export function FileViewerOverlay() {
               Open
             </button>
           </div>
+          {/* ADR-0193: 터미널 path-link 의 Ctrl / Ctrl+Shift 클릭과 같은 두 동작을
+              뷰어에서도 버튼으로 노출한다. 콘텐츠 종류(바이너리·미리보기 실패·외부
+              터미널 뷰어)와 무관하게 항상 같은 자리에 있도록 본문이 아니라 호스트
+              헤더가 소유한다. 열 파일이 아직 없는 prompt 모드에서는 대상이 없다. */}
+          {!promptMode && (
+            <div className="ml-1">
+              <OsHandoffActions
+                path={path}
+                variant="toolbar"
+                testIdPrefix="file-viewer-overlay-os"
+              />
+            </div>
+          )}
           <button
             onClick={toggleMaximized}
             className="hover-bg-strong ml-1 flex h-6 w-6 items-center justify-center rounded text-xs"
@@ -197,7 +212,7 @@ export function FileViewerOverlay() {
             title={maximized ? "Restore" : "Maximize (fill window)"}
             data-testid="file-viewer-overlay-maximize"
           >
-            {maximized ? "🗗" : "🗖"}
+            {maximized ? <RestoreIcon /> : <MaximizeIcon />}
           </button>
           <button
             onClick={closeFileViewer}
@@ -206,7 +221,7 @@ export function FileViewerOverlay() {
             title="Close (Esc)"
             data-testid="file-viewer-overlay-close"
           >
-            &#10005;
+            <XIcon />
           </button>
         </div>
         <div

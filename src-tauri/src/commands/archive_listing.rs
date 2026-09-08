@@ -7,7 +7,11 @@
 //! all — and that path is bounded so a crafted stream cannot inflate forever.
 
 use crate::constants::{MAX_ARCHIVE_ENTRIES, MAX_ARCHIVE_INFLATE_BYTES};
-use std::io::Read;
+use std::io::{Cursor, Read, Seek};
+
+mod bounded_zip;
+
+use bounded_zip::read_bounded_zip_listing;
 
 /// One entry of an archive as the viewer shows it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -91,7 +95,11 @@ pub fn archive_format(file_name: &str) -> Option<ArchiveFormat> {
 /// is an untrusted file the user merely clicked on.
 pub fn read_archive_listing(path: &str, format: ArchiveFormat) -> Result<ArchiveListing, String> {
     match format {
-        ArchiveFormat::Zip => read_zip_listing(path),
+        ArchiveFormat::Zip => {
+            let file =
+                std::fs::File::open(path).map_err(|e| format!("Cannot open archive: {e}"))?;
+            read_zip_listing(file, None)
+        }
         ArchiveFormat::Tar => {
             let file =
                 std::fs::File::open(path).map_err(|e| format!("Cannot open archive: {e}"))?;
@@ -109,12 +117,53 @@ pub fn read_archive_listing(path: &str, format: ArchiveFormat) -> Result<Archive
     }
 }
 
-fn read_zip_listing(path: &str) -> Result<ArchiveListing, String> {
+/// Enumerate an archive for a transport-bound viewer. The compressed source is
+/// read at most `max_source_bytes + 1`, gzip expansion is independently capped,
+/// and ZIP central-directory traversal is rejected above the visible entry
+/// budget. The unbounded desktop viewer keeps the legacy whole-archive totals.
+pub fn read_archive_listing_bounded(
+    path: &str,
+    format: ArchiveFormat,
+    max_source_bytes: usize,
+    max_inflate_bytes: u64,
+) -> Result<ArchiveListing, String> {
     let file = std::fs::File::open(path).map_err(|e| format!("Cannot open archive: {e}"))?;
+    let read_limit = max_source_bytes.saturating_add(1);
+    let mut bytes = Vec::with_capacity(read_limit.min(64 * 1024));
+    file.take(read_limit as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("Cannot read archive: {e}"))?;
+    if bytes.len() > max_source_bytes {
+        return Err(format!(
+            "File exceeds the {max_source_bytes} byte viewer limit"
+        ));
+    }
+
+    match format {
+        ArchiveFormat::Zip => read_bounded_zip_listing(&bytes, MAX_ARCHIVE_ENTRIES),
+        ArchiveFormat::Tar => read_tar_listing(Cursor::new(bytes), ArchiveFormat::Tar),
+        ArchiveFormat::TarGz => {
+            let decoder = flate2::read::GzDecoder::new(Cursor::new(bytes));
+            read_tar_listing(decoder.take(max_inflate_bytes), ArchiveFormat::TarGz)
+        }
+    }
+}
+
+fn read_zip_listing<R: Read + Seek>(
+    reader: R,
+    max_scanned_entries: Option<usize>,
+) -> Result<ArchiveListing, String> {
     let mut archive =
-        zip::ZipArchive::new(file).map_err(|e| format!("Cannot read zip archive: {e}"))?;
+        zip::ZipArchive::new(reader).map_err(|e| format!("Cannot read zip archive: {e}"))?;
 
     let total_entries = archive.len();
+    if let Some(limit) = max_scanned_entries {
+        if total_entries > limit {
+            return Err(format!(
+                "Archive entry count exceeds the {limit} entry viewer limit"
+            ));
+        }
+    }
     let listed = total_entries.min(MAX_ARCHIVE_ENTRIES);
     let mut entries = Vec::with_capacity(listed);
     let mut total_bytes = 0_u64;
@@ -205,228 +254,4 @@ fn read_tar_listing<R: Read>(reader: R, format: ArchiveFormat) -> Result<Archive
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Write;
-
-    fn temp_path(name: &str) -> std::path::PathBuf {
-        let mut path = std::env::temp_dir();
-        path.push(format!("laymux_archive_{}_{name}", std::process::id()));
-        path
-    }
-
-    /// Build a zip with stored (uncompressed) entries so the fixture does not
-    /// depend on the crate's optional deflate codecs.
-    fn write_zip(path: &std::path::Path, files: &[(&str, &[u8])], dirs: &[&str]) {
-        let file = std::fs::File::create(path).expect("create zip");
-        let mut writer = zip::ZipWriter::new(file);
-        let options: zip::write::FileOptions<'_, ()> =
-            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
-        for dir in dirs {
-            writer.add_directory(*dir, options).expect("add dir");
-        }
-        for (name, body) in files {
-            writer.start_file(*name, options).expect("start file");
-            writer.write_all(body).expect("write body");
-        }
-        writer.finish().expect("finish zip");
-    }
-
-    fn write_tar(path: &std::path::Path, files: &[(&str, &[u8])]) -> Vec<u8> {
-        let mut builder = tar::Builder::new(Vec::new());
-        for (name, body) in files {
-            let mut header = tar::Header::new_gnu();
-            header.set_size(body.len() as u64);
-            header.set_mode(0o644);
-            header.set_cksum();
-            builder
-                .append_data(&mut header, *name, *body)
-                .expect("append tar entry");
-        }
-        let bytes = builder.into_inner().expect("finish tar");
-        std::fs::write(path, &bytes).expect("write tar");
-        bytes
-    }
-
-    #[test]
-    fn archive_format_needs_the_whole_name_for_double_extensions() {
-        assert_eq!(archive_format("bundle.tar.gz"), Some(ArchiveFormat::TarGz));
-        assert_eq!(archive_format("bundle.TGZ"), Some(ArchiveFormat::TarGz));
-        assert_eq!(archive_format("bundle.tar"), Some(ArchiveFormat::Tar));
-        assert_eq!(archive_format("app.jar"), Some(ArchiveFormat::Zip));
-        assert_eq!(archive_format("pkg.whl"), Some(ArchiveFormat::Zip));
-        // Formats with no decoder in this build must not claim to be listable.
-        assert_eq!(archive_format("bundle.tar.xz"), None);
-        assert_eq!(archive_format("bundle.7z"), None);
-        assert_eq!(archive_format("notes.txt"), None);
-    }
-
-    #[test]
-    fn zip_listing_reports_names_sizes_and_directories() {
-        let path = temp_path("listing.zip");
-        write_zip(
-            &path,
-            &[("src/main.rs", b"fn main() {}"), ("README.md", b"hi")],
-            &["src/"],
-        );
-
-        let listing = read_archive_listing(&path.to_string_lossy(), ArchiveFormat::Zip)
-            .expect("zip must list");
-
-        assert_eq!(listing.format, ArchiveFormat::Zip);
-        assert_eq!(listing.total_entries, 3);
-        assert!(!listing.truncated);
-        let dir = listing
-            .entries
-            .iter()
-            .find(|e| e.is_directory)
-            .expect("directory entry");
-        assert_eq!(dir.name, "src/");
-        let main = listing
-            .entries
-            .iter()
-            .find(|e| e.name == "src/main.rs")
-            .expect("file entry");
-        assert_eq!(main.size, 12);
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn tar_listing_reports_every_entry() {
-        let path = temp_path("listing.tar");
-        write_tar(&path, &[("a.txt", b"aaa"), ("nested/b.txt", b"bbbb")]);
-
-        let listing = read_archive_listing(&path.to_string_lossy(), ArchiveFormat::Tar)
-            .expect("tar must list");
-
-        assert_eq!(listing.format, ArchiveFormat::Tar);
-        assert_eq!(listing.total_entries, 2);
-        assert_eq!(listing.entries[0].name, "a.txt");
-        assert_eq!(listing.entries[0].size, 3);
-        // Tar has no per-entry compression, so both sizes are the same number.
-        assert_eq!(listing.entries[0].compressed_size, 3);
-        assert_eq!(listing.entries[1].name, "nested/b.txt");
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn tar_gz_listing_inflates_only_the_headers() {
-        let raw = {
-            let path = temp_path("source.tar");
-            let bytes = write_tar(&path, &[("only.txt", b"payload")]);
-            let _ = std::fs::remove_file(&path);
-            bytes
-        };
-        let path = temp_path("listing.tar.gz");
-        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-        encoder.write_all(&raw).expect("gzip write");
-        std::fs::write(&path, encoder.finish().expect("gzip finish")).expect("write tgz");
-
-        let listing = read_archive_listing(&path.to_string_lossy(), ArchiveFormat::TarGz)
-            .expect("tar.gz must list");
-
-        assert_eq!(listing.format, ArchiveFormat::TarGz);
-        assert_eq!(listing.total_entries, 1);
-        assert_eq!(listing.entries[0].name, "only.txt");
-        assert_eq!(listing.entries[0].size, 7);
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn the_size_total_covers_entries_the_listing_cap_dropped() {
-        // The frontend pairs `total_bytes` with `total_entries` in one summary
-        // line. If the total only counted listed entries, a capped archive
-        // would advertise its full entry count next to a fraction of its size.
-        let over_cap = MAX_ARCHIVE_ENTRIES + 5;
-        let bodies: Vec<(String, Vec<u8>)> = (0..over_cap)
-            .map(|index| (format!("f{index}.bin"), vec![b'x'; 10]))
-            .collect();
-        let refs: Vec<(&str, &[u8])> = bodies
-            .iter()
-            .map(|(name, body)| (name.as_str(), body.as_slice()))
-            .collect();
-        let path = temp_path("capped.tar");
-        write_tar(&path, &refs);
-
-        let listing = read_archive_listing(&path.to_string_lossy(), ArchiveFormat::Tar)
-            .expect("tar must list");
-
-        assert!(listing.truncated);
-        assert_eq!(listing.entries.len(), MAX_ARCHIVE_ENTRIES);
-        assert_eq!(listing.total_entries, over_cap);
-        assert_eq!(listing.total_bytes, over_cap as u64 * 10);
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn a_corrupt_archive_errors_instead_of_panicking() {
-        let path = temp_path("corrupt.zip");
-        std::fs::write(&path, b"PK\x03\x04 this is not a real central directory")
-            .expect("write corrupt zip");
-
-        let result = read_archive_listing(&path.to_string_lossy(), ArchiveFormat::Zip);
-
-        assert!(result.is_err(), "corrupt zip must not list");
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn a_missing_archive_errors() {
-        let path = temp_path("definitely_missing.zip");
-        let _ = std::fs::remove_file(&path);
-
-        let result = read_archive_listing(&path.to_string_lossy(), ArchiveFormat::Zip);
-
-        assert!(result.is_err(), "missing archive must not list");
-    }
-
-    #[test]
-    fn a_stream_that_ends_mid_entry_keeps_the_entries_it_already_read() {
-        // Cutting an uncompressed tar is deterministic: entry one occupies
-        // blocks 0..4608 (512 header + 4096 data) and entry two's header needs
-        // 4608..5120, so a cut at 4900 leaves that header incomplete. Only
-        // headers are read here, so the cut has to land inside one to stop the
-        // walk. This is the same `Err` branch a `.tar.gz` reaches when it hits
-        // the inflate bound, tested without depending on how well a given
-        // payload happens to compress.
-        let raw = {
-            let path = temp_path("source_trunc.tar");
-            let bytes = write_tar(
-                &path,
-                &[("first.txt", &[b'a'; 4096]), ("second.txt", &[b'b'; 4096])],
-            );
-            let _ = std::fs::remove_file(&path);
-            bytes
-        };
-        let mut cut = raw;
-        cut.truncate(4_900);
-        let path = temp_path("truncated.tar");
-        std::fs::write(&path, &cut).expect("write truncated tar");
-
-        let listing = read_archive_listing(&path.to_string_lossy(), ArchiveFormat::Tar)
-            .expect("a partial stream still lists what it read");
-
-        assert!(listing.truncated, "a cut stream must report truncation");
-        assert_eq!(
-            listing.entries.len(),
-            1,
-            "the entry completed before the cut must survive"
-        );
-        assert_eq!(listing.entries[0].name, "first.txt");
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn a_stream_cut_before_its_first_entry_errors() {
-        // Nothing was read, so there is nothing honest to show — the caller
-        // degrades to the binary placeholder rather than an empty listing that
-        // would read as "this archive is empty".
-        let path = temp_path("headless.tar");
-        std::fs::write(&path, [0_u8; 100]).expect("write partial header");
-
-        let result = read_archive_listing(&path.to_string_lossy(), ArchiveFormat::Tar);
-
-        assert!(result.is_err(), "a header-less stream must not list");
-        let _ = std::fs::remove_file(&path);
-    }
-}
+mod tests;

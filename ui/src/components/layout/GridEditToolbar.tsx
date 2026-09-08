@@ -8,6 +8,19 @@ import type { DockPosition } from "@/stores/types";
 import { WidgetSlot } from "@/components/widgets/WidgetSlot";
 import { SleepPreventionToggle } from "./SleepPreventionToggle";
 import { UpdateButton } from "./UpdateButton";
+import {
+  CopyIcon,
+  FileSearchIcon,
+  MinusIcon,
+  PanelBottomIcon,
+  PanelLeftIcon,
+  PanelRightIcon,
+  PanelTopIcon,
+  RadioTowerIcon,
+  SettingsIcon,
+  SquareIcon,
+  XIcon,
+} from "@/components/ui/icons";
 import logoSvg from "@/assets/logo.svg";
 
 /**
@@ -73,32 +86,12 @@ export function GridEditToolbar() {
       .catch(() => {});
   }, []);
 
-  /** Dock position icons: rectangle with highlighted edge showing dock location */
+  /** Lucide panel icons map directly to the four dock positions. */
   const dockIcons: Record<DockPosition, React.ReactNode> = {
-    left: (
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-        <rect x="1" y="1" width="12" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.2" />
-        <rect x="1" y="1" width="4" height="12" rx="1" fill="currentColor" opacity="0.5" />
-      </svg>
-    ),
-    top: (
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-        <rect x="1" y="1" width="12" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.2" />
-        <rect x="1" y="1" width="12" height="4" rx="1" fill="currentColor" opacity="0.5" />
-      </svg>
-    ),
-    bottom: (
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-        <rect x="1" y="1" width="12" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.2" />
-        <rect x="1" y="9" width="12" height="4" rx="1" fill="currentColor" opacity="0.5" />
-      </svg>
-    ),
-    right: (
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-        <rect x="1" y="1" width="12" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.2" />
-        <rect x="9" y="1" width="4" height="12" rx="1" fill="currentColor" opacity="0.5" />
-      </svg>
-    ),
+    left: <PanelLeftIcon />,
+    top: <PanelTopIcon />,
+    bottom: <PanelBottomIcon />,
+    right: <PanelRightIcon />,
   };
 
   return (
@@ -199,12 +192,10 @@ export function GridEditToolbar() {
             color: "var(--text-secondary)",
             background: "transparent",
             border: "none",
-            fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'",
-            fontSize: "var(--fs-xs)",
           }}
           title="Open File Viewer (Ctrl+Shift+O)"
         >
-          {"\uE8A5"}
+          <FileSearchIcon />
         </button>
 
         <SleepPreventionToggle />
@@ -219,14 +210,12 @@ export function GridEditToolbar() {
             color: remoteButtonColor,
             background: "transparent",
             border: "none",
-            fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'",
-            fontSize: "var(--fs-xs)",
             opacity: remoteEnabled ? 1 : 0.65,
           }}
           title={remoteButtonTitle}
           aria-label="Remote Access"
         >
-          {"\uE703"}
+          <RadioTowerIcon />
         </button>
 
         <button
@@ -240,7 +229,7 @@ export function GridEditToolbar() {
           }}
           title="Settings (Ctrl+,)"
         >
-          &#9881;
+          <SettingsIcon />
         </button>
       </div>
 
@@ -253,12 +242,10 @@ export function GridEditToolbar() {
           style={{
             color: "var(--text-secondary)",
             border: "none",
-            fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'",
-            fontSize: "var(--fs-xs)",
           }}
           title="Minimize"
         >
-          {"\uE921"}
+          <MinusIcon />
         </button>
         <button
           data-testid="window-maximize"
@@ -267,12 +254,10 @@ export function GridEditToolbar() {
           style={{
             color: "var(--text-secondary)",
             border: "none",
-            fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'",
-            fontSize: "var(--fs-xs)",
           }}
           title={maximized ? "Restore" : "Maximize"}
         >
-          {maximized ? "\uE923" : "\uE922"}
+          {maximized ? <CopyIcon size={12} /> : <SquareIcon size={12} />}
         </button>
         <button
           data-testid="window-close"
@@ -281,12 +266,10 @@ export function GridEditToolbar() {
           style={{
             color: "var(--text-secondary)",
             border: "none",
-            fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'",
-            fontSize: "var(--fs-xs)",
           }}
           title="Close"
         >
-          {"\uE8BB"}
+          <XIcon />
         </button>
       </div>
     </div>

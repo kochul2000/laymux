@@ -82,6 +82,8 @@ class E2eOutputSocket internal constructor(
     private val session: RemoteSession,
     private val client: OkHttpClient,
     private val callbacks: E2eOutputSocketCallbacks,
+    /** Scroll-top history expansion budget in KiB; 0 attaches at the PC default. */
+    private val historyKib: Int = 0,
     random: SecureRandom = SecureRandom(),
 ) : WebSocketListener() {
     private val streamNonce = ByteArray(E2eOutputProtocol.STREAM_NONCE_BYTES)
@@ -125,7 +127,7 @@ class E2eOutputSocket internal constructor(
             webSocket.close(1000, null)
             return
         }
-        val open = cipher.encryptOpen(terminalId, leaseId)
+        val open = cipher.encryptOpen(terminalId, leaseId, historyKib)
         try {
             if (!webSocket.send(open.toByteString())) {
                 fail("Secure output OPEN could not be sent.")

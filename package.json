@@ -6,6 +6,7 @@
   "scripts": {
     "prepare": "husky",
     "sweep:target": "node scripts/sweep-target.mjs --force",
-    "test:sweep-target": "node scripts/tests/sweep-target.test.mjs"
+    "test:sweep-target": "node scripts/tests/sweep-target.test.mjs",
+    "test:release-channels": "node scripts/tests/release-channels.test.mjs"
   }
 }

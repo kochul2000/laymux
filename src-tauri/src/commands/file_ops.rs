@@ -21,7 +21,7 @@ pub struct PathInfo {
 /// Never errors on a missing path — a non-existent path simply returns
 /// `{ exists: false, is_directory: false }` so the frontend can show feedback
 /// without treating "not found" as a hard error.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn stat_path(path: String, wsl_distro: Option<String>) -> PathInfo {
     let resolved =
         path_utils::resolve_address_path_following_symlinks(&path, wsl_distro.as_deref());
@@ -50,6 +50,10 @@ pub fn stat_paths_inner(
         )));
     }
 
+    // Resolving the default distro once per batch (rather than per path inside
+    // `resolve_address_path`) keeps the WSL lookup out of the loop; the lookup
+    // itself is cached in `get_default_wsl_distro` because ADR-0188's ambient
+    // triggers call this batch far more often than a drag did.
     #[cfg(windows)]
     let inferred_distro = wsl_distro.map(str::to_owned).or_else(|| {
         paths
@@ -82,7 +86,18 @@ pub fn stat_paths_inner(
         .collect())
 }
 
-#[tauri::command]
+/// `async` is load-bearing, not decoration (ADR-0188, generalized by ADR-0202).
+///
+/// A plain `#[tauri::command]` on a sync function is `ExecutionContext::Blocking`
+/// in `tauri-macros`: the body runs inline on the thread handling the IPC, which
+/// is the app's main/event-loop thread. This body does up to
+/// `MAX_PATH_LINK_CANDIDATES` `fs::metadata` calls and can resolve the default
+/// WSL distribution, so a stale UNC/network path or a cold `wsl.exe` probe would
+/// stall the window itself. `#[tauri::command(async)]` on a sync function
+/// selects the `sync_threadpool` kind, which runs it on the async runtime
+/// instead. `commands::main_thread_io` holds the whole table and keeps a later
+/// edit from dropping any of them back onto the event loop.
+#[tauri::command(async)]
 pub fn stat_paths(paths: Vec<String>, wsl_distro: Option<String>) -> Result<Vec<PathInfo>, String> {
     stat_paths_inner(&paths, wsl_distro.as_deref()).map_err(Into::into)
 }
@@ -100,7 +115,7 @@ pub fn home_directory() -> Option<String> {
 }
 
 /// Return the current user's home directory path.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_home_directory() -> Result<String, String> {
     home_directory().ok_or_else(|| "Could not determine home directory".to_string())
 }
@@ -117,8 +132,12 @@ pub struct DirEntry {
 }
 
 /// List directory contents and return structured metadata for each entry.
-#[tauri::command]
-pub fn list_directory(path: String, wsl_distro: Option<String>) -> Result<Vec<DirEntry>, String> {
+#[tauri::command(async)]
+pub fn list_directory(
+    path: String,
+    wsl_distro: Option<String>,
+    max_entries: Option<usize>,
+) -> Result<Vec<DirEntry>, String> {
     // Resolve WSL/Windows paths with the shared inference rule (#282), following
     // WSL symlinks so a linked directory is browsable (#363).
     let resolved =
@@ -127,7 +146,7 @@ pub fn list_directory(path: String, wsl_distro: Option<String>) -> Result<Vec<Di
     let entries = std::fs::read_dir(dir_path).map_err(|e| format!("Cannot read directory: {e}"))?;
 
     let mut result = Vec::new();
-    for entry in entries {
+    for entry in entries.take(max_entries.unwrap_or(usize::MAX)) {
         let entry = match entry {
             Ok(e) => e,
             Err(_) => continue, // skip unreadable entries
@@ -207,7 +226,7 @@ pub(crate) fn base64_encode(input: &[u8]) -> String {
     result
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_settings_file() -> Result<(), String> {
     let path = crate::settings::settings_path();
     #[cfg(target_os = "windows")]
@@ -251,6 +270,23 @@ mod tests {
             std::path::Path::new(&home).exists(),
             "resolved home dir should exist: {home}"
         );
+    }
+
+    #[test]
+    fn list_directory_stops_before_scanning_past_the_requested_bound() {
+        let dir = tempfile::tempdir().expect("temp directory");
+        for index in 0..5 {
+            std::fs::write(dir.path().join(format!("entry-{index}.txt")), b"x")
+                .expect("write directory entry");
+        }
+
+        let bounded = list_directory(dir.path().to_string_lossy().into_owned(), None, Some(2))
+            .expect("bounded listing");
+        let unbounded = list_directory(dir.path().to_string_lossy().into_owned(), None, None)
+            .expect("unbounded listing");
+
+        assert_eq!(bounded.len(), 2);
+        assert_eq!(unbounded.len(), 5);
     }
 
     #[test]
@@ -305,6 +341,19 @@ mod tests {
     fn stat_paths_rejects_an_unbounded_batch() {
         let paths = vec![String::from("missing"); crate::constants::MAX_PATH_LINK_CANDIDATES + 1];
         assert!(stat_paths_inner(&paths, None).is_err());
+    }
+
+    /// ADR-0188 raised this ceiling so a Remote idle screen scan fits in one
+    /// batch. It is the maximum filesystem lookups one batch may perform, not
+    /// the 16-candidate selection cap.
+    #[test]
+    fn stat_paths_batch_ceiling_fits_a_remote_screen_scan() {
+        assert_eq!(crate::constants::MAX_PATH_LINK_CANDIDATES, 64);
+        let paths = vec![String::from("missing"); crate::constants::MAX_PATH_LINK_CANDIDATES];
+        assert_eq!(
+            stat_paths_inner(&paths, None).expect("bounded batch").len(),
+            crate::constants::MAX_PATH_LINK_CANDIDATES
+        );
     }
 
     #[test]

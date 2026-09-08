@@ -1,5 +1,7 @@
 import { create } from "zustand";
 
+export const SESSION_ATTRIBUTION_STARTUP_GRACE_MS = 15_000;
+
 export type TerminalActivityType = "shell" | "running" | "interactiveApp";
 
 export interface TerminalActivityInfo {
@@ -20,9 +22,14 @@ export interface TerminalInstance {
   isFocused: boolean;
   /** False between React mount and successful backend PTY session creation. */
   sessionReady?: boolean;
+  /** Resume startup grace: do not classify the pane as a conclusive shell yet. */
+  attributionPendingUntil?: number;
   lastCommand?: string;
   lastExitCode?: number;
   lastCommandAt?: number;
+  /** Latest user text submitted to this terminal; runtime-only and never persisted. */
+  lastUserInput?: string;
+  lastUserInputAt?: number;
   /** Detected terminal activity state. */
   activity?: TerminalActivityInfo;
   /**
@@ -76,6 +83,8 @@ interface TerminalStoreState {
         | "lastCommand"
         | "lastExitCode"
         | "lastCommandAt"
+        | "lastUserInput"
+        | "lastUserInputAt"
         | "activity"
         | "activitySequence"
         | "outputActive"
@@ -83,6 +92,7 @@ interface TerminalStoreState {
         | "syncGroup"
         | "activityMessage"
         | "sessionReady"
+        | "attributionPendingUntil"
       >
     >,
   ) => void;

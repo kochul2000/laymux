@@ -1,8 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { fileURLToPath } from "node:url";
 import { fulfillRemoteClientAsset } from "./remote-client-assets";
-
-const remoteRoot = fileURLToPath(new URL("../../src-tauri/src/remote_server/", import.meta.url));
 
 // The drawer renders pane rows from `workspaces[].panes`, so the fixture has
 // to carry the same panes there as in `activeWorkspace`.
@@ -173,29 +170,21 @@ test("selected desktop-valid relative file is underlined and opens Remote FileVi
     release: ReturnType<typeof deferred>;
     resumed: ReturnType<typeof deferred>;
   };
-  let nextPathLinkHold: PathLinkHold | null = null;
-  const holdNextPathLink = (): PathLinkHold => {
-    const hold = { started: deferred(), release: deferred(), resumed: deferred() };
+  let nextPathLinkHold: (PathLinkHold & { mode: string }) | null = null;
+  // ADR-0188: the page also fires `screen` scans when output settles, so a hold
+  // has to name the trigger it waits for or an idle scan could consume it.
+  const holdNextPathLink = (mode = "selection"): PathLinkHold => {
+    const hold = { started: deferred(), release: deferred(), resumed: deferred(), mode };
     nextPathLinkHold = hold;
     return hold;
   };
+  const selectionRequests = () =>
+    pathLinkRequests.filter((entry) => entry.body.mode === "selection");
 
   await context.route("http://remote.test/remote/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     if (await fulfillRemoteClientAsset(route, url.pathname)) return;
-    if (url.pathname === "/remote/viewer/") {
-      return route.fulfill({
-        path: `${remoteRoot}viewer_page.html`,
-        contentType: "text/html; charset=utf-8",
-      });
-    }
-    if (url.pathname === "/remote/viewer/viewer.js") {
-      return route.fulfill({
-        path: `${remoteRoot}viewer_page.js`,
-        contentType: "text/javascript; charset=utf-8",
-      });
-    }
     if (url.pathname === "/remote/v1/session/claim") {
       return route.fulfill({
         json: {
@@ -233,9 +222,9 @@ test("selected desktop-valid relative file is underlined and opens Remote FileVi
         capability: await request.headerValue("x-laymux-remote-file-viewer"),
         body,
       });
-      const hold = nextPathLinkHold;
-      nextPathLinkHold = null;
+      const hold = nextPathLinkHold?.mode === body.mode ? nextPathLinkHold : null;
       if (hold) {
+        nextPathLinkHold = null;
         hold.started.resolve();
         await hold.release.promise;
         hold.resumed.resolve();
@@ -341,30 +330,31 @@ test("selected desktop-valid relative file is underlined and opens Remote FileVi
   const decoration = page.locator(".remote-path-link-decoration");
   await expect(decoration).toBeVisible();
   await expect(decoration).toHaveCSS("border-bottom-style", "solid");
-  expect(pathLinkRequests).toEqual([
+  expect(selectionRequests()).toEqual([
     {
       authorization: "Bearer remote-secret",
       lease: "lease-path-link",
       capability: "viewer-path-link",
-      body: { terminalId: "terminal-1", selection: "src/main.rs" },
+      body: { terminalId: "terminal-1", mode: "selection", lines: ["src/main.rs"] },
     },
   ]);
 
   const box = await decoration.boundingBox();
   expect(box).not.toBeNull();
-  const popupPromise = page.waitForEvent("popup");
   await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
-  const popup = await popupPromise;
 
-  await expect(popup.locator("#text")).toContainText("fn main() {}");
-  expect(popup.url()).toBe("http://remote.test/remote/viewer/");
+  // The link opens the in-page viewer (ADR-0184), not a second tab.
+  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+  await expect(page.locator("#fileViewerText")).toContainText("fn main() {}");
+  await expect(page.locator("#fileViewerTitle")).toHaveText("C:\\work\\src\\main.rs");
   await expect
     .poll(() => renderRequests)
     .toEqual([{ source: "path", path: "C:\\work\\src\\main.rs" }]);
 
   // A resize/reflow while the stat bridge is pending must cancel the old
   // validation and re-run it against the current xterm selection geometry.
-  await popup.close();
+  await page.locator("#fileViewerClose").click();
+  await expect(page.locator("#fileViewerOverlay")).toBeHidden();
   const resizeHold = holdNextPathLink();
   await page.evaluate(() => {
     const term = (window as CapturedTerminalWindow).__remoteTerm;
@@ -376,7 +366,7 @@ test("selected desktop-valid relative file is underlined and opens Remote FileVi
     const term = (window as CapturedTerminalWindow).__remoteTerm;
     if (term && term.cols > 20) term.resize(term.cols - 1, term.rows);
   });
-  await expect.poll(() => pathLinkRequests.length).toBe(3);
+  await expect.poll(() => selectionRequests().length).toBe(3);
   await expect(decoration).toBeVisible();
   resizeHold.release.resolve();
   await resizeHold.resumed.promise;
@@ -399,7 +389,7 @@ test("selected desktop-valid relative file is underlined and opens Remote FileVi
       page.evaluate(() => (window as CapturedTerminalWindow).__remoteTerm?.getSelection() || ""),
     )
     .toBe("src/main.rs");
-  await expect.poll(() => pathLinkRequests.length, { timeout: 5_000 }).toBe(4);
+  await expect.poll(() => selectionRequests().length, { timeout: 5_000 }).toBe(4);
   await terminalSwitchHold.started.promise;
   await page.locator("#navToggle").click();
   await page.locator(".workspace-pane-row").nth(1).click();
@@ -429,10 +419,146 @@ test("selected desktop-valid relative file is underlined and opens Remote FileVi
   await releaseHold.started.promise;
   await page.locator("#navToggle").click();
   // Exit lives in the drawer's connection view; the drawer opens on workspace.
+  await page.locator("#drawerSettingsButton").click();
   await page.locator("#drawerConnectionButton").click();
   await page.locator("#exit").click();
   releaseHold.release.resolve();
   await releaseHold.resumed.promise;
   await expect(decoration).toHaveCount(0);
   await expect(page.locator("#terminal")).not.toHaveClass(/remote-path-link-clickable/);
+});
+
+test("a directory link opens the explorer listing, not the file renderer (ADR-0198)", async ({
+  context,
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const listRequests: Array<Record<string, unknown>> = [];
+  const renderRequests: Array<Record<string, unknown>> = [];
+
+  await context.route("http://remote.test/remote/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (await fulfillRemoteClientAsset(route, url.pathname)) return;
+    if (url.pathname === "/remote/v1/session/claim") {
+      return route.fulfill({
+        json: {
+          active: true,
+          leaseId: "lease-dir-link",
+          resumeToken: "resume-dir-link",
+          fileViewerToken: "viewer-dir-link",
+          heartbeatTimeoutSeconds: 45,
+        },
+      });
+    }
+    if (url.pathname === "/remote/v1/session/heartbeat") {
+      return route.fulfill({ json: { active: true, leaseId: "lease-dir-link" } });
+    }
+    if (url.pathname === "/remote/v1/session/release") {
+      return route.fulfill({ json: { ok: true } });
+    }
+    if (url.pathname === "/remote/v1/navigation") {
+      return route.fulfill({ json: navigation });
+    }
+    if (/^\/remote\/v1\/terminals\/terminal-[12]\/(focus|resize)$/.test(url.pathname)) {
+      return route.fulfill({ json: { ok: true } });
+    }
+    if (url.pathname === "/remote/v1/file-viewer/status") {
+      return route.fulfill({ json: { open: false, path: null } });
+    }
+    if (url.pathname === "/remote/v1/file-viewer/path-link") {
+      return route.fulfill({
+        json: {
+          valid: true,
+          matches: [
+            {
+              token: "src",
+              path: "C:\\work\\src",
+              kind: "directory",
+              lineIndex: 0,
+              startIndex: 0,
+              endIndex: "src".length,
+            },
+          ],
+        },
+      });
+    }
+    if (url.pathname === "/remote/v1/file-viewer/list") {
+      listRequests.push(JSON.parse(request.postData() || "{}") as Record<string, unknown>);
+      return route.fulfill({
+        json: {
+          path: "C:\\work\\src",
+          parent: "C:\\work",
+          entries: [
+            {
+              name: "main.rs",
+              path: "C:\\work\\src\\main.rs",
+              isDirectory: false,
+              isSymlink: false,
+              size: 12,
+            },
+          ],
+          truncated: false,
+        },
+      });
+    }
+    if (url.pathname === "/remote/v1/file-viewer/render") {
+      renderRequests.push(JSON.parse(request.postData() || "{}") as Record<string, unknown>);
+      return route.fulfill({
+        json: { kind: "text", path: "C:\\work\\src", content: "", truncated: false },
+      });
+    }
+    return route.fulfill({ status: 404, json: { error: "not mocked" } });
+  });
+
+  await page.routeWebSocket(/\/remote\/v1\/terminals\/terminal-1\/output/, (socket) => {
+    const { header, payload } = snapshotFrames("src\r\n");
+    socket.send(header);
+    socket.send(payload);
+  });
+  await page.routeWebSocket(/\/remote\/v1\/terminals\/terminal-2\/output/, (socket) => {
+    const { header, payload } = snapshotFrames("second terminal\r\n");
+    socket.send(header);
+    socket.send(payload);
+  });
+
+  await page.goto("http://remote.test/remote/#token=remote-secret");
+  await page.evaluate(() => {
+    const target = window as CapturedTerminalWindow;
+    const originalReset = target.Terminal.prototype.reset;
+    target.Terminal.prototype.reset = function resetCapturingInstance() {
+      (window as CapturedTerminalWindow).__remoteTerm = this as never;
+      return originalReset.call(this);
+    };
+  });
+  await page.locator("#connect").click();
+  await expect(page.locator("#status")).toHaveText("Main · Pane 1");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as CapturedTerminalWindow).__remoteTerm?.buffer.active
+            .getLine(0)
+            ?.translateToString() || "",
+      ),
+    )
+    .toContain("src");
+
+  await page.waitForTimeout(200);
+  await page.evaluate(() => {
+    (window as CapturedTerminalWindow).__remoteTerm?.select(0, 0, "src".length);
+  });
+
+  const decoration = page.locator(".remote-path-link-decoration");
+  await expect(decoration).toBeVisible();
+  const box = await decoration.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+
+  // The directory opens as a listing in the same overlay; render is never hit.
+  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+  await expect(page.locator("#fileViewerTitle")).toHaveText("C:\\work\\src");
+  await expect(page.locator(".file-viewer-directory-row", { hasText: "main.rs" })).toBeVisible();
+  expect(listRequests).toEqual([{ path: "C:\\work\\src" }]);
+  expect(renderRequests).toEqual([]);
 });

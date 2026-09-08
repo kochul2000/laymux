@@ -8,6 +8,14 @@ class RemoteBridge(
     private val activity: MainActivity,
     private val documentGeneration: Long,
 ) {
+    /**
+     * Feature probe for scroll-top history expansion (ADR-0182). A Remote page
+     * only adds `historyKib` to its output open record when this answers true,
+     * because older connectors reject an open record with unknown fields.
+     */
+    @JavascriptInterface
+    fun supportsOutputHistoryBudget(): Boolean = true
+
     @JavascriptInterface
     fun setRemoteLease(leaseId: String?) {
         activity.setRemoteLease(documentGeneration, leaseId)
@@ -31,6 +39,22 @@ class RemoteBridge(
     @JavascriptInterface
     fun openExternalUrl(url: String?) {
         activity.openExternalUrl(documentGeneration, url ?: return)
+    }
+
+    /**
+     * Save a host file the Remote FileViewer downloaded (ADR-0185). The secure
+     * WebView has no download handler, so a browser-style `<a download>` is a
+     * silent no-op here; native writes the bytes to the shared Downloads
+     * collection instead.
+     */
+    @JavascriptInterface
+    fun saveRemoteFile(name: String?, mediaType: String?, base64: String?) {
+        activity.saveRemoteFile(
+            documentGeneration,
+            name ?: return,
+            mediaType.orEmpty(),
+            base64 ?: return,
+        )
     }
 
     // OAuth loopback relay (ADR-0175): catch the provider's localhost

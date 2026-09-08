@@ -9,6 +9,11 @@ import type { SyncCwdConfig, SyncCwdDefaults } from "./sync-cwd-config";
 import type { TerminalActivityInfo } from "@/stores/terminal-store";
 import type { InitialExecutionHost } from "./terminal-execution-host";
 import { assertSettingsWriteAllowed } from "./settings-write-guard";
+import {
+  normalizeComposerStarredEntries,
+  type ComposerStarredEntry,
+  type ComposerStarredEntryInput,
+} from "./terminal-input-composer-state";
 
 export type { SyncCwdConfig, SyncCwdDefaults } from "./sync-cwd-config";
 
@@ -88,6 +93,26 @@ export async function writeToTerminal(id: string, data: string): Promise<void> {
   return invoke("write_to_terminal", { id, data });
 }
 
+/**
+ * Preserve xterm's binary-string contract across JSON IPC. Each UTF-16 code
+ * unit represents one raw byte; passing the string itself would UTF-8 encode
+ * values above 0x7f in Rust's `String::as_bytes()` path.
+ */
+export async function writeTerminalBinaryInput(
+  id: string,
+  generation: number,
+  binary: string,
+): Promise<void> {
+  const data = Array.from(binary, (character) => {
+    const value = character.charCodeAt(0);
+    if (value > 0xff) {
+      throw new Error("xterm binary input contains a non-byte code unit");
+    }
+    return value;
+  });
+  return invoke("write_terminal_binary_input", { id, generation, data });
+}
+
 export async function writeTerminalProtocolReply(
   id: string,
   generation: number,
@@ -148,8 +173,7 @@ export interface TerminalOutputAttachFailStoppedPayload {
 }
 
 export type TerminalOutputAttachResult =
-  | TerminalOutputAttachmentPayload
-  | TerminalOutputAttachFailStoppedPayload;
+  TerminalOutputAttachmentPayload | TerminalOutputAttachFailStoppedPayload;
 
 export interface TerminalOutputDeltaPayload {
   generation: number;
@@ -191,13 +215,7 @@ export async function acknowledgeTerminalOutputEnvelope(
 }
 
 export type TerminalOutputEnvelopeRepairStatus =
-  | "idle"
-  | "eventPending"
-  | "exact"
-  | "stale"
-  | "alreadyReceipted"
-  | "mismatch"
-  | "exhausted";
+  "idle" | "eventPending" | "exact" | "stale" | "alreadyReceipted" | "mismatch" | "exhausted";
 
 export interface TerminalOutputEnvelopeRepairResponse {
   status: TerminalOutputEnvelopeRepairStatus;
@@ -335,6 +353,22 @@ export async function closeTerminalSession(id: string): Promise<void> {
   });
 }
 
+export interface HiddenTerminalEvictionResult {
+  closedTerminalIds: string[];
+  failedTerminalIds: string[];
+}
+
+/**
+ * Let the backend own the full mutation-drain -> critical checkpoint -> close
+ * transaction for hidden PTYs. The returned IDs are the only panes safe to
+ * unmount; failures remain live and are retried by the timer.
+ */
+export async function checkpointAndCloseHiddenTerminals(
+  terminalIds: readonly string[],
+): Promise<HiddenTerminalEvictionResult> {
+  return invoke("checkpoint_and_close_hidden_terminals", { terminalIds });
+}
+
 export async function getSyncGroupTerminals(groupName: string): Promise<string[]> {
   return invoke("get_sync_group_terminals", { groupName });
 }
@@ -373,6 +407,7 @@ export interface AndroidPairingStatus {
 export interface AndroidPairingQr {
   status: AndroidPairingStatus;
   qrSvg: string;
+  pairingPayload: string;
 }
 
 export async function getRemoteAccessStatus(): Promise<RemoteAccessStatus> {
@@ -495,6 +530,8 @@ export type SettingsLoadResult =
       dropped: ValidationWarning[];
       warnings: ValidationWarning[];
       settingsPath: string;
+      /** SHA-256 of the exact source whose dropped paths were reviewed. */
+      recoveryRevision: string;
     }
   | { status: "parse_error"; settings: Settings; error: string; settingsPath: string };
 
@@ -506,6 +543,27 @@ export async function resetSettings(): Promise<Settings> {
   return invoke("reset_settings");
 }
 
+export async function acknowledgeSettingsRecovery(
+  expectedRecoveryRevision: string,
+): Promise<Settings> {
+  return invoke("acknowledge_settings_recovery", { expectedRecoveryRevision });
+}
+
+export type SettingsRecoveryAcknowledgeError =
+  | { kind: "recoveryDocumentRejected"; message: string }
+  | { kind: "runtimeReconcileFailed"; message: string };
+
+export function isSettingsRecoveryAcknowledgeError(
+  error: unknown,
+): error is SettingsRecoveryAcknowledgeError {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as Record<string, unknown>;
+  return (
+    typeof candidate.message === "string" &&
+    (candidate.kind === "recoveryDocumentRejected" || candidate.kind === "runtimeReconcileFailed")
+  );
+}
+
 export async function getSettingsPath(): Promise<string> {
   return invoke("get_settings_path");
 }
@@ -513,6 +571,84 @@ export async function getSettingsPath(): Promise<string> {
 export async function saveSettings(settings: Settings): Promise<void> {
   assertSettingsWriteAllowed();
   return invoke("save_settings", { settings });
+}
+
+export type ComposerStarredEntryPatch = {
+  text: string;
+  starred: boolean;
+  label?: string;
+  send?: boolean;
+  previousText?: string;
+};
+
+export async function setComposerStarredEntry(
+  text: string | ComposerStarredEntryPatch,
+  starred?: boolean,
+): Promise<ComposerStarredEntry[]> {
+  const patch: ComposerStarredEntryPatch =
+    typeof text === "string" ? { text, starred: starred === true } : text;
+  const entries = await invoke<ComposerStarredEntryInput[]>("set_composer_starred_entry", patch);
+  return normalizeComposerStarredEntries(entries);
+}
+
+export function onComposerStarredEntriesChanged(
+  callback: (entries: ComposerStarredEntry[]) => void,
+): Promise<UnlistenFn> {
+  return listen<ComposerStarredEntryInput[]>("composer-starred-entries-changed", (event) =>
+    callback(normalizeComposerStarredEntries(event.payload)),
+  );
+}
+
+export interface TerminalSessionAttribution {
+  generation: number;
+  state:
+    | "identified"
+    | "restorePending"
+    | "fresh"
+    | "noAgent"
+    | "activeButUnidentified"
+    | "unknown";
+  provider?: "claude" | "codex" | "grok";
+  sessionId?: string;
+}
+
+export async function getTerminalSessionAttributions(
+  claudeSessionMaxAgeHours?: number,
+  codexSessionMaxAgeHours?: number,
+  grokSessionMaxAgeHours?: number,
+): Promise<Record<string, TerminalSessionAttribution>> {
+  return invoke("get_terminal_session_attributions", {
+    claudeSessionMaxAgeHours,
+    codexSessionMaxAgeHours,
+    grokSessionMaxAgeHours,
+  });
+}
+
+export interface SessionCheckpointRequest {
+  requestId: number;
+  reason: "watchdog" | "update" | "eviction";
+  requireConclusive: boolean;
+  terminalIds?: string[];
+}
+
+export function onSessionCheckpointRequested(
+  listener: (request: SessionCheckpointRequest) => void,
+): Promise<UnlistenFn> {
+  return listen<SessionCheckpointRequest>("session-checkpoint-requested", (event) => {
+    listener(event.payload);
+  });
+}
+
+export async function acknowledgeSessionCheckpoint(
+  requestId: number,
+  checkpointCommitId?: number,
+  error?: string,
+): Promise<void> {
+  return invoke("acknowledge_session_checkpoint", {
+    requestId,
+    checkpointCommitId,
+    error,
+  });
 }
 
 export async function loadMemo(key: string): Promise<string> {
@@ -707,12 +843,7 @@ export interface GithubRepoSnapshot {
 
 /** Every mutating action the GitHub view may ask the backend to run. */
 export type GithubItemAction =
-  | "issue.close"
-  | "issue.closeNotPlanned"
-  | "pr.merge"
-  | "pr.squash"
-  | "pr.rebase"
-  | "pr.close";
+  "issue.close" | "issue.closeNotPlanned" | "pr.merge" | "pr.squash" | "pr.rebase" | "pr.close";
 
 /**
  * Read the shared open issue/PR snapshot for the repository containing
@@ -826,6 +957,8 @@ export interface CodexSettings {
   restoreSession: boolean;
   /** Maximum age (hours) for Codex rollout files. 0 = no limit. Default: 24. */
   sessionMaxAgeHours: number;
+  /** Navigate a visible normal-buffer transcript with pointer scrolling (default: true). */
+  transcriptScrollEnabled: boolean;
   /** Status message display mode (default: "bullet-title"). */
   statusMessageMode: CodexStatusMessageMode;
   /** Delimiter between bullet and title when both shown (default: " · "). */
@@ -934,13 +1067,7 @@ export interface ViewerSettings {
 
 /** Palette tokens offered for the `#123` emphasis. Names, so themes still own the hue. */
 export type GithubNumberColor =
-  | "yellow"
-  | "accent"
-  | "green"
-  | "red"
-  | "primary"
-  | "secondary"
-  | "muted";
+  "yellow" | "accent" | "green" | "red" | "primary" | "secondary" | "muted";
 
 export interface GithubSettings {
   /** Tab shown when the view first mounts. */
@@ -995,6 +1122,18 @@ export type FileViewerContent =
     }
   | { kind: "binary"; size: number };
 
+/**
+ * A whole file for download. Hand-mirrored from the Rust `FileDownloadContent`
+ * struct (`commands/file_viewer.rs`).
+ */
+export type FileDownloadContent = {
+  /** File name only — never the host path. */
+  name: string;
+  mediaType: string;
+  base64: string;
+  size: number;
+};
+
 export type {
   AppearanceSettings,
   PasteSettings,
@@ -1039,11 +1178,6 @@ export interface RemoteSettings {
   /** Android E2E controller lease grace after the app enters background (0..900 seconds). */
   androidBackgroundLeaseSeconds: number;
   autoMobileModeMinWidth: number;
-  snapshotMaxKib: number;
-  /** Remote terminal cell font size in pixels. */
-  terminalFontSize: number;
-  /** Remote input composer and suggestion font size in pixels. */
-  composerFontSize: number;
   preferredHost: string;
   customHosts: string[];
   cloudEnabled: boolean;
@@ -1057,14 +1191,12 @@ export interface RemoteSettings {
   serveTerminalFont: boolean;
   /** Mirror the desktop's placed widgets onto the remote strip (ADR-0124). */
   widgets: boolean;
-  /** Wheel scroll multiplier for the remote browser terminal (xterm `scrollSensitivity`). */
-  scrollSensitivity: number;
-  /** Remote wheel multiplier while the fast-scroll modifier (Alt) is held. */
-  fastScrollSensitivity: number;
-  /** One-finger drag scrollback multiplier on the remote surface. 1 = 1:1 physical scroll. */
-  touchScrollSensitivity: number;
-  /** Two-finger drag scrollback multiplier on the remote surface. Defaults to 5. */
-  twoFingerScrollSensitivity: number;
+  /** Largest Remote attachment a client may upload, in MiB (1..10). */
+  attachmentMaxMib: number;
+  /** Accept any file type as an opaque binary attachment. */
+  attachmentAllowAllExtensions: boolean;
+  /** Extra extensions stored as opaque binaries beyond image/text/PDF/DOCX/PPTX (lowercase, no dot). */
+  attachmentExtraExtensions: string[];
 }
 
 export interface Settings {
@@ -1090,6 +1222,8 @@ export interface Settings {
   dock: import("@/stores/settings-store").DockSettings;
   notifications: import("@/stores/settings-store").NotificationSettings;
   power?: import("@/stores/settings-store").PowerSettings;
+  /** Release channel this install follows (ADR-0190). */
+  update?: import("@/stores/settings-store").UpdateSettings;
   workspaceSelector: import("@/stores/settings-store").WorkspaceSelectorSettings;
   claude: ClaudeSettings;
   codex?: CodexSettings;
@@ -1244,8 +1378,16 @@ export interface DirEntry {
 }
 
 /** List directory contents via Rust std::fs::read_dir. */
-export async function listDirectory(path: string, wslDistro?: string): Promise<DirEntry[]> {
-  return invoke("list_directory", { path, wslDistro: wslDistro ?? null });
+export async function listDirectory(
+  path: string,
+  wslDistro?: string,
+  maxEntries?: number,
+): Promise<DirEntry[]> {
+  return invoke("list_directory", {
+    path,
+    wslDistro: wslDistro ?? null,
+    maxEntries: maxEntries ?? null,
+  });
 }
 
 /** Filesystem facts about a path (used by the File Explorer address bar, #278). */
@@ -1291,6 +1433,33 @@ export async function readFileForViewer(
   maxBytes?: number,
 ): Promise<FileViewerContent> {
   return invoke("read_file_for_viewer", { path, maxBytes: maxBytes ?? null });
+}
+
+export interface SpreadsheetContent {
+  sheetNames: string[];
+  sheet: string;
+  cells: { row: number; column: number; value: string }[];
+  totalRows: number;
+  totalColumns: number;
+  truncated: boolean;
+}
+
+export async function readSpreadsheetForViewer(
+  path: string,
+  sheet?: string,
+): Promise<SpreadsheetContent> {
+  return invoke("read_spreadsheet_for_viewer", { path, sheet: sheet ?? null });
+}
+
+/**
+ * Read a whole file for handing to the user (ADR-0185). Rejects rather than
+ * truncating: a partial save is a corrupt file.
+ */
+export async function readFileForDownload(
+  path: string,
+  maxBytes?: number,
+): Promise<FileDownloadContent> {
+  return invoke("read_file_for_download", { path, maxBytes: maxBytes ?? null });
 }
 
 /** Update whether a terminal sends CWD changes to other terminals. */
@@ -1782,8 +1951,12 @@ export async function setSleepInhibit(enabled: boolean): Promise<boolean> {
 
 export type AppUpdateOperation = "idle" | "checking" | "downloading" | "installing";
 
+export type AppUpdateChannel = "stable" | "beta";
+
 export interface AppUpdateStatus {
   enabled: boolean;
+  /** Release channel the backend used for the last check (ADR-0190). */
+  channel: AppUpdateChannel;
   currentVersion: string;
   availableVersion: string | null;
   notes: string | null;

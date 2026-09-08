@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { MoonIcon, SlashIcon } from "@/components/ui/icons";
 import { persistSession } from "@/lib/persist-session";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useSleepInhibitStore } from "@/stores/sleep-inhibit-store";
@@ -48,25 +49,14 @@ export function SleepPreventionToggle() {
       data-keep-awake={keepAwake}
       data-failed={failed}
       onClick={handleClick}
-      className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center border-0 bg-transparent"
+      className="relative flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center border-0 bg-transparent"
       style={{ color, opacity }}
       title={title}
       aria-label="Sleep prevention"
       aria-pressed={keepAwake}
     >
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-        {/* Crescent moon — sleep. */}
-        <path
-          d="M11.4 8.7A5 5 0 0 1 5.3 2.6 5 5 0 1 0 11.4 8.7Z"
-          stroke="currentColor"
-          strokeWidth="1.2"
-          strokeLinejoin="round"
-        />
-        {/* Struck through while the manual switch is on. */}
-        {keepAwake && (
-          <line x1="2" y1="12" x2="12" y2="2" stroke="currentColor" strokeWidth="1.2" />
-        )}
-      </svg>
+      <MoonIcon />
+      {keepAwake && <SlashIcon className="absolute" />}
     </button>
   );
 }

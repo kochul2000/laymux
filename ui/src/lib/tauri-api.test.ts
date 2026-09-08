@@ -18,15 +18,19 @@ import {
   attachTerminalOutput,
   acknowledgeTerminalOutput,
   writeTerminalInput,
+  writeTerminalBinaryInput,
   writeToTerminal,
   writeTerminalBootstrapProtocolReply,
   writeTerminalProtocolReply,
   getTerminalGeometryCapabilities,
   resizeTerminal,
   closeTerminalSession,
+  checkpointAndCloseHiddenTerminals,
   getSyncGroupTerminals,
   handleLxMessage,
   loadSettings,
+  acknowledgeSettingsRecovery,
+  isSettingsRecoveryAcknowledgeError,
   resetSettings,
   saveSettings,
   getRemoteAccessStatus,
@@ -167,6 +171,27 @@ describe("tauri-api", () => {
         id: "t1",
         data: "ls\n",
       });
+    });
+  });
+
+  describe("writeTerminalBinaryInput", () => {
+    it("serializes xterm Latin-1 code units as exact byte values", async () => {
+      mockInvoke.mockResolvedValue(undefined);
+
+      await writeTerminalBinaryInput("t1", 7, `\x1b[M${String.fromCharCode(0x20, 0x80, 0xff)}`);
+
+      expect(mockInvoke).toHaveBeenCalledWith("write_terminal_binary_input", {
+        id: "t1",
+        generation: 7,
+        data: [0x1b, 0x5b, 0x4d, 0x20, 0x80, 0xff],
+      });
+    });
+
+    it("rejects code units outside xterm's binary-string contract", async () => {
+      await expect(writeTerminalBinaryInput("t1", 7, "가")).rejects.toThrow(
+        "xterm binary input contains a non-byte code unit",
+      );
+      expect(mockInvoke).not.toHaveBeenCalled();
     });
   });
 
@@ -411,6 +436,25 @@ describe("tauri-api", () => {
     });
   });
 
+  describe("checkpointAndCloseHiddenTerminals", () => {
+    it("passes the complete eviction set to the backend transaction", async () => {
+      mockInvoke.mockResolvedValue({
+        closedTerminalIds: ["terminal-p1"],
+        failedTerminalIds: ["terminal-p2"],
+      });
+
+      await expect(
+        checkpointAndCloseHiddenTerminals(["terminal-p1", "terminal-p2"]),
+      ).resolves.toEqual({
+        closedTerminalIds: ["terminal-p1"],
+        failedTerminalIds: ["terminal-p2"],
+      });
+      expect(mockInvoke).toHaveBeenCalledWith("checkpoint_and_close_hidden_terminals", {
+        terminalIds: ["terminal-p1", "terminal-p2"],
+      });
+    });
+  });
+
   describe("getSyncGroupTerminals", () => {
     it("returns terminal IDs for group", async () => {
       mockInvoke.mockResolvedValue(["t1", "t2"]);
@@ -473,6 +517,30 @@ describe("tauri-api", () => {
       await resetSettings();
 
       expect(mockInvoke).toHaveBeenCalledWith("reset_settings");
+    });
+
+    it("permits the explicit recovery acknowledgement while regular writes are blocked", async () => {
+      setBlockPersist(true);
+      mockInvoke.mockResolvedValue({ defaultProfile: "PowerShell", profiles: [] });
+
+      await acknowledgeSettingsRecovery("revision-a");
+
+      expect(mockInvoke).toHaveBeenCalledWith("acknowledge_settings_recovery", {
+        expectedRecoveryRevision: "revision-a",
+      });
+    });
+
+    it("recognizes only structured recovery acknowledgement errors", () => {
+      expect(
+        isSettingsRecoveryAcknowledgeError({
+          kind: "runtimeReconcileFailed",
+          message: "runtime unavailable",
+        }),
+      ).toBe(true);
+      expect(isSettingsRecoveryAcknowledgeError(new Error("runtime unavailable"))).toBe(false);
+      expect(
+        isSettingsRecoveryAcknowledgeError({ kind: "unknown", message: "runtime unavailable" }),
+      ).toBe(false);
     });
   });
 
@@ -540,7 +608,7 @@ describe("tauri-api", () => {
       expect(mockInvoke).toHaveBeenCalledWith("cloud_disconnect");
     });
 
-    it("invokes the Android pairing lifecycle commands without passing a seed", async () => {
+    it("returns the copyable Android invitation only from the create command", async () => {
       const empty = { paired: false, endpoint: null, instanceId: null };
       const created = {
         status: {
@@ -549,6 +617,7 @@ describe("tauri-api", () => {
           instanceId: "instance-1",
         },
         qrSvg: "<svg />",
+        pairingPayload: "laymux://pair/v2?secret=copy-me",
       };
       mockInvoke
         .mockResolvedValueOnce(empty)

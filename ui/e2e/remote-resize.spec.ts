@@ -101,6 +101,8 @@ function outputFrames(text: string, seqStart: number, phase: "snapshot" | "delta
 
 interface RemoteHarness {
   resizeCalls: ResizeCall[];
+  resizeFinalizationFailures?: number;
+  lastResizeAt?: number;
   lineCount?: number;
   sendDelta?: (text: string) => void;
 }
@@ -126,6 +128,15 @@ async function installRemoteMocks(page: Page, options: RemoteHarness) {
     if (url.pathname === "/remote/v1/terminals/terminal-1/resize") {
       const body = route.request().postDataJSON() as { cols: number; rows: number };
       options.resizeCalls.push({ cols: body.cols, rows: body.rows });
+      options.lastResizeAt = Date.now();
+      if ((options.resizeFinalizationFailures ?? 0) > 0) {
+        options.resizeFinalizationFailures!--;
+        await route.fulfill({
+          status: 500,
+          json: { error: "destructive session finalization is in progress" },
+        });
+        return;
+      }
       await route.fulfill({ json: {} });
       return;
     }
@@ -194,6 +205,47 @@ async function terminalGeometry(page: Page) {
 // fitTerminal schedules via rAF + a 160ms retry and queueResize debounces
 // 120ms, so a quiet period longer than both proves no resize was sent.
 const RESIZE_SETTLE_MS = 800;
+
+test("a post-attach resize retries a transient session finalization", async ({ page }) => {
+  const harness: RemoteHarness = { resizeCalls: [] };
+  await installRemoteMocks(page, harness);
+  await page.setViewportSize({ width: 800, height: 900 });
+  await connectRemote(page);
+
+  await expect.poll(() => harness.resizeCalls.length).toBeGreaterThanOrEqual(1);
+  await page.waitForTimeout(RESIZE_SETTLE_MS);
+  const baselineCalls = harness.resizeCalls.length;
+  harness.resizeFinalizationFailures = 1;
+
+  await page.setViewportSize({ width: 500, height: 900 });
+
+  await expect.poll(() => harness.resizeCalls.length).toBe(baselineCalls + 2);
+  await expect(page.locator("#status")).not.toContainText("Resize failed");
+  expect(harness.resizeCalls.at(-1)).toEqual(harness.resizeCalls.at(-2));
+});
+
+test("a newer queued geometry supersedes a session finalization retry", async ({ page }) => {
+  const harness: RemoteHarness = { resizeCalls: [] };
+  await installRemoteMocks(page, harness);
+  await page.setViewportSize({ width: 800, height: 900 });
+  await connectRemote(page);
+
+  await expect.poll(() => harness.resizeCalls.length).toBeGreaterThanOrEqual(1);
+  await page.waitForTimeout(RESIZE_SETTLE_MS);
+  const baselineCalls = harness.resizeCalls.length;
+  harness.resizeFinalizationFailures = 1;
+
+  await page.setViewportSize({ width: 650, height: 900 });
+  await expect.poll(() => harness.resizeCalls.length).toBe(baselineCalls + 1);
+  const rejected = harness.resizeCalls.at(-1)!;
+  await page.waitForTimeout(Math.max(0, 470 - (Date.now() - harness.lastResizeAt!)));
+  await page.setViewportSize({ width: 500, height: 900 });
+
+  await expect.poll(() => harness.resizeCalls.length).toBeGreaterThanOrEqual(baselineCalls + 2);
+  await page.waitForTimeout(RESIZE_SETTLE_MS);
+  expect(harness.resizeCalls).toHaveLength(baselineCalls + 2);
+  expect(harness.resizeCalls.at(-1)!.cols).toBeLessThan(rejected.cols);
+});
 
 test("a height-only shrink keeps PTY geometry and crops the surface", async ({ page }) => {
   const resizeCalls: ResizeCall[] = [];

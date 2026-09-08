@@ -12,6 +12,11 @@ on:
         required: true
         default: false
         type: boolean
+      publish_android:
+        description: "Build and publish Android APK (required when Android release inputs changed)"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -27,6 +32,7 @@ jobs:
       release_id: ${{ steps.release.outputs.release_id }}
       tag: ${{ steps.release.outputs.tag }}
       prerelease: ${{ steps.release.outputs.prerelease }}
+      publish_android: ${{ steps.release.outputs.publish_android }}
       commit_sha: ${{ steps.release.outputs.commit_sha }}
 
     steps:
@@ -43,6 +49,7 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           RELEASE_TAG: ${{ inputs.tag }}
           PRERELEASE: ${{ inputs.prerelease }}
+          PUBLISH_ANDROID: ${{ inputs.publish_android }}
         run: |
           set -euo pipefail
 
@@ -56,21 +63,101 @@ jobs:
             exit 1
           }
 
-          [[ "$RELEASE_TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
-            echo "Release tag contains unsupported characters: $RELEASE_TAG" >&2
+          # Both channels feed a client updater, so every tag satisfies the shared
+          # release grammar. Android's tighter versionCode bounds are checked only
+          # when an APK is actually requested (ADR-0223).
+          version="${RELEASE_TAG#v}"
+          node scripts/release/release-version.mjs --validate "$RELEASE_TAG"
+          case "$version" in
+            *-beta.*)
+              [[ "$PRERELEASE" == "true" ]] || {
+                echo "A -beta.N tag must be dispatched as a prerelease: $RELEASE_TAG" >&2
+                exit 1
+              }
+              ;;
+            *)
+              [[ "$PRERELEASE" == "false" ]] || {
+                echo "A prerelease must use a vX.Y.Z-beta.N tag: $RELEASE_TAG" >&2
+                exit 1
+              }
+              ;;
+          esac
+
+          # tauri.conf.json owns the version the updater compares against;
+          # Cargo.toml owns the version every status surface reports. A release
+          # where they disagree ships an app whose displayed version is not the
+          # one it compares with.
+          app_version="$(jq -r '.version' src-tauri/tauri.conf.json)"
+          [[ "$version" == "$app_version" ]] || {
+            echo "Release tag $version does not match app version $app_version" >&2
             exit 1
           }
-          if [[ "$PRERELEASE" != "true" ]]; then
-            version="${RELEASE_TAG#v}"
-            [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
-              echo "Stable release tag must be vX.Y.Z or X.Y.Z: $RELEASE_TAG" >&2
+          crate_version="$(sed -n 's/^version = "\(.*\)"$/\1/p' src-tauri/Cargo.toml | head -n 1)"
+          [[ "$version" == "$crate_version" ]] || {
+            echo "Release tag $version does not match src-tauri/Cargo.toml version $crate_version" >&2
+            exit 1
+          }
+
+          if [[ "$PUBLISH_ANDROID" == "true" ]]; then
+            # Reject a version the Android versionCode encoding cannot carry
+            # before any artifact is built.
+            node scripts/release/android-version-code.mjs "$RELEASE_TAG"
+          fi
+
+          # Channel forwardness is checked *before* anything is published. If the
+          # only check lived in the channel job, a version lower than the current
+          # channel would already be latest by the time it was refused: the legacy
+          # endpoint would serve it, and Android would take it as an upgrade
+          # because the new versionCode scheme is numerically larger than the
+          # legacy one (ADR-0190).
+          # `gh api` prints the error body to stdout on a 404 and does not apply
+          # --jq to it, so a missing file yields JSON rather than nothing. Branch
+          # on the exit status and only read stdout when the call succeeded.
+          channel_version() {
+            local body
+            body="$(gh api "repos/$GITHUB_REPOSITORY/contents/desktop-$1.json?ref=release-channels" --jq '.content' 2>/dev/null)" || return 0
+            printf '%s' "$body" | base64 -d | jq -r '.version'
+          }
+          if [[ "$PRERELEASE" == "true" ]]; then
+            current_channel_version="$(channel_version beta)"
+          else
+            current_channel_version="$(channel_version stable)"
+          fi
+          if [[ -n "$current_channel_version" && "$current_channel_version" != "null" ]]; then
+            node scripts/release/release-version.mjs \
+              --newer "$version" --than "$current_channel_version" || {
+              echo "Release $version does not move its channel forward from $current_channel_version" >&2
               exit 1
             }
-            app_version="$(jq -r '.version' src-tauri/tauri.conf.json)"
-            [[ "$version" == "$app_version" ]] || {
-              echo "Stable release tag $version does not match app version $app_version" >&2
+          fi
+
+          # Skipping Android is safe only while the release APK inputs are
+          # unchanged from the Android channel's current artifact. Test/debug-only
+          # sources are intentionally outside this release-input allowlist.
+          if [[ "$PUBLISH_ANDROID" == "false" ]]; then
+            android_channel="stable"
+            [[ "$PRERELEASE" == "true" ]] && android_channel="beta"
+            android_body="$(gh api "repos/$GITHUB_REPOSITORY/contents/android-$android_channel.json?ref=release-channels" --jq '.content')"
+            android_manifest="$(printf '%s' "$android_body" | base64 -d)"
+            android_release_tag="$(jq -er '.releaseUrl | split("/")[-1]' <<<"$android_manifest")"
+            git rev-parse --verify "refs/tags/$android_release_tag^{commit}" >/dev/null || {
+              echo "Android channel tag is unavailable locally: $android_release_tag" >&2
               exit 1
             }
+            android_release_inputs=(
+              apps/android/app/src/main
+              apps/android/app/build.gradle.kts
+              apps/android/app/proguard-rules.pro
+              apps/android/build.gradle.kts
+              apps/android/settings.gradle.kts
+              apps/android/gradle.properties
+              apps/android/gradle/wrapper/gradle-wrapper.properties
+            )
+            if ! git diff --quiet "$android_release_tag"..."$GITHUB_SHA" -- "${android_release_inputs[@]}"; then
+              echo "Android release inputs changed since $android_release_tag; dispatch again with publish_android=true" >&2
+              git diff --name-only "$android_release_tag"..."$GITHUB_SHA" -- "${android_release_inputs[@]}" >&2
+              exit 1
+            fi
           fi
 
           existing_release_id="$(
@@ -99,23 +186,31 @@ jobs:
           echo "release_id=$release_id" >>"$GITHUB_OUTPUT"
           echo "tag=$RELEASE_TAG" >>"$GITHUB_OUTPUT"
           echo "prerelease=$PRERELEASE" >>"$GITHUB_OUTPUT"
+          echo "publish_android=$PUBLISH_ANDROID" >>"$GITHUB_OUTPUT"
           echo "commit_sha=$GITHUB_SHA" >>"$GITHUB_OUTPUT"
 
-  build:
+  wsl-probe:
     needs: prepare
-    strategy:
-      fail-fast: false
-      # tauri-action merges each platform into the release's latest.json.
-      # Serialize uploads so two fresh platform manifests cannot clobber one another.
-      max-parallel: 1
-      matrix:
-        include:
-          - platform: windows-latest
-            target: x86_64-pc-windows-msvc
-          - platform: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.commit_sha }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test and build static WSL companion
+        run: |
+          cargo test --locked -p laymux-wsl-codex-probe
+          bash scripts/build-wsl-probe.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wsl-codex-probe
+          path: src-tauri/gen/wsl/laymux-wsl-codex-probe
+          if-no-files-found: error
 
-    runs-on: ${{ matrix.platform }}
+  build:
+    needs: [prepare, wsl-probe]
+    # Linux desktop releases are paused (ADR-0240).
+    runs-on: windows-latest
 
     steps:
       - name: Checkout
@@ -126,13 +221,13 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-pc-windows-msvc
 
-      - name: Install Linux system dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - name: Download bundled WSL companion
+        uses: actions/download-artifact@v4
+        with:
+          name: wsl-codex-probe
+          path: src-tauri/gen/wsl
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -162,11 +257,13 @@ jobs:
           tagName: ${{ needs.prepare.outputs.tag }}
           releaseDraft: true
           prerelease: ${{ needs.prepare.outputs.prerelease }}
-          args: --target ${{ matrix.target }}
+          args: >-
+            --target x86_64-pc-windows-msvc
+            ${{ needs.prepare.outputs.prerelease == 'true' && '--bundles nsis,updater' || '' }}
 
   android:
     needs: prepare
-    if: needs.prepare.outputs.prerelease == 'false'
+    if: needs.prepare.outputs.publish_android == 'true'
     runs-on: ubuntu-latest
     env:
       ANDROID_APP_SIGNING_CERT_SHA256: ${{ vars.ANDROID_APP_SIGNING_CERT_SHA256 }}
@@ -214,21 +311,13 @@ jobs:
             [[ -n "${!name}" ]] || { echo "Missing release input: $name" >&2; exit 1; }
           done
 
-          version="${RELEASE_TAG#v}"
-          [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || {
-            echo "Android release tag must be a stable semantic version: $RELEASE_TAG" >&2
-            exit 1
-          }
-          major="${BASH_REMATCH[1]}"
-          minor="${BASH_REMATCH[2]}"
-          patch="${BASH_REMATCH[3]}"
-          (( major < 2100 && minor < 1000 && patch < 1000 )) || {
-            echo "Release version cannot be encoded as Android versionCode" >&2
-            exit 1
-          }
-          version_code=$((10#$major * 1000000 + 10#$minor * 1000 + 10#$patch))
-          (( version_code > 0 && version_code <= 2100000000 )) || {
-            echo "Android versionCode is out of range: $version_code" >&2
+          # versionName/versionCode come from the shared encoder so the bounds
+          # and the beta slot layout have one owner and unit tests (ADR-0190).
+          encoded="$(node scripts/release/android-version-code.mjs "$RELEASE_TAG")"
+          version="$(printf '%s\n' "$encoded" | sed -n 's/^versionName=//p')"
+          version_code="$(printf '%s\n' "$encoded" | sed -n 's/^versionCode=//p')"
+          [[ -n "$version" && -n "$version_code" ]] || {
+            echo "Android version encoding produced no output for $RELEASE_TAG" >&2
             exit 1
           }
 
@@ -287,12 +376,113 @@ jobs:
         shell: bash
         run: rm -f -- "${LAYMUX_ANDROID_APP_SIGNING_STORE_FILE:-$RUNNER_TEMP/laymux-android-app-signing.jks}"
 
+  channel_bootstrap:
+    # The channel branch must already hold a valid manifest for both channels
+    # *before* anything is published (ADR-0190). A channel-aware build that goes
+    # latest first would send every upgraded install to a 404 for as long as the
+    # downstream job took — or forever, if it failed.
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-channels
+      cancel-in-progress: false
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.commit_sha }}
+
+      - name: Seed the channel branch if it is missing
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: release-channels
+        run: |
+          set -euo pipefail
+
+          # Branch on the exit status, never on the output: `gh api` prints the
+          # error body to stdout on a 404 and does not apply --jq to it, so a
+          # missing file reads as a non-empty value and would skip the seeding
+          # this job exists to do.
+          # The condition is "every stable file exists", not "the branch exists":
+          # a branch seeded before the Android channel existed holds no Android
+          # file, and a channel-aware app would then get a 404 from its fixed
+          # endpoint until the next release (ADR-0223).
+          if gh api "repos/$GITHUB_REPOSITORY/contents/desktop-stable.json?ref=$BRANCH" >/dev/null 2>&1 &&
+            gh api "repos/$GITHUB_REPOSITORY/contents/android-stable.json?ref=$BRANCH" >/dev/null 2>&1; then
+            echo "channel branch already seeded"
+            exit 0
+          fi
+
+          # Desktop seeds from the latest stable release. Android may intentionally
+          # lag, so recover it from the newest stable release that actually has the
+          # correctly named APK asset (ADR-0223).
+          seed_tag="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name' 2>/dev/null)" || seed_tag=""
+          [[ -n "$seed_tag" && "$seed_tag" != "null" ]] || {
+            echo "No stable release to seed the channel branch from" >&2
+            exit 1
+          }
+
+          channels="$RUNNER_TEMP/channels"
+          mkdir -p "$channels"
+          # Carry over whatever the branch already holds. The publish step
+          # rebuilds the whole tree, so a file left out here is deleted.
+          for file in desktop-stable.json desktop-beta.json android-stable.json android-beta.json; do
+            if body="$(gh api "repos/$GITHUB_REPOSITORY/contents/$file?ref=$BRANCH" --jq '.content' 2>/dev/null)"; then
+              printf '%s' "$body" | base64 -d >"$channels/$file"
+            fi
+          done
+
+          android_seed_json="$(
+            gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
+              jq -sc '
+                [.[][]
+                  | select(.draft == false and .prerelease == false)
+                  | . as $release
+                  | ($release.tag_name | sub("^v"; "")) as $version
+                  | select(any($release.assets[]?; .name == ("Laymux-Android-" + $version + ".apk")))]
+                | sort_by(.published_at) | reverse | first
+              '
+          )"
+          android_seed_tag="$(jq -er '.tag_name' <<<"$android_seed_json")" || {
+            echo "No stable release with an Android APK is available for channel seeding" >&2
+            exit 1
+          }
+          android_seed_published="$(jq -er '.published_at' <<<"$android_seed_json")"
+
+          seed_manifest="$RUNNER_TEMP/seed-latest.json"
+          gh release download "$seed_tag" --pattern latest.json --output "$seed_manifest" --clobber
+          seed_published="$(gh release view "$seed_tag" --json publishedAt --jq '.publishedAt')"
+          node scripts/release/channel-manifest.mjs \
+            --tag "$seed_tag" --prerelease false --seed-stable true \
+            --publish-android true --android-tag "$android_seed_tag" \
+            --manifest "$seed_manifest" --channel-dir "$channels" \
+            --pub-date "$seed_published" --android-pub-date "$android_seed_published" \
+            --owner "${GITHUB_REPOSITORY%%/*}" --repo "${GITHUB_REPOSITORY##*/}"
+
+          bash "$GITHUB_WORKSPACE/scripts/release/publish-channel-commit.sh" \
+            "$channels" "$BRANCH" "seed channel manifests from $seed_tag"
+
   publish:
-    needs: [prepare, build, android]
+    # A requested Android artifact is a hard gate. An intentional omission is
+    # allowed only after prepare proved the Android release inputs are unchanged.
+    needs: [prepare, build, android, channel_bootstrap]
     if: >-
-      always() &&
-      needs.build.result == 'success' &&
-      (needs.android.result == 'success' || needs.android.result == 'skipped')
+      ${{
+        always() &&
+        needs.prepare.result == 'success' &&
+        needs.build.result == 'success' &&
+        needs.channel_bootstrap.result == 'success' &&
+        (
+          needs.android.result == 'success' ||
+          (
+            needs.android.result == 'skipped' &&
+            needs.prepare.outputs.publish_android == 'false'
+          )
+        )
+      }}
     runs-on: ubuntu-latest
     steps:
       - name: Publish complete release
@@ -308,3 +498,84 @@ jobs:
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
               -F draft=false -F prerelease=false -f make_latest=true
           fi
+
+  channels:
+    # The channel manifest, not GitHub's `latest` pointer, is what the app reads
+    # (ADR-0190). Runs only after the release is fully published so a channel can
+    # never point at a draft or an incomplete artifact set.
+    needs: [prepare, publish]
+    # publish is if-gated to run when android is intentionally skipped
+    # (desktop-only release, ADR-0223). Without a matching override here the
+    # skipped android job propagates through publish's needs chain and skips
+    # this job too, so a desktop-only release never advances the channel
+    # manifests the updater reads (observed on v0.12.6).
+    if: >-
+      ${{
+        always() &&
+        needs.prepare.result == 'success' &&
+        needs.publish.result == 'success'
+      }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-channels
+      cancel-in-progress: false
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.commit_sha }}
+
+      - name: Update channel manifests
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          PUBLISH_ANDROID: ${{ needs.prepare.outputs.publish_android }}
+          BRANCH: release-channels
+        run: |
+          set -euo pipefail
+
+          channels="$RUNNER_TEMP/channels"
+          mkdir -p "$channels"
+
+          # Read the branch through the API rather than cloning: the channel
+          # branch holds only these four files, and a clone would put the source
+          # tree and a credential into the deployment working copy. The branch is
+          # guaranteed to exist by the bootstrap job that gates publish.
+          # Every file must be downloaded, not only the ones this release writes:
+          # the publish step rebuilds the whole tree, so a file missing from the
+          # directory is deleted from the branch (ADR-0223).
+          # Again: exit status, not output. A 404 body on stdout would be written
+          # as if it were a manifest.
+          for file in desktop-stable.json desktop-beta.json android-stable.json android-beta.json; do
+            rm -f "$channels/$file"
+            if body="$(gh api "repos/$GITHUB_REPOSITORY/contents/$file?ref=$BRANCH" --jq '.content' 2>/dev/null)"; then
+              printf '%s' "$body" | base64 -d >"$channels/$file"
+            fi
+          done
+
+          manifest="$RUNNER_TEMP/latest.json"
+          gh release download "$RELEASE_TAG" --pattern latest.json --output "$manifest" --clobber
+
+          # Validation, the forward-only invariants and the write plan live in the
+          # script so they are unit tested rather than discovered in a release.
+          # The Android manifest records when the release went out, so it comes
+          # from the release itself rather than from the runner clock.
+          published_at="$(gh release view "$RELEASE_TAG" --json publishedAt --jq '.publishedAt')"
+
+          written="$(node "$GITHUB_WORKSPACE/scripts/release/channel-manifest.mjs" \
+            --tag "$RELEASE_TAG" \
+            --prerelease "$PRERELEASE" \
+            --publish-android "$PUBLISH_ANDROID" \
+            --manifest "$manifest" \
+            --channel-dir "$channels" \
+            --pub-date "$published_at" \
+            --owner "${GITHUB_REPOSITORY%%/*}" \
+            --repo "${GITHUB_REPOSITORY##*/}")"
+          printf 'channel files to publish:\n%s\n' "${written:-<none>}"
+
+          bash "$GITHUB_WORKSPACE/scripts/release/publish-channel-commit.sh" \
+            "$channels" "$BRANCH" "release: $RELEASE_TAG channel manifests"

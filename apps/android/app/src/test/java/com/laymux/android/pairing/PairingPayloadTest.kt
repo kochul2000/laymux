@@ -159,6 +159,15 @@ class PairingPayloadTest {
         }
     }
 
+    @Test
+    fun rejectsOversizedManualPairingValueBeforeParsing() {
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            PairingPayload.parse("x".repeat(4097), nowEpochSeconds = now)
+        }
+
+        assertEquals("페어링 값이 너무 깁니다", error.message)
+    }
+
     private fun pairingUri(
         endpoint: String,
         instance: String,

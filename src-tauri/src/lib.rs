@@ -42,12 +42,14 @@ mod pty_reader;
 pub mod pty_trace;
 pub mod remote_server;
 pub mod remote_session;
+pub mod session_checkpoint;
 pub mod settings;
 pub mod state;
 pub mod terminal;
 mod terminal_env;
 pub mod terminal_output;
 pub mod terminal_protocol;
+pub mod update_install_guard;
 pub mod usage_probe;
 pub mod wsl_liveness;
 pub mod wsl_probe;
@@ -118,6 +120,20 @@ pub fn run() {
                 let paste_dir = clipboard::default_paste_image_dir();
                 if let Err(e) = clipboard::cleanup_old_paste_images(&paste_dir, 7) {
                     tracing::warn!(error = %e, "Paste image cleanup failed");
+                }
+            }
+
+            // Remote image/text uploads are app-owned cache files. Keep the same
+            // bounded retention window as desktop smart-paste images (ADR-0181).
+            match remote_server::cleanup_stale_attachments(
+                constants::REMOTE_TERMINAL_ATTACHMENT_MAX_AGE_DAYS,
+            ) {
+                Ok(removed) if removed > 0 => {
+                    tracing::info!(removed, "Pruned stale Remote terminal attachments");
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::warn!(%error, "Remote terminal attachment cleanup failed");
                 }
             }
 
@@ -231,6 +247,7 @@ pub fn run() {
             }
 
             app_update::start_periodic_checks(app.handle().clone(), app_state.app_update.clone());
+            session_checkpoint::start_watchdog(app.handle().clone(), app_state.clone());
 
             app.manage(app_state);
             Ok(())
@@ -241,6 +258,7 @@ pub fn run() {
             commands::get_terminal_geometry_capabilities,
             commands::resize_terminal,
             commands::write_to_terminal,
+            commands::write_terminal_binary_input,
             commands::write_terminal_protocol_reply,
             commands::write_terminal_bootstrap_protocol_reply,
             commands::interrupt_terminal_on_exit,
@@ -255,6 +273,7 @@ pub fn run() {
             commands::resume_terminal_output,
             commands::log_terminal_trace_batch,
             commands::close_terminal_session,
+            session_checkpoint::checkpoint_and_close_hidden_terminals,
             commands::mark_claude_terminal,
             commands::mark_codex_terminal,
             commands::mark_grok_terminal,
@@ -264,11 +283,13 @@ pub fn run() {
             commands::get_claude_session_ids,
             commands::get_codex_session_ids,
             commands::get_grok_session_ids,
+            commands::get_terminal_session_attributions,
             commands::get_sync_group_terminals,
             commands::handle_lx_message,
             commands::list_system_monospace_fonts,
             commands::load_settings,
             commands::save_settings,
+            commands::set_composer_starred_entry,
             commands::load_memo,
             commands::save_memo,
             commands::open_settings_file,
@@ -298,12 +319,15 @@ pub fn run() {
             commands::save_window_geometry,
             commands::load_window_geometry,
             commands::read_file_for_viewer,
+            commands::read_spreadsheet_for_viewer,
+            commands::read_file_for_download,
             commands::list_directory,
             commands::stat_path,
             commands::stat_paths,
             commands::get_home_directory,
             commands::get_automation_info,
             commands::load_settings_validated,
+            commands::acknowledge_settings_recovery,
             commands::reset_settings,
             commands::get_settings_path,
             commands::subscribe_usage_probe,
@@ -331,6 +355,7 @@ pub fn run() {
             commands::get_app_update_status,
             commands::check_app_update,
             commands::install_app_update,
+            session_checkpoint::acknowledge_session_checkpoint,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

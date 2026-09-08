@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use crate::constants::*;
 use crate::lock_ext::MutexExt;
 #[cfg(target_os = "windows")]
-use crate::process::headless_command;
+use crate::process::{headless_command, status_with_timeout};
 use crate::pty_control::{PendingControlJob, PtyControlCompletion, PtyControlWorker};
 use crate::pty_reader::{run_interruptible_reader_loop, PtyReaderLifecycle};
 use crate::terminal::{
@@ -170,6 +170,7 @@ pub(crate) fn chunked_write_to_guarded(
 /// Handle to a running PTY process, providing write and resize capabilities.
 #[derive(Clone)]
 pub struct PtyHandle {
+    session_restore: Option<Arc<PendingSessionRestore>>,
     /// Owns the writer on one terminal-specific FIFO thread.
     control: Arc<PtyControlWorker>,
     /// Independent lifecycle handle: it is never protected by the writer
@@ -187,6 +188,10 @@ pub struct PtyHandle {
     /// handle is closed). Lets `terminate()` safely skip taskkill when the
     /// child has already exited on its own.
     child_exited: Arc<AtomicBool>,
+    /// Serializes publishing child exit with claiming PID-based tree kill.
+    /// The wait thread retains its OS child handle while waiting for this
+    /// mutex, so Windows cannot recycle the PID during a claimed taskkill.
+    child_exit_handshake: Arc<Mutex<()>>,
     input_faulted: Arc<AtomicBool>,
     /// Generation-bound reader wake and teardown completion. This is separate
     /// from the master so a blocking cloned output pipe can be interrupted.
@@ -205,7 +210,43 @@ pub struct PtyHandle {
     wsl_backed: bool,
 }
 
+struct PendingSessionRestore {
+    provider: &'static str,
+    session_id: String,
+    consumed: AtomicBool,
+}
+
 impl PtyHandle {
+    pub(crate) fn with_session_restore(mut self, restore: Option<(&'static str, String)>) -> Self {
+        self.session_restore = restore.map(|(provider, session_id)| {
+            Arc::new(PendingSessionRestore {
+                provider,
+                session_id,
+                consumed: AtomicBool::new(false),
+            })
+        });
+        self
+    }
+
+    pub(crate) fn unconsumed_session_restore(&self) -> Option<(&'static str, &str)> {
+        let restore = self.session_restore.as_ref()?;
+        (!restore.consumed.load(Ordering::Acquire))
+            .then_some((restore.provider, restore.session_id.as_str()))
+    }
+
+    pub(crate) fn consume_session_restore(&self) {
+        if let Some(restore) = &self.session_restore {
+            restore.consumed.store(true, Ordering::Release);
+        }
+    }
+
+    /// Only the generation-checked protocol reply commands may use this path.
+    pub(crate) fn write_protocol_reply(&self, data: &[u8]) -> Result<(), String> {
+        self.ensure_input_healthy()?;
+        let deadline = Instant::now() + Duration::from_millis(PTY_CONTROL_JOB_TIMEOUT_MS);
+        let pending = self.control.submit_write(data, false, deadline)?;
+        self.await_enqueued_control_job(pending, deadline, || true)
+    }
     /// Time budget `terminate()` gives the shell to exit on its own after the
     /// PTY is closed before falling back to a forced kill. Polled in small
     /// steps so well-behaved shells return almost immediately.
@@ -224,12 +265,14 @@ impl PtyHandle {
     ) -> Self {
         let master = Arc::new(Mutex::new(None));
         Self {
+            session_restore: None,
             control: PtyControlWorker::spawn(writer, Arc::clone(&master))
                 .expect("test PTY control worker"),
             master,
             child_killer: Arc::new(Mutex::new(None)),
             child_pid: None,
             child_exited: Arc::new(AtomicBool::new(true)),
+            child_exit_handshake: Arc::new(Mutex::new(())),
             input_faulted: Arc::new(AtomicBool::new(false)),
             reader_lifecycle: PtyReaderLifecycle::completed_for_test(terminal_generation),
             codex_startup_color_probe: None,
@@ -370,6 +413,9 @@ impl PtyHandle {
         deadline: Instant,
     ) -> Result<PendingControlJob, String> {
         self.ensure_input_healthy()?;
+        if !data.is_empty() || submit {
+            self.consume_session_restore();
+        }
         self.control.submit_write(data, submit, deadline)
     }
 
@@ -489,6 +535,13 @@ impl PtyHandle {
             .then(|| self.control.completion())
     }
 
+    /// Return the worker lifecycle acknowledgement unconditionally. Handle
+    /// retirement uses this before the worker can fault so a concurrent write
+    /// cannot become invisible after the handle leaves the live registry.
+    pub(crate) fn control_completion(&self) -> PtyControlCompletion {
+        self.control.completion()
+    }
+
     fn force_input_fault(&self) -> Result<(), String> {
         if self.input_faulted.swap(true, Ordering::AcqRel) {
             return Ok(());
@@ -527,18 +580,25 @@ impl PtyHandle {
     }
 
     fn kill_child_tree(&self) -> Result<(), String> {
-        if self.child_exited.load(Ordering::Acquire) {
-            return Ok(());
-        }
+        run_with_live_child_kill_claim(&self.child_exit_handshake, &self.child_exited, || {
+            self.kill_child_tree_claimed()
+        })?
+        .unwrap_or(Ok(()))
+    }
 
+    /// Kill implementation entered only while the child-exit handshake is
+    /// held and the wait thread therefore still reserves the Windows PID.
+    fn kill_child_tree_claimed(&self) -> Result<(), String> {
         #[allow(unused_mut)]
         let mut platform_error: Option<String> = None;
         #[cfg(target_os = "windows")]
         if let Some(pid) = self.child_pid {
-            match headless_command("taskkill")
-                .args(["/PID", &pid.to_string(), "/T", "/F"])
-                .status()
-            {
+            let mut taskkill = headless_command("taskkill");
+            taskkill.args(["/PID", &pid.to_string(), "/T", "/F"]);
+            match status_with_timeout(
+                &mut taskkill,
+                Duration::from_millis(PTY_PROCESS_TREE_KILL_TIMEOUT_MS),
+            ) {
                 Ok(status) if status.success() => return Ok(()),
                 Ok(status) => {
                     tracing::debug!(pid, status = ?status.code(), "taskkill returned non-zero during PTY cleanup");
@@ -570,6 +630,24 @@ impl PtyHandle {
         }
         Ok(())
     }
+}
+
+fn run_with_live_child_kill_claim<T>(
+    handshake: &Mutex<()>,
+    child_exited: &AtomicBool,
+    action: impl FnOnce() -> T,
+) -> Result<Option<T>, String> {
+    let _claim = handshake.lock_or_err()?;
+    if child_exited.load(Ordering::Acquire) {
+        return Ok(None);
+    }
+    Ok(Some(action()))
+}
+
+fn publish_child_exit(handshake: &Mutex<()>, child_exited: &AtomicBool) -> Result<(), String> {
+    let _claim = handshake.lock_or_err()?;
+    child_exited.store(true, Ordering::Release);
+    Ok(())
 }
 
 fn wait_for_child_with_master_close_retry(
@@ -705,6 +783,8 @@ where
     let child_killer = child.clone_killer();
     let child_exited = Arc::new(AtomicBool::new(false));
     let exited_signal = Arc::clone(&child_exited);
+    let child_exit_handshake = Arc::new(Mutex::new(()));
+    let exited_handshake = Arc::clone(&child_exit_handshake);
 
     // Spawn a background thread to wait for the child process.
     // This prevents zombie processes on Unix (where unwait-ed children
@@ -720,7 +800,13 @@ where
     thread::spawn(move || {
         let mut child = child;
         let _ = child.wait();
-        exited_signal.store(true, Ordering::Release);
+        if let Err(error) = publish_child_exit(&exited_handshake, &exited_signal) {
+            // Dropping the process handle after a poisoned handshake could
+            // make a concurrent PID-based kill unsafe. Leak it instead; this
+            // is a terminal-local fail-safe on an already-corrupted path.
+            tracing::error!(%error, "child exit handshake failed; retaining process handle");
+            std::mem::forget(child);
+        }
         // `child` drops here; Windows may recycle the PID after this point.
     });
     drop(pair.slave);
@@ -740,11 +826,13 @@ where
     let master = Arc::new(Mutex::new(Some(pair.master)));
     let control = PtyControlWorker::spawn(writer, Arc::clone(&master))?;
     let handle = PtyHandle {
+        session_restore: None,
         control,
         master,
         child_killer: Arc::new(Mutex::new(Some(child_killer))),
         child_pid,
         child_exited,
+        child_exit_handshake,
         input_faulted: Arc::new(AtomicBool::new(false)),
         reader_lifecycle: Arc::clone(&reader_lifecycle),
         codex_startup_color_probe: None,
@@ -1122,6 +1210,121 @@ mod tests {
         )
     }
 
+    #[cfg(any(windows, target_os = "linux"))]
+    fn make_native_binary_probe_session(
+        command_line: String,
+        startup_command: String,
+    ) -> TerminalSession {
+        TerminalSession::new(
+            "binary-input-probe".into(),
+            TerminalConfig {
+                profile: "native-binary-probe".into(),
+                command_line,
+                startup_command,
+                starting_directory: String::new(),
+                cols: 80,
+                rows: 24,
+                sync_group: "binary-input-probe".into(),
+                env: vec![],
+                advertise_true_color: true,
+            },
+        )
+    }
+
+    #[cfg(windows)]
+    fn native_binary_probe_command(
+        directory: &std::path::Path,
+    ) -> Result<(String, String), Box<dyn std::error::Error>> {
+        let script_path = directory.join("binary-input-probe.ps1");
+        std::fs::write(
+            &script_path,
+            r#"Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class LaymuxRawConsoleInput {
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr GetStdHandle(int kind);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool SetConsoleMode(IntPtr handle, uint mode);
+}
+'@
+$handle = [LaymuxRawConsoleInput]::GetStdHandle(-10)
+if (-not [LaymuxRawConsoleInput]::SetConsoleMode($handle, 0x0200)) {
+    throw "failed to enable virtual terminal input"
+}
+[Console]::WriteLine("RAW_READY")
+$stream = [Console]::OpenStandardInput()
+$bytes = New-Object byte[] 6
+$offset = 0
+while ($offset -lt $bytes.Length) {
+    $read = $stream.Read($bytes, $offset, $bytes.Length - $offset)
+    if ($read -le 0) { throw "stdin closed before the binary report completed" }
+    $offset += $read
+}
+$hex = [BitConverter]::ToString($bytes).Replace("-", "").ToLowerInvariant()
+[Console]::WriteLine("RAW_BYTES:" + $hex)
+"#,
+        )?;
+        let escaped_path = script_path.display().to_string().replace('\'', "''");
+        Ok(("powershell.exe".into(), format!("& '{escaped_path}'; exit")))
+    }
+
+    #[cfg(target_os = "linux")]
+    fn native_binary_probe_command(
+        directory: &std::path::Path,
+    ) -> Result<(String, String), Box<dyn std::error::Error>> {
+        let script_path = directory.join("binary-input-probe.sh");
+        std::fs::write(
+            &script_path,
+            r#"stty raw -echo
+printf 'RAW_READY\r\n'
+hex="$(dd bs=1 count=6 2>/dev/null | od -An -tx1 | tr -d ' \r\n')"
+printf 'RAW_BYTES:%s\r\n' "$hex"
+"#,
+        )?;
+        Ok((format!("/bin/sh {}", script_path.display()), String::new()))
+    }
+
+    #[test]
+    #[cfg(any(windows, target_os = "linux"))]
+    fn native_pty_input_obeys_platform_binary_mouse_boundary() {
+        let directory = tempfile::tempdir().expect("binary probe tempdir");
+        let (command_line, startup_command) =
+            native_binary_probe_command(directory.path()).expect("binary probe script");
+        let session = make_native_binary_probe_session(command_line, startup_command);
+        let (tx, rx) = mpsc::channel();
+        let handle = spawn_pty_for_generation(&session, 79, move |data| {
+            let _ = tx.send(data);
+            PtyOutputControl::Continue
+        })
+        .expect("spawn native binary probe")
+        .handle;
+
+        let ready = collect_pty_output_until(&rx, "RAW_READY", PTY_OUTPUT_TIMEOUT);
+        #[cfg(windows)]
+        let report = [0x1b, b'[', b'M', 0x20, 0x7e, 0x7f];
+        #[cfg(target_os = "linux")]
+        let report = [0x1b, b'[', b'M', 0x20, 0x80, 0xff];
+        let write_result = handle.write(&report);
+        let output = collect_pty_output_until(&rx, "RAW_BYTES:", PTY_OUTPUT_TIMEOUT);
+        let _ = handle.terminate();
+
+        assert!(
+            ready.contains("RAW_READY"),
+            "probe did not become ready: {ready:?}"
+        );
+        write_result.expect("write binary report to native PTY");
+        let report_hex = report
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let expected = format!("raw_bytes:{report_hex}");
+        assert!(
+            output.to_lowercase().contains(&expected),
+            "native PTY changed binary input bytes: {output:?}"
+        );
+    }
+
     #[test]
     #[cfg(any(windows, target_os = "linux"))]
     fn native_interruptible_reader_preserves_data_and_stops_while_idle() {
@@ -1218,6 +1421,43 @@ mod tests {
 
         assert_eq!(close_attempts.get(), 3);
         assert!(master_closed.get());
+    }
+
+    #[test]
+    fn child_exit_publication_waits_for_an_in_flight_kill_claim() {
+        let handshake = Arc::new(Mutex::new(()));
+        let child_exited = Arc::new(AtomicBool::new(false));
+        let (kill_started_tx, kill_started_rx) = mpsc::channel();
+        let (release_kill_tx, release_kill_rx) = mpsc::channel();
+        let kill_handshake = Arc::clone(&handshake);
+        let kill_exited = Arc::clone(&child_exited);
+        let killer = thread::spawn(move || {
+            run_with_live_child_kill_claim(&kill_handshake, &kill_exited, || {
+                kill_started_tx.send(()).unwrap();
+                release_kill_rx.recv().unwrap();
+            })
+            .unwrap()
+        });
+        kill_started_rx.recv().unwrap();
+
+        let (wait_started_tx, wait_started_rx) = mpsc::channel();
+        let (wait_done_tx, wait_done_rx) = mpsc::channel();
+        let wait_handshake = Arc::clone(&handshake);
+        let wait_exited = Arc::clone(&child_exited);
+        let waiter = thread::spawn(move || {
+            wait_started_tx.send(()).unwrap();
+            publish_child_exit(&wait_handshake, &wait_exited).unwrap();
+            wait_done_tx.send(()).unwrap();
+        });
+        wait_started_rx.recv().unwrap();
+
+        assert!(wait_done_rx.try_recv().is_err());
+        assert!(!child_exited.load(Ordering::Acquire));
+        release_kill_tx.send(()).unwrap();
+
+        assert!(killer.join().unwrap().is_some());
+        waiter.join().unwrap();
+        assert!(child_exited.load(Ordering::Acquire));
     }
 
     #[test]

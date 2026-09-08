@@ -1,16 +1,9 @@
 import { useTranslation } from "react-i18next";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useUiStore } from "@/stores/ui-store";
+import { BellIcon } from "@/components/ui/icons";
 import { WidgetChrome, WidgetLabel } from "./WidgetChrome";
 import type { WidgetComponentProps } from "./types";
-
-/**
- * Ringer glyph from the icon font the toolbar buttons already use.
- *
- * Escaped rather than pasted so no encoding step can mangle it, and the count
- * beside it still carries the meaning where that font is absent.
- */
-const BELL_GLYPH = "\uEA8F";
 
 export function NotificationsWidget({ instance }: WidgetComponentProps) {
   const { t } = useTranslation("settings");
@@ -30,12 +23,7 @@ export function NotificationsWidget({ instance }: WidgetComponentProps) {
       onClick={toggleNotificationPanel}
     >
       <WidgetLabel>
-        <span
-          style={{ fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'" }}
-          aria-hidden="true"
-        >
-          {BELL_GLYPH}
-        </span>
+        <BellIcon size={12} />
       </WidgetLabel>
       <span
         data-testid={`widget-notifications-${instance.id}-count`}

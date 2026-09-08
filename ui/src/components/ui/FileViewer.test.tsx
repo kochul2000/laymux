@@ -1,13 +1,28 @@
 import { render, screen, act, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { FileViewer } from "./FileViewer";
-import { openExternal, readFileForViewer } from "@/lib/tauri-api";
+import {
+  openExternal,
+  openInOs,
+  readFileForViewer,
+  readSpreadsheetForViewer,
+} from "@/lib/tauri-api";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useOverridesStore } from "@/stores/overrides-store";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 
 vi.mock("@/lib/tauri-api", () => ({
+  clipboardWriteText: vi.fn(),
+  readSpreadsheetForViewer: vi.fn().mockResolvedValue({
+    sheetNames: ["Sheet1"],
+    sheet: "Sheet1",
+    cells: [{ row: 0, column: 0, value: "excel-cell" }],
+    totalRows: 1,
+    totalColumns: 1,
+    truncated: false,
+  }),
   openExternal: vi.fn().mockResolvedValue(undefined),
+  openInOs: vi.fn().mockResolvedValue(undefined),
   readFileForViewer: vi
     .fn()
     .mockResolvedValue({ kind: "text", content: "file content", truncated: false }),
@@ -32,8 +47,19 @@ const baseProps = {
 };
 
 describe("FileViewer", () => {
+  it.each(["xls", "XLSX", "xlsb", "ods"])(
+    "routes %s through the spreadsheet reader",
+    async (extension) => {
+      render(<FileViewer {...baseProps} path={"/book." + extension} />);
+      await screen.findByText("excel-cell");
+      expect(readSpreadsheetForViewer).toHaveBeenCalledWith("/book." + extension, undefined);
+      expect(readFileForViewer).not.toHaveBeenCalled();
+    },
+  );
   beforeEach(() => {
     vi.mocked(openExternal).mockClear();
+    vi.mocked(openInOs).mockClear();
+    vi.mocked(openInOs).mockResolvedValue(undefined);
     vi.mocked(readFileForViewer).mockClear();
     vi.mocked(readFileForViewer).mockResolvedValue({
       kind: "text",
@@ -311,6 +337,36 @@ describe("FileViewer", () => {
     expect(screen.getByTestId("file-viewer-binary")).toHaveTextContent("2.0 KB");
   });
 
+  it("offers to open a binary file on this PC right where the preview would be", async () => {
+    // The binary fallback is the one content kind with nothing to look at, so the
+    // OS handoff is offered in the content area too, not only in the host header
+    // (ADR-0193).
+    useSettingsStore.setState({
+      terminal: { ...useSettingsStore.getState().terminal, pathLinkOsOpenConfirm: false },
+    });
+    vi.mocked(readFileForViewer).mockResolvedValue({ kind: "binary", size: 2048 });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/home/user/blob.bin" />);
+    });
+    fireEvent.click(screen.getByTestId("file-viewer-binary-os-open"));
+    expect(openInOs).toHaveBeenCalledWith("/home/user/blob.bin", "open");
+
+    fireEvent.click(screen.getByTestId("file-viewer-binary-os-reveal"));
+    expect(openInOs).toHaveBeenCalledWith("/home/user/blob.bin", "reveal");
+  });
+
+  it("keeps the confirm gate on the binary content-area open button", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    vi.mocked(readFileForViewer).mockResolvedValue({ kind: "binary", size: 2048 });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/home/user/setup.exe" />);
+    });
+    fireEvent.click(screen.getByTestId("file-viewer-binary-os-open"));
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(openInOs).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
   it("shows an error message when reading fails", async () => {
     vi.mocked(readFileForViewer).mockRejectedValue("boom");
     await act(async () => {
@@ -558,7 +614,14 @@ describe("FileViewer", () => {
       render(<FileViewer {...baseProps} path="/w/bundle.zip" />);
     });
 
-    expect(screen.getAllByTestId("archive-preview-row")).toHaveLength(2);
+    const rows = screen.getAllByTestId("archive-preview-row");
+    expect(rows).toHaveLength(2);
+    const fileRow = rows.find((row) => row.textContent?.includes("main.rs"));
+    const dirRow = rows.find(
+      (row) => row.textContent?.includes("src/") && !row.textContent?.includes("main.rs"),
+    );
+    expect(fileRow?.querySelector(".lucide-file")).toBeTruthy();
+    expect(dirRow?.querySelector(".lucide-folder")).toBeTruthy();
     expect(screen.getByTestId("archive-preview-truncated")).toHaveTextContent(
       "Showing the first 2 of 5,000 entries.",
     );

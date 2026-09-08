@@ -5,6 +5,7 @@ import {
   XTERM_PENDING_COMPOSITION_FIELDS,
   readPendingCompositionSend,
 } from "./xterm-pending-composition";
+import { createImeCompositionController } from "./ime-composition-controller";
 import { createTerminalFocusOwnership } from "./terminal-focus-ownership";
 
 function stubMatchMedia() {
@@ -192,7 +193,7 @@ describe("xterm blur contract during composition (issue #555)", () => {
     helper.dispatchEvent(new Event("input"));
     expect(helper.value).toBe("\uac00");
 
-    helper.dispatchEvent(new Event("blur"));
+    helper.blur();
     await flushFinalizer();
 
     // Nothing reached the PTY, and the only copy of the text is gone.
@@ -203,11 +204,17 @@ describe("xterm blur contract during composition (issue #555)", () => {
     expect(readXtermComposing(terminal)).toBe(true);
   });
 
-  it("cannot recover the text from a compositionend that arrives after the blur", async () => {
-    // Slice source already empty, so the deferred finalizer has nothing to send.
+  it("ignores a late compositionend without swallowing fresh input after refocus", async () => {
     const { terminal, helper } = mountTerminal();
     const data: string[] = [];
     terminal.onData((d) => data.push(d));
+    const controller = createImeCompositionController({
+      getCols: () => 80,
+      getAnchor: () => ({ cursorX: 0, cursorAbsY: 0 }),
+      getXtermPendingSend: () => readPendingCompositionSend(terminal)?.pending ?? false,
+      onCommit: (text) => data.push(text),
+    });
+    controller.bind(helper);
 
     helper.focus();
     helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
@@ -216,22 +223,23 @@ describe("xterm blur contract during composition (issue #555)", () => {
     helper.selectionEnd = 1;
     helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uac00" }));
     helper.dispatchEvent(new Event("input"));
-    helper.dispatchEvent(new Event("blur"));
-    await flushFinalizer();
+    helper.blur();
 
     helper.dispatchEvent(new CompositionEvent("compositionend", { data: "\uac00" }));
+    helper.focus();
+    helper.value = "a";
+    helper.dispatchEvent(
+      new InputEvent("input", { data: "a", inputType: "insertText", bubbles: true }),
+    );
     await flushFinalizer();
 
-    expect(data).toEqual([]);
+    expect(data.join("")).toBe("\uac00a");
+    controller.dispose();
   });
 
-  it("loses the text when the blur lands inside the deferred send window", async () => {
-    // The ordering the real WebView2 + Windows IME produces, and the sole basis for
-    // keying the blur commit off xterm's pending flag: `compositionend` schedules the
-    // finalizer, the blur clears the textarea before it runs, and the slice comes out
-    // empty. If a future xterm ever sends here, the controller's commit becomes a
-    // duplicate on every focus change — so this has to fail loudly rather than let
-    // that ship.
+  it("flushes finalized text before blur clears the textarea", async () => {
+    // WebView2 can blur inside xterm's deferred send window. The patched blur handler
+    // must consume that pending generation before clearing its only DOM source.
     const { terminal, helper } = mountTerminal();
     const data: string[] = [];
     terminal.onData((d) => data.push(d));
@@ -248,15 +256,90 @@ describe("xterm blur contract during composition (issue #555)", () => {
     // The send is scheduled but has not run.
     expect(readPendingCompositionSend(terminal)?.pending).toBe(true);
 
-    helper.dispatchEvent(new Event("blur"));
-    // Still pending, and the source xterm would slice is already gone.
-    expect(readPendingCompositionSend(terminal)?.pending).toBe(true);
+    helper.blur();
+    expect(readPendingCompositionSend(terminal)?.pending).toBe(false);
     expect(helper.value).toBe("");
+    expect(data).toEqual(["\uac00"]);
 
     await flushFinalizer();
-    expect(data).toEqual([]);
-    expect(readPendingCompositionSend(terminal)?.pending).toBe(false);
+    expect(data).toEqual(["\uac00"]);
   });
+
+  it("flushes event data only once even if the helper is refocused", async () => {
+    const { terminal, helper } = mountTerminal();
+    const data: string[] = [];
+    terminal.onData((d) => data.push(d));
+
+    helper.focus();
+    helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    helper.value = "\uac00";
+    helper.selectionStart = 1;
+    helper.selectionEnd = 1;
+    helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uac00" }));
+    helper.dispatchEvent(new Event("input"));
+    helper.dispatchEvent(new CompositionEvent("compositionend", { data: "\uac00" }));
+
+    helper.blur();
+    helper.focus();
+    await flushFinalizer();
+
+    expect(data).toEqual(["\uac00"]);
+  });
+
+  it("does not lose queued ordinary input when blur interrupts the delayed send", async () => {
+    const { terminal, helper } = mountTerminal();
+    const data: string[] = [];
+    terminal.onData((d) => data.push(d));
+    const controller = createImeCompositionController({
+      getCols: () => 80,
+      getAnchor: () => ({ cursorX: 0, cursorAbsY: 0 }),
+      getXtermPendingSend: () => readPendingCompositionSend(terminal)?.pending ?? false,
+      onCommit: (text) => data.push(text),
+    });
+    controller.bind(helper);
+
+    helper.value = "이미 보낸 긴 잔여물";
+    helper.focus();
+    helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    helper.value = "\uac00";
+    helper.selectionStart = 1;
+    helper.selectionEnd = 1;
+    helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uac00" }));
+    helper.dispatchEvent(new CompositionEvent("compositionend", { data: "\uac00" }));
+    helper.value = "\uac00a";
+    helper.dispatchEvent(
+      new InputEvent("input", { data: "a", inputType: "insertText", bubbles: true }),
+    );
+
+    helper.blur();
+    await flushFinalizer();
+
+    expect(data).toEqual(["\uac00a"]);
+    controller.dispose();
+  });
+
+  it("preserves pending FIFO order when blur flushes multiple generations", async () => {
+    const { terminal, helper } = mountTerminal();
+    const data: string[] = [];
+    terminal.onData((text) => data.push(text));
+    const controller = createImeCompositionController({
+      getCols: () => 80,
+      getAnchor: () => ({ cursorX: 0, cursorAbsY: 0 }),
+      getXtermPendingSend: () => readPendingCompositionSend(terminal)?.pending ?? false,
+      onCommit: (text) => data.push(text),
+    });
+    controller.bind(helper);
+
+    composeAndCommit(helper, "가");
+    helper.value = "";
+    composeAndCommit(helper, "나");
+    helper.blur();
+    await flushFinalizer();
+
+    expect(data.join("")).toBe("가나");
+    controller.dispose();
+  });
+
   it("does send it when compositionend comes before the blur", async () => {
     // The ordering where xterm really does send. The controller stays out of this path
     // by reading xterm's pending flag — NOT by its own phase, which is
@@ -271,7 +354,7 @@ describe("xterm blur contract during composition (issue #555)", () => {
     await flushFinalizer();
     expect(data).toEqual(["\uac00"]);
 
-    helper.dispatchEvent(new Event("blur"));
+    helper.blur();
     await flushFinalizer();
 
     // Still exactly once — the blur itself adds nothing.

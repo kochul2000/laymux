@@ -5,6 +5,7 @@ import { useSyncEvents } from "@/hooks/useSyncEvents";
 import { useSessionPersistence } from "@/hooks/useSessionPersistence";
 import { useAutomationBridge } from "@/hooks/useAutomationBridge";
 import { saveBeforeClose, setBlockPersist } from "@/lib/persist-session";
+import { applySettingsSnapshot } from "@/lib/settings-snapshot";
 import { createCloseHandler } from "@/lib/window-close-handler";
 import { exitInterruptBudgetMs } from "@/lib/interrupt-terminals-on-exit";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -28,11 +29,13 @@ import { RemoteControlOverlay } from "@/components/layout/RemoteControlOverlay";
 import { LocalMobileModeOverlay } from "@/components/layout/LocalMobileModeOverlay";
 import { useAutoRemoteAccessPrompt } from "@/hooks/useAutoRemoteAccessPrompt";
 import { useLocalMobileModeStore } from "@/stores/local-mobile-mode-store";
+import { useSessionCheckpointLifecycle } from "@/hooks/useSessionCheckpointLifecycle";
 
 export function App() {
   useKeyboardShortcuts();
   useSyncEvents();
   const { loaded, loadStatus } = useSessionPersistence();
+  useSessionCheckpointLifecycle(loaded);
   useAutomationBridge();
   useWindowGeometry();
   useAppFocus();
@@ -127,10 +130,16 @@ export function App() {
         <Suspense fallback={null}>
           <SettingsRecoveryModal
             loadResult={loadStatus.result}
-            onDismiss={() => {
+            onDismiss={(acknowledgedSettings) => {
               // Recovery held settings writes back until the user saw the dropped
-              // paths. Acknowledging the modal releases them (ADR-0119).
-              if (recoveryStatus === "recovered") setBlockPersist(false);
+              // paths. Rehydrate the exact snapshot acknowledged by the backend
+              // before releasing writes, because settings.json may have been
+              // edited manually while this modal was open (ADR-0119/0222).
+              if (recoveryStatus === "recovered") {
+                if (!acknowledgedSettings) return;
+                applySettingsSnapshot(acknowledgedSettings, { includeStructural: true });
+                setBlockPersist(false);
+              }
               setRecoveryDismissed(true);
             }}
             onReset={() => {

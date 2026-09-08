@@ -1,11 +1,24 @@
-import { readFileForViewer, statPaths } from "./tauri-api";
+import {
+  getHomeDirectory,
+  listDirectory,
+  readFileForDownload,
+  readFileForViewer,
+  statPaths,
+} from "./tauri-api";
 import { normalizeViewerPath } from "./file-viewer";
+import { joinPath, parentPath } from "./file-explorer-parse";
 import {
   decidePathLinkAction,
+  extractPathCandidatesAtOffset,
+  extractPathCandidatesFromScreen,
   extractPathCandidatesFromSelection,
   isPathLinkCwdCurrent,
   joinCwdPath,
+  pathPointLimits,
+  pathScreenLimits,
   pathSelectionLimits,
+  resolveOverlappingRanges,
+  type PathSelectionCandidate,
 } from "./path-link-detect";
 import {
   documentPreviewKind,
@@ -24,6 +37,178 @@ export interface RemoteFileViewerBridgeResult {
 
 const ok = (data: unknown): RemoteFileViewerBridgeResult => ({ success: true, data });
 const err = (error: string): RemoteFileViewerBridgeResult => ({ success: false, error });
+const RESPONSE_LIMIT_ERROR = "Remote response exceeds the viewer limit";
+
+function jsonStringUtf8Bytes(value: string, consume: (bytes: number) => boolean): boolean {
+  if (!consume(2)) return false; // opening and closing quotes
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (
+      code === 0x22 ||
+      code === 0x5c ||
+      code === 0x08 ||
+      code === 0x09 ||
+      code === 0x0a ||
+      code === 0x0c ||
+      code === 0x0d
+    ) {
+      if (!consume(2)) return false;
+    } else if (code <= 0x1f) {
+      if (!consume(6)) return false;
+    } else if (code <= 0x7f) {
+      if (!consume(1)) return false;
+    } else if (code <= 0x7ff) {
+      if (!consume(2)) return false;
+    } else if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        if (!consume(4)) return false;
+        index += 1;
+      } else if (!consume(6)) {
+        return false;
+      }
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      if (!consume(6)) return false;
+    } else if (!consume(3)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Check JSON's serialized UTF-8 size without first materializing the payload.
+ * FileViewer results are plain JSON values; unfamiliar prototypes, cycles and
+ * non-JSON primitives fail closed instead of invoking a user-defined `toJSON`.
+ */
+export function isJsonValueWithinUtf8Budget(value: unknown, maxBytes: number): boolean {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) return false;
+  let remaining = maxBytes;
+  const consume = (bytes: number) => {
+    if (bytes > remaining) return false;
+    remaining -= bytes;
+    return true;
+  };
+  const ancestors = new WeakSet<object>();
+
+  const visit = (current: unknown, inArray: boolean): boolean => {
+    if (current === null) return consume(4);
+    if (typeof current === "string") return jsonStringUtf8Bytes(current, consume);
+    if (typeof current === "boolean") return consume(current ? 4 : 5);
+    if (typeof current === "number") {
+      const serialized = Number.isFinite(current) ? JSON.stringify(current) : "null";
+      return consume(serialized.length);
+    }
+    if (current === undefined || typeof current === "function" || typeof current === "symbol") {
+      return inArray ? consume(4) : false;
+    }
+    if (typeof current !== "object" || ancestors.has(current)) return false;
+
+    if (Array.isArray(current)) {
+      if (!consume(2)) return false;
+      ancestors.add(current);
+      try {
+        for (let index = 0; index < current.length; index += 1) {
+          if (index > 0 && !consume(1)) return false;
+          if (!visit(current[index], true)) return false;
+        }
+      } finally {
+        ancestors.delete(current);
+      }
+      return true;
+    }
+
+    if (Object.getPrototypeOf(current) !== Object.prototype) return false;
+    if (!consume(2)) return false;
+    ancestors.add(current);
+    try {
+      let emitted = 0;
+      for (const key of Object.keys(current)) {
+        const child = (current as Record<string, unknown>)[key];
+        if (child === undefined || typeof child === "function" || typeof child === "symbol") {
+          continue;
+        }
+        if (emitted > 0 && !consume(1)) return false;
+        if (!jsonStringUtf8Bytes(key, consume) || !consume(1) || !visit(child, false)) return false;
+        emitted += 1;
+      }
+    } finally {
+      ancestors.delete(current);
+    }
+    return true;
+  };
+
+  try {
+    return visit(value, false);
+  } catch {
+    return false;
+  }
+}
+
+export function boundRemoteFileViewerResult(
+  result: RemoteFileViewerBridgeResult,
+  maxResponseBytes: unknown,
+  requestId?: string,
+): RemoteFileViewerBridgeResult {
+  if (maxResponseBytes === undefined) return result;
+  const serializedValue =
+    requestId === undefined
+      ? result
+      : {
+          requestId,
+          success: result.success,
+          data: result.data ?? null,
+          error: result.error ?? null,
+        };
+  if (
+    !Number.isSafeInteger(maxResponseBytes) ||
+    (maxResponseBytes as number) <= 0 ||
+    !isJsonValueWithinUtf8Budget(serializedValue, maxResponseBytes as number)
+  ) {
+    return err(RESPONSE_LIMIT_ERROR);
+  }
+  return result;
+}
+
+/** Remote path-link 발견 트리거(ADR-0188). 서버가 이미 검사하지만 fail-closed 로 다시 본다. */
+type RemotePathLinkMode = "selection" | "point" | "screen";
+
+function remotePathLinkMode(value: unknown): RemotePathLinkMode | null {
+  return value === "selection" || value === "point" || value === "screen" ? value : null;
+}
+
+function remotePathLinkLines(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  return value.every((line) => typeof line === "string") ? (value as string[]) : null;
+}
+
+/**
+ * 트리거별 후보 추출(ADR-0188). 문법은 데스크톱과 같은 파서를 쓰고, 트리거마다
+ * 범위와 상한만 다르다 — `point` 는 caret 이 가리키는 토큰 하나, `screen` 은
+ * 화면의 strong candidate, `selection` 은 기존 bounded maximal-munch.
+ */
+function resolveRemotePathLinkCandidates(
+  mode: RemotePathLinkMode,
+  lines: string[],
+  caret: unknown,
+  maxPathLength: number,
+): PathSelectionCandidate[] {
+  if (mode === "screen") {
+    return extractPathCandidatesFromScreen(lines, pathScreenLimits(maxPathLength));
+  }
+  if (mode === "point") {
+    const position = caret as { lineIndex?: unknown; index?: unknown } | null;
+    const lineIndex = position?.lineIndex;
+    const index = position?.index;
+    if (!Number.isSafeInteger(lineIndex) || !Number.isSafeInteger(index)) return [];
+    const line = lines[lineIndex as number];
+    if (line === undefined) return [];
+    return extractPathCandidatesAtOffset(line, index as number, pathPointLimits(maxPathLength)).map(
+      (candidate) => ({ ...candidate, lineIndex: lineIndex as number }),
+    );
+  }
+  return extractPathCandidatesFromSelection(lines.join("\n"), pathSelectionLimits(maxPathLength));
+}
 
 /** Resolve Remote FileViewer queries against the desktop store and safe renderer. */
 export async function handleRemoteFileViewerRequest(
@@ -37,16 +222,19 @@ export async function handleRemoteFileViewerRequest(
   }
   if (method === "pathLink") {
     const terminalId = typeof params.terminalId === "string" ? params.terminalId : "";
-    const selection = typeof params.selection === "string" ? params.selection : "";
+    const mode = remotePathLinkMode(params.mode);
+    const lines = remotePathLinkLines(params.lines);
     const terminal = useTerminalStore.getState().instances.find((item) => item.id === terminalId);
     const settings = useSettingsStore.getState().terminal;
-    if (!terminal || !settings.pathLinkEnabled) {
+    if (!terminal || !settings.pathLinkEnabled || !mode || !lines) {
       return ok({ valid: false });
     }
 
-    const candidates = extractPathCandidatesFromSelection(
-      selection,
-      pathSelectionLimits(settings.pathLinkMaxLength),
+    const candidates = resolveRemotePathLinkCandidates(
+      mode,
+      lines,
+      params.caret,
+      settings.pathLinkMaxLength,
     );
     if (candidates.length === 0) return ok({ valid: false });
 
@@ -79,24 +267,94 @@ export async function handleRemoteFileViewerRequest(
       ) {
         return ok({ valid: false });
       }
-      const matches = pending.flatMap(({ candidate, path, statIndex }) => {
+      // 파일(openFile)과 디렉터리(changeDir) 모두 링크가 된다(ADR-0198) —
+      // Remote 는 directory match 를 explorer 열기로 라우팅한다.
+      const linkable = pending.filter(({ statIndex }) => {
         const info = infos[statIndex];
-        if (!info || decidePathLinkAction(info) !== "openFile") return [];
-        return [
-          {
-            token: candidate.text,
-            path,
-            lineIndex: candidate.lineIndex,
-            startIndex: candidate.startIndex,
-            endIndex: candidate.endIndex,
-          },
-        ];
+        return Boolean(info) && decidePathLinkAction(info) !== "none";
       });
+      // 공백 확장 후보(ADR-0191)는 접두끼리 겹친다 — 존재하는 것 중 같은 줄의
+      // 겹치는 범위는 가장 긴 것만 남긴다(longest-existing-wins).
+      const matches = resolveOverlappingRanges(linkable, ({ candidate }) => ({
+        line: candidate.lineIndex,
+        start: candidate.startIndex,
+        end: candidate.endIndex,
+      })).map(({ candidate, path, statIndex }) => ({
+        token: candidate.text,
+        path,
+        kind: infos[statIndex].isDirectory ? "directory" : "file",
+        lineIndex: candidate.lineIndex,
+        startIndex: candidate.startIndex,
+        endIndex: candidate.endIndex,
+      }));
       return matches.length > 0 ? ok({ valid: true, matches }) : ok({ valid: false });
     } catch (error) {
       return err(
         `Path link validation failed: ${error instanceof Error ? error.message : String(error)}`,
       );
+    }
+  }
+  if (method === "list") {
+    const maxEntries = params.maxEntries;
+    if (
+      !Number.isSafeInteger(maxEntries) ||
+      (maxEntries as number) <= 0 ||
+      (maxEntries as number) >= Number.MAX_SAFE_INTEGER
+    ) {
+      return err("maxEntries must be a positive integer");
+    }
+    let path: string;
+    if (params.source === "terminalCwd") {
+      // The folder button opens where the user is working; a missing terminal
+      // id, an unknown terminal or one that has not reported a cwd yet all
+      // fall back to the host home directory.
+      const terminalId = typeof params.terminalId === "string" ? params.terminalId : "";
+      const terminal = useTerminalStore.getState().instances.find((item) => item.id === terminalId);
+      try {
+        path = terminal?.cwd || (await getHomeDirectory());
+      } catch (error) {
+        return err(error instanceof Error ? error.message : String(error));
+      }
+    } else {
+      path = normalizeViewerPath(typeof params.path === "string" ? params.path : "");
+      if (!path) return err("path is required");
+    }
+    try {
+      // Ask Rust for one look-ahead entry. That bounds read_dir + metadata work
+      // while preserving an exact `truncated` signal for the visible slice.
+      const entries = await listDirectory(path, undefined, (maxEntries as number) + 1);
+      const bounded = entries.slice(0, maxEntries as number);
+      const parent = parentPath(path);
+      return ok({
+        path,
+        parent: parent && parent !== path ? parent : null,
+        entries: bounded.map((entry) => ({
+          name: entry.name,
+          path: joinPath(path, entry.name),
+          isDirectory: entry.isDirectory,
+          isSymlink: entry.isSymlink,
+          size: entry.size,
+        })),
+        truncated: entries.length > bounded.length,
+      });
+    } catch (error) {
+      return err(error instanceof Error ? error.message : String(error));
+    }
+  }
+  if (method === "download") {
+    const maxBytes = params.maxBytes;
+    if (!Number.isSafeInteger(maxBytes) || (maxBytes as number) <= 0) {
+      return err("maxBytes must be a positive integer");
+    }
+    const path = normalizeViewerPath(typeof params.path === "string" ? params.path : "");
+    if (!path) return err("path is required");
+    try {
+      // Raw bytes, not a rendered payload: a download of an HTML or Markdown
+      // file must be the source the host holds, never the sanitized preview
+      // document that `render` returns in its place.
+      return ok({ path, ...(await readFileForDownload(path, maxBytes as number)) });
+    } catch (error) {
+      return err(error instanceof Error ? error.message : String(error));
     }
   }
   if (method !== "render") return err(`Unknown method: fileViewer.${method}`);

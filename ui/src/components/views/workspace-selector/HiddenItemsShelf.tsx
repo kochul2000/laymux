@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { DerivedHiddenItems, HiddenWorkspaceItem } from "@/lib/hidden-items";
+import { EyeIcon, XIcon } from "@/components/ui/icons";
 
 interface HiddenItemsShelfProps {
   items: DerivedHiddenItems;
@@ -8,20 +9,6 @@ interface HiddenItemsShelfProps {
   onFocusAfterEmpty: () => void;
   onRestoreAll: () => void;
   onRestoreWorkspace: (item: HiddenWorkspaceItem, open: boolean) => void;
-}
-
-function EyeIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-      <path
-        d="M1 6s2.2-3.5 5-3.5S11 6 11 6 8.8 9.5 6 9.5 1 6 1 6Z"
-        stroke="currentColor"
-        strokeWidth="1.1"
-        strokeLinejoin="round"
-      />
-      <circle cx="6" cy="6" r="1.6" stroke="currentColor" strokeWidth="1.1" />
-    </svg>
-  );
 }
 
 /**
@@ -89,7 +76,7 @@ export function HiddenItemsShelf({
           title={t("hiddenItems.close")}
           onClick={onClose}
         >
-          ×
+          <XIcon size={12} />
         </button>
       </div>
 
@@ -131,7 +118,7 @@ export function HiddenItemsShelf({
                   onRestoreWorkspace(item, false);
                 }}
               >
-                <EyeIcon />
+                <EyeIcon size={12} />
               </button>
             </div>
           );

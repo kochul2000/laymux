@@ -22,6 +22,7 @@ import { getDockForDirection, getDockExitDirection } from "@/lib/dock-navigation
 import { clipboardWriteText } from "@/lib/tauri-api";
 import { runPaneClearFromUi } from "@/lib/pane-clear-action";
 import { runWorkspaceClearFromUi } from "@/lib/workspace-clear-action";
+import { resolveFocusedTerminalPane } from "@/lib/focused-terminal";
 
 const ARROW_TO_DIRECTION: Record<string, Direction> = {
   ArrowLeft: "left",
@@ -107,18 +108,18 @@ function copyFocusedPaneIdentifier(): boolean {
 
 /** Focus target that would receive a terminal keystroke; dock focus wins. */
 function focusedTerminalPaneId(): string | null {
-  const { focusedDock, focusedDockPaneId, getDock } = useDockStore.getState();
-  const pane =
-    focusedDock !== null
-      ? getDock(focusedDock)?.panes.find((candidate) => candidate.id === focusedDockPaneId)
-      : (() => {
-          const workspace = useWorkspaceStore.getState().getActiveWorkspace();
-          const { focusedPaneIndex } = useGridStore.getState();
-          return workspace && focusedPaneIndex !== null
-            ? workspace.panes[focusedPaneIndex]
-            : undefined;
-        })();
-  return pane?.view.type === "TerminalView" ? pane.id : null;
+  const workspaceState = useWorkspaceStore.getState();
+  const dockState = useDockStore.getState();
+  return (
+    resolveFocusedTerminalPane({
+      workspaces: workspaceState.workspaces,
+      activeWorkspaceId: workspaceState.activeWorkspaceId,
+      focusedPaneIndex: useGridStore.getState().focusedPaneIndex,
+      docks: dockState.docks,
+      focusedDock: dockState.focusedDock,
+      focusedDockPaneId: dockState.focusedDockPaneId,
+    })?.id ?? null
+  );
 }
 
 /** Check if the currently focused element is a text-editable field (input, textarea, contentEditable). */

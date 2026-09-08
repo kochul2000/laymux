@@ -23,6 +23,7 @@ vi.mock("@/lib/tauri-api", () => ({
   getClaudeSessionIds: vi.fn().mockResolvedValue({}),
   getCodexSessionIds: vi.fn().mockResolvedValue({}),
   getGrokSessionIds: vi.fn().mockResolvedValue({}),
+  getTerminalSessionAttributions: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock("@/lib/interrupt-terminals-on-exit", () => ({
@@ -37,6 +38,8 @@ vi.mock("@/lib/terminal-serialize-registry", () => ({
 
 import {
   persistSession,
+  flushSessionCheckpoint,
+  markSessionCheckpointMutation,
   saveBeforeClose,
   _resetClosingDown,
   truncateFromEnd,
@@ -49,13 +52,33 @@ import {
   getClaudeSessionIds,
   getCodexSessionIds,
   getGrokSessionIds,
+  getTerminalSessionAttributions,
 } from "@/lib/tauri-api";
 import { interruptTerminalsOnExit } from "@/lib/interrupt-terminals-on-exit";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
-import { useTerminalStore } from "@/stores/terminal-store";
+import { useTerminalStore, type TerminalActivityInfo } from "@/stores/terminal-store";
+
+/** Register a terminal instance the way a mounted TerminalView would. */
+function registerLiveTerminal(
+  terminalId: string,
+  activity: TerminalActivityInfo,
+  options: { sessionReady?: boolean } = {},
+): void {
+  const store = useTerminalStore.getState();
+  store.registerInstance({
+    id: terminalId,
+    profile: "PowerShell",
+    syncGroup: "ws-1",
+    workspaceId: "ws-1",
+  });
+  store.updateInstanceInfo(terminalId, {
+    sessionReady: options.sessionReady ?? true,
+    activity,
+  });
+}
 
 describe("persistSession", () => {
   beforeEach(() => {
@@ -69,7 +92,385 @@ describe("persistSession", () => {
     vi.mocked(getClaudeSessionIds).mockResolvedValue({});
     vi.mocked(getCodexSessionIds).mockResolvedValue({});
     vi.mocked(getGrokSessionIds).mockResolvedValue({});
+    vi.mocked(getTerminalSessionAttributions).mockImplementation(
+      async (claudeAge, codexAge, grokAge) => {
+        const [claude, codex, grok] = await Promise.all([
+          getClaudeSessionIds(claudeAge),
+          getCodexSessionIds(codexAge),
+          getGrokSessionIds(grokAge),
+        ]);
+        const terminalIds = new Set([
+          ...useTerminalStore
+            .getState()
+            .instances.filter((instance) => instance.sessionReady !== false)
+            .map((instance) => instance.id),
+          ...Object.keys(claude),
+          ...Object.keys(codex),
+          ...Object.keys(grok),
+        ]);
+        return Object.fromEntries(
+          [...terminalIds].map((terminalId) => {
+            const claims = [
+              ["claude", claude[terminalId]],
+              ["codex", codex[terminalId]],
+              ["grok", grok[terminalId]],
+            ].filter(([, sessionId]) => sessionId !== undefined);
+            if (claims.length === 1 && claims[0][1]) {
+              return [
+                terminalId,
+                {
+                  generation: 1,
+                  state: "identified",
+                  provider: claims[0][0],
+                  sessionId: claims[0][1],
+                },
+              ];
+            }
+            if (claims.length > 0) {
+              return [terminalId, { generation: 1, state: "activeButUnidentified" }];
+            }
+            const activity = useTerminalStore
+              .getState()
+              .instances.find((instance) => instance.id === terminalId)?.activity;
+            return [
+              terminalId,
+              {
+                generation: 1,
+                state: activity?.type === "interactiveApp" ? "activeButUnidentified" : "noAgent",
+              },
+            ];
+          }),
+        );
+      },
+    );
     vi.mocked(interruptTerminalsOnExit).mockResolvedValue(undefined);
+  });
+
+  it.each([
+    ["workspace", "claude", "lastClaudeSession"],
+    ["workspace", "codex", "lastCodexSession"],
+    ["workspace", "grok", "lastGrokSession"],
+    ["dock", "claude", "lastClaudeSession"],
+    ["dock", "codex", "lastCodexSession"],
+    ["dock", "grok", "lastGrokSession"],
+  ] as const)(
+    "%s pane keeps the latest %s checkpoint after its PTY disappears",
+    async (surface, provider, field) => {
+      const view = {
+        type: "TerminalView" as const,
+        lastCodexSession: "old-session",
+        lastCwd: "/old",
+      };
+      useWorkspaceStore.getState().setPaneView(0, view);
+      const dock = useDockStore.getState().getDock("left")!;
+      useDockStore.getState().setDockPaneView("left", dock.panes[0].id, view);
+      const getPane = () =>
+        surface === "workspace"
+          ? useWorkspaceStore.getState().workspaces[0].panes[0]
+          : useDockStore.getState().getDock("left")!.panes[0];
+      const id = `terminal-${getPane().id}`;
+      vi.mocked(getTerminalCwds).mockResolvedValue({ [id]: "/latest" });
+      vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+        [id]: { generation: 1, state: "identified", provider, sessionId: "latest-session" },
+      });
+      await flushSessionCheckpoint({
+        reason: "eviction",
+        requireConclusive: true,
+        terminalIds: [id],
+      });
+
+      // The backend has closed the hidden PTY; the next checkpoint has no attribution.
+      vi.mocked(getTerminalCwds).mockResolvedValue({});
+      vi.mocked(getTerminalSessionAttributions).mockResolvedValue({});
+      await persistSession();
+      const saved = vi.mocked(saveSettings).mock.calls.at(-1)![0];
+      const savedPane =
+        surface === "workspace"
+          ? saved.workspaces[0].panes[0]
+          : saved.docks!.find((entry) => entry.position === "left")!.panes![0];
+      expect(savedPane.view).toEqual({
+        type: "TerminalView",
+        [field]: "latest-session",
+        lastCwd: "/latest",
+      });
+      // A remount consumes the view from the live store, without reloading settings.json.
+      expect(getPane().view).toEqual(savedPane.view);
+    },
+  );
+
+  it.each(["noAgent", "activeButUnidentified"] as const)(
+    "does not resurrect IDs cleared by a committed %s verdict when lookup later fails",
+    async (state) => {
+      const ws = useWorkspaceStore.getState();
+      ws.setPaneView(0, {
+        type: "TerminalView",
+        lastClaudeSession: "old-claude",
+        lastCodexSession: "old-codex",
+        lastGrokSession: "old-grok",
+      });
+      const id = `terminal-${ws.workspaces[0].panes[0].id}`;
+      vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+        [id]: { generation: 1, state },
+      });
+      await persistSession();
+      vi.mocked(getTerminalSessionAttributions).mockRejectedValueOnce(
+        new Error("probe unavailable"),
+      );
+      await persistSession();
+      expect(vi.mocked(saveSettings).mock.calls.at(-1)![0].workspaces[0].panes[0].view).toEqual({
+        type: "TerminalView",
+      });
+      expect(useWorkspaceStore.getState().workspaces[0].panes[0].view).toEqual({
+        type: "TerminalView",
+      });
+    },
+  );
+
+  it("publishes metadata only after a successful save and preserves concurrent view edits", async () => {
+    const ws = useWorkspaceStore.getState();
+    ws.setPaneView(0, { type: "TerminalView", lastCodexSession: "old-session" });
+    const getPane = () => useWorkspaceStore.getState().workspaces[0].panes[0];
+    const original = getPane().view;
+    const id = `terminal-${getPane().id}`;
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+      [id]: { generation: 1, state: "identified", provider: "codex", sessionId: "latest-session" },
+    });
+    vi.mocked(saveSettings).mockRejectedValueOnce(new Error("disk full"));
+    await expect(persistSession()).rejects.toThrow("disk full");
+    expect(getPane().view).toBe(original);
+
+    let finishSave: (() => void) | undefined;
+    vi.mocked(saveSettings).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+    const pending = persistSession();
+    await vi.waitFor(() => expect(finishSave).toBeDefined());
+    expect(getPane().view).toBe(original);
+    const replacement = {
+      type: "TerminalView" as const,
+      profile: "new-profile",
+      lastCodexSession: "user-selected-session",
+    };
+    ws.setPaneView(0, replacement);
+    finishSave!();
+    await pending;
+    expect(getPane().view).toBe(replacement);
+  });
+
+  it("settles metadata publication with lifecycle revision tracking and no redundant store updates", async () => {
+    const ws = useWorkspaceStore.getState();
+    ws.setPaneView(0, { type: "TerminalView", lastCodexSession: "old-session" });
+    const id = `terminal-${ws.workspaces[0].panes[0].id}`;
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+      [id]: { generation: 1, state: "identified", provider: "codex", sessionId: "latest-session" },
+    });
+    const onMutation = vi.fn(markSessionCheckpointMutation);
+    const unsubscribe = useWorkspaceStore.subscribe(onMutation);
+    try {
+      await persistSession();
+      expect(onMutation).toHaveBeenCalledTimes(1);
+      expect(saveSettings).toHaveBeenCalledTimes(1);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("saves output within the close budget when a WSL probe takes three seconds", async () => {
+    vi.useFakeTimers();
+    const ws = useWorkspaceStore.getState();
+    ws.setPaneView(0, { type: "TerminalView", lastCodexSession: "old-session" });
+    const paneId = ws.workspaces[0].panes[0].id;
+    vi.mocked(getTerminalSessionAttributions).mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      return {
+        [`terminal-${paneId}`]: {
+          generation: 1,
+          state: "identified",
+          provider: "codex",
+          sessionId: "latest-session",
+        },
+        "terminal-wsl": { generation: 2, state: "unknown" },
+      };
+    });
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(new Map([[paneId, () => "latest-output"]]));
+    const unsubscribe = useWorkspaceStore.subscribe(markSessionCheckpointMutation);
+    const closing = saveBeforeClose();
+    try {
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(saveTerminalOutputCache).toHaveBeenCalledWith(paneId, "latest-output");
+      expect(getTerminalSessionAttributions).toHaveBeenCalledTimes(1);
+    } finally {
+      unsubscribe();
+      await vi.runAllTimersAsync();
+      await closing;
+      vi.useRealTimers();
+    }
+  });
+
+  it("still saves a trailing checkpoint for a view edit during disk commit", async () => {
+    const ws = useWorkspaceStore.getState();
+    ws.setPaneView(0, { type: "TerminalView", lastCodexSession: "old-session" });
+    const id = `terminal-${ws.workspaces[0].panes[0].id}`;
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+      [id]: { generation: 1, state: "identified", provider: "codex", sessionId: "latest-session" },
+    });
+    let finishSave: (() => void) | undefined;
+    vi.mocked(saveSettings).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+    const unsubscribe = useWorkspaceStore.subscribe(markSessionCheckpointMutation);
+    const saving = persistSession();
+    try {
+      await vi.waitFor(() => expect(finishSave).toBeDefined());
+      ws.setPaneView(1, { type: "MemoView", label: "new-view" });
+      finishSave!();
+      await saving;
+      expect(saveSettings).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(saveSettings).mock.calls.at(-1)![0].workspaces[0].panes[1].view).toEqual({
+        type: "MemoView",
+        label: "new-view",
+      });
+    } finally {
+      unsubscribe();
+      finishSave?.();
+      await saving;
+    }
+  });
+
+  it("allows an update with a never-started pane and preserves its saved session", async () => {
+    const ws = useWorkspaceStore.getState();
+    ws.setPaneView(0, { type: "TerminalView", lastCodexSession: "saved-unvisited-session" });
+    const id = `terminal-${ws.workspaces[0].panes[0].id}`;
+    registerLiveTerminal(id, { type: "shell" }, { sessionReady: false });
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({});
+    const commit = await flushSessionCheckpoint({ reason: "update", requireConclusive: true });
+    expect(commit.coverage).toEqual([]);
+    expect(
+      vi.mocked(saveSettings).mock.calls.at(-1)?.[0].workspaces[0].panes[0].view,
+    ).toMatchObject({ lastCodexSession: "saved-unvisited-session" });
+  });
+
+  it("checkpoints a proven empty Codex without retaining the old resume ID", async () => {
+    const ws = useWorkspaceStore.getState();
+    ws.setPaneView(0, { type: "TerminalView", lastCodexSession: "old-session" });
+    const id = `terminal-${ws.workspaces[0].panes[0].id}`;
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+      [id]: { generation: 7, provider: "codex", state: "fresh", sessionId: "new-empty" },
+    });
+    await flushSessionCheckpoint({ reason: "update", requireConclusive: true });
+    const view = vi.mocked(saveSettings).mock.calls.at(-1)?.[0].workspaces[0].panes[0].view;
+    expect(view).toMatchObject({ lastAgentFresh: "codex" });
+    expect(view).not.toHaveProperty("lastCodexSession");
+    expect(useWorkspaceStore.getState().workspaces[0].panes[0].view).toMatchObject({
+      lastAgentFresh: "codex",
+    });
+  });
+
+  it("rejects two different empty sessions across the checkpoint barrier", async () => {
+    const id = "terminal-fresh-race";
+    vi.mocked(getTerminalSessionAttributions)
+      .mockResolvedValueOnce({
+        [id]: { generation: 7, provider: "codex", state: "fresh", sessionId: "empty-a" },
+      })
+      .mockResolvedValueOnce({
+        [id]: { generation: 7, provider: "codex", state: "fresh", sessionId: "empty-b" },
+      });
+    await expect(
+      flushSessionCheckpoint({ reason: "update", requireConclusive: true }),
+    ).rejects.toThrow();
+  });
+
+  it("preserves an unconsumed resume and allows update without a frontend visit", async () => {
+    const ws = useWorkspaceStore.getState();
+    ws.setPaneView(0, { type: "TerminalView", lastCodexSession: "saved-session" });
+    const id = `terminal-${ws.workspaces[0].panes[0].id}`;
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+      [id]: {
+        generation: 7,
+        provider: "codex",
+        state: "restorePending",
+        sessionId: "saved-session",
+      },
+    });
+    const commit = await flushSessionCheckpoint({ reason: "update", requireConclusive: true });
+    expect(commit.coverage).toEqual([
+      {
+        terminalId: id,
+        generation: 7,
+        provider: "codex",
+        state: "restorePending",
+        sessionId: "saved-session",
+      },
+    ]);
+    expect(
+      vi.mocked(saveSettings).mock.calls.at(-1)?.[0].workspaces[0].panes[0].view,
+    ).toMatchObject({ lastCodexSession: "saved-session" });
+  });
+
+  it.each(["generation", "sessionId", "state"] as const)(
+    "rejects a pending resume whose %s changes across update observations",
+    async (field) => {
+      const id = "terminal-restore-race";
+      const first = {
+        generation: 7,
+        provider: "codex" as const,
+        state: "restorePending" as const,
+        sessionId: "saved-session",
+      };
+      const changed = {
+        ...first,
+        [field]:
+          field === "generation"
+            ? 8
+            : field === "sessionId"
+              ? "different-session"
+              : "activeButUnidentified",
+      };
+      vi.mocked(getTerminalSessionAttributions)
+        .mockResolvedValueOnce({ [id]: first })
+        .mockResolvedValueOnce({ [id]: changed });
+      await expect(
+        flushSessionCheckpoint({ reason: "update", requireConclusive: true }),
+      ).rejects.toThrow();
+      expect(saveSettings).not.toHaveBeenCalled();
+    },
+  );
+
+  it("reproduces update refusal for an unfocused live Codex without a durable session", async () => {
+    const id = "terminal-unfocused-codex";
+    // No frontend instance/focus is needed: the backend live catalog is authoritative.
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+      [id]: { generation: 1, provider: "codex", state: "activeButUnidentified" },
+    });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await expect(
+        flushSessionCheckpoint({ reason: "update", requireConclusive: true }),
+      ).rejects.toThrow(`Session attribution is not conclusive for ${id}: activeButUnidentified`);
+    }
+    expect(saveSettings).not.toHaveBeenCalled();
+  });
+
+  it("repeatedly refuses to evict a live hidden terminal whose attribution remains unknown", async () => {
+    const id = "terminal-hidden-unknown";
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+      [id]: { generation: 1, state: "unknown" },
+    });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await expect(
+        flushSessionCheckpoint({
+          reason: "eviction",
+          requireConclusive: true,
+          terminalIds: [id],
+        }),
+      ).rejects.toThrow(`Session attribution is not conclusive for ${id}: unknown`);
+    }
+    expect(saveSettings).not.toHaveBeenCalled();
   });
 
   it("calls saveSettings with current state from all stores", async () => {
@@ -257,7 +658,7 @@ describe("persistSession", () => {
       useSettingsStore.getState().setPaste({ smart: false, imageDir: "/tmp/img" });
       useSettingsStore.getState().setControlBar({ hoverIdleSeconds: 5 });
       useSettingsStore.getState().setNotifications({ dismiss: "manual" });
-      useSettingsStore.getState().setTerminal({ copyOnSelect: false, scrollbarStyle: "separate" });
+      useSettingsStore.getState().setTerminal({ copyOnSelect: false });
       useSettingsStore.getState().setWorkspaceSelector({ pathEllipsis: "end" });
 
       await persistSession();
@@ -274,7 +675,6 @@ describe("persistSession", () => {
       expect(notifications.dismiss).toBe("manual");
       expect(terminal.copyOnSelect).toBe(false);
       expect(workspaceSelector.pathEllipsis).toBe("end");
-      expect(terminal.scrollbarStyle).toBe("separate");
     });
 
     it("claude settings survive round-trip", async () => {
@@ -582,6 +982,170 @@ describe("persistSession", () => {
     expect(savedView).not.toHaveProperty("lastCodexSession");
   });
 
+  it("preserves prior ids when a provider lookup fails instead of treating it as no agent", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      lastCodexSession: "last-proven-session",
+    });
+    registerLiveTerminal(`terminal-${paneId}`, { type: "shell" });
+    vi.mocked(getCodexSessionIds).mockRejectedValueOnce(new Error("process snapshot failed"));
+
+    await persistSession();
+
+    const savedView = vi.mocked(saveSettings).mock.calls[0][0].workspaces[0].panes[0].view;
+    expect(savedView.lastCodexSession).toBe("last-proven-session");
+  });
+
+  it("drops a stale agent session when the live pane is back to the shell", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      lastClaudeSession: "stale-claude-session",
+    });
+    // No provider lists the pane: the agent exited and the detectors dropped it.
+    registerLiveTerminal(`terminal-${paneId}`, { type: "shell" });
+
+    await persistSession();
+
+    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+      .panes[0].view;
+    expect(savedView).not.toHaveProperty("lastClaudeSession");
+  });
+
+  it("does not clear a resume id while the restored agent is still starting", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      lastCodexSession: "session-being-restored",
+    });
+    const terminalId = `terminal-${paneId}`;
+    registerLiveTerminal(terminalId, { type: "shell" });
+    useTerminalStore.getState().updateInstanceInfo(terminalId, {
+      attributionPendingUntil: Date.now() + 15_000,
+    });
+
+    await persistSession();
+
+    const savedView = vi.mocked(saveSettings).mock.calls[0][0].workspaces[0].panes[0].view;
+    expect(savedView.lastCodexSession).toBe("session-being-restored");
+  });
+
+  it("keeps a resume id when the agent is active but not identified during startup grace", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    const terminalId = `terminal-${paneId}`;
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      lastCodexSession: "session-being-restored",
+    });
+    registerLiveTerminal(terminalId, { type: "interactiveApp", name: "Codex" });
+    useTerminalStore.getState().updateInstanceInfo(terminalId, {
+      attributionPendingUntil: Date.now() + 15_000,
+    });
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValueOnce({
+      [terminalId]: {
+        generation: 1,
+        state: "activeButUnidentified",
+        provider: "codex",
+      },
+    });
+
+    await persistSession();
+
+    const savedView = vi.mocked(saveSettings).mock.calls[0][0].workspaces[0].panes[0].view;
+    expect(savedView.lastCodexSession).toBe("session-being-restored");
+  });
+
+  it("keeps the resume grace before PTY creation has marked the session ready", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    const terminalId = `terminal-${paneId}`;
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      lastCodexSession: "session-selected-for-startup",
+    });
+    registerLiveTerminal(terminalId, { type: "shell" }, { sessionReady: false });
+    useTerminalStore.getState().updateInstanceInfo(terminalId, {
+      attributionPendingUntil: Date.now() + 15_000,
+    });
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValueOnce({
+      [terminalId]: { generation: 1, state: "noAgent" },
+    });
+
+    await persistSession();
+
+    const savedView = vi.mocked(saveSettings).mock.calls[0][0].workspaces[0].panes[0].view;
+    expect(savedView.lastCodexSession).toBe("session-selected-for-startup");
+  });
+
+  it("keeps a stale agent session for a pane with no live terminal this run", async () => {
+    const wsState = useWorkspaceStore.getState();
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      lastClaudeSession: "stale-claude-session",
+    });
+
+    await persistSession();
+
+    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+      .panes[0].view;
+    expect(savedView.lastClaudeSession).toBe("stale-claude-session");
+  });
+
+  it("does not trust frontend activity when backend session attribution is unresolved", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      lastClaudeSession: "stale-claude-session",
+    });
+    // Activity is only a hint. The backend proves the agent but no exact ID, so
+    // a normal checkpoint must not keep a potentially wrong resume target.
+    registerLiveTerminal(`terminal-${paneId}`, { type: "interactiveApp", name: "Claude" });
+
+    await persistSession();
+
+    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+      .panes[0].view;
+    expect(savedView).not.toHaveProperty("lastClaudeSession");
+  });
+
+  it("keeps a stale agent session while the pane session is not ready yet", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      lastClaudeSession: "stale-claude-session",
+    });
+    registerLiveTerminal(`terminal-${paneId}`, { type: "shell" }, { sessionReady: false });
+
+    await persistSession();
+
+    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+      .panes[0].view;
+    expect(savedView.lastClaudeSession).toBe("stale-claude-session");
+  });
+
+  it("drops a stale agent session on a live dock pane back to the shell", async () => {
+    const dockState = useDockStore.getState();
+    const dockPaneId = dockState.getDock("left")!.panes[0].id;
+    dockState.setDockPaneView("left", dockPaneId, {
+      type: "TerminalView",
+      lastCodexSession: "stale-codex-session",
+    });
+    registerLiveTerminal(`terminal-${dockPaneId}`, { type: "shell" });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const leftDock = savedArg.docks.find((d: { position: string }) => d.position === "left");
+    expect(leftDock.panes[0].view).not.toHaveProperty("lastCodexSession");
+  });
+
   it("keeps collecting Codex attribution while restore is disabled", async () => {
     const wsState = useWorkspaceStore.getState();
     const paneId = wsState.workspaces[0].panes[0].id;
@@ -692,6 +1256,120 @@ describe("persistSession", () => {
 
     const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg.workspaces[0].panes[0].view.lastCwd).toBeUndefined();
+  });
+
+  it("runs one trailing checkpoint when a mutation arrives during an in-flight save", async () => {
+    let finishFirstSave: (() => void) | undefined;
+    vi.mocked(saveSettings)
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishFirstSave = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(undefined);
+
+    const first = persistSession({ reason: "mutation" });
+    await vi.waitFor(() => expect(saveSettings).toHaveBeenCalledTimes(1));
+    useWorkspaceStore
+      .getState()
+      .renameWorkspace(useWorkspaceStore.getState().workspaces[0].id, "Newest workspace");
+    const second = persistSession({ reason: "workspaceEntry" });
+    finishFirstSave?.();
+    await Promise.all([first, second]);
+
+    expect(saveSettings).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(saveSettings).mock.calls[1][0].workspaces[0].name).toBe("Newest-workspace");
+  });
+
+  it("does not downgrade a critical barrier when a normal request trails it", async () => {
+    let finishFirstSave: (() => void) | undefined;
+    vi.mocked(saveSettings)
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishFirstSave = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(undefined);
+
+    const critical = flushSessionCheckpoint({ reason: "update", requireConclusive: true });
+    await vi.waitFor(() => expect(saveSettings).toHaveBeenCalledTimes(1));
+    const normal = persistSession({ reason: "completion" });
+    finishFirstSave?.();
+    await Promise.all([critical, normal]);
+
+    expect(saveSettings).toHaveBeenCalledTimes(2);
+    expect(getTerminalSessionAttributions).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not narrow an all-terminal update barrier to an overlapping eviction target", async () => {
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+      "terminal-target": { generation: 1, state: "noAgent" },
+      "terminal-unresolved": { generation: 1, state: "activeButUnidentified" },
+    });
+    let finishFirstSave: (() => void) | undefined;
+    vi.mocked(saveSettings).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishFirstSave = resolve;
+        }),
+    );
+
+    const eviction = flushSessionCheckpoint({
+      reason: "eviction",
+      requireConclusive: true,
+      terminalIds: ["terminal-target"],
+    });
+    await vi.waitFor(() => expect(saveSettings).toHaveBeenCalledTimes(1));
+    const update = flushSessionCheckpoint({ reason: "update", requireConclusive: true });
+    finishFirstSave?.();
+
+    await expect(Promise.all([eviction, update])).rejects.toThrow(
+      "Session attribution is not conclusive for terminal-unresolved",
+    );
+    expect(saveSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a destructive checkpoint when an active agent has no stable session id", async () => {
+    const paneId = useWorkspaceStore.getState().workspaces[0].panes[0].id;
+    registerLiveTerminal(`terminal-${paneId}`, { type: "interactiveApp", name: "Codex" });
+    vi.mocked(getCodexSessionIds).mockResolvedValue({ [`terminal-${paneId}`]: null });
+
+    await expect(
+      flushSessionCheckpoint({ reason: "update", requireConclusive: true }),
+    ).rejects.toThrow("not conclusive");
+    expect(saveSettings).not.toHaveBeenCalled();
+  });
+
+  it("rejects a destructive checkpoint when attribution lookup fails before terminals register", async () => {
+    vi.mocked(getTerminalSessionAttributions).mockRejectedValueOnce(
+      new Error("attribution IPC unavailable"),
+    );
+
+    await expect(
+      flushSessionCheckpoint({ reason: "update", requireConclusive: true }),
+    ).rejects.toThrow("Session attribution lookup failed");
+    expect(saveSettings).not.toHaveBeenCalled();
+  });
+
+  it("rejects a destructive checkpoint when the authoritative CWD lookup fails", async () => {
+    const paneId = useWorkspaceStore.getState().workspaces[0].panes[0].id;
+    const terminalId = `terminal-${paneId}`;
+    useWorkspaceStore.getState().setPaneView(0, {
+      type: "TerminalView",
+      lastCwd: "/old",
+    });
+    registerLiveTerminal(terminalId, { type: "shell" });
+    vi.mocked(getTerminalCwds).mockRejectedValue(new Error("CWD IPC unavailable"));
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+      [terminalId]: { generation: 1, state: "noAgent" },
+    });
+
+    await expect(
+      flushSessionCheckpoint({ reason: "update", requireConclusive: true }),
+    ).rejects.toThrow("Terminal CWD lookup failed");
+    expect(saveSettings).not.toHaveBeenCalled();
   });
 
   it("is no-op after saveBeforeClose sets closingDown flag", async () => {
@@ -810,7 +1488,7 @@ describe("saveBeforeClose", () => {
     const saving = saveBeforeClose();
     await vi.waitFor(() => expect(interruptTerminalsOnExit).toHaveBeenCalledTimes(1));
     expect(callOrder).toEqual(["collect-codex", "interrupt"]);
-    expect(saveSettings).not.toHaveBeenCalled();
+    expect(saveSettings).toHaveBeenCalledTimes(1);
 
     finishInterrupt?.();
     await saving;

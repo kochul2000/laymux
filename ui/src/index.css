@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+/* Pretendard v1.3.9 — SIL OFL 1.1; license distributed alongside the font. */
+@font-face {
+  font-family: "Pretendard Variable";
+  font-style: normal;
+  font-weight: 45 920;
+  font-display: swap;
+  src: url("/fonts/pretendard/PretendardVariable.woff2") format("woff2");
+}
+
 :root {
   --bg-base: #1e1e2e;
   --bg-surface: #181825;
@@ -58,6 +67,9 @@
   --fs-sm: 11px;
   --fs-md: 13px;
   --fs-lg: 15px;
+  --settings-control-height: 34px;
+  --settings-sidebar-width: 180px;
+  --settings-content-width: 840px;
 
   /* utility */
   --separator-bg: #ffffff14; /* intentionally same as --hover-bg-strong */
@@ -66,17 +78,103 @@
      --ui-font-default is the single source of truth for the built-in fallback stack
      (referenced by useAppTheme so the literal lives in one place). --ui-font is what
      the UI reads; useAppTheme overrides it at runtime from appearance.uiFontFamily. */
-  --ui-font-default: "Consolas", "Fira Code", monospace;
+  --ui-font-default: "Pretendard Variable", sans-serif;
   --ui-font: var(--ui-font-default);
   --transition-fast: 0.1s;
   --transition-list-collapse: 0.18s;
   --pane-row-max-h: 28px;
+  --workspace-terminal-pane-row-max-h: 36px;
   --workspace-count-badge-size: 14px;
   --workspace-count-badge-px: 3px;
   --hidden-shelf-max-height: 44%;
   --hidden-action-size: 24px;
   --undo-snackbar-offset: 8px;
   --terminal-composition-underline-color: currentColor;
+}
+
+/* Settings fields adapt to their modal or dock, independently of window width. */
+.settings-sidebar {
+  width: var(--settings-sidebar-width);
+}
+.settings-content {
+  container-type: inline-size;
+}
+.settings-fields > div {
+  max-width: var(--settings-content-width);
+  margin-inline: auto;
+}
+.settings-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(0, 1.4fr);
+  align-items: start;
+  gap: 16px;
+  padding-block: 12px;
+}
+.settings-row + .settings-row {
+  border-top: 1px solid var(--border);
+}
+.settings-row-label {
+  padding-top: 4px;
+  overflow-wrap: anywhere;
+}
+.settings-view
+  :is(input:not([type="checkbox"]):not([type="range"]):not([type="color"]), select, textarea) {
+  min-height: var(--settings-control-height);
+  max-width: 100%;
+  border-radius: 0;
+  font-size: var(--fs-md);
+}
+.settings-view p {
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.settings-nav-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 20px 12px 6px;
+  color: var(--text-secondary);
+}
+.settings-nav-heading h3 {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.settings-nav-divider {
+  flex: 1;
+  border-top: 1px solid var(--border);
+}
+.settings-nav-button {
+  display: block;
+  width: 100%;
+  padding: 8px 12px 8px 24px;
+  border-left: 3px solid transparent;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  font-size: var(--fs-md);
+  cursor: pointer;
+}
+.settings-nav-button:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+.settings-nav-button[aria-current="page"] {
+  background: var(--accent-10);
+  border-left-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.settings-nav-button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -2px;
+}
+@container (max-width: 460px) {
+  .settings-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
 }
 
 /* Reset: Tailwind v4 @layer base already provides *, ::before, ::after { margin:0; padding:0; box-sizing:border-box }.
@@ -163,6 +261,73 @@
      the currently active mode feel responsive and distinctly highlighted. */
   .hover-bg-accent:hover {
     background: var(--accent-20);
+  }
+
+  /* Destructive controls arm on the first activation. Keep the warning on
+     the control itself so the second click has the same target. */
+  .two-click-confirm-button[data-confirming="true"] {
+    background: var(--red-15) !important;
+    color: var(--red) !important;
+    box-shadow: inset 0 0 0 1px var(--red);
+    opacity: 1;
+  }
+
+  /* Real buttons for surfaces that ask the user to *do* something
+     (ADR-0192). Before this, action buttons were assembled inline per call
+     site — accent-coloured text with a hairline border, no disabled
+     affordance — so a disabled button looked exactly like an enabled one and
+     the click that did nothing read as a bug. The variants live here rather
+     than in inline styles because hover and :disabled belong in CSS. */
+  .ui-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    box-sizing: border-box;
+    min-height: 26px;
+    padding: 0 10px;
+    border-radius: var(--radius-md);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background var(--transition-fast) ease,
+      border-color var(--transition-fast) ease,
+      opacity var(--transition-fast) ease;
+  }
+
+  .ui-btn:disabled {
+    cursor: default;
+    opacity: 0.45;
+  }
+
+  /* Pressed feedback. A settings action can take a moment to answer, so the
+     click itself has to be visible before the result is. */
+  .ui-btn:not(:disabled):active {
+    transform: translateY(1px);
+  }
+
+  .ui-btn-primary {
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: var(--bg-base);
+  }
+
+  .ui-btn-primary:not(:disabled):hover {
+    background: var(--accent-50);
+  }
+
+  .ui-btn-secondary {
+    border: 1px solid var(--border);
+    background: var(--bg-base);
+    color: var(--text-primary);
+  }
+
+  .ui-btn-secondary:not(:disabled):hover {
+    background: var(--hover-bg-strong);
+    border-color: var(--accent-50);
   }
 
   /* Per-row eye buttons (workspace-eye, pane-eye). Needs its
@@ -458,6 +623,50 @@
     background: var(--bg-base);
   }
 
+  /* The host-drawn way back to desktop mode, shown only when the embedded page
+     never announced itself (#955). It floats over the frame instead of covering
+     it, so a late greeting does not hide a working mobile view behind a scrim. */
+  .local-mobile-mode-fallback {
+    position: absolute;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1;
+    display: grid;
+    gap: 8px;
+    justify-items: center;
+    max-width: min(420px, calc(100% - 32px));
+    padding: 16px 20px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--bg-surface);
+    text-align: center;
+  }
+
+  .local-mobile-mode-fallback-title {
+    color: var(--text-primary);
+    font-size: var(--fs-md);
+  }
+
+  .local-mobile-mode-fallback-body {
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+  }
+
+  .local-mobile-mode-fallback-exit {
+    height: var(--btn-h);
+    padding: 0 12px;
+    border: 1px solid var(--accent-50);
+    border-radius: var(--radius-md);
+    background: var(--accent-12);
+    color: var(--text-primary);
+    font-size: var(--fs-sm);
+  }
+
+  .local-mobile-mode-fallback-exit:hover {
+    background: var(--accent-20);
+  }
+
   .workspace-pane-row {
     max-height: var(--pane-row-max-h);
     opacity: 1;
@@ -468,6 +677,9 @@
       opacity var(--transition-list-collapse) ease,
       transform var(--transition-list-collapse) ease,
       margin var(--transition-list-collapse) ease;
+  }
+  .workspace-terminal-pane-row-two-line {
+    max-height: var(--workspace-terminal-pane-row-max-h);
   }
   .workspace-pane-row-collapsed {
     max-height: 0;
@@ -487,6 +699,16 @@
   .pane-hover-bar:hover {
     background: var(--bar-bg-hover);
     backdrop-filter: blur(8px);
+  }
+
+  .pane-control-popover {
+    box-shadow: 0 4px 14px var(--backdrop-heavy);
+  }
+
+  .pane-control-anchor:focus-visible,
+  .pane-control-popover :is(button, select):focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
   }
 
   /* Toolbar (28px header bar) */
@@ -525,14 +747,6 @@
     background: var(--separator-bg);
   }
 }
-
-/*
- * Terminal scrollbar styles:
- * xterm.js v6 custom scrollbar controlled via overviewRuler.width in TerminalView.
- *   - overlay (default): width = 0, FitAddon uses full container width
- *   - separate: width = 14, FitAddon reserves scrollbar space
- * CSS classes (scrollbar-overlay / scrollbar-separate) applied for test hooks only.
- */
 
 /* The helper textarea is a real DOM element in both renderers, so its OS caret
    needs a frame class independently of xterm's painted cursor (ADR-0079). */
@@ -635,6 +849,44 @@
 
 .terminal-path-link-hint[hidden] {
   display: none;
+}
+
+/* ADR-0224: 링크 액션 칩. `chip` 모드에서 클릭은 링크를 열지 않고 이 칩을 띄우며,
+   버튼을 눌러야 실행된다. 힌트 라벨과 달리 입력을 받으므로 pointer-events 를
+   켜 둔다. 위치는 TerminalView 가 계산한다(힌트 라벨과 같은 좌표계). */
+.terminal-link-chip {
+  position: absolute;
+  z-index: 7;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-surface);
+  box-shadow: 0 2px 8px var(--backdrop-light);
+  white-space: nowrap;
+}
+
+.terminal-link-chip[hidden] {
+  display: none;
+}
+
+.terminal-link-chip-action {
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.terminal-link-chip-action:hover,
+.terminal-link-chip-action:focus-visible {
+  background: var(--hover-bg-strong);
+  outline: none;
 }
 
 .terminal-overlay-caret {

@@ -5,7 +5,9 @@
 //! diff and so on — belongs to the frontend and is decided from the path, so it
 //! deliberately has no counterpart here.
 
-use crate::commands::archive_listing::{archive_format, read_archive_listing, ArchiveEntry};
+use crate::commands::archive_listing::{
+    archive_format, read_archive_listing, read_archive_listing_bounded, ArchiveEntry,
+};
 use crate::commands::file_ops::base64_encode;
 use crate::constants::{DEFAULT_FILE_VIEWER_BYTES, MAX_INLINE_PDF_BYTES};
 use crate::path_utils;
@@ -214,7 +216,7 @@ const TEXT_EXTENSIONS: &[&str] = &[
 ];
 
 /// Read a file and classify it for the file viewer.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_file_for_viewer(
     path: String,
     max_bytes: Option<usize>,
@@ -236,17 +238,28 @@ pub fn read_file_for_viewer(
     // Archives are classified from the whole file name because `.tar.gz` is a
     // pair, not an extension.
     if let Some(format) = archive_format(file_name) {
-        // A file that merely ends in `.zip` may not be one. Listing failure is
-        // not viewer failure: fall through to the binary placeholder so the
-        // user still sees the size and can open it in the host app.
-        if let Ok(listing) = read_archive_listing(&resolved, format) {
-            return Ok(FileViewerContent::Archive {
-                format: listing.format.as_str().to_string(),
-                entries: listing.entries,
-                total_entries: listing.total_entries,
-                total_bytes: listing.total_bytes,
-                truncated: listing.truncated,
-            });
+        // A file that merely ends in `.zip` may not be one. Parse failures fall
+        // through to the binary placeholder; explicit transport/scan limits
+        // remain errors so Remote can answer 413 instead of doing unbounded
+        // work behind a harmless-looking archive suffix.
+        let listing = match max_bytes {
+            Some(limit) => read_archive_listing_bounded(&resolved, format, limit, limit as u64),
+            None => read_archive_listing(&resolved, format),
+        };
+        match listing {
+            Ok(listing) => {
+                return Ok(FileViewerContent::Archive {
+                    format: listing.format.as_str().to_string(),
+                    entries: listing.entries,
+                    total_entries: listing.total_entries,
+                    total_bytes: listing.total_bytes,
+                    truncated: listing.truncated,
+                });
+            }
+            Err(error) if max_bytes.is_some() && error.contains("viewer limit") => {
+                return Err(error);
+            }
+            Err(_) => {}
         }
     }
 
@@ -332,6 +345,80 @@ pub fn read_file_for_viewer(
 /// read. Bound the read itself when a remote caller supplies a limit, keeping
 /// the desktop's existing unbounded behavior otherwise (`convertFileSrc` cannot
 /// handle WSL UNC paths, so inlining is the only option there).
+/// A whole file, for handing to the user rather than displaying (ADR-0185).
+///
+/// Deliberately not a `FileViewerContent` variant: classification decides what
+/// a file *is* so the viewer can render it, while a download does not care —
+/// every kind comes back as the same bytes. Keeping them apart also keeps the
+/// display path from ever growing a "here are the raw bytes too" branch.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileDownloadContent {
+    /// File name only, for the client's save dialog. Never the host path.
+    pub name: String,
+    pub media_type: String,
+    pub base64: String,
+    pub size: usize,
+}
+
+/// Read a whole file for download, bounded by `max_bytes`.
+///
+/// A truncated download is a corrupt file, so this errors instead of returning a
+/// partial body — the caller maps that to 413 and tells the user the file is too
+/// large for the Remote surface.
+#[tauri::command(async)]
+pub fn read_file_for_download(
+    path: String,
+    max_bytes: Option<usize>,
+) -> Result<FileDownloadContent, String> {
+    let resolved = path_utils::resolve_address_path_following_symlinks(&path, None);
+    let file_path = std::path::Path::new(&resolved);
+    let name = file_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    if name.is_empty() {
+        return Err("Cannot download a path without a file name".to_string());
+    }
+    let ext = file_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| format!(".{}", value.to_lowercase()))
+        .unwrap_or_default();
+    let bytes = read_bounded_binary(&resolved, max_bytes, "file")?;
+    Ok(FileDownloadContent {
+        name: name.to_string(),
+        media_type: download_media_type(&ext).to_string(),
+        size: bytes.len(),
+        base64: base64_encode(&bytes),
+    })
+}
+
+/// Only the types the client needs to hand the OS a sensible default app.
+/// Anything else is a byte stream, which is honest and lets the OS decide.
+fn download_media_type(ext: &str) -> &'static str {
+    match ext {
+        ".png" => "image/png",
+        ".jpg" | ".jpeg" => "image/jpeg",
+        ".gif" => "image/gif",
+        ".svg" => "image/svg+xml",
+        ".webp" => "image/webp",
+        ".bmp" => "image/bmp",
+        ".ico" => "image/x-icon",
+        ".avif" => "image/avif",
+        ".pdf" => "application/pdf",
+        ".zip" => "application/zip",
+        ".gz" | ".tgz" => "application/gzip",
+        ".tar" => "application/x-tar",
+        ".json" => "application/json",
+        ".csv" => "text/csv",
+        ".html" | ".htm" => "text/html",
+        ".md" => "text/markdown",
+        ".txt" | ".log" => "text/plain",
+        _ => "application/octet-stream",
+    }
+}
+
 fn read_bounded_binary(
     resolved: &str,
     max_bytes: Option<usize>,
@@ -547,6 +634,18 @@ mod tests {
     }
 
     #[test]
+    fn a_remote_archive_over_the_requested_source_limit_is_rejected_before_listing() {
+        let path = temp_path("remote_limit.zip");
+        std::fs::write(&path, vec![0_u8; 64]).expect("write oversized archive-shaped file");
+
+        let error = read_file_for_viewer(path.to_string_lossy().into_owned(), Some(16))
+            .expect_err("remote archive source must be bounded before parsing");
+
+        assert_eq!(error, "File exceeds the 16 byte viewer limit");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn a_file_that_only_looks_like_a_zip_falls_back_to_binary() {
         let path = temp_path("liar.zip");
         // Big enough to exceed the default limit so the text branch cannot
@@ -583,5 +682,100 @@ mod tests {
             }
             let _ = std::fs::remove_file(&path);
         }
+    }
+
+    /// The download payload is hand-mirrored in `ui/src/lib/tauri-api.ts` too, so
+    /// its wire keys are pinned for the same reason as the viewer union above.
+    #[test]
+    fn download_content_serializes_with_the_key_names_the_frontend_reads() {
+        let value = serde_json::to_value(FileDownloadContent {
+            name: "notes.md".into(),
+            media_type: "text/markdown".into(),
+            base64: "eA".into(),
+            size: 1,
+        })
+        .expect("serialize");
+        let mut keys: Vec<&str> = value
+            .as_object()
+            .expect("object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(keys, vec!["base64", "mediaType", "name", "size"]);
+    }
+
+    #[test]
+    fn read_file_for_download_returns_the_whole_file_and_its_name_only() {
+        let path = temp_path("download.md");
+        std::fs::write(&path, b"# host notes").expect("write file");
+        let content = read_file_for_download(path.to_string_lossy().into_owned(), Some(1024))
+            .expect("download");
+        let expected_name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("file name");
+        assert_eq!(content.name, expected_name);
+        assert_eq!(content.media_type, "text/markdown");
+        assert_eq!(content.size, 12);
+        assert_eq!(base64_decode_to_string(&content.base64), "# host notes");
+        // The host path is the caller's input, never part of the response the
+        // client hands to a save dialog.
+        assert!(!content.name.contains(std::path::MAIN_SEPARATOR));
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn read_file_for_download_gives_a_binary_kind_its_bytes() {
+        // `read_file_for_viewer` answers `Binary { size }` here — no bytes at
+        // all — which is exactly why download cannot reuse that path.
+        let path = temp_path("download.bin");
+        std::fs::write(&path, [0_u8, 1, 2, 255]).expect("write file");
+        let content = read_file_for_download(path.to_string_lossy().into_owned(), Some(1024))
+            .expect("download");
+        assert_eq!(content.media_type, "application/octet-stream");
+        assert_eq!(content.size, 4);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn read_file_for_download_refuses_a_file_over_the_limit_instead_of_truncating() {
+        let path = temp_path("download_big.bin");
+        std::fs::write(&path, vec![b'a'; 64]).expect("write file");
+        let error = read_file_for_download(path.to_string_lossy().into_owned(), Some(16))
+            .expect_err("must refuse");
+        // A truncated download is a corrupt file, so this is an error, not a
+        // shorter body.
+        assert!(error.contains("16 byte"), "unexpected error: {error}");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn download_media_types_cover_what_the_client_hands_the_os() {
+        assert_eq!(download_media_type(".png"), "image/png");
+        assert_eq!(download_media_type(".pdf"), "application/pdf");
+        assert_eq!(download_media_type(".md"), "text/markdown");
+        assert_eq!(download_media_type(".unknown"), "application/octet-stream");
+        assert_eq!(download_media_type(""), "application/octet-stream");
+    }
+
+    fn base64_decode_to_string(encoded: &str) -> String {
+        const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut buffer = 0_u32;
+        let mut bits = 0_u32;
+        let mut bytes = Vec::new();
+        for symbol in encoded.bytes().filter(|byte| *byte != b'=') {
+            let index = ALPHABET
+                .iter()
+                .position(|candidate| *candidate == symbol)
+                .expect("base64 symbol") as u32;
+            buffer = (buffer << 6) | index;
+            bits += 6;
+            if bits >= 8 {
+                bits -= 8;
+                bytes.push((buffer >> bits) as u8);
+            }
+        }
+        String::from_utf8(bytes).expect("utf8")
     }
 }

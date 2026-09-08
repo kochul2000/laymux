@@ -1,3 +1,5 @@
+import { WarningIcon } from "@/components/ui/icons";
+
 interface TerminalOutputStoppedBarProps {
   terminalId: string;
   reason: string;
@@ -28,23 +30,7 @@ export function TerminalOutputStoppedBar({
         borderColor: "var(--yellow)",
       }}
     >
-      <svg
-        width="18"
-        height="18"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden
-        className="shrink-0"
-        style={{ color: "var(--yellow)" }}
-      >
-        <path d="M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0Z" />
-        <path d="M12 9v4" />
-        <path d="M12 17h.01" />
-      </svg>
+      <WarningIcon size={18} className="shrink-0" style={{ color: "var(--yellow)" }} />
       <div className="min-w-0 flex-1">
         <div className="font-semibold">{title}</div>
         <div className="text-[11px]" style={{ color: "var(--text-secondary)" }}>

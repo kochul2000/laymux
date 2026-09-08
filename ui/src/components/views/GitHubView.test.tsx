@@ -260,8 +260,8 @@ describe("GitHubView", () => {
     expect(clipboardWriteText).toHaveBeenCalledWith("feat/wip-branch");
     expect(openExternal).not.toHaveBeenCalled();
     // Only the branch button acknowledges; copy link keeps its own icon.
-    expect(branchButton).toHaveTextContent("✓");
-    expect(screen.getByTestId("github-copy-12")).toHaveTextContent("⧉");
+    expect(branchButton.querySelector(".lucide-check")).toBeInTheDocument();
+    expect(screen.getByTestId("github-copy-12").querySelector(".lucide-copy")).toBeInTheDocument();
   });
 
   it("offers no branch button on rows without a branch", () => {

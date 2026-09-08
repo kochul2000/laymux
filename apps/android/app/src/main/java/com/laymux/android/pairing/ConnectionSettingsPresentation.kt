@@ -1,5 +1,7 @@
 package com.laymux.android.pairing
 
+import com.laymux.android.update.UpdateState
+
 data class ConnectionSettingsState(
     val instanceId: String,
     val pairing: PairingSheetItem?,
@@ -7,6 +9,11 @@ data class ConnectionSettingsState(
     val biometricAvailability: BiometricAvailability,
     val error: String?,
     val notice: String?,
+    /**
+     * 앱 업데이트는 페어링별 상태가 아니지만, 이 다이얼로그가 앱의 유일한
+     * 네이티브 설정 표면이므로 여기에 실어 보낸다 (ADR-0197).
+     */
+    val update: UpdateState,
 )
 
 enum class ConnectionPairingStatus {

@@ -6,8 +6,9 @@ use laymux_lib::settings::{
     FontSettings, GithubSettings, GrokSettings, GrokStatusMessageMode, IssueReporterSettings,
     Keybinding, Layout, LayoutPane, MemoSettings, OutputActivityBurstSettings, PaneClearBusyPolicy,
     PaneClearSettings, PowerSettings, Profile, ProfileDefaults, RemoteSettings, Settings,
-    SettingsLoadResult, StatusLineWidgets, TerminalSettings, ValidationWarning, ViewerSettings,
-    WidgetInstance, WidgetSlots, WidgetsSettings, Workspace, WorkspacePane, WorkspacePaneView,
+    SettingsLoadResult, StatusLineWidgets, TerminalSettings, UpdateSettings, ValidationWarning,
+    ViewerSettings, WidgetInstance, WidgetSlots, WidgetsSettings, Workspace, WorkspacePane,
+    WorkspacePaneView,
 };
 use laymux_lib::state::AppState;
 use laymux_lib::terminal::{SyncGroup, TerminalConfig, TerminalSession};
@@ -207,6 +208,9 @@ fn settings_round_trip_with_full_config() {
             keep_awake: false,
             keep_awake_when_busy: true,
         },
+        update: UpdateSettings {
+            channel: "beta".into(),
+        },
         workspace_selector: Default::default(),
         claude: ClaudeSettings::default(),
         codex: Default::default(),
@@ -282,6 +286,7 @@ fn settings_round_trip_with_full_config() {
     // Spot-check a non-default value: a section left at its default would round
     // trip even if it never reached the file at all.
     assert!(loaded.power.keep_awake_when_busy);
+    assert_eq!(loaded.update.channel, "beta");
     assert_eq!(loaded.grok.command, "grok --yolo");
     assert!(!loaded.grok.restore_session);
     assert_eq!(loaded.grok.session_max_age_hours, 6);
@@ -2459,6 +2464,7 @@ fn settings_load_result_round_trip_recovered() {
             repaired: true,
         }],
         settings_path: "C:\\Users\\test\\settings.json".into(),
+        recovery_revision: "revision-a".into(),
     };
     let json = serde_json::to_string(&result).unwrap();
     assert!(json.contains("\"status\":\"recovered\""));
@@ -2466,6 +2472,7 @@ fn settings_load_result_round_trip_recovered() {
     // does not count a repair as a loss.
     assert!(json.contains("\"dropped\""));
     assert!(json.contains("\"settingsPath\""));
+    assert!(json.contains("\"recoveryRevision\""));
     let parsed: SettingsLoadResult = serde_json::from_str(&json).unwrap();
     assert_eq!(result, parsed);
 }

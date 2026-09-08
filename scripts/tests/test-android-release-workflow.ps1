@@ -22,7 +22,16 @@ $requiredWorkflowTokens = @(
     ":app:assembleRelease",
     "apksigner verify --verbose --print-certs",
     "sha256sum",
-    "gh release upload"
+    "gh release upload",
+    # ADR-0190: both channels feed a client updater, so both tags are checked
+    # against the client contract and the versionCode encoding has one owner.
+    'scripts/release/android-version-code.mjs "$RELEASE_TAG"',
+    "*-beta.*)",
+    "src-tauri/Cargo.toml version",
+    "scripts/release/channel-manifest.mjs",
+    "release-channels",
+    "publish_android:",
+    '--publish-android "$PUBLISH_ANDROID"'
 )
 foreach ($token in $requiredWorkflowTokens) {
     if (-not $workflow.Contains($token)) {
@@ -52,6 +61,111 @@ if ($workflow.Contains("bundleRelease")) {
 
 if ($workflow.Contains('gh release create') -or $workflow.Contains('/releases/tags/$RELEASE_TAG')) {
     throw "draft release identity must come from the create response, not a tag lookup"
+}
+
+# Android publication is explicit for both channels. A requested Android build
+# remains a hard gate; only an intentional omission may be skipped.
+if ($workflow.Contains("needs.prepare.outputs.prerelease == 'false'")) {
+    throw "Android job must not be limited to stable releases"
+}
+if (-not $workflow.Contains("needs.android.result == 'skipped'")) {
+    throw "publish must tolerate an intentional Android omission"
+}
+if (-not $workflow.Contains("needs.prepare.outputs.publish_android == 'false'")) {
+    throw "a skipped Android job must be tied to publish_android=false"
+}
+if (-not $workflow.Contains("needs.prepare.outputs.publish_android == 'true'")) {
+    throw "the Android job must run when publish_android=true"
+}
+if (-not $workflow.Contains("Android release inputs changed since")) {
+    throw "unchanged-Android releases need a source-change guard"
+}
+if (-not $workflow.Contains('--bundles')) {
+    throw "prerelease desktop builds must limit bundles (rpm/deb reject semver prereleases)"
+}
+
+# ADR-0190: the channel branch is written through the API, never a clone that
+# would carry a credential and the source tree into the deployment branch.
+if ($workflow.Contains('x-access-token:$GH_TOKEN@github.com')) {
+    throw "the channel job must not embed the token in a clone URL"
+}
+if (-not $workflow.Contains('--seed-stable true')) {
+    throw "the channel job must seed a missing stable manifest so neither channel 404s"
+}
+if (-not $workflow.Contains('needs: [prepare, build, android, channel_bootstrap]')) {
+    throw "publish must wait for the channel branch to be seeded"
+}
+if (-not $workflow.Contains('release-version.mjs')) {
+    throw "channel forwardness must be checked before publish"
+}
+if (-not $workflow.Contains('publish-channel-commit.sh')) {
+    throw "channel commits must go through the shared API publisher"
+}
+
+# `gh api` prints the error body to stdout on a 404 without applying --jq, so a
+# missing channel file reads as a non-empty value. Probing by output made the
+# bootstrap job pass without seeding anything (run 32559427438).
+if ($workflow -match '(?m)^\s*\w+="\$\(gh api [^\n]*contents/[^\n]*--jq[^\n]*\|\| true\)"') {
+    throw "channel file probes must branch on gh api exit status, not captured output"
+}
+if (-not $workflow.Contains('if gh api "repos/$GITHUB_REPOSITORY/contents/desktop-stable.json?ref=$BRANCH" >/dev/null 2>&1 &&')) {
+    throw "the bootstrap seeding guard must test the gh api exit status"
+}
+
+# ADR-0197: the Android channel files ship in the same commit as the desktop
+# ones. The guard is per-file, not per-branch — a branch seeded before the
+# Android channel existed would otherwise 404 for every channel-aware phone.
+if (-not $workflow.Contains('gh api "repos/$GITHUB_REPOSITORY/contents/android-stable.json?ref=$BRANCH" >/dev/null 2>&1; then')) {
+    throw "the bootstrap guard must also require the Android stable manifest"
+}
+$channelPublisher = Get-Content -Raw -Encoding utf8 (
+    Join-Path $repoRoot "scripts/release/publish-channel-commit.sh"
+)
+foreach ($file in @("android-stable.json", "android-beta.json")) {
+    if (-not $workflow.Contains($file)) {
+        throw "the channel jobs must carry $file (the publisher rebuilds the whole tree)"
+    }
+    if (-not $channelPublisher.Contains($file)) {
+        throw "publish-channel-commit.sh must include $file in the tree"
+    }
+}
+if (-not $workflow.Contains('"Laymux-Android-" + $version + ".apk"')) {
+    throw "seeding must discover a release whose Android APK was actually published"
+}
+if (-not $workflow.Contains('--android-tag "$android_seed_tag"')) {
+    throw "desktop and Android bootstrap tags must be independently selectable"
+}
+if (-not $workflow.Contains('--pub-date')) {
+    throw "the Android manifest pubDate must come from the release, not the runner clock"
+}
+
+# The channel publisher had the same trap inside it: a 404 body became the parent
+# commit sha. It also died with exit 126 when checked out as 100644, and that
+# failure lands *after* publish — the release goes latest with a stale channel.
+$publisher = Join-Path $repoRoot "scripts/release/publish-channel-commit.sh"
+$publisherSource = Get-Content -Raw -Encoding utf8 $publisher
+if ($publisherSource -match '(?m)branch_sha="\$\(gh api [^\n]*\|\| true\)"') {
+    throw "publish-channel-commit.sh must branch on gh api exit status, not captured output"
+}
+$mode = (& git -C $repoRoot ls-files -s -- scripts/release/publish-channel-commit.sh) -split '\s+' | Select-Object -First 1
+if ($mode -ne "100755") {
+    throw "publish-channel-commit.sh must be executable in git (found $mode)"
+}
+foreach ($call in ($workflow -split "`n" | Where-Object { $_ -match 'publish-channel-commit\.sh' })) {
+    if ($call -notmatch 'bash\s+"\$GITHUB_WORKSPACE') {
+        throw "the channel publisher must be invoked via bash so the file mode cannot break it: $($call.Trim())"
+    }
+}
+
+# The release-contract scripts are only a gate if something runs them.
+& node (Join-Path $repoRoot "scripts/tests/release-channels.test.mjs")
+if ($LASTEXITCODE -ne 0) {
+    throw "release channel script tests failed"
+}
+
+$updater = Get-Content -Raw -Encoding utf8 (Join-Path $repoRoot "src-tauri/tauri.conf.json")
+if ($updater.Contains("releases/latest/download/latest.json")) {
+    throw "the static updater endpoint must be the stable channel manifest (ADR-0190)"
 }
 
 Write-Output "Android release workflow contract passed"

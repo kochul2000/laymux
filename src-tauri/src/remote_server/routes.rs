@@ -13,6 +13,7 @@ use tokio::time;
 use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
+use crate::android_e2e::AndroidE2eRequestContext;
 use crate::automation_server::ServerState;
 use crate::commands::{resize_terminal_inner, write_terminal_input_inner, write_to_terminal_inner};
 use crate::constants::{REMOTE_CLAIM_RESERVATION_TTL_MS, REMOTE_CLAIM_RETRY_AFTER_MS};
@@ -29,16 +30,17 @@ use super::assets::{
     remote_addon_fit_js, remote_font, remote_unicode_provider_js, remote_web_links_addon_js,
     remote_xterm_css, remote_xterm_js,
 };
+use super::attachments::remote_terminal_attachment;
 use super::auth::remote_guard;
-use super::display_settings::{remote_display_settings, update_remote_display_settings};
+use super::composer_routes::{remote_composer_starred, remote_composer_starred_update};
 use super::font_assets::FONT_ROUTE_PATH;
 use super::github_repo_routes::remote_terminal_github_repo;
 use super::lease::{
     active_lease_matches_with_timeout, effective_heartbeat_timeout_seconds,
     emit_remote_control_status, get_remote_control_status, reclaim_lockout_active,
     require_active_lease, status_from_state, wait_for_remote_owner_transition_async,
-    AndroidE2eClaimContext, ClaimReservationAttempt, HumanControlOrigin, RemoteControlLease,
-    RemoteControlState, RemoteControlStatus, RemoteOwnerTransition,
+    ClaimReservationAttempt, HumanControlOrigin, RemoteControlLease, RemoteControlState,
+    RemoteControlStatus, RemoteOwnerTransition,
 };
 use super::navigation_routes::{
     remote_layouts_list, remote_navigation, remote_notification_mark_read,
@@ -55,9 +57,9 @@ use super::page_assets::remote_hashed_asset;
 use super::pwa::{remote_manifest, remote_pwa_icon, ICON_ROUTE_PATH, MANIFEST_ROUTE_PATH};
 use super::terminal_info::remote_terminal_infos;
 use super::update_routes::{remote_update_check, remote_update_install, remote_update_status};
-use super::viewer_page::{remote_viewer_javascript, remote_viewer_page};
 use super::viewer_routes::{
-    remote_file_viewer_path_link, remote_file_viewer_render, remote_file_viewer_status,
+    remote_file_viewer_download, remote_file_viewer_list, remote_file_viewer_path_link,
+    remote_file_viewer_render, remote_file_viewer_status, remote_file_viewer_status_android,
 };
 use super::widget_routes::remote_widgets;
 use super::{internal_error, json_error};
@@ -83,6 +85,18 @@ struct ClaimResponse {
     status: RemoteControlStatus,
     resume_token: String,
     file_viewer_token: String,
+    /// Host attachment policy (ADR-0227) so the page sizes its checks and
+    /// file chooser to this host instead of a built-in constant.
+    attachments: super::attachments::AttachmentPolicy,
+}
+
+/// `/session/status` answer: the control status plus the attachment policy.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionStatusResponse {
+    #[serde(flatten)]
+    status: RemoteControlStatus,
+    attachments: super::attachments::AttachmentPolicy,
 }
 
 #[derive(Debug, Deserialize)]
@@ -120,6 +134,19 @@ struct TerminalResizeRequest {
 #[serde(rename_all = "camelCase")]
 struct RemoteQuery {
     lease_id: Option<String>,
+    /// Scroll-top history expansion: the attach screen budget this client asks
+    /// for, in KiB. Only raises the owner-configured budget (ADR-0182). Kept as
+    /// a string so an unparsable value degrades to the owner budget instead of
+    /// rejecting the whole attach — the same fail-open the Cloud tunnel uses.
+    history_kib: Option<String>,
+}
+
+impl RemoteQuery {
+    fn history_kib(&self) -> Option<u32> {
+        self.history_kib
+            .as_deref()
+            .and_then(|value| value.parse::<u32>().ok())
+    }
 }
 
 pub fn build_router(state: ServerState) -> Router<ServerState> {
@@ -139,7 +166,9 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         )
         .route(
             "/remote/v1/e2e/rpc",
-            post(remote_android_e2e_rpc).layer(DefaultBodyLimit::max(2 * 1024 * 1024)),
+            // The handler bounds the envelope itself from the host's attachment
+            // maximum (ADR-0227) instead of a static limit.
+            post(remote_android_e2e_rpc).layer(DefaultBodyLimit::disable()),
         )
         .route(ANDROID_E2E_OUTPUT_PATH, get(remote_android_e2e_output_ws))
         .route("/remote/v1/session/status", get(remote_session_status))
@@ -149,13 +178,15 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
             post(remote_session_heartbeat),
         )
         .route("/remote/v1/session/release", post(remote_session_release))
-        .route(
-            "/remote/v1/display-settings",
-            get(remote_display_settings)
-                .put(update_remote_display_settings)
-                .layer(DefaultBodyLimit::max(2 * 1024)),
-        )
         .route("/remote/v1/navigation", get(remote_navigation))
+        .route(
+            "/remote/v1/composer/starred",
+            get(remote_composer_starred)
+                .post(remote_composer_starred_update)
+                .layer(DefaultBodyLimit::max(
+                    crate::constants::REMOTE_COMPOSER_STARRED_REQUEST_MAX_BYTES,
+                )),
+        )
         .route("/remote/v1/layouts", get(remote_layouts_list))
         // Lease-free like `navigation`: the strip only reads (ADR-0124).
         .route("/remote/v1/widgets", get(remote_widgets))
@@ -213,6 +244,12 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
             post(remote_terminal_input),
         )
         .route(
+            "/remote/v1/terminals/{id}/attachments",
+            // The handler bounds the body itself from `remote.attachmentMaxMib`
+            // (ADR-0227); axum's static default limit would cap it at 2 MiB.
+            post(remote_terminal_attachment).layer(DefaultBodyLimit::disable()),
+        )
+        .route(
             "/remote/v1/terminals/{id}/resize",
             post(remote_terminal_resize),
         )
@@ -222,16 +259,21 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         )
         .route(
             "/remote/v1/file-viewer/status",
-            get(remote_file_viewer_status),
+            get(remote_file_viewer_status).post(remote_file_viewer_status_android),
         )
         .route(
             "/remote/v1/file-viewer/render",
             post(remote_file_viewer_render),
         )
         .route(
+            "/remote/v1/file-viewer/download",
+            post(remote_file_viewer_download),
+        )
+        .route(
             "/remote/v1/file-viewer/path-link",
             post(remote_file_viewer_path_link),
         )
+        .route("/remote/v1/file-viewer/list", post(remote_file_viewer_list))
         // OAuth loopback relay (ADR-0175). Sized for an auth URL / callback
         // query, both bounded well under these caps by the handlers.
         .route(
@@ -281,8 +323,6 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         // vendor assets.
         .route(MANIFEST_ROUTE_PATH, get(remote_manifest))
         .route(ICON_ROUTE_PATH, get(remote_pwa_icon))
-        .route("/remote/viewer/", get(remote_viewer_page))
-        .route("/remote/viewer/viewer.js", get(remote_viewer_javascript))
         .merge(api_routes)
 }
 
@@ -294,9 +334,21 @@ async fn remote_health() -> Response {
     .into_response()
 }
 
-async fn remote_session_status(State(server): State<ServerState>) -> Response {
+async fn remote_session_status(
+    State(server): State<ServerState>,
+    transport: Option<axum::Extension<super::RemoteTransport>>,
+) -> Response {
+    let transport = transport.map(|axum::Extension(transport)| transport);
+    let attachments = match effective_remote_settings(&server.app_state) {
+        Ok(settings) => super::attachments::AttachmentPolicy::from_settings(&settings, transport),
+        Err(err) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, &err),
+    };
     match get_remote_control_status(&server.app_state) {
-        Ok(status) => Json(status).into_response(),
+        Ok(status) => Json(SessionStatusResponse {
+            status,
+            attachments,
+        })
+        .into_response(),
         Err(err) => json_error(StatusCode::INTERNAL_SERVER_ERROR, &err),
     }
 }
@@ -318,12 +370,31 @@ fn conflict_status_response(current: &RemoteControlState, timeout_seconds: u64) 
 /// One claim attempt under the owner lock. `allow_handoff_wait` is true only
 /// on the first pass: a voluntary-release drain whose handoff capability
 /// matches yields `AwaitHandoff`, and the caller retries once after the drain.
+#[cfg(test)]
 fn attempt_claim(
     settings: &crate::settings::models::RemoteSettings,
     current: &mut RemoteControlState,
     body: &ClaimRequest,
     remote_addr: &str,
     allow_handoff_wait: bool,
+) -> ClaimAttempt {
+    attempt_claim_with_context(
+        settings,
+        current,
+        body,
+        remote_addr,
+        allow_handoff_wait,
+        None,
+    )
+}
+
+fn attempt_claim_with_context(
+    settings: &crate::settings::models::RemoteSettings,
+    current: &mut RemoteControlState,
+    body: &ClaimRequest,
+    remote_addr: &str,
+    allow_handoff_wait: bool,
+    request_context: Option<&AndroidE2eRequestContext>,
 ) -> ClaimAttempt {
     if !settings.enabled {
         return ClaimAttempt::Rejected(json_error(
@@ -409,13 +480,18 @@ fn attempt_claim(
     );
     let resume_token = current.issue_resume_capability(&lease_id);
     let file_viewer_token = current.issue_file_viewer_capability(&lease_id);
+    if let Some(context) = request_context {
+        current.tag_android_e2e_lease(&lease_id, context);
+    }
     ClaimAttempt::Granted(Box::new(ClaimResponse {
         status: status_from_state(current, timeout_seconds),
         resume_token,
         file_viewer_token,
+        attachments: super::attachments::AttachmentPolicy::from_settings(settings, None),
     }))
 }
 
+#[cfg(test)]
 fn complete_handoff_claim_attempt(
     settings: &crate::settings::models::RemoteSettings,
     current: &mut RemoteControlState,
@@ -423,31 +499,71 @@ fn complete_handoff_claim_attempt(
     remote_addr: &str,
     transition: RemoteOwnerTransition,
 ) -> ClaimAttempt {
+    complete_handoff_claim_attempt_with_context(
+        settings,
+        current,
+        body,
+        remote_addr,
+        transition,
+        None,
+    )
+}
+
+fn complete_handoff_claim_attempt_with_context(
+    settings: &crate::settings::models::RemoteSettings,
+    current: &mut RemoteControlState,
+    body: &ClaimRequest,
+    remote_addr: &str,
+    transition: RemoteOwnerTransition,
+    request_context: Option<&AndroidE2eRequestContext>,
+) -> ClaimAttempt {
     current.finalize_owner_transition_if_drained(transition);
-    attempt_claim(settings, current, body, remote_addr, false)
+    attempt_claim_with_context(settings, current, body, remote_addr, false, request_context)
 }
 
 async fn remote_session_claim(
     State(server): State<ServerState>,
     ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
-    claim_context: Option<axum::Extension<AndroidE2eClaimContext>>,
+    request_context: Option<axum::Extension<AndroidE2eRequestContext>>,
+    transport: Option<axum::Extension<super::RemoteTransport>>,
     Json(body): Json<ClaimRequest>,
 ) -> Response {
     let remote_addr = addr.to_string();
+    let transport = transport.map(|axum::Extension(transport)| transport);
+    // Read the transport-aware attachment policy (ADR-0227) before touching
+    // lease state so a settings read failure cannot grant a lease behind a 500.
+    let attachments = match effective_remote_settings(&server.app_state) {
+        Ok(settings) => super::attachments::AttachmentPolicy::from_settings(&settings, transport),
+        Err(err) => return internal_error(err),
+    };
     // A lease claimed through an E2E session must not outlive that session:
     // a reconnecting phone otherwise fights its own dead lease with 409s
-    // until the heartbeat timeout (ADR-0170). The registry is consulted
-    // outside the controller lock; the release re-validates under it.
+    // until the heartbeat timeout (ADR-0170). Dead-lease cleanup consults the
+    // registry outside the controller lock and re-validates under it. The
+    // actual E2E claim commit instead holds the registry across the ordered
+    // remote_access -> remote_control transaction (ADR-0208).
     if let Some(response) = release_dead_android_e2e_lease(&server) {
         return response;
     }
-    let attempt =
-        match with_effective_remote_control_state(&server.app_state, |settings, current| {
-            attempt_claim(settings, current, &body, &remote_addr, true)
-        }) {
-            Ok(attempt) => attempt,
-            Err(err) => return internal_error(err),
-        };
+    let request_context = request_context
+        .as_ref()
+        .map(|axum::Extension(context)| context);
+    let attempt = match with_current_android_e2e_request_context(&server, request_context, || {
+        with_effective_remote_control_state(&server.app_state, |settings, current| {
+            attempt_claim_with_context(
+                settings,
+                current,
+                &body,
+                &remote_addr,
+                true,
+                request_context,
+            )
+        })
+    }) {
+        Ok(Some(attempt)) => attempt,
+        Ok(None) => return json_error(StatusCode::FORBIDDEN, "Android E2E session is not current"),
+        Err(err) => return internal_error(err),
+    };
 
     let attempt = match attempt {
         ClaimAttempt::AwaitHandoff(transition) => {
@@ -460,10 +576,22 @@ async fn remote_session_claim(
             // remains an internal error rather than a retryable conflict.
             let _wait_result =
                 wait_for_remote_owner_transition_async(&server.app_state, transition).await;
-            match with_effective_remote_control_state(&server.app_state, |settings, current| {
-                complete_handoff_claim_attempt(settings, current, &body, &remote_addr, transition)
+            match with_current_android_e2e_request_context(&server, request_context, || {
+                with_effective_remote_control_state(&server.app_state, |settings, current| {
+                    complete_handoff_claim_attempt_with_context(
+                        settings,
+                        current,
+                        &body,
+                        &remote_addr,
+                        transition,
+                        request_context,
+                    )
+                })
             }) {
-                Ok(attempt) => attempt,
+                Ok(Some(attempt)) => attempt,
+                Ok(None) => {
+                    return json_error(StatusCode::FORBIDDEN, "Android E2E session is not current")
+                }
                 Err(err) => return internal_error(err),
             }
         }
@@ -471,16 +599,11 @@ async fn remote_session_claim(
     };
 
     match attempt {
-        ClaimAttempt::Granted(response) => {
-            if let (Some(axum::Extension(context)), Some(lease_id)) =
-                (claim_context.as_ref(), response.status.lease_id.as_ref())
-            {
-                match server.app_state.remote_control.lock_or_err() {
-                    Ok(mut control) => control.tag_android_e2e_lease(lease_id, context),
-                    Err(err) => return internal_error(err),
-                }
-            }
+        ClaimAttempt::Granted(mut response) => {
             emit_remote_control_status(&server.app_handle, &response.status);
+            // The attempt runs under the owner lock without transport
+            // knowledge; the relay-aware policy read above replaces it here.
+            response.attachments = attachments;
             Json(*response).into_response()
         }
         ClaimAttempt::Rejected(response) => response,
@@ -489,6 +612,28 @@ async fn remote_session_claim(
             "remote controller lease is not active",
         ),
     }
+}
+
+fn with_current_android_e2e_request_context<R>(
+    server: &ServerState,
+    context: Option<&AndroidE2eRequestContext>,
+    operation: impl FnOnce() -> Result<R, String>,
+) -> Result<Option<R>, String> {
+    let Some(context) = context else {
+        return operation().map(Some);
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "System clock is before Unix epoch".to_string())?
+        .as_secs();
+    crate::android_pairing::with_lifecycle(|| {
+        server
+            .app_state
+            .android_e2e
+            .with_current_request_context(context, now, operation)
+    })
+    .map_err(|error| error.to_string())?
+    .transpose()
 }
 
 /// Releases a controller lease whose Android E2E session is gone (revoked by
@@ -792,6 +937,7 @@ async fn remote_terminal_output_ws(
     Query(query): Query<RemoteQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
+    let history_kib = query.history_kib();
     let Some(lease_id) = query.lease_id.filter(|value| !value.is_empty()) else {
         return json_error(StatusCode::CONFLICT, "remote controller lease is required");
     };
@@ -803,7 +949,7 @@ async fn remote_terminal_output_ws(
         Err(err) => return internal_error(err),
     };
     let timeout_seconds = effective_heartbeat_timeout_seconds(&settings);
-    let snapshot_max_bytes = super::effective_snapshot_max_bytes(&settings);
+    let snapshot_max_bytes = super::effective_attach_snapshot_max_bytes(history_kib);
 
     ws.on_upgrade(move |socket| {
         stream_terminal_output(
@@ -1010,7 +1156,7 @@ fn terminal_control_response(result: Result<(), String>) -> Response {
     }
 }
 
-fn lease_id_from_headers(headers: &HeaderMap) -> Option<&str> {
+pub(super) fn lease_id_from_headers(headers: &HeaderMap) -> Option<&str> {
     headers
         .get(REMOTE_LEASE_HEADER)
         .and_then(|value| value.to_str().ok())
@@ -1024,10 +1170,10 @@ fn terminal_size_is_positive(cols: u16, rows: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        attempt_claim, claim_input_busy_response, complete_handoff_claim_attempt,
-        exact_resize_unavailable_response, terminal_control_response, terminal_size_is_positive,
-        ClaimAttempt, ClaimRequest, ClaimResponse, RemoteControlLease, RemoteControlState,
-        TerminalResizeRequest,
+        attempt_claim, attempt_claim_with_context, claim_input_busy_response,
+        complete_handoff_claim_attempt, exact_resize_unavailable_response,
+        terminal_control_response, terminal_size_is_positive, ClaimAttempt, ClaimRequest,
+        ClaimResponse, RemoteControlLease, RemoteControlState, RemoteQuery, TerminalResizeRequest,
     };
     use crate::lock_ext::MutexExt;
     use crate::settings::models::RemoteSettings;
@@ -1039,6 +1185,8 @@ mod tests {
     use axum::response::{IntoResponse, Response};
     use axum::routing::get;
     use axum::{middleware, Router};
+    use std::sync::{mpsc, Arc};
+    use std::thread;
     use std::time::{Duration, Instant};
     use tower::ServiceExt;
 
@@ -1075,6 +1223,134 @@ mod tests {
                 panic!("expected a rejected claim, got AwaitHandoff")
             }
         }
+    }
+
+    #[test]
+    fn android_e2e_claim_installs_its_exact_session_binding_with_the_lease() {
+        let app_state = AppState::default();
+        let context =
+            app_state
+                .android_e2e
+                .install_test_request_context("desktop-7", "session-a", u64::MAX);
+        let mut current = RemoteControlState::default();
+
+        let granted = expect_granted(attempt_claim_with_context(
+            &enabled_settings(),
+            &mut current,
+            &claim_body(None),
+            "relay",
+            true,
+            Some(&context),
+        ));
+        let lease_id = granted.status.lease_id.expect("granted lease id");
+        let tag = current
+            .active_android_e2e_lease()
+            .expect("claim-owned E2E binding");
+
+        assert_eq!(tag.lease_id, lease_id);
+        assert_eq!(tag.owner_epoch, current.owner_epoch);
+        assert_eq!(tag.instance_id, "desktop-7");
+        assert_eq!(tag.session_id, "session-a");
+        assert!(!granted.file_viewer_token.is_empty());
+    }
+
+    #[test]
+    fn android_claim_commit_holds_pairing_lifecycle_before_owner_state() {
+        let app_state = Arc::new(AppState::default());
+        let context =
+            app_state
+                .android_e2e
+                .install_test_request_context("desktop-7", "session-a", u64::MAX);
+        let (commit_entered_tx, commit_entered_rx) = mpsc::channel();
+        let (release_commit_tx, release_commit_rx) = mpsc::channel();
+        let commit_state = Arc::clone(&app_state);
+        let commit = thread::spawn(move || {
+            crate::android_pairing::with_lifecycle(|| {
+                commit_state.android_e2e.with_current_request_context(
+                    &context,
+                    1_000,
+                    || -> Result<ClaimAttempt, String> {
+                        commit_entered_tx.send(()).expect("signal claim commit");
+                        release_commit_rx.recv().expect("release claim commit");
+                        let _access = commit_state.remote_access.lock_or_err()?;
+                        let mut control = commit_state.remote_control.lock_or_err()?;
+                        Ok(attempt_claim_with_context(
+                            &enabled_settings(),
+                            &mut control,
+                            &claim_body(None),
+                            "relay",
+                            true,
+                            Some(&context),
+                        ))
+                    },
+                )
+            })
+            .expect("pairing lifecycle")
+            .expect("current request context")
+            .expect("owner transaction")
+        });
+        commit_entered_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("claim commit entered");
+
+        let (pairing_entered_tx, pairing_entered_rx) = mpsc::channel();
+        let pairing = thread::spawn(move || {
+            crate::android_pairing::with_lifecycle(|| {
+                pairing_entered_tx
+                    .send(())
+                    .expect("signal pairing transaction");
+                Ok(())
+            })
+            .expect("pairing transaction");
+        });
+        assert!(
+            pairing_entered_rx
+                .recv_timeout(Duration::from_millis(50))
+                .is_err(),
+            "pairing revision mutation must wait for the claim commit"
+        );
+
+        release_commit_tx.send(()).expect("finish claim commit");
+        expect_granted(commit.join().expect("claim commit thread"));
+        pairing_entered_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("pairing transaction follows claim commit");
+        pairing.join().expect("pairing thread");
+    }
+
+    #[test]
+    fn pairing_revocation_that_wins_first_cannot_mutate_owner_state() {
+        let app_state = AppState::default();
+        let context =
+            app_state
+                .android_e2e
+                .install_test_request_context("desktop-7", "session-a", u64::MAX);
+        crate::android_pairing::with_lifecycle(|| app_state.android_e2e.clear())
+            .expect("revoke sessions");
+
+        let outcome = crate::android_pairing::with_lifecycle(|| {
+            app_state
+                .android_e2e
+                .with_current_request_context(&context, 1_000, || {
+                    let mut control = app_state.remote_control.lock().expect("owner lock");
+                    attempt_claim_with_context(
+                        &enabled_settings(),
+                        &mut control,
+                        &claim_body(None),
+                        "relay",
+                        true,
+                        Some(&context),
+                    )
+                })
+        })
+        .expect("pairing lifecycle");
+
+        assert!(outcome.is_none());
+        let control = app_state.remote_control.lock().expect("owner lock");
+        assert_eq!(control.owner_epoch, 0);
+        assert!(control.lease.is_none());
+        assert!(!control.has_file_viewer_capability_for_test());
+        assert!(control.active_android_e2e_lease().is_none());
     }
 
     /// Pins the axum behaviour `build_router` relies on: a guard attached with
@@ -1115,6 +1391,55 @@ mod tests {
         assert!(!terminal_size_is_positive(80, 0));
         assert!(!terminal_size_is_positive(0, 0));
         assert!(terminal_size_is_positive(80, 24));
+    }
+
+    #[test]
+    fn output_attach_query_carries_an_optional_history_budget() {
+        let parse = |query: &str| {
+            let uri: axum::http::Uri = format!("http://remote/output?{query}").parse().unwrap();
+            axum::extract::Query::<RemoteQuery>::try_from_uri(&uri).map(|query| query.0)
+        };
+
+        assert_eq!(parse("leaseId=lease-1").unwrap().history_kib(), None);
+        assert_eq!(
+            parse("leaseId=lease-1&historyKib=256")
+                .unwrap()
+                .history_kib(),
+            Some(256)
+        );
+        // Fail-open: an unparsable budget attaches at the owner's own budget
+        // instead of rejecting the upgrade and killing the terminal view.
+        assert_eq!(
+            parse("leaseId=lease-1&historyKib=huge")
+                .unwrap()
+                .history_kib(),
+            None
+        );
+        assert_eq!(
+            parse("leaseId=lease-1&historyKib=-8")
+                .unwrap()
+                .history_kib(),
+            None
+        );
+
+        // The attach budget the output route hands to the checkpoint request is
+        // the device value applied above the server fallback.
+        assert_eq!(
+            crate::remote_server::effective_attach_snapshot_max_bytes(
+                parse("leaseId=lease-1&historyKib=256")
+                    .unwrap()
+                    .history_kib()
+            ),
+            256 * 1024
+        );
+        assert_eq!(
+            crate::remote_server::effective_attach_snapshot_max_bytes(
+                parse("leaseId=lease-1&historyKib=huge")
+                    .unwrap()
+                    .history_kib()
+            ),
+            4 * 1024
+        );
     }
 
     #[test]

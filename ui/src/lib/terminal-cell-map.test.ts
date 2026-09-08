@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { reconstructLine, readLineCells, type CellInfo } from "./terminal-cell-map";
+import {
+  findTokenCellRange,
+  readCellRangeText,
+  reconstructLine,
+  readLineCells,
+  type CellInfo,
+} from "./terminal-cell-map";
 
 /** ASCII 한 글자 = 1셀. */
 function ascii(text: string): CellInfo[] {
@@ -78,5 +84,52 @@ describe("readLineCells", () => {
       { chars: " ", width: 1 },
       { chars: " ", width: 1 },
     ]);
+  });
+});
+
+// -- ADR-0224 액션 칩의 원문 캡처/재검사 --
+
+describe("readCellRangeText", () => {
+  it("셀 범위(끝 포함) 안의 문자만 읽는다", () => {
+    const cells = ascii("abcdef");
+    expect(readCellRangeText(cells, 2, 4)).toBe("bcd");
+    expect(readCellRangeText(cells, 1, 6)).toBe("abcdef");
+  });
+
+  it("와이드 문자는 두 셀을 모두 덮어야 포함된다", () => {
+    // "a한b" → a(1) 한(2~3) b(4)
+    const cells = [...ascii("a"), ...wide("한"), ...ascii("b")];
+    expect(readCellRangeText(cells, 1, 4)).toBe("a한b");
+    expect(readCellRangeText(cells, 2, 3)).toBe("한");
+    // 뒷셀이 범위 밖이면 그 글자는 빠진다 — 절반만 캡처된 범위를 원문으로
+    // 인정하지 않는다.
+    expect(readCellRangeText(cells, 2, 2)).toBe("");
+  });
+
+  it("범위 밖이면 빈 문자열", () => {
+    expect(readCellRangeText(ascii("abc"), 10, 20)).toBe("");
+  });
+});
+
+describe("findTokenCellRange", () => {
+  it("클릭 지점을 덮는 출현의 셀 범위를 돌려준다", () => {
+    const cells = ascii("see https://a.io and https://a.io end");
+    // 첫 출현: offset 4..15 → 셀 5..16
+    expect(findTokenCellRange(cells, "https://a.io", 6)).toEqual({ startCol: 5, endCol: 16 });
+    // 두 번째 출현: offset 21..32 → 셀 22..33
+    expect(findTokenCellRange(cells, "https://a.io", 25)).toEqual({ startCol: 22, endCol: 33 });
+  });
+
+  it("어떤 출현도 덮지 않으면 null", () => {
+    const cells = ascii("see https://a.io end");
+    expect(findTokenCellRange(cells, "https://a.io", 2)).toBeNull();
+    expect(findTokenCellRange(cells, "https://b.io", 6)).toBeNull();
+    expect(findTokenCellRange(cells, "", 6)).toBeNull();
+  });
+
+  it("와이드 문자가 앞서면 셀 컬럼으로 보정한다", () => {
+    // "한 http://a.io" → 한(1~2) 공백(3) URL(4~14)
+    const cells = [...wide("한"), ...ascii(" http://a.io")];
+    expect(findTokenCellRange(cells, "http://a.io", 5)).toEqual({ startCol: 4, endCol: 14 });
   });
 });

@@ -27,10 +27,29 @@ const UI_ROOT = process.cwd();
  * 510 kB kept roughly that same small margin. Sleep prevention (ADR-0114) then
  * added ~2.6 kB of always-visible chrome — a top-bar toggle, its coordinator,
  * and one Settings group — taking the entry to 512,576 B. 515 kB restores the
- * same small margin rather than banking room for several more features: the
- * point of the guard is to make the next increase a conscious decision too.
+ * same small margin rather than banking room for several more features.
+ * Codex 0.150+ cursor-tail recognition and its byte-exact fail-open boundaries
+ * then took the entry to 515,856 B. Session checkpoint coordination (ADR-0222)
+ * adds the always-on lifecycle/revision fence and attribution coverage needed
+ * before update/eviction, taking the combined entry to 518,182 B. 521 kB keeps
+ * 2,818 B of headroom; the point of the guard is to make the next increase a
+ * conscious decision too.
+ *
+ * The link activation gate (ADR-0224) then added three always-loaded modules —
+ * the gesture→result mapping, the action chip's DOM view and its lifetime
+ * session — plus the chip's labels and one Settings group's strings in both
+ * locales, taking the entry to 525,051 B. Korean copy costs 3 bytes a
+ * character, so the strings are about a third of that. 528 kB restores the same
+ * ~3 kB margin rather than banking room for the next feature.
+ *
+ * Later link-chip liveness, host-global Composer starred commands and Remote
+ * attachment settings raised the base entry to 530,081 B without moving this
+ * gate. The shared file-kind icon mapping adds 264 B, taking it to 530,345 B.
+ * 533 kB restores 2,655 B of headroom instead of banking room for more work.
+ * Composer starred-entry labels, send metadata and the shared editor take the
+ * combined entry to 536,758 B. 540 kB keeps the same small margin.
  */
-const STARTUP_CHUNK_BUDGET_BYTES = 515_000;
+const STARTUP_CHUNK_BUDGET_BYTES = 540_000;
 
 /**
  * Ceiling for a lazily-imported **syntax grammar**. Generous because a

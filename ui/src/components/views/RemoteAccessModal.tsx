@@ -60,6 +60,7 @@ export function RemoteAccessModal() {
   const [status, setStatus] = useState<RemoteControlStatus | null>(null);
   const [androidPairing, setAndroidPairing] = useState<AndroidPairingStatus | null>(null);
   const [androidQrSvg, setAndroidQrSvg] = useState<string | null>(null);
+  const [androidPairingPayload, setAndroidPairingPayload] = useState<string | null>(null);
   // Read once at mount. It is a render input (it decides which host resolves by
   // default), so it lives in lazily-initialised state rather than a ref —
   // refs must not be read during render.
@@ -121,7 +122,10 @@ export function RemoteAccessModal() {
         .then((next) => {
           if (cancelled) return;
           setAndroidPairing(next);
-          if (next.phase !== "pending") setAndroidQrSvg(null);
+          if (next.phase !== "pending") {
+            setAndroidQrSvg(null);
+            setAndroidPairingPayload(null);
+          }
         })
         .catch(() => {});
     };
@@ -191,9 +195,16 @@ export function RemoteAccessModal() {
   };
 
   const handleCopy = async (key: string, value: string) => {
-    await navigator.clipboard?.writeText(value);
-    setCopied(key);
-    window.setTimeout(() => setCopied((current) => (current === key ? null : current)), 1200);
+    setError(null);
+    try {
+      const clipboard = navigator.clipboard;
+      if (!clipboard) throw new Error(t("remoteAccess.copyUnavailable"));
+      await clipboard.writeText(value);
+      setCopied(key);
+      window.setTimeout(() => setCopied((current) => (current === key ? null : current)), 1200);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("remoteAccess.copyFailed"));
+    }
   };
 
   const tokenForEnable = () => token || generateRemoteToken();
@@ -241,10 +252,14 @@ export function RemoteAccessModal() {
   const handleCreateAndroidPairing = async () => {
     setActionPending("android-create");
     setError(null);
+    setAndroidQrSvg(null);
+    setAndroidPairingPayload(null);
+    setCopied((current) => (current === "android-pairing" ? null : current));
     try {
       const created = await createAndroidPairingQr();
       setAndroidPairing(created.status);
       setAndroidQrSvg(created.qrSvg);
+      setAndroidPairingPayload(created.pairingPayload);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -255,9 +270,11 @@ export function RemoteAccessModal() {
   const handleRevokeAndroidPairing = async () => {
     setActionPending("android-revoke");
     setError(null);
+    setAndroidQrSvg(null);
+    setAndroidPairingPayload(null);
+    setCopied((current) => (current === "android-pairing" ? null : current));
     try {
       setAndroidPairing(await revokeAndroidPairing());
-      setAndroidQrSvg(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -462,6 +479,23 @@ export function RemoteAccessModal() {
             <div className="text-center text-[11px]" style={{ color: "var(--text-secondary)" }}>
               {t("remoteAccess.androidPairingScanHint")}
             </div>
+            {androidPairingPayload && (
+              <button
+                type="button"
+                data-testid="android-pairing-copy"
+                onClick={() => void handleCopy("android-pairing", androidPairingPayload)}
+                className="hover-bg rounded px-3 py-1.5 text-xs"
+                style={{
+                  color: "var(--accent)",
+                  background: "transparent",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                {copied === "android-pairing"
+                  ? t("remoteAccess.androidPairingCopied")
+                  : t("remoteAccess.androidPairingCopy")}
+              </button>
+            )}
           </div>
         )}
       </div>

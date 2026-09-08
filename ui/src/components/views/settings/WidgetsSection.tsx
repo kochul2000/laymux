@@ -11,6 +11,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FocusInput, FocusSelect } from "@/components/ui/FormControls";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
+import { ArrowDownIcon, ArrowUpIcon, XIcon } from "@/components/ui/icons";
 import { WIDGET_DEFINITIONS, findWidgetDefinition } from "@/components/widgets/registry";
 import type { WidgetOptionSpec } from "@/components/widgets/types";
 import {
@@ -467,7 +468,7 @@ function WidgetDetail({
           title={t("widgets.moveUp")}
           onClick={() => onChange(nudgeWidget(widgets, instance.id, -1))}
         >
-          ↑
+          <ArrowUpIcon size={11} />
         </button>
         <button
           type="button"
@@ -478,7 +479,7 @@ function WidgetDetail({
           title={t("widgets.moveDown")}
           onClick={() => onChange(nudgeWidget(widgets, instance.id, 1))}
         >
-          ↓
+          <ArrowDownIcon size={11} />
         </button>
         <button
           type="button"
@@ -491,7 +492,7 @@ function WidgetDetail({
             onRemoved();
           }}
         >
-          ✕
+          <XIcon size={11} />
         </button>
       </div>
 

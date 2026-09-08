@@ -11,20 +11,37 @@ import {
   readComposerHeight,
   selectComposerHistoryEntries,
   selectComposerAutocompleteSuggestions,
+  composerSuggestionDisplay,
+  isComposerStarred,
+  normalizeComposerStarredEntries,
+  COMPOSER_STARRED_EDITOR_LONG_PRESS_MS,
   DEFAULT_COMPOSER_HISTORY_POPUP_ITEMS,
   DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS,
   writeComposerHeight,
+  type ComposerStarredEntry,
+  type ComposerStarredEntryInput,
+  type ComposerAutocompleteSuggestion,
   type InputMode,
 } from "@/lib/terminal-input-composer-state";
+import { ComposerStarredEntryEditor } from "@/components/ui/ComposerStarredEntryEditor";
+import { StarIcon } from "@/components/ui/icons";
 
 export interface TerminalInputComposerLabels {
   editor: string;
-  placeholder: string;
   resize: string;
   /** Accessible name for the Tab-triggered past-input recall list (issue #504). */
   history: string;
   /** Accessible name for the as-you-type autocomplete suggestion list (issue #505). */
   autocomplete: string;
+  star: string;
+  unstar: string;
+  starredEditor: string;
+  starredLabel: string;
+  starredValue: string;
+  starredSend: string;
+  starredSendDesc: string;
+  starredSave: string;
+  starredCancel: string;
 }
 
 export interface TerminalInputComposerProps {
@@ -95,6 +112,13 @@ export interface TerminalInputComposerProps {
    * appears; Tab (or arrows + Enter) accepts one.
    */
   autocompleteEnabled?: boolean;
+  /** Host-global explicitly persisted entries (ADR-0226, ADR-0229). */
+  starredEntries?: readonly ComposerStarredEntryInput[];
+  onToggleStar?: (entry: string, starred: boolean) => void;
+  onUpsertStarredEntry?: (
+    entry: ComposerStarredEntry,
+    previousValue?: string,
+  ) => void | Promise<void>;
   /** Maximum number of suggestions shown in the autocomplete dropdown. */
   maxAutocompleteItems?: number;
   className?: string;
@@ -140,6 +164,9 @@ export function TerminalInputComposer({
   historyScopeKey,
   maxHistoryItems = DEFAULT_COMPOSER_HISTORY_POPUP_ITEMS,
   autocompleteEnabled = false,
+  starredEntries = [],
+  onToggleStar,
+  onUpsertStarredEntry,
   maxAutocompleteItems = DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS,
   className,
   testId,
@@ -188,7 +215,12 @@ export function TerminalInputComposer({
   // lists are mutually exclusive by construction and never fight for keys.
   const autocompleteSuggestions =
     autocompleteEnabled && text.length > 0
-      ? selectComposerAutocompleteSuggestions(history ?? [], text, maxAutocompleteItems)
+      ? selectComposerAutocompleteSuggestions(
+          history ?? [],
+          text,
+          maxAutocompleteItems,
+          starredEntries,
+        )
       : [];
   // Escape / blur dismiss the dropdown until the next keystroke reopens it.
   // Bucket-tagged like the popup state: a scope switch re-arms it.
@@ -222,9 +254,68 @@ export function TerminalInputComposer({
     setAutocompleteDismissed(true);
     setAutocompleteIndex(-1);
   };
-  const commitAutocompleteEntry = (entry: string | undefined) => {
+  const commitAutocompleteEntry = (suggestion: ComposerAutocompleteSuggestion | undefined) => {
     dismissAutocomplete();
-    if (entry != null) onTextChange(entry);
+    if (suggestion == null) return;
+    onTextChange(suggestion.value);
+    if (suggestion.send && !actionDisabled) onSend();
+  };
+  const [starredEditor, setStarredEditor] = useState<{
+    previousValue?: string;
+    entry: ComposerStarredEntry;
+  } | null>(null);
+  const [starredEditorError, setStarredEditorError] = useState("");
+  const openStarredEditor = (suggestion: ComposerAutocompleteSuggestion) => {
+    if (!onUpsertStarredEntry) return;
+    const existing = normalizeComposerStarredEntries(starredEntries).find(
+      (entry) => entry.value === suggestion.value,
+    );
+    dismissAutocomplete();
+    setStarredEditorError("");
+    setStarredEditor({
+      previousValue: existing?.value,
+      entry: existing ?? {
+        value: suggestion.value,
+        label: suggestion.label,
+        send: suggestion.send,
+      },
+    });
+  };
+  const saveStarredEditor = async (entry: ComposerStarredEntry) => {
+    if (!starredEditor || !onUpsertStarredEntry) return;
+    setStarredEditorError("");
+    try {
+      await onUpsertStarredEntry(entry, starredEditor.previousValue);
+      setStarredEditor(null);
+    } catch (error) {
+      setStarredEditorError(String(error));
+    }
+  };
+
+  const renderStarButton = (entry: string) => {
+    const starred = isComposerStarred(starredEntries, entry);
+    const action = starred ? labels.unstar : labels.star;
+    if (!onToggleStar) return null;
+    return (
+      <button
+        type="button"
+        aria-label={`${action}: ${entry}`}
+        aria-pressed={starred}
+        title={action}
+        className="shrink-0 rounded p-0.5"
+        style={{ color: starred ? "var(--accent)" : "var(--text-secondary)" }}
+        onMouseDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggleStar(entry, !starred);
+        }}
+      >
+        <StarIcon size={13} fill={starred ? "currentColor" : "none"} />
+      </button>
+    );
   };
 
   const [height, setHeightState] = useState(() => readComposerHeight());
@@ -459,21 +550,27 @@ export function TerminalInputComposer({
               // Entries can repeat only across different indices post-dedupe, so
               // index is a stable key for this ephemeral list.
               key={`${index}-${entry}`}
-              id={`${childTestId("history")}-option-${index}`}
-              data-testid={childTestId(`history-option-${index}`)}
-              role="option"
-              aria-selected={index === historyIndex}
-              title={entry}
-              className="terminal-input-composer-history-item cursor-pointer truncate whitespace-nowrap rounded px-2 py-1"
+              role="none"
+              className="terminal-input-composer-history-item flex items-center gap-1 rounded"
               style={index === historyIndex ? { background: "var(--accent-20)" } : undefined}
               onMouseEnter={() => setHistoryIndex(index)}
-              // mousedown (not click) so the textarea keeps focus through the pick.
-              onMouseDown={(event) => {
-                event.preventDefault();
-                commitHistoryEntry(entry);
-              }}
             >
-              {entry}
+              <button
+                type="button"
+                id={`${childTestId("history")}-option-${index}`}
+                data-testid={childTestId(`history-option-${index}`)}
+                role="option"
+                aria-selected={index === historyIndex}
+                title={entry}
+                className="min-w-0 flex-1 cursor-pointer truncate whitespace-nowrap px-2 py-1 text-left"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  commitHistoryEntry(entry);
+                }}
+              >
+                {entry}
+              </button>
+              {renderStarButton(entry)}
             </li>
           ))}
         </ul>
@@ -491,27 +588,95 @@ export function TerminalInputComposer({
             color: "var(--text-primary)",
           }}
         >
-          {autocompleteSuggestions.map((entry, index) => (
+          {autocompleteSuggestions.map((suggestion, index) => (
             <li
               // Post-dedupe entries are unique, so the value is a stable key.
-              key={`${index}-${entry}`}
-              id={`${childTestId("autocomplete")}-option-${index}`}
-              data-testid={childTestId(`autocomplete-option-${index}`)}
-              role="option"
-              aria-selected={index === activeAutocompleteIndex}
-              title={entry}
-              className="terminal-input-composer-history-item cursor-pointer truncate whitespace-nowrap rounded px-2 py-1"
+              key={`${index}-${suggestion.value}`}
+              role="none"
+              className="terminal-input-composer-history-item flex items-center gap-1 rounded"
               style={
                 index === activeAutocompleteIndex ? { background: "var(--accent-20)" } : undefined
               }
               onMouseEnter={() => setAutocompleteIndex(index)}
-              // mousedown (not click) so the textarea keeps focus through the pick.
-              onMouseDown={(event) => {
-                event.preventDefault();
-                commitAutocompleteEntry(entry);
-              }}
             >
-              {entry}
+              <button
+                type="button"
+                id={`${childTestId("autocomplete")}-option-${index}`}
+                data-testid={childTestId(`autocomplete-option-${index}`)}
+                role="option"
+                aria-selected={index === activeAutocompleteIndex}
+                title={suggestion.value}
+                className="min-w-0 flex-1 cursor-pointer truncate whitespace-nowrap px-2 py-1 text-left"
+                onMouseDown={(event) => {
+                  if (event.button !== 0) return;
+                  event.preventDefault();
+                  if (!onUpsertStarredEntry) commitAutocompleteEntry(suggestion);
+                }}
+                onPointerDown={(event) => {
+                  if (event.button !== 0) return;
+                  if (event.isPrimary === false && event.pointerType) return;
+                  if (!onUpsertStarredEntry) return;
+                  const target = event.currentTarget;
+                  const pointerId = event.pointerId;
+                  const startX = event.clientX;
+                  const startY = event.clientY;
+                  let fired = false;
+                  let moved = false;
+                  try {
+                    target.setPointerCapture(pointerId);
+                  } catch {
+                    /* jsdom */
+                  }
+                  const timer = window.setTimeout(() => {
+                    fired = true;
+                    openStarredEditor(suggestion);
+                  }, COMPOSER_STARRED_EDITOR_LONG_PRESS_MS);
+                  const stop = () => {
+                    window.clearTimeout(timer);
+                    try {
+                      target.releasePointerCapture(pointerId);
+                    } catch {
+                      /* already released */
+                    }
+                    target.removeEventListener("pointerup", onUp);
+                    target.removeEventListener("pointercancel", onCancel);
+                    target.removeEventListener("pointermove", onMove);
+                  };
+                  const onMove = (move: globalThis.PointerEvent) => {
+                    if (move.pointerId !== pointerId) return;
+                    if (Math.hypot(move.clientX - startX, move.clientY - startY) > 8) {
+                      moved = true;
+                      stop();
+                    }
+                  };
+                  const onUp = (up: globalThis.PointerEvent) => {
+                    if (up.pointerId !== pointerId) return;
+                    stop();
+                    if (fired || moved) return;
+                    up.preventDefault();
+                    commitAutocompleteEntry(suggestion);
+                  };
+                  const onCancel = (cancel: globalThis.PointerEvent) => {
+                    if (cancel.pointerId !== pointerId) return;
+                    stop();
+                  };
+                  target.addEventListener("pointerup", onUp);
+                  target.addEventListener("pointercancel", onCancel);
+                  target.addEventListener("pointermove", onMove);
+                }}
+              >
+                {composerSuggestionDisplay(suggestion)}
+                {suggestion.send ? (
+                  <span
+                    aria-hidden="true"
+                    className="ml-1"
+                    style={{ color: "var(--text-secondary)" }}
+                  >
+                    ↵
+                  </span>
+                ) : null}
+              </button>
+              {renderStarButton(suggestion.value)}
             </li>
           ))}
         </ul>
@@ -539,7 +704,6 @@ export function TerminalInputComposer({
         data-testid={childTestId("textarea")}
         aria-label={labels.editor}
         value={text}
-        placeholder={labels.placeholder}
         disabled={disabled}
         autoFocus={autoFocus && !disabled}
         aria-expanded={historyVisible || autocompleteVisible}
@@ -603,6 +767,26 @@ export function TerminalInputComposer({
         }}
         onKeyDown={handleEditorKeyDown}
       />
+      {starredEditor ? (
+        <ComposerStarredEntryEditor
+          title={labels.starredEditor}
+          initial={starredEditor.entry}
+          error={starredEditorError}
+          labels={{
+            label: labels.starredLabel,
+            value: labels.starredValue,
+            send: labels.starredSend,
+            sendDesc: labels.starredSendDesc,
+            save: labels.starredSave,
+            cancel: labels.starredCancel,
+          }}
+          onClose={() => {
+            setStarredEditor(null);
+            setStarredEditorError("");
+          }}
+          onSave={(entry) => void saveStarredEditor(entry)}
+        />
+      ) : null}
     </div>
   );
 }

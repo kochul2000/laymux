@@ -9,8 +9,9 @@ import {
   type CSSProperties,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { ChevronDownIcon } from "@/components/ui/icons";
 import i18n from "@/i18n";
-import { Terminal } from "@xterm/xterm";
+import { Terminal, type IMarker } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -23,6 +24,7 @@ import {
   normalizeScrollSensitivity,
 } from "@/lib/scroll-sensitivity";
 import { resolveLinkAtCell, isModifierLinkClick } from "@/lib/terminal-link-click";
+import { createCodexTranscriptWheelHandler } from "@/lib/codex-transcript-wheel";
 import {
   _reserveWebglInitDelay,
   isLinuxHost,
@@ -31,21 +33,40 @@ import {
   shouldEnableTerminalWebgl,
 } from "@/lib/terminal-view-runtime";
 import { createPathLinkController, type VerifiedPathSelection } from "@/lib/path-link-provider";
-import { pathLinkHintKey, requiresHardConfirm } from "@/lib/path-link-os-open";
-import { createPathLinkClickHandlers, PATH_LINK_CLICK_SLOP } from "@/lib/path-link-click";
+import { pathLinkHintKey, pathLinkActionForChipAction } from "@/lib/path-link-os-open";
+import { osHandoffConfirmKey } from "@/lib/os-handoff";
+import {
+  createPathLinkClickHandlers,
+  passOsHandoffGate,
+  PATH_LINK_CLICK_SLOP,
+} from "@/lib/path-link-click";
 import { createPathLinkHint } from "@/lib/path-link-hint";
+import { linkChipLabelKey, type LinkChipAction } from "@/lib/link-activation";
+import { createLinkChip, type LinkChipAnchor } from "@/lib/link-chip";
+import { createLinkChipSession, type LinkChipTargetShape } from "@/lib/link-chip-session";
+import { captureUrlChipRange, liveChipBufferLine } from "@/lib/link-chip-capture";
+import { createPathLinkPointEvaluator, PATH_LINK_HOVER_DWELL_MS } from "@/lib/path-link-point";
 import {
   extractPathCandidatesFromSelection,
   isPathLinkCwdCurrent,
   joinCwdPath,
   decidePathLinkAction,
-  mapSelectionCandidateToPathRange,
   pathSelectionLimits,
+  resolveOverlappingRanges,
 } from "@/lib/path-link-detect";
-import { readLineCells } from "@/lib/terminal-cell-map";
+import {
+  readPathLinkSelection,
+  mapPathLinkParts,
+  pathLinkPartsCurrent,
+} from "@/lib/path-link-lines";
+import { readCellRangeText, readLineCells } from "@/lib/terminal-cell-map";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { WebglAddon } from "@xterm/addon-webgl";
-import { useTerminalStore, type TerminalActivityInfo } from "@/stores/terminal-store";
+import {
+  SESSION_ATTRIBUTION_STARTUP_GRACE_MS,
+  useTerminalStore,
+  type TerminalActivityInfo,
+} from "@/stores/terminal-store";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 import { useSettingsStore, defaultProfileDefaults } from "@/stores/settings-store";
 import { useOverridesStore, FONT_ZOOM_MIN, FONT_ZOOM_MAX } from "@/stores/overrides-store";
@@ -54,6 +75,7 @@ import {
   createTerminalSession,
   type ViewerStartupRequest,
   writeToTerminal,
+  writeTerminalBinaryInput,
   writeTerminalBootstrapProtocolReply,
   writeTerminalProtocolReply,
   writeTerminalInput,
@@ -113,6 +135,7 @@ import { createLinuxImeCandidateGuard } from "@/lib/linux-ime-candidate-guard";
 import { readPendingCompositionSend } from "@/lib/xterm-pending-composition";
 import { installNativeCursorSuppression } from "@/lib/native-cursor-suppression";
 import { createOsInputSourceChordGuard } from "@/lib/os-input-source-chord";
+import { createDirectInputCapture, normalizeSubmittedInput } from "@/lib/terminal-last-input";
 import {
   createTerminalFocusOwnership,
   type TerminalFocusOwnership,
@@ -156,7 +179,7 @@ import { useNotificationStore } from "@/stores/notification-store";
 import { resolveWorkspaceId } from "@/lib/workspace-utils";
 import { OutputIdleDetector } from "@/lib/output-idle-detector";
 import { SerializeAddon } from "@xterm/addon-serialize";
-import { loadTerminalOutputCache } from "@/lib/tauri-api";
+import { loadTerminalOutputCache, setComposerStarredEntry } from "@/lib/tauri-api";
 import {
   registerTerminalSerializer,
   unregisterTerminalSerializer,
@@ -392,16 +415,16 @@ async function withTerminalOutputRepairWatchdog<T>(
 /** Byte-size threshold for the large paste warning dialog. */
 const LARGE_PASTE_THRESHOLD = 5120;
 
-/** "separate" 스크롤바 모드에서 xterm overviewRuler가 예약하는 거터 폭(px). */
-const SCROLLBAR_SEPARATE_GUTTER_PX = 14;
+/** xterm v6 기본 스크롤바 슬라이더와 FitAddon이 예약하는 거터 폭(px). */
+const SCROLLBAR_GUTTER_PX = 14;
 
 /**
  * jump-to-bottom 버튼의 우측 오프셋(px). 버튼은 pane 우측 끝 기준 절대위치이고,
- * xterm 스크롤바 슬라이더는 overlay/separate 모드 모두 우측 끝에 동일 폭으로
- * 렌더되므로(슬라이더 폭 ~14px), 모드와 무관하게 슬라이더를 비켜가는 단일 값을 쓴다.
+ * xterm 스크롤바 슬라이더는 우측 끝에 약 14px 폭으로 렌더되므로
+ * 슬라이더를 비켜가는 단일 값을 쓴다.
  * 14px 슬라이더 + 12px 여유 = 26px (issue #361).
  */
-const SCROLL_BTN_RIGHT_PX = SCROLLBAR_SEPARATE_GUTTER_PX + 12;
+const SCROLL_BTN_RIGHT_PX = SCROLLBAR_GUTTER_PX + 12;
 
 const textEncoder = new TextEncoder();
 
@@ -688,6 +711,7 @@ interface TerminalViewProps {
   lastClaudeSession?: string;
   /** Codex CLI session ID from previous session, used for `codex resume` on startup. */
   lastCodexSession?: string;
+  lastAgentFresh?: "codex";
   /** Grok Build session ID from previous session, used for `grok --resume` on startup. */
   lastGrokSession?: string;
   /** Override the startup command (takes precedence over agent session restore). */
@@ -718,6 +742,7 @@ export function TerminalView({
   onRestart,
   lastClaudeSession,
   lastCodexSession,
+  lastAgentFresh,
   lastGrokSession,
   startupCommandOverride,
   viewerStartup,
@@ -853,6 +878,13 @@ export function TerminalView({
     dismissTerminalResponseNotification(instanceId);
     writeTerminalInput(instanceId, started.submission.text, true)
       .then(() => {
+        const lastUserInput = normalizeSubmittedInput(started.submission.text);
+        if (lastUserInput) {
+          useTerminalStore.getState().updateInstanceInfo(started.submission.terminalId, {
+            lastUserInput,
+            lastUserInputAt: Date.now(),
+          });
+        }
         pushComposerHistory(
           resolveComposerHistoryKey(started.submission.terminalId),
           started.submission.text,
@@ -1207,6 +1239,8 @@ export function TerminalView({
     let currentParsingFrameEndCursorAuthoritative = false;
     let currentParsingAttachEpoch: number | undefined;
     let currentParsingGeneration: number | undefined;
+    /** Generation of the attachment the coordinator is currently applying. */
+    let outputGeneration: number | undefined;
     let humanDataEmissionDepth = 0;
     let pendingXtermUserInputOrigins = 0;
     let humanInputFailureNotified = false;
@@ -1276,11 +1310,6 @@ export function TerminalView({
         }
       : defaultTheme;
 
-    // Scrollbar overlay mode: set overviewRuler width to 0 so FitAddon
-    // does not reserve space for the scrollbar — it renders on top of content.
-    const sbStyle = settingsState.terminal.scrollbarStyle ?? "overlay";
-    const overviewRulerWidth = sbStyle === "overlay" ? 0 : SCROLLBAR_SEPARATE_GUTTER_PX;
-
     const resolvedFont = settingsState.resolveFont(
       profile,
       paneId ? useOverridesStore.getState().getViewOverride(paneId) : undefined,
@@ -1312,7 +1341,10 @@ export function TerminalView({
       theme,
       customGlyphs: true,
       rescaleOverlappingGlyphs: true,
-      overviewRuler: { width: overviewRulerWidth },
+      // Keep the scrollbar on xterm v6's default 14px gutter while suppressing
+      // the overview-ruler canvas and its separator line. FitAddon and the
+      // viewport intentionally treat zero as their default scrollbar width.
+      overviewRuler: { width: 0 },
       scrollback: 10000,
       scrollSensitivity: normalizeScrollSensitivity(
         settingsState.terminal.scrollSensitivity,
@@ -1333,9 +1365,11 @@ export function TerminalView({
       // dialog inside the Tauri webview. Route them through the same
       // openExternal path as plain-text links so they open the OS browser
       // (issue #345).
+      // ADR-0224: 실행은 activation 설정을 통과한다. `chip` 모드면 여기서 열지
+      // 않고 칩을 띄운다. xterm 이 주는 range 는 칩 수명 판정의 캡처가 된다.
       linkHandler: {
-        activate: (_event, uri) => {
-          openExternal(uri).catch(() => {});
+        activate: (event, uri, range) => {
+          activateUrlLink(uri, event, range);
         },
       },
     });
@@ -1348,8 +1382,8 @@ export function TerminalView({
     activateTerminalUnicodeProvider(terminal);
 
     const fitAddon = new FitAddon();
-    const webLinksAddon = new WebLinksAddon((_event, uri) => {
-      openExternal(uri).catch(() => {});
+    const webLinksAddon = new WebLinksAddon((event, uri) => {
+      activateUrlLink(uri, event);
     });
 
     terminal.loadAddon(fitAddon);
@@ -1413,7 +1447,7 @@ export function TerminalView({
     terminal.registerLinkProvider(
       createIndentedLinkProvider(
         terminal,
-        (uri) => openExternal(uri).catch(() => {}),
+        (uri, event, range) => activateUrlLink(uri, event, range),
         () => useSettingsStore.getState().paste.linkJoin,
       ),
     );
@@ -1427,18 +1461,20 @@ export function TerminalView({
     terminal.registerLinkProvider(
       createPrLinkProvider(
         terminal,
-        (n) => {
+        (n, event, range) => {
           const base = repoBaseRef.current;
-          if (base) openExternal(`${base}/issues/${n}`).catch(() => {});
+          if (base) activateUrlLink(`${base}/issues/${n}`, event, range);
         },
         () => repoBaseRef.current,
       ),
     );
 
-    // Issue #363 (선택 기반): 사용자가 *선택(드래그)* 한 파일/디렉토리 경로에
-    // 밑줄을 긋고, 클릭하면 파일은 viewer 로 열고 디렉토리는 cwd 로 전파한다.
-    // 기존의 "hover 줄 전체 토큰 stat" 방식을 제거했다(느리고 Windows 에서 동작
-    // 안 함). 검증(트림/판별 + cwd 조합 + stat_path)은 pointer release의 최종 선택에
+    // Issue #363: 터미널에서 발견한 파일/디렉토리 경로에 밑줄을 긋고, 클릭하면
+    // 파일은 viewer 로 열고 디렉토리는 cwd 로 전파한다. 발견 트리거는 드래그
+    // 선택(`selection`)과 포인터 지점(`point`: hover dwell·이동 없는 클릭)이며
+    // 후자는 포인터 아래 토큰 하나만 조회한다(ADR-0188). 과거의 "hover 줄 전체
+    // 토큰 stat" 을 되살리는 것이 아니다 — 그 방식은 트리거당 조회량이 무제한
+    // 이어서 느렸다. 선택 트리거의 검증은 pointer release 의 최종 선택에
     // **gesture당 1회만** 수행하고, 검증되면 데코레이션으로 밑줄을 직접 그린다
     // (xterm linkifier hover 에 의존하면 검증 후 마우스를 나갔다 돌아와야 켜지는
     // 문제가 있어 데코레이션 방식으로 전환 — path-link-provider 주석 참고).
@@ -1460,7 +1496,7 @@ export function TerminalView({
           useNotificationStore.getState().addNotification({
             terminalId: instanceId,
             workspaceId: resolveWorkspaceId(instanceId),
-            message: i18n.t("terminal.osOpenFailed", { ns: "common", message: String(err) }),
+            message: i18n.t("osHandoff.failed", { ns: "common", message: String(err) }),
             level: "error",
           });
         });
@@ -1490,6 +1526,188 @@ export function TerminalView({
     });
     pathLinkControllerRef.current = pathLink;
 
+    // ADR-0224 액션 칩. `chip` 모드에서 클릭은 링크를 열지 않고 이 칩을 띄우며,
+    // 칩의 버튼을 눌러야 실행된다. 칩은 surface-local UI 상태이므로 스토어에도
+    // localStorage 에도 넣지 않고(ADR-0004) 이 effect 가 소유한다. 수명 판정은
+    // 밑줄과 같은 "캡처한 컬럼 범위에 원문이 남아 있는가"이며, 그 판정 시점은
+    // ADR-0220 의 안정 프레임을 그대로 공유한다(별도 수명 규칙을 만들지 않는다).
+    type TerminalLinkChipTarget = LinkChipTargetShape & {
+      /** path 대상의 원본 검증 선택. URL 칩에는 없다. */
+      selection?: VerifiedPathSelection;
+      /**
+       * 칩이 사는 동안 대상 줄을 따라가는 마커. 밑줄이 저장한 라인 번호가 아니라
+       * 마커의 현재 라인을 믿는 것과 같은 이유다(`path-link-provider` 의
+       * `tokenStillAtRange`) — scrollback trim 은 절대 라인 번호를 밀어내므로,
+       * 동결된 번호로 재검사하면 밑줄과 칩이 서로 다른 줄을 본다. 마커 등록에
+       * 실패했으면 undefined 이고 그때만 캡처한 번호로 떨어진다.
+       */
+      marker?: IMarker;
+    };
+    const linkChipView = createLinkChip(wrapperRef.current);
+    /** 칩 대상 줄을 따라갈 마커. 버퍼 밖이거나 등록에 실패하면 undefined. */
+    const registerChipMarker = (bufferLine: number): IMarker | undefined => {
+      try {
+        const buffer = terminal.buffer.active;
+        const cursorAbsY = (buffer.baseY ?? 0) + (buffer.cursorY ?? 0);
+        const offset = Math.trunc(bufferLine - 1 - cursorAbsY);
+        if (!Number.isFinite(offset)) return undefined;
+        return terminal.registerMarker(offset) ?? undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    const readPathLinkClickSettings = () => {
+      const terminalSettings = useSettingsStore.getState().terminal;
+      return {
+        osOpenEnabled: terminalSettings.pathLinkOsOpenEnabled,
+        confirmAlways: terminalSettings.pathLinkOsOpenConfirm,
+        activation: terminalSettings.pathLinkActivation,
+      };
+    };
+    const confirmOsHandoff = ({ path }: { path: string }) =>
+      window.confirm(i18n.t(osHandoffConfirmKey(path), { ns: "common", path }));
+    /** 1-based 버퍼 라인의 셀. 라인이 없으면 null. */
+    const readChipLineCells = (bufferLine: number) => {
+      const line = terminalRef.current?.buffer.active.getLine(bufferLine - 1);
+      return line ? readLineCells(line) : null;
+    };
+    /** 캡처한 (라인, 컬럼 범위) 에 지금 쓰여 있는 문자열. 라인을 못 읽으면 null. */
+    const readChipRangeText = (target: TerminalLinkChipTarget): string | null => {
+      // 마커가 라인의 정본이다 — 밑줄 재검증과 같은 규칙(link-chip-capture 주석).
+      const bufferLine = liveChipBufferLine(target);
+      if (bufferLine === null) return null;
+      if (
+        target.selection?.pathParts &&
+        !pathLinkPartsCurrent(
+          terminal.buffer.active,
+          target.selection.pathParts,
+          bufferLine - target.bufferLine,
+        )
+      )
+        return null;
+      const cells = readChipLineCells(bufferLine);
+      if (!cells) return null;
+      return readCellRangeText(cells, target.startCol, target.endCol);
+    };
+    const linkChip = createLinkChipSession<TerminalLinkChipTarget>({
+      view: linkChipView,
+      labelFor: (action, kind) => i18n.t(linkChipLabelKey(action, kind), { ns: "common" }),
+      isTokenAlive: (target) => readChipRangeText(target) === target.token,
+      // 칩이 사라지면 그 줄을 따라가던 마커도 함께 거둔다(교체·실행 포함).
+      onDismiss: (target) => target.marker?.dispose(),
+      run: (target, action) => {
+        if (action === "copy") {
+          clipboardWriteText(target.value).catch((err) => {
+            console.warn(`[linkChip] ${instanceId} 복사 실패:`, err);
+          });
+          return;
+        }
+        if (action === "browser") {
+          openExternal(target.value).catch(() => {});
+          return;
+        }
+        const selection = target.selection;
+        const pathAction = pathLinkActionForChipAction(action);
+        if (!selection || !pathAction) return;
+        // ADR-0100 의 확인 정책은 칩에서도 똑같이 통과한다 — 칩은 기존 액션의
+        // 표시 방식일 뿐이고, 하드 클래스 확인은 모드·경로와 무관하다.
+        if (
+          !passOsHandoffGate(selection, pathAction, {
+            getSettings: readPathLinkClickSettings,
+            confirm: confirmOsHandoff,
+            onOsHandoffSettled: () => terminalRef.current?.focus(),
+          })
+        ) {
+          return;
+        }
+        pathLink.activate(selection, pathAction);
+      },
+    });
+    /** 칩 기준 사각형 — 사용자가 방금 누른 지점이 곧 링크 위다. */
+    const chipAnchorAt = (point: { clientX: number; clientY: number }): LinkChipAnchor => ({
+      left: point.clientX,
+      right: point.clientX,
+      top: point.clientY,
+      bottom: point.clientY,
+    });
+    const openLinkChip = (
+      target: TerminalLinkChipTarget,
+      actions: readonly LinkChipAction[],
+      point: { clientX: number; clientY: number },
+    ) => {
+      linkChip.open({
+        target: { ...target, marker: registerChipMarker(target.bufferLine) },
+        anchor: chipAnchorAt(point),
+        actions,
+      });
+    };
+
+    /**
+     * URL 링크 활성화의 단일 관문(ADR-0224). `immediate` 면 기존처럼 즉시 열고,
+     * `chip` 이면 아무것도 열지 않고 칩을 띄운다.
+     *
+     * #352 수정자 우회는 이 함수를 거치지 않는다 — 수정자 자체가 명시적 제스처
+     * 이므로 모드와 무관하게 즉발이다(ADR-0224 Decision 4).
+     *
+     * 함수 선언인 이유: xterm 옵션(`linkHandler`)과 addon 핸들러가 이 지점보다
+     * 위에서 클로저를 만든다. 호이스팅으로 그 클로저들이 같은 관문을 부른다.
+     */
+    function activateUrlLink(
+      uri: string,
+      event?: MouseEvent,
+      range?: { start: { x: number; y: number }; end: { x: number; y: number } },
+    ) {
+      if (useSettingsStore.getState().terminal.urlLinkActivation !== "chip") {
+        openExternal(uri).catch(() => {});
+        return;
+      }
+      const target = captureUrlChipTarget(uri, event, range);
+      // 캡처에 실패하면 칩을 띄우지 않는다 — 아무것도 실행하지 않는 쪽이
+      // `chip` 모드의 fail closed 다(captureUrlChipTarget 주석 참고).
+      if (!target) return;
+      const point = event
+        ? { clientX: event.clientX, clientY: event.clientY }
+        : { clientX: 0, clientY: 0 };
+      openLinkChip(target, ["browser", "copy"], point);
+    }
+
+    /**
+     * URL 칩의 대상 캡처. URL 은 밑줄 엔트리가 없으므로 칩 생성 시점의
+     * (버퍼 라인, 컬럼 범위, 원문)을 잡아 두고 path 와 같은 판정을 적용한다.
+     * 여러 줄에 걸친 링크는 사용자가 클릭한 줄의 구간만 캡처한다.
+     *
+     * **셀 범위를 확정하지 못하면 null 이다.** `WebLinksAddon` 은 범위를 주지
+     * 않으므로 클릭한 줄에서 URL 을 되찾는데, 화면 원문과 uri 가 다르면(줄바꿈
+     * 결합 등) 못 찾는다. 그때 클릭 셀 한 칸만 캡처하면 그 한 글자가 아무 줄에서나
+     * 우연히 일치해 재검사를 통과하고, URL 이 지워진 화면에서도 칩이 살아남는다.
+     * 한 칸짜리 가짜 캡처를 만드느니 칩을 포기한다 — 클릭이 아무것도 실행하지
+     * 않는 것이 `chip` 모드의 계약이고, 즉시 열고 싶으면 #352 Shift/Alt 우회가
+     * 모드와 무관하게 남아 있다.
+     */
+    function captureUrlChipTarget(
+      uri: string,
+      event?: MouseEvent,
+      range?: { start: { x: number; y: number }; end: { x: number; y: number } },
+    ): TerminalLinkChipTarget | null {
+      const t = terminalRef.current ?? terminal;
+      const coords = event ? getClickCellCoords(t, event) : null;
+      let clicked: { bufferLine: number; col: number } | undefined;
+      if (coords) {
+        const [col, viewportRow] = coords; // 1-based
+        const viewportY = (t.buffer.active as { viewportY?: number }).viewportY ?? 0;
+        clicked = { bufferLine: viewportY + viewportRow, col };
+      }
+      const capture = captureUrlChipRange({
+        uri,
+        cols: t.cols,
+        clicked,
+        range,
+        readCells: readChipLineCells,
+      });
+      if (!capture) return null;
+      return { kind: "url", value: uri, ...capture };
+    }
+
     // 검증된 경로가 선택돼 클릭 가능할 때 포인터(손가락) 커서를 호스트에 직접
     // 적용한다. xterm 의 링크 hover 포인터는 *활성 텍스트 선택* 위에서는 선택
     // 커서(I-beam)에 밀려 적용되지 않으므로(우리 모델은 항상 선택이 떠 있다),
@@ -1498,11 +1716,111 @@ export function TerminalView({
       wrapperRef.current?.classList.toggle("terminal-path-link-clickable", active);
     };
 
-    // 검증된 선택을 비우고(있으면) 밑줄 데코레이션을 거둔다. 선택 해제/변경 공통 경로.
+    // ADR-0220: xterm mutates its buffer while a DEC 2026 frame is still hidden
+    // from the renderer. Comparing a decoration with that intermediate buffer
+    // would dispose a link that remains visible in the last complete frame. A
+    // normal reset settles through `onWriteParsed`; xterm's one-second safety
+    // timeout has no closing parse callback, so the mode monitor settles the
+    // deferred comparison when it observes the mode fall instead.
+    let pathLinkRevalidationDeferred = false;
+    const revalidatePathLinksAtStableFrame = () => {
+      pathLinkRevalidationDeferred = false;
+      const droppedPathLinks = pathLink.revalidate();
+      if (droppedPathLinks > 0) setPathLinkCursor(false);
+      // ADR-0224: 칩 수명은 밑줄 수명에 종속한다 — 같은 안정 프레임에서 같은
+      // 판정을 받는다(별도 수명 규칙을 만들지 않는다).
+      linkChip.revalidate();
+    };
+
+    // 검증된 링크를 비우고(있으면) 밑줄 데코레이션을 거둔다. 선택 해제/변경 공통
+    // 경로. 새 선택은 point 밑줄도 무효화한다 — 같은 지점에 두 밑줄이 겹치지
+    // 않게 하는 ADR-0188 규칙이다.
     const clearPathLinkSelection = () => {
       setPathLinkCursor(false);
       pathLinkHint.hide();
       pathLink.clear();
+      // ADR-0224: 선택 시작/변경은 칩을 소멸시킨다. 칩을 띄운 클릭의 선택 해제는
+      // 이보다 먼저 도착하므로(document mouseup → window mouseup) 자기 칩을
+      // 지우지 않는다.
+      linkChip.dismiss("selection");
+    };
+
+    // ADR-0188 `point` 트리거. hover dwell 과 이동 없는 클릭이 공유하며, 포인터
+    // 아래 maximal token 하나만 조회한다(트리거당 stat_paths 1건). 검증 로직은
+    // path-link-point.ts 가 소유하고 여기서는 xterm·스토어·IPC 만 주입한다.
+    const pathLinkPoint = createPathLinkPointEvaluator({
+      getSettings: () => {
+        const terminalSettings = useSettingsStore.getState().terminal;
+        return {
+          enabled: terminalSettings.pathLinkEnabled,
+          maxPathLength: terminalSettings.pathLinkMaxLength,
+        };
+      },
+      getCwd: () => cwdRef.current,
+      resolveCell: (clientX, clientY) => {
+        const t = terminalRef.current;
+        if (!t) return null;
+        // getCoords 는 clientX/clientY 와 대상 엘리먼트의 rect 만 읽으므로
+        // (xterm `getCoordsRelativeToElement`) 좌표만 담은 객체로 충분하다.
+        // 실제 MouseEvent 가 없는 dwell 타이머에서도 같은 변환을 쓰려면 필요하다.
+        const coords = getClickCellCoords(t, { clientX, clientY } as MouseEvent);
+        if (!coords) return null;
+        const [col, viewportRow] = coords;
+        const viewportY = t.buffer.active.viewportY ?? 0;
+        return { col, absoluteLine: viewportY + viewportRow - 1 };
+      },
+      readLine: (absoluteLine) => {
+        const t = terminalRef.current;
+        return t?.buffer.active.getLine(absoluteLine);
+      },
+      statPaths,
+      isVerifiedAt: (clientX, clientY) => pathLink.getHit(clientX, clientY) !== null,
+      apply: (selections) => {
+        pathLink.setVerifiedSelections("point", selections);
+        // 밑줄이 켜졌으면 포인터는 (dwell 이든 클릭이든) 그 위에 있다. 커서를
+        // 먼저 켜 두고, 어긋난 드문 경우는 다음 mousemove 의 hit-test 가 고친다.
+        if (selections.length > 0) setPathLinkCursor(true);
+      },
+    });
+
+    // hover dwell: 포인터가 멈춰 있어야 평가한다. 움직이면 타이머를 다시 잡고,
+    // 버튼이 눌린 동안(선택 drag)에는 아예 잡지 않는다(ADR-0165 유지).
+    let pathLinkHoverTimer: number | undefined;
+    let pathLinkHoverPoint: { x: number; y: number } | null = null;
+    const cancelPathLinkHoverDwell = () => {
+      if (pathLinkHoverTimer !== undefined) {
+        window.clearTimeout(pathLinkHoverTimer);
+        pathLinkHoverTimer = undefined;
+      }
+      pathLinkHoverPoint = null;
+    };
+    const schedulePathLinkHoverDwell = (event: MouseEvent, overExistingLink: boolean) => {
+      // 이미 밑줄 위면 클릭 대상이 있다. 드래그 중에는 조회하지 않는다.
+      if (overExistingLink || event.buttons !== 0) {
+        cancelPathLinkHoverDwell();
+        return;
+      }
+      // click slop 안의 이동은 "멈춰 있다"로 본다. 매 이동마다 타이머를 다시
+      // 잡으면 트랙패드 미세 드리프트로 1px 씩 흔들리는 포인터는 영원히
+      // dwell 에 도달하지 못한다.
+      const anchor = pathLinkHoverPoint;
+      if (
+        anchor &&
+        pathLinkHoverTimer !== undefined &&
+        Math.abs(event.clientX - anchor.x) <= PATH_LINK_CLICK_SLOP &&
+        Math.abs(event.clientY - anchor.y) <= PATH_LINK_CLICK_SLOP
+      ) {
+        return;
+      }
+      cancelPathLinkHoverDwell();
+      pathLinkHoverPoint = { x: event.clientX, y: event.clientY };
+      pathLinkHoverTimer = window.setTimeout(() => {
+        pathLinkHoverTimer = undefined;
+        const point = pathLinkHoverPoint;
+        pathLinkHoverPoint = null;
+        if (!point) return;
+        void pathLinkPoint.evaluateAt(point.x, point.y);
+      }, PATH_LINK_HOVER_DWELL_MS);
     };
 
     // 선택 drag의 mouseup 처리까지 끝난 뒤 1회 호출되는 검증 흐름.
@@ -1518,16 +1836,26 @@ export function TerminalView({
       const t = terminalRef.current;
       if (!t) return;
       const selection = t.getSelection();
-      const candidates = extractPathCandidatesFromSelection(
-        selection,
-        pathSelectionLimits(settings.pathLinkMaxLength),
-      );
-      if (candidates.length === 0) {
+      const pos = t.getSelectionPosition();
+      if (!pos) {
         clearPathLinkSelection();
         return;
       }
-      const pos = t.getSelectionPosition();
-      if (!pos) {
+      const limits = pathSelectionLimits(settings.pathLinkMaxLength);
+      if (
+        !selection ||
+        selection.length > limits.maxSelectionLength ||
+        pos.end.y - pos.start.y >= limits.maxLines
+      ) {
+        clearPathLinkSelection();
+        return;
+      }
+      const lines = readPathLinkSelection(t.buffer.active, pos, selection);
+      const candidates = extractPathCandidatesFromSelection(
+        lines.map((line) => line.text).join("\n"),
+        pathSelectionLimits(settings.pathLinkMaxLength),
+      );
+      if (candidates.length === 0) {
         clearPathLinkSelection();
         return;
       }
@@ -1543,13 +1871,11 @@ export function TerminalView({
           pathIndexes.set(absPath, statIndex);
           uniquePaths.push(absPath);
         }
-        const line = t.buffer.active.getLine(pos.start.y + candidate.lineIndex);
-        const lineCells = line ? readLineCells(line) : undefined;
         return [
           {
             absPath,
             statIndex,
-            range: mapSelectionCandidateToPathRange(pos, candidate, lineCells),
+            candidate,
           },
         ];
       });
@@ -1565,17 +1891,45 @@ export function TerminalView({
             clearPathLinkSelection();
             return;
           }
-          const verified = pending.flatMap<VerifiedPathSelection>((item) => {
+          if (t.getSelection() !== selection) return;
+          const livePosition = t.getSelectionPosition();
+          if (!livePosition) return;
+          const liveLines = readPathLinkSelection(t.buffer.active, livePosition, selection);
+          if (
+            JSON.stringify(liveLines.map((l) => l.text)) !==
+            JSON.stringify(lines.map((l) => l.text))
+          )
+            return;
+          const existing = pending.flatMap((item) => {
             const info = infos[item.statIndex];
             const action = info ? decidePathLinkAction(info) : "none";
             if (action === "none") return [];
             return [
               {
-                ...item.range,
+                candidate: item.candidate,
                 absPath: item.absPath,
                 isDirectory: action === "changeDir",
               },
             ];
+          });
+          // 공백 확장 후보(ADR-0191)는 접두끼리 겹친다 — 존재하는 것 중 같은
+          // 줄의 겹치는 범위는 가장 긴 것만 남긴다(longest-existing-wins).
+          const verified = resolveOverlappingRanges(existing, ({ candidate }) => ({
+            line: candidate.lineIndex,
+            start: candidate.startIndex,
+            end: candidate.endIndex,
+          })).flatMap<VerifiedPathSelection>(({ candidate, absPath, isDirectory }) => {
+            const parts = mapPathLinkParts(liveLines[candidate.lineIndex], candidate);
+            if (!pathLinkPartsCurrent(t.buffer.active, parts)) return [];
+            return parts.map(({ bufferLine, startCol, endCol, token }) => ({
+              bufferLine,
+              startCol,
+              endCol,
+              token,
+              absPath,
+              isDirectory,
+              ...(parts.length > 1 ? { pathParts: parts } : {}),
+            }));
           });
           if (verified.length === 0) {
             clearPathLinkSelection();
@@ -1588,7 +1942,7 @@ export function TerminalView({
           // mousemove 의 hitTest 가 곧바로 교정한다(데코 rect 는 다음 프레임에야
           // 준비돼 여기서 hitTest 해도 신뢰할 수 없다).
           setPathLinkCursor(true);
-          pathLink.setVerifiedSelections(verified);
+          pathLink.setVerifiedSelections("selection", verified);
         })
         .catch(() => {
           if (seq !== pathLinkSelectionSeq) return;
@@ -1694,6 +2048,7 @@ export function TerminalView({
         // render without a parser reset. Its debounced render may run before or
         // after this rAF monitor; release the gate and request one recovery paint.
         // The render service coalesces both requests when they meet in one frame.
+        if (pathLinkRevalidationDeferred) revalidatePathLinksAtStableFrame();
         terminal.refresh(0, terminal.rows - 1);
       }
     };
@@ -1970,6 +2325,7 @@ export function TerminalView({
       }
 
       const shadowCursor = shadowCursorRef.current;
+      const compositionPreview = compositionPreviewRef.current;
       const caretOwner = resolveVisualCaretOwner({
         opened: openedRef.current,
         focused: isFocusedRef.current,
@@ -1978,18 +2334,28 @@ export function TerminalView({
         syncOutputActive: syncOutputActiveRef.current,
         isAltBufferActive: shadowCursor.isAltBufferActive,
         viewportScrolledUp: isTerminalScrolledUp(term),
-        compositionActive: compositionPreviewRef.current.active,
+        compositionActive: compositionPreview.active,
         cursorHidden: shadowCursor.isCursorHidden,
         hasSyncFramePosition: shadowCursor.hasSyncFramePosition,
         hasPromptBoundary: shadowCursor.hasPromptBoundary,
         isInputPhase: shadowCursor.isInputPhase,
       });
+
+      // A completed composition is no longer part of the visible input surface.
+      // Clear it before synchronized-output or post-frame caret freezing can return
+      // early; otherwise the committed syllable remains over a newer xterm input row.
+      if (!compositionPreview.active) {
+        previewEl.style.opacity = "0";
+        if (previewEl.childElementCount > 0) {
+          previewEl.replaceChildren();
+        }
+        restoreHelperAnchor("composition-inactive");
+      }
       if (caretOwner === "frozen") {
         // DEC 2026 keeps the previously rendered xterm surface visible while
-        // parser state advances. The overlay is part of that surface: leave its
-        // opacity, geometry, composition preview, and helper anchor untouched
-        // until the frame closes. WSL can expose this state across rAFs because
-        // it intentionally does not hold the whole output transaction.
+        // parser state advances. Preserve the last non-composition caret opacity
+        // and geometry until the frame closes. Live composition outranks this
+        // owner and a finished preview was already cleared above.
         trace("overlay-frozen", { reason: "sync-output-active" });
         return;
       }
@@ -1997,14 +2363,6 @@ export function TerminalView({
         hideOverlay();
         trace("overlay-hidden", { reason: caretOwner, shadowCursor });
         return;
-      }
-
-      // Skip when already cleared — assigning `textContent` replaces
-      // child nodes even when the value is unchanged, and this runs on
-      // every rAF paint outside composition.
-      if (!compositionPreviewRef.current.active && previewEl.textContent) {
-        previewEl.style.opacity = "0";
-        previewEl.replaceChildren();
       }
 
       // Post-frame settle window: the shadow position right after a DEC
@@ -2015,9 +2373,7 @@ export function TerminalView({
       // Composition preview and sustained DECTCEM hide bypass the
       // freeze — see `shouldFreezeOverlayForPark` for why each must
       // reach paint immediately.
-      if (
-        shouldFreezeOverlayForPark(shadowCursorRef.current, compositionPreviewRef.current.active)
-      ) {
+      if (shouldFreezeOverlayForPark(shadowCursorRef.current, compositionPreview.active)) {
         trace("overlay-frozen", { reason: "park-pending" });
         return;
       }
@@ -2050,7 +2406,6 @@ export function TerminalView({
         caretOwner === "composition-preview" ||
         caretOwner === "sync-frame" ||
         caretOwner === "shadow-input";
-      const compositionPreview = compositionPreviewRef.current;
       let cursorX = useShadowCursor
         ? shadowCursor.cursorX
         : ((term.buffer.active as { cursorX?: number }).cursorX ?? 0);
@@ -2384,7 +2739,7 @@ export function TerminalView({
     // *without* ever parking would keep the overlay frozen indefinitely. Codex
     // parks after every frame (the whole reason this layer exists) and
     // `isOverlayCaretActivity` is Codex-only, so there is no exposure
-    // today. Codex 0.145's authoritative in-frame park never enters this
+    // today. Codex's authoritative strict in-frame parks never enter this
     // pending state — revisit if another ratatui TUI joins the overlay set.
     const armParkSettleTimer = () => {
       cancelParkSettleTimer();
@@ -2541,7 +2896,7 @@ export function TerminalView({
             if (shadowCursorRef.current.parkPending) {
               startParkSettleTimer(currentParsingParkDeadline);
             } else {
-              // Codex 0.145 parks inside the frame, so there is no follow-up
+              // Codex strict tails park inside the frame, so there is no follow-up
               // chunk to await and no prior settle timer may survive it.
               clearParkSettleTimer();
             }
@@ -2592,6 +2947,14 @@ export function TerminalView({
       scheduleShadowCursorSync();
     });
     const writeParsedDisposable = terminal.onWriteParsed(() => {
+      // ADR-0188/0220: 안정된 화면에서는 밑줄 아래 원문이 달라진 항목만
+      // 거둔다. DEC 2026 중간 버퍼는 아직 표시된 화면이 아니므로 보류한다.
+      if (syncOutputActiveRef.current) pathLinkRevalidationDeferred = true;
+      else revalidatePathLinksAtStableFrame();
+      // 출력이 왔으면 이전 음성 결과("여긴 파일 아님")도 더 이상 못 믿는다 —
+      // memo 만 잊고 진행 중 조회는 살린다. 여기서 revision 까지 올리면 출력이
+      // 잦은 pane 에서 hover 결과가 매번 폐기돼 밑줄이 영원히 안 켜진다.
+      pathLinkPoint.forget();
       if (compositionPreviewRef.current.active) {
         // The shadow cursor stays frozen for the composition, but the *text* the
         // app just echoed is a fact, and it is the only thing that knows where an
@@ -2725,6 +3088,9 @@ export function TerminalView({
       // 잡는다. 스크롤 뒤 포인터가 멈춰 있으면 라벨만 옛 좌표에 남으므로 감춘다
       // (다음 mousemove 가 필요하면 다시 그린다).
       pathLinkHint.hide();
+      // ADR-0224: 칩은 링크 옆 절대 좌표에 떠 있고 마커를 따라가지 않는다.
+      // 스크롤은 칩을 소멸시킨다(캡처한 라인 번호가 밀리는 경합도 함께 닫힌다).
+      linkChip.dismiss("scroll");
     });
     // Issue #530: 앱 비활성화(Alt-Tab 등)에서 webview 가 helper textarea 의 실제
     // DOM focus 를 body/null 로 떨어뜨려도 store 의 pane focus 는 그대로이므로
@@ -2956,6 +3322,20 @@ export function TerminalView({
       return true;
     });
 
+    terminal.attachCustomWheelEventHandler(
+      createCodexTranscriptWheelHandler({
+        terminal,
+        isEnabled: () => useSettingsStore.getState().codex.transcriptScrollEnabled,
+        isCodexActive: () => {
+          const activity = useTerminalStore
+            .getState()
+            .instances.find((instance) => instance.id === instanceId)?.activity;
+          return activity?.type === "interactiveApp" && activity.name === "Codex";
+        },
+        isLocalControlAllowed: localTerminalControlAllowed,
+      }),
+    );
+
     // Hide mouse cursor + control bar when user starts typing.
     // Two listeners needed: terminal.onKey for when xterm has focus (normal typing),
     // DOM keydown for when focus is elsewhere (e.g., after clicking control bar).
@@ -2984,17 +3364,37 @@ export function TerminalView({
       setPathLinkCursor(inside);
       // #687: 수정자 클릭은 발견성이 없으므로, 밑줄 위에 있을 때만 무엇을 할 수
       // 있는지 라벨로 알린다. 기능이 꺼져 있으면 알릴 것이 없다.
+      // ADR-0224: `chip` 모드에서는 칩 자체가 액션 목록을 보여 주므로 hover 힌트
+      // 라벨을 대체한다. `immediate` 모드의 라벨은 그대로다.
       const sel = hit?.selection ?? null;
-      const hintKey = sel
-        ? pathLinkHintKey(
-            sel.isDirectory,
-            useSettingsStore.getState().terminal.pathLinkOsOpenEnabled,
-          )
-        : null;
+      const terminalSettings = useSettingsStore.getState().terminal;
+      const hintKey =
+        sel && terminalSettings.pathLinkActivation !== "chip"
+          ? pathLinkHintKey(sel.isDirectory, terminalSettings.pathLinkOsOpenEnabled)
+          : null;
       if (rect && hintKey) pathLinkHint.show(rect, i18n.t(hintKey, { ns: "common" }));
       else pathLinkHint.hide();
+      // ADR-0188: 포인터가 멈추면 그 지점 하나를 검증한다(밑줄 위면 생략).
+      schedulePathLinkHoverDwell(e, inside);
     };
-    const handleMouseLeave = () => pathLinkHint.hide();
+    const handleMouseLeave = () => {
+      cancelPathLinkHoverDwell();
+      pathLinkHint.hide();
+    };
+    // ADR-0224: Esc 는 칩을 닫는다. 칩이 떠 있을 때만 소비하므로(그 외에는 false)
+    // TUI 로 가는 평소의 Esc 는 그대로 흐른다. capture 단계여야 xterm 이 먼저
+    // PTY 로 보내 버리지 않는다.
+    const handleLinkChipKeyDown = (event: KeyboardEvent) => {
+      if (!linkChip.handleKeyDown(event.key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    // 칩 밖 클릭/탭도 칩을 닫는다. 칩 안(버튼)이면 유지한다.
+    const handleLinkChipOutsidePointerDown = (event: PointerEvent) => {
+      linkChip.handlePointerDown(event.target);
+    };
+    outerEl?.addEventListener("keydown", handleLinkChipKeyDown, true);
+    window.addEventListener("pointerdown", handleLinkChipOutsidePointerDown, true);
     outerEl?.addEventListener("keydown", handleKeyDown);
     outerEl?.addEventListener("mousemove", handleMouseMove);
     outerEl?.addEventListener("mouseleave", handleMouseLeave);
@@ -3015,23 +3415,29 @@ export function TerminalView({
     // 스토어·i18n·터미널 포커스만 주입해 배선한다.
     const pathLinkClick = createPathLinkClickHandlers<VerifiedPathSelection>({
       getSelectionAt: (x, y) => pathLink.getHit(x, y)?.selection ?? null,
-      getSettings: () => {
-        const terminalSettings = useSettingsStore.getState().terminal;
-        return {
-          osOpenEnabled: terminalSettings.pathLinkOsOpenEnabled,
-          confirmAlways: terminalSettings.pathLinkOsOpenConfirm,
-        };
-      },
-      confirm: ({ path }) =>
-        window.confirm(
-          i18n.t(
-            requiresHardConfirm(path)
-              ? "terminal.osOpenConfirmExecutable"
-              : "terminal.osOpenConfirm",
-            { ns: "common", path },
-          ),
-        ),
+      getSettings: readPathLinkClickSettings,
+      confirm: confirmOsHandoff,
       activate: (sel, action) => pathLink.activate(sel, action),
+      // 칩은 밑줄 hit-test 사각형과 겹칠 수 있고 hit-test 는 z-order 를 보지
+      // 않는다. 칩 버튼에서 출발한 mousedown 은 밑줄 press 를 무장시키지 않는다.
+      isChipEvent: (e) => linkChipView.contains(e.target),
+      // ADR-0224 `chip` 모드: 실행하지 않고 칩을 띄운다. 밑줄 데코레이션은 이
+      // 클릭이 선택을 지우면서 이미 폐기됐을 수 있으므로, 칩은 데코레이션을
+      // 참조하지 않고 검증 선택이 들고 있는 (라인, 컬럼 범위, 원문)을 캡처한다.
+      showChip: (sel, actions, point) =>
+        openLinkChip(
+          {
+            kind: sel.isDirectory ? "directory" : "file",
+            value: sel.absPath,
+            bufferLine: sel.bufferLine,
+            startCol: sel.startCol,
+            endCol: sel.endCol,
+            token: sel.token,
+            selection: sel,
+          },
+          actions,
+          point,
+        ),
       // mousedown 을 preventDefault 했고 네이티브 대화상자가 포커스를 가져가므로,
       // 진행·취소 어느 쪽이든 터미널 포커스를 되돌려 준다.
       onOsHandoffSettled: () => terminalRef.current?.focus(),
@@ -3096,7 +3502,16 @@ export function TerminalView({
     const finalizePointerSelection = () => {
       const gesture = retirePointerSelectionGesture();
       if (!gesture) return;
-      if (gesture.moved || gesture.selectionChanged) evaluatePathLinkSelection();
+      if (gesture.moved) {
+        // 드래그 → 최종 선택을 gesture 당 1회 검증한다(ADR-0165).
+        evaluatePathLinkSelection();
+      } else {
+        // 이동 없는 클릭 → 그 지점 하나를 검증한다(ADR-0188). 밑줄 위 클릭은
+        // pathLinkClick 이 이미 열기로 처리했고 evaluator 가 재파싱하지 않는다.
+        // 클릭이 선택을 지웠으면 onSelectionChange 가 stale 링크를 이미 거뒀다.
+        cancelPathLinkHoverDwell();
+        void pathLinkPoint.evaluateAt(gesture.startX, gesture.startY);
+      }
       if (useSettingsStore.getState().terminal.copyOnSelect) runTerminalCopy(terminal);
     };
     const handlePointerSelectionUp = (event: PointerEvent) => {
@@ -3123,7 +3538,9 @@ export function TerminalView({
       if (pointerSelectionGesture) pointerSelectionGesture.selectionChanged = true;
       // Issue #363/#ADR-0165: 선택 변경에서는 stale 링크와 진행 중인 검증만
       // 무효화한다. 후보 파싱과 filesystem stat은 gesture 완료 뒤에만 한다.
+      // ADR-0188: 새 선택은 point 밑줄과 그 재조회 memo 도 무효화한다.
       pathLinkSelectionSeq += 1;
+      pathLinkPoint.invalidate();
       clearPathLinkSelection();
     });
 
@@ -3142,6 +3559,9 @@ export function TerminalView({
     // later unrelated release parse paths or copy a disposed terminal.
     const handlePointerDown = (event: PointerEvent) => {
       if (event.button !== 0) return;
+      // 누르는 동안에는 hover dwell 을 돌리지 않는다 — 이 gesture 의 결과
+      // (드래그면 selection, 클릭이면 point)가 검증을 소유한다.
+      cancelPathLinkHoverDwell();
       retirePointerSelectionGesture();
       // Invalidate an earlier async stat immediately, but leave its verified
       // decoration through mousedown so an ordinary path-link click can still
@@ -3248,6 +3668,7 @@ export function TerminalView({
     // CoreService signal identifies delayed IME commits exactly; capture events
     // additionally cover focus reports that xterm emits without wasUserInput.
     // Without the internal signal, ambiguous live-write data stays human.
+    const directInputCapture = createDirectInputCapture();
     terminal.onData((data) => {
       trace("terminal-onData", {
         bytes: data.length,
@@ -3278,10 +3699,19 @@ export function TerminalView({
       }
       if (route === "human") {
         if (!localTerminalControlAllowed()) return;
+        const submittedInputs = directInputCapture.push(data);
         const byteLength = textEncoder.encode(data).length;
         const attempt = beginTerminalInputDelivery(instanceId, byteLength);
         void writeToTerminal(instanceId, data).then(
-          () => settleTerminalInputDelivery(attempt, "succeeded"),
+          () => {
+            settleTerminalInputDelivery(attempt, "succeeded");
+            const lastUserInput = submittedInputs.at(-1);
+            if (!lastUserInput) return;
+            useTerminalStore.getState().updateInstanceInfo(instanceId, {
+              lastUserInput,
+              lastUserInputAt: Date.now(),
+            });
+          },
           (error: unknown) => {
             if (!settleTerminalInputDelivery(attempt, "failed") || cancelled) return;
             trace("terminal-human-input-write-failed", {
@@ -3298,6 +3728,34 @@ export function TerminalView({
       // reply must not enter or consume one-shot state from the replacement.
       if (currentParsingGeneration === undefined) return;
       writeTerminalProtocolReply(instanceId, currentParsingGeneration, data).catch(() => {});
+    });
+
+    // xterm emits legacy DEFAULT mouse reports as a Latin-1-style binary
+    // string, not onData. Preserve each code unit as one PTY byte and keep this
+    // human input on the same Local owner, exactly-once metrics, and failure
+    // notification path as keyboard/IME/mouse onData. Binary reports never
+    // participate in parser reply/replay routing or the recent-input model.
+    terminal.onBinary((data) => {
+      const generation = outputGeneration;
+      if (!localTerminalControlAllowed() || generation === undefined) return;
+      trace("terminal-onBinary", {
+        bytes: data.length,
+        preview: Array.from(data.slice(0, 16), (character) => character.charCodeAt(0)),
+      });
+      const attempt = beginTerminalInputDelivery(instanceId, data.length);
+      void writeTerminalBinaryInput(instanceId, generation, data).then(
+        () => {
+          settleTerminalInputDelivery(attempt, "succeeded");
+        },
+        (error: unknown) => {
+          if (!settleTerminalInputDelivery(attempt, "failed") || cancelled) return;
+          trace("terminal-human-binary-input-write-failed", {
+            bytes: data.length,
+            error: error instanceof Error ? error.name : "unknown",
+          });
+          notifyHumanInputDeliveryFailure();
+        },
+      );
     });
 
     const nativeWindowsOutputStabilizer = new NativeWindowsOutputStabilizer();
@@ -3517,6 +3975,7 @@ export function TerminalView({
       if (
         cancelled ||
         remoteResizeSyncInFlight ||
+        !terminalSessionReady ||
         !localTerminalControlAllowed() ||
         cols <= 0 ||
         rows <= 0
@@ -4032,8 +4491,6 @@ export function TerminalView({
     let outputAttachTimeoutStreak = 0;
     let outputAckTimeoutStreak = 0;
     const outputControlOperations = terminalOutputControlOperationRegistry.mount(instanceId);
-    /** Generation of the attachment the coordinator is currently applying. */
-    let outputGeneration: number | undefined;
     /** Parsed-credit sender owned by exactly one backend attach lease. */
     let outputFlowAcknowledger: TerminalOutputFlowAcknowledger | undefined;
     type OutputTransportMode = "pending" | "v2" | "v3" | "fail-stop";
@@ -5604,9 +6061,12 @@ export function TerminalView({
       lastGrokSession && GROK_SESSION_ID_PATTERN.test(lastGrokSession)
         ? lastGrokSession
         : undefined;
-    const presentAgentSessionKeys = [lastClaudeSession, lastCodexSession, lastGrokSession].filter(
-      (value) => typeof value === "string" && value.length > 0,
-    ).length;
+    const presentAgentSessionKeys = [
+      lastClaudeSession,
+      lastCodexSession,
+      lastGrokSession,
+      lastAgentFresh,
+    ].filter((value) => typeof value === "string" && value.length > 0).length;
     const hasAgentSessionConflict = presentAgentSessionKeys > 1;
     // The launch command is configurable so a user can carry flags such as
     // `--dangerously-skip-permissions` / `--yolo` into the restored session.
@@ -5621,13 +6081,21 @@ export function TerminalView({
       ? startupCommandOverride
       : hasAgentSessionConflict
         ? undefined
-        : shouldRestoreClaudeSession && safeSessionId
-          ? `${claudeCommand} --resume ${safeSessionId}`
-          : shouldRestoreCodexSession && safeCodexSessionId
-            ? `${codexCommand} resume ${safeCodexSessionId}`
-            : shouldRestoreGrokSession && safeGrokSessionId
-              ? `${grokCommand} --resume ${safeGrokSessionId}`
-              : undefined;
+        : shouldRestoreCodexSession && lastAgentFresh === "codex"
+          ? codexCommand
+          : shouldRestoreClaudeSession && safeSessionId
+            ? `${claudeCommand} --resume ${safeSessionId}`
+            : shouldRestoreCodexSession && safeCodexSessionId
+              ? `${codexCommand} resume ${safeCodexSessionId}`
+              : shouldRestoreGrokSession && safeGrokSessionId
+                ? `${grokCommand} --resume ${safeGrokSessionId}`
+                : undefined;
+
+    if (startupOverride && !viewerStartup) {
+      useTerminalStore.getState().updateInstanceInfo(instanceId, {
+        attributionPendingUntil: Date.now() + SESSION_ATTRIBUTION_STARTUP_GRACE_MS,
+      });
+    }
 
     cacheRestorePromise =
       !isFreshRestart && shouldRestoreOutput && paneId
@@ -5663,6 +6131,7 @@ export function TerminalView({
           stabilizeNativeWindowsOutput = shouldStabilizeInitialExecutionHost(initialExecutionHost);
           terminalSessionReady = true;
           if (cancelled) return;
+          if (remoteReturnResizeDirtyRef.current) startRemoteResizeSync();
           useTerminalStore.getState().updateInstanceInfo(instanceId, {
             sessionReady: true,
             // The backend seeds the session CWD from the PTY's actual start
@@ -5715,6 +6184,9 @@ export function TerminalView({
       const { width, height } = entries[0].contentRect;
       // #687: reflow 뒤 라벨 좌표는 더 이상 밑줄과 맞지 않는다(스크롤과 동일 이유).
       pathLinkHint.hide();
+      // ADR-0224: resize·reflow 는 셀 좌표계를 바꾼다 → 칩도 소멸한다. pane 을
+      // 감추는 워크스페이스 전환도 0×0 entry 로 여기 도달한다.
+      linkChip.dismiss("resize");
       const isNowHidden = width === 0 || height === 0;
       isContainerHiddenRef.current = isNowHidden;
       // A pending debounced fit must never run against a hidden container.
@@ -5765,7 +6237,10 @@ export function TerminalView({
         // rebuild this terminal twice per clear.
         registerAtlasRebuilder(instanceId, rebuildRendererForForeignClear);
 
-        performTerminalFit({});
+        // The PTY started rendererless at xterm's default 80x24. Treat the
+        // first fitted grid as authoritative and reuse the acknowledged retry
+        // path so neither PTY readiness nor the owner-status gate can lose it.
+        performTerminalFit({ syncBackendResize: true });
         openedRef.current = true;
         // Sync viewport-dependent UI once on mount. onScroll only fires on
         // subsequent viewport moves, so a terminal restored (or reattached)
@@ -5902,10 +6377,16 @@ export function TerminalView({
       idleDetector.dispose();
       resizeObserver.disconnect();
       outerContainer?.removeEventListener("contextmenu", handleContextMenu);
+      cancelPathLinkHoverDwell();
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
       outerEl?.removeEventListener("mouseleave", handleMouseLeave);
       pathLinkHint.dispose();
+      // ADR-0224: terminal 폐기는 칩도 함께 거둔다.
+      outerEl?.removeEventListener("keydown", handleLinkChipKeyDown, true);
+      window.removeEventListener("pointerdown", handleLinkChipOutsidePointerDown, true);
+      linkChip.dismiss("dispose");
+      linkChipView.dispose();
       outerEl?.removeEventListener("pointerdown", handlePointerDown);
       outerEl?.removeEventListener("mousedown", handlePathLinkMouseDown, true);
       window.removeEventListener("mouseup", handlePathLinkMouseUp);
@@ -6141,6 +6622,7 @@ export function TerminalView({
     remoteControlReleaseRevisionRef.current = remoteControlSnapshot.releaseRevision;
     const statusKnown = remoteControlStatus !== null;
     const remoteActive = remoteControlStatus?.active ?? false;
+    const backendResizePending = remoteReturnResizeDirtyRef.current;
     remoteControlStatusKnownRef.current = statusKnown;
     remoteControlActiveRef.current = remoteActive;
     localControlAvailableRef.current = statusKnown && !remoteActive;
@@ -6150,7 +6632,7 @@ export function TerminalView({
     if (
       !statusKnown ||
       remoteActive ||
-      (!wasActive && !remoteWasReleased) ||
+      (!wasActive && !remoteWasReleased && !backendResizePending) ||
       !term ||
       !openedRef.current
     ) {
@@ -6319,26 +6801,6 @@ export function TerminalView({
     };
   }, [runTerminalRendererReflow]);
 
-  // Reactively update xterm overviewRuler width when scrollbarStyle changes
-  const scrollbarStyleForEffect = useSettingsStore((s) => s.terminal.scrollbarStyle ?? "overlay");
-  useEffect(() => {
-    const term = terminalRef.current;
-    if (!term?.options) return;
-    try {
-      const newWidth = scrollbarStyleForEffect === "overlay" ? 0 : SCROLLBAR_SEPARATE_GUTTER_PX;
-      term.options.overviewRuler = { width: newWidth };
-      // The overviewRuler option update is harmless while hidden, but
-      // fit() on a 0×0 container would PTY-resize to cols=0. Defer.
-      if (isContainerHiddenRef.current) {
-        reflowDirtyRef.current = true;
-      } else {
-        guardedTerminalFitRef.current?.({});
-      }
-    } catch {
-      /* xterm mock may not support options setter */
-    }
-  }, [scrollbarStyleForEffect]);
-
   // Wheel sensitivity is a live xterm option: a settings change applies to the
   // running terminal without a restart, and does not touch layout.
   const scrollSensitivityForEffect = useSettingsStore((s) =>
@@ -6372,11 +6834,6 @@ export function TerminalView({
   const pb = padding?.bottom ?? 8;
   const pl = padding?.left ?? 8;
 
-  // Scrollbar style: overlay (default) renders on top of terminal content,
-  // separate reserves space for the scrollbar.
-  const scrollbarStyle = useSettingsStore((s) => s.terminal.scrollbarStyle ?? "overlay");
-  const scrollbarClass = scrollbarStyle === "overlay" ? "scrollbar-overlay" : "scrollbar-separate";
-
   // Issue #361: the jump-to-bottom button is opt-out via settings (default on).
   const showScrollToBottomButtonSetting = useSettingsStore(
     (s) => s.terminal.showScrollToBottomButton ?? true,
@@ -6406,11 +6863,11 @@ export function TerminalView({
   const composerAutocompleteEnabled = useSettingsStore(
     (s) => s.terminal.composerAutocomplete ?? true,
   );
+  const composerStarredEntries = useSettingsStore((s) => s.terminal.composerStarredEntries ?? []);
 
   // Issue #361: the jump-to-bottom button must clear the scrollbar slider so
-  // they do not overlap. The slider renders at the same right-edge width in both
-  // overlay and separate modes, and the button is positioned relative to the
-  // pane edge, so the offset is mode-independent (see SCROLL_BTN_RIGHT_PX).
+  // they do not overlap. The button is positioned relative to the pane edge, so
+  // it clears the fixed right-edge slider width (see SCROLL_BTN_RIGHT_PX).
   const scrollBtnRight = SCROLL_BTN_RIGHT_PX;
 
   const wrapperStyle: CSSProperties & {
@@ -6441,7 +6898,7 @@ export function TerminalView({
       <div
         ref={wrapperRef}
         data-testid={`terminal-view-${instanceId}`}
-        className={`relative min-h-0 min-w-0 flex-1 overflow-hidden ${scrollbarClass} ${nativeCursorHidden ? "terminal-native-cursor-hidden" : ""} ${inputMode === "composer" ? "terminal-composer-active" : ""}`}
+        className={`relative min-h-0 min-w-0 flex-1 overflow-hidden ${nativeCursorHidden ? "terminal-native-cursor-hidden" : ""} ${inputMode === "composer" ? "terminal-composer-active" : ""}`}
         style={wrapperStyle}
         onFocusCapture={(event) => {
           if (
@@ -6529,19 +6986,7 @@ export function TerminalView({
               setShowScrollToBottom(false);
             }}
           >
-            <svg
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="3"
-              strokeLinecap="butt"
-              strokeLinejoin="round"
-              aria-hidden
-            >
-              <path d="m5 8.5 7 7 7-7" />
-            </svg>
+            <ChevronDownIcon size={24} strokeWidth={3} />
           </button>
         )}
       </div>
@@ -6550,10 +6995,18 @@ export function TerminalView({
         text={composerDraft.text}
         labels={{
           editor: t("terminal.composerEditor"),
-          placeholder: t("terminal.composerPlaceholder"),
           resize: t("terminal.composerResize"),
           history: t("terminal.composerHistory"),
           autocomplete: t("terminal.composerAutocomplete"),
+          star: t("terminal.composerStar"),
+          unstar: t("terminal.composerUnstar"),
+          starredEditor: t("terminal.composerStarredEditor"),
+          starredLabel: t("terminal.composerStarredLabel"),
+          starredValue: t("terminal.composerStarredValue"),
+          starredSend: t("terminal.composerStarredSend"),
+          starredSendDesc: t("terminal.composerStarredSendDesc"),
+          starredSave: t("terminal.composerStarredSave"),
+          starredCancel: t("terminal.composerStarredCancel"),
         }}
         textareaRef={composerTextareaRef}
         inFlight={composerDraft.inFlight !== null}
@@ -6564,6 +7017,7 @@ export function TerminalView({
         atShellPrompt={atShellPrompt}
         historyPopupEnabled={composerHistoryPopupEnabled}
         autocompleteEnabled={composerAutocompleteEnabled}
+        starredEntries={composerStarredEntries}
         history={readComposerHistory(composerHistoryKey)}
         historyScopeKey={composerHistoryKey}
         onTextChange={(text) => {
@@ -6577,6 +7031,24 @@ export function TerminalView({
         onProxyPaste={pasteComposerProxy}
         onCompositionCommit={commitComposerComposition}
         onHistory={navigateComposerHistory}
+        onToggleStar={(entry, starred) => {
+          void setComposerStarredEntry(entry, starred)
+            .then((entries) =>
+              useSettingsStore.getState().setTerminal({ composerStarredEntries: entries }),
+            )
+            .catch((error) => console.warn("Failed to update Composer star", error));
+        }}
+        onUpsertStarredEntry={(entry, previousValue) => {
+          return setComposerStarredEntry({
+            text: entry.value,
+            starred: true,
+            label: entry.label,
+            send: entry.send,
+            previousText: previousValue,
+          }).then((entries) =>
+            useSettingsStore.getState().setTerminal({ composerStarredEntries: entries }),
+          );
+        }}
       />
     </div>
   );

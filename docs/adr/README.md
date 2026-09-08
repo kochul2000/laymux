@@ -58,7 +58,7 @@ ADR 이 필요한 대표 기준:
 | [0038](0038-remote-height-shrink-surface-crop.md) | Remote 높이 축소는 surface-local crop — normal buffer rows 축소를 PTY에 전파하지 않음 (0015 확장) | Accepted |
 | [0039](0039-remote-spatial-notification-step-navigation.md) | Remote 공간순서·알림순서 스텝 내비게이션은 데스크톱 프론트엔드가 계산 (0018/0019/0020/0028 확장) | Accepted |
 | [0040](0040-remote-soft-key-user-order.md) | Remote 소프트 키는 사용자가 정한 순서를 유지한다 (0028 확장) | Accepted |
-| [0041](0041-remote-served-file-viewer.md) | Remote FileViewer는 lease-gated API와 자격 증명 없는 새 탭으로 제공 | Superseded by [0044](0044-remote-file-viewer-explicit-host-path.md) |
+| [0041](0041-remote-served-file-viewer.md) | Remote FileViewer는 lease-gated API와 자격 증명 없는 새 탭으로 제공 | Superseded by [0044](0044-remote-file-viewer-explicit-host-path.md), [0184](0184-remote-file-viewer-in-page-overlay.md) |
 | [0042](0042-remote-file-viewer-secret-capability.md) | Remote FileViewer는 lease-bound 비밀 capability로 호스트 파일을 읽음 (0041 권한·응답 정정) | Accepted |
 | [0043](0043-global-terminal-ready-startup-slot.md) | 터미널 시작은 앱 전역 준비 완료 슬롯으로 직렬화한다 | Accepted |
 | [0044](0044-remote-file-viewer-explicit-host-path.md) | Remote FileViewer의 호스트 경로 반영은 명시적 action으로만 수행 | Accepted |
@@ -190,13 +190,76 @@ ADR 이 필요한 대표 기준:
 | [0170](0170-android-e2e-lease-dies-with-its-session.md) | Android E2E 세션으로 claim 한 lease 는 세션과 함께 죽는다 | Accepted |
 | [0172](0172-android-e2e-compat-version-gate.md) | Android E2E — 비호환 시에만 올리는 호환 번호로 연결 게이트 | Accepted |
 | [0171](0171-remote-preedit-laid-out-on-committed-cells.md) | Remote 조합 텍스트는 확정 후 셀 위에 배치한다 | Accepted |
-| [0173](0173-remote-display-settings-pc-owned-and-lease-gated.md) | Remote 화면 설정은 PC가 소유하고 변경은 controller lease로 제한한다 | Accepted |
+| [0173](0173-remote-display-settings-pc-owned-and-lease-gated.md) | Remote 화면 설정은 PC가 소유하고 변경은 controller lease로 제한한다 | Superseded by [0209](0209-remote-display-preferences-are-device-local.md) |
 | [0174](0174-github-signed-desktop-self-update.md) | PC 업데이트는 GitHub Releases와 고정 서명 키를 사용한다 | Accepted |
 | [0175](0175-remote-oauth-loopback-relay.md) | 폰에서 연 설치형 OAuth 로그인의 loopback redirect를 1회용 세션으로 PC 리스너에 중계한다 | Proposed |
 | [0176](0176-dev-android-pairing-payload-injection.md) | dev 빌드 한정으로 페어링 payload 를 MCP 로 노출하고 debug 앱 딥링크로 주입한다 | Proposed |
 | [0177](0177-remote-two-finger-touch-scroll-sensitivity.md) | Remote 터치 스크롤 민감도를 한 손가락·두 손가락으로 분리한다(두 손가락 기본 5) | Proposed |
 | [0178](0178-android-pairing-native-material-bottom-sheet.md) | Android pairing은 네이티브 Material bottom sheet가 소유한다 (0157 대체) | Accepted |
 | [0179](0179-android-connection-settings-from-dashboard-menu.md) | Android 연결 설정은 Cloud 대시보드의 PC 메뉴에서 진입한다 (0178 정정) | Accepted |
+| [0180](0180-remote-hidden-workspace-header-icon.md) | Remote 숨김 workspace 보관함은 상단 개수 아이콘으로 연다 (0153 정정) | Accepted |
+| [0181](0181-remote-terminal-file-attachments.md) | Remote 터미널 첨부는 bounded 호스트 임시 파일과 기존 structured input을 사용한다 | Proposed |
+| [0182](0182-remote-scroll-top-history-expansion.md) | Remote 스크롤 최상단은 더 깊은 screen checkpoint를 요청해 이전 출력을 받아온다 (0069 확장) | Accepted |
+| [0183](0183-remote-page-content-security-policy.md) | Remote 셸 문서에도 CSP 를 적용하고 WebSocket source 는 검증된 Host 만 반영한다 | Proposed |
+| [0184](0184-remote-file-viewer-in-page-overlay.md) | Remote FileViewer 는 새 탭이 아니라 Remote 문서 안 오버레이로 렌더한다 (0041 새 탭 결정 대체) | Proposed |
+| [0185](0185-remote-file-viewer-download.md) | Remote FileViewer 다운로드는 전용 bytes 엔드포인트로 받고 안드로이드는 네이티브가 저장한다 | Proposed |
+| [0186](0186-remote-input-action-three-zone-layout.md) | Remote 입력 action은 기기별 기본행·Keys 확장행·숨김 3-zone 배치를 사용한다 (0028·0040 확장, 0036 일부 정정) | Accepted |
+| [0187](0187-remote-drawer-status-dots-and-hidden-subview.md) | Remote drawer 상태 표시는 작은 점으로 통일하고 숨김 workspace는 하위 화면에서 연다 (0180 대체, 0153 정정) | Accepted |
+| [0188](0188-path-link-ambient-detection-triggers.md) | path-link 은 선택 외에도 포인터 지점(hover dwell·클릭·탭)과 Remote 유휴 화면에서 발견한다 (0165·0148·0045 확장) | Proposed |
+| [0189](0189-ime-candidate-first-observation-fold.md) | IME 조합 관측은 candidate에 순서대로 병합하고 consumed keypress를 취소한다 (0093 정정) | Accepted |
+| [0190](0190-update-release-channels.md) | 업데이트는 stable·beta 두 채널을 가지며 채널 매니페스트가 최신 릴리스의 단일 진실원이다 (0174 확장·정정) | Proposed |
+| [0191](0191-path-link-space-extended-candidates.md) | path-link 후보는 절대경로 앵커에서 공백을 넘어 확장하고 존재하는 최장 후보가 이긴다 (0148·0188 확장) | Proposed |
+| [0192](0192-standard-action-button-and-disabled-affordance.md) | 액션 버튼은 공용 컴포넌트로 그리고 비활성 컨트롤은 이유를 포인터 자리에서 말한다 | Proposed |
+| [0193](0193-viewer-os-handoff-buttons.md) | FileViewer 는 OS 열기·위치 보기를 버튼으로 노출하고 확인 정책을 트리거와 분리한다 (0100 확장) | Proposed |
+| [0194](0194-workspace-pane-last-input-second-line.md) | Workspace selector는 마지막 사용자 입력 표시 모드를 제공한다 (0151 정정) | Accepted |
+| [0195](0195-agent-session-cleared-on-shell-return.md) | agent 를 종료한 pane 은 shell 로 복원한다 — live pane 에 주장자가 없으면 세션 id 삭제 (0120 확장) | Accepted |
+| [0196](0196-remote-coarse-pointer-attach-defers-input-focus.md) | 터치 기기의 Remote attach 는 입력 surface focus 를 선점하지 않는다 (0036 축 구분) | Proposed |
+| [0197](0197-android-update-channel-release-handoff.md) | Android 앱은 기기-로컬 채널 설정으로 릴리스 채널을 따라가고 업데이트는 GitHub 릴리스 페이지로 넘긴다 (0190 확장) | Superseded by [0223](0223-android-release-advances-only-with-apk.md) |
+| [0198](0198-remote-file-explorer-overlay.md) | Remote FileViewer 오버레이는 인-오버레이 file explorer 로 디렉터리를 탐색한다 (0184/0044/0042 확장, 0188 디렉터리 비활성 개정) | Accepted |
+| [0199](0199-remote-menu-font-size-pc-owned.md) | Remote 메뉴(내비게이션 드로어) 글자 크기를 PC 소유 display-settings 계약에 추가한다 (0173 확장) | Superseded by [0209](0209-remote-display-preferences-are-device-local.md) |
+| [0200](0200-remote-composer-opacity-state-settings.md) | Remote Composer 투명도는 PC 소유 Idle·Focused·Active 3단계 표시 설정이다 (0173 확장) | Superseded by [0209](0209-remote-display-preferences-are-device-local.md) |
+| [0201](0201-update-install-releases-child-file-locks.md) | 업데이트 설치기를 부르기 전에 앱이 자기 자식 프로세스를 정리한다 (0174 확장) | Accepted |
+| [0202](0202-io-commands-off-the-main-thread.md) | I/O(파일시스템·프로세스·시스템 열거)하는 Tauri 커맨드는 `#[tauri::command(async)]` 로 메인 스레드를 벗어난다 (0188 확장) | Proposed |
+| [0203](0203-remote-composer-overlays-terminal-output.md) | Remote Composer는 터미널 출력 위에 겹친다 (0200 배치·geometry 정정) | Accepted |
+| [0204](0204-remote-lease-recovery-on-control-failure.md) | 제어 근거로 거절된 Remote 요청은 lease 를 재검증하고, 돌아온 탭은 쥔 lease 를 즉시 프로브한다 (0042·0037 확장) | Proposed |
+| [0205](0205-lucide-application-icon-source.md) | 범용 애플리케이션 아이콘은 Lucide를 단일 출처로 사용한다 (0192 부분 대체) | Accepted |
+| [0206](0206-codex-normal-buffer-transcript-wheel-routing.md) | Codex normal-buffer transcript의 휠은 pager 입력으로 라우팅한다 (0142 확장) | Accepted |
+| [0207](0207-remote-composer-recall-observes-soft-keyboard-geometry.md) | Remote Composer 탭 recall은 소프트 키보드 geometry를 관측한다 (0196 확장·정정) | Accepted |
+| [0208](0208-android-e2e-file-viewer-typed-capability.md) | Android E2E FileViewer는 타입화 capability와 exact claim binding을 함께 검증 | Accepted |
+| [0209](0209-remote-display-preferences-are-device-local.md) | Remote 표시·입력 감도·기본 checkpoint 예산은 기기 로컬로 소유한다 (0173·0199·0200 대체) | Accepted |
+| [0210](0210-remote-lucide-icon-boundary.md) | Remote 범용 아이콘도 Lucide DOM 경계에서 렌더한다 (0205·0169 확장) | Accepted |
+| [0211](0211-workspace-selector-destructive-actions-require-two-activations.md) | Workspace selector 파괴적 action은 같은 컨트롤의 연속 두 번 활성화를 요구한다 (0033·0035 정정) | Accepted |
+| [0212](0212-android-pairing-invitation-copy-paste.md) | Android 페어링 초대는 QR과 명시적 복사·붙여넣기를 함께 제공한다 (0145·0178 확장, 0176 범위 정정) | Accepted |
+| [0213](0213-remote-input-action-segment-placement-and-user-keys.md) | Remote 입력 action은 행 안의 정렬 구역에 배치하고, 조합키는 사용자가 등록한다 (0028 확장, 0186·0040 정정) | Proposed |
+| [0214](0214-remote-settings-paginates-into-tabs.md) | Remote Settings는 탭으로 나누고 선택한 탭만 기기에 남긴다 (0187 확장) | Proposed |
+| [0215](0215-remote-page-frames-only-the-desktop-app.md) | Remote 셸은 데스크톱 앱 origin 에만 프레임을 허용하고, 모바일 모드 탈출구는 호스트가 소유한다 (0183 정정) | Proposed |
+| [0216](0216-xterm-legacy-mouse-binary-input-boundary.md) | xterm legacy mouse binary 입력은 플랫폼 PTY 경계에서 검증한다 (0054·0096·0202 확장) | Accepted |
+| [0217](0217-fixed-terminal-scrollbar-layout.md) | 터미널 스크롤바는 현재의 고정 gutter·구분선 없는 단일 레이아웃만 사용한다 | Accepted |
+| [0218](0218-codex-transcript-pointer-scroll-toggle.md) | Codex transcript 포인터 스크롤 활성 여부를 호스트 설정으로 데스크톱·Remote에 공유한다 (0206 확장) | Accepted |
+| [0219](0219-android-back-defers-to-remote-ui-stack.md) | Android system back은 Remote UI stack을 순서대로 닫는다 (0149 확장) | Accepted |
+| [0220](0220-path-link-stable-frame-lifetime.md) | path-link 수명 판정은 synchronized-output 안정 프레임에서 수행한다 (0188 정정) | Accepted |
+| [0221](0221-codex-position-first-in-frame-cursor-park.md) | Codex position-first 인프레임 커서 주차도 권위 tail로 인정한다 (0076·0078 확장) | Accepted |
+| [0222](0222-agent-session-checkpoint-coordinator.md) | Agent 세션 복원점은 통합 귀속 스냅샷과 수명주기 체크포인트로 확정한다 (0118·0120·0195·0201 정정, 0174 확장) | Accepted |
+| [0223](0223-android-release-advances-only-with-apk.md) | Android 릴리스 채널은 APK를 명시적으로 발행할 때만 전진한다 (0190 정정, 0197 대체) | Accepted |
+| [0224](0224-link-activation-chip-gate.md) | 링크 실행은 activation 설정으로 게이트하고, deliberate 모드는 액션 칩으로 명시 실행한다 (0188 확장) | Accepted |
+| [0225](0225-android-oauth-loopback-address-family.md) | Android OAuth loopback listener는 redirect 주소 패밀리를 따른다 (0175 Android bind 정정) | Accepted |
+| [0226](0226-composer-stars-are-host-global-persistent-state.md) | Composer 별표는 Desktop·Remote가 공유하는 호스트 전역 영구 상태다 (0029·0055 확장) | Accepted |
+| [0227](0227-remote-document-attachments.md) | Remote 첨부는 signature 확인된 문서를 받고, 크기 상한과 추가 허용 종류는 host settings가 정한다 (0181 확장) | Accepted |
+| [0228](0228-remote-cursor-key-hold-repeat.md) | Remote 커서 키는 누르는 동안 자동 반복하고, 나머지 소프트 키는 1회 입력을 유지한다 (0213 확장) | Accepted |
+| [0229](0229-composer-starred-entries-have-label-and-send.md) | Composer 별표 항목은 라벨·전송 여부를 가진다 (0226의 원소 타입·exact-query·영속 진입점 정정, 0219 dismiss 순서 확장) | Accepted |
+| [0230](0230-xterm-compositionend-data-recovers-replaced-textarea.md) | textarea가 통째로 교체된 조합 확정은 compositionend 데이터로 복구한다 (0093 확장) | Accepted |
+| [0231](0231-hidden-eviction-target-scoped-input-admission.md) | 숨김 자동 종료의 입력 차단은 대상 terminal에 한정한다 (0222 정정) | Accepted |
+| [0232](0232-unconsumed-resume-checkpoint.md) | 입력 전 복원 요청은 generation에 결부된 복원점으로 보존한다 | Accepted |
+| [0233](0233-remote-workspace-menu-pinning.md) | Remote 워크스페이스 메뉴는 기기 로컬 너비를 공유하고 viewport 컷오프보다 넓을 때만 고정한다 (0015·0209 확장) | Accepted |
+| [0234](0234-remote-user-key-explicit-submit.md) | Remote 사용자 키는 Enter 제출 의도를 별도로 저장한다 (0213 정정) | Accepted |
+| [0235](0235-wrapped-path-link-logical-lines.md) | 줄바꿈 경로의 논리 줄 복원과 물리 셀 조각의 공동 수명 | Accepted |
+| [0236](0236-remote-composer-inline-attachments.md) | Remote Composer 인라인 첨부 칩 | Proposed |
+| [0237](0237-remote-floating-input-controls.md) | Remote 플로팅 입력은 기기 로컬 배치와 기존 액션을 공유한다 (0213·0228 확장) | Accepted |
+| [0238](0238-codex-lifecycle-storage-checkpoint.md) | Codex 복원점은 프로세스별 대화 전환 기록으로 선택한다 | Accepted |
+| [0239](0239-remote-pad-hold-move-opacity.md) | Remote 방향 패드는 중앙 길게 누르기로 이동하고 불투명도를 기기에 저장한다 (0237 일부 대체) | Accepted |
+| [0240](0240-windows-android-release-targets.md) | 릴리스는 당분간 Windows와 Android만 배포한다 | Accepted |
+| [0241](0241-bundled-pretendard-default-ui-font.md) | 데스크톱 UI 기본 폰트로 Pretendard 가변 폰트를 내장한다 | Accepted |
+| [0242](0242-readonly-spreadsheet-viewer.md) | 스프레드시트는 Rust에서 읽고 데스크톱에서 값으로 표시한다 | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

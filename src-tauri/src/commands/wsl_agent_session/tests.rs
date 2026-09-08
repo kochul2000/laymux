@@ -14,6 +14,24 @@ fn process(pid: u32, ppid: u32, name: &str) -> WslProcessEntry {
 }
 
 #[test]
+fn live_codex_without_rollout_is_not_mistaken_for_an_absent_agent() {
+    let entries = parse_probe_output(
+        concat!(
+            "LAYMUX_WSL_AGENT_PROBE_V2\n",
+            "P\tterminal-pane-a\t20\t10\tcodex\t/home/user\t\t\n",
+            "LAYMUX_WSL_AGENT_PROBE_END\n",
+        )
+        .as_bytes(),
+    )
+    .unwrap();
+    let selected = select_top_level_agent(&entries, WslAgentProvider::Codex)
+        .unwrap()
+        .unwrap();
+    assert_eq!(selected.pid, 20);
+    assert!(selected.rollout_paths.is_empty());
+}
+
+#[test]
 fn parses_bounded_probe_rows_and_optional_roots() {
     let output = concat!(
         "LAYMUX_WSL_AGENT_PROBE_V2\n",

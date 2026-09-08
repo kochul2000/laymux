@@ -14,6 +14,11 @@ data class PairingSheetState(
     val biometricAvailability: BiometricAvailability,
     val remoteConnected: Boolean,
     val remoteConnecting: Boolean,
+    // True while any pairing/connect operation is still running (scan, ACK,
+    // biometric unwrap, session open). MainActivity already owns that
+    // definition for its own re-entrancy guards, so the sheet takes it as a
+    // raw input instead of re-deriving a second, drifting copy.
+    val busy: Boolean,
     val error: String?,
     val notice: String?,
 )
@@ -63,6 +68,8 @@ data class PairingSheetPresentation(
     val scanAction: PairingScanAction,
     val scanEmphasis: PairingScanEmphasis,
     val scanEnabled: Boolean,
+    val busy: Boolean,
+    val noticeVisible: Boolean,
 )
 
 fun presentPairingSheet(state: PairingSheetState): PairingSheetPresentation {
@@ -116,5 +123,11 @@ fun presentPairingSheet(state: PairingSheetState): PairingSheetPresentation {
             PairingScanEmphasis.PRIMARY
         },
         scanEnabled = !state.remoteConnecting || biometricBlocked,
+        busy = state.busy,
+        // A refresh that carries no notice still happens mid-operation (most
+        // notifyPairingChanged() callers pass neither text), so the row stays
+        // up while busy — otherwise the spinner would blink out of an
+        // operation that is still running.
+        noticeVisible = state.busy || !state.notice.isNullOrBlank(),
     )
 }

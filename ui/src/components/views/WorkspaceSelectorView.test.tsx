@@ -156,6 +156,37 @@ describe("WorkspaceSelectorView", () => {
     expect(screen.getByTestId("layout-card-default-layout")).toBeInTheDocument();
   });
 
+  it("requires two clicks to delete a saved layout", () => {
+    useWorkspaceStore.getState().exportAsNewLayout("Extra");
+    const extra = useWorkspaceStore.getState().layouts.find((layout) => layout.name === "Extra")!;
+    render(<WorkspaceSelectorView />);
+
+    fireEvent.mouseEnter(screen.getByTestId(`layout-card-${extra.id}`));
+    fireEvent.click(screen.getByTestId(`layout-menu-${extra.id}`));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(useWorkspaceStore.getState().layouts).toHaveLength(2);
+    const confirmingButton = screen.getByRole("button", { name: "Click again to delete Extra" });
+    expect(confirmingButton).toHaveAttribute("data-confirming", "true");
+
+    fireEvent.click(confirmingButton);
+    expect(useWorkspaceStore.getState().layouts).toHaveLength(1);
+    expect(useWorkspaceStore.getState().layouts[0].id).toBe("default-layout");
+  });
+
+  it("deletes a saved layout on the first click when confirmation is disabled", () => {
+    useSettingsStore.getState().setWorkspaceSelector({ confirmDestructiveActions: false });
+    useWorkspaceStore.getState().exportAsNewLayout("Extra");
+    const extra = useWorkspaceStore.getState().layouts.find((layout) => layout.name === "Extra")!;
+    render(<WorkspaceSelectorView />);
+
+    fireEvent.mouseEnter(screen.getByTestId(`layout-card-${extra.id}`));
+    fireEvent.click(screen.getByTestId(`layout-menu-${extra.id}`));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(useWorkspaceStore.getState().layouts).toHaveLength(1);
+  });
+
   it("offers export-new next to the layout cards", async () => {
     const user = userEvent.setup();
     const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("My Layout");
@@ -238,6 +269,74 @@ describe("WorkspaceSelectorView", () => {
     expect(useDockStore.getState().focusedDock).toBeNull();
     expect(useDockStore.getState().focusedDockPaneId).toBeNull();
     expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+  });
+
+  it("enters the exact pane clicked in an inactive workspace", async () => {
+    const user = userEvent.setup();
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-a",
+          name: "Alpha",
+          panes: [
+            {
+              id: "pane-a",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+        {
+          id: "ws-b",
+          name: "Beta",
+          panes: [
+            {
+              id: "pane-b-left",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+            {
+              id: "pane-b-right",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-a",
+    });
+    useGridStore.getState().setFocusedPane(0);
+    useDockStore.getState().setFocusedDock("left");
+    useSettingsStore.getState().setWorkspaceSelector({
+      display: {
+        minimap: true,
+        environment: false,
+        activity: false,
+        path: false,
+        result: false,
+      },
+      lastInputMode: "workspaceLatest",
+    });
+    render(<WorkspaceSelectorView />);
+
+    const targetPane = screen.getByTestId("pane-row-pane-b-right");
+    expect(targetPane).toHaveAccessibleName("Open Beta, pane 2, PowerShell");
+    await user.click(targetPane);
+
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-b");
+    expect(useDockStore.getState().focusedDock).toBeNull();
+    expect(useDockStore.getState().focusedDockPaneId).toBeNull();
+    expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+    expect(markNotificationsRead).toHaveBeenLastCalledWith(["terminal-pane-b-right"]);
   });
 
   it("shows unread badge when notifications exist", async () => {
@@ -328,7 +427,7 @@ describe("WorkspaceSelectorView", () => {
     });
   });
 
-  it("shows latest notification text", async () => {
+  it("keeps the notification badge without restoring the removed aggregate text", async () => {
     useWorkspaceStore.setState({
       workspaces: [
         {
@@ -362,8 +461,9 @@ describe("WorkspaceSelectorView", () => {
     render(<WorkspaceSelectorView />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Build done/)).toBeInTheDocument();
+      expect(screen.getByTestId("unread-badge-ws-default")).toHaveTextContent("1");
     });
+    expect(screen.queryByText(/Build done/)).not.toBeInTheDocument();
   });
 
   it("activates the workspace and syncs backend read state on click (#365)", async () => {
@@ -599,8 +699,127 @@ describe("WorkspaceSelectorView", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/npm test/)).toBeInTheDocument();
-      expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("✓");
+      const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
+      const icon = badge.querySelector('[data-status-icon="success"]');
+      expect(icon).toBeInTheDocument();
+      expect(icon).toHaveAttribute("aria-label", "Command succeeded");
+      expect(badge).not.toHaveTextContent("✓");
     });
+  });
+
+  it("renders the latest submitted user input on the pane second line", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p1",
+      profile: "PowerShell",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-p1", {
+      lastCommand: "codex",
+      lastCommandAt: 10,
+      lastUserInput: "이 사용자의 마지막 질문을 보여줘",
+      lastUserInputAt: 20,
+      activity: { type: "interactiveApp", name: "Codex" },
+      activityMessage: "스트리밍 중인 assistant 토큰",
+    });
+
+    render(<WorkspaceSelectorView />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("pane-last-input-terminal-p1")).toHaveTextContent(
+        "이 사용자의 마지막 질문을 보여줘",
+      );
+    });
+    expect(screen.getByTestId("pane-row-p1")).toHaveClass(
+      "workspace-terminal-pane-row",
+      "workspace-terminal-pane-row-two-line",
+    );
+    // 마지막 입력은 pane 행에서 눈으로 먼저 잡히는 정보라 굵게 그린다.
+    expect(screen.getByTestId("pane-last-input-terminal-p1")).toHaveClass("font-bold");
+    expect(screen.queryByText("스트리밍 중인 assistant 토큰")).not.toBeInTheDocument();
+  });
+
+  it("moves only the newest visible pane input to one workspace line in workspaceLatest mode", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+            {
+              id: "p2",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              view: { type: "TerminalView", profile: "WSL" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p1",
+      profile: "PowerShell",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p2",
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-p1", {
+      lastUserInput: "older pane input",
+      lastUserInputAt: 10,
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-p2", {
+      lastUserInput: "newest pane input",
+      lastUserInputAt: 20,
+    });
+    useSettingsStore.getState().setWorkspaceSelector({ lastInputMode: "workspaceLatest" });
+
+    render(<WorkspaceSelectorView />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("workspace-last-input-ws-default")).toHaveTextContent(
+        "newest pane input",
+      );
+    });
+    expect(screen.queryByTestId("pane-last-input-terminal-p1")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pane-last-input-terminal-p2")).not.toBeInTheDocument();
+    expect(screen.getByTestId("pane-row-p1")).not.toHaveClass(
+      "workspace-terminal-pane-row-two-line",
+    );
   });
 
   it("displays last command with failure indicator", async () => {
@@ -639,7 +858,9 @@ describe("WorkspaceSelectorView", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/npm build/)).toBeInTheDocument();
-      expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("✗");
+      const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
+      expect(badge.querySelector('[data-status-icon="failure"]')).toBeInTheDocument();
+      expect(badge).not.toHaveTextContent("✗");
     });
   });
 
@@ -677,7 +898,9 @@ describe("WorkspaceSelectorView", () => {
     render(<WorkspaceSelectorView />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("—");
+      const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
+      expect(badge.querySelector('[data-status-icon="idle"]')).toBeInTheDocument();
+      expect(badge).not.toHaveTextContent("—");
     });
   });
 
@@ -718,7 +941,9 @@ describe("WorkspaceSelectorView", () => {
 
     await waitFor(() => {
       // Universal 4-state: exitCode≠0 → ✗ regardless of activity
-      expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("✗");
+      const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
+      expect(badge.querySelector('[data-status-icon="failure"]')).toBeInTheDocument();
+      expect(badge).not.toHaveTextContent("✗");
     });
   });
 
@@ -1072,17 +1297,36 @@ describe("WorkspaceSelectorView", () => {
     expect(screen.queryByTestId(/^workspace-close-/)).not.toBeInTheDocument();
   });
 
-  it("removes workspace when close button is clicked", () => {
+  it("removes workspace only after the close button is clicked twice", () => {
     useWorkspaceStore.getState().addWorkspace("Second", "default-layout");
     render(<WorkspaceSelectorView />);
 
     const ws2 = useWorkspaceStore.getState().workspaces[1];
     const item = screen.getByTestId(`workspace-item-${ws2.id}`);
     fireEvent.mouseEnter(item);
-    fireEvent.click(screen.getByTestId(`workspace-close-${ws2.id}`));
+    const closeButton = screen.getByTestId(`workspace-close-${ws2.id}`);
+    fireEvent.click(closeButton);
+
+    expect(useWorkspaceStore.getState().workspaces).toHaveLength(2);
+    expect(closeButton).toHaveAttribute("data-confirming", "true");
+    expect(closeButton).toHaveAccessibleName(`Click again to close ${ws2.name}`);
+
+    fireEvent.click(closeButton);
 
     expect(useWorkspaceStore.getState().workspaces).toHaveLength(1);
     expect(useWorkspaceStore.getState().workspaces[0].id).toBe("ws-default");
+  });
+
+  it("removes a workspace on the first close click when confirmation is disabled", () => {
+    useSettingsStore.getState().setWorkspaceSelector({ confirmDestructiveActions: false });
+    useWorkspaceStore.getState().addWorkspace("Second", "default-layout");
+    render(<WorkspaceSelectorView />);
+
+    const ws2 = useWorkspaceStore.getState().workspaces[1];
+    fireEvent.mouseEnter(screen.getByTestId(`workspace-item-${ws2.id}`));
+    fireEvent.click(screen.getByTestId(`workspace-close-${ws2.id}`));
+
+    expect(useWorkspaceStore.getState().workspaces).toHaveLength(1);
   });
 
   it("switches to another workspace when active workspace is closed", () => {
@@ -1093,7 +1337,10 @@ describe("WorkspaceSelectorView", () => {
 
     const item = screen.getByTestId(`workspace-item-${ws2.id}`);
     fireEvent.mouseEnter(item);
-    fireEvent.click(screen.getByTestId(`workspace-close-${ws2.id}`));
+    const closeButton = screen.getByTestId(`workspace-close-${ws2.id}`);
+    fireEvent.click(closeButton);
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws2.id);
+    fireEvent.click(closeButton);
 
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-default");
   });
@@ -1105,7 +1352,10 @@ describe("WorkspaceSelectorView", () => {
 
     const item = screen.getByTestId(`workspace-item-${ws2.id}`);
     fireEvent.mouseEnter(item);
-    fireEvent.click(screen.getByTestId(`workspace-close-${ws2.id}`));
+    const closeButton = screen.getByTestId(`workspace-close-${ws2.id}`);
+    fireEvent.click(closeButton);
+    expect(useWorkspaceStore.getState().workspaces).toHaveLength(2);
+    fireEvent.click(closeButton);
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-default");
   });
 
@@ -1160,17 +1410,18 @@ describe("WorkspaceSelectorView", () => {
       // Should show workspace terminal's command, not dock's
       expect(screen.getByText(/npm test/)).toBeInTheDocument();
       expect(screen.queryByText(/cargo build/)).not.toBeInTheDocument();
-      expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("✓");
+      const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
+      expect(badge.querySelector('[data-status-icon="success"]')).toBeInTheDocument();
+      expect(badge).not.toHaveTextContent("✓");
     });
   });
 
-  it("workspace items always render 3 rows even without data", () => {
+  it("does not render the workspace-level aggregate status row", () => {
     render(<WorkspaceSelectorView />);
     const item = screen.getByTestId("workspace-item-ws-default");
-    // Should have row-1, row-2, row-3
     expect(item.querySelector("[data-testid='ws-row-1-ws-default']")).toBeInTheDocument();
     expect(item.querySelector("[data-testid='ws-row-2-ws-default']")).toBeInTheDocument();
-    expect(item.querySelector("[data-testid='ws-row-3-ws-default']")).toBeInTheDocument();
+    expect(item.querySelector("[data-testid='ws-row-3-ws-default']")).not.toBeInTheDocument();
   });
 
   it("workspace index number has shortcut tooltip", () => {
@@ -1372,7 +1623,9 @@ describe("WorkspaceSelectorView", () => {
     render(<WorkspaceSelectorView />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("pane-cmd-badge-terminal-p1")).toHaveTextContent("⏳");
+      const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
+      expect(badge.querySelector('[data-status-icon="working"]')).toBeInTheDocument();
+      expect(badge).not.toHaveTextContent("⏳");
     });
   });
 
@@ -1411,7 +1664,8 @@ describe("WorkspaceSelectorView", () => {
     await waitFor(() => {
       const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
       expect(badge).toBeInTheDocument();
-      expect(badge).toHaveTextContent("—");
+      expect(badge.querySelector('[data-status-icon="idle"]')).toBeInTheDocument();
+      expect(badge).not.toHaveTextContent("—");
       expect(badge.style.border).toContain("var(--accent)");
     });
   });
@@ -2007,7 +2261,7 @@ describe("WorkspaceSelectorView", () => {
       expect(screen.queryByTestId("hide-mode-toggle")).not.toBeInTheDocument();
     });
 
-    it("offers immediate workspace hide actions but no per-row pane hide button", () => {
+    it("offers two-step workspace hide actions but no per-row pane hide button", () => {
       render(<WorkspaceSelectorView />);
       fireEvent.mouseEnter(screen.getByTestId("workspace-item-ws-1"));
       expect(screen.getByTestId("workspace-hide-ws-1")).toHaveAttribute(
@@ -2146,11 +2400,28 @@ describe("WorkspaceSelectorView", () => {
     it("moves to the next visible workspace before hiding the active one", () => {
       render(<WorkspaceSelectorView />);
       fireEvent.mouseEnter(screen.getByTestId("workspace-item-ws-1"));
-      fireEvent.click(screen.getByTestId("workspace-hide-ws-1"));
+      const hideButton = screen.getByTestId("workspace-hide-ws-1");
+      fireEvent.click(hideButton);
+
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-1");
+      expect(useUiStore.getState().hiddenWorkspaceIds.has("ws-1")).toBe(false);
+      expect(hideButton).toHaveAttribute("data-confirming", "true");
+      expect(hideButton).toHaveAccessibleName("Click again to hide Project A");
+
+      fireEvent.click(hideButton);
 
       expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-2");
       expect(useUiStore.getState().hiddenWorkspaceIds.has("ws-1")).toBe(true);
       expect(screen.queryByTestId("workspace-item-ws-1")).not.toBeInTheDocument();
+    });
+
+    it("hides on the first click when destructive confirmation is disabled", () => {
+      useSettingsStore.getState().setWorkspaceSelector({ confirmDestructiveActions: false });
+      render(<WorkspaceSelectorView />);
+      fireEvent.mouseEnter(screen.getByTestId("workspace-item-ws-2"));
+      fireEvent.click(screen.getByTestId("workspace-hide-ws-2"));
+
+      expect(useUiStore.getState().hiddenWorkspaceIds.has("ws-2")).toBe(true);
     });
 
     it("disables hiding the last visible workspace", () => {
@@ -2167,7 +2438,10 @@ describe("WorkspaceSelectorView", () => {
     it("shows an undo snackbar for workspace hide and restores with a set action", () => {
       render(<WorkspaceSelectorView />);
       fireEvent.mouseEnter(screen.getByTestId("workspace-item-ws-2"));
-      fireEvent.click(screen.getByTestId("workspace-hide-ws-2"));
+      const hideButton = screen.getByTestId("workspace-hide-ws-2");
+      fireEvent.click(hideButton);
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+      fireEvent.click(hideButton);
 
       expect(screen.getByRole("status")).toHaveTextContent("hidden from the list");
       fireEvent.click(screen.getByTestId("undo-snackbar-action"));
@@ -2356,10 +2630,33 @@ describe("WorkspaceSelectorView", () => {
       }
     };
 
-    it("broadcasts Ctrl+L to every terminal pane of the hovered workspace", async () => {
+    it("broadcasts Ctrl+L only after the clear button is clicked twice", async () => {
       setup();
       render(<WorkspaceSelectorView />);
       fireEvent.mouseEnter(screen.getByTestId("workspace-item-ws-term"));
+      const clearButton = screen.getByTestId("workspace-clear-ws-term");
+      vi.mocked(writeToTerminal).mockClear();
+
+      fireEvent.click(clearButton);
+      expect(writeToTerminal).not.toHaveBeenCalled();
+      expect(clearButton).toHaveAttribute("data-confirming", "true");
+      expect(clearButton).toHaveAccessibleName("Click again to clear Terminals");
+
+      fireEvent.click(clearButton);
+
+      await waitFor(() => {
+        expect(vi.mocked(writeToTerminal)).toHaveBeenCalledWith("terminal-pane-a", "\x0c");
+      });
+      expect(vi.mocked(writeToTerminal)).toHaveBeenCalledWith("terminal-pane-b", "\x0c");
+    });
+
+    it("clears on the first click when destructive confirmation is disabled", async () => {
+      setup();
+      useSettingsStore.getState().setWorkspaceSelector({ confirmDestructiveActions: false });
+      render(<WorkspaceSelectorView />);
+      fireEvent.mouseEnter(screen.getByTestId("workspace-item-ws-term"));
+      vi.mocked(writeToTerminal).mockClear();
+
       fireEvent.click(screen.getByTestId("workspace-clear-ws-term"));
 
       await waitFor(() => {

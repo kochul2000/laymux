@@ -42,6 +42,7 @@ import {
 
 // Mock xterm since it requires a real DOM with canvas
 const mockOnData = vi.fn();
+const mockOnBinary = vi.fn();
 let capturedResizeHandler: ((size: { cols: number; rows: number }) => void) | null = null;
 const mockOnResize = vi.fn((handler: (size: { cols: number; rows: number }) => void) => {
   capturedResizeHandler = handler;
@@ -77,13 +78,36 @@ const mockScrollLines = vi.fn((lines: number) => {
     Math.min(mockBufferActive.baseY, mockBufferActive.viewportY + lines),
   );
 });
+/**
+ * ADR-0188 point 트리거용 라인 fixture. `setMockBufferLine` 로 채운 텍스트를
+ * 실제 xterm 처럼 셀 단위로 돌려준다(모두 1셀 폭 문자로 가정).
+ */
+type MockBufferLine = {
+  length: number;
+  getCell(x: number): { getChars(): string; getWidth(): number } | undefined;
+  translateToString(trimRight?: boolean): string;
+};
+let mockBufferLineText: string | null = null;
+function setMockBufferLine(text: string | null): void {
+  mockBufferLineText = text;
+}
+function mockBufferLine(): MockBufferLine | undefined {
+  const text = mockBufferLineText;
+  if (text === null) return undefined;
+  return {
+    length: text.length,
+    getCell: (x: number) =>
+      x < text.length ? { getChars: () => text[x], getWidth: () => 1 } : undefined,
+    translateToString: (trimRight = false) => (trimRight ? text.trimEnd() : text),
+  };
+}
 const mockBufferActive: {
   cursorX: number;
   cursorY: number;
   baseY: number;
   viewportY: number;
   length: number;
-  getLine(index: number): undefined;
+  getLine(index: number): MockBufferLine | undefined;
   // Real xterm reports which buffer is live. Composer passthrough keys off it.
   type: "normal" | "alternate";
 } = {
@@ -92,7 +116,7 @@ const mockBufferActive: {
   baseY: 0,
   viewportY: 0,
   length: 1,
-  getLine: () => undefined,
+  getLine: () => mockBufferLine(),
   type: "normal",
 };
 const mockOnScroll = vi.fn((handler: () => void) => {
@@ -108,15 +132,26 @@ type MockTerminalInstance = {
 const createdTerminals: MockTerminalInstance[] = [];
 const mockModes = { synchronizedOutputMode: false };
 let capturedKeyHandler: ((e: KeyboardEvent) => boolean) | null = null;
+let capturedWheelHandler: ((e: WheelEvent) => boolean) | null = null;
 const mockAttachCustomKeyEventHandler = vi.fn((handler: (e: KeyboardEvent) => boolean) => {
   capturedKeyHandler = handler;
 });
+const mockAttachCustomWheelEventHandler = vi.fn((handler: (e: WheelEvent) => boolean) => {
+  capturedWheelHandler = handler;
+});
+const mockConsumeWheelEvent = vi.fn(() => 1);
+const mockTerminalInput = vi.fn();
 function completeMockWrite(_: string | Uint8Array, callback?: () => void): void {
   callback?.();
 }
 const mockWrite = vi.fn(completeMockWrite);
 const mockRefresh = vi.fn();
 const mockClearTextureAtlas = vi.fn();
+type MockPathLinkDecoration = {
+  element: HTMLElement;
+  dispose: ReturnType<typeof vi.fn>;
+};
+const mockPathLinkDecorations: MockPathLinkDecoration[] = [];
 
 // ── stream attach reset gate ────────────────────────────────────────────────
 // The output attach chain ends in `terminal.reset()`, which also rebuilds the
@@ -280,6 +315,7 @@ vi.mock("@xterm/xterm", () => ({
     });
     write = mockWrite;
     onData = mockOnData;
+    onBinary = mockOnBinary;
     onResize = mockOnResize;
     onTitleChange = mockOnTitleChange;
     onSelectionChange = mockOnSelectionChange;
@@ -291,8 +327,26 @@ vi.mock("@xterm/xterm", () => ({
     scrollToBottom = mockScrollToBottom;
     scrollLines = mockScrollLines;
     attachCustomKeyEventHandler = mockAttachCustomKeyEventHandler;
+    attachCustomWheelEventHandler = mockAttachCustomWheelEventHandler;
+    input = mockTerminalInput;
     private readonly userInputListeners = new Set<() => void>();
     _core = {
+      // ADR-0188 point 트리거는 xterm 코어의 좌표 변환을 쓴다. 셀 폭 10px,
+      // 셀 높이 20px 로 두어 clientX/clientY 를 1-based 셀로 옮긴다.
+      _mouseService: {
+        getCoords: (event: MouseEvent): [number, number] => [
+          Math.floor(event.clientX / 10) + 1,
+          Math.floor(event.clientY / 20) + 1,
+        ],
+      },
+      screenElement: null,
+      coreMouseService: {
+        consumeWheelEvent: mockConsumeWheelEvent,
+      },
+      _renderService: {
+        dimensions: { device: { cell: { height: 20 } } },
+      },
+      _coreBrowserService: { dpr: 1 },
       coreService: {
         // The field both renderers gate the cursor on. Real xterm owns it and
         // DECTCEM writes it; issue #598 suppresses through it, so the mock must
@@ -314,6 +368,13 @@ vi.mock("@xterm/xterm", () => ({
       const handler = mockOnData.mock.calls.at(-1)?.[0] as ((value: string) => void) | undefined;
       handler?.(data);
     };
+    emitBinary = (data: string) => {
+      // xterm's CoreService applies disableStdin to every binary event. Binary
+      // reports are human mouse input, never parser-generated replies.
+      if (this.options.disableStdin) return;
+      const handler = mockOnBinary.mock.calls.at(-1)?.[0] as ((value: string) => void) | undefined;
+      handler?.(data);
+    };
     focus = mockFocus;
     blur = mockBlur;
     paste = mockPaste;
@@ -322,11 +383,34 @@ vi.mock("@xterm/xterm", () => ({
     getSelectionPosition = mockGetSelectionPosition;
     clearSelection = mockClearSelection;
     registerMarker = vi.fn(() => ({ dispose: vi.fn() }));
-    registerDecoration = vi.fn(() => ({
-      element: document.createElement("div"),
-      onRender: vi.fn(),
-      dispose: vi.fn(),
-    }));
+    // The path-link hit test reads the decoration's real rect and requires the
+    // element to be connected, so the mock attaches it and derives the rect from
+    // the cell geometry the mock `_mouseService` uses (10px x 20px cells).
+    registerDecoration = vi.fn((options?: { x?: number; width?: number }) => {
+      const element = document.createElement("div");
+      const x = options?.x ?? 0;
+      const width = options?.width ?? 1;
+      element.getBoundingClientRect = () =>
+        ({
+          x: x * 10,
+          y: 0,
+          left: x * 10,
+          right: (x + width) * 10,
+          top: 0,
+          bottom: 20,
+          width: width * 10,
+          height: 20,
+          toJSON: () => ({}),
+        }) as DOMRect;
+      document.body.appendChild(element);
+      const decoration = {
+        element,
+        onRender: vi.fn(),
+        dispose: vi.fn(() => element.remove()),
+      };
+      mockPathLinkDecorations.push(decoration);
+      return decoration;
+    });
     refresh = mockRefresh;
     // Passes itself so a test can tell *which* terminals were cleared, not just
     // how many calls happened (issue #571).
@@ -473,6 +557,7 @@ const mockCreateTerminalSession = vi.fn().mockResolvedValue({
   },
 });
 const mockWriteToTerminal = vi.fn().mockResolvedValue(undefined);
+const mockWriteTerminalBinaryInput = vi.fn().mockResolvedValue(undefined);
 const mockWriteTerminalBootstrapProtocolReply = vi.fn().mockResolvedValue(false);
 const mockWriteTerminalProtocolReply = vi.fn().mockResolvedValue(undefined);
 const mockWriteTerminalInput = vi.fn().mockResolvedValue(undefined);
@@ -547,6 +632,7 @@ const mockLoadTerminalOutputCache = vi
 vi.mock("@/lib/tauri-api", () => ({
   createTerminalSession: (...args: unknown[]) => mockCreateTerminalSession(...args),
   writeToTerminal: (...args: unknown[]) => mockWriteToTerminal(...args),
+  writeTerminalBinaryInput: (...args: unknown[]) => mockWriteTerminalBinaryInput(...args),
   writeTerminalBootstrapProtocolReply: (...args: unknown[]) =>
     mockWriteTerminalBootstrapProtocolReply(...args),
   writeTerminalProtocolReply: (...args: unknown[]) => mockWriteTerminalProtocolReply(...args),
@@ -701,6 +787,7 @@ describe("TerminalView", () => {
     localStorage.clear();
     clearRuntimeComposerState();
     capturedKeyHandler = null;
+    capturedWheelHandler = null;
     capturedLinkHandler = null;
     capturedIndentedLinkHandler = null;
     createdTerminals.length = 0;
@@ -713,6 +800,7 @@ describe("TerminalView", () => {
     oscHandlers.clear();
     escHandlers.clear();
     mockModes.synchronizedOutputMode = false;
+    mockPathLinkDecorations.length = 0;
     capturedRemoteControlChanged = null;
     capturedTerminalOutputFailStopped = null;
     mockOutputSequence = 0;
@@ -723,6 +811,7 @@ describe("TerminalView", () => {
     mockBufferActive.baseY = 0;
     mockBufferActive.viewportY = 0;
     mockBufferActive.type = "normal";
+    setMockBufferLine(null);
     mockGetRemoteControlStatus.mockResolvedValue({
       active: false,
       leaseId: null,
@@ -3211,82 +3300,154 @@ describe("TerminalView", () => {
     expect(useTerminalStartupStore.getState().activePaneId).toBe("pane-second");
   });
 
-  it("starts the PTY and rendererless output attach when the first measured size is zero", async () => {
-    type Observer = {
-      target: Element | null;
-      callback: ResizeObserverCallback;
-    };
-    const observers: Observer[] = [];
-    const originalResizeObserver = globalThis.ResizeObserver;
-    globalThis.ResizeObserver = class {
-      private readonly observer: Observer;
+  it.each(["session", "status"] as const)(
+    "reconciles the fitted grid when %s readiness resolves last",
+    async (lastReadyGate) => {
+      type Observer = {
+        target: Element | null;
+        callback: ResizeObserverCallback;
+      };
+      const observers: Observer[] = [];
+      const originalResizeObserver = globalThis.ResizeObserver;
+      globalThis.ResizeObserver = class {
+        private readonly observer: Observer;
 
-      constructor(callback: ResizeObserverCallback) {
-        this.observer = { target: null, callback };
-        observers.push(this.observer);
-      }
+        constructor(callback: ResizeObserverCallback) {
+          this.observer = { target: null, callback };
+          observers.push(this.observer);
+        }
 
-      observe(target: Element) {
-        this.observer.target = target;
-      }
+        observe(target: Element) {
+          this.observer.target = target;
+        }
 
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver;
+        unobserve() {}
+        disconnect() {}
+      } as unknown as typeof ResizeObserver;
 
-    const resize = (observer: Observer, width: number, height: number) => {
-      observer.callback(
-        [
-          {
-            target: observer.target as Element,
-            contentRect: { width, height },
-          } as unknown as ResizeObserverEntry,
-        ],
-        {} as ResizeObserver,
-      );
-    };
-
-    try {
-      render(
-        <TerminalView
-          instanceId="terminal-pane-zero-size"
-          paneId="pane-zero-size"
-          profile="PowerShell"
-          syncGroup=""
-        />,
-      );
-      expect(observers).toHaveLength(1);
-      const observer = observers[0];
-      const terminal = createdTerminals[0] as unknown as {
-        open: ReturnType<typeof vi.fn>;
+      const resize = (observer: Observer, width: number, height: number) => {
+        observer.callback(
+          [
+            {
+              target: observer.target as Element,
+              contentRect: { width, height },
+            } as unknown as ResizeObserverEntry,
+          ],
+          {} as ResizeObserver,
+        );
       };
 
-      act(() => resize(observer, 0, 600));
+      let resolveSession!: (value: Awaited<ReturnType<typeof mockCreateTerminalSession>>) => void;
+      mockCreateTerminalSession.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSession = resolve;
+          }),
+      );
+      let resolveStatus!: (value: { active: boolean }) => void;
+      mockGetRemoteControlStatus.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveStatus = resolve;
+          }),
+      );
 
-      await vi.waitFor(() => {
-        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
-          "terminal-pane-zero-size",
-          "PowerShell",
-          80,
-          24,
-          "",
-          true,
-          true,
-          undefined,
-          undefined,
+      try {
+        render(
+          <TerminalView
+            instanceId="terminal-pane-zero-size"
+            paneId="pane-zero-size"
+            profile="PowerShell"
+            syncGroup=""
+          />,
         );
-        expect(mockAttachTerminalOutput).toHaveBeenCalledWith("terminal-pane-zero-size");
-      });
-      expect(terminal.open).not.toHaveBeenCalled();
+        expect(observers).toHaveLength(1);
+        const observer = observers[0];
+        const terminal = createdTerminals[0] as unknown as {
+          open: ReturnType<typeof vi.fn>;
+          cols: number;
+          rows: number;
+        };
 
-      act(() => resize(observer, 800, 600));
+        act(() => resize(observer, 0, 600));
 
-      expect(terminal.open).toHaveBeenCalledTimes(1);
-      expect(mockCreateTerminalSession).toHaveBeenCalledTimes(1);
-    } finally {
-      globalThis.ResizeObserver = originalResizeObserver;
-    }
-  });
+        await vi.waitFor(() => {
+          expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+            "terminal-pane-zero-size",
+            "PowerShell",
+            80,
+            24,
+            "",
+            true,
+            true,
+            undefined,
+            undefined,
+          );
+        });
+        expect(terminal.open).not.toHaveBeenCalled();
+
+        mockFit.mockImplementationOnce(() => {
+          terminal.cols = 300;
+          terminal.rows = 5;
+          capturedResizeHandler?.({ cols: 300, rows: 5 });
+        });
+        act(() => resize(observer, 800, 600));
+
+        expect(terminal.open).toHaveBeenCalledTimes(1);
+        expect(mockCreateTerminalSession).toHaveBeenCalledTimes(1);
+        expect(mockResizeTerminal).not.toHaveBeenCalled();
+
+        const settleSession = async () => {
+          await act(async () => {
+            resolveSession({
+              id: "terminal-pane-zero-size",
+              title: "Terminal",
+              initialExecutionHost: "unknown",
+              config: {
+                profile: "PowerShell",
+                cols: 80,
+                rows: 24,
+                sync_group: "",
+                env: [],
+                advertise_true_color: true,
+              },
+            });
+            await Promise.resolve();
+          });
+          await vi.waitFor(() => {
+            expect(mockAttachTerminalOutput).toHaveBeenCalledWith("terminal-pane-zero-size");
+          });
+        };
+        const settleStatus = async () => {
+          await act(async () => {
+            resolveStatus({ active: false });
+            await Promise.resolve();
+          });
+        };
+
+        if (lastReadyGate === "status") {
+          await settleSession();
+          expect(mockResizeTerminal).not.toHaveBeenCalled();
+          await settleStatus();
+        } else {
+          await settleStatus();
+          await act(async () => {
+            await new Promise<void>((resolve) => {
+              requestAnimationFrame(() => setTimeout(resolve, 0));
+            });
+          });
+          expect(mockResizeTerminal).not.toHaveBeenCalled();
+          await settleSession();
+        }
+
+        await vi.waitFor(() => {
+          expect(mockResizeTerminal).toHaveBeenCalledWith("terminal-pane-zero-size", 300, 5);
+        });
+      } finally {
+        globalThis.ResizeObserver = originalResizeObserver;
+      }
+    },
+  );
 
   it("releases the global startup slot when PTY creation fails", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -4115,6 +4276,78 @@ describe("TerminalView", () => {
     expect(mockOnData).toHaveBeenCalled();
   });
 
+  it("forwards legacy DEFAULT mouse bytes once without recording lastUserInput", async () => {
+    const terminalId = "t-binary-mouse-input";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+    mockWriteToTerminal.mockClear();
+    mockWriteTerminalBinaryInput.mockClear();
+
+    const report = "\x1b[M !!";
+    act(() => createdTerminals.at(-1)!.emitBinary(report));
+
+    await vi.waitFor(() => {
+      expect(mockWriteTerminalBinaryInput).toHaveBeenCalledWith(terminalId, 1, report);
+      expect(terminalInputDeliveryCounters(terminalId).succeeded).toBe(1);
+    });
+    expect(mockWriteTerminalBinaryInput).toHaveBeenCalledTimes(1);
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
+    expect(terminalInputDeliveryCounters(terminalId)).toEqual({
+      attempts: 1,
+      succeeded: 1,
+      failed: 0,
+      attemptedBytes: 6,
+      succeededBytes: 6,
+      failedBytes: 0,
+    });
+    expect(
+      useTerminalStore.getState().instances.find((instance) => instance.id === terminalId)
+        ?.lastUserInput,
+    ).toBeUndefined();
+  });
+
+  it("reports a rejected binary mouse write once without resending it", async () => {
+    const terminalId = "t-binary-mouse-rejected";
+    mockWriteTerminalBinaryInput.mockRejectedValueOnce(new Error("IPC response lost"));
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+    mockWriteTerminalBinaryInput.mockClear();
+
+    const report = "\x1b[M !!";
+    act(() => createdTerminals.at(-1)!.emitBinary(report));
+
+    await vi.waitFor(() => {
+      expect(terminalInputDeliveryCounters(terminalId).failed).toBe(1);
+    });
+    expect(mockWriteTerminalBinaryInput).toHaveBeenCalledTimes(1);
+    expect(mockWriteTerminalBinaryInput).toHaveBeenCalledWith(terminalId, 1, report);
+    expect(terminalInputDeliveryCounters(terminalId)).toEqual({
+      attempts: 1,
+      succeeded: 0,
+      failed: 1,
+      attemptedBytes: 6,
+      succeededBytes: 0,
+      failedBytes: 6,
+    });
+    expect(useNotificationStore.getState().notifications).toEqual([
+      expect.objectContaining({ terminalId, requiresAction: true, level: "error" }),
+    ]);
+  });
+
+  it("keeps binary mouse input fail-closed while Local control is unknown", async () => {
+    mockGetRemoteControlStatus.mockReturnValueOnce(new Promise(() => {}));
+    render(<TerminalView instanceId="t-binary-mouse-unknown" profile="PowerShell" syncGroup="" />);
+    await vi.waitFor(() => expect(mockOnBinary).toHaveBeenCalled());
+    mockWriteTerminalBinaryInput.mockClear();
+
+    const terminal = createdTerminals.at(-1)!;
+    expect(terminal.options.disableStdin).toBe(true);
+    act(() => terminal.emitBinary("\x1b[M !!"));
+
+    expect(mockWriteTerminalBinaryInput).not.toHaveBeenCalled();
+    expect(terminalInputDeliveryCounters("t-binary-mouse-unknown").attempts).toBe(0);
+  });
+
   it("records a successful human onData write with UTF-8 byte totals", async () => {
     const terminalId = "t-human-write-success";
     render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
@@ -4132,6 +4365,81 @@ describe("TerminalView", () => {
       attemptedBytes: 3,
       succeededBytes: 3,
       failedBytes: 0,
+    });
+  });
+
+  it("records a completed direct-mode agent input without exposing partial typing", async () => {
+    const terminalId = "t-human-last-input";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForLocalTerminalControl();
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo(terminalId, {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    act(() => createdTerminals.at(-1)!.emitCoreData("마지막 질", true));
+    await vi.waitFor(() =>
+      expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "마지막 질"),
+    );
+    expect(
+      useTerminalStore.getState().instances.find((instance) => instance.id === terminalId)
+        ?.lastUserInput,
+    ).toBeUndefined();
+
+    act(() => createdTerminals.at(-1)!.emitCoreData("문\r", true));
+    await vi.waitFor(() => {
+      expect(
+        useTerminalStore.getState().instances.find((instance) => instance.id === terminalId)
+          ?.lastUserInput,
+      ).toBe("마지막 질문");
+    });
+  });
+
+  it("forwards TUI mouse reports without recording them as the last direct input", async () => {
+    const terminalId = "t-human-last-input-mouse-report";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForLocalTerminalControl();
+
+    const terminal = createdTerminals.at(-1)!;
+    act(() => terminal.emitCoreData("\u001b[<35;118;41M\u001b[<35;119;41M", true));
+    await vi.waitFor(() =>
+      expect(mockWriteToTerminal).toHaveBeenCalledWith(
+        terminalId,
+        "\u001b[<35;118;41M\u001b[<35;119;41M",
+      ),
+    );
+    expect(
+      useTerminalStore.getState().instances.find((instance) => instance.id === terminalId)
+        ?.lastUserInput,
+    ).toBeUndefined();
+
+    act(() => terminal.emitCoreData("실제 질문\r", true));
+    await vi.waitFor(() => {
+      expect(
+        useTerminalStore.getState().instances.find((instance) => instance.id === terminalId)
+          ?.lastUserInput,
+      ).toBe("실제 질문");
+    });
+  });
+
+  it("records a completed direct-mode shell command without waiting for OSC 133", async () => {
+    const terminalId = "t-human-last-shell-command";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForLocalTerminalControl();
+
+    act(() => createdTerminals.at(-1)!.emitCoreData("npm test", true));
+    expect(
+      useTerminalStore.getState().instances.find((instance) => instance.id === terminalId)
+        ?.lastUserInput,
+    ).toBeUndefined();
+
+    act(() => createdTerminals.at(-1)!.emitCoreData("\r", true));
+    await vi.waitFor(() => {
+      expect(
+        useTerminalStore.getState().instances.find((instance) => instance.id === terminalId)
+          ?.lastUserInput,
+      ).toBe("npm test");
     });
   });
 
@@ -4418,6 +4726,92 @@ describe("TerminalView", () => {
       },
     });
 
+    const setupWslCodexCompositionFrame = async (terminalId: string) => {
+      mockCreateTerminalSession.mockResolvedValueOnce({
+        ...sessionResult("wsl"),
+        id: terminalId,
+      });
+      render(<TerminalView instanceId={terminalId} profile="WSL" syncGroup="" isFocused />);
+      act(() => {
+        useTerminalStore.getState().updateInstanceInfo(terminalId, {
+          activity: { type: "interactiveApp", name: "Codex" },
+        });
+      });
+
+      const terminal = createdTerminals.at(-1)! as MockTerminalInstance & {
+        buffer: { active: typeof mockBufferActive };
+      };
+      const container = screen.getByTestId(`terminal-view-${terminalId}`);
+      const overlay = screen.getByTestId(`terminal-overlay-caret-${terminalId}`);
+      const preview = screen.getByTestId(`terminal-composition-preview-${terminalId}`);
+      const rect = () =>
+        ({
+          left: 0,
+          top: 0,
+          width: 800,
+          height: 480,
+          right: 800,
+          bottom: 480,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        }) as DOMRect;
+      const screenEl = document.createElement("div");
+      screenEl.className = "xterm-screen";
+      screenEl.getBoundingClientRect = rect;
+      const helper = document.createElement("textarea");
+      helper.className = "xterm-helper-textarea";
+      terminal.element.append(screenEl, helper);
+      container.getBoundingClientRect = rect;
+      await waitForTerminalInputReady();
+      await waitForStreamAttachReset();
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      terminal.buffer.active.baseY = 0;
+      terminal.buffer.active.viewportY = 0;
+      terminal.buffer.active.cursorX = 10;
+      terminal.buffer.active.cursorY = 4;
+      act(() => {
+        helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+        helper.value = "\ub2c8";
+        helper.selectionStart = 1;
+        helper.selectionEnd = 1;
+        helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\ub2c8" }));
+        helper.dispatchEvent(new Event("input"));
+      });
+      await vi.waitFor(() => {
+        expect(preview.textContent).toBe("\ub2c8");
+        expect(preview.style.transform).toBe("translate(100px, 80px)");
+        expect(overlay.style.opacity).toBe("1");
+        expect(overlay.style.transform).toBe("translate(120px, 80px)");
+        expect(helper.style.left).toBe("120px");
+        expect(helper.style.top).toBe("80px");
+      });
+
+      mockModes.synchronizedOutputMode = true;
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([2026]);
+        // A TUI repaint can park the public cursor on a footer while the
+        // composition controller still owns the input-row anchor.
+        terminal.buffer.active.cursorX = 40;
+        terminal.buffer.active.cursorY = 10;
+        const renderHandler = mockOnRender.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+        renderHandler?.();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(container).toHaveClass("terminal-sync-output-active");
+
+      const closeFrame = async () => {
+        mockModes.synchronizedOutputMode = false;
+        await act(async () => {
+          await csiHandlers.get("?:l")?.([2026]);
+        });
+      };
+      return { container, helper, overlay, preview, closeFrame };
+    };
+
     it("removes only the in-frame cursor show and refreshes after one atomic write", async () => {
       const terminalId = "t-native-stabilizer";
       mockCreateTerminalSession.mockResolvedValueOnce(sessionResult("nativeWindows"));
@@ -4441,7 +4835,10 @@ describe("TerminalView", () => {
       await vi.waitFor(() => expect(mockRefresh).toHaveBeenCalledTimes(2));
     });
 
-    it("flushes Codex 0.145's in-frame cursor park in the same xterm write", async () => {
+    it.each([
+      ["0.145", "\x1b[?2026hbody\x1b[26;58H\x1b[?25h\x1b[24;3H\x1b[?2026l"],
+      ["0.150+", "\x1b[?2026hbody\x1b[26;58H\x1b[24;3H\x1b[?25h\x1b[?2026l"],
+    ])("flushes Codex %s's in-frame cursor park in the same xterm write", async (_version, raw) => {
       const terminalId = "t-native-in-frame-park";
       mockCreateTerminalSession.mockResolvedValueOnce({
         ...sessionResult("nativeWindows"),
@@ -4453,89 +4850,91 @@ describe("TerminalView", () => {
       const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
         | ((data: Uint8Array) => void)
         | undefined;
-      const raw = "\x1b[?2026hbody\x1b[26;58H\x1b[?25h\x1b[24;3H\x1b[?2026l";
-      const expected = "\x1b[?2026hbody\x1b[26;58H\x1b[?25h\x1b[24;3H\x1b[?2026l";
 
       act(() => onOutput?.(new TextEncoder().encode(raw)));
 
       expect(mockWrite).toHaveBeenCalledTimes(1);
-      expect(new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array)).toBe(expected);
+      expect(new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array)).toBe(raw);
     });
 
-    it("does not send WSL Codex 0.145's in-frame park through the legacy settle timeout", async () => {
-      localStorage.setItem("laymux:cursor-trace", "1");
-      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-      const terminalId = "t-wsl-in-frame-park";
-      try {
-        mockCreateTerminalSession.mockResolvedValueOnce({
-          ...sessionResult("wsl"),
-          id: terminalId,
-        });
-        render(<TerminalView instanceId={terminalId} profile="WSL" syncGroup="" />);
-        await waitForTerminalInputReady();
-        act(() => {
-          useTerminalStore.getState().updateInstanceInfo(terminalId, {
-            activity: { type: "interactiveApp", name: "Codex" },
+    it.each([
+      ["0.145", "\x1b[?2026hbody\x1b[24;58H\x1b[?25h\x1b[6;5H\x1b[?2026l"],
+      ["0.150+", "\x1b[?2026hbody\x1b[24;58H\x1b[6;5H\x1b[?25h\x1b[?2026l"],
+    ])(
+      "does not send WSL Codex %s's in-frame park through the legacy settle timeout",
+      async (_version, raw) => {
+        localStorage.setItem("laymux:cursor-trace", "1");
+        const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+        const terminalId = "t-wsl-in-frame-park";
+        try {
+          mockCreateTerminalSession.mockResolvedValueOnce({
+            ...sessionResult("wsl"),
+            id: terminalId,
           });
-        });
+          render(<TerminalView instanceId={terminalId} profile="WSL" syncGroup="" />);
+          await waitForTerminalInputReady();
+          act(() => {
+            useTerminalStore.getState().updateInstanceInfo(terminalId, {
+              activity: { type: "interactiveApp", name: "Codex" },
+            });
+          });
 
-        const terminal = createdTerminals.at(-1)! as MockTerminalInstance & {
-          buffer: { active: typeof mockBufferActive };
-        };
-        const rawSet = mockRegisterCsiHandler.mock.calls.find(
-          (call) =>
-            (call[0] as { prefix?: string; final: string }).prefix === "?" &&
-            (call[0] as { prefix?: string; final: string }).final === "h",
-        )?.[1] as ((params: readonly number[]) => boolean) | undefined;
-        const rawReset = mockRegisterCsiHandler.mock.calls.find(
-          (call) =>
-            (call[0] as { prefix?: string; final: string }).prefix === "?" &&
-            (call[0] as { prefix?: string; final: string }).final === "l",
-        )?.[1] as ((params: readonly number[]) => boolean) | undefined;
-        expect(rawSet).toBeTypeOf("function");
-        expect(rawReset).toBeTypeOf("function");
+          const terminal = createdTerminals.at(-1)! as MockTerminalInstance & {
+            buffer: { active: typeof mockBufferActive };
+          };
+          const rawSet = mockRegisterCsiHandler.mock.calls.find(
+            (call) =>
+              (call[0] as { prefix?: string; final: string }).prefix === "?" &&
+              (call[0] as { prefix?: string; final: string }).final === "h",
+          )?.[1] as ((params: readonly number[]) => boolean) | undefined;
+          const rawReset = mockRegisterCsiHandler.mock.calls.find(
+            (call) =>
+              (call[0] as { prefix?: string; final: string }).prefix === "?" &&
+              (call[0] as { prefix?: string; final: string }).final === "l",
+          )?.[1] as ((params: readonly number[]) => boolean) | undefined;
+          expect(rawSet).toBeTypeOf("function");
+          expect(rawReset).toBeTypeOf("function");
 
-        mockWrite.mockClear();
-        mockWrite.mockImplementation(function (data, callback?: () => void) {
-          const parsed =
-            typeof data === "string" ? data : new TextDecoder().decode(data as Uint8Array);
-          if (parsed.includes("\x1b[?2026h")) rawSet?.([2026]);
-          if (parsed.includes("\x1b[?25h")) {
-            terminal.buffer.active.cursorX = 58;
-            terminal.buffer.active.cursorY = 23;
-            rawSet?.([25]);
-          }
-          if (parsed.includes("\x1b[6;5H")) {
-            terminal.buffer.active.cursorX = 4;
-            terminal.buffer.active.cursorY = 5;
-          }
-          if (parsed.includes("\x1b[?2026l")) rawReset?.([2026]);
-          callback?.();
-        });
-        const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
-          | ((data: Uint8Array) => void)
-          | undefined;
+          mockWrite.mockClear();
+          mockWrite.mockImplementation(function (data, callback?: () => void) {
+            const parsed =
+              typeof data === "string" ? data : new TextDecoder().decode(data as Uint8Array);
+            if (parsed.includes("\x1b[?2026h")) rawSet?.([2026]);
+            if (parsed.includes("\x1b[?25h")) {
+              terminal.buffer.active.cursorX = 58;
+              terminal.buffer.active.cursorY = 23;
+              rawSet?.([25]);
+            }
+            if (parsed.includes("\x1b[6;5H")) {
+              terminal.buffer.active.cursorX = 4;
+              terminal.buffer.active.cursorY = 5;
+            }
+            if (parsed.includes("\x1b[?2026l")) rawReset?.([2026]);
+            callback?.();
+          });
+          const onOutput = mockOnTerminalOutput.mock.calls.find(
+            ([id]) => id === terminalId,
+          )?.[1] as ((data: Uint8Array) => void) | undefined;
 
-        vi.useFakeTimers();
-        act(() => {
-          onOutput?.(
-            new TextEncoder().encode("\x1b[?2026hbody\x1b[24;58H\x1b[?25h\x1b[6;5H\x1b[?2026l"),
+          vi.useFakeTimers();
+          act(() => {
+            onOutput?.(new TextEncoder().encode(raw));
+          });
+          await act(async () => {
+            vi.advanceTimersByTime(60);
+          });
+
+          const settleTraces = logSpy.mock.calls.filter(
+            (call) => typeof call[0] === "string" && call[0].includes("park-settle-timeout"),
           );
-        });
-        await act(async () => {
-          vi.advanceTimersByTime(60);
-        });
-
-        const settleTraces = logSpy.mock.calls.filter(
-          (call) => typeof call[0] === "string" && call[0].includes("park-settle-timeout"),
-        );
-        expect(settleTraces).toHaveLength(0);
-      } finally {
-        vi.useRealTimers();
-        logSpy.mockRestore();
-        localStorage.removeItem("laymux:cursor-trace");
-      }
-    });
+          expect(settleTraces).toHaveLength(0);
+        } finally {
+          vi.useRealTimers();
+          logSpy.mockRestore();
+          localStorage.removeItem("laymux:cursor-trace");
+        }
+      },
+    );
 
     it("keeps the painted WSL Codex caret frozen while a Working frame spans animation frames", async () => {
       const terminalId = "t-wsl-working-caret";
@@ -4608,6 +5007,66 @@ describe("TerminalView", () => {
       await act(async () => {
         await csiHandlers.get("?:l")?.([2026]);
       });
+    });
+
+    it("advances the live IME preview while a WSL Codex frame spans animation frames", async () => {
+      const { container, helper, overlay, preview, closeFrame } =
+        await setupWslCodexCompositionFrame("t-wsl-working-ime-advance");
+      try {
+        act(() => {
+          helper.dispatchEvent(new CompositionEvent("compositionend", { data: "\ub2c8" }));
+          helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+          helper.value = "\ub2c8\ub2e4";
+          helper.selectionStart = 2;
+          helper.selectionEnd = 2;
+          helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\ub2e4" }));
+          helper.dispatchEvent(new Event("input"));
+        });
+        await act(async () => {
+          const renderHandler = mockOnRender.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+          renderHandler?.();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+
+        await vi.waitFor(() => {
+          expect(container).toHaveClass("terminal-sync-output-active");
+          expect(preview.textContent).toBe("\ub2e4");
+          expect(preview.style.transform).toBe("translate(120px, 80px)");
+          expect(overlay.style.opacity).toBe("1");
+          expect(overlay.style.transform).toBe("translate(140px, 80px)");
+          expect(helper.style.left).toBe("140px");
+          expect(helper.style.top).toBe("80px");
+        });
+      } finally {
+        await closeFrame();
+      }
+    });
+
+    it("clears a finished IME preview while a WSL Codex frame spans animation frames", async () => {
+      const { container, helper, overlay, preview, closeFrame } =
+        await setupWslCodexCompositionFrame("t-wsl-working-ime-finish");
+      try {
+        const frozenOverlayOpacity = overlay.style.opacity;
+        const frozenOverlayTransform = overlay.style.transform;
+        act(() => {
+          helper.dispatchEvent(new CompositionEvent("compositionend", { data: "\ub2c8" }));
+        });
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+
+        await vi.waitFor(() => {
+          expect(container).toHaveClass("terminal-sync-output-active");
+          expect(preview.textContent).toBe("");
+          expect(preview.style.opacity).toBe("0");
+          expect(overlay.style.opacity).toBe(frozenOverlayOpacity);
+          expect(overlay.style.transform).toBe(frozenOverlayTransform);
+          expect(helper.style.left).toBe("");
+          expect(helper.style.top).toBe("");
+        });
+      } finally {
+        await closeFrame();
+      }
     });
 
     it("lets an open IME composition adopt Codex 0.145's in-frame park", async () => {
@@ -6455,6 +6914,7 @@ describe("TerminalView", () => {
 
   it("validates a selected path only once after the pointer drag ends", async () => {
     mockGetSelection.mockReturnValue(String.raw`C:\work\src\main.ts`);
+    setMockBufferLine(String.raw`C:\work\src\main.ts`);
     mockGetSelectionPosition.mockReturnValue({
       start: { x: 0, y: 0 },
       end: { x: 19, y: 0 },
@@ -6496,6 +6956,7 @@ describe("TerminalView", () => {
 
   it("invalidates the previous path link as soon as a new pointer drag moves", async () => {
     mockGetSelection.mockReturnValue(String.raw`C:\work\src\main.ts`);
+    setMockBufferLine(String.raw`C:\work\src\main.ts`);
     mockGetSelectionPosition.mockReturnValue({
       start: { x: 0, y: 0 },
       end: { x: 19, y: 0 },
@@ -6535,6 +6996,7 @@ describe("TerminalView", () => {
 
   it("discards an in-flight path stat when a new pointer gesture starts", async () => {
     mockGetSelection.mockReturnValue(String.raw`C:\work\src\main.ts`);
+    setMockBufferLine(String.raw`C:\work\src\main.ts`);
     mockGetSelectionPosition.mockReturnValue({
       start: { x: 0, y: 0 },
       end: { x: 19, y: 0 },
@@ -6578,8 +7040,272 @@ describe("TerminalView", () => {
     window.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true, pointerId: 6 }));
   });
 
+  // -- ADR-0188: 포인터 지점(point) 트리거 — hover dwell 과 이동 없는 클릭 --
+
+  it("validates the token under a stopped pointer once (hover dwell)", async () => {
+    // 화면: "cat C:\work\src\main.ts" — 토큰은 셀 5~23.
+    setMockBufferLine(String.raw`cat C:\work\src\main.ts`);
+    mockGetSelection.mockReturnValue("");
+    mockStatPaths.mockResolvedValue([{ exists: true, isDirectory: false }]);
+
+    render(<TerminalView instanceId="t-path-hover-dwell" profile="PowerShell" syncGroup="" />);
+
+    const outer = screen.getByTestId("terminal-view-t-path-hover-dwell");
+    // clientX 100 → 셀 11(토큰 안), clientY 0 → 뷰포트 첫 행.
+    outer.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 100, clientY: 0 }));
+
+    // dwell 이 끝나기 전에는 조회가 없다.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    expect(mockStatPaths).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+    await vi.waitFor(() => {
+      expect(mockStatPaths).toHaveBeenCalledTimes(1);
+    });
+    expect(mockStatPaths).toHaveBeenCalledWith([String.raw`C:\work\src\main.ts`]);
+    expect(outer).toHaveClass("terminal-path-link-clickable");
+  });
+
+  it("keeps a verified path decoration through a split synchronized-output repaint", async () => {
+    const originalLine = String.raw`cat C:\work\src\main.ts`;
+    setMockBufferLine(originalLine);
+    mockGetSelection.mockReturnValue("");
+    mockStatPaths.mockResolvedValue([{ exists: true, isDirectory: false }]);
+
+    render(<TerminalView instanceId="t-path-sync-frame" profile="PowerShell" syncGroup="" />);
+
+    const outer = screen.getByTestId("terminal-view-t-path-sync-frame");
+    outer.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 100, clientY: 0 }));
+    await vi.waitFor(
+      () => {
+        expect(mockStatPaths).toHaveBeenCalledTimes(1);
+        expect(mockPathLinkDecorations).toHaveLength(1);
+      },
+      { timeout: 2_000 },
+    );
+    const originalDecoration = mockPathLinkDecorations[0];
+    expect(originalDecoration.element.isConnected).toBe(true);
+
+    // Codex can split one DEC 2026 repaint across PTY output chunks. xterm's
+    // buffer already contains this cleared intermediate row, while the renderer
+    // deliberately continues showing the previous complete frame.
+    mockModes.synchronizedOutputMode = true;
+    await act(async () => {
+      await csiHandlers.get("?:h")?.([2026]);
+    });
+    setMockBufferLine("");
+    const writeParsed = mockOnWriteParsed.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+    act(() => writeParsed?.());
+
+    expect(originalDecoration.dispose).not.toHaveBeenCalled();
+    expect(originalDecoration.element.isConnected).toBe(true);
+    expect(outer).toHaveClass("terminal-path-link-clickable");
+
+    // The closing chunk restores the same path before DEC 2026 reset. The
+    // stable-frame validation must retain the exact decoration, not recreate it.
+    setMockBufferLine(originalLine);
+    mockModes.synchronizedOutputMode = false;
+    await act(async () => {
+      await csiHandlers.get("?:l")?.([2026]);
+    });
+    act(() => writeParsed?.());
+
+    expect(originalDecoration.dispose).not.toHaveBeenCalled();
+    expect(mockPathLinkDecorations).toEqual([originalDecoration]);
+    expect(originalDecoration.element.isConnected).toBe(true);
+  });
+
+  it("settles deferred path validation when synchronized output times out", async () => {
+    const originalLine = String.raw`cat C:\work\src\main.ts`;
+    setMockBufferLine(originalLine);
+    mockGetSelection.mockReturnValue("");
+    mockStatPaths.mockResolvedValue([{ exists: true, isDirectory: false }]);
+
+    render(<TerminalView instanceId="t-path-sync-timeout" profile="PowerShell" syncGroup="" />);
+
+    const outer = screen.getByTestId("terminal-view-t-path-sync-timeout");
+    outer.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 100, clientY: 0 }));
+    await vi.waitFor(
+      () => {
+        expect(mockStatPaths).toHaveBeenCalledTimes(1);
+        expect(mockPathLinkDecorations).toHaveLength(1);
+      },
+      { timeout: 2_000 },
+    );
+    const originalDecoration = mockPathLinkDecorations[0];
+
+    mockModes.synchronizedOutputMode = true;
+    await act(async () => {
+      await csiHandlers.get("?:h")?.([2026]);
+    });
+    setMockBufferLine("");
+    const writeParsed = mockOnWriteParsed.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+    act(() => writeParsed?.());
+    expect(originalDecoration.dispose).not.toHaveBeenCalled();
+
+    // A write that opened synchronized output arms TerminalView's mode monitor.
+    // The xterm mock does not parse bytes, so the parser hook above establishes
+    // the matching component state explicitly.
+    await vi.waitFor(() => expect(mockOnTerminalOutput).toHaveBeenCalled());
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    act(() => onOutput?.(new TextEncoder().encode("\x1b[?2026hframe")));
+    await vi.waitFor(() => expect(mockWrite).toHaveBeenCalled());
+
+    // xterm releases a malformed/open frame after its safety timeout without a
+    // parser reset or another onWriteParsed event. The mode monitor owns this
+    // final stable-buffer comparison.
+    mockModes.synchronizedOutputMode = false;
+    await vi.waitFor(() => expect(originalDecoration.dispose).toHaveBeenCalledTimes(1));
+    expect(originalDecoration.element.isConnected).toBe(false);
+    expect(outer).not.toHaveClass("terminal-path-link-clickable");
+  });
+
+  it("does not validate while the pointer keeps moving", async () => {
+    setMockBufferLine(String.raw`cat C:\work\src\main.ts`);
+    mockGetSelection.mockReturnValue("");
+    mockStatPaths.mockResolvedValue([{ exists: true, isDirectory: false }]);
+
+    render(<TerminalView instanceId="t-path-hover-moving" profile="PowerShell" syncGroup="" />);
+
+    const outer = screen.getByTestId("terminal-view-t-path-hover-moving");
+    for (const clientX of [60, 80, 100, 120]) {
+      outer.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX, clientY: 0 }));
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 120));
+      });
+    }
+    expect(mockStatPaths).not.toHaveBeenCalled();
+  });
+
+  it("does not validate on hover while a selection drag is in progress", async () => {
+    setMockBufferLine(String.raw`cat C:\work\src\main.ts`);
+    mockGetSelection.mockReturnValue("");
+
+    render(<TerminalView instanceId="t-path-hover-drag" profile="PowerShell" syncGroup="" />);
+
+    const outer = screen.getByTestId("terminal-view-t-path-hover-drag");
+    outer.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, pointerId: 11, clientX: 100, clientY: 0 }),
+    );
+    // buttons=1 → 누른 상태의 이동은 dwell 을 잡지 않는다.
+    outer.dispatchEvent(
+      new MouseEvent("mousemove", { bubbles: true, clientX: 110, clientY: 0, buttons: 1 }),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+
+    expect(mockStatPaths).not.toHaveBeenCalled();
+    window.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true, pointerId: 11 }));
+  });
+
+  it("validates the clicked token once and does not open it on that click", async () => {
+    setMockBufferLine(String.raw`cat C:\work\src\main.ts`);
+    mockGetSelection.mockReturnValue("");
+    mockStatPaths.mockResolvedValue([{ exists: true, isDirectory: false }]);
+
+    render(<TerminalView instanceId="t-path-click-detect" profile="PowerShell" syncGroup="" />);
+
+    const outer = screen.getByTestId("terminal-view-t-path-click-detect");
+    outer.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, pointerId: 12, clientX: 100, clientY: 0 }),
+    );
+    outer.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, clientX: 100, clientY: 0 }));
+    window.dispatchEvent(
+      new PointerEvent("pointerup", { bubbles: true, pointerId: 12, clientX: 100, clientY: 0 }),
+    );
+    window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: 100, clientY: 0 }));
+
+    await vi.waitFor(() => {
+      expect(mockStatPaths).toHaveBeenCalledTimes(1);
+    });
+    expect(mockStatPaths).toHaveBeenCalledWith([String.raw`C:\work\src\main.ts`]);
+    // 발견은 열기가 아니다 — 아직 밑줄이 없던 문구의 클릭은 viewer 를 열지 않는다.
+    const { useFileViewerStore } = await import("@/stores/file-viewer-store");
+    expect(useFileViewerStore.getState().open).toBe(false);
+  });
+
+  it("opens the file on a click that lands on an already verified underline", async () => {
+    setMockBufferLine(String.raw`cat C:\work\src\main.ts`);
+    mockGetSelection.mockReturnValue("");
+    mockStatPaths.mockResolvedValue([{ exists: true, isDirectory: false }]);
+
+    render(<TerminalView instanceId="t-path-click-open" profile="PowerShell" syncGroup="" />);
+
+    const outer = screen.getByTestId("terminal-view-t-path-click-open");
+    // 1st click: discovery only.
+    outer.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, pointerId: 21, clientX: 100, clientY: 0 }),
+    );
+    window.dispatchEvent(
+      new PointerEvent("pointerup", { bubbles: true, pointerId: 21, clientX: 100, clientY: 0 }),
+    );
+    window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: 100, clientY: 0 }));
+    await vi.waitFor(() => {
+      expect(mockStatPaths).toHaveBeenCalledTimes(1);
+    });
+    const { useFileViewerStore } = await import("@/stores/file-viewer-store");
+    expect(useFileViewerStore.getState().open).toBe(false);
+
+    // 2nd click on the same spot: the verified target is captured on mousedown
+    // and opened on mouseup.
+    outer.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, pointerId: 22, clientX: 100, clientY: 0 }),
+    );
+    outer.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, clientX: 100, clientY: 0 }));
+    window.dispatchEvent(
+      new PointerEvent("pointerup", { bubbles: true, pointerId: 22, clientX: 100, clientY: 0 }),
+    );
+    window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: 100, clientY: 0 }));
+
+    await vi.waitFor(() => {
+      expect(useFileViewerStore.getState().open).toBe(true);
+    });
+    expect(useFileViewerStore.getState().path).toBe(String.raw`C:\work\src\main.ts`);
+    // The second click reuses the verified target instead of re-parsing it.
+    expect(mockStatPaths).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a drag on the selection path instead of the point path", async () => {
+    setMockBufferLine(String.raw`cat C:\work\src\main.ts`);
+    mockGetSelection.mockReturnValue(String.raw`C:\work\src\main.ts`);
+    mockGetSelectionPosition.mockReturnValue({
+      start: { x: 4, y: 0 },
+      end: { x: 23, y: 0 },
+    });
+    mockStatPaths.mockResolvedValue([{ exists: true, isDirectory: false }]);
+
+    render(<TerminalView instanceId="t-path-drag-selection" profile="PowerShell" syncGroup="" />);
+
+    const outer = screen.getByTestId("terminal-view-t-path-drag-selection");
+    outer.dispatchEvent(
+      // 컬럼 4 는 "cat" 뒤 공백이다. point 분기를 타면 후보가 없어 stat 0회가
+      // 되므로, 아래 1회 단정이 두 분기를 실제로 구별한다.
+      new PointerEvent("pointerdown", { bubbles: true, pointerId: 13, clientX: 30, clientY: 0 }),
+    );
+    window.dispatchEvent(
+      new PointerEvent("pointermove", { bubbles: true, pointerId: 13, clientX: 200, clientY: 0 }),
+    );
+    window.dispatchEvent(
+      new PointerEvent("pointerup", { bubbles: true, pointerId: 13, clientX: 200, clientY: 0 }),
+    );
+    mockOnSelectionChange.mock.calls[0][0]();
+    window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: 200, clientY: 0 }));
+
+    await vi.waitFor(() => {
+      expect(mockStatPaths).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("does not validate a path after the pointer selection gesture is cancelled", async () => {
     mockGetSelection.mockReturnValue(String.raw`C:\work\src\main.ts`);
+    setMockBufferLine(String.raw`C:\work\src\main.ts`);
     mockGetSelectionPosition.mockReturnValue({
       start: { x: 0, y: 0 },
       end: { x: 19, y: 0 },
@@ -7042,7 +7768,7 @@ describe("TerminalView", () => {
     }
   });
 
-  it("waits for write drain before font, DPR, and scrollbar geometry reflows", async () => {
+  it("waits for write drain before font and DPR geometry reflows", async () => {
     type DprMql = {
       listeners: Array<(event: MediaQueryListEvent) => void>;
       addEventListener: (type: string, callback: (event: MediaQueryListEvent) => void) => void;
@@ -7095,13 +7821,6 @@ describe("TerminalView", () => {
 
       act(() => {
         useOverridesStore.getState().setViewOverride("pane-geometry-write-drain", { fontSize: 20 });
-        useSettingsStore.setState({
-          ...useSettingsStore.getState(),
-          terminal: {
-            ...useSettingsStore.getState().terminal,
-            scrollbarStyle: "separate" as const,
-          },
-        });
         for (const listener of [...mqls[0].listeners]) {
           listener(new Event("change") as MediaQueryListEvent);
         }
@@ -7269,15 +7988,6 @@ describe("TerminalView", () => {
   });
 
   it("resends the latest PC geometry when it changes during remote-return sync", async () => {
-    let resolveFirstResize: (() => void) | undefined;
-    mockResizeTerminal.mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveFirstResize = resolve;
-        }),
-    );
-    mockResizeTerminal.mockResolvedValue(undefined);
-
     render(
       <TerminalView
         instanceId="t-remote-latest-geometry"
@@ -7291,7 +8001,18 @@ describe("TerminalView", () => {
       expect(capturedRemoteControlChanged).toBeTruthy();
     });
     await waitForTerminalRendererOpen();
+    await vi.waitFor(() => {
+      expect(mockResizeTerminal).toHaveBeenCalledWith("t-remote-latest-geometry", 80, 24);
+    });
     mockResizeTerminal.mockClear();
+    let resolveFirstResize: (() => void) | undefined;
+    mockResizeTerminal.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveFirstResize = resolve;
+        }),
+    );
+    mockResizeTerminal.mockResolvedValue(undefined);
 
     act(() => {
       capturedRemoteControlChanged?.({ active: true });
@@ -8755,7 +9476,7 @@ describe("TerminalView", () => {
   // -- Regression: reflow triggers fired while inactive workspace is hidden --
   //
   // WorkspaceArea hides inactive workspaces via `display: none`. The font /
-  // DPR / scrollbar reflow effects run for every mounted TerminalView, so
+  // DPR reflow effects run for every mounted TerminalView, so
   // without a guard they call `fit()` on a 0×0 container — propagating
   // cols/rows=0 through `terminal.onResize` to a PTY resize ioctl — and
   // attempt an atlas rebuild against a canvas that is not painted. Both are
@@ -8938,73 +9659,6 @@ describe("TerminalView", () => {
     } finally {
       globalThis.ResizeObserver = originalResizeObserver;
       window.matchMedia = originalMatchMedia;
-    }
-  });
-
-  it("does not fit when scrollbarStyle changes while container is hidden", async () => {
-    type Observer = {
-      target: Element | null;
-      callback: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void;
-    };
-    const observers: Observer[] = [];
-    const originalResizeObserver = globalThis.ResizeObserver;
-    globalThis.ResizeObserver = class {
-      private obs: Observer;
-      constructor(cb: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void) {
-        this.obs = { target: null, callback: cb };
-        observers.push(this.obs);
-      }
-      observe(target: Element) {
-        this.obs.target = target;
-        setTimeout(() => {
-          this.obs.callback(
-            [
-              {
-                target,
-                contentRect: { width: 800, height: 600 },
-              } as unknown as ResizeObserverEntry,
-            ],
-            this as unknown as ResizeObserver,
-          );
-        }, 0);
-      }
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver;
-
-    try {
-      render(<TerminalView instanceId="t-hidden-sb" profile="PowerShell" syncGroup="" />);
-      await vi.waitFor(() => {
-        expect(mockCreateTerminalSession).toHaveBeenCalled();
-      });
-      await waitForTerminalRendererOpen();
-      const obs = observers[0];
-      const target = obs.target as Element;
-
-      // Hide.
-      act(() => {
-        obs.callback(
-          [{ target, contentRect: { width: 0, height: 0 } } as unknown as ResizeObserverEntry],
-          {} as ResizeObserver,
-        );
-      });
-
-      mockFit.mockClear();
-
-      // Scrollbar style change while hidden.
-      useSettingsStore.setState({
-        ...useSettingsStore.getState(),
-        terminal: {
-          ...useSettingsStore.getState().terminal,
-          scrollbarStyle: "separate" as const,
-        },
-      });
-
-      await new Promise((resolve) => setTimeout(resolve, 30));
-
-      expect(mockFit).not.toHaveBeenCalled();
-    } finally {
-      globalThis.ResizeObserver = originalResizeObserver;
     }
   });
 
@@ -9210,90 +9864,20 @@ describe("TerminalView", () => {
     }
   });
 
-  // -- Scrollbar style --
+  // -- Fixed scrollbar layout --
 
-  it("applies scrollbar-overlay class by default", () => {
+  it("keeps the overview ruler disabled without scrollbar mode classes", async () => {
     render(<TerminalView instanceId="t-sb1" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(createdTerminals.length).toBeGreaterThan(0);
+    });
+
+    const term = createdTerminals[createdTerminals.length - 1];
+    expect(term.options.overviewRuler).toEqual({ width: 0 });
     const container = screen.getByTestId("terminal-view-t-sb1");
-    expect(container.classList.contains("scrollbar-overlay")).toBe(true);
-    expect(container.classList.contains("scrollbar-separate")).toBe(false);
-  });
-
-  it("applies scrollbar-separate class when setting is separate", () => {
-    useSettingsStore.setState({
-      ...useSettingsStore.getState(),
-      terminal: {
-        ...useSettingsStore.getState().terminal,
-        scrollbarStyle: "separate" as const,
-      },
-    });
-
-    render(<TerminalView instanceId="t-sb2" profile="PowerShell" syncGroup="" />);
-    const container = screen.getByTestId("terminal-view-t-sb2");
-    expect(container.classList.contains("scrollbar-separate")).toBe(true);
     expect(container.classList.contains("scrollbar-overlay")).toBe(false);
-  });
-
-  it("updates xterm overviewRuler and re-fits when scrollbarStyle changes dynamically", async () => {
-    render(<TerminalView instanceId="t-sb-dyn" profile="PowerShell" syncGroup="" />);
-
-    await vi.waitFor(() => {
-      expect(mockCreateTerminalSession).toHaveBeenCalled();
-    });
-
-    mockFit.mockClear();
-
-    useSettingsStore.setState({
-      ...useSettingsStore.getState(),
-      terminal: {
-        ...useSettingsStore.getState().terminal,
-        scrollbarStyle: "separate" as const,
-      },
-    });
-
-    await vi.waitFor(() => {
-      const container = screen.getByTestId("terminal-view-t-sb-dyn");
-      expect(container.classList.contains("scrollbar-separate")).toBe(true);
-    });
-
-    await vi.waitFor(() => {
-      expect(mockFit).toHaveBeenCalled();
-    });
-  });
-
-  it("updates xterm overviewRuler when scrollbarStyle changes from separate to overlay", async () => {
-    useSettingsStore.setState({
-      ...useSettingsStore.getState(),
-      terminal: {
-        ...useSettingsStore.getState().terminal,
-        scrollbarStyle: "separate" as const,
-      },
-    });
-
-    render(<TerminalView instanceId="t-sb-rev" profile="PowerShell" syncGroup="" />);
-
-    await vi.waitFor(() => {
-      expect(mockCreateTerminalSession).toHaveBeenCalled();
-    });
-
-    mockFit.mockClear();
-
-    useSettingsStore.setState({
-      ...useSettingsStore.getState(),
-      terminal: {
-        ...useSettingsStore.getState().terminal,
-        scrollbarStyle: "overlay" as const,
-      },
-    });
-
-    await vi.waitFor(() => {
-      const container = screen.getByTestId("terminal-view-t-sb-rev");
-      expect(container.classList.contains("scrollbar-overlay")).toBe(true);
-    });
-
-    await vi.waitFor(() => {
-      expect(mockFit).toHaveBeenCalled();
-    });
+    expect(container.classList.contains("scrollbar-separate")).toBe(false);
   });
 
   // -- Wheel scroll sensitivity --
@@ -9360,6 +9944,75 @@ describe("TerminalView", () => {
       expect(term.options.scrollSensitivity).toBe(5);
       expect(term.options.fastScrollSensitivity).toBe(8);
     });
+  });
+
+  it("routes wheel rows to a visible normal-buffer Codex transcript pager", async () => {
+    const terminalId = "t-codex-transcript-wheel";
+    setMockBufferLine("/ T R A N S C R I P T / / / / / /");
+    mockConsumeWheelEvent.mockReturnValueOnce(3);
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForLocalTerminalControl();
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo(terminalId, {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+    const event = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaMode: WheelEvent.DOM_DELTA_LINE,
+      deltaY: 1,
+    });
+
+    expect(capturedWheelHandler).not.toBeNull();
+    expect(capturedWheelHandler?.(event)).toBe(false);
+    expect(event.defaultPrevented).toBe(true);
+    expect(mockConsumeWheelEvent).toHaveBeenCalledWith(event, 20, 1);
+    expect(mockTerminalInput.mock.calls).toEqual(Array(3).fill(["\x1b[B", true]));
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo(terminalId, { activity: { type: "shell" } });
+    });
+    expect(
+      capturedWheelHandler?.(
+        new WheelEvent("wheel", {
+          cancelable: true,
+          deltaMode: WheelEvent.DOM_DELTA_LINE,
+          deltaY: 1,
+        }),
+      ),
+    ).toBe(true);
+    expect(mockTerminalInput).toHaveBeenCalledTimes(3);
+  });
+
+  it("leaves a normal-buffer Codex transcript on xterm scrollback when the convenience is off", async () => {
+    const terminalId = "t-codex-transcript-wheel-disabled";
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      codex: {
+        ...useSettingsStore.getState().codex,
+        transcriptScrollEnabled: false,
+      },
+    });
+    setMockBufferLine("/ T R A N S C R I P T / / / / / /");
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForLocalTerminalControl();
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo(terminalId, {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    const event = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaMode: WheelEvent.DOM_DELTA_LINE,
+      deltaY: 1,
+    });
+    expect(capturedWheelHandler?.(event)).toBe(true);
+    expect(event.defaultPrevented).toBe(false);
+    expect(mockConsumeWheelEvent).not.toHaveBeenCalled();
+    expect(mockTerminalInput).not.toHaveBeenCalled();
   });
 
   // -- URL link click (issue #29) --
@@ -9714,6 +10367,14 @@ describe("TerminalView", () => {
           undefined,
         );
       });
+    });
+
+    it("starts Codex without resume for a proven empty checkpoint", async () => {
+      render(
+        <TerminalView instanceId="t-codex-fresh" profile="PowerShell" lastAgentFresh="codex" />,
+      );
+      await vi.waitFor(() => expect(mockCreateTerminalSession).toHaveBeenCalled());
+      expect(mockCreateTerminalSession.mock.calls.at(-1)?.[8]).toBe("codex");
     });
 
     it("passes codex resume when lastCodexSession is set", async () => {
@@ -10581,21 +11242,10 @@ describe("TerminalView jump-to-bottom button (issue #349)", () => {
     expect(screen.queryByTestId("terminal-scroll-to-bottom-t-jump3")).not.toBeInTheDocument();
   });
 
-  // Issue #361: the button must clear the scrollbar slider. The slider renders at
-  // the same right-edge width in both modes and the button is positioned relative
-  // to the pane edge, so the offset (--terminal-scroll-btn-right) is the same
-  // (26px = 14px slider + 12px clearance) regardless of scrollbar mode.
-  it("uses a 26px right offset in overlay scrollbar mode", () => {
-    useSettingsStore.getState().setTerminal({ scrollbarStyle: "overlay" });
-    render(<TerminalView instanceId="t-sb-overlay" profile="PowerShell" syncGroup="" />);
-    const wrapper = screen.getByTestId("terminal-view-t-sb-overlay");
-    expect(wrapper.style.getPropertyValue("--terminal-scroll-btn-right")).toBe("26px");
-  });
-
-  it("uses the same 26px right offset in separate scrollbar mode", () => {
-    useSettingsStore.getState().setTerminal({ scrollbarStyle: "separate" });
-    render(<TerminalView instanceId="t-sb-separate" profile="PowerShell" syncGroup="" />);
-    const wrapper = screen.getByTestId("terminal-view-t-sb-separate");
+  // Issue #361: 14px scrollbar slider + 12px clearance.
+  it("uses a 26px right offset for the fixed scrollbar", () => {
+    render(<TerminalView instanceId="t-sb-fixed" profile="PowerShell" syncGroup="" />);
+    const wrapper = screen.getByTestId("terminal-view-t-sb-fixed");
     // 14px scrollbar slider + 12px clearance.
     expect(wrapper.style.getPropertyValue("--terminal-scroll-btn-right")).toBe("26px");
   });
@@ -14124,6 +14774,10 @@ describe("TerminalView desktop input composer", () => {
 
     expect(mockWriteTerminalInput).toHaveBeenCalledWith("t-composer-send", "한글\nsecond", true);
     await vi.waitFor(() => expect(textarea.value).toBe(""));
+    expect(
+      useTerminalStore.getState().instances.find((instance) => instance.id === "t-composer-send")
+        ?.lastUserInput,
+    ).toBe("한글 second");
   });
 
   // Issue #558. In the alternate screen the composer is a keyboard proxy: keys go to

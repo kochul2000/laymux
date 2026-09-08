@@ -2,6 +2,34 @@ import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
 import { installRemoteClientRoutes, remoteClientMarkupWithoutXterm } from "./remote-client-assets";
 
 /**
+ * Seed a v2 key-bar layout placing `softKeyIds` in the Keys row. Placement is
+ * the only activation signal, so a test that drives a specific key has to put
+ * it on the bar first.
+ */
+async function seedKeyBar(page: Page, softKeyIds: string[], expanded = true) {
+  await page.addInitScript(
+    ({ keys, open }) => {
+      localStorage.setItem(
+        "laymux.remote.keybar",
+        JSON.stringify({
+          expanded: open,
+          userKeys: [],
+          zones: {
+            main: { left: [], center: [], right: ["keyboard", "keys", "composer"] },
+            expanded: {
+              left: keys.map((id: string) => `soft:${id}`),
+              center: [],
+              right: [],
+            },
+          },
+        }),
+      );
+    },
+    { keys: softKeyIds, open: expanded },
+  );
+}
+
+/**
  * Serve the real remote page against a fixed navigation snapshot: active
  * workspace `ws-a` with two terminal panes (p-a1, p-a2) plus an inactive
  * `ws-b` whose pane/status summary remains visible. Spatial step requests are
@@ -10,6 +38,10 @@ import { installRemoteClientRoutes, remoteClientMarkupWithoutXterm } from "./rem
 async function routeRemoteWithWorkspaces(
   page: Page,
   spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }>,
+  options: {
+    includeGamma?: boolean;
+    initialHiddenWorkspaceIds?: string[];
+  } = {},
 ): Promise<{
   setWorkspaceDisplay: (
     display: Partial<{
@@ -20,9 +52,12 @@ async function routeRemoteWithWorkspaces(
       result: boolean;
     }>,
   ) => void;
+  setLastInputMode: (mode: "perPane" | "workspaceLatest") => void;
   visibilityRequests: Array<{ path: string; body: { hidden: boolean; leaseId: string } }>;
+  focusRequests: Array<{ terminalId: string; body: { leaseId: string } }>;
   outputAttachments: string[];
   setVisibilityFallbackWorkspaceId: (workspaceId: string | null) => void;
+  setNotifications: (notifications: Array<Record<string, unknown>>, unreadCount: number) => void;
 }> {
   let workspaceDisplay = {
     minimap: false,
@@ -31,13 +66,18 @@ async function routeRemoteWithWorkspaces(
     path: true,
     result: true,
   };
+  let lastInputMode: "perPane" | "workspaceLatest" = "perPane";
   const visibilityRequests: Array<{
     path: string;
     body: { hidden: boolean; leaseId: string };
   }> = [];
-  const hiddenWorkspaceIds = new Set<string>();
+  const focusRequests: Array<{ terminalId: string; body: { leaseId: string } }> = [];
+  const hiddenWorkspaceIds = new Set(options.initialHiddenWorkspaceIds ?? []);
   const hiddenPaneIds = new Set<string>();
   const outputAttachments: string[] = [];
+  let activeWorkspaceId = "ws-a";
+  let notifications: Array<Record<string, unknown>> = [];
+  let unreadNotificationCount = 0;
   let visibilityFallbackWorkspaceId: string | null = null;
   const paneA1 = {
     id: "p-a1",
@@ -50,7 +90,7 @@ async function routeRemoteWithWorkspaces(
     y: 0,
     w: 0.5,
     h: 1,
-    selectorDisplay: { environment: "A1" },
+    selectorDisplay: { environment: "A1", lastInput: "older pane input", lastInputAt: 10 },
   };
   const paneA2 = {
     id: "p-a2",
@@ -63,7 +103,7 @@ async function routeRemoteWithWorkspaces(
     y: 0,
     w: 0.5,
     h: 1,
-    selectorDisplay: { environment: "A2" },
+    selectorDisplay: { environment: "A2", lastInput: "newest pane input", lastInputAt: 20 },
   };
   const paneB1 = {
     id: "p-b1",
@@ -81,6 +121,8 @@ async function routeRemoteWithWorkspaces(
       environment: "PS",
       activity: { label: "running", color: "var(--yellow)" },
       cwd: "~/work/beta",
+      lastInput: "npm test",
+      lastInputAt: 15,
     },
   };
 
@@ -102,17 +144,21 @@ async function routeRemoteWithWorkspaces(
           terminals: [
             { id: "term-a1", title: "A1", workspaceId: "ws-a", paneNumber: 1, appearance: {} },
             { id: "term-a2", title: "A2", workspaceId: "ws-a", paneNumber: 2, appearance: {} },
+            { id: "term-b1", title: "B1", workspaceId: "ws-b", paneNumber: 1, appearance: {} },
           ],
           activeWorkspace: {
-            id: "ws-a",
-            name: "Alpha",
-            panes: [paneWithVisibility(paneA1), paneWithVisibility(paneA2)],
+            id: activeWorkspaceId,
+            name: activeWorkspaceId === "ws-a" ? "Alpha" : "Beta",
+            panes:
+              activeWorkspaceId === "ws-a"
+                ? [paneWithVisibility(paneA1), paneWithVisibility(paneA2)]
+                : [paneWithVisibility(paneB1)],
           },
           workspaces: [
             {
               id: "ws-a",
               name: "Alpha",
-              isActive: true,
+              isActive: activeWorkspaceId === "ws-a",
               terminalPaneCount: 2,
               selectorSummary: { terminalCount: 2, lastCommand: null, latestNotification: null },
               hidden: hiddenWorkspaceIds.has("ws-a"),
@@ -122,7 +168,7 @@ async function routeRemoteWithWorkspaces(
             {
               id: "ws-b",
               name: "Beta",
-              isActive: false,
+              isActive: activeWorkspaceId === "ws-b",
               terminalPaneCount: 1,
               selectorSummary: {
                 terminalCount: 1,
@@ -137,12 +183,32 @@ async function routeRemoteWithWorkspaces(
               collapsed: hiddenWorkspaceIds.has("ws-b"),
               panes: [paneWithVisibility(paneB1)],
             },
+            ...(options.includeGamma
+              ? [
+                  {
+                    id: "ws-c",
+                    name: "Gamma",
+                    isActive: false,
+                    terminalPaneCount: 0,
+                    selectorSummary: {
+                      terminalCount: 0,
+                      lastCommand: null,
+                      latestNotification: null,
+                    },
+                    hidden: hiddenWorkspaceIds.has("ws-c"),
+                    collapsed: hiddenWorkspaceIds.has("ws-c"),
+                    panes: [],
+                  },
+                ]
+              : []),
           ],
           docks: [],
-          notifications: [],
+          notifications,
+          unreadNotificationCount,
           workspaceSelector: {
             display: workspaceDisplay,
             pathEllipsis: "start",
+            lastInputMode,
           },
         },
       });
@@ -167,6 +233,17 @@ async function routeRemoteWithWorkspaces(
       });
       return;
     }
+    const focusMatch = url.pathname.match(/^\/remote\/v1\/terminals\/([^/]+)\/focus$/);
+    if (focusMatch) {
+      const terminalId = decodeURIComponent(focusMatch[1]);
+      focusRequests.push({
+        terminalId,
+        body: route.request().postDataJSON() as { leaseId: string },
+      });
+      activeWorkspaceId = terminalId === "term-b1" ? "ws-b" : "ws-a";
+      await route.fulfill({ json: { focused: terminalId } });
+      return;
+    }
     if (url.pathname === "/remote/v1/navigation/spatial") {
       spatialBodies.push(route.request().postDataJSON());
       await route.fulfill({ json: { moved: false, reason: "no_other_target" } });
@@ -174,18 +251,26 @@ async function routeRemoteWithWorkspaces(
     }
     await route.fulfill({ json: {} });
   });
-  await page.routeWebSocket(/\/remote\/v1\/terminals\/term-a[12]\/output/, (socket) => {
+  await page.routeWebSocket(/\/remote\/v1\/terminals\/term-[ab][12]\/output/, (socket) => {
     const match = socket.url().match(/terminals\/([^/]+)\/output/);
     if (match) outputAttachments.push(decodeURIComponent(match[1]));
   });
   return {
     outputAttachments,
+    focusRequests,
     visibilityRequests,
     setVisibilityFallbackWorkspaceId(workspaceId) {
       visibilityFallbackWorkspaceId = workspaceId;
     },
+    setNotifications(nextNotifications, unreadCount) {
+      notifications = nextNotifications;
+      unreadNotificationCount = unreadCount;
+    },
     setWorkspaceDisplay(display) {
       workspaceDisplay = { ...workspaceDisplay, ...display };
+    },
+    setLastInputMode(mode) {
+      lastInputMode = mode;
     },
   };
 }
@@ -203,7 +288,8 @@ test.describe("remote mobile layout", () => {
     const terminalMeta = page.locator("#terminalMeta");
 
     await expect(page.locator("#keyBar")).toBeHidden();
-    await expect(terminalMeta).toBeHidden();
+    await expect(terminalMeta).toHaveClass("sr-only");
+    await expect(footer.locator(":scope > #terminalMeta")).toHaveCount(0);
     expect((await footer.boundingBox())?.height).toBeLessThan(50);
     const footerButtons = await footer.locator("button:not([hidden])").evaluateAll((buttons) =>
       buttons.map((button) => ({
@@ -211,30 +297,72 @@ test.describe("remote mobile layout", () => {
         minWidth: getComputedStyle(button).minWidth,
       })),
     );
-    expect(footerButtons).toHaveLength(3);
+    // Without the client script only the statically-marked-up right segment
+    // shows: Keyboard and Keys.
+    expect(footerButtons).toHaveLength(2);
     const widths = footerButtons.map(({ width }) => width);
     expect(Math.max(...widths) - Math.min(...widths)).toBeLessThan(0.1);
-    expect(footerButtons.every(({ minWidth }) => minWidth === "0px")).toBe(true);
+    expect(footerButtons.every(({ minWidth }) => minWidth === "54px")).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
 
     await page.setViewportSize({ width: 180, height: 844 });
-    const narrowFooter = await footer.evaluate((element) => ({
+    const narrowFooter = await footer.locator("#mainActionRow").evaluate((element) => ({
       clientWidth: element.clientWidth,
-      scrollWidth: element.scrollWidth,
       buttonWidths: Array.from(
         element.querySelectorAll("button:not([hidden])"),
         (button) => button.getBoundingClientRect().width,
       ),
     }));
-    expect(narrowFooter.scrollWidth).toBe(narrowFooter.clientWidth);
     expect(
       Math.max(...narrowFooter.buttonWidths) - Math.min(...narrowFooter.buttonWidths),
     ).toBeLessThan(0.1);
+    // Whatever the row does internally, the document never scrolls sideways.
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(180);
   });
 
+  test("keeps every header action inside the narrowest Remote viewport", async ({ page }) => {
+    await page.locator(".app > header button").evaluateAll((buttons) => {
+      buttons.forEach((button) => {
+        button.hidden = false;
+      });
+    });
+    await page.setViewportSize({ width: 180, height: 844 });
+
+    const header = await page.locator(".app > header").evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(header.scrollWidth).toBe(header.clientWidth);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(180);
+  });
+
+  test("keeps terminal metadata out of the footer in wide landscape", async ({ page }) => {
+    await page.setViewportSize({ width: 700, height: 390 });
+
+    await expect(page.locator("#mainActionRow")).toBeVisible();
+    await expect(page.locator("footer > #terminalMeta")).toHaveCount(0);
+    const terminalMeta = page.locator("#terminalMeta");
+    await expect(terminalMeta).not.toHaveAttribute("role", "status");
+    await expect(terminalMeta).not.toHaveAttribute("aria-live", /.+/);
+    const terminalMetaStyle = await terminalMeta.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        position: style.position,
+        width: style.width,
+        height: style.height,
+        clip: style.clip,
+      };
+    });
+    expect(terminalMetaStyle).toEqual({
+      position: "absolute",
+      width: "1px",
+      height: "1px",
+      clip: "rect(0px, 0px, 0px, 0px)",
+    });
+  });
+
   test("confines horizontal scrolling to the soft-key row", async ({ page }) => {
-    await page.locator("#keyRow").evaluate((row) => {
+    await page.locator('#keyRow > [data-segment="left"]').evaluate((row) => {
       for (const label of [
         "Esc",
         "Tab",
@@ -263,33 +391,26 @@ test.describe("remote mobile layout", () => {
       overflowX: getComputedStyle(row).overflowX,
       scrollbarWidth: getComputedStyle(row).scrollbarWidth,
       webkitScrollbarDisplay: getComputedStyle(row, "::-webkit-scrollbar").display,
-      settingsInsideRow: row.firstElementChild?.id === "keyBarSettings",
-      buttonRows: new Set(Array.from(row.children, (child) => (child as HTMLElement).offsetTop))
-        .size,
+      settingsInsideRow: row.querySelector("#keyBarSettings") !== null,
+      buttonRows: new Set(
+        Array.from(row.querySelectorAll(".key-btn"), (child) => (child as HTMLElement).offsetTop),
+      ).size,
     }));
 
     expect(overflow.scrollWidth).toBeGreaterThan(overflow.clientWidth);
     expect(overflow.overflowX).toBe("auto");
     expect(overflow.scrollbarWidth).toBe("none");
     expect(overflow.webkitScrollbarDisplay).toBe("none");
-    expect(overflow.settingsInsideRow).toBe(true);
+    expect(overflow.settingsInsideRow).toBe(false);
     expect(overflow.buttonRows).toBe(1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
 
-    const settingsMovement = await keyRow.evaluate((row) => {
-      const settings = row.querySelector<HTMLElement>("#keyBarSettings")!;
-      const before = settings.getBoundingClientRect().x;
-      row.scrollLeft = row.scrollWidth;
-      const after = settings.getBoundingClientRect().x;
-      row.scrollLeft = 0;
-      return { before, after };
-    });
-    expect(settingsMovement.after).toBeLessThan(settingsMovement.before);
+    await expect(page.locator("#drawerSettingsButton")).toHaveCount(1);
   });
 
   test("keeps the key-bar height stable across empty and populated states", async ({ page }) => {
     const keyBar = page.locator("#keyBar");
-    const keyRow = page.locator("#keyRow");
+    const keyRow = page.locator('#keyRow > [data-segment="left"]');
     await keyBar.evaluate((bar) => {
       bar.hidden = false;
     });
@@ -324,6 +445,7 @@ test.describe("remote mobile layout", () => {
         body: "<!doctype html><title>remote test</title>",
       }),
     );
+    await seedKeyBar(page, ["navPad", "navPrev", "navNext", "notifRecent", "notifOldest"], false);
     await page.goto("http://remote.test/");
     await page.setContent(remoteClientMarkupWithoutXterm());
     await page.locator("#keyBarToggle").click();
@@ -331,8 +453,8 @@ test.describe("remote mobile layout", () => {
     // No dedicated bar row — the keys live in the toggleable key bar.
     await expect(page.locator("#navStepBar")).toHaveCount(0);
 
-    // Default "step" set: 4-way nav flick pad + four step keys, rendered
-    // ahead of the escape-sequence keys.
+    // The flick pad ships placed by default; the individual step keys are
+    // placed here because placement is what activates a key.
     const navPad = page.locator('[data-key="navPad"]');
     await expect(navPad).toHaveCount(1);
     await expect(navPad).toHaveAttribute(
@@ -392,6 +514,7 @@ test.describe("remote mobile layout", () => {
     await expect(page.locator("#widgetStripToggle")).toBeEnabled();
     await page.locator("#drawerBack").click();
     await expect(page.locator("#drawerSettingsButton")).toBeFocused();
+    await page.locator("#drawerSettingsButton").click();
     await page.locator("#drawerConnectionButton").click();
     await expect(page.locator("#drawerBack")).toBeFocused();
 
@@ -402,6 +525,7 @@ test.describe("remote mobile layout", () => {
     await page.locator("#navToggle").click();
     await expect(page.locator("#drawerWorkspaceView")).toBeVisible();
     await expect(page.locator("#workspaceSection")).toBeVisible();
+    await expect(page.locator("#drawerHiddenView")).toBeHidden();
     await expect(page.locator("#workspaceSection .nav-section-title")).toHaveCount(0);
     await expect(page.locator("#notificationSection")).toBeHidden();
     await expect(page.locator("#drawerConnectionView")).toBeHidden();
@@ -420,6 +544,10 @@ test.describe("remote mobile layout", () => {
     await page.locator("#drawerSettingsButton").click();
     await expect(page.locator("#drawerBack")).toBeFocused();
     await expect(page.locator("#drawerSettingsView")).toBeVisible();
+    // Settings opens on its own tabbed pages; Input bar is the first.
+    await expect(page.locator("#settingsPanelInputBar")).toBeVisible();
+    await expect(page.locator("#displaySection")).toBeHidden();
+    await page.locator('#settingsTabs [data-settings-panel="display"]').click();
     await expect(page.locator("#displaySection")).toBeVisible();
     await expect(page.locator("#drawerWorkspaceView")).toBeHidden();
 
@@ -427,6 +555,7 @@ test.describe("remote mobile layout", () => {
     await expect(page.locator("#drawerSettingsButton")).toBeFocused();
     await expect(page.locator("#drawerWorkspaceView")).toBeVisible();
 
+    await page.locator("#drawerSettingsButton").click();
     await page.locator("#drawerConnectionButton").click();
     await expect(page.locator("#drawerBack")).toBeFocused();
     await expect(page.locator("#drawerConnectionView")).toBeVisible();
@@ -507,15 +636,17 @@ test.describe("remote mobile layout", () => {
     });
     await page.routeWebSocket(/\/remote\/v1\/terminals\/term-a\/output/, () => {});
 
+    await seedKeyBar(page, ["navPrev", "navNext"], false);
     await page.goto("http://remote.test/remote/#token=test-token");
     await page.locator("#connect").click();
 
     const exclusion = page.locator("#spatialExclusion");
     await expect(exclusion).toBeVisible();
-    await expect(exclusion.locator('svg[data-icon="circle-minus"]')).toHaveCount(1);
+    await expect(exclusion.locator('svg[data-remote-icon-name="CircleMinus"]')).toHaveCount(1);
     await expect(exclusion).toHaveAttribute("aria-pressed", "false");
     await expect(exclusion).toHaveAttribute("aria-label", "Exclude this pane from pane navigation");
 
+    await page.locator("#keyBarToggle").click();
     const [exclusionBox, composerToggleBox] = await Promise.all([
       exclusion.boundingBox(),
       page.locator("#inputModeToggle").boundingBox(),
@@ -525,7 +656,6 @@ test.describe("remote mobile layout", () => {
     expect(exclusionBox!.height).toBe(26);
     expect(composerToggleBox!.height).toBe(26);
 
-    await page.locator("#keyBarToggle").click();
     await page.locator('[data-key="navNext"]').click();
     await expect.poll(() => spatialBodies.length).toBe(1);
     expect(spatialBodies[0].excludedPaneIds).toEqual([]);
@@ -559,6 +689,7 @@ test.describe("remote mobile layout", () => {
     const spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }> = [];
     await routeRemoteWithWorkspaces(page, spatialBodies);
 
+    await seedKeyBar(page, ["navPrev", "navNext"], false);
     await page.goto("http://remote.test/remote/#token=test-token");
     await page.locator("#connect").click();
     await page.locator("#navToggle").click();
@@ -566,7 +697,7 @@ test.describe("remote mobile layout", () => {
     // Every workspace with terminal panes shows the same circle-minus skip icon.
     const skipB = page.locator('[data-workspace-skip="ws-b"]');
     await expect(skipB).toBeVisible();
-    await expect(skipB.locator('svg[data-icon="circle-minus"]')).toHaveCount(1);
+    await expect(skipB.locator('svg[data-remote-icon-name="CircleMinus"]')).toHaveCount(1);
     await expect(skipB).toHaveAttribute("aria-pressed", "false");
 
     await skipB.click();
@@ -620,7 +751,7 @@ test.describe("remote mobile layout", () => {
     await expect(page.locator("#spatialExclusion")).toHaveAttribute("aria-pressed", "false");
   });
 
-  test("shows inactive pane status and the same bottom summary without selecting it", async ({
+  test("shows inactive pane status and last input without a bottom aggregate row", async ({
     page,
   }) => {
     const spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }> = [];
@@ -635,12 +766,71 @@ test.describe("remote mobile layout", () => {
     await expect(beta.locator(".pane-env")).toHaveText("PS");
     await expect(beta.locator(".pane-activity")).toHaveText("running");
     await expect(beta.locator(".pane-path")).toHaveText("~/work/beta");
-    await expect(beta.locator(".pane-command-status")).toHaveText("⏳");
-    await expect(beta.locator(".workspace-status-line")).toContainText("npm test");
-    await expect(beta.locator(".workspace-status-line")).toContainText("✓");
+    const commandStatus = beta.getByRole("img", { name: "Command running" });
+    await expect(commandStatus).toHaveCount(1);
+    await expect(commandStatus).not.toHaveAttribute("title");
+    await expect(commandStatus.locator('svg[data-remote-icon-name="Hourglass"]')).toHaveCount(1);
+    await expect(beta.locator(".pane-last-input")).toHaveText("npm test");
+    await expect(beta.locator(".workspace-status-line")).toHaveCount(0);
   });
 
-  test("mirrors the PC hidden workspace shelf and pane eye controls", async ({ page }) => {
+  test("enters the exact pane tapped in an inactive workspace", async ({ page }) => {
+    const spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }> = [];
+    const controls = await routeRemoteWithWorkspaces(page, spatialBodies);
+    controls.setWorkspaceDisplay({
+      minimap: true,
+      environment: false,
+      activity: false,
+      path: false,
+      result: false,
+    });
+    controls.setLastInputMode("workspaceLatest");
+
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await expect.poll(() => controls.outputAttachments.at(-1)).toBe("term-a1");
+    await page.locator("#navToggle").click();
+
+    const betaPane = page.locator('[data-workspace-item="ws-b"] [data-pane-row="p-b1"]');
+    await expect(betaPane).toHaveJSProperty("tagName", "BUTTON");
+    await expect(betaPane).toHaveAccessibleName("Open Beta, pane 1, PowerShell");
+    await betaPane.click();
+
+    await expect
+      .poll(() => controls.focusRequests.at(-1))
+      .toEqual({
+        terminalId: "term-b1",
+        body: { leaseId: "lease-1" },
+      });
+    await expect.poll(() => controls.outputAttachments.at(-1)).toBe("term-b1");
+  });
+
+  test("uses compact pane rows and one newest input line in workspaceLatest mode", async ({
+    page,
+  }) => {
+    const spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }> = [];
+    const controls = await routeRemoteWithWorkspaces(page, spatialBodies);
+    controls.setLastInputMode("workspaceLatest");
+
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await page.locator("#navToggle").click();
+
+    const alpha = page.locator(".workspace-item", { hasText: "Alpha" });
+    await expect(alpha.locator(".pane-last-input")).toHaveCount(0);
+    await expect(alpha.locator(".workspace-pane-row.compact")).toHaveCount(2);
+    await expect(alpha.locator(".workspace-last-input")).toHaveText("newest pane input");
+    expect((await alpha.locator(".workspace-pane-row.compact").first().boundingBox())?.height).toBe(
+      18,
+    );
+
+    await alpha.locator('[data-pane-visibility="p-a2"]').click();
+    await expect(alpha.locator(".workspace-last-input")).toHaveText("older pane input");
+  });
+
+  test("opens hidden workspaces as a drawer page and mirrors pane eye controls", async ({
+    page,
+  }) => {
     const spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }> = [];
     const controls = await routeRemoteWithWorkspaces(page, spatialBodies);
 
@@ -648,21 +838,74 @@ test.describe("remote mobile layout", () => {
     await page.locator("#connect").click();
     await page.locator("#navToggle").click();
 
+    await expect(page.locator("#workspaceSection > .workspace-section-heading")).toHaveCount(0);
+    await expect(page.locator(".drawer-header-actions > #hiddenWorkspaceToggle")).toBeAttached();
     await expect(page.locator("#hiddenWorkspaceToggle")).toBeHidden();
     await page.locator('[data-workspace-visibility="ws-b"]').click();
     await expect(page.locator('[data-workspace-item="ws-b"]')).toHaveCount(0);
-    await expect(page.locator("#hiddenWorkspaceToggle")).toHaveText("Hidden 1");
+    await expect(page.locator("#hiddenWorkspaceToggle")).toBeVisible();
+    await expect(page.locator("#hiddenWorkspaceToggle svg")).toHaveCount(1);
+    await expect(page.locator("#hiddenWorkspaceBadge")).toHaveCount(0);
+    await expect(page.locator("#hiddenWorkspaceToggle")).toHaveClass(/status-indicator/);
+    await expect(page.locator("#hiddenWorkspaceToggle")).toHaveAttribute(
+      "aria-label",
+      "Open hidden workspaces (1)",
+    );
+    await expect(page.locator("#hiddenWorkspaceToggle")).toHaveAttribute(
+      "title",
+      "Open hidden workspaces (1)",
+    );
+
+    // Keep the worst-case header compact at the repo's narrowest mobile
+    // viewport: local-app mode also exposes the PC button.
+    await page.locator("#desktopModeDrawer").evaluate((button) => {
+      button.hidden = false;
+    });
+    await page.setViewportSize({ width: 180, height: 844 });
+    await expect(page.locator("#drawerTitle")).toBeHidden();
+    const narrowHeader = await page.locator(".drawer-header").evaluate((header) => {
+      const actions = header.querySelector<HTMLElement>(".drawer-header-actions");
+      if (!actions) throw new Error("drawer header actions are missing");
+      const headerRect = header.getBoundingClientRect();
+      const actionRect = actions.getBoundingClientRect();
+      return {
+        actionLeft: actionRect.left,
+        actionRight: actionRect.right,
+        headerClientWidth: header.clientWidth,
+        headerLeft: headerRect.left,
+        headerRight: headerRect.right,
+        headerScrollWidth: header.scrollWidth,
+      };
+    });
+    expect(narrowHeader.headerScrollWidth).toBe(narrowHeader.headerClientWidth);
+    expect(narrowHeader.actionLeft).toBeGreaterThanOrEqual(narrowHeader.headerLeft);
+    expect(narrowHeader.actionRight).toBeLessThanOrEqual(narrowHeader.headerRight);
+    const narrowPin = await page.locator("#navigationPin").boundingBox();
+    expect(narrowPin!.x).toBeGreaterThanOrEqual(narrowHeader.headerLeft);
+    expect(narrowPin!.x + narrowPin!.width).toBeLessThanOrEqual(narrowHeader.actionLeft);
+    await page.screenshot({ path: "../.screenshots/remote-pin-toolbar-180.png" });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(180);
     expect(controls.visibilityRequests.at(-1)).toEqual({
       path: "/remote/v1/workspaces/ws-b/visibility",
       body: { hidden: true, leaseId: "lease-1" },
     });
 
     await page.locator("#hiddenWorkspaceToggle").click();
+    await expect(page.locator("#drawerHiddenView")).toBeVisible();
+    await expect(page.locator("#drawerWorkspaceView")).toBeHidden();
+    await expect(page.locator("#drawerTitle")).toHaveText("Hidden workspaces");
+    await expect(page.locator("#drawerBack")).toBeFocused();
     await expect(page.locator("#hiddenWorkspaceShelf")).toBeVisible();
     await expect(page.locator('[data-hidden-workspace="ws-b"]')).toContainText("Beta");
+
+    await page.locator("#drawerBack").click();
+    await expect(page.locator("#drawerWorkspaceView")).toBeVisible();
+    await expect(page.locator("#hiddenWorkspaceToggle")).toBeFocused();
+    await page.locator("#hiddenWorkspaceToggle").click();
     await page.locator('[data-hidden-workspace-restore="ws-b"]').click();
     await expect(page.locator('[data-workspace-item="ws-b"]')).toBeVisible();
     await expect(page.locator("#hiddenWorkspaceToggle")).toBeHidden();
+    await expect(page.locator("#drawerWorkspaceView")).toBeVisible();
 
     const paneToggle = page.locator('[data-pane-visibility="p-a2"]');
     await paneToggle.click();
@@ -676,6 +919,99 @@ test.describe("remote mobile layout", () => {
     await paneToggle.click();
     await expect(page.locator('[data-pane-row="p-a2"]')).not.toHaveClass(/hidden-item/);
     await expect(paneToggle).toHaveAttribute("aria-pressed", "false");
+  });
+
+  test("keeps keyboard focus after partial and final hidden workspace restores", async ({
+    page,
+  }) => {
+    const spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }> = [];
+    await routeRemoteWithWorkspaces(page, spatialBodies, {
+      includeGamma: true,
+      initialHiddenWorkspaceIds: ["ws-b", "ws-c"],
+    });
+
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await page.locator("#navToggle").click();
+    await page.locator("#hiddenWorkspaceToggle").click();
+
+    await page.locator('[data-hidden-workspace-restore="ws-b"]').click();
+    await expect(page.locator('[data-hidden-workspace-restore="ws-c"]')).toBeFocused();
+
+    await page.locator('[data-hidden-workspace-restore="ws-c"]').click();
+    await expect(page.locator("#drawerWorkspaceView")).toBeVisible();
+    await expect(page.locator('[data-workspace-visibility="ws-c"]')).toBeFocused();
+  });
+
+  test("uses settings-sized dots for hidden and notification status", async ({ page }) => {
+    const spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }> = [];
+    const controls = await routeRemoteWithWorkspaces(page, spatialBodies);
+    controls.setNotifications(
+      [
+        {
+          id: "notice-1",
+          workspaceId: "ws-a",
+          workspaceName: "Alpha",
+          terminalId: "term-a1",
+          message: "Ready",
+          level: "success",
+          isRead: false,
+          createdAt: Date.now(),
+        },
+      ],
+      1,
+    );
+
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await page.locator("#navToggle").click();
+    await page.locator('[data-workspace-visibility="ws-b"]').click();
+
+    await expect(page.locator("#hiddenWorkspaceToggle")).toBeVisible();
+    await expect(page.locator("#hiddenWorkspaceToggle")).toHaveClass(/status-indicator/);
+    await expect(page.locator("#notificationBadge")).toHaveCount(0);
+    await expect(page.locator("#drawerNotificationsButton")).toHaveClass(/status-indicator/);
+    await expect(page.locator("#drawerNotificationsButton")).toHaveAttribute(
+      "aria-label",
+      "Open notifications (1 unread)",
+    );
+
+    const dotStyles = await page.evaluate(() => {
+      const settings = document.querySelector<HTMLElement>("#drawerSettingsButton");
+      const hidden = document.querySelector<HTMLElement>("#hiddenWorkspaceToggle");
+      const notifications = document.querySelector<HTMLElement>("#drawerNotificationsButton");
+      if (!settings || !hidden || !notifications) throw new Error("drawer controls are missing");
+      settings.classList.add("update-available");
+      const readDot = (element: HTMLElement) => {
+        const style = getComputedStyle(element, "::after");
+        return {
+          width: style.width,
+          height: style.height,
+          right: style.right,
+          top: style.top,
+          background: style.backgroundColor,
+        };
+      };
+      return {
+        settings: readDot(settings),
+        hidden: readDot(hidden),
+        notifications: readDot(notifications),
+        hiddenColor: getComputedStyle(hidden).color,
+        notificationColor: getComputedStyle(notifications).color,
+      };
+    });
+    expect(dotStyles.hidden).toEqual(dotStyles.settings);
+    expect(dotStyles.notifications).toEqual(dotStyles.settings);
+    expect(dotStyles.hidden.width).toBe("5px");
+    expect(dotStyles.hidden.height).toBe("5px");
+    expect(dotStyles.hiddenColor).toBe(dotStyles.notificationColor);
+
+    controls.setNotifications([], 0);
+    await expect(page.locator("#drawerNotificationsButton")).not.toHaveClass(/status-indicator/);
+    await expect(page.locator("#drawerNotificationsButton")).toHaveAttribute(
+      "aria-label",
+      "Open notifications",
+    );
   });
 
   test("reattaches output when the host hides an active workspace beyond a stale snapshot", async ({
@@ -710,8 +1046,9 @@ test.describe("remote mobile layout", () => {
 
     const beta = page.locator(".workspace-item", { hasText: "Beta" });
     await expect(beta.locator(".pane-activity")).toHaveText("running");
-    await expect(beta.locator(".pane-command-status")).toHaveText("⏳");
-
+    await expect(
+      beta.locator('.pane-command-status svg[data-remote-icon-name="Hourglass"]'),
+    ).toHaveCount(1);
     controls.setWorkspaceDisplay({ activity: false, result: false });
     await expect(beta.locator(".pane-activity")).toHaveCount(0, { timeout: 5000 });
     await expect(beta.locator(".pane-command-status")).toHaveCount(0);
@@ -813,90 +1150,79 @@ test.describe("remote mobile layout", () => {
     }
   });
 
-  test("drags visible soft keys and offers accessible order controls", async ({ page }) => {
-    await page.route("http://remote.test/", (route) =>
-      route.fulfill({
-        contentType: "text/html",
-        body: "<!doctype html><title>remote test</title>",
+  test("routes the first real xterm touch to Composer before snapshot readiness", async ({
+    page,
+  }) => {
+    let outputSocket: WebSocketRoute | null = null;
+    await installRemoteClientRoutes(page);
+    await page.route("http://remote.test/remote/v1/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/remote/v1/session/claim") {
+        await route.fulfill({ json: { leaseId: "lease-1", heartbeatTimeoutSeconds: 45 } });
+        return;
+      }
+      if (url.pathname === "/remote/v1/navigation") {
+        await route.fulfill({
+          json: {
+            terminals: [{ id: "term-1", title: "Shell", appearance: {} }],
+            activeWorkspace: {
+              focusedPaneNumber: 1,
+              panes: [
+                {
+                  paneNumber: 1,
+                  terminalId: "term-1",
+                  terminalLive: true,
+                  viewType: "TerminalView",
+                },
+              ],
+            },
+            workspaces: [],
+            docks: [],
+            notifications: [],
+          },
+        });
+        return;
+      }
+      await route.fulfill({ json: {} });
+    });
+    await page.routeWebSocket(/\/remote\/v1\/terminals\/term-1\/output/, (socket) => {
+      outputSocket = socket;
+    });
+
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    const editor = page.locator("#composerInput");
+    await expect(page.locator("#terminal .xterm")).toBeVisible();
+    await expect(editor).toBeEnabled();
+    await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "false");
+    await expect.poll(() => outputSocket).not.toBeNull();
+
+    await page.locator("#terminal .xterm").tap();
+    await expect(editor).toBeFocused();
+    await page.keyboard.type("real xterm touch");
+    await expect(editor).toHaveText("real xterm touch");
+
+    outputSocket!.send(
+      JSON.stringify({
+        type: "terminal.output",
+        version: 1,
+        phase: "snapshot",
+        seqStart: 0,
+        seqEnd: 0,
+        byteLength: 0,
+        state: {
+          version: 1,
+          snapshotStartSeq: 0,
+          snapshotSeq: 0,
+          protocolRevision: 0,
+          modes: { bracketedPaste: false },
+        },
       }),
     );
-    await page.goto("http://remote.test/");
-    await page.evaluate(() => {
-      localStorage.setItem(
-        "laymux.remote.keybar",
-        JSON.stringify({ visible: true, sets: [], custom: ["tab", "enter"] }),
-      );
-    });
-    await page.setContent(remoteClientMarkupWithoutXterm());
-
-    const renderedKeyIds = () =>
-      page
-        .locator("#keyRow .key-btn")
-        .evaluateAll((buttons) =>
-          buttons.map((button) => (button as HTMLButtonElement).dataset.key),
-        );
-    await expect.poll(renderedKeyIds).toEqual(["tab", "enter"]);
-
-    await page.locator("#keyBarSettings").click();
-    await expect(page.locator("#keyPopoverBody")).toContainText("Key order");
-    await page.locator(".key-chip").filter({ hasText: "Esc" }).click();
-    await expect.poll(renderedKeyIds).toEqual(["tab", "enter", "esc"]);
-
-    const orderSection = page.locator("#keyPopoverBody > .key-order-section");
-    await expect(orderSection).toHaveCount(1);
-    expect(
-      await orderSection.evaluate((section) => section === section.parentElement?.lastElementChild),
-    ).toBe(true);
-    const paletteEscBox = await page
-      .locator(".key-chip:not(.key-order-chip)")
-      .filter({ hasText: "Esc" })
-      .boundingBox();
-    const orderEscBox = await page.locator('.key-order-chip[data-order-key="esc"]').boundingBox();
-    expect(paletteEscBox).not.toBeNull();
-    expect(orderEscBox).not.toBeNull();
-    expect(Math.abs(orderEscBox!.width - paletteEscBox!.width)).toBeLessThan(0.1);
-    expect(Math.abs(orderEscBox!.height - paletteEscBox!.height)).toBeLessThan(0.1);
-
-    const escOrderChip = page.locator('.key-order-chip[data-order-key="esc"]');
-    const tabOrderChip = page.locator('.key-order-chip[data-order-key="tab"]');
-    // The order section sits at the end of the popover's scroll area, so on a
-    // short viewport the chips start outside it. Raw mouse coordinates do not
-    // scroll the way `click()` does — without this the drag lands on nothing.
-    await escOrderChip.scrollIntoViewIfNeeded();
-    await tabOrderChip.scrollIntoViewIfNeeded();
-    const escBox = await escOrderChip.boundingBox();
-    const tabBox = await tabOrderChip.boundingBox();
-    expect(escBox).not.toBeNull();
-    expect(tabBox).not.toBeNull();
-    await page.mouse.move(escBox!.x + escBox!.width / 2, escBox!.y + escBox!.height / 2);
-    await page.mouse.down();
-    await page.waitForTimeout(250);
-    await expect(escOrderChip).toHaveClass(/dragging/);
-    await page.mouse.move(tabBox!.x + 2, tabBox!.y + tabBox!.height / 2, { steps: 4 });
-    await expect(tabOrderChip).toHaveClass(/drop-before/);
-    await page.mouse.up();
-
-    await expect.poll(renderedKeyIds).toEqual(["esc", "tab", "enter"]);
-    await expect
-      .poll(() =>
-        page.evaluate(() => {
-          const stored = JSON.parse(localStorage.getItem("laymux.remote.keybar") || "{}");
-          return stored.order.filter((id: string) => ["esc", "tab", "enter"].includes(id));
-        }),
-      )
-      .toEqual(["esc", "tab", "enter"]);
-
-    await page.reload();
-    await page.setContent(remoteClientMarkupWithoutXterm());
-    await expect.poll(renderedKeyIds).toEqual(["esc", "tab", "enter"]);
-
-    await page.locator("#keyBarSettings").click();
-    await page.locator('.key-order-chip[data-order-key="enter"]').click();
-    await expect(page.locator(".key-order-actions")).toBeVisible();
-    await page.getByRole("button", { name: "Move Enter to start" }).click();
-    await expect.poll(renderedKeyIds).toEqual(["enter", "esc", "tab"]);
-    await page.getByRole("button", { name: "Reset key order" }).click();
-    await expect.poll(renderedKeyIds).toEqual(["esc", "tab", "enter"]);
+    outputSocket!.send(Buffer.alloc(0));
+    await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
+    await expect(editor).toBeFocused();
+    await expect(editor).toHaveText("real xterm touch");
   });
 
   test("keeps terminal keyboard focus while sending every soft-key sequence", async ({ page }) => {
@@ -904,9 +1230,57 @@ test.describe("remote mobile layout", () => {
     let outputSocket: WebSocketRoute | null = null;
     await page.addInitScript(() => {
       localStorage.setItem("laymux.remote.inputMode", "direct");
+      // Placement is activation: every key this test drives has to be on the
+      // Keys row, in the order the assertion below expects.
       localStorage.setItem(
         "laymux.remote.keybar",
-        JSON.stringify({ visible: true, sets: ["nav", "edit", "ctrl", "fn"], custom: [] }),
+        JSON.stringify({
+          expanded: true,
+          userKeys: [],
+          zones: {
+            main: { left: [], center: [], right: ["keyboard", "keys"] },
+            expanded: {
+              left: [
+                "q",
+                "esc",
+                "tab",
+                "stab",
+                "dpad",
+                "up",
+                "down",
+                "left",
+                "right",
+                "home",
+                "end",
+                "enter",
+                "bksp",
+                "ins",
+                "del",
+                "pgup",
+                "pgdn",
+                "c-c",
+                "c-j",
+                "c-l",
+                "c-t",
+                "c-u",
+                "f1",
+                "f2",
+                "f3",
+                "f4",
+                "f5",
+                "f6",
+                "f7",
+                "f8",
+                "f9",
+                "f10",
+                "f11",
+                "f12",
+              ].map((id) => `soft:${id}`),
+              center: [],
+              right: [],
+            },
+          },
+        }),
       );
     });
     await installRemoteClientRoutes(page);
@@ -953,12 +1327,15 @@ test.describe("remote mobile layout", () => {
     await page.locator("#connect").click();
     await expect(page.locator("#focusTerminal")).toBeEnabled();
 
-    // Connecting focuses the direct input surface on its own; the Keyboard
-    // button is a focus toggle now, so tapping it here would dismiss it.
+    // Attach leaves the focus alone on a touch device (ADR-0196), so the first
+    // Keyboard tap is what raises the direct input surface. From here the
+    // button is a focus toggle, so tapping it again would dismiss it.
     const helperTextarea = page.locator(".xterm-helper-textarea");
+    await page.locator("#focusTerminal").tap();
     await expect(helperTextarea).toBeFocused();
 
     const fixedCases = [
+      { id: "q", sequence: "q" },
       { id: "esc", sequence: "\x1b" },
       { id: "tab", sequence: "\t" },
       { id: "stab", sequence: "\x1b[Z" },
@@ -968,17 +1345,11 @@ test.describe("remote mobile layout", () => {
       { id: "del", sequence: "\x1b[3~" },
       { id: "pgup", sequence: "\x1b[5~" },
       { id: "pgdn", sequence: "\x1b[6~" },
-      { id: "c-a", sequence: "\x01" },
       { id: "c-c", sequence: "\x03" },
-      { id: "c-d", sequence: "\x04" },
-      { id: "c-e", sequence: "\x05" },
-      { id: "c-k", sequence: "\x0b" },
+      { id: "c-j", sequence: "\n" },
       { id: "c-l", sequence: "\x0c" },
-      { id: "c-r", sequence: "\x12" },
       { id: "c-t", sequence: "\x14" },
       { id: "c-u", sequence: "\x15" },
-      { id: "c-w", sequence: "\x17" },
-      { id: "c-z", sequence: "\x1a" },
       { id: "f1", sequence: "\x1bOP" },
       { id: "f2", sequence: "\x1bOQ" },
       { id: "f3", sequence: "\x1bOR" },
@@ -1004,6 +1375,7 @@ test.describe("remote mobile layout", () => {
       .locator("#keyRow .key-btn")
       .evaluateAll((buttons) => buttons.map((button) => (button as HTMLButtonElement).dataset.key));
     expect(renderedKeyIds).toEqual([
+      "q",
       "esc",
       "tab",
       "stab",
@@ -1020,17 +1392,11 @@ test.describe("remote mobile layout", () => {
       "del",
       "pgup",
       "pgdn",
-      "c-a",
       "c-c",
-      "c-d",
-      "c-e",
-      "c-k",
+      "c-j",
       "c-l",
-      "c-r",
       "c-t",
       "c-u",
-      "c-w",
-      "c-z",
       "f1",
       "f2",
       "f3",
@@ -1096,6 +1462,332 @@ test.describe("remote mobile layout", () => {
     await flickKey(32, 0, "\x1bOC");
     await flickKey(0, 32, "\x1bOB");
     await flickKey(-32, 0, "\x1bOD");
+
+    // Press-and-hold streams repeats while the key is down; the release still
+    // sends its one `click` like every tap above. So this only has to show the
+    // stream, that it stops on release, and that a non-cursor key like ^C never
+    // joins in.
+    const holdKey = async (id: string, dx: number, dy: number, holdMs: number, drift = 0) => {
+      const button = page.locator(`[data-key="${id}"]`);
+      await button.scrollIntoViewIfNeeded();
+      const box = await button.boundingBox();
+      expect(box).not.toBeNull();
+      const x = box!.x + box!.width / 2;
+      const y = box!.y + box!.height / 2;
+      const writeIndex = writes.length;
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchStart",
+        touchPoints: [{ x, y, id: 1 }],
+      });
+      if (dx || dy) {
+        await cdp.send("Input.dispatchTouchEvent", {
+          type: "touchMove",
+          touchPoints: [{ x: x + dx, y: y + dy, id: 1 }],
+        });
+      }
+      // A thumb never rests perfectly still. The key row scrolls horizontally,
+      // so a few px of drift must not let the browser claim the touch as a pan
+      // and cancel the pointer out from under the repeat.
+      for (let step = 1; drift && step <= 3; step += 1) {
+        await page.waitForTimeout(holdMs / 4);
+        await cdp.send("Input.dispatchTouchEvent", {
+          type: "touchMove",
+          touchPoints: [{ x: x + dx + (step % 2 ? drift : -drift), y: y + dy, id: 1 }],
+        });
+      }
+      await page.waitForTimeout(drift ? holdMs / 4 : holdMs);
+      const during = writes.slice(writeIndex);
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await page.waitForTimeout(200);
+      const settled = writes.length;
+      await page.waitForTimeout(200);
+      // Releasing ends the repeat: no write arrives in the second window.
+      expect(writes.length).toBe(settled);
+      return { during, total: writes.slice(writeIndex) };
+    };
+
+    // Count sequences rather than writes: 12 ms input coalescing can pack two
+    // repeats into one body. 400 ms delay + 60 ms interval means a 900 ms hold
+    // streams roughly nine sends, so a stalled runner still clears the floor.
+    const streamOf = (sent: string[], sequence: string) => {
+      const joined = sent.join("");
+      return { count: joined.split(sequence).length - 1, rest: joined.split(sequence).join("") };
+    };
+
+    const heldArrow = streamOf((await holdKey("left", 0, 0, 900)).total, "\x1bOD");
+    expect(heldArrow.count).toBeGreaterThanOrEqual(3);
+    expect(heldArrow.rest).toBe("");
+
+    // The same hold with the thumb wandering 20 px keeps streaming.
+    const driftedArrow = streamOf((await holdKey("left", 0, 0, 900, 20)).total, "\x1bOD");
+    expect(driftedArrow.count).toBeGreaterThanOrEqual(3);
+    expect(driftedArrow.rest).toBe("");
+
+    // Same for the flick pad while the finger rests on a direction.
+    const heldPad = streamOf((await holdKey("dpad", 0, -32, 900)).total, "\x1bOA");
+    expect(heldPad.count).toBeGreaterThanOrEqual(3);
+    expect(heldPad.rest).toBe("");
+
+    // A non-cursor key never repeats: holding ^C sends nothing until release,
+    // and the release is the same single interrupt a tap sends.
+    const heldInterrupt = await holdKey("c-c", 0, 0, 900);
+    expect(heldInterrupt.during).toEqual([]);
+    expect(heldInterrupt.total.join("")).toBe("\x03");
+    await expect(helperTextarea).toBeFocused();
+  });
+
+  test("routes normal-buffer Codex transcript wheel and touch scroll to cursor input", async ({
+    page,
+  }) => {
+    const writes: string[] = [];
+    let codexTranscriptScrollEnabled = true;
+    let navigationRequestCount = 0;
+    await page.addInitScript(() => {
+      let capturedConstructor: typeof window.Terminal | undefined;
+      Object.defineProperty(window, "Terminal", {
+        configurable: true,
+        get: () => capturedConstructor,
+        set: (TerminalConstructor: typeof window.Terminal) => {
+          capturedConstructor = class extends TerminalConstructor {
+            constructor(options?: ConstructorParameters<typeof TerminalConstructor>[0]) {
+              super(options);
+              Object.defineProperty(window, "__codexTranscriptTerminal", {
+                configurable: true,
+                value: this,
+              });
+            }
+          };
+        },
+      });
+    });
+    await installRemoteClientRoutes(page);
+    await page.route("http://remote.test/remote/v1/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/remote/v1/session/claim") {
+        await route.fulfill({ json: { leaseId: "lease-1", heartbeatTimeoutSeconds: 45 } });
+        return;
+      }
+      if (url.pathname === "/remote/v1/navigation") {
+        navigationRequestCount += 1;
+        await route.fulfill({
+          json: {
+            codexTranscriptScrollEnabled,
+            terminals: [{ id: "term-1", title: "Codex", appearance: {} }],
+            activeWorkspace: {
+              focusedPaneNumber: 1,
+              panes: [
+                {
+                  paneNumber: 1,
+                  terminalId: "term-1",
+                  terminalLive: true,
+                  viewType: "TerminalView",
+                  activity: { type: "interactiveApp", name: "Codex" },
+                },
+              ],
+            },
+            workspaces: [],
+            docks: [],
+            notifications: [],
+          },
+        });
+        return;
+      }
+      if (url.pathname === "/remote/v1/terminals/term-1/write") {
+        const body = route.request().postDataJSON() as { data: string };
+        writes.push(body.data);
+      }
+      await route.fulfill({ json: {} });
+    });
+    await page.routeWebSocket(/\/remote\/v1\/terminals\/term-1\/output/, () => {});
+
+    const cdp = await page.context().newCDPSession(page);
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await expect(page.locator("#focusTerminal")).toBeEnabled();
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const terminal = (
+            window as Window & {
+              __codexTranscriptTerminal?: {
+                write(data: string, callback: () => void): void;
+              };
+            }
+          ).__codexTranscriptTerminal;
+          terminal?.write(
+            "\x1b[2J\x1b[H/ T R A N S C R I P T\r\ncontent\r\n↑/↓ to scroll",
+            resolve,
+          );
+        }),
+    );
+    await expect(page.locator(".xterm-rows")).toContainText("T R A N S C R I P T");
+
+    await page.locator(".xterm").evaluate((element) => {
+      element.dispatchEvent(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          deltaMode: WheelEvent.DOM_DELTA_LINE,
+          deltaY: 1,
+        }),
+      );
+    });
+    await expect.poll(() => writes).toEqual(["\x1b[B"]);
+    writes.length = 0;
+
+    const screenBox = await page.locator(".xterm-screen").boundingBox();
+    expect(screenBox).not.toBeNull();
+    const rows = await page.evaluate(
+      () =>
+        (
+          window as Window & {
+            __codexTranscriptTerminal?: { rows?: number };
+          }
+        ).__codexTranscriptTerminal?.rows,
+    );
+    const cellHeight = screenBox!.height / (rows || 24);
+    const x = screenBox!.x + screenBox!.width / 2;
+    const startY = screenBox!.y + screenBox!.height / 2;
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x, y: startY, id: 1 }],
+    });
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ x, y: startY - cellHeight, id: 1 }],
+    });
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await expect.poll(() => writes).toEqual(["\x1b[B"]);
+
+    writes.length = 0;
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const terminal = (
+            window as Window & {
+              __codexTranscriptTerminal?: {
+                write(data: string, callback: () => void): void;
+              };
+            }
+          ).__codexTranscriptTerminal;
+          terminal?.write("\x1b[?1000h\x1b[?1006h", resolve);
+        }),
+    );
+    await page.locator(".xterm").evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      element.dispatchEvent(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + rect.width / 2,
+          clientY: rect.top + rect.height / 2,
+          deltaMode: WheelEvent.DOM_DELTA_LINE,
+          deltaY: 1,
+        }),
+      );
+    });
+    await expect.poll(() => writes.length).toBeGreaterThan(0);
+    expect(writes.join("")).toMatch(/^\x1b\[</);
+    expect(writes).not.toContain("\x1b[B");
+
+    writes.length = 0;
+    await page.evaluate(() => {
+      const state = window as Window & {
+        __codexMouseTrackingTouchWheels?: Array<{
+          deltaMode: number;
+          deltaY: number;
+        }>;
+      };
+      state.__codexMouseTrackingTouchWheels = [];
+      document.querySelector(".xterm")?.addEventListener(
+        "wheel",
+        (event) => {
+          if (!event.isTrusted) {
+            state.__codexMouseTrackingTouchWheels?.push({
+              deltaMode: event.deltaMode,
+              deltaY: event.deltaY,
+            });
+          }
+        },
+        true,
+      );
+    });
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [
+        { x: x - 12, y: startY, id: 1 },
+        { x: x + 12, y: startY, id: 2 },
+      ],
+    });
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [
+        { x: x - 12, y: startY - cellHeight * 2, id: 1 },
+        { x: x + 12, y: startY - cellHeight * 2, id: 2 },
+      ],
+    });
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              window as Window & {
+                __codexMouseTrackingTouchWheels?: unknown[];
+              }
+            ).__codexMouseTrackingTouchWheels?.length ?? 0,
+        ),
+      )
+      .toBeGreaterThan(0);
+    const touchWheel = await page.evaluate(
+      () =>
+        (
+          window as Window & {
+            __codexMouseTrackingTouchWheels?: Array<{
+              deltaMode: number;
+              deltaY: number;
+            }>;
+          }
+        ).__codexMouseTrackingTouchWheels?.[0],
+    );
+    expect(touchWheel?.deltaMode).toBe(0);
+    expect(Math.abs(touchWheel?.deltaY ?? 0)).toBeGreaterThan(0);
+    expect(writes).not.toContain("\x1b[A");
+    expect(writes).not.toContain("\x1b[B");
+
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const terminal = (
+            window as Window & {
+              __codexTranscriptTerminal?: {
+                write(data: string, callback: () => void): void;
+              };
+            }
+          ).__codexTranscriptTerminal;
+          terminal?.write("\x1b[?1000l\x1b[?1006l", resolve);
+        }),
+    );
+    writes.length = 0;
+    codexTranscriptScrollEnabled = false;
+    const requestCountBeforeOpeningDrawer = navigationRequestCount;
+    await page.locator("#navToggle").click();
+    await expect
+      .poll(() => navigationRequestCount)
+      .toBeGreaterThan(requestCountBeforeOpeningDrawer);
+    await page.waitForTimeout(100);
+    await page.locator(".xterm").evaluate((element) => {
+      element.dispatchEvent(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          deltaMode: WheelEvent.DOM_DELTA_LINE,
+          deltaY: 1,
+        }),
+      );
+    });
+    await page.waitForTimeout(100);
+    expect(writes).toEqual([]);
   });
 
   test("keeps accelerated alternate-buffer scrolling as discrete replay-safe writes", async ({
@@ -1334,7 +2026,7 @@ test.describe("remote mobile layout", () => {
       state.__releaseScrollReplay = undefined;
       release?.();
     });
-    await page.locator("#ctrlC").click();
+    await page.locator('[data-key="c-c"]').click();
     await expect.poll(() => writes.includes("\x03")).toBe(true);
     expect(writes).toEqual(["\x03"]);
   });
@@ -1447,7 +2139,7 @@ test.describe("remote mobile layout", () => {
     await page.setContent(remoteClientMarkupWithoutXterm());
     await page.locator("#token").fill("test-token");
     await page.locator("#connect").click();
-    await expect(page.locator("#ctrlC")).toBeEnabled();
+    await expect(page.locator('[data-key="c-c"]')).toBeEnabled();
 
     await page.evaluate(() => {
       const testWindow = window as Window & {
@@ -1494,8 +2186,9 @@ test.describe("remote mobile layout", () => {
     await page.setContent(remoteClientMarkupWithoutXterm());
     const app = page.locator(".app");
 
-    // Default sets: "step" (5 nav keys) + "nav" (10 escape keys).
-    await expect(page.locator("#keyRow .key-btn")).toHaveCount(15);
+    // Default Keys row placement: navPad + Tab/Shift+Tab on the left, then
+    // ^U ^L ^T ^J + flick pad + PgUp/PgDn on the right.
+    await expect(page.locator("#keyRow .key-btn")).toHaveCount(10);
     await expect(page.locator("#keyBar")).toBeHidden();
     await page.locator("#keyBarToggle").click();
     await expect(page.locator("#keyBar")).toBeVisible();

@@ -12,7 +12,7 @@ use crate::automation_server::ServerState;
 use crate::constants::EVENT_WORKSPACE_STATE_CHANGED;
 
 use super::lease::require_active_lease;
-use super::navigation::build_remote_navigation_payload;
+use super::navigation::{build_remote_navigation_payload, RemoteNavigationHostState};
 use super::routes::REMOTE_LEASE_HEADER;
 use super::terminal_info::remote_terminal_infos;
 use super::{internal_error, json_error};
@@ -125,7 +125,12 @@ pub(super) async fn remote_navigation(State(server): State<ServerState>) -> Resp
         &terminal_instances_data,
         &notifications_data,
         &ui_state_data,
-        &terminals,
+        RemoteNavigationHostState {
+            terminals: &terminals,
+            codex_transcript_scroll_enabled: settings.codex.transcript_scroll_enabled,
+            url_link_activation: &settings.terminal.url_link_activation,
+            path_link_activation: &settings.terminal.path_link_activation,
+        },
     ))
     .into_response()
 }
@@ -244,15 +249,7 @@ pub(super) async fn remote_workspace_create(
         None => return json_error(StatusCode::BAD_REQUEST, "layout not found"),
     };
 
-    match frontend_bridge_json(
-        &server,
-        "action",
-        "workspaces",
-        "add",
-        params,
-    )
-    .await
-    {
+    match frontend_bridge_json(&server, "action", "workspaces", "add", params).await {
         Ok(data) => {
             emit_workspace_state_changed(
                 &server,
@@ -741,7 +738,10 @@ mod tests {
 
         let (name, params) = workspace_create_params(&layouts, 2, "split").unwrap();
         assert_eq!(name, "Three Pane 3");
-        assert_eq!(params, serde_json::json!({ "name": "Three Pane 3", "layoutId": "split" }));
+        assert_eq!(
+            params,
+            serde_json::json!({ "name": "Three Pane 3", "layoutId": "split" })
+        );
         assert!(workspace_create_params(&layouts, 2, "missing").is_none());
     }
 }

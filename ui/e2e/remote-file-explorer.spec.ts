@@ -1,0 +1,713 @@
+import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { fulfillRemoteClientAsset } from "./remote-client-assets";
+
+/**
+ * Remote in-overlay file explorer (ADR-0198): the header folder button and the
+ * directory rows drive `/remote/v1/file-viewer/list`, files open through the
+ * existing render route, and Back re-requests the listing instead of caching.
+ */
+
+type ListingEntry = {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  isSymlink: boolean;
+  size: number;
+};
+
+const dir = (name: string, path: string): ListingEntry => ({
+  name,
+  path,
+  isDirectory: true,
+  isSymlink: false,
+  size: 0,
+});
+const file = (name: string, path: string, size = 24): ListingEntry => ({
+  name,
+  path,
+  isDirectory: false,
+  isSymlink: false,
+  size,
+});
+const symlink = (name: string, path: string, size = 8): ListingEntry => ({
+  name,
+  path,
+  isDirectory: false,
+  isSymlink: true,
+  size,
+});
+
+const LISTINGS: Record<
+  string,
+  { path: string; parent: string | null; entries: ListingEntry[]; truncated: boolean }
+> = {
+  "/home/user": {
+    path: "/home/user",
+    parent: "/home",
+    entries: [
+      dir("repo", "/home/user/repo"),
+      dir("empty", "/home/user/empty"),
+      dir("huge", "/home/user/huge"),
+      dir("denied", "/home/user/denied"),
+      file("<img src=x onerror=alert(1)>.txt", "/home/user/<img src=x onerror=alert(1)>.txt"),
+      file("notes.txt", "/home/user/notes.txt"),
+      symlink("current", "/home/user/current"),
+    ],
+    truncated: false,
+  },
+  "/home/user/repo": {
+    path: "/home/user/repo",
+    parent: "/home/user",
+    entries: [file("main.rs", "/home/user/repo/main.rs", 512)],
+    truncated: false,
+  },
+  "/home/user/empty": {
+    path: "/home/user/empty",
+    parent: "/home/user",
+    entries: [],
+    truncated: false,
+  },
+  "/home/user/huge": {
+    path: "/home/user/huge",
+    parent: "/home/user",
+    entries: [file("first.txt", "/home/user/huge/first.txt")],
+    truncated: true,
+  },
+};
+
+async function installRemoteExplorerMocks(context: BrowserContext, withTerminal = false) {
+  const listRequests: Array<{
+    lease: string | null;
+    fileViewerCapability: string | null;
+    body: Record<string, unknown>;
+  }> = [];
+  const renderRequests: Array<Record<string, unknown>> = [];
+
+  await context.route("http://remote.test/remote/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (await fulfillRemoteClientAsset(route, url.pathname)) return;
+    if (url.pathname === "/remote/v1/session/claim") {
+      return route.fulfill({
+        json: {
+          active: true,
+          leaseId: "lease-197",
+          resumeToken: "resume-197",
+          fileViewerToken: "viewer-197",
+          heartbeatTimeoutSeconds: 45,
+        },
+      });
+    }
+    if (url.pathname === "/remote/v1/session/heartbeat") {
+      return route.fulfill({ json: { ok: true } });
+    }
+    if (url.pathname === "/remote/v1/session/release") {
+      return route.fulfill({ json: { ok: true } });
+    }
+    if (url.pathname === "/remote/v1/navigation") {
+      const pane = {
+        id: "pane-1",
+        location: "workspace",
+        workspaceId: "ws-1",
+        paneIndex: 0,
+        paneNumber: 1,
+        viewType: "TerminalView",
+        terminalId: "terminal-1",
+        terminalLive: true,
+        title: "Shell",
+        profile: "PowerShell",
+        cwd: "/home/user",
+        activity: { type: "shell" },
+        isFocused: true,
+        hidden: false,
+        collapsed: false,
+        x: 0,
+        y: 0,
+        w: 1,
+        h: 1,
+      };
+      return route.fulfill({
+        json: {
+          activeWorkspace: withTerminal ? { id: "ws-1", name: "Main", panes: [pane] } : null,
+          workspaces: withTerminal
+            ? [{ id: "ws-1", name: "Main", isActive: true, hidden: false, panes: [pane] }]
+            : [],
+          docks: [],
+          terminals: withTerminal
+            ? [
+                {
+                  id: "terminal-1",
+                  title: "Shell",
+                  profile: "PowerShell",
+                  cwd: "/home/user",
+                  workspaceId: "ws-1",
+                  paneNumber: 1,
+                  appearance: {
+                    fontFamily: "'Cascadia Mono', 'Consolas', monospace",
+                    cursorStyle: "bar",
+                    cursorWidth: 1,
+                    theme: {},
+                  },
+                },
+              ]
+            : [],
+          workspaceSelector: { display: {}, pathEllipsis: "start" },
+          notifications: [],
+          unreadNotificationCount: 0,
+        },
+      });
+    }
+    if (url.pathname === "/remote/v1/file-viewer/list") {
+      const body = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
+      listRequests.push({
+        lease: await request.headerValue("x-laymux-remote-lease"),
+        fileViewerCapability: await request.headerValue("x-laymux-remote-file-viewer"),
+        body,
+      });
+      const path = body.source === "terminalCwd" ? "/home/user" : String(body.path || "");
+      const listing = LISTINGS[path];
+      if (!listing) {
+        return route.fulfill({ status: 502, json: { error: "Cannot read directory: denied" } });
+      }
+      return route.fulfill({ json: listing });
+    }
+    if (url.pathname === "/remote/v1/file-viewer/render") {
+      const body = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
+      renderRequests.push(body);
+      if (String(body.path || "").endsWith("missing.txt")) {
+        return route.fulfill({ status: 502, json: { error: "Cannot read file: missing" } });
+      }
+      return route.fulfill({
+        json: {
+          kind: "text",
+          path: String(body.path || ""),
+          content: "fn main() {}",
+          truncated: false,
+        },
+      });
+    }
+    return route.fulfill({ status: 404, json: { error: "not mocked" } });
+  });
+  if (withTerminal) {
+    await context.routeWebSocket(/\/remote\/v1\/terminals\/terminal-1\/output/, () => {});
+  }
+
+  return { listRequests, renderRequests };
+}
+
+async function connectRemote(page: Page, localApp = false) {
+  await page.goto(`http://remote.test/remote/${localApp ? "?localApp=1" : ""}`);
+  await page.locator("#token").fill("remote-secret");
+  await page.locator("#connect").click();
+  await expect(page.locator("#exit")).toBeEnabled();
+}
+
+async function flickTerminalEdge(page: Page, edge: "left" | "right") {
+  await page.locator("#terminal .xterm").evaluate((element, selectedEdge) => {
+    const target = element as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    target.setPointerCapture = () => {};
+    target.releasePointerCapture = () => {};
+    target.hasPointerCapture = () => false;
+    const startX = selectedEdge === "left" ? rect.left + 1 : rect.right - 1;
+    const endX = startX + (selectedEdge === "left" ? 80 : -80);
+    const dispatch = (type: string, clientX: number) =>
+      target.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          pointerId: 41,
+          pointerType: "touch",
+          isPrimary: true,
+          clientX,
+          clientY: rect.top + rect.height / 2,
+          screenX: clientX,
+          screenY: rect.top + rect.height / 2,
+        }),
+      );
+    dispatch("pointerdown", startX);
+    dispatch("pointermove", endX);
+    dispatch("pointerup", endX);
+  }, edge);
+}
+
+async function flickSurface(
+  page: Page,
+  selector: string,
+  distance: number,
+  edge?: "left" | "right",
+) {
+  const target = page.locator(selector);
+  await expect(target).toBeVisible();
+  // Wait for the drawer transition before hit-testing native touch input.
+  await target.click({ trial: true });
+  const box = (await target.boundingBox())!;
+  const x = edge ? box.x + (edge === "left" ? 1 : box.width - 1) : box.x + box.width / 2;
+  const y = box.y + (edge ? 30 : box.height / 2);
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x, y, id: 1 }],
+    });
+    for (let step = 1; step <= 8; step += 1) {
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x: x + (distance * step) / 8, y, id: 1 }],
+      });
+    }
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  } finally {
+    await cdp.detach();
+  }
+}
+
+async function touchTerminalLeftEdge(page: Page, moves: number[] = []) {
+  await page.locator("#terminal .xterm").evaluate((element, distances) => {
+    const target = element as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    target.setPointerCapture = () => {};
+    target.releasePointerCapture = () => {};
+    target.hasPointerCapture = () => false;
+    const clientX = rect.left + 1;
+    const init = {
+      bubbles: true,
+      cancelable: true,
+      pointerId: 42,
+      pointerType: "touch",
+      isPrimary: true,
+      clientX,
+      clientY: rect.top + rect.height / 2,
+      screenX: clientX,
+      screenY: rect.top + rect.height / 2,
+    };
+    target.dispatchEvent(new PointerEvent("pointerdown", init));
+    for (const distance of distances) {
+      target.dispatchEvent(
+        new PointerEvent("pointermove", {
+          ...init,
+          clientX: clientX + distance,
+          screenX: clientX + distance,
+        }),
+      );
+    }
+    target.dispatchEvent(
+      new PointerEvent("pointerup", {
+        ...init,
+        clientX: clientX + (distances.at(-1) ?? 0),
+        screenX: clientX + (distances.at(-1) ?? 0),
+      }),
+    );
+  }, moves);
+}
+
+for (const edge of ["left", "right"] as const) {
+  test(`blank terminal background opens the ${edge === "left" ? "menu" : "viewer"}`, async ({
+    context,
+    page,
+  }, testInfo) => {
+    await installRemoteExplorerMocks(context, true);
+    await page.setViewportSize({ width: 390, height: 720 });
+    await connectRemote(page, true);
+    await expect(page.locator("#terminal .xterm")).toBeVisible();
+    // Reproduce the exposed wrapper above a tail-anchored xterm crop.
+    await page.locator("#terminalSizer").evaluate((element) => {
+      element.style.setProperty("height", "100%", "important");
+      element.style.setProperty("top", "200px", "important");
+    });
+    await expect
+      .poll(() =>
+        page.locator("#terminal").evaluate((element, side) => {
+          const box = element.getBoundingClientRect();
+          return document.elementFromPoint(
+            box.x + (side === "left" ? 1 : box.width - 1),
+            box.y + 30,
+          )?.id;
+        }, edge),
+      )
+      .toBe("terminalViewport");
+    await flickSurface(page, "#terminal", edge === "left" ? 80 : -80, edge);
+    if (edge === "left") await expect(page.locator(".app")).toHaveClass(/nav-open/);
+    else await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath(`blank-${edge}-opened.png`) });
+  });
+}
+
+test("the header folder button appears with the capability and lists the cwd", async ({
+  context,
+  page,
+}) => {
+  const { listRequests } = await installRemoteExplorerMocks(context);
+
+  await page.goto("http://remote.test/remote/");
+  // No lease yet: the entry point means nothing, so it is hidden, not disabled.
+  await expect(page.locator("#fileExplorerHeader")).toBeHidden();
+
+  await page.locator("#token").fill("remote-secret");
+  await page.locator("#connect").click();
+  await expect(page.locator("#exit")).toBeEnabled();
+  await expect(page.locator("#fileExplorerHeader")).toBeVisible();
+
+  await page.locator("#fileExplorerHeader").click();
+  const overlay = page.locator("#fileViewerOverlay");
+  await expect(overlay).toBeVisible();
+  await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user");
+
+  const pathBounds = await page.locator("#fileViewerTitle").evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    return {
+      selectableWidth: element.getBoundingClientRect().width,
+      textWidth: range.getBoundingClientRect().width,
+    };
+  });
+  expect(pathBounds.selectableWidth).toBeLessThanOrEqual(pathBounds.textWidth + 1);
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: (command: string) => {
+        if (command !== "copy") return false;
+        const clipboardData = new DataTransfer();
+        document.dispatchEvent(
+          new ClipboardEvent("copy", {
+            clipboardData,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        (window as typeof window & { __copiedPath?: string }).__copiedPath =
+          clipboardData.getData("text/plain");
+        return true;
+      },
+    });
+  });
+  await page.locator("#fileViewerCopyPath").click();
+  await expect(page.locator("#status")).toHaveText("Copied /home/user");
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as typeof window & { __copiedPath?: string }).__copiedPath),
+    )
+    .toBe("/home/user");
+
+  const rows = page.locator(".file-viewer-directory-row");
+  await expect(rows).toHaveCount(8); // ".." + four dirs + two files + symlink
+  await expect(rows.nth(0)).toHaveText("..");
+  await expect(rows.nth(1)).toContainText("repo");
+  // A hostile entry name stays text, never markup.
+  await expect(rows.nth(5)).toContainText("<img src=x onerror=alert(1)>.txt");
+  await expect(rows.nth(0).locator("[data-remote-icon-name=FolderUp]")).toHaveCount(1);
+  await expect(
+    page
+      .locator(".file-viewer-directory-row", { hasText: "repo" })
+      .locator("[data-remote-icon-name=Folder]"),
+  ).toHaveCount(1);
+  await expect(
+    page
+      .locator(".file-viewer-directory-row", { hasText: "notes.txt" })
+      .locator("[data-remote-icon-name=File]"),
+  ).toHaveCount(1);
+  await expect(
+    page
+      .locator(".file-viewer-directory-row", { hasText: "current" })
+      .locator("[data-remote-icon-name=Link]"),
+  ).toHaveCount(1);
+
+  // Zoom and download are file-mode affordances — hidden, not disabled.
+  await expect(page.locator("#fileViewerZoom")).toBeHidden();
+  await expect(page.locator("#fileViewerDownload")).toBeHidden();
+  await expect(page.locator("#fileViewerBack")).toBeHidden();
+
+  expect(listRequests).toEqual([
+    {
+      lease: "lease-197",
+      fileViewerCapability: "viewer-197",
+      body: { source: "terminalCwd" },
+    },
+  ]);
+});
+
+test("navigates into a directory, opens a file and Back re-requests the listing", async ({
+  context,
+  page,
+}) => {
+  const { listRequests, renderRequests } = await installRemoteExplorerMocks(context);
+  await connectRemote(page);
+
+  await page.locator("#fileExplorerHeader").click();
+  await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user");
+
+  await page.locator(".file-viewer-directory-row", { hasText: "repo" }).click();
+  await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user/repo");
+  await expect(page.locator(".file-viewer-directory-row", { hasText: "main.rs" })).toBeVisible();
+
+  await page.locator(".file-viewer-directory-row", { hasText: "main.rs" }).click();
+  await expect(page.locator("#fileViewerText")).toHaveText("fn main() {}");
+  await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user/repo/main.rs");
+  // File mode brings the download affordance back.
+  await expect(page.locator("#fileViewerDownload")).toBeVisible();
+  expect(renderRequests).toEqual([{ source: "path", path: "/home/user/repo/main.rs" }]);
+
+  // Back exists only for a file reached through the explorer and re-lists.
+  await expect(page.locator("#fileViewerBack")).toBeVisible();
+  await page.locator("#fileViewerBack").click();
+  await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user/repo");
+  await expect(page.locator(".file-viewer-directory-row", { hasText: "main.rs" })).toBeVisible();
+  expect(listRequests.map((item) => item.body)).toEqual([
+    { source: "terminalCwd" },
+    { path: "/home/user/repo" },
+    { path: "/home/user/repo" },
+  ]);
+
+  // The ".." row walks up.
+  await page.locator(".file-viewer-directory-row.parent").click();
+  await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user");
+  // Directory mode has no stale download target.
+  await expect(page.locator("#fileViewerDownload")).toBeHidden();
+});
+
+test("direct path open lives in the explorer and returns to its directory", async ({
+  context,
+  page,
+}) => {
+  const { listRequests } = await installRemoteExplorerMocks(context);
+  await connectRemote(page);
+
+  await expect(page.locator("#drawerWorkspaceView #fileViewerSection")).toHaveCount(0);
+  await page.locator("#fileExplorerHeader").click();
+  await expect(page.locator("#fileViewerOverlay #fileViewerSection")).toBeVisible();
+
+  await page.locator("#fileViewerPath").fill("/home/user/notes.txt");
+  await page.locator("#openFileViewer").click();
+  await expect(page.locator("#fileViewerText")).toHaveText("fn main() {}");
+  await expect(page.locator("#fileViewerSection")).toBeHidden();
+  await expect(page.locator("#fileViewerBack")).toBeVisible();
+
+  await page.locator("#fileViewerBack").click();
+  await expect(page.locator("#fileViewerSection")).toBeVisible();
+  await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user");
+  expect(listRequests.map((item) => item.body)).toEqual([
+    { source: "terminalCwd" },
+    { path: "/home/user" },
+  ]);
+
+  await page.locator("#fileViewerPath").fill("/home/user/missing.txt");
+  await page.locator("#openFileViewer").click();
+  await expect(page.locator("#fileViewerSection")).toBeVisible();
+  await expect(page.locator("#fileViewerMessage")).toContainText("Cannot read file");
+  await expect(page.locator("#fileViewerBack")).toBeVisible();
+  await expect(page.locator("#fileViewerCopyPath")).toBeHidden();
+});
+
+test("empty, truncated and failing listings are reported", async ({ context, page }) => {
+  await installRemoteExplorerMocks(context);
+  await connectRemote(page);
+
+  await page.locator("#fileExplorerHeader").click();
+  await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user");
+
+  await page.locator(".file-viewer-directory-row", { hasText: "empty" }).click();
+  await expect(page.locator(".file-viewer-directory-empty")).toHaveText("Empty directory");
+  // The ".." row still walks out of an empty directory.
+  await page.locator(".file-viewer-directory-row.parent").click();
+  await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user");
+
+  await page.locator(".file-viewer-directory-row", { hasText: "huge" }).click();
+  await expect(page.locator(".file-viewer-directory-row", { hasText: "first.txt" })).toBeVisible();
+  await expect(page.locator("#fileViewerMessage")).toHaveText(
+    "Listing truncated at the Remote entry limit.",
+  );
+
+  await page.locator(".file-viewer-directory-row.parent").click();
+  await page.locator(".file-viewer-directory-row", { hasText: "denied" }).click();
+  await expect(page.locator("#fileViewerMessage")).toContainText("Cannot read directory");
+  await expect(page.locator("#fileViewerSection")).toBeVisible();
+  await expect(page.locator("#fileViewerBack")).toBeVisible();
+
+  await page.locator("#fileViewerPath").fill("/home/user/missing.txt");
+  await page.locator("#openFileViewer").click();
+  await expect(page.locator("#fileViewerMessage")).toContainText("Cannot read file");
+  await expect(page.locator("#fileViewerSection")).toBeVisible();
+  await expect(page.locator("#fileViewerBack")).toBeVisible();
+});
+
+test("closing the explorer clears its state", async ({ context, page }) => {
+  await installRemoteExplorerMocks(context);
+  await connectRemote(page);
+
+  await page.locator("#fileExplorerHeader").click();
+  const overlay = page.locator("#fileViewerOverlay");
+  await expect(overlay).toBeVisible();
+  await expect(page.locator(".file-viewer-directory-row").first()).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(overlay).toBeHidden();
+  await expect(page.locator(".file-viewer-directory-row")).toHaveCount(0);
+  await expect(page.locator("#fileViewerTitle")).toHaveText("");
+});
+
+test("the explorer works at a mobile viewport", async ({ context, page }) => {
+  await installRemoteExplorerMocks(context);
+  await page.setViewportSize({ width: 390, height: 720 });
+  await connectRemote(page);
+
+  await page.locator("#fileExplorerHeader").click();
+  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+  const row = page.locator(".file-viewer-directory-row", { hasText: "repo" });
+  await expect(row).toBeVisible();
+  // Touch target: the row must be at least 44px tall.
+  const box = await row.boundingBox();
+  expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  await row.click();
+  await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user/repo");
+  await expect(page.locator("#fileViewerCopyPath")).toBeVisible();
+});
+
+test("mobile terminal edge flicks open workspaces on the left and files on the right", async ({
+  context,
+  page,
+}) => {
+  const { listRequests } = await installRemoteExplorerMocks(context, true);
+  await page.setViewportSize({ width: 390, height: 720 });
+  await connectRemote(page, true);
+
+  await flickTerminalEdge(page, "left");
+  await expect(page.locator(".app")).toHaveClass(/nav-open/);
+  await page.locator("#navScrim").evaluate((button: HTMLButtonElement) => button.click());
+
+  await flickTerminalEdge(page, "right");
+  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+  await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user");
+  expect(listRequests.at(-1)?.body).toEqual({
+    source: "terminalCwd",
+    terminalId: "terminal-1",
+  });
+});
+
+test("opposite mobile flicks close the workspace menu and file explorer", async ({
+  context,
+  page,
+}) => {
+  await installRemoteExplorerMocks(context, true);
+  await page.setViewportSize({ width: 390, height: 720 });
+  await connectRemote(page, true);
+  await expect(page.locator("#swipeCloseDrawersToggle")).toBeChecked();
+
+  await flickTerminalEdge(page, "left");
+  await expect(page.locator(".app")).toHaveClass(/nav-open/);
+  await flickSurface(page, "#workspaceList", -80);
+  await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
+
+  await flickTerminalEdge(page, "right");
+  await expect(page.locator("#fileViewerDirectory")).toBeVisible();
+  await flickSurface(page, "#fileViewerDirectory", 80);
+  await expect(page.locator("#fileViewerOverlay")).toBeHidden();
+});
+
+test("swipe opening and closing are independent device-local settings", async ({
+  context,
+  page,
+}) => {
+  await installRemoteExplorerMocks(context, true);
+  await page.addInitScript(() => {
+    if (localStorage.getItem("laymux.remote.swipeCloseDrawers") === null) {
+      localStorage.setItem("laymux.remote.swipeCloseDrawers", "0");
+    }
+  });
+  await page.setViewportSize({ width: 390, height: 720 });
+  await connectRemote(page, true);
+
+  await flickTerminalEdge(page, "left");
+  await flickSurface(page, "#workspaceList", -80);
+  await expect(page.locator(".app")).toHaveClass(/nav-open/);
+  await page.locator("#navToggle").click();
+  await flickTerminalEdge(page, "right");
+  await flickSurface(page, "#fileViewerDirectory", 80);
+  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await page.locator("#navToggle").click();
+  await page.locator("#drawerSettingsButton").click();
+  await page.locator("#settingsTabDisplay").click();
+  const openToggle = page.getByRole("checkbox", { name: "Swipe to open", exact: false });
+  const closeToggle = page.getByRole("checkbox", { name: "Swipe to close", exact: false });
+  await expect(openToggle).toBeChecked();
+  await expect(closeToggle).not.toBeChecked();
+  await openToggle.uncheck();
+  await closeToggle.check();
+  await expect
+    .poll(() =>
+      page.evaluate(() => ({
+        open: localStorage.getItem("laymux.remote.edgeSwipeDrawers"),
+        close: localStorage.getItem("laymux.remote.swipeCloseDrawers"),
+      })),
+    )
+    .toEqual({ open: "0", close: "1" });
+
+  await page.reload();
+  await expect(page.locator("#exit")).toBeEnabled();
+  await page.locator("#navToggle").click();
+  await page.locator("#drawerSettingsButton").click();
+  await page.locator("#settingsTabDisplay").click();
+  await expect(openToggle).not.toBeChecked();
+  await expect(closeToggle).toBeChecked();
+  await page.locator("#navToggle").click();
+  await flickTerminalEdge(page, "left");
+  await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
+  await flickTerminalEdge(page, "right");
+  await expect(page.locator("#fileViewerOverlay")).toBeHidden();
+
+  await page.locator("#navToggle").click();
+  await flickSurface(page, "#workspaceList", -80);
+  await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
+  await page.locator("#fileExplorerHeader").click();
+  await flickSurface(page, "#fileViewerDirectory", 80);
+  await expect(page.locator("#fileViewerOverlay")).toBeHidden();
+});
+
+test("the device-local setting disables both terminal edge flicks", async ({ context, page }) => {
+  await installRemoteExplorerMocks(context, true);
+  await page.setViewportSize({ width: 390, height: 720 });
+  await connectRemote(page, true);
+
+  await page.locator("#navToggle").click();
+  await page.locator("#drawerSettingsButton").click();
+  await page.locator("#settingsTabDisplay").click();
+  const toggle = page.locator("#edgeSwipeDrawersToggle");
+  await expect(toggle).toBeChecked();
+  await toggle.uncheck();
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("laymux.remote.edgeSwipeDrawers")))
+    .toBe("0");
+  await page.locator("#navToggle").click();
+
+  await flickTerminalEdge(page, "left");
+  await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
+  await flickTerminalEdge(page, "right");
+  await expect(page.locator("#fileViewerOverlay")).toBeHidden();
+});
+
+test("edge gestures preserve taps without treating a returned drag as one", async ({
+  context,
+  page,
+}) => {
+  await installRemoteExplorerMocks(context, true);
+  await page.addInitScript(() => localStorage.setItem("laymux.remote.inputMode", "direct"));
+  await page.setViewportSize({ width: 390, height: 720 });
+  await connectRemote(page, true);
+
+  await page
+    .locator(".xterm-helper-textarea")
+    .evaluate((input: HTMLTextAreaElement) => input.blur());
+  await touchTerminalLeftEdge(page);
+
+  await expect(page.locator(".xterm-helper-textarea")).toBeFocused();
+  await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
+
+  await page
+    .locator(".xterm-helper-textarea")
+    .evaluate((input: HTMLTextAreaElement) => input.blur());
+  await touchTerminalLeftEdge(page, [20, 0]);
+  await expect(page.locator(".xterm-helper-textarea")).not.toBeFocused();
+  await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
+});

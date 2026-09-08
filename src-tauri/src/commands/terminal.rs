@@ -120,7 +120,24 @@ fn apply_claude_title_state(
 enum ValidatedStartupOverride {
     Claude(String),
     Codex(String),
+    CodexFresh(String),
     Grok(String),
+}
+
+impl ValidatedStartupOverride {
+    fn session_restore(&self) -> Option<(&'static str, String)> {
+        let (provider, command) = match self {
+            Self::Claude(command) => ("claude", command),
+            Self::Codex(command) => ("codex", command),
+            Self::CodexFresh(_) => return None,
+            Self::Grok(command) => ("grok", command),
+        };
+        // Validation already requires the final token to be one safe resume ID.
+        command
+            .split_whitespace()
+            .last()
+            .map(|id| (provider, id.to_owned()))
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -144,7 +161,10 @@ fn plan_terminal_startup(
     }
 
     match validated_override {
-        Some(ValidatedStartupOverride::Codex(command)) => {
+        Some(
+            ValidatedStartupOverride::Codex(command)
+            | ValidatedStartupOverride::CodexFresh(command),
+        ) => {
             let codex_launcher_host = InitialExecutionHost::classify_spawn_target(
                 command.split_whitespace().next(),
                 windows,
@@ -189,7 +209,7 @@ fn initial_execution_host_for_terminal(
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-pub fn create_terminal_session(
+pub async fn create_terminal_session(
     id: String,
     profile: String,
     cols: u16,
@@ -200,9 +220,13 @@ pub fn create_terminal_session(
     cwd: Option<String>,
     startup_command_override: Option<String>,
     viewer: Option<super::ViewerStartupRequest>,
-    state: State<Arc<AppState>>,
+    state: State<'_, Arc<AppState>>,
     app: AppHandle,
 ) -> Result<TerminalSession, String> {
+    let _checkpoint_permit = state
+        .session_checkpoint
+        .begin_mutation_after_finalization()
+        .await;
     // Inject LX_SOCKET and LX_AUTOMATION_PORT env vars
     let mut env = Vec::new();
     if let Ok(path_lock) = state.ipc_socket_path.lock_or_err() {
@@ -247,7 +271,17 @@ pub fn create_terminal_session(
     // commands. The launch command prefix is re-derived from settings here, so a
     // caller cannot smuggle flags the user did not configure.
     let validated_override = startup_command_override.and_then(|command| {
-        if super::is_valid_claude_startup_command_override(&command, &settings.claude.command) {
+        if command
+            == crate::settings::agent_command::resolve_agent_command(
+                &settings.codex.command,
+                crate::settings::agent_command::DEFAULT_CODEX_COMMAND,
+            )
+        {
+            Some(ValidatedStartupOverride::CodexFresh(command))
+        } else if super::is_valid_claude_startup_command_override(
+            &command,
+            &settings.claude.command,
+        ) {
             Some(ValidatedStartupOverride::Claude(command))
         } else if super::is_valid_codex_startup_command_override(&command, &settings.codex.command)
         {
@@ -258,6 +292,13 @@ pub fn create_terminal_session(
             None
         }
     });
+    let session_restore = if viewer_startup.is_empty() {
+        validated_override
+            .as_ref()
+            .and_then(ValidatedStartupOverride::session_restore)
+    } else {
+        None
+    };
     let profile_startup = matched_profile
         .map(|p| p.startup_command.clone())
         .unwrap_or_default();
@@ -995,7 +1036,8 @@ pub fn create_terminal_session(
     let pty_handle = spawned_pty
         .handle
         .with_codex_startup_color_probe(codex_startup_color_probe)
-        .with_bootstrap_da_reply(bootstrap_da_reply);
+        .with_bootstrap_da_reply(bootstrap_da_reply)
+        .with_session_restore(session_restore);
 
     // Startup output can fail before the spawned handle is published. The
     // callback has already stopped its reader and marked this exact generation;
@@ -1281,6 +1323,20 @@ pub fn write_to_terminal(
     write_to_terminal_inner(&state, &id, data.as_bytes(), HumanControlOrigin::Local)
 }
 
+/// Write an xterm `onBinary` human-input report without passing through a Rust
+/// UTF-8 `String`. The desktop adapter serializes each xterm code unit as one
+/// array element, and this command binds the report to the surface's PTY
+/// generation before entering the normal Local-owner input FIFO.
+#[tauri::command]
+pub fn write_terminal_binary_input(
+    id: String,
+    generation: u64,
+    data: Vec<u8>,
+    state: State<Arc<AppState>>,
+) -> Result<(), String> {
+    write_terminal_binary_input_inner(&state, &id, generation, &data, HumanControlOrigin::Local)
+}
+
 /// Write an xterm-generated terminal protocol reply to the PTY. Unlike human
 /// keyboard, paste, mouse, focus, and resize input, this is a response to live
 /// PTY output and must continue while a remote client owns human control.
@@ -1300,6 +1356,7 @@ pub fn write_terminal_protocol_reply_inner(
     generation: u64,
     data: &[u8],
 ) -> Result<(), String> {
+    let _checkpoint_permit = state.session_checkpoint.begin_terminal_mutation(id)?;
     // Resolve the exact generation-bound writer once. A late xterm callback
     // from a retired surface must neither write into nor consume one-shot state
     // from a replacement session that reused the same terminal id.
@@ -1357,7 +1414,7 @@ pub fn write_terminal_protocol_reply_inner(
             "terminal protocol reply"
         );
     }
-    handle.write(data)
+    handle.write_protocol_reply(data)
 }
 
 /// Offer xterm's Primary Device Attributes response generated while parsing an
@@ -1379,6 +1436,7 @@ pub fn write_terminal_bootstrap_protocol_reply_inner(
     generation: u64,
     data: &[u8],
 ) -> Result<bool, String> {
+    let _checkpoint_permit = state.session_checkpoint.begin_terminal_mutation(id)?;
     let handle = state
         .pty_handles
         .lock_or_err()?
@@ -1409,7 +1467,7 @@ pub fn write_terminal_bootstrap_protocol_reply_inner(
             "terminal bootstrap protocol reply"
         );
     }
-    handle.write(data)?;
+    handle.write_protocol_reply(data)?;
     Ok(true)
 }
 
@@ -1448,6 +1506,61 @@ pub fn write_to_terminal_inner(
         );
     }
 
+    write_human_terminal_bytes_inner(state, id, data, origin, None)
+}
+
+pub fn write_terminal_binary_input_inner(
+    state: &AppState,
+    id: &str,
+    generation: u64,
+    data: &[u8],
+    origin: HumanControlOrigin,
+) -> Result<(), String> {
+    validate_xterm_default_mouse_binary_input(data)?;
+
+    if pty_trace::is_pty_trace_enabled() {
+        tracing::info!(
+            terminal_id = %id,
+            direction = "ui-binary->pty",
+            generation,
+            bytes = data.len(),
+            signals = ?pty_trace::detect_terminal_signals(data),
+            preview = %pty_trace::summarize_terminal_bytes(data),
+            "binary PTY input"
+        );
+    }
+
+    write_human_terminal_bytes_inner(state, id, data, origin, Some(generation))
+}
+
+fn validate_xterm_default_mouse_binary_input(data: &[u8]) -> Result<(), String> {
+    if data.len() != XTERM_DEFAULT_MOUSE_REPORT_LEN
+        || !data.starts_with(XTERM_DEFAULT_MOUSE_REPORT_PREFIX)
+    {
+        return Err("unsupported xterm binary input: expected CSI M Pb Px Py".into());
+    }
+
+    #[cfg(windows)]
+    if data[XTERM_DEFAULT_MOUSE_REPORT_PREFIX.len()..]
+        .iter()
+        .any(|byte| *byte > XTERM_DEFAULT_MOUSE_CONPTY_MAX_BYTE)
+    {
+        return Err(
+            "legacy DEFAULT mouse input exceeds the ConPTY UTF-8 boundary; use SGR mouse encoding"
+                .into(),
+        );
+    }
+
+    Ok(())
+}
+
+fn write_human_terminal_bytes_inner(
+    state: &AppState,
+    id: &str,
+    data: &[u8],
+    origin: HumanControlOrigin,
+    expected_generation: Option<u64>,
+) -> Result<(), String> {
     let permit = begin_human_control_operation(state, origin, id)?;
     let handle = state
         .pty_handles
@@ -1455,6 +1568,14 @@ pub fn write_to_terminal_inner(
         .get(id)
         .cloned()
         .ok_or_else(|| format!("Session '{id}' not found"))?;
+    if let Some(generation) = expected_generation {
+        let active_generation = handle.terminal_generation();
+        if generation != active_generation {
+            return Err(format!(
+                "stale terminal binary input for '{id}': generation {generation}, active {active_generation}"
+            ));
+        }
+    }
 
     let deadline = permit.deadline();
     let pending = permit.enqueue_pty_job(|| handle.enqueue_write(data, false, deadline))?;
@@ -1557,10 +1678,26 @@ pub fn resume_terminal_output(
 }
 
 #[tauri::command]
-pub fn close_terminal_session(
+pub async fn close_terminal_session(
     id: String,
-    state: State<Arc<AppState>>,
+    state: State<'_, Arc<AppState>>,
     app: AppHandle,
+) -> Result<(), String> {
+    let _checkpoint_permit = state
+        .session_checkpoint
+        .begin_mutation_after_finalization()
+        .await;
+    close_terminal_session_inner(&id, &state, &app)
+}
+
+/// Close one terminal after the caller has established an equivalent or
+/// stronger lifecycle gate. Hidden eviction uses this while owning the target
+/// lifecycle fence, so reacquiring a normal mutation permit would
+/// reject the transaction that owns the fence.
+pub(crate) fn close_terminal_session_inner(
+    id: &str,
+    state: &AppState,
+    app: &AppHandle,
 ) -> Result<(), String> {
     // Hold the terminal catalog from generation selection through all
     // id-keyed cleanup. Create performs its duplicate check and generation
@@ -1572,23 +1709,23 @@ pub fn close_terminal_session(
     let output_retirement = terminal_output::begin_terminal_output_retirement_for_close(
         &state.terminal_protocol_states,
         &state.output_buffers,
-        &id,
+        id,
     )?;
 
-    let Some(session) = terminals.remove(&id) else {
+    let Some(session) = terminals.remove(id) else {
         drop(terminals);
         if let Some(retirement) = output_retirement {
             retirement.finish();
         }
         return Err(format!("Session '{id}' not found"));
     };
-    let handle = take_pty_handle_for_close(&state, &id);
+    let handle = take_pty_handle_for_close(state, id);
 
     // Remove from sync group
     if !session.config.sync_group.is_empty() {
         if let Ok(mut groups) = state.sync_groups.lock_or_err() {
             if let Some(group) = groups.get_mut(&session.config.sync_group) {
-                group.remove_terminal(&id);
+                group.remove_terminal(id);
                 if group.terminal_ids.is_empty() {
                     groups.remove(&session.config.sync_group);
                 }
@@ -1598,48 +1735,48 @@ pub fn close_terminal_session(
 
     // Clean up propagation flag
     if let Ok(mut propagated) = state.propagated_terminals.lock_or_err() {
-        propagated.remove(&id);
+        propagated.remove(id);
     }
 
     // Clean up Claude terminal tracking
     if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
-        known.remove(&id);
+        known.remove(id);
     }
 
     // Clean up Codex terminal tracking
     if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
-        known.remove(&id);
+        known.remove(id);
     }
 
     // Clean up Grok terminal tracking
     if let Ok(mut known) = state.known_grok_terminals.lock_or_err() {
-        known.remove(&id);
+        known.remove(id);
     }
 
     // Drop the PTY callback's detection flags. The callback closure is gone with
     // the PTY, so keeping the entry would only pin dead state and grow the table
     // over a long session.
     if let Ok(mut callback_states) = state.pty_callback_states.lock_or_err() {
-        callback_states.remove(&id);
+        callback_states.remove(id);
     }
 
     // Clean up the per-terminal write/exec lock (#427). The table is now
     // process-global on AppState, so without this it would grow unbounded as
     // terminals open and close over a long session.
     if let Ok(mut locks) = state.exec_locks.lock_or_err() {
-        locks.remove(&id);
+        locks.remove(id);
     }
 
     // Clean up interactive-app grace window (#237) so a new terminal that
     // happens to reuse this ID does not inherit stale detection.
-    activity::clear_interactive_app_grace_window(&state, &id);
+    activity::clear_interactive_app_grace_window(state, id);
     // Mirror cleanup for the recently-exited marker so a fresh terminal
     // reusing this ID does not start under a stale Claude/Codex exit
     // suppression.
-    activity::clear_interactive_app_exit_marker(&state, &id);
+    activity::clear_interactive_app_exit_marker(state, id);
     // Same reason for the guest liveness verdict, which is bound to the PTY
     // generation that produced it (ADR-0134).
-    crate::wsl_liveness::forget(&id);
+    crate::wsl_liveness::forget(id);
 
     // Clean up notifications for this terminal
     if let Ok(mut notifs) = state.notifications.lock_or_err() {
@@ -1664,7 +1801,17 @@ pub fn close_terminal_session(
         retirement.finish();
     }
     if let Some(handle) = handle {
-        handle.terminate()?;
+        let quarantine_result = state
+            .session_checkpoint
+            .quarantine_retired_pty_completion(handle.control_completion());
+        let terminate_result = handle.terminate();
+        match (terminate_result, quarantine_result) {
+            (Err(terminate), Err(quarantine)) => {
+                return Err(format!("{terminate}; {quarantine}"));
+            }
+            (Err(error), Ok(())) | (Ok(()), Err(error)) => return Err(error),
+            (Ok(()), Ok(())) => {}
+        }
     }
 
     Ok(())
@@ -2310,6 +2457,111 @@ mod tests {
     }
 
     #[test]
+    fn binary_input_is_generation_bound_owner_gated_and_byte_preserving() {
+        let state = AppState::new();
+        enable_test_remote_access(&state);
+        let written = Arc::new(Mutex::new(Vec::new()));
+        state.pty_handles.lock_or_err().unwrap().insert(
+            "t1".into(),
+            pty::PtyHandle::from_test_writer_for_generation(
+                Box::new(SharedTestWriter(Arc::clone(&written))),
+                7,
+            ),
+        );
+        let safe_report = [0x1b, b'[', b'M', 0x20, 0x7e, 0x7f];
+
+        write_terminal_binary_input_inner(&state, "t1", 7, &safe_report, HumanControlOrigin::Local)
+            .unwrap();
+        assert_eq!(written.lock().unwrap().as_slice(), safe_report);
+
+        let high_bit_report = [0x1b, b'[', b'M', 0x20, 0x80, 0xff];
+        #[cfg(windows)]
+        {
+            let unsupported = write_terminal_binary_input_inner(
+                &state,
+                "t1",
+                7,
+                &high_bit_report,
+                HumanControlOrigin::Local,
+            )
+            .unwrap_err();
+            assert!(unsupported.contains("ConPTY UTF-8 boundary"));
+            assert_eq!(written.lock().unwrap().as_slice(), safe_report);
+        }
+        #[cfg(not(windows))]
+        {
+            write_terminal_binary_input_inner(
+                &state,
+                "t1",
+                7,
+                &high_bit_report,
+                HumanControlOrigin::Local,
+            )
+            .unwrap();
+            assert_eq!(
+                written.lock().unwrap().as_slice(),
+                [safe_report.as_slice(), high_bit_report.as_slice()].concat()
+            );
+        }
+
+        let before_rejections = written.lock().unwrap().clone();
+        let malformed = write_terminal_binary_input_inner(
+            &state,
+            "t1",
+            7,
+            b"not-mouse",
+            HumanControlOrigin::Local,
+        )
+        .unwrap_err();
+        assert!(malformed.contains("expected CSI M Pb Px Py"));
+        assert_eq!(*written.lock().unwrap(), before_rejections);
+
+        let stale = write_terminal_binary_input_inner(
+            &state,
+            "t1",
+            6,
+            &safe_report,
+            HumanControlOrigin::Local,
+        )
+        .unwrap_err();
+        assert!(stale.contains("stale terminal binary input"));
+        assert_eq!(*written.lock().unwrap(), before_rejections);
+
+        set_test_remote_lease(&state, "lease-1");
+        assert!(write_terminal_binary_input_inner(
+            &state,
+            "t1",
+            7,
+            &safe_report,
+            HumanControlOrigin::Local,
+        )
+        .is_err());
+        assert_eq!(*written.lock().unwrap(), before_rejections);
+    }
+
+    #[test]
+    fn remote_input_consumes_resume_but_protocol_and_rejected_local_input_do_not() {
+        let state = AppState::new();
+        enable_test_remote_access(&state);
+        let handle = pty::PtyHandle::from_test_writer_for_generation(Box::new(std::io::sink()), 7)
+            .with_session_restore(Some(("codex", "saved-session".into())));
+        state
+            .pty_handles
+            .lock_or_err()
+            .unwrap()
+            .insert("t1".into(), handle.clone());
+        set_test_remote_lease(&state, "lease-1");
+        write_terminal_protocol_reply_inner(&state, "t1", 7, b"\x1b[0n").unwrap();
+        assert!(handle.unconsumed_session_restore().is_some());
+        assert!(
+            write_to_terminal_inner(&state, "t1", b"rejected", HumanControlOrigin::Local).is_err()
+        );
+        assert!(handle.unconsumed_session_restore().is_some());
+        write_to_terminal_inner(&state, "t1", b"new work", remote_origin("lease-1")).unwrap();
+        assert!(handle.unconsumed_session_restore().is_none());
+    }
+
+    #[test]
     fn a_same_size_resize_stops_after_the_owner_gate_instead_of_touching_the_pty() {
         let state = AppState::new();
         enable_test_remote_access(&state);
@@ -2405,6 +2657,24 @@ mod tests {
             written.lock().unwrap().as_slice(),
             b"\x1b]10;rgb:ffff/ffff/ffff\x1b\\"
         );
+    }
+
+    #[test]
+    fn finalization_fence_rejects_terminal_protocol_replies() {
+        let state = AppState::new();
+        state.pty_handles.lock().unwrap().insert(
+            "t1".into(),
+            pty::PtyHandle::from_test_writer_for_generation(Box::new(Vec::<u8>::new()), 4),
+        );
+        state
+            .session_checkpoint
+            .begin_finalization_for_test()
+            .unwrap();
+
+        let result = write_terminal_protocol_reply_inner(&state, "t1", 4, b"\x1b[?1;2c");
+
+        assert!(result.is_err());
+        state.session_checkpoint.cancel_finalization();
     }
 
     #[test]

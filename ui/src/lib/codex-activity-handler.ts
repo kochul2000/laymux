@@ -1,4 +1,4 @@
-import type { RawTerminalState } from "./activity-handler";
+import type { RawTerminalState, StatusResult } from "./activity-handler";
 import { CODEX_INPUT_PENDING_MARKER, STATUS_ICON_WORKING } from "./activity-markers";
 import { ShellActivityHandler } from "./shell-activity-handler";
 
@@ -45,7 +45,7 @@ export class CodexActivityHandler extends ShellActivityHandler {
     return startsWithBrailleSpinner(title);
   }
 
-  computeStatus(raw: RawTerminalState) {
+  computeStatus(raw: RawTerminalState): StatusResult {
     if (isInputPending(raw.activityMessage)) {
       return { icon: "✓", color: "var(--green)" };
     }

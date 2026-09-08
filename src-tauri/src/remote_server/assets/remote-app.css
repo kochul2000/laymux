@@ -1,3 +1,63 @@
+      #floatingControls {
+        position: fixed;
+        z-index: 8;
+        pointer-events: none;
+      }
+      .floating-control {
+        position: absolute;
+        pointer-events: auto;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-tap-highlight-color: #00000000;
+        opacity: var(--floating-opacity, 1);
+      }
+      .floating-control > button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: var(--floating-size);
+        min-width: 0;
+        min-height: 0;
+        padding: 4px;
+        border: 1px solid var(--accent-50);
+        border-radius: 50%;
+        background: var(--bg-overlay);
+        color: var(--text-primary);
+        font-size: clamp(10px, calc(var(--floating-size) * 0.18), 20px);
+        white-space: normal;
+        overflow-wrap: anywhere;
+        line-height: 1.1;
+        box-shadow: 0 3px 12px var(--backdrop-light);
+        touch-action: none;
+      }
+      .floating-control > button:disabled { pointer-events: none; }
+      .floating-control .remote-icon {
+        width: calc(var(--floating-size) * 0.4);
+        height: calc(var(--floating-size) * 0.4);
+        pointer-events: none;
+      }
+      .floating-control.dragging { opacity: 0.7; }
+      .floating-control > .key-flick-btn {
+        border: 2px solid var(--border);
+        background: radial-gradient(circle, var(--bg-overlay) 42%, var(--bg-surface) 44%);
+        box-shadow: inset 0 0 0 2px var(--bg-base), 0 3px 0 var(--bg-base);
+        color: var(--text-primary);
+      }
+      .floating-setting {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin: 0 0 12px;
+        padding: 10px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+      }
+      .floating-setting label { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+      .floating-setting input[type="number"] { width: 64px; min-width: 0; }
+      #floatingSettingsEditor > select { width: 100%; margin-bottom: 8px; }
+      .action-proxy { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
       :root {
         color-scheme: dark;
         --bg-base: #1e1e2e;
@@ -41,10 +101,20 @@
         --fs-sm: 11px;
         --fs-md: 13px;
         --remote-composer-font-size: 16px;
+        --remote-composer-idle-opacity: 0.55;
+        --remote-composer-focused-opacity: 0.8;
+        --remote-composer-active-opacity: 1;
+        --remote-menu-font-size: 13px;
+        --remote-navigation-width: 360px;
+        --touch-selection-handle-size: 22px;
         /* Compact controls in the Remote header share one border-box height. */
         --header-control-height: 26px;
         --key-bar-control-height: 26px;
         --terminal-scroll-btn-right: 26px;
+      }
+      .remote-icon {
+        display: block;
+        flex: 0 0 auto;
       }
       * { box-sizing: border-box; }
       html, body {
@@ -111,6 +181,83 @@
       footer {
         border-top: 1px solid var(--border);
       }
+      /* Both input rows are three alignment segments, not one run of buttons:
+         order alone cannot express "these hug the left edge, those hug the
+         right", which is exactly what a wide screen needs. `space-between`
+         keeps the outer segments pinned to the edges and collapses the empty
+         ones to zero, so a row with only left and right content still reads
+         correctly. When content outgrows the row the free space is gone, the
+         tracks fall back to content width and the row scrolls inside itself
+         (never the document). */
+      .input-action-row {
+        display: grid;
+        grid-template-columns: auto auto auto;
+        justify-content: space-between;
+        min-width: 0;
+        max-width: 100%;
+        flex: 1 1 auto;
+        align-items: center;
+        gap: 8px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+      }
+      .input-action-row::-webkit-scrollbar {
+        display: none;
+      }
+      .input-action-row {
+        --input-button-scale: var(--remote-main-button-scale, 1);
+      }
+      .button-size-controls {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        grid-column: 2 / -1;
+      }
+      .button-size-controls output {
+        min-width: 4ch;
+        text-align: center;
+      }
+      .key-row {
+        --input-button-scale: var(--remote-keys-button-scale, 1);
+      }
+      .input-action-row, .key-row {
+        --key-bar-control-height: calc(26px * var(--input-button-scale));
+        --fs-sm: calc(11px * var(--input-button-scale));
+        --fs-md: calc(13px * var(--input-button-scale));
+        font-size: var(--fs-md);
+      }
+      .input-action-row .remote-icon, .key-row .remote-icon {
+        width: calc(14px * var(--input-button-scale));
+        height: calc(14px * var(--input-button-scale));
+      }
+      .action-segment .composer-send .remote-icon {
+        width: calc(20px * var(--input-button-scale));
+        height: calc(20px * var(--input-button-scale));
+      }
+      /* Keep segment minimums content-sized so overflowing rows scroll. */
+      .action-segment {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .action-segment[data-segment="left"] {
+        justify-content: flex-start;
+      }
+      .action-segment[data-segment="center"] {
+        justify-content: center;
+      }
+      .action-segment[data-segment="right"] {
+        justify-content: flex-end;
+      }
+      /* A soft key placed in the footer is a footer button, not a compact
+         key-bar key: matching the sibling box keeps the main row on one
+         visual line instead of centring a shorter key against taller ones. */
+      footer .action-segment > .key-btn {
+        height: auto;
+        padding: calc(5px * var(--input-button-scale, 1)) calc(9px * var(--input-button-scale, 1));
+      }
       label {
         display: flex;
         align-items: center;
@@ -131,7 +278,7 @@
       button {
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
-        padding: 5px 9px;
+        padding: calc(5px * var(--input-button-scale, 1)) calc(9px * var(--input-button-scale, 1));
         background: var(--panel-2);
         color: var(--text);
         cursor: pointer;
@@ -155,7 +302,7 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        padding: 5px 9px;
+        padding: calc(5px * var(--input-button-scale, 1)) calc(9px * var(--input-button-scale, 1));
         border: 1px solid var(--accent);
         border-radius: var(--radius-md);
         background: var(--accent);
@@ -167,6 +314,24 @@
       .composer-send:disabled {
         cursor: default;
         opacity: 0.4;
+      }
+      .attachment-button {
+        flex: 0 0 auto;
+        display: inline-flex;
+        width: var(--key-bar-control-height);
+        height: var(--key-bar-control-height);
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        color: var(--text-secondary);
+      }
+      .attachment-button:hover:not(:disabled) {
+        border-color: var(--accent-50);
+        background: var(--hover-bg);
+        color: var(--accent);
+      }
+      .attachment-button.busy {
+        color: var(--accent);
       }
       main {
         position: relative;
@@ -289,14 +454,33 @@
       .status::-webkit-scrollbar {
         display: none;
       }
+      /* The shared Lucide loader owns a fixed box, avoiding symbol-font and
+         platform-dependent spinner glyphs. */
       .status-spinner {
-        display: inline-block;
-        width: 1ch;
+        display: inline-flex;
+        width: 10px;
+        height: 10px;
         margin-right: 1ch;
-        text-align: center;
+        align-items: center;
+        justify-content: center;
+        vertical-align: middle;
+      }
+      .status-spinner > .remote-icon {
+        animation: status-spinner-spin 0.7s linear infinite;
       }
       .status-spinner[hidden] {
         display: none;
+      }
+      @keyframes status-spinner-spin {
+        to {
+          transform: rotate(1turn);
+        }
+      }
+      /* Reduced motion keeps the marker and drops the movement. */
+      @media (prefers-reduced-motion: reduce) {
+        .status-spinner > .remote-icon {
+          animation: none;
+        }
       }
       .status.error {
         color: var(--danger);
@@ -311,8 +495,8 @@
         flex: 0 0 auto;
         align-items: center;
         justify-content: center;
-        width: var(--header-control-height);
-        height: var(--header-control-height);
+        width: calc(34px * var(--input-button-scale, 1));
+        height: var(--key-bar-control-height);
         padding: 0;
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
@@ -333,17 +517,22 @@
         flex: 0 0 auto;
       }
       .terminal-shell {
+        position: relative;
         min-width: 0;
         min-height: 0;
         display: grid;
-        grid-template-rows: minmax(0, 1fr) auto;
+        grid-template-rows: minmax(0, 1fr);
         width: 100%;
         height: 100%;
         padding: 6px;
         background: var(--terminal-bg);
       }
       .terminal-composer {
-        position: relative;
+        position: absolute;
+        z-index: 7;
+        right: 6px;
+        bottom: 6px;
+        left: 6px;
         display: grid;
         grid-template-columns: minmax(0, 1fr);
         grid-template-rows: minmax(72px, auto);
@@ -352,6 +541,19 @@
         padding: 0;
         border-top: 1px solid var(--border);
         background: var(--terminal-bg);
+        opacity: var(--remote-composer-idle-opacity);
+        transition: opacity 140ms ease;
+      }
+      .terminal-composer[data-opacity-state="focused"] {
+        opacity: var(--remote-composer-focused-opacity);
+      }
+      .terminal-composer[data-opacity-state="active"] {
+        opacity: var(--remote-composer-active-opacity);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .terminal-composer {
+          transition: none;
+        }
       }
       /* Tab recall (issue #504) and as-you-type autocomplete (issue #505) lists.
          They float above the editor over the terminal so they never grow the
@@ -377,23 +579,115 @@
         display: none;
       }
       .composer-suggest-item {
+        display: flex;
+        align-items: center;
         overflow: hidden;
-        padding: 5px 8px;
         border-radius: var(--radius-md);
         color: var(--text-primary);
+      }
+      .composer-suggest-pick {
+        min-width: 0;
+        flex: 1;
+        overflow: hidden;
+        padding: 5px 8px;
+        border: 0;
+        background: transparent;
+        color: inherit;
         cursor: pointer;
         text-overflow: ellipsis;
+        text-align: left;
         white-space: nowrap;
       }
       .composer-suggest-item:hover {
         background: var(--hover-bg);
       }
-      .composer-suggest-item[aria-selected="true"] {
+      .composer-suggest-item.is-active {
         background: var(--accent-20);
+      }
+      .composer-suggest-star {
+        flex: 0 0 auto;
+        margin-right: 5px;
+        padding: 3px;
+        border: 0;
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--text-secondary);
+        cursor: pointer;
+      }
+      .composer-suggest-star[aria-pressed="true"] {
+        color: var(--accent);
+      }
+      .composer-suggest-send {
+        margin-left: 4px;
+        color: var(--text-secondary);
+      }
+      .composer-star-editor-scrim {
+        position: fixed;
+        inset: 0;
+        z-index: 55;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        background: #0000008c;
+      }
+      .composer-star-editor-scrim[hidden] {
+        display: none;
+      }
+      .composer-star-editor-dialog {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        width: min(440px, 100%);
+        padding: 14px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        background: var(--bg-base);
+      }
+      .composer-star-editor-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .composer-star-editor-title {
+        color: var(--text);
+        font-size: var(--fs-sm);
+        font-weight: 700;
+      }
+      .composer-star-editor-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+      }
+      .composer-star-editor-field textarea {
+        min-height: 72px;
+        resize: vertical;
+      }
+      .composer-star-editor-send {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text-primary);
+        font-size: var(--fs-sm);
+      }
+      .composer-star-editor-error {
+        color: var(--danger);
+        font-size: var(--fs-xs);
+      }
+      .composer-star-editor-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
       }
       /* Flush editor (mirrors desktop): no outer margin / parent padding, no
          border or rounding — it fills the strip under the divider. */
       .composer-input {
+        font-family: inherit;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
         width: 100%;
         min-width: 0;
         min-height: 72px;
@@ -410,8 +704,24 @@
         outline: none;
         overflow: auto;
       }
-      .composer-input:disabled {
-        opacity: 0.6;
+      .composer-attachment {
+        display: inline-flex;
+        max-width: min(24ch, 100%);
+        padding: 0 0.4em;
+        vertical-align: bottom;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-surface);
+        color: var(--accent);
+        font-size: 0.9em;
+      }
+      .composer-attachment-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .remote-body {
         position: relative;
@@ -422,15 +732,25 @@
         overflow: hidden;
       }
       .navigation-panel {
+        /* Device-local menu text size (ADR-0209). The drawer's font-size tiers are
+           re-derived from the menu base so every row scales together; the
+           10/13 and 11/13 ratios keep the default (13px) pixel-identical to
+           the global --fs-xs/--fs-sm tokens. */
+        --fs-xs: calc(var(--remote-menu-font-size) * 10 / 13);
+        --fs-sm: calc(var(--remote-menu-font-size) * 11 / 13);
+        --fs-md: var(--remote-menu-font-size);
+        --count-badge-base: calc(var(--remote-menu-font-size) * 10 / 13);
+        font-size: var(--remote-menu-font-size);
         position: absolute;
         inset: 0 auto 0 0;
         z-index: 20;
-        width: min(360px, calc(100vw - 28px));
+        width: min(var(--remote-navigation-width), calc(100vw - 28px));
         min-width: 0;
         min-height: 0;
         display: flex;
         flex-direction: column;
         overflow: auto;
+        touch-action: pan-y;
         padding: 0;
         border-right: 1px solid var(--border);
         background: var(--bg-surface);
@@ -440,6 +760,25 @@
       }
       .app.nav-open .navigation-panel {
         transform: translateX(0);
+      }
+      .app.nav-pinned .remote-body {
+        grid-template-columns: var(--remote-navigation-width) minmax(0, 1fr);
+      }
+      .app.nav-pinned .navigation-panel {
+        position: relative;
+        inset: auto;
+        grid-column: 1;
+        grid-row: 1;
+        width: var(--remote-navigation-width);
+        box-shadow: none;
+        transform: none;
+      }
+      .app.nav-pinned .terminal-shell {
+        grid-column: 2;
+        grid-row: 1;
+      }
+      .app.nav-pinned .menu-button {
+        display: none;
       }
       .nav-scrim {
         position: absolute;
@@ -457,6 +796,8 @@
       .drawer-header-button,
       .desktop-mode-button,
       .copy-pane-button,
+      .file-explorer-button,
+      .navigation-pin-button,
       .spatial-exclusion-button {
         width: 28px;
         height: var(--header-control-height);
@@ -468,15 +809,34 @@
         border-color: transparent;
         background: transparent;
       }
+      /* Chromium can focus the first control when the Remote document becomes
+         the active surface. Keep that boot-time focus from drawing a stray box
+         around the menu icon; the button remains in the tab order. */
+      .menu-button:focus {
+        outline: none;
+      }
       .menu-button:hover,
       .drawer-header-button:hover,
       .desktop-mode-button:hover,
       .copy-pane-button:hover,
+      .file-explorer-button:hover,
+      .navigation-pin-button:hover,
       .spatial-exclusion-button:hover {
         background: var(--hover-bg);
       }
       .copy-pane-button {
         color: var(--text-secondary);
+      }
+      .file-explorer-button {
+        color: var(--text-secondary);
+      }
+      .navigation-pin-button {
+        color: var(--text-secondary);
+      }
+      .navigation-pin-button[aria-pressed="true"] {
+        border-color: var(--accent-50);
+        background: var(--accent-20);
+        color: var(--accent);
       }
       .spatial-exclusion-button {
         color: var(--text-secondary);
@@ -494,30 +854,23 @@
         font-size: var(--fs-sm);
         font-weight: 650;
       }
-      .menu-button {
-        flex-direction: column;
-        gap: 3px;
-      }
-      .menu-button span {
-        width: 14px;
-        height: 1px;
-        border-radius: 1px;
-        background: var(--text-primary);
-      }
       .drawer-header {
         height: 32px;
         display: flex;
         flex: 0 0 auto;
         align-items: center;
         justify-content: space-between;
+        gap: 4px;
         padding: 0 6px 0 9px;
         border-bottom: 1px solid var(--border);
       }
       .drawer-heading {
         display: flex;
+        flex: 1 1 auto;
         min-width: 0;
         align-items: center;
         gap: 4px;
+        overflow: hidden;
       }
       .drawer-header-button {
         width: 28px;
@@ -531,20 +884,11 @@
         background: transparent;
         color: var(--text-secondary);
       }
-      .drawer-notification-button {
-        position: relative;
-      }
-      .drawer-notification-badge {
-        position: absolute;
-        top: 0;
-        right: -1px;
-        min-width: 12px;
-        height: 12px;
-        padding: 0 3px;
-        font-size: 8px;
-        pointer-events: none;
-      }
       .drawer-title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
         color: var(--text-primary);
         font-size: var(--fs-md);
         font-weight: 650;
@@ -561,6 +905,81 @@
         flex: 1 1 auto;
         flex-direction: column;
         overflow: auto;
+        touch-action: pan-y;
+      }
+      /* Settings pagination (tablist under the drawer header). The strip stays
+         put while the panel scrolls, so switching subjects never requires
+         scrolling back up first. */
+      .settings-tabs {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        display: flex;
+        /* The long Input bar panel must scroll instead of taking this flex
+           item's height. Without an explicit zero shrink factor, the strip
+           collapses to its padding and the tabs disappear on short screens. */
+        flex: 0 0 auto;
+        min-width: 0;
+        gap: 2px;
+        padding: 4px 6px 0;
+        border-bottom: 1px solid var(--border);
+        background: var(--panel);
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+      .settings-tabs::-webkit-scrollbar {
+        display: none;
+      }
+      /* `1 0 auto`, not `1 1 0`: a shrinking tab would squeeze its label past
+         its own box (no ellipsis, nowrap) and the strip's overflow would never
+         engage. Growing-only tabs fill a wide drawer and scroll a narrow one. */
+      .settings-tab {
+        flex: 1 0 auto;
+        padding: 6px 8px;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        border-radius: 0;
+        background: none;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .settings-tab:hover {
+        color: var(--text-secondary);
+      }
+      .settings-tab.active {
+        border-bottom-color: var(--accent);
+        color: var(--accent);
+      }
+      /* Same 5px status dot the drawer buttons use (ADR-0187), so the drawer
+         dot and the tab dot read as one trail to the update. */
+      .settings-tab.update-available {
+        position: relative;
+      }
+      .settings-tab.update-available::after {
+        position: absolute;
+        right: 2px;
+        top: 4px;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--yellow);
+        content: "";
+      }
+      .settings-panel {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+      }
+      .settings-panel[hidden] {
+        display: none;
+      }
+      .settings-connection-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin: 8px;
       }
       .connection-title {
         color: var(--text-secondary);
@@ -634,8 +1053,9 @@
       }
       .file-viewer-panel {
         display: grid;
-        gap: 7px;
-        padding: 0 8px 9px;
+        gap: 6px;
+        padding: 8px 10px;
+        background: var(--bg-surface);
         border-bottom: 1px solid var(--border);
       }
       .file-viewer-status {
@@ -650,18 +1070,16 @@
         color: var(--danger);
       }
       .file-viewer-path-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        gap: 6px;
         min-width: 0;
       }
       .file-viewer-path-row input {
         min-width: 0;
         width: 100%;
       }
-      .file-viewer-actions {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 6px;
-      }
-      .file-viewer-actions button {
+      .file-viewer-path-row button {
         min-width: 0;
       }
       .nav-section + .nav-section {
@@ -745,9 +1163,126 @@
       .nav-settings-status.error {
         color: var(--danger);
       }
+      .input-layout-editor {
+        min-width: 0;
+        padding: 0 8px 10px;
+      }
+      .input-layout-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .input-layout-heading .key-order-help {
+        min-width: 0;
+        margin-top: 0;
+      }
+      .input-layout-zone {
+        min-width: 72px;
+        padding: 3px 4px;
+        color: var(--text);
+        background: var(--panel-2);
+        font-size: var(--fs-xs);
+      }
+      /* Row editor: the settings mirror of the bar itself — one block per row,
+         one drop slot per alignment segment. */
+      .layout-row-editor {
+        margin-top: 8px;
+      }
+      .layout-segment {
+        display: grid;
+        grid-template-columns: 52px minmax(0, 1fr);
+        align-items: start;
+        gap: 6px;
+        padding: 3px 0;
+      }
+      .layout-segment-label {
+        padding-top: 4px;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+        font-weight: 600;
+      }
+      .layout-segment-slot {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 5px;
+        min-height: 26px;
+        padding: 2px;
+        border: 1px dashed var(--border);
+        border-radius: var(--radius-md);
+        user-select: none;
+      }
+      .layout-segment-slot.drop-active,
+      .layout-hidden.drop-active {
+        border-color: var(--accent);
+        background: var(--accent-12);
+      }
+      .layout-hidden {
+        margin-top: 10px;
+        padding: 4px;
+        border: 1px dashed var(--border);
+        border-radius: var(--radius-md);
+      }
+      .layout-hidden .key-popover-title {
+        margin-top: 0;
+      }
+      .layout-hidden-label {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+        font-weight: 600;
+      }
+      .user-key-form {
+        margin-top: 2px;
+      }
+      .user-key-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 0;
+      }
+      .user-key-label {
+        flex: 0 0 52px;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+        font-weight: 600;
+      }
+      .user-key-input {
+        flex: 1 1 auto;
+        min-width: 0;
+        padding: 3px 6px;
+        font-size: var(--fs-xs);
+      }
+      .user-key-escape-buttons {
+        display: flex;
+        flex: 1 1 auto;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+      .user-key-shift {
+        flex: 0 0 auto;
+        gap: 4px;
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+      }
+      .user-key-preview {
+        padding: 3px 0 0 58px;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+      }
+      .user-key-submit {
+        justify-content: flex-end;
+      }
+      .user-key-error {
+        padding-top: 4px;
+        color: var(--danger);
+        font-size: var(--fs-xs);
+      }
       .drawer-header-button {
         position: relative;
       }
+      .drawer-header-button.status-indicator::after,
       .drawer-header-button.update-available::after {
         position: absolute;
         right: 2px;
@@ -791,6 +1326,7 @@
       .pc-update-notes {
         max-height: 96px;
         overflow: auto;
+        touch-action: pan-y;
         white-space: pre-wrap;
         color: var(--muted);
         font-size: var(--fs-sm);
@@ -816,28 +1352,12 @@
         flex: 1 1 auto;
         flex-direction: column;
         overflow-y: auto;
-      }
-      .workspace-section-heading {
-        display: flex;
-        min-width: 0;
-        align-items: center;
-        justify-content: flex-end;
-        gap: 8px;
-        padding: 2px 6px 4px 8px;
+        /* Nested scrollers must preserve horizontal pointer events themselves. */
+        touch-action: pan-y;
       }
       .hidden-workspace-toggle {
-        flex: 0 0 auto;
-        padding: 2px 6px;
-        border: 1px solid transparent;
-        border-radius: var(--radius-sm);
-        background: var(--active-bg);
-        color: var(--yellow);
-        font-size: 9px;
-        line-height: 1.3;
-      }
-      .hidden-workspace-toggle:hover,
-      .hidden-workspace-toggle[aria-expanded="true"] {
-        background: var(--accent-12);
+        position: relative;
+        color: var(--text-secondary);
       }
       .new-workspace-panel {
         display: grid;
@@ -849,10 +1369,8 @@
         text-align: left;
       }
       .hidden-workspace-shelf {
-        max-height: min(34vh, 260px);
         overflow-y: auto;
-        border-top: 1px solid var(--border);
-        border-bottom: 1px solid var(--border);
+        touch-action: pan-y;
         background: var(--bg-surface);
         padding: 3px 5px;
       }
@@ -944,11 +1462,13 @@
       .workspace-primary-right {
         flex: 0 0 auto;
       }
+      /* Workspace-list text sizes are em so they follow the drawer's device-local
+         menu base (--remote-menu-font-size, 13px default): NNpx/13. */
       .workspace-index {
         flex: 0 0 auto;
         min-width: 10px;
         color: var(--text-primary);
-        font-size: 10px;
+        font-size: 0.7692em;
         font-weight: 500;
         opacity: 0.6;
       }
@@ -962,7 +1482,7 @@
         text-overflow: ellipsis;
         white-space: nowrap;
         color: var(--text-secondary);
-        font-size: 14px;
+        font-size: 1.0769em;
         font-weight: 500;
       }
       .workspace-item.active .workspace-name {
@@ -971,7 +1491,7 @@
       .workspace-terminal-count {
         flex: 0 0 auto;
         color: var(--text-secondary);
-        font-size: 9px;
+        font-size: 0.6923em;
         line-height: 1.3;
         padding: 1px 6px;
         border-radius: var(--radius-sm);
@@ -1037,13 +1557,16 @@
         flex: 0 0 auto;
         align-items: center;
         justify-content: center;
-        min-width: 14px;
-        height: 14px;
+        min-width: 1.4em;
+        height: 1.4em;
         padding: 0 3px;
         border-radius: var(--radius-sm);
         background: var(--accent);
         color: var(--bg-base);
-        font-size: 10px;
+        /* Base size × the JS shrink factor for long counts. Inside the drawer
+           --count-badge-base follows the menu font size; elsewhere (key bar)
+           it stays the fixed 10px default. */
+        font-size: calc(var(--count-badge-base, 10px) * var(--count-badge-scale, 1));
         font-weight: 600;
         font-variant-numeric: tabular-nums;
         line-height: 1;
@@ -1106,6 +1629,7 @@
       .notification-list {
         min-height: 0;
         overflow-y: auto;
+        touch-action: pan-y;
       }
       .notification-group-title {
         display: flex;
@@ -1193,7 +1717,9 @@
         flex: 0 0 auto;
         min-width: 38px;
         color: var(--accent);
-        font-size: 9px;
+        /* calc, not em: the parent row is --fs-sm (11px), so an em here would
+           shrink below the historical 9px. 9px/13 of the menu base. */
+        font-size: calc(var(--remote-menu-font-size) * 9 / 13);
         font-weight: 700;
         text-transform: uppercase;
       }
@@ -1217,8 +1743,6 @@
       .dock-terminal-row {
         width: 100%;
         min-width: 0;
-        min-height: 18px;
-        max-height: 18px;
         display: flex;
         align-items: center;
         gap: 6px;
@@ -1239,6 +1763,20 @@
           opacity 160ms ease,
           transform 160ms ease,
           margin 160ms ease;
+      }
+      .workspace-pane-row {
+        min-height: 36px;
+        max-height: 36px;
+        align-items: flex-start;
+      }
+      .workspace-pane-row.compact {
+        min-height: 18px;
+        max-height: 18px;
+        align-items: center;
+      }
+      .dock-terminal-row {
+        min-height: 18px;
+        max-height: 18px;
       }
       .workspace-pane-row:hover:not(:disabled),
       .dock-terminal-row:hover:not(:disabled) {
@@ -1274,6 +1812,7 @@
         flex: 0 0 auto;
         width: 18px;
         height: 12px;
+        margin-top: 2px;
         opacity: 0.5;
       }
       .workspace-pane-row.active .pane-minimap {
@@ -1285,6 +1824,47 @@
         flex: 1 1 auto;
         align-items: center;
         gap: 4px;
+      }
+      .workspace-pane-row .pane-row-main {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 1px;
+      }
+      .workspace-pane-row.compact .pane-row-main {
+        flex-direction: row;
+        align-items: center;
+        gap: 4px;
+      }
+      .workspace-pane-row.compact .pane-minimap {
+        margin-top: 0;
+      }
+      .pane-row-primary {
+        display: flex;
+        min-width: 0;
+        width: 100%;
+        align-items: center;
+        gap: 4px;
+      }
+      .pane-last-input {
+        min-width: 0;
+        min-height: 14px;
+        overflow: hidden;
+        color: var(--text-secondary);
+        font-weight: 700;
+        opacity: 0.68;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .workspace-last-input {
+        min-width: 0;
+        min-height: 18px;
+        padding-left: 18px;
+        overflow: hidden;
+        color: var(--text-secondary);
+        font-size: var(--fs-sm);
+        opacity: 0.68;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .pane-env {
         flex: 0 0 auto;
@@ -1301,7 +1881,8 @@
         border-radius: var(--radius-sm);
         background: var(--active-bg);
         color: var(--text-secondary);
-        font-size: 9px;
+        /* calc, not em: the parent row is --fs-sm — see .dock-position-badge. */
+        font-size: calc(var(--remote-menu-font-size) * 9 / 13);
         text-align: center;
       }
       .pane-activity.running {
@@ -1339,8 +1920,8 @@
       }
       .pane-command-status {
         flex: 0 0 auto;
-        width: 16px;
-        height: 16px;
+        width: 1.6em;
+        height: 1.6em;
         margin-left: auto;
         display: inline-flex;
         align-items: center;
@@ -1348,7 +1929,9 @@
         box-sizing: border-box;
         border: 1.5px solid transparent;
         border-radius: var(--radius-md);
-        font-size: 10px;
+        /* calc, not em: the parent row is --fs-sm — see .dock-position-badge.
+           width/height stay em: they scale from this element's own size. */
+        font-size: calc(var(--remote-menu-font-size) * 10 / 13);
         line-height: 1;
       }
       .pane-command-status.unread {
@@ -1367,44 +1950,12 @@
         margin-top: 2px;
         padding-left: 18px;
         color: var(--text-secondary);
-        font-size: 12px;
+        font-size: 0.9231em;
         opacity: 0.5;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      .workspace-status-line {
-        min-height: 18px;
-        margin-top: 2px;
-        padding-left: 18px;
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        color: var(--text-secondary);
-        font-size: 12px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .workspace-status-text {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .workspace-status-time {
-        flex: 0 0 auto;
-        opacity: 0.4;
-      }
-      .workspace-status-notification {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        font-style: italic;
-      }
-      .workspace-status-notification.error { color: var(--red); }
-      .workspace-status-notification.success { color: var(--green); }
-      .workspace-status-notification.warning { color: var(--yellow); }
-      .workspace-status-notification.info { color: var(--accent); }
       .nav-empty {
         margin: 0 8px 7px;
         padding: 7px 8px;
@@ -1432,7 +1983,7 @@
       .terminal-scroll-to-bottom {
         position: absolute;
         right: var(--terminal-scroll-btn-right);
-        bottom: 16px;
+        bottom: calc(16px + var(--remote-composer-overlay-height, 0px));
         z-index: 5;
         display: flex;
         align-items: center;
@@ -1539,14 +2090,22 @@
           width: 0;
           min-width: 0;
           overflow: hidden;
-          padding-left: 4px;
-          padding-right: 4px;
+          padding-left: calc(4px * var(--input-button-scale, 1));
+          padding-right: calc(4px * var(--input-button-scale, 1));
           text-overflow: ellipsis;
           white-space: nowrap;
+        }
+        footer .action-segment > button {
+          width: auto;
+          min-width: calc(54px * var(--input-button-scale));
+          flex: 1 0 calc(54px * var(--input-button-scale));
         }
         /* Send joins the equal split — its base flex: 0 0 auto outranks the
            rule above and would collapse against width: 0, clipping the icon. */
         footer .composer-send {
+          flex: 1 1 0;
+        }
+        footer .attachment-button {
           flex: 1 1 0;
         }
         .terminal-composer {
@@ -1557,6 +2116,49 @@
           min-height: 64px;
           margin: 0;
           padding: 6px 8px;
+        }
+      }
+      @media (max-width: 360px) {
+        .file-viewer-path-row {
+          grid-template-columns: 1fr 1fr;
+        }
+        .file-viewer-path-row input {
+          grid-column: 1 / -1;
+        }
+      }
+      @media (max-width: 240px) {
+        .app > header {
+          gap: 0;
+          padding-right: 1px;
+          padding-left: 1px;
+        }
+        .drawer-header {
+          padding-right: 1px;
+          padding-left: 1px;
+        }
+        .drawer-heading {
+          display: none;
+        }
+        .drawer-header-actions {
+          width: 100%;
+          flex-shrink: 1;
+          min-width: 0;
+          justify-content: space-between;
+          gap: 0;
+        }
+        .drawer-header-actions > button {
+          flex-shrink: 1;
+          min-width: 0;
+        }
+        .drawer-header-button,
+        .desktop-mode-button {
+          width: 24px;
+          min-width: 24px;
+          padding-right: 0;
+          padding-left: 0;
+        }
+        .desktop-mode-button {
+          font-size: var(--fs-xs);
         }
       }
       @supports (height: 100dvh) {
@@ -1575,6 +2177,43 @@
       #terminal.remote-path-link-clickable .xterm,
       #terminal.remote-path-link-clickable .xterm-screen {
         cursor: pointer;
+      }
+      /* ADR-0224 링크 액션 칩. `chip` 모드에서 탭은 링크를 열지 않고 이 칩을
+         띄우며, 버튼을 눌러야 실행된다. 위치는 remote-app.js 가 #terminal
+         기준 픽셀로 넣는다(선택 핸들과 같은 좌표계). */
+      .remote-link-chip {
+        position: absolute;
+        z-index: 13;
+        display: flex;
+        gap: 2px;
+        padding: 2px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--bg-overlay);
+        box-shadow: 0 2px 8px #00000059;
+        white-space: nowrap;
+      }
+      .remote-link-chip[hidden] {
+        display: none;
+      }
+      .remote-link-chip-action {
+        /* 터치 표면이므로 라벨보다 탭 영역이 우선이다. */
+        min-height: 32px;
+        padding: 6px 10px;
+        border: 0;
+        border-radius: var(--radius-md);
+        background: transparent;
+        color: var(--text-primary);
+        font: inherit;
+        font-size: 12px;
+        line-height: 1.4;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+      .remote-link-chip-action:active,
+      .remote-link-chip-action:focus-visible {
+        background: #ffffff14;
+        outline: none;
       }
       .xterm-helper-textarea {
         font-size: 16px;
@@ -1601,14 +2240,54 @@
         position: absolute;
         z-index: 12;
         display: none;
-        width: 18px;
-        height: 18px;
+        width: var(--touch-selection-handle-size);
+        height: var(--touch-selection-handle-size);
         border: 2px solid var(--terminal-bg);
-        border-radius: 50%;
+        border-radius: 0 50% 50% 50%;
         background: var(--accent);
         box-shadow: 0 2px 8px #00000059;
         touch-action: none;
-        transform: translate(-50%, -50%);
+      }
+      .touch-selection-handle[data-handle="start"] {
+        border-radius: 50% 0 50% 50%;
+        transform: translateX(-100%);
+      }
+      .touch-selection-handle[data-handle="start"][data-inward="true"] {
+        border-radius: 0 50% 50% 50%;
+        transform: none;
+      }
+      .touch-selection-handle[data-handle="end"][data-inward="true"] {
+        border-radius: 50% 0 50% 50%;
+        transform: translateX(-100%);
+      }
+      .touch-selection-magnifier {
+        position: fixed;
+        z-index: 1000;
+        width: 168px;
+        height: 76px;
+        max-width: calc(100vw - 16px);
+        overflow: hidden;
+        border: 2px solid var(--accent);
+        border-radius: 18px;
+        background: var(--terminal-surface-bg, var(--terminal-bg));
+        box-shadow: 0 4px 16px #00000059;
+        pointer-events: none;
+        user-select: none;
+      }
+      .touch-selection-magnifier::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 20%;
+        height: 60%;
+        border-left: 1px solid var(--accent);
+      }
+      .touch-selection-magnifier-content {
+        position: absolute;
+        top: 0;
+        left: 0;
+        padding: 0;
+        transform-origin: top left;
       }
       /* --- Special key toolbar (soft keys) ---
          A client-side row of buttons that send terminal escape sequences via
@@ -1628,28 +2307,11 @@
         border-top: 1px solid var(--border);
         background: var(--panel);
       }
-      .key-bar-settings {
-        width: 30px;
-        height: var(--key-bar-control-height);
-        display: inline-flex;
-        flex: 0 0 auto;
-        align-items: center;
-        justify-content: center;
-        padding: 0;
-        color: var(--text-secondary);
-        font-size: 14px;
-      }
-      .key-bar-settings:hover {
-        background: var(--hover-bg);
-      }
-      .key-bar-settings.open {
-        border-color: var(--accent-50);
-        color: var(--accent);
-      }
       .key-row {
-        display: flex;
+        display: grid;
+        grid-template-columns: auto auto auto;
+        justify-content: space-between;
         flex: 1 1 auto;
-        flex-wrap: nowrap;
         align-items: center;
         gap: 5px;
         min-width: 0;
@@ -1659,15 +2321,18 @@
         scrollbar-width: none;
         -webkit-overflow-scrolling: touch;
       }
+      .key-row .action-segment {
+        gap: 5px;
+      }
       .key-row::-webkit-scrollbar {
         display: none;
       }
       .key-btn {
         position: relative;
         flex: 0 0 auto;
-        min-width: 34px;
+        min-width: calc(34px * var(--input-button-scale, 1));
         height: var(--key-bar-control-height);
-        padding: 4px 9px;
+        padding: calc(4px * var(--input-button-scale, 1)) calc(9px * var(--input-button-scale, 1));
         background: var(--panel-2);
         color: var(--text);
         font-size: var(--fs-sm);
@@ -1692,7 +2357,16 @@
         background: var(--accent-12);
       }
       .key-flick-btn {
-        min-width: 42px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: calc(42px * var(--input-button-scale, 1));
+        touch-action: none;
+        user-select: none;
+      }
+      /* Same reason as the flick pad: a repeating key owns the whole gesture,
+         so the scrolling key row must not steal it on a few px of drift. */
+      .key-repeat-btn {
         touch-action: none;
         user-select: none;
       }
@@ -1766,6 +2440,10 @@
       }
       .key-row-empty {
         display: inline-flex;
+        /* The empty notice only shows when every segment is empty, so it can
+           span the whole grid row without colliding with a chip. */
+        grid-row: 1;
+        grid-column: 1 / -1;
         flex: 0 0 auto;
         align-items: center;
         height: var(--key-bar-control-height);
@@ -1777,26 +2455,6 @@
       .key-toggle.active {
         border-color: var(--accent-50);
         color: var(--accent);
-      }
-      .key-popover {
-        position: absolute;
-        left: 6px;
-        bottom: calc(100% + 6px);
-        z-index: 40;
-        width: min(340px, calc(100vw - 24px));
-        max-height: min(60vh, 440px);
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
-        background: var(--panel);
-        box-shadow: 0 12px 32px #00000073;
-      }
-      .key-popover-scroll {
-        min-height: 0;
-        overflow-y: auto;
-        padding: 8px 10px 10px;
       }
       .key-popover-title {
         margin: 10px 0 4px;
@@ -1839,7 +2497,7 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      /* Scope picker in the "Composer recall" popover section (ADR-0055). */
+      /* Scope picker in the "Composer" popover section (ADR-0055). */
       .key-set-select {
         flex: 0 0 auto;
         max-width: 56%;
@@ -1873,18 +2531,6 @@
         background: var(--accent-12);
         color: var(--accent);
       }
-      .key-order-section {
-        margin-top: 10px;
-      }
-      .key-order-heading {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-      }
-      .key-order-heading .key-popover-title {
-        margin: 0;
-      }
       .key-order-reset {
         flex: 0 0 auto;
         padding: 2px 7px;
@@ -1894,24 +2540,22 @@
       .key-order-reset:hover {
         background: var(--hover-bg);
       }
-      .key-order-grid {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 5px;
-        padding-top: 6px;
-        user-select: none;
+      .key-order-zone-label {
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+        font-weight: 600;
       }
-      .key-order-chip {
+      .layout-chip {
         position: relative;
         touch-action: none;
         cursor: grab;
       }
-      .key-order-chip.dragging {
+      .layout-chip.dragging {
         opacity: 0.45;
         cursor: grabbing;
       }
-      .key-order-chip.drop-before::before,
-      .key-order-chip.drop-after::after {
+      .layout-chip.drop-before::before,
+      .layout-chip.drop-after::after {
         position: absolute;
         top: -3px;
         bottom: -3px;
@@ -1920,10 +2564,10 @@
         background: var(--accent);
         content: "";
       }
-      .key-order-chip.drop-before::before {
+      .layout-chip.drop-before::before {
         left: -4px;
       }
-      .key-order-chip.drop-after::after {
+      .layout-chip.drop-after::after {
         right: -4px;
       }
       .key-order-help {
@@ -1950,6 +2594,9 @@
         font-weight: 600;
       }
       .key-order-action {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         min-width: 34px;
         height: 26px;
         padding: 0 7px;
@@ -1958,6 +2605,221 @@
       }
       .key-order-action:hover:not(:disabled) {
         background: var(--hover-bg);
+      }
+      .key-order-danger {
+        border-color: #8b3440;
+        color: var(--danger);
+      }
+
+      /* Host file viewer (ADR-0184). Fills the surface rather than centring a
+         card: a file is read, and on a phone a centred dialog wastes the rows
+         that reading needs. */
+      .file-viewer-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        display: flex;
+        padding: 8px;
+        background: #0000008c;
+      }
+      .file-viewer-dialog {
+        display: flex;
+        flex: 1 1 auto;
+        flex-direction: column;
+        min-width: 0;
+        min-height: 0;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        background: var(--bg-base);
+        overflow: hidden;
+      }
+      .file-viewer-header {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-surface);
+      }
+      .file-viewer-title-slot {
+        display: flex;
+        flex: 1 1 auto;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+      }
+      .file-viewer-title {
+        flex: 0 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        color: var(--muted);
+        font-size: var(--fs-sm);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        /* The tail of a host path identifies the file; the drive letter does
+           not. Keep the end visible when it overflows. */
+        direction: rtl;
+        text-align: left;
+      }
+      .file-viewer-zoom {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        gap: 4px;
+      }
+      .file-viewer-zoom button,
+      .file-viewer-copy-path,
+      .file-viewer-download,
+      .file-viewer-close {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 26px;
+        height: 24px;
+        padding: 0 6px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--bg-base);
+        color: var(--text);
+        font-size: var(--fs-sm);
+        line-height: 1;
+      }
+      .file-viewer-zoom button:hover,
+      .file-viewer-copy-path:hover,
+      .file-viewer-download:hover,
+      .file-viewer-close:hover {
+        background: var(--hover-bg);
+      }
+      .file-viewer-download[disabled] {
+        color: var(--muted);
+        opacity: 0.6;
+      }
+      .file-viewer-zoom-level {
+        min-width: 40px;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+        text-align: center;
+      }
+      @media (max-width: 360px) {
+        .file-viewer-header {
+          gap: 4px;
+          padding-inline: 6px;
+        }
+        .file-viewer-zoom-level,
+        #fileViewerZoomReset {
+          display: none;
+        }
+      }
+      .file-viewer-body {
+        flex: 1 1 auto;
+        min-width: 0;
+        min-height: 0;
+        overflow: auto;
+        overscroll-behavior: contain;
+        /* Pinch zoom is handled by the client, so the browser must not claim
+           the gesture and zoom the whole page instead. */
+        touch-action: pan-x pan-y;
+      }
+      .file-viewer-message,
+      .file-viewer-binary {
+        padding: 14px;
+        color: var(--muted);
+        font-size: var(--fs-sm);
+      }
+      .file-viewer-message.error {
+        color: var(--danger);
+      }
+      .file-viewer-text {
+        margin: 0;
+        padding: 12px;
+        min-width: min-content;
+        font-size: var(--file-viewer-text-size, var(--fs-md));
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .file-viewer-image {
+        display: block;
+        margin: 0 auto;
+        padding: 12px;
+        width: var(--file-viewer-image-width, auto);
+        max-width: var(--file-viewer-image-max-width, 100%);
+        height: auto;
+      }
+      .file-viewer-preview {
+        display: block;
+        width: 100%;
+        height: 100%;
+        min-height: 320px;
+        border: 0;
+        background: var(--bg-surface);
+      }
+      .file-viewer-back {
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: center;
+        min-width: 26px;
+        height: 24px;
+        padding: 0 6px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--bg-base);
+        color: var(--text);
+        line-height: 1;
+      }
+      .file-viewer-back:hover {
+        background: var(--hover-bg);
+      }
+      /* Explorer mode (ADR-0197): a single-panel directory listing inside the
+         same overlay body. Rows are buttons sized for touch. */
+      .file-viewer-directory {
+        display: flex;
+        flex-direction: column;
+        padding: 6px;
+        touch-action: pan-y;
+      }
+      .file-viewer-directory-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 44px;
+        padding: 0 10px;
+        border: 0;
+        border-radius: var(--radius-md);
+        background: transparent;
+        color: var(--text);
+        font-size: var(--fs-md);
+        text-align: left;
+      }
+      .file-viewer-directory-row:hover {
+        background: var(--hover-bg);
+      }
+      .file-viewer-directory-row.parent {
+        color: var(--muted);
+      }
+      .file-viewer-directory-icon {
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: center;
+        color: var(--text-secondary);
+      }
+      .file-viewer-directory-name {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .file-viewer-directory-size {
+        flex: 0 0 auto;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+      }
+      .file-viewer-directory-empty {
+        padding: 14px;
+        color: var(--muted);
+        font-size: var(--fs-sm);
       }
 
       /* OAuth loopback relay (ADR-0175) */
@@ -2010,7 +2872,15 @@
       }
       .oauth-relay-status.success {
         color: var(--green);
+        display: flex;
+        align-items: flex-start;
+        gap: 4px;
         font-weight: 600;
+      }
+      .oauth-relay-status-icon {
+        display: inline-flex;
+        flex: 0 0 auto;
+        margin-top: 1px;
       }
       .oauth-relay-actions {
         display: flex;

@@ -2,6 +2,7 @@ import { useEffect, useCallback, useRef, useState } from "react";
 import type { ViewInstanceConfig } from "@/stores/types";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useContainerSize } from "@/hooks/useContainerSize";
+import { GripVerticalIcon } from "@/components/ui/icons";
 
 /**
  * Content-box height (px) below which the "Select a view" guidance header is
@@ -120,15 +121,16 @@ function EmptyViewCard({
 
             {/* Drag handle — right edge */}
             <span
-              className="shrink-0 pl-2 pr-0.5 text-[10px]"
+              className="shrink-0 pl-2 pr-0.5"
               style={{
                 color: "var(--text-secondary)",
                 opacity: 0.25,
                 cursor: "grab",
                 userSelect: "none",
               }}
+              data-testid="empty-view-drag-handle"
             >
-              ⠿
+              <GripVerticalIcon size={12} />
             </span>
           </>
         )}

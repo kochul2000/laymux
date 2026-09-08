@@ -13,8 +13,8 @@ import {
   isWindowsProfile,
   formatCommand,
   ACTIVITY_MSG_TRUNCATE_LEN,
-  formatRelativeTime,
   formatActivity,
+  getTerminalLastInput,
   getStatusDisplaySettings,
   projectWorkspaceTerminals,
   shortWorkspaceLabel,
@@ -33,12 +33,27 @@ import { getPaneDragData, isPaneDrag } from "@/lib/pane-dnd";
 import { markNotificationsRead } from "@/lib/tauri-api";
 import { toTerminalId } from "@/lib/pane-ids";
 import { computePaneNumbers } from "@/lib/pane-numbers";
+import { selectLatestTerminalInput } from "@/lib/terminal-last-input";
 import { deriveHiddenItems, findNextVisibleWorkspaceId } from "@/lib/hidden-items";
 import { setWorkspaceHiddenWithFallback } from "@/lib/hidden-item-actions";
-import { switchActiveWorkspace } from "@/lib/workspace-transition";
+import { focusWorkspacePane, switchActiveWorkspace } from "@/lib/workspace-transition";
 import { runWorkspaceClearFromUi } from "@/lib/workspace-clear-action";
 import { HiddenItemsShelf } from "./workspace-selector/HiddenItemsShelf";
 import { UndoSnackbar } from "@/components/ui/UndoSnackbar";
+import { CommandStatusIcon } from "@/components/ui/CommandStatusIcon";
+import { TwoClickConfirmButton } from "@/components/ui/TwoClickConfirmButton";
+import { getCommandStatusIconKind } from "@/lib/command-status-icon";
+import {
+  BroomIcon,
+  CopyPlusIcon,
+  EllipsisVerticalIcon,
+  EyeIcon,
+  ListFilterIcon,
+  ListIcon,
+  PencilIcon,
+  PlusIcon,
+  XIcon,
+} from "@/components/ui/icons";
 
 /** 섹션 소제목 라벨 (uppercase, 작은 폰트, 반투명) */
 function SectionLabel({ children }: { children: React.ReactNode }) {
@@ -99,21 +114,6 @@ interface DragContext {
 
 type HiddenUndoItem = { id: string; name: string; paneIds: string[]; nonce: number };
 
-/** Eye icon (visible state) — 11x11 */
-function EyeIcon({ size = 11 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 11 11" fill="none">
-      <path
-        d="M1 5.5C1 5.5 3 2 5.5 2C8 2 10 5.5 10 5.5C10 5.5 8 9 5.5 9C3 9 1 5.5 1 5.5Z"
-        stroke="currentColor"
-        strokeWidth="1"
-        strokeLinejoin="round"
-      />
-      <circle cx="5.5" cy="5.5" r="1.5" stroke="currentColor" strokeWidth="1" />
-    </svg>
-  );
-}
-
 function WorkspaceItem({
   ws,
   index,
@@ -129,8 +129,10 @@ function WorkspaceItem({
   onPaneDragLeave,
   onPaneDrop,
   hiddenPaneIds,
+  confirmDestructiveActions,
   canHideWorkspace,
   onSelect,
+  onSelectPane,
   onClose,
   onDuplicate,
   onRename,
@@ -152,8 +154,10 @@ function WorkspaceItem({
   onPaneDragLeave: (e: React.DragEvent) => void;
   onPaneDrop: (e: React.DragEvent, wsId: string) => void;
   hiddenPaneIds: Set<string>;
+  confirmDestructiveActions: boolean;
   canHideWorkspace: boolean;
   onSelect: () => void;
+  onSelectPane: (paneIndex: number, pane: WorkspacePane) => void;
   onClose: () => void;
   onDuplicate: () => void;
   onRename: () => void;
@@ -163,28 +167,10 @@ function WorkspaceItem({
   const { t } = useTranslation("workspace");
   const [hovered, setHovered] = useState(false);
   const wsDisplay = useSettingsStore((s) => s.workspaceSelector.display);
+  const lastInputMode = useSettingsStore((s) => s.workspaceSelector.lastInputMode);
   const claudeSettings = useSettingsStore((s) => s.claude);
   const codexSettings = useSettingsStore((s) => s.codex);
   const grokSettings = useSettingsStore((s) => s.grok);
-
-  const cmdInfo = summary.lastCommand;
-  const cmdStatusSettings = getStatusDisplaySettings(
-    cmdInfo?.activity,
-    claudeSettings,
-    codexSettings,
-    grokSettings,
-  );
-  const cmdStatus = cmdInfo
-    ? computeCommandStatus(
-        cmdInfo.exitCode,
-        cmdInfo.outputActive,
-        cmdInfo.activityMessage,
-        cmdInfo.activity,
-        cmdInfo.title,
-        cmdStatusSettings.mode,
-        cmdStatusSettings.delimiter,
-      )
-    : null;
 
   return (
     <div
@@ -284,13 +270,15 @@ function WorkspaceItem({
             <ExitFade show={summary.unreadCount > 0} className="workspace-count-badge-frame">
               <CountBadge count={summary.unreadCount} testId={`unread-badge-${ws.id}`} />
             </ExitFade>
-            <button
+            <TwoClickConfirmButton
               type="button"
               data-testid={`workspace-hide-${ws.id}`}
-              onClick={(e) => {
-                e.stopPropagation();
+              onConfirm={() => {
                 onHideWorkspace();
               }}
+              confirmationEnabled={confirmDestructiveActions}
+              stopPropagation
+              confirmLabel={t("hiddenItems.hideConfirm", { name: ws.name })}
               disabled={!canHideWorkspace}
               className="hidden-item-action-btn workspace-quick-hide hover-bg cursor-pointer"
               aria-label={isActive ? t("hiddenItems.hideAndMove") : t("hiddenItems.hideFromList")}
@@ -303,16 +291,18 @@ function WorkspaceItem({
               }
             >
               <EyeIcon size={12} />
-            </button>
+            </TwoClickConfirmButton>
             {hovered && (
               <>
                 {panes.some((pane) => pane.view.type === "TerminalView") && (
-                  <button
+                  <TwoClickConfirmButton
                     data-testid={`workspace-clear-${ws.id}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
+                    onConfirm={() => {
                       onClearTerminals();
                     }}
+                    confirmationEnabled={confirmDestructiveActions}
+                    stopPropagation
+                    confirmLabel={t("item.clearTerminalsConfirm", { name: ws.name })}
                     className="shrink-0 cursor-pointer rounded p-0.5 leading-none opacity-50 hover:opacity-100"
                     style={{
                       color: "var(--text-secondary)",
@@ -321,21 +311,8 @@ function WorkspaceItem({
                     }}
                     title={t("item.clearTerminals")}
                   >
-                    {/* Broom: the workspace's terminals get swept, the panes stay. */}
-                    <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-                      {/* Upright, not angled: a diagonal handle plus a triangular
-                          head reads as a checkmark at this size. The handle
-                          overlaps the head so the two never separate. */}
-                      <path
-                        d="M5.5 1.3V5.6"
-                        stroke="currentColor"
-                        strokeWidth="1.3"
-                        strokeLinecap="round"
-                      />
-                      {/* Filled flared head — a 1px outline blurs into a blob at 11px. */}
-                      <path d="M4.1 5.1H6.9L8.7 9.6H2.3z" fill="currentColor" />
-                    </svg>
-                  </button>
+                    <BroomIcon size={11} />
+                  </TwoClickConfirmButton>
                 )}
                 <button
                   data-testid={`workspace-duplicate-${ws.id}`}
@@ -351,26 +328,7 @@ function WorkspaceItem({
                   }}
                   title={t("item.duplicateWorkspace")}
                 >
-                  <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-                    <rect
-                      x="0.5"
-                      y="2.5"
-                      width="7"
-                      height="7"
-                      rx="1"
-                      stroke="currentColor"
-                      strokeWidth="1"
-                    />
-                    <rect
-                      x="3"
-                      y="0.5"
-                      width="7"
-                      height="7"
-                      rx="1"
-                      stroke="currentColor"
-                      strokeWidth="1"
-                    />
-                  </svg>
+                  <CopyPlusIcon size={11} />
                 </button>
                 <button
                   data-testid={`workspace-rename-${ws.id}`}
@@ -386,39 +344,26 @@ function WorkspaceItem({
                   }}
                   title={t("item.renameWorkspace")}
                 >
-                  <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-                    <path
-                      d="M7.5 1.5l2 2-6 6H1.5v-2z"
-                      stroke="currentColor"
-                      strokeWidth="1"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
+                  <PencilIcon size={11} />
                 </button>
                 {canClose && (
-                  <button
+                  <TwoClickConfirmButton
                     data-testid={`workspace-close-${ws.id}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
+                    onConfirm={() => {
                       onClose();
                     }}
-                    className="shrink-0 cursor-pointer rounded p-0.5 leading-none opacity-50 hover:opacity-100 hover:text-[var(--red)]"
+                    confirmationEnabled={confirmDestructiveActions}
+                    stopPropagation
+                    confirmLabel={t("item.closeWorkspaceConfirm", { name: ws.name })}
+                    className="shrink-0 cursor-pointer rounded p-0.5 leading-none text-[var(--text-secondary)] opacity-50 hover:opacity-100 hover:text-[var(--red)]"
                     style={{
-                      color: "var(--text-secondary)",
                       background: "transparent",
                       border: "none",
                     }}
                     title={t("item.closeWorkspace")}
                   >
-                    <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-                      <path
-                        d="M2.5 2.5l6 6M8.5 2.5l-6 6"
-                        stroke="currentColor"
-                        strokeWidth="1.2"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                  </button>
+                    <XIcon size={11} />
+                  </TwoClickConfirmButton>
                 )}
               </>
             )}
@@ -437,52 +382,271 @@ function WorkspaceItem({
                 (a, b) => (paneNumbers.get(a.id) ?? 0) - (paneNumbers.get(b.id) ?? 0),
               );
               const gridFocused = isActive ? useGridStore.getState().focusedPaneIndex : null;
-              return panesByNumber
-                .filter((pane) => !hiddenPaneIds.has(pane.id))
-                .map((pane) => {
-                  // 표시 순서와 달리 focus/minimap은 WorkspacePane[] 원본 인덱스를 사용한다.
-                  const paneIndex = paneIndexById.get(pane.id) ?? -1;
-                  const isFocusedPane = isActive && gridFocused === paneIndex;
-                  if (pane.view.type === "TerminalView") {
-                    const termId = toTerminalId(pane.id);
-                    const ts = summary.terminalSummaries.find((t) => t.id === termId);
-                    if (!ts) return null;
-                    const paneStatusSettings = getStatusDisplaySettings(
-                      ts.activity,
-                      claudeSettings,
-                      codexSettings,
-                      grokSettings,
-                    );
-                    // `outputActive` belongs in the gate, not just the input: a
-                    // shell streaming output before any command was captured is
-                    // working, and sleep prevention already counts it as busy
-                    // (ADR-0114). Dropping it here would leave the row showing
-                    // the previous result while the machine stays awake for it.
-                    const tCmdStatus =
-                      ts.lastCommand || ts.outputActive || ts.activity?.type === "interactiveApp"
-                        ? computeCommandStatus(
-                            ts.lastExitCode,
-                            ts.outputActive,
-                            ts.activityMessage,
-                            ts.activity,
-                            ts.title,
-                            paneStatusSettings.mode,
-                            paneStatusSettings.delimiter,
-                          )
-                        : null;
-                    const actInfo = formatActivity(ts.activity);
+              const visiblePanes = panesByNumber.filter((pane) => !hiddenPaneIds.has(pane.id));
+              const workspaceLastInput = selectLatestTerminalInput(
+                visiblePanes.flatMap((pane) => {
+                  if (pane.view.type !== "TerminalView") return [];
+                  const terminal = summary.terminalSummaries.find(
+                    (item) => item.id === toTerminalId(pane.id),
+                  );
+                  return terminal ? [terminal] : [];
+                }),
+              );
+              return (
+                <>
+                  {visiblePanes.map((pane) => {
+                    // 표시 순서와 달리 focus/minimap은 WorkspacePane[] 원본 인덱스를 사용한다.
+                    const paneIndex = paneIndexById.get(pane.id) ?? -1;
+                    const paneNumber = paneNumbers.get(pane.id) ?? paneIndex + 1;
+                    const isFocusedPane = isActive && gridFocused === paneIndex;
+                    if (pane.view.type === "TerminalView") {
+                      const termId = toTerminalId(pane.id);
+                      const ts = summary.terminalSummaries.find((t) => t.id === termId);
+                      if (!ts) return null;
+                      const paneStatusSettings = getStatusDisplaySettings(
+                        ts.activity,
+                        claudeSettings,
+                        codexSettings,
+                        grokSettings,
+                      );
+                      // `outputActive` belongs in the gate, not just the input: a
+                      // shell streaming output before any command was captured is
+                      // working, and sleep prevention already counts it as busy
+                      // (ADR-0114). Dropping it here would leave the row showing
+                      // the previous result while the machine stays awake for it.
+                      const tCmdStatus =
+                        ts.lastCommand || ts.outputActive || ts.activity?.type === "interactiveApp"
+                          ? computeCommandStatus(
+                              ts.lastExitCode,
+                              ts.outputActive,
+                              ts.activityMessage,
+                              ts.activity,
+                              ts.title,
+                              paneStatusSettings.mode,
+                              paneStatusSettings.delimiter,
+                            )
+                          : null;
+                      const actInfo = formatActivity(ts.activity);
+                      const lastInput = getTerminalLastInput(ts);
+                      return (
+                        <button
+                          type="button"
+                          key={pane.id}
+                          data-testid={`pane-row-${pane.id}`}
+                          aria-label={t("item.openPane", {
+                            workspace: ws.name,
+                            number: paneNumber,
+                            view: ts.profile || pane.view.profile || "TerminalView",
+                          })}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onSelectPane(paneIndex, pane);
+                          }}
+                          className={`workspace-pane-row workspace-terminal-pane-row flex w-full cursor-pointer gap-1.5 border-0 bg-transparent p-0 text-left text-[11px] ${
+                            lastInputMode === "perPane"
+                              ? "workspace-terminal-pane-row-two-line items-start"
+                              : "items-center"
+                          }`}
+                          style={{
+                            paddingLeft: showMinimap && wsDisplay.minimap ? 0 : 18,
+                            ...(isFocusedPane
+                              ? {
+                                  background: "var(--accent-12)",
+                                  borderRadius: "var(--radius-md)",
+                                  filter: "brightness(1.3)",
+                                }
+                              : {}),
+                          }}
+                        >
+                          <div className="flex min-w-0 flex-1 items-start gap-1.5">
+                            {showMinimap && wsDisplay.minimap && (
+                              <span
+                                className={`${lastInputMode === "perPane" ? "mt-0.5 " : ""}shrink-0`}
+                                data-testid={`pane-minimap-${termId}`}
+                                style={{ opacity: isFocusedPane ? 1 : 0.5 }}
+                              >
+                                <PaneMinimap
+                                  panes={minimapPanes}
+                                  highlightIndex={paneIndex}
+                                  width={18}
+                                  height={12}
+                                />
+                              </span>
+                            )}
+                            <div
+                              className={`flex min-w-0 flex-1 ${
+                                lastInputMode === "perPane" ? "flex-col gap-px" : "items-center"
+                              }`}
+                            >
+                              <div
+                                data-testid={`pane-primary-${ts.id}`}
+                                className="flex min-w-0 items-center gap-1 truncate"
+                              >
+                                <div className="flex min-w-0 flex-1 items-center gap-1 truncate">
+                                  {wsDisplay.environment && (
+                                    <span
+                                      className="shrink-0 font-medium"
+                                      style={{
+                                        color: "var(--text-secondary)",
+                                        opacity: isActive ? 0.9 : 0.7,
+                                      }}
+                                    >
+                                      {shortWorkspaceLabel(ts.label)}
+                                    </span>
+                                  )}
+                                  {wsDisplay.activity && (
+                                    <span
+                                      data-testid={`terminal-activity-${ts.id}`}
+                                      className="shrink-0 rounded px-1 mr-1 text-[9px]"
+                                      style={{
+                                        color: actInfo.color,
+                                        background:
+                                          ts.activity?.type === "interactiveApp"
+                                            ? ts.activity?.name === "Claude"
+                                              ? "var(--orange-15)"
+                                              : "var(--accent-12)"
+                                            : "var(--active-bg)",
+                                        minWidth: 40,
+                                        textAlign: "center",
+                                        display: "inline-block",
+                                        opacity: isActive ? 1 : 0.7,
+                                      }}
+                                    >
+                                      {actInfo.label}
+                                      {ts.outputActive ? "" : ""}
+                                    </span>
+                                  )}
+                                  {wsDisplay.path && ts.branch && (
+                                    <>
+                                      <span
+                                        className="shrink-0"
+                                        style={{
+                                          color: "var(--green)",
+                                          opacity: isActive ? 1 : 0.7,
+                                        }}
+                                      >
+                                        {ts.branch}
+                                      </span>
+                                    </>
+                                  )}
+                                  {wsDisplay.path && ts.cwd && (
+                                    <>
+                                      <span
+                                        className="truncate"
+                                        style={{
+                                          color: isActive
+                                            ? "var(--text-primary)"
+                                            : "var(--text-secondary)",
+                                          opacity: isActive ? 0.7 : 0.5,
+                                          ...(pathEllipsis === "start"
+                                            ? { direction: "rtl", textAlign: "left" }
+                                            : {}),
+                                        }}
+                                      >
+                                        <bdi>
+                                          {abbreviatePath(
+                                            isWindowsProfile(ts.profile)
+                                              ? mntPathToWindows(ts.cwd)
+                                              : ts.cwd,
+                                            pathEllipsis,
+                                          )}
+                                        </bdi>
+                                      </span>
+                                    </>
+                                  )}
+                                </div>
+                                {wsDisplay.result && tCmdStatus?.icon ? (
+                                  <span
+                                    data-testid={`pane-cmd-badge-${ts.id}`}
+                                    className="ml-auto shrink-0"
+                                    style={{
+                                      color: tCmdStatus.color,
+                                      border: ts.hasUnreadNotification
+                                        ? "1.5px solid var(--accent)"
+                                        : "1.5px solid transparent",
+                                      borderRadius: "var(--radius-md)",
+                                      width: 16,
+                                      height: 16,
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      boxSizing: "border-box",
+                                      fontSize: 10,
+                                      lineHeight: 1,
+                                      // Fade the accent ring as the unread alert clears (focus/input),
+                                      // matching the badge/dot fade (issue #365 follow-up).
+                                      transition: "border-color 200ms ease",
+                                    }}
+                                  >
+                                    <CommandStatusIcon
+                                      status={tCmdStatus.icon}
+                                      label={t(
+                                        `commandStatus.${getCommandStatusIconKind(tCmdStatus.icon)}`,
+                                      )}
+                                    />
+                                  </span>
+                                ) : (
+                                  // Rendered as a standalone ExitFade (not a ternary branch) so the
+                                  // dot can fade out when the alert clears instead of unmounting
+                                  // instantly. Hidden while a cmd badge owns the slot.
+                                  <ExitFade
+                                    show={!!(wsDisplay.result && ts.hasUnreadNotification)}
+                                    data-testid={`pane-notif-dot-${ts.id}`}
+                                    className="ml-auto shrink-0"
+                                    style={{
+                                      width: 6,
+                                      height: 6,
+                                      borderRadius: "50%",
+                                      background: "var(--accent)",
+                                      display: "inline-block",
+                                    }}
+                                  />
+                                )}
+                              </div>
+                              {lastInputMode === "perPane" && (
+                                <div
+                                  data-testid={`pane-last-input-${ts.id}`}
+                                  className="min-w-0 truncate font-bold"
+                                  title={lastInput}
+                                  style={{
+                                    minHeight: "1rem",
+                                    color: "var(--text-secondary)",
+                                    opacity: lastInput ? (isActive ? 0.8 : 0.6) : 0,
+                                  }}
+                                >
+                                  {lastInput
+                                    ? formatCommand(lastInput, ACTIVITY_MSG_TRUNCATE_LEN)
+                                    : "\u00a0"}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    }
+                    // EmptyView or other view types (IssueReporterView, MemoView, etc.)
                     return (
-                      <div
+                      <button
+                        type="button"
                         key={pane.id}
                         data-testid={`pane-row-${pane.id}`}
-                        className="workspace-pane-row flex items-center gap-1.5 truncate text-[11px]"
+                        aria-label={t("item.openPane", {
+                          workspace: ws.name,
+                          number: paneNumber,
+                          view: pane.view.type,
+                        })}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onSelectPane(paneIndex, pane);
+                        }}
+                        className="workspace-pane-row flex w-full cursor-pointer items-center gap-1.5 truncate border-0 bg-transparent p-0 text-left text-[11px]"
                         style={{
                           paddingLeft: showMinimap && wsDisplay.minimap ? 0 : 18,
                           ...(isFocusedPane
                             ? {
-                                background: "var(--accent-12)",
+                                background: "var(--accent-08)",
                                 borderRadius: "var(--radius-md)",
-                                filter: "brightness(1.3)",
+                                color: "var(--text-primary)",
                               }
                             : {}),
                         }}
@@ -491,7 +655,7 @@ function WorkspaceItem({
                           {showMinimap && wsDisplay.minimap && (
                             <span
                               className="shrink-0"
-                              data-testid={`pane-minimap-${termId}`}
+                              data-testid={`pane-minimap-empty-${pane.id}`}
                               style={{ opacity: isFocusedPane ? 1 : 0.5 }}
                             >
                               <PaneMinimap
@@ -503,165 +667,36 @@ function WorkspaceItem({
                             </span>
                           )}
                           <div className="flex min-w-0 flex-1 items-center gap-1 truncate">
-                            {wsDisplay.environment && (
-                              <span
-                                className="shrink-0 font-medium"
-                                style={{
-                                  color: "var(--text-secondary)",
-                                  opacity: isActive ? 0.9 : 0.7,
-                                }}
-                              >
-                                {shortWorkspaceLabel(ts.label)}
-                              </span>
-                            )}
-                            {wsDisplay.activity && (
-                              <span
-                                data-testid={`terminal-activity-${ts.id}`}
-                                className="shrink-0 rounded px-1 mr-1 text-[9px]"
-                                style={{
-                                  color: actInfo.color,
-                                  background:
-                                    ts.activity?.type === "interactiveApp"
-                                      ? ts.activity?.name === "Claude"
-                                        ? "var(--orange-15)"
-                                        : "var(--accent-12)"
-                                      : "var(--active-bg)",
-                                  minWidth: 40,
-                                  textAlign: "center",
-                                  display: "inline-block",
-                                  opacity: isActive ? 1 : 0.7,
-                                }}
-                              >
-                                {actInfo.label}
-                                {ts.outputActive ? "" : ""}
-                              </span>
-                            )}
-                            {wsDisplay.path && ts.branch && (
-                              <>
-                                <span
-                                  className="shrink-0"
-                                  style={{ color: "var(--green)", opacity: isActive ? 1 : 0.7 }}
-                                >
-                                  {ts.branch}
-                                </span>
-                              </>
-                            )}
-                            {wsDisplay.path && ts.cwd && (
-                              <>
-                                <span
-                                  className="truncate"
-                                  style={{
-                                    color: isActive
-                                      ? "var(--text-primary)"
-                                      : "var(--text-secondary)",
-                                    opacity: isActive ? 0.7 : 0.5,
-                                    ...(pathEllipsis === "start"
-                                      ? { direction: "rtl", textAlign: "left" }
-                                      : {}),
-                                  }}
-                                >
-                                  <bdi>
-                                    {abbreviatePath(
-                                      isWindowsProfile(ts.profile)
-                                        ? mntPathToWindows(ts.cwd)
-                                        : ts.cwd,
-                                      pathEllipsis,
-                                    )}
-                                  </bdi>
-                                </span>
-                              </>
-                            )}
-                          </div>
-                          {wsDisplay.result && tCmdStatus?.icon ? (
                             <span
-                              data-testid={`pane-cmd-badge-${ts.id}`}
-                              className="shrink-0 ml-auto"
-                              style={{
-                                color: tCmdStatus.color,
-                                border: ts.hasUnreadNotification
-                                  ? "1.5px solid var(--accent)"
-                                  : "1.5px solid transparent",
-                                borderRadius: "var(--radius-md)",
-                                width: 16,
-                                height: 16,
-                                display: "inline-flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                boxSizing: "border-box",
-                                fontSize: 10,
-                                lineHeight: 1,
-                                // Fade the accent ring as the unread alert clears (focus/input),
-                                // matching the badge/dot fade (issue #365 follow-up).
-                                transition: "border-color 200ms ease",
-                              }}
+                              className="shrink-0 font-medium"
+                              style={{ color: "var(--text-secondary)", opacity: 0.4 }}
                             >
-                              {tCmdStatus.icon}
+                              {shortWorkspaceLabel(pane.view.type)}
                             </span>
-                          ) : (
-                            // Rendered as a standalone ExitFade (not a ternary branch) so the
-                            // dot can fade out when the alert clears instead of unmounting
-                            // instantly. Hidden while a cmd badge owns the slot.
-                            <ExitFade
-                              show={!!(wsDisplay.result && ts.hasUnreadNotification)}
-                              data-testid={`pane-notif-dot-${ts.id}`}
-                              className="shrink-0 ml-auto"
-                              style={{
-                                width: 6,
-                                height: 6,
-                                borderRadius: "50%",
-                                background: "var(--accent)",
-                                display: "inline-block",
-                              }}
-                            />
-                          )}
+                          </div>
                         </div>
-                      </div>
+                      </button>
                     );
-                  }
-                  // EmptyView or other view types (IssueReporterView, MemoView, etc.)
-                  return (
+                  })}
+                  {lastInputMode === "workspaceLatest" && (
                     <div
-                      key={pane.id}
-                      data-testid={`pane-row-${pane.id}`}
-                      className="workspace-pane-row flex items-center gap-1.5 truncate text-[11px]"
+                      data-testid={`workspace-last-input-${ws.id}`}
+                      className="workspace-last-input-row min-w-0 truncate text-[11px]"
+                      title={workspaceLastInput?.text}
                       style={{
-                        paddingLeft: showMinimap && wsDisplay.minimap ? 0 : 18,
-                        ...(isFocusedPane
-                          ? {
-                              background: "var(--accent-08)",
-                              borderRadius: "var(--radius-md)",
-                              color: "var(--text-primary)",
-                            }
-                          : {}),
+                        minHeight: "1rem",
+                        paddingLeft: 18,
+                        color: "var(--text-secondary)",
+                        opacity: workspaceLastInput ? (isActive ? 0.8 : 0.6) : 0,
                       }}
                     >
-                      <div className="flex min-w-0 flex-1 items-center gap-1.5 truncate">
-                        {showMinimap && wsDisplay.minimap && (
-                          <span
-                            className="shrink-0"
-                            data-testid={`pane-minimap-empty-${pane.id}`}
-                            style={{ opacity: isFocusedPane ? 1 : 0.5 }}
-                          >
-                            <PaneMinimap
-                              panes={minimapPanes}
-                              highlightIndex={paneIndex}
-                              width={18}
-                              height={12}
-                            />
-                          </span>
-                        )}
-                        <div className="flex min-w-0 flex-1 items-center gap-1 truncate">
-                          <span
-                            className="shrink-0 font-medium"
-                            style={{ color: "var(--text-secondary)", opacity: 0.4 }}
-                          >
-                            {shortWorkspaceLabel(pane.view.type)}
-                          </span>
-                        </div>
-                      </div>
+                      {workspaceLastInput
+                        ? formatCommand(workspaceLastInput.text, ACTIVITY_MSG_TRUNCATE_LEN)
+                        : "\u00a0"}
                     </div>
-                  );
-                });
+                  )}
+                </>
+              );
             })()}
           </div>
         ) : (
@@ -698,46 +733,6 @@ function WorkspaceItem({
             )}
           </div>
         )}
-
-        {/* Row 3: Last command OR notification — always rendered */}
-        <div
-          data-testid={`ws-row-3-${ws.id}`}
-          className="mt-0.5 truncate text-xs"
-          style={{ paddingLeft: 18, minHeight: "1.25rem" }}
-        >
-          {cmdInfo ? (
-            <span className="flex items-center gap-1">
-              <span data-testid={`cmd-status-${ws.id}`} style={{ color: cmdStatus?.color }}>
-                {cmdStatus?.icon}
-              </span>
-              <span className="truncate" style={{ color: "var(--text-secondary)" }}>
-                {formatCommand(
-                  cmdStatus?.text ?? cmdInfo.command,
-                  cmdStatus?.text ? ACTIVITY_MSG_TRUNCATE_LEN : undefined,
-                )}
-              </span>
-              <span style={{ color: "var(--text-secondary)", opacity: 0.4 }}>
-                · {formatRelativeTime(cmdInfo.timestamp)}
-              </span>
-            </span>
-          ) : summary.latestNotification ? (
-            <span
-              className="italic"
-              style={{
-                color:
-                  summary.latestNotification.level === "error"
-                    ? "var(--red)"
-                    : summary.latestNotification.level === "success"
-                      ? "var(--green)"
-                      : summary.latestNotification.level === "warning"
-                        ? "var(--yellow)"
-                        : "var(--accent)",
-              }}
-            >
-              &ldquo;{summary.latestNotification.message}&rdquo;
-            </span>
-          ) : null}
-        </div>
       </div>
     </div>
   );
@@ -747,6 +742,7 @@ function LayoutCard({
   layout,
   isDefault,
   canDelete,
+  confirmDestructiveActions,
   onClick,
   onRename,
   onDuplicate,
@@ -757,6 +753,7 @@ function LayoutCard({
   layout: { id: string; name: string; panes: { x: number; y: number; w: number; h: number }[] };
   isDefault: boolean;
   canDelete: boolean;
+  confirmDestructiveActions: boolean;
   onClick: () => void;
   onRename: () => void;
   onDuplicate: () => void;
@@ -890,11 +887,7 @@ function LayoutCard({
           }}
           title={t("layout.options")}
         >
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-            <circle cx="6" cy="2.5" r="1.2" />
-            <circle cx="6" cy="6" r="1.2" />
-            <circle cx="6" cy="9.5" r="1.2" />
-          </svg>
+          <EllipsisVerticalIcon size={12} />
         </button>
       )}
 
@@ -956,19 +949,20 @@ function LayoutCard({
             </button>
           )}
           {canDelete && (
-            <button
-              onClick={() => {
-                if (window.confirm(t("layout.deleteConfirm", { name: layout.name }))) {
-                  onDelete();
-                }
+            <TwoClickConfirmButton
+              onConfirm={() => {
+                onDelete();
                 setMenuOpen(false);
               }}
+              confirmationEnabled={confirmDestructiveActions}
+              confirmLabel={t("layout.deleteConfirm", { name: layout.name })}
+              confirmChildren={t("layout.deleteConfirm", { name: layout.name })}
               className="cursor-pointer px-3 py-1 text-left text-[11px]"
               style={{ color: "var(--red)", background: "transparent", border: "none" }}
               title={t("layout.deleteTitle")}
             >
               {t("layout.delete")}
-            </button>
+            </TwoClickConfirmButton>
           )}
         </div>
       )}
@@ -1015,14 +1009,7 @@ function ExportNewLayoutRow({ onExport }: { onExport: (name: string) => void }) 
         title={t("layout.exportNewTitle")}
       >
         <span className="ml-0.5 flex shrink-0 items-center justify-center" style={{ width: 24 }}>
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <path
-              d="M6 1.5v9M1.5 6h9"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-            />
-          </svg>
+          <PlusIcon size={12} />
         </span>
         <span className="truncate text-[11px] font-medium">{t("layout.exportNew")}</span>
       </button>
@@ -1077,6 +1064,9 @@ export function WorkspaceSelectorView() {
   const setWorkspaceHidden = useUiStore((s) => s.setWorkspaceHidden);
 
   const pathEllipsis = useSettingsStore((s) => s.workspaceSelector.pathEllipsis);
+  const confirmDestructiveActions = useSettingsStore(
+    (s) => s.workspaceSelector.confirmDestructiveActions,
+  );
   const workspaceSortOrder = useSettingsStore((s) => s.workspaceSelector.sortOrder);
   const setWorkspaceSelector = useSettingsStore((s) => s.setWorkspaceSelector);
   const terminalInstances = useTerminalStore((s) => s.instances);
@@ -1228,6 +1218,13 @@ export function WorkspaceSelectorView() {
     switchActiveWorkspace(wsId);
   };
 
+  const handleSelectPane = (wsId: string, paneIndex: number, pane: WorkspacePane) => {
+    if (pane.view.type === "TerminalView") {
+      markNotificationsRead([toTerminalId(pane.id)]).catch(() => {});
+    }
+    focusWorkspacePane(wsId, paneIndex);
+  };
+
   const handleCreateWithLayout = (layoutId: string) => {
     const layout = layouts.find((l) => l.id === layoutId);
     const baseName = layout?.name ?? "Workspace";
@@ -1269,6 +1266,7 @@ export function WorkspaceSelectorView() {
               layout={layout}
               isDefault={i === 0}
               canDelete={layouts.length > 1}
+              confirmDestructiveActions={confirmDestructiveActions}
               onClick={() => handleCreateWithLayout(layout.id)}
               onRename={() => {
                 const name = window.prompt(t("layout.renamePrompt"), layout.name);
@@ -1331,21 +1329,11 @@ export function WorkspaceSelectorView() {
               workspaceSortOrder === "manual" ? t("sort.manualTitle") : t("sort.notificationTitle")
             }
           >
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-              {workspaceSortOrder === "manual" ? (
-                <>
-                  <rect x="1" y="1" width="8" height="1.5" rx="0.5" fill="currentColor" />
-                  <rect x="1" y="4.25" width="8" height="1.5" rx="0.5" fill="currentColor" />
-                  <rect x="1" y="7.5" width="8" height="1.5" rx="0.5" fill="currentColor" />
-                </>
-              ) : (
-                <>
-                  <rect x="1" y="1" width="8" height="1.5" rx="0.5" fill="currentColor" />
-                  <rect x="1" y="4.25" width="6" height="1.5" rx="0.5" fill="currentColor" />
-                  <rect x="1" y="7.5" width="4" height="1.5" rx="0.5" fill="currentColor" />
-                </>
-              )}
-            </svg>
+            {workspaceSortOrder === "manual" ? (
+              <ListIcon size={10} />
+            ) : (
+              <ListFilterIcon size={10} />
+            )}
             {workspaceSortOrder === "manual" ? t("sort.manual") : t("sort.notification")}
           </button>
         </span>
@@ -1430,6 +1418,7 @@ export function WorkspaceSelectorView() {
               onPaneDragLeave={handlePaneDragLeave}
               onPaneDrop={handlePaneDrop}
               hiddenPaneIds={wsHiddenPaneIds}
+              confirmDestructiveActions={confirmDestructiveActions}
               canHideWorkspace={
                 !isActive ||
                 findNextVisibleWorkspaceId({
@@ -1439,6 +1428,7 @@ export function WorkspaceSelectorView() {
                 }) !== null
               }
               onSelect={() => handleSelectWorkspace(ws.id)}
+              onSelectPane={(paneIndex, pane) => handleSelectPane(ws.id, paneIndex, pane)}
               onClose={() => removeWorkspace(ws.id)}
               onDuplicate={() => {
                 const result = duplicateWorkspace(ws.id);

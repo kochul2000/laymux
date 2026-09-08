@@ -1,10 +1,6 @@
 use serde::Serialize;
 
-use crate::constants::{DEFAULT_FAST_SCROLL_SENSITIVITY, DEFAULT_SCROLL_SENSITIVITY};
-use crate::settings::models::{
-    clamp_scroll_sensitivity, ColorScheme, Profile, Settings, REMOTE_FONT_SIZE_MAX,
-    REMOTE_FONT_SIZE_MIN,
-};
+use crate::settings::models::{ColorScheme, Profile, Settings};
 
 use super::font_assets::{resolve_font_assets, RemoteFontAssets};
 
@@ -15,7 +11,6 @@ const DEFAULT_FONT_FACE: &str = "Cascadia Mono";
 #[serde(rename_all = "camelCase")]
 pub(super) struct RemoteTerminalAppearance {
     pub font_family: String,
-    pub font_size: u16,
     pub cursor_style: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor_width: Option<u16>,
@@ -25,18 +20,6 @@ pub(super) struct RemoteTerminalAppearance {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub font_assets: Option<RemoteFontAssets>,
     pub theme: RemoteTerminalTheme,
-    /// Wheel multipliers handed straight to the remote xterm. They ride the
-    /// per-terminal option bundle because the client applies them at the same
-    /// place as the font and theme, but they come from `remote.*` — the remote
-    /// client is its own device and does not inherit the desktop's value.
-    pub scroll_sensitivity: f32,
-    pub fast_scroll_sensitivity: f32,
-    /// One-finger drag scrollback multiplier. Unlike the two above it is not an
-    /// xterm option — the page converts drag pixels to lines itself.
-    pub touch_scroll_sensitivity: f32,
-    /// Two-finger drag scrollback multiplier. Same pixel→line path as
-    /// `touch_scroll_sensitivity`, applied when two pointers drive the scroll.
-    pub two_finger_scroll_sensitivity: f32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
@@ -104,30 +87,10 @@ pub(super) fn resolve_remote_terminal_appearance(
 
     RemoteTerminalAppearance {
         font_family: terminal_font_family(face),
-        font_size: settings
-            .remote
-            .terminal_font_size
-            .clamp(REMOTE_FONT_SIZE_MIN, REMOTE_FONT_SIZE_MAX),
         cursor_style: cursor_style.into(),
         cursor_width,
         font_assets: resolve_font_assets(face, settings),
         theme: resolve_terminal_theme(profile, settings),
-        scroll_sensitivity: clamp_scroll_sensitivity(
-            settings.remote.scroll_sensitivity,
-            DEFAULT_SCROLL_SENSITIVITY,
-        ),
-        fast_scroll_sensitivity: clamp_scroll_sensitivity(
-            settings.remote.fast_scroll_sensitivity,
-            DEFAULT_FAST_SCROLL_SENSITIVITY,
-        ),
-        touch_scroll_sensitivity: clamp_scroll_sensitivity(
-            settings.remote.touch_scroll_sensitivity,
-            DEFAULT_SCROLL_SENSITIVITY,
-        ),
-        two_finger_scroll_sensitivity: clamp_scroll_sensitivity(
-            settings.remote.two_finger_scroll_sensitivity,
-            DEFAULT_FAST_SCROLL_SENSITIVITY,
-        ),
     }
 }
 
@@ -332,7 +295,6 @@ mod tests {
             appearance.font_family,
             "'Fira Code', 'Cascadia Mono', 'Consolas', monospace"
         );
-        assert_eq!(appearance.font_size, 14);
         assert_eq!(appearance.cursor_style, "bar");
         assert_eq!(appearance.cursor_width, Some(1));
         assert_eq!(appearance.theme.background.as_deref(), Some("#0C0C0C"));
@@ -373,7 +335,6 @@ mod tests {
             appearance.font_family,
             "'JetBrains Mono', 'Cascadia Mono', 'Consolas', monospace"
         );
-        assert_eq!(appearance.font_size, 14);
         assert_eq!(appearance.cursor_style, "block");
         assert_eq!(appearance.cursor_width, None);
         assert_eq!(appearance.theme.foreground.as_deref(), Some("#111111"));
@@ -415,89 +376,6 @@ mod tests {
         assert_eq!(
             appearance.font_family,
             "'Laymux No Such Font Face', 'Cascadia Mono', 'Consolas', monospace"
-        );
-    }
-
-    /// The remote client is its own device: its wheel multiplier comes from
-    /// `remote.*`, never from the desktop `terminal.*` value.
-    #[test]
-    fn carries_the_remote_wheel_sensitivities_not_the_desktop_ones() {
-        let mut settings = Settings::default();
-        settings.terminal.scroll_sensitivity = 7.0;
-        settings.terminal.fast_scroll_sensitivity = 9.0;
-        settings.remote.scroll_sensitivity = 2.5;
-        settings.remote.fast_scroll_sensitivity = 12.0;
-        settings.remote.touch_scroll_sensitivity = 1.8;
-        settings.remote.two_finger_scroll_sensitivity = 6.5;
-        settings.profiles = vec![Profile {
-            name: "PowerShell".into(),
-            ..Profile::default()
-        }];
-
-        let appearance = resolve_remote_terminal_appearance("PowerShell", &settings);
-
-        assert_eq!(appearance.scroll_sensitivity, 2.5);
-        assert_eq!(appearance.fast_scroll_sensitivity, 12.0);
-        assert_eq!(appearance.touch_scroll_sensitivity, 1.8);
-        assert_eq!(appearance.two_finger_scroll_sensitivity, 6.5);
-    }
-
-    #[test]
-    fn terminal_font_size_comes_from_remote_settings_not_the_desktop_profile() {
-        let mut settings = Settings::default();
-        settings.profile_defaults.font.size = 11;
-        settings.profiles = vec![Profile {
-            name: "PowerShell".into(),
-            font: Some(FontSettings {
-                face: "JetBrains Mono".into(),
-                size: 22,
-                weight: "normal".into(),
-            }),
-            ..Profile::default()
-        }];
-        settings.remote.terminal_font_size = 18;
-
-        let appearance = resolve_remote_terminal_appearance("PowerShell", &settings);
-
-        assert_eq!(appearance.font_size, 18);
-        assert_eq!(
-            appearance.font_family,
-            "'JetBrains Mono', 'Cascadia Mono', 'Consolas', monospace"
-        );
-    }
-
-    /// A hand-edited settings.json is normalized before it reaches the client.
-    /// Positive out-of-band values are clamped; values xterm refuses outright
-    /// (non-positive, non-finite) fall back to the default instead of being
-    /// dragged up to the floor.
-    #[test]
-    fn normalizes_hand_edited_wheel_sensitivities() {
-        let mut settings = Settings::default();
-        settings.remote.scroll_sensitivity = 0.0;
-        settings.remote.fast_scroll_sensitivity = 1000.0;
-        settings.remote.touch_scroll_sensitivity = f32::NAN;
-
-        let appearance = resolve_remote_terminal_appearance("PowerShell", &settings);
-
-        assert_eq!(
-            appearance.scroll_sensitivity,
-            crate::constants::DEFAULT_SCROLL_SENSITIVITY
-        );
-        assert_eq!(
-            appearance.fast_scroll_sensitivity,
-            crate::constants::MAX_SCROLL_SENSITIVITY
-        );
-        assert_eq!(
-            appearance.touch_scroll_sensitivity,
-            crate::constants::DEFAULT_SCROLL_SENSITIVITY
-        );
-
-        // A positive value below the floor is a scale the user asked for, so it
-        // is clamped rather than replaced.
-        settings.remote.scroll_sensitivity = 0.01;
-        assert_eq!(
-            resolve_remote_terminal_appearance("PowerShell", &settings).scroll_sensitivity,
-            crate::constants::MIN_SCROLL_SENSITIVITY
         );
     }
 

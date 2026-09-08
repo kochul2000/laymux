@@ -3,7 +3,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::body::{to_bytes, Body};
 use axum::extract::{ConnectInfo, State};
-use axum::http::{header, HeaderValue, Method, Request, StatusCode};
+use axum::http::{header, HeaderValue, Method, Request, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -12,21 +12,28 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
-use crate::android_e2e::{ChallengeRequest, CipherEnvelope, E2eError, EstablishRequest};
+use crate::android_e2e::{
+    AndroidE2eDispatchResult, AndroidE2eReplayGuard, AndroidE2eRequestContext, ChallengeRequest,
+    CipherEnvelope, E2eError, EstablishRequest,
+};
 use crate::automation_server::ServerState;
+use crate::constants::{android_e2e_rpc_body_limit, MAX_ANDROID_E2E_FILE_VIEWER_RESPONSE_BYTES};
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
-use crate::remote_server::TunnelAuthorized;
+use crate::remote_server::{RemoteTransport, TunnelAuthorized};
 
 use super::access::effective_remote_settings;
 use super::lease::{
-    effective_heartbeat_timeout_seconds, emit_remote_control_status, status_from_state,
-    wait_for_remote_owner_transition_async,
+    effective_heartbeat_timeout_seconds, emit_remote_control_status,
+    require_android_e2e_file_viewer_capability, status_from_state,
+    wait_for_remote_owner_transition_async, AndroidE2eFileViewerProof,
 };
 use super::{internal_error, json_error};
 
 const INTERNAL_RESPONSE_LIMIT: usize = 1024 * 1024;
 const RESOURCE_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
+const FILE_VIEWER_AUTHORIZATION_FIELD: &str = "fileViewerAuthorization";
+const FILE_VIEWER_CREDENTIAL_MAX_CHARS: usize = 128;
 
 // `rename_all` renames the variant tags only; variant fields need
 // `rename_all_fields`. Without it the camelCase wire contract
@@ -54,6 +61,13 @@ enum PlainRequest {
     },
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FileViewerAuthorizationBody {
+    lease_id: String,
+    file_viewer_token: String,
+}
+
 pub(super) async fn remote_android_e2e_challenge(
     State(server): State<ServerState>,
     Json(request): Json<ChallengeRequest>,
@@ -73,11 +87,12 @@ pub(super) async fn remote_android_e2e_challenge(
         Err(error) => return no_store(internal_error(error)),
     };
     no_store(
-        match server
-            .app_state
-            .android_e2e
-            .issue_challenge(request, &material, now)
-        {
+        match with_current_pairing_material(&material, || {
+            server
+                .app_state
+                .android_e2e
+                .issue_challenge(request, &material, now)
+        }) {
             Ok(response) => Json(response).into_response(),
             Err(error) => e2e_error_response(error),
         },
@@ -103,11 +118,12 @@ pub(super) async fn remote_android_e2e_establish(
         Err(error) => return no_store(internal_error(error)),
     };
     no_store(
-        match server
-            .app_state
-            .android_e2e
-            .establish(request, &material, now)
-        {
+        match with_current_pairing_material(&material, || {
+            server
+                .app_state
+                .android_e2e
+                .establish(request, &material, now)
+        }) {
             Ok(response) => Json(response).into_response(),
             Err(error) => e2e_error_response(error),
         },
@@ -116,8 +132,44 @@ pub(super) async fn remote_android_e2e_establish(
 
 pub(super) async fn remote_android_e2e_rpc(
     State(server): State<ServerState>,
-    Json(envelope): Json<CipherEnvelope>,
+    transport: Option<axum::Extension<RemoteTransport>>,
+    request: Request<Body>,
 ) -> Response {
+    // The envelope reached us either through the Cloud relay tunnel or over
+    // Tailscale Direct; the inner request inherits that so payload policy can
+    // respect the relay's own bounds (ADR-0227).
+    let via_cloud_relay = matches!(
+        transport,
+        Some(axum::Extension(RemoteTransport::CloudRelayBrowser))
+    );
+    // The envelope bound follows the host's attachment maximum (ADR-0227) so a
+    // 1 MiB host never buffers the 10 MiB-sized envelope; the route disables
+    // axum's static default limit for this.
+    let envelope_limit = match effective_remote_settings(&server.app_state) {
+        Ok(settings) => android_e2e_rpc_body_limit(
+            super::attachments::AttachmentPolicy::from_settings(&settings, None).host_max_bytes,
+        ),
+        Err(error) => return no_store(internal_error(error)),
+    };
+    let raw = match to_bytes(request.into_body(), envelope_limit).await {
+        Ok(raw) => raw,
+        Err(_) => {
+            return no_store(json_error(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "Android E2E envelope exceeds the request limit",
+            ))
+        }
+    };
+    let envelope: CipherEnvelope = match serde_json::from_slice(&raw) {
+        Ok(envelope) => envelope,
+        Err(_) => {
+            return no_store(json_error(
+                StatusCode::BAD_REQUEST,
+                "Android E2E envelope is not valid JSON",
+            ))
+        }
+    };
+    drop(raw);
     let session = match server.app_state.android_e2e.session(
         &envelope.instance_id,
         &envelope.session_id,
@@ -130,19 +182,17 @@ pub(super) async fn remote_android_e2e_rpc(
         Err(error) => return no_store(e2e_error_response(error)),
     };
     let dispatch_server = server.clone();
-    // The claim handler binds the granted lease to this session (ADR-0170), so
-    // the internally re-injected request carries which session is asking.
-    let claim_context = super::lease::AndroidE2eClaimContext {
-        instance_id: session.instance_id.clone(),
-        session_id: session.session_id.clone(),
-    };
+    let replay_server = server.clone();
     no_store(
         match session
             .process(
                 envelope,
                 || unix_time_now().map_err(E2eError::Internal),
-                move |request| {
-                    dispatch_plain_request(dispatch_server, claim_context.clone(), request)
+                move |context, request| {
+                    dispatch_plain_request(dispatch_server, context, request, via_cloud_relay)
+                },
+                move |context, request, guard| {
+                    revalidate_cached_file_viewer_request(&replay_server, context, request, &guard)
                 },
             )
             .await
@@ -173,24 +223,51 @@ async fn load_material(
     })?
 }
 
+fn with_current_pairing_material<T>(
+    material: &crate::android_pairing::ConfirmedPairingMaterial,
+    operation: impl FnOnce() -> Result<T, E2eError>,
+) -> Result<T, E2eError> {
+    crate::android_pairing::with_lifecycle(|| {
+        Ok(
+            if material.revision == crate::android_pairing::pairing_revision() {
+                operation()
+            } else {
+                Err(E2eError::Invalid)
+            },
+        )
+    })
+    .map_err(E2eError::Internal)?
+}
+
 async fn dispatch_plain_request(
     server: ServerState,
-    claim_context: super::lease::AndroidE2eClaimContext,
+    request_context: AndroidE2eRequestContext,
     value: Value,
-) -> Result<Value, AppError> {
+    via_cloud_relay: bool,
+) -> Result<AndroidE2eDispatchResult, AppError> {
     let request: PlainRequest = serde_json::from_value(value)
         .map_err(|_| AppError::Other("Android E2E plaintext request is invalid".into()))?;
     match request {
-        PlainRequest::Resource { path } => dispatch_resource(server, &path).await,
+        PlainRequest::Resource { path } => Ok(AndroidE2eDispatchResult::unguarded(
+            dispatch_resource(server, &path).await?,
+        )),
         PlainRequest::Http { method, path, body } => {
-            dispatch_http(server, claim_context, &method, &path, body).await
+            dispatch_http(
+                server,
+                request_context,
+                &method,
+                &path,
+                body,
+                RemoteTransport::AndroidE2e { via_cloud_relay },
+            )
+            .await
         }
         PlainRequest::BackgroundTransition { lease_id } => {
             if !valid_remote_identifier(&lease_id) {
-                return Ok(rpc_error(
+                return Ok(AndroidE2eDispatchResult::unguarded(rpc_error(
                     StatusCode::BAD_REQUEST,
                     "Remote lease identity is invalid",
-                ));
+                )));
             }
             let settings = effective_remote_settings(&server.app_state).map_err(AppError::Other)?;
             let seconds = settings.android_background_lease_seconds;
@@ -205,20 +282,20 @@ async fn dispatch_plain_request(
                     if control.lease.as_ref().map(|lease| lease.lease_id.as_str())
                         != Some(lease_id.as_str())
                     {
-                        return Ok(rpc_error(
+                        return Ok(AndroidE2eDispatchResult::unguarded(rpc_error(
                             StatusCode::CONFLICT,
                             "Remote lease is not active",
-                        ));
+                        )));
                     }
                     control.begin_voluntary_release_transition(now)
                 } else if control.refresh_remote_lease(&lease_id, now, Duration::from_secs(seconds))
                 {
                     None
                 } else {
-                    return Ok(rpc_error(
+                    return Ok(AndroidE2eDispatchResult::unguarded(rpc_error(
                         StatusCode::CONFLICT,
                         "Remote lease is not active",
-                    ));
+                    )));
                 }
             };
             if let Some(transition) = transition {
@@ -231,11 +308,11 @@ async fn dispatch_plain_request(
                     status_from_state(&control, effective_heartbeat_timeout_seconds(&settings));
                 emit_remote_control_status(&server.app_handle, &status);
             }
-            Ok(json!({
+            Ok(AndroidE2eDispatchResult::unguarded(json!({
                 "kind": "backgroundTransition",
                 "action": if seconds == 0 { "released" } else { "retained" },
                 "leaseSeconds": seconds,
-            }))
+            })))
         }
     }
 }
@@ -303,20 +380,32 @@ async fn dispatch_resource(server: ServerState, path: &str) -> Result<Value, App
 
 async fn dispatch_http(
     server: ServerState,
-    claim_context: super::lease::AndroidE2eClaimContext,
+    request_context: AndroidE2eRequestContext,
     method: &str,
     path: &str,
-    body: Option<Value>,
-) -> Result<Value, AppError> {
+    mut body: Option<Value>,
+    transport: RemoteTransport,
+) -> Result<AndroidE2eDispatchResult, AppError> {
     let method = method
         .parse::<Method>()
         .map_err(|_| AppError::Other("Android E2E HTTP method is invalid".into()))?;
     if !http_path_allowed(&method, path) {
-        return Ok(rpc_error(
+        return Ok(AndroidE2eDispatchResult::unguarded(rpc_error(
             StatusCode::FORBIDDEN,
             "Remote operation is not allowed",
-        ));
+        )));
     }
+    let is_file_viewer = file_viewer_path(&method, path);
+    let file_viewer_proof =
+        match take_file_viewer_proof(&method, path, &mut body, request_context.clone()) {
+            Ok(proof) => proof,
+            Err(()) => {
+                return Ok(AndroidE2eDispatchResult::unguarded(rpc_error(
+                    StatusCode::FORBIDDEN,
+                    "remote file viewer capability is required or invalid",
+                )))
+            }
+        };
     let encoded_body = match body {
         Some(body) => serde_json::to_vec(&body)?,
         None => Vec::new(),
@@ -328,7 +417,11 @@ async fn dispatch_http(
         .body(Body::from(encoded_body))
         .map_err(|error| AppError::Other(format!("Android E2E request build failed: {error}")))?;
     request.extensions_mut().insert(TunnelAuthorized);
-    request.extensions_mut().insert(claim_context);
+    request.extensions_mut().insert(transport);
+    request.extensions_mut().insert(request_context);
+    if let Some(proof) = file_viewer_proof {
+        request.extensions_mut().insert(proof);
+    }
     request.extensions_mut().insert(ConnectInfo(SocketAddr::new(
         IpAddr::V4(Ipv4Addr::LOCALHOST),
         0,
@@ -339,51 +432,160 @@ async fn dispatch_http(
         .await
         .map_err(|error| AppError::Other(format!("Android E2E dispatch failed: {error}")))?;
     let status = response.status();
-    let bytes = to_bytes(response.into_body(), INTERNAL_RESPONSE_LIMIT)
-        .await
-        .map_err(|error| AppError::Other(format!("Android E2E response read failed: {error}")))?;
+    let replay_guard = response
+        .extensions()
+        .get::<AndroidE2eReplayGuard>()
+        .cloned();
+    let response_limit = internal_response_limit(is_file_viewer);
+    let bytes = match to_bytes(response.into_body(), response_limit).await {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return Ok(AndroidE2eDispatchResult::unguarded(rpc_error(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "Remote response is too large",
+            )))
+        }
+    };
     let body = if bytes.is_empty() {
         Value::Null
     } else {
         serde_json::from_slice(&bytes)
             .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()))
     };
-    Ok(json!({
+    let response = json!({
         "kind": "http",
         "status": status.as_u16(),
         "body": body,
-    }))
+    });
+    Ok(match replay_guard {
+        Some(guard) => AndroidE2eDispatchResult::guarded(response, guard),
+        None => AndroidE2eDispatchResult::unguarded(response),
+    })
+}
+
+fn internal_response_limit(is_file_viewer: bool) -> usize {
+    if is_file_viewer {
+        MAX_ANDROID_E2E_FILE_VIEWER_RESPONSE_BYTES
+    } else {
+        INTERNAL_RESPONSE_LIMIT
+    }
+}
+
+fn take_file_viewer_proof(
+    method: &Method,
+    path: &str,
+    body: &mut Option<Value>,
+    context: AndroidE2eRequestContext,
+) -> Result<Option<AndroidE2eFileViewerProof>, ()> {
+    let authorization = body
+        .as_mut()
+        .and_then(Value::as_object_mut)
+        .and_then(|object| object.remove(FILE_VIEWER_AUTHORIZATION_FIELD));
+    if !file_viewer_path(method, path) {
+        return authorization.map_or(Ok(None), |_| Err(()));
+    }
+    let authorization: FileViewerAuthorizationBody =
+        serde_json::from_value(authorization.ok_or(())?).map_err(|_| ())?;
+    if authorization.lease_id.is_empty()
+        || authorization.file_viewer_token.is_empty()
+        || authorization.lease_id.chars().count() > FILE_VIEWER_CREDENTIAL_MAX_CHARS
+        || authorization.file_viewer_token.chars().count() > FILE_VIEWER_CREDENTIAL_MAX_CHARS
+    {
+        return Err(());
+    }
+    Ok(Some(AndroidE2eFileViewerProof::new(
+        context,
+        authorization.lease_id,
+        authorization.file_viewer_token,
+    )))
+}
+
+fn file_viewer_path(method: &Method, path: &str) -> bool {
+    matches!(
+        (method, path),
+        (&Method::POST, "/remote/v1/file-viewer/status")
+            | (&Method::POST, "/remote/v1/file-viewer/render")
+            | (&Method::POST, "/remote/v1/file-viewer/download")
+            | (&Method::POST, "/remote/v1/file-viewer/path-link")
+            | (&Method::POST, "/remote/v1/file-viewer/list")
+    )
+}
+
+fn revalidate_cached_file_viewer_request(
+    server: &ServerState,
+    context: AndroidE2eRequestContext,
+    value: Value,
+    guard: &AndroidE2eReplayGuard,
+) -> Result<(), E2eError> {
+    let request: PlainRequest = serde_json::from_value(value).map_err(|_| E2eError::Invalid)?;
+    let PlainRequest::Http {
+        method,
+        path,
+        mut body,
+    } = request
+    else {
+        return Err(E2eError::Invalid);
+    };
+    let method = method.parse::<Method>().map_err(|_| E2eError::Invalid)?;
+    let proof = take_file_viewer_proof(&method, &path, &mut body, context)
+        .map_err(|_| E2eError::Invalid)?
+        .ok_or(E2eError::Invalid)?;
+    let presented_lease_id = body
+        .as_ref()
+        .and_then(Value::as_object)
+        .and_then(|object| object.get("leaseId"))
+        .and_then(Value::as_str);
+    require_android_e2e_file_viewer_capability(
+        &server.app_state,
+        &proof,
+        presented_lease_id,
+        Some(guard),
+    )
+    .map(|_| ())
+    .map_err(|_| E2eError::Invalid)
 }
 
 fn http_path_allowed(method: &Method, path: &str) -> bool {
+    if method == Method::GET {
+        if let Ok(uri) = path.parse::<Uri>() {
+            if uri.scheme().is_none()
+                && uri.authority().is_none()
+                && uri.path() == "/remote/v1/composer/starred"
+            {
+                return true;
+            }
+        }
+    }
     if invalid_inner_path(path) {
         return false;
     }
     match (method, path) {
         (&Method::GET, "/remote/v1/session/status")
-        | (&Method::GET, "/remote/v1/display-settings")
         | (&Method::GET, "/remote/v1/navigation")
+        | (&Method::GET, "/remote/v1/composer/starred")
         | (&Method::GET, "/remote/v1/layouts")
         | (&Method::GET, "/remote/v1/widgets")
         | (&Method::GET, "/remote/v1/update")
         | (&Method::GET, "/remote/v1/terminals")
-        | (&Method::GET, "/remote/v1/file-viewer/status")
         | (&Method::POST, "/remote/v1/session/claim")
         | (&Method::POST, "/remote/v1/session/heartbeat")
         | (&Method::POST, "/remote/v1/session/release")
         | (&Method::POST, "/remote/v1/navigation/spatial")
         | (&Method::POST, "/remote/v1/navigation/notification")
+        | (&Method::POST, "/remote/v1/composer/starred")
         | (&Method::POST, "/remote/v1/workspaces")
         | (&Method::POST, "/remote/v1/workspaces/active")
+        | (&Method::POST, "/remote/v1/file-viewer/status")
         | (&Method::POST, "/remote/v1/file-viewer/render")
+        | (&Method::POST, "/remote/v1/file-viewer/download")
         | (&Method::POST, "/remote/v1/file-viewer/path-link")
+        | (&Method::POST, "/remote/v1/file-viewer/list")
         | (&Method::POST, "/remote/v1/oauth-relay/begin")
         | (&Method::POST, "/remote/v1/oauth-relay/forward")
         | (&Method::POST, "/remote/v1/notifications/mark-all-read")
         | (&Method::POST, "/remote/v1/update/check")
         | (&Method::POST, "/remote/v1/update/install")
         | (&Method::DELETE, "/remote/v1/notifications") => true,
-        (&Method::PUT, "/remote/v1/display-settings") => true,
         (&Method::GET, _) => terminal_read_path(path),
         (&Method::POST, _) => {
             terminal_control_path(path)
@@ -412,7 +614,11 @@ fn terminal_control_path(path: &str) -> bool {
     let Some((terminal_id, action)) = rest.rsplit_once('/') else {
         return false;
     };
-    valid_remote_identifier(terminal_id) && matches!(action, "focus" | "write" | "input" | "resize")
+    valid_remote_identifier(terminal_id)
+        && matches!(
+            action,
+            "focus" | "write" | "input" | "resize" | "attachments"
+        )
 }
 
 fn notification_read_path(path: &str) -> bool {
@@ -448,8 +654,6 @@ fn resource_path_allowed(path: &str) -> bool {
             | "/remote/vendor/addon-fit.js"
             | "/remote/vendor/addon-web-links.js"
             | "/remote/manifest.webmanifest"
-            | "/remote/viewer/"
-            | "/remote/viewer/viewer.js"
     ) {
         return true;
     }
@@ -529,7 +733,34 @@ fn unix_time_now() -> Result<u64, AppError> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     use super::*;
+
+    fn request_context() -> AndroidE2eRequestContext {
+        crate::android_e2e::AndroidE2eState::default().install_test_request_context(
+            "desktop-7",
+            "session-7",
+            u64::MAX,
+        )
+    }
+
+    #[test]
+    fn stale_pairing_material_cannot_enter_a_registry_mutation() {
+        let material = crate::android_pairing::ConfirmedPairingMaterial {
+            seed: zeroize::Zeroizing::new(vec![7_u8; 32]),
+            revision: crate::android_pairing::pairing_revision().wrapping_add(1),
+        };
+        let called = AtomicBool::new(false);
+
+        let result = with_current_pairing_material(&material, || {
+            called.store(true, Ordering::Release);
+            Ok(())
+        });
+
+        assert!(matches!(result, Err(E2eError::Invalid)));
+        assert!(!called.load(Ordering::Acquire));
+    }
 
     /// The exact plaintext bodies `MainActivity` sends over the E2E RPC. These
     /// are the wire contract from api-contracts.md §13.0, so they are written
@@ -580,6 +811,14 @@ mod tests {
     fn inner_http_allowlist_rejects_e2e_recursion_and_path_escaping() {
         assert!(http_path_allowed(&Method::GET, "/remote/v1/terminals"));
         assert!(http_path_allowed(&Method::GET, "/remote/v1/navigation"));
+        assert!(http_path_allowed(
+            &Method::GET,
+            "/remote/v1/composer/starred?leaseId=lease-1"
+        ));
+        assert!(http_path_allowed(
+            &Method::POST,
+            "/remote/v1/composer/starred"
+        ));
         assert!(http_path_allowed(&Method::GET, "/remote/v1/layouts"));
         assert!(http_path_allowed(&Method::GET, "/remote/v1/update"));
         assert!(http_path_allowed(&Method::POST, "/remote/v1/update/check"));
@@ -587,11 +826,11 @@ mod tests {
             &Method::POST,
             "/remote/v1/update/install"
         ));
-        assert!(http_path_allowed(
+        assert!(!http_path_allowed(
             &Method::GET,
             "/remote/v1/display-settings"
         ));
-        assert!(http_path_allowed(
+        assert!(!http_path_allowed(
             &Method::PUT,
             "/remote/v1/display-settings"
         ));
@@ -606,6 +845,18 @@ mod tests {
         assert!(http_path_allowed(
             &Method::POST,
             "/remote/v1/file-viewer/path-link"
+        ));
+        assert!(http_path_allowed(
+            &Method::POST,
+            "/remote/v1/file-viewer/list"
+        ));
+        assert!(!http_path_allowed(
+            &Method::GET,
+            "/remote/v1/file-viewer/status"
+        ));
+        assert!(http_path_allowed(
+            &Method::POST,
+            "/remote/v1/file-viewer/status"
         ));
         assert!(http_path_allowed(&Method::POST, "/remote/v1/workspaces"));
         assert!(http_path_allowed(
@@ -623,6 +874,10 @@ mod tests {
         assert!(http_path_allowed(
             &Method::POST,
             "/remote/v1/terminals/term-1/input"
+        ));
+        assert!(http_path_allowed(
+            &Method::POST,
+            "/remote/v1/terminals/term-1/attachments"
         ));
         assert!(!http_path_allowed(
             &Method::POST,
@@ -650,6 +905,78 @@ mod tests {
         ));
         assert!(!valid_remote_identifier("terminal/escape"));
         assert!(!valid_remote_identifier(&"x".repeat(129)));
+    }
+
+    #[test]
+    fn file_viewer_proof_is_strict_and_removed_before_inner_dispatch() {
+        let mut body = Some(json!({
+            "source": "path",
+            "path": "C:\\work\\notes.txt",
+            "fileViewerAuthorization": {
+                "leaseId": "lease-1",
+                "fileViewerToken": "viewer-1"
+            }
+        }));
+        let proof = take_file_viewer_proof(
+            &Method::POST,
+            "/remote/v1/file-viewer/render",
+            &mut body,
+            request_context(),
+        )
+        .expect("typed proof")
+        .expect("proof present");
+        let _proof = proof;
+        assert_eq!(
+            body,
+            Some(json!({"source": "path", "path": "C:\\work\\notes.txt"}))
+        );
+
+        let mut missing = Some(json!({"source": "path", "path": "C:\\work\\notes.txt"}));
+        assert!(take_file_viewer_proof(
+            &Method::POST,
+            "/remote/v1/file-viewer/render",
+            &mut missing,
+            request_context(),
+        )
+        .is_err());
+
+        let mut unknown = Some(json!({
+            "fileViewerAuthorization": {
+                "leaseId": "lease-1",
+                "fileViewerToken": "viewer-1",
+                "authorization": "not-allowed"
+            }
+        }));
+        assert!(take_file_viewer_proof(
+            &Method::POST,
+            "/remote/v1/file-viewer/status",
+            &mut unknown,
+            request_context(),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn file_viewer_authorization_field_is_rejected_on_other_routes() {
+        let mut body = Some(json!({
+            "fileViewerAuthorization": {
+                "leaseId": "lease-1",
+                "fileViewerToken": "viewer-1"
+            }
+        }));
+        assert!(take_file_viewer_proof(
+            &Method::POST,
+            "/remote/v1/session/heartbeat",
+            &mut body,
+            request_context(),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn file_viewer_gets_a_route_scoped_response_budget() {
+        assert_eq!(internal_response_limit(false), 1024 * 1024);
+        assert_eq!(internal_response_limit(true), 3 * 1024 * 1024);
     }
 
     #[test]

@@ -33,21 +33,19 @@
     <div class="app">
       <header>
         <button id="navToggle" class="menu-button" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="navigationPanel">
-          <span></span>
-          <span></span>
-          <span></span>
+          <span data-remote-icon="Menu" data-icon-size="18"></span>
         </button>
         <button id="copyPaneId" class="copy-pane-button" type="button" hidden aria-label="Copy pane identifier" title="Copy pane identifier (lx:pane:...)">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9" stroke-linecap="round"/></svg>
+          <span data-remote-icon="Copy"></span>
         </button>
         <div id="status" class="status" aria-busy="false">
-          <span id="statusSpinner" class="status-spinner" aria-hidden="true" hidden></span><span id="statusText">Enter the remote token, then connect.</span>
+          <span id="statusSpinner" class="status-spinner" aria-hidden="true" hidden><span data-remote-icon="LoaderCircle" data-icon-size="10"></span></span><span id="statusText">Enter the remote token, then connect.</span>
         </div>
-        <button id="spatialExclusion" class="spatial-exclusion-button" type="button" hidden aria-label="Exclude this pane from pane navigation" aria-pressed="false" title="Exclude this pane from pane navigation">
-          <svg data-icon="circle-minus" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>
+        <button id="fileExplorerHeader" class="file-explorer-button" type="button" hidden aria-label="Browse host files" title="Browse host files">
+          <span data-remote-icon="FolderOpen"></span>
         </button>
-        <button id="inputModeToggle" class="input-mode-toggle" type="button" aria-pressed="false" aria-label="Switch to Composer input" title="Switch to Composer input">
-          <span id="inputModeIcon" class="input-mode-icon" aria-hidden="true"></span>
+        <button id="spatialExclusion" class="spatial-exclusion-button" type="button" hidden aria-label="Exclude this pane from pane navigation" aria-pressed="false" title="Exclude this pane from pane navigation">
+          <span data-remote-icon="CircleMinus"></span>
         </button>
         <button id="desktopModeHeader" class="desktop-mode-button" type="button" hidden>PC</button>
       </header>
@@ -66,62 +64,33 @@
           <button id="navScrim" class="nav-scrim" type="button" aria-label="Close navigation" hidden></button>
           <aside id="navigationPanel" class="navigation-panel" aria-label="Remote navigation">
             <div class="drawer-header">
+              <button id="navigationPin" class="drawer-header-button navigation-pin-button" type="button" aria-label="Pin workspace menu" aria-pressed="false" title="Pin workspace menu">
+                <span data-remote-icon="Pin"></span>
+              </button>
               <div class="drawer-heading">
                 <div id="drawerTitle" class="drawer-title">Remote</div>
               </div>
               <div class="drawer-header-actions">
                 <button id="desktopModeDrawer" class="desktop-mode-button" type="button" hidden>PC</button>
                 <button id="newWorkspace" class="drawer-header-button" type="button" aria-label="New workspace" title="New workspace" disabled>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                  <span data-remote-icon="Plus"></span>
+                </button>
+                <button id="hiddenWorkspaceToggle" class="drawer-header-button hidden-workspace-toggle" type="button" aria-label="Open hidden workspaces (0)" title="Open hidden workspaces (0)" aria-controls="drawerHiddenView" hidden>
+                  <span data-remote-icon="EyeOff"></span>
                 </button>
                 <button id="drawerNotificationsButton" class="drawer-header-button drawer-notification-button" type="button" aria-label="Open notifications" title="Notifications" disabled>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
-                  <span id="notificationBadge" class="workspace-count-badge drawer-notification-badge" hidden>0</span>
-                </button>
-                <button id="drawerConnectionButton" class="drawer-header-button" type="button" aria-label="Open connection" title="Connection">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v5M16 3v5M6 8h12v3a6 6 0 0 1-12 0V8ZM12 17v4"/></svg>
+                  <span data-remote-icon="Bell"></span>
                 </button>
                 <button id="drawerSettingsButton" class="drawer-header-button" type="button" aria-label="Open settings" title="Settings">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.1.37.32.7.6 1 .3.26.68.4 1.1.4H21v4h-.09A1.7 1.7 0 0 0 19.4 15Z"/></svg>
+                  <span data-remote-icon="Settings"></span>
                 </button>
                 <button id="drawerBack" class="drawer-header-button" type="button" aria-label="Close and return to workspace navigation" title="Close" hidden>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                  <span data-remote-icon="X"></span>
                 </button>
               </div>
             </div>
             <div id="drawerWorkspaceView" class="drawer-view">
-              <section id="fileViewerSection" class="nav-section locked" aria-label="File viewer">
-              <h2 class="nav-section-title">File viewer</h2>
-              <div class="file-viewer-panel">
-                <div class="file-viewer-path-row">
-                  <input id="fileViewerPath" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Host file path" placeholder="Host file path" disabled />
-                </div>
-                <div class="file-viewer-actions">
-                  <button id="pullHostFileViewerPath" type="button" aria-label="Use current host viewer path" disabled>From host</button>
-                  <button id="openFileViewer" type="button" disabled>Open viewer</button>
-                </div>
-                <div id="fileViewerStatus" class="file-viewer-status">Connect to open a host file.</div>
-              </div>
-              </section>
               <section id="workspaceSection" class="nav-section locked">
-              <div class="workspace-section-heading">
-                <button
-                  id="hiddenWorkspaceToggle"
-                  class="hidden-workspace-toggle"
-                  type="button"
-                  aria-expanded="false"
-                  aria-controls="hiddenWorkspaceShelf"
-                  hidden
-                >
-                  Hidden 0
-                </button>
-              </div>
-              <div
-                id="hiddenWorkspaceShelf"
-                class="hidden-workspace-shelf"
-                aria-label="Hidden workspaces"
-                hidden
-              ></div>
               <div id="workspaceList" class="nav-list"></div>
               </section>
               <section id="dockSection" class="nav-section locked">
@@ -134,6 +103,11 @@
               </div>
               </section>
             </div><!-- /drawerWorkspaceView -->
+            <div id="drawerHiddenView" class="drawer-view" hidden>
+              <section id="hiddenWorkspaceSection" class="nav-section locked" aria-label="Hidden workspaces">
+                <div id="hiddenWorkspaceShelf" class="hidden-workspace-shelf"></div>
+              </section>
+            </div><!-- /drawerHiddenView -->
             <div id="drawerNotificationsView" class="drawer-view drawer-notifications-view" hidden>
               <section id="notificationSection" class="nav-section locked" aria-label="Notifications">
                 <div id="notificationPanel" class="notification-panel">
@@ -164,17 +138,70 @@
               </section>
             </div><!-- /drawerConnectionView -->
             <div id="drawerSettingsView" class="drawer-view" hidden>
+              <section class="nav-section" aria-label="Connection">
+                <button id="drawerConnectionButton" class="settings-connection-button" type="button" aria-label="Open connection" title="Connection">
+                  <span data-remote-icon="Plug"></span> Connection
+                </button>
+              </section>
+              <!-- Settings grew past one scroll: the sections are paginated so a
+                   short screen shows one subject at a time. -->
+              <div id="settingsTabs" class="settings-tabs" role="tablist" aria-label="Settings sections">
+                <button id="settingsTabInputBar" class="settings-tab" type="button" role="tab" data-settings-panel="inputBar" aria-controls="settingsPanelInputBar" aria-selected="true">Input bar</button>
+                <button id="settingsTabFloating" class="settings-tab" type="button" role="tab" data-settings-panel="floating" aria-controls="settingsPanelFloating" aria-selected="false" tabindex="-1">Floating</button>
+                <button id="settingsTabComposer" class="settings-tab" type="button" role="tab" data-settings-panel="composer" aria-controls="settingsPanelComposer" aria-selected="false" tabindex="-1">Composer</button>
+                <button id="settingsTabDisplay" class="settings-tab" type="button" role="tab" data-settings-panel="display" aria-controls="settingsPanelDisplay" aria-selected="false" tabindex="-1">Display</button>
+                <button id="settingsTabApp" class="settings-tab" type="button" role="tab" data-settings-panel="app" aria-controls="settingsPanelApp" aria-selected="false" tabindex="-1">App</button>
+              </div>
+              <div id="settingsPanelInputBar" class="settings-panel" role="tabpanel" data-settings-panel="inputBar" aria-labelledby="settingsTabInputBar">
+              <section id="inputLayoutSection" class="nav-section" aria-label="Input bar">
+              <h2 class="nav-section-title">Input bar</h2>
+              <div class="nav-number-row">
+                <span class="nav-number-copy">Main button size</span>
+                <div class="button-size-controls">
+                <button type="button" data-button-scale="mainButtonScale" data-step="-10" aria-label="Decrease Main button size">−</button>
+                <output id="remoteMainButtonScale" aria-live="polite">100%</output>
+                <button type="button" data-button-scale="mainButtonScale" data-step="10" aria-label="Increase Main button size">+</button>
+                </div>
+              </div>
+              <div class="nav-number-row">
+                <span class="nav-number-copy">Keys button size</span>
+                <div class="button-size-controls">
+                <button type="button" data-button-scale="keysButtonScale" data-step="-10" aria-label="Decrease Keys button size">−</button>
+                <output id="remoteKeysButtonScale" aria-live="polite">100%</output>
+                <button type="button" data-button-scale="keysButtonScale" data-step="10" aria-label="Increase Keys button size">+</button>
+                </div>
+              </div>
+              <button id="resetButtonSizes" type="button">Reset button sizes</button>
+              <div id="remoteButtonSizeStatus" class="nav-settings-status" role="status"></div>
+              <div class="nav-settings-status">Choose each action's row and order on this device.</div>
+              <div id="inputLayoutEditor" class="input-layout-editor"></div>
+              </section>
+              </div><!-- /settingsPanelInputBar -->
+              <div id="settingsPanelFloating" class="settings-panel" role="tabpanel" data-settings-panel="floating" aria-labelledby="settingsTabFloating" hidden>
+                <section class="nav-section" aria-label="Floating controls">
+                  <h2 class="nav-section-title">Floating controls</h2>
+                  <div class="nav-settings-status">Hold the center of a pad, then drag to move. Drag other buttons to move.</div>
+                  <div id="floatingSettingsEditor" class="input-layout-editor"></div>
+                </section>
+              </div>
+              <div id="settingsPanelComposer" class="settings-panel" role="tabpanel" data-settings-panel="composer" aria-labelledby="settingsTabComposer" hidden>
+              <section id="composerSection" class="nav-section" aria-label="Composer">
+              <h2 class="nav-section-title">Composer</h2>
+              <div class="nav-settings-status">Recall and agent-output options for this device.</div>
+              <div id="composerSettingsEditor" class="input-layout-editor"></div>
+              </section>
+              </div><!-- /settingsPanelComposer -->
+              <div id="settingsPanelDisplay" class="settings-panel" role="tabpanel" data-settings-panel="display" aria-labelledby="settingsTabDisplay" hidden>
               <section id="displaySection" class="nav-section" aria-label="Display">
               <h2 class="nav-section-title">Display</h2>
-              <!-- These two values are PC-owned settings (ADR-0173). Reading
-                   stays behind Remote auth; editing additionally needs the
-                   active controller lease. -->
+              <!-- Device-local Remote preferences (ADR-0209). They remain
+                   editable before connection and never mutate host settings. -->
               <label class="nav-number-row" for="remoteTerminalFontSize">
                 <span class="nav-number-copy">
                   <span class="nav-toggle-name">Terminal text</span>
                   <span class="nav-number-desc">Remote screen cells</span>
                 </span>
-                <input id="remoteTerminalFontSize" type="number" min="6" max="72" step="1" disabled />
+                <input id="remoteTerminalFontSize" type="number" min="6" max="72" step="1" />
                 <span class="nav-number-unit">px</span>
               </label>
               <label class="nav-number-row" for="remoteComposerFontSize">
@@ -182,15 +209,92 @@
                   <span class="nav-toggle-name">Composer text</span>
                   <span class="nav-number-desc">Input and suggestions</span>
                 </span>
-                <input id="remoteComposerFontSize" type="number" min="6" max="72" step="1" disabled />
+                <input id="remoteComposerFontSize" type="number" min="6" max="72" step="1" />
                 <span class="nav-number-unit">px</span>
+              </label>
+              <label class="nav-number-row" for="remoteComposerIdleOpacity">
+                <span class="nav-number-copy">
+                  <span class="nav-toggle-name">Composer idle</span>
+                  <span class="nav-number-desc">Visible without focus or activity</span>
+                </span>
+                <input id="remoteComposerIdleOpacity" type="number" min="20" max="100" step="5" />
+                <span class="nav-number-unit">%</span>
+              </label>
+              <label class="nav-number-row" for="remoteComposerFocusedOpacity">
+                <span class="nav-number-copy">
+                  <span class="nav-toggle-name">Composer focused</span>
+                  <span class="nav-number-desc">Empty editor with keyboard focus</span>
+                </span>
+                <input id="remoteComposerFocusedOpacity" type="number" min="20" max="100" step="5" />
+                <span class="nav-number-unit">%</span>
+              </label>
+              <label class="nav-number-row" for="remoteComposerActiveOpacity">
+                <span class="nav-number-copy">
+                  <span class="nav-toggle-name">Composer active</span>
+                  <span class="nav-number-desc">Draft, suggestion, IME, or send activity</span>
+                </span>
+                <input id="remoteComposerActiveOpacity" type="number" min="20" max="100" step="5" />
+                <span class="nav-number-unit">%</span>
+              </label>
+              <label class="nav-number-row" for="remoteMenuFontSize">
+                <span class="nav-number-copy">
+                  <span class="nav-toggle-name">Menu text</span>
+                  <span class="nav-number-desc">This navigation drawer</span>
+                </span>
+                <input id="remoteMenuFontSize" type="number" min="6" max="72" step="1" />
+              <span class="nav-number-unit">px</span>
+              </label>
+              <label class="nav-toggle-row" for="remoteNavigationPinned">
+                <input id="remoteNavigationPinned" type="checkbox" />
+                <span class="nav-toggle-name">Pin workspace menu</span>
+                <span class="nav-toggle-desc">Keep beside the terminal when wide enough</span>
+              </label>
+              <label class="nav-number-row" for="remoteNavigationWidth">
+                <span class="nav-number-copy">
+                  <span class="nav-toggle-name">Workspace menu width</span>
+                  <span class="nav-number-desc">Pinned and floating menu</span>
+                </span>
+                <input id="remoteNavigationWidth" type="number" min="200" max="720" step="1" />
+                <span class="nav-number-unit">px</span>
+              </label>
+              <label class="nav-number-row" for="remoteNavigationPinCutoff">
+                <span class="nav-number-copy">
+                  <span class="nav-toggle-name">Pin width cutoff</span>
+                  <span class="nav-number-desc">At or below this width, use the floating menu</span>
+                </span>
+                <input id="remoteNavigationPinCutoff" type="number" min="320" max="2560" step="1" />
+                <span class="nav-number-unit">px</span>
+              </label>
+              <label class="nav-number-row" for="remoteSnapshotMaxKib">
+                <span class="nav-number-copy">
+                  <span class="nav-toggle-name">Initial history</span>
+                  <span class="nav-number-desc">Checkpoint budget per attach</span>
+                </span>
+                <input id="remoteSnapshotMaxKib" type="number" min="1" max="1024" step="1" />
+                <span class="nav-number-unit">KiB</span>
+              </label>
+              <label class="nav-number-row" for="remoteScrollSensitivity">
+                <span class="nav-number-copy">
+                  <span class="nav-toggle-name">Wheel scroll</span>
+                  <span class="nav-number-desc">Pointer wheel speed</span>
+                </span>
+                <input id="remoteScrollSensitivity" type="number" min="0.1" max="20" step="0.1" />
+                <span class="nav-number-unit">×</span>
+              </label>
+              <label class="nav-number-row" for="remoteFastScrollSensitivity">
+                <span class="nav-number-copy">
+                  <span class="nav-toggle-name">Fast wheel scroll</span>
+                  <span class="nav-number-desc">Alt + wheel speed</span>
+                </span>
+                <input id="remoteFastScrollSensitivity" type="number" min="0.1" max="20" step="0.1" />
+                <span class="nav-number-unit">×</span>
               </label>
               <label class="nav-number-row" for="remoteTouchScrollSensitivity">
                 <span class="nav-number-copy">
                   <span class="nav-toggle-name">One-finger scroll</span>
                   <span class="nav-number-desc">Drag scrollback speed</span>
                 </span>
-                <input id="remoteTouchScrollSensitivity" type="number" min="0.1" max="20" step="0.1" disabled />
+                <input id="remoteTouchScrollSensitivity" type="number" min="0.1" max="20" step="0.1" />
                 <span class="nav-number-unit">×</span>
               </label>
               <label class="nav-number-row" for="remoteTwoFingerScrollSensitivity">
@@ -198,10 +302,18 @@
                   <span class="nav-toggle-name">Two-finger scroll</span>
                   <span class="nav-number-desc">Faster two-finger swipe</span>
                 </span>
-                <input id="remoteTwoFingerScrollSensitivity" type="number" min="0.1" max="20" step="0.1" disabled />
+                <input id="remoteTwoFingerScrollSensitivity" type="number" min="0.1" max="20" step="0.1" />
                 <span class="nav-number-unit">×</span>
               </label>
-              <div id="remoteDisplaySettingsStatus" class="nav-settings-status">Connect to edit PC settings.</div>
+              <label class="nav-number-row" for="remoteSelectionHandleSize">
+                <span class="nav-number-copy">
+                  <span class="nav-toggle-name">Selection handle</span>
+                  <span class="nav-number-desc">Touch drag handle size</span>
+                </span>
+                <input id="remoteSelectionHandleSize" type="number" min="14" max="32" step="1" />
+                <span class="nav-number-unit">px</span>
+              </label>
+              <div id="remoteDisplaySettingsStatus" class="nav-settings-status">Saved on this device.</div>
               <!-- Device-local display choice (ADR-0132). Not `locked`: what
                    this browser spends its chrome rows on is nobody's lease. -->
               <label class="nav-toggle-row" for="widgetStripToggle">
@@ -209,7 +321,19 @@
                 <span class="nav-toggle-name">Widget bar</span>
                 <span class="nav-toggle-desc">Row under the header</span>
               </label>
+              <label class="nav-toggle-row" for="edgeSwipeDrawersToggle">
+                <input id="edgeSwipeDrawersToggle" type="checkbox" checked />
+                <span class="nav-toggle-name">Swipe to open</span>
+                <span class="nav-toggle-desc">Left: workspaces · Right: files</span>
+              </label>
+              <label class="nav-toggle-row" for="swipeCloseDrawersToggle">
+                <input id="swipeCloseDrawersToggle" type="checkbox" checked />
+                <span class="nav-toggle-name">Swipe to close</span>
+                <span class="nav-toggle-desc">Workspaces ← · Files →</span>
+              </label>
               </section>
+              </div><!-- /settingsPanelDisplay -->
+              <div id="settingsPanelApp" class="settings-panel" role="tabpanel" data-settings-panel="app" aria-labelledby="settingsTabApp" hidden>
               <section id="pcUpdateSection" class="nav-section" aria-label="Laymux update">
               <h2 class="nav-section-title">Laymux update</h2>
               <div class="pc-update-panel">
@@ -232,57 +356,157 @@
                 <div id="installHint" class="install-hint" hidden>iOS installs from the share sheet: Share → “Add to Home Screen”.</div>
               </div>
               </section>
+              </div><!-- /settingsPanelApp -->
             </div><!-- /drawerSettingsView -->
           </aside>
           <div class="terminal-shell">
             <div id="terminal" aria-label="Terminal output">
               <div id="terminalViewport"><div id="terminalSizer"></div></div>
               <button id="scrollToBottom" class="terminal-scroll-to-bottom" type="button" hidden aria-label="Scroll to bottom" title="Scroll to bottom">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="butt" stroke-linejoin="round" aria-hidden="true">
-                  <path d="m5 8.5 7 7 7-7" />
-                </svg>
+                <span data-remote-icon="ChevronDown" data-icon-size="24" data-icon-stroke-width="3"></span>
               </button>
             </div>
             <section id="terminalComposer" class="terminal-composer" aria-label="Terminal input composer" hidden>
               <ul id="composerHistoryList" class="composer-suggest-list" role="listbox" aria-label="Recent terminal input" hidden></ul>
               <ul id="composerAutocompleteList" class="composer-suggest-list" role="listbox" aria-label="Terminal input suggestions" hidden></ul>
-              <textarea
+              <div
+                role="textbox"
+                aria-multiline="true"
+                contenteditable="false"
                 id="composerInput"
                 class="composer-input"
                 aria-label="Compose terminal input"
                 autocomplete="off"
                 autocapitalize="off"
                 spellcheck="false"
-                placeholder="Enter to send · Shift+Enter for a newline"
-              ></textarea>
+              ></div>
             </section>
           </div>
         </div>
       </main>
       <nav id="keyBar" class="key-bar" aria-label="Special keys" hidden>
-        <div id="keyRow" class="key-row" role="group" aria-label="Special key buttons">
-          <button id="keyBarSettings" class="key-bar-settings" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="keyPopover" title="Choose key sets">⚙</button>
-        </div>
-        <div id="keyFlickHint" class="key-flick-hint" data-direction="" aria-hidden="true" hidden>
-          <span class="key-flick-arrow" data-flick-direction="up">↑</span>
-          <span class="key-flick-arrow" data-flick-direction="right">→</span>
-          <span class="key-flick-arrow" data-flick-direction="down">↓</span>
-          <span class="key-flick-arrow" data-flick-direction="left">←</span>
-          <span class="key-flick-center"></span>
-        </div>
-        <div id="keyPopover" class="key-popover" hidden>
-          <div id="keyPopoverBody" class="key-popover-scroll"></div>
+        <div id="keyRow" class="key-row" role="group" aria-label="Keys row">
+          <div class="action-segment" data-segment="left"></div>
+          <div class="action-segment" data-segment="center"></div>
+          <div class="action-segment" data-segment="right"></div>
         </div>
       </nav>
+        <div id="keyFlickHint" class="key-flick-hint" data-direction="" aria-hidden="true" hidden>
+          <span class="key-flick-arrow" data-flick-direction="up"><span data-remote-icon="ArrowUp" data-icon-size="12"></span></span>
+          <span class="key-flick-arrow" data-flick-direction="right"><span data-remote-icon="ArrowRight" data-icon-size="12"></span></span>
+          <span class="key-flick-arrow" data-flick-direction="down"><span data-remote-icon="ArrowDown" data-icon-size="12"></span></span>
+          <span class="key-flick-arrow" data-flick-direction="left"><span data-remote-icon="ArrowLeft" data-icon-size="12"></span></span>
+          <span class="key-flick-center"></span>
+        </div>
       <footer>
-        <button id="ctrlC" disabled>Ctrl+C</button>
-        <button id="focusTerminal" disabled>Keyboard</button>
-        <button id="keyBarToggle" class="key-toggle" type="button" aria-pressed="false" aria-controls="keyBar" title="Toggle special-key toolbar">Keys</button>
-        <div id="terminalMeta" class="status-hint grow">No terminal selected.</div>
-        <button id="composerSend" class="composer-send" type="button" hidden aria-label="Send input" title="Send">
-          <svg data-icon="paper-plane" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13.47 20.21 19.91 4.09 3.8 10.53l3.75 3.77 9.14-6.99-6.99 9.14 3.77 3.76Z"/></svg>
-        </button>
+        <div id="mainActionRow" class="input-action-row" role="group" aria-label="Input actions">
+          <div class="action-segment" data-segment="left"></div>
+          <div class="action-segment" data-segment="center"></div>
+          <div class="action-segment" data-segment="right">
+            <button id="focusTerminal" disabled>Keyboard</button>
+            <button id="keyBarToggle" class="key-toggle" type="button" aria-pressed="false" aria-controls="keyBar" title="Toggle special-key toolbar">Keys</button>
+            <button id="inputModeToggle" class="input-mode-toggle" type="button" hidden aria-pressed="false" aria-label="Switch to Composer input" title="Switch to Composer input">
+              <span id="inputModeIcon" class="input-mode-icon" aria-hidden="true"></span>
+            </button>
+            <button id="attachFile" class="attachment-button" type="button" hidden disabled aria-label="Attach image or text file" title="Attach image or text file">
+              <span data-remote-icon="Paperclip"></span>
+            </button>
+            <button id="composerSend" class="composer-send" type="button" hidden aria-label="Send input" title="Send">
+              <span data-remote-icon="Send" data-icon-size="20"></span>
+            </button>
+          </div>
+        </div>
+        <input id="attachmentInput" class="sr-only" type="file" accept="image/*,text/*,.md,.markdown,.json,.jsonl,.yaml,.yml,.toml,.xml,.csv,.log,.ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.rs,.go,.java,.kt,.kts,.c,.h,.cpp,.hpp,.cc,.cs,.sh,.bash,.zsh,.fish,.ps1,.bat,.cmd,.sql,.css,.scss,.html,.htm,.ini,.conf,.cfg,.env,.pdf,.docx,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation" multiple tabindex="-1" aria-hidden="true" />
       </footer>
+      <div id="terminalMeta" class="sr-only">No terminal selected.</div>
+    </div>
+    <!-- File viewer (ADR-0184). Renders in this document instead of a second
+         tab: `window.open` is unavailable in the Android wrapper and unreliable
+         in an installed PWA. The sandboxed iframe below is the security
+         boundary that the separate tab never provided — same origin either way
+         (ADR-0041) — so sanitized HTML/Markdown still runs script-less. -->
+    <div id="fileViewerOverlay" class="file-viewer-overlay" hidden>
+      <div
+        class="file-viewer-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Host files"
+      >
+        <header class="file-viewer-header">
+          <button id="fileViewerBack" class="file-viewer-back" type="button" hidden aria-label="Back to the folder" title="Back to the folder">
+            <span data-remote-icon="ChevronLeft"></span>
+          </button>
+          <div class="file-viewer-title-slot">
+            <div id="fileViewerTitle" class="file-viewer-title" title=""></div>
+            <button id="fileViewerCopyPath" class="file-viewer-copy-path" type="button" hidden aria-label="Copy path" title="Copy path">
+              <span data-remote-icon="Copy"></span>
+            </button>
+          </div>
+          <div id="fileViewerZoom" class="file-viewer-zoom" hidden>
+            <button id="fileViewerZoomOut" type="button" aria-label="Zoom out">
+              <span data-remote-icon="ZoomOut"></span>
+            </button>
+            <span id="fileViewerZoomLevel" class="file-viewer-zoom-level">100%</span>
+            <button id="fileViewerZoomIn" type="button" aria-label="Zoom in">
+              <span data-remote-icon="ZoomIn"></span>
+            </button>
+            <button id="fileViewerZoomReset" type="button" aria-label="Reset zoom">Reset</button>
+          </div>
+          <button id="fileViewerDownload" class="file-viewer-download" type="button">Download</button>
+          <button id="fileViewerClose" class="file-viewer-close" type="button" aria-label="Close host files">
+            <span data-remote-icon="X"></span>
+          </button>
+        </header>
+        <section id="fileViewerSection" class="file-viewer-open-panel locked" aria-label="Open host file by path" hidden>
+          <div class="file-viewer-panel">
+            <div class="file-viewer-path-row">
+              <input id="fileViewerPath" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Host file path" placeholder="Host file path" disabled />
+              <button id="pullHostFileViewerPath" type="button" aria-label="Use current host viewer path" disabled>From host</button>
+              <button id="openFileViewer" type="button" disabled>Open</button>
+            </div>
+            <div id="fileViewerStatus" class="file-viewer-status">Connect to open a host file.</div>
+          </div>
+        </section>
+        <div id="fileViewerBody" class="file-viewer-body">
+          <div id="fileViewerMessage" class="file-viewer-message">Loading file…</div>
+          <pre id="fileViewerText" class="file-viewer-text" hidden></pre>
+          <img id="fileViewerImage" class="file-viewer-image" alt="Host file preview" hidden />
+          <iframe
+            id="fileViewerPreview"
+            class="file-viewer-preview"
+            title="Safe file preview"
+            sandbox=""
+            hidden
+          ></iframe>
+          <div id="fileViewerBinary" class="file-viewer-binary" hidden></div>
+          <div id="fileViewerDirectory" class="file-viewer-directory" hidden></div>
+        </div>
+      </div>
+    </div>
+    <div id="composerStarEditorScrim" class="composer-star-editor-scrim" hidden>
+      <div class="composer-star-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="composerStarEditorTitle">
+        <div class="composer-star-editor-header">
+          <div id="composerStarEditorTitle" class="composer-star-editor-title">Edit starred input</div>
+          <button id="composerStarEditorClose" type="button" aria-label="Close">Close</button>
+        </div>
+        <label class="composer-star-editor-field">
+          <span>Label</span>
+          <input id="composerStarEditorLabel" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        </label>
+        <label class="composer-star-editor-field">
+          <span>Value</span>
+          <textarea id="composerStarEditorValue" spellcheck="false"></textarea>
+        </label>
+        <label class="composer-star-editor-send">
+          <input id="composerStarEditorSend" type="checkbox" />
+          <span>Send on pick</span>
+        </label>
+        <div id="composerStarEditorError" class="composer-star-editor-error" hidden></div>
+        <div class="composer-star-editor-actions">
+          <button id="composerStarEditorCancel" type="button">Cancel</button>
+          <button id="composerStarEditorSave" class="primary" type="button">Save</button>
+        </div>
+      </div>
     </div>
     <!-- OAuth loopback relay (ADR-0175). Shown when a terminal link is an
          installed-app OAuth flow: the provider redirects to the desktop's

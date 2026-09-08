@@ -14,41 +14,54 @@ internal data class WebSurfaceLayers(
     val cloudAccessible: Boolean,
     val cloudBridgeEnabled: Boolean,
     val remoteBridgeEnabled: Boolean,
+    val cloudLoadOverlayVisible: Boolean = false,
 )
 
 internal object WebSurfaceLayerPolicy {
-    fun forSurface(surface: VisibleWebSurface): WebSurfaceLayers = when (surface) {
-        VisibleWebSurface.CLOUD -> WebSurfaceLayers(
-            cloudVisible = true,
-            secureVisible = false,
-            cloudInteractive = true,
-            cloudAccessible = true,
-            cloudBridgeEnabled = true,
-            remoteBridgeEnabled = false,
-        )
-        VisibleWebSurface.PAIRING -> WebSurfaceLayers(
-            cloudVisible = true,
-            secureVisible = false,
-            cloudInteractive = false,
-            cloudAccessible = false,
-            cloudBridgeEnabled = false,
-            remoteBridgeEnabled = false,
-        )
-        VisibleWebSurface.CONNECTION_SETTINGS -> WebSurfaceLayers(
-            cloudVisible = true,
-            secureVisible = false,
-            cloudInteractive = false,
-            cloudAccessible = false,
-            cloudBridgeEnabled = false,
-            remoteBridgeEnabled = false,
-        )
-        VisibleWebSurface.REMOTE -> WebSurfaceLayers(
-            cloudVisible = false,
-            secureVisible = true,
-            cloudInteractive = false,
-            cloudAccessible = false,
-            cloudBridgeEnabled = false,
-            remoteBridgeEnabled = true,
+    fun forSurface(
+        surface: VisibleWebSurface,
+        cloudDocumentPresentation: CloudDocumentPresentation = CloudDocumentPresentation.READY,
+    ): WebSurfaceLayers {
+        val base = when (surface) {
+            VisibleWebSurface.CLOUD -> WebSurfaceLayers(
+                cloudVisible = true,
+                secureVisible = false,
+                cloudInteractive = true,
+                cloudAccessible = true,
+                cloudBridgeEnabled = true,
+                remoteBridgeEnabled = false,
+            )
+            VisibleWebSurface.PAIRING -> WebSurfaceLayers(
+                cloudVisible = true,
+                secureVisible = false,
+                cloudInteractive = false,
+                cloudAccessible = false,
+                cloudBridgeEnabled = false,
+                remoteBridgeEnabled = false,
+            )
+            VisibleWebSurface.CONNECTION_SETTINGS -> WebSurfaceLayers(
+                cloudVisible = true,
+                secureVisible = false,
+                cloudInteractive = false,
+                cloudAccessible = false,
+                cloudBridgeEnabled = false,
+                remoteBridgeEnabled = false,
+            )
+            VisibleWebSurface.REMOTE -> WebSurfaceLayers(
+                cloudVisible = false,
+                secureVisible = true,
+                cloudInteractive = false,
+                cloudAccessible = false,
+                cloudBridgeEnabled = false,
+                remoteBridgeEnabled = true,
+            )
+        }
+        val cloudDocumentReady = cloudDocumentPresentation == CloudDocumentPresentation.READY
+        return base.copy(
+            cloudInteractive = base.cloudInteractive && cloudDocumentReady,
+            cloudAccessible = base.cloudAccessible && cloudDocumentReady,
+            cloudBridgeEnabled = base.cloudBridgeEnabled && cloudDocumentReady,
+            cloudLoadOverlayVisible = base.cloudVisible && !cloudDocumentReady,
         )
     }
 }

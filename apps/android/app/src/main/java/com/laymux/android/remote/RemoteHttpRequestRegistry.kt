@@ -14,13 +14,19 @@ internal class RemoteHttpRequestRegistry {
     private val active = ConcurrentHashMap<String, Long>()
 
     fun register(requestId: String): Ticket? {
-        val token = nextToken.getAndUpdate { current ->
-            if (current == Long.MAX_VALUE) 1 else current + 1
-        }
+        val token = claimToken()
         return if (active.putIfAbsent(requestId, token) == null) {
             Ticket(requestId, token)
         } else {
             null
+        }
+    }
+
+    private fun claimToken(): Long {
+        while (true) {
+            val current = nextToken.get()
+            val following = if (current == Long.MAX_VALUE) 1 else current + 1
+            if (nextToken.compareAndSet(current, following)) return current
         }
     }
 

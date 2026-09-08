@@ -70,7 +70,19 @@ pub(super) struct WslAgentProcess {
     pub rollout_paths: Vec<String>,
 }
 
+pub(super) struct WslAgentProcessLookup {
+    pub attributions: HashMap<String, Option<WslAgentProcess>>,
+    pub failed_terminal_ids: HashSet<String>,
+}
+
 impl WslAgentProcess {
+    pub(super) fn codex_home_dir(&self) -> Option<PathBuf> {
+        self.windows_path(
+            self.codex_home
+                .as_deref()
+                .unwrap_or(&format!("{}/.codex", self.home.trim_end_matches('/'))),
+        )
+    }
     pub(super) fn claude_sessions_dir(&self) -> Option<PathBuf> {
         self.windows_path(&format!(
             "{}/.claude/sessions",
@@ -85,6 +97,7 @@ impl WslAgentProcess {
         self.windows_path(&format!("{}/.grok", self.home.trim_end_matches('/')))
     }
 
+    #[cfg(test)]
     pub(super) fn codex_rollout_paths(&self) -> Vec<PathBuf> {
         let default_home = format!("{}/.codex", self.home.trim_end_matches('/'));
         let codex_home = self.codex_home.as_deref().unwrap_or(&default_home);
@@ -120,11 +133,14 @@ impl WslAgentProcess {
 pub(super) fn resolve_wsl_agent_processes(
     state: &AppState,
     provider: WslAgentProvider,
-) -> Result<HashMap<String, Option<WslAgentProcess>>, AppError> {
+) -> Result<WslAgentProcessLookup, AppError> {
     #[cfg(not(windows))]
     {
         let _ = (state, provider);
-        return Ok(HashMap::new());
+        return Ok(WslAgentProcessLookup {
+            attributions: HashMap::new(),
+            failed_terminal_ids: HashSet::new(),
+        });
     }
 
     #[cfg(windows)]
@@ -135,8 +151,18 @@ pub(super) fn resolve_wsl_agent_processes(
         let deadline = Instant::now() + WSL_AGENT_PROBE_TIMEOUT;
         let targets = wsl_terminal_targets(state, deadline)?;
         let mut result = HashMap::new();
+        let mut failed_terminal_ids = HashSet::new();
+        if targets.lookup_failed {
+            failed_terminal_ids.extend(
+                targets
+                    .targets
+                    .iter()
+                    .filter(|(_, distro)| distro.is_none())
+                    .map(|(terminal_id, _)| terminal_id.clone()),
+            );
+        }
         let mut by_distro: HashMap<String, Vec<String>> = HashMap::new();
-        for (terminal_id, distro) in targets {
+        for (terminal_id, distro) in targets.targets {
             match distro {
                 Some(distro) => by_distro.entry(distro).or_default().push(terminal_id),
                 None => {
@@ -155,6 +181,7 @@ pub(super) fn resolve_wsl_agent_processes(
                 Ok(entries) => entries,
                 Err(error) => {
                     tracing::warn!(%distro, %error, "WSL agent process probe failed closed");
+                    failed_terminal_ids.extend(terminal_ids.iter().cloned());
                     for terminal_id in terminal_ids {
                         result.insert(terminal_id, None);
                     }
@@ -182,7 +209,10 @@ pub(super) fn resolve_wsl_agent_processes(
                 );
             }
         }
-        Ok(result)
+        Ok(WslAgentProcessLookup {
+            attributions: result,
+            failed_terminal_ids,
+        })
     }
 }
 

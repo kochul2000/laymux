@@ -250,7 +250,9 @@ async function installLeaseMocks(
  */
 async function connectRemote(page: Page, expectedStatus = "Main · Pane 1") {
   const connect = page.locator("#connect");
-  const status = page.locator("#status");
+  // The wrapper also owns the busy spinner and formatting whitespace; only the
+  // text node is the connection-state contract this helper is waiting for.
+  const status = page.locator("#statusText");
   // Wait for one of the two to become true before deciding: the automatic claim
   // has already landed, or the button is ours to press. Reading `isEnabled` on
   // its own races both ways — the button is briefly disabled while a claim is in
@@ -373,6 +375,7 @@ test("an explicit release reconnects to the last selected workspace pane", async
 
   await page.locator("#navToggle").click();
   // Exit lives in the drawer's connection view; the drawer opens on workspace.
+  await page.locator("#drawerSettingsButton").click();
   await page.locator("#drawerConnectionButton").click();
   await page.locator("#exit").click();
   await expect(page.locator("#connect")).toBeEnabled();
@@ -420,6 +423,7 @@ test("a reconnect falls back when the last selected terminal is no longer live",
 
   await page.locator("#navToggle").click();
   // Exit lives in the drawer's connection view; the drawer opens on workspace.
+  await page.locator("#drawerSettingsButton").click();
   await page.locator("#drawerConnectionButton").click();
   await page.locator("#exit").click();
   changingNavigation.activeWorkspace.panes[1].terminalLive = false;

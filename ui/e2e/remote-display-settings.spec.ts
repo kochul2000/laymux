@@ -2,38 +2,55 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { installRemoteClientRoutes } from "./remote-client-assets";
 
+const DISPLAY_SETTINGS_KEY = "laymux.remote.displaySettings";
+
+const deviceSettings = {
+  terminalFontSize: 19,
+  composerFontSize: 26,
+  menuFontSize: 17,
+  mainButtonScale: 120,
+  keysButtonScale: 90,
+  navigationPinned: false,
+  navigationWidth: 300,
+  navigationPinCutoff: 720,
+  composerIdleOpacity: 45,
+  composerFocusedOpacity: 75,
+  composerActiveOpacity: 95,
+  snapshotMaxKib: 64,
+  scrollSensitivity: 2.5,
+  fastScrollSensitivity: 8,
+  touchScrollSensitivity: 1.5,
+  twoFingerScrollSensitivity: 6,
+  selectionHandleSize: 24,
+};
+
+const workspacePane = {
+  id: "pane-1",
+  location: "workspace",
+  workspaceId: "ws-1",
+  paneIndex: 0,
+  paneNumber: 1,
+  viewType: "terminal",
+  terminalId: "terminal-1",
+  terminalLive: true,
+  title: "Shell",
+  profile: "PowerShell",
+  cwd: "C:\\work",
+  activity: { type: "shell" },
+  outputActive: false,
+  commandRunning: true,
+  isFocused: true,
+  unreadCount: 0,
+  hidden: false,
+  collapsed: false,
+  x: 0,
+  y: 0,
+  w: 1,
+  h: 1,
+};
+
 const navigation = {
-  activeWorkspace: {
-    id: "ws-1",
-    name: "Main",
-    panes: [
-      {
-        id: "pane-1",
-        location: "workspace",
-        workspaceId: "ws-1",
-        paneIndex: 0,
-        paneNumber: 1,
-        viewType: "terminal",
-        terminalId: "terminal-1",
-        terminalLive: true,
-        title: "Shell",
-        profile: "PowerShell",
-        cwd: "C:\\work",
-        branch: "main",
-        activity: { type: "shell" },
-        outputActive: false,
-        commandRunning: false,
-        isFocused: true,
-        unreadCount: 0,
-        hidden: false,
-        collapsed: false,
-        x: 0,
-        y: 0,
-        w: 1,
-        h: 1,
-      },
-    ],
-  },
+  activeWorkspace: { id: "ws-1", name: "Main", panes: [workspacePane] },
   workspaces: [
     {
       id: "ws-1",
@@ -45,7 +62,7 @@ const navigation = {
       terminalPaneCount: 1,
       liveTerminalCount: 1,
       unreadCount: 0,
-      panes: [],
+      panes: [workspacePane],
     },
   ],
   docks: [],
@@ -59,7 +76,6 @@ const navigation = {
       paneNumber: 1,
       appearance: {
         fontFamily: "'Cascadia Mono', 'Consolas', monospace",
-        fontSize: 14,
         cursorStyle: "bar",
         cursorWidth: 1,
         theme: {},
@@ -71,64 +87,57 @@ const navigation = {
   unreadNotificationCount: 0,
 };
 
-interface DisplaySettings {
-  terminalFontSize: number;
-  composerFontSize: number;
-  touchScrollSensitivity: number;
-  twoFingerScrollSensitivity: number;
-  revision: string;
-}
-
-type DisplaySettingsPut = Omit<DisplaySettings, "revision"> & {
-  leaseId: string;
-  expectedRevision: string;
+type TermWindow = typeof window & {
+  Terminal: { prototype: { reset: () => void } };
+  __remoteTerm?: {
+    options: { fontSize: number; scrollSensitivity: number; fastScrollSensitivity: number };
+  };
 };
-
-interface DisplaySettingsHarness {
-  settings: DisplaySettings;
-  claimLeaseIds: string[];
-  claimRequests: number;
-  getRequests: number;
-  putBodies: DisplaySettingsPut[];
-  delayNextPut: boolean;
-  releasePut: (() => void) | null;
-}
 
 function snapshotFrames(text: string) {
   const payload = Buffer.from(text, "utf8");
-  const header = JSON.stringify({
-    type: "terminal.output",
-    version: 1,
-    phase: "snapshot",
-    seqStart: 0,
-    seqEnd: payload.byteLength,
-    byteLength: payload.byteLength,
-    state: {
+  return {
+    header: JSON.stringify({
+      type: "terminal.output",
       version: 1,
-      generation: 1,
-      snapshotStartSeq: 0,
-      snapshotSeq: payload.byteLength,
-      sourceStartSeq: 0,
-      sourceSeq: payload.byteLength,
-      snapshotKind: "raw",
-      protocolRevision: 0,
-      modes: { bracketedPaste: false },
-      geometry: { revision: 0, cols: 80, rows: 24 },
-    },
-  });
-  return { header, payload };
+      phase: "snapshot",
+      seqStart: 0,
+      seqEnd: payload.byteLength,
+      byteLength: payload.byteLength,
+      state: {
+        version: 1,
+        generation: 1,
+        snapshotStartSeq: 0,
+        snapshotSeq: payload.byteLength,
+        sourceStartSeq: 0,
+        sourceSeq: payload.byteLength,
+        snapshotKind: "raw",
+        protocolRevision: 0,
+        modes: { bracketedPaste: false },
+        geometry: { revision: 0, cols: 80, rows: 24 },
+      },
+    }),
+    payload,
+  };
 }
 
-async function installRemoteMocks(page: Page, harness: DisplaySettingsHarness) {
+async function installApiMocks(
+  page: Page,
+  displayRequests: string[],
+  outputUrls: string[] = [],
+  outputClosers: Array<() => void> = [],
+) {
   await installRemoteClientRoutes(page);
   await page.route("http://remote.test/remote/v1/**", async (route) => {
     const url = new URL(route.request().url());
+    if (url.pathname === "/remote/v1/display-settings") {
+      displayRequests.push(route.request().method());
+      await route.fulfill({ status: 404, json: { error: "removed" } });
+      return;
+    }
     if (url.pathname === "/remote/v1/session/claim") {
-      const leaseId =
-        harness.claimLeaseIds[Math.min(harness.claimRequests, harness.claimLeaseIds.length - 1)];
-      harness.claimRequests += 1;
       await route.fulfill({
-        json: { active: true, leaseId, heartbeatTimeoutSeconds: 45 },
+        json: { active: true, leaseId: "lease-1", heartbeatTimeoutSeconds: 45 },
       });
       return;
     }
@@ -140,65 +149,249 @@ async function installRemoteMocks(page: Page, harness: DisplaySettingsHarness) {
       await route.fulfill({ json: navigation });
       return;
     }
-    if (url.pathname === "/remote/v1/display-settings") {
-      if (route.request().method() === "GET") {
-        harness.getRequests += 1;
-        await route.fulfill({ json: harness.settings });
-        return;
-      }
-
-      const contentType = route.request().headers()["content-type"];
-      if (contentType !== "application/json") {
-        await route.fulfill({
-          status: 415,
-          contentType: "text/plain",
-          body: "Expected request with `Content-Type: application/json`",
-        });
-        return;
-      }
-
-      const body = route.request().postDataJSON() as DisplaySettingsPut;
-      harness.putBodies.push(body);
-      if (harness.delayNextPut) {
-        harness.delayNextPut = false;
-        await new Promise<void>((resolve) => {
-          harness.releasePut = resolve;
-        });
-      }
-      if (body.expectedRevision !== harness.settings.revision) {
-        await route.fulfill({
-          status: 409,
-          json: { error: "Settings revision conflict" },
-        });
-        return;
-      }
-      const revisionNumber = Number(harness.settings.revision.replace(/^rev-/, "")) || 0;
-      harness.settings = {
-        terminalFontSize: body.terminalFontSize,
-        composerFontSize: body.composerFontSize,
-        touchScrollSensitivity: body.touchScrollSensitivity,
-        twoFingerScrollSensitivity: body.twoFingerScrollSensitivity,
-        revision: `rev-${revisionNumber + 1}`,
-      };
-      await route.fulfill({ json: harness.settings });
-      return;
-    }
     await route.fulfill({ json: {} });
   });
-
   await page.routeWebSocket(/\/remote\/v1\/terminals\/terminal-1\/output/, (socket) => {
+    outputUrls.push(socket.url());
+    outputClosers.push(() => socket.close());
     const snapshot = snapshotFrames("ready\r\n");
     socket.send(snapshot.header);
     socket.send(snapshot.payload);
   });
 }
 
-type TermWindow = typeof window & {
-  Terminal: { prototype: { reset: () => void } };
-  __remoteTerm?: { options: { fontSize: number } };
-};
+async function openDeviceSettings(page: Page) {
+  await page.locator("#navToggle").click();
+  await page.locator("#drawerSettingsButton").evaluate((button) => button.click());
+  // Settings is paginated; the display preferences live on their own tab.
+  await page
+    .locator('#settingsTabs [data-settings-panel="display"]')
+    .evaluate((tab: HTMLElement) => tab.click());
+  await expect(page.locator("#remoteTerminalFontSize")).toBeEnabled();
+}
 
-async function connectAndOpenDisplaySettings(page: Page) {
+test("원격 화면 설정은 연결 전부터 기기 localStorage에서 읽고 저장한다", async ({ page }) => {
+  const displayRequests: string[] = [];
+  await installApiMocks(page, displayRequests);
+  await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), {
+    key: DISPLAY_SETTINGS_KEY,
+    value: deviceSettings,
+  });
+
+  await page.goto("http://remote.test/remote/");
+  await openDeviceSettings(page);
+
+  await expect(page.locator("#remoteTerminalFontSize")).toHaveValue("19");
+  await expect(page.locator("#remoteComposerFontSize")).toHaveValue("26");
+  await expect(page.locator("#remoteMenuFontSize")).toHaveValue("17");
+  await expect(page.locator("#remoteNavigationPinned")).not.toBeChecked();
+  await expect(page.locator("#remoteNavigationWidth")).toHaveValue("300");
+  await expect(page.locator("#remoteNavigationPinCutoff")).toHaveValue("720");
+  await expect(page.locator("#remoteSnapshotMaxKib")).toHaveValue("64");
+  await expect(page.locator("#remoteScrollSensitivity")).toHaveValue("2.5");
+  await expect(page.locator("#remoteFastScrollSensitivity")).toHaveValue("8");
+  await expect(page.locator("#remoteTouchScrollSensitivity")).toHaveValue("1.5");
+  await expect(page.locator("#remoteTwoFingerScrollSensitivity")).toHaveValue("6");
+  await expect(page.locator("#remoteSelectionHandleSize")).toHaveValue("24");
+  await expect(page.locator("#remoteDisplaySettingsStatus")).toHaveText("Saved on this device.");
+
+  await page.locator("#remoteTerminalFontSize").fill("22");
+  await page.locator("#remoteTerminalFontSize").blur();
+  await expect
+    .poll(() =>
+      page.evaluate((key) => JSON.parse(localStorage.getItem(key) || "null"), DISPLAY_SETTINGS_KEY),
+    )
+    .toMatchObject({ ...deviceSettings, terminalFontSize: 22 });
+  expect(displayRequests).toEqual([]);
+
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue("--remote-composer-font-size"),
+      ),
+    )
+    .toBe("26px");
+
+  await page.locator("#remoteSelectionHandleSize").fill("28");
+  await page.locator("#remoteSelectionHandleSize").blur();
+  await expect
+    .poll(() =>
+      page.evaluate((key) => JSON.parse(localStorage.getItem(key) || "null"), DISPLAY_SETTINGS_KEY),
+    )
+    .toMatchObject({ ...deviceSettings, terminalFontSize: 22, selectionHandleSize: 28 });
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue(
+          "--touch-selection-handle-size",
+        ),
+      ),
+    )
+    .toBe("28px");
+});
+
+test("워크스페이스 메뉴는 너비를 공유하고 컷오프보다 넓을 때만 고정된다", async ({ page }) => {
+  const displayRequests: string[] = [];
+  await installApiMocks(page, displayRequests);
+  await page.setViewportSize({ width: 900, height: 800 });
+  await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), {
+    key: DISPLAY_SETTINGS_KEY,
+    value: { ...deviceSettings, navigationPinned: true },
+  });
+
+  await page.goto("http://remote.test/remote/");
+
+  await expect(page.locator(".app")).toHaveClass(/nav-pinned/);
+  await expect(page.locator("#navigationPanel")).toHaveCSS("width", "300px");
+  await expect(page.locator("#navScrim")).toBeHidden();
+  expect(
+    await page.evaluate(() => {
+      const remoteUi = (
+        window as typeof window & {
+          laymuxRemoteUi: { dismissTopLayer: () => boolean };
+        }
+      ).laymuxRemoteUi;
+      return [remoteUi.dismissTopLayer(), remoteUi.dismissTopLayer()];
+    }),
+  ).toEqual([true, false]);
+
+  await page.setViewportSize({ width: 720, height: 800 });
+  await expect(page.locator(".app")).not.toHaveClass(/nav-pinned/);
+  await expect(page.locator("#navigationPanel")).toHaveCSS("width", "300px");
+
+  await page.setViewportSize({ width: 721, height: 800 });
+  await expect(page.locator(".app")).toHaveClass(/nav-pinned/);
+
+  await page.locator("#drawerSettingsButton").evaluate((button) => button.click());
+  await page
+    .locator('#settingsTabs [data-settings-panel="display"]')
+    .evaluate((tab: HTMLElement) => tab.click());
+  await page.locator("#remoteNavigationWidth").fill("280");
+  await page.locator("#remoteNavigationWidth").blur();
+  await expect(page.locator("#navigationPanel")).toHaveCSS("width", "280px");
+
+  await page.locator("#remoteNavigationPinCutoff").fill("800");
+  await page.locator("#remoteNavigationPinCutoff").blur();
+  await expect(page.locator(".app")).not.toHaveClass(/nav-pinned/);
+  await page.locator("#remoteNavigationPinCutoff").fill("720");
+  await page.locator("#remoteNavigationPinCutoff").blur();
+  await expect(page.locator(".app")).toHaveClass(/nav-pinned/);
+
+  await page.locator("#remoteNavigationPinned").uncheck();
+  await expect(page.locator(".app")).not.toHaveClass(/nav-pinned/);
+  await expect(page.locator("#navigationPanel")).toHaveCSS("width", "280px");
+  await expect
+    .poll(() =>
+      page.evaluate((key) => JSON.parse(localStorage.getItem(key) || "null"), DISPLAY_SETTINGS_KEY),
+    )
+    .toMatchObject({
+      navigationPinned: false,
+      navigationWidth: 280,
+      navigationPinCutoff: 720,
+    });
+  expect(displayRequests).toEqual([]);
+});
+
+test("메뉴 도구 줄의 핀 아이콘은 설정과 같은 워크스페이스 메뉴 고정 값을 토글한다", async ({
+  page,
+}) => {
+  const displayRequests: string[] = [];
+  await installApiMocks(page, displayRequests);
+  await page.setViewportSize({ width: 900, height: 800 });
+  await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), {
+    key: DISPLAY_SETTINGS_KEY,
+    value: deviceSettings,
+  });
+
+  await page.goto("http://remote.test/remote/");
+
+  await page.locator("#token").fill("test-token");
+  await page.locator("#connect").click();
+  await page.locator("#navToggle").click();
+  const pin = page.locator(".drawer-header > #navigationPin");
+  await expect(page.locator("header #navigationPin")).toHaveCount(0);
+  await expect(pin).toBeVisible();
+  const pinBox = await pin.boundingBox();
+  const plusBox = await page.locator("#newWorkspace").boundingBox();
+  expect(pinBox!.y).toBe(plusBox!.y);
+  const titleBox = await page.locator("#drawerTitle").boundingBox();
+  expect(pinBox!.x + pinBox!.width).toBeLessThanOrEqual(titleBox!.x);
+  await expect(pin.locator('svg[data-remote-icon-name="Pin"]')).toHaveCount(1);
+  await expect(pin).toHaveAttribute("aria-pressed", "false");
+  await expect(pin).toHaveAttribute("aria-label", "Pin workspace menu");
+
+  await pin.click();
+  await expect(page.locator(".app")).toHaveClass(/nav-pinned/);
+  await expect(pin).toHaveAttribute("aria-pressed", "true");
+  await expect(pin).toHaveAttribute("aria-label", "Unpin workspace menu");
+  await expect(page.locator("#remoteNavigationPinned")).toBeChecked();
+  await page.screenshot({ path: "../.screenshots/remote-pin-toolbar-wide.png" });
+  await expect
+    .poll(() =>
+      page.evaluate((key) => JSON.parse(localStorage.getItem(key) || "null"), DISPLAY_SETTINGS_KEY),
+    )
+    .toMatchObject({ navigationPinned: true });
+
+  await pin.click();
+  await expect(page.locator(".app")).not.toHaveClass(/nav-pinned/);
+  await expect(pin).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator("#remoteNavigationPinned")).not.toBeChecked();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(pin).toBeVisible();
+  await page.screenshot({ path: "../.screenshots/remote-pin-toolbar-mobile.png" });
+  await expect(page.locator(".drawer-header #drawerConnectionButton")).toHaveCount(0);
+  await page.locator("#drawerSettingsButton").click();
+  await expect(page.locator("#drawerSettingsView #drawerConnectionButton")).toBeVisible();
+  await page.screenshot({ path: "../.screenshots/remote-connection-settings-mobile.png" });
+  await page.locator("#drawerConnectionButton").click();
+  await expect(page.locator("#drawerConnectionView")).toBeVisible();
+  await page.locator("#drawerBack").click();
+  await expect(page.locator("#drawerSettingsButton")).toBeFocused();
+  expect(displayRequests).toEqual([]);
+});
+
+test("잘못된 워크스페이스 메뉴 숫자 설정은 안전한 기본값으로 복구한다", async ({ page }) => {
+  const displayRequests: string[] = [];
+  await installApiMocks(page, displayRequests);
+  await page.setViewportSize({ width: 500, height: 800 });
+  await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), {
+    key: DISPLAY_SETTINGS_KEY,
+    value: {
+      ...deviceSettings,
+      navigationPinned: true,
+      navigationWidth: null,
+      navigationPinCutoff: false,
+    },
+  });
+
+  await page.goto("http://remote.test/remote/");
+  await expect(page.locator(".app")).not.toHaveClass(/nav-pinned/);
+  await page.locator("#drawerSettingsButton").evaluate((button) => button.click());
+  await page
+    .locator('#settingsTabs [data-settings-panel="display"]')
+    .evaluate((tab: HTMLElement) => tab.click());
+
+  await expect(page.locator("#remoteNavigationWidth")).toHaveValue("360");
+  await expect(page.locator("#remoteNavigationPinCutoff")).toHaveValue("720");
+  await page.locator("#remoteNavigationWidth").fill("");
+  await page.locator("#remoteNavigationWidth").blur();
+  await expect
+    .poll(() =>
+      page.evaluate((key) => JSON.parse(localStorage.getItem(key) || "null"), DISPLAY_SETTINGS_KEY),
+    )
+    .toMatchObject({ navigationWidth: 360, navigationPinCutoff: 720 });
+  expect(displayRequests).toEqual([]);
+});
+
+test("기기의 terminal 옵션과 checkpoint 예산을 최초 attach에 적용한다", async ({ page }) => {
+  const displayRequests: string[] = [];
+  const outputUrls: string[] = [];
+  await installApiMocks(page, displayRequests, outputUrls);
+  await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), {
+    key: DISPLAY_SETTINGS_KEY,
+    value: deviceSettings,
+  });
+
   await page.goto("http://remote.test/remote/#token=test-token");
   await page.evaluate(() => {
     const target = window as TermWindow;
@@ -209,195 +402,164 @@ async function connectAndOpenDisplaySettings(page: Page) {
     };
   });
   await page.locator("#connect").click();
+
+  await expect.poll(() => outputUrls.length).toBeGreaterThan(0);
+  expect(new URL(outputUrls[0]).searchParams.get("historyKib")).toBe("64");
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const options = (window as TermWindow).__remoteTerm?.options;
+        return options
+          ? [options.fontSize, options.scrollSensitivity, options.fastScrollSensitivity]
+          : null;
+      }),
+    )
+    .toEqual([19, 2.5, 8]);
+  await expect(page.locator("#terminal .xterm")).toBeVisible();
+  expect(displayRequests).toEqual([]);
+});
+
+test("실행 중 바꾼 checkpoint 예산은 다음 자동 attach부터 적용한다", async ({ page }) => {
+  const displayRequests: string[] = [];
+  const outputUrls: string[] = [];
+  const outputClosers: Array<() => void> = [];
+  await installApiMocks(page, displayRequests, outputUrls, outputClosers);
+
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.locator("#connect").click();
+
+  await expect.poll(() => outputUrls.length).toBe(1);
+  expect(new URL(outputUrls[0]).searchParams.get("historyKib")).toBe("4");
+
+  await page.locator("#remoteSnapshotMaxKib").evaluate((input) => {
+    const numberInput = input as HTMLInputElement;
+    numberInput.value = "64";
+    numberInput.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await expect
+    .poll(() =>
+      page.evaluate((key) => JSON.parse(localStorage.getItem(key) || "null"), DISPLAY_SETTINGS_KEY),
+    )
+    .toMatchObject({ snapshotMaxKib: 64 });
+
+  outputClosers[0]();
+
+  await expect.poll(() => outputUrls.length).toBe(2);
+  expect(new URL(outputUrls[1]).searchParams.get("historyKib")).toBe("64");
+  expect(displayRequests).toEqual([]);
+});
+
+test("디바이스 저장 실패 상태는 연결 전환 뒤에도 유지한다", async ({ page }) => {
+  const displayRequests: string[] = [];
+  await installApiMocks(page, displayRequests);
+  await page.addInitScript((displaySettingsKey) => {
+    const originalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function setItem(key, value) {
+      if (key === displaySettingsKey)
+        throw new DOMException("storage blocked", "QuotaExceededError");
+      return originalSetItem.call(this, key, value);
+    };
+  }, DISPLAY_SETTINGS_KEY);
+
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.locator("#remoteTerminalFontSize").evaluate((input) => {
+    const numberInput = input as HTMLInputElement;
+    numberInput.value = "22";
+    numberInput.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await expect(page.locator("#remoteDisplaySettingsStatus")).toHaveText(
+    "Could not save on this device.",
+  );
+
+  await page.locator("#connect").click();
+
+  await expect(page.locator(".connection-panel")).toHaveClass(/connected/);
+
+  await expect(page.locator("#remoteDisplaySettingsStatus")).toHaveText(
+    "Could not save on this device.",
+  );
+  expect(displayRequests).toEqual([]);
+});
+
+test("버튼 크기는 기존 terminal crop을 유지하고 모바일·가로 화면 안에서 스크롤한다", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const requests: string[] = [];
+  await installApiMocks(page, requests);
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.locator("#connect").click();
+  await expect(page.locator("#terminal .xterm-rows")).toBeVisible();
+  const rowCount = () => page.locator("#terminal .xterm-rows > div").count();
+  await expect.poll(rowCount).toBeGreaterThan(5);
+  const before = await rowCount();
+  const hostHeight = await page.locator("#terminal").evaluate((host) => host.clientHeight);
+  await page.locator("#keyBarToggle").click();
   await page.locator("#navToggle").click();
   await page.locator("#drawerSettingsButton").click();
-  await expect(page.locator("#remoteTerminalFontSize")).toBeEnabled();
-}
-
-test("PC 소유 표시 크기를 조회·저장하고 현재 Remote surface에 즉시 적용한다", async ({ page }) => {
-  const harness: DisplaySettingsHarness = {
-    settings: {
-      terminalFontSize: 18,
-      composerFontSize: 20,
-      touchScrollSensitivity: 1,
-      twoFingerScrollSensitivity: 5,
-      revision: "rev-1",
-    },
-    claimLeaseIds: ["lease-1"],
-    claimRequests: 0,
-    getRequests: 0,
-    putBodies: [],
-    delayNextPut: false,
-    releasePut: null,
-  };
-  await installRemoteMocks(page, harness);
-  await connectAndOpenDisplaySettings(page);
-
-  await expect(page.locator("#remoteTerminalFontSize")).toHaveValue("18");
-  await expect(page.locator("#remoteComposerFontSize")).toHaveValue("20");
-  await expect
-    .poll(() =>
-      page.evaluate(() => ({
-        terminal: (window as TermWindow).__remoteTerm?.options.fontSize ?? 0,
-        composer: getComputedStyle(document.getElementById("composerInput") as HTMLElement)
-          .fontSize,
-      })),
-    )
-    .toEqual({ terminal: 18, composer: "20px" });
-
-  await page.locator("#remoteTerminalFontSize").fill("22");
-  await page.locator("#remoteComposerFontSize").click();
-  await expect.poll(() => harness.putBodies.length).toBe(1);
-  await expect(page.locator("#remoteDisplaySettingsStatus")).toHaveText("Saved on this PC.");
-  await expect
-    .poll(() => page.evaluate(() => (window as TermWindow).__remoteTerm?.options.fontSize ?? 0))
-    .toBe(22);
-
-  await page.locator("#remoteComposerFontSize").fill("24");
-  await page.locator("#remoteTerminalFontSize").click();
-  await expect.poll(() => harness.putBodies.length).toBe(2);
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () => getComputedStyle(document.getElementById("composerInput") as HTMLElement).fontSize,
-      ),
-    )
-    .toBe("24px");
-  expect(harness.putBodies).toEqual([
-    {
-      leaseId: "lease-1",
-      expectedRevision: "rev-1",
-      terminalFontSize: 22,
-      composerFontSize: 20,
-      touchScrollSensitivity: 1,
-      twoFingerScrollSensitivity: 5,
-    },
-    {
-      leaseId: "lease-1",
-      expectedRevision: "rev-2",
-      terminalFontSize: 22,
-      composerFontSize: 24,
-      touchScrollSensitivity: 1,
-      twoFingerScrollSensitivity: 5,
-    },
-  ]);
-});
-
-test("저장 중 drawer를 다시 열어도 pending 상태와 최신 저장값을 잃지 않는다", async ({ page }) => {
-  const harness: DisplaySettingsHarness = {
-    settings: {
-      terminalFontSize: 18,
-      composerFontSize: 20,
-      touchScrollSensitivity: 1,
-      twoFingerScrollSensitivity: 5,
-      revision: "rev-1",
-    },
-    claimLeaseIds: ["lease-1"],
-    claimRequests: 0,
-    getRequests: 0,
-    putBodies: [],
-    delayNextPut: true,
-    releasePut: null,
-  };
-  await installRemoteMocks(page, harness);
-  await connectAndOpenDisplaySettings(page);
-
-  await page.locator("#remoteTerminalFontSize").fill("22");
-  await page.locator("#remoteComposerFontSize").click();
-  await expect.poll(() => harness.putBodies.length).toBe(1);
-  await expect(page.locator("#remoteTerminalFontSize")).toBeDisabled();
-
+  for (const row of ["Main", "Keys"]) {
+    for (let i = 0; i < 6; i++) {
+      await page.getByRole("button", { name: `Increase ${row} button size`, exact: true }).click();
+    }
+  }
+  await page.screenshot({ path: testInfo.outputPath("button-size-settings.png") });
+  for (const control of await page.locator(".button-size-controls").all()) {
+    const centres = await control.locator("button, output").evaluateAll((items) =>
+      items.map((item) => {
+        const box = item.getBoundingClientRect();
+        return box.top + box.height / 2;
+      }),
+    );
+    expect(Math.max(...centres) - Math.min(...centres)).toBeLessThan(1);
+  }
   await page.locator("#drawerBack").click();
-  await page.locator("#drawerSettingsButton").click();
-  harness.releasePut?.();
-
-  await expect(page.locator("#remoteTerminalFontSize")).toBeEnabled();
-  await expect(page.locator("#remoteTerminalFontSize")).toHaveValue("22");
-  await expect(page.locator("#remoteDisplaySettingsStatus")).toHaveText("Saved on this PC.");
+  if ((await page.locator("#navToggle").getAttribute("aria-expanded")) === "true") {
+    await page.locator("#navToggle").click();
+  }
+  // ADR-0038: height-only shrink crops the normal buffer without resizing PTY rows.
+  await expect
+    .poll(() => page.locator("#terminal").evaluate((host) => host.clientHeight))
+    .toBeLessThan(hostHeight);
+  expect(await rowCount()).toBe(before);
+  for (const width of [390, 844]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 390 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+    for (const id of ["mainActionRow", "keyRow"]) {
+      const sizes = await page.locator(`#${id}`).evaluate((row) => {
+        row.scrollLeft = row.scrollWidth;
+        return { scroll: row.scrollLeft, width: row.clientWidth, content: row.scrollWidth };
+      });
+      if (sizes.content > sizes.width) expect(sizes.scroll).toBeGreaterThan(0);
+    }
+    await page.screenshot({ path: testInfo.outputPath(`button-size-${width}.png`) });
+  }
+  await expect.poll(rowCount).toBeLessThan(before);
+  expect(requests).toEqual([]);
 });
 
-test("저장 중 lease가 바뀌면 새 controller에서 PC 값을 다시 읽는다", async ({ page }) => {
-  const harness: DisplaySettingsHarness = {
-    settings: {
-      terminalFontSize: 18,
-      composerFontSize: 20,
-      touchScrollSensitivity: 1,
-      twoFingerScrollSensitivity: 5,
-      revision: "rev-1",
-    },
-    claimLeaseIds: ["lease-1", "lease-2"],
-    claimRequests: 0,
-    getRequests: 0,
-    putBodies: [],
-    delayNextPut: true,
-    releasePut: null,
-  };
-  await installRemoteMocks(page, harness);
-  await connectAndOpenDisplaySettings(page);
-
-  await page.locator("#remoteTerminalFontSize").fill("22");
-  await page.locator("#remoteComposerFontSize").click();
-  await expect.poll(() => harness.putBodies.length).toBe(1);
-
-  await page.locator("#drawerBack").click();
-  await page.locator("#drawerConnectionButton").click();
-  await page.locator("#exit").click();
-  await expect(page.locator("#connect")).toBeVisible();
-  await page.locator("#connect").click();
-  await expect.poll(() => harness.claimRequests).toBe(2);
-  const getsBeforeOldSaveSettles = harness.getRequests;
-
-  harness.releasePut?.();
-
-  await expect.poll(() => harness.getRequests).toBeGreaterThan(getsBeforeOldSaveSettles);
-  await expect(page.locator("#remoteTerminalFontSize")).toBeEnabled();
-  await expect(page.locator("#remoteTerminalFontSize")).toHaveValue("22");
-  await expect(page.locator("#remoteDisplaySettingsStatus")).toHaveText("Stored on this PC.");
-});
-
-test("PC settings revision이 바뀌면 stale Remote 저장을 거부하고 최신 값을 다시 읽는다", async ({
-  page,
-}) => {
-  const harness: DisplaySettingsHarness = {
-    settings: {
-      terminalFontSize: 18,
-      composerFontSize: 20,
-      touchScrollSensitivity: 1,
-      twoFingerScrollSensitivity: 5,
-      revision: "rev-1",
-    },
-    claimLeaseIds: ["lease-1"],
-    claimRequests: 0,
-    getRequests: 0,
-    putBodies: [],
-    delayNextPut: false,
-    releasePut: null,
-  };
-  await installRemoteMocks(page, harness);
-  await connectAndOpenDisplaySettings(page);
-
-  harness.settings = {
-    terminalFontSize: 19,
-    composerFontSize: 26,
-    touchScrollSensitivity: 1,
-    twoFingerScrollSensitivity: 5,
-    revision: "rev-2",
-  };
-  const getsBeforeConflict = harness.getRequests;
-  await page.locator("#remoteTerminalFontSize").fill("22");
-  await page.locator("#remoteComposerFontSize").click();
-
-  await expect.poll(() => harness.putBodies.length).toBe(1);
-  expect(harness.putBodies[0]).toEqual({
-    leaseId: "lease-1",
-    expectedRevision: "rev-1",
-    terminalFontSize: 22,
-    composerFontSize: 20,
-    touchScrollSensitivity: 1,
-    twoFingerScrollSensitivity: 5,
+test("잘못된 버튼 배율을 정규화하고 저장 실패에도 현재 화면은 적용한다", async ({ page }) => {
+  await installApiMocks(page, []);
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "laymux.remote.displaySettings",
+      JSON.stringify({ mainButtonScale: 999, keysButtonScale: null }),
+    );
+    Storage.prototype.setItem = () => {
+      throw new DOMException("blocked", "QuotaExceededError");
+    };
   });
-  await expect.poll(() => harness.getRequests).toBeGreaterThan(getsBeforeConflict);
-  await expect(page.locator("#remoteTerminalFontSize")).toHaveValue("19");
-  await expect(page.locator("#remoteComposerFontSize")).toHaveValue("26");
-  await expect(page.locator("#remoteDisplaySettingsStatus")).toHaveText("Stored on this PC.");
+  await page.goto("http://remote.test/remote/");
+  await page.locator("#drawerSettingsButton").click();
+  await expect(page.locator("#remoteMainButtonScale")).toHaveText("160%");
+  await expect(page.locator("#remoteKeysButtonScale")).toHaveText("100%");
+  await page.getByRole("button", { name: "Decrease Main button size", exact: true }).click();
+  await expect(page.locator("#remoteMainButtonScale")).toHaveText("150%");
+  await expect(page.locator("#remoteButtonSizeStatus")).toHaveText(
+    "Could not save on this device.",
+  );
+  expect(
+    await page
+      .locator("#mainActionRow")
+      .evaluate((row) => getComputedStyle(row).getPropertyValue("--input-button-scale").trim()),
+  ).toBe("1.5");
 });

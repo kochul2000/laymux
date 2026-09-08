@@ -30,6 +30,19 @@ export const PATH_LINK_MAX_SELECTION_LENGTH = 1024;
 export const PATH_LINK_MAX_SELECTION_LINES = 8;
 export const PATH_LINK_MAX_CANDIDATES = 16;
 
+/** ADR-0188 screen 트리거: 한 화면으로 볼 줄 수·문자 수·후보 수 상한. */
+export const PATH_LINK_MAX_SCREEN_LINES = 64;
+export const PATH_LINK_MAX_SCREEN_CHARS = 8192;
+export const PATH_LINK_MAX_SCREEN_CANDIDATES = 64;
+
+/** ADR-0191: 절대경로 앵커에서 공백을 넘어 확장하는 cut(공백 경계) 수의 앵커당 상한. */
+export const PATH_LINK_MAX_SPACE_EXTENSIONS = 8;
+/**
+ * 백엔드 `stat_paths` 배치 상한(`MAX_PATH_LINK_CANDIDATES`)의 프론트 거울.
+ * 백엔드는 초과 배치를 통째로 거부(fail-closed)하므로 추출 단계에서 미리 자른다.
+ */
+export const PATH_LINK_MAX_STAT_BATCH = 64;
+
 export interface PathSelectionCandidate {
   /** 장식과 `:line:col`을 제거한 경로 원문. */
   text: string;
@@ -54,6 +67,30 @@ export function isPathLinkCwdCurrent(
   currentCwd: string | undefined,
 ): boolean {
   return requestedCwd === currentCwd;
+}
+
+export interface PathPointLimits {
+  maxPathLength: number;
+}
+
+export interface PathScreenLimits {
+  maxLines: number;
+  maxChars: number;
+  maxCandidates: number;
+  maxPathLength: number;
+}
+
+export function pathPointLimits(maxPathLength: number): PathPointLimits {
+  return { maxPathLength };
+}
+
+export function pathScreenLimits(maxPathLength: number): PathScreenLimits {
+  return {
+    maxLines: PATH_LINK_MAX_SCREEN_LINES,
+    maxChars: PATH_LINK_MAX_SCREEN_CHARS,
+    maxCandidates: PATH_LINK_MAX_SCREEN_CANDIDATES,
+    maxPathLength,
+  };
 }
 
 export function pathSelectionLimits(maxPathLength: number): PathSelectionLimits {
@@ -97,8 +134,16 @@ export function trimPathToken(raw: string): { text: string; leading: number } {
     text = text.slice(1);
   }
 
+  return { text: trimPathTail(text), leading };
+}
+
+/**
+ * 후보 꼬리 정리 — 단일 토큰과 공백 확장 후보(ADR-0191)가 같은 규칙을 쓴다.
+ * 닫는 괄호/따옴표 → 후행 문장부호 → `:line:col` 순서로 제거한다.
+ */
+function trimPathTail(raw: string): string {
   // 뒤쪽 닫는 괄호/따옴표 제거.
-  text = text.replace(/[)"'`\]}>]+$/, "");
+  let text = raw.replace(/[)"'`\]}>.,;:]+$/, "");
 
   // 후행 문장부호(마침표/쉼표/세미콜론/콜론) 먼저 제거 — `file:42:5:` 처럼
   // 줄번호 뒤에 콜론이 더 붙은 grep 출력을 정리한다.
@@ -110,7 +155,7 @@ export function trimPathToken(raw: string): { text: string; leading: number } {
   const lineMarker = text.search(/:\d+(?::\d+)?/);
   if (lineMarker >= 0) text = text.slice(0, lineMarker);
 
-  return { text, leading };
+  return text;
 }
 
 /**
@@ -216,8 +261,10 @@ function looksLikeStrongPath(text: string): boolean {
  * 확정하거나 버린 뒤에는 그 내부 suffix를 다시 경로로 해석하지 않는다. 따라서
  * 긴 후보의 stat이 실패해도 우연히 존재하는 basename으로 fallback하지 않는다.
  *
- * 상한을 넘긴 선택이나 후보가 너무 많은 선택은 부분 결과가 아니라 빈 목록을
- * 반환한다. 그래야 잘린 결과 일부만 링크로 보이는 예측 불가능한 상태가 없다.
+ * 상한을 넘긴 선택이나 기본 후보가 너무 많은 선택은 부분 결과가 아니라 빈
+ * 목록을 반환한다. 그래야 잘린 결과 일부만 링크로 보이는 예측 불가능한 상태가
+ * 없다. 공백 확장 후보(ADR-0191)는 이 all-or-nothing 의 대상이 아니다 — 발견을
+ * 더하는 것이므로 기본 후보 뒤에 배치 총량까지 best-effort 로 덧붙는다.
  */
 export function extractPathCandidatesFromSelection(
   selection: string,
@@ -236,25 +283,7 @@ export function extractPathCandidatesFromSelection(
   const lines = selection.split(/\r?\n/);
   if (lines.length > limits.maxLines) return [];
 
-  const maximalTokens: Array<PathSelectionCandidate & { strong: boolean }> = [];
-  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-    const line = lines[lineIndex];
-    const matcher = new RegExp(SELECTION_TOKEN_RE.source, "g");
-    let match: RegExpExecArray | null;
-    while ((match = matcher.exec(line)) !== null) {
-      const raw = match[0];
-      const { text, leading } = trimPathToken(raw);
-      if (!text || SCHEME_RE.test(text)) continue;
-      const startIndex = match.index + leading;
-      maximalTokens.push({
-        text,
-        lineIndex,
-        startIndex,
-        endIndex: startIndex + text.length,
-        strong: looksLikeStrongPath(text),
-      });
-    }
-  }
+  const maximalTokens = lines.flatMap((line, lineIndex) => readMaximalTokens(line, lineIndex));
 
   const exactSingleToken =
     maximalTokens.length === 1 && trimSelectionToPath(selection) === maximalTokens[0].text;
@@ -269,6 +298,248 @@ export function extractPathCandidatesFromSelection(
       endIndex: candidate.endIndex,
     });
     if (candidates.length > limits.maxCandidates) return [];
+  }
+
+  // ADR-0191: 절대경로 앵커의 공백 확장 후보를 best-effort 로 덧붙인다. 확장은
+  // 발견을 더하는 것이므로 기본 토큰의 all-or-nothing 상한 대상이 아니고, 배치
+  // 총량(백엔드 상한)에서만 자른다.
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    for (const extension of spaceExtensionCandidates(
+      lines[lineIndex],
+      lineIndex,
+      limits.maxPathLength,
+    )) {
+      if (candidates.length >= PATH_LINK_MAX_STAT_BATCH) return candidates;
+      candidates.push({
+        text: extension.text,
+        lineIndex: extension.lineIndex,
+        startIndex: extension.startIndex,
+        endIndex: extension.endIndex,
+      });
+    }
+  }
+  return candidates;
+}
+
+/** 한 줄에서 maximal token 들을 원문 범위와 함께 읽는다(경계 규칙 단일 소유). */
+function readMaximalTokens(
+  line: string,
+  lineIndex: number,
+): Array<PathSelectionCandidate & { strong: boolean; rawStart: number; rawEnd: number }> {
+  const tokens: Array<
+    PathSelectionCandidate & { strong: boolean; rawStart: number; rawEnd: number }
+  > = [];
+  const matcher = new RegExp(SELECTION_TOKEN_RE.source, "g");
+  let match: RegExpExecArray | null;
+  while ((match = matcher.exec(line)) !== null) {
+    const raw = match[0];
+    const { text, leading } = trimPathToken(raw);
+    if (!text || SCHEME_RE.test(text)) continue;
+    const startIndex = match.index + leading;
+    tokens.push({
+      text,
+      lineIndex,
+      startIndex,
+      endIndex: startIndex + text.length,
+      strong: looksLikeStrongPath(text),
+      rawStart: match.index,
+      rawEnd: match.index + raw.length,
+    });
+  }
+  return tokens;
+}
+
+/**
+ * 절대경로 앵커 chunk 에서 공백을 넘어 확장한 접두 후보들(ADR-0191).
+ *
+ * 줄을 공백 단위 raw chunk 로 나누고, 앞 장식을 뗀 텍스트가 절대경로로 시작하는
+ * chunk 를 앵커로 삼아, 이어지는 chunk 끝(cut)마다 원문 접두 문자열을 후보로
+ * 만든다. chunk 는 토큰(`SELECTION_TOKEN_RE`)과 달리 괄호·따옴표를 경계로 삼지
+ * 않으므로 `C:\Program Files (x86)\...` 도 원문 그대로 이어진다.
+ *
+ * 경로의 끝은 문법으로 알 수 없으므로 문장 꼬리가 붙은 cut 도 후보로 나간다 —
+ * 실존 검증(`stat_paths`)이 게이트이고, 존재하는 후보 사이의 겹침은
+ * `resolveOverlappingRanges` 가 longest-existing-wins 로 정리한다.
+ *
+ * 비용 상한: 앵커당 cut ≤ `PATH_LINK_MAX_SPACE_EXTENSIONS`. 인접 chunk 간격이
+ * 스페이스만일 때 이어지고 탭이 끼면 끊는다(표 정렬은 경로가 아니다).
+ * 상대경로는 앵커가 되지 않는다 — 앵커 없이는 모든 단어 열이 후보가 된다.
+ */
+function spaceExtensionCandidates(
+  line: string,
+  lineIndex: number,
+  maxPathLength: number,
+): Array<PathSelectionCandidate & { rawEnd: number }> {
+  const results: Array<PathSelectionCandidate & { rawEnd: number }> = [];
+  const chunks: Array<{ start: number; end: number }> = [];
+  const chunkRe = /\S+/g;
+  let match: RegExpExecArray | null;
+  while ((match = chunkRe.exec(line)) !== null) {
+    chunks.push({ start: match.index, end: match.index + match[0].length });
+  }
+  for (let i = 0; i < chunks.length - 1; i++) {
+    const raw = line.slice(chunks[i].start, chunks[i].end);
+    const { text: anchorText, leading } = trimPathToken(raw);
+    if (!anchorText || !isAbsolutePath(anchorText) || SCHEME_RE.test(anchorText)) continue;
+    const anchorStart = chunks[i].start + leading;
+    let produced: string | null = null;
+    const lastCut = Math.min(i + PATH_LINK_MAX_SPACE_EXTENSIONS, chunks.length - 1);
+    for (let k = i + 1; k <= lastCut; k++) {
+      const gap = line.slice(chunks[k - 1].end, chunks[k].start);
+      if (!/^ +$/.test(gap)) break;
+      const text = trimPathTail(line.slice(anchorStart, chunks[k].end));
+      // 꼬리 정리가 첫 공백 앞까지 잘라냈으면 단일 토큰 후보와 같다 — 중복 생략.
+      if (!text.includes(" ") || text === produced) continue;
+      if (text.length > maxPathLength) continue;
+      produced = text;
+      results.push({
+        text,
+        lineIndex,
+        startIndex: anchorStart,
+        endIndex: anchorStart + text.length,
+        rawEnd: chunks[k].end,
+      });
+    }
+  }
+  return results;
+}
+
+/**
+ * 존재 검증을 통과한 후보들 사이에서 같은 줄의 겹치는 범위를 정리한다
+ * (ADR-0191 longest-existing-wins). 긴 것부터 greedy 로 채택하고, 이미 채택된
+ * 범위와 겹치는 짧은 후보는 버린다. 겹치지 않는 후보는 모두 남고, 반환 순서는
+ * 입력 순서를 유지한다.
+ */
+export function resolveOverlappingRanges<T>(
+  items: T[],
+  rangeOf: (item: T) => { line: number; start: number; end: number },
+): T[] {
+  if (items.length <= 1) return items;
+  const indexed = items.map((item, index) => ({ item, index, range: rangeOf(item) }));
+  const byLength = [...indexed].sort(
+    (a, b) => b.range.end - b.range.start - (a.range.end - a.range.start) || a.index - b.index,
+  );
+  const kept: Array<{ line: number; start: number; end: number }> = [];
+  const keptIndexes = new Set<number>();
+  for (const entry of byLength) {
+    const clashes = kept.some(
+      (range) =>
+        range.line === entry.range.line &&
+        entry.range.start < range.end &&
+        range.start < entry.range.end,
+    );
+    if (clashes) continue;
+    kept.push(entry.range);
+    keptIndexes.add(entry.index);
+  }
+  return indexed.filter((entry) => keptIndexes.has(entry.index)).map((entry) => entry.item);
+}
+
+/**
+ * 포인터가 가리키는 offset 을 덮는 후보들을 만든다
+ * (ADR-0188 `point` 트리거: hover dwell·클릭·Remote 탭, ADR-0191 공백 확장).
+ *
+ * 기본 후보는 offset 을 덮는 maximal token **하나**다 — 이웃 토큰과 토큰 내부
+ * substring/basename 은 만들지 않는다. 사용자가 한 토큰을 명시적으로 지목한
+ * 입력이므로 ADR-0148 의 단일 token 선택과 같게 슬래시·확장자 없는 맨이름도
+ * 받고, 실제 존재 여부는 `stat_paths` 가 판정한다.
+ *
+ * 여기에 offset 을 덮는 공백 확장 후보(ADR-0191, 절대경로 앵커 기준 접두)를
+ * 더한다 — 후보 수는 1 + 앵커당 cut 상한으로 여전히 상수이며, 트리거당 stat
+ * 배치는 1회다. offset 이 공백 위여도 그 공백을 **포함하는** 확장 후보는
+ * 평가한다(경로 내부의 공백 위 hover/클릭).
+ *
+ * offset 은 트림 *전* 원문(따옴표·괄호·`:line:col` 포함) 범위와 비교한다.
+ * 사용자는 화면에 보이는 문자를 가리키므로, 트림으로 떨어져 나간 장식 위를
+ * 가리켰다고 후보를 잃지 않는다.
+ */
+export function extractPathCandidatesAtOffset(
+  line: string,
+  offset: number,
+  limits: PathPointLimits,
+): PathSelectionCandidate[] {
+  if (!line || !Number.isFinite(offset) || offset < 0 || offset >= line.length) return [];
+  if (limits.maxPathLength < 1) return [];
+  const results: PathSelectionCandidate[] = [];
+  // 공백 위를 가리켰으면 토큰이 없다(경계 클릭을 이웃 토큰으로 끌어오지 않는다).
+  if (line[offset].trim() !== "") {
+    for (const token of readMaximalTokens(line, 0)) {
+      if (offset < token.rawStart || offset >= token.rawEnd) continue;
+      if (token.text.length > limits.maxPathLength) break;
+      results.push({
+        text: token.text,
+        lineIndex: token.lineIndex,
+        startIndex: token.startIndex,
+        endIndex: token.endIndex,
+      });
+      break;
+    }
+  }
+  for (const candidate of spaceExtensionCandidates(line, 0, limits.maxPathLength)) {
+    if (offset < candidate.startIndex || offset >= candidate.rawEnd) continue;
+    results.push({
+      text: candidate.text,
+      lineIndex: candidate.lineIndex,
+      startIndex: candidate.startIndex,
+      endIndex: candidate.endIndex,
+    });
+  }
+  return results;
+}
+
+/**
+ * 보이는 화면 여러 줄에서 strong candidate 만 읽기 순서로 모은다
+ * (ADR-0188 `screen` 트리거: Remote 유휴 스캔).
+ *
+ * 사용자가 범위를 고르지 않은 ambient 표시이므로 두 가지가 선택 기반과 다르다.
+ *   - 맨이름을 받지 않는다 — 절대경로·구분자·확장자 중 하나가 있어야 한다.
+ *   - 상한을 넘으면 빈 목록이 아니라 **앞쪽만 남긴 부분 결과**를 낸다. 화면
+ *     전체를 포기하는 것보다 앞쪽 64개를 표시하는 편이 낫다.
+ * 공백 확장 후보(ADR-0191)는 절대경로 앵커가 있을 때만 생기므로 ambient 여도
+ * 안전하며, 같은 상한 안에서 함께 센다.
+ */
+export function extractPathCandidatesFromScreen(
+  lines: string[],
+  limits: PathScreenLimits,
+): PathSelectionCandidate[] {
+  if (
+    lines.length === 0 ||
+    limits.maxLines < 1 ||
+    limits.maxChars < 1 ||
+    limits.maxCandidates < 1 ||
+    limits.maxPathLength < 1
+  ) {
+    return [];
+  }
+
+  const candidates: PathSelectionCandidate[] = [];
+  let chars = 0;
+  const scanned = Math.min(lines.length, limits.maxLines);
+  for (let lineIndex = 0; lineIndex < scanned; lineIndex++) {
+    const line = lines[lineIndex];
+    chars += line.length;
+    if (chars > limits.maxChars) break;
+    for (const token of readMaximalTokens(line, lineIndex)) {
+      if (!token.strong || token.text.length > limits.maxPathLength) continue;
+      candidates.push({
+        text: token.text,
+        lineIndex: token.lineIndex,
+        startIndex: token.startIndex,
+        endIndex: token.endIndex,
+      });
+      if (candidates.length >= limits.maxCandidates) return candidates;
+    }
+    // ADR-0191: 공백 확장 후보도 같은 상한 안에서 읽기 순서대로 센다 — 상한
+    // 초과 시 뒤쪽을 버리는 부분 결과 semantics(ADR-0188)는 그대로다.
+    for (const extension of spaceExtensionCandidates(line, lineIndex, limits.maxPathLength)) {
+      candidates.push({
+        text: extension.text,
+        lineIndex: extension.lineIndex,
+        startIndex: extension.startIndex,
+        endIndex: extension.endIndex,
+      });
+      if (candidates.length >= limits.maxCandidates) return candidates;
+    }
   }
   return candidates;
 }
@@ -385,6 +656,35 @@ export function mapSelectionCandidateToPathRange(
   }
 
   return { bufferLine, startCol: fallbackStartCol, endCol: fallbackEndCol };
+}
+
+/**
+ * 줄 안 offset 범위를 그 줄의 1-based 절대 버퍼 셀 범위로 변환한다
+ * (ADR-0188 `point`·`screen` 트리거).
+ *
+ * 선택 기반 매핑과 달리 후보 offset 이 이미 **줄 전체 기준**이므로 선택 시작
+ * 컬럼 보정이 없다. 셀 정보가 있으면 와이드 문자(#691)를 셀 단위로 보정하고,
+ * 없거나 어긋나면 UTF-16 offset 을 컬럼으로 쓰는 계산으로 떨어진다.
+ */
+export function mapLineCandidateToPathRange(
+  bufferLine: number,
+  candidate: PathSelectionCandidate,
+  lineCells?: CellInfo[],
+): MappedPathRange {
+  if (lineCells && lineCells.length > 0) {
+    const { text, columns, endColumns } = reconstructLine(lineCells);
+    const startOffset = candidate.startIndex;
+    const endOffset = candidate.endIndex - 1;
+    if (
+      text.slice(startOffset, endOffset + 1) === candidate.text &&
+      columns[startOffset] !== undefined &&
+      endColumns[endOffset] !== undefined
+    ) {
+      return { bufferLine, startCol: columns[startOffset], endCol: endColumns[endOffset] };
+    }
+  }
+  const startCol = candidate.startIndex + 1;
+  return { bufferLine, startCol, endCol: startCol + candidate.text.length - 1 };
 }
 
 /**

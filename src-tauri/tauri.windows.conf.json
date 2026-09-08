@@ -1,8 +1,15 @@
 {
   "bundle": {
+    "targets": ["nsis"],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
     "resources": {
       "gen/conpty/conpty.dll": "conpty.dll",
-      "gen/conpty/OpenConsole.exe": "OpenConsole.exe"
+      "gen/conpty/OpenConsole.exe": "OpenConsole.exe",
+      "gen/wsl/laymux-wsl-codex-probe": "laymux-wsl-codex-probe"
     }
   }
 }

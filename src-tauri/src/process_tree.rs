@@ -330,6 +330,13 @@ fn app_in_pty(state: &AppState, terminal_id: &str, force_fresh: bool) -> PtyAppL
 /// Enumerate all live processes as `(pid, ppid, name)` triples.
 /// Returns an empty vec when enumeration fails (caller treats as "unknown").
 pub fn snapshot_processes() -> Vec<ProcessEntry> {
+    try_snapshot_processes().unwrap_or_default()
+}
+
+/// Enumerate processes without erasing the difference between an empty result
+/// and an OS enumeration failure. Session attribution uses this checked form
+/// because failure must preserve the previous resume id.
+pub fn try_snapshot_processes() -> Result<Vec<ProcessEntry>, String> {
     #[cfg(windows)]
     {
         snapshot_processes_windows()
@@ -341,7 +348,7 @@ pub fn snapshot_processes() -> Vec<ProcessEntry> {
 }
 
 #[cfg(windows)]
-fn snapshot_processes_windows() -> Vec<ProcessEntry> {
+fn snapshot_processes_windows() -> Result<Vec<ProcessEntry>, String> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32First, Process32Next, PROCESSENTRY32, TH32CS_SNAPPROCESS,
@@ -361,7 +368,7 @@ fn snapshot_processes_windows() -> Vec<ProcessEntry> {
     unsafe {
         let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if snap == INVALID_HANDLE_VALUE {
-            return result;
+            return Err("failed to create the operating-system process snapshot".into());
         }
         let _guard = SnapshotGuard(snap);
 
@@ -388,7 +395,11 @@ fn snapshot_processes_windows() -> Vec<ProcessEntry> {
             }
         }
     }
-    result
+    if result.is_empty() {
+        Err("operating-system process snapshot was empty".into())
+    } else {
+        Ok(result)
+    }
 }
 
 /// Linux: enumerate `/proc/<pid>/stat`. The `stat` line is
@@ -397,11 +408,10 @@ fn snapshot_processes_windows() -> Vec<ProcessEntry> {
 /// the field after the single-char state. Parsing comm via the last `)` is
 /// robust to process names that themselves contain spaces or parentheses.
 #[cfg(not(windows))]
-fn snapshot_processes_proc() -> Vec<ProcessEntry> {
+fn snapshot_processes_proc() -> Result<Vec<ProcessEntry>, String> {
     let mut result = Vec::new();
-    let Ok(entries) = std::fs::read_dir("/proc") else {
-        return result;
-    };
+    let entries = std::fs::read_dir("/proc")
+        .map_err(|error| format!("failed to enumerate /proc: {error}"))?;
     for entry in entries.flatten() {
         let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
             continue;
@@ -423,7 +433,11 @@ fn snapshot_processes_proc() -> Vec<ProcessEntry> {
         let ppid = rest.get(1).and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
         result.push(ProcessEntry { pid, ppid, name });
     }
-    result
+    if result.is_empty() {
+        Err("operating-system process snapshot was empty".into())
+    } else {
+        Ok(result)
+    }
 }
 
 #[cfg(test)]

@@ -1,14 +1,14 @@
 import { toTerminalId } from "@/lib/pane-ids";
 import {
-  getClaudeSessionIds,
-  getCodexSessionIds,
-  getGrokSessionIds,
   getTerminalCwds,
+  getTerminalSessionAttributions,
   saveSettings,
   type Settings,
+  type TerminalSessionAttribution,
 } from "@/lib/tauri-api";
 import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useTerminalStore } from "@/stores/terminal-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import {
   applySettingsSnapshot,
@@ -28,72 +28,165 @@ interface CollectSettingsSnapshotOptions {
   includeRuntimeStructuralState?: boolean;
 }
 
+export type TerminalAttributionState =
+  | "identified"
+  | "restorePending"
+  | "fresh"
+  | "noAgent"
+  | "activeButUnidentified"
+  | "unknown";
+
+export interface TerminalAttributionCoverage {
+  terminalId: string;
+  state: TerminalAttributionState;
+  generation?: number;
+  provider?: "claude" | "codex" | "grok";
+  sessionId?: string;
+}
+
+export interface CollectedSessionCheckpoint {
+  settings: Settings;
+  coverage: TerminalAttributionCoverage[];
+  cwdLookupFailed: boolean;
+  attributionLookupFailed: boolean;
+}
+
 type SavedTerminalView = { type: string; [key: string]: unknown };
+
+/** Runtime state that decides the persisted `lastCwd` / `last*Session` fields. */
+interface TerminalRuntimeAttribution {
+  backendCwds: Record<string, string>;
+  backendAttributions: Record<string, TerminalSessionAttribution>;
+  attributionLookupFailed: boolean;
+  attributionPendingTerminalIds: ReadonlySet<string>;
+}
+
+function terminalAttributionState(
+  terminalId: string,
+  runtime: TerminalRuntimeAttribution,
+): TerminalAttributionState {
+  if (runtime.attributionLookupFailed) return "unknown";
+  const attribution = runtime.backendAttributions[terminalId];
+  if (!attribution) return "unknown";
+  if (
+    (attribution.state === "noAgent" || attribution.state === "activeButUnidentified") &&
+    runtime.attributionPendingTerminalIds.has(terminalId)
+  ) {
+    return "unknown";
+  }
+  return attribution.state;
+}
+
+function terminalAttributionCoverage(
+  terminalId: string,
+  runtime: TerminalRuntimeAttribution,
+): TerminalAttributionCoverage {
+  const state = terminalAttributionState(terminalId, runtime);
+  const identified = runtime.backendAttributions[terminalId];
+  if (state !== "identified" && state !== "restorePending" && state !== "fresh") {
+    return {
+      terminalId,
+      state,
+      generation: identified?.generation,
+      provider: identified?.provider,
+    };
+  }
+  return {
+    terminalId,
+    state,
+    generation: identified?.generation,
+    provider: identified?.provider,
+    sessionId: identified?.sessionId,
+  };
+}
 
 function applyTerminalSessionFields(
   view: SavedTerminalView,
   terminalId: string,
-  backendCwds: Record<string, string>,
-  claudeSessionIds: Record<string, string | null>,
-  codexSessionIds: Record<string, string | null>,
-  grokSessionIds: Record<string, string | null>,
+  runtime: TerminalRuntimeAttribution,
 ): SavedTerminalView {
+  const { backendCwds } = runtime;
   const savedView = { ...view };
   const cwd = backendCwds[terminalId];
   if (cwd) savedView.lastCwd = cwd;
 
-  const claudeSession = claudeSessionIds[terminalId];
-  const codexSession = codexSessionIds[terminalId];
-  const grokSession = grokSessionIds[terminalId];
-  const claudeActive = Object.hasOwn(claudeSessionIds, terminalId);
-  const codexActive = Object.hasOwn(codexSessionIds, terminalId);
-  const grokActive = Object.hasOwn(grokSessionIds, terminalId);
-  const activeCount = Number(claudeActive) + Number(codexActive) + Number(grokActive);
-  const unproven =
-    (claudeActive && !claudeSession) ||
-    (codexActive && !codexSession) ||
-    (grokActive && !grokSession);
-  if (activeCount > 1 || unproven) {
+  const attribution = terminalAttributionState(terminalId, runtime);
+  if (attribution === "unknown") {
+    return savedView;
+  }
+  delete savedView.lastAgentFresh;
+  if (attribution === "fresh") {
     delete savedView.lastClaudeSession;
     delete savedView.lastCodexSession;
     delete savedView.lastGrokSession;
-  } else if (claudeSession) {
-    savedView.lastClaudeSession = claudeSession;
+    savedView.lastAgentFresh = runtime.backendAttributions[terminalId].provider;
+    return savedView;
+  }
+
+  // Live pane, no provider claims it → it is a shell pane now, so any id from
+  // an earlier run is stale. Panes with no live terminal (another workspace,
+  // never started this run) keep theirs — they were never given a chance to
+  // prove anything.
+  if (attribution === "noAgent" || attribution === "activeButUnidentified") {
+    delete savedView.lastClaudeSession;
     delete savedView.lastCodexSession;
     delete savedView.lastGrokSession;
-  } else if (codexSession) {
-    savedView.lastCodexSession = codexSession;
+  } else if (runtime.backendAttributions[terminalId]?.provider === "claude") {
+    savedView.lastClaudeSession = runtime.backendAttributions[terminalId].sessionId;
+    delete savedView.lastCodexSession;
+    delete savedView.lastGrokSession;
+  } else if (runtime.backendAttributions[terminalId]?.provider === "codex") {
+    savedView.lastCodexSession = runtime.backendAttributions[terminalId].sessionId;
     delete savedView.lastClaudeSession;
     delete savedView.lastGrokSession;
-  } else if (grokSession) {
-    savedView.lastGrokSession = grokSession;
+  } else if (runtime.backendAttributions[terminalId]?.provider === "grok") {
+    savedView.lastGrokSession = runtime.backendAttributions[terminalId].sessionId;
     delete savedView.lastClaudeSession;
     delete savedView.lastCodexSession;
   }
   return savedView;
 }
 
-/** Collect the current settings-owned state from every frontend store. */
-export async function collectSettingsSnapshot(
+function collectAttributionPendingTerminalIds(): ReadonlySet<string> {
+  const now = Date.now();
+  return new Set(
+    useTerminalStore
+      .getState()
+      .instances.filter((instance) => (instance.attributionPendingUntil ?? 0) > now)
+      .map((instance) => instance.id),
+  );
+}
+
+async function collectSessionCheckpointInternal(
   options: CollectSettingsSnapshotOptions = {},
-): Promise<Settings> {
+): Promise<CollectedSessionCheckpoint> {
   const settingsState = useSettingsStore.getState();
   const workspaceState = useWorkspaceStore.getState();
   const dockState = useDockStore.getState();
   const maxAge = settingsState.claude?.sessionMaxAgeHours;
   const codexMaxAge = settingsState.codex?.sessionMaxAgeHours;
   const grokMaxAge = settingsState.grok?.sessionMaxAgeHours;
-  const [backendCwds, claudeSessionIds, codexSessionIds, grokSessionIds] =
-    options.includeRuntimeStructuralState === false
-      ? [{}, {}, {}, {}]
-      : await Promise.all([
-          getTerminalCwds().catch(() => ({}) as Record<string, string>),
-          getClaudeSessionIds(maxAge).catch(() => ({}) as Record<string, string | null>),
-          getCodexSessionIds(codexMaxAge).catch(() => ({}) as Record<string, string | null>),
-          getGrokSessionIds(grokMaxAge).catch(() => ({}) as Record<string, string | null>),
-        ]);
+  const includeRuntime = options.includeRuntimeStructuralState !== false;
+  const runtimeResults = includeRuntime
+    ? await Promise.allSettled([
+        getTerminalCwds(),
+        getTerminalSessionAttributions(maxAge, codexMaxAge, grokMaxAge),
+      ])
+    : undefined;
+  const backendCwds = runtimeResults?.[0].status === "fulfilled" ? runtimeResults[0].value : {};
+  const cwdLookupFailed = includeRuntime && runtimeResults?.[0].status === "rejected";
+  const backendAttributions =
+    runtimeResults?.[1].status === "fulfilled" ? runtimeResults[1].value : {};
+  const runtime: TerminalRuntimeAttribution = {
+    backendCwds,
+    backendAttributions,
+    attributionLookupFailed: includeRuntime && runtimeResults?.[1].status === "rejected",
+    attributionPendingTerminalIds: includeRuntime
+      ? collectAttributionPendingTerminalIds()
+      : new Set<string>(),
+  };
 
-  return {
+  const settings: Settings = {
     language: settingsState.language,
     defaultProfile: settingsState.defaultProfile,
     profileDefaults: { ...settingsState.profileDefaults },
@@ -176,10 +269,7 @@ export async function collectSettingsSnapshot(
             ? applyTerminalSessionFields(
                 pane.view as SavedTerminalView,
                 toTerminalId(pane.id),
-                backendCwds,
-                claudeSessionIds,
-                codexSessionIds,
-                grokSessionIds,
+                runtime,
               )
             : ({ ...pane.view } as SavedTerminalView);
         return {
@@ -205,6 +295,7 @@ export async function collectSettingsSnapshot(
     dock: { ...settingsState.dock },
     notifications: { ...settingsState.notifications },
     power: { ...settingsState.power },
+    update: { ...settingsState.update },
     workspaceSelector: {
       ...settingsState.workspaceSelector,
       display: { ...settingsState.workspaceSelector.display },
@@ -233,10 +324,7 @@ export async function collectSettingsSnapshot(
             ? applyTerminalSessionFields(
                 pane.view as SavedTerminalView,
                 toTerminalId(pane.id),
-                backendCwds,
-                claudeSessionIds,
-                codexSessionIds,
-                grokSessionIds,
+                runtime,
               )
             : ({ ...pane.view } as SavedTerminalView);
         return {
@@ -250,6 +338,36 @@ export async function collectSettingsSnapshot(
       }),
     })),
   };
+  const coverageTerminalIds = new Set([
+    ...Object.keys(backendAttributions),
+    ...useTerminalStore
+      .getState()
+      .instances.filter((instance) => instance.sessionReady !== false)
+      .map((instance) => instance.id),
+  ]);
+  const coverage = includeRuntime
+    ? [...coverageTerminalIds].map((terminalId) => terminalAttributionCoverage(terminalId, runtime))
+    : [];
+  return {
+    settings,
+    coverage,
+    cwdLookupFailed,
+    attributionLookupFailed: runtime.attributionLookupFailed,
+  };
+}
+
+/** Collect settings plus the attribution confidence for every live terminal. */
+export async function collectSessionCheckpoint(
+  options: CollectSettingsSnapshotOptions = {},
+): Promise<CollectedSessionCheckpoint> {
+  return collectSessionCheckpointInternal(options);
+}
+
+/** Collect the current settings-owned state from every frontend store. */
+export async function collectSettingsSnapshot(
+  options: CollectSettingsSnapshotOptions = {},
+): Promise<Settings> {
+  return (await collectSessionCheckpointInternal(options)).settings;
 }
 
 /** Persist a validated snapshot, then expose it to the live stores. */

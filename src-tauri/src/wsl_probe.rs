@@ -28,13 +28,21 @@ use crate::terminal::InitialExecutionHost;
 /// `None` means the pane uses the default distribution, which the caller
 /// resolves once per probe pass.
 #[cfg(windows)]
+pub struct WslTerminalTargets {
+    pub targets: Vec<(String, Option<String>)>,
+    /// At least one WSL-backed pane could not be assigned a trustworthy distro.
+    pub lookup_failed: bool,
+}
+
+#[cfg(windows)]
 pub fn wsl_terminal_targets(
     state: &AppState,
     deadline: Instant,
-) -> Result<Vec<(String, Option<String>)>, AppError> {
+) -> Result<WslTerminalTargets, AppError> {
     let terminals = state.terminals.lock_or_err()?;
     let mut unresolved_default = Vec::new();
     let mut targets = Vec::new();
+    let mut lookup_failed = false;
     for (terminal_id, session) in terminals.iter() {
         if session.initial_execution_host != InitialExecutionHost::Wsl {
             continue;
@@ -50,6 +58,7 @@ pub fn wsl_terminal_targets(
                     %error,
                     "invalid explicit WSL distro failed closed"
                 );
+                lookup_failed = true;
                 (None, false)
             }
         };
@@ -62,11 +71,17 @@ pub fn wsl_terminal_targets(
 
     if !unresolved_default.is_empty() {
         let default = remaining_timeout(deadline).and_then(default_distro_cached);
+        if default.is_none() {
+            lookup_failed = true;
+        }
         for index in unresolved_default {
             targets[index].1.clone_from(&default);
         }
     }
-    Ok(targets)
+    Ok(WslTerminalTargets {
+        targets,
+        lookup_failed,
+    })
 }
 
 /// The default distribution, cached for `WSL_DEFAULT_DISTRO_CACHE_TTL`.
@@ -77,8 +92,11 @@ pub fn wsl_terminal_targets(
 /// the user runs `wsl --set-default`, so a short cache is safe. Negative
 /// results are cached too, otherwise a machine with no WSL installed would
 /// spawn a doomed `wsl.exe` every cycle.
+/// Also used by the path-link batch (`stat_paths`, ADR-0188): its ambient
+/// triggers (hover dwell, Remote idle screen scan) fire far more often than a
+/// drag did, and each POSIX-looking candidate would otherwise pay the probe.
 #[cfg(windows)]
-fn default_distro_cached(timeout: Duration) -> Option<String> {
+pub(crate) fn default_distro_cached(timeout: Duration) -> Option<String> {
     static CACHE: std::sync::Mutex<Option<(Instant, Option<String>)>> = std::sync::Mutex::new(None);
 
     if let Ok(guard) = CACHE.lock_or_err() {
@@ -193,6 +211,9 @@ pub fn is_safe_distro_name(value: &str) -> bool {
 mod tests {
     use super::*;
 
+    #[cfg(windows)]
+    use crate::terminal::{InitialExecutionHost, TerminalConfig, TerminalSession};
+
     #[test]
     fn parses_only_unquoted_consistent_wsl_distribution_flags() {
         assert_eq!(
@@ -246,5 +267,25 @@ mod tests {
         assert!(!is_safe_distro_name("a/b"));
         assert!(!is_safe_distro_name("a\\b"));
         assert!(!is_safe_distro_name("a\nb"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn invalid_terminal_distro_marks_the_whole_lookup_unhealthy() {
+        let state = AppState::new();
+        let mut session = TerminalSession::new("terminal-1".into(), TerminalConfig::default());
+        session.initial_execution_host = InitialExecutionHost::Wsl;
+        session.wsl_distro = Some("bad/name".into());
+        state
+            .terminals
+            .lock()
+            .unwrap()
+            .insert("terminal-1".into(), session);
+
+        let resolved =
+            wsl_terminal_targets(&state, Instant::now() + Duration::from_secs(1)).unwrap();
+
+        assert!(resolved.lookup_failed);
+        assert_eq!(resolved.targets, vec![("terminal-1".into(), None)]);
     }
 }

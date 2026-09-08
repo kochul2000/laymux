@@ -10,7 +10,9 @@ use uuid::Uuid;
 use super::{keyring_store, tunnel, CloudStatus};
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
-use crate::settings::{default_cloud_relay_base_url, load_settings, save_settings};
+#[cfg(test)]
+use crate::settings::save_settings;
+use crate::settings::{default_cloud_relay_base_url, load_settings};
 use crate::state::AppState;
 
 const CALLBACK_PATH: &str = "/pair/callback";
@@ -535,12 +537,15 @@ fn persist_pairing_result_locked(
     }
     keyring_store::set_device_token(&complete.device_token)?;
 
-    settings.remote.cloud_enabled = true;
-    settings.remote.relay_base_url = normalized_relay_base_url(relay_base_url);
-    settings.remote.cloud_instance_id = Some(complete.instance_id.clone());
-    settings.remote.cloud_tunnel_url = Some(complete.tunnel_url);
-    settings.remote.cloud_server_base_url = Some(complete.server_base_url);
-    save_settings(&settings).map_err(AppError::Other)?;
+    settings = crate::settings::update_settings(|settings| {
+        settings.remote.cloud_enabled = true;
+        settings.remote.relay_base_url = normalized_relay_base_url(relay_base_url);
+        settings.remote.cloud_instance_id = Some(complete.instance_id.clone());
+        settings.remote.cloud_tunnel_url = Some(complete.tunnel_url.clone());
+        settings.remote.cloud_server_base_url = Some(complete.server_base_url.clone());
+        Ok(())
+    })
+    .map_err(AppError::Other)?;
     crate::remote_server::update_persistent_cloud_settings_snapshot(state, &settings.remote)
         .map_err(AppError::Other)?;
 

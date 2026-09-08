@@ -244,7 +244,6 @@ describe("useSessionPersistence", () => {
           notificationDismiss: "workspace",
           copyOnSelect: true,
           pathEllipsis: "start",
-          scrollbarStyle: "overlay",
         },
         claude: { syncCwd: "skip" },
       }) as any,
@@ -306,7 +305,6 @@ describe("useSessionPersistence", () => {
           notificationDismiss: "workspace",
           copyOnSelect: true,
           pathEllipsis: "start",
-          scrollbarStyle: "overlay",
         },
         claude: { syncCwd: "skip" },
       }) as any,
@@ -349,7 +347,6 @@ describe("useSessionPersistence", () => {
           notificationDismiss: "workspace",
           copyOnSelect: true,
           pathEllipsis: "start",
-          scrollbarStyle: "overlay",
         },
         claude: { syncCwd: "skip" },
       }) as any,
@@ -396,7 +393,7 @@ describe("useSessionPersistence", () => {
         workspaces: [],
         docks: [],
         paste: { smart: false, imageDir: "/images" },
-        terminal: { copyOnSelect: false, scrollbarStyle: "separate" },
+        terminal: { copyOnSelect: false },
         controlBar: { hoverIdleSeconds: 5 },
         notifications: { dismiss: "manual" },
         workspaceSelector: { pathEllipsis: "end" },
@@ -417,7 +414,6 @@ describe("useSessionPersistence", () => {
     expect(notifications.dismiss).toBe("manual");
     expect(terminal.copyOnSelect).toBe(false);
     expect(workspaceSelector.pathEllipsis).toBe("end");
-    expect(terminal.scrollbarStyle).toBe("separate");
   });
 
   it("restores layout viewConfig (overwritten layouts persist across restart)", async () => {
@@ -474,7 +470,6 @@ describe("useSessionPersistence", () => {
           notificationDismiss: "workspace",
           copyOnSelect: true,
           pathEllipsis: "start",
-          scrollbarStyle: "overlay",
         },
         claude: { syncCwd: "skip" },
       }) as any,
@@ -521,7 +516,6 @@ describe("useSessionPersistence", () => {
           notificationDismiss: "workspace",
           copyOnSelect: true,
           pathEllipsis: "start",
-          scrollbarStyle: "overlay",
         },
         claude: { syncCwd: "command" },
       }) as any,
@@ -587,7 +581,6 @@ describe("useSessionPersistence", () => {
           notificationDismiss: "workspace",
           copyOnSelect: true,
           pathEllipsis: "start",
-          scrollbarStyle: "overlay",
         },
         claude: { syncCwd: "skip" },
       }) as any,

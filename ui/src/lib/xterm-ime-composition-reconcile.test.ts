@@ -99,6 +99,7 @@ function dispatchKeypress(textarea: HTMLTextAreaElement, text: string) {
   Object.defineProperty(keypress, "charCode", { value: text.charCodeAt(0) });
   Object.defineProperty(keypress, "keyCode", { value: 0 });
   textarea.dispatchEvent(keypress);
+  return keypress;
 }
 
 function dispatchKeydown(
@@ -124,8 +125,9 @@ describe("patched xterm composition keypress reconciliation", () => {
   it("keeps an ordinary non-composition keypress on the immediate path", () => {
     const { emitted, textarea } = openTerminal();
 
-    dispatchKeypress(textarea, "a");
+    const keypress = dispatchKeypress(textarea, "a");
 
+    expect(keypress.defaultPrevented).toBe(false);
     expect(emitted).toEqual(["a"]);
   });
 
@@ -226,6 +228,19 @@ describe("patched xterm composition keypress reconciliation", () => {
     expect(emitted.join("")).toBe("한ab");
   });
 
+  it("keeps multiple unmatched keypresses ordered before the candidate", async () => {
+    const { emitted, textarea } = openTerminal();
+    startComposition(textarea, "한");
+    await flushEventLoop();
+
+    endComposition(textarea, "한");
+    dispatchKeypress(textarea, "a");
+    dispatchKeypress(textarea, "b");
+    await flushEventLoop();
+
+    expect(emitted.join("")).toBe("ab한");
+  });
+
   it("reconciles buffered keypress text before an ordinary keydown finalizes immediately", async () => {
     const { emitted, textarea } = openTerminal();
     startComposition(textarea, "한");
@@ -260,6 +275,33 @@ describe("patched xterm composition keypress reconciliation", () => {
     expect(emitted.join("")).toBe("한");
   });
 
+  it("prevents a consumed legacy keypress from default-inserting after a separator", async () => {
+    const { emitted, textarea } = openTerminal();
+    startComposition(textarea, "면");
+    await flushEventLoop();
+
+    endComposition(textarea, "면");
+    textarea.value = "면 ";
+    textarea.selectionStart = 2;
+    textarea.selectionEnd = 2;
+    textarea.dispatchEvent(
+      new InputEvent("input", { data: " ", inputType: "insertText", bubbles: true }),
+    );
+    const propagatedKeypress = dispatchKeypress(textarea, "면");
+
+    // jsdom does not execute keypress default actions. Model WebView2 inserting
+    // the propagated syllable only when xterm leaves the event uncancelled.
+    if (!propagatedKeypress.defaultPrevented) {
+      textarea.value = "면 면";
+      textarea.selectionStart = 3;
+      textarea.selectionEnd = 3;
+    }
+    await flushEventLoop();
+
+    expect(propagatedKeypress.defaultPrevented).toBe(true);
+    expect(emitted.join("")).toBe("면 ");
+  });
+
   it("emits an input-only propagated composition exactly once", async () => {
     const { emitted, textarea } = openTerminal();
     startComposition(textarea, "한");
@@ -291,6 +333,47 @@ describe("patched xterm composition keypress reconciliation", () => {
     await flushEventLoop();
 
     expect(emitted.join("")).toBe("한글");
+  });
+
+  it("keeps the full commit when Windows IME replaces retained textarea text", async () => {
+    const { emitted, textarea } = openTerminal();
+    textarea.focus();
+    textarea.value = "이미 전송된 긴 입력";
+    textarea.selectionStart = textarea.value.length;
+    textarea.selectionEnd = textarea.value.length;
+
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    textarea.value += "수";
+    textarea.dispatchEvent(
+      new CompositionEvent("compositionupdate", { data: "수", bubbles: true }),
+    );
+    await flushEventLoop();
+
+    // Windows TSF can select the whole helper textarea and replace it. The
+    // composition start offset now points beyond the new value.
+    textarea.value = "수정을 해야 할거 아냐";
+    textarea.selectionStart = 0;
+    textarea.selectionEnd = textarea.value.length;
+    textarea.dispatchEvent(
+      new CompositionEvent("compositionupdate", { data: textarea.value, bubbles: true }),
+    );
+    await flushEventLoop();
+    endComposition(textarea, textarea.value);
+    await flushEventLoop();
+
+    expect(emitted.join("")).toBe("수정을 해야 할거 아냐");
+  });
+
+  it("keeps consecutive generations separate when the next composition replaces the textarea", async () => {
+    const { emitted, textarea } = openTerminal();
+
+    startComposition(textarea, "가");
+    endComposition(textarea, "가");
+    startComposition(textarea, "나");
+    endComposition(textarea, "나");
+    await flushEventLoop();
+
+    expect(emitted.join("")).toBe("가나");
   });
 
   it("flushes input-first reconciliation once before an interleaved ordinary keydown", async () => {

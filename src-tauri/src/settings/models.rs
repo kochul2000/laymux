@@ -1,11 +1,10 @@
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::constants::{
-    DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS, DEFAULT_REMOTE_SNAPSHOT_MAX_KIB,
-    PARSER_ADMISSION_FOCUSED_SHARE_DEFAULT, PARSER_ADMISSION_HIDDEN_SHARE_DEFAULT,
-    PARSER_ADMISSION_SHARE_MAX, PARSER_ADMISSION_SHARE_MIN, PARSER_ADMISSION_VISIBLE_SHARE_DEFAULT,
-    WIDGET_FONT_SIZE_DEFAULT,
+    DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS, PARSER_ADMISSION_FOCUSED_SHARE_DEFAULT,
+    PARSER_ADMISSION_HIDDEN_SHARE_DEFAULT, PARSER_ADMISSION_SHARE_MAX, PARSER_ADMISSION_SHARE_MIN,
+    PARSER_ADMISSION_VISIBLE_SHARE_DEFAULT, WIDGET_FONT_SIZE_DEFAULT,
 };
 
 /// Color scheme definition (Windows Terminal compatible).
@@ -511,6 +510,10 @@ pub struct CodexSettings {
     /// Set to 0 to disable the age filter.
     #[serde(default = "default_session_max_age_hours")]
     pub session_max_age_hours: u64,
+    /// Whether pointer scrolling navigates a visible normal-buffer Codex
+    /// transcript with cursor-key input (default: true).
+    #[serde(default = "default_true")]
+    pub transcript_scroll_enabled: bool,
     /// Status message display mode (default: "bullet-title").
     #[serde(default)]
     pub status_message_mode: CodexStatusMessageMode,
@@ -525,6 +528,7 @@ impl Default for CodexSettings {
             command: default_codex_command(),
             restore_session: true,
             session_max_age_hours: 24,
+            transcript_scroll_enabled: true,
             status_message_mode: CodexStatusMessageMode::default(),
             status_message_delimiter: default_codex_status_message_delimiter(),
         }
@@ -547,7 +551,8 @@ pub enum GrokStatusMessageMode {
     BulletTitle,
 }
 
-/// Grok Build integration settings (ADR-0156). Same field set as Codex.
+/// Grok Build integration settings (ADR-0156). Shares Codex's launch,
+/// session-restore, and status-message fields, but not Codex-only transcript behavior.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GrokSettings {
@@ -680,10 +685,6 @@ pub enum PathEllipsisMode {
     #[default]
     Start,
     End,
-}
-
-fn default_scrollbar_style() -> String {
-    "overlay".to_string()
 }
 
 // ── Terminal settings ──
@@ -826,6 +827,56 @@ impl ParserAdmissionSettings {
     }
 }
 
+/// One host-global Composer shortcut (ADR-0226, ADR-0229).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ComposerStarredEntry {
+    pub value: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub send: bool,
+}
+
+impl ComposerStarredEntry {
+    pub fn from_value(value: impl Into<String>) -> Self {
+        Self {
+            value: value.into(),
+            label: String::new(),
+            send: false,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ComposerStarredEntry {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        match value {
+            serde_json::Value::String(text) => Ok(Self::from_value(text)),
+            serde_json::Value::Object(_) => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Raw {
+                    value: String,
+                    #[serde(default)]
+                    label: String,
+                    #[serde(default)]
+                    send: bool,
+                }
+                let raw: Raw = serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+                Ok(Self {
+                    value: raw.value,
+                    label: raw.label,
+                    send: raw.send,
+                })
+            }
+            other => Err(serde::de::Error::custom(format!(
+                "Composer starred entry must be a string or object, got {other}"
+            ))),
+        }
+    }
+}
+
 /// Terminal behavior & rendering settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -842,9 +893,6 @@ pub struct TerminalSettings {
     /// Automatically copy text to clipboard when selected in terminal.
     #[serde(default = "default_true")]
     pub copy_on_select: bool,
-    /// Terminal scrollbar style: "overlay" (default) or "separate".
-    #[serde(default = "default_scrollbar_style")]
-    pub scrollbar_style: String,
     /// Enable selection-based file/directory path links.
     #[serde(default = "default_true")]
     pub path_link_enabled: bool,
@@ -859,6 +907,15 @@ pub struct TerminalSettings {
     /// class. Turning this off still confirms directly executable extensions.
     #[serde(default = "default_true")]
     pub path_link_os_open_confirm: bool,
+    /// How a click/tap on a URL link executes — "immediate" (default, open at
+    /// once) or "chip" (show an action chip and open only from it), ADR-0224.
+    #[serde(default = "default_link_activation")]
+    pub url_link_activation: String,
+    /// How a click/tap on a verified file/directory path underline executes —
+    /// "immediate" (default) or "chip" (ADR-0224). Ctrl / Ctrl+Shift keep going
+    /// straight to the host OS in both modes (ADR-0100).
+    #[serde(default = "default_link_activation")]
+    pub path_link_activation: String,
     /// Show the floating jump-to-bottom button while scrolled up.
     #[serde(default = "default_true")]
     pub show_scroll_to_bottom_button: bool,
@@ -881,6 +938,10 @@ pub struct TerminalSettings {
     /// Composer: suggest matching past inputs as an autocomplete dropdown while typing (issue #505).
     #[serde(default = "default_true")]
     pub composer_autocomplete: bool,
+    /// Explicitly starred Composer entries, shared across every workspace and
+    /// surface on this host (ADR-0226, ADR-0229).
+    #[serde(default)]
+    pub composer_starred_entries: Vec<ComposerStarredEntry>,
 }
 
 impl Default for TerminalSettings {
@@ -890,23 +951,31 @@ impl Default for TerminalSettings {
             parser_admission: ParserAdmissionSettings::default(),
             advertise_true_color: true,
             copy_on_select: true,
-            scrollbar_style: default_scrollbar_style(),
             path_link_enabled: true,
             path_link_max_length: default_path_link_max_length(),
             path_link_os_open_enabled: true,
             path_link_os_open_confirm: true,
+            url_link_activation: default_link_activation(),
+            path_link_activation: default_link_activation(),
             show_scroll_to_bottom_button: true,
             scroll_sensitivity: default_scroll_sensitivity(),
             fast_scroll_sensitivity: default_fast_scroll_sensitivity(),
             composer_history_scope: default_composer_history_scope(),
             composer_history_popup: true,
             composer_autocomplete: true,
+            composer_starred_entries: Vec::new(),
         }
     }
 }
 
 fn default_path_link_max_length() -> u32 {
     256
+}
+
+/// ADR-0224: both activation keys default to the current behavior, so an
+/// existing install keeps opening links on the first click until it opts in.
+fn default_link_activation() -> String {
+    crate::constants::LINK_ACTIVATION_IMMEDIATE.to_string()
 }
 
 fn default_scroll_sensitivity() -> f32 {
@@ -1348,6 +1417,30 @@ pub struct PowerSettings {
     pub keep_awake_when_busy: bool,
 }
 
+/// Which release channel this install follows (ADR-0190).
+///
+/// The field is a plain string rather than an enum so an unknown value read from
+/// disk resolves to stable at runtime instead of dropping the whole settings
+/// tree into partial recovery. Writes are rejected by semantic validation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateSettings {
+    #[serde(default = "default_update_channel")]
+    pub channel: String,
+}
+
+impl Default for UpdateSettings {
+    fn default() -> Self {
+        Self {
+            channel: default_update_channel(),
+        }
+    }
+}
+
+fn default_update_channel() -> String {
+    crate::constants::UPDATE_CHANNEL_STABLE.to_string()
+}
+
 /// Which elements to display in WorkspaceSelectorView pane rows.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -1389,6 +1482,12 @@ pub struct WorkspaceSelectorSettings {
     /// Path ellipsis direction. "start" (default) shows the end of the path.
     #[serde(default)]
     pub path_ellipsis: PathEllipsisMode,
+    /// Last submitted input layout: "perPane" (default) | "workspaceLatest".
+    #[serde(default = "default_workspace_last_input_mode")]
+    pub last_input_mode: String,
+    /// Require two activations for destructive WorkspaceSelectorView controls.
+    #[serde(default = "default_true")]
+    pub confirm_destructive_actions: bool,
     /// Seconds a pane/workspace must stay hidden before its terminal (PTY)
     /// is automatically closed to save resources. 0 = disabled. See issue #269.
     #[serde(default)]
@@ -1399,12 +1498,18 @@ fn default_workspace_sort_order() -> String {
     "manual".to_string()
 }
 
+fn default_workspace_last_input_mode() -> String {
+    "perPane".to_string()
+}
+
 impl Default for WorkspaceSelectorSettings {
     fn default() -> Self {
         Self {
             display: WorkspaceDisplaySettings::default(),
             sort_order: default_workspace_sort_order(),
             path_ellipsis: PathEllipsisMode::default(),
+            last_input_mode: default_workspace_last_input_mode(),
+            confirm_destructive_actions: true,
             hidden_auto_close_seconds: 0,
         }
     }
@@ -1770,15 +1875,6 @@ pub struct RemoteSettings {
     /// App window width at or below which the Remote Access modal opens automatically. 0 disables.
     #[serde(default = "default_remote_auto_mobile_mode_min_width")]
     pub auto_mobile_mode_min_width: u32,
-    /// Max KiB of recent output replayed to a remote client on terminal attach.
-    #[serde(default = "default_remote_snapshot_max_kib")]
-    pub snapshot_max_kib: u32,
-    /// Terminal cell font size used only by the Remote surface.
-    #[serde(default = "default_remote_terminal_font_size")]
-    pub terminal_font_size: u16,
-    /// Text size for the Remote input composer and its suggestions.
-    #[serde(default = "default_remote_composer_font_size")]
-    pub composer_font_size: u16,
     /// Preferred host for copyable remote URLs. Empty = auto-select the first candidate.
     #[serde(default)]
     pub preferred_host: String,
@@ -1819,27 +1915,31 @@ pub struct RemoteSettings {
     /// on a device where a screen row matters more, and never touches placement.
     #[serde(default = "default_remote_widgets")]
     pub widgets: bool,
-    /// Wheel scroll multiplier for the Remote browser terminal (xterm
-    /// `scrollSensitivity`). Separate from `terminal.scrollSensitivity`: the
-    /// remote client is a different device with its own pointer.
-    #[serde(default = "default_scroll_sensitivity")]
-    pub scroll_sensitivity: f32,
-    /// Remote wheel multiplier while the fast-scroll modifier (Alt) is held
-    /// (xterm `fastScrollSensitivity`).
-    #[serde(default = "default_fast_scroll_sensitivity")]
-    pub fast_scroll_sensitivity: f32,
-    /// Multiplier for **one-finger** finger-drag scrollback on the Remote
-    /// surface. 1 keeps the 1:1 physical scroll the gesture starts out as;
-    /// above 1 the content moves further than the finger. Not an xterm option —
-    /// the Remote page owns this gesture and converts pixels to lines itself.
-    #[serde(default = "default_scroll_sensitivity")]
-    pub touch_scroll_sensitivity: f32,
-    /// Multiplier for **two-finger** finger-drag scrollback on the Remote
-    /// surface. Separate from the one-finger value so a two-finger swipe can
-    /// cover more scrollback per drag; defaults to the fast-scroll factor (5).
-    /// Same pixel→line path as `touch_scroll_sensitivity`, not an xterm option.
-    #[serde(default = "default_fast_scroll_sensitivity")]
-    pub two_finger_scroll_sensitivity: f32,
+    /// Largest decoded Remote attachment in MiB (1..=10, ADR-0227). The
+    /// attachment JSON body bound, the Android E2E RPC envelope bound and the
+    /// attachment cache quota all derive from this value.
+    #[serde(default = "default_remote_attachment_max_mib")]
+    pub attachment_max_mib: u32,
+    /// Accept every file type as an opaque binary attachment instead of only
+    /// the signature-checked images/documents and UTF-8 text.
+    #[serde(default)]
+    pub attachment_allow_all_extensions: bool,
+    /// Extra extensions (lowercase, no dot) accepted as opaque binary attachments.
+    #[serde(default)]
+    pub attachment_extra_extensions: Vec<String>,
+}
+
+/// Extensions end up in a cache file name, so settings and callers may only
+/// supply lowercase ASCII alphanumerics of bounded length (ADR-0227).
+pub fn is_valid_attachment_extension(extension: &str) -> bool {
+    (1..=16).contains(&extension.len())
+        && extension
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+}
+
+fn default_remote_attachment_max_mib() -> u32 {
+    1
 }
 
 fn default_remote_bind_address() -> String {
@@ -1862,23 +1962,6 @@ fn default_android_background_lease_seconds() -> u64 {
 
 fn default_remote_auto_mobile_mode_min_width() -> u32 {
     720
-}
-
-fn default_remote_snapshot_max_kib() -> u32 {
-    DEFAULT_REMOTE_SNAPSHOT_MAX_KIB
-}
-
-pub const REMOTE_FONT_SIZE_MIN: u16 = 6;
-pub const REMOTE_FONT_SIZE_MAX: u16 = 72;
-pub const DEFAULT_REMOTE_TERMINAL_FONT_SIZE: u16 = 14;
-pub const DEFAULT_REMOTE_COMPOSER_FONT_SIZE: u16 = 16;
-
-fn default_remote_terminal_font_size() -> u16 {
-    DEFAULT_REMOTE_TERMINAL_FONT_SIZE
-}
-
-fn default_remote_composer_font_size() -> u16 {
-    DEFAULT_REMOTE_COMPOSER_FONT_SIZE
 }
 
 fn default_cloud_auto_reconnect() -> bool {
@@ -1924,9 +2007,6 @@ impl Default for RemoteSettings {
             heartbeat_timeout_seconds: default_remote_heartbeat_timeout_seconds(),
             android_background_lease_seconds: default_android_background_lease_seconds(),
             auto_mobile_mode_min_width: default_remote_auto_mobile_mode_min_width(),
-            snapshot_max_kib: default_remote_snapshot_max_kib(),
-            terminal_font_size: default_remote_terminal_font_size(),
-            composer_font_size: default_remote_composer_font_size(),
             preferred_host: String::new(),
             custom_hosts: Vec::new(),
             cloud_enabled: false,
@@ -1938,10 +2018,9 @@ impl Default for RemoteSettings {
             cloud_access_mode: CloudAccessMode::default(),
             serve_terminal_font: false,
             widgets: default_remote_widgets(),
-            scroll_sensitivity: default_scroll_sensitivity(),
-            fast_scroll_sensitivity: default_fast_scroll_sensitivity(),
-            touch_scroll_sensitivity: default_scroll_sensitivity(),
-            two_finger_scroll_sensitivity: default_fast_scroll_sensitivity(),
+            attachment_max_mib: default_remote_attachment_max_mib(),
+            attachment_allow_all_extensions: false,
+            attachment_extra_extensions: Vec::new(),
         }
     }
 }
@@ -2042,6 +2121,8 @@ pub struct Settings {
     pub notifications: NotificationSettings,
     #[serde(default)]
     pub power: PowerSettings,
+    #[serde(default)]
+    pub update: UpdateSettings,
     #[serde(default)]
     pub workspace_selector: WorkspaceSelectorSettings,
     #[serde(default)]
@@ -2152,6 +2233,7 @@ impl Default for Settings {
             dock: DockSettings::default(),
             notifications: NotificationSettings::default(),
             power: PowerSettings::default(),
+            update: UpdateSettings::default(),
             workspace_selector: WorkspaceSelectorSettings::default(),
             claude: ClaudeSettings::default(),
             codex: CodexSettings::default(),

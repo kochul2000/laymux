@@ -4,6 +4,7 @@ import { FileViewerOverlay } from "./FileViewerOverlay";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { viewerInstanceId } from "@/lib/file-viewer";
+import { openInOs } from "@/lib/tauri-api";
 
 // Mock FileViewer so the overlay tests stay focused on overlay behaviour
 // (dismiss handling + the id it forwards), not on file reading / TerminalView.
@@ -15,6 +16,12 @@ vi.mock("@/components/ui/FileViewer", () => ({
       data-path={props.path as string}
     />
   ),
+}));
+
+// The OS handoff buttons call one Tauri command; only that call is mocked so the
+// confirm gate and the mode each button asks for stay under test (ADR-0193).
+vi.mock("@/lib/tauri-api", () => ({
+  openInOs: vi.fn().mockResolvedValue(undefined),
 }));
 
 // The explorer itself has a dedicated suite. Here we only verify how the
@@ -45,6 +52,9 @@ describe("FileViewerOverlay", () => {
   beforeEach(() => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useFileViewerStore.setState({ open: false, path: "", maximized: false });
+    vi.restoreAllMocks();
+    vi.mocked(openInOs).mockClear();
+    vi.mocked(openInOs).mockResolvedValue(undefined);
   });
 
   it("renders nothing when closed", () => {
@@ -339,5 +349,67 @@ describe("FileViewerOverlay", () => {
     expect(idB).toBe(viewerInstanceId("/home/user/b.txt"));
     expect(eventNameSafe.test(`terminal-output-${idB}`)).toBe(true);
     expect(idB).not.toBe(idA);
+  });
+  it("opens the loaded file on this PC from the header button", () => {
+    useSettingsStore.setState({
+      terminal: { ...useSettingsStore.getState().terminal, pathLinkOsOpenConfirm: false },
+    });
+    act(() => {
+      useFileViewerStore.getState().openFileViewer("/home/user/a.txt");
+    });
+    render(<FileViewerOverlay />);
+    fireEvent.click(screen.getByTestId("file-viewer-overlay-os-open"));
+    expect(openInOs).toHaveBeenCalledWith("/home/user/a.txt", "open");
+  });
+
+  it("reveals the loaded file without a confirmation, even with confirm on", () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    act(() => {
+      useFileViewerStore.getState().openFileViewer("/home/user/a.txt");
+    });
+    render(<FileViewerOverlay />);
+    fireEvent.click(screen.getByTestId("file-viewer-overlay-os-reveal"));
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(openInOs).toHaveBeenCalledWith("/home/user/a.txt", "reveal");
+  });
+
+  it("asks before opening a file on this PC and does nothing when cancelled", () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    act(() => {
+      useFileViewerStore.getState().openFileViewer("/home/user/a.txt");
+    });
+    render(<FileViewerOverlay />);
+    fireEvent.click(screen.getByTestId("file-viewer-overlay-os-open"));
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(openInOs).not.toHaveBeenCalled();
+
+    confirmSpy.mockReturnValue(true);
+    fireEvent.click(screen.getByTestId("file-viewer-overlay-os-open"));
+    expect(openInOs).toHaveBeenCalledWith("/home/user/a.txt", "open");
+  });
+
+  it("has no OS buttons before a file is chosen", () => {
+    act(() => {
+      useFileViewerStore.getState().openEmptyFileViewer();
+    });
+    render(<FileViewerOverlay />);
+    expect(screen.getByTestId("file-viewer-overlay")).toBeInTheDocument();
+    expect(screen.queryByTestId("file-viewer-overlay-os-open")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("file-viewer-overlay-os-reveal")).not.toBeInTheDocument();
+  });
+
+  it("shows the failure when the host program could not be launched", async () => {
+    useSettingsStore.setState({
+      terminal: { ...useSettingsStore.getState().terminal, pathLinkOsOpenConfirm: false },
+    });
+    vi.mocked(openInOs).mockRejectedValue("no xdg-open");
+    act(() => {
+      useFileViewerStore.getState().openFileViewer("/home/user/a.txt");
+    });
+    render(<FileViewerOverlay />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("file-viewer-overlay-os-open"));
+    });
+    expect(screen.getByTestId("file-viewer-overlay-os-error")).toHaveTextContent("no xdg-open");
   });
 });

@@ -97,6 +97,7 @@ type RemoteMockOptions = {
   heartbeatFailureStatus?: number;
   claimTransitionConflicts?: number;
   reconnectPayloadDelayMs?: number;
+  stalledReconnectSnapshots?: number;
   snapshotLineCount?: number;
 };
 
@@ -181,6 +182,9 @@ async function installRemoteMocks(page: Page, options: RemoteMockOptions = {}) {
     state.sockets.push(socket);
     const connectionNumber = state.sockets.length;
     const delay = connectionNumber > 1 ? (options.reconnectPayloadDelayMs ?? 0) : 0;
+    if (connectionNumber > 1 && connectionNumber <= 1 + (options.stalledReconnectSnapshots ?? 0)) {
+      return;
+    }
     setTimeout(() => {
       const prefix = connectionNumber === 1 ? "initial" : "restored";
       const output = Array.from(
@@ -269,7 +273,11 @@ async function scrollRemoteViewportUp(page: Page, lines: number) {
   }, lines);
 }
 
-test("a pending top-bar action shows and then clears its text spinner", async ({ page }) => {
+function spinnerAnimationName(spinner: Locator) {
+  return spinner.evaluate((el) => getComputedStyle(el).animationName);
+}
+
+test("a pending top-bar action shows and then clears its spinner", async ({ page }) => {
   await installRemoteMocks(page, { claimDelayMs: 600 });
   await instrumentRemotePage(page);
 
@@ -280,7 +288,9 @@ test("a pending top-bar action shows and then clears its text spinner", async ({
   await expect(page.locator("#statusText")).toHaveText("Claiming remote control…");
   await expect(status).toHaveAttribute("aria-busy", "true");
   await expect(spinner).toBeVisible();
-  await expect(spinner).toHaveText(/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/);
+  // The marker is a drawn ring, not a glyph: it carries no text at any frame.
+  await expect(spinner).toHaveText("");
+  expect(await spinnerAnimationName(spinner)).toBe("status-spinner-spin");
 
   await expect(page.locator("#statusText")).toHaveText("Main · Pane 1");
   await expect(status).toHaveAttribute("aria-busy", "false");
@@ -297,9 +307,22 @@ test("reduced motion keeps the pending marker static", async ({ page }) => {
   const spinner = page.locator("#statusSpinner");
   await expect(page.locator("#statusText")).toHaveText("Claiming remote control…");
   await expect(spinner).toBeVisible();
-  await expect(spinner).toHaveText("⠿");
-  await page.waitForTimeout(150);
-  await expect(spinner).toHaveText("⠿");
+  expect(await spinnerAnimationName(spinner)).toBe("none");
+  // Static marker, but still a marker: the ring closes instead of spinning.
+  const borders = await spinner.evaluate((el) => {
+    const style = getComputedStyle(el);
+    return {
+      top: style.borderTopColor,
+      right: style.borderRightColor,
+      rightStyle: style.borderRightStyle,
+      width: style.width,
+      height: style.height,
+    };
+  });
+  expect(borders.top).toBe(borders.right);
+  expect(borders.rightStyle).toBe("solid");
+  expect(borders.width).toBe("10px");
+  expect(borders.height).toBe("10px");
 });
 
 test("a disconnected paste reports a static warning instead of endless reconnect activity", async ({
@@ -349,6 +372,24 @@ test("a short output drop reconnects without status noise or an early terminal r
   await expect(page.locator("#status")).toHaveText("Main · Pane 1");
   await expect.poll(() => resetCount(page)).toBe(2);
   expect(await statusHistory(page)).not.toContain("Connection interrupted. Reconnecting…");
+});
+
+test("an output reconnect replaces a socket that never delivers its snapshot", async ({ page }) => {
+  const remote = await installRemoteMocks(page, { stalledReconnectSnapshots: 1 });
+  await instrumentRemotePage(page);
+
+  await page.locator("#connect").click();
+  await expect.poll(() => resetCount(page)).toBe(1);
+
+  await remote.sockets[0].close();
+  await expect.poll(() => remote.sockets.length).toBe(2);
+  await expect(page.locator("#statusText")).toHaveText("Connection interrupted. Reconnecting…", {
+    timeout: 5000,
+  });
+
+  await expect.poll(() => remote.sockets.length, { timeout: 25000 }).toBe(3);
+  await expect.poll(() => resetCount(page)).toBe(2);
+  await expect(page.locator("#statusText")).toHaveText("Main · Pane 1");
 });
 
 test("an output reconnect preserves a scrolled-up viewport", async ({ page }) => {

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { openExternal, readFileForViewer, type FileViewerContent } from "@/lib/tauri-api";
-import { fileExtension, resolveViewer } from "@/lib/file-viewer";
+import { fileExtension, isSpreadsheetPath, resolveViewer } from "@/lib/file-viewer";
+import { SpreadsheetPreview } from "@/components/ui/preview/SpreadsheetPreview";
 import {
   htmlToSafePreviewDocument,
   markdownToSafePreviewDocument,
@@ -37,6 +39,8 @@ import {
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 import { TerminalView } from "@/components/views/TerminalView";
 import { PaneLoadingPlaceholder } from "@/components/ui/PaneLoadingPlaceholder";
+import { OsHandoffActions } from "@/components/ui/OsHandoffActions";
+import { ZoomInIcon, ZoomOutIcon } from "@/components/ui/icons";
 
 /**
  * Shared file-viewer body. The single rendering mechanism behind every entry
@@ -59,6 +63,7 @@ export interface FileViewerProps {
 }
 
 export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: FileViewerProps) {
+  const { t } = useTranslation("common");
   const extensionViewers = useSettingsStore((s) => s.fileExplorer.extensionViewers);
   const profiles = useSettingsStore((s) => s.profiles);
   const viewerSettings = useSettingsStore((s) => s.viewer);
@@ -147,7 +152,7 @@ export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: Fil
   } | null>(null);
 
   useEffect(() => {
-    if (resolution.viewerType !== "web") return;
+    if (resolution.viewerType !== "web" || isSpreadsheetPath(path)) return;
     let cancelled = false;
     readFileForViewer(path)
       .then((c) => {
@@ -238,6 +243,10 @@ export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: Fil
         {resolution.message}
       </div>
     );
+  }
+
+  if (isSpreadsheetPath(path)) {
+    return <SpreadsheetPreview key={path} path={path} bodyStyle={effectiveBodyStyle} />;
   }
 
   if (error) {
@@ -353,6 +362,9 @@ export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: Fil
     }
 
     if (content.kind === "binary") {
+      // ADR-0193: 미리보기가 없는 바로 그 자리에서 다음 행동을 제시한다. 헤더에
+      // 같은 버튼이 있지만, 빈 화면만 보고 "지원 안 되는 파일"로 끝내는 사용자가
+      // 그 글리프까지 찾아가지는 않는다.
       return (
         <div
           className="flex flex-col items-center justify-center h-full gap-2"
@@ -360,7 +372,9 @@ export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: Fil
           data-testid="file-viewer-binary"
           data-file-viewer-body
         >
-          <div>Binary file ({(content.size / 1024).toFixed(1)} KB)</div>
+          <div>{t("viewer.binaryFile", { size: (content.size / 1024).toFixed(1) })}</div>
+          <div className="text-center text-xs">{t("osHandoff.noPreviewPrompt")}</div>
+          <OsHandoffActions path={path} variant="cta" testIdPrefix="file-viewer-binary-os" />
         </div>
       );
     }
@@ -691,7 +705,7 @@ function ImageZoomControls({ zoom, onZoom }: { zoom: number; onZoom: (delta: num
         className="hover-bg-strong rounded px-1.5 py-1 text-xs"
         style={zoomButtonStyle}
       >
-        −
+        <ZoomOutIcon />
       </button>
       <span
         className="px-1 text-xs"
@@ -709,7 +723,7 @@ function ImageZoomControls({ zoom, onZoom }: { zoom: number; onZoom: (delta: num
         className="hover-bg-strong rounded px-1.5 py-1 text-xs"
         style={zoomButtonStyle}
       >
-        +
+        <ZoomInIcon />
       </button>
     </>
   );

@@ -38,6 +38,7 @@ import {
   grokUsageStatusMessage,
 } from "@/lib/usage-status";
 import { isTerminalWorking } from "@/lib/terminal-working";
+import { resolveFocusedTerminalCwd } from "@/lib/focused-terminal";
 import { abbreviatePath } from "@/lib/workspace-summary";
 import {
   readWidgetFontSize,
@@ -56,6 +57,8 @@ import { useNotificationStore } from "@/stores/notification-store";
 import { useSettingsStore, type UsageColorSettings } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useGridStore } from "@/stores/grid-store";
+import { useDockStore } from "@/stores/dock-store";
 
 /** Which end of the strip an item sticks to. The desktop's two surfaces both fold into one line. */
 export type RemoteWidgetAlign = "left" | "right";
@@ -243,11 +246,22 @@ export async function buildRemoteWidgetSnapshot(
   );
 
   const terminals = useTerminalStore.getState().instances;
-  const activeWorkspaceId = useWorkspaceStore.getState().activeWorkspaceId;
+  const workspaceState = useWorkspaceStore.getState();
+  const activeWorkspaceId = workspaceState.activeWorkspaceId;
+  const gridState = useGridStore.getState();
+  const dockState = useDockStore.getState();
   const unread = useNotificationStore
     .getState()
     .notifications.filter((notification) => notification.readAt === null).length;
-  const cwd = terminals.find((terminal) => terminal.isFocused)?.cwd;
+  const cwd = resolveFocusedTerminalCwd({
+    terminals,
+    workspaces: workspaceState.workspaces,
+    activeWorkspaceId,
+    focusedPaneIndex: gridState.focusedPaneIndex,
+    docks: dockState.docks,
+    focusedDock: dockState.focusedDock,
+    focusedDockPaneId: dockState.focusedDockPaneId,
+  });
 
   const items = placed.flatMap(({ instance, align }): RemoteWidgetItem[] => {
     switch (instance.type) {

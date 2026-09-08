@@ -16,7 +16,12 @@ type LexicalState =
 
 type TransactionPhase = "holdingFrame" | "awaitingRestore";
 type RestoreStage = "hide" | "position" | "show";
-type InFrameParkStage = "none" | "shown" | "positioned";
+type InFrameParkStage =
+  | "none"
+  | "positionsBeforeShow"
+  | "shown"
+  | "showThenPositioned"
+  | "positionThenShown";
 
 interface Transaction {
   phase: TransactionPhase;
@@ -44,9 +49,10 @@ export interface NativeWindowsOutputStabilizerOptions {
 
 /**
  * Surface-local byte stream stabilizer for native Windows synchronized-output
- * frames. It only recognizes the two narrow DEC 2026 + DECTCEM park grammars
- * pinned by ADR-0076 (legacy out-of-frame restore and Codex 0.145 in-frame park);
- * every malformed, late, or oversized candidate is emitted byte-for-byte.
+ * frames. It only recognizes the narrow DEC 2026 + DECTCEM park grammars
+ * pinned by ADR-0076 (legacy out-of-frame restore and Codex 0.145 in-frame park),
+ * plus ADR-0221's Codex 0.150+ position-first tail; every malformed, late, or
+ * oversized candidate is emitted byte-for-byte.
  */
 export class NativeWindowsOutputStabilizer {
   private readonly holdMs: number;
@@ -101,7 +107,7 @@ export class NativeWindowsOutputStabilizer {
         this.consumeNormalByte(byte, now, output);
         return;
       case "escape":
-        this.consumeEscapeByte(byte, output);
+        this.consumeEscapeByte(byte, now, output);
         return;
       case "csi":
         this.consumeCsiByte(byte, now, output);
@@ -110,10 +116,10 @@ export class NativeWindowsOutputStabilizer {
         this.consumeControlByte(byte, output);
         return;
       case "passEscape":
-        this.consumePassEscapeByte(byte, output);
+        this.consumePassEscapeByte(byte, now, output);
         return;
       case "passCsi":
-        this.consumePassCsiByte(byte, output);
+        this.consumePassCsiByte(byte, now, output);
         return;
       case "passControl":
         output.append(byte);
@@ -150,8 +156,8 @@ export class NativeWindowsOutputStabilizer {
       if (this.transaction.phase === "awaitingRestore") {
         this.failOpen(output);
       } else if (this.transaction.inFrameParkStage !== "none") {
-        // Only accept `?25h`, position command(s), then `?2026l` with no
-        // printable payload between them as an in-frame cursor park.
+        // Strict in-frame parks do not permit printable payload between their
+        // position/show tokens and the following DEC 2026 reset.
         this.transaction.inFrameParkStage = "none";
       }
       return;
@@ -159,12 +165,26 @@ export class NativeWindowsOutputStabilizer {
     output.append(byte);
   }
 
-  private consumeEscapeByte(byte: number, output: EmissionBuilder): void {
+  private consumeEscapeByte(byte: number, now: number, output: EmissionBuilder): void {
     const escape = this.lexical as Extract<LexicalState, { kind: "escape" }>;
     escape.bytes.push(byte);
     const control = controlStringKind(byte);
+    if (
+      byte === ESC &&
+      this.transaction &&
+      this.transaction.bytes.length >= this.maxBufferedBytes
+    ) {
+      this.failOpen(output);
+      this.lexical = { kind: "escape", bytes: [ESC], startedAt: now };
+      return;
+    }
     if (this.transaction && !this.appendHeld(byte, output)) {
       this.setPassStateAfterEscapeByte(byte);
+      return;
+    }
+
+    if (byte === ESC) {
+      this.reconsumeEscape(escape.bytes.slice(0, -1), now, output);
       return;
     }
 
@@ -203,6 +223,15 @@ export class NativeWindowsOutputStabilizer {
   private consumeCsiByte(byte: number, now: number, output: EmissionBuilder): void {
     const csi = this.lexical as Extract<LexicalState, { kind: "csi" }>;
     csi.bytes.push(byte);
+    if (
+      byte === ESC &&
+      this.transaction &&
+      this.transaction.bytes.length >= this.maxBufferedBytes
+    ) {
+      this.failOpen(output);
+      this.lexical = { kind: "escape", bytes: [ESC], startedAt: now };
+      return;
+    }
     if (this.transaction && !this.appendHeld(byte, output)) {
       this.setPassStateAfterCsiByte(byte, csi.bytes.length);
       return;
@@ -216,13 +245,50 @@ export class NativeWindowsOutputStabilizer {
 
     const isParameterOrIntermediate = byte >= 0x20 && byte <= 0x3f;
     if (!isParameterOrIntermediate || csi.bytes.length > MAX_CSI_BYTES) {
+      if (byte === ESC) {
+        this.reconsumeEscape(csi.bytes.slice(0, -1), now, output);
+        return;
+      }
       this.lexical = { kind: "normal" };
       if (this.transaction?.phase === "awaitingRestore") {
         this.failOpen(output);
+      } else if (this.transaction?.phase === "holdingFrame") {
+        this.transaction.inFrameParkStage = "none";
       } else if (!this.transaction) {
         output.appendMany(csi.bytes);
       }
     }
+  }
+
+  private reconsumeEscape(
+    precedingUnheldBytes: readonly number[],
+    now: number,
+    output: EmissionBuilder,
+  ): void {
+    const transaction = this.transaction;
+    if (!transaction) {
+      output.appendMany(precedingUnheldBytes);
+      this.lexical = { kind: "escape", bytes: [ESC], startedAt: now };
+      return;
+    }
+
+    if (transaction.phase === "awaitingRestore") {
+      // The current ESC cancels the partial sequence and belongs to the next
+      // sequence. Fail open only the old transaction so a following frame
+      // opener can start a fresh transaction from this same ESC byte.
+      transaction.bytes.pop();
+      this.failOpen(output);
+      this.lexical = { kind: "escape", bytes: [ESC], startedAt: now };
+      return;
+    }
+
+    this.lexical = {
+      kind: "escape",
+      bytes: [ESC],
+      heldStart: transaction.bytes.length - 1,
+      startedAt: now,
+    };
+    transaction.inFrameParkStage = "none";
   }
 
   private consumeControlByte(byte: number, output: EmissionBuilder): void {
@@ -246,13 +312,21 @@ export class NativeWindowsOutputStabilizer {
     }
   }
 
-  private consumePassEscapeByte(byte: number, output: EmissionBuilder): void {
+  private consumePassEscapeByte(byte: number, now: number, output: EmissionBuilder): void {
+    if (byte === ESC) {
+      this.lexical = { kind: "escape", bytes: [ESC], startedAt: now };
+      return;
+    }
     output.append(byte);
     this.setPassStateAfterEscapeByte(byte);
   }
 
-  private consumePassCsiByte(byte: number, output: EmissionBuilder): void {
+  private consumePassCsiByte(byte: number, now: number, output: EmissionBuilder): void {
     const csi = this.lexical as Extract<LexicalState, { kind: "passCsi" }>;
+    if (byte === ESC) {
+      this.lexical = { kind: "escape", bytes: [ESC], startedAt: now };
+      return;
+    }
     output.append(byte);
     this.setPassStateAfterCsiByte(byte, csi.bytesSeen + 1);
   }
@@ -304,17 +378,27 @@ export class NativeWindowsOutputStabilizer {
     if (transaction.phase === "holdingFrame") {
       if (kind === "cursorShow") {
         transaction.omitOnSuccess.push({ start: tokenStart, end: transaction.bytes.length });
-        transaction.inFrameParkStage = "shown";
-      } else if (
-        kind === "position" &&
-        (transaction.inFrameParkStage === "shown" || transaction.inFrameParkStage === "positioned")
-      ) {
-        transaction.inFrameParkStage = "positioned";
+        transaction.inFrameParkStage =
+          transaction.inFrameParkStage === "positionsBeforeShow" ||
+          transaction.inFrameParkStage === "showThenPositioned"
+            ? "positionThenShown"
+            : "shown";
+      } else if (kind === "position") {
+        transaction.inFrameParkStage =
+          transaction.inFrameParkStage === "shown" ||
+          transaction.inFrameParkStage === "showThenPositioned" ||
+          transaction.inFrameParkStage === "positionThenShown"
+            ? "showThenPositioned"
+            : "positionsBeforeShow";
       } else if (kind === "frameEnd") {
-        if (transaction.inFrameParkStage === "positioned") {
+        if (
+          transaction.inFrameParkStage === "showThenPositioned" ||
+          transaction.inFrameParkStage === "positionThenShown"
+        ) {
           // The show belongs to the final caret, not to a transient footer.
           // Keep it in the atomic write so xterm's application DECTCEM state
-          // stays current; DEC 2026 prevents a paint before the following CUP.
+          // stays current; DEC 2026 prevents a paint between either strict
+          // position/show ordering and this frame reset.
           transaction.omitOnSuccess.pop();
           this.completeTransaction(output, true);
           return;
@@ -322,6 +406,12 @@ export class NativeWindowsOutputStabilizer {
         transaction.phase = "awaitingRestore";
         transaction.restoreStage = "hide";
         transaction.frameEndAt = now;
+      } else if (kind === "frameEndCombined") {
+        // xterm closes synchronized output for any valid private-mode reset
+        // containing 2026. Only the singleton reset can complete a strict
+        // cursor park; a combined reset must close this candidate fail-open.
+        transaction.frameEndAt = now;
+        this.failOpen(output);
       } else if (kind === "frameStart") {
         this.failOpen(output);
       } else if (transaction.inFrameParkStage !== "none") {
@@ -475,12 +565,20 @@ function isControlStringEnd(kind: ControlStringKind, previousEsc: boolean, byte:
   return (kind === "osc" && byte === BEL) || (previousEsc && byte === 0x5c);
 }
 
-type CsiKind = "frameStart" | "frameEnd" | "cursorHide" | "cursorShow" | "position" | "other";
+type CsiKind =
+  | "frameStart"
+  | "frameEnd"
+  | "frameEndCombined"
+  | "cursorHide"
+  | "cursorShow"
+  | "position"
+  | "other";
 
 function classifyCsi(bytes: readonly number[]): CsiKind {
   const text = String.fromCharCode(...bytes);
   if (text === "\x1b[?2026h") return "frameStart";
   if (text === "\x1b[?2026l") return "frameEnd";
+  if (hasPrivateModeParameter(text, "l", 2026)) return "frameEndCombined";
   if (text === "\x1b[?25l") return "cursorHide";
   if (text === "\x1b[?25h") return "cursorShow";
   const body = text.slice(2, -1);
@@ -488,6 +586,13 @@ function classifyCsi(bytes: readonly number[]): CsiKind {
   if ((final === "H" || final === "f") && /^[0-9;]*$/.test(body)) return "position";
   if (final === "G" && /^\d*$/.test(body)) return "position";
   return "other";
+}
+
+function hasPrivateModeParameter(text: string, final: "h" | "l", parameter: number): boolean {
+  if (!text.startsWith("\x1b[?") || text.at(-1) !== final) return false;
+  const body = text.slice(3, -1);
+  if (!/^[0-9;]+$/.test(body)) return false;
+  return body.split(";").some((value) => value !== "" && Number(value) === parameter);
 }
 
 function parkDeadline(transaction: Transaction, holdMs: number): number | undefined {

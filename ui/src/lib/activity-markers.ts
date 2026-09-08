@@ -25,3 +25,6 @@ export const CLAUDE_INPUT_PENDING_MARKER = "__claude_input_pending__";
  * loaded *by* `activity-handler.ts` and cannot import values back out of it.
  */
 export const STATUS_ICON_WORKING = "⏳";
+
+/** Stable status values shared by activity calculation and external projections. */
+export type StatusIconGlyph = typeof STATUS_ICON_WORKING | "✓" | "✗" | "—";

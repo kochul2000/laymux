@@ -1,5 +1,9 @@
 use super::super::crypto::{decrypt_response, encrypt_request};
 use super::*;
+use std::sync::atomic::AtomicUsize;
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 use zeroize::Zeroizing;
 
 fn request() -> ChallengeRequest {
@@ -17,6 +21,45 @@ fn material() -> ConfirmedPairingMaterial {
         seed: Zeroizing::new(vec![7_u8; 32]),
         revision: crate::android_pairing::pairing_revision(),
     }
+}
+
+#[test]
+fn current_request_context_commit_serializes_against_session_clear() {
+    let e2e = Arc::new(AndroidE2eState::default());
+    let context = e2e.install_test_request_context("desktop-7", "session-a", u64::MAX);
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let commit_e2e = Arc::clone(&e2e);
+    let commit = thread::spawn(move || {
+        commit_e2e
+            .with_current_request_context(&context, 1_000, || {
+                entered_tx.send(()).expect("signal commit entry");
+                release_rx.recv().expect("release commit");
+                7_u8
+            })
+            .expect("registry lock")
+    });
+    entered_rx.recv().expect("commit entered");
+
+    let (clear_started_tx, clear_started_rx) = mpsc::channel();
+    let (clear_done_tx, clear_done_rx) = mpsc::channel();
+    let clear_e2e = Arc::clone(&e2e);
+    let clear = thread::spawn(move || {
+        clear_started_tx.send(()).expect("signal clear start");
+        clear_e2e.clear().expect("clear sessions");
+        clear_done_tx.send(()).expect("signal clear completion");
+    });
+    clear_started_rx.recv().expect("clear started");
+    assert!(clear_done_rx
+        .recv_timeout(Duration::from_millis(50))
+        .is_err());
+
+    release_tx.send(()).expect("finish commit");
+    assert_eq!(commit.join().expect("commit thread"), Some(7));
+    clear_done_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("clear follows commit");
+    clear.join().expect("clear thread");
 }
 
 #[tokio::test]
@@ -140,7 +183,12 @@ async fn exact_request_replay_returns_cached_encrypted_response() {
         .process(
             envelope.clone(),
             || Ok(1_001),
-            |_| async { Ok(serde_json::json!({"ok": true})) },
+            |_, _| async {
+                Ok(AndroidE2eDispatchResult::unguarded(
+                    serde_json::json!({"ok": true}),
+                ))
+            },
+            |_, _, _| Ok(()),
         )
         .await
         .unwrap();
@@ -148,7 +196,8 @@ async fn exact_request_replay_returns_cached_encrypted_response() {
         .process(
             envelope,
             || Ok(1_800),
-            |_| async { panic!("cached replay must not dispatch twice") },
+            |_, _| async { panic!("cached replay must not dispatch twice") },
+            |_, _, _| Ok(()),
         )
         .await
         .unwrap();
@@ -173,11 +222,182 @@ async fn exact_request_replay_returns_cached_encrypted_response() {
 }
 
 #[tokio::test]
+async fn guarded_exact_retry_revalidates_authority_and_revokes_on_change() {
+    let server_keys = derive_session_keys(&[7_u8; 32], &["p", "i", "c", "cs", "sn", "s"]).unwrap();
+    let client_keys = derive_session_keys(&[7_u8; 32], &["p", "i", "c", "cs", "sn", "s"]).unwrap();
+    let session_id = URL_SAFE_NO_PAD.encode([9_u8; SESSION_ID_BYTES]);
+    let session = Arc::new(AndroidE2eSession {
+        instance_id: "desktop-7".into(),
+        session_id: session_id.clone(),
+        pairing_revision: crate::android_pairing::pairing_revision(),
+        expires_at: AtomicU64::new(2_000),
+        revoked: AtomicBool::new(false),
+        state: AsyncMutex::new(SessionState {
+            keys: server_keys,
+            used_output_nonces: HashSet::new(),
+            next_sequence: 0,
+            last_request_digest: None,
+            last_response: None,
+        }),
+    });
+    let envelope = CipherEnvelope {
+        version: 1,
+        instance_id: "desktop-7".into(),
+        session_id,
+        sequence: 0,
+        ciphertext: encrypt_request(
+            &client_keys.a2d,
+            "desktop-7",
+            &session.session_id,
+            0,
+            br#"{"kind":"http","method":"POST","path":"/remote/v1/file-viewer/render"}"#,
+        )
+        .unwrap(),
+    };
+    let guard = AndroidE2eReplayGuard::new(
+        "lease-1".into(),
+        7,
+        11,
+        "desktop-7".into(),
+        session.session_id.clone(),
+    );
+    let allowed = Arc::new(AtomicBool::new(true));
+    let checks = Arc::new(AtomicUsize::new(0));
+
+    let first_allowed = Arc::clone(&allowed);
+    let first_checks = Arc::clone(&checks);
+    let first = session
+        .process(
+            envelope.clone(),
+            || Ok(1_000),
+            move |_, _| {
+                let guard = guard.clone();
+                async move {
+                    Ok(AndroidE2eDispatchResult::guarded(
+                        serde_json::json!({"secret": "payload"}),
+                        guard,
+                    ))
+                }
+            },
+            move |_, _, _| {
+                first_checks.fetch_add(1, Ordering::AcqRel);
+                first_allowed
+                    .load(Ordering::Acquire)
+                    .then_some(())
+                    .ok_or(E2eError::Invalid)
+            },
+        )
+        .await
+        .expect("initial guarded response");
+
+    let replay_allowed = Arc::clone(&allowed);
+    let replay_checks = Arc::clone(&checks);
+    let replay = session
+        .process(
+            envelope.clone(),
+            || Ok(1_100),
+            |_, _| async { panic!("guarded retry must not dispatch twice") },
+            move |_, _, _| {
+                replay_checks.fetch_add(1, Ordering::AcqRel);
+                replay_allowed
+                    .load(Ordering::Acquire)
+                    .then_some(())
+                    .ok_or(E2eError::Invalid)
+            },
+        )
+        .await
+        .expect("still-authorized replay");
+    assert_eq!(replay, first);
+
+    allowed.store(false, Ordering::Release);
+    let denied_checks = Arc::clone(&checks);
+    assert!(matches!(
+        session
+            .process(
+                envelope,
+                || Ok(1_200),
+                |_, _| async { panic!("denied retry must not dispatch twice") },
+                move |_, _, _| {
+                    denied_checks.fetch_add(1, Ordering::AcqRel);
+                    Err(E2eError::Invalid)
+                },
+            )
+            .await,
+        Err(E2eError::Invalid)
+    ));
+    assert!(session.is_revoked());
+    assert_eq!(checks.load(Ordering::Acquire), 3);
+}
+
+#[tokio::test]
+async fn guarded_fresh_response_is_not_encrypted_when_authority_changed_during_dispatch() {
+    let server_keys = derive_session_keys(&[7_u8; 32], &["p", "i", "c", "cs", "sn", "s"]).unwrap();
+    let client_keys = derive_session_keys(&[7_u8; 32], &["p", "i", "c", "cs", "sn", "s"]).unwrap();
+    let session_id = URL_SAFE_NO_PAD.encode([9_u8; SESSION_ID_BYTES]);
+    let session = Arc::new(AndroidE2eSession {
+        instance_id: "desktop-7".into(),
+        session_id: session_id.clone(),
+        pairing_revision: crate::android_pairing::pairing_revision(),
+        expires_at: AtomicU64::new(2_000),
+        revoked: AtomicBool::new(false),
+        state: AsyncMutex::new(SessionState {
+            keys: server_keys,
+            used_output_nonces: HashSet::new(),
+            next_sequence: 0,
+            last_request_digest: None,
+            last_response: None,
+        }),
+    });
+    let envelope = CipherEnvelope {
+        version: 1,
+        instance_id: "desktop-7".into(),
+        session_id,
+        sequence: 0,
+        ciphertext: encrypt_request(
+            &client_keys.a2d,
+            "desktop-7",
+            &session.session_id,
+            0,
+            br#"{"kind":"http","method":"POST","path":"/remote/v1/file-viewer/render"}"#,
+        )
+        .unwrap(),
+    };
+    let guard = AndroidE2eReplayGuard::new(
+        "lease-1".into(),
+        7,
+        11,
+        "desktop-7".into(),
+        session.session_id.clone(),
+    );
+
+    assert!(matches!(
+        session
+            .process(
+                envelope,
+                || Ok(1_000),
+                move |_, _| async move {
+                    Ok(AndroidE2eDispatchResult::guarded(
+                        serde_json::json!({"secret": "must-not-be-encrypted"}),
+                        guard,
+                    ))
+                },
+                |_, _, _| Err(E2eError::Invalid),
+            )
+            .await,
+        Err(E2eError::Invalid)
+    ));
+    assert!(session.is_revoked());
+    let state = session.state.lock().await;
+    assert_eq!(state.next_sequence, 0);
+    assert!(state.last_response.is_none());
+}
+
+#[tokio::test]
 async fn authenticated_requests_slide_the_inactivity_deadline() {
     let session_keys = derive_session_keys(&[7_u8; 32], &["p", "i", "c", "cs", "sn", "s"]).unwrap();
     let client_keys = derive_session_keys(&[7_u8; 32], &["p", "i", "c", "cs", "sn", "s"]).unwrap();
     let session_id = URL_SAFE_NO_PAD.encode([9_u8; SESSION_ID_BYTES]);
-    let session = AndroidE2eSession {
+    let session = Arc::new(AndroidE2eSession {
         instance_id: "desktop-7".into(),
         session_id: session_id.clone(),
         pairing_revision: crate::android_pairing::pairing_revision(),
@@ -190,7 +410,7 @@ async fn authenticated_requests_slide_the_inactivity_deadline() {
             last_request_digest: None,
             last_response: None,
         }),
-    };
+    });
 
     let first = session
         .process(
@@ -209,7 +429,12 @@ async fn authenticated_requests_slide_the_inactivity_deadline() {
                 .unwrap(),
             },
             || Ok(1_059),
-            |_| async { Ok(serde_json::json!({"ok": true})) },
+            |_, _| async {
+                Ok(AndroidE2eDispatchResult::unguarded(
+                    serde_json::json!({"ok": true}),
+                ))
+            },
+            |_, _, _| Ok(()),
         )
         .await
         .unwrap();
@@ -247,7 +472,12 @@ async fn authenticated_requests_slide_the_inactivity_deadline() {
                 .unwrap(),
             },
             || Ok(1_958),
-            |_| async { Ok(serde_json::json!({"ok": true})) },
+            |_, _| async {
+                Ok(AndroidE2eDispatchResult::unguarded(
+                    serde_json::json!({"ok": true}),
+                ))
+            },
+            |_, _, _| Ok(()),
         )
         .await
         .unwrap();
@@ -265,7 +495,7 @@ async fn failed_dispatch_does_not_slide_the_inactivity_deadline() {
         br#"{"kind":"test"}"#,
     )
     .unwrap();
-    let session = AndroidE2eSession {
+    let session = Arc::new(AndroidE2eSession {
         instance_id: "desktop-7".into(),
         session_id: session_id.clone(),
         pairing_revision: crate::android_pairing::pairing_revision(),
@@ -278,7 +508,7 @@ async fn failed_dispatch_does_not_slide_the_inactivity_deadline() {
             last_request_digest: None,
             last_response: None,
         }),
-    };
+    });
 
     assert!(matches!(
         session
@@ -291,7 +521,8 @@ async fn failed_dispatch_does_not_slide_the_inactivity_deadline() {
                     ciphertext,
                 },
                 || Ok(1_059),
-                |_| async { Err(AppError::Other("dispatch failed".into())) },
+                |_, _| async { Err(AppError::Other("dispatch failed".into())) },
+                |_, _, _| Ok(()),
             )
             .await,
         Err(E2eError::Internal(_))
@@ -324,7 +555,7 @@ fn challenge_expires_at_the_exact_boundary() {
 #[tokio::test]
 async fn session_expires_at_the_exact_boundary_after_waiting_for_its_lock() {
     let keys = derive_session_keys(&[7_u8; 32], &["p", "i", "c", "cs", "sn", "s"]).unwrap();
-    let session = AndroidE2eSession {
+    let session = Arc::new(AndroidE2eSession {
         instance_id: "desktop-7".into(),
         session_id: URL_SAFE_NO_PAD.encode([9_u8; SESSION_ID_BYTES]),
         pairing_revision: crate::android_pairing::pairing_revision(),
@@ -337,7 +568,7 @@ async fn session_expires_at_the_exact_boundary_after_waiting_for_its_lock() {
             last_request_digest: None,
             last_response: None,
         }),
-    };
+    });
     let envelope = CipherEnvelope {
         version: 1,
         instance_id: session.instance_id.clone(),
@@ -351,7 +582,8 @@ async fn session_expires_at_the_exact_boundary_after_waiting_for_its_lock() {
             .process(
                 envelope,
                 || Ok(1_060),
-                |_| async { panic!("an expired request must not dispatch") }
+                |_, _| async { panic!("an expired request must not dispatch") },
+                |_, _, _| Ok(()),
             )
             .await,
         Err(E2eError::Expired)
@@ -403,7 +635,8 @@ async fn clear_revokes_a_session_arc_that_was_already_looked_up() {
                     ciphertext,
                 },
                 || Ok(1_000),
-                |_| async { panic!("a revoked request must not dispatch") },
+                |_, _| async { panic!("a revoked request must not dispatch") },
+                |_, _, _| Ok(()),
             )
             .await,
         Err(E2eError::Invalid)

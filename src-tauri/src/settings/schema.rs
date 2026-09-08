@@ -30,6 +30,7 @@ pub const READ_ONLY_SETTINGS_PATHS: &[&str] = &[
     "/remote/cloudInstanceId",
     "/remote/cloudTunnelUrl",
     "/remote/cloudServerBaseUrl",
+    "/terminal/composerStarredEntries",
 ];
 
 const ENTRIES: &[MetadataEntry] = &[
@@ -88,6 +89,12 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::Live,
     },
     MetadataEntry {
+        path: "/terminal/composerStarredEntries",
+        description: "사용자가 명시적으로 저장한 Composer 별표 목록입니다. 각 항목은 {value,label,send}이며 레거시 문자열은 빈 라벨·send=false로 읽습니다.",
+        sensitive: true,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
         path: "/terminal/outputActivityBurst",
         description: "출력 활동(⏳) 감지 임계입니다. 두 검출기는 PTY 생성 시점에 터미널당 하나씩 만들어지므로, 저장 후 새로 생성한 터미널부터 적용됩니다.",
         sensitive: false,
@@ -101,7 +108,7 @@ const ENTRIES: &[MetadataEntry] = &[
     },
     MetadataEntry {
         path: "/terminal/scrollSensitivity",
-        description: "데스크톱 터미널 마우스 휠 스크롤 배율(0.1~20, 기본 1)입니다. 값이 클수록 한 번 굴릴 때 더 많이 스크롤합니다. 리모트 화면은 remote.scrollSensitivity가 따로 정합니다.",
+        description: "데스크톱 터미널 마우스 휠 스크롤 배율(0.1~20, 기본 1)입니다. 값이 클수록 한 번 굴릴 때 더 많이 스크롤합니다. 리모트 화면은 각 기기의 로컬 표시 설정이 따로 정합니다.",
         sensitive: false,
         apply_mode: ApplyMode::Live,
     },
@@ -120,6 +127,18 @@ const ENTRIES: &[MetadataEntry] = &[
     MetadataEntry {
         path: "/terminal/pathLinkOsOpenConfirm",
         description: "파일을 연결 프로그램으로 열 때마다 확인합니다. 끄면 확인 범위가 줄어드니 사용자가 직접 요청할 때만 끄십시오. 꺼도 실행 파일·스크립트 등 위험한 확장자는 계속 확인합니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
+        path: "/terminal/urlLinkActivation",
+        description: "URL 링크를 클릭·탭했을 때의 실행 방식입니다. \"immediate\"(기본)는 즉시 브라우저를 열고, \"chip\"은 링크 옆에 액션 칩을 띄워 사용자가 고른 뒤에만 실행합니다. 즉시 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
+        path: "/terminal/pathLinkActivation",
+        description: "검증된 파일·디렉터리 경로 밑줄을 클릭·탭했을 때의 실행 방식입니다. \"immediate\"(기본)는 즉시 뷰어/CWD 이동을 수행하고, \"chip\"은 액션 칩을 띄웁니다. Ctrl / Ctrl+Shift 클릭은 두 모드 모두 칩 없이 호스트 OS 로 직행합니다. 즉시 적용됩니다.",
         sensitive: false,
         apply_mode: ApplyMode::Live,
     },
@@ -178,8 +197,20 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::Live,
     },
     MetadataEntry {
+        path: "/update",
+        description: "따라갈 릴리스 채널 설정입니다(ADR-0190).",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
+        path: "/update/channel",
+        description: "업데이트를 받아올 채널입니다. stable 은 정식 릴리스만, beta 는 정식보다 먼저 나오는 테스트 릴리스까지 받습니다(기본 \"stable\"). beta 는 안정성이 보장되지 않으며, 한번 올라간 뒤 stable 로 되돌려도 정식이 그 버전을 넘어설 때까지는 업데이트가 없습니다. 채널을 바꾸면 즉시 한 번 확인합니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
         path: "/workspaceSelector",
-        description: "workspace selector 표시·정렬·숨김 터미널 정리 설정입니다.",
+        description: "workspace selector 표시·마지막 입력 배치·정렬·파괴적 action 확인·숨김 터미널 정리 설정입니다.",
         sensitive: false,
         apply_mode: ApplyMode::Live,
     },
@@ -203,7 +234,7 @@ const ENTRIES: &[MetadataEntry] = &[
     },
     MetadataEntry {
         path: "/codex",
-        description: "Codex 세션 복원과 상태 메시지 표시 설정입니다.",
+        description: "Codex 세션 복원, 트랜스크립트 포인터 스크롤, 상태 메시지 표시 설정입니다.",
         sensitive: false,
         apply_mode: ApplyMode::Live,
     },
@@ -224,6 +255,12 @@ const ENTRIES: &[MetadataEntry] = &[
         description: "Codex 세션 복원 후보 rollout의 최대 수정 경과 시간입니다. 0은 나이 필터를 끕니다. 다음 세션 수집부터 적용됩니다.",
         sensitive: false,
         apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
+        path: "/codex/transcriptScrollEnabled",
+        description: "normal buffer Codex 트랜스크립트에서 데스크톱 마우스 휠과 Remote 터치/휠 스크롤을 방향키 입력으로 변환할지 정합니다. 즉시 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
     },
     MetadataEntry {
         path: "/grok",
@@ -304,42 +341,6 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::Live,
     },
     MetadataEntry {
-        path: "/remote/snapshotMaxKib",
-        description: "원격 접속·터미널 전환 시 만드는 화면 체크포인트의 스크롤백 소프트 예산(KiB, 1~1024)입니다. 현재 화면·터미널 상태는 예산보다 클 수 있으며 다음 attach부터 적용됩니다.",
-        sensitive: false,
-        apply_mode: ApplyMode::NextUse,
-    },
-    MetadataEntry {
-        path: "/remote/terminalFontSize",
-        description: "Remote terminal cell font size in pixels (6-72, default 14).",
-        sensitive: false,
-        apply_mode: ApplyMode::Live,
-    },
-    MetadataEntry {
-        path: "/remote/composerFontSize",
-        description: "Remote input composer font size in pixels (6-72, default 16).",
-        sensitive: false,
-        apply_mode: ApplyMode::Live,
-    },
-    MetadataEntry {
-        path: "/remote/scrollSensitivity",
-        description: "원격 브라우저 터미널의 마우스 휠 스크롤 배율(0.1~20, 기본 1)입니다. 다음 attach부터 적용됩니다.",
-        sensitive: false,
-        apply_mode: ApplyMode::NextUse,
-    },
-    MetadataEntry {
-        path: "/remote/fastScrollSensitivity",
-        description: "원격 브라우저 터미널에서 Alt를 누른 채 휠을 굴릴 때의 스크롤 배율(0.1~20, 기본 5)입니다. 다음 attach부터 적용됩니다.",
-        sensitive: false,
-        apply_mode: ApplyMode::NextUse,
-    },
-    MetadataEntry {
-        path: "/remote/touchScrollSensitivity",
-        description: "원격 브라우저에서 손가락으로 끌어 스크롤할 때의 배율(0.1~20, 기본 1)입니다. 1이면 손가락과 내용이 1:1로 움직입니다. 다음 attach부터 적용됩니다.",
-        sensitive: false,
-        apply_mode: ApplyMode::NextUse,
-    },
-    MetadataEntry {
         path: "/remote/serveTerminalFont",
         description: "데스크톱 터미널 폰트 파일을 원격 브라우저로 전송할지 여부입니다. 폰트 바이너리를 네트워크로 내보내는 것은 재배포이므로 재배포가 허용된 폰트에만 켜세요(Consolas 등 OS 번들 독점 폰트는 허용되지 않습니다). 다음 attach부터 적용됩니다.",
         sensitive: false,
@@ -350,6 +351,24 @@ const ENTRIES: &[MetadataEntry] = &[
         description: "데스크톱에 배치한 위젯을 원격 클라이언트 상단 스트립에도 보여줄지 여부입니다. 배치·옵션은 settings.widgets 하나가 소유하며 이 값은 원격 표면의 표시 여부만 정합니다. 끄더라도 배치는 보존됩니다.",
         sensitive: false,
         apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
+        path: "/remote/attachmentMaxMib",
+        description: "Remote 클라이언트가 첨부할 수 있는 최대 파일 크기(MiB, 1~10)입니다. 첨부 요청 body 상한, Android E2E RPC envelope 상한, 첨부 캐시 quota(최대 크기의 64배)가 이 값에서 유도됩니다. Cloud relay를 거치는 요청은 relay payload 상한이 더 작으면 그 값으로 제한되고 Tailscale 직결을 안내합니다(실효 상한은 연결 시 page에 전달됩니다). 다음 첨부부터 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
+        path: "/remote/attachmentAllowAllExtensions",
+        description: "모든 파일 형식을 내용 검사 없이 Remote 첨부로 받을지 여부입니다. 끄면 signature가 확인되는 이미지·PDF·DOCX·PPTX, UTF-8 텍스트, attachmentExtraExtensions만 허용합니다. 다음 첨부부터 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
+        path: "/remote/attachmentExtraExtensions",
+        description: "기본 종류 외에 그대로 저장할 확장자 목록입니다(소문자, 점 없이, 영문·숫자 1~16자). 내용 검사 없이 해당 확장자로 저장합니다. 다음 첨부부터 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
     },
     MetadataEntry {
         path: "/remote/authToken",

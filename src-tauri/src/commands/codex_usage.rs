@@ -106,7 +106,7 @@ struct RawWindow {
 /// CODEX_HOME whose independent `auth.json` was created with `codex login`.
 /// A missing executable and an unauthenticated account are normal display
 /// states, not command errors.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_codex_usage_snapshot(config_dir: String) -> CodexUsageSnapshot {
     match read_rate_limits(&config_dir) {
         Ok(snapshot) => snapshot,

@@ -7,8 +7,9 @@ import path from "path";
  * the server embeds assets with `include_bytes!`, so the minified output has
  * to exist as a committed file.
  *
- * Sources and artifacts both live in `src-tauri/src/remote_server/assets/` —
- * `remote-app.{js,css}` are the hand-edited sources, `remote-app.min.{js,css}`
+ * The app/CSS sources and artifacts live in
+ * `src-tauri/src/remote_server/assets/`; the Lucide boundary lives beside the
+ * Remote entry in `ui/src/remote/remote-icons.js`. `remote-app.min.{js,css}`
  * are generated here. `scripts/stamp-remote-page.mjs` prepends the
  * generated-file banner with the source hashes afterwards (the minifier strips
  * banner comments), and `src/remote/remote-page-bundle.test.ts` fails when the

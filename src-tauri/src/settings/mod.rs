@@ -10,11 +10,29 @@ pub use validation::{SettingsLoadResult, ValidationWarning};
 
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use crate::lock_ext::MutexExt;
+use sha2::{Digest, Sha256};
 
 static MEMO_LOCK: Mutex<()> = Mutex::new(());
+
+/// Serializes every settings.json writer.
+///
+/// Writers are not all on one thread: the cloud pairing/tunnel tasks save from
+/// their own runtime threads, and `save_settings`/`reset_settings` now run on
+/// the Tauri sync threadpool instead of the main thread (ADR-0202). Two
+/// interleaved writers to the same path can leave a torn file, so the write
+/// itself is gated here rather than relying on the main thread to serialize it.
+///
+/// This is a leaf lock: nothing else is acquired while it is held, so it takes
+/// no place in the `AppState` lock order (api-contracts.md §14.3). Holding it
+/// across an `AppState` lock is what would break that — do not.
+static SETTINGS_WRITE_LOCK: Mutex<()> = Mutex::new(());
+/// Keeps the dedicated Composer mutation event in the same order as its disk writes.
+static COMPOSER_STAR_UPDATE_LOCK: Mutex<()> = Mutex::new(());
+static COMPOSER_STAR_REVISION: AtomicU64 = AtomicU64::new(0);
 
 fn lock_memo_gate(lock: &Mutex<()>) -> Result<std::sync::MutexGuard<'_, ()>, String> {
     Ok(lock.lock_or_err()?)
@@ -113,6 +131,7 @@ fn load_settings_validated_from(path: &std::path::Path) -> SettingsLoadResult {
             dropped,
             warnings,
             settings_path: path_str,
+            recovery_revision: recovery_revision(&raw_content),
         };
     }
 
@@ -263,19 +282,821 @@ fn save_memo_to(path: &PathBuf, key: &str, content: &str) -> Result<(), String> 
 }
 
 /// Save settings to disk.
+///
+/// The write is serialized against every other writer and lands through a
+/// temporary file, so a concurrent save cannot interleave bytes and a reader
+/// never observes a half-written settings.json (ADR-0202).
 pub fn save_settings(settings: &Settings) -> Result<(), String> {
-    let path = settings_path();
+    save_settings_to(&settings_path(), settings)
+}
+
+/// Commit a frontend-owned checkpoint without overwriting cloud identity that
+/// a backend worker may have refreshed after the WebView collected its snapshot.
+pub fn save_frontend_settings(settings: &Settings) -> Result<Settings, String> {
+    save_frontend_settings_to(&settings_path(), settings)
+}
+
+/// Atomically load the latest document, mutate only caller-owned fields, and
+/// replace it while holding the settings transaction gate.
+pub fn update_settings(
+    mutate: impl FnOnce(&mut Settings) -> Result<(), String>,
+) -> Result<Settings, String> {
+    update_settings_at(&settings_path(), mutate)
+}
+
+pub(crate) const COMPOSER_STARRED_ENTRIES_FULL_ERROR: &str = "Composer starred entry limit reached";
+pub(crate) const COMPOSER_STARRED_ENTRY_DUPLICATE_ERROR: &str =
+    "Composer starred entry already exists";
+pub(crate) const COMPOSER_STARRED_ENTRY_NOT_FOUND_ERROR: &str =
+    "Composer starred entry no longer exists";
+
+pub(crate) struct ComposerStarredSnapshot {
+    pub entries: Option<Vec<ComposerStarredEntry>>,
+    pub revision: u64,
+}
+
+pub(crate) fn composer_starred_snapshot(
+    known_revision: Option<u64>,
+) -> Result<ComposerStarredSnapshot, String> {
+    let _guard = COMPOSER_STAR_UPDATE_LOCK.lock_or_err()?;
+    let revision = COMPOSER_STAR_REVISION.load(Ordering::SeqCst);
+    let entries = if known_revision == Some(revision) {
+        None
+    } else {
+        Some(load_settings().terminal.composer_starred_entries)
+    };
+    Ok(ComposerStarredSnapshot { entries, revision })
+}
+
+pub fn update_composer_starred_entry(
+    value: &str,
+    starred: bool,
+    label: Option<&str>,
+    send: Option<bool>,
+    previous_value: Option<&str>,
+    committed: impl FnOnce(&[ComposerStarredEntry]),
+) -> Result<Vec<ComposerStarredEntry>, String> {
+    let snapshot = update_composer_starred_entry_snapshot(
+        value,
+        starred,
+        label,
+        send,
+        previous_value,
+        committed,
+    )?;
+    Ok(snapshot.entries.unwrap_or_default())
+}
+
+pub(crate) fn update_composer_starred_entry_snapshot(
+    value: &str,
+    starred: bool,
+    label: Option<&str>,
+    send: Option<bool>,
+    previous_value: Option<&str>,
+    committed: impl FnOnce(&[ComposerStarredEntry]),
+) -> Result<ComposerStarredSnapshot, String> {
+    let _guard = COMPOSER_STAR_UPDATE_LOCK.lock_or_err()?;
+    let (entries, changed) = update_composer_starred_entry_at_with_change(
+        &settings_path(),
+        value,
+        starred,
+        label,
+        send,
+        previous_value,
+    )?;
+    let revision = if changed {
+        COMPOSER_STAR_REVISION.fetch_add(1, Ordering::SeqCst) + 1
+    } else {
+        COMPOSER_STAR_REVISION.load(Ordering::SeqCst)
+    };
+    committed(&entries);
+    Ok(ComposerStarredSnapshot {
+        entries: Some(entries),
+        revision,
+    })
+}
+
+#[cfg(test)]
+fn update_composer_starred_entry_at(
+    path: &std::path::Path,
+    value: &str,
+    starred: bool,
+    label: Option<&str>,
+    send: Option<bool>,
+    previous_value: Option<&str>,
+) -> Result<Vec<ComposerStarredEntry>, String> {
+    Ok(update_composer_starred_entry_at_with_change(
+        path,
+        value,
+        starred,
+        label,
+        send,
+        previous_value,
+    )?
+    .0)
+}
+
+fn update_composer_starred_entry_at_with_change(
+    path: &std::path::Path,
+    value: &str,
+    starred: bool,
+    label: Option<&str>,
+    send: Option<bool>,
+    previous_value: Option<&str>,
+) -> Result<(Vec<ComposerStarredEntry>, bool), String> {
+    let mut changed = false;
+    let settings = update_settings_at(path, |settings| {
+        changed = mutate_composer_starred_entries(
+            &mut settings.terminal.composer_starred_entries,
+            value,
+            starred,
+            label,
+            send,
+            previous_value,
+        )?;
+        Ok(())
+    })?;
+    Ok((settings.terminal.composer_starred_entries, changed))
+}
+
+pub(crate) fn validate_composer_starred_entry(value: &str) -> Result<(), String> {
+    if value.is_empty() {
+        return Err("Composer starred entry cannot be empty".into());
+    }
+    if value.len() > crate::constants::COMPOSER_STARRED_ENTRY_MAX_BYTES {
+        return Err("Composer starred entry is too large".into());
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_composer_starred_label(label: &str) -> Result<(), String> {
+    if label.len() > crate::constants::COMPOSER_STARRED_ENTRY_LABEL_MAX_BYTES {
+        return Err("Composer starred entry label is too large".into());
+    }
+    Ok(())
+}
+
+fn mutate_composer_starred_entries(
+    entries: &mut Vec<ComposerStarredEntry>,
+    value: &str,
+    starred: bool,
+    label: Option<&str>,
+    send: Option<bool>,
+    previous_value: Option<&str>,
+) -> Result<bool, String> {
+    if !starred {
+        let remove_value = previous_value
+            .filter(|text| !text.is_empty())
+            .unwrap_or(value);
+        let previous_len = entries.len();
+        entries.retain(|entry| entry.value != remove_value);
+        return Ok(entries.len() != previous_len);
+    }
+
+    validate_composer_starred_entry(value)?;
+    if let Some(label) = label {
+        validate_composer_starred_label(label)?;
+    }
+
+    let previous_identity = previous_value.filter(|text| !text.is_empty());
+    let identity = previous_identity.unwrap_or(value);
+    if let Some(index) = entries.iter().position(|entry| entry.value == identity) {
+        if value != identity && entries.iter().any(|entry| entry.value == value) {
+            return Err(COMPOSER_STARRED_ENTRY_DUPLICATE_ERROR.into());
+        }
+        return Ok(apply_composer_starred_metadata(
+            &mut entries[index],
+            value,
+            label,
+            send,
+        ));
+    }
+    if let Some(index) = entries.iter().position(|entry| entry.value == value) {
+        if previous_identity.is_some() {
+            return Err(COMPOSER_STARRED_ENTRY_DUPLICATE_ERROR.into());
+        }
+        return Ok(apply_composer_starred_metadata(
+            &mut entries[index],
+            value,
+            label,
+            send,
+        ));
+    }
+    if previous_identity.is_some() {
+        return Err(COMPOSER_STARRED_ENTRY_NOT_FOUND_ERROR.into());
+    }
+    if entries.len() >= crate::constants::COMPOSER_STARRED_ENTRIES_MAX {
+        return Err(COMPOSER_STARRED_ENTRIES_FULL_ERROR.into());
+    }
+    entries.push(ComposerStarredEntry {
+        value: value.to_string(),
+        label: label.unwrap_or("").to_string(),
+        send: send.unwrap_or(false),
+    });
+    Ok(true)
+}
+
+fn apply_composer_starred_metadata(
+    entry: &mut ComposerStarredEntry,
+    value: &str,
+    label: Option<&str>,
+    send: Option<bool>,
+) -> bool {
+    let mut changed = false;
+    if entry.value != value {
+        entry.value = value.to_string();
+        changed = true;
+    }
+    if let Some(label) = label {
+        if entry.label != label {
+            entry.label = label.to_string();
+            changed = true;
+        }
+    }
+    if let Some(send) = send {
+        if entry.send != send {
+            entry.send = send;
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// Commit the leniently recovered document only after the user has reviewed
+/// the dropped paths. Background writers cannot implicitly acknowledge loss.
+pub fn acknowledge_settings_recovery(expected_recovery_revision: &str) -> Result<Settings, String> {
+    acknowledge_settings_recovery_at(&settings_path(), expected_recovery_revision)
+}
+
+fn recovery_revision(raw_content: &str) -> String {
+    Sha256::digest(raw_content.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn unacknowledged_recovery_error() -> String {
+    "Refusing to overwrite recovered settings before recovery is acknowledged".into()
+}
+
+fn update_settings_at(
+    path: &std::path::Path,
+    mutate: impl FnOnce(&mut Settings) -> Result<(), String>,
+) -> Result<Settings, String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {e}"))?;
     }
+    let _guard = SETTINGS_WRITE_LOCK.lock_or_err()?;
+    let mut settings = if path.exists() {
+        match load_settings_validated_from(path) {
+            SettingsLoadResult::Ok { settings, .. }
+            | SettingsLoadResult::Repaired { settings, .. } => settings,
+            SettingsLoadResult::Recovered { .. } => {
+                return Err(unacknowledged_recovery_error());
+            }
+            SettingsLoadResult::ParseError { error, .. } => {
+                return Err(format!(
+                    "Refusing to overwrite an unparseable settings file: {error}"
+                ));
+            }
+        }
+    } else {
+        Settings::default()
+    };
+    mutate(&mut settings)?;
+    let json =
+        serde_json::to_string_pretty(&settings).map_err(|e| format!("Serialize error: {e}"))?;
+    write_file_atomically(path, json.as_bytes())?;
+    Ok(settings)
+}
+
+fn save_frontend_settings_to(
+    path: &std::path::Path,
+    settings: &Settings,
+) -> Result<Settings, String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {e}"))?;
+    }
+    let _guard = SETTINGS_WRITE_LOCK.lock_or_err()?;
+    let mut candidate = settings.clone();
+    if path.exists() {
+        match load_settings_validated_from(path) {
+            SettingsLoadResult::Ok {
+                settings: latest, ..
+            }
+            | SettingsLoadResult::Repaired {
+                settings: latest, ..
+            } => {
+                candidate.remote.cloud_enabled = latest.remote.cloud_enabled;
+                candidate
+                    .remote
+                    .cloud_instance_id
+                    .clone_from(&latest.remote.cloud_instance_id);
+                candidate
+                    .remote
+                    .cloud_tunnel_url
+                    .clone_from(&latest.remote.cloud_tunnel_url);
+                candidate
+                    .remote
+                    .cloud_server_base_url
+                    .clone_from(&latest.remote.cloud_server_base_url);
+                candidate
+                    .terminal
+                    .composer_starred_entries
+                    .clone_from(&latest.terminal.composer_starred_entries);
+            }
+            SettingsLoadResult::Recovered { .. } => {
+                return Err(unacknowledged_recovery_error());
+            }
+            SettingsLoadResult::ParseError { error, .. } => {
+                return Err(format!(
+                    "Refusing to overwrite an unparseable settings file: {error}"
+                ));
+            }
+        }
+    }
+    let json =
+        serde_json::to_string_pretty(&candidate).map_err(|e| format!("Serialize error: {e}"))?;
+    write_file_atomically(path, json.as_bytes())?;
+    Ok(candidate)
+}
+
+fn acknowledge_settings_recovery_at(
+    path: &std::path::Path,
+    expected_recovery_revision: &str,
+) -> Result<Settings, String> {
+    let _guard = SETTINGS_WRITE_LOCK.lock_or_err()?;
+    match load_settings_validated_from(path) {
+        SettingsLoadResult::Recovered {
+            settings,
+            recovery_revision,
+            ..
+        } => {
+            if recovery_revision != expected_recovery_revision {
+                return Err(
+                    "Settings recovery changed; review the latest dropped paths before acknowledging"
+                        .into(),
+                );
+            }
+            let json = serde_json::to_string_pretty(&settings)
+                .map_err(|error| format!("Serialize error: {error}"))?;
+            write_file_atomically(path, json.as_bytes())?;
+            Ok(settings)
+        }
+        SettingsLoadResult::Ok { settings, .. } | SettingsLoadResult::Repaired { settings, .. } => {
+            Ok(settings)
+        }
+        SettingsLoadResult::ParseError { error, .. } => Err(format!(
+            "Refusing to acknowledge an unparseable settings file: {error}"
+        )),
+    }
+}
+
+/// `save_settings` against an explicit path, so the write contract is testable
+/// without reaching for the real config directory.
+pub(crate) fn save_settings_to(path: &std::path::Path, settings: &Settings) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {e}"))?;
+    }
+    let _guard = SETTINGS_WRITE_LOCK.lock_or_err()?;
     let json =
         serde_json::to_string_pretty(settings).map_err(|e| format!("Serialize error: {e}"))?;
-    fs::write(&path, json).map_err(|e| format!("Write error: {e}"))
+    write_file_atomically(path, json.as_bytes())
+}
+
+/// Write `bytes` to `path` by way of a sibling temporary file.
+///
+/// `fs::rename` replaces an existing destination on both Windows (MoveFileEx
+/// with MOVEFILE_REPLACE_EXISTING) and POSIX, so the destination is either the
+/// old file or the new one — never a truncated prefix of the new one.
+fn write_file_atomically(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, bytes).map_err(|e| format!("Write error: {e}"))?;
+    match fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = fs::remove_file(&tmp);
+            Err(format!("Write error: {e}"))
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── settings.json 쓰기 (ADR-0202) ──
+
+    /// `save_settings` no longer runs only on the main thread, so the write has
+    /// to survive concurrent writers on its own: whole content, no debris.
+    #[test]
+    fn saving_settings_replaces_the_file_without_leaving_a_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, "stale contents that are longer than the new file").unwrap();
+
+        let settings = Settings::default();
+        save_settings_to(&path, &settings).unwrap();
+
+        let written = std::fs::read_to_string(&path).unwrap();
+        serde_json::from_str::<serde_json::Value>(&written).expect("a whole JSON document");
+        assert!(!path.with_extension("json.tmp").exists());
+    }
+
+    #[test]
+    fn frontend_checkpoint_preserves_backend_owned_cloud_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let mut latest = Settings::default();
+        latest.remote.cloud_enabled = true;
+        latest.remote.cloud_instance_id = Some("new-instance".into());
+        latest.remote.cloud_tunnel_url = Some("wss://new.example.test".into());
+        latest.remote.cloud_server_base_url = Some("https://new.example.test".into());
+        save_settings_to(&path, &latest).unwrap();
+
+        let mut stale_frontend = latest.clone();
+        stale_frontend.remote.cloud_enabled = false;
+        stale_frontend.remote.cloud_instance_id = Some("old-instance".into());
+        stale_frontend.remote.cloud_tunnel_url = None;
+        stale_frontend.remote.cloud_server_base_url = None;
+        stale_frontend.workspaces[0].name = "new workspace checkpoint".into();
+        save_frontend_settings_to(&path, &stale_frontend).unwrap();
+
+        let saved = match load_settings_validated_from(&path) {
+            SettingsLoadResult::Ok { settings, .. }
+            | SettingsLoadResult::Repaired { settings, .. }
+            | SettingsLoadResult::Recovered { settings, .. } => settings,
+            SettingsLoadResult::ParseError { error, .. } => panic!("{error}"),
+        };
+        assert!(saved.remote.cloud_enabled);
+        assert_eq!(
+            saved.remote.cloud_instance_id.as_deref(),
+            Some("new-instance")
+        );
+        assert_eq!(saved.workspaces[0].name, "new workspace checkpoint");
+    }
+
+    #[test]
+    fn composer_stars_are_atomic_and_a_stale_frontend_checkpoint_cannot_revert_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let mut stale_frontend = Settings::default();
+        stale_frontend.workspaces[0].name = "new workspace checkpoint".into();
+        save_settings_to(&path, &stale_frontend).unwrap();
+
+        let entries =
+            update_composer_starred_entry_at(&path, "git status", true, None, None, None).unwrap();
+        assert_eq!(entries, [ComposerStarredEntry::from_value("git status")]);
+
+        save_frontend_settings_to(&path, &stale_frontend).unwrap();
+        let saved = match load_settings_validated_from(&path) {
+            SettingsLoadResult::Ok { settings, .. }
+            | SettingsLoadResult::Repaired { settings, .. }
+            | SettingsLoadResult::Recovered { settings, .. } => settings,
+            SettingsLoadResult::ParseError { error, .. } => panic!("{error}"),
+        };
+        assert_eq!(
+            saved.terminal.composer_starred_entries,
+            [ComposerStarredEntry::from_value("git status")]
+        );
+        assert_eq!(saved.workspaces[0].name, "new workspace checkpoint");
+
+        let entries =
+            update_composer_starred_entry_at(&path, "git status", false, None, None, None).unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn composer_star_validation_rejects_blank_oversized_and_over_capacity_entries() {
+        let mut entries = Vec::new();
+        assert!(mutate_composer_starred_entries(&mut entries, "", true, None, None, None).is_err());
+        assert!(mutate_composer_starred_entries(
+            &mut entries,
+            &"x".repeat(crate::constants::COMPOSER_STARRED_ENTRY_MAX_BYTES + 1),
+            true,
+            None,
+            None,
+            None,
+        )
+        .is_err());
+
+        entries.extend(
+            (0..crate::constants::COMPOSER_STARRED_ENTRIES_MAX)
+                .map(|index| ComposerStarredEntry::from_value(format!("cmd-{index}"))),
+        );
+        assert!(mutate_composer_starred_entries(
+            &mut entries,
+            "one-too-many",
+            true,
+            None,
+            None,
+            None
+        )
+        .is_err());
+        assert_eq!(
+            entries.len(),
+            crate::constants::COMPOSER_STARRED_ENTRIES_MAX
+        );
+
+        let oversized = "x".repeat(crate::constants::COMPOSER_STARRED_ENTRY_MAX_BYTES + 1);
+        let mut invalid_entries = vec![
+            ComposerStarredEntry::from_value(""),
+            ComposerStarredEntry::from_value(oversized.clone()),
+        ];
+        assert!(
+            mutate_composer_starred_entries(&mut invalid_entries, "", false, None, None, None)
+                .is_ok()
+        );
+        assert!(mutate_composer_starred_entries(
+            &mut invalid_entries,
+            &oversized,
+            false,
+            None,
+            None,
+            None
+        )
+        .is_ok());
+        assert!(invalid_entries.is_empty());
+    }
+
+    #[test]
+    fn composer_star_objects_accept_legacy_strings_and_update_label_send_in_place() {
+        let parsed: Vec<ComposerStarredEntry> =
+            serde_json::from_str(r#"["git status",{"value":"git push","label":"gp","send":true}]"#)
+                .unwrap();
+        assert_eq!(
+            parsed,
+            [
+                ComposerStarredEntry::from_value("git status"),
+                ComposerStarredEntry {
+                    value: "git push".into(),
+                    label: "gp".into(),
+                    send: true,
+                }
+            ]
+        );
+        assert_eq!(
+            serde_json::to_value(&parsed[0]).unwrap(),
+            serde_json::json!({ "value": "git status", "label": "", "send": false })
+        );
+
+        let mut entries = vec![ComposerStarredEntry::from_value("git status")];
+        assert!(mutate_composer_starred_entries(
+            &mut entries,
+            "git pull",
+            true,
+            Some("gpl"),
+            Some(true),
+            Some("git status"),
+        )
+        .unwrap());
+        assert_eq!(
+            entries,
+            [ComposerStarredEntry {
+                value: "git pull".into(),
+                label: "gpl".into(),
+                send: true,
+            }]
+        );
+
+        let oversized_label =
+            "x".repeat(crate::constants::COMPOSER_STARRED_ENTRY_LABEL_MAX_BYTES + 1);
+        assert!(mutate_composer_starred_entries(
+            &mut entries,
+            "git pull",
+            true,
+            Some(oversized_label.as_str()),
+            None,
+            None,
+        )
+        .is_err());
+
+        entries.push(ComposerStarredEntry::from_value("git push"));
+        assert_eq!(
+            mutate_composer_starred_entries(
+                &mut entries,
+                "git push",
+                true,
+                None,
+                None,
+                Some("git pull"),
+            )
+            .unwrap_err(),
+            COMPOSER_STARRED_ENTRY_DUPLICATE_ERROR
+        );
+
+        entries.remove(0);
+        assert_eq!(
+            mutate_composer_starred_entries(
+                &mut entries,
+                "git push",
+                true,
+                Some("overwritten"),
+                None,
+                Some("git pull"),
+            )
+            .unwrap_err(),
+            COMPOSER_STARRED_ENTRY_DUPLICATE_ERROR
+        );
+        assert_eq!(entries[0].label, "");
+
+        entries.clear();
+        assert_eq!(
+            mutate_composer_starred_entries(
+                &mut entries,
+                "git push",
+                true,
+                Some("gp"),
+                Some(true),
+                Some("git pull"),
+            )
+            .unwrap_err(),
+            COMPOSER_STARRED_ENTRY_NOT_FOUND_ERROR
+        );
+        assert!(entries.is_empty());
+
+        entries.extend([
+            ComposerStarredEntry::from_value("git pull"),
+            ComposerStarredEntry::from_value("git push"),
+        ]);
+        assert!(mutate_composer_starred_entries(
+            &mut entries,
+            "git push",
+            false,
+            None,
+            None,
+            Some("git pull"),
+        )
+        .unwrap());
+        assert_eq!(entries, [ComposerStarredEntry::from_value("git push")]);
+    }
+
+    #[test]
+    fn composer_stars_are_sensitive_and_read_only_to_generic_settings_patches() {
+        let metadata = contract::metadata_for_path("/terminal/composerStarredEntries");
+        assert!(!metadata.writable);
+        assert!(metadata.sensitive);
+    }
+
+    #[test]
+    fn composer_star_snapshot_omits_an_unchanged_list() {
+        let revision = COMPOSER_STAR_REVISION.load(Ordering::SeqCst);
+        let snapshot = composer_starred_snapshot(Some(revision)).unwrap();
+        assert_eq!(snapshot.revision, revision);
+        assert!(snapshot.entries.is_none());
+    }
+
+    #[test]
+    fn path_owned_backend_update_preserves_the_latest_session_checkpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let mut checkpoint = Settings::default();
+        checkpoint.workspaces[0].name = "latest session checkpoint".into();
+        save_settings_to(&path, &checkpoint).unwrap();
+
+        let updated = update_settings_at(&path, |settings| {
+            settings.remote.cloud_enabled = true;
+            settings.remote.cloud_instance_id = Some("instance-2".into());
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(updated.workspaces[0].name, "latest session checkpoint");
+        assert_eq!(
+            updated.remote.cloud_instance_id.as_deref(),
+            Some("instance-2")
+        );
+    }
+
+    #[test]
+    fn backend_update_refuses_unacknowledged_recovered_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let original = r#"{
+          "language": "en",
+          "terminal": { "parserAdmission": { "hiddenShare": "invalid" } }
+        }"#;
+        std::fs::write(&path, original).unwrap();
+
+        let error = update_settings_at(&path, |settings| {
+            settings.remote.cloud_enabled = true;
+            Ok(())
+        })
+        .unwrap_err();
+
+        assert!(error.contains("recovery is acknowledged"), "{error}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+
+        let frontend_error = save_frontend_settings_to(&path, &Settings::default()).unwrap_err();
+        assert!(
+            frontend_error.contains("recovery is acknowledged"),
+            "{frontend_error}"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+    }
+
+    #[test]
+    fn recovery_acknowledgement_is_the_only_non_reset_path_that_unlocks_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(
+            &path,
+            r#"{
+              "language": "en",
+              "terminal": { "parserAdmission": { "hiddenShare": "invalid" } }
+            }"#,
+        )
+        .unwrap();
+
+        let recovery_revision = match load_settings_validated_from(&path) {
+            SettingsLoadResult::Recovered {
+                recovery_revision, ..
+            } => recovery_revision,
+            result => panic!("expected recovered settings, got {result:?}"),
+        };
+        let acknowledged = acknowledge_settings_recovery_at(&path, &recovery_revision).unwrap();
+        assert_eq!(acknowledged.language, "en");
+        assert!(matches!(
+            load_settings_validated_from(&path),
+            SettingsLoadResult::Ok { .. } | SettingsLoadResult::Repaired { .. }
+        ));
+
+        let updated = update_settings_at(&path, |settings| {
+            settings.remote.cloud_enabled = true;
+            Ok(())
+        })
+        .unwrap();
+        assert!(updated.remote.cloud_enabled);
+    }
+
+    #[test]
+    fn recovery_acknowledgement_rejects_unreviewed_new_dropped_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, r#"{ "language": 42, "defaultProfile": "WSL" }"#).unwrap();
+        let original_revision = match load_settings_validated_from(&path) {
+            SettingsLoadResult::Recovered {
+                recovery_revision, ..
+            } => recovery_revision,
+            result => panic!("expected recovered settings, got {result:?}"),
+        };
+
+        let manually_edited = r#"{
+          "language": "en",
+          "terminal": { "parserAdmission": { "hiddenShare": "invalid" } }
+        }"#;
+        fs::write(&path, manually_edited).unwrap();
+        let error = acknowledge_settings_recovery_at(&path, &original_revision).unwrap_err();
+
+        assert!(error.contains("review the latest dropped paths"), "{error}");
+        assert_eq!(fs::read_to_string(&path).unwrap(), manually_edited);
+        let latest = load_settings_validated_from(&path);
+        let SettingsLoadResult::Recovered {
+            dropped,
+            recovery_revision,
+            ..
+        } = latest
+        else {
+            panic!("expected latest recovered settings, got {latest:?}");
+        };
+        assert_eq!(dropped.len(), 1);
+        assert_eq!(dropped[0].path, "terminal.parserAdmission.hiddenShare");
+        acknowledge_settings_recovery_at(&path, &recovery_revision).unwrap();
+    }
+
+    /// Two writers racing on one path may not interleave into a torn document —
+    /// every observer sees one save or the other, never a prefix of both.
+    #[test]
+    fn concurrent_saves_never_leave_a_torn_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+
+        let small = Settings {
+            language: "ko".into(),
+            ..Settings::default()
+        };
+        let defaults = Settings::default();
+        let large = Settings {
+            language: "en".into(),
+            profiles: std::iter::repeat_with(|| defaults.profiles[0].clone())
+                .take(200)
+                .collect(),
+            ..defaults.clone()
+        };
+
+        std::thread::scope(|scope| {
+            for settings in [&small, &large] {
+                scope.spawn(|| {
+                    for _ in 0..20 {
+                        save_settings_to(&path, settings).unwrap();
+                        let read = std::fs::read_to_string(&path).unwrap();
+                        serde_json::from_str::<serde_json::Value>(&read)
+                            .expect("a whole JSON document");
+                    }
+                });
+            }
+        });
+    }
 
     #[test]
     fn memo_serialization_gate_fails_closed_after_poison() {
@@ -287,6 +1108,38 @@ mod tests {
         .is_err());
 
         assert!(lock_memo_gate(&gate).is_err());
+    }
+
+    // ── 업데이트 채널 (ADR-0190) ──
+
+    #[test]
+    fn unknown_update_channel_loads_without_recovery_and_resolves_to_stable() {
+        // The channel is a String, not an enum, so a hand-edited value does not
+        // drop the whole settings tree into partial recovery. The runtime folds
+        // it to stable instead (ADR-0190).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            r#"{
+              "language": "en",
+              "defaultProfile": "WSL",
+              "update": { "channel": "nightly" }
+            }"#,
+        )
+        .unwrap();
+
+        let result = load_settings_validated_from(&path);
+        let settings = match &result {
+            SettingsLoadResult::Ok { settings, .. } => settings,
+            SettingsLoadResult::Repaired { settings, .. } => settings,
+            other => panic!("expected Ok or Repaired, got {other:?}"),
+        };
+        assert_eq!(settings.update.channel, "nightly");
+        assert_eq!(
+            crate::app_update::UpdateChannel::from_settings_value(&settings.update.channel),
+            crate::app_update::UpdateChannel::Stable
+        );
     }
 
     // ── 타입 오류 부분 복구 (issue #701, ADR-0119) ──
@@ -311,6 +1164,7 @@ mod tests {
             dropped,
             warnings,
             settings_path,
+            recovery_revision,
         } = result
         else {
             panic!("expected Recovered, got {result:?}");
@@ -325,6 +1179,7 @@ mod tests {
             Settings::default().terminal.parser_admission.hidden_share
         );
         assert_eq!(settings_path, path.display().to_string());
+        assert_eq!(recovery_revision.len(), 64);
 
         // Exactly one value was lost. Structural repairs (this file has no
         // workspaces, so the loader synthesizes one) stay out of that count.
@@ -415,7 +1270,6 @@ mod tests {
             legacy.remote.cloud_access_mode,
             models::CloudAccessMode::BrowserAndE2e
         );
-
         let json = r#"{
           "remote": {
             "enabled": true,
@@ -537,6 +1391,7 @@ mod tests {
           "codex": {
             "restoreSession": false,
             "sessionMaxAgeHours": 72,
+            "transcriptScrollEnabled": false,
             "statusMessageMode": "title-bullet",
             "statusMessageDelimiter": " | "
           }
@@ -548,12 +1403,14 @@ mod tests {
         );
         assert!(!settings.codex.restore_session);
         assert_eq!(settings.codex.session_max_age_hours, 72);
+        assert!(!settings.codex.transcript_scroll_enabled);
         assert_eq!(settings.codex.status_message_delimiter, " | ");
 
         let serialized = serde_json::to_string(&settings).unwrap();
         assert!(serialized.contains("\"codex\""));
         assert!(serialized.contains("\"restoreSession\":false"));
         assert!(serialized.contains("\"sessionMaxAgeHours\":72"));
+        assert!(serialized.contains("\"transcriptScrollEnabled\":false"));
         assert!(serialized.contains("\"statusMessageMode\":\"title-bullet\""));
     }
 
@@ -562,6 +1419,7 @@ mod tests {
         let settings: Settings = serde_json::from_str(r#"{ "codex": {} }"#).unwrap();
         assert!(settings.codex.restore_session);
         assert_eq!(settings.codex.session_max_age_hours, 24);
+        assert!(settings.codex.transcript_scroll_enabled);
     }
 
     #[test]
@@ -577,6 +1435,10 @@ mod tests {
         assert_eq!(
             contract::metadata_for_path("/codex/sessionMaxAgeHours").apply_mode,
             contract::ApplyMode::NextUse
+        );
+        assert_eq!(
+            contract::metadata_for_path("/codex/transcriptScrollEnabled").apply_mode,
+            contract::ApplyMode::Live
         );
     }
 
@@ -696,6 +1558,49 @@ mod tests {
         // Round-trip the serialized form back to ensure the field is not dropped.
         let reparsed: Settings = serde_json::from_str(&serialized).unwrap();
         assert_eq!(reparsed.workspace_selector.hidden_auto_close_seconds, 600);
+    }
+
+    #[test]
+    fn workspace_selector_last_input_mode_defaults_to_per_pane() {
+        let settings: Settings = serde_json::from_str(r#"{ "workspaceSelector": {} }"#).unwrap();
+        assert_eq!(settings.workspace_selector.last_input_mode, "perPane");
+    }
+
+    #[test]
+    fn workspace_selector_last_input_mode_round_trip() {
+        let json = r#"{
+          "workspaceSelector": {
+            "lastInputMode": "workspaceLatest"
+          }
+        }"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            settings.workspace_selector.last_input_mode,
+            "workspaceLatest"
+        );
+
+        let serialized = serde_json::to_string(&settings).unwrap();
+        assert!(serialized.contains("\"lastInputMode\":\"workspaceLatest\""));
+    }
+
+    #[test]
+    fn workspace_selector_destructive_confirmation_defaults_on() {
+        let settings: Settings = serde_json::from_str(r#"{ "workspaceSelector": {} }"#).unwrap();
+        assert!(settings.workspace_selector.confirm_destructive_actions);
+    }
+
+    #[test]
+    fn workspace_selector_destructive_confirmation_round_trip() {
+        let json = r#"{
+          "workspaceSelector": {
+            "confirmDestructiveActions": false
+          }
+        }"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert!(!settings.workspace_selector.confirm_destructive_actions);
+
+        let serialized = serde_json::to_string(&settings).unwrap();
+        assert!(serialized.contains("\"confirmDestructiveActions\":false"));
     }
 
     #[test]

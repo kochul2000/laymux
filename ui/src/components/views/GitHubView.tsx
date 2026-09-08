@@ -8,6 +8,13 @@ import { useGithubRepoSnapshot } from "@/hooks/useGithubRepoSnapshot";
 import { useNowTick } from "@/hooks/useUsageSnapshot";
 import { relativeTime, shouldOpenUpward, statusMessage } from "@/lib/github-list-format";
 import {
+  CheckIcon,
+  CopyIcon,
+  EllipsisIcon,
+  GitBranchIcon,
+  RefreshIcon,
+} from "@/components/ui/icons";
+import {
   clipboardWriteText,
   openExternal,
   runGithubItemAction,
@@ -307,7 +314,7 @@ export function GitHubView({
             style={{ ...ROW_BTN, opacity: loading ? 0.5 : 1 }}
             className="hover-bg shrink-0"
           >
-            ⟳
+            <RefreshIcon size={12} />
           </button>
         </div>
       </ViewHeader>
@@ -438,7 +445,11 @@ export function GitHubView({
                 }}
                 className="hover-bg shrink-0"
               >
-                {isCopied(copied, item.number, "branch") ? "✓" : "⎇"}
+                {isCopied(copied, item.number, "branch") ? (
+                  <CheckIcon size={12} />
+                ) : (
+                  <GitBranchIcon size={12} />
+                )}
               </button>
             )}
             {/* Copy link stays visible at all times (issue #708) — it is the
@@ -458,7 +469,11 @@ export function GitHubView({
               }}
               className="hover-bg shrink-0"
             >
-              {isCopied(copied, item.number, "link") ? "✓" : "⧉"}
+              {isCopied(copied, item.number, "link") ? (
+                <CheckIcon size={12} />
+              ) : (
+                <CopyIcon size={12} />
+              )}
             </button>
             <div className="relative shrink-0">
               <button
@@ -482,7 +497,7 @@ export function GitHubView({
                 style={ROW_BTN}
                 className="hover-bg"
               >
-                ⋯
+                <EllipsisIcon size={12} />
               </button>
               {openMenu === item.number && (
                 <div

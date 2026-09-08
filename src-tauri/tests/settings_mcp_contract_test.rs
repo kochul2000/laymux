@@ -136,7 +136,11 @@ fn semantic_enum_and_range_errors_are_rejected() {
         &Settings::default(),
         &json!({
             "language": "xx",
-            "terminal": { "scrollbarStyle": "floating", "composerHistoryScope": "everything" },
+            "terminal": {
+                "composerHistoryScope": "everything",
+                "urlLinkActivation": "sheet",
+                "pathLinkActivation": "double-click"
+            },
             "profileDefaults": { "opacity": 9, "font": { "size": 100 } }
         }),
     );
@@ -144,10 +148,13 @@ fn semantic_enum_and_range_errors_are_rejected() {
     assert!(!prepared.valid);
     for path in [
         "/language",
-        "/terminal/scrollbarStyle",
         // ADR-0055: an unknown sharing scope must be rejected, not silently
         // widened to a shared bucket.
         "/terminal/composerHistoryScope",
+        // ADR-0224: 링크 실행 게이트는 두 값만 있다. 알 수 없는 모드를 조용히
+        // "immediate" 로 흡수하면 사용자는 칩을 켠 줄 알고 계속 즉발을 겪는다.
+        "/terminal/urlLinkActivation",
+        "/terminal/pathLinkActivation",
         "/profileDefaults/opacity",
         "/profileDefaults/font/size",
     ] {
@@ -172,6 +179,22 @@ fn the_old_sleep_prevention_mode_is_no_longer_a_setting() {
         .errors
         .iter()
         .any(|issue| issue.path == "/power/sleepPrevention"));
+}
+
+#[test]
+fn the_old_scrollbar_style_is_no_longer_a_setting() {
+    // ADR-0217 fixes the terminal scrollbar geometry. An agent still sending
+    // the removed mode selector must receive an unknown-path error.
+    let prepared = prepare_settings_update(
+        &Settings::default(),
+        &json!({ "terminal": { "scrollbarStyle": "separate" } }),
+    );
+
+    assert!(!prepared.valid);
+    assert!(prepared
+        .errors
+        .iter()
+        .any(|issue| issue.path == "/terminal/scrollbarStyle"));
 }
 
 #[test]
@@ -272,66 +295,29 @@ fn changing_a_preexisting_invalid_value_to_another_invalid_value_is_rejected() {
 }
 
 #[test]
-fn remote_snapshot_max_kib_outside_range_is_rejected() {
-    let too_small = prepare_settings_update(
-        &Settings::default(),
-        &json!({ "remote": { "snapshotMaxKib": 0 } }),
-    );
-    assert!(!too_small.valid);
-    assert!(too_small
-        .errors
-        .iter()
-        .any(|issue| issue.path == "/remote/snapshotMaxKib"));
-
-    let too_large = prepare_settings_update(
-        &Settings::default(),
-        &json!({ "remote": { "snapshotMaxKib": 2048 } }),
-    );
-    assert!(!too_large.valid);
-    assert!(too_large
-        .errors
-        .iter()
-        .any(|issue| issue.path == "/remote/snapshotMaxKib"));
-
-    let in_range = prepare_settings_update(
-        &Settings::default(),
-        &json!({ "remote": { "snapshotMaxKib": 64 } }),
-    );
-    assert!(in_range.valid, "errors: {:?}", in_range.errors);
-}
-
-#[test]
-fn remote_snapshot_max_kib_defaults_to_four() {
-    assert_eq!(Settings::default().remote.snapshot_max_kib, 4);
-}
-
-#[test]
-fn remote_display_font_sizes_default_and_validate_as_pc_owned_settings() {
-    let defaults = Settings::default();
-    assert_eq!(defaults.remote.terminal_font_size, 14);
-    assert_eq!(defaults.remote.composer_font_size, 16);
-
-    let valid = prepare_settings_update(
-        &defaults,
-        &json!({ "remote": { "terminalFontSize": 18, "composerFontSize": 20 } }),
-    );
-    assert!(valid.valid, "errors: {:?}", valid.errors);
-    let candidate = valid.candidate.unwrap();
-    assert_eq!(candidate.remote.terminal_font_size, 18);
-    assert_eq!(candidate.remote.composer_font_size, 20);
-
-    for (field, value) in [
-        ("terminalFontSize", 5),
-        ("terminalFontSize", 73),
-        ("composerFontSize", 5),
-        ("composerFontSize", 73),
+fn device_local_remote_display_fields_are_not_pc_settings() {
+    for field in [
+        "snapshotMaxKib",
+        "terminalFontSize",
+        "composerFontSize",
+        "menuFontSize",
+        "composerIdleOpacity",
+        "composerFocusedOpacity",
+        "composerActiveOpacity",
+        "scrollSensitivity",
+        "fastScrollSensitivity",
+        "touchScrollSensitivity",
+        "twoFingerScrollSensitivity",
     ] {
         let mut patch = json!({ "remote": {} });
-        patch["remote"][field] = json!(value);
+        patch["remote"][field] = json!(1);
         let prepared = prepare_settings_update(&Settings::default(), &patch);
-        assert!(!prepared.valid, "{field}={value} must be rejected");
+        assert!(
+            !prepared.valid,
+            "{field} must not be accepted as a PC setting"
+        );
         assert!(prepared.errors.iter().any(|issue| {
-            issue.code == "out_of_range" && issue.path == format!("/remote/{field}")
+            issue.code == "unknown_key" && issue.path == format!("/remote/{field}")
         }));
     }
 }
@@ -727,6 +713,42 @@ fn rust_settings_model_preserves_frontend_owned_fields() {
     assert_eq!(serialized["terminal"]["pathLinkMaxLength"], 1024);
     assert_eq!(serialized["terminal"]["pathLinkOsOpenConfirm"], false);
     assert_eq!(serialized["terminal"]["pathLinkOsOpenEnabled"], true);
+}
+
+#[test]
+fn link_activation_defaults_to_immediate_and_round_trips_chip() {
+    // ADR-0224: 기본값은 현행 동작(즉발)이다. 두 키는 독립이므로 한쪽만 chip 으로
+    // 올려도 다른 쪽이 따라 올라가지 않는다.
+    let defaults = Settings::default().terminal;
+    assert_eq!(defaults.url_link_activation, "immediate");
+    assert_eq!(defaults.path_link_activation, "immediate");
+
+    let settings: Settings = serde_json::from_value(json!({
+        "terminal": { "pathLinkActivation": "chip" }
+    }))
+    .unwrap();
+    assert_eq!(settings.terminal.path_link_activation, "chip");
+    assert_eq!(settings.terminal.url_link_activation, "immediate");
+
+    let serialized = serde_json::to_value(settings).unwrap();
+    assert_eq!(serialized["terminal"]["pathLinkActivation"], "chip");
+    assert_eq!(serialized["terminal"]["urlLinkActivation"], "immediate");
+}
+
+#[test]
+fn link_activation_metadata_applies_live() {
+    // 두 키는 즉시 적용이다 — 다음 pane 을 열 때까지 기다리지 않는다.
+    for path in [
+        "/terminal/urlLinkActivation",
+        "/terminal/pathLinkActivation",
+    ] {
+        let metadata = metadata_for_path(path);
+        assert_eq!(metadata.apply_mode, ApplyMode::Live, "{path}");
+        assert!(metadata.writable, "{path}");
+        assert!(!metadata.sensitive, "{path}");
+        // 부모(/terminal) 설명을 물려받지 않고 자기 문구를 갖는다.
+        assert!(metadata.description.contains("chip"), "{path}");
+    }
 }
 
 #[test]

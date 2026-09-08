@@ -4,8 +4,9 @@ mod android_e2e_routes;
 mod android_pairing_routes;
 mod appearance;
 mod assets;
+mod attachments;
 mod auth;
-mod display_settings;
+mod composer_routes;
 mod font_assets;
 mod github_repo_routes;
 mod lease;
@@ -20,7 +21,6 @@ mod render_checkpoint;
 mod routes;
 mod terminal_info;
 mod update_routes;
-mod viewer_page;
 mod viewer_routes;
 mod widget_routes;
 
@@ -31,7 +31,7 @@ use axum::Json;
 #[cfg(test)]
 pub(crate) use access::update_persistent_remote_settings_for_test;
 pub(crate) use access::{
-    effective_remote_settings, effective_snapshot_max_bytes,
+    effective_attach_snapshot_max_bytes, effective_remote_settings,
     update_persistent_cloud_settings_snapshot, update_persistent_remote_settings,
 };
 pub use access::{
@@ -43,10 +43,11 @@ pub(crate) use android_e2e_output::{
     unix_time_seconds, PreparedAndroidE2eOutput, ANDROID_E2E_OUTPUT_PATH,
     E2E_OUTPUT_MAX_ENCRYPTED_RECORD_BYTES, E2E_OUTPUT_OPEN_RECORD_LIMIT,
 };
-pub(crate) use auth::TunnelAuthorized;
+pub(crate) use attachments::cleanup_stale_attachments;
+pub(crate) use auth::{RemoteTransport, TunnelAuthorized};
 pub(crate) use lease::{
-    active_lease_matches_with_timeout, begin_human_control_operation, HumanControlOrigin,
-    HumanControlPermit,
+    active_lease_matches_with_timeout, begin_human_control_operation,
+    human_control_operations_drained, HumanControlOrigin, HumanControlPermit,
 };
 pub use lease::{
     get_remote_control_status, reclaim_remote_control, RemoteControlLease, RemoteControlState,

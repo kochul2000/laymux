@@ -12,11 +12,23 @@ type FocusRequest = {
   respond: () => Promise<void>;
 };
 
+type NavigationRequest = {
+  respond: () => Promise<void>;
+};
+
+type ComposerStarRead = {
+  respond: () => Promise<void>;
+};
+
 type RemoteState = {
   inputs: InputRequest[];
   writes: Array<{ leaseId: string; data: string }>;
   focuses: FocusRequest[];
+  navigations: NavigationRequest[];
   claims: Array<{ clientName?: string; claimReservationId?: string }>;
+  starredEntries: Array<{ value: string; label: string; send: boolean }>;
+  composerStarReads: ComposerStarRead[];
+  starRevision: number;
 };
 
 const pane = (terminalId: string, paneNumber: number, cwd: string, isFocused: boolean) => ({
@@ -100,9 +112,13 @@ async function installBrowserMocks(
     coarse: boolean;
     storedMode?: "direct" | "composer";
     legacyOutput?: boolean;
+    delayTerminal1Snapshot?: boolean;
     delayTerminal2Snapshot?: boolean;
     delayFirstTerminalWrite?: boolean;
     deferSocketCloseEvent?: boolean;
+    failTerminalConstruction?: boolean;
+    lateTerminalFocusAfterTouchTap?: boolean;
+    virtualKeyboardHeight?: number;
   },
 ) {
   await page.addInitScript(
@@ -110,9 +126,13 @@ async function installBrowserMocks(
       coarse,
       storedMode,
       legacyOutput,
+      delayTerminal1Snapshot,
       delayTerminal2Snapshot,
       delayFirstTerminalWrite,
       deferSocketCloseEvent,
+      failTerminalConstruction,
+      lateTerminalFocusAfterTouchTap,
+      virtualKeyboardHeight,
     }) => {
       if (storedMode) localStorage.setItem("laymux.remote.inputMode", storedMode);
       else localStorage.removeItem("laymux.remote.inputMode");
@@ -137,6 +157,13 @@ async function installBrowserMocks(
         },
       });
 
+      if (virtualKeyboardHeight !== undefined) {
+        Object.defineProperty(navigator, "virtualKeyboard", {
+          configurable: true,
+          value: { boundingRect: { height: virtualKeyboardHeight } },
+        });
+      }
+
       class MockTerminal {
         options: Record<string, unknown>;
         modes = {
@@ -151,6 +178,7 @@ async function installBrowserMocks(
         buffer = {
           active: {
             type: "normal",
+            baseY: 0,
             viewportY: 0,
             ydisp: 0,
             length: 24,
@@ -188,10 +216,12 @@ async function installBrowserMocks(
         };
         private dataListener: ((data: string) => void) | null = null;
         private resizeListener: ((size: { cols: number; rows: number }) => void) | null = null;
+        private scrollListener: (() => void) | null = null;
         private delayNextWrite = Boolean(delayFirstTerminalWrite);
         private delayedWriteCallback: (() => void) | null = null;
 
         constructor(options: Record<string, unknown>) {
+          if (failTerminalConstruction) throw new Error("xterm constructor failed");
           this.options = { ...options };
           Object.defineProperty(window, "__mockTerminal", {
             value: this,
@@ -213,6 +243,18 @@ async function installBrowserMocks(
           screen.append(textarea);
           element.append(screen);
           element.addEventListener("mousedown", () => textarea.focus());
+          if (lateTerminalFocusAfterTouchTap) {
+            // Android can deliver xterm's compatibility focus after the touch
+            // bridge has handled pointerup. Model that late focus theft in the
+            // gesture's next frame so the Composer handoff must outlive one call.
+            element.addEventListener("pointerup", (event) => {
+              if (event.pointerType !== "touch") return;
+              requestAnimationFrame(() => {
+                textarea.dataset.lateTouchFocus = "true";
+                textarea.focus();
+              });
+            });
+          }
           host.append(element);
           this.element = element;
           this.textarea = textarea;
@@ -227,7 +269,9 @@ async function installBrowserMocks(
         }
 
         onSelectionChange(_listener: () => void) {}
-        onScroll(_listener: () => void) {}
+        onScroll(listener: () => void) {
+          this.scrollListener = listener;
+        }
         hasSelection() {
           return Boolean(this.selection);
         }
@@ -269,8 +313,28 @@ async function installBrowserMocks(
         blur() {
           this.textarea?.blur();
         }
-        scrollLines(_amount: number) {}
-        scrollToBottom() {}
+        scrollCalls: number[] = [];
+        scrollLines(amount: number) {
+          this.scrollCalls.push(amount);
+          const active = this.buffer.active;
+          active.viewportY = Math.max(0, Math.min(active.baseY, active.viewportY + amount));
+          active.ydisp = active.viewportY;
+          this.scrollListener?.();
+        }
+        scrollToBottom() {
+          this.scrollCalls.push(Number.POSITIVE_INFINITY);
+          const active = this.buffer.active;
+          active.viewportY = active.baseY;
+          active.ydisp = active.baseY;
+          this.scrollListener?.();
+        }
+        setViewport(baseY: number, viewportY: number) {
+          const active = this.buffer.active;
+          active.baseY = Math.max(0, baseY);
+          active.viewportY = Math.max(0, Math.min(active.baseY, viewportY));
+          active.ydisp = active.viewportY;
+          this.scrollListener?.();
+        }
         emitData(data: string) {
           this.dataListener?.(data);
         }
@@ -341,7 +405,12 @@ async function installBrowserMocks(
               );
               return;
             }
-            if (delayTerminal2Snapshot && url.includes("/terminals/terminal-2/output")) return;
+            if (
+              (delayTerminal1Snapshot && url.includes("/terminals/terminal-1/output")) ||
+              (delayTerminal2Snapshot && url.includes("/terminals/terminal-2/output"))
+            ) {
+              return;
+            }
             this.emitSnapshot();
           }, 0);
         }
@@ -408,19 +477,42 @@ async function installRemotePage(
     coarse: boolean;
     localApp?: boolean;
     storedMode?: "direct" | "composer";
+    activeAgent?: "Claude" | "Codex" | "Grok";
     holdInputs?: boolean;
     holdTerminalFocus?: boolean;
+    holdInitialNavigation?: boolean;
     legacyOutput?: boolean;
+    delayTerminal1Snapshot?: boolean;
     delayTerminal2Snapshot?: boolean;
     delayFirstTerminalWrite?: boolean;
     deferSocketCloseEvent?: boolean;
+    failTerminalConstruction?: boolean;
+    lateTerminalFocusAfterTouchTap?: boolean;
+    virtualKeyboardHeight?: number;
     claimBusyResponses?: number;
     claimRetryAfterMs?: number;
     claimReservationTtlMs?: number;
     width?: number;
+    starredEntries?: Array<string | { value: string; label?: string; send?: boolean }>;
+    holdInitialComposerStars?: boolean;
   },
 ): Promise<RemoteState> {
-  const state: RemoteState = { inputs: [], writes: [], focuses: [], claims: [] };
+  const toStarred = (
+    entry: string | { value: string; label?: string; send?: boolean },
+  ): { value: string; label: string; send: boolean } =>
+    typeof entry === "string"
+      ? { value: entry, label: "", send: false }
+      : { value: entry.value, label: entry.label ?? "", send: entry.send === true };
+  const state: RemoteState = {
+    inputs: [],
+    writes: [],
+    focuses: [],
+    navigations: [],
+    claims: [],
+    starredEntries: (options.starredEntries ?? []).map(toStarred),
+    composerStarReads: [],
+    starRevision: 0,
+  };
   let remainingClaimBusyResponses = options.claimBusyResponses ?? 0;
   await page.setViewportSize({ width: options.width ?? 390, height: 844 });
   await installBrowserMocks(page, options);
@@ -461,8 +553,83 @@ async function installRemotePage(
       await route.fulfill({ json: { active: true, leaseId: "lease-1" } });
       return;
     }
+    if (url.pathname === "/remote/v1/composer/starred") {
+      if (route.request().method() === "POST") {
+        const body = route.request().postDataJSON() as {
+          value?: string;
+          text?: string;
+          starred: boolean;
+          label?: string;
+          send?: boolean;
+          previousValue?: string;
+        };
+        const value = body.value || body.text || "";
+        const previous = [...state.starredEntries];
+        if (!body.starred) {
+          state.starredEntries = state.starredEntries.filter((entry) => entry.value !== value);
+        } else if (value) {
+          const identity = body.previousValue || value;
+          const existing = state.starredEntries.find((entry) => entry.value === identity);
+          const next = {
+            value,
+            label: body.label ?? existing?.label ?? "",
+            send: body.send ?? existing?.send ?? false,
+          };
+          const index = state.starredEntries.findIndex((entry) => entry.value === identity);
+          if (index >= 0) state.starredEntries[index] = next;
+          else if (!state.starredEntries.some((entry) => entry.value === value)) {
+            state.starredEntries.push(next);
+          }
+        }
+        if (JSON.stringify(previous) !== JSON.stringify(state.starredEntries)) {
+          state.starRevision += 1;
+        }
+        await route.fulfill({
+          json: { entries: state.starredEntries, revision: state.starRevision },
+        });
+        return;
+      }
+      const revisionParam = url.searchParams.get("revision");
+      const knownRevision = revisionParam == null ? null : Number(revisionParam);
+      const payload =
+        knownRevision === state.starRevision
+          ? { revision: state.starRevision }
+          : { entries: [...state.starredEntries], revision: state.starRevision };
+      if (options.holdInitialComposerStars && state.composerStarReads.length === 0) {
+        await new Promise<void>((done) => {
+          state.composerStarReads.push({
+            respond: async () => {
+              await route.fulfill({ json: payload });
+              done();
+            },
+          });
+        });
+        return;
+      }
+      await route.fulfill({ json: payload });
+      return;
+    }
     if (url.pathname === "/remote/v1/navigation") {
-      await route.fulfill({ json: navigation });
+      const navigationWithActivity = structuredClone(navigation);
+      if (options.activeAgent) {
+        const updateActivity = (items: typeof panes) => {
+          items[0].activity = { type: "interactiveApp", name: options.activeAgent };
+        };
+        updateActivity(navigationWithActivity.activeWorkspace.panes);
+        updateActivity(navigationWithActivity.workspaces[0].panes);
+      }
+      if (options.holdInitialNavigation && state.navigations.length === 0) {
+        await new Promise<void>((done) => {
+          state.navigations.push({
+            respond: async () => {
+              await route.fulfill({ json: navigationWithActivity });
+              done();
+            },
+          });
+        });
+        return;
+      }
+      await route.fulfill({ json: navigationWithActivity });
       return;
     }
     if (url.pathname.endsWith("/input")) {
@@ -538,6 +705,103 @@ async function dispatchTerminalPaste(page: Page, text: string) {
   }, text);
 }
 
+async function clickInputModeToggle(page: Page) {
+  const toggle = page.locator("#inputModeToggle");
+  if (!(await toggle.isVisible())) {
+    await page.locator("#keyBarToggle").click();
+  }
+  await toggle.click();
+}
+
+async function openRemoteSettings(page: Page) {
+  const navigationToggle = page.locator("#navToggle");
+  const settings = page.locator("#drawerSettingsButton");
+  if ((await navigationToggle.getAttribute("aria-expanded")) !== "true") {
+    await navigationToggle.click();
+  }
+  await settings.click();
+  await expect(page.locator("#drawerSettingsView")).toBeVisible();
+  // Settings is paginated; the composer toggles live on their own tab.
+  await page.locator('#settingsTabs [data-settings-panel="composer"]').click();
+  await expect(page.locator("#settingsPanelComposer")).toBeVisible();
+}
+
+async function expectedComposerHiddenDistance(page: Page, configuredLines: number) {
+  await expect(page.locator("#terminal .xterm-screen")).toBeVisible();
+  await expect(page.locator("#terminalComposer")).toBeVisible();
+  const hiddenLines = await page.evaluate((lines) => {
+    const mock = window as typeof window & { __mockTerminal?: { rows: number } };
+    const screen = document.querySelector<HTMLElement>("#terminal .xterm-screen");
+    const composer = document.querySelector<HTMLElement>("#terminalComposer");
+    const rows = mock.__mockTerminal?.rows ?? 0;
+    if (!screen || !composer || rows <= 0) return lines;
+    const terminalRect = screen.getBoundingClientRect();
+    const composerRect = composer.getBoundingClientRect();
+    const overlap = Math.max(
+      0,
+      Math.min(terminalRect.bottom, composerRect.bottom) -
+        Math.max(terminalRect.top, composerRect.top),
+    );
+    const cellHeight = terminalRect.height / rows;
+    const coveredLines = cellHeight > 0 ? Math.ceil(overlap / cellHeight) : 0;
+    return Math.max(0, lines - coveredLines);
+  }, configuredLines);
+  return hiddenLines;
+}
+
+async function terminalScrollDistance(page: Page) {
+  return page.evaluate(() => {
+    const mock = window as typeof window & {
+      __mockTerminal?: {
+        buffer: { active: { baseY: number; viewportY: number } };
+      };
+    };
+    const active = mock.__mockTerminal?.buffer.active;
+    return active ? active.baseY - active.viewportY : -1;
+  });
+}
+
+test("custom Send Enter uses structured submit while raw keys retain their bytes and order", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "laymux.remote.keybar",
+      JSON.stringify({
+        userKeys: [
+          { id: "u-raw", label: "Raw", seq: "before\n" },
+          { id: "u-send", label: "Run", seq: "run\n", submit: true },
+          { id: "u-after", label: "After", seq: "after", submit: "true" },
+        ],
+        zones: {
+          main: { left: ["soft:u-raw", "soft:u-send", "soft:u-after"], center: [], right: [] },
+          expanded: { left: [], center: [], right: [] },
+        },
+      }),
+    );
+  });
+  const state = await installRemotePage(page, { coarse: true, holdInputs: true });
+  await connect(page);
+  const requests: string[] = [];
+  page.on("request", (request) => {
+    if (/\/(write|input)$/.test(new URL(request.url()).pathname)) {
+      requests.push(new URL(request.url()).pathname.split("/").at(-1)!);
+    }
+  });
+  await page.locator('[data-key="u-raw"]').click();
+  await page.locator('[data-key="u-send"]').click();
+  await page.locator('[data-key="u-after"]').click();
+  await expect.poll(() => state.inputs.length).toBe(1);
+  expect(state.writes.map((write) => write.data)).toEqual(["before\n"]);
+  await state.inputs[0].respond();
+  await expect.poll(() => state.writes.length).toBe(2);
+  expect(state.inputs.map((input) => input.body)).toEqual([
+    { leaseId: "lease-1", text: "run\n", submit: true },
+  ]);
+  expect(state.writes.map((write) => write.data)).toEqual(["before\n", "after"]);
+  expect(requests).toEqual(["write", "input", "write"]);
+});
+
 test("fine-pointer PC and coarse-pointer mobile can both toggle and persist the preferred mode", async ({
   page,
 }) => {
@@ -547,7 +811,7 @@ test("fine-pointer PC and coarse-pointer mobile can both toggle and persist the 
   const toggle = page.locator("#inputModeToggle");
   await expect(composer).toBeHidden();
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
-  await toggle.click();
+  await clickInputModeToggle(page);
   await expect(composer).toBeVisible();
   await expect(toggle).toHaveAttribute("aria-pressed", "true");
   await expect
@@ -557,9 +821,16 @@ test("fine-pointer PC and coarse-pointer mobile can both toggle and persist the 
   const geometry = await page.locator(".terminal-shell").evaluate((shell) => {
     const terminal = shell.querySelector<HTMLElement>("#terminal")!.getBoundingClientRect();
     const editor = shell.querySelector<HTMLElement>("#terminalComposer")!.getBoundingClientRect();
-    return { terminalBottom: terminal.bottom, editorTop: editor.top };
+    return {
+      terminalTop: terminal.top,
+      terminalBottom: terminal.bottom,
+      editorTop: editor.top,
+      editorBottom: editor.bottom,
+    };
   });
-  expect(geometry.terminalBottom).toBeLessThanOrEqual(geometry.editorTop);
+  expect(geometry.editorTop).toBeGreaterThanOrEqual(geometry.terminalTop);
+  expect(geometry.editorTop).toBeLessThan(geometry.terminalBottom);
+  expect(geometry.editorBottom).toBeLessThanOrEqual(geometry.terminalBottom);
 
   // Re-running the static entry simulates a reload: preference survives, drafts do not.
   await page.setContent(remoteClientMarkupWithoutXterm());
@@ -594,7 +865,7 @@ test("coarse pointer defaults to Composer and a saved Direct preference wins", a
   await expect(page.locator("#terminalComposer")).toBeHidden();
   await expect(page.locator("#inputModeToggle")).toHaveAttribute("aria-pressed", "false");
 
-  await page.locator("#inputModeToggle").click();
+  await clickInputModeToggle(page);
   await expect(page.locator("#terminalComposer")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
 });
@@ -611,19 +882,19 @@ test("terminal switches preserve isolated mode and draft state without persisten
 
   await selectTerminal(page, "C:\\two");
   await expect(page.locator("#terminalMeta")).toContainText("Shell 2");
-  await expect(editor).toHaveValue("");
+  await expect(editor).toHaveText("");
   await editor.fill("draft two");
-  await page.locator("#inputModeToggle").click();
+  await clickInputModeToggle(page);
   await expect(page.locator("#terminalComposer")).toBeHidden();
 
   await selectTerminal(page, "C:\\one");
   await expect(page.locator("#terminalComposer")).toBeVisible();
-  await expect(editor).toHaveValue("draft one");
+  await expect(editor).toHaveText("draft one");
 
   await selectTerminal(page, "C:\\two");
   await expect(page.locator("#terminalComposer")).toBeHidden();
-  await page.locator("#inputModeToggle").click();
-  await expect(editor).toHaveValue("draft two");
+  await clickInputModeToggle(page);
+  await expect(editor).toHaveText("draft two");
   expect(
     await page.evaluate(() => Object.keys(localStorage).filter((key) => key.includes("Draft"))),
   ).toEqual([]);
@@ -644,6 +915,18 @@ test("a terminal switch isolates the old socket and readiness before delayed hos
   await expect(page.locator("#terminalMeta")).toContainText("Shell 2");
   await expect.poll(() => remote.focuses.length).toBe(1);
   expect(remote.focuses[0].terminalId).toBe("terminal-2");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as Window & {
+              __mockSockets: Array<{ url: string; closed: boolean }>;
+            }
+          ).__mockSockets.length,
+      ),
+    )
+    .toBe(2);
 
   const sockets = await page.evaluate(() =>
     (
@@ -677,12 +960,13 @@ test("fine-pointer Composer sends on Enter and keeps Shift+Enter as a newline", 
 }) => {
   const remote = await installRemotePage(page, { coarse: false, width: 1280 });
   await connect(page);
-  await page.locator("#inputModeToggle").click();
+  await clickInputModeToggle(page);
 
   const editor = page.locator("#composerInput");
   await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
-  // Desktop layout has no visible Send button — Enter is the send gesture.
-  await expect(page.locator("#composerSend")).toBeHidden();
+  // Send is a configurable action and remains available in Composer on every
+  // layout; desktop Enter continues to provide the keyboard gesture too.
+  await expect(page.locator("#composerSend")).toBeVisible();
 
   // The desktop keydown guards: Enter mid-composition (isComposing) and the
   // soft-keyboard keyCode 229 variant never submit.
@@ -702,7 +986,7 @@ test("fine-pointer Composer sends on Enter and keeps Shift+Enter as a newline", 
 
   await editor.fill("line");
   await editor.press("Shift+Enter");
-  await expect(editor).toHaveValue("line\n");
+  await expect(editor).toHaveText("line\n");
   expect(remote.inputs).toHaveLength(0);
 
   await editor.fill("send me");
@@ -713,7 +997,7 @@ test("fine-pointer Composer sends on Enter and keeps Shift+Enter as a newline", 
     text: "send me",
     submit: true,
   });
-  await expect(editor).toHaveValue("");
+  await expect(editor).toHaveText("");
 });
 
 test("mobile-layout Composer keeps Enter as a newline and submits with the Send button", async ({
@@ -737,7 +1021,7 @@ test("mobile-layout Composer keeps Enter as a newline and submits with the Send 
 
   await editor.fill("line");
   await editor.press("Enter");
-  await expect(editor).toHaveValue("line\n");
+  await expect(editor).toHaveText("line\n");
   expect(remote.inputs).toHaveLength(0);
 
   await editor.fill("send me");
@@ -748,19 +1032,19 @@ test("mobile-layout Composer keeps Enter as a newline and submits with the Send 
     text: "send me",
     submit: true,
   });
-  await expect(editor).toHaveValue("");
+  await expect(editor).toHaveText("");
 
   await editor.fill("untouched draft");
-  await page.locator("#ctrlC").click();
+  await page.locator('[data-key="c-c"]').click();
   await expect.poll(() => remote.writes.length).toBe(1);
   expect(remote.writes[0]).toEqual({ leaseId: "lease-1", data: "\x03" });
-  await expect(editor).toHaveValue("untouched draft");
+  await expect(editor).toHaveText("untouched draft");
 
   await page.locator("#keyBarToggle").click();
   await page.locator('[data-key="esc"]').click();
   await expect.poll(() => remote.writes.length).toBe(2);
   expect(remote.writes[1].data).toBe("\x1b");
-  await expect(editor).toHaveValue("untouched draft");
+  await expect(editor).toHaveText("untouched draft");
 });
 
 test("PC-app embedded mobile view (localApp=1) keeps the mobile send gesture on a fine pointer", async ({
@@ -781,7 +1065,7 @@ test("PC-app embedded mobile view (localApp=1) keeps the mobile send gesture on 
 
   await editor.fill("line");
   await editor.press("Enter");
-  await expect(editor).toHaveValue("line\n");
+  await expect(editor).toHaveText("line\n");
   expect(remote.inputs).toHaveLength(0);
 
   await editor.fill("send me");
@@ -792,7 +1076,7 @@ test("PC-app embedded mobile view (localApp=1) keeps the mobile send gesture on 
     text: "send me",
     submit: true,
   });
-  await expect(editor).toHaveValue("");
+  await expect(editor).toHaveText("");
 });
 
 test("Direct paste uses structured input only after a V1 snapshot establishes readiness", async ({
@@ -819,10 +1103,10 @@ test("legacy unsequenced output remains visible but Composer and direct paste fa
 
   await page.locator("#composerInput").fill("preserved draft");
   await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "false");
-  await page.locator("#inputModeToggle").click();
+  await clickInputModeToggle(page);
   await dispatchTerminalPaste(page, "must not send");
   expect(remote.inputs).toHaveLength(0);
-  await expect(page.locator("#status")).toHaveText("Terminal input is not ready. Reconnecting...");
+  await expect(page.locator("#status")).toHaveText("Terminal input is not ready.");
 });
 
 test("a malformed output frame stays fail-closed after a delayed snapshot write completes", async ({
@@ -1046,18 +1330,18 @@ test("an in-flight snapshot is sent once and only clears the unchanged revision"
   await editor.fill("edited while pending");
   await remote.inputs[0].respond();
   await expect(composer).toHaveAttribute("data-can-send", "true");
-  await expect(editor).toHaveValue("edited while pending");
+  await expect(editor).toHaveText("edited while pending");
 
   await send.click();
   await expect.poll(() => remote.inputs.length).toBe(2);
   await remote.inputs[1].respond();
-  await expect(editor).toHaveValue("");
+  await expect(editor).toHaveText("");
 
   await editor.fill("preserve on failure");
   await send.click();
   await expect.poll(() => remote.inputs.length).toBe(3);
   await remote.inputs[2].respond(500);
-  await expect(editor).toHaveValue("preserve on failure");
+  await expect(editor).toHaveText("preserve on failure");
   await expect(composer).toHaveAttribute("data-can-send", "true");
 
   await editor.fill("terminal one pending");
@@ -1066,9 +1350,9 @@ test("an in-flight snapshot is sent once and only clears the unchanged revision"
   await selectTerminal(page, "C:\\two");
   await editor.fill("terminal two draft");
   await remote.inputs[3].respond();
-  await expect(editor).toHaveValue("terminal two draft");
+  await expect(editor).toHaveText("terminal two draft");
   await selectTerminal(page, "C:\\one");
-  await expect(editor).toHaveValue("");
+  await expect(editor).toHaveText("");
 });
 
 test("disconnect releases an in-flight Composer action while preserving its draft", async ({
@@ -1091,14 +1375,14 @@ test("disconnect releases an in-flight Composer action while preserving its draf
   await page.locator("#connect").evaluate((button: HTMLButtonElement) => button.click());
   await expect(page.locator("#status")).toHaveText("Main · Pane 1");
 
-  await expect(editor).toHaveValue("preserve across disconnect");
+  await expect(editor).toHaveText("preserve across disconnect");
   await expect(editor).toBeEnabled();
   await expect(composer).toHaveAttribute("data-can-send", "true");
 
   // Settle the mocked, already-aborted route so the test leaves no pending
   // Playwright handler behind. The stale response must not clear the draft.
   await remote.inputs[0].respond().catch(() => {});
-  await expect(editor).toHaveValue("preserve across disconnect");
+  await expect(editor).toHaveText("preserve across disconnect");
 });
 
 test("Composer keeps xterm unfocused and hides its inactive application cursor", async ({
@@ -1107,6 +1391,9 @@ test("Composer keeps xterm unfocused and hides its inactive application cursor",
   await installRemotePage(page, { coarse: true });
   await connect(page);
 
+  // Attach leaves the focus alone on a touch device (ADR-0196), so raise the
+  // editor the way a person does before asserting the composer's cursor policy.
+  await page.locator("#focusTerminal").click();
   await expect(page.locator("#composerInput")).toBeFocused();
   expect(
     await page.evaluate(
@@ -1121,7 +1408,7 @@ test("Composer keeps xterm unfocused and hides its inactive application cursor",
     "xterm-helper-textarea",
   );
 
-  await page.locator("#inputModeToggle").click();
+  await clickInputModeToggle(page);
   expect(
     await page.evaluate(
       () =>
@@ -1165,6 +1452,190 @@ test("Direct-input xterm textarea opts out of browser autofill (issue #503)", as
     .toBe("off");
 });
 
+// A soft keyboard only opens inside the gesture that asked for it, and attach
+// finishes several awaits after the tap that started it. Focusing there would
+// leave DOM focus without an IME — and the Keyboard button reads DOM focus as
+// "the keyboard is up", so its first tap would dismiss instead of raise
+// (ADR-0196).
+// These specs drive a coarse pointer through the matchMedia stub and click with
+// a mouse, because a headless browser has no IME to observe: they pin the state
+// the IME depends on (nobody holds the focus until a gesture asks for it), not
+// the keyboard itself. Real-device measurement stays the final word.
+test("coarse-pointer attach leaves the input focus for the first Keyboard tap (ADR-0196)", async ({
+  page,
+}) => {
+  await installRemotePage(page, { coarse: true });
+  await connect(page);
+
+  const composer = page.locator("#terminalComposer");
+  const editor = page.locator("#composerInput");
+  const activeTagName = () => page.evaluate(() => document.activeElement?.tagName ?? "");
+
+  await expect(composer).toBeVisible();
+  await expect(editor).toBeEnabled();
+  expect(await activeTagName()).toBe("BODY");
+  // A focus arriving late — a microtask or timer behind the snapshot — must not
+  // sneak in either, so re-check once the send affordance has settled.
+  await expect(composer).toHaveAttribute("data-can-send", "true");
+  expect(await activeTagName()).toBe("BODY");
+
+  // One tap raises: the editor stays open and takes focus inside the gesture.
+  await page.locator("#focusTerminal").click();
+  await expect(composer).toBeVisible();
+  await expect(editor).toBeFocused();
+});
+
+test.describe("mobile touch Composer focus", () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+
+  test("the first terminal touch survives initial attach and late xterm focus", async ({
+    page,
+  }) => {
+    const remote = await installRemotePage(page, {
+      coarse: true,
+      holdInitialNavigation: true,
+      delayTerminal1Snapshot: true,
+      lateTerminalFocusAfterTouchTap: true,
+    });
+
+    const editor = page.locator("#composerInput");
+    await page.locator("#token").fill("test-token");
+    await page.locator("#connect").click();
+    await expect.poll(() => remote.navigations.length).toBe(1);
+
+    // The lease exists here, but navigation has not established which terminal
+    // owns the draft. An xterm created in this interval is a tappable input
+    // surface with no Composer target — the original cold-entry race.
+    await expect(page.locator("#terminal .xterm")).toHaveCount(0);
+    await expect(editor).toBeDisabled();
+
+    await remote.navigations[0].respond();
+    await expect(page.locator("#status")).toHaveText("Main · Pane 1");
+    await expect(page.locator("#terminal .xterm")).toBeVisible();
+    await expect(editor).not.toBeFocused();
+    await expect(editor).toBeEnabled();
+    await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "false");
+
+    // The output snapshot is still pending. The first real terminal tap must
+    // nevertheless focus the visible editor, and keep it after xterm's helper
+    // textarea tries to take focus later in the same touch turn.
+    const terminalBox = await page.locator("#terminal .xterm").boundingBox();
+    expect(terminalBox).not.toBeNull();
+    await page.touchscreen.tap(
+      terminalBox!.x + terminalBox!.width / 2,
+      terminalBox!.y + terminalBox!.height / 2,
+    );
+
+    await expect(page.locator(".xterm-helper-textarea")).toHaveAttribute(
+      "data-late-touch-focus",
+      "true",
+    );
+    await expect(editor).toBeFocused();
+    await page.keyboard.type("touch input works");
+    await expect(editor).toHaveText("touch input works");
+
+    await page.evaluate(() => {
+      const [socket] = (window as Window & { __mockSockets: Array<{ emitSnapshot: () => void }> })
+        .__mockSockets;
+      socket.emitSnapshot();
+    });
+    await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
+    await expect(editor).toBeFocused();
+    await expect(editor).toHaveText("touch input works");
+  });
+
+  test("reports xterm construction failure through the connect transaction", async ({ page }) => {
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    await installRemotePage(page, {
+      coarse: true,
+      failTerminalConstruction: true,
+    });
+
+    await page.locator("#token").fill("test-token");
+    await page.locator("#connect").click();
+
+    await expect(page.locator("#status")).toHaveText("xterm constructor failed");
+    await expect(page.locator("#connect")).toBeEnabled();
+    await expect(page.locator("#terminal .xterm")).toHaveCount(0);
+    expect(pageErrors).not.toContain("xterm constructor failed");
+  });
+
+  test("double and triple terminal taps leave Composer unfocused for selection", async ({
+    page,
+  }) => {
+    await installRemotePage(page, { coarse: true });
+    await connect(page);
+
+    const editor = page.locator("#composerInput");
+    const terminalBox = await page.locator("#terminal .xterm").boundingBox();
+    expect(terminalBox).not.toBeNull();
+    const tapTerminal = () =>
+      page.touchscreen.tap(
+        terminalBox!.x + terminalBox!.width / 2,
+        terminalBox!.y + terminalBox!.height / 2,
+      );
+
+    await tapTerminal();
+    await tapTerminal();
+    await expect(editor).not.toBeFocused();
+
+    await page.waitForTimeout(600);
+    await tapTerminal();
+    await tapTerminal();
+    await tapTerminal();
+    await expect(editor).not.toBeFocused();
+  });
+});
+
+test("a coarse-pointer terminal switch also leaves the focus alone (ADR-0196)", async ({
+  page,
+}) => {
+  await installRemotePage(page, { coarse: true });
+  await connect(page);
+
+  await page.locator("#focusTerminal").click();
+  await expect(page.locator("#composerInput")).toBeFocused();
+
+  // Selecting a pane starts an attach that finishes several awaits later, so it
+  // must not hand the focus back behind the user's back either.
+  await selectTerminal(page, "C:\\two");
+  await expect(page.locator("#status")).toHaveText("Main · Pane 2");
+  await expect(page.locator("#composerInput")).not.toBeFocused();
+
+  await page.locator("#focusTerminal").click();
+  await expect(page.locator("#composerInput")).toBeFocused();
+});
+
+test("coarse-pointer Direct attach also leaves the focus for the first Keyboard tap (ADR-0196)", async ({
+  page,
+}) => {
+  await installRemotePage(page, { coarse: true, storedMode: "direct" });
+  await connect(page);
+
+  const activeClassName = () => page.evaluate(() => document.activeElement?.className ?? "");
+  expect(await activeClassName()).not.toContain("xterm-helper-textarea");
+
+  await page.locator("#focusTerminal").click();
+  await expect.poll(activeClassName).toContain("xterm-helper-textarea");
+});
+
+test("fine-pointer attach keeps focusing the composer at connect (ADR-0196)", async ({ page }) => {
+  await installRemotePage(page, { coarse: false, width: 1280, storedMode: "composer" });
+  await connect(page);
+
+  await expect(page.locator("#composerInput")).toBeFocused();
+});
+
+// The axis is the pointer, not the layout: the PC app's embedded mobile view is
+// a mobile layout driven by a hardware keyboard, so it keeps its attach focus.
+test("PC-app embedded mobile view keeps its attach focus (ADR-0196)", async ({ page }) => {
+  await installRemotePage(page, { coarse: false, localApp: true, storedMode: "composer" });
+  await connect(page);
+
+  await expect(page.locator("#composerInput")).toBeFocused();
+});
+
 test("Keyboard button collapses and restores the Composer editor with the soft keyboard", async ({
   page,
 }) => {
@@ -1175,8 +1646,10 @@ test("Keyboard button collapses and restores the Composer editor with the soft k
   const editor = page.locator("#composerInput");
   const keyboardButton = page.locator("#focusTerminal");
 
-  // Connect focuses the composer editor; the first toggle dismisses the
-  // keyboard and collapses the editor pane with it.
+  // The first tap raises the keyboard (attach left the focus alone, ADR-0196);
+  // the next one dismisses it and collapses the editor pane with it.
+  await expect(editor).not.toBeFocused();
+  await keyboardButton.click();
   await expect(editor).toBeFocused();
   await expect(composer).toBeVisible();
   await editor.fill("draft survives collapse");
@@ -1193,7 +1666,7 @@ test("Keyboard button collapses and restores the Composer editor with the soft k
   await keyboardButton.click();
   await expect(composer).toBeVisible();
   await expect(editor).toBeFocused();
-  await expect(editor).toHaveValue("draft survives collapse");
+  await expect(editor).toHaveText("draft survives collapse");
   await expect(page.locator("#composerSend")).toBeEnabled();
 });
 
@@ -1201,6 +1674,8 @@ test("reconnect keeps a collapsed Composer editor collapsed and unfocused", asyn
   await installRemotePage(page, { coarse: true });
   await connect(page);
 
+  // Raise, then dismiss: only a keyboard the user actually opened can collapse.
+  await page.locator("#focusTerminal").click();
   await expect(page.locator("#composerInput")).toBeFocused();
   await page.locator("#focusTerminal").click();
   await expect(page.locator("#terminalComposer")).toBeHidden();
@@ -1226,14 +1701,15 @@ test("explicit mode switches reset a collapsed Composer editor", async ({ page }
   await installRemotePage(page, { coarse: true });
   await connect(page);
 
+  await page.locator("#focusTerminal").click();
   await expect(page.locator("#composerInput")).toBeFocused();
   await page.locator("#focusTerminal").click();
   await expect(page.locator("#terminalComposer")).toBeHidden();
 
   // Direct and back to Composer: the mode switch must reveal the editor
   // instead of leaving composer mode with no visible input surface.
-  await page.locator("#inputModeToggle").click();
-  await page.locator("#inputModeToggle").click();
+  await clickInputModeToggle(page);
+  await clickInputModeToggle(page);
   await expect(page.locator("#terminalComposer")).toBeVisible();
   await expect(page.locator("#composerInput")).toBeFocused();
 });
@@ -1244,17 +1720,19 @@ test("special keys cancel the mousedown focus-theft default so the soft keyboard
   await installRemotePage(page, { coarse: true });
   await connect(page);
 
-  // Composer mode connects with the editor focused (mobile keyboard raised).
+  // The Keyboard tap is what raises the mobile keyboard (ADR-0196); from here
+  // on the editor holds focus and must keep it through every special key.
   const editor = page.locator("#composerInput");
+  await page.locator("#focusTerminal").click();
   await expect(editor).toBeFocused();
   await page.locator("#keyBarToggle").click();
 
   // A native tap fires mousedown before the browser moves focus. WebKit/iOS
   // only honors mousedown.preventDefault() to keep the focused textarea (and
   // its open keyboard) — pointerdown preventDefault is ignored there (#482).
-  // Every key that emits input — a soft key, the flick pad, and footer Ctrl+C —
-  // must cancel that default so focus never leaves the editor.
-  const mousedownKeys = ['[data-key="esc"]', '[data-key="dpad"]', "#ctrlC"];
+  // Every key that emits input — a soft key, the flick pad, and the ^C key in
+  // the footer — must cancel that default so focus never leaves the editor.
+  const mousedownKeys = ['[data-key="esc"]', '[data-key="dpad"]', '[data-key="c-c"]'];
   for (const selector of mousedownKeys) {
     const prevented = await page
       .locator(selector)
@@ -1285,11 +1763,116 @@ test("special keys cancel the mousedown focus-theft default so the soft keyboard
   await expect(editor).toBeFocused();
 });
 
+test("floating cursor tap is one-shot, pad flick sends input, and dragging sends nothing", async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "laymux.remote.keybar",
+      JSON.stringify({
+        floating: {
+          pads: { dpad: { enabled: true, size: 64, x: 0.1, y: 0.5 } },
+          buttons: [{ id: "f-up", actionId: "soft:up", enabled: true, size: 64, x: 0.9, y: 0.5 }],
+        },
+      }),
+    ),
+  );
+  const remote = await installRemotePage(page, { coarse: true });
+  await connect(page);
+  await page.locator("#focusTerminal").click();
+  const editor = page.locator("#composerInput");
+  const up = page.locator('#floatingControls [data-key="up"]');
+  await expect(up).toBeEnabled();
+  await up.click({ delay: 650 });
+  await expect.poll(() => remote.writes.map((write) => write.data)).toEqual(["\x1b[A"]);
+  await expect(editor).toBeFocused();
+  const pad = page.locator('#floatingControls [data-key="dpad"]');
+  const box = (await pad.boundingBox())!;
+  await page.mouse.move(box.x + 32, box.y + 32);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 60, box.y + 32, { steps: 3 });
+  await page.mouse.up();
+  await expect.poll(() => remote.writes.map((write) => write.data)).toEqual(["\x1b[A", "\x1b[C"]);
+  for (const control of [up, pad]) {
+    const start = (await control.boundingBox())!;
+    await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+    await page.mouse.down();
+    if (control === pad) await expect(page.locator(".floating-control.dragging")).toHaveCount(1);
+    await page.mouse.move(start.x + 20, start.y - 70, { steps: 4 });
+    await page.mouse.up();
+  }
+  await page.waitForTimeout(150);
+  expect(remote.writes).toHaveLength(2);
+  await expect(editor).toBeFocused();
+});
+
+test("floating header copies follow availability and the shared skip toggle", async ({ page }) => {
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "laymux.remote.keybar",
+      JSON.stringify({
+        floating: {
+          buttons: [
+            { id: "f-copy", actionId: "copyPane", x: 0.1, y: 0.3 },
+            { id: "f-skip", actionId: "skip", x: 0.9, y: 0.3 },
+          ],
+        },
+      }),
+    ),
+  );
+  await installRemotePage(page, { coarse: true });
+  const copy = page.locator('#floatingControls [data-action-proxy="copyPane"]');
+  const skip = page.locator('#floatingControls [data-action-proxy="skip"]');
+  await expect(copy).toBeDisabled();
+  await expect(skip).toBeDisabled();
+  await connect(page);
+  await expect(copy).toBeEnabled();
+  await expect(skip).toBeEnabled();
+  await skip.click();
+  await expect(page.locator("#spatialExclusion")).toHaveAttribute("aria-pressed", "true");
+  await expect(skip).toHaveAttribute("aria-pressed", "true");
+  await page.locator("#spatialExclusion").click();
+  await expect(skip).toHaveAttribute("aria-pressed", "false");
+});
+
+test("floating navigation pad shares spatial navigation and does not repeat on hold", async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "laymux.remote.keybar",
+      JSON.stringify({
+        floating: { pads: { navPad: { enabled: true, x: 0.5, y: 0.5 } } },
+      }),
+    ),
+  );
+  const remote = await installRemotePage(page, { coarse: true });
+  const steps: Array<{ direction: string; leaseId: string }> = [];
+  await page.route("**/remote/v1/navigation/spatial", async (route) => {
+    steps.push(route.request().postDataJSON());
+    await route.fulfill({ json: { moved: false, reason: "no_other_target" } });
+  });
+  await connect(page);
+  const pad = page.locator('#floatingControls [data-key="navPad"]');
+  await expect(pad).toBeEnabled();
+  const box = (await pad.boundingBox())!;
+  await page.mouse.move(box.x + 32, box.y + 32);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 32, box.y + 60, { steps: 3 });
+  await page.waitForTimeout(650);
+  expect(steps).toEqual([]);
+  await page.mouse.up();
+  await expect
+    .poll(() => steps)
+    .toEqual([expect.objectContaining({ direction: "next", leaseId: "lease-1" })]);
+  expect(remote.writes).toEqual([]);
+});
+
 // --- Composer recall: Tab history popup (#504) + autocomplete (#505) ---
 
 async function enterComposerMode(page: Page) {
   // Desktop layout (fine pointer) defaults to Direct; switch to Composer.
-  await page.locator("#inputModeToggle").click();
+  await clickInputModeToggle(page);
   await expect(page.locator("#terminalComposer")).toBeVisible();
 }
 
@@ -1304,7 +1887,7 @@ async function sendComposerLine(
   await editor.press("Enter");
   await expect.poll(() => remote.inputs.length).toBe(expectedCount);
   expect(remote.inputs[expectedCount - 1].body.text).toBe(text);
-  await expect(editor).toHaveValue("");
+  await expect(editor).toHaveText("");
 }
 
 test("Tab on an empty draft opens the newest-first recall popup and Enter fills it (#504)", async ({
@@ -1336,12 +1919,12 @@ test("Tab on an empty draft opens the newest-first recall popup and Enter fills 
   await expect(list.locator('[role="option"]').nth(1)).toHaveAttribute("aria-selected", "true");
   await editor.press("Enter");
   await expect(list).toBeHidden();
-  await expect(editor).toHaveValue("echo two");
+  await expect(editor).toHaveText("echo two");
   // Selecting from the popup fills the draft; it must not send.
   expect(remote.inputs).toHaveLength(3);
 });
 
-test("tapping the empty editor opens the recall popup — soft keyboards have no Tab key (#504)", async ({
+test("an empty-editor tap opens recall only with the keyboard up and a blank tap dismisses suggestions (#504)", async ({
   page,
 }) => {
   const remote = await installRemotePage(page, { coarse: true });
@@ -1357,27 +1940,61 @@ test("tapping the empty editor opens the recall popup — soft keyboards have no
   await editor.fill("echo one");
   await page.locator("#composerSend").click();
   await expect.poll(() => remote.inputs.length).toBe(1);
-  await expect(editor).toHaveValue("");
+  await expect(editor).toHaveText("");
   await editor.fill("echo two");
   await page.locator("#composerSend").click();
   await expect.poll(() => remote.inputs.length).toBe(2);
-  await expect(editor).toHaveValue("");
+  await expect(editor).toHaveText("");
 
-  // A tap on the empty editor opens the same newest-first popup Tab opens.
+  // DOM focus is not evidence that the soft keyboard is visible. The first
+  // tap only raises the keyboard, so it must not cover the editor with recall.
+  await editor.click();
+  await expect(editor).toBeFocused();
+  await expect(list).toBeHidden();
+
+  // Model the VisualViewport shrink arriving between pointer-down and click as
+  // the first tap raises the keyboard. The decision is based on gesture-start
+  // geometry, so this click still must not open recall.
+  await editor.dispatchEvent("pointerdown");
+  await page.setViewportSize({ width: 390, height: 500 });
+  await editor.dispatchEvent("click");
+  await expect(list).toBeHidden();
+
+  // A later tap starts with the keyboard visible and may now open the same
+  // newest-first popup Tab opens.
   await editor.click();
   await expect(list).toBeVisible();
   await expect(list.locator('[role="option"]')).toHaveText(["echo two", "echo one"]);
 
+  // A blank tap in the editor dismisses the visible list without changing or
+  // sending the draft.
+  await editor.click();
+  await expect(list).toBeHidden();
+  await expect(editor).toHaveText("");
+  expect(remote.inputs).toHaveLength(2);
+
+  // Open it again to verify the existing touch-friendly pick path.
+  await editor.click();
+  await expect(list).toBeVisible();
+
   // Entries commit on mousedown (touch-friendly): fills the draft, no send.
   await list.locator('[role="option"]').nth(1).dispatchEvent("mousedown");
   await expect(list).toBeHidden();
-  await expect(editor).toHaveValue("echo one");
+  await expect(editor).toHaveText("echo one");
   expect(remote.inputs).toHaveLength(2);
 
   // A tap on a NON-empty draft never opens the recall popup (autocomplete
   // owns the non-empty draft, and only while typing).
   await editor.click();
   await expect(list).toBeHidden();
+
+  // A blank tap dismisses the as-you-type list too, while preserving text.
+  await editor.fill("echo");
+  const autocomplete = page.locator("#composerAutocompleteList");
+  await expect(autocomplete).toBeVisible();
+  await editor.click();
+  await expect(autocomplete).toBeHidden();
+  await expect(editor).toHaveText("echo");
 
   // A tap mid-IME composition never opens the popup, even on an empty draft;
   // it opens again once composition ends.
@@ -1386,6 +2003,39 @@ test("tapping the empty editor opens the recall popup — soft keyboards have no
   await editor.click();
   await expect(list).toBeHidden();
   await editor.dispatchEvent("compositionend");
+  await editor.click();
+  await expect(list).toBeVisible();
+});
+
+test("VirtualKeyboard geometry is authoritative over the viewport fallback", async ({ page }) => {
+  const remote = await installRemotePage(page, {
+    coarse: true,
+    virtualKeyboardHeight: 0,
+  });
+  await connect(page);
+  const editor = page.locator("#composerInput");
+  const list = page.locator("#composerHistoryList");
+
+  await editor.fill("echo one");
+  await page.locator("#composerSend").click();
+  await expect.poll(() => remote.inputs.length).toBe(1);
+  await expect(editor).toHaveText("");
+
+  // A supported VirtualKeyboard API reporting zero is an explicit closed
+  // signal, even while another height-only viewport change exceeds fallback
+  // thresholds.
+  await page.setViewportSize({ width: 390, height: 500 });
+  await editor.click();
+  await expect(list).toBeHidden();
+
+  await page.evaluate(() => {
+    const keyboard = (
+      navigator as Navigator & {
+        virtualKeyboard: { boundingRect: { height: number } };
+      }
+    ).virtualKeyboard;
+    keyboard.boundingRect.height = 280;
+  });
   await editor.click();
   await expect(list).toBeVisible();
 });
@@ -1412,7 +2062,7 @@ test("as-you-type autocomplete suggests prefixes; plain Enter still sends, arrow
   await editor.press("Enter");
   await expect.poll(() => remote.inputs.length).toBe(4);
   expect(remote.inputs[3].body.text).toBe("ec");
-  await expect(editor).toHaveValue("");
+  await expect(editor).toHaveText("");
 
   // Arrow creates a highlight; then Enter PICKS (fills) instead of sending.
   await editor.fill("ec");
@@ -1421,14 +2071,128 @@ test("as-you-type autocomplete suggests prefixes; plain Enter still sends, arrow
   await expect(dropdown.locator('[role="option"]').nth(0)).toHaveAttribute("aria-selected", "true");
   await editor.press("Enter");
   await expect(dropdown).toBeHidden();
-  await expect(editor).toHaveValue("echo two");
+  await expect(editor).toHaveText("echo two");
   expect(remote.inputs).toHaveLength(4);
 
   // Tab completes to the top suggestion with no active highlight.
   await editor.fill("ec");
   await expect(dropdown).toBeVisible();
   await editor.press("Tab");
-  await expect(editor).toHaveValue("echo two");
+  await expect(editor).toHaveText("echo two");
+});
+
+test("starred autocomplete can send on pick and long-press opens the editor", async ({ page }) => {
+  const remote = await installRemotePage(page, {
+    coarse: false,
+    width: 1280,
+    starredEntries: [{ value: "git status", label: " gs ", send: true }],
+  });
+  await connect(page);
+  await enterComposerMode(page);
+  const editor = page.locator("#composerInput");
+  const autocomplete = page.locator("#composerAutocompleteList");
+
+  await editor.fill("gs");
+  await expect(autocomplete).toBeVisible();
+  await expect(autocomplete.locator('[role="option"]')).toContainText(["gs"]);
+  const starredPick = autocomplete.locator('[role="option"]').first();
+  expect(
+    await autocomplete.locator("button").evaluateAll((buttons) =>
+      buttons.every((button, index) => {
+        const pointerId = index + 7;
+        const down = new PointerEvent("pointerdown", {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          isPrimary: true,
+          pointerId,
+          pointerType: "touch",
+        });
+        button.dispatchEvent(down);
+        button.dispatchEvent(
+          new PointerEvent("pointercancel", { bubbles: true, pointerId, pointerType: "touch" }),
+        );
+        return down.defaultPrevented;
+      }),
+    ),
+  ).toBe(true);
+  await starredPick.click();
+  await expect.poll(() => remote.inputs.length).toBe(1);
+  expect(remote.inputs[0].body.text).toBe("git status");
+  expect(remote.inputs[0].body.submit).toBe(true);
+  await expect(editor).toBeFocused();
+
+  await editor.fill("gs");
+  await expect(autocomplete).toBeVisible();
+  await autocomplete.locator('[role="option"]').first().dispatchEvent("pointerdown");
+  await page.waitForTimeout(550);
+  await expect(page.locator("#composerStarEditorScrim")).toBeVisible();
+  await expect(page.locator("#composerStarEditorLabel")).toHaveValue(" gs ");
+  await expect(page.locator("#composerStarEditorValue")).toHaveValue("git status");
+  await expect(page.locator("#composerStarEditorSend")).toBeChecked();
+  expect(remote.inputs).toHaveLength(1);
+
+  await page.locator("#composerStarEditorValue").fill("git status ");
+  await page.locator("#composerStarEditorSave").click();
+  await expect
+    .poll(() => remote.starredEntries)
+    .toEqual([{ value: "git status ", label: "gs", send: true }]);
+  await expect(page.locator("#composerStarEditorScrim")).toBeHidden();
+  await expect(editor).toBeFocused();
+});
+
+test("Remote autocomplete reads and toggles the host-global persistent star list", async ({
+  page,
+}) => {
+  const remote = await installRemotePage(page, {
+    coarse: false,
+    width: 1280,
+    starredEntries: ["echo persistent"],
+  });
+  await connect(page);
+  await enterComposerMode(page);
+  const editor = page.locator("#composerInput");
+  const dropdown = page.locator("#composerAutocompleteList");
+
+  // This suggestion came from the host endpoint, not runtime history.
+  await editor.fill("ec");
+  await expect(dropdown).toBeVisible();
+  await expect(dropdown.locator('[role="option"]')).toHaveText(["echo persistent"]);
+
+  await dropdown.getByRole("button", { name: "Unstar: echo persistent" }).click();
+  await expect.poll(() => remote.starredEntries).toEqual([]);
+  await expect(dropdown).toBeHidden();
+
+  await sendComposerLine(page, remote, editor, "echo runtime", 1);
+  await editor.fill("ec");
+  await dropdown.getByRole("button", { name: "Star: echo runtime" }).click();
+  await expect
+    .poll(() => remote.starredEntries)
+    .toEqual([{ value: "echo runtime", label: "", send: false }]);
+});
+
+test("Remote refreshes Desktop star changes and ignores a stale earlier read", async ({ page }) => {
+  const remote = await installRemotePage(page, {
+    coarse: false,
+    width: 1280,
+    starredEntries: ["echo initial"],
+    holdInitialComposerStars: true,
+  });
+  await connect(page);
+  await enterComposerMode(page);
+  await expect.poll(() => remote.composerStarReads.length).toBe(1);
+
+  remote.starredEntries = [{ value: "echo desktop", label: "", send: false }];
+  remote.starRevision += 1;
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+
+  const editor = page.locator("#composerInput");
+  const options = page.locator("#composerAutocompleteList").locator('[role="option"]');
+  await editor.fill("ec");
+  await expect(options).toHaveText(["echo desktop"]);
+
+  await remote.composerStarReads[0].respond();
+  await expect(options).toHaveText(["echo desktop"]);
 });
 
 test("recall history is in-memory only and never written to any persistent store", async ({
@@ -1478,7 +2242,7 @@ test("recall history is in-memory only and never written to any persistent store
   expect(dump.local).not.toContain(secret);
 });
 
-test("the popover toggles disable the recall popup and autocomplete", async ({ page }) => {
+test("the Remote Settings toggles disable the recall popup and autocomplete", async ({ page }) => {
   const remote = await installRemotePage(page, { coarse: false, width: 1280 });
   await connect(page);
   await enterComposerMode(page);
@@ -1487,9 +2251,8 @@ test("the popover toggles disable the recall popup and autocomplete", async ({ p
   await sendComposerLine(page, remote, editor, "echo one", 1);
   await sendComposerLine(page, remote, editor, "echo two", 2);
 
-  // Open the key-set popover where the composer toggles live.
-  await page.locator("#keyBarToggle").click();
-  await page.locator("#keyBarSettings").click();
+  // Open Remote Settings where the composer toggles live.
+  await openRemoteSettings(page);
   await expect(page.locator("#composerHistoryPopupToggle")).toBeChecked();
   await expect(page.locator("#composerAutocompleteToggle")).toBeChecked();
   await page.locator("#composerHistoryPopupToggle").uncheck();
@@ -1501,8 +2264,8 @@ test("the popover toggles disable the recall popup and autocomplete", async ({ p
     .poll(() => page.evaluate(() => localStorage.getItem("laymux.remote.composerAutocomplete")))
     .toBe("0");
 
-  // Dismiss the popover, back to the editor.
-  await page.locator("#terminal").click({ position: { x: 5, y: 5 } });
+  // Close the drawer, back to the editor.
+  await page.locator("#navToggle").click();
   await editor.focus();
 
   // Tab no longer opens the recall popup...
@@ -1511,4 +2274,225 @@ test("the popover toggles disable the recall popup and autocomplete", async ({ p
   // ...and typing a prefix no longer shows the autocomplete dropdown.
   await editor.fill("ec");
   await expect(page.locator("#composerAutocompleteList")).toBeHidden();
+});
+
+for (const [agent, configuredLines] of [
+  ["Claude", 3],
+  ["Codex", 4],
+  ["Grok", 2],
+] as const) {
+  test(`Composer subtracts its overlay from ${agent}'s configured hidden input lines`, async ({
+    page,
+  }) => {
+    await installRemotePage(page, { coarse: false, width: 1280, activeAgent: agent });
+    await connect(page);
+
+    await enterComposerMode(page);
+    const expectedDistance = await expectedComposerHiddenDistance(page, configuredLines);
+    await expect.poll(() => terminalScrollDistance(page)).toBe(expectedDistance);
+
+    await openRemoteSettings(page);
+    const toggle = page.locator("#composerHideAgentInputToggle");
+    await expect(toggle).toBeChecked();
+    await expect(toggle).toHaveAttribute("aria-label", "Hide unused agent input");
+    await expect(page.locator(`#composerHiddenAgentInputLines${agent}`)).toHaveValue(
+      String(configuredLines),
+    );
+  });
+}
+
+test("mobile Composer describes and configures unused agent input hiding", async ({ page }) => {
+  await installRemotePage(page, { coarse: true, activeAgent: "Codex" });
+  await connect(page);
+  await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
+  await expect(page.locator("#terminalComposer")).toBeVisible();
+
+  await openRemoteSettings(page);
+  const toggle = page.locator("#composerHideAgentInputToggle");
+  await expect(toggle).toBeChecked();
+  await expect(toggle.locator("..")).toContainText("Hide unused agent input");
+  await expect(toggle.locator("..")).toContainText("While using Composer");
+  const claudeLines = page.locator("#composerHiddenAgentInputLinesClaude");
+  await expect(claudeLines).toHaveAttribute("aria-label", "Claude input lines to hide");
+  // Opening the drawer schedules terminal fits. Let those settle, then isolate
+  // the inactive-agent setting change from layout-driven viewport restoration.
+  await page.waitForTimeout(250);
+  const distanceBeforeInactiveChange = await terminalScrollDistance(page);
+  await page.evaluate(() => {
+    const mock = window as typeof window & {
+      __mockTerminal?: { scrollCalls: number[] };
+    };
+    mock.__mockTerminal?.scrollCalls.splice(0);
+  });
+  await claudeLines.fill("6");
+  await claudeLines.blur();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const mock = window as typeof window & {
+          __mockTerminal?: { scrollCalls: number[] };
+        };
+        return mock.__mockTerminal?.scrollCalls ?? [];
+      }),
+    )
+    .toEqual([]);
+  await expect.poll(() => terminalScrollDistance(page)).toBe(distanceBeforeInactiveChange);
+  await page.evaluate(() => {
+    const mock = window as typeof window & {
+      __mockTerminal?: {
+        scrollCalls: number[];
+        setViewport: (baseY: number, viewportY: number) => void;
+      };
+    };
+    mock.__mockTerminal?.setViewport(100, 100);
+    mock.__mockTerminal?.scrollCalls.splice(0);
+  });
+  const codexLines = page.locator("#composerHiddenAgentInputLinesCodex");
+  await codexLines.fill("6");
+  await codexLines.blur();
+  const expectedDistance = await expectedComposerHiddenDistance(page, 6);
+  await expect.poll(() => terminalScrollDistance(page)).toBe(expectedDistance);
+  await expect
+    .poll(() =>
+      page.evaluate(() => localStorage.getItem("laymux.remote.composerHiddenAgentInputLines")),
+    )
+    .toBe('{"Claude":6,"Codex":6,"Grok":2}');
+});
+
+test("leaving Composer or disabling hiding reveals the active agent input again", async ({
+  page,
+}) => {
+  await installRemotePage(page, { coarse: true, activeAgent: "Codex" });
+  await connect(page);
+
+  await clickInputModeToggle(page);
+  await expect.poll(() => terminalScrollDistance(page)).toBe(0);
+
+  await clickInputModeToggle(page);
+  const expectedHiddenDistance = await expectedComposerHiddenDistance(page, 4);
+  await expect.poll(() => terminalScrollDistance(page)).toBe(expectedHiddenDistance);
+
+  await page.locator("#focusTerminal").click();
+  await expect(page.locator("#terminalComposer")).toBeHidden();
+  await expect.poll(() => terminalScrollDistance(page)).toBe(0);
+
+  await page.locator("#focusTerminal").click();
+  await expect(page.locator("#terminalComposer")).toBeVisible();
+  await expect.poll(() => terminalScrollDistance(page)).toBe(expectedHiddenDistance);
+
+  await openRemoteSettings(page);
+  await page.locator("#composerHideAgentInputToggle").uncheck();
+  await expect.poll(() => terminalScrollDistance(page)).toBe(0);
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("laymux.remote.composerHideAgentInput")))
+    .toBe("0");
+});
+
+test("Composer jump-to-bottom stops at the hidden input boundary before the live tail", async ({
+  page,
+}) => {
+  await installRemotePage(page, { coarse: true, activeAgent: "Codex" });
+  await connect(page);
+  await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
+
+  type ScrollMock = {
+    buffer: { active: { baseY: number; viewportY: number } };
+    scrollCalls: number[];
+    setViewport: (baseY: number, viewportY: number) => void;
+  };
+  const readScrollState = () =>
+    page.evaluate(() => {
+      const mock = (
+        window as typeof window & {
+          __mockTerminal?: ScrollMock;
+        }
+      ).__mockTerminal;
+      return {
+        calls: mock?.scrollCalls ?? [],
+        distance: mock ? mock.buffer.active.baseY - mock.buffer.active.viewportY : -1,
+      };
+    });
+
+  // `connect()` reports the selected pane before snapshot replay and the
+  // two-pass fit finish. Establish a settled Composer boundary before this
+  // test starts simulating user-owned viewport movement.
+  await expect
+    .poll(async () => {
+      const { calls } = await readScrollState();
+      return calls.some(
+        (call, index) => call === Number.POSITIVE_INFINITY && calls[index + 1] === -4,
+      );
+    })
+    .toBe(true);
+  await page.waitForTimeout(250);
+
+  await page.evaluate(() => {
+    const mock = (
+      window as typeof window & {
+        __mockTerminal?: ScrollMock;
+      }
+    ).__mockTerminal;
+    document
+      .querySelector("#terminal")
+      ?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    mock?.scrollCalls.splice(0);
+    mock?.setViewport(100, 80);
+  });
+
+  const scrollToBottom = page.locator("#scrollToBottom");
+  await expect(scrollToBottom).toBeVisible();
+
+  await scrollToBottom.click();
+  await expect.poll(readScrollState).toEqual({
+    calls: [Number.POSITIVE_INFINITY, -4],
+    distance: 4,
+  });
+  await expect(scrollToBottom).toBeVisible();
+
+  await scrollToBottom.click();
+  await expect.poll(readScrollState).toEqual({
+    calls: [Number.POSITIVE_INFINITY, -4, Number.POSITIVE_INFINITY],
+    distance: 0,
+  });
+  await expect(scrollToBottom).toBeHidden();
+
+  await page.evaluate(() => {
+    const mock = (
+      window as typeof window & {
+        __mockTerminal?: ScrollMock;
+      }
+    ).__mockTerminal;
+    mock?.scrollCalls.splice(0);
+    const composer = document.querySelector<HTMLTextAreaElement>("#composerInput");
+    composer?.blur();
+    composer?.focus();
+    // Keep its hide request pending behind a new fit, then move the viewport.
+    // The button click below owns the final position and must cancel that hide.
+    window.dispatchEvent(new Event("resize"));
+    mock?.setViewport(100, 80);
+    const button = document.querySelector<HTMLButtonElement>("#scrollToBottom");
+    button?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+  });
+  await page.waitForTimeout(250);
+  await expect.poll(readScrollState).toEqual({ calls: [], distance: 20 });
+
+  await scrollToBottom.click();
+  await expect.poll(readScrollState).toEqual({
+    calls: [Number.POSITIVE_INFINITY, -4],
+    distance: 4,
+  });
+  await expect(scrollToBottom).toBeVisible();
+  await page.waitForTimeout(250);
+  await expect.poll(readScrollState).toEqual({
+    calls: [Number.POSITIVE_INFINITY, -4],
+    distance: 4,
+  });
+
+  await scrollToBottom.click();
+  await page.waitForTimeout(250);
+  await expect.poll(readScrollState).toEqual({
+    calls: [Number.POSITIVE_INFINITY, -4, Number.POSITIVE_INFINITY],
+    distance: 0,
+  });
+  await expect(scrollToBottom).toBeHidden();
 });

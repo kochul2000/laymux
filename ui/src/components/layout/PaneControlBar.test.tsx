@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -290,6 +290,39 @@ describe("PaneControlBar", () => {
     expect(defaultActions.onClear).toHaveBeenCalled();
   });
 
+  it("터미널 실제 클리어 버튼은 단축키를 표시하고 전용 동작을 호출한다", async () => {
+    const onClearTerminal = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar
+        currentView={defaultView}
+        actions={{ ...defaultActions, onClearTerminal }}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    const button = screen.getByTestId("pane-control-clear-terminal");
+    expect(button).toHaveAttribute("title", "Clear terminal (Alt+L)");
+    await user.click(button);
+    expect(onClearTerminal).toHaveBeenCalledTimes(1);
+  });
+
+  it("터미널이 아닌 view에는 실제 클리어 버튼을 표시하지 않는다", () => {
+    render(
+      <PaneControlBar
+        currentView={{ type: "MemoView" }}
+        actions={{ ...defaultActions, onClearTerminal: vi.fn() }}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    expect(screen.queryByTestId("pane-control-clear-terminal")).not.toBeInTheDocument();
+  });
+
   it("Restart View는 terminal에서만 빨간 위험 버튼으로 표시하고 동작한다", async () => {
     const onRestart = vi.fn();
     const user = userEvent.setup();
@@ -355,6 +388,27 @@ describe("PaneControlBar", () => {
     expect(screen.getByTestId("pane-control-pinned")).toBeInTheDocument();
   });
 
+  it("keeps terminal clear available in the narrow hover menu", async () => {
+    stubPaneWidth(320);
+    const onClearTerminal = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar
+        currentView={defaultView}
+        actions={{ ...defaultActions, onClearTerminal }}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("pane-control-menu-btn")).toBeInTheDocument());
+    await user.click(screen.getByTestId("pane-control-menu-btn"));
+    await user.click(screen.getByTestId("pane-control-clear-terminal"));
+
+    expect(onClearTerminal).toHaveBeenCalledTimes(1);
+  });
+
   // -- Narrow pane floating menu escapes pane clipping (issue #384) --
   // 좁은 pane에서 컨트롤 메뉴가 pane의 overflow-hidden 컨테이너에 갇히지 않도록
   // document.body로 portal 렌더한다. pane 서브트리 밖에 있어야 클리핑되지 않는다.
@@ -378,6 +432,85 @@ describe("PaneControlBar", () => {
     expect(document.body.contains(menu)).toBe(true);
     // It still escapes any ancestor stacking context via fixed positioning.
     expect(menu.className).toContain("fixed");
+  });
+
+  it("opens overflowing ViewHeader controls only on click without resizing the body", async () => {
+    // This pane is wider than the legacy 360px cutoff. Its GitHub-like header
+    // still cannot keep the tabs intact beside the full control cluster.
+    stubPaneWidth(480);
+    const clientWidthSpy = vi
+      .spyOn(HTMLElement.prototype, "clientWidth", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.dataset.testid === "view-header-content" ? 120 : 480;
+      });
+    const scrollWidthSpy = vi
+      .spyOn(HTMLElement.prototype, "scrollWidth", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.dataset.testid === "view-header-content" ? 205 : 480;
+      });
+
+    const { container, rerender } = render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <ViewHeader testId="view-header" title="GitHub">
+          <button className="shrink-0">Issues 100</button>
+          <button className="shrink-0">PRs 100</button>
+        </ViewHeader>
+        <div data-testid="view-body">body</div>
+      </PaneControlBar>,
+    );
+
+    const trigger = await screen.findByTestId("pane-control-menu-btn");
+    expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument();
+    fireEvent.click(trigger);
+    const menu = await screen.findByTestId("pane-control-floating-menu");
+    expect(container.contains(menu)).toBe(false);
+    expect(menu).toHaveAttribute("role", "toolbar");
+    expect(screen.getByTestId("pane-control-floating-content")).toHaveClass("flex-wrap");
+    expect(screen.getByTestId("view-header")).toHaveClass("ui-toolbar");
+    expect(screen.getByTestId("view-body")).toHaveTextContent("body");
+    expect(screen.getByText("Issues 100")).toBeVisible();
+    expect(screen.getByText("PRs 100")).toBeVisible();
+    expect(menu).toContainElement(screen.getByTestId("pane-control-split-h"));
+    expect(menu).toContainElement(screen.getByTestId("pane-control-split-v"));
+    expect(menu).toContainElement(screen.getByTestId("pane-control-clear"));
+    expect(menu).toContainElement(screen.getByTestId("pane-control-view-select"));
+    expect(menu).toContainElement(screen.getByTestId("pane-control-pin"));
+    expect(menu).toContainElement(screen.getByTestId("pane-control-minimize"));
+
+    rerender(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={false}>
+        <ViewHeader testId="view-header" title="GitHub">
+          <button className="shrink-0">Issues 100</button>
+          <button className="shrink-0">PRs 100</button>
+        </ViewHeader>
+        <div data-testid="view-body">body</div>
+      </PaneControlBar>,
+    );
+    fireEvent.pointerMove(document.body);
+    expect(screen.getByTestId("pane-control-floating-menu")).toBeInTheDocument();
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument();
+
+    clientWidthSpy.mockRestore();
+    scrollWidthSpy.mockRestore();
+  });
+
+  it("does not reopen a dismissed menu when pane hover returns", async () => {
+    stubPaneWidth(200);
+    const content = (hovered: boolean) => (
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={hovered}>
+        <ViewHeader title="GitHub">Issues 0</ViewHeader>
+      </PaneControlBar>
+    );
+    const { rerender } = render(content(true));
+    const trigger = await screen.findByTestId("pane-control-menu-btn");
+    expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument();
+    fireEvent.click(trigger);
+    expect(screen.getByTestId("pane-control-floating-menu")).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    rerender(content(false));
+    rerender(content(true));
+    expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument();
   });
 
   it("keeps the narrow menu open and actionable after the pane loses hover (issue #384)", async () => {
@@ -448,6 +581,126 @@ describe("PaneControlBar", () => {
     await waitFor(() =>
       expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument(),
     );
+  });
+
+  it("closes an explicitly opened floating toolbar with Escape", async () => {
+    stubPaneWidth(200);
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    await user.click(await screen.findByTestId("pane-control-menu-btn"));
+    expect(screen.getByTestId("pane-control-floating-menu")).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("moves focus into a manual toolbar and restores it to the trigger on Escape", async () => {
+    stubPaneWidth(200);
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    const trigger = await screen.findByTestId("pane-control-menu-btn");
+    await user.click(trigger);
+    await waitFor(() => expect(screen.getByTestId("pane-control-view-select")).toHaveFocus());
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument(),
+    );
+    expect(trigger).toHaveFocus();
+  });
+
+  it("restores Escape focus to the owning pane when hover unmounts the trigger", async () => {
+    stubPaneWidth(200);
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    await user.click(await screen.findByTestId("pane-control-menu-btn"));
+    await waitFor(() => expect(screen.getByTestId("pane-control-view-select")).toHaveFocus());
+
+    rerender(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={false}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    expect(screen.queryByTestId("pane-control-menu-btn")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("pane-control-hover")).toHaveFocus();
+  });
+
+  it("preserves keyboard focus when a minimized narrow pane expands into the portal", async () => {
+    stubPaneWidth(200);
+    useSettingsStore.setState((state) => ({
+      controlBar: { ...state.controlBar, defaultMode: "minimized" },
+    }));
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    const minimizedTrigger = await screen.findByTestId("pane-control-menu-btn");
+    minimizedTrigger.focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.getByTestId("pane-control-view-select")).toHaveFocus());
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("pane-control-menu-btn")).toHaveFocus();
+  });
+
+  it("discards a portalled menu while its owning workspace is inactive", async () => {
+    stubPaneWidth(200);
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true} isActive>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    await user.click(await screen.findByTestId("pane-control-menu-btn"));
+    expect(screen.getByTestId("pane-control-floating-menu")).toBeInTheDocument();
+
+    rerender(
+      <PaneControlBar
+        currentView={defaultView}
+        actions={defaultActions}
+        hovered={false}
+        isActive={false}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument();
+
+    rerender(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true} isActive>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    await screen.findByTestId("pane-control-menu-btn");
+    expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument();
   });
 
   it("does not re-open the narrow menu after widen then re-narrow (stale-open regression, issue #385)", async () => {
@@ -522,14 +775,38 @@ describe("PaneControlBar", () => {
     useSettingsStore.setState((s) => ({
       controlBar: { ...s.controlBar, defaultMode: "pinned" },
     }));
-    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-      top: 100,
-      bottom: 120,
-      left: 380,
-      right: 400,
-      width: 20,
-      height: 20,
-    } as DOMRect);
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        if (this.dataset.testid === "pane-control-floating-menu") {
+          return {
+            top: 0,
+            bottom: 50,
+            left: 0,
+            right: 200,
+            width: 200,
+            height: 50,
+          } as DOMRect;
+        }
+        if (this.tagName === "BUTTON") {
+          return {
+            top: 100,
+            bottom: 120,
+            left: 380,
+            right: 400,
+            width: 20,
+            height: 20,
+          } as DOMRect;
+        }
+        return {
+          top: 80,
+          bottom: 600,
+          left: 100,
+          right: 420,
+          width: 320,
+          height: 520,
+        } as DOMRect;
+      });
     const user = userEvent.setup();
     const { rerender } = render(
       <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={false}>
@@ -547,8 +824,9 @@ describe("PaneControlBar", () => {
 
     await user.click(screen.getByTestId("pane-control-menu-btn"));
     const menu = screen.getByTestId("pane-control-floating-menu");
+    await waitFor(() => expect(menu).toHaveAttribute("data-placement", "down"));
     expect(menu.style.top).toBe("122px");
-    expect(menu.style.right).toBe(`${window.innerWidth - 400}px`);
+    expect(menu.style.left).toBe("200px");
     rectSpy.mockRestore();
   });
 
@@ -569,7 +847,18 @@ describe("PaneControlBar", () => {
     const rectSpy = vi
       .spyOn(HTMLElement.prototype, "getBoundingClientRect")
       .mockImplementation(function (this: HTMLElement) {
-        return this.tagName === "BUTTON" ? zeroRect : paneRect;
+        if (this.tagName === "BUTTON") return zeroRect;
+        if (this.dataset.testid === "pane-control-floating-menu") {
+          return {
+            top: 0,
+            bottom: 50,
+            left: 0,
+            right: 180,
+            width: 180,
+            height: 50,
+          } as DOMRect;
+        }
+        return paneRect;
       });
     const user = userEvent.setup();
     render(
@@ -582,8 +871,9 @@ describe("PaneControlBar", () => {
     await user.click(screen.getByTestId("pane-control-menu-btn"));
 
     const menu = screen.getByTestId("pane-control-floating-menu");
+    await waitFor(() => expect(menu).toHaveAttribute("data-placement", "down"));
     expect(menu.style.top).toBe("302px");
-    expect(menu.style.right).toBe(`${window.innerWidth - 240}px`);
+    expect(menu.style.left).toBe("60px");
     rectSpy.mockRestore();
   });
 
@@ -618,7 +908,7 @@ describe("PaneControlBar", () => {
         <div>content</div>
       </PaneControlBar>,
     );
-    await user.click(screen.getByTestId("pane-control-minimize"));
+    await user.click(screen.getByRole("button", { name: "컨트롤바 숨기기" }));
     expect(screen.getByTestId("pane-control-minimized")).toBeInTheDocument();
     expect(screen.getByTestId("pane-control-menu-btn")).toBeInTheDocument();
   });
@@ -668,6 +958,7 @@ describe("PaneControlBar", () => {
     await user.click(screen.getByTestId("pane-control-menu-btn"));
     await user.click(screen.getByTestId("pane-control-minimize"));
     expect(screen.getByTestId("pane-control-minimized")).toBeInTheDocument();
+    expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument();
 
     // Expanding from the three-dot entry opens the same narrow menu. It must
     // retain a Minimize action so this is a reversible toggle.

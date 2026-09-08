@@ -1,8 +1,12 @@
 import { render, screen, fireEvent, act } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("@/lib/persist-session", () => ({
   persistSession: vi.fn().mockResolvedValue(undefined),
+}));
+const clearPaneFromUiMock = vi.fn().mockResolvedValue(null);
+vi.mock("@/lib/pane-clear-action", () => ({
+  runPaneClearFromUi: (paneId: string) => clearPaneFromUiMock(paneId),
 }));
 vi.mock("@/lib/tauri-api", () => ({
   createTerminalSession: vi.fn().mockResolvedValue(undefined),
@@ -53,11 +57,109 @@ describe("Dock", () => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
     useTerminalStartupStore.setState(useTerminalStartupStore.getInitialState());
+    clearPaneFromUiMock.mockClear();
     // 기존 테스트는 hover를 기본 모드로 가정
     useSettingsStore.setState((s) => ({
       controlBar: { ...s.controlBar, defaultMode: "hover" },
     }));
     capturedViewConfigs.length = 0;
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("discards a single-pane dock portal when the retained dock becomes inactive", async () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class MockResizeObserver {
+        constructor(private callback: ResizeObserverCallback) {}
+        observe(target: Element) {
+          setTimeout(
+            () =>
+              this.callback(
+                [
+                  {
+                    target,
+                    contentRect: { width: 200, height: 600 },
+                  } as unknown as ResizeObserverEntry,
+                ],
+                this as unknown as ResizeObserver,
+              ),
+            0,
+          );
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    const pane = {
+      id: "dp-retained",
+      view: { type: "MemoView" as const },
+      x: 0,
+      y: 0,
+      w: 1,
+      h: 1,
+    };
+    const { rerender } = render(
+      <Dock position="left" activeView="MemoView" views={[]} panes={[pane]} isActive />,
+    );
+
+    fireEvent.mouseEnter(screen.getByTestId("dock-left"));
+    fireEvent.click(await screen.findByTestId("pane-control-menu-btn"));
+    expect(screen.getByTestId("pane-control-floating-menu")).toBeInTheDocument();
+
+    rerender(
+      <Dock position="left" activeView="MemoView" views={[]} panes={[pane]} isActive={false} />,
+    );
+    expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument();
+  });
+
+  it("keeps every split pane inactive in a retained hidden dock", () => {
+    render(
+      <Dock
+        position="bottom"
+        activeView="MemoView"
+        views={[]}
+        isActive={false}
+        panes={[
+          { id: "dp-a", view: { type: "MemoView" }, x: 0, y: 0, w: 0.5, h: 1 },
+          { id: "dp-b", view: { type: "MemoView" }, x: 0.5, y: 0, w: 0.5, h: 1 },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId("dock-pane-dp-a")).toHaveStyle({ display: "none" });
+    expect(screen.getByTestId("dock-pane-dp-b")).toHaveStyle({ display: "none" });
+    fireEvent.mouseEnter(screen.getByTestId("dock-pane-dp-a"));
+    expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument();
+  });
+
+  it("does not revive a single-pane hover bar when a retained dock is shown again", () => {
+    useSettingsStore.setState((state) => ({
+      controlBar: { ...state.controlBar, hoverIdleSeconds: 0 },
+    }));
+    const pane = {
+      id: "dp-hover-lifecycle",
+      view: { type: "MemoView" as const },
+      x: 0,
+      y: 0,
+      w: 1,
+      h: 1,
+    };
+    const { rerender } = render(
+      <Dock position="left" activeView="MemoView" views={[]} panes={[pane]} isActive />,
+    );
+    fireEvent.mouseEnter(screen.getByTestId("dock-left"));
+    expect(screen.getByTestId("pane-control-bar")).toBeInTheDocument();
+
+    rerender(
+      <Dock position="left" activeView="MemoView" views={[]} panes={[pane]} isActive={false} />,
+    );
+    expect(screen.queryByTestId("pane-control-bar")).not.toBeInTheDocument();
+
+    rerender(<Dock position="left" activeView="MemoView" views={[]} panes={[pane]} isActive />);
+    expect(screen.queryByTestId("pane-control-bar")).not.toBeInTheDocument();
   });
 
   it("renders with correct test id", () => {
@@ -246,6 +348,23 @@ describe("Dock", () => {
     const dock = screen.getByTestId("dock-bottom");
     fireEvent.mouseEnter(dock);
     expect(screen.getByTestId("pane-control-clear")).toBeInTheDocument();
+  });
+
+  it("터미널 실제 클리어 버튼은 단일 dock pane을 대상으로 실행한다", () => {
+    render(
+      <Dock
+        position="bottom"
+        activeView="TerminalView"
+        views={[]}
+        panes={[{ id: "dp-1", view: { type: "TerminalView" }, x: 0, y: 0, w: 1, h: 1 }]}
+      />,
+    );
+    fireEvent.mouseEnter(screen.getByTestId("dock-bottom"));
+
+    fireEvent.click(screen.getByTestId("pane-control-clear-terminal"));
+
+    expect(clearPaneFromUiMock).toHaveBeenCalledWith("dp-1");
+    expect(clearPaneFromUiMock).toHaveBeenCalledTimes(1);
   });
 
   it("shows clear button even when panes is empty but activeView is set", () => {

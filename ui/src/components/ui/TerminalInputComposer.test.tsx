@@ -1,16 +1,27 @@
 import { useState } from "react";
-import { cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { TerminalInputComposer, type TerminalInputComposerLabels } from "./TerminalInputComposer";
-import type { InputMode } from "@/lib/terminal-input-composer-state";
+import {
+  COMPOSER_STARRED_EDITOR_LONG_PRESS_MS,
+  type InputMode,
+} from "@/lib/terminal-input-composer-state";
 
 const labels: TerminalInputComposerLabels = {
   editor: "Terminal input",
-  placeholder: "Type before sending",
   resize: "Resize input area",
   history: "Recent inputs",
   autocomplete: "Input suggestions",
+  star: "Star",
+  unstar: "Unstar",
+  starredEditor: "Edit starred input",
+  starredLabel: "Label",
+  starredValue: "Value",
+  starredSend: "Send on pick",
+  starredSendDesc: "Selecting this suggestion also submits it.",
+  starredSave: "Save",
+  starredCancel: "Cancel",
 };
 
 function renderComposer(
@@ -47,7 +58,6 @@ describe("TerminalInputComposer", () => {
 
     const textarea = screen.getByRole("textbox", { name: "Terminal input" });
     expect(textarea).toHaveValue("draft");
-    expect(textarea).toHaveAttribute("placeholder", "Type before sending");
     // The editor is the whole surface — no separate action button steals space.
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.getByTestId("composer")).toHaveAttribute("data-can-send", "true");
@@ -713,6 +723,154 @@ describe("TerminalInputComposer", () => {
       fireEvent.mouseDown(screen.getByText("git checkout"));
       expect(onTextChange).toHaveBeenCalledWith("git checkout");
       expect(screen.queryByTestId("composer-autocomplete")).not.toBeInTheDocument();
+    });
+
+    it("sends after filling when the starred suggestion is marked to send", () => {
+      const onSend = vi.fn();
+      const onTextChange = vi.fn();
+      const onUpsertStarredEntry = vi.fn();
+      renderComposer({
+        text: "gs",
+        autocompleteEnabled: true,
+        starredEntries: [{ value: "git status", label: "gs", send: true }],
+        onSend,
+        onTextChange,
+        onUpsertStarredEntry,
+      });
+
+      const option = screen.getByRole("option", { name: /gs/ });
+      fireEvent.pointerDown(option, {
+        pointerId: 1,
+        clientX: 10,
+        clientY: 10,
+        button: 0,
+        isPrimary: true,
+      });
+      fireEvent.pointerUp(option, {
+        pointerId: 1,
+        clientX: 10,
+        clientY: 10,
+        button: 0,
+        isPrimary: true,
+      });
+      expect(onTextChange).toHaveBeenCalledWith("git status");
+      expect(onSend).toHaveBeenCalledTimes(1);
+    });
+
+    it("ignores a non-primary pointer on a send suggestion", () => {
+      const onSend = vi.fn();
+      const onTextChange = vi.fn();
+      const onUpsertStarredEntry = vi.fn();
+      renderComposer({
+        text: "gs",
+        autocompleteEnabled: true,
+        starredEntries: [{ value: "git status", label: "gs", send: true }],
+        onSend,
+        onTextChange,
+        onUpsertStarredEntry,
+      });
+
+      const option = screen.getByRole("option", { name: /gs/ });
+      fireEvent.pointerDown(option, { pointerId: 1, clientX: 10, clientY: 10, button: 2 });
+      fireEvent.pointerUp(option, { pointerId: 1, clientX: 10, clientY: 10, button: 2 });
+      expect(onTextChange).not.toHaveBeenCalled();
+      expect(onSend).not.toHaveBeenCalled();
+    });
+
+    it("opens the starred editor on a long press instead of picking", () => {
+      vi.useFakeTimers();
+      try {
+        const onTextChange = vi.fn();
+        const onUpsertStarredEntry = vi.fn();
+        renderComposer({
+          text: "git",
+          autocompleteEnabled: true,
+          history,
+          onTextChange,
+          onUpsertStarredEntry,
+        });
+        const option = screen.getByTestId("composer-autocomplete-option-0");
+        fireEvent.pointerDown(option, {
+          pointerId: 1,
+          clientX: 10,
+          clientY: 10,
+          button: 0,
+          isPrimary: true,
+        });
+        act(() => {
+          vi.advanceTimersByTime(COMPOSER_STARRED_EDITOR_LONG_PRESS_MS);
+        });
+        expect(screen.getByTestId("composer-starred-editor")).toBeInTheDocument();
+        expect(onTextChange).not.toHaveBeenCalled();
+        fireEvent.pointerUp(option, {
+          pointerId: 1,
+          clientX: 10,
+          clientY: 10,
+          button: 0,
+          isPrimary: true,
+        });
+        expect(onTextChange).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps the starred editor and draft visible when saving fails", async () => {
+      vi.useFakeTimers();
+      try {
+        const onUpsertStarredEntry = vi.fn().mockRejectedValue(new Error("save failed"));
+        renderComposer({
+          text: "git",
+          autocompleteEnabled: true,
+          history,
+          onUpsertStarredEntry,
+        });
+        const option = screen.getByTestId("composer-autocomplete-option-0");
+        fireEvent.pointerDown(option, {
+          pointerId: 1,
+          clientX: 10,
+          clientY: 10,
+          button: 0,
+          isPrimary: true,
+        });
+        act(() => vi.advanceTimersByTime(COMPOSER_STARRED_EDITOR_LONG_PRESS_MS));
+        fireEvent.change(screen.getByTestId("composer-starred-editor-label"), {
+          target: { value: "kept label" },
+        });
+
+        await act(async () => fireEvent.click(screen.getByTestId("composer-starred-editor-save")));
+
+        expect(screen.getByTestId("composer-starred-editor")).toBeInTheDocument();
+        expect(screen.getByRole("alert")).toHaveTextContent("save failed");
+        expect(screen.getByTestId("composer-starred-editor-label")).toHaveValue("kept label");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("toggles a persistent star without selecting or closing the suggestion", () => {
+      const onTextChange = vi.fn();
+      const onToggleStar = vi.fn();
+      renderComposer({
+        text: "git",
+        autocompleteEnabled: true,
+        history,
+        starredEntries: ["git checkout"],
+        onToggleStar,
+        onTextChange,
+      });
+
+      const star = screen.getByRole("button", { name: "Star: git push" });
+      const unstar = screen.getByRole("button", { name: "Unstar: git checkout" });
+      expect(star).toHaveAttribute("aria-pressed", "false");
+      expect(unstar).toHaveAttribute("aria-pressed", "true");
+
+      fireEvent.mouseDown(star);
+      fireEvent.click(star);
+
+      expect(onToggleStar).toHaveBeenCalledWith("git push", true);
+      expect(onTextChange).not.toHaveBeenCalled();
+      expect(screen.getByTestId("composer-autocomplete")).toBeInTheDocument();
     });
 
     it("lets ArrowUp fall through to edge history recall when no suggestion is active", () => {

@@ -315,10 +315,18 @@ pub fn find_wsl_distro(state: &AppState, source_id: &str) -> Option<String> {
     None
 }
 
-/// Detect the default WSL distro name (cached per-call; fast because wsl.exe is local).
+/// Detect the default WSL distro name through the shared 60s cache.
+///
+/// The probe itself is a `wsl.exe --list` spawn with a 3s timeout, and
+/// `resolve_address_path` calls this **per path** when no distro was passed in.
+/// A bounded `stat_paths` batch of 64 POSIX-looking candidates would otherwise
+/// spawn 64 processes, so every caller goes through the cache
+/// (`wsl_probe::default_distro_cached`, which also rejects unsafe distro names —
+/// the name is interpolated into `\\wsl.localhost\<distro>\...`). ADR-0188's
+/// ambient triggers made this path frequent enough to matter.
 #[cfg(windows)]
 pub fn get_default_wsl_distro() -> Option<String> {
-    get_default_wsl_distro_with_timeout(crate::constants::WSL_AGENT_PROBE_TIMEOUT)
+    crate::wsl_probe::default_distro_cached(crate::constants::WSL_AGENT_PROBE_TIMEOUT)
 }
 
 #[cfg(windows)]

@@ -35,13 +35,21 @@ import {
   type GrokUsageVisibleRow,
   type Keybinding,
   type LanguageSetting,
+  type UpdateChannel,
 } from "@/stores/settings-store";
 import {
   cloudConnectStart,
   cloudDisconnect,
   getCloudStatus,
   loadSettings,
+  checkAppUpdate,
+  getAppUpdateStatus,
+  installAppUpdate,
+  onAppUpdateStatusChanged,
+  openExternal,
+  type AppUpdateStatus,
   getRemoteAccessStatus,
+  setComposerStarredEntry,
   setRemoteRuntimeAccess,
   type CloudStatus,
   type ExtensionViewer,
@@ -49,6 +57,8 @@ import {
   type GithubSettings,
   type RemoteSettings,
 } from "@/lib/tauri-api";
+import { Button } from "@/components/ui/Button";
+import { ExternalLinkIcon, PlusIcon, XIcon } from "@/components/ui/icons";
 import type { SyncCwdConfig } from "@/lib/sync-cwd-config";
 import {
   GITHUB_FONT_SIZE_MAX,
@@ -69,10 +79,13 @@ import {
   usesArrowWildcard,
 } from "@/lib/keybinding-registry";
 import { toSupportedCursorShape } from "@/lib/cursor-settings";
+import { ComposerStarredEntryEditor } from "@/components/ui/ComposerStarredEntryEditor";
 import {
+  composerSuggestionDisplay,
   readDesktopInputModePreference,
   writeDesktopInputModePreference,
   type ComposerHistoryScope,
+  type ComposerStarredEntry,
   type InputMode,
 } from "@/lib/terminal-input-composer-state";
 import type { PastePathSeparator } from "@/lib/smart-text";
@@ -85,6 +98,7 @@ import {
   isSafeAgentCommand,
   resolveAgentCommand,
 } from "@/lib/agent-command";
+import type { LinkActivationMode } from "@/lib/link-activation";
 import { FocusInput, FocusSelect } from "@/components/ui/FormControls";
 import { inputCls, inputStyle } from "@/components/ui/form-control-styles";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
@@ -97,10 +111,7 @@ import {
   LOOPBACK_ALLOWED_IPS,
   normalizeAutoMobileWidth,
   normalizeCustomHosts,
-  normalizeSnapshotMaxKib,
   parseAllowedIps,
-  SNAPSHOT_MAX_KIB_MAX,
-  SNAPSHOT_MAX_KIB_MIN,
   TAILSCALE_ALLOWED_IPS,
 } from "@/lib/remote-hosts";
 import {
@@ -114,8 +125,7 @@ import {
 import { useRemoteHostOptions } from "@/hooks/useRemoteHostOptions";
 
 const cardStyle: React.CSSProperties = {
-  background: "var(--bg-overlay)",
-  borderRadius: "var(--radius-lg)",
+  background: "var(--bg-surface)",
   border: "1px solid var(--border)",
 };
 
@@ -131,15 +141,15 @@ function SettingRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start gap-3 py-1.5">
-      <div className="w-36 shrink-0 pt-1">
+    <div className="settings-row">
+      <div className="settings-row-label">
         <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
           {label}
         </span>
         {desc && (
           <p
-            className="mt-0.5 text-[11px] leading-tight"
-            style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            className="mt-1 text-[13px] leading-relaxed"
+            style={{ color: "var(--text-secondary)" }}
           >
             {desc}
           </p>
@@ -151,15 +161,12 @@ function SettingRow({
 }
 
 /** Sidebar group header (e.g. "Appearance", "Terminal"). */
-function NavGroupHeader({ label }: { label: string }) {
+function NavGroupHeader({ label, children }: { label: string; children?: React.ReactNode }) {
   return (
-    <div className="mt-3 px-3 pb-1">
-      <span
-        className="text-[10px] uppercase tracking-wider"
-        style={{ color: "var(--text-secondary)", opacity: 0.7 }}
-      >
-        {label}
-      </span>
+    <div className="settings-nav-heading">
+      <h3>{label}</h3>
+      <span className="settings-nav-divider" aria-hidden="true" />
+      {children}
     </div>
   );
 }
@@ -167,7 +174,7 @@ function NavGroupHeader({ label }: { label: string }) {
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <h3
-      className="mb-3 border-b pb-2 text-[15px] font-semibold"
+      className="mb-4 border-b pb-3 text-lg font-semibold"
       style={{ borderColor: "var(--border)", color: "var(--text-primary)" }}
     >
       {children}
@@ -179,10 +186,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 function SubGroup({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div style={cardStyle} className="mt-3 p-4">
-      <h3
-        className="mb-3 text-[12px] font-semibold uppercase tracking-wider"
-        style={{ color: "var(--text-secondary)", opacity: 0.7 }}
-      >
+      <h3 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-secondary)" }}>
         {title}
       </h3>
       {children}
@@ -246,6 +250,297 @@ function useMonospacedFonts() {
   return installed;
 }
 
+/** Where the update section links out to. The updater itself pins these in Rust. */
+const RELEASES_URL = "https://github.com/kochul2000/laymux/releases";
+const RELEASE_TAG_URL = (version: string) => `${RELEASES_URL}/tag/v${version}`;
+
+function formatUpdateTimestamp(value: number | string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const date = typeof value === "number" ? new Date(value) : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString();
+}
+
+/**
+ * Version, channel, and the update actions in one place (ADR-0190).
+ *
+ * The channel is a settings draft like every other field here — it lands on
+ * Save, and saving triggers a check because the backend reads the channel from
+ * the file. Check and install are actions, not settings, so they run at once.
+ */
+function UpdateSection() {
+  const { t } = useTranslation("settings");
+  const storeUpdate = useSettingsStore((s) => s.update);
+  const setUpdate = useSettingsStore((s) => s.setUpdate);
+  const [update, setDraftUpdate] = useDraft("update", storeUpdate, (v) => setUpdate(v));
+
+  const [status, setStatus] = useState<AppUpdateStatus | null>(null);
+  const [requestError, setRequestError] = useState<string | null>(null);
+  // Backend status is process-global, so lastError can come from the startup or
+  // periodic checker. Settings only surfaces failures for an action initiated
+  // from this section; background failures remain available in the snapshot
+  // without turning into a persistent user-facing wall of transport text.
+  const explicitUpdateActionRef = useRef(false);
+
+  const settleExplicitUpdateAction = useCallback((snapshot: AppUpdateStatus) => {
+    setStatus(snapshot);
+    if (!explicitUpdateActionRef.current || snapshot.operation !== "idle") return;
+    explicitUpdateActionRef.current = false;
+    setRequestError(snapshot.lastError);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+
+    void getAppUpdateStatus()
+      .then((snapshot) => {
+        if (!cancelled) setStatus(snapshot);
+      })
+      .catch(() => {});
+    void onAppUpdateStatusChanged((snapshot) => {
+      if (cancelled) return;
+      if (!explicitUpdateActionRef.current && snapshot.operation === "checking") {
+        setRequestError(null);
+      }
+      settleExplicitUpdateAction(snapshot);
+    })
+      .then((stop) => {
+        if (cancelled) stop();
+        else unlisten = stop;
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [settleExplicitUpdateAction]);
+
+  const busy = status !== null && status.operation !== "idle";
+  const available = status?.availableVersion ?? null;
+  const error = requestError;
+  // Why the manual check cannot run right now, as the sentence to show on the
+  // button itself; null when it can run. The dev-build gate is enforced in Rust
+  // (a debug binary must never replace itself with a release artifact), so the
+  // UI only has to explain it.
+  const checkDisabledReason = !status
+    ? t("update.loadingStatus")
+    : !status.enabled
+      ? t("update.disabledInDev")
+      : busy
+        ? t("update.busy")
+        : null;
+  const checkedAt = formatUpdateTimestamp(status?.checkedAtMs);
+  const publishedAt = formatUpdateTimestamp(status?.publishedAt);
+
+  const runCheck = useCallback(() => {
+    setRequestError(null);
+    explicitUpdateActionRef.current = true;
+    void checkAppUpdate()
+      .then(settleExplicitUpdateAction)
+      .catch((reason: unknown) => {
+        explicitUpdateActionRef.current = false;
+        setRequestError(reason instanceof Error ? reason.message : String(reason));
+      });
+  }, [settleExplicitUpdateAction]);
+
+  const runInstall = useCallback(() => {
+    if (!available) return;
+    if (!window.confirm(t("update.installConfirm", { version: available }))) return;
+    setRequestError(null);
+    explicitUpdateActionRef.current = true;
+    void installAppUpdate()
+      .then(settleExplicitUpdateAction)
+      .catch((reason: unknown) => {
+        explicitUpdateActionRef.current = false;
+        setRequestError(reason instanceof Error ? reason.message : String(reason));
+      });
+  }, [available, settleExplicitUpdateAction, t]);
+
+  return (
+    <div>
+      <SectionTitle>{t("update.title")}</SectionTitle>
+
+      <SubGroup title={t("update.groupVersion")}>
+        <SettingRow label={t("update.currentVersion")}>
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              data-testid="update-current-version"
+              className="text-[13px]"
+              style={{ color: "var(--text-primary)" }}
+            >
+              {status?.currentVersion ?? "—"}
+            </span>
+            <span
+              data-testid="update-current-channel"
+              className="rounded px-1.5 py-0.5 text-[13px]"
+              style={{ color: "var(--text-secondary)", border: "1px solid var(--border)" }}
+            >
+              {status?.channel === "beta" ? t("update.channelBeta") : t("update.channelStable")}
+            </span>
+          </div>
+        </SettingRow>
+
+        <SettingRow label={t("update.releasePage")}>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              data-testid="update-open-current-release"
+              icon={<ExternalLinkIcon />}
+              disabled={!status?.currentVersion}
+              title={t("update.opensInBrowser")}
+              onClick={() => {
+                if (status?.currentVersion)
+                  void openExternal(RELEASE_TAG_URL(status.currentVersion));
+              }}
+            >
+              {t("update.openCurrentRelease")}
+            </Button>
+            <Button
+              data-testid="update-open-releases"
+              icon={<ExternalLinkIcon />}
+              title={t("update.opensInBrowser")}
+              onClick={() => void openExternal(RELEASES_URL)}
+            >
+              {t("update.openReleases")}
+            </Button>
+          </div>
+        </SettingRow>
+      </SubGroup>
+
+      <SubGroup title={t("update.groupChannel")}>
+        <SettingRow label={t("update.channel")} desc={t("update.channelDesc")}>
+          <FocusSelect
+            data-testid="update-channel-select"
+            className={inputCls}
+            value={update.channel}
+            onChange={(e) => setDraftUpdate({ channel: e.target.value as UpdateChannel })}
+          >
+            <option value="stable">{t("update.channelStable")}</option>
+            <option value="beta">{t("update.channelBeta")}</option>
+          </FocusSelect>
+        </SettingRow>
+        {update.channel === "beta" && (
+          <p
+            data-testid="update-channel-beta-warning"
+            className="text-[13px]"
+            style={{ color: "var(--claude)", margin: "0 0 8px" }}
+          >
+            {t("update.channelBetaWarning")}
+          </p>
+        )}
+      </SubGroup>
+
+      <SubGroup title={t("update.groupCheck")}>
+        <SettingRow label={t("update.manualCheck")} desc={t("update.checkNowDesc")}>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              variant="primary"
+              data-testid="update-check-btn"
+              disabled={checkDisabledReason !== null}
+              // A disabled button has to say why it is disabled where the
+              // pointer already is. The dev-build gate is the common case and
+              // its explanation used to live only in a paragraph below.
+              title={checkDisabledReason ?? undefined}
+              onClick={runCheck}
+            >
+              {status?.operation === "checking" ? t("update.checking") : t("update.checkNow")}
+            </Button>
+            <span
+              data-testid="update-checked-at"
+              className="text-[13px]"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              {checkedAt ? t("update.checkedAt", { at: checkedAt }) : t("update.neverChecked")}
+            </span>
+          </div>
+        </SettingRow>
+
+        {status && !status.enabled && (
+          <p
+            data-testid="update-disabled-note"
+            className="text-[13px]"
+            style={{ color: "var(--text-secondary)", margin: "0 0 8px" }}
+          >
+            {t("update.disabledInDev")}
+          </p>
+        )}
+
+        {status?.enabled === false ? null : available ? (
+          <div
+            data-testid="update-available"
+            className="mt-1 rounded p-3"
+            style={{ border: "1px solid var(--border)" }}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                {t("update.availableVersion", { version: available })}
+              </span>
+              {publishedAt && (
+                <span
+                  data-testid="update-published-at"
+                  className="text-[13px]"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  {t("update.publishedAt", { at: publishedAt })}
+                </span>
+              )}
+            </div>
+            {status?.notes && (
+              <pre
+                data-testid="update-notes"
+                className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-[13px]"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                {status.notes}
+              </pre>
+            )}
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <Button
+                variant="primary"
+                data-testid="update-install-btn"
+                disabled={busy}
+                title={busy ? t("update.busy") : undefined}
+                onClick={runInstall}
+              >
+                {status?.operation === "downloading" || status?.operation === "installing"
+                  ? t("update.installing")
+                  : t("update.install")}
+              </Button>
+              <Button
+                data-testid="update-open-available-release"
+                icon={<ExternalLinkIcon />}
+                title={t("update.opensInBrowser")}
+                onClick={() => void openExternal(RELEASE_TAG_URL(available))}
+              >
+                {t("update.openReleaseNotes")}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <p
+            data-testid="update-up-to-date"
+            className="text-[13px]"
+            style={{ color: "var(--text-secondary)", margin: "0 0 8px" }}
+          >
+            {t("update.upToDate")}
+          </p>
+        )}
+
+        {error && (
+          <p
+            data-testid="update-error"
+            className="min-w-0 max-w-full break-words text-[13px] [overflow-wrap:anywhere]"
+            style={{ color: "var(--claude)", margin: "0 0 8px" }}
+          >
+            {error}
+          </p>
+        )}
+      </SubGroup>
+    </div>
+  );
+}
+
 const LANGUAGE_OPTIONS: LanguageSetting[] = ["system", "ko", "en"];
 
 function StartupSection() {
@@ -272,99 +567,60 @@ function StartupSection() {
     <div>
       <SectionTitle>{t("settings:startup.title")}</SectionTitle>
 
-      {/* Language — applies immediately (live i18n effect), so it is not draft-gated. */}
-      <div className="mb-3" style={cardStyle}>
-        <div className="px-4 py-2">
-          <div className="flex items-center justify-between">
-            <div>
-              <h4 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-                {t("settings:startup.language.title")}
-              </h4>
-              <p
-                className="mt-0.5 text-[11px]"
-                style={{ color: "var(--text-secondary)", opacity: 0.6 }}
-              >
-                {t("settings:startup.language.description")}
-              </p>
-            </div>
-            <FocusSelect
-              data-testid="language-select"
-              value={language}
-              onChange={(e) => setLanguage(e.target.value as LanguageSetting)}
-              className="w-44 rounded px-2 py-1.5 text-xs"
-            >
-              {LANGUAGE_OPTIONS.map((lng) => (
-                <option key={lng} value={lng}>
-                  {t(`common:language.${lng}`)}
+      <div style={cardStyle} className="p-4">
+        <SettingRow
+          label={t("settings:startup.language.title")}
+          desc={t("settings:startup.language.description")}
+        >
+          <FocusSelect
+            data-testid="language-select"
+            aria-label={t("settings:startup.language.title")}
+            value={language}
+            onChange={(e) => setLanguage(e.target.value as LanguageSetting)}
+            className={inputCls}
+          >
+            {LANGUAGE_OPTIONS.map((lng) => (
+              <option key={lng} value={lng}>
+                {t(`common:language.${lng}`)}
+              </option>
+            ))}
+          </FocusSelect>
+        </SettingRow>
+        <SettingRow label={t("startup.appTheme.title")} desc={t("startup.appTheme.description")}>
+          <FocusSelect
+            data-testid="app-theme-select"
+            aria-label={t("startup.appTheme.title")}
+            value={draftAppTheme}
+            onChange={(e) => setDraftAppTheme(e.target.value)}
+            className={inputCls}
+          >
+            {builtinAppThemes.map((theme) => (
+              <option key={theme.id} value={theme.id}>
+                {theme.name}
+              </option>
+            ))}
+          </FocusSelect>
+        </SettingRow>
+        <SettingRow
+          label={t("startup.defaultProfile.title")}
+          desc={t("startup.defaultProfile.description")}
+        >
+          <FocusSelect
+            data-testid="default-profile-select"
+            aria-label={t("startup.defaultProfile.title")}
+            value={draftDefaultProfile}
+            onChange={(e) => setDraftDefaultProfile(e.target.value)}
+            className={inputCls}
+          >
+            {profiles
+              .filter((p) => !p.hidden)
+              .map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name}
                 </option>
               ))}
-            </FocusSelect>
-          </div>
-        </div>
-      </div>
-
-      {/* App Theme */}
-      <div className="mb-3" style={cardStyle}>
-        <div className="px-4 py-2">
-          <div className="flex items-center justify-between">
-            <div>
-              <h4 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-                {t("startup.appTheme.title")}
-              </h4>
-              <p
-                className="mt-0.5 text-[11px]"
-                style={{ color: "var(--text-secondary)", opacity: 0.6 }}
-              >
-                {t("startup.appTheme.description")}
-              </p>
-            </div>
-            <FocusSelect
-              data-testid="app-theme-select"
-              value={draftAppTheme}
-              onChange={(e) => setDraftAppTheme(e.target.value)}
-              className="w-44 rounded px-2 py-1.5 text-xs"
-            >
-              {builtinAppThemes.map((theme) => (
-                <option key={theme.id} value={theme.id}>
-                  {theme.name}
-                </option>
-              ))}
-            </FocusSelect>
-          </div>
-        </div>
-      </div>
-
-      {/* Default profile */}
-      <div className="mb-4" style={cardStyle}>
-        <div className="px-4 py-2">
-          <div className="flex items-center justify-between">
-            <div>
-              <h4 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-                {t("startup.defaultProfile.title")}
-              </h4>
-              <p
-                className="mt-0.5 text-[11px]"
-                style={{ color: "var(--text-secondary)", opacity: 0.6 }}
-              >
-                {t("startup.defaultProfile.description")}
-              </p>
-            </div>
-            <FocusSelect
-              data-testid="default-profile-select"
-              value={draftDefaultProfile}
-              onChange={(e) => setDraftDefaultProfile(e.target.value)}
-              className="w-44 rounded px-2 py-1.5 text-xs"
-            >
-              {profiles
-                .filter((p) => !p.hidden)
-                .map((p) => (
-                  <option key={p.name} value={p.name}>
-                    {p.name}
-                  </option>
-                ))}
-            </FocusSelect>
-          </div>
-        </div>
+          </FocusSelect>
+        </SettingRow>
       </div>
     </div>
   );
@@ -396,7 +652,7 @@ function FontSection() {
           <h4 className="mb-1 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
             {t("font.uiFontTitle")}
           </h4>
-          <p className="mb-2 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.6 }}>
+          <p className="mb-2 text-[13px]" style={{ color: "var(--text-secondary)" }}>
             {t("font.uiFontDescription")}
           </p>
           <SettingRow label={t("font.face")} desc={t("font.uiFontFaceDesc")}>
@@ -421,7 +677,7 @@ function FontSection() {
       </div>
 
       {/* Base font — default for non-terminal text views (Memo, Issue Reporter, …). */}
-      <p className="mb-3 mt-4 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.6 }}>
+      <p className="mb-3 mt-4 text-[13px]" style={{ color: "var(--text-secondary)" }}>
         {t("font.appFontDescription")}
       </p>
       <FontFields
@@ -731,7 +987,7 @@ function CursorFields({
             {resetBtn("stabilizeInteractiveCursor")}
           </div>
         </SettingRow>
-        <p className="mt-1 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.7 }}>
+        <p className="mt-1 text-[13px]" style={{ color: "var(--text-secondary)" }}>
           {t("cursor.applyNote")}
         </p>
       </div>
@@ -990,7 +1246,7 @@ function DefaultsSection() {
   return (
     <div>
       <SectionTitle>{t("defaults.title")}</SectionTitle>
-      <p className="mb-4 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.6 }}>
+      <p className="mb-4 text-[13px]" style={{ color: "var(--text-secondary)" }}>
         {t("defaults.description")}
       </p>
 
@@ -1147,7 +1403,7 @@ function ProfileSection({ profileIndex }: { profileIndex: number }) {
       {/* Additional Settings Tab (Font + Appearance + Advanced — inherited from defaults) */}
       {activeTab === "additional" && (
         <>
-          <p className="mb-3 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.6 }}>
+          <p className="mb-3 text-[13px]" style={{ color: "var(--text-secondary)" }}>
             {t("profile.additionalIntro")}
           </p>
           <FontFields
@@ -1519,9 +1775,48 @@ function TerminalSection() {
   const { t } = useTranslation("settings");
   const storeTerminal = useSettingsStore((s) => s.terminal);
   const setTerminal = useSettingsStore((s) => s.setTerminal);
-  const [terminal, setDraftTerminal] = useDraft("terminal", storeTerminal, (v) => setTerminal(v));
+  const [composerStarredEntries, storeTerminalDraft] = useMemo(() => {
+    const { composerStarredEntries, ...draft } = storeTerminal;
+    return [composerStarredEntries, draft] as const;
+  }, [storeTerminal]);
+  const [terminal, setDraftTerminal] = useDraft("terminal", storeTerminalDraft, (v) =>
+    setTerminal(v),
+  );
   const update = (partial: Partial<typeof terminal>) =>
     setDraftTerminal((prev) => ({ ...prev, ...partial }));
+  const [newComposerStar, setNewComposerStar] = useState("");
+  const [composerStarError, setComposerStarError] = useState("");
+  const [composerStarEditor, setComposerStarEditor] = useState<{
+    previousValue?: string;
+    entry: ComposerStarredEntry;
+  } | null>(null);
+  const updateComposerStar = async (
+    text: string,
+    starred: boolean,
+    extra?: { label?: string; send?: boolean; previousText?: string },
+  ) => {
+    setComposerStarError("");
+    try {
+      const entries = await setComposerStarredEntry({
+        text,
+        starred,
+        ...extra,
+      });
+      setTerminal({ composerStarredEntries: entries });
+      if (starred) setNewComposerStar("");
+      setComposerStarEditor(null);
+    } catch (error) {
+      setComposerStarError(String(error));
+    }
+  };
+  const starredEditorLabels = {
+    label: t("terminal.composerStarredEntryLabel"),
+    value: t("terminal.composerStarredEntryValue"),
+    send: t("terminal.composerStarredEntrySend"),
+    sendDesc: t("terminal.composerStarredEntrySendDesc"),
+    save: t("terminal.composerStarredEntrySave"),
+    cancel: t("terminal.composerStarredEntryCancel"),
+  };
 
   // Exit behavior (issue #451) lives under the top-level `exit` key but is
   // edited here in the Terminal section since it interrupts terminals.
@@ -1610,6 +1905,114 @@ function TerminalSection() {
           onChange={(v) => update({ composerAutocomplete: v })}
         />
 
+        <SettingRow
+          label={t("terminal.composerStarredEntries")}
+          desc={t("terminal.composerStarredEntriesDesc")}
+        >
+          <div className="flex gap-2">
+            <textarea
+              data-testid="composer-starred-entry-input"
+              className={`${inputCls} min-h-16 flex-1 resize-y`}
+              style={inputStyle}
+              value={newComposerStar}
+              placeholder={t("terminal.composerStarredEntryPlaceholder")}
+              onChange={(event) => setNewComposerStar(event.target.value)}
+            />
+            <Button
+              data-testid="composer-starred-entry-add"
+              icon={<PlusIcon size={12} />}
+              disabled={!newComposerStar}
+              onClick={() => void updateComposerStar(newComposerStar, true)}
+            >
+              {t("terminal.composerStarredEntryAdd")}
+            </Button>
+          </div>
+          {composerStarError && (
+            <p role="alert" className="mt-1 text-xs" style={{ color: "var(--red)" }}>
+              {composerStarError}
+            </p>
+          )}
+          {composerStarredEntries.length === 0 ? (
+            <p className="mt-2 text-xs" style={{ color: "var(--text-secondary)" }}>
+              {t("terminal.composerStarredEntriesEmpty")}
+            </p>
+          ) : (
+            <ul className="mt-2 max-h-48 list-none overflow-y-auto p-0">
+              {composerStarredEntries.map((entry, index) => {
+                const display = composerSuggestionDisplay(entry);
+                return (
+                  <li
+                    key={entry.value}
+                    data-testid={`composer-starred-entry-${index}`}
+                    className="flex items-start gap-2 border-t py-1.5 first:border-t-0"
+                    style={{ borderColor: "var(--border)" }}
+                  >
+                    <button
+                      type="button"
+                      data-testid={`composer-starred-entry-edit-${index}`}
+                      className="min-w-0 flex-1 rounded px-0.5 py-0.5 text-left"
+                      onClick={() => {
+                        setComposerStarError("");
+                        setComposerStarEditor({ previousValue: entry.value, entry });
+                      }}
+                    >
+                      <span className="block whitespace-pre-wrap break-words text-xs">
+                        {display}
+                        {entry.send ? (
+                          <span
+                            className="ml-1"
+                            style={{ color: "var(--accent)" }}
+                            title={t("terminal.composerStarredEntrySendBadge")}
+                          >
+                            ↵
+                          </span>
+                        ) : null}
+                      </span>
+                      {entry.label.trim() && entry.label.trim() !== entry.value ? (
+                        <span
+                          className="mt-0.5 block whitespace-pre-wrap break-words text-[13px]"
+                          style={{ color: "var(--text-secondary)" }}
+                        >
+                          {entry.value}
+                        </span>
+                      ) : null}
+                    </button>
+                    <button
+                      type="button"
+                      data-testid={`composer-starred-entry-remove-${index}`}
+                      aria-label={`${t("terminal.composerStarredEntryRemove")}: ${entry.value}`}
+                      title={t("terminal.composerStarredEntryRemove")}
+                      className="shrink-0 rounded p-1"
+                      onClick={() => void updateComposerStar(entry.value, false)}
+                    >
+                      <XIcon size={12} />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </SettingRow>
+        {composerStarEditor ? (
+          <ComposerStarredEntryEditor
+            title={t("terminal.composerStarredEntryEdit")}
+            initial={composerStarEditor.entry}
+            error={composerStarError}
+            labels={starredEditorLabels}
+            onClose={() => {
+              setComposerStarEditor(null);
+              setComposerStarError("");
+            }}
+            onSave={(entry) =>
+              void updateComposerStar(entry.value, true, {
+                label: entry.label,
+                send: entry.send,
+                previousText: composerStarEditor.previousValue,
+              })
+            }
+          />
+        ) : null}
+
         <ToggleRow
           label={t("terminal.copyOnSelect")}
           desc={t("terminal.copyOnSelectDesc")}
@@ -1617,18 +2020,6 @@ function TerminalSection() {
           checked={terminal.copyOnSelect}
           onChange={(v) => update({ copyOnSelect: v })}
         />
-
-        <SettingRow label={t("terminal.scrollbarStyle")} desc={t("terminal.scrollbarStyleDesc")}>
-          <FocusSelect
-            data-testid="scrollbar-style-select"
-            className={inputCls}
-            value={terminal.scrollbarStyle}
-            onChange={(e) => update({ scrollbarStyle: e.target.value as "overlay" | "separate" })}
-          >
-            <option value="overlay">{t("terminal.scrollbarOverlay")}</option>
-            <option value="separate">{t("terminal.scrollbarSeparate")}</option>
-          </FocusSelect>
-        </SettingRow>
 
         <SettingRow
           label={t("terminal.scrollSensitivity")}
@@ -1732,6 +2123,40 @@ function TerminalSection() {
         />
       </SubGroup>
 
+      {/* ADR-0224: 실행 게이트는 URL 과 경로를 따로 고른다. 발견(밑줄)은 어느
+          모드에서도 게이트되지 않으므로 여기에 노출하지 않는다. */}
+      <SubGroup title={t("terminal.linkActivationGroup")}>
+        <SettingRow
+          label={t("terminal.urlLinkActivation")}
+          desc={t("terminal.urlLinkActivationDesc")}
+        >
+          <FocusSelect
+            data-testid="url-link-activation-select"
+            className={inputCls}
+            value={terminal.urlLinkActivation}
+            onChange={(e) => update({ urlLinkActivation: e.target.value as LinkActivationMode })}
+          >
+            <option value="immediate">{t("terminal.linkActivationImmediate")}</option>
+            <option value="chip">{t("terminal.linkActivationChip")}</option>
+          </FocusSelect>
+        </SettingRow>
+
+        <SettingRow
+          label={t("terminal.pathLinkActivation")}
+          desc={t("terminal.pathLinkActivationDesc")}
+        >
+          <FocusSelect
+            data-testid="path-link-activation-select"
+            className={inputCls}
+            value={terminal.pathLinkActivation}
+            onChange={(e) => update({ pathLinkActivation: e.target.value as LinkActivationMode })}
+          >
+            <option value="immediate">{t("terminal.linkActivationImmediate")}</option>
+            <option value="chip">{t("terminal.linkActivationChip")}</option>
+          </FocusSelect>
+        </SettingRow>
+      </SubGroup>
+
       <SubGroup title={t("terminal.exitGroup")}>
         <ToggleRow
           label={t("terminal.interruptOnExit")}
@@ -1792,7 +2217,7 @@ function TerminalSection() {
       </SubGroup>
 
       <SubGroup title={t("terminal.paneClearGroup")}>
-        <p className="mb-3 text-[11px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>
+        <p className="mb-3 text-[13px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>
           {t("terminal.paneClearGroupDesc")}
         </p>
 
@@ -1935,7 +2360,7 @@ function InterfaceSection() {
                 updateControlBar({ hoverIdleSeconds: Math.max(0, Number(e.target.value)) })
               }
             />
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+            <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
               {t("common.seconds")}
             </span>
           </div>
@@ -2023,34 +2448,34 @@ function InterfaceSection() {
   );
 }
 
-// -- Sections: Remote Connection / Remote Display --
+// -- Section: Remote Connection and host data policy --
 
-type RemoteDisplaySettings = Pick<
-  RemoteSettings,
-  | "terminalFontSize"
-  | "composerFontSize"
-  | "snapshotMaxKib"
-  | "serveTerminalFont"
-  | "widgets"
-  | "scrollSensitivity"
-  | "fastScrollSensitivity"
-  | "touchScrollSensitivity"
-  | "twoFingerScrollSensitivity"
->;
-type RemoteConnectionSettings = Omit<RemoteSettings, keyof RemoteDisplaySettings>;
-const REMOTE_FONT_SIZE_MIN = 6;
-const REMOTE_FONT_SIZE_MAX = 72;
-
-function normalizeRemoteFontSize(value: unknown, fallback: number): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.min(REMOTE_FONT_SIZE_MAX, Math.max(REMOTE_FONT_SIZE_MIN, Math.trunc(parsed)));
-}
+type RemoteConnectionSettings = RemoteSettings;
 
 type RemoteSectionDraft = RemoteConnectionSettings & {
   allowedIpsText: string;
   customHostInput: string;
+  attachmentExtensionInput: string;
 };
+
+const ATTACHMENT_EXTENSION_RE = /^[a-z0-9]{1,16}$/;
+
+/** Lowercase, strip leading dots, drop invalid entries, dedupe (order kept). */
+function normalizeAttachmentExtensions(list: string[]): string[] {
+  const seen = new Set<string>();
+  for (const raw of list) {
+    const ext = raw.trim().replace(/^\.+/, "").toLowerCase();
+    if (ATTACHMENT_EXTENSION_RE.test(ext)) seen.add(ext);
+  }
+  return [...seen];
+}
+
+/** Mirrors `REMOTE_TERMINAL_ATTACHMENT_MAX_MIB` in src-tauri/src/constants.rs. */
+const MAX_REMOTE_ATTACHMENT_MIB = 10;
+
+function clampAttachmentMaxMib(value: unknown): number {
+  return Math.min(MAX_REMOTE_ATTACHMENT_MIB, Math.max(1, Math.trunc(Number(value) || 1)));
+}
 
 function toRemoteSectionDraft(remote: RemoteSettings): RemoteSectionDraft {
   return {
@@ -2072,13 +2497,24 @@ function toRemoteSectionDraft(remote: RemoteSettings): RemoteSectionDraft {
     cloudServerBaseUrl: remote.cloudServerBaseUrl,
     cloudAutoReconnect: remote.cloudAutoReconnect,
     cloudAccessMode: remote.cloudAccessMode,
+    serveTerminalFont: remote.serveTerminalFont,
+    widgets: remote.widgets,
+    attachmentMaxMib: remote.attachmentMaxMib,
+    attachmentAllowAllExtensions: remote.attachmentAllowAllExtensions,
+    attachmentExtraExtensions: remote.attachmentExtraExtensions,
     allowedIpsText: formatAllowedIps(remote.allowedIps),
     customHostInput: "",
+    attachmentExtensionInput: "",
   };
 }
 
 function toRemoteSettings(draft: RemoteSectionDraft): RemoteConnectionSettings {
-  const { allowedIpsText, customHostInput: _customHostInput, ...remote } = draft;
+  const {
+    allowedIpsText,
+    customHostInput: _customHostInput,
+    attachmentExtensionInput: _attachmentExtensionInput,
+    ...remote
+  } = draft;
   const allowedIps = parseAllowedIps(allowedIpsText);
   const customHosts = normalizeCustomHosts(remote.customHosts);
   return {
@@ -2093,6 +2529,8 @@ function toRemoteSettings(draft: RemoteSectionDraft): RemoteConnectionSettings {
       900,
       Math.max(0, Math.trunc(Number(remote.androidBackgroundLeaseSeconds) || 0)),
     ),
+    attachmentMaxMib: clampAttachmentMaxMib(remote.attachmentMaxMib),
+    attachmentExtraExtensions: normalizeAttachmentExtensions(remote.attachmentExtraExtensions),
   };
 }
 
@@ -2199,6 +2637,24 @@ function RemoteConnectionSection() {
     update({
       customHosts,
       ...(remote.preferredHost === host ? { preferredHost: "" } : {}),
+    });
+  };
+
+  const handleAddAttachmentExtension = () => {
+    update({
+      attachmentExtraExtensions: normalizeAttachmentExtensions([
+        ...remote.attachmentExtraExtensions,
+        remote.attachmentExtensionInput,
+      ]),
+      attachmentExtensionInput: "",
+    });
+  };
+
+  const handleRemoveAttachmentExtension = (ext: string) => {
+    update({
+      attachmentExtraExtensions: remote.attachmentExtraExtensions.filter(
+        (candidate) => candidate !== ext,
+      ),
     });
   };
 
@@ -2349,7 +2805,7 @@ function RemoteConnectionSection() {
                     allowedIpsText: appendAllowedIps(remote.allowedIpsText, TAILSCALE_ALLOWED_IPS),
                   })
                 }
-                className="hover-bg rounded px-2 py-1 text-[11px]"
+                className="hover-bg rounded px-2 py-1 text-[13px]"
                 style={{
                   color: "var(--accent)",
                   background: "transparent",
@@ -2363,7 +2819,7 @@ function RemoteConnectionSection() {
                 type="button"
                 data-testid="remote-settings-reset-loopback"
                 onClick={() => update({ allowedIpsText: formatAllowedIps(LOOPBACK_ALLOWED_IPS) })}
-                className="hover-bg rounded px-2 py-1 text-[11px]"
+                className="hover-bg rounded px-2 py-1 text-[13px]"
                 style={{
                   color: "var(--accent)",
                   background: "transparent",
@@ -2394,7 +2850,7 @@ function RemoteConnectionSection() {
                 update({ autoMobileModeMinWidth: normalizeAutoMobileWidth(event.target.value) })
               }
             />
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+            <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
               px
             </span>
           </div>
@@ -2423,7 +2879,7 @@ function RemoteConnectionSection() {
                 })
               }
             />
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+            <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
               초
             </span>
           </div>
@@ -2474,7 +2930,7 @@ function RemoteConnectionSection() {
                       type="button"
                       data-testid={`remote-settings-custom-host-remove-${host}`}
                       onClick={() => handleRemoveCustomHost(host)}
-                      className="hover-bg shrink-0 rounded px-2 py-1 text-[11px]"
+                      className="hover-bg shrink-0 rounded px-2 py-1 text-[13px]"
                       style={{
                         color: "var(--red)",
                         background: "transparent",
@@ -2545,7 +3001,7 @@ function RemoteConnectionSection() {
               data-testid="remote-settings-cloud-connect"
               onClick={handleCloudConnect}
               disabled={cloudConnectPending || cloudDisconnectPending}
-              className="hover-bg rounded px-2 py-1 text-[11px] disabled:cursor-not-allowed disabled:opacity-50"
+              className="hover-bg rounded px-2 py-1 text-[13px] disabled:cursor-not-allowed disabled:opacity-50"
               style={{
                 color: "var(--accent)",
                 background: "transparent",
@@ -2561,7 +3017,7 @@ function RemoteConnectionSection() {
                 data-testid="remote-settings-cloud-disconnect"
                 onClick={handleCloudDisconnect}
                 disabled={cloudDisconnectPending || cloudConnectPending}
-                className="hover-bg rounded px-2 py-1 text-[11px] disabled:cursor-not-allowed disabled:opacity-50"
+                className="hover-bg rounded px-2 py-1 text-[13px] disabled:cursor-not-allowed disabled:opacity-50"
                 style={{
                   color: "var(--red)",
                   background: "transparent",
@@ -2587,227 +3043,8 @@ function RemoteConnectionSection() {
           />
         </SettingRow>
       </SubGroup>
-    </div>
-  );
-}
 
-function toRemoteDisplaySettings(remote: RemoteSettings): RemoteDisplaySettings {
-  return {
-    terminalFontSize: remote.terminalFontSize,
-    composerFontSize: remote.composerFontSize,
-    snapshotMaxKib: remote.snapshotMaxKib,
-    serveTerminalFont: remote.serveTerminalFont,
-    widgets: remote.widgets,
-    scrollSensitivity: remote.scrollSensitivity,
-    fastScrollSensitivity: remote.fastScrollSensitivity,
-    touchScrollSensitivity: remote.touchScrollSensitivity,
-    twoFingerScrollSensitivity: remote.twoFingerScrollSensitivity,
-  };
-}
-
-function normalizeRemoteDisplaySettings(remote: RemoteDisplaySettings): RemoteDisplaySettings {
-  return {
-    ...remote,
-    terminalFontSize: normalizeRemoteFontSize(remote.terminalFontSize, 14),
-    composerFontSize: normalizeRemoteFontSize(remote.composerFontSize, 16),
-    snapshotMaxKib: normalizeSnapshotMaxKib(remote.snapshotMaxKib),
-    scrollSensitivity: normalizeScrollSensitivity(
-      remote.scrollSensitivity,
-      DEFAULT_SCROLL_SENSITIVITY,
-    ),
-    fastScrollSensitivity: normalizeScrollSensitivity(
-      remote.fastScrollSensitivity,
-      DEFAULT_FAST_SCROLL_SENSITIVITY,
-    ),
-    touchScrollSensitivity: normalizeScrollSensitivity(
-      remote.touchScrollSensitivity,
-      DEFAULT_SCROLL_SENSITIVITY,
-    ),
-    twoFingerScrollSensitivity: normalizeScrollSensitivity(
-      remote.twoFingerScrollSensitivity,
-      DEFAULT_FAST_SCROLL_SENSITIVITY,
-    ),
-  };
-}
-
-function RemoteDisplaySection() {
-  const { t } = useTranslation("settings");
-  const storeRemote = useSettingsStore((s) => s.remote);
-  const setRemote = useSettingsStore((s) => s.setRemote);
-  const storeDraft = useMemo(() => toRemoteDisplaySettings(storeRemote), [storeRemote]);
-  const [remote, setDraftRemote] = useDraft<RemoteDisplaySettings>(
-    "remoteDisplay",
-    storeDraft,
-    (draft) => setRemote(normalizeRemoteDisplaySettings(draft)),
-  );
-  const update = (partial: Partial<RemoteDisplaySettings>) =>
-    setDraftRemote((previous) => ({ ...previous, ...partial }));
-
-  return (
-    <div>
-      <SectionTitle>{t("remote.displayTitle")}</SectionTitle>
-
-      <SubGroup title={t("remote.groupDisplay")}>
-        <SettingRow label={t("remote.terminalFontSize")} desc={t("remote.terminalFontSizeDesc")}>
-          <div className="flex items-center gap-2">
-            <FocusInput
-              data-testid="remote-settings-terminal-font-size-input"
-              type="number"
-              min={REMOTE_FONT_SIZE_MIN}
-              max={REMOTE_FONT_SIZE_MAX}
-              step={1}
-              className={inputCls}
-              inputStyle={{ width: 110 }}
-              value={remote.terminalFontSize}
-              onChange={(event) =>
-                update({
-                  terminalFontSize: normalizeRemoteFontSize(event.target.value, 14),
-                })
-              }
-            />
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
-              px
-            </span>
-          </div>
-        </SettingRow>
-
-        <SettingRow label={t("remote.composerFontSize")} desc={t("remote.composerFontSizeDesc")}>
-          <div className="flex items-center gap-2">
-            <FocusInput
-              data-testid="remote-settings-composer-font-size-input"
-              type="number"
-              min={REMOTE_FONT_SIZE_MIN}
-              max={REMOTE_FONT_SIZE_MAX}
-              step={1}
-              className={inputCls}
-              inputStyle={{ width: 110 }}
-              value={remote.composerFontSize}
-              onChange={(event) =>
-                update({
-                  composerFontSize: normalizeRemoteFontSize(event.target.value, 16),
-                })
-              }
-            />
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
-              px
-            </span>
-          </div>
-        </SettingRow>
-
-        <SettingRow label={t("remote.snapshotMaxKib")} desc={t("remote.snapshotMaxKibDesc")}>
-          <div className="flex items-center gap-2">
-            <FocusInput
-              data-testid="remote-settings-snapshot-max-kib-input"
-              type="number"
-              min={SNAPSHOT_MAX_KIB_MIN}
-              max={SNAPSHOT_MAX_KIB_MAX}
-              step={1}
-              className={inputCls}
-              inputStyle={{ width: 110 }}
-              value={remote.snapshotMaxKib}
-              onChange={(event) =>
-                update({ snapshotMaxKib: normalizeSnapshotMaxKib(event.target.value) })
-              }
-            />
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
-              KiB
-            </span>
-          </div>
-        </SettingRow>
-
-        <SettingRow label={t("remote.scrollSensitivity")} desc={t("remote.scrollSensitivityDesc")}>
-          <FocusInput
-            data-testid="remote-settings-scroll-sensitivity-input"
-            type="number"
-            min={SCROLL_SENSITIVITY_MIN}
-            max={SCROLL_SENSITIVITY_MAX}
-            step={SCROLL_SENSITIVITY_STEP}
-            className={inputCls}
-            inputStyle={{ width: 110 }}
-            value={remote.scrollSensitivity}
-            onChange={(event) =>
-              update({
-                scrollSensitivity: normalizeScrollSensitivity(
-                  event.target.value,
-                  DEFAULT_SCROLL_SENSITIVITY,
-                ),
-              })
-            }
-          />
-        </SettingRow>
-
-        <SettingRow
-          label={t("remote.fastScrollSensitivity")}
-          desc={t("remote.fastScrollSensitivityDesc")}
-        >
-          <FocusInput
-            data-testid="remote-settings-fast-scroll-sensitivity-input"
-            type="number"
-            min={SCROLL_SENSITIVITY_MIN}
-            max={SCROLL_SENSITIVITY_MAX}
-            step={SCROLL_SENSITIVITY_STEP}
-            className={inputCls}
-            inputStyle={{ width: 110 }}
-            value={remote.fastScrollSensitivity}
-            onChange={(event) =>
-              update({
-                fastScrollSensitivity: normalizeScrollSensitivity(
-                  event.target.value,
-                  DEFAULT_FAST_SCROLL_SENSITIVITY,
-                ),
-              })
-            }
-          />
-        </SettingRow>
-
-        <SettingRow
-          label={t("remote.touchScrollSensitivity")}
-          desc={t("remote.touchScrollSensitivityDesc")}
-        >
-          <FocusInput
-            data-testid="remote-settings-touch-scroll-sensitivity-input"
-            type="number"
-            min={SCROLL_SENSITIVITY_MIN}
-            max={SCROLL_SENSITIVITY_MAX}
-            step={SCROLL_SENSITIVITY_STEP}
-            className={inputCls}
-            inputStyle={{ width: 110 }}
-            value={remote.touchScrollSensitivity}
-            onChange={(event) =>
-              update({
-                touchScrollSensitivity: normalizeScrollSensitivity(
-                  event.target.value,
-                  DEFAULT_SCROLL_SENSITIVITY,
-                ),
-              })
-            }
-          />
-        </SettingRow>
-
-        <SettingRow
-          label={t("remote.twoFingerScrollSensitivity")}
-          desc={t("remote.twoFingerScrollSensitivityDesc")}
-        >
-          <FocusInput
-            data-testid="remote-settings-two-finger-scroll-sensitivity-input"
-            type="number"
-            min={SCROLL_SENSITIVITY_MIN}
-            max={SCROLL_SENSITIVITY_MAX}
-            step={SCROLL_SENSITIVITY_STEP}
-            className={inputCls}
-            inputStyle={{ width: 110 }}
-            value={remote.twoFingerScrollSensitivity}
-            onChange={(event) =>
-              update({
-                twoFingerScrollSensitivity: normalizeScrollSensitivity(
-                  event.target.value,
-                  DEFAULT_FAST_SCROLL_SENSITIVITY,
-                ),
-              })
-            }
-          />
-        </SettingRow>
-
+      <SubGroup title={t("remote.groupHostData")}>
         <ToggleRow
           label={t("remote.serveTerminalFont")}
           desc={t("remote.serveTerminalFontDesc")}
@@ -2815,7 +3052,6 @@ function RemoteDisplaySection() {
           checked={remote.serveTerminalFont}
           onChange={(value) => update({ serveTerminalFont: value })}
         />
-
         <ToggleRow
           label={t("remote.widgets")}
           desc={t("remote.widgetsDesc")}
@@ -2823,6 +3059,102 @@ function RemoteDisplaySection() {
           checked={remote.widgets}
           onChange={(value) => update({ widgets: value })}
         />
+      </SubGroup>
+
+      <SubGroup title={t("remote.groupAttachments")}>
+        <SettingRow label={t("remote.attachmentMaxMib")} desc={t("remote.attachmentMaxMibDesc")}>
+          <div className="flex items-center gap-2">
+            <FocusInput
+              data-testid="remote-settings-attachment-max-mib"
+              type="number"
+              min={1}
+              max={MAX_REMOTE_ATTACHMENT_MIB}
+              step={1}
+              className={inputCls}
+              inputStyle={{ width: 110 }}
+              value={remote.attachmentMaxMib}
+              onChange={(event) =>
+                // Only the lower bound while typing so "1" → "5" can be entered;
+                // the upper bound is applied on save (toRemoteSettings).
+                update({
+                  attachmentMaxMib: Math.max(1, Math.trunc(Number(event.target.value) || 1)),
+                })
+              }
+            />
+            <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
+              MiB
+            </span>
+          </div>
+        </SettingRow>
+        <ToggleRow
+          label={t("remote.attachmentAllowAllExtensions")}
+          desc={t("remote.attachmentAllowAllExtensionsDesc")}
+          testid="remote-settings-attachment-allow-all"
+          checked={remote.attachmentAllowAllExtensions}
+          onChange={(value) => update({ attachmentAllowAllExtensions: value })}
+        />
+        <SettingRow
+          label={t("remote.attachmentExtraExtensions")}
+          desc={t("remote.attachmentExtraExtensionsDesc")}
+        >
+          <div className="flex min-w-0 flex-col gap-2">
+            <div className="flex min-w-0 gap-2">
+              <FocusInput
+                data-testid="remote-settings-attachment-extension-input"
+                className={inputCls}
+                placeholder={t("remote.attachmentExtensionPlaceholder")}
+                value={remote.attachmentExtensionInput}
+                onChange={(event) => update({ attachmentExtensionInput: event.target.value })}
+              />
+              <button
+                type="button"
+                data-testid="remote-settings-attachment-extension-add"
+                onClick={handleAddAttachmentExtension}
+                className="hover-bg shrink-0 rounded px-3 py-1.5 text-xs"
+                style={{
+                  color: "var(--accent)",
+                  background: "transparent",
+                  border: "1px solid var(--border)",
+                  cursor: "pointer",
+                }}
+              >
+                {t("remote.addAttachmentExtension")}
+              </button>
+            </div>
+            {remote.attachmentExtraExtensions.length > 0 && (
+              <div className="flex flex-col gap-1">
+                {remote.attachmentExtraExtensions.map((ext) => (
+                  <div key={ext} className="flex items-center gap-2 text-[12px]">
+                    <code
+                      className="min-w-0 flex-1 truncate rounded px-2 py-1"
+                      style={{
+                        color: "var(--text-primary)",
+                        background: "var(--bg-base)",
+                        border: "1px solid var(--border)",
+                      }}
+                    >
+                      {ext}
+                    </code>
+                    <button
+                      type="button"
+                      data-testid={`remote-settings-attachment-extension-remove-${ext}`}
+                      onClick={() => handleRemoveAttachmentExtension(ext)}
+                      className="hover-bg shrink-0 rounded px-2 py-1 text-[13px]"
+                      style={{
+                        color: "var(--red)",
+                        background: "transparent",
+                        border: "1px solid var(--border)",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {t("common.remove")}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </SettingRow>
       </SubGroup>
     </div>
   );
@@ -2876,6 +3208,22 @@ function WorkspacesSection() {
       <SectionTitle>{t("workspaces.title")}</SectionTitle>
 
       <SubGroup title={t("workspaces.groupDisplay")}>
+        <SettingRow label={t("workspaces.lastInputMode")} desc={t("workspaces.lastInputModeDesc")}>
+          <FocusSelect
+            data-testid="workspace-last-input-mode-select"
+            className={inputCls}
+            value={wsSelector.lastInputMode}
+            onChange={(e) =>
+              updateWsSelector({
+                lastInputMode: e.target.value as "perPane" | "workspaceLatest",
+              })
+            }
+          >
+            <option value="perPane">{t("workspaces.lastInputPerPane")}</option>
+            <option value="workspaceLatest">{t("workspaces.lastInputWorkspaceLatest")}</option>
+          </FocusSelect>
+        </SettingRow>
+
         {displayItems.map((item, i) => (
           <div key={item.key} className={`flex items-start gap-3 py-1${i > 0 ? " mt-2" : ""}`}>
             <div className="w-36 shrink-0 pt-1">
@@ -2883,8 +3231,8 @@ function WorkspacesSection() {
                 {item.label}
               </span>
               <p
-                className="mt-0.5 text-[11px] leading-tight"
-                style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+                className="mt-0.5 text-[13px] leading-tight"
+                style={{ color: "var(--text-secondary)" }}
               >
                 {item.desc}
               </p>
@@ -2907,6 +3255,14 @@ function WorkspacesSection() {
       </SubGroup>
 
       <SubGroup title={t("workspaces.groupBehavior")}>
+        <ToggleRow
+          label={t("workspaces.confirmDestructiveActions")}
+          desc={t("workspaces.confirmDestructiveActionsDesc")}
+          testid="workspace-destructive-confirm-toggle"
+          checked={wsSelector.confirmDestructiveActions}
+          onChange={(value) => updateWsSelector({ confirmDestructiveActions: value })}
+        />
+
         <SettingRow label={t("workspaces.pathEllipsis")} desc={t("workspaces.pathEllipsisDesc")}>
           <FocusSelect
             data-testid="path-ellipsis-select"
@@ -2938,7 +3294,7 @@ function WorkspacesSection() {
                 })
               }
             />
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+            <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
               {t("common.seconds")}
             </span>
           </div>
@@ -2961,8 +3317,8 @@ function WorkspacesSection() {
                   {label}
                 </span>
                 <p
-                  className="mt-0.5 text-[11px] leading-tight"
-                  style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+                  className="mt-0.5 text-[13px] leading-tight"
+                  style={{ color: "var(--text-secondary)" }}
                 >
                   {desc}
                 </p>
@@ -3025,8 +3381,8 @@ function ClaudeSection() {
               {t("claude.syncCwd")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("claude.syncCwdDesc")}
             </p>
@@ -3053,8 +3409,8 @@ function ClaudeSection() {
               {t("claude.command")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("claude.commandDesc")}
             </p>
@@ -3073,7 +3429,7 @@ function ClaudeSection() {
               {claude.command !== DEFAULT_CLAUDE_COMMAND && (
                 <button
                   data-testid="claude-command-reset"
-                  className="hover-bg px-1.5 py-0.5 rounded text-[11px]"
+                  className="hover-bg px-1.5 py-0.5 rounded text-[13px]"
                   style={{ color: "var(--text-secondary)" }}
                   onClick={() => updateClaude({ command: DEFAULT_CLAUDE_COMMAND })}
                 >
@@ -3084,15 +3440,15 @@ function ClaudeSection() {
             {isSafeAgentCommand(claude.command) ? (
               <p
                 data-testid="claude-command-preview"
-                className="mt-1 text-[11px] leading-tight"
-                style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+                className="mt-1 text-[13px] leading-tight"
+                style={{ color: "var(--text-secondary)" }}
               >
                 {`${resolveAgentCommand(claude.command, DEFAULT_CLAUDE_COMMAND)} --resume <session-id>`}
               </p>
             ) : (
               <p
                 data-testid="claude-command-warning"
-                className="mt-1 text-[11px] leading-tight"
+                className="mt-1 text-[13px] leading-tight"
                 style={{ color: "var(--claude)" }}
               >
                 {t("claude.commandInvalid", { command: DEFAULT_CLAUDE_COMMAND })}
@@ -3108,8 +3464,8 @@ function ClaudeSection() {
               {t("claude.restoreSession")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("claude.restoreSessionDesc")}
             </p>
@@ -3136,8 +3492,8 @@ function ClaudeSection() {
               {t("claude.sessionMaxAge")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("claude.sessionMaxAgeDesc")}
             </p>
@@ -3176,8 +3532,8 @@ function ClaudeSection() {
               {t("claude.statusMessageMode")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("claude.statusMessageModeDesc")}
             </p>
@@ -3214,8 +3570,8 @@ function ClaudeSection() {
                 {t("claude.delimiter")}
               </span>
               <p
-                className="mt-0.5 text-[11px] leading-tight"
-                style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+                className="mt-0.5 text-[13px] leading-tight"
+                style={{ color: "var(--text-secondary)" }}
               >
                 {t("claude.delimiterDesc")}
               </p>
@@ -3233,7 +3589,7 @@ function ClaudeSection() {
                 {claude.statusMessageDelimiter !== DEFAULT_STATUS_MESSAGE_DELIMITER && (
                   <button
                     data-testid="claude-status-message-delimiter-reset"
-                    className="hover-bg px-1.5 py-0.5 rounded text-[11px]"
+                    className="hover-bg px-1.5 py-0.5 rounded text-[13px]"
                     style={{ color: "var(--text-secondary)" }}
                     onClick={() =>
                       updateClaude({
@@ -3258,8 +3614,8 @@ function ClaudeSection() {
               {t("claude.autoResume")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("claude.autoResumeDesc")}
             </p>
@@ -3288,8 +3644,8 @@ function ClaudeSection() {
                   {t("claude.resumeDelay")}
                 </span>
                 <p
-                  className="mt-0.5 text-[11px] leading-tight"
-                  style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+                  className="mt-0.5 text-[13px] leading-tight"
+                  style={{ color: "var(--text-secondary)" }}
                 >
                   {t("claude.resumeDelayDesc")}
                 </p>
@@ -3326,8 +3682,8 @@ function ClaudeSection() {
                   {t("claude.resumeMessage")}
                 </span>
                 <p
-                  className="mt-0.5 text-[11px] leading-tight"
-                  style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+                  className="mt-0.5 text-[13px] leading-tight"
+                  style={{ color: "var(--text-secondary)" }}
                 >
                   {t("claude.resumeMessageDesc")}
                 </p>
@@ -3371,8 +3727,8 @@ function CodexSection() {
               {t("codex.command")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("codex.commandDesc")}
             </p>
@@ -3391,7 +3747,7 @@ function CodexSection() {
               {codex.command !== DEFAULT_CODEX_COMMAND && (
                 <button
                   data-testid="codex-command-reset"
-                  className="hover-bg px-1.5 py-0.5 rounded text-[11px]"
+                  className="hover-bg px-1.5 py-0.5 rounded text-[13px]"
                   style={{ color: "var(--text-secondary)" }}
                   onClick={() => updateCodex({ command: DEFAULT_CODEX_COMMAND })}
                 >
@@ -3402,15 +3758,15 @@ function CodexSection() {
             {isSafeAgentCommand(codex.command) ? (
               <p
                 data-testid="codex-command-preview"
-                className="mt-1 text-[11px] leading-tight"
-                style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+                className="mt-1 text-[13px] leading-tight"
+                style={{ color: "var(--text-secondary)" }}
               >
                 {`${resolveAgentCommand(codex.command, DEFAULT_CODEX_COMMAND)} resume <session-id>`}
               </p>
             ) : (
               <p
                 data-testid="codex-command-warning"
-                className="mt-1 text-[11px] leading-tight"
+                className="mt-1 text-[13px] leading-tight"
                 style={{ color: "var(--claude)" }}
               >
                 {t("codex.commandInvalid", { command: DEFAULT_CODEX_COMMAND })}
@@ -3425,8 +3781,8 @@ function CodexSection() {
               {t("codex.restoreSession")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("codex.restoreSessionDesc")}
             </p>
@@ -3452,8 +3808,8 @@ function CodexSection() {
               {t("codex.sessionMaxAge")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("codex.sessionMaxAgeDesc")}
             </p>
@@ -3484,6 +3840,35 @@ function CodexSection() {
         </div>
       </SubGroup>
 
+      <SubGroup title={t("codex.groupTranscript")}>
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              {t("codex.transcriptScroll")}
+            </span>
+            <p
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              {t("codex.transcriptScrollDesc")}
+            </p>
+          </div>
+          <div className="min-w-0 flex-1 pt-1">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                data-testid="codex-transcript-scroll-toggle"
+                type="checkbox"
+                checked={codex.transcriptScrollEnabled}
+                onChange={(e) => updateCodex({ transcriptScrollEnabled: e.target.checked })}
+              />
+              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                {codex.transcriptScrollEnabled ? t("common.enabled") : t("common.disabled")}
+              </span>
+            </label>
+          </div>
+        </div>
+      </SubGroup>
+
       <SubGroup title={t("codex.groupStatusMessage")}>
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
@@ -3491,8 +3876,8 @@ function CodexSection() {
               {t("codex.statusMessageMode")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("codex.statusMessageModeDesc")}
             </p>
@@ -3528,8 +3913,8 @@ function CodexSection() {
                 {t("codex.delimiter")}
               </span>
               <p
-                className="mt-0.5 text-[11px] leading-tight"
-                style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+                className="mt-0.5 text-[13px] leading-tight"
+                style={{ color: "var(--text-secondary)" }}
               >
                 {t("codex.delimiterDesc")}
               </p>
@@ -3547,7 +3932,7 @@ function CodexSection() {
                 {codex.statusMessageDelimiter !== DEFAULT_STATUS_MESSAGE_DELIMITER && (
                   <button
                     data-testid="codex-status-message-delimiter-reset"
-                    className="hover-bg rounded px-1.5 py-0.5 text-[11px]"
+                    className="hover-bg rounded px-1.5 py-0.5 text-[13px]"
                     style={{ color: "var(--text-secondary)" }}
                     onClick={() =>
                       updateCodex({
@@ -3597,14 +3982,11 @@ function GrokSection() {
               onChange={(e) => updateGrok({ command: e.target.value })}
             />
             {isSafeAgentCommand(grok.command) ? (
-              <p
-                className="mt-1 text-[11px]"
-                style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-              >
+              <p className="mt-1 text-[13px]" style={{ color: "var(--text-secondary)" }}>
                 {`${resolveAgentCommand(grok.command, DEFAULT_GROK_COMMAND)} --resume <session-id>`}
               </p>
             ) : (
-              <p className="mt-1 text-[11px]" style={{ color: "var(--claude)" }}>
+              <p className="mt-1 text-[13px]" style={{ color: "var(--claude)" }}>
                 {t("grok.commandInvalid", { command: DEFAULT_GROK_COMMAND })}
               </p>
             )}
@@ -3668,8 +4050,8 @@ function GrokSection() {
                 {t("grok.delimiter")}
               </span>
               <p
-                className="mt-0.5 text-[11px] leading-tight"
-                style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+                className="mt-0.5 text-[13px] leading-tight"
+                style={{ color: "var(--text-secondary)" }}
               >
                 {t("grok.delimiterDesc")}
               </p>
@@ -3687,7 +4069,7 @@ function GrokSection() {
                 {grok.statusMessageDelimiter !== DEFAULT_STATUS_MESSAGE_DELIMITER && (
                   <button
                     data-testid="grok-status-message-delimiter-reset"
-                    className="hover-bg rounded px-1.5 py-0.5 text-[11px]"
+                    className="hover-bg rounded px-1.5 py-0.5 text-[13px]"
                     style={{ color: "var(--text-secondary)" }}
                     onClick={() =>
                       updateGrok({
@@ -3793,8 +4175,8 @@ function FileExplorerSection() {
               {t("fileExplorer.padding")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("fileExplorer.paddingDesc")}
             </p>
@@ -3809,7 +4191,7 @@ function FileExplorerSection() {
                   | "paddingLeft";
                 return (
                   <label key={dir} className="flex items-center gap-1.5">
-                    <span className="w-12 text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                    <span className="w-12 text-[13px]" style={{ color: "var(--text-secondary)" }}>
                       {t(`appearance.${dir.toLowerCase()}`)}
                     </span>
                     <input
@@ -3860,8 +4242,8 @@ function FileExplorerSection() {
               {t("fileExplorer.extensionViewers")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("fileExplorer.extensionViewersDesc")}
             </p>
@@ -3930,7 +4312,7 @@ function FileExplorerSection() {
                   </div>
                   {profileError && (
                     <p
-                      className="mt-1 text-[11px]"
+                      className="mt-1 text-[13px]"
                       style={{ color: "var(--red)" }}
                       data-testid={`fe-ext-viewer-profile-error-${i}`}
                     >
@@ -4006,8 +4388,8 @@ function ViewerSection() {
               {t("viewer.padding")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("viewer.paddingDesc")}
             </p>
@@ -4022,7 +4404,7 @@ function ViewerSection() {
                   | "paddingLeft";
                 return (
                   <label key={dir} className="flex items-center gap-1.5">
-                    <span className="w-12 text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                    <span className="w-12 text-[13px]" style={{ color: "var(--text-secondary)" }}>
                       {t(`appearance.${dir.toLowerCase()}`)}
                     </span>
                     <input
@@ -4120,8 +4502,8 @@ function IssueReporterSection() {
               {t("issueReporter.repositories")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("issueReporter.repositoriesDesc")}
             </p>
@@ -4175,8 +4557,8 @@ function IssueReporterSection() {
               {t("issueReporter.padding")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("issueReporter.paddingDesc")}
             </p>
@@ -4187,7 +4569,7 @@ function IssueReporterSection() {
                 const key = `padding${dir}` as keyof typeof issueReporter;
                 return (
                   <label key={dir} className="flex items-center gap-1.5">
-                    <span className="w-12 text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                    <span className="w-12 text-[13px]" style={{ color: "var(--text-secondary)" }}>
                       {t(`appearance.${dir.toLowerCase()}`)}
                     </span>
                     <input
@@ -4566,7 +4948,7 @@ function WidgetsSection() {
     <div data-testid="settings-widgets-section">
       <SectionTitle>{t("widgets.title")}</SectionTitle>
       <p
-        className="px-4 pb-2 text-[11px] leading-relaxed"
+        className="px-4 pb-2 text-[13px] leading-relaxed"
         style={{ color: "var(--text-secondary)", opacity: 0.75 }}
       >
         {t("widgets.intro")}
@@ -4609,7 +4991,7 @@ function ClaudeUsageGroup() {
   return (
     <SubGroup title={t("usage.title")}>
       <p
-        className="pb-2 text-[11px] leading-relaxed"
+        className="pb-2 text-[13px] leading-relaxed"
         style={{ color: "var(--text-secondary)", opacity: 0.75 }}
       >
         {t("usage.intro")}
@@ -4638,8 +5020,8 @@ function ClaudeUsageGroup() {
             {t("usage.configDirs")}
           </span>
           <p
-            className="mt-0.5 text-[11px] leading-tight"
-            style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            className="mt-0.5 text-[13px] leading-tight"
+            style={{ color: "var(--text-secondary)" }}
           >
             {t("usage.configDirsDesc")}
           </p>
@@ -4730,8 +5112,8 @@ function CodexUsageGroup() {
             {t("usage.codexAccountDirs")}
           </span>
           <p
-            className="mt-0.5 text-[11px] leading-tight"
-            style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            className="mt-0.5 text-[13px] leading-tight"
+            style={{ color: "var(--text-secondary)" }}
           >
             {t("usage.codexAccountDirsDesc")}
           </p>
@@ -4833,8 +5215,8 @@ function GrokUsageGroup() {
             {t("usage.grokConfigDirs")}
           </span>
           <p
-            className="mt-0.5 text-[11px] leading-tight"
-            style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            className="mt-0.5 text-[13px] leading-tight"
+            style={{ color: "var(--text-secondary)" }}
           >
             {t("usage.grokConfigDirsDesc")}
           </p>
@@ -4940,8 +5322,8 @@ function MemoSection() {
               {t("memo.padding")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("memo.paddingDesc")}
             </p>
@@ -4956,7 +5338,7 @@ function MemoSection() {
                   | "paddingLeft";
                 return (
                   <label key={dir} className="flex items-center gap-1.5">
-                    <span className="w-12 text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                    <span className="w-12 text-[13px]" style={{ color: "var(--text-secondary)" }}>
                       {t(`appearance.${dir.toLowerCase()}`)}
                     </span>
                     <input
@@ -4987,8 +5369,8 @@ function MemoSection() {
               {t("memo.indentSize")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("memo.indentSizeDesc")}
             </p>
@@ -5020,8 +5402,8 @@ function MemoSection() {
               {t("memo.paragraphDetection")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("memo.paragraphDetectionDesc")}
             </p>
@@ -5044,7 +5426,7 @@ function MemoSection() {
                 </span>
               </label>
               <label className="flex items-center gap-1.5">
-                <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
                   {t("memo.blankLineCount")}
                 </span>
                 <input
@@ -5076,8 +5458,8 @@ function MemoSection() {
               {t("memo.tripleClickSelect")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("memo.tripleClickSelectDesc")}
             </p>
@@ -5104,8 +5486,8 @@ function MemoSection() {
               {t("memo.copyOnSelect")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("memo.copyOnSelectDesc")}
             </p>
@@ -5396,7 +5778,7 @@ function KeybindingsSection() {
                 }}
                 title={t("common.remove")}
               >
-                ✕
+                <XIcon size={12} />
               </button>
             </div>
           </div>
@@ -5561,7 +5943,6 @@ export function SettingsView() {
   };
 
   const [saveLabel, setSaveLabel] = useState("Save");
-  const [navHover, setNavHover] = useState<string | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // Draft flush/reset registry — sections register callbacks invoked on Save/Discard
@@ -5608,9 +5989,11 @@ export function SettingsView() {
   const handleSave = () => {
     const shouldReconcileRemote = dirtySetRef.current.has("remoteConnection");
     const previousRemoteEnabled = useSettingsStore.getState().remote.enabled;
+    const previousUpdateChannel = useSettingsStore.getState().update.channel;
     // Flush all draft states to store first
     for (const fn of flushMapRef.current.values()) fn();
     const nextRemoteEnabled = useSettingsStore.getState().remote.enabled;
+    const nextUpdateChannel = useSettingsStore.getState().update.channel;
     draftValuesRef.current.clear();
     dirtySetRef.current.clear();
     setDirty(false);
@@ -5619,6 +6002,12 @@ export function SettingsView() {
       .then(async () => {
         if (shouldReconcileRemote) {
           await reconcileRemoteAccessAfterRemoteSave(previousRemoteEnabled, nextRemoteEnabled);
+        }
+        // A channel switch has to be answered now: the periodic check is six
+        // hours away, and the backend reads the channel from the file this save
+        // just wrote (ADR-0190). Failures stay in the update status.
+        if (nextUpdateChannel !== previousUpdateChannel) {
+          void checkAppUpdate().catch(() => {});
         }
         setSaveLabel("Saved!");
         saveTimerRef.current = setTimeout(() => setSaveLabel("Save"), 1500);
@@ -5636,274 +6025,109 @@ export function SettingsView() {
     setDirty(false);
   };
 
-  const navBtnStyle = (id: string): React.CSSProperties => {
-    const isActive = activeNav === id;
-    const isHover = navHover === id;
-    return {
-      background: isActive
-        ? "var(--bg-overlay)"
-        : isHover
-          ? "var(--hover-bg-subtle)"
-          : "transparent",
-      color: isActive ? "var(--accent)" : "var(--text-primary)",
-      borderLeft: isActive ? "3px solid var(--accent)" : "3px solid transparent",
-      cursor: "pointer",
-      transition: "all 0.1s",
-    };
-  };
-
   return (
     <SettingsDraftContext.Provider value={draftCtx}>
       <div
         data-testid="settings-view"
-        className="flex h-full"
+        className="settings-view flex h-full min-h-0"
         style={{ color: "var(--text-primary)" }}
       >
         {/* Sidebar Navigation */}
         <nav
-          className="flex h-full w-40 shrink-0 flex-col overflow-y-auto py-3"
+          className="settings-sidebar flex h-full shrink-0 flex-col overflow-y-auto py-3"
           style={{
             background: "var(--bg-surface)",
             borderRight: "1px solid var(--border)",
           }}
         >
           {/* Open JSON — Windows Terminal style top-right link */}
-          <button
+          <Button
             data-testid="sidebar-open-json"
             onClick={handleOpenSettingsJson}
-            className="mx-3 mb-2 px-2 py-1 text-left text-[10px]"
-            style={{
-              color: "var(--text-secondary)",
-              background: "transparent",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius-md)",
-              cursor: "pointer",
-              opacity: 0.7,
-            }}
+            className="mx-3 mb-2"
             title={t("nav.openJsonTitle")}
           >
             {t("nav.openJson")}
-          </button>
+          </Button>
 
-          {/* Appearance */}
-          <NavGroupHeader label={t("nav.groupAppearance")} />
-          <button
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("startup")}
-            onClick={() => setActiveNav("startup")}
-            onMouseEnter={() => setNavHover("startup")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.startup")}
-          </button>
-          <button
-            data-testid="nav-font"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("font")}
-            onClick={() => setActiveNav("font")}
-            onMouseEnter={() => setNavHover("font")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.appFont")}
-          </button>
-
-          {/* Terminal */}
-          <NavGroupHeader label={t("nav.groupTerminal")} />
-          <button
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("colorSchemes")}
-            onClick={() => setActiveNav("colorSchemes")}
-            onMouseEnter={() => setNavHover("colorSchemes")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.colorSchemes")}
-          </button>
-          <button
-            data-testid="nav-terminal"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("terminal")}
-            onClick={() => setActiveNav("terminal")}
-            onMouseEnter={() => setNavHover("terminal")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.terminal")}
-          </button>
-          <button
-            data-testid="nav-paste"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("paste")}
-            onClick={() => setActiveNav("paste")}
-            onMouseEnter={() => setNavHover("paste")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.paste")}
-          </button>
-
-          {/* Interface */}
-          <NavGroupHeader label={t("nav.groupInterface")} />
-          <button
-            data-testid="nav-interface"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("interface")}
-            onClick={() => setActiveNav("interface")}
-            onMouseEnter={() => setNavHover("interface")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.interface")}
-          </button>
-          <button
-            data-testid="nav-widgets"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("widgets")}
-            onClick={() => setActiveNav("widgets")}
-            onMouseEnter={() => setNavHover("widgets")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.widgets")}
-          </button>
-          <button
-            data-testid="nav-workspaceDisplay"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("workspaceDisplay")}
-            onClick={() => setActiveNav("workspaceDisplay")}
-            onMouseEnter={() => setNavHover("workspaceDisplay")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.workspaces")}
-          </button>
-
-          {/* Remote */}
-          <NavGroupHeader label={t("nav.groupRemote")} />
-          <button
-            data-testid="nav-remote"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("remoteConnection")}
-            onClick={() => setActiveNav("remoteConnection")}
-            onMouseEnter={() => setNavHover("remoteConnection")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.remoteConnection")}
-          </button>
-          <button
-            data-testid="nav-remote-display"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("remoteDisplay")}
-            onClick={() => setActiveNav("remoteDisplay")}
-            onMouseEnter={() => setNavHover("remoteDisplay")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.remoteDisplay")}
-          </button>
-
-          {/* Agents */}
-          <NavGroupHeader label={t("nav.groupAgents")} />
-          <button
-            data-testid="nav-claude"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("claude")}
-            onClick={() => setActiveNav("claude")}
-            onMouseEnter={() => setNavHover("claude")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.claude")}
-          </button>
-          <button
-            data-testid="nav-codex"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("codex")}
-            onClick={() => setActiveNav("codex")}
-            onMouseEnter={() => setNavHover("codex")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.codex")}
-          </button>
-          <button
-            data-testid="nav-grok"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("grok")}
-            onClick={() => setActiveNav("grok")}
-            onMouseEnter={() => setNavHover("grok")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.grok")}
-          </button>
-
-          {/* Views */}
-          <NavGroupHeader label={t("nav.groupViews")} />
-          <button
-            data-testid="nav-memo"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("memo")}
-            onClick={() => setActiveNav("memo")}
-            onMouseEnter={() => setNavHover("memo")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.memo")}
-          </button>
-          <button
-            data-testid="nav-fileExplorer"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("fileExplorer")}
-            onClick={() => setActiveNav("fileExplorer")}
-            onMouseEnter={() => setNavHover("fileExplorer")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.fileExplorer")}
-          </button>
-          <button
-            data-testid="nav-viewer"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("viewer")}
-            onClick={() => setActiveNav("viewer")}
-            onMouseEnter={() => setNavHover("viewer")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.viewer")}
-          </button>
-          <button
-            data-testid="nav-issueReporter"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("issueReporter")}
-            onClick={() => setActiveNav("issueReporter")}
-            onMouseEnter={() => setNavHover("issueReporter")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.issueReporter")}
-          </button>
-          <button
-            data-testid="nav-github"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("github")}
-            onClick={() => setActiveNav("github")}
-            onMouseEnter={() => setNavHover("github")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.github")}
-          </button>
-
-          {/* Input */}
-          <NavGroupHeader label={t("nav.groupInput")} />
-          <button
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("keybindings")}
-            onClick={() => setActiveNav("keybindings")}
-            onMouseEnter={() => setNavHover("keybindings")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.keybindings")}
-          </button>
+          {[
+            {
+              group: "groupGeneral",
+              items: [
+                ["startup", "startup"],
+                ["update", "update"],
+              ],
+            },
+            {
+              group: "groupAppearance",
+              items: [
+                ["font", "appFont"],
+                ["interface", "interface"],
+                ["workspaceDisplay", "workspaces"],
+                ["widgets", "widgets"],
+              ],
+            },
+            {
+              group: "groupTerminal",
+              items: [
+                ["terminal", "terminal"],
+                ["colorSchemes", "colorSchemes"],
+              ],
+            },
+            {
+              group: "groupInput",
+              items: [
+                ["paste", "paste"],
+                ["keybindings", "keybindings"],
+              ],
+            },
+            {
+              group: "groupViews",
+              items: [
+                ["memo", "memo"],
+                ["fileExplorer", "fileExplorer"],
+                ["viewer", "viewer"],
+                ["github", "github"],
+                ["issueReporter", "issueReporter"],
+              ],
+            },
+            {
+              group: "groupAgents",
+              items: [
+                ["claude", "claude"],
+                ["codex", "codex"],
+                ["grok", "grok"],
+              ],
+            },
+            { group: "groupRemote", items: [["remoteConnection", "remoteConnection"]] },
+          ].map(({ group, items }) => (
+            <section
+              key={group}
+              data-testid={`settings-group-${group}`}
+              aria-label={t(`nav.${group}`)}
+            >
+              <NavGroupHeader label={t(`nav.${group}`)} />
+              {items.map(([id, label]) => (
+                <button
+                  key={id}
+                  data-testid={`nav-${id === "remoteConnection" ? "remote" : id}`}
+                  className="settings-nav-button"
+                  aria-current={activeNav === id ? "page" : undefined}
+                  onClick={() => setActiveNav(id)}
+                >
+                  {t(`nav.${label}`)}
+                </button>
+              ))}
+            </section>
+          ))}
 
           {/* Profiles group */}
-          <div className="mt-3 flex items-center justify-between px-3 pb-1">
-            <span
-              className="text-[10px] uppercase tracking-wider"
-              style={{ color: "var(--text-secondary)", opacity: 0.7 }}
-            >
-              {t("nav.groupProfiles")}
-            </span>
+          <NavGroupHeader label={t("nav.groupProfiles")}>
             <button
               data-testid="add-profile-btn"
               onClick={handleAddProfile}
+              title={t("nav.addProfile")}
+              aria-label={t("nav.addProfile")}
               className="text-xs"
               style={{
                 color: "var(--accent)",
@@ -5912,17 +6136,15 @@ export function SettingsView() {
                 cursor: "pointer",
               }}
             >
-              +
+              <PlusIcon />
             </button>
-          </div>
+          </NavGroupHeader>
 
           <button
             data-testid="nav-profile-defaults"
-            className="w-full px-4 py-2 text-left text-[13px] italic"
-            style={navBtnStyle("defaults")}
+            className="settings-nav-button"
+            aria-current={activeNav === "defaults" ? "page" : undefined}
             onClick={() => setActiveNav("defaults")}
-            onMouseEnter={() => setNavHover("defaults")}
-            onMouseLeave={() => setNavHover(null)}
           >
             {t("nav.profileDefaults")}
           </button>
@@ -5932,11 +6154,9 @@ export function SettingsView() {
             return (
               <div key={id} className="group flex items-center">
                 <button
-                  className="min-w-0 flex-1 truncate px-4 py-2 text-left text-[13px]"
-                  style={navBtnStyle(id)}
+                  className="settings-nav-button min-w-0 flex-1 truncate"
+                  aria-current={activeNav === id ? "page" : undefined}
                   onClick={() => setActiveNav(id)}
-                  onMouseEnter={() => setNavHover(id)}
-                  onMouseLeave={() => setNavHover(null)}
                 >
                   {p.name}
                 </button>
@@ -5955,7 +6175,7 @@ export function SettingsView() {
                   }}
                   title={t("nav.deleteProfile")}
                 >
-                  ✕
+                  <XIcon size={12} />
                 </button>
               </div>
             );
@@ -5966,12 +6186,13 @@ export function SettingsView() {
 
         {/* Content Area */}
         <div
-          className="relative min-w-0 flex-1 overflow-y-auto"
+          className="settings-content relative flex min-h-0 min-w-0 flex-1 flex-col"
           style={{ background: "var(--bg-base)" }}
         >
-          <div className="p-4 pb-14" style={{ maxWidth: 720 }}>
+          <div className="settings-fields min-h-0 flex-1 overflow-y-auto p-5">
             {activeNav === "startup" && <StartupSection />}
             {activeNav === "font" && <FontSection />}
+            {activeNav === "update" && <UpdateSection />}
             {activeNav === "defaults" && <DefaultsSection />}
             {activeNav.startsWith("profile-") && (
               <ProfileSection key={activeNav} profileIndex={parseInt(activeNav.split("-")[1])} />
@@ -5983,7 +6204,6 @@ export function SettingsView() {
             {activeNav === "interface" && <InterfaceSection />}
             {activeNav === "workspaceDisplay" && <WorkspacesSection />}
             {activeNav === "remoteConnection" && <RemoteConnectionSection />}
-            {activeNav === "remoteDisplay" && <RemoteDisplaySection />}
             {activeNav === "claude" && <ClaudeSection />}
             {activeNav === "codex" && <CodexSection />}
             {activeNav === "grok" && <GrokSection />}
@@ -5997,52 +6217,45 @@ export function SettingsView() {
 
           {/* Sticky save bar — always visible at bottom */}
           <div
-            className="sticky bottom-0 flex items-center justify-end gap-2 px-4 py-3"
+            className="flex shrink-0 flex-wrap items-center justify-end gap-2 px-5 py-3"
             style={{ background: "var(--bg-surface)", borderTop: "1px solid var(--border)" }}
           >
-            <button
-              data-testid="discard-settings-btn"
-              onClick={handleDiscard}
-              disabled={!dirty}
-              className="px-5 py-2 text-[13px] font-medium"
-              style={{
-                background: "transparent",
-                color: "var(--text-secondary)",
-                border: "1px solid var(--border)",
-                cursor: dirty ? "pointer" : "default",
-                transition: "all 0.15s",
-                borderRadius: "var(--radius-md)",
-                opacity: dirty ? 1 : 0.4,
-              }}
-            >
-              {t("save.discard")}
-            </button>
-            <button
-              data-testid="save-settings-btn"
-              onClick={handleSave}
-              disabled={!dirty}
-              className="px-8 py-2 text-[13px] font-medium"
-              style={{
-                background:
-                  saveLabel === "Saved!"
-                    ? "var(--green)"
-                    : saveLabel === "Error!"
-                      ? "var(--red)"
-                      : "var(--accent)",
-                color: "var(--bg-base)",
-                border: "none",
-                cursor: dirty ? "pointer" : "default",
-                transition: "all 0.15s",
-                borderRadius: "var(--radius-md)",
-                opacity: dirty ? 1 : 0.4,
-              }}
+            <span
+              role="status"
+              className="mr-auto text-[13px]"
+              style={{ color: "var(--text-secondary)" }}
             >
               {saveLabel === "Saved!"
                 ? t("save.saved")
                 : saveLabel === "Error!"
                   ? t("save.error")
-                  : t("save.save")}
-            </button>
+                  : dirty
+                    ? t("save.unsaved")
+                    : t("save.noChanges")}
+            </span>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                data-testid="discard-settings-btn"
+                onClick={handleDiscard}
+                disabled={!dirty}
+                title={!dirty ? t("save.noChanges") : undefined}
+              >
+                {t("save.discard")}
+              </Button>
+              <Button
+                data-testid="save-settings-btn"
+                variant="primary"
+                onClick={handleSave}
+                disabled={!dirty}
+                title={!dirty ? t("save.noChanges") : undefined}
+              >
+                {saveLabel === "Saved!"
+                  ? t("save.saved")
+                  : saveLabel === "Error!"
+                    ? t("save.error")
+                    : t("save.save")}
+              </Button>
+            </div>
           </div>
         </div>
       </div>

@@ -4,6 +4,7 @@
 - Date: 2026-08-18
 - Source: 사용자 요구("PC에서 GitHub 기준 업데이트 알림·실행", "Remote 접속 중에도 업데이트 확인·실행", "Android 앱 업데이트는 앱스토어 이후") · [architecture/overview.md §2](../architecture/overview.md) · [architecture/api-contracts.md §12·§13](../architecture/api-contracts.md) · [ADR-0013](0013-direct-remote-mode.md) · [ADR-0149](0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md) · [ADR-0170](0170-android-e2e-lease-dies-with-its-session.md)
 - Extends: ADR-0013, ADR-0149, ADR-0170
+- Amended by: [ADR-0190](0190-update-release-channels.md) — 단일 stable endpoint, `x.y.z` 전용 클라이언트 계약, prerelease 번들 집합·tag 검사·게시 게이트가 채널 계약으로 정정된다. 서명 검증, `UpdateManager` 소유권, Automation/Remote 노출 범위와 lease 정책은 유효하다.
 
 ## Context
 

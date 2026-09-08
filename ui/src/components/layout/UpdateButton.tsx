@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { DownloadIcon } from "@/components/ui/icons";
 
 import {
   getAppUpdateStatus,
@@ -51,12 +52,19 @@ export function UpdateButton() {
       return percent === null ? "Downloading update" : `Downloading update (${percent}%)`;
     }
     if (error) return `Update ${status.availableVersion} — ${error}`;
-    return `Update ${status.availableVersion} available — click to install and restart`;
+    // Name the channel on beta: the same button offers a test build there, and
+    // the version string alone does not say which series it came from.
+    const channelNote = status.channel === "beta" ? " (beta channel)" : "";
+    return `Update ${status.availableVersion}${channelNote} available — click to install and restart`;
   }, [error, percent, status]);
 
   const handleInstall = useCallback(() => {
     if (!status?.availableVersion || status.operation !== "idle") return;
-    if (!window.confirm(`Install Laymux ${status.availableVersion} and restart now?`)) return;
+    // Consent is given here, so the channel has to be visible here — not only in
+    // the tooltip that led to the click (ADR-0190).
+    const channelNote = status.channel === "beta" ? " from the beta channel" : "";
+    if (!window.confirm(`Install Laymux ${status.availableVersion}${channelNote} and restart now?`))
+      return;
     setRequestError(null);
     void installAppUpdate()
       .then(setStatus)
@@ -81,10 +89,7 @@ export function UpdateButton() {
       title={title}
       aria-label={title}
     >
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-        <path d="M7 1.5v7M4.5 6 7 8.5 9.5 6" stroke="currentColor" strokeWidth="1.2" />
-        <path d="M2 9.5v2h10v-2" stroke="currentColor" strokeWidth="1.2" />
-      </svg>
+      <DownloadIcon />
       {busy && <span>{status.operation === "installing" ? "…" : (percent ?? "…")}</span>}
     </button>
   );

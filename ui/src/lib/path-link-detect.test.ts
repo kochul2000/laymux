@@ -9,6 +9,11 @@ import {
   isWithinPathLengthLimit,
   decidePathLinkAction,
   mapSelectionToPathRange,
+  extractPathCandidatesAtOffset,
+  extractPathCandidatesFromScreen,
+  mapLineCandidateToPathRange,
+  resolveOverlappingRanges,
+  PATH_LINK_MAX_SPACE_EXTENSIONS,
 } from "./path-link-detect";
 
 describe("isPathLinkCwdCurrent", () => {
@@ -168,6 +173,39 @@ describe("extractPathCandidatesFromSelection", () => {
         maxPathLength: 10,
       }),
     ).toEqual([{ text: "ok.ts", lineIndex: 0, startIndex: 31, endIndex: 36 }]);
+  });
+
+  it("절대경로 앵커의 공백 확장 접두를 기본 후보 뒤에 덧붙인다 (ADR-0191)", () => {
+    const texts = extractPathCandidatesFromSelection(
+      "G:/내 드라이브/Advisor/Advisor_0.1.0_x64-setup.exe",
+      options,
+    ).map((c) => c.text);
+    // 기본 토큰(공백에서 쪼개진 두 조각)에 더해, 앵커에서 이어 붙인 전체 경로가
+    // 후보로 나온다 — 존재 여부는 stat 게이트가 판정한다.
+    expect(texts).toContain("G:/내");
+    expect(texts).toContain("드라이브/Advisor/Advisor_0.1.0_x64-setup.exe");
+    expect(texts).toContain("G:/내 드라이브/Advisor/Advisor_0.1.0_x64-setup.exe");
+  });
+
+  it("확장 접두는 공백(cut)마다 하나씩, 앵커당 상한까지만 만든다", () => {
+    const words = Array.from({ length: PATH_LINK_MAX_SPACE_EXTENSIONS + 3 }, (_, i) => `w${i}`);
+    const texts = extractPathCandidatesFromSelection(`C:/base ${words.join(" ")}`, options)
+      .map((c) => c.text)
+      .filter((text) => text.includes(" "));
+    expect(texts).toHaveLength(PATH_LINK_MAX_SPACE_EXTENSIONS);
+    expect(texts[0]).toBe("C:/base w0");
+    expect(texts[texts.length - 1]).toBe(
+      `C:/base ${words.slice(0, PATH_LINK_MAX_SPACE_EXTENSIONS).join(" ")}`,
+    );
+  });
+
+  it("확장 접두는 기본 후보의 all-or-nothing 상한에 걸리지 않는다", () => {
+    // 기본 강한 토큰 16개(상한 이내) + 절대경로 앵커 1개 — 확장이 더해져 16을
+    // 넘어도 전체 검사가 생략되지 않는다.
+    const tokens = Array.from({ length: 15 }, (_, i) => `f${i}.ts`).join(" ");
+    const candidates = extractPathCandidatesFromSelection(`${tokens} C:/dir name`, options);
+    expect(candidates.map((c) => c.text)).toContain("C:/dir name");
+    expect(candidates.length).toBeGreaterThan(16);
   });
 });
 
@@ -443,5 +481,218 @@ describe("mapSelectionToPathRange", () => {
     expect(r.bufferLine).toBe(8); // y 7 → 8
     expect(r.startCol).toBe(4); // (3+0)+1, 토큰 인덱스 0
     expect(r.endCol).toBe(13); // 3 + len(10) - 1 = 12, +1 = 13
+  });
+});
+
+describe("extractPathCandidatesAtOffset (ADR-0188 point 트리거)", () => {
+  const limits = { maxPathLength: 256 };
+
+  it("offset을 덮는 maximal token 하나만 원문 범위와 함께 낸다", () => {
+    // "build failed: ui/src/lib/foo.ts:12:3 (see log)"
+    const line = "build failed: ui/src/lib/foo.ts:12:3 (see log)";
+    expect(extractPathCandidatesAtOffset(line, 20, limits)).toEqual([
+      {
+        text: "ui/src/lib/foo.ts",
+        lineIndex: 0,
+        startIndex: 14,
+        endIndex: 31,
+      },
+    ]);
+  });
+
+  it("이웃 토큰이나 토큰 내부 basename은 후보로 만들지 않는다", () => {
+    const line = "diff ui/src/App.tsx ui/src/App.test.tsx";
+    // 첫 토큰 안의 offset → 첫 토큰만.
+    expect(extractPathCandidatesAtOffset(line, 6, limits).map((c) => c.text)).toEqual([
+      "ui/src/App.tsx",
+    ]);
+    // 두 번째 토큰 안의 offset → 두 번째 토큰만.
+    expect(extractPathCandidatesAtOffset(line, 25, limits).map((c) => c.text)).toEqual([
+      "ui/src/App.test.tsx",
+    ]);
+  });
+
+  it("공백·경계 위 offset이나 범위 밖 offset은 후보가 없다", () => {
+    const line = "a  ui/src/App.tsx";
+    expect(extractPathCandidatesAtOffset(line, 1, limits)).toEqual([]);
+    expect(extractPathCandidatesAtOffset(line, 999, limits)).toEqual([]);
+    expect(extractPathCandidatesAtOffset("", 0, limits)).toEqual([]);
+    expect(extractPathCandidatesAtOffset(line, -1, limits)).toEqual([]);
+  });
+
+  it("포인터로 지목한 토큰은 슬래시·확장자 없는 맨이름도 받는다", () => {
+    expect(
+      extractPathCandidatesAtOffset("cd laymux 로 이동", 4, limits).map((c) => c.text),
+    ).toEqual(["laymux"]);
+  });
+
+  it("URL 스킴은 제외하고, 후보 길이 상한을 넘으면 버린다", () => {
+    expect(extractPathCandidatesAtOffset("see https://a.dev/x now", 8, limits)).toEqual([]);
+    expect(extractPathCandidatesAtOffset("aaaa/bbbb", 2, { maxPathLength: 4 })).toEqual([]);
+  });
+
+  it("따옴표·괄호와 grep 꼬리를 떼고 시작 offset을 보정한다", () => {
+    const line = 'log ("src/main.rs:42:5")';
+    expect(extractPathCandidatesAtOffset(line, 8, limits)).toEqual([
+      {
+        text: "src/main.rs",
+        lineIndex: 0,
+        startIndex: 6,
+        endIndex: 17,
+      },
+    ]);
+  });
+
+  it("절대경로 앵커에서 공백을 넘어 offset을 덮는 확장 접두를 함께 낸다 (ADR-0191)", () => {
+    const line = "설치: G:/내 드라이브/Advisor/Advisor_0.1.0_x64-setup.exe 실행";
+    // "드라이브/..." 토큰 위의 offset — 상대 토큰 자체와 앵커(G:/내)에서
+    // 확장된 접두들이 함께 나온다.
+    const texts = extractPathCandidatesAtOffset(line, 10, limits).map((c) => c.text);
+    expect(texts).toContain("드라이브/Advisor/Advisor_0.1.0_x64-setup.exe");
+    expect(texts).toContain("G:/내 드라이브/Advisor/Advisor_0.1.0_x64-setup.exe");
+    // 문장 꼬리를 붙인 cut 도 stat 게이트 대상 후보로 나온다.
+    expect(texts).toContain("G:/내 드라이브/Advisor/Advisor_0.1.0_x64-setup.exe 실행");
+  });
+
+  it("경로 내부의 공백 위 offset도 그 공백을 덮는 확장 후보를 평가한다", () => {
+    const line = "G:/내 드라이브/x.exe";
+    const texts = extractPathCandidatesAtOffset(line, 4, limits).map((c) => c.text);
+    expect(texts).toEqual(["G:/내 드라이브/x.exe"]);
+  });
+
+  it("확장 후보는 트림 전 원문(grep 꼬리 포함) 범위로 offset 을 덮는다", () => {
+    const line = "G:/내 드라이브/a.ts:42";
+    // ":42" 위를 가리켜도 그 꼬리를 포함하던 cut 의 후보를 잃지 않는다.
+    const texts = extractPathCandidatesAtOffset(line, line.length - 1, limits).map((c) => c.text);
+    expect(texts).toContain("G:/내 드라이브/a.ts");
+  });
+
+  it("괄호가 든 경로도 chunk 확장으로 원문 그대로 잇는다", () => {
+    const line = "run C:/Program Files (x86)/App/app.exe now";
+    const texts = extractPathCandidatesAtOffset(line, 16, limits).map((c) => c.text);
+    expect(texts).toContain("C:/Program Files (x86)/App/app.exe");
+  });
+
+  it("상대경로는 앵커가 아니고, 탭 간격은 확장을 끊는다", () => {
+    expect(extractPathCandidatesAtOffset("src/my file.txt", 8, limits).map((c) => c.text)).toEqual([
+      "file.txt",
+    ]);
+    expect(extractPathCandidatesAtOffset("C:/a\tb.txt", 6, limits).map((c) => c.text)).toEqual([
+      "b.txt",
+    ]);
+  });
+});
+
+describe("extractPathCandidatesFromScreen (ADR-0188 screen 트리거)", () => {
+  const limits = {
+    maxLines: 64,
+    maxChars: 8192,
+    maxCandidates: 64,
+    maxPathLength: 256,
+  };
+
+  it("화면 여러 줄의 strong candidate를 읽기 순서로 모은다", () => {
+    expect(
+      extractPathCandidatesFromScreen(["edit ui/src/App.tsx now", "", "cat Cargo.toml"], limits),
+    ).toEqual([
+      { text: "ui/src/App.tsx", lineIndex: 0, startIndex: 5, endIndex: 19 },
+      { text: "Cargo.toml", lineIndex: 2, startIndex: 4, endIndex: 14 },
+    ]);
+  });
+
+  it("지목되지 않은 화면에서는 맨이름을 후보로 만들지 않는다", () => {
+    expect(extractPathCandidatesFromScreen(["cd laymux and build v3"], limits)).toEqual([]);
+  });
+
+  it("후보 상한을 넘으면 앞쪽만 남기고 자른다(부분 결과 허용)", () => {
+    const line = Array.from({ length: 5 }, (_, i) => `a${i}.txt`).join(" ");
+    const candidates = extractPathCandidatesFromScreen([line, line], {
+      ...limits,
+      maxCandidates: 6,
+    });
+    expect(candidates).toHaveLength(6);
+    expect(candidates[5]).toEqual({ text: "a0.txt", lineIndex: 1, startIndex: 0, endIndex: 6 });
+  });
+
+  it("줄 수·총 문자 수 상한을 넘긴 뒤쪽 줄은 버린다", () => {
+    const rows = ["a/1.txt", "a/2.txt", "a/3.txt"];
+    expect(
+      extractPathCandidatesFromScreen(rows, { ...limits, maxLines: 2 }).map((c) => c.lineIndex),
+    ).toEqual([0, 1]);
+    expect(
+      extractPathCandidatesFromScreen(rows, { ...limits, maxChars: 14 }).map((c) => c.lineIndex),
+    ).toEqual([0, 1]);
+  });
+
+  it("절대경로 앵커의 공백 확장 접두를 같은 상한 안에서 함께 낸다 (ADR-0191)", () => {
+    const texts = extractPathCandidatesFromScreen(
+      ["다운로드 완료: G:/내 드라이브/Advisor/setup.exe 를 실행하세요"],
+      limits,
+    ).map((c) => c.text);
+    expect(texts).toContain("G:/내 드라이브/Advisor/setup.exe");
+    // 앵커가 없는 일반 단어 열은 확장을 만들지 않는다.
+    expect(
+      extractPathCandidatesFromScreen(["내 문서/파일.txt 를 여세요"], limits)
+        .map((c) => c.text)
+        .some((text) => text.includes(" ")),
+    ).toBe(false);
+  });
+});
+
+describe("resolveOverlappingRanges (ADR-0191 longest-existing-wins)", () => {
+  const rangeOf = (item: { line: number; start: number; end: number }) => item;
+
+  it("같은 줄의 겹치는 범위는 가장 긴 것만 남긴다", () => {
+    const items = [
+      { line: 0, start: 0, end: 5 }, // "G:/내"
+      { line: 0, start: 0, end: 12 }, // "G:/내 드라이브"
+      { line: 0, start: 0, end: 20 }, // 전체 경로
+    ];
+    expect(resolveOverlappingRanges(items, rangeOf)).toEqual([{ line: 0, start: 0, end: 20 }]);
+  });
+
+  it("겹치지 않는 범위와 다른 줄의 범위는 모두 남고 입력 순서를 유지한다", () => {
+    const items = [
+      { line: 0, start: 0, end: 5 },
+      { line: 0, start: 6, end: 12 },
+      { line: 1, start: 0, end: 5 },
+    ];
+    expect(resolveOverlappingRanges(items, rangeOf)).toEqual(items);
+  });
+
+  it("부분 겹침도 긴 쪽이 이긴다", () => {
+    const items = [
+      { line: 0, start: 4, end: 10 },
+      { line: 0, start: 0, end: 8 },
+    ];
+    expect(resolveOverlappingRanges(items, rangeOf)).toEqual([{ line: 0, start: 0, end: 8 }]);
+  });
+});
+
+describe("mapLineCandidateToPathRange (ADR-0188)", () => {
+  const candidate = { text: "가/a.txt", lineIndex: 0, startIndex: 2, endIndex: 9 };
+
+  it("셀 정보가 있으면 와이드 문자를 셀 단위로 보정한다", () => {
+    // "x가 가/a.txt" — 앞의 한글 1개(2셀)와 후보 안의 한글 1개(2셀).
+    const cells = [
+      { chars: "x", width: 1 },
+      { chars: "가", width: 2 },
+      { chars: "", width: 0 },
+      { chars: " ", width: 1 },
+      { chars: "가", width: 2 },
+      { chars: "", width: 0 },
+      ...[..."/a.txt"].map((chars) => ({ chars, width: 1 })),
+    ];
+    expect(
+      mapLineCandidateToPathRange(12, { ...candidate, startIndex: 3, endIndex: 10 }, cells),
+    ).toEqual({ bufferLine: 12, startCol: 5, endCol: 12 });
+  });
+
+  it("셀 정보가 없으면 UTF-16 offset을 1-based 컬럼으로 쓴다", () => {
+    expect(mapLineCandidateToPathRange(3, candidate)).toEqual({
+      bufferLine: 3,
+      startCol: 3,
+      endCol: 9,
+    });
   });
 });

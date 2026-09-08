@@ -13,9 +13,12 @@ import { useHoverTimer } from "@/hooks/useHoverTimer";
 import { useCwdDefaultsResolver } from "./useCwdDefaultsResolver";
 import { resolvePaneCwd } from "@/lib/pane-cwd";
 import { supportsCwdReceive, supportsCwdSend } from "@/lib/view-cwd-capability";
+import { runPaneClearFromUi } from "@/lib/pane-clear-action";
 
 interface DockProps {
   position: DockPosition;
+  /** False while a persistState dock is retained inside its hidden grid cell. */
+  isActive?: boolean;
   activeView: ViewType | null;
   views: ViewType[];
   panes: DockPane[];
@@ -42,6 +45,7 @@ const viewIcons: Record<ViewType, string> = {
 
 export function Dock({
   position,
+  isActive = true,
   activeView,
   views,
   panes,
@@ -62,7 +66,7 @@ export function Dock({
     return ws?.name ?? "";
   });
 
-  const singleHover = useHoverTimer(hoverIdleSeconds);
+  const singleHover = useHoverTimer(hoverIdleSeconds, isActive);
   const resolveCwdDefaults = useCwdDefaultsResolver("dock");
   const startupRevealedPaneIds = useTerminalStartupStore((state) => state.revealedPaneIds);
   // Restart requests live in a store, not local state (ADR-0113) — see PaneGrid.
@@ -79,6 +83,7 @@ export function Dock({
     return (
       <DockGrid
         position={position}
+        isActive={isActive}
         panes={panes}
         activeWorkspaceId={activeWorkspaceId}
         activeWsName={activeWsName}
@@ -114,10 +119,11 @@ export function Dock({
   return (
     <div
       data-testid={`dock-${position}`}
+      data-active={isActive ? "true" : "false"}
       className="flex h-full w-full overflow-hidden"
       style={{ background: "var(--bg-surface)", borderColor: "var(--border)" }}
-      onMouseEnter={() => singleHover.activate("__single__")}
-      onMouseMove={() => singleHover.activate("__single__")}
+      onMouseEnter={() => isActive && singleHover.activate("__single__")}
+      onMouseMove={() => isActive && singleHover.activate("__single__")}
       onMouseLeave={singleHover.clear}
     >
       {showIconBar && (
@@ -149,7 +155,8 @@ export function Dock({
         <PaneControlBar
           paneId={singlePaneId}
           currentView={panes[0]?.view ?? { type: activeView ?? "EmptyView" }}
-          hovered={singleHover.hoveredId !== null}
+          hovered={isActive && singleHover.hoveredId !== null}
+          isActive={isActive}
           cwdSendOn={singleCwdSendOn}
           cwdReceiveOn={singleCwdReceiveOn}
           actions={{
@@ -159,6 +166,12 @@ export function Dock({
                 : undefined,
             onSplitV:
               onSplitPane && singlePaneId ? () => onSplitPane(singlePaneId, "vertical") : undefined,
+            onClearTerminal:
+              singleView?.type === "TerminalView" && singlePaneId
+                ? () => {
+                    void runPaneClearFromUi(singlePaneId);
+                  }
+                : undefined,
             onClear:
               activeView && activeView !== "EmptyView"
                 ? singlePaneId && onSetPaneView
@@ -243,6 +256,7 @@ export function Dock({
 /** Thin wrapper that configures PaneGrid for dock context */
 function DockGrid({
   position,
+  isActive,
   panes,
   activeWorkspaceId,
   activeWsName,
@@ -252,6 +266,7 @@ function DockGrid({
   onResizePane,
 }: {
   position: DockPosition;
+  isActive: boolean;
   panes: DockPane[];
   activeWorkspaceId: string;
   activeWsName: string;
@@ -283,6 +298,7 @@ function DockGrid({
       workspaceName={activeWsName}
       emptyViewContext="dock"
       location="dock"
+      isActive={isActive}
       boundaryHandlesProps={{
         panes,
         getLatestPanes: () => useDockStore.getState().getDock(position)?.panes ?? [],

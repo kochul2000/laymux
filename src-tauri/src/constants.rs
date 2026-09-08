@@ -1,5 +1,8 @@
 use std::time::Duration;
 
+/// Static Linux x64 companion, staged beside the Windows application.
+pub const WSL_CODEX_PROBE_FILE: &str = "laymux-wsl-codex-probe";
+
 // ── OS credential-store names ────────────────────────────────────
 
 pub const KEYRING_SERVICE: &str = "laymux";
@@ -30,9 +33,30 @@ pub const EVENT_GROK_USAGE_SNAPSHOT_CHANGED: &str = "grok-usage-snapshot-changed
 /// asked for it — the watchdog re-acquiring or losing one (ADR-0114).
 pub const EVENT_SLEEP_INHIBIT_CHANGED: &str = "sleep-inhibit-changed";
 pub const EVENT_APP_UPDATE_STATUS_CHANGED: &str = "app-update-status-changed";
+pub const EVENT_COMPOSER_STARRED_ENTRIES_CHANGED: &str = "composer-starred-entries-changed";
+
+/// Explicitly persisted Composer entries (ADR-0226, ADR-0229).
+pub const COMPOSER_STARRED_ENTRIES_MAX: usize = 200;
+pub const COMPOSER_STARRED_ENTRY_MAX_BYTES: usize = 16 * 1024;
+pub const COMPOSER_STARRED_ENTRY_LABEL_MAX_BYTES: usize = 256;
+pub const REMOTE_COMPOSER_STARRED_REQUEST_MAX_BYTES: usize =
+    COMPOSER_STARRED_ENTRY_MAX_BYTES * 6 * 3 + COMPOSER_STARRED_ENTRY_LABEL_MAX_BYTES * 6 + 1024;
 pub const GITHUB_UPDATE_HOST: &str = "github.com";
 pub const GITHUB_UPDATE_OWNER: &str = "kochul2000";
 pub const GITHUB_UPDATE_REPOSITORY: &str = "laymux";
+/// Channel manifests live on a workflow-owned orphan branch; the raw host serves
+/// them as the single source of truth for "what is newest on this channel"
+/// (ADR-0190). GitHub has no stable alias for the latest prerelease.
+pub const UPDATE_CHANNEL_MANIFEST_BRANCH: &str = "release-channels";
+pub const UPDATE_CHANNEL_MANIFEST_HOST: &str = "raw.githubusercontent.com";
+pub const UPDATE_CHECK_RETRY_DELAY: Duration = Duration::from_secs(1);
+/// The installer cannot overwrite a file some child process still holds, so the
+/// install path tears its children down and then waits for the bundled runtime
+/// to become writable before handing over (ADR-0201). The ceiling is generous
+/// because exceeding it means the user sees the installer fail; the wait ends as
+/// soon as the files are actually free, so the common case never approaches it.
+pub const UPDATE_INSTALL_LOCK_RELEASE_TIMEOUT_MS: u64 = 10_000;
+pub const UPDATE_INSTALL_LOCK_RELEASE_POLL_MS: u64 = 100;
 /// Fired when the OS remote-desktop (RDP / Terminal Services) session state of
 /// the laymux process flips. Payload is a bool: `true` while the window is being
 /// viewed over a remote session. The UI uses it to auto-open the Remote Access
@@ -98,6 +122,15 @@ pub const COLORTERM_TRUECOLOR: &str = "truecolor";
 /// trace logs are only useful when diagnosing cursor/flicker issues.
 pub const ENV_LAYMUX_PTY_TRACE: &str = "LAYMUX_PTY_TRACE";
 
+/// xterm's DEFAULT mouse encoding is the fixed-width `CSI M Pb Px Py`
+/// binary report. `onBinary` currently emits only this encoding.
+pub const XTERM_DEFAULT_MOUSE_REPORT_PREFIX: &[u8; 3] = b"\x1b[M";
+pub const XTERM_DEFAULT_MOUSE_REPORT_LEN: usize = 6;
+/// ConPTY's pseudoconsole channel is UTF-8, so only single-byte UTF-8 values
+/// can cross it without changing the fixed-width DEFAULT mouse report.
+#[cfg(windows)]
+pub const XTERM_DEFAULT_MOUSE_CONPTY_MAX_BYTE: u8 = 0x7f;
+
 /// Enables a diagnostic path where the UI tracer ships batched
 /// shadow-cursor events to the Rust side via a single `invoke` per
 /// `requestAnimationFrame` — the server-side stream is the same
@@ -127,7 +160,6 @@ pub const MIN_REMOTE_HEARTBEAT_TIMEOUT_SECONDS: u64 = 30;
 
 pub const SETTINGS_LANGUAGES: &[&str] = &["system", "ko", "en"];
 pub const APP_THEME_IDS: &[&str] = &["catppuccin-mocha", "dracula", "wsl-dark", "github-light"];
-pub const TERMINAL_SCROLLBAR_STYLES: &[&str] = &["overlay", "separate"];
 /// xterm parser admission class shares (ADR-0101). Defaults are 5 (focused) /
 /// 3 (other visible) / 2 (hidden together); the sum is one admission cycle.
 pub const PARSER_ADMISSION_FOCUSED_SHARE_DEFAULT: u32 = 5;
@@ -148,10 +180,20 @@ pub const MIN_SCROLL_SENSITIVITY: f32 = 0.1;
 pub const MAX_SCROLL_SENSITIVITY: f32 = 20.0;
 /// Composer past-input history sharing scope (ADR-0055).
 pub const COMPOSER_HISTORY_SCOPES: &[&str] = &["global", "workspace", "pane"];
+/// Link execution gate (ADR-0224). `immediate` keeps the single-gesture open;
+/// `chip` shows an action chip and executes only from it. Order is display order.
+pub const LINK_ACTIVATION_MODES: &[&str] = &[LINK_ACTIVATION_IMMEDIATE, LINK_ACTIVATION_CHIP];
+pub const LINK_ACTIVATION_IMMEDIATE: &str = "immediate";
+pub const LINK_ACTIVATION_CHIP: &str = "chip";
 pub const PASTE_PATH_SEPARATORS: &[&str] = &["space", "newline", "comma", "semicolon"];
 pub const CONTROL_BAR_MODES: &[&str] = &["hover", "pinned", "minimized"];
 pub const NOTIFICATION_DISMISS_MODES: &[&str] = &["workspace", "paneFocus", "manual"];
 pub const WORKSPACE_SORT_ORDERS: &[&str] = &["manual", "notification"];
+pub const WORKSPACE_LAST_INPUT_MODES: &[&str] = &["perPane", "workspaceLatest"];
+/// Update channels a build can follow (ADR-0190). Order is display order.
+pub const UPDATE_CHANNELS: &[&str] = &[UPDATE_CHANNEL_STABLE, UPDATE_CHANNEL_BETA];
+pub const UPDATE_CHANNEL_STABLE: &str = "stable";
+pub const UPDATE_CHANNEL_BETA: &str = "beta";
 pub const PROFILE_CURSOR_SHAPES: &[&str] = &[
     "bar",
     "underscore",
@@ -227,6 +269,9 @@ pub const ENTER_SUBMIT_CR_DELAY_MS: u64 = 300;
 pub const PTY_CONTROL_CANCEL_GRACE_MS: u64 = 250;
 /// Final bounded wait for the platform worker to acknowledge PTY termination.
 pub const PTY_CONTROL_TERMINATE_GRACE_MS: u64 = 250;
+/// Deadline for the Windows process-tree helper used during PTY teardown.
+/// A stalled `taskkill.exe` must not hold a global finalization fence forever.
+pub const PTY_PROCESS_TREE_KILL_TIMEOUT_MS: u64 = 1_000;
 /// Bound for an interruptible PTY reader to acknowledge a generation wake.
 pub const PTY_READER_WAKE_TIMEOUT_MS: u64 = 500;
 /// Bound for the generation-scoped reader lifecycle to reach terminal state
@@ -239,6 +284,56 @@ pub const REMOTE_OWNER_TRANSITION_TIMEOUT_MS: u64 = 750;
 /// Maximum complete physical payload accepted by the human structured-input
 /// API, including bracketed-paste markers and an optional submit CR.
 pub const TERMINAL_STRUCTURED_INPUT_MAX_BYTES: usize = 1024 * 1024;
+
+/// Remote attachment cache quota expressed in attachments of the configured
+/// maximum size (`remote.attachmentMaxMib`, ADR-0227): 64 MiB at the 1 MiB default.
+pub const REMOTE_TERMINAL_ATTACHMENT_CACHE_FILES_OF_MAX_SIZE: usize = 64;
+/// Maximum regular-file count retained in the Remote attachment cache. This
+/// also bounds zero-byte attachments and the cost of cache scans.
+pub const REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_FILES: usize = 1024;
+/// Slack for the non-`data` fields of one Remote attachment JSON body
+/// (lease id, bounded file name and MIME type, JSON syntax).
+pub const REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES: usize = 16 * 1024;
+/// Cloud relay bound for one browser HTTP request body forwarded over the
+/// tunnel (laymux-server `TUNNEL_HTTP_REQUEST_BYTES_LIMIT`). Attachments that
+/// arrive through the relay are capped to what fits under it (ADR-0227).
+pub const CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT: usize = 16 * 1024 * 1024;
+/// Cloud relay bound for one Android E2E RPC envelope (laymux-server
+/// `ANDROID_E2E_RPC_BODY_LIMIT`, `POST /api/android/e2e/rpc`).
+pub const CLOUD_RELAY_ANDROID_E2E_RPC_BODY_LIMIT: usize = 2 * 1024 * 1024;
+/// Upper bound of `remote.attachmentMaxMib` (ADR-0227). The Cloud relay forwards
+/// at most 16 MiB of request body, which fits this many decoded MiB after base64.
+pub const REMOTE_TERMINAL_ATTACHMENT_MAX_MIB: u32 = 10;
+/// Base64 length of the largest decoded attachment a policy allows.
+pub const fn remote_attachment_encoded_limit(max_bytes: usize) -> usize {
+    max_bytes.div_ceil(3) * 4
+}
+/// JSON body bound for one attachment request at the given decoded maximum.
+pub const fn remote_attachment_request_limit(max_bytes: usize) -> usize {
+    remote_attachment_encoded_limit(max_bytes) + REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES
+}
+/// Largest inner request plaintext an Android E2E envelope may carry: the
+/// attachment JSON at the configurable cap plus the `PlainRequest` wrapper.
+pub const ANDROID_E2E_MAX_REQUEST_PLAINTEXT_BYTES: usize =
+    remote_attachment_request_limit(REMOTE_TERMINAL_ATTACHMENT_MAX_MIB as usize * 1024 * 1024)
+        + REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES;
+/// Body bound for one Android E2E RPC envelope carrying an attachment of the
+/// given decoded maximum: the inner plaintext is AEAD-sealed and base64url-
+/// encoded once more. Never below the 2 MiB the envelope always allowed.
+pub const fn android_e2e_rpc_body_limit(max_bytes: usize) -> usize {
+    let derived = (remote_attachment_request_limit(max_bytes)
+        + REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES)
+        .div_ceil(3)
+        * 4
+        + REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES;
+    if derived > 2 * 1024 * 1024 {
+        derived
+    } else {
+        2 * 1024 * 1024
+    }
+}
+/// Startup cleanup age for Remote attachment cache files.
+pub const REMOTE_TERMINAL_ATTACHMENT_MAX_AGE_DAYS: u64 = 7;
 
 /// Delay suggested to a Remote client when a Local human-input operation is
 /// already draining ahead of its claim reservation.
@@ -302,10 +397,10 @@ pub const TERMINAL_ATTACH_SNAPSHOT_MAX_BYTES: usize = TERMINAL_OUTPUT_MAX_DESKTO
 /// sent to a Remote client on terminal attach.
 pub const DEFAULT_REMOTE_SNAPSHOT_MAX_KIB: u32 = 4;
 
-/// Effective bounds for `remote.snapshotMaxKib`. The upper bound matches the
-/// serialized checkpoint hard cap. The current viewport, alternate buffer and
-/// restore modes remain mandatory even when their minimum serialization is
-/// larger than the configured soft budget.
+/// Effective bounds for a Remote device's local `snapshotMaxKib` request. The
+/// upper bound matches the serialized checkpoint hard cap. The current
+/// viewport, alternate buffer and restore modes remain mandatory even when
+/// their minimum serialization is larger than the requested soft budget.
 pub const MIN_REMOTE_SNAPSHOT_MAX_KIB: u32 = 1;
 pub const MAX_REMOTE_SNAPSHOT_MAX_KIB: u32 = 1024;
 /// Absolute serialized xterm checkpoint limit, independent of its soft
@@ -317,20 +412,49 @@ pub const REMOTE_RENDER_CHECKPOINT_ABSOLUTE_MAX_BYTES: usize = 1024 * 1024;
 /// source cap stays deliberately small and is enforced before image reads.
 pub const MAX_REMOTE_FILE_VIEWER_BYTES: usize = 8 * 1024 * 1024;
 
+/// Android E2E FileViewer source cap. Base64-bearing render/download payloads
+/// must still fit the route-scoped inner JSON limit and the 4 MiB encrypted
+/// plaintext envelope (ADR-0208).
+pub const MAX_ANDROID_E2E_FILE_VIEWER_BYTES: usize = 2 * 1024 * 1024;
+/// Maximum serialized inner JSON response for Android E2E FileViewer RPCs.
+/// This is enforced in the frontend before the Tauri IPC response is built
+/// and again at the Rust dispatcher boundary.
+pub const MAX_ANDROID_E2E_FILE_VIEWER_RESPONSE_BYTES: usize = 3 * 1024 * 1024;
+
 /// Maximum Unicode scalar count accepted from one Remote terminal selection
 /// before the desktop path-link parser runs. This matches the maximum valid
 /// `terminal.pathLinkMaxLength` setting.
 pub const MAX_REMOTE_PATH_LINK_SELECTION_CHARS: usize = 4096;
 
-/// Maximum non-overlapping path candidates validated for one desktop/Remote
-/// terminal selection. The frontend applies the same cap before this command.
-pub const MAX_PATH_LINK_CANDIDATES: usize = 16;
+/// Maximum lines accepted from one Remote terminal selection, matching the
+/// desktop selection parser's line cap (ADR-0148).
+pub const MAX_REMOTE_PATH_LINK_SELECTION_LINES: usize = 8;
+
+/// Maximum paths accepted by one `stat_paths` batch. A selection contributes at
+/// most 16 candidates (ADR-0148), while a Remote idle screen scan can carry a
+/// whole viewport worth of paths (ADR-0188); this is the ceiling on filesystem
+/// lookups one batch may perform, not the selection candidate cap.
+pub const MAX_PATH_LINK_CANDIDATES: usize = 64;
+
+/// Maximum terminal rows the Remote idle scan may send as one screen, and the
+/// candidate cap applied to it. Beyond these the scan drops the tail rather
+/// than abandoning the screen (ADR-0188).
+pub const MAX_REMOTE_PATH_LINK_SCREEN_LINES: usize = 64;
+
+/// Maximum Unicode scalar count accepted across all lines of one Remote idle
+/// screen scan request.
+pub const MAX_REMOTE_PATH_LINK_SCREEN_CHARS: usize = 8192;
 
 /// Maximum Unicode scalar count accepted for the terminal id attached to a
 /// Remote path-link validation request. Runtime terminal ids are much shorter;
 /// this only prevents an authenticated client from forwarding an unbounded id
 /// through the async frontend bridge.
 pub const MAX_REMOTE_PATH_LINK_TERMINAL_ID_CHARS: usize = 256;
+
+/// Maximum entries returned by one Remote FileViewer directory listing
+/// (ADR-0198). Past this the bridge truncates the sorted list and reports
+/// `truncated:true` — partial front-of-list beats failing the whole directory.
+pub const MAX_REMOTE_FILE_VIEWER_LIST_ENTRIES: usize = 1000;
 
 /// Secret-capability header required by Remote FileViewer endpoints.
 pub const REMOTE_FILE_VIEWER_CAPABILITY_HEADER: &str = "x-laymux-remote-file-viewer";
@@ -521,6 +645,24 @@ pub const SLEEP_INHIBIT_STDERR_CAPTURE_LIMIT: usize = 4096;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn composer_star_request_limit_accepts_every_maximum_escaped_field() {
+        let value = "\0".repeat(COMPOSER_STARRED_ENTRY_MAX_BYTES);
+        let label = "\0".repeat(COMPOSER_STARRED_ENTRY_LABEL_MAX_BYTES);
+        let body = serde_json::to_vec(&serde_json::json!({
+            "leaseId": "lease",
+            "value": value,
+            "text": value,
+            "previousValue": value,
+            "starred": true,
+            "label": label,
+            "send": true,
+        }))
+        .unwrap();
+
+        assert!(body.len() <= REMOTE_COMPOSER_STARRED_REQUEST_MAX_BYTES);
+    }
 
     #[test]
     fn propagation_timeout_is_positive() {
