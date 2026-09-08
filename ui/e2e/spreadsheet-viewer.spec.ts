@@ -100,3 +100,51 @@ test("four spreadsheet extensions open in the viewer with sheet search and TSV c
     .getByTestId("file-viewer-overlay")
     .screenshot({ path: "../.screenshots/spreadsheet-viewer-e2e.png" });
 });
+
+test("extends column selection while horizontally auto-scrolling", async ({ appPage: page }) => {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.evaluate(() => {
+    const host = window as unknown as {
+      __TAURI_INTERNALS__: {
+        invoke: (cmd: string, args: Record<string, unknown>) => Promise<unknown>;
+      };
+    };
+    const original = host.__TAURI_INTERNALS__.invoke;
+    host.__TAURI_INTERNALS__.invoke = async (cmd, args) =>
+      cmd === "read_spreadsheet_for_viewer"
+        ? {
+            sheetNames: ["Wide"],
+            sheet: "Wide",
+            totalRows: 2,
+            totalColumns: 30,
+            truncated: false,
+            cells: Array.from({ length: 30 }, (_, column) => ({
+              row: 0,
+              column,
+              value: String(column),
+            })),
+          }
+        : original(cmd, args);
+  });
+  await page.keyboard.press("Control+Shift+O");
+  await page.getByTestId("file-viewer-overlay-path-input").fill("C:/wide.xlsx");
+  await page.getByTestId("file-viewer-overlay-path-submit").click();
+  const header = page.getByRole("button", { name: "Select column A", exact: true });
+  await expect(header).toBeVisible();
+  const a = await header.boundingBox();
+  const grid = page.getByTestId("spreadsheet-grid");
+  const rect = await grid.boundingBox();
+  if (!a || !rect) throw new Error("Missing header");
+  await page.mouse.move(a.x + 10, a.y + 10);
+  await page.mouse.down();
+  await page.mouse.move(rect.x + rect.width + 10, a.y + 10, { steps: 10 });
+  await expect.poll(() => grid.evaluate((element) => element.scrollLeft)).toBeGreaterThan(450);
+  await page.mouse.up();
+  await page.keyboard.press("Control+c");
+  await expect
+    .poll(async () => {
+      const text = await page.evaluate(() => navigator.clipboard.readText());
+      return text.split("\n")[0].split("\t").length;
+    })
+    .toBeGreaterThan(Math.floor(rect.width / 144) + 1);
+});

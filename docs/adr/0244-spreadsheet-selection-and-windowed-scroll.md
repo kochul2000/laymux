@@ -1,6 +1,6 @@
 # 0244. 스프레드시트는 범위 선택과 스크롤 창으로 탐색한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-08
 - Source: 사용자 UX 피드백, ADR-0242, architecture/data-flow.md 데스크톱 스프레드시트 뷰어
 - 관계: ADR-0242의 페이지 탐색과 복사 인터랙션을 정정한다. 파일 읽기 계약과 상한은 유지한다.

@@ -64,15 +64,32 @@ export function SpreadsheetTable({
       if (pointer) {
         const rect = scroller.getBoundingClientRect();
         const dy =
-          pointer.y < rect.top + ROW_HEIGHT + 16 ? -12 : pointer.y > rect.bottom - 16 ? 12 : 0;
-        const dx = pointer.x < rect.left + 16 ? -12 : pointer.x > rect.right - 16 ? 12 : 0;
+          selected?.kind === "columns"
+            ? 0
+            : pointer.y < rect.top + ROW_HEIGHT + 16
+              ? -12
+              : pointer.y > rect.bottom - 16
+                ? 12
+                : 0;
+        const dx =
+          selected?.kind === "rows"
+            ? 0
+            : pointer.x < rect.left + 16
+              ? -12
+              : pointer.x > rect.right - 16
+                ? 12
+                : 0;
         if (dx || dy) {
           scroller.scrollTop += dy;
           scroller.scrollLeft += dx;
           const target = document
             .elementFromPoint(
-              Math.max(rect.left + 1, Math.min(rect.right - 18, pointer.x)),
-              Math.max(rect.top + ROW_HEIGHT + 1, Math.min(rect.bottom - 18, pointer.y)),
+              selected?.kind === "rows"
+                ? rect.left + ROW_HEADER_WIDTH / 2
+                : Math.max(rect.left + ROW_HEADER_WIDTH + 1, Math.min(rect.right - 18, pointer.x)),
+              selected?.kind === "columns"
+                ? rect.top + ROW_HEIGHT / 2
+                : Math.max(rect.top + ROW_HEIGHT + 1, Math.min(rect.bottom - 18, pointer.y)),
             )
             ?.closest<HTMLButtonElement>("[data-selection-kind]");
           if (target && scroller.contains(target))
@@ -95,7 +112,7 @@ export function SpreadsheetTable({
       window.removeEventListener("mousemove", move);
       cancelAnimationFrame(frame);
     };
-  }, [dragging, scroller]);
+  }, [dragging, scroller, selected?.kind]);
   const columnCount = Math.min(data.totalColumns, MAX_COLUMNS);
   const rows = useMemo(() => {
     const result = Array.from({ length: Math.min(data.totalRows, MAX_ROWS) }, (_, index) => ({
