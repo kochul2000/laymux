@@ -1,10 +1,20 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SpreadsheetPreview } from "./SpreadsheetPreview";
-import { readSpreadsheetForViewer } from "@/lib/tauri-api";
+import {
+  openSpreadsheetForViewer,
+  nextSpreadsheetForViewer,
+  closeSpreadsheetForViewer,
+} from "@/lib/tauri-api";
+const readSpreadsheetForViewer = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/tauri-api", () => ({
-  readSpreadsheetForViewer: vi.fn(),
+  openSpreadsheetForViewer: vi.fn(async (path, sheet) => {
+    const content = await readSpreadsheetForViewer(path, sheet);
+    return { content, sessionId: path, loadedRows: content.totalRows, hasMore: false };
+  }),
+  nextSpreadsheetForViewer: vi.fn(),
+  closeSpreadsheetForViewer: vi.fn().mockResolvedValue(undefined),
 }));
 
 const data = {
@@ -97,6 +107,7 @@ describe("SpreadsheetPreview", () => {
     await screen.findByText("상품");
     await act(async () => finish({ ...data, cells: [{ row: 0, column: 0, value: "stale" }] }));
     expect(screen.queryByText("stale")).not.toBeInTheDocument();
+    expect(closeSpreadsheetForViewer).toHaveBeenCalledWith("/old.xls");
   });
 });
 
@@ -105,6 +116,47 @@ function copySelection() {
   fireEvent.copy(screen.getByTestId("spreadsheet-grid"), { clipboardData: { setData } });
   return setData;
 }
+
+it("reads another window only on demand and allows only one pending request", async () => {
+  const content = {
+    ...data,
+    totalRows: 100,
+    totalColumns: 0,
+    cells: [],
+  };
+  vi.mocked(openSpreadsheetForViewer).mockResolvedValueOnce({
+    sessionId: "stream",
+    content,
+    loadedRows: 100,
+    hasMore: true,
+  });
+  let finish!: (value: Awaited<ReturnType<typeof nextSpreadsheetForViewer>>) => void;
+  vi.mocked(nextSpreadsheetForViewer).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const view = render(<SpreadsheetPreview path="/stream.xlsx" />);
+  await screen.findByRole("table");
+  expect(nextSpreadsheetForViewer).not.toHaveBeenCalled();
+  const grid = screen.getByTestId("spreadsheet-grid");
+  fireEvent.scroll(grid);
+  fireEvent.scroll(grid);
+  expect(nextSpreadsheetForViewer).toHaveBeenCalledTimes(1);
+  await act(async () =>
+    finish({
+      sessionId: "stream",
+      loadedRows: 101,
+      hasMore: false,
+      content: { ...content, totalColumns: 1, cells: [{ row: 100, column: 0, value: "last" }] },
+    }),
+  );
+  fireEvent.change(screen.getByTestId("spreadsheet-search"), { target: { value: "last" } });
+  expect(screen.getByText("last")).toBeVisible();
+  view.unmount();
+  expect(closeSpreadsheetForViewer).toHaveBeenCalledWith("stream");
+});
 
 it("selects rows, columns and a dragged rectangle", async () => {
   vi.mocked(readSpreadsheetForViewer).mockResolvedValue({ ...data, totalRows: 3 });

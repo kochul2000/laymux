@@ -250,6 +250,7 @@ pub fn run() {
             session_checkpoint::start_watchdog(app.handle().clone(), app_state.clone());
 
             app.manage(app_state);
+            app.manage(commands::SpreadsheetStreams::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -320,6 +321,9 @@ pub fn run() {
             commands::load_window_geometry,
             commands::read_file_for_viewer,
             commands::read_spreadsheet_for_viewer,
+            commands::open_spreadsheet_for_viewer,
+            commands::next_spreadsheet_for_viewer,
+            commands::close_spreadsheet_for_viewer,
             commands::read_file_for_download,
             commands::list_directory,
             commands::stat_path,

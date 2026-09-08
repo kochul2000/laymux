@@ -20,9 +20,13 @@ type Selection = {
 export function SpreadsheetTable({
   data,
   bodyStyle,
+  hasMore = false,
+  onNeedMore,
 }: {
   data: SpreadsheetContent;
   bodyStyle?: React.CSSProperties;
+  hasMore?: boolean;
+  onNeedMore?: () => void;
 }) {
   const { t } = useTranslation("common");
   const [query, setQuery] = useState("");
@@ -113,7 +117,7 @@ export function SpreadsheetTable({
       cancelAnimationFrame(frame);
     };
   }, [dragging, scroller, selected?.kind]);
-  const columnCount = Math.min(data.totalColumns, MAX_COLUMNS);
+  const columnCount = Math.min(Math.max(data.totalColumns, hasMore ? 1 : 0), MAX_COLUMNS);
   const rows = useMemo(() => {
     const result = Array.from({ length: Math.min(data.totalRows, MAX_ROWS) }, (_, index) => ({
       index,
@@ -192,6 +196,7 @@ export function SpreadsheetTable({
       {data.truncated && (
         <PreviewNotice testId="spreadsheet-truncated">{t("spreadsheet.truncated")}</PreviewNotice>
       )}
+      {hasMore && <PreviewNotice tone="info">{t("spreadsheet.partialRead")}</PreviewNotice>}
       <div className="flex flex-wrap items-center gap-3 px-3 py-2" style={toolbarStyle}>
         <input
           type="search"
@@ -224,15 +229,28 @@ export function SpreadsheetTable({
         data-testid="spreadsheet-grid"
         data-file-viewer-body
         className="empty-view-scroll min-h-0 flex-1 overflow-auto"
-        style={bodyStyle}
-        onScroll={(event) =>
+        style={{
+          ...bodyStyle,
+          padding: undefined,
+          paddingTop: 0,
+          paddingRight: 0,
+          paddingBottom: 0,
+          paddingLeft: 0,
+        }}
+        onScroll={(event) => {
           setViewport({
             top: event.currentTarget.scrollTop,
             left: event.currentTarget.scrollLeft,
             width: event.currentTarget.clientWidth || 800,
             height: event.currentTarget.clientHeight || 560,
-          })
-        }
+          });
+          if (
+            hasMore &&
+            event.currentTarget.scrollTop + event.currentTarget.clientHeight >=
+              event.currentTarget.scrollHeight - ROW_HEIGHT * 10
+          )
+            onNeedMore?.();
+        }}
         onCopy={(event) => {
           if (!bounds) return;
           event.preventDefault();

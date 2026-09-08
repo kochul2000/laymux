@@ -1,6 +1,46 @@
 use laymux_lib::commands::read_spreadsheet_for_viewer;
 
 #[test]
+fn streams_requested_windows_and_releases_closed_readers() {
+    let mut xml = String::from(
+        r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>"#,
+    );
+    for row in 1..=500 {
+        xml.push_str(&format!(
+            "<row r=\"{row}\"><c r=\"A{row}\"><v>{row}</v></c></row>"
+        ));
+    }
+    xml.push_str("</sheetData></worksheet>");
+    let (_dir, path) = xlsx_with_sheet(xml.as_bytes());
+    let streams = laymux_lib::commands::SpreadsheetStreams::default();
+    let first = streams.open(path.to_string_lossy().into(), None).unwrap();
+    assert_eq!(first.content.cells.len(), 100);
+    assert_eq!(first.loaded_rows, 100);
+    let second = streams.next(&first.session_id).unwrap();
+    assert_eq!(second.content.cells[0].value, "101");
+    assert_eq!(second.loaded_rows, 200);
+    streams.close(&first.session_id).unwrap();
+    assert!(streams.next(&first.session_id).is_err());
+}
+
+#[test]
+fn large_legacy_files_are_rejected_before_parsing() {
+    let dir = tempfile::tempdir().unwrap();
+    for ext in ["xls", "ods"] {
+        let path = dir.path().join(format!("large.{ext}"));
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(2 * 1024 * 1024 + 1)
+            .unwrap();
+        assert!(
+            read_spreadsheet_for_viewer(path.to_string_lossy().into(), None)
+                .unwrap_err()
+                .contains("2 MiB")
+        );
+    }
+}
+
+#[test]
 fn reads_real_workbooks_in_all_four_formats_and_switches_sheets() {
     for ext in ["xls", "xlsx", "xlsb", "ods"] {
         let path = format!(
