@@ -347,7 +347,13 @@ mod tests {
     #[test]
     fn snapshots_are_bound_to_the_controller_and_expire() {
         let mut bridge = DeviceSettingsBridge::default();
-        bridge.sync("lease-1", report()).unwrap();
+        let mut device = report();
+        // Existing Remote pages normalize every custom key with a submit flag.
+        device.settings["inputBarUserKeys"] = json!([
+            {"id":"u-one", "label":"Tab", "seq":"\t", "submit":false},
+            {"id":"u-two", "label":"Run", "seq":"echo ok", "submit":true}
+        ]);
+        bridge.sync("lease-1", device).unwrap();
         assert!(bridge.current("lease-1").is_ok());
         assert!(bridge.current("lease-2").is_err());
         bridge.snapshot.as_mut().unwrap().observed_at -= SNAPSHOT_MAX_AGE;

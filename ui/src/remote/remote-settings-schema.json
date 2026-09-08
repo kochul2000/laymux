@@ -403,6 +403,11 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 32
+          },
+          "submit": {
+            "type": "boolean",
+            "default": false,
+            "description": "사용자가 키를 누를 때 문자열 뒤에 Enter를 전송할지 여부. 설정 저장은 입력을 실행하지 않습니다. 생략 시 false."
           }
         }
       },

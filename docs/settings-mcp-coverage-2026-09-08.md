@@ -504,4 +504,3 @@ Startup·Font·Defaults·Profile·Color schemes·Paste·Terminal·Interface·Rem
 - `/workspaces/{index}/panes/{index}/w`
 - `/workspaces/{index}/panes/{index}/x`
 - `/workspaces/{index}/panes/{index}/y`
-

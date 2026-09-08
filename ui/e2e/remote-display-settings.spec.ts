@@ -192,9 +192,12 @@ test("MCP heartbeat 변경은 기기 저장·화면 적용 뒤 확인 응답을 
             composerFontSize: 19,
             menuFontSize: 17,
             touchScrollSensitivity: 2,
+            mainButtonScale: 120,
+            keysButtonScale: 90,
+            selectionHandleSize: 28,
             composerAutocomplete: false,
             composerHiddenClaudeLines: 5,
-            inputBarUserKeys: [{ id: "u-test", label: "확인", seq: "\t" }],
+            inputBarUserKeys: [{ id: "u-test", label: "확인", seq: "\t", submit: true }],
             floatingButtons: [
               {
                 id: "f-test",
@@ -219,6 +222,9 @@ test("MCP heartbeat 변경은 기기 저장·화면 적용 뒤 확인 응답을 
   await expect.poll(() => acknowledgement, { timeout: 15000 }).toMatchObject({ success: true });
   expect(savedReport).toMatchObject({
     terminalFontSize: 20,
+    mainButtonScale: 120,
+    keysButtonScale: 90,
+    selectionHandleSize: 28,
     touchScrollSensitivity: 2,
     composerAutocomplete: false,
   });
@@ -226,7 +232,7 @@ test("MCP heartbeat 변경은 기기 저장·화면 적용 뒤 확인 응답을 
   expect(savedReport).not.toHaveProperty("composerHistory");
   expect(savedReport).toMatchObject({
     composerHiddenClaudeLines: 5,
-    inputBarUserKeys: [{ id: "u-test", label: "확인", seq: "\t" }],
+    inputBarUserKeys: [{ id: "u-test", label: "확인", seq: "\t", submit: true }],
   });
   await expect(page.locator('#floatingControls [data-floating-id="f-test"]')).toHaveCSS(
     "opacity",

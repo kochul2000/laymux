@@ -55,7 +55,7 @@ node scripts/check-settings-mcp-agents.mjs
 ## 범위와 제약
 
 - PC는 34개 설정 섹션을 탐색하고 기존 엄격 검증·revision·마스킹·snapshot 저장 경로로 변경한다. 구조적 세션 상태와 이미 읽기 전용인 필드는 일반 patch로 바꾸지 않는다.
-- Remote는 현재 controller 기기의 표시·스크롤·입력·플로팅·배치·탐색 제외 41개 최상위 설정 키를 지원한다. 기기별 소유권을 유지하며 미연결·구버전 페이지·15초 이상 오래된 snapshot은 오류다. 적용 확인은 최대 20초다.
+- Remote는 현재 controller 기기의 표시·스크롤·입력·플로팅·배치·탐색 제외 44개 최상위 설정 키를 지원한다. 기기별 소유권을 유지하며 미연결·구버전 페이지·15초 이상 오래된 snapshot은 오류다. 적용 확인은 최대 20초다.
 - 입력 초안·과거 입력 내용·인증정보는 기기 설정 도구에 노출하지 않는다. 사용자 등록 특수키의 설정된 전송 문자열은 지원하지만 저장만으로 실행하지 않는다. 임의 localStorage 편집이나 오프라인 기기 큐는 제공하지 않는다.
 - 실행 맥락은 현재 human-control owner 기준이며 개별 외부 채팅 출처의 증명은 아니다. 명시적 사용자 대상이 우선하고, 출처가 현재 제어 표면과 다르면 확인해야 한다.
 - Android lifecycle/lease E2E는 bundled Remote 코드와 native bridge 모형을 사용했다. 실제 Android 하드웨어에서 세 CLI를 별도로 실행한 검증은 아니다. 실제 Remote 변경은 Chromium의 휴대폰 크기 브라우저에서 확인했다.
@@ -68,3 +68,15 @@ node scripts/check-settings-mcp-agents.mjs
 - Rust 전체 lib: 2,054개 중 2,049개 통과. 실패 5개는 기존 Remote UI 변경과 `remote_server::page`의 소스 문자열 assertion 불일치다(bootstrap, soft-key toolbar, pane/workspace exclusion icon, composer send icon). 이 다섯 검사와 그 기대 문자열은 이번 설정 개선에서 변경하지 않았다.
 - 설정 전용 Rust 계약: 62개 통과. Remote 기기 bridge·실행 맥락·중첩 schema 5개와 release/dev 도구 등록 검사도 통과했다.
 - 변경분 ESLint, TypeScript `tsc --noEmit`, Rust `cargo clippy --workspace --all-targets -- -D warnings`, `cargo check --release`, dev 빌드가 통과했다. 전체 조회·필터 응답 크기·민감 배열 마스킹·기기 대상·만료·불일치 응답·저장 실패 회귀 검사가 포함된다.
+
+## PR 최신 main 통합 검증
+
+기준 main은 `3fa04b34`, PR은 #1038이다. 다른 세션의 미커밋 변경은 포함하지 않고 별도 워크트리에서 통합했다. 최신 main의 버튼 배율 2종·선택 핸들 크기와 사용자 키 `submit`을 반영했다. 표시 기본값 전수 대조, 배율 enum 거부, 기존 사용자 키 heartbeat 수신·변경 테스트를 추가했다.
+
+- 최신 Remote 설정·플로팅·Android lifecycle·lease 전환/복구 E2E: 41개 통과.
+- 관련 UI·실제 production bundle 검사: 177개 통과. 추가 배율 거부 테스트 2개 포함 스키마 테스트도 통과.
+- Rust settings 통합: 62개 통과. Remote relay·MCP 테스트, TypeScript, 변경 파일 ESLint, 전체 clippy와 UI 빌드 통과.
+- 전체 UI 최초 실행: 4891개 통과, 3개 실패. 번들 해시는 최종 stamp 재생성 후 통과했고 production bundle의 동시 빌드 5초 타임아웃은 단독 재실행에서 통과했다. 남은 updater-release-contract는 main의 Windows 전용 workflow에 이미 없는 `max-parallel: 1`과 Linux target을 요구하는 기존 검사다.
+- 전체 Rust 최초 실행: 2056개 통과, 9개 실패. identity 1개는 테스트 컴파일 중 commit으로 HEAD가 바뀐 영향이며 고정 HEAD 재실행 3개 통과로 확인했다. 나머지 page.rs 8개는 main에도 없는 예전 아이콘·함수 서명·path-link 소스 문자열을 요구한다. `git show origin/main`의 page.html/remote-app.js에서 해당 문자열이 모두 없는 것을 대조했다. 이번 변경의 필수 관련 검증과 분리해 기록하며 전체 스위트 통과로 표현하지 않는다.
+
+독립 unless-p1 리뷰 1회: P1 없음, P2 사용자 키 submit 누락 1건 수정, 현재 지원 수 문서 Nit 수정. 추가 ADR급 후속 작업 없음.
