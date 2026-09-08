@@ -1,4 +1,55 @@
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
+import { readFile } from "node:fs/promises";
+import { expect, test } from "./fixtures";
+
+test("제공 HTML 구조가 SPA fallback으로 열리고 PC 버튼이 원본 파일을 전달한다", async ({
+  appPage: page,
+}) => {
+  const source = process.env.LAYMUX_HTML_PREVIEW_REPRO_FILE
+    ? await readFile(process.env.LAYMUX_HTML_PREVIEW_REPRO_FILE, "utf8")
+    : '<div id="printer-container"></div><script>window.PrinterApp.mountPrinter()</script>';
+  const path = "/tmp/dd-presentation-r15/dd.preview.html";
+  await page.evaluate((source) => {
+    const host = window as unknown as {
+      __TAURI_INTERNALS__: {
+        invoke: (cmd: string, args: Record<string, unknown>) => Promise<unknown>;
+      };
+      htmlOsOpenRequests: Record<string, unknown>[];
+    };
+    host.htmlOsOpenRequests = [];
+    const original = host.__TAURI_INTERNALS__.invoke;
+    host.__TAURI_INTERNALS__.invoke = async (cmd, args) => {
+      if (cmd === "read_file_for_viewer")
+        return { kind: "text", content: source, truncated: false };
+      if (cmd === "open_in_os") {
+        host.htmlOsOpenRequests.push(args);
+        return;
+      }
+      return original(cmd, args);
+    };
+  }, source);
+  await page.keyboard.press("Control+Shift+O");
+  await page.getByTestId("file-viewer-overlay-path-input").fill(path);
+  await page.getByTestId("file-viewer-overlay-path-submit").click();
+  await expect(page.getByTestId("file-viewer-html-empty")).toBeVisible();
+  const open = page.getByTestId("file-viewer-html-os-open");
+  await expect(open).toBeVisible();
+  const requests = () =>
+    page.evaluate(
+      () =>
+        (window as unknown as { htmlOsOpenRequests: Record<string, unknown>[] }).htmlOsOpenRequests,
+    );
+  expect(await requests()).toEqual([]);
+  await page
+    .getByTestId("file-viewer-overlay")
+    .screenshot({ path: "../.screenshots/html-spa-fallback.png" });
+  page.on("dialog", (dialog) => dialog.accept());
+  await open.click();
+  await expect.poll(requests).toEqual([{ path, wslDistro: null, mode: "open" }]);
+  await page.getByTestId("file-viewer-source-mode").click();
+  await expect(page.getByTestId("file-viewer-text")).toContainText("printer-container");
+  await expect(open).toHaveCount(0);
+});
 
 async function showPreview(page: Page, source: string, sandbox: string) {
   await page.route("**/__html-preview", (route) =>

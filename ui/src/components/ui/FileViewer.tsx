@@ -4,7 +4,8 @@ import { openExternal, readFileForViewer, type FileViewerContent } from "@/lib/t
 import { fileExtension, isSpreadsheetPath, resolveViewer } from "@/lib/file-viewer";
 import { SpreadsheetPreview } from "@/components/ui/preview/SpreadsheetPreview";
 import {
-  htmlToSafePreviewDocument,
+  buildHtmlPreview,
+  EMPTY_HTML_PREVIEW_MESSAGE,
   markdownToSafePreviewDocument,
   type PreviewFont,
 } from "@/lib/file-preview";
@@ -485,16 +486,32 @@ function TypedPreview({
   font: PreviewFont;
   onFontZoom?: (delta: number) => void;
 }) {
-  const documentHtml = useMemo(() => {
-    if (previewKind === "markdown") return markdownToSafePreviewDocument(content.content, font);
-    if (previewKind === "html") return htmlToSafePreviewDocument(content.content, font);
+  const documentPreview = useMemo(() => {
+    if (previewKind === "markdown") {
+      return { empty: false, documentHtml: markdownToSafePreviewDocument(content.content, font) };
+    }
+    if (previewKind === "html") return buildHtmlPreview(content.content, font);
     return null;
   }, [content.content, previewKind, font]);
+
+  if (documentPreview?.empty) {
+    return (
+      <div
+        className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 overflow-auto p-4"
+        style={{ color: "var(--text-secondary)", ...bodyStyle }}
+        data-testid="file-viewer-html-empty"
+        data-file-viewer-body
+      >
+        <p className="max-w-md text-center">{EMPTY_HTML_PREVIEW_MESSAGE}</p>
+        <OsHandoffActions path={path} variant="cta" testIdPrefix="file-viewer-html-os" />
+      </div>
+    );
+  }
 
   if (isDocumentPreviewKind(previewKind)) {
     return (
       <PreviewFrame
-        documentHtml={documentHtml ?? ""}
+        documentHtml={documentPreview?.documentHtml ?? ""}
         bodyStyle={bodyStyle}
         onFontZoom={onFontZoom}
       />

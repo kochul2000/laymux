@@ -147,17 +147,26 @@ export interface PreviewFont {
   size: number;
 }
 
+export const EMPTY_HTML_PREVIEW_MESSAGE =
+  "이 HTML은 내장 미리보기에서 표시할 내용이 없습니다. " +
+  "JavaScript 실행이 필요한 문서일 수 있습니다. PC의 브라우저 등 외부 프로그램으로 열어 주세요.";
+
 export function htmlToSafePreviewDocument(html: string, font?: PreviewFont): string {
+  return buildHtmlPreview(html, font).documentHtml;
+}
+
+export function buildHtmlPreview(html: string, font?: PreviewFont) {
   const safeHtml = sanitizePreviewHtml(html);
   const { body } = new DOMParser().parseFromString(safeHtml, "text/html");
-  return buildPreviewDocument(
-    hasPreviewContent(body)
-      ? safeHtml
-      : "<p>이 HTML은 내장 미리보기에서 표시할 내용이 없습니다.</p>" +
-          "<p>JavaScript 실행이 필요한 문서일 수 있습니다. PC의 브라우저 등 외부 프로그램으로 열어 주세요.</p>",
-    "html",
-    font,
-  );
+  const empty = !hasPreviewContent(body);
+  return {
+    empty,
+    documentHtml: buildPreviewDocument(
+      empty ? `<p>${EMPTY_HTML_PREVIEW_MESSAGE}</p>` : safeHtml,
+      "html",
+      font,
+    ),
+  };
 }
 
 // ponytail: DOM + inline CSS heuristic, not pixel analysis. Loading text and
