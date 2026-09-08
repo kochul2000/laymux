@@ -529,7 +529,7 @@
       }
       .terminal-composer {
         position: absolute;
-        z-index: 9;
+        z-index: 7;
         right: 6px;
         bottom: 6px;
         left: 6px;

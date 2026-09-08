@@ -15,6 +15,39 @@ async function open(page: Page) {
 const stored = (page: Page) =>
   page.evaluate(() => JSON.parse(localStorage.getItem("laymux.remote.keybar") || "{}").floating);
 
+test("floating controls stay above the composer and below menus, viewer, and feedback", async ({
+  page,
+}) => {
+  await open(page);
+  const z = await page.evaluate(() => {
+    const terminal = document.getElementById("terminal")!;
+    for (const className of [
+      "touch-selection-handle",
+      "remote-link-chip",
+      "touch-selection-magnifier",
+    ]) {
+      const element = document.createElement("div");
+      element.className = className;
+      terminal.append(element);
+    }
+    return [
+      "#scrollToBottom",
+      "#terminalComposer",
+      "#floatingControls",
+      "#navScrim",
+      ".touch-selection-handle",
+      ".remote-link-chip",
+      "#navigationPanel",
+      "#composerStarEditorScrim",
+      "#keyFlickHint",
+      "#fileViewerOverlay",
+      "#oauthRelayScrim",
+      ".touch-selection-magnifier",
+    ].map((selector) => Number(getComputedStyle(document.querySelector(selector)!).zIndex));
+  });
+  expect(z).toEqual([5, 7, 8, 10, 12, 13, 20, 55, 60, 60, 60, 1000]);
+});
+
 test("round pads move only after a central hold and keyboard uses an icon", async ({ page }) => {
   await open(page);
   await expect(page.getByLabel("Arrow pad opacity")).toHaveValue("50");
