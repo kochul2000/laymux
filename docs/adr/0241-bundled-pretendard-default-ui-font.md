@@ -1,6 +1,6 @@
 # 0241. 데스크톱 UI 기본 폰트로 Pretendard 가변 폰트를 내장한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-08
 - Source: 사용자 요구 — 가변 Pretendard 내장 및 기본값 지정; architecture/api-contracts.md §10·§15
 
