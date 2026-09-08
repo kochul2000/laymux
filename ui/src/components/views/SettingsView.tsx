@@ -125,8 +125,7 @@ import {
 import { useRemoteHostOptions } from "@/hooks/useRemoteHostOptions";
 
 const cardStyle: React.CSSProperties = {
-  background: "var(--bg-overlay)",
-  borderRadius: "var(--radius-lg)",
+  background: "var(--bg-surface)",
   border: "1px solid var(--border)",
 };
 
@@ -142,15 +141,15 @@ function SettingRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start gap-3 py-1.5">
-      <div className="w-36 shrink-0 pt-1">
+    <div className="settings-row">
+      <div className="settings-row-label">
         <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
           {label}
         </span>
         {desc && (
           <p
-            className="mt-0.5 text-[11px] leading-tight"
-            style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            className="mt-1 text-[13px] leading-relaxed"
+            style={{ color: "var(--text-secondary)" }}
           >
             {desc}
           </p>
@@ -164,11 +163,8 @@ function SettingRow({
 /** Sidebar group header (e.g. "Appearance", "Terminal"). */
 function NavGroupHeader({ label }: { label: string }) {
   return (
-    <div className="mt-3 px-3 pb-1">
-      <span
-        className="text-[10px] uppercase tracking-wider"
-        style={{ color: "var(--text-secondary)", opacity: 0.7 }}
-      >
+    <div className="mt-5 px-3 pb-2">
+      <span className="text-[13px] font-semibold" style={{ color: "var(--text-secondary)" }}>
         {label}
       </span>
     </div>
@@ -178,7 +174,7 @@ function NavGroupHeader({ label }: { label: string }) {
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <h3
-      className="mb-3 border-b pb-2 text-[15px] font-semibold"
+      className="mb-4 border-b pb-3 text-lg font-semibold"
       style={{ borderColor: "var(--border)", color: "var(--text-primary)" }}
     >
       {children}
@@ -190,10 +186,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 function SubGroup({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div style={cardStyle} className="mt-3 p-4">
-      <h3
-        className="mb-3 text-[12px] font-semibold uppercase tracking-wider"
-        style={{ color: "var(--text-secondary)", opacity: 0.7 }}
-      >
+      <h3 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-secondary)" }}>
         {title}
       </h3>
       {children}
@@ -381,7 +374,7 @@ function UpdateSection() {
             </span>
             <span
               data-testid="update-current-channel"
-              className="rounded px-1.5 py-0.5 text-[11px]"
+              className="rounded px-1.5 py-0.5 text-[13px]"
               style={{ color: "var(--text-secondary)", border: "1px solid var(--border)" }}
             >
               {status?.channel === "beta" ? t("update.channelBeta") : t("update.channelStable")}
@@ -430,7 +423,7 @@ function UpdateSection() {
         {update.channel === "beta" && (
           <p
             data-testid="update-channel-beta-warning"
-            className="text-[11px]"
+            className="text-[13px]"
             style={{ color: "var(--claude)", margin: "0 0 8px" }}
           >
             {t("update.channelBetaWarning")}
@@ -455,7 +448,7 @@ function UpdateSection() {
             </Button>
             <span
               data-testid="update-checked-at"
-              className="text-[11px]"
+              className="text-[13px]"
               style={{ color: "var(--text-secondary)" }}
             >
               {checkedAt ? t("update.checkedAt", { at: checkedAt }) : t("update.neverChecked")}
@@ -466,7 +459,7 @@ function UpdateSection() {
         {status && !status.enabled && (
           <p
             data-testid="update-disabled-note"
-            className="text-[11px]"
+            className="text-[13px]"
             style={{ color: "var(--text-secondary)", margin: "0 0 8px" }}
           >
             {t("update.disabledInDev")}
@@ -486,7 +479,7 @@ function UpdateSection() {
               {publishedAt && (
                 <span
                   data-testid="update-published-at"
-                  className="text-[11px]"
+                  className="text-[13px]"
                   style={{ color: "var(--text-secondary)" }}
                 >
                   {t("update.publishedAt", { at: publishedAt })}
@@ -496,7 +489,7 @@ function UpdateSection() {
             {status?.notes && (
               <pre
                 data-testid="update-notes"
-                className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-[11px]"
+                className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-[13px]"
                 style={{ color: "var(--text-secondary)" }}
               >
                 {status.notes}
@@ -527,7 +520,7 @@ function UpdateSection() {
         ) : (
           <p
             data-testid="update-up-to-date"
-            className="text-[11px]"
+            className="text-[13px]"
             style={{ color: "var(--text-secondary)", margin: "0 0 8px" }}
           >
             {t("update.upToDate")}
@@ -537,7 +530,7 @@ function UpdateSection() {
         {error && (
           <p
             data-testid="update-error"
-            className="min-w-0 max-w-full break-words text-[11px] [overflow-wrap:anywhere]"
+            className="min-w-0 max-w-full break-words text-[13px] [overflow-wrap:anywhere]"
             style={{ color: "var(--claude)", margin: "0 0 8px" }}
           >
             {error}
@@ -574,99 +567,60 @@ function StartupSection() {
     <div>
       <SectionTitle>{t("settings:startup.title")}</SectionTitle>
 
-      {/* Language — applies immediately (live i18n effect), so it is not draft-gated. */}
-      <div className="mb-3" style={cardStyle}>
-        <div className="px-4 py-2">
-          <div className="flex items-center justify-between">
-            <div>
-              <h4 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-                {t("settings:startup.language.title")}
-              </h4>
-              <p
-                className="mt-0.5 text-[11px]"
-                style={{ color: "var(--text-secondary)", opacity: 0.6 }}
-              >
-                {t("settings:startup.language.description")}
-              </p>
-            </div>
-            <FocusSelect
-              data-testid="language-select"
-              value={language}
-              onChange={(e) => setLanguage(e.target.value as LanguageSetting)}
-              className="w-44 rounded px-2 py-1.5 text-xs"
-            >
-              {LANGUAGE_OPTIONS.map((lng) => (
-                <option key={lng} value={lng}>
-                  {t(`common:language.${lng}`)}
+      <div style={cardStyle} className="p-4">
+        <SettingRow
+          label={t("settings:startup.language.title")}
+          desc={t("settings:startup.language.description")}
+        >
+          <FocusSelect
+            data-testid="language-select"
+            aria-label={t("settings:startup.language.title")}
+            value={language}
+            onChange={(e) => setLanguage(e.target.value as LanguageSetting)}
+            className={inputCls}
+          >
+            {LANGUAGE_OPTIONS.map((lng) => (
+              <option key={lng} value={lng}>
+                {t(`common:language.${lng}`)}
+              </option>
+            ))}
+          </FocusSelect>
+        </SettingRow>
+        <SettingRow label={t("startup.appTheme.title")} desc={t("startup.appTheme.description")}>
+          <FocusSelect
+            data-testid="app-theme-select"
+            aria-label={t("startup.appTheme.title")}
+            value={draftAppTheme}
+            onChange={(e) => setDraftAppTheme(e.target.value)}
+            className={inputCls}
+          >
+            {builtinAppThemes.map((theme) => (
+              <option key={theme.id} value={theme.id}>
+                {theme.name}
+              </option>
+            ))}
+          </FocusSelect>
+        </SettingRow>
+        <SettingRow
+          label={t("startup.defaultProfile.title")}
+          desc={t("startup.defaultProfile.description")}
+        >
+          <FocusSelect
+            data-testid="default-profile-select"
+            aria-label={t("startup.defaultProfile.title")}
+            value={draftDefaultProfile}
+            onChange={(e) => setDraftDefaultProfile(e.target.value)}
+            className={inputCls}
+          >
+            {profiles
+              .filter((p) => !p.hidden)
+              .map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name}
                 </option>
               ))}
-            </FocusSelect>
-          </div>
-        </div>
-      </div>
-
-      {/* App Theme */}
-      <div className="mb-3" style={cardStyle}>
-        <div className="px-4 py-2">
-          <div className="flex items-center justify-between">
-            <div>
-              <h4 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-                {t("startup.appTheme.title")}
-              </h4>
-              <p
-                className="mt-0.5 text-[11px]"
-                style={{ color: "var(--text-secondary)", opacity: 0.6 }}
-              >
-                {t("startup.appTheme.description")}
-              </p>
-            </div>
-            <FocusSelect
-              data-testid="app-theme-select"
-              value={draftAppTheme}
-              onChange={(e) => setDraftAppTheme(e.target.value)}
-              className="w-44 rounded px-2 py-1.5 text-xs"
-            >
-              {builtinAppThemes.map((theme) => (
-                <option key={theme.id} value={theme.id}>
-                  {theme.name}
-                </option>
-              ))}
-            </FocusSelect>
-          </div>
-        </div>
-      </div>
-
-      {/* Default profile */}
-      <div className="mb-4" style={cardStyle}>
-        <div className="px-4 py-2">
-          <div className="flex items-center justify-between">
-            <div>
-              <h4 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-                {t("startup.defaultProfile.title")}
-              </h4>
-              <p
-                className="mt-0.5 text-[11px]"
-                style={{ color: "var(--text-secondary)", opacity: 0.6 }}
-              >
-                {t("startup.defaultProfile.description")}
-              </p>
-            </div>
-            <FocusSelect
-              data-testid="default-profile-select"
-              value={draftDefaultProfile}
-              onChange={(e) => setDraftDefaultProfile(e.target.value)}
-              className="w-44 rounded px-2 py-1.5 text-xs"
-            >
-              {profiles
-                .filter((p) => !p.hidden)
-                .map((p) => (
-                  <option key={p.name} value={p.name}>
-                    {p.name}
-                  </option>
-                ))}
-            </FocusSelect>
-          </div>
-        </div>
+          </FocusSelect>
+        </SettingRow>
       </div>
     </div>
   );
@@ -698,7 +652,7 @@ function FontSection() {
           <h4 className="mb-1 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
             {t("font.uiFontTitle")}
           </h4>
-          <p className="mb-2 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.6 }}>
+          <p className="mb-2 text-[13px]" style={{ color: "var(--text-secondary)" }}>
             {t("font.uiFontDescription")}
           </p>
           <SettingRow label={t("font.face")} desc={t("font.uiFontFaceDesc")}>
@@ -723,7 +677,7 @@ function FontSection() {
       </div>
 
       {/* Base font — default for non-terminal text views (Memo, Issue Reporter, …). */}
-      <p className="mb-3 mt-4 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.6 }}>
+      <p className="mb-3 mt-4 text-[13px]" style={{ color: "var(--text-secondary)" }}>
         {t("font.appFontDescription")}
       </p>
       <FontFields
@@ -1033,7 +987,7 @@ function CursorFields({
             {resetBtn("stabilizeInteractiveCursor")}
           </div>
         </SettingRow>
-        <p className="mt-1 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.7 }}>
+        <p className="mt-1 text-[13px]" style={{ color: "var(--text-secondary)" }}>
           {t("cursor.applyNote")}
         </p>
       </div>
@@ -1292,7 +1246,7 @@ function DefaultsSection() {
   return (
     <div>
       <SectionTitle>{t("defaults.title")}</SectionTitle>
-      <p className="mb-4 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.6 }}>
+      <p className="mb-4 text-[13px]" style={{ color: "var(--text-secondary)" }}>
         {t("defaults.description")}
       </p>
 
@@ -1449,7 +1403,7 @@ function ProfileSection({ profileIndex }: { profileIndex: number }) {
       {/* Additional Settings Tab (Font + Appearance + Advanced — inherited from defaults) */}
       {activeTab === "additional" && (
         <>
-          <p className="mb-3 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.6 }}>
+          <p className="mb-3 text-[13px]" style={{ color: "var(--text-secondary)" }}>
             {t("profile.additionalIntro")}
           </p>
           <FontFields
@@ -2016,7 +1970,7 @@ function TerminalSection() {
                       </span>
                       {entry.label.trim() && entry.label.trim() !== entry.value ? (
                         <span
-                          className="mt-0.5 block whitespace-pre-wrap break-words text-[11px]"
+                          className="mt-0.5 block whitespace-pre-wrap break-words text-[13px]"
                           style={{ color: "var(--text-secondary)" }}
                         >
                           {entry.value}
@@ -2263,7 +2217,7 @@ function TerminalSection() {
       </SubGroup>
 
       <SubGroup title={t("terminal.paneClearGroup")}>
-        <p className="mb-3 text-[11px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>
+        <p className="mb-3 text-[13px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>
           {t("terminal.paneClearGroupDesc")}
         </p>
 
@@ -2406,7 +2360,7 @@ function InterfaceSection() {
                 updateControlBar({ hoverIdleSeconds: Math.max(0, Number(e.target.value)) })
               }
             />
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+            <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
               {t("common.seconds")}
             </span>
           </div>
@@ -2851,7 +2805,7 @@ function RemoteConnectionSection() {
                     allowedIpsText: appendAllowedIps(remote.allowedIpsText, TAILSCALE_ALLOWED_IPS),
                   })
                 }
-                className="hover-bg rounded px-2 py-1 text-[11px]"
+                className="hover-bg rounded px-2 py-1 text-[13px]"
                 style={{
                   color: "var(--accent)",
                   background: "transparent",
@@ -2865,7 +2819,7 @@ function RemoteConnectionSection() {
                 type="button"
                 data-testid="remote-settings-reset-loopback"
                 onClick={() => update({ allowedIpsText: formatAllowedIps(LOOPBACK_ALLOWED_IPS) })}
-                className="hover-bg rounded px-2 py-1 text-[11px]"
+                className="hover-bg rounded px-2 py-1 text-[13px]"
                 style={{
                   color: "var(--accent)",
                   background: "transparent",
@@ -2896,7 +2850,7 @@ function RemoteConnectionSection() {
                 update({ autoMobileModeMinWidth: normalizeAutoMobileWidth(event.target.value) })
               }
             />
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+            <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
               px
             </span>
           </div>
@@ -2925,7 +2879,7 @@ function RemoteConnectionSection() {
                 })
               }
             />
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+            <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
               초
             </span>
           </div>
@@ -2976,7 +2930,7 @@ function RemoteConnectionSection() {
                       type="button"
                       data-testid={`remote-settings-custom-host-remove-${host}`}
                       onClick={() => handleRemoveCustomHost(host)}
-                      className="hover-bg shrink-0 rounded px-2 py-1 text-[11px]"
+                      className="hover-bg shrink-0 rounded px-2 py-1 text-[13px]"
                       style={{
                         color: "var(--red)",
                         background: "transparent",
@@ -3047,7 +3001,7 @@ function RemoteConnectionSection() {
               data-testid="remote-settings-cloud-connect"
               onClick={handleCloudConnect}
               disabled={cloudConnectPending || cloudDisconnectPending}
-              className="hover-bg rounded px-2 py-1 text-[11px] disabled:cursor-not-allowed disabled:opacity-50"
+              className="hover-bg rounded px-2 py-1 text-[13px] disabled:cursor-not-allowed disabled:opacity-50"
               style={{
                 color: "var(--accent)",
                 background: "transparent",
@@ -3063,7 +3017,7 @@ function RemoteConnectionSection() {
                 data-testid="remote-settings-cloud-disconnect"
                 onClick={handleCloudDisconnect}
                 disabled={cloudDisconnectPending || cloudConnectPending}
-                className="hover-bg rounded px-2 py-1 text-[11px] disabled:cursor-not-allowed disabled:opacity-50"
+                className="hover-bg rounded px-2 py-1 text-[13px] disabled:cursor-not-allowed disabled:opacity-50"
                 style={{
                   color: "var(--red)",
                   background: "transparent",
@@ -3127,7 +3081,7 @@ function RemoteConnectionSection() {
                 })
               }
             />
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+            <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
               MiB
             </span>
           </div>
@@ -3185,7 +3139,7 @@ function RemoteConnectionSection() {
                       type="button"
                       data-testid={`remote-settings-attachment-extension-remove-${ext}`}
                       onClick={() => handleRemoveAttachmentExtension(ext)}
-                      className="hover-bg shrink-0 rounded px-2 py-1 text-[11px]"
+                      className="hover-bg shrink-0 rounded px-2 py-1 text-[13px]"
                       style={{
                         color: "var(--red)",
                         background: "transparent",
@@ -3277,8 +3231,8 @@ function WorkspacesSection() {
                 {item.label}
               </span>
               <p
-                className="mt-0.5 text-[11px] leading-tight"
-                style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+                className="mt-0.5 text-[13px] leading-tight"
+                style={{ color: "var(--text-secondary)" }}
               >
                 {item.desc}
               </p>
@@ -3340,7 +3294,7 @@ function WorkspacesSection() {
                 })
               }
             />
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+            <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
               {t("common.seconds")}
             </span>
           </div>
@@ -3363,8 +3317,8 @@ function WorkspacesSection() {
                   {label}
                 </span>
                 <p
-                  className="mt-0.5 text-[11px] leading-tight"
-                  style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+                  className="mt-0.5 text-[13px] leading-tight"
+                  style={{ color: "var(--text-secondary)" }}
                 >
                   {desc}
                 </p>
@@ -3427,8 +3381,8 @@ function ClaudeSection() {
               {t("claude.syncCwd")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("claude.syncCwdDesc")}
             </p>
@@ -3455,8 +3409,8 @@ function ClaudeSection() {
               {t("claude.command")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("claude.commandDesc")}
             </p>
@@ -3475,7 +3429,7 @@ function ClaudeSection() {
               {claude.command !== DEFAULT_CLAUDE_COMMAND && (
                 <button
                   data-testid="claude-command-reset"
-                  className="hover-bg px-1.5 py-0.5 rounded text-[11px]"
+                  className="hover-bg px-1.5 py-0.5 rounded text-[13px]"
                   style={{ color: "var(--text-secondary)" }}
                   onClick={() => updateClaude({ command: DEFAULT_CLAUDE_COMMAND })}
                 >
@@ -3486,15 +3440,15 @@ function ClaudeSection() {
             {isSafeAgentCommand(claude.command) ? (
               <p
                 data-testid="claude-command-preview"
-                className="mt-1 text-[11px] leading-tight"
-                style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+                className="mt-1 text-[13px] leading-tight"
+                style={{ color: "var(--text-secondary)" }}
               >
                 {`${resolveAgentCommand(claude.command, DEFAULT_CLAUDE_COMMAND)} --resume <session-id>`}
               </p>
             ) : (
               <p
                 data-testid="claude-command-warning"
-                className="mt-1 text-[11px] leading-tight"
+                className="mt-1 text-[13px] leading-tight"
                 style={{ color: "var(--claude)" }}
               >
                 {t("claude.commandInvalid", { command: DEFAULT_CLAUDE_COMMAND })}
@@ -3510,8 +3464,8 @@ function ClaudeSection() {
               {t("claude.restoreSession")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("claude.restoreSessionDesc")}
             </p>
@@ -3538,8 +3492,8 @@ function ClaudeSection() {
               {t("claude.sessionMaxAge")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("claude.sessionMaxAgeDesc")}
             </p>
@@ -3578,8 +3532,8 @@ function ClaudeSection() {
               {t("claude.statusMessageMode")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("claude.statusMessageModeDesc")}
             </p>
@@ -3592,7 +3546,10 @@ function ClaudeSection() {
               onChange={(e) =>
                 updateClaude({
                   statusMessageMode: e.target.value as
-                    "bullet" | "title" | "bullet-title" | "title-bullet",
+                    | "bullet"
+                    | "title"
+                    | "bullet-title"
+                    | "title-bullet",
                 })
               }
             >
@@ -3613,8 +3570,8 @@ function ClaudeSection() {
                 {t("claude.delimiter")}
               </span>
               <p
-                className="mt-0.5 text-[11px] leading-tight"
-                style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+                className="mt-0.5 text-[13px] leading-tight"
+                style={{ color: "var(--text-secondary)" }}
               >
                 {t("claude.delimiterDesc")}
               </p>
@@ -3632,7 +3589,7 @@ function ClaudeSection() {
                 {claude.statusMessageDelimiter !== DEFAULT_STATUS_MESSAGE_DELIMITER && (
                   <button
                     data-testid="claude-status-message-delimiter-reset"
-                    className="hover-bg px-1.5 py-0.5 rounded text-[11px]"
+                    className="hover-bg px-1.5 py-0.5 rounded text-[13px]"
                     style={{ color: "var(--text-secondary)" }}
                     onClick={() =>
                       updateClaude({
@@ -3657,8 +3614,8 @@ function ClaudeSection() {
               {t("claude.autoResume")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("claude.autoResumeDesc")}
             </p>
@@ -3687,8 +3644,8 @@ function ClaudeSection() {
                   {t("claude.resumeDelay")}
                 </span>
                 <p
-                  className="mt-0.5 text-[11px] leading-tight"
-                  style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+                  className="mt-0.5 text-[13px] leading-tight"
+                  style={{ color: "var(--text-secondary)" }}
                 >
                   {t("claude.resumeDelayDesc")}
                 </p>
@@ -3725,8 +3682,8 @@ function ClaudeSection() {
                   {t("claude.resumeMessage")}
                 </span>
                 <p
-                  className="mt-0.5 text-[11px] leading-tight"
-                  style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+                  className="mt-0.5 text-[13px] leading-tight"
+                  style={{ color: "var(--text-secondary)" }}
                 >
                   {t("claude.resumeMessageDesc")}
                 </p>
@@ -3770,8 +3727,8 @@ function CodexSection() {
               {t("codex.command")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("codex.commandDesc")}
             </p>
@@ -3790,7 +3747,7 @@ function CodexSection() {
               {codex.command !== DEFAULT_CODEX_COMMAND && (
                 <button
                   data-testid="codex-command-reset"
-                  className="hover-bg px-1.5 py-0.5 rounded text-[11px]"
+                  className="hover-bg px-1.5 py-0.5 rounded text-[13px]"
                   style={{ color: "var(--text-secondary)" }}
                   onClick={() => updateCodex({ command: DEFAULT_CODEX_COMMAND })}
                 >
@@ -3801,15 +3758,15 @@ function CodexSection() {
             {isSafeAgentCommand(codex.command) ? (
               <p
                 data-testid="codex-command-preview"
-                className="mt-1 text-[11px] leading-tight"
-                style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+                className="mt-1 text-[13px] leading-tight"
+                style={{ color: "var(--text-secondary)" }}
               >
                 {`${resolveAgentCommand(codex.command, DEFAULT_CODEX_COMMAND)} resume <session-id>`}
               </p>
             ) : (
               <p
                 data-testid="codex-command-warning"
-                className="mt-1 text-[11px] leading-tight"
+                className="mt-1 text-[13px] leading-tight"
                 style={{ color: "var(--claude)" }}
               >
                 {t("codex.commandInvalid", { command: DEFAULT_CODEX_COMMAND })}
@@ -3824,8 +3781,8 @@ function CodexSection() {
               {t("codex.restoreSession")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("codex.restoreSessionDesc")}
             </p>
@@ -3851,8 +3808,8 @@ function CodexSection() {
               {t("codex.sessionMaxAge")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("codex.sessionMaxAgeDesc")}
             </p>
@@ -3890,8 +3847,8 @@ function CodexSection() {
               {t("codex.transcriptScroll")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("codex.transcriptScrollDesc")}
             </p>
@@ -3919,8 +3876,8 @@ function CodexSection() {
               {t("codex.statusMessageMode")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("codex.statusMessageModeDesc")}
             </p>
@@ -3933,7 +3890,10 @@ function CodexSection() {
               onChange={(e) =>
                 updateCodex({
                   statusMessageMode: e.target.value as
-                    "bullet" | "title" | "bullet-title" | "title-bullet",
+                    | "bullet"
+                    | "title"
+                    | "bullet-title"
+                    | "title-bullet",
                 })
               }
             >
@@ -3953,8 +3913,8 @@ function CodexSection() {
                 {t("codex.delimiter")}
               </span>
               <p
-                className="mt-0.5 text-[11px] leading-tight"
-                style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+                className="mt-0.5 text-[13px] leading-tight"
+                style={{ color: "var(--text-secondary)" }}
               >
                 {t("codex.delimiterDesc")}
               </p>
@@ -3972,7 +3932,7 @@ function CodexSection() {
                 {codex.statusMessageDelimiter !== DEFAULT_STATUS_MESSAGE_DELIMITER && (
                   <button
                     data-testid="codex-status-message-delimiter-reset"
-                    className="hover-bg rounded px-1.5 py-0.5 text-[11px]"
+                    className="hover-bg rounded px-1.5 py-0.5 text-[13px]"
                     style={{ color: "var(--text-secondary)" }}
                     onClick={() =>
                       updateCodex({
@@ -4022,14 +3982,11 @@ function GrokSection() {
               onChange={(e) => updateGrok({ command: e.target.value })}
             />
             {isSafeAgentCommand(grok.command) ? (
-              <p
-                className="mt-1 text-[11px]"
-                style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-              >
+              <p className="mt-1 text-[13px]" style={{ color: "var(--text-secondary)" }}>
                 {`${resolveAgentCommand(grok.command, DEFAULT_GROK_COMMAND)} --resume <session-id>`}
               </p>
             ) : (
-              <p className="mt-1 text-[11px]" style={{ color: "var(--claude)" }}>
+              <p className="mt-1 text-[13px]" style={{ color: "var(--claude)" }}>
                 {t("grok.commandInvalid", { command: DEFAULT_GROK_COMMAND })}
               </p>
             )}
@@ -4073,7 +4030,10 @@ function GrokSection() {
           onChange={(e) =>
             updateGrok({
               statusMessageMode: e.target.value as
-                "bullet" | "title" | "bullet-title" | "title-bullet",
+                | "bullet"
+                | "title"
+                | "bullet-title"
+                | "title-bullet",
             })
           }
         >
@@ -4090,8 +4050,8 @@ function GrokSection() {
                 {t("grok.delimiter")}
               </span>
               <p
-                className="mt-0.5 text-[11px] leading-tight"
-                style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+                className="mt-0.5 text-[13px] leading-tight"
+                style={{ color: "var(--text-secondary)" }}
               >
                 {t("grok.delimiterDesc")}
               </p>
@@ -4109,7 +4069,7 @@ function GrokSection() {
                 {grok.statusMessageDelimiter !== DEFAULT_STATUS_MESSAGE_DELIMITER && (
                   <button
                     data-testid="grok-status-message-delimiter-reset"
-                    className="hover-bg rounded px-1.5 py-0.5 text-[11px]"
+                    className="hover-bg rounded px-1.5 py-0.5 text-[13px]"
                     style={{ color: "var(--text-secondary)" }}
                     onClick={() =>
                       updateGrok({
@@ -4215,8 +4175,8 @@ function FileExplorerSection() {
               {t("fileExplorer.padding")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("fileExplorer.paddingDesc")}
             </p>
@@ -4225,10 +4185,13 @@ function FileExplorerSection() {
             <div className="grid grid-cols-2 gap-2">
               {(["Top", "Right", "Bottom", "Left"] as const).map((dir) => {
                 const key = `padding${dir}` as
-                  "paddingTop" | "paddingRight" | "paddingBottom" | "paddingLeft";
+                  | "paddingTop"
+                  | "paddingRight"
+                  | "paddingBottom"
+                  | "paddingLeft";
                 return (
                   <label key={dir} className="flex items-center gap-1.5">
-                    <span className="w-12 text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                    <span className="w-12 text-[13px]" style={{ color: "var(--text-secondary)" }}>
                       {t(`appearance.${dir.toLowerCase()}`)}
                     </span>
                     <input
@@ -4279,8 +4242,8 @@ function FileExplorerSection() {
               {t("fileExplorer.extensionViewers")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("fileExplorer.extensionViewersDesc")}
             </p>
@@ -4349,7 +4312,7 @@ function FileExplorerSection() {
                   </div>
                   {profileError && (
                     <p
-                      className="mt-1 text-[11px]"
+                      className="mt-1 text-[13px]"
                       style={{ color: "var(--red)" }}
                       data-testid={`fe-ext-viewer-profile-error-${i}`}
                     >
@@ -4425,8 +4388,8 @@ function ViewerSection() {
               {t("viewer.padding")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("viewer.paddingDesc")}
             </p>
@@ -4435,10 +4398,13 @@ function ViewerSection() {
             <div className="grid grid-cols-2 gap-2">
               {(["Top", "Right", "Bottom", "Left"] as const).map((dir) => {
                 const key = `padding${dir}` as
-                  "paddingTop" | "paddingRight" | "paddingBottom" | "paddingLeft";
+                  | "paddingTop"
+                  | "paddingRight"
+                  | "paddingBottom"
+                  | "paddingLeft";
                 return (
                   <label key={dir} className="flex items-center gap-1.5">
-                    <span className="w-12 text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                    <span className="w-12 text-[13px]" style={{ color: "var(--text-secondary)" }}>
                       {t(`appearance.${dir.toLowerCase()}`)}
                     </span>
                     <input
@@ -4536,8 +4502,8 @@ function IssueReporterSection() {
               {t("issueReporter.repositories")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("issueReporter.repositoriesDesc")}
             </p>
@@ -4591,8 +4557,8 @@ function IssueReporterSection() {
               {t("issueReporter.padding")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("issueReporter.paddingDesc")}
             </p>
@@ -4603,7 +4569,7 @@ function IssueReporterSection() {
                 const key = `padding${dir}` as keyof typeof issueReporter;
                 return (
                   <label key={dir} className="flex items-center gap-1.5">
-                    <span className="w-12 text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                    <span className="w-12 text-[13px]" style={{ color: "var(--text-secondary)" }}>
                       {t(`appearance.${dir.toLowerCase()}`)}
                     </span>
                     <input
@@ -4982,7 +4948,7 @@ function WidgetsSection() {
     <div data-testid="settings-widgets-section">
       <SectionTitle>{t("widgets.title")}</SectionTitle>
       <p
-        className="px-4 pb-2 text-[11px] leading-relaxed"
+        className="px-4 pb-2 text-[13px] leading-relaxed"
         style={{ color: "var(--text-secondary)", opacity: 0.75 }}
       >
         {t("widgets.intro")}
@@ -5025,7 +4991,7 @@ function ClaudeUsageGroup() {
   return (
     <SubGroup title={t("usage.title")}>
       <p
-        className="pb-2 text-[11px] leading-relaxed"
+        className="pb-2 text-[13px] leading-relaxed"
         style={{ color: "var(--text-secondary)", opacity: 0.75 }}
       >
         {t("usage.intro")}
@@ -5054,8 +5020,8 @@ function ClaudeUsageGroup() {
             {t("usage.configDirs")}
           </span>
           <p
-            className="mt-0.5 text-[11px] leading-tight"
-            style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            className="mt-0.5 text-[13px] leading-tight"
+            style={{ color: "var(--text-secondary)" }}
           >
             {t("usage.configDirsDesc")}
           </p>
@@ -5146,8 +5112,8 @@ function CodexUsageGroup() {
             {t("usage.codexAccountDirs")}
           </span>
           <p
-            className="mt-0.5 text-[11px] leading-tight"
-            style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            className="mt-0.5 text-[13px] leading-tight"
+            style={{ color: "var(--text-secondary)" }}
           >
             {t("usage.codexAccountDirsDesc")}
           </p>
@@ -5249,8 +5215,8 @@ function GrokUsageGroup() {
             {t("usage.grokConfigDirs")}
           </span>
           <p
-            className="mt-0.5 text-[11px] leading-tight"
-            style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            className="mt-0.5 text-[13px] leading-tight"
+            style={{ color: "var(--text-secondary)" }}
           >
             {t("usage.grokConfigDirsDesc")}
           </p>
@@ -5356,8 +5322,8 @@ function MemoSection() {
               {t("memo.padding")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("memo.paddingDesc")}
             </p>
@@ -5366,10 +5332,13 @@ function MemoSection() {
             <div className="grid grid-cols-2 gap-2">
               {(["Top", "Right", "Bottom", "Left"] as const).map((dir) => {
                 const key = `padding${dir}` as
-                  "paddingTop" | "paddingRight" | "paddingBottom" | "paddingLeft";
+                  | "paddingTop"
+                  | "paddingRight"
+                  | "paddingBottom"
+                  | "paddingLeft";
                 return (
                   <label key={dir} className="flex items-center gap-1.5">
-                    <span className="w-12 text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                    <span className="w-12 text-[13px]" style={{ color: "var(--text-secondary)" }}>
                       {t(`appearance.${dir.toLowerCase()}`)}
                     </span>
                     <input
@@ -5400,8 +5369,8 @@ function MemoSection() {
               {t("memo.indentSize")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("memo.indentSizeDesc")}
             </p>
@@ -5433,8 +5402,8 @@ function MemoSection() {
               {t("memo.paragraphDetection")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("memo.paragraphDetectionDesc")}
             </p>
@@ -5457,7 +5426,7 @@ function MemoSection() {
                 </span>
               </label>
               <label className="flex items-center gap-1.5">
-                <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
                   {t("memo.blankLineCount")}
                 </span>
                 <input
@@ -5489,8 +5458,8 @@ function MemoSection() {
               {t("memo.tripleClickSelect")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("memo.tripleClickSelectDesc")}
             </p>
@@ -5517,8 +5486,8 @@ function MemoSection() {
               {t("memo.copyOnSelect")}
             </span>
             <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              className="mt-0.5 text-[13px] leading-tight"
+              style={{ color: "var(--text-secondary)" }}
             >
               {t("memo.copyOnSelectDesc")}
             </p>
@@ -5974,7 +5943,6 @@ export function SettingsView() {
   };
 
   const [saveLabel, setSaveLabel] = useState("Save");
-  const [navHover, setNavHover] = useState<string | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // Draft flush/reset registry — sections register callbacks invoked on Save/Discard
@@ -6057,269 +6025,105 @@ export function SettingsView() {
     setDirty(false);
   };
 
-  const navBtnStyle = (id: string): React.CSSProperties => {
-    const isActive = activeNav === id;
-    const isHover = navHover === id;
-    return {
-      background: isActive
-        ? "var(--bg-overlay)"
-        : isHover
-          ? "var(--hover-bg-subtle)"
-          : "transparent",
-      color: isActive ? "var(--accent)" : "var(--text-primary)",
-      borderLeft: isActive ? "3px solid var(--accent)" : "3px solid transparent",
-      cursor: "pointer",
-      transition: "all 0.1s",
-    };
-  };
-
   return (
     <SettingsDraftContext.Provider value={draftCtx}>
       <div
         data-testid="settings-view"
-        className="flex h-full"
+        className="settings-view flex h-full min-h-0"
         style={{ color: "var(--text-primary)" }}
       >
         {/* Sidebar Navigation */}
         <nav
-          className="flex h-full w-40 shrink-0 flex-col overflow-y-auto py-3"
+          className="settings-sidebar flex h-full shrink-0 flex-col overflow-y-auto py-3"
           style={{
             background: "var(--bg-surface)",
             borderRight: "1px solid var(--border)",
           }}
         >
           {/* Open JSON — Windows Terminal style top-right link */}
-          <button
+          <Button
             data-testid="sidebar-open-json"
             onClick={handleOpenSettingsJson}
-            className="mx-3 mb-2 px-2 py-1 text-left text-[10px]"
-            style={{
-              color: "var(--text-secondary)",
-              background: "transparent",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius-md)",
-              cursor: "pointer",
-              opacity: 0.7,
-            }}
+            className="mx-3 mb-2"
             title={t("nav.openJsonTitle")}
           >
             {t("nav.openJson")}
-          </button>
+          </Button>
 
-          {/* General */}
-          <NavGroupHeader label={t("nav.groupGeneral")} />
-          <button
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("startup")}
-            onClick={() => setActiveNav("startup")}
-            onMouseEnter={() => setNavHover("startup")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.startup")}
-          </button>
-          <button
-            data-testid="nav-font"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("font")}
-            onClick={() => setActiveNav("font")}
-            onMouseEnter={() => setNavHover("font")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.appFont")}
-          </button>
-          <button
-            data-testid="nav-update"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("update")}
-            onClick={() => setActiveNav("update")}
-            onMouseEnter={() => setNavHover("update")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.update")}
-          </button>
-
-          {/* Terminal */}
-          <NavGroupHeader label={t("nav.groupTerminal")} />
-          <button
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("colorSchemes")}
-            onClick={() => setActiveNav("colorSchemes")}
-            onMouseEnter={() => setNavHover("colorSchemes")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.colorSchemes")}
-          </button>
-          <button
-            data-testid="nav-terminal"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("terminal")}
-            onClick={() => setActiveNav("terminal")}
-            onMouseEnter={() => setNavHover("terminal")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.terminal")}
-          </button>
-          <button
-            data-testid="nav-paste"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("paste")}
-            onClick={() => setActiveNav("paste")}
-            onMouseEnter={() => setNavHover("paste")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.paste")}
-          </button>
-
-          {/* Interface */}
-          <NavGroupHeader label={t("nav.groupInterface")} />
-          <button
-            data-testid="nav-interface"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("interface")}
-            onClick={() => setActiveNav("interface")}
-            onMouseEnter={() => setNavHover("interface")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.interface")}
-          </button>
-          <button
-            data-testid="nav-widgets"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("widgets")}
-            onClick={() => setActiveNav("widgets")}
-            onMouseEnter={() => setNavHover("widgets")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.widgets")}
-          </button>
-          <button
-            data-testid="nav-workspaceDisplay"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("workspaceDisplay")}
-            onClick={() => setActiveNav("workspaceDisplay")}
-            onMouseEnter={() => setNavHover("workspaceDisplay")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.workspaces")}
-          </button>
-
-          {/* Remote */}
-          <NavGroupHeader label={t("nav.groupRemote")} />
-          <button
-            data-testid="nav-remote"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("remoteConnection")}
-            onClick={() => setActiveNav("remoteConnection")}
-            onMouseEnter={() => setNavHover("remoteConnection")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.remoteConnection")}
-          </button>
-
-          {/* Agents */}
-          <NavGroupHeader label={t("nav.groupAgents")} />
-          <button
-            data-testid="nav-claude"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("claude")}
-            onClick={() => setActiveNav("claude")}
-            onMouseEnter={() => setNavHover("claude")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.claude")}
-          </button>
-          <button
-            data-testid="nav-codex"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("codex")}
-            onClick={() => setActiveNav("codex")}
-            onMouseEnter={() => setNavHover("codex")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.codex")}
-          </button>
-          <button
-            data-testid="nav-grok"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("grok")}
-            onClick={() => setActiveNav("grok")}
-            onMouseEnter={() => setNavHover("grok")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.grok")}
-          </button>
-
-          {/* Views */}
-          <NavGroupHeader label={t("nav.groupViews")} />
-          <button
-            data-testid="nav-memo"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("memo")}
-            onClick={() => setActiveNav("memo")}
-            onMouseEnter={() => setNavHover("memo")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.memo")}
-          </button>
-          <button
-            data-testid="nav-fileExplorer"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("fileExplorer")}
-            onClick={() => setActiveNav("fileExplorer")}
-            onMouseEnter={() => setNavHover("fileExplorer")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.fileExplorer")}
-          </button>
-          <button
-            data-testid="nav-viewer"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("viewer")}
-            onClick={() => setActiveNav("viewer")}
-            onMouseEnter={() => setNavHover("viewer")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.viewer")}
-          </button>
-          <button
-            data-testid="nav-issueReporter"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("issueReporter")}
-            onClick={() => setActiveNav("issueReporter")}
-            onMouseEnter={() => setNavHover("issueReporter")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.issueReporter")}
-          </button>
-          <button
-            data-testid="nav-github"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("github")}
-            onClick={() => setActiveNav("github")}
-            onMouseEnter={() => setNavHover("github")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.github")}
-          </button>
-
-          {/* Input */}
-          <NavGroupHeader label={t("nav.groupInput")} />
-          <button
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("keybindings")}
-            onClick={() => setActiveNav("keybindings")}
-            onMouseEnter={() => setNavHover("keybindings")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.keybindings")}
-          </button>
+          {[
+            {
+              group: "groupGeneral",
+              items: [
+                ["startup", "startup"],
+                ["update", "update"],
+              ],
+            },
+            {
+              group: "groupAppearance",
+              items: [
+                ["font", "appFont"],
+                ["interface", "interface"],
+                ["workspaceDisplay", "workspaces"],
+                ["widgets", "widgets"],
+              ],
+            },
+            {
+              group: "groupTerminal",
+              items: [
+                ["terminal", "terminal"],
+                ["colorSchemes", "colorSchemes"],
+              ],
+            },
+            {
+              group: "groupInput",
+              items: [
+                ["paste", "paste"],
+                ["keybindings", "keybindings"],
+              ],
+            },
+            {
+              group: "groupViews",
+              items: [
+                ["memo", "memo"],
+                ["fileExplorer", "fileExplorer"],
+                ["viewer", "viewer"],
+                ["github", "github"],
+                ["issueReporter", "issueReporter"],
+              ],
+            },
+            {
+              group: "groupAgents",
+              items: [
+                ["claude", "claude"],
+                ["codex", "codex"],
+                ["grok", "grok"],
+              ],
+            },
+            { group: "groupRemote", items: [["remoteConnection", "remoteConnection"]] },
+          ].map(({ group, items }) => (
+            <section
+              key={group}
+              data-testid={`settings-group-${group}`}
+              aria-label={t(`nav.${group}`)}
+            >
+              <NavGroupHeader label={t(`nav.${group}`)} />
+              {items.map(([id, label]) => (
+                <button
+                  key={id}
+                  data-testid={`nav-${id === "remoteConnection" ? "remote" : id}`}
+                  className="settings-nav-button"
+                  aria-current={activeNav === id ? "page" : undefined}
+                  onClick={() => setActiveNav(id)}
+                >
+                  {t(`nav.${label}`)}
+                </button>
+              ))}
+            </section>
+          ))}
 
           {/* Profiles group */}
           <div className="mt-3 flex items-center justify-between px-3 pb-1">
-            <span
-              className="text-[10px] uppercase tracking-wider"
-              style={{ color: "var(--text-secondary)", opacity: 0.7 }}
-            >
+            <span className="text-[13px] font-semibold" style={{ color: "var(--text-secondary)" }}>
               {t("nav.groupProfiles")}
             </span>
             <button
@@ -6341,11 +6145,9 @@ export function SettingsView() {
 
           <button
             data-testid="nav-profile-defaults"
-            className="w-full px-4 py-2 text-left text-[13px] italic"
-            style={navBtnStyle("defaults")}
+            className="settings-nav-button"
+            aria-current={activeNav === "defaults" ? "page" : undefined}
             onClick={() => setActiveNav("defaults")}
-            onMouseEnter={() => setNavHover("defaults")}
-            onMouseLeave={() => setNavHover(null)}
           >
             {t("nav.profileDefaults")}
           </button>
@@ -6355,11 +6157,9 @@ export function SettingsView() {
             return (
               <div key={id} className="group flex items-center">
                 <button
-                  className="min-w-0 flex-1 truncate px-4 py-2 text-left text-[13px]"
-                  style={navBtnStyle(id)}
+                  className="settings-nav-button min-w-0 flex-1 truncate"
+                  aria-current={activeNav === id ? "page" : undefined}
                   onClick={() => setActiveNav(id)}
-                  onMouseEnter={() => setNavHover(id)}
-                  onMouseLeave={() => setNavHover(null)}
                 >
                   {p.name}
                 </button>
@@ -6389,10 +6189,10 @@ export function SettingsView() {
 
         {/* Content Area */}
         <div
-          className="relative min-w-0 flex-1 overflow-y-auto"
+          className="settings-content relative flex min-h-0 min-w-0 flex-1 flex-col"
           style={{ background: "var(--bg-base)" }}
         >
-          <div className="p-4 pb-14" style={{ maxWidth: 720 }}>
+          <div className="settings-fields min-h-0 flex-1 overflow-y-auto p-5">
             {activeNav === "startup" && <StartupSection />}
             {activeNav === "font" && <FontSection />}
             {activeNav === "update" && <UpdateSection />}
@@ -6420,52 +6220,45 @@ export function SettingsView() {
 
           {/* Sticky save bar — always visible at bottom */}
           <div
-            className="sticky bottom-0 flex items-center justify-end gap-2 px-4 py-3"
+            className="flex shrink-0 flex-wrap items-center justify-end gap-2 px-5 py-3"
             style={{ background: "var(--bg-surface)", borderTop: "1px solid var(--border)" }}
           >
-            <button
-              data-testid="discard-settings-btn"
-              onClick={handleDiscard}
-              disabled={!dirty}
-              className="px-5 py-2 text-[13px] font-medium"
-              style={{
-                background: "transparent",
-                color: "var(--text-secondary)",
-                border: "1px solid var(--border)",
-                cursor: dirty ? "pointer" : "default",
-                transition: "all 0.15s",
-                borderRadius: "var(--radius-md)",
-                opacity: dirty ? 1 : 0.4,
-              }}
-            >
-              {t("save.discard")}
-            </button>
-            <button
-              data-testid="save-settings-btn"
-              onClick={handleSave}
-              disabled={!dirty}
-              className="px-8 py-2 text-[13px] font-medium"
-              style={{
-                background:
-                  saveLabel === "Saved!"
-                    ? "var(--green)"
-                    : saveLabel === "Error!"
-                      ? "var(--red)"
-                      : "var(--accent)",
-                color: "var(--bg-base)",
-                border: "none",
-                cursor: dirty ? "pointer" : "default",
-                transition: "all 0.15s",
-                borderRadius: "var(--radius-md)",
-                opacity: dirty ? 1 : 0.4,
-              }}
+            <span
+              role="status"
+              className="mr-auto text-[13px]"
+              style={{ color: "var(--text-secondary)" }}
             >
               {saveLabel === "Saved!"
                 ? t("save.saved")
                 : saveLabel === "Error!"
                   ? t("save.error")
-                  : t("save.save")}
-            </button>
+                  : dirty
+                    ? t("save.unsaved")
+                    : t("save.noChanges")}
+            </span>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                data-testid="discard-settings-btn"
+                onClick={handleDiscard}
+                disabled={!dirty}
+                title={!dirty ? t("save.noChanges") : undefined}
+              >
+                {t("save.discard")}
+              </Button>
+              <Button
+                data-testid="save-settings-btn"
+                variant="primary"
+                onClick={handleSave}
+                disabled={!dirty}
+                title={!dirty ? t("save.noChanges") : undefined}
+              >
+                {saveLabel === "Saved!"
+                  ? t("save.saved")
+                  : saveLabel === "Error!"
+                    ? t("save.error")
+                    : t("save.save")}
+              </Button>
+            </div>
           </div>
         </div>
       </div>
