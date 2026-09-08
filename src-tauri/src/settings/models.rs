@@ -189,17 +189,22 @@ fn default_antialiasing_mode() -> String {
 /// Keybinding entry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct Keybinding {
+    /// Key chord, e.g. "Ctrl+Shift+N". Read describe_settings(/keybindings)'s catalog before replacing this override list.
     pub keys: String,
+    /// Command ID from the live keybinding catalog. Omitted commands keep their registry default shortcuts.
     pub command: String,
 }
 
 /// Font settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct FontSettings {
+    /// Font family name, e.g. "Cascadia Mono". Use an installed font; this does not install fonts.
     #[serde(default = "default_font_face")]
     pub face: String,
+    /// Font size in pixels (6..72). Terminal fonts and non-terminal content fonts have separate settings.
     #[serde(default = "default_font_size")]
     pub size: u16,
+    /// Font weight, e.g. "normal", "bold", or "500".
     #[serde(default = "default_font_weight")]
     pub weight: String,
 }

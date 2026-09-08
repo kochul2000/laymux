@@ -4,7 +4,7 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 
 use super::models::Settings;
-use super::schema::{is_read_only_path, is_sensitive_path, metadata_json};
+use super::schema::{is_read_only_path, is_sensitive_path};
 pub use super::schema::{metadata_for_path, sensitive_settings_paths, READ_ONLY_SETTINGS_PATHS};
 use super::semantic_validation;
 
@@ -110,22 +110,42 @@ pub fn redact_settings(settings: &Settings) -> Value {
 
 pub fn select_settings_paths(settings: &Settings, paths: &[String]) -> Result<Value, String> {
     let redacted = redact_settings(settings);
-    select_paths_from_value(&redacted, paths)
+    if paths.is_empty() {
+        return Ok(redacted);
+    }
+    for path in paths {
+        let mut current = &redacted;
+        for segment in pointer_segments(path)? {
+            if let Some(items) = current.as_array() {
+                current = segment
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|index| items.get(index))
+                    .ok_or_else(|| format!("설정 배열 항목을 찾을 수 없습니다: {path}"))?;
+            } else if let Some(next) = current.get(&segment) {
+                current = next;
+            } else {
+                break;
+            }
+        }
+    }
+    select_default_paths(&redacted, &super::description::settings_schema(), paths)
 }
 
 pub fn describe_settings(paths: &[String]) -> Result<Value, String> {
-    let schema = schemars::schema_for!(Settings);
-    let schema_value = serde_json::to_value(&schema).unwrap_or_else(|_| json!({}));
+    let schema_value = super::description::settings_schema();
     let defaults = Settings::default();
     let default_values = if paths.is_empty() {
-        redact_settings(&defaults)
+        json!({})
     } else {
         select_default_paths(&redact_settings(&defaults), &schema_value, paths)?
     };
     Ok(json!({
-        "schema": schema,
+        "schema": super::description::select_schema(&schema_value, paths)?,
         "defaults": default_values,
-        "metadata": metadata_json(paths),
+        "metadata": super::description::metadata(&schema_value, paths)?,
+        "guide": super::description::GUIDE,
+        "scope": "pc",
         "pathFormat": "RFC 6901 JSON Pointer",
         "mergeSemantics": {
             "objects": "recursive merge",
@@ -360,20 +380,6 @@ fn has_sensitive_value(value: &Value) -> bool {
         Value::String(value) => !value.is_empty(),
         _ => true,
     }
-}
-
-fn select_paths_from_value(value: &Value, paths: &[String]) -> Result<Value, String> {
-    let mut selected = Map::new();
-    for path in paths {
-        if !path.starts_with('/') {
-            return Err(format!("JSON Pointer는 '/'로 시작해야 합니다: {path}"));
-        }
-        let Some(found) = value.pointer(path) else {
-            return Err(format!("설정 경로를 찾을 수 없습니다: {path}"));
-        };
-        selected.insert(path.clone(), found.clone());
-    }
-    Ok(Value::Object(selected))
 }
 
 fn select_default_paths(

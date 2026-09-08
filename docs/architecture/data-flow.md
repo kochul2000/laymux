@@ -1519,6 +1519,10 @@ Pane control bar의 **Restart View**는 이 앱 시작 복원 흐름의 명시�
 
 #### 설정 snapshot 단일 경로
 
+Remote 기기 로컬 선호의 MCP 변경은 PC snapshot과 분리한다([ADR-0243](../adr/0243-settings-mcp-scoped-discovery-and-remote-device-bridge.md)). `remote-settings-schema.json`을 Rust 설명·검증과 Remote JS가 함께 사용하며, 현재 controller의 heartbeat로 snapshot → 변경 요청 → 기기 localStorage 저장·기존 UI 적용 → 확인 응답을 교환한다. `clientId`·revision·유효기간을 양쪽에서 확인하며 호스트에는 영속하지 않는다. 기기가 확인하지 않은 변경은 성공으로 응답하지 않는다.
+
+`get_settings_context`는 현재 human-control owner로 기본 설정 범위를 도출한다. Local은 PC, 유효한 Remote lease는 기기 로컬, 전환·만료는 미확정이다. 요청 출처 증명이 아니므로 명시적인 사용자 대상이 우선한다. 연결 정책은 어느 표면에서도 PC `/remote`다. 플로팅 MCP 변경은 `keybar.floating`을 저장하고 기존 컨트롤을 다시 렌더한다. 전체 표시를 꺼도 개별 구성은 보존한다.
+
 UI 종료 영속, 시작 hydration, Automation REST, MCP 설정 도구는 서로 다른 설정 조립 로직을 갖지 않는다.
 
 ```

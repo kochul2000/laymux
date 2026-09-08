@@ -1387,6 +1387,24 @@ export async function handleAsyncAutomationRequest(
     const result = await handleRemoteFileViewerRequest(request.method, request.params);
     return boundRemoteFileViewerResult(result, request.params.maxResponseBytes, request.requestId);
   }
+  if (request.target === "settings" && request.method === "getCatalog") {
+    const { DEFAULT_KEYBINDINGS } = await import("@/lib/keybinding-registry");
+    const { WIDGET_DEFINITIONS } = await import("@/components/widgets/registry");
+    return ok({
+      keybindings: DEFAULT_KEYBINDINGS.map(({ id, label, defaultKeys, group }) => ({
+        command: id,
+        label,
+        defaultKeys,
+        group,
+      })),
+      widgets: WIDGET_DEFINITIONS.map(({ type, labelKey, defaultOptions, optionSpecs }) => ({
+        type,
+        labelKey,
+        defaultOptions,
+        optionSpecs,
+      })),
+    });
+  }
   if (request.target === "settings" && request.method === "getSnapshot") {
     try {
       return ok({ settings: await collectSettingsSnapshot() });

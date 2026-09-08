@@ -593,7 +593,7 @@ struct GetSettingsParam {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct DescribeSettingsParam {
-    /// JSON Pointer paths to describe. Omit or pass an empty array for the full schema.
+    /// JSON Pointer paths such as /terminal or /profileDefaults/font. Omit for a section guide; then request relevant paths for full field details.
     #[serde(default)]
     paths: Vec<String>,
 }
@@ -601,16 +601,31 @@ struct DescribeSettingsParam {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct ValidateSettingsParam {
     /// Partial settings object. Objects are merged recursively and arrays are replaced.
+    #[schemars(with = "serde_json::Map<String, Value>")]
     patch: Value,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct UpdateSettingsParam {
     /// Partial settings object. Objects are merged recursively and arrays are replaced.
+    #[schemars(with = "serde_json::Map<String, Value>")]
     patch: Value,
     /// Revision returned by get_settings. A mismatch prevents overwriting a newer change.
     #[serde(alias = "expectedRevision")]
     expected_revision: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct UpdateRemoteSettingsParam {
+    /// clientId from get_remote_settings. Pins the connected Remote device; never guess.
+    #[serde(alias = "clientId")]
+    client_id: String,
+    /// revision from get_remote_settings. A stale value is rejected by both host and device.
+    #[serde(alias = "expectedRevision")]
+    expected_revision: String,
+    /// Flat device settings patch, e.g. {"terminalFontSize":20,"touchScrollSensitivity":2}. Describe first.
+    #[schemars(with = "serde_json::Map<String, Value>")]
+    patch: Value,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -1734,8 +1749,24 @@ fn local_interface_ips() -> Vec<String> {
 
 #[tool_router]
 impl McpHandler {
-    /// Read the effective laymux settings from the frontend store.
-    /// Sensitive values are redacted. Use RFC 6901 JSON Pointer paths to limit the response.
+    /// FIRST step for settings requests: discover the current user control surface (PC or Remote).
+    /// Agents run on the PC even when the user works remotely; localhost/OS is NOT the user's surface.
+    /// Follow defaultScope for unspecified display/input requests; explicit user targets override it.
+    /// Host connection/security policies always use PC /remote. Recheck before applying changes.
+    #[tool]
+    async fn get_settings_context(&self) -> Result<CallToolResult, ErrorData> {
+        Ok(
+            match crate::remote_server::device_settings::context(&self.state.app_state) {
+                Ok(value) => json_result(&value),
+                Err(error) => CallToolResult::error(vec![Content::text(error)]),
+            },
+        )
+    }
+
+    /// Read current PC settings and revision. Omit paths for the full redacted snapshot;
+    /// paths such as /profileDefaults/font or /power return a JSON Pointer-to-value map.
+    /// Start with get_settings_context to resolve the user's surface, then describe_settings for keys. Remote display and input
+    /// preferences belong to get_remote_settings; PC /remote is connection/security policy.
     #[tool]
     async fn get_settings(
         &self,
@@ -1755,15 +1786,39 @@ impl McpHandler {
         })))
     }
 
-    /// Describe laymux settings with JSON Schema, defaults, meanings, write permissions,
-    /// sensitivity, and apply timing. Paths use RFC 6901 JSON Pointer syntax.
+    /// Discover PC setting keys, meanings, valid values, defaults, scope and apply timing.
+    /// Omit paths for a section guide; request /section or /section/field for focused details.
+    /// Terminal font: /profileDefaults/font (profile/pane overrides win). App content font:
+    /// /appearance/font; PC menu size is fixed. Remote display/input: describe_remote_settings.
+    /// Workflow: describe → get current values → validate patch → update with expected_revision → read back.
     #[tool]
     async fn describe_settings(
         &self,
         Parameters(p): Parameters<DescribeSettingsParam>,
     ) -> Result<CallToolResult, ErrorData> {
         match describe_settings_contract(&p.paths) {
-            Ok(description) => Ok(json_result(&description)),
+            Ok(mut description) => {
+                if p.paths.iter().any(|path| {
+                    ["/keybindings", "/widgets"]
+                        .iter()
+                        .any(|section| path == section || path.starts_with(&format!("{section}/")))
+                }) {
+                    match bridge_request(&self.state, "query", "settings", "getCatalog", json!({}))
+                        .await
+                    {
+                        Ok(catalog) if catalog.get("keybindings").is_some() => {
+                            description["catalog"] = catalog
+                        }
+                        Ok(_) => {
+                            return Ok(CallToolResult::error(vec![Content::text(
+                                "키바인딩 레지스트리를 읽지 못했습니다.",
+                            )]))
+                        }
+                        Err(error) => return Ok(Self::settings_bridge_error(error)),
+                    }
+                }
+                Ok(json_result(&description))
+            }
             Err(message) => Ok(CallToolResult::error(vec![Content::text(message)])),
         }
     }
@@ -1810,6 +1865,70 @@ impl McpHandler {
             object.insert("settings".into(), effective_settings.unwrap_or(Value::Null));
         }
         Ok(json_result(&response))
+    }
+
+    /// Discover settings for the current Remote surface (see get_settings_context): terminal/composer/menu
+    /// font sizes, floating controls, opacity, wheel/touch sensitivity, navigation, input mode, recall and widgets.
+    /// These preferences are saved on that device, independently of PC settings and other devices.
+    /// Available offline for discovery; get/validate/update require the target device's active control connection.
+    #[tool]
+    async fn describe_remote_settings(&self) -> Result<CallToolResult, ErrorData> {
+        Ok(json_result(
+            &crate::remote_server::device_settings::describe(),
+        ))
+    }
+
+    /// Read the active Remote controller device's local preferences, clientId and revision.
+    /// Use for phone/browser settings, not PC /remote connection policies. No connected device
+    /// or stale/unsupported page is an explicit error. Read before relative changes such as double scroll speed.
+    #[tool]
+    async fn get_remote_settings(&self) -> Result<CallToolResult, ErrorData> {
+        Ok(
+            match crate::remote_server::device_settings::get(&self.state.app_state) {
+                Ok(value) => json_result(&value),
+                Err(error) => CallToolResult::error(vec![Content::text(error)]),
+            },
+        )
+    }
+
+    /// Dry-run a flat Remote device settings patch without saving: e.g.
+    /// {"terminalFontSize":20,"touchScrollSensitivity":2}. Describe and get current settings first.
+    /// Rejects unknown keys, wrong types, bounds and inconsistent composer opacities.
+    #[tool]
+    async fn validate_remote_settings(
+        &self,
+        Parameters(p): Parameters<ValidateSettingsParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        Ok(
+            match crate::remote_server::device_settings::validate(&self.state.app_state, &p.patch) {
+                Ok(value) => json_result(&value),
+                Err(error) => CallToolResult::error(vec![Content::text(error)]),
+            },
+        )
+    }
+
+    /// Save and apply local preferences on the active Remote phone/browser, and wait for
+    /// its acknowledgement (up to 20 seconds). Pass client_id and expected_revision from get_remote_settings.
+    /// Only the named connected device changes. On conflict reconnect/read and retry; on timeout
+    /// read actual values before retrying because acknowledgement may have been lost.
+    #[tool]
+    async fn update_remote_settings(
+        &self,
+        Parameters(p): Parameters<UpdateRemoteSettingsParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        Ok(
+            match crate::remote_server::device_settings::update(
+                &self.state.app_state,
+                &p.client_id,
+                &p.expected_revision,
+                &p.patch,
+            )
+            .await
+            {
+                Ok(value) => json_result(&value),
+                Err(error) => CallToolResult::error(vec![Content::text(error)]),
+            },
+        )
     }
 
     // ── Terminal (7) ──
@@ -3395,6 +3514,9 @@ impl ServerHandler for McpHandler {
                  Call `resources/subscribe` on any URI to receive `notifications/resources/updated` \
                  when the backing state changes. Tools remain available for backward compatibility.\n\n\
                  ## Common workflows\n\
+                 - Settings FIRST: get_settings_context. Use its defaultScope when the user omits a target; never infer PC from the agent OS or localhost. Explicit targets override the default. Recheck context before writes.\n\
+                 - Change PC settings: describe_settings (section guide, then paths) → get_settings → validate_settings → update_settings with expected_revision → get_settings. Arrays replace the whole list; preserve other entries.\n\
+                 - Change this Remote phone/browser: describe_remote_settings → get_remote_settings → validate_remote_settings → update_remote_settings with client_id and expected_revision. PC /remote is connection/security policy, not device display preferences.\n\
                  - Find yourself: echo $LX_TERMINAL_ID (or $env:LX_TERMINAL_ID in PowerShell) → identify_caller\n\
                  - Send command to adjacent pane: identify_caller → use neighbors.right.terminalId → write_to_terminal\n\
                  - Read another pane's output: list_terminals → read_terminal_output with target terminal_id\n\
@@ -4927,6 +5049,11 @@ mod tests {
             "describe_settings",
             "validate_settings",
             "update_settings",
+            "describe_remote_settings",
+            "get_settings_context",
+            "get_remote_settings",
+            "validate_remote_settings",
+            "update_remote_settings",
         ] {
             assert!(
                 router.has_route(name),
