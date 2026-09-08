@@ -107,6 +107,13 @@ struct LeaseRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct HeartbeatRequest {
+    lease_id: String,
+    device_settings: Option<super::device_settings::DeviceReport>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct TerminalWriteRequest {
     data: String,
     lease_id: Option<String>,
@@ -720,14 +727,14 @@ fn claim_reservation_rejected_response(remaining: Option<Duration>) -> Response 
 
 async fn remote_session_heartbeat(
     State(server): State<ServerState>,
-    Json(body): Json<LeaseRequest>,
+    Json(body): Json<HeartbeatRequest>,
 ) -> Response {
     let settings = match effective_remote_settings(&server.app_state) {
         Ok(settings) => settings,
         Err(err) => return internal_error(err),
     };
     let timeout_seconds = effective_heartbeat_timeout_seconds(&settings);
-    let (status, refreshed, expiry_started, expiry_finalized, transition) = {
+    let (status, refreshed, expiry_started, expiry_finalized, transition, device_settings) = {
         let mut current = match server.app_state.remote_control.lock_or_err() {
             Ok(current) => current,
             Err(err) => return internal_error(err),
@@ -738,12 +745,19 @@ async fn remote_session_heartbeat(
         let expiry_started = current.observe_lease_expiry(now, timeout);
         let expiry_finalized = was_transitioning && !current.transitioning;
         let refreshed = current.refresh_remote_lease(&body.lease_id, now, timeout);
+        let device_settings = if refreshed {
+            body.device_settings
+                .map(|report| current.device_settings.sync(&body.lease_id, report))
+        } else {
+            None
+        };
         (
             status_from_state(&current, timeout_seconds),
             refreshed,
             expiry_started,
             expiry_finalized,
             current.current_owner_transition(),
+            device_settings,
         )
     };
 
@@ -770,7 +784,16 @@ async fn remote_session_heartbeat(
             "remote controller lease is not active",
         );
     }
-    Json(status).into_response()
+    let mut response = match serde_json::to_value(status) {
+        Ok(value) => value,
+        Err(error) => return internal_error(error),
+    };
+    match device_settings {
+        Some(Ok(Some(command))) => response["deviceSettingsCommand"] = command,
+        Some(Err(error)) => response["deviceSettingsError"] = serde_json::json!(error),
+        _ => {}
+    }
+    Json(response).into_response()
 }
 
 async fn remote_session_release(

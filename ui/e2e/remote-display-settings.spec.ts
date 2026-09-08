@@ -170,6 +170,186 @@ async function openDeviceSettings(page: Page) {
   await expect(page.locator("#remoteTerminalFontSize")).toBeEnabled();
 }
 
+test("MCP heartbeat 변경은 기기 저장·화면 적용 뒤 확인 응답을 보낸다", async ({ page }) => {
+  await installApiMocks(page, []);
+  let sent = false;
+  let acknowledgement: { success: boolean } | undefined;
+  let savedReport: Record<string, unknown> | undefined;
+  await page.route("http://remote.test/remote/v1/session/heartbeat", async (route) => {
+    const body = route.request().postDataJSON();
+    const device = body.deviceSettings;
+    savedReport = device.settings;
+    if (device.result) acknowledgement = device.result;
+    const command = !sent
+      ? {
+          requestId: "test-change",
+          clientId: device.clientId,
+          leaseId: body.leaseId,
+          expectedRevision: device.revision,
+          validForMs: 10000,
+          patch: {
+            terminalFontSize: 20,
+            composerFontSize: 19,
+            menuFontSize: 17,
+            touchScrollSensitivity: 2,
+            mainButtonScale: 120,
+            keysButtonScale: 90,
+            selectionHandleSize: 28,
+            composerAutocomplete: false,
+            composerHiddenClaudeLines: 5,
+            inputBarUserKeys: [{ id: "u-test", label: "확인", seq: "\t", submit: true }],
+            floatingButtons: [
+              {
+                id: "f-test",
+                actionId: "soft:u-test",
+                enabled: true,
+                size: 64,
+                opacity: 0.5,
+                x: 0.5,
+                y: 0.5,
+              },
+            ],
+          },
+        }
+      : null;
+    sent = true;
+    await route.fulfill({
+      json: { active: true, leaseId: body.leaseId, deviceSettingsCommand: command },
+    });
+  });
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.locator("#connect").click();
+  await expect.poll(() => acknowledgement, { timeout: 15000 }).toMatchObject({ success: true });
+  expect(savedReport).toMatchObject({
+    terminalFontSize: 20,
+    mainButtonScale: 120,
+    keysButtonScale: 90,
+    selectionHandleSize: 28,
+    touchScrollSensitivity: 2,
+    composerAutocomplete: false,
+  });
+  expect(savedReport).not.toHaveProperty("authToken");
+  expect(savedReport).not.toHaveProperty("composerHistory");
+  expect(savedReport).toMatchObject({
+    composerHiddenClaudeLines: 5,
+    inputBarUserKeys: [{ id: "u-test", label: "확인", seq: "\t", submit: true }],
+  });
+  await expect(page.locator('#floatingControls [data-floating-id="f-test"]')).toHaveCSS(
+    "opacity",
+    "0.5",
+  );
+  expect(
+    await page.evaluate(() =>
+      JSON.parse(localStorage.getItem("laymux.remote.composerHiddenAgentInputLines") || "{}"),
+    ),
+  ).toMatchObject({ Claude: 5, Codex: 4, Grok: 2 });
+  await expect(page.locator("#remoteTerminalFontSize")).toHaveValue("20");
+  expect(
+    await page.evaluate(() =>
+      getComputedStyle(document.documentElement).getPropertyValue("--remote-menu-font-size"),
+    ),
+  ).toBe("17px");
+  expect(
+    await page.evaluate(
+      (key) => JSON.parse(localStorage.getItem(key) || "{}"),
+      DISPLAY_SETTINGS_KEY,
+    ),
+  ).toMatchObject({ terminalFontSize: 20, touchScrollSensitivity: 2 });
+  expect(
+    await page.evaluate(() => localStorage.getItem("laymux.remote.composerAutocomplete")),
+  ).toBe("0");
+});
+
+test("MCP 플로팅 전체 표시를 껐다 켜도 개별 배치와 버튼은 보존한다", async ({ page }) => {
+  await installApiMocks(page, []);
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "laymux.remote.keybar",
+      JSON.stringify({
+        floating: {
+          pads: { dpad: { enabled: true, x: 0.3, size: 72 } },
+          buttons: [{ id: "f-keys", actionId: "keys", enabled: true }],
+        },
+      }),
+    ),
+  );
+  let pending: Record<string, unknown> | null = null;
+  let ack: { requestId: string; success: boolean } | undefined;
+  let serial = 0;
+  await page.route("http://remote.test/remote/v1/session/heartbeat", async (route) => {
+    const { deviceSettings: device, leaseId } = route.request().postDataJSON();
+    ack = device.result;
+    const command = pending
+      ? {
+          requestId: String(++serial),
+          clientId: device.clientId,
+          leaseId,
+          expectedRevision: device.revision,
+          validForMs: 10000,
+          patch: pending,
+        }
+      : null;
+    pending = null;
+    await route.fulfill({ json: { active: true, leaseId, deviceSettingsCommand: command } });
+  });
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.locator("#connect").click();
+  await expect(page.locator("#floatingControls > *")).toHaveCount(2);
+  for (const [patch, count] of [
+    [{ floatingEnabled: false }, 0],
+    [{ floatingEnabled: true, floatingNavPadEnabled: true, floatingNavPadSize: 80 }, 3],
+    [{ floatingDpadEnabled: false }, 2],
+  ] as const) {
+    const requestId = String(serial + 1);
+    pending = patch;
+    await expect.poll(() => ack, { timeout: 15000 }).toMatchObject({ requestId, success: true });
+    await expect(page.locator("#floatingControls > *")).toHaveCount(count);
+    expect(
+      await page.evaluate(() => JSON.parse(localStorage.getItem("laymux.remote.keybar") || "{}")),
+    ).toMatchObject({
+      floating: {
+        pads: { dpad: { x: 0.3, size: 72 } },
+        buttons: [{ id: "f-keys", actionId: "keys", enabled: true }],
+      },
+    });
+  }
+});
+
+test("MCP 저장 실패는 기존 기기 값과 실패 응답을 유지한다", async ({ page }) => {
+  await installApiMocks(page, []);
+  await page.addInitScript(() => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === "laymux.remote.displaySettings") throw new Error("storage unavailable");
+      return original.call(this, key, value);
+    };
+  });
+  let sent = false;
+  let acknowledgement: { success: boolean } | undefined;
+  await page.route("http://remote.test/remote/v1/session/heartbeat", async (route) => {
+    const { deviceSettings: device, leaseId } = route.request().postDataJSON();
+    if (device.result) acknowledgement = device.result;
+    const command = !sent
+      ? {
+          requestId: "storage-error",
+          clientId: device.clientId,
+          leaseId,
+          expectedRevision: device.revision,
+          validForMs: 10000,
+          patch: { terminalFontSize: 20, floatingDpadEnabled: true, composerHiddenClaudeLines: 5 },
+        }
+      : null;
+    sent = true;
+    await route.fulfill({ json: { active: true, leaseId, deviceSettingsCommand: command } });
+  });
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.locator("#connect").click();
+  await expect.poll(() => acknowledgement, { timeout: 15000 }).toMatchObject({ success: false });
+  await expect(page.locator("#remoteTerminalFontSize")).toHaveValue("14");
+  await expect(page.locator("#floatingControls > *")).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem("laymux.remote.keybar"))).toBeNull();
+});
+
 test("원격 화면 설정은 연결 전부터 기기 localStorage에서 읽고 저장한다", async ({ page }) => {
   const displayRequests: string[] = [];
   await installApiMocks(page, displayRequests);

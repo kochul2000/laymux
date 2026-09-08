@@ -1,3 +1,4 @@
+import { createRemoteSettingsBridge } from "../../../../ui/src/remote/remote-settings-mcp.js";
 import { createComposerEditor } from "../../../../ui/src/remote/composer-editor.js";
 import { readPathLinkSelection, readPathLinkLines, mapPathLinkParts, pathLinkPartsCurrent, PATH_LINK_CONTEXT_ROWS } from "../../../../ui/src/lib/path-link-lines.ts";
 import {
@@ -6225,6 +6226,8 @@ import {
         async function heartbeat() {
           if (!leaseId || heartbeatInFlight) return;
           const heartbeatLeaseId = leaseId;
+          const requestStartedAt = performance.now();
+          let settingsReplyPending = false;
           heartbeatInFlight = true;
           const controller = typeof AbortController === "function" ? new AbortController() : null;
           heartbeatAbortController = controller;
@@ -6233,12 +6236,13 @@ import {
             ? setTimeout(() => controller.abort(), requestTimeoutMs)
             : null;
           try {
-            await remoteFetch("/remote/v1/session/heartbeat", {
+            const response = await remoteFetch("/remote/v1/session/heartbeat", {
               method: "POST",
-              body: JSON.stringify({ leaseId: heartbeatLeaseId }),
+              body: JSON.stringify({ leaseId: heartbeatLeaseId, deviceSettings: remoteSettingsAgentBridge.snapshot() }),
               ...(controller ? { signal: controller.signal } : {}),
             });
             if (leaseId !== heartbeatLeaseId || heartbeatAbortController !== controller) return;
+            settingsReplyPending = remoteSettingsAgentBridge.receive(response?.deviceSettingsCommand, heartbeatLeaseId, requestStartedAt);
             lastHeartbeatOkAt = Date.now();
             if (heartbeatRetryTimer) {
               clearTimeout(heartbeatRetryTimer);
@@ -6258,6 +6262,9 @@ import {
             if (heartbeatAbortController === controller) {
               heartbeatAbortController = null;
               heartbeatInFlight = false;
+            }
+            if (settingsReplyPending && leaseId === heartbeatLeaseId) {
+              setTimeout(() => { void heartbeat().catch(error => console.warn("Remote settings acknowledgement failed", error)); }, 0);
             }
           }
         }
@@ -10179,7 +10186,7 @@ import {
           const floating = normalizeFloatingControls(ownProperty(value, "floating"), knownActionIdSet(userKeys));
           const keysPlaced = INPUT_ACTION_SEGMENTS.some((segment) =>
             zones.main[segment].includes("keys"),
-          ) || floating.buttons.some((button) => button.enabled && button.actionId === "keys");
+          ) || (floating.enabled && floating.buttons.some((button) => button.enabled && button.actionId === "keys"));
           return {
             expanded: ownProperty(value, "expanded") === true && keysPlaced,
             userKeys,
@@ -10831,11 +10838,11 @@ import {
             seen.add(item.id);
             buttons.push({ id: item.id, actionId: item.actionId, ...geometry(item, 0.85, true) });
           }
-          return { pads, buttons };
+          return { enabled: raw?.enabled !== false, pads, buttons };
         }
 
         function hasFloatingKeysToggle() {
-          return keyBarConfig.floating.buttons.some((item) => item.enabled && item.actionId === "keys");
+          return keyBarConfig.floating.enabled && keyBarConfig.floating.buttons.some((item) => item.enabled && item.actionId === "keys");
         }
 
         // Header actions keep their original node and listeners. All copies,
@@ -10975,7 +10982,7 @@ import {
           }
           layer.replaceChildren();
           for (const { id, item, actionId, pad } of floatingEntries()) {
-            if (!item.enabled) continue;
+            if (!keyBarConfig.floating.enabled || !item.enabled) continue;
             const element = document.createElement("div");
             element.className = "floating-control";
             element.dataset.floatingId = id;
@@ -11001,6 +11008,16 @@ import {
             if (keyBar.hidden !== keyBarWasHidden) scheduleTerminalFit();
             updateKeyBarControls();
           };
+          const visibilityLabel = document.createElement("label");
+          const visibility = document.createElement("input");
+          visibility.type = "checkbox";
+          visibility.checked = keyBarConfig.floating.enabled;
+          visibility.addEventListener("change", () => {
+            keyBarConfig.floating.enabled = visibility.checked;
+            update();
+          });
+          visibilityLabel.append(visibility, " Show floating controls");
+          editor.append(visibilityLabel);
           for (const { item, id, actionId, pad } of floatingEntries()) {
             const name = pad ? (id === "dpad" ? "Arrow pad" : "Pane / alert pad") : inputActionLabel(actionId);
             const group = document.createElement("fieldset");
@@ -12477,6 +12494,125 @@ import {
         swipeCloseDrawersToggle.checked = swipeCloseDrawersEnabled;
         applyRemoteDisplaySettings(remoteDisplaySettings);
         updateRemoteDisplaySettingsControls();
+
+        const floatingSettingFields = {
+          floatingDpadEnabled: ["dpad", "enabled"], floatingNavPadEnabled: ["navPad", "enabled"],
+          floatingDpadSize: ["dpad", "size"], floatingNavPadSize: ["navPad", "size"],
+          floatingDpadOpacity: ["dpad", "opacity"], floatingNavPadOpacity: ["navPad", "opacity"],
+          floatingDpadX: ["dpad", "x"], floatingDpadY: ["dpad", "y"],
+          floatingNavPadX: ["navPad", "x"], floatingNavPadY: ["navPad", "y"],
+        };
+        const hiddenLineFields = { composerHiddenClaudeLines: "Claude", composerHiddenCodexLines: "Codex", composerHiddenGrokLines: "Grok" };
+        const remoteSettingsAgentBridge = createRemoteSettingsBridge(
+          () => ({
+            ...remoteDisplaySettings,
+            floatingEnabled: keyBarConfig.floating.enabled,
+            floatingButtons: structuredClone(keyBarConfig.floating.buttons),
+            inputBarZones: structuredClone(keyBarConfig.zones),
+            inputBarUserKeys: structuredClone(keyBarConfig.userKeys),
+            spatialExcludedPaneIds: [...spatialExcludedPaneIds],
+            spatialExcludedWorkspaceIds: [...spatialExcludedWorkspaceIds],
+            ...Object.fromEntries(Object.entries(hiddenLineFields).map(([key, agent]) => [key, hiddenComposerAgentInputLines(agent)])),
+            ...Object.fromEntries(Object.entries(floatingSettingFields).map(([key, [pad, field]]) => [key, keyBarConfig.floating.pads[pad][field]])),
+            inputMode: currentInputMode(),
+            composerHistoryPopup: composerHistoryPopupEnabled,
+            composerAutocomplete: composerAutocompleteEnabled,
+            composerHideAgentInput: composerHideAgentInputEnabled,
+            composerHistoryScope,
+            widgetStrip: widgetStripAllowed,
+            edgeSwipeDrawers: edgeSwipeDrawersEnabled,
+            swipeCloseDrawers: swipeCloseDrawersEnabled,
+          }),
+          (candidate, patch) => {
+            const display = Object.fromEntries(Object.keys(DEFAULT_REMOTE_DISPLAY_SETTINGS).map(key => [key, candidate[key]]));
+            const keys = {
+              inputMode: inputModeKey,
+              composerHistoryPopup: composerHistoryPopupKey,
+              composerAutocomplete: composerAutocompleteKey,
+              composerHideAgentInput: composerHideAgentInputKey,
+              composerHistoryScope: composerHistoryScopeStorageKey,
+              widgetStrip: widgetStripKey,
+              edgeSwipeDrawers: edgeSwipeDrawersKey,
+              swipeCloseDrawers: swipeCloseDrawersKey,
+            };
+            const writes = [];
+            const floatingChanged = Object.keys(patch).some(key => ["floatingEnabled", "floatingButtons", "inputBarZones", "inputBarUserKeys"].includes(key) || Object.hasOwn(floatingSettingFields, key));
+            const updatedKeyBar = structuredClone(keyBarConfig);
+            if (floatingChanged) {
+              updatedKeyBar.floating.enabled = candidate.floatingEnabled;
+              updatedKeyBar.floating.buttons = candidate.floatingButtons;
+              updatedKeyBar.zones = candidate.inputBarZones;
+              updatedKeyBar.userKeys = candidate.inputBarUserKeys;
+              for (const [key, [pad, field]] of Object.entries(floatingSettingFields)) {
+                updatedKeyBar.floating.pads[pad][field] = candidate[key];
+              }
+              writes.push([keyBarKey, JSON.stringify(updatedKeyBar)]);
+            }
+            const linesChanged = Object.keys(patch).some(key => Object.hasOwn(hiddenLineFields, key));
+            const hiddenLines = Object.fromEntries(Object.entries(hiddenLineFields).map(([key, agent]) => [agent, candidate[key]]));
+            if (linesChanged) writes.push([composerHiddenAgentInputLinesKey, JSON.stringify(hiddenLines)]);
+            const skipsChanged = ["spatialExcludedPaneIds", "spatialExcludedWorkspaceIds"].some(key => Object.hasOwn(patch, key));
+            if (skipsChanged) {
+              if (!navigationState) throw new Error("탐색 목록이 없습니다. 연결 후 다시 조회하세요.");
+              for (const workspace of navigationState.workspaces || []) {
+                const panes = workspaceTerminalPaneIds(workspace.id);
+                if (panes.length && candidate.spatialExcludedWorkspaceIds.includes(workspace.id) !== panes.every(id => candidate.spatialExcludedPaneIds.includes(id))) {
+                  throw new Error("워크스페이스 제외와 소속 터미널 pane 제외를 일치시켜 두 목록을 함께 변경하세요.");
+                }
+              }
+              writes.push([spatialExcludedPaneIdsKey, JSON.stringify(candidate.spatialExcludedPaneIds)], [spatialExcludedWorkspaceIdsKey, JSON.stringify(candidate.spatialExcludedWorkspaceIds)]);
+            }
+            if (Object.keys(patch).some(key => Object.hasOwn(DEFAULT_REMOTE_DISPLAY_SETTINGS, key))) {
+              writes.push([remoteDisplaySettingsKey, JSON.stringify(display)]);
+            }
+            for (const key of Object.keys(patch)) {
+              if (keys[key]) writes.push([keys[key], typeof candidate[key] === "boolean" ? (candidate[key] ? "1" : "0") : candidate[key]]);
+            }
+            const previous = writes.map(([key]) => [key, localStorage.getItem(key)]);
+            try {
+              for (const [key, value] of writes) localStorage.setItem(key, value);
+            } catch (error) {
+              for (const [key, value] of previous) {
+                try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); }
+                catch { /* Storage may remain unavailable; never report success. */ }
+              }
+              throw error;
+            }
+            applyRemoteDisplaySettings(display);
+            if (floatingChanged) {
+              keyBarConfig = updatedKeyBar;
+              rebuildUserKeyIndex();
+              renderInputActionRows();
+              renderFloatingSettings();
+            }
+            if (Object.hasOwn(patch, "inputMode")) setInputMode(candidate.inputMode, { persist: false, focus: false });
+            composerHistoryPopupEnabled = candidate.composerHistoryPopup;
+            composerAutocompleteEnabled = candidate.composerAutocomplete;
+            composerHistoryScope = candidate.composerHistoryScope;
+            composerHideAgentInputEnabled = candidate.composerHideAgentInput;
+            if (linesChanged) composerHiddenAgentInputLines = hiddenLines;
+            if (Object.hasOwn(patch, "composerHideAgentInput") || linesChanged) {
+              if (composerHideAgentInputEnabled) hideActiveAgentInputForComposer();
+              else revealActiveAgentInput();
+            }
+            resetComposerSuggestions();
+            renderComposerSuggestions();
+            if (Object.hasOwn(patch, "widgetStrip")) setWidgetStripAllowed(candidate.widgetStrip);
+            edgeSwipeDrawersEnabled = candidate.edgeSwipeDrawers;
+            swipeCloseDrawersEnabled = candidate.swipeCloseDrawers;
+            edgeSwipeDrawersToggle.checked = edgeSwipeDrawersEnabled;
+            swipeCloseDrawersToggle.checked = swipeCloseDrawersEnabled;
+            if (skipsChanged) {
+              spatialExcludedPaneIds = new Set(candidate.spatialExcludedPaneIds);
+              spatialExcludedWorkspaceIds = new Set(candidate.spatialExcludedWorkspaceIds);
+              updateHeaderPaneIdentity();
+              renderWorkspaceList(navigationState.workspaces || []);
+            }
+            renderKeyPopover();
+            updateRemoteDisplaySettingsControls("Saved on this device by agent.");
+          },
+          androidHttpDocumentId,
+        );
 
         widgetStripToggle.addEventListener("change", () => {
           setWidgetStripAllowed(widgetStripToggle.checked);

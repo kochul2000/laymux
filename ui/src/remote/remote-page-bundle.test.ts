@@ -53,6 +53,8 @@ describe("remote page bundle", () => {
         ` path-link-lines.ts=${fileHash(path.resolve(__dirname, "../lib/path-link-lines.ts"))}` +
         ` terminal-cell-map.ts=${fileHash(path.resolve(__dirname, "../lib/terminal-cell-map.ts"))}` +
         ` composer-editor.js=${fileHash(path.resolve(__dirname, "./composer-editor.js"))}` +
+        ` remote-settings-mcp.js=${fileHash(path.resolve(__dirname, "remote-settings-mcp.js"))}` +
+        ` remote-settings-schema.json=${fileHash(path.resolve(__dirname, "remote-settings-schema.json"))}` +
         ` lucide-package=${packageInputHash(lock, "lucide")}`,
     );
   });

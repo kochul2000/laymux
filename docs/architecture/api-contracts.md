@@ -1042,18 +1042,31 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 
 #### Tool 노출 정책
 
+설정 탐색·변경은 [ADR-0243](../adr/0243-settings-mcp-scoped-discovery-and-remote-device-bridge.md)을 따른다. `get_settings`의 경로 생략은 전체 마스킹 snapshot이다. `describe_settings`의 경로 생략은 섹션 안내이며, 경로 지정 시 해당 값에 필요한 스키마만 반환한다. Remote 기기 선호는 별도 도구로 현재 controller 문서에 전달하며 기존 heartbeat의 기기 snapshot·요청·적용 응답으로 확인한다. 값은 기기 localStorage가 소유하고 호스트의 중계 상태는 메모리에만 둔다. 입력 문자열과 인증정보는 기기 설정 snapshot에 포함하지 않는다.
+
 MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. release(`19280`)에서는 운영·사용자 상태 조작에 필요한 안정 툴만 노출하고, laymux-dev(`19281`)에서는 UI 검증/설정 모달/hover 시뮬레이션처럼 기능 개발 e2e 구동에 필요한 dev 전용 툴을 추가 노출한다. dev 전용 툴은 release 의 `tools/list` 결과에서 숨기며, 이름을 직접 호출해도 `tool not found` 로 거부한다([ADR-0017](../adr/0017-mcp-dev-only-tools.md)).
 
-#### Tool 목록 (release 37개 + dev 전용 20개)
+#### Tool 목록 (release 44개 + dev 전용 20개)
 
-**설정 (4)** — release/dev 공통, frontend snapshot bridge 기반([ADR-0032](../adr/0032-llm-settings-introspection-and-safe-mutation.md)):
+**설정 (9)** — release/dev 공통. PC는 frontend snapshot bridge, Remote 기기는 controller heartbeat bridge를 사용한다([ADR-0032](../adr/0032-llm-settings-introspection-and-safe-mutation.md), [ADR-0243](../adr/0243-settings-mcp-scoped-discovery-and-remote-device-bridge.md)):
 
 | Tool | 구현 방식 | 설명 |
 |------|-----------|------|
 | `get_settings` | `settings.getSnapshot` bridge | 현재 store에서 합성한 설정과 revision 조회. `paths`는 RFC 6901 JSON Pointer 배열이며, `remote.authToken`은 항상 마스킹 |
-| `describe_settings` | Rust settings contract | JSON Schema·기본값·의미·쓰기 가능 여부·민감 여부·적용 시점(`live`/`nextUse`/`restart`) 조회 |
+| `get_settings_context` | 현재 human-control owner | 설정 작업 시작·변경 직전에 기본 범위(`pc`/`remoteDevice`/null), `targetReady`, `clientId`, `ownerEpoch` 조회. 명시적 사용자 대상이 우선하며 전환·만료는 미확정. 프로세스 OS나 localhost로 사용자 표면을 추측하지 않음 |
+| `describe_settings` | Rust settings contract + 필요한 runtime catalog | 경로 생략은 34개 섹션 안내. 경로 지정은 해당 필드만 포함하는 독립 스키마·기본값·의미·허용값·권한·적용 시점 조회. `/keybindings`는 frontend의 실제 command·label·defaultKeys·group, `/widgets`는 실제 위젯의 type·기본 옵션·옵션 제약도 반환 |
 | `validate_settings` | snapshot bridge + Rust strict validator | 부분 patch dry-run. 객체는 재귀 병합, 배열은 전체 교체하며 오류·기존 위반(`existingIssues`)·diff·후보 revision을 반환하고 저장하지 않음 |
 | `update_settings` | strict validator → `settings.applySnapshot` bridge | 검증된 후보만 `settings.json`에 저장하고 store에 적용. 선택적 `expected_revision`/`expectedRevision` 충돌 검사 지원 |
+| `describe_remote_settings` | PC·Remote 공용 기기 설정 schema | 기기 로컬 표시·스크롤·입력·플로팅·배치·탐색 제외 44개 최상위 키의 타입·기본값·범위·의미·적용 시점, 액션 목록과 제외 이유를 연결 없이 조회 |
+| `get_remote_settings` | 현재 controller의 heartbeat snapshot | `clientId`, `revision`, `settings` 반환. 미연결·15초 이상 지난 snapshot·구버전 기기는 오류 |
+| `validate_remote_settings` | 공용 기기 schema 검증 | 최상위 키별 교체 patch의 dry-run(그 안의 객체·배열은 전체 교체). 미지원 키·타입·범위·필수 필드·입력바 중복/참조·플로팅 액션과 `idle ≤ focused ≤ active` 순서를 거부. 탐색 제외의 현재 workspace/pane 관계는 기기에서 쓰기 전에 추가 검사 |
+| `update_remote_settings` | heartbeat 명령 → 기기 저장·적용 → 응답 확인 | `client_id`와 `expected_revision` 필수. 최대 20초 동안 대상 기기의 저장·적용 확인을 기다린다. 충돌·만료·기기 전환·저장 실패는 tool error. 시간 초과 시 실제 값 재조회 후 재시도 |
+
+`get_settings`의 경로 생략은 전체 마스킹 snapshot을 반환한다. 경로 지정 결과와 설명의 `schema.properties`·`defaults` 키는 JSON Pointer다. 타입에는 존재하지만 현재 생략된 optional 값은 `null`로 조회된다. PC `patch`는 중첩 객체이며 JSON Pointer map이 아니다. 프로필 폰트는 현재 터미널에도 즉시 반영되지만 프로필별·pane별 override가 우선한다. PC 메뉴 크기는 현재 설정으로 제공하지 않으며 비터미널 본문 크기를 대체 변경하지 않도록 안내한다.
+
+맥락의 기본값은 현재 제어 표면이며 개별 채팅 메시지 출처 증명은 아니다. 명시적 대상이 우선하고 외부 채팅·자동화는 출처가 다르면 확인한다. Remote에서 요청해도 연결·보안 정책은 PC `/remote`를 사용한다. 전체 필드 대조는 [설정 MCP 전수 대조](../settings-mcp-coverage-2026-09-08.md)에 기록한다.
+
+Remote heartbeat의 선택적 `deviceSettings`는 `{clientId, revision, settings, result?}`다. 서버는 활성 lease를 갱신한 동일 락 안에서 이를 받아들이고, 대기 중인 변경을 `deviceSettingsCommand: {requestId, leaseId, clientId, expectedRevision, patch, validForMs}`로 반환한다. 기기는 대상·revision·유효기간을 재검사하고 기존 UI 함수로 적용한다. 저장을 먼저 수행하고 실패 시 이전 저장값 복원을 시도하며 성공으로 보고하지 않는다. 다음 즉시 heartbeat의 `result: {requestId, success, error?}`와 실제 snapshot이 후보와 일치해야 MCP 성공이다. 중복 요청은 다시 적용하지 않는다. 중계는 `RemoteControlState.device_settings` 하나의 메모리 상태이며 호스트 설정 파일과 입력 내용·인증정보를 다루지 않는다. Direct·Android E2E 기존 heartbeat 인증·allowlist는 유지한다.
 
 일반 설정 patch에서 `workspaces`·`layouts`·`docks`·`workspaceDisplayOrder`와 cloud pairing 소유 필드는 읽기 전용이다. revision도 이 필드를 제외한 쓰기 가능한 구성만 해시한다. 이 경로 집합은 Rust metadata의 단일 상수에서 읽기 전용 판정·revision 계산·frontend `revisionIgnoredPaths`를 모두 파생한다. 알 수 없는 키, 타입/범위/enum 오류, profile 등 교차 참조 오류는 자동 보정하지 않고 거부한다. 단, 현재 설정부터 존재하고 후보에서도 값·오류가 변하지 않은 의미 위반은 무관한 patch를 막지 않고 `existingIssues`로 보고하며, 새 위반 또는 기존 값을 다른 잘못된 값으로 바꾼 경우만 `errors`로 거부한다. 민감값 전체 응답·diff·마스킹 sentinel 보존은 metadata의 `sensitive` 경로 목록을 공통 사용한다. `remote.authToken`의 `***REDACTED***` 값은 기존 secret 유지 표식이며 새 문자열 또는 빈 문자열만 실제 값을 변경한다. 쓰기 요청은 `AppState` 공용 설정 락으로 snapshot 조회부터 적용까지 직렬화하고, frontend가 저장 전후 기대 snapshot을 재검사해 Settings UI와의 경쟁도 충돌로 반환한다. 비교용 frontend snapshot은 CWD·Claude session IPC를 생략한다. 이 충돌 정책은 기존 app-theme/profile-defaults/profile REST·MCP setter에도 의도적으로 적용되며, 경쟁 시 REST는 `409 Conflict`, MCP는 tool error를 반환하므로 호출자는 최신 설정을 다시 읽고 재시도해야 한다.
 
@@ -1784,7 +1797,7 @@ src-tauri/src/
 │   ├── handlers_bridge.rs    # 프론트엔드 브릿지 핸들러
 │   ├── helpers.rs            # bridge_request, JSON 응답 헬퍼
 │   ├── settings_bridge.rs    # frontend settings snapshot/apply 공통 브리지·쓰기 직렬화
-│   ├── mcp.rs                # 내장 MCP 서버 (release tool 37종 + resource 핸들러, §12.7)
+│   ├── mcp.rs                # 내장 MCP 서버 (release tool 44종 + resource 핸들러, §12.7)
 │   └── mcp_resources.rs      # MCP Resources URI 모델·구독 레지스트리
 ├── terminal/mod.rs           # 터미널 모델 (TerminalSession, Config, Notification)
 ├── pty.rs                    # PTY 스폰 및 I/O
