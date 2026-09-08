@@ -1272,6 +1272,40 @@ describe("handleAsyncAutomationRequest", () => {
     expect(result.data).toHaveProperty("settings.docks");
   });
 
+  it("explains rebindable commands and widget options from the actual registries", async () => {
+    const result = await handleAsyncAutomationRequest({
+      requestId: "settings-catalog",
+      category: "query",
+      target: "settings",
+      method: "getCatalog",
+      params: {},
+    });
+    expect(result.success).toBe(true);
+    expect(result.data).toHaveProperty(
+      "widgets",
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "codexUsage",
+          defaultOptions: expect.objectContaining({ display: "both" }),
+          optionSpecs: expect.arrayContaining([
+            expect.objectContaining({
+              key: "barWidth",
+              min: expect.any(Number),
+              max: expect.any(Number),
+            }),
+          ]),
+        }),
+      ]),
+    );
+    expect(result.data).toHaveProperty(
+      "keybindings",
+      expect.arrayContaining([
+        expect.objectContaining({ command: "settings.open", defaultKeys: expect.any(String) }),
+        expect.objectContaining({ command: "workspace.new", label: expect.any(String) }),
+      ]),
+    );
+  });
+
   it("persists and applies a backend-validated settings snapshot", async () => {
     const current = await handleAsyncAutomationRequest({
       requestId: "settings-current",

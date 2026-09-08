@@ -1,5 +1,6 @@
 pub mod agent_command;
 pub mod contract;
+mod description;
 mod lenient;
 pub mod models;
 mod schema;
