@@ -1,6 +1,6 @@
 # 설정 MCP 전수 대조 — 2026-09-08
 
-ADR: [0236](adr/0242-settings-mcp-scoped-discovery-and-remote-device-bridge.md).
+ADR: [0236](adr/0243-settings-mcp-scoped-discovery-and-remote-device-bridge.md).
 
 ## 실행 맥락과 변경 범위
 

@@ -1435,6 +1435,22 @@ export async function readFileForViewer(
   return invoke("read_file_for_viewer", { path, maxBytes: maxBytes ?? null });
 }
 
+export interface SpreadsheetContent {
+  sheetNames: string[];
+  sheet: string;
+  cells: { row: number; column: number; value: string }[];
+  totalRows: number;
+  totalColumns: number;
+  truncated: boolean;
+}
+
+export async function readSpreadsheetForViewer(
+  path: string,
+  sheet?: string,
+): Promise<SpreadsheetContent> {
+  return invoke("read_spreadsheet_for_viewer", { path, sheet: sheet ?? null });
+}
+
 /**
  * Read a whole file for handing to the user (ADR-0185). Rejects rather than
  * truncating: a partial save is a corrupt file.

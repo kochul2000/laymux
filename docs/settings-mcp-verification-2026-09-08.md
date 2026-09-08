@@ -1,6 +1,6 @@
 # 설정 MCP 개선 검증 — 2026-09-08
 
-ADR: [0242 — 범위별 설명과 Remote 기기 적용 확인](adr/0242-settings-mcp-scoped-discovery-and-remote-device-bridge.md).
+ADR: [0243 — 범위별 설명과 Remote 기기 적용 확인](adr/0243-settings-mcp-scoped-discovery-and-remote-device-bridge.md).
 
 최신 main 통합 시 표시 설정 3개(기본행·확장행 버튼 배율, 선택 핸들 크기)를 추가해 최종 노출은 44개다. 아래 실제 CLI 기록은 통합 전 41개 계약에 대한 결과이며, 추가 키는 별도 회귀 테스트로 검증한다.
 

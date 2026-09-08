@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { openExternal, readFileForViewer, type FileViewerContent } from "@/lib/tauri-api";
-import { fileExtension, resolveViewer } from "@/lib/file-viewer";
+import { fileExtension, isSpreadsheetPath, resolveViewer } from "@/lib/file-viewer";
+import { SpreadsheetPreview } from "@/components/ui/preview/SpreadsheetPreview";
 import {
   htmlToSafePreviewDocument,
   markdownToSafePreviewDocument,
@@ -151,7 +152,7 @@ export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: Fil
   } | null>(null);
 
   useEffect(() => {
-    if (resolution.viewerType !== "web") return;
+    if (resolution.viewerType !== "web" || isSpreadsheetPath(path)) return;
     let cancelled = false;
     readFileForViewer(path)
       .then((c) => {
@@ -242,6 +243,10 @@ export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: Fil
         {resolution.message}
       </div>
     );
+  }
+
+  if (isSpreadsheetPath(path)) {
+    return <SpreadsheetPreview key={path} path={path} bodyStyle={effectiveBodyStyle} />;
   }
 
   if (error) {

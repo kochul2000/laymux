@@ -988,6 +988,10 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 
 > 위 표 외에도 `docks/{position}/active-view·toggle·panes/{paneId}`, `settings/profile-defaults·profiles/{i}`, `workspaces/{id}/summary`, `ui/notifications`, `ui/hidden/{workspace,pane}/{id}/toggle` 등이 등록돼 있다. 전수는 위 각주의 정본을 본다.
 
+### 데스크톱 스프레드시트 IPC
+
+[ADR-0242](../adr/0242-readonly-spreadsheet-viewer.md): `read_spreadsheet_for_viewer(path: string, sheet?: string)`는 main thread 밖에서 공통 경로 해석과 파일 파싱을 수행한다. 응답은 `{sheetNames: string[], sheet: string, cells: {row: number, column: number, value: string}[], totalRows: number, totalColumns: number, truncated: boolean}`이다. 좌표는 0부터 시작하고 totalRows/totalColumns는 비어 있지 않은 셀의 마지막 절대 좌표+1이다. sheet 생략 시 첫 워크시트를 선택한다. 존재하지 않는 시트·손상·암호화·읽기 상한 초과는 오류다. 캐시나 AppState를 사용하지 않는다. Remote bridge는 이 커맨드를 호출하지 않는다. 기존 `/api/v1/ui/file-viewer`로 데스크톱 열기와 screenshot 검증을 수행한다.
+
 ### 12.4 터미널 출력 버퍼
 
 - 터미널별 1MB 링 버퍼 (AppState에 저장)
@@ -1038,13 +1042,13 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 
 #### Tool 노출 정책
 
-설정 탐색·변경은 [ADR-0242](../adr/0242-settings-mcp-scoped-discovery-and-remote-device-bridge.md)을 따른다. `get_settings`의 경로 생략은 전체 마스킹 snapshot이다. `describe_settings`의 경로 생략은 섹션 안내이며, 경로 지정 시 해당 값에 필요한 스키마만 반환한다. Remote 기기 선호는 별도 도구로 현재 controller 문서에 전달하며 기존 heartbeat의 기기 snapshot·요청·적용 응답으로 확인한다. 값은 기기 localStorage가 소유하고 호스트의 중계 상태는 메모리에만 둔다. 입력 문자열과 인증정보는 기기 설정 snapshot에 포함하지 않는다.
+설정 탐색·변경은 [ADR-0243](../adr/0243-settings-mcp-scoped-discovery-and-remote-device-bridge.md)을 따른다. `get_settings`의 경로 생략은 전체 마스킹 snapshot이다. `describe_settings`의 경로 생략은 섹션 안내이며, 경로 지정 시 해당 값에 필요한 스키마만 반환한다. Remote 기기 선호는 별도 도구로 현재 controller 문서에 전달하며 기존 heartbeat의 기기 snapshot·요청·적용 응답으로 확인한다. 값은 기기 localStorage가 소유하고 호스트의 중계 상태는 메모리에만 둔다. 입력 문자열과 인증정보는 기기 설정 snapshot에 포함하지 않는다.
 
 MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. release(`19280`)에서는 운영·사용자 상태 조작에 필요한 안정 툴만 노출하고, laymux-dev(`19281`)에서는 UI 검증/설정 모달/hover 시뮬레이션처럼 기능 개발 e2e 구동에 필요한 dev 전용 툴을 추가 노출한다. dev 전용 툴은 release 의 `tools/list` 결과에서 숨기며, 이름을 직접 호출해도 `tool not found` 로 거부한다([ADR-0017](../adr/0017-mcp-dev-only-tools.md)).
 
 #### Tool 목록 (release 44개 + dev 전용 20개)
 
-**설정 (9)** — release/dev 공통. PC는 frontend snapshot bridge, Remote 기기는 controller heartbeat bridge를 사용한다([ADR-0032](../adr/0032-llm-settings-introspection-and-safe-mutation.md), [ADR-0242](../adr/0242-settings-mcp-scoped-discovery-and-remote-device-bridge.md)):
+**설정 (9)** — release/dev 공통. PC는 frontend snapshot bridge, Remote 기기는 controller heartbeat bridge를 사용한다([ADR-0032](../adr/0032-llm-settings-introspection-and-safe-mutation.md), [ADR-0243](../adr/0243-settings-mcp-scoped-discovery-and-remote-device-bridge.md)):
 
 | Tool | 구현 방식 | 설명 |
 |------|-----------|------|

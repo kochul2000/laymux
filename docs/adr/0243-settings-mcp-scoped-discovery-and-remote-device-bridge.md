@@ -1,4 +1,4 @@
-# 0242. 설정 MCP의 범위별 설명과 Remote 기기 적용 확인
+# 0243. 설정 MCP의 범위별 설명과 Remote 기기 적용 확인
 
 - Status: Accepted
 - Date: 2026-09-08

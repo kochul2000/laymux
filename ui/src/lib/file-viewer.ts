@@ -76,6 +76,10 @@ export function fileExtension(path: string): string {
   return segment.slice(dot).toLowerCase();
 }
 
+export function isSpreadsheetPath(path: string): boolean {
+  return [".xls", ".xlsx", ".xlsb", ".ods"].includes(fileExtension(path));
+}
+
 /**
  * Decide how to render a file: as a built-in web viewer (text/image/binary) or
  * via an external terminal command configured for its extension.
