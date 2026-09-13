@@ -62,6 +62,9 @@ test("round pads move only after a central hold and keyboard uses an icon", asyn
   await expect(
     page.locator('#keyRow [data-key="navPad"] [data-remote-icon-name="GamepadDirectional"]'),
   ).toHaveCount(1);
+  await expect(
+    page.locator('#keyRow [data-key="navPad"] [data-remote-icon-name="GamepadDirectional"]'),
+  ).toHaveAttribute("fill", "currentColor");
   await expect(page.locator(".floating-handle")).toHaveCount(0);
   await expect(page.locator('#floatingControls [data-remote-icon-name="Keyboard"]')).toHaveCount(1);
   await expect(pad).toHaveCSS("border-radius", "50%");
@@ -117,6 +120,11 @@ test("pad hints switch between square chevrons and arrows only during use", asyn
   ]) {
     const pad = page.locator(`#floatingControls [data-key="${id}"]`);
     await expect(pad.locator(`[data-remote-icon-name="${idle}"]`)).toHaveCount(1);
+    await expect(pad.locator(`[data-remote-icon-name="${idle}"]`)).toHaveAttribute(
+      "fill",
+      id === "navPad" ? "currentColor" : "none",
+    );
+    await page.screenshot({ path: testInfo.outputPath(`${id}-idle.png`) });
     await pad.evaluate((button: HTMLButtonElement) => {
       button.disabled = false;
     });
