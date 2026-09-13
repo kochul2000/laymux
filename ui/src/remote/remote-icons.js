@@ -120,7 +120,7 @@ export function createRemoteIcon(
     focusable: "false",
     class: classes,
     "data-remote-icon-name": name,
-    ...(fill ? { fill } : {}),
+    fill: name === "GamepadDirectional" ? "currentColor" : fill || "none",
   });
 }
 

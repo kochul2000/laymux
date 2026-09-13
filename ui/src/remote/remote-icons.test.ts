@@ -10,6 +10,11 @@ import {
 } from "./remote-icons.js";
 
 describe("Remote Lucide icon boundary", () => {
+  it("fills every directional gamepad while preserving other icon defaults", () => {
+    expect(createRemoteIcon("GamepadDirectional").getAttribute("fill")).toBe("currentColor");
+    expect(createRemoteIcon("Move").getAttribute("fill")).toBe("none");
+  });
+
   it("owns the shared decorative SVG defaults", () => {
     const icon = createRemoteIcon("Copy");
 
