@@ -159,6 +159,50 @@ fn wsl_available() -> bool {
 
 #[cfg(windows)]
 #[test]
+fn wsl_prompt_refresh_does_not_report_internal_commands() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    if !wsl_available() {
+        eprintln!("WSL 배포판이 없어 실제 Bash 프롬프트 검증을 건너뜁니다.");
+        return;
+    }
+    let home = tempfile::tempdir().expect("빈 셸 설정 디렉터리");
+    let home_path = home.path().to_string_lossy().replace('\\', "/");
+    let home_path = format!(
+        "/mnt/{}{}",
+        home_path[..1].to_ascii_lowercase(),
+        &home_path[2..]
+    );
+    let (command, args) =
+        TerminalSession::command_line_to_command_with_env("wsl.exe", &[("HOME".into(), home_path)]);
+    let mut child = laymux_lib::process::headless_command(&command)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("대화형 WSL Bash 실행");
+    child
+        .stdin
+        .take()
+        .expect("Bash stdin")
+        .write_all(b"\n# comment\nfalse\n\n# comment after failure\ntrue\nexit\n")
+        .expect("프롬프트 갱신 입력");
+    let output = child.wait_with_output().expect("Bash 종료");
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let commands: Vec<_> = stdout
+        .split("\x1b]133;E;")
+        .skip(1)
+        .map(|part| part.split('\x07').next().unwrap())
+        .collect();
+    assert_eq!(commands, ["false", "true", "exit"], "{stdout:?}");
+    assert!(stdout.contains("\x1b]133;D;1\x07"), "{stdout:?}");
+}
+
+#[cfg(windows)]
+#[test]
 fn wsl_child_receives_mutations_without_stale_windows_terminal_identity() {
     if !wsl_available() {
         eprintln!("WSL 배포판이 없어 실제 WSL child probe를 건너뜁니다.");
