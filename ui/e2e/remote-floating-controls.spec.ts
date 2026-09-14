@@ -133,12 +133,22 @@ test("pad hints switch between square chevrons and arrows only during use", asyn
     await page.mouse.move(box.x + box.width * 0.85, box.y + box.height / 2);
     await page.mouse.down();
     await expect(page.locator("#keyFlickHint")).toBeVisible();
+    await page.mouse.move(box.x + box.width * 0.85 + 32, box.y + box.height / 2);
+    await expect(page.locator("#keyFlickHint")).toHaveAttribute("data-direction", "right");
+    const hintBackground = await page
+      .locator("#keyFlickHint")
+      .evaluate((hint) => getComputedStyle(hint).backgroundColor);
     for (const direction of ["Up", "Down", "Left", "Right"]) {
-      await expect(
-        page.locator(
-          `#keyFlickHint [data-flick-direction="${direction.toLowerCase()}"] [data-remote-icon-name="${active}${direction}"]`,
-        ),
-      ).toHaveCount(1);
+      const icon = page.locator(
+        `#keyFlickHint [data-flick-direction="${direction.toLowerCase()}"] [data-remote-icon-name="${active}${direction}"]`,
+      );
+      await expect(icon).toHaveCount(1);
+      await expect(icon.locator("path").first()).toHaveCSS("fill", "none");
+      if (id === "navPad") {
+        const color = await icon.evaluate((svg) => getComputedStyle(svg).color);
+        await expect(icon.locator("rect")).toHaveCSS("fill", color);
+        await expect(icon.locator("path")).toHaveCSS("stroke", hintBackground);
+      }
     }
     await page.screenshot({ path: testInfo.outputPath(`${id}-active.png`) });
     await page.mouse.up();

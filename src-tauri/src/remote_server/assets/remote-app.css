@@ -116,6 +116,13 @@
         display: block;
         flex: 0 0 auto;
       }
+      .remote-icon[data-remote-icon-name^="SquareChevron"] > rect {
+        fill: currentColor;
+      }
+      .remote-icon[data-remote-icon-name^="SquareChevron"] > path {
+        fill: none;
+        stroke: var(--panel);
+      }
       * { box-sizing: border-box; }
       html, body {
         width: 100%;
