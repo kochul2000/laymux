@@ -1,6 +1,6 @@
 # 0248. Codex 작업 상태는 현재 세션의 턴 기록으로 판정한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-14
 - Source: 사용자 Codex 영구 모래시계 제보 및 수정안 선택, Codex 0.154.0 소스·dev WSL 실측, architecture/data-flow.md §9·§13.5
 - Amends: ADR-0147의 Codex 완료 추론, ADR-0238의 세션 식별 결과 활용 범위
