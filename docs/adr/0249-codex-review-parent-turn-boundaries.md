@@ -1,6 +1,6 @@
 # 0249. Codex 리뷰 경계에서 부모 턴의 귀속을 복원한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-14
 - Source: 사용자 v1.0.1 `/review` 완료 후 영구 모래시계 제보, 해당 pane의 Codex 0.154.0 rollout 실측, [ADR-0248](0248-codex-turn-lifecycle-activity.md), architecture/data-flow.md §13.5
 - Amends: ADR-0248의 현재 턴 식별 규칙. 세션 귀속·원시 상태 소유권·IPC 스키마는 유지한다.

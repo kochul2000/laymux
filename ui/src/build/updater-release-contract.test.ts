@@ -48,9 +48,9 @@ describe("desktop updater release contract", () => {
     expect(workflow).toContain("ref: ${{ needs.prepare.outputs.commit_sha }}");
     expect(workflow).toContain("needs: [prepare, build, android, channel_bootstrap]");
     expect(workflow).toContain("make_latest");
-    expect(workflow).toContain("max-parallel: 1");
-    expect(workflow).toContain("target: x86_64-pc-windows-msvc");
-    expect(workflow).toContain("target: x86_64-unknown-linux-gnu");
+    // ADR-0240: the desktop build is Windows-only; the WSL companion is separate.
+    expect(workflow).toContain("--target x86_64-pc-windows-msvc");
+    expect(workflow).not.toContain("target: x86_64-unknown-linux-gnu");
     expect(workflow).toMatch(/tauri-apps\/tauri-action@[0-9a-f]{40}/);
     expect(workflow).not.toContain("tauri-apps/tauri-action@v0");
     expect(workflow).toContain(
