@@ -192,11 +192,46 @@ fn run(
     shutdown: Arc<AtomicBool>,
 ) {
     let mut snapshot = UsageSnapshot::idle(spec.config_dir.clone());
+    let mut consecutive_failures: u32 = 0;
+    while !shutdown.load(Ordering::SeqCst) {
+        run_session(
+            &spec,
+            &publish,
+            &rx,
+            &shutdown,
+            &mut snapshot,
+            &mut consecutive_failures,
+        );
+        if shutdown.load(Ordering::SeqCst) {
+            break;
+        }
+        consecutive_failures = consecutive_failures.saturating_add(1);
+        let delay = next_delay(spec.refresh_seconds, consecutive_failures);
+        snapshot.next_query_at_ms = Some(now_ms() + delay.as_millis() as u64);
+        publish(snapshot.clone());
+        match rx.recv_timeout(delay) {
+            Ok(WorkerCommand::Refresh) | Err(RecvTimeoutError::Timeout) => {}
+            Ok(WorkerCommand::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+}
+
+/// Failed CLI sessions can retain credentials loaded before another pane's
+/// login. Retry with a fresh PTY in the same profile and config directory.
+fn run_session(
+    spec: &WorkerSpec,
+    publish: &Publisher,
+    rx: &Receiver<WorkerCommand>,
+    shutdown: &Arc<AtomicBool>,
+    snapshot: &mut UsageSnapshot,
+    consecutive_failures: &mut u32,
+) {
     snapshot.status = ProbeStatus::Starting;
+    snapshot.next_query_at_ms = None;
     publish(snapshot.clone());
 
     let screen = ProbeScreen::new();
-    let session = build_session(&spec);
+    let session = build_session(spec);
     let reader_screen = screen.clone();
     let handle = match pty::spawn_pty(&session, move |data| {
         reader_screen.feed(&data);
@@ -206,14 +241,13 @@ fn run(
         Err(error) => {
             tracing::warn!(config_dir = %spec.config_dir, %error, "usage probe pty spawn failed");
             snapshot.status = ProbeStatus::Failed { message: error };
-            publish(snapshot);
             return;
         }
     };
 
     let transport = PtyTransport { handle, screen };
     let pacer = FlagPacer {
-        shutdown: Arc::clone(&shutdown),
+        shutdown: Arc::clone(shutdown),
     };
     let timing = ProbeTiming::default();
     let probe = ProbeSession::new(&transport, &pacer, timing);
@@ -240,14 +274,12 @@ fn run(
             // capture means the shell never spoke, while a populated one points
             // at whatever prompt or error blocked startup.
             snapshot.raw_screen = Some(transport.screen_text());
-            publish(snapshot);
             let _ = transport.handle.terminate();
             return;
         }
     }
 
     let refresh_seconds = sanitize_refresh_seconds(spec.refresh_seconds);
-    let mut consecutive_failures: u32 = 0;
 
     loop {
         if pacer.cancelled() {
@@ -264,9 +296,7 @@ fn run(
                     snapshot.week_model = outcome.parsed.week_model;
                     snapshot.week_model_label = outcome.parsed.week_model_label;
                     snapshot.captured_at_ms = Some(now_ms());
-                    consecutive_failures = 0;
-                } else {
-                    consecutive_failures = consecutive_failures.saturating_add(1);
+                    *consecutive_failures = 0;
                 }
                 snapshot.status = status;
                 // Always keep the capture: on failure it is the only evidence of
@@ -275,12 +305,14 @@ fn run(
             }
             Err(error) => {
                 tracing::warn!(config_dir = %spec.config_dir, %error, "usage probe query failed");
-                consecutive_failures = consecutive_failures.saturating_add(1);
                 snapshot.status = ProbeStatus::Failed { message: error };
             }
         }
 
-        let delay = next_delay(refresh_seconds, consecutive_failures);
+        if !snapshot.status.has_usable_data() {
+            break;
+        }
+        let delay = next_delay(refresh_seconds, 0);
         snapshot.next_query_at_ms = Some(now_ms() + delay.as_millis() as u64);
         publish(snapshot.clone());
 
@@ -311,6 +343,32 @@ mod tests {
     fn probe_session_never_joins_a_sync_group() {
         let session = build_session(&spec());
         assert_eq!(session.config.sync_group, "none");
+    }
+
+    #[test]
+    fn failed_startup_keeps_retrying_with_the_same_subscription() {
+        let (tx, rx) = mpsc::channel();
+        let mut spec = spec();
+        spec.command_line = "laymux-nonexistent-usage-test-shell".into();
+        let worker = spawn(
+            spec,
+            Arc::new(move |snapshot| {
+                let _ = tx.send(snapshot);
+            }),
+        );
+        let next_failure = || loop {
+            let snapshot = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            if matches!(snapshot.status, ProbeStatus::Failed { .. }) {
+                break snapshot;
+            }
+        };
+        let first = next_failure();
+        worker.request_refresh();
+        // Shut down even when the assertions fail, so no test worker survives.
+        let retried = rx.recv_timeout(Duration::from_secs(10));
+        worker.shutdown();
+        assert!(first.next_query_at_ms.is_some());
+        assert!(retried.is_ok(), "refresh must reach a live retry worker");
     }
 
     #[test]

@@ -214,7 +214,7 @@ URL=브라우저·복사이고, Remote 는 같은 목록에서 OS 열기와 CWD 
       "colors": { "used": "#d97757", "pace": "#f9e2af", "track": "#585858" }
     },
     "codex": {
-      "profile": "", // Codex UsageView의 terminal font profile. 빈 값이면 defaultProfile
+      "profile": "", // Codex 실행 환경과 terminal font profile. 빈 값이면 defaultProfile
       "refreshSeconds": 600, // 로컬 app-server 조회 간격. 600~3600으로 적용
       "configDirs": [], // 별도 로그인한 CODEX_HOME 목록. 기본 CODEX_HOME은 항상 포함
       "visibleRows": ["weekly", "sparkWeekly"], // Weekly limit / Spark Weekly limit. 하나 이상 필수
@@ -233,7 +233,7 @@ URL=브라우저·복사이고, Remote 는 같은 목록에서 OS 열기와 CWD 
 
 **에이전트별 수집 경로는 분리한다.** Claude는 profile/config dir를 가진 PTY probe를 쓰며, Codex는 CLI가 제공하는 app-server 계정 API를 쓰고, Grok은 `/usage` TUI를 읽는 headless PTY probe를 쓴다([ADR-0156](../adr/0156-grok-first-class-agent.md)). provider는 원시 snapshot만 만들고 화면 규칙은 공통 `UsagePresentation`이 소유한다.
 
-Codex UsageView의 현재 rate-limit 원천은 `codex app-server`의 로컬 stdio JSON-RPC `account/rateLimits/read`다. 이 호출은 설정·네트워크 listener·사용자 대화 state를 만들지 않는다. 응답에서 직접 얻는 window와 reset epoch만 `get_codex_usage_snapshot` Tauri command로 WebView에 전달한다([ADR-0104](../adr/0104-codex-usage-app-server-probe.md)). `usage.codex.profile`은 화면의 terminal font를, `refreshSeconds`는 local app-server 재조회 간격을 정한다. `configDirs`의 각 경로는 app-server 자식 프로세스의 `CODEX_HOME`으로 전달되며, 사용자는 해당 경로에서 `codex login`을 먼저 실행한다.
+Codex UsageView의 현재 rate-limit 원천은 `codex app-server`의 로컬 stdio JSON-RPC `account/rateLimits/read`다. 이 호출은 설정·네트워크 listener·사용자 대화 state를 만들지 않는다. 응답에서 직접 얻는 window와 reset epoch만 `get_codex_usage_snapshot` Tauri command로 WebView에 전달한다([ADR-0104](../adr/0104-codex-usage-app-server-probe.md)). `usage.codex.profile`은 실행 환경과 화면의 terminal font를, `refreshSeconds`는 app-server 재조회 간격을 정한다. Windows의 WSL 프로필은 해당 배포판·사용자로 Bash 초기화 후 실행하며, 다른 프로필은 기존 네이티브 실행을 쓴다. `configDirs`의 각 경로는 해당 실행 환경의 app-server 자식 프로세스에 `CODEX_HOME`으로 전달되며, 사용자는 같은 환경·경로에서 `codex login`을 먼저 실행한다. 매번 새 프로세스로 읽으므로 이후 로그인은 다음 조회에 반영된다([ADR-0247](../adr/0247-usage-profile-login-recovery.md)).
 
 `usage.claude.profile` 은 `claude` 가 설치된 셸을 고른다 — WSL 에만 설치했다면 `"WSL"`. 존재하지 않는 프로필이면 구독이 오류로 실패하고 UsageView 푸터에 그대로 표시된다.
 

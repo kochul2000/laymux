@@ -276,7 +276,7 @@ pub fn save_memo(key: String, content: String) -> Result<(), String> {
 /// Split an `issueReporter.shell` prefix into tokens, respecting single and double quotes.
 /// Unmatched trailing quotes treat the rest of the string as one token.
 /// Note: backslash escapes (e.g. `\"`) are NOT supported.
-fn split_shell_prefix(input: &str) -> Vec<String> {
+pub(super) fn split_shell_prefix(input: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();
     let mut chars = input.chars().peekable();

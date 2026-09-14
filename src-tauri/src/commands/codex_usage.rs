@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::process::headless_command;
+mod launch;
 
 const APP_SERVER_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -108,7 +108,8 @@ struct RawWindow {
 /// states, not command errors.
 #[tauri::command(async)]
 pub fn get_codex_usage_snapshot(config_dir: String) -> CodexUsageSnapshot {
-    match read_rate_limits(&config_dir) {
+    let settings = crate::settings::load_settings();
+    match launch::command(&settings, &config_dir).and_then(read_rate_limits) {
         Ok(snapshot) => snapshot,
         Err(ReadError::Missing) => CodexUsageSnapshot::failed(CodexUsageStatus::CodexMissing),
         Err(ReadError::Unauthorized) => CodexUsageSnapshot::failed(CodexUsageStatus::Unauthorized),
@@ -125,9 +126,7 @@ enum ReadError {
     Failed(String),
 }
 
-fn read_rate_limits(config_dir: &str) -> Result<CodexUsageSnapshot, ReadError> {
-    let mut command = codex_app_server_command();
-    apply_codex_home(&mut command, config_dir);
+fn read_rate_limits(mut command: std::process::Command) -> Result<CodexUsageSnapshot, ReadError> {
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -161,7 +160,10 @@ fn read_rate_limits(config_dir: &str) -> Result<CodexUsageSnapshot, ReadError> {
         .stderr
         .take()
         .ok_or_else(|| ReadError::Failed("Codex app-server stderr unavailable".into()))?;
-    let stderr_reader = std::thread::spawn(move || read_stderr_tail(stderr));
+    let (stderr_tx, stderr_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = stderr_tx.send(read_stderr_tail(stderr));
+    });
     let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let response =
@@ -178,9 +180,10 @@ fn read_rate_limits(config_dir: &str) -> Result<CodexUsageSnapshot, ReadError> {
         }
         Err(_) => None,
     };
-    let stderr = stderr_reader
-        .join()
-        .unwrap_or_else(|_| "Codex app-server stderr reader failed".into());
+    // WSL 자손이 파이프를 유지해도 호출자가 무한히 대기하지 않는다.
+    let stderr = stderr_rx
+        .recv_timeout(Duration::from_millis(200))
+        .unwrap_or_default();
 
     match response {
         Ok(Some(response)) => parse_rate_limit_response(response),
@@ -242,39 +245,6 @@ fn classify_no_response(exit_status: Option<std::process::ExitStatus>, stderr: &
     ReadError::Failed(format!(
         "Codex app-server exited without a rate-limit response ({status}){detail}"
     ))
-}
-
-fn apply_codex_home(command: &mut std::process::Command, config_dir: &str) {
-    if !config_dir.is_empty() {
-        command.env("CODEX_HOME", config_dir);
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn codex_app_server_command() -> std::process::Command {
-    // npm installs Codex as a .cmd/.ps1 shim on Windows. Invoke the underlying
-    // Node entry point directly so stdin/stdout stay attached to app-server.
-    if let Some(script) = std::env::var_os("APPDATA")
-        .map(|appdata| {
-            std::path::PathBuf::from(appdata).join("npm/node_modules/@openai/codex/bin/codex.js")
-        })
-        .filter(|path| path.is_file())
-    {
-        let mut command = headless_command("node");
-        command.arg(script).args(["app-server", "--stdio"]);
-        return command;
-    }
-    // Fallback for non-npm installs that still expose a command shim.
-    let mut command = headless_command("cmd");
-    command.args(["/C", "codex", "app-server", "--stdio"]);
-    command
-}
-
-#[cfg(not(target_os = "windows"))]
-fn codex_app_server_command() -> std::process::Command {
-    let mut command = headless_command("codex");
-    command.args(["app-server", "--stdio"]);
-    command
 }
 
 #[cfg(test)]
@@ -353,18 +323,6 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::ffi::OsStr;
-
-    #[test]
-    fn selected_account_home_is_isolated_to_its_app_server_child() {
-        let mut command = std::process::Command::new("codex");
-        apply_codex_home(&mut command, "C:/accounts/work");
-        let home = command
-            .get_envs()
-            .find(|(key, _)| *key == OsStr::new("CODEX_HOME"))
-            .and_then(|(_, value)| value.map(ToOwned::to_owned));
-        assert_eq!(home.as_deref(), Some(OsStr::new("C:/accounts/work")));
-    }
 
     #[test]
     fn parses_all_structured_rate_limit_windows() {
