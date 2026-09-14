@@ -11,6 +11,76 @@ fn append(file: &mut File, kind: &str, id: &str) {
     file.flush().unwrap();
 }
 
+fn review_boundary(file: &mut File, paginated: bool, entering: bool, id: &str) {
+    let payload = if paginated {
+        serde_json::json!({
+            "type": "item_completed", "turn_id": id,
+            "item": {"type": if entering { "EnteredReviewMode" } else { "ExitedReviewMode" }}
+        })
+    } else {
+        serde_json::json!({
+            "type": if entering { "entered_review_mode" } else { "exited_review_mode" },
+            "turn_id": id
+        })
+    };
+    writeln!(
+        file,
+        "{}",
+        serde_json::json!({"type": "event_msg", "payload": payload})
+    )
+    .unwrap();
+    file.flush().unwrap();
+}
+
+#[test]
+fn review_parent_completion_follows_forwarded_child_start_in_both_history_formats() {
+    for paginated in [false, true] {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let mut reader = TurnReader::default();
+        // Codex 0.154.0 /review writes the parent's boundary, the delegate's
+        // start, then the parent's exit boundary and completion to one rollout.
+        review_boundary(file.as_file_mut(), paginated, true, "parent");
+        append(file.as_file_mut(), "task_started", "child");
+        assert_eq!(reader.read(file.path()).unwrap().state, TurnState::Running);
+        review_boundary(file.as_file_mut(), paginated, false, "parent");
+        assert_eq!(reader.read(file.path()).unwrap().state, TurnState::Running);
+        append(file.as_file_mut(), "task_complete", "parent");
+        assert_eq!(
+            reader.read(file.path()).unwrap(),
+            Turn {
+                state: TurnState::Completed,
+                turn_id: Some("parent".into()),
+            }
+        );
+        append(file.as_file_mut(), "task_started", "next");
+        append(file.as_file_mut(), "task_complete", "parent");
+        assert_eq!(reader.read(file.path()).unwrap().state, TurnState::Running);
+        append(file.as_file_mut(), "task_complete", "next");
+        assert_eq!(
+            reader.read(file.path()).unwrap().state,
+            TurnState::Completed
+        );
+    }
+}
+
+#[test]
+fn review_exit_restores_parent_from_tail_without_claiming_success_before_abort() {
+    for paginated in [false, true] {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let mut reader = TurnReader::default();
+        append(file.as_file_mut(), "task_started", "child");
+        // Initial tail may omit EnteredReviewMode. ExitedReviewMode is also
+        // emitted on abort, so only a later parent terminal event can end work.
+        review_boundary(file.as_file_mut(), paginated, false, "parent");
+        assert_eq!(reader.read(file.path()).unwrap().state, TurnState::Running);
+        append(file.as_file_mut(), "turn_aborted", "parent");
+        assert_eq!(
+            reader.read(file.path()).unwrap().state,
+            TurnState::Interrupted
+        );
+    }
+}
+
 #[test]
 fn follows_consecutive_turns_and_ignores_old_completions() {
     let mut file = tempfile::NamedTempFile::new().unwrap();

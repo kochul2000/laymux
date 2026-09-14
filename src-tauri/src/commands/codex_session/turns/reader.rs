@@ -99,6 +99,18 @@ impl TurnReader {
         };
         let state = match kind {
             "task_started" | "turn_started" => TurnState::Running,
+            // /review forwards the delegate's start but completes the parent.
+            // Restore the parent at its structured boundary in either rollout
+            // format; exiting review alone is not success (it also precedes abort).
+            "entered_review_mode" | "exited_review_mode" => TurnState::Running,
+            "item_completed"
+                if matches!(
+                    payload["item"]["type"].as_str(),
+                    Some("EnteredReviewMode" | "ExitedReviewMode")
+                ) =>
+            {
+                TurnState::Running
+            }
             "task_complete" | "turn_complete" => {
                 if payload.get("error").is_some_and(|error| !error.is_null()) {
                     TurnState::Failed
