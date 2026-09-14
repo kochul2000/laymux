@@ -41,7 +41,6 @@ export function subscribeCodexTurnStates(): () => void {
     useTerminalStore.getState().instances.map((instance) => [instance.id, ++epoch]),
   );
   const previous = new Map<string, CodexTurnSnapshot>();
-  const submittedAfter = new Map<string, string>();
 
   function unknown(id: string, reset = true) {
     const current = useTerminalStore.getState().instances.find((instance) => instance.id === id);
@@ -104,11 +103,6 @@ export function subscribeCodexTurnStates(): () => void {
           unknown(id);
           continue;
         }
-        if (snapshot.state !== "running" && submittedAfter.get(id) === turnKey(snapshot)) {
-          unknown(id, false);
-          continue;
-        }
-        submittedAfter.delete(id);
         const before = previous.get(id);
         previous.set(id, snapshot);
         if (!sameSnapshot(current.codexTurn, snapshot))
@@ -162,14 +156,14 @@ export function subscribeCodexTurnStates(): () => void {
         if (current) epochs.set(id, ++epoch);
         else epochs.delete(id);
         previous.delete(id);
-        submittedAfter.delete(id);
         if (current?.codexTurn)
           useTerminalStore.getState().updateInstanceInfo(id, { codexTurn: undefined });
       }
       if (current && old && isCodex(current) && current.lastUserInputAt !== old.lastUserInputAt) {
         const turn = previous.get(id);
         if (turn && turn.state !== "running") {
-          submittedAfter.set(id, turnKey(turn));
+          // Local commands such as /status may never start another turn.
+          // Invalidate this frame, then let the next observation be authoritative.
           unknown(id, false);
         }
       }

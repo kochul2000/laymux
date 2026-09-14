@@ -1102,7 +1102,7 @@ Claude Code 가 세션 리미트에 걸리면 스크롤백에 `⎿  You've hit y
 
 `commands/codex_session/turns`가 소유하는 reader는 최초 마지막 1 MiB와 이후 추가된 바이트를 회당 최대 1 MiB 읽는다. 마지막 64바이트 anchor로 축소·경계 내용 변경을 감지해 다시 시드하며, 불완전한 줄·미처리 backlog·잘못된 lifecycle은 이전 성공 상태를 유지하지 않는다. 현재 턴 ID에 맞는 `task_started`/`task_complete`/`turn_aborted`를 running/completed/failed/interrupted로 해석한다. 종료의 error가 있으면 failed이며 다른 턴의 종료는 무시한다. 같은 세션에서도 새로운 시작이 이후 상태를 결정한다. Windows native/Linux는 일반 파일 I/O, WSL은 기존 guest 경로 변환을 쓰며 SQLite는 bundled Linux probe가 계속 소유한다. reader 캐시의 leaf mutex는 AppState 락과 겹치지 않는다.
 
-`useSyncEvents`가 `subscribeCodexTurnStates`를 시작한다. Codex pane이 있을 때 한 번에 하나의 조회를 보내고 응답 뒤 1초 후 다시 조회한다. 6초 이상 지연한 요청은 기존 상태를 unknown으로 만들고 늦은 응답을 버린다. pane 재생성·앱 전환·조회 중 제출 입력이 바뀌면 오래된 응답을 버린다. 완료 뒤 새 입력은 이전 턴의 완료 표시를 무효화하며, 같은 기록으로 다시 완료시키지 않는다. raw `codexTurn`은 영속하지 않고 출력 이벤트는 계속 `outputActive`를 갱신한다.
+`useSyncEvents`가 `subscribeCodexTurnStates`를 시작한다. Codex pane이 있을 때 한 번에 하나의 조회를 보내고 응답 뒤 1초 후 다시 조회한다. 6초 이상 지연한 요청은 기존 상태를 unknown으로 만들고 늦은 응답을 버린다. pane 재생성·앱 전환·조회 중 제출 입력이 바뀌면 오래된 응답을 버린다. 완료 뒤 새 입력은 표시를 일시 무효화하고 다음 유효 관측으로 복원한다. `/status` 같은 로컬 명령은 새 턴을 만들지 않으므로 같은 턴의 재관측을 거부하지 않으며, 같은 완료 알림은 재생하지 않는다. raw `codexTurn`은 영속하지 않고 출력 이벤트는 계속 `outputActive`를 갱신한다.
 
 `CodexActivityHandler`가 이 두 원시 상태를 조합해 selector·Automation/Remote의 selectorStatus·절전 억제·clear 보호에 공통 적용한다. 확인된 completed는 반짝이가 출력 중이어도 완료이고, running은 조용해도 작업 중이다. unknown일 때 출력량·타이틀은 보조 신호지만 이전 셸 exitCode를 Codex 성공으로 재사용하지 않는다. 첫 관측·세션 전환·조회 복구는 과거 완료 알림을 재생하지 않는다. 같은 관측 세션에서 새로 확인한 completed만 성공 알림과 완료 체크포인트를 만든다. 입력 대기 마커 전환은 info 알림이고, frame 종료/2초 timeout/중단/오류는 성공 알림을 만들지 않는다.
 

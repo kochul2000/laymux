@@ -90,14 +90,30 @@ describe("Codex turn observation", () => {
     expect(notifications()).toHaveLength(1);
   });
 
-  it("does not restore the previous completion after submission and catches a fast next turn", async () => {
+  it("accepts the last observed turn after a local command without replaying completion", async () => {
+    result(snapshot("completed"));
+    stop = subscribeCodexTurnStates();
+    await tick();
+    useTerminalStore
+      .getState()
+      .updateInstanceInfo("pane", {
+        lastUserInputAt: Date.now(),
+        lastUserInput: "/status",
+        outputActive: true,
+      });
+    await tick();
+    expect(instance().codexTurn?.state).toBe("completed");
+    expect(isTerminalWorking(instance())).toBe(false);
+    expect(notifications()).toHaveLength(0);
+  });
+
+  it("invalidates the current display on submission and catches a fast next turn", async () => {
     result(snapshot("completed"));
     stop = subscribeCodexTurnStates();
     await tick();
     useTerminalStore
       .getState()
       .updateInstanceInfo("pane", { lastUserInputAt: Date.now(), lastUserInput: "next" });
-    await tick();
     expect(instance().codexTurn?.state).toBe("unknown");
     result(snapshot("completed", "b"));
     await tick();
