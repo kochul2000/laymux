@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::constants::ENV_GROK_HOME;
 use crate::pty::{self, PtyHandle, PtyOutputControl};
 use crate::terminal::{TerminalConfig, TerminalSession};
-use crate::usage_probe::{sanitize_refresh_seconds, ProbeScreen, PROBE_COLS, PROBE_ROWS};
+use crate::usage_probe::{next_delay, ProbeScreen, PROBE_COLS, PROBE_ROWS};
 
 use super::session::{BootOutcome, Pacer, ProbeSession, ProbeTiming, ProbeTransport};
 use super::snapshot::{GrokProbeStatus, GrokUsageSnapshot};
@@ -205,11 +205,45 @@ fn run(
     shutdown: Arc<AtomicBool>,
 ) {
     let mut snapshot = GrokUsageSnapshot::idle(&spec.config_dir);
+    let mut consecutive_failures: u32 = 0;
+    while !shutdown.load(Ordering::SeqCst) {
+        run_session(
+            &spec,
+            &publish,
+            &rx,
+            &shutdown,
+            &mut snapshot,
+            &mut consecutive_failures,
+        );
+        if shutdown.load(Ordering::SeqCst) {
+            break;
+        }
+        consecutive_failures = consecutive_failures.saturating_add(1);
+        let delay = next_delay(spec.refresh_seconds, consecutive_failures);
+        snapshot.next_query_at_ms = Some(now_ms() + delay.as_millis() as u64);
+        publish(snapshot.clone());
+        match rx.recv_timeout(delay) {
+            Ok(WorkerCommand::Refresh) | Err(RecvTimeoutError::Timeout) => {}
+            Ok(WorkerCommand::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+}
+
+// 실패한 CLI의 인증 캐시를 버리고 같은 프로필에서 로그인 정보를 다시 읽는다.
+fn run_session(
+    spec: &WorkerSpec,
+    publish: &Publisher,
+    rx: &Receiver<WorkerCommand>,
+    shutdown: &Arc<AtomicBool>,
+    snapshot: &mut GrokUsageSnapshot,
+    consecutive_failures: &mut u32,
+) {
     snapshot.status = GrokProbeStatus::Starting;
+    snapshot.next_query_at_ms = None;
     publish(snapshot.clone());
 
     let screen = ProbeScreen::new();
-    let session = build_session(&spec);
+    let session = build_session(spec);
     let reader_screen = screen.clone();
     let handle = match pty::spawn_pty(&session, move |data| {
         reader_screen.feed(&data);
@@ -219,14 +253,13 @@ fn run(
         Err(error) => {
             tracing::warn!(config_dir = %spec.config_dir, %error, "grok usage probe pty spawn failed");
             snapshot.status = GrokProbeStatus::Failed { message: error };
-            publish(snapshot);
             return;
         }
     };
 
     let transport = PtyTransport { handle, screen };
     let pacer = FlagPacer {
-        shutdown: Arc::clone(&shutdown),
+        shutdown: Arc::clone(shutdown),
     };
     let probe = ProbeSession::new(&transport, &pacer, ProbeTiming::default());
 
@@ -244,13 +277,11 @@ fn run(
                 BootOutcome::Ready | BootOutcome::Cancelled => unreachable!(),
             };
             snapshot.raw_screen = Some(transport.screen_text());
-            publish(snapshot);
             let _ = transport.handle.terminate();
             return;
         }
     }
 
-    let refresh_seconds = sanitize_refresh_seconds(spec.refresh_seconds);
     loop {
         if pacer.cancelled() {
             break;
@@ -265,6 +296,7 @@ fn run(
                     snapshot.rows = outcome.rows;
                     snapshot.status = GrokProbeStatus::Ready;
                     snapshot.captured_at_ms = Some(now_ms());
+                    *consecutive_failures = 0;
                 }
             }
             Err(error) => {
@@ -272,41 +304,54 @@ fn run(
                     let _ = transport.handle.terminate();
                     return;
                 }
-                // Query-time relaunch failures must not retire the worker.
-                // Leftover `Command 'usage' not found` used to look like
-                // GrokMissing and leave the UI stuck until remount.
                 snapshot.status = GrokProbeStatus::Failed { message: error };
                 snapshot.raw_screen = Some(transport.screen_text());
             }
         }
-        snapshot.next_query_at_ms = Some(now_ms() + refresh_seconds * 1000);
+        if !snapshot.status.has_usable_data() {
+            break;
+        }
+        let delay = next_delay(spec.refresh_seconds, 0);
+        snapshot.next_query_at_ms = Some(now_ms() + delay.as_millis() as u64);
         publish(snapshot.clone());
 
-        let deadline = Duration::from_secs(refresh_seconds);
-        let mut remaining = deadline;
-        loop {
-            if pacer.cancelled() {
-                let _ = transport.handle.terminate();
-                return;
-            }
-            match rx.recv_timeout(remaining.min(WAIT_SLICE)) {
-                Ok(WorkerCommand::Refresh) => break,
-                Ok(WorkerCommand::Shutdown) => {
-                    let _ = transport.handle.terminate();
-                    return;
-                }
-                Err(RecvTimeoutError::Timeout) => {
-                    remaining = remaining.saturating_sub(WAIT_SLICE);
-                    if remaining.is_zero() {
-                        break;
-                    }
-                }
-                Err(RecvTimeoutError::Disconnected) => {
-                    let _ = transport.handle.terminate();
-                    return;
-                }
-            }
+        match rx.recv_timeout(delay) {
+            Ok(WorkerCommand::Refresh) | Err(RecvTimeoutError::Timeout) => {}
+            Ok(WorkerCommand::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
         }
     }
     let _ = transport.handle.terminate();
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+
+    #[test]
+    fn startup_failure_keeps_an_automatic_retry_scheduled() {
+        let (tx, rx) = mpsc::channel();
+        let worker = spawn(
+            WorkerSpec {
+                config_dir: String::new(),
+                profile: "WSL".into(),
+                command_line: "laymux-nonexistent-grok-test-shell".into(),
+                starting_directory: String::new(),
+                refresh_seconds: 600,
+            },
+            Arc::new(move |snapshot| {
+                let _ = tx.send(snapshot);
+            }),
+        );
+        let failed = loop {
+            let snapshot = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            if matches!(snapshot.status, GrokProbeStatus::Failed { .. }) {
+                break snapshot;
+            }
+        };
+        worker.shutdown();
+        assert!(
+            failed.next_query_at_ms.is_some(),
+            "기동 실패 후 자동 재시도가 끊겼다"
+        );
+    }
 }

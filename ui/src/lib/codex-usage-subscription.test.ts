@@ -96,4 +96,20 @@ describe("codex usage subscription", () => {
     expect(current.status.type).toBe("failed");
     expect(current.capturedAtMs).toBeNull();
   });
+
+  it("recovers from authentication failure on the next poll without resubscribing", async () => {
+    vi.mocked(getCodexUsageSnapshot).mockResolvedValueOnce({
+      status: { type: "unauthorized" },
+      limits: [],
+      plan: null,
+      capturedAtMs: null,
+    });
+    subscribeCodexUsage("/account", 600_000, vi.fn());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readCodexSnapshot("/account").status.type).toBe("unauthorized");
+
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(readCodexSnapshot("/account")).toEqual(snapshot(1));
+    expect(getCodexUsageSnapshot).toHaveBeenCalledTimes(2);
+  });
 });
