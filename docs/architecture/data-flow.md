@@ -189,6 +189,10 @@ OSC 이스케이프 시퀀스는 **Rust PTY 콜백에서 단일 패스로 처리
 
 #### Notify Gate
 
+WSL Bash의 DEBUG preexec 훅은 빈 Enter·주석 입력 후 실행되는 `__laymux_prompt_pre`를
+사용자 명령으로 보고하지 않는다. 이때 OSC 133;C/E를 보내지 않아 마지막 명령을 보존하고,
+기존 프롬프트 훅의 OSC 133;D와 OSC 7 처리는 계속 수행한다.
+
 셸 초기화 시 발생하는 OSC 133;D가 불필요한 알림을 유발하는 것을 방지한다.
 
 - `TerminalSession.notify_gate_armed` (기본값 `false`)로 게이팅

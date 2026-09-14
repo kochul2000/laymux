@@ -398,6 +398,8 @@ __laymux_prompt_post() {
 __laymux_preexec() {
     [ "$__laymux_at_prompt" != "1" ] && return
     __laymux_at_prompt=0
+    # Empty/comment-only input reaches PROMPT_COMMAND with the preexec gate armed.
+    [ "$BASH_COMMAND" = "__laymux_prompt_pre" ] && return
     printf '\e]133;C\a'
     printf '\e]133;E;%s\a' "$BASH_COMMAND"
 }
