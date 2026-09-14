@@ -1,6 +1,6 @@
 # 0247. 사용량 조회는 선택한 실행 환경의 로그인 상태로 복구한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-14
 - Source: 사용자 요구(WSL pane에서 로그인한 뒤 사용량 위젯 복구, Claude·Codex·Grok 동시 점검), architecture/data-flow.md §10.5
 - Extends: [0102](0102-claude-usage-probe-headless-pty.md), [0104](0104-codex-usage-app-server-probe.md), [0156](0156-grok-first-class-agent.md)
