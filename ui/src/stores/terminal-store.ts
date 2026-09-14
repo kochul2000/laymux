@@ -44,15 +44,15 @@ export interface TerminalInstance {
   activitySequence?: number;
   /** True if terminal is actively producing output. */
   outputActive?: boolean;
+  /** Current Codex turn, independent of terminal rendering activity. Runtime only. */
+  codexTurn?: import("@/lib/tauri-api").CodexTurnSnapshot;
   /**
    * Which backend detector armed the current `outputActive` (ADR-0147), or
    * `undefined` when it came from a path that does not report one (the title
    * spinner) or `outputActive` is false.
    *
-   * Stored raw because one consumer needs the distinction: a working→idle
-   * transition only means "task finished" if the app was redrawing its own UI
-   * (`"frame"`). Sustained byte volume (`"volume"`) says the pane emitted a lot
-   * — a long tool output mid-task looks identical to a finished one.
+   * Rendering and byte-volume diagnostics stay independent of task lifecycle.
+   * Neither source proves Codex completion (ADR-0248).
    */
   outputActiveSource?: "frame" | "volume";
   /** Latest provider-specific activity status message. */
@@ -88,6 +88,7 @@ interface TerminalStoreState {
         | "activity"
         | "activitySequence"
         | "outputActive"
+        | "codexTurn"
         | "outputActiveSource"
         | "syncGroup"
         | "activityMessage"

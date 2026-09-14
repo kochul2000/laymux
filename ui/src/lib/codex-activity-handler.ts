@@ -28,6 +28,11 @@ export class CodexActivityHandler extends ShellActivityHandler {
   }
 
   isBusy(raw: RawTerminalState): boolean {
+    if (isInputPending(raw.activityMessage)) return true;
+    if (raw.codexTurn?.state === "unknown") return true;
+    if (raw.codexTurn) {
+      return raw.codexTurn.state === "running";
+    }
     if (super.isBusy(raw)) return true;
     if (isInputPending(raw.activityMessage)) return true;
     return startsWithBrailleSpinner(raw.title);
@@ -46,13 +51,26 @@ export class CodexActivityHandler extends ShellActivityHandler {
   }
 
   computeStatus(raw: RawTerminalState): StatusResult {
+    switch (raw.codexTurn?.state) {
+      case "completed":
+        return { icon: "✓", color: "var(--green)" };
+      case "failed":
+        return { icon: "✗", color: "var(--red)" };
+      case "idle":
+      case "interrupted":
+        return { icon: "—", color: "var(--text-secondary)" };
+    }
     if (isInputPending(raw.activityMessage)) {
       return { icon: "✓", color: "var(--green)" };
+    }
+    if (raw.codexTurn?.state === "running") {
+      return { icon: STATUS_ICON_WORKING, color: "var(--yellow)" };
     }
     if (!raw.outputActive && startsWithBrailleSpinner(raw.title)) {
       return { icon: STATUS_ICON_WORKING, color: "var(--yellow)" };
     }
-    return super.computeStatus(raw);
+    // A previous shell exit code is not evidence that this Codex turn succeeded.
+    return super.computeStatus({ ...raw, exitCode: undefined });
   }
 
   computeStatusMessage(raw: RawTerminalState): string | undefined {

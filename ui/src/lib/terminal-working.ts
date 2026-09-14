@@ -20,6 +20,7 @@ export function isTerminalWorking(instance: TerminalInstance): boolean {
   const status = getHandler(instance.activity).computeStatus({
     exitCode: instance.lastExitCode,
     outputActive: instance.outputActive ?? false,
+    codexTurn: instance.codexTurn,
     lastCommand: instance.lastCommand,
     activityMessage: instance.activityMessage,
     activity: instance.activity,

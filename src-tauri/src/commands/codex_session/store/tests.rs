@@ -4,6 +4,41 @@ const SESSION_A: &str = "019fc0d8-a862-7241-a0f5-b6a66ef4ef6f";
 const SESSION_B: &str = "019fc114-970b-7933-a31b-bbd53883b57e";
 
 #[test]
+fn turn_observation_requires_a_selection_and_changes_when_the_process_restarts() {
+    let temp = tempfile::tempdir().unwrap();
+    let logs = create_logs_db(temp.path());
+    let path = write_rollout(temp.path(), SESSION_A, ",\"source\":\"cli\"");
+    let store = CodexSessionStore::new(temp.path().into(), temp.path().into());
+    insert_log(&logs, 1, "pid:101:first", None);
+    insert_log(&logs, 2, "pid:101:first", Some(SESSION_A));
+    assert!(store
+        .find_selection_for_pid_checked(101, None)
+        .unwrap()
+        .unwrap()
+        .selection_epoch
+        .is_none());
+    let body = format!("app_server.request{{rpc.method=\"thread/resume\" rpc.request_id=1 app_server.client_name=\"codex-tui\"}}:thread_spawn{{}}:session_init:startup_prewarm{{otel.name=\"startup_prewarm\" thread.id={SESSION_A}}}: ready");
+    logs.execute("UPDATE logs SET feedback_log_body=?1 WHERE id=2", [&body])
+        .unwrap();
+    let before = store
+        .find_selection_for_pid_checked(101, None)
+        .unwrap()
+        .unwrap();
+    assert_eq!(before.selection_epoch, Some(2));
+    assert_eq!(store.rollout_path_checked(&before.id).unwrap(), Some(path));
+    insert_log(&logs, 3, "pid:101:second", None);
+    insert_log(&logs, 4, "pid:101:second", Some(SESSION_A));
+    logs.execute("UPDATE logs SET feedback_log_body=?1 WHERE id=4", [&body])
+        .unwrap();
+    let after = store
+        .find_selection_for_pid_checked(101, None)
+        .unwrap()
+        .unwrap();
+    assert_eq!(before.id, after.id);
+    assert_eq!(after.selection_epoch, Some(4));
+}
+
+#[test]
 fn proven_new_thread_without_rollout_is_fresh() {
     let temp = tempfile::tempdir().unwrap();
     let logs = create_logs_db(temp.path());

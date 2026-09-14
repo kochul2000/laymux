@@ -29,6 +29,7 @@ const mockMarkClaudeTerminal = vi.fn().mockResolvedValue(true);
 const mockSendDesktopNotification = vi.fn().mockResolvedValue(undefined);
 const mockGetTerminalSerializeMap = vi.fn();
 const mockGetTerminalStates = vi.fn().mockResolvedValue({});
+const mockGetCodexTurnStates = vi.fn().mockResolvedValue({});
 
 vi.mock("@/lib/tauri-api", () => ({
   onSyncCwd: (...args: unknown[]) => mockOnSyncCwd(...args),
@@ -46,6 +47,7 @@ vi.mock("@/lib/tauri-api", () => ({
     mockOnComposerStarredEntriesChanged(...args),
   markClaudeTerminal: (...args: unknown[]) => mockMarkClaudeTerminal(...args),
   getTerminalStates: (...args: unknown[]) => mockGetTerminalStates(...args),
+  getCodexTurnStates: (...args: unknown[]) => mockGetCodexTurnStates(...args),
   sendOsNotification: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -1281,7 +1283,7 @@ describe("useSyncEvents", () => {
       expect(getInst()?.lastExitCode).toBe(0);
     });
 
-    it("marks Codex success when outputActive transitions to false", () => {
+    it("does not infer Codex success when outputActive transitions to false", () => {
       useTerminalStore.getState().registerInstance({
         id: "t1",
         profile: "PowerShell",
@@ -1300,13 +1302,10 @@ describe("useSyncEvents", () => {
 
       const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
       expect(instance?.outputActive).toBe(false);
-      expect(instance?.lastExitCode).toBe(0);
+      expect(instance?.lastExitCode).toBeUndefined();
       expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Codex" });
       const notifications = useNotificationStore.getState().notifications;
-      expect(notifications).toHaveLength(1);
-      expect(notifications[0].terminalId).toBe("t1");
-      expect(notifications[0].level).toBe("success");
-      expect(notifications[0].message).toBe("Codex task completed");
+      expect(notifications).toHaveLength(0);
     });
 
     it("does not mark Codex success when the activity was armed by output volume", () => {
@@ -1345,8 +1344,8 @@ describe("useSyncEvents", () => {
       vi.useRealTimers();
     });
 
-    it("still marks Codex success when the activity came from a frame burst", () => {
-      // Counter-test: the guard must not suppress the real completion path.
+    it("does not infer Codex success from a stopped frame animation", () => {
+      // A frame can be Working or idle decoration; neither proves completion.
       vi.useFakeTimers();
       useTerminalStore.getState().registerInstance({
         id: "t1",
@@ -1368,14 +1367,12 @@ describe("useSyncEvents", () => {
       });
 
       const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
-      expect(instance?.lastExitCode).toBe(0);
-      expect(useNotificationStore.getState().notifications[0]?.message).toBe(
-        "Codex task completed",
-      );
+      expect(instance?.lastExitCode).toBeUndefined();
+      expect(useNotificationStore.getState().notifications).toHaveLength(0);
       vi.useRealTimers();
     });
 
-    it("reparses the Codex screen snapshot when success is detected", () => {
+    it("does not reinterpret a screen snapshot as success when output stops", () => {
       useTerminalStore.getState().registerInstance({
         id: "t1",
         profile: "PowerShell",
@@ -1403,11 +1400,11 @@ describe("useSyncEvents", () => {
       activityCb({ terminalId: "t1", active: false });
 
       const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
-      expect(instance?.activityMessage).toBe("Yes.");
-      expect(instance?.lastExitCode).toBe(0);
+      expect(instance?.activityMessage).toBe("Working (1s · esc to interrupt)");
+      expect(instance?.lastExitCode).toBeUndefined();
     });
 
-    it("marks Codex success when outputActive times out", () => {
+    it("does not infer Codex success when outputActive times out", () => {
       vi.useFakeTimers();
       useTerminalStore.getState().registerInstance({
         id: "t1",
@@ -1430,15 +1427,14 @@ describe("useSyncEvents", () => {
       vi.advanceTimersByTime(2100);
       const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
       expect(instance?.outputActive).toBe(false);
-      expect(instance?.lastExitCode).toBe(0);
+      expect(instance?.lastExitCode).toBeUndefined();
       const notifications = useNotificationStore.getState().notifications;
-      expect(notifications).toHaveLength(1);
-      expect(notifications[0].message).toBe("Codex task completed");
+      expect(notifications).toHaveLength(0);
 
       vi.useRealTimers();
     });
 
-    it("uses awaiting-input notification message for Codex approval prompts", () => {
+    it("does not turn an approval prompt into a success when output stops", () => {
       useTerminalStore.getState().registerInstance({
         id: "t1",
         profile: "PowerShell",
@@ -1457,9 +1453,7 @@ describe("useSyncEvents", () => {
       activityCb({ terminalId: "t1", active: false });
 
       const notifications = useNotificationStore.getState().notifications;
-      expect(notifications).toHaveLength(1);
-      expect(notifications[0].message).toBe("Codex is awaiting input");
-      expect(notifications[0].level).toBe("success");
+      expect(notifications).toHaveLength(0);
     });
   });
 });

@@ -16,6 +16,7 @@ export interface LastCommandInfo {
   exitCode: number | undefined; // undefined = still running
   timestamp: number;
   outputActive?: boolean; // true = terminal still producing output (e.g. subprocess running)
+  codexTurn?: TerminalInstance["codexTurn"];
   activityMessage?: string; // latest provider-specific activity status message
   activity?: TerminalActivityInfo;
   title?: string; // terminal title (used for Claude idle detection via ✳ prefix)
@@ -35,6 +36,7 @@ export interface TerminalSummaryInfo {
   lastUserInputAt: number | undefined;
   activity: TerminalActivityInfo | undefined;
   outputActive: boolean;
+  codexTurn?: TerminalInstance["codexTurn"];
   hasUnreadNotification: boolean;
   activityMessage: string | undefined;
 }
@@ -141,6 +143,7 @@ export function getLastCommandForWorkspace(terminals: TerminalInstance[]): LastC
     exitCode: t.lastExitCode,
     timestamp: t.lastCommandAt ?? t.lastActivityAt,
     outputActive: t.outputActive,
+    codexTurn: t.codexTurn,
     activityMessage: t.activityMessage,
     activity: t.activity,
     title: t.title,
@@ -195,6 +198,7 @@ export function computeWorkspaceSummary(
       lastUserInputAt: t.lastUserInputAt,
       activity: t.activity,
       outputActive: t.outputActive ?? false,
+      codexTurn: t.codexTurn,
       hasUnreadNotification: notifications.some((n) => n.terminalId === t.id && n.readAt === null),
       activityMessage: t.activityMessage,
     })),
@@ -466,10 +470,12 @@ export function computeCommandStatus(
   title?: string,
   statusMessageMode?: ActivityStatusMessageMode,
   statusMessageDelimiter?: string,
+  codexTurn?: TerminalInstance["codexTurn"],
 ): CommandStatus {
   const raw: RawTerminalState = {
     exitCode,
     outputActive: outputActive ?? false,
+    codexTurn,
     lastCommand: undefined,
     activityMessage,
     activity,
