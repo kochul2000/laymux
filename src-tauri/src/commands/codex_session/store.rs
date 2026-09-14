@@ -27,6 +27,7 @@ pub(super) struct CodexSessionStore {
 pub(super) struct ResolvedSession {
     pub id: String,
     pub fresh: bool,
+    pub selection_epoch: Option<i64>,
 }
 
 impl CodexSessionStore {
@@ -110,6 +111,7 @@ impl CodexSessionStore {
                     return Ok(Some(ResolvedSession {
                         id: thread_id,
                         fresh: false,
+                        selection_epoch: None,
                     }))
                 }
                 // Only a positively identified auxiliary thread can be skipped.
@@ -129,7 +131,13 @@ impl CodexSessionStore {
             return Ok(None);
         };
         match self.validate_session_checked(&id, age)? {
-            Some(true) => return Ok(Some(ResolvedSession { id, fresh: false })),
+            Some(true) => {
+                return Ok(Some(ResolvedSession {
+                    id,
+                    fresh: false,
+                    selection_epoch: Some(selection.epoch),
+                }))
+            }
             Some(false) => return Ok(None),
             None => {}
         }
@@ -144,7 +152,11 @@ impl CodexSessionStore {
             if paths.is_empty() {
                 // A state row with a missing rollout is an I/O error in validation,
                 // never fresh. Invalid/expired/auxiliary files also cannot get here.
-                return Ok(Some(ResolvedSession { id, fresh: true }));
+                return Ok(Some(ResolvedSession {
+                    id,
+                    fresh: true,
+                    selection_epoch: Some(selection.epoch),
+                }));
             }
         }
         Ok(None)
@@ -160,7 +172,16 @@ impl CodexSessionStore {
         if !is_valid_session_id(session_id) {
             return Ok(None);
         }
-        let cutoff = age_cutoff(max_age_hours);
+        let Some(path) = self.rollout_path_checked(session_id)? else {
+            return Ok(None);
+        };
+        parse_rollout_header_checked(&path, age_cutoff(max_age_hours), session_id)
+    }
+
+    pub(super) fn rollout_path_checked(&self, session_id: &str) -> Result<Option<PathBuf>, String> {
+        if !is_valid_session_id(session_id) {
+            return Ok(None);
+        }
         if let Some(state_db) = if self.guest {
             None
         } else {
@@ -168,10 +189,17 @@ impl CodexSessionStore {
         } {
             let state = open_read_only_checked(&state_db)?;
             if let Some(state_path) = find_rollout_path_checked(&state, session_id)? {
-                return parse_rollout_header_checked(&state_path, cutoff, session_id);
+                return Ok(Some(state_path));
             }
         }
-        find_rollout_by_session_id_checked(&self.sessions_dir(), session_id, cutoff)
+        let mut paths = Vec::new();
+        collect_rollout_paths_checked(
+            &self.sessions_dir(),
+            CODEX_SESSION_DIRECTORY_DEPTH,
+            session_id,
+            &mut paths,
+        )?;
+        Ok((paths.len() == 1).then(|| paths.remove(0)))
     }
 }
 
@@ -272,19 +300,6 @@ fn age_cutoff(max_age_hours: Option<u64>) -> Option<u128> {
                 )
             })
     })
-}
-
-fn find_rollout_by_session_id_checked(
-    dir: &Path,
-    session_id: &str,
-    cutoff: Option<u128>,
-) -> Result<Option<bool>, String> {
-    let mut paths = Vec::new();
-    collect_rollout_paths_checked(dir, CODEX_SESSION_DIRECTORY_DEPTH, session_id, &mut paths)?;
-    if let [path] = paths.as_slice() {
-        return parse_rollout_header_checked(path, cutoff, session_id);
-    }
-    Ok(None)
 }
 
 #[cfg(test)]

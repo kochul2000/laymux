@@ -1864,6 +1864,18 @@ export async function getCodexSessionIds(
   });
 }
 
+export interface CodexTurnSnapshot {
+  generation: number;
+  sessionId?: string;
+  selectionKey?: string;
+  turnId?: string;
+  state: "running" | "completed" | "failed" | "interrupted" | "idle" | "unknown";
+}
+
+export async function getCodexTurnStates(): Promise<Record<string, CodexTurnSnapshot>> {
+  return invoke("get_codex_turn_states");
+}
+
 export async function getGrokSessionIds(
   sessionMaxAgeHours?: number,
 ): Promise<Record<string, string | null>> {

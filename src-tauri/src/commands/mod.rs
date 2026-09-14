@@ -30,6 +30,7 @@ pub use android_pairing::*;
 pub use app_update::*;
 pub use archive_listing::*;
 pub use claude_session::*;
+pub use codex_session::turns::*;
 pub use codex_session::*;
 pub use codex_usage::*;
 pub use file_ops::*;
@@ -115,6 +116,10 @@ mod main_thread_io {
             &["get_claude_session_ids"],
         ),
         (include_str!("codex_session.rs"), &["get_codex_session_ids"]),
+        (
+            include_str!("codex_session/turns.rs"),
+            &["get_codex_turn_states"],
+        ),
         (include_str!("grok_session.rs"), &["get_grok_session_ids"]),
         (
             include_str!("codex_usage.rs"),

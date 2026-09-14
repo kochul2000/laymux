@@ -1,5 +1,6 @@
 mod lifecycle;
 mod store;
+pub(crate) mod turns;
 mod wsl;
 
 use std::collections::{HashMap, HashSet};
@@ -21,8 +22,8 @@ use self::store::CodexSessionStore;
 /// Resolve Codex CLI session IDs only when the owning pane can be proven.
 ///
 /// Native terminals use the PTY child tree and Codex diagnostics DB. Windows
-/// WSL terminals use the inherited pane marker and rollout FDs of the exact
-/// Linux process. CWD is deliberately not a fallback: panes commonly share it.
+/// WSL terminals use the inherited pane marker and process-scoped SQLite
+/// lifecycle rows inside the distro. CWD is deliberately not a fallback.
 #[tauri::command(async)]
 pub fn get_codex_session_ids(
     session_max_age_hours: Option<u64>,
@@ -49,6 +50,14 @@ pub(crate) fn get_codex_session_ids_impl(
 pub(crate) fn get_codex_session_lookup_impl(
     session_max_age_hours: Option<u64>,
     state: &AppState,
+) -> Result<ProviderSessionLookup, crate::error::AppError> {
+    lookup_with_observer(session_max_age_hours, state, |_, _, _| {})
+}
+
+fn lookup_with_observer(
+    session_max_age_hours: Option<u64>,
+    state: &AppState,
+    mut observe: impl FnMut(&str, &CodexSessionStore, &store::ResolvedSession),
 ) -> Result<ProviderSessionLookup, crate::error::AppError> {
     let known: Vec<String> = state
         .known_codex_terminals
@@ -92,6 +101,7 @@ pub(crate) fn get_codex_session_lookup_impl(
         rollout_absence.insert(terminal_id.clone(), false);
         match store.find_selection_for_pid_checked(*pid, session_max_age_hours) {
             Ok(Some(session)) => {
+                observe(terminal_id, &store, &session);
                 if session.fresh {
                     fresh_sessions.insert(terminal_id.clone(), session.id.clone());
                 }
@@ -131,8 +141,13 @@ pub(crate) fn get_codex_session_lookup_impl(
                                 let home = process
                                     .codex_home_dir()
                                     .ok_or_else(|| "invalid WSL Codex home".to_owned())?;
-                                CodexSessionStore::for_guest(home)
-                                    .resolve_selection(selection, session_max_age_hours)
+                                let store = CodexSessionStore::for_guest(home);
+                                let session =
+                                    store.resolve_selection(selection, session_max_age_hours)?;
+                                if let Some(session) = &session {
+                                    observe(&terminal_id, &store, session);
+                                }
+                                Ok(session)
                             });
                         match selection {
                             Ok(Some(session)) => {

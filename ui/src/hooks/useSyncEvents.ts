@@ -25,14 +25,11 @@ import {
   CLAUDE_INPUT_PENDING_MARKER,
   CODEX_INPUT_PENDING_MARKER,
   detectActivityFromCommand,
-  detectCodexConversationMessageFromOutput,
-  detectCodexStatusMessageFromOutput,
 } from "@/lib/activity-detection";
 import { getHandler, type RawTerminalState } from "@/lib/activity-handler";
 import { isStaleActivity } from "@/lib/activity-order";
 import { extractCodexTitleMessage } from "@/lib/codex-activity-handler";
-import { resolveWorkspaceId } from "@/lib/workspace-utils";
-import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
+import { subscribeCodexTurnStates } from "@/lib/codex-turn-subscription";
 import { useSettingsStore } from "@/stores/settings-store";
 
 const CWD_PERSIST_DEBOUNCE_MS = 2000;
@@ -42,75 +39,6 @@ export function useSyncEvents() {
   const cwdPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const outputActiveTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
-  const parseCodexSnapshotMessage = useCallback((terminalId: string): string | undefined => {
-    const snapshot = getTerminalSerializeMap().get(terminalId)?.();
-    if (!snapshot) return undefined;
-    return (
-      detectCodexConversationMessageFromOutput(snapshot) ??
-      detectCodexStatusMessageFromOutput(snapshot) ??
-      undefined
-    );
-  }, []);
-
-  const notifyInteractiveAppSuccessOnIdle = useCallback((terminalId: string, message: string) => {
-    const workspaceId = resolveWorkspaceId(terminalId);
-    useNotificationStore.getState().addNotification({
-      terminalId,
-      workspaceId,
-      message,
-      level: "success",
-    });
-    void persistSession({ reason: "completion" });
-
-    const { activeWorkspaceId } = useWorkspaceStore.getState();
-    const ideFocused = document.hasFocus();
-    if (!ideFocused || activeWorkspaceId !== workspaceId) {
-      sendDesktopNotification("Laymux", message);
-    }
-  }, []);
-
-  const markInteractiveAppSuccessOnIdle = useCallback(
-    (terminalId: string) => {
-      const instance = useTerminalStore.getState().instances.find((i) => i.id === terminalId);
-      if (
-        !instance?.outputActive ||
-        instance.activity?.type !== "interactiveApp" ||
-        instance.activity.name !== "Codex"
-      ) {
-        return;
-      }
-
-      // Volume-armed activity is not evidence of a task boundary (ADR-0147).
-      // Codex spilling a large tool output (a diff, a log) trips the volume
-      // detector; if the model then thinks quietly for 2s the timer expires and
-      // this would fire "Codex task completed" plus a synthetic exitCode=0
-      // mid-task. The frame path is the one that means "the app redrew its own
-      // UI", which is what a working→idle transition is derived from. Claude is
-      // covered instead by its declared-idle ✳ title outranking outputActive.
-      if (instance.outputActiveSource === "volume") {
-        return;
-      }
-
-      const message =
-        instance.activityMessage === CODEX_INPUT_PENDING_MARKER
-          ? "Codex is awaiting input"
-          : "Codex task completed";
-
-      const snapshotMessage =
-        instance.activityMessage === CODEX_INPUT_PENDING_MARKER
-          ? undefined
-          : parseCodexSnapshotMessage(terminalId);
-
-      useTerminalStore.getState().updateInstanceInfo(terminalId, {
-        lastExitCode: 0,
-        lastCommandAt: Date.now(),
-        activityMessage: snapshotMessage ?? instance.activityMessage,
-      });
-      notifyInteractiveAppSuccessOnIdle(terminalId, message);
-    },
-    [notifyInteractiveAppSuccessOnIdle, parseCodexSnapshotMessage],
-  );
-
   const debouncedPersistCwd = useCallback(() => {
     if (cwdPersistTimerRef.current) clearTimeout(cwdPersistTimerRef.current);
     cwdPersistTimerRef.current = setTimeout(() => {
@@ -118,39 +46,31 @@ export function useSyncEvents() {
     }, CWD_PERSIST_DEBOUNCE_MS);
   }, []);
 
-  const resetOutputActiveSoon = useCallback(
-    (terminalId: string) => {
-      const prev = outputActiveTimers.current.get(terminalId);
-      if (prev) clearTimeout(prev);
-      outputActiveTimers.current.set(
-        terminalId,
-        setTimeout(() => {
-          markInteractiveAppSuccessOnIdle(terminalId);
-          useTerminalStore.getState().updateInstanceInfo(terminalId, {
-            outputActive: false,
-            outputActiveSource: undefined,
-          });
-          outputActiveTimers.current.delete(terminalId);
-        }, OUTPUT_ACTIVE_RESET_MS),
-      );
-    },
-    [markInteractiveAppSuccessOnIdle],
-  );
-
-  const clearOutputActive = useCallback(
-    (terminalId: string) => {
-      markInteractiveAppSuccessOnIdle(terminalId);
-      useTerminalStore
-        .getState()
-        .updateInstanceInfo(terminalId, { outputActive: false, outputActiveSource: undefined });
-      const timer = outputActiveTimers.current.get(terminalId);
-      if (timer) {
-        clearTimeout(timer);
+  const resetOutputActiveSoon = useCallback((terminalId: string) => {
+    const prev = outputActiveTimers.current.get(terminalId);
+    if (prev) clearTimeout(prev);
+    outputActiveTimers.current.set(
+      terminalId,
+      setTimeout(() => {
+        useTerminalStore.getState().updateInstanceInfo(terminalId, {
+          outputActive: false,
+          outputActiveSource: undefined,
+        });
         outputActiveTimers.current.delete(terminalId);
-      }
-    },
-    [markInteractiveAppSuccessOnIdle],
-  );
+      }, OUTPUT_ACTIVE_RESET_MS),
+    );
+  }, []);
+
+  const clearOutputActive = useCallback((terminalId: string) => {
+    useTerminalStore
+      .getState()
+      .updateInstanceInfo(terminalId, { outputActive: false, outputActiveSource: undefined });
+    const timer = outputActiveTimers.current.get(terminalId);
+    if (timer) {
+      clearTimeout(timer);
+      outputActiveTimers.current.delete(terminalId);
+    }
+  }, []);
 
   const markOutputActive = useCallback(
     (terminalId: string, source?: TerminalOutputActivitySource) => {
@@ -163,6 +83,7 @@ export function useSyncEvents() {
   );
 
   useEffect(() => {
+    const unsubscribeCodexTurns = subscribeCodexTurnStates();
     let cancelled = false;
     const unlisteners: (() => void)[] = [];
     // Capture the Map itself so cleanup drains the same instance this effect
@@ -547,6 +468,7 @@ export function useSyncEvents() {
 
     return () => {
       cancelled = true;
+      unsubscribeCodexTurns();
       unsubStore();
       if (initialSyncUnsub) initialSyncUnsub();
       if (cwdPersistTimerRef.current) clearTimeout(cwdPersistTimerRef.current);

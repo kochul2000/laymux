@@ -2102,6 +2102,8 @@ if (matchesKeybinding(e, "issueReporter.submit")) { handleSubmit(); }
 
 각 앱 activity 타입별로 **ActivityHandler** 클래스를 구현하여 notification, status, statusMessage 계산과 단일 pane 실제 클리어 입력·busy 판정을 분기한다. 원시 상태는 공통으로 저장하고, activity 타입에 따라 해당 핸들러가 최종 표시와 안전한 쓰기 계약을 도출한다. 워크스페이스 화면 클리어는 이 계약을 사용하지 않고 Ctrl+L만 브로드캐스트한다([ADR-0137](../adr/0137-workspace-clear-ctrl-l-broadcast.md), [ADR-0158](../adr/0158-activity-aware-single-pane-clear.md)).
 
+Codex의 `get_codex_turn_states` Tauri command는 인자 없이 현재 알려진 Codex pane의 `Record<terminalId, { generation, sessionId?, selectionKey?, turnId?, state }>`를 반환한다([ADR-0248](../adr/0248-codex-turn-lifecycle-activity.md)). `state`는 `running | completed | failed | interrupted | idle | unknown`이다. `selectionKey`는 프로세스별 TUI 대화 선택 로그의 식별자로, 호출자가 구성하거나 다른 프로세스/세션에 재사용하지 않는다. 정확한 귀속과 읽기에 실패하면 unknown이며 성공·중단으로 합성하지 않는다. 파일 경로와 transcript 본문은 응답에 포함하지 않는다. 명령은 blocking I/O를 Tauri threadpool에서 실행하고 조회 전후 PTY generation을 검증한다. frontend의 메모리 전용 `codexTurn`과 공통 `outputActive`는 분리되며, Automation `terminals.list`의 기존 instance 확장 필드와 `selectorStatus`에도 같은 상태가 노출된다. 별도 REST 제어 endpoint나 Codex 설정 변경은 추가하지 않는다.
+
 #### ActivityHandler 인터페이스
 
 ```typescript

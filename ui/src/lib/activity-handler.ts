@@ -18,6 +18,7 @@ export type ActivityStatusMessageMode = "bullet" | "title" | "title-bullet" | "b
 export interface RawTerminalState {
   exitCode: number | undefined;
   outputActive: boolean;
+  codexTurn?: import("@/lib/tauri-api").CodexTurnSnapshot;
   lastCommand: string | undefined;
   activityMessage: string | undefined;
   activity: TerminalActivityInfo | undefined;

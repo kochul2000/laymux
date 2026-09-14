@@ -283,6 +283,7 @@ pub fn run() {
             commands::is_grok_terminal,
             commands::get_claude_session_ids,
             commands::get_codex_session_ids,
+            commands::get_codex_turn_states,
             commands::get_grok_session_ids,
             commands::get_terminal_session_attributions,
             commands::get_sync_group_terminals,

@@ -395,6 +395,7 @@ function selectorStatusForTerminal(
     terminal.title,
     display.mode,
     display.delimiter,
+    terminal.codexTurn,
   );
 }
 
@@ -439,6 +440,7 @@ function selectorSummaryForWorkspace(workspace: Workspace) {
         lastCommand.title,
         display.mode,
         display.delimiter,
+        lastCommand.codexTurn,
       ),
     };
   }

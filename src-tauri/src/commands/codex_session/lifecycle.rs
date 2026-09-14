@@ -15,6 +15,7 @@ pub(super) struct LogRow {
 pub(super) struct Selection {
     pub id: Option<String>,
     pub can_be_fresh: bool,
+    pub epoch: i64,
 }
 
 /// Input must be ordered by log id and scoped to one process incarnation.
@@ -30,6 +31,7 @@ pub(super) fn select(rows: &[LogRow]) -> Option<Selection> {
             return Some(Selection {
                 id: None,
                 can_be_fresh: false,
+                epoch: row.id,
             });
         }
         previous_id = Some(row.id);
@@ -62,6 +64,7 @@ pub(super) fn select(rows: &[LogRow]) -> Option<Selection> {
             selected = Some(Selection {
                 id: None,
                 can_be_fresh: start,
+                epoch: row.id,
             });
         }
         if current_request != request {
@@ -124,7 +127,8 @@ mod tests {
             select(&[row(1, "1", "start", "new-id")]),
             Some(Selection {
                 id: Some("new-id".into()),
-                can_be_fresh: true
+                can_be_fresh: true,
+                epoch: 1
             })
         );
         assert!(

@@ -424,6 +424,7 @@ function WorkspaceItem({
                               ts.title,
                               paneStatusSettings.mode,
                               paneStatusSettings.delimiter,
+                              ts.codexTurn,
                             )
                           : null;
                       const actInfo = formatActivity(ts.activity);
