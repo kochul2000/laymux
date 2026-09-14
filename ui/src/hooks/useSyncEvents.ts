@@ -119,13 +119,13 @@ export function useSyncEvents() {
   }, []);
 
   const resetOutputActiveSoon = useCallback(
-    (terminalId: string, inferCompletion = true) => {
+    (terminalId: string) => {
       const prev = outputActiveTimers.current.get(terminalId);
       if (prev) clearTimeout(prev);
       outputActiveTimers.current.set(
         terminalId,
         setTimeout(() => {
-          if (inferCompletion) markInteractiveAppSuccessOnIdle(terminalId);
+          markInteractiveAppSuccessOnIdle(terminalId);
           useTerminalStore.getState().updateInstanceInfo(terminalId, {
             outputActive: false,
             outputActiveSource: undefined,
@@ -164,8 +164,6 @@ export function useSyncEvents() {
 
   useEffect(() => {
     let cancelled = false;
-    // ADR-0248: only trust title lifecycle after observing Codex's own spinner.
-    const codexTitleTerminals = new Set<string>();
     const unlisteners: (() => void)[] = [];
     // Capture the Map itself so cleanup drains the same instance this effect
     // populated. `useRef(new Map())` is never reassigned, so this is the live
@@ -229,7 +227,6 @@ export function useSyncEvents() {
     trackListener(
       onTerminalOutputActivity((data) => {
         if (cancelled) return;
-        if (codexTitleTerminals.has(data.terminalId)) return;
         if (data.active === false) {
           clearOutputActive(data.terminalId);
           return;
@@ -300,24 +297,8 @@ export function useSyncEvents() {
 
         updateInstanceInfo(data.terminalId, updates as Parameters<typeof updateInstanceInfo>[1]);
 
-        const activeTitle = getHandler(resolvedActivity).isActiveTitle?.(data.title);
-        if (codexActivity && activeTitle) {
-          codexTitleTerminals.add(data.terminalId);
-        } else if (!data.title || data.title.includes("OpenAI Codex")) {
-          if (codexTitleTerminals.delete(data.terminalId)) {
-            resetOutputActiveSoon(data.terminalId, false);
-          }
-        }
-
-        if (activeTitle) {
+        if (handler.isActiveTitle?.(data.title)) {
           markOutputActive(data.terminalId);
-          if (codexTitleTerminals.has(data.terminalId)) {
-            const timer = pendingOutputActiveTimers.get(data.terminalId);
-            if (timer) clearTimeout(timer);
-            pendingOutputActiveTimers.delete(data.terminalId);
-          }
-        } else if (codexTitleTerminals.has(data.terminalId)) {
-          clearOutputActive(data.terminalId);
         }
       }),
     );
@@ -553,13 +534,6 @@ export function useSyncEvents() {
       .catch(() => {});
 
     const unsubStore = useTerminalStore.subscribe((state, prevState) => {
-      for (const id of codexTitleTerminals) {
-        const activity = state.instances.find((instance) => instance.id === id)?.activity;
-        if (activity?.type !== "interactiveApp" || activity.name !== "Codex") {
-          codexTitleTerminals.delete(id);
-          if (activity) resetOutputActiveSoon(id, false);
-        }
-      }
       if (state.instances.length < prevState.instances.length) {
         const currentIds = new Set(state.instances.map((i) => i.id));
         for (const [id, timer] of outputActiveTimers.current) {
@@ -584,5 +558,5 @@ export function useSyncEvents() {
         unlisten();
       }
     };
-  }, [clearOutputActive, debouncedPersistCwd, markOutputActive, resetOutputActiveSoon]);
+  }, [clearOutputActive, debouncedPersistCwd, markOutputActive]);
 }

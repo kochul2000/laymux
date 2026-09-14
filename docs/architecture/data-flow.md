@@ -1061,14 +1061,6 @@ Claude Code 가 세션 리미트에 걸리면 스크롤백에 `⎿  You've hit y
 
 타이머 발화 시 설정된 복귀 문구(기본 `"go on"`)를 PTY 에 쓰고, **150ms 후 단독 `\r`(CR)** 로 제출한다 — Claude Code TUI 에서 `\n` 은 줄바꿈만 발생하기 때문. 중복 발화 방지는 두 가지: 같은 reset 시각 키(`"13:50|Asia/Seoul"`)로 타이머가 이미 pending 이면 skip, 발화 직후 버퍼에 남은 배너 잔여물이 다음 날 타이머를 재예약하지 않도록 같은 키는 6시간 동안 재무장 금지. 예약/발화 시 각각 notification 을 발행한다. 설정은 `claude.sessionLimitAutoResume`/`sessionLimitResumeDelaySeconds`/`sessionLimitResumeMessage`([api-contracts.md](./api-contracts.md) Claude Code 설정).
 
-### Codex의 관측된 타이틀 작업 경계
-
-[ADR-0248](../adr/0248-codex-observed-title-activity.md): `useSyncEvents`는 현재 Codex activity에서 실제 Braille 스피너 타이틀을 본 terminal ID를 hook 수명 동안 기억한다. 이후 작업 타이틀은 기존 `outputActive`를 켜고 추론 타이머를 취소하며, 비어 있지 않은 비스피너 타이틀은 기존 완료·알림 경로를 한 번 실행하고 끈다. 해당 세션의 frame/volume 이벤트는 이 판정을 덮지 않는다. Astra의 150ms 유휴 반짝이가 완료 뒤에도 프레임을 계속 내기 때문이다.
-
-빈 타이틀·시작 배너, Codex activity 종료·terminal 제거 시 관측 자격을 해제한다. 타이틀 신호를 아직 확인하지 않은 세션과 WebView 리로드 직후는 아래 출력 추론을 유지한다. 이 자격은 새로운 표시 상태나 영속 필드가 아니며 프로세스 생존은 기존 Rust 판정을 따른다.
-
-2026-09-14 dev(19281)에서 WSL Codex 0.154.0/Astra의 반짝이를 켜고 확인했다. 수정 전 유휴 타이틀에서도 12초 연속 `outputActiveSource=frame`/`⏳`였고, 수정 후 두 번의 연속 응답 모두 작업 중 `⏳`에서 완료 `✓`로 바뀌며 composer 반짝이를 유지했다. dev 초기 팔레트 조회 지연은 재현 도구의 OSC 10/11 응답으로 통제했다. Windows는 반짝이가 비활성인 짧은 응답만 비교했으며, 반짝이가 활성인 Windows 실기는 미검증이다.
-
 ### outputActive 감지 (워크스페이스 상태 관리 원칙)
 
 `outputActive`는 ⏳ 아이콘을 결정하는 프론트엔드 전용 상태다. **네 가지 독립된 감지 경로**가 있으며, 백엔드에서 직접 `outputActive`를 계산하지 않는다.
