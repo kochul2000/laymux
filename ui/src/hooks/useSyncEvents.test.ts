@@ -1281,6 +1281,80 @@ describe("useSyncEvents", () => {
       expect(getInst()?.lastExitCode).toBe(0);
     });
 
+    it("uses observed Codex title transitions despite continuous Astra frame bursts", () => {
+      vi.useFakeTimers();
+      useTerminalStore.getState().registerInstance({
+        id: "t1",
+        profile: "WSL",
+        syncGroup: "g1",
+        workspaceId: "ws-1",
+      });
+      useTerminalStore.getState().updateInstanceInfo("t1", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+      renderHook(() => useSyncEvents());
+      const title = mockOnTerminalTitleChanged.mock.calls[0][0];
+      const output = mockOnTerminalOutputActivity.mock.calls[0][0];
+      const instance = () => useTerminalStore.getState().instances.find((i) => i.id === "t1");
+
+      title({ terminalId: "t1", title: "⠋ Reply DONE | kochul" });
+      act(() => vi.advanceTimersByTime(3000));
+      expect(instance()?.outputActive).toBe(true);
+      expect(useNotificationStore.getState().notifications).toHaveLength(0);
+
+      title({ terminalId: "t1", title: "Reply DONE | kochul" });
+      for (let i = 0; i < 12; i++) {
+        output({ terminalId: "t1", source: "frame" });
+        act(() => vi.advanceTimersByTime(1000));
+        expect(instance()?.outputActive).toBe(false);
+      }
+      output({ terminalId: "t1", source: "volume" });
+      expect(instance()?.outputActive).toBe(false);
+      expect(instance()?.lastExitCode).toBe(0);
+      expect(useNotificationStore.getState().notifications).toHaveLength(1);
+
+      title({ terminalId: "t1", title: "⠙ Second task | kochul" });
+      expect(instance()?.outputActive).toBe(true);
+      title({ terminalId: "t1", title: "Second task | kochul" });
+      expect(instance()?.outputActive).toBe(false);
+      expect(useNotificationStore.getState().notifications).toHaveLength(2);
+
+      useTerminalStore.getState().updateInstanceInfo("t1", { activity: { type: "shell" } });
+      useTerminalStore.getState().updateInstanceInfo("t1", {
+        activity: { type: "interactiveApp", name: "Codex" },
+        title: "custom static title",
+      });
+      output({ terminalId: "t1", source: "frame" });
+      expect(instance()?.outputActive).toBe(true);
+      vi.useRealTimers();
+    });
+
+    it.each(["", "OpenAI Codex"])(
+      "falls back without false completion when Codex loses its title signal: %s",
+      (resetTitle) => {
+        vi.useFakeTimers();
+        useTerminalStore.getState().registerInstance({
+          id: "t1",
+          profile: "PowerShell",
+          syncGroup: "g1",
+          workspaceId: "ws-1",
+        });
+        useTerminalStore.getState().updateInstanceInfo("t1", {
+          activity: { type: "interactiveApp", name: "Codex" },
+        });
+        renderHook(() => useSyncEvents());
+        const title = mockOnTerminalTitleChanged.mock.calls[0][0];
+        title({ terminalId: "t1", title: "⠋ kochul" });
+        title({ terminalId: "t1", title: resetTitle });
+        act(() => vi.advanceTimersByTime(3000));
+        expect(useTerminalStore.getState().instances[0].outputActive).toBe(false);
+        expect(useNotificationStore.getState().notifications).toHaveLength(0);
+        mockOnTerminalOutputActivity.mock.calls[0][0]({ terminalId: "t1", source: "frame" });
+        expect(useTerminalStore.getState().instances[0].outputActive).toBe(true);
+        vi.useRealTimers();
+      },
+    );
+
     it("marks Codex success when outputActive transitions to false", () => {
       useTerminalStore.getState().registerInstance({
         id: "t1",
