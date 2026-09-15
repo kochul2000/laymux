@@ -32,7 +32,8 @@ try {
     const workspaceId = `repro-unvisited-${suffix}`;
     const paneId = `repro-unvisited-pane-${suffix}`;
     const id = `terminal-${paneId}`;
-    const command = `python3 ${fixturePath}`;
+    const codexHome = `/tmp/laymux-unvisited-attribution-${suffix}`;
+    const command = `CODEX_HOME=${codexHome} CODEX_SQLITE_HOME=${codexHome} python3 ${fixturePath}`;
     settings.setState({ codex: { ...settings.getState().codex, command } });
     ws.setState({
       workspaces: [

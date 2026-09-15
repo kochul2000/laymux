@@ -1,5 +1,7 @@
 # Codex 공용 로그 정리 뒤 업데이트 귀속 실패
 
+후속 조합·반복·다중 pane·장애·재시작 검증과 추가 수정은 [조합 검증 보고서](codex-attribution-matrix-repro.md)에 기록했다.
+
 2026-09-15, base `f56f88f1`, Laymux dev 19281, 실제 Windows·WSL Codex 0.154.0.
 
 ## 원본 pane에서 확인한 증거

@@ -85,6 +85,85 @@ mod tests {
     use super::*;
 
     #[test]
+    fn retention_and_fault_matrix() {
+        let mut checks = 0;
+        for _ in 0..5 {
+            for journal in ["DELETE", "WAL"] {
+                for retention in [
+                    "0",
+                    "id=2",
+                    "id IN (2,5)",
+                    "thread_id IS NULL",
+                    "thread_id IS NULL AND id<10",
+                ] {
+                    let root = tempfile::tempdir().unwrap();
+                    let process = root.path().join("42");
+                    std::fs::create_dir(&process).unwrap();
+                    let environ = format!(
+                        "LX_TERMINAL_ID=matrix\0CODEX_SQLITE_HOME={}\0",
+                        root.path().display()
+                    );
+                    std::fs::write(process.join("environ"), &environ).unwrap();
+                    std::fs::write(process.join("comm"), "codex\n").unwrap();
+                    let db = Connection::open(root.path().join("logs_2.sqlite")).unwrap();
+                    db.pragma_update(None, "journal_mode", journal).unwrap();
+                    db.execute_batch("CREATE TABLE logs(id INTEGER PRIMARY KEY,thread_id TEXT,process_uuid TEXT,feedback_log_body TEXT);
+                        CREATE INDEX idx_logs_process_uuid_threadless_ts ON logs(process_uuid) WHERE thread_id IS NULL;
+                        INSERT INTO logs VALUES(1,NULL,'pid:42:old','old process');
+                        INSERT INTO logs VALUES(2,NULL,'pid:42:new','startup');
+                        INSERT INTO logs VALUES(3,'a','pid:42:new','app_server.request{rpc.method=\"thread/start\"}');
+                        INSERT INTO logs VALUES(4,'other','pid:43:other','session_loop{');
+                        INSERT INTO logs VALUES(5,NULL,'pid:42:new','middle');
+                        INSERT INTO logs VALUES(6,'b','pid:42:new','app_server.request{rpc.method=\"thread/start\"}');
+                        INSERT INTO logs VALUES(7,'b','pid:42:new','session_loop{');
+                        INSERT INTO logs VALUES(8,'a','pid:42:new','app_server.request{rpc.method=\"thread/resume\"}');
+                        INSERT INTO logs VALUES(9,'b','pid:42:new','quoted app_server.request{rpc.method=\"thread/start\"}');
+                        INSERT INTO logs VALUES(10,NULL,'pid:42:new','late');").unwrap();
+                    let expected = probe(root.path(), 42, "matrix").unwrap();
+                    assert_eq!(
+                        expected
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .map(|r| r["id"].as_i64().unwrap())
+                            .collect::<Vec<_>>(),
+                        [3, 6, 7, 8]
+                    );
+                    db.execute(
+                        &format!(
+                            "DELETE FROM logs WHERE process_uuid='pid:42:new' AND ({retention})"
+                        ),
+                        [],
+                    )
+                    .unwrap();
+                    assert_eq!(probe(root.path(), 42, "matrix").unwrap(), expected);
+                    for invalid in ["", "other-pane"] {
+                        assert!(probe(root.path(), 42, invalid).is_err());
+                    }
+                    std::fs::write(process.join("comm"), "sh\n").unwrap();
+                    assert!(probe(root.path(), 42, "matrix").is_err());
+                    std::fs::write(process.join("comm"), "codex\n").unwrap();
+                    let corrupt = root.path().join("logs_99.sqlite");
+                    std::fs::write(&corrupt, "corrupt").unwrap();
+                    assert!(probe(root.path(), 42, "matrix").is_err());
+                    std::fs::remove_file(corrupt).unwrap();
+                    assert_eq!(probe(root.path(), 42, "matrix").unwrap(), expected);
+                    if journal == "DELETE" {
+                        db.execute_batch("BEGIN EXCLUSIVE").unwrap();
+                        assert!(probe(root.path(), 42, "matrix").is_err());
+                        db.execute_batch("ROLLBACK").unwrap();
+                        assert_eq!(probe(root.path(), 42, "matrix").unwrap(), expected);
+                    }
+                    db.execute("DELETE FROM logs", []).unwrap();
+                    assert!(probe(root.path(), 42, "matrix").is_err());
+                    checks += 1;
+                }
+            }
+        }
+        assert_eq!(checks, 50);
+    }
+
+    #[test]
     fn reads_live_wal_without_runtime_and_rejects_wrong_pane() {
         let root = tempfile::tempdir().unwrap();
         let process = root.path().join("42");

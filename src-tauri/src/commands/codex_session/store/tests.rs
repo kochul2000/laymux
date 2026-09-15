@@ -1,5 +1,7 @@
 use super::*;
 
+mod retention_matrix;
+
 const SESSION_A: &str = "019fc0d8-a862-7241-a0f5-b6a66ef4ef6f";
 const SESSION_B: &str = "019fc114-970b-7933-a31b-bbd53883b57e";
 

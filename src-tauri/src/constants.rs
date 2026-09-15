@@ -113,6 +113,8 @@ pub const CODEX_SQLITE_STATE_PREFIX: &str = "state_";
 pub const CODEX_SQLITE_BUSY_TIMEOUT: u64 = 100;
 /// Upper bound for each Windows→WSL metadata probe used during session save.
 pub const WSL_AGENT_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+/// Bound per-pane Codex helper launches within the shared WSL deadline.
+pub const WSL_CODEX_PROBE_CONCURRENCY: usize = 4;
 
 pub const TERM_PROGRAM_LAYMUX: &str = "laymux";
 pub const COLORTERM_TRUECOLOR: &str = "truecolor";
