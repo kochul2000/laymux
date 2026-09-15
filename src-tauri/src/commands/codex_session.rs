@@ -121,6 +121,7 @@ fn lookup_with_observer(
     let mut result = crate::process_tree::complete_agent_session_attributions(&known, exact);
     match resolve_wsl_agent_processes(state, WslAgentProvider::Codex) {
         Ok(lookup) => {
+            let mut process_rows = wsl::read_rows_batch(&lookup.attributions, deadline);
             failed_terminal_ids.extend(lookup.failed_terminal_ids);
             for (terminal_id, process) in lookup.attributions {
                 rollout_absence.insert(
@@ -131,9 +132,9 @@ fn lookup_with_observer(
                 );
                 let session_id = match process {
                     Some(process) => {
-                        let selection = crate::wsl_probe::remaining_timeout(deadline)
-                            .ok_or_else(|| "Codex WSL deadline expired".to_owned())
-                            .and_then(|timeout| wsl::read_rows(&process, &terminal_id, timeout))
+                        let selection = process_rows
+                            .remove(&terminal_id)
+                            .unwrap_or_else(|| Err("WSL Codex diagnostics missing".into()))
                             .and_then(|rows| {
                                 let Some(selection) = lifecycle::select(&rows) else {
                                     return Ok(None);

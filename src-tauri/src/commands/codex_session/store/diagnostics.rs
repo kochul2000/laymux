@@ -5,11 +5,14 @@ pub(super) fn find_process_uuid_checked(
     pid: u32,
 ) -> Result<Option<(String, i64)>, String> {
     let pattern = format!("pid:{pid}:*");
+    // Threadless logs can be pruned before thread-bound startup/turn logs.
+    // Both incarnation selection and its lower bound must include retained
+    // thread rows, or an active conversation disappears from every lookup.
     let process_uuid: Option<String> = connection
         .query_row(
             "SELECT process_uuid
-             FROM logs INDEXED BY idx_logs_process_uuid_threadless_ts
-             WHERE thread_id IS NULL AND process_uuid GLOB ?1
+             FROM logs NOT INDEXED
+             WHERE process_uuid GLOB ?1
              ORDER BY id DESC
              LIMIT 1",
             [&pattern],
@@ -23,8 +26,8 @@ pub(super) fn find_process_uuid_checked(
     let first_log_id = connection
         .query_row(
             "SELECT MIN(id)
-             FROM logs INDEXED BY idx_logs_process_uuid_threadless_ts
-             WHERE thread_id IS NULL AND process_uuid = ?1
+             FROM logs NOT INDEXED
+             WHERE process_uuid = ?1
              LIMIT 1",
             [&process_uuid],
             |row| row.get(0),
