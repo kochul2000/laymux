@@ -47,12 +47,16 @@ fn probe(
     let mut db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     db.busy_timeout(std::time::Duration::from_millis(200))?;
     let tx = db.transaction()?;
+    // Threadless retention is independent of per-thread retention. It cannot
+    // identify the latest incarnation or bound that incarnation's first log.
     let identity: String = tx.query_row(
-        "SELECT process_uuid FROM logs INDEXED BY idx_logs_process_uuid_threadless_ts WHERE thread_id IS NULL AND process_uuid GLOB ?1 ORDER BY id DESC LIMIT 1",
+        "SELECT process_uuid FROM logs NOT INDEXED WHERE process_uuid GLOB ?1 ORDER BY id DESC LIMIT 1",
         [format!("pid:{pid}:*")], |r| r.get(0))?;
     let first: i64 = tx.query_row(
-        "SELECT MIN(id) FROM logs INDEXED BY idx_logs_process_uuid_threadless_ts WHERE thread_id IS NULL AND process_uuid=?1",
-        [&identity], |r| r.get(0))?;
+        "SELECT MIN(id) FROM logs NOT INDEXED WHERE process_uuid=?1",
+        [&identity],
+        |r| r.get(0),
+    )?;
     let mut statement = tx.prepare("SELECT id,thread_id,substr(feedback_log_body,1,2048) FROM logs WHERE id>=?1 AND process_uuid=?2 AND (feedback_log_body LIKE 'app_server.request{%rpc.method=\"thread/%' OR feedback_log_body LIKE 'session_loop{%') ORDER BY id")?;
     let rows = statement.query_map(rusqlite::params![first, identity], |row| {
         Ok(serde_json::json!({"id": row.get::<_, i64>(0)?, "thread_id": row.get::<_, Option<String>>(1)?, "feedback_log_body": row.get::<_, String>(2)?}))
@@ -100,12 +104,18 @@ mod tests {
             CREATE INDEX idx_logs_process_uuid_threadless_ts ON logs(process_uuid) WHERE thread_id IS NULL;
             INSERT INTO logs VALUES(1,NULL,'pid:42:old','start');
             INSERT INTO logs VALUES(2,NULL,'pid:42:new','start');
-            INSERT INTO logs VALUES(3,NULL,'pid:42:new','app_server.request{rpc.method=\"thread/start\"}');
+            INSERT INTO logs VALUES(3,'current','pid:42:new','app_server.request{rpc.method=\"thread/start\"}');
             INSERT INTO logs VALUES(4,'other','pid:43:new','session_loop{');
-            INSERT INTO logs VALUES(5,'old','pid:42:old','session_loop{');").unwrap();
+            INSERT INTO logs VALUES(5,'old','pid:42:old','session_loop{');
+            INSERT INTO logs VALUES(6,NULL,'pid:42:new','later threadless log');
+            INSERT INTO logs VALUES(7,'current','pid:42:new','current thread log');").unwrap();
         let rows = probe(root.path(), 42, "pane").unwrap();
         assert_eq!(rows.as_array().unwrap().len(), 1);
         assert_eq!(rows[0]["id"], 3);
+        for id in [2, 6] {
+            db.execute("DELETE FROM logs WHERE id=?1", [id]).unwrap();
+            assert_eq!(probe(root.path(), 42, "pane").unwrap(), rows);
+        }
         assert!(probe(root.path(), 42, "wrong").is_err());
         std::fs::write(process.join("comm"), "sh\n").unwrap();
         assert!(probe(root.path(), 42, "pane").is_err());

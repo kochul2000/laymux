@@ -1472,6 +1472,8 @@ Windows 빌드 전에 Linux/WSL에서 `bash scripts/build-wsl-probe.sh`를 실�
 
 레거시 native Codex 후보는 정확한 rollout header 또는 같은 process UUID의 temporary-structured 진단으로 보조 스레드임이 증명된 경우만 건너뛴다. 새 후보의 rollout 누락·만료·손상·경로 중복은 이전 대화로 fallback하지 않는다. lifecycle 선택 경로에서는 늦게 도착한 이전 요청의 로그가 현재 선택을 되돌리지 않도록 요청별 첫 관측 순서를 사용한다. 일반 메시지에 인용된 span과 teardown 로그는 선택 완료 증거가 아니다.
 
+native·WSL 모두 현재 PID의 최신 process UUID와 그 UUID의 첫 로그 ID를 `thread_id` 유무와 무관하게 남아 있는 전체 행에서 구한다. threadless 로그만의 부분 인덱스는 사용하지 않는다. 공용 로그가 먼저 정리되면 그 최소 ID가 보존된 thread/start·thread/resume보다 뒤로 이동하거나 현재 UUID 자체가 조회에서 빠지므로, 이를 시작 경계로 삼으면 정상 대화가 `ActiveButUnidentified`로 잘못 분류된다. 이후 lifecycle·레거시 후보 조회는 계속 선택된 정확한 process UUID로 제한한다.
+
 실행 중 미식별 상태의 예외는 WSL Codex의 **정확한 process 선택 + rollout FD 부재**를 provider adapter가 관측 map으로 전달한 경우로 제한한다. map 값 `true`는 해당 증거, `false`는 관측됐지만 예외 대상이 아닌 후보(native·모호·FD 존재), key 부재는 아직 후보를 관측하지 못했음을 뜻한다. provider probe 뒤의 fresh liveness에서 처음 Codex가 보이면 `Unknown`으로 남기고 기존 복원점을 소비하지 않는다. 일반 session ID `None`(후보 검증 실패·중복·모호한 PID 포함) 자체는 예외의 증거가 아니며, native/다른 provider에는 FD 부재 증거를 합성하지 않는다. 최종 snapshot에서 pending provider/ID가 다른 pending 또는 정확한 귀속과 중복되면 pending만 거부하고 소비한다.
 
 [ADR-0232](../adr/0232-unconsumed-resume-checkpoint.md)는 위 startup grace와 아래 critical 허용 판정을 확장한다. Rust가 검증한 명시적 resume 요청은 PTY handle에 generation-local로 보관한다. 첫 비프로토콜 입력 enqueue 또는 정확한 귀속/다른 provider/복수 provider 관측 전까지, 건강한 `NoAgent`나 동일 provider의 `ActiveButUnidentified`를 `RestorePending(provider, sessionId)`로 반환한다. 프론트는 이 요청 ID를 저장하고 이중 안정 관측에서도 허용한다. 방문 여부나 15초 경과로 소비하지 않으며, protocol reply와 resize도 소비하지 않는다. 일반 입력(Local·Remote·Automation·MCP·sync CWD)은 공통 PTY FIFO 진입 전에 소비한다. 조회 실패·generation 교체·신규 CLI·profile startup·viewer에는 예외를 적용하지 않는다. 따라서 저장된 ID만으로 실행 중인 임의 세션의 업데이트를 허용하지 않는다.

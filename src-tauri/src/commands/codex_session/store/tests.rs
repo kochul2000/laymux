@@ -56,6 +56,36 @@ fn proven_new_thread_without_rollout_is_fresh() {
 }
 
 #[test]
+fn retained_thread_logs_survive_threadless_pruning() {
+    let temp = tempfile::tempdir().unwrap();
+    let logs = create_logs_db(temp.path());
+    // An older incarnation of the same PID must never become the fallback.
+    insert_log(&logs, 1, "pid:101:old", None);
+    insert_log(&logs, 2, "pid:101:current", Some(SESSION_A));
+    logs.execute("UPDATE logs SET feedback_log_body=?1 WHERE id=2", [format!(
+        "app_server.request{{rpc.method=\"thread/start\" rpc.request_id=1 app_server.client_name=\"codex-tui\"}}:thread_spawn{{}}:session_init:environments.resolve{{}}:shell_snapshot{{thread_id={SESSION_A}}}: ready"
+    )]).unwrap();
+    insert_log(&logs, 3, "pid:101:current", None);
+    let store = CodexSessionStore::new(temp.path().into(), temp.path().into());
+    for prune_all_threadless in [false, true] {
+        if prune_all_threadless {
+            logs.execute("DELETE FROM logs WHERE id=3", []).unwrap();
+        }
+        let selected = store
+            .find_selection_for_pid_checked(101, None)
+            .unwrap()
+            .expect("the retained thread/start proves the current fresh session");
+        assert_eq!(selected.id, SESSION_A);
+        assert!(selected.fresh);
+    }
+    write_rollout(temp.path(), SESSION_A, ",\"source\":\"cli\"");
+    assert_eq!(
+        store.find_session_for_pid(101, None).as_deref(),
+        Some(SESSION_A)
+    );
+}
+
+#[test]
 fn resumed_thread_wins_over_later_background_logs_from_previous_thread() {
     let temp = tempfile::tempdir().unwrap();
     let logs = create_logs_db(temp.path());
