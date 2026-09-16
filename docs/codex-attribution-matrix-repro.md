@@ -3,6 +3,8 @@
 2026-09-15~16, Windows·Linux dev 19281, PR #1050 (`fix/codex-threadless-attribution`).
 기존 오류의 원본 증거와 수정 전후 비교는 [최초 재현 보고서](codex-threadless-log-retention-repro.md)에 있다.
 
+이전 결과를 재사용하지 않고 `bed8da30`에서 다시 실행한 [독립 dev 재검증](attribution-dev-recheck-2026-09-16.md)에서 레이아웃 생성·workspace 복제 12개 조합의 저장 거부와 native DB 잠금이 WSL 귀속에 미치는 영향을 추가로 확인했다. 아래 기본 30개 통과를 모든 추가 조건의 통과로 확대해서 해석하지 않는다.
+
 ## 검증 기준
 
 실제 Codex 검증은 0.154.0·0.153.4를 별도 프로세스로 실행했다. Windows native, 기본 WSL, `wsl.exe -d Ubuntu-22.04`, Linux native를 각각 사용했다. 두 WSL 지정 방식은 같은 Ubuntu-22.04를 대상으로 한다. Linux native는 WSLg에서 실행한 Linux Tauri/WebKit dev이며 Windows host의 WSL 귀속 adapter와 구분한다. `APPDATA`/Linux `HOME`, WebView 데이터, Codex 로그·대화 저장소를 격리했다. release 19280은 조작하지 않았다.
