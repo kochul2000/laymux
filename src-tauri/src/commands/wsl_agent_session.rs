@@ -21,14 +21,27 @@ printf 'LAYMUX_WSL_AGENT_PROBE_V2\n'
 for proc in /proc/[0-9]*; do
   [ -r "$proc/environ" ] || continue
   env_lines=$(tr '\000' '\n' < "$proc/environ" 2>/dev/null) || continue
-  terminal_id=$(printf '%s\n' "$env_lines" | sed -n 's/^LX_TERMINAL_ID=//p' | head -n 1)
+  unset terminal_id home codex_home grok_home
+  while IFS='=' read -r key value; do
+    case "$key" in
+      LX_TERMINAL_ID) [ "${terminal_id+x}" = x ] || terminal_id=$value ;;
+      HOME) [ "${home+x}" = x ] || home=$value ;;
+      CODEX_HOME) [ "${codex_home+x}" = x ] || codex_home=$value ;;
+      GROK_HOME) [ "${grok_home+x}" = x ] || grok_home=$value ;;
+    esac
+  done <<EOF
+$env_lines
+EOF
   [ -n "$terminal_id" ] || continue
-  name=$(cat "$proc/comm" 2>/dev/null) || continue
-  ppid=$(sed -n 's/^PPid:[[:space:]]*//p' "$proc/status" 2>/dev/null)
-  home=$(printf '%s\n' "$env_lines" | sed -n 's/^HOME=//p' | head -n 1)
-  codex_home=$(printf '%s\n' "$env_lines" | sed -n 's/^CODEX_HOME=//p' | head -n 1)
-  grok_home=$(printf '%s\n' "$env_lines" | sed -n 's/^GROK_HOME=//p' | head -n 1)
+  IFS= read -r name < "$proc/comm" 2>/dev/null || continue
+  ppid=
+  while read -r key value; do
+    if [ "$key" = 'PPid:' ]; then ppid=$value; break; fi
+  done < "$proc/status" 2>/dev/null
   printf 'P\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$terminal_id" "${proc##*/}" "$ppid" "$name" "$home" "$codex_home" "$grok_home"
+  # Only Codex attribution consumes rollout descriptors. Keep every marked
+  # process above so intermediary shells still establish the parent chain.
+  case "$name" in [cC][oO][dD][eE][xX]*) ;; *) continue ;; esac
   for fd in "$proc"/fd/*; do
     target=$(readlink "$fd" 2>/dev/null) || continue
     case "$target" in

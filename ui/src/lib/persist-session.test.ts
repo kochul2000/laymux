@@ -146,6 +146,245 @@ describe("persistSession", () => {
     vi.mocked(interruptTerminalsOnExit).mockResolvedValue(undefined);
   });
 
+  it.each(["codex", "claude", "grok"] as const)(
+    "keeps the final %s checkpoint when native requests arrive during exit interrupts",
+    async (provider) => {
+      const pane = useWorkspaceStore.getState().workspaces[0].panes[0];
+      const id = `terminal-${pane.id}`;
+      useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+      registerLiveTerminal(id, { type: "interactiveApp", name: provider });
+      vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+        [id]: { generation: 1, state: "identified", provider, sessionId: "before-exit" },
+      });
+      vi.mocked(interruptTerminalsOnExit).mockImplementationOnce(async () => {
+        // Real Ctrl+C can retire the process while the window is still settling.
+        vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+          [id]: { generation: 1, state: "noAgent" },
+        });
+        for (const reason of ["watchdog", "eviction", "update"] as const) {
+          await expect(
+            flushSessionCheckpoint({ reason, requireConclusive: reason !== "watchdog" }),
+          ).rejects.toThrow("Window close is in progress");
+        }
+      });
+
+      await saveBeforeClose();
+
+      expect(getTerminalSessionAttributions).toHaveBeenCalledTimes(1);
+      expect(saveSettings).toHaveBeenCalledTimes(1);
+      const view = vi.mocked(saveSettings).mock.calls[0][0].workspaces[0].panes[0].view;
+      const field = {
+        codex: "lastCodexSession",
+        claude: "lastClaudeSession",
+        grok: "lastGrokSession",
+      } as const;
+      expect(view[field[provider]]).toBe("before-exit");
+    },
+  );
+
+  it("crosses attribution verdicts with mounted, hidden, rendererless and retired panes five times", async () => {
+    vi.useFakeTimers();
+    let checks = 0;
+    try {
+      for (let repeat = 0; repeat < 5; repeat++) {
+        for (const surface of [
+          "focused",
+          "unfocused",
+          "hidden",
+          "rendererless",
+          "unvisited",
+          "evicted",
+        ]) {
+          for (const state of [
+            "fresh",
+            "identified",
+            "noAgent",
+            "activeButUnidentified",
+            "unknown",
+          ] as const) {
+            _resetClosingDown();
+            vi.mocked(saveSettings).mockClear();
+            useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+            useTerminalStore.setState({ instances: [] });
+            const workspace = useWorkspaceStore.getState().workspaces[0];
+            const pane = workspace.panes[0];
+            useWorkspaceStore
+              .getState()
+              .setPaneView(0, { type: "TerminalView", lastCodexSession: "old" });
+            const id = `terminal-${pane.id}`;
+            if (["focused", "unfocused", "hidden", "evicted"].includes(surface)) {
+              registerLiveTerminal(id, { type: "shell" });
+              if (surface === "focused") useTerminalStore.getState().setTerminalFocus(id);
+              if (surface === "evicted") useTerminalStore.getState().unregisterInstance(id);
+              if (surface === "hidden") useWorkspaceStore.setState({ activeWorkspaceId: "other" });
+            }
+            const live = !["unvisited", "evicted"].includes(surface);
+            vi.mocked(getTerminalSessionAttributions).mockResolvedValue(
+              live
+                ? {
+                    [id]: {
+                      generation: 1,
+                      state,
+                      ...(["fresh", "identified"].includes(state)
+                        ? { provider: "codex", sessionId: "current" }
+                        : {}),
+                    },
+                  }
+                : {},
+            );
+            const result = flushSessionCheckpoint({
+              reason: "update",
+              requireConclusive: true,
+            }).then(
+              () => "saved",
+              () => "rejected",
+            );
+            await vi.runAllTimersAsync();
+            const rejected = live && ["unknown", "activeButUnidentified"].includes(state);
+            expect(await result, `${repeat}/${surface}/${state}`).toBe(
+              rejected ? "rejected" : "saved",
+            );
+            if (rejected) expect(saveSettings).not.toHaveBeenCalled();
+            else {
+              const view = vi.mocked(saveSettings).mock.calls.at(-1)![0].workspaces[0].panes[0]
+                .view;
+              expect(view.lastCodexSession).toBe(
+                !live ? "old" : state === "identified" ? "current" : undefined,
+              );
+              expect(view.lastAgentFresh).toBe(live && state === "fresh" ? "codex" : undefined);
+            }
+            checks++;
+          }
+        }
+      }
+      expect(checks).toBe(150);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects every changed observation and permits a stable retry twenty times", async () => {
+    vi.useFakeTimers();
+    try {
+      for (let repeat = 0; repeat < 20; repeat++) {
+        for (const change of [
+          "session",
+          "provider",
+          "generation",
+          "exit",
+          "unidentified",
+          "failure",
+        ] as const) {
+          _resetClosingDown();
+          vi.mocked(saveSettings).mockClear();
+          const pane = useWorkspaceStore.getState().workspaces[0].panes[0];
+          const id = `terminal-${pane.id}`;
+          const before = {
+            generation: 1,
+            state: "identified" as const,
+            provider: "codex" as const,
+            sessionId: "a",
+          };
+          const after = {
+            ...before,
+            ...(change === "session" ? { sessionId: "b" } : {}),
+            ...(change === "provider" ? { provider: "claude" as const } : {}),
+            ...(change === "generation" ? { generation: 2 } : {}),
+          };
+          const lookup = vi.mocked(getTerminalSessionAttributions);
+          lookup.mockReset().mockResolvedValueOnce({ [id]: before });
+          if (change === "failure")
+            lookup.mockRejectedValueOnce(new Error("injected probe failure"));
+          else
+            lookup.mockResolvedValueOnce({
+              [id]:
+                change === "exit"
+                  ? { generation: 1, state: "noAgent" }
+                  : change === "unidentified"
+                    ? { generation: 1, state: "activeButUnidentified" }
+                    : after,
+            });
+          const rejected = flushSessionCheckpoint({
+            reason: "update",
+            requireConclusive: true,
+          }).then(
+            () => false,
+            () => true,
+          );
+          await vi.runAllTimersAsync();
+          expect(await rejected, `${repeat}/${change}`).toBe(true);
+          expect(saveSettings).not.toHaveBeenCalled();
+          lookup.mockResolvedValue({ [id]: after });
+          const retry = flushSessionCheckpoint({ reason: "update", requireConclusive: true });
+          await vi.runAllTimersAsync();
+          expect((await retry).coverage.find((entry) => entry.terminalId === id)?.sessionId).toBe(
+            after.sessionId,
+          );
+          expect(saveSettings).toHaveBeenCalledTimes(1);
+        }
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps update coverage when every checkpoint trigger overlaps in either order twenty times", async () => {
+    vi.useFakeTimers();
+    try {
+      for (let repeat = 0; repeat < 20; repeat++) {
+        for (const reason of [
+          "mutation",
+          "completion",
+          "workspaceEntry",
+          "watchdog",
+          "eviction",
+          "update",
+        ] as const) {
+          for (const updateFirst of [true, false]) {
+            _resetClosingDown();
+            vi.mocked(saveSettings).mockClear();
+            const id = `terminal-${useWorkspaceStore.getState().workspaces[0].panes[0].id}`;
+            let release!: () => void;
+            const gate = new Promise<void>((resolve) => {
+              release = resolve;
+            });
+            const lookup = vi.mocked(getTerminalSessionAttributions);
+            const attribution = {
+              [id]: {
+                generation: 1,
+                state: "identified" as const,
+                provider: "codex" as const,
+                sessionId: "current",
+              },
+            };
+            lookup
+              .mockReset()
+              .mockImplementationOnce(async () => {
+                await gate;
+                return attribution;
+              })
+              .mockResolvedValue(attribution);
+            const update = { reason: "update" as const, requireConclusive: true };
+            const other = {
+              reason,
+              requireConclusive: reason === "eviction" || reason === "update",
+              terminalIds: [id],
+            };
+            const first = flushSessionCheckpoint(updateFirst ? update : other);
+            const second = flushSessionCheckpoint(updateFirst ? other : update);
+            release();
+            await vi.runAllTimersAsync();
+            expect(await first).toEqual(await second);
+            expect(saveSettings).toHaveBeenCalledTimes(2);
+            expect(lookup.mock.calls.length).toBe(updateFirst || other.requireConclusive ? 4 : 3);
+          }
+        }
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     ["workspace", "claude", "lastClaudeSession"],
     ["workspace", "codex", "lastCodexSession"],
@@ -454,6 +693,46 @@ describe("persistSession", () => {
       ).rejects.toThrow(`Session attribution is not conclusive for ${id}: activeButUnidentified`);
     }
     expect(saveSettings).not.toHaveBeenCalled();
+  });
+
+  it.each(["update", "eviction"] as const)(
+    "rejects %s when native process ownership is ambiguous even without a provider claim",
+    async (reason) => {
+      const ws = useWorkspaceStore.getState();
+      ws.setPaneView(0, { type: "TerminalView", lastCodexSession: "last-proven-session" });
+      const pane = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0];
+      const id = `terminal-${pane.id}`;
+      vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+        [id]: { generation: 7, state: "activeButUnidentified" },
+      });
+      await expect(
+        flushSessionCheckpoint({ reason, requireConclusive: true, terminalIds: [id] }),
+      ).rejects.toThrow(`Session attribution is not conclusive for ${id}: activeButUnidentified`);
+      expect(saveSettings).not.toHaveBeenCalled();
+      expect(pane.view.lastCodexSession).toBe("last-proven-session");
+    },
+  );
+
+  it("handles a background save joining a rejected barrier without hiding the critical failure", async () => {
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+      "terminal-ambiguous": { generation: 7, state: "activeButUnidentified" },
+    });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const critical = flushSessionCheckpoint({ reason: "update", requireConclusive: true });
+      // Event handlers intentionally do not await this workspace-entry hint.
+      void persistSession({ reason: "workspaceEntry" });
+      await expect(critical).rejects.toThrow("activeButUnidentified");
+      await vi.waitFor(() =>
+        expect(warning).toHaveBeenCalledWith(
+          "[session-checkpoint] Failed to persist session:",
+          expect.objectContaining({ message: expect.stringContaining("activeButUnidentified") }),
+        ),
+      );
+      expect(saveSettings).not.toHaveBeenCalled();
+    } finally {
+      warning.mockRestore();
+    }
   });
 
   it("repeatedly refuses to evict a live hidden terminal whose attribution remains unknown", async () => {

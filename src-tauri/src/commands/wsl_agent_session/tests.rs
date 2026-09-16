@@ -1,5 +1,78 @@
 use super::*;
 
+#[cfg(target_os = "linux")]
+#[test]
+fn shell_probe_preserves_ancestry_and_literal_environment_values() {
+    use std::os::unix::fs::symlink;
+    let root = tempfile::tempdir().unwrap();
+    for pid in 1..=160 {
+        let dir = root.path().join(pid.to_string());
+        std::fs::create_dir_all(dir.join("fd")).unwrap();
+        let marker = if pid <= 32 {
+            format!("LX_TERMINAL_ID=terminal-matrix-{}\0", (pid - 1) / 2)
+        } else {
+            String::new()
+        };
+        std::fs::write(dir.join("environ"), format!("{marker}HOME=/home/test user\0CODEX_HOME=/tmp/with space=a\0GROK_HOME=/tmp/literal$(not-run)\0CODEX_HOME=/wrong-duplicate\0")).unwrap();
+        std::fs::write(
+            dir.join("comm"),
+            if pid % 2 == 0 { "codex\n" } else { "bash\n" },
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("status"),
+            format!(
+                "Name:\ttest\nPPid:\t{}\n",
+                if pid % 2 == 0 { pid - 1 } else { 0 }
+            ),
+        )
+        .unwrap();
+        symlink(
+            "/tmp/with space=a/sessions/2026/rollout-test.jsonl",
+            dir.join("fd/9"),
+        )
+        .unwrap();
+    }
+    let script = WSL_PROCESS_PROBE.replace(
+        "/proc/[0-9]*",
+        &format!("\"{}\"/[0-9]*", root.path().display()),
+    );
+    for _ in 0..20 {
+        let mut command = crate::process::headless_command("sh");
+        command.args(["-c", &script]);
+        let output =
+            crate::process::output_with_timeout(&mut command, std::time::Duration::from_secs(3))
+                .unwrap();
+        assert!(output.status.success());
+        let entries = parse_probe_output(&output.stdout).unwrap();
+        assert_eq!(entries.len(), 32);
+        for entries in group_by_terminal(entries).values() {
+            let selected = select_top_level_agent(entries, WslAgentProvider::Codex)
+                .unwrap()
+                .unwrap();
+            assert_eq!(selected.home, "/home/test user");
+            assert_eq!(selected.codex_home.as_deref(), Some("/tmp/with space=a"));
+            assert_eq!(
+                selected.grok_home.as_deref(),
+                Some("/tmp/literal$(not-run)")
+            );
+            assert_eq!(
+                selected.rollout_paths,
+                ["/tmp/with space=a/sessions/2026/rollout-test.jsonl"]
+            );
+            assert_eq!(
+                entries
+                    .iter()
+                    .find(|entry| entry.name == "bash")
+                    .unwrap()
+                    .rollout_paths
+                    .len(),
+                0
+            );
+        }
+    }
+}
+
 fn process(pid: u32, ppid: u32, name: &str) -> WslProcessEntry {
     WslProcessEntry {
         terminal_id: "terminal-pane-a".into(),

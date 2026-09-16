@@ -475,6 +475,60 @@ describe("WorkspaceStore", () => {
   });
 
   // Layout actions
+  describe.each(["PowerShell", "WSL"])("independent copies (%s)", (profile) => {
+    it.each([
+      "duplicateWorkspace",
+      "exportAsNewLayout",
+      "exportToLayout",
+      "addWorkspace",
+      "duplicateLayout",
+    ] as const)("%s keeps configuration without copying agent restore ownership", (action) => {
+      const config = {
+        type: "TerminalView" as const,
+        profile,
+        lastCwd: profile === "WSL" ? "/work/project" : "D:\\work\\project",
+        syncGroup: "shared-project",
+        cwdSend: false,
+        cwdReceive: true,
+      };
+      const view = {
+        ...config,
+        lastClaudeSession: "claude-original",
+        lastCodexSession: "codex-original",
+        lastGrokSession: "grok-original",
+        lastAgentFresh: "codex",
+      };
+      const store = useWorkspaceStore.getState();
+      store.setPaneView(0, view);
+      const source = useWorkspaceStore.getState().getActiveWorkspace()!;
+      // Include persisted layouts from before the fix at the import boundary.
+      const layout = {
+        id: "saved-layout",
+        name: "Saved",
+        panes: [{ x: 0, y: 0, w: 1, h: 1, viewType: view.type, viewConfig: view }],
+      };
+      useWorkspaceStore.setState({ layouts: [layout] });
+      let copy;
+      if (action === "duplicateWorkspace") {
+        const result = store.duplicateWorkspace(source.id)!;
+        copy = useWorkspaceStore.getState().workspaces.find((w) => w.id === result.newWorkspaceId)!;
+      } else {
+        if (action === "exportAsNewLayout") store.exportAsNewLayout("Exported");
+        if (action === "exportToLayout") store.exportToLayout(layout.id);
+        if (action === "duplicateLayout") store.duplicateLayout(layout.id, "Copy");
+        const template = useWorkspaceStore.getState().layouts.at(-1)!;
+        if (action !== "addWorkspace") expect(template.panes[0].viewConfig).toEqual(config);
+        store.addWorkspace("Independent", template.id);
+        copy = useWorkspaceStore.getState().workspaces.at(-1)!;
+      }
+      expect(copy.panes[0].id).not.toBe(source.panes[0].id);
+      expect(copy.panes[0].view).toEqual(config);
+      expect(copy.panes[0].view).not.toBe(view);
+      expect(useWorkspaceStore.getState().workspaces.find((w) => w.id === source.id)).toBe(source);
+      expect(source.panes[0].view).toEqual(view);
+    });
+  });
+
   describe("exportAsNewLayout", () => {
     it("creates a new layout from current workspace panes", () => {
       useWorkspaceStore.getState().splitPane(0, "horizontal");

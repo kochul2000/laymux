@@ -45,16 +45,14 @@ pub(crate) struct ProviderTerminalDomains {
 }
 
 pub(crate) fn provider_terminal_domains(
-    known_terminal_ids: &[String],
     state: &AppState,
 ) -> Result<ProviderTerminalDomains, crate::error::AppError> {
     let ptys = state.pty_handles.lock_or_err()?;
     let mut native_roots = Vec::new();
     let mut wsl_terminal_ids = HashSet::new();
-    for terminal_id in known_terminal_ids {
-        let Some(handle) = ptys.get(terminal_id) else {
-            continue;
-        };
+    // Display caches can lag a provider handover. Every live PTY must reach
+    // the process-tree lookup even when its current provider was never cached.
+    for (terminal_id, handle) in ptys.iter() {
         if handle.is_wsl_backed() {
             wsl_terminal_ids.insert(terminal_id.clone());
         } else if let Some(child_pid) = handle.child_pid() {
@@ -97,7 +95,9 @@ fn classify_attribution(
         .into_iter()
         .filter_map(|(provider, session)| session.map(|session| (provider, session)))
         .collect();
-    if active.len() == 1 {
+    // The fresh tree may have become ambiguous after an earlier provider lookup.
+    // Its conflict must not be hidden by a previously exact session claim.
+    if active.len() == 1 && liveness != PtyAppLiveness::Ambiguous {
         let (provider, session) = active[0];
         if let Some(session_id) = session.clone() {
             return TerminalSessionAttribution {
@@ -136,6 +136,7 @@ fn classify_attribution(
             (SessionAttributionState::ActiveButUnidentified, Some("grok"))
         }
         PtyAppLiveness::Running(_) => (SessionAttributionState::NoAgent, None),
+        PtyAppLiveness::Ambiguous => (SessionAttributionState::ActiveButUnidentified, None),
         PtyAppLiveness::NoneAlive => (SessionAttributionState::NoAgent, None),
         PtyAppLiveness::Unknown => (SessionAttributionState::Unknown, None),
     };

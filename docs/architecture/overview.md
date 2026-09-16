@@ -191,6 +191,8 @@ WorkspaceSelectorView의 평상시 목록에서 quick-hide한 워크스페이스
 
 Layout은 Workspace 생성 시점에만 사용된다. 생성 후 Workspace는 독립적으로 존재하며, Layout과의 영구 참조를 유지하지 않는다.
 
+레이아웃 내보내기·복제, 레이아웃으로 workspace 생성, workspace 복제는 view 설정과 `lastCwd`를 보존하지만 `lastClaudeSession`·`lastCodexSession`·`lastGrokSession`·`lastAgentFresh`는 복사하지 않는다. 대화 복원점은 원래 pane의 소유이며 새 pane에서 같은 대화를 동시에 열지 않는다. 이미 저장된 레이아웃에 이 필드가 있어도 workspace 생성 경계에서 제거한다. 기존 pane을 이동하는 작업은 ID와 복원점을 함께 유지한다.
+
 ```
 Layout (생성 시점에만 사용)
 ├── id

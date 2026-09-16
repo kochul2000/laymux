@@ -256,6 +256,11 @@ async function runCheckpointCoordinator(): Promise<SessionCheckpointCommit> {
 export function flushSessionCheckpoint(
   options: SessionCheckpointOptions = {},
 ): Promise<SessionCheckpointCommit> {
+  // Native watchdog/update/eviction requests bypass persistSession(). Once
+  // closing starts, only the pre-interrupt close checkpoint may collect state.
+  if (closingDown && options.reason !== "close") {
+    return Promise.reject(new Error("Window close is in progress"));
+  }
   if (isSettingsWriteBlocked()) {
     return Promise.reject(
       new Error("Settings persistence is blocked until recovery is acknowledged"),
@@ -277,9 +282,15 @@ export function flushSessionCheckpoint(
  * Called by workspace store save actions and other persistence triggers.
  * No-op if saveBeforeClose() is already in progress (prevents duplicate saves during teardown).
  */
-export async function persistSession(options: SessionCheckpointOptions = {}): Promise<void> {
-  if (closingDown || isSettingsWriteBlocked()) return;
-  await flushSessionCheckpoint(options);
+export function persistSession(options: SessionCheckpointOptions = {}): Promise<void> {
+  if (closingDown || isSettingsWriteBlocked()) return Promise.resolve();
+  const pending = flushSessionCheckpoint(options).then(() => {});
+  // Background hints may join a failing critical barrier. Handle their rejected
+  // promise while preserving the rejection for callers that explicitly await it.
+  void pending.catch((error: unknown) => {
+    console.warn("[session-checkpoint] Failed to persist session:", error);
+  });
+  return pending;
 }
 
 /**
@@ -328,7 +339,6 @@ export async function saveBeforeClose(): Promise<void> {
     }
   }
 
-  // 2. Persist session directly (bypasses closingDown guard)
   // Wait for cache writes before cleaning — otherwise clean may race and
   // delete files that are still being written.
   await Promise.allSettled(cachePromises);
