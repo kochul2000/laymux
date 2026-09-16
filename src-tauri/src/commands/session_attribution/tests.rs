@@ -1,6 +1,54 @@
 use super::*;
 
 #[test]
+fn ambiguous_native_liveness_rejects_prior_provider_claims_and_pending_resume() {
+    for provider in ["claude", "codex", "grok"] {
+        for prior_claim in [false, true] {
+            let claimed = if prior_claim {
+                HashMap::from([("t".into(), Some("earlier-session".into()))])
+            } else {
+                HashMap::new()
+            };
+            let empty = HashMap::new();
+            let attribution = classify_attribution(
+                7,
+                "t",
+                if provider == "claude" {
+                    &claimed
+                } else {
+                    &empty
+                },
+                if provider == "codex" {
+                    &claimed
+                } else {
+                    &empty
+                },
+                if provider == "grok" { &claimed } else { &empty },
+                PtyAppLiveness::Ambiguous,
+                false,
+            );
+            assert_eq!(
+                attribution.state,
+                SessionAttributionState::ActiveButUnidentified
+            );
+            assert_eq!(attribution.provider, None);
+            assert_eq!(attribution.session_id, None);
+            let handle = crate::pty::PtyHandle::from_test_writer_for_generation(
+                Box::new(std::io::sink()),
+                7,
+            )
+            .with_session_restore(Some((provider, "saved-session".into())));
+            let attribution = apply_unconsumed_restore(attribution, &handle, Some(true));
+            assert_eq!(
+                attribution.state,
+                SessionAttributionState::ActiveButUnidentified
+            );
+            assert!(handle.unconsumed_session_restore().is_none());
+        }
+    }
+}
+
+#[test]
 fn fresh_requires_exact_noncolliding_codex_identity() {
     let id = "new-empty".to_owned();
     let identified = TerminalSessionAttribution {

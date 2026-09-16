@@ -1456,9 +1456,11 @@ Windows host의 WSL terminal은 host process tree에 `wsl.exe`만 보이므로 n
 
 native provider 조회는 표시용 `known_claude_terminals`·`known_codex_terminals`·`known_grok_terminals` 캐시를 대상 목록이나 부재 판정에 사용하지 않는다. live PTY 전체에서 native/WSL 도메인을 나누고, native process snapshot의 최상위 agent PID로 각 provider의 현재 대상을 선정한다. Claude도 이 PID 하나의 세션 파일만 읽으므로 다른 agent 아래 실행된 Claude나 Claude의 하위 agent를 현재 대화로 선택하지 않는다. 표시 캐시가 비거나 이전 provider를 가리켜도 실제 프로세스가 있는 pane을 누락하거나 종료된 provider의 `None` claim을 만들지 않는다. 이는 ADR-0222의 process·provider 저장소 귀속과 activity 힌트 분리를 적용한다.
 
+native tree에서 가장 얕은 깊이에 agent가 둘 이상 있으면 같은 provider끼리도 모호하다. 정확한 PID 선택은 거절하되 liveness는 `Ambiguous`를 보존하고, 통합 판정은 provider 없는 `ActiveButUnidentified`가 된다. 이전 provider 조회에서 얻은 ID나 미소비 resume 요청으로 이 모호성을 덮지 않으므로 update·eviction barrier를 통과하지 않는다. 표시용 activity는 모호성을 확정 종료로 취급하지 않고 기존 title·buffer 보조 판정을 유지한다.
+
 통합 attribution command는 세 provider lookup을 동시에 시작한다. 각 adapter가 독립 3초 deadline을 갖더라도 wall-clock에서 하나의 probe budget만 소비하므로 정상 close의 5초 저장 예산과 critical 이중 관측의 20초 ACK 예산을 넘기지 않는다.
 
-WSL 세션 프로세스 probe는 환경과 PPID를 POSIX 셸 내장 `read`로 나누어 읽는다. 프로세스마다 환경 변수별 `sed`·`head` 파이프라인을 반복하지 않는다. pane marker를 상속한 중간 셸도 부모 관계 계산에 포함하고, rollout FD 열거는 이를 소비하는 Codex 프로세스에만 수행한다. 첫 번째 환경 변수 값, 공백·등호를 포함한 경로와 기존 3초 예산을 보존한다. 현재 Codex 대화 선택은 §13.5의 SQLite lifecycle 기록이 우선이며, FD 부재는 미소비 복원 요청 판정의 보조 증거다. Codex 진단 도구는 최대 4개를 동시에 실행해 pane별 `wsl.exe` 시작 비용이 순차 누적되지 않게 한다. 모든 실행은 원래 조회의 공통 3초 deadline에서 남은 시간만 사용하며, 실패는 해당 pane에만 귀속한다. lifecycle 선택과 중복 ID 검증은 결과를 모은 뒤 기존 경로에서 수행한다.
+WSL 세션 프로세스 probe는 환경과 PPID를 POSIX 셸 내장 `read`로 나누어 읽는다. 프로세스마다 환경 변수별 `sed`·`head` 파이프라인을 반복하지 않는다. pane marker를 상속한 중간 셸도 부모 관계 계산에 포함하고, rollout FD 열거는 이를 소비하는 Codex 프로세스에만 수행한다. 첫 번째 환경 변수 값, 공백·등호를 포함한 경로와 기존 3초 예산을 보존한다. 현재 Codex 대화 선택은 §13.5의 SQLite lifecycle 기록이 우선이며, FD 부재는 미소비 복원 요청 판정의 보조 증거다. Codex 진단 도구는 최대 4개를 동시에 실행하며, 완료된 슬롯은 다른 슬롯의 느린 작업을 기다리지 않고 다음 pane을 즉시 시작한다. 모든 실행은 원래 조회의 공통 3초 deadline에서 남은 시간만 사용하며, 실패나 reader panic은 해당 pane에만 귀속한다. lifecycle 선택과 중복 ID 검증은 결과를 모은 뒤 기존 경로에서 수행한다.
 
 **agent를 종료한 pane은 shell로 복원한다**([ADR-0195](../adr/0195-agent-session-cleared-on-shell-return.md), [ADR-0222](../adr/0222-agent-session-checkpoint-coordinator.md)). 판정 SoT는 Rust `get_terminal_session_attributions`다. 이 command는 live PTY의 generation과 native/WSL process liveness, 세 provider의 정확 귀속 결과를 한 verdict로 묶는다. 프론트 activity는 체크포인트 요청 힌트일 뿐 세션 삭제·보존 판정에 쓰지 않는다.
 

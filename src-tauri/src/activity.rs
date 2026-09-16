@@ -80,7 +80,7 @@ pub fn is_claude_terminal_from_buffer(
     // resident in the recent 16KB after a title-less exit (SIGKILL, dropped
     // callback) would re-pin the pane via the strong-signal branch below until
     // it scrolls out (PR #292 review P2). Only `Unknown` (no PID / snapshot
-    // miss) is inconclusive and falls back to the title/buffer heuristics.
+    // miss) or ambiguous process ownership falls back to title/buffer heuristics.
     use crate::process_tree::PtyAppLiveness;
     match crate::process_tree::interactive_app_in_pty(state, terminal_id) {
         PtyAppLiveness::Running("Claude") => {
@@ -93,7 +93,7 @@ pub fn is_claude_terminal_from_buffer(
             }
             return false;
         }
-        PtyAppLiveness::Unknown => {}
+        PtyAppLiveness::Unknown | PtyAppLiveness::Ambiguous => {}
     }
 
     let Some(buf) = buffer else {
@@ -386,7 +386,7 @@ pub fn is_codex_terminal_from_buffer(
             }
             return false;
         }
-        PtyAppLiveness::Unknown => {}
+        PtyAppLiveness::Unknown | PtyAppLiveness::Ambiguous => {}
     }
 
     let Some(buf) = buffer else {
@@ -490,7 +490,7 @@ pub fn is_grok_terminal_from_buffer(
             }
             return false;
         }
-        PtyAppLiveness::Unknown => {}
+        PtyAppLiveness::Unknown | PtyAppLiveness::Ambiguous => {}
     }
 
     let Some(buf) = buffer else {

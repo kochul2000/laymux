@@ -695,6 +695,24 @@ describe("persistSession", () => {
     expect(saveSettings).not.toHaveBeenCalled();
   });
 
+  it.each(["update", "eviction"] as const)(
+    "rejects %s when native process ownership is ambiguous even without a provider claim",
+    async (reason) => {
+      const ws = useWorkspaceStore.getState();
+      ws.setPaneView(0, { type: "TerminalView", lastCodexSession: "last-proven-session" });
+      const pane = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0];
+      const id = `terminal-${pane.id}`;
+      vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+        [id]: { generation: 7, state: "activeButUnidentified" },
+      });
+      await expect(
+        flushSessionCheckpoint({ reason, requireConclusive: true, terminalIds: [id] }),
+      ).rejects.toThrow(`Session attribution is not conclusive for ${id}: activeButUnidentified`);
+      expect(saveSettings).not.toHaveBeenCalled();
+      expect(pane.view.lastCodexSession).toBe("last-proven-session");
+    },
+  );
+
   it("repeatedly refuses to evict a live hidden terminal whose attribution remains unknown", async () => {
     const id = "terminal-hidden-unknown";
     vi.mocked(getTerminalSessionAttributions).mockResolvedValue({

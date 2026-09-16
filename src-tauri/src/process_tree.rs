@@ -131,8 +131,9 @@ pub fn descendant_pids(snapshot: &[ProcessEntry], root: u32) -> HashSet<u32> {
 /// Breadth-first from `root` so the **shallowest** matching process wins: when
 /// a Claude pane spawns Codex as a subprocess (or vice versa) the foreground
 /// app the shell launched sits nearer the root and is reported. Returns `None`
-/// when no `claude`/`codex` process is found in the tree.
-pub fn match_interactive_app(snapshot: &[ProcessEntry], root: u32) -> Option<&'static str> {
+/// when no supported agent or no unique shallowest process is found.
+#[cfg(test)]
+fn match_interactive_app(snapshot: &[ProcessEntry], root: u32) -> Option<&'static str> {
     match_interactive_app_process(snapshot, root).map(|(_, app)| app)
 }
 
@@ -142,6 +143,17 @@ pub fn match_interactive_app_process(
     snapshot: &[ProcessEntry],
     root: u32,
 ) -> Option<(u32, &'static str)> {
+    match shallowest_interactive_app_processes(snapshot, root).as_slice() {
+        [candidate] => Some(*candidate),
+        _ => None,
+    }
+}
+
+// Keep multiple matches for liveness even though exact PID attribution rejects them.
+fn shallowest_interactive_app_processes(
+    snapshot: &[ProcessEntry],
+    root: u32,
+) -> Vec<(u32, &'static str)> {
     let mut children: HashMap<u32, Vec<&ProcessEntry>> = HashMap::new();
     let mut name_by_pid: HashMap<u32, &str> = HashMap::new();
     for e in snapshot {
@@ -153,7 +165,7 @@ pub fn match_interactive_app_process(
     // startup command launches `claude` directly with no intermediate shell.
     if let Some(name) = name_by_pid.get(&root) {
         if let Some(app) = name_to_app(name) {
-            return Some((root, app));
+            return vec![(root, app)];
         }
     }
 
@@ -178,16 +190,11 @@ pub fn match_interactive_app_process(
                 }
             }
         }
-        if found.len() == 1 {
-            return Some(found[0]);
-        }
-        if found.len() > 1 {
-            // Same-depth Claude/Codex/Grok siblings are ambiguous — snapshot
-            // order is not a contract (ADR-0156 unique top-level).
-            return None;
+        if !found.is_empty() {
+            return found;
         }
     }
-    None
+    Vec::new()
 }
 
 /// Cached global process snapshot. Independent of any `AppState` lock — it
@@ -224,6 +231,8 @@ fn with_snapshot<R>(force_fresh: bool, f: impl FnOnce(&[ProcessEntry]) -> R) -> 
 pub enum PtyAppLiveness {
     /// `claude`/`codex` is alive in the PTY's descendant tree.
     Running(&'static str),
+    /// Multiple shallowest agent processes are alive; no exact owner can be chosen.
+    Ambiguous,
     /// The snapshot was readable and the PTY's PID is known, but no
     /// `claude`/`codex` process is under it — authoritative "nothing alive here".
     NoneAlive,
@@ -240,6 +249,7 @@ pub enum PtyAppLiveness {
 /// - empty `snapshot` → `Unknown` (enumeration failed; there is always at least
 ///   the calling process, so an empty list means failure, not "no processes").
 /// - non-empty snapshot, app found → `Running`.
+/// - multiple shallowest agents → `Ambiguous` (never an authoritative exit).
 /// - non-empty snapshot, no app found → `NoneAlive` (authoritative negative).
 fn classify(child_pid: Option<u32>, snapshot: &[ProcessEntry]) -> PtyAppLiveness {
     let Some(pid) = child_pid else {
@@ -248,9 +258,10 @@ fn classify(child_pid: Option<u32>, snapshot: &[ProcessEntry]) -> PtyAppLiveness
     if snapshot.is_empty() {
         return PtyAppLiveness::Unknown;
     }
-    match match_interactive_app(snapshot, pid) {
-        Some(app) => PtyAppLiveness::Running(app),
-        None => PtyAppLiveness::NoneAlive,
+    match shallowest_interactive_app_processes(snapshot, pid).as_slice() {
+        [] => PtyAppLiveness::NoneAlive,
+        [(_, app)] => PtyAppLiveness::Running(app),
+        _ => PtyAppLiveness::Ambiguous,
     }
 }
 
@@ -635,6 +646,32 @@ mod tests {
         ];
         assert_eq!(match_interactive_app(&snapshot, 100), None);
         assert_eq!(match_interactive_app_process(&snapshot, 100), None);
+    }
+
+    #[test]
+    fn ambiguous_native_agents_are_never_authoritative_absence() {
+        for left in ["claude.exe", "codex.exe", "grok.exe"] {
+            for right in ["claude.exe", "codex.exe", "grok.exe"] {
+                for wrapped in [false, true] {
+                    let parent = if wrapped { 150 } else { 100 };
+                    let mut snapshot = vec![
+                        entry(100, 1, "pwsh.exe"),
+                        entry(150, 100, "node.exe"),
+                        entry(200, parent, left),
+                        entry(300, parent, right),
+                    ];
+                    for _ in 0..2 {
+                        assert_eq!(match_interactive_app_process(&snapshot, 100), None);
+                        assert_eq!(
+                            classify(Some(100), &snapshot),
+                            PtyAppLiveness::Ambiguous,
+                            "{left} + {right}, wrapped={wrapped}"
+                        );
+                        snapshot.reverse();
+                    }
+                }
+            }
+        }
     }
 
     #[test]

@@ -95,7 +95,9 @@ fn classify_attribution(
         .into_iter()
         .filter_map(|(provider, session)| session.map(|session| (provider, session)))
         .collect();
-    if active.len() == 1 {
+    // The fresh tree may have become ambiguous after an earlier provider lookup.
+    // Its conflict must not be hidden by a previously exact session claim.
+    if active.len() == 1 && liveness != PtyAppLiveness::Ambiguous {
         let (provider, session) = active[0];
         if let Some(session_id) = session.clone() {
             return TerminalSessionAttribution {
@@ -134,6 +136,7 @@ fn classify_attribution(
             (SessionAttributionState::ActiveButUnidentified, Some("grok"))
         }
         PtyAppLiveness::Running(_) => (SessionAttributionState::NoAgent, None),
+        PtyAppLiveness::Ambiguous => (SessionAttributionState::ActiveButUnidentified, None),
         PtyAppLiveness::NoneAlive => (SessionAttributionState::NoAgent, None),
         PtyAppLiveness::Unknown => (SessionAttributionState::Unknown, None),
     };
