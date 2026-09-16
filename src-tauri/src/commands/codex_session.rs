@@ -67,7 +67,6 @@ fn lookup_with_observer(
     let mut failed_terminal_ids = HashSet::new();
     let mut rollout_absence = HashMap::new();
     let mut fresh_sessions = HashMap::new();
-    let deadline = std::time::Instant::now() + crate::constants::WSL_AGENT_PROBE_TIMEOUT;
     let terminal_codex_pids: Vec<(String, u32)> = if terminal_roots.is_empty() {
         Vec::new()
     } else {
@@ -116,6 +115,8 @@ fn lookup_with_observer(
         .map(|(id, _)| id.clone())
         .collect();
     let mut result = crate::process_tree::complete_agent_session_attributions(&observed, exact);
+    // Native DB I/O must not consume the guest's process + diagnostics budget.
+    let deadline = std::time::Instant::now() + crate::constants::WSL_AGENT_PROBE_TIMEOUT;
     match resolve_wsl_agent_processes(state, WslAgentProvider::Codex) {
         Ok(lookup) => {
             let mut process_rows = wsl::read_rows_batch(&lookup.attributions, deadline);

@@ -19,7 +19,7 @@ export interface LayoutPane {
   w: number;
   h: number;
   viewType: ViewType;
-  /** Full view config including profile etc. When present, used instead of bare viewType. */
+  /** View configuration (profile, CWD, etc.), excluding pane-owned agent restore state. */
   viewConfig?: ViewInstanceConfig;
 }
 

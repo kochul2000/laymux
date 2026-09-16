@@ -8,7 +8,17 @@ import { useTerminalRestartStore } from "./terminal-restart-store";
 import { resolvePaneCwd } from "@/lib/pane-cwd";
 import { clearComposerHistoryForWorkspace } from "@/lib/terminal-input-composer-state";
 
-/** Convert a workspace pane to a layout pane (preserving view config). */
+/** A new pane copies configuration, but cannot own the source's conversation. */
+function copyViewConfig(view: ViewInstanceConfig): ViewInstanceConfig {
+  const copy = { ...view };
+  delete copy.lastClaudeSession;
+  delete copy.lastCodexSession;
+  delete copy.lastGrokSession;
+  delete copy.lastAgentFresh;
+  return copy;
+}
+
+/** Convert a workspace pane to a layout template. */
 function toLayoutPane(p: WorkspacePane): LayoutPane {
   return {
     x: p.x,
@@ -16,11 +26,11 @@ function toLayoutPane(p: WorkspacePane): LayoutPane {
     w: p.w,
     h: p.h,
     viewType: p.view.type,
-    viewConfig: { ...p.view },
+    viewConfig: copyViewConfig(p.view),
   };
 }
 
-/** Convert a layout pane to a workspace pane (restoring view config). */
+/** Also sanitize old persisted templates when creating an independent pane. */
 function toWorkspacePane(p: LayoutPane): WorkspacePane {
   return {
     id: generateId("pane"),
@@ -28,7 +38,7 @@ function toWorkspacePane(p: LayoutPane): WorkspacePane {
     y: p.y,
     w: p.w,
     h: p.h,
-    view: p.viewConfig ? { ...p.viewConfig } : { type: p.viewType },
+    view: p.viewConfig ? copyViewConfig(p.viewConfig) : { type: p.viewType },
   };
 }
 
@@ -186,7 +196,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         y: p.y,
         w: p.w,
         h: p.h,
-        view: { ...p.view },
+        view: copyViewConfig(p.view),
       };
     });
 
@@ -507,7 +517,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       name: newName,
       panes: layout.panes.map((p) => ({
         ...p,
-        ...(p.viewConfig ? { viewConfig: { ...p.viewConfig } } : {}),
+        ...(p.viewConfig ? { viewConfig: copyViewConfig(p.viewConfig) } : {}),
       })),
     };
 
