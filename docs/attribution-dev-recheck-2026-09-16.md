@@ -4,7 +4,7 @@
 
 **기본 30개는 첫 입력이 저장된 대화 기준으로 통과했다. 추가 조건에서는 실패가 재현됐다.** 특히 레이아웃으로 workspace 생성·workspace 복제는 세 provider와 두 OS 모두에서 `activeButUnidentified`로 업데이트용 저장이 거부됐다.
 
-이하 §1~4는 수정 전 `bed8da30`의 관측 기록이다. 이후 사용자 요청에 따라 §3의 새 결함 두 건을 `36716d5f`에서 수정했다. 후속 검증과 기존 한계는 §5에 구분한다.
+이하 §1~4는 수정 전 `bed8da30`의 관측 기록이다. 이후 사용자 요청에 따라 §3의 새 결함 두 건을 `36716d5f`에서 수정했다. 후속 검증과 기존 한계는 §5에, 리뷰 지적과 추가 dev 검증은 §6에 구분한다.
 
 ## 환경과 판정 기준
 
@@ -201,12 +201,59 @@ node scripts/repro-codex-host-isolation.mjs ../.tmp/attribution-matrix/recheck/r
 
 §2의 **처음 실행한 무입력 Claude 복원 실패와 Windows Grok 1.0.13의 ID 부재는 이전부터 알려진 별도 한계로 남는다.** 이번 새 결함 두 건의 수정·통과에 포함하지 않는다.
 
+## 6. 리뷰 수정과 추가 dev 검증
+
+### 원인과 회귀 검사
+
+리뷰 3건을 `fd0e14e3`에서 수정하고, dev에서 추가로 관측한 background 저장의 unhandled rejection을 `09ece112`에서 수정했다.
+
+| 항목 | 수정 전 재현 | 수정 및 검증 |
+|---|---|---|
+| native 동일 깊이의 여러 agent | 정확한 PID 선택이 `None`이면 liveness도 `NoneAlive`로 축약됐다. 새 테스트에서 Claude 두 개가 확정 부재로 판정됐다. | 공통 tree 탐색이 후보들을 보존한다. 모호하면 `Ambiguous` → provider 없는 `ActiveButUnidentified`로 파괴 전 저장을 거절한다. 3×3 provider 쌍 × wrapper 유무 × snapshot 순서 = 36개 조건 통과. |
+| 조회 사이 native tree 변경 | 이전 provider 조회에 ID가 하나 있으면 새 liveness의 모호성을 `Identified`로 덮었다. 추가 실패 테스트로 확인했다. | 새 모호성이 이전 ID보다 우선한다. 세 provider × 이전 claim 유무 = 6개 조건에서 미소비 resume도 barrier를 우회하지 못함을 확인했다. |
+| WSL 느린 pane 뒤 작업 | HashMap의 실제 첫 작업을 막으면 정상 7개 중 3개만 시작했다. 남은 4개는 첫 chunk의 종료를 기다리다가 공통 deadline이 끝났다. | 최대 4개 worker가 완료 즉시 다음 pane을 받는다. 정상 7개가 모두 끝나야 느린 작업이 풀리는 결정적 검사 통과. 별도 16개 작업에서 동시 상한·DB 실패·reader panic의 pane별 격리·만료 후 실행 금지도 통과. |
+| retention 중복 반복 | 동일한 1,260개 관측을 5회 생성했다. | 중복 바깥 반복과 동일 fault/recovery 반복을 제거했다. DELETE/WAL × 보존 5종 × lifecycle 9종 × 파일 7종 × native/guest의 고유 1,260개 관측은 유지한다. |
+| 자동 저장과 critical 실패의 경합 | dev의 실제 workspace 진입 저장이 critical 거절에 합류하면서 unhandled rejection을 냈다. 새 테스트에서도 같은 미처리 오류 1개를 재현했다. | `persistSession`이 반환 promise에 오류 handler를 연결한다. background 호출은 오류를 기록하고, 명시적으로 기다리는 호출자는 동일한 실패를 받는다. critical 거절·디스크 저장 미실행·기존 명시적 저장 실패 전달 검사 통과. |
+
+Windows Rust 관련 검사 **239/239**(process tree 26, session attribution 17, Codex session 40, activity 156), UI checkpoint·lifecycle·hidden auto-close **122/122** 통과. 1,260개 matrix를 포함한 Codex 검사 40개 전체가 **51.11초**에 끝났다. 리뷰의 수정 전 단일 matrix 측정치는 약 268초였으며, 이를 같은 실행에서 잰 전후 benchmark로 취급하지 않는다. Rust all-targets Clippy `-D warnings`, 변경 Rust rustfmt, 변경 UI ESLint·Prettier, TypeScript와 production build를 통과했다.
+
+### 실제 dev — native 모호성
+
+`fd0e14e3`, dev PID `32992`에서 같은 provider 쌍 3개, 서로 다른 provider 쌍 3개, 세 provider 동시 실행 1개를 만들었다. `codex.exe`·`claude.exe`·`grok.exe`라는 이름의 실제 OS 자식 프로세스를 동일 parent 아래 유지하는 **process fixture**다. 이 7건 자체를 실제 CLI 대화 검사로 세지 않는다.
+
+- 7개 모두 provider·session ID 없는 `ActiveButUnidentified`였다.
+- 각 pane의 update·eviction critical 저장 **14/14 거절**을 확인했다.
+- 숨김 자동 종료를 1초로 설정하고 6.5초 기다렸다. backend checkpoint 거절 로그와 7개 PTY generation 보존·eviction 없음이 확인됐다.
+- fixture 제거 후 실제 Codex·Claude·Grok × Windows·WSL의 기존 12개 대화는 원래 ID로 복원·저장됐다.
+
+증거: `review-native-fd0e14e3.json`, `review-live-checks.json`. 앞의 JSON은 각 조합·판정·거절 사유·generation을 기록한다.
+
+### 실제 dev — WSL 8개 중 하나 지연
+
+같은 dev에서 기존 WSL Codex 2개와 새 실제 WSL Codex 6개를 함께 실행했다. 동봉 probe를 임시 wrapper로 감싸 지정한 pane 하나만 5초 지연시키고, 나머지는 원래 Linux SQLite 도구를 실행했다. 공통 3초 deadline과 실제 WSL 프로세스·저장소를 그대로 사용했다.
+
+- **3/3회** 지연 pane 하나만 `Unknown`, 나머지 WSL Codex 7개는 원래 상태·ID를 유지했다. 다른 provider/host의 10개 pane도 유지됐다.
+- 전체 update는 지연 pane 때문에 거절됐다. 정상 WSL 7개만 대상으로 한 eviction checkpoint는 모두 성공했다.
+- 통합 귀속 조회는 각각 **3,237 / 3,249 / 3,267 ms**였다. 이 수치는 WSL 이외의 조회 비용도 포함한다.
+- wrapper 제거 후 **18개 pane 전체**의 정상 critical 저장·귀속 일치를 확인했다. 원래 도구 바이너리의 SHA-256 일치도 확인했다.
+- 추가 pane을 제거한 뒤 기존 12개 ID가 유지됐고, 종료 옵션 ON의 실제 창 종료 후 디스크에도 보존됐다.
+
+증거: `review-wsl.json`, `review-wsl-pool.json`, `review-wsl-pool-starts.log`, `review-wsl-recovery.json`, `review-recovered-checks.json`, `review-close-result.json`. 최초 하네스는 전체 coverage 18개를 대상 7개로 잘못 가정해 중단됐다. 대상 ID로 필터링하도록 고쳤으며, 중단 결과는 `review-wsl-pool-harness-aborted.json`으로 남기고 위 3회에 포함하지 않았다.
+
+### 최종 UI 수정 후 재기동
+
+`09ece112`, dev PID `51988`에서 native 7개 조합을 다시 만들었다. update·eviction 14건 각각의 진행 중에 실제 workspace를 전환하여 background 저장을 합류시켰다. **14/14 거절, 7개 PTY 보존, WebView page error 0건**이었다. 오류 기록은 남고 unhandled rejection은 없어졌다.
+
+두 번째 dev 기동에서도 미진입 PTY 0개·저장 ID 12개 보존을 확인했다. fixture 제거 후 실제 12개 대화의 첫 진입·critical 저장과 종료 옵션 OFF의 실제 창 종료를 검사했고, 디스크 ID 변경은 0개였다. 첫 빌드의 ON 종료와 최종 빌드의 OFF 종료를 각각 1회 검사한 결과이며, §5의 6회 재기동을 여기에 합산하지 않는다.
+
+증거는 `.tmp/attribution-matrix/recheck/`의 `review-native.json`(`pageErrors: []`), `review-final-unvisited-checks.json`, `review-final-live-checks.json`, `review-final-close-result.json`, `review-final-dev.err.log`에 남겼다. 테스트 workspace·PTY를 제거하고 격리 dev 창을 정상 종료했다.
+
 ## 실행 범위와 제외
 
 - dev 빌드는 updater가 비활성이다. 여기서 검증한 update는 실제 UI/Rust 저장 경로이며, **설치 파일 다운로드·교체·설치 후 재기동 전체를 검증한 것은 아니다**. `app_update.rs`의 finalization 전체는 이 결과로 대체하지 않는다. 실제 backend pending 요청과 ACK는 숨김 자동 종료에서 별도로 검사했다.
 - 모든 축의 무제한 데카르트 곱을 실행했다는 뜻이 아니다. 표에 적은 현재 버전·host·상태와 주입 조건이 실제 실행 범위다. 다른 CLI 버전, OS 자체 재부팅, 모든 장애와 모든 생명주기 상태의 전체 교차는 포함하지 않는다.
 - Codex는 이번 기본 프로필에서 `--yolo`로 실행했다. Codex의 도구 승인 설정별 교차는 실행하지 않았으며, 실제 시작 안내·디렉터리 선택 대기는 별도로 검사했다. 요청 실패는 이번 실행에서 관측된 Grok WSL 429와 재시도만 확인했다. 세 provider 전체의 네트워크·인증 실패 조합을 실행했다는 뜻이 아니다.
 - 기본 라이프사이클 실험에서는 UI HMR을 발생시키지 않았다. IPC 장애·관측 경합 주입은 별도 WebView 준비 단계 이후 측정했다. 중단된 하네스 시도는 통과 횟수에서 제외한다.
-- §1~4는 제품 코드를 변경하지 않은 독립 검증이고, §5는 새 결함 두 건의 수정 후 별도 검증이다. 이전 검증의 반복 횟수를 새 커밋의 검사 횟수에 합산하지 않는다.
+- §1~4는 제품 코드를 변경하지 않은 독립 검증이고, §5와 §6은 각 수정 후 별도 검증이다. 이전 검증의 반복 횟수를 새 커밋의 검사 횟수에 합산하지 않는다.
 
-ADR 불필요: 기존 독립 Workspace/Layout 모델과 ADR-0120·0238의 WSL 조회 범위를 적용하여 잘못 복사된 pane 복원점과 잘못 시작된 deadline을 바로잡는다. API·저장 스키마·복원 명령은 변경하지 않으며, 관련 living doc을 함께 갱신했다.
+ADR 불필요: 기존 독립 Workspace/Layout 모델과 ADR-0120·0238의 WSL 조회 범위, ADR-0222의 모호한 활성 세션 차단·critical 실패 전달 계약을 직접 적용한다. 복원점 복사·deadline 시작·프로세스 모호성·작업 슬롯 대기·background 오류 처리를 바로잡으며, API·저장 스키마·복원 명령·동시 실행 상한을 바꾸지 않는다. 계획과 PR 갱신 직전에 판정하고 관련 living doc을 함께 갱신했다.
