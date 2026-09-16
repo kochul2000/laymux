@@ -713,6 +713,28 @@ describe("persistSession", () => {
     },
   );
 
+  it("handles a background save joining a rejected barrier without hiding the critical failure", async () => {
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+      "terminal-ambiguous": { generation: 7, state: "activeButUnidentified" },
+    });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const critical = flushSessionCheckpoint({ reason: "update", requireConclusive: true });
+      // Event handlers intentionally do not await this workspace-entry hint.
+      void persistSession({ reason: "workspaceEntry" });
+      await expect(critical).rejects.toThrow("activeButUnidentified");
+      await vi.waitFor(() =>
+        expect(warning).toHaveBeenCalledWith(
+          "[session-checkpoint] Failed to persist session:",
+          expect.objectContaining({ message: expect.stringContaining("activeButUnidentified") }),
+        ),
+      );
+      expect(saveSettings).not.toHaveBeenCalled();
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
   it("repeatedly refuses to evict a live hidden terminal whose attribution remains unknown", async () => {
     const id = "terminal-hidden-unknown";
     vi.mocked(getTerminalSessionAttributions).mockResolvedValue({

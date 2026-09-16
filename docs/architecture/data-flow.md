@@ -1460,6 +1460,8 @@ native tree에서 가장 얕은 깊이에 agent가 둘 이상 있으면 같은 p
 
 통합 attribution command는 세 provider lookup을 동시에 시작한다. 각 adapter가 독립 3초 deadline을 갖더라도 wall-clock에서 하나의 probe budget만 소비하므로 정상 close의 5초 저장 예산과 critical 이중 관측의 20초 ACK 예산을 넘기지 않는다.
 
+background 저장 힌트가 critical checkpoint에 합류하면 같은 실패를 받을 수 있다. `persistSession`은 반환 promise에 오류 기록 handler를 즉시 연결하여 대기하지 않는 이벤트 호출의 unhandled rejection을 막고, 반환 promise 자체의 실패는 그대로 유지한다. 명시적으로 기다리는 설정 저장·update·eviction 호출자가 실패를 성공으로 오인하지 않는다.
+
 WSL 세션 프로세스 probe는 환경과 PPID를 POSIX 셸 내장 `read`로 나누어 읽는다. 프로세스마다 환경 변수별 `sed`·`head` 파이프라인을 반복하지 않는다. pane marker를 상속한 중간 셸도 부모 관계 계산에 포함하고, rollout FD 열거는 이를 소비하는 Codex 프로세스에만 수행한다. 첫 번째 환경 변수 값, 공백·등호를 포함한 경로와 기존 3초 예산을 보존한다. 현재 Codex 대화 선택은 §13.5의 SQLite lifecycle 기록이 우선이며, FD 부재는 미소비 복원 요청 판정의 보조 증거다. Codex 진단 도구는 최대 4개를 동시에 실행하며, 완료된 슬롯은 다른 슬롯의 느린 작업을 기다리지 않고 다음 pane을 즉시 시작한다. 모든 실행은 원래 조회의 공통 3초 deadline에서 남은 시간만 사용하며, 실패나 reader panic은 해당 pane에만 귀속한다. lifecycle 선택과 중복 ID 검증은 결과를 모은 뒤 기존 경로에서 수행한다.
 
 **agent를 종료한 pane은 shell로 복원한다**([ADR-0195](../adr/0195-agent-session-cleared-on-shell-return.md), [ADR-0222](../adr/0222-agent-session-checkpoint-coordinator.md)). 판정 SoT는 Rust `get_terminal_session_attributions`다. 이 command는 live PTY의 generation과 native/WSL process liveness, 세 provider의 정확 귀속 결과를 한 verdict로 묶는다. 프론트 activity는 체크포인트 요청 힌트일 뿐 세션 삭제·보존 판정에 쓰지 않는다.

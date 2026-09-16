@@ -282,9 +282,15 @@ export function flushSessionCheckpoint(
  * Called by workspace store save actions and other persistence triggers.
  * No-op if saveBeforeClose() is already in progress (prevents duplicate saves during teardown).
  */
-export async function persistSession(options: SessionCheckpointOptions = {}): Promise<void> {
-  if (closingDown || isSettingsWriteBlocked()) return;
-  await flushSessionCheckpoint(options);
+export function persistSession(options: SessionCheckpointOptions = {}): Promise<void> {
+  if (closingDown || isSettingsWriteBlocked()) return Promise.resolve();
+  const pending = flushSessionCheckpoint(options).then(() => {});
+  // Background hints may join a failing critical barrier. Handle their rejected
+  // promise while preserving the rejection for callers that explicitly await it.
+  void pending.catch((error: unknown) => {
+    console.warn("[session-checkpoint] Failed to persist session:", error);
+  });
+  return pending;
 }
 
 /**
