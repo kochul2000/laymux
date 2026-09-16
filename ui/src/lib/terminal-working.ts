@@ -1,11 +1,11 @@
 import type { TerminalInstance } from "@/stores/terminal-store";
 import { terminalTaskPolicy } from "./terminal-task";
 
-/** Automatic sleep policy; never infer work from an icon or a display message. */
+/** Displayed work count follows the task, not the sleep grace period or output. */
 export function isTerminalWorking(instance: TerminalInstance): boolean {
-  return terminalTaskPolicy(instance).inhibitSleep;
+  return instance.task?.state === "running";
 }
 
-export function hasWorkingTerminal(instances: readonly TerminalInstance[]): boolean {
-  return instances.some(isTerminalWorking);
+export function hasSleepInhibitingTerminal(instances: readonly TerminalInstance[]): boolean {
+  return instances.some((instance) => terminalTaskPolicy(instance).inhibitSleep);
 }

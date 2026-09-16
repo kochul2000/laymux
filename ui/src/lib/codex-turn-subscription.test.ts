@@ -56,6 +56,52 @@ afterEach(() => {
 });
 
 describe("Codex turn observation", () => {
+  it("restores a prompt seen before the first lifecycle poll without an alert", async () => {
+    useTerminalStore.getState().updateInstanceInfo("pane", { generation: 1 });
+    observeTaskInput("pane", true);
+    result(snapshot("unknown"));
+    stop = subscribeCodexTurnStates();
+    await tick();
+    result(snapshot("running"));
+    await tick();
+    expect(instance().task).toMatchObject({
+      source: "1:1:session",
+      taskId: "a",
+      state: "waiting",
+      observation: "confirmed",
+    });
+    expect(notifications()).toHaveLength(0);
+    await tick();
+    expect(instance().task?.state).toBe("waiting");
+    expect(notifications()).toHaveLength(0);
+    observeTaskInput("pane", false);
+    await tick();
+    expect(instance().task?.state).toBe("running");
+  });
+
+  it.each(["resolved", "generation", "session", "completed"])(
+    "does not restore an invalid initial prompt (%s)",
+    async (reason) => {
+      useTerminalStore.getState().updateInstanceInfo("pane", { generation: 1 });
+      if (reason === "session") {
+        result(snapshot("running"));
+        stop = subscribeCodexTurnStates();
+        await tick();
+      }
+      observeTaskInput("pane", true);
+      if (reason === "resolved") observeTaskInput("pane", false);
+      if (reason === "generation")
+        useTerminalStore.getState().updateInstanceInfo("pane", { generation: 2 });
+      result({
+        ...snapshot(reason === "completed" ? "completed" : "running", "b", "2"),
+        generation: reason === "generation" ? 2 : 1,
+      });
+      stop ??= subscribeCodexTurnStates();
+      await tick();
+      expect(instance().task?.state).toBe(reason === "completed" ? "ended" : "running");
+    },
+  );
+
   it("rebinds a prompt received before the next turn poll without needing a redraw", async () => {
     result(snapshot("completed"));
     stop = subscribeCodexTurnStates();

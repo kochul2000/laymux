@@ -3565,6 +3565,42 @@ describe("TerminalView", () => {
     ).toBe("continuing after approval");
   });
 
+  it("restores an approval from the attach snapshot without clearing it or notifying", async () => {
+    const id = "t-codex-restore-prompt";
+    const snapshot = new TextEncoder().encode(
+      "Would you like to run the following command?\r\nPress enter to confirm or esc to cancel\r\n",
+    );
+    mockAttachTerminalOutput.mockResolvedValueOnce({
+      state: {
+        version: 1,
+        generation: 1,
+        snapshotStartSeq: 0,
+        snapshotSeq: snapshot.length,
+        sourceStartSeq: 0,
+        sourceSeq: snapshot.length,
+        snapshotKind: "raw",
+        protocolRevision: 0,
+        modes: { bracketedPaste: false },
+        geometry: { revision: 0, cols: 80, rows: 24 },
+      },
+      snapshot: Array.from(snapshot),
+      flowControl: { token: "lease-restore-prompt", windowBytes: 524288 },
+    });
+    stopTaskSubscription = subscribeTerminalTasks();
+    render(<TerminalView instanceId={id} profile="PowerShell" syncGroup="" />);
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo(id, {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+    await waitForTerminalInputReady();
+    expect(useTerminalStore.getState().instances.find((entry) => entry.id === id)).toMatchObject({
+      generation: 1,
+      task: { state: "waiting", observation: "confirmed" },
+    });
+    expect(useNotificationStore.getState().notifications).toHaveLength(0);
+  });
+
   it("does not infer Codex identity from a prompt-shaped output", async () => {
     render(<TerminalView instanceId="t-codex-running-prompt" profile="PowerShell" syncGroup="" />);
     useTerminalStore.getState().updateInstanceInfo("t-codex-running-prompt", {

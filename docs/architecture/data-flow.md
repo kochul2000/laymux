@@ -1027,6 +1027,10 @@ Codex 종료 상태에서 새 입력을 제출하면 기존 source·종료 taskI
 
 자동 작업 알림은 `subscribeTerminalTasks` 한 곳에서 입력 대기 진입·종료 전이를 발행한다. 최초 종료·입력 대기는 알리지 않으며 반복 관측·결과 보강·출력 정지·조회 실패도 알림을 만들지 않는다. 같은 작업의 진행 → 지연 → 종료는 한 번 알린다. 대기 알림은 기존 `requiresAction` 도착 보호와 읽음 정책을 유지한다. Rust의 합성 Claude 성공 알림과 OSC 133 자동 Notify, 프론트의 무출력 성공 추정은 사용하지 않는다. 명시적 `lx notify`는 독립이다.
 
+최초 output attach는 snapshot을 관측하기 전에 generation을 확정한다. 첫 Codex lifecycle 조회보다 먼저 복원한 입력 대기는 현재 PTY·앱의 로컬 source일 때만 첫 running 턴에 무알림으로 재귀속한다. 이미 확인한 다른 세션의 대기나 해소·종료된 관측은 이전하지 않는다.
+
+Desktop·Remote의 작업 중 개수는 공통 task의 running 상태만 센다. 관측 지연의 60초 절전 만료나 작업 미확인 pane의 출력 활동은 작업 개수를 바꾸지 않는다.
+
 절전과 실제 clear는 `terminalTaskPolicy`를 읽는다. 확인된 진행은 자동 억제하고 지연은 마지막 유효 진행 관측부터 60초까지만 유지한다. 실패 재시도·출력은 기한을 늘리지 않으며 1초 정책 타이머가 조용한 pane도 해제한다. tooltip은 60초 만료 사유를 표시하고 수동 keepAwake·다른 pane의 근거는 유지한다. lifecycle 없는 비통합 셸·미지원 TUI는 출력 활동 동안만 예외적으로 억제한다.
 
 clear는 확인된 작업 없음·종료만 허용하고 나머지는 busyPolicy를 따른다. 미지원 TUI는 항상 skip한다. 미확인 셸의 예외는 PTY 준비·현재 generation에서 성공한 liveness 조회·shell 분류·작업/대기/출력 부재가 모두 필요하다. `clearPane`가 최대 3초(요청 deadline 이내)로 liveness를 새로 조회하며, 실패·교체는 보호한다. 이 예외는 작업 없음의 증명이 아니며 미검출 조용한 전경 작업에 입력이 섞일 위험은 남는다.

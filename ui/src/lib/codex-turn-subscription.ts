@@ -1,6 +1,7 @@
 import { getCodexTurnStates, type CodexTurnSnapshot } from "./tauri-api";
 import { useTerminalStore, type TerminalInstance } from "@/stores/terminal-store";
 import { observeTaskInput, observeTerminalTask } from "./terminal-task-observers";
+import { taskSource } from "./terminal-task";
 
 const POLL_MS = 1000;
 const STALE_MS = 6000;
@@ -95,6 +96,13 @@ export function subscribeCodexTurnStates(): () => void {
         const taskId = snapshot.turnId ?? "idle";
         const deferred = current.deferredTaskInput;
         const changedTask = current.task?.source !== source || current.task?.taskId !== taskId;
+        // A prompt can precede the first lifecycle lookup. Only the local, current
+        // PTY/app scope may be rebound; a previous concrete session never transfers.
+        const restoredWaiting =
+          snapshot.state === "running" &&
+          current.task?.state === "waiting" &&
+          current.task.kind === "input" &&
+          current.task.source === taskSource(current);
         useTerminalStore.getState().updateInstanceInfo(id, {
           codexTurn: snapshot,
           ...(changedTask ? { deferredTaskInput: undefined } : {}),
@@ -102,8 +110,13 @@ export function subscribeCodexTurnStates(): () => void {
         observeTerminalTask(id, {
           source,
           taskId,
-          state:
-            snapshot.state === "running" ? "running" : snapshot.state === "idle" ? "idle" : "ended",
+          state: restoredWaiting
+            ? "waiting"
+            : snapshot.state === "running"
+              ? "running"
+              : snapshot.state === "idle"
+                ? "idle"
+                : "ended",
           result:
             snapshot.state === "completed"
               ? "success"

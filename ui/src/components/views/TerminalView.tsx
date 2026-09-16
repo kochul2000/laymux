@@ -5667,6 +5667,10 @@ export function TerminalView({
           .then(() =>
             withCompositionScrollRebuild(async () => {
               if (!isCurrentAttach()) return;
+              // Bind observations to the attached PTY before replay can restore a modal.
+              useTerminalStore
+                .getState()
+                .updateInstanceInfo(instanceId, { generation: attachment.state.generation });
               terminal.reset();
               resetStreamDerivedCursorState();
               if (cached) {
@@ -5720,9 +5724,6 @@ export function TerminalView({
               );
               if (!isCurrentAttach()) return;
               outputGeneration = attachment.state.generation;
-              useTerminalStore
-                .getState()
-                .updateInstanceInfo(instanceId, { generation: outputGeneration });
               if (supportsV3) {
                 await activateOutputV3(
                   epoch,

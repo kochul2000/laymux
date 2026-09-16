@@ -8,7 +8,7 @@ import {
 } from "@/lib/sleep-inhibit-coordinator";
 import { shouldInhibitSleep } from "@/lib/sleep-prevention";
 import { onSleepInhibitChanged } from "@/lib/tauri-api";
-import { hasWorkingTerminal } from "@/lib/terminal-working";
+import { hasSleepInhibitingTerminal } from "@/lib/terminal-working";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 
@@ -33,7 +33,7 @@ export function useSleepPrevention(): void {
       // the common case — don't walk them on every store update to reach a
       // foregone conclusion.
       const hasBusy =
-        axes.keepAwakeWhenBusy && hasWorkingTerminal(useTerminalStore.getState().instances);
+        axes.keepAwakeWhenBusy && hasSleepInhibitingTerminal(useTerminalStore.getState().instances);
       const staleTaskExpired = useTerminalStore
         .getState()
         .instances.some((instance) => terminalTaskPolicy(instance).sleepExpired);
