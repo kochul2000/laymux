@@ -21,15 +21,13 @@ import {
 } from "@/lib/tauri-api";
 import { persistSession } from "@/lib/persist-session";
 import { sendDesktopNotification } from "./useOsNotification";
-import {
-  CLAUDE_INPUT_PENDING_MARKER,
-  CODEX_INPUT_PENDING_MARKER,
-  detectActivityFromCommand,
-} from "@/lib/activity-detection";
+import { detectActivityFromCommand } from "@/lib/activity-detection";
 import { getHandler, type RawTerminalState } from "@/lib/activity-handler";
 import { isStaleActivity } from "@/lib/activity-order";
 import { extractCodexTitleMessage } from "@/lib/codex-activity-handler";
 import { subscribeCodexTurnStates } from "@/lib/codex-turn-subscription";
+import { observeTaskTitle, observeTerminalTask } from "@/lib/terminal-task-observers";
+import { subscribeTerminalTasks } from "@/lib/terminal-task-subscription";
 import { useSettingsStore } from "@/stores/settings-store";
 
 const CWD_PERSIST_DEBOUNCE_MS = 2000;
@@ -83,6 +81,7 @@ export function useSyncEvents() {
   );
 
   useEffect(() => {
+    const unsubscribeTasks = subscribeTerminalTasks();
     const unsubscribeCodexTurns = subscribeCodexTurnStates();
     let cancelled = false;
     const unlisteners: (() => void)[] = [];
@@ -124,21 +123,6 @@ export function useSyncEvents() {
     trackListener(
       onClaudeMessageChanged((data) => {
         if (cancelled) return;
-        const instance = useTerminalStore
-          .getState()
-          .instances.find((i) => i.id === data.terminalId);
-        // The frontend's modal detector sets activityMessage to
-        // CLAUDE_INPUT_PENDING_MARKER when a permission/response prompt is on
-        // screen. Rust fires `claude-message-changed` on every title change
-        // (i.e. every spinner-tick frame while Claude is animating ✶/Braille
-        // behind the modal), so without this guard the marker would be
-        // clobbered within ~150 ms by the title-derived task description and
-        // the status icon would flap back to ⏳. The marker is cleared by
-        // the same detector when the modal scrolls out of the rolling
-        // buffer, at which point the next Rust message naturally applies.
-        if (instance?.activityMessage === CLAUDE_INPUT_PENDING_MARKER) {
-          return;
-        }
         useTerminalStore.getState().updateInstanceInfo(data.terminalId, {
           activityMessage: data.message,
         });
@@ -161,6 +145,12 @@ export function useSyncEvents() {
         if (cancelled) return;
         const { updateInstanceInfo, instances } = useTerminalStore.getState();
         const instance = instances.find((i) => i.id === data.terminalId);
+        if (
+          data.generation !== undefined &&
+          instance?.generation !== undefined &&
+          data.generation !== instance.generation
+        )
+          return;
         const detectedActivity = data.interactiveApp
           ? ({ type: "interactiveApp", name: data.interactiveApp } as const)
           : undefined;
@@ -175,12 +165,16 @@ export function useSyncEvents() {
           title: data.title,
         };
 
-        const updates: Record<string, unknown> = { title: data.title };
+        const updates: Record<string, unknown> = {
+          title: data.title,
+          ...(data.generation !== undefined ? { generation: data.generation } : {}),
+        };
         // Only the activity is ordered against the reconcile worker's verdicts
         // (ADR-0135). The title, the Codex status message and the active-title
         // signal below all describe this event alone and stay valid even when a
         // newer verdict has already classified the pane.
         if (!isStaleActivity(instance?.activitySequence, data.activitySequence)) {
+          if (data.appSession !== undefined) updates.appSession = data.appSession;
           if (detectedActivity) {
             updates.activity = detectedActivity;
           } else if (data.interactiveAppExited && currentActivity?.type === "interactiveApp") {
@@ -209,7 +203,7 @@ export function useSyncEvents() {
         const resolvedActivity = detectedActivity ?? currentActivity;
         const codexActivity =
           resolvedActivity?.type === "interactiveApp" && resolvedActivity.name === "Codex";
-        if (codexActivity && instance?.activityMessage !== CODEX_INPUT_PENDING_MARKER) {
+        if (codexActivity) {
           const titleMessage = extractCodexTitleMessage(data.title);
           if (titleMessage !== undefined || !instance?.activityMessage) {
             updates.activityMessage = titleMessage;
@@ -218,9 +212,8 @@ export function useSyncEvents() {
 
         updateInstanceInfo(data.terminalId, updates as Parameters<typeof updateInstanceInfo>[1]);
 
-        if (handler.isActiveTitle?.(data.title)) {
-          markOutputActive(data.terminalId);
-        }
+        if (!isStaleActivity(instance?.activitySequence, data.activitySequence))
+          observeTaskTitle(data.terminalId, data.title);
       }),
     );
 
@@ -293,13 +286,24 @@ export function useSyncEvents() {
         useTerminalStore.getState().updateInstanceInfo(data.terminalId, {
           title: data.title,
         });
+        observeTaskTitle(data.terminalId, data.title);
       }),
     );
 
     trackListener(
       onCommandStatus((data) => {
         if (cancelled) return;
-        const update: Record<string, unknown> = {};
+        const instanceAtEvent = useTerminalStore
+          .getState()
+          .instances.find((entry) => entry.id === data.terminalId);
+        if (
+          data.generation !== undefined &&
+          instanceAtEvent?.generation !== undefined &&
+          data.generation !== instanceAtEvent.generation
+        )
+          return;
+        const update: Record<string, unknown> =
+          data.generation !== undefined ? { generation: data.generation } : {};
 
         if (data.command !== undefined && data.command !== "__preexec__") {
           update.lastCommand = data.command;
@@ -328,7 +332,7 @@ export function useSyncEvents() {
           }
         }
 
-        if (data.exitCode !== undefined) {
+        if (data.exitCode !== undefined && data.phase === undefined) {
           update.lastExitCode = data.exitCode;
           update.lastCommandAt = Date.now();
           const instance = useTerminalStore
@@ -352,15 +356,30 @@ export function useSyncEvents() {
           }
         }
 
-        useTerminalStore.getState().updateInstanceInfo(
-          data.terminalId,
-          update as {
-            lastCommand?: string;
-            lastExitCode?: number;
-            lastCommandAt?: number;
-            activity?: { type: import("@/stores/terminal-store").TerminalActivityType };
-          },
-        );
+        useTerminalStore.getState().updateInstanceInfo(data.terminalId, update);
+        const current = useTerminalStore
+          .getState()
+          .instances.find((entry) => entry.id === data.terminalId);
+        if (current && current.activity?.type !== "interactiveApp") {
+          if (data.phase === "start") {
+            observeTerminalTask(data.terminalId, {
+              state: "running",
+              taskId: String((current.task?.sequence ?? 0) + 1),
+            });
+          } else if (data.phase === "end" && current.task?.state !== "idle") {
+            observeTerminalTask(data.terminalId, {
+              state: "ended",
+              result:
+                data.exitCode === undefined
+                  ? undefined
+                  : data.exitCode === 0
+                    ? "success"
+                    : "failure",
+            });
+          } else if (data.phase === "prompt" && !current.task?.state) {
+            observeTerminalTask(data.terminalId, { state: "idle" });
+          }
+        }
       }),
     );
 
@@ -393,11 +412,11 @@ export function useSyncEvents() {
             // or an older verdict delivered after this one would be accepted
             // and change the pane.
             if (instance.activitySequence !== activitySequence) {
-              updateInstanceInfo(terminalId, { activitySequence });
+              updateInstanceInfo(terminalId, { activitySequence, livenessConfirmed: true });
             }
             continue;
           }
-          updateInstanceInfo(terminalId, { activity, activitySequence });
+          updateInstanceInfo(terminalId, { activity, activitySequence, livenessConfirmed: true });
           attributionChanged = true;
         }
         if (attributionChanged) void persistSession({ reason: "mutation" });
@@ -420,7 +439,7 @@ export function useSyncEvents() {
         if (cancelled) return;
         const pending = new Map<string, TerminalActivityInfo>();
         for (const [terminalId, info] of Object.entries(states)) {
-          if (info.activity?.type === "interactiveApp") {
+          if (info.activity) {
             pending.set(terminalId, info.activity);
           }
         }
@@ -437,7 +456,7 @@ export function useSyncEvents() {
             // fresher than the mount snapshot, so we must not override it. This
             // closes the narrow reload race in both directions.
             if (activity && !inst.activity) {
-              updateInstanceInfo(inst.id, { activity });
+              updateInstanceInfo(inst.id, { activity, livenessConfirmed: true });
             }
             pending.delete(inst.id);
           }
@@ -469,6 +488,7 @@ export function useSyncEvents() {
     return () => {
       cancelled = true;
       unsubscribeCodexTurns();
+      unsubscribeTasks();
       unsubStore();
       if (initialSyncUnsub) initialSyncUnsub();
       if (cwdPersistTimerRef.current) clearTimeout(cwdPersistTimerRef.current);

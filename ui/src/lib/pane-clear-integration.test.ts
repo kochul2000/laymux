@@ -1,11 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/tauri-api", () => ({
+  getTerminalStates: vi
+    .fn()
+    .mockImplementation(async () =>
+      Object.fromEntries(
+        useTerminalStore
+          .getState()
+          .instances.map((entry) => [entry.id, { activity: entry.activity ?? { type: "shell" } }]),
+      ),
+    ),
   writeTerminalInput: vi.fn().mockResolvedValue(undefined),
   writeToTerminal: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { writeTerminalInput, writeToTerminal } from "@/lib/tauri-api";
+import { getTerminalStates, writeTerminalInput, writeToTerminal } from "@/lib/tauri-api";
+import { observeTerminalTask } from "./terminal-task-observers";
 import { clearPane } from "./pane-clear";
 import { useDockStore } from "@/stores/dock-store";
 import { useTerminalRestartStore } from "@/stores/terminal-restart-store";
@@ -96,11 +106,31 @@ describe("clearPane against live stores", () => {
     expect(result.cleared).toEqual(["terminal-pane-b"]);
   });
 
+  it("protects an unknown shell when current liveness fails", async () => {
+    seedWorkspace();
+    vi.mocked(getTerminalStates).mockRejectedValueOnce(new Error("offline"));
+    const result = await clearPane("pane-a");
+    expect(result.skipped).toEqual([{ terminalId: "terminal-pane-a", reason: "busy" }]);
+    expect(writeTerminalInput).not.toHaveBeenCalled();
+  });
+
+  it("does not clear a replacement PTY using an old liveness response", async () => {
+    seedWorkspace();
+    vi.mocked(getTerminalStates).mockImplementationOnce(async () => {
+      useTerminalStore.getState().updateInstanceInfo("terminal-pane-a", { generation: 2 });
+      return { "terminal-pane-a": { activity: { type: "shell" } } };
+    });
+    const result = await clearPane("pane-a");
+    expect(result.cleared).toEqual([]);
+    expect(writeTerminalInput).not.toHaveBeenCalled();
+  });
+
   it.each(["Codex", "Grok"])("submits /clear to a %s pane", async (name) => {
     seedWorkspace();
     useTerminalStore.getState().updateInstanceInfo("terminal-pane-a", {
       activity: { type: "interactiveApp", name },
     });
+    observeTerminalTask("terminal-pane-a", { state: "idle" });
     await clearPane("pane-a");
     expect(vi.mocked(writeTerminalInput)).toHaveBeenCalledWith("terminal-pane-a", "/clear", true);
   });

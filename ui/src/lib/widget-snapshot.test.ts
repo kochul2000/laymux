@@ -14,6 +14,7 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useDockStore } from "@/stores/dock-store";
 import { defaultWidgets, type WidgetInstance } from "@/lib/widget-placement";
+import { observeTask } from "./terminal-task";
 import { buildRemoteWidgetSnapshot } from "./widget-snapshot";
 
 const NOW = new Date("2026-08-03T12:00:00Z");
@@ -219,9 +220,27 @@ describe("buildRemoteWidgetSnapshot", () => {
   it("counts terminal activity in the scope the placement asked for", async () => {
     useTerminalStore.setState({
       instances: [
-        terminal({ id: "t1", workspaceId: "ws-1", activity: { type: "running" } }),
+        terminal({
+          id: "t1",
+          workspaceId: "ws-1",
+          activity: { type: "running" },
+          task: observeTask(
+            undefined,
+            { source: "s", taskId: "t", sequence: 1, state: "running" },
+            NOW.getTime(),
+          ),
+        }),
         terminal({ id: "t2", workspaceId: "ws-1" }),
-        terminal({ id: "t3", workspaceId: "ws-2", activity: { type: "running" } }),
+        terminal({
+          id: "t3",
+          workspaceId: "ws-2",
+          activity: { type: "running" },
+          task: observeTask(
+            undefined,
+            { source: "s", taskId: "t", sequence: 1, state: "running" },
+            NOW.getTime(),
+          ),
+        }),
       ],
     });
     placeWidgets({

@@ -1,6 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./tauri-api", () => ({
+  getTerminalStates: vi
+    .fn()
+    .mockImplementation(async () =>
+      Object.fromEntries(
+        useTerminalStore
+          .getState()
+          .instances.map((entry) => [entry.id, { activity: entry.activity ?? { type: "shell" } }]),
+      ),
+    ),
   writeTerminalInput: vi.fn().mockResolvedValue(undefined),
   writeToTerminal: vi.fn().mockResolvedValue(undefined),
 }));

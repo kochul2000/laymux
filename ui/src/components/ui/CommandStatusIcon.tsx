@@ -1,6 +1,16 @@
 import type { StatusIconGlyph } from "@/lib/activity-markers";
 import { getCommandStatusIconKind } from "@/lib/command-status-icon";
-import { CheckIcon, HourglassIcon, MinusIcon, XIcon, type IconProps } from "./icons";
+import {
+  CircleHelpIcon,
+  CircleSlashIcon,
+  MessageCircleQuestionIcon,
+  SquareIcon,
+  CheckIcon,
+  HourglassIcon,
+  MinusIcon,
+  XIcon,
+  type IconProps,
+} from "./icons";
 
 interface CommandStatusIconProps extends Omit<IconProps, "aria-label"> {
   status: StatusIconGlyph;
@@ -33,6 +43,14 @@ export function CommandStatusIcon({
       return <CheckIcon {...sharedProps} />;
     case "failure":
       return <XIcon {...sharedProps} />;
+    case "waiting":
+      return <MessageCircleQuestionIcon {...sharedProps} />;
+    case "interrupted":
+      return <CircleSlashIcon {...sharedProps} />;
+    case "ended":
+      return <SquareIcon {...sharedProps} />;
+    case "unknown":
+      return <CircleHelpIcon {...sharedProps} />;
     case "idle":
       return <MinusIcon {...sharedProps} />;
   }

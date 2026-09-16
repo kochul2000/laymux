@@ -40,9 +40,9 @@ import { focusWorkspacePane, switchActiveWorkspace } from "@/lib/workspace-trans
 import { runWorkspaceClearFromUi } from "@/lib/workspace-clear-action";
 import { HiddenItemsShelf } from "./workspace-selector/HiddenItemsShelf";
 import { UndoSnackbar } from "@/components/ui/UndoSnackbar";
+import { ActivityIcon, Clock3Icon } from "@/components/ui/icons";
 import { CommandStatusIcon } from "@/components/ui/CommandStatusIcon";
 import { TwoClickConfirmButton } from "@/components/ui/TwoClickConfirmButton";
-import { getCommandStatusIconKind } from "@/lib/command-status-icon";
 import {
   BroomIcon,
   CopyPlusIcon,
@@ -409,24 +409,17 @@ function WorkspaceItem({
                         codexSettings,
                         grokSettings,
                       );
-                      // `outputActive` belongs in the gate, not just the input: a
-                      // shell streaming output before any command was captured is
-                      // working, and sleep prevention already counts it as busy
-                      // (ADR-0114). Dropping it here would leave the row showing
-                      // the previous result while the machine stays awake for it.
-                      const tCmdStatus =
-                        ts.lastCommand || ts.outputActive || ts.activity?.type === "interactiveApp"
-                          ? computeCommandStatus(
-                              ts.lastExitCode,
-                              ts.outputActive,
-                              ts.activityMessage,
-                              ts.activity,
-                              ts.title,
-                              paneStatusSettings.mode,
-                              paneStatusSettings.delimiter,
-                              ts.codexTurn,
-                            )
-                          : null;
+                      const tCmdStatus = computeCommandStatus(
+                        ts.lastExitCode,
+                        ts.outputActive,
+                        ts.activityMessage,
+                        ts.activity,
+                        ts.title,
+                        paneStatusSettings.mode,
+                        paneStatusSettings.delimiter,
+                        ts.codexTurn,
+                        ts.task,
+                      );
                       const actInfo = formatActivity(ts.activity);
                       const lastInput = getTerminalLastInput(ts);
                       return (
@@ -559,6 +552,7 @@ function WorkspaceItem({
                                 {wsDisplay.result && tCmdStatus?.icon ? (
                                   <span
                                     data-testid={`pane-cmd-badge-${ts.id}`}
+                                    title={`${tCmdStatus.label}${tCmdStatus.outputActive ? ` · ${t("commandStatus.output")}` : ""}`}
                                     className="ml-auto shrink-0"
                                     style={{
                                       color: tCmdStatus.color,
@@ -566,7 +560,8 @@ function WorkspaceItem({
                                         ? "1.5px solid var(--accent)"
                                         : "1.5px solid transparent",
                                       borderRadius: "var(--radius-md)",
-                                      width: 16,
+                                      minWidth: 16,
+                                      gap: 3,
                                       height: 16,
                                       display: "inline-flex",
                                       alignItems: "center",
@@ -581,10 +576,24 @@ function WorkspaceItem({
                                   >
                                     <CommandStatusIcon
                                       status={tCmdStatus.icon}
-                                      label={t(
-                                        `commandStatus.${getCommandStatusIconKind(tCmdStatus.icon)}`,
-                                      )}
+                                      label={tCmdStatus.label}
                                     />
+                                    {tCmdStatus.observation === "stale" && (
+                                      <Clock3Icon
+                                        size={10}
+                                        role="img"
+                                        aria-hidden={false}
+                                        aria-label={t("commandStatus.stale")}
+                                      />
+                                    )}
+                                    {tCmdStatus.outputActive && (
+                                      <ActivityIcon
+                                        size={10}
+                                        role="img"
+                                        aria-hidden={false}
+                                        aria-label={t("commandStatus.output")}
+                                      />
+                                    )}
                                   </span>
                                 ) : (
                                   // Rendered as a standalone ExitFade (not a ternary branch) so the

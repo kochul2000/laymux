@@ -281,9 +281,51 @@ pub fn extract_branch_from_command(command: &str) -> Option<String> {
     parts.last().map(|s| s.to_string())
 }
 
+/// Task boundaries are independent of output and notification hooks (ADR-0250).
+pub fn task_lifecycle(event: &OscEvent) -> Option<(&'static str, Option<i32>)> {
+    if event.code != 133 {
+        return None;
+    }
+    match event.param.as_deref() {
+        Some("A") => Some(("prompt", None)),
+        Some("C") => Some(("start", None)),
+        Some("D") => Some(("end", event.data.parse().ok())),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn task_lifecycle_keeps_missing_result_distinct_from_success() {
+        assert_eq!(
+            task_lifecycle(&make_event(133, Some("A"), "")),
+            Some(("prompt", None))
+        );
+        assert_eq!(
+            task_lifecycle(&make_event(133, Some("C"), "")),
+            Some(("start", None))
+        );
+        assert_eq!(
+            task_lifecycle(&make_event(133, Some("D"), "")),
+            Some(("end", None))
+        );
+        assert_eq!(
+            task_lifecycle(&make_event(133, Some("D"), "0")),
+            Some(("end", Some(0)))
+        );
+        assert_eq!(
+            task_lifecycle(&make_event(133, Some("D"), "7")),
+            Some(("end", Some(7)))
+        );
+        assert_eq!(
+            task_lifecycle(&make_event(133, Some("E"), "echo test")),
+            None
+        );
+        assert_eq!(task_lifecycle(&make_event(2, None, "✳ Claude Code")), None);
+    }
     use crate::osc::OscEvent;
 
     fn make_event(code: u16, param: Option<&str>, data: &str) -> OscEvent {

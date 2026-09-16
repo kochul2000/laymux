@@ -5,6 +5,12 @@ import {
   ArrowUp,
   Bell,
   Check,
+  CircleHelp,
+  CircleSlash,
+  MessageCircleQuestion,
+  Square,
+  Clock3,
+  Activity,
   ChevronDown,
   ChevronLeft,
   Circle,
@@ -56,6 +62,12 @@ const ICONS = Object.freeze({
   ArrowUp,
   Bell,
   Check,
+  CircleHelp,
+  CircleSlash,
+  MessageCircleQuestion,
+  Square,
+  Clock3,
+  Activity,
   ChevronDown,
   ChevronLeft,
   Circle,
@@ -168,6 +180,21 @@ const COMMAND_STATUS_ICONS = Object.freeze({
 });
 
 export function commandStatusIconName(status) {
+  // Typed task semantics are authoritative; the glyph map is legacy presentation only.
+  if (status && typeof status === "object") {
+    if (status.taskState === "idle") return "Minus";
+    if (status.taskState === "running") return "Hourglass";
+    if (status.taskState === "waiting") return "MessageCircleQuestion";
+    if (status.taskState === "ended")
+      return status.taskResult === "success"
+        ? "Check"
+        : status.taskResult === "failure"
+          ? "X"
+          : status.taskResult === "interrupted"
+            ? "CircleSlash"
+            : "Square";
+    return "CircleHelp";
+  }
   return COMMAND_STATUS_ICONS[status] || null;
 }
 

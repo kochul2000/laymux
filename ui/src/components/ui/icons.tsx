@@ -8,6 +8,11 @@ import {
   BrushCleaning,
   Camera,
   Check,
+  Activity,
+  Clock3,
+  CircleHelp,
+  CircleSlash,
+  MessageCircleQuestion,
   ChevronDown,
   ChevronRight,
   Columns2,
@@ -307,4 +312,19 @@ export function ZoomInIcon(props: IconProps) {
 
 export function ZoomOutIcon(props: IconProps) {
   return renderIcon(ZoomOut, props);
+}
+export function CircleHelpIcon(props: IconProps) {
+  return renderIcon(CircleHelp, props);
+}
+export function CircleSlashIcon(props: IconProps) {
+  return renderIcon(CircleSlash, props);
+}
+export function MessageCircleQuestionIcon(props: IconProps) {
+  return renderIcon(MessageCircleQuestion, props);
+}
+export function ActivityIcon(props: IconProps) {
+  return renderIcon(Activity, props);
+}
+export function Clock3Icon(props: IconProps) {
+  return renderIcon(Clock3, props);
 }

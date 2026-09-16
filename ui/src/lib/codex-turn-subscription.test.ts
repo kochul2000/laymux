@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getCodexTurnStates, type CodexTurnSnapshot } from "./tauri-api";
+import { subscribeTerminalTasks } from "./terminal-task-subscription";
+import { observeTaskInput } from "./terminal-task-observers";
 import { subscribeCodexTurnStates } from "./codex-turn-subscription";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useNotificationStore } from "@/stores/notification-store";
@@ -23,6 +25,7 @@ const snapshot = (
   state,
 });
 let stop: (() => void) | undefined;
+let stopTasks: () => void;
 const instance = () => useTerminalStore.getState().instances[0];
 const notifications = () => useNotificationStore.getState().notifications;
 const result = (turn: CodexTurnSnapshot) =>
@@ -33,6 +36,7 @@ async function tick() {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  stopTasks = subscribeTerminalTasks();
   vi.clearAllMocks();
   useTerminalStore.setState(useTerminalStore.getInitialState());
   useNotificationStore.setState(useNotificationStore.getInitialState());
@@ -46,6 +50,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   stop?.();
+  stopTasks();
   stop = undefined;
   vi.useRealTimers();
 });
@@ -55,9 +60,7 @@ describe("Codex turn observation", () => {
     result(snapshot("running"));
     stop = subscribeCodexTurnStates();
     await tick();
-    useTerminalStore
-      .getState()
-      .updateInstanceInfo("pane", { activityMessage: "__codex_input_pending__" });
+    observeTaskInput("pane", true);
     useTerminalStore.getState().updateInstanceInfo("pane", { outputActive: true });
     await tick();
     expect(notifications()).toHaveLength(1);
@@ -94,27 +97,25 @@ describe("Codex turn observation", () => {
     result(snapshot("completed"));
     stop = subscribeCodexTurnStates();
     await tick();
-    useTerminalStore
-      .getState()
-      .updateInstanceInfo("pane", {
-        lastUserInputAt: Date.now(),
-        lastUserInput: "/status",
-        outputActive: true,
-      });
+    useTerminalStore.getState().updateInstanceInfo("pane", {
+      lastUserInputAt: Date.now(),
+      lastUserInput: "/status",
+      outputActive: true,
+    });
     await tick();
     expect(instance().codexTurn?.state).toBe("completed");
     expect(isTerminalWorking(instance())).toBe(false);
     expect(notifications()).toHaveLength(0);
   });
 
-  it("invalidates the current display on submission and catches a fast next turn", async () => {
+  it("preserves the last result on submission and catches a fast next turn", async () => {
     result(snapshot("completed"));
     stop = subscribeCodexTurnStates();
     await tick();
     useTerminalStore
       .getState()
       .updateInstanceInfo("pane", { lastUserInputAt: Date.now(), lastUserInput: "next" });
-    expect(instance().codexTurn?.state).toBe("unknown");
+    expect(instance().task?.state).toBe("ended");
     result(snapshot("completed", "b"));
     await tick();
     expect(instance().codexTurn?.state).toBe("completed");
@@ -128,16 +129,17 @@ describe("Codex turn observation", () => {
     result(snapshot(state));
     await tick();
     expect(instance().codexTurn?.state).toBe(state);
-    expect(notifications()).toHaveLength(0);
+    expect(notifications()).toHaveLength(1);
+    expect(notifications()[0].level).toBe(state === "failed" ? "error" : "warning");
   });
 
-  it("clears failed observations and seeds session switches without success alerts", async () => {
+  it("retains failed observations and seeds session switches without alerts", async () => {
     result(snapshot("running"));
     stop = subscribeCodexTurnStates();
     await tick();
     vi.mocked(getCodexTurnStates).mockRejectedValue(new Error("unavailable"));
     await tick();
-    expect(instance().codexTurn?.state).toBe("unknown");
+    expect(instance().task?.observation).toBe("stale");
     result(snapshot("completed", "b", "2"));
     await tick();
     expect(notifications()).toHaveLength(0);
@@ -157,11 +159,11 @@ describe("Codex turn observation", () => {
     await tick();
     const count = vi.mocked(getCodexTurnStates).mock.calls.length;
     await vi.advanceTimersByTimeAsync(6000);
-    expect(instance().codexTurn?.state).toBe("unknown");
+    expect(instance().task?.observation).toBe("stale");
     expect(getCodexTurnStates).toHaveBeenCalledTimes(count);
     finish({ pane: snapshot("completed", "late") });
     await vi.advanceTimersByTimeAsync(0);
-    expect(instance().codexTurn?.state).toBe("unknown");
+    expect(instance().task?.observation).toBe("stale");
     expect(notifications()).toHaveLength(0);
   });
 
@@ -197,13 +199,11 @@ describe("Codex turn observation", () => {
     useTerminalStore
       .getState()
       .registerInstance({ id: "pane", workspaceId: "ws", profile: "ps", syncGroup: "s" });
-    useTerminalStore
-      .getState()
-      .updateInstanceInfo("pane", {
-        sessionReady: true,
-        activity: { type: "interactiveApp", name: "Codex" },
-        codexTurn: snapshot("running", "new"),
-      });
+    useTerminalStore.getState().updateInstanceInfo("pane", {
+      sessionReady: true,
+      activity: { type: "interactiveApp", name: "Codex" },
+      codexTurn: snapshot("running", "new"),
+    });
     // Registration invalidates inherited state; a later current observation is preserved.
     useTerminalStore
       .getState()

@@ -378,13 +378,6 @@ function enrichPane(p: WorkspacePane, index: number, paneNumbers: Map<string, nu
 function selectorStatusForTerminal(
   terminal: ReturnType<typeof useTerminalStore.getState>["instances"][number],
 ) {
-  if (
-    !terminal.lastCommand &&
-    !terminal.outputActive &&
-    terminal.activity?.type !== "interactiveApp"
-  ) {
-    return null;
-  }
   const { claude, codex, grok } = useSettingsStore.getState();
   const display = getStatusDisplaySettings(terminal.activity, claude, codex, grok);
   return computeCommandStatus(
@@ -396,6 +389,7 @@ function selectorStatusForTerminal(
     display.mode,
     display.delimiter,
     terminal.codexTurn,
+    terminal.task,
   );
 }
 
@@ -441,6 +435,7 @@ function selectorSummaryForWorkspace(workspace: Workspace) {
         display.mode,
         display.delimiter,
         lastCommand.codexTurn,
+        lastCommand.task,
       ),
     };
   }

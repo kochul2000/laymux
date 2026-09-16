@@ -1,6 +1,7 @@
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { observeTerminalTask } from "@/lib/terminal-task-observers";
 import { WorkspaceSelectorView } from "./WorkspaceSelectorView";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useNotificationStore } from "@/stores/notification-store";
@@ -695,6 +696,7 @@ describe("WorkspaceSelectorView", () => {
       lastCommandAt: Date.now(),
     });
 
+    observeTerminalTask("terminal-p1", { state: "ended", result: "success" });
     render(<WorkspaceSelectorView />);
 
     await waitFor(() => {
@@ -854,6 +856,7 @@ describe("WorkspaceSelectorView", () => {
       lastCommandAt: Date.now(),
     });
 
+    observeTerminalTask("terminal-p1", { state: "ended", result: "failure" });
     render(<WorkspaceSelectorView />);
 
     await waitFor(() => {
@@ -864,7 +867,7 @@ describe("WorkspaceSelectorView", () => {
     });
   });
 
-  it("displays idle indicator when command has no exit code and no output", async () => {
+  it("displays unknown when no lifecycle observation exists", async () => {
     useWorkspaceStore.setState({
       workspaces: [
         {
@@ -899,12 +902,12 @@ describe("WorkspaceSelectorView", () => {
 
     await waitFor(() => {
       const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
-      expect(badge.querySelector('[data-status-icon="idle"]')).toBeInTheDocument();
+      expect(badge.querySelector('[data-status-icon="unknown"]')).toBeInTheDocument();
       expect(badge).not.toHaveTextContent("—");
     });
   });
 
-  it("displays failure indicator when command failed regardless of activity type", async () => {
+  it("does not inherit the previous shell result in an agent", async () => {
     useWorkspaceStore.setState({
       workspaces: [
         {
@@ -942,7 +945,7 @@ describe("WorkspaceSelectorView", () => {
     await waitFor(() => {
       // Universal 4-state: exitCode≠0 → ✗ regardless of activity
       const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
-      expect(badge.querySelector('[data-status-icon="failure"]')).toBeInTheDocument();
+      expect(badge.querySelector('[data-status-icon="unknown"]')).toBeInTheDocument();
       expect(badge).not.toHaveTextContent("✗");
     });
   });
@@ -1404,6 +1407,7 @@ describe("WorkspaceSelectorView", () => {
       lastCommandAt: Date.now(),
     });
 
+    observeTerminalTask("terminal-p1", { state: "ended", result: "success" });
     render(<WorkspaceSelectorView />);
 
     await waitFor(() => {
@@ -1596,7 +1600,7 @@ describe("WorkspaceSelectorView", () => {
     });
   });
 
-  it("shows the hourglass for a shell streaming output before any command was captured", async () => {
+  it("shows output activity separately from an unconfirmed shell task", async () => {
     // Sleep prevention counts this terminal as busy (ADR-0114). If the row
     // stayed blank the UI would say idle while the machine is kept awake.
     useWorkspaceStore.setState({
@@ -1624,7 +1628,8 @@ describe("WorkspaceSelectorView", () => {
 
     await waitFor(() => {
       const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
-      expect(badge.querySelector('[data-status-icon="working"]')).toBeInTheDocument();
+      expect(badge.querySelector('[data-status-icon="unknown"]')).toBeInTheDocument();
+      expect(badge.querySelector('[aria-label="Output activity"]')).toBeInTheDocument();
       expect(badge).not.toHaveTextContent("⏳");
     });
   });
@@ -1664,7 +1669,7 @@ describe("WorkspaceSelectorView", () => {
     await waitFor(() => {
       const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
       expect(badge).toBeInTheDocument();
-      expect(badge.querySelector('[data-status-icon="idle"]')).toBeInTheDocument();
+      expect(badge.querySelector('[data-status-icon="unknown"]')).toBeInTheDocument();
       expect(badge).not.toHaveTextContent("—");
       expect(badge.style.border).toContain("var(--accent)");
     });
@@ -1702,7 +1707,7 @@ describe("WorkspaceSelectorView", () => {
 
     await waitFor(() => {
       // There's no command icon, so we show a standalone notification dot
-      const badge = screen.getByTestId("pane-notif-dot-terminal-p1");
+      const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
       expect(badge).toBeInTheDocument();
     });
   });

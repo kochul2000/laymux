@@ -15,7 +15,11 @@ import { useOverridesStore } from "@/stores/overrides-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
-import { CODEX_INPUT_PENDING_MARKER, CLAUDE_INPUT_PENDING_MARKER } from "@/lib/activity-detection";
+import { observeTerminalTask } from "@/lib/terminal-task-observers";
+import { subscribeTerminalTasks } from "@/lib/terminal-task-subscription";
+let stopTaskSubscription: (() => void) | undefined;
+vi.mock("@/lib/persist-session", () => ({ persistSession: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@/hooks/useOsNotification", () => ({ sendDesktopNotification: vi.fn() }));
 import { clearRuntimeComposerState } from "@/lib/terminal-input-composer-state";
 import { terminalOutputRecoveryCounters } from "@/lib/terminal-output-recovery-metrics";
 import * as terminalOutputRecoveryMetrics from "@/lib/terminal-output-recovery-metrics";
@@ -765,6 +769,8 @@ beforeEach(() => {
 // A bailed gate is a fixture bug, not a passing test: the handler ran on ordering
 // luck. Reported here so the bailing test names itself.
 afterEach(async () => {
+  stopTaskSubscription?.();
+  stopTaskSubscription = undefined;
   cleanup();
   await act(async () => {
     await Promise.resolve();
@@ -3547,8 +3553,8 @@ describe("TerminalView", () => {
     });
 
     expect(
-      useTerminalStore.getState().instances.find((i) => i.id === "t-codex-prompt")?.activityMessage,
-    ).toBe(CODEX_INPUT_PENDING_MARKER);
+      useTerminalStore.getState().instances.find((i) => i.id === "t-codex-prompt")?.task?.state,
+    ).toBe("waiting");
 
     act(() => {
       onOutput?.(new TextEncoder().encode("• continuing after approval\r\n"));
@@ -3559,7 +3565,7 @@ describe("TerminalView", () => {
     ).toBe("continuing after approval");
   });
 
-  it("turns a running Codex approval prompt into input pending and emits one notification", async () => {
+  it("does not infer Codex identity from a prompt-shaped output", async () => {
     render(<TerminalView instanceId="t-codex-running-prompt" profile="PowerShell" syncGroup="" />);
     useTerminalStore.getState().updateInstanceInfo("t-codex-running-prompt", {
       activity: { type: "running" },
@@ -3590,22 +3596,17 @@ describe("TerminalView", () => {
     const instance = useTerminalStore
       .getState()
       .instances.find((i) => i.id === "t-codex-running-prompt");
-    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Codex" });
-    expect(instance?.activityMessage).toBe(CODEX_INPUT_PENDING_MARKER);
+    expect(instance?.activity).toEqual({ type: "running" });
+    expect(instance?.task?.state).toBeUndefined();
 
     const notifications = useNotificationStore.getState().notifications;
-    expect(notifications).toHaveLength(1);
-    expect(notifications[0]).toMatchObject({
-      terminalId: "t-codex-running-prompt",
-      message: "Codex is waiting for your input",
-      level: "info",
-    });
+    expect(notifications).toHaveLength(0);
 
     act(() => {
       onOutput?.(new TextEncoder().encode("Would you like to run the following command?\r\n"));
     });
 
-    expect(useNotificationStore.getState().notifications).toHaveLength(1);
+    expect(useNotificationStore.getState().notifications).toHaveLength(0);
   });
 
   it("does not turn ordinary running output into Codex input pending", async () => {
@@ -3640,10 +3641,38 @@ describe("TerminalView", () => {
     expect(useNotificationStore.getState().notifications).toHaveLength(0);
   });
 
+  it("does not inherit an old prompt after a new task starts", async () => {
+    render(<TerminalView instanceId="t-task-boundary" profile="PowerShell" syncGroup="" />);
+    await vi.waitFor(() => expect(mockOnTerminalOutput).toHaveBeenCalled());
+    useTerminalStore.getState().updateInstanceInfo("t-task-boundary", {
+      activity: { type: "interactiveApp", name: "Codex" },
+    });
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)![1];
+    act(() => {
+      observeTerminalTask("t-task-boundary", { state: "running", taskId: "first" });
+      onOutput(
+        new TextEncoder().encode(
+          "Would you like to run the following command?\r\nPress enter to confirm or esc to cancel\r\n",
+        ),
+      );
+    });
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-task-boundary")?.task?.state,
+    ).toBe("waiting");
+    act(() => {
+      observeTerminalTask("t-task-boundary", { state: "ended" });
+      observeTerminalTask("t-task-boundary", { state: "running", taskId: "second" });
+      onOutput(new TextEncoder().encode("ordinary new task output\r\n"));
+    });
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-task-boundary")?.task?.state,
+    ).toBe("running");
+  });
+
   it("does not re-notify from a stale Codex prompt in the rolling output tail", async () => {
     render(<TerminalView instanceId="t-stale-codex-prompt" profile="PowerShell" syncGroup="" />);
     useTerminalStore.getState().updateInstanceInfo("t-stale-codex-prompt", {
-      activity: { type: "running" },
+      activity: { type: "interactiveApp", name: "Codex" },
       lastCommand: "npm test",
     });
 
@@ -3665,23 +3694,23 @@ describe("TerminalView", () => {
         ),
       );
     });
-    expect(useNotificationStore.getState().notifications).toHaveLength(1);
-
-    useTerminalStore.getState().updateInstanceInfo("t-stale-codex-prompt", {
-      activity: { type: "running" },
-      activityMessage: undefined,
-    });
+    expect(useNotificationStore.getState().notifications).toHaveLength(0);
 
     act(() => {
       onOutput?.(new TextEncoder().encode("later output after the prompt was answered\r\n"));
     });
 
+    act(() => {
+      onOutput?.(new TextEncoder().encode("more ordinary output\r\n"));
+    });
+
     const instance = useTerminalStore
       .getState()
       .instances.find((i) => i.id === "t-stale-codex-prompt");
-    expect(instance?.activity).toEqual({ type: "running" });
+    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Codex" });
+    expect(instance?.task?.state).toBe("running");
     expect(instance?.activityMessage).toBeUndefined();
-    expect(useNotificationStore.getState().notifications).toHaveLength(1);
+    expect(useNotificationStore.getState().notifications).toHaveLength(0);
   });
 
   it("detects Codex approval prompts split across output chunks", async () => {
@@ -3706,8 +3735,8 @@ describe("TerminalView", () => {
     });
 
     expect(
-      useTerminalStore.getState().instances.find((i) => i.id === "t-codex-split")?.activityMessage,
-    ).toBe(CODEX_INPUT_PENDING_MARKER);
+      useTerminalStore.getState().instances.find((i) => i.id === "t-codex-split")?.task?.state,
+    ).toBe("waiting");
   });
 
   it("marks Claude permission prompts as input pending and emits one notification", async () => {
@@ -3729,6 +3758,8 @@ describe("TerminalView", () => {
       | ((data: Uint8Array) => void)
       | undefined;
     expect(onOutput).toBeTypeOf("function");
+    stopTaskSubscription = subscribeTerminalTasks();
+    observeTerminalTask("t-claude-prompt", { state: "running" });
 
     act(() => {
       onOutput?.(
@@ -3742,13 +3773,13 @@ describe("TerminalView", () => {
     });
 
     const instance = useTerminalStore.getState().instances.find((i) => i.id === "t-claude-prompt");
-    expect(instance?.activityMessage).toBe(CLAUDE_INPUT_PENDING_MARKER);
+    expect(instance?.task?.state).toBe("waiting");
 
     const notifications = useNotificationStore.getState().notifications;
     expect(notifications).toHaveLength(1);
     expect(notifications[0]).toMatchObject({
       terminalId: "t-claude-prompt",
-      message: "Claude is waiting for your input",
+      message: "Claude: 입력 대기",
       level: "info",
     });
 
@@ -3941,6 +3972,8 @@ describe("TerminalView", () => {
       | ((data: Uint8Array) => void)
       | undefined;
     expect(onOutput).toBeTypeOf("function");
+    stopTaskSubscription = subscribeTerminalTasks();
+    observeTerminalTask("t-claude-prompt-done", { state: "running" });
 
     act(() => {
       onOutput?.(
@@ -3953,9 +3986,9 @@ describe("TerminalView", () => {
     });
 
     expect(
-      useTerminalStore.getState().instances.find((i) => i.id === "t-claude-prompt-done")
-        ?.activityMessage,
-    ).toBe(CLAUDE_INPUT_PENDING_MARKER);
+      useTerminalStore.getState().instances.find((i) => i.id === "t-claude-prompt-done")?.task
+        ?.state,
+    ).toBe("waiting");
 
     // User answered — Claude writes enough non-modal content to push
     // the ❯ arrow out of the 4 KB dismissal window. Marker must
@@ -3971,9 +4004,9 @@ describe("TerminalView", () => {
     });
 
     expect(
-      useTerminalStore.getState().instances.find((i) => i.id === "t-claude-prompt-done")
-        ?.activityMessage,
-    ).toBeUndefined();
+      useTerminalStore.getState().instances.find((i) => i.id === "t-claude-prompt-done")?.task
+        ?.state,
+    ).toBe("running");
 
     // The unread badge for this terminal's requiresAction alert must
     // also clear — otherwise the badge would hang around forever after
@@ -4000,6 +4033,8 @@ describe("TerminalView", () => {
       | ((data: Uint8Array) => void)
       | undefined;
     expect(onOutput).toBeTypeOf("function");
+    stopTaskSubscription = subscribeTerminalTasks();
+    observeTerminalTask("t-claude-normal-prompt", { state: "running" });
 
     act(() => {
       onOutput?.(
@@ -4012,18 +4047,18 @@ describe("TerminalView", () => {
     });
 
     expect(
-      useTerminalStore.getState().instances.find((i) => i.id === "t-claude-normal-prompt")
-        ?.activityMessage,
-    ).toBe(CLAUDE_INPUT_PENDING_MARKER);
+      useTerminalStore.getState().instances.find((i) => i.id === "t-claude-normal-prompt")?.task
+        ?.state,
+    ).toBe("waiting");
 
     act(() => {
       onOutput?.(new TextEncoder().encode("╰─❯ "));
     });
 
     expect(
-      useTerminalStore.getState().instances.find((i) => i.id === "t-claude-normal-prompt")
-        ?.activityMessage,
-    ).toBeUndefined();
+      useTerminalStore.getState().instances.find((i) => i.id === "t-claude-normal-prompt")?.task
+        ?.state,
+    ).toBe("running");
 
     const pending = useNotificationStore
       .getState()
@@ -4054,6 +4089,8 @@ describe("TerminalView", () => {
       | ((data: Uint8Array) => void)
       | undefined;
     expect(onOutput).toBeTypeOf("function");
+    stopTaskSubscription = subscribeTerminalTasks();
+    observeTerminalTask("t-claude-chunked", { state: "running" });
 
     // Chunk 1: full modal frame.
     act(() => {
@@ -4066,9 +4103,8 @@ describe("TerminalView", () => {
       );
     });
     expect(
-      useTerminalStore.getState().instances.find((i) => i.id === "t-claude-chunked")
-        ?.activityMessage,
-    ).toBe(CLAUDE_INPUT_PENDING_MARKER);
+      useTerminalStore.getState().instances.find((i) => i.id === "t-claude-chunked")?.task?.state,
+    ).toBe("waiting");
 
     // Chunk 2: spinner footer continuation (modal still on screen,
     // but this chunk's text doesn't include the modal box). Marker
@@ -4077,9 +4113,8 @@ describe("TerminalView", () => {
       onOutput?.(new TextEncoder().encode("✶ Hashing… (5s)\r\n"));
     });
     expect(
-      useTerminalStore.getState().instances.find((i) => i.id === "t-claude-chunked")
-        ?.activityMessage,
-    ).toBe(CLAUDE_INPUT_PENDING_MARKER);
+      useTerminalStore.getState().instances.find((i) => i.id === "t-claude-chunked")?.task?.state,
+    ).toBe("waiting");
   });
 
   it("re-fires the input-pending notification when a fresh modal arrives after the previous one was dismissed", async () => {
@@ -4102,6 +4137,8 @@ describe("TerminalView", () => {
       | ((data: Uint8Array) => void)
       | undefined;
     expect(onOutput).toBeTypeOf("function");
+    stopTaskSubscription = subscribeTerminalTasks();
+    observeTerminalTask("t-claude-second-modal", { state: "running" });
 
     const notifCountBefore = useNotificationStore
       .getState()
@@ -4129,9 +4166,9 @@ describe("TerminalView", () => {
       onOutput?.(new TextEncoder().encode("Continuing with the edit...\r\n".repeat(200)));
     });
     expect(
-      useTerminalStore.getState().instances.find((i) => i.id === "t-claude-second-modal")
-        ?.activityMessage,
-    ).toBeUndefined();
+      useTerminalStore.getState().instances.find((i) => i.id === "t-claude-second-modal")?.task
+        ?.state,
+    ).toBe("running");
 
     // Second modal arrives → notification fires AGAIN.
     act(() => {

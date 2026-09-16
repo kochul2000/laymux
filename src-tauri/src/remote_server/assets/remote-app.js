@@ -7779,15 +7779,24 @@ import {
               primary.append(path);
             }
 
-            const statusIconName = commandStatusIconName(pane.selectorStatus?.icon);
+            const statusIconName = commandStatusIconName(pane.selectorStatus);
             if (display.result && statusIconName) {
               const status = document.createElement("span");
               status.className = `pane-command-status${(pane.unreadCount || 0) > 0 ? " unread" : ""}`;
               setRemoteIcon(status, statusIconName, { size: 12 });
               if (pane.selectorStatus.color) status.style.color = pane.selectorStatus.color;
               status.setAttribute("role", "img");
-              status.setAttribute("aria-label", COMMAND_STATUS_LABELS[statusIconName]);
+              status.setAttribute("aria-label", pane.selectorStatus.label || COMMAND_STATUS_LABELS[statusIconName]);
               primary.append(status);
+              for (const [visible, icon, label] of [[pane.selectorStatus.observation === "stale", "Clock3", "관측 지연"], [pane.selectorStatus.outputActive, "Activity", "출력 활동"]]) {
+                if (!visible) continue;
+                const badge = document.createElement("span");
+                setRemoteIcon(badge, icon, { size: 12 });
+                badge.setAttribute("role", "img");
+                badge.setAttribute("aria-label", label);
+                badge.title = label;
+                primary.append(badge);
+              }
             } else if (display.result && (pane.unreadCount || 0) > 0) {
               const unread = document.createElement("span");
               unread.className = "pane-notification-dot";

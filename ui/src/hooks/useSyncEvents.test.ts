@@ -88,6 +88,32 @@ describe("useSyncEvents", () => {
     expect(mockOnSyncCwd).toHaveBeenCalledWith(expect.any(Function));
   });
 
+  it("observes generation-scoped shell lifecycle without synthesizing a result", () => {
+    useTerminalStore
+      .getState()
+      .registerInstance({ id: "shell-task", profile: "PowerShell", syncGroup: "" });
+    useTerminalStore.getState().updateInstanceInfo("shell-task", { generation: 7 });
+    renderHook(() => useSyncEvents());
+    const emit = mockOnCommandStatus.mock.calls[0][0];
+    act(() => emit({ terminalId: "shell-task", generation: 7, phase: "prompt" }));
+    expect(useTerminalStore.getState().instances[0].task?.state).toBe("idle");
+    act(() => emit({ terminalId: "shell-task", generation: 7, phase: "start" }));
+    act(() => emit({ terminalId: "shell-task", generation: 6, phase: "end", exitCode: 0 }));
+    expect(useTerminalStore.getState().instances[0].task?.state).toBe("running");
+    act(() => emit({ terminalId: "shell-task", generation: 7, phase: "end" }));
+    expect(useTerminalStore.getState().instances[0].task).toMatchObject({
+      state: "ended",
+      result: undefined,
+    });
+    act(() => emit({ terminalId: "shell-task", generation: 7, phase: "end", exitCode: 0 }));
+    act(() => emit({ terminalId: "shell-task", generation: 7, phase: "prompt" }));
+    expect(useTerminalStore.getState().instances[0].task).toMatchObject({
+      state: "ended",
+      result: "success",
+    });
+    expect(useNotificationStore.getState().notifications).toHaveLength(1);
+  });
+
   it("registers sync-branch listener on mount", () => {
     renderHook(() => useSyncEvents());
     expect(mockOnSyncBranch).toHaveBeenCalledWith(expect.any(Function));
@@ -664,17 +690,8 @@ describe("useSyncEvents", () => {
     expect(instance?.activityMessage).toBe("모든 테스트 통과했습니다.");
   });
 
-  it("does NOT overwrite the input-pending marker on claude-message-changed", async () => {
-    // Rust emits `claude-message-changed` every time Claude's title changes
-    // — i.e. on every spinner-tick frame while a modal is on screen. The
-    // frontend's input-pending detector sets `activityMessage` to
-    // CLAUDE_INPUT_PENDING_MARKER to signal "user response needed". If the
-    // Rust message handler clobbered that marker with the title-derived
-    // task description, the status icon would flap back to ⏳ within
-    // milliseconds and the user would never see the ✓ "waiting for input"
-    // state. This guards that interaction: while the marker is set, the
-    // Rust message is ignored.
-    const { CLAUDE_INPUT_PENDING_MARKER } = await import("@/lib/activity-markers");
+  it("keeps input waiting independent of claude-message-changed", async () => {
+    const { observeTaskInput } = await import("@/lib/terminal-task-observers");
     useTerminalStore.getState().registerInstance({
       id: "t1",
       profile: "WSL",
@@ -682,8 +699,9 @@ describe("useSyncEvents", () => {
       workspaceId: "ws-1",
     });
     useTerminalStore.getState().updateInstanceInfo("t1", {
-      activityMessage: CLAUDE_INPUT_PENDING_MARKER,
+      activity: { type: "interactiveApp", name: "Claude" },
     });
+    observeTaskInput("t1", true);
 
     renderHook(() => useSyncEvents());
 
@@ -691,7 +709,8 @@ describe("useSyncEvents", () => {
     callback({ terminalId: "t1", message: "Thinking with xhigh effort" });
 
     const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
-    expect(instance?.activityMessage).toBe(CLAUDE_INPUT_PENDING_MARKER);
+    expect(instance?.activityMessage).toBe("Thinking with xhigh effort");
+    expect(instance?.task?.state).toBe("waiting");
   });
 
   it("calls markClaudeTerminal when command text detects Claude", () => {
@@ -895,7 +914,8 @@ describe("useSyncEvents", () => {
 
     const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
     expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Codex" });
-    expect(instance?.outputActive).toBe(true);
+    expect(instance?.outputActive).toBeUndefined();
+    expect(instance?.task).toBeUndefined();
   });
 
   // ── Regression guard for issue #234 ──

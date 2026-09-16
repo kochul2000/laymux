@@ -16,6 +16,15 @@ vi.mock("@/lib/tauri-api", () => ({
   saveSettings: vi.fn().mockResolvedValue(undefined),
   propagateCwdOnce: vi.fn().mockResolvedValue(undefined),
   clipboardWriteText: vi.fn().mockResolvedValue(undefined),
+  getTerminalStates: vi
+    .fn()
+    .mockImplementation(async () =>
+      Object.fromEntries(
+        useTerminalStore
+          .getState()
+          .instances.map((entry) => [entry.id, { activity: entry.activity ?? { type: "shell" } }]),
+      ),
+    ),
   writeTerminalInput: vi.fn().mockResolvedValue(undefined),
   writeToTerminal: vi.fn().mockResolvedValue(undefined),
 }));

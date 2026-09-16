@@ -1,3 +1,5 @@
+import { terminalTaskPolicy } from "@/lib/terminal-task";
+import { useSleepInhibitStore } from "@/stores/sleep-inhibit-store";
 import { useEffect } from "react";
 import {
   observeSleepInhibitState,
@@ -32,12 +34,18 @@ export function useSleepPrevention(): void {
       // foregone conclusion.
       const hasBusy =
         axes.keepAwakeWhenBusy && hasWorkingTerminal(useTerminalStore.getState().instances);
+      const staleTaskExpired = useTerminalStore
+        .getState()
+        .instances.some((instance) => terminalTaskPolicy(instance).sleepExpired);
+      if (useSleepInhibitStore.getState().staleTaskExpired !== staleTaskExpired)
+        useSleepInhibitStore.setState({ staleTaskExpired });
       requestSleepInhibit(shouldInhibitSleep(axes, hasBusy));
     };
 
     // A reloaded WebView cannot know what the backend still holds, so the first
     // derived value is always sent — even when it is the default "no".
     sync();
+    const expiryTimer = setInterval(sync, 1000);
     const unsubscribeSettings = useSettingsStore.subscribe(sync);
     const unsubscribeTerminals = useTerminalStore.subscribe(sync);
 
@@ -58,6 +66,7 @@ export function useSleepPrevention(): void {
 
     return () => {
       cancelled = true;
+      clearInterval(expiryTimer);
       unlisten?.();
       unsubscribeSettings();
       unsubscribeTerminals();

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { observeTask, type TaskObservation, type TerminalTask } from "@/lib/terminal-task";
 
 export const SESSION_ATTRIBUTION_STARTUP_GRACE_MS = 15_000;
 
@@ -22,6 +23,12 @@ export interface TerminalInstance {
   isFocused: boolean;
   /** False between React mount and successful backend PTY session creation. */
   sessionReady?: boolean;
+  generation?: number;
+  taskEpoch?: number;
+  appSession?: number;
+  livenessConfirmed?: boolean;
+  taskObservation?: TaskObservation;
+  task?: TerminalTask;
   /** Resume startup grace: do not classify the pane as a conclusive shell yet. */
   attributionPendingUntil?: number;
   lastCommand?: string;
@@ -70,6 +77,7 @@ interface TerminalStoreState {
     label?: string;
   }) => void;
   unregisterInstance: (id: string) => void;
+  observeTask: (id: string, observation: TaskObservation) => void;
   getInstancesBySyncGroup: (group: string) => TerminalInstance[];
   getTerminalsForWorkspace: (workspaceId: string) => TerminalInstance[];
   updateInstanceInfo: (
@@ -93,6 +101,9 @@ interface TerminalStoreState {
         | "syncGroup"
         | "activityMessage"
         | "sessionReady"
+        | "generation"
+        | "appSession"
+        | "livenessConfirmed"
         | "attributionPendingUntil"
       >
     >,
@@ -139,7 +150,39 @@ export const useTerminalStore = create<TerminalStoreState>()((set, get) => ({
 
   updateInstanceInfo: (id, info) => {
     set((state) => ({
-      instances: state.instances.map((inst) => (inst.id === id ? { ...inst, ...info } : inst)),
+      instances: state.instances.map((inst) => {
+        if (inst.id !== id) return inst;
+        const next = { ...inst, ...info };
+        const changed =
+          inst.activity?.name !== next.activity?.name ||
+          inst.generation !== next.generation ||
+          inst.appSession !== next.appSession ||
+          (inst.sessionReady !== false && next.sessionReady === false);
+        return changed
+          ? {
+              ...next,
+              task: undefined,
+              taskObservation: undefined,
+              codexTurn: undefined,
+              taskEpoch: (inst.taskEpoch ?? 0) + 1,
+              livenessConfirmed: info.livenessConfirmed ?? false,
+            }
+          : next;
+      }),
+    }));
+  },
+
+  observeTask: (id, observation) => {
+    set((state) => ({
+      instances: state.instances.map((inst) =>
+        inst.id === id
+          ? {
+              ...inst,
+              taskObservation: observation,
+              task: observeTask(inst.task, observation, Date.now()),
+            }
+          : inst,
+      ),
     }));
   },
 

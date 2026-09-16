@@ -1,11 +1,6 @@
 import { getCodexTurnStates, type CodexTurnSnapshot } from "./tauri-api";
 import { useTerminalStore, type TerminalInstance } from "@/stores/terminal-store";
-import { useNotificationStore } from "@/stores/notification-store";
-import { useWorkspaceStore } from "@/stores/workspace-store";
-import { persistSession } from "./persist-session";
-import { resolveWorkspaceId } from "./workspace-utils";
-import { sendDesktopNotification } from "@/hooks/useOsNotification";
-import { CODEX_INPUT_PENDING_MARKER } from "./activity-markers";
+import { observeTerminalTask } from "./terminal-task-observers";
 
 const POLL_MS = 1000;
 const STALE_MS = 6000;
@@ -22,14 +17,6 @@ function sourceKey(turn: CodexTurnSnapshot): string {
   return `${turn.generation}:${turn.selectionKey ?? ""}:${turn.sessionId ?? ""}`;
 }
 
-function turnKey(turn: CodexTurnSnapshot): string {
-  return `${sourceKey(turn)}:${turn.turnId ?? ""}`;
-}
-
-function sameSnapshot(before: CodexTurnSnapshot | undefined, next: CodexTurnSnapshot): boolean {
-  return !!before && before.state === next.state && turnKey(before) === turnKey(next);
-}
-
 /** One in-flight lookup for all panes. Output events keep their independent state. */
 export function subscribeCodexTurnStates(): () => void {
   let disposed = false;
@@ -40,18 +27,11 @@ export function subscribeCodexTurnStates(): () => void {
   const epochs = new Map(
     useTerminalStore.getState().instances.map((instance) => [instance.id, ++epoch]),
   );
-  const previous = new Map<string, CodexTurnSnapshot>();
 
-  function unknown(id: string, reset = true) {
+  function unknown(id: string) {
     const current = useTerminalStore.getState().instances.find((instance) => instance.id === id);
     if (!current || !isCodex(current)) return;
-    if (reset) previous.delete(id);
-    const codexTurn: CodexTurnSnapshot = {
-      generation: current.codexTurn?.generation ?? 0,
-      state: "unknown",
-    };
-    if (!sameSnapshot(current.codexTurn, codexTurn))
-      useTerminalStore.getState().updateInstanceInfo(id, { codexTurn });
+    observeTerminalTask(id, { source: current.task?.source, state: undefined });
   }
 
   function schedule(delay = POLL_MS) {
@@ -73,6 +53,7 @@ export function subscribeCodexTurnStates(): () => void {
         {
           epoch: epochs.get(instance.id) ?? 0,
           inputAt: instance.lastUserInputAt,
+          taskEpoch: instance.taskEpoch,
         },
       ]),
     );
@@ -83,7 +64,8 @@ export function subscribeCodexTurnStates(): () => void {
         stamp &&
         isCodex(current) &&
         stamp.epoch === (epochs.get(id) ?? 0) &&
-        stamp.inputAt === current.lastUserInputAt
+        stamp.inputAt === current.lastUserInputAt &&
+        stamp.taskEpoch === current.taskEpoch
         ? current
         : undefined;
     }
@@ -99,36 +81,31 @@ export function subscribeCodexTurnStates(): () => void {
         const current = currentTarget(id);
         if (!current) continue;
         const snapshot = snapshots[id];
+        if (
+          snapshot &&
+          current.generation !== undefined &&
+          snapshot.generation !== current.generation
+        )
+          continue;
         if (!snapshot || snapshot.state === "unknown") {
           unknown(id);
           continue;
         }
-        const before = previous.get(id);
-        previous.set(id, snapshot);
-        if (!sameSnapshot(current.codexTurn, snapshot))
-          useTerminalStore.getState().updateInstanceInfo(id, { codexTurn: snapshot });
-        // Seed historical snapshots silently. A new source is a selection or
-        // process change, never a completion of the previously observed turn.
-        if (
-          snapshot.state !== "completed" ||
-          !snapshot.turnId ||
-          !before ||
-          sourceKey(before) !== sourceKey(snapshot) ||
-          (before.state === "completed" && before.turnId === snapshot.turnId)
-        )
-          continue;
-        const workspaceId = resolveWorkspaceId(id);
-        const message = "Codex task completed";
-        useNotificationStore
-          .getState()
-          .addNotification({ terminalId: id, workspaceId, message, level: "success" });
-        void persistSession({ reason: "completion" });
-        if (
-          !document.hasFocus() ||
-          useWorkspaceStore.getState().activeWorkspaceId !== workspaceId
-        ) {
-          void sendDesktopNotification("Laymux", message);
-        }
+        useTerminalStore.getState().updateInstanceInfo(id, { codexTurn: snapshot });
+        observeTerminalTask(id, {
+          source: sourceKey(snapshot),
+          taskId: snapshot.turnId ?? "idle",
+          state:
+            snapshot.state === "running" ? "running" : snapshot.state === "idle" ? "idle" : "ended",
+          result:
+            snapshot.state === "completed"
+              ? "success"
+              : snapshot.state === "failed"
+                ? "failure"
+                : snapshot.state === "interrupted"
+                  ? "interrupted"
+                  : undefined,
+        });
       }
     } catch {
       if (!disposed) for (const id of stamps.keys()) if (currentTarget(id)) unknown(id);
@@ -151,39 +128,18 @@ export function subscribeCodexTurnStates(): () => void {
         !!current !== !!old ||
         (current &&
           old &&
-          (isCodex(current) !== isCodex(old) || current.sessionReady !== old.sessionReady))
+          (isCodex(current) !== isCodex(old) ||
+            current.sessionReady !== old.sessionReady ||
+            current.taskEpoch !== old.taskEpoch))
       ) {
         if (current) epochs.set(id, ++epoch);
         else epochs.delete(id);
-        previous.delete(id);
         if (current?.codexTurn)
           useTerminalStore.getState().updateInstanceInfo(id, { codexTurn: undefined });
       }
       if (current && old && isCodex(current) && current.lastUserInputAt !== old.lastUserInputAt) {
-        const turn = previous.get(id);
-        if (turn && turn.state !== "running") {
-          // Local commands such as /status may never start another turn.
-          // Invalidate this frame, then let the next observation be authoritative.
-          unknown(id, false);
-        }
-      }
-      if (
-        current &&
-        isCodex(current) &&
-        current.activityMessage === CODEX_INPUT_PENDING_MARKER &&
-        old?.activityMessage !== CODEX_INPUT_PENDING_MARKER
-      ) {
-        const workspaceId = resolveWorkspaceId(id);
-        const message = "Codex is awaiting input";
-        useNotificationStore
-          .getState()
-          .addNotification({ terminalId: id, workspaceId, message, level: "info" });
-        if (
-          !document.hasFocus() ||
-          useWorkspaceStore.getState().activeWorkspaceId !== workspaceId
-        ) {
-          void sendDesktopNotification("Laymux", message);
-        }
+        // A submitted local command is not a new task; invalidate in-flight reads only.
+        schedule(0);
       }
     }
     if (state.instances.some(isCodex)) schedule(0);

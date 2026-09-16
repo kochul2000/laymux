@@ -1,8 +1,10 @@
-import { getHandler, isRegisteredInteractiveApp, type RawTerminalState } from "./activity-handler";
+import { getHandler, isRegisteredInteractiveApp } from "./activity-handler";
+import { terminalTaskPolicy } from "./terminal-task";
 import { resolvePaneCwd, type CwdBearingPane } from "./pane-cwd";
 import { toPaneId, toTerminalId } from "./pane-ids";
 import { CTRL_C, INTERRUPT_ROUND_INTERVAL_MS } from "./terminal-interrupt";
 import {
+  getTerminalStates,
   writeTerminalInput,
   writeToTerminal,
   type PaneClearBusyPolicy,
@@ -105,18 +107,6 @@ export function resolvePaneClear(
   return resolved;
 }
 
-function toRawState(instance: TerminalInstance): RawTerminalState {
-  return {
-    exitCode: instance.lastExitCode,
-    outputActive: instance.outputActive ?? false,
-    codexTurn: instance.codexTurn,
-    lastCommand: instance.lastCommand,
-    activityMessage: instance.activityMessage,
-    activity: instance.activity,
-    title: instance.title,
-  };
-}
-
 /** Pure activity-aware decision for one registered terminal. */
 export function planTerminalClear(
   instance: TerminalInstance,
@@ -136,7 +126,7 @@ export function planTerminalClear(
 
   const handler = getHandler(activity);
   const input = handler.clearInput(config.shellCommand);
-  if (!handler.isBusy(toRawState(instance))) {
+  if (terminalTaskPolicy(instance).clearAllowed) {
     return { ...base, kind: "submit", input };
   }
 
@@ -263,14 +253,64 @@ export async function clearPane(
 
   const config = resolvePaneClear(settings, options);
   const terminalId = toTerminalId(paneId);
-  const instance = useTerminalStore
+  const deadlineAt =
+    options.hardDeadlineMs === undefined ? undefined : Date.now() + options.hardDeadlineMs;
+  let instance = useTerminalStore
     .getState()
     .instances.find((candidate) => candidate.id === terminalId);
+  // The non-integrated shell exception requires a successful current liveness lookup.
+  if (
+    instance?.sessionReady === true &&
+    !instance.task?.state &&
+    instance.activity?.type !== "interactiveApp"
+  ) {
+    const before = instance;
+    let activity: TerminalInstance["activity"];
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const states = await Promise.race([
+        getTerminalStates(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("liveness timeout")),
+            Math.max(0, Math.min(3000, (deadlineAt ?? Infinity) - Date.now())),
+          );
+        }),
+      ]);
+      activity = states[terminalId]?.activity;
+    } catch {
+      /* Unknown stays protected. */
+    } finally {
+      clearTimeout(timer);
+    }
+    instance = useTerminalStore
+      .getState()
+      .instances.find((candidate) => candidate.id === terminalId);
+    if (
+      instance?.generation === before.generation &&
+      instance?.taskEpoch === before.taskEpoch &&
+      instance?.sessionReady === true
+    ) {
+      useTerminalStore.getState().updateInstanceInfo(terminalId, {
+        ...(activity ? { activity } : {}),
+        livenessConfirmed: !!activity,
+      });
+      instance = useTerminalStore
+        .getState()
+        .instances.find((candidate) => candidate.id === terminalId);
+    } else {
+      return {
+        cleared: [],
+        interrupted: [],
+        restarted: [],
+        skipped: [{ terminalId, reason: "notReady" }],
+        failed: [],
+      };
+    }
+  }
   const action: PaneClearAction = instance
     ? planTerminalClear(instance, config)
     : { paneId, terminalId, kind: "skip", reason: "notReady" };
-  const deadlineAt =
-    options.hardDeadlineMs === undefined ? undefined : Date.now() + options.hardDeadlineMs;
 
   return runPaneClearAction({
     action,
