@@ -88,6 +88,61 @@ describe("useSyncEvents", () => {
     expect(mockOnSyncCwd).toHaveBeenCalledWith(expect.any(Function));
   });
 
+  it.each(["command", "title"])("waits for attach before accepting %s generation", (kind) => {
+    useTerminalStore
+      .getState()
+      .registerInstance({ id: "restarted", profile: "PowerShell", syncGroup: "" });
+    renderHook(() => useSyncEvents());
+    const command = mockOnCommandStatus.mock.calls[0][0];
+    const title = mockOnTerminalTitleChanged.mock.calls[0][0];
+    act(() => {
+      if (kind === "command") {
+        command({ terminalId: "restarted", generation: 6, phase: "start" });
+        command({ terminalId: "restarted", generation: 6, phase: "end", exitCode: 0 });
+        command({ terminalId: "restarted", generation: 7, phase: "start" });
+      } else {
+        title({ terminalId: "restarted", generation: 6, title: "⠋ old", interactiveApp: "Claude" });
+        title({ terminalId: "restarted", generation: 6, title: "✳ old", interactiveApp: "Claude" });
+        title({
+          terminalId: "restarted",
+          generation: 7,
+          title: "⠋ current",
+          interactiveApp: "Claude",
+        });
+      }
+    });
+    expect(useTerminalStore.getState().instances[0].generation).toBeUndefined();
+    expect(useTerminalStore.getState().instances[0].task).toBeUndefined();
+    expect(useNotificationStore.getState().notifications).toHaveLength(0);
+    expect(persistSession).not.toHaveBeenCalled();
+    act(() => useTerminalStore.getState().updateInstanceInfo("restarted", { generation: 7 }));
+    expect(useTerminalStore.getState().instances[0].task?.state).toBe("running");
+    expect(useNotificationStore.getState().notifications).toHaveLength(0);
+    if (kind === "title") expect(useTerminalStore.getState().instances[0].title).toBe("⠋ current");
+    act(() => useTerminalStore.getState().updateInstanceInfo("restarted", { outputActive: true }));
+    expect(useNotificationStore.getState().notifications).toHaveLength(0);
+  });
+
+  it.each(["unregister", "unmount"])("discards deferred generation events on %s", (reason) => {
+    const register = () =>
+      useTerminalStore
+        .getState()
+        .registerInstance({ id: "removed", profile: "PowerShell", syncGroup: "" });
+    register();
+    const { unmount } = renderHook(() => useSyncEvents());
+    const emit = mockOnCommandStatus.mock.calls[0][0];
+    act(() => emit({ terminalId: "removed", generation: 7, phase: "start" }));
+    if (reason === "unregister")
+      act(() => {
+        useTerminalStore.getState().unregisterInstance("removed");
+        register();
+      });
+    else unmount();
+    act(() => useTerminalStore.getState().updateInstanceInfo("removed", { generation: 7 }));
+    expect(useTerminalStore.getState().instances[0].task).toBeUndefined();
+    expect(useNotificationStore.getState().notifications).toHaveLength(0);
+  });
+
   it("observes generation-scoped shell lifecycle without synthesizing a result", () => {
     useTerminalStore
       .getState()

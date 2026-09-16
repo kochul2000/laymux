@@ -1,6 +1,6 @@
 import { getCodexTurnStates, type CodexTurnSnapshot } from "./tauri-api";
 import { useTerminalStore, type TerminalInstance } from "@/stores/terminal-store";
-import { observeTerminalTask } from "./terminal-task-observers";
+import { observeTaskInput, observeTerminalTask } from "./terminal-task-observers";
 
 const POLL_MS = 1000;
 const STALE_MS = 6000;
@@ -91,10 +91,17 @@ export function subscribeCodexTurnStates(): () => void {
           unknown(id);
           continue;
         }
-        useTerminalStore.getState().updateInstanceInfo(id, { codexTurn: snapshot });
+        const source = sourceKey(snapshot);
+        const taskId = snapshot.turnId ?? "idle";
+        const deferred = current.deferredTaskInput;
+        const changedTask = current.task?.source !== source || current.task?.taskId !== taskId;
+        useTerminalStore.getState().updateInstanceInfo(id, {
+          codexTurn: snapshot,
+          ...(changedTask ? { deferredTaskInput: undefined } : {}),
+        });
         observeTerminalTask(id, {
-          source: sourceKey(snapshot),
-          taskId: snapshot.turnId ?? "idle",
+          source,
+          taskId,
           state:
             snapshot.state === "running" ? "running" : snapshot.state === "idle" ? "idle" : "ended",
           result:
@@ -106,6 +113,14 @@ export function subscribeCodexTurnStates(): () => void {
                   ? "interrupted"
                   : undefined,
         });
+        if (
+          deferred?.observation &&
+          deferred.source === source &&
+          deferred.taskId !== taskId &&
+          deferred.inputAt === current.lastUserInputAt &&
+          snapshot.state === "running"
+        )
+          observeTaskInput(id, true);
       }
     } catch {
       if (!disposed) for (const id of stamps.keys()) if (currentTarget(id)) unknown(id);

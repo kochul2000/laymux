@@ -2108,7 +2108,11 @@ if (matchesKeybinding(e, "issueReporter.submit")) { handleSubmit(); }
 
 **이벤트 계약**: 기존 `command-status`의 command/exitCode 메타데이터와 별도로 OSC 133 lifecycle 발행에는 `phase: start | end | prompt`와 `generation`이 있다. D 결과를 읽지 못하면 exitCode를 생략한다. title 이벤트에는 `generation`과 `appSession`(기존 process detection epoch)이 추가되며, 이전 generation/낡은 activity sequence의 작업 관측은 수락하지 않는다. 출력 활동 이벤트는 frame/volume만 발행하고 타이틀로 배지 타이머를 갱신하지 않는다.
 
+현재 generation은 output attach가 확정한다. generation이 미확정인 instance의 lifecycle/title 이벤트는 처리하지 않고 보류하며, attach 후 일치하는 generation만 수신 순서대로 적용한다. 이벤트 자체로 현재 generation을 시딩하지 않는다. instance 제거 또는 구독 종료 시 보류 이벤트를 폐기한다.
+
 **메모리 모델**: terminal instance의 `taskObservation`은 source·taskId·sequence·state·선택적 result·입력 해소 여부·타이틀 만료 시간을 담는다. `task`는 공통 계산 결과와 마지막 유효 관측 시각·알림 전이 번호를 보관한다. 입력 관측은 `kind: input`으로 구분하며 다른 source/taskId는 거부한다. 작업·관측 상태와 중복 제거 이력은 세션 파일에 영속하지 않는다. 표시 메시지는 상태 마커를 담지 않는다.
+
+`deferredTaskInput`은 Codex 종료 뒤 제출 경계(source·이전 taskId·inputAt)와 선택적 보류 입력 관측을 보관하는 메모리 전용 어댑터 입력이다. 새 턴 확인 전에는 기존 task를 변경하지 않으며, 같은 source의 새 running 턴에 한 번 재귀속한 뒤 소모한다. 표시/정책 소비자는 이 버퍼를 입력 대기 상태로 읽지 않는다.
 
 **외부 투영**: Desktop·Automation terminals.list·Remote selectorStatus는 다음 필드를 공유한다.
 

@@ -85,6 +85,24 @@ export function useSyncEvents() {
     const unsubscribeCodexTurns = subscribeCodexTurnStates();
     let cancelled = false;
     const unlisteners: (() => void)[] = [];
+    const pendingGenerationEvents = new Map<string, (() => void)[]>();
+
+    function deferGeneration(
+      terminalId: string,
+      generation: number | undefined,
+      apply: () => void,
+    ): boolean {
+      const instance = useTerminalStore
+        .getState()
+        .instances.find((entry) => entry.id === terminalId);
+      if (cancelled || !instance) return true;
+      if (generation === undefined) return false; // Legacy command metadata has no task phase.
+      if (instance.generation !== undefined) return generation !== instance.generation;
+      const events = pendingGenerationEvents.get(terminalId) ?? [];
+      events.push(apply);
+      pendingGenerationEvents.set(terminalId, events);
+      return true;
+    }
     // Capture the Map itself so cleanup drains the same instance this effect
     // populated. `useRef(new Map())` is never reassigned, so this is the live
     // map — the capture exists to keep cleanup independent of `.current` at
@@ -141,16 +159,10 @@ export function useSyncEvents() {
     );
 
     trackListener(
-      onTerminalTitleChanged((data) => {
-        if (cancelled) return;
+      onTerminalTitleChanged(function applyTitle(data): void {
+        if (deferGeneration(data.terminalId, data.generation, () => applyTitle(data))) return;
         const { updateInstanceInfo, instances } = useTerminalStore.getState();
         const instance = instances.find((i) => i.id === data.terminalId);
-        if (
-          data.generation !== undefined &&
-          instance?.generation !== undefined &&
-          data.generation !== instance.generation
-        )
-          return;
         const detectedActivity = data.interactiveApp
           ? ({ type: "interactiveApp", name: data.interactiveApp } as const)
           : undefined;
@@ -167,7 +179,6 @@ export function useSyncEvents() {
 
         const updates: Record<string, unknown> = {
           title: data.title,
-          ...(data.generation !== undefined ? { generation: data.generation } : {}),
         };
         // Only the activity is ordered against the reconcile worker's verdicts
         // (ADR-0135). The title, the Codex status message and the active-title
@@ -291,19 +302,9 @@ export function useSyncEvents() {
     );
 
     trackListener(
-      onCommandStatus((data) => {
-        if (cancelled) return;
-        const instanceAtEvent = useTerminalStore
-          .getState()
-          .instances.find((entry) => entry.id === data.terminalId);
-        if (
-          data.generation !== undefined &&
-          instanceAtEvent?.generation !== undefined &&
-          data.generation !== instanceAtEvent.generation
-        )
-          return;
-        const update: Record<string, unknown> =
-          data.generation !== undefined ? { generation: data.generation } : {};
+      onCommandStatus(function applyCommand(data): void {
+        if (deferGeneration(data.terminalId, data.generation, () => applyCommand(data))) return;
+        const update: Record<string, unknown> = {};
 
         if (data.command !== undefined && data.command !== "__preexec__") {
           update.lastCommand = data.command;
@@ -474,6 +475,13 @@ export function useSyncEvents() {
       .catch(() => {});
 
     const unsubStore = useTerminalStore.subscribe((state, prevState) => {
+      for (const [id, events] of pendingGenerationEvents) {
+        const instance = state.instances.find((entry) => entry.id === id);
+        if (!instance || instance.generation !== undefined) {
+          pendingGenerationEvents.delete(id); // Delete before replay: handlers update this store.
+          if (instance) for (const apply of events) apply();
+        }
+      }
       if (state.instances.length < prevState.instances.length) {
         const currentIds = new Set(state.instances.map((i) => i.id));
         for (const [id, timer] of outputActiveTimers.current) {
@@ -487,6 +495,7 @@ export function useSyncEvents() {
 
     return () => {
       cancelled = true;
+      pendingGenerationEvents.clear();
       unsubscribeCodexTurns();
       unsubscribeTasks();
       unsubStore();

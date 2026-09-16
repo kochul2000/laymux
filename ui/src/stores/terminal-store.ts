@@ -29,6 +29,13 @@ export interface TerminalInstance {
   livenessConfirmed?: boolean;
   taskObservation?: TaskObservation;
   task?: TerminalTask;
+  /** Codex input received after a closed turn, awaiting authoritative turn attribution. */
+  deferredTaskInput?: {
+    source: string;
+    taskId: string;
+    inputAt: number;
+    observation?: TaskObservation;
+  };
   /** Resume startup grace: do not classify the pane as a conclusive shell yet. */
   attributionPendingUntil?: number;
   lastCommand?: string;
@@ -93,6 +100,7 @@ interface TerminalStoreState {
         | "lastCommandAt"
         | "lastUserInput"
         | "lastUserInputAt"
+        | "deferredTaskInput"
         | "activity"
         | "activitySequence"
         | "outputActive"
@@ -163,11 +171,27 @@ export const useTerminalStore = create<TerminalStoreState>()((set, get) => ({
               ...next,
               task: undefined,
               taskObservation: undefined,
+              deferredTaskInput: undefined,
               codexTurn: undefined,
               taskEpoch: (inst.taskEpoch ?? 0) + 1,
               livenessConfirmed: info.livenessConfirmed ?? false,
             }
-          : next;
+          : {
+              ...next,
+              ...(info.lastUserInputAt !== undefined &&
+              info.lastUserInputAt !== inst.lastUserInputAt
+                ? {
+                    deferredTaskInput:
+                      next.activity?.name === "Codex" && inst.task?.state === "ended"
+                        ? {
+                            source: inst.task.source,
+                            taskId: inst.task.taskId,
+                            inputAt: info.lastUserInputAt,
+                          }
+                        : undefined,
+                  }
+                : {}),
+            };
       }),
     }));
   },

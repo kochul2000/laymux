@@ -2093,7 +2093,10 @@ describe("useKeyboardShortcuts", () => {
         });
         useTerminalStore
           .getState()
-          .updateInstanceInfo(`terminal-${paneId}`, { sessionReady: true });
+          .updateInstanceInfo(`terminal-${paneId}`, {
+            sessionReady: true,
+            activity: { type: "shell" },
+          });
       }
     }
 
@@ -2152,7 +2155,12 @@ describe("useKeyboardShortcuts", () => {
         syncGroup: "ws-default",
         workspaceId: "ws-default",
       });
-      useTerminalStore.getState().updateInstanceInfo("terminal-dock-pane", { sessionReady: true });
+      useTerminalStore
+        .getState()
+        .updateInstanceInfo("terminal-dock-pane", {
+          sessionReady: true,
+          activity: { type: "shell" },
+        });
       renderHook(() => useKeyboardShortcuts());
 
       fireKey("l", { altKey: true });

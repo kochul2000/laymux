@@ -1023,11 +1023,15 @@ Remote drawer도 선택된 workspace만 축약하지 않고 모든 visible works
 
 `TerminalView`의 기존 승인·응답 감지는 source·taskId·sequence·해소 정보를 가진 입력 관측을 전달한다. 표시 메시지에 내부 마커를 저장하지 않는다. 같은 작업의 대기는 진행 관측보다 우선하고, 해소는 다시 진행으로, 종료는 대기를 닫는다. 닫힌 작업이나 다른 작업·세션에 속한 늦은 입력 관측은 거부한다. PTY generation·앱 변경·앱 감지 epoch 변경은 이력을 초기화한다.
 
+Codex 종료 상태에서 새 입력을 제출하면 기존 source·종료 taskId·제출 시점을 재관측 경계로 기록한다. 다음 poll보다 먼저 도착한 승인 프롬프트는 원시 관측으로 보류하며 표시 상태를 합성하지 않는다. 같은 source의 다른 running turnId를 확인할 때만 보류 관측을 새 턴에 재귀속한다. 동일 종료 턴의 재조회·일시 실패에는 보류를 유지하지만, 프롬프트 해소·다음 입력·PTY/앱/세션 교체·새 턴 종료에는 재사용하지 않는다. 입력 대기 표시는 여전히 공통 task에서만 읽는다.
+
 자동 작업 알림은 `subscribeTerminalTasks` 한 곳에서 입력 대기 진입·종료 전이를 발행한다. 최초 종료·입력 대기는 알리지 않으며 반복 관측·결과 보강·출력 정지·조회 실패도 알림을 만들지 않는다. 같은 작업의 진행 → 지연 → 종료는 한 번 알린다. 대기 알림은 기존 `requiresAction` 도착 보호와 읽음 정책을 유지한다. Rust의 합성 Claude 성공 알림과 OSC 133 자동 Notify, 프론트의 무출력 성공 추정은 사용하지 않는다. 명시적 `lx notify`는 독립이다.
 
 절전과 실제 clear는 `terminalTaskPolicy`를 읽는다. 확인된 진행은 자동 억제하고 지연은 마지막 유효 진행 관측부터 60초까지만 유지한다. 실패 재시도·출력은 기한을 늘리지 않으며 1초 정책 타이머가 조용한 pane도 해제한다. tooltip은 60초 만료 사유를 표시하고 수동 keepAwake·다른 pane의 근거는 유지한다. lifecycle 없는 비통합 셸·미지원 TUI는 출력 활동 동안만 예외적으로 억제한다.
 
 clear는 확인된 작업 없음·종료만 허용하고 나머지는 busyPolicy를 따른다. 미지원 TUI는 항상 skip한다. 미확인 셸의 예외는 PTY 준비·현재 generation에서 성공한 liveness 조회·shell 분류·작업/대기/출력 부재가 모두 필요하다. `clearPane`가 최대 3초(요청 deadline 이내)로 liveness를 새로 조회하며, 실패·교체는 보호한다. 이 예외는 작업 없음의 증명이 아니며 미검출 조용한 전경 작업에 입력이 섞일 위험은 남는다.
+
+예외 조회는 이미 shell로 분류된 pane에만 적용한다. OSC 133 E만 받은 running이나 activity 미확정은 조회로 shell로 덮지 않는다. 조회 중 running/task 관측이 새로 생겼다면 그 증거도 보존하고 최신 상태로 busyPolicy를 적용한다.
 
 결과 아이콘은 pane 첫째 줄에 Lucide SVG로 표시하고 상태 색상과 읽지 않은 알림 링은 기존 배지가 소유한다. 마지막 입력 표시는 `workspaceSelector.lastInputMode`가 소유한다([ADR-0194](../adr/0194-workspace-pane-last-input-second-line.md)). 기본 `perPane`은 각 terminal pane 둘째 줄에 그 pane의 입력을 표시한다. `workspaceLatest`는 terminal pane을 첫째 줄만 있는 높이로 줄이고, visible terminal pane 중 가장 최근 입력 하나를 pane 목록 아래 별도 한 줄에 표시한다. 두 모드 모두 `lastUserInput/lastUserInputAt`과 `lastCommand/lastCommandAt` 중 더 최신인 비어 있지 않은 제출 문자열을 선택하고 공백을 한 칸으로 접은 뒤 최대 50자로 truncate한다. Composer는 structured input 성공 뒤 snapshot을 기록하며 Direct는 human `onData`의 bounded line editor가 CR/LF 제출을 본 뒤 기록한다. Direct 조립기는 ECMA-48 7-bit CSI의 parameter/intermediate/final byte 범위를 chunk 경계에 걸쳐 bounded 상태로 소비하므로 SGR·SGR-pixels와 parameterized mouse report 좌표가 제출 문장에 섞이지 않는다. 이 필터는 최근 입력 모델에만 적용하며 PTY로 보내는 원본 입력 바이트는 변경하지 않는다. 이 상태는 메모리 전용이고 세션에 영속하지 않는다. 과거처럼 workspace 전체의 마지막 명령·상대 시간·최신 알림 텍스트를 섞던 통합 상태 행은 어느 모드에서도 렌더하지 않는다.
 

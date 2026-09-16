@@ -38,7 +38,10 @@ function seedTerminal() {
     syncGroup: "ws-clear",
     workspaceId: "ws-clear",
   });
-  useTerminalStore.getState().updateInstanceInfo("terminal-pane-a", { sessionReady: true });
+  useTerminalStore.getState().updateInstanceInfo("terminal-pane-a", {
+    sessionReady: true,
+    activity: { type: "shell" },
+  });
 }
 
 describe("runPaneClearFromUi", () => {

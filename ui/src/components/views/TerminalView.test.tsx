@@ -3641,6 +3641,67 @@ describe("TerminalView", () => {
     expect(useNotificationStore.getState().notifications).toHaveLength(0);
   });
 
+  it.each([false, true])(
+    "buffers a new-turn prompt until polling, including dismissal=%s",
+    async (dismissed) => {
+      const id = "t-deferred-prompt";
+      render(<TerminalView instanceId={id} profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => expect(mockOnTerminalOutput).toHaveBeenCalled());
+      const onOutput = mockOnTerminalOutput.mock.calls.at(-1)![1];
+      act(() => {
+        useTerminalStore
+          .getState()
+          .updateInstanceInfo(id, { activity: { type: "interactiveApp", name: "Codex" } });
+        observeTerminalTask(id, { state: "ended", taskId: "previous" });
+        useTerminalStore
+          .getState()
+          .updateInstanceInfo(id, { lastUserInput: "next", lastUserInputAt: Date.now() });
+        onOutput(
+          new TextEncoder().encode(
+            "Would you like to run the following command?\r\nPress enter to confirm or esc to cancel\r\n",
+          ),
+        );
+      });
+      expect(
+        useTerminalStore.getState().instances.find((i) => i.id === id)?.deferredTaskInput
+          ?.observation?.state,
+      ).toBe("waiting");
+      if (dismissed)
+        act(() => onOutput(new TextEncoder().encode("• continuing after approval\r\n")));
+      const instance = useTerminalStore.getState().instances.find((i) => i.id === id);
+      expect(instance?.task?.state).toBe("ended");
+      expect(instance?.deferredTaskInput?.observation?.state).toBe(
+        dismissed ? undefined : "waiting",
+      );
+    },
+  );
+
+  it("does not defer an old prompt tail after a new submission", async () => {
+    const id = "t-submission-tail";
+    render(<TerminalView instanceId={id} profile="PowerShell" syncGroup="" />);
+    await vi.waitFor(() => expect(mockOnTerminalOutput).toHaveBeenCalled());
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)![1];
+    act(() => {
+      useTerminalStore
+        .getState()
+        .updateInstanceInfo(id, { activity: { type: "interactiveApp", name: "Codex" } });
+      observeTerminalTask(id, { state: "running", taskId: "previous" });
+      onOutput(
+        new TextEncoder().encode(
+          "Would you like to run the following command?\r\nPress enter to confirm or esc to cancel\r\n",
+        ),
+      );
+      observeTerminalTask(id, { state: "ended" });
+      useTerminalStore
+        .getState()
+        .updateInstanceInfo(id, { lastUserInput: "next", lastUserInputAt: Date.now() });
+      onOutput(new TextEncoder().encode("new request received\r\n"));
+    });
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === id);
+    expect(instance?.task?.state).toBe("ended");
+    expect(instance?.deferredTaskInput?.observation).toBeUndefined();
+  });
+
   it("does not inherit an old prompt after a new task starts", async () => {
     render(<TerminalView instanceId="t-task-boundary" profile="PowerShell" syncGroup="" />);
     await vi.waitFor(() => expect(mockOnTerminalOutput).toHaveBeenCalled());

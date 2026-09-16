@@ -56,6 +56,56 @@ afterEach(() => {
 });
 
 describe("Codex turn observation", () => {
+  it("rebinds a prompt received before the next turn poll without needing a redraw", async () => {
+    result(snapshot("completed"));
+    stop = subscribeCodexTurnStates();
+    await tick();
+    useTerminalStore
+      .getState()
+      .updateInstanceInfo("pane", { lastUserInputAt: Date.now(), lastUserInput: "next" });
+    observeTaskInput("pane", true);
+    expect(instance().task?.state).toBe("ended");
+    expect(notifications()).toHaveLength(0);
+    await tick(); // The previous completed turn may still be the latest record.
+    expect(instance().task?.state).toBe("ended");
+    result(snapshot("running", "b"));
+    await tick();
+    expect(instance().task).toMatchObject({ taskId: "b", state: "waiting" });
+    expect(notifications()).toHaveLength(1);
+    await tick();
+    expect(instance().task?.state).toBe("waiting");
+    expect(notifications()).toHaveLength(1);
+  });
+
+  it.each(["resolved", "new-input", "session", "completed", "no-submission"])(
+    "does not rebind an invalid deferred prompt (%s)",
+    async (reason) => {
+      result(snapshot("completed"));
+      stop = subscribeCodexTurnStates();
+      await tick();
+      if (reason !== "no-submission")
+        useTerminalStore
+          .getState()
+          .updateInstanceInfo("pane", { lastUserInputAt: Date.now(), lastUserInput: "/status" });
+      observeTaskInput("pane", true);
+      if (reason === "resolved") observeTaskInput("pane", false);
+      if (reason === "new-input")
+        useTerminalStore
+          .getState()
+          .updateInstanceInfo("pane", { lastUserInputAt: Date.now() + 1, lastUserInput: "other" });
+      result(
+        snapshot(
+          reason === "completed" ? "completed" : "running",
+          "b",
+          reason === "session" ? "2" : "1",
+        ),
+      );
+      await tick();
+      expect(instance().task?.state).toBe(reason === "completed" ? "ended" : "running");
+      expect(notifications().filter((n) => n.requiresAction)).toHaveLength(0);
+    },
+  );
+
   it("notifies an input wait once as information, independently of redraws", async () => {
     result(snapshot("running"));
     stop = subscribeCodexTurnStates();

@@ -262,7 +262,7 @@ export async function clearPane(
   if (
     instance?.sessionReady === true &&
     !instance.task?.state &&
-    instance.activity?.type !== "interactiveApp"
+    instance.activity?.type === "shell"
   ) {
     const before = instance;
     let activity: TerminalInstance["activity"];
@@ -291,10 +291,12 @@ export async function clearPane(
       instance?.taskEpoch === before.taskEpoch &&
       instance?.sessionReady === true
     ) {
-      useTerminalStore.getState().updateInstanceInfo(terminalId, {
-        ...(activity ? { activity } : {}),
-        livenessConfirmed: !!activity,
-      });
+      // A command may start while liveness is in flight. Its evidence wins.
+      if (instance.activity?.type === "shell" && !instance.task?.state)
+        useTerminalStore.getState().updateInstanceInfo(terminalId, {
+          ...(activity ? { activity } : {}),
+          livenessConfirmed: !!activity,
+        });
       instance = useTerminalStore
         .getState()
         .instances.find((candidate) => candidate.id === terminalId);

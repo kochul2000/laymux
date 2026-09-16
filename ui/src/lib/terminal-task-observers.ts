@@ -48,6 +48,32 @@ export function observeTaskTitle(id: string, title: string) {
 export function observeTaskInput(id: string, pending: boolean) {
   const instance = useTerminalStore.getState().instances.find((entry) => entry.id === id);
   if (!instance || !["Claude", "Codex"].includes(instance.activity?.name ?? "")) return;
+  const deferred = instance.deferredTaskInput;
+  if (
+    instance.activity?.name === "Codex" &&
+    instance.task?.state === "ended" &&
+    deferred &&
+    deferred.source === instance.task.source &&
+    deferred.taskId === instance.task.taskId &&
+    deferred.inputAt === instance.lastUserInputAt
+  ) {
+    if (pending === (deferred.observation?.state === "waiting")) return;
+    useTerminalStore.getState().updateInstanceInfo(id, {
+      deferredTaskInput: {
+        ...deferred,
+        observation: pending
+          ? {
+              kind: "input",
+              source: deferred.source,
+              taskId: deferred.taskId,
+              sequence: instance.task.sequence + 1,
+              state: "waiting",
+            }
+          : undefined,
+      },
+    });
+    return;
+  }
   if (pending === (instance.task?.state === "waiting")) return;
   if (instance.task?.state === "ended") return;
   observeTerminalTask(id, {

@@ -38,7 +38,9 @@ function registerTerminal(paneId: string, workspaceId = "ws-clear") {
     syncGroup: workspaceId,
     workspaceId,
   });
-  useTerminalStore.getState().updateInstanceInfo(`terminal-${paneId}`, { sessionReady: true });
+  useTerminalStore
+    .getState()
+    .updateInstanceInfo(`terminal-${paneId}`, { sessionReady: true, activity: { type: "shell" } });
 }
 
 function seedWorkspace() {
@@ -94,6 +96,18 @@ function makeBusy(paneId: string) {
 describe("clearPane against live stores", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getTerminalStates)
+      .mockReset()
+      .mockImplementation(async () =>
+        Object.fromEntries(
+          useTerminalStore
+            .getState()
+            .instances.map((entry) => [
+              entry.id,
+              { activity: entry.activity ?? { type: "shell" } },
+            ]),
+        ),
+      );
     vi.mocked(writeTerminalInput).mockResolvedValue(undefined);
     vi.mocked(writeToTerminal).mockResolvedValue(undefined);
     resetStores();
@@ -113,6 +127,40 @@ describe("clearPane against live stores", () => {
     expect(result.skipped).toEqual([{ terminalId: "terminal-pane-a", reason: "busy" }]);
     expect(writeTerminalInput).not.toHaveBeenCalled();
   });
+
+  it("does not invent a shell classification before an activity observation", async () => {
+    seedWorkspace();
+    useTerminalStore.getState().updateInstanceInfo("terminal-pane-a", { activity: undefined });
+    const result = await clearPane("pane-a");
+    expect(result.skipped).toEqual([{ terminalId: "terminal-pane-a", reason: "busy" }]);
+    expect(getTerminalStates).not.toHaveBeenCalled();
+    expect(writeTerminalInput).not.toHaveBeenCalled();
+  });
+
+  it.each(["before", "during"])(
+    "preserves E-only running observed %s the liveness lookup",
+    async (when) => {
+      seedWorkspace();
+      const start = () =>
+        useTerminalStore.getState().updateInstanceInfo("terminal-pane-a", {
+          activity: { type: "running" },
+          lastCommand: "quiet-command",
+        });
+      if (when === "before") start();
+      vi.mocked(getTerminalStates).mockImplementationOnce(async () => {
+        if (when === "during") start();
+        return { "terminal-pane-a": { activity: { type: "shell" } } };
+      });
+      const result = await clearPane("pane-a");
+      expect(result.skipped).toEqual([{ terminalId: "terminal-pane-a", reason: "busy" }]);
+      expect(
+        useTerminalStore.getState().instances.find((i) => i.id === "terminal-pane-a")?.activity
+          ?.type,
+      ).toBe("running");
+      expect(writeTerminalInput).not.toHaveBeenCalled();
+      if (when === "before") expect(getTerminalStates).not.toHaveBeenCalled();
+    },
+  );
 
   it("does not clear a replacement PTY using an old liveness response", async () => {
     seedWorkspace();

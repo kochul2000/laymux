@@ -4528,7 +4528,7 @@ export function TerminalView({
       const text = streamDecoder.decode(data, { stream: true });
       const promptInstance = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
       const promptTask = promptInstance?.task;
-      const scope = `${promptInstance?.taskEpoch}:${promptTask?.source}:${promptTask?.taskId}`;
+      const scope = `${promptInstance?.taskEpoch}:${promptTask?.source}:${promptTask?.taskId}:${promptInstance?.deferredTaskInput?.inputAt}`;
       if (promptTaskScope !== scope) {
         recentOutputTail = "";
         claudeDetectionBuffer = "";
@@ -4567,7 +4567,8 @@ export function TerminalView({
           codexConversationMessage ??
           (currentIsFooter || !currentMessage ? codexStatusMessage : undefined);
         if (
-          current.task?.state === "waiting" &&
+          (current.task?.state === "waiting" ||
+            current.deferredTaskInput?.observation?.state === "waiting") &&
           text.trim() &&
           !detectCodexInputPendingFromOutput(text)
         ) {
