@@ -867,7 +867,13 @@
       "working": "Command running",
       "success": "Command succeeded",
       "failure": "Command failed",
-      "idle": "No command result"
+      "idle": "No current task",
+      "waiting": "Awaiting input",
+      "interrupted": "Interrupted",
+      "ended": "Task ended · result unobserved",
+      "unknown": "Task unconfirmed",
+      "stale": "Observation delayed",
+      "output": "Output activity"
     },
     "newWorkspace": "New Workspace",
     "workspaces": "Workspaces",

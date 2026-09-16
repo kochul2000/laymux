@@ -9,6 +9,7 @@ import {
   type RawTerminalState,
 } from "./activity-handler";
 import { selectTerminalLastInput } from "./terminal-last-input";
+import { taskPresentation, type TerminalTask } from "./terminal-task";
 import type { StatusIconGlyph } from "./activity-markers";
 
 export interface LastCommandInfo {
@@ -17,6 +18,7 @@ export interface LastCommandInfo {
   timestamp: number;
   outputActive?: boolean; // true = terminal still producing output (e.g. subprocess running)
   codexTurn?: TerminalInstance["codexTurn"];
+  task?: TerminalTask;
   activityMessage?: string; // latest provider-specific activity status message
   activity?: TerminalActivityInfo;
   title?: string; // terminal title (used for Claude idle detection via ✳ prefix)
@@ -37,6 +39,7 @@ export interface TerminalSummaryInfo {
   activity: TerminalActivityInfo | undefined;
   outputActive: boolean;
   codexTurn?: TerminalInstance["codexTurn"];
+  task?: TerminalTask;
   hasUnreadNotification: boolean;
   activityMessage: string | undefined;
 }
@@ -144,6 +147,7 @@ export function getLastCommandForWorkspace(terminals: TerminalInstance[]): LastC
     timestamp: t.lastCommandAt ?? t.lastActivityAt,
     outputActive: t.outputActive,
     codexTurn: t.codexTurn,
+    task: t.task,
     activityMessage: t.activityMessage,
     activity: t.activity,
     title: t.title,
@@ -199,6 +203,7 @@ export function computeWorkspaceSummary(
       activity: t.activity,
       outputActive: t.outputActive ?? false,
       codexTurn: t.codexTurn,
+      task: t.task,
       hasUnreadNotification: notifications.some((n) => n.terminalId === t.id && n.readAt === null),
       activityMessage: t.activityMessage,
     })),
@@ -412,6 +417,11 @@ export function formatActivity(activity: TerminalActivityInfo | undefined): {
 }
 
 export interface CommandStatus {
+  label: string;
+  observation: import("./terminal-task").ObservationState;
+  taskState?: import("./terminal-task").TaskState;
+  taskResult?: import("./terminal-task").TaskResult;
+  outputActive: boolean;
   icon: StatusIconGlyph;
   color: string; // CSS color value
   text?: string; // display text override (e.g., Claude activity message)
@@ -456,12 +466,7 @@ export function getStatusDisplaySettings(
   return { mode: undefined, delimiter: undefined };
 }
 
-/**
- * Compute final command status display via ActivityHandler delegation.
- *
- * Delegates to the appropriate handler based on activity type.
- * Default (no activity) uses ShellActivityHandler with the 4-state rule.
- */
+/** Present the common task state; handlers only format provider message text. */
 export function computeCommandStatus(
   exitCode: number | undefined,
   outputActive: boolean | undefined,
@@ -471,6 +476,7 @@ export function computeCommandStatus(
   statusMessageMode?: ActivityStatusMessageMode,
   statusMessageDelimiter?: string,
   codexTurn?: TerminalInstance["codexTurn"],
+  task?: TerminalTask,
 ): CommandStatus {
   const raw: RawTerminalState = {
     exitCode,
@@ -484,9 +490,15 @@ export function computeCommandStatus(
     statusMessageDelimiter,
   };
   const handler = getHandler(activity);
-  const status = handler.computeStatus(raw);
+  const status = taskPresentation(task);
   const text = handler.computeStatusMessage(raw);
-  return { ...status, text };
+  return {
+    ...status,
+    text,
+    taskState: task?.state,
+    taskResult: task?.result,
+    outputActive: outputActive ?? false,
+  };
 }
 
 export function formatRelativeTime(ts: number): string {

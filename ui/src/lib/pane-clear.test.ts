@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { CLAUDE_INPUT_PENDING_MARKER, CODEX_INPUT_PENDING_MARKER } from "./activity-markers";
+import { observeTask } from "./terminal-task";
+const task = (state: "idle" | "running" | "waiting" | "ended") =>
+  observeTask(undefined, { source: "s", taskId: "t", sequence: 1, state }, Date.now());
 import {
   DEFAULT_PANE_CLEAR,
   isNoOpPaneClearResult,
@@ -61,7 +63,9 @@ describe("resolvePaneClear", () => {
 
 describe("planTerminalClear", () => {
   it("submits the configured command to an idle shell", () => {
-    expect(planTerminalClear(instance({ id: "terminal-pane-a" }), config)).toEqual({
+    expect(
+      planTerminalClear(instance({ id: "terminal-pane-a", task: task("idle") }), config),
+    ).toEqual({
       paneId: "pane-a",
       terminalId: "terminal-pane-a",
       kind: "submit",
@@ -75,6 +79,7 @@ describe("planTerminalClear", () => {
         instance({
           id: "terminal-pane-a",
           activity: { type: "interactiveApp", name },
+          task: task("idle"),
         }),
         config,
       ),
@@ -100,26 +105,32 @@ describe("planTerminalClear", () => {
   });
 
   describe("busy pane", () => {
-    const busyShell = instance({ id: "terminal-pane-a", activity: { type: "running" } });
+    const busyShell = instance({
+      id: "terminal-pane-a",
+      activity: { type: "running" },
+      task: task("running"),
+    });
     const workingClaude = instance({
       id: "terminal-pane-b",
       activity: { type: "interactiveApp", name: "Claude" },
       title: "✻ Working",
+      task: task("running"),
     });
     const claudeModal = instance({
       id: "terminal-pane-c",
       activity: { type: "interactiveApp", name: "Claude" },
-      activityMessage: CLAUDE_INPUT_PENDING_MARKER,
+      task: task("waiting"),
     });
     const codexModal = instance({
       id: "terminal-pane-d",
       activity: { type: "interactiveApp", name: "Codex" },
-      activityMessage: CODEX_INPUT_PENDING_MARKER,
+      task: task("waiting"),
     });
     const workingGrok = instance({
       id: "terminal-pane-e",
       activity: { type: "interactiveApp", name: "Grok" },
       title: "- Running: tests - grok",
+      task: task("running"),
     });
 
     it("skips every known busy shape under the default policy", () => {
@@ -151,7 +162,16 @@ describe("planTerminalClear", () => {
         planTerminalClear(instance({ id: "terminal-pane-a", outputActive: true }), config),
       ).toMatchObject({ kind: "skip", reason: "busy" });
       expect(
-        planTerminalClear(instance({ id: "terminal-pane-a", lastExitCode: 1 }), config).kind,
+        planTerminalClear(
+          instance({
+            id: "terminal-pane-a",
+            lastExitCode: 1,
+            sessionReady: true,
+            activity: { type: "shell" },
+            livenessConfirmed: true,
+          }),
+          config,
+        ).kind,
       ).toBe("submit");
     });
   });

@@ -1615,9 +1615,15 @@ export function onSetTabTitle(
   });
 }
 
-/** Listen for command status events (OSC 133 E/D). */
+/** Command metadata and generation-scoped OSC 133 A/C/D task boundaries. */
 export function onCommandStatus(
-  callback: (data: { terminalId: string; command?: string; exitCode?: number }) => void,
+  callback: (data: {
+    terminalId: string;
+    command?: string;
+    exitCode?: number;
+    phase?: "start" | "end" | "prompt";
+    generation?: number;
+  }) => void,
 ): Promise<UnlistenFn> {
   return listen("command-status", (event) => {
     callback(
@@ -1906,6 +1912,8 @@ export function onTerminalCwdChanged(
 
 export interface TerminalTitleChangedData {
   terminalId: string;
+  generation?: number;
+  appSession?: number;
   title: string;
   interactiveApp: string | null;
   notifyGateArmed: boolean;

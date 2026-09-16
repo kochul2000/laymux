@@ -1,5 +1,4 @@
-import type { RawTerminalState, StatusResult } from "./activity-handler";
-import { CODEX_INPUT_PENDING_MARKER, STATUS_ICON_WORKING } from "./activity-markers";
+import type { RawTerminalState } from "./activity-handler";
 import { ShellActivityHandler } from "./shell-activity-handler";
 
 const BRAILLE_SPINNER_RANGE_START = 0x2800;
@@ -12,10 +11,6 @@ function startsWithBrailleSpinner(title: string | undefined): boolean {
   return first >= BRAILLE_SPINNER_RANGE_START && first <= BRAILLE_SPINNER_RANGE_END;
 }
 
-function isInputPending(activityMessage: string | undefined): boolean {
-  return activityMessage === CODEX_INPUT_PENDING_MARKER;
-}
-
 export function extractCodexTitleMessage(title: string | undefined): string | undefined {
   if (!startsWithBrailleSpinner(title) || !title) return undefined;
   const stripped = title.slice(1).trim();
@@ -25,17 +20,6 @@ export function extractCodexTitleMessage(title: string | undefined): string | un
 export class CodexActivityHandler extends ShellActivityHandler {
   clearInput(): string {
     return "/clear";
-  }
-
-  isBusy(raw: RawTerminalState): boolean {
-    if (isInputPending(raw.activityMessage)) return true;
-    if (raw.codexTurn?.state === "unknown") return true;
-    if (raw.codexTurn) {
-      return raw.codexTurn.state === "running";
-    }
-    if (super.isBusy(raw)) return true;
-    if (isInputPending(raw.activityMessage)) return true;
-    return startsWithBrailleSpinner(raw.title);
   }
 
   shouldPreserveActivityOnTitleReset(): boolean {
@@ -50,33 +34,7 @@ export class CodexActivityHandler extends ShellActivityHandler {
     return startsWithBrailleSpinner(title);
   }
 
-  computeStatus(raw: RawTerminalState): StatusResult {
-    switch (raw.codexTurn?.state) {
-      case "completed":
-        return { icon: "✓", color: "var(--green)" };
-      case "failed":
-        return { icon: "✗", color: "var(--red)" };
-      case "idle":
-      case "interrupted":
-        return { icon: "—", color: "var(--text-secondary)" };
-    }
-    if (isInputPending(raw.activityMessage)) {
-      return { icon: "✓", color: "var(--green)" };
-    }
-    if (raw.codexTurn?.state === "running") {
-      return { icon: STATUS_ICON_WORKING, color: "var(--yellow)" };
-    }
-    if (!raw.outputActive && startsWithBrailleSpinner(raw.title)) {
-      return { icon: STATUS_ICON_WORKING, color: "var(--yellow)" };
-    }
-    // A previous shell exit code is not evidence that this Codex turn succeeded.
-    return super.computeStatus({ ...raw, exitCode: undefined });
-  }
-
   computeStatusMessage(raw: RawTerminalState): string | undefined {
-    if (isInputPending(raw.activityMessage)) {
-      return undefined;
-    }
     const bullet = raw.activityMessage || undefined;
     const titleMsg = extractCodexTitleMessage(raw.title);
     const mode = raw.statusMessageMode ?? "title";

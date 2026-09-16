@@ -2100,41 +2100,30 @@ if (matchesKeybinding(e, "issueReporter.submit")) { handleSubmit(); }
 - 이 예외는 터미널에 한정한다. 파일 탐색기 등 다른 컴포넌트의 copy/paste는 여전히
   시스템 이벤트 전용이다.
 
-### 15.6 앱 전용 편의 코드 격리
+### 15.6 앱 전용 관측과 공통 작업 정책
 
-각 앱 activity 타입별로 **ActivityHandler** 클래스를 구현하여 notification, status, statusMessage 계산과 단일 pane 실제 클리어 입력·busy 판정을 분기한다. 원시 상태는 공통으로 저장하고, activity 타입에 따라 해당 핸들러가 최종 표시와 안전한 쓰기 계약을 도출한다. 워크스페이스 화면 클리어는 이 계약을 사용하지 않고 Ctrl+L만 브로드캐스트한다([ADR-0137](../adr/0137-workspace-clear-ctrl-l-broadcast.md), [ADR-0158](../adr/0158-activity-aware-single-pane-clear.md)).
+[ADR-0250](../adr/0250-terminal-task-state-and-notification-transitions.md)에 따라 앱별 핸들러는 메시지 포맷·기존 타이틀 해석·clear 입력(`/clear` 또는 셸 설정값)의 어댑터다. 최종 표시·알림·절전·clear 보호는 `terminal-task.ts`와 공통 전이 구독자가 소유한다. 워크스페이스 Ctrl+L은 기존 방송 동작을 유지한다.
 
-Codex의 `get_codex_turn_states` Tauri command는 인자 없이 현재 알려진 Codex pane의 `Record<terminalId, { generation, sessionId?, selectionKey?, turnId?, state }>`를 반환한다([ADR-0248](../adr/0248-codex-turn-lifecycle-activity.md)). `state`는 `running | completed | failed | interrupted | idle | unknown`이다. `selectionKey`는 프로세스별 TUI 대화 선택 로그의 식별자로, 호출자가 구성하거나 다른 프로세스/세션에 재사용하지 않는다. 정확한 귀속과 읽기에 실패하면 unknown이며 성공·중단으로 합성하지 않는다. 파일 경로와 transcript 본문은 응답에 포함하지 않는다. 명령은 blocking I/O를 Tauri threadpool에서 실행하고 조회 전후 PTY generation을 검증한다. frontend의 메모리 전용 `codexTurn`과 공통 `outputActive`는 분리되며, Automation `terminals.list`의 기존 instance 확장 필드와 `selectorStatus`에도 같은 상태가 노출된다. 별도 REST 제어 endpoint나 Codex 설정 변경은 추가하지 않는다.
+`get_codex_turn_states`는 인자 없이 `Record<terminalId, { generation, sessionId?, selectionKey?, turnId?, state }>`를 반환한다. `state`는 `running | completed | failed | interrupted | idle | unknown`이고 정확 귀속·읽기 실패는 unknown이다. 프로세스별 selectionKey는 호출자가 합성하거나 재사용하지 않는다. blocking I/O는 Tauri threadpool에서 실행하며 전후 generation을 검증한다. Windows·Linux·WSL 파일 경로와 /review 부모 턴 경계는 ADR-0248·0249를 그대로 따른다. 프론트 조회 실패는 직전 상태를 지우지 않고 지연으로 처리한다.
 
-#### ActivityHandler 인터페이스
+**이벤트 계약**: 기존 `command-status`의 command/exitCode 메타데이터와 별도로 OSC 133 lifecycle 발행에는 `phase: start | end | prompt`와 `generation`이 있다. D 결과를 읽지 못하면 exitCode를 생략한다. title 이벤트에는 `generation`과 `appSession`(기존 process detection epoch)이 추가되며, 이전 generation/낡은 activity sequence의 작업 관측은 수락하지 않는다. 출력 활동 이벤트는 frame/volume만 발행하고 타이틀로 배지 타이머를 갱신하지 않는다.
 
-```typescript
-interface ActivityHandler {
-  computeStatus(raw: RawTerminalState): StatusResult;        // 아이콘, 색상
-  computeStatusMessage(raw: RawTerminalState): string;       // 표시 텍스트
-  computeNotification(raw: RawTerminalState): Notification | null;  // 알림 발생 여부/내용
-  clearInput(shellClearCommand: string): string;             // 실제 클리어 제출 텍스트
-  isBusy(raw: RawTerminalState): boolean;                    // 지금 제출해도 안전한지
-}
-```
+현재 generation은 output attach가 확정한다. generation이 미확정인 instance의 lifecycle/title 이벤트는 처리하지 않고 보류하며, attach 후 일치하는 generation만 수신 순서대로 적용한다. 이벤트 자체로 현재 generation을 시딩하지 않는다. instance 제거 또는 구독 종료 시 보류 이벤트를 폐기한다.
 
-#### 핸들러 등록
+**메모리 모델**: terminal instance의 `taskObservation`은 source·taskId·sequence·state·선택적 result·입력 해소 여부·타이틀 만료 시간을 담는다. `task`는 공통 계산 결과와 마지막 유효 관측 시각·알림 전이 번호를 보관한다. 입력 관측은 `kind: input`으로 구분하며 다른 source/taskId는 거부한다. 작업·관측 상태와 중복 제거 이력은 세션 파일에 영속하지 않는다. 표시 메시지는 상태 마커를 담지 않는다.
 
-```typescript
-const handlers: Record<string, ActivityHandler> = {
-  default: new ShellActivityHandler(),     // 셸 기본 (OSC 133 기반)
-  Claude: new ClaudeActivityHandler(),     // Claude Code 최적화
-  // 향후: neovim, htop 등 추가 가능
-};
+`deferredTaskInput`은 Codex 종료 뒤 제출 경계(source·이전 taskId·inputAt)와 선택적 보류 입력 관측을 보관하는 메모리 전용 어댑터 입력이다. 새 턴 확인 전에는 기존 task를 변경하지 않으며, 같은 source의 새 running 턴에 한 번 재귀속한 뒤 소모한다. 표시/정책 소비자는 이 버퍼를 입력 대기 상태로 읽지 않는다.
 
-function getHandler(activity?: Activity): ActivityHandler {
-  return handlers[activity?.name] ?? handlers.default;
-}
-```
+**외부 투영**: Desktop·Automation terminals.list·Remote selectorStatus는 다음 필드를 공유한다.
 
-#### 격리 규칙
+| 필드 | 값 |
+| --- | --- |
+| taskState | idle / running / waiting / ended, 미확인이면 생략 |
+| taskResult | success / failure / interrupted, 관측한 종료 결과만 포함 |
+| observation | confirmed / unknown / stale |
+| outputActive | 독립 출력 활동 boolean |
+| icon, color, label, text | 표시 호환 필드와 접근성 문구; 정책의 입력이 아님 |
 
-- 각 핸들러는 독립 모듈 파일에 구현한다 (`shell-activity-handler.ts`, `claude-activity-handler.ts`).
-- 핸들러를 import하지 않으면 해당 앱 전용 로직이 완전히 제거되어야 한다.
-- 핸들러 추가 시 기존 핸들러의 테스트가 깨지지 않아야 하고, 등록된 interactive app은 실제 클리어 입력과 busy 판정을 명시해야 한다.
-- 핸들러 동작은 설정으로 조절 가능하게 한다 — 현재는 Claude 상태 메시지 구성을 `claude.statusMessageMode`/`statusMessageDelimiter`(§10)가 제어한다. 핸들러 전체를 default 로 폴백시키는 플래그는 아직 없다(필요해지면 추가).
+Remote는 taskState/taskResult로 아이콘을 선택하고 관측 지연·출력 활동을 별도 배지로 그린다. 기존 REST/MCP 조회 경로의 확장이며 인증·포트·제어 endpoint는 바꾸지 않는다.
+
+핸들러별 메시지 포맷은 `claude/codex/grok.statusMessageMode/statusMessageDelimiter`를 유지한다. 테스트는 앱 어댑터의 파싱·메시지/clear 입력과 공통 상태·알림/정책을 각각 검증한다. 표시 조합과 신호별 제한은 [data-flow.md §9](./data-flow.md)에 둔다.

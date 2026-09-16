@@ -1,5 +1,4 @@
-import type { RawTerminalState, StatusResult } from "./activity-handler";
-import { STATUS_ICON_WORKING } from "./activity-markers";
+import type { RawTerminalState } from "./activity-handler";
 import { ShellActivityHandler } from "./shell-activity-handler";
 
 const BRAILLE_SPINNER_RANGE_START = 0x2800;
@@ -55,10 +54,6 @@ export class GrokActivityHandler extends ShellActivityHandler {
     return "/clear";
   }
 
-  isBusy(raw: RawTerminalState): boolean {
-    return super.isBusy(raw) || isGrokWorkingTitle(raw.title);
-  }
-
   shouldPreserveActivityOnTitleReset(): boolean {
     return true;
   }
@@ -69,13 +64,6 @@ export class GrokActivityHandler extends ShellActivityHandler {
 
   isActiveTitle(title: string | undefined): boolean {
     return isGrokWorkingTitle(title);
-  }
-
-  computeStatus(raw: RawTerminalState): StatusResult {
-    if (!raw.outputActive && isGrokWorkingTitle(raw.title)) {
-      return { icon: STATUS_ICON_WORKING, color: "var(--yellow)" };
-    }
-    return super.computeStatus(raw);
   }
 
   computeStatusMessage(raw: RawTerminalState): string | undefined {

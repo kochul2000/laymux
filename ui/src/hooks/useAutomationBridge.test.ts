@@ -14,6 +14,7 @@ import html2canvas from "html2canvas";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useDockStore } from "@/stores/dock-store";
+import { observeTerminalTask } from "@/lib/terminal-task-observers";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useUiStore } from "@/stores/ui-store";
@@ -3264,7 +3265,7 @@ describe("spatial pane numbers (issue #256)", () => {
     expect(byId[BL]).toBe(3);
     expect(summary.terminalCount).toBe(3);
     expect(lastCommand.command).toBe("cargo test");
-    expect(status).toMatchObject({ icon: "✓", color: "var(--green)" });
+    expect(status).toMatchObject({ icon: "?", observation: "unknown", outputActive: false });
   });
 
   it("projects never-mounted workspace terminals with the same selector placeholders as PC", () => {
@@ -3324,7 +3325,7 @@ describe("spatial pane numbers (issue #256)", () => {
     expect(instances.find((instance) => instance.id === "terminal-cold")).toMatchObject({
       profile: "WSL",
       workspaceId: "ws-cold",
-      selectorStatus: null,
+      selectorStatus: { icon: "?", observation: "unknown" },
       selectorDisplay: {
         environment: "WSL",
         activity: { label: "shell", color: "var(--text-secondary)" },
@@ -3363,8 +3364,9 @@ describe("spatial pane numbers (issue #256)", () => {
     const terminal = instances.find((instance) => instance.id === `terminal-${TL}`)!;
 
     expect(terminal.selectorStatus).toMatchObject({
-      icon: "⏳",
-      color: "var(--yellow)",
+      icon: "?",
+      observation: "unknown",
+      color: "var(--text-secondary)",
       text: "Implementing / Editing navigation.rs",
     });
     expect(terminal.selectorDisplay).toMatchObject({
@@ -3987,6 +3989,7 @@ describe("panes.clear over the async bridge (ADR-0158)", () => {
         workspaceId: "ws-clear",
       });
       useTerminalStore.getState().updateInstanceInfo(`terminal-${paneId}`, { sessionReady: true });
+      observeTerminalTask(`terminal-${paneId}`, { state: "idle" });
     }
   }
 

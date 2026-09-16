@@ -1,6 +1,14 @@
 import type { StatusIconGlyph } from "./activity-markers";
 
-export type CommandStatusIconKind = "working" | "success" | "failure" | "idle";
+export type CommandStatusIconKind =
+  | "working"
+  | "success"
+  | "failure"
+  | "idle"
+  | "waiting"
+  | "interrupted"
+  | "ended"
+  | "unknown";
 
 export function getCommandStatusIconKind(status: StatusIconGlyph): CommandStatusIconKind {
   switch (status) {
@@ -10,6 +18,14 @@ export function getCommandStatusIconKind(status: StatusIconGlyph): CommandStatus
       return "success";
     case "✗":
       return "failure";
+    case "!":
+      return "waiting";
+    case "⊘":
+      return "interrupted";
+    case "□":
+      return "ended";
+    case "?":
+      return "unknown";
     case "—":
       return "idle";
   }

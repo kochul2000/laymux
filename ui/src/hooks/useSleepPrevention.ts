@@ -1,3 +1,5 @@
+import { terminalTaskPolicy } from "@/lib/terminal-task";
+import { useSleepInhibitStore } from "@/stores/sleep-inhibit-store";
 import { useEffect } from "react";
 import {
   observeSleepInhibitState,
@@ -6,7 +8,7 @@ import {
 } from "@/lib/sleep-inhibit-coordinator";
 import { shouldInhibitSleep } from "@/lib/sleep-prevention";
 import { onSleepInhibitChanged } from "@/lib/tauri-api";
-import { hasWorkingTerminal } from "@/lib/terminal-working";
+import { hasSleepInhibitingTerminal } from "@/lib/terminal-working";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 
@@ -31,13 +33,19 @@ export function useSleepPrevention(): void {
       // the common case — don't walk them on every store update to reach a
       // foregone conclusion.
       const hasBusy =
-        axes.keepAwakeWhenBusy && hasWorkingTerminal(useTerminalStore.getState().instances);
+        axes.keepAwakeWhenBusy && hasSleepInhibitingTerminal(useTerminalStore.getState().instances);
+      const staleTaskExpired = useTerminalStore
+        .getState()
+        .instances.some((instance) => terminalTaskPolicy(instance).sleepExpired);
+      if (useSleepInhibitStore.getState().staleTaskExpired !== staleTaskExpired)
+        useSleepInhibitStore.setState({ staleTaskExpired });
       requestSleepInhibit(shouldInhibitSleep(axes, hasBusy));
     };
 
     // A reloaded WebView cannot know what the backend still holds, so the first
     // derived value is always sent — even when it is the default "no".
     sync();
+    const expiryTimer = setInterval(sync, 1000);
     const unsubscribeSettings = useSettingsStore.subscribe(sync);
     const unsubscribeTerminals = useTerminalStore.subscribe(sync);
 
@@ -58,6 +66,7 @@ export function useSleepPrevention(): void {
 
     return () => {
       cancelled = true;
+      clearInterval(expiryTimer);
       unlisten?.();
       unsubscribeSettings();
       unsubscribeTerminals();

@@ -16,6 +16,15 @@ vi.mock("@/lib/tauri-api", () => ({
   saveSettings: vi.fn().mockResolvedValue(undefined),
   propagateCwdOnce: vi.fn().mockResolvedValue(undefined),
   clipboardWriteText: vi.fn().mockResolvedValue(undefined),
+  getTerminalStates: vi
+    .fn()
+    .mockImplementation(async () =>
+      Object.fromEntries(
+        useTerminalStore
+          .getState()
+          .instances.map((entry) => [entry.id, { activity: entry.activity ?? { type: "shell" } }]),
+      ),
+    ),
   writeTerminalInput: vi.fn().mockResolvedValue(undefined),
   writeToTerminal: vi.fn().mockResolvedValue(undefined),
 }));
@@ -2084,7 +2093,10 @@ describe("useKeyboardShortcuts", () => {
         });
         useTerminalStore
           .getState()
-          .updateInstanceInfo(`terminal-${paneId}`, { sessionReady: true });
+          .updateInstanceInfo(`terminal-${paneId}`, {
+            sessionReady: true,
+            activity: { type: "shell" },
+          });
       }
     }
 
@@ -2143,7 +2155,12 @@ describe("useKeyboardShortcuts", () => {
         syncGroup: "ws-default",
         workspaceId: "ws-default",
       });
-      useTerminalStore.getState().updateInstanceInfo("terminal-dock-pane", { sessionReady: true });
+      useTerminalStore
+        .getState()
+        .updateInstanceInfo("terminal-dock-pane", {
+          sessionReady: true,
+          activity: { type: "shell" },
+        });
       renderHook(() => useKeyboardShortcuts());
 
       fireKey("l", { altKey: true });

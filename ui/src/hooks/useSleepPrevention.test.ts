@@ -13,6 +13,7 @@ import { resetSleepInhibitCoordinator } from "@/lib/sleep-inhibit-coordinator";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useSleepInhibitStore } from "@/stores/sleep-inhibit-store";
 import { useTerminalStore } from "@/stores/terminal-store";
+import { observeTerminalTask } from "@/lib/terminal-task-observers";
 
 function registerBusyTerminal(id: string) {
   const store = useTerminalStore.getState();
@@ -57,6 +58,39 @@ describe("useSleepPrevention", () => {
     renderHook(() => useSleepPrevention());
     expect(setSleepInhibit).toHaveBeenCalledExactlyOnceWith(false);
   });
+
+  it.each([false, true])(
+    "stale running expires at 60s without overriding manual=%s",
+    async (manual) => {
+      vi.useFakeTimers();
+      try {
+        useSettingsStore.getState().setPower({ keepAwake: manual, keepAwakeWhenBusy: true });
+        registerBusyTerminal("agent");
+        useTerminalStore.getState().updateInstanceInfo("agent", {
+          activity: { type: "interactiveApp", name: "Codex" },
+        });
+        observeTerminalTask("agent", { state: "running" });
+        const { unmount } = await mounted();
+        act(() => observeTerminalTask("agent", { state: undefined }));
+        await act(async () => vi.advanceTimersByTimeAsync(59_000));
+        expect(setSleepInhibit).not.toHaveBeenCalled();
+        act(() => {
+          observeTerminalTask("agent", { state: undefined });
+          useTerminalStore.getState().updateInstanceInfo("agent", { outputActive: true });
+        });
+        await act(async () => vi.advanceTimersByTimeAsync(1000));
+        await flush();
+        expect(useSleepInhibitStore.getState().staleTaskExpired).toBe(true);
+        if (manual) expect(setSleepInhibit).not.toHaveBeenCalled();
+        else expect(setSleepInhibit).toHaveBeenLastCalledWith(false);
+        expect(useTerminalStore.getState().instances[0].task?.state).toBe("running");
+        unmount();
+        await flush();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it("stays off while both axes are off, however busy the terminals get", async () => {
     await mounted();

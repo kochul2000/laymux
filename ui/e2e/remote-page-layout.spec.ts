@@ -116,7 +116,15 @@ async function routeRemoteWithWorkspaces(
     cwd: "C:\\Users\\kochul\\work\\beta",
     branch: "feature/beta",
     activity: { type: "running" },
-    selectorStatus: { icon: "⏳", color: "var(--yellow)", text: "Building" },
+    selectorStatus: {
+      icon: "⏳",
+      color: "var(--yellow)",
+      text: "Building",
+      taskState: "running",
+      observation: "confirmed",
+      outputActive: false,
+      label: "Command running",
+    },
     selectorDisplay: {
       environment: "PS",
       activity: { label: "running", color: "var(--yellow)" },

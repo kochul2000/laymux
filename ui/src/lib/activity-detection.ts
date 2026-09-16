@@ -3,12 +3,6 @@ import {
   detectRegisteredActivityFromCommand,
   detectRegisteredActivityFromTitle,
 } from "./activity-handler";
-import { CLAUDE_INPUT_PENDING_MARKER, CODEX_INPUT_PENDING_MARKER } from "./activity-markers";
-
-// Re-export so existing call sites that already import these markers from
-// `activity-detection` keep working. The canonical source is `activity-markers`
-// to keep the import graph acyclic \u2014 see the doc comment there.
-export { CLAUDE_INPUT_PENDING_MARKER, CODEX_INPUT_PENDING_MARKER };
 const MIDDLE_DOT = "\u00b7";
 const ASSISTANT_BULLET = "\u2022";
 
@@ -150,11 +144,8 @@ export function detectClaudeInputPendingFromOutput(text: string): boolean {
  * chunk even though the combined buffer holds a complete modal — that
  * is exactly the silent-fail mode reported by the user.
  *
- * De-duplication of repeat notifications is the call site's job (via
- * the `CLAUDE_INPUT_PENDING_MARKER` on `activityMessage`). The marker
- * is cleared by `TerminalView` which also resets the buffer it owns,
- * so the detector cannot keep re-firing on stale modal residue after
- * the user has answered.
+ * The common task transition owns notification deduplication; TerminalView
+ * resets its detection buffer after the user answers.
  */
 export function detectNewClaudeInputPendingPrompt(previousText: string, nextText: string): boolean {
   const combinedText = `${previousText}${nextText}`.slice(-CLAUDE_DETECTION_WINDOW);
