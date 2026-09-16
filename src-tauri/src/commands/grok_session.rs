@@ -6,7 +6,6 @@ use std::time::SystemTime;
 use serde::Deserialize;
 use tauri::State;
 
-use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 
 use super::session_attribution::{provider_terminal_domains, ProviderSessionLookup};
@@ -173,18 +172,15 @@ pub(crate) fn get_grok_session_lookup_impl(
     session_max_age_hours: Option<u64>,
     state: &AppState,
 ) -> Result<ProviderSessionLookup, String> {
-    let known: Vec<String> = {
-        let k = state.known_grok_terminals.lock_or_err()?;
-        k.iter().cloned().collect()
-    };
     let home = grok_home();
-    let domains = provider_terminal_domains(&known, state)?;
+    let domains = provider_terminal_domains(state)?;
     let terminal_roots = domains.native_roots;
     let native_terminal_ids: HashSet<String> = terminal_roots
         .iter()
         .map(|(terminal_id, _)| terminal_id.clone())
         .collect();
     let mut failed_terminal_ids = HashSet::new();
+    let mut observed = Vec::new();
     let mut candidates = Vec::new();
     if !terminal_roots.is_empty() {
         match crate::process_tree::try_snapshot_processes() {
@@ -198,6 +194,7 @@ pub(crate) fn get_grok_session_lookup_impl(
                     if app != "Grok" {
                         continue;
                     }
+                    observed.push(terminal_id.clone());
                     match session_id_for_pid_checked(&home, pid, session_max_age_hours) {
                         Ok(Some(session_id)) => candidates.push((terminal_id, session_id)),
                         Ok(None) => {}
@@ -215,7 +212,7 @@ pub(crate) fn get_grok_session_lookup_impl(
         }
     }
     let mut result = crate::process_tree::complete_agent_session_attributions(
-        &known,
+        &observed,
         crate::process_tree::reject_duplicate_session_attributions(
             candidates
                 .into_iter()

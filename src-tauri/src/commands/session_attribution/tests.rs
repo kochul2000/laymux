@@ -323,6 +323,60 @@ fn provider_lookup_failure_is_scoped_to_the_affected_terminal() {
 }
 
 #[test]
+fn stale_activity_caches_do_not_claim_an_absent_native_provider() {
+    let state = AppState::new();
+    let terminal_id = "stale-native";
+    state.pty_handles.lock().unwrap().insert(
+        terminal_id.into(),
+        crate::pty::PtyHandle::from_test_writer(Box::new(std::io::sink()))
+            .with_child_pid(Some(u32::MAX)),
+    );
+    for cache in [
+        &state.known_claude_terminals,
+        &state.known_codex_terminals,
+        &state.known_grok_terminals,
+    ] {
+        cache.lock().unwrap().insert(terminal_id.into());
+    }
+    let claude =
+        super::super::claude_session::get_claude_session_lookup_impl(None, &state).unwrap();
+    let codex = super::super::codex_session::get_codex_session_lookup_impl(None, &state).unwrap();
+    let grok = super::super::grok_session::get_grok_session_lookup_impl(None, &state).unwrap();
+    for lookup in [claude, codex, grok] {
+        assert!(lookup.attributions.is_empty());
+        assert!(lookup.failed_terminal_ids.is_empty());
+    }
+}
+
+#[test]
+fn provider_domains_include_live_ptys_without_activity_cache_entries() {
+    let state = AppState::new();
+    state.pty_handles.lock().unwrap().extend([
+        (
+            "uncached-native".into(),
+            crate::pty::PtyHandle::from_test_writer(Box::new(std::io::sink()))
+                .with_child_pid(Some(101)),
+        ),
+        (
+            "uncached-wsl".into(),
+            crate::pty::PtyHandle::from_test_writer(Box::new(std::io::sink()))
+                .with_child_pid(Some(202))
+                .with_wsl_backed(true),
+        ),
+    ]);
+    assert!(state.known_claude_terminals.lock().unwrap().is_empty());
+    assert!(state.known_codex_terminals.lock().unwrap().is_empty());
+    assert!(state.known_grok_terminals.lock().unwrap().is_empty());
+
+    let domains = provider_terminal_domains(&state).unwrap();
+    assert_eq!(domains.native_roots, vec![("uncached-native".into(), 101)]);
+    assert_eq!(
+        domains.wsl_terminal_ids,
+        HashSet::from(["uncached-wsl".into()])
+    );
+}
+
+#[test]
 fn provider_domains_keep_wsl_terminals_out_of_native_snapshot_failures() {
     let state = AppState::new();
     state.pty_handles.lock().unwrap().extend([
@@ -339,9 +393,7 @@ fn provider_domains_keep_wsl_terminals_out_of_native_snapshot_failures() {
         ),
     ]);
 
-    let domains =
-        provider_terminal_domains(&["terminal-native".into(), "terminal-wsl".into()], &state)
-            .unwrap();
+    let domains = provider_terminal_domains(&state).unwrap();
 
     assert_eq!(domains.native_roots, vec![("terminal-native".into(), 101)]);
     assert_eq!(

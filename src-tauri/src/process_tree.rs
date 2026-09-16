@@ -39,15 +39,15 @@ pub struct ProcessEntry {
     pub name: String,
 }
 
-/// Preserve every terminal that the title/process state machine identified as
-/// the provider, even when an exact session ID cannot be proven. `None` is a
+/// Preserve every terminal whose live process identified the provider,
+/// even when an exact session ID cannot be proven. `None` is a
 /// deliberate fail-closed attribution, distinct from a terminal where that
 /// provider is not currently running.
 pub(crate) fn complete_agent_session_attributions(
-    known_terminal_ids: &[String],
+    observed_terminal_ids: &[String],
     exact: HashMap<String, String>,
 ) -> HashMap<String, Option<String>> {
-    let mut result: HashMap<String, Option<String>> = known_terminal_ids
+    let mut result: HashMap<String, Option<String>> = observed_terminal_ids
         .iter()
         .cloned()
         .map(|terminal_id| (terminal_id, None))

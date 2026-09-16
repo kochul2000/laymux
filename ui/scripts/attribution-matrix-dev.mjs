@@ -132,6 +132,11 @@ try {
         if (coverage && expected.sessionId && coverage.sessionId !== expected.sessionId)
           mismatches.push(`Wrong committed session for ${id}`);
         const view = panes.find((p) => `terminal-${p.id}` === id)?.view;
+        const sessionField = {
+          codex: "lastCodexSession",
+          claude: "lastClaudeSession",
+          grok: "lastGrokSession",
+        }[expected.provider ?? "codex"];
         if (
           !error &&
           expected.state === "fresh" &&
@@ -141,7 +146,7 @@ try {
         if (
           !error &&
           expected.state === "identified" &&
-          view?.lastCodexSession !== expected.sessionId
+          view?.[sessionField] !== expected.sessionId
         )
           mismatches.push(`Wrong resume metadata for ${id}`);
       }

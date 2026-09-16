@@ -1,7 +1,7 @@
 /* global fetch, window, setTimeout */
 // From ui/: LAYMUX_REPRO_ISOLATED=1 node scripts/repro-exit-checkpoint.mjs
-// <matrix workspace id> <isolated settings.json> [race|on|off]
-// Requires real, resumable agents already configured in that workspace.
+// <matrix workspace id|all> <isolated settings.json> [race|on|off]
+// Requires real, resumable agents already configured in the target workspaces.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { chromium } from "@playwright/test";
@@ -42,13 +42,24 @@ try {
     async ({ workspaceId, mode }) => {
       const { useWorkspaceStore: ws } = await import("/src/stores/workspace-store.ts");
       for (let attempt = 0; attempt < 100; attempt++) {
-        if (ws.getState().workspaces.some((workspace) => workspace.id === workspaceId)) break;
+        if (
+          ws
+            .getState()
+            .workspaces.some((workspace) =>
+              workspaceId === "all"
+                ? workspace.name.startsWith("matrix-")
+                : workspace.id === workspaceId,
+            )
+        )
+          break;
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
       if (!ws.getState().workspaces.every((w) => w.name.startsWith("matrix-")))
         throw Error("Matrix-owned workspaces required");
-      const target = ws.getState().workspaces.find((w) => w.id === workspaceId);
-      if (!target) throw Error("Workspace missing");
+      const targets = ws
+        .getState()
+        .workspaces.filter((w) => workspaceId === "all" || w.id === workspaceId);
+      if (!targets.length) throw Error("Workspace missing");
       const record = window.__recordExitRepro;
       let injected = false;
       window.__exitReproInvoke = async (invoke, command, args, ...rest) => {
@@ -74,8 +85,12 @@ try {
         if (command === "save_settings") await record({ command, phase: "end" });
         return result;
       };
-      ws.getState().setActiveWorkspace(workspaceId);
-      return target.panes
+      for (const target of targets) {
+        ws.getState().setActiveWorkspace(target.id);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+      return targets
+        .flatMap((target) => target.panes)
         .filter((p) => p.view.type === "TerminalView")
         .map((p) => `terminal-${p.id}`);
     },
