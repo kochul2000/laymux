@@ -1,6 +1,7 @@
 # 0147. 출력 볼륨을 앱 협조 없는 활성 신호로 인정하고, 앱이 선언한 유휴는 추론된 활성을 이긴다
 
 - Status: Accepted
+- Superseded by: [ADR-0250](0250-terminal-task-state-and-notification-transitions.md), Decision 1·3의 출력 기반 작업 중(⏳) 판정과 Decision 4·5의 타이틀·출력 간 보완 관계에 한정한다. 볼륨 검출 자체와 임계·비용 제약은 유지한다.
 - Date: 2026-08-12
 - Source: architecture/data-flow.md §outputActive 감지("ANY PTY 출력 기반 판단 금지" 규칙 정정), [ADR-0005](0005-display-state-raw-separation-compute.md), 사용자 보고("Claude 가 working 인데 ⏳ 대신 ✓ 로 뜬다", "shell 에 출력이 계속되고 있으면 working 이어야 한다")
 
