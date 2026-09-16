@@ -1,6 +1,6 @@
 # 0250. 터미널 작업 상태와 확인 알림은 공통 전이로 판정한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-16
 - Source: 사용자 v1.0.3 Astra 모래시계 제보와 상태·알림 단순화 합의 및 설계 리뷰, [PR #1046](https://github.com/kochul2000/laymux/pull/1046), [PR #1047](https://github.com/kochul2000/laymux/pull/1047), [architecture/data-flow.md §9](../architecture/data-flow.md), [architecture/api-contracts.md §15.6](../architecture/api-contracts.md)
 - Partially Supersedes: [ADR-0147](0147-output-volume-activity-and-app-declared-idle.md) Decision 1·3의 출력 볼륨을 다른 신호와 합쳐 작업 중(⏳)으로 판정하는 결정. Decision 4·5의 타이틀·출력 간 보완 관계도 아래의 제한적 타이틀 해석과 별도 출력 활동 축으로 대체한다. 볼륨 검출 자체와 임계·비용 제약은 유지한다.
@@ -115,5 +115,5 @@ Windows·Linux와 native·WSL은 같은 상태·알림 의미를 사용한다. �
 - 같은 작업에서 관측 복구 후 놓쳤던 종료를 한 번 알리는 동작과 실패·중단·결과 미관측 종료의 확인 알림이 추가된다. 최초 종료·입력 대기 복원과 반복 관측은 알리지 않는다. 그 대가로 재시작 전에 이미 입력을 기다리던 pane은 사용자가 상태 표시를 직접 확인해야 한다.
 - 기존 핸들러의 표시 반환, 입력 대기 문자열 마커, 자동 알림 직접 발행과 아이콘을 역으로 읽는 소비자를 함께 정리해야 한다. 기존 Lucide 아이콘과 앱별 관측기를 사용하며 별도 상태 머신 라이브러리나 이벤트 저장소는 도입하지 않는다.
 - 후속 구현은 TDD로 네 상태·결과 부재·관측 상태 조합, 입력 대기와 종료의 순서·귀속, `진행 중 → 관측 지연 → 종료`의 단일 알림, 최초 성공·실패·중단 종료와 N개 입력 대기의 무알림 복원, 반복 전이 중복 방지, 세션 변경·PTY 교체·늦은 응답 격리, `/review` 부모 턴·`/status` 로컬 명령을 검증한다. Claude·Grok의 정상·변경·비활성 타이틀과 6초 갱신 만료, 장식 출력·비통합 셸의 출력 배지, 60초 절전 상한·출력에 의한 기한 연장 금지·수동 override, 비통합 셸 clear 예외·liveness 미확인·미지원 TUI skip도 고정한다. Desktop/Remote 의미 일치와 실제 제보 원인의 진단·dev 실기 검증은 별도로 남긴다.
-- 이번 PR은 Proposed ADR과 인덱스만 변경한다. 방향 승인 후 Accepted로 전환할 때 ADR-0147에는 부분 대체 범위를 적은 `Superseded by` 관계만 추가하고 기존 결정 본문은 보존한다. 런타임 코드·외부 필드 계약과 `docs/architecture/`는 후속 구현 PR에서 함께 갱신한다. Accepted된 선행 ADR 본문은 이 제안 단계에서 수정하지 않는다.
+- 이번 PR은 승인된 ADR과 인덱스, ADR-0147의 부분 대체 범위를 적은 `Superseded by` 관계만 변경하고 선행 ADR의 기존 결정 본문은 보존한다. 런타임 코드·외부 필드 계약과 `docs/architecture/`는 후속 구현 PR에서 함께 갱신한다.
 - 관측 가능한 앱 신호가 사라지거나 새로운 작업·입력 대기 구조가 이 네 상태로 표현되지 않을 때 결정 범위를 재검토한다. 렌더링 변화만으로 작업 상태나 알림 종류를 추가하지 않는다.
