@@ -4,6 +4,8 @@
 
 **기본 30개는 첫 입력이 저장된 대화 기준으로 통과했다. 추가 조건에서는 실패가 재현됐다.** 특히 레이아웃으로 workspace 생성·workspace 복제는 세 provider와 두 OS 모두에서 `activeButUnidentified`로 업데이트용 저장이 거부됐다.
 
+이하 §1~4는 수정 전 `bed8da30`의 관측 기록이다. 이후 사용자 요청에 따라 §3의 새 결함 두 건을 `36716d5f`에서 수정했다. 후속 검증과 기존 한계는 §5에 구분한다.
+
 ## 환경과 판정 기준
 
 - Windows dev Automation API **19281**, WebView CDP 9229. release 19280은 사용하지 않았다.
@@ -134,12 +136,77 @@ Windows의 실제 Codex DB를 `VACUUM INTO`로 별도 최신 번호 DB에 복제
 
 관측 경합의 최초 WebView 재로딩 시도는 pane 하나의 제어가 완료되지 않아 제외했다. 별도 dev 재기동과 테스트 설정의 명시적 복구 후 다시 준비했으며, 그 준비 과정은 재기동 보존 성공에 포함하지 않는다. 최종 실행에서 종료·provider·ID 변화가 실제 완료된 경우와 generation 변화가 실제 관측된 경우만 집계했다. generation의 첫 하네스는 재시작 후 반드시 NoAgent일 것으로 가정해 대기 만료됐고, 실제 새 generation에서 같은 대화가 재개된 것을 기준으로 재검증했다. `transitions.json`의 해당 중단 항목은 통과가 아니며, 최종 두 조건은 `transitions-rest-3.json`에 있다.
 
+## 5. 새 결함 수정과 후속 검증
+
+수정 커밋은 `36716d5f39d17fc1f72c19e48a4fd5f3767fe859`다. 제품 코드는 두 원인에 한정했다.
+
+- workspace 복제·레이아웃 내보내기/복제/생성의 공통 view 복사에서 세 provider의 `last*Session`과 `lastAgentFresh`를 제외한다. 프로필·CWD·동기화 설정과 원본 pane은 보존한다. 이미 저장된 레이아웃도 새 workspace 생성 시 복원점을 전달하지 않는다. 기존 pane의 이동은 복원점을 유지한다.
+- Codex WSL의 deadline을 native 조회 이후, WSL process 탐색 직전에 만든다. WSL process 탐색과 SQLite 도우미의 공통 3초 제한·최대 4개 병렬 조회는 유지한다.
+
+### 복제·레이아웃의 30개 조건
+
+같은 커밋의 dev PID 44904에서 원본 CLI 12개를 유지한 채 provider/host별 대표 workspace를 복사했다. 대표 workspace에는 terminal pane이 하나씩 있고, 나머지 여섯 원본은 혼합 workspace에 있다. 각 복사본을 미진입 상태에서 저장하고, 실제 진입 후 18초 이상 기다려 critical 저장을 다시 실행했다.
+
+| 원본 CLI / host | 새 레이아웃으로 생성 | workspace 복제 | 기존 레이아웃 덮어쓰기 후 생성 | 레이아웃 복제 후 생성 | 복원 ID가 들어 있는 과거 레이아웃으로 생성 |
+|---|---|---|---|---|---|
+| Claude / Windows | 통과 | 통과 | 통과 | 통과 | 통과 |
+| Claude / WSL | 통과 | 통과 | 통과 | 통과 | 통과 |
+| Codex / Windows | 통과 | 통과 | 통과 | 통과 | 통과 |
+| Codex / WSL | 통과 | 통과 | 통과 | 통과 | 통과 |
+| Grok / Windows | 통과 | 통과 | 통과 | 통과 | 통과 |
+| Grok / WSL | 통과 | 통과 | 통과 | 통과 | 통과 |
+
+모든 복사본은 프로필·CWD·동기화 설정을 보존하고 **대화 복원점 없는 새 셸(`NoAgent`)**로 시작했다. 원본 12개의 정확한 provider·ID·저장 필드는 생성 전·후·복사본 제거 후에도 유지됐다. 미진입 coverage는 12개, 진입 후에는 원본 12개와 새 pane 하나의 13개였다. 원본 CLI 수동 재시작이나 저장된 ID의 수동 복구는 사용하지 않았다. 이는 복사본의 무입력 Claude/Grok 복원 정책을 검사한 결과가 아니다.
+
+원본 증거: `fix-structure.json`의 30개 결과. §3.1의 두 생성 경로 12개 실패를 포함해 5개 경로를 실제 store action→PTY→귀속 IPC→critical 저장으로 검사했다.
+
+**혼합 배치 2건도 통과했다.** 세 provider × 두 host의 terminal pane 6개와 EmptyView 하나가 있는 workspace에서 레이아웃 생성과 workspace 복제를 각각 실행했다. 여섯 새 PTY가 준비된 뒤 18초를 더 기다려 검사했으며, 새 pane은 모두 `NoAgent`, 원본 12개는 원래 provider·ID를 유지했다. critical coverage는 18개였다. 증거는 `fix-structure-mixed.json`이다. 따라서 이 수정의 실제 생성·복제 검사는 **30개 조건 + 혼합 2건 = 32건**이다.
+
+### Windows DB 잠금의 host 간 영향
+
+커밋에 포함한 `ui/scripts/repro-codex-host-isolation.mjs`로 수정 전 `300d1874`(PID 684)와 수정 후 `36716d5f`(PID 44904)를 동일 조건에서 비교했다. 실제 DB를 `VACUUM INTO`로 복사해 정상 조회를 먼저 확인하고, 그 복사본에만 Windows 공유 거부 잠금을 걸었다.
+
+| 관측 | 수정 전 | 수정 후 |
+|---|---|---|
+| 잠금 전 원본·복사본 | 12개 ID 정상 | 12개 ID 정상 |
+| 잠금 중 3회 | Windows Codex 2개와 **정상 WSL Codex 2개 모두 `unknown`** | 잠긴 Windows Codex 2개만 `unknown`, 나머지 10개는 정확한 ID 유지 |
+| 잠금 중 critical/일반 저장 | critical 거부, 기존 12개 ID 보존 | critical 거부, 기존 12개 ID 보존 |
+| 잠금 해제·복사본 제거 후 | 정상 복구 | 정상 복구 |
+
+원본 증거: `fix-host-before.json`, `fix-host-after.json`, `fix-host-summary.json`. 최초 잠금 획득 시도는 background reader와 경합하여 측정 전에 중단됐다. 테스트 도구에 잠금 획득·정리의 짧은 재시도를 추가한 뒤 위 동일 검사를 실행했으며, 중단 시도는 성공 횟수에 포함하지 않았다.
+
+재실행은 Windows에서 두 native·두 WSL Codex를 포함한 격리 dev와 baseline을 준비한 뒤 `ui/`에서 한다. baseline 형식은 스크립트 머리말에 있다. 테스트용 SQLite 홈은 현재 worktree의 `.tmp/` 아래로 제한한다.
+
+```powershell
+$env:LAYMUX_REPRO_ISOLATED='1'
+node scripts/repro-codex-host-isolation.mjs ../.tmp/attribution-matrix/recheck/resumable-baseline.json ../.tmp/attribution-matrix/recheck/home/.codex ../.tmp/attribution-matrix/recheck/fix-host-after.json
+```
+
+### 수정 후 실제 재기동
+
+종료 옵션 ON/OFF 각각 실제 앱을 3회 시작했다. 매 기동 미진입 상태의 critical 저장에서 PTY·attribution·coverage가 모두 비어 있고 원본 12개 저장 ID가 유지됨을 확인했다. 앞 두 기동은 미진입 상태에서 다시 종료했으며, 세 번째 기동은 모든 workspace에 진입해 원래 12개 provider·ID를 복원한 뒤 실제 창을 닫았다. 최종 디스크에서도 같은 ID를 확인했다.
+
+| 종료 옵션 | 실제 dev PID | 미진입 저장 | 세 번째 기동의 첫 진입·종료 |
+|---|---|---|---|
+| ON | `13328 → 25980 → 29804` | 3회 통과 | 12개 원래 대화 복원·저장 통과 |
+| OFF | `5004 → 5288 → 21272` | 3회 통과 | 12개 원래 대화 복원·저장 통과 |
+
+증거: `fix-{on,off}-unvisited-{1,2,3}-checks.json`, `fix-{on,off}-restored-visited-checks.json`, 각 `*-close-result.json`. `fix-final-audit.json`은 32개 생성·복사 결과, DB 잠금 전후 결과, 서로 다른 6개 PID와 모든 저장 ID를 별도로 대조한 요약이다. 모든 결과의 실행 커밋이 `36716d5f`인지도 확인했다.
+
+### 자동 회귀 검사
+
+- 새 복제 회귀 검사는 수정 전 **10개 실패**, 수정 후 통과했다. Windows·WSL 프로필 × workspace 복제/새 레이아웃 내보내기/기존 레이아웃 덮어쓰기/저장된 레이아웃으로 생성/레이아웃 복제의 5개 경로다. 세 provider ID·fresh 필드 제거, 나머지 설정과 원본 객체 보존을 함께 검사한다.
+- Windows UI: workspace store, WorkspaceSelectorView, store e2e, checkpoint 검사 **338/338 통과**. TypeScript·production build·변경 파일 ESLint/Prettier 통과.
+- Windows Rust: Codex session 검사 **39/39**, session attribution 검사 **16/16 통과**. 기존 로그 보존 matrix와 병렬 조회의 실패 범위 검사도 포함한다. 변경 Rust 파일의 rustfmt 검사는 통과했다. 전체 `cargo fmt --all -- --check`는 변경 전부터 있던 `remote_server/font_assets.rs:360`의 줄바꿈 차이로 실패했으며, 무관한 파일은 수정하지 않았다.
+
+§2의 **처음 실행한 무입력 Claude 복원 실패와 Windows Grok 1.0.13의 ID 부재는 이전부터 알려진 별도 한계로 남는다.** 이번 새 결함 두 건의 수정·통과에 포함하지 않는다.
+
 ## 실행 범위와 제외
 
 - dev 빌드는 updater가 비활성이다. 여기서 검증한 update는 실제 UI/Rust 저장 경로이며, **설치 파일 다운로드·교체·설치 후 재기동 전체를 검증한 것은 아니다**. `app_update.rs`의 finalization 전체는 이 결과로 대체하지 않는다. 실제 backend pending 요청과 ACK는 숨김 자동 종료에서 별도로 검사했다.
 - 모든 축의 무제한 데카르트 곱을 실행했다는 뜻이 아니다. 표에 적은 현재 버전·host·상태와 주입 조건이 실제 실행 범위다. 다른 CLI 버전, OS 자체 재부팅, 모든 장애와 모든 생명주기 상태의 전체 교차는 포함하지 않는다.
 - Codex는 이번 기본 프로필에서 `--yolo`로 실행했다. Codex의 도구 승인 설정별 교차는 실행하지 않았으며, 실제 시작 안내·디렉터리 선택 대기는 별도로 검사했다. 요청 실패는 이번 실행에서 관측된 Grok WSL 429와 재시도만 확인했다. 세 provider 전체의 네트워크·인증 실패 조합을 실행했다는 뜻이 아니다.
 - 기본 라이프사이클 실험에서는 UI HMR을 발생시키지 않았다. IPC 장애·관측 경합 주입은 별도 WebView 준비 단계 이후 측정했다. 중단된 하네스 시도는 통과 횟수에서 제외한다.
-- 제품 코드를 변경하지 않은 독립 검증이다. 새로 드러난 실패를 수정 완료로 표시하지 않는다.
+- §1~4는 제품 코드를 변경하지 않은 독립 검증이고, §5는 새 결함 두 건의 수정 후 별도 검증이다. 이전 검증의 반복 횟수를 새 커밋의 검사 횟수에 합산하지 않는다.
 
-ADR 불필요: 실행 조건·관측 결과·기존 코드의 실패 경로를 기록하며, 소유권·API·저장 스키마·복원 정책을 변경하지 않는다.
+ADR 불필요: 기존 독립 Workspace/Layout 모델과 ADR-0120·0238의 WSL 조회 범위를 적용하여 잘못 복사된 pane 복원점과 잘못 시작된 deadline을 바로잡는다. API·저장 스키마·복원 명령은 변경하지 않으며, 관련 living doc을 함께 갱신했다.
