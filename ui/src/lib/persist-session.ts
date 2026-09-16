@@ -256,6 +256,11 @@ async function runCheckpointCoordinator(): Promise<SessionCheckpointCommit> {
 export function flushSessionCheckpoint(
   options: SessionCheckpointOptions = {},
 ): Promise<SessionCheckpointCommit> {
+  // Native watchdog/update/eviction requests bypass persistSession(). Once
+  // closing starts, only the pre-interrupt close checkpoint may collect state.
+  if (closingDown && options.reason !== "close") {
+    return Promise.reject(new Error("Window close is in progress"));
+  }
   if (isSettingsWriteBlocked()) {
     return Promise.reject(
       new Error("Settings persistence is blocked until recovery is acknowledged"),
@@ -328,7 +333,6 @@ export async function saveBeforeClose(): Promise<void> {
     }
   }
 
-  // 2. Persist session directly (bypasses closingDown guard)
   // Wait for cache writes before cleaning — otherwise clean may race and
   // delete files that are still being written.
   await Promise.allSettled(cachePromises);

@@ -146,6 +146,42 @@ describe("persistSession", () => {
     vi.mocked(interruptTerminalsOnExit).mockResolvedValue(undefined);
   });
 
+  it.each(["codex", "claude", "grok"] as const)(
+    "keeps the final %s checkpoint when native requests arrive during exit interrupts",
+    async (provider) => {
+      const pane = useWorkspaceStore.getState().workspaces[0].panes[0];
+      const id = `terminal-${pane.id}`;
+      useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+      registerLiveTerminal(id, { type: "interactiveApp", name: provider });
+      vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+        [id]: { generation: 1, state: "identified", provider, sessionId: "before-exit" },
+      });
+      vi.mocked(interruptTerminalsOnExit).mockImplementationOnce(async () => {
+        // Real Ctrl+C can retire the process while the window is still settling.
+        vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+          [id]: { generation: 1, state: "noAgent" },
+        });
+        for (const reason of ["watchdog", "eviction", "update"] as const) {
+          await expect(
+            flushSessionCheckpoint({ reason, requireConclusive: reason !== "watchdog" }),
+          ).rejects.toThrow("Window close is in progress");
+        }
+      });
+
+      await saveBeforeClose();
+
+      expect(getTerminalSessionAttributions).toHaveBeenCalledTimes(1);
+      expect(saveSettings).toHaveBeenCalledTimes(1);
+      const view = vi.mocked(saveSettings).mock.calls[0][0].workspaces[0].panes[0].view;
+      const field = {
+        codex: "lastCodexSession",
+        claude: "lastClaudeSession",
+        grok: "lastGrokSession",
+      } as const;
+      expect(view[field[provider]]).toBe("before-exit");
+    },
+  );
+
   it("crosses attribution verdicts with mounted, hidden, rendererless and retired panes five times", async () => {
     vi.useFakeTimers();
     let checks = 0;

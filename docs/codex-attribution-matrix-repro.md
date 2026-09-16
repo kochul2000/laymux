@@ -56,13 +56,32 @@ Rust의 별도 오류 검증은 SQLite exclusive lock, 더 최신 번호의 손�
 - Linux GUI 빌드에서 현재 Rust 컴파일러의 경고 렌더러가 내부 오류를 냈다. 실기용 Linux 바이너리는 `RUSTFLAGS=-A dead_code`로 빌드했다. Windows strict clippy 결과와 구분한다.
 - Linux 실기의 `health`는 dev 종류·실행 파일·PR worktree 경로를 확인했다. Windows에서 생성한 worktree의 git 경로를 Linux 빌드가 해석하지 못해 `gitCommit`/`gitBranch`는 null이었다. Linux 별도 UI 복사본과 npm 설치를 사용했으며 Windows용 `ui/node_modules`를 WSL에서 변경하지 않았다.
 
+## 후속 확인: 종료 시 동작과 저장 요청의 경합
+
+사용자가 지적한 실사용 `exit` 설정은 `interruptTerminals=true`, `interruptRounds=3`, `settleMs=2000`이었다. 앞선 실기에서는 이 설정이 꺼져 있었으므로 해당 교차 조건은 검증하지 못했다.
+
+- 업데이트 경로는 `request_frontend_checkpoint("update", true)` 뒤 installer의 자식 정리를 수행하며, 일반 창 닫기의 `saveBeforeClose`/Ctrl+C를 호출하지 않는다. 실제 Windows·WSL Codex 두 pane에서 설정 OFF/ON 각각 5회 critical checkpoint를 실행했고, IPC 호출을 기록해 Ctrl+C 0회와 정확한 ID 유지를 확인했다. 설치 프로그램 자체는 실행하지 않았다.
+- 일반 종료의 기본 순서는 metadata 저장 → Ctrl+C 3회 → 2초 대기 → 출력 캐시 → 창 닫기다. 저장 요청이 추가로 들어오지 않으면 두 ID가 유지됐다.
+- 그러나 Ctrl+C 첫 호출 800ms 뒤 native watchdog과 같은 `session-checkpoint-requested` 이벤트를 주입하면, `persistSession`의 종료 플래그를 우회한 `flushSessionCheckpoint`가 다시 조회했다. Windows는 `noAgent`, WSL은 `activeButUnidentified`로 관측됐고, 두 pane의 저장 ID가 모두 지워졌다. 종료 이벤트, Ctrl+C, provider 조회, 설정 쓰기는 실제 dev 경로이며 주입한 것은 watchdog 요청의 도착 시점이다. 합성 request ID에 대한 Rust ACK는 pending 요청이 없어 거절되므로 이 ACK를 실제 watchdog 왕복 성공으로 세지 않는다.
+- 시작 직후에는 15초 startup grace가 이 삭제를 가렸다. 유예 만료 후 같은 경합을 실행해 삭제를 확인했다. 따라서 초기 실행 직후의 성공만으로 정상 종료를 판정할 수 없다.
+- 수정은 공통 `flushSessionCheckpoint`에서 종료 중의 비-close 요청을 거부한다. 마지막 close checkpoint는 Ctrl+C 전에 완료하며, native 요청은 오류 ACK 경로로 끝난다. 세 provider에 대해 watchdog·eviction·update 요청을 검증하는 새 테스트 3개가 수정 전 실패하고 수정 후 통과했다. 관련 4개 파일의 120개 테스트도 통과했다.
+- 수정 후 같은 실제 종료 경합을 5회 반복하여 Windows·WSL 두 ID 보존을 확인했다. 유예 만료 뒤 설정 ON/OFF의 일반 종료도 각각 확인했고, Ctrl+C 호출은 ON에서 6회(두 pane × 3회), OFF에서 0회였다. 체크인한 `ui/scripts/repro-exit-checkpoint.mjs`로도 한 번 더 경합을 실행해 두 ID 보존을 확인했다.
+
+이 문제는 종료 중 복원점 손실의 실측 원인이다. 업데이트 체크포인트 단독 실행의 `activeButUnidentified`를 이 설정 하나로 설명하지 않는다. ADR-0222의 "정상 close에서 인터럽트 전 복원점 확정" 규칙과 ADR-0048의 인터럽트 설정을 직접 적용하므로 새 ADR은 필요하지 않다. 실기 증거는 `.tmp/attribution-matrix/exit/`의 `update-events.json`, `normal-result.json`, `race-early-result.json`, `race-before-fix-{events,result}.json`, `close-{red,green}.json`에 있다.
+
+```powershell
+# 격리한 dev에 실제 resumable agent가 있는 matrix-* workspace를 준비한 뒤 ui/에서 실행
+$env:LAYMUX_REPRO_ISOLATED = '1'
+node scripts/repro-exit-checkpoint.mjs <workspace-id> <isolated-settings.json> race
+```
+
 ## 전체 회귀 검사
 
 | 검사 | 결과 |
 | --- | --- |
-| Windows UI unit | 4,958/4,958 통과 (`--maxWorkers=4`). 최종 focus/eviction 테스트 상태 구성 보강 후 해당 파일 95/95 재검증 통과 |
+| Windows UI unit | 종료 경합 수정 후 4,961/4,961 통과 (`--maxWorkers=4`). 관련 종료·checkpoint 검사 120개도 별도 통과 |
 | xterm cell-grid screen | 89/89 통과 |
-| UI build / TypeScript | 통과 |
+| UI build / TypeScript | 종료 경합 수정 후 재검증 통과 |
 | Windows workspace/all-targets strict clippy | 추가 동시 조회 수정 후 통과 |
 | Windows Rust 전체 최초 실행 | 2,078 통과, 11 실패, 1 ignored |
 | Rust 재검증 | 기존 Remote HTML 검사와 이미 통과한 긴 matrix를 제외한 workspace 실행에서 2,221 통과, 8 ignored. 최초 Android timing 실패 3개도 재검증 통과 |
