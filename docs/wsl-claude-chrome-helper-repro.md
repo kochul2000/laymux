@@ -47,3 +47,9 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib live_wsl_claude_attributio
 - 독립 서브에이전트 코드 리뷰: 수정이 필요한 지적 없음. 실제 shell 테스트 11개도 독립 실행하여 통과했다.
 
 이 검증은 원래 실패 pane의 정확한 세션 귀속과 체크포인트 계약을 확인한다. 사용자 앱에서 업데이트 설치나 critical checkpoint를 직접 실행하지 않았고, 다른 pane의 독립적인 미식별 원인 또는 native Windows의 helper 판정까지 해결했다고 주장하지 않는다. 현재 실행 중인 1.0.4에는 코드 변경이 자동 반영되지 않는다.
+
+## PR #1056 머지 전 재확인
+
+2026-09-17, #1057이 포함된 main `babd4588`을 병합하고 ADR 번호 충돌을 0253으로 정리했다. 독립 리뷰에서 P1/P2 지적은 없었으며 shell fixture 11개를 리뷰어도 별도로 통과했다. Windows에서 shell fixture 11개, 위 Rust 회귀 70개, UI 저장·체크포인트 120개와 변경 Rust 파일 rustfmt를 다시 실행해 모두 통과했다.
+
+이 시점에는 위 실기 기록의 대화 PID 997318과 Chrome 호스트 PID 2718444가 모두 종료된 상태여서 같은 프로세스에 대한 실기 대조는 재실행하지 않았다. 앞 절의 실기 결과는 PR 작성 당시 기록이며, 이번 재검증 결과와 구분한다. 사용자 release API·PTY·설정은 변경하지 않았다.

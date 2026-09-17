@@ -1,6 +1,6 @@
 # 0253. WSL Claude의 Chrome 호스트는 대화 프로세스 후보에서 제외한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-17
 - Source: v1.0.4 사용자 보고(`terminal-pane-54e49f2e: activeButUnidentified`), [data-flow.md §9·§13](../architecture/data-flow.md), [재현 기록](../wsl-claude-chrome-helper-repro.md)
 - Extends: [ADR-0120](0120-wsl-agent-session-attribution.md)의 WSL provider 프로세스 선택, [ADR-0134](0134-wsl-guest-interactive-app-liveness.md)의 게스트 liveness 후보 판정
