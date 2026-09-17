@@ -1,6 +1,7 @@
 # 0251. 터미널 활동은 다섯 종류 중 아이콘 하나로 표시한다
 
 - Status: Accepted
+- Partially Superseded by: [ADR-0254](0254-confirmed-idle-before-output-activity.md) (확인된 작업 없음의 출력 fallback만 대체)
 - Date: 2026-09-17
 - Source: 사용자 합의(내부 상태 신호 유지, 단일 아이콘, 중단은 대시, 상태 툴팁 제거, 미확인 알림 테두리 유지), PR #1052, architecture/data-flow.md §9, architecture/api-contracts.md §15.6
 - Partially Supersedes: [ADR-0250](0250-terminal-task-state-and-notification-transitions.md)의 미확인·중단·결과 미관측 개별 표시 및 출력 활동·관측 지연 보조 표시 결정

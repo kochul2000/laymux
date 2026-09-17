@@ -141,7 +141,7 @@ describe("작업 관측의 공통 소비 경로", () => {
   });
 
   it.each([
-    ["idle", undefined, "Hourglass"],
+    ["idle", undefined, "Minus"],
     ["running", undefined, "Hourglass"],
     ["waiting", undefined, "CircleAlert"],
     ["ended", "success", "Check"],
