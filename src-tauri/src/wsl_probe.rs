@@ -24,6 +24,12 @@ use crate::state::AppState;
 #[cfg(windows)]
 use crate::terminal::InitialExecutionHost;
 
+/// Both guest process consumers must exclude exactly the same proven helpers.
+#[cfg(any(windows, test))]
+pub(crate) fn with_agent_role_probe(script: &str) -> String {
+    format!("{}\n{script}", include_str!("wsl_probe/agent-role.sh"))
+}
+
 /// Every WSL-backed terminal and the distribution its probe must run in.
 /// `None` means the pane uses the default distribution, which the caller
 /// resolves once per probe pass.

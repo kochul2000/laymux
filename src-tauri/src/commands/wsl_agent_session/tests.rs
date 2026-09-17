@@ -33,7 +33,7 @@ fn shell_probe_preserves_ancestry_and_literal_environment_values() {
         )
         .unwrap();
     }
-    let script = WSL_PROCESS_PROBE.replace(
+    let script = crate::wsl_probe::with_agent_role_probe(WSL_PROCESS_PROBE).replace(
         "/proc/[0-9]*",
         &format!("\"{}\"/[0-9]*", root.path().display()),
     );
@@ -79,6 +79,7 @@ fn process(pid: u32, ppid: u32, name: &str) -> WslProcessEntry {
         pid,
         ppid,
         name: name.into(),
+        is_helper: false,
         home: "/home/user".into(),
         codex_home: None,
         grok_home: None,
@@ -90,8 +91,8 @@ fn process(pid: u32, ppid: u32, name: &str) -> WslProcessEntry {
 fn live_codex_without_rollout_is_not_mistaken_for_an_absent_agent() {
     let entries = parse_probe_output(
         concat!(
-            "LAYMUX_WSL_AGENT_PROBE_V2\n",
-            "P\tterminal-pane-a\t20\t10\tcodex\t/home/user\t\t\n",
+            "LAYMUX_WSL_AGENT_PROBE_V3\n",
+            "P\tterminal-pane-a\t20\t10\tcodex\t/home/user\t\t\t0\n",
             "LAYMUX_WSL_AGENT_PROBE_END\n",
         )
         .as_bytes(),
@@ -107,9 +108,9 @@ fn live_codex_without_rollout_is_not_mistaken_for_an_absent_agent() {
 #[test]
 fn parses_bounded_probe_rows_and_optional_roots() {
     let output = concat!(
-        "LAYMUX_WSL_AGENT_PROBE_V2\n",
-        "P\tterminal-pane-a\t10\t1\tbash\t/home/user\t\t\n",
-        "P\tterminal-pane-a\t20\t10\tcodex\t/home/user\t/opt/codex\t\n",
+        "LAYMUX_WSL_AGENT_PROBE_V3\n",
+        "P\tterminal-pane-a\t10\t1\tbash\t/home/user\t\t\t0\n",
+        "P\tterminal-pane-a\t20\t10\tcodex\t/home/user\t/opt/codex\t\t0\n",
         "R\tterminal-pane-a\t20\t/opt/codex/sessions/2026/08/02/rollout-a.jsonl\n",
         "LAYMUX_WSL_AGENT_PROBE_END\n",
     );
@@ -127,13 +128,92 @@ fn parses_bounded_probe_rows_and_optional_roots() {
 fn malformed_or_incomplete_probe_output_fails_closed() {
     assert!(parse_probe_output(b"terminal-pane-a\t20\t10\tcodex\n").is_err());
     assert!(parse_probe_output(
-        b"LAYMUX_WSL_AGENT_PROBE_V2\nP\tterminal-pane-a\tbad\t10\tcodex\t/home/u\t\t\nLAYMUX_WSL_AGENT_PROBE_END\n"
+        b"LAYMUX_WSL_AGENT_PROBE_V3\nP\tterminal-pane-a\tbad\t10\tcodex\t/home/u\t\t\t0\nLAYMUX_WSL_AGENT_PROBE_END\n"
     )
     .is_err());
     assert!(parse_probe_output(
-        b"LAYMUX_WSL_AGENT_PROBE_V2\nR\tterminal-pane-a\t20\t/orphan.jsonl\nLAYMUX_WSL_AGENT_PROBE_END\n"
+        b"LAYMUX_WSL_AGENT_PROBE_V3\nR\tterminal-pane-a\t20\t/orphan.jsonl\nLAYMUX_WSL_AGENT_PROBE_END\n"
     )
     .is_err());
+}
+
+#[test]
+fn chrome_host_role_resolves_the_reported_live_pane_without_guessing_by_session_file() {
+    // Captured shape: neither parent exposes the runtime-exported marker in
+    // /proc/environ. Both Claude processes therefore have depth zero here.
+    let entries = parse_probe_output(
+        concat!(
+            "LAYMUX_WSL_AGENT_PROBE_V3\n",
+            "P\tterminal-pane-repro\t2718444\t2641428\tclaude\t/home/user\t\t\t1\n",
+            "P\tterminal-pane-repro\t997318\t984482\tclaude\t/home/user\t\t\t0\n",
+            "LAYMUX_WSL_AGENT_PROBE_END\n",
+        )
+        .as_bytes(),
+    )
+    .unwrap();
+    assert_eq!(
+        select_top_level_agent(&entries, WslAgentProvider::Claude)
+            .unwrap()
+            .unwrap()
+            .pid,
+        997318
+    );
+    assert_eq!(
+        select_top_level_agent(&entries, WslAgentProvider::Codex),
+        None
+    );
+    assert_eq!(
+        select_top_level_agent(&entries, WslAgentProvider::Grok),
+        None
+    );
+    let mut unproven = entries;
+    unproven[0].is_helper = false;
+    assert_eq!(
+        select_top_level_agent(&unproven, WslAgentProvider::Claude),
+        Some(None)
+    );
+}
+
+#[test]
+fn chrome_host_alone_is_not_an_active_conversation() {
+    let mut helper = process(30, 10, "claude");
+    helper.is_helper = true;
+    assert_eq!(
+        select_top_level_agent(&[helper], WslAgentProvider::Claude),
+        None
+    );
+}
+
+#[test]
+fn shallower_chrome_host_does_not_hide_a_conversation_or_shorten_its_descendants() {
+    let mut helper = process(30, 1, "claude");
+    helper.is_helper = true;
+    let entries = vec![
+        process(10, 1, "bash"),
+        process(20, 10, "claude"),
+        helper,
+        process(40, 30, "bash"),
+        process(50, 40, "codex"),
+    ];
+    assert_eq!(
+        select_top_level_agent(&entries, WslAgentProvider::Claude)
+            .unwrap()
+            .unwrap()
+            .pid,
+        20
+    );
+    assert_eq!(
+        select_top_level_agent(&entries, WslAgentProvider::Codex),
+        None
+    );
+}
+
+#[test]
+fn missing_or_invalid_helper_evidence_is_not_a_valid_probe() {
+    for suffix in ["", "\t", "\t2", "\thelper"] {
+        let output = format!("LAYMUX_WSL_AGENT_PROBE_V3\nP\tt\t20\t10\tclaude\t/home/user\t\t{suffix}\nLAYMUX_WSL_AGENT_PROBE_END\n");
+        assert!(parse_probe_output(output.as_bytes()).is_err());
+    }
 }
 
 #[test]
