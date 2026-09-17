@@ -86,6 +86,10 @@ export function useSyncEvents() {
     let cancelled = false;
     const unlisteners: (() => void)[] = [];
     const pendingGenerationEvents = new Map<string, (() => void)[]>();
+    const pendingClaudeIdle = new Map<
+      string,
+      { generation: number; appSession: number; title: string; lastUserInputAt?: number }
+    >();
 
     function deferGeneration(
       terminalId: string,
@@ -161,6 +165,7 @@ export function useSyncEvents() {
     trackListener(
       onTerminalTitleChanged(function applyTitle(data): void {
         if (deferGeneration(data.terminalId, data.generation, () => applyTitle(data))) return;
+        pendingClaudeIdle.delete(data.terminalId);
         const { updateInstanceInfo, instances } = useTerminalStore.getState();
         const instance = instances.find((i) => i.id === data.terminalId);
         const detectedActivity = data.interactiveApp
@@ -225,6 +230,23 @@ export function useSyncEvents() {
 
         if (!isStaleActivity(instance?.activitySequence, data.activitySequence))
           observeTaskTitle(data.terminalId, data.title);
+        const current = useTerminalStore.getState().instances.find((i) => i.id === data.terminalId);
+        if (
+          current &&
+          !current.activity?.name &&
+          data.generation !== undefined &&
+          data.appSession !== undefined &&
+          !data.interactiveAppExited &&
+          !isStaleActivity(instance?.activitySequence, data.activitySequence) &&
+          data.title.startsWith("✳")
+        ) {
+          pendingClaudeIdle.set(data.terminalId, {
+            generation: data.generation,
+            appSession: data.appSession,
+            title: data.title,
+            lastUserInputAt: current.lastUserInputAt,
+          });
+        }
       }),
     );
 
@@ -294,6 +316,7 @@ export function useSyncEvents() {
     trackListener(
       onSetTabTitle((data) => {
         if (cancelled) return;
+        pendingClaudeIdle.delete(data.terminalId);
         useTerminalStore.getState().updateInstanceInfo(data.terminalId, {
           title: data.title,
         });
@@ -304,6 +327,7 @@ export function useSyncEvents() {
     trackListener(
       onCommandStatus(function applyCommand(data): void {
         if (deferGeneration(data.terminalId, data.generation, () => applyCommand(data))) return;
+        pendingClaudeIdle.delete(data.terminalId);
         const update: Record<string, unknown> = {};
 
         if (data.command !== undefined && data.command !== "__preexec__") {
@@ -475,6 +499,23 @@ export function useSyncEvents() {
       .catch(() => {});
 
     const unsubStore = useTerminalStore.subscribe((state, prevState) => {
+      for (const [id, pending] of pendingClaudeIdle) {
+        const instance = state.instances.find((entry) => entry.id === id);
+        if (
+          !instance ||
+          instance.sessionReady === false ||
+          instance.generation !== pending.generation ||
+          instance.appSession !== pending.appSession ||
+          instance.lastUserInputAt !== pending.lastUserInputAt
+        ) {
+          pendingClaudeIdle.delete(id);
+        } else if (instance.activity?.name) {
+          // Consume once, before observeTaskTitle recursively updates the store.
+          pendingClaudeIdle.delete(id);
+          if (instance.activity.name === "Claude" && !instance.task)
+            observeTaskTitle(id, pending.title);
+        }
+      }
       for (const [id, events] of pendingGenerationEvents) {
         const instance = state.instances.find((entry) => entry.id === id);
         if (!instance || instance.generation !== undefined) {
@@ -496,6 +537,7 @@ export function useSyncEvents() {
     return () => {
       cancelled = true;
       pendingGenerationEvents.clear();
+      pendingClaudeIdle.clear();
       unsubscribeCodexTurns();
       unsubscribeTasks();
       unsubStore();

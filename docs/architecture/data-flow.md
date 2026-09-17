@@ -1005,6 +1005,8 @@ Remote drawer도 선택된 workspace만 축약하지 않고 모든 visible works
 
 `terminal-store`는 앱 식별·출력 활동과 별도로 마지막 원시 `taskObservation`과 공통 계산 결과 `task`를 메모리에만 보관한다. `terminal-task.ts::observeTask`가 작업 없음(`idle`)·진행 중(`running`)·입력 대기(`waiting`)·종료(`ended`), 선택적 종료 결과(`success | failure | interrupted`), 관측 상태(`confirmed | unknown | stale`)를 계산한다. 미확인에는 작업 상태를 채우지 않고, 지연에는 마지막 작업과 알림 이력을 보존한다.
 
+WSL Claude 복원은 live `✳ <대화 제목>`이 프로세스 식별보다 먼저 도착할 수 있다([ADR-0252](../adr/0252-claude-idle-before-app-identification.md)). `useSyncEvents`는 아직 이름이 확인되지 않은 pane의 유효한 live 유휴 타이틀 하나만 generation·appSession·lastUserInputAt과 함께 보류한다. 같은 범위의 Claude가 식별되고 다른 작업 관측이 없으면 `observeTaskTitle`로 한 번 반영한다. 그 사이 새 타이틀·명령·사용자 타이틀 변경·제출 입력, generation/appSession 변경·세션 준비 해제, 다른 앱 식별, pane 삭제·구독 해제가 있으면 폐기한다. working 스피너와 달리 유휴는 시간 경과만으로 무효화하지 않는다. xterm의 캐시·표시 타이틀은 이 경로에 들어오지 않는다. 최초 유휴는 `idle/confirmed`가 되어 Alt+L을 허용하지만 성공이나 완료 알림을 합성하지 않으며, 아이콘은 기존 ADR-0251대로 `—`다.
+
 | 의미 | Lucide 아이콘 | 색상·접근성 |
 | --- | --- | --- |
 | 대기·미확인·중단·결과 없는 종료 | Minus | 보조 텍스트색, 대기 |
