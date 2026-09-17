@@ -864,11 +864,11 @@
   },
   "workspace": {
     "commandStatus": {
-      "working": "Command running",
+      "working": "Active",
       "success": "Command succeeded",
       "failure": "Command failed",
-      "idle": "No current task",
-      "waiting": "Awaiting input",
+      "idle": "Idle",
+      "waiting": "Response or approval needed",
       "interrupted": "Interrupted",
       "ended": "Task ended · result unobserved",
       "unknown": "Task unconfirmed",

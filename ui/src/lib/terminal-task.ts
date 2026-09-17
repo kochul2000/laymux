@@ -2,6 +2,7 @@ import i18n from "@/i18n";
 import { getCommandStatusIconKind } from "./command-status-icon";
 import type { TerminalInstance } from "@/stores/terminal-store";
 import type { StatusIconGlyph } from "./activity-markers";
+import { taskStatusGlyph } from "./task-status-glyph";
 
 export type TaskState = "idle" | "running" | "waiting" | "ended";
 export type TaskResult = "success" | "failure" | "interrupted";
@@ -129,44 +130,23 @@ export function taskSource(instance: TerminalInstance): string {
 export function taskPresentation(
   task: TerminalTask | undefined,
   now = Date.now(),
+  outputActive = false,
 ): { icon: StatusIconGlyph; color: string; label: string; observation: ObservationState } {
   const { observation } = taskPolicy(task, false, true, false, now);
-  let icon: StatusIconGlyph = "?";
-  let color = "var(--text-secondary)";
-  switch (task?.state) {
-    case "idle":
-      icon = "—";
-      break;
-    case "running":
-      icon = "⏳";
-      color = "var(--yellow)";
-      break;
-    case "waiting":
-      icon = "!";
-      color = "var(--yellow)";
-      break;
-    case "ended":
-      icon =
-        task.result === "success"
-          ? "✓"
-          : task.result === "failure"
-            ? "✗"
-            : task.result === "interrupted"
-              ? "⊘"
-              : "□";
-      color =
-        task.result === "success"
-          ? "var(--green)"
-          : task.result === "failure"
-            ? "var(--red)"
-            : color;
-  }
+  const icon = taskStatusGlyph(task?.state, task?.result, outputActive);
+  const color =
+    icon === "⏳" || icon === "!"
+      ? "var(--yellow)"
+      : icon === "✓"
+        ? "var(--green)"
+        : icon === "✗"
+          ? "var(--red)"
+          : "var(--text-secondary)";
   const label = i18n.t(`workspace:commandStatus.${getCommandStatusIconKind(icon)}`);
   return {
     icon,
     color,
-    label:
-      observation === "stale" ? `${label} · ${i18n.t("workspace:commandStatus.stale")}` : label,
+    label,
     observation,
   };
 }

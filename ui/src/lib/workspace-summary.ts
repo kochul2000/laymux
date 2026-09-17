@@ -490,7 +490,7 @@ export function computeCommandStatus(
     statusMessageDelimiter,
   };
   const handler = getHandler(activity);
-  const status = taskPresentation(task);
+  const status = taskPresentation(task, Date.now(), outputActive ?? false);
   const text = handler.computeStatusMessage(raw);
   return {
     ...status,
