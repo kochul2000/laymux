@@ -20,7 +20,7 @@ Claude Code의 대화 프로세스와 `claude --chrome-native-host` 브라우저
 
 - 세션 귀속과 liveness는 동일한 게스트 역할 판정을 사용한다. 실행 파일 이름과 NUL로 구분된 argv의 경계를 함께 검사하며, 전체 command line의 부분 문자열이나 CWD·세션 파일 부재로 역할을 추정하지 않는다.
 - 보조 프로세스도 세션 귀속의 PID·PPID 관계에는 남긴다. 후보 자격만 제거하여 자손의 깊이 계산을 보존한다.
-- 명시적으로 증명된 Chrome 호스트만 남으면 대화 provider는 부재다. 실제 대화가 여러 개면 기존 모호성 판정과 critical checkpoint 차단을 유지한다.
+- 명시적으로 증명된 Chrome 호스트만 남으면 대화 provider는 부재다. 같은 최상위 깊이에 실제 대화가 여러 개면 기존 모호성 판정과 critical checkpoint 차단을 유지한다.
 - argv를 읽지 못하거나 알려진 실행 모드와 일치하지 않으면 기존 후보 판정을 유지한다. 증거 부족을 helper라는 증거로 바꾸지 않는다.
 - probe는 argv 내용을 host로 반환하거나 로그에 기록하지 않고 역할 여부만 전달한다. 사용자 프로세스·provider 설정·세션 파일에는 쓰지 않는다. 기존 distro·deadline·generation·ID 충돌 정책을 유지한다.
 
