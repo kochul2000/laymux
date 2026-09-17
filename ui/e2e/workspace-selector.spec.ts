@@ -137,6 +137,10 @@ test.describe("WorkspaceSelectorView - Hidden Workspaces Shelf (ADR-0035)", () =
 
     await defaultWorkspace.hover();
     await defaultWorkspace.locator("[data-testid^='workspace-hide-']").click();
+    await expect(defaultWorkspace.locator("[data-testid^='workspace-hide-']")).toHaveAccessibleName(
+      "Click again to hide Default",
+    );
+    await defaultWorkspace.locator("[data-testid^='workspace-hide-']").click();
 
     const chip = page.getByTestId("hidden-items-chip");
     await expect(chip).toContainText("1");
@@ -163,6 +167,10 @@ test.describe("WorkspaceSelectorView - Hidden Workspaces Shelf (ADR-0035)", () =
 
     // A second hide cycle exercises the restore-all path.
     await defaultWorkspace.hover();
+    await defaultWorkspace.locator("[data-testid^='workspace-hide-']").click();
+    await expect(defaultWorkspace.locator("[data-testid^='workspace-hide-']")).toHaveAccessibleName(
+      "Click again to hide Default",
+    );
     await defaultWorkspace.locator("[data-testid^='workspace-hide-']").click();
     await page.getByTestId("hidden-items-chip").click();
     await page.getByTestId("hidden-items-restore-all").click();

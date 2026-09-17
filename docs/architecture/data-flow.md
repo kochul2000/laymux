@@ -1010,13 +1010,17 @@ WSL Claude 복원은 live `✳ <대화 제목>`이 프로세스 식별보다 먼
 | 의미 | Lucide 아이콘 | 색상·접근성 |
 | --- | --- | --- |
 | 대기·미확인·중단·결과 없는 종료 | Minus | 보조 텍스트색, 대기 |
-| 진행 중 또는 작업 없음·미확인에서 출력 활동 | Hourglass | 노랑, 활동 중 |
+| 진행 중 또는 작업 미확인에서 출력 활동 | Hourglass | 노랑, 활동 중 |
 | 입력 대기 | CircleAlert | 노랑, 응답·승인 필요 |
 | 성공 / 실패 | Check / X | 초록 / 빨강, 성공 / 실패 |
+
+[ADR-0254](../adr/0254-confirmed-idle-before-output-activity.md)에 따라 확인된 작업 없음(`idle`)은 출력 활동이 있어도 대시로 표시한다. 빈 WSL Astra 입력창은 `idle/confirmed`와 `outputActive=true`가 동시에 가능하다. 작업 미확인에서의 출력 fallback은 유지한다.
 
 [ADR-0251](../adr/0251-single-terminal-status-icon.md)에 따라 터미널당 상태 아이콘은 하나다. `task-status-glyph.ts`의 순수 표시 함수를 Desktop과 Remote가 공유한다. 입력 대기·진행·종료 결과는 출력 활동보다 우선한다. 관측 지연은 마지막 상태의 표시를 유지하고 별도 시계나 문구를 붙이지 않는다. 출력 파형·미확인 물음표·상태 툴팁은 없다. 접근성 이름은 다섯 표시의 의미만 전달하며 ko/en 번역을 따른다. 미확인 알림의 기존 네모 테두리와 읽음 처리는 유지한다. 내부 `taskState/taskResult/observation/outputActive`는 그대로 보존하며 표시 모래시계로 작업 상태·알림·절전·clear를 재판정하지 않는다.
 
 앱 어댑터는 기존 파서와 관측 경로를 재사용한다. 셸은 Rust OSC 133 C/D/A를 `command-status.phase`로 수신하고, D에 종료 코드가 없으면 결과 없는 종료로 남긴다. 명령 없는 A만 작업 없음을 복원한다. Claude는 새 working 타이틀을 진행으로, 작업 뒤 새 ✳를 결과 없는 종료로, 최초 ✳를 작업 없음으로 해석한다. Grok의 Braille 또는 `- Running:`은 진행만 증명하며 접두사 소멸로 종료를 만들지 않는다. 두 타이틀 어댑터는 새 수신부터 6초 후 지연이 되며 저장된 문자열 재읽기는 기한을 늘리지 않는다. Codex의 내부 작업 판정은 타이틀이나 출력으로 fallback하지 않는다.
+
+시작 신호 없는 셸의 한계는 남는다. 현재 PowerShell 통합처럼 D만 보내는 환경은 다음 명령 시작을 관측하지 못해 이전 종료 결과가 남을 수 있다. lifecycle이 전혀 없는 CMD는 작업 미확인 상태에서 출력 활동만 표시하며 무출력 작업의 진행·완료를 판정하지 않는다. [2026-09-18 실측](../codex-task-status-repro-2026-09-17.md)의 PowerShell 후속 범위는 [#1058](https://github.com/kochul2000/laymux/issues/1058)이다.
 
 `TerminalView`의 기존 승인·응답 감지는 source·taskId·sequence·해소 정보를 가진 입력 관측을 전달한다. 표시 메시지에 내부 마커를 저장하지 않는다. 같은 작업의 대기는 진행 관측보다 우선하고, 해소는 다시 진행으로, 종료는 대기를 닫는다. 닫힌 작업이나 다른 작업·세션에 속한 늦은 입력 관측은 거부한다. PTY generation·앱 변경·앱 감지 epoch 변경은 이력을 초기화한다.
 
@@ -1075,6 +1079,8 @@ Codex `/review`는 하위 턴의 시작과 부모 턴의 완료를 같은 rollou
 
 `useSyncEvents`가 `subscribeCodexTurnStates`를 시작한다. 한 번에 한 요청을 보내고 응답 후 1초 뒤 다시 조회한다. 6초 지연·오류·불완전 기록은 마지막 유효 작업과 알림 이력을 보존한 지연 관측을 전달한다. pane generation·앱 epoch·제출 입력이 요청 시작 때와 다르면 늦은 응답을 버린다. 새 입력은 재조회를 유도하지만 /status 같은 로컬 명령을 새 턴으로 합성하지 않는다. source는 generation·selectionKey·sessionId, taskId는 turnId이며 새 source의 종료·입력 대기는 무알림 복원이다. /review 부모 턴 처리는 Rust reader의 ADR-0249 계약을 유지한다.
 
+[ADR-0255](../adr/0255-codex-delayed-observation-recovery.md)에 따라 6초는 지연 관측의 기준이며 정상 응답의 폐기 기한이 아니다. 응답이 늦어도 기존 실행 범위 검사를 통과하면 반영한다. 6초보다 느린 조회가 연속되어도 이전 완료에 고정되지 않으며, 요청을 겹치지 않고 응답 후 다음 조회를 예약한다.
+
 #### 데이터 흐름 (PTY 콜백의 두 검출기)
 
 ```
@@ -1093,7 +1099,7 @@ Codex `/review`는 하위 턴의 시작과 부모 턴의 완료를 같은 rollou
   │  outputActive=true + 2초 타이머 리셋
   ▼
 [computeCommandStatus]
-  │  outputActive=true → 작업 없음·미확인일 때 단일 모래시계 표시 (내부 작업 상태 불변)
+  │  outputActive=true → 작업 미확인일 때 단일 모래시계 표시 (내부 작업 상태 불변)
 ```
 
 #### False Positive 방지
@@ -1107,7 +1113,7 @@ Codex `/review`는 하위 턴의 시작과 부모 턴의 완료를 같은 rollou
 | Claude 응답 생성                | 프레임 주기에 따라 | 수십~수백 KiB   | 출력 활동 (볼륨 임계 충족)        |
 | 빌드/테스트 로그 플러드         | 0회                | MiB 급          | 출력 활동 (볼륨 임계 충족)        |
 
-> **볼륨 열은 미실측 추정이다.** 프레임 열은 기존 구현에서 확인된 값이지만, 볼륨 임계(2초/64KiB)와 "프레임 한 장·프롬프트 한 줄이 임계에 못 미친다"는 판단은 계산으로 정한 것이고 `scripts/bench/` 플러드 벤치로 재지 않았다([ADR-0147](../adr/0147-output-volume-activity-and-app-declared-idle.md) Consequences 의 재검토 조건). 특히 **최대화된 pane 에서 셀마다 SGR 를 다시 내는 alt-screen 전체 리페인트 한 장은 수십 KiB** 가 될 수 있어, `less`·`lazygit` 처럼 사용자 조작마다 뷰포트를 다시 그리는 앱은 2초에 두세 장으로 임계를 넘길 여지가 있다. 출력 활동 신호는 리페인트에도 켜질 수 있지만 내부 작업 상태와 알림을 바꾸지 않는다. 작업 없음·미확인에서는 그 신호가 표시 모래시계가 될 수 있다. 비통합 셸·미지원 TUI의 출력 기반 절전 예외에는 이 비용이 남는다.
+> **볼륨 열은 미실측 추정이다.** 프레임 열은 기존 구현에서 확인된 값이지만, 볼륨 임계(2초/64KiB)와 "프레임 한 장·프롬프트 한 줄이 임계에 못 미친다"는 판단은 계산으로 정한 것이고 `scripts/bench/` 플러드 벤치로 재지 않았다([ADR-0147](../adr/0147-output-volume-activity-and-app-declared-idle.md) Consequences 의 재검토 조건). 특히 **최대화된 pane 에서 셀마다 SGR 를 다시 내는 alt-screen 전체 리페인트 한 장은 수십 KiB** 가 될 수 있어, `less`·`lazygit` 처럼 사용자 조작마다 뷰포트를 다시 그리는 앱은 2초에 두세 장으로 임계를 넘길 여지가 있다. 출력 활동 신호는 리페인트에도 켜질 수 있지만 내부 작업 상태와 알림을 바꾸지 않는다. 작업 미확인에서는 그 신호가 표시 모래시계가 될 수 있다. 비통합 셸·미지원 TUI의 출력 기반 절전 예외에는 이 비용이 남는다.
 
 ### 인터랙티브 앱 인식 — 프로세스 트리 liveness ([ADR-0009](../adr/0009-process-tree-interactive-app-liveness.md))
 

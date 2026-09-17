@@ -70,14 +70,15 @@ export function subscribeCodexTurnStates(): () => void {
         ? current
         : undefined;
     }
-    let expired = false;
     expiry = setTimeout(() => {
-      expired = true;
       if (!disposed) for (const id of stamps.keys()) if (currentTarget(id)) unknown(id);
     }, STALE_MS);
     try {
       const snapshots = await getCodexTurnStates();
-      if (disposed || expired) return;
+      // The timer reports observation delay; it does not invalidate a response.
+      // Otherwise consistently slow lookups can never replace an old completion.
+      // The per-target stamps below still reject replaced scopes and new input.
+      if (disposed) return;
       for (const id of stamps.keys()) {
         const current = currentTarget(id);
         if (!current) continue;

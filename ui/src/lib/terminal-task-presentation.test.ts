@@ -1,13 +1,31 @@
 import { describe, expect, it } from "vitest";
 import { commandStatusIconName } from "../remote/remote-icons.js";
 import { observeTask, taskPolicy, taskPresentation, type TaskObservation } from "./terminal-task";
+import { computeCommandStatus } from "./workspace-summary";
 
 describe("터미널의 단일 상태 아이콘", () => {
+  it.each([undefined, { type: "shell" } as const])(
+    "에이전트 activity가 없는 미확인 셸은 출력만 표시하고 이전 exitCode로 성공을 합성하지 않는다 (%j)",
+    (activity) => {
+      for (const output of [false, true, false]) {
+        const status = computeCommandStatus(0, output, undefined, activity);
+        expect(status).toMatchObject({
+          icon: output ? "⏳" : "—",
+          observation: "unknown",
+          outputActive: output,
+        });
+        expect(status.taskState).toBeUndefined();
+        expect(status.taskResult).toBeUndefined();
+        expect(commandStatusIconName(status)).toBe(output ? "Hourglass" : "Minus");
+      }
+    },
+  );
+
   it.each([
     [undefined, undefined, false, "—", "Minus"],
     [undefined, undefined, true, "⏳", "Hourglass"],
     ["idle", undefined, false, "—", "Minus"],
-    ["idle", undefined, true, "⏳", "Hourglass"],
+    ["idle", undefined, true, "—", "Minus"],
     ["running", undefined, false, "⏳", "Hourglass"],
     ["running", undefined, true, "⏳", "Hourglass"],
     ["waiting", undefined, false, "!", "CircleAlert"],

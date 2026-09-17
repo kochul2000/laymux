@@ -6,6 +6,7 @@ import { subscribeCodexTurnStates } from "./codex-turn-subscription";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { isTerminalWorking } from "./terminal-working";
+import { computeCommandStatus } from "./workspace-summary";
 
 vi.mock("./tauri-api", () => ({ getCodexTurnStates: vi.fn() }));
 vi.mock("./persist-session", () => ({ persistSession: vi.fn().mockResolvedValue(undefined) }));
@@ -56,6 +57,31 @@ afterEach(() => {
 });
 
 describe("Codex turn observation", () => {
+  it("확인된 빈 Codex 세션은 Astra 입력창 출력 중에도 대기로 표시한다", async () => {
+    result({ generation: 1, sessionId: "session", selectionKey: "1", state: "idle" });
+    useTerminalStore.getState().updateInstanceInfo("pane", { outputActive: true });
+    stop = subscribeCodexTurnStates();
+    await tick();
+    const current = instance();
+    expect(current.task).toMatchObject({ state: "idle", observation: "confirmed" });
+    expect(current.outputActive).toBe(true);
+    expect(
+      computeCommandStatus(
+        undefined,
+        current.outputActive,
+        undefined,
+        current.activity,
+        undefined,
+        undefined,
+        undefined,
+        current.codexTurn,
+        current.task,
+      ).icon,
+    ).toBe("—");
+    expect(isTerminalWorking(current)).toBe(false);
+    expect(notifications()).toHaveLength(0);
+  });
+
   it("restores a prompt seen before the first lifecycle poll without an alert", async () => {
     useTerminalStore.getState().updateInstanceInfo("pane", { generation: 1 });
     observeTaskInput("pane", true);
@@ -241,7 +267,7 @@ describe("Codex turn observation", () => {
     expect(notifications()).toHaveLength(0);
   });
 
-  it("expires a hung lookup without overlap and discards the late response", async () => {
+  it("느린 조회는 지연으로 표시하고 같은 실행 범위의 정상 응답으로 복구한다", async () => {
     result(snapshot("completed"));
     stop = subscribeCodexTurnStates();
     await tick();
@@ -257,11 +283,79 @@ describe("Codex turn observation", () => {
     await vi.advanceTimersByTimeAsync(6000);
     expect(instance().task?.observation).toBe("stale");
     expect(getCodexTurnStates).toHaveBeenCalledTimes(count);
-    finish({ pane: snapshot("completed", "late") });
+    finish({ pane: snapshot("running", "next") });
     await vi.advanceTimersByTimeAsync(0);
-    expect(instance().task?.observation).toBe("stale");
+    expect(instance().task).toMatchObject({
+      state: "running",
+      taskId: "next",
+      observation: "confirmed",
+    });
+    expect(notifications()).toHaveLength(0);
+    result(snapshot("completed", "next"));
+    await tick();
+    expect(instance().task?.state).toBe("ended");
+    expect(notifications()).toHaveLength(1);
+    await tick();
+    expect(notifications()).toHaveLength(1);
+  });
+
+  it("6초보다 느린 연속 조회도 이전 완료에 고정되지 않는다", async () => {
+    result(snapshot("completed"));
+    stop = subscribeCodexTurnStates();
+    await tick();
+    vi.mocked(getCodexTurnStates).mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve({ pane: snapshot("running", "b") }), 7000),
+        ),
+    );
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(instance().task).toMatchObject({
+      state: "running",
+      taskId: "b",
+      observation: "confirmed",
+    });
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(instance().task).toMatchObject({
+      state: "running",
+      taskId: "b",
+      observation: "confirmed",
+    });
     expect(notifications()).toHaveLength(0);
   });
+
+  it.each(["input", "generation", "app", "disposed"])(
+    "지연 응답도 무효화된 실행 범위에는 적용하지 않는다 (%s)",
+    async (reason) => {
+      useTerminalStore.getState().updateInstanceInfo("pane", { generation: 1 });
+      result(snapshot("completed"));
+      stop = subscribeCodexTurnStates();
+      await tick();
+      let finish!: (value: Record<string, CodexTurnSnapshot>) => void;
+      vi.mocked(getCodexTurnStates).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      await tick();
+      await vi.advanceTimersByTimeAsync(6000);
+      if (reason === "input")
+        useTerminalStore.getState().updateInstanceInfo("pane", { lastUserInputAt: Date.now() });
+      if (reason === "generation")
+        useTerminalStore.getState().updateInstanceInfo("pane", { generation: 2 });
+      if (reason === "app")
+        useTerminalStore
+          .getState()
+          .updateInstanceInfo("pane", { activity: { type: "interactiveApp", name: "Claude" } });
+      if (reason === "disposed") stop();
+      finish({ pane: snapshot("running", "obsolete") });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(instance().task?.taskId).not.toBe("obsolete");
+      expect(instance().codexTurn?.turnId).not.toBe("obsolete");
+      expect(notifications()).toHaveLength(0);
+    },
+  );
 
   it("rejects an in-flight result when the terminal is recreated under the same id", async () => {
     let finish!: (value: Record<string, CodexTurnSnapshot>) => void;
