@@ -86,6 +86,10 @@ export function useSyncEvents() {
     let cancelled = false;
     const unlisteners: (() => void)[] = [];
     const pendingGenerationEvents = new Map<string, (() => void)[]>();
+    const pendingClaudeIdle = new Map<
+      string,
+      { generation: number; appSession: number; title: string; lastUserInputAt?: number }
+    >();
 
     function deferGeneration(
       terminalId: string,
@@ -159,8 +163,36 @@ export function useSyncEvents() {
     );
 
     trackListener(
-      onTerminalTitleChanged(function applyTitle(data): void {
-        if (deferGeneration(data.terminalId, data.generation, () => applyTitle(data))) return;
+      onTerminalTitleChanged(function applyTitle(data, replay = false): void {
+        // Capture freshness at live receipt, before attach can defer this event
+        // behind a newer process reconcile. Replaying must not recapture it.
+        const received = useTerminalStore
+          .getState()
+          .instances.find((i) => i.id === data.terminalId);
+        if (
+          !replay &&
+          !cancelled &&
+          received &&
+          (received.generation === undefined || received.generation === data.generation) &&
+          !isStaleActivity(received.activitySequence, data.activitySequence)
+        ) {
+          pendingClaudeIdle.delete(data.terminalId);
+          if (
+            !received.activity?.name &&
+            data.generation !== undefined &&
+            data.appSession !== undefined &&
+            !data.interactiveAppExited &&
+            data.title.startsWith("✳")
+          ) {
+            pendingClaudeIdle.set(data.terminalId, {
+              generation: data.generation,
+              appSession: data.appSession,
+              title: data.title,
+              lastUserInputAt: received.lastUserInputAt,
+            });
+          }
+        }
+        if (deferGeneration(data.terminalId, data.generation, () => applyTitle(data, true))) return;
         const { updateInstanceInfo, instances } = useTerminalStore.getState();
         const instance = instances.find((i) => i.id === data.terminalId);
         const detectedActivity = data.interactiveApp
@@ -294,6 +326,7 @@ export function useSyncEvents() {
     trackListener(
       onSetTabTitle((data) => {
         if (cancelled) return;
+        pendingClaudeIdle.delete(data.terminalId);
         useTerminalStore.getState().updateInstanceInfo(data.terminalId, {
           title: data.title,
         });
@@ -302,8 +335,20 @@ export function useSyncEvents() {
     );
 
     trackListener(
-      onCommandStatus(function applyCommand(data): void {
-        if (deferGeneration(data.terminalId, data.generation, () => applyCommand(data))) return;
+      onCommandStatus(function applyCommand(data, replay = false): void {
+        const received = useTerminalStore
+          .getState()
+          .instances.find((i) => i.id === data.terminalId);
+        if (
+          !replay &&
+          received &&
+          (data.generation === undefined ||
+            received.generation === undefined ||
+            received.generation === data.generation)
+        )
+          pendingClaudeIdle.delete(data.terminalId);
+        if (deferGeneration(data.terminalId, data.generation, () => applyCommand(data, true)))
+          return;
         const update: Record<string, unknown> = {};
 
         if (data.command !== undefined && data.command !== "__preexec__") {
@@ -475,6 +520,37 @@ export function useSyncEvents() {
       .catch(() => {});
 
     const unsubStore = useTerminalStore.subscribe((state, prevState) => {
+      for (const [id, pending] of pendingClaudeIdle) {
+        const instance = state.instances.find((entry) => entry.id === id);
+        if (
+          !instance ||
+          (instance.sessionReady === false &&
+            prevState.instances.find((entry) => entry.id === id)?.sessionReady === true) ||
+          (instance.generation !== undefined && instance.generation !== pending.generation) ||
+          (instance.appSession !== undefined && instance.appSession !== pending.appSession) ||
+          instance.lastUserInputAt !== pending.lastUserInputAt
+        ) {
+          pendingClaudeIdle.delete(id);
+        } else if (instance.activity?.name && instance.activity.name !== "Claude") {
+          pendingClaudeIdle.delete(id);
+        } else if (
+          instance.generation !== undefined &&
+          instance.sessionReady !== false &&
+          instance.activity?.name === "Claude"
+        ) {
+          if (instance.task) {
+            pendingClaudeIdle.delete(id);
+            continue;
+          }
+          if (instance.appSession === undefined) {
+            useTerminalStore.getState().updateInstanceInfo(id, { appSession: pending.appSession });
+            continue;
+          }
+          // Consume once, before observeTaskTitle recursively updates the store.
+          pendingClaudeIdle.delete(id);
+          observeTaskTitle(id, pending.title);
+        }
+      }
       for (const [id, events] of pendingGenerationEvents) {
         const instance = state.instances.find((entry) => entry.id === id);
         if (!instance || instance.generation !== undefined) {
@@ -496,6 +572,7 @@ export function useSyncEvents() {
     return () => {
       cancelled = true;
       pendingGenerationEvents.clear();
+      pendingClaudeIdle.clear();
       unsubscribeCodexTurns();
       unsubscribeTasks();
       unsubStore();
