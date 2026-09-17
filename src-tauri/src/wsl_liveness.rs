@@ -64,6 +64,7 @@ for proc in /proc/[0-9]*; do
     claude|codex|grok) ;;
     *) continue ;;
   esac
+  if laymux_is_claude_chrome_host "$proc" "$name"; then continue; fi
   pid=${proc##*/}
   terminal_id=
   unreadable=0
@@ -303,7 +304,7 @@ pub fn refresh(state: &AppState) {
         };
         let reading = match crate::wsl_probe::run_probe_script(
             &distro,
-            WSL_LIVENESS_PROBE,
+            &crate::wsl_probe::with_agent_role_probe(WSL_LIVENESS_PROBE),
             "laymux-wsl-liveness-probe",
             timeout,
         )
