@@ -220,10 +220,11 @@ import {
         const SCROLL_SENSITIVITY_MIN = 0.1;
         const SCROLL_SENSITIVITY_MAX = 20;
         const COMMAND_STATUS_LABELS = Object.freeze({
-          Hourglass: "Command running",
+          Hourglass: "Active",
           Check: "Command succeeded",
           X: "Command failed",
-          Minus: "No command result",
+          Minus: "Idle",
+          CircleAlert: "Response or approval needed",
         });
         const DEFAULT_REMOTE_DISPLAY_SETTINGS = Object.freeze({
           terminalFontSize: 14,
@@ -7788,15 +7789,6 @@ import {
               status.setAttribute("role", "img");
               status.setAttribute("aria-label", pane.selectorStatus.label || COMMAND_STATUS_LABELS[statusIconName]);
               primary.append(status);
-              for (const [visible, icon, label] of [[pane.selectorStatus.observation === "stale", "Clock3", "관측 지연"], [pane.selectorStatus.outputActive, "Activity", "출력 활동"]]) {
-                if (!visible) continue;
-                const badge = document.createElement("span");
-                setRemoteIcon(badge, icon, { size: 12 });
-                badge.setAttribute("role", "img");
-                badge.setAttribute("aria-label", label);
-                badge.title = label;
-                primary.append(badge);
-              }
             } else if (display.result && (pane.unreadCount || 0) > 0) {
               const unread = document.createElement("span");
               unread.className = "pane-notification-dot";

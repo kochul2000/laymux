@@ -2106,7 +2106,7 @@ if (matchesKeybinding(e, "issueReporter.submit")) { handleSubmit(); }
 
 `get_codex_turn_states`는 인자 없이 `Record<terminalId, { generation, sessionId?, selectionKey?, turnId?, state }>`를 반환한다. `state`는 `running | completed | failed | interrupted | idle | unknown`이고 정확 귀속·읽기 실패는 unknown이다. 프로세스별 selectionKey는 호출자가 합성하거나 재사용하지 않는다. blocking I/O는 Tauri threadpool에서 실행하며 전후 generation을 검증한다. Windows·Linux·WSL 파일 경로와 /review 부모 턴 경계는 ADR-0248·0249를 그대로 따른다. 프론트 조회 실패는 직전 상태를 지우지 않고 지연으로 처리한다.
 
-**이벤트 계약**: 기존 `command-status`의 command/exitCode 메타데이터와 별도로 OSC 133 lifecycle 발행에는 `phase: start | end | prompt`와 `generation`이 있다. D 결과를 읽지 못하면 exitCode를 생략한다. title 이벤트에는 `generation`과 `appSession`(기존 process detection epoch)이 추가되며, 이전 generation/낡은 activity sequence의 작업 관측은 수락하지 않는다. 출력 활동 이벤트는 frame/volume만 발행하고 타이틀로 배지 타이머를 갱신하지 않는다.
+**이벤트 계약**: 기존 `command-status`의 command/exitCode 메타데이터와 별도로 OSC 133 lifecycle 발행에는 `phase: start | end | prompt`와 `generation`이 있다. D 결과를 읽지 못하면 exitCode를 생략한다. title 이벤트에는 `generation`과 `appSession`(기존 process detection epoch)이 추가되며, 이전 generation/낡은 activity sequence의 작업 관측은 수락하지 않는다. 출력 활동 이벤트는 frame/volume만 발행하고 타이틀로 출력 활동 타이머를 갱신하지 않는다.
 
 현재 generation은 output attach가 확정한다. generation이 미확정인 instance의 lifecycle/title 이벤트는 처리하지 않고 보류하며, attach 후 일치하는 generation만 수신 순서대로 적용한다. 이벤트 자체로 현재 generation을 시딩하지 않는다. instance 제거 또는 구독 종료 시 보류 이벤트를 폐기한다.
 
@@ -2124,6 +2124,6 @@ if (matchesKeybinding(e, "issueReporter.submit")) { handleSubmit(); }
 | outputActive | 독립 출력 활동 boolean |
 | icon, color, label, text | 표시 호환 필드와 접근성 문구; 정책의 입력이 아님 |
 
-Remote는 taskState/taskResult로 아이콘을 선택하고 관측 지연·출력 활동을 별도 배지로 그린다. 기존 REST/MCP 조회 경로의 확장이며 인증·포트·제어 endpoint는 바꾸지 않는다.
+[ADR-0251](../adr/0251-single-terminal-status-icon.md)에 따라 Desktop과 Remote는 `task-status-glyph.ts`로 다섯 아이콘 중 하나만 선택한다. 입력 대기·진행·종료 결과가 출력보다 우선하며, 작업 없음·미확인에서만 출력 활동을 모래시계로 표현한다. 지연·출력 보조 배지와 상태 툴팁은 없고 미확인 알림 테두리는 유지한다. 내부 필드와 알림·절전·clear 정책은 바꾸지 않는다. 기존 REST/MCP 조회 경로의 확장이며 인증·포트·제어 endpoint는 바꾸지 않는다.
 
 핸들러별 메시지 포맷은 `claude/codex/grok.statusMessageMode/statusMessageDelimiter`를 유지한다. 테스트는 앱 어댑터의 파싱·메시지/clear 입력과 공통 상태·알림/정책을 각각 검증한다. 표시 조합과 신호별 제한은 [data-flow.md §9](./data-flow.md)에 둔다.

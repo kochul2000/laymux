@@ -81,7 +81,7 @@ describe("작업 관측의 공통 소비 경로", () => {
         inhibitSleep: false,
         clearAllowed: false,
       });
-      expect(taskPresentation(current().task).icon).toBe("?");
+      expect(taskPresentation(current().task).icon).toBe("—");
       expect(notices()).toHaveLength(0);
     },
   );
@@ -141,13 +141,13 @@ describe("작업 관측의 공통 소비 경로", () => {
   });
 
   it.each([
-    ["idle", undefined, "Minus"],
+    ["idle", undefined, "Hourglass"],
     ["running", undefined, "Hourglass"],
-    ["waiting", undefined, "MessageCircleQuestion"],
+    ["waiting", undefined, "CircleAlert"],
     ["ended", "success", "Check"],
     ["ended", "failure", "X"],
-    ["ended", "interrupted", "CircleSlash"],
-    ["ended", undefined, "Square"],
+    ["ended", "interrupted", "Minus"],
+    ["ended", undefined, "Minus"],
   ] as const)("Desktop/Automation/Remote가 %s/%s를 같은 뜻으로 투영한다", (state, result, icon) => {
     register("Codex");
     observeTerminalTask("pane", { state, result });

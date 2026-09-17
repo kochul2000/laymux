@@ -3265,7 +3265,7 @@ describe("spatial pane numbers (issue #256)", () => {
     expect(byId[BL]).toBe(3);
     expect(summary.terminalCount).toBe(3);
     expect(lastCommand.command).toBe("cargo test");
-    expect(status).toMatchObject({ icon: "?", observation: "unknown", outputActive: false });
+    expect(status).toMatchObject({ icon: "—", observation: "unknown", outputActive: false });
   });
 
   it("projects never-mounted workspace terminals with the same selector placeholders as PC", () => {
@@ -3325,7 +3325,7 @@ describe("spatial pane numbers (issue #256)", () => {
     expect(instances.find((instance) => instance.id === "terminal-cold")).toMatchObject({
       profile: "WSL",
       workspaceId: "ws-cold",
-      selectorStatus: { icon: "?", observation: "unknown" },
+      selectorStatus: { icon: "—", observation: "unknown" },
       selectorDisplay: {
         environment: "WSL",
         activity: { label: "shell", color: "var(--text-secondary)" },
@@ -3364,7 +3364,7 @@ describe("spatial pane numbers (issue #256)", () => {
     const terminal = instances.find((instance) => instance.id === `terminal-${TL}`)!;
 
     expect(terminal.selectorStatus).toMatchObject({
-      icon: "?",
+      icon: "—",
       observation: "unknown",
       color: "var(--text-secondary)",
       text: "Implementing / Editing navigation.rs",

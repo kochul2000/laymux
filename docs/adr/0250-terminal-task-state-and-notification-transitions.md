@@ -1,6 +1,7 @@
 # 0250. 터미널 작업 상태와 확인 알림은 공통 전이로 판정한다
 
 - Status: Accepted
+- Partially Superseded by: [ADR-0251](0251-single-terminal-status-icon.md) (사용자 상태 표시만 대체, 내부 상태와 정책은 유지)
 - Date: 2026-09-16
 - Source: 사용자 v1.0.3 Astra 모래시계 제보와 상태·알림 단순화 합의 및 설계 리뷰, [PR #1046](https://github.com/kochul2000/laymux/pull/1046), [PR #1047](https://github.com/kochul2000/laymux/pull/1047), [architecture/data-flow.md §9](../architecture/data-flow.md), [architecture/api-contracts.md §15.6](../architecture/api-contracts.md)
 - Partially Supersedes: [ADR-0147](0147-output-volume-activity-and-app-declared-idle.md) Decision 1·3의 출력 볼륨을 다른 신호와 합쳐 작업 중(⏳)으로 판정하는 결정. Decision 4·5의 타이틀·출력 간 보완 관계도 아래의 제한적 타이틀 해석과 별도 출력 활동 축으로 대체한다. 볼륨 검출 자체와 임계·비용 제약은 유지한다.
