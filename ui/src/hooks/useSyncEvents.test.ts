@@ -5,7 +5,7 @@ import { useTerminalStore } from "@/stores/terminal-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
-import { terminalTaskPolicy } from "@/lib/terminal-task";
+import { taskSource, terminalTaskPolicy } from "@/lib/terminal-task";
 
 vi.mock("@/lib/persist-session", () => ({
   persistSession: vi.fn().mockResolvedValue(undefined),
@@ -138,6 +138,126 @@ describe("useSyncEvents", () => {
       clock.mockRestore();
     },
   );
+
+  it.each(["none", "title", "command", "session", "input", "generation"])(
+    "attach 대기 중 받은 유휴는 reconcile 이후에도 보존하되 %s 경계를 넘지 않는다",
+    (change) => {
+      const store = useTerminalStore.getState();
+      store.registerInstance({ id: "attaching", profile: "WSL", syncGroup: "ws" });
+      renderHook(() => useSyncEvents());
+      const title = mockOnTerminalTitleChanged.mock.calls[0][0];
+      act(() => {
+        title({
+          terminalId: "attaching",
+          generation: 7,
+          appSession: 0,
+          activitySequence: 10,
+          title: "✳ Restored",
+          interactiveApp: null,
+        });
+        mockOnTerminalActivityReconciled.mock.calls[0][0]([
+          {
+            terminalId: "attaching",
+            activitySequence: 11,
+            activity: { type: "interactiveApp", name: "Claude" },
+          },
+        ]);
+        if (change === "title")
+          title({
+            terminalId: "attaching",
+            generation: 7,
+            appSession: 0,
+            activitySequence: 12,
+            title: "custom",
+            interactiveApp: null,
+          });
+        if (change === "command")
+          mockOnCommandStatus.mock.calls[0][0]({
+            terminalId: "attaching",
+            generation: 7,
+            phase: "start",
+          });
+        if (change === "session") store.updateInstanceInfo("attaching", { appSession: 1 });
+        if (change === "input") store.updateInstanceInfo("attaching", { lastUserInputAt: 10 });
+        store.updateInstanceInfo("attaching", {
+          generation: change === "generation" ? 8 : 7,
+          sessionReady: true,
+        });
+      });
+      const current = useTerminalStore.getState().instances[0];
+      expect(terminalTaskPolicy(current).clearAllowed).toBe(change === "none");
+      if (change === "none")
+        expect(current.task).toMatchObject({ state: "idle", observation: "confirmed" });
+      else expect(current.task?.state).toBeUndefined();
+      expect(useNotificationStore.getState().notifications).toHaveLength(0);
+    },
+  );
+
+  it("attach 대기 중 확인한 모달을 보류한 유휴로 덮어쓰지 않는다", () => {
+    const store = useTerminalStore.getState();
+    store.registerInstance({ id: "attaching", profile: "WSL", syncGroup: "ws" });
+    renderHook(() => useSyncEvents());
+    act(() => {
+      mockOnTerminalTitleChanged.mock.calls[0][0]({
+        terminalId: "attaching",
+        generation: 7,
+        appSession: 0,
+        activitySequence: 10,
+        title: "✳ Restored",
+        interactiveApp: null,
+      });
+      mockOnTerminalActivityReconciled.mock.calls[0][0]([
+        {
+          terminalId: "attaching",
+          activitySequence: 11,
+          activity: { type: "interactiveApp", name: "Claude" },
+        },
+      ]);
+      store.updateInstanceInfo("attaching", { generation: 7 });
+      const source = taskSource(useTerminalStore.getState().instances[0]);
+      store.observeTask("attaching", {
+        source,
+        taskId: "0",
+        sequence: 1,
+        state: "waiting",
+        kind: "input",
+      });
+      store.updateInstanceInfo("attaching", { sessionReady: true });
+    });
+    const current = useTerminalStore.getState().instances[0];
+    expect(current.task?.state).toBe("waiting");
+    expect(terminalTaskPolicy(current).clearAllowed).toBe(false);
+  });
+
+  it("attach 전 명령보다 나중에 받은 유휴는 과거 명령 재생으로 폐기하지 않는다", () => {
+    const store = useTerminalStore.getState();
+    store.registerInstance({ id: "attaching", profile: "WSL", syncGroup: "ws" });
+    renderHook(() => useSyncEvents());
+    act(() => {
+      mockOnCommandStatus.mock.calls[0][0]({
+        terminalId: "attaching",
+        generation: 7,
+        phase: "start",
+      });
+      mockOnTerminalTitleChanged.mock.calls[0][0]({
+        terminalId: "attaching",
+        generation: 7,
+        appSession: 0,
+        activitySequence: 10,
+        title: "✳ Restored",
+        interactiveApp: null,
+      });
+      store.updateInstanceInfo("attaching", { generation: 7, sessionReady: true });
+      mockOnTerminalActivityReconciled.mock.calls[0][0]([
+        {
+          terminalId: "attaching",
+          activitySequence: 11,
+          activity: { type: "interactiveApp", name: "Claude" },
+        },
+      ]);
+    });
+    expect(terminalTaskPolicy(useTerminalStore.getState().instances[0]).clearAllowed).toBe(true);
+  });
 
   it.each(["command", "title"])("waits for attach before accepting %s generation", (kind) => {
     useTerminalStore

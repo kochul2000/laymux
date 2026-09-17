@@ -1,6 +1,6 @@
 # 0252. 앱 식별 전 Claude 유휴를 실행 범위에 묶어 보류한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-17
 - Source: WSL Claude 복원 후 Alt+L 차단 제보, v1.0.5 dev 재현, [ADR-0250](0250-terminal-task-state-and-notification-transitions.md), [data-flow §9](../architecture/data-flow.md)
 - Extends: ADR-0250의 확인된 Claude 세션에 대한 타이틀 관측을 앱 식별 지연 구간까지 연결한다. 작업 상태·알림·clear 정책은 유지한다.
@@ -16,7 +16,8 @@ WSL에서 `claude --resume`은 이름을 포함하지 않는 `✳ <대화 제목
 **식별되지 않은 pane에서 실제 수신한 `✳` 유휴 타이틀 하나를 PTY generation·appSession·제출 입력 시점에 묶어 보류하고, 같은 범위의 Claude 식별이 확인되면 최초 유휴로 한 번만 반영한다.**
 
 - 구조화된 live 타이틀만 보류한다. xterm 복원·표시 타이틀, working 스피너, generation 또는 appSession이 없는 이벤트는 보류하지 않는다.
-- 기존 activity 순서 검사를 통과하고 명시적 앱 종료가 아닌 이벤트만 인정한다. 이후 타이틀·명령·사용자 타이틀 변경·새 제출 입력, PTY 또는 appSession 교체·세션 준비 해제, pane 삭제·구독 해제는 보류를 폐기한다.
+- 실제 수신 시 기존 activity 순서 검사를 통과하고 명시적 앱 종료가 아닌 이벤트만 인정한다. attach 전 수신도 보존하며, generation 확정 전에는 소비하지 않는다. 큐 재생 중 reconcile의 순서 번호가 앞서도 유효했던 수신을 버리지 않고, 과거 명령 재생으로 더 최신 유휴를 폐기하지 않는다.
+- 이후 유효한 live 타이틀·명령·사용자 타이틀 변경·새 제출 입력, PTY 또는 appSession 교체·준비된 세션의 준비 해제, pane 삭제·구독 해제는 보류를 폐기한다. 최초 attach의 준비 대기는 폐기 사유가 아니다. appSession이 아직 없으면 보류한 live 이벤트의 값을 같은 generation에 바인딩한 후 소비한다.
 - 처음 식별된 앱이 Claude가 아니면 폐기한다. 이미 새 작업 관측이 있으면 덮어쓰지 않는다. 소비 전에 보류를 제거해 재판정이나 재진입으로 반복 적용하지 않는다.
 - 유휴 관측은 작업 스피너의 6초 갱신 기한과 다르게 시간 경과만으로 무효화하지 않는다. 대신 실행 범위와 후속 신호로 유효성을 제한한다. 보류는 terminal당 한 건이며 앱 식별을 대신하지 않는다.
 - 최종 작업 상태·알림·clear의 소유자는 기존 공통 계산 경로다. 최초 유휴는 성공이나 완료 알림을 만들지 않는다. 영속·외부 API·플랫폼별 정책은 추가하지 않는다.
