@@ -4,7 +4,7 @@
 - 사용자 실행 버전: Windows laymux 1.0.4
 - 수정 기준: `0b262d10`(main, 1.0.5). 이 버전의 아이콘 변경은 해당 귀속 경로를 수정하지 않았다.
 - 대상: `terminal-pane-54e49f2e`, Ubuntu-22.04, Claude Code 2.1.274
-- 결정: [ADR-0252](adr/0252-wsl-claude-chrome-helper-role.md)
+- 결정: [ADR-0253](adr/0253-wsl-claude-chrome-helper-role.md)
 
 ## 실제 실패 증거
 

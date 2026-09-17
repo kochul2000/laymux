@@ -1,4 +1,4 @@
-# 0252. WSL Claude의 Chrome 호스트는 대화 프로세스 후보에서 제외한다
+# 0253. WSL Claude의 Chrome 호스트는 대화 프로세스 후보에서 제외한다
 
 - Status: Proposed
 - Date: 2026-09-17
