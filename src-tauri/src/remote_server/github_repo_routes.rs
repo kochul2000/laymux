@@ -1,13 +1,14 @@
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::automation_server::ServerState;
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 
+use super::lease::require_active_lease;
 use super::{internal_error, json_error};
 
 #[derive(Debug, Serialize)]
@@ -15,6 +16,27 @@ use super::{internal_error, json_error};
 struct RemoteGithubRepoResponse {
     cwd: Option<String>,
     repo_base: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct RemoteGithubSnapshotQuery {
+    force: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteGithubSnapshotResponse {
+    cwd: Option<String>,
+    #[serde(flatten)]
+    snapshot: crate::commands::GithubRepoSnapshot,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct RemoteGithubActionRequest {
+    lease_id: String,
+    action: String,
+    number: u64,
 }
 
 pub(super) async fn remote_terminal_github_repo(
@@ -32,6 +54,57 @@ pub(super) async fn remote_terminal_github_repo(
         Ok(Err(err)) => internal_error(err),
         Err(err) => internal_error(format!("GitHub repository lookup task failed: {err}")),
     }
+}
+
+pub(super) async fn remote_terminal_github_snapshot(
+    State(server): State<ServerState>,
+    Path(id): Path<String>,
+    Query(query): Query<RemoteGithubSnapshotQuery>,
+) -> Response {
+    let cwd = match remote_terminal_cwd(&server.app_state, &id) {
+        Ok(Some(cwd)) => cwd,
+        Ok(None) => return json_error(StatusCode::NOT_FOUND, "terminal session not found"),
+        Err(err) => return internal_error(err),
+    };
+    let snapshot =
+        crate::commands::get_github_repo_snapshot(cwd.clone().unwrap_or_default(), query.force)
+            .await;
+    no_store_snapshot(RemoteGithubSnapshotResponse { cwd, snapshot })
+}
+
+pub(super) async fn remote_terminal_github_action(
+    State(server): State<ServerState>,
+    Path(id): Path<String>,
+    Json(body): Json<RemoteGithubActionRequest>,
+) -> Response {
+    if let Err(response) = require_active_lease(&server.app_state, Some(&body.lease_id)) {
+        return response;
+    }
+    let cwd = match remote_terminal_cwd(&server.app_state, &id) {
+        Ok(Some(Some(cwd))) => cwd,
+        Ok(Some(None)) => {
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "terminal working directory is unavailable",
+            )
+        }
+        Ok(None) => return json_error(StatusCode::NOT_FOUND, "terminal session not found"),
+        Err(err) => return internal_error(err),
+    };
+    match crate::commands::run_github_item_action(cwd, body.action, body.number).await {
+        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Err(err) => json_error(StatusCode::BAD_GATEWAY, &err),
+    }
+}
+
+fn remote_terminal_cwd(
+    app_state: &AppState,
+    terminal_id: &str,
+) -> Result<Option<Option<String>>, String> {
+    let terminals = app_state.terminals.lock_or_err()?;
+    Ok(terminals
+        .get(terminal_id)
+        .map(|terminal| terminal.cwd.clone()))
 }
 
 fn remote_terminal_github_repo_for_state(
@@ -56,6 +129,14 @@ fn remote_terminal_github_repo_for_state(
 }
 
 fn no_store_json(info: RemoteGithubRepoResponse) -> Response {
+    let mut response = Json(info).into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
+fn no_store_snapshot(info: RemoteGithubSnapshotResponse) -> Response {
     let mut response = Json(info).into_response();
     response
         .headers_mut()
@@ -146,5 +227,39 @@ mod tests {
             response.headers().get(header::CACHE_CONTROL),
             Some(&HeaderValue::from_static("no-store"))
         );
+    }
+
+    #[test]
+    fn github_snapshot_and_action_resolve_cwd_from_the_exact_terminal() {
+        let state = AppState::new();
+        insert_terminal(&state, "terminal-1", Some("/repo/one".into()));
+        insert_terminal(&state, "terminal-2", Some("/repo/two".into()));
+
+        assert_eq!(
+            remote_terminal_cwd(&state, "terminal-2").unwrap(),
+            Some(Some("/repo/two".into()))
+        );
+        assert_eq!(remote_terminal_cwd(&state, "missing").unwrap(), None);
+    }
+
+    #[test]
+    fn github_snapshot_response_flattens_the_desktop_contract() {
+        let value = serde_json::to_value(RemoteGithubSnapshotResponse {
+            cwd: Some("/repo".into()),
+            snapshot: crate::commands::GithubRepoSnapshot {
+                status: crate::commands::GithubRepoStatus::Ready,
+                repo: Some("owner/repo".into()),
+                repo_url: Some("https://github.com/owner/repo".into()),
+                issues: Vec::new(),
+                pulls: Vec::new(),
+                fetched_at_ms: Some(257),
+            },
+        })
+        .unwrap();
+
+        assert_eq!(value["cwd"], "/repo");
+        assert_eq!(value["status"]["type"], "ready");
+        assert_eq!(value["repoUrl"], "https://github.com/owner/repo");
+        assert_eq!(value["fetchedAtMs"], 257);
     }
 }

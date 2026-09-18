@@ -48,6 +48,7 @@ describe("Remote 설정 MCP 기기 적용", () => {
       "widgetStrip",
       "edgeSwipeDrawers",
       "swipeCloseDrawers",
+      "rightSwipeView",
       "spatialExcludedPaneIds",
       "spatialExcludedWorkspaceIds",
     ];

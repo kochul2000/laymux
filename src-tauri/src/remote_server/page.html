@@ -44,6 +44,9 @@
         <button id="fileExplorerHeader" class="file-explorer-button" type="button" hidden aria-label="Browse host files" title="Browse host files">
           <span data-remote-icon="FolderOpen"></span>
         </button>
+        <button id="githubHeader" class="github-button" type="button" hidden aria-label="Open GitHub issues and pull requests" title="GitHub issues and pull requests">
+          <span data-remote-icon="GitPullRequest"></span>
+        </button>
         <button id="spatialExclusion" class="spatial-exclusion-button" type="button" hidden aria-label="Exclude this pane from pane navigation" aria-pressed="false" title="Exclude this pane from pane navigation">
           <span data-remote-icon="CircleMinus"></span>
         </button>
@@ -326,6 +329,16 @@
                 <span class="nav-toggle-name">Swipe to open</span>
                 <span class="nav-toggle-desc">Left: workspaces · Right: files</span>
               </label>
+              <label class="nav-select-row" for="rightSwipeView">
+                <span class="nav-toggle-copy">
+                  <span class="nav-toggle-name">Right swipe opens</span>
+                  <span class="nav-toggle-desc">Choose the panel for the right edge</span>
+                </span>
+                <select id="rightSwipeView">
+                  <option value="files">Files</option>
+                  <option value="github">GitHub</option>
+                </select>
+              </label>
               <label class="nav-toggle-row" for="swipeCloseDrawersToggle">
                 <input id="swipeCloseDrawersToggle" type="checkbox" checked />
                 <span class="nav-toggle-name">Swipe to close</span>
@@ -419,6 +432,25 @@
         <input id="attachmentInput" class="sr-only" type="file" accept="image/*,text/*,.md,.markdown,.json,.jsonl,.yaml,.yml,.toml,.xml,.csv,.log,.ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.rs,.go,.java,.kt,.kts,.c,.h,.cpp,.hpp,.cc,.cs,.sh,.bash,.zsh,.fish,.ps1,.bat,.cmd,.sql,.css,.scss,.html,.htm,.ini,.conf,.cfg,.env,.pdf,.docx,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation" multiple tabindex="-1" aria-hidden="true" />
       </footer>
       <div id="terminalMeta" class="sr-only">No terminal selected.</div>
+    </div>
+    <div id="githubOverlay" class="github-overlay" hidden>
+      <div class="github-dialog" role="dialog" aria-modal="true" aria-label="GitHub issues and pull requests">
+        <header class="github-header">
+          <div class="github-tabs" role="tablist" aria-label="GitHub list">
+            <button id="githubIssuesTab" class="github-tab active" type="button" role="tab" aria-selected="true">Issues <span id="githubIssuesCount">0</span></button>
+            <button id="githubPullsTab" class="github-tab" type="button" role="tab" aria-selected="false">PRs <span id="githubPullsCount">0</span></button>
+          </div>
+          <div id="githubRepo" class="github-repo" title=""></div>
+          <button id="githubRefresh" class="github-header-action" type="button" aria-label="Refresh GitHub list" title="Refresh now">
+            <span data-remote-icon="RefreshCw"></span>
+          </button>
+          <button id="githubClose" class="github-header-action" type="button" aria-label="Close GitHub view">
+            <span data-remote-icon="X"></span>
+          </button>
+        </header>
+        <div id="githubStatus" class="github-status" role="status"></div>
+        <div id="githubList" class="github-list"></div>
+      </div>
     </div>
     <!-- File viewer (ADR-0184). Renders in this document instead of a second
          tab: `window.open` is unavailable in the Android wrapper and unreliable

@@ -322,6 +322,10 @@ Tauri command 는 두 개다([ADR-0106](../adr/0106-github-list-view-repo-regist
 
 읽기 경로는 `lib/github-display.ts` 단일 clamp 를 지난다. 스키마는 값을 거부하지 않고 조용히 clamp 하며(`refreshSeconds` 하한 처리와 같은 방식), 뷰는 settings.json 의 원시 값을 style 로 직접 흘리지 않는다.
 
+Remote도 같은 프로세스 전역 snapshot registry와 action allowlist를 사용한다([ADR-0257](../adr/0257-remote-github-view.md)). `GET /remote/v1/terminals/{id}/github?force=<bool>`는 terminal의 현재 CWD와 `{ status, repo, repoUrl, issues[], pulls[], fetchedAtMs }`를 반환하고, `POST /remote/v1/terminals/{id}/github/actions`는 `{ leaseId, action, number }`를 받는다. 읽기는 Remote bearer/IP/Origin gate를, 변경은 그 gate와 active controller lease를 모두 요구한다. handler는 terminal lock에서 CWD만 복사한 뒤 lock을 놓고 공용 command를 호출하므로 `.git` 탐색과 `gh` 실행 중 terminal registry를 잠그지 않는다. Android E2E 내부 HTTP allowlist도 이 두 exact terminal route만 허용한다.
+
+Remote header는 File Explorer 옆에 GitHub 버튼을 두고 연결된 active terminal의 CWD로 overlay를 연다. Issues/PRs, 수동 새로고침, 링크·브랜치 복사와 데스크톱과 같은 두 단계 확인 action을 제공한다. 우측 가장자리 스와이프 대상은 기기 로컬 `localStorage["laymux.remote.rightSwipeView"]`(`"files" | "github"`, 기본 `"files"`)가 정하고 Remote Settings → Display와 Remote settings MCP가 함께 편집한다. 좌측 스와이프는 계속 workspace menu를 연다.
+
 ### Direct Remote Mode 설정
 
 브라우저 원격 접속은 명시적 opt-in 설정이다. 기본값은 꺼짐이며, remote API는 Automation API/MCP의 IP allowlist와 별도 인증/Origin/IP 정책을 사용한다([ADR-0013](../adr/0013-direct-remote-mode.md)).

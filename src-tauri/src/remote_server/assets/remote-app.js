@@ -126,6 +126,17 @@ import {
         const fileViewerDirectoryElement = $("fileViewerDirectory");
         const fileViewerBackButton = $("fileViewerBack");
         const fileExplorerHeaderButton = $("fileExplorerHeader");
+        const githubHeaderButton = $("githubHeader");
+        const githubOverlayElement = $("githubOverlay");
+        const githubIssuesTabButton = $("githubIssuesTab");
+        const githubPullsTabButton = $("githubPullsTab");
+        const githubIssuesCountElement = $("githubIssuesCount");
+        const githubPullsCountElement = $("githubPullsCount");
+        const githubRepoElement = $("githubRepo");
+        const githubRefreshButton = $("githubRefresh");
+        const githubCloseButton = $("githubClose");
+        const githubStatusElement = $("githubStatus");
+        const githubListElement = $("githubList");
         const focusTerminalButton = $("focusTerminal");
         const attachmentButton = $("attachFile");
         const attachmentInput = $("attachmentInput");
@@ -176,6 +187,7 @@ import {
         const widgetStripKey = "laymux.remote.widgetStrip";
         const edgeSwipeDrawersKey = "laymux.remote.edgeSwipeDrawers";
         const swipeCloseDrawersKey = "laymux.remote.swipeCloseDrawers";
+        const rightSwipeViewKey = "laymux.remote.rightSwipeView";
         const spatialExcludedPaneIdsKey = "laymux.remote.spatialExcludedPaneIds";
         const spatialExcludedWorkspaceIdsKey = "laymux.remote.spatialExcludedWorkspaceIds";
         // Secret resume capability issued by a successful claim. It lives in
@@ -342,6 +354,15 @@ import {
         let activeGithubRepoBase = null;
         let githubRepoRequestRevision = 0;
         let githubRepoAbortController = null;
+        let githubSnapshot = null;
+        let githubTab = "issues";
+        let githubRequestRevision = 0;
+        let githubPollTimer = null;
+        let githubOpenMenu = null;
+        let githubMenuUp = false;
+        let githubConfirming = null;
+        let githubActionInFlight = false;
+        let githubError = null;
         // Keep the user's most recently attached pane across release/lease
         // loss within this document. The navigation snapshot remains the
         // authority for whether it is still live and eligible; this hint is
@@ -520,6 +541,7 @@ import {
         let composerHideAgentInputEnabled = loadLocalToggle(composerHideAgentInputKey);
         let edgeSwipeDrawersEnabled = loadLocalToggle(edgeSwipeDrawersKey);
         let swipeCloseDrawersEnabled = loadLocalToggle(swipeCloseDrawersKey);
+        let rightSwipeView = loadRightSwipeView();
         let composerHiddenAgentInputLines = loadComposerHiddenAgentInputLines();
         let composerAgentInputHideFrame = null;
         let composerAgentInputHideRequest = null;
@@ -1548,6 +1570,306 @@ import {
             });
         }
 
+        const REMOTE_GITHUB_POLL_MS = 10000;
+        const REMOTE_GITHUB_PENDING_RETRY_MS = 1000;
+        const REMOTE_GITHUB_ACTIONS = Object.freeze({
+          issues: [
+            ["issue.close", "Close as completed", false],
+            ["issue.closeNotPlanned", "Close as not planned", false],
+          ],
+          pulls: [
+            ["pr.merge", "Merge (merge commit)", true],
+            ["pr.squash", "Squash and merge", true],
+            ["pr.rebase", "Rebase and merge", true],
+            ["pr.close", "Close", false],
+          ],
+        });
+
+        function remoteOverlayOpen() {
+          return !fileViewerOverlayElement.hidden || !githubOverlayElement.hidden;
+        }
+
+        function githubStatusMessage(status) {
+          switch (status?.type) {
+            case "ready":
+            case "pending":
+              return "";
+            case "notAGithubRepo":
+              return "No GitHub repository for this terminal's CWD";
+            case "ghMissing":
+              return "`gh` not found on PATH";
+            case "unauthorized":
+              return "Run `gh auth login` to read issues and PRs";
+            case "failed":
+              return status.message || "GitHub request failed";
+            default:
+              return "";
+          }
+        }
+
+        function githubRelativeTime(value) {
+          const timestamp = Date.parse(value || "");
+          if (!Number.isFinite(timestamp)) return "";
+          const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+          if (seconds < 60) return "just now";
+          const minutes = Math.round(seconds / 60);
+          if (minutes < 60) return `${minutes}m`;
+          const hours = Math.round(minutes / 60);
+          if (hours < 24) return `${hours}h`;
+          return `${Math.round(hours / 24)}d`;
+        }
+
+        function githubIconButton(icon, label, className = "github-row-action") {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = className;
+          button.setAttribute("aria-label", label);
+          button.title = label;
+          setRemoteIcon(button, icon);
+          return button;
+        }
+
+        function renderGithubView() {
+          const issues = Array.isArray(githubSnapshot?.issues) ? githubSnapshot.issues : [];
+          const pulls = Array.isArray(githubSnapshot?.pulls) ? githubSnapshot.pulls : [];
+          githubIssuesCountElement.textContent = String(issues.length);
+          githubPullsCountElement.textContent = String(pulls.length);
+          githubIssuesTabButton.classList.toggle("active", githubTab === "issues");
+          githubPullsTabButton.classList.toggle("active", githubTab === "pulls");
+          githubIssuesTabButton.setAttribute("aria-selected", String(githubTab === "issues"));
+          githubPullsTabButton.setAttribute("aria-selected", String(githubTab === "pulls"));
+          githubRepoElement.textContent = githubSnapshot?.repo || "";
+          githubRepoElement.title = githubSnapshot?.repo || "";
+          githubRefreshButton.disabled = githubActionInFlight;
+          const status = githubError || githubStatusMessage(githubSnapshot?.status);
+          githubStatusElement.textContent = status;
+          githubStatusElement.classList.toggle("error", Boolean(githubError || githubSnapshot?.status?.type === "failed"));
+          githubListElement.replaceChildren();
+          const items = githubTab === "issues" ? issues : pulls;
+          if (!githubSnapshot && !githubError) {
+            githubStatusElement.textContent = "Loading GitHub items...";
+            return;
+          }
+          if (!status && githubSnapshot?.status?.type === "ready" && items.length === 0) {
+            githubStatusElement.textContent = githubTab === "issues"
+              ? "No open issues"
+              : "No open pull requests";
+          }
+          for (const item of items) {
+            const row = document.createElement("div");
+            row.className = "github-row";
+            row.dataset.githubNumber = String(item.number);
+
+            const main = document.createElement("button");
+            main.type = "button";
+            main.className = "github-row-main";
+            main.title = item.title || "";
+            const number = document.createElement("span");
+            number.className = "github-number";
+            number.textContent = `#${item.number}`;
+            main.append(number);
+            if (item.isDraft) {
+              const draft = document.createElement("span");
+              draft.className = "github-draft";
+              draft.textContent = "DRAFT";
+              main.append(draft);
+            }
+            const copy = document.createElement("span");
+            copy.className = "github-row-copy";
+            const title = document.createElement("span");
+            title.className = "github-title";
+            title.textContent = item.title || "";
+            const meta = document.createElement("span");
+            meta.className = "github-meta";
+            if (item.author) {
+              const author = document.createElement("span");
+              author.textContent = `@${item.author}`;
+              meta.append(author);
+            }
+            const updated = githubRelativeTime(item.updatedAt);
+            if (updated) {
+              const time = document.createElement("span");
+              time.textContent = updated;
+              meta.append(time);
+            }
+            for (const labelText of (Array.isArray(item.labels) ? item.labels : []).slice(0, 2)) {
+              const label = document.createElement("span");
+              label.className = "github-label";
+              label.textContent = labelText;
+              meta.append(label);
+            }
+            copy.append(title, meta);
+            main.append(copy);
+            main.addEventListener("click", () => openRemoteUrl(item.url));
+            row.append(main);
+
+            const copyLink = githubIconButton("Copy", "Copy link");
+            copyLink.addEventListener("click", () => {
+              writeClipboardText(item.url)
+                .then(() => setStatus(`Copied #${item.number} link`))
+                .catch((error) => setStatus(`Copy failed: ${error.message || error}`, true));
+            });
+            row.append(copyLink);
+            if (githubTab === "pulls" && item.headRefName) {
+              const copyBranch = githubIconButton("GitBranch", "Copy branch");
+              copyBranch.addEventListener("click", () => {
+                writeClipboardText(item.headRefName)
+                  .then(() => setStatus(`Copied ${item.headRefName}`))
+                  .catch((error) => setStatus(`Copy failed: ${error.message || error}`, true));
+              });
+              row.append(copyBranch);
+            }
+            const menuButton = githubIconButton("Ellipsis", "GitHub actions");
+            menuButton.setAttribute("aria-expanded", String(githubOpenMenu === item.number));
+            menuButton.addEventListener("click", () => {
+              const opening = githubOpenMenu !== item.number;
+              githubOpenMenu = opening ? item.number : null;
+              if (opening) {
+                const rowRect = row.getBoundingClientRect();
+                const listRect = githubListElement.getBoundingClientRect();
+                const below = listRect.bottom - rowRect.bottom;
+                const above = rowRect.top - listRect.top;
+                githubMenuUp = below < 170 && above > below;
+              }
+              githubConfirming = null;
+              renderGithubView();
+            });
+            row.append(menuButton);
+
+            if (githubOpenMenu === item.number) {
+              const menu = document.createElement("div");
+              menu.className = `github-row-menu${githubMenuUp ? " up" : ""}`;
+              if (githubConfirming?.number === item.number) {
+                const prompt = document.createElement("div");
+                prompt.className = "github-menu-action";
+                prompt.textContent = githubConfirming.label;
+                const confirm = document.createElement("button");
+                confirm.type = "button";
+                confirm.className = "github-menu-action github-menu-confirm";
+                confirm.textContent = githubActionInFlight ? "Working..." : "Confirm";
+                confirm.disabled = githubActionInFlight;
+                confirm.addEventListener("click", () => runRemoteGithubAction(item.number, githubConfirming.action));
+                const cancel = document.createElement("button");
+                cancel.type = "button";
+                cancel.className = "github-menu-action";
+                cancel.textContent = "Cancel";
+                cancel.disabled = githubActionInFlight;
+                cancel.addEventListener("click", () => {
+                  githubConfirming = null;
+                  renderGithubView();
+                });
+                menu.append(prompt, confirm, cancel);
+              } else {
+                for (const [action, label, danger] of REMOTE_GITHUB_ACTIONS[githubTab]) {
+                  const actionButton = document.createElement("button");
+                  actionButton.type = "button";
+                  actionButton.className = `github-menu-action${danger ? " danger" : ""}`;
+                  actionButton.textContent = label;
+                  actionButton.addEventListener("click", () => {
+                    githubConfirming = { number: item.number, action, label };
+                    renderGithubView();
+                  });
+                  menu.append(actionButton);
+                }
+              }
+              row.append(menu);
+            }
+            githubListElement.append(row);
+          }
+        }
+
+        function scheduleGithubPoll(delay = REMOTE_GITHUB_POLL_MS) {
+          if (githubPollTimer) clearTimeout(githubPollTimer);
+          githubPollTimer = setTimeout(() => {
+            githubPollTimer = null;
+            if (!githubOverlayElement.hidden) loadRemoteGithubSnapshot(false);
+          }, delay);
+        }
+
+        async function loadRemoteGithubSnapshot(force = false) {
+          const terminalId = activeTerminalId;
+          if (!leaseId || !terminalId || githubOverlayElement.hidden) return;
+          const revision = ++githubRequestRevision;
+          githubError = null;
+          renderGithubView();
+          try {
+            const snapshot = await remoteFetch(
+              `/remote/v1/terminals/${encodeURIComponent(terminalId)}/github?force=${force ? "true" : "false"}`,
+            );
+            if (revision !== githubRequestRevision || terminalId !== activeTerminalId || githubOverlayElement.hidden) return;
+            githubSnapshot = snapshot;
+            githubOpenMenu = null;
+            githubConfirming = null;
+            renderGithubView();
+            scheduleGithubPoll(snapshot.status?.type === "pending" ? REMOTE_GITHUB_PENDING_RETRY_MS : REMOTE_GITHUB_POLL_MS);
+          } catch (error) {
+            if (revision !== githubRequestRevision || githubOverlayElement.hidden) return;
+            githubError = error instanceof Error ? error.message : String(error);
+            renderGithubView();
+            scheduleGithubPoll();
+          }
+        }
+
+        async function runRemoteGithubAction(number, action) {
+          if (!leaseId || !activeTerminalId || githubActionInFlight) return;
+          const requestLeaseId = leaseId;
+          const requestTerminalId = activeTerminalId;
+          githubActionInFlight = true;
+          githubError = null;
+          renderGithubView();
+          try {
+            await remoteFetch(
+              `/remote/v1/terminals/${encodeURIComponent(requestTerminalId)}/github/actions`,
+              {
+                method: "POST",
+                body: JSON.stringify({ leaseId: requestLeaseId, action, number }),
+              },
+            );
+            if (leaseId !== requestLeaseId || activeTerminalId !== requestTerminalId) return;
+            githubOpenMenu = null;
+            githubConfirming = null;
+            await loadRemoteGithubSnapshot(true);
+          } catch (error) {
+            if (leaseId === requestLeaseId && activeTerminalId === requestTerminalId) {
+              githubError = error instanceof Error ? error.message : String(error);
+            }
+          } finally {
+            githubActionInFlight = false;
+            renderGithubView();
+          }
+        }
+
+        function openRemoteGithubView() {
+          if (!leaseId || !activeTerminalId) return;
+          if (!fileViewerOverlayElement.hidden) closeFileViewer();
+          setNavigationOpen(false);
+          githubSnapshot = null;
+          githubError = null;
+          githubOpenMenu = null;
+          githubMenuUp = false;
+          githubConfirming = null;
+          githubOverlayElement.hidden = false;
+          renderGithubView();
+          loadRemoteGithubSnapshot(false);
+        }
+
+        function closeRemoteGithubView() {
+          githubRequestRevision += 1;
+          if (githubPollTimer) clearTimeout(githubPollTimer);
+          githubPollTimer = null;
+          githubOverlayElement.hidden = true;
+          githubSnapshot = null;
+          githubError = null;
+          githubOpenMenu = null;
+          githubMenuUp = false;
+          githubConfirming = null;
+          focusCurrentInputSurface();
+        }
+
+        function renderGithubEntryState() {
+          githubHeaderButton.hidden = !(leaseId && activeTerminalId);
+        }
+
         function renderFileViewerState(message = null, isError = false) {
           const connected = Boolean(leaseId && fileViewerToken);
           // The header folder button is an entry point, not an action with a
@@ -1784,6 +2106,7 @@ import {
 
         function openFileViewerOverlay(path, explorerReturnPath) {
           if (!leaseId || !fileViewerToken || !path) return;
+          if (!githubOverlayElement.hidden) closeRemoteGithubView();
           const openedFromExplorer = explorerReturnPath !== undefined;
           const requestRevision = ++fileViewerRequestRevision;
           const requestLeaseId = leaseId;
@@ -1855,6 +2178,7 @@ import {
 
         function openFileExplorerOverlay(request) {
           if (!leaseId || !fileViewerToken || !request) return;
+          if (!githubOverlayElement.hidden) closeRemoteGithubView();
           const explorerFallbackPath = fileViewerDirectoryPath || fileViewerExplorerReturnPath;
           const requestRevision = ++fileViewerRequestRevision;
           const requestLeaseId = leaseId;
@@ -3084,6 +3408,22 @@ import {
           }
         }
 
+        function loadRightSwipeView() {
+          try {
+            return localStorage.getItem(rightSwipeViewKey) === "github" ? "github" : "files";
+          } catch (_) {
+            return "files";
+          }
+        }
+
+        function saveRightSwipeView(value) {
+          rightSwipeView = value === "github" ? "github" : "files";
+          try {
+            localStorage.setItem(rightSwipeViewKey, rightSwipeView);
+          } catch (_) {}
+          rightSwipeViewSelect.value = rightSwipeView;
+        }
+
         function normalizeComposerHiddenAgentInputLines(value, fallback) {
           const parsed = Number(value);
           if (!Number.isFinite(parsed)) return fallback;
@@ -3722,7 +4062,7 @@ import {
           if (
             !tappedTerminalId ||
             currentInputMode() !== "composer" ||
-            !fileViewerOverlayElement.hidden
+            remoteOverlayOpen()
           ) {
             return;
           }
@@ -3738,7 +4078,7 @@ import {
               currentInputMode() !== "composer" ||
               composerCollapsed ||
               composerEditor.disabled ||
-              !fileViewerOverlayElement.hidden
+              remoteOverlayOpen()
             ) {
               return;
             }
@@ -3849,7 +4189,8 @@ import {
 
         function setActiveTerminal(nextTerminalId) {
           const nextId = nextTerminalId || null;
-          if (activeTerminalId !== nextId) {
+          const terminalChanged = activeTerminalId !== nextId;
+          if (terminalChanged) {
             clearPathLinkSelection();
             // Publish a terminal switch only after the previous output/input
             // surface has been isolated. Otherwise the old socket can keep
@@ -3886,6 +4227,11 @@ import {
           }
           renderInputSurface();
           updateHeaderPaneIdentity();
+          renderGithubEntryState();
+          if (terminalChanged && !githubOverlayElement.hidden) {
+            githubSnapshot = null;
+            loadRemoteGithubSnapshot(false);
+          }
         }
 
         function setConnected(connected) {
@@ -3917,8 +4263,10 @@ import {
             fileViewerPathRevision += 1;
             fileViewerPathInput.value = "";
             closeFileViewer();
+            closeRemoteGithubView();
           }
           renderFileViewerState();
+          renderGithubEntryState();
         }
 
         function setConnectionHint(message, attention = false) {
@@ -5602,10 +5950,12 @@ import {
             const rect = surface.getBoundingClientRect();
             const navigationOpen = navToggleButton.getAttribute("aria-expanded") === "true";
             const edge =
-              edgeSwipeDrawersEnabled && mobileLayout && !navigationOpen && fileViewerOverlayElement.hidden
+              edgeSwipeDrawersEnabled && mobileLayout && !navigationOpen && !remoteOverlayOpen()
                 ? point.clientX <= rect.left + EDGE_SWIPE_HIT_PX
                   ? "left"
-                  : leaseId && fileViewerToken && point.clientX >= rect.right - EDGE_SWIPE_HIT_PX
+                  : leaseId && activeTerminalId &&
+                      (rightSwipeView === "github" || fileViewerToken) &&
+                      point.clientX >= rect.right - EDGE_SWIPE_HIT_PX
                     ? "right"
                     : null
                 : null;
@@ -5659,6 +6009,7 @@ import {
                 clearTouchLongPressTimer();
                 touchGesture.mode = "edgeOpened";
                 if (edge === "left") setNavigationOpen(true);
+                else if (rightSwipeView === "github") openRemoteGithubView();
                 else openCurrentFileExplorer();
               } else if (
                 openingDistance < -INTERNAL_TOUCH_SCROLL_SLOP_PX ||
@@ -6891,6 +7242,10 @@ import {
             closeFileViewer();
             return true;
           }
+          if (!githubOverlayElement.hidden) {
+            closeRemoteGithubView();
+            return true;
+          }
           if (composerStarEditorScrim && !composerStarEditorScrim.hidden) {
             closeComposerStarEditor();
             return true;
@@ -6932,6 +7287,7 @@ import {
         const widgetStripToggle = $("widgetStripToggle");
         const edgeSwipeDrawersToggle = $("edgeSwipeDrawersToggle");
         const swipeCloseDrawersToggle = $("swipeCloseDrawersToggle");
+        const rightSwipeViewSelect = $("rightSwipeView");
         // Fixed and client-owned: the strip is a viewer, not probe demand, so it
         // has no business following `usage.*.refreshSeconds`. Fast enough for
         // the activity and notification counts, which are the parts that move.
@@ -12493,6 +12849,7 @@ import {
         widgetStripToggle.checked = widgetStripAllowed;
         edgeSwipeDrawersToggle.checked = edgeSwipeDrawersEnabled;
         swipeCloseDrawersToggle.checked = swipeCloseDrawersEnabled;
+        rightSwipeViewSelect.value = rightSwipeView;
         applyRemoteDisplaySettings(remoteDisplaySettings);
         updateRemoteDisplaySettingsControls();
 
@@ -12523,6 +12880,7 @@ import {
             widgetStrip: widgetStripAllowed,
             edgeSwipeDrawers: edgeSwipeDrawersEnabled,
             swipeCloseDrawers: swipeCloseDrawersEnabled,
+            rightSwipeView,
           }),
           (candidate, patch) => {
             const display = Object.fromEntries(Object.keys(DEFAULT_REMOTE_DISPLAY_SETTINGS).map(key => [key, candidate[key]]));
@@ -12535,6 +12893,7 @@ import {
               widgetStrip: widgetStripKey,
               edgeSwipeDrawers: edgeSwipeDrawersKey,
               swipeCloseDrawers: swipeCloseDrawersKey,
+              rightSwipeView: rightSwipeViewKey,
             };
             const writes = [];
             const floatingChanged = Object.keys(patch).some(key => ["floatingEnabled", "floatingButtons", "inputBarZones", "inputBarUserKeys"].includes(key) || Object.hasOwn(floatingSettingFields, key));
@@ -12601,8 +12960,10 @@ import {
             if (Object.hasOwn(patch, "widgetStrip")) setWidgetStripAllowed(candidate.widgetStrip);
             edgeSwipeDrawersEnabled = candidate.edgeSwipeDrawers;
             swipeCloseDrawersEnabled = candidate.swipeCloseDrawers;
+            rightSwipeView = candidate.rightSwipeView;
             edgeSwipeDrawersToggle.checked = edgeSwipeDrawersEnabled;
             swipeCloseDrawersToggle.checked = swipeCloseDrawersEnabled;
+            rightSwipeViewSelect.value = rightSwipeView;
             if (skipsChanged) {
               spatialExcludedPaneIds = new Set(candidate.spatialExcludedPaneIds);
               spatialExcludedWorkspaceIds = new Set(candidate.spatialExcludedWorkspaceIds);
@@ -12625,6 +12986,9 @@ import {
         swipeCloseDrawersToggle.addEventListener("change", () => {
           swipeCloseDrawersEnabled = swipeCloseDrawersToggle.checked;
           saveLocalToggle(swipeCloseDrawersKey, swipeCloseDrawersEnabled);
+        });
+        rightSwipeViewSelect.addEventListener("change", () => {
+          saveRightSwipeView(rightSwipeViewSelect.value);
         });
         remoteTerminalFontSizeInput.addEventListener("change", () => {
           saveRemoteDisplaySettings();
@@ -12778,6 +13142,21 @@ import {
           // bridge falls back to the host home directory.
           openCurrentFileExplorer();
         });
+        githubHeaderButton.addEventListener("click", openRemoteGithubView);
+        githubIssuesTabButton.addEventListener("click", () => {
+          githubTab = "issues";
+          githubOpenMenu = null;
+          githubConfirming = null;
+          renderGithubView();
+        });
+        githubPullsTabButton.addEventListener("click", () => {
+          githubTab = "pulls";
+          githubOpenMenu = null;
+          githubConfirming = null;
+          renderGithubView();
+        });
+        githubRefreshButton.addEventListener("click", () => loadRemoteGithubSnapshot(true));
+        githubCloseButton.addEventListener("click", closeRemoteGithubView);
         fileViewerBackButton.addEventListener("click", () => {
           // Back re-requests the listing rather than restoring a cache: the
           // directory may have changed while the file was open (ADR-0198).
@@ -12803,11 +13182,30 @@ import {
           // user reading, selecting or scrolling the file.
           if (event.target === fileViewerOverlayElement) closeFileViewer();
         });
+        githubOverlayElement.addEventListener("click", (event) => {
+          if (event.target === githubOverlayElement) closeRemoteGithubView();
+        });
+        window.addEventListener(
+          "keydown",
+          (event) => {
+            if (githubOverlayElement.hidden || event.key !== "Escape") return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            closeRemoteGithubView();
+          },
+          true,
+        );
         installHorizontalFlickDismiss(
           fileViewerDirectoryElement,
           1,
           () => !fileViewerDirectoryElement.hidden,
           closeFileViewer,
+        );
+        installHorizontalFlickDismiss(
+          githubListElement,
+          1,
+          () => !githubOverlayElement.hidden,
+          closeRemoteGithubView,
         );
         fileViewerZoomOutButton.addEventListener("click", () => adjustFileViewerZoom(-1));
         fileViewerZoomInButton.addEventListener("click", () => adjustFileViewerZoom(1));
@@ -13298,5 +13696,6 @@ import {
           window.removeEventListener("keydown", handleLinkChipKeyDown, true);
           clearPathLinkSelection();
           closeFileViewer();
+          closeRemoteGithubView();
         });
       })();
