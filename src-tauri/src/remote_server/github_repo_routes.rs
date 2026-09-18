@@ -35,8 +35,17 @@ struct RemoteGithubSnapshotResponse {
 #[serde(rename_all = "camelCase")]
 pub(super) struct RemoteGithubActionRequest {
     lease_id: String,
+    cwd: String,
     action: String,
     number: u64,
+}
+
+#[derive(Debug, PartialEq)]
+enum RemoteGithubActionCwd {
+    Ready(String),
+    TerminalNotFound,
+    Unavailable,
+    Changed,
 }
 
 pub(super) async fn remote_terminal_github_repo(
@@ -80,20 +89,41 @@ pub(super) async fn remote_terminal_github_action(
     if let Err(response) = require_active_lease(&server.app_state, Some(&body.lease_id)) {
         return response;
     }
-    let cwd = match remote_terminal_cwd(&server.app_state, &id) {
-        Ok(Some(Some(cwd))) => cwd,
-        Ok(Some(None)) => {
+    let cwd = match remote_terminal_action_cwd(&server.app_state, &id, &body.cwd) {
+        Ok(RemoteGithubActionCwd::Ready(cwd)) => cwd,
+        Ok(RemoteGithubActionCwd::Unavailable) => {
             return json_error(
                 StatusCode::BAD_REQUEST,
                 "terminal working directory is unavailable",
             )
         }
-        Ok(None) => return json_error(StatusCode::NOT_FOUND, "terminal session not found"),
+        Ok(RemoteGithubActionCwd::Changed) => {
+            return json_error(
+                StatusCode::CONFLICT,
+                "terminal working directory changed; refresh the GitHub view",
+            )
+        }
+        Ok(RemoteGithubActionCwd::TerminalNotFound) => {
+            return json_error(StatusCode::NOT_FOUND, "terminal session not found")
+        }
         Err(err) => return internal_error(err),
     };
     match crate::commands::run_github_item_action(cwd, body.action, body.number).await {
         Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
         Err(err) => json_error(StatusCode::BAD_GATEWAY, &err),
+    }
+}
+
+fn remote_terminal_action_cwd(
+    app_state: &AppState,
+    terminal_id: &str,
+    expected_cwd: &str,
+) -> Result<RemoteGithubActionCwd, String> {
+    match remote_terminal_cwd(app_state, terminal_id)? {
+        Some(Some(cwd)) if cwd == expected_cwd => Ok(RemoteGithubActionCwd::Ready(cwd)),
+        Some(Some(_)) => Ok(RemoteGithubActionCwd::Changed),
+        Some(None) => Ok(RemoteGithubActionCwd::Unavailable),
+        None => Ok(RemoteGithubActionCwd::TerminalNotFound),
     }
 }
 
@@ -240,6 +270,14 @@ mod tests {
             Some(Some("/repo/two".into()))
         );
         assert_eq!(remote_terminal_cwd(&state, "missing").unwrap(), None);
+        assert_eq!(
+            remote_terminal_action_cwd(&state, "terminal-2", "/repo/two").unwrap(),
+            RemoteGithubActionCwd::Ready("/repo/two".into())
+        );
+        assert_eq!(
+            remote_terminal_action_cwd(&state, "terminal-2", "/repo/one").unwrap(),
+            RemoteGithubActionCwd::Changed
+        );
     }
 
     #[test]
@@ -261,5 +299,26 @@ mod tests {
         assert_eq!(value["status"]["type"], "ready");
         assert_eq!(value["repoUrl"], "https://github.com/owner/repo");
         assert_eq!(value["fetchedAtMs"], 257);
+    }
+
+    #[test]
+    fn github_action_request_requires_the_snapshot_cwd() {
+        assert!(
+            serde_json::from_value::<RemoteGithubActionRequest>(serde_json::json!({
+                "leaseId": "lease-1",
+                "action": "pr.squash",
+                "number": 17
+            }))
+            .is_err()
+        );
+
+        let request = serde_json::from_value::<RemoteGithubActionRequest>(serde_json::json!({
+            "leaseId": "lease-1",
+            "cwd": "/repo/one",
+            "action": "pr.squash",
+            "number": 17
+        }))
+        .unwrap();
+        assert_eq!(request.cwd, "/repo/one");
     }
 }

@@ -184,7 +184,7 @@ test.describe("Remote GitHub view", () => {
     await pull.getByRole("button", { name: "Confirm" }).click();
     await expect
       .poll(() => requests.actionRequests)
-      .toEqual([{ leaseId: "lease-257", action: "pr.squash", number: 18 }]);
+      .toEqual([{ leaseId: "lease-257", cwd: "/work/repo", action: "pr.squash", number: 18 }]);
     await expect.poll(() => requests.snapshotRequests.at(-1)).toBe("?force=true");
   });
 

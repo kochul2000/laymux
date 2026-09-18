@@ -1811,7 +1811,8 @@ import {
         }
 
         async function runRemoteGithubAction(number, action) {
-          if (!leaseId || !activeTerminalId || githubActionInFlight) return;
+          const requestCwd = githubSnapshot?.cwd;
+          if (!leaseId || !activeTerminalId || !requestCwd || githubActionInFlight) return;
           const requestLeaseId = leaseId;
           const requestTerminalId = activeTerminalId;
           githubActionInFlight = true;
@@ -1822,7 +1823,12 @@ import {
               `/remote/v1/terminals/${encodeURIComponent(requestTerminalId)}/github/actions`,
               {
                 method: "POST",
-                body: JSON.stringify({ leaseId: requestLeaseId, action, number }),
+                body: JSON.stringify({
+                  leaseId: requestLeaseId,
+                  cwd: requestCwd,
+                  action,
+                  number,
+                }),
               },
             );
             if (leaseId !== requestLeaseId || activeTerminalId !== requestTerminalId) return;
@@ -5953,8 +5959,9 @@ import {
               edgeSwipeDrawersEnabled && mobileLayout && !navigationOpen && !remoteOverlayOpen()
                 ? point.clientX <= rect.left + EDGE_SWIPE_HIT_PX
                   ? "left"
-                  : leaseId && activeTerminalId &&
-                      (rightSwipeView === "github" || fileViewerToken) &&
+                  : leaseId &&
+                      ((rightSwipeView === "github" && activeTerminalId) ||
+                        (rightSwipeView === "files" && fileViewerToken)) &&
                       point.clientX >= rect.right - EDGE_SWIPE_HIT_PX
                     ? "right"
                     : null

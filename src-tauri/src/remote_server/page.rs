@@ -731,6 +731,7 @@ mod tests {
         assert!(html.contains("/github?force="));
         assert!(html.contains("/github/actions"));
         assert!(html.contains("function runRemoteGithubAction(number, action)"));
+        assert!(html.contains("cwd: requestCwd"));
         assert!(html.contains("githubConfirming = { number: item.number, action, label };"));
     }
 
