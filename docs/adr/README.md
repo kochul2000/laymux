@@ -273,6 +273,7 @@ ADR 이 필요한 대표 기준:
 | [0253](0253-wsl-claude-chrome-helper-role.md) | WSL Claude의 Chrome 호스트는 대화 프로세스 후보에서 제외한다 | Accepted |
 | [0254](0254-confirmed-idle-before-output-activity.md) | 확인된 작업 없음은 출력 활동보다 우선한다 | Accepted |
 | [0255](0255-codex-delayed-observation-recovery.md) | 지연된 Codex 조회도 실행 범위가 유효하면 관측을 복구한다 | Accepted |
+| [0256](0256-codex-thread-settings-preserve-fresh.md) | Codex의 설정 변경만으로 새 빈 대화의 복원 자격을 취소하지 않는다 | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 
