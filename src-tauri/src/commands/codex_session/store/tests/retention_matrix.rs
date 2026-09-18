@@ -9,6 +9,7 @@ fn retention_lifecycle_rollout_matrix() {
         for retention in ["intact", "initial", "partial", "all", "late_only"] {
             for state in [
                 "fresh",
+                "settings",
                 "running",
                 "completed",
                 "failed",
@@ -50,7 +51,17 @@ fn retention_lifecycle_rollout_matrix() {
                     };
                     insert_log(&logs, 6, process, Some(selected));
                     lifecycle_log(&logs, 6, "new", method, selected);
-                    let has_input = !matches!(state, "fresh" | "clear" | "resume" | "resume_a");
+                    let has_input = !matches!(
+                        state,
+                        "fresh" | "settings" | "clear" | "resume" | "resume_a"
+                    );
+                    if state == "settings" {
+                        insert_log(&logs, 7, process, Some(selected));
+                        logs.execute(
+                            "UPDATE logs SET feedback_log_body=?1 WHERE id=7",
+                            [format!("session_loop{{thread_id={selected}}}: Submission sub=Submission {{ id: \"settings-1\", op: ThreadSettings {{ thread_settings: ThreadSettingsOverrides {{ model: Some(\"gpt-6-astra\") }} }}, trace: None, parent_turn_id: None, root_turn_id: None }}")],
+                        ).unwrap();
+                    }
                     if has_input {
                         insert_log(&logs, 7, process, Some(selected));
                         logs.execute(
@@ -149,7 +160,7 @@ fn retention_lifecycle_rollout_matrix() {
             }
         }
     }
-    assert_eq!(checks, 1260);
+    assert_eq!(checks, 1400);
     println!("retention_lifecycle_rollout_matrix: {checks} verified observations");
 }
 

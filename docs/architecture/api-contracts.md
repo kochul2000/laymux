@@ -565,6 +565,8 @@ Rust는 내부 event `session-checkpoint-requested {requestId,reason,requireConc
 
 Windows child wait와 PID 기반 `taskkill`은 하나의 handshake를 공유한다. kill이 live child를 claim한 뒤에는 종료를 관측한 wait thread도 kill 완료 전까지 OS process handle을 drop하지 않아 PID 재사용을 막는다. 숨김 회수의 ACK 전 재검증은 단순 visibility가 아니라 timer owner의 최신 만료 자격 집합을 사용한다. 따라서 현재 timeout 증가와 hidden→visible→hidden으로 연속 숨김 epoch가 바뀐 대상은 오류 ACK되어 PTY를 보존한다.
 
+Codex의 fresh 귀속에서 모델 등 설정 변경만 담은 정확한 `ThreadSettings` submission은 턴 입력 증거가 아니다([ADR-0256](../adr/0256-codex-thread-settings-preserve-fresh.md)). 기존 새 대화 ID·rollout 부재 검증과 critical checkpoint 이중 관측은 유지하며, 실제 입력·중단·종료·미확인 기록이나 resume를 fresh로 바꾸지 않는다. 상태·IPC·저장 필드는 추가하지 않는다.
+
 ### Grok 설정
 
 Grok Build 관련 동작(세션 복원, 셀렉터 상태 메시지 구성)을 제어한다. 실행 명령·세션 복원·상태 메시지 필드는 Codex와 공유하지만, Codex 전용 transcript 설정과 Claude 전용 `syncCwd`·`sessionLimit*`는 두지 않는다([ADR-0156](../adr/0156-grok-first-class-agent.md)).

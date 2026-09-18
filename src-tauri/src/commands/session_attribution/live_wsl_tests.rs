@@ -6,6 +6,16 @@ use super::*;
 #[test]
 #[ignore = "requires LAYMUX_TEST_WSL_DISTRO, LAYMUX_TEST_TERMINAL_ID and LAYMUX_TEST_SESSION_ID"]
 fn live_wsl_claude_attribution_matches_its_session_file() {
+    assert_live_wsl_attribution("claude", SessionAttributionState::Identified);
+}
+
+#[test]
+#[ignore = "requires LAYMUX_TEST_WSL_DISTRO, LAYMUX_TEST_TERMINAL_ID and LAYMUX_TEST_SESSION_ID"]
+fn live_wsl_codex_settings_only_session_is_fresh() {
+    assert_live_wsl_attribution("codex", SessionAttributionState::Fresh);
+}
+
+fn assert_live_wsl_attribution(provider: &str, expected_state: SessionAttributionState) {
     let distro = std::env::var("LAYMUX_TEST_WSL_DISTRO").unwrap();
     let terminal_id = std::env::var("LAYMUX_TEST_TERMINAL_ID").unwrap();
     let expected = std::env::var("LAYMUX_TEST_SESSION_ID").unwrap();
@@ -52,9 +62,10 @@ fn live_wsl_claude_attribution_matches_its_session_file() {
             crate::wsl_liveness::liveness(&terminal_id, 7),
             provider_lookup_failed_for_terminal(&terminal_id, &[&claude, &codex, &grok]),
         );
+        let attribution = apply_fresh(attribution, codex.fresh_sessions.get(&terminal_id));
         println!("{}", serde_json::to_string(&attribution).unwrap());
-        assert_eq!(attribution.state, SessionAttributionState::Identified);
-        assert_eq!(attribution.provider, Some("claude"));
+        assert_eq!(attribution.state, expected_state);
+        assert_eq!(attribution.provider, Some(provider));
         assert_eq!(attribution.session_id.as_deref(), Some(expected.as_str()));
     }
 }
