@@ -226,6 +226,13 @@
       "default": true,
       "applyMode": "live"
     },
+    "rightSwipeView": {
+      "type": "string",
+      "enum": ["files", "github"],
+      "description": "오른쪽 가장자리 스와이프로 열 Remote 패널입니다.",
+      "default": "files",
+      "applyMode": "live"
+    },
     "composerHiddenClaudeLines": {
       "type": "integer",
       "default": 3,

@@ -714,6 +714,25 @@ mod tests {
         assert!(html.contains("clearTouchLongPressTimer();"));
         assert!(html.contains("if (edge === \"left\") setNavigationOpen(true);"));
         assert!(html.contains("openCurrentFileExplorer();"));
+        assert!(html.contains("id=\"rightSwipeView\""));
+        assert!(html.contains("const rightSwipeViewKey = \"laymux.remote.rightSwipeView\";"));
+        assert!(html.contains("rightSwipeView === \"github\""));
+        assert!(html.contains("openRemoteGithubView();"));
+    }
+
+    #[test]
+    fn remote_page_exposes_the_shared_github_view() {
+        let html = remote_client_source();
+
+        assert!(html.contains("id=\"githubHeader\""));
+        assert!(html.contains("id=\"githubOverlay\""));
+        assert!(html.contains("id=\"githubIssuesTab\""));
+        assert!(html.contains("id=\"githubPullsTab\""));
+        assert!(html.contains("/github?force="));
+        assert!(html.contains("/github/actions"));
+        assert!(html.contains("function runRemoteGithubAction(number, action)"));
+        assert!(html.contains("cwd: requestCwd"));
+        assert!(html.contains("githubConfirming = { number: item.number, action, label };"));
     }
 
     #[test]
@@ -958,7 +977,7 @@ mod tests {
         let touch_focus = &html[touch_focus_start..touch_focus_end];
         assert!(touch_focus.contains("focusCurrentInputSurface();"));
         assert!(touch_focus.contains("requestAnimationFrame(() => {"));
-        assert!(touch_focus.contains("!fileViewerOverlayElement.hidden"));
+        assert!(touch_focus.contains("remoteOverlayOpen()"));
         assert!(touch_focus.contains("focusedElement !== terminal?.textarea"));
         assert!(touch_focus.contains("focusedElement !== document.body"));
         let touch_selection_start = html
