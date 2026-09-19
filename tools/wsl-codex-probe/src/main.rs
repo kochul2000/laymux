@@ -67,7 +67,7 @@ fn probe(
     {
         return Err("Codex process changed during query".into());
     }
-    Ok(serde_json::Value::Array(rows))
+    Ok(serde_json::json!({"process_uuid": identity, "rows": rows}))
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -120,8 +120,9 @@ mod tests {
                         INSERT INTO logs VALUES(9,'b','pid:42:new','quoted app_server.request{rpc.method=\"thread/start\"}');
                         INSERT INTO logs VALUES(10,NULL,'pid:42:new','late');").unwrap();
                     let expected = probe(root.path(), 42, "matrix").unwrap();
+                    assert_eq!(expected["process_uuid"], "pid:42:new");
                     assert_eq!(
-                        expected
+                        expected["rows"]
                             .as_array()
                             .unwrap()
                             .iter()
@@ -189,8 +190,8 @@ mod tests {
             INSERT INTO logs VALUES(6,NULL,'pid:42:new','later threadless log');
             INSERT INTO logs VALUES(7,'current','pid:42:new','current thread log');").unwrap();
         let rows = probe(root.path(), 42, "pane").unwrap();
-        assert_eq!(rows.as_array().unwrap().len(), 1);
-        assert_eq!(rows[0]["id"], 3);
+        assert_eq!(rows["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(rows["rows"][0]["id"], 3);
         for id in [2, 6] {
             db.execute("DELETE FROM logs WHERE id=?1", [id]).unwrap();
             assert_eq!(probe(root.path(), 42, "pane").unwrap(), rows);

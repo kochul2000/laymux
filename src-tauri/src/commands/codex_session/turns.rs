@@ -49,7 +49,7 @@ pub struct CodexTurnSnapshot {
 struct Source {
     generation: u64,
     session_id: String,
-    epoch: i64,
+    selection_key: String,
     path: Option<PathBuf>,
 }
 
@@ -81,7 +81,8 @@ pub(crate) fn get_codex_turn_states_impl(
         .collect();
     let mut sources = HashMap::new();
     let lookup = super::lookup_with_observer(None, state, |id, store, session| {
-        let (Some(generation), Some(epoch)) = (generations.get(id), session.selection_epoch) else {
+        let (Some(generation), Some(selection_key)) = (generations.get(id), &session.selection_key)
+        else {
             return;
         };
         let path = if session.fresh {
@@ -96,7 +97,7 @@ pub(crate) fn get_codex_turn_states_impl(
                     Source {
                         generation: *generation,
                         session_id: session.id.clone(),
-                        epoch,
+                        selection_key: selection_key.clone(),
                         path,
                     },
                 );
@@ -146,7 +147,7 @@ pub(crate) fn get_codex_turn_states_impl(
                 CodexTurnSnapshot {
                     generation: entry.source.generation,
                     session_id: Some(entry.source.session_id.clone()),
-                    selection_key: Some(entry.source.epoch.to_string()),
+                    selection_key: Some(entry.source.selection_key.clone()),
                     turn,
                 },
             );

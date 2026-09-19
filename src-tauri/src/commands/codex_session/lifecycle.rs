@@ -11,6 +11,12 @@ pub(super) struct LogRow {
     pub feedback_log_body: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub(super) struct ProcessRows {
+    pub process_uuid: String,
+    pub rows: Vec<LogRow>,
+}
+
 #[derive(Debug, PartialEq)]
 pub(super) struct Selection {
     pub id: Option<String>,
@@ -118,21 +124,19 @@ pub(super) fn select(rows: &[LogRow]) -> Option<Selection> {
     selected
 }
 
-fn is_thread_settings_submission(body: &str, session_id: &str) -> bool {
-    let Some((observed_id, submission)) = body
+pub(super) fn submission_operation<'a>(body: &'a str, session_id: &str) -> Option<&'a str> {
+    let (observed_id, submission) = body
         .strip_prefix("session_loop{thread_id=")
-        .and_then(|rest| rest.split_once("}: Submission sub=Submission { id: \""))
-    else {
-        return false;
-    };
-    let Some((submission_id, operation)) = submission.split_once("\", op: ") else {
-        return false;
-    };
+        .and_then(|rest| rest.split_once("}: Submission sub=Submission { id: \""))?;
+    let (submission_id, operation) = submission.split_once("\", op: ")?;
     // Match the top-level Debug discriminator before any settings or user text.
     // Quoted operations, subspans and an incomplete discriminator stay unknown.
-    observed_id == session_id
-        && is_valid_session_id(submission_id)
-        && operation.starts_with("ThreadSettings { thread_settings: ")
+    (observed_id == session_id && is_valid_session_id(submission_id)).then_some(operation)
+}
+
+fn is_thread_settings_submission(body: &str, session_id: &str) -> bool {
+    submission_operation(body, session_id)
+        .is_some_and(|operation| operation.starts_with("ThreadSettings { thread_settings: "))
 }
 
 #[cfg(test)]
