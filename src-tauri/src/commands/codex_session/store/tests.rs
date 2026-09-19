@@ -1,5 +1,6 @@
 use super::*;
 
+mod retained_loops;
 mod retention_matrix;
 
 const SESSION_A: &str = "019fc0d8-a862-7241-a0f5-b6a66ef4ef6f";
@@ -17,7 +18,7 @@ fn turn_observation_requires_a_selection_and_changes_when_the_process_restarts()
         .find_selection_for_pid_checked(101, None)
         .unwrap()
         .unwrap()
-        .selection_epoch
+        .selection_key
         .is_none());
     let body = format!("app_server.request{{rpc.method=\"thread/resume\" rpc.request_id=1 app_server.client_name=\"codex-tui\"}}:thread_spawn{{}}:session_init:startup_prewarm{{otel.name=\"startup_prewarm\" thread.id={SESSION_A}}}: ready");
     logs.execute("UPDATE logs SET feedback_log_body=?1 WHERE id=2", [&body])
@@ -26,7 +27,7 @@ fn turn_observation_requires_a_selection_and_changes_when_the_process_restarts()
         .find_selection_for_pid_checked(101, None)
         .unwrap()
         .unwrap();
-    assert_eq!(before.selection_epoch, Some(2));
+    assert_eq!(before.selection_key, Some("2".into()));
     assert_eq!(store.rollout_path_checked(&before.id).unwrap(), Some(path));
     insert_log(&logs, 3, "pid:101:second", None);
     insert_log(&logs, 4, "pid:101:second", Some(SESSION_A));
@@ -37,7 +38,7 @@ fn turn_observation_requires_a_selection_and_changes_when_the_process_restarts()
         .unwrap()
         .unwrap();
     assert_eq!(before.id, after.id);
-    assert_eq!(after.selection_epoch, Some(4));
+    assert_eq!(after.selection_key, Some("4".into()));
 }
 
 #[test]
@@ -269,9 +270,13 @@ fn temporary_title_thread_without_rollout_does_not_hide_the_interactive_thread()
     // A message merely quoting a diagnostic span is not lifecycle evidence.
     logs.execute(
         "UPDATE logs SET feedback_log_body=?1 WHERE id=4",
-        [format!("session_loop{{}}: user quoted {body}")],
+        [format!(
+            "session_loop{{thread_id={SESSION_B}}}: user quoted {body}"
+        )],
     )
     .unwrap();
+    logs.execute("UPDATE logs SET thread_id=?1 WHERE id=4", [SESSION_B])
+        .unwrap();
     assert_eq!(store.find_session_for_pid_checked(106, None).unwrap(), None);
     logs.execute(
         "UPDATE logs SET feedback_log_body=?1,process_uuid='pid:107:other' WHERE id=4",

@@ -1451,11 +1451,15 @@ WSL 세션 프로세스 probe는 환경과 PPID를 POSIX 셸 내장 `read`로 �
 
 Codex WSL 조회의 3초 deadline은 native 조회가 끝난 뒤 WSL process 탐색 직전에 시작한다. distro 탐색과 모든 WSL SQLite 조회가 이 예산을 공유하고, SQLite 도우미는 최대 4개씩 병렬 실행한다. native DB의 잠금·읽기 지연이 정상 WSL pane의 조회 시간을 소진하지 않는다. 각 조회 실패는 해당 terminal의 `Unknown`으로 남긴다.
 
-[ADR-0238](../adr/0238-codex-lifecycle-storage-checkpoint.md): Codex의 TUI thread/start·thread/resume 진단은 프로세스 incarnation에 결부된 현재 대화 선택 증거다. 새 대화 ID에 턴 입력·rollout이 없을 때만 `Fresh(provider, sessionId)`를 반환한다. 이중 관측에는 ID까지 포함하고 pane에는 `lastAgentFresh=codex`를 저장하여 다음 시작을 설정된 명령의 resume 없는 실행으로 만든다. WSL SQLite는 앱 옆에 동봉된 정적 Linux `laymux-wsl-codex-probe`가 해당 distro 안에서 읽기 전용 트랜잭션으로 조회한다. 도구는 PID·pane marker·프로세스 이름을 검증하고 기존 3초 예산 안에 JSON을 반환한다. Python·sqlite3 실행 파일·훅·사용자 패키지 설치는 필요 없다. 도구 누락·실행 실패·조회 오류는 Unknown이다. TUI 전환 증거가 없는 native 구버전은 아래 레거시 후보 검증을 유지하며 WSL은 미식별로 남는다.
+[ADR-0238](../adr/0238-codex-lifecycle-storage-checkpoint.md): Codex의 TUI thread/start·thread/resume 진단은 프로세스 incarnation에 결부된 현재 대화 선택 증거다. 새 대화 ID에 턴 입력·rollout이 없을 때만 `Fresh(provider, sessionId)`를 반환한다. 이중 관측에는 ID까지 포함하고 pane에는 `lastAgentFresh=codex`를 저장하여 다음 시작을 설정된 명령의 resume 없는 실행으로 만든다. WSL SQLite는 앱 옆에 동봉된 정적 Linux `laymux-wsl-codex-probe`가 해당 distro 안에서 읽기 전용 트랜잭션으로 조회한다. 도구는 PID·pane marker·프로세스 이름을 검증하고 기존 3초 예산 안에 JSON을 반환한다. Python·sqlite3 실행 파일·훅·사용자 패키지 설치는 필요 없다. 도구 누락·실행 실패·조회 오류는 Unknown이다. TUI 전환·loop 증거가 모두 없는 native 구버전은 아래 레거시 후보 검증을 유지하며 WSL은 미식별로 남는다.
+
+[ADR-0258](../adr/0258-codex-retained-loop-session-attribution.md): 선택 이후의 정확한 최상위 `Shutdown` 또는 루트 `Agent loop exited`는 그 선택을 폐기한다. 시작 기록이 대화별 정리로 사라졌으면 같은 process UUID에서 종료되지 않은 유일한 최상위 `session_loop` 후보를 정확한 rollout과 대조하여 복구한다. 폐기된 선택 이후의 loop만 후보가 된다. 이전 대화의 종료는 지연될 수 있으므로 그 종료 이후의 활동을 요구하지 않는다. 미완료 전환·복수 후보·미확인 파일은 복구를 차단하며 fresh를 합성하지 않는다. 살아 있는 명시적 선택은 늦은 이전 대화 활동보다 우선한다. native도 읽기 트랜잭션을 사용하며 WSL 도우미는 동일 트랜잭션의 `{process_uuid, rows}` 객체를 반환한다. 복구 선택 키는 process UUID·대화 ID에 결부되어 정리로 첫 행이 바뀌어도 안정적이다. TUI 전환·loop 증거가 모두 없는 native 구버전만 레거시 후보 검증을 사용한다.
 
 [ADR-0256](../adr/0256-codex-thread-settings-preserve-fresh.md): native·WSL 공통 lifecycle 판정은 `session_loop`의 정확한 대화 ID와 submission ID, 최상위 `op: ThreadSettings` 형식이 확인된 설정 변경을 턴 입력으로 세지 않는다. 모델만 바꾼 새 대화는 rollout이 없으면 fresh를 유지한다. 실제 입력·중단·종료·미확인 loop 기록은 기존처럼 fresh 자격을 취소하며, 이후 설정 변경으로 되살리지 않는다. resume와 rollout 손상·만료·중복 판정도 그대로다.
 
 Windows 빌드 전에 Linux/WSL에서 `bash scripts/build-wsl-probe.sh`를 실행한다(Rust/C 컴파일러와 readelf는 개발·CI 의존성뿐이다). `tools/wsl-codex-probe`는 기존 bundled rusqlite를 사용하며 CRT도 정적 링크한다. 스크립트는 ELF의 interpreter/NEEDED 부재를 검사하고 `src-tauri/gen/wsl/`에 스테이징한다. Windows build.rs는 도구 부재를 실패시키고 실행 파일 옆에 복사하며 NSIS resources도 같은 파일을 동봉한다. release workflow는 같은 commit의 Linux 빌드 artifact를 Windows job에 전달한다. 사용자 WSL의 PATH에서 도구를 찾거나 실행 중 다운로드하지 않는다.
+
+부모 `session_loop` 안의 subagent 초기화 행은 DB의 thread ID가 자식일 수 있다. 부모 span과 열이 다르면 자식의 정확한 rollout header로 보조 역할을 검증한 행만 제외한다. 이 역할 확인에는 복원 나이 제한을 적용하지 않고, 한 snapshot에서 같은 보조 ID는 한 번만 검증한다. 파일이 없거나 손상되었거나 다른 최상위 대화라면 불일치를 숨기지 않는다. ID가 일치하는 일반 loop 후보도 보조 역할을 나이 제한 없이 확인하여 제외한 뒤, 복원할 최상위 후보에만 기존 나이 제한을 적용한다.
 
 레거시 native Codex 후보는 정확한 rollout header 또는 같은 process UUID의 temporary-structured 진단으로 보조 스레드임이 증명된 경우만 건너뛴다. 새 후보의 rollout 누락·만료·손상·경로 중복은 이전 대화로 fallback하지 않는다. lifecycle 선택 경로에서는 늦게 도착한 이전 요청의 로그가 현재 선택을 되돌리지 않도록 요청별 첫 관측 순서를 사용한다. 일반 메시지에 인용된 span과 teardown 로그는 선택 완료 증거가 아니다.
 

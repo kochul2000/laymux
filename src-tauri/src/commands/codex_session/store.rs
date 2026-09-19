@@ -7,6 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 
 mod diagnostics;
+mod retained;
 use diagnostics::{
     find_process_thread_ids_checked, find_process_uuid_checked, is_temporary_thread_checked,
 };
@@ -27,7 +28,7 @@ pub(super) struct CodexSessionStore {
 pub(super) struct ResolvedSession {
     pub id: String,
     pub fresh: bool,
-    pub selection_epoch: Option<i64>,
+    pub selection_key: Option<String>,
 }
 
 impl CodexSessionStore {
@@ -94,13 +95,21 @@ impl CodexSessionStore {
         else {
             return Ok(None);
         };
-        let logs = open_read_only_checked(&logs_path)?;
+        let mut connection = open_read_only_checked(&logs_path)?;
+        let logs = connection.transaction().map_err(|e| e.to_string())?;
         let Some((process_uuid, first_log_id)) = find_process_uuid_checked(&logs, pid)? else {
             return Ok(None);
         };
         let rows = read_lifecycle_rows(&logs, &process_uuid, first_log_id)?;
-        if let Some(selection) = super::lifecycle::select(&rows) {
-            return self.resolve_selection(selection, max_age_hours);
+        if super::lifecycle::select(&rows).is_some()
+            || rows
+                .iter()
+                .any(|r| r.feedback_log_body.starts_with("session_loop{"))
+        {
+            return self.resolve_process_rows(
+                &super::lifecycle::ProcessRows { process_uuid, rows },
+                max_age_hours,
+            );
         }
         for thread_id in find_process_thread_ids_checked(&logs, &process_uuid, first_log_id)? {
             if is_temporary_thread_checked(&logs, &process_uuid, first_log_id, &thread_id)? {
@@ -111,7 +120,7 @@ impl CodexSessionStore {
                     return Ok(Some(ResolvedSession {
                         id: thread_id,
                         fresh: false,
-                        selection_epoch: None,
+                        selection_key: None,
                     }))
                 }
                 // Only a positively identified auxiliary thread can be skipped.
@@ -135,7 +144,7 @@ impl CodexSessionStore {
                 return Ok(Some(ResolvedSession {
                     id,
                     fresh: false,
-                    selection_epoch: Some(selection.epoch),
+                    selection_key: Some(selection.epoch.to_string()),
                 }))
             }
             Some(false) => return Ok(None),
@@ -155,7 +164,7 @@ impl CodexSessionStore {
                 return Ok(Some(ResolvedSession {
                     id,
                     fresh: true,
-                    selection_epoch: Some(selection.epoch),
+                    selection_key: Some(selection.epoch.to_string()),
                 }));
             }
         }
