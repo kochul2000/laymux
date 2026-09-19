@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use super::{CodexSessionStore, ResolvedSession};
 use crate::commands::claude_session::is_valid_session_id;
@@ -10,8 +10,12 @@ struct LoopEvidence {
     closed: Option<i64>,
 }
 
-fn loops(rows: &[LogRow]) -> Result<BTreeMap<&str, LoopEvidence>, String> {
+fn loops<'a>(
+    store: &CodexSessionStore,
+    rows: &'a [LogRow],
+) -> Result<BTreeMap<&'a str, LoopEvidence>, String> {
     let mut evidence = BTreeMap::<&str, LoopEvidence>::new();
+    let mut auxiliary = HashSet::new();
     for row in rows {
         if !row.feedback_log_body.starts_with("session_loop{") {
             continue;
@@ -20,8 +24,24 @@ fn loops(rows: &[LogRow]) -> Result<BTreeMap<&str, LoopEvidence>, String> {
             .feedback_log_body
             .strip_prefix("session_loop{thread_id=")
             .and_then(|body| body.split_once('}').map(|(id, _)| id))
-            .filter(|id| is_valid_session_id(id) && row.thread_id.as_deref() == Some(id))
+            .filter(|id| is_valid_session_id(id))
             .ok_or("unverifiable Codex session-loop identity")?;
+        if row.thread_id.as_deref() != Some(id) {
+            let column = row
+                .thread_id
+                .as_deref()
+                .ok_or("Codex session-loop thread missing")?;
+            if !auxiliary.contains(column) {
+                // Nested subagent initialization carries the parent's outer
+                // loop span and the child's DB identity. It is not ownership
+                // evidence for either loop. Age cannot change an auxiliary role.
+                if store.validate_session_checked(column, None)? != Some(false) {
+                    return Err("unverifiable Codex session-loop identity mismatch".into());
+                }
+                auxiliary.insert(column);
+            }
+            continue;
+        }
         let entry = evidence.entry(id).or_default();
         entry.last = row.id;
         if row.feedback_log_body == format!("session_loop{{thread_id={id}}}: Agent loop exited")
@@ -47,7 +67,7 @@ impl CodexSessionStore {
             return Err("Codex process identity missing".into());
         }
         let selected = lifecycle::select(&process.rows);
-        let loops = loops(&process.rows)?;
+        let loops = loops(self, &process.rows)?;
         let mut boundary = None;
         if let Some(selection) = selected {
             let Some(id) = &selection.id else {

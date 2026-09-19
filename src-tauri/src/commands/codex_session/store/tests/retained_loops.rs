@@ -255,3 +255,57 @@ fn previous_thread_can_finish_shutdown_after_the_new_threads_quiet_completed_tur
         Some(SESSION_B)
     );
 }
+
+#[test]
+fn nested_subagent_initialization_does_not_poison_the_parent_loop() {
+    for explicit in [true, false] {
+        for guest in [true, false] {
+            let temp = tempfile::tempdir().unwrap();
+            let logs = create_logs_db(temp.path());
+            let process = "pid:101:current";
+            if explicit {
+                start(&logs, 1, process, SESSION_A);
+            }
+            activity(&logs, 2, process, SESSION_A, "TurnInput {}");
+            write_rollout(temp.path(), SESSION_A, ",\"source\":\"cli\"");
+            let child = write_rollout(
+                temp.path(),
+                SESSION_B,
+                ",\"source\":{\"subagent\":{\"thread_spawn\":{}}}",
+            );
+            append(&logs, 3, process, SESSION_B, format!("session_loop{{thread_id={SESSION_A}}}:submission_dispatch{{}}:turn{{thread.id={SESSION_A}}}:thread_spawn{{}}:session_init:apply_rollout_reconstruction{{thread_id={SESSION_B}}}: reconstructed"));
+            let store = if guest {
+                CodexSessionStore::for_guest(temp.path().into())
+            } else {
+                CodexSessionStore::new(temp.path().into(), temp.path().into())
+            };
+            let rows = super::super::super::lifecycle::ProcessRows {
+                process_uuid: process.into(),
+                rows: read_lifecycle_rows(&logs, process, 0).unwrap(),
+            };
+            assert_eq!(
+                store.resolve_process_rows(&rows, None).unwrap().unwrap().id,
+                SESSION_A,
+                "explicit={explicit} guest={guest}"
+            );
+            std::fs::File::options()
+                .write(true)
+                .open(&child)
+                .unwrap()
+                .set_modified(SystemTime::now() - Duration::from_secs(48 * 3600))
+                .unwrap();
+            assert_eq!(
+                store
+                    .resolve_process_rows(&rows, Some(24))
+                    .unwrap()
+                    .unwrap()
+                    .id,
+                SESSION_A
+            );
+            std::fs::remove_file(child).unwrap();
+            assert!(store.resolve_process_rows(&rows, None).is_err());
+            write_rollout(temp.path(), SESSION_B, ",\"source\":\"cli\"");
+            assert!(store.resolve_process_rows(&rows, None).is_err());
+        }
+    }
+}
