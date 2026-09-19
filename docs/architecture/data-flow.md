@@ -1459,7 +1459,7 @@ Codex WSL 조회의 3초 deadline은 native 조회가 끝난 뒤 WSL process 탐
 
 Windows 빌드 전에 Linux/WSL에서 `bash scripts/build-wsl-probe.sh`를 실행한다(Rust/C 컴파일러와 readelf는 개발·CI 의존성뿐이다). `tools/wsl-codex-probe`는 기존 bundled rusqlite를 사용하며 CRT도 정적 링크한다. 스크립트는 ELF의 interpreter/NEEDED 부재를 검사하고 `src-tauri/gen/wsl/`에 스테이징한다. Windows build.rs는 도구 부재를 실패시키고 실행 파일 옆에 복사하며 NSIS resources도 같은 파일을 동봉한다. release workflow는 같은 commit의 Linux 빌드 artifact를 Windows job에 전달한다. 사용자 WSL의 PATH에서 도구를 찾거나 실행 중 다운로드하지 않는다.
 
-부모 `session_loop` 안의 subagent 초기화 행은 DB의 thread ID가 자식일 수 있다. 부모 span과 열이 다르면 자식의 정확한 rollout header로 보조 역할을 검증한 행만 제외한다. 이 역할 확인에는 복원 나이 제한을 적용하지 않고, 한 snapshot에서 같은 보조 ID는 한 번만 검증한다. 파일이 없거나 손상되었거나 다른 최상위 대화라면 불일치를 숨기지 않는다.
+부모 `session_loop` 안의 subagent 초기화 행은 DB의 thread ID가 자식일 수 있다. 부모 span과 열이 다르면 자식의 정확한 rollout header로 보조 역할을 검증한 행만 제외한다. 이 역할 확인에는 복원 나이 제한을 적용하지 않고, 한 snapshot에서 같은 보조 ID는 한 번만 검증한다. 파일이 없거나 손상되었거나 다른 최상위 대화라면 불일치를 숨기지 않는다. ID가 일치하는 일반 loop 후보도 보조 역할을 나이 제한 없이 확인하여 제외한 뒤, 복원할 최상위 후보에만 기존 나이 제한을 적용한다.
 
 레거시 native Codex 후보는 정확한 rollout header 또는 같은 process UUID의 temporary-structured 진단으로 보조 스레드임이 증명된 경우만 건너뛴다. 새 후보의 rollout 누락·만료·손상·경로 중복은 이전 대화로 fallback하지 않는다. lifecycle 선택 경로에서는 늦게 도착한 이전 요청의 로그가 현재 선택을 되돌리지 않도록 요청별 첫 관측 순서를 사용한다. 일반 메시지에 인용된 span과 teardown 로그는 선택 완료 증거가 아니다.
 

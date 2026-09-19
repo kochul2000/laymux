@@ -309,3 +309,50 @@ fn nested_subagent_initialization_does_not_poison_the_parent_loop() {
         }
     }
 }
+
+#[test]
+fn expired_auxiliary_loops_do_not_block_a_current_top_level_conversation() {
+    for guest in [false, true] {
+        for source in [
+            ",\"source\":{\"subagent\":{\"thread_spawn\":{}}}",
+            ",\"source\":\"exec\"",
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            let logs = create_logs_db(temp.path());
+            let process = "pid:101:current";
+            activity(&logs, 1, process, SESSION_A, "TurnInput {}");
+            activity(&logs, 2, process, SESSION_B, "TurnInput {}");
+            let current = write_rollout(temp.path(), SESSION_A, ",\"source\":\"cli\"");
+            let auxiliary = write_rollout(temp.path(), SESSION_B, source);
+            let expire = |path| {
+                std::fs::File::options()
+                    .write(true)
+                    .open(path)
+                    .unwrap()
+                    .set_modified(SystemTime::now() - Duration::from_secs(48 * 3600))
+                    .unwrap();
+            };
+            expire(&auxiliary);
+            let store = if guest {
+                CodexSessionStore::for_guest(temp.path().into())
+            } else {
+                CodexSessionStore::new(temp.path().into(), temp.path().into())
+            };
+            let rows = super::super::super::lifecycle::ProcessRows {
+                process_uuid: process.into(),
+                rows: read_lifecycle_rows(&logs, process, 0).unwrap(),
+            };
+            let resolve = || {
+                if guest {
+                    store.resolve_process_rows(&rows, Some(24))
+                } else {
+                    store.find_selection_for_pid_checked(101, Some(24))
+                }
+                .unwrap()
+            };
+            assert_eq!(resolve().unwrap().id, SESSION_A, "guest={guest} {source}");
+            expire(&current);
+            assert!(resolve().is_none(), "expired top-level guest={guest}");
+        }
+    }
+}

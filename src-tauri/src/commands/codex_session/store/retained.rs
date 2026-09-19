@@ -91,10 +91,17 @@ impl CodexSessionStore {
             if evidence.closed.is_some() || boundary.is_some_and(|n| evidence.last <= n) {
                 continue;
             }
-            match self.validate_session_checked(id, age)? {
+            // An old auxiliary rollout still proves its role. Only a session
+            // that would actually be restored must pass the age restriction.
+            match self.validate_session_checked(id, None)? {
                 Some(false) => continue,
                 None => return Ok(None),
                 Some(true) => {
+                    if age.is_some_and(|hours| hours > 0)
+                        && self.validate_session_checked(id, age)? != Some(true)
+                    {
+                        return Ok(None);
+                    }
                     if candidate.is_some() {
                         return Ok(None);
                     }

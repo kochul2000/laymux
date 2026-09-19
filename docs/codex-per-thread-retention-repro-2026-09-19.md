@@ -29,6 +29,7 @@ release 19280은 변경하지 않았다. 격리 APPDATA·WebView·native/WSL Cod
 - 재시작 후 WSL에서 `/clear`한 빈 대화의 모델을 Sol에서 Astra로 변경했다. 입력 없이 `fresh/idle`을 유지했고 Windows 일반 셸과 함께 전체 critical checkpoint가 성공했다.
 - 1차 독립 리뷰가 찾은 `Shutdown` 행 소실 뒤 `Agent loop exited`만 남는 경로는 실패 테스트를 먼저 확인하고 수정했다. 실기에서 발견한 이전 대화의 지연 종료 역시 실패 테스트 후 수정했다. 이전 종료 시각보다 새 대화의 마지막 활동이 앞서도 복구한다.
 - 최종 사용자 프로세스 재조회에서 부모 loop 안의 subagent 초기화 행이 부모 ID와 자식 DB ID의 불일치로 `Unknown`이 되는 회귀를 발견했다. 2차 리뷰도 P1으로 확인했다. 정확한 자식 rollout으로 보조 역할이 확인된 행만 제외하도록 수정한 뒤 동일 실제 프로세스 두 개의 귀속을 두 번 다시 통과했다. native/guest·명시 선택/초기화 정리·오래된 보조 파일 및 누락/최상위 파일을 교차한 실패 테스트를 먼저 추가했다.
+- P1 수정 뒤 새 리뷰어의 3차 전체 리뷰에서는 P1이 없었으며, ID가 일치하는 오래된 보조 loop가 복구를 막는 P2를 발견했다. native/guest와 subagent/exec 각각에서 실패를 확인하고, 역할 확인과 최상위 복원 나이 제한을 분리해 수정했다. 보조 파일이 오래되어도 현재 대화를 복구하며, 최상위 대화 자체가 만료된 경우에는 계속 거부한다.
 
 ## 회귀 범위
 
@@ -36,4 +37,4 @@ native/guest 공통 판정으로 대화별 1,000행 정리·두 PID의 다른 �
 
 현재 증거가 모호한 경우의 거부와 업데이트 barrier는 유지한다. 이 기록은 위 실제 조건의 수정 검증이며 모든 Codex 내부 진단 형식에 대한 보증은 아니다. 진단 원문과 인증 파일은 커밋하지 않는다.
 
-검증 명령은 `cargo test --manifest-path src-tauri/Cargo.toml --lib codex_session`(50개), `--lib session_attribution`(19개 통과·실기 전용 3개 기본 제외), `cargo test -p laymux-wsl-codex-probe`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo build --manifest-path src-tauri/Cargo.toml --bin laymux`다. Windows UI에서는 persist-session·terminal-store·terminal-task·useSyncEvents·codex-turn-subscription·codex-activity-handler 6개 파일의 245개 테스트와 `npm run build`를 통과했다. Linux 정적 WSL 도우미를 다시 빌드하고 dev 실행 파일 옆의 SHA-256이 스테이징 산출물과 일치함을 확인했다.
+검증 명령은 `cargo test --manifest-path src-tauri/Cargo.toml --lib codex_session`(51개), `--lib session_attribution`(19개 통과·실기 전용 3개 기본 제외), `cargo test -p laymux-wsl-codex-probe`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo build --manifest-path src-tauri/Cargo.toml --bin laymux`다. Windows UI에서는 persist-session·terminal-store·terminal-task·useSyncEvents·codex-turn-subscription·codex-activity-handler 6개 파일의 245개 테스트와 `npm run build`를 통과했다. Linux 정적 WSL 도우미를 다시 빌드하고 dev 실행 파일 옆의 SHA-256이 스테이징 산출물과 일치함을 확인했다.
