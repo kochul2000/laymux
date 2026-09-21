@@ -390,7 +390,7 @@ export function AppLayout() {
           testIdPrefix="settings-modal"
           title="Settings"
           onClose={closeSettingsModal}
-          size="w-[780px] h-[85vh]"
+          size="settings-modal"
         >
           <div className="min-h-0 flex-1">
             <SettingsView />

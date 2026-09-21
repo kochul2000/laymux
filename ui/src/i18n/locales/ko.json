@@ -408,7 +408,10 @@
       "paneClearInterruptRounds": "Ctrl+C 전송 횟수",
       "paneClearInterruptRoundsDesc": "클리어 전에 Ctrl+C를 몇 번 보낼지 정합니다 (1~10).",
       "paneClearSettle": "대기 시간 (ms)",
-      "paneClearSettleDesc": "마지막 Ctrl+C 이후 클리어 입력을 제출하기까지 기다리는 시간입니다 (0~10000)."
+      "paneClearSettleDesc": "마지막 Ctrl+C 이후 클리어 입력을 제출하기까지 기다리는 시간입니다 (0~10000).",
+      "groupGeneral": "일반",
+      "groupComposer": "입력칸(Composer)",
+      "groupScroll": "복사·스크롤"
     },
     "interface": {
       "title": "인터페이스",
@@ -707,7 +710,9 @@
       "changeShortcut": "단축키를 변경하려면 클릭",
       "actionPlaceholder": "action.name",
       "addBinding": "+ 새 바인딩 추가",
-      "unassigned": "미할당"
+      "unassigned": "미할당",
+      "customGroup": "사용자 정의",
+      "customEmpty": "사용자 정의 바인딩이 없습니다."
     },
     "recovery": {
       "pathUnavailable": "(경로를 가져올 수 없습니다)",

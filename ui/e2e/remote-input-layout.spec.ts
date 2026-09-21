@@ -556,7 +556,7 @@ test.describe("Remote input action layout", () => {
     // Input bar first, everything else out of the layout — that is the point of
     // paginating: one subject at a time instead of one long scroll.
     await expect(page.locator("#settingsPanelInputBar")).toBeVisible();
-    for (const panel of ["composer", "display", "app"]) {
+    for (const panel of ["floating", "composer", "display", "panels", "app"]) {
       await expect(
         page.locator(`#drawerSettingsView [data-settings-panel="${panel}"].settings-panel`),
       ).toBeHidden();
@@ -572,6 +572,10 @@ test.describe("Remote input action layout", () => {
 
     // Roving tabindex: arrows move within the tablist.
     await displayTab.press("ArrowRight");
+    await expect(page.locator("#settingsPanelPanels")).toBeVisible();
+    const panelsTab = page.locator('#settingsTabs [data-settings-panel="panels"]');
+    await expect(panelsTab).toBeFocused();
+    await panelsTab.press("ArrowRight");
     await expect(page.locator("#settingsPanelApp")).toBeVisible();
     await expect(page.locator('#settingsTabs [data-settings-panel="app"]')).toBeFocused();
 

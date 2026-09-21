@@ -103,6 +103,15 @@ import { FocusInput, FocusSelect } from "@/components/ui/FormControls";
 import { inputCls, inputStyle } from "@/components/ui/form-control-styles";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { WidgetsSectionBody } from "./settings/WidgetsSection";
+import { SettingsNavigation } from "./settings/SettingsNavigation";
+import {
+  SettingsField,
+  SettingsGroup,
+  SettingsInlineFields,
+  SettingsMiniField,
+  SettingsPageTitle,
+  SettingsToggleField,
+} from "./settings/SettingsLayout";
 import { useRemoteAccessStore } from "@/stores/remote-access-store";
 import {
   appendAllowedIps,
@@ -124,75 +133,7 @@ import {
 } from "@/lib/scroll-sensitivity";
 import { useRemoteHostOptions } from "@/hooks/useRemoteHostOptions";
 
-const cardStyle: React.CSSProperties = {
-  background: "var(--bg-surface)",
-  border: "1px solid var(--border)",
-};
-
 // -- Sub-components --
-
-function SettingRow({
-  label,
-  desc,
-  children,
-}: {
-  label: string;
-  desc?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="settings-row">
-      <div className="settings-row-label">
-        <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-          {label}
-        </span>
-        {desc && (
-          <p
-            className="mt-1 text-[13px] leading-relaxed"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            {desc}
-          </p>
-        )}
-      </div>
-      <div className="min-w-0 flex-1">{children}</div>
-    </div>
-  );
-}
-
-/** Sidebar group header (e.g. "Appearance", "Terminal"). */
-function NavGroupHeader({ label, children }: { label: string; children?: React.ReactNode }) {
-  return (
-    <div className="settings-nav-heading">
-      <h3>{label}</h3>
-      <span className="settings-nav-divider" aria-hidden="true" />
-      {children}
-    </div>
-  );
-}
-
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return (
-    <h3
-      className="mb-4 border-b pb-3 text-lg font-semibold"
-      style={{ borderColor: "var(--border)", color: "var(--text-primary)" }}
-    >
-      {children}
-    </h3>
-  );
-}
-
-/** Card wrapper grouping related fields under an uppercase sub-header within a section. */
-function SubGroup({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div style={cardStyle} className="mt-3 p-4">
-      <h3 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-secondary)" }}>
-        {title}
-      </h3>
-      {children}
-    </div>
-  );
-}
 
 function ColorSwatch({
   color,
@@ -359,11 +300,11 @@ function UpdateSection() {
   }, [available, settleExplicitUpdateAction, t]);
 
   return (
-    <div>
-      <SectionTitle>{t("update.title")}</SectionTitle>
+    <div className="settings-page">
+      <SettingsPageTitle>{t("update.title")}</SettingsPageTitle>
 
-      <SubGroup title={t("update.groupVersion")}>
-        <SettingRow label={t("update.currentVersion")}>
+      <SettingsGroup title={t("update.groupVersion")}>
+        <SettingsField label={t("update.currentVersion")}>
           <div className="flex flex-wrap items-center gap-2">
             <span
               data-testid="update-current-version"
@@ -380,9 +321,9 @@ function UpdateSection() {
               {status?.channel === "beta" ? t("update.channelBeta") : t("update.channelStable")}
             </span>
           </div>
-        </SettingRow>
+        </SettingsField>
 
-        <SettingRow label={t("update.releasePage")}>
+        <SettingsField label={t("update.releasePage")}>
           <div className="flex flex-wrap items-center gap-3">
             <Button
               data-testid="update-open-current-release"
@@ -405,11 +346,11 @@ function UpdateSection() {
               {t("update.openReleases")}
             </Button>
           </div>
-        </SettingRow>
-      </SubGroup>
+        </SettingsField>
+      </SettingsGroup>
 
-      <SubGroup title={t("update.groupChannel")}>
-        <SettingRow label={t("update.channel")} desc={t("update.channelDesc")}>
+      <SettingsGroup title={t("update.groupChannel")}>
+        <SettingsField label={t("update.channel")} desc={t("update.channelDesc")}>
           <FocusSelect
             data-testid="update-channel-select"
             className={inputCls}
@@ -419,7 +360,7 @@ function UpdateSection() {
             <option value="stable">{t("update.channelStable")}</option>
             <option value="beta">{t("update.channelBeta")}</option>
           </FocusSelect>
-        </SettingRow>
+        </SettingsField>
         {update.channel === "beta" && (
           <p
             data-testid="update-channel-beta-warning"
@@ -429,10 +370,10 @@ function UpdateSection() {
             {t("update.channelBetaWarning")}
           </p>
         )}
-      </SubGroup>
+      </SettingsGroup>
 
-      <SubGroup title={t("update.groupCheck")}>
-        <SettingRow label={t("update.manualCheck")} desc={t("update.checkNowDesc")}>
+      <SettingsGroup title={t("update.groupCheck")}>
+        <SettingsField label={t("update.manualCheck")} desc={t("update.checkNowDesc")}>
           <div className="flex flex-wrap items-center gap-3">
             <Button
               variant="primary"
@@ -454,7 +395,7 @@ function UpdateSection() {
               {checkedAt ? t("update.checkedAt", { at: checkedAt }) : t("update.neverChecked")}
             </span>
           </div>
-        </SettingRow>
+        </SettingsField>
 
         {status && !status.enabled && (
           <p
@@ -536,7 +477,7 @@ function UpdateSection() {
             {error}
           </p>
         )}
-      </SubGroup>
+      </SettingsGroup>
     </div>
   );
 }
@@ -564,11 +505,11 @@ function StartupSection() {
   );
 
   return (
-    <div>
-      <SectionTitle>{t("settings:startup.title")}</SectionTitle>
+    <div className="settings-page">
+      <SettingsPageTitle>{t("settings:startup.title")}</SettingsPageTitle>
 
-      <div style={cardStyle} className="p-4">
-        <SettingRow
+      <SettingsGroup>
+        <SettingsField
           label={t("settings:startup.language.title")}
           desc={t("settings:startup.language.description")}
         >
@@ -585,8 +526,8 @@ function StartupSection() {
               </option>
             ))}
           </FocusSelect>
-        </SettingRow>
-        <SettingRow label={t("startup.appTheme.title")} desc={t("startup.appTheme.description")}>
+        </SettingsField>
+        <SettingsField label={t("startup.appTheme.title")} desc={t("startup.appTheme.description")}>
           <FocusSelect
             data-testid="app-theme-select"
             aria-label={t("startup.appTheme.title")}
@@ -600,8 +541,8 @@ function StartupSection() {
               </option>
             ))}
           </FocusSelect>
-        </SettingRow>
-        <SettingRow
+        </SettingsField>
+        <SettingsField
           label={t("startup.defaultProfile.title")}
           desc={t("startup.defaultProfile.description")}
         >
@@ -620,8 +561,8 @@ function StartupSection() {
                 </option>
               ))}
           </FocusSelect>
-        </SettingRow>
-      </div>
+        </SettingsField>
+      </SettingsGroup>
     </div>
   );
 }
@@ -642,50 +583,40 @@ function FontSection() {
   );
 
   return (
-    <div>
-      <SectionTitle>{t("font.sectionTitle")}</SectionTitle>
+    <div className="settings-page">
+      <SettingsPageTitle>{t("font.sectionTitle")}</SettingsPageTitle>
 
       {/* Interface (chrome) font — view titles, buttons, lists, workspace selector.
           Family only; same dropdown widget as the base font. "" = built-in default. */}
-      <div style={cardStyle} className="mb-3">
-        <div className="px-4 py-2">
-          <h4 className="mb-1 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-            {t("font.uiFontTitle")}
-          </h4>
-          <p className="mb-2 text-[13px]" style={{ color: "var(--text-secondary)" }}>
-            {t("font.uiFontDescription")}
-          </p>
-          <SettingRow label={t("font.face")} desc={t("font.uiFontFaceDesc")}>
-            <FocusSelect
-              data-testid="ui-font-family-input"
-              value={draftUiFont}
-              onChange={(e) => setDraftUiFont(e.target.value)}
-              className={inputCls}
-            >
-              <option value="">{t("font.uiFontDefaultOption")}</option>
-              {draftUiFont && !monoFonts.includes(draftUiFont) && (
-                <option value={draftUiFont}>{draftUiFont}</option>
-              )}
-              {monoFonts.map((f) => (
-                <option key={f} value={f}>
-                  {f}
-                </option>
-              ))}
-            </FocusSelect>
-          </SettingRow>
-        </div>
-      </div>
+      <SettingsGroup title={t("font.uiFontTitle")} description={t("font.uiFontDescription")}>
+        <SettingsField label={t("font.face")} desc={t("font.uiFontFaceDesc")}>
+          <FocusSelect
+            data-testid="ui-font-family-input"
+            value={draftUiFont}
+            onChange={(e) => setDraftUiFont(e.target.value)}
+            className={inputCls}
+          >
+            <option value="">{t("font.uiFontDefaultOption")}</option>
+            {draftUiFont && !monoFonts.includes(draftUiFont) && (
+              <option value={draftUiFont}>{draftUiFont}</option>
+            )}
+            {monoFonts.map((f) => (
+              <option key={f} value={f}>
+                {f}
+              </option>
+            ))}
+          </FocusSelect>
+        </SettingsField>
+      </SettingsGroup>
 
       {/* Base font — default for non-terminal text views (Memo, Issue Reporter, …). */}
-      <p className="mb-3 mt-4 text-[13px]" style={{ color: "var(--text-secondary)" }}>
-        {t("font.appFontDescription")}
-      </p>
       <FontFields
         font={draftFont}
         onChange={setDraftFont}
         monoFonts={monoFonts}
         faceDesc={t("font.faceDescDefault")}
         cardTitle={t("font.baseFontTitle")}
+        description={t("font.appFontDescription")}
       />
     </div>
   );
@@ -699,6 +630,7 @@ function FontFields({
   monoFonts,
   faceDesc,
   cardTitle,
+  description,
 }: {
   font: FontSettings;
   onChange: (font: FontSettings) => void;
@@ -708,6 +640,7 @@ function FontFields({
   faceDesc?: string;
   /** Override the card heading. Defaults to the generic "Font" label. */
   cardTitle?: string;
+  description?: string;
 }) {
   const { t } = useTranslation("settings");
   const isDefault = defaults && JSON.stringify(font) === JSON.stringify(defaults);
@@ -729,57 +662,53 @@ function FontFields({
     ) : null;
 
   return (
-    <div style={cardStyle} className="mb-3">
-      <div className="px-4 py-2">
-        <div className="flex items-center gap-2 mb-2">
-          <h4 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-            {cardTitle ?? t("font.cardTitle")}
-          </h4>
-          {resetBtn}
-        </div>
-        <SettingRow label={t("font.face")} desc={faceDesc ?? t("font.faceDescTerminal")}>
-          <FocusSelect
-            data-testid="font-face-input"
-            value={font.face}
-            onChange={(e) => onChange({ ...font, face: e.target.value })}
-            className={inputCls}
-          >
-            {!monoFonts.includes(font.face) && <option value={font.face}>{font.face}</option>}
-            {monoFonts.map((f) => (
-              <option key={f} value={f}>
-                {f}
-              </option>
-            ))}
-          </FocusSelect>
-        </SettingRow>
-        <SettingRow label={t("font.size")} desc={t("font.sizeDesc")}>
-          <FocusInput
-            data-testid="font-size-input"
-            type="number"
-            value={font.size}
-            onChange={(e) => onChange({ ...font, size: parseInt(e.target.value) || 14 })}
-            className="w-24 rounded px-2 py-1.5 text-xs"
-            min={6}
-            max={72}
-          />
-        </SettingRow>
-        <SettingRow label={t("font.weight")}>
-          <select
-            data-testid="font-weight-select"
-            value={font.weight}
-            onChange={(e) => onChange({ ...font, weight: e.target.value })}
-            className={inputCls}
-            style={inputStyle}
-          >
-            {fontWeightOptions.map((w) => (
-              <option key={w} value={w}>
-                {w.charAt(0).toUpperCase() + w.slice(1)}
-              </option>
-            ))}
-          </select>
-        </SettingRow>
-      </div>
-    </div>
+    <SettingsGroup
+      title={cardTitle ?? t("font.cardTitle")}
+      description={description}
+      actions={resetBtn}
+    >
+      <SettingsField label={t("font.face")} desc={faceDesc ?? t("font.faceDescTerminal")}>
+        <FocusSelect
+          data-testid="font-face-input"
+          value={font.face}
+          onChange={(e) => onChange({ ...font, face: e.target.value })}
+          className={inputCls}
+        >
+          {!monoFonts.includes(font.face) && <option value={font.face}>{font.face}</option>}
+          {monoFonts.map((f) => (
+            <option key={f} value={f}>
+              {f}
+            </option>
+          ))}
+        </FocusSelect>
+      </SettingsField>
+      <SettingsField label={t("font.size")} desc={t("font.sizeDesc")}>
+        <FocusInput
+          data-testid="font-size-input"
+          type="number"
+          value={font.size}
+          onChange={(e) => onChange({ ...font, size: parseInt(e.target.value) || 14 })}
+          className="w-24 rounded px-2 py-1.5 text-xs"
+          min={6}
+          max={72}
+        />
+      </SettingsField>
+      <SettingsField label={t("font.weight")}>
+        <select
+          data-testid="font-weight-select"
+          value={font.weight}
+          onChange={(e) => onChange({ ...font, weight: e.target.value })}
+          className={inputCls}
+          style={inputStyle}
+        >
+          {fontWeightOptions.map((w) => (
+            <option key={w} value={w}>
+              {w.charAt(0).toUpperCase() + w.slice(1)}
+            </option>
+          ))}
+        </select>
+      </SettingsField>
+    </SettingsGroup>
   );
 }
 
@@ -822,81 +751,68 @@ function AppearanceFields({
 
   return (
     <>
-      <div style={cardStyle} className="mb-3">
-        <div className="px-4 py-2">
-          <h4 className="mb-2 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-            {t("appearance.title")}
-          </h4>
-          <SettingRow label={t("appearance.colorScheme")}>
-            <div className="flex items-center">
-              <select
-                value={data.colorScheme}
-                onChange={(e) => onChange({ colorScheme: e.target.value })}
-                className={inputCls}
-                style={inputStyle}
-              >
-                <option value="">{t("appearance.colorSchemeDefault")}</option>
-                {colorSchemes.map((cs) => (
-                  <option key={cs.name} value={cs.name}>
-                    {cs.name}
-                  </option>
-                ))}
-              </select>
-              {resetBtn("colorScheme")}
-            </div>
-          </SettingRow>
-          <SettingRow label={t("appearance.opacity")}>
-            <div className="flex items-center gap-2">
-              <input
-                type="range"
-                min={10}
-                max={100}
-                value={data.opacity}
-                onChange={(e) => onChange({ opacity: parseInt(e.target.value) })}
-                className="flex-1"
-              />
-              <span className="w-8 text-right text-xs" style={{ color: "var(--text-secondary)" }}>
-                {data.opacity}%
-              </span>
-              {resetBtn("opacity")}
-            </div>
-          </SettingRow>
-        </div>
-      </div>
+      <SettingsGroup title={t("appearance.title")}>
+        <SettingsField label={t("appearance.colorScheme")}>
+          <div className="flex items-center">
+            <select
+              value={data.colorScheme}
+              onChange={(e) => onChange({ colorScheme: e.target.value })}
+              className={inputCls}
+              style={inputStyle}
+            >
+              <option value="">{t("appearance.colorSchemeDefault")}</option>
+              {colorSchemes.map((cs) => (
+                <option key={cs.name} value={cs.name}>
+                  {cs.name}
+                </option>
+              ))}
+            </select>
+            {resetBtn("colorScheme")}
+          </div>
+        </SettingsField>
+        <SettingsField label={t("appearance.opacity")}>
+          <div className="flex items-center gap-2">
+            <input
+              type="range"
+              min={10}
+              max={100}
+              value={data.opacity}
+              onChange={(e) => onChange({ opacity: parseInt(e.target.value) })}
+              className="flex-1"
+            />
+            <span className="w-8 text-right text-xs" style={{ color: "var(--text-secondary)" }}>
+              {data.opacity}%
+            </span>
+            {resetBtn("opacity")}
+          </div>
+        </SettingsField>
+      </SettingsGroup>
 
       {/* Padding */}
-      <div style={cardStyle} className="mb-3">
-        <div className="px-4 py-2">
-          <div className="flex items-center gap-2 mb-2">
-            <h4 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-              {t("appearance.padding")}
-            </h4>
-            {resetBtn("padding")}
-          </div>
-          <div className="grid grid-cols-2 gap-x-6 gap-y-1">
-            {(["top", "right", "bottom", "left"] as const).map((side) => (
-              <SettingRow key={side} label={t(`appearance.${side}`)}>
-                <input
-                  type="number"
-                  value={data.padding[side]}
-                  onChange={(e) =>
-                    onChange({
-                      padding: {
-                        ...data.padding,
-                        [side]: Math.max(0, parseInt(e.target.value) || 0),
-                      },
-                    })
-                  }
-                  className="w-20 rounded px-2 py-1.5 text-xs"
-                  style={inputStyle}
-                  min={0}
-                  max={100}
-                />
-              </SettingRow>
-            ))}
-          </div>
-        </div>
-      </div>
+      <SettingsGroup title={t("appearance.padding")} actions={resetBtn("padding")}>
+        <SettingsInlineFields>
+          {(["top", "right", "bottom", "left"] as const).map((side) => (
+            <SettingsMiniField key={side} label={t(`appearance.${side}`)}>
+              <input
+                type="number"
+                value={data.padding[side]}
+                onChange={(e) =>
+                  onChange({
+                    padding: {
+                      ...data.padding,
+                      [side]: Math.max(0, parseInt(e.target.value) || 0),
+                    },
+                  })
+                }
+                className="w-20 rounded px-2 py-1.5 text-xs"
+                style={inputStyle}
+                min={0}
+                max={100}
+              />
+            </SettingsMiniField>
+          ))}
+        </SettingsInlineFields>
+      </SettingsGroup>
     </>
   );
 }
@@ -934,64 +850,42 @@ function CursorFields({
     ) : null;
 
   return (
-    <div style={cardStyle} className="mb-3">
-      <div className="px-4 py-2">
-        <h4 className="mb-2 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-          {t("cursor.title")}
-        </h4>
-        <SettingRow label={t("cursor.shape")}>
-          <div className="flex items-center">
-            <select
-              data-testid="cursor-shape-select"
-              value={supportedCursorShape}
-              onChange={(e) => onChange({ cursorShape: e.target.value as CursorShape })}
-              className={inputCls}
-              style={inputStyle}
-            >
-              <option value="bar">{t("cursor.shapeBar")}</option>
-              <option value="underscore">{t("cursor.shapeUnderscore")}</option>
-              <option value="filledBox">{t("cursor.shapeFilledBox")}</option>
-            </select>
-            {resetBtn("cursorShape")}
-          </div>
-        </SettingRow>
-        <SettingRow label={t("cursor.blink")}>
-          <div className="flex items-center gap-2">
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                data-testid="cursor-blink-toggle"
-                type="checkbox"
-                checked={data.cursorBlink}
-                onChange={(e) => onChange({ cursorBlink: e.target.checked })}
-              />
-              <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-                {t("cursor.blinkEnable")}
-              </span>
-            </label>
-            {resetBtn("cursorBlink")}
-          </div>
-        </SettingRow>
-        <SettingRow label={t("cursor.stability")} desc={t("cursor.stabilityDesc")}>
-          <div className="flex items-center gap-2">
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                data-testid="stabilize-interactive-cursor-toggle"
-                type="checkbox"
-                checked={data.stabilizeInteractiveCursor}
-                onChange={(e) => onChange({ stabilizeInteractiveCursor: e.target.checked })}
-              />
-              <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-                {t("cursor.stabilityEnable")}
-              </span>
-            </label>
-            {resetBtn("stabilizeInteractiveCursor")}
-          </div>
-        </SettingRow>
-        <p className="mt-1 text-[13px]" style={{ color: "var(--text-secondary)" }}>
-          {t("cursor.applyNote")}
-        </p>
-      </div>
-    </div>
+    <SettingsGroup title={t("cursor.title")}>
+      <SettingsField label={t("cursor.shape")}>
+        <div className="flex items-center">
+          <select
+            data-testid="cursor-shape-select"
+            value={supportedCursorShape}
+            onChange={(e) => onChange({ cursorShape: e.target.value as CursorShape })}
+            className={inputCls}
+            style={inputStyle}
+          >
+            <option value="bar">{t("cursor.shapeBar")}</option>
+            <option value="underscore">{t("cursor.shapeUnderscore")}</option>
+            <option value="filledBox">{t("cursor.shapeFilledBox")}</option>
+          </select>
+          {resetBtn("cursorShape")}
+        </div>
+      </SettingsField>
+      <SettingsToggleField
+        label={t("cursor.blink")}
+        testId="cursor-blink-toggle"
+        checked={data.cursorBlink}
+        onChange={(v) => onChange({ cursorBlink: v })}
+        trailing={resetBtn("cursorBlink")}
+      />
+      <SettingsToggleField
+        label={t("cursor.stability")}
+        desc={t("cursor.stabilityDesc")}
+        testId="stabilize-interactive-cursor-toggle"
+        checked={data.stabilizeInteractiveCursor}
+        onChange={(v) => onChange({ stabilizeInteractiveCursor: v })}
+        trailing={resetBtn("stabilizeInteractiveCursor")}
+      />
+      <p className="mt-1 text-[13px]" style={{ color: "var(--text-secondary)" }}>
+        {t("cursor.applyNote")}
+      </p>
+    </SettingsGroup>
   );
 }
 
@@ -1063,12 +957,12 @@ function AdvancedFields({
     ) : null;
 
   return (
-    <div style={cardStyle}>
-      <div className="px-4 py-2">
-        <h4 className="mb-2 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-          {t("advanced.title")}
-        </h4>
-        <SettingRow label={t("advanced.scrollbackLines")} desc={t("advanced.scrollbackLinesDesc")}>
+    <>
+      <SettingsGroup title={t("advanced.title")}>
+        <SettingsField
+          label={t("advanced.scrollbackLines")}
+          desc={t("advanced.scrollbackLinesDesc")}
+        >
           <div className="flex items-center">
             <input
               type="number"
@@ -1083,8 +977,8 @@ function AdvancedFields({
             />
             {resetBtn("scrollbackLines")}
           </div>
-        </SettingRow>
-        <SettingRow label={t("advanced.bellStyle")} desc={t("advanced.bellStyleDesc")}>
+        </SettingsField>
+        <SettingsField label={t("advanced.bellStyle")} desc={t("advanced.bellStyleDesc")}>
           <div className="flex items-center">
             <select
               value={data.bellStyle}
@@ -1100,8 +994,8 @@ function AdvancedFields({
             </select>
             {resetBtn("bellStyle")}
           </div>
-        </SettingRow>
-        <SettingRow label={t("advanced.closeOnExit")} desc={t("advanced.closeOnExitDesc")}>
+        </SettingsField>
+        <SettingsField label={t("advanced.closeOnExit")} desc={t("advanced.closeOnExitDesc")}>
           <div className="flex items-center">
             <select
               value={data.closeOnExit}
@@ -1116,8 +1010,8 @@ function AdvancedFields({
             </select>
             {resetBtn("closeOnExit")}
           </div>
-        </SettingRow>
-        <SettingRow label={t("advanced.antialiasing")} desc={t("advanced.antialiasingDesc")}>
+        </SettingsField>
+        <SettingsField label={t("advanced.antialiasing")} desc={t("advanced.antialiasingDesc")}>
           <div className="flex items-center">
             <select
               value={data.antialiasingMode}
@@ -1131,78 +1025,42 @@ function AdvancedFields({
             </select>
             {resetBtn("antialiasingMode")}
           </div>
-        </SettingRow>
-        <SettingRow label={t("advanced.suppressTitle")}>
-          <div className="flex items-center gap-2">
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                checked={data.suppressApplicationTitle}
-                onChange={(e) => onChange({ suppressApplicationTitle: e.target.checked })}
-              />
-              <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                {t("advanced.suppressTitleDesc")}
-              </span>
-            </label>
-            {resetBtn("suppressApplicationTitle")}
-          </div>
-        </SettingRow>
-        <SettingRow label={t("advanced.snapOnInput")}>
-          <div className="flex items-center gap-2">
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                checked={data.snapOnInput}
-                onChange={(e) => onChange({ snapOnInput: e.target.checked })}
-              />
-              <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                {t("advanced.snapOnInputDesc")}
-              </span>
-            </label>
-            {resetBtn("snapOnInput")}
-          </div>
-        </SettingRow>
-
-        <h4 className="mb-2 mt-4 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-          {t("advanced.sessionRestore")}
-        </h4>
-        <SettingRow label={t("advanced.restoreCwd")} desc={t("advanced.restoreCwdDesc")}>
-          <div className="flex items-center gap-2">
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                data-testid="restore-cwd-checkbox"
-                type="checkbox"
-                checked={data.restoreCwd}
-                onChange={(e) => onChange({ restoreCwd: e.target.checked })}
-              />
-              <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                {t("advanced.restoreCwdEnable")}
-              </span>
-            </label>
-            {resetBtn("restoreCwd")}
-          </div>
-        </SettingRow>
-        <SettingRow label={t("advanced.restoreOutput")} desc={t("advanced.restoreOutputDesc")}>
-          <div className="flex items-center gap-2">
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                data-testid="restore-output-checkbox"
-                type="checkbox"
-                checked={data.restoreOutput}
-                onChange={(e) => onChange({ restoreOutput: e.target.checked })}
-              />
-              <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                {t("advanced.restoreOutputEnable")}
-              </span>
-            </label>
-            {resetBtn("restoreOutput")}
-          </div>
-        </SettingRow>
-
-        <h4 className="mb-2 mt-4 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-          {t("advanced.cwdPropagation")}
-        </h4>
-        <SettingRow label={t("advanced.cwdPropagation")} desc={t("advanced.cwdPropagationDesc")}>
+        </SettingsField>
+        <SettingsToggleField
+          label={t("advanced.suppressTitle")}
+          desc={t("advanced.suppressTitleDesc")}
+          checked={data.suppressApplicationTitle}
+          onChange={(v) => onChange({ suppressApplicationTitle: v })}
+          trailing={resetBtn("suppressApplicationTitle")}
+        />
+        <SettingsToggleField
+          label={t("advanced.snapOnInput")}
+          desc={t("advanced.snapOnInputDesc")}
+          checked={data.snapOnInput}
+          onChange={(v) => onChange({ snapOnInput: v })}
+          trailing={resetBtn("snapOnInput")}
+        />
+      </SettingsGroup>
+      <SettingsGroup title={t("advanced.sessionRestore")}>
+        <SettingsToggleField
+          label={t("advanced.restoreCwd")}
+          desc={t("advanced.restoreCwdDesc")}
+          testId="restore-cwd-checkbox"
+          checked={data.restoreCwd ?? false}
+          onChange={(v) => onChange({ restoreCwd: v })}
+          trailing={resetBtn("restoreCwd")}
+        />
+        <SettingsToggleField
+          label={t("advanced.restoreOutput")}
+          desc={t("advanced.restoreOutputDesc")}
+          testId="restore-output-checkbox"
+          checked={data.restoreOutput ?? false}
+          onChange={(v) => onChange({ restoreOutput: v })}
+          trailing={resetBtn("restoreOutput")}
+        />
+      </SettingsGroup>
+      <SettingsGroup title={t("advanced.cwdPropagation")}>
+        <SettingsField label={t("advanced.cwdPropagation")} desc={t("advanced.cwdPropagationDesc")}>
           <div className="flex items-center">
             <select
               data-testid="sync-cwd-profile-select"
@@ -1220,9 +1078,9 @@ function AdvancedFields({
               <option value="off">{t("advanced.cwdOff")}</option>
             </select>
           </div>
-        </SettingRow>
-      </div>
-    </div>
+        </SettingsField>
+      </SettingsGroup>
+    </>
   );
 }
 
@@ -1244,8 +1102,8 @@ function DefaultsSection() {
     setDraftDefaults((prev) => ({ ...prev, ...partial }));
 
   return (
-    <div>
-      <SectionTitle>{t("defaults.title")}</SectionTitle>
+    <div className="settings-page">
+      <SettingsPageTitle>{t("defaults.title")}</SettingsPageTitle>
       <p className="mb-4 text-[13px]" style={{ color: "var(--text-secondary)" }}>
         {t("defaults.description")}
       </p>
@@ -1301,8 +1159,8 @@ function ProfileSection({ profileIndex }: { profileIndex: number }) {
     setDraftProfile((prev) => (prev ? { ...prev, ...data } : prev));
 
   return (
-    <div>
-      <SectionTitle>{profile.name}</SectionTitle>
+    <div className="settings-page">
+      <SettingsPageTitle>{profile.name}</SettingsPageTitle>
 
       {/* Sub-tab bar */}
       <div
@@ -1329,75 +1187,67 @@ function ProfileSection({ profileIndex }: { profileIndex: number }) {
 
       {/* General Tab */}
       {activeTab === "general" && (
-        <div style={cardStyle} className="mb-3">
-          <div className="px-4 py-2">
-            <SettingRow label={t("profile.name")}>
-              <input
-                data-testid="profile-name-input"
-                type="text"
-                value={profile.name}
-                onChange={(e) => update({ name: e.target.value })}
-                className={inputCls}
-                style={inputStyle}
-              />
-            </SettingRow>
-            <SettingRow label={t("profile.commandLine")} desc={t("profile.commandLineDesc")}>
-              <input
-                type="text"
-                value={profile.commandLine}
-                onChange={(e) => update({ commandLine: e.target.value })}
-                className={inputCls}
-                style={inputStyle}
-                placeholder="powershell.exe"
-              />
-            </SettingRow>
-            <SettingRow label={t("profile.startupCommand")} desc={t("profile.startupCommandDesc")}>
-              <input
-                type="text"
-                value={profile.startupCommand}
-                onChange={(e) => update({ startupCommand: e.target.value })}
-                className={inputCls}
-                style={inputStyle}
-                placeholder="cd ~/project && conda activate myenv"
-              />
-            </SettingRow>
-            <SettingRow
-              label={t("profile.startingDirectory")}
-              desc={t("profile.startingDirectoryDesc")}
-            >
-              <input
-                type="text"
-                value={profile.startingDirectory}
-                onChange={(e) => update({ startingDirectory: e.target.value })}
-                className={inputCls}
-                style={inputStyle}
-                placeholder="~"
-              />
-            </SettingRow>
-            <SettingRow label={t("profile.tabTitle")} desc={t("profile.tabTitleDesc")}>
-              <input
-                type="text"
-                value={profile.tabTitle}
-                onChange={(e) => update({ tabTitle: e.target.value })}
-                className={inputCls}
-                style={inputStyle}
-                placeholder=""
-              />
-            </SettingRow>
-            <SettingRow label={t("profile.hidden")}>
-              <label className="flex cursor-pointer items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={profile.hidden}
-                  onChange={(e) => update({ hidden: e.target.checked })}
-                />
-                <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                  {t("profile.hiddenDesc")}
-                </span>
-              </label>
-            </SettingRow>
-          </div>
-        </div>
+        <SettingsGroup>
+          <SettingsField label={t("profile.name")}>
+            <input
+              data-testid="profile-name-input"
+              type="text"
+              value={profile.name}
+              onChange={(e) => update({ name: e.target.value })}
+              className={inputCls}
+              style={inputStyle}
+            />
+          </SettingsField>
+          <SettingsField label={t("profile.commandLine")} desc={t("profile.commandLineDesc")}>
+            <input
+              type="text"
+              value={profile.commandLine}
+              onChange={(e) => update({ commandLine: e.target.value })}
+              className={inputCls}
+              style={inputStyle}
+              placeholder="powershell.exe"
+            />
+          </SettingsField>
+          <SettingsField label={t("profile.startupCommand")} desc={t("profile.startupCommandDesc")}>
+            <input
+              type="text"
+              value={profile.startupCommand}
+              onChange={(e) => update({ startupCommand: e.target.value })}
+              className={inputCls}
+              style={inputStyle}
+              placeholder="cd ~/project && conda activate myenv"
+            />
+          </SettingsField>
+          <SettingsField
+            label={t("profile.startingDirectory")}
+            desc={t("profile.startingDirectoryDesc")}
+          >
+            <input
+              type="text"
+              value={profile.startingDirectory}
+              onChange={(e) => update({ startingDirectory: e.target.value })}
+              className={inputCls}
+              style={inputStyle}
+              placeholder="~"
+            />
+          </SettingsField>
+          <SettingsField label={t("profile.tabTitle")} desc={t("profile.tabTitleDesc")}>
+            <input
+              type="text"
+              value={profile.tabTitle}
+              onChange={(e) => update({ tabTitle: e.target.value })}
+              className={inputCls}
+              style={inputStyle}
+              placeholder=""
+            />
+          </SettingsField>
+          <SettingsToggleField
+            label={t("profile.hidden")}
+            desc={t("profile.hiddenDesc")}
+            checked={profile.hidden}
+            onChange={(v) => update({ hidden: v })}
+          />
+        </SettingsGroup>
       )}
 
       {/* Additional Settings Tab (Font + Appearance + Advanced — inherited from defaults) */}
@@ -1487,8 +1337,8 @@ function ColorSchemesSection() {
   ] as const;
 
   return (
-    <div>
-      <SectionTitle>{t("colorSchemes.title")}</SectionTitle>
+    <div className="settings-page">
+      <SettingsPageTitle>{t("colorSchemes.title")}</SettingsPageTitle>
 
       {/* Scheme selector */}
       <div className="mb-4 flex items-center gap-2">
@@ -1530,144 +1380,96 @@ function ColorSchemesSection() {
 
       {scheme && (
         <>
-          <div style={cardStyle} className="mb-3">
-            <div className="px-4 py-2">
-              <h4 className="mb-2 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-                {t("colorSchemes.schemeName")}
-              </h4>
-              <input
-                type="text"
-                value={scheme.name}
-                onChange={(e) => updateField("name", e.target.value)}
-                className={inputCls}
-                style={inputStyle}
-              />
-            </div>
-          </div>
+          <SettingsGroup title={t("colorSchemes.schemeName")}>
+            <input
+              type="text"
+              value={scheme.name}
+              onChange={(e) => updateField("name", e.target.value)}
+              className={inputCls}
+              style={inputStyle}
+            />
+          </SettingsGroup>
 
           {/* Terminal Colors */}
-          <div style={cardStyle} className="mb-3">
-            <div className="px-4 py-2">
-              <h4 className="mb-3 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-                {t("colorSchemes.terminalColors")}
-              </h4>
-              <div className="mb-3 flex gap-2">
-                <ColorSwatch
-                  color={scheme.foreground}
-                  label={t("colorSchemes.fg")}
-                  onChange={(v) => updateField("foreground", v)}
-                />
-                <ColorSwatch
-                  color={scheme.background}
-                  label={t("colorSchemes.bg")}
-                  onChange={(v) => updateField("background", v)}
-                />
-                <ColorSwatch
-                  color={scheme.cursorColor}
-                  label={t("colorSchemes.cursor")}
-                  onChange={(v) => updateField("cursorColor", v)}
-                />
-                <ColorSwatch
-                  color={scheme.selectionBackground}
-                  label={t("colorSchemes.select")}
-                  onChange={(v) => updateField("selectionBackground", v)}
-                />
-              </div>
+          <SettingsGroup title={t("colorSchemes.terminalColors")}>
+            <div className="mb-3 flex gap-2">
+              <ColorSwatch
+                color={scheme.foreground}
+                label={t("colorSchemes.fg")}
+                onChange={(v) => updateField("foreground", v)}
+              />
+              <ColorSwatch
+                color={scheme.background}
+                label={t("colorSchemes.bg")}
+                onChange={(v) => updateField("background", v)}
+              />
+              <ColorSwatch
+                color={scheme.cursorColor}
+                label={t("colorSchemes.cursor")}
+                onChange={(v) => updateField("cursorColor", v)}
+              />
+              <ColorSwatch
+                color={scheme.selectionBackground}
+                label={t("colorSchemes.select")}
+                onChange={(v) => updateField("selectionBackground", v)}
+              />
+            </div>
 
-              <h4
-                className="mb-2 mt-4 text-xs font-semibold"
-                style={{ color: "var(--text-primary)" }}
-              >
-                {t("colorSchemes.ansiColors")}
-              </h4>
-              <div className="mb-2 flex gap-2">
-                {ansiColors.map(([key]) => (
+            <h4
+              className="mb-2 mt-4 text-xs font-semibold"
+              style={{ color: "var(--text-primary)" }}
+            >
+              {t("colorSchemes.ansiColors")}
+            </h4>
+            <div className="mb-2 flex gap-2">
+              {ansiColors.map(([key]) => (
+                <ColorSwatch
+                  key={key}
+                  color={scheme[key]}
+                  label={t(`colorSchemes.${key}`)}
+                  onChange={(v) => updateField(key, v)}
+                />
+              ))}
+            </div>
+            <div className="flex gap-2">
+              {brightColors.map(([key]) => {
+                const base = key.replace("bright", "").toLowerCase();
+                return (
                   <ColorSwatch
                     key={key}
                     color={scheme[key]}
-                    label={t(`colorSchemes.${key}`)}
+                    label={t("colorSchemes.brightPrefix") + t(`colorSchemes.${base}`)}
                     onChange={(v) => updateField(key, v)}
                   />
-                ))}
-              </div>
-              <div className="flex gap-2">
-                {brightColors.map(([key]) => {
-                  const base = key.replace("bright", "").toLowerCase();
-                  return (
-                    <ColorSwatch
-                      key={key}
-                      color={scheme[key]}
-                      label={t("colorSchemes.brightPrefix") + t(`colorSchemes.${base}`)}
-                      onChange={(v) => updateField(key, v)}
-                    />
-                  );
-                })}
-              </div>
+                );
+              })}
             </div>
-          </div>
+          </SettingsGroup>
 
           {/* Preview */}
-          <div style={cardStyle}>
-            <div className="px-4 py-2">
-              <h4 className="mb-2 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-                {t("colorSchemes.preview")}
-              </h4>
-              <div
-                className="rounded p-3 font-mono text-xs"
-                style={{ background: scheme.background, color: scheme.foreground }}
-              >
-                <span style={{ color: scheme.green }}>user@host</span>
-                <span style={{ color: scheme.white }}>:</span>
-                <span style={{ color: scheme.blue }}>~/project</span>
-                <span style={{ color: scheme.white }}>$ </span>
-                <span style={{ color: scheme.yellow }}>npm</span>
-                <span style={{ color: scheme.white }}> run dev</span>
-                <br />
-                <span style={{ color: scheme.cyan }}>Ready</span>
-                <span style={{ color: scheme.white }}> on </span>
-                <span style={{ color: scheme.purple }}>http://localhost:3000</span>
-                <br />
-                <span style={{ color: scheme.red }}>error</span>
-                <span style={{ color: scheme.white }}>: module not found</span>
-              </div>
+          <SettingsGroup title={t("colorSchemes.preview")}>
+            <div
+              className="rounded p-3 font-mono text-xs"
+              style={{ background: scheme.background, color: scheme.foreground }}
+            >
+              <span style={{ color: scheme.green }}>user@host</span>
+              <span style={{ color: scheme.white }}>:</span>
+              <span style={{ color: scheme.blue }}>~/project</span>
+              <span style={{ color: scheme.white }}>$ </span>
+              <span style={{ color: scheme.yellow }}>npm</span>
+              <span style={{ color: scheme.white }}> run dev</span>
+              <br />
+              <span style={{ color: scheme.cyan }}>Ready</span>
+              <span style={{ color: scheme.white }}> on </span>
+              <span style={{ color: scheme.purple }}>http://localhost:3000</span>
+              <br />
+              <span style={{ color: scheme.red }}>error</span>
+              <span style={{ color: scheme.white }}>: module not found</span>
             </div>
-          </div>
+          </SettingsGroup>
         </>
       )}
     </div>
-  );
-}
-
-// -- Shared: toggle row --
-
-function ToggleRow({
-  label,
-  desc,
-  testid,
-  checked,
-  onChange,
-}: {
-  label: string;
-  desc: string;
-  testid: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  const { t } = useTranslation("settings");
-  return (
-    <SettingRow label={label} desc={desc}>
-      <div className="flex items-center gap-2">
-        <ToggleSwitch
-          data-testid={testid}
-          aria-label={label}
-          checked={checked}
-          onChange={onChange}
-        />
-        <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-          {checked ? t("common.enabled") : t("common.disabled")}
-        </span>
-      </div>
-    </SettingRow>
   );
 }
 
@@ -1682,19 +1484,19 @@ function PasteSection() {
     setDraftPaste((prev) => ({ ...prev, ...partial }));
 
   return (
-    <div>
-      <SectionTitle>{t("paste.title")}</SectionTitle>
+    <div className="settings-page">
+      <SettingsPageTitle>{t("paste.title")}</SettingsPageTitle>
 
-      <SubGroup title={t("paste.groupGeneral")}>
-        <ToggleRow
+      <SettingsGroup title={t("paste.groupGeneral")}>
+        <SettingsToggleField
           label={t("paste.smartPaste")}
           desc={t("paste.smartPasteDesc")}
-          testid="smart-paste-toggle"
+          testId="smart-paste-toggle"
           checked={paste.smart}
           onChange={(v) => update({ smart: v })}
         />
 
-        <SettingRow label={t("paste.imageDir")} desc={t("paste.imageDirDesc")}>
+        <SettingsField label={t("paste.imageDir")} desc={t("paste.imageDirDesc")}>
           <FocusInput
             data-testid="paste-image-dir-input"
             className={inputCls}
@@ -1702,37 +1504,40 @@ function PasteSection() {
             value={paste.imageDir}
             onChange={(e) => update({ imageDir: e.target.value })}
           />
-        </SettingRow>
-      </SubGroup>
+        </SettingsField>
+      </SettingsGroup>
 
-      <SubGroup title={t("paste.groupTextTransform")}>
-        <ToggleRow
+      <SettingsGroup title={t("paste.groupTextTransform")}>
+        <SettingsToggleField
           label={t("paste.smartRemoveIndent")}
           desc={t("paste.smartRemoveIndentDesc")}
-          testid="smart-remove-indent-toggle"
+          testId="smart-remove-indent-toggle"
           checked={paste.removeIndent}
           onChange={(v) => update({ removeIndent: v })}
         />
 
-        <ToggleRow
+        <SettingsToggleField
           label={t("paste.smartRemoveLineBreak")}
           desc={t("paste.smartRemoveLineBreakDesc")}
-          testid="smart-remove-linebreak-toggle"
+          testId="smart-remove-linebreak-toggle"
           checked={paste.removeLineBreak}
           onChange={(v) => update({ removeLineBreak: v })}
         />
 
-        <ToggleRow
+        <SettingsToggleField
           label={t("paste.smartLinkJoin")}
           desc={t("paste.smartLinkJoinDesc")}
-          testid="smart-link-join-toggle"
+          testId="smart-link-join-toggle"
           checked={paste.linkJoin}
           onChange={(v) => update({ linkJoin: v })}
         />
-      </SubGroup>
+      </SettingsGroup>
 
-      <SubGroup title={t("paste.groupMultiFile")}>
-        <SettingRow label={t("paste.multiFileSeparator")} desc={t("paste.multiFileSeparatorDesc")}>
+      <SettingsGroup title={t("paste.groupMultiFile")}>
+        <SettingsField
+          label={t("paste.multiFileSeparator")}
+          desc={t("paste.multiFileSeparatorDesc")}
+        >
           <select
             data-testid="paste-path-separator-select"
             value={paste.pathSeparator}
@@ -1745,26 +1550,26 @@ function PasteSection() {
             <option value="comma">{t("paste.separatorComma")}</option>
             <option value="semicolon">{t("paste.separatorSemicolon")}</option>
           </select>
-        </SettingRow>
+        </SettingsField>
 
-        <ToggleRow
+        <SettingsToggleField
           label={t("paste.quotePaths")}
           desc={t("paste.quotePathsDesc")}
-          testid="paste-path-quote-toggle"
+          testId="paste-path-quote-toggle"
           checked={paste.pathQuote}
           onChange={(v) => update({ pathQuote: v })}
         />
-      </SubGroup>
+      </SettingsGroup>
 
-      <SubGroup title={t("paste.groupSafety")}>
-        <ToggleRow
+      <SettingsGroup title={t("paste.groupSafety")}>
+        <SettingsToggleField
           label={t("paste.largeWarning")}
           desc={t("paste.largeWarningDesc")}
-          testid="large-paste-warning-toggle"
+          testId="large-paste-warning-toggle"
           checked={paste.largeWarning}
           onChange={(v) => update({ largeWarning: v })}
         />
-      </SubGroup>
+      </SettingsGroup>
     </div>
   );
 }
@@ -1845,10 +1650,10 @@ function TerminalSection() {
   };
 
   return (
-    <div>
-      <SectionTitle>{t("terminal.title")}</SectionTitle>
-      <div style={cardStyle} className="p-4">
-        <SettingRow
+    <div className="settings-page">
+      <SettingsPageTitle>{t("terminal.title")}</SettingsPageTitle>
+      <SettingsGroup title={t("terminal.groupGeneral")}>
+        <SettingsField
           label={t("terminal.defaultInputMode")}
           desc={t("terminal.defaultInputModeDesc")}
         >
@@ -1861,17 +1666,19 @@ function TerminalSection() {
             <option value="direct">{t("terminal.inputModeDirect")}</option>
             <option value="composer">{t("terminal.inputModeComposer")}</option>
           </FocusSelect>
-        </SettingRow>
+        </SettingsField>
 
-        <ToggleRow
+        <SettingsToggleField
           label={t("terminal.advertiseTrueColor")}
           desc={t("terminal.advertiseTrueColorDesc")}
-          testid="advertise-truecolor-toggle"
+          testId="advertise-truecolor-toggle"
           checked={terminal.advertiseTrueColor}
           onChange={(v) => update({ advertiseTrueColor: v })}
         />
+      </SettingsGroup>
 
-        <SettingRow
+      <SettingsGroup title={t("terminal.groupComposer")}>
+        <SettingsField
           label={t("terminal.composerHistoryScope")}
           desc={t("terminal.composerHistoryScopeDesc")}
         >
@@ -1887,25 +1694,26 @@ function TerminalSection() {
             <option value="workspace">{t("terminal.composerHistoryScopeWorkspace")}</option>
             <option value="pane">{t("terminal.composerHistoryScopePane")}</option>
           </FocusSelect>
-        </SettingRow>
+        </SettingsField>
 
-        <ToggleRow
+        <SettingsToggleField
           label={t("terminal.composerHistoryPopup")}
           desc={t("terminal.composerHistoryPopupDesc")}
-          testid="composer-history-popup-toggle"
+          testId="composer-history-popup-toggle"
           checked={terminal.composerHistoryPopup}
           onChange={(v) => update({ composerHistoryPopup: v })}
         />
 
-        <ToggleRow
+        <SettingsToggleField
           label={t("terminal.composerAutocomplete")}
           desc={t("terminal.composerAutocompleteDesc")}
-          testid="composer-autocomplete-toggle"
+          testId="composer-autocomplete-toggle"
           checked={terminal.composerAutocomplete}
           onChange={(v) => update({ composerAutocomplete: v })}
         />
 
-        <SettingRow
+        <SettingsField
+          layout="stack"
           label={t("terminal.composerStarredEntries")}
           desc={t("terminal.composerStarredEntriesDesc")}
         >
@@ -1992,7 +1800,7 @@ function TerminalSection() {
               })}
             </ul>
           )}
-        </SettingRow>
+        </SettingsField>
         {composerStarEditor ? (
           <ComposerStarredEntryEditor
             title={t("terminal.composerStarredEntryEdit")}
@@ -2012,16 +1820,18 @@ function TerminalSection() {
             }
           />
         ) : null}
+      </SettingsGroup>
 
-        <ToggleRow
+      <SettingsGroup title={t("terminal.groupScroll")}>
+        <SettingsToggleField
           label={t("terminal.copyOnSelect")}
           desc={t("terminal.copyOnSelectDesc")}
-          testid="copy-on-select-toggle"
+          testId="copy-on-select-toggle"
           checked={terminal.copyOnSelect}
           onChange={(v) => update({ copyOnSelect: v })}
         />
 
-        <SettingRow
+        <SettingsField
           label={t("terminal.scrollSensitivity")}
           desc={t("terminal.scrollSensitivityDesc")}
         >
@@ -2032,7 +1842,6 @@ function TerminalSection() {
             max={SCROLL_SENSITIVITY_MAX}
             step={SCROLL_SENSITIVITY_STEP}
             className={inputCls}
-            style={{ width: 90 }}
             value={terminal.scrollSensitivity}
             onChange={(e) =>
               update({
@@ -2043,9 +1852,9 @@ function TerminalSection() {
               })
             }
           />
-        </SettingRow>
+        </SettingsField>
 
-        <SettingRow
+        <SettingsField
           label={t("terminal.fastScrollSensitivity")}
           desc={t("terminal.fastScrollSensitivityDesc")}
         >
@@ -2056,7 +1865,6 @@ function TerminalSection() {
             max={SCROLL_SENSITIVITY_MAX}
             step={SCROLL_SENSITIVITY_STEP}
             className={inputCls}
-            style={{ width: 90 }}
             value={terminal.fastScrollSensitivity}
             onChange={(e) =>
               update({
@@ -2067,27 +1875,27 @@ function TerminalSection() {
               })
             }
           />
-        </SettingRow>
+        </SettingsField>
 
-        <ToggleRow
+        <SettingsToggleField
           label={t("terminal.scrollToBottomButton")}
           desc={t("terminal.scrollToBottomButtonDesc")}
-          testid="scroll-to-bottom-button-toggle"
+          testId="scroll-to-bottom-button-toggle"
           checked={terminal.showScrollToBottomButton}
           onChange={(v) => update({ showScrollToBottomButton: v })}
         />
-      </div>
+      </SettingsGroup>
 
-      <SubGroup title={t("terminal.pathLinkGroup")}>
-        <ToggleRow
+      <SettingsGroup title={t("terminal.pathLinkGroup")}>
+        <SettingsToggleField
           label={t("terminal.pathLink")}
           desc={t("terminal.pathLinkDesc")}
-          testid="path-link-enabled-toggle"
+          testId="path-link-enabled-toggle"
           checked={terminal.pathLinkEnabled}
           onChange={(v) => update({ pathLinkEnabled: v })}
         />
 
-        <SettingRow
+        <SettingsField
           label={t("terminal.pathLinkMaxLength")}
           desc={t("terminal.pathLinkMaxLengthDesc")}
         >
@@ -2098,35 +1906,34 @@ function TerminalSection() {
             max={4096}
             step={1}
             className={inputCls}
-            style={{ width: 90 }}
             value={terminal.pathLinkMaxLength}
             onChange={(e) =>
               update({ pathLinkMaxLength: Math.max(8, Math.round(Number(e.target.value) || 0)) })
             }
           />
-        </SettingRow>
+        </SettingsField>
 
-        <ToggleRow
+        <SettingsToggleField
           label={t("terminal.pathLinkOsOpen")}
           desc={t("terminal.pathLinkOsOpenDesc")}
-          testid="path-link-os-open-toggle"
+          testId="path-link-os-open-toggle"
           checked={terminal.pathLinkOsOpenEnabled}
           onChange={(v) => update({ pathLinkOsOpenEnabled: v })}
         />
 
-        <ToggleRow
+        <SettingsToggleField
           label={t("terminal.pathLinkOsOpenConfirm")}
           desc={t("terminal.pathLinkOsOpenConfirmDesc")}
-          testid="path-link-os-open-confirm-toggle"
+          testId="path-link-os-open-confirm-toggle"
           checked={terminal.pathLinkOsOpenConfirm}
           onChange={(v) => update({ pathLinkOsOpenConfirm: v })}
         />
-      </SubGroup>
+      </SettingsGroup>
 
       {/* ADR-0224: 실행 게이트는 URL 과 경로를 따로 고른다. 발견(밑줄)은 어느
           모드에서도 게이트되지 않으므로 여기에 노출하지 않는다. */}
-      <SubGroup title={t("terminal.linkActivationGroup")}>
-        <SettingRow
+      <SettingsGroup title={t("terminal.linkActivationGroup")}>
+        <SettingsField
           label={t("terminal.urlLinkActivation")}
           desc={t("terminal.urlLinkActivationDesc")}
         >
@@ -2139,9 +1946,9 @@ function TerminalSection() {
             <option value="immediate">{t("terminal.linkActivationImmediate")}</option>
             <option value="chip">{t("terminal.linkActivationChip")}</option>
           </FocusSelect>
-        </SettingRow>
+        </SettingsField>
 
-        <SettingRow
+        <SettingsField
           label={t("terminal.pathLinkActivation")}
           desc={t("terminal.pathLinkActivationDesc")}
         >
@@ -2154,21 +1961,21 @@ function TerminalSection() {
             <option value="immediate">{t("terminal.linkActivationImmediate")}</option>
             <option value="chip">{t("terminal.linkActivationChip")}</option>
           </FocusSelect>
-        </SettingRow>
-      </SubGroup>
+        </SettingsField>
+      </SettingsGroup>
 
-      <SubGroup title={t("terminal.exitGroup")}>
-        <ToggleRow
+      <SettingsGroup title={t("terminal.exitGroup")}>
+        <SettingsToggleField
           label={t("terminal.interruptOnExit")}
           desc={t("terminal.interruptOnExitDesc")}
-          testid="interrupt-on-exit-toggle"
+          testId="interrupt-on-exit-toggle"
           checked={exit.interruptTerminals}
           onChange={(v) => updateExit({ interruptTerminals: v })}
         />
 
         {exit.interruptTerminals && (
           <>
-            <SettingRow
+            <SettingsField
               label={t("terminal.interruptRounds")}
               desc={t("terminal.interruptRoundsDesc")}
             >
@@ -2179,7 +1986,6 @@ function TerminalSection() {
                 max={10}
                 step={1}
                 className={inputCls}
-                style={{ width: 90 }}
                 value={exit.interruptRounds}
                 onChange={(e) =>
                   updateExit({
@@ -2190,9 +1996,9 @@ function TerminalSection() {
                   })
                 }
               />
-            </SettingRow>
+            </SettingsField>
 
-            <SettingRow
+            <SettingsField
               label={t("terminal.interruptSettle")}
               desc={t("terminal.interruptSettleDesc")}
             >
@@ -2203,7 +2009,6 @@ function TerminalSection() {
                 max={10000}
                 step={100}
                 className={inputCls}
-                style={{ width: 90 }}
                 value={exit.settleMs}
                 onChange={(e) =>
                   updateExit({
@@ -2211,17 +2016,17 @@ function TerminalSection() {
                   })
                 }
               />
-            </SettingRow>
+            </SettingsField>
           </>
         )}
-      </SubGroup>
+      </SettingsGroup>
 
-      <SubGroup title={t("terminal.paneClearGroup")}>
+      <SettingsGroup title={t("terminal.paneClearGroup")}>
         <p className="mb-3 text-[13px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>
           {t("terminal.paneClearGroupDesc")}
         </p>
 
-        <SettingRow
+        <SettingsField
           label={t("terminal.paneClearShellCommand")}
           desc={t("terminal.paneClearShellCommandDesc")}
         >
@@ -2229,13 +2034,12 @@ function TerminalSection() {
             data-testid="pane-clear-shell-command-input"
             type="text"
             className={inputCls}
-            style={{ width: 140 }}
             value={paneClear.shellCommand}
             onChange={(event) => updatePaneClear({ shellCommand: event.target.value })}
           />
-        </SettingRow>
+        </SettingsField>
 
-        <SettingRow
+        <SettingsField
           label={t("terminal.paneClearBusyPolicy")}
           desc={t("terminal.paneClearBusyPolicyDesc")}
         >
@@ -2254,11 +2058,11 @@ function TerminalSection() {
             <option value="interrupt">{t("terminal.paneClearBusyPolicyInterrupt")}</option>
             <option value="restart">{t("terminal.paneClearBusyPolicyRestart")}</option>
           </FocusSelect>
-        </SettingRow>
+        </SettingsField>
 
         {paneClear.busyPolicy === "interrupt" && (
           <>
-            <SettingRow
+            <SettingsField
               label={t("terminal.paneClearInterruptRounds")}
               desc={t("terminal.paneClearInterruptRoundsDesc")}
             >
@@ -2269,7 +2073,6 @@ function TerminalSection() {
                 max={10}
                 step={1}
                 className={inputCls}
-                style={{ width: 90 }}
                 value={paneClear.interruptRounds}
                 onChange={(event) =>
                   updatePaneClear({
@@ -2280,9 +2083,9 @@ function TerminalSection() {
                   })
                 }
               />
-            </SettingRow>
+            </SettingsField>
 
-            <SettingRow
+            <SettingsField
               label={t("terminal.paneClearSettle")}
               desc={t("terminal.paneClearSettleDesc")}
             >
@@ -2293,7 +2096,6 @@ function TerminalSection() {
                 max={10000}
                 step={100}
                 className={inputCls}
-                style={{ width: 90 }}
                 value={paneClear.settleMs}
                 onChange={(event) =>
                   updatePaneClear({
@@ -2304,10 +2106,10 @@ function TerminalSection() {
                   })
                 }
               />
-            </SettingRow>
+            </SettingsField>
           </>
         )}
-      </SubGroup>
+      </SettingsGroup>
     </div>
   );
 }
@@ -2341,11 +2143,11 @@ function InterfaceSection() {
     setDraftDock((prev) => ({ ...prev, ...partial }));
 
   return (
-    <div>
-      <SectionTitle>{t("interface.title")}</SectionTitle>
+    <div className="settings-page">
+      <SettingsPageTitle>{t("interface.title")}</SettingsPageTitle>
 
-      <SubGroup title={t("interface.groupControlBar")}>
-        <SettingRow label={t("interface.hoverAutoHide")} desc={t("interface.hoverAutoHideDesc")}>
+      <SettingsGroup title={t("interface.groupControlBar")}>
+        <SettingsField label={t("interface.hoverAutoHide")} desc={t("interface.hoverAutoHideDesc")}>
           <div className="flex items-center gap-2">
             <FocusInput
               data-testid="hover-idle-seconds-input"
@@ -2354,7 +2156,6 @@ function InterfaceSection() {
               max={30}
               step={0.5}
               className={inputCls}
-              style={{ width: 70 }}
               value={controlBar.hoverIdleSeconds}
               onChange={(e) =>
                 updateControlBar({ hoverIdleSeconds: Math.max(0, Number(e.target.value)) })
@@ -2364,9 +2165,12 @@ function InterfaceSection() {
               {t("common.seconds")}
             </span>
           </div>
-        </SettingRow>
+        </SettingsField>
 
-        <SettingRow label={t("interface.controlBarMode")} desc={t("interface.controlBarModeDesc")}>
+        <SettingsField
+          label={t("interface.controlBarMode")}
+          desc={t("interface.controlBarModeDesc")}
+        >
           <FocusSelect
             data-testid="default-control-bar-mode-select"
             className={inputCls}
@@ -2379,35 +2183,35 @@ function InterfaceSection() {
             <option value="hover">{t("interface.controlBarHover")}</option>
             <option value="pinned">{t("interface.controlBarPinned")}</option>
           </FocusSelect>
-        </SettingRow>
-      </SubGroup>
+        </SettingsField>
+      </SettingsGroup>
 
-      <SubGroup title={t("interface.groupDock")}>
-        <ToggleRow
+      <SettingsGroup title={t("interface.groupDock")}>
+        <SettingsToggleField
           label={t("interface.dockPersist")}
           desc={t("interface.dockPersistDesc")}
-          testid="dock-persist-state-toggle"
+          testId="dock-persist-state-toggle"
           checked={dock.persistState}
           onChange={(v) => updateDock({ persistState: v })}
         />
-        <ToggleRow
+        <SettingsToggleField
           label={t("interface.dockArrowNav")}
           desc={t("interface.dockArrowNavDesc")}
-          testid="dock-arrow-nav-toggle"
+          testId="dock-arrow-nav-toggle"
           checked={dock.arrowNav}
           onChange={(v) => updateDock({ arrowNav: v })}
         />
-        <ToggleRow
+        <SettingsToggleField
           label={t("interface.dockArrowFocusPane")}
           desc={t("interface.dockArrowFocusPaneDesc")}
-          testid="dock-arrow-focus-pane-toggle"
+          testId="dock-arrow-focus-pane-toggle"
           checked={dock.arrowFocusPane}
           onChange={(v) => updateDock({ arrowFocusPane: v })}
         />
-      </SubGroup>
+      </SettingsGroup>
 
-      <SubGroup title={t("interface.groupNotifications")}>
-        <SettingRow
+      <SettingsGroup title={t("interface.groupNotifications")}>
+        <SettingsField
           label={t("interface.notificationDismiss")}
           desc={t("interface.notificationDismissDesc")}
         >
@@ -2425,25 +2229,25 @@ function InterfaceSection() {
             <option value="paneFocus">{t("interface.dismissPaneFocus")}</option>
             <option value="manual">{t("interface.dismissManual")}</option>
           </FocusSelect>
-        </SettingRow>
-      </SubGroup>
+        </SettingsField>
+      </SettingsGroup>
 
-      <SubGroup title={t("interface.groupPower")}>
-        <ToggleRow
+      <SettingsGroup title={t("interface.groupPower")}>
+        <SettingsToggleField
           label={t("interface.keepAwake")}
           desc={t("interface.keepAwakeDesc")}
-          testid="keep-awake-toggle"
+          testId="keep-awake-toggle"
           checked={power.keepAwake}
           onChange={(v) => setDraftPower((prev) => ({ ...prev, keepAwake: v }))}
         />
-        <ToggleRow
+        <SettingsToggleField
           label={t("interface.keepAwakeWhenBusy")}
           desc={t("interface.keepAwakeWhenBusyDesc")}
-          testid="keep-awake-when-busy-toggle"
+          testId="keep-awake-when-busy-toggle"
           checked={power.keepAwakeWhenBusy}
           onChange={(v) => setDraftPower((prev) => ({ ...prev, keepAwakeWhenBusy: v }))}
         />
-      </SubGroup>
+      </SettingsGroup>
     </div>
   );
 }
@@ -2757,22 +2561,22 @@ function RemoteConnectionSection() {
     Boolean(cloudStatus?.lastError);
 
   return (
-    <div>
-      <SectionTitle>{t("remote.connectionTitle")}</SectionTitle>
+    <div className="settings-page">
+      <SettingsPageTitle>{t("remote.connectionTitle")}</SettingsPageTitle>
 
-      <SubGroup title={t("remote.groupAccess")}>
-        <ToggleRow
+      <SettingsGroup title={t("remote.groupAccess")}>
+        <SettingsToggleField
           label={t("remote.enabled")}
           desc={t("remote.enabledDesc")}
-          testid="remote-settings-enabled-toggle"
+          testId="remote-settings-enabled-toggle"
           checked={remote.enabled}
           onChange={handleToggleEnabled}
         />
 
-        <ToggleRow
+        <SettingsToggleField
           label={t("remote.tailscaleOnly")}
           desc={t("remote.tailscaleOnlyDesc")}
-          testid="remote-settings-tailscale-only-toggle"
+          testId="remote-settings-tailscale-only-toggle"
           checked={remote.tailscaleOnly}
           onChange={(checked) =>
             update({
@@ -2784,7 +2588,11 @@ function RemoteConnectionSection() {
           }
         />
 
-        <SettingRow label={t("remote.allowedIps")} desc={t("remote.allowedIpsDesc")}>
+        <SettingsField
+          layout="stack"
+          label={t("remote.allowedIps")}
+          desc={t("remote.allowedIpsDesc")}
+        >
           <div className="flex min-w-0 flex-col gap-2">
             <textarea
               data-testid="remote-settings-allowed-ips-input"
@@ -2831,9 +2639,9 @@ function RemoteConnectionSection() {
               </button>
             </div>
           </div>
-        </SettingRow>
+        </SettingsField>
 
-        <SettingRow
+        <SettingsField
           label={t("remote.autoMobileMinWidth")}
           desc={t("remote.autoMobileMinWidthDesc")}
         >
@@ -2844,7 +2652,6 @@ function RemoteConnectionSection() {
               min={0}
               step={1}
               className={inputCls}
-              inputStyle={{ width: 110 }}
               value={remote.autoMobileModeMinWidth}
               onChange={(event) =>
                 update({ autoMobileModeMinWidth: normalizeAutoMobileWidth(event.target.value) })
@@ -2854,9 +2661,9 @@ function RemoteConnectionSection() {
               px
             </span>
           </div>
-        </SettingRow>
+        </SettingsField>
 
-        <SettingRow
+        <SettingsField
           label="Android 백그라운드 제어권 유지"
           desc="Android 앱을 잠시 벗어났을 때 Remote 제어권을 유지할 시간입니다. 0이면 즉시 반납합니다."
         >
@@ -2868,7 +2675,6 @@ function RemoteConnectionSection() {
               max={900}
               step={1}
               className={inputCls}
-              inputStyle={{ width: 110 }}
               value={remote.androidBackgroundLeaseSeconds}
               onChange={(event) =>
                 update({
@@ -2883,11 +2689,15 @@ function RemoteConnectionSection() {
               초
             </span>
           </div>
-        </SettingRow>
-      </SubGroup>
+        </SettingsField>
+      </SettingsGroup>
 
-      <SubGroup title={t("remote.groupHosts")}>
-        <SettingRow label={t("remote.customHosts")} desc={t("remote.customHostsDesc")}>
+      <SettingsGroup title={t("remote.groupHosts")}>
+        <SettingsField
+          layout="stack"
+          label={t("remote.customHosts")}
+          desc={t("remote.customHostsDesc")}
+        >
           <div className="flex min-w-0 flex-col gap-2">
             <div className="flex min-w-0 gap-2">
               <FocusInput
@@ -2945,9 +2755,9 @@ function RemoteConnectionSection() {
               </div>
             )}
           </div>
-        </SettingRow>
+        </SettingsField>
 
-        <SettingRow label={t("remote.preferredHost")} desc={t("remote.preferredHostDesc")}>
+        <SettingsField label={t("remote.preferredHost")} desc={t("remote.preferredHostDesc")}>
           <FocusSelect
             data-testid="remote-settings-preferred-host-select"
             className={inputCls}
@@ -2964,11 +2774,11 @@ function RemoteConnectionSection() {
               </option>
             ))}
           </FocusSelect>
-        </SettingRow>
-      </SubGroup>
+        </SettingsField>
+      </SettingsGroup>
 
-      <SubGroup title={t("remote.groupCloud")}>
-        <SettingRow label={t("remote.cloudAccessMode")} desc={t("remote.cloudAccessModeDesc")}>
+      <SettingsGroup title={t("remote.groupCloud")}>
+        <SettingsField label={t("remote.cloudAccessMode")} desc={t("remote.cloudAccessModeDesc")}>
           <FocusSelect
             data-testid="remote-settings-cloud-access-mode-select"
             className={inputCls}
@@ -2982,9 +2792,9 @@ function RemoteConnectionSection() {
             <option value="browserAndE2e">{t("remote.cloudAccessModeBrowserAndE2e")}</option>
             <option value="androidE2eOnly">{t("remote.cloudAccessModeAndroidE2eOnly")}</option>
           </FocusSelect>
-        </SettingRow>
+        </SettingsField>
 
-        <SettingRow label={t("remote.cloudStatus")}>
+        <SettingsField layout="stack" label={t("remote.cloudStatus")}>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span
               data-testid="remote-settings-cloud-status"
@@ -3031,9 +2841,12 @@ function RemoteConnectionSection() {
               </button>
             )}
           </div>
-        </SettingRow>
+        </SettingsField>
 
-        <SettingRow label={t("remote.cloudRelayBaseUrl")} desc={t("remote.cloudRelayBaseUrlDesc")}>
+        <SettingsField
+          label={t("remote.cloudRelayBaseUrl")}
+          desc={t("remote.cloudRelayBaseUrlDesc")}
+        >
           <FocusInput
             data-testid="remote-settings-cloud-relay-base-url-input"
             className={inputCls}
@@ -3041,28 +2854,28 @@ function RemoteConnectionSection() {
             value={remote.relayBaseUrl}
             onChange={(event) => update({ relayBaseUrl: event.target.value })}
           />
-        </SettingRow>
-      </SubGroup>
+        </SettingsField>
+      </SettingsGroup>
 
-      <SubGroup title={t("remote.groupHostData")}>
-        <ToggleRow
+      <SettingsGroup title={t("remote.groupHostData")}>
+        <SettingsToggleField
           label={t("remote.serveTerminalFont")}
           desc={t("remote.serveTerminalFontDesc")}
-          testid="remote-settings-serve-terminal-font-toggle"
+          testId="remote-settings-serve-terminal-font-toggle"
           checked={remote.serveTerminalFont}
           onChange={(value) => update({ serveTerminalFont: value })}
         />
-        <ToggleRow
+        <SettingsToggleField
           label={t("remote.widgets")}
           desc={t("remote.widgetsDesc")}
-          testid="remote-settings-widgets-toggle"
+          testId="remote-settings-widgets-toggle"
           checked={remote.widgets}
           onChange={(value) => update({ widgets: value })}
         />
-      </SubGroup>
+      </SettingsGroup>
 
-      <SubGroup title={t("remote.groupAttachments")}>
-        <SettingRow label={t("remote.attachmentMaxMib")} desc={t("remote.attachmentMaxMibDesc")}>
+      <SettingsGroup title={t("remote.groupAttachments")}>
+        <SettingsField label={t("remote.attachmentMaxMib")} desc={t("remote.attachmentMaxMibDesc")}>
           <div className="flex items-center gap-2">
             <FocusInput
               data-testid="remote-settings-attachment-max-mib"
@@ -3071,7 +2884,6 @@ function RemoteConnectionSection() {
               max={MAX_REMOTE_ATTACHMENT_MIB}
               step={1}
               className={inputCls}
-              inputStyle={{ width: 110 }}
               value={remote.attachmentMaxMib}
               onChange={(event) =>
                 // Only the lower bound while typing so "1" → "5" can be entered;
@@ -3085,15 +2897,16 @@ function RemoteConnectionSection() {
               MiB
             </span>
           </div>
-        </SettingRow>
-        <ToggleRow
+        </SettingsField>
+        <SettingsToggleField
           label={t("remote.attachmentAllowAllExtensions")}
           desc={t("remote.attachmentAllowAllExtensionsDesc")}
-          testid="remote-settings-attachment-allow-all"
+          testId="remote-settings-attachment-allow-all"
           checked={remote.attachmentAllowAllExtensions}
           onChange={(value) => update({ attachmentAllowAllExtensions: value })}
         />
-        <SettingRow
+        <SettingsField
+          layout="stack"
           label={t("remote.attachmentExtraExtensions")}
           desc={t("remote.attachmentExtraExtensionsDesc")}
         >
@@ -3154,8 +2967,8 @@ function RemoteConnectionSection() {
               </div>
             )}
           </div>
-        </SettingRow>
-      </SubGroup>
+        </SettingsField>
+      </SettingsGroup>
     </div>
   );
 }
@@ -3204,11 +3017,14 @@ function WorkspacesSection() {
   ];
 
   return (
-    <div>
-      <SectionTitle>{t("workspaces.title")}</SectionTitle>
+    <div className="settings-page">
+      <SettingsPageTitle>{t("workspaces.title")}</SettingsPageTitle>
 
-      <SubGroup title={t("workspaces.groupDisplay")}>
-        <SettingRow label={t("workspaces.lastInputMode")} desc={t("workspaces.lastInputModeDesc")}>
+      <SettingsGroup title={t("workspaces.groupDisplay")}>
+        <SettingsField
+          label={t("workspaces.lastInputMode")}
+          desc={t("workspaces.lastInputModeDesc")}
+        >
           <FocusSelect
             data-testid="workspace-last-input-mode-select"
             className={inputCls}
@@ -3222,48 +3038,30 @@ function WorkspacesSection() {
             <option value="perPane">{t("workspaces.lastInputPerPane")}</option>
             <option value="workspaceLatest">{t("workspaces.lastInputWorkspaceLatest")}</option>
           </FocusSelect>
-        </SettingRow>
+        </SettingsField>
 
-        {displayItems.map((item, i) => (
-          <div key={item.key} className={`flex items-start gap-3 py-1${i > 0 ? " mt-2" : ""}`}>
-            <div className="w-36 shrink-0 pt-1">
-              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                {item.label}
-              </span>
-              <p
-                className="mt-0.5 text-[13px] leading-tight"
-                style={{ color: "var(--text-secondary)" }}
-              >
-                {item.desc}
-              </p>
-            </div>
-            <div className="min-w-0 flex-1">
-              <label className="flex cursor-pointer items-center gap-2">
-                <input
-                  data-testid={`ws-display-${item.key}-toggle`}
-                  type="checkbox"
-                  checked={wsDisplay[item.key]}
-                  onChange={(e) => updateWsDisplay({ [item.key]: e.target.checked })}
-                />
-                <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                  {wsDisplay[item.key] ? t("common.enabled") : t("common.disabled")}
-                </span>
-              </label>
-            </div>
-          </div>
+        {displayItems.map((item) => (
+          <SettingsToggleField
+            key={item.key}
+            label={item.label}
+            desc={item.desc}
+            testId={`ws-display-${item.key}-toggle`}
+            checked={wsDisplay[item.key]}
+            onChange={(v) => updateWsDisplay({ [item.key]: v })}
+          />
         ))}
-      </SubGroup>
+      </SettingsGroup>
 
-      <SubGroup title={t("workspaces.groupBehavior")}>
-        <ToggleRow
+      <SettingsGroup title={t("workspaces.groupBehavior")}>
+        <SettingsToggleField
           label={t("workspaces.confirmDestructiveActions")}
           desc={t("workspaces.confirmDestructiveActionsDesc")}
-          testid="workspace-destructive-confirm-toggle"
+          testId="workspace-destructive-confirm-toggle"
           checked={wsSelector.confirmDestructiveActions}
           onChange={(value) => updateWsSelector({ confirmDestructiveActions: value })}
         />
 
-        <SettingRow label={t("workspaces.pathEllipsis")} desc={t("workspaces.pathEllipsisDesc")}>
+        <SettingsField label={t("workspaces.pathEllipsis")} desc={t("workspaces.pathEllipsisDesc")}>
           <FocusSelect
             data-testid="path-ellipsis-select"
             className={inputCls}
@@ -3273,9 +3071,9 @@ function WorkspacesSection() {
             <option value="start">{t("workspaces.ellipsisStart")}</option>
             <option value="end">{t("workspaces.ellipsisEnd")}</option>
           </FocusSelect>
-        </SettingRow>
+        </SettingsField>
 
-        <SettingRow
+        <SettingsField
           label={t("workspaces.hiddenAutoClose")}
           desc={t("workspaces.hiddenAutoCloseDesc")}
         >
@@ -3286,7 +3084,6 @@ function WorkspacesSection() {
               min={0}
               step={30}
               className={inputCls}
-              style={{ width: 80 }}
               value={wsSelector.hiddenAutoCloseSeconds}
               onChange={(e) =>
                 updateWsSelector({
@@ -3298,11 +3095,11 @@ function WorkspacesSection() {
               {t("common.seconds")}
             </span>
           </div>
-        </SettingRow>
-      </SubGroup>
+        </SettingsField>
+      </SettingsGroup>
 
-      <SubGroup title={t("workspaces.groupCwdDefaults")}>
-        {(["workspace", "dock"] as const).map((location, i) => {
+      <SettingsGroup title={t("workspaces.groupCwdDefaults")}>
+        {(["workspace", "dock"] as const).map((location) => {
           const label =
             location === "workspace" ? t("workspaces.cwdWorkspace") : t("workspaces.cwdDock");
           const desc =
@@ -3311,48 +3108,33 @@ function WorkspacesSection() {
               : t("workspaces.cwdDockDesc");
           const value = syncCwdDefaults[location];
           return (
-            <div key={location} className={`flex items-start gap-3 py-1${i > 0 ? " mt-2" : ""}`}>
-              <div className="w-36 shrink-0 pt-1">
-                <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                  {label}
-                </span>
-                <p
-                  className="mt-0.5 text-[13px] leading-tight"
-                  style={{ color: "var(--text-secondary)" }}
-                >
-                  {desc}
-                </p>
+            <SettingsField key={location} label={label} desc={desc}>
+              <div className="flex flex-wrap gap-x-5 gap-y-2">
+                <label className="flex cursor-pointer items-center gap-2">
+                  <ToggleSwitch
+                    data-testid={`sync-cwd-${location}-send-toggle`}
+                    checked={value.send}
+                    onChange={(v) => updateSyncCwdDefault(location, "send", v)}
+                  />
+                  <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                    {t("workspaces.send")}
+                  </span>
+                </label>
+                <label className="flex cursor-pointer items-center gap-2">
+                  <ToggleSwitch
+                    data-testid={`sync-cwd-${location}-receive-toggle`}
+                    checked={value.receive}
+                    onChange={(v) => updateSyncCwdDefault(location, "receive", v)}
+                  />
+                  <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                    {t("workspaces.receive")}
+                  </span>
+                </label>
               </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap gap-x-5 gap-y-2">
-                  <label className="flex cursor-pointer items-center gap-2">
-                    <input
-                      data-testid={`sync-cwd-${location}-send-toggle`}
-                      type="checkbox"
-                      checked={value.send}
-                      onChange={(e) => updateSyncCwdDefault(location, "send", e.target.checked)}
-                    />
-                    <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                      {t("workspaces.send")}
-                    </span>
-                  </label>
-                  <label className="flex cursor-pointer items-center gap-2">
-                    <input
-                      data-testid={`sync-cwd-${location}-receive-toggle`}
-                      type="checkbox"
-                      checked={value.receive}
-                      onChange={(e) => updateSyncCwdDefault(location, "receive", e.target.checked)}
-                    />
-                    <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                      {t("workspaces.receive")}
-                    </span>
-                  </label>
-                </div>
-              </div>
-            </div>
+            </SettingsField>
           );
         })}
-      </SubGroup>
+      </SettingsGroup>
     </div>
   );
 }
@@ -3370,338 +3152,207 @@ function ClaudeSection() {
     setDraftClaude((prev) => ({ ...prev, ...partial }));
 
   return (
-    <div>
-      <SectionTitle>{t("claude.title")}</SectionTitle>
+    <div className="settings-page">
+      <SettingsPageTitle>{t("claude.title")}</SettingsPageTitle>
 
-      <SubGroup title={t("claude.groupSyncCwd")}>
+      <SettingsGroup title={t("claude.groupSyncCwd")}>
         {/* Sync CWD mode */}
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("claude.syncCwd")}
-            </span>
-            <p
-              className="mt-0.5 text-[13px] leading-tight"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {t("claude.syncCwdDesc")}
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <FocusSelect
-              data-testid="claude-sync-cwd-select"
-              className={inputCls}
-              value={claude.syncCwd}
-              onChange={(e) => updateClaude({ syncCwd: e.target.value as "skip" | "command" })}
-            >
-              <option value="skip">{t("claude.syncCwdSkip")}</option>
-              <option value="command">{t("claude.syncCwdCommand")}</option>
-            </FocusSelect>
-          </div>
-        </div>
-      </SubGroup>
+        <SettingsField label={t("claude.syncCwd")} desc={t("claude.syncCwdDesc")}>
+          <FocusSelect
+            data-testid="claude-sync-cwd-select"
+            className={inputCls}
+            value={claude.syncCwd}
+            onChange={(e) => updateClaude({ syncCwd: e.target.value as "skip" | "command" })}
+          >
+            <option value="skip">{t("claude.syncCwdSkip")}</option>
+            <option value="command">{t("claude.syncCwdCommand")}</option>
+          </FocusSelect>
+        </SettingsField>
+      </SettingsGroup>
 
-      <SubGroup title={t("claude.groupSessionRestore")}>
+      <SettingsGroup title={t("claude.groupSessionRestore")}>
         {/* Launch command (flags land here, e.g. --dangerously-skip-permissions) */}
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("claude.command")}
-            </span>
+        <SettingsField label={t("claude.command")} desc={t("claude.commandDesc")} layout="stack">
+          <div className="flex items-center gap-2">
+            <FocusInput
+              data-testid="claude-command-input"
+              className={inputCls}
+              type="text"
+              placeholder={DEFAULT_CLAUDE_COMMAND}
+              value={claude.command}
+              onChange={(e) => updateClaude({ command: e.target.value })}
+            />
+            {claude.command !== DEFAULT_CLAUDE_COMMAND && (
+              <button
+                data-testid="claude-command-reset"
+                className="hover-bg px-1.5 py-0.5 rounded text-[13px]"
+                style={{ color: "var(--text-secondary)" }}
+                onClick={() => updateClaude({ command: DEFAULT_CLAUDE_COMMAND })}
+              >
+                {t("common.default")}
+              </button>
+            )}
+          </div>
+          {isSafeAgentCommand(claude.command) ? (
             <p
-              className="mt-0.5 text-[13px] leading-tight"
+              data-testid="claude-command-preview"
+              className="mt-1 text-[13px] leading-tight"
               style={{ color: "var(--text-secondary)" }}
             >
-              {t("claude.commandDesc")}
+              {`${resolveAgentCommand(claude.command, DEFAULT_CLAUDE_COMMAND)} --resume <session-id>`}
             </p>
+          ) : (
+            <p
+              data-testid="claude-command-warning"
+              className="mt-1 text-[13px] leading-tight"
+              style={{ color: "var(--claude)" }}
+            >
+              {t("claude.commandInvalid", { command: DEFAULT_CLAUDE_COMMAND })}
+            </p>
+          )}
+        </SettingsField>
+
+        {/* Restore Session */}
+        <SettingsToggleField
+          label={t("claude.restoreSession")}
+          desc={t("claude.restoreSessionDesc")}
+          testId="claude-restore-session-toggle"
+          checked={claude.restoreSession}
+          onChange={(v) => updateClaude({ restoreSession: v })}
+        />
+
+        {/* Session Max Age */}
+        <SettingsField label={t("claude.sessionMaxAge")} desc={t("claude.sessionMaxAgeDesc")}>
+          <div className="flex items-center gap-2">
+            <FocusInput
+              data-testid="claude-session-max-age-input"
+              className={inputCls}
+              type="number"
+              min={0}
+              value={claude.sessionMaxAgeHours}
+              onChange={(e) => {
+                const parsed = parseInt(e.target.value, 10);
+                updateClaude({
+                  sessionMaxAgeHours: Number.isNaN(parsed)
+                    ? DEFAULT_AGENT_SESSION_MAX_AGE_HOURS
+                    : Math.max(0, parsed),
+                });
+              }}
+            />
+            <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
+              {t("common.hours")}
+            </span>
           </div>
-          <div className="min-w-0 flex-1">
+        </SettingsField>
+      </SettingsGroup>
+
+      <SettingsGroup title={t("claude.groupStatusMessage")}>
+        {/* Status Message Mode */}
+        <SettingsField
+          label={t("claude.statusMessageMode")}
+          desc={t("claude.statusMessageModeDesc")}
+        >
+          <FocusSelect
+            data-testid="claude-status-message-mode-select"
+            className={inputCls}
+            value={claude.statusMessageMode}
+            onChange={(e) =>
+              updateClaude({
+                statusMessageMode: e.target.value as
+                  | "bullet"
+                  | "title"
+                  | "bullet-title"
+                  | "title-bullet",
+              })
+            }
+          >
+            <option value="bullet-title">{t("claude.modeBulletTitle")}</option>
+            <option value="title-bullet">{t("claude.modeTitleBullet")}</option>
+            <option value="bullet">{t("claude.modeBullet")}</option>
+            <option value="title">{t("claude.modeTitle")}</option>
+          </FocusSelect>
+        </SettingsField>
+
+        {/* Status Message Delimiter */}
+        {(claude.statusMessageMode === "bullet-title" ||
+          claude.statusMessageMode === "title-bullet") && (
+          <SettingsField label={t("claude.delimiter")} desc={t("claude.delimiterDesc")}>
             <div className="flex items-center gap-2">
               <FocusInput
-                data-testid="claude-command-input"
+                data-testid="claude-status-message-delimiter-input"
                 className={inputCls}
                 type="text"
-                style={{ width: 320 }}
-                placeholder={DEFAULT_CLAUDE_COMMAND}
-                value={claude.command}
-                onChange={(e) => updateClaude({ command: e.target.value })}
+                value={claude.statusMessageDelimiter}
+                onChange={(e) => updateClaude({ statusMessageDelimiter: e.target.value })}
               />
-              {claude.command !== DEFAULT_CLAUDE_COMMAND && (
+              {claude.statusMessageDelimiter !== DEFAULT_STATUS_MESSAGE_DELIMITER && (
                 <button
-                  data-testid="claude-command-reset"
+                  data-testid="claude-status-message-delimiter-reset"
                   className="hover-bg px-1.5 py-0.5 rounded text-[13px]"
                   style={{ color: "var(--text-secondary)" }}
-                  onClick={() => updateClaude({ command: DEFAULT_CLAUDE_COMMAND })}
+                  onClick={() =>
+                    updateClaude({
+                      statusMessageDelimiter: DEFAULT_STATUS_MESSAGE_DELIMITER,
+                    })
+                  }
                 >
                   {t("common.default")}
                 </button>
               )}
             </div>
-            {isSafeAgentCommand(claude.command) ? (
-              <p
-                data-testid="claude-command-preview"
-                className="mt-1 text-[13px] leading-tight"
-                style={{ color: "var(--text-secondary)" }}
-              >
-                {`${resolveAgentCommand(claude.command, DEFAULT_CLAUDE_COMMAND)} --resume <session-id>`}
-              </p>
-            ) : (
-              <p
-                data-testid="claude-command-warning"
-                className="mt-1 text-[13px] leading-tight"
-                style={{ color: "var(--claude)" }}
-              >
-                {t("claude.commandInvalid", { command: DEFAULT_CLAUDE_COMMAND })}
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* Restore Session */}
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("claude.restoreSession")}
-            </span>
-            <p
-              className="mt-0.5 text-[13px] leading-tight"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {t("claude.restoreSessionDesc")}
-            </p>
-          </div>
-          <div className="min-w-0 flex-1 pt-1">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                data-testid="claude-restore-session-toggle"
-                type="checkbox"
-                checked={claude.restoreSession}
-                onChange={(e) => updateClaude({ restoreSession: e.target.checked })}
-              />
-              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                {claude.restoreSession ? t("common.enabled") : t("common.disabled")}
-              </span>
-            </label>
-          </div>
-        </div>
-
-        {/* Session Max Age */}
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("claude.sessionMaxAge")}
-            </span>
-            <p
-              className="mt-0.5 text-[13px] leading-tight"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {t("claude.sessionMaxAgeDesc")}
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <FocusInput
-                data-testid="claude-session-max-age-input"
-                className={inputCls}
-                type="number"
-                min={0}
-                style={{ width: 80 }}
-                value={claude.sessionMaxAgeHours}
-                onChange={(e) => {
-                  const parsed = parseInt(e.target.value, 10);
-                  updateClaude({
-                    sessionMaxAgeHours: Number.isNaN(parsed)
-                      ? DEFAULT_AGENT_SESSION_MAX_AGE_HOURS
-                      : Math.max(0, parsed),
-                  });
-                }}
-              />
-              <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
-                {t("common.hours")}
-              </span>
-            </div>
-          </div>
-        </div>
-      </SubGroup>
-
-      <SubGroup title={t("claude.groupStatusMessage")}>
-        {/* Status Message Mode */}
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("claude.statusMessageMode")}
-            </span>
-            <p
-              className="mt-0.5 text-[13px] leading-tight"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {t("claude.statusMessageModeDesc")}
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <FocusSelect
-              data-testid="claude-status-message-mode-select"
-              className={inputCls}
-              value={claude.statusMessageMode}
-              onChange={(e) =>
-                updateClaude({
-                  statusMessageMode: e.target.value as
-                    | "bullet"
-                    | "title"
-                    | "bullet-title"
-                    | "title-bullet",
-                })
-              }
-            >
-              <option value="bullet-title">{t("claude.modeBulletTitle")}</option>
-              <option value="title-bullet">{t("claude.modeTitleBullet")}</option>
-              <option value="bullet">{t("claude.modeBullet")}</option>
-              <option value="title">{t("claude.modeTitle")}</option>
-            </FocusSelect>
-          </div>
-        </div>
-
-        {/* Status Message Delimiter */}
-        {(claude.statusMessageMode === "bullet-title" ||
-          claude.statusMessageMode === "title-bullet") && (
-          <div className="flex items-start gap-3 py-1.5">
-            <div className="w-36 shrink-0 pt-1">
-              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                {t("claude.delimiter")}
-              </span>
-              <p
-                className="mt-0.5 text-[13px] leading-tight"
-                style={{ color: "var(--text-secondary)" }}
-              >
-                {t("claude.delimiterDesc")}
-              </p>
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <FocusInput
-                  data-testid="claude-status-message-delimiter-input"
-                  className={inputCls}
-                  type="text"
-                  style={{ width: 100 }}
-                  value={claude.statusMessageDelimiter}
-                  onChange={(e) => updateClaude({ statusMessageDelimiter: e.target.value })}
-                />
-                {claude.statusMessageDelimiter !== DEFAULT_STATUS_MESSAGE_DELIMITER && (
-                  <button
-                    data-testid="claude-status-message-delimiter-reset"
-                    className="hover-bg px-1.5 py-0.5 rounded text-[13px]"
-                    style={{ color: "var(--text-secondary)" }}
-                    onClick={() =>
-                      updateClaude({
-                        statusMessageDelimiter: DEFAULT_STATUS_MESSAGE_DELIMITER,
-                      })
-                    }
-                  >
-                    {t("common.default")}
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
+          </SettingsField>
         )}
-      </SubGroup>
+      </SettingsGroup>
 
-      <SubGroup title={t("claude.groupAutoResume")}>
+      <SettingsGroup title={t("claude.groupAutoResume")}>
         {/* Session Limit Auto Resume (issue #312) */}
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("claude.autoResume")}
-            </span>
-            <p
-              className="mt-0.5 text-[13px] leading-tight"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {t("claude.autoResumeDesc")}
-            </p>
-          </div>
-          <div className="min-w-0 flex-1 pt-1">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                data-testid="claude-session-limit-auto-resume-toggle"
-                type="checkbox"
-                checked={claude.sessionLimitAutoResume}
-                onChange={(e) => updateClaude({ sessionLimitAutoResume: e.target.checked })}
-              />
-              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                {claude.sessionLimitAutoResume ? t("common.enabled") : t("common.disabled")}
-              </span>
-            </label>
-          </div>
-        </div>
+        <SettingsToggleField
+          label={t("claude.autoResume")}
+          desc={t("claude.autoResumeDesc")}
+          testId="claude-session-limit-auto-resume-toggle"
+          checked={claude.sessionLimitAutoResume}
+          onChange={(v) => updateClaude({ sessionLimitAutoResume: v })}
+        />
 
         {claude.sessionLimitAutoResume && (
           <>
             {/* Session Limit Resume Delay */}
-            <div className="flex items-start gap-3 py-1.5">
-              <div className="w-36 shrink-0 pt-1">
-                <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                  {t("claude.resumeDelay")}
+            <SettingsField label={t("claude.resumeDelay")} desc={t("claude.resumeDelayDesc")}>
+              <div className="flex items-center gap-2">
+                <FocusInput
+                  data-testid="claude-session-limit-resume-delay-input"
+                  className={inputCls}
+                  type="number"
+                  min={0}
+                  value={claude.sessionLimitResumeDelaySeconds}
+                  onChange={(e) => {
+                    const parsed = parseInt(e.target.value, 10);
+                    updateClaude({
+                      sessionLimitResumeDelaySeconds: Number.isNaN(parsed)
+                        ? 60
+                        : Math.max(0, parsed),
+                    });
+                  }}
+                />
+                <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
+                  {t("common.seconds")}
                 </span>
-                <p
-                  className="mt-0.5 text-[13px] leading-tight"
-                  style={{ color: "var(--text-secondary)" }}
-                >
-                  {t("claude.resumeDelayDesc")}
-                </p>
               </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <FocusInput
-                    data-testid="claude-session-limit-resume-delay-input"
-                    className={inputCls}
-                    type="number"
-                    min={0}
-                    style={{ width: 80 }}
-                    value={claude.sessionLimitResumeDelaySeconds}
-                    onChange={(e) => {
-                      const parsed = parseInt(e.target.value, 10);
-                      updateClaude({
-                        sessionLimitResumeDelaySeconds: Number.isNaN(parsed)
-                          ? 60
-                          : Math.max(0, parsed),
-                      });
-                    }}
-                  />
-                  <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
-                    {t("common.seconds")}
-                  </span>
-                </div>
-              </div>
-            </div>
+            </SettingsField>
 
             {/* Session Limit Resume Message */}
-            <div className="flex items-start gap-3 py-1.5">
-              <div className="w-36 shrink-0 pt-1">
-                <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                  {t("claude.resumeMessage")}
-                </span>
-                <p
-                  className="mt-0.5 text-[13px] leading-tight"
-                  style={{ color: "var(--text-secondary)" }}
-                >
-                  {t("claude.resumeMessageDesc")}
-                </p>
-              </div>
-              <div className="min-w-0 flex-1">
-                <FocusInput
-                  data-testid="claude-session-limit-resume-message-input"
-                  className={inputCls}
-                  type="text"
-                  style={{ width: 200 }}
-                  value={claude.sessionLimitResumeMessage}
-                  onChange={(e) => updateClaude({ sessionLimitResumeMessage: e.target.value })}
-                />
-              </div>
-            </div>
+            <SettingsField label={t("claude.resumeMessage")} desc={t("claude.resumeMessageDesc")}>
+              <FocusInput
+                data-testid="claude-session-limit-resume-message-input"
+                className={inputCls}
+                type="text"
+                value={claude.sessionLimitResumeMessage}
+                onChange={(e) => updateClaude({ sessionLimitResumeMessage: e.target.value })}
+              />
+            </SettingsField>
           </>
         )}
-      </SubGroup>
+      </SettingsGroup>
       <ClaudeUsageGroup />
     </div>
   );
@@ -3716,238 +3367,145 @@ function CodexSection() {
     setDraftCodex((prev) => ({ ...prev, ...partial }));
 
   return (
-    <div>
-      <SectionTitle>{t("codex.title")}</SectionTitle>
+    <div className="settings-page">
+      <SettingsPageTitle>{t("codex.title")}</SettingsPageTitle>
 
-      <SubGroup title={t("codex.groupSessionRestore")}>
+      <SettingsGroup title={t("codex.groupSessionRestore")}>
         {/* Launch command (flags land here, e.g. --yolo) */}
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("codex.command")}
-            </span>
+        <SettingsField label={t("codex.command")} desc={t("codex.commandDesc")} layout="stack">
+          <div className="flex items-center gap-2">
+            <FocusInput
+              data-testid="codex-command-input"
+              className={inputCls}
+              type="text"
+              placeholder={DEFAULT_CODEX_COMMAND}
+              value={codex.command}
+              onChange={(e) => updateCodex({ command: e.target.value })}
+            />
+            {codex.command !== DEFAULT_CODEX_COMMAND && (
+              <button
+                data-testid="codex-command-reset"
+                className="hover-bg px-1.5 py-0.5 rounded text-[13px]"
+                style={{ color: "var(--text-secondary)" }}
+                onClick={() => updateCodex({ command: DEFAULT_CODEX_COMMAND })}
+              >
+                {t("common.default")}
+              </button>
+            )}
+          </div>
+          {isSafeAgentCommand(codex.command) ? (
             <p
-              className="mt-0.5 text-[13px] leading-tight"
+              data-testid="codex-command-preview"
+              className="mt-1 text-[13px] leading-tight"
               style={{ color: "var(--text-secondary)" }}
             >
-              {t("codex.commandDesc")}
+              {`${resolveAgentCommand(codex.command, DEFAULT_CODEX_COMMAND)} resume <session-id>`}
             </p>
+          ) : (
+            <p
+              data-testid="codex-command-warning"
+              className="mt-1 text-[13px] leading-tight"
+              style={{ color: "var(--claude)" }}
+            >
+              {t("codex.commandInvalid", { command: DEFAULT_CODEX_COMMAND })}
+            </p>
+          )}
+        </SettingsField>
+
+        <SettingsToggleField
+          label={t("codex.restoreSession")}
+          desc={t("codex.restoreSessionDesc")}
+          testId="codex-restore-session-toggle"
+          checked={codex.restoreSession}
+          onChange={(v) => updateCodex({ restoreSession: v })}
+        />
+
+        <SettingsField label={t("codex.sessionMaxAge")} desc={t("codex.sessionMaxAgeDesc")}>
+          <div className="flex items-center gap-2">
+            <FocusInput
+              data-testid="codex-session-max-age-input"
+              className={inputCls}
+              type="number"
+              min={0}
+              value={codex.sessionMaxAgeHours}
+              onChange={(e) => {
+                const parsed = parseInt(e.target.value, 10);
+                updateCodex({
+                  sessionMaxAgeHours: Number.isNaN(parsed)
+                    ? DEFAULT_AGENT_SESSION_MAX_AGE_HOURS
+                    : Math.max(0, parsed),
+                });
+              }}
+            />
+            <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
+              {t("common.hours")}
+            </span>
           </div>
-          <div className="min-w-0 flex-1">
+        </SettingsField>
+      </SettingsGroup>
+
+      <SettingsGroup title={t("codex.groupTranscript")}>
+        <SettingsToggleField
+          label={t("codex.transcriptScroll")}
+          desc={t("codex.transcriptScrollDesc")}
+          testId="codex-transcript-scroll-toggle"
+          checked={codex.transcriptScrollEnabled}
+          onChange={(v) => updateCodex({ transcriptScrollEnabled: v })}
+        />
+      </SettingsGroup>
+
+      <SettingsGroup title={t("codex.groupStatusMessage")}>
+        <SettingsField label={t("codex.statusMessageMode")} desc={t("codex.statusMessageModeDesc")}>
+          <FocusSelect
+            data-testid="codex-status-message-mode-select"
+            className={inputCls}
+            value={codex.statusMessageMode}
+            onChange={(e) =>
+              updateCodex({
+                statusMessageMode: e.target.value as
+                  | "bullet"
+                  | "title"
+                  | "bullet-title"
+                  | "title-bullet",
+              })
+            }
+          >
+            <option value="title">{t("codex.modeTitle")}</option>
+            <option value="bullet-title">{t("codex.modeBulletTitle")}</option>
+            <option value="title-bullet">{t("codex.modeTitleBullet")}</option>
+            <option value="bullet">{t("codex.modeBullet")}</option>
+          </FocusSelect>
+        </SettingsField>
+
+        {(codex.statusMessageMode === "bullet-title" ||
+          codex.statusMessageMode === "title-bullet") && (
+          <SettingsField label={t("codex.delimiter")} desc={t("codex.delimiterDesc")}>
             <div className="flex items-center gap-2">
               <FocusInput
-                data-testid="codex-command-input"
+                data-testid="codex-status-message-delimiter-input"
                 className={inputCls}
                 type="text"
-                style={{ width: 320 }}
-                placeholder={DEFAULT_CODEX_COMMAND}
-                value={codex.command}
-                onChange={(e) => updateCodex({ command: e.target.value })}
+                value={codex.statusMessageDelimiter}
+                onChange={(e) => updateCodex({ statusMessageDelimiter: e.target.value })}
               />
-              {codex.command !== DEFAULT_CODEX_COMMAND && (
+              {codex.statusMessageDelimiter !== DEFAULT_STATUS_MESSAGE_DELIMITER && (
                 <button
-                  data-testid="codex-command-reset"
-                  className="hover-bg px-1.5 py-0.5 rounded text-[13px]"
+                  data-testid="codex-status-message-delimiter-reset"
+                  className="hover-bg rounded px-1.5 py-0.5 text-[13px]"
                   style={{ color: "var(--text-secondary)" }}
-                  onClick={() => updateCodex({ command: DEFAULT_CODEX_COMMAND })}
+                  onClick={() =>
+                    updateCodex({
+                      statusMessageDelimiter: DEFAULT_STATUS_MESSAGE_DELIMITER,
+                    })
+                  }
                 >
                   {t("common.default")}
                 </button>
               )}
             </div>
-            {isSafeAgentCommand(codex.command) ? (
-              <p
-                data-testid="codex-command-preview"
-                className="mt-1 text-[13px] leading-tight"
-                style={{ color: "var(--text-secondary)" }}
-              >
-                {`${resolveAgentCommand(codex.command, DEFAULT_CODEX_COMMAND)} resume <session-id>`}
-              </p>
-            ) : (
-              <p
-                data-testid="codex-command-warning"
-                className="mt-1 text-[13px] leading-tight"
-                style={{ color: "var(--claude)" }}
-              >
-                {t("codex.commandInvalid", { command: DEFAULT_CODEX_COMMAND })}
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("codex.restoreSession")}
-            </span>
-            <p
-              className="mt-0.5 text-[13px] leading-tight"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {t("codex.restoreSessionDesc")}
-            </p>
-          </div>
-          <div className="min-w-0 flex-1 pt-1">
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                data-testid="codex-restore-session-toggle"
-                type="checkbox"
-                checked={codex.restoreSession}
-                onChange={(e) => updateCodex({ restoreSession: e.target.checked })}
-              />
-              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                {codex.restoreSession ? t("common.enabled") : t("common.disabled")}
-              </span>
-            </label>
-          </div>
-        </div>
-
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("codex.sessionMaxAge")}
-            </span>
-            <p
-              className="mt-0.5 text-[13px] leading-tight"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {t("codex.sessionMaxAgeDesc")}
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <FocusInput
-                data-testid="codex-session-max-age-input"
-                className={inputCls}
-                type="number"
-                min={0}
-                style={{ width: 80 }}
-                value={codex.sessionMaxAgeHours}
-                onChange={(e) => {
-                  const parsed = parseInt(e.target.value, 10);
-                  updateCodex({
-                    sessionMaxAgeHours: Number.isNaN(parsed)
-                      ? DEFAULT_AGENT_SESSION_MAX_AGE_HOURS
-                      : Math.max(0, parsed),
-                  });
-                }}
-              />
-              <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
-                {t("common.hours")}
-              </span>
-            </div>
-          </div>
-        </div>
-      </SubGroup>
-
-      <SubGroup title={t("codex.groupTranscript")}>
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("codex.transcriptScroll")}
-            </span>
-            <p
-              className="mt-0.5 text-[13px] leading-tight"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {t("codex.transcriptScrollDesc")}
-            </p>
-          </div>
-          <div className="min-w-0 flex-1 pt-1">
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                data-testid="codex-transcript-scroll-toggle"
-                type="checkbox"
-                checked={codex.transcriptScrollEnabled}
-                onChange={(e) => updateCodex({ transcriptScrollEnabled: e.target.checked })}
-              />
-              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                {codex.transcriptScrollEnabled ? t("common.enabled") : t("common.disabled")}
-              </span>
-            </label>
-          </div>
-        </div>
-      </SubGroup>
-
-      <SubGroup title={t("codex.groupStatusMessage")}>
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("codex.statusMessageMode")}
-            </span>
-            <p
-              className="mt-0.5 text-[13px] leading-tight"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {t("codex.statusMessageModeDesc")}
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <FocusSelect
-              data-testid="codex-status-message-mode-select"
-              className={inputCls}
-              value={codex.statusMessageMode}
-              onChange={(e) =>
-                updateCodex({
-                  statusMessageMode: e.target.value as
-                    | "bullet"
-                    | "title"
-                    | "bullet-title"
-                    | "title-bullet",
-                })
-              }
-            >
-              <option value="title">{t("codex.modeTitle")}</option>
-              <option value="bullet-title">{t("codex.modeBulletTitle")}</option>
-              <option value="title-bullet">{t("codex.modeTitleBullet")}</option>
-              <option value="bullet">{t("codex.modeBullet")}</option>
-            </FocusSelect>
-          </div>
-        </div>
-
-        {(codex.statusMessageMode === "bullet-title" ||
-          codex.statusMessageMode === "title-bullet") && (
-          <div className="flex items-start gap-3 py-1.5">
-            <div className="w-36 shrink-0 pt-1">
-              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                {t("codex.delimiter")}
-              </span>
-              <p
-                className="mt-0.5 text-[13px] leading-tight"
-                style={{ color: "var(--text-secondary)" }}
-              >
-                {t("codex.delimiterDesc")}
-              </p>
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <FocusInput
-                  data-testid="codex-status-message-delimiter-input"
-                  className={inputCls}
-                  type="text"
-                  style={{ width: 100 }}
-                  value={codex.statusMessageDelimiter}
-                  onChange={(e) => updateCodex({ statusMessageDelimiter: e.target.value })}
-                />
-                {codex.statusMessageDelimiter !== DEFAULT_STATUS_MESSAGE_DELIMITER && (
-                  <button
-                    data-testid="codex-status-message-delimiter-reset"
-                    className="hover-bg rounded px-1.5 py-0.5 text-[13px]"
-                    style={{ color: "var(--text-secondary)" }}
-                    onClick={() =>
-                      updateCodex({
-                        statusMessageDelimiter: DEFAULT_STATUS_MESSAGE_DELIMITER,
-                      })
-                    }
-                  >
-                    {t("common.default")}
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
+          </SettingsField>
         )}
-      </SubGroup>
+      </SettingsGroup>
       <CodexUsageGroup />
     </div>
   );
@@ -3962,67 +3520,46 @@ function GrokSection() {
     setDraftGrok((prev) => ({ ...prev, ...partial }));
 
   return (
-    <div>
-      <SectionTitle>{t("grok.title")}</SectionTitle>
-      <SubGroup title={t("grok.groupSessionRestore")}>
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("grok.command")}
-            </span>
-          </div>
-          <div className="min-w-0 flex-1">
-            <FocusInput
-              data-testid="grok-command-input"
-              className={inputCls}
-              type="text"
-              style={{ width: 320 }}
-              placeholder={DEFAULT_GROK_COMMAND}
-              value={grok.command}
-              onChange={(e) => updateGrok({ command: e.target.value })}
-            />
-            {isSafeAgentCommand(grok.command) ? (
-              <p className="mt-1 text-[13px]" style={{ color: "var(--text-secondary)" }}>
-                {`${resolveAgentCommand(grok.command, DEFAULT_GROK_COMMAND)} --resume <session-id>`}
-              </p>
-            ) : (
-              <p className="mt-1 text-[13px]" style={{ color: "var(--claude)" }}>
-                {t("grok.commandInvalid", { command: DEFAULT_GROK_COMMAND })}
-              </p>
-            )}
-          </div>
-        </div>
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("grok.restoreSession")}
-            </span>
-          </div>
-          <input
-            data-testid="grok-restore-session"
-            type="checkbox"
-            checked={grok.restoreSession}
-            onChange={(e) => updateGrok({ restoreSession: e.target.checked })}
+    <div className="settings-page">
+      <SettingsPageTitle>{t("grok.title")}</SettingsPageTitle>
+      <SettingsGroup title={t("grok.groupSessionRestore")}>
+        <SettingsField label={t("grok.command")} layout="stack">
+          <FocusInput
+            data-testid="grok-command-input"
+            className={inputCls}
+            type="text"
+            placeholder={DEFAULT_GROK_COMMAND}
+            value={grok.command}
+            onChange={(e) => updateGrok({ command: e.target.value })}
           />
-        </div>
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("grok.sessionMaxAge")}
-            </span>
-          </div>
+          {isSafeAgentCommand(grok.command) ? (
+            <p className="mt-1 text-[13px]" style={{ color: "var(--text-secondary)" }}>
+              {`${resolveAgentCommand(grok.command, DEFAULT_GROK_COMMAND)} --resume <session-id>`}
+            </p>
+          ) : (
+            <p className="mt-1 text-[13px]" style={{ color: "var(--claude)" }}>
+              {t("grok.commandInvalid", { command: DEFAULT_GROK_COMMAND })}
+            </p>
+          )}
+        </SettingsField>
+        <SettingsToggleField
+          label={t("grok.restoreSession")}
+          testId="grok-restore-session"
+          checked={grok.restoreSession}
+          onChange={(v) => updateGrok({ restoreSession: v })}
+        />
+        <SettingsField label={t("grok.sessionMaxAge")}>
           <FocusInput
             data-testid="grok-session-max-age"
             className={inputCls}
             type="number"
             min={0}
-            style={{ width: 80 }}
             value={grok.sessionMaxAgeHours}
             onChange={(e) => updateGrok({ sessionMaxAgeHours: Number(e.target.value) || 0 })}
           />
-        </div>
-      </SubGroup>
-      <SubGroup title={t("grok.groupStatusMessage")}>
+        </SettingsField>
+      </SettingsGroup>
+      <SettingsGroup title={t("grok.groupStatusMessage")}>
         <FocusSelect
           data-testid="grok-status-message-mode-select"
           className={inputCls}
@@ -4044,47 +3581,33 @@ function GrokSection() {
         </FocusSelect>
         {(grok.statusMessageMode === "bullet-title" ||
           grok.statusMessageMode === "title-bullet") && (
-          <div className="flex items-start gap-3 py-1.5">
-            <div className="w-36 shrink-0 pt-1">
-              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                {t("grok.delimiter")}
-              </span>
-              <p
-                className="mt-0.5 text-[13px] leading-tight"
-                style={{ color: "var(--text-secondary)" }}
-              >
-                {t("grok.delimiterDesc")}
-              </p>
+          <SettingsField label={t("grok.delimiter")} desc={t("grok.delimiterDesc")}>
+            <div className="flex items-center gap-2">
+              <FocusInput
+                data-testid="grok-status-message-delimiter-input"
+                className={inputCls}
+                type="text"
+                value={grok.statusMessageDelimiter}
+                onChange={(e) => updateGrok({ statusMessageDelimiter: e.target.value })}
+              />
+              {grok.statusMessageDelimiter !== DEFAULT_STATUS_MESSAGE_DELIMITER && (
+                <button
+                  data-testid="grok-status-message-delimiter-reset"
+                  className="hover-bg rounded px-1.5 py-0.5 text-[13px]"
+                  style={{ color: "var(--text-secondary)" }}
+                  onClick={() =>
+                    updateGrok({
+                      statusMessageDelimiter: DEFAULT_STATUS_MESSAGE_DELIMITER,
+                    })
+                  }
+                >
+                  {t("common.default")}
+                </button>
+              )}
             </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <FocusInput
-                  data-testid="grok-status-message-delimiter-input"
-                  className={inputCls}
-                  type="text"
-                  style={{ width: 100 }}
-                  value={grok.statusMessageDelimiter}
-                  onChange={(e) => updateGrok({ statusMessageDelimiter: e.target.value })}
-                />
-                {grok.statusMessageDelimiter !== DEFAULT_STATUS_MESSAGE_DELIMITER && (
-                  <button
-                    data-testid="grok-status-message-delimiter-reset"
-                    className="hover-bg rounded px-1.5 py-0.5 text-[13px]"
-                    style={{ color: "var(--text-secondary)" }}
-                    onClick={() =>
-                      updateGrok({
-                        statusMessageDelimiter: DEFAULT_STATUS_MESSAGE_DELIMITER,
-                      })
-                    }
-                  >
-                    {t("common.default")}
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
+          </SettingsField>
         )}
-      </SubGroup>
+      </SettingsGroup>
       <GrokUsageGroup />
     </div>
   );
@@ -4116,12 +3639,12 @@ function FileExplorerSection() {
     });
 
   return (
-    <div>
-      <SectionTitle>{t("fileExplorer.title")}</SectionTitle>
+    <div className="settings-page">
+      <SettingsPageTitle>{t("fileExplorer.title")}</SettingsPageTitle>
 
-      <SubGroup title={t("fileExplorer.groupShell")}>
+      <SettingsGroup title={t("fileExplorer.groupShell")}>
         {/* Shell Profile */}
-        <SettingRow
+        <SettingsField
           label={t("fileExplorer.shellProfile")}
           desc={t("fileExplorer.shellProfileDesc")}
         >
@@ -4138,12 +3661,12 @@ function FileExplorerSection() {
               </option>
             ))}
           </FocusSelect>
-        </SettingRow>
-      </SubGroup>
+        </SettingsField>
+      </SettingsGroup>
 
-      <SubGroup title={t("fileExplorer.groupAppearance")}>
+      <SettingsGroup title={t("fileExplorer.groupAppearance")}>
         {/* Font */}
-        <SettingRow label={t("fileExplorer.fontFamily")} desc={t("fileExplorer.fontFamilyDesc")}>
+        <SettingsField label={t("fileExplorer.fontFamily")} desc={t("fileExplorer.fontFamilyDesc")}>
           <FocusInput
             data-testid="fe-font-family"
             className={inputCls}
@@ -4151,192 +3674,157 @@ function FileExplorerSection() {
             value={fe.fontFamily}
             onChange={(e) => updateFe({ fontFamily: e.target.value })}
           />
-        </SettingRow>
+        </SettingsField>
 
-        <SettingRow label={t("fileExplorer.fontSize")} desc={t("fileExplorer.fontSizeDesc")}>
+        <SettingsField label={t("fileExplorer.fontSize")} desc={t("fileExplorer.fontSizeDesc")}>
           <input
             data-testid="fe-font-size"
             type="number"
             min={8}
             max={32}
             className={inputCls}
-            style={{ width: 60 }}
             value={fe.fontSize}
             onChange={(e) =>
               updateFe({ fontSize: Math.max(8, Math.min(32, Number(e.target.value) || 13)) })
             }
           />
-        </SettingRow>
+        </SettingsField>
 
         {/* Padding */}
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("fileExplorer.padding")}
-            </span>
-            <p
-              className="mt-0.5 text-[13px] leading-tight"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {t("fileExplorer.paddingDesc")}
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="grid grid-cols-2 gap-2">
-              {(["Top", "Right", "Bottom", "Left"] as const).map((dir) => {
-                const key = `padding${dir}` as
-                  | "paddingTop"
-                  | "paddingRight"
-                  | "paddingBottom"
-                  | "paddingLeft";
-                return (
-                  <label key={dir} className="flex items-center gap-1.5">
-                    <span className="w-12 text-[13px]" style={{ color: "var(--text-secondary)" }}>
-                      {t(`appearance.${dir.toLowerCase()}`)}
-                    </span>
-                    <input
-                      data-testid={`fe-padding-${dir.toLowerCase()}`}
-                      type="number"
-                      min={0}
-                      max={64}
-                      className={inputCls}
-                      style={{ width: 60 }}
-                      value={fe[key]}
-                      onChange={(e) =>
-                        updateFe({
-                          [key]: Math.max(0, Math.min(64, Number(e.target.value) || 0)),
-                        })
-                      }
-                    />
-                  </label>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </SubGroup>
-
-      <SubGroup title={t("fileExplorer.groupBehavior")}>
-        {/* Copy on Select */}
-        <SettingRow
-          label={t("fileExplorer.copyOnSelect")}
-          desc={t("fileExplorer.copyOnSelectDesc")}
+        <SettingsField
+          label={t("fileExplorer.padding")}
+          desc={t("fileExplorer.paddingDesc")}
+          layout="stack"
         >
-          <label className="flex items-center gap-2">
-            <input
-              data-testid="fe-copy-on-select"
-              type="checkbox"
-              checked={fe.copyOnSelect}
-              onChange={(e) => updateFe({ copyOnSelect: e.target.checked })}
-            />
-            <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-              {t("common.enabledShort")}
-            </span>
-          </label>
-        </SettingRow>
-
-        {/* Extension Viewers */}
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("fileExplorer.extensionViewers")}
-            </span>
-            <p
-              className="mt-0.5 text-[13px] leading-tight"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {t("fileExplorer.extensionViewersDesc")}
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            {fe.extensionViewers.map((viewer, i) => {
-              const viewerProfile = viewer.profile ?? "";
-              const profileExists = profiles.some((candidate) => candidate.name === viewerProfile);
-              const profileError = !viewerProfile.trim()
-                ? t("fileExplorer.viewerProfileRequired")
-                : !profileExists
-                  ? t("fileExplorer.viewerProfileMissing")
-                  : null;
+          <SettingsInlineFields>
+            {(["Top", "Right", "Bottom", "Left"] as const).map((dir) => {
+              const key = `padding${dir}` as
+                | "paddingTop"
+                | "paddingRight"
+                | "paddingBottom"
+                | "paddingLeft";
               return (
-                <div key={i} className="mb-2">
-                  <div className="flex items-center gap-2">
-                    <FocusInput
-                      data-testid={`fe-ext-viewer-ext-${i}`}
-                      className={inputCls}
-                      style={{ width: 120 }}
-                      placeholder=".txt,.log"
-                      value={viewer.extensions.join(",")}
-                      onChange={(e) =>
-                        updateViewer(i, {
-                          extensions: e.target.value
-                            .split(",")
-                            .map((s) => s.trim())
-                            .filter(Boolean),
-                        })
-                      }
-                    />
-                    <FocusInput
-                      data-testid={`fe-ext-viewer-cmd-${i}`}
-                      className={inputCls}
-                      style={{ width: 120 }}
-                      placeholder="vi"
-                      value={viewer.command}
-                      onChange={(e) => updateViewer(i, { command: e.target.value })}
-                    />
-                    <FocusSelect
-                      data-testid={`fe-ext-viewer-profile-${i}`}
-                      className={inputCls}
-                      style={{ width: 140 }}
-                      value={profileExists ? viewerProfile : ""}
-                      onChange={(e) => updateViewer(i, { profile: e.target.value })}
-                    >
-                      <option value="">{t("fileExplorer.viewerProfilePlaceholder")}</option>
-                      {profiles.map((candidate) => (
-                        <option key={candidate.name} value={candidate.name}>
-                          {candidate.name}
-                        </option>
-                      ))}
-                    </FocusSelect>
-                    <button
-                      data-testid={`fe-ext-viewer-remove-${i}`}
-                      className="text-xs px-1.5 py-0.5 rounded"
-                      style={{
-                        background: "var(--bg-overlay)",
-                        color: "var(--red)",
-                        border: "1px solid var(--border)",
-                      }}
-                      onClick={() => removeViewer(i)}
-                    >
-                      {t("common.remove")}
-                    </button>
-                  </div>
-                  {profileError && (
-                    <p
-                      className="mt-1 text-[13px]"
-                      style={{ color: "var(--red)" }}
-                      data-testid={`fe-ext-viewer-profile-error-${i}`}
-                    >
-                      {profileError}
-                    </p>
-                  )}
-                </div>
+                <SettingsMiniField key={dir} label={t(`appearance.${dir.toLowerCase()}`)}>
+                  <input
+                    data-testid={`fe-padding-${dir.toLowerCase()}`}
+                    type="number"
+                    min={0}
+                    max={64}
+                    className={inputCls}
+                    value={fe[key]}
+                    onChange={(e) =>
+                      updateFe({
+                        [key]: Math.max(0, Math.min(64, Number(e.target.value) || 0)),
+                      })
+                    }
+                  />
+                </SettingsMiniField>
               );
             })}
-            <button
-              data-testid="fe-ext-viewer-add"
-              className="text-xs px-2 py-1 rounded"
-              style={{
-                background: "var(--bg-overlay)",
-                color: "var(--accent)",
-                border: "1px solid var(--border)",
-              }}
-              onClick={addViewer}
-            >
-              {t("fileExplorer.addViewer")}
-            </button>
-          </div>
-        </div>
-      </SubGroup>
+          </SettingsInlineFields>
+        </SettingsField>
+      </SettingsGroup>
+
+      <SettingsGroup title={t("fileExplorer.groupBehavior")}>
+        {/* Copy on Select */}
+        <SettingsToggleField
+          label={t("fileExplorer.copyOnSelect")}
+          desc={t("fileExplorer.copyOnSelectDesc")}
+          testId="fe-copy-on-select"
+          checked={fe.copyOnSelect}
+          onChange={(v) => updateFe({ copyOnSelect: v })}
+        />
+
+        {/* Extension Viewers */}
+        <SettingsField
+          label={t("fileExplorer.extensionViewers")}
+          desc={t("fileExplorer.extensionViewersDesc")}
+          layout="stack"
+        >
+          {fe.extensionViewers.map((viewer, i) => {
+            const viewerProfile = viewer.profile ?? "";
+            const profileExists = profiles.some((candidate) => candidate.name === viewerProfile);
+            const profileError = !viewerProfile.trim()
+              ? t("fileExplorer.viewerProfileRequired")
+              : !profileExists
+                ? t("fileExplorer.viewerProfileMissing")
+                : null;
+            return (
+              <div key={i} className="mb-2">
+                <div className="flex items-center gap-2">
+                  <FocusInput
+                    data-testid={`fe-ext-viewer-ext-${i}`}
+                    className={inputCls}
+                    placeholder=".txt,.log"
+                    value={viewer.extensions.join(",")}
+                    onChange={(e) =>
+                      updateViewer(i, {
+                        extensions: e.target.value
+                          .split(",")
+                          .map((s) => s.trim())
+                          .filter(Boolean),
+                      })
+                    }
+                  />
+                  <FocusInput
+                    data-testid={`fe-ext-viewer-cmd-${i}`}
+                    className={inputCls}
+                    placeholder="vi"
+                    value={viewer.command}
+                    onChange={(e) => updateViewer(i, { command: e.target.value })}
+                  />
+                  <FocusSelect
+                    data-testid={`fe-ext-viewer-profile-${i}`}
+                    className={inputCls}
+                    value={profileExists ? viewerProfile : ""}
+                    onChange={(e) => updateViewer(i, { profile: e.target.value })}
+                  >
+                    <option value="">{t("fileExplorer.viewerProfilePlaceholder")}</option>
+                    {profiles.map((candidate) => (
+                      <option key={candidate.name} value={candidate.name}>
+                        {candidate.name}
+                      </option>
+                    ))}
+                  </FocusSelect>
+                  <button
+                    data-testid={`fe-ext-viewer-remove-${i}`}
+                    className="text-xs px-1.5 py-0.5 rounded"
+                    style={{
+                      background: "var(--bg-overlay)",
+                      color: "var(--red)",
+                      border: "1px solid var(--border)",
+                    }}
+                    onClick={() => removeViewer(i)}
+                  >
+                    {t("common.remove")}
+                  </button>
+                </div>
+                {profileError && (
+                  <p
+                    className="mt-1 text-[13px]"
+                    style={{ color: "var(--red)" }}
+                    data-testid={`fe-ext-viewer-profile-error-${i}`}
+                  >
+                    {profileError}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+          <button
+            data-testid="fe-ext-viewer-add"
+            className="text-xs px-2 py-1 rounded"
+            style={{
+              background: "var(--bg-overlay)",
+              color: "var(--accent)",
+              border: "1px solid var(--border)",
+            }}
+            onClick={addViewer}
+          >
+            {t("fileExplorer.addViewer")}
+          </button>
+        </SettingsField>
+      </SettingsGroup>
     </div>
   );
 }
@@ -4352,11 +3840,11 @@ function ViewerSection() {
     setDraftViewer((prev) => ({ ...prev, ...partial }));
 
   return (
-    <div>
-      <SectionTitle>{t("viewer.title")}</SectionTitle>
+    <div className="settings-page">
+      <SettingsPageTitle>{t("viewer.title")}</SettingsPageTitle>
 
-      <SubGroup title={t("viewer.groupAppearance")}>
-        <SettingRow label={t("viewer.fontFamily")} desc={t("viewer.fontFamilyDesc")}>
+      <SettingsGroup title={t("viewer.groupAppearance")}>
+        <SettingsField label={t("viewer.fontFamily")} desc={t("viewer.fontFamilyDesc")}>
           <FocusInput
             data-testid="viewer-font-family"
             className={inputCls}
@@ -4364,70 +3852,52 @@ function ViewerSection() {
             value={viewer.fontFamily}
             onChange={(e) => updateViewer({ fontFamily: e.target.value })}
           />
-        </SettingRow>
+        </SettingsField>
 
-        <SettingRow label={t("viewer.fontSize")} desc={t("viewer.fontSizeDesc")}>
+        <SettingsField label={t("viewer.fontSize")} desc={t("viewer.fontSizeDesc")}>
           <input
             data-testid="viewer-font-size"
             type="number"
             min={8}
             max={32}
             className={inputCls}
-            style={{ width: 60 }}
             value={viewer.fontSize}
             onChange={(e) =>
               updateViewer({ fontSize: Math.max(8, Math.min(32, Number(e.target.value) || 13)) })
             }
           />
-        </SettingRow>
+        </SettingsField>
 
         {/* Padding */}
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("viewer.padding")}
-            </span>
-            <p
-              className="mt-0.5 text-[13px] leading-tight"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {t("viewer.paddingDesc")}
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="grid grid-cols-2 gap-2">
-              {(["Top", "Right", "Bottom", "Left"] as const).map((dir) => {
-                const key = `padding${dir}` as
-                  | "paddingTop"
-                  | "paddingRight"
-                  | "paddingBottom"
-                  | "paddingLeft";
-                return (
-                  <label key={dir} className="flex items-center gap-1.5">
-                    <span className="w-12 text-[13px]" style={{ color: "var(--text-secondary)" }}>
-                      {t(`appearance.${dir.toLowerCase()}`)}
-                    </span>
-                    <input
-                      data-testid={`viewer-padding-${dir.toLowerCase()}`}
-                      type="number"
-                      min={0}
-                      max={64}
-                      className={inputCls}
-                      style={{ width: 60 }}
-                      value={viewer[key]}
-                      onChange={(e) =>
-                        updateViewer({
-                          [key]: Math.max(0, Math.min(64, Number(e.target.value) || 0)),
-                        })
-                      }
-                    />
-                  </label>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </SubGroup>
+        <SettingsField label={t("viewer.padding")} desc={t("viewer.paddingDesc")} layout="stack">
+          <SettingsInlineFields>
+            {(["Top", "Right", "Bottom", "Left"] as const).map((dir) => {
+              const key = `padding${dir}` as
+                | "paddingTop"
+                | "paddingRight"
+                | "paddingBottom"
+                | "paddingLeft";
+              return (
+                <SettingsMiniField key={dir} label={t(`appearance.${dir.toLowerCase()}`)}>
+                  <input
+                    data-testid={`viewer-padding-${dir.toLowerCase()}`}
+                    type="number"
+                    min={0}
+                    max={64}
+                    className={inputCls}
+                    value={viewer[key]}
+                    onChange={(e) =>
+                      updateViewer({
+                        [key]: Math.max(0, Math.min(64, Number(e.target.value) || 0)),
+                      })
+                    }
+                  />
+                </SettingsMiniField>
+              );
+            })}
+          </SettingsInlineFields>
+        </SettingsField>
+      </SettingsGroup>
     </div>
   );
 }
@@ -4465,8 +3935,8 @@ function IssueReporterSection() {
   };
 
   return (
-    <div>
-      <SectionTitle>{t("issueReporter.title")}</SectionTitle>
+    <div className="settings-page">
+      <SettingsPageTitle>{t("issueReporter.title")}</SettingsPageTitle>
 
       {/* Font (inherits from App Font) */}
       <FontFields
@@ -4484,8 +3954,8 @@ function IssueReporterSection() {
         faceDesc={t("font.inheritAppFont")}
       />
 
-      <SubGroup title={t("issueReporter.groupSubmit")}>
-        <SettingRow label={t("issueReporter.shell")} desc={t("issueReporter.shellDesc")}>
+      <SettingsGroup title={t("issueReporter.groupSubmit")}>
+        <SettingsField label={t("issueReporter.shell")} desc={t("issueReporter.shellDesc")}>
           <FocusInput
             data-testid="issue-reporter-shell-input"
             className={inputCls}
@@ -4493,106 +3963,84 @@ function IssueReporterSection() {
             value={issueReporter.shell}
             onChange={(e) => updateIssueReporter({ shell: e.target.value })}
           />
-        </SettingRow>
+        </SettingsField>
 
         {/* Repositories */}
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("issueReporter.repositories")}
-            </span>
-            <p
-              className="mt-0.5 text-[13px] leading-tight"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {t("issueReporter.repositoriesDesc")}
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            {issueReporter.repositories.map((repo, i) => (
-              <div key={i} className="flex items-center gap-2 mb-2">
-                <FocusInput
-                  data-testid={`issue-reporter-repo-input-${i}`}
-                  className={inputCls}
-                  style={{ flex: 1 }}
-                  placeholder="owner/repo"
-                  value={repo}
-                  onChange={(e) => updateRepository(i, e.target.value)}
-                />
-                <button
-                  data-testid={`issue-reporter-repo-remove-${i}`}
-                  className="text-xs px-1.5 py-0.5 rounded"
-                  style={{
-                    background: "var(--bg-overlay)",
-                    color: "var(--red)",
-                    border: "1px solid var(--border)",
-                  }}
-                  onClick={() => removeRepository(i)}
-                >
-                  {t("common.remove")}
-                </button>
-              </div>
-            ))}
-            <button
-              data-testid="issue-reporter-repo-add"
-              className="text-xs px-2 py-1 rounded"
-              style={{
-                background: "var(--bg-overlay)",
-                color: "var(--accent)",
-                border: "1px solid var(--border)",
-              }}
-              onClick={addRepository}
-            >
-              {t("issueReporter.addRepository")}
-            </button>
-          </div>
-        </div>
-      </SubGroup>
-
-      <SubGroup title={t("issueReporter.groupAppearance")}>
-        {/* Padding */}
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("issueReporter.padding")}
-            </span>
-            <p
-              className="mt-0.5 text-[13px] leading-tight"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {t("issueReporter.paddingDesc")}
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="grid grid-cols-2 gap-2">
-              {(["Top", "Right", "Bottom", "Left"] as const).map((dir) => {
-                const key = `padding${dir}` as keyof typeof issueReporter;
-                return (
-                  <label key={dir} className="flex items-center gap-1.5">
-                    <span className="w-12 text-[13px]" style={{ color: "var(--text-secondary)" }}>
-                      {t(`appearance.${dir.toLowerCase()}`)}
-                    </span>
-                    <input
-                      data-testid={`issue-reporter-padding-${dir.toLowerCase()}`}
-                      type="number"
-                      min={0}
-                      max={64}
-                      className={inputCls}
-                      style={{ width: 60 }}
-                      value={issueReporter[key]}
-                      onChange={(e) =>
-                        updateIssueReporter({
-                          [key]: Math.max(0, Math.min(64, Number(e.target.value) || 0)),
-                        })
-                      }
-                    />
-                  </label>
-                );
-              })}
+        <SettingsField
+          label={t("issueReporter.repositories")}
+          desc={t("issueReporter.repositoriesDesc")}
+          layout="stack"
+        >
+          {issueReporter.repositories.map((repo, i) => (
+            <div key={i} className="flex items-center gap-2 mb-2">
+              <FocusInput
+                data-testid={`issue-reporter-repo-input-${i}`}
+                className={inputCls}
+                style={{ flex: 1 }}
+                placeholder="owner/repo"
+                value={repo}
+                onChange={(e) => updateRepository(i, e.target.value)}
+              />
+              <button
+                data-testid={`issue-reporter-repo-remove-${i}`}
+                className="text-xs px-1.5 py-0.5 rounded"
+                style={{
+                  background: "var(--bg-overlay)",
+                  color: "var(--red)",
+                  border: "1px solid var(--border)",
+                }}
+                onClick={() => removeRepository(i)}
+              >
+                {t("common.remove")}
+              </button>
             </div>
-          </div>
-        </div>
-      </SubGroup>
+          ))}
+          <button
+            data-testid="issue-reporter-repo-add"
+            className="text-xs px-2 py-1 rounded"
+            style={{
+              background: "var(--bg-overlay)",
+              color: "var(--accent)",
+              border: "1px solid var(--border)",
+            }}
+            onClick={addRepository}
+          >
+            {t("issueReporter.addRepository")}
+          </button>
+        </SettingsField>
+      </SettingsGroup>
+
+      <SettingsGroup title={t("issueReporter.groupAppearance")}>
+        {/* Padding */}
+        <SettingsField
+          label={t("issueReporter.padding")}
+          desc={t("issueReporter.paddingDesc")}
+          layout="stack"
+        >
+          <SettingsInlineFields>
+            {(["Top", "Right", "Bottom", "Left"] as const).map((dir) => {
+              const key = `padding${dir}` as keyof typeof issueReporter;
+              return (
+                <SettingsMiniField key={dir} label={t(`appearance.${dir.toLowerCase()}`)}>
+                  <input
+                    data-testid={`issue-reporter-padding-${dir.toLowerCase()}`}
+                    type="number"
+                    min={0}
+                    max={64}
+                    className={inputCls}
+                    value={issueReporter[key]}
+                    onChange={(e) =>
+                      updateIssueReporter({
+                        [key]: Math.max(0, Math.min(64, Number(e.target.value) || 0)),
+                      })
+                    }
+                  />
+                </SettingsMiniField>
+              );
+            })}
+          </SettingsInlineFields>
+        </SettingsField>
+      </SettingsGroup>
     </div>
   );
 }
@@ -4609,11 +4057,11 @@ function GitHubSection() {
     setDraftGithub((prev) => ({ ...prev, ...partial }));
 
   return (
-    <div>
-      <SectionTitle>{t("github.title")}</SectionTitle>
+    <div className="settings-page">
+      <SettingsPageTitle>{t("github.title")}</SettingsPageTitle>
 
-      <SubGroup title={t("github.groupBehavior")}>
-        <SettingRow label={t("github.defaultTab")} desc={t("github.defaultTabDesc")}>
+      <SettingsGroup title={t("github.groupBehavior")}>
+        <SettingsField label={t("github.defaultTab")} desc={t("github.defaultTabDesc")}>
           <FocusSelect
             data-testid="github-default-tab"
             className={inputCls}
@@ -4625,13 +4073,12 @@ function GitHubSection() {
             <option value="issues">{t("github.defaultTabIssues")}</option>
             <option value="pulls">{t("github.defaultTabPulls")}</option>
           </FocusSelect>
-        </SettingRow>
+        </SettingsField>
 
-        <SettingRow label={t("github.refreshSeconds")} desc={t("github.refreshSecondsDesc")}>
+        <SettingsField label={t("github.refreshSeconds")} desc={t("github.refreshSecondsDesc")}>
           <FocusInput
             data-testid="github-refresh-input"
             type="number"
-            inputStyle={{ width: "7rem" }}
             min={10}
             max={3600}
             step={10}
@@ -4642,25 +4089,19 @@ function GitHubSection() {
               })
             }
           />
-        </SettingRow>
+        </SettingsField>
 
-        <SettingRow label={t("github.hideDraftPulls")} desc={t("github.hideDraftPullsDesc")}>
-          <label className="flex items-center gap-2">
-            <input
-              data-testid="github-hide-draft-pulls"
-              type="checkbox"
-              checked={github.hideDraftPulls}
-              onChange={(e) => updateGithub({ hideDraftPulls: e.target.checked })}
-            />
-            <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-              {t("common.enabledShort")}
-            </span>
-          </label>
-        </SettingRow>
-      </SubGroup>
+        <SettingsToggleField
+          label={t("github.hideDraftPulls")}
+          desc={t("github.hideDraftPullsDesc")}
+          testId="github-hide-draft-pulls"
+          checked={github.hideDraftPulls}
+          onChange={(v) => updateGithub({ hideDraftPulls: v })}
+        />
+      </SettingsGroup>
 
-      <SubGroup title={t("github.groupDisplay")}>
-        <SettingRow label={t("github.fontFamily")} desc={t("github.fontFamilyDesc")}>
+      <SettingsGroup title={t("github.groupDisplay")}>
+        <SettingsField label={t("github.fontFamily")} desc={t("github.fontFamilyDesc")}>
           <FocusSelect
             data-testid="github-font-family"
             className={inputCls}
@@ -4677,21 +4118,20 @@ function GitHubSection() {
               </option>
             ))}
           </FocusSelect>
-        </SettingRow>
+        </SettingsField>
 
-        <SettingRow label={t("github.fontSize")} desc={t("github.fontSizeDesc")}>
+        <SettingsField label={t("github.fontSize")} desc={t("github.fontSizeDesc")}>
           <FocusInput
             data-testid="github-font-size"
             type="number"
-            inputStyle={{ width: "7rem" }}
             min={GITHUB_FONT_SIZE_MIN}
             max={GITHUB_FONT_SIZE_MAX}
             value={github.fontSize}
             onChange={(e) => updateGithub({ fontSize: readGithubFontSize(Number(e.target.value)) })}
           />
-        </SettingRow>
+        </SettingsField>
 
-        <SettingRow label={t("github.numberColor")} desc={t("github.numberColorDesc")}>
+        <SettingsField label={t("github.numberColor")} desc={t("github.numberColorDesc")}>
           <FocusSelect
             data-testid="github-number-color"
             className={inputCls}
@@ -4706,55 +4146,36 @@ function GitHubSection() {
               </option>
             ))}
           </FocusSelect>
-        </SettingRow>
+        </SettingsField>
 
-        <SettingRow label={t("github.showAuthor")} desc={t("github.showAuthorDesc")}>
-          <label className="flex items-center gap-2">
-            <input
-              data-testid="github-show-author"
-              type="checkbox"
-              checked={github.showAuthor}
-              onChange={(e) => updateGithub({ showAuthor: e.target.checked })}
-            />
-            <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-              {t("common.enabledShort")}
-            </span>
-          </label>
-        </SettingRow>
+        <SettingsToggleField
+          label={t("github.showAuthor")}
+          desc={t("github.showAuthorDesc")}
+          testId="github-show-author"
+          checked={github.showAuthor}
+          onChange={(v) => updateGithub({ showAuthor: v })}
+        />
 
-        <SettingRow label={t("github.showUpdated")} desc={t("github.showUpdatedDesc")}>
-          <label className="flex items-center gap-2">
-            <input
-              data-testid="github-show-updated"
-              type="checkbox"
-              checked={github.showUpdated}
-              onChange={(e) => updateGithub({ showUpdated: e.target.checked })}
-            />
-            <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-              {t("common.enabledShort")}
-            </span>
-          </label>
-        </SettingRow>
+        <SettingsToggleField
+          label={t("github.showUpdated")}
+          desc={t("github.showUpdatedDesc")}
+          testId="github-show-updated"
+          checked={github.showUpdated}
+          onChange={(v) => updateGithub({ showUpdated: v })}
+        />
 
-        <SettingRow label={t("github.showDraftBadge")} desc={t("github.showDraftBadgeDesc")}>
-          <label className="flex items-center gap-2">
-            <input
-              data-testid="github-show-draft-badge"
-              type="checkbox"
-              checked={github.showDraftBadge}
-              onChange={(e) => updateGithub({ showDraftBadge: e.target.checked })}
-            />
-            <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-              {t("common.enabledShort")}
-            </span>
-          </label>
-        </SettingRow>
+        <SettingsToggleField
+          label={t("github.showDraftBadge")}
+          desc={t("github.showDraftBadgeDesc")}
+          testId="github-show-draft-badge"
+          checked={github.showDraftBadge}
+          onChange={(v) => updateGithub({ showDraftBadge: v })}
+        />
 
-        <SettingRow label={t("github.labelMaxCount")} desc={t("github.labelMaxCountDesc")}>
+        <SettingsField label={t("github.labelMaxCount")} desc={t("github.labelMaxCountDesc")}>
           <FocusInput
             data-testid="github-label-max-count"
             type="number"
-            inputStyle={{ width: "7rem" }}
             min={0}
             max={GITHUB_LABEL_MAX_COUNT_MAX}
             value={github.labelMaxCount}
@@ -4762,13 +4183,12 @@ function GitHubSection() {
               updateGithub({ labelMaxCount: readGithubLabelMaxCount(Number(e.target.value)) })
             }
           />
-        </SettingRow>
+        </SettingsField>
 
-        <SettingRow label={t("github.labelMaxWidth")} desc={t("github.labelMaxWidthDesc")}>
+        <SettingsField label={t("github.labelMaxWidth")} desc={t("github.labelMaxWidthDesc")}>
           <FocusInput
             data-testid="github-label-max-width"
             type="number"
-            inputStyle={{ width: "7rem" }}
             min={GITHUB_LABEL_MAX_WIDTH_MIN}
             max={GITHUB_LABEL_MAX_WIDTH_MAX}
             step={4}
@@ -4777,8 +4197,8 @@ function GitHubSection() {
               updateGithub({ labelMaxWidth: readGithubLabelMaxWidth(Number(e.target.value)) })
             }
           />
-        </SettingRow>
-      </SubGroup>
+        </SettingsField>
+      </SettingsGroup>
     </div>
   );
 }
@@ -4815,7 +4235,7 @@ function UsageProfileFields({
   const { t } = useTranslation("settings");
   return (
     <>
-      <SettingRow label={profileLabel} desc={profileDescription}>
+      <SettingsField label={profileLabel} desc={profileDescription}>
         <select
           data-testid={`${testIdPrefix}-profile-select`}
           value={usage.profile}
@@ -4833,20 +4253,19 @@ function UsageProfileFields({
             </option>
           ))}
         </select>
-      </SettingRow>
+      </SettingsField>
 
-      <SettingRow label={t("usage.refresh")} desc={refreshDescription}>
+      <SettingsField label={t("usage.refresh")} desc={refreshDescription}>
         <FocusInput
           data-testid={`${testIdPrefix}-refresh-input`}
           type="number"
-          inputStyle={{ width: "7rem" }}
           min={USAGE_REFRESH_MIN_SECONDS}
           max={USAGE_REFRESH_MAX_SECONDS}
           step={30}
           value={usage.refreshSeconds}
           onChange={(e) => update({ refreshSeconds: Number(e.target.value) })}
         />
-      </SettingRow>
+      </SettingsField>
     </>
   );
 }
@@ -4866,7 +4285,7 @@ function UsageRowSelection<Row extends string>({
 }) {
   const { t } = useTranslation("settings");
   return (
-    <SettingRow label={t("usage.visibleRows")} desc={t("usage.visibleRowsDesc")}>
+    <SettingsField label={t("usage.visibleRows")} desc={t("usage.visibleRowsDesc")}>
       <div className="flex flex-col items-start gap-1">
         {rows.map((row) => {
           const checked = visibleRows.includes(row);
@@ -4894,7 +4313,7 @@ function UsageRowSelection<Row extends string>({
           );
         })}
       </div>
-    </SettingRow>
+    </SettingsField>
   );
 }
 
@@ -4917,7 +4336,7 @@ function UsageColorFields({
   return (
     <>
       {entries.map(([key, label]) => (
-        <SettingRow
+        <SettingsField
           key={key}
           label={label}
           desc={t(`usage.color${key[0].toUpperCase()}${key.slice(1)}Desc`)}
@@ -4929,7 +4348,7 @@ function UsageColorFields({
             onChange={(event) => update({ [key]: event.target.value })}
             className="h-7 w-12 cursor-pointer bg-transparent p-0"
           />
-        </SettingRow>
+        </SettingsField>
       ))}
     </>
   );
@@ -4945,14 +4364,8 @@ function WidgetsSection() {
   const [widgets, setDraftWidgets] = useDraft("widgets", storeWidgets, setWidgets);
 
   return (
-    <div data-testid="settings-widgets-section">
-      <SectionTitle>{t("widgets.title")}</SectionTitle>
-      <p
-        className="px-4 pb-2 text-[13px] leading-relaxed"
-        style={{ color: "var(--text-secondary)", opacity: 0.75 }}
-      >
-        {t("widgets.intro")}
-      </p>
+    <div data-testid="settings-widgets-section" className="settings-page">
+      <SettingsPageTitle description={t("widgets.intro")}>{t("widgets.title")}</SettingsPageTitle>
       <WidgetsSectionBody
         widgets={widgets}
         onChange={setDraftWidgets}
@@ -4989,13 +4402,7 @@ function ClaudeUsageGroup() {
   };
 
   return (
-    <SubGroup title={t("usage.title")}>
-      <p
-        className="pb-2 text-[13px] leading-relaxed"
-        style={{ color: "var(--text-secondary)", opacity: 0.75 }}
-      >
-        {t("usage.intro")}
-      </p>
+    <SettingsGroup title={t("usage.title")} description={t("usage.intro")}>
       <UsageProfileFields
         usage={claudeUsage}
         update={updateClaude}
@@ -5014,61 +4421,48 @@ function ClaudeUsageGroup() {
         update={(visibleRows) => updateClaude({ visibleRows })}
       />
 
-      <div className="flex items-start gap-3 py-1.5">
-        <div className="w-36 shrink-0 pt-1">
-          <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-            {t("usage.configDirs")}
-          </span>
-          <p
-            className="mt-0.5 text-[13px] leading-tight"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            {t("usage.configDirsDesc")}
-          </p>
-        </div>
-        <div className="min-w-0 flex-1">
-          {claudeUsage.configDirs.map((dir, i) => (
-            <div key={i} className="mb-2 flex items-center gap-2">
-              <FocusInput
-                data-testid={`usage-config-dir-input-${i}`}
-                placeholder={t("usage.configDirPlaceholder")}
-                value={dir}
-                onChange={(e) => updateConfigDir(i, e.target.value)}
-              />
-              <button
-                data-testid={`usage-config-dir-remove-${i}`}
-                className="rounded px-1.5 py-0.5 text-xs"
-                style={{
-                  background: "var(--bg-overlay)",
-                  color: "var(--red)",
-                  border: "1px solid var(--border)",
-                }}
-                onClick={() => removeConfigDir(i)}
-              >
-                {t("common.remove")}
-              </button>
-            </div>
-          ))}
-          <button
-            data-testid="usage-config-dir-add"
-            className="rounded px-2 py-1 text-xs"
-            style={{
-              background: "var(--bg-overlay)",
-              color: "var(--accent)",
-              border: "1px solid var(--border)",
-            }}
-            onClick={addConfigDir}
-          >
-            {t("usage.addConfigDir")}
-          </button>
-        </div>
-      </div>
+      <SettingsField label={t("usage.configDirs")} desc={t("usage.configDirsDesc")} layout="stack">
+        {claudeUsage.configDirs.map((dir, i) => (
+          <div key={i} className="mb-2 flex items-center gap-2">
+            <FocusInput
+              data-testid={`usage-config-dir-input-${i}`}
+              placeholder={t("usage.configDirPlaceholder")}
+              value={dir}
+              onChange={(e) => updateConfigDir(i, e.target.value)}
+            />
+            <button
+              data-testid={`usage-config-dir-remove-${i}`}
+              className="rounded px-1.5 py-0.5 text-xs"
+              style={{
+                background: "var(--bg-overlay)",
+                color: "var(--red)",
+                border: "1px solid var(--border)",
+              }}
+              onClick={() => removeConfigDir(i)}
+            >
+              {t("common.remove")}
+            </button>
+          </div>
+        ))}
+        <button
+          data-testid="usage-config-dir-add"
+          className="rounded px-2 py-1 text-xs"
+          style={{
+            background: "var(--bg-overlay)",
+            color: "var(--accent)",
+            border: "1px solid var(--border)",
+          }}
+          onClick={addConfigDir}
+        >
+          {t("usage.addConfigDir")}
+        </button>
+      </SettingsField>
       <UsageColorFields
         testIdPrefix="usage-claude"
         colors={claudeUsage.colors}
         update={(partial) => updateClaude({ colors: { ...claudeUsage.colors, ...partial } })}
       />
-    </SubGroup>
+    </SettingsGroup>
   );
 }
 
@@ -5088,7 +4482,7 @@ function CodexUsageGroup() {
   };
 
   return (
-    <SubGroup title={t("usage.title")}>
+    <SettingsGroup title={t("usage.title")}>
       <UsageProfileFields
         usage={codexUsage}
         update={updateCodex}
@@ -5106,71 +4500,62 @@ function CodexUsageGroup() {
         testIdPrefix="codex-usage"
         update={(visibleRows) => updateCodex({ visibleRows })}
       />
-      <div className="flex items-start gap-3 py-1.5">
-        <div className="w-36 shrink-0 pt-1">
-          <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-            {t("usage.codexAccountDirs")}
-          </span>
-          <p
-            className="mt-0.5 text-[13px] leading-tight"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            {t("usage.codexAccountDirsDesc")}
-          </p>
-        </div>
-        <div className="min-w-0 flex-1">
-          {codexUsage.configDirs.map((dir, i) => (
-            <div key={i} className="mb-2 flex items-center gap-2">
-              <FocusInput
-                data-testid={`codex-usage-config-dir-input-${i}`}
-                placeholder={t("usage.codexAccountDirPlaceholder")}
-                value={dir}
-                onChange={(e) =>
-                  updateCodex({
-                    configDirs: codexUsage.configDirs.map((value, index) =>
-                      index === i ? e.target.value : value,
-                    ),
-                  })
-                }
-              />
-              <button
-                data-testid={`codex-usage-config-dir-remove-${i}`}
-                className="rounded px-1.5 py-0.5 text-xs"
-                style={{
-                  background: "var(--bg-overlay)",
-                  color: "var(--red)",
-                  border: "1px solid var(--border)",
-                }}
-                onClick={() =>
-                  updateCodex({
-                    configDirs: codexUsage.configDirs.filter((_, index) => index !== i),
-                  })
-                }
-              >
-                {t("common.remove")}
-              </button>
-            </div>
-          ))}
-          <button
-            data-testid="codex-usage-config-dir-add"
-            className="rounded px-2 py-1 text-xs"
-            style={{
-              background: "var(--bg-overlay)",
-              color: "var(--accent)",
-              border: "1px solid var(--border)",
-            }}
-            onClick={() => updateCodex({ configDirs: [...codexUsage.configDirs, ""] })}
-          >
-            {t("usage.addCodexAccount")}
-          </button>
-        </div>
-      </div>
+      <SettingsField
+        label={t("usage.codexAccountDirs")}
+        desc={t("usage.codexAccountDirsDesc")}
+        layout="stack"
+      >
+        {codexUsage.configDirs.map((dir, i) => (
+          <div key={i} className="mb-2 flex items-center gap-2">
+            <FocusInput
+              data-testid={`codex-usage-config-dir-input-${i}`}
+              placeholder={t("usage.codexAccountDirPlaceholder")}
+              value={dir}
+              onChange={(e) =>
+                updateCodex({
+                  configDirs: codexUsage.configDirs.map((value, index) =>
+                    index === i ? e.target.value : value,
+                  ),
+                })
+              }
+            />
+            <button
+              data-testid={`codex-usage-config-dir-remove-${i}`}
+              className="rounded px-1.5 py-0.5 text-xs"
+              style={{
+                background: "var(--bg-overlay)",
+                color: "var(--red)",
+                border: "1px solid var(--border)",
+              }}
+              onClick={() =>
+                updateCodex({
+                  configDirs: codexUsage.configDirs.filter((_, index) => index !== i),
+                })
+              }
+            >
+              {t("common.remove")}
+            </button>
+          </div>
+        ))}
+        <button
+          data-testid="codex-usage-config-dir-add"
+          className="rounded px-2 py-1 text-xs"
+          style={{
+            background: "var(--bg-overlay)",
+            color: "var(--accent)",
+            border: "1px solid var(--border)",
+          }}
+          onClick={() => updateCodex({ configDirs: [...codexUsage.configDirs, ""] })}
+        >
+          {t("usage.addCodexAccount")}
+        </button>
+      </SettingsField>
       <UsageColorFields
         testIdPrefix="usage-codex"
         colors={codexUsage.colors}
         update={(partial) => updateCodex({ colors: { ...codexUsage.colors, ...partial } })}
       />
-    </SubGroup>
+    </SettingsGroup>
   );
 }
 
@@ -5191,7 +4576,7 @@ function GrokUsageGroup() {
   };
 
   return (
-    <SubGroup title={t("usage.title")}>
+    <SettingsGroup title={t("usage.title")}>
       <UsageProfileFields
         usage={grokUsage}
         update={updateGrokUsage}
@@ -5209,71 +4594,62 @@ function GrokUsageGroup() {
         testIdPrefix="grok-usage"
         update={(visibleRows) => updateGrokUsage({ visibleRows })}
       />
-      <div className="flex items-start gap-3 py-1.5">
-        <div className="w-36 shrink-0 pt-1">
-          <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-            {t("usage.grokConfigDirs")}
-          </span>
-          <p
-            className="mt-0.5 text-[13px] leading-tight"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            {t("usage.grokConfigDirsDesc")}
-          </p>
-        </div>
-        <div className="min-w-0 flex-1">
-          {grokUsage.configDirs.map((dir, i) => (
-            <div key={i} className="mb-2 flex items-center gap-2">
-              <FocusInput
-                data-testid={`grok-usage-config-dir-input-${i}`}
-                placeholder={t("usage.grokConfigDirPlaceholder")}
-                value={dir}
-                onChange={(e) =>
-                  updateGrokUsage({
-                    configDirs: grokUsage.configDirs.map((value, index) =>
-                      index === i ? e.target.value : value,
-                    ),
-                  })
-                }
-              />
-              <button
-                data-testid={`grok-usage-config-dir-remove-${i}`}
-                className="rounded px-1.5 py-0.5 text-xs"
-                style={{
-                  background: "var(--bg-overlay)",
-                  color: "var(--red)",
-                  border: "1px solid var(--border)",
-                }}
-                onClick={() =>
-                  updateGrokUsage({
-                    configDirs: grokUsage.configDirs.filter((_, index) => index !== i),
-                  })
-                }
-              >
-                {t("common.remove")}
-              </button>
-            </div>
-          ))}
-          <button
-            data-testid="grok-usage-config-dir-add"
-            className="rounded px-2 py-1 text-xs"
-            style={{
-              background: "var(--bg-overlay)",
-              color: "var(--accent)",
-              border: "1px solid var(--border)",
-            }}
-            onClick={() => updateGrokUsage({ configDirs: [...grokUsage.configDirs, ""] })}
-          >
-            {t("usage.addGrokConfigDir")}
-          </button>
-        </div>
-      </div>
+      <SettingsField
+        label={t("usage.grokConfigDirs")}
+        desc={t("usage.grokConfigDirsDesc")}
+        layout="stack"
+      >
+        {grokUsage.configDirs.map((dir, i) => (
+          <div key={i} className="mb-2 flex items-center gap-2">
+            <FocusInput
+              data-testid={`grok-usage-config-dir-input-${i}`}
+              placeholder={t("usage.grokConfigDirPlaceholder")}
+              value={dir}
+              onChange={(e) =>
+                updateGrokUsage({
+                  configDirs: grokUsage.configDirs.map((value, index) =>
+                    index === i ? e.target.value : value,
+                  ),
+                })
+              }
+            />
+            <button
+              data-testid={`grok-usage-config-dir-remove-${i}`}
+              className="rounded px-1.5 py-0.5 text-xs"
+              style={{
+                background: "var(--bg-overlay)",
+                color: "var(--red)",
+                border: "1px solid var(--border)",
+              }}
+              onClick={() =>
+                updateGrokUsage({
+                  configDirs: grokUsage.configDirs.filter((_, index) => index !== i),
+                })
+              }
+            >
+              {t("common.remove")}
+            </button>
+          </div>
+        ))}
+        <button
+          data-testid="grok-usage-config-dir-add"
+          className="rounded px-2 py-1 text-xs"
+          style={{
+            background: "var(--bg-overlay)",
+            color: "var(--accent)",
+            border: "1px solid var(--border)",
+          }}
+          onClick={() => updateGrokUsage({ configDirs: [...grokUsage.configDirs, ""] })}
+        >
+          {t("usage.addGrokConfigDir")}
+        </button>
+      </SettingsField>
       <UsageColorFields
         testIdPrefix="usage-grok"
         colors={grokUsage.colors}
         update={(partial) => updateGrokUsage({ colors: { ...grokUsage.colors, ...partial } })}
       />
-    </SubGroup>
+    </SettingsGroup>
   );
 }
 
@@ -5295,8 +4671,8 @@ function MemoSection() {
   };
 
   return (
-    <div>
-      <SectionTitle>{t("memo.title")}</SectionTitle>
+    <div className="settings-page">
+      <SettingsPageTitle>{t("memo.title")}</SettingsPageTitle>
 
       {/* Font (inherits from App Font) */}
       <FontFields
@@ -5314,199 +4690,115 @@ function MemoSection() {
         faceDesc={t("font.inheritAppFont")}
       />
 
-      <SubGroup title={t("memo.groupLayout")}>
+      <SettingsGroup title={t("memo.groupLayout")}>
         {/* Padding */}
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("memo.padding")}
-            </span>
-            <p
-              className="mt-0.5 text-[13px] leading-tight"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {t("memo.paddingDesc")}
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="grid grid-cols-2 gap-2">
-              {(["Top", "Right", "Bottom", "Left"] as const).map((dir) => {
-                const key = `padding${dir}` as
-                  | "paddingTop"
-                  | "paddingRight"
-                  | "paddingBottom"
-                  | "paddingLeft";
-                return (
-                  <label key={dir} className="flex items-center gap-1.5">
-                    <span className="w-12 text-[13px]" style={{ color: "var(--text-secondary)" }}>
-                      {t(`appearance.${dir.toLowerCase()}`)}
-                    </span>
-                    <input
-                      data-testid={`memo-padding-${dir.toLowerCase()}`}
-                      type="number"
-                      min={0}
-                      max={64}
-                      className={inputCls}
-                      style={{ width: 60 }}
-                      value={memo[key]}
-                      onChange={(e) =>
-                        updateMemo({
-                          [key]: Math.max(0, Math.min(64, Number(e.target.value) || 0)),
-                        })
-                      }
-                    />
-                  </label>
-                );
-              })}
-            </div>
-          </div>
-        </div>
+        <SettingsField label={t("memo.padding")} desc={t("memo.paddingDesc")} layout="stack">
+          <SettingsInlineFields>
+            {(["Top", "Right", "Bottom", "Left"] as const).map((dir) => {
+              const key = `padding${dir}` as
+                | "paddingTop"
+                | "paddingRight"
+                | "paddingBottom"
+                | "paddingLeft";
+              return (
+                <SettingsMiniField key={dir} label={t(`appearance.${dir.toLowerCase()}`)}>
+                  <input
+                    data-testid={`memo-padding-${dir.toLowerCase()}`}
+                    type="number"
+                    min={0}
+                    max={64}
+                    className={inputCls}
+                    value={memo[key]}
+                    onChange={(e) =>
+                      updateMemo({
+                        [key]: Math.max(0, Math.min(64, Number(e.target.value) || 0)),
+                      })
+                    }
+                  />
+                </SettingsMiniField>
+              );
+            })}
+          </SettingsInlineFields>
+        </SettingsField>
 
         {/* Indent Size */}
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("memo.indentSize")}
-            </span>
-            <p
-              className="mt-0.5 text-[13px] leading-tight"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {t("memo.indentSizeDesc")}
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <input
-              data-testid="memo-indent-size"
-              type="number"
-              min={1}
-              max={8}
-              className={inputCls}
-              style={{ width: 60 }}
-              value={memo.indentSize}
-              onChange={(e) =>
-                updateMemo({
-                  indentSize: Math.max(1, Math.min(8, Number(e.target.value) || 2)),
-                })
-              }
-            />
-          </div>
-        </div>
-      </SubGroup>
+        <SettingsField label={t("memo.indentSize")} desc={t("memo.indentSizeDesc")}>
+          <input
+            data-testid="memo-indent-size"
+            type="number"
+            min={1}
+            max={8}
+            className={inputCls}
+            value={memo.indentSize}
+            onChange={(e) =>
+              updateMemo({
+                indentSize: Math.max(1, Math.min(8, Number(e.target.value) || 2)),
+              })
+            }
+          />
+        </SettingsField>
+      </SettingsGroup>
 
-      <SubGroup title={t("memo.groupBehavior")}>
+      <SettingsGroup title={t("memo.groupBehavior")}>
         {/* Paragraph Detection */}
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("memo.paragraphDetection")}
-            </span>
-            <p
-              className="mt-0.5 text-[13px] leading-tight"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {t("memo.paragraphDetectionDesc")}
-            </p>
+        <SettingsField label={t("memo.paragraphDetection")} desc={t("memo.paragraphDetectionDesc")}>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1.5">
+              <ToggleSwitch
+                data-testid="memo-paragraph-copy-enabled"
+                checked={memo.paragraphCopy.enabled}
+                onChange={(v) =>
+                  updateMemo({
+                    paragraphCopy: { ...memo.paragraphCopy, enabled: v },
+                  })
+                }
+              />
+              <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+                {t("common.enabledShort")}
+              </span>
+            </label>
+            <label className="flex items-center gap-1.5">
+              <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
+                {t("memo.blankLineCount")}
+              </span>
+              <input
+                data-testid="memo-paragraph-copy-min-blank-lines"
+                type="number"
+                min={1}
+                max={10}
+                className={inputCls}
+                value={memo.paragraphCopy.minBlankLines}
+                onChange={(e) =>
+                  updateMemo({
+                    paragraphCopy: {
+                      ...memo.paragraphCopy,
+                      minBlankLines: Math.max(1, Math.min(10, Number(e.target.value) || 1)),
+                    },
+                  })
+                }
+              />
+            </label>
           </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-3">
-              <label className="flex items-center gap-1.5">
-                <input
-                  data-testid="memo-paragraph-copy-enabled"
-                  type="checkbox"
-                  checked={memo.paragraphCopy.enabled}
-                  onChange={(e) =>
-                    updateMemo({
-                      paragraphCopy: { ...memo.paragraphCopy, enabled: e.target.checked },
-                    })
-                  }
-                />
-                <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-                  {t("common.enabledShort")}
-                </span>
-              </label>
-              <label className="flex items-center gap-1.5">
-                <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
-                  {t("memo.blankLineCount")}
-                </span>
-                <input
-                  data-testid="memo-paragraph-copy-min-blank-lines"
-                  type="number"
-                  min={1}
-                  max={10}
-                  className={inputCls}
-                  style={{ width: 50 }}
-                  value={memo.paragraphCopy.minBlankLines}
-                  onChange={(e) =>
-                    updateMemo({
-                      paragraphCopy: {
-                        ...memo.paragraphCopy,
-                        minBlankLines: Math.max(1, Math.min(10, Number(e.target.value) || 1)),
-                      },
-                    })
-                  }
-                />
-              </label>
-            </div>
-          </div>
-        </div>
+        </SettingsField>
 
         {/* Triple-click Paragraph Select */}
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("memo.tripleClickSelect")}
-            </span>
-            <p
-              className="mt-0.5 text-[13px] leading-tight"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {t("memo.tripleClickSelectDesc")}
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <label className="flex items-center gap-1.5">
-              <input
-                data-testid="memo-triple-click-paragraph-select"
-                type="checkbox"
-                checked={memo.tripleClickParagraphSelect}
-                onChange={(e) => updateMemo({ tripleClickParagraphSelect: e.target.checked })}
-              />
-              <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-                {t("common.enabledShort")}
-              </span>
-            </label>
-          </div>
-        </div>
+        <SettingsToggleField
+          label={t("memo.tripleClickSelect")}
+          desc={t("memo.tripleClickSelectDesc")}
+          testId="memo-triple-click-paragraph-select"
+          checked={memo.tripleClickParagraphSelect}
+          onChange={(v) => updateMemo({ tripleClickParagraphSelect: v })}
+        />
 
         {/* Copy on Select */}
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("memo.copyOnSelect")}
-            </span>
-            <p
-              className="mt-0.5 text-[13px] leading-tight"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {t("memo.copyOnSelectDesc")}
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <label className="flex items-center gap-1.5">
-              <input
-                data-testid="memo-copy-on-select"
-                type="checkbox"
-                checked={memo.copyOnSelect}
-                onChange={(e) => updateMemo({ copyOnSelect: e.target.checked })}
-              />
-              <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-                {t("common.enabledShort")}
-              </span>
-            </label>
-          </div>
-        </div>
-      </SubGroup>
+        <SettingsToggleField
+          label={t("memo.copyOnSelect")}
+          desc={t("memo.copyOnSelectDesc")}
+          testId="memo-copy-on-select"
+          checked={memo.copyOnSelect}
+          onChange={(v) => updateMemo({ copyOnSelect: v })}
+        />
+      </SettingsGroup>
     </div>
   );
 }
@@ -5597,204 +4889,217 @@ function KeybindingsSection() {
     .map((kb, i) => ({ ...kb, index: i }))
     .filter((kb) => !defaultKeybindings.some((d) => d.id === kb.command));
 
+  // Consecutive defaults with the same group share one card.
+  const keybindingGroups: { group: string; defs: (typeof defaultKeybindings)[number][] }[] = [];
+  for (const def of defaultKeybindings) {
+    const last = keybindingGroups[keybindingGroups.length - 1];
+    if (last && last.group === def.group) last.defs.push(def);
+    else keybindingGroups.push({ group: def.group, defs: [def] });
+  }
+
   return (
-    <div>
-      <SectionTitle>{t("keybindings.title")}</SectionTitle>
+    <div className="settings-page">
+      <SettingsPageTitle>{t("keybindings.title")}</SettingsPageTitle>
 
-      <div data-testid="default-keybindings" className="flex flex-col gap-0">
-        {defaultKeybindings.map((def, idx) => {
-          // Render group header when group changes
-          const prevGroup = idx > 0 ? defaultKeybindings[idx - 1].group : null;
-          const showGroupHeader = def.group !== prevGroup;
-          const override = overrideMap.get(def.id);
-          const isOverridden = !!override;
-          const isEditing = editingId === def.id;
-          const displayKeys = isOverridden ? override.keys : def.defaultKeys;
-
-          return (
-            <div key={def.id}>
-              {showGroupHeader && (
+      <div data-testid="default-keybindings" className="settings-stack">
+        {keybindingGroups.map(({ group, defs }) => (
+          <SettingsGroup key={group} title={group}>
+            {defs.map((def) => {
+              const override = overrideMap.get(def.id);
+              const isOverridden = !!override;
+              const isEditing = editingId === def.id;
+              const displayKeys = isOverridden ? override.keys : def.defaultKeys;
+              return (
                 <div
-                  className="px-3 pt-3 pb-1 text-[10px] font-medium uppercase tracking-wider"
-                  style={{ color: "var(--text-secondary)", opacity: 0.5 }}
+                  key={def.id}
+                  className="settings-kb-row"
+                  style={{
+                    background: isEditing ? "var(--accent-06)" : "transparent",
+                    boxShadow: isOverridden ? "inset 2px 0 0 var(--accent)" : "none",
+                  }}
                 >
-                  {def.group}
-                </div>
-              )}
-              <div
-                className="flex items-center gap-3 px-3 py-1.5"
-                style={{
-                  background: isEditing ? "var(--accent-06)" : "transparent",
-                  borderLeft: isOverridden ? "2px solid var(--accent)" : "2px solid transparent",
-                }}
-              >
-                <span className="min-w-0 flex-1 text-xs" style={{ color: "var(--text-primary)" }}>
-                  {def.label}
-                </span>
-
-                {isEditing ? (
-                  <div
-                    tabIndex={0}
-                    autoFocus
-                    onKeyDown={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      const raw = keyEventToString(e.nativeEvent);
-                      if (!raw) return;
-                      // Wildcard actions (`pane.focus` = "Alt+Arrow") bind all four
-                      // directions at once — pressing any arrow during capture keeps
-                      // the `Arrow` token instead of narrowing to a single direction.
-                      // Non-arrow captures are rejected outright: the handler derives
-                      // its direction from the pressed arrow, so a non-arrow binding
-                      // could never do anything (PR #338 review).
-                      let str = raw;
-                      if (usesArrowWildcard(def.defaultKeys)) {
-                        str = coerceArrowWildcard(raw);
-                        if (str === raw) return;
-                      }
-                      setCapturedKeys(str);
-                      // Update the keybinding in draft
-                      setDraftKeybindings((prev) =>
-                        prev.map((kb) => (kb.command === def.id ? { ...kb, keys: str } : kb)),
-                      );
-                    }}
-                    onBlur={() => setEditingId(null)}
-                    className="flex items-center gap-2 rounded px-2 py-1 text-xs"
-                    style={{
-                      border: "1px solid var(--accent)",
-                      background: "var(--bg-base)",
-                      color: "var(--accent)",
-                      outline: "none",
-                      minWidth: 120,
-                      fontFamily: "var(--ui-font)",
-                      fontSize: "var(--fs-sm)",
-                    }}
+                  <span
+                    className="min-w-0 flex-1 text-[13px]"
+                    style={{ color: "var(--text-primary)" }}
                   >
-                    {capturedKeys || (
-                      <span style={{ opacity: 0.5 }}>{t("keybindings.pressKeys")}</span>
+                    {def.label}
+                  </span>
+
+                  {isEditing ? (
+                    <div
+                      tabIndex={0}
+                      autoFocus
+                      onKeyDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const raw = keyEventToString(e.nativeEvent);
+                        if (!raw) return;
+                        // Wildcard actions (`pane.focus` = "Alt+Arrow") bind all four
+                        // directions at once — pressing any arrow during capture keeps
+                        // the `Arrow` token instead of narrowing to a single direction.
+                        // Non-arrow captures are rejected outright: the handler derives
+                        // its direction from the pressed arrow, so a non-arrow binding
+                        // could never do anything (PR #338 review).
+                        let str = raw;
+                        if (usesArrowWildcard(def.defaultKeys)) {
+                          str = coerceArrowWildcard(raw);
+                          if (str === raw) return;
+                        }
+                        setCapturedKeys(str);
+                        // Update the keybinding in draft
+                        setDraftKeybindings((prev) =>
+                          prev.map((kb) => (kb.command === def.id ? { ...kb, keys: str } : kb)),
+                        );
+                      }}
+                      onBlur={() => setEditingId(null)}
+                      className="flex items-center gap-2 rounded px-2 py-1 text-xs"
+                      style={{
+                        border: "1px solid var(--accent)",
+                        background: "var(--bg-base)",
+                        color: "var(--accent)",
+                        outline: "none",
+                        minWidth: 120,
+                        fontFamily: "var(--ui-font)",
+                        fontSize: "var(--fs-sm)",
+                      }}
+                    >
+                      {capturedKeys || (
+                        <span style={{ opacity: 0.5 }}>{t("keybindings.pressKeys")}</span>
+                      )}
+                    </div>
+                  ) : (
+                    <kbd
+                      style={{
+                        ...kbdStyle,
+                        cursor: "pointer",
+                        ...(isAssignedKeybinding(displayKeys) ? {} : { opacity: 0.5 }),
+                      }}
+                      onClick={() => handleStartCapture(def.id, def.defaultKeys)}
+                      title={t("keybindings.changeShortcut")}
+                    >
+                      {/* 의도적으로 미할당인 액션(`terminal.osInputSourceSwitch`)은 빈
+                        칸이 아니라 미할당임을 보여야 클릭 대상임을 알 수 있다. */}
+                      {isAssignedKeybinding(displayKeys)
+                        ? displayKeys
+                        : t("keybindings.unassigned")}
+                    </kbd>
+                  )}
+
+                  <div className="w-12 shrink-0 text-right">
+                    {isOverridden && !isEditing && (
+                      <button
+                        onClick={() => handleResetDefault(def.id)}
+                        className="rounded px-1.5 py-0.5 text-[10px]"
+                        style={{
+                          color: "var(--text-secondary)",
+                          background: "transparent",
+                          border: "1px solid var(--border)",
+                          cursor: "pointer",
+                        }}
+                        title={t("common.resetToDefault")}
+                      >
+                        {t("common.reset")}
+                      </button>
                     )}
                   </div>
-                ) : (
-                  <kbd
-                    style={{
-                      ...kbdStyle,
-                      cursor: "pointer",
-                      ...(isAssignedKeybinding(displayKeys) ? {} : { opacity: 0.5 }),
-                    }}
-                    onClick={() => handleStartCapture(def.id, def.defaultKeys)}
-                    title={t("keybindings.changeShortcut")}
-                  >
-                    {/* 의도적으로 미할당인 액션(`terminal.osInputSourceSwitch`)은 빈
-                        칸이 아니라 미할당임을 보여야 클릭 대상임을 알 수 있다. */}
-                    {isAssignedKeybinding(displayKeys) ? displayKeys : t("keybindings.unassigned")}
-                  </kbd>
-                )}
-
-                <div className="w-12 shrink-0 text-right">
-                  {isOverridden && !isEditing && (
-                    <button
-                      onClick={() => handleResetDefault(def.id)}
-                      className="rounded px-1.5 py-0.5 text-[10px]"
-                      style={{
-                        color: "var(--text-secondary)",
-                        background: "transparent",
-                        border: "1px solid var(--border)",
-                        cursor: "pointer",
-                      }}
-                      title={t("common.resetToDefault")}
-                    >
-                      {t("common.reset")}
-                    </button>
-                  )}
                 </div>
-              </div>
-            </div>
-          );
-        })}
-
-        {customOnly.map((kb) => (
-          <div
-            key={`custom-${kb.index}`}
-            className="flex items-center gap-3 px-3 py-1.5"
-            style={{ borderLeft: "2px solid var(--accent)" }}
-          >
-            <FocusInput
-              type="text"
-              value={kb.command}
-              onChange={(e) => {
-                const val = e.target.value;
-                setDraftKeybindings((prev) =>
-                  prev.map((k, i) => (i === kb.index ? { ...k, command: val } : k)),
-                );
-              }}
-              placeholder={t("keybindings.actionPlaceholder")}
-              className="min-w-0 flex-1 rounded px-2 py-0.5 text-xs"
-            />
-            <kbd
-              style={{ ...kbdStyle, cursor: "pointer" }}
-              onClick={() => setEditingId(`custom-${kb.index}`)}
-            >
-              {kb.keys || "—"}
-            </kbd>
-            {editingId === `custom-${kb.index}` && (
-              <div
-                tabIndex={0}
-                autoFocus
-                onKeyDown={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  const str = keyEventToString(e.nativeEvent);
-                  if (str) {
-                    setDraftKeybindings((prev) =>
-                      prev.map((k, i) => (i === kb.index ? { ...k, keys: str } : k)),
-                    );
-                  }
-                }}
-                onBlur={() => setEditingId(null)}
-                className="flex items-center gap-2 rounded px-2 py-1 text-xs"
-                style={{
-                  border: "1px solid var(--accent)",
-                  background: "var(--bg-base)",
-                  color: "var(--accent)",
-                  outline: "none",
-                  minWidth: 120,
-                  fontFamily: "var(--ui-font)",
-                  fontSize: "var(--fs-sm)",
-                }}
-              >
-                {kb.keys || <span style={{ opacity: 0.5 }}>{t("keybindings.pressKeys")}</span>}
-              </div>
-            )}
-            <div className="w-12 shrink-0 text-right">
-              <button
-                data-testid={`remove-keybinding-${kb.index}`}
-                onClick={() => setDraftKeybindings((prev) => prev.filter((_, i) => i !== kb.index))}
-                className="text-xs"
-                style={{
-                  color: "var(--red)",
-                  cursor: "pointer",
-                  background: "transparent",
-                  border: "none",
-                }}
-                title={t("common.remove")}
-              >
-                <XIcon size={12} />
-              </button>
-            </div>
-          </div>
+              );
+            })}
+          </SettingsGroup>
         ))}
       </div>
 
-      <div className="mt-3">
-        <button
-          data-testid="add-keybinding-btn"
-          onClick={() => setDraftKeybindings((prev) => [...prev, { keys: "", command: "" }])}
-          className="rounded px-4 py-1.5 text-xs"
-          style={{ ...inputStyle, cursor: "pointer" }}
-        >
-          {t("keybindings.addBinding")}
-        </button>
-      </div>
+      <SettingsGroup
+        title={t("keybindings.customGroup")}
+        actions={
+          <Button
+            data-testid="add-keybinding-btn"
+            onClick={() => setDraftKeybindings((prev) => [...prev, { keys: "", command: "" }])}
+          >
+            {t("keybindings.addBinding")}
+          </Button>
+        }
+      >
+        {customOnly.length === 0 ? (
+          <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+            {t("keybindings.customEmpty")}
+          </p>
+        ) : (
+          customOnly.map((kb) => (
+            <div
+              key={`custom-${kb.index}`}
+              className="settings-kb-row"
+              style={{ boxShadow: "inset 2px 0 0 var(--accent)" }}
+            >
+              <FocusInput
+                type="text"
+                value={kb.command}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setDraftKeybindings((prev) =>
+                    prev.map((k, i) => (i === kb.index ? { ...k, command: val } : k)),
+                  );
+                }}
+                placeholder={t("keybindings.actionPlaceholder")}
+                className="min-w-0 flex-1 rounded px-2 py-0.5 text-xs"
+              />
+              <kbd
+                style={{ ...kbdStyle, cursor: "pointer" }}
+                onClick={() => setEditingId(`custom-${kb.index}`)}
+              >
+                {kb.keys || "—"}
+              </kbd>
+              {editingId === `custom-${kb.index}` && (
+                <div
+                  tabIndex={0}
+                  autoFocus
+                  onKeyDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const str = keyEventToString(e.nativeEvent);
+                    if (str) {
+                      setDraftKeybindings((prev) =>
+                        prev.map((k, i) => (i === kb.index ? { ...k, keys: str } : k)),
+                      );
+                    }
+                  }}
+                  onBlur={() => setEditingId(null)}
+                  className="flex items-center gap-2 rounded px-2 py-1 text-xs"
+                  style={{
+                    border: "1px solid var(--accent)",
+                    background: "var(--bg-base)",
+                    color: "var(--accent)",
+                    outline: "none",
+                    minWidth: 120,
+                    fontFamily: "var(--ui-font)",
+                    fontSize: "var(--fs-sm)",
+                  }}
+                >
+                  {kb.keys || <span style={{ opacity: 0.5 }}>{t("keybindings.pressKeys")}</span>}
+                </div>
+              )}
+              <div className="w-12 shrink-0 text-right">
+                <button
+                  data-testid={`remove-keybinding-${kb.index}`}
+                  onClick={() =>
+                    setDraftKeybindings((prev) => prev.filter((_, i) => i !== kb.index))
+                  }
+                  className="text-xs"
+                  style={{
+                    color: "var(--red)",
+                    cursor: "pointer",
+                    background: "transparent",
+                    border: "none",
+                  }}
+                  title={t("common.remove")}
+                >
+                  <XIcon size={12} />
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </SettingsGroup>
     </div>
   );
 }
@@ -5945,6 +5250,14 @@ export function SettingsView() {
   const [saveLabel, setSaveLabel] = useState("Save");
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
+  // The sections share one scroll container, so without this a new page would
+  // open wherever the previous one was left. Layout effect: the reset lands in
+  // the same commit as the swap, before the user can see the old offset.
+  const fieldsRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (fieldsRef.current) fieldsRef.current.scrollTop = 0;
+  }, [activeNav]);
+
   // Draft flush/reset registry — sections register callbacks invoked on Save/Discard
   const flushMapRef = useRef<Map<string, FlushFn>>(new Map());
   const resetMapRef = useRef<Map<string, FlushFn>>(new Map());
@@ -6032,164 +5345,21 @@ export function SettingsView() {
         className="settings-view flex h-full min-h-0"
         style={{ color: "var(--text-primary)" }}
       >
-        {/* Sidebar Navigation */}
-        <nav
-          className="settings-sidebar flex h-full shrink-0 flex-col overflow-y-auto py-3"
-          style={{
-            background: "var(--bg-surface)",
-            borderRight: "1px solid var(--border)",
+        <SettingsNavigation
+          activeNav={activeNav}
+          profiles={profiles}
+          onNavigate={setActiveNav}
+          onAddProfile={handleAddProfile}
+          onRemoveProfile={(index) => {
+            removeProfile(index);
+            setActiveNav("startup");
           }}
-        >
-          {/* Open JSON — Windows Terminal style top-right link */}
-          <Button
-            data-testid="sidebar-open-json"
-            onClick={handleOpenSettingsJson}
-            className="mx-3 mb-2"
-            title={t("nav.openJsonTitle")}
-          >
-            {t("nav.openJson")}
-          </Button>
-
-          {[
-            {
-              group: "groupGeneral",
-              items: [
-                ["startup", "startup"],
-                ["update", "update"],
-              ],
-            },
-            {
-              group: "groupAppearance",
-              items: [
-                ["font", "appFont"],
-                ["interface", "interface"],
-                ["workspaceDisplay", "workspaces"],
-                ["widgets", "widgets"],
-              ],
-            },
-            {
-              group: "groupTerminal",
-              items: [
-                ["terminal", "terminal"],
-                ["colorSchemes", "colorSchemes"],
-              ],
-            },
-            {
-              group: "groupInput",
-              items: [
-                ["paste", "paste"],
-                ["keybindings", "keybindings"],
-              ],
-            },
-            {
-              group: "groupViews",
-              items: [
-                ["memo", "memo"],
-                ["fileExplorer", "fileExplorer"],
-                ["viewer", "viewer"],
-                ["github", "github"],
-                ["issueReporter", "issueReporter"],
-              ],
-            },
-            {
-              group: "groupAgents",
-              items: [
-                ["claude", "claude"],
-                ["codex", "codex"],
-                ["grok", "grok"],
-              ],
-            },
-            { group: "groupRemote", items: [["remoteConnection", "remoteConnection"]] },
-          ].map(({ group, items }) => (
-            <section
-              key={group}
-              data-testid={`settings-group-${group}`}
-              aria-label={t(`nav.${group}`)}
-            >
-              <NavGroupHeader label={t(`nav.${group}`)} />
-              {items.map(([id, label]) => (
-                <button
-                  key={id}
-                  data-testid={`nav-${id === "remoteConnection" ? "remote" : id}`}
-                  className="settings-nav-button"
-                  aria-current={activeNav === id ? "page" : undefined}
-                  onClick={() => setActiveNav(id)}
-                >
-                  {t(`nav.${label}`)}
-                </button>
-              ))}
-            </section>
-          ))}
-
-          {/* Profiles group */}
-          <NavGroupHeader label={t("nav.groupProfiles")}>
-            <button
-              data-testid="add-profile-btn"
-              onClick={handleAddProfile}
-              title={t("nav.addProfile")}
-              aria-label={t("nav.addProfile")}
-              className="text-xs"
-              style={{
-                color: "var(--accent)",
-                background: "transparent",
-                border: "none",
-                cursor: "pointer",
-              }}
-            >
-              <PlusIcon />
-            </button>
-          </NavGroupHeader>
-
-          <button
-            data-testid="nav-profile-defaults"
-            className="settings-nav-button"
-            aria-current={activeNav === "defaults" ? "page" : undefined}
-            onClick={() => setActiveNav("defaults")}
-          >
-            {t("nav.profileDefaults")}
-          </button>
-
-          {profiles.map((p, i) => {
-            const id = `profile-${i}`;
-            return (
-              <div key={id} className="group flex items-center">
-                <button
-                  className="settings-nav-button min-w-0 flex-1 truncate"
-                  aria-current={activeNav === id ? "page" : undefined}
-                  onClick={() => setActiveNav(id)}
-                >
-                  {p.name}
-                </button>
-                <button
-                  data-testid={`remove-profile-${i}`}
-                  onClick={() => {
-                    removeProfile(i);
-                    setActiveNav("startup");
-                  }}
-                  className="mr-2 hidden text-xs opacity-50 hover:opacity-100 group-hover:inline"
-                  style={{
-                    color: "var(--red)",
-                    background: "transparent",
-                    border: "none",
-                    cursor: "pointer",
-                  }}
-                  title={t("nav.deleteProfile")}
-                >
-                  <XIcon size={12} />
-                </button>
-              </div>
-            );
-          })}
-
-          <div className="mt-auto" />
-        </nav>
+          onOpenJson={handleOpenSettingsJson}
+        />
 
         {/* Content Area */}
-        <div
-          className="settings-content relative flex min-h-0 min-w-0 flex-1 flex-col"
-          style={{ background: "var(--bg-base)" }}
-        >
-          <div className="settings-fields min-h-0 flex-1 overflow-y-auto p-5">
+        <div className="settings-content relative flex min-h-0 min-w-0 flex-1 flex-col">
+          <div ref={fieldsRef} className="settings-fields min-h-0 flex-1 overflow-y-auto">
             {activeNav === "startup" && <StartupSection />}
             {activeNav === "font" && <FontSection />}
             {activeNav === "update" && <UpdateSection />}
@@ -6216,10 +5386,7 @@ export function SettingsView() {
           </div>
 
           {/* Sticky save bar — always visible at bottom */}
-          <div
-            className="flex shrink-0 flex-wrap items-center justify-end gap-2 px-5 py-3"
-            style={{ background: "var(--bg-surface)", borderTop: "1px solid var(--border)" }}
-          >
+          <div className="settings-save-bar">
             <span
               role="status"
               className="mr-auto text-[13px]"

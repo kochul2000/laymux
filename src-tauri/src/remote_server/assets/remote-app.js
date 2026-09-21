@@ -11457,6 +11457,7 @@ import {
             updateKeyBarControls();
           };
           const visibilityLabel = document.createElement("label");
+          visibilityLabel.className = "nav-toggle-row";
           const visibility = document.createElement("input");
           visibility.type = "checkbox";
           visibility.checked = keyBarConfig.floating.enabled;
@@ -11464,7 +11465,10 @@ import {
             keyBarConfig.floating.enabled = visibility.checked;
             update();
           });
-          visibilityLabel.append(visibility, " Show floating controls");
+          const visibilityName = document.createElement("span");
+          visibilityName.className = "nav-toggle-name";
+          visibilityName.textContent = "Show floating controls";
+          visibilityLabel.append(visibility, visibilityName);
           editor.append(visibilityLabel);
           for (const { item, id, actionId, pad } of floatingEntries()) {
             const name = pad ? (id === "dpad" ? "Arrow pad" : "Pane / alert pad") : inputActionLabel(actionId);

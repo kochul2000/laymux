@@ -68,8 +68,21 @@
   --fs-md: 13px;
   --fs-lg: 15px;
   --settings-control-height: 34px;
-  --settings-sidebar-width: 180px;
+  --settings-sidebar-width: 212px;
+  --settings-rail-width: 56px;
   --settings-content-width: 840px;
+  --settings-control-width: 240px;
+  --settings-number-width: 104px;
+  --settings-mini-input-width: 72px;
+  --settings-page-title-size: 28px;
+  --settings-label-size: 14px;
+  --settings-desc-size: 12px;
+  --settings-page-padding: 28px;
+  --settings-group-gap: 24px;
+  --settings-row-gap: 4px;
+  --settings-card-padding: 16px;
+  --settings-card-min-height: 68px;
+  --settings-field-gap: 24px;
 
   /* utility */
   --separator-bg: #ffffff14; /* intentionally same as --hover-bg-strong */
@@ -92,88 +105,371 @@
   --terminal-composition-underline-color: currentColor;
 }
 
-/* Settings fields adapt to their modal or dock, independently of window width. */
+/* Windows Terminal settings: a navigation rail and quiet, individual rows.
+   Tokens follow the app theme; the product's square corners stay intact. */
+.settings-modal {
+  width: 1040px;
+  max-width: 94vw;
+  height: min(86vh, 860px);
+}
+.settings-view {
+  container: settings / inline-size;
+  background: var(--bg-surface);
+}
 .settings-sidebar {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
   width: var(--settings-sidebar-width);
+  min-height: 0;
 }
 .settings-content {
-  container-type: inline-size;
+  container: settings-content / inline-size;
+  background: var(--bg-surface);
+}
+.settings-fields {
+  padding: var(--settings-page-padding);
 }
 .settings-fields > div {
   max-width: var(--settings-content-width);
   margin-inline: auto;
 }
-.settings-row {
+.settings-page,
+.settings-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--settings-group-gap);
+  min-width: 0;
+}
+.settings-page__header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 4px;
+}
+.settings-page__title {
+  font-size: var(--settings-page-title-size);
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+.settings-page__desc,
+.settings-group__desc {
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+}
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.settings-group__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 20px;
+}
+.settings-group__title {
+  font-size: var(--settings-label-size);
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+.settings-group__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.settings-group__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--settings-row-gap);
+  min-width: 0;
+}
+.settings-group__body > :not(.settings-field):not(.settings-kb-row) {
+  margin: 8px var(--settings-card-padding);
+  max-width: calc(100% - 2 * var(--settings-card-padding));
+}
+.settings-field {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) minmax(0, 1.4fr);
-  align-items: start;
-  gap: 16px;
-  padding-block: 12px;
+  align-items: center;
+  column-gap: var(--settings-field-gap);
+  row-gap: 12px;
+  min-height: var(--settings-card-min-height);
+  min-width: 0;
+  padding: var(--settings-card-padding);
+  border: 1px solid var(--hover-bg-subtle);
+  background: var(--bg-base);
 }
-.settings-row + .settings-row {
-  border-top: 1px solid var(--border);
+.settings-field--inline {
+  grid-template-columns: minmax(0, 1fr) minmax(0, min(var(--settings-control-width), 40%));
 }
-.settings-row-label {
-  padding-top: 4px;
+.settings-field--stack {
+  grid-template-columns: minmax(0, 1fr);
+}
+.settings-field__text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.settings-field__label {
+  font-size: var(--settings-label-size);
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--text-primary);
+  word-break: keep-all;
   overflow-wrap: anywhere;
+}
+.settings-field__desc {
+  font-size: var(--settings-desc-size);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+.settings-field__control {
+  min-width: 0;
+  word-break: keep-all;
+}
+.settings-field__control :is(input, select, textarea) {
+  max-width: 100%;
+}
+.settings-field--inline > .settings-field__control {
+  display: grid;
+  justify-items: end;
+  align-content: center;
+  row-gap: 6px;
+}
+.settings-field--stack > .settings-field__control {
+  display: block;
+}
+.settings-field__control input[type="number"] {
+  width: var(--settings-number-width);
+}
+.settings-mini-field input {
+  width: var(--settings-mini-input-width);
+}
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.settings-toggle__state {
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  text-align: right;
+}
+.settings-inline-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+}
+.settings-mini-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+}
+.settings-mini-field__label {
+  min-width: 2.5em;
+}
+.settings-kb-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 8px var(--settings-card-padding);
+  background: var(--bg-base);
 }
 .settings-view
   :is(input:not([type="checkbox"]):not([type="range"]):not([type="color"]), select, textarea) {
   min-height: var(--settings-control-height);
-  max-width: 100%;
+  padding-inline: 10px;
+  border: 1px solid var(--border);
   border-radius: 0;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  color-scheme: dark;
   font-size: var(--fs-md);
 }
 .settings-view p {
-  line-height: 1.6;
+  line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+/* Navigation: icons also identify pages when the dock collapses to a rail. */
+.settings-nav-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-block: 8px;
 }
 .settings-nav-heading {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 20px 12px 6px;
+  margin: 12px 20px 4px;
   color: var(--text-secondary);
 }
-.settings-nav-heading h3 {
-  font-size: var(--fs-sm);
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+.settings-nav-scroll > section:first-child .settings-nav-heading {
+  margin-top: 4px;
 }
-.settings-nav-divider {
-  flex: 1;
-  border-top: 1px solid var(--border);
+.settings-nav-heading h3 {
+  font-size: var(--settings-desc-size);
+  font-weight: 600;
 }
 .settings-nav-button {
-  display: block;
-  width: 100%;
-  padding: 8px 12px 8px 24px;
-  border-left: 3px solid transparent;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: calc(100% - 16px);
+  min-height: 34px;
+  margin-inline: 8px;
+  padding: 7px 12px;
   background: transparent;
   color: var(--text-primary);
   text-align: left;
   font-size: var(--fs-md);
   cursor: pointer;
 }
+.settings-nav-button svg {
+  color: var(--text-secondary);
+}
+.settings-nav-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .settings-nav-button:hover {
   background: var(--hover-bg);
-  color: var(--text-primary);
 }
 .settings-nav-button[aria-current="page"] {
-  background: var(--accent-10);
-  border-left-color: var(--accent);
-  color: var(--accent);
-  font-weight: 600;
+  background: var(--hover-bg-strong);
 }
-.settings-nav-button:focus-visible {
+.settings-nav-button[aria-current="page"]::before {
+  position: absolute;
+  top: 9px;
+  bottom: 9px;
+  left: 0;
+  width: 3px;
+  background: var(--accent);
+  content: "";
+}
+.settings-nav-button[aria-current="page"] svg {
+  color: var(--accent);
+}
+.settings-nav-button:focus-visible,
+.settings-profile-remove:focus-visible {
   outline: 1px solid var(--accent);
   outline-offset: -2px;
 }
-@container (max-width: 460px) {
-  .settings-row {
+.settings-profile-nav {
+  position: relative;
+}
+.settings-profile-nav .settings-nav-button {
+  padding-right: 32px;
+}
+.settings-profile-remove {
+  position: absolute;
+  top: 7px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--red);
+  opacity: 0;
+  cursor: pointer;
+}
+.settings-profile-nav:hover .settings-profile-remove,
+.settings-profile-nav:focus-within .settings-profile-remove {
+  opacity: 1;
+}
+.settings-nav-footer {
+  display: flex;
+  align-items: center;
+  min-height: 60px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+}
+.settings-nav-footer .settings-json-button {
+  justify-content: flex-start;
+  width: 100%;
+  padding-inline: 0;
+  border-color: transparent;
+  background: transparent;
+  font-weight: 400;
+}
+.settings-save-bar {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-height: 60px;
+  padding: 12px var(--settings-page-padding);
+  border-top: 1px solid var(--border);
+}
+.settings-save-bar .ui-btn {
+  min-height: var(--settings-control-height);
+  min-width: 80px;
+}
+
+/* Wrap text controls before their description is squeezed into a thin column.
+   Switches need little space and keep their label beside them. */
+@container settings-content (max-width: 600px) {
+  .settings-fields {
+    padding: 20px;
+  }
+  .settings-field--inline {
     grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
+  }
+  .settings-field--inline > .settings-field__control {
+    justify-items: start;
+  }
+  .settings-field--toggle {
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 16px;
+  }
+  .settings-field--toggle > .settings-field__control {
+    justify-items: end;
+  }
+  .settings-save-bar {
+    padding-inline: 20px;
+  }
+}
+@container settings (max-width: 640px) {
+  .settings-sidebar {
+    width: var(--settings-rail-width);
+  }
+  .settings-nav-heading,
+  .settings-nav-label {
+    display: none;
+  }
+  .settings-nav-scroll > section + section {
+    margin-top: 8px;
+  }
+  .settings-nav-button,
+  .settings-profile-nav .settings-nav-button {
+    justify-content: center;
+    padding-inline: 0;
+  }
+  .settings-nav-footer {
+    padding-inline: 12px;
+  }
+  .settings-nav-footer .settings-json-button {
+    justify-content: center;
+  }
+  .settings-profile-remove {
+    right: 3px;
   }
 }
 
