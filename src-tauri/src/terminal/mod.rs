@@ -316,36 +316,11 @@ impl SyncGroup {
     }
 }
 
-/// PowerShell shell integration script.
-/// Overrides `prompt` to emit:
-/// - OSC 133;D (command exit code) — enables notify-on-fail
-/// - OSC 7 (current working directory) — enables sync-cwd
-///   Uses single quotes and concatenation to avoid double-quote escaping issues
-///   with PowerShell's -Command parameter.
+/// PowerShell의 수락된 줄 입력/프롬프트 경계를 OSC로 전달한다 (ADR-0262).
 fn shell_integration_powershell() -> String {
-    // PowerShell 5.1 doesn't support `e escape — use [char]27 instead.
-    // OSC sequences are embedded directly in the prompt return string.
-    // [Console]::Write() fails in ConPTY context, so we avoid it.
-    // Avoids double quotes — they get mangled by Windows cmd-line argument escaping.
-    r#"
-$global:__lmx_e = [string][char]27
-$global:__lmx_b = [string][char]7
-$global:__lmx_f = $true
-function prompt {
-    $ec = $global:LASTEXITCODE; if ($null -eq $ec) { $ec = 0 }
-    $e = $global:__lmx_e; $b = $global:__lmx_b
-    $loc = (Get-Location).ProviderPath
-    $cwd = $loc.Replace([char]92, '/')
-    if ($cwd.StartsWith('//')) { $r = $e + ']7;' + $cwd + $b }
-    else { $r = $e + ']7;file://localhost/' + $cwd + $b }
-    if (-not $global:__lmx_f) { $r = $e + ']133;D;' + $ec + $b + $r }
-    $global:__lmx_f = $false
-    $global:LASTEXITCODE = $ec
-    return $r + 'PS ' + $loc + '> '
-}
-"#
-    .trim()
-    .to_string()
+    include_str!("powershell-integration.ps1")
+        .trim()
+        .to_string()
 }
 
 /// Bash shell integration script for WSL (without env injection).
