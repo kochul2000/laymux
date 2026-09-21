@@ -408,7 +408,10 @@
       "paneClearInterruptRounds": "Ctrl+C presses",
       "paneClearInterruptRoundsDesc": "How many times to send Ctrl+C before clearing (1–10).",
       "paneClearSettle": "Settle delay (ms)",
-      "paneClearSettleDesc": "How long to wait after the last Ctrl+C before submitting the clear input (0–10000)."
+      "paneClearSettleDesc": "How long to wait after the last Ctrl+C before submitting the clear input (0–10000).",
+      "groupGeneral": "General",
+      "groupComposer": "Composer",
+      "groupScroll": "Copy & Scroll"
     },
     "interface": {
       "title": "Interface",
@@ -707,7 +710,9 @@
       "changeShortcut": "Click to change shortcut",
       "actionPlaceholder": "action.name",
       "addBinding": "+ Add new binding",
-      "unassigned": "Unassigned"
+      "unassigned": "Unassigned",
+      "customGroup": "Custom",
+      "customEmpty": "No custom bindings."
     },
     "recovery": {
       "pathUnavailable": "(Unable to get the path)",

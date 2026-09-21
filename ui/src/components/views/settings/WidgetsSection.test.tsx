@@ -46,7 +46,6 @@ describe("WidgetsSectionBody", () => {
 
     expect(screen.getByTestId("widgets-font-family")).toBeInTheDocument();
     expect(screen.getByTestId("widgets-font-size")).toHaveValue(9);
-    expect(screen.getByTestId("widgets-font-size")).toHaveStyle({ width: "60px" });
     await user.selectOptions(screen.getByTestId("widgets-font-family"), "JetBrains Mono");
     const withFamily = onChange.mock.calls.at(-1)?.[0] as WidgetsSettings;
     expect(withFamily.fontFamily).toBe("JetBrains Mono");

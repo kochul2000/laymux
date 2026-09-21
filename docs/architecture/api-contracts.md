@@ -34,9 +34,10 @@ UI 다국어는 **react-i18next** 로 구현한다(이슈 #350).
 - UI 기본 폰트는 앱에 동봉한 Pretendard Variable v1.3.9다([ADR-0241](../adr/0241-bundled-pretendard-default-ui-font.md)). `ui/public/fonts/pretendard/`의 WOFF2(2,057,688바이트)와 라이선스를 함께 배포하고 `index.css`의 `@font-face`가 로컬에서 로딩한다. `--ui-font-default`는 `"Pretendard Variable", sans-serif`이며 `appearance.uiFontFamily = ""`는 이 기본값을 뜻한다. 명시한 UI 폰트는 `useAppTheme`가 앞에 붙인다. 터미널·콘텐츠 폰트와 Remote 폰트 정책은 바뀌지 않는다.
 
 - 내비게이션은 일반(시작·업데이트), 모양(폰트·인터페이스·워크스페이스·위젯), 터미널(동작·색상), 입력(붙여넣기·키 바인딩), 뷰, 에이전트, 원격, 프로필로 묶는다. 기존 Automation 섹션 ID는 유지한다.
-- 사이드바 그룹 제목은 11px 굵은 보조 텍스트와 가로 구분선으로 표시하고, 실제 메뉴는 13px 기본 텍스트와 추가 들여쓰기로 구분한다. 프로필 제목도 같은 헤더를 사용한다.
-- 설정 행은 라벨·설명과 입력을 두 열로 정렬하고, 콘텐츠 폭 460px 이하에서는 한 열로 쌓는다. 설명은 13px와 테마의 보조 텍스트 색상을 사용하며 별도 투명도로 흐리게 하지 않는다. 설정 내부 텍스트 입력·선택 상자는 최소 높이 34px와 각진 모서리를 공유한다.
-- 메뉴와 본문은 독립 스크롤 영역이며 저장·변경 취소와 변경 상태는 본문 아래에 항상 남는다. 기존 draft 저장 방식과 즉시 적용 항목은 유지한다. 액션 버튼은 [ADR-0192](../adr/0192-standard-action-button-and-disabled-affordance.md)의 공통 Button을 사용한다.
+- Windows Terminal의 [설정 화면](https://learn.microsoft.com/en-us/windows/terminal/images/portable-mode.png)을 기준으로 큰 페이지 제목(28px), 아이콘 내비게이션, 라벨·설명을 왼쪽에 묶고 컨트롤을 오른쪽에 놓는 개별 설정 행을 사용한다. 그룹 전체를 감싸는 테두리 없이 그룹 제목(14px)과 행 사이 간격으로 구분한다. 앱 테마의 CSS 변수와 각진 모서리는 유지한다.
+- `SettingsNavigation`은 212px 사이드바와 하단 고정 JSON 열기를 렌더한다. 메뉴는 공용 Lucide 아이콘·13px 텍스트·짧은 선택 표시를 사용한다. 설정 뷰 폭 640px 이하에서는 56px 아이콘 메뉴로 접으며 각 버튼의 `aria-label`·`title`로 이름을 유지한다. 메뉴와 본문은 독립 스크롤 영역이다.
+- 설정 행의 라벨은 14px, 설명은 12px 보조 텍스트다. 일반 컨트롤 열은 최대 240px이고 콘텐츠 폭 600px 이하에서는 라벨·설명 다음 줄로 옮긴다. 스위치는 좁은 폭에서도 라벨 옆에 두고 상태 문구를 스위치 앞에 놓아 스위치가 같은 축에 정렬되게 한다. 입력·선택 상자는 최소 높이 34px, 숫자 입력은 104px, 여백 미니 입력은 72px을 사용한다.
+- 모달은 최대 1040px 폭·860px 높이에서 화면 크기에 맞춰 줄어든다. 저장·변경 취소와 변경 상태는 본문 아래에 항상 남고, 카테고리를 바꾸면 본문 스크롤을 맨 위로 돌린다. 기존 draft 저장 방식과 즉시 적용 항목은 유지한다. 액션 버튼은 [ADR-0192](../adr/0192-standard-action-button-and-disabled-affordance.md)의 공통 Button을 사용한다.
 
 ### 로딩 실패와 부분 복구
 
@@ -2031,6 +2032,7 @@ pub fn get_terminal_summaries_inner(
 - **앱을 떠나는 버튼은 external-link 아이콘을 단다.** OS 브라우저로 클릭을 넘기는 버튼은 `ExternalLinkIcon`과 "브라우저에서 엽니다" `title`을 함께 쓴다.
 - **범용 애플리케이션 아이콘은 Lucide로 통일한다**([ADR-0205](../adr/0205-lucide-application-icon-source.md), [ADR-0210](../adr/0210-remote-lucide-icon-boundary.md)). 데스크톱 호출부는 `lucide-react`를 직접 import하지 않고 `components/ui/icons.tsx`의 공용 아이콘을 사용하며, Remote 호출부는 vanilla `lucide`를 직접 import하거나 SVG path를 복사하지 않고 `ui/src/remote/remote-icons.js`를 사용한다. 두 진입점이 기본 크기·선 굵기·`currentColor`·장식 아이콘 접근성 속성을 동일하게 소유한다. pane 명령 상태의 문자열 값은 계산·절전 억제·Automation/Remote 호환 계약으로 유지하되 각 최종 렌더링 경계에서 Lucide `Hourglass`·`Check`·`X`·`Minus`로 변환한다. 레이아웃 미니맵처럼 입력 데이터에 따라 그려지는 SVG, Remote terminal keycap label·단위·제품 고유 데이터 시각화만 예외이며, dock 위치 토글처럼 Lucide가 의미를 그대로 제공하는 정적 도식은 예외가 아니다.
 - 재사용 가능한 UI 요소(Modal, FormControls, Separator 등)는 `components/ui/`에 배치한다.
+- **설정 화면은 `components/views/settings/SettingsLayout.tsx`의 공통 컴포넌트로 조립한다.** `SettingsPageTitle`(페이지 제목) → `SettingsGroup`(그룹 제목 + 설정 목록) → `SettingsField`(개별 설정 행) / `SettingsToggleField`(불리언 설정 — 상태 문구 + 스위치; 체크박스는 다중 선택 목록용)를 쓴다. `SettingsField`의 `layout="inline"`은 라벨·설명을 한 텍스트 블록으로 묶고 컨트롤을 오른쪽에 가운데 정렬하며, `layout="stack"`은 그 아래에 전폭 컨트롤을 배치한다(목록·명령줄·여백 격자용). 작은 입력 묶음은 `SettingsInlineFields`/`SettingsMiniField`를 쓴다. 섹션별로 행·카드·입력 폭을 직접 만들지 않으며 스타일과 반응형 배치는 `index.css`의 `.settings-*`가 소유한다. 내비게이션은 `SettingsNavigation.tsx`가 표시만 담당하고 선택·프로필 동작·설정 draft는 기존 `SettingsView`가 소유한다.
 - **3곳 이상** 동일 패턴이 반복되면 공통 컴포넌트로 추출한다.
 - 새 View 추가 시 기존 공유 컴포넌트를 우선 검토하고, 없으면 인라인으로 작성 후 반복이 확인되면 추출한다.
 

@@ -5,11 +5,13 @@ import {
   ArrowRight,
   ArrowUp,
   Bell,
+  Bot,
   BrushCleaning,
   Camera,
   Check,
   ChevronDown,
   ChevronRight,
+  Clipboard,
   Columns2,
   Copy,
   CopyPlus,
@@ -21,6 +23,7 @@ import {
   Eye,
   EyeOff,
   File,
+  FileJson,
   FileSearch,
   Folder,
   FolderOpen,
@@ -30,6 +33,7 @@ import {
   Image,
   Hourglass,
   Keyboard,
+  Layers,
   Link,
   List,
   ListFilter,
@@ -37,6 +41,7 @@ import {
   Minus,
   Minimize2,
   Moon,
+  Palette,
   PanelBottom,
   PanelLeft,
   PanelRight,
@@ -46,12 +51,15 @@ import {
   Plus,
   RadioTower,
   RefreshCw,
+  Rocket,
   Rows2,
   Settings,
   Slash,
   Square,
+  SquareTerminal,
   Star,
   TriangleAlert,
+  Type,
   Upload,
   X,
   ZoomIn,
@@ -103,6 +111,38 @@ export function ArrowUpIcon(props: IconProps) {
 
 export function BellIcon(props: IconProps) {
   return renderIcon(Bell, props);
+}
+
+export function BotIcon(props: IconProps) {
+  return renderIcon(Bot, props);
+}
+
+export function ClipboardIcon(props: IconProps) {
+  return renderIcon(Clipboard, props);
+}
+
+export function FileJsonIcon(props: IconProps) {
+  return renderIcon(FileJson, props);
+}
+
+export function LayersIcon(props: IconProps) {
+  return renderIcon(Layers, props);
+}
+
+export function PaletteIcon(props: IconProps) {
+  return renderIcon(Palette, props);
+}
+
+export function RocketIcon(props: IconProps) {
+  return renderIcon(Rocket, props);
+}
+
+export function TerminalIcon(props: IconProps) {
+  return renderIcon(SquareTerminal, props);
+}
+
+export function TypeIcon(props: IconProps) {
+  return renderIcon(Type, props);
 }
 
 export function BroomIcon(props: IconProps) {

@@ -10,7 +10,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FocusInput, FocusSelect } from "@/components/ui/FormControls";
-import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
+import { SettingsField, SettingsGroup, SettingsToggleField } from "./SettingsLayout";
 import { ArrowDownIcon, ArrowUpIcon, XIcon } from "@/components/ui/icons";
 import { WIDGET_DEFINITIONS, findWidgetDefinition } from "@/components/widgets/registry";
 import type { WidgetOptionSpec } from "@/components/widgets/types";
@@ -54,7 +54,7 @@ function newInstanceId(): string {
  * select paints its text with the OS light-mode colour and disappears against
  * the app background.
  */
-const controlStyle: React.CSSProperties = { fontSize: "var(--fs-xs)", padding: "2px 4px" };
+const controlStyle: React.CSSProperties = { fontSize: "var(--fs-sm)", padding: "2px 6px" };
 
 const buttonStyle: React.CSSProperties = {
   background: "transparent",
@@ -81,15 +81,14 @@ export function WidgetsSectionBody({
   const change = (next: WidgetsSettings) => onChange(next);
 
   return (
-    <div data-testid="settings-widgets-section-body" className="flex flex-col gap-3 px-4 py-2">
-      <div className="flex flex-col gap-1">
-        <div className="flex items-center gap-2">
-          <span className="w-36 shrink-0 text-[12px]" style={{ color: "var(--text-primary)" }}>
-            {t("widgets.fontFamily")}
-          </span>
+    <div data-testid="settings-widgets-section-body" className="settings-stack">
+      {/* Shared face and the status line switch: ordinary settings rows, so they
+          line up with every other page. */}
+      <SettingsGroup>
+        <SettingsField label={t("widgets.fontFamily")}>
           <FocusSelect
             data-testid="widgets-font-family"
-            style={{ ...controlStyle, minWidth: 160 }}
+            className="w-full"
             value={widgets.fontFamily}
             onChange={(event) => change({ ...widgets, fontFamily: event.target.value })}
           >
@@ -103,15 +102,11 @@ export function WidgetsSectionBody({
               </option>
             ))}
           </FocusSelect>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="w-36 shrink-0 text-[12px]" style={{ color: "var(--text-primary)" }}>
-            {t("widgets.fontSize")}
-          </span>
+        </SettingsField>
+        <SettingsField label={t("widgets.fontSize")}>
           <FocusInput
             type="number"
             data-testid="widgets-font-size"
-            inputStyle={{ ...controlStyle, width: 60 }}
             min={WIDGET_FONT_SIZE_MIN}
             max={WIDGET_FONT_SIZE_MAX}
             value={readWidgetFontSize(widgets.fontSize)}
@@ -127,69 +122,60 @@ export function WidgetsSectionBody({
               });
             }}
           />
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between">
-        <div className="min-w-0">
-          <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-            {t("widgets.statusLineEnabled")}
-          </span>
-          <p
-            className="mt-0.5 text-[11px] leading-tight"
-            style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-          >
-            {t("widgets.statusLineEnabledDesc")}
-          </p>
-        </div>
-        <ToggleSwitch
-          data-testid="widgets-status-line-toggle"
+        </SettingsField>
+        <SettingsToggleField
+          label={t("widgets.statusLineEnabled")}
+          desc={t("widgets.statusLineEnabledDesc")}
+          testId="widgets-status-line-toggle"
           checked={widgets.statusLine.enabled}
           onChange={(enabled) =>
             change({ ...widgets, statusLine: { ...widgets.statusLine, enabled } })
           }
         />
-      </div>
+      </SettingsGroup>
 
-      <WidgetsPreview widgets={widgets} selectedId={selectedId} onSelect={setSelectedId} />
+      {/* Placement editor: preview → pick → detail (ADR-0105), in one card. */}
+      <SettingsGroup>
+        <WidgetsPreview widgets={widgets} selectedId={selectedId} onSelect={setSelectedId} />
 
-      <div className="flex flex-col gap-2">
-        {WIDGET_SLOT_IDS.map((slot) => (
-          <SlotRow
-            key={slotKey(slot)}
-            slot={slot}
+        <div className="flex flex-col gap-2">
+          {WIDGET_SLOT_IDS.map((slot) => (
+            <SlotRow
+              key={slotKey(slot)}
+              slot={slot}
+              widgets={widgets}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              onChange={(next, focusId) => {
+                change(next);
+                if (focusId !== undefined) setSelectedId(focusId);
+              }}
+            />
+          ))}
+        </div>
+
+        {selected ? (
+          <WidgetDetail
+            instance={selected.instance}
+            slot={selected.slot}
+            index={selected.index}
+            count={readSlot(widgets, selected.slot).length}
             widgets={widgets}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            onChange={(next, focusId) => {
-              change(next);
-              if (focusId !== undefined) setSelectedId(focusId);
-            }}
+            claudeConfigDirs={claudeConfigDirs}
+            grokConfigDirs={grokConfigDirs}
+            onChange={change}
+            onRemoved={() => setSelectedId(null)}
           />
-        ))}
-      </div>
-
-      {selected ? (
-        <WidgetDetail
-          instance={selected.instance}
-          slot={selected.slot}
-          index={selected.index}
-          count={readSlot(widgets, selected.slot).length}
-          widgets={widgets}
-          claudeConfigDirs={claudeConfigDirs}
-          grokConfigDirs={grokConfigDirs}
-          onChange={change}
-          onRemoved={() => setSelectedId(null)}
-        />
-      ) : (
-        <p
-          data-testid="widgets-select-hint"
-          className="text-[11px]"
-          style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-        >
-          {t("widgets.selectHint")}
-        </p>
-      )}
+        ) : (
+          <p
+            data-testid="widgets-select-hint"
+            className="text-[12px]"
+            style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+          >
+            {t("widgets.selectHint")}
+          </p>
+        )}
+      </SettingsGroup>
     </div>
   );
 }
@@ -224,7 +210,7 @@ function WidgetsPreview({
     <div data-testid="widgets-preview" className="flex flex-col gap-1">
       {surfaces.map(({ surface, label, dimmed }) => (
         <div key={surface} className="flex flex-col gap-0.5">
-          <span className="text-[10px]" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
+          <span className="text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
             {label}
           </span>
           <div
@@ -342,7 +328,7 @@ function SlotRow({
     <div className="flex flex-wrap items-center gap-1">
       <span
         data-testid={`widgets-slot-title-${key}`}
-        className="w-36 shrink-0 text-[12px]"
+        className="w-36 shrink-0 text-[13px]"
         style={{ color: "var(--text-primary)" }}
       >
         {t(`widgets.slot.${key}`)}
@@ -356,7 +342,7 @@ function SlotRow({
             key={instance.id}
             type="button"
             data-testid={`widgets-chip-${instance.id}`}
-            className="px-1.5 py-0.5 text-[11px]"
+            className="px-1.5 py-0.5 text-[12px]"
             style={{
               ...buttonStyle,
               color: isSelected ? "var(--bg-base)" : "var(--text-secondary)",
@@ -373,7 +359,7 @@ function SlotRow({
       })}
 
       {instances.length === 0 && (
-        <span className="text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.5 }}>
+        <span className="text-[12px]" style={{ color: "var(--text-secondary)", opacity: 0.5 }}>
           {t("widgets.empty")}
         </span>
       )}
@@ -437,7 +423,7 @@ function WidgetDetail({
       style={{ border: "1px solid var(--separator-bg)" }}
     >
       <div className="flex items-center gap-1">
-        <span className="mr-auto text-[12px]" style={{ color: "var(--text-primary)" }}>
+        <span className="mr-auto text-[13px]" style={{ color: "var(--text-primary)" }}>
           {definition ? t(definition.labelKey) : t("widgets.unknownType", { type: instance.type })}
         </span>
 
@@ -501,7 +487,7 @@ function WidgetDetail({
           {definition.optionSpecs.map((spec) => (
             <div key={spec.key} className="flex items-center gap-2">
               <span
-                className="w-36 shrink-0 text-[11px]"
+                className="w-36 shrink-0 text-[12px]"
                 style={{ color: "var(--text-secondary)" }}
               >
                 {t(spec.labelKey)}
