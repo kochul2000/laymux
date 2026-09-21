@@ -2,8 +2,9 @@ import { useMemo, useState } from "react";
 import type { ArchiveEntry } from "@/lib/tauri-api";
 import { formatBytes, pluralize } from "@/lib/preview/format";
 import { PreviewNotice } from "./PreviewNotice";
-import { ChevronDownIcon, FileIcon, FolderIcon } from "@/components/ui/icons";
-import { fileKindIconName } from "@/lib/file-kind-icon";
+import { ChevronDownIcon } from "@/components/ui/icons";
+import { FileKindIcon } from "@/components/ui/FileKindIcon";
+import { fileKindColor } from "@/lib/file-kind-icon";
 
 type SortKey = "name" | "size";
 
@@ -101,24 +102,17 @@ export function ArchivePreview({
                 className="hover-bg"
                 data-testid="archive-preview-row"
               >
-                <td style={{ ...cellStyle, overflowWrap: "anywhere" }}>
+                <td style={{ ...cellStyle, overflowWrap: "anywhere", color: fileKindColor(entry) }}>
                   <span
                     style={{
-                      color: "var(--text-muted)",
                       display: "inline-flex",
                       width: 14,
                       userSelect: "none",
                     }}
                   >
-                    {fileKindIconName(entry) === "Folder" ? (
-                      <FolderIcon size={12} />
-                    ) : (
-                      <FileIcon size={12} />
-                    )}
+                    <FileKindIcon entry={entry} />
                   </span>
-                  <span style={{ color: entry.isDirectory ? "var(--accent)" : undefined }}>
-                    {entry.name}
-                  </span>
+                  <span>{entry.name}</span>
                 </td>
                 <td style={{ ...cellStyle, textAlign: "right", whiteSpace: "nowrap" }}>
                   {entry.isDirectory ? "" : formatBytes(entry.size)}

@@ -1,4 +1,5 @@
 import { taskStatusGlyph } from "../lib/task-status-glyph";
+export { fileKindIconName, fileKindColor, FILE_KIND_ICON_SIZE } from "../lib/file-kind-icon";
 import {
   ArrowDown,
   ArrowLeft,
@@ -187,12 +188,4 @@ export function commandStatusIconName(status) {
     ];
   }
   return COMMAND_STATUS_ICONS[status] || null;
-}
-
-/** Keep in lockstep with `ui/src/lib/file-kind-icon.ts`. */
-export function fileKindIconName(entry, isParent = false) {
-  if (isParent) return "FolderUp";
-  if (entry && entry.isDirectory) return "Folder";
-  if (entry && entry.isSymlink) return "Link";
-  return "File";
 }

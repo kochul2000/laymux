@@ -136,6 +136,18 @@ describe("FileExplorerView", () => {
     ).toBeTruthy();
     expect(screen.getByTestId("file-explorer-item-1").querySelector(".lucide-folder")).toBeTruthy();
     expect(screen.getByTestId("file-explorer-item-2").querySelector(".lucide-file")).toBeTruthy();
+    for (const [index, color] of [
+      [0, "var(--accent)"],
+      [1, "var(--accent)"],
+      [2, "var(--text-primary)"],
+    ] as const) {
+      const row = screen.getByTestId(`file-explorer-item-${index}`);
+      expect(row.style.color).toBe(color);
+      expect(row.querySelector("svg")).toHaveAttribute("width", "13");
+      expect(row.querySelector("svg")).toHaveAttribute("stroke-width", "2");
+    }
+    fireEvent.click(screen.getByTestId("file-explorer-item-1"));
+    expect(screen.getByTestId("file-explorer-item-1").style.color).toBe("var(--bg-base)");
   });
 
   it("draws a symlink with the Lucide link glyph", async () => {
@@ -149,6 +161,7 @@ describe("FileExplorerView", () => {
     const row = screen.getByTestId("file-explorer-item-1");
     expect(row).toHaveTextContent("notes");
     expect(row.querySelector(".lucide-link")).toBeTruthy();
+    expect(row.style.color).toBe("var(--green)");
   });
 
   it("click selects single item", async () => {
