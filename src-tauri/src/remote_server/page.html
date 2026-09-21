@@ -144,11 +144,12 @@
               </section>
             </div><!-- /drawerConnectionView -->
             <div id="drawerSettingsView" class="drawer-view" hidden>
-              <section class="nav-section" aria-label="Connection">
+              <div class="settings-intro">
+                <p>Customize this device.<br />Changes are saved automatically.</p>
                 <button id="drawerConnectionButton" class="settings-connection-button" type="button" aria-label="Open connection" title="Connection">
                   <span data-remote-icon="Plug"></span> Connection
                 </button>
-              </section>
+              </div>
               <!-- Settings grew past one scroll: the sections are paginated so a
                    short screen shows one subject at a time. -->
               <div id="settingsTabs" class="settings-tabs" role="tablist" aria-label="Settings sections">
@@ -201,8 +202,10 @@
               <div id="settingsPanelDisplay" class="settings-panel" role="tabpanel" data-settings-panel="display" aria-labelledby="settingsTabDisplay" hidden>
               <section id="displaySection" class="nav-section" aria-label="Display">
               <h2 class="nav-section-title">Display</h2>
+              <p class="settings-page-description">Text, spacing and scrolling for this screen.</p>
               <!-- Device-local Remote preferences (ADR-0209). They remain
                    editable before connection and never mutate host settings. -->
+              <h3 class="settings-group-title">Text size</h3>
               <label class="nav-number-row" for="remoteTerminalFontSize">
                 <span class="nav-number-copy">
                   <span class="nav-toggle-name">Terminal text</span>
@@ -219,6 +222,7 @@
                 <input id="remoteComposerFontSize" type="number" min="6" max="72" step="1" />
                 <span class="nav-number-unit">px</span>
               </label>
+              <h3 class="settings-group-title">Composer opacity</h3>
               <label class="nav-number-row" for="remoteComposerIdleOpacity">
                 <span class="nav-number-copy">
                   <span class="nav-toggle-name">Composer idle</span>
@@ -243,6 +247,7 @@
                 <input id="remoteComposerActiveOpacity" type="number" min="20" max="100" step="5" />
                 <span class="nav-number-unit">%</span>
               </label>
+              <h3 class="settings-group-title">Workspace menu</h3>
               <label class="nav-number-row" for="remoteMenuFontSize">
                 <span class="nav-number-copy">
                   <span class="nav-toggle-name">Menu text</span>
@@ -272,6 +277,7 @@
                 <input id="remoteNavigationPinCutoff" type="number" min="320" max="2560" step="1" />
                 <span class="nav-number-unit">px</span>
               </label>
+              <h3 class="settings-group-title">History and scrolling</h3>
               <label class="nav-number-row" for="remoteSnapshotMaxKib">
                 <span class="nav-number-copy">
                   <span class="nav-toggle-name">Initial history</span>
@@ -312,6 +318,7 @@
                 <input id="remoteTwoFingerScrollSensitivity" type="number" min="0.1" max="20" step="0.1" />
                 <span class="nav-number-unit">×</span>
               </label>
+              <h3 class="settings-group-title">Selection and widgets</h3>
               <label class="nav-number-row" for="remoteSelectionHandleSize">
                 <span class="nav-number-copy">
                   <span class="nav-toggle-name">Selection handle</span>
@@ -332,10 +339,12 @@
               </div><!-- /settingsPanelDisplay -->
               <div id="settingsPanelPanels" class="settings-panel" role="tabpanel" data-settings-panel="panels" aria-labelledby="settingsTabPanels" hidden>
               <section class="nav-section" aria-label="Panels and header icons">
-              <h2 class="nav-section-title">Header icons</h2>
+              <h2 class="nav-section-title">Panels</h2>
+              <p class="settings-page-description">Choose your tools and how to open them.</p>
+              <h3 class="settings-group-title">Header icons</h3>
               <div id="headerIconSettings"></div>
               <div class="nav-settings-status">Saved on this device. Hidden tools are skipped when cycling; the selected edge shortcut still opens them.</div>
-              <h2 class="nav-section-title">Swipe gestures</h2>
+              <h3 class="settings-group-title">Swipe gestures</h3>
               <label class="nav-toggle-row" for="edgeSwipeDrawersToggle">
                 <input id="edgeSwipeDrawersToggle" type="checkbox" checked />
                 <span class="nav-toggle-name">Swipe to open</span>
@@ -369,10 +378,11 @@
               </label>
               <div class="nav-settings-status">Cycle: Issues → PRs → Files → Memo. Swipe the header, hint, or list; text editors and file previews keep their own gestures.</div>
               </section>
-              </div><!-- /settingsPanelDisplay -->
+              </div><!-- /settingsPanelPanels -->
               <div id="settingsPanelApp" class="settings-panel" role="tabpanel" data-settings-panel="app" aria-labelledby="settingsTabApp" hidden>
               <section id="pcUpdateSection" class="nav-section" aria-label="Laymux update">
-              <h2 class="nav-section-title">Laymux update</h2>
+              <h2 class="nav-section-title">App</h2>
+              <h3 class="settings-group-title">Laymux update</h3>
               <div class="pc-update-panel">
                 <div id="pcUpdateStatus" class="nav-settings-status">Checking PC update status...</div>
                 <div class="pc-update-actions">
@@ -387,7 +397,7 @@
                    the terminal, and only appears while it can be acted on
                    (ADR-0099). -->
               <section id="installSection" class="nav-section" aria-label="Install this app" hidden>
-              <h2 class="nav-section-title">Install</h2>
+              <h3 class="settings-group-title">Install</h3>
               <div class="install-panel">
                 <button id="installApp" class="install-button" type="button">Install PWA</button>
                 <div id="installHint" class="install-hint" hidden>iOS installs from the share sheet: Share → “Add to Home Screen”.</div>
