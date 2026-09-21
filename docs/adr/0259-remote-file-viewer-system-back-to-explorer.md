@@ -1,6 +1,6 @@
 # 0259. Remote 파일 열람 중 system back은 직전 Files 목록으로 돌아간다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-21
 - Source: [issue #1063](https://github.com/kochul2000/laymux/issues/1063), [ADR-0198](0198-remote-file-explorer-overlay.md), [ADR-0219](0219-android-back-defers-to-remote-ui-stack.md), [api-contracts §13.3.1](../architecture/api-contracts.md#1331-remote-file-viewer)
 - Amends: ADR-0219의 FileViewer system back 정책만 대체한다. 나머지 레이어 우선순위와 native 위임 계약은 유지한다.
