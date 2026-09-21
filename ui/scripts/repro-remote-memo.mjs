@@ -1,4 +1,4 @@
-/* global window, document, fetch */
+/* global fetch */
 // Run only against a newly launched, isolated APPDATA dev instance (19281).
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
