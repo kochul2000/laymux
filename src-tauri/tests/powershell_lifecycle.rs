@@ -105,6 +105,10 @@ fn execution(result: &str) -> Vec<(String, String)> {
 fn powershell_reports_each_execution_before_silent_work_and_its_actual_result() {
     let mut shell = Shell::new();
     assert_eq!(shell.command("Write-Output FIRST_DONE"), execution("0"));
+    assert_eq!(
+        shell.command("begin { Write-Output NAMED_BLOCK }"),
+        execution("0")
+    );
     shell.bytes.clear();
     shell.write("Write-Output SECOND_START; Start-Sleep -Seconds 2; Write-Output SECOND_DONE\r");
     shell.until(|s| {
@@ -117,7 +121,7 @@ fn powershell_reports_each_execution_before_silent_work_and_its_actual_result() 
     assert_eq!(shell.phases(), execution("0"));
     assert_eq!(shell.command("cmd.exe /d /c exit 7"), execution("1"));
     assert_eq!(
-        shell.command("Write-Output AFTER_NATIVE_FAILURE"),
+        shell.command("if ($LASTEXITCODE -ne 7) { throw 'LASTEXITCODE changed' }; Write-Output AFTER_NATIVE_FAILURE"),
         execution("0")
     );
     assert_eq!(
@@ -134,7 +138,7 @@ fn powershell_reports_each_execution_before_silent_work_and_its_actual_result() 
 fn powershell_editing_does_not_create_tasks_and_interruption_has_no_success() {
     let mut shell = Shell::new();
     assert_eq!(shell.command("Write-Output READY"), execution("0"));
-    for input in ["", "   ", "# comment only", "<# block comment #>"] {
+    for input in ["", "   ", "; ;", "# comment only", "<# block comment #>"] {
         assert!(
             shell.command(input).is_empty(),
             "입력 {input:?}가 작업을 만들면 안 됨"

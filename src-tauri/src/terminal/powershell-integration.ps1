@@ -13,8 +13,12 @@ if ((Get-Module PSReadLine) -and (Test-Path Function:PSConsoleHostReadLine)) {
         $line = & $global:__lmx_readline
         if (-not [string]::IsNullOrWhiteSpace($line)) {
             $tokens = $null; $parseErrors = $null
-            $ast = [System.Management.Automation.Language.Parser]::ParseInput($line, [ref]$tokens, [ref]$parseErrors)
-            if ($ast.EndBlock.Statements.Count -gt 0) {
+            $null = [System.Management.Automation.Language.Parser]::ParseInput($line, [ref]$tokens, [ref]$parseErrors)
+            # EndBlock만 보면 begin/process 등 이름 있는 블록의 실행을 놓친다.
+            $hasCommand = @($tokens | Where-Object {
+                $_.Kind -notin @('Comment', 'NewLine', 'LineContinuation', 'EndOfInput', 'Semi')
+            }).Count -gt 0
+            if ($hasCommand) {
                 $previous = Get-History -Count 1
                 $global:__lmx_history = if ($previous) { $previous.Id } else { -1 }
                 $global:__lmx_running = $true
