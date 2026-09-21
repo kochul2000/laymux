@@ -1542,6 +1542,8 @@ Remote page는 workspace navigation과 dock navigation을 별도 토글 패널�
 
 ### 13.3.1 Remote File Viewer
 
+Android system back은 Files 내부 탐색 깊이를 따른다([ADR-0259](../adr/0259-remote-file-viewer-system-back-to-explorer.md), ADR-0219의 FileViewer 정책 부분 대체). Explorer 복귀 경로가 있으면 헤더 Back과 같은 함수로 직전 디렉터리를 다시 조회하고, 목록 표시 중이거나 복귀 경로가 없는 파일 링크 열람에서는 오버레이를 닫는다. 파일 로딩·오류 중에도 복귀 경로를 사용하며, 복귀 요청은 기존 revision으로 늦은 파일 응답을 무효화한다. 목록 복귀도 `dismissTopLayer()`가 `true`로 소비하므로 native disconnect guard로 넘어가지 않는다. Escape·명시적 닫기·backdrop은 기존대로 오버레이 전체를 닫는다.
+
 메인 헤더의 폴더 버튼은 lease+FileViewer capability 보유 시에만 노출되며 활성 터미널 cwd에서 Remote Explorer 오버레이를 연다([ADR-0198](../adr/0198-remote-file-explorer-overlay.md)). Explorer 디렉터리 모드는 목록 위에 host file path 입력, 명시적 `From host`, `Open` action을 함께 표시하며 workspace drawer에는 파일 열기 UI를 두지 않는다([ADR-0042](../adr/0042-remote-file-viewer-secret-capability.md), [ADR-0044](../adr/0044-remote-file-viewer-explicit-host-path.md), [ADR-0184](../adr/0184-remote-file-viewer-in-page-overlay.md), [ADR-0208](../adr/0208-android-e2e-file-viewer-typed-capability.md)). 연결·heartbeat는 FileViewer status를 자동 조회하거나 입력을 변경하지 않는다. 사용자가 `From host`를 누르면 그때 `/status`를 조회해 데스크톱에서 현재 열린 파일 path를 입력에 넣으며, 요청 중 입력 revision이 바뀌면 늦은 응답을 적용하지 않는다. `Open`과 일반 Enter는 클릭 시점의 trim된 입력값을 exact path snapshot으로 전달하며 데스크톱 FileViewer store를 변경하지 않는다. 성공하면 입력 UI를 숨기고 같은 오버레이의 파일 모드로 전환하며 Back은 직전 Explorer 디렉터리를 다시 조회한다. 실패하면 입력 UI와 Back을 유지한다. Remote terminal의 선택 파일 링크도 사용자 selection/click을 명시적 host path action으로 취급하고 desktop parser를 재사용해 같은 viewer로 연다([ADR-0045](../adr/0045-remote-path-link-reuses-desktop-parser.md)).
 
 | Endpoint | Method | 용도 |
