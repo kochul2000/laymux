@@ -265,12 +265,21 @@ fn complete_settings_recovery(
 
 #[tauri::command(async)]
 pub fn load_memo(key: String) -> Result<String, String> {
-    crate::settings::load_memo(&key)
+    Ok(crate::settings::load_shared_memos()?
+        .remove(&key)
+        .unwrap_or_default())
 }
 
 #[tauri::command(async)]
-pub fn save_memo(key: String, content: String) -> Result<(), String> {
-    crate::settings::save_memo(&key, &content)
+pub fn save_memo(key: String, content: String, expected_content: String) -> Result<(), String> {
+    crate::settings::save_shared_memo(&key, &content, &expected_content).map_err(
+        |error| match error {
+            crate::settings::MemoWriteError::Conflict => {
+                "Memo changed on another device. Copy your draft, then reload.".to_string()
+            }
+            crate::settings::MemoWriteError::Storage(message) => message,
+        },
+    )
 }
 
 /// Split an `issueReporter.shell` prefix into tokens, respecting single and double quotes.

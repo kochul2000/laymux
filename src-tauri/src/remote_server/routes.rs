@@ -44,6 +44,7 @@ use super::lease::{
     ClaimReservationAttempt, HumanControlOrigin, RemoteControlLease, RemoteControlState,
     RemoteControlStatus, RemoteOwnerTransition,
 };
+use super::memo_routes::{remote_memo_save, remote_memos};
 use super::navigation_routes::{
     remote_layouts_list, remote_navigation, remote_notification_mark_read,
     remote_notifications_clear, remote_notifications_mark_all_read, remote_pane_visibility,
@@ -240,6 +241,7 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
             "/remote/v1/terminals/{id}/github-repo",
             get(remote_terminal_github_repo),
         )
+        .route("/remote/v1/memos", get(remote_memos).post(remote_memo_save))
         .route(
             "/remote/v1/terminals/{id}/github",
             get(remote_terminal_github_snapshot),

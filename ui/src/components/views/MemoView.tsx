@@ -1,4 +1,6 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useSyncExternalStore, useEffect, useRef, useCallback, useMemo } from "react";
+import { MemoDocument } from "@/lib/memo-document";
+import { Button } from "@/components/ui/Button";
 import { loadMemo, saveMemo, clipboardWriteText } from "@/lib/tauri-api";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useOverridesStore, FONT_ZOOM_MIN, FONT_ZOOM_MAX } from "@/stores/overrides-store";
@@ -18,11 +20,18 @@ interface MemoViewProps {
 }
 
 export function MemoView({ memoKey, paneId, isFocused }: MemoViewProps) {
-  const [text, setText] = useState("");
+  const memoDocument = useMemo(
+    () =>
+      new MemoDocument(
+        () => loadMemo(memoKey),
+        (content, expected) => saveMemo(memoKey, content, expected),
+      ),
+    [memoKey],
+  );
+  const memoState = useSyncExternalStore(memoDocument.subscribe, memoDocument.getSnapshot);
+  const text = memoState.text;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const latestTextRef = useRef(text);
-  const flushedRef = useRef(true);
   const pendingSelectionRef = useRef<{ start: number; end: number } | null>(null);
 
   // Apply pending selection after React re-render
@@ -36,13 +45,12 @@ export function MemoView({ memoKey, paneId, isFocused }: MemoViewProps) {
 
   // Load content from memo.json on mount
   useEffect(() => {
-    loadMemo(memoKey)
-      .then((content) => {
-        setText(content);
-        latestTextRef.current = content;
-      })
-      .catch(() => {});
-  }, [memoKey]);
+    void memoDocument.refresh();
+    const poll = setInterval(() => {
+      void memoDocument.refresh();
+    }, 2000);
+    return () => clearInterval(poll);
+  }, [memoDocument]);
 
   // Focus when isFocused becomes true
   useEffect(() => {
@@ -51,12 +59,7 @@ export function MemoView({ memoKey, paneId, isFocused }: MemoViewProps) {
     }
   }, [isFocused]);
 
-  const flush = useCallback(() => {
-    if (!flushedRef.current) {
-      saveMemo(memoKey, latestTextRef.current).catch(() => {});
-      flushedRef.current = true;
-    }
-  }, [memoKey]);
+  const flush = memoDocument.save;
 
   // Flush pending content on unmount
   useEffect(() => {
@@ -67,16 +70,9 @@ export function MemoView({ memoKey, paneId, isFocused }: MemoViewProps) {
   }, [flush]);
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value;
-    setText(val);
-    latestTextRef.current = val;
-    flushedRef.current = false;
-
+    memoDocument.edit(e.target.value);
     if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      saveMemo(memoKey, val).catch(() => {});
-      flushedRef.current = true;
-    }, DEBOUNCE_MS);
+    timerRef.current = setTimeout(flush, DEBOUNCE_MS);
   };
 
   const memo = useSettingsStore((s) => s.memo);
@@ -252,16 +248,11 @@ export function MemoView({ memoKey, paneId, isFocused }: MemoViewProps) {
 
   const applyTextChange = useCallback(
     (newText: string) => {
-      setText(newText);
-      latestTextRef.current = newText;
-      flushedRef.current = false;
+      memoDocument.edit(newText);
       if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => {
-        saveMemo(memoKey, newText).catch(() => {});
-        flushedRef.current = true;
-      }, DEBOUNCE_MS);
+      timerRef.current = setTimeout(flush, DEBOUNCE_MS);
     },
-    [memoKey],
+    [memoDocument, flush],
   );
 
   const handleKeyDown = useCallback(
@@ -423,11 +414,36 @@ export function MemoView({ memoKey, paneId, isFocused }: MemoViewProps) {
   return (
     <ViewShell testId="memo-view">
       <ViewHeader testId="memo-header" title="Memo" />
+      {memoState.error && (
+        <div role="alert" className="flex items-center gap-2 p-2 text-xs">
+          <span>{memoState.error}</span>
+          <Button
+            onClick={() => {
+              void clipboardWriteText(text);
+            }}
+          >
+            Copy draft
+          </Button>
+          <Button
+            onClick={() => {
+              if (
+                !memoState.dirty ||
+                window.confirm("Discard your draft and reload the PC memo?")
+              ) {
+                void memoDocument.refresh(true);
+              }
+            }}
+          >
+            Reload
+          </Button>
+        </div>
+      )}
       <ViewBody variant="full">
         <textarea
           ref={textareaRef}
           data-testid="memo-textarea"
           value={text}
+          disabled={!memoState.loaded}
           onChange={handleChange}
           onPaste={handlePaste}
           onKeyDown={handleKeyDown}

@@ -18,6 +18,8 @@ use crate::lock_ext::MutexExt;
 use sha2::{Digest, Sha256};
 
 static MEMO_LOCK: Mutex<()> = Mutex::new(());
+mod memo_shared;
+pub use memo_shared::{load_shared_memos, save_shared_memo, MemoWriteError};
 
 /// Serializes every settings.json writer.
 ///
@@ -279,7 +281,7 @@ fn save_memo_to(path: &PathBuf, key: &str, content: &str) -> Result<(), String> 
         map.insert(key.to_string(), content.to_string());
     }
     let json = serde_json::to_string_pretty(&map).map_err(|e| format!("Serialize error: {e}"))?;
-    fs::write(path, json).map_err(|e| format!("Write error: {e}"))
+    write_file_atomically(path, json.as_bytes())
 }
 
 /// Save settings to disk.

@@ -277,6 +277,7 @@ ADR 이 필요한 대표 기준:
 | [0257](0257-remote-github-view.md) | Remote GitHub View는 데스크톱 스냅샷을 재사용하고 우측 스와이프 대상을 기기별로 고른다 (0106·0149 확장) | Accepted |
 | [0258](0258-codex-retained-loop-session-attribution.md) | Codex 로그 정리 뒤 종료된 선택을 폐기하고 유일한 대화 소유권을 검증한다 | Proposed |
 | [0259](0259-remote-file-viewer-system-back-to-explorer.md) | Remote 파일 열람 중 system back은 직전 Files 목록으로 돌아간다 (0219 부분 대체) | Accepted |
+| [0260](0260-remote-shared-memo-and-panel-preferences.md) | Remote 메모는 PC 저장소를 공유하고 패널 진입점은 기기별로 선택한다 | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

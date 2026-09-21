@@ -173,7 +173,8 @@ export interface TerminalOutputAttachFailStoppedPayload {
 }
 
 export type TerminalOutputAttachResult =
-  TerminalOutputAttachmentPayload | TerminalOutputAttachFailStoppedPayload;
+  | TerminalOutputAttachmentPayload
+  | TerminalOutputAttachFailStoppedPayload;
 
 export interface TerminalOutputDeltaPayload {
   generation: number;
@@ -215,7 +216,13 @@ export async function acknowledgeTerminalOutputEnvelope(
 }
 
 export type TerminalOutputEnvelopeRepairStatus =
-  "idle" | "eventPending" | "exact" | "stale" | "alreadyReceipted" | "mismatch" | "exhausted";
+  | "idle"
+  | "eventPending"
+  | "exact"
+  | "stale"
+  | "alreadyReceipted"
+  | "mismatch"
+  | "exhausted";
 
 export interface TerminalOutputEnvelopeRepairResponse {
   status: TerminalOutputEnvelopeRepairStatus;
@@ -655,8 +662,12 @@ export async function loadMemo(key: string): Promise<string> {
   return invoke("load_memo", { key });
 }
 
-export async function saveMemo(key: string, content: string): Promise<void> {
-  return invoke("save_memo", { key, content });
+export async function saveMemo(
+  key: string,
+  content: string,
+  expectedContent: string,
+): Promise<void> {
+  return invoke("save_memo", { key, content, expectedContent });
 }
 
 // ── Claude usage probe (ADR-0102) ────────────────────────────────
@@ -843,7 +854,12 @@ export interface GithubRepoSnapshot {
 
 /** Every mutating action the GitHub view may ask the backend to run. */
 export type GithubItemAction =
-  "issue.close" | "issue.closeNotPlanned" | "pr.merge" | "pr.squash" | "pr.rebase" | "pr.close";
+  | "issue.close"
+  | "issue.closeNotPlanned"
+  | "pr.merge"
+  | "pr.squash"
+  | "pr.rebase"
+  | "pr.close";
 
 /**
  * Read the shared open issue/PR snapshot for the repository containing
@@ -1067,7 +1083,13 @@ export interface ViewerSettings {
 
 /** Palette tokens offered for the `#123` emphasis. Names, so themes still own the hue. */
 export type GithubNumberColor =
-  "yellow" | "accent" | "green" | "red" | "primary" | "secondary" | "muted";
+  | "yellow"
+  | "accent"
+  | "green"
+  | "red"
+  | "primary"
+  | "secondary"
+  | "muted";
 
 export interface GithubSettings {
   /** Tab shown when the view first mounts. */

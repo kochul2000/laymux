@@ -1378,6 +1378,8 @@ Windows·Linux release의 업데이트 상태는 Rust `UpdateManager`가 단독 
 
 `cache/` 디렉터리는 향후 다른 캐시 데이터(메모 등)도 수용할 수 있도록 확장 가능한 구조.
 
+메모의 영속 SoT는 `cache/memo.json`의 `memo-{paneId} → content`다. Desktop `MemoView`와 Remote Memo overlay는 `MemoDocument`의 원본·초안·저장 중 상태를 공유하는 구현을 사용한다([ADR-0260](../adr/0260-remote-shared-memo-and-panel-preferences.md)). PC는 300ms debounce로 자동 저장하고 깨끗한 메모만 2초마다 다시 읽는다. Remote는 목록 열기/Reload로 다시 읽고 Save로 명시적으로 저장한다. 저장은 `expectedContent`와 파일의 현재 내용을 같은 `MEMO_LOCK` 안에서 비교한 뒤 수행한다. 불일치나 읽기/파싱 오류는 기존 데이터와 초안을 유지하며, 오류 UI의 Copy draft와 명시적 Reload로 복구한다. Remote의 닫기·메모 선택·일시 연결 해제는 문서 수명 내 초안을 유지한다.
+
 ### 13.3 프로파일 설정
 
 ```jsonc

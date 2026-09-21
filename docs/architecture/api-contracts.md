@@ -1750,6 +1750,13 @@ Remote Composer 첨부 표시([ADR-0236](../adr/0236-remote-composer-inline-atta
 
 ---
 
+### Remote 공유 메모와 패널 설정 (ADR-0260)
+
+- `GET /remote/v1/memos?leaseId=<id>`: active lease 검증 후 `{memos:[{key,content}],count}`를 반환한다. 키는 알파벳 정렬이다. 아직 저장되지 않은 빈 MemoView는 기존 navigation의 pane 정보로 보완한다.
+- `POST /remote/v1/memos`: `{leaseId,key,content,expectedContent}`를 받고 같은 파일 잠금 아래 비교·저장한다. `memo-` 접두사의 ASCII 영숫자·`-`·`_` 키(6–256자)만 허용한다. 성공 `{ok:true}`, 원본 불일치 409, 저장소 읽기/파싱/쓰기 실패 500이다. 원격 bearer/Origin gate와 active lease를 모두 요구하며 성공 응답은 no-store다. Android E2E allowlist는 위 exact GET/POST 경로만 확장한다.
+- Desktop `save_memo` IPC도 `expectedContent`를 필수로 받아 같은 비교 저장을 사용한다. 원본 불일치는 실패로 반환하며 자동 덮어쓰기 재시도는 하지 않는다. `load_memo`는 읽기/파싱 오류를 빈 내용으로 숨기지 않는다.
+- Remote settings MCP에 `headerFiles`, `headerGithub`, `headerMemo`, `headerSpatialExclusion`, `headerDesktopMode` boolean(모두 기본 true, live)을 추가한다. localStorage 키는 `laymux.remote.<field>`다. `rightSwipeView`는 `files | github | memo`이며 기본 files를 유지한다. UI는 `Panels` 탭에서 이 설정과 스와이프 열기/닫기를 편집한다. 아이콘 표시는 기존 연결·가용성 조건 AND 기기 표시 설정으로 계산한다.
+
 ## 14. Rust 코드 설계 원칙
 > 추가: 2026.04.05
 

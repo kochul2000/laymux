@@ -228,10 +228,40 @@
     },
     "rightSwipeView": {
       "type": "string",
-      "enum": ["files", "github"],
+      "enum": ["files", "github", "memo"],
       "description": "오른쪽 가장자리 스와이프로 열 Remote 패널입니다.",
       "default": "files",
       "applyMode": "live"
+    },
+    "headerFiles": {
+      "type": "boolean",
+      "default": true,
+      "applyMode": "live",
+      "description": "우상단 Files 아이콘 표시. 숨겨도 스와이프로 열 수 있습니다."
+    },
+    "headerGithub": {
+      "type": "boolean",
+      "default": true,
+      "applyMode": "live",
+      "description": "우상단 GitHub 아이콘 표시. 숨겨도 스와이프로 열 수 있습니다."
+    },
+    "headerMemo": {
+      "type": "boolean",
+      "default": true,
+      "applyMode": "live",
+      "description": "우상단 공유 메모 아이콘 표시. 숨겨도 스와이프로 열 수 있습니다."
+    },
+    "headerSpatialExclusion": {
+      "type": "boolean",
+      "default": true,
+      "applyMode": "live",
+      "description": "우상단 pane 탐색 제외 아이콘 표시. 실제 제외 상태는 변경하지 않습니다."
+    },
+    "headerDesktopMode": {
+      "type": "boolean",
+      "default": true,
+      "applyMode": "live",
+      "description": "우상단 PC 모드 버튼 표시. 지원하는 환경에서만 보입니다."
     },
     "composerHiddenClaudeLines": {
       "type": "integer",

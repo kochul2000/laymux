@@ -2942,7 +2942,28 @@
         color: var(--text-secondary);
         font-size: var(--fs-sm);
       }
-      .github-status:empty {
+        #memoSelect {
+          flex: 1 1 auto;
+          min-width: 0;
+          max-width: 100%;
+          min-height: 32px;
+          background: var(--bg-base);
+          color: var(--text-primary);
+          border: 1px solid var(--border);
+        }
+        #memoText {
+          flex: 1 1 auto;
+          min-height: 0;
+          width: 100%;
+          resize: none;
+          padding: 12px;
+          border: 0;
+          outline: none;
+          background: var(--bg-base);
+          color: var(--text-primary);
+          font: 16px/1.6 monospace;
+        }
+        .github-status:empty {
         display: none;
       }
       .github-status.error {
