@@ -1,6 +1,7 @@
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { observeTerminalTask } from "@/lib/terminal-task-observers";
 import { WorkspaceSelectorView } from "./WorkspaceSelectorView";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useNotificationStore } from "@/stores/notification-store";
@@ -130,6 +131,61 @@ describe("WorkspaceSelectorView", () => {
       return buildSummariesFromStores(ids);
     });
   });
+
+  it.each(["running", "waiting"] as const)(
+    "%s: 지연·출력 중에도 아이콘 하나와 미확인 테두리만 표시한다",
+    async (state) => {
+      useWorkspaceStore.setState({
+        workspaces: [
+          {
+            id: "ws-default",
+            name: "Default",
+            panes: [
+              {
+                id: "p1",
+                x: 0,
+                y: 0,
+                w: 1,
+                h: 1,
+                view: { type: "TerminalView", profile: "PowerShell" },
+              },
+            ],
+          },
+        ],
+        activeWorkspaceId: "ws-default",
+      });
+      useTerminalStore.getState().registerInstance({
+        id: "terminal-p1",
+        profile: "PowerShell",
+        syncGroup: "Default",
+        workspaceId: "ws-default",
+      });
+      observeTerminalTask("terminal-p1", { state });
+      observeTerminalTask("terminal-p1", { state: undefined });
+      useTerminalStore.getState().updateInstanceInfo("terminal-p1", { outputActive: true });
+      addUnreadNotification({
+        terminalId: "terminal-p1",
+        workspaceId: "ws-default",
+        message: "확인 필요",
+      });
+      render(<WorkspaceSelectorView />);
+      await waitFor(() => {
+        const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
+        expect(badge.querySelectorAll("svg")).toHaveLength(1);
+        expect(
+          badge.querySelector(
+            `[data-status-icon="${state === "running" ? "working" : "waiting"}"]`,
+          ),
+        ).toBeInTheDocument();
+        expect(badge).not.toHaveAttribute("title");
+        expect(badge.querySelector("[title]")).toBeNull();
+        expect(badge.style.border).toContain("var(--accent)");
+        expect(badge.querySelector("svg")?.getAttribute("aria-label")).not.toMatch(
+          /delayed|output|지연|출력/i,
+        );
+      });
+    },
+  );
 
   it("renders workspace list", () => {
     render(<WorkspaceSelectorView />);
@@ -695,6 +751,7 @@ describe("WorkspaceSelectorView", () => {
       lastCommandAt: Date.now(),
     });
 
+    observeTerminalTask("terminal-p1", { state: "ended", result: "success" });
     render(<WorkspaceSelectorView />);
 
     await waitFor(() => {
@@ -854,6 +911,7 @@ describe("WorkspaceSelectorView", () => {
       lastCommandAt: Date.now(),
     });
 
+    observeTerminalTask("terminal-p1", { state: "ended", result: "failure" });
     render(<WorkspaceSelectorView />);
 
     await waitFor(() => {
@@ -864,7 +922,7 @@ describe("WorkspaceSelectorView", () => {
     });
   });
 
-  it("displays idle indicator when command has no exit code and no output", async () => {
+  it("displays a neutral dash when no lifecycle observation exists", async () => {
     useWorkspaceStore.setState({
       workspaces: [
         {
@@ -904,7 +962,7 @@ describe("WorkspaceSelectorView", () => {
     });
   });
 
-  it("displays failure indicator when command failed regardless of activity type", async () => {
+  it("does not inherit the previous shell result in an agent", async () => {
     useWorkspaceStore.setState({
       workspaces: [
         {
@@ -942,7 +1000,7 @@ describe("WorkspaceSelectorView", () => {
     await waitFor(() => {
       // Universal 4-state: exitCode≠0 → ✗ regardless of activity
       const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
-      expect(badge.querySelector('[data-status-icon="failure"]')).toBeInTheDocument();
+      expect(badge.querySelector('[data-status-icon="idle"]')).toBeInTheDocument();
       expect(badge).not.toHaveTextContent("✗");
     });
   });
@@ -1404,6 +1462,7 @@ describe("WorkspaceSelectorView", () => {
       lastCommandAt: Date.now(),
     });
 
+    observeTerminalTask("terminal-p1", { state: "ended", result: "success" });
     render(<WorkspaceSelectorView />);
 
     await waitFor(() => {
@@ -1596,7 +1655,7 @@ describe("WorkspaceSelectorView", () => {
     });
   });
 
-  it("shows the hourglass for a shell streaming output before any command was captured", async () => {
+  it("shows one hourglass for output from an unconfirmed shell task", async () => {
     // Sleep prevention counts this terminal as busy (ADR-0114). If the row
     // stayed blank the UI would say idle while the machine is kept awake.
     useWorkspaceStore.setState({
@@ -1625,6 +1684,8 @@ describe("WorkspaceSelectorView", () => {
     await waitFor(() => {
       const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
       expect(badge.querySelector('[data-status-icon="working"]')).toBeInTheDocument();
+      expect(badge.querySelectorAll("svg")).toHaveLength(1);
+      expect(badge.querySelector('[aria-label="Output activity"]')).toBeNull();
       expect(badge).not.toHaveTextContent("⏳");
     });
   });
@@ -1702,7 +1763,7 @@ describe("WorkspaceSelectorView", () => {
 
     await waitFor(() => {
       // There's no command icon, so we show a standalone notification dot
-      const badge = screen.getByTestId("pane-notif-dot-terminal-p1");
+      const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
       expect(badge).toBeInTheDocument();
     });
   });

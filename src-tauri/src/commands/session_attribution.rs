@@ -356,3 +356,9 @@ fn apply_fresh(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(test, windows))]
+mod live_wsl_tests;
+
+#[cfg(all(test, windows))]
+mod live_native_tests;

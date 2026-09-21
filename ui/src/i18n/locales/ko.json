@@ -869,10 +869,16 @@
   },
   "workspace": {
     "commandStatus": {
-      "working": "명령 실행 중",
+      "working": "활동 중",
       "success": "명령 성공",
       "failure": "명령 실패",
-      "idle": "명령 결과 없음"
+      "idle": "대기",
+      "waiting": "응답·승인 필요",
+      "interrupted": "중단",
+      "ended": "종료 · 결과 미관측",
+      "unknown": "작업 미확인",
+      "stale": "관측 지연",
+      "output": "출력 활동"
     },
     "newWorkspace": "새 워크스페이스",
     "workspaces": "워크스페이스",

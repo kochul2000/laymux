@@ -323,6 +323,10 @@ Tauri command 는 두 개다([ADR-0106](../adr/0106-github-list-view-repo-regist
 
 읽기 경로는 `lib/github-display.ts` 단일 clamp 를 지난다. 스키마는 값을 거부하지 않고 조용히 clamp 하며(`refreshSeconds` 하한 처리와 같은 방식), 뷰는 settings.json 의 원시 값을 style 로 직접 흘리지 않는다.
 
+Remote도 같은 프로세스 전역 snapshot registry와 action allowlist를 사용한다([ADR-0257](../adr/0257-remote-github-view.md)). `GET /remote/v1/terminals/{id}/github?force=<bool>`는 terminal의 현재 CWD와 `{ status, repo, repoUrl, issues[], pulls[], fetchedAtMs }`를 반환하고, `POST /remote/v1/terminals/{id}/github/actions`는 `{ leaseId, cwd, action, number }`를 받는다. 변경 시 `cwd`는 사용자가 확인한 snapshot의 값이어야 하며 live terminal CWD와 다르면 `409`로 거부해 다른 repository의 같은 번호에 작업하는 것을 막는다. 읽기는 Remote bearer/IP/Origin gate를, 변경은 그 gate와 active controller lease를 모두 요구한다. handler는 terminal lock에서 CWD만 복사한 뒤 lock을 놓고 공용 command를 호출하므로 `.git` 탐색과 `gh` 실행 중 terminal registry를 잠그지 않는다. Android E2E 내부 HTTP allowlist도 이 두 exact terminal route만 허용한다.
+
+Remote header는 File Explorer 옆에 GitHub 버튼을 두고 연결된 active terminal의 CWD로 overlay를 연다. Issues/PRs, 수동 새로고침, 링크·브랜치 복사와 데스크톱과 같은 두 단계 확인 action을 제공한다. 우측 가장자리 스와이프 대상은 기기 로컬 `localStorage["laymux.remote.rightSwipeView"]`(`"files" | "github" | "memo"`, 기본 `"files"`)가 정하고 Remote Settings → Panels와 Remote settings MCP가 함께 편집한다. 터미널의 좌측 가장자리 제스처는 계속 workspace menu를 연다. 열린 도구 안에서는 왼쪽이 표시·사용 가능한 Issues → PRs → Files → Memo 순환이며, 오른쪽은 `toolSwipeRightAction`의 기본 닫기 또는 역순 순환이다([ADR-0261](../adr/0261-remote-visible-tool-swipe-cycle.md)).
+
 ### Direct Remote Mode 설정
 
 브라우저 원격 접속은 명시적 opt-in 설정이다. 기본값은 꺼짐이며, remote API는 Automation API/MCP의 IP allowlist와 별도 인증/Origin/IP 정책을 사용한다([ADR-0013](../adr/0013-direct-remote-mode.md)).
@@ -565,6 +569,8 @@ rollout 나이 필터는 파일의 nanosecond 수정 시각만 사용하며, 생
 Rust는 내부 event `session-checkpoint-requested {requestId,reason,requireConclusive,terminalIds?}`로 WebView 조정기에 저장을 요청하고, 프론트는 디스크 commit 뒤 `acknowledge_session_checkpoint(requestId,checkpointCommitId,error?)`를 호출한다. 정리된 StrictMode listener가 이미 받은 request도 침묵하지 않고 오류 ACK한다. watchdog은 5분 cadence이고 update 요청은 20초 timeout의 critical barrier다. update fence는 새 mutation admission을 거부하고 기존 permit, controller operation, fault 뒤에도 아직 종료되지 않은 live PTY worker와 registry에서 제거되어 격리 추적 중인 retired worker completion을 최대 16초 drain한 뒤 이 event를 보낸다. handle close는 fault 여부와 무관한 worker completion을 격리하므로 removal 뒤 fault로 바뀌는 worker도 놓치지 않는다. Windows process-tree helper는 별도 1초 deadline으로 실행해 정지한 `taskkill`이 hidden eviction의 전역 fence를 무기한 유지하지 못하게 한다. 여러 hidden target의 유계 teardown은 병렬 실행하고 scope guard가 오류·panic을 포함한 모든 command 반환에서 fence를 해제하므로 fence-held 시간이 pane 수에 선형으로 늘어나지 않는다. fence 중 terminal create와 TerminalView unmount close는 거절해 버리지 않고 admission 밖에서 취소를 기다리며, checkpoint 실패로 fence가 풀리면 normal permit으로 생성 또는 backend PTY 정리를 완료한다(update 성공 시 close는 process cleanup이 소유한다). Automation action request ID는 HTTP timeout과 별개로 늦은 `automation_response`까지 detached mutation으로 남는다. REST/MCP 입력뿐 아니라 lx group command, sync-CWD, xterm protocol reply도 같은 admission을 통과한다. 특히 sync-CWD permit은 PTY write뿐 아니라 propagation marker, backend `session.cwd`, frontend event까지 논리 mutation 전체를 덮으므로 fence가 과거 CWD를 commit한 뒤 tail이 늦게 적용될 수 없다(종료 전용 ETX만 명시적 예외다). critical barrier는 generation을 포함한 동일한 conclusive coverage를 150ms 간격으로 두 번 얻고 authoritative CWD 조회도 성공해야 한다. CWD IPC 실패를 빈 map으로 축약해 과거 `lastCwd`를 성공 commit하지 않는다. 숨김 pane 회수는 내부 command `checkpoint_and_close_hidden_terminals(terminalIds)`가 전역 fence와 drain, 대상 critical checkpoint, backend PTY close를 연속 소유한다. 프론트는 ACK 직전에 대상이 여전히 숨김 회수 대상인지 재검증하고, backend가 실제로 닫았다고 반환한 ID만 unmount한다. 그 사이 설정·visibility가 바뀌어 이미 닫힌 pane은 eviction set에 먼저 반영하고 현재 hook이 그 전이를 즉시 재평가해 remount하므로, 정리된 과거 effect의 늦은 응답도 죽은 PTY를 다음 timer까지 참조하게 하지 않는다. 실패 ID는 다음 tick에서 재시도한다. 이 IPC는 Automation/Remote 외부 계약이 아니라 앱 내부 수명주기 계약이다.
 
 Windows child wait와 PID 기반 `taskkill`은 하나의 handshake를 공유한다. kill이 live child를 claim한 뒤에는 종료를 관측한 wait thread도 kill 완료 전까지 OS process handle을 drop하지 않아 PID 재사용을 막는다. 숨김 회수의 ACK 전 재검증은 단순 visibility가 아니라 timer owner의 최신 만료 자격 집합을 사용한다. 따라서 현재 timeout 증가와 hidden→visible→hidden으로 연속 숨김 epoch가 바뀐 대상은 오류 ACK되어 PTY를 보존한다.
+
+Codex의 fresh 귀속에서 모델 등 설정 변경만 담은 정확한 `ThreadSettings` submission은 턴 입력 증거가 아니다([ADR-0256](../adr/0256-codex-thread-settings-preserve-fresh.md)). 기존 새 대화 ID·rollout 부재 검증과 critical checkpoint 이중 관측은 유지하며, 실제 입력·중단·종료·미확인 기록이나 resume를 fresh로 바꾸지 않는다. 상태·IPC·저장 필드는 추가하지 않는다.
 
 ### Grok 설정
 
@@ -1537,6 +1543,8 @@ Remote page는 workspace navigation과 dock navigation을 별도 토글 패널�
 
 ### 13.3.1 Remote File Viewer
 
+Android system back은 Files 내부 탐색 깊이를 따른다([ADR-0259](../adr/0259-remote-file-viewer-system-back-to-explorer.md), ADR-0219의 FileViewer 정책 부분 대체). Explorer 복귀 경로가 있으면 헤더 Back과 같은 함수로 직전 디렉터리를 다시 조회하고, 목록 표시 중이거나 복귀 경로가 없는 파일 링크 열람에서는 오버레이를 닫는다. 파일 로딩·오류 중에도 복귀 경로를 사용하며, 복귀 요청은 기존 revision으로 늦은 파일 응답을 무효화한다. 목록 복귀도 `dismissTopLayer()`가 `true`로 소비하므로 native disconnect guard로 넘어가지 않는다. Escape·명시적 닫기·backdrop은 기존대로 오버레이 전체를 닫는다.
+
 메인 헤더의 폴더 버튼은 lease+FileViewer capability 보유 시에만 노출되며 활성 터미널 cwd에서 Remote Explorer 오버레이를 연다([ADR-0198](../adr/0198-remote-file-explorer-overlay.md)). Explorer 디렉터리 모드는 목록 위에 host file path 입력, 명시적 `From host`, `Open` action을 함께 표시하며 workspace drawer에는 파일 열기 UI를 두지 않는다([ADR-0042](../adr/0042-remote-file-viewer-secret-capability.md), [ADR-0044](../adr/0044-remote-file-viewer-explicit-host-path.md), [ADR-0184](../adr/0184-remote-file-viewer-in-page-overlay.md), [ADR-0208](../adr/0208-android-e2e-file-viewer-typed-capability.md)). 연결·heartbeat는 FileViewer status를 자동 조회하거나 입력을 변경하지 않는다. 사용자가 `From host`를 누르면 그때 `/status`를 조회해 데스크톱에서 현재 열린 파일 path를 입력에 넣으며, 요청 중 입력 revision이 바뀌면 늦은 응답을 적용하지 않는다. `Open`과 일반 Enter는 클릭 시점의 trim된 입력값을 exact path snapshot으로 전달하며 데스크톱 FileViewer store를 변경하지 않는다. 성공하면 입력 UI를 숨기고 같은 오버레이의 파일 모드로 전환하며 Back은 직전 Explorer 디렉터리를 다시 조회한다. 실패하면 입력 UI와 Back을 유지한다. Remote terminal의 선택 파일 링크도 사용자 selection/click을 명시적 host path action으로 취급하고 desktop parser를 재사용해 같은 viewer로 연다([ADR-0045](../adr/0045-remote-path-link-reuses-desktop-parser.md)).
 
 | Endpoint | Method | 용도 |
@@ -1626,9 +1634,9 @@ Remote 입력 action은 기본행(`main`)과 `Keys` 확장행(`expanded`) 각각
 
 확장행의 방향키·Tab·Esc·PgUp/PgDn·Ctrl 조합·F 키와 `submit`이 false인 사용자 등록 키는 `enqueueInput` → `/remote/v1/terminals/{id}/write` 로 escape 시퀀스를 보낸다(새 endpoint 없음). 방향키·Home·End는 `terminal.modes.applicationCursorKeysMode`를 반영해 SS3(`\x1bO`)/CSI(`\x1b[`)를 고른다. 키 버튼과 `Keys`·`Keyboard`, header pane 복사 버튼은 pointer activation의 기본 포커스 이동을 `mousedown`·`pointerdown` 양쪽에서 막아 현재 포커스된 입력 표면(composer 에디터 또는 xterm helper textarea)과 열린 모바일 소프트 키보드를 유지하되 실제 전송은 `click`으로 처리한다. WebKit/iOS는 `pointerdown` preventDefault만으로 포커스 이동을 막지 못하므로 `mousedown`도 함께 막는다(공유 `preventFocusSteal`/`keepInputSurfaceFocus`, [#482](https://github.com/kochul2000/laymux/issues/482)). Navigation 세트의 `↕↔` 방향 패드는 누르는 동안 상·우·하·좌 힌트를 표시하고 18px 이상 flick한 우세 방향을 기존 입력 경로로 보낸다. 임계거리 미만 탭과 취소 pointer는 입력을 보내지 않는다. 커서 키(`cursor` 속성: 방향키·Home·End)와 `↕↔` 방향 패드는 누르고 있으면 400ms 뒤 60ms 간격으로 자동 반복한다 — 패드는 손가락이 머무는 방향을 반복하고 방향이 바뀌면 지연을 다시 잰다. 반복은 1회 입력 경로를 대체하지 않고 그 위에 얹으므로 총 전송은 반복 n회 + 릴리스의 기존 1회이며, 릴리스·`pointercancel` 이 스트림을 멈춘다. 반복하는 키는 flick 패드와 같이 `touch-action: none`(`.key-repeat-btn`)으로 제스처를 소유한다 — 가로 스크롤되는 키 행이 몇 px 드리프트를 팬으로 가져가면 `pointercancel` 로 반복이 끊긴다. 나머지 소프트 키·사용자 등록 키와 `P↕N↔` navigation 패드는 1회 입력을 유지한다([ADR-0228](../adr/0228-remote-cursor-key-hold-repeat.md)).
 
-Remote drawer Settings는 헤더 아래 tablist로 `Input bar` · `Composer` · `Display` · `App`(업데이트·설치) 네 페이지로 나뉜다([ADR-0214](../adr/0214-remote-settings-paginates-into-tabs.md)) — 한 화면에 전부 쌓으면 짧은 화면에서 뒤쪽 섹션이 스크롤에 묻힌다. 선택한 탭만 layout에 남기고(`hidden`) 나머지는 렌더 트리에 두되 감춘다. tablist는 roving tabindex(선택된 탭만 `tabindex=0`, ←/→ 순환과 Home/End 이동)를 쓰고 스크롤 중에도 보이도록 sticky다. 탭을 바꾸면 drawer 스크롤을 맨 위로 되돌린다. 선택은 다른 Remote 표시 설정과 같은 surface-local 값으로 `localStorage["laymux.remote.settingsPanel"]`에 저장하며, 알 수 없는 값은 첫 탭으로 되돌린다 — 이는 [ADR-0187](../adr/0187-remote-drawer-status-dots-and-hidden-subview.md)이 영속하지 않는다고 정한 *최상위 drawer 하위 화면 선택*이 아니라 [ADR-0209](../adr/0209-remote-display-preferences-are-device-local.md)의 기기 로컬 표시 선호다(최상위 화면은 여전히 매번 workspace 기본 화면에서 시작한다). Settings 진입점의 상태 점이 특정 탭 내용을 가리키면 그 탭에도 같은 점을 찍는다(현재는 PC 업데이트 → `App`). Composer 설정은 더 이상 `#inputLayoutEditor` 안이 아니라 자기 탭의 `#composerSettingsEditor`에 렌더한다.
+Remote drawer Settings는 헤더 아래 tablist로 `Input bar` · `Floating` · `Composer` · `Display` · `Panels` · `App`(업데이트·설치) 여섯 페이지로 나뉜다([ADR-0214](../adr/0214-remote-settings-paginates-into-tabs.md)) — 한 화면에 전부 쌓으면 짧은 화면에서 뒤쪽 섹션이 스크롤에 묻힌다. 선택한 탭만 layout에 남기고(`hidden`) 나머지는 렌더 트리에 두되 감춘다. tablist는 roving tabindex(선택된 탭만 `tabindex=0`, ←/→ 순환과 Home/End 이동)를 쓰고 스크롤 중에도 보이도록 sticky다. 탭을 바꾸면 drawer 스크롤을 맨 위로 되돌린다. 선택은 다른 Remote 표시 설정과 같은 surface-local 값으로 `localStorage["laymux.remote.settingsPanel"]`에 저장하며, 알 수 없는 값은 첫 탭으로 되돌린다 — 이는 [ADR-0187](../adr/0187-remote-drawer-status-dots-and-hidden-subview.md)이 영속하지 않는다고 정한 *최상위 drawer 하위 화면 선택*이 아니라 [ADR-0209](../adr/0209-remote-display-preferences-are-device-local.md)의 기기 로컬 표시 선호다(최상위 화면은 여전히 매번 workspace 기본 화면에서 시작한다). Settings 진입점의 상태 점이 특정 탭 내용을 가리키면 그 탭에도 같은 점을 찍는다(현재는 PC 업데이트 → `App`). Composer 설정은 더 이상 `#inputLayoutEditor` 안이 아니라 자기 탭의 `#composerSettingsEditor`에 렌더한다.
 
-Display 탭의 `Swipe to open`과 `Swipe to close`는 모바일 Remote의 열기·닫기 제스처를 독립적으로 켠다. 열기 선택은 기존 surface-local `localStorage["laymux.remote.edgeSwipeDrawers"]`에 저장하며 키가 없거나 값이 `"0"`이 아니면 기본 on이다. 닫기 선택은 `localStorage["laymux.remote.swipeCloseDrawers"]`에 저장하며 열기와 동일하게 명시적인 `"0"`만 off이고 기본 on이다. 열기가 켜진 `mobileLayout`에서 terminal viewport 전체(하단 정렬 crop으로 xterm 위에 드러난 빈 배경 포함)의 왼쪽 24px 안에서 시작해 오른쪽으로 56px 이상 이동하고 수평 이동이 수직 이동의 1.25배를 넘으면 기존 workspace drawer를 연다. 오른쪽 24px 안에서 시작한 대칭 제스처는 active lease와 FileViewer capability가 있을 때 기존 Remote file explorer를 현재 terminal CWD(terminal이 없으면 host home)에서 연다. 닫기가 켜져 있으면 열린 floating workspace drawer는 패널을 왼쪽으로, 열린 file explorer는 디렉터리 목록을 오른쪽으로 같은 임계값만큼 flick하면 닫힌다. drawer 안쪽의 workspace/dock 목록·숨긴 workspace 목록·알림 목록·업데이트 노트도 각각 `touch-action: pan-y`를 지정해 브라우저가 가로 드래그를 스크롤로 가져가 pointer를 취소하지 않도록 한다. 반대 방향 또는 수직 우세 이동은 기존 한 손가락 스크롤 경로로 되돌리고, 데스크톱 pointer에서는 이 제스처를 적용하지 않는다([ADR-0209](../adr/0209-remote-display-preferences-are-device-local.md), [ADR-0198](../adr/0198-remote-file-explorer-overlay.md)).
+Panels 탭의 `Swipe to open`과 `Swipe to close`는 모바일 Remote의 열기·닫기 제스처를 독립적으로 켠다. 열기 선택은 기존 surface-local `localStorage["laymux.remote.edgeSwipeDrawers"]`에 저장하며 키가 없거나 값이 `"0"`이 아니면 기본 on이다. 닫기 선택은 `localStorage["laymux.remote.swipeCloseDrawers"]`에 저장하며 열기와 동일하게 명시적인 `"0"`만 off이고 기본 on이다. 열기가 켜진 `mobileLayout`에서 terminal viewport 전체(하단 정렬 crop으로 xterm 위에 드러난 빈 배경 포함)의 왼쪽 24px 안에서 시작해 오른쪽으로 56px 이상 이동하고 수평 이동이 수직 이동의 1.25배를 넘으면 기존 workspace drawer를 연다. 오른쪽 24px 안에서 시작한 대칭 제스처는 rightSwipeView의 Files/GitHub/Memo를 각 lease/capability 조건 아래 연다. Files는 현재 terminal CWD(terminal이 없으면 host home)에서 연다. 닫기가 켜져 있으면 열린 floating workspace drawer는 패널을 왼쪽으로, 열린 도구는 toolSwipeRightAction=close일 때 헤더·안내 줄 또는 GitHub/Files 목록에서 오른쪽으로 같은 임계값만큼 flick하면 닫힌다. 열린 도구의 왼쪽/설정된 역방향 순환은 아래 ADR-0261 절을 따른다. drawer 안쪽의 workspace/dock 목록·숨긴 workspace 목록·알림 목록·업데이트 노트도 각각 `touch-action: pan-y`를 지정해 브라우저가 가로 드래그를 스크롤로 가져가 pointer를 취소하지 않도록 한다. 반대 방향 또는 수직 우세 이동은 기존 한 손가락 스크롤 경로로 되돌리고, 데스크톱 pointer에서는 이 제스처를 적용하지 않는다([ADR-0209](../adr/0209-remote-display-preferences-are-device-local.md), [ADR-0198](../adr/0198-remote-file-explorer-overlay.md)).
 
 `Input bar` 편집기는 배치와 순서를 하나의 칩 모델로 다룬다. Main 행·Keys 행의 각 구역과 `Hidden` 목록이 모두 드롭 대상이고, 고정 action과 소프트키를 구분 없이 칩으로 보여 준다. long-press Pointer Events drag(HTML native DnD 아님)와 삽입 표시선으로 구역·행·`Hidden` 경계를 넘어 옮기며, `Keys` 칩만은 확장행 구역을 drag target으로 받지 않는다. **숨겨진 칩을 탭하면 곧바로 Keys 행 끝(`Keys`는 main 행)에 배치되고 선택 상태로 남는다** — 새로 등록한 사용자 키도 같은 자리에 놓인다. 배치된 칩을 탭하면 선택만 토글한다. 선택 시 행·구역 select(`Main · Left` … `Keys · Right`, `Hidden`)와 구역 내 `First`·`←`·`→`·`Last`가 열리고, 사용자 등록 키에는 `Delete`가 함께 붙는다 — drag는 enhancement이고 이 탭 경로가 정본이다. `Hidden` 목록은 미배치 action을 카테고리(Actions / Pane·Alert nav / Navigation / Editing / Ctrl keys / Function / Custom keys)로 묶어 보여 준다. `Reset`은 배치와 확장 상태만 기본값으로 되돌리고 등록된 사용자 키는 지우지 않는다. 두 행은 CSS grid 3열 + `justify-content: space-between`으로 그리며, 구역 컨테이너에는 `min-width: 0`을 주지 않는다(트랙의 자동 최소 크기가 0이 되면 구역이 내용보다 좁아져 이웃과 겹친다). 화면 폭보다 길면 각 행 내부에서만 좌우 스크롤하며 한 줄을 유지하고 scrollbar track은 노출하지 않는다. app/header/main/footer/key-bar 경계는 `min-width: 0`을 유지해 문서 outer overflow를 만들지 않는다.
 
@@ -1742,6 +1750,21 @@ Remote Composer 첨부 표시([ADR-0236](../adr/0236-remote-composer-inline-atta
 값은 데스크톱 프론트 bridge(`query`/`widgets`/`snapshot`)에서 오며 **원격 폴은 probe 수요를 만들지 않는다**. Claude 스냅샷은 backend 가 마지막으로 캡처한 값을 읽을 뿐 probe 를 띄우지 않고, Codex 는 데스크톱의 계정별 단일 폴러가 가진 스냅샷을 공유한다([ADR-0104](../adr/0104-codex-usage-app-server-probe.md)). 폴 주기는 원격 클라이언트가 소유하며 `usage.*.refreshSeconds` 와 무관하다 — 그릴 항목이 있으면 5초, 없으면 30초로 늦추되 멈추지 않는다(배치는 데스크톱에서 언제든 늘어난다). 폴이 멈추는 경우는 셋뿐이다 — 기기 토글을 끈 경우, 연결을 해제한 경우, `401`/`403` 을 받은 경우. 문서가 숨겨진 동안에는 요청을 보내지 않는다(체인은 살아 있다). 폭이 모자라면 접지 않고 가로 스크롤한다 — `widgets.overflow` 의 `collapse` 는 데스크톱 표면 정책이다. 상호작용은 원격 자신의 표면에서 끝난다: 알림 위젯은 원격 drawer 의 알림 패널을 열고, CWD 위젯은 브라우저 클립보드에 복사한다.
 
 ---
+
+### Remote 공유 메모와 패널 설정 (ADR-0260)
+
+- `GET /remote/v1/memos?leaseId=<id>`: active lease 검증 후 `{memos:[{key,content}],count}`를 반환한다. 키는 알파벳 정렬이다. 아직 저장되지 않은 빈 MemoView는 기존 navigation의 pane 정보로 보완한다.
+- `POST /remote/v1/memos`: `{leaseId,key,content,expectedContent}`를 받고 같은 파일 잠금 아래 비교·저장한다. `memo-` 접두사의 ASCII 영숫자·`-`·`_` 키(6–256자)만 허용한다. 성공 `{ok:true}`, 원본 불일치 409, 저장소 읽기/파싱/쓰기 실패 500이다. 원격 bearer/Origin gate와 active lease를 모두 요구하며 성공 응답은 no-store다. Android E2E allowlist는 위 exact GET/POST 경로만 확장한다.
+- Desktop `save_memo` IPC도 `expectedContent`를 필수로 받아 같은 비교 저장을 사용한다. 원본 불일치는 실패로 반환하며 자동 덮어쓰기 재시도는 하지 않는다. `load_memo`는 읽기/파싱 오류를 빈 내용으로 숨기지 않는다.
+- Remote settings MCP에 `headerFiles`, `headerGithub`, `headerMemo`, `headerSpatialExclusion`, `headerDesktopMode` boolean(모두 기본 true, live)을 추가한다. localStorage 키는 `laymux.remote.<field>`다. `rightSwipeView`는 `files | github | memo`이며 기본 files를 유지한다. UI는 `Panels` 탭에서 이 설정과 스와이프 열기/닫기를 편집한다. 아이콘 표시는 기존 연결·가용성 조건 AND 기기 표시 설정으로 계산한다.
+
+### Remote 도구 순환 (ADR-0261)
+
+`toolSwipeRightAction`은 `close | previous`(기본 close, live)이며 `laymux.remote.toolSwipeRightAction`에 저장한다. Panels와 Remote settings MCP가 함께 편집하며 host settings/API에는 보내지 않는다. close는 기존 `swipeCloseDrawers`가 켜져야 동작하고 previous와 왼쪽 다음 도구 순환은 그 토글과 독립이다. 미지 저장값은 close로 복구한다.
+
+`remote-tool-swipe.js`는 고정 Issues → PRs → Files → Memo 순서에서 헤더 표시 설정 AND 가용성(lease, GitHub active terminal, Files capability)에 맞는 다음 항목을 계산한다. 현재 항목이 숨겨져 있어도 원래 위치를 기준으로 찾으며 다른 항목이 없으면 no-op이다. 기존 `rightSwipeView`는 숨긴 도구도 직접 열 수 있다. 탐색 제외·PC 모드는 도구가 아니므로 순환 대상이 아니다.
+
+문서 단일 포인터 소유자가 `data-remote-tool-swipe` 표면(도구 헤더·안내 줄, GitHub 목록, Files 디렉터리 목록)만 처리한다. 모바일 touch/pen에서 56px·수직 대비 1.25배 수평 이동을 확인하고 pointerup에서 한 단계 전환하며 후속 클릭을 소비한다. 입력 요소·메모 textarea·파일 렌더러·선택 중인 텍스트는 제외하고 수직 이동·다중 포인터·취소는 전환하지 않는다. 안내 줄은 다음/닫기/이전 동작을 현재 설정에 맞게 표시한다. Memo 초안은 기존 문서에 남고 자동 저장하지 않는다. Files Back은 현재 파일에서 폴더 복귀를 유지하며 다른 도구에서 Files를 다시 열면 기존 terminal CWD 경로를 사용한다.
 
 ## 14. Rust 코드 설계 원칙
 > 추가: 2026.04.05
@@ -2038,6 +2061,8 @@ pub fn get_terminal_summaries_inner(
 
 ### 15.4 컴포넌트 설계
 
+파일 항목의 표시 규칙은 `ui/src/lib/file-kind-icon.ts`를 PC·Remote가 함께 import한다([ADR-0205](../adr/0205-lucide-application-icon-source.md), [ADR-0210](../adr/0210-remote-lucide-icon-boundary.md) 직접 적용). 탐색기·FileViewer 내부 탐색기·압축파일 목록은 `FolderUp`/`Folder`/`Link`/`File`을 13px로 표시한다. 아이콘과 이름 모두 디렉터리(상위 폴더·디렉터리 링크 포함)는 `--accent`, 파일 링크는 `--green`, 일반 파일은 `--text-primary`를 쓴다. PC의 선택된 포커스 행은 기존 선택 대비색을 아이콘과 이름에 함께 적용한다. React의 `FileKindIcon`과 Remote의 Lucide DOM 경계는 같은 매핑·크기를 소비하고, Remote 생성 번들 드리프트 검사에는 이 공용 모듈도 포함한다.
+
 - View 내부의 로컬 서브 컴포넌트(`BarBtn`, `Sep` 등)는 같은 파일 내에 정의한다. 단, 2개 이상의 파일에서 사용되면 공유 모듈로 승격한다.
 - Props에 `data-testid`를 전달할 수 있도록 `testId` prop을 지원한다.
 - 스타일 상수(높이, 반경 등)는 컴포넌트 파일 상단에 `const`로 선언하되, CSS 변수로 정의된 토큰이 있으면 그것을 사용한다.
@@ -2102,41 +2127,34 @@ if (matchesKeybinding(e, "issueReporter.submit")) { handleSubmit(); }
 - 이 예외는 터미널에 한정한다. 파일 탐색기 등 다른 컴포넌트의 copy/paste는 여전히
   시스템 이벤트 전용이다.
 
-### 15.6 앱 전용 편의 코드 격리
+### 15.6 앱 전용 관측과 공통 작업 정책
 
-각 앱 activity 타입별로 **ActivityHandler** 클래스를 구현하여 notification, status, statusMessage 계산과 단일 pane 실제 클리어 입력·busy 판정을 분기한다. 원시 상태는 공통으로 저장하고, activity 타입에 따라 해당 핸들러가 최종 표시와 안전한 쓰기 계약을 도출한다. 워크스페이스 화면 클리어는 이 계약을 사용하지 않고 Ctrl+L만 브로드캐스트한다([ADR-0137](../adr/0137-workspace-clear-ctrl-l-broadcast.md), [ADR-0158](../adr/0158-activity-aware-single-pane-clear.md)).
+[ADR-0250](../adr/0250-terminal-task-state-and-notification-transitions.md)에 따라 앱별 핸들러는 메시지 포맷·기존 타이틀 해석·clear 입력(`/clear` 또는 셸 설정값)의 어댑터다. 최종 표시·알림·절전·clear 보호는 `terminal-task.ts`와 공통 전이 구독자가 소유한다. 워크스페이스 Ctrl+L은 기존 방송 동작을 유지한다.
 
-Codex의 `get_codex_turn_states` Tauri command는 인자 없이 현재 알려진 Codex pane의 `Record<terminalId, { generation, sessionId?, selectionKey?, turnId?, state }>`를 반환한다([ADR-0248](../adr/0248-codex-turn-lifecycle-activity.md)). `state`는 `running | completed | failed | interrupted | idle | unknown`이다. `selectionKey`는 프로세스별 TUI 대화 선택 로그의 식별자로, 호출자가 구성하거나 다른 프로세스/세션에 재사용하지 않는다. 정확한 귀속과 읽기에 실패하면 unknown이며 성공·중단으로 합성하지 않는다. 파일 경로와 transcript 본문은 응답에 포함하지 않는다. 명령은 blocking I/O를 Tauri threadpool에서 실행하고 조회 전후 PTY generation을 검증한다. frontend의 메모리 전용 `codexTurn`과 공통 `outputActive`는 분리되며, Automation `terminals.list`의 기존 instance 확장 필드와 `selectorStatus`에도 같은 상태가 노출된다. 별도 REST 제어 endpoint나 Codex 설정 변경은 추가하지 않는다.
+`get_codex_turn_states`는 인자 없이 `Record<terminalId, { generation, sessionId?, selectionKey?, turnId?, state }>`를 반환한다. `state`는 `running | completed | failed | interrupted | idle | unknown`이고 정확 귀속·읽기 실패는 unknown이다. 프로세스별 selectionKey는 호출자가 합성하거나 재사용하지 않는다. blocking I/O는 Tauri threadpool에서 실행하며 전후 generation을 검증한다. Windows·Linux·WSL 파일 경로와 /review 부모 턴 경계는 ADR-0248·0249를 그대로 따른다. 프론트 조회 실패는 직전 상태를 지우지 않고 지연으로 처리한다.
 
-#### ActivityHandler 인터페이스
+정상 Codex 응답은 6초 지연 후에도 구독·pane·앱·제출 입력·generation 검사를 통과하면 반영한다([ADR-0255](../adr/0255-codex-delayed-observation-recovery.md)). 지연 기준은 결과 폐기 기한이 아니며, 실제 오류·unknown과 영구 미응답에는 기존 보호가 유지된다. 확인된 `idle`의 아이콘은 출력과 관계없이 대시다([ADR-0254](../adr/0254-confirmed-idle-before-output-activity.md)).
 
-```typescript
-interface ActivityHandler {
-  computeStatus(raw: RawTerminalState): StatusResult;        // 아이콘, 색상
-  computeStatusMessage(raw: RawTerminalState): string;       // 표시 텍스트
-  computeNotification(raw: RawTerminalState): Notification | null;  // 알림 발생 여부/내용
-  clearInput(shellClearCommand: string): string;             // 실제 클리어 제출 텍스트
-  isBusy(raw: RawTerminalState): boolean;                    // 지금 제출해도 안전한지
-}
-```
+**이벤트 계약**: 기존 `command-status`의 command/exitCode 메타데이터와 별도로 OSC 133 lifecycle 발행에는 `phase: start | end | prompt`와 `generation`이 있다. D 결과를 읽지 못하면 exitCode를 생략한다. title 이벤트에는 `generation`과 `appSession`(기존 process detection epoch)이 추가되며, 이전 generation/낡은 activity sequence의 작업 관측은 수락하지 않는다. 출력 활동 이벤트는 frame/volume만 발행하고 타이틀로 출력 활동 타이머를 갱신하지 않는다.
 
-#### 핸들러 등록
+PowerShell의 PSReadLine 통합은 [ADR-0262](../adr/0262-powershell-command-lifecycle.md)에 따라 이 기존 C/D/A 경로를 사용한다. `exitCode`는 PowerShell 파이프라인의 성공 여부(0/1)이며, 중단·결과 미관측은 생략한다. PSReadLine이 없거나 제한 언어 모드인 PowerShell은 OSC 7만 제공하고 작업 lifecycle은 미확인으로 남긴다. reader 래핑은 `FullLanguage`에서만 설치한다. 명령 본문 E나 새 endpoint/필드는 추가하지 않는다.
 
-```typescript
-const handlers: Record<string, ActivityHandler> = {
-  default: new ShellActivityHandler(),     // 셸 기본 (OSC 133 기반)
-  Claude: new ClaudeActivityHandler(),     // Claude Code 최적화
-  // 향후: neovim, htop 등 추가 가능
-};
+현재 generation은 output attach가 확정한다. generation이 미확정인 instance의 lifecycle/title 이벤트는 처리하지 않고 보류하며, attach 후 일치하는 generation만 수신 순서대로 적용한다. 이벤트 자체로 현재 generation을 시딩하지 않는다. instance 제거 또는 구독 종료 시 보류 이벤트를 폐기한다.
 
-function getHandler(activity?: Activity): ActivityHandler {
-  return handlers[activity?.name] ?? handlers.default;
-}
-```
+**메모리 모델**: terminal instance의 `taskObservation`은 source·taskId·sequence·state·선택적 result·입력 해소 여부·타이틀 만료 시간을 담는다. `task`는 공통 계산 결과와 마지막 유효 관측 시각·알림 전이 번호를 보관한다. 입력 관측은 `kind: input`으로 구분하며 다른 source/taskId는 거부한다. 작업·관측 상태와 중복 제거 이력은 세션 파일에 영속하지 않는다. 표시 메시지는 상태 마커를 담지 않는다.
 
-#### 격리 규칙
+`deferredTaskInput`은 Codex 종료 뒤 제출 경계(source·이전 taskId·inputAt)와 선택적 보류 입력 관측을 보관하는 메모리 전용 어댑터 입력이다. 새 턴 확인 전에는 기존 task를 변경하지 않으며, 같은 source의 새 running 턴에 한 번 재귀속한 뒤 소모한다. 표시/정책 소비자는 이 버퍼를 입력 대기 상태로 읽지 않는다.
 
-- 각 핸들러는 독립 모듈 파일에 구현한다 (`shell-activity-handler.ts`, `claude-activity-handler.ts`).
-- 핸들러를 import하지 않으면 해당 앱 전용 로직이 완전히 제거되어야 한다.
-- 핸들러 추가 시 기존 핸들러의 테스트가 깨지지 않아야 하고, 등록된 interactive app은 실제 클리어 입력과 busy 판정을 명시해야 한다.
-- 핸들러 동작은 설정으로 조절 가능하게 한다 — 현재는 Claude 상태 메시지 구성을 `claude.statusMessageMode`/`statusMessageDelimiter`(§10)가 제어한다. 핸들러 전체를 default 로 폴백시키는 플래그는 아직 없다(필요해지면 추가).
+**외부 투영**: Desktop·Automation terminals.list·Remote selectorStatus는 다음 필드를 공유한다.
+
+| 필드 | 값 |
+| --- | --- |
+| taskState | idle / running / waiting / ended, 미확인이면 생략 |
+| taskResult | success / failure / interrupted, 관측한 종료 결과만 포함 |
+| observation | confirmed / unknown / stale |
+| outputActive | 독립 출력 활동 boolean |
+| icon, color, label, text | 표시 호환 필드와 접근성 문구; 정책의 입력이 아님 |
+
+[ADR-0251](../adr/0251-single-terminal-status-icon.md)·[ADR-0254](../adr/0254-confirmed-idle-before-output-activity.md)에 따라 Desktop과 Remote는 `task-status-glyph.ts`로 다섯 아이콘 중 하나만 선택한다. 작업 없음·입력 대기·진행·종료 결과가 출력보다 우선하며, 작업 미확인에서만 출력 활동을 모래시계로 표현한다. 지연·출력 보조 배지와 상태 툴팁은 없고 미확인 알림 테두리는 유지한다. 내부 필드와 알림·절전·clear 정책은 바꾸지 않는다. 기존 REST/MCP 조회 경로의 확장이며 인증·포트·제어 endpoint는 바꾸지 않는다.
+
+핸들러별 메시지 포맷은 `claude/codex/grok.statusMessageMode/statusMessageDelimiter`를 유지한다. 테스트는 앱 어댑터의 파싱·메시지/clear 입력과 공통 상태·알림/정책을 각각 검증한다. 표시 조합과 신호별 제한은 [data-flow.md §9](./data-flow.md)에 둔다.

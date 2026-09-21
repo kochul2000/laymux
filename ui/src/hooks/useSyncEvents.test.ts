@@ -5,6 +5,7 @@ import { useTerminalStore } from "@/stores/terminal-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { taskSource, terminalTaskPolicy } from "@/lib/terminal-task";
 
 vi.mock("@/lib/persist-session", () => ({
   persistSession: vi.fn().mockResolvedValue(undefined),
@@ -86,6 +87,354 @@ describe("useSyncEvents", () => {
   it("registers sync-cwd listener on mount", () => {
     renderHook(() => useSyncEvents());
     expect(mockOnSyncCwd).toHaveBeenCalledWith(expect.any(Function));
+  });
+
+  it.each(["✳ Reply with OK", "✳ Claude Code"])(
+    "WSL의 앱 식별보다 먼저 도착한 유휴 타이틀을 한 번 반영한다: %s",
+    (title) => {
+      const store = useTerminalStore.getState();
+      store.registerInstance({ id: "restored", profile: "WSL", syncGroup: "ws" });
+      store.updateInstanceInfo("restored", { generation: 7, sessionReady: true });
+      renderHook(() => useSyncEvents());
+      const emitTitle = mockOnTerminalTitleChanged.mock.calls[0][0];
+      const reconcile = mockOnTerminalActivityReconciled.mock.calls[0][0];
+      act(() =>
+        emitTitle({
+          terminalId: "restored",
+          generation: 7,
+          appSession: 0,
+          activitySequence: 10,
+          title,
+          interactiveApp: null,
+        }),
+      );
+      expect(useTerminalStore.getState().instances[0].task).toBeUndefined();
+      // WSL identity can arrive late; elapsed time alone does not negate idle.
+      const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 30_000);
+      act(() =>
+        reconcile([
+          {
+            terminalId: "restored",
+            activitySequence: 11,
+            activity: { type: "interactiveApp", name: "Claude" },
+          },
+        ]),
+      );
+      const current = () => useTerminalStore.getState().instances[0];
+      expect(current().task).toMatchObject({ state: "idle", observation: "confirmed" });
+      expect(terminalTaskPolicy(current()).clearAllowed).toBe(true);
+      expect(useNotificationStore.getState().notifications).toHaveLength(0);
+      const task = current().task;
+      act(() =>
+        reconcile([
+          {
+            terminalId: "restored",
+            activitySequence: 12,
+            activity: { type: "interactiveApp", name: "Claude" },
+          },
+        ]),
+      );
+      expect(current().task).toBe(task);
+      clock.mockRestore();
+    },
+  );
+
+  it.each(["none", "title", "command", "session", "input", "generation"])(
+    "attach 대기 중 받은 유휴는 reconcile 이후에도 보존하되 %s 경계를 넘지 않는다",
+    (change) => {
+      const store = useTerminalStore.getState();
+      store.registerInstance({ id: "attaching", profile: "WSL", syncGroup: "ws" });
+      renderHook(() => useSyncEvents());
+      const title = mockOnTerminalTitleChanged.mock.calls[0][0];
+      act(() => {
+        title({
+          terminalId: "attaching",
+          generation: 7,
+          appSession: 0,
+          activitySequence: 10,
+          title: "✳ Restored",
+          interactiveApp: null,
+        });
+        mockOnTerminalActivityReconciled.mock.calls[0][0]([
+          {
+            terminalId: "attaching",
+            activitySequence: 11,
+            activity: { type: "interactiveApp", name: "Claude" },
+          },
+        ]);
+        if (change === "title")
+          title({
+            terminalId: "attaching",
+            generation: 7,
+            appSession: 0,
+            activitySequence: 12,
+            title: "custom",
+            interactiveApp: null,
+          });
+        if (change === "command")
+          mockOnCommandStatus.mock.calls[0][0]({
+            terminalId: "attaching",
+            generation: 7,
+            phase: "start",
+          });
+        if (change === "session") store.updateInstanceInfo("attaching", { appSession: 1 });
+        if (change === "input") store.updateInstanceInfo("attaching", { lastUserInputAt: 10 });
+        store.updateInstanceInfo("attaching", {
+          generation: change === "generation" ? 8 : 7,
+          sessionReady: true,
+        });
+      });
+      const current = useTerminalStore.getState().instances[0];
+      expect(terminalTaskPolicy(current).clearAllowed).toBe(change === "none");
+      if (change === "none")
+        expect(current.task).toMatchObject({ state: "idle", observation: "confirmed" });
+      else expect(current.task?.state).toBeUndefined();
+      expect(useNotificationStore.getState().notifications).toHaveLength(0);
+    },
+  );
+
+  it("attach 대기 중 확인한 모달을 보류한 유휴로 덮어쓰지 않는다", () => {
+    const store = useTerminalStore.getState();
+    store.registerInstance({ id: "attaching", profile: "WSL", syncGroup: "ws" });
+    renderHook(() => useSyncEvents());
+    act(() => {
+      mockOnTerminalTitleChanged.mock.calls[0][0]({
+        terminalId: "attaching",
+        generation: 7,
+        appSession: 0,
+        activitySequence: 10,
+        title: "✳ Restored",
+        interactiveApp: null,
+      });
+      mockOnTerminalActivityReconciled.mock.calls[0][0]([
+        {
+          terminalId: "attaching",
+          activitySequence: 11,
+          activity: { type: "interactiveApp", name: "Claude" },
+        },
+      ]);
+      store.updateInstanceInfo("attaching", { generation: 7 });
+      const source = taskSource(useTerminalStore.getState().instances[0]);
+      store.observeTask("attaching", {
+        source,
+        taskId: "0",
+        sequence: 1,
+        state: "waiting",
+        kind: "input",
+      });
+      store.updateInstanceInfo("attaching", { sessionReady: true });
+    });
+    const current = useTerminalStore.getState().instances[0];
+    expect(current.task?.state).toBe("waiting");
+    expect(terminalTaskPolicy(current).clearAllowed).toBe(false);
+  });
+
+  it("attach 전 명령보다 나중에 받은 유휴는 과거 명령 재생으로 폐기하지 않는다", () => {
+    const store = useTerminalStore.getState();
+    store.registerInstance({ id: "attaching", profile: "WSL", syncGroup: "ws" });
+    renderHook(() => useSyncEvents());
+    act(() => {
+      mockOnCommandStatus.mock.calls[0][0]({
+        terminalId: "attaching",
+        generation: 7,
+        phase: "start",
+      });
+      mockOnTerminalTitleChanged.mock.calls[0][0]({
+        terminalId: "attaching",
+        generation: 7,
+        appSession: 0,
+        activitySequence: 10,
+        title: "✳ Restored",
+        interactiveApp: null,
+      });
+      store.updateInstanceInfo("attaching", { generation: 7, sessionReady: true });
+      mockOnTerminalActivityReconciled.mock.calls[0][0]([
+        {
+          terminalId: "attaching",
+          activitySequence: 11,
+          activity: { type: "interactiveApp", name: "Claude" },
+        },
+      ]);
+    });
+    expect(terminalTaskPolicy(useTerminalStore.getState().instances[0]).clearAllowed).toBe(true);
+  });
+
+  it.each(["command", "title"])("waits for attach before accepting %s generation", (kind) => {
+    useTerminalStore
+      .getState()
+      .registerInstance({ id: "restarted", profile: "PowerShell", syncGroup: "" });
+    renderHook(() => useSyncEvents());
+    const command = mockOnCommandStatus.mock.calls[0][0];
+    const title = mockOnTerminalTitleChanged.mock.calls[0][0];
+    act(() => {
+      if (kind === "command") {
+        command({ terminalId: "restarted", generation: 6, phase: "start" });
+        command({ terminalId: "restarted", generation: 6, phase: "end", exitCode: 0 });
+        command({ terminalId: "restarted", generation: 7, phase: "start" });
+      } else {
+        title({ terminalId: "restarted", generation: 6, title: "⠋ old", interactiveApp: "Claude" });
+        title({ terminalId: "restarted", generation: 6, title: "✳ old", interactiveApp: "Claude" });
+        title({
+          terminalId: "restarted",
+          generation: 7,
+          title: "⠋ current",
+          interactiveApp: "Claude",
+        });
+      }
+    });
+    expect(useTerminalStore.getState().instances[0].generation).toBeUndefined();
+    expect(useTerminalStore.getState().instances[0].task).toBeUndefined();
+    expect(useNotificationStore.getState().notifications).toHaveLength(0);
+    expect(persistSession).not.toHaveBeenCalled();
+    act(() => useTerminalStore.getState().updateInstanceInfo("restarted", { generation: 7 }));
+    expect(useTerminalStore.getState().instances[0].task?.state).toBe("running");
+    expect(useNotificationStore.getState().notifications).toHaveLength(0);
+    if (kind === "title") expect(useTerminalStore.getState().instances[0].title).toBe("⠋ current");
+    act(() => useTerminalStore.getState().updateInstanceInfo("restarted", { outputActive: true }));
+    expect(useNotificationStore.getState().notifications).toHaveLength(0);
+  });
+
+  it.each([
+    "newTitle",
+    "command",
+    "generation",
+    "session",
+    "otherApp",
+    "unregister",
+    "input",
+    "notReady",
+  ])("보류한 Claude 유휴를 %s 이후의 앱에 넘기지 않는다", (change) => {
+    const store = useTerminalStore.getState();
+    const register = () => {
+      store.registerInstance({ id: "restored", profile: "WSL", syncGroup: "ws" });
+      store.updateInstanceInfo("restored", { generation: 7, sessionReady: true });
+    };
+    register();
+    renderHook(() => useSyncEvents());
+    const title = mockOnTerminalTitleChanged.mock.calls[0][0];
+    const reconcile = mockOnTerminalActivityReconciled.mock.calls[0][0];
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1000);
+    try {
+      act(() =>
+        title({
+          terminalId: "restored",
+          generation: 7,
+          appSession: 0,
+          activitySequence: 10,
+          title: "✳ Restored",
+          interactiveApp: null,
+        }),
+      );
+      act(() => {
+        if (change === "newTitle")
+          title({
+            terminalId: "restored",
+            generation: 7,
+            appSession: 0,
+            activitySequence: 11,
+            title: "◐ Working",
+            interactiveApp: null,
+          });
+        if (change === "command")
+          mockOnCommandStatus.mock.calls[0][0]({
+            terminalId: "restored",
+            generation: 7,
+            phase: "start",
+          });
+        if (change === "generation") store.updateInstanceInfo("restored", { generation: 8 });
+        if (change === "session") store.updateInstanceInfo("restored", { appSession: 1 });
+        if (change === "otherApp")
+          store.updateInstanceInfo("restored", {
+            activity: { type: "interactiveApp", name: "Codex" },
+          });
+        if (change === "unregister") {
+          store.unregisterInstance("restored");
+          register();
+        }
+        if (change === "input") store.updateInstanceInfo("restored", { lastUserInputAt: 7000 });
+        if (change === "notReady") {
+          store.updateInstanceInfo("restored", { sessionReady: false });
+          store.updateInstanceInfo("restored", { sessionReady: true });
+        }
+        reconcile([
+          {
+            terminalId: "restored",
+            activitySequence: 12,
+            activity: { type: "interactiveApp", name: "Claude" },
+          },
+        ]);
+      });
+      const current = useTerminalStore.getState().instances[0];
+      expect(current.task).toBeUndefined();
+      expect(terminalTaskPolicy(current).clearAllowed).toBe(false);
+      expect(useNotificationStore.getState().notifications).toHaveLength(0);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it("화면 표시용으로 복원한 타이틀을 작업 관측으로 승격하지 않는다", () => {
+    const store = useTerminalStore.getState();
+    store.registerInstance({ id: "restored", profile: "WSL", syncGroup: "ws" });
+    store.updateInstanceInfo("restored", { generation: 7, sessionReady: true });
+    renderHook(() => useSyncEvents());
+    act(() => {
+      store.updateInstanceInfo("restored", { title: "✳ cached" });
+      mockOnTerminalActivityReconciled.mock.calls[0][0]([
+        {
+          terminalId: "restored",
+          activitySequence: 12,
+          activity: { type: "interactiveApp", name: "Claude" },
+        },
+      ]);
+    });
+    expect(terminalTaskPolicy(useTerminalStore.getState().instances[0]).clearAllowed).toBe(false);
+  });
+
+  it.each(["unregister", "unmount"])("discards deferred generation events on %s", (reason) => {
+    const register = () =>
+      useTerminalStore
+        .getState()
+        .registerInstance({ id: "removed", profile: "PowerShell", syncGroup: "" });
+    register();
+    const { unmount } = renderHook(() => useSyncEvents());
+    const emit = mockOnCommandStatus.mock.calls[0][0];
+    act(() => emit({ terminalId: "removed", generation: 7, phase: "start" }));
+    if (reason === "unregister")
+      act(() => {
+        useTerminalStore.getState().unregisterInstance("removed");
+        register();
+      });
+    else unmount();
+    act(() => useTerminalStore.getState().updateInstanceInfo("removed", { generation: 7 }));
+    expect(useTerminalStore.getState().instances[0].task).toBeUndefined();
+    expect(useNotificationStore.getState().notifications).toHaveLength(0);
+  });
+
+  it("observes generation-scoped shell lifecycle without synthesizing a result", () => {
+    useTerminalStore
+      .getState()
+      .registerInstance({ id: "shell-task", profile: "PowerShell", syncGroup: "" });
+    useTerminalStore.getState().updateInstanceInfo("shell-task", { generation: 7 });
+    renderHook(() => useSyncEvents());
+    const emit = mockOnCommandStatus.mock.calls[0][0];
+    act(() => emit({ terminalId: "shell-task", generation: 7, phase: "prompt" }));
+    expect(useTerminalStore.getState().instances[0].task?.state).toBe("idle");
+    act(() => emit({ terminalId: "shell-task", generation: 7, phase: "start" }));
+    act(() => emit({ terminalId: "shell-task", generation: 6, phase: "end", exitCode: 0 }));
+    expect(useTerminalStore.getState().instances[0].task?.state).toBe("running");
+    act(() => emit({ terminalId: "shell-task", generation: 7, phase: "end" }));
+    expect(useTerminalStore.getState().instances[0].task).toMatchObject({
+      state: "ended",
+      result: undefined,
+    });
+    act(() => emit({ terminalId: "shell-task", generation: 7, phase: "end", exitCode: 0 }));
+    act(() => emit({ terminalId: "shell-task", generation: 7, phase: "prompt" }));
+    expect(useTerminalStore.getState().instances[0].task).toMatchObject({
+      state: "ended",
+      result: "success",
+    });
+    expect(useNotificationStore.getState().notifications).toHaveLength(1);
   });
 
   it("registers sync-branch listener on mount", () => {
@@ -664,17 +1013,8 @@ describe("useSyncEvents", () => {
     expect(instance?.activityMessage).toBe("모든 테스트 통과했습니다.");
   });
 
-  it("does NOT overwrite the input-pending marker on claude-message-changed", async () => {
-    // Rust emits `claude-message-changed` every time Claude's title changes
-    // — i.e. on every spinner-tick frame while a modal is on screen. The
-    // frontend's input-pending detector sets `activityMessage` to
-    // CLAUDE_INPUT_PENDING_MARKER to signal "user response needed". If the
-    // Rust message handler clobbered that marker with the title-derived
-    // task description, the status icon would flap back to ⏳ within
-    // milliseconds and the user would never see the ✓ "waiting for input"
-    // state. This guards that interaction: while the marker is set, the
-    // Rust message is ignored.
-    const { CLAUDE_INPUT_PENDING_MARKER } = await import("@/lib/activity-markers");
+  it("keeps input waiting independent of claude-message-changed", async () => {
+    const { observeTaskInput } = await import("@/lib/terminal-task-observers");
     useTerminalStore.getState().registerInstance({
       id: "t1",
       profile: "WSL",
@@ -682,8 +1022,9 @@ describe("useSyncEvents", () => {
       workspaceId: "ws-1",
     });
     useTerminalStore.getState().updateInstanceInfo("t1", {
-      activityMessage: CLAUDE_INPUT_PENDING_MARKER,
+      activity: { type: "interactiveApp", name: "Claude" },
     });
+    observeTaskInput("t1", true);
 
     renderHook(() => useSyncEvents());
 
@@ -691,7 +1032,8 @@ describe("useSyncEvents", () => {
     callback({ terminalId: "t1", message: "Thinking with xhigh effort" });
 
     const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
-    expect(instance?.activityMessage).toBe(CLAUDE_INPUT_PENDING_MARKER);
+    expect(instance?.activityMessage).toBe("Thinking with xhigh effort");
+    expect(instance?.task?.state).toBe("waiting");
   });
 
   it("calls markClaudeTerminal when command text detects Claude", () => {
@@ -895,7 +1237,8 @@ describe("useSyncEvents", () => {
 
     const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
     expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Codex" });
-    expect(instance?.outputActive).toBe(true);
+    expect(instance?.outputActive).toBeUndefined();
+    expect(instance?.task).toBeUndefined();
   });
 
   // ── Regression guard for issue #234 ──

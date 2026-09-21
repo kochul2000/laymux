@@ -17,84 +17,11 @@ function raw(overrides: Partial<RawTerminalState> = {}): RawTerminalState {
 describe("ShellActivityHandler", () => {
   const handler = new ShellActivityHandler();
 
-  describe("computeStatus", () => {
-    it("returns ⏳ yellow when outputActive (priority 1)", () => {
-      const result = handler.computeStatus(raw({ outputActive: true }));
-      expect(result).toEqual({ icon: "⏳", color: "var(--yellow)" });
-    });
-
-    it("outputActive overrides exitCode=0", () => {
-      const result = handler.computeStatus(raw({ outputActive: true, exitCode: 0 }));
-      expect(result.icon).toBe("⏳");
-    });
-
-    it("outputActive overrides exitCode≠0", () => {
-      const result = handler.computeStatus(raw({ outputActive: true, exitCode: 1 }));
-      expect(result.icon).toBe("⏳");
-    });
-
-    it("returns ✓ green when exitCode=0", () => {
-      const result = handler.computeStatus(raw({ exitCode: 0 }));
-      expect(result).toEqual({ icon: "✓", color: "var(--green)" });
-    });
-
-    it("returns ✗ red when exitCode≠0", () => {
-      const result = handler.computeStatus(raw({ exitCode: 1 }));
-      expect(result).toEqual({ icon: "✗", color: "var(--red)" });
-    });
-
-    it("returns ✗ red for negative exit codes", () => {
-      const result = handler.computeStatus(raw({ exitCode: -1 }));
-      expect(result.icon).toBe("✗");
-    });
-
-    it("returns — gray for idle (no exitCode, no outputActive)", () => {
-      const result = handler.computeStatus(raw());
-      expect(result).toEqual({ icon: "—", color: "var(--text-secondary)" });
-    });
-
-    it("returns ⏳ yellow when activity is running (sleep/ssh/sparse scripts)", () => {
-      // Long-running commands without DEC-2026 bursts must show ⏳ rather than
-      // inheriting the prior command's ✓/✗.
-      const result = handler.computeStatus(raw({ activity: { type: "running" } }));
-      expect(result).toEqual({ icon: "⏳", color: "var(--yellow)" });
-    });
-
-    it("activity=running takes precedence over stale exitCode=0", () => {
-      const result = handler.computeStatus(raw({ activity: { type: "running" }, exitCode: 0 }));
-      expect(result.icon).toBe("⏳");
-    });
-
-    it("activity=running takes precedence over stale exitCode≠0", () => {
-      const result = handler.computeStatus(raw({ activity: { type: "running" }, exitCode: 1 }));
-      expect(result.icon).toBe("⏳");
-    });
-
-    it("outputActive still wins over activity=running", () => {
-      const result = handler.computeStatus(
-        raw({ activity: { type: "running" }, outputActive: true }),
-      );
-      expect(result.icon).toBe("⏳");
-    });
-
-    it("activity=shell falls through to exitCode rules", () => {
-      const result = handler.computeStatus(raw({ activity: { type: "shell" }, exitCode: 0 }));
-      expect(result.icon).toBe("✓");
-    });
-  });
-
   describe("computeStatusMessage", () => {
     it("always returns undefined (shell uses command text directly)", () => {
       expect(handler.computeStatusMessage(raw())).toBeUndefined();
       expect(handler.computeStatusMessage(raw({ activityMessage: "Building..." }))).toBeUndefined();
       expect(handler.computeStatusMessage(raw({ lastCommand: "npm test" }))).toBeUndefined();
-    });
-  });
-
-  describe("computeNotification", () => {
-    it("always returns null", () => {
-      expect(handler.computeNotification(raw())).toBeNull();
-      expect(handler.computeNotification(raw({ exitCode: 1 }))).toBeNull();
     });
   });
 });

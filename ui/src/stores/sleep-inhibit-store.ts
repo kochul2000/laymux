@@ -14,6 +14,7 @@ import { create } from "zustand";
 interface SleepInhibitState {
   /** Backend-confirmed: an inhibitor is held right now. */
   active: boolean;
+  staleTaskExpired: boolean;
   /** The last request did not deliver what was asked for. */
   failed: boolean;
   /** A request completed: `active` is the state in effect, `satisfied` whether it is the one asked for. */
@@ -24,6 +25,7 @@ interface SleepInhibitState {
 
 export const useSleepInhibitStore = create<SleepInhibitState>((set) => ({
   active: false,
+  staleTaskExpired: false,
   failed: false,
   reportResult: (active, satisfied) => set({ active, failed: !satisfied }),
   reportFailure: () => set({ failed: true }),

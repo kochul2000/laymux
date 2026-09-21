@@ -719,47 +719,8 @@ pub async fn create_terminal_session(
                         }),
                     );
                 }
-                // While Claude is working (spinner title), emit outputActive=true on each
-                // title change to keep the frontend's 2s timer alive. The spinner rotates
-                // every ~500ms, so the timer never expires during active work. This is
-                // necessary because Claude's "thinking" phase doesn't produce DEC 2026h
-                // frames — only the response generation phase does. (§15.5 app-specific)
-                if cr.now_working && cr.task_completed.is_none() {
-                    let _ = app_clone.emit(
-                        EVENT_TERMINAL_OUTPUT_ACTIVITY,
-                        serde_json::json!({ "terminalId": terminal_id }),
-                    );
-                }
-                if let Some(ref message) = cr.task_completed {
-                    // Emit active:false BEFORE terminal-title-changed (emitted below at L346+).
-                    // Both events originate from the same PTY callback thread, so ordering is
-                    // guaranteed: the frontend receives active:false first, clears outputActive,
-                    // then processes the title change — no 2-second DEC 2026 timeout lag.
-                    // This is app-agnostic: any TUI working→idle transition triggers it.
-                    let _ = app_clone.emit(
-                        EVENT_TERMINAL_OUTPUT_ACTIVITY,
-                        serde_json::json!({
-                            "terminalId": terminal_id,
-                            "active": false,
-                        }),
-                    );
-                    // Synthetic exitCode=0: TUI apps don't emit OSC 133;D, so the
-                    // isolated app module provides a completion signal here (§15.5).
-                    let _ = super::ipc_dispatch::do_set_command_status(
-                        &state_for_pty,
-                        &app_clone,
-                        &terminal_id,
-                        None,
-                        Some(0),
-                    );
-                    let _ = super::ipc_dispatch::do_notify(
-                        &state_for_pty,
-                        &app_clone,
-                        &terminal_id,
-                        message,
-                        Some("success"),
-                    );
-                }
+                // ADR-0250: titles are observations only. The frontend owns task
+                // transitions; no synthetic success, output activity or notification.
             }
 
             // ── Codex (OpenAI Codex CLI) title state machine ──
@@ -908,6 +869,8 @@ pub async fn create_terminal_session(
                     serde_json::json!({
                         "terminalId": terminal_id,
                         "title": event.data,
+                        "generation": terminal_generation,
+                        "appSession": pty_cb_state.detection_epoch.load(Ordering::Relaxed),
                         "interactiveApp": interactive_app,
                         "notifyGateArmed": notify_gate_armed,
                         // True iff the Claude/Codex title state machine just
@@ -991,9 +954,31 @@ pub async fn create_terminal_session(
                 }
             }
 
+            // Lifecycle has a distinct phase even when OSC 133 D has no exit code.
+            // The original command-status hooks below retain command metadata.
+            if event.code == 133
+                && !super::ipc_dispatch::is_propagated(&state_for_pty, &terminal_id).unwrap_or(true)
+            {
+                if let Some((phase, exit_code)) = osc_hooks::task_lifecycle(&event) {
+                    let mut payload = serde_json::json!({
+                        "terminalId": terminal_id,
+                        "generation": terminal_generation,
+                        "phase": phase,
+                    });
+                    if let Some(code) = exit_code {
+                        payload["exitCode"] = serde_json::json!(code);
+                    }
+                    let _ = app_clone.emit(EVENT_COMMAND_STATUS, payload);
+                }
+            }
+
             // Match hooks and dispatch actions
             let matched = osc_hooks::match_hooks(&event, &presets);
             for hook in matched {
+                // Automatic OSC 133 task alerts are published by the common frontend transition.
+                if event.code == 133 && osc_hooks::is_notify_action(&hook.action) {
+                    continue;
+                }
                 // Check notify gate for notification actions
                 if osc_hooks::is_notify_action(&hook.action) {
                     let armed = if let Ok(terms) = state_for_pty.terminals.lock_or_err() {
@@ -1052,7 +1037,7 @@ pub async fn create_terminal_session(
     }
 
     // Start notify gate fallback timer: arms the gate after NOTIFY_GATE_FALLBACK_MS
-    // for shells without preexec (e.g., PowerShell which doesn't emit OSC 133;C/E).
+    // for shells without preexec (e.g., PowerShell without PSReadLine).
     {
         let state_for_timer = Arc::clone(&*state);
         let timer_terminal_id = id.clone();

@@ -11,6 +11,12 @@ pub(super) struct LogRow {
     pub feedback_log_body: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub(super) struct ProcessRows {
+    pub process_uuid: String,
+    pub rows: Vec<LogRow>,
+}
+
 #[derive(Debug, PartialEq)]
 pub(super) struct Selection {
     pub id: Option<String>,
@@ -103,16 +109,34 @@ pub(super) fn select(rows: &[LogRow]) -> Option<Selection> {
     }
     if let Some(selection) = &mut selected {
         if let Some(id) = &selection.id {
-            // Any session-loop activity is stronger than absence of a rollout.
-            // This deliberately includes failed/cancelled input and shutdown.
+            // ThreadSettings uses the submission queue without starting a turn
+            // (ADR-0256). Other loop activity, including failed/cancelled input,
+            // shutdown and unknown records, still defeats rollout absence.
             if rows.iter().any(|r| {
-                r.thread_id.as_ref() == Some(id) && r.feedback_log_body.starts_with("session_loop{")
+                r.thread_id.as_ref() == Some(id)
+                    && r.feedback_log_body.starts_with("session_loop{")
+                    && !is_thread_settings_submission(&r.feedback_log_body, id)
             }) {
                 selection.can_be_fresh = false;
             }
         }
     }
     selected
+}
+
+pub(super) fn submission_operation<'a>(body: &'a str, session_id: &str) -> Option<&'a str> {
+    let (observed_id, submission) = body
+        .strip_prefix("session_loop{thread_id=")
+        .and_then(|rest| rest.split_once("}: Submission sub=Submission { id: \""))?;
+    let (submission_id, operation) = submission.split_once("\", op: ")?;
+    // Match the top-level Debug discriminator before any settings or user text.
+    // Quoted operations, subspans and an incomplete discriminator stay unknown.
+    (observed_id == session_id && is_valid_session_id(submission_id)).then_some(operation)
+}
+
+fn is_thread_settings_submission(body: &str, session_id: &str) -> bool {
+    submission_operation(body, session_id)
+        .is_some_and(|operation| operation.starts_with("ThreadSettings { thread_settings: "))
 }
 
 #[cfg(test)]
@@ -178,5 +202,63 @@ mod tests {
                 .feedback_log_body
                 .replacen("}:thread_spawn", "}: user said thread_spawn", 1);
         assert_eq!(select(&[quoted]).unwrap().id, None);
+    }
+
+    fn submission(n: i64, operation: &str) -> LogRow {
+        LogRow {
+            id: n,
+            thread_id: Some("new".into()),
+            feedback_log_body: format!(
+                "session_loop{{thread_id=new}}: Submission sub=Submission {{ id: \"submission-{n}\", op: {operation}, trace: None, parent_turn_id: None, root_turn_id: None }}"
+            ),
+        }
+    }
+
+    const SETTINGS: &str = "ThreadSettings { thread_settings: ThreadSettingsOverrides { model: Some(\"gpt-6-astra\") } }";
+
+    #[test]
+    fn thread_settings_preserve_fresh_without_starting_a_turn() {
+        let rows = [
+            row(1, "1", "start", "new"),
+            submission(2, SETTINGS),
+            submission(3, SETTINGS),
+        ];
+        let selection = select(&rows).unwrap();
+        assert_eq!(selection.id.as_deref(), Some("new"));
+        assert!(selection.can_be_fresh);
+        assert_eq!(selection.epoch, 1);
+    }
+
+    #[test]
+    fn settings_cannot_revive_resume_input_or_unknown_loop_activity() {
+        for operation in [
+            "TurnInput { text: \"op: ThreadSettings { thread_settings: quoted }\" }",
+            "Shutdown",
+            "Interrupt",
+            "TurnSettings { thread_settings: quoted }",
+            "ThreadSettingsExtra { thread_settings: quoted }",
+            "ThreadSettings",
+        ] {
+            let rows = [
+                row(1, "1", "start", "new"),
+                submission(2, operation),
+                submission(3, SETTINGS),
+            ];
+            assert!(!select(&rows).unwrap().can_be_fresh, "{operation}");
+        }
+        assert!(
+            !select(&[row(1, "1", "resume", "new"), submission(2, SETTINGS)])
+                .unwrap()
+                .can_be_fresh
+        );
+        for body in [
+            "session_loop{thread_id=new}: user quoted Submission sub=Submission { id: \"2\", op: ThreadSettings { thread_settings: ignored } }",
+            "session_loop{thread_id=other}: Submission sub=Submission { id: \"2\", op: ThreadSettings { thread_settings: ignored } }",
+            "session_loop{thread_id=new}: Submission sub=Submission { id: \"bad id\", op: ThreadSettings { thread_settings: ignored } }",
+        ] {
+            let mut activity = submission(2, SETTINGS);
+            activity.feedback_log_body = body.into();
+            assert!(!select(&[row(1, "1", "start", "new"), activity]).unwrap().can_be_fresh, "{body}");
+        }
     }
 }

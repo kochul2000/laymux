@@ -1,17 +1,8 @@
 import type { TerminalActivityInfo } from "@/stores/terminal-store";
-import { STATUS_ICON_WORKING, type StatusIconGlyph } from "./activity-markers";
 import { ShellActivityHandler } from "./shell-activity-handler";
 import { ClaudeActivityHandler } from "./claude-activity-handler";
 import { CodexActivityHandler } from "./codex-activity-handler";
 import { GrokActivityHandler, isGrokTitle } from "./grok-activity-handler";
-
-/** Re-exported so status consumers can reach it from the handler entry point. */
-export { STATUS_ICON_WORKING };
-
-export interface StatusResult {
-  icon: StatusIconGlyph;
-  color: string;
-}
 
 export type ActivityStatusMessageMode = "bullet" | "title" | "title-bullet" | "bullet-title";
 
@@ -30,16 +21,12 @@ export interface RawTerminalState {
 }
 
 export interface ActivityHandler {
-  computeStatus(raw: RawTerminalState): StatusResult;
   computeStatusMessage(raw: RawTerminalState): string | undefined;
-  computeNotification(raw: RawTerminalState): { message: string; level: string } | null;
   shouldPreserveActivityOnTitleReset?(raw: RawTerminalState): boolean;
   shouldPreserveActivityOnExitCode?(raw: RawTerminalState): boolean;
   isActiveTitle?(title: string | undefined): boolean;
   /** Text submitted as one line when the user requests an actual pane clear. */
   clearInput(shellClearCommand: string): string;
-  /** Whether submitting `clearInput()` now could disrupt an active prompt/task. */
-  isBusy(raw: RawTerminalState): boolean;
 }
 
 type InteractiveAppRegistration = {
@@ -58,7 +45,7 @@ function registerInteractiveApp(
 ): void {
   interactiveApps.set(
     activityName,
-    "computeStatus" in registration ? { handler: registration } : registration,
+    "clearInput" in registration ? { handler: registration } : registration,
   );
 }
 

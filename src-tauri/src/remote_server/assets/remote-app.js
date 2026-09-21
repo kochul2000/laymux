@@ -1,9 +1,13 @@
 import { createRemoteSettingsBridge } from "../../../../ui/src/remote/remote-settings-mcp.js";
+import { createRemoteMemo } from "../../../../ui/src/remote/remote-memo.js";
+import { installRemoteToolSwipes, nextRemoteTool, normalizeToolSwipeRightAction } from "../../../../ui/src/remote/remote-tool-swipe.js";
 import { createComposerEditor } from "../../../../ui/src/remote/composer-editor.js";
 import { readPathLinkSelection, readPathLinkLines, mapPathLinkParts, pathLinkPartsCurrent, PATH_LINK_CONTEXT_ROWS } from "../../../../ui/src/lib/path-link-lines.ts";
 import {
   commandStatusIconName,
   fileKindIconName,
+  fileKindColor,
+  FILE_KIND_ICON_SIZE,
   hydrateRemoteIcons,
   setRemoteIcon,
 } from "../../../../ui/src/remote/remote-icons.js";
@@ -126,6 +130,17 @@ import {
         const fileViewerDirectoryElement = $("fileViewerDirectory");
         const fileViewerBackButton = $("fileViewerBack");
         const fileExplorerHeaderButton = $("fileExplorerHeader");
+        const githubHeaderButton = $("githubHeader");
+        const githubOverlayElement = $("githubOverlay");
+        const githubIssuesTabButton = $("githubIssuesTab");
+        const githubPullsTabButton = $("githubPullsTab");
+        const githubIssuesCountElement = $("githubIssuesCount");
+        const githubPullsCountElement = $("githubPullsCount");
+        const githubRepoElement = $("githubRepo");
+        const githubRefreshButton = $("githubRefresh");
+        const githubCloseButton = $("githubClose");
+        const githubStatusElement = $("githubStatus");
+        const githubListElement = $("githubList");
         const focusTerminalButton = $("focusTerminal");
         const attachmentButton = $("attachFile");
         const attachmentInput = $("attachmentInput");
@@ -176,6 +191,8 @@ import {
         const widgetStripKey = "laymux.remote.widgetStrip";
         const edgeSwipeDrawersKey = "laymux.remote.edgeSwipeDrawers";
         const swipeCloseDrawersKey = "laymux.remote.swipeCloseDrawers";
+        const rightSwipeViewKey = "laymux.remote.rightSwipeView";
+        const toolSwipeRightActionKey = "laymux.remote.toolSwipeRightAction";
         const spatialExcludedPaneIdsKey = "laymux.remote.spatialExcludedPaneIds";
         const spatialExcludedWorkspaceIdsKey = "laymux.remote.spatialExcludedWorkspaceIds";
         // Secret resume capability issued by a successful claim. It lives in
@@ -220,10 +237,11 @@ import {
         const SCROLL_SENSITIVITY_MIN = 0.1;
         const SCROLL_SENSITIVITY_MAX = 20;
         const COMMAND_STATUS_LABELS = Object.freeze({
-          Hourglass: "Command running",
+          Hourglass: "Active",
           Check: "Command succeeded",
           X: "Command failed",
-          Minus: "No command result",
+          Minus: "Idle",
+          CircleAlert: "Response or approval needed",
         });
         const DEFAULT_REMOTE_DISPLAY_SETTINGS = Object.freeze({
           terminalFontSize: 14,
@@ -300,6 +318,18 @@ import {
         const REMOTE_LONG_TEXT_ATTACHMENT_THRESHOLD_BYTES = 5 * 1024;
         const attachmentTextEncoder = new TextEncoder();
         let leaseId = null;
+        const headerIconFields = {
+          headerFiles: "Files", headerGithub: "GitHub", headerMemo: "Memo",
+          headerSpatialExclusion: "Pane navigation exclusion", headerDesktopMode: "PC mode",
+        };
+        const headerIconKeys = Object.fromEntries(Object.keys(headerIconFields).map(key => [key, `laymux.remote.${key}`]));
+        let headerIcons = Object.fromEntries(Object.entries(headerIconKeys).map(([key, storageKey]) => [key, loadLocalToggle(storageKey)]));
+        const memoView = createRemoteMemo({
+          api: remoteFetch, getLease: () => leaseId, getNavigation: () => navigationState,
+          copy: writeClipboardText,
+          beforeOpen: () => { closeFileViewer(); closeRemoteGithubView(); setNavigationOpen(false); },
+          afterClose: () => focusCurrentInputSurface(),
+        });
         let remoteDisplaySettings = loadDeviceDisplaySettings();
         let resumeToken = null;
         let fileViewerToken = null;
@@ -341,6 +371,15 @@ import {
         let activeGithubRepoBase = null;
         let githubRepoRequestRevision = 0;
         let githubRepoAbortController = null;
+        let githubSnapshot = null;
+        let githubTab = "issues";
+        let githubRequestRevision = 0;
+        let githubPollTimer = null;
+        let githubOpenMenu = null;
+        let githubMenuUp = false;
+        let githubConfirming = null;
+        let githubActionInFlight = false;
+        let githubError = null;
         // Keep the user's most recently attached pane across release/lease
         // loss within this document. The navigation snapshot remains the
         // authority for whether it is still live and eligible; this hint is
@@ -519,6 +558,8 @@ import {
         let composerHideAgentInputEnabled = loadLocalToggle(composerHideAgentInputKey);
         let edgeSwipeDrawersEnabled = loadLocalToggle(edgeSwipeDrawersKey);
         let swipeCloseDrawersEnabled = loadLocalToggle(swipeCloseDrawersKey);
+        let rightSwipeView = loadRightSwipeView();
+        let toolSwipeRightAction = loadToolSwipeRightAction();
         let composerHiddenAgentInputLines = loadComposerHiddenAgentInputLines();
         let composerAgentInputHideFrame = null;
         let composerAgentInputHideRequest = null;
@@ -668,7 +709,7 @@ import {
         // Android E2E exits Remote control through Release. Keep the PC-mode
         // switch only for the desktop app's embedded mobile view, where it
         // changes the surrounding desktop layout rather than releasing a lease.
-        desktopModeHeaderButton.hidden = !localAppMode;
+        desktopModeHeaderButton.hidden = !localAppMode || !headerIcons.headerDesktopMode;
         desktopModeDrawerButton.hidden = !localAppMode;
         // Tell the PC app's overlay the embed actually came up. A refused frame
         // still fires the iframe's `load`, so this greeting is the host's only
@@ -1547,12 +1588,363 @@ import {
             });
         }
 
+        const REMOTE_GITHUB_POLL_MS = 10000;
+        const REMOTE_GITHUB_PENDING_RETRY_MS = 1000;
+        const REMOTE_GITHUB_ACTIONS = Object.freeze({
+          issues: [
+            ["issue.close", "Close as completed", false],
+            ["issue.closeNotPlanned", "Close as not planned", false],
+          ],
+          pulls: [
+            ["pr.merge", "Merge (merge commit)", true],
+            ["pr.squash", "Squash and merge", true],
+            ["pr.rebase", "Rebase and merge", true],
+            ["pr.close", "Close", false],
+          ],
+        });
+
+        function remoteOverlayOpen() {
+          return !fileViewerOverlayElement.hidden || !githubOverlayElement.hidden || memoView.isOpen();
+        }
+
+        function currentRemoteTool() {
+          if (!githubOverlayElement.hidden) return githubTab;
+          if (!fileViewerOverlayElement.hidden) return "files";
+          if (memoView.isOpen()) return "memo";
+          return null;
+        }
+
+        function resolveRemoteToolSwipe(direction) {
+          if (direction === -1 && toolSwipeRightAction === "close") {
+            return swipeCloseDrawersEnabled ? "close" : null;
+          }
+          return nextRemoteTool(currentRemoteTool(), direction, {
+            github: Boolean(leaseId && activeTerminalId && headerIcons.headerGithub),
+            files: Boolean(leaseId && fileViewerToken && headerIcons.headerFiles),
+            memo: Boolean(leaseId && headerIcons.headerMemo),
+          });
+        }
+
+        function performRemoteToolSwipe(tool) {
+          if (tool === "close") {
+            if (!githubOverlayElement.hidden) closeRemoteGithubView();
+            else if (!fileViewerOverlayElement.hidden) closeFileViewer();
+            else if (memoView.isOpen()) memoView.close();
+          } else if (tool === "issues" || tool === "pulls") {
+            githubTab = tool;
+            githubOpenMenu = null;
+            githubConfirming = null;
+            if (githubOverlayElement.hidden) openRemoteGithubView();
+            else renderGithubView();
+          } else if (tool === "files") openCurrentFileExplorer();
+          else if (tool === "memo") void memoView.open();
+        }
+
+        function renderToolSwipePreferences() {
+          toolSwipeRightActionSelect.value = toolSwipeRightAction;
+          const right = toolSwipeRightAction === "previous" ? "Previous tool →" :
+            swipeCloseDrawersEnabled ? "Close →" : "Use × to close";
+          document.querySelectorAll(".remote-tool-swipe-hint").forEach((element) => {
+            element.hidden = !mobileLayout;
+            element.textContent = `← Next tool · ${right}`;
+          });
+        }
+
+        function githubStatusMessage(status) {
+          switch (status?.type) {
+            case "ready":
+            case "pending":
+              return "";
+            case "notAGithubRepo":
+              return "No GitHub repository for this terminal's CWD";
+            case "ghMissing":
+              return "`gh` not found on PATH";
+            case "unauthorized":
+              return "Run `gh auth login` to read issues and PRs";
+            case "failed":
+              return status.message || "GitHub request failed";
+            default:
+              return "";
+          }
+        }
+
+        function githubRelativeTime(value) {
+          const timestamp = Date.parse(value || "");
+          if (!Number.isFinite(timestamp)) return "";
+          const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+          if (seconds < 60) return "just now";
+          const minutes = Math.round(seconds / 60);
+          if (minutes < 60) return `${minutes}m`;
+          const hours = Math.round(minutes / 60);
+          if (hours < 24) return `${hours}h`;
+          return `${Math.round(hours / 24)}d`;
+        }
+
+        function githubIconButton(icon, label, className = "github-row-action") {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = className;
+          button.setAttribute("aria-label", label);
+          button.title = label;
+          setRemoteIcon(button, icon);
+          return button;
+        }
+
+        function renderGithubView() {
+          const issues = Array.isArray(githubSnapshot?.issues) ? githubSnapshot.issues : [];
+          const pulls = Array.isArray(githubSnapshot?.pulls) ? githubSnapshot.pulls : [];
+          githubIssuesCountElement.textContent = String(issues.length);
+          githubPullsCountElement.textContent = String(pulls.length);
+          githubIssuesTabButton.classList.toggle("active", githubTab === "issues");
+          githubPullsTabButton.classList.toggle("active", githubTab === "pulls");
+          githubIssuesTabButton.setAttribute("aria-selected", String(githubTab === "issues"));
+          githubPullsTabButton.setAttribute("aria-selected", String(githubTab === "pulls"));
+          githubRepoElement.textContent = githubSnapshot?.repo || "";
+          githubRepoElement.title = githubSnapshot?.repo || "";
+          githubRefreshButton.disabled = githubActionInFlight;
+          const status = githubError || githubStatusMessage(githubSnapshot?.status);
+          githubStatusElement.textContent = status;
+          githubStatusElement.classList.toggle("error", Boolean(githubError || githubSnapshot?.status?.type === "failed"));
+          githubListElement.replaceChildren();
+          const items = githubTab === "issues" ? issues : pulls;
+          if (!githubSnapshot && !githubError) {
+            githubStatusElement.textContent = "Loading GitHub items...";
+            return;
+          }
+          if (!status && githubSnapshot?.status?.type === "ready" && items.length === 0) {
+            githubStatusElement.textContent = githubTab === "issues"
+              ? "No open issues"
+              : "No open pull requests";
+          }
+          for (const item of items) {
+            const row = document.createElement("div");
+            row.className = "github-row";
+            row.dataset.githubNumber = String(item.number);
+
+            const main = document.createElement("button");
+            main.type = "button";
+            main.className = "github-row-main";
+            main.title = item.title || "";
+            const number = document.createElement("span");
+            number.className = "github-number";
+            number.textContent = `#${item.number}`;
+            main.append(number);
+            if (item.isDraft) {
+              const draft = document.createElement("span");
+              draft.className = "github-draft";
+              draft.textContent = "DRAFT";
+              main.append(draft);
+            }
+            const copy = document.createElement("span");
+            copy.className = "github-row-copy";
+            const title = document.createElement("span");
+            title.className = "github-title";
+            title.textContent = item.title || "";
+            const meta = document.createElement("span");
+            meta.className = "github-meta";
+            if (item.author) {
+              const author = document.createElement("span");
+              author.textContent = `@${item.author}`;
+              meta.append(author);
+            }
+            const updated = githubRelativeTime(item.updatedAt);
+            if (updated) {
+              const time = document.createElement("span");
+              time.textContent = updated;
+              meta.append(time);
+            }
+            for (const labelText of (Array.isArray(item.labels) ? item.labels : []).slice(0, 2)) {
+              const label = document.createElement("span");
+              label.className = "github-label";
+              label.textContent = labelText;
+              meta.append(label);
+            }
+            copy.append(title, meta);
+            main.append(copy);
+            main.addEventListener("click", () => openRemoteUrl(item.url));
+            row.append(main);
+
+            const copyLink = githubIconButton("Copy", "Copy link");
+            copyLink.addEventListener("click", () => {
+              writeClipboardText(item.url)
+                .then(() => setStatus(`Copied #${item.number} link`))
+                .catch((error) => setStatus(`Copy failed: ${error.message || error}`, true));
+            });
+            row.append(copyLink);
+            if (githubTab === "pulls" && item.headRefName) {
+              const copyBranch = githubIconButton("GitBranch", "Copy branch");
+              copyBranch.addEventListener("click", () => {
+                writeClipboardText(item.headRefName)
+                  .then(() => setStatus(`Copied ${item.headRefName}`))
+                  .catch((error) => setStatus(`Copy failed: ${error.message || error}`, true));
+              });
+              row.append(copyBranch);
+            }
+            const menuButton = githubIconButton("Ellipsis", "GitHub actions");
+            menuButton.setAttribute("aria-expanded", String(githubOpenMenu === item.number));
+            menuButton.addEventListener("click", () => {
+              const opening = githubOpenMenu !== item.number;
+              githubOpenMenu = opening ? item.number : null;
+              if (opening) {
+                const rowRect = row.getBoundingClientRect();
+                const listRect = githubListElement.getBoundingClientRect();
+                const below = listRect.bottom - rowRect.bottom;
+                const above = rowRect.top - listRect.top;
+                githubMenuUp = below < 170 && above > below;
+              }
+              githubConfirming = null;
+              renderGithubView();
+            });
+            row.append(menuButton);
+
+            if (githubOpenMenu === item.number) {
+              const menu = document.createElement("div");
+              menu.className = `github-row-menu${githubMenuUp ? " up" : ""}`;
+              if (githubConfirming?.number === item.number) {
+                const prompt = document.createElement("div");
+                prompt.className = "github-menu-action";
+                prompt.textContent = githubConfirming.label;
+                const confirm = document.createElement("button");
+                confirm.type = "button";
+                confirm.className = "github-menu-action github-menu-confirm";
+                confirm.textContent = githubActionInFlight ? "Working..." : "Confirm";
+                confirm.disabled = githubActionInFlight;
+                confirm.addEventListener("click", () => runRemoteGithubAction(item.number, githubConfirming.action));
+                const cancel = document.createElement("button");
+                cancel.type = "button";
+                cancel.className = "github-menu-action";
+                cancel.textContent = "Cancel";
+                cancel.disabled = githubActionInFlight;
+                cancel.addEventListener("click", () => {
+                  githubConfirming = null;
+                  renderGithubView();
+                });
+                menu.append(prompt, confirm, cancel);
+              } else {
+                for (const [action, label, danger] of REMOTE_GITHUB_ACTIONS[githubTab]) {
+                  const actionButton = document.createElement("button");
+                  actionButton.type = "button";
+                  actionButton.className = `github-menu-action${danger ? " danger" : ""}`;
+                  actionButton.textContent = label;
+                  actionButton.addEventListener("click", () => {
+                    githubConfirming = { number: item.number, action, label };
+                    renderGithubView();
+                  });
+                  menu.append(actionButton);
+                }
+              }
+              row.append(menu);
+            }
+            githubListElement.append(row);
+          }
+        }
+
+        function scheduleGithubPoll(delay = REMOTE_GITHUB_POLL_MS) {
+          if (githubPollTimer) clearTimeout(githubPollTimer);
+          githubPollTimer = setTimeout(() => {
+            githubPollTimer = null;
+            if (!githubOverlayElement.hidden) loadRemoteGithubSnapshot(false);
+          }, delay);
+        }
+
+        async function loadRemoteGithubSnapshot(force = false) {
+          const terminalId = activeTerminalId;
+          if (!leaseId || !terminalId || githubOverlayElement.hidden) return;
+          const revision = ++githubRequestRevision;
+          githubError = null;
+          renderGithubView();
+          try {
+            const snapshot = await remoteFetch(
+              `/remote/v1/terminals/${encodeURIComponent(terminalId)}/github?force=${force ? "true" : "false"}`,
+            );
+            if (revision !== githubRequestRevision || terminalId !== activeTerminalId || githubOverlayElement.hidden) return;
+            githubSnapshot = snapshot;
+            githubOpenMenu = null;
+            githubConfirming = null;
+            renderGithubView();
+            scheduleGithubPoll(snapshot.status?.type === "pending" ? REMOTE_GITHUB_PENDING_RETRY_MS : REMOTE_GITHUB_POLL_MS);
+          } catch (error) {
+            if (revision !== githubRequestRevision || githubOverlayElement.hidden) return;
+            githubError = error instanceof Error ? error.message : String(error);
+            renderGithubView();
+            scheduleGithubPoll();
+          }
+        }
+
+        async function runRemoteGithubAction(number, action) {
+          const requestCwd = githubSnapshot?.cwd;
+          if (!leaseId || !activeTerminalId || !requestCwd || githubActionInFlight) return;
+          const requestLeaseId = leaseId;
+          const requestTerminalId = activeTerminalId;
+          githubActionInFlight = true;
+          githubError = null;
+          renderGithubView();
+          try {
+            await remoteFetch(
+              `/remote/v1/terminals/${encodeURIComponent(requestTerminalId)}/github/actions`,
+              {
+                method: "POST",
+                body: JSON.stringify({
+                  leaseId: requestLeaseId,
+                  cwd: requestCwd,
+                  action,
+                  number,
+                }),
+              },
+            );
+            if (leaseId !== requestLeaseId || activeTerminalId !== requestTerminalId) return;
+            githubOpenMenu = null;
+            githubConfirming = null;
+            await loadRemoteGithubSnapshot(true);
+          } catch (error) {
+            if (leaseId === requestLeaseId && activeTerminalId === requestTerminalId) {
+              githubError = error instanceof Error ? error.message : String(error);
+            }
+          } finally {
+            githubActionInFlight = false;
+            renderGithubView();
+          }
+        }
+
+        function openRemoteGithubView() {
+          if (!leaseId || !activeTerminalId) return;
+          if (memoView.isOpen()) memoView.close();
+          if (!fileViewerOverlayElement.hidden) closeFileViewer();
+          setNavigationOpen(false);
+          githubSnapshot = null;
+          githubError = null;
+          githubOpenMenu = null;
+          githubMenuUp = false;
+          githubConfirming = null;
+          githubOverlayElement.hidden = false;
+          renderGithubView();
+          loadRemoteGithubSnapshot(false);
+        }
+
+        function closeRemoteGithubView() {
+          githubRequestRevision += 1;
+          if (githubPollTimer) clearTimeout(githubPollTimer);
+          githubPollTimer = null;
+          githubOverlayElement.hidden = true;
+          githubSnapshot = null;
+          githubError = null;
+          githubOpenMenu = null;
+          githubMenuUp = false;
+          githubConfirming = null;
+          focusCurrentInputSurface();
+        }
+
+        function renderGithubEntryState() {
+          githubHeaderButton.hidden = !(leaseId && activeTerminalId && headerIcons.headerGithub);
+          $("memoHeader").hidden = !(leaseId && headerIcons.headerMemo);
+        }
+
         function renderFileViewerState(message = null, isError = false) {
           const connected = Boolean(leaseId && fileViewerToken);
           // The header folder button is an entry point, not an action with a
           // recoverable disabled state: without a lease it means nothing, so it
           // is hidden rather than disabled (ADR-0192, ADR-0198).
-          fileExplorerHeaderButton.hidden = !connected;
+          fileExplorerHeaderButton.hidden = !connected || !headerIcons.headerFiles;
           fileViewerSection.classList.toggle("locked", !connected);
           fileViewerPathInput.disabled = !connected;
           pullHostFileViewerPathButton.disabled = !connected || fileViewerStatusInFlight;
@@ -1759,6 +2151,14 @@ import {
           fileViewerZoomElement.hidden = !fileViewerZoomable();
         }
 
+        function returnToFileExplorer() {
+          if (!fileViewerExplorerReturnPath) return false;
+          // Header and system Back share fresh listing + stale-render invalidation
+          // (ADR-0198, ADR-0259), including loading and failed file requests.
+          openFileExplorerOverlay({ path: fileViewerExplorerReturnPath });
+          return true;
+        }
+
         function closeFileViewer() {
           fileViewerRequestRevision += 1;
           fileViewerOverlayElement.hidden = true;
@@ -1783,6 +2183,8 @@ import {
 
         function openFileViewerOverlay(path, explorerReturnPath) {
           if (!leaseId || !fileViewerToken || !path) return;
+          if (memoView.isOpen()) memoView.close();
+          if (!githubOverlayElement.hidden) closeRemoteGithubView();
           const openedFromExplorer = explorerReturnPath !== undefined;
           const requestRevision = ++fileViewerRequestRevision;
           const requestLeaseId = leaseId;
@@ -1854,6 +2256,8 @@ import {
 
         function openFileExplorerOverlay(request) {
           if (!leaseId || !fileViewerToken || !request) return;
+          if (memoView.isOpen()) memoView.close();
+          if (!githubOverlayElement.hidden) closeRemoteGithubView();
           const explorerFallbackPath = fileViewerDirectoryPath || fileViewerExplorerReturnPath;
           const requestRevision = ++fileViewerRequestRevision;
           const requestLeaseId = leaseId;
@@ -1954,10 +2358,11 @@ import {
           const row = document.createElement("button");
           row.type = "button";
           row.className = "file-viewer-directory-row";
+          row.style.color = fileKindColor(entry);
           const icon = document.createElement("span");
           icon.className = "file-viewer-directory-icon";
           icon.setAttribute("aria-hidden", "true");
-          setRemoteIcon(icon, fileKindIconName(entry, isParent));
+          setRemoteIcon(icon, fileKindIconName(entry, isParent), { size: FILE_KIND_ICON_SIZE });
           const name = document.createElement("span");
           name.className = "file-viewer-directory-name";
           name.textContent = entry.name;
@@ -3083,6 +3488,28 @@ import {
           }
         }
 
+        function loadRightSwipeView() {
+          try {
+            const value = localStorage.getItem(rightSwipeViewKey);
+            return ["github", "memo"].includes(value) ? value : "files";
+          } catch (_) {
+            return "files";
+          }
+        }
+
+        function loadToolSwipeRightAction() {
+          try { return normalizeToolSwipeRightAction(localStorage.getItem(toolSwipeRightActionKey)); }
+          catch { return "close"; }
+        }
+
+        function saveRightSwipeView(value) {
+          rightSwipeView = ["github", "memo"].includes(value) ? value : "files";
+          try {
+            localStorage.setItem(rightSwipeViewKey, rightSwipeView);
+          } catch (_) {}
+          rightSwipeViewSelect.value = rightSwipeView;
+        }
+
         function normalizeComposerHiddenAgentInputLines(value, fallback) {
           const parsed = Number(value);
           if (!Number.isFinite(parsed)) return fallback;
@@ -3721,7 +4148,7 @@ import {
           if (
             !tappedTerminalId ||
             currentInputMode() !== "composer" ||
-            !fileViewerOverlayElement.hidden
+            remoteOverlayOpen()
           ) {
             return;
           }
@@ -3737,7 +4164,7 @@ import {
               currentInputMode() !== "composer" ||
               composerCollapsed ||
               composerEditor.disabled ||
-              !fileViewerOverlayElement.hidden
+              remoteOverlayOpen()
             ) {
               return;
             }
@@ -3848,7 +4275,8 @@ import {
 
         function setActiveTerminal(nextTerminalId) {
           const nextId = nextTerminalId || null;
-          if (activeTerminalId !== nextId) {
+          const terminalChanged = activeTerminalId !== nextId;
+          if (terminalChanged) {
             clearPathLinkSelection();
             // Publish a terminal switch only after the previous output/input
             // surface has been isolated. Otherwise the old socket can keep
@@ -3885,6 +4313,11 @@ import {
           }
           renderInputSurface();
           updateHeaderPaneIdentity();
+          renderGithubEntryState();
+          if (terminalChanged && !githubOverlayElement.hidden) {
+            githubSnapshot = null;
+            loadRemoteGithubSnapshot(false);
+          }
         }
 
         function setConnected(connected) {
@@ -3916,8 +4349,11 @@ import {
             fileViewerPathRevision += 1;
             fileViewerPathInput.value = "";
             closeFileViewer();
+            closeRemoteGithubView();
           }
           renderFileViewerState();
+          renderGithubEntryState();
+          if (!connected && memoView.isOpen()) memoView.close();
         }
 
         function setConnectionHint(message, attention = false) {
@@ -5601,10 +6037,13 @@ import {
             const rect = surface.getBoundingClientRect();
             const navigationOpen = navToggleButton.getAttribute("aria-expanded") === "true";
             const edge =
-              edgeSwipeDrawersEnabled && mobileLayout && !navigationOpen && fileViewerOverlayElement.hidden
+              edgeSwipeDrawersEnabled && mobileLayout && !navigationOpen && !remoteOverlayOpen()
                 ? point.clientX <= rect.left + EDGE_SWIPE_HIT_PX
                   ? "left"
-                  : leaseId && fileViewerToken && point.clientX >= rect.right - EDGE_SWIPE_HIT_PX
+                  : leaseId &&
+                      ((rightSwipeView === "github" && activeTerminalId) || rightSwipeView === "memo" ||
+                        (rightSwipeView === "files" && fileViewerToken)) &&
+                      point.clientX >= rect.right - EDGE_SWIPE_HIT_PX
                     ? "right"
                     : null
                 : null;
@@ -5658,6 +6097,8 @@ import {
                 clearTouchLongPressTimer();
                 touchGesture.mode = "edgeOpened";
                 if (edge === "left") setNavigationOpen(true);
+                else if (rightSwipeView === "github") openRemoteGithubView();
+                else if (rightSwipeView === "memo") memoView.open();
                 else openCurrentFileExplorer();
               } else if (
                 openingDistance < -INTERNAL_TOUCH_SCROLL_SLOP_PX ||
@@ -6627,7 +7068,7 @@ import {
         function updateHeaderPaneIdentity() {
           const pane = activeWorkspacePane();
           copyPaneIdButton.hidden = !activePaneIdentifier();
-          spatialExclusionButton.hidden = !pane;
+          spatialExclusionButton.hidden = !pane || !headerIcons.headerSpatialExclusion;
           const excluded = Boolean(pane && spatialExcludedPaneIds.has(pane.id));
           spatialExclusionButton.setAttribute("aria-pressed", String(excluded));
           const label = excluded
@@ -6880,6 +7321,7 @@ import {
         // (ADR-0149, ADR-0219). Keep the hierarchy in this PC-served document
         // and expose only a boolean consumed/not-consumed boundary to native.
         function dismissTopRemoteLayer() {
+          if (memoView.isOpen()) { memoView.close(); return true; }
           // Both modals have z-index 60; OAuth follows the viewer in DOM order
           // and is therefore the topmost layer if both are present.
           if (!oauthRelayScrim.hidden) {
@@ -6887,7 +7329,11 @@ import {
             return true;
           }
           if (!fileViewerOverlayElement.hidden) {
-            closeFileViewer();
+            if (!returnToFileExplorer()) closeFileViewer();
+            return true;
+          }
+          if (!githubOverlayElement.hidden) {
+            closeRemoteGithubView();
             return true;
           }
           if (composerStarEditorScrim && !composerStarEditorScrim.hidden) {
@@ -6931,6 +7377,8 @@ import {
         const widgetStripToggle = $("widgetStripToggle");
         const edgeSwipeDrawersToggle = $("edgeSwipeDrawersToggle");
         const swipeCloseDrawersToggle = $("swipeCloseDrawersToggle");
+        const rightSwipeViewSelect = $("rightSwipeView");
+        const toolSwipeRightActionSelect = $("toolSwipeRightAction");
         // Fixed and client-owned: the strip is a viewer, not probe demand, so it
         // has no business following `usage.*.refreshSeconds`. Fast enough for
         // the activity and notification counts, which are the parts that move.
@@ -7779,14 +8227,14 @@ import {
               primary.append(path);
             }
 
-            const statusIconName = commandStatusIconName(pane.selectorStatus?.icon);
+            const statusIconName = commandStatusIconName(pane.selectorStatus);
             if (display.result && statusIconName) {
               const status = document.createElement("span");
               status.className = `pane-command-status${(pane.unreadCount || 0) > 0 ? " unread" : ""}`;
               setRemoteIcon(status, statusIconName, { size: 12 });
               if (pane.selectorStatus.color) status.style.color = pane.selectorStatus.color;
               status.setAttribute("role", "img");
-              status.setAttribute("aria-label", COMMAND_STATUS_LABELS[statusIconName]);
+              status.setAttribute("aria-label", pane.selectorStatus.label || COMMAND_STATUS_LABELS[statusIconName]);
               primary.append(status);
             } else if (display.result && (pane.unreadCount || 0) > 0) {
               const unread = document.createElement("span");
@@ -12007,7 +12455,7 @@ import {
         // Settings is paginated: only the selected panel is in the layout, so a
         // long section no longer buries the others under a scroll. The choice is
         // surface-local like the rest of the Remote display preferences.
-        const SETTINGS_PANELS = ["inputBar", "floating", "composer", "display", "app"];
+        const SETTINGS_PANELS = ["inputBar", "floating", "composer", "display", "panels", "app"];
 
         function loadSettingsPanel() {
           try {
@@ -12489,9 +12937,37 @@ import {
         // The markup ships checked; the stored choice is what actually holds
         // (ADR-0132). Applied before the first connect so a device that turned
         // the row off never flashes it.
+        function renderHeaderIconPreferences() {
+          for (const key of Object.keys(headerIconFields)) $(key).checked = headerIcons[key];
+          renderFileViewerState();
+          renderGithubEntryState();
+          updateHeaderPaneIdentity();
+          desktopModeHeaderButton.hidden = !localAppMode || !headerIcons.headerDesktopMode;
+        }
+        for (const [key, label] of Object.entries(headerIconFields)) {
+          const row = document.createElement("label");
+          row.className = "nav-toggle-row";
+          row.htmlFor = key;
+          const input = document.createElement("input");
+          input.type = "checkbox";
+          input.id = key;
+          input.addEventListener("change", () => {
+            headerIcons[key] = input.checked;
+            saveLocalToggle(headerIconKeys[key], input.checked);
+            renderHeaderIconPreferences();
+          });
+          const name = document.createElement("span");
+          name.className = "nav-toggle-name";
+          name.textContent = label;
+          row.append(input, name);
+          $("headerIconSettings").appendChild(row);
+        }
+        renderHeaderIconPreferences();
         widgetStripToggle.checked = widgetStripAllowed;
         edgeSwipeDrawersToggle.checked = edgeSwipeDrawersEnabled;
         swipeCloseDrawersToggle.checked = swipeCloseDrawersEnabled;
+        rightSwipeViewSelect.value = rightSwipeView;
+        renderToolSwipePreferences();
         applyRemoteDisplaySettings(remoteDisplaySettings);
         updateRemoteDisplaySettingsControls();
 
@@ -12522,6 +12998,9 @@ import {
             widgetStrip: widgetStripAllowed,
             edgeSwipeDrawers: edgeSwipeDrawersEnabled,
             swipeCloseDrawers: swipeCloseDrawersEnabled,
+            rightSwipeView,
+            toolSwipeRightAction,
+            ...headerIcons,
           }),
           (candidate, patch) => {
             const display = Object.fromEntries(Object.keys(DEFAULT_REMOTE_DISPLAY_SETTINGS).map(key => [key, candidate[key]]));
@@ -12534,6 +13013,9 @@ import {
               widgetStrip: widgetStripKey,
               edgeSwipeDrawers: edgeSwipeDrawersKey,
               swipeCloseDrawers: swipeCloseDrawersKey,
+              rightSwipeView: rightSwipeViewKey,
+              toolSwipeRightAction: toolSwipeRightActionKey,
+              ...headerIconKeys,
             };
             const writes = [];
             const floatingChanged = Object.keys(patch).some(key => ["floatingEnabled", "floatingButtons", "inputBarZones", "inputBarUserKeys"].includes(key) || Object.hasOwn(floatingSettingFields, key));
@@ -12600,8 +13082,14 @@ import {
             if (Object.hasOwn(patch, "widgetStrip")) setWidgetStripAllowed(candidate.widgetStrip);
             edgeSwipeDrawersEnabled = candidate.edgeSwipeDrawers;
             swipeCloseDrawersEnabled = candidate.swipeCloseDrawers;
+            rightSwipeView = candidate.rightSwipeView;
+            toolSwipeRightAction = candidate.toolSwipeRightAction;
+            headerIcons = Object.fromEntries(Object.keys(headerIconFields).map(key => [key, candidate[key]]));
+            renderHeaderIconPreferences();
             edgeSwipeDrawersToggle.checked = edgeSwipeDrawersEnabled;
             swipeCloseDrawersToggle.checked = swipeCloseDrawersEnabled;
+            rightSwipeViewSelect.value = rightSwipeView;
+            renderToolSwipePreferences();
             if (skipsChanged) {
               spatialExcludedPaneIds = new Set(candidate.spatialExcludedPaneIds);
               spatialExcludedWorkspaceIds = new Set(candidate.spatialExcludedWorkspaceIds);
@@ -12624,6 +13112,16 @@ import {
         swipeCloseDrawersToggle.addEventListener("change", () => {
           swipeCloseDrawersEnabled = swipeCloseDrawersToggle.checked;
           saveLocalToggle(swipeCloseDrawersKey, swipeCloseDrawersEnabled);
+          renderToolSwipePreferences();
+        });
+        toolSwipeRightActionSelect.addEventListener("change", () => {
+          toolSwipeRightAction = normalizeToolSwipeRightAction(toolSwipeRightActionSelect.value);
+          try { localStorage.setItem(toolSwipeRightActionKey, toolSwipeRightAction); }
+          catch { /* Device storage can be unavailable; retain the live preference. */ }
+          renderToolSwipePreferences();
+        });
+        rightSwipeViewSelect.addEventListener("change", () => {
+          saveRightSwipeView(rightSwipeViewSelect.value);
         });
         remoteTerminalFontSizeInput.addEventListener("change", () => {
           saveRemoteDisplaySettings();
@@ -12777,12 +13275,28 @@ import {
           // bridge falls back to the host home directory.
           openCurrentFileExplorer();
         });
-        fileViewerBackButton.addEventListener("click", () => {
-          // Back re-requests the listing rather than restoring a cache: the
-          // directory may have changed while the file was open (ADR-0198).
-          if (fileViewerExplorerReturnPath) {
-            openFileExplorerOverlay({ path: fileViewerExplorerReturnPath });
-          }
+        githubHeaderButton.addEventListener("click", openRemoteGithubView);
+        githubIssuesTabButton.addEventListener("click", () => {
+          githubTab = "issues";
+          githubOpenMenu = null;
+          githubConfirming = null;
+          renderGithubView();
+        });
+        githubPullsTabButton.addEventListener("click", () => {
+          githubTab = "pulls";
+          githubOpenMenu = null;
+          githubConfirming = null;
+          renderGithubView();
+        });
+        githubRefreshButton.addEventListener("click", () => loadRemoteGithubSnapshot(true));
+        githubCloseButton.addEventListener("click", closeRemoteGithubView);
+        fileViewerBackButton.addEventListener("click", returnToFileExplorer);
+        $("memoHeader").addEventListener("click", () => { void memoView.open(); });
+        installRemoteToolSwipes({
+          getCurrent: currentRemoteTool,
+          enabled: () => mobileLayout && Boolean(leaseId) && remoteOverlayOpen(),
+          resolveAction: resolveRemoteToolSwipe,
+          perform: performRemoteToolSwipe,
         });
         // Capture phase, and the event stops here: Escape otherwise reaches the
         // terminal and is written to the PTY as ESC while the user only meant to
@@ -12802,11 +13316,18 @@ import {
           // user reading, selecting or scrolling the file.
           if (event.target === fileViewerOverlayElement) closeFileViewer();
         });
-        installHorizontalFlickDismiss(
-          fileViewerDirectoryElement,
-          1,
-          () => !fileViewerDirectoryElement.hidden,
-          closeFileViewer,
+        githubOverlayElement.addEventListener("click", (event) => {
+          if (event.target === githubOverlayElement) closeRemoteGithubView();
+        });
+        window.addEventListener(
+          "keydown",
+          (event) => {
+            if (githubOverlayElement.hidden || event.key !== "Escape") return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            closeRemoteGithubView();
+          },
+          true,
         );
         fileViewerZoomOutButton.addEventListener("click", () => adjustFileViewerZoom(-1));
         fileViewerZoomInButton.addEventListener("click", () => adjustFileViewerZoom(1));
@@ -13297,5 +13818,6 @@ import {
           window.removeEventListener("keydown", handleLinkChipKeyDown, true);
           clearPathLinkSelection();
           closeFileViewer();
+          closeRemoteGithubView();
         });
       })();

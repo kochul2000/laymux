@@ -134,15 +134,12 @@ fn lookup_with_observer(
                             .remove(&terminal_id)
                             .unwrap_or_else(|| Err("WSL Codex diagnostics missing".into()))
                             .and_then(|rows| {
-                                let Some(selection) = lifecycle::select(&rows) else {
-                                    return Ok(None);
-                                };
                                 let home = process
                                     .codex_home_dir()
                                     .ok_or_else(|| "invalid WSL Codex home".to_owned())?;
                                 let store = CodexSessionStore::for_guest(home);
                                 let session =
-                                    store.resolve_selection(selection, session_max_age_hours)?;
+                                    store.resolve_process_rows(&rows, session_max_age_hours)?;
                                 if let Some(session) = &session {
                                     observe(&terminal_id, &store, session);
                                 }

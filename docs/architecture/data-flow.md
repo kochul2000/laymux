@@ -197,7 +197,7 @@ WSL Bash의 DEBUG preexec 훅은 빈 Enter·주석 입력 후 실행되는 `__la
 
 - `TerminalSession.notify_gate_armed` (기본값 `false`)로 게이팅
 - OSC 133;C (preexec) 또는 133;E (command text) 수신 시 게이트 활성화
-- preexec를 지원하지 않는 셸(PowerShell 등)은 `NOTIFY_GATE_FALLBACK_MS`(3초) 후 자동 활성화
+- 시작 신호를 관측하지 못하는 셸은 `NOTIFY_GATE_FALLBACK_MS`(3초) 후 자동 활성화. PSReadLine 통합 PowerShell은 C로 즉시 활성화한다. 이 타이머는 작업 시작·종료를 합성하지 않는다.
 - Notify 액션은 게이트가 활성화된 후에만 디스패치됨
 
 #### 프리셋 목록
@@ -996,56 +996,49 @@ Remote drawer도 선택된 workspace만 축약하지 않고 모든 visible works
 | git branch          | OSC 133E 감지 또는 `.git/HEAD` watch | 있을 때                    |
 | working directory   | OSC 7 감지                           | 있을 때 (브랜치와 같은 줄) |
 | 리스닝 포트         | 주기적 `ss -tlnp` / `netstat` 조회   | 활성 워크스페이스만        |
-| pane 결과 아이콘    | OSC 133 E/D + activity handler       | 결과 표시 설정이 켜질 때   |
+| pane 결과 아이콘    | 공통 task 상태 투영       | 결과 표시 설정이 켜질 때   |
 | pane 마지막 입력    | 제출 입력 또는 OSC 133 명령          | terminal pane 둘째 줄      |
 | 읽지 않은 알림 배지 | 알림 시스템                          | 카운트 > 0                 |
 | 알림 링 (테두리)    | 알림 발생 시                         | 읽지 않은 알림 있을 때     |
 
-### 마지막 명령 표시 (Activity-Aware Computation)
+### 작업 상태와 출력 활동 ([ADR-0250](../adr/0250-terminal-task-state-and-notification-transitions.md))
 
-표시 항목(아이콘, 색상, 텍스트)은 **원시 상태를 변경하지 않고**, activity 타입을 추가 입력으로 받아 계산 함수에서 분기하여 도출한다. 아래 표의 `⏳`·`✓`·`✗`·`—`는 계산·Automation/Remote projection이 유지하는 호환 식별자다. 데스크톱 React는 이 문자를 직접 표시하지 않고 `CommandStatusIcon`에서 각각 Lucide `Hourglass`·`Check`·`X`·`Minus`로 렌더링한다([ADR-0205](../adr/0205-lucide-application-icon-source.md)).
+`terminal-store`는 앱 식별·출력 활동과 별도로 마지막 원시 `taskObservation`과 공통 계산 결과 `task`를 메모리에만 보관한다. `terminal-task.ts::observeTask`가 작업 없음(`idle`)·진행 중(`running`)·입력 대기(`waiting`)·종료(`ended`), 선택적 종료 결과(`success | failure | interrupted`), 관측 상태(`confirmed | unknown | stale`)를 계산한다. 미확인에는 작업 상태를 채우지 않고, 지연에는 마지막 작업과 알림 이력을 보존한다.
 
-#### 기본 (셸, activity = none)
+WSL Claude 복원은 live `✳ <대화 제목>`이 프로세스 식별보다 먼저 도착할 수 있다([ADR-0252](../adr/0252-claude-idle-before-app-identification.md)). `useSyncEvents`는 아직 이름이 확인되지 않은 pane의 유효한 live 유휴 타이틀 하나만 generation·appSession·lastUserInputAt과 함께 보류한다. 실제 수신 시 activity 순서를 검사하고 attach 대기 중에도 보존한다. 큐 재생은 관측을 다시 수집하거나 보류를 폐기하지 않는다. generation과 준비 상태가 확인되고 같은 범위의 Claude가 식별되었으며 다른 작업 관측이 없으면 `observeTaskTitle`로 한 번 반영한다. appSession 미확정 시에는 보류한 live 이벤트의 값을 먼저 바인딩한다. 그 사이 새 유효 live 타이틀·명령·사용자 타이틀 변경·제출 입력, generation/appSession 변경·준비된 세션의 준비 해제, 다른 앱 식별, pane 삭제·구독 해제가 있으면 폐기한다. 최초 attach 준비 대기와 시간 경과만으로는 유휴를 무효화하지 않는다. xterm의 캐시·표시 타이틀은 이 경로에 들어오지 않는다. 최초 유휴는 `idle/confirmed`가 되어 Alt+L을 허용하지만 성공이나 완료 알림을 합성하지 않으며, 아이콘은 기존 ADR-0251대로 `—`다.
 
-| 우선순위 | 조건                           | 아이콘 | 색상 |
-| -------- | ------------------------------ | ------ | ---- |
-| 1        | `outputActive === true`        | ⏳     | 노랑 |
-| 2        | `activity.type === "running"`  | ⏳     | 노랑 |
-| 3        | `exitCode === 0`               | ✓      | 초록 |
-| 4        | `exitCode !== undefined` (≠ 0) | ✗      | 빨강 |
-| 5        | 나머지 (유휴/대기)             | —      | 회색 |
+| 의미 | Lucide 아이콘 | 색상·접근성 |
+| --- | --- | --- |
+| 대기·미확인·중단·결과 없는 종료 | Minus | 보조 텍스트색, 대기 |
+| 진행 중 또는 작업 미확인에서 출력 활동 | Hourglass | 노랑, 활동 중 |
+| 입력 대기 | CircleAlert | 노랑, 응답·승인 필요 |
+| 성공 / 실패 | Check / X | 초록 / 빨강, 성공 / 실패 |
 
-2번이 있는 이유: OSC 133 C 로 시작만 알려진 명령(`sleep`, `ssh`, 출력이 드문 스크립트)은 `outputActive` 를 못 켜므로, 그대로 두면 **직전** 명령의 exitCode 를 물려받아 ✓/✗ 로 보인다.
+[ADR-0254](../adr/0254-confirmed-idle-before-output-activity.md)에 따라 확인된 작업 없음(`idle`)은 출력 활동이 있어도 대시로 표시한다. 빈 WSL Astra 입력창은 `idle/confirmed`와 `outputActive=true`가 동시에 가능하다. 작업 미확인에서의 출력 fallback은 유지한다.
 
-#### Claude (activity = Claude, [ADR-0147](../adr/0147-output-volume-activity-and-app-declared-idle.md))
+[ADR-0251](../adr/0251-single-terminal-status-icon.md)에 따라 터미널당 상태 아이콘은 하나다. `task-status-glyph.ts`의 순수 표시 함수를 Desktop과 Remote가 공유한다. 입력 대기·진행·종료 결과는 출력 활동보다 우선한다. 관측 지연은 마지막 상태의 표시를 유지하고 별도 시계나 문구를 붙이지 않는다. 출력 파형·미확인 물음표·상태 툴팁은 없다. 접근성 이름은 다섯 표시의 의미만 전달하며 ko/en 번역을 따른다. 미확인 알림의 기존 네모 테두리와 읽음 처리는 유지한다. 내부 `taskState/taskResult/observation/outputActive`는 그대로 보존하며 표시 모래시계로 작업 상태·알림·절전·clear를 재판정하지 않는다.
 
-| 우선순위 | 조건                           | 아이콘 | 근거                                                     |
-| -------- | ------------------------------ | ------ | -------------------------------------------------------- |
-| 1        | input-pending 마커             | ✓      | 권한 모달 = 사용자가 행동할 상태. 뒤의 스피너보다 강하다 |
-| 2        | 타이틀이 working 스피너로 시작 | ⏳     | 앱이 "작업 중" 이라고 선언                               |
-| 3        | 타이틀이 `✳`(U+2733)로 시작    | ✓      | 앱이 "입력 대기" 라고 **선언**                           |
-| 4        | `outputActive === true`        | ⏳     | 출력에서 **추론**한 활성                                 |
-| 5        | 나머지                         | —      | 셸 핸들러로 폴백                                         |
+앱 어댑터는 기존 파서와 관측 경로를 재사용한다. 셸은 Rust OSC 133 C/D/A를 `command-status.phase`로 수신하고, D에 종료 코드가 없으면 결과 없는 종료로 남긴다. 명령 없는 A만 작업 없음을 복원한다. Claude는 새 working 타이틀을 진행으로, 작업 뒤 새 ✳를 결과 없는 종료로, 최초 ✳를 작업 없음으로 해석한다. Grok의 Braille 또는 `- Running:`은 진행만 증명하며 접두사 소멸로 종료를 만들지 않는다. 두 타이틀 어댑터는 새 수신부터 6초 후 지연이 되며 저장된 문자열 재읽기는 기한을 늘리지 않는다. Codex의 내부 작업 판정은 타이틀이나 출력으로 fallback하지 않는다.
 
-**3번이 4번보다 위인 것이 이 표의 핵심이다.** 앱이 명시적으로 선언한 유휴는 출력에서 추론한 활성을 이긴다. 반대 순서면 응답 flush 직후의 잔여 청크가 유휴 pane 을 프론트 타이머 2초 동안 ⏳ 로 되돌리고, 유휴 상태로도 리렌더하는 TUI 는 영구히 ⏳ 로 굳는다. `isTerminalWorking`(절전 억제, [ADR-0114](../adr/0114-sleep-prevention-mode.md))이 같은 계산 함수를 읽으므로 이 역전은 절전에도 그대로 적용된다.
+PowerShell 통합([ADR-0262](../adr/0262-powershell-command-lifecycle.md), [#1058](https://github.com/kochul2000/laymux/issues/1058))은 `terminal/powershell-integration.ps1`을 Rust에서 내장한다. 로드된 PSReadLine의 `PSConsoleHostReadLine` 반환값에 실행문이 있을 때만 OSC 133 C를 보내고 원래 문자열을 호스트에 돌려준다. 최초 프롬프트는 A이며, C에 대응하는 다음 프롬프트만 D를 보낸다. 빈 Enter·주석·입력 취소·미완성 멀티라인은 새 작업·종료 알림을 만들지 않는다. 실행 성공/실패는 프롬프트 진입의 `$?`와 새 history 항목으로 D;0/D;1을 보내고, 중단/종료 결과 미관측은 코드 없는 D로 보낸다. `$LASTEXITCODE` 자체는 변경하지 않으며 과거 native 종료 코드를 다음 cmdlet의 결과로 사용하지 않는다. 기존 셸 프로세스는 재시작해야 새 통합을 받는다.
 
-working 스피너 문자 목록(`✶✻✽✢` + `◐◑`(U+25D0/25D1) + Braille U+2800..U+28FF)은 Rust `claude_activity.rs` 의 `WORKING_SPINNERS` 와 프론트 `claude-activity-handler.ts` 두 곳에 있고 **동기화 의무**가 있다. 목록은 편의이며 판정의 근거가 아니다 — 목록이 낡거나(2.1.228 이 별표류를 `◐◑` 로 교체했을 때 그랬다) 타이틀에 접두어가 아예 없을 때(`CLAUDE_CODE_DISABLE_TERMINAL_TITLE`·타이틀 rename) 4번이 판정을 받친다.
+reader 래핑은 `LanguageMode=FullLanguage`에서만 설치한다. PSReadLine이 없거나 `ConstrainedLanguage`이면 원래 reader를 보존하고 PowerShell은 OSC 7만 보내며 lifecycle을 합성하지 않는다. 이 경우와 CMD는 작업 미확인 상태에서 출력 활동만 표시하며 무출력 작업의 진행·완료를 판정하지 않는다. 출력 중 자동 절전 fallback과 clear의 기존 미확인 셸 best-effort 예외를 사용하므로 조용한 실행의 clear 보호를 보장하지 않는다. 사용자에 의한 통합 reader/prompt 재정의·제거도 지원 범위 밖이다. [2026-09-18 실측](../codex-task-status-repro-2026-09-17.md)은 D만 보내던 수정 전 동작의 기록이다.
 
-#### Activity-Aware 분기 원칙
+`TerminalView`의 기존 승인·응답 감지는 source·taskId·sequence·해소 정보를 가진 입력 관측을 전달한다. 표시 메시지에 내부 마커를 저장하지 않는다. 같은 작업의 대기는 진행 관측보다 우선하고, 해소는 다시 진행으로, 종료는 대기를 닫는다. 닫힌 작업이나 다른 작업·세션에 속한 늦은 입력 관측은 거부한다. PTY generation·앱 변경·앱 감지 epoch 변경은 이력을 초기화한다.
 
-`computeCommandStatus(rawState, activity)` 함수는 activity 타입에 따라 **status(아이콘/색상)**, **statusMessage(텍스트)**, **notification(알림 발생 여부/내용)** 세 가지를 최적화한다.
+Codex 종료 상태에서 새 입력을 제출하면 기존 source·종료 taskId·제출 시점을 재관측 경계로 기록한다. 다음 poll보다 먼저 도착한 승인 프롬프트는 원시 관측으로 보류하며 표시 상태를 합성하지 않는다. 같은 source의 다른 running turnId를 확인할 때만 보류 관측을 새 턴에 재귀속한다. 동일 종료 턴의 재조회·일시 실패에는 보류를 유지하지만, 프롬프트 해소·다음 입력·PTY/앱/세션 교체·새 턴 종료에는 재사용하지 않는다. 입력 대기 표시는 여전히 공통 task에서만 읽는다.
 
-| 항목              | 셸 (기본)                   | Claude Code (activity = Claude)   |
-| ----------------- | --------------------------- | --------------------------------- |
-| **status**        | OSC 133 C/D 기반 4상태      | working/idle 전환 + 합성 exitCode |
-| **statusMessage** | 셸 명령 텍스트 (`npm test`) | 태스크 설명 (`Working on task`)   |
-| **notification**  | exitCode ≠ 0 → 실패 알림    | task_completed 메시지 기반 알림   |
+자동 작업 알림은 `subscribeTerminalTasks` 한 곳에서 입력 대기 진입·종료 전이를 발행한다. 최초 종료·입력 대기는 알리지 않으며 반복 관측·결과 보강·출력 정지·조회 실패도 알림을 만들지 않는다. 같은 작업의 진행 → 지연 → 종료는 한 번 알린다. 대기 알림은 기존 `requiresAction` 도착 보호와 읽음 정책을 유지한다. Rust의 합성 Claude 성공 알림과 OSC 133 자동 Notify, 프론트의 무출력 성공 추정은 사용하지 않는다. 명시적 `lx notify`는 독립이다.
 
-**설계 규칙**:
+최초 output attach는 snapshot을 관측하기 전에 generation을 확정한다. 첫 Codex lifecycle 조회보다 먼저 복원한 입력 대기는 현재 PTY·앱의 로컬 source일 때만 첫 running 턴에 무알림으로 재귀속한다. 이미 확인한 다른 세션의 대기나 해소·종료된 관측은 이전하지 않는다.
 
-- 원시 상태(`commandText`, `exitCode`, `outputActive`, `title` 등)는 activity와 무관하게 독립 저장한다. 하나의 공유 필드를 앱별로 덮어쓰지 않는다.
-- 계산 함수는 원시 상태 + activity 타입을 입력받아 최종 표시를 도출한다. activity 타입이 추가되면 계산 함수에 분기만 추가한다.
-- 앱 전용 분기 로직은 [api-contracts.md](./api-contracts.md) §15.6(앱 전용 편의 코드 격리)에 따라 격리된 모듈에 구현하고, 계산 함수에서 import하여 사용한다.
+Desktop·Remote의 작업 중 개수는 공통 task의 running 상태만 센다. 관측 지연의 60초 절전 만료나 작업 미확인 pane의 출력 활동은 작업 개수를 바꾸지 않는다.
+
+절전과 실제 clear는 `terminalTaskPolicy`를 읽는다. 확인된 진행은 자동 억제하고 지연은 마지막 유효 진행 관측부터 60초까지만 유지한다. 실패 재시도·출력은 기한을 늘리지 않으며 1초 정책 타이머가 조용한 pane도 해제한다. tooltip은 60초 만료 사유를 표시하고 수동 keepAwake·다른 pane의 근거는 유지한다. lifecycle 없는 비통합 셸·미지원 TUI는 출력 활동 동안만 예외적으로 억제한다.
+
+clear는 확인된 작업 없음·종료만 허용하고 나머지는 busyPolicy를 따른다. 미지원 TUI는 항상 skip한다. 미확인 셸의 예외는 PTY 준비·현재 generation에서 성공한 liveness 조회·shell 분류·작업/대기/출력 부재가 모두 필요하다. `clearPane`가 최대 3초(요청 deadline 이내)로 liveness를 새로 조회하며, 실패·교체는 보호한다. 이 예외는 작업 없음의 증명이 아니며 미검출 조용한 전경 작업에 입력이 섞일 위험은 남는다.
+
+예외 조회는 이미 shell로 분류된 pane에만 적용한다. OSC 133 E만 받은 running이나 activity 미확정은 조회로 shell로 덮지 않는다. 조회 중 running/task 관측이 새로 생겼다면 그 증거도 보존하고 최신 상태로 busyPolicy를 적용한다.
 
 결과 아이콘은 pane 첫째 줄에 Lucide SVG로 표시하고 상태 색상과 읽지 않은 알림 링은 기존 배지가 소유한다. 마지막 입력 표시는 `workspaceSelector.lastInputMode`가 소유한다([ADR-0194](../adr/0194-workspace-pane-last-input-second-line.md)). 기본 `perPane`은 각 terminal pane 둘째 줄에 그 pane의 입력을 표시한다. `workspaceLatest`는 terminal pane을 첫째 줄만 있는 높이로 줄이고, visible terminal pane 중 가장 최근 입력 하나를 pane 목록 아래 별도 한 줄에 표시한다. 두 모드 모두 `lastUserInput/lastUserInputAt`과 `lastCommand/lastCommandAt` 중 더 최신인 비어 있지 않은 제출 문자열을 선택하고 공백을 한 칸으로 접은 뒤 최대 50자로 truncate한다. Composer는 structured input 성공 뒤 snapshot을 기록하며 Direct는 human `onData`의 bounded line editor가 CR/LF 제출을 본 뒤 기록한다. Direct 조립기는 ECMA-48 7-bit CSI의 parameter/intermediate/final byte 범위를 chunk 경계에 걸쳐 bounded 상태로 소비하므로 SGR·SGR-pixels와 parameterized mouse report 좌표가 제출 문장에 섞이지 않는다. 이 필터는 최근 입력 모델에만 적용하며 PTY로 보내는 원본 입력 바이트는 변경하지 않는다. 이 상태는 메모리 전용이고 세션에 영속하지 않는다. 과거처럼 workspace 전체의 마지막 명령·상대 시간·최신 알림 텍스트를 섞던 통합 상태 행은 어느 모드에서도 렌더하지 않는다.
 
@@ -1053,7 +1046,7 @@ working 스피너 문자 목록(`✶✻✽✢` + `◐◑`(U+25D0/25D1) + Braille
 
 `statusMessage`(=`activityMessage`)는 타이틀뿐 아니라 TerminalView 의 16KB rolling 출력 버퍼에서 직접 추출한 텍스트로도 채워진다. 추출기는 모두 `activity-detection.ts` 에 있으며 TerminalView 의 출력 콜백에서 현재 activity 분기에 따라 호출된다. Codex 분기는 `detectCodexConversationMessageFromOutput` 로 assistant bullet(`• …`) 라인을 골라 surfacing 하고, `nextCodexMessage && current.activityMessage !== nextCodexMessage` dedup 으로 같은 메시지 재기록을 막는다. 이 출력 기반 문자열은 activity 상태 계산과 알림 문맥에 남지만 마지막 입력 표시에는 사용하지 않는다. `perPane`의 둘째 줄과 `workspaceLatest`의 workspace 입력 줄은 입력 경로가 기록한 마지막 제출 입력만 사용하므로 assistant 스트리밍 토큰이 selector 문구를 갱신하지 않는다([ADR-0194](../adr/0194-workspace-pane-last-input-second-line.md)).
 
-Claude 분기는 unfocused 세션 복귀 시(또는 `/recap`) 스크롤백에 출력되는 한 줄 요약을 `detectClaudeRecapFromOutput` 로 추출한다. 시그니처는 `※ recap: <요약> (disable recaps in /config)` — `※` 는 U+203B(REFERENCE MARK). 요약의 끝은 **명시적 종료자가 있어야만** 인정한다: 접미 힌트(`(disable recaps in /config)`) 또는 박스 드로잉 라인(`─` 3회+ 연속). EOF 폴백은 의도적으로 없다 — 스트리밍 중 잘린 미완성 recap 이 surfacing 되는 것을 막는 게이트다(#306 리뷰). recap 은 alt-screen 에서 CUP/CUF 커서 이스케이프로 여러 행에 wrap 되어 그려지므로, 단순 SGR 제거가 아니라 `stripAnsi`(CUP→`\n`, CUF(N)→N 칸 공백)로 정규화한 뒤 공백 런을 한 칸으로 접어 원래 한 줄로 복원한다. 버퍼에 여러 recap 이 누적되면 **마지막(최신)** 것을 취한다. surfacing 은 Codex 대화 메시지와 동일하게 `activityMessage` 경유이며(`ClaudeActivityHandler.computeStatusMessage` 의 `bullet` 경로), input-pending 모달이 떠 있는 동안(`CLAUDE_INPUT_PENDING_MARKER`)에는 recap 으로 덮어쓰지 않는다. 별도 notification 은 발생시키지 않는다.
+Claude 분기는 unfocused 세션 복귀 시(또는 `/recap`) 스크롤백에 출력되는 한 줄 요약을 `detectClaudeRecapFromOutput` 로 추출한다. 시그니처는 `※ recap: <요약> (disable recaps in /config)` — `※` 는 U+203B(REFERENCE MARK). 요약의 끝은 **명시적 종료자가 있어야만** 인정한다: 접미 힌트(`(disable recaps in /config)`) 또는 박스 드로잉 라인(`─` 3회+ 연속). EOF 폴백은 의도적으로 없다 — 스트리밍 중 잘린 미완성 recap 이 surfacing 되는 것을 막는 게이트다(#306 리뷰). recap 은 alt-screen 에서 CUP/CUF 커서 이스케이프로 여러 행에 wrap 되어 그려지므로, 단순 SGR 제거가 아니라 `stripAnsi`(CUP→`\n`, CUF(N)→N 칸 공백)로 정규화한 뒤 공백 런을 한 칸으로 접어 원래 한 줄로 복원한다. 버퍼에 여러 recap 이 누적되면 **마지막(최신)** 것을 취한다. surfacing 은 Codex 대화 메시지와 동일하게 `activityMessage` 경유이며(`ClaudeActivityHandler.computeStatusMessage` 의 `bullet` 경로), 공통 작업 상태가 입력 대기인 동안에는 recap 으로 덮어쓰지 않는다. 별도 notification 은 발생시키지 않는다.
 
 #### 세션 리미트 자동 복귀 (Claude, issue #312)
 
@@ -1063,32 +1056,14 @@ Claude Code 가 세션 리미트에 걸리면 스크롤백에 `⎿  You've hit y
 
 ### outputActive 감지 (워크스페이스 상태 관리 원칙)
 
-`outputActive`는 출력 활동을 나타내는 프론트엔드 전용 원시 상태다. **네 가지 독립된 감지 경로**가 있으며, 백엔드에서 직접 `outputActive`를 계산하지 않는다. Codex의 작업 상태는 아래의 턴 기록이 우선한다.
-
-| 감지 경로     | 대상                                                                | 신호                              | 동작                                                                     |
-| ------------- | ------------------------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------ |
-| OSC 133 C/D   | 셸 명령 (pytest, apt 등)                                            | preexec → precmd lifecycle        | `commandRunning` → `outputActive`                                        |
-| DEC 2026h     | 동기화 프레임을 빠르게 그리는 TUI (neovim 등)                       | `\x1b[?2026h` (동기화 렌더 시작)  | Rust PTY 콜백에서 감지 → `terminal-output-activity` 이벤트               |
-| 타이틀 스피너 | TUI 앱 thinking 단계 ([api-contracts.md](./api-contracts.md) §15.6) | OSC 0/2 타이틀 스피너 회전        | Rust PTY 콜백에서 `now_working` 감지 → `terminal-output-activity` 이벤트 |
-| **출력 볼륨** | 앱 종류 무관 — 위 셋이 전부 못 볼 때의 바닥                         | 윈도 내 누적 PTY 바이트 임계 초과 | Rust PTY 콜백에서 감지 → `terminal-output-activity` 이벤트               |
-
-**네 경로는 서로의 사각을 덮는다**([ADR-0147](../adr/0147-output-volume-activity-and-app-declared-idle.md)). 어느 하나도 단독 권위가 아니다.
-
-| 상황                                     | OSC 133 | DEC 2026           | 타이틀 | 볼륨          |
-| ---------------------------------------- | ------- | ------------------ | ------ | ------------- |
-| lx 통합 셸에서 도는 명령                 | ✅      | —                  | —      | 출력량에 따라 |
-| neovim 편집 (초당 수십 프레임)           | —       | ✅                 | —      | —             |
-| Claude 응답 스트리밍                     | —       | 프레임 주기에 따라 | ✅     | ✅            |
-| Claude 조용한 툴 대기 (네트워크·`sleep`) | —       | ❌                 | ✅     | ❌            |
-| 타이틀 접두어 없는 TUI 가 대량 출력      | —       | ❌                 | ❌     | ✅            |
-| lx 통합 없는 셸의 빌드 로그              | ❌      | ❌                 | ❌     | ✅            |
+`outputActive`는 PTY 바이트 볼륨과 DEC 2026 프레임 검출만 소비한다. OSC 133 명령 실행과 앱 작업 타이틀은 작업 관측에만 사용하며 출력 활동 타이머를 켜거나 끄지 않는다. 종료 뒤 잔여 출력 신호는 기존 2초 해제로 끝나며 종료 아이콘을 덮거나 별도 배지를 만들지 않는다.
 
 #### 설계 원칙
 
 - **프론트엔드가 단일 소스**: `outputActive`는 Zustand store(`terminal-store`)에서만 관리한다. 백엔드 `TerminalSummaryResponse`에 `outputActive`를 포함하지 않는다.
 - **DEC 2026은 TUI 전용 신호**: 일반 셸 명령(`ls`, `pytest` 등)은 DEC 2026h를 사용하지 않으므로 이 경로로 감지되지 않는다. 셸 명령의 running 상태는 OSC 133 C/D가 담당한다.
 - **출력의 "유무" 기반 판단 금지 — "양" 기반은 허용**([ADR-0147](../adr/0147-output-volume-activity-and-app-declared-idle.md) 로 경계 정정): `output_buffer.last_output_at` 같은 "PTY에 뭐라도 출력되면 active" 방식은 셸 프롬프트 리드로에 false positive 를 내므로 여전히 금지다. 배제해야 하는 대상(프롬프트 리드로·포커스 리드로·키 에코)은 이벤트당 상한이 있는 양이므로, **사람의 타이핑이 도달할 수 없는 높이의 누적 바이트 임계**는 셋 다 걸러내면서 빌드 로그·테스트 출력·스트리밍 응답을 잡는다. 임계 없는 유무 판정과 임계 있는 볼륨 판정을 같은 것으로 취급하지 않는다.
-- **볼륨은 앱 협조가 필요 없는 유일한 신호**: 나머지 셋은 앱이 OSC 133 을 내거나, 프레임을 빠르게 그리거나, 약속된 스피너 문자를 타이틀에 붙여야 성립한다. 외부 앱의 렌더링 세부가 바뀌어도 판정이 남아야 하므로 볼륨 경로를 제거하거나 임계를 무력화하지 않는다.
+- **볼륨은 앱 협조 없이 출력 활동을 관측하는 신호**다. 작업 경계의 증거로 승격하지 않는다.
 - **빈도 기반 감지 (Burst Detection)**: 단일 DEC 2026h 이벤트만으로는 활성으로 판정하지 않는다. 포커스 리드로(DEC 1004 → `\x1b[I]` → 앱이 1회 리드로)나 키 입력 에코(키스트로크 → 앱이 1회 리드로)는 모두 1회성이다. **`windowMs`(기본 2초) 내에 `threshold`(기본 6회) 이상의 DEC 2026h가 감지되어야** 이벤트를 발행한다. neovim 편집처럼 초당 수십 프레임을 그리는 작업은 임계값을 즉시 넘는다. 반대로 **프레임 주기가 느린 앱은 이 경로로 잡히지 않는다** — Claude Code 2.1.228 의 타이틀 스피너는 960ms 주기라 2초 창에 두 장뿐이다. 그 사각은 볼륨 경로가 덮는다.
 - **볼륨 기반 감지**: `volumeWindowMs`(기본 2초) 내 누적 PTY 출력 바이트가 `volumeThresholdBytes`(기본 64KiB, 즉 지속 ~32KiB/s)를 넘으면 발행한다. 하한은 4KiB 로 clamp 되어 유무 판정으로 퇴화할 수 없다. 검출은 PTY 콜백의 뜨거운 경로에 있으므로 청크당 누적 덧셈 + `Instant` 비교뿐이고 바이트를 다시 훑지 않는다.
 - **두 검출기는 독립적으로 평가한다**: 한 청크가 프레임 마커와 대량 출력을 함께 실을 수 있고, 볼륨 윈도 합은 모든 바이트를 봐야 의미가 있으므로 `else` 로 묶지 않는다. 둘 중 하나만 걸려도 같은 이벤트가 나가고, 프론트의 2초 타이머는 어느 쪽으로든 유지된다.
@@ -1104,9 +1079,9 @@ Claude Code 가 세션 리미트에 걸리면 스크롤백에 `⎿  You've hit y
 
 Codex `/review`는 하위 턴의 시작과 부모 턴의 완료를 같은 rollout에 기록할 수 있다([ADR-0249](../adr/0249-codex-review-parent-turn-boundaries.md)). Legacy의 `entered_review_mode`/`exited_review_mode`, Paginated의 `item_completed` 내 `EnteredReviewMode`/`ExitedReviewMode`는 부모 turn_id로 running을 복원한다. 리뷰 종료 경계만으로 성공을 만들지 않고 뒤따르는 부모 완료·오류·중단을 기다린다. 초기 읽기에서 진입 경계가 빠졌어도 종료 경계로 복원하며, 이후 일반 턴의 다른 ID 종료 방어는 유지한다.
 
-`useSyncEvents`가 `subscribeCodexTurnStates`를 시작한다. Codex pane이 있을 때 한 번에 하나의 조회를 보내고 응답 뒤 1초 후 다시 조회한다. 6초 이상 지연한 요청은 기존 상태를 unknown으로 만들고 늦은 응답을 버린다. pane 재생성·앱 전환·조회 중 제출 입력이 바뀌면 오래된 응답을 버린다. 완료 뒤 새 입력은 표시를 일시 무효화하고 다음 유효 관측으로 복원한다. `/status` 같은 로컬 명령은 새 턴을 만들지 않으므로 같은 턴의 재관측을 거부하지 않으며, 같은 완료 알림은 재생하지 않는다. raw `codexTurn`은 영속하지 않고 출력 이벤트는 계속 `outputActive`를 갱신한다.
+`useSyncEvents`가 `subscribeCodexTurnStates`를 시작한다. 한 번에 한 요청을 보내고 응답 후 1초 뒤 다시 조회한다. 6초 지연·오류·불완전 기록은 마지막 유효 작업과 알림 이력을 보존한 지연 관측을 전달한다. pane generation·앱 epoch·제출 입력이 요청 시작 때와 다르면 늦은 응답을 버린다. 새 입력은 재조회를 유도하지만 /status 같은 로컬 명령을 새 턴으로 합성하지 않는다. source는 generation·selectionKey·sessionId, taskId는 turnId이며 새 source의 종료·입력 대기는 무알림 복원이다. /review 부모 턴 처리는 Rust reader의 ADR-0249 계약을 유지한다.
 
-`CodexActivityHandler`가 이 두 원시 상태를 조합해 selector·Automation/Remote의 selectorStatus·절전 억제·clear 보호에 공통 적용한다. 확인된 completed는 반짝이가 출력 중이어도 완료이고, running은 조용해도 작업 중이다. unknown일 때 출력량·타이틀은 보조 신호지만 이전 셸 exitCode를 Codex 성공으로 재사용하지 않는다. 첫 관측·세션 전환·조회 복구는 과거 완료 알림을 재생하지 않는다. 같은 관측 세션에서 새로 확인한 completed만 성공 알림과 완료 체크포인트를 만든다. 입력 대기 마커 전환은 info 알림이고, frame 종료/2초 timeout/중단/오류는 성공 알림을 만들지 않는다.
+[ADR-0255](../adr/0255-codex-delayed-observation-recovery.md)에 따라 6초는 지연 관측의 기준이며 정상 응답의 폐기 기한이 아니다. 응답이 늦어도 기존 실행 범위 검사를 통과하면 반영한다. 6초보다 느린 조회가 연속되어도 이전 완료에 고정되지 않으며, 요청을 겹치지 않고 응답 후 다음 조회를 예약한다.
 
 #### 데이터 흐름 (PTY 콜백의 두 검출기)
 
@@ -1126,7 +1101,7 @@ Codex `/review`는 하위 턴의 시작과 부모 턴의 완료를 같은 rollou
   │  outputActive=true + 2초 타이머 리셋
   ▼
 [computeCommandStatus]
-  │  outputActive=true → ⏳ (셸 1순위 / Claude 4순위)
+  │  outputActive=true → 작업 미확인일 때 단일 모래시계 표시 (내부 작업 상태 불변)
 ```
 
 #### False Positive 방지
@@ -1136,11 +1111,11 @@ Codex `/review`는 하위 턴의 시작과 부모 턴의 완료를 같은 rollou
 | 포커스 전환 (DEC 1004 → 리드로) | 1회                | 프레임 1장      | 무시 (양쪽 임계 미달)             |
 | 키 입력 에코 (타이핑)           | 키당 1회           | 키당 프레임 1장 | 무시 (2초 내 6회·64KiB 모두 미달) |
 | 셸 프롬프트 리드로              | 0회                | 수백 B          | 무시 (볼륨 임계 미달)             |
-| neovim 화면 갱신                | 수십 회/초         | —               | ⏳ (프레임 임계 즉시 충족)        |
-| Claude 응답 생성                | 프레임 주기에 따라 | 수십~수백 KiB   | ⏳ (볼륨 임계 충족)               |
-| 빌드/테스트 로그 플러드         | 0회                | MiB 급          | ⏳ (볼륨 임계 충족)               |
+| neovim 화면 갱신                | 수십 회/초         | —               | 출력 활동 (프레임 임계 즉시 충족) |
+| Claude 응답 생성                | 프레임 주기에 따라 | 수십~수백 KiB   | 출력 활동 (볼륨 임계 충족)        |
+| 빌드/테스트 로그 플러드         | 0회                | MiB 급          | 출력 활동 (볼륨 임계 충족)        |
 
-> **볼륨 열은 미실측 추정이다.** 프레임 열은 기존 구현에서 확인된 값이지만, 볼륨 임계(2초/64KiB)와 "프레임 한 장·프롬프트 한 줄이 임계에 못 미친다"는 판단은 계산으로 정한 것이고 `scripts/bench/` 플러드 벤치로 재지 않았다([ADR-0147](../adr/0147-output-volume-activity-and-app-declared-idle.md) Consequences 의 재검토 조건). 특히 **최대화된 pane 에서 셀마다 SGR 를 다시 내는 alt-screen 전체 리페인트 한 장은 수십 KiB** 가 될 수 있어, `less`·`lazygit` 처럼 사용자 조작마다 뷰포트를 다시 그리는 앱은 2초에 두세 장으로 임계를 넘길 여지가 있다. Claude pane 은 `✳` 선언 유휴가 막아주지만 셸·기타 TUI pane 은 막히지 않는다 — 그러면 스크롤만 하는 동안 ⏳ 가 뜨고 절전 억제까지 걸린다. 이 표를 근거로 인용하기 전에 [dev-repro-methodology.md §4.6](../dev-repro-methodology.md) 절차로 리페인트 한 장의 실제 바이트를 재고 숫자를 채워라.
+> **볼륨 열은 미실측 추정이다.** 프레임 열은 기존 구현에서 확인된 값이지만, 볼륨 임계(2초/64KiB)와 "프레임 한 장·프롬프트 한 줄이 임계에 못 미친다"는 판단은 계산으로 정한 것이고 `scripts/bench/` 플러드 벤치로 재지 않았다([ADR-0147](../adr/0147-output-volume-activity-and-app-declared-idle.md) Consequences 의 재검토 조건). 특히 **최대화된 pane 에서 셀마다 SGR 를 다시 내는 alt-screen 전체 리페인트 한 장은 수십 KiB** 가 될 수 있어, `less`·`lazygit` 처럼 사용자 조작마다 뷰포트를 다시 그리는 앱은 2초에 두세 장으로 임계를 넘길 여지가 있다. 출력 활동 신호는 리페인트에도 켜질 수 있지만 내부 작업 상태와 알림을 바꾸지 않는다. 작업 미확인에서는 그 신호가 표시 모래시계가 될 수 있다. 비통합 셸·미지원 TUI의 출력 기반 절전 예외에는 이 비용이 남는다.
 
 ### 인터랙티브 앱 인식 — 프로세스 트리 liveness ([ADR-0009](../adr/0009-process-tree-interactive-app-liveness.md))
 
@@ -1163,7 +1138,7 @@ Claude Code·Codex 가 실행 중인지의 **권위는 PTY 자식 프로세스 �
 - **종료 판정도 같은 판정을 읽는다**: WSL pane 의 종료는 게스트 프로브가 소유하고, 억제가 틀렸으면 reconcile 워커가 정정한다([ADR-0135](../adr/0135-activity-reconcile-backend-diff-push.md) 4-2, ADR-0134 3-1 대체). 억제가 없으면 살아있는 에이전트에 대한 타이틀 유래 종료가 프론트를 `shell` 로 하드 오버라이드하고, 백엔드는 계속 `Claude` 여서 diff 가 침묵한다.
 - **판정은 `(terminal_id, PTY generation)` 키**: Restart View 등으로 같은 id 에 새 PTY 가 붙으면 이전 세대 판정은 `Unknown`. 세션 종료 시 `wsl_liveness::forget()` 으로 항목을 지워 in-flight 패스가 되살리지 못하게 한다.
 - **패스 전체 예산 + distribution 별 독립 타임아웃 + 시작 순서 회전**: 패스는 `WSL_LIVENESS_PASS_BUDGET`(4초) 안에 끝난다 — 기본 distro 해석과 모든 distribution 프로브가 이 예산을 나눠 쓰고, 개별 프로브는 자기 타임아웃과 남은 예산 중 작은 쪽을 받는다. 예산이 바닥나면 남은 distribution 은 판정 없이 건너뛰고 그 수를 로그로 남긴다(늦게 발행하면 모든 pane 의 판정이 함께 늙는다). 개별 타임아웃이 있어야 앞 distribution 하나의 장애가 뒤를 굶기지 않고, 회전이 있어야 밀리는 distribution 이 고정되지 않는다([ADR-0136](../adr/0136-activity-derivation-stamp-and-scoped-exit.md) 3).
-- distribution 해석·검증(`is_safe_distro_name`)·실행 plumbing 은 `wsl_probe` 가 소유하고 세션 귀속 프로브(`commands/wsl_agent_session`)와 공유한다.
+- distribution 해석·검증(`is_safe_distro_name`)·실행 plumbing 은 `wsl_probe` 가 소유하고 세션 귀속 프로브(`commands/wsl_agent_session`)와 공유한다. 두 프로브는 `wsl_probe/agent-role.sh`의 역할 판정도 공유한다. Claude의 첫 실행 인자가 정확히 `--chrome-native-host`인 경우만 대화 후보에서 제외하며, argv를 읽지 못하면 후보를 유지한다. helper만 남으면 대화 실행 중 판정을 유지하지 않는다([ADR-0253](../adr/0253-wsl-claude-chrome-helper-role.md)).
 
 #### 주기 재판정 — 변경분만 push ([ADR-0135](../adr/0135-activity-reconcile-backend-diff-push.md))
 
@@ -1405,6 +1380,8 @@ Windows·Linux release의 업데이트 상태는 Rust `UpdateManager`가 단독 
 
 `cache/` 디렉터리는 향후 다른 캐시 데이터(메모 등)도 수용할 수 있도록 확장 가능한 구조.
 
+메모의 영속 SoT는 `cache/memo.json`의 `memo-{paneId} → content`다. Desktop `MemoView`와 Remote Memo overlay는 `MemoDocument`의 원본·초안·저장 중 상태를 공유하는 구현을 사용한다([ADR-0260](../adr/0260-remote-shared-memo-and-panel-preferences.md)). PC는 300ms debounce로 자동 저장하고 깨끗한 메모만 2초마다 다시 읽는다. Remote는 목록 열기/Reload로 다시 읽고 Save로 명시적으로 저장한다. 저장은 `expectedContent`와 파일의 현재 내용을 같은 `MEMO_LOCK` 안에서 비교한 뒤 수행한다. 불일치나 읽기/파싱 오류는 기존 데이터와 초안을 유지하며, 오류 UI의 Copy draft와 명시적 Reload로 복구한다. Remote의 닫기·메모 선택·일시 연결 해제와 도구 스와이프 순환([ADR-0261](../adr/0261-remote-visible-tool-swipe-cycle.md))은 문서 수명 내 초안을 유지하고 저장하지 않는다.
+
 ### 13.3 프로파일 설정
 
 ```jsonc
@@ -1454,6 +1431,8 @@ Windows·Linux release의 업데이트 상태는 Rust `UpdateManager`가 단독 
 
 Windows host의 WSL terminal은 host process tree에 `wsl.exe`만 보이므로 native PID 귀속을 적용하지 않는다. provider 조회 시작부터 `PtyHandle.is_wsl_backed()`로 native root와 WSL terminal ID를 분리하며, host process snapshot 실패는 native ID에만, WSL target/probe 실패는 해당 WSL ID에만 결부한다. `TerminalSession`이 소유한 distro를 결정한 뒤 bounded `wsl.exe --exec sh` probe가 해당 distro의 `/proc` 환경을 읽고, rcfile에서 상속된 `LX_TERMINAL_ID`로 pane과 top-level Claude/Codex/Grok Linux PID를 직접 연결한다. provider가 중첩됐으면 전체 Claude/Codex/Grok 후보 중 유일한 최상위 agent만 활성 provider이며, provider별로 각각 최상위를 고르지 않는다. Claude는 현재 live descendant PID에 해당하는 `<HOME>/.claude/sessions/<pid>.json`만 읽어 무관한 과거 파일의 손상을 전역 조회 실패로 확대하지 않는다. Codex는 동봉한 Linux 도구로 해당 PID의 SQLite lifecycle 기록을 읽고 §13.5의 대화 선택·rollout 검증을 적용한다. live WAL SQLite를 Windows에서 열지 않으며, open rollout FD는 미소비 복원 요청을 판정하는 보조 증거로만 사용한다. Grok는 guest 프로세스의 `GROK_HOME`(없으면 guest `HOME/.grok`)에서 `active_sessions.json`의 PID 일치를 읽고, 그 PID의 유효 UUID가 정확히 하나이며 `summary.json`이 존재하고 mtime이 age 게이트를 통과할 때만 귀속한다. Grok에는 rollout 필터가 없다. 명시 distro 파싱 실패는 default distro로 fallback하지 않고, default 조회와 모든 distro probe는 하나의 3초 deadline 안에서 끝난다. 이 명시/default distro 결정 자체가 실패하면 probe 대상 없음이 아니라 attribution 조회 실패(`Unknown`)로 전파한다. native·WSL 결과 병합 뒤 session ID 충돌도 전부 `null` 처리한다. live candidate에 결부된 distro·probe·provider 저장소 중 하나라도 증명할 수 없으면 CWD나 최신 파일로 추정하지 않고 `null`로 fail-closed한다([ADR-0120](../adr/0120-wsl-agent-session-attribution.md), [ADR-0156](../adr/0156-grok-first-class-agent.md)).
 
+WSL의 Claude Chrome 호스트(`argv[1] == --chrome-native-host`)는 공통 게스트 역할 검사로 대화 후보에서 제외한다. 세션 probe V3의 P 행은 helper 여부만 추가로 반환하며 argv 원문은 보내지 않는다. helper의 PID·PPID는 깊이 계산에 계속 포함하고, 실제 대화 두 개의 동률은 여전히 귀속 불가다. 명시적인 역할 증거를 못 읽으면 후보를 유지하며, 세션 파일이 있는 PID를 우선하는 우회는 하지 않는다([ADR-0253](../adr/0253-wsl-claude-chrome-helper-role.md)).
+
 native provider 조회는 표시용 `known_claude_terminals`·`known_codex_terminals`·`known_grok_terminals` 캐시를 대상 목록이나 부재 판정에 사용하지 않는다. live PTY 전체에서 native/WSL 도메인을 나누고, native process snapshot의 최상위 agent PID로 각 provider의 현재 대상을 선정한다. Claude도 이 PID 하나의 세션 파일만 읽으므로 다른 agent 아래 실행된 Claude나 Claude의 하위 agent를 현재 대화로 선택하지 않는다. 표시 캐시가 비거나 이전 provider를 가리켜도 실제 프로세스가 있는 pane을 누락하거나 종료된 provider의 `None` claim을 만들지 않는다. 이는 ADR-0222의 process·provider 저장소 귀속과 activity 힌트 분리를 적용한다.
 
 native tree에서 가장 얕은 깊이에 agent가 둘 이상 있으면 같은 provider끼리도 모호하다. 정확한 PID 선택은 거절하되 liveness는 `Ambiguous`를 보존하고, 통합 판정은 provider 없는 `ActiveButUnidentified`가 된다. 이전 provider 조회에서 얻은 ID나 미소비 resume 요청으로 이 모호성을 덮지 않으므로 update·eviction barrier를 통과하지 않는다. 표시용 activity는 모호성을 확정 종료로 취급하지 않고 기존 title·buffer 보조 판정을 유지한다.
@@ -1476,9 +1455,15 @@ WSL 세션 프로세스 probe는 환경과 PPID를 POSIX 셸 내장 `read`로 �
 
 Codex WSL 조회의 3초 deadline은 native 조회가 끝난 뒤 WSL process 탐색 직전에 시작한다. distro 탐색과 모든 WSL SQLite 조회가 이 예산을 공유하고, SQLite 도우미는 최대 4개씩 병렬 실행한다. native DB의 잠금·읽기 지연이 정상 WSL pane의 조회 시간을 소진하지 않는다. 각 조회 실패는 해당 terminal의 `Unknown`으로 남긴다.
 
-[ADR-0238](../adr/0238-codex-lifecycle-storage-checkpoint.md): Codex의 TUI thread/start·thread/resume 진단은 프로세스 incarnation에 결부된 현재 대화 선택 증거다. 새 대화 ID에 턴 입력·rollout이 없을 때만 `Fresh(provider, sessionId)`를 반환한다. 이중 관측에는 ID까지 포함하고 pane에는 `lastAgentFresh=codex`를 저장하여 다음 시작을 설정된 명령의 resume 없는 실행으로 만든다. WSL SQLite는 앱 옆에 동봉된 정적 Linux `laymux-wsl-codex-probe`가 해당 distro 안에서 읽기 전용 트랜잭션으로 조회한다. 도구는 PID·pane marker·프로세스 이름을 검증하고 기존 3초 예산 안에 JSON을 반환한다. Python·sqlite3 실행 파일·훅·사용자 패키지 설치는 필요 없다. 도구 누락·실행 실패·조회 오류는 Unknown이다. TUI 전환 증거가 없는 native 구버전은 아래 레거시 후보 검증을 유지하며 WSL은 미식별로 남는다.
+[ADR-0238](../adr/0238-codex-lifecycle-storage-checkpoint.md): Codex의 TUI thread/start·thread/resume 진단은 프로세스 incarnation에 결부된 현재 대화 선택 증거다. 새 대화 ID에 턴 입력·rollout이 없을 때만 `Fresh(provider, sessionId)`를 반환한다. 이중 관측에는 ID까지 포함하고 pane에는 `lastAgentFresh=codex`를 저장하여 다음 시작을 설정된 명령의 resume 없는 실행으로 만든다. WSL SQLite는 앱 옆에 동봉된 정적 Linux `laymux-wsl-codex-probe`가 해당 distro 안에서 읽기 전용 트랜잭션으로 조회한다. 도구는 PID·pane marker·프로세스 이름을 검증하고 기존 3초 예산 안에 JSON을 반환한다. Python·sqlite3 실행 파일·훅·사용자 패키지 설치는 필요 없다. 도구 누락·실행 실패·조회 오류는 Unknown이다. TUI 전환·loop 증거가 모두 없는 native 구버전은 아래 레거시 후보 검증을 유지하며 WSL은 미식별로 남는다.
+
+[ADR-0258](../adr/0258-codex-retained-loop-session-attribution.md): 선택 이후의 정확한 최상위 `Shutdown` 또는 루트 `Agent loop exited`는 그 선택을 폐기한다. 시작 기록이 대화별 정리로 사라졌으면 같은 process UUID에서 종료되지 않은 유일한 최상위 `session_loop` 후보를 정확한 rollout과 대조하여 복구한다. 폐기된 선택 이후의 loop만 후보가 된다. 이전 대화의 종료는 지연될 수 있으므로 그 종료 이후의 활동을 요구하지 않는다. 미완료 전환·복수 후보·미확인 파일은 복구를 차단하며 fresh를 합성하지 않는다. 살아 있는 명시적 선택은 늦은 이전 대화 활동보다 우선한다. native도 읽기 트랜잭션을 사용하며 WSL 도우미는 동일 트랜잭션의 `{process_uuid, rows}` 객체를 반환한다. 복구 선택 키는 process UUID·대화 ID에 결부되어 정리로 첫 행이 바뀌어도 안정적이다. TUI 전환·loop 증거가 모두 없는 native 구버전만 레거시 후보 검증을 사용한다.
+
+[ADR-0256](../adr/0256-codex-thread-settings-preserve-fresh.md): native·WSL 공통 lifecycle 판정은 `session_loop`의 정확한 대화 ID와 submission ID, 최상위 `op: ThreadSettings` 형식이 확인된 설정 변경을 턴 입력으로 세지 않는다. 모델만 바꾼 새 대화는 rollout이 없으면 fresh를 유지한다. 실제 입력·중단·종료·미확인 loop 기록은 기존처럼 fresh 자격을 취소하며, 이후 설정 변경으로 되살리지 않는다. resume와 rollout 손상·만료·중복 판정도 그대로다.
 
 Windows 빌드 전에 Linux/WSL에서 `bash scripts/build-wsl-probe.sh`를 실행한다(Rust/C 컴파일러와 readelf는 개발·CI 의존성뿐이다). `tools/wsl-codex-probe`는 기존 bundled rusqlite를 사용하며 CRT도 정적 링크한다. 스크립트는 ELF의 interpreter/NEEDED 부재를 검사하고 `src-tauri/gen/wsl/`에 스테이징한다. Windows build.rs는 도구 부재를 실패시키고 실행 파일 옆에 복사하며 NSIS resources도 같은 파일을 동봉한다. release workflow는 같은 commit의 Linux 빌드 artifact를 Windows job에 전달한다. 사용자 WSL의 PATH에서 도구를 찾거나 실행 중 다운로드하지 않는다.
+
+부모 `session_loop` 안의 subagent 초기화 행은 DB의 thread ID가 자식일 수 있다. 부모 span과 열이 다르면 자식의 정확한 rollout header로 보조 역할을 검증한 행만 제외한다. 이 역할 확인에는 복원 나이 제한을 적용하지 않고, 한 snapshot에서 같은 보조 ID는 한 번만 검증한다. 파일이 없거나 손상되었거나 다른 최상위 대화라면 불일치를 숨기지 않는다. ID가 일치하는 일반 loop 후보도 보조 역할을 나이 제한 없이 확인하여 제외한 뒤, 복원할 최상위 후보에만 기존 나이 제한을 적용한다.
 
 레거시 native Codex 후보는 정확한 rollout header 또는 같은 process UUID의 temporary-structured 진단으로 보조 스레드임이 증명된 경우만 건너뛴다. 새 후보의 rollout 누락·만료·손상·경로 중복은 이전 대화로 fallback하지 않는다. lifecycle 선택 경로에서는 늦게 도착한 이전 요청의 로그가 현재 선택을 되돌리지 않도록 요청별 첫 관측 순서를 사용한다. 일반 메시지에 인용된 span과 teardown 로그는 선택 완료 증거가 아니다.
 

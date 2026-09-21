@@ -11,13 +11,13 @@ use crate::wsl_probe::remaining_timeout;
 #[cfg(windows)]
 use crate::wsl_probe::{run_probe_script, wsl_terminal_targets};
 
-const PROBE_HEADER: &str = "LAYMUX_WSL_AGENT_PROBE_V2";
+const PROBE_HEADER: &str = "LAYMUX_WSL_AGENT_PROBE_V3";
 const PROBE_END: &str = "LAYMUX_WSL_AGENT_PROBE_END";
 
 /// The script receives no interpolated values. The distro is a `wsl.exe` argv
 /// and the terminal marker comes from each process environment.
 const WSL_PROCESS_PROBE: &str = r#"
-printf 'LAYMUX_WSL_AGENT_PROBE_V2\n'
+printf 'LAYMUX_WSL_AGENT_PROBE_V3\n'
 for proc in /proc/[0-9]*; do
   [ -r "$proc/environ" ] || continue
   env_lines=$(tr '\000' '\n' < "$proc/environ" 2>/dev/null) || continue
@@ -38,7 +38,9 @@ EOF
   while read -r key value; do
     if [ "$key" = 'PPid:' ]; then ppid=$value; break; fi
   done < "$proc/status" 2>/dev/null
-  printf 'P\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$terminal_id" "${proc##*/}" "$ppid" "$name" "$home" "$codex_home" "$grok_home"
+  helper=0
+  if laymux_is_claude_chrome_host "$proc" "$name"; then helper=1; fi
+  printf 'P\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$terminal_id" "${proc##*/}" "$ppid" "$name" "$home" "$codex_home" "$grok_home" "$helper"
   # Only Codex attribution consumes rollout descriptors. Keep every marked
   # process above so intermediary shells still establish the parent chain.
   case "$name" in [cC][oO][dD][eE][xX]*) ;; *) continue ;; esac
@@ -67,6 +69,7 @@ struct WslProcessEntry {
     pid: u32,
     ppid: u32,
     name: String,
+    is_helper: bool,
     home: String,
     codex_home: Option<String>,
     grok_home: Option<String>,
@@ -231,7 +234,8 @@ pub(super) fn resolve_wsl_agent_processes(
 
 #[cfg(windows)]
 fn probe_distro(distro: &str, timeout: Duration) -> Result<Vec<WslProcessEntry>, String> {
-    let stdout = run_probe_script(distro, WSL_PROCESS_PROBE, "laymux-wsl-agent-probe", timeout)?;
+    let script = crate::wsl_probe::with_agent_role_probe(WSL_PROCESS_PROBE);
+    let stdout = run_probe_script(distro, &script, "laymux-wsl-agent-probe", timeout)?;
     parse_probe_output(&stdout)
 }
 
@@ -249,8 +253,8 @@ fn parse_probe_output(output: &[u8]) -> Result<Vec<WslProcessEntry>, String> {
     {
         let fields: Vec<&str> = line.split('\t').collect();
         match fields.as_slice() {
-            ["P", terminal_id, pid, ppid, name, home, codex_home, grok_home]
-                if !terminal_id.is_empty() && !name.is_empty() =>
+            ["P", terminal_id, pid, ppid, name, home, codex_home, grok_home, helper]
+                if !terminal_id.is_empty() && !name.is_empty() && matches!(*helper, "0" | "1") =>
             {
                 entries.push(WslProcessEntry {
                     terminal_id: (*terminal_id).to_string(),
@@ -259,6 +263,7 @@ fn parse_probe_output(output: &[u8]) -> Result<Vec<WslProcessEntry>, String> {
                         .parse::<u32>()
                         .map_err(|_| "WSL probe row had an invalid PPID".to_string())?,
                     name: (*name).to_string(),
+                    is_helper: *helper == "1",
                     home: (*home).to_string(),
                     codex_home: non_empty(codex_home),
                     grok_home: non_empty(grok_home),
@@ -322,13 +327,18 @@ fn select_top_level_agent(
         .collect();
     let mut candidates = Vec::new();
     for entry in entries {
+        // Keep helpers in by_pid: removing their topology would change the
+        // depth of real agents below them. Only their candidacy is excluded.
+        if entry.is_helper {
+            continue;
+        }
         let Some(entry_provider) = process_provider(&entry.name) else {
             continue;
         };
         let Some(depth) = process_depth(entry.pid, &by_pid) else {
             return entries
                 .iter()
-                .any(|entry| process_matches_provider(&entry.name, provider))
+                .any(|entry| !entry.is_helper && process_matches_provider(&entry.name, provider))
                 .then_some(None);
         };
         candidates.push((depth, entry_provider, entry));

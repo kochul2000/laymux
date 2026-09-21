@@ -41,6 +41,8 @@ async function routeRemoteWithWorkspaces(
   options: {
     includeGamma?: boolean;
     initialHiddenWorkspaceIds?: string[];
+    selectorStatus?: Record<string, unknown>;
+    paneUnreadCount?: number;
   } = {},
 ): Promise<{
   setWorkspaceDisplay: (
@@ -106,6 +108,7 @@ async function routeRemoteWithWorkspaces(
     selectorDisplay: { environment: "A2", lastInput: "newest pane input", lastInputAt: 20 },
   };
   const paneB1 = {
+    unreadCount: options.paneUnreadCount ?? 0,
     id: "p-b1",
     paneIndex: 0,
     paneNumber: 1,
@@ -116,7 +119,16 @@ async function routeRemoteWithWorkspaces(
     cwd: "C:\\Users\\kochul\\work\\beta",
     branch: "feature/beta",
     activity: { type: "running" },
-    selectorStatus: { icon: "⏳", color: "var(--yellow)", text: "Building" },
+    selectorStatus: {
+      icon: "⏳",
+      color: "var(--yellow)",
+      text: "Building",
+      taskState: "running",
+      observation: "confirmed",
+      outputActive: false,
+      label: "Command running",
+      ...options.selectorStatus,
+    },
     selectorDisplay: {
       environment: "PS",
       activity: { label: "running", color: "var(--yellow)" },
@@ -749,6 +761,26 @@ test.describe("remote mobile layout", () => {
       )
       .toEqual(["p-b1"]);
     await expect(page.locator("#spatialExclusion")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  test("shows one status icon without output or stale badges", async ({ page }) => {
+    await routeRemoteWithWorkspaces(page, [], {
+      selectorStatus: { observation: "stale", outputActive: true },
+      paneUnreadCount: 1,
+    });
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await page.locator("#navToggle").click();
+    const beta = page.locator(".workspace-item", { hasText: "Beta" });
+    const status = beta.locator(".pane-command-status");
+    await expect(status).toHaveClass(/unread/);
+    await expect(status.locator("svg")).toHaveCount(1);
+    await expect(status.locator('[data-remote-icon-name="Hourglass"]')).toHaveCount(1);
+    await expect(status).not.toHaveAttribute("title");
+    await expect(
+      beta.locator('[data-remote-icon-name="Clock3"], [data-remote-icon-name="Activity"]'),
+    ).toHaveCount(0);
+    await page.screenshot({ path: "test-results/single-status-remote.png" });
   });
 
   test("shows inactive pane status and last input without a bottom aggregate row", async ({

@@ -11,6 +11,7 @@ pub(crate) mod device_settings;
 mod font_assets;
 mod github_repo_routes;
 mod lease;
+mod memo_routes;
 mod navigation;
 mod navigation_routes;
 mod navigation_step_routes;

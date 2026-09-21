@@ -548,11 +548,20 @@ fn revalidate_cached_file_viewer_request(
 fn http_path_allowed(method: &Method, path: &str) -> bool {
     if method == Method::GET {
         if let Ok(uri) = path.parse::<Uri>() {
-            if uri.scheme().is_none()
-                && uri.authority().is_none()
-                && uri.path() == "/remote/v1/composer/starred"
-            {
-                return true;
+            if uri.scheme().is_none() && uri.authority().is_none() {
+                if uri.path() == "/remote/v1/composer/starred" {
+                    return true;
+                }
+                if uri.path() == "/remote/v1/memos" {
+                    return uri.query().is_some_and(|query| {
+                        query.starts_with("leaseId=") && !query.contains('&')
+                    });
+                }
+                if terminal_github_path(uri.path())
+                    && matches!(uri.query(), Some("force=true" | "force=false"))
+                {
+                    return true;
+                }
             }
         }
     }
@@ -573,6 +582,8 @@ fn http_path_allowed(method: &Method, path: &str) -> bool {
         | (&Method::POST, "/remote/v1/navigation/spatial")
         | (&Method::POST, "/remote/v1/navigation/notification")
         | (&Method::POST, "/remote/v1/composer/starred")
+        | (&Method::GET, "/remote/v1/memos")
+        | (&Method::POST, "/remote/v1/memos")
         | (&Method::POST, "/remote/v1/workspaces")
         | (&Method::POST, "/remote/v1/workspaces/active")
         | (&Method::POST, "/remote/v1/file-viewer/status")
@@ -601,16 +612,25 @@ fn terminal_read_path(path: &str) -> bool {
     let Some(rest) = path.strip_prefix("/remote/v1/terminals/") else {
         return false;
     };
-    let Some((terminal_id, action)) = rest.rsplit_once('/') else {
+    rest.strip_suffix("/github-repo")
+        .is_some_and(valid_remote_identifier)
+}
+
+fn terminal_github_path(path: &str) -> bool {
+    let Some(rest) = path.strip_prefix("/remote/v1/terminals/") else {
         return false;
     };
-    valid_remote_identifier(terminal_id) && action == "github-repo"
+    rest.strip_suffix("/github")
+        .is_some_and(valid_remote_identifier)
 }
 
 fn terminal_control_path(path: &str) -> bool {
     let Some(rest) = path.strip_prefix("/remote/v1/terminals/") else {
         return false;
     };
+    if let Some(terminal_id) = rest.strip_suffix("/github/actions") {
+        return valid_remote_identifier(terminal_id);
+    }
     let Some((terminal_id, action)) = rest.rsplit_once('/') else {
         return false;
     };
@@ -809,6 +829,20 @@ mod tests {
 
     #[test]
     fn inner_http_allowlist_rejects_e2e_recursion_and_path_escaping() {
+        assert!(http_path_allowed(
+            &Method::GET,
+            "/remote/v1/memos?leaseId=lease-1"
+        ));
+        assert!(http_path_allowed(&Method::POST, "/remote/v1/memos"));
+        assert!(!http_path_allowed(&Method::DELETE, "/remote/v1/memos"));
+        assert!(!http_path_allowed(
+            &Method::GET,
+            "/remote/v1/memos?leaseId=x&extra=y"
+        ));
+        assert!(!http_path_allowed(
+            &Method::POST,
+            "/remote/v1/memos/../settings"
+        ));
         assert!(http_path_allowed(&Method::GET, "/remote/v1/terminals"));
         assert!(http_path_allowed(&Method::GET, "/remote/v1/navigation"));
         assert!(http_path_allowed(
@@ -837,6 +871,26 @@ mod tests {
         assert!(http_path_allowed(
             &Method::GET,
             "/remote/v1/terminals/term-1/github-repo"
+        ));
+        assert!(http_path_allowed(
+            &Method::GET,
+            "/remote/v1/terminals/term-1/github?force=true"
+        ));
+        assert!(!http_path_allowed(
+            &Method::GET,
+            "/remote/v1/terminals/term-1/github"
+        ));
+        assert!(!http_path_allowed(
+            &Method::GET,
+            "/remote/v1/terminals/term-1/github?force=true&extra=1"
+        ));
+        assert!(http_path_allowed(
+            &Method::POST,
+            "/remote/v1/terminals/term-1/github/actions"
+        ));
+        assert!(!http_path_allowed(
+            &Method::POST,
+            "/remote/v1/terminals/term-1/github"
         ));
         assert!(http_path_allowed(
             &Method::POST,

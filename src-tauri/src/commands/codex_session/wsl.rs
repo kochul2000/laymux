@@ -1,4 +1,4 @@
-use super::lifecycle::LogRow;
+use super::lifecycle::ProcessRows;
 use crate::commands::wsl_agent_session::WslAgentProcess;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -7,15 +7,15 @@ use std::time::{Duration, Instant};
 pub(super) fn read_rows_batch(
     processes: &HashMap<String, Option<WslAgentProcess>>,
     deadline: Instant,
-) -> HashMap<String, Result<Vec<LogRow>, String>> {
+) -> HashMap<String, Result<ProcessRows, String>> {
     read_rows_batch_with(processes, deadline, read_rows)
 }
 
 fn read_rows_batch_with(
     processes: &HashMap<String, Option<WslAgentProcess>>,
     deadline: Instant,
-    read: impl Fn(&WslAgentProcess, &str, Duration) -> Result<Vec<LogRow>, String> + Sync,
-) -> HashMap<String, Result<Vec<LogRow>, String>> {
+    read: impl Fn(&WslAgentProcess, &str, Duration) -> Result<ProcessRows, String> + Sync,
+) -> HashMap<String, Result<ProcessRows, String>> {
     let processes: Vec<_> = processes
         .iter()
         .filter_map(|(id, process)| process.as_ref().map(|process| (id, process)))
@@ -59,7 +59,7 @@ pub(super) fn read_rows(
     process: &WslAgentProcess,
     terminal_id: &str,
     timeout: std::time::Duration,
-) -> Result<Vec<LogRow>, String> {
+) -> Result<ProcessRows, String> {
     if !crate::wsl_probe::is_safe_distro_name(&process.distro) {
         return Err("unsafe WSL distribution name".into());
     }
@@ -87,8 +87,15 @@ pub(super) fn read_rows(
     if !output.status.success() {
         return Err(format!("WSL Codex probe exited with {}", output.status));
     }
-    serde_json::from_slice(&output.stdout)
-        .map_err(|e| format!("invalid WSL Codex diagnostics: {e}"))
+    let rows: ProcessRows = serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("invalid WSL Codex diagnostics: {e}"))?;
+    if !rows
+        .process_uuid
+        .starts_with(&format!("pid:{}:", process.pid))
+    {
+        return Err("WSL Codex diagnostic process identity mismatch".into());
+    }
+    Ok(rows)
 }
 
 #[cfg(not(windows))]
@@ -96,7 +103,7 @@ pub(super) fn read_rows(
     _: &WslAgentProcess,
     _: &str,
     _: std::time::Duration,
-) -> Result<Vec<LogRow>, String> {
+) -> Result<ProcessRows, String> {
     Err("WSL is unavailable on this host".into())
 }
 
@@ -136,7 +143,10 @@ mod tests {
             } else {
                 *completed.lock().unwrap() += 1;
                 ready.notify_all();
-                Ok(vec![])
+                Ok(ProcessRows {
+                    process_uuid: format!("pid:{}:test", process.pid),
+                    rows: vec![],
+                })
             }
         });
         assert_eq!(rows.len(), 8);
@@ -184,7 +194,10 @@ mod tests {
             if process.pid == 7 {
                 Err("isolated database failure".into())
             } else {
-                Ok(vec![])
+                Ok(ProcessRows {
+                    process_uuid: format!("pid:{}:test", process.pid),
+                    rows: vec![],
+                })
             }
         });
         assert_eq!(rows.len(), 16);

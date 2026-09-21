@@ -9,6 +9,7 @@ import {
   BrushCleaning,
   Camera,
   Check,
+  CircleAlert,
   ChevronDown,
   ChevronRight,
   Clipboard,
@@ -347,4 +348,8 @@ export function ZoomInIcon(props: IconProps) {
 
 export function ZoomOutIcon(props: IconProps) {
   return renderIcon(ZoomOut, props);
+}
+
+export function CircleAlertIcon(props: IconProps) {
+  return renderIcon(CircleAlert, props);
 }

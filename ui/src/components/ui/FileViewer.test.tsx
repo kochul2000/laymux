@@ -666,6 +666,13 @@ describe("FileViewer", () => {
     );
     expect(fileRow?.querySelector(".lucide-file")).toBeTruthy();
     expect(dirRow?.querySelector(".lucide-folder")).toBeTruthy();
+    expect(fileRow?.querySelector("td")?.style.color).toBe("var(--text-primary)");
+    expect(dirRow?.querySelector("td")?.style.color).toBe("var(--accent)");
+    for (const row of rows) {
+      expect(row.querySelector("svg")).toHaveAttribute("width", "13");
+      expect(row.querySelector("svg")).toHaveAttribute("stroke-width", "2");
+      expect(row.querySelector("svg")?.parentElement?.style.color).toBe("");
+    }
     expect(screen.getByTestId("archive-preview-truncated")).toHaveTextContent(
       "Showing the first 2 of 5,000 entries.",
     );

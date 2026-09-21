@@ -21,6 +21,7 @@ export function SleepPreventionToggle() {
   const keepAwake = useSettingsStore((s) => s.power.keepAwake);
   const keepAwakeWhenBusy = useSettingsStore((s) => s.power.keepAwakeWhenBusy);
   const setPower = useSettingsStore((s) => s.setPower);
+  const staleTaskExpired = useSleepInhibitStore((s) => s.staleTaskExpired);
   const failed = useSleepInhibitStore((s) => s.failed);
 
   const handleClick = useCallback(() => {
@@ -39,7 +40,7 @@ export function SleepPreventionToggle() {
   const policy = keepAwakeWhenBusy
     ? " — Settings also keeps it awake while a terminal is busy"
     : "";
-  const title = `${state}${policy}${failed ? " — the last inhibit request failed" : ""}`;
+  const title = `${state}${policy}${keepAwakeWhenBusy && staleTaskExpired ? " — 관측 지연 60초 경과: 해당 작업의 자동 절전 억제 해제" : ""}${failed ? " — the last inhibit request failed" : ""}`;
 
   // Square corners and static styling in classes, per api-contracts §15.1 —
   // only the two theme-dependent values are inline.

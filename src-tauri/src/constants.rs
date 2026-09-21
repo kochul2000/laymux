@@ -526,7 +526,7 @@ pub const EVENT_WORKSPACE_STATE_CHANGED: &str = "workspace-state-changed";
 pub const EVENT_TERMINALS_LIST_CHANGED: &str = "terminals-list-changed";
 
 /// Fallback delay (ms) to arm the notify gate for shells without preexec
-/// (e.g., PowerShell which doesn't emit OSC 133;C/E). After this delay,
+/// (e.g., PowerShell without PSReadLine). After this delay,
 /// notifications are enabled even without observing a user command.
 pub const NOTIFY_GATE_FALLBACK_MS: u64 = 3000;
 

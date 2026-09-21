@@ -1,3 +1,5 @@
+import { taskStatusGlyph } from "../lib/task-status-glyph";
+export { fileKindIconName, fileKindColor, FILE_KIND_ICON_SIZE } from "../lib/file-kind-icon";
 import {
   ArrowDown,
   ArrowLeft,
@@ -5,6 +7,7 @@ import {
   ArrowUp,
   Bell,
   Check,
+  CircleAlert,
   ChevronDown,
   ChevronLeft,
   Circle,
@@ -13,10 +16,13 @@ import {
   createElement,
   Eye,
   EyeOff,
+  Ellipsis,
   File,
   Folder,
   FolderOpen,
   FolderUp,
+  GitBranch,
+  GitPullRequest,
   Hourglass,
   Keyboard,
   Link,
@@ -34,6 +40,7 @@ import {
   Pin,
   Plug,
   Plus,
+  RefreshCw,
   Send,
   Settings,
   Star,
@@ -56,6 +63,7 @@ const ICONS = Object.freeze({
   ArrowUp,
   Bell,
   Check,
+  CircleAlert,
   ChevronDown,
   ChevronLeft,
   Circle,
@@ -63,10 +71,13 @@ const ICONS = Object.freeze({
   Copy,
   Eye,
   EyeOff,
+  Ellipsis,
   File,
   Folder,
   FolderOpen,
   FolderUp,
+  GitBranch,
+  GitPullRequest,
   Hourglass,
   Keyboard,
   Link,
@@ -84,6 +95,7 @@ const ICONS = Object.freeze({
   Pin,
   Plug,
   Plus,
+  RefreshCw,
   Send,
   Settings,
   Star,
@@ -165,16 +177,15 @@ const COMMAND_STATUS_ICONS = Object.freeze({
   "✓": "Check",
   "✗": "X",
   "—": "Minus",
+  "!": "CircleAlert",
 });
 
 export function commandStatusIconName(status) {
+  // Typed task semantics are authoritative; the glyph map is legacy presentation only.
+  if (status && typeof status === "object") {
+    return COMMAND_STATUS_ICONS[
+      taskStatusGlyph(status.taskState, status.taskResult, status.outputActive)
+    ];
+  }
   return COMMAND_STATUS_ICONS[status] || null;
-}
-
-/** Keep in lockstep with `ui/src/lib/file-kind-icon.ts`. */
-export function fileKindIconName(entry, isParent = false) {
-  if (isParent) return "FolderUp";
-  if (entry && entry.isDirectory) return "Folder";
-  if (entry && entry.isSymlink) return "Link";
-  return "File";
 }

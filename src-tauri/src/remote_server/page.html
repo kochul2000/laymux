@@ -44,6 +44,12 @@
         <button id="fileExplorerHeader" class="file-explorer-button" type="button" hidden aria-label="Browse host files" title="Browse host files">
           <span data-remote-icon="FolderOpen"></span>
         </button>
+        <button id="githubHeader" class="github-button" type="button" hidden aria-label="Open GitHub issues and pull requests" title="GitHub issues and pull requests">
+          <span data-remote-icon="GitPullRequest"></span>
+        </button>
+        <button id="memoHeader" class="github-button" type="button" hidden aria-label="Open shared memos" title="Shared memos">
+          <span data-remote-icon="Pencil"></span>
+        </button>
         <button id="spatialExclusion" class="spatial-exclusion-button" type="button" hidden aria-label="Exclude this pane from pane navigation" aria-pressed="false" title="Exclude this pane from pane navigation">
           <span data-remote-icon="CircleMinus"></span>
         </button>
@@ -150,6 +156,7 @@
                 <button id="settingsTabFloating" class="settings-tab" type="button" role="tab" data-settings-panel="floating" aria-controls="settingsPanelFloating" aria-selected="false" tabindex="-1">Floating</button>
                 <button id="settingsTabComposer" class="settings-tab" type="button" role="tab" data-settings-panel="composer" aria-controls="settingsPanelComposer" aria-selected="false" tabindex="-1">Composer</button>
                 <button id="settingsTabDisplay" class="settings-tab" type="button" role="tab" data-settings-panel="display" aria-controls="settingsPanelDisplay" aria-selected="false" tabindex="-1">Display</button>
+                <button id="settingsTabPanels" class="settings-tab" type="button" role="tab" data-settings-panel="panels" aria-controls="settingsPanelPanels" aria-selected="false" tabindex="-1">Panels</button>
                 <button id="settingsTabApp" class="settings-tab" type="button" role="tab" data-settings-panel="app" aria-controls="settingsPanelApp" aria-selected="false" tabindex="-1">App</button>
               </div>
               <div id="settingsPanelInputBar" class="settings-panel" role="tabpanel" data-settings-panel="inputBar" aria-labelledby="settingsTabInputBar">
@@ -321,16 +328,46 @@
                 <span class="nav-toggle-name">Widget bar</span>
                 <span class="nav-toggle-desc">Row under the header</span>
               </label>
+              </section>
+              </div><!-- /settingsPanelDisplay -->
+              <div id="settingsPanelPanels" class="settings-panel" role="tabpanel" data-settings-panel="panels" aria-labelledby="settingsTabPanels" hidden>
+              <section class="nav-section" aria-label="Panels and header icons">
+              <h2 class="nav-section-title">Header icons</h2>
+              <div id="headerIconSettings"></div>
+              <div class="nav-settings-status">Saved on this device. Hidden tools are skipped when cycling; the selected edge shortcut still opens them.</div>
+              <h2 class="nav-section-title">Swipe gestures</h2>
               <label class="nav-toggle-row" for="edgeSwipeDrawersToggle">
                 <input id="edgeSwipeDrawersToggle" type="checkbox" checked />
                 <span class="nav-toggle-name">Swipe to open</span>
-                <span class="nav-toggle-desc">Left: workspaces · Right: files</span>
+                <span class="nav-toggle-desc">Left: workspaces · Right: selected panel</span>
+              </label>
+              <label class="nav-select-row" for="rightSwipeView">
+                <span class="nav-toggle-copy">
+                  <span class="nav-toggle-name">Right swipe opens</span>
+                  <span class="nav-toggle-desc">Choose the panel for the right edge</span>
+                </span>
+                <select id="rightSwipeView">
+                  <option value="files">Files</option>
+                  <option value="github">GitHub</option>
+                  <option value="memo">Memo</option>
+                </select>
               </label>
               <label class="nav-toggle-row" for="swipeCloseDrawersToggle">
                 <input id="swipeCloseDrawersToggle" type="checkbox" checked />
                 <span class="nav-toggle-name">Swipe to close</span>
-                <span class="nav-toggle-desc">Workspaces ← · Files →</span>
+                <span class="nav-toggle-desc">Workspaces ← · Tools → only in Close panel mode</span>
               </label>
+              <label class="nav-select-row" for="toolSwipeRightAction">
+                <span class="nav-toggle-copy">
+                  <span class="nav-toggle-name">Inside tools: swipe right</span>
+                  <span class="nav-toggle-desc">Left always cycles to the next visible tool</span>
+                </span>
+                <select id="toolSwipeRightAction">
+                  <option value="close">Close panel</option>
+                  <option value="previous">Previous tool</option>
+                </select>
+              </label>
+              <div class="nav-settings-status">Cycle: Issues → PRs → Files → Memo. Swipe the header, hint, or list; text editors and file previews keep their own gestures.</div>
               </section>
               </div><!-- /settingsPanelDisplay -->
               <div id="settingsPanelApp" class="settings-panel" role="tabpanel" data-settings-panel="app" aria-labelledby="settingsTabApp" hidden>
@@ -420,6 +457,41 @@
       </footer>
       <div id="terminalMeta" class="sr-only">No terminal selected.</div>
     </div>
+    <div id="memoOverlay" class="github-overlay" hidden>
+      <div class="github-dialog memo-dialog" role="dialog" aria-modal="true" aria-label="Shared memos">
+        <header id="memoToolbar" class="github-header" data-remote-tool-swipe="memo">
+          <label class="sr-only" for="memoSelect">PC memo</label>
+          <select id="memoSelect" aria-label="PC memo"></select>
+          <button id="memoSave" class="github-tab" type="button">Save</button>
+          <button id="memoReload" class="github-header-action" type="button" aria-label="Reload memo" title="Reload from PC"><span data-remote-icon="RefreshCw"></span></button>
+          <button id="memoCopy" class="github-header-action" type="button" aria-label="Copy memo" title="Copy draft"><span data-remote-icon="Copy"></span></button>
+          <button id="memoClose" class="github-header-action" type="button" aria-label="Close memos"><span data-remote-icon="X"></span></button>
+        </header>
+        <div class="remote-tool-swipe-hint" data-remote-tool-swipe="memo"></div>
+        <div id="memoStatus" class="github-status" role="status"></div>
+        <textarea id="memoText" aria-label="Memo content" spellcheck="false" disabled></textarea>
+      </div>
+    </div>
+    <div id="githubOverlay" class="github-overlay" hidden>
+      <div class="github-dialog" role="dialog" aria-modal="true" aria-label="GitHub issues and pull requests">
+        <header id="githubToolbar" class="github-header" data-remote-tool-swipe="github">
+          <div class="github-tabs" role="tablist" aria-label="GitHub list">
+            <button id="githubIssuesTab" class="github-tab active" type="button" role="tab" aria-selected="true">Issues <span id="githubIssuesCount">0</span></button>
+            <button id="githubPullsTab" class="github-tab" type="button" role="tab" aria-selected="false">PRs <span id="githubPullsCount">0</span></button>
+          </div>
+          <div id="githubRepo" class="github-repo" title=""></div>
+          <button id="githubRefresh" class="github-header-action" type="button" aria-label="Refresh GitHub list" title="Refresh now">
+            <span data-remote-icon="RefreshCw"></span>
+          </button>
+          <button id="githubClose" class="github-header-action" type="button" aria-label="Close GitHub view">
+            <span data-remote-icon="X"></span>
+          </button>
+        </header>
+        <div class="remote-tool-swipe-hint" data-remote-tool-swipe="github"></div>
+        <div id="githubStatus" class="github-status" role="status"></div>
+        <div id="githubList" class="github-list" data-remote-tool-swipe="github"></div>
+      </div>
+    </div>
     <!-- File viewer (ADR-0184). Renders in this document instead of a second
          tab: `window.open` is unavailable in the Android wrapper and unreliable
          in an installed PWA. The sandboxed iframe below is the security
@@ -432,7 +504,7 @@
         aria-modal="true"
         aria-label="Host files"
       >
-        <header class="file-viewer-header">
+        <header id="fileViewerToolbar" class="file-viewer-header" data-remote-tool-swipe="files">
           <button id="fileViewerBack" class="file-viewer-back" type="button" hidden aria-label="Back to the folder" title="Back to the folder">
             <span data-remote-icon="ChevronLeft"></span>
           </button>
@@ -457,6 +529,7 @@
             <span data-remote-icon="X"></span>
           </button>
         </header>
+        <div class="remote-tool-swipe-hint" data-remote-tool-swipe="files"></div>
         <section id="fileViewerSection" class="file-viewer-open-panel locked" aria-label="Open host file by path" hidden>
           <div class="file-viewer-panel">
             <div class="file-viewer-path-row">
@@ -479,7 +552,7 @@
             hidden
           ></iframe>
           <div id="fileViewerBinary" class="file-viewer-binary" hidden></div>
-          <div id="fileViewerDirectory" class="file-viewer-directory" hidden></div>
+          <div id="fileViewerDirectory" class="file-viewer-directory" data-remote-tool-swipe="files" hidden></div>
         </div>
       </div>
     </div>

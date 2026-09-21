@@ -157,11 +157,8 @@ import {
 } from "@/lib/shadow-cursor-state";
 
 import {
-  CODEX_INPUT_PENDING_MARKER,
-  CLAUDE_INPUT_PENDING_MARKER,
   detectCodexConversationMessageFromOutput,
   detectCodexInputPendingFromOutput,
-  detectNewCodexInputPendingPrompt,
   detectCodexStatusMessageFromOutput,
   detectNewClaudeInputPendingPrompt,
   detectClaudeRecapFromOutput,
@@ -177,7 +174,7 @@ import {
 } from "@/lib/claude-session-limit";
 import { useNotificationStore } from "@/stores/notification-store";
 import { resolveWorkspaceId } from "@/lib/workspace-utils";
-import { OutputIdleDetector } from "@/lib/output-idle-detector";
+import { observeTaskInput } from "@/lib/terminal-task-observers";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { loadTerminalOutputCache, setComposerStarredEntry } from "@/lib/tauri-api";
 import {
@@ -336,7 +333,6 @@ const TERMINAL_WRITE_CALLBACK_SOURCE_COUNTER: Record<
 };
 
 /** Default silence timeout for output idle detection (ms). */
-const OUTPUT_IDLE_TIMEOUT_MS = 5000;
 
 /**
  * Trailing debounce (ms) before reflowing the terminal after a container-size
@@ -551,8 +547,6 @@ function shouldBlockLargePaste(content: string, enabled: boolean): boolean {
   );
 }
 
-/** Notify gate fallback timeout — only used for output idle detector gating. */
-const NOTIFY_GATE_FALLBACK_MS = 3000;
 const HUMAN_INPUT_DELIVERY_FAILURE_MESSAGE =
   "입력을 터미널에 전달하지 못했습니다. 중복 실행을 막기 위해 자동 재시도하지 않았습니다. 다시 입력하세요.";
 
@@ -3843,51 +3837,13 @@ export function TerminalView({
       resizeBackendTerminal(cols, rows).catch(() => {});
     });
 
-    // Track terminal title changes (OSC 0/2) for interactive app detection.
-    // Claude task transitions and notifications are now handled by the Rust
-    // PTY callback via structured events (terminal-title-changed, lx-notify).
-    // xterm.js onTitleChange is kept as a lightweight fallback for activity detection.
+    // Cached xterm titles are display-only. Structured live events own task
+    // observations and the backend owns app identity (ADR-0250).
     terminal.onTitleChange((title) => {
-      const { updateInstanceInfo } = useTerminalStore.getState();
-      const detected = detectActivityFromTitle(title);
-
-      updateInstanceInfo(instanceId, {
-        title,
-        ...(detected ? { activity: detected } : {}),
-      });
+      useTerminalStore.getState().updateInstanceInfo(instanceId, { title });
     });
 
-    // Notify gate for output idle detector only — OSC notifications are now
-    // handled entirely in Rust. This gate controls whether the idle detector
-    // can emit "completed" notifications.
-    const notifyGate = { armed: false };
-    const notifyGateTimer = setTimeout(() => {
-      notifyGate.armed = true;
-    }, NOTIFY_GATE_FALLBACK_MS);
-
-    // Output idle detector (monitor-silence): fires when terminal output
-    // stops for OUTPUT_IDLE_TIMEOUT_MS while activity is "running".
-    const idleDetector = new OutputIdleDetector(OUTPUT_IDLE_TIMEOUT_MS, () => {
-      const inst = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
-      // Only fire for "running" activity (not shell, not Claude/interactive apps)
-      if (inst?.activity?.type !== "running") return;
-      // Mark command as completed
-      useTerminalStore.getState().updateInstanceInfo(instanceId, {
-        lastExitCode: 0,
-        lastCommandAt: Date.now(),
-        activity: { type: "shell" },
-      });
-      const wsId = resolveWorkspaceId(instanceId);
-      const cmdDesc = inst.lastCommand || "Command";
-      if (notifyGate.armed) {
-        useNotificationStore.getState().addNotification({
-          terminalId: instanceId,
-          workspaceId: wsId,
-          message: `${cmdDesc} completed`,
-          level: "success",
-        });
-      }
-    });
+    // Task completion is observed through lifecycle signals, never output silence.
 
     // Persistent TextDecoder with stream mode to handle UTF-8 characters
     // split across PTY output chunks (e.g., ✳ = E2 9C B3 may arrive as two chunks).
@@ -4521,6 +4477,7 @@ export function TerminalView({
     let terminalOutputWriteChain = Promise.resolve();
     let inAltScreen = false;
     let recentOutputTail = "";
+    let promptTaskScope: string | undefined;
     // Separate, larger rolling buffer for Claude modal detection only.
     // Claude redraws its modal every spinner tick in alt-screen mode, and
     // one ANSI-heavy frame is ~4 KB. The 1 KB `recentOutputTail` above
@@ -4569,7 +4526,15 @@ export function TerminalView({
         onDiscard,
       );
       const text = streamDecoder.decode(data, { stream: true });
-      const previousOutputTail = recentOutputTail;
+      const promptInstance = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
+      const promptTask = promptInstance?.task;
+      const scope = `${promptInstance?.taskEpoch}:${promptTask?.source}:${promptTask?.taskId}:${promptInstance?.deferredTaskInput?.inputAt}`;
+      if (promptTaskScope !== scope) {
+        recentOutputTail = "";
+        claudeDetectionBuffer = "";
+        claudeDismissalBuffer = "";
+        promptTaskScope = scope;
+      }
       const combinedText = (recentOutputTail + text).slice(-1024);
       recentOutputTail = combinedText;
       const previousClaudeBuffer = claudeDetectionBuffer;
@@ -4579,12 +4544,6 @@ export function TerminalView({
       // OSC parsing and hook dispatch are now handled entirely in the Rust
       // PTY callback (iter_osc_events + match_hooks + dispatch_osc_action).
       // The frontend only needs to handle alt-screen detection and idle monitoring.
-
-      // Feed idle detector on every output chunk
-      const inst = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
-      if (inst?.activity?.type === "running") {
-        idleDetector.recordOutput();
-      }
 
       const outputActivity = detectActivityFromOutput(combinedText);
       if (outputActivity) {
@@ -4599,48 +4558,28 @@ export function TerminalView({
 
       const current = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
       const codexInputPending = detectCodexInputPendingFromOutput(combinedText);
-      const codexPromptBecamePending = detectNewCodexInputPendingPrompt(previousOutputTail, text);
-      if (
-        current?.activity?.type === "running" &&
-        codexPromptBecamePending &&
-        current.activityMessage !== CODEX_INPUT_PENDING_MARKER
-      ) {
-        useTerminalStore.getState().updateInstanceInfo(instanceId, {
-          activity: { type: "interactiveApp", name: "Codex" },
-          activityMessage: CODEX_INPUT_PENDING_MARKER,
-        });
-        useNotificationStore.getState().addNotification({
-          terminalId: instanceId,
-          workspaceId: resolveWorkspaceId(instanceId),
-          message: "Codex is waiting for your input",
-          level: "info",
-        });
-      } else if (
-        current?.activity?.type === "interactiveApp" &&
-        current.activity.name === "Codex"
-      ) {
+      if (current?.activity?.type === "interactiveApp" && current.activity.name === "Codex") {
         const codexConversationMessage = detectCodexConversationMessageFromOutput(combinedText);
         const codexStatusMessage = detectCodexStatusMessageFromOutput(combinedText);
         const currentMessage = current.activityMessage;
-        const currentIsFooter =
-          !!currentMessage &&
-          currentMessage !== CODEX_INPUT_PENDING_MARKER &&
-          isCodexFooterStatusLine(currentMessage);
+        const currentIsFooter = !!currentMessage && isCodexFooterStatusLine(currentMessage);
         const nextCodexMessage =
           codexConversationMessage ??
           (currentIsFooter || !currentMessage ? codexStatusMessage : undefined);
         if (
-          current.activityMessage === CODEX_INPUT_PENDING_MARKER &&
+          (current.task?.state === "waiting" ||
+            current.deferredTaskInput?.observation?.state === "waiting") &&
           text.trim() &&
           !detectCodexInputPendingFromOutput(text)
         ) {
           useTerminalStore.getState().updateInstanceInfo(instanceId, {
             activityMessage: nextCodexMessage,
           });
+          observeTaskInput(instanceId, false);
+          // Answered prompts must not become a new wait from the rolling tail.
+          recentOutputTail = "";
         } else if (codexInputPending) {
-          useTerminalStore.getState().updateInstanceInfo(instanceId, {
-            activityMessage: CODEX_INPUT_PENDING_MARKER,
-          });
+          observeTaskInput(instanceId, true);
         } else if (nextCodexMessage && current.activityMessage !== nextCodexMessage) {
           useTerminalStore.getState().updateInstanceInfo(instanceId, {
             activityMessage: nextCodexMessage,
@@ -4648,35 +4587,17 @@ export function TerminalView({
         }
       }
 
-      // Claude Code permission / response prompt — mirror of the Codex
-      // input-pending wiring above. Without this branch the WSL Claude path
-      // shows ⏳ indefinitely while Claude is parked on a y/N modal: the
-      // working spinner title is still animating behind the modal, so the
-      // working→idle title transition (which fires `task_completed` in
-      // `claude_activity.rs`) never runs and no notification is emitted.
-      // Detecting the modal directly from the rolling output tail closes
-      // that gap.
+      // Modal observations override title spinners until the detector resolves
+      // them. The common transition subscriber owns all task notifications.
       if (current?.activity?.type === "interactiveApp" && current.activity.name === "Claude") {
         const claudePromptBecamePending = detectNewClaudeInputPendingPrompt(
           previousClaudeBuffer,
           text,
         );
-        if (claudePromptBecamePending && current.activityMessage !== CLAUDE_INPUT_PENDING_MARKER) {
-          useTerminalStore.getState().updateInstanceInfo(instanceId, {
-            activityMessage: CLAUDE_INPUT_PENDING_MARKER,
-          });
-          useNotificationStore.getState().addNotification({
-            terminalId: instanceId,
-            workspaceId: resolveWorkspaceId(instanceId),
-            message: "Claude is waiting for your input",
-            level: "info",
-            // The modal needs an actual user response — keep the badge
-            // up even if this happens to be the active workspace, so
-            // the user can step away and still find the alert later.
-            requiresAction: true,
-          });
+        if (claudePromptBecamePending && current.task?.state !== "waiting") {
+          observeTaskInput(instanceId, true);
         } else if (
-          current.activityMessage === CLAUDE_INPUT_PENDING_MARKER &&
+          current.task?.state === "waiting" &&
           text.trim() &&
           shouldDismissClaudeInputPendingFromOutput(claudeDismissalBuffer)
         ) {
@@ -4684,20 +4605,7 @@ export function TerminalView({
           // or Claude has returned to the normal `╰─❯ ` input prompt. The
           // latter also contains `❯`, so the dismissal check must distinguish
           // it from an arrowed modal option.
-          useTerminalStore.getState().updateInstanceInfo(instanceId, {
-            activityMessage: undefined,
-          });
-          // The user has resolved the modal; clear the unread badge
-          // for the input-pending alert this terminal raised. The
-          // notification record is left in the panel as history but
-          // no longer counts as unread.
-          const notificationStore = useNotificationStore.getState();
-          const pendingIds = notificationStore.notifications
-            .filter((n) => n.terminalId === instanceId && n.requiresAction && n.readAt === null)
-            .map((n) => n.id);
-          if (pendingIds.length > 0) {
-            notificationStore.markNotificationsAsRead(pendingIds);
-          }
+          observeTaskInput(instanceId, false);
           // Reset the detection buffer so the just-resolved modal's
           // residue cannot re-trigger detection on the next chunk
           // (the 16 KB window still holds the answered modal frame).
@@ -4716,7 +4624,7 @@ export function TerminalView({
         // `bullet` path — the same channel Codex replies flow through. Never
         // overwrite a live input-pending modal: while CLAUDE_INPUT_PENDING_MARKER
         // is set the user must answer the modal, so the recap waits.
-        if (current.activityMessage !== CLAUDE_INPUT_PENDING_MARKER) {
+        if (current.task?.state !== "waiting") {
           const claudeRecap = detectClaudeRecapFromOutput(claudeDetectionBuffer);
           if (claudeRecap && current.activityMessage !== claudeRecap) {
             useTerminalStore.getState().updateInstanceInfo(instanceId, {
@@ -5759,6 +5667,10 @@ export function TerminalView({
           .then(() =>
             withCompositionScrollRebuild(async () => {
               if (!isCurrentAttach()) return;
+              // Bind observations to the attached PTY before replay can restore a modal.
+              useTerminalStore
+                .getState()
+                .updateInstanceInfo(instanceId, { generation: attachment.state.generation });
               terminal.reset();
               resetStreamDerivedCursorState();
               if (cached) {
@@ -6372,9 +6284,7 @@ export function TerminalView({
         terminalReflowFrameRef.current = null;
       }
       pendingRendererFitRequestRef.current = null;
-      clearTimeout(notifyGateTimer);
       clearParkSettleTimer();
-      idleDetector.dispose();
       resizeObserver.disconnect();
       outerContainer?.removeEventListener("contextmenu", handleContextMenu);
       cancelPathLinkHoverDwell();

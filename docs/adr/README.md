@@ -236,7 +236,7 @@ ADR 이 필요한 대표 기준:
 | [0216](0216-xterm-legacy-mouse-binary-input-boundary.md) | xterm legacy mouse binary 입력은 플랫폼 PTY 경계에서 검증한다 (0054·0096·0202 확장) | Accepted |
 | [0217](0217-fixed-terminal-scrollbar-layout.md) | 터미널 스크롤바는 현재의 고정 gutter·구분선 없는 단일 레이아웃만 사용한다 | Accepted |
 | [0218](0218-codex-transcript-pointer-scroll-toggle.md) | Codex transcript 포인터 스크롤 활성 여부를 호스트 설정으로 데스크톱·Remote에 공유한다 (0206 확장) | Accepted |
-| [0219](0219-android-back-defers-to-remote-ui-stack.md) | Android system back은 Remote UI stack을 순서대로 닫는다 (0149 확장) | Accepted |
+| [0219](0219-android-back-defers-to-remote-ui-stack.md) | Android system back은 Remote UI stack을 순서대로 닫는다 (0149 확장) | FileViewer 정책만 [0259](0259-remote-file-viewer-system-back-to-explorer.md)로 대체 |
 | [0220](0220-path-link-stable-frame-lifetime.md) | path-link 수명 판정은 synchronized-output 안정 프레임에서 수행한다 (0188 정정) | Accepted |
 | [0221](0221-codex-position-first-in-frame-cursor-park.md) | Codex position-first 인프레임 커서 주차도 권위 tail로 인정한다 (0076·0078 확장) | Accepted |
 | [0222](0222-agent-session-checkpoint-coordinator.md) | Agent 세션 복원점은 통합 귀속 스냅샷과 수명주기 체크포인트로 확정한다 (0118·0120·0195·0201 정정, 0174 확장) | Accepted |
@@ -268,6 +268,18 @@ ADR 이 필요한 대표 기준:
 | [0248](0248-codex-turn-lifecycle-activity.md) | Codex 작업 상태는 현재 세션의 턴 기록으로 판정한다 | Accepted |
 | [0249](0249-codex-review-parent-turn-boundaries.md) | Codex 리뷰 경계에서 부모 턴의 귀속을 복원한다 | Accepted |
 | [0250](0250-terminal-task-state-and-notification-transitions.md) | 터미널 작업 상태와 확인 알림은 공통 전이로 판정한다 | Accepted |
+| [0251](0251-single-terminal-status-icon.md) | 터미널 활동은 다섯 종류 중 아이콘 하나로 표시한다 | Accepted |
+| [0252](0252-claude-idle-before-app-identification.md) | 앱 식별 전 Claude 유휴를 실행 범위에 묶어 보류한다 | Accepted |
+| [0253](0253-wsl-claude-chrome-helper-role.md) | WSL Claude의 Chrome 호스트는 대화 프로세스 후보에서 제외한다 | Accepted |
+| [0254](0254-confirmed-idle-before-output-activity.md) | 확인된 작업 없음은 출력 활동보다 우선한다 | Accepted |
+| [0255](0255-codex-delayed-observation-recovery.md) | 지연된 Codex 조회도 실행 범위가 유효하면 관측을 복구한다 | Accepted |
+| [0256](0256-codex-thread-settings-preserve-fresh.md) | Codex의 설정 변경만으로 새 빈 대화의 복원 자격을 취소하지 않는다 | Accepted |
+| [0257](0257-remote-github-view.md) | Remote GitHub View는 데스크톱 스냅샷을 재사용하고 우측 스와이프 대상을 기기별로 고른다 (0106·0149 확장) | Accepted |
+| [0258](0258-codex-retained-loop-session-attribution.md) | Codex 로그 정리 뒤 종료된 선택을 폐기하고 유일한 대화 소유권을 검증한다 | Proposed |
+| [0259](0259-remote-file-viewer-system-back-to-explorer.md) | Remote 파일 열람 중 system back은 직전 Files 목록으로 돌아간다 (0219 부분 대체) | Accepted |
+| [0260](0260-remote-shared-memo-and-panel-preferences.md) | Remote 메모는 PC 저장소를 공유하고 패널 진입점은 기기별로 선택한다 | Accepted |
+| [0261](0261-remote-visible-tool-swipe-cycle.md) | Remote 도구 스와이프는 표시된 도구를 고정 순서로 순환한다 | Accepted |
+| [0262](0262-powershell-command-lifecycle.md) | PowerShell 작업 경계는 수락된 줄 입력과 프롬프트가 소유한다 | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

@@ -413,6 +413,20 @@ test("the header folder button appears with the capability and lists the cwd", a
       .locator("[data-remote-icon-name=Link]"),
   ).toHaveCount(1);
 
+  // PC Explorer (including the viewer sidebar) uses 13px icons and colors
+  // both the glyph and name by kind. Check computed CSS, including overrides.
+  for (const [index, color] of [
+    [0, "rgb(137, 180, 250)"],
+    [1, "rgb(137, 180, 250)"],
+    [6, "rgb(205, 214, 244)"],
+    [7, "rgb(166, 227, 161)"],
+  ] as const) {
+    await expect(rows.nth(index).locator("svg")).toHaveCSS("color", color);
+    await expect(rows.nth(index).locator(".file-viewer-directory-name")).toHaveCSS("color", color);
+    await expect(rows.nth(index).locator("svg")).toHaveAttribute("width", "13");
+    await expect(rows.nth(index).locator("svg")).toHaveAttribute("stroke-width", "2");
+  }
+
   // Zoom and download are file-mode affordances — hidden, not disabled.
   await expect(page.locator("#fileViewerZoom")).toBeHidden();
   await expect(page.locator("#fileViewerDownload")).toBeHidden();
@@ -466,6 +480,92 @@ test("navigates into a directory, opens a file and Back re-requests the listing"
   await expect(page.locator("#fileViewerDownload")).toBeHidden();
 });
 
+test("system back returns from a file to Files before closing the overlay", async ({
+  context,
+  page,
+}, testInfo) => {
+  const { listRequests } = await installRemoteExplorerMocks(context);
+  await page.setViewportSize({ width: 390, height: 720 });
+  await connectRemote(page);
+  await page.locator("#fileExplorerHeader").click();
+  await page.locator(".file-viewer-directory-row", { hasText: "repo" }).click();
+  await page.locator(".file-viewer-directory-row", { hasText: "main.rs" }).click();
+  await expect(page.locator("#fileViewerText")).toHaveText("fn main() {}");
+  await page.screenshot({ path: testInfo.outputPath("files-viewer.png") });
+
+  const back = () =>
+    page.evaluate(() =>
+      (
+        window as Window & {
+          laymuxRemoteUi: { dismissTopLayer(): boolean };
+        }
+      ).laymuxRemoteUi.dismissTopLayer(),
+    );
+  expect(await back()).toBe(true);
+  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+  await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user/repo");
+  await expect(page.locator(".file-viewer-directory-row", { hasText: "main.rs" })).toBeVisible();
+  await expect(page.locator("#fileViewerText")).toBeHidden();
+  expect(listRequests.map(({ body }) => body)).toEqual([
+    { source: "terminalCwd" },
+    { path: "/home/user/repo" },
+    { path: "/home/user/repo" },
+  ]);
+  await page.screenshot({ path: testInfo.outputPath("files-after-back.png") });
+
+  expect(await back()).toBe(true);
+  await expect(page.locator("#fileViewerOverlay")).toBeHidden();
+  expect(await back()).toBe(false);
+});
+
+test("system back cancels a pending file render when returning to Files", async ({
+  context,
+  page,
+}) => {
+  await installRemoteExplorerMocks(context);
+  let finishRender: (() => Promise<void>) | undefined;
+  await page.route("**/remote/v1/file-viewer/render", (route) => {
+    finishRender = () =>
+      route.fulfill({
+        json: {
+          kind: "text",
+          path: "/home/user/notes.txt",
+          content: "late file content",
+          truncated: false,
+        },
+      });
+  });
+  await connectRemote(page);
+  await page.locator("#fileExplorerHeader").click();
+  await page.locator(".file-viewer-directory-row", { hasText: "notes.txt" }).click();
+  await expect.poll(() => Boolean(finishRender)).toBe(true);
+  expect(
+    await page.evaluate(() =>
+      (
+        window as Window & {
+          laymuxRemoteUi: { dismissTopLayer(): boolean };
+        }
+      ).laymuxRemoteUi.dismissTopLayer(),
+    ),
+  ).toBe(true);
+  await expect(page.locator("#fileViewerDirectory")).toBeVisible();
+  const renderResponse = page.waitForResponse("**/remote/v1/file-viewer/render");
+  await finishRender!();
+  await (await renderResponse).finished();
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }),
+  );
+  await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user");
+  await expect(page.locator("#fileViewerText")).toBeHidden();
+  // A following viewer interaction must still operate on the directory.
+  await page.locator(".file-viewer-directory-row", { hasText: "repo" }).click();
+  await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user/repo");
+  await expect(page.locator("#fileViewerText")).toBeHidden();
+});
+
 test("direct path open lives in the explorer and returns to its directory", async ({
   context,
   page,
@@ -497,6 +597,17 @@ test("direct path open lives in the explorer and returns to its directory", asyn
   await expect(page.locator("#fileViewerMessage")).toContainText("Cannot read file");
   await expect(page.locator("#fileViewerBack")).toBeVisible();
   await expect(page.locator("#fileViewerCopyPath")).toBeHidden();
+  expect(
+    await page.evaluate(() =>
+      (
+        window as Window & {
+          laymuxRemoteUi: { dismissTopLayer(): boolean };
+        }
+      ).laymuxRemoteUi.dismissTopLayer(),
+    ),
+  ).toBe(true);
+  await expect(page.locator("#fileViewerDirectory")).toBeVisible();
+  await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user");
 });
 
 test("empty, truncated and failing listings are reported", async ({ context, page }) => {
@@ -628,7 +739,7 @@ test("swipe opening and closing are independent device-local settings", async ({
 
   await page.locator("#navToggle").click();
   await page.locator("#drawerSettingsButton").click();
-  await page.locator("#settingsTabDisplay").click();
+  await page.locator("#settingsTabPanels").click();
   const openToggle = page.getByRole("checkbox", { name: "Swipe to open", exact: false });
   const closeToggle = page.getByRole("checkbox", { name: "Swipe to close", exact: false });
   await expect(openToggle).toBeChecked();
@@ -648,7 +759,7 @@ test("swipe opening and closing are independent device-local settings", async ({
   await expect(page.locator("#exit")).toBeEnabled();
   await page.locator("#navToggle").click();
   await page.locator("#drawerSettingsButton").click();
-  await page.locator("#settingsTabDisplay").click();
+  await page.locator("#settingsTabPanels").click();
   await expect(openToggle).not.toBeChecked();
   await expect(closeToggle).toBeChecked();
   await page.locator("#navToggle").click();
@@ -672,7 +783,7 @@ test("the device-local setting disables both terminal edge flicks", async ({ con
 
   await page.locator("#navToggle").click();
   await page.locator("#drawerSettingsButton").click();
-  await page.locator("#settingsTabDisplay").click();
+  await page.locator("#settingsTabPanels").click();
   const toggle = page.locator("#edgeSwipeDrawersToggle");
   await expect(toggle).toBeChecked();
   await toggle.uncheck();

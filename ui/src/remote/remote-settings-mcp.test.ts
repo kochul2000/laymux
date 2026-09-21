@@ -37,6 +37,7 @@ describe("Remote 설정 MCP 기기 적용", () => {
       (match) => match[1],
     );
     const settings = [
+      // Header preferences share a generated storage-key map.
       "displaySettings",
       "keybar",
       "inputMode",
@@ -48,10 +49,19 @@ describe("Remote 설정 MCP 기기 적용", () => {
       "widgetStrip",
       "edgeSwipeDrawers",
       "swipeCloseDrawers",
+      "rightSwipeView",
+      "toolSwipeRightAction",
+      "headerFiles",
+      "headerGithub",
+      "headerMemo",
+      "headerSpatialExclusion",
+      "headerDesktopMode",
       "spatialExcludedPaneIds",
       "spatialExcludedWorkspaceIds",
     ];
     const internal = ["token", "resumeToken", "autoConnect", "settingsPanel"];
+    const headerFields = source.match(/const headerIconFields = \{([\s\S]*?)\};/)![1];
+    keys.push(...Array.from(headerFields.matchAll(/(header\w+):/g), (match) => match[1]));
     expect(keys.sort()).toEqual([...settings, ...internal].sort());
     for (const field of Object.values(remoteSettingsSchema.properties)) {
       expect(field.description).not.toMatch(/\?{3,}/);

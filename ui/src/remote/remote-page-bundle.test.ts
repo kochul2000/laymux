@@ -49,12 +49,17 @@ describe("remote page bundle", () => {
       `// Source-SHA256: remote-app.js=${sourceHash("remote-app.js")}` +
         ` remote-app.css=${sourceHash("remote-app.css")}` +
         ` remote-icons.js=${fileHash(ICON_SOURCE_PATH)}` +
+        ` file-kind-icon.ts=${fileHash(path.resolve(__dirname, "../lib/file-kind-icon.ts"))}` +
+        ` task-status-glyph.ts=${fileHash(path.resolve(__dirname, "../lib/task-status-glyph.ts"))}` +
         ` codex-transcript-wheel.ts=${fileHash(CODEX_TRANSCRIPT_WHEEL_SOURCE_PATH)}` +
         ` path-link-lines.ts=${fileHash(path.resolve(__dirname, "../lib/path-link-lines.ts"))}` +
         ` terminal-cell-map.ts=${fileHash(path.resolve(__dirname, "../lib/terminal-cell-map.ts"))}` +
         ` composer-editor.js=${fileHash(path.resolve(__dirname, "./composer-editor.js"))}` +
         ` remote-settings-mcp.js=${fileHash(path.resolve(__dirname, "remote-settings-mcp.js"))}` +
         ` remote-settings-schema.json=${fileHash(path.resolve(__dirname, "remote-settings-schema.json"))}` +
+        ` remote-memo.js=${fileHash(path.resolve(__dirname, "remote-memo.js"))}` +
+        ` remote-tool-swipe.js=${fileHash(path.resolve(__dirname, "remote-tool-swipe.js"))}` +
+        ` memo-document.ts=${fileHash(path.resolve(__dirname, "../lib/memo-document.ts"))}` +
         ` lucide-package=${packageInputHash(lock, "lucide")}`,
     );
   });

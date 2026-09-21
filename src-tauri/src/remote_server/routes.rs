@@ -34,7 +34,9 @@ use super::attachments::remote_terminal_attachment;
 use super::auth::remote_guard;
 use super::composer_routes::{remote_composer_starred, remote_composer_starred_update};
 use super::font_assets::FONT_ROUTE_PATH;
-use super::github_repo_routes::remote_terminal_github_repo;
+use super::github_repo_routes::{
+    remote_terminal_github_action, remote_terminal_github_repo, remote_terminal_github_snapshot,
+};
 use super::lease::{
     active_lease_matches_with_timeout, effective_heartbeat_timeout_seconds,
     emit_remote_control_status, get_remote_control_status, reclaim_lockout_active,
@@ -42,6 +44,7 @@ use super::lease::{
     ClaimReservationAttempt, HumanControlOrigin, RemoteControlLease, RemoteControlState,
     RemoteControlStatus, RemoteOwnerTransition,
 };
+use super::memo_routes::{remote_memo_save, remote_memos};
 use super::navigation_routes::{
     remote_layouts_list, remote_navigation, remote_notification_mark_read,
     remote_notifications_clear, remote_notifications_mark_all_read, remote_pane_visibility,
@@ -237,6 +240,15 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         .route(
             "/remote/v1/terminals/{id}/github-repo",
             get(remote_terminal_github_repo),
+        )
+        .route("/remote/v1/memos", get(remote_memos).post(remote_memo_save))
+        .route(
+            "/remote/v1/terminals/{id}/github",
+            get(remote_terminal_github_snapshot),
+        )
+        .route(
+            "/remote/v1/terminals/{id}/github/actions",
+            post(remote_terminal_github_action),
         )
         .route(
             "/remote/v1/terminals/{id}/focus",

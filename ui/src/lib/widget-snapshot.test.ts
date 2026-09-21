@@ -14,6 +14,7 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useDockStore } from "@/stores/dock-store";
 import { defaultWidgets, type WidgetInstance } from "@/lib/widget-placement";
+import { observeTask } from "./terminal-task";
 import { buildRemoteWidgetSnapshot } from "./widget-snapshot";
 
 const NOW = new Date("2026-08-03T12:00:00Z");
@@ -216,12 +217,33 @@ describe("buildRemoteWidgetSnapshot", () => {
     ).toEqual(["/a", "/b"]);
   });
 
-  it("counts terminal activity in the scope the placement asked for", async () => {
+  it("counts scoped running tasks even after sleep expiry, without counting output alone", async () => {
     useTerminalStore.setState({
       instances: [
-        terminal({ id: "t1", workspaceId: "ws-1", activity: { type: "running" } }),
-        terminal({ id: "t2", workspaceId: "ws-1" }),
-        terminal({ id: "t3", workspaceId: "ws-2", activity: { type: "running" } }),
+        terminal({
+          id: "t1",
+          workspaceId: "ws-1",
+          activity: { type: "running" },
+          task: {
+            ...observeTask(
+              undefined,
+              { source: "s", taskId: "t", sequence: 1, state: "running" },
+              0,
+            ),
+            observation: "stale",
+          },
+        }),
+        terminal({ id: "t2", workspaceId: "ws-1", outputActive: true }),
+        terminal({
+          id: "t3",
+          workspaceId: "ws-2",
+          activity: { type: "running" },
+          task: observeTask(
+            undefined,
+            { source: "s", taskId: "t", sequence: 1, state: "running" },
+            NOW.getTime(),
+          ),
+        }),
       ],
     });
     placeWidgets({
