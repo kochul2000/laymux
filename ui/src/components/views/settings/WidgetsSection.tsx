@@ -10,6 +10,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FocusInput, FocusSelect } from "@/components/ui/FormControls";
+import { Button } from "@/components/ui/Button";
 import { SettingsField, SettingsGroup, SettingsToggleField } from "./SettingsLayout";
 import { ArrowDownIcon, ArrowUpIcon, XIcon } from "@/components/ui/icons";
 import { WIDGET_DEFINITIONS, findWidgetDefinition } from "@/components/widgets/registry";
@@ -56,13 +57,6 @@ function newInstanceId(): string {
  */
 const controlStyle: React.CSSProperties = { fontSize: "var(--fs-sm)", padding: "2px 6px" };
 
-const buttonStyle: React.CSSProperties = {
-  background: "transparent",
-  border: "1px solid var(--border)",
-  color: "var(--text-secondary)",
-  cursor: "pointer",
-};
-
 export function WidgetsSectionBody({
   widgets,
   onChange,
@@ -72,88 +66,53 @@ export function WidgetsSectionBody({
 }: WidgetsSectionBodyProps) {
   const { t } = useTranslation("settings");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [pickedSlot, setPickedSlot] = useState<WidgetSlotId>(
+    () => WIDGET_SLOT_IDS.find((slot) => readSlot(widgets, slot).length > 0) ?? WIDGET_SLOT_IDS[0],
+  );
 
   const placements = allPlacements(widgets);
   // A removed widget must not leave a detail panel behind, and the selection is
   // derived rather than synced so no effect has to chase the placement.
   const selected = placements.find((placement) => placement.instance.id === selectedId) ?? null;
+  // Follow a selected widget when it moves; switching destinations is UI-only.
+  const activeSlot = selected?.slot ?? pickedSlot;
 
   const change = (next: WidgetsSettings) => onChange(next);
 
   return (
     <div data-testid="settings-widgets-section-body" className="settings-stack">
-      {/* Shared face and the status line switch: ordinary settings rows, so they
-          line up with every other page. */}
-      <SettingsGroup>
-        <SettingsField label={t("widgets.fontFamily")}>
-          <FocusSelect
-            data-testid="widgets-font-family"
-            className="w-full"
-            value={widgets.fontFamily}
-            onChange={(event) => change({ ...widgets, fontFamily: event.target.value })}
-          >
-            <option value="">{t("widgets.fontFamilyDefault")}</option>
-            {widgets.fontFamily && !fontFamilies.includes(widgets.fontFamily) && (
-              <option value={widgets.fontFamily}>{widgets.fontFamily}</option>
-            )}
-            {fontFamilies.map((family) => (
-              <option key={family} value={family}>
-                {family}
-              </option>
-            ))}
-          </FocusSelect>
-        </SettingsField>
-        <SettingsField label={t("widgets.fontSize")}>
-          <FocusInput
-            type="number"
-            data-testid="widgets-font-size"
-            min={WIDGET_FONT_SIZE_MIN}
-            max={WIDGET_FONT_SIZE_MAX}
-            value={readWidgetFontSize(widgets.fontSize)}
-            onChange={(event) => {
-              const size = Number(event.target.value);
-              if (!Number.isFinite(size)) return;
-              change({
-                ...widgets,
-                fontSize: Math.max(
-                  WIDGET_FONT_SIZE_MIN,
-                  Math.min(WIDGET_FONT_SIZE_MAX, Math.round(size)),
-                ),
-              });
-            }}
-          />
-        </SettingsField>
-        <SettingsToggleField
-          label={t("widgets.statusLineEnabled")}
-          desc={t("widgets.statusLineEnabledDesc")}
-          testId="widgets-status-line-toggle"
-          checked={widgets.statusLine.enabled}
-          onChange={(enabled) =>
-            change({ ...widgets, statusLine: { ...widgets.statusLine, enabled } })
-          }
-        />
-      </SettingsGroup>
-
-      {/* Placement editor: preview → pick → detail (ADR-0105), in one card. */}
-      <SettingsGroup>
+      <div className="widgets-placement">
         <WidgetsPreview widgets={widgets} selectedId={selectedId} onSelect={setSelectedId} />
-
-        <div className="flex flex-col gap-2">
+        <div className="widgets-destinations" role="group" aria-label={t("widgets.placement")}>
           {WIDGET_SLOT_IDS.map((slot) => (
-            <SlotRow
+            <button
+              type="button"
               key={slotKey(slot)}
-              slot={slot}
-              widgets={widgets}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-              onChange={(next, focusId) => {
-                change(next);
-                if (focusId !== undefined) setSelectedId(focusId);
+              data-testid={`widgets-slot-title-${slotKey(slot)}`}
+              aria-pressed={slotKey(activeSlot) === slotKey(slot)}
+              onClick={() => {
+                setPickedSlot(slot);
+                setSelectedId(null);
               }}
-            />
+            >
+              <span>{t(`widgets.slot.${slotKey(slot)}`)}</span>
+              <span className="widgets-slot-count">{readSlot(widgets, slot).length}</span>
+            </button>
           ))}
         </div>
-
+        {activeSlot.surface === "statusLine" && !widgets.statusLine.enabled && (
+          <p className="widgets-help">{t("widgets.statusLineOff")}</p>
+        )}
+        <SlotRow
+          slot={activeSlot}
+          widgets={widgets}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          onChange={(next, focusId) => {
+            change(next);
+            if (focusId !== undefined) setSelectedId(focusId);
+          }}
+        />
         {selected ? (
           <WidgetDetail
             instance={selected.instance}
@@ -164,18 +123,69 @@ export function WidgetsSectionBody({
             claudeConfigDirs={claudeConfigDirs}
             grokConfigDirs={grokConfigDirs}
             onChange={change}
-            onRemoved={() => setSelectedId(null)}
+            onRemoved={() => {
+              setPickedSlot(activeSlot);
+              setSelectedId(null);
+            }}
           />
         ) : (
-          <p
-            data-testid="widgets-select-hint"
-            className="text-[12px]"
-            style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-          >
+          <p data-testid="widgets-select-hint" className="widgets-help">
             {t("widgets.selectHint")}
           </p>
         )}
-      </SettingsGroup>
+      </div>
+      <details className="widgets-appearance">
+        <summary>{t("widgets.appearance")}</summary>
+        <SettingsGroup>
+          <SettingsField label={t("widgets.fontFamily")}>
+            <FocusSelect
+              data-testid="widgets-font-family"
+              className="w-full"
+              value={widgets.fontFamily}
+              onChange={(event) => change({ ...widgets, fontFamily: event.target.value })}
+            >
+              <option value="">{t("widgets.fontFamilyDefault")}</option>
+              {widgets.fontFamily && !fontFamilies.includes(widgets.fontFamily) && (
+                <option value={widgets.fontFamily}>{widgets.fontFamily}</option>
+              )}
+              {fontFamilies.map((family) => (
+                <option key={family} value={family}>
+                  {family}
+                </option>
+              ))}
+            </FocusSelect>
+          </SettingsField>
+          <SettingsField label={t("widgets.fontSize")}>
+            <FocusInput
+              type="number"
+              data-testid="widgets-font-size"
+              min={WIDGET_FONT_SIZE_MIN}
+              max={WIDGET_FONT_SIZE_MAX}
+              value={readWidgetFontSize(widgets.fontSize)}
+              onChange={(event) => {
+                const size = Number(event.target.value);
+                if (!Number.isFinite(size)) return;
+                change({
+                  ...widgets,
+                  fontSize: Math.max(
+                    WIDGET_FONT_SIZE_MIN,
+                    Math.min(WIDGET_FONT_SIZE_MAX, Math.round(size)),
+                  ),
+                });
+              }}
+            />
+          </SettingsField>
+          <SettingsToggleField
+            label={t("widgets.statusLineEnabled")}
+            desc={t("widgets.statusLineEnabledDesc")}
+            testId="widgets-status-line-toggle"
+            checked={widgets.statusLine.enabled}
+            onChange={(enabled) =>
+              change({ ...widgets, statusLine: { ...widgets.statusLine, enabled } })
+            }
+          />
+        </SettingsGroup>
+      </details>
     </div>
   );
 }
@@ -207,12 +217,10 @@ function WidgetsPreview({
   ];
 
   return (
-    <div data-testid="widgets-preview" className="flex flex-col gap-1">
+    <div data-testid="widgets-preview" className="widgets-preview">
       {surfaces.map(({ surface, label, dimmed }) => (
         <div key={surface} className="flex flex-col gap-0.5">
-          <span className="text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
-            {label}
-          </span>
+          <span className="widgets-preview-label">{label}</span>
           <div
             data-testid={`widgets-preview-${surface}`}
             className="ui-toolbar px-1"
@@ -325,69 +333,56 @@ function SlotRow({
   const key = slotKey(slot);
 
   return (
-    <div className="flex flex-wrap items-center gap-1">
-      <span
-        data-testid={`widgets-slot-title-${key}`}
-        className="w-36 shrink-0 text-[13px]"
-        style={{ color: "var(--text-primary)" }}
-      >
-        {t(`widgets.slot.${key}`)}
-      </span>
-
-      {instances.map((instance) => {
-        const definition = findWidgetDefinition(instance.type);
-        const isSelected = instance.id === selectedId;
-        return (
-          <button
-            key={instance.id}
-            type="button"
-            data-testid={`widgets-chip-${instance.id}`}
-            className="px-1.5 py-0.5 text-[12px]"
-            style={{
-              ...buttonStyle,
-              color: isSelected ? "var(--bg-base)" : "var(--text-secondary)",
-              background: isSelected ? "var(--accent)" : "transparent",
-              borderColor: isSelected ? "var(--accent)" : "var(--border)",
-            }}
-            onClick={() => onSelect(instance.id)}
-          >
-            {definition
-              ? t(definition.labelKey)
-              : t("widgets.unknownType", { type: instance.type })}
-          </button>
-        );
-      })}
-
-      {instances.length === 0 && (
-        <span className="text-[12px]" style={{ color: "var(--text-secondary)", opacity: 0.5 }}>
-          {t("widgets.empty")}
-        </span>
-      )}
-
-      <FocusSelect
-        data-testid={`widgets-add-${key}`}
-        style={{ ...controlStyle, marginLeft: "auto" }}
-        value=""
-        onChange={(event) => {
-          const definition = findWidgetDefinition(event.target.value);
-          if (!definition) return;
-          const instance = {
-            id: newInstanceId(),
-            type: definition.type,
-            options: { ...definition.defaultOptions },
-          };
-          // Select what was just added: the next thing the user wants is its
-          // options, and hunting for it in the list is the only alternative.
-          onChange(addWidget(widgets, slot, instance), instance.id);
-        }}
-      >
-        <option value="">{t("widgets.add")}</option>
-        {WIDGET_DEFINITIONS.map((definition) => (
-          <option key={definition.type} value={definition.type}>
-            {t(definition.labelKey)}
-          </option>
-        ))}
-      </FocusSelect>
+    <div className="widgets-slot-editor">
+      <div className="widgets-slot-heading">
+        <h3>{t(`widgets.slot.${key}`)}</h3>
+        <FocusSelect
+          data-testid={`widgets-add-${key}`}
+          aria-label={t("widgets.add")}
+          value=""
+          onChange={(event) => {
+            const definition = findWidgetDefinition(event.target.value);
+            if (!definition) return;
+            const instance = {
+              id: newInstanceId(),
+              type: definition.type,
+              options: { ...definition.defaultOptions },
+            };
+            // Select what was just added: the next thing the user wants is its
+            // options, and hunting for it in the list is the only alternative.
+            onChange(addWidget(widgets, slot, instance), instance.id);
+          }}
+        >
+          <option value="">{t("widgets.add")}</option>
+          {WIDGET_DEFINITIONS.map((definition) => (
+            <option key={definition.type} value={definition.type}>
+              {t(definition.labelKey)}
+            </option>
+          ))}
+        </FocusSelect>
+      </div>
+      <div className="widgets-slot-list">
+        {instances.map((instance, index) => {
+          const definition = findWidgetDefinition(instance.type);
+          return (
+            <button
+              key={instance.id}
+              type="button"
+              data-testid={`widgets-chip-${instance.id}`}
+              aria-pressed={instance.id === selectedId}
+              onClick={() => onSelect(instance.id)}
+            >
+              <span className="widgets-slot-count">{index + 1}</span>
+              <span>
+                {definition
+                  ? t(definition.labelKey)
+                  : t("widgets.unknownType", { type: instance.type })}
+              </span>
+            </button>
+          );
+        })}
+        {instances.length === 0 && <p className="widgets-help">{t("widgets.emptyHint")}</p>}
+      </div>
     </div>
   );
 }
@@ -417,18 +412,15 @@ function WidgetDetail({
   const definition = findWidgetDefinition(instance.type);
 
   return (
-    <div
-      data-testid={`widgets-detail-${instance.id}`}
-      className="flex flex-col gap-2 p-2"
-      style={{ border: "1px solid var(--separator-bg)" }}
-    >
-      <div className="flex items-center gap-1">
-        <span className="mr-auto text-[13px]" style={{ color: "var(--text-primary)" }}>
+    <div data-testid={`widgets-detail-${instance.id}`} className="widgets-detail">
+      <div className="widgets-detail-heading">
+        <span className="widgets-detail-name">
           {definition ? t(definition.labelKey) : t("widgets.unknownType", { type: instance.type })}
         </span>
 
         <FocusSelect
           data-testid={`widgets-move-${instance.id}`}
+          aria-label={t("widgets.placement")}
           style={controlStyle}
           value={slotKey(slot)}
           onChange={(event) => {
@@ -445,53 +437,41 @@ function WidgetDetail({
           ))}
         </FocusSelect>
 
-        <button
-          type="button"
+        <Button
           data-testid={`widgets-up-${instance.id}`}
-          className="px-1.5 text-[11px]"
-          style={{ ...buttonStyle, opacity: index === 0 ? 0.4 : 1 }}
           disabled={index === 0}
           title={t("widgets.moveUp")}
+          aria-label={t("widgets.moveUp")}
           onClick={() => onChange(nudgeWidget(widgets, instance.id, -1))}
         >
-          <ArrowUpIcon size={11} />
-        </button>
-        <button
-          type="button"
+          <ArrowUpIcon size={14} />
+        </Button>
+        <Button
           data-testid={`widgets-down-${instance.id}`}
-          className="px-1.5 text-[11px]"
-          style={{ ...buttonStyle, opacity: index === count - 1 ? 0.4 : 1 }}
           disabled={index === count - 1}
           title={t("widgets.moveDown")}
+          aria-label={t("widgets.moveDown")}
           onClick={() => onChange(nudgeWidget(widgets, instance.id, 1))}
         >
-          <ArrowDownIcon size={11} />
-        </button>
-        <button
-          type="button"
+          <ArrowDownIcon size={14} />
+        </Button>
+        <Button
           data-testid={`widgets-remove-${instance.id}`}
-          className="px-1.5 text-[11px]"
-          style={buttonStyle}
           title={t("widgets.remove")}
           onClick={() => {
             onChange(removeWidget(widgets, instance.id));
             onRemoved();
           }}
         >
-          <XIcon size={11} />
-        </button>
+          <XIcon size={14} /> {t("widgets.remove")}
+        </Button>
       </div>
 
       {definition && definition.optionSpecs.length > 0 && (
-        <div className="flex flex-col gap-1">
+        <div className="widgets-options">
           {definition.optionSpecs.map((spec) => (
-            <div key={spec.key} className="flex items-center gap-2">
-              <span
-                className="w-36 shrink-0 text-[12px]"
-                style={{ color: "var(--text-secondary)" }}
-              >
-                {t(spec.labelKey)}
-              </span>
+            <div key={spec.key} className="widgets-option">
+              <span>{t(spec.labelKey)}</span>
               <OptionControl
                 spec={spec}
                 instance={instance}

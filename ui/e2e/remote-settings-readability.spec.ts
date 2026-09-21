@@ -51,6 +51,14 @@ for (const [width, drawerWidth] of [
       await page.getByRole("tab", { name, exact: true }).click();
       const panel = page.getByRole("tabpanel");
       await expect(panel).toBeVisible();
+      if (name === "Input bar") {
+        // Validate the expanded editors too, including the minimum 200px menu.
+        await page.locator('#inputLayoutEditor [data-layout-action="soft:c-c"]').click();
+        for (const id of ["inputAvailableKeys", "inputCustomKey", "inputButtonSizes"]) {
+          await page.locator(`#${id} > summary`).click();
+        }
+        await page.getByLabel("Custom key kind").selectOption("raw");
+      }
       const overflow = await panel.evaluate((element) => {
         const bounds = element.getBoundingClientRect();
         return Array.from(

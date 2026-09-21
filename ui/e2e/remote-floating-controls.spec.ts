@@ -289,6 +289,7 @@ test("header actions start Hidden, can be placed on a row, and remain in the hea
   for (const action of ["menu", "copyPane", "viewer", "skip", "desktop"]) {
     await expect(page.locator(`.layout-hidden [data-layout-action="${action}"]`)).toHaveCount(1);
   }
+  await page.locator("#inputAvailableKeys > summary").click();
   await page.locator('.layout-hidden [data-layout-action="menu"]').click();
   await expect(page.locator('#keyRow [data-action-proxy="menu"]')).toHaveCount(1);
   await expect(page.locator("header #navToggle")).toHaveCount(1);

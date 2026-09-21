@@ -25,6 +25,21 @@ const placed = (): WidgetsSettings => ({
 });
 
 describe("WidgetsSectionBody", () => {
+  it("edits one destination at a time without changing placement when switching", async () => {
+    const user = userEvent.setup();
+    const { onChange } = setup(placed());
+    expect(screen.getAllByTestId(/^widgets-add-/)).toHaveLength(1);
+    await user.click(screen.getByTestId("widgets-chip-w1"));
+    await user.click(screen.getByTestId("widgets-slot-title-statusLine.right"));
+    expect(screen.getByTestId("widgets-add-statusLine.right")).toBeInTheDocument();
+    expect(screen.queryByTestId("widgets-detail-w1")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("widgets-chip-w1")).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+    await user.click(screen.getByTestId("widgets-preview-item-w1"));
+    expect(screen.getByTestId("widgets-add-topBar.left")).toBeInTheDocument();
+    expect(screen.getByTestId("widgets-detail-w1")).toBeInTheDocument();
+  });
+
   it("offers all four slots", () => {
     setup();
     for (const key of ["topBar.left", "topBar.right", "statusLine.left", "statusLine.right"]) {
@@ -43,6 +58,8 @@ describe("WidgetsSectionBody", () => {
         fontFamilies={["JetBrains Mono"]}
       />,
     );
+
+    await user.click(screen.getByText("Shared appearance · font and status line"));
 
     expect(screen.getByTestId("widgets-font-family")).toBeInTheDocument();
     expect(screen.getByTestId("widgets-font-size")).toHaveValue(9);
@@ -198,6 +215,7 @@ describe("WidgetsSectionBody", () => {
     };
     const { onChange } = setup(withStatusLine);
 
+    await user.click(screen.getByText("Shared appearance · font and status line"));
     await user.click(screen.getByTestId("widgets-status-line-toggle"));
 
     const next = onChange.mock.calls[0][0] as WidgetsSettings;
