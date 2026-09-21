@@ -6,6 +6,8 @@ import { readPathLinkSelection, readPathLinkLines, mapPathLinkParts, pathLinkPar
 import {
   commandStatusIconName,
   fileKindIconName,
+  fileKindColor,
+  FILE_KIND_ICON_SIZE,
   hydrateRemoteIcons,
   setRemoteIcon,
 } from "../../../../ui/src/remote/remote-icons.js";
@@ -2356,10 +2358,11 @@ import {
           const row = document.createElement("button");
           row.type = "button";
           row.className = "file-viewer-directory-row";
+          row.style.color = fileKindColor(entry);
           const icon = document.createElement("span");
           icon.className = "file-viewer-directory-icon";
           icon.setAttribute("aria-hidden", "true");
-          setRemoteIcon(icon, fileKindIconName(entry, isParent));
+          setRemoteIcon(icon, fileKindIconName(entry, isParent), { size: FILE_KIND_ICON_SIZE });
           const name = document.createElement("span");
           name.className = "file-viewer-directory-name";
           name.textContent = entry.name;

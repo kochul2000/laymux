@@ -2827,14 +2827,11 @@
       .file-viewer-directory-row:hover {
         background: var(--hover-bg);
       }
-      .file-viewer-directory-row.parent {
-        color: var(--muted);
-      }
       .file-viewer-directory-icon {
         display: inline-flex;
         flex: 0 0 auto;
         align-items: center;
-        color: var(--text-secondary);
+        color: inherit;
       }
       .file-viewer-directory-name {
         flex: 1 1 auto;

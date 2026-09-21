@@ -2059,6 +2059,8 @@ pub fn get_terminal_summaries_inner(
 
 ### 15.4 컴포넌트 설계
 
+파일 항목의 표시 규칙은 `ui/src/lib/file-kind-icon.ts`를 PC·Remote가 함께 import한다([ADR-0205](../adr/0205-lucide-application-icon-source.md), [ADR-0210](../adr/0210-remote-lucide-icon-boundary.md) 직접 적용). 탐색기·FileViewer 내부 탐색기·압축파일 목록은 `FolderUp`/`Folder`/`Link`/`File`을 13px로 표시한다. 아이콘과 이름 모두 디렉터리(상위 폴더·디렉터리 링크 포함)는 `--accent`, 파일 링크는 `--green`, 일반 파일은 `--text-primary`를 쓴다. PC의 선택된 포커스 행은 기존 선택 대비색을 아이콘과 이름에 함께 적용한다. React의 `FileKindIcon`과 Remote의 Lucide DOM 경계는 같은 매핑·크기를 소비하고, Remote 생성 번들 드리프트 검사에는 이 공용 모듈도 포함한다.
+
 - View 내부의 로컬 서브 컴포넌트(`BarBtn`, `Sep` 등)는 같은 파일 내에 정의한다. 단, 2개 이상의 파일에서 사용되면 공유 모듈로 승격한다.
 - Props에 `data-testid`를 전달할 수 있도록 `testId` prop을 지원한다.
 - 스타일 상수(높이, 반경 등)는 컴포넌트 파일 상단에 `const`로 선언하되, CSS 변수로 정의된 토큰이 있으면 그것을 사용한다.
