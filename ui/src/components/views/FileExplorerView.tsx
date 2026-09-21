@@ -23,15 +23,9 @@ import {
 import { ViewShell } from "@/components/ui/ViewShell";
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import { ViewBody } from "@/components/ui/ViewBody";
-import {
-  ArrowLeftIcon,
-  ArrowRightIcon,
-  FileIcon,
-  FolderIcon,
-  FolderUpIcon,
-  LinkIcon,
-} from "@/components/ui/icons";
-import { fileKindIconName } from "@/lib/file-kind-icon";
+import { ArrowLeftIcon, ArrowRightIcon } from "@/components/ui/icons";
+import { FileKindIcon } from "@/components/ui/FileKindIcon";
+import { fileKindColor } from "@/lib/file-kind-icon";
 
 export interface FileExplorerViewProps {
   instanceId: string;
@@ -45,19 +39,6 @@ export interface FileExplorerViewProps {
   lastCwd?: string;
   /** Override file activation when the explorer is hosted inside another UI. */
   onOpenFile?: (path: string) => unknown;
-}
-
-function FileKindRowIcon({ entry, isParent }: { entry: DirEntry; isParent: boolean }) {
-  switch (fileKindIconName(entry, isParent)) {
-    case "FolderUp":
-      return <FolderUpIcon size={13} />;
-    case "Folder":
-      return <FolderIcon size={13} />;
-    case "Link":
-      return <LinkIcon size={13} />;
-    case "File":
-      return <FileIcon size={13} />;
-  }
 }
 
 export function FileExplorerView({
@@ -805,11 +786,7 @@ export function FileExplorerView({
                 color:
                   selectedIndices.has(i) && i === focusIndex
                     ? "var(--bg-base)"
-                    : entry.isDirectory
-                      ? "var(--accent)"
-                      : entry.isSymlink
-                        ? "var(--green)"
-                        : "var(--text-primary)",
+                    : fileKindColor(entry),
               }}
               data-testid={`file-explorer-item-${i}`}
               data-selected={selectedIndices.has(i)}
@@ -818,7 +795,7 @@ export function FileExplorerView({
               onDoubleClick={() => handleItemDoubleClick(i)}
             >
               <span className="flex min-w-0 items-center gap-1 text-xs">
-                <FileKindRowIcon entry={entry} isParent={entry.name === ".."} />
+                <FileKindIcon entry={entry} isParent={entry.name === ".."} />
                 <span className="truncate">
                   {entry.name === ".." ? ".." : entry.isDirectory ? `${entry.name}/` : entry.name}
                 </span>

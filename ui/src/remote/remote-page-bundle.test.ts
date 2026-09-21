@@ -49,6 +49,7 @@ describe("remote page bundle", () => {
       `// Source-SHA256: remote-app.js=${sourceHash("remote-app.js")}` +
         ` remote-app.css=${sourceHash("remote-app.css")}` +
         ` remote-icons.js=${fileHash(ICON_SOURCE_PATH)}` +
+        ` file-kind-icon.ts=${fileHash(path.resolve(__dirname, "../lib/file-kind-icon.ts"))}` +
         ` task-status-glyph.ts=${fileHash(path.resolve(__dirname, "../lib/task-status-glyph.ts"))}` +
         ` codex-transcript-wheel.ts=${fileHash(CODEX_TRANSCRIPT_WHEEL_SOURCE_PATH)}` +
         ` path-link-lines.ts=${fileHash(path.resolve(__dirname, "../lib/path-link-lines.ts"))}` +

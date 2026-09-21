@@ -413,6 +413,20 @@ test("the header folder button appears with the capability and lists the cwd", a
       .locator("[data-remote-icon-name=Link]"),
   ).toHaveCount(1);
 
+  // PC Explorer (including the viewer sidebar) uses 13px icons and colors
+  // both the glyph and name by kind. Check computed CSS, including overrides.
+  for (const [index, color] of [
+    [0, "rgb(137, 180, 250)"],
+    [1, "rgb(137, 180, 250)"],
+    [6, "rgb(205, 214, 244)"],
+    [7, "rgb(166, 227, 161)"],
+  ] as const) {
+    await expect(rows.nth(index).locator("svg")).toHaveCSS("color", color);
+    await expect(rows.nth(index).locator(".file-viewer-directory-name")).toHaveCSS("color", color);
+    await expect(rows.nth(index).locator("svg")).toHaveAttribute("width", "13");
+    await expect(rows.nth(index).locator("svg")).toHaveAttribute("stroke-width", "2");
+  }
+
   // Zoom and download are file-mode affordances — hidden, not disabled.
   await expect(page.locator("#fileViewerZoom")).toBeHidden();
   await expect(page.locator("#fileViewerDownload")).toBeHidden();
