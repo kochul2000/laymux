@@ -42,6 +42,34 @@ async function installMocks(context: BrowserContext) {
     const request = route.request();
     const url = new URL(request.url());
     if (await fulfillRemoteClientAsset(route, url.pathname)) return;
+    if (url.pathname === "/remote/v1/file-viewer/list") {
+      return route.fulfill({
+        json: {
+          path: "/work/repo",
+          parent: "/work",
+          truncated: false,
+          entries: [
+            {
+              name: "notes.txt",
+              path: "/work/repo/notes.txt",
+              isDirectory: false,
+              isSymlink: false,
+              size: 24,
+            },
+          ],
+        },
+      });
+    }
+    if (url.pathname === "/remote/v1/file-viewer/render") {
+      return route.fulfill({
+        json: {
+          kind: "text",
+          path: "/work/repo/notes.txt",
+          content: "file text",
+          truncated: false,
+        },
+      });
+    }
     if (url.pathname === "/remote/v1/memos") {
       if (request.method() === "GET") {
         expect(url.searchParams.get("leaseId")).toBe("lease-257");
@@ -183,8 +211,125 @@ async function flickRightEdge(page: Page) {
   });
 }
 
+async function flickTool(page: Page, selector: string, direction: number, dy = 0) {
+  await page.locator(selector).evaluate(
+    (target, { direction, dy }) => {
+      const rect = target.getBoundingClientRect();
+      const x = direction > 0 ? rect.left + 20 : rect.right - 20;
+      const y = rect.top + Math.min(rect.height / 2, 20);
+      for (const [type, distance] of [
+        ["pointerdown", 0],
+        ["pointermove", 80],
+        ["pointermove", 120],
+        ["pointerup", 120],
+      ] as const) {
+        target.dispatchEvent(
+          new PointerEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            pointerId: 71,
+            pointerType: "touch",
+            isPrimary: true,
+            clientX: x + distance * direction,
+            clientY: y + (distance ? dy : 0),
+          }),
+        );
+      }
+    },
+    { direction, dy },
+  );
+}
+
 test.describe("Remote GitHub view", () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 720 } });
+
+  test("cycles one step per fling through Issues, PRs, Files and Memo without losing drafts", async ({
+    context,
+    page,
+  }) => {
+    const mocks = await installMocks(context);
+    await connect(page);
+    await page.locator("#githubHeader").click();
+    await flickTool(page, "#githubList", -1);
+    await expect(page.locator("#githubPullsTab")).toHaveAttribute("aria-selected", "true");
+    await flickTool(page, "#githubToolbar", -1);
+    await expect(page.locator("#fileViewerDirectory")).toBeVisible();
+    await flickTool(page, "#fileViewerDirectory", -1);
+    await expect(page.locator("#memoText")).toHaveValue("PC에서 쓴 메모\n공유 확인");
+    await page.locator("#memoText").fill("순회 중 보존할 초안");
+    await flickTool(page, "#memoText", -1);
+    await expect(page.locator("#memoOverlay")).toBeVisible();
+    await flickTool(page, "#memoToolbar", -1);
+    await expect(page.locator("#githubIssuesTab")).toHaveAttribute("aria-selected", "true");
+    await flickTool(page, "#githubList", -1);
+    await flickTool(page, "#githubList", -1);
+    await flickTool(page, "#fileViewerDirectory", -1);
+    await expect(page.locator("#memoText")).toHaveValue("순회 중 보존할 초안");
+    expect(mocks.memoRequests).toEqual([]);
+  });
+
+  test("right swipe defaults to close and its previous-tool setting persists", async ({
+    context,
+    page,
+  }) => {
+    await installMocks(context);
+    await connect(page);
+    await page.locator("#githubHeader").click();
+    await flickTool(page, "#githubList", 1);
+    await expect(page.locator("#githubOverlay")).toBeHidden();
+    await page.locator("#navToggle").click();
+    await page.locator("#drawerSettingsButton").click();
+    await page.locator("#settingsTabPanels").click();
+    await page.locator("#toolSwipeRightAction").selectOption("previous");
+    await page.locator("#swipeCloseDrawersToggle").uncheck();
+    expect(
+      await page.evaluate(() => localStorage.getItem("laymux.remote.toolSwipeRightAction")),
+    ).toBe("previous");
+    await page.locator("#navToggle").click();
+    await page.locator("#githubHeader").click();
+    await flickTool(page, "#githubList", 1);
+    await expect(page.locator("#memoOverlay")).toBeVisible();
+    await flickTool(page, "#memoToolbar", 1);
+    await expect(page.locator("#fileViewerDirectory")).toBeVisible();
+    await flickTool(page, "#fileViewerDirectory", 1);
+    await expect(page.locator("#githubPullsTab")).toHaveAttribute("aria-selected", "true");
+    await flickTool(page, "#githubList", 1);
+    await expect(page.locator("#githubIssuesTab")).toHaveAttribute("aria-selected", "true");
+    await page.reload();
+    await page.locator("#navToggle").click();
+    await page.locator("#drawerSettingsButton").click();
+    await page.locator("#settingsTabPanels").click();
+    await expect(page.locator("#toolSwipeRightAction")).toHaveValue("previous");
+  });
+
+  test("skips hidden tools, leaves vertical gestures and file text alone, and keeps Files Back", async ({
+    context,
+    page,
+  }) => {
+    await installMocks(context);
+    await context.addInitScript(() => {
+      localStorage.setItem("laymux.remote.headerGithub", "0");
+      localStorage.setItem("laymux.remote.toolSwipeRightAction", "previous");
+    });
+    await page.goto("http://remote.test/remote/");
+    await page.locator("#token").fill("remote-secret");
+    await page.locator("#connect").click();
+    await page.locator("#fileExplorerHeader").click();
+    await page.locator(".file-viewer-directory-row", { hasText: "notes.txt" }).click();
+    await expect(page.locator("#fileViewerText")).toBeVisible();
+    await flickTool(page, "#fileViewerText", -1);
+    await expect(page.locator("#fileViewerText")).toBeVisible();
+    await page.locator("#fileViewerBack").click();
+    await expect(page.locator("#fileViewerDirectory")).toBeVisible();
+    await flickTool(page, "#fileViewerDirectory", -1, 150);
+    await expect(page.locator("#fileViewerDirectory")).toBeVisible();
+    await flickTool(page, "#fileViewerDirectory", -1);
+    await expect(page.locator("#memoOverlay")).toBeVisible();
+    await flickTool(page, "#memoToolbar", -1);
+    await expect(page.locator("#fileViewerDirectory")).toBeVisible();
+    await flickTool(page, "#fileViewerDirectory", 1);
+    await expect(page.locator("#memoOverlay")).toBeVisible();
+  });
 
   test("shares PC memos, retains conflicting drafts, and hides icons independently of swipe", async ({
     context,

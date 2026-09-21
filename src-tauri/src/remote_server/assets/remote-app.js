@@ -1,5 +1,6 @@
 import { createRemoteSettingsBridge } from "../../../../ui/src/remote/remote-settings-mcp.js";
 import { createRemoteMemo } from "../../../../ui/src/remote/remote-memo.js";
+import { installRemoteToolSwipes, nextRemoteTool, normalizeToolSwipeRightAction } from "../../../../ui/src/remote/remote-tool-swipe.js";
 import { createComposerEditor } from "../../../../ui/src/remote/composer-editor.js";
 import { readPathLinkSelection, readPathLinkLines, mapPathLinkParts, pathLinkPartsCurrent, PATH_LINK_CONTEXT_ROWS } from "../../../../ui/src/lib/path-link-lines.ts";
 import {
@@ -189,6 +190,7 @@ import {
         const edgeSwipeDrawersKey = "laymux.remote.edgeSwipeDrawers";
         const swipeCloseDrawersKey = "laymux.remote.swipeCloseDrawers";
         const rightSwipeViewKey = "laymux.remote.rightSwipeView";
+        const toolSwipeRightActionKey = "laymux.remote.toolSwipeRightAction";
         const spatialExcludedPaneIdsKey = "laymux.remote.spatialExcludedPaneIds";
         const spatialExcludedWorkspaceIdsKey = "laymux.remote.spatialExcludedWorkspaceIds";
         // Secret resume capability issued by a successful claim. It lives in
@@ -555,6 +557,7 @@ import {
         let edgeSwipeDrawersEnabled = loadLocalToggle(edgeSwipeDrawersKey);
         let swipeCloseDrawersEnabled = loadLocalToggle(swipeCloseDrawersKey);
         let rightSwipeView = loadRightSwipeView();
+        let toolSwipeRightAction = loadToolSwipeRightAction();
         let composerHiddenAgentInputLines = loadComposerHiddenAgentInputLines();
         let composerAgentInputHideFrame = null;
         let composerAgentInputHideRequest = null;
@@ -1600,6 +1603,49 @@ import {
 
         function remoteOverlayOpen() {
           return !fileViewerOverlayElement.hidden || !githubOverlayElement.hidden || memoView.isOpen();
+        }
+
+        function currentRemoteTool() {
+          if (!githubOverlayElement.hidden) return githubTab;
+          if (!fileViewerOverlayElement.hidden) return "files";
+          if (memoView.isOpen()) return "memo";
+          return null;
+        }
+
+        function resolveRemoteToolSwipe(direction) {
+          if (direction === -1 && toolSwipeRightAction === "close") {
+            return swipeCloseDrawersEnabled ? "close" : null;
+          }
+          return nextRemoteTool(currentRemoteTool(), direction, {
+            github: Boolean(leaseId && activeTerminalId && headerIcons.headerGithub),
+            files: Boolean(leaseId && fileViewerToken && headerIcons.headerFiles),
+            memo: Boolean(leaseId && headerIcons.headerMemo),
+          });
+        }
+
+        function performRemoteToolSwipe(tool) {
+          if (tool === "close") {
+            if (!githubOverlayElement.hidden) closeRemoteGithubView();
+            else if (!fileViewerOverlayElement.hidden) closeFileViewer();
+            else if (memoView.isOpen()) memoView.close();
+          } else if (tool === "issues" || tool === "pulls") {
+            githubTab = tool;
+            githubOpenMenu = null;
+            githubConfirming = null;
+            if (githubOverlayElement.hidden) openRemoteGithubView();
+            else renderGithubView();
+          } else if (tool === "files") openCurrentFileExplorer();
+          else if (tool === "memo") void memoView.open();
+        }
+
+        function renderToolSwipePreferences() {
+          toolSwipeRightActionSelect.value = toolSwipeRightAction;
+          const right = toolSwipeRightAction === "previous" ? "Previous tool →" :
+            swipeCloseDrawersEnabled ? "Close →" : "Use × to close";
+          document.querySelectorAll(".remote-tool-swipe-hint").forEach((element) => {
+            element.hidden = !mobileLayout;
+            element.textContent = `← Next tool · ${right}`;
+          });
         }
 
         function githubStatusMessage(status) {
@@ -3446,6 +3492,11 @@ import {
           } catch (_) {
             return "files";
           }
+        }
+
+        function loadToolSwipeRightAction() {
+          try { return normalizeToolSwipeRightAction(localStorage.getItem(toolSwipeRightActionKey)); }
+          catch { return "close"; }
         }
 
         function saveRightSwipeView(value) {
@@ -7324,6 +7375,7 @@ import {
         const edgeSwipeDrawersToggle = $("edgeSwipeDrawersToggle");
         const swipeCloseDrawersToggle = $("swipeCloseDrawersToggle");
         const rightSwipeViewSelect = $("rightSwipeView");
+        const toolSwipeRightActionSelect = $("toolSwipeRightAction");
         // Fixed and client-owned: the strip is a viewer, not probe demand, so it
         // has no business following `usage.*.refreshSeconds`. Fast enough for
         // the activity and notification counts, which are the parts that move.
@@ -12912,6 +12964,7 @@ import {
         edgeSwipeDrawersToggle.checked = edgeSwipeDrawersEnabled;
         swipeCloseDrawersToggle.checked = swipeCloseDrawersEnabled;
         rightSwipeViewSelect.value = rightSwipeView;
+        renderToolSwipePreferences();
         applyRemoteDisplaySettings(remoteDisplaySettings);
         updateRemoteDisplaySettingsControls();
 
@@ -12943,6 +12996,7 @@ import {
             edgeSwipeDrawers: edgeSwipeDrawersEnabled,
             swipeCloseDrawers: swipeCloseDrawersEnabled,
             rightSwipeView,
+            toolSwipeRightAction,
             ...headerIcons,
           }),
           (candidate, patch) => {
@@ -12957,6 +13011,7 @@ import {
               edgeSwipeDrawers: edgeSwipeDrawersKey,
               swipeCloseDrawers: swipeCloseDrawersKey,
               rightSwipeView: rightSwipeViewKey,
+              toolSwipeRightAction: toolSwipeRightActionKey,
               ...headerIconKeys,
             };
             const writes = [];
@@ -13025,11 +13080,13 @@ import {
             edgeSwipeDrawersEnabled = candidate.edgeSwipeDrawers;
             swipeCloseDrawersEnabled = candidate.swipeCloseDrawers;
             rightSwipeView = candidate.rightSwipeView;
+            toolSwipeRightAction = candidate.toolSwipeRightAction;
             headerIcons = Object.fromEntries(Object.keys(headerIconFields).map(key => [key, candidate[key]]));
             renderHeaderIconPreferences();
             edgeSwipeDrawersToggle.checked = edgeSwipeDrawersEnabled;
             swipeCloseDrawersToggle.checked = swipeCloseDrawersEnabled;
             rightSwipeViewSelect.value = rightSwipeView;
+            renderToolSwipePreferences();
             if (skipsChanged) {
               spatialExcludedPaneIds = new Set(candidate.spatialExcludedPaneIds);
               spatialExcludedWorkspaceIds = new Set(candidate.spatialExcludedWorkspaceIds);
@@ -13052,6 +13109,13 @@ import {
         swipeCloseDrawersToggle.addEventListener("change", () => {
           swipeCloseDrawersEnabled = swipeCloseDrawersToggle.checked;
           saveLocalToggle(swipeCloseDrawersKey, swipeCloseDrawersEnabled);
+          renderToolSwipePreferences();
+        });
+        toolSwipeRightActionSelect.addEventListener("change", () => {
+          toolSwipeRightAction = normalizeToolSwipeRightAction(toolSwipeRightActionSelect.value);
+          try { localStorage.setItem(toolSwipeRightActionKey, toolSwipeRightAction); }
+          catch { /* Device storage can be unavailable; retain the live preference. */ }
+          renderToolSwipePreferences();
         });
         rightSwipeViewSelect.addEventListener("change", () => {
           saveRightSwipeView(rightSwipeViewSelect.value);
@@ -13225,7 +13289,12 @@ import {
         githubCloseButton.addEventListener("click", closeRemoteGithubView);
         fileViewerBackButton.addEventListener("click", returnToFileExplorer);
         $("memoHeader").addEventListener("click", () => { void memoView.open(); });
-        installHorizontalFlickDismiss($("memoToolbar"), 1, memoView.isOpen, memoView.close);
+        installRemoteToolSwipes({
+          getCurrent: currentRemoteTool,
+          enabled: () => mobileLayout && Boolean(leaseId) && remoteOverlayOpen(),
+          resolveAction: resolveRemoteToolSwipe,
+          perform: performRemoteToolSwipe,
+        });
         // Capture phase, and the event stops here: Escape otherwise reaches the
         // terminal and is written to the PTY as ESC while the user only meant to
         // dismiss the file they are reading.
@@ -13256,18 +13325,6 @@ import {
             closeRemoteGithubView();
           },
           true,
-        );
-        installHorizontalFlickDismiss(
-          fileViewerDirectoryElement,
-          1,
-          () => !fileViewerDirectoryElement.hidden,
-          closeFileViewer,
-        );
-        installHorizontalFlickDismiss(
-          githubListElement,
-          1,
-          () => !githubOverlayElement.hidden,
-          closeRemoteGithubView,
         );
         fileViewerZoomOutButton.addEventListener("click", () => adjustFileViewerZoom(-1));
         fileViewerZoomInButton.addEventListener("click", () => adjustFileViewerZoom(1));

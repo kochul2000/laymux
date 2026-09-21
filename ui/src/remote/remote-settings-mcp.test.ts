@@ -50,6 +50,7 @@ describe("Remote 설정 MCP 기기 적용", () => {
       "edgeSwipeDrawers",
       "swipeCloseDrawers",
       "rightSwipeView",
+      "toolSwipeRightAction",
       "headerFiles",
       "headerGithub",
       "headerMemo",
