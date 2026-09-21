@@ -55,6 +55,21 @@ try {
     409,
   );
   await page.goto(`${base}/remote/#token=${encodeURIComponent(token)}`);
+  assert.equal(
+    (
+      await fetch(`${base}/remote/v1/memos`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          leaseId: "bad",
+          key: "memo-test",
+          content: "denied",
+          expectedContent: "",
+        }),
+      })
+    ).status,
+    409,
+  );
   await page.locator("#connect").click();
   await expect(page.locator("#memoHeader")).toBeVisible({ timeout: 20000 });
   await page.locator("#memoHeader").click();

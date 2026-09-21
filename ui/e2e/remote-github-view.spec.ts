@@ -210,7 +210,14 @@ test.describe("Remote GitHub view", () => {
     await page.locator("#memoSave").click();
     await expect(page.locator("#memoStatus")).toContainText("Memo changed");
     await expect(page.locator("#memoText")).toHaveValue("보존할 초안");
-    await page.locator("#memoClose").click();
+    expect(
+      await page.evaluate(() =>
+        (
+          window as Window & { laymuxRemoteUi: { dismissTopLayer: () => boolean } }
+        ).laymuxRemoteUi.dismissTopLayer(),
+      ),
+    ).toBe(true);
+    await expect(page.locator("#memoOverlay")).toBeHidden();
     await page.locator("#memoHeader").click();
     await expect(page.locator("#memoText")).toHaveValue("보존할 초안");
     page.once("dialog", (dialog) => dialog.accept());

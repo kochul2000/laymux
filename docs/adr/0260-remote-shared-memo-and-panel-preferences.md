@@ -1,6 +1,6 @@
 # 0260. Remote 메모는 PC 저장소를 공유하고 패널 진입점은 기기별로 선택한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-21
 - Source: 사용자 요구(Remote 메모 공유 및 우상단 아이콘별 표시 설정), [ADR-0257](0257-remote-github-view.md), [architecture/api-contracts.md](../architecture/api-contracts.md)
 - Extends: ADR-0257의 우측 스와이프 대상과 기기 로컬 패널 설정
