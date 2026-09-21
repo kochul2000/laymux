@@ -2088,6 +2088,14 @@ import {
           fileViewerZoomElement.hidden = !fileViewerZoomable();
         }
 
+        function returnToFileExplorer() {
+          if (!fileViewerExplorerReturnPath) return false;
+          // Header and system Back share fresh listing + stale-render invalidation
+          // (ADR-0198, ADR-0259), including loading and failed file requests.
+          openFileExplorerOverlay({ path: fileViewerExplorerReturnPath });
+          return true;
+        }
+
         function closeFileViewer() {
           fileViewerRequestRevision += 1;
           fileViewerOverlayElement.hidden = true;
@@ -7246,7 +7254,7 @@ import {
             return true;
           }
           if (!fileViewerOverlayElement.hidden) {
-            closeFileViewer();
+            if (!returnToFileExplorer()) closeFileViewer();
             return true;
           }
           if (!githubOverlayElement.hidden) {
@@ -13164,13 +13172,7 @@ import {
         });
         githubRefreshButton.addEventListener("click", () => loadRemoteGithubSnapshot(true));
         githubCloseButton.addEventListener("click", closeRemoteGithubView);
-        fileViewerBackButton.addEventListener("click", () => {
-          // Back re-requests the listing rather than restoring a cache: the
-          // directory may have changed while the file was open (ADR-0198).
-          if (fileViewerExplorerReturnPath) {
-            openFileExplorerOverlay({ path: fileViewerExplorerReturnPath });
-          }
-        });
+        fileViewerBackButton.addEventListener("click", returnToFileExplorer);
         // Capture phase, and the event stops here: Escape otherwise reaches the
         // terminal and is written to the PTY as ESC while the user only meant to
         // dismiss the file they are reading.

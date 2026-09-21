@@ -634,6 +634,11 @@ test("Android back dismisses the top Remote layer before the disconnect guard", 
   await expect(page.locator("#fileViewerOverlay")).toBeVisible();
 
   expect(await dismissTopRemoteLayer(page)).toBe(true);
+  await expect(page.locator("#fileViewerDirectory")).toBeVisible();
+  await expect(page.locator("#fileViewerTitle")).toHaveText("C:\\work");
+  await expect(page.locator("#fileViewerText")).toBeHidden();
+
+  expect(await dismissTopRemoteLayer(page)).toBe(true);
   await expect(page.locator("#fileViewerOverlay")).toBeHidden();
   await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
 
