@@ -226,6 +226,13 @@
       "default": true,
       "applyMode": "live"
     },
+    "toolSwipeRightAction": {
+      "type": "string",
+      "enum": ["close", "previous"],
+      "description": "열린 도구창에서 오른쪽 스와이프 동작: close는 기존 닫기(닫기 토글 적용), previous는 표시된 도구의 역순 순환. 왼쪽은 항상 다음 도구입니다.",
+      "default": "close",
+      "applyMode": "live"
+    },
     "rightSwipeView": {
       "type": "string",
       "enum": ["files", "github", "memo"],
@@ -237,19 +244,19 @@
       "type": "boolean",
       "default": true,
       "applyMode": "live",
-      "description": "우상단 Files 아이콘 표시. 숨겨도 스와이프로 열 수 있습니다."
+      "description": "우상단 Files 아이콘 표시 및 도구 순환 포함 여부. 숨겨도 선택한 가장자리 바로가기로 열 수 있습니다."
     },
     "headerGithub": {
       "type": "boolean",
       "default": true,
       "applyMode": "live",
-      "description": "우상단 GitHub 아이콘 표시. 숨겨도 스와이프로 열 수 있습니다."
+      "description": "우상단 GitHub 아이콘 표시 및 Issues/PRs 도구 순환 포함 여부. 숨겨도 선택한 가장자리 바로가기로 열 수 있습니다."
     },
     "headerMemo": {
       "type": "boolean",
       "default": true,
       "applyMode": "live",
-      "description": "우상단 공유 메모 아이콘 표시. 숨겨도 스와이프로 열 수 있습니다."
+      "description": "우상단 공유 메모 아이콘 표시 및 도구 순환 포함 여부. 숨겨도 선택한 가장자리 바로가기로 열 수 있습니다."
     },
     "headerSpatialExclusion": {
       "type": "boolean",

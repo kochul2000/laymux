@@ -2877,6 +2877,20 @@
         box-shadow: 0 12px 36px var(--backdrop-light);
         overflow: hidden;
       }
+      [data-remote-tool-swipe] {
+        touch-action: pan-y;
+      }
+      .remote-tool-swipe-hint {
+        flex: 0 0 auto;
+        padding: 5px 12px;
+        color: var(--muted);
+        font-size: 11px;
+        text-align: center;
+        user-select: none;
+      }
+      .remote-tool-swipe-hint[hidden] {
+        display: none;
+      }
       .github-header {
         display: flex;
         flex: 0 0 auto;
