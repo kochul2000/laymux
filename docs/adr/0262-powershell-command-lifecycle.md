@@ -1,6 +1,6 @@
 # 0262. PowerShell 작업 경계는 수락된 줄 입력과 프롬프트가 소유한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-21
 - Source: [#1058](https://github.com/kochul2000/laymux/issues/1058), 사용자 dev 재현·TDD 수정 PR 요청, [data-flow §9](../architecture/data-flow.md#작업-상태와-출력-활동-adr-0250)
 - Extends: [ADR-0250](0250-terminal-task-state-and-notification-transitions.md)의 셸 관측 경로. 작업·출력 분리와 공통 정책은 유지한다.
@@ -18,11 +18,11 @@ PowerShell의 기존 통합은 프롬프트마다 OSC 133 D만 보낸다. 두 �
 **PowerShell은 기존 PSConsoleHostReadLine이 실행할 입력을 반환한 뒤 C를 보내고, 그 실행에 대응하는 다음 프롬프트에서만 D를 보낸다.**
 
 - Rust가 내장 통합 스크립트를 주입하고 기존 Rust OSC 단일 패스가 C/D/A를 구조화 이벤트로 바꾼다. Desktop·Remote·알림·절전·clear는 기존 공통 task 정책을 그대로 쓴다.
-- 이미 로드된 PSReadLine의 기존 `PSConsoleHostReadLine` 함수를 감싸고 반환 문자열을 그대로 호스트에 돌려준다. PSReadLine 설치·강제 로드·키 바인딩 교체는 하지 않는다. PowerShell 5.1과 pwsh에 같은 스크립트를 쓴다.
+- `LanguageMode=FullLanguage`이고 PSReadLine이 로드된 경우에만 기존 `PSConsoleHostReadLine` 함수를 감싸고 반환 문자열을 그대로 호스트에 돌려준다. 제한 언어에서 차단되는 Parser/Host.UI 호출 때문에 명령 입력 자체를 잃지 않도록 reader를 보존한다. PSReadLine 설치·강제 로드·키 바인딩 교체는 하지 않는다. PowerShell 5.1과 pwsh에 같은 스크립트를 쓴다.
 - 공백·주석만 있는 입력과 취소는 새 작업이 아니다. 멀티라인·붙여넣기는 편집기가 완성된 실행 단위를 반환한 시점에 한 번 시작한다. 명령 본문 OSC E는 이번 범위에 추가하지 않는다.
 - 처음의 통합 프롬프트는 A로 작업 없음을 알린다. D는 C 이후에만 한 번 보내므로 빈 Enter·주석·입력 중 Ctrl+C·프롬프트 재출력은 이전 결과와 알림 이력을 바꾸지 않는다.
 - 종료는 프롬프트 진입의 `$?`와 새 PowerShell history 항목의 실행 상태로 판정한다. 성공은 D;0, 실패는 D;1이며 이는 PowerShell 파이프라인의 성공 여부다. 과거 native `$LASTEXITCODE`를 현재 명령의 결과로 재사용하지 않으며 변수 자체는 보존한다. 실행 중단은 D에 코드를 붙이지 않아 성공·실패를 합성하지 않는다.
-- PSReadLine이 없으면 C/D/A를 보내지 않고 OSC 7 CWD만 유지한다. 새 pane은 CMD처럼 lifecycle 미확인과 출력 활동 fallback을 사용한다. 출력 중에는 기존 표시·자동 절전 fallback이 적용되고 clear는 기존 미확인 셸 best-effort 예외를 따른다. 무출력 실행의 clear 보호를 보장하지 않는다.
+- PSReadLine이 없거나 `ConstrainedLanguage`이면 C/D/A를 보내지 않고 OSC 7 CWD만 유지한다. 새 pane은 CMD처럼 lifecycle 미확인과 출력 활동 fallback을 사용한다. 출력 중에는 기존 표시·자동 절전 fallback이 적용되고 clear는 기존 미확인 셸 best-effort 예외를 따른다. 무출력 실행의 clear 보호를 보장하지 않는다.
 - 통합 설치 이후 사용자가 reader나 prompt를 재정의/제거하면 lifecycle 지원을 보장하지 않는다. 새 프로세스에서 통합을 다시 설치한다. CMD·Bash·Codex·Claude 계약은 변경하지 않는다.
 
 ## Alternatives Considered

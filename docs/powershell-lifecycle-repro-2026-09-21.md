@@ -54,3 +54,11 @@ cargo clippy -p laymux --test powershell_lifecycle -- -D warnings
 ## 검증 한계
 
 PSReadLine 없는 PowerShell은 별도 실제 PowerShell 프로세스에서 OSC 7만 나오는 것을 검사했다. 이 경로와 CMD는 조용한 작업을 추론하지 않으며 clear의 기존 best-effort 예외가 남는다. 실행 후 reader/prompt를 사용자가 재정의하는 경우는 지원 범위 밖이다. pwsh/Linux PowerShell 실기는 수행하지 않았다. Claude/Codex 확인된 idle은 관련 UI 회귀 테스트로 검증했으며 이번 실기에서 실제 에이전트를 새로 실행하지 않았다. OS 클립보드 붙여넣기 대신 실제 PTY에 여러 줄을 한 번에 전송했다.
+
+## 제한 언어 리뷰 반영과 v1.0.11
+
+추가 회귀 테스트는 PSReadLine을 로드한 별도 PowerShell 프로세스에서 `LanguageMode=ConstrainedLanguage`로 전환한 뒤 통합 스크립트를 파싱한다. 대화형 입력 부분만 고정 문자열을 반환하는 원래 reader로 대체하고 나머지는 실제 PowerShell 엔진에서 실행한다. `$ErrorActionPreference='Stop'`에서 수정 전 `CannotCreateTypeConstrainedLanguage`로 입력 반환이 중단되는 실패를 확인했다.
+
+설치 조건에 `FullLanguage` 가드를 추가한 뒤 원래 reader 객체·반환 명령·실제 명령 실행과 OSC 7 두 번을 확인했다. stderr와 OSC 133은 없었다. 기존 실제 ConPTY 시나리오를 포함한 4개 테스트가 모두 통과했다. 이는 언어 모드의 동작 검증이며 실제 AppLocker/WDAC 정책 배포 시험은 아니다.
+
+사용자의 수정·머지·릴리즈 요청에 따라 ADR-0262를 Accepted로 전환하고 Cargo·Tauri·lockfile 버전을 1.0.11로 맞췄다. 릴리즈 버전·채널 정책은 기존 ADR-0190/0240을 그대로 적용하며 새 설계 결정은 추가하지 않는다.

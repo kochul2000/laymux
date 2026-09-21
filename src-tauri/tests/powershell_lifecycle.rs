@@ -200,3 +200,54 @@ fn powershell_without_psreadline_only_reports_cwd() {
         "종료만 합성하면 안 됨: {events:?}"
     );
 }
+
+#[test]
+fn powershell_constrained_language_preserves_reader_and_cwd_without_lifecycle() {
+    let (_, args) = TerminalSession::command_line_to_command("powershell.exe");
+    // IEX로 모드 변경 후 주입 코드를 파싱해야 실제 제한 언어 스크립트가 된다.
+    let integration = args.last().expect("주입 스크립트").replace('\'', "''");
+    let script = format!(
+        r#"
+Import-Module PSReadLine -ErrorAction Stop
+$integration = '{integration}'
+$ExecutionContext.SessionState.LanguageMode = 'ConstrainedLanguage'
+Invoke-Expression 'function global:PSConsoleHostReadLine {{ return ''Write-Output COMMAND_RAN'' }}'
+$originalReader = $function:PSConsoleHostReadLine
+$ErrorActionPreference = 'Stop'
+Invoke-Expression $integration
+$command = PSConsoleHostReadLine
+if ($command -ne 'Write-Output COMMAND_RAN') {{ throw '입력이 변형됨' }}
+if ($function:PSConsoleHostReadLine -ne $originalReader) {{ throw '제한 언어 reader를 교체함' }}
+Invoke-Expression $command
+prompt
+prompt
+"#
+    );
+    let output = laymux_lib::process::headless_command("powershell.exe")
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &script,
+        ])
+        .output()
+        .expect("제한 언어 PowerShell");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("COMMAND_RAN"));
+    let events: Vec<_> = iter_osc_events(&output.stdout).collect();
+    assert_eq!(events.iter().filter(|e| e.code == 7).count(), 2);
+    assert!(
+        !events.iter().any(|e| e.code == 133),
+        "제한 언어에서 lifecycle을 합성하면 안 됨: {events:?}"
+    );
+}

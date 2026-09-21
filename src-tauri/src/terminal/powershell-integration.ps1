@@ -6,7 +6,9 @@ $global:__lmx_running = $false
 $global:__lmx_reader = $false
 
 # 편집기의 키/검증/이력 설정을 바꾸지 않고 호스트에 반환되는 실행 단위를 관찰한다.
-if ((Get-Module PSReadLine) -and (Test-Path Function:PSConsoleHostReadLine)) {
+# 제한 언어에서는 Parser와 Host.UI 메서드가 차단되므로 원래 reader를 보존한다.
+if (($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') -and
+    (Get-Module PSReadLine) -and (Test-Path Function:PSConsoleHostReadLine)) {
     $global:__lmx_reader = $true
     $global:__lmx_readline = $function:PSConsoleHostReadLine
     function global:PSConsoleHostReadLine {

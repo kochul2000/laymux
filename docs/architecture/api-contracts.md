@@ -2133,7 +2133,7 @@ if (matchesKeybinding(e, "issueReporter.submit")) { handleSubmit(); }
 
 **이벤트 계약**: 기존 `command-status`의 command/exitCode 메타데이터와 별도로 OSC 133 lifecycle 발행에는 `phase: start | end | prompt`와 `generation`이 있다. D 결과를 읽지 못하면 exitCode를 생략한다. title 이벤트에는 `generation`과 `appSession`(기존 process detection epoch)이 추가되며, 이전 generation/낡은 activity sequence의 작업 관측은 수락하지 않는다. 출력 활동 이벤트는 frame/volume만 발행하고 타이틀로 출력 활동 타이머를 갱신하지 않는다.
 
-PowerShell의 PSReadLine 통합은 [ADR-0262](../adr/0262-powershell-command-lifecycle.md)에 따라 이 기존 C/D/A 경로를 사용한다. `exitCode`는 PowerShell 파이프라인의 성공 여부(0/1)이며, 중단·결과 미관측은 생략한다. PSReadLine 없는 PowerShell은 OSC 7만 제공하고 작업 lifecycle은 미확인으로 남긴다. 명령 본문 E나 새 endpoint/필드는 추가하지 않는다.
+PowerShell의 PSReadLine 통합은 [ADR-0262](../adr/0262-powershell-command-lifecycle.md)에 따라 이 기존 C/D/A 경로를 사용한다. `exitCode`는 PowerShell 파이프라인의 성공 여부(0/1)이며, 중단·결과 미관측은 생략한다. PSReadLine이 없거나 제한 언어 모드인 PowerShell은 OSC 7만 제공하고 작업 lifecycle은 미확인으로 남긴다. reader 래핑은 `FullLanguage`에서만 설치한다. 명령 본문 E나 새 endpoint/필드는 추가하지 않는다.
 
 현재 generation은 output attach가 확정한다. generation이 미확정인 instance의 lifecycle/title 이벤트는 처리하지 않고 보류하며, attach 후 일치하는 generation만 수신 순서대로 적용한다. 이벤트 자체로 현재 generation을 시딩하지 않는다. instance 제거 또는 구독 종료 시 보류 이벤트를 폐기한다.
 

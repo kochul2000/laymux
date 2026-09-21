@@ -1022,7 +1022,7 @@ WSL Claude 복원은 live `✳ <대화 제목>`이 프로세스 식별보다 먼
 
 PowerShell 통합([ADR-0262](../adr/0262-powershell-command-lifecycle.md), [#1058](https://github.com/kochul2000/laymux/issues/1058))은 `terminal/powershell-integration.ps1`을 Rust에서 내장한다. 로드된 PSReadLine의 `PSConsoleHostReadLine` 반환값에 실행문이 있을 때만 OSC 133 C를 보내고 원래 문자열을 호스트에 돌려준다. 최초 프롬프트는 A이며, C에 대응하는 다음 프롬프트만 D를 보낸다. 빈 Enter·주석·입력 취소·미완성 멀티라인은 새 작업·종료 알림을 만들지 않는다. 실행 성공/실패는 프롬프트 진입의 `$?`와 새 history 항목으로 D;0/D;1을 보내고, 중단/종료 결과 미관측은 코드 없는 D로 보낸다. `$LASTEXITCODE` 자체는 변경하지 않으며 과거 native 종료 코드를 다음 cmdlet의 결과로 사용하지 않는다. 기존 셸 프로세스는 재시작해야 새 통합을 받는다.
 
-PSReadLine이 없으면 PowerShell은 OSC 7만 보내고 lifecycle을 합성하지 않는다. 이 경우와 CMD는 작업 미확인 상태에서 출력 활동만 표시하며 무출력 작업의 진행·완료를 판정하지 않는다. 출력 중 자동 절전 fallback과 clear의 기존 미확인 셸 best-effort 예외를 사용하므로 조용한 실행의 clear 보호를 보장하지 않는다. 사용자에 의한 통합 reader/prompt 재정의·제거도 지원 범위 밖이다. [2026-09-18 실측](../codex-task-status-repro-2026-09-17.md)은 D만 보내던 수정 전 동작의 기록이다.
+reader 래핑은 `LanguageMode=FullLanguage`에서만 설치한다. PSReadLine이 없거나 `ConstrainedLanguage`이면 원래 reader를 보존하고 PowerShell은 OSC 7만 보내며 lifecycle을 합성하지 않는다. 이 경우와 CMD는 작업 미확인 상태에서 출력 활동만 표시하며 무출력 작업의 진행·완료를 판정하지 않는다. 출력 중 자동 절전 fallback과 clear의 기존 미확인 셸 best-effort 예외를 사용하므로 조용한 실행의 clear 보호를 보장하지 않는다. 사용자에 의한 통합 reader/prompt 재정의·제거도 지원 범위 밖이다. [2026-09-18 실측](../codex-task-status-repro-2026-09-17.md)은 D만 보내던 수정 전 동작의 기록이다.
 
 `TerminalView`의 기존 승인·응답 감지는 source·taskId·sequence·해소 정보를 가진 입력 관측을 전달한다. 표시 메시지에 내부 마커를 저장하지 않는다. 같은 작업의 대기는 진행 관측보다 우선하고, 해소는 다시 진행으로, 종료는 대기를 닫는다. 닫힌 작업이나 다른 작업·세션에 속한 늦은 입력 관측은 거부한다. PTY generation·앱 변경·앱 감지 epoch 변경은 이력을 초기화한다.
 
