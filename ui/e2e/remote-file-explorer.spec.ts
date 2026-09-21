@@ -725,7 +725,7 @@ test("swipe opening and closing are independent device-local settings", async ({
 
   await page.locator("#navToggle").click();
   await page.locator("#drawerSettingsButton").click();
-  await page.locator("#settingsTabDisplay").click();
+  await page.locator("#settingsTabPanels").click();
   const openToggle = page.getByRole("checkbox", { name: "Swipe to open", exact: false });
   const closeToggle = page.getByRole("checkbox", { name: "Swipe to close", exact: false });
   await expect(openToggle).toBeChecked();
@@ -745,7 +745,7 @@ test("swipe opening and closing are independent device-local settings", async ({
   await expect(page.locator("#exit")).toBeEnabled();
   await page.locator("#navToggle").click();
   await page.locator("#drawerSettingsButton").click();
-  await page.locator("#settingsTabDisplay").click();
+  await page.locator("#settingsTabPanels").click();
   await expect(openToggle).not.toBeChecked();
   await expect(closeToggle).toBeChecked();
   await page.locator("#navToggle").click();
@@ -769,7 +769,7 @@ test("the device-local setting disables both terminal edge flicks", async ({ con
 
   await page.locator("#navToggle").click();
   await page.locator("#drawerSettingsButton").click();
-  await page.locator("#settingsTabDisplay").click();
+  await page.locator("#settingsTabPanels").click();
   const toggle = page.locator("#edgeSwipeDrawersToggle");
   await expect(toggle).toBeChecked();
   await toggle.uncheck();

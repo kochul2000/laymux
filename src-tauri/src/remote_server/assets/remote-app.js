@@ -1,4 +1,5 @@
 import { createRemoteSettingsBridge } from "../../../../ui/src/remote/remote-settings-mcp.js";
+import { createRemoteMemo } from "../../../../ui/src/remote/remote-memo.js";
 import { createComposerEditor } from "../../../../ui/src/remote/composer-editor.js";
 import { readPathLinkSelection, readPathLinkLines, mapPathLinkParts, pathLinkPartsCurrent, PATH_LINK_CONTEXT_ROWS } from "../../../../ui/src/lib/path-link-lines.ts";
 import {
@@ -313,6 +314,18 @@ import {
         const REMOTE_LONG_TEXT_ATTACHMENT_THRESHOLD_BYTES = 5 * 1024;
         const attachmentTextEncoder = new TextEncoder();
         let leaseId = null;
+        const headerIconFields = {
+          headerFiles: "Files", headerGithub: "GitHub", headerMemo: "Memo",
+          headerSpatialExclusion: "Pane navigation exclusion", headerDesktopMode: "PC mode",
+        };
+        const headerIconKeys = Object.fromEntries(Object.keys(headerIconFields).map(key => [key, `laymux.remote.${key}`]));
+        let headerIcons = Object.fromEntries(Object.entries(headerIconKeys).map(([key, storageKey]) => [key, loadLocalToggle(storageKey)]));
+        const memoView = createRemoteMemo({
+          api: remoteFetch, getLease: () => leaseId, getNavigation: () => navigationState,
+          copy: writeClipboardText,
+          beforeOpen: () => { closeFileViewer(); closeRemoteGithubView(); setNavigationOpen(false); },
+          afterClose: () => focusCurrentInputSurface(),
+        });
         let remoteDisplaySettings = loadDeviceDisplaySettings();
         let resumeToken = null;
         let fileViewerToken = null;
@@ -691,7 +704,7 @@ import {
         // Android E2E exits Remote control through Release. Keep the PC-mode
         // switch only for the desktop app's embedded mobile view, where it
         // changes the surrounding desktop layout rather than releasing a lease.
-        desktopModeHeaderButton.hidden = !localAppMode;
+        desktopModeHeaderButton.hidden = !localAppMode || !headerIcons.headerDesktopMode;
         desktopModeDrawerButton.hidden = !localAppMode;
         // Tell the PC app's overlay the embed actually came up. A refused frame
         // still fires the iframe's `load`, so this greeting is the host's only
@@ -1586,7 +1599,7 @@ import {
         });
 
         function remoteOverlayOpen() {
-          return !fileViewerOverlayElement.hidden || !githubOverlayElement.hidden;
+          return !fileViewerOverlayElement.hidden || !githubOverlayElement.hidden || memoView.isOpen();
         }
 
         function githubStatusMessage(status) {
@@ -1847,6 +1860,7 @@ import {
 
         function openRemoteGithubView() {
           if (!leaseId || !activeTerminalId) return;
+          if (memoView.isOpen()) memoView.close();
           if (!fileViewerOverlayElement.hidden) closeFileViewer();
           setNavigationOpen(false);
           githubSnapshot = null;
@@ -1873,7 +1887,8 @@ import {
         }
 
         function renderGithubEntryState() {
-          githubHeaderButton.hidden = !(leaseId && activeTerminalId);
+          githubHeaderButton.hidden = !(leaseId && activeTerminalId && headerIcons.headerGithub);
+          $("memoHeader").hidden = !(leaseId && headerIcons.headerMemo);
         }
 
         function renderFileViewerState(message = null, isError = false) {
@@ -1881,7 +1896,7 @@ import {
           // The header folder button is an entry point, not an action with a
           // recoverable disabled state: without a lease it means nothing, so it
           // is hidden rather than disabled (ADR-0192, ADR-0198).
-          fileExplorerHeaderButton.hidden = !connected;
+          fileExplorerHeaderButton.hidden = !connected || !headerIcons.headerFiles;
           fileViewerSection.classList.toggle("locked", !connected);
           fileViewerPathInput.disabled = !connected;
           pullHostFileViewerPathButton.disabled = !connected || fileViewerStatusInFlight;
@@ -2120,6 +2135,7 @@ import {
 
         function openFileViewerOverlay(path, explorerReturnPath) {
           if (!leaseId || !fileViewerToken || !path) return;
+          if (memoView.isOpen()) memoView.close();
           if (!githubOverlayElement.hidden) closeRemoteGithubView();
           const openedFromExplorer = explorerReturnPath !== undefined;
           const requestRevision = ++fileViewerRequestRevision;
@@ -2192,6 +2208,7 @@ import {
 
         function openFileExplorerOverlay(request) {
           if (!leaseId || !fileViewerToken || !request) return;
+          if (memoView.isOpen()) memoView.close();
           if (!githubOverlayElement.hidden) closeRemoteGithubView();
           const explorerFallbackPath = fileViewerDirectoryPath || fileViewerExplorerReturnPath;
           const requestRevision = ++fileViewerRequestRevision;
@@ -3424,14 +3441,15 @@ import {
 
         function loadRightSwipeView() {
           try {
-            return localStorage.getItem(rightSwipeViewKey) === "github" ? "github" : "files";
+            const value = localStorage.getItem(rightSwipeViewKey);
+            return ["github", "memo"].includes(value) ? value : "files";
           } catch (_) {
             return "files";
           }
         }
 
         function saveRightSwipeView(value) {
-          rightSwipeView = value === "github" ? "github" : "files";
+          rightSwipeView = ["github", "memo"].includes(value) ? value : "files";
           try {
             localStorage.setItem(rightSwipeViewKey, rightSwipeView);
           } catch (_) {}
@@ -4281,6 +4299,7 @@ import {
           }
           renderFileViewerState();
           renderGithubEntryState();
+          if (!connected && memoView.isOpen()) memoView.close();
         }
 
         function setConnectionHint(message, attention = false) {
@@ -5968,7 +5987,7 @@ import {
                 ? point.clientX <= rect.left + EDGE_SWIPE_HIT_PX
                   ? "left"
                   : leaseId &&
-                      ((rightSwipeView === "github" && activeTerminalId) ||
+                      ((rightSwipeView === "github" && activeTerminalId) || rightSwipeView === "memo" ||
                         (rightSwipeView === "files" && fileViewerToken)) &&
                       point.clientX >= rect.right - EDGE_SWIPE_HIT_PX
                     ? "right"
@@ -6025,6 +6044,7 @@ import {
                 touchGesture.mode = "edgeOpened";
                 if (edge === "left") setNavigationOpen(true);
                 else if (rightSwipeView === "github") openRemoteGithubView();
+                else if (rightSwipeView === "memo") memoView.open();
                 else openCurrentFileExplorer();
               } else if (
                 openingDistance < -INTERNAL_TOUCH_SCROLL_SLOP_PX ||
@@ -6994,7 +7014,7 @@ import {
         function updateHeaderPaneIdentity() {
           const pane = activeWorkspacePane();
           copyPaneIdButton.hidden = !activePaneIdentifier();
-          spatialExclusionButton.hidden = !pane;
+          spatialExclusionButton.hidden = !pane || !headerIcons.headerSpatialExclusion;
           const excluded = Boolean(pane && spatialExcludedPaneIds.has(pane.id));
           spatialExclusionButton.setAttribute("aria-pressed", String(excluded));
           const label = excluded
@@ -7247,6 +7267,7 @@ import {
         // (ADR-0149, ADR-0219). Keep the hierarchy in this PC-served document
         // and expose only a boolean consumed/not-consumed boundary to native.
         function dismissTopRemoteLayer() {
+          if (memoView.isOpen()) { memoView.close(); return true; }
           // Both modals have z-index 60; OAuth follows the viewer in DOM order
           // and is therefore the topmost layer if both are present.
           if (!oauthRelayScrim.hidden) {
@@ -12379,7 +12400,7 @@ import {
         // Settings is paginated: only the selected panel is in the layout, so a
         // long section no longer buries the others under a scroll. The choice is
         // surface-local like the rest of the Remote display preferences.
-        const SETTINGS_PANELS = ["inputBar", "floating", "composer", "display", "app"];
+        const SETTINGS_PANELS = ["inputBar", "floating", "composer", "display", "panels", "app"];
 
         function loadSettingsPanel() {
           try {
@@ -12861,6 +12882,32 @@ import {
         // The markup ships checked; the stored choice is what actually holds
         // (ADR-0132). Applied before the first connect so a device that turned
         // the row off never flashes it.
+        function renderHeaderIconPreferences() {
+          for (const key of Object.keys(headerIconFields)) $(key).checked = headerIcons[key];
+          renderFileViewerState();
+          renderGithubEntryState();
+          updateHeaderPaneIdentity();
+          desktopModeHeaderButton.hidden = !localAppMode || !headerIcons.headerDesktopMode;
+        }
+        for (const [key, label] of Object.entries(headerIconFields)) {
+          const row = document.createElement("label");
+          row.className = "nav-toggle-row";
+          row.htmlFor = key;
+          const input = document.createElement("input");
+          input.type = "checkbox";
+          input.id = key;
+          input.addEventListener("change", () => {
+            headerIcons[key] = input.checked;
+            saveLocalToggle(headerIconKeys[key], input.checked);
+            renderHeaderIconPreferences();
+          });
+          const name = document.createElement("span");
+          name.className = "nav-toggle-name";
+          name.textContent = label;
+          row.append(input, name);
+          $("headerIconSettings").appendChild(row);
+        }
+        renderHeaderIconPreferences();
         widgetStripToggle.checked = widgetStripAllowed;
         edgeSwipeDrawersToggle.checked = edgeSwipeDrawersEnabled;
         swipeCloseDrawersToggle.checked = swipeCloseDrawersEnabled;
@@ -12896,6 +12943,7 @@ import {
             edgeSwipeDrawers: edgeSwipeDrawersEnabled,
             swipeCloseDrawers: swipeCloseDrawersEnabled,
             rightSwipeView,
+            ...headerIcons,
           }),
           (candidate, patch) => {
             const display = Object.fromEntries(Object.keys(DEFAULT_REMOTE_DISPLAY_SETTINGS).map(key => [key, candidate[key]]));
@@ -12909,6 +12957,7 @@ import {
               edgeSwipeDrawers: edgeSwipeDrawersKey,
               swipeCloseDrawers: swipeCloseDrawersKey,
               rightSwipeView: rightSwipeViewKey,
+              ...headerIconKeys,
             };
             const writes = [];
             const floatingChanged = Object.keys(patch).some(key => ["floatingEnabled", "floatingButtons", "inputBarZones", "inputBarUserKeys"].includes(key) || Object.hasOwn(floatingSettingFields, key));
@@ -12976,6 +13025,8 @@ import {
             edgeSwipeDrawersEnabled = candidate.edgeSwipeDrawers;
             swipeCloseDrawersEnabled = candidate.swipeCloseDrawers;
             rightSwipeView = candidate.rightSwipeView;
+            headerIcons = Object.fromEntries(Object.keys(headerIconFields).map(key => [key, candidate[key]]));
+            renderHeaderIconPreferences();
             edgeSwipeDrawersToggle.checked = edgeSwipeDrawersEnabled;
             swipeCloseDrawersToggle.checked = swipeCloseDrawersEnabled;
             rightSwipeViewSelect.value = rightSwipeView;
@@ -13173,6 +13224,8 @@ import {
         githubRefreshButton.addEventListener("click", () => loadRemoteGithubSnapshot(true));
         githubCloseButton.addEventListener("click", closeRemoteGithubView);
         fileViewerBackButton.addEventListener("click", returnToFileExplorer);
+        $("memoHeader").addEventListener("click", () => { void memoView.open(); });
+        installHorizontalFlickDismiss($("memoToolbar"), 1, memoView.isOpen, memoView.close);
         // Capture phase, and the event stops here: Escape otherwise reaches the
         // terminal and is written to the PTY as ESC while the user only meant to
         // dismiss the file they are reading.

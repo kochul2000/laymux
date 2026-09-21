@@ -13,6 +13,29 @@ vi.mock("@/lib/tauri-api", () => ({
 }));
 
 describe("MemoView", () => {
+  it("refreshes clean PC content but preserves a conflicting local draft", async () => {
+    vi.mocked(loadMemo).mockResolvedValue("PC original");
+    render(<MemoView memoKey="memo-shared" />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    vi.mocked(loadMemo).mockResolvedValue("Remote update");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(screen.getByTestId("memo-textarea")).toHaveValue("Remote update");
+    vi.mocked(saveMemo).mockRejectedValue(new Error("Memo changed on another device"));
+    fireEvent.change(screen.getByTestId("memo-textarea"), { target: { value: "PC draft" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400);
+    });
+    expect(saveMemo).toHaveBeenCalledWith("memo-shared", "PC draft", "Remote update");
+    expect(screen.getByRole("alert")).toHaveTextContent("Memo changed");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(screen.getByTestId("memo-textarea")).toHaveValue("PC draft");
+  });
   beforeEach(() => {
     vi.useFakeTimers();
     vi.mocked(loadMemo).mockClear().mockResolvedValue("");
@@ -34,7 +57,7 @@ describe("MemoView", () => {
     render(<MemoView memoKey="pane-42" />);
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await vi.runOnlyPendingTimersAsync();
     });
 
     const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
@@ -45,7 +68,7 @@ describe("MemoView", () => {
   it("defaults to empty string when key has no content", async () => {
     render(<MemoView memoKey="pane-1" />);
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await vi.runOnlyPendingTimersAsync();
     });
     const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
     expect(textarea.value).toBe("");
@@ -54,7 +77,7 @@ describe("MemoView", () => {
   it("saves content to memo.json with key after debounce", async () => {
     render(<MemoView memoKey="pane-7" />);
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await vi.runOnlyPendingTimersAsync();
     });
 
     const textarea = screen.getByTestId("memo-textarea");
@@ -67,7 +90,7 @@ describe("MemoView", () => {
     });
 
     expect(saveMemo).toHaveBeenCalledTimes(1);
-    expect(saveMemo).toHaveBeenCalledWith("pane-7", "abc");
+    expect(saveMemo).toHaveBeenCalledWith("pane-7", "abc", "");
   });
 
   it("textarea fills full container", () => {
@@ -79,7 +102,7 @@ describe("MemoView", () => {
   it("flushes pending content to file on unmount", async () => {
     const { unmount } = render(<MemoView memoKey="pane-3" />);
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await vi.runOnlyPendingTimersAsync();
     });
 
     const textarea = screen.getByTestId("memo-textarea");
@@ -87,7 +110,7 @@ describe("MemoView", () => {
 
     unmount();
 
-    expect(saveMemo).toHaveBeenCalledWith("pane-3", "pending");
+    expect(saveMemo).toHaveBeenCalledWith("pane-3", "pending", "");
   });
 
   it("applies memo padding from settings", () => {
@@ -118,7 +141,7 @@ describe("MemoView", () => {
     vi.mocked(loadMemo).mockRejectedValue(new Error("disk error"));
     render(<MemoView memoKey="pane-1" />);
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await vi.runOnlyPendingTimersAsync();
     });
 
     const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
@@ -137,7 +160,7 @@ describe("MemoView", () => {
       vi.mocked(loadMemo).mockResolvedValue("abc\n\n\ndef");
       render(<MemoView memoKey="pane-para" />);
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.runOnlyPendingTimersAsync();
       });
 
       // The copy-button overlay must be gone entirely.
@@ -159,7 +182,7 @@ describe("MemoView", () => {
       vi.mocked(loadMemo).mockResolvedValue("abc\n\n\ndef");
       render(<MemoView memoKey="pane-no-copy" />);
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.runOnlyPendingTimersAsync();
       });
       vi.mocked(clipboardWriteText).mockClear();
 
@@ -184,7 +207,7 @@ describe("MemoView", () => {
       vi.mocked(loadMemo).mockResolvedValue("abc\n\n\ndef\nggg");
       render(<MemoView memoKey="pane-tpl" />);
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.runOnlyPendingTimersAsync();
       });
 
       const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
@@ -211,7 +234,7 @@ describe("MemoView", () => {
       vi.mocked(loadMemo).mockResolvedValue("single paragraph only");
       render(<MemoView memoKey="pane-tpl-single" />);
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.runOnlyPendingTimersAsync();
       });
 
       const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
@@ -237,7 +260,7 @@ describe("MemoView", () => {
       vi.mocked(loadMemo).mockResolvedValue("abc\n\n\ndef\nggg");
       render(<MemoView memoKey="pane-dbl-no" />);
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.runOnlyPendingTimersAsync();
       });
 
       const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
@@ -260,7 +283,7 @@ describe("MemoView", () => {
       vi.mocked(loadMemo).mockResolvedValue("abc\n\n\ndef");
       render(<MemoView memoKey="pane-tpl-off" />);
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.runOnlyPendingTimersAsync();
       });
 
       vi.mocked(clipboardWriteText).mockClear();
@@ -285,7 +308,7 @@ describe("MemoView", () => {
       vi.mocked(loadMemo).mockResolvedValue(content);
       render(<MemoView memoKey={memoKey} />);
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.runOnlyPendingTimersAsync();
       });
       vi.mocked(clipboardWriteText).mockClear();
       const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
@@ -335,7 +358,7 @@ describe("MemoView", () => {
       vi.mocked(loadMemo).mockResolvedValue("first paragraph\n\nsecond");
       render(<MemoView memoKey="pane-any-sel" />);
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.runOnlyPendingTimersAsync();
       });
       vi.mocked(clipboardWriteText).mockClear();
       const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
@@ -355,7 +378,7 @@ describe("MemoView", () => {
       vi.mocked(loadMemo).mockResolvedValue("hello world");
       render(<MemoView memoKey="pane-cos-off" />);
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.runOnlyPendingTimersAsync();
       });
       vi.mocked(clipboardWriteText).mockClear();
       const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
@@ -379,7 +402,7 @@ describe("MemoView", () => {
         </div>,
       );
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.runOnlyPendingTimersAsync();
       });
       vi.mocked(clipboardWriteText).mockClear();
 
@@ -449,7 +472,7 @@ describe("MemoView", () => {
       vi.mocked(loadMemo).mockResolvedValue(content);
       render(<MemoView memoKey="pane-tab" />);
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.runOnlyPendingTimersAsync();
       });
       vi.mocked(saveMemo).mockClear();
       return screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
@@ -512,7 +535,7 @@ describe("MemoView", () => {
         vi.advanceTimersByTime(400);
       });
 
-      expect(saveMemo).toHaveBeenCalledWith("pane-tab", "  hello");
+      expect(saveMemo).toHaveBeenCalledWith("pane-tab", "  hello", "hello");
     });
 
     it("단일 줄 선택 시에도 인덴트가 적용된다", async () => {
@@ -562,7 +585,7 @@ describe("MemoView", () => {
       });
       render(<MemoView memoKey="pane-1" />);
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.runOnlyPendingTimersAsync();
       });
       const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
       expect(textarea.style.fontFamily).toBe("Consolas");
@@ -578,7 +601,7 @@ describe("MemoView", () => {
       });
       render(<MemoView memoKey="pane-1" />);
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.runOnlyPendingTimersAsync();
       });
       const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
       expect(textarea.style.fontFamily).toBe('"Fira Code"');
@@ -592,7 +615,7 @@ describe("MemoView", () => {
       });
       render(<MemoView memoKey="pane-1" />);
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.runOnlyPendingTimersAsync();
       });
       const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
       expect(textarea.style.fontSize).toBe("18px");
@@ -608,7 +631,7 @@ describe("MemoView", () => {
       });
       render(<MemoView memoKey="pane-1" />);
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.runOnlyPendingTimersAsync();
       });
       const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
       expect(textarea.style.fontSize).toBe("13px");
@@ -624,7 +647,7 @@ describe("MemoView", () => {
       vi.mocked(loadMemo).mockResolvedValue("");
       render(<MemoView memoKey="memo-zoom" paneId={paneId} />);
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.runOnlyPendingTimersAsync();
       });
       return screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
     }
@@ -664,7 +687,7 @@ describe("MemoView", () => {
       vi.mocked(loadMemo).mockResolvedValue("");
       render(<MemoView memoKey="memo-min" paneId="pane-min" />);
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.runOnlyPendingTimersAsync();
       });
       const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
       expect(textarea.style.fontSize).toBe("6px");
@@ -682,7 +705,7 @@ describe("MemoView", () => {
       vi.mocked(loadMemo).mockResolvedValue("");
       render(<MemoView memoKey="memo-ov" paneId="pane-ov" />);
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.runOnlyPendingTimersAsync();
       });
       const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
       expect(textarea.style.fontSize).toBe("22px");

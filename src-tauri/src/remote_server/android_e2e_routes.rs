@@ -552,6 +552,11 @@ fn http_path_allowed(method: &Method, path: &str) -> bool {
                 if uri.path() == "/remote/v1/composer/starred" {
                     return true;
                 }
+                if uri.path() == "/remote/v1/memos" {
+                    return uri.query().is_some_and(|query| {
+                        query.starts_with("leaseId=") && !query.contains('&')
+                    });
+                }
                 if terminal_github_path(uri.path())
                     && matches!(uri.query(), Some("force=true" | "force=false"))
                 {
@@ -577,6 +582,8 @@ fn http_path_allowed(method: &Method, path: &str) -> bool {
         | (&Method::POST, "/remote/v1/navigation/spatial")
         | (&Method::POST, "/remote/v1/navigation/notification")
         | (&Method::POST, "/remote/v1/composer/starred")
+        | (&Method::GET, "/remote/v1/memos")
+        | (&Method::POST, "/remote/v1/memos")
         | (&Method::POST, "/remote/v1/workspaces")
         | (&Method::POST, "/remote/v1/workspaces/active")
         | (&Method::POST, "/remote/v1/file-viewer/status")
@@ -822,6 +829,20 @@ mod tests {
 
     #[test]
     fn inner_http_allowlist_rejects_e2e_recursion_and_path_escaping() {
+        assert!(http_path_allowed(
+            &Method::GET,
+            "/remote/v1/memos?leaseId=lease-1"
+        ));
+        assert!(http_path_allowed(&Method::POST, "/remote/v1/memos"));
+        assert!(!http_path_allowed(&Method::DELETE, "/remote/v1/memos"));
+        assert!(!http_path_allowed(
+            &Method::GET,
+            "/remote/v1/memos?leaseId=x&extra=y"
+        ));
+        assert!(!http_path_allowed(
+            &Method::POST,
+            "/remote/v1/memos/../settings"
+        ));
         assert!(http_path_allowed(&Method::GET, "/remote/v1/terminals"));
         assert!(http_path_allowed(&Method::GET, "/remote/v1/navigation"));
         assert!(http_path_allowed(

@@ -36,10 +36,29 @@ const snapshot = {
 async function installMocks(context: BrowserContext) {
   const snapshotRequests: string[] = [];
   const actionRequests: Array<Record<string, unknown>> = [];
+  const memoRequests: Array<Record<string, unknown>> = [];
+  let pcMemo = "PC에서 쓴 메모\n공유 확인";
   await context.route("http://remote.test/remote/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     if (await fulfillRemoteClientAsset(route, url.pathname)) return;
+    if (url.pathname === "/remote/v1/memos") {
+      if (request.method() === "GET") {
+        expect(url.searchParams.get("leaseId")).toBe("lease-257");
+        return route.fulfill({
+          json: { memos: [{ key: "memo-pane-2", content: pcMemo }], count: 1 },
+        });
+      }
+      const body = JSON.parse(request.postData() || "{}");
+      memoRequests.push(body);
+      if (body.expectedContent !== pcMemo)
+        return route.fulfill({
+          status: 409,
+          json: { error: "Memo changed on the PC. Copy your draft, then reload." },
+        });
+      pcMemo = body.content;
+      return route.fulfill({ json: { ok: true } });
+    }
     if (url.pathname === "/remote/v1/session/claim") {
       return route.fulfill({
         json: {
@@ -120,7 +139,14 @@ async function installMocks(context: BrowserContext) {
     return route.fulfill({ status: 404, json: { error: "not mocked" } });
   });
   await context.routeWebSocket(/\/remote\/v1\/terminals\/terminal-1\/output/, () => {});
-  return { snapshotRequests, actionRequests };
+  return {
+    snapshotRequests,
+    actionRequests,
+    memoRequests,
+    changePcMemo: (text: string) => {
+      pcMemo = text;
+    },
+  };
 }
 
 async function connect(page: Page) {
@@ -160,6 +186,87 @@ async function flickRightEdge(page: Page) {
 test.describe("Remote GitHub view", () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 720 } });
 
+  test("shares PC memos, retains conflicting drafts, and hides icons independently of swipe", async ({
+    context,
+    page,
+  }) => {
+    const mocks = await installMocks(context);
+    await connect(page);
+    await page.locator("#memoHeader").click();
+    await expect(page.locator("#memoText")).toHaveValue("PC에서 쓴 메모\n공유 확인");
+    await page.locator("#memoText").fill("모바일 수정");
+    await page.locator("#memoSave").click();
+    await expect(page.locator("#memoStatus")).toHaveText("Saved on PC");
+    expect(mocks.memoRequests).toEqual([
+      {
+        leaseId: "lease-257",
+        key: "memo-pane-2",
+        content: "모바일 수정",
+        expectedContent: "PC에서 쓴 메모\n공유 확인",
+      },
+    ]);
+    await page.locator("#memoText").fill("보존할 초안");
+    mocks.changePcMemo("PC 동시 수정");
+    await page.locator("#memoSave").click();
+    await expect(page.locator("#memoStatus")).toContainText("Memo changed");
+    await expect(page.locator("#memoText")).toHaveValue("보존할 초안");
+    expect(
+      await page.evaluate(() =>
+        (
+          window as Window & { laymuxRemoteUi: { dismissTopLayer: () => boolean } }
+        ).laymuxRemoteUi.dismissTopLayer(),
+      ),
+    ).toBe(true);
+    await expect(page.locator("#memoOverlay")).toBeHidden();
+    await page.locator("#memoHeader").click();
+    await expect(page.locator("#memoText")).toHaveValue("보존할 초안");
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.locator("#memoReload").click();
+    await expect(page.locator("#memoText")).toHaveValue("PC 동시 수정");
+    await page.locator("#memoClose").click();
+
+    await page.locator("#navToggle").click();
+    await page.locator("#drawerSettingsButton").click();
+    await page.locator("#settingsTabPanels").click();
+    for (const key of [
+      "headerFiles",
+      "headerGithub",
+      "headerMemo",
+      "headerSpatialExclusion",
+      "headerDesktopMode",
+    ]) {
+      await page.locator(`#${key}`).uncheck();
+      expect(await page.evaluate((key) => localStorage.getItem(`laymux.remote.${key}`), key)).toBe(
+        "0",
+      );
+    }
+    await page.locator("#rightSwipeView").selectOption("memo");
+    await page.locator("#navToggle").click();
+    for (const id of [
+      "fileExplorerHeader",
+      "githubHeader",
+      "memoHeader",
+      "spatialExclusion",
+      "desktopModeHeader",
+    ]) {
+      await expect(page.locator(`#${id}`)).toBeHidden();
+    }
+    await flickRightEdge(page);
+    await expect(page.locator("#memoOverlay")).toBeVisible();
+    await expect(page.locator("#memoText")).toHaveValue("PC 동시 수정");
+    await page.screenshot({ path: "test-results/remote-shared-memo.png" });
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#memoOverlay")).toBeHidden();
+    await page.reload();
+    await expect(page.locator("#memoHeader")).toBeHidden();
+    await page.locator("#navToggle").click();
+    await page.locator("#drawerSettingsButton").click();
+    await page.locator("#settingsTabPanels").click();
+    await expect(page.locator("#headerMemo")).not.toBeChecked();
+    await expect(page.locator("#rightSwipeView")).toHaveValue("memo");
+    await page.screenshot({ path: "test-results/remote-panels-settings.png" });
+  });
+
   test("opens beside Explorer and provides the desktop list actions", async ({ context, page }) => {
     const requests = await installMocks(context);
     await connect(page);
@@ -194,7 +301,7 @@ test.describe("Remote GitHub view", () => {
 
     await page.locator("#navToggle").click();
     await page.locator("#drawerSettingsButton").click();
-    await page.locator("#settingsTabDisplay").click();
+    await page.locator("#settingsTabPanels").click();
     await page.locator("#rightSwipeView").selectOption("github");
     await expect
       .poll(() => page.evaluate(() => localStorage.getItem("laymux.remote.rightSwipeView")))
