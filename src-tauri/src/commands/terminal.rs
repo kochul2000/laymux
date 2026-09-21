@@ -1037,7 +1037,7 @@ pub async fn create_terminal_session(
     }
 
     // Start notify gate fallback timer: arms the gate after NOTIFY_GATE_FALLBACK_MS
-    // for shells without preexec (e.g., PowerShell which doesn't emit OSC 133;C/E).
+    // for shells without preexec (e.g., PowerShell without PSReadLine).
     {
         let state_for_timer = Arc::clone(&*state);
         let timer_terminal_id = id.clone();
