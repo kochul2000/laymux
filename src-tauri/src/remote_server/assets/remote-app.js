@@ -11654,6 +11654,7 @@ import {
           const row = canPlaceInputAction(actionId, "expanded") ? "expanded" : "main";
           selectedInputActionId = actionId;
           moveInputActionTo(actionId, row, row === "expanded" ? "left" : "right");
+          keyPopoverBody.querySelector(".key-order-actions")?.scrollIntoView({ block: "nearest" });
         }
 
         // Long-press drag (Pointer Events, never HTML native DnD — ADR-0040)
@@ -11892,9 +11893,8 @@ import {
           const heading = document.createElement("div");
           heading.className = "input-layout-heading";
           const help = document.createElement("div");
-          help.className = "key-order-help";
-          help.textContent =
-            "Hold and drag a key to move it between rows and alignments · Tap a key for move controls";
+          help.className = "key-order-zone-label";
+          help.textContent = "Your layout";
           const reset = document.createElement("button");
           reset.type = "button";
           reset.className = "key-order-reset";
@@ -11918,6 +11918,10 @@ import {
           title.className = "key-order-zone-label";
           title.textContent = INPUT_ROW_LABELS[row];
           section.append(title);
+          const description = document.createElement("span");
+          description.className = "layout-row-description";
+          description.textContent = row === "main" ? "Always visible" : "Shown when Keys is open";
+          section.append(description);
           for (const segment of INPUT_ACTION_SEGMENTS) {
             const group = document.createElement("div");
             group.className = "layout-segment";
@@ -11968,38 +11972,52 @@ import {
           return groups.filter((group) => group.ids.length > 0);
         }
 
+        // Disclosure is transient editor state, never part of the saved layout.
+        const inputSetupOpen = new Set();
+
+        function createInputSetupDisclosure(id, label) {
+          const section = document.createElement("details");
+          section.id = id;
+          section.className = "input-setup-disclosure";
+          section.open = inputSetupOpen.has(id);
+          const summary = document.createElement("summary");
+          summary.textContent = label;
+          section.append(summary);
+          return section;
+        }
+
         function renderHiddenSection() {
           const unplaced = unplacedInputActionIds();
-          const section = document.createElement("section");
-          section.className = "layout-hidden";
+          const section = createInputSetupDisclosure("inputAvailableKeys", `Add keys · ${unplaced.length} available`);
+          section.classList.add("layout-hidden");
           section.dataset.dropHidden = "true";
-          const title = document.createElement("div");
-          title.className = "key-popover-title";
-          title.textContent = "Hidden";
-          section.append(title);
+          const body = document.createElement("div");
+          body.className = "input-setup-disclosure-body";
           const help = document.createElement("div");
           help.className = "key-order-help";
-          help.textContent = "Not on the bar. Tap one to use it, or drag it onto a row.";
-          section.append(help);
+          help.textContent = "Tap to add to the Keys row. To hide a key, move it here or choose Hidden in its position menu.";
+          body.append(help);
           for (const group of hiddenGroups(unplaced)) {
             const label = document.createElement("div");
             label.className = "layout-hidden-label";
             label.textContent = group.name;
-            section.append(label);
+            body.append(label);
             const grid = document.createElement("div");
             grid.className = "key-chip-grid";
             for (const actionId of group.ids) grid.append(createLayoutChip(actionId));
-            section.append(grid);
+            body.append(grid);
           }
           if (unplaced.length === 0) {
             const empty = document.createElement("div");
             empty.className = "key-order-help";
             empty.textContent = "Every action is on the bar.";
-            section.append(empty);
+            body.append(empty);
           }
           if (selectedInputActionId && !inputActionPlacement(selectedInputActionId)) {
-            section.append(createChipControls(selectedInputActionId));
+            section.open = true;
+            body.append(createChipControls(selectedInputActionId));
           }
+          section.append(body);
           keyPopoverBody.append(section);
         }
 
@@ -12083,13 +12101,14 @@ import {
         // built-in key shape, with optional structured submit through the
         // existing input path. No new Remote endpoint is needed.
         function renderUserKeySection() {
-          const title = document.createElement("div");
-          title.className = "key-popover-title";
-          title.textContent = "Add custom key";
-          keyPopoverBody.append(title);
+          const section = createInputSetupDisclosure("inputCustomKey", "Create custom key");
 
           const form = document.createElement("div");
-          form.className = "user-key-form";
+          form.className = "user-key-form input-setup-disclosure-body";
+          const description = document.createElement("p");
+          description.className = "key-order-help";
+          description.textContent = "For a shortcut that isn't in Add keys. Choose a combination, or enter an advanced raw sequence.";
+          form.append(description);
 
           const modeRow = document.createElement("div");
           modeRow.className = "user-key-row";
@@ -12301,7 +12320,8 @@ import {
             error.textContent = userKeyFormError;
             form.append(error);
           }
-          keyPopoverBody.append(form);
+          section.append(form);
+          keyPopoverBody.append(section);
         }
 
         function renderInputLayoutEditor() {
@@ -12449,6 +12469,10 @@ import {
         }
 
         function renderKeyPopover() {
+          for (const section of keyPopoverBody.querySelectorAll("details[id]")) {
+            if (section.open) inputSetupOpen.add(section.id);
+            else inputSetupOpen.delete(section.id);
+          }
           keyPopoverBody.textContent = "";
           composerSettingsBody.textContent = "";
           renderInputLayoutEditor();

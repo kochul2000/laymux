@@ -51,8 +51,15 @@ function chip(page: Page, actionId: string) {
 }
 
 /** Selecting a chip is a toggle, so only click when it is not already selected. */
+async function openSetup(page: Page, id: string) {
+  if ((await page.locator(`#${id}`).getAttribute("open")) === null) {
+    await page.locator(`#${id} > summary`).click();
+  }
+}
+
 async function selectChip(page: Page, actionId: string) {
   const target = chip(page, actionId);
+  if (!(await target.isVisible())) await openSetup(page, "inputAvailableKeys");
   if ((await target.getAttribute("aria-pressed")) !== "true") await target.click();
 }
 
@@ -64,16 +71,19 @@ async function place(page: Page, actionId: string, hint: string, value: string) 
 /** Long-press drag: the chip editor commits on pointerup, never via native DnD. */
 async function dragChipOnto(page: Page, sourceId: string, targetId: string, toRightHalf = false) {
   const from = chip(page, sourceId);
-  await from.scrollIntoViewIfNeeded();
+  if (!(await from.isVisible())) await openSetup(page, "inputAvailableKeys");
+  await from.evaluate((el) => el.scrollIntoView({ block: "center" }));
   const fromBox = await from.boundingBox();
-  const to = chip(page, targetId);
-  await to.scrollIntoViewIfNeeded();
-  const toBox = await to.boundingBox();
   expect(fromBox).not.toBeNull();
-  expect(toBox).not.toBeNull();
   await page.mouse.move(fromBox!.x + fromBox!.width / 2, fromBox!.y + fromBox!.height / 2);
   await page.mouse.down();
   await page.waitForTimeout(250);
+  // A cross-row drag can span more than one viewport. Keep capture while the
+  // target scrolls into view, and keep both endpoints below the sticky tabs.
+  const to = chip(page, targetId);
+  await to.evaluate((el) => el.scrollIntoView({ block: "center" }));
+  const toBox = await to.boundingBox();
+  expect(toBox).not.toBeNull();
   await page.mouse.move(
     toBox!.x + (toRightHalf ? toBox!.width - 2 : 2),
     toBox!.y + toBox!.height / 2,
@@ -83,6 +93,63 @@ async function dragChipOnto(page: Page, sourceId: string, targetId: string, toRi
 }
 
 test.describe("Remote input action layout", () => {
+  test("터치 화면에서 추가한 키의 조작부를 바로 보여 주고 접힘 상태를 유지한다", async ({
+    browser,
+  }) => {
+    const context = await browser.newContext({ isMobile: true, hasTouch: true });
+    const page = await context.newPage();
+    try {
+      await openMarkup(page);
+      await page.setViewportSize({ width: 320, height: 568 });
+      await page.locator("#drawerSettingsButton").tap();
+      await page.locator("#inputAvailableKeys > summary").tap();
+      await chip(page, "soft:f1").tap();
+      await expect(page.getByLabel("Place F1")).toBeInViewport();
+      await expect(page.getByLabel("Place F1")).toHaveValue("expanded:left");
+      await page.locator("#inputAvailableKeys > summary").tap();
+      await page.getByLabel("Place F1").selectOption("main:center");
+      await expect(page.locator("#inputAvailableKeys")).not.toHaveAttribute("open");
+      await page.locator("#inputCustomKey > summary").tap();
+      await page.getByLabel("Custom key kind").selectOption("raw");
+      await page.getByLabel("Custom key label").fill("Test");
+      await page.getByLabel("Custom key sequence").fill("test");
+      await page.locator("#inputCustomKey > summary").tap();
+      await page.locator("#inputCustomKey > summary").tap();
+      await expect(page.getByLabel("Custom key sequence")).toHaveValue("test");
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+      await page.screenshot({ path: "../.screenshots/widget-keys-remote-touch-320.png" });
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("키 배치를 먼저 보여 주고 추가·등록·크기는 필요할 때 펼친다", async ({ page }) => {
+    await openMarkup(page);
+    await page.locator("#drawerSettingsButton").click();
+    await expect(page.locator(".layout-row-editor")).toHaveCount(2);
+    await expect(chip(page, "soft:f1")).toBeHidden();
+    await expect(page.getByLabel("Custom key kind")).toBeHidden();
+    await expect(page.locator("#remoteMainButtonScale")).toBeHidden();
+    await page.locator("#inputAvailableKeys > summary").click();
+    await openSetup(page, "inputAvailableKeys");
+    await chip(page, "soft:f1").click();
+    await expect(page.getByLabel("Place F1")).toHaveValue("expanded:left");
+    await expect(page.locator("#inputAvailableKeys")).toHaveAttribute("open", "");
+    await page.locator("#inputCustomKey > summary").click();
+    await page.getByLabel("Custom key base key").selectOption("g");
+    await expect(page.locator("#inputCustomKey")).toHaveAttribute("open", "");
+    await expect(page.getByLabel("Custom key base key")).toHaveValue("g");
+    await page.locator("#inputButtonSizes > summary").click();
+    await expect(page.locator("#remoteMainButtonScale")).toBeVisible();
+    for (const width of [320, 390, 720]) {
+      await page.setViewportSize({ width, height: 700 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+      expect(
+        await page.locator("#inputLayoutEditor").evaluate((el) => el.scrollWidth <= el.clientWidth),
+      ).toBe(true);
+    }
+  });
+
   test("행별 버튼 크기를 즉시 적용하고 이동·복원·기본값을 유지한다", async ({ page }) => {
     await openMarkup(page);
     await page.locator("#keyBarToggle").click();
@@ -93,6 +160,7 @@ test.describe("Remote input action layout", () => {
     const mainHeight = await height(mainKey);
     const keysHeight = await height(keysKey);
     await page.locator("#drawerSettingsButton").click();
+    await openSetup(page, "inputButtonSizes");
     await expect(page.locator("#remoteMainButtonScale")).toHaveText("100%");
     for (let i = 0; i < 6; i++)
       await page.getByRole("button", { name: "Increase Main button size", exact: true }).click();
@@ -116,6 +184,7 @@ test.describe("Remote input action layout", () => {
     await expect(page.locator("#remoteMainButtonScale")).toHaveText("160%");
     await expect(page.locator("#remoteKeysButtonScale")).toHaveText("80%");
     await page.locator("#drawerSettingsButton").click();
+    await openSetup(page, "inputButtonSizes");
     await page.getByRole("button", { name: "Reset button sizes", exact: true }).click();
     await expect(page.locator("#remoteMainButtonScale")).toHaveText("100%");
     await expect(page.locator("#remoteKeysButtonScale")).toHaveText("100%");
@@ -283,6 +352,7 @@ test.describe("Remote input action layout", () => {
     // One tap is "use this": it lands at the end of the Keys row and stays
     // selected, so choosing to use a key and choosing where it goes are one
     // gesture apart rather than two screens apart.
+    await openSetup(page, "inputAvailableKeys");
     await chip(page, "soft:f1").click();
     await expect
       .poll(async () => (await storedConfig(page)).zones.expanded.left.at(-1))
@@ -391,6 +461,7 @@ test.describe("Remote input action layout", () => {
     // one — a single bad entry must not take the whole list with it.
     await page.locator("#drawerSettingsButton").click();
     await expect(page.locator('#inputLayoutEditor [data-layout-action^="soft:u-"]')).toHaveCount(1);
+    await openSetup(page, "inputCustomKey");
     await page.getByLabel("Custom key kind").selectOption("raw");
     await page.getByLabel("Custom key label").fill("^Q");
     await page.getByLabel("Custom key sequence").fill("\\x11");
@@ -411,6 +482,7 @@ test.describe("Remote input action layout", () => {
     await openMarkup(page);
     await page.locator("#drawerSettingsButton").click();
 
+    await openSetup(page, "inputCustomKey");
     await page.getByLabel("Custom key kind").selectOption("combo");
     await page.getByLabel("Custom key modifier").selectOption("ctrl");
     await page.getByLabel("Custom key base key").selectOption("g");
@@ -436,6 +508,7 @@ test.describe("Remote input action layout", () => {
   test("registers a raw escape sequence and reports invalid input", async ({ page }) => {
     await openMarkup(page);
     await page.locator("#drawerSettingsButton").click();
+    await openSetup(page, "inputCustomKey");
     await page.getByLabel("Custom key kind").selectOption("raw");
 
     await page.getByLabel("Custom key label").fill("C→");
@@ -461,6 +534,7 @@ test.describe("Remote input action layout", () => {
   test("persists explicit Send Enter independently from raw newline bytes", async ({ page }) => {
     await openMarkup(page);
     await page.locator("#drawerSettingsButton").click();
+    await openSetup(page, "inputCustomKey");
     await page.getByLabel("Custom key kind").selectOption("raw");
     await expect(page.getByLabel("Send Enter")).not.toBeChecked();
     await page.getByLabel("Custom key label").fill("Run");
@@ -473,6 +547,7 @@ test.describe("Remote input action layout", () => {
     await page.reload();
     await page.setContent(remoteClientMarkupWithoutXterm());
     await page.locator("#drawerSettingsButton").click();
+    await openSetup(page, "inputCustomKey");
     await page.getByLabel("Custom key kind").selectOption("raw");
     await page.getByLabel("Custom key label").fill("Raw");
     await page.getByLabel("Custom key sequence").fill("run\\n");
@@ -487,6 +562,7 @@ test.describe("Remote input action layout", () => {
   test("inserts common raw escapes without requiring a backslash key", async ({ page }) => {
     await openMarkup(page);
     await page.locator("#drawerSettingsButton").click();
+    await openSetup(page, "inputCustomKey");
     await page.getByLabel("Custom key kind").selectOption("raw");
 
     const sequence = page.getByLabel("Custom key sequence");

@@ -734,7 +734,11 @@
     },
     "widgets": {
       "title": "Widgets",
-      "intro": "Choose what sits in the top bar and the status line. A slot's order is the on-screen order, and left or right is decided by which slot you place it in. The top bar reserves its window drag region first; when the remaining width runs out, the widgets farthest from the window edge collapse first.",
+      "intro": "Choose a position, then add widgets. They appear in the order listed.",
+      "placement": "Widget position",
+      "appearance": "Shared appearance · font and status line",
+      "emptyHint": "Add a widget to show in this position.",
+      "statusLineOff": "The status line is off. Your layout is kept; turn it on in Shared appearance below.",
       "fontFamily": "Shared font",
       "fontFamilyDefault": "Use interface font",
       "fontSize": "Shared font size",
