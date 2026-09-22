@@ -989,6 +989,7 @@
         display: none;
       }
       .settings-connection-button {
+        margin-top: 16px;
         display: inline-flex;
         align-items: center;
         gap: 6px;

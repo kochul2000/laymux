@@ -527,6 +527,7 @@ test.describe("remote mobile layout", () => {
     await page.locator("#drawerBack").click();
     await expect(page.locator("#drawerSettingsButton")).toBeFocused();
     await page.locator("#drawerSettingsButton").click();
+    await page.getByRole("tab", { name: "App", exact: true }).click();
     await page.locator("#drawerConnectionButton").click();
     await expect(page.locator("#drawerBack")).toBeFocused();
 
@@ -556,7 +557,9 @@ test.describe("remote mobile layout", () => {
     await page.locator("#drawerSettingsButton").click();
     await expect(page.locator("#drawerBack")).toBeFocused();
     await expect(page.locator("#drawerSettingsView")).toBeVisible();
-    // Settings opens on its own tabbed pages; Input bar is the first.
+    // Returning from Connection retains App; select Input bar explicitly.
+    await expect(page.locator("#settingsPanelApp")).toBeVisible();
+    await page.getByRole("tab", { name: "Input bar", exact: true }).click();
     await expect(page.locator("#settingsPanelInputBar")).toBeVisible();
     await expect(page.locator("#displaySection")).toBeHidden();
     await page.locator('#settingsTabs [data-settings-panel="display"]').click();
@@ -568,6 +571,7 @@ test.describe("remote mobile layout", () => {
     await expect(page.locator("#drawerWorkspaceView")).toBeVisible();
 
     await page.locator("#drawerSettingsButton").click();
+    await page.getByRole("tab", { name: "App", exact: true }).click();
     await page.locator("#drawerConnectionButton").click();
     await expect(page.locator("#drawerBack")).toBeFocused();
     await expect(page.locator("#drawerConnectionView")).toBeVisible();

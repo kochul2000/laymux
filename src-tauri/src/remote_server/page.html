@@ -146,9 +146,6 @@
             <div id="drawerSettingsView" class="drawer-view" hidden>
               <div class="settings-intro">
                 <p>Customize this device.<br />Changes are saved automatically.</p>
-                <button id="drawerConnectionButton" class="settings-connection-button" type="button" aria-label="Open connection" title="Connection">
-                  <span data-remote-icon="Plug"></span> Connection
-                </button>
               </div>
               <!-- Settings grew past one scroll: the sections are paginated so a
                    short screen shows one subject at a time. -->
@@ -405,6 +402,11 @@
                 <button id="installApp" class="install-button" type="button">Install PWA</button>
                 <div id="installHint" class="install-hint" hidden>iOS installs from the share sheet: Share → “Add to Home Screen”.</div>
               </div>
+              </section>
+              <section class="nav-section" aria-label="Connection">
+                <button id="drawerConnectionButton" class="settings-connection-button" type="button" aria-label="Open connection" title="Connection">
+                  <span data-remote-icon="Plug"></span> Connection
+                </button>
               </section>
               </div><!-- /settingsPanelApp -->
             </div><!-- /drawerSettingsView -->

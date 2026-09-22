@@ -376,6 +376,7 @@ test("an explicit release reconnects to the last selected workspace pane", async
   await page.locator("#navToggle").click();
   // Exit lives in the drawer's connection view; the drawer opens on workspace.
   await page.locator("#drawerSettingsButton").click();
+  await page.getByRole("tab", { name: "App", exact: true }).click();
   await page.locator("#drawerConnectionButton").click();
   await page.locator("#exit").click();
   await expect(page.locator("#connect")).toBeEnabled();
@@ -424,6 +425,7 @@ test("a reconnect falls back when the last selected terminal is no longer live",
   await page.locator("#navToggle").click();
   // Exit lives in the drawer's connection view; the drawer opens on workspace.
   await page.locator("#drawerSettingsButton").click();
+  await page.getByRole("tab", { name: "App", exact: true }).click();
   await page.locator("#drawerConnectionButton").click();
   await page.locator("#exit").click();
   changingNavigation.activeWorkspace.panes[1].terminalLive = false;
