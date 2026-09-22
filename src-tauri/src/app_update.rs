@@ -4,6 +4,7 @@
 //! status machine shared by the desktop WebView, Automation API, and Remote UI
 //! (ADR-0174).
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -20,6 +21,8 @@ use crate::constants::{
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 
+#[path = "app_update_progress.rs"]
+pub mod progress;
 #[path = "app_update_retry.rs"]
 mod retry;
 
@@ -83,6 +86,7 @@ pub enum UpdateOperation {
     Idle,
     Checking,
     Downloading,
+    Preparing,
     Installing,
 }
 
@@ -100,6 +104,8 @@ pub struct UpdateStatus {
     pub total_bytes: Option<u64>,
     pub checked_at_ms: Option<u64>,
     pub last_error: Option<String>,
+    pub preparation: Option<progress::ExitProgress>,
+    pub exit_settings: Option<progress::ExitPlan>,
 }
 
 impl Default for UpdateStatus {
@@ -117,18 +123,22 @@ impl Default for UpdateStatus {
             total_bytes: None,
             checked_at_ms: None,
             last_error: None,
+            preparation: None,
+            exit_settings: None,
         }
     }
 }
 
 pub struct UpdateManager {
     status: Mutex<UpdateStatus>,
+    closing: AtomicBool,
 }
 
 impl Default for UpdateManager {
     fn default() -> Self {
         Self {
             status: Mutex::new(UpdateStatus::default()),
+            closing: AtomicBool::new(false),
         }
     }
 }
@@ -142,6 +152,7 @@ impl UpdateManager {
                 channel,
                 ..UpdateStatus::default()
             }),
+            closing: AtomicBool::new(false),
         }
     }
 
@@ -224,6 +235,9 @@ impl UpdateManager {
     /// installing a build from the series the user just left.
     fn begin_install(&self, channel: UpdateChannel) -> Result<UpdateStatus, String> {
         let mut status = self.status.lock_or_err()?;
+        if self.closing.load(Ordering::Acquire) {
+            return Err("window close is in progress".into());
+        }
         if !status.enabled {
             return Err("updates are disabled in development builds".into());
         }
@@ -240,6 +254,8 @@ impl UpdateManager {
             ));
         }
         status.operation = UpdateOperation::Downloading;
+        status.preparation = None;
+        status.exit_settings = Some(crate::settings::load_settings().exit.into());
         status.downloaded_bytes = 0;
         status.total_bytes = None;
         status.last_error = None;
@@ -262,7 +278,10 @@ impl UpdateManager {
 
     fn mark_installing(&self) -> Result<UpdateStatus, String> {
         let mut status = self.status.lock_or_err()?;
-        if status.operation == UpdateOperation::Downloading {
+        if matches!(
+            status.operation,
+            UpdateOperation::Downloading | UpdateOperation::Preparing
+        ) {
             status.operation = UpdateOperation::Installing;
         }
         Ok(status.clone())
@@ -613,6 +632,7 @@ async fn install_and_restart(
     let state = app
         .try_state::<Arc<AppState>>()
         .ok_or_else(|| "app state is unavailable for the update checkpoint".to_string())?;
+    publish(app, &manager.mark_preparing()?);
     state
         .session_checkpoint
         .begin_finalization_and_drain(&state)

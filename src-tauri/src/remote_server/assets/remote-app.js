@@ -1,3 +1,4 @@
+import { createRemoteUpdateDialog } from "../../../../ui/src/remote/remote-update-dialog.js";
 import { createRemoteSettingsBridge } from "../../../../ui/src/remote/remote-settings-mcp.js";
 import { createRemoteMemo } from "../../../../ui/src/remote/remote-memo.js";
 import { installRemoteToolSwipes, nextRemoteTool, normalizeToolSwipeRightAction } from "../../../../ui/src/remote/remote-tool-swipe.js";
@@ -53,9 +54,7 @@ import {
         const remoteSelectionHandleSizeInput = $("remoteSelectionHandleSize");
         const remoteDisplaySettingsStatus = $("remoteDisplaySettingsStatus");
         const pcUpdateStatusElement = $("pcUpdateStatus");
-        const pcUpdateNotes = $("pcUpdateNotes");
         const checkPcUpdateButton = $("checkPcUpdate");
-        const installPcUpdateButton = $("installPcUpdate");
         const desktopModeHeaderButton = $("desktopModeHeader");
         const desktopModeDrawerButton = $("desktopModeDrawer");
         const navScrim = $("navScrim");
@@ -589,6 +588,11 @@ import {
         let pcUpdateStatus = null;
         let pcUpdatePollTimer = null;
         let pcUpdateRequestInFlight = false;
+        const pcUpdateDialog = createRemoteUpdateDialog({
+          check: () => loadPcUpdateStatus({ check: true }),
+          install: () => installPcUpdate(),
+          getCanInstall: () => Boolean(leaseId),
+        });
         let hiddenWorkspaceCount = 0;
         let touchGesture = null;
         let touchPointers = new Map();
@@ -1461,7 +1465,6 @@ import {
           const status = pcUpdateStatus;
           const availableVersion = status?.availableVersion || null;
           const operation = status?.operation || "idle";
-          const busy = operation === "checking" || operation === "downloading" || operation === "installing";
           const total = Number(status?.totalBytes) || 0;
           const downloaded = Number(status?.downloadedBytes) || 0;
           const percent = total > 0 ? Math.min(100, Math.floor((downloaded / total) * 100)) : null;
@@ -1487,11 +1490,7 @@ import {
           // tab the user cannot see.
           drawerSettingsButton.classList.toggle("update-available", Boolean(availableVersion));
           settingsAppTabButton.classList.toggle("update-available", Boolean(availableVersion));
-          checkPcUpdateButton.disabled = busy || pcUpdateRequestInFlight || !status?.enabled;
-          installPcUpdateButton.hidden = !availableVersion;
-          installPcUpdateButton.disabled = busy || pcUpdateRequestInFlight || !leaseId;
-          pcUpdateNotes.textContent = status?.notes || "";
-          pcUpdateNotes.hidden = !status?.notes;
+          checkPcUpdateButton.disabled = false;
         }
 
         async function loadPcUpdateStatus({ check = false } = {}) {
@@ -1502,8 +1501,10 @@ import {
             pcUpdateStatus = await remoteFetch(check ? "/remote/v1/update/check" : "/remote/v1/update", {
               ...(check ? { method: "POST" } : {}),
             });
+            pcUpdateDialog.update(pcUpdateStatus);
             renderPcUpdateStatus();
           } catch (error) {
+            pcUpdateDialog.disconnected(error.message || String(error));
             renderPcUpdateStatus(error.message || String(error), true);
           } finally {
             pcUpdateRequestInFlight = false;
@@ -1518,7 +1519,7 @@ import {
         async function installPcUpdate() {
           const selectedLeaseId = leaseId;
           if (!selectedLeaseId || !pcUpdateStatus?.availableVersion || pcUpdateRequestInFlight) return;
-          if (!window.confirm(`Install Laymux ${pcUpdateStatus.availableVersion} and restart the PC now?`)) return;
+          if (pcUpdateStatus.operation !== "idle") return;
           pcUpdateRequestInFlight = true;
           renderPcUpdateStatus("Starting signed update...");
           try {
@@ -1527,10 +1528,12 @@ import {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ leaseId: selectedLeaseId }),
             });
+            pcUpdateDialog.update(pcUpdateStatus);
             renderPcUpdateStatus();
           } catch (error) {
             // The installer can sever this request while the PC is restarting.
             // Keep polling: a surviving page will reconnect to the new process.
+            pcUpdateDialog.disconnected(error.message || String(error));
             renderPcUpdateStatus(error.message || String(error), true);
           } finally {
             pcUpdateRequestInFlight = false;
@@ -1540,7 +1543,7 @@ import {
 
         function schedulePcUpdatePoll(delay = null) {
           if (pcUpdatePollTimer) clearTimeout(pcUpdatePollTimer);
-          const busy = pcUpdateStatus && ["checking", "downloading", "installing"].includes(pcUpdateStatus.operation);
+          const busy = pcUpdateStatus && ["checking", "downloading", "preparing", "installing"].includes(pcUpdateStatus.operation);
           pcUpdatePollTimer = setTimeout(() => {
             pcUpdatePollTimer = null;
             if (document.visibilityState === "visible") {
@@ -13204,10 +13207,7 @@ import {
           saveRemoteDisplaySettings();
         });
         checkPcUpdateButton.addEventListener("click", () => {
-          loadPcUpdateStatus({ check: true }).catch(() => {});
-        });
-        installPcUpdateButton.addEventListener("click", () => {
-          installPcUpdate().catch(() => {});
+          pcUpdateDialog.open();
         });
         navToggleButton.addEventListener("click", () => {
           const open = navToggleButton.getAttribute("aria-expanded") !== "true";

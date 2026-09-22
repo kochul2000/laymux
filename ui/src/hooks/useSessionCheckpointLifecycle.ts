@@ -1,10 +1,18 @@
 import { useEffect } from "react";
 
-import { acknowledgeSessionCheckpoint, onSessionCheckpointRequested } from "@/lib/tauri-api";
+import {
+  acknowledgeSessionCheckpoint,
+  onSessionCheckpointRequested,
+  getAppUpdateStatus,
+  onAppUpdateStatusChanged,
+  reportAppUpdatePreparation,
+} from "@/lib/tauri-api";
 import {
   flushSessionCheckpoint,
   markSessionCheckpointMutation,
   persistSession,
+  prepareTerminalExit,
+  setPreparingUpdate,
 } from "@/lib/persist-session";
 import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -23,6 +31,17 @@ export function useSessionCheckpointLifecycle(ready: boolean): void {
     if (!ready) return;
     let cancelled = false;
     let unlisten: (() => void) | undefined;
+    let stopUpdate: (() => void) | undefined;
+    void onAppUpdateStatusChanged((status) => {
+      if (!cancelled && status.operation === "idle") setPreparingUpdate(false);
+    })
+      .then((stop) => {
+        if (cancelled) stop();
+        else stopUpdate = stop;
+      })
+      .catch((error) => {
+        console.warn("[session-checkpoint] Update status subscription failed:", error);
+      });
     let workspaceEntryTimer: ReturnType<typeof setTimeout> | undefined;
     const scheduleWorkspaceEntryCatchUp = () => {
       if (workspaceEntryTimer) clearTimeout(workspaceEntryTimer);
@@ -51,7 +70,16 @@ export function useSessionCheckpointLifecycle(ready: boolean): void {
         requireConclusive: request.requireConclusive,
         terminalIds: request.terminalIds,
       })
-        .then((commit) => {
+        .then(async (commit) => {
+          if (request.reason === "update") {
+            if (cancelled) throw new Error("update preparation listener cancelled");
+            setPreparingUpdate(true);
+            const status = await getAppUpdateStatus();
+            await prepareTerminalExit(async (progress) => {
+              if (cancelled) throw new Error("update preparation listener cancelled");
+              await reportAppUpdatePreparation(request.requestId, progress);
+            }, status.exitSettings ?? undefined);
+          }
           if (
             request.reason === "eviction" &&
             !hiddenEvictionTargetsRemainEligible(request.terminalIds ?? [])
@@ -111,6 +139,7 @@ export function useSessionCheckpointLifecycle(ready: boolean): void {
       cancelled = true;
       if (workspaceEntryTimer) clearTimeout(workspaceEntryTimer);
       unlisten?.();
+      stopUpdate?.();
       unsubscribeWorkspace();
       unsubscribeDock();
       unsubscribeSettings();

@@ -11,6 +11,8 @@ import {
 } from "@/lib/settings-snapshot";
 import { interruptTerminalsOnExit } from "@/lib/interrupt-terminals-on-exit";
 import { isSettingsWriteBlocked } from "@/lib/settings-write-guard";
+import type { ProgressReporter } from "@/lib/lifecycle-progress";
+import type { ExitSettings } from "@/lib/tauri-api";
 
 export { setBlockPersist } from "@/lib/settings-write-guard";
 
@@ -41,6 +43,10 @@ export function truncateFromEnd(data: string, maxChars: number): string {
 
 /** True once saveBeforeClose() starts — prevents duplicate persistSession() calls during teardown. */
 let closingDown = false;
+let preparingUpdate = false;
+export function setPreparingUpdate(value: boolean): void {
+  preparingUpdate = value;
+}
 
 export interface SessionCheckpointOptions {
   reason?:
@@ -82,6 +88,7 @@ export function markSessionCheckpointMutation(): void {
 /** Reset closingDown flag (for tests only). */
 export function _resetClosingDown(): void {
   closingDown = false;
+  preparingUpdate = false;
   activeCheckpoint = null;
   trailingCheckpointRequested = false;
   pendingOptions = {};
@@ -258,7 +265,7 @@ export function flushSessionCheckpoint(
 ): Promise<SessionCheckpointCommit> {
   // Native watchdog/update/eviction requests bypass persistSession(). Once
   // closing starts, only the pre-interrupt close checkpoint may collect state.
-  if (closingDown && options.reason !== "close") {
+  if (preparingUpdate || (closingDown && options.reason !== "close")) {
     return Promise.reject(new Error("Window close is in progress"));
   }
   if (isSettingsWriteBlocked()) {
@@ -283,7 +290,7 @@ export function flushSessionCheckpoint(
  * No-op if saveBeforeClose() is already in progress (prevents duplicate saves during teardown).
  */
 export function persistSession(options: SessionCheckpointOptions = {}): Promise<void> {
-  if (closingDown || isSettingsWriteBlocked()) return Promise.resolve();
+  if (closingDown || preparingUpdate || isSettingsWriteBlocked()) return Promise.resolve();
   const pending = flushSessionCheckpoint(options).then(() => {});
   // Background hints may join a failing critical barrier. Handle their rejected
   // promise while preserving the rejection for callers that explicitly await it.
@@ -298,8 +305,9 @@ export function persistSession(options: SessionCheckpointOptions = {}): Promise<
  * Sets closingDown flag to suppress any concurrent persistSession() calls
  * that store actions might trigger during teardown.
  */
-export async function saveBeforeClose(): Promise<void> {
+export async function saveBeforeClose(report?: ProgressReporter): Promise<void> {
   closingDown = true;
+  await report?.({ stage: "checkpoint", completed: 0, total: null });
 
   // Drain any older write and commit the final attribution before Ctrl+C can
   // return an agent to the shell and erase the process evidence.
@@ -311,7 +319,16 @@ export async function saveBeforeClose(): Promise<void> {
   // running terminals so cron/agents wind down and Claude/Codex print their
   // resume session id. This must run before the serialize loop below so the
   // printed id lands in the cached scrollback. Opt-in; no-op when disabled.
-  await interruptTerminalsOnExit();
+  await prepareTerminalExit(report);
+}
+
+/** Shared post-checkpoint preparation; never recollect attribution after Ctrl+C. */
+export async function prepareTerminalExit(
+  report?: ProgressReporter,
+  exit?: Partial<ExitSettings>,
+): Promise<void> {
+  await interruptTerminalsOnExit(report, exit);
+  await report?.({ stage: "caching", completed: 0, total: null });
 
   // When settings had a parse error, don't overwrite the user's original file with defaults.
   // Terminal output caching is still safe — only settings.json persistence is blocked.
@@ -323,25 +340,44 @@ export async function saveBeforeClose(): Promise<void> {
   // 1. Serialize and cache terminal outputs
   const serializeMap = getTerminalSerializeMap();
   const cachePromises: Promise<void>[] = [];
+  let completed = 0;
+  let serializationFailed = false;
   for (const [paneId, serializeFn] of serializeMap.entries()) {
     try {
       let data = serializeFn();
-      if (!data || data.length === 0) continue;
+      if (!data || data.length === 0) {
+        completed++;
+        continue;
+      }
       const maxChars = getMaxCacheChars();
       if (data.length > maxChars) {
         data = truncateFromEnd(data, maxChars);
       }
       if (data.length > 0) {
-        cachePromises.push(saveTerminalOutputCache(paneId, data));
+        cachePromises.push(
+          saveTerminalOutputCache(paneId, data).then(async () => {
+            completed++;
+            await report?.({ stage: "caching", completed, total: serializeMap.size });
+          }),
+        );
+      } else {
+        completed++;
       }
     } catch (err) {
+      serializationFailed = true;
       console.warn(`[saveBeforeClose] Failed to serialize pane ${paneId}:`, err);
     }
   }
 
   // Wait for cache writes before cleaning — otherwise clean may race and
   // delete files that are still being written.
-  await Promise.allSettled(cachePromises);
+  const results = await Promise.allSettled(cachePromises);
+  if (report && (serializationFailed || results.some((result) => result.status === "rejected"))) {
+    throw new Error(
+      "Terminal history could not be saved. Tasks may already have been interrupted.",
+    );
+  }
+  await report?.({ stage: "caching", completed, total: serializeMap.size });
 
   // Clean orphaned cache files after all cache writes have completed.
   const activePaneIds: string[] = [];

@@ -16,6 +16,7 @@ mod eviction_tests;
 
 pub const EVENT_SESSION_CHECKPOINT_REQUESTED: &str = "session-checkpoint-requested";
 const CHECKPOINT_RESPONSE_TIMEOUT: Duration = Duration::from_secs(20);
+const UPDATE_PREPARATION_TIMEOUT: Duration = Duration::from_secs(20);
 const CHECKPOINT_WATCHDOG_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const FINALIZATION_DRAIN_TIMEOUT: Duration = Duration::from_secs(16);
 const FINALIZATION_DRAIN_POLL: Duration = Duration::from_millis(10);
@@ -76,6 +77,9 @@ impl Drop for SessionMutationPermit<'_> {
 }
 
 impl SessionCheckpointRuntime {
+    pub fn has_pending_request(&self, request_id: u64) -> Result<bool, String> {
+        Ok(self.pending.lock_or_err()?.contains_key(&request_id))
+    }
     pub fn ensure_mutations_allowed(&self) -> Result<(), String> {
         if self.finalizing.load(Ordering::Acquire) {
             Err("destructive session finalization is in progress".into())
@@ -286,7 +290,12 @@ async fn request_frontend_checkpoint_for_terminals(
         ));
     }
 
-    match tokio::time::timeout(CHECKPOINT_RESPONSE_TIMEOUT, receiver).await {
+    let response_timeout = if reason == "update" {
+        CHECKPOINT_RESPONSE_TIMEOUT + UPDATE_PREPARATION_TIMEOUT
+    } else {
+        CHECKPOINT_RESPONSE_TIMEOUT
+    };
+    match tokio::time::timeout(response_timeout, receiver).await {
         Ok(Ok(result)) => result,
         Ok(Err(_)) => Err("frontend session checkpoint responder stopped".into()),
         Err(_) => {

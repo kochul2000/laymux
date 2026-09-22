@@ -1594,3 +1594,9 @@ Pane을 가리키는 식별자는 용도가 다른 3가지가 공존한다. 혼�
 - **식별자 복사 (issue #276)**: 컨트롤바 `PaneNumberBadge`를 클릭하거나 `pane.copyIdentifier` 키바인딩(기본 `Ctrl+Alt+C`)을 누르면 해당 pane의 식별자를 클립보드에 복사한다. 포맷은 `ui/src/lib/pane-numbers.ts`의 순수 함수 `formatPaneIdentifier()`가 생성하며, `lx:pane:<workspaceName>:<paneNumber>` 형태다. 예: `lx:pane:Default:1`. 이 문자열은 자동화/MCP `write_to_terminal`·`read_terminal_output`·`focus_terminal`에서 `terminal_id` 또는 `pane_ref`로 그대로 사용할 수 있다. MCP는 locator를 마지막 `:` 기준으로 분리해(`rsplit_once`) 마지막 세그먼트를 pane number, 그 앞 전체를 workspace name으로 본다(이름에 `:`가 있어도 안전). 그런 다음 workspace name을 현재 workspace 목록에서 id로 해석한 뒤 `terminals.resolveByNumber` 경로로 terminalId를 찾는다. `paneNumber`는 휘발성이므로 복사값도 시점 참조다. 배지는 `workspaceId`와 `workspaceName`이 주어진 컨트롤바 컨텍스트(PaneGrid)에서만 클릭-복사 가능하며, dock 등 번호 없는 위치에서는 비대화형 라벨로 렌더된다.
 
 ---
+
+### 종료·업데이트 진행 UI (ADR-0264)
+
+`LifecycleModal`은 App 루트에서 native dialog로 표시하여 Settings 패널의 unmount와 분리한다. Settings의 업데이트 진입점과 상단 UpdateButton은 `lifecycle-store.openUpdate`로 동일한 모달을 연다. 다운로드는 최소화할 수 있고 preparing/installing 진입 시 다시 표시한다. 창 종료는 `begin_app_close`로 업데이트 설치와 상호 배제한 뒤 `saveBeforeClose(report)` → PTY close → destroy 순서다. 창 종료 요청은 하나로 합치며 저장 실패나 지연은 자동 강제 종료 대신 사용자의 명시적 종료 선택을 기다린다. 지연됐던 저장이 완료되면 정상 종료할 수 있다.
+
+업데이트 진행은 Rust UpdateManager의 `preparation {stage,completed,total,warning}`과 설치 수락 시 저장한 `exitSettings`를 사용한다. `useSessionCheckpointLifecycle`은 critical commit 뒤 일반 checkpoint를 차단하고 `prepareTerminalExit`(인터럽트·출력 대기·캐시)를 완료한 뒤 ACK한다. 업데이트 ACK 기한은 40초이며 진행 IPC는 유효한 native request ID와 preparing 상태를 검사한다. idle 복귀 시 일반 checkpoint 차단을 해제한다. Remote는 같은 snapshot과 공유 문구·CSS로 native dialog를 표시하며, 설치 상태 뒤 단절만 재연결 대기로 표시하고 목표 실행 버전 확인 후 완료한다.

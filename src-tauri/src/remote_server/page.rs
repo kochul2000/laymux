@@ -786,13 +786,10 @@ mod tests {
 
         assert!(html.contains("id=\"pcUpdateStatus\""));
         assert!(html.contains("id=\"checkPcUpdate\""));
-        assert!(html.contains("id=\"installPcUpdate\""));
         assert!(html.contains("/remote/v1/update/check"));
         assert!(html.contains("/remote/v1/update/install"));
         assert!(html.contains("body: JSON.stringify({ leaseId: selectedLeaseId })"));
-        assert!(html.contains(
-            "installPcUpdateButton.disabled = busy || pcUpdateRequestInFlight || !leaseId"
-        ));
+        assert!(html.contains("pcUpdateDialog.open()"));
         assert!(html.contains("drawerSettingsButton.classList.toggle(\"update-available\""));
         assert!(html.contains("delay ?? (busy ? 1000 : 60000)"));
     }
