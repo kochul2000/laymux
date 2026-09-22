@@ -521,7 +521,9 @@ test("메뉴 도구 줄의 핀 아이콘은 설정과 같은 워크스페이스 
   await page.screenshot({ path: "../.screenshots/remote-pin-toolbar-mobile.png" });
   await expect(page.locator(".drawer-header #drawerConnectionButton")).toHaveCount(0);
   await page.locator("#drawerSettingsButton").click();
-  await expect(page.locator("#drawerSettingsView #drawerConnectionButton")).toBeVisible();
+  await expect(page.locator(".settings-intro #drawerConnectionButton")).toHaveCount(0);
+  await page.getByRole("tab", { name: "App", exact: true }).click();
+  await expect(page.locator("#settingsPanelApp #drawerConnectionButton")).toBeVisible();
   await page.screenshot({ path: "../.screenshots/remote-connection-settings-mobile.png" });
   await page.locator("#drawerConnectionButton").click();
   await expect(page.locator("#drawerConnectionView")).toBeVisible();
