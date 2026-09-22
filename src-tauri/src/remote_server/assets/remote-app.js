@@ -1642,12 +1642,6 @@ import {
 
         function renderToolSwipePreferences() {
           toolSwipeRightActionSelect.value = toolSwipeRightAction;
-          const right = toolSwipeRightAction === "previous" ? "Previous tool →" :
-            swipeCloseDrawersEnabled ? "Close →" : "Use × to close";
-          document.querySelectorAll(".remote-tool-swipe-hint").forEach((element) => {
-            element.hidden = !mobileLayout;
-            element.textContent = `← Next tool · ${right}`;
-          });
         }
 
         function githubStatusMessage(status) {
@@ -13140,7 +13134,6 @@ import {
         swipeCloseDrawersToggle.addEventListener("change", () => {
           swipeCloseDrawersEnabled = swipeCloseDrawersToggle.checked;
           saveLocalToggle(swipeCloseDrawersKey, swipeCloseDrawersEnabled);
-          renderToolSwipePreferences();
         });
         toolSwipeRightActionSelect.addEventListener("change", () => {
           toolSwipeRightAction = normalizeToolSwipeRightAction(toolSwipeRightActionSelect.value);
