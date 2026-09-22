@@ -358,6 +358,8 @@ pub fn run() {
             commands::cloud_disconnect,
             commands::set_sleep_inhibit,
             commands::get_app_update_status,
+            commands::begin_app_close,
+            commands::report_app_update_preparation,
             commands::check_app_update,
             commands::install_app_update,
             session_checkpoint::acknowledge_session_checkpoint,

@@ -2164,3 +2164,9 @@ PowerShell의 PSReadLine 통합은 [ADR-0262](../adr/0262-powershell-command-lif
 [ADR-0251](../adr/0251-single-terminal-status-icon.md)·[ADR-0254](../adr/0254-confirmed-idle-before-output-activity.md)에 따라 Desktop과 Remote는 `task-status-glyph.ts`로 다섯 아이콘 중 하나만 선택한다. 작업 없음·입력 대기·진행·종료 결과가 출력보다 우선하며, 작업 미확인에서만 출력 활동을 모래시계로 표현한다. 지연·출력 보조 배지와 상태 툴팁은 없고 미확인 알림 테두리는 유지한다. 내부 필드와 알림·절전·clear 정책은 바꾸지 않는다. 기존 REST/MCP 조회 경로의 확장이며 인증·포트·제어 endpoint는 바꾸지 않는다.
 
 핸들러별 메시지 포맷은 `claude/codex/grok.statusMessageMode/statusMessageDelimiter`를 유지한다. 테스트는 앱 어댑터의 파싱·메시지/clear 입력과 공통 상태·알림/정책을 각각 검증한다. 표시 조합과 신호별 제한은 [data-flow.md §9](./data-flow.md)에 둔다.
+
+### 종료·업데이트 진행 계약 (ADR-0264)
+
+`UpdateStatus.operation`은 idle/checking/downloading/preparing/installing이다. `preparation`은 nullable `{stage: checkpoint|interrupting|settling|caching, completed, total: number|null, warning: string|null}`이며 `exitSettings`는 설치 수락 시 저장된 종료 설정이다. idle 조회는 현재 저장된 종료 설정을 반환한다. Tauri `report_app_update_preparation(requestId,progress)`는 native request가 pending이고 update가 preparing일 때만 수락한다. 기존 Remote GET `/remote/v1/update`는 같은 진행 정보를 포함한 snapshot을 반환한다. 설치 요청은 기존 active controller lease를 유지한다.
+
+Dev POST `/api/v1/ui/lifecycle`는 `{action:"open"}`으로 실제 업데이트 모달을 열고, `{action:"close"}`로 preview를 해제한다. `{kind:"close"|"update",stage:"ready"|"downloading"|"checkpoint"|"interrupting"|"settling"|"caching"|"installing"|"closing",completed?,total?,cleanup?,error?}`는 지정한 진행 상태의 preview를 표시한다. 실제 정리나 설치를 수행하지 않고 동일한 컴포넌트를 렌더한다. Rust debug gate와 frontend DEV gate를 모두 적용한다.

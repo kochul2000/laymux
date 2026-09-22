@@ -3414,3 +3414,6 @@
         justify-content: flex-end;
         gap: 8px;
       }
+
+.remote-update-dialog { --text-muted: var(--text-secondary); --accent-06: #89b4fa0f; --accent-10: #89b4fa1a; --backdrop-heavy: #00000080; }
+.remote-update-dialog .lifecycle-actions button { min-height: 40px; padding: 8px 12px; }

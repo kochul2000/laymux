@@ -132,4 +132,34 @@ describe("runInterruptTerminals", () => {
     expect(count).toBe(2);
     expect(write).toHaveBeenCalledTimes(2);
   });
+
+  it("reports configured output wait, not task completion", async () => {
+    const report = vi.fn();
+    await runInterruptTerminals({
+      config: enabled({ rounds: 1, settleMs: 250 }),
+      getTerminalIds: () => ["a"],
+      write: vi.fn().mockResolvedValue(undefined),
+      sleep: vi.fn().mockResolvedValue(undefined),
+      report,
+    });
+    expect(report).toHaveBeenCalledWith({ stage: "interrupting", completed: 0, total: 1 });
+    expect(report).toHaveBeenCalledWith({ stage: "settling", completed: 100, total: 250 });
+    expect(report).toHaveBeenLastCalledWith({ stage: "settling", completed: 250, total: 250 });
+  });
+
+  it("does not send interrupts after a native preparation request expires", async () => {
+    const write = vi.fn();
+    await expect(
+      runInterruptTerminals({
+        config: enabled(),
+        getTerminalIds: () => ["a"],
+        write,
+        sleep: vi.fn(),
+        report: async () => {
+          throw new Error("expired");
+        },
+      }),
+    ).rejects.toThrow("expired");
+    expect(write).not.toHaveBeenCalled();
+  });
 });

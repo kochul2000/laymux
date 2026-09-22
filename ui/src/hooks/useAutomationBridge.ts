@@ -1339,6 +1339,15 @@ export function handleAutomationRequest(request: AutomationRequest): HandlerResu
 export async function handleAsyncAutomationRequest(
   request: AutomationRequest,
 ): Promise<HandlerResult> {
+  if (request.target === "ui" && request.method === "lifecycle") {
+    if (!import.meta.env.DEV) return err("Lifecycle preview is dev-only");
+    try {
+      const { previewLifecycle } = await import("@/lib/lifecycle-preview");
+      return ok(await previewLifecycle(request.params));
+    } catch (error) {
+      return err(String(error));
+    }
+  }
   if (request.target === "terminals" && request.method === "renderCheckpoint") {
     const terminalId = request.params.id;
     const maxBytes = request.params.maxBytes;

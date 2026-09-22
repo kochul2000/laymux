@@ -1,3 +1,4 @@
+import { useLifecycleStore } from "@/stores/lifecycle-store";
 import { render, screen, within, fireEvent, act, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -318,18 +319,18 @@ describe("SettingsView", () => {
   });
 
   describe("Updates section", () => {
-    it("shows the current version, its channel, and the release links", async () => {
+    it("opens the shared update dialog without installing or losing channel drafts", async () => {
       const user = userEvent.setup();
+      useLifecycleStore.setState({ status: mockAppUpdateStatus, open: false, kind: "update" });
       render(<SettingsView />);
-
       await user.click(screen.getByTestId("nav-update"));
-
-      await waitFor(() =>
-        expect(screen.getByTestId("update-current-version")).toHaveTextContent("0.11.0"),
-      );
-      expect(screen.getByTestId("update-current-channel")).toBeInTheDocument();
-      expect(screen.getByTestId("update-open-current-release")).toBeInTheDocument();
-      expect(screen.getByTestId("update-open-releases")).toBeInTheDocument();
+      expect(screen.getByTestId("update-current-version")).toHaveTextContent("0.11.0");
+      await user.selectOptions(screen.getByTestId("update-channel-select"), "beta");
+      await user.click(screen.getByTestId("update-open-btn"));
+      expect(useLifecycleStore.getState().open).toBe(true);
+      expect(screen.getByTestId("update-channel-select")).toHaveValue("beta");
+      expect(useSettingsStore.getState().update.channel).toBe("stable");
+      expect(mockInvoke).not.toHaveBeenCalledWith("install_app_update");
     });
 
     it("saves the chosen channel and warns while beta is selected", async () => {
@@ -370,96 +371,6 @@ describe("SettingsView", () => {
 
       await waitFor(() => expect(persistSession).toHaveBeenCalled());
       expect(mockInvoke).not.toHaveBeenCalledWith("check_app_update");
-    });
-
-    it("checks on demand and reports being up to date", async () => {
-      const user = userEvent.setup();
-      render(<SettingsView />);
-
-      await user.click(screen.getByTestId("nav-update"));
-      await waitFor(() => expect(screen.getByTestId("update-up-to-date")).toBeInTheDocument());
-
-      await user.click(screen.getByTestId("update-check-btn"));
-      await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("check_app_update"));
-      expect(screen.getByTestId("update-checked-at")).toBeInTheDocument();
-    });
-
-    it("hides automatic check errors until an explicit check reports one", async () => {
-      const automaticError = "https://updates.example.test/" + "automatic-error/".repeat(40);
-      mockAppUpdateStatus = { ...mockAppUpdateStatus, lastError: automaticError };
-      const user = userEvent.setup();
-      render(<SettingsView />);
-
-      await user.click(screen.getByTestId("nav-update"));
-      await waitFor(() => expect(screen.getByTestId("update-up-to-date")).toBeInTheDocument());
-      expect(screen.queryByTestId("update-error")).not.toBeInTheDocument();
-
-      const manualError = "https://updates.example.test/" + "manual-error/".repeat(40);
-      mockAppUpdateStatus = { ...mockAppUpdateStatus, lastError: manualError };
-      await user.click(screen.getByTestId("update-check-btn"));
-
-      const error = await screen.findByTestId("update-error");
-      expect(error).toHaveTextContent(manualError);
-      expect(error).toHaveClass("min-w-0", "max-w-full", "break-words", "[overflow-wrap:anywhere]");
-    });
-
-    it("says on the button itself why a dev build cannot check", async () => {
-      // The gate lives in Rust (a debug binary must not replace itself with a
-      // release artifact). The complaint it produced was a UI one: the button
-      // looked enabled, so a click that legitimately did nothing read as a bug.
-      mockAppUpdateStatus = { ...mockAppUpdateStatus, enabled: false };
-      const user = userEvent.setup();
-      render(<SettingsView />);
-
-      await user.click(screen.getByTestId("nav-update"));
-      const check = await waitFor(() => screen.getByTestId("update-check-btn"));
-      expect(check).toBeDisabled();
-      expect(check).toHaveAttribute("title", "Self-update is disabled in development builds.");
-      expect(screen.getByTestId("update-disabled-note")).toBeInTheDocument();
-
-      await user.click(check);
-      expect(mockInvoke).not.toHaveBeenCalledWith("check_app_update");
-    });
-
-    it("marks the buttons that leave the app for the browser", async () => {
-      const user = userEvent.setup();
-      render(<SettingsView />);
-
-      await user.click(screen.getByTestId("nav-update"));
-      const openCurrent = await waitFor(() => screen.getByTestId("update-open-current-release"));
-      expect(openCurrent.querySelector("svg")).not.toBeNull();
-      expect(openCurrent).toHaveAttribute("title", "Opens in your browser");
-      expect(screen.getByTestId("update-open-releases").querySelector("svg")).not.toBeNull();
-
-      await user.click(openCurrent);
-      await waitFor(() =>
-        expect(mockShellOpen).toHaveBeenCalledWith(
-          "https://github.com/kochul2000/laymux/releases/tag/v0.11.0",
-        ),
-      );
-    });
-
-    it("shows the pending version with its release time and offers the install", async () => {
-      mockAppUpdateStatus = {
-        ...mockAppUpdateStatus,
-        availableVersion: "0.11.1-beta.1",
-        channel: "beta",
-        notes: "beta notes",
-        publishedAt: "2026-08-22T07:45:00.000Z",
-      };
-      const user = userEvent.setup();
-      render(<SettingsView />);
-
-      await user.click(screen.getByTestId("nav-update"));
-      await waitFor(() =>
-        expect(screen.getByTestId("update-available")).toHaveTextContent("0.11.1-beta.1"),
-      );
-      expect(screen.getByTestId("update-published-at")).toBeInTheDocument();
-      expect(screen.getByTestId("update-notes")).toHaveTextContent("beta notes");
-
-      vi.spyOn(window, "confirm").mockReturnValue(true);
-      await user.click(screen.getByTestId("update-install-btn"));
-      await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("install_app_update"));
     });
   });
 

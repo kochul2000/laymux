@@ -2010,11 +2010,13 @@ export async function setSleepInhibit(enabled: boolean): Promise<boolean> {
   return invoke("set_sleep_inhibit", { enabled });
 }
 
-export type AppUpdateOperation = "idle" | "checking" | "downloading" | "installing";
+export type AppUpdateOperation = "idle" | "checking" | "downloading" | "preparing" | "installing";
 
 export type AppUpdateChannel = "stable" | "beta";
 
 export interface AppUpdateStatus {
+  preparation?: import("./lifecycle-progress").ExitProgress | null;
+  exitSettings?: ExitSettings | null;
   enabled: boolean;
   /** Release channel the backend used for the last check (ADR-0190). */
   channel: AppUpdateChannel;
@@ -2039,6 +2041,16 @@ export async function checkAppUpdate(): Promise<AppUpdateStatus> {
 
 export async function installAppUpdate(): Promise<AppUpdateStatus> {
   return invoke("install_app_update");
+}
+
+export async function beginAppClose(): Promise<void> {
+  return invoke("begin_app_close");
+}
+export async function reportAppUpdatePreparation(
+  requestId: number,
+  progress: import("./lifecycle-progress").ExitProgress,
+): Promise<void> {
+  return invoke("report_app_update_preparation", { requestId, progress });
 }
 
 export function onAppUpdateStatusChanged(

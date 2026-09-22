@@ -809,6 +809,23 @@ pub async fn ui_navigate_settings(
     }
 }
 
+/// Dev-only visual lifecycle preview. No terminal or installer work is performed.
+pub async fn ui_lifecycle(
+    AxumState(state): AxumState<ServerState>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    if !cfg!(debug_assertions) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": "dev-only lifecycle preview" })),
+        );
+    }
+    match bridge_request(&state, "action", "ui", "lifecycle", body).await {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
 /// POST /api/v1/ui/file-viewer — open the unified file viewer overlay for a path.
 /// Accepts `{ "path": "...", "newWindow": bool? }`. Backs the MCP
 /// `open_file_viewer` tool and the global Ctrl+Shift+O shortcut.

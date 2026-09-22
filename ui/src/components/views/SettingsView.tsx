@@ -1,3 +1,4 @@
+import { useLifecycleStore } from "@/stores/lifecycle-store";
 import {
   useState,
   useRef,
@@ -43,11 +44,6 @@ import {
   getCloudStatus,
   loadSettings,
   checkAppUpdate,
-  getAppUpdateStatus,
-  installAppUpdate,
-  onAppUpdateStatusChanged,
-  openExternal,
-  type AppUpdateStatus,
   getRemoteAccessStatus,
   setComposerStarredEntry,
   setRemoteRuntimeAccess,
@@ -58,7 +54,7 @@ import {
   type RemoteSettings,
 } from "@/lib/tauri-api";
 import { Button } from "@/components/ui/Button";
-import { ExternalLinkIcon, PlusIcon, XIcon } from "@/components/ui/icons";
+import { PlusIcon, XIcon } from "@/components/ui/icons";
 import type { SyncCwdConfig } from "@/lib/sync-cwd-config";
 import {
   GITHUB_FONT_SIZE_MAX,
@@ -192,163 +188,44 @@ function useMonospacedFonts() {
 }
 
 /** Where the update section links out to. The updater itself pins these in Rust. */
-const RELEASES_URL = "https://github.com/kochul2000/laymux/releases";
-const RELEASE_TAG_URL = (version: string) => `${RELEASES_URL}/tag/v${version}`;
-
-function formatUpdateTimestamp(value: number | string | null | undefined): string | null {
-  if (value === null || value === undefined) return null;
-  const date = typeof value === "number" ? new Date(value) : new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleString();
-}
-
-/**
- * Version, channel, and the update actions in one place (ADR-0190).
- *
- * The channel is a settings draft like every other field here — it lands on
- * Save, and saving triggers a check because the backend reads the channel from
- * the file. Check and install are actions, not settings, so they run at once.
- */
 function UpdateSection() {
-  const { t } = useTranslation("settings");
+  const { t, i18n } = useTranslation("settings");
+  const ko = i18n.language.startsWith("ko");
   const storeUpdate = useSettingsStore((s) => s.update);
   const setUpdate = useSettingsStore((s) => s.setUpdate);
   const [update, setDraftUpdate] = useDraft("update", storeUpdate, (v) => setUpdate(v));
-
-  const [status, setStatus] = useState<AppUpdateStatus | null>(null);
-  const [requestError, setRequestError] = useState<string | null>(null);
-  // Backend status is process-global, so lastError can come from the startup or
-  // periodic checker. Settings only surfaces failures for an action initiated
-  // from this section; background failures remain available in the snapshot
-  // without turning into a persistent user-facing wall of transport text.
-  const explicitUpdateActionRef = useRef(false);
-
-  const settleExplicitUpdateAction = useCallback((snapshot: AppUpdateStatus) => {
-    setStatus(snapshot);
-    if (!explicitUpdateActionRef.current || snapshot.operation !== "idle") return;
-    explicitUpdateActionRef.current = false;
-    setRequestError(snapshot.lastError);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    let unlisten: (() => void) | undefined;
-
-    void getAppUpdateStatus()
-      .then((snapshot) => {
-        if (!cancelled) setStatus(snapshot);
-      })
-      .catch(() => {});
-    void onAppUpdateStatusChanged((snapshot) => {
-      if (cancelled) return;
-      if (!explicitUpdateActionRef.current && snapshot.operation === "checking") {
-        setRequestError(null);
-      }
-      settleExplicitUpdateAction(snapshot);
-    })
-      .then((stop) => {
-        if (cancelled) stop();
-        else unlisten = stop;
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, [settleExplicitUpdateAction]);
-
-  const busy = status !== null && status.operation !== "idle";
-  const available = status?.availableVersion ?? null;
-  const error = requestError;
-  // Why the manual check cannot run right now, as the sentence to show on the
-  // button itself; null when it can run. The dev-build gate is enforced in Rust
-  // (a debug binary must never replace itself with a release artifact), so the
-  // UI only has to explain it.
-  const checkDisabledReason = !status
-    ? t("update.loadingStatus")
-    : !status.enabled
-      ? t("update.disabledInDev")
-      : busy
-        ? t("update.busy")
-        : null;
-  const checkedAt = formatUpdateTimestamp(status?.checkedAtMs);
-  const publishedAt = formatUpdateTimestamp(status?.publishedAt);
-
-  const runCheck = useCallback(() => {
-    setRequestError(null);
-    explicitUpdateActionRef.current = true;
-    void checkAppUpdate()
-      .then(settleExplicitUpdateAction)
-      .catch((reason: unknown) => {
-        explicitUpdateActionRef.current = false;
-        setRequestError(reason instanceof Error ? reason.message : String(reason));
-      });
-  }, [settleExplicitUpdateAction]);
-
-  const runInstall = useCallback(() => {
-    if (!available) return;
-    if (!window.confirm(t("update.installConfirm", { version: available }))) return;
-    setRequestError(null);
-    explicitUpdateActionRef.current = true;
-    void installAppUpdate()
-      .then(settleExplicitUpdateAction)
-      .catch((reason: unknown) => {
-        explicitUpdateActionRef.current = false;
-        setRequestError(reason instanceof Error ? reason.message : String(reason));
-      });
-  }, [available, settleExplicitUpdateAction, t]);
-
+  const status = useLifecycleStore((s) => s.status);
   return (
     <div className="settings-page">
       <SettingsPageTitle>{t("update.title")}</SettingsPageTitle>
-
       <SettingsGroup title={t("update.groupVersion")}>
         <SettingsField label={t("update.currentVersion")}>
-          <div className="flex flex-wrap items-center gap-2">
-            <span
-              data-testid="update-current-version"
-              className="text-[13px]"
-              style={{ color: "var(--text-primary)" }}
-            >
-              {status?.currentVersion ?? "—"}
-            </span>
-            <span
-              data-testid="update-current-channel"
-              className="rounded px-1.5 py-0.5 text-[13px]"
-              style={{ color: "var(--text-secondary)", border: "1px solid var(--border)" }}
-            >
-              {status?.channel === "beta" ? t("update.channelBeta") : t("update.channelStable")}
-            </span>
-          </div>
+          <span data-testid="update-current-version">{status?.currentVersion ?? "?"}</span>
+          <span
+            data-testid="update-current-channel"
+            className="ml-3"
+            style={{ color: "var(--text-secondary)" }}
+          >
+            {status?.channel === "beta" ? t("update.channelBeta") : t("update.channelStable")}
+          </span>
         </SettingsField>
-
-        <SettingsField label={t("update.releasePage")}>
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              data-testid="update-open-current-release"
-              icon={<ExternalLinkIcon />}
-              disabled={!status?.currentVersion}
-              title={t("update.opensInBrowser")}
-              onClick={() => {
-                if (status?.currentVersion)
-                  void openExternal(RELEASE_TAG_URL(status.currentVersion));
-              }}
-            >
-              {t("update.openCurrentRelease")}
-            </Button>
-            <Button
-              data-testid="update-open-releases"
-              icon={<ExternalLinkIcon />}
-              title={t("update.opensInBrowser")}
-              onClick={() => void openExternal(RELEASES_URL)}
-            >
-              {t("update.openReleases")}
-            </Button>
-          </div>
+        <SettingsField
+          label={ko ? "????" : "Update"}
+          desc={
+            ko
+              ? "?? ???? ?? ???? ? ???? ?????."
+              : "Check versions and follow installation in one dialog."
+          }
+        >
+          <Button
+            variant="primary"
+            data-testid="update-open-btn"
+            onClick={() => useLifecycleStore.getState().openUpdate()}
+          >
+            {ko ? "???? ??" : "Open update"}
+          </Button>
         </SettingsField>
       </SettingsGroup>
-
       <SettingsGroup title={t("update.groupChannel")}>
         <SettingsField label={t("update.channel")} desc={t("update.channelDesc")}>
           <FocusSelect
@@ -365,116 +242,9 @@ function UpdateSection() {
           <p
             data-testid="update-channel-beta-warning"
             className="text-[13px]"
-            style={{ color: "var(--claude)", margin: "0 0 8px" }}
+            style={{ color: "var(--claude)" }}
           >
             {t("update.channelBetaWarning")}
-          </p>
-        )}
-      </SettingsGroup>
-
-      <SettingsGroup title={t("update.groupCheck")}>
-        <SettingsField label={t("update.manualCheck")} desc={t("update.checkNowDesc")}>
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              variant="primary"
-              data-testid="update-check-btn"
-              disabled={checkDisabledReason !== null}
-              // A disabled button has to say why it is disabled where the
-              // pointer already is. The dev-build gate is the common case and
-              // its explanation used to live only in a paragraph below.
-              title={checkDisabledReason ?? undefined}
-              onClick={runCheck}
-            >
-              {status?.operation === "checking" ? t("update.checking") : t("update.checkNow")}
-            </Button>
-            <span
-              data-testid="update-checked-at"
-              className="text-[13px]"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {checkedAt ? t("update.checkedAt", { at: checkedAt }) : t("update.neverChecked")}
-            </span>
-          </div>
-        </SettingsField>
-
-        {status && !status.enabled && (
-          <p
-            data-testid="update-disabled-note"
-            className="text-[13px]"
-            style={{ color: "var(--text-secondary)", margin: "0 0 8px" }}
-          >
-            {t("update.disabledInDev")}
-          </p>
-        )}
-
-        {status?.enabled === false ? null : available ? (
-          <div
-            data-testid="update-available"
-            className="mt-1 rounded p-3"
-            style={{ border: "1px solid var(--border)" }}
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                {t("update.availableVersion", { version: available })}
-              </span>
-              {publishedAt && (
-                <span
-                  data-testid="update-published-at"
-                  className="text-[13px]"
-                  style={{ color: "var(--text-secondary)" }}
-                >
-                  {t("update.publishedAt", { at: publishedAt })}
-                </span>
-              )}
-            </div>
-            {status?.notes && (
-              <pre
-                data-testid="update-notes"
-                className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-[13px]"
-                style={{ color: "var(--text-secondary)" }}
-              >
-                {status.notes}
-              </pre>
-            )}
-            <div className="mt-2 flex flex-wrap items-center gap-3">
-              <Button
-                variant="primary"
-                data-testid="update-install-btn"
-                disabled={busy}
-                title={busy ? t("update.busy") : undefined}
-                onClick={runInstall}
-              >
-                {status?.operation === "downloading" || status?.operation === "installing"
-                  ? t("update.installing")
-                  : t("update.install")}
-              </Button>
-              <Button
-                data-testid="update-open-available-release"
-                icon={<ExternalLinkIcon />}
-                title={t("update.opensInBrowser")}
-                onClick={() => void openExternal(RELEASE_TAG_URL(available))}
-              >
-                {t("update.openReleaseNotes")}
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <p
-            data-testid="update-up-to-date"
-            className="text-[13px]"
-            style={{ color: "var(--text-secondary)", margin: "0 0 8px" }}
-          >
-            {t("update.upToDate")}
-          </p>
-        )}
-
-        {error && (
-          <p
-            data-testid="update-error"
-            className="min-w-0 max-w-full break-words text-[13px] [overflow-wrap:anywhere]"
-            style={{ color: "var(--claude)", margin: "0 0 8px" }}
-          >
-            {error}
           </p>
         )}
       </SettingsGroup>

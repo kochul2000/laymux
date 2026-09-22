@@ -22,6 +22,12 @@ vi.mock("@/lib/tauri-api", () => ({
     });
   }),
   acknowledgeSessionCheckpoint: vi.fn().mockResolvedValue(undefined),
+  onAppUpdateStatusChanged: vi.fn().mockResolvedValue(() => {}),
+  getAppUpdateStatus: vi.fn().mockResolvedValue({
+    operation: "preparing",
+    exitSettings: { interruptTerminals: true, interruptRounds: 2, settleMs: 500 },
+  }),
+  reportAppUpdatePreparation: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/persist-session", () => ({
@@ -30,6 +36,8 @@ vi.mock("@/lib/persist-session", () => ({
     frontendMutationRevision: 4,
     coverage: [],
   }),
+  prepareTerminalExit: vi.fn().mockResolvedValue(undefined),
+  setPreparingUpdate: vi.fn(),
   markSessionCheckpointMutation: vi.fn(),
   persistSession: vi.fn().mockResolvedValue(undefined),
 }));
@@ -37,6 +45,8 @@ vi.mock("@/lib/persist-session", () => ({
 import { acknowledgeSessionCheckpoint, onSessionCheckpointRequested } from "@/lib/tauri-api";
 import {
   flushSessionCheckpoint,
+  prepareTerminalExit,
+  setPreparingUpdate,
   markSessionCheckpointMutation,
   persistSession,
 } from "@/lib/persist-session";
@@ -213,4 +223,37 @@ describe("useSessionCheckpointLifecycle", () => {
 
     expect(persistSession).toHaveBeenCalledWith({ reason: "workspaceEntry" });
   });
+});
+
+it("does not ACK success until task cleanup and history saving finish", async () => {
+  let finish!: () => void;
+  vi.mocked(prepareTerminalExit).mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  vi.mocked(acknowledgeSessionCheckpoint).mockClear();
+  renderHook(() => useSessionCheckpointLifecycle(true));
+  await vi.waitFor(() => expect(nativeListener).toBeDefined());
+  nativeListener?.({ requestId: 91, reason: "update", requireConclusive: true });
+  await vi.waitFor(() => expect(finish).toBeDefined());
+  expect(setPreparingUpdate).toHaveBeenCalledWith(true);
+  expect(prepareTerminalExit).toHaveBeenLastCalledWith(expect.any(Function), {
+    interruptTerminals: true,
+    interruptRounds: 2,
+    settleMs: 500,
+  });
+  expect(acknowledgeSessionCheckpoint).not.toHaveBeenCalled();
+  finish();
+  await vi.waitFor(() => expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(91, 17));
+});
+it("rejects installation when output preparation fails", async () => {
+  vi.mocked(prepareTerminalExit).mockRejectedValueOnce(new Error("cache failed"));
+  renderHook(() => useSessionCheckpointLifecycle(true));
+  await vi.waitFor(() => expect(nativeListener).toBeDefined());
+  nativeListener?.({ requestId: 92, reason: "update", requireConclusive: true });
+  await vi.waitFor(() =>
+    expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(92, undefined, "cache failed"),
+  );
 });
