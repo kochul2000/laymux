@@ -246,8 +246,8 @@ import {
           terminalFontSize: 14,
           composerFontSize: 16,
           menuFontSize: 13,
-          mainButtonScale: 110,
-          keysButtonScale: 110,
+          mainButtonScale: 100,
+          keysButtonScale: 100,
           navigationPinned: false,
           navigationWidth: 300,
           navigationPinCutoff: 720,
@@ -1364,8 +1364,13 @@ import {
           remoteMenuFontSizeInput.value = String(normalized.menuFontSize);
           $("remoteMainButtonScale").textContent = `${normalized.mainButtonScale}%`;
           $("remoteKeysButtonScale").textContent = `${normalized.keysButtonScale}%`;
-          document.documentElement.style.setProperty("--remote-main-button-scale", String(normalized.mainButtonScale / 100));
-          document.documentElement.style.setProperty("--remote-keys-button-scale", String(normalized.keysButtonScale / 100));
+          // The user-facing percentage is relative to the unchanged physical
+          // baseline, so 100% remains the size previously shown as 110%.
+          const buttonBaselineScale = Number.parseFloat(
+            getComputedStyle(document.documentElement).getPropertyValue("--remote-button-baseline-scale"),
+          ) || 1;
+          document.documentElement.style.setProperty("--remote-main-button-scale", String(buttonBaselineScale * normalized.mainButtonScale / 100));
+          document.documentElement.style.setProperty("--remote-keys-button-scale", String(buttonBaselineScale * normalized.keysButtonScale / 100));
           document.querySelectorAll("[data-button-scale]").forEach((button) => {
             const value = normalized[button.dataset.buttonScale];
             button.disabled = Number(button.dataset.step) < 0 ? value <= 80 : value >= 160;

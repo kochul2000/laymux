@@ -687,7 +687,7 @@ test("버튼 크기는 기존 terminal crop을 유지하고 모바일·가로 �
   await page.locator("#drawerSettingsButton").click();
   await page.locator("#inputButtonSizes > summary").click();
   for (const row of ["Main", "Keys"]) {
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
       await page.getByRole("button", { name: `Increase ${row} button size`, exact: true }).click();
     }
   }
@@ -740,7 +740,7 @@ test("잘못된 버튼 배율을 정규화하고 저장 실패에도 현재 화�
   await page.goto("http://remote.test/remote/");
   await page.locator("#drawerSettingsButton").click();
   await expect(page.locator("#remoteMainButtonScale")).toHaveText("160%");
-  await expect(page.locator("#remoteKeysButtonScale")).toHaveText("110%");
+  await expect(page.locator("#remoteKeysButtonScale")).toHaveText("100%");
   await page.locator("#inputButtonSizes > summary").click();
   await page.getByRole("button", { name: "Decrease Main button size", exact: true }).click();
   await expect(page.locator("#remoteMainButtonScale")).toHaveText("150%");
@@ -751,5 +751,5 @@ test("잘못된 버튼 배율을 정규화하고 저장 실패에도 현재 화�
     await page
       .locator("#mainActionRow")
       .evaluate((row) => getComputedStyle(row).getPropertyValue("--input-button-scale").trim()),
-  ).toBe("1.5");
+  ).toBe("1.65");
 });

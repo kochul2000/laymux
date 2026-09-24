@@ -9,7 +9,9 @@
 ---
 ## 10. Settings
 
-`settings.json`은 **사용자가 의도적으로 편집·공유하는 구성**만 담는다. 재시작 간 유지돼야 하지만 구성이 아닌 UI 상태(컨트롤 바 모드, 폰트 줌 등)는 localStorage에 저장되는 인스턴스 오버라이드 레이어([overview.md](./overview.md) §4.2)에 들어간다.
+`settings.json`은 **사용자가 의도적으로 편집·공유하는 구성**만 담는다. 재시작 간 유지돼야 하지만 구성이 아닌 pane별 컨트롤 바 모드·폰트 줌 등은 localStorage에 저장되는 인스턴스 오버라이드 레이어([overview.md](./overview.md) §4.2)에 들어간다. 전체 pane의 기본 컨트롤 바 모드인 `controlBar.defaultMode`는 `settings.json` 구성이다.
+
+새 PC 설정의 `controlBar.defaultMode`는 `pinned`이고, 기본 Dock은 왼쪽 WorkspaceSelectorView와 오른쪽 MemoView / FileExplorerView / GitHubView(위부터 높이 1/3씩)다. 위·아래 Dock은 숨긴다. 이 기본 구성은 Rust `Settings::default()`와 프론트 store에 일치시키며, 기존에 저장된 컨트롤 바 모드·pane 오버라이드·Dock 배치는 그대로 적용한다. 새 값은 신규 또는 생략된 설정에만 적용한다([ADR-0265](../adr/0265-pc-remote-first-use-defaults.md)).
 
 ### 다국어(i18n) — 언어 설정
 
@@ -1598,7 +1600,7 @@ render body의 business field는 `{ "source": "current" }` 또는 `{ "source": "
 |---|---|---|
 | 입력 | Direct, 기존 터미널 즉시 입력 | 포인터 종류와 무관하게 Composer · 터미널 입력 모드 토글 |
 | 입력바 | PC 기존 키바인딩 | Main `^C · Q · Esc · /clr` / `Keyboard · Keys · Send`; Expanded 왼쪽 `Composer · NavPad · Notifications oldest · Tab`, 오른쪽 `^U · ^L · ^T · DPad · PgUp · PgDn · Attachment` · Settings → Input bar |
-| 표시 | PC 기존 프로필·터미널 설정 | Main/Keys 버튼 각 110%, Composer 불투명도 idle/focused/active 50/70/100%, 탐색 너비 300px, 최초 checkpoint 요청 8 KiB · Settings → Input bar/Display/Panels |
+| 표시 | PC 기존 프로필·터미널 설정 | Main/Keys 버튼 각 100%, Composer 불투명도 idle/focused/active 50/70/100%, 탐색 너비 300px, 최초 checkpoint 요청 8 KiB · Settings → Input bar/Display/Panels |
 | 플로팅 | PC 터미널 표면과 별도 | 왼쪽 탐색·알림 패드와 오른쪽 방향 패드 모두 활성, 각 64px·불투명도 0.5, 화면 중간 높이; 일반 플로팅 버튼 없음 · Settings → Floating |
 | 위젯·복원 | PC 위젯 배치 빈 상태·status line 꺼짐, 에이전트 세션 복원 켜짐 | 호스트에 배치된 위젯을 미러링하며 호스트 공개 게이트와 기기 로컬 토글이 모두 켜져야 표시 |
 
@@ -1620,7 +1622,7 @@ Remote terminal control은 상태 소유권을 세 범주로 나눈다([ADR-0015
 
 Remote 표시·조작 선호의 SoT는 각 기기의 `localStorage["laymux.remote.displaySettings"]`다([ADR-0209](../adr/0209-remote-display-preferences-are-device-local.md), [ADR-0265](../adr/0265-pc-remote-first-use-defaults.md)). terminal/composer/menu 글자 크기(기본 14/16/13, 6~72), Composer Idle/Focused/Active 불투명도(50/70/100, 20~100, 5 단위, `Idle ≤ Focused ≤ Active`), checkpoint 최초 예산(8 KiB, 1~1024), wheel/fast wheel/한 손가락/두 손가락 민감도(1/5/1/5, 0.1~20)를 한 JSON 객체로 저장한다. terminal 값은 Remote xterm cell에만 적용하고 desktop profile 크기는 바꾸지 않으며, composer 값은 Composer editor와 history/autocomplete 목록에 함께 적용한다. menu 값은 drawer의 기준 글자 크기로 `--fs-xs/--fs-sm/--fs-md` 토큰과 em 기반 텍스트·배지를 비례 스케일한다. 저장은 controller lease나 연결을 요구하지 않고 현재 문서의 CSS 변수, xterm option, 터치 지역 상태에 즉시 적용한다. `snapshotMaxKib`는 다음 최초·사용자 지시 attach부터 `historyKib`로 전송된다.
 
-Main·Keys 행의 버튼 크기는 `mainButtonScale`·`keysButtonScale`(기본 110%, 80~160%, 10 단위)로 같은 기기 로컬 표시 설정에 저장한다. `Settings → Input bar`의 −/+/기본값 복원은 연결 전에도 동작하며 글자·아이콘·높이·최소 너비·버튼 안쪽 여백을 즉시 조절한다. 버튼은 배치된 행의 배율을 상속하고 좌·중·우 배치와 행 내부 가로 스크롤을 유지한다. 저장 실패 시 현재 화면에는 적용하고 같은 탭에 오류를 표시한다. 기존 fit/resize 경로가 변경된 터미널 영역을 반영한다. 높이만 줄면 normal buffer는 ADR-0038에 따라 rows를 유지하고 crop하며, 폭 변경·높이 증가·alternate buffer는 기존처럼 fit한다. PC 설정·Remote API 계약은 바꾸지 않는다(ADR-0209 직접 적용).
+Main·Keys 행의 버튼 크기는 `mainButtonScale`·`keysButtonScale`(기본 100%, 80~160%, 10 단위)로 같은 기기 로컬 표시 설정에 저장한다. `Settings → Input bar`의 −/+/기본값 복원은 연결 전에도 동작하며 글자·아이콘·높이·최소 너비·버튼 안쪽 여백을 즉시 조절한다. 버튼은 배치된 행의 배율을 상속하고 좌·중·우 배치와 행 내부 가로 스크롤을 유지한다. 저장 실패 시 현재 화면에는 적용하고 같은 탭에 오류를 표시한다. 기존 fit/resize 경로가 변경된 터미널 영역을 반영한다. 높이만 줄면 normal buffer는 ADR-0038에 따라 rows를 유지하고 crop하며, 폭 변경·높이 증가·alternate buffer는 기존처럼 fit한다. 새 100%의 실제 크기는 직전 110%와 같다. 저장된 배율 숫자는 마이그레이션하지 않으므로 기존 110% 저장값은 새 기준의 110%로 렌더되어 직전보다 실제 크기가 10% 커진다. 허용 범위(80~160%)와 10 단위는 유지한다. PC 설정·Remote API 계약은 바꾸지 않는다([ADR-0209](../adr/0209-remote-display-preferences-are-device-local.md), [ADR-0265](../adr/0265-pc-remote-first-use-defaults.md)).
 
 보이는 Remote Composer의 불투명도 상태는 raw 상태를 한 함수에서 다음 우선순위로 계산한다. 입력이 disabled면 `idle`, 초안·history/autocomplete 목록·IME 조합·전송 중 하나라도 활성화되면 `active`, 빈 Composer editor가 DOM focus를 가지면 `focused`, 나머지는 `idle`이다. `.terminal-composer[data-opacity-state]`가 이 결과를 반영하고 surface 전체에 해당 CSS 변수 값을 적용한다. Composer는 terminal shell의 별도 행을 차지하지 않고 terminal host 하단 위에 겹치는 overlay다. terminal cell surface는 Composer 뒤까지 전체 높이로 렌더되므로 낮은 opacity에서 실제 출력이 비치며, Composer 표시·숨김과 높이 조절은 terminal geometry를 바꾸지 않는다([ADR-0203](../adr/0203-remote-composer-overlays-terminal-output.md)). Direct mode와 접힌 Composer는 계속 `hidden`이다. Active 기본값은 100%라 입력과 추천 목록을 완전히 불투명하게 유지한다.
 

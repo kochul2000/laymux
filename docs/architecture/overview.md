@@ -151,9 +151,10 @@ manifest가 아니라 `version`·`versionCode`·`releaseUrl`·`apkUrl`·`apkSha2
 ### 3.1 Dock
 
 - TopDock / BottomDock / LeftDock / RightDock 4개 고정 영역
-- 선택된 View 하나가 전체 영역을 채움
+- Dock은 여러 pane으로 분할할 수 있고, 각 View가 자기 pane을 채움
 - Workspace 전환에 영향받지 않음 (항상 고정)
 - View 전환 UI: 아이콘 사이드바 스타일
+- 새 설정의 PC 기본 배치는 왼쪽 WorkspaceSelectorView와 오른쪽 MemoView / FileExplorerView / GitHubView(위부터 각각 높이 1/3)이다. 위·아래 Dock은 숨겨진다. 저장된 Dock 배치는 그대로 사용한다.
 
 ### 3.2 WorkspaceArea
 
@@ -250,7 +251,7 @@ View:     viewOverrides[paneId]        (localStorage: "laymux-view-overrides")
 |---|---|---|
 | `controlBarMode` | `"hover" \| "pinned" \| "minimized"` | 해당 pane의 컨트롤 바 표시 모드. `settings.controlBar.defaultMode`를 개별 덮어쓰기. |
 
-> `controlBar.defaultMode` 는 Rust `ControlBarSettings`(`settings/models.rs`) + 프론트 settings-store 양쪽에 존재하며 `settings.json` 에 영속된다. pane 단위 `paneOverrides` 는 localStorage 로 유지되어 이를 개별 덮어쓴다.
+> 새 설정의 `controlBar.defaultMode`는 `pinned`다. 이 기본값은 Rust `ControlBarSettings`(`settings/models.rs`) + 프론트 settings-store 양쪽에 존재하며 `settings.json`에 영속된다. 저장된 `hover`·`minimized` 기본 모드는 유지하고, pane 단위 `paneOverrides`는 localStorage에서 이를 개별 덮어쓴다.
 
 #### View 인스턴스 오버라이드 (`viewOverrides`)
 

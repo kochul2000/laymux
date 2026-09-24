@@ -77,8 +77,8 @@ test("fresh Remote device starts in composer with the requested controls", async
   expect(geometry[1].y).toBeGreaterThan(300);
 
   await page.locator("#drawerSettingsButton").click();
-  await expect(page.locator("#remoteMainButtonScale")).toHaveText("110%");
-  await expect(page.locator("#remoteKeysButtonScale")).toHaveText("110%");
+  await expect(page.locator("#remoteMainButtonScale")).toHaveText("100%");
+  await expect(page.locator("#remoteKeysButtonScale")).toHaveText("100%");
 });
 
 test("saved direct mode, disabled pads, and custom key layout survive a reload", async ({
@@ -150,7 +150,7 @@ test("missing and malformed preference data fall back to fresh-device defaults",
   await expect(page.locator('#mainActionRow [data-key="u-defaultclear"]')).toHaveText("/clr");
   await expect(page.locator("#floatingControls .floating-control")).toHaveCount(2);
   await page.locator("#drawerSettingsButton").click();
-  await expect(page.locator("#remoteMainButtonScale")).toHaveText("110%");
+  await expect(page.locator("#remoteMainButtonScale")).toHaveText("100%");
 });
 
 test("a saved empty custom-key list cannot leave a dangling default action", async ({ page }) => {
@@ -189,4 +189,118 @@ test("a complete saved empty layout remains empty", async ({ page }) => {
   expect(
     await page.evaluate((key) => JSON.parse(localStorage.getItem(key)!).userKeys, keybarKey),
   ).toEqual([]);
+});
+
+test("100% preserves the former 110% pixels and size controls scale from that baseline", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator("#keyBarToggle").click();
+  const sizes = () =>
+    page.evaluate(() => {
+      const read = (selector: string) => {
+        const element = document.querySelector<HTMLElement>(selector)!;
+        const style = getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return {
+          height: rect.height,
+          width: rect.width,
+          font: parseFloat(style.fontSize),
+          paddingTop: parseFloat(style.paddingTop),
+          paddingRight: parseFloat(style.paddingRight),
+        };
+      };
+      return {
+        main: read('#mainActionRow [data-key="c-c"]'),
+        keys: read('#keyRow [data-key="tab"]'),
+        icon: read("#composerSend svg"),
+      };
+    });
+  const initial = await sizes();
+  expect(initial.main.height).toBeCloseTo(30.53125, 1);
+  expect(initial.main.width).toBeCloseTo(59.390625, 1);
+  expect(initial.main.font).toBeCloseTo(12.1, 2);
+  expect(initial.main.paddingTop).toBeCloseTo(5.5, 2);
+  expect(initial.main.paddingRight).toBeCloseTo(9.9, 2);
+  expect(initial.keys.height).toBeCloseTo(28.59375, 1);
+  expect(initial.keys.width).toBeCloseTo(41.75, 1);
+  expect(initial.keys.font).toBeCloseTo(12.1, 2);
+  expect(initial.keys.paddingTop).toBeCloseTo(4.4, 2);
+  expect(initial.keys.paddingRight).toBeCloseTo(9.9, 2);
+  expect(initial.icon.width).toBeCloseTo(22, 1);
+  expect(initial.icon.height).toBeCloseTo(22, 1);
+
+  await page.locator("#drawerSettingsButton").click();
+  await page.locator("#inputButtonSizes > summary").click();
+  await expect(page.locator("#remoteMainButtonScale")).toHaveText("100%");
+  await expect(page.locator("#remoteKeysButtonScale")).toHaveText("100%");
+  await page.getByRole("button", { name: "Increase Main button size" }).click();
+  await page.getByRole("button", { name: "Decrease Keys button size" }).click();
+  await expect(page.locator("#remoteMainButtonScale")).toHaveText("110%");
+  await expect(page.locator("#remoteKeysButtonScale")).toHaveText("90%");
+  const changed = await sizes();
+  expect(changed.main.font).toBeCloseTo(initial.main.font * 1.1, 2);
+  expect(changed.keys.font).toBeCloseTo(initial.keys.font * 0.9, 2);
+  expect(changed.icon.width).toBeCloseTo(initial.icon.width * 1.1, 1);
+  expect(
+    await page.evaluate((key) => JSON.parse(localStorage.getItem(key)!), displayKey),
+  ).toMatchObject({ mainButtonScale: 110, keysButtonScale: 90 });
+  await page.getByRole("button", { name: "Reset button sizes" }).click();
+  await expect(page.locator("#remoteMainButtonScale")).toHaveText("100%");
+  await expect(page.locator("#remoteKeysButtonScale")).toHaveText("100%");
+  expect(await sizes()).toEqual(initial);
+  expect(
+    await page.evaluate((key) => JSON.parse(localStorage.getItem(key)!), displayKey),
+  ).toMatchObject({ mainButtonScale: 100, keysButtonScale: 100 });
+});
+
+test("a stored button percentage stays numeric and uses the new size baseline", async ({
+  page,
+}) => {
+  await page.addInitScript((key) => {
+    localStorage.setItem(key, JSON.stringify({ mainButtonScale: 110, keysButtonScale: 90 }));
+  }, displayKey);
+  await open(page);
+  await page.locator("#keyBarToggle").click();
+  await page.locator("#drawerSettingsButton").click();
+  await page.locator("#inputButtonSizes > summary").click();
+  await expect(page.locator("#remoteMainButtonScale")).toHaveText("110%");
+  await expect(page.locator("#remoteKeysButtonScale")).toHaveText("90%");
+  const fontSizes = await page.evaluate(() => ({
+    main: parseFloat(
+      getComputedStyle(document.querySelector('#mainActionRow [data-key="c-c"]')!).fontSize,
+    ),
+    keys: parseFloat(
+      getComputedStyle(document.querySelector('#keyRow [data-key="tab"]')!).fontSize,
+    ),
+  }));
+  expect(fontSizes.main).toBeCloseTo(12.1 * 1.1, 2);
+  expect(fontSizes.keys).toBeCloseTo(12.1 * 0.9, 2);
+  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)!), displayKey)).toEqual({
+    mainButtonScale: 110,
+    keysButtonScale: 90,
+  });
+});
+
+test("80% and 160% resolve to 0.88 and 1.76 physical scale", async ({ page }) => {
+  await page.addInitScript((key) => {
+    localStorage.setItem(key, JSON.stringify({ mainButtonScale: 80, keysButtonScale: 160 }));
+  }, displayKey);
+  await open(page);
+  const scale = await page.evaluate(() => ({
+    main: parseFloat(
+      getComputedStyle(document.querySelector("#mainActionRow")!).getPropertyValue(
+        "--input-button-scale",
+      ),
+    ),
+    keys: parseFloat(
+      getComputedStyle(document.querySelector("#keyRow")!).getPropertyValue("--input-button-scale"),
+    ),
+  }));
+  expect(scale.main).toBeCloseTo(0.88, 5);
+  expect(scale.keys).toBeCloseTo(1.76, 5);
+  await page.locator("#drawerSettingsButton").click();
+  await page.locator("#inputButtonSizes > summary").click();
+  await expect(page.locator("#remoteMainButtonScale")).toHaveText("80%");
+  await expect(page.locator("#remoteKeysButtonScale")).toHaveText("160%");
 });

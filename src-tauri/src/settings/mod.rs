@@ -1247,6 +1247,94 @@ mod tests {
     }
 
     #[test]
+    fn fresh_settings_pin_panes_and_show_three_right_dock_views() {
+        let settings = Settings::default();
+        assert_eq!(settings.control_bar.default_mode, "pinned");
+        let left = settings
+            .docks
+            .iter()
+            .find(|dock| dock.position == "left")
+            .unwrap();
+        assert!(left.visible);
+        assert_eq!(left.active_view.as_deref(), Some("WorkspaceSelectorView"));
+
+        let right = settings
+            .docks
+            .iter()
+            .find(|dock| dock.position == "right")
+            .unwrap();
+        assert!(right.visible);
+        assert_eq!(right.size, 240.0);
+        assert_eq!(right.panes.len(), 3);
+        for (index, view) in ["MemoView", "FileExplorerView", "GitHubView"]
+            .into_iter()
+            .enumerate()
+        {
+            let pane = &right.panes[index];
+            assert_eq!(pane.view["type"], view);
+            assert_eq!(
+                (pane.x, pane.y, pane.w, pane.h),
+                (0.0, index as f64 / 3.0, 1.0, 1.0 / 3.0)
+            );
+        }
+    }
+
+    #[test]
+    fn describe_settings_exposes_fresh_control_bar_and_dock_defaults() {
+        let description = contract::describe_settings(&["/controlBar".into(), "/docks".into()])
+            .expect("default settings description");
+        assert_eq!(
+            description["defaults"]["/controlBar"]["defaultMode"],
+            "pinned"
+        );
+        assert_eq!(
+            description["defaults"]["/docks"][1]["panes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|pane| pane["view"]["type"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["MemoView", "FileExplorerView", "GitHubView"]
+        );
+        assert!(description["metadata"]["/controlBar"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("pinned"));
+    }
+
+    #[test]
+    fn saved_control_bar_modes_and_right_dock_layout_survive_loading() {
+        for mode in ["hover", "minimized"] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("settings.json");
+            let mut saved = Settings::default();
+            saved.control_bar.default_mode = mode.into();
+            let right = saved
+                .docks
+                .iter_mut()
+                .find(|dock| dock.position == "right")
+                .unwrap();
+            right.visible = false;
+            right.panes = vec![models::DockPaneSetting {
+                id: "dp-custom-right".into(),
+                view: serde_json::json!({"type":"FileExplorerView"}),
+                x: 0.0,
+                y: 0.0,
+                w: 1.0,
+                h: 1.0,
+            }];
+            fs::write(&path, serde_json::to_vec(&saved).unwrap()).unwrap();
+
+            let result = load_settings_validated_from(&path);
+            let SettingsLoadResult::Ok { settings, .. } = result else {
+                panic!("saved settings should load without repair: {result:?}");
+            };
+            assert_eq!(settings.control_bar.default_mode, mode);
+            assert_eq!(settings.docks, saved.docks);
+        }
+    }
+
+    #[test]
     fn default_language_is_system() {
         let settings = Settings::default();
         assert_eq!(settings.language, "system");

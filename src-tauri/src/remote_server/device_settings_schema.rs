@@ -154,8 +154,8 @@ mod tests {
 
         for (key, expected) in [
             ("inputMode", json!("composer")),
-            ("mainButtonScale", json!(110)),
-            ("keysButtonScale", json!(110)),
+            ("mainButtonScale", json!(100)),
+            ("keysButtonScale", json!(100)),
             ("composerIdleOpacity", json!(50)),
             ("composerFocusedOpacity", json!(70)),
             ("composerActiveOpacity", json!(100)),

@@ -106,8 +106,9 @@
         --remote-composer-active-opacity: 1;
         --remote-menu-font-size: 13px;
         --remote-navigation-width: 300px;
-        --remote-main-button-scale: 1.1;
-        --remote-keys-button-scale: 1.1;
+        --remote-button-baseline-scale: 1.1;
+        --remote-main-button-scale: var(--remote-button-baseline-scale);
+        --remote-keys-button-scale: var(--remote-button-baseline-scale);
         --touch-selection-handle-size: 22px;
         /* Compact controls in the Remote header share one border-box height. */
         --header-control-height: 26px;

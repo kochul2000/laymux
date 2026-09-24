@@ -535,14 +535,14 @@
     "mainButtonScale": {
       "type": "integer",
       "enum": [80, 90, 100, 110, 120, 130, 140, 150, 160],
-      "default": 110,
+      "default": 100,
       "applyMode": "live",
       "description": "기본 입력행 버튼 크기 배율(%). 80~160, 10 단위."
     },
     "keysButtonScale": {
       "type": "integer",
       "enum": [80, 90, 100, 110, 120, 130, 140, 150, 160],
-      "default": 110,
+      "default": 100,
       "applyMode": "live",
       "description": "Keys 확장행 버튼 크기 배율(%). 80~160, 10 단위."
     },
