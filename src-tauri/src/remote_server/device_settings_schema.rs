@@ -142,6 +142,98 @@ pub(super) fn prepare(current: &Value, patch: &Value) -> Result<Value, String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn fresh_device_schema_describes_the_product_remote_defaults() {
+        let defaults: Value = SCHEMA["properties"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(key, field)| (key.clone(), field["default"].clone()))
+            .collect();
+
+        for (key, expected) in [
+            ("inputMode", json!("composer")),
+            ("mainButtonScale", json!(110)),
+            ("keysButtonScale", json!(110)),
+            ("composerIdleOpacity", json!(50)),
+            ("composerFocusedOpacity", json!(70)),
+            ("composerActiveOpacity", json!(100)),
+            ("navigationWidth", json!(300)),
+            ("snapshotMaxKib", json!(8)),
+            ("floatingEnabled", json!(true)),
+            ("floatingDpadEnabled", json!(true)),
+            ("floatingNavPadEnabled", json!(true)),
+            ("floatingDpadSize", json!(64)),
+            ("floatingNavPadSize", json!(64)),
+            ("floatingDpadOpacity", json!(0.5)),
+            ("floatingNavPadOpacity", json!(0.5)),
+            ("floatingDpadX", json!(0.9108609136460442)),
+            ("floatingDpadY", json!(0.5274580464716007)),
+            ("floatingNavPadX", json!(0.10478285610595374)),
+            ("floatingNavPadY", json!(0.5206913907023182)),
+            ("spatialExcludedPaneIds", json!([])),
+            ("spatialExcludedWorkspaceIds", json!([])),
+            ("floatingButtons", json!([])),
+        ] {
+            assert_eq!(defaults[key], expected, "{key}");
+        }
+        assert_eq!(
+            defaults["inputBarUserKeys"],
+            json!([
+                {"id":"u-defaultclear","label":"/clr","seq":"/clear","submit":true}
+            ])
+        );
+        assert_eq!(
+            defaults["inputBarZones"]["main"]["left"],
+            json!(["soft:c-c", "soft:q", "soft:esc", "soft:u-defaultclear"])
+        );
+        assert_eq!(
+            defaults["inputBarZones"]["expanded"]["left"],
+            json!(["composer", "soft:navPad", "soft:notifOldest", "soft:tab"])
+        );
+        assert_eq!(
+            defaults["inputBarZones"]["expanded"]["right"],
+            json!([
+                "soft:c-u",
+                "soft:c-l",
+                "soft:c-t",
+                "soft:dpad",
+                "soft:pgup",
+                "soft:pgdn",
+                "attachment"
+            ])
+        );
+        assert_eq!(prepare(&json!({}), &defaults).unwrap(), defaults);
+    }
+
+    #[test]
+    fn existing_device_preferences_are_not_reseeded_from_new_schema_defaults() {
+        let mut existing: Value = SCHEMA["properties"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(key, field)| (key.clone(), field["default"].clone()))
+            .collect();
+        existing["inputMode"] = json!("direct");
+        existing["floatingDpadEnabled"] = json!(false);
+        existing["floatingNavPadEnabled"] = json!(false);
+        existing["inputBarUserKeys"] = json!([]);
+        existing["inputBarZones"]["main"]["left"] = json!([]);
+        existing["inputBarZones"]["expanded"]["left"] = json!([]);
+
+        let updated = prepare(&existing, &json!({"navigationWidth": 400})).unwrap();
+        assert_eq!(updated["navigationWidth"], 400);
+        for key in [
+            "inputMode",
+            "floatingDpadEnabled",
+            "floatingNavPadEnabled",
+            "inputBarUserKeys",
+            "inputBarZones",
+        ] {
+            assert_eq!(updated[key], existing[key], "{key}");
+        }
+    }
     #[test]
     fn nested_layout_contract_rejects_unknown_and_duplicate_actions_without_losing_other_keys() {
         let defaults: Value = SCHEMA["properties"]
@@ -164,7 +256,10 @@ mod tests {
         let mut zones = defaults["inputBarZones"].clone();
         zones["main"]["center"] = json!(["keys"]);
         assert!(prepare(&defaults, &json!({"inputBarZones":zones})).is_err());
-        let candidate = prepare(&defaults, &json!({"inputBarUserKeys":[{"id":"u-x","label":"X","seq":"\u{1b}"}], "floatingButtons":[{"id":"f-x","actionId":"soft:u-x","enabled":true,"size":64,"opacity":0.5,"x":0.5,"y":0.5}]})).unwrap();
+        let candidate = prepare(&defaults, &json!({"inputBarUserKeys":[
+            {"id":"u-defaultclear","label":"/clr","seq":"/clear","submit":true},
+            {"id":"u-x","label":"X","seq":"\u{1b}"}
+        ], "floatingButtons":[{"id":"f-x","actionId":"soft:u-x","enabled":true,"size":64,"opacity":0.5,"x":0.5,"y":0.5}]})).unwrap();
         assert_eq!(candidate["inputBarZones"], defaults["inputBarZones"]);
     }
 }

@@ -802,6 +802,18 @@ test("custom Send Enter uses structured submit while raw keys retain their bytes
   expect(requests).toEqual(["write", "input", "write"]);
 });
 
+test("first-use Q writes one byte and /clr submits the clear command", async ({ page }) => {
+  const state = await installRemotePage(page, { coarse: true, holdInputs: true });
+  await connect(page);
+  await page.locator('#mainActionRow [data-key="q"]').click();
+  await expect.poll(() => state.writes.length).toBe(1);
+  expect(state.writes[0].data).toBe("q");
+  await page.locator('#mainActionRow [data-key="u-defaultclear"]').click();
+  await expect.poll(() => state.inputs.length).toBe(1);
+  expect(state.inputs[0].body).toEqual({ leaseId: "lease-1", text: "/clear", submit: true });
+  await state.inputs[0].respond();
+});
+
 test("fine-pointer PC and coarse-pointer mobile can both toggle and persist the preferred mode", async ({
   page,
 }) => {
@@ -809,6 +821,9 @@ test("fine-pointer PC and coarse-pointer mobile can both toggle and persist the 
 
   const composer = page.locator("#terminalComposer");
   const toggle = page.locator("#inputModeToggle");
+  await expect(composer).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await clickInputModeToggle(page);
   await expect(composer).toBeHidden();
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
   await clickInputModeToggle(page);
@@ -960,7 +975,6 @@ test("fine-pointer Composer sends on Enter and keeps Shift+Enter as a newline", 
 }) => {
   const remote = await installRemotePage(page, { coarse: false, width: 1280 });
   await connect(page);
-  await clickInputModeToggle(page);
 
   const editor = page.locator("#composerInput");
   await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
@@ -1082,7 +1096,7 @@ test("PC-app embedded mobile view (localApp=1) keeps the mobile send gesture on 
 test("Direct paste uses structured input only after a V1 snapshot establishes readiness", async ({
   page,
 }) => {
-  const remote = await installRemotePage(page, { coarse: false });
+  const remote = await installRemotePage(page, { coarse: false, storedMode: "direct" });
   await connect(page);
 
   await expect(page.locator("#terminalComposer")).toBeHidden();
@@ -1771,7 +1785,7 @@ test("floating cursor tap is one-shot, pad flick sends input, and dragging sends
       "laymux.remote.keybar",
       JSON.stringify({
         floating: {
-          pads: { dpad: { enabled: true, size: 64, x: 0.1, y: 0.5 } },
+          pads: { dpad: { enabled: true, size: 64, x: 0.1, y: 0.5 }, navPad: { enabled: false } },
           buttons: [{ id: "f-up", actionId: "soft:up", enabled: true, size: 64, x: 0.9, y: 0.5 }],
         },
       }),
@@ -1871,8 +1885,9 @@ test("floating navigation pad shares spatial navigation and does not repeat on h
 // --- Composer recall: Tab history popup (#504) + autocomplete (#505) ---
 
 async function enterComposerMode(page: Page) {
-  // Desktop layout (fine pointer) defaults to Direct; switch to Composer.
-  await clickInputModeToggle(page);
+  if ((await page.locator("#inputModeToggle").getAttribute("aria-pressed")) !== "true") {
+    await clickInputModeToggle(page);
+  }
   await expect(page.locator("#terminalComposer")).toBeVisible();
 }
 
@@ -2284,7 +2299,12 @@ for (const [agent, configuredLines] of [
   test(`Composer subtracts its overlay from ${agent}'s configured hidden input lines`, async ({
     page,
   }) => {
-    await installRemotePage(page, { coarse: false, width: 1280, activeAgent: agent });
+    await installRemotePage(page, {
+      coarse: false,
+      width: 1280,
+      activeAgent: agent,
+      storedMode: "direct",
+    });
     await connect(page);
 
     await enterComposerMode(page);

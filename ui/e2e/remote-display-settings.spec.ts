@@ -197,7 +197,10 @@ test("MCP heartbeat 변경은 기기 저장·화면 적용 뒤 확인 응답을 
             selectionHandleSize: 28,
             composerAutocomplete: false,
             composerHiddenClaudeLines: 5,
-            inputBarUserKeys: [{ id: "u-test", label: "확인", seq: "\t", submit: true }],
+            inputBarUserKeys: [
+              { id: "u-defaultclear", label: "/clr", seq: "/clear", submit: true },
+              { id: "u-test", label: "확인", seq: "\t", submit: true },
+            ],
             floatingButtons: [
               {
                 id: "f-test",
@@ -232,7 +235,10 @@ test("MCP heartbeat 변경은 기기 저장·화면 적용 뒤 확인 응답을 
   expect(savedReport).not.toHaveProperty("composerHistory");
   expect(savedReport).toMatchObject({
     composerHiddenClaudeLines: 5,
-    inputBarUserKeys: [{ id: "u-test", label: "확인", seq: "\t", submit: true }],
+    inputBarUserKeys: [
+      { id: "u-defaultclear", label: "/clr", seq: "/clear", submit: true },
+      { id: "u-test", label: "확인", seq: "\t", submit: true },
+    ],
   });
   await expect(page.locator('#floatingControls [data-floating-id="f-test"]')).toHaveCSS(
     "opacity",
@@ -294,7 +300,7 @@ test("MCP 플로팅 전체 표시를 껐다 켜도 개별 배치와 버튼은 �
   });
   await page.goto("http://remote.test/remote/#token=test-token");
   await page.locator("#connect").click();
-  await expect(page.locator("#floatingControls > *")).toHaveCount(2);
+  await expect(page.locator("#floatingControls > *")).toHaveCount(3);
   for (const [patch, count] of [
     [{ floatingEnabled: false }, 0],
     [{ floatingEnabled: true, floatingNavPadEnabled: true, floatingNavPadSize: 80 }, 3],
@@ -346,7 +352,7 @@ test("MCP 저장 실패는 기존 기기 값과 실패 응답을 유지한다", 
   await page.locator("#connect").click();
   await expect.poll(() => acknowledgement, { timeout: 15000 }).toMatchObject({ success: false });
   await expect(page.locator("#remoteTerminalFontSize")).toHaveValue("14");
-  await expect(page.locator("#floatingControls > *")).toHaveCount(0);
+  await expect(page.locator("#floatingControls > *")).toHaveCount(2);
   expect(await page.evaluate(() => localStorage.getItem("laymux.remote.keybar"))).toBeNull();
 });
 
@@ -553,7 +559,7 @@ test("잘못된 워크스페이스 메뉴 숫자 설정은 안전한 기본값�
     .locator('#settingsTabs [data-settings-panel="display"]')
     .evaluate((tab: HTMLElement) => tab.click());
 
-  await expect(page.locator("#remoteNavigationWidth")).toHaveValue("360");
+  await expect(page.locator("#remoteNavigationWidth")).toHaveValue("300");
   await expect(page.locator("#remoteNavigationPinCutoff")).toHaveValue("720");
   await page.locator("#remoteNavigationWidth").fill("");
   await page.locator("#remoteNavigationWidth").blur();
@@ -561,7 +567,7 @@ test("잘못된 워크스페이스 메뉴 숫자 설정은 안전한 기본값�
     .poll(() =>
       page.evaluate((key) => JSON.parse(localStorage.getItem(key) || "null"), DISPLAY_SETTINGS_KEY),
     )
-    .toMatchObject({ navigationWidth: 360, navigationPinCutoff: 720 });
+    .toMatchObject({ navigationWidth: 300, navigationPinCutoff: 720 });
   expect(displayRequests).toEqual([]);
 });
 
@@ -611,7 +617,7 @@ test("실행 중 바꾼 checkpoint 예산은 다음 자동 attach부터 적용�
   await page.locator("#connect").click();
 
   await expect.poll(() => outputUrls.length).toBe(1);
-  expect(new URL(outputUrls[0]).searchParams.get("historyKib")).toBe("4");
+  expect(new URL(outputUrls[0]).searchParams.get("historyKib")).toBe("8");
 
   await page.locator("#remoteSnapshotMaxKib").evaluate((input) => {
     const numberInput = input as HTMLInputElement;
@@ -681,7 +687,7 @@ test("버튼 크기는 기존 terminal crop을 유지하고 모바일·가로 �
   await page.locator("#drawerSettingsButton").click();
   await page.locator("#inputButtonSizes > summary").click();
   for (const row of ["Main", "Keys"]) {
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 5; i++) {
       await page.getByRole("button", { name: `Increase ${row} button size`, exact: true }).click();
     }
   }
@@ -734,7 +740,7 @@ test("잘못된 버튼 배율을 정규화하고 저장 실패에도 현재 화�
   await page.goto("http://remote.test/remote/");
   await page.locator("#drawerSettingsButton").click();
   await expect(page.locator("#remoteMainButtonScale")).toHaveText("160%");
-  await expect(page.locator("#remoteKeysButtonScale")).toHaveText("100%");
+  await expect(page.locator("#remoteKeysButtonScale")).toHaveText("110%");
   await page.locator("#inputButtonSizes > summary").click();
   await page.getByRole("button", { name: "Decrease Main button size", exact: true }).click();
   await expect(page.locator("#remoteMainButtonScale")).toHaveText("150%");
