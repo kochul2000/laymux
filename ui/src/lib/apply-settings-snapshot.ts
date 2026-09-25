@@ -7,6 +7,7 @@ import {
 } from "@/stores/settings-store";
 import type { DockPosition, Layout, ViewType, Workspace } from "@/stores/types";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useAgentStartupStore } from "@/stores/agent-startup-store";
 
 export interface ApplySettingsSnapshotOptions {
   includeStructural?: boolean;
@@ -125,6 +126,9 @@ export function applySettingsSnapshot(
 
 function applyWorkspaceSnapshot(rawSettings: Settings): void {
   if (!rawSettings.layouts?.length || !rawSettings.workspaces?.length) return;
+  // A structural reload can reuse a pane ID with a different view. A pending
+  // manual launch belongs to the old runtime view and must not cross it.
+  useAgentStartupStore.getState().clearAll();
 
   const layouts: Layout[] = rawSettings.layouts.map((layout) => ({
     id: layout.id,

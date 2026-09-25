@@ -7,6 +7,7 @@ import { EmptyView, type EmptyViewContext } from "./EmptyView";
 import { WorkspaceSelectorView } from "./WorkspaceSelectorView";
 import { TerminalView } from "./TerminalView";
 import { SettingsView } from "./SettingsView";
+import { useAgentStartupStore } from "@/stores/agent-startup-store";
 import { IssueReporterView } from "./IssueReporterView";
 import { MemoView } from "./MemoView";
 import { UsageView } from "./UsageView";
@@ -69,6 +70,9 @@ function TerminalViewWithSyncCwd({
   const profileDefaultsSyncCwd = useSettingsStore((s) => s.profileDefaults.syncCwd);
   const syncCwdDefaults = useSettingsStore((s) => s.syncCwdDefaults);
   const fallbackId = useId();
+  const agentStartupIntent = useAgentStartupStore((state) =>
+    paneId ? state.requests[paneId] : undefined,
+  );
 
   const configSyncGroup = (viewConfig?.syncGroup as string) ?? "";
   const effectiveSyncGroup = configSyncGroup || workspaceId || "";
@@ -108,6 +112,7 @@ function TerminalViewWithSyncCwd({
       lastCodexSession={lastCodexSession}
       lastAgentFresh={viewConfig?.lastAgentFresh === "codex" ? "codex" : undefined}
       lastGrokSession={lastGrokSession}
+      agentStartupIntent={agentStartupIntent}
       restartCwd={terminalRestartCwd}
       isUserRestart={terminalRestartFresh ?? false}
       onUserRestartConsumed={onTerminalRestartConsumed}

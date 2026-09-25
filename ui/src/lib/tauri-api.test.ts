@@ -15,6 +15,7 @@ import { listen } from "@tauri-apps/api/event";
 import {
   type TerminalSessionResult,
   createTerminalSession,
+  checkAgentInstallation,
   attachTerminalOutput,
   acknowledgeTerminalOutput,
   writeTerminalInput,
@@ -97,6 +98,8 @@ describe("tauri-api", () => {
         cwd: null,
         startupCommandOverride: null,
         viewer: null,
+        agentStartup: null,
+        shellOnlyStartup: false,
       });
       expect(result).toEqual(mockResult);
     });
@@ -126,6 +129,8 @@ describe("tauri-api", () => {
         cwd: null,
         startupCommandOverride: null,
         viewer: null,
+        agentStartup: null,
+        shellOnlyStartup: false,
       });
     });
 
@@ -159,7 +164,88 @@ describe("tauri-api", () => {
         cwd: null,
         startupCommandOverride: null,
         viewer: { command: "vi", path: "C:\\Users\\me\\README.md" },
+        agentStartup: null,
+        shellOnlyStartup: false,
       });
+    });
+
+    it("passes a structured agent or shell-only startup without a command override", async () => {
+      mockInvoke.mockResolvedValue({ id: "agent-1" });
+      await createTerminalSession("agent-1", "WSL", 80, 24, "", true, true, undefined, {
+        agentStartup: { agentId: "codex" },
+      });
+      expect(mockInvoke).toHaveBeenLastCalledWith(
+        "create_terminal_session",
+        expect.objectContaining({
+          profile: "WSL",
+          agentStartup: { agentId: "codex" },
+          shellOnlyStartup: false,
+          startupCommandOverride: null,
+          viewer: null,
+        }),
+      );
+      await createTerminalSession("shell-1", "WSL", 80, 24, "", true, true, undefined, {
+        shellOnlyStartup: true,
+      });
+      expect(mockInvoke).toHaveBeenLastCalledWith(
+        "create_terminal_session",
+        expect.objectContaining({
+          profile: "WSL",
+          agentStartup: null,
+          shellOnlyStartup: true,
+          startupCommandOverride: null,
+          viewer: null,
+        }),
+      );
+    });
+
+    it("checks installation in the selected profile", async () => {
+      mockInvoke.mockResolvedValue({ status: "installed", environment: "wsl", version: "1.0" });
+      await expect(checkAgentInstallation("grok", "WSL")).resolves.toMatchObject({
+        status: "installed",
+        environment: "wsl",
+      });
+      expect(mockInvoke).toHaveBeenCalledWith("check_agent_installation", {
+        agentId: "grok",
+        profileName: "WSL",
+      });
+    });
+
+    it("does not invoke a cancelled one-shot startup during StrictMode replay", async () => {
+      mockInvoke.mockResolvedValue({ id: "replay-1" });
+      let cancelled = false;
+      const first = createTerminalSession(
+        "replay-1",
+        "PowerShell",
+        80,
+        24,
+        "",
+        true,
+        true,
+        undefined,
+        { agentStartup: { agentId: "claude" } },
+        () => !cancelled,
+      );
+      cancelled = true;
+      const closing = closeTerminalSession("replay-1");
+      const replacement = createTerminalSession(
+        "replay-1",
+        "PowerShell",
+        80,
+        24,
+        "",
+        true,
+        true,
+        undefined,
+        { agentStartup: { agentId: "claude" } },
+        () => true,
+      );
+      await expect(first).rejects.toThrow("cancelled");
+      await closing;
+      await replacement;
+      expect(
+        mockInvoke.mock.calls.filter(([command]) => command === "create_terminal_session"),
+      ).toHaveLength(1);
     });
   });
 

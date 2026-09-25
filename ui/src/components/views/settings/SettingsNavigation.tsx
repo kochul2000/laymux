@@ -70,6 +70,7 @@ const groups: { label: string; items: NavigationItem[] }[] = [
   {
     label: "groupAgents",
     items: [
+      { id: "agentSetup", label: "agentSetup", icon: BotIcon },
       { id: "claude", label: "claude", icon: BotIcon },
       { id: "codex", label: "codex", icon: BotIcon },
       { id: "grok", label: "grok", icon: BotIcon },

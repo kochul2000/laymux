@@ -8,6 +8,7 @@ import { useWorkspaceStore } from "./workspace-store";
 import { useOverridesStore } from "./overrides-store";
 import { useCwdPropagateStore } from "./cwd-propagate-store";
 import { useTerminalRestartStore } from "./terminal-restart-store";
+import { useAgentStartupStore } from "./agent-startup-store";
 import { useTerminalStore } from "./terminal-store";
 import { persistSession } from "@/lib/persist-session";
 
@@ -40,6 +41,7 @@ describe("WorkspaceStore", () => {
     useOverridesStore.setState({ paneOverrides: {}, viewOverrides: {} });
     useCwdPropagateStore.setState({ requests: {} });
     useTerminalRestartStore.setState({ requests: {} });
+    useAgentStartupStore.setState(useAgentStartupStore.getInitialState());
     useTerminalStore.setState(useTerminalStore.getInitialState());
     localStorage.clear();
     vi.clearAllMocks();
@@ -61,6 +63,48 @@ describe("WorkspaceStore", () => {
     expect(state.layouts).toHaveLength(1);
     expect(state.workspaces).toHaveLength(1);
     expect(state.activeWorkspaceId).toBe(state.workspaces[0].id);
+  });
+
+  it("clears pending agent startup when its workspace is removed", () => {
+    const store = useWorkspaceStore.getState();
+    store.addWorkspace("Temporary", store.layouts[0].id);
+    const victim = useWorkspaceStore.getState().workspaces.at(-1)!;
+    useAgentStartupStore.getState().request(victim.panes[0].id, "claude");
+    useWorkspaceStore.getState().removeWorkspace(victim.id);
+    expect(useAgentStartupStore.getState().requests[victim.panes[0].id]).toBeUndefined();
+  });
+
+  it("clears pending startup when a pane view or profile is replaced", () => {
+    const pane = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0];
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView", profile: "PowerShell" });
+    useAgentStartupStore.getState().request(pane.id, "codex");
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView", profile: "WSL" });
+    expect(useAgentStartupStore.getState().requests[pane.id]).toBeUndefined();
+    useAgentStartupStore.getState().request(pane.id, "grok");
+    useWorkspaceStore.getState().setPaneView(0, { type: "EmptyView" });
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView", profile: "PowerShell" });
+    expect(useAgentStartupStore.getState().requests[pane.id]).toBeUndefined();
+  });
+
+  it("preserves pending startup and its outcome across the same terminal profile's metadata edits", () => {
+    const pane = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0];
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView", profile: "PowerShell" });
+    useAgentStartupStore.getState().request(pane.id, "claude");
+    useWorkspaceStore.getState().setPaneView(0, {
+      type: "TerminalView",
+      profile: "PowerShell",
+      cwdSend: false,
+    });
+    expect(useAgentStartupStore.getState().requests[pane.id]).toBe("claude");
+    useAgentStartupStore.getState().consume(pane.id);
+    useAgentStartupStore.getState().report(pane.id, { status: "ready" });
+    useWorkspaceStore.getState().setPaneView(0, {
+      type: "TerminalView",
+      profile: "PowerShell",
+      cwdSend: false,
+      cwdReceive: false,
+    });
+    expect(useAgentStartupStore.getState().outcomes[pane.id]).toEqual({ status: "ready" });
   });
 
   it("returns active workspace", () => {

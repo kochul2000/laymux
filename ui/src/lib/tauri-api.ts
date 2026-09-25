@@ -38,7 +38,30 @@ export interface ViewerStartupRequest {
   path: string;
 }
 
-export type TerminalStartupRequest = string | ViewerStartupRequest;
+export interface AgentStartupRequest {
+  agentId: "claude" | "codex" | "grok";
+}
+
+export type TerminalStartupRequest =
+  | string
+  | ViewerStartupRequest
+  | { agentStartup: AgentStartupRequest }
+  | { shellOnlyStartup: true };
+
+export interface AgentInstallationResult {
+  status: "installed" | "missing" | "unknown";
+  environment: "windows" | "wsl" | "linux" | "unknown";
+  version?: string;
+  detail?: string;
+  effectiveCommand?: string;
+}
+
+export async function checkAgentInstallation(
+  agentId: AgentStartupRequest["agentId"],
+  profileName: string,
+): Promise<AgentInstallationResult> {
+  return invoke("check_agent_installation", { agentId, profileName });
+}
 
 // React effect cleanup cannot await an async close before a replacement
 // effect starts. Serialize create/close for each terminal id so an unmount
@@ -70,11 +93,23 @@ export async function createTerminalSession(
   cwdReceive: boolean = true,
   cwd?: string,
   startup?: TerminalStartupRequest,
+  shouldStart?: () => boolean,
 ): Promise<TerminalSessionResult> {
   const startupCommandOverride = typeof startup === "string" ? startup : null;
-  const viewer = startup && typeof startup === "object" ? startup : null;
-  return enqueueTerminalLifecycle(id, () =>
-    invoke("create_terminal_session", {
+  const viewer = startup && typeof startup === "object" && "path" in startup ? startup : null;
+  const agentStartup =
+    startup && typeof startup === "object" && "agentStartup" in startup
+      ? startup.agentStartup
+      : null;
+  const shellOnlyStartup =
+    startup && typeof startup === "object" && "shellOnlyStartup" in startup
+      ? startup.shellOnlyStartup
+      : false;
+  return enqueueTerminalLifecycle(id, () => {
+    // StrictMode may retire the first one-shot pane mount before queued IPC.
+    if (shouldStart && !shouldStart())
+      return Promise.reject(new Error("terminal startup cancelled"));
+    return invoke("create_terminal_session", {
       id,
       profile,
       cols,
@@ -85,8 +120,10 @@ export async function createTerminalSession(
       cwd: cwd ?? null,
       startupCommandOverride,
       viewer,
-    }),
-  );
+      agentStartup,
+      shellOnlyStartup,
+    });
+  });
 }
 
 export async function writeToTerminal(id: string, data: string): Promise<void> {

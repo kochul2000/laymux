@@ -100,6 +100,7 @@ import { inputCls, inputStyle } from "@/components/ui/form-control-styles";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { WidgetsSectionBody } from "./settings/WidgetsSection";
 import { SettingsNavigation } from "./settings/SettingsNavigation";
+import { AgentSetupSection } from "./settings/AgentSetupSection";
 import {
   SettingsField,
   SettingsGroup,
@@ -5144,6 +5145,7 @@ export function SettingsView() {
             {activeNav === "interface" && <InterfaceSection />}
             {activeNav === "workspaceDisplay" && <WorkspacesSection />}
             {activeNav === "remoteConnection" && <RemoteConnectionSection />}
+            {activeNav === "agentSetup" && <AgentSetupSection onNavigate={setActiveNav} />}
             {activeNav === "claude" && <ClaudeSection />}
             {activeNav === "codex" && <CodexSection />}
             {activeNav === "grok" && <GrokSection />}

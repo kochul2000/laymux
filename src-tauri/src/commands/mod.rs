@@ -1,3 +1,4 @@
+mod agent_setup;
 mod android_pairing;
 mod app_update;
 mod archive_listing;
@@ -26,6 +27,7 @@ mod viewer_startup;
 mod wsl_agent_session;
 
 pub use crate::cloud::commands::*;
+pub use agent_setup::*;
 pub use android_pairing::*;
 pub use app_update::*;
 pub use archive_listing::*;
@@ -62,6 +64,10 @@ pub use viewer_startup::*;
 mod main_thread_io {
     /// `(file source, commands that must carry `#[tauri::command(async)]`)`.
     const OFF_MAIN_THREAD: &[(&str, &[&str])] = &[
+        (
+            include_str!("agent_setup.rs"),
+            &["check_agent_installation"],
+        ),
         (
             include_str!("spreadsheet_stream.rs"),
             &[
