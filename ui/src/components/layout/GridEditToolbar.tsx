@@ -22,6 +22,7 @@ import {
   XIcon,
 } from "@/components/ui/icons";
 import logoSvg from "@/assets/logo.svg";
+import { useTranslation } from "react-i18next";
 
 /**
  * Width the window drag region keeps no matter how many widgets are placed.
@@ -36,7 +37,10 @@ async function getWindow() {
 }
 
 export function GridEditToolbar() {
+  const { t } = useTranslation("settings");
   const toggleSettingsModal = useUiStore((s) => s.toggleSettingsModal);
+  const openSettingsModal = useUiStore((s) => s.openSettingsModal);
+  const setSettingsNavTarget = useUiStore((s) => s.setSettingsNavTarget);
   const toggleRemoteAccessModal = useUiStore((s) => s.toggleRemoteAccessModal);
   const openEmptyFileViewer = useFileViewerStore((s) => s.openEmptyFileViewer);
   const remote = useSettingsStore((s) => s.remote);
@@ -199,6 +203,19 @@ export function GridEditToolbar() {
         </button>
 
         <SleepPreventionToggle />
+
+        <button
+          type="button"
+          data-testid="agent-setup-entry"
+          className="shrink-0 cursor-pointer px-1 text-xs"
+          style={{ color: "var(--text-secondary)", background: "transparent", border: "none" }}
+          onClick={() => {
+            setSettingsNavTarget("agentSetup");
+            openSettingsModal();
+          }}
+        >
+          {t("agentSetup.entry")}
+        </button>
 
         <UpdateButton />
 

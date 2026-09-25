@@ -31,6 +31,16 @@ UI 다국어는 **react-i18next** 로 구현한다(이슈 #350).
 - SettingsView를 Dock에 배치하여 열기 (선택, Dock only)
 - `settings.json` 직접 텍스트 편집
 
+### 에이전트 연결 설정
+
+상단 `연결 설정`과 Settings 내비게이션은 `agentSetup` 섹션을 연다. 최초 실행에 자동으로 표시하지 않으며 기존 `ui.navigateSettings`도 같은 section ID를 사용한다. 페이지는 Claude Code·Codex·Grok 및 기존 terminal profile을 선택해 설치 검사·공식 설치/로그인 안내·새 pane 실행을 제공한다. 명령 수정은 기존 에이전트 설정으로 이동한다. MCP와 휴대폰 설정은 별도 후속 범위다([ADR-0266](../adr/0266-agent-connection-setup.md)).
+
+Tauri `check_agent_installation(agentId, profileName)`는 저장된 설정에서 명령·프로필을 해석하고 선택한 환경에서 실행 파일 및 고정 `--version`을 검사한다. 결과의 `status`는 `installed | missing | unknown`, `environment`는 `windows | wsl | linux | unknown`이며 확인된 버전과 진단 설명을 선택적으로 제공한다. 사용자 지정 명령 플래그는 probe에 전달하지 않는다. unsupported profile·시간 초과는 `unknown`으로 반환하고 호스트나 다른 WSL 환경으로 폴백하지 않는다. 설치 여부는 로그인 상태를 나타내지 않는다.
+
+자동 검사·에이전트 시작은 기존 PTY가 시작 명령을 실행하는 Windows PowerShell·WSL 프로필을 지원한다. CMD·네이티브 Linux Bash 및 해석 불가능한 래퍼는 `unknown`으로 안내하고, 에이전트 시작 IPC는 지원하지 않는 셸을 오류로 거부한다. 수동 설치·로그인용 셸은 열 수 있다. PowerShell 진단은 저장된 옵션을 임의로 추가 적용하지 않고 실제 PTY 초기화 정책에 맞춘다. 결과에는 서버가 해석한 `effectiveCommand`를 포함한다.
+
+`create_terminal_session`은 명시적 신규 실행을 위한 `agentStartup: { agentId }`와 안내용 새 셸을 위한 `shellOnlyStartup: true`를 받는다. agent 요청은 Rust가 설정에서 재도출한 명령으로, shell-only 요청은 빈 시작 명령으로 이번 생성의 profile startupCommand를 대체한다. 둘은 서로 및 viewer/문자열 startup override와 상호 배타적이다. 이 요청은 frontend runtime의 일회성 의도이며 설정·workspace/layout·session snapshot에 저장하지 않는다. 일반 생성과 기존 세션 복원 경로는 그대로 사용한다.
+
 ### 데스크톱 설정 화면 구성
 
 - UI 기본 폰트는 앱에 동봉한 Pretendard Variable v1.3.9다([ADR-0241](../adr/0241-bundled-pretendard-default-ui-font.md)). `ui/public/fonts/pretendard/`의 WOFF2(2,057,688바이트)와 라이선스를 함께 배포하고 `index.css`의 `@font-face`가 로컬에서 로딩한다. `--ui-font-default`는 `"Pretendard Variable", sans-serif`이며 `appearance.uiFontFamily = ""`는 이 기본값을 뜻한다. 명시한 UI 폰트는 `useAppTheme`가 앞에 붙인다. 터미널·콘텐츠 폰트와 Remote 폰트 정책은 바뀌지 않는다.

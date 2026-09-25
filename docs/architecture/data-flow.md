@@ -1359,6 +1359,14 @@ Windows·Linux release의 업데이트 상태는 Rust `UpdateManager`가 단독 
 
 ## 13. Session Persistence & Cache
 
+### 에이전트 연결 페이지의 일회성 시작
+
+Settings `agentSetup`의 설치 검사는 선택한 agent/profile에 묶인 요청이며, 선택이나 관련 설정이 바뀌면 이전 결과를 무효화한다. 늦게 도착한 이전 요청 결과로 현재 선택의 상태를 갱신하지 않는다. 설치 검사·PTY 준비·로그인은 별개의 상태로 다룬다([ADR-0266](../adr/0266-agent-connection-setup.md)).
+
+사용자가 에이전트 실행 또는 안내용 터미널 열기를 누르면 기존 workspace/pane 생성 경로로 새 terminal pane을 만들고, runtime의 일회성 agent/shell-only 요청을 해당 TerminalView 생성에 전달한다. Rust는 저장된 프로필과 명령에서 시작 동작을 도출한다. 요청은 생성/정리 수명에 맞춰 제거하고 session snapshot·layout export에 넣지 않는다. 생성 실패는 실제 오류로 표시하며 기존 작업 pane은 변경하지 않는다. 이후 재시작의 대화 복원은 기존 session persistence 경로가 소유한다.
+
+새 요청은 pane View를 공개하기 전에 등록한다. pane/workspace 삭제, View 종류·프로필 교체, 구조적 설정 snapshot 재적용은 이전 요청을 정리한다. 같은 터미널의 표시·CWD 속성 갱신은 요청과 결과를 유지한다. 명시적 시작의 IPC는 큐에서 실제 호출하기 직전에 해당 마운트가 취소됐는지 확인해 StrictMode의 폐기된 첫 마운트에서 실행하지 않는다.
+
 ### 13.1 개요
 
 앱 재시작 시 터미널의 이전 출력과 CWD를 복원한다. 프로파일 단위로 제어한다.

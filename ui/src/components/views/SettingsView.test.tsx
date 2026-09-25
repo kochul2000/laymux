@@ -179,6 +179,13 @@ describe("SettingsView", () => {
   });
 
   describe("external navigation (ui.navigateSettings)", () => {
+    it("opens the agent connection section", () => {
+      act(() => useUiStore.getState().setSettingsNavTarget("agentSetup"));
+      render(<SettingsView />);
+      expect(screen.getByTestId("agent-setup-page")).toBeInTheDocument();
+      expect(screen.getByTestId("nav-agentSetup")).toHaveAttribute("aria-current", "page");
+    });
+
     it("shows the section requested through the ui store", () => {
       act(() => useUiStore.getState().setSettingsNavTarget("fileExplorer"));
       render(<SettingsView />);

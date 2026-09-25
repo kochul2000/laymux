@@ -207,6 +207,55 @@ fn initial_execution_host_for_terminal(
     )
 }
 
+/// Resolve the one explicit startup intent before a PTY is allocated. This
+/// keeps the server-owned agent command and the ordinary profile startup on
+/// the same creation path while refusing shells that ignore startup_command.
+fn resolve_profile_startup(
+    settings: &crate::settings::Settings,
+    profile: Option<&crate::settings::Profile>,
+    profile_name: &str,
+    has_viewer: bool,
+    has_override: bool,
+    agent: Option<&super::AgentStartupRequest>,
+    shell_only: bool,
+) -> Result<String, String> {
+    let intent_count = usize::from(has_viewer)
+        + usize::from(has_override)
+        + usize::from(agent.is_some())
+        + usize::from(shell_only);
+    if intent_count > 1 {
+        return Err("Terminal startup requests are mutually exclusive".into());
+    }
+    if agent.is_some() || shell_only {
+        let selected =
+            profile.ok_or_else(|| format!("Terminal profile '{profile_name}' does not exist"))?;
+        if let Some(agent) = agent {
+            let line = if selected.command_line.trim().is_empty() {
+                TerminalSession::profile_command_line(profile_name)
+            } else {
+                &selected.command_line
+            };
+            let executable = line.split_whitespace().next().unwrap_or("");
+            let shell = crate::terminal::detect_shell_type(executable);
+            if !cfg!(windows)
+                || !matches!(
+                    shell,
+                    crate::terminal::ShellType::PowerShell | crate::terminal::ShellType::Wsl
+                )
+            {
+                return Err(format!(
+                    "Agent startup is unsupported for terminal profile '{profile_name}'"
+                ));
+            }
+            return super::agent_startup_command(settings, &agent.agent_id);
+        }
+        return Ok(String::new());
+    }
+    Ok(profile
+        .map(|selected| selected.startup_command.clone())
+        .unwrap_or_default())
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn create_terminal_session(
@@ -220,6 +269,8 @@ pub async fn create_terminal_session(
     cwd: Option<String>,
     startup_command_override: Option<String>,
     viewer: Option<super::ViewerStartupRequest>,
+    agent_startup: Option<super::AgentStartupRequest>,
+    shell_only_startup: Option<bool>,
     state: State<'_, Arc<AppState>>,
     app: AppHandle,
 ) -> Result<TerminalSession, String> {
@@ -246,9 +297,15 @@ pub async fn create_terminal_session(
     let command_line = matched_profile
         .map(|p| p.command_line.clone())
         .unwrap_or_default();
-    if viewer.is_some() && startup_command_override.is_some() {
-        return Err("Viewer startup and startup command override are mutually exclusive".into());
-    }
+    let profile_startup = resolve_profile_startup(
+        &settings,
+        matched_profile,
+        &profile,
+        viewer.is_some(),
+        startup_command_override.is_some(),
+        agent_startup.as_ref(),
+        shell_only_startup == Some(true),
+    )?;
 
     let viewer_startup = if let Some(request) = viewer.as_ref() {
         let selected_profile = matched_profile
@@ -299,9 +356,6 @@ pub async fn create_terminal_session(
     } else {
         None
     };
-    let profile_startup = matched_profile
-        .map(|p| p.startup_command.clone())
-        .unwrap_or_default();
     // Match the same effective executable that the PTY spawn path classifies.
     // Only a validated native Windows Codex restore arms the one-shot stale
     // OSC 10/11 reply guard; launch timing remains unchanged on every host.
@@ -2193,6 +2247,120 @@ mod tests {
     use std::sync::mpsc;
     use std::thread;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn structured_agent_startup_uses_server_settings_and_replaces_profile_startup() {
+        let mut settings = crate::settings::Settings::default();
+        settings.codex.command = "codex --yolo".into();
+        let profile = crate::settings::Profile {
+            name: "PowerShell".into(),
+            command_line: "powershell.exe -NoLogo".into(),
+            startup_command: "echo existing startup".into(),
+            ..Default::default()
+        };
+        let agent = super::super::AgentStartupRequest {
+            agent_id: "codex".into(),
+        };
+        if cfg!(windows) {
+            assert_eq!(
+                resolve_profile_startup(
+                    &settings,
+                    Some(&profile),
+                    &profile.name,
+                    false,
+                    false,
+                    Some(&agent),
+                    false
+                )
+                .unwrap(),
+                "codex --yolo"
+            );
+        } else {
+            assert!(resolve_profile_startup(
+                &settings,
+                Some(&profile),
+                &profile.name,
+                false,
+                false,
+                Some(&agent),
+                false
+            )
+            .is_err());
+        }
+        assert_eq!(
+            resolve_profile_startup(
+                &settings,
+                Some(&profile),
+                &profile.name,
+                false,
+                false,
+                None,
+                true
+            )
+            .unwrap(),
+            ""
+        );
+        assert_eq!(
+            resolve_profile_startup(
+                &settings,
+                Some(&profile),
+                &profile.name,
+                false,
+                false,
+                None,
+                false
+            )
+            .unwrap(),
+            "echo existing startup"
+        );
+    }
+
+    #[test]
+    fn structured_startup_rejects_conflicts_missing_profiles_and_unsupported_shells() {
+        let settings = crate::settings::Settings::default();
+        let agent = super::super::AgentStartupRequest {
+            agent_id: "claude".into(),
+        };
+        let profile = crate::settings::Profile {
+            name: "CMD".into(),
+            command_line: "cmd.exe".into(),
+            ..Default::default()
+        };
+        assert!(resolve_profile_startup(
+            &settings,
+            Some(&profile),
+            "CMD",
+            true,
+            false,
+            Some(&agent),
+            false
+        )
+        .is_err());
+        assert!(
+            resolve_profile_startup(&settings, Some(&profile), "CMD", false, true, None, true)
+                .is_err()
+        );
+        assert!(resolve_profile_startup(
+            &settings,
+            None,
+            "removed",
+            false,
+            false,
+            Some(&agent),
+            false
+        )
+        .is_err());
+        assert!(resolve_profile_startup(
+            &settings,
+            Some(&profile),
+            "CMD",
+            false,
+            false,
+            Some(&agent),
+            false
+        )
+        .is_err());
+    }
 
     struct SharedTestWriter(Arc<Mutex<Vec<u8>>>);
 

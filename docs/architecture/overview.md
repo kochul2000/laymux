@@ -227,6 +227,8 @@ Workspace (Independent)
 
 ### 4.2 인스턴스 오버라이드 레이어 (Pane / View)
 
+에이전트 연결 페이지는 기존 Settings의 `agentSetup` 섹션으로 제공한다. 에이전트·프로필의 구성은 기존 settings store가 소유하고, 설치 진단은 선택한 실행 환경을 해석하는 Rust IPC가 수행한다. 명시적인 새 pane의 agent/shell-only 시작 의도는 frontend runtime에서만 보유하며 pane 구성·설정·레이아웃으로 영속하지 않는다([ADR-0266](../adr/0266-agent-connection-setup.md)).
+
 사용자 구성(`settings.json`)과 UI 상태(localStorage)를 엄격히 분리한다.
 
 - **구성 (settings.json)**: 사용자가 의도적으로 편집·유지하는 값. 프로파일, ProfileDefaults, 키바인딩, 워크스페이스 레이아웃(pane 위치/view 타입) 등.

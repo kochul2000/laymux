@@ -5,6 +5,8 @@ import { removePaneAndRedistribute } from "./pane-removal";
 import { useOverridesStore } from "./overrides-store";
 import { useCwdPropagateStore } from "./cwd-propagate-store";
 import { useTerminalRestartStore } from "./terminal-restart-store";
+import { useAgentStartupStore } from "./agent-startup-store";
+import type { AgentStartupIntent } from "./agent-startup-store";
 import { resolvePaneCwd } from "@/lib/pane-cwd";
 import { clearComposerHistoryForWorkspace } from "@/lib/terminal-input-composer-state";
 
@@ -119,7 +121,11 @@ interface WorkspaceState {
    * pane id 와 view 설정은 보존된다. 소스가 1개뿐이면(빈 워크스페이스 방지) 무시.
    */
   movePaneToWorkspace: (paneId: string, targetWorkspaceId: string) => void;
-  setPaneView: (paneIndex: number, view: ViewInstanceConfig) => void;
+  setPaneView: (
+    paneIndex: number,
+    view: ViewInstanceConfig,
+    startupIntent?: AgentStartupIntent,
+  ) => void;
 
   // Layout actions
   exportAsNewLayout: (name: string) => void;
@@ -244,6 +250,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         cwdPropagate.clear(p.id);
         // 재시작 요청도 pane 수명에 묶인다(ADR-0113).
         useTerminalRestartStore.getState().forgetRestart(p.id);
+        useAgentStartupStore.getState().clear(p.id);
       }
     }
   },
@@ -343,6 +350,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       useCwdPropagateStore.getState().clear(removedPaneId);
       // 재시작 요청도 pane 수명에 묶인다(ADR-0113).
       useTerminalRestartStore.getState().forgetRestart(removedPaneId);
+      useAgentStartupStore.getState().clear(removedPaneId);
     }
   },
 
@@ -438,14 +446,26 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     }));
   },
 
-  setPaneView: (paneIndex, view) => {
+  setPaneView: (paneIndex, view, startupIntent) => {
     const ws = get().getActiveWorkspace();
     if (!ws) return;
     if (paneIndex < 0 || paneIndex >= ws.panes.length) return;
 
     const prev = ws.panes[paneIndex];
     const viewTypeChanged = prev.view.type !== view.type;
+    const terminalProfileChanged =
+      prev.view.type === "TerminalView" && prev.view.profile !== view.profile;
     const newPanes = ws.panes.map((p, i) => (i === paneIndex ? { ...p, view } : p));
+
+    // A different view/profile retires its one-shot startup. CWD and other
+    // metadata edits within the same terminal must preserve both a pending
+    // request and a reported ready/failed outcome.
+    if (viewTypeChanged || terminalProfileChanged || startupIntent) {
+      useAgentStartupStore.getState().clear(prev.id);
+    }
+    // Register explicit replacement intent before publishing TerminalView so
+    // subscribers cannot mount it before the request exists.
+    if (startupIntent) useAgentStartupStore.getState().request(prev.id, startupIntent);
 
     set((state) => ({
       workspaces: state.workspaces.map((w) => (w.id === ws.id ? { ...w, panes: newPanes } : w)),

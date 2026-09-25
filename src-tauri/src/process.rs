@@ -50,6 +50,82 @@ fn drain<R: Read + Send + 'static>(source: Option<R>) -> std::sync::mpsc::Receiv
     rx
 }
 
+/// Collect at most `limit` bytes while draining the rest so a chatty child
+/// cannot block or grow this process's memory without bound.
+fn drain_bounded<R: Read + Send + 'static>(
+    source: Option<R>,
+    limit: usize,
+) -> std::sync::mpsc::Receiver<Vec<u8>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut captured = Vec::with_capacity(limit);
+        if let Some(mut reader) = source {
+            let mut chunk = [0; 4096];
+            while let Ok(size) = reader.read(&mut chunk) {
+                if size == 0 {
+                    break;
+                }
+                let keep = size.min(limit.saturating_sub(captured.len()));
+                captured.extend_from_slice(&chunk[..keep]);
+            }
+        }
+        let _ = tx.send(captured);
+    });
+    rx
+}
+
+/// A bounded-output, bounded-time variant for diagnostics that invoke CLIs.
+/// On timeout the direct child is reaped; Windows also attempts a bounded
+/// `taskkill /T` before reaping it. Detached descendants that escape that
+/// process tree are outside this helper's guarantee. Pipe reader threads are
+/// never joined and their captured memory stays within `output_limit`.
+pub fn output_bounded_with_timeout(
+    command: &mut Command,
+    timeout: Duration,
+    output_limit: usize,
+) -> std::io::Result<Output> {
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let stdout_rx = drain_bounded(child.stdout.take(), output_limit);
+    let stderr_rx = drain_bounded(child.stderr.take(), output_limit);
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait()? {
+            Some(status) => break status,
+            None if Instant::now() >= deadline => {
+                // Keep the direct child's OS handle alive until the process
+                // tree is terminated so Windows cannot recycle its PID first.
+                #[cfg(windows)]
+                {
+                    let mut tree = headless_command("taskkill");
+                    tree.args(["/PID", &child.id().to_string(), "/T", "/F"]);
+                    let _ = status_with_timeout(&mut tree, Duration::from_secs(1));
+                }
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "diagnostic process timed out",
+                ));
+            }
+            None => std::thread::sleep(EXIT_POLL_INTERVAL),
+        }
+    };
+    let drain_deadline = Instant::now() + DRAIN_GRACE;
+    let stdout = stdout_rx.recv_timeout(DRAIN_GRACE).unwrap_or_default();
+    let stderr = stderr_rx
+        .recv_timeout(drain_deadline.saturating_duration_since(Instant::now()))
+        .unwrap_or_default();
+    Ok(Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
 /// Run `command` to completion, killing it once it outlives `timeout`.
 ///
 /// `Command::output()` waits forever. For a process that talks to the network
@@ -213,5 +289,39 @@ mod tests {
             .expect_err("slow status-only command must not be waited on forever");
         assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn bounded_diagnostic_discards_excess_output() {
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = headless_command("powershell.exe");
+            command.args([
+                "-NoProfile",
+                "-Command",
+                "[Console]::Out.Write(('x' * 50000))",
+            ]);
+            command
+        };
+        #[cfg(not(windows))]
+        let mut command = {
+            let mut command = headless_command("sh");
+            command.args(["-c", "yes x | head -c 50000"]);
+            command
+        };
+        let output = output_bounded_with_timeout(&mut command, Duration::from_secs(10), 128)
+            .expect("bounded diagnostic completes");
+        assert!(output.status.success());
+        assert_eq!(output.stdout.len(), 128);
+    }
+
+    #[test]
+    fn bounded_diagnostic_releases_caller_after_timeout_with_open_pipes() {
+        let started = Instant::now();
+        let error =
+            output_bounded_with_timeout(&mut slow_command(), Duration::from_millis(300), 64)
+                .expect_err("slow diagnostic must time out");
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(3));
     }
 }

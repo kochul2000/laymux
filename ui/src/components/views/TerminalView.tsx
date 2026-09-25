@@ -68,6 +68,7 @@ import {
   type TerminalActivityInfo,
 } from "@/stores/terminal-store";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
+import { useAgentStartupStore } from "@/stores/agent-startup-store";
 import { useSettingsStore, defaultProfileDefaults } from "@/stores/settings-store";
 import { useOverridesStore, FONT_ZOOM_MIN, FONT_ZOOM_MAX } from "@/stores/overrides-store";
 import { toSupportedCursorShape, toXtermCursorOptions } from "@/lib/cursor-settings";
@@ -710,6 +711,7 @@ interface TerminalViewProps {
   lastGrokSession?: string;
   /** Override the startup command (takes precedence over agent session restore). */
   startupCommandOverride?: string;
+  agentStartupIntent?: "claude" | "codex" | "grok" | "shell";
   /** Structured external viewer command. Rust validates and quotes the path. */
   viewerStartup?: ViewerStartupRequest;
 }
@@ -739,6 +741,7 @@ export function TerminalView({
   lastAgentFresh,
   lastGrokSession,
   startupCommandOverride,
+  agentStartupIntent,
   viewerStartup,
 }: TerminalViewProps) {
   const { t } = useTranslation("common");
@@ -6003,7 +6006,10 @@ export function TerminalView({
                 ? `${grokCommand} --resume ${safeGrokSessionId}`
                 : undefined;
 
-    if (startupOverride && !viewerStartup) {
+    if (
+      (startupOverride || (agentStartupIntent && agentStartupIntent !== "shell")) &&
+      !viewerStartup
+    ) {
       useTerminalStore.getState().updateInstanceInfo(instanceId, {
         attributionPendingUntil: Date.now() + SESSION_ATTRIBUTION_STARTUP_GRACE_MS,
       });
@@ -6036,13 +6042,22 @@ export function TerminalView({
         cwdSendRef.current,
         cwdReceiveRef.current,
         isFreshRestart ? restartCwd : shouldRestoreCwd ? lastCwd : undefined,
-        viewerStartup ?? startupOverride,
+        agentStartupIntent === "shell"
+          ? { shellOnlyStartup: true }
+          : agentStartupIntent
+            ? { agentStartup: { agentId: agentStartupIntent } }
+            : (viewerStartup ?? startupOverride),
+        ...(agentStartupIntent ? ([() => !cancelled] as const) : ([] as const)),
       )
         .then((createdSession) => {
           initialExecutionHost = createdSession.initialExecutionHost ?? "unknown";
           stabilizeNativeWindowsOutput = shouldStabilizeInitialExecutionHost(initialExecutionHost);
           terminalSessionReady = true;
           if (cancelled) return;
+          if (agentStartupIntent && paneId) {
+            useAgentStartupStore.getState().consume(paneId);
+            useAgentStartupStore.getState().report(paneId, { status: "ready" });
+          }
           if (remoteReturnResizeDirtyRef.current) startRemoteResizeSync();
           useTerminalStore.getState().updateInstanceInfo(instanceId, {
             sessionReady: true,
@@ -6062,6 +6077,12 @@ export function TerminalView({
         })
         .catch((err) => {
           if (cancelled) return;
+          if (agentStartupIntent && paneId) {
+            useAgentStartupStore.getState().consume(paneId);
+            useAgentStartupStore
+              .getState()
+              .report(paneId, { status: "failed", detail: String(err) });
+          }
           console.error(`[TerminalView] Failed to create session ${instanceId}:`, err);
           trackedTerminalWrite(`\r\n\x1b[31mFailed to create terminal session: ${err}\x1b[0m\r\n`);
           settleFailedStartup();

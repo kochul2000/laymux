@@ -22,6 +22,7 @@ import { useDockStore } from "@/stores/dock-store";
 import { useOverridesStore } from "@/stores/overrides-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useAgentStartupStore } from "@/stores/agent-startup-store";
 import { defaultWidgets } from "@/lib/widget-placement";
 import {
   applySettingsSnapshot,
@@ -35,6 +36,7 @@ describe("settings snapshot", () => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useDockStore.setState(useDockStore.getInitialState());
     useOverridesStore.setState(useOverridesStore.getInitialState());
+    useAgentStartupStore.setState(useAgentStartupStore.getInitialState());
     vi.clearAllMocks();
   });
 
@@ -72,6 +74,14 @@ describe("settings snapshot", () => {
     expect(snapshot.workspaces).toHaveLength(1);
     expect(snapshot.layouts).toHaveLength(1);
     expect(snapshot.docks).toHaveLength(4);
+  });
+
+  it("drops pending agent startup on a structural settings reload", async () => {
+    const snapshot = await collectSettingsSnapshot();
+    const paneId = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].id;
+    useAgentStartupStore.getState().request(paneId, "claude");
+    applySettingsSnapshot(snapshot, { includeStructural: true });
+    expect(useAgentStartupStore.getState().requests[paneId]).toBeUndefined();
   });
 
   it("applies validated preference settings to the live stores", async () => {

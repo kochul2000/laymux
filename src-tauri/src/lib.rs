@@ -256,6 +256,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             commands::create_terminal_session,
+            commands::check_agent_installation,
             commands::get_terminal_geometry_capabilities,
             commands::resize_terminal,
             commands::write_to_terminal,

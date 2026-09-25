@@ -13,6 +13,7 @@ import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { useRemoteAccessStore } from "@/stores/remote-access-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { defaultWidgets } from "@/lib/widget-placement";
+import { useUiStore } from "@/stores/ui-store";
 
 describe("GridEditToolbar", () => {
   beforeEach(() => {
@@ -21,6 +22,7 @@ describe("GridEditToolbar", () => {
     useFileViewerStore.setState(useFileViewerStore.getInitialState());
     useRemoteAccessStore.setState(useRemoteAccessStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
+    useUiStore.setState(useUiStore.getInitialState());
   });
 
   it("leaves layout export to the workspace selector view", () => {
@@ -71,6 +73,14 @@ describe("GridEditToolbar", () => {
   it("renders the file viewer button", () => {
     render(<GridEditToolbar />);
     expect(screen.getByTestId("file-viewer-btn")).toBeInTheDocument();
+  });
+
+  it("opens the agent connection section from the top bar", async () => {
+    const user = userEvent.setup();
+    render(<GridEditToolbar />);
+    await user.click(screen.getByTestId("agent-setup-entry"));
+    expect(useUiStore.getState().settingsModalOpen).toBe(true);
+    expect(useUiStore.getState().settingsNavTarget).toBe("agentSetup");
   });
 
   it("renders the file viewer button with the Lucide file-search icon", () => {
