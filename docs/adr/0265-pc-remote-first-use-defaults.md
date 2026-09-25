@@ -1,6 +1,6 @@
 # 0265. PC·Remote의 첫 사용 기본 구성을 정한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-24
 - Source: 사용자 요구(현재 Remote 구성을 기본으로 사용하되 `u-p1-mg` 제외, 양쪽 플로팅 활성, 기존 110% 크기를 새 100% 기준으로 사용, PC pane의 pinned 기본과 우측 GitHub View 추가), [issue #1075](https://github.com/kochul2000/laymux/issues/1075), [api-contracts.md §13.4](../architecture/api-contracts.md#134-terminal-control)
 - 관계: ADR-0209의 기기 로컬 소유권을 유지하고, ADR-0237의 패드 초기 비활성 기본값만 대체한다. ADR-0239의 이동·불투명도 계약은 유지한다.
