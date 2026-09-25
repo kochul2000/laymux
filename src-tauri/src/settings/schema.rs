@@ -167,7 +167,7 @@ const ENTRIES: &[MetadataEntry] = &[
     },
     MetadataEntry {
         path: "/controlBar",
-        description: "pane control bar의 기본 표시 방식과 idle 동작입니다.",
+        description: "pane control bar의 기본 표시 방식과 idle 동작입니다. 새 pane의 기본 모드는 pinned이며, 저장된 hover/minimized 선택과 pane별 override가 우선합니다.",
         sensitive: false,
         apply_mode: ApplyMode::Live,
     },
@@ -437,7 +437,7 @@ const ENTRIES: &[MetadataEntry] = &[
     },
     MetadataEntry {
         path: "/docks",
-        description: "dock pane 구조 상태입니다. 일반 patch 대신 dock MCP를 사용합니다.",
+        description: "dock pane 구조 상태입니다. 새 설치의 오른쪽 dock은 Memo, File Explorer, GitHub 세 pane이지만 저장된 dock 구조가 우선합니다. 일반 patch 대신 dock MCP를 사용합니다.",
         sensitive: false,
         apply_mode: ApplyMode::Live,
     },

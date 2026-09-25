@@ -160,9 +160,9 @@ test("floating pads and repeated tap buttons persist with independent size and p
   page,
 }, testInfo) => {
   await open(page);
-  await expect(page.locator("#floatingControls > *")).toHaveCount(0);
-  await page.getByLabel("Arrow pad enabled").check();
-  await page.getByLabel("Pane / alert pad enabled").check();
+  await expect(page.locator("#floatingControls > *")).toHaveCount(2);
+  await expect(page.getByLabel("Arrow pad enabled")).toBeChecked();
+  await expect(page.getByLabel("Pane / alert pad enabled")).toBeChecked();
   await expect(page.getByLabel("Pane / alert pad Y", { exact: true })).toHaveCount(0);
   await expect(
     page.getByText("Hold the center of a pad, then drag to move.", { exact: false }),
@@ -350,7 +350,7 @@ test("rejects unknown actions and malformed geometry without losing valid contro
     ),
   );
   await open(page);
-  await expect(page.locator("#floatingControls > *")).toHaveCount(2);
+  await expect(page.locator("#floatingControls > *")).toHaveCount(3);
   await expect(page.getByLabel("Arrow pad size")).toHaveValue("128");
   await expect(page.getByLabel("Arrow pad opacity")).toHaveValue("50");
   await expect(

@@ -88,7 +88,10 @@ describe("Remote 설정 MCP 기기 적용", () => {
     zones.main.center = ["keys"];
     expect(() => validateRemoteSettings(defaults, { inputBarZones: zones })).toThrow();
     const candidate = validateRemoteSettings(defaults, {
-      inputBarUserKeys: [{ id: "u-x", label: "X", seq: "\t", submit: true }],
+      inputBarUserKeys: [
+        ...defaults.inputBarUserKeys,
+        { id: "u-x", label: "X", seq: "\t", submit: true },
+      ],
       floatingButtons: [
         { id: "f-x", actionId: "soft:u-x", enabled: true, size: 64, opacity: 0.5, x: 0.5, y: 0.5 },
       ],

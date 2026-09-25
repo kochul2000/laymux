@@ -19,6 +19,7 @@ import {
   saveSettings,
 } from "@/lib/tauri-api";
 import { useDockStore } from "@/stores/dock-store";
+import { useOverridesStore } from "@/stores/overrides-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { defaultWidgets } from "@/lib/widget-placement";
@@ -33,6 +34,7 @@ describe("settings snapshot", () => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useDockStore.setState(useDockStore.getInitialState());
+    useOverridesStore.setState(useOverridesStore.getInitialState());
     vi.clearAllMocks();
   });
 
@@ -97,6 +99,45 @@ describe("settings snapshot", () => {
     });
     expect(useSettingsStore.getState().paneClear).toEqual(snapshot.paneClear);
     expect(useSettingsStore.getState().github.fontSize).toBe(19);
+  });
+
+  it("loads fresh pinned controls and the three right-dock views without changing their geometry", async () => {
+    const snapshot = await collectSettingsSnapshot();
+    const expected = snapshot.docks.find((dock) => dock.position === "right")!;
+    applySettingsSnapshot(snapshot);
+
+    expect(useSettingsStore.getState().controlBar.defaultMode).toBe("pinned");
+    const right = useDockStore.getState().getDock("right")!;
+    expect(right.visible).toBe(true);
+    expect(right.panes).toEqual(expected.panes);
+    expect(right.panes.map((pane) => pane.view.type)).toEqual([
+      "MemoView",
+      "FileExplorerView",
+      "GitHubView",
+    ]);
+    expect(right.panes.map(({ y, h }) => [y, h])).toEqual([
+      [0, 1 / 3],
+      [1 / 3, 1 / 3],
+      [2 / 3, 1 / 3],
+    ]);
+  });
+
+  it("keeps a saved right dock and pane override instead of adding new default views", async () => {
+    const paneId = useWorkspaceStore.getState().workspaces[0].panes[0].id;
+    useOverridesStore.getState().setPaneOverride(paneId, { controlBarMode: "minimized" });
+    const snapshot = await collectSettingsSnapshot();
+    snapshot.controlBar.defaultMode = "hover";
+    const right = snapshot.docks.find((dock) => dock.position === "right")!;
+    right.visible = false;
+    right.panes = [{ ...right.panes[1], x: 0, y: 0, w: 1, h: 1 }];
+
+    applySettingsSnapshot(snapshot);
+
+    expect(useSettingsStore.getState().controlBar.defaultMode).toBe("hover");
+    const loaded = useDockStore.getState().getDock("right")!;
+    expect(loaded.visible).toBe(false);
+    expect(loaded.panes).toEqual(right.panes);
+    expect(useOverridesStore.getState().paneOverrides[paneId].controlBarMode).toBe("minimized");
   });
 
   it("saves before applying so a persistence failure leaves runtime state unchanged", async () => {

@@ -101,11 +101,14 @@
         --fs-sm: 11px;
         --fs-md: 13px;
         --remote-composer-font-size: 16px;
-        --remote-composer-idle-opacity: 0.55;
-        --remote-composer-focused-opacity: 0.8;
+        --remote-composer-idle-opacity: 0.5;
+        --remote-composer-focused-opacity: 0.7;
         --remote-composer-active-opacity: 1;
         --remote-menu-font-size: 13px;
-        --remote-navigation-width: 360px;
+        --remote-navigation-width: 300px;
+        --remote-button-baseline-scale: 1.1;
+        --remote-main-button-scale: var(--remote-button-baseline-scale);
+        --remote-keys-button-scale: var(--remote-button-baseline-scale);
         --touch-selection-handle-size: 22px;
         /* Compact controls in the Remote header share one border-box height. */
         --header-control-height: 26px;

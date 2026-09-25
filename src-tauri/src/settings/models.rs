@@ -1349,7 +1349,7 @@ fn default_hover_idle_seconds() -> u64 {
 }
 
 fn default_control_bar_mode() -> String {
-    "minimized".to_string()
+    "pinned".to_string()
 }
 
 impl Default for ControlBarSettings {
@@ -2222,14 +2222,35 @@ impl Default for Settings {
                     },
                 }],
             }],
-            docks: vec![DockSetting {
-                position: "left".into(),
-                active_view: Some("WorkspaceSelectorView".into()),
-                views: vec!["WorkspaceSelectorView".into()],
-                visible: true,
-                size: default_dock_size(),
-                panes: Vec::new(),
-            }],
+            docks: vec![
+                DockSetting {
+                    position: "left".into(),
+                    active_view: Some("WorkspaceSelectorView".into()),
+                    views: vec!["WorkspaceSelectorView".into()],
+                    visible: true,
+                    size: default_dock_size(),
+                    panes: Vec::new(),
+                },
+                DockSetting {
+                    position: "right".into(),
+                    active_view: Some("MemoView".into()),
+                    views: Vec::new(),
+                    visible: true,
+                    size: default_dock_size(),
+                    panes: ["MemoView", "FileExplorerView", "GitHubView"]
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, view_type)| DockPaneSetting {
+                            id: format!("dp-default-right-{index}"),
+                            view: serde_json::json!({ "type": view_type }),
+                            x: 0.0,
+                            y: index as f64 / 3.0,
+                            w: 1.0,
+                            h: 1.0 / 3.0,
+                        })
+                        .collect(),
+                },
+            ],
             terminal: TerminalSettings::default(),
             paste: PasteSettings::default(),
             control_bar: ControlBarSettings::default(),

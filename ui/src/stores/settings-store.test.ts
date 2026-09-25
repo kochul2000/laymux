@@ -19,6 +19,16 @@ describe("settings-store", () => {
     expect(useSettingsStore.getState().language).toBe("system");
   });
 
+  it("pins new pane control bars while preserving saved hover and minimized modes", () => {
+    expect(useSettingsStore.getState().controlBar.defaultMode).toBe("pinned");
+    for (const defaultMode of ["hover", "minimized"] as const) {
+      useSettingsStore
+        .getState()
+        .loadFromSettings({ controlBar: { defaultMode, hoverIdleSeconds: 2 } });
+      expect(useSettingsStore.getState().controlBar.defaultMode).toBe(defaultMode);
+    }
+  });
+
   it("exposes safe focused-pane clear defaults", () => {
     expect(useSettingsStore.getState().paneClear).toEqual(DEFAULT_PANE_CLEAR);
   });

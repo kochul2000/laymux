@@ -249,12 +249,12 @@ import {
           mainButtonScale: 100,
           keysButtonScale: 100,
           navigationPinned: false,
-          navigationWidth: 360,
+          navigationWidth: 300,
           navigationPinCutoff: 720,
-          composerIdleOpacity: 55,
-          composerFocusedOpacity: 80,
+          composerIdleOpacity: 50,
+          composerFocusedOpacity: 70,
           composerActiveOpacity: 100,
-          snapshotMaxKib: 4,
+          snapshotMaxKib: 8,
           scrollSensitivity: 1,
           fastScrollSensitivity: 5,
           touchScrollSensitivity: 1,
@@ -1223,11 +1223,11 @@ import {
             100,
           );
           const focused = Math.min(
-            normalizeRemoteComposerOpacity(settings?.composerFocusedOpacity, 80),
+            normalizeRemoteComposerOpacity(settings?.composerFocusedOpacity, 70),
             active,
           );
           const idle = Math.min(
-            normalizeRemoteComposerOpacity(settings?.composerIdleOpacity, 55),
+            normalizeRemoteComposerOpacity(settings?.composerIdleOpacity, 50),
             focused,
           );
           return {
@@ -1347,7 +1347,7 @@ import {
         }
 
         function normalizeRemoteButtonScale(value) {
-          return Math.round(normalizeRemoteNavigationSize(value, 100, 80, 160) / 10) * 10;
+          return Math.round(normalizeRemoteNavigationSize(value, DEFAULT_REMOTE_DISPLAY_SETTINGS.mainButtonScale, 80, 160) / 10) * 10;
         }
 
         function applyRemoteDisplaySettings(settings) {
@@ -1364,8 +1364,13 @@ import {
           remoteMenuFontSizeInput.value = String(normalized.menuFontSize);
           $("remoteMainButtonScale").textContent = `${normalized.mainButtonScale}%`;
           $("remoteKeysButtonScale").textContent = `${normalized.keysButtonScale}%`;
-          document.documentElement.style.setProperty("--remote-main-button-scale", String(normalized.mainButtonScale / 100));
-          document.documentElement.style.setProperty("--remote-keys-button-scale", String(normalized.keysButtonScale / 100));
+          // The user-facing percentage is relative to the unchanged physical
+          // baseline, so 100% remains the size previously shown as 110%.
+          const buttonBaselineScale = Number.parseFloat(
+            getComputedStyle(document.documentElement).getPropertyValue("--remote-button-baseline-scale"),
+          ) || 1;
+          document.documentElement.style.setProperty("--remote-main-button-scale", String(buttonBaselineScale * normalized.mainButtonScale / 100));
+          document.documentElement.style.setProperty("--remote-keys-button-scale", String(buttonBaselineScale * normalized.keysButtonScale / 100));
           document.querySelectorAll("[data-button-scale]").forEach((button) => {
             const value = normalized[button.dataset.buttonScale];
             button.disabled = Number(button.dataset.step) < 0 ? value <= 80 : value >= 160;
@@ -3467,7 +3472,7 @@ import {
             const stored = localStorage.getItem(inputModeKey);
             if (stored === "direct" || stored === "composer") return stored;
           } catch (_) {}
-          return matchMedia("(pointer: coarse)").matches ? "composer" : "direct";
+          return "composer";
         }
 
         function savePreferredInputMode(mode) {
@@ -10492,23 +10497,25 @@ import {
         const USER_KEY_LABEL_MAX = 8;
         const USER_KEY_SEQ_MAX = 32;
         const USER_KEY_MAX = 24;
+        const DEFAULT_USER_KEYS = Object.freeze([
+          Object.freeze({ id: "u-defaultclear", label: "/clr", seq: "/clear", submit: true }),
+        ]);
         const DEFAULT_KEYBAR = {
           expanded: false,
-          userKeys: [],
+          userKeys: DEFAULT_USER_KEYS,
           zones: {
             main: {
-              left: ["soft:c-c", "soft:q", "soft:esc"],
+              left: ["soft:c-c", "soft:q", "soft:esc", "soft:u-defaultclear"],
               center: [],
               right: ["keyboard", "keys", "send"],
             },
             expanded: {
-              left: ["composer", "soft:navPad", "soft:tab", "soft:stab"],
+              left: ["composer", "soft:navPad", "soft:notifOldest", "soft:tab"],
               center: [],
               right: [
                 "soft:c-u",
                 "soft:c-l",
                 "soft:c-t",
-                "soft:c-j",
                 "soft:dpad",
                 "soft:pgup",
                 "soft:pgdn",
@@ -10554,18 +10561,20 @@ import {
           return zones;
         }
 
-        function defaultInputZones() {
+        function defaultInputZones(knownIds = null) {
           const zones = emptyInputZones();
           for (const row of INPUT_ACTION_ROWS) {
             for (const segment of INPUT_ACTION_SEGMENTS) {
-              zones[row][segment] = [...DEFAULT_KEYBAR.zones[row][segment]];
+              zones[row][segment] = DEFAULT_KEYBAR.zones[row][segment].filter(
+                (actionId) => !knownIds || knownIds.has(actionId),
+              );
             }
           }
           return zones;
         }
 
         function normalizeUserKeys(raw) {
-          if (!Array.isArray(raw)) return [];
+          if (!Array.isArray(raw)) return DEFAULT_USER_KEYS.map((key) => ({ ...key }));
           const keys = [];
           const seen = new Set();
           for (const entry of raw) {
@@ -10602,7 +10611,7 @@ import {
           for (const row of INPUT_ACTION_ROWS) {
             const rawRow = ownProperty(raw, row);
             for (const segment of INPUT_ACTION_SEGMENTS) {
-              if (!Array.isArray(ownProperty(rawRow, segment))) return defaultInputZones();
+              if (!Array.isArray(ownProperty(rawRow, segment))) return defaultInputZones(knownIds);
             }
           }
           const zones = emptyInputZones();
@@ -10789,7 +10798,7 @@ import {
         function resetInputActionLayout() {
           selectedInputActionId = "";
           keyBarConfig.expanded = false;
-          keyBarConfig.zones = defaultInputZones();
+          keyBarConfig.zones = defaultInputZones(knownActionIdSet(keyBarConfig.userKeys));
           commitInputLayout();
         }
 
@@ -11264,16 +11273,16 @@ import {
         }
 
         function normalizeFloatingControls(raw, knownIds) {
-          const geometry = (value, x, enabled = false) => ({
+          const geometry = (value, x, y, enabled = false) => ({
             enabled: typeof value?.enabled === "boolean" ? value.enabled : enabled,
             size: floatingNumber(value?.size, 64, 44, 128),
             opacity: floatingNumber(value?.opacity, 0.5, 0, 1),
             x: floatingNumber(value?.x, x, 0, 1),
-            y: floatingNumber(value?.y, 0.65, 0, 1),
+            y: floatingNumber(value?.y, y, 0, 1),
           });
           const pads = {
-            dpad: geometry(raw?.pads?.dpad, 0.95),
-            navPad: geometry(raw?.pads?.navPad, 0.05),
+            dpad: geometry(raw?.pads?.dpad, 0.9108609136460442, 0.5274580464716007, true),
+            navPad: geometry(raw?.pads?.navPad, 0.10478285610595374, 0.5206913907023182, true),
           };
           const seen = new Set();
           const buttons = [];
@@ -11281,7 +11290,7 @@ import {
             if (!item || typeof item.id !== "string" || !/^f-[a-z0-9-]{1,50}$/.test(item.id) || seen.has(item.id)) continue;
             if (!knownIds.has(item.actionId) || ["soft:dpad", "soft:navPad"].includes(item.actionId)) continue;
             seen.add(item.id);
-            buttons.push({ id: item.id, actionId: item.actionId, ...geometry(item, 0.85, true) });
+            buttons.push({ id: item.id, actionId: item.actionId, ...geometry(item, 0.85, 0.65, true) });
           }
           return { enabled: raw?.enabled !== false, pads, buttons };
         }
