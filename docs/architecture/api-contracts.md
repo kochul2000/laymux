@@ -1581,6 +1581,8 @@ render body의 business field는 `{ "source": "current" }` 또는 `{ "source": "
 
 다운로드는 표시 payload를 재사용하지 않고 `POST /remote/v1/file-viewer/download`로 원본 바이트를 받는다([ADR-0185](../adr/0185-remote-file-viewer-download.md)). `render`는 HTML/Markdown을 원문 대신 sanitize된 preview document로 내려주고 `binary`/`archive`에는 바이트가 없으므로, 오버레이가 들고 있는 것으로 저장하면 사용자가 요청한 파일이 아니게 된다. 데스크톱 커맨드는 `read_file_for_download`이며 응답은 `{path,name,mediaType,base64,size}`다 — `name`은 **파일 이름만**이고 호스트 경로는 요청에만 존재한다. route는 render와 같은 lease+capability 게이트를 쓰며 browser는 8 MiB, Android E2E는 2 MiB 상한을 적용한다. 상한을 넘으면 잘린 본문이 아니라 에러를 반환한다(잘린 다운로드는 손상 파일이다). 브라우저는 `Blob`+`<a download>`로 저장하며 object URL은 지연 해제한다(클릭 직후 동기 해제는 방금 시작된 저장을 취소할 수 있다). 안드로이드 래퍼는 WebView에 `DownloadListener`가 없어 같은 코드가 조용히 실패하므로 `LaymuxNative.saveRemoteFile(name, mediaType, base64)`로 네이티브가 `MediaStore.Downloads`에 쓴다 — 런타임 권한이 필요 없고 `IS_PENDING`으로 바이트를 다 쓴 뒤에만 공개되며, `MediaStore.Downloads`가 없는 Android 9 이하에서는 저장 대신 안내 메시지를 표시한다. 브리지 메서드가 없는 구버전 APK도 같은 방식으로 안내한다. 저장 이름은 호스트가 정한 값이므로 네이티브가 `RemoteDownloadPolicy`로 다시 만든다: 경로 구분자·제어문자·예약문자 치환, 디렉터리를 가리키는 이름은 대체 이름, 길이는 확장자를 보존하며 96자로 절단, 바이트 수는 저장 전 같은 상한으로 재확인.
 
+Android 저장 호출은 주입된 `LaymuxNative` 객체의 메서드로 실행한다. 메서드만 분리해 호출하면 Java bridge가 수신 객체를 확인하지 못해 `non-injected object` 오류로 거부한다. 다운로드 응답을 기다리는 동안에도 브리지 객체 참조를 보존한다.
+
 ### 13.3.2 OAuth Loopback Relay
 
 데스크톱 CLI 의 OAuth "installed app" 플로우(`redirect_uri=http://localhost:{port}`)를 Remote 기기에서 완주시키는 중계다([ADR-0175](../adr/0175-remote-oauth-loopback-relay.md)). Remote 페이지가 열려는 터미널 링크가 loopback `redirect_uri` 를 가진 https auth URL 이고 active lease 를 쥐고 있을 때만 진입하며, 탭 시에는 대상 호스트·포트를 설명하는 확인 모달만 뜨고 사용자가 명시적으로 시작해야 `begin` 이 호출된다.

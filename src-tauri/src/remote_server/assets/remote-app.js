@@ -2421,11 +2421,11 @@ import {
           if (!leaseId || !fileViewerToken || !path || fileViewerDownloadInFlight) return;
           // The wrapper WebView has no download handler of its own, so a browser
           // save silently does nothing there. Refuse rather than pretend.
-          const nativeSave =
+          const nativeDownloadBridge =
             androidE2eMode && typeof window.LaymuxNative?.saveRemoteFile === "function"
-              ? window.LaymuxNative.saveRemoteFile
+              ? window.LaymuxNative
               : null;
-          if (androidE2eMode && !nativeSave) {
+          if (androidE2eMode && !nativeDownloadBridge) {
             setFileViewerMessage("This app version cannot save files. Update the app.", true);
             return;
           }
@@ -2451,8 +2451,9 @@ import {
               if (!payload || typeof payload.base64 !== "string" || typeof payload.name !== "string") {
                 throw new Error("Download response was not usable");
               }
-              if (nativeSave) {
-                nativeSave(payload.name, payload.mediaType || "", payload.base64);
+              if (nativeDownloadBridge) {
+                // Java bridge methods must retain the injected object as their receiver.
+                nativeDownloadBridge.saveRemoteFile(payload.name, payload.mediaType || "", payload.base64);
                 setFileViewerMessage(`Saved ${payload.name} to Downloads.`);
                 return;
               }
