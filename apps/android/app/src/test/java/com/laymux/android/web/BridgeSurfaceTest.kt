@@ -18,6 +18,7 @@ class BridgeSurfaceTest {
                 "setRemoteLease",
                 "disconnectRemote",
                 "openExternalUrl",
+                "openRemoteFile",
                 "saveRemoteFile",
                 "supportsOutputHistoryBudget",
             ),

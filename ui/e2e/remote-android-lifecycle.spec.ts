@@ -81,6 +81,7 @@ type AndroidLifecycleState = {
   outputOpens: number;
   renderRequests: number;
   savedFiles: Array<{ name: string; mediaType: string; base64: string }>;
+  openedFiles: Array<{ name: string; mediaType: string; base64: string }>;
   leases: Array<string | null>;
   releaseRequests: Array<{ leaseId: string }>;
   heldReleaseRequestId: string | null;
@@ -98,6 +99,7 @@ type AndroidLifecycleWindow = typeof window & {
     cancelRemoteHttp: (requestId: string) => void;
     setRemoteLease: (leaseId: string | null) => void;
     saveRemoteFile: (name: string, mediaType: string, base64: string) => void;
+    openRemoteFile?: (name: string, mediaType: string, base64: string) => void;
     disconnectRemote: () => void;
     beginOauthRelay: (sessionId: string, port: string, path: string, authUrl: string) => void;
     cancelOauthRelay: () => void;
@@ -179,6 +181,7 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
         outputOpens: 0,
         renderRequests: 0,
         savedFiles: [],
+        openedFiles: [],
         leases: [],
         releaseRequests: [],
         heldReleaseRequestId: null,
@@ -357,6 +360,12 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
             );
           }
           state.savedFiles.push({ name, mediaType, base64 });
+        },
+        openRemoteFile(name, mediaType, base64) {
+          if (this !== target.LaymuxNative) {
+            throw new Error("openRemoteFile must retain the injected bridge receiver");
+          }
+          state.openedFiles.push({ name, mediaType, base64 });
         },
         disconnectRemote() {
           state.disconnects += 1;
@@ -770,6 +779,33 @@ test("a stale OAuth forward cannot clear a newer relay opened after back", async
     { leaseId: "lease-1", sessionId: "oauth-session-2", pathAndQuery: "/callback?code=new" },
   ]);
   await expect(page.locator("#oauthRelayStatus")).toContainText("200");
+});
+
+test("the Android wrapper opens files through native and explains an outdated APK", async ({
+  page,
+}) => {
+  await installAndroidRemote(page);
+  const state = () =>
+    page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState);
+  await expect.poll(async () => (await state()).outputOpens).toBe(1);
+  await page.locator("#fileExplorerHeader").click();
+  await page.locator("#fileViewerPath").fill("C:\\work\\notes.txt");
+  await page.locator("#openFileViewer").click();
+  await page.locator("#fileViewerOpen").click();
+  await expect
+    .poll(async () => (await state()).openedFiles)
+    .toEqual([{ name: "notes.txt", mediaType: "text/plain", base64: "aG9zdCB0ZXh0" }]);
+  expect((await state()).savedFiles).toEqual([]);
+  expect(page.context().pages()).toHaveLength(1);
+  const before = (await state()).fileViewerRequests.length;
+  await page.evaluate(() => {
+    delete (window as AndroidLifecycleWindow).LaymuxNative.openRemoteFile;
+  });
+  await page.locator("#fileViewerOpen").click();
+  await expect(page.locator("#fileViewerMessage")).toHaveText(
+    "This app version cannot open files. Update the app.",
+  );
+  expect((await state()).fileViewerRequests).toHaveLength(before);
 });
 
 test("the Android wrapper saves a download through native, not the browser path", async ({

@@ -1,6 +1,9 @@
 import { expect, test, type BrowserContext } from "@playwright/test";
 import { fulfillRemoteClientAsset } from "./remote-client-assets";
 
+// The default headless shell downloads PDFs; full Chromium has the native viewer.
+test.use({ channel: "chromium" });
+
 /** 1x1 PNG, so the image branch renders a real decodable bitmap. */
 const PNG_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==";
@@ -415,4 +418,151 @@ test("a download failure is reported without closing the viewer", async ({ conte
   // The button has to come back, not stay stuck on "Saving...".
   await expect(page.locator("#fileViewerDownload")).toBeEnabled();
   await expect(page.locator("#fileViewerDownload")).toHaveText("Download");
+});
+
+test("opens original HTML in an isolated tab next to Download", async ({ context, page }) => {
+  const { downloadRequests } = await installRemoteViewerMocks(context);
+  await page.setViewportSize({ width: 320, height: 640 });
+  await connectRemote(page);
+  await openRemoteFileExplorer(page);
+  await expect(page.locator("#fileViewerOpen")).toBeHidden();
+  await page.locator("#fileViewerPath").fill("C:\\work\\notes.html");
+  await page.locator("#openFileViewer").click();
+  const popupPromise = page.waitForEvent("popup");
+  await page.locator("#fileViewerOpen").click();
+  const popup = await popupPromise;
+  await expect(popup.frameLocator("iframe").locator("h1")).toHaveText("host source");
+  await expect(popup.locator("iframe")).toHaveAttribute("sandbox", "");
+  expect(await popup.evaluate(() => window.opener)).toBeNull();
+  expect(downloadRequests[0]).toEqual({
+    lease: "lease-481",
+    fileViewerCapability: "viewer-481",
+    body: { path: "C:\\work\\notes.html" },
+  });
+  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+  await expect(page.locator("#fileViewerOpen")).toBeEnabled();
+  await page.screenshot({ path: "test-results/remote-file-open-mobile.png" });
+});
+
+test("reports a blocked new tab without fetching the file", async ({ context, page }) => {
+  const { downloadRequests } = await installRemoteViewerMocks(context);
+  await connectRemote(page);
+  await openRemoteFileExplorer(page);
+  await page.locator("#fileViewerPath").fill("C:\\work\\notes.html");
+  await page.locator("#openFileViewer").click();
+  await page.evaluate(() => {
+    window.open = () => null;
+  });
+  await page.locator("#fileViewerOpen").click();
+  await expect(page.locator("#fileViewerMessage")).toContainText("Allow pop-ups");
+  expect(downloadRequests).toEqual([]);
+});
+
+for (const mediaType of ["application/zip", "application/octet-stream"]) {
+  test(`explains unsupported browser Open for ${mediaType}`, async ({ context, page }) => {
+    await installRemoteViewerMocks(context);
+    await context.route("**/file-viewer/download", (route) =>
+      route.fulfill({
+        json: { name: "archive.zip", mediaType, base64: "YQ==" },
+      }),
+    );
+    await connectRemote(page);
+    await openRemoteFileExplorer(page);
+    await page.locator("#fileViewerPath").fill("C:\\work\\archive.zip");
+    await page.locator("#openFileViewer").click();
+    const popupPromise = page.waitForEvent("popup");
+    await page.locator("#fileViewerOpen").click();
+    const popup = await popupPromise;
+    await expect.poll(() => popup.isClosed()).toBe(true);
+    await expect(page.locator("#fileViewerMessage")).toHaveText(
+      "This browser cannot open this file type. Use Download instead.",
+    );
+    await expect(page.locator("#fileViewerDownload")).toBeEnabled();
+    await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+  });
+}
+
+test("closes the reserved tab on failure and restores file actions", async ({ context, page }) => {
+  await installRemoteViewerMocks(context, { downloadStatus: 413 });
+  await connectRemote(page);
+  await openRemoteFileExplorer(page);
+  await page.locator("#fileViewerPath").fill("C:\\work\\huge.pdf");
+  await page.locator("#openFileViewer").click();
+  const popupPromise = page.waitForEvent("popup");
+  await page.locator("#fileViewerOpen").click();
+  const popup = await popupPromise;
+  await expect.poll(() => popup.isClosed()).toBe(true);
+  await expect(page.locator("#fileViewerMessage")).toContainText("exceeds");
+  await expect(page.locator("#fileViewerOpen")).toBeEnabled();
+  await expect(page.locator("#fileViewerDownload")).toBeEnabled();
+  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+});
+
+test.describe("browser PDF viewer", () => {
+  test("hands original PDF bytes to the browser PDF tab", async ({ context, page }) => {
+    const pdf = await page.pdf();
+    await installRemoteViewerMocks(context);
+    await context.route("**/file-viewer/download", (route) =>
+      route.fulfill({
+        json: { name: "report.pdf", mediaType: "application/pdf", base64: pdf.toString("base64") },
+      }),
+    );
+    await connectRemote(page);
+    await openRemoteFileExplorer(page);
+    await page.locator("#fileViewerPath").fill("C:\\work\\report.pdf");
+    await page.locator("#openFileViewer").click();
+    const popupPromise = page.waitForEvent("popup");
+    await page.locator("#fileViewerOpen").click();
+    const popup = await popupPromise;
+    await expect.poll(() => popup.url()).toMatch(/^blob:/);
+    await expect
+      .poll(() => popup.frames().some((frame) => frame.url().startsWith("chrome-extension://")))
+      .toBe(true);
+    const viewer = popup.frames().find((frame) => frame.url().startsWith("chrome-extension://"))!;
+    await expect(viewer.locator("pdf-viewer")).toBeAttached();
+  });
+});
+
+test("keeps Open and Download beside zoom at narrow phone width", async ({ context, page }) => {
+  await installRemoteViewerMocks(context);
+  await page.setViewportSize({ width: 320, height: 640 });
+  await connectRemote(page);
+  await openRemoteFileExplorer(page);
+  await page.locator("#fileViewerPath").fill("C:\\work\\shot.png");
+  await page.locator("#openFileViewer").click();
+  await expect(page.locator("#fileViewerZoom")).toBeVisible();
+  const bounds = await page.locator(".file-viewer-header").evaluate((element) => ({
+    width: element.clientWidth,
+    scroll: element.scrollWidth,
+    open: element.querySelector("#fileViewerOpen")!.getBoundingClientRect().toJSON(),
+    download: element.querySelector("#fileViewerDownload")!.getBoundingClientRect().toJSON(),
+  }));
+  expect(bounds.scroll).toBe(bounds.width);
+  expect(bounds.open.right).toBeLessThanOrEqual(bounds.download.left);
+  await page.screenshot({ path: "test-results/remote-file-open-zoom-mobile.png" });
+});
+
+test("discards a late open response after switching files", async ({ context, page }) => {
+  await installRemoteViewerMocks(context);
+  let finishDownload: (() => Promise<void>) | undefined;
+  await context.route("**/file-viewer/download", async (route) => {
+    finishDownload = () =>
+      route.fulfill({ json: { name: "old.html", mediaType: "text/html", base64: "YQ==" } });
+  });
+  await connectRemote(page);
+  await openRemoteFileExplorer(page);
+  await page.locator("#fileViewerPath").fill("C:\\work\\old.html");
+  await page.locator("#openFileViewer").click();
+  const popupPromise = page.waitForEvent("popup");
+  await page.locator("#fileViewerOpen").click();
+  const popup = await popupPromise;
+  await expect.poll(() => !!finishDownload).toBe(true);
+  await expect(page.locator("#fileViewerDownload")).toBeDisabled();
+  await page.locator("#fileViewerBack").click();
+  await page.locator("#fileViewerPath").fill("C:\\work\\new.txt");
+  await page.locator("#openFileViewer").click();
+  await finishDownload!();
+  await expect.poll(() => popup.isClosed()).toBe(true);
+  await expect(page.locator("#fileViewerText")).toHaveText("plain host text");
+  await expect(page.locator("#fileViewerOpen")).toBeEnabled();
 });
