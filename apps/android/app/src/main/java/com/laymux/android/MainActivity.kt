@@ -108,6 +108,7 @@ import com.laymux.android.web.RemoteBackGuard
 import com.laymux.android.web.RemoteBridge
 import com.laymux.android.web.RemoteDocumentAuthority
 import com.laymux.android.web.RemoteDownloadPolicy
+import com.laymux.android.web.RemoteFileOpener
 import com.laymux.android.web.RemoteLoadProgress
 import com.laymux.android.web.RemoteOutputOpen
 import com.laymux.android.web.RemoteResourceCache
@@ -1187,14 +1188,33 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         }
     }
 
-    /**
-     * Save a file the Remote FileViewer downloaded (ADR-0185).
-     *
-     * The secure WebView has no download handler, so the browser's `<a download>` path is a
-     * silent no-op here. Native writes the bytes into the shared Downloads collection, which
-     * needs no runtime permission — but only from Android 10, where `MediaStore.Downloads`
-     * appeared. Older devices are told instead of being handed a silent failure.
-     */
+    /** Open original host bytes in a device viewer with temporary read access (ADR-0266). */
+    fun openRemoteFile(documentGeneration: Long, name: String, mediaType: String, base64: String) {
+        if (!remoteBridgeActionsEnabled(documentGeneration)) return
+        // JavascriptInterface runs off the UI thread; finish writing before granting access.
+        val intent = try {
+            RemoteFileOpener.prepare(this, name, mediaType, base64)
+        } catch (_: Exception) {
+            runOnUiThread {
+                if (remoteBridgeActionsEnabled(documentGeneration)) {
+                    showCloudMessage("파일을 열 수 없습니다. 데이터와 전송 한도를 확인해 주세요.")
+                }
+            }
+            return
+        }
+        runOnUiThread {
+            if (!remoteBridgeActionsEnabled(documentGeneration)) return@runOnUiThread
+            try {
+                startActivity(intent)
+            } catch (_: android.content.ActivityNotFoundException) {
+                showCloudMessage("이 파일을 열 앱이 없습니다. 지원 앱을 설치하거나 다운로드해 주세요.")
+            } catch (_: RuntimeException) {
+                showCloudMessage("파일을 연결 앱으로 열지 못했습니다.")
+            }
+        }
+    }
+
+    /** Save original host bytes in the shared Downloads collection (Android 10+, ADR-0185). */
     fun saveRemoteFile(
         documentGeneration: Long,
         name: String,

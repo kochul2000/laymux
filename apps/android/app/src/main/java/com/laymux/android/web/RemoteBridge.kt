@@ -41,6 +41,12 @@ class RemoteBridge(
         activity.openExternalUrl(documentGeneration, url ?: return)
     }
 
+    /** Open host bytes with the device's associated viewer (ADR-0266). */
+    @JavascriptInterface
+    fun openRemoteFile(name: String?, mediaType: String?, base64: String?) {
+        activity.openRemoteFile(documentGeneration, name ?: return, mediaType.orEmpty(), base64 ?: return)
+    }
+
     /**
      * Save a host file the Remote FileViewer downloaded (ADR-0185). The secure
      * WebView has no download handler, so a browser-style `<a download>` is a

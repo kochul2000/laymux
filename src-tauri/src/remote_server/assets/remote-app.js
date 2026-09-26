@@ -120,6 +120,7 @@ import {
         const fileViewerZoomResetButton = $("fileViewerZoomReset");
         const fileViewerCloseButton = $("fileViewerClose");
         const fileViewerDownloadButton = $("fileViewerDownload");
+        const fileViewerOpenButton = $("fileViewerOpen");
         const fileViewerBodyElement = $("fileViewerBody");
         const fileViewerMessageElement = $("fileViewerMessage");
         const fileViewerTextElement = $("fileViewerText");
@@ -2416,18 +2417,51 @@ import {
           setTimeout(() => URL.revokeObjectURL(url), 60000);
         }
 
-        function downloadCurrentFileViewerFile() {
+        function openFileInBrowserTab(tab, payload) {
+          if (tab.closed) return;
+          const mediaType = payload.mediaType || "application/octet-stream";
+          const url = URL.createObjectURL(new Blob([base64ToBytes(payload.base64)], { type: mediaType }));
+          try {
+            if (mediaType === "application/pdf") {
+              tab.location.replace(url);
+            } else {
+              // Host HTML/SVG must never execute with the Remote document's origin.
+              const frame = tab.document.createElement("iframe");
+              frame.setAttribute("sandbox", "");
+              frame.title = payload.name;
+              frame.style.cssText = "position:fixed;inset:0;width:100%;height:100%;border:0";
+              frame.src = url;
+              tab.document.title = payload.name;
+              tab.document.body.replaceChildren(frame);
+            }
+          } finally {
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+          }
+        }
+
+        function downloadCurrentFileViewerFile(openOnDevice = false) {
           const path = fileViewerPath;
           if (!leaseId || !fileViewerToken || !path || fileViewerDownloadInFlight) return;
           // The wrapper WebView has no download handler of its own, so a browser
           // save silently does nothing there. Refuse rather than pretend.
+          const nativeMethod = openOnDevice ? "openRemoteFile" : "saveRemoteFile";
           const nativeSave =
-            androidE2eMode && typeof window.LaymuxNative?.saveRemoteFile === "function"
-              ? window.LaymuxNative.saveRemoteFile
+            androidE2eMode && typeof window.LaymuxNative?.[nativeMethod] === "function"
+              ? (...args) => window.LaymuxNative[nativeMethod](...args)
               : null;
           if (androidE2eMode && !nativeSave) {
-            setFileViewerMessage("This app version cannot save files. Update the app.", true);
+            setFileViewerMessage(`This app version cannot ${openOnDevice ? "open" : "save"} files. Update the app.`, true);
             return;
+          }
+          // Reserve the tab during the user gesture, before the authenticated fetch.
+          const openedTab = openOnDevice && !androidE2eMode ? window.open("about:blank", "_blank") : null;
+          if (openOnDevice && !androidE2eMode && !openedTab) {
+            setFileViewerMessage("Allow pop-ups to open this file in a new tab.", true);
+            return;
+          }
+          if (openedTab) {
+            openedTab.opener = null;
+            openedTab.document.body.textContent = "Loading file…";
           }
           const requestRevision = fileViewerRequestRevision;
           const requestLeaseId = leaseId;
@@ -2446,6 +2480,7 @@ import {
                 leaseId !== requestLeaseId ||
                 fileViewerToken !== requestFileViewerToken
               ) {
+                openedTab?.close();
                 return;
               }
               if (!payload || typeof payload.base64 !== "string" || typeof payload.name !== "string") {
@@ -2453,12 +2488,17 @@ import {
               }
               if (nativeSave) {
                 nativeSave(payload.name, payload.mediaType || "", payload.base64);
-                setFileViewerMessage(`Saved ${payload.name} to Downloads.`);
+                setFileViewerMessage(openOnDevice ? `Opening ${payload.name}…` : `Saved ${payload.name} to Downloads.`);
                 return;
               }
-              saveDownloadInBrowser(payload);
+              if (openedTab) {
+                openFileInBrowserTab(openedTab, payload);
+              } else {
+                saveDownloadInBrowser(payload);
+              }
             })
             .catch(async (error) => {
+              openedTab?.close();
               if (requestRevision !== fileViewerRequestRevision) return;
               if (await fileViewerControlLost(error)) return;
               if (requestRevision !== fileViewerRequestRevision) return;
@@ -2477,6 +2517,11 @@ import {
         function applyFileViewerDownloadState() {
           fileViewerDownloadButton.disabled =
             fileViewerDownloadInFlight || !fileViewerPath || !leaseId || !fileViewerToken;
+          fileViewerOpenButton.disabled = fileViewerDownloadButton.disabled;
+          fileViewerOpenButton.hidden = fileViewerDownloadButton.hidden;
+          fileViewerOpenButton.title = fileViewerOpenButton.disabled
+            ? "Wait for the file transfer or reconnect."
+            : "Open on this device";
           fileViewerDownloadButton.textContent = fileViewerDownloadInFlight
             ? "Saving..."
             : "Download";
@@ -13299,7 +13344,8 @@ import {
             .then(() => setStatus(`Copied ${path}`))
             .catch((err) => setStatus(`Copy failed: ${err.message || err}`, true));
         });
-        fileViewerDownloadButton.addEventListener("click", downloadCurrentFileViewerFile);
+        fileViewerDownloadButton.addEventListener("click", () => downloadCurrentFileViewerFile());
+        fileViewerOpenButton.addEventListener("click", () => downloadCurrentFileViewerFile(true));
         fileExplorerHeaderButton.addEventListener("click", () => {
           // Open where the user is working. Without an attached terminal the
           // bridge falls back to the host home directory.
