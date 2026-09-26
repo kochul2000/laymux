@@ -1,6 +1,6 @@
 # 0267. 프로세스 기록으로 확인한 현재 Codex 대화는 파일 나이로 만료시키지 않는다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-26
 - Source: 실행 중인 WSL Codex의 `activeButUnidentified`로 업데이트가 막힌 사용자 보고, [data-flow.md §13.5](../architecture/data-flow.md)
 - Supersedes: [ADR-0258](0258-codex-retained-loop-session-attribution.md)의 최상위 대화 나이 제한(나머지 결정은 유지)
