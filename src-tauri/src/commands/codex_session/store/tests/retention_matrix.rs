@@ -133,9 +133,11 @@ fn retention_lifecycle_rollout_matrix() {
                         };
                         let result = if guest {
                             let rows = read_lifecycle_rows(&logs, process, 0).unwrap();
-                            store.resolve_selection(
-                                crate::commands::codex_session::lifecycle::select(&rows).unwrap(),
-                                Some(24),
+                            store.resolve_process_rows(
+                                &crate::commands::codex_session::lifecycle::ProcessRows {
+                                    process_uuid: process.into(),
+                                    rows,
+                                },
                             )
                         } else {
                             store.find_selection_for_pid_checked(101, Some(24))
@@ -146,7 +148,9 @@ fn retention_lifecycle_rollout_matrix() {
                         } else {
                             let actual = result.unwrap().map(|s| (s.id, s.fresh));
                             let expected = match file {
-                                "valid" | "appending" => Some((selected.to_owned(), false)),
+                                "valid" | "appending" | "expired" => {
+                                    Some((selected.to_owned(), false))
+                                }
                                 "absent" if !has_input && method == "start" => {
                                     Some((selected.to_owned(), true))
                                 }

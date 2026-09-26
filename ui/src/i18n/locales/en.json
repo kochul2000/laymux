@@ -574,7 +574,7 @@
       "restoreSession": "Restore Session",
       "restoreSessionDesc": "Automatically restore Codex sessions on app restart",
       "sessionMaxAge": "Session Max Age",
-      "sessionMaxAgeDesc": "Ignore rollouts older than this (0 = unlimited)",
+      "sessionMaxAgeDesc": "Ignore older rollouts only for Codex versions without current-session lifecycle records (0 = unlimited)",
       "transcriptScroll": "Transcript Scroll",
       "transcriptScrollDesc": "Use mouse-wheel and Remote touch scrolling as arrow-key navigation in a normal-buffer transcript",
       "statusMessageMode": "Status Message Mode",

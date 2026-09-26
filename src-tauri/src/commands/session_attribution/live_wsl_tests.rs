@@ -15,6 +15,12 @@ fn live_wsl_codex_settings_only_session_is_fresh() {
     assert_live_wsl_attribution("codex", SessionAttributionState::Fresh);
 }
 
+#[test]
+#[ignore = "requires LAYMUX_TEST_WSL_DISTRO, LAYMUX_TEST_TERMINAL_ID and LAYMUX_TEST_SESSION_ID"]
+fn live_wsl_codex_attribution_matches_its_session_file() {
+    assert_live_wsl_attribution("codex", SessionAttributionState::Identified);
+}
+
 fn assert_live_wsl_attribution(provider: &str, expected_state: SessionAttributionState) {
     let distro = std::env::var("LAYMUX_TEST_WSL_DISTRO").unwrap();
     let terminal_id = std::env::var("LAYMUX_TEST_TERMINAL_ID").unwrap();

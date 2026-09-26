@@ -574,7 +574,7 @@
       "restoreSession": "세션 복원",
       "restoreSessionDesc": "앱 재시작 시 Codex 세션을 자동 복원",
       "sessionMaxAge": "세션 유효 기간",
-      "sessionMaxAgeDesc": "이 시간보다 오래된 rollout은 무시 (0 = 무제한)",
+      "sessionMaxAgeDesc": "현재 대화 기록이 없는 구버전 Codex의 오래된 rollout만 제외 (0 = 무제한)",
       "transcriptScroll": "트랜스크립트 스크롤",
       "transcriptScrollDesc": "normal buffer 트랜스크립트에서 마우스 휠과 Remote 터치 스크롤을 방향키 탐색으로 사용",
       "statusMessageMode": "상태 메시지 모드",

@@ -1,6 +1,6 @@
 # 0258. Codex 로그 정리 뒤 종료된 선택을 폐기하고 유일한 대화 소유권을 검증한다
 
-- Status: Accepted
+- Status: Superseded by [0267](0267-codex-live-session-age-policy.md)
 - Date: 2026-09-19
 - Source: v1.0.7 사용자 보고(`activeButUnidentified`), [data-flow.md §13.5](../architecture/data-flow.md), [Codex의 독립적인 thread 로그 정리](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/state/src/runtime/logs.rs)
 - Extends: [ADR-0238](0238-codex-lifecycle-storage-checkpoint.md), [ADR-0248](0248-codex-turn-lifecycle-activity.md)

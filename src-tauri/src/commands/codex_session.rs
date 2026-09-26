@@ -138,8 +138,7 @@ fn lookup_with_observer(
                                     .codex_home_dir()
                                     .ok_or_else(|| "invalid WSL Codex home".to_owned())?;
                                 let store = CodexSessionStore::for_guest(home);
-                                let session =
-                                    store.resolve_process_rows(&rows, session_max_age_hours)?;
+                                let session = store.resolve_process_rows(&rows)?;
                                 if let Some(session) = &session {
                                     observe(&terminal_id, &store, session);
                                 }
