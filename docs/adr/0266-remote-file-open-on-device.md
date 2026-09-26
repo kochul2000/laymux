@@ -1,6 +1,6 @@
 # 0266. Remote 파일 열기는 원본 바이트를 기기 뷰어에 전달한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-26
 - Source: 사용자 요구(PDF·HTML을 폰에서 연결 앱으로 열기), [ADR-0185](0185-remote-file-viewer-download.md), [ADR-0183](0183-remote-page-content-security-policy.md), [api-contracts.md §13.3.1](../architecture/api-contracts.md)
 - 관계: ADR-0185의 원본 바이트 전달을 기기 열기로 확장한다.
