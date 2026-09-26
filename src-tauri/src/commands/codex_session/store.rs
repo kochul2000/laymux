@@ -106,10 +106,8 @@ impl CodexSessionStore {
                 .iter()
                 .any(|r| r.feedback_log_body.starts_with("session_loop{"))
         {
-            return self.resolve_process_rows(
-                &super::lifecycle::ProcessRows { process_uuid, rows },
-                max_age_hours,
-            );
+            return self
+                .resolve_process_rows(&super::lifecycle::ProcessRows { process_uuid, rows });
         }
         for thread_id in find_process_thread_ids_checked(&logs, &process_uuid, first_log_id)? {
             if is_temporary_thread_checked(&logs, &process_uuid, first_log_id, &thread_id)? {
@@ -134,12 +132,11 @@ impl CodexSessionStore {
     pub(super) fn resolve_selection(
         &self,
         selection: super::lifecycle::Selection,
-        age: Option<u64>,
     ) -> Result<Option<ResolvedSession>, String> {
         let Some(id) = selection.id else {
             return Ok(None);
         };
-        match self.validate_session_checked(&id, age)? {
+        match self.validate_session_checked(&id, None)? {
             Some(true) => {
                 return Ok(Some(ResolvedSession {
                     id,
@@ -160,7 +157,7 @@ impl CodexSessionStore {
             )?;
             if paths.is_empty() {
                 // A state row with a missing rollout is an I/O error in validation,
-                // never fresh. Invalid/expired/auxiliary files also cannot get here.
+                // never fresh. Invalid/auxiliary files also cannot get here.
                 return Ok(Some(ResolvedSession {
                     id,
                     fresh: true,

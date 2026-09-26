@@ -58,10 +58,10 @@ fn loops<'a>(
 impl CodexSessionStore {
     /// Resolve the same process-scoped snapshot on native and WSL. Never use
     /// latest activity to choose among top-level conversations (ADR-0258).
+    /// A proven live conversation does not expire with its rollout (ADR-0267).
     pub(in crate::commands::codex_session) fn resolve_process_rows(
         &self,
         process: &ProcessRows,
-        age: Option<u64>,
     ) -> Result<Option<ResolvedSession>, String> {
         if process.process_uuid.is_empty() {
             return Err("Codex process identity missing".into());
@@ -79,7 +79,7 @@ impl CodexSessionStore {
                 .and_then(|e| e.closed)
                 .filter(|shutdown| *shutdown > selection.epoch);
             if closed.is_none() {
-                return self.resolve_selection(selection, age);
+                return self.resolve_selection(selection);
             }
             // Codex may defer the old thread's shutdown until after the new
             // thread has already completed a turn. Its exit is not the start
@@ -91,17 +91,12 @@ impl CodexSessionStore {
             if evidence.closed.is_some() || boundary.is_some_and(|n| evidence.last <= n) {
                 continue;
             }
-            // An old auxiliary rollout still proves its role. Only a session
-            // that would actually be restored must pass the age restriction.
+            // File age cannot invalidate process-scoped ownership or an
+            // auxiliary role. Still validate the exact, unique rollout header.
             match self.validate_session_checked(id, None)? {
                 Some(false) => continue,
                 None => return Ok(None),
                 Some(true) => {
-                    if age.is_some_and(|hours| hours > 0)
-                        && self.validate_session_checked(id, age)? != Some(true)
-                    {
-                        return Ok(None);
-                    }
                     if candidate.is_some() {
                         return Ok(None);
                     }

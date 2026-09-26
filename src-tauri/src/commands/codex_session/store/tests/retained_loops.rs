@@ -18,6 +18,61 @@ fn activity(db: &Connection, n: i64, process: &str, id: &str, operation: &str) {
 }
 
 #[test]
+fn live_lifecycle_keeps_a_session_older_than_the_configured_age_limit() {
+    for retained_only in [false, true] {
+        for guest in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let logs = create_logs_db(temp.path());
+            let process = "pid:101:current";
+            start(&logs, 1, process, SESSION_A);
+            activity(&logs, 2, process, SESSION_A, "Shutdown");
+            start(&logs, 3, process, SESSION_B);
+            activity(&logs, 4, process, SESSION_B, "TurnInput {}");
+            if retained_only {
+                logs.execute("DELETE FROM logs WHERE id=3", []).unwrap();
+            }
+            write_rollout(temp.path(), SESSION_A, ",\"source\":\"cli\"");
+            let current = write_rollout(temp.path(), SESSION_B, ",\"source\":\"cli\"");
+            let old_mtime = SystemTime::now() - Duration::from_secs(73 * 3600);
+            std::fs::File::options()
+                .write(true)
+                .open(&current)
+                .unwrap()
+                .set_modified(old_mtime)
+                .unwrap();
+            let store = if guest {
+                CodexSessionStore::for_guest(temp.path().into())
+            } else {
+                CodexSessionStore::new(temp.path().into(), temp.path().into())
+            };
+            let rows = super::super::super::lifecycle::ProcessRows {
+                process_uuid: process.into(),
+                rows: read_lifecycle_rows(&logs, process, 0).unwrap(),
+            };
+            // Exercise both observations used by the critical checkpoint.
+            for _ in 0..2 {
+                let selected = if guest {
+                    store.resolve_process_rows(&rows)
+                } else {
+                    store.find_selection_for_pid_checked(101, Some(72))
+                }
+                .unwrap()
+                .unwrap_or_else(|| {
+                    panic!("live session lost: guest={guest}, retained={retained_only}")
+                });
+                assert_eq!(selected.id, SESSION_B);
+                assert!(!selected.fresh);
+                assert!(selected.selection_key.is_some());
+            }
+            assert_eq!(
+                std::fs::metadata(current).unwrap().modified().unwrap(),
+                old_mtime
+            );
+        }
+    }
+}
+
+#[test]
 fn per_thread_pruning_does_not_resurrect_a_closed_conversation_in_two_panes() {
     for journal in ["WAL", "DELETE"] {
         let temp = tempfile::tempdir().unwrap();
@@ -64,11 +119,7 @@ fn per_thread_pruning_does_not_resurrect_a_closed_conversation_in_two_panes() {
         };
         let guest = CodexSessionStore::for_guest(temp.path().into());
         assert_eq!(
-            guest
-                .resolve_process_rows(&rows, Some(72))
-                .unwrap()
-                .unwrap()
-                .id,
+            guest.resolve_process_rows(&rows).unwrap().unwrap().id,
             SESSION_B
         );
     }
@@ -115,7 +166,6 @@ fn retained_loop_file_faults_pending_transitions_and_untrusted_shutdowns_block_r
     for fault in [
         "missing",
         "corrupt",
-        "expired",
         "duplicate",
         "wrong_id",
         "pending",
@@ -132,7 +182,6 @@ fn retained_loop_file_faults_pending_transitions_and_untrusted_shutdowns_block_r
             match fault {
                 "missing" => std::fs::remove_file(path).unwrap(),
                 "corrupt" => std::fs::write(path, "{").unwrap(),
-                "expired" => std::fs::File::options().write(true).open(path).unwrap().set_modified(SystemTime::now()-Duration::from_secs(48*3600)).unwrap(),
                 "duplicate" => { std::fs::copy(path, temp.path().join("sessions").join(format!("rollout-copy-{SESSION_B}.jsonl"))).unwrap(); },
                 "wrong_id" => std::fs::write(path, "{\"type\":\"session_meta\",\"payload\":{\"id\":\"other\",\"cwd\":\"/same\"}}").unwrap(),
                 "pending" => append(&logs, 2, process, SESSION_A, "app_server.request{rpc.method=\"thread/start\" rpc.request_id=next app_server.client_name=\"codex-tui\"}: preparing".into()),
@@ -154,7 +203,7 @@ fn retained_loop_file_faults_pending_transitions_and_untrusted_shutdowns_block_r
                 rows: read_lifecycle_rows(&logs, process, 0).unwrap(),
             };
             let result = if guest {
-                store.resolve_process_rows(&rows, Some(24))
+                store.resolve_process_rows(&rows)
             } else {
                 store.find_selection_for_pid_checked(101, Some(24))
             };
@@ -221,17 +270,10 @@ fn loop_exit_survives_pruned_shutdown_and_late_prewarm_without_reviving_closed_o
                 process_uuid: process.into(),
                 rows: read_lifecycle_rows(&logs, process, 0).unwrap(),
             };
-            assert!(store
-                .resolve_process_rows(&snapshot(), None)
-                .unwrap()
-                .is_none());
+            assert!(store.resolve_process_rows(&snapshot()).unwrap().is_none());
             activity(&logs, 5, process, SESSION_B, "TurnInput {}");
             assert_eq!(
-                store
-                    .resolve_process_rows(&snapshot(), None)
-                    .unwrap()
-                    .unwrap()
-                    .id,
+                store.resolve_process_rows(&snapshot()).unwrap().unwrap().id,
                 SESSION_B
             );
             logs.execute("DELETE FROM logs WHERE id=5", []).unwrap();
@@ -284,7 +326,7 @@ fn nested_subagent_initialization_does_not_poison_the_parent_loop() {
                 rows: read_lifecycle_rows(&logs, process, 0).unwrap(),
             };
             assert_eq!(
-                store.resolve_process_rows(&rows, None).unwrap().unwrap().id,
+                store.resolve_process_rows(&rows).unwrap().unwrap().id,
                 SESSION_A,
                 "explicit={explicit} guest={guest}"
             );
@@ -295,17 +337,13 @@ fn nested_subagent_initialization_does_not_poison_the_parent_loop() {
                 .set_modified(SystemTime::now() - Duration::from_secs(48 * 3600))
                 .unwrap();
             assert_eq!(
-                store
-                    .resolve_process_rows(&rows, Some(24))
-                    .unwrap()
-                    .unwrap()
-                    .id,
+                store.resolve_process_rows(&rows).unwrap().unwrap().id,
                 SESSION_A
             );
             std::fs::remove_file(child).unwrap();
-            assert!(store.resolve_process_rows(&rows, None).is_err());
+            assert!(store.resolve_process_rows(&rows).is_err());
             write_rollout(temp.path(), SESSION_B, ",\"source\":\"cli\"");
-            assert!(store.resolve_process_rows(&rows, None).is_err());
+            assert!(store.resolve_process_rows(&rows).is_err());
         }
     }
 }
@@ -344,7 +382,7 @@ fn expired_auxiliary_loops_do_not_block_a_current_top_level_conversation() {
             };
             let resolve = || {
                 if guest {
-                    store.resolve_process_rows(&rows, Some(24))
+                    store.resolve_process_rows(&rows)
                 } else {
                     store.find_selection_for_pid_checked(101, Some(24))
                 }
@@ -352,7 +390,11 @@ fn expired_auxiliary_loops_do_not_block_a_current_top_level_conversation() {
             };
             assert_eq!(resolve().unwrap().id, SESSION_A, "guest={guest} {source}");
             expire(&current);
-            assert!(resolve().is_none(), "expired top-level guest={guest}");
+            assert_eq!(
+                resolve().unwrap().id,
+                SESSION_A,
+                "old top-level guest={guest}"
+            );
         }
     }
 }
