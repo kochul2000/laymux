@@ -4,6 +4,11 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "../..")
 $workflow = Get-Content -Raw -Encoding utf8 (Join-Path $repoRoot ".github/workflows/release.yml")
 $gradle = Get-Content -Raw -Encoding utf8 (Join-Path $repoRoot "apps/android/app/build.gradle.kts")
 
+# setup-android v3 defaults to the retired SDK 'tools' package.
+if ($workflow -notmatch 'uses: android-actions/setup-android@v3\s+with:\s+packages: platform-tools\s') {
+    throw "Android SDK setup must explicitly omit the retired tools package"
+}
+
 $requiredWorkflowTokens = @(
     "android:",
     "ANDROID_APP_SIGNING_KEYSTORE_BASE64",

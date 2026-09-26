@@ -283,7 +283,10 @@ jobs:
           java-version: 17
 
       - name: Set up Android SDK
+        # The action defaults to the retired 'tools' package. SDK 36 is installed below.
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Install Android SDK 36
         shell: bash
