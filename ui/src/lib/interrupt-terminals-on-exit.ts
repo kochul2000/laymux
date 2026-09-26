@@ -3,6 +3,7 @@ import { CTRL_C, INTERRUPT_ROUND_INTERVAL_MS } from "@/lib/terminal-interrupt";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import type { ExitSettings } from "@/lib/tauri-api";
+import type { ProgressReporter } from "@/lib/lifecycle-progress";
 
 /**
  * Kill-on-exit orchestration (issue #451).
@@ -62,6 +63,7 @@ export interface RunInterruptDeps {
   getTerminalIds: () => string[];
   write: (id: string, data: string) => Promise<void>;
   sleep: (ms: number) => Promise<void>;
+  report?: ProgressReporter;
 }
 
 /**
@@ -72,11 +74,14 @@ export async function runInterruptTerminals(deps: RunInterruptDeps): Promise<num
   if (!deps.config.enabled) return 0;
   const ids = Array.from(new Set(deps.getTerminalIds()));
   if (ids.length === 0) return 0;
+  let failed = false;
 
   for (let round = 0; round < deps.config.rounds; round++) {
+    await deps.report?.({ stage: "interrupting", completed: round, total: deps.config.rounds });
     // A failed write (e.g. a terminal that already exited) must not abort the
     // rest — allSettled keeps every terminal getting its Ctrl+C.
-    await Promise.allSettled(ids.map((id) => deps.write(id, CTRL_C)));
+    const results = await Promise.allSettled(ids.map((id) => deps.write(id, CTRL_C)));
+    failed ||= results.some((result) => result.status === "rejected");
     if (round < deps.config.rounds - 1) {
       await deps.sleep(INTERRUPT_ROUND_INTERVAL_MS);
     }
@@ -84,18 +89,38 @@ export async function runInterruptTerminals(deps: RunInterruptDeps): Promise<num
   // Give Claude/Codex time to print the resume session id before we cache the
   // scrollback and tear the window down.
   if (deps.config.settleMs > 0) {
-    await deps.sleep(deps.config.settleMs);
+    let elapsed = 0;
+    await deps.report?.({ stage: "settling", completed: elapsed, total: deps.config.settleMs });
+    while (elapsed < deps.config.settleMs) {
+      const step = deps.report
+        ? Math.min(100, deps.config.settleMs - elapsed)
+        : deps.config.settleMs;
+      await deps.sleep(step);
+      elapsed += step;
+      await deps.report?.({ stage: "settling", completed: elapsed, total: deps.config.settleMs });
+    }
   }
+  if (failed)
+    await deps.report?.({
+      stage: "settling",
+      completed: 0,
+      total: null,
+      warning: "Some terminal interrupt signals could not be delivered.",
+    });
   return ids.length;
 }
 
 /** Production entry point: read live settings + terminals and run the interrupt. */
-export async function interruptTerminalsOnExit(): Promise<void> {
-  const config = resolveExitInterrupt(useSettingsStore.getState().exit);
+export async function interruptTerminalsOnExit(
+  report?: ProgressReporter,
+  settings?: Partial<ExitSettings>,
+): Promise<void> {
+  const config = resolveExitInterrupt(settings ?? useSettingsStore.getState().exit);
   if (!config.enabled) return;
   try {
     await runInterruptTerminals({
       config,
+      report,
       getTerminalIds: () => useTerminalStore.getState().instances.map((instance) => instance.id),
       // Shutdown-only ETX path: bypasses the human-control gate so the interrupt
       // still lands while a remote client holds the control lease (issue #451).
@@ -103,6 +128,7 @@ export async function interruptTerminalsOnExit(): Promise<void> {
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     });
   } catch (err) {
+    if (report) throw err;
     // Never block window close on a best-effort interrupt.
     console.warn("[interruptTerminalsOnExit] failed:", err);
   }

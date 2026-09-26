@@ -1,0 +1,206 @@
+.lifecycle-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  height: fit-content;
+  z-index: 10001;
+  width: min(390px, calc(100vw - 32px));
+  max-height: calc(100dvh - 40px);
+  overflow: auto;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  box-shadow: 0 20px 80px var(--backdrop-heavy);
+  font-family: inherit;
+}
+.lifecycle-dialog::backdrop {
+  background: transparent;
+}
+.lifecycle-dialog:not([open]) {
+  display: none;
+}
+.lifecycle-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: var(--backdrop-heavy, #00000080);
+}
+.lifecycle-backdrop[hidden] {
+  display: none;
+}
+.lifecycle-content {
+  padding: 18px;
+}
+.lifecycle-title {
+  overflow-wrap: anywhere;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin: 0 0 6px;
+}
+.lifecycle-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin: 0;
+}
+.lifecycle-version {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0 12px;
+  font-size: 17px;
+}
+.lifecycle-version span:first-child {
+  font-weight: 400;
+}
+.lifecycle-channel {
+  margin-left: auto;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.lifecycle-notes {
+  margin: 12px 0;
+}
+.lifecycle-notes summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.lifecycle-notes pre {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 100px;
+  overflow: auto;
+  color: var(--text-secondary);
+}
+.lifecycle-info {
+  padding: 12px;
+  margin-top: 12px;
+  background: var(--accent-06);
+  border-left: 2px solid var(--accent-50);
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--text-secondary);
+}
+.lifecycle-error {
+  margin-top: 16px;
+  padding: 12px;
+  border-left: 2px solid var(--claude);
+  background: var(--orange-15);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.lifecycle-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-base);
+}
+.lifecycle-steps {
+  list-style: none;
+  padding: 0;
+  margin: 18px 0 0;
+}
+.lifecycle-step {
+  display: flex;
+  gap: 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+  min-height: 30px;
+}
+.lifecycle-step.is-active {
+  color: var(--text-primary);
+  min-height: 64px;
+}
+.lifecycle-step.is-done {
+  color: var(--text-secondary);
+}
+.lifecycle-step-icon {
+  width: 24px;
+  flex: 0 0 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  font-size: 10px;
+}
+.is-active .lifecycle-step-icon {
+  border-color: var(--accent-50);
+  color: var(--accent);
+  background: var(--accent-10);
+}
+.is-done .lifecycle-step-icon {
+  border-color: transparent;
+  color: var(--green);
+}
+.lifecycle-step-body {
+  flex: 1;
+  min-width: 0;
+  padding-top: 3px;
+}
+.lifecycle-step-detail {
+  display: flex;
+  justify-content: space-between;
+  min-height: 22px;
+  padding-top: 7px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.lifecycle-track {
+  height: 3px;
+  background: var(--border);
+  margin-top: 8px;
+  overflow: hidden;
+}
+.lifecycle-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.15s linear;
+}
+.lifecycle-bar.is-indeterminate {
+  animation: lifecycle-slide 1.4s ease-in-out infinite;
+}
+.lifecycle-spin {
+  animation: lifecycle-spin 1s linear infinite;
+}
+@keyframes lifecycle-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes lifecycle-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(380%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lifecycle-spin,
+  .lifecycle-bar.is-indeterminate {
+    animation: none;
+  }
+  .lifecycle-bar {
+    transition: none;
+  }
+}
+
+.lifecycle-preview {
+  margin-top: 12px;
+  color: var(--text-muted);
+  font-size: 10px;
+}

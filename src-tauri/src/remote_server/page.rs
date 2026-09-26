@@ -786,13 +786,10 @@ mod tests {
 
         assert!(html.contains("id=\"pcUpdateStatus\""));
         assert!(html.contains("id=\"checkPcUpdate\""));
-        assert!(html.contains("id=\"installPcUpdate\""));
         assert!(html.contains("/remote/v1/update/check"));
         assert!(html.contains("/remote/v1/update/install"));
         assert!(html.contains("body: JSON.stringify({ leaseId: selectedLeaseId })"));
-        assert!(html.contains(
-            "installPcUpdateButton.disabled = busy || pcUpdateRequestInFlight || !leaseId"
-        ));
+        assert!(html.contains("pcUpdateDialog.open()"));
         assert!(html.contains("drawerSettingsButton.classList.toggle(\"update-available\""));
         assert!(html.contains("delay ?? (busy ? 1000 : 60000)"));
     }
@@ -1490,13 +1487,15 @@ mod tests {
         assert!(html.contains("class=\"action-segment\" data-segment=\"right\""));
         // Default placement: the compact command keys stay left and the input
         // controls stay right.
-        assert!(html.contains("left: [\"soft:c-c\", \"soft:q\", \"soft:esc\"],"));
+        assert!(html
+            .contains("left: [\"soft:c-c\", \"soft:q\", \"soft:esc\", \"soft:u-defaultclear\"],"));
         assert!(html.contains("right: [\"keyboard\", \"keys\", \"send\"],"));
         assert!(html.contains("function normalizeInputLayoutConfig(raw)"));
         assert!(html.contains("function normalizeInputZones(raw, knownIds)"));
-        // No migration path: anything that is not the v2 shape resets.
+        // No migration path: invalid shapes use only defaults known to the
+        // current key registry, including a saved empty custom-key list.
         assert!(html.contains(
-            "if (!Array.isArray(ownProperty(rawRow, segment))) return defaultInputZones();"
+            "if (!Array.isArray(ownProperty(rawRow, segment))) return defaultInputZones(knownIds);"
         ));
         assert!(!html.contains("function projectSoftKeyOrderFromZones(zones)"));
         assert!(!html.contains("function syncKeyOrderProjection()"));
@@ -1514,7 +1513,7 @@ mod tests {
         assert!(html.contains("function canPlaceInputAction(actionId, row)"));
         // Tapping a hidden chip is "use this", not "select this".
         assert!(html.contains("function useInputAction(actionId)"));
-        assert!(html.contains("title.textContent = \"Hidden\";"));
+        assert!(html.contains("hiddenOption.textContent = \"Hidden\";"));
         assert!(html.contains("return actionId !== \"keys\" || row === \"main\";"));
         assert!(html.contains("keyBarConfig.expanded = false;"));
         assert!(!html.contains("id=\"keyBarSettings\""));

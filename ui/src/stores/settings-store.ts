@@ -391,7 +391,12 @@ export type {
  * The xterm.js UI only renders a narrower subset via SupportedCursorShape.
  */
 export type CursorShape =
-  "bar" | "underscore" | "filledBox" | "emptyBox" | "doubleUnderscore" | "vintage";
+  | "bar"
+  | "underscore"
+  | "filledBox"
+  | "emptyBox"
+  | "doubleUnderscore"
+  | "vintage";
 export type SupportedCursorShape = "bar" | "underscore" | "filledBox";
 export type BellStyle = "audible" | "none" | "window" | "taskbar" | "all";
 export type CloseOnExit = "automatic" | "graceful" | "always" | "never";
@@ -827,7 +832,7 @@ export const DEFAULT_TERMINAL: TerminalSettings = {
 
 export const DEFAULT_CONTROL_BAR: ControlBarSettings = {
   hoverIdleSeconds: 2,
-  defaultMode: "minimized",
+  defaultMode: "pinned",
 };
 
 /**

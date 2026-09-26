@@ -197,7 +197,10 @@ test("MCP heartbeat 변경은 기기 저장·화면 적용 뒤 확인 응답을 
             selectionHandleSize: 28,
             composerAutocomplete: false,
             composerHiddenClaudeLines: 5,
-            inputBarUserKeys: [{ id: "u-test", label: "확인", seq: "\t", submit: true }],
+            inputBarUserKeys: [
+              { id: "u-defaultclear", label: "/clr", seq: "/clear", submit: true },
+              { id: "u-test", label: "확인", seq: "\t", submit: true },
+            ],
             floatingButtons: [
               {
                 id: "f-test",
@@ -232,7 +235,10 @@ test("MCP heartbeat 변경은 기기 저장·화면 적용 뒤 확인 응답을 
   expect(savedReport).not.toHaveProperty("composerHistory");
   expect(savedReport).toMatchObject({
     composerHiddenClaudeLines: 5,
-    inputBarUserKeys: [{ id: "u-test", label: "확인", seq: "\t", submit: true }],
+    inputBarUserKeys: [
+      { id: "u-defaultclear", label: "/clr", seq: "/clear", submit: true },
+      { id: "u-test", label: "확인", seq: "\t", submit: true },
+    ],
   });
   await expect(page.locator('#floatingControls [data-floating-id="f-test"]')).toHaveCSS(
     "opacity",
@@ -294,7 +300,7 @@ test("MCP 플로팅 전체 표시를 껐다 켜도 개별 배치와 버튼은 �
   });
   await page.goto("http://remote.test/remote/#token=test-token");
   await page.locator("#connect").click();
-  await expect(page.locator("#floatingControls > *")).toHaveCount(2);
+  await expect(page.locator("#floatingControls > *")).toHaveCount(3);
   for (const [patch, count] of [
     [{ floatingEnabled: false }, 0],
     [{ floatingEnabled: true, floatingNavPadEnabled: true, floatingNavPadSize: 80 }, 3],
@@ -346,7 +352,7 @@ test("MCP 저장 실패는 기존 기기 값과 실패 응답을 유지한다", 
   await page.locator("#connect").click();
   await expect.poll(() => acknowledgement, { timeout: 15000 }).toMatchObject({ success: false });
   await expect(page.locator("#remoteTerminalFontSize")).toHaveValue("14");
-  await expect(page.locator("#floatingControls > *")).toHaveCount(0);
+  await expect(page.locator("#floatingControls > *")).toHaveCount(2);
   expect(await page.evaluate(() => localStorage.getItem("laymux.remote.keybar"))).toBeNull();
 });
 
@@ -521,7 +527,9 @@ test("메뉴 도구 줄의 핀 아이콘은 설정과 같은 워크스페이스 
   await page.screenshot({ path: "../.screenshots/remote-pin-toolbar-mobile.png" });
   await expect(page.locator(".drawer-header #drawerConnectionButton")).toHaveCount(0);
   await page.locator("#drawerSettingsButton").click();
-  await expect(page.locator("#drawerSettingsView #drawerConnectionButton")).toBeVisible();
+  await expect(page.locator(".settings-intro #drawerConnectionButton")).toHaveCount(0);
+  await page.getByRole("tab", { name: "App", exact: true }).click();
+  await expect(page.locator("#settingsPanelApp #drawerConnectionButton")).toBeVisible();
   await page.screenshot({ path: "../.screenshots/remote-connection-settings-mobile.png" });
   await page.locator("#drawerConnectionButton").click();
   await expect(page.locator("#drawerConnectionView")).toBeVisible();
@@ -551,7 +559,7 @@ test("잘못된 워크스페이스 메뉴 숫자 설정은 안전한 기본값�
     .locator('#settingsTabs [data-settings-panel="display"]')
     .evaluate((tab: HTMLElement) => tab.click());
 
-  await expect(page.locator("#remoteNavigationWidth")).toHaveValue("360");
+  await expect(page.locator("#remoteNavigationWidth")).toHaveValue("300");
   await expect(page.locator("#remoteNavigationPinCutoff")).toHaveValue("720");
   await page.locator("#remoteNavigationWidth").fill("");
   await page.locator("#remoteNavigationWidth").blur();
@@ -559,7 +567,7 @@ test("잘못된 워크스페이스 메뉴 숫자 설정은 안전한 기본값�
     .poll(() =>
       page.evaluate((key) => JSON.parse(localStorage.getItem(key) || "null"), DISPLAY_SETTINGS_KEY),
     )
-    .toMatchObject({ navigationWidth: 360, navigationPinCutoff: 720 });
+    .toMatchObject({ navigationWidth: 300, navigationPinCutoff: 720 });
   expect(displayRequests).toEqual([]);
 });
 
@@ -609,7 +617,7 @@ test("실행 중 바꾼 checkpoint 예산은 다음 자동 attach부터 적용�
   await page.locator("#connect").click();
 
   await expect.poll(() => outputUrls.length).toBe(1);
-  expect(new URL(outputUrls[0]).searchParams.get("historyKib")).toBe("4");
+  expect(new URL(outputUrls[0]).searchParams.get("historyKib")).toBe("8");
 
   await page.locator("#remoteSnapshotMaxKib").evaluate((input) => {
     const numberInput = input as HTMLInputElement;
@@ -743,5 +751,5 @@ test("잘못된 버튼 배율을 정규화하고 저장 실패에도 현재 화�
     await page
       .locator("#mainActionRow")
       .evaluate((row) => getComputedStyle(row).getPropertyValue("--input-button-scale").trim()),
-  ).toBe("1.5");
+  ).toBe("1.65");
 });

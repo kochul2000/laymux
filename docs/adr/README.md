@@ -254,7 +254,7 @@ ADR 이 필요한 대표 기준:
 | [0234](0234-remote-user-key-explicit-submit.md) | Remote 사용자 키는 Enter 제출 의도를 별도로 저장한다 (0213 정정) | Accepted |
 | [0235](0235-wrapped-path-link-logical-lines.md) | 줄바꿈 경로의 논리 줄 복원과 물리 셀 조각의 공동 수명 | Accepted |
 | [0236](0236-remote-composer-inline-attachments.md) | Remote Composer 인라인 첨부 칩 | Proposed |
-| [0237](0237-remote-floating-input-controls.md) | Remote 플로팅 입력은 기기 로컬 배치와 기존 액션을 공유한다 (0213·0228 확장) | Accepted |
+| [0237](0237-remote-floating-input-controls.md) | Remote 플로팅 입력은 기기 로컬 배치와 기존 액션을 공유한다 (0213·0228 확장) | Superseded by 0265 (패드 초기 기본값만) |
 | [0238](0238-codex-lifecycle-storage-checkpoint.md) | Codex 복원점은 프로세스별 대화 전환 기록으로 선택한다 | Accepted |
 | [0239](0239-remote-pad-hold-move-opacity.md) | Remote 방향 패드는 중앙 길게 누르기로 이동하고 불투명도를 기기에 저장한다 (0237 일부 대체) | Accepted |
 | [0240](0240-windows-android-release-targets.md) | 릴리스는 당분간 Windows와 Android만 배포한다 | Accepted |
@@ -278,8 +278,11 @@ ADR 이 필요한 대표 기준:
 | [0258](0258-codex-retained-loop-session-attribution.md) | Codex 로그 정리 뒤 종료된 선택을 폐기하고 유일한 대화 소유권을 검증한다 | Proposed |
 | [0259](0259-remote-file-viewer-system-back-to-explorer.md) | Remote 파일 열람 중 system back은 직전 Files 목록으로 돌아간다 (0219 부분 대체) | Accepted |
 | [0260](0260-remote-shared-memo-and-panel-preferences.md) | Remote 메모는 PC 저장소를 공유하고 패널 진입점은 기기별로 선택한다 | Accepted |
-| [0261](0261-remote-visible-tool-swipe-cycle.md) | Remote 도구 스와이프는 표시된 도구를 고정 순서로 순환한다 | Accepted |
+| [0261](0261-remote-visible-tool-swipe-cycle.md) | Remote 도구 스와이프는 표시된 도구를 고정 순서로 순환한다 | Superseded by 0263 (안내 줄만) |
 | [0262](0262-powershell-command-lifecycle.md) | PowerShell 작업 경계는 수락된 줄 입력과 프롬프트가 소유한다 | Accepted |
+| [0263](0263-remote-tool-swipe-hint-removal.md) | Remote 도구의 상단 스와이프 안내 줄을 제거한다 | Accepted |
+| [0264](0264-exit-update-progress-dialog.md) | 종료·업데이트 준비 단계와 전용 진행 모달 공유 | Accepted |
+| [0265](0265-pc-remote-first-use-defaults.md) | PC·Remote의 첫 사용 기본 구성을 정한다 | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

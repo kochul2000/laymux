@@ -1,99 +1,40 @@
-import { act, render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-import type { AppUpdateStatus } from "@/lib/tauri-api";
-
-const getAppUpdateStatus = vi.fn<() => Promise<AppUpdateStatus>>();
-const installAppUpdate = vi.fn<() => Promise<AppUpdateStatus>>();
-let statusListener: ((status: AppUpdateStatus) => void) | null = null;
-
-vi.mock("@/lib/tauri-api", () => ({
-  getAppUpdateStatus: () => getAppUpdateStatus(),
-  installAppUpdate: () => installAppUpdate(),
-  onAppUpdateStatusChanged: (listener: (status: AppUpdateStatus) => void) => {
-    statusListener = listener;
-    return Promise.resolve(() => {});
-  },
-}));
-
+import { render, screen, fireEvent } from "@testing-library/react";
+import { beforeEach, describe, expect, it } from "vitest";
 import { UpdateButton } from "./UpdateButton";
-
-const status = (overrides: Partial<AppUpdateStatus> = {}): AppUpdateStatus => ({
+import { useLifecycleStore } from "@/stores/lifecycle-store";
+import type { AppUpdateStatus } from "@/lib/tauri-api";
+const status: AppUpdateStatus = {
   enabled: true,
-  channel: "stable",
-  currentVersion: "0.10.13",
-  availableVersion: null,
+  channel: "beta",
+  currentVersion: "1.0.0",
+  availableVersion: "1.1.0-beta.1",
   notes: null,
   publishedAt: null,
   operation: "idle",
   downloadedBytes: 0,
   totalBytes: null,
-  checkedAtMs: Date.now(),
+  checkedAtMs: null,
   lastError: null,
-  ...overrides,
-});
-
+};
+beforeEach(() =>
+  useLifecycleStore.setState({ status, open: false, kind: "update", preview: false }),
+);
 describe("UpdateButton", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    statusListener = null;
-    getAppUpdateStatus.mockResolvedValue(status());
-    installAppUpdate.mockResolvedValue(
-      status({ availableVersion: "0.11.0", operation: "downloading" }),
-    );
-    vi.spyOn(window, "confirm").mockReturnValue(true);
-  });
-
-  it("stays absent when this build has no available update", async () => {
+  it("opens the shared dialog instead of installing directly", () => {
     render(<UpdateButton />);
-    await act(async () => {});
+    fireEvent.click(screen.getByTestId("app-update-btn"));
+    expect(useLifecycleStore.getState().open).toBe(true);
+    expect(useLifecycleStore.getState().status?.operation).toBe("idle");
+  });
+  it("remains usable to reopen minimized download progress", () => {
+    useLifecycleStore.setState({ status: { ...status, operation: "downloading" } });
+    render(<UpdateButton />);
+    fireEvent.click(screen.getByTestId("app-update-btn"));
+    expect(useLifecycleStore.getState().open).toBe(true);
+  });
+  it("is absent without an available update", () => {
+    useLifecycleStore.setState({ status: { ...status, availableVersion: null } });
+    render(<UpdateButton />);
     expect(screen.queryByTestId("app-update-btn")).not.toBeInTheDocument();
-  });
-
-  it("appears from a backend event and schedules an accepted install", async () => {
-    const user = userEvent.setup();
-    render(<UpdateButton />);
-    await act(async () => {});
-
-    act(() => statusListener?.(status({ availableVersion: "0.11.0" })));
-    const button = screen.getByTestId("app-update-btn");
-    expect(button).toHaveStyle({ color: "var(--yellow)" });
-    expect(button).toHaveAttribute("aria-label", expect.stringContaining("0.11.0"));
-
-    await user.click(button);
-    expect(window.confirm).toHaveBeenCalled();
-    expect(installAppUpdate).toHaveBeenCalledTimes(1);
-  });
-
-  it("names the beta channel so a test build is not mistaken for a stable one", async () => {
-    render(<UpdateButton />);
-    await act(async () => {});
-
-    act(() => statusListener?.(status({ availableVersion: "0.11.0-beta.1", channel: "beta" })));
-    expect(screen.getByTestId("app-update-btn")).toHaveAttribute(
-      "aria-label",
-      expect.stringContaining("beta channel"),
-    );
-  });
-
-  it("shows download progress and prevents a duplicate install", async () => {
-    const user = userEvent.setup();
-    getAppUpdateStatus.mockResolvedValue(
-      status({
-        availableVersion: "0.11.0",
-        operation: "downloading",
-        downloadedBytes: 40,
-        totalBytes: 100,
-      }),
-    );
-    render(<UpdateButton />);
-    await act(async () => {});
-
-    const button = screen.getByTestId("app-update-btn");
-    expect(button).toHaveTextContent("40");
-    expect(button).toBeDisabled();
-    await user.click(button);
-    expect(installAppUpdate).not.toHaveBeenCalled();
   });
 });

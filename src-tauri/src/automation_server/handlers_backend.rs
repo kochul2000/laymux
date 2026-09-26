@@ -268,6 +268,11 @@ pub async fn api_docs() -> impl IntoResponse {
                 "body": { "section": "\"startup\" | \"profile-0\" | \"profile-1\" | \"colorSchemes\" | \"keybindings\"" }
             },
             {
+                "method": "POST", "path": "/api/v1/ui/lifecycle",
+                "description": "Dev-only lifecycle dialog preview. Never interrupts tasks or installs updates. Release returns 403.",
+                "body": { "action": "open | close (optional)", "kind": "close | update", "stage": "ready | downloading | checkpoint | interrupting | settling | caching | installing | closing", "completed": "number (optional)", "total": "number (optional)", "cleanup": "boolean (optional)" }
+            },
+            {
                 "method": "POST", "path": "/api/v1/ui/file-viewer",
                 "description": "Open the unified file viewer overlay for a file path (same viewer as File Explorer / Ctrl+Shift+O).",
                 "body": { "path": "string (absolute path, required)", "newWindow": "boolean (optional — fill the whole window)" }

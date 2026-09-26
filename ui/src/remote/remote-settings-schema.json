@@ -6,17 +6,17 @@
       "type": "boolean",
       "default": true,
       "applyMode": "live",
-      "description": "플로팅 컨트롤 전체 표시 스위치. false는 모든 패드·버튼을 숨기되 개별 활성·크기·위치를 보존합니다. true는 구성된 항목을 다시 표시합니다. 최초에는 패드가 모두 꺼져 있으므로 방향 패드를 요청하면 floatingDpadEnabled도 켜세요."
+      "description": "플로팅 컨트롤 전체 표시 스위치. false는 모든 패드·버튼을 숨기되 개별 활성·크기·위치를 보존합니다. true는 구성된 항목을 다시 표시합니다. 새 기기에서는 두 패드가 모두 켜집니다."
     },
     "floatingDpadEnabled": {
       "type": "boolean",
-      "default": false,
+      "default": true,
       "applyMode": "live",
       "description": "커서 방향키 플로팅 패드. 표시에는 floatingEnabled=true도 필요합니다."
     },
     "floatingNavPadEnabled": {
       "type": "boolean",
-      "default": false,
+      "default": true,
       "applyMode": "live",
       "description": "pane·알림 탐색 플로팅 패드. 표시에는 floatingEnabled=true도 필요합니다."
     },
@@ -89,7 +89,7 @@
     "navigationWidth": {
       "type": "integer",
       "description": "고정 탐색 패널 너비(px).",
-      "default": 360,
+      "default": 300,
       "minimum": 200,
       "maximum": 720,
       "group": "display",
@@ -107,7 +107,7 @@
     "composerIdleOpacity": {
       "type": "integer",
       "description": "입력창이 비활성일 때 불투명도(%). idle ≤ focused ≤ active를 유지하세요.",
-      "default": 55,
+      "default": 50,
       "minimum": 20,
       "maximum": 100,
       "group": "display",
@@ -116,7 +116,7 @@
     "composerFocusedOpacity": {
       "type": "integer",
       "description": "입력창에 포커스가 있을 때 불투명도(%).",
-      "default": 80,
+      "default": 70,
       "minimum": 20,
       "maximum": 100,
       "group": "display",
@@ -134,7 +134,7 @@
     "snapshotMaxKib": {
       "type": "integer",
       "description": "최초 출력·스크롤 기록 가져오기 예산(KiB). 다음 terminal attach부터 적용됩니다.",
-      "default": 4,
+      "default": 8,
       "minimum": 1,
       "maximum": 1024,
       "applyMode": "nextUse",
@@ -179,7 +179,7 @@
     "inputMode": {
       "type": "string",
       "enum": ["direct", "composer"],
-      "default": "direct",
+      "default": "composer",
       "description": "현재 Remote 입력 모드. direct는 직접 터미널 입력, composer는 별도 입력창입니다.",
       "applyMode": "live"
     },
@@ -296,7 +296,7 @@
     },
     "floatingDpadX": {
       "type": "number",
-      "default": 0.95,
+      "default": 0.9108609136460442,
       "minimum": 0,
       "maximum": 1,
       "applyMode": "live",
@@ -304,7 +304,7 @@
     },
     "floatingDpadY": {
       "type": "number",
-      "default": 0.65,
+      "default": 0.5274580464716007,
       "minimum": 0,
       "maximum": 1,
       "applyMode": "live",
@@ -312,7 +312,7 @@
     },
     "floatingNavPadX": {
       "type": "number",
-      "default": 0.05,
+      "default": 0.10478285610595374,
       "minimum": 0,
       "maximum": 1,
       "applyMode": "live",
@@ -320,7 +320,7 @@
     },
     "floatingNavPadY": {
       "type": "number",
-      "default": 0.65,
+      "default": 0.5206913907023182,
       "minimum": 0,
       "maximum": 1,
       "applyMode": "live",
@@ -402,18 +402,17 @@
       },
       "default": {
         "main": {
-          "left": ["soft:c-c", "soft:q", "soft:esc"],
+          "left": ["soft:c-c", "soft:q", "soft:esc", "soft:u-defaultclear"],
           "center": [],
           "right": ["keyboard", "keys", "send"]
         },
         "expanded": {
-          "left": ["composer", "soft:navPad", "soft:tab", "soft:stab"],
+          "left": ["composer", "soft:navPad", "soft:notifOldest", "soft:tab"],
           "center": [],
           "right": [
             "soft:c-u",
             "soft:c-l",
             "soft:c-t",
-            "soft:c-j",
             "soft:dpad",
             "soft:pgup",
             "soft:pgdn",
@@ -455,7 +454,7 @@
           }
         }
       },
-      "default": [],
+      "default": [{ "id": "u-defaultclear", "label": "/clr", "seq": "/clear", "submit": true }],
       "applyMode": "live",
       "description": "사용자 등록 특수키 목록 전체 교체. id=u-영소문자숫자, label=양끝공백 없는1~8자, seq=실제 전송 문자열 최대32자. 저장만 하고 실행하지 않음. 삭제 시 inputBarZones와 floatingButtons 참조도 함께 제거. 입력 초안·기록은 포함하지 않음."
     },

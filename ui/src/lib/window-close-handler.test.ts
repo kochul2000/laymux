@@ -93,4 +93,57 @@ describe("createCloseHandler", () => {
     expect(mockDestroy).toHaveBeenCalledTimes(1);
     expect(mockClose).not.toHaveBeenCalled();
   });
+
+  it("coalesces repeated close requests while saving", async () => {
+    let finish!: () => void;
+    mockSaveBeforeClose.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const handler = createHandler();
+    const first = handler(makeEvent());
+    const secondEvent = makeEvent();
+    const second = handler(secondEvent);
+    expect(secondEvent.preventDefault).toHaveBeenCalledOnce();
+    expect(mockSaveBeforeClose).toHaveBeenCalledOnce();
+    finish();
+    await Promise.all([first, second]);
+    expect(mockDestroy).toHaveBeenCalledOnce();
+  });
+
+  it("does not close while an accepted update owns finalization", async () => {
+    const handler = createCloseHandler({
+      destroy: mockDestroy,
+      close: mockClose,
+      saveBeforeClose: mockSaveBeforeClose,
+      timeoutMs: 50,
+      beforeClose: async () => false,
+    });
+    await handler(makeEvent());
+    expect(mockSaveBeforeClose).not.toHaveBeenCalled();
+    expect(mockDestroy).not.toHaveBeenCalled();
+  });
+
+  it("waits for an explicit choice after a save failure", async () => {
+    let choose!: () => void;
+    mockSaveBeforeClose.mockRejectedValueOnce(new Error("disk full"));
+    const handler = createCloseHandler({
+      destroy: mockDestroy,
+      close: mockClose,
+      saveBeforeClose: mockSaveBeforeClose,
+      timeoutMs: 50,
+      onSaveProblem: () =>
+        new Promise<void>((resolve) => {
+          choose = resolve;
+        }),
+    });
+    const pending = handler(makeEvent());
+    await vi.waitFor(() => expect(choose).toBeDefined());
+    expect(mockDestroy).not.toHaveBeenCalled();
+    choose();
+    await pending;
+    expect(mockDestroy).toHaveBeenCalledOnce();
+  });
 });

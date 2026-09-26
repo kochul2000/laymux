@@ -1,6 +1,6 @@
 # 0261. Remote 도구 스와이프는 표시된 도구를 고정 순서로 순환한다
 
-- Status: Accepted
+- Status: Superseded by [0263](0263-remote-tool-swipe-hint-removal.md) (안내 줄 관련 결정만)
 - Date: 2026-09-21
 - Source: [issue #1064](https://github.com/kochul2000/laymux/issues/1064), [ADR-0260](0260-remote-shared-memo-and-panel-preferences.md), [architecture/api-contracts.md](../architecture/api-contracts.md)
 - Extends: ADR-0260의 기기 로컬 패널 설정과 아이콘 표시 정책

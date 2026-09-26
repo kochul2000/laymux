@@ -101,11 +101,14 @@
         --fs-sm: 11px;
         --fs-md: 13px;
         --remote-composer-font-size: 16px;
-        --remote-composer-idle-opacity: 0.55;
-        --remote-composer-focused-opacity: 0.8;
+        --remote-composer-idle-opacity: 0.5;
+        --remote-composer-focused-opacity: 0.7;
         --remote-composer-active-opacity: 1;
         --remote-menu-font-size: 13px;
-        --remote-navigation-width: 360px;
+        --remote-navigation-width: 300px;
+        --remote-button-baseline-scale: 1.1;
+        --remote-main-button-scale: var(--remote-button-baseline-scale);
+        --remote-keys-button-scale: var(--remote-button-baseline-scale);
         --touch-selection-handle-size: 22px;
         /* Compact controls in the Remote header share one border-box height. */
         --header-control-height: 26px;
@@ -989,6 +992,7 @@
         display: none;
       }
       .settings-connection-button {
+        margin-top: 16px;
         display: inline-flex;
         align-items: center;
         gap: 6px;
@@ -3142,17 +3146,6 @@
       [data-remote-tool-swipe] {
         touch-action: pan-y;
       }
-      .remote-tool-swipe-hint {
-        flex: 0 0 auto;
-        padding: 5px 12px;
-        color: var(--muted);
-        font-size: 11px;
-        text-align: center;
-        user-select: none;
-      }
-      .remote-tool-swipe-hint[hidden] {
-        display: none;
-      }
       .github-header {
         display: flex;
         flex: 0 0 auto;
@@ -3425,3 +3418,6 @@
         justify-content: flex-end;
         gap: 8px;
       }
+
+.remote-update-dialog { --text-muted: var(--text-secondary); --accent-06: #89b4fa0f; --accent-10: #89b4fa1a; --backdrop-heavy: #00000080; }
+.remote-update-dialog .lifecycle-actions button { min-height: 40px; padding: 8px 12px; }

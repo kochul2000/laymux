@@ -8,6 +8,9 @@ import { saveBeforeClose, setBlockPersist } from "@/lib/persist-session";
 import { applySettingsSnapshot } from "@/lib/settings-snapshot";
 import { createCloseHandler } from "@/lib/window-close-handler";
 import { exitInterruptBudgetMs } from "@/lib/interrupt-terminals-on-exit";
+import { beginAppClose } from "@/lib/tauri-api";
+import { LifecycleModal } from "@/components/layout/LifecycleModal";
+import { useLifecycleStore, waitForCloseDecision } from "@/stores/lifecycle-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useWindowGeometry, captureWindowGeometry } from "@/hooks/useWindowGeometry";
 import { useAppFocus } from "@/hooks/useAppFocus";
@@ -61,11 +64,25 @@ export function App() {
         if (cancelled) return;
         const appWindow = getCurrentWindow();
         const handler = createCloseHandler({
+          beforeClose: async () => {
+            try {
+              await beginAppClose();
+            } catch {
+              useLifecycleStore.getState().openUpdate();
+              return false;
+            }
+            useLifecycleStore
+              .getState()
+              .startClose(useSettingsStore.getState().exit.interruptTerminals);
+            return true;
+          },
+          onSaveProblem: waitForCloseDecision,
           destroy: () => appWindow.destroy(),
           close: () => appWindow.close(),
           saveBeforeClose: async () => {
             await captureWindowGeometry();
-            await saveBeforeClose();
+            await saveBeforeClose(useLifecycleStore.getState().report);
+            useLifecycleStore.getState().report({ stage: "closing", completed: 0, total: null });
             await closeOpenTerminalSessions();
           },
           // Widen the base save timeout by the kill-on-exit budget (issue #451)
@@ -151,6 +168,7 @@ export function App() {
         </Suspense>
       )}
       <LocalMobileModeOverlay />
+      <LifecycleModal />
       {!localMobileModeActive && <RemoteControlOverlay />}
     </div>
   );

@@ -8,6 +8,8 @@ export interface CloseHandlerDeps {
    * (e.g. a longer kill-on-exit settle delay). See issue #451.
    */
   timeoutMs: number | (() => number);
+  beforeClose?: () => Promise<boolean>;
+  onSaveProblem?: (error: string, pending: Promise<void>) => Promise<void>;
 }
 
 /**
@@ -22,6 +24,7 @@ export interface CloseHandlerDeps {
  */
 export function createCloseHandler(deps: CloseHandlerDeps) {
   let forceClose = false;
+  let running = false;
 
   return async (event: { preventDefault: () => void }) => {
     if (forceClose) {
@@ -30,16 +33,29 @@ export function createCloseHandler(deps: CloseHandlerDeps) {
     }
 
     event.preventDefault();
+    if (running) return;
+    running = true;
+    if (deps.beforeClose && !(await deps.beforeClose().catch(() => false))) {
+      running = false;
+      return;
+    }
 
     const timeoutMs = typeof deps.timeoutMs === "function" ? deps.timeoutMs() : deps.timeoutMs;
 
+    const pending = deps.saveBeforeClose();
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await Promise.race([
-        deps.saveBeforeClose().then(() => "saved" as const),
-        new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), timeoutMs)),
+      const outcome = await Promise.race([
+        pending.then(() => "saved" as const),
+        new Promise<"timeout">((resolve) => {
+          timer = setTimeout(() => resolve("timeout"), timeoutMs);
+        }),
       ]);
-    } catch {
-      // Save failure is non-fatal — proceed to close
+      if (outcome === "timeout") await deps.onSaveProblem?.("timeout", pending);
+    } catch (error) {
+      await deps.onSaveProblem?.(String(error), pending);
+    } finally {
+      clearTimeout(timer);
     }
 
     try {

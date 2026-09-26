@@ -19,18 +19,20 @@ describe("DockStore", () => {
     expect(left?.activeView).toBe("WorkspaceSelectorView");
   });
 
-  it("right dock shows MemoView and FileExplorerView in separate panes by default", () => {
+  it("fresh right dock stacks Memo, File Explorer, and GitHub in three equal panes", () => {
     const right = useDockStore.getInitialState().docks.find((d) => d.position === "right")!;
     expect(right.activeView).toBe("MemoView");
     expect(right.views).toEqual([]);
-    expect(right.panes).toHaveLength(2);
+    expect(right.panes).toHaveLength(3);
     expect(right.panes.map((pane) => pane.view)).toEqual([
       { type: "MemoView" },
       { type: "FileExplorerView" },
+      { type: "GitHubView" },
     ]);
     expect(right.panes.map(({ x, y, w, h }) => ({ x, y, w, h }))).toEqual([
-      { x: 0, y: 0, w: 1, h: 0.5 },
-      { x: 0, y: 0.5, w: 1, h: 0.5 },
+      { x: 0, y: 0, w: 1, h: 1 / 3 },
+      { x: 0, y: 1 / 3, w: 1, h: 1 / 3 },
+      { x: 0, y: 2 / 3, w: 1, h: 1 / 3 },
     ]);
     expect(right.visible).toBe(true);
   });

@@ -350,6 +350,7 @@ mod tests {
         let mut device = report();
         // Existing Remote pages normalize every custom key with a submit flag.
         device.settings["inputBarUserKeys"] = json!([
+            {"id":"u-defaultclear", "label":"/clr", "seq":"/clear", "submit":true},
             {"id":"u-one", "label":"Tab", "seq":"\t", "submit":false},
             {"id":"u-two", "label":"Run", "seq":"echo ok", "submit":true}
         ]);

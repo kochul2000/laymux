@@ -199,7 +199,7 @@ test.describe("Remote input action layout", () => {
 
     await expect
       .poll(() => renderedSegmentActions(page, "mainActionRow", "left"))
-      .toEqual(["soft:c-c", "soft:q", "soft:esc"]);
+      .toEqual(["soft:c-c", "soft:q", "soft:esc", "soft:u-defaultclear"]);
     await expect.poll(() => renderedSegmentActions(page, "mainActionRow", "center")).toEqual([]);
     await expect
       .poll(() => renderedSegmentActions(page, "mainActionRow", "right"))
@@ -229,7 +229,7 @@ test.describe("Remote input action layout", () => {
     await expect(page.locator("#keyBar")).toBeVisible();
     await expect
       .poll(() => renderedSegmentActions(page, "keyRow", "left"))
-      .toEqual(["composer", "soft:navPad", "soft:tab", "soft:stab"]);
+      .toEqual(["composer", "soft:navPad", "soft:notifOldest", "soft:tab"]);
     await expect.poll(() => renderedSegmentActions(page, "keyRow", "center")).toEqual([]);
     await expect
       .poll(() => renderedSegmentActions(page, "keyRow", "right"))
@@ -237,7 +237,6 @@ test.describe("Remote input action layout", () => {
         "soft:c-u",
         "soft:c-l",
         "soft:c-t",
-        "soft:c-j",
         "soft:dpad",
         "soft:pgup",
         "soft:pgdn",
@@ -273,7 +272,7 @@ test.describe("Remote input action layout", () => {
     await place(page, "soft:c-c", "Ctrl+C (interrupt)", "main:right");
     await expect
       .poll(() => renderedActions(page, "mainActionRow"))
-      .toEqual(["soft:q", "soft:esc", "keys", "soft:c-c"]);
+      .toEqual(["soft:q", "soft:esc", "soft:u-defaultclear", "keys", "send", "soft:c-c"]);
 
     // Hidden round trip: unplacing hides the button, replacing restores it.
     await place(page, "soft:c-c", "Ctrl+C (interrupt)", "hidden");
@@ -282,7 +281,7 @@ test.describe("Remote input action layout", () => {
     await expect(segment(page, "mainActionRow", "left")).toContainText("^C");
 
     const zones = (await storedConfig(page)).zones;
-    expect(zones.main.left).toEqual(["soft:q", "soft:esc", "soft:c-c"]);
+    expect(zones.main.left).toEqual(["soft:q", "soft:esc", "soft:u-defaultclear", "soft:c-c"]);
     expect(zones.main.right).toEqual(["keys", "send"]);
     expect(zones.expanded.center).toEqual(["keyboard"]);
 
@@ -314,7 +313,16 @@ test.describe("Remote input action layout", () => {
     await dragChipOnto(page, "soft:tab", "soft:c-c", true);
     await expect
       .poll(() => renderedActions(page, "mainActionRow"))
-      .toEqual(["soft:c-c", "soft:tab", "soft:q", "soft:esc", "keyboard", "keys"]);
+      .toEqual([
+        "soft:c-c",
+        "soft:tab",
+        "soft:q",
+        "soft:esc",
+        "soft:u-defaultclear",
+        "keyboard",
+        "keys",
+        "send",
+      ]);
   });
 
   test("keeps Keys out of the row it opens and closes the bar when it is unplaced", async ({
@@ -409,18 +417,26 @@ test.describe("Remote input action layout", () => {
     // inventing an alignment the user never chose.
     await expect
       .poll(() => renderedActions(page, "mainActionRow"))
-      .toEqual(["soft:c-c", "soft:q", "soft:esc", "keyboard", "keys"]);
+      .toEqual([
+        "soft:c-c",
+        "soft:q",
+        "soft:esc",
+        "soft:u-defaultclear",
+        "keyboard",
+        "keys",
+        "send",
+      ]);
     await expect(page.locator('[data-input-action="soft:c-a"]')).toHaveCount(0);
-    await expect(page.locator("#composerSend")).toBeHidden();
+    await expect(page.locator("#composerSend")).toBeVisible();
 
     // `expanded` is validated on its own, so the bar stays open across the
     // zones reset.
     await expect(page.locator("#keyBar")).toBeVisible();
     await expect(page.locator('#keyRow [data-input-action="soft:tab"]')).toHaveCount(1);
     await page.locator("#inputModeToggle").click();
-    await expect(page.locator("#composerSend")).toBeVisible();
-    await page.locator("#inputModeToggle").click();
     await expect(page.locator("#composerSend")).toBeHidden();
+    await page.locator("#inputModeToggle").click();
+    await expect(page.locator("#composerSend")).toBeVisible();
   });
 
   test("rejects prototype names and out-of-bounds custom keys from storage", async ({ page }) => {
@@ -498,11 +514,13 @@ test.describe("Remote input action layout", () => {
       .poll(async () =>
         ((await storedConfig(page)).userKeys || []).map((entry: { seq: string }) => entry.seq),
       )
-      .toEqual(["\u0007"]);
+      .toEqual(["/clear", "\u0007"]);
 
     await page.getByRole("button", { name: "Delete custom key ^G" }).click();
-    await expect(page.locator('[data-input-action^="soft:u-"]')).toHaveCount(0);
-    await expect.poll(async () => (await storedConfig(page)).userKeys).toEqual([]);
+    await expect(page.locator('[data-input-action^="soft:u-"]')).toHaveCount(1);
+    await expect
+      .poll(async () => (await storedConfig(page)).userKeys)
+      .toEqual([{ id: "u-defaultclear", label: "/clr", seq: "/clear", submit: true }]);
   });
 
   test("registers a raw escape sequence and reports invalid input", async ({ page }) => {
@@ -524,7 +542,7 @@ test.describe("Remote input action layout", () => {
       .poll(async () =>
         ((await storedConfig(page)).userKeys || []).map((entry: { seq: string }) => entry.seq),
       )
-      .toEqual(["\u001b[1;5C"]);
+      .toEqual(["/clear", "\u001b[1;5C"]);
 
     await page.reload();
     await page.setContent(remoteClientMarkupWithoutXterm());
@@ -542,7 +560,7 @@ test.describe("Remote input action layout", () => {
     await page.getByLabel("Send Enter").check();
     await page.getByRole("button", { name: "Add custom key" }).click();
     await expect(page.getByLabel("Send Enter")).not.toBeChecked();
-    const [key] = (await storedConfig(page)).userKeys;
+    const [, key] = (await storedConfig(page)).userKeys;
     expect(key).toMatchObject({ label: "Run", seq: "run\n", submit: true });
     await page.reload();
     await page.setContent(remoteClientMarkupWithoutXterm());
@@ -553,6 +571,7 @@ test.describe("Remote input action layout", () => {
     await page.getByLabel("Custom key sequence").fill("run\\n");
     await page.getByRole("button", { name: "Add custom key" }).click();
     expect((await storedConfig(page)).userKeys).toEqual([
+      { id: "u-defaultclear", label: "/clr", seq: "/clear", submit: true },
       key,
       expect.objectContaining({ label: "Raw", seq: "run\n", submit: false }),
     ]);
@@ -589,7 +608,7 @@ test.describe("Remote input action layout", () => {
       .poll(async () =>
         ((await storedConfig(page)).userKeys || []).map((entry: { seq: string }) => entry.seq),
       )
-      .toEqual(["run\r"]);
+      .toEqual(["/clear", "run\r"]);
   });
 
   test("updates the Keys-row empty state when Send becomes visible in Composer", async ({
