@@ -16,7 +16,7 @@ Remote 미리보기와 다운로드만으로는 폰의 PDF 뷰어·HTML 처리 �
 - 서버 route·lease·capability·전송 상한은 유지한다. 열기와 저장은 하나의 전송 중 상태를 공유하고, 파일 전환·lease 변경 이후 도착한 응답은 폐기한다.
 - Android는 `LaymuxNative.openRemoteFile(name, mediaType, base64)`를 제공한다. 현재 문서 세대를 검사하고 기존 파일명 정규화·인코딩 전후 상한을 적용한다. 전용 private cache에 파일별 독립 경로로 저장하고 FileProvider의 `content:` URI와 임시 읽기 권한만 ACTION_VIEW로 전달한다. provider는 외부 공개하지 않으며 전용 하위 경로만 허용한다. 이전 파일은 이후 열기 시 24시간이 지난 것만 정리한다.
 - 연결 앱 없음·잘못된 데이터·쓰기 실패는 메시지로 알린다. 구버전 APK는 업데이트 안내를 표시하고 다운로드로 조용히 대체하지 않는다. Downloads에 영구 사본을 만드는 동작은 기존 Download가 담당한다.
-- 브라우저는 사용자 클릭 안에서 빈 탭을 먼저 열고 opener를 끊는다. PDF는 원본 Blob으로 이동하고, 나머지는 새 탭의 sandbox iframe에서 표시한다. sandbox는 스크립트·동일 origin 접근을 허용하지 않는다. frame-src에 blob:을 허용하되 다른 CSP 지시자는 유지한다. 실패·늦은 응답 시 빈 탭을 닫고 object URL은 지연 해제한다.
+- 브라우저는 사용자 클릭 안에서 빈 탭을 먼저 열고 opener를 끊는다. PDF는 원본 Blob으로 이동하고, 표시 가능한 HTML·텍스트·JSON·XML·이미지는 새 탭의 sandbox iframe에서 표시한다. ZIP·일반 바이너리 등 지원 목록 밖의 MIME는 빈 탭을 닫고 Download 사용을 안내한다. sandbox는 스크립트·동일 origin 접근을 허용하지 않는다. frame-src에 blob:을 허용하되 다른 CSP 지시자는 유지한다. 실패·늦은 응답 시 빈 탭을 닫고 object URL은 지연 해제한다.
 
 ## Alternatives Considered
 

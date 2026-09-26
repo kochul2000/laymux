@@ -458,6 +458,30 @@ test("reports a blocked new tab without fetching the file", async ({ context, pa
   expect(downloadRequests).toEqual([]);
 });
 
+for (const mediaType of ["application/zip", "application/octet-stream"]) {
+  test(`explains unsupported browser Open for ${mediaType}`, async ({ context, page }) => {
+    await installRemoteViewerMocks(context);
+    await context.route("**/file-viewer/download", (route) =>
+      route.fulfill({
+        json: { name: "archive.zip", mediaType, base64: "YQ==" },
+      }),
+    );
+    await connectRemote(page);
+    await openRemoteFileExplorer(page);
+    await page.locator("#fileViewerPath").fill("C:\\work\\archive.zip");
+    await page.locator("#openFileViewer").click();
+    const popupPromise = page.waitForEvent("popup");
+    await page.locator("#fileViewerOpen").click();
+    const popup = await popupPromise;
+    await expect.poll(() => popup.isClosed()).toBe(true);
+    await expect(page.locator("#fileViewerMessage")).toHaveText(
+      "This browser cannot open this file type. Use Download instead.",
+    );
+    await expect(page.locator("#fileViewerDownload")).toBeEnabled();
+    await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+  });
+}
+
 test("closes the reserved tab on failure and restores file actions", async ({ context, page }) => {
   await installRemoteViewerMocks(context, { downloadStatus: 413 });
   await connectRemote(page);

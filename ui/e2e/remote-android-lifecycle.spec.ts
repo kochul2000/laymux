@@ -353,9 +353,18 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
           state.leases.push(leaseId);
         },
         saveRemoteFile(name, mediaType, base64) {
+          // Android's injected Java methods reject calls detached from their bridge.
+          if (this !== target.LaymuxNative) {
+            throw new Error(
+              "Error invoking saveRemoteFile: Java bridge method can't be invoked on a non-injected object",
+            );
+          }
           state.savedFiles.push({ name, mediaType, base64 });
         },
         openRemoteFile(name, mediaType, base64) {
+          if (this !== target.LaymuxNative) {
+            throw new Error("openRemoteFile must retain the injected bridge receiver");
+          }
           state.openedFiles.push({ name, mediaType, base64 });
         },
         disconnectRemote() {

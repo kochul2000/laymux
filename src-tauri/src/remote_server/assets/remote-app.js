@@ -2419,8 +2419,19 @@ import {
 
         function openFileInBrowserTab(tab, payload) {
           if (tab.closed) return;
-          const mediaType = payload.mediaType || "application/octet-stream";
-          const url = URL.createObjectURL(new Blob([base64ToBytes(payload.base64)], { type: mediaType }));
+          const mediaType = (payload.mediaType || "application/octet-stream").split(";", 1)[0].trim().toLowerCase();
+          // Download-only MIME types cannot navigate a sandboxed frame. Report them
+          // here rather than leaving a blank tab without a catchable browser error.
+          const browserViewableTypes = [
+            "application/pdf", "text/html", "text/plain", "application/json",
+            "application/xml", "text/xml", "application/xhtml+xml",
+            "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif",
+            "image/bmp", "image/svg+xml", "image/x-icon", "image/vnd.microsoft.icon",
+          ];
+          if (!browserViewableTypes.includes(mediaType)) {
+            throw new Error("This browser cannot open this file type. Use Download instead.");
+          }
+          const url = URL.createObjectURL(new Blob([base64ToBytes(payload.base64)], { type: payload.mediaType || mediaType }));
           try {
             if (mediaType === "application/pdf") {
               tab.location.replace(url);
@@ -2445,11 +2456,11 @@ import {
           // The wrapper WebView has no download handler of its own, so a browser
           // save silently does nothing there. Refuse rather than pretend.
           const nativeMethod = openOnDevice ? "openRemoteFile" : "saveRemoteFile";
-          const nativeSave =
+          const nativeFileBridge =
             androidE2eMode && typeof window.LaymuxNative?.[nativeMethod] === "function"
-              ? (...args) => window.LaymuxNative[nativeMethod](...args)
+              ? window.LaymuxNative
               : null;
-          if (androidE2eMode && !nativeSave) {
+          if (androidE2eMode && !nativeFileBridge) {
             setFileViewerMessage(`This app version cannot ${openOnDevice ? "open" : "save"} files. Update the app.`, true);
             return;
           }
@@ -2486,8 +2497,9 @@ import {
               if (!payload || typeof payload.base64 !== "string" || typeof payload.name !== "string") {
                 throw new Error("Download response was not usable");
               }
-              if (nativeSave) {
-                nativeSave(payload.name, payload.mediaType || "", payload.base64);
+              if (nativeFileBridge) {
+                // Preserve the injected receiver across the asynchronous file fetch.
+                nativeFileBridge[nativeMethod](payload.name, payload.mediaType || "", payload.base64);
                 setFileViewerMessage(openOnDevice ? `Opening ${payload.name}…` : `Saved ${payload.name} to Downloads.`);
                 return;
               }
