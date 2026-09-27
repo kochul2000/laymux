@@ -1,6 +1,6 @@
 # 0275. Remote 물리 키보드 입력은 안전한 입력 표면으로 포커스를 복구한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-27
 - Source: 사용자 실기 신고(물리 키보드 연결 중 터치 pane 전환 후 재탭 필요), [ADR-0196](0196-remote-coarse-pointer-attach-defers-input-focus.md), [ADR-0273](0273-remote-physical-keyboard-and-navigation-keys.md), [api-contracts.md §13.4](../architecture/api-contracts.md)
 - Extends: ADR-0196의 coarse pointer 포커스 제한에 확인된 물리 키보드 예외를 추가한다. ADR-0273의 기존 native 연결 상태를 재사용한다.
