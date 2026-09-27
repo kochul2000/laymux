@@ -1,6 +1,6 @@
 # 0277. Remote 기본 클리어 키는 pane clear action을 실행한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-27
 - Source: 사용자 요구(Remote Add keys에 Alt+L 추가, 기본 `/clr` 교체), [ADR-0265](0265-pc-remote-first-use-defaults.md), [ADR-0269](0269-remote-physical-keyboard-shortcuts.md), [ADR-0271](0271-remote-requested-desktop-writes-carry-lease.md), [api-contracts §13.4](../architecture/api-contracts.md#134-terminal-control)
 - Amends: ADR-0265의 기본 `/clr` 사용자 키 결정. 나머지 첫 사용 기본값과 저장값 우선 정책은 유지한다.
