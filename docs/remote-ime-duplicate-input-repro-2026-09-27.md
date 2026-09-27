@@ -1,5 +1,7 @@
 # Remote Direct 한글 단어 중복 입력 재현과 검증
 
+> 후속 조사: 아래 수정이 포함된 최신 자산에도 **조합 중 keydown 선행 → compositionend 후행**의 별도 중복 경로가 남아 있다. [2026-09-27 후속 재현 기록](remote-direct-ime-keydown-duplicate-investigation-2026-09-27.md)을 함께 본다. 이 문서의 수정 결과는 아래에서 검증한 이벤트 순서에 한정된다.
+
 사용자는 Android laymux 앱의 Direct 입력에서 소프트웨어·하드웨어 키보드 모두 단어가 간헐적으로 반복된다고 보고했다. Composer에서는 발생하지 않는다고 확인했다. 결정은 [ADR-0268](adr/0268-remote-ime-shares-composition-reconciliation.md)이다.
 
 ## 원인과 수정
