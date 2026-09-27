@@ -20,17 +20,16 @@ const status = {
   exitSettings: { interruptTerminals: true },
 };
 describe("Remote update dialog", () => {
-  it("shows the host and requires control before install", () => {
+  it("labels the connected PC update clearly and requires control before install", () => {
     const install = vi.fn();
     const modal = createRemoteUpdateDialog({
       check: vi.fn(),
       install,
       getCanInstall: () => false,
-      host: "OFFICE-PC",
     });
     modal.update(status);
     modal.open();
-    expect(document.body.textContent).toContain("OFFICE-PC");
+    expect(document.querySelector("h2")?.textContent).toBe("Connected PC update");
     const button = [...document.querySelectorAll("button")].find(
       (b) => b.textContent === "Update and restart",
     )!;

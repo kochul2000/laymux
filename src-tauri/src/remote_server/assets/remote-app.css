@@ -1051,7 +1051,7 @@
         margin: 0 4px 16px;
         padding: 0;
         color: var(--text-primary);
-        font-size: max(24px, calc(var(--remote-menu-font-size) * 1.5));
+        font-size: max(16px, var(--remote-menu-font-size));
         font-weight: 600;
         letter-spacing: -0.025em;
         text-transform: none;

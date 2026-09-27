@@ -51,6 +51,12 @@ for (const [width, drawerWidth] of [
       await page.getByRole("tab", { name, exact: true }).click();
       const panel = page.getByRole("tabpanel");
       await expect(panel).toBeVisible();
+      const titleSizes = await panel
+        .locator(".nav-section-title")
+        .evaluateAll((titles) =>
+          titles.map((title) => parseFloat(getComputedStyle(title).fontSize)),
+        );
+      for (const titleSize of titleSizes) expect(titleSize).toBeLessThanOrEqual(18);
       if (name === "Input bar") {
         // Validate the expanded editors too, including the minimum 200px menu.
         await page.locator('#inputLayoutEditor [data-layout-action="soft:c-c"]').click();
