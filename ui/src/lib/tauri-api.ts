@@ -964,7 +964,7 @@ export interface ClaudeSettings {
 }
 
 export interface CodexSettings {
-  /** Discard unsent text and verify /status before close/update (default: false). */
+  /** Discard unsent text and verify /status before close/update (default: true). */
   verifySessionOnExit: boolean;
   /**
    * Command that launches the Codex CLI (default: "codex"). Flags belong here —

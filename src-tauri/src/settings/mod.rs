@@ -1506,6 +1506,24 @@ mod tests {
     }
 
     #[test]
+    fn codex_exit_verification_defaults_on_but_preserves_explicit_choice() {
+        assert!(Settings::default().codex.verify_session_on_exit);
+        for json in [r#"{}"#, r#"{ "codex": {} }"#] {
+            let settings: Settings = serde_json::from_str(json).unwrap();
+            assert!(settings.codex.verify_session_on_exit);
+        }
+        for enabled in [false, true] {
+            let settings: Settings = serde_json::from_value(serde_json::json!({
+                "codex": { "verifySessionOnExit": enabled }
+            }))
+            .unwrap();
+            let serialized = serde_json::to_value(&settings).unwrap();
+            assert_eq!(settings.codex.verify_session_on_exit, enabled);
+            assert_eq!(serialized["codex"]["verifySessionOnExit"], enabled);
+        }
+    }
+
+    #[test]
     fn codex_session_restore_defaults_for_existing_settings() {
         let settings: Settings = serde_json::from_str(r#"{ "codex": {} }"#).unwrap();
         assert!(settings.codex.restore_session);

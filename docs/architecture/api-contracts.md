@@ -15,7 +15,7 @@
 
 ### Codex 종료 확인
 
-`codex.verifySessionOnExit`는 기본 false인 종료·업데이트 전용 세션 확인 설정이다([ADR-0270](../adr/0270-codex-status-checkpoint-probe.md)). 미전송 텍스트를 삭제하며 기본 Codex 편집 키와 대기 중 텍스트 composer를 요구한다. `begin_codex_status_checkpoint(updateRequestId?)`가 반환한 토큰에만 `codex_status_checkpoint_input(clear | typeStatus | submit)`, `read_codex_status_checkpoint`, `complete_codex_status_checkpoint`, `finish_codex_status_checkpoint`를 허용한다. backend는 generation·프로세스·native update 요청·기한과 단계 순서를 검증한다. 임의 바이트 입력이나 상시 귀속 조회 API가 아니며 Automation·Remote raw write의 fence를 우회시키지 않는다. `cancel_app_close`는 준비 실패 후 사용자가 종료 취소를 선택했을 때 앱 종료 예약을 해제한다. 완료 IPC는 저장 후 기한과 fence 소유권을 다시 확인한다. 성공한 일반 종료는 창 파괴까지 입력 차단을 유지하고 terminal close 정리만 허용하며, 실패·종료 취소는 차단을 해제한다.
+`codex.verifySessionOnExit`는 기본 true인 종료·업데이트 전용 세션 확인 설정이다([ADR-0270](../adr/0270-codex-status-checkpoint-probe.md)). 미전송 텍스트를 삭제하며 기본 Codex 편집 키와 대기 중 텍스트 composer를 요구한다. `begin_codex_status_checkpoint(updateRequestId?)`가 반환한 토큰에만 `codex_status_checkpoint_input(clear | typeStatus | submit)`, `read_codex_status_checkpoint`, `complete_codex_status_checkpoint`, `finish_codex_status_checkpoint`를 허용한다. backend는 generation·프로세스·native update 요청·기한과 단계 순서를 검증한다. 임의 바이트 입력이나 상시 귀속 조회 API가 아니며 Automation·Remote raw write의 fence를 우회시키지 않는다. `cancel_app_close`는 준비 실패 후 사용자가 종료 취소를 선택했을 때 앱 종료 예약을 해제한다. 완료 IPC는 저장 후 기한과 fence 소유권을 다시 확인한다. 성공한 일반 종료는 창 파괴까지 입력 차단을 유지하고 terminal close 정리만 허용하며, 실패·종료 취소는 차단을 해제한다.
 
 ### 다국어(i18n) — 언어 설정
 

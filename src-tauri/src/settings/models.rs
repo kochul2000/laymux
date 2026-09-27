@@ -502,8 +502,8 @@ pub enum CodexStatusMessageMode {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CodexSettings {
-    /// Discard unsent Codex text and query /status before close/update (opt-in).
-    #[serde(default)]
+    /// Discard unsent Codex text and query /status before close/update (default: true).
+    #[serde(default = "default_true")]
     pub verify_session_on_exit: bool,
     /// Command that launches the Codex CLI (default: "codex").
     ///
@@ -533,7 +533,7 @@ pub struct CodexSettings {
 impl Default for CodexSettings {
     fn default() -> Self {
         Self {
-            verify_session_on_exit: false,
+            verify_session_on_exit: true,
             command: default_codex_command(),
             restore_session: true,
             session_max_age_hours: 24,

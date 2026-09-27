@@ -269,7 +269,7 @@ const ENTRIES: &[MetadataEntry] = &[
     },
     MetadataEntry {
         path: "/codex/verifySessionOnExit",
-        description: "종료·업데이트 전에 기본 키맵의 대기 중인 Codex 입력을 지우고 /status로 복원 세션을 확인합니다. 미전송 초안이 삭제되고 터미널 크기가 잠시 바뀝니다. 기본값은 꺼짐입니다.",
+        description: "종료·업데이트 전에 기본 키맵의 대기 중인 Codex 입력을 지우고 /status로 복원 세션을 확인합니다. 미전송 초안이 삭제되고 터미널 크기가 잠시 바뀝니다. 기본값은 켜짐입니다.",
         sensitive: false,
         apply_mode: ApplyMode::NextUse,
     },

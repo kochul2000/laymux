@@ -82,6 +82,9 @@ describe("useSessionCheckpointLifecycle", () => {
     await vi.waitFor(() => expect(onSessionCheckpointRequested).toHaveBeenCalledTimes(1));
 
     nativeListener?.({ requestId: 9, reason: "update", requireConclusive: true });
+    await vi.waitFor(() =>
+      expect(withCodexStatusCheckpoint).toHaveBeenCalledWith(true, 9, expect.any(Function)),
+    );
 
     await vi.waitFor(() => expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(9, 17));
     expect(flushSessionCheckpoint).toHaveBeenCalledWith({

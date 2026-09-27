@@ -124,7 +124,7 @@ terminal_title = ["app-name", "thread-id", "codex-version", "spinner", "project"
 
 ## 2026-09-27: 선택 옵션의 `/status` 조회 검증
 
-사용자가 종료 출력 대신 입력창을 편집 키로 지운 뒤 `/status`를 읽는 방식을 선택했다. `codex.verifySessionOnExit`는 기본 false이며, 일반 종료와 업데이트의 마지막 저장 직전에만 조회한다. 구현 계약과 미지원 상태는 ADR-0270과 architecture 문서가 정본이다.
+사용자가 종료 출력 대신 입력창을 편집 키로 지운 뒤 `/status`를 읽는 방식을 선택했다. `codex.verifySessionOnExit`는 기본 true이며, 일반 종료와 업데이트의 마지막 저장 직전에만 조회한다. 구현 계약과 미지원 상태는 ADR-0270과 architecture 문서가 정본이다.
 
 Codex 0.157.1 Windows native 기본 공유 데몬을 dev 19281에서 실행했다. 사용자 Codex 설정과 release 앱은 변경하지 않았다.
 

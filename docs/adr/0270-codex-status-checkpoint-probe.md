@@ -2,7 +2,7 @@
 
 - Status: Proposed
 - Date: 2026-09-27
-- Source: 사용자 요청(기본 데몬의 세션 미식별 해결, 입력 삭제 후 `/status` 조회), [data-flow §13.5](../architecture/data-flow.md), [ADR-0222](0222-agent-session-checkpoint-coordinator.md), [조사 기록](../codex-shared-daemon-attribution-repro-2026-09-26.md)
+- Source: 사용자 요청(기본 데몬의 세션 미식별 해결, 입력 삭제 후 `/status` 조회, 기본 켜짐), [data-flow §13.5](../architecture/data-flow.md), [ADR-0222](0222-agent-session-checkpoint-coordinator.md), [조사 기록](../codex-shared-daemon-attribution-repro-2026-09-26.md)
 - Extends: ADR-0222의 종료·업데이트 귀속 수집. 일반 저장의 수동 관측 정책은 유지한다.
 
 ## Context
@@ -11,7 +11,7 @@ Codex의 기본 공유 데몬에서는 TUI 프로세스 진단에 현재 대화 
 
 ## Decision
 
-`codex.verifySessionOnExit`(기본 false)가 켜져 있으면 일반 종료와 업데이트의 마지막 checkpoint 전에 Codex TUI의 입력을 비우고 `/status`로 복원점을 확인한다.
+`codex.verifySessionOnExit`(기본 true)가 켜져 있으면 일반 종료와 업데이트의 마지막 checkpoint 전에 Codex TUI의 입력을 비우고 `/status`로 복원점을 확인한다. 사용자 요청에 따라 신규 설정과 필드가 생략된 기존 설정은 켜짐으로 해석하며, 명시적으로 저장한 false는 유지한다.
 
 - 옵션은 미전송 초안 삭제와 일시적인 터미널 크기 변경을 명시한다. 주기 저장, 완료 알림, workspace 전환, 숨김 pane 정리에서는 실행하지 않는다. 기존 로그 감지는 유지한다.
 - backend가 짧은 수명의 조회 토큰, 대상 PTY generation, 실행 중인 Codex 프로세스, 원래 크기와 조회 출력 경계를 소유한다. 일반 종료는 입력 fence를 획득·drain하고, 업데이트는 해당 native checkpoint 요청이 이미 소유한 fence를 사용한다. 일반 입력과 Remote 제어는 이 구간에 끼어들 수 없다.
