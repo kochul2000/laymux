@@ -133,5 +133,7 @@ Codex 0.157.1 Windows native 기본 공유 데몬을 dev 19281에서 실행했�
 - 입력 초안에 `normal`, `INSERT`가 포함돼도 일반 텍스트로 처리했다. 실제 Vim footer만 미지원 상태로 판정한다.
 - 저장된 rollout을 읽기 전용으로 확인하여 정확한 session_meta ID와 테스트 셸 명령의 기록을 확인했다. 삭제한 미전송 초안은 rollout에 없었다.
 - 초기화 중 Session ID 없는 화면과 shell composer는 조회 실패로 처리했다. 불확실한 화면에서 Enter를 보내지 않는다.
+- 최신 main(`9220ef73`, 1.0.19)을 반영한 dev에서 설정 UI로 옵션을 켜고 실제 창 닫기를 실행했다. shell composer에서는 실패 모달의 종료 취소로 돌아왔고 입력이 다시 가능했다. 일반 composer의 여러 줄 초안과 중간 커서 상태에서는 창이 정상 종료됐고, settings.json의 해당 pane `lastCodexSession`에 정확한 UUID가 남았다.
+- 같은 테스트 설정으로 dev를 재실행하고 workspace를 활성화하자 이전 대화가 자동 복원됐다. 다시 일반 종료한 뒤에도 동일 UUID가 저장됐다. 삭제한 최종 초안이 rollout에 없는 것을 확인했다. 설정 옵션과 실패 모달은 screenshot API로 시각 확인했다.
 
 단위·화면 테스트는 오래된 status 출력, 모달로 지워진 명령 메뉴, 토큰 만료와 지연 저장, generation·프로세스 변경, 실제 프로세스의 별도 Codex/SQLite 홈, 설정 override, close/update fence, 실패 후 종료 취소를 포함한다. 이 실측은 Windows native 범위이며 WSL 실제 TUI 종료·복원까지 검증한 기록은 아니다.
