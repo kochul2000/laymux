@@ -93,6 +93,26 @@ async function dragChipOnto(page: Page, sourceId: string, targetId: string, toRi
 }
 
 test.describe("Remote input action layout", () => {
+  test("Add keys에서 Alt+L을 다시 배치하고 저장한다", async ({ page }) => {
+    await openMarkup(page);
+    await expect(page.locator('#mainActionRow [data-key="clearPane"]')).toHaveText("Alt+L");
+    await page.locator("#drawerSettingsButton").click();
+    await place(page, "soft:clearPane", "Alt+L (clear pane)", "hidden");
+    await openSetup(page, "inputAvailableKeys");
+    await expect(
+      page.locator('#inputAvailableKeys [data-layout-action="soft:clearPane"]'),
+    ).toBeVisible();
+    await place(page, "soft:clearPane", "Alt+L (clear pane)", "expanded:center");
+    await page.reload();
+    await page.setContent(remoteClientMarkupWithoutXterm());
+    await page.locator("#keyBarToggle").click();
+    await expect(segment(page, "keyRow", "center").locator('[data-key="clearPane"]')).toHaveText(
+      "Alt+L",
+    );
+    await page.locator("#drawerSettingsButton").click();
+    await page.screenshot({ path: "test-results/remote-pane-clear-layout.png" });
+  });
+
   test("터치 화면에서 추가한 키의 조작부를 바로 보여 주고 접힘 상태를 유지한다", async ({
     browser,
   }) => {
@@ -199,7 +219,7 @@ test.describe("Remote input action layout", () => {
 
     await expect
       .poll(() => renderedSegmentActions(page, "mainActionRow", "left"))
-      .toEqual(["soft:c-c", "soft:q", "soft:esc", "soft:u-defaultclear"]);
+      .toEqual(["soft:c-c", "soft:q", "soft:esc", "soft:clearPane"]);
     await expect.poll(() => renderedSegmentActions(page, "mainActionRow", "center")).toEqual([]);
     await expect
       .poll(() => renderedSegmentActions(page, "mainActionRow", "right"))
@@ -272,7 +292,7 @@ test.describe("Remote input action layout", () => {
     await place(page, "soft:c-c", "Ctrl+C (interrupt)", "main:right");
     await expect
       .poll(() => renderedActions(page, "mainActionRow"))
-      .toEqual(["soft:q", "soft:esc", "soft:u-defaultclear", "keys", "send", "soft:c-c"]);
+      .toEqual(["soft:q", "soft:esc", "soft:clearPane", "keys", "send", "soft:c-c"]);
 
     // Hidden round trip: unplacing hides the button, replacing restores it.
     await place(page, "soft:c-c", "Ctrl+C (interrupt)", "hidden");
@@ -281,7 +301,7 @@ test.describe("Remote input action layout", () => {
     await expect(segment(page, "mainActionRow", "left")).toContainText("^C");
 
     const zones = (await storedConfig(page)).zones;
-    expect(zones.main.left).toEqual(["soft:q", "soft:esc", "soft:u-defaultclear", "soft:c-c"]);
+    expect(zones.main.left).toEqual(["soft:q", "soft:esc", "soft:clearPane", "soft:c-c"]);
     expect(zones.main.right).toEqual(["keys", "send"]);
     expect(zones.expanded.center).toEqual(["keyboard"]);
 
@@ -318,7 +338,7 @@ test.describe("Remote input action layout", () => {
         "soft:tab",
         "soft:q",
         "soft:esc",
-        "soft:u-defaultclear",
+        "soft:clearPane",
         "keyboard",
         "keys",
         "send",
@@ -417,15 +437,7 @@ test.describe("Remote input action layout", () => {
     // inventing an alignment the user never chose.
     await expect
       .poll(() => renderedActions(page, "mainActionRow"))
-      .toEqual([
-        "soft:c-c",
-        "soft:q",
-        "soft:esc",
-        "soft:u-defaultclear",
-        "keyboard",
-        "keys",
-        "send",
-      ]);
+      .toEqual(["soft:c-c", "soft:q", "soft:esc", "soft:clearPane", "keyboard", "keys", "send"]);
     await expect(page.locator('[data-input-action="soft:c-a"]')).toHaveCount(0);
     await expect(page.locator("#composerSend")).toBeVisible();
 
@@ -514,13 +526,11 @@ test.describe("Remote input action layout", () => {
       .poll(async () =>
         ((await storedConfig(page)).userKeys || []).map((entry: { seq: string }) => entry.seq),
       )
-      .toEqual(["/clear", "\u0007"]);
+      .toEqual(["\u0007"]);
 
     await page.getByRole("button", { name: "Delete custom key ^G" }).click();
-    await expect(page.locator('[data-input-action^="soft:u-"]')).toHaveCount(1);
-    await expect
-      .poll(async () => (await storedConfig(page)).userKeys)
-      .toEqual([{ id: "u-defaultclear", label: "/clr", seq: "/clear", submit: true }]);
+    await expect(page.locator('[data-input-action^="soft:u-"]')).toHaveCount(0);
+    await expect.poll(async () => (await storedConfig(page)).userKeys).toEqual([]);
   });
 
   test("registers a raw escape sequence and reports invalid input", async ({ page }) => {
@@ -542,7 +552,7 @@ test.describe("Remote input action layout", () => {
       .poll(async () =>
         ((await storedConfig(page)).userKeys || []).map((entry: { seq: string }) => entry.seq),
       )
-      .toEqual(["/clear", "\u001b[1;5C"]);
+      .toEqual(["\u001b[1;5C"]);
 
     await page.reload();
     await page.setContent(remoteClientMarkupWithoutXterm());
@@ -560,7 +570,7 @@ test.describe("Remote input action layout", () => {
     await page.getByLabel("Send Enter").check();
     await page.getByRole("button", { name: "Add custom key" }).click();
     await expect(page.getByLabel("Send Enter")).not.toBeChecked();
-    const [, key] = (await storedConfig(page)).userKeys;
+    const [key] = (await storedConfig(page)).userKeys;
     expect(key).toMatchObject({ label: "Run", seq: "run\n", submit: true });
     await page.reload();
     await page.setContent(remoteClientMarkupWithoutXterm());
@@ -571,7 +581,6 @@ test.describe("Remote input action layout", () => {
     await page.getByLabel("Custom key sequence").fill("run\\n");
     await page.getByRole("button", { name: "Add custom key" }).click();
     expect((await storedConfig(page)).userKeys).toEqual([
-      { id: "u-defaultclear", label: "/clr", seq: "/clear", submit: true },
       key,
       expect.objectContaining({ label: "Raw", seq: "run\n", submit: false }),
     ]);
@@ -608,7 +617,7 @@ test.describe("Remote input action layout", () => {
       .poll(async () =>
         ((await storedConfig(page)).userKeys || []).map((entry: { seq: string }) => entry.seq),
       )
-      .toEqual(["/clear", "run\r"]);
+      .toEqual(["run\r"]);
   });
 
   test("updates the Keys-row empty state when Send becomes visible in Composer", async ({

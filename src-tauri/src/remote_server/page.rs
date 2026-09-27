@@ -1487,8 +1487,9 @@ mod tests {
         assert!(html.contains("class=\"action-segment\" data-segment=\"right\""));
         // Default placement: the compact command keys stay left and the input
         // controls stay right.
-        assert!(html
-            .contains("left: [\"soft:c-c\", \"soft:q\", \"soft:esc\", \"soft:u-defaultclear\"],"));
+        assert!(
+            html.contains("left: [\"soft:c-c\", \"soft:q\", \"soft:esc\", \"soft:clearPane\"],")
+        );
         assert!(html.contains("right: [\"keyboard\", \"keys\", \"send\"],"));
         assert!(html.contains("function normalizeInputLayoutConfig(raw)"));
         assert!(html.contains("function normalizeInputZones(raw, knownIds)"));

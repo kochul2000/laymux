@@ -421,7 +421,7 @@
       },
       "default": {
         "main": {
-          "left": ["soft:c-c", "soft:q", "soft:esc", "soft:u-defaultclear"],
+          "left": ["soft:c-c", "soft:q", "soft:esc", "soft:clearPane"],
           "center": [],
           "right": ["keyboard", "keys", "send"]
         },
@@ -473,7 +473,7 @@
           }
         }
       },
-      "default": [{ "id": "u-defaultclear", "label": "/clr", "seq": "/clear", "submit": true }],
+      "default": [],
       "applyMode": "live",
       "description": "사용자 등록 특수키 목록 전체 교체. id=u-영소문자숫자, label=양끝공백 없는1~8자, seq=실제 전송 문자열 최대32자. 저장만 하고 실행하지 않음. 삭제 시 inputBarZones와 floatingButtons 참조도 함께 제거. 입력 초안·기록은 포함하지 않음."
     },
@@ -612,6 +612,7 @@
     "soft:c-u",
     "soft:c-t",
     "soft:c-l",
+    "soft:clearPane",
     "soft:f1",
     "soft:f2",
     "soft:f3",

@@ -1618,12 +1618,12 @@ Android 저장·열기 호출은 주입된 `LaymuxNative` 객체의 메서드로
 | 항목 | PC 기본 | 새 Remote 기기 기본·설정 경로 |
 |---|---|---|
 | 입력 | Direct, 기존 터미널 즉시 입력 | 포인터 종류와 무관하게 Composer · 터미널 입력 모드 토글 |
-| 입력바 | PC 기존 키바인딩 | Main `^C · Q · Esc · /clr` / `Keyboard · Keys · Send`; Expanded 왼쪽 `Composer · NavPad · Notifications oldest · Tab`, 오른쪽 `^U · ^L · ^T · DPad · PgUp · PgDn · Attachment` · Settings → Input bar |
+| 입력바 | PC 기존 키바인딩 | Main `^C · Q · Esc · Alt+L` / `Keyboard · Keys · Send`; Expanded 왼쪽 `Composer · NavPad · Notifications oldest · Tab`, 오른쪽 `^U · ^L · ^T · DPad · PgUp · PgDn · Attachment` · Settings → Input bar |
 | 표시 | PC 기존 프로필·터미널 설정 | Main/Keys 버튼 각 100%, Composer 불투명도 idle/focused/active 50/70/100%, 탐색 너비 300px, 최초 checkpoint 요청 8 KiB · Settings → Input bar/Display/Panels |
 | 플로팅 | PC 터미널 표면과 별도 | 왼쪽 탐색·알림 패드와 오른쪽 방향 패드 모두 활성, 각 64px·불투명도 0.5, 화면 중간 높이; 일반 플로팅 버튼 없음 · Settings → Floating |
 | 위젯·복원 | PC 위젯 배치 빈 상태·status line 꺼짐, 에이전트 세션 복원 켜짐 | 호스트에 배치된 위젯을 미러링하며 호스트 공개 게이트와 기기 로컬 토글이 모두 켜져야 표시 |
 
-`Q`는 기존 raw `/write` 경로를 쓰는 내장 `soft:q`, `/clr`는 기존 structured `/input` 경로를 쓰는 편집 가능한 기본 사용자 키 `u-defaultclear`(`seq="/clear"`, `submit:true`)다. 기본 키를 저장하거나 로드하는 것만으로 명령을 보내지 않는다. 개인용 `u-p1-mg`, pane/workspace 제외 ID, 인증정보는 배포 기본값에 포함하지 않는다. 유효하게 저장된 `direct`·`false`·빈 사용자 키 목록·완전한 빈 행 배치·커스텀 순서/좌표는 새 기본보다 우선한다. 누락되거나 잘못된 값만 정규화하며, 잘못된 행 구조를 기본 배치로 대체할 때는 현재 사용자 키 목록에 없는 액션을 걸러낸다. 완전하고 유효한 배치에는 새 액션을 자동 삽입하지 않는다. Remote runtime과 `describe_remote_settings`가 노출하는 공유 스키마 기본값은 일치한다.
+`Q`는 기존 raw `/write` 경로를 쓰는 내장 `soft:q`이고, `Alt+L`은 내장 `soft:clearPane`이다([ADR-0277](../adr/0277-remote-pane-clear-soft-key.md)). Settings → Input bar → Add keys의 Pane actions에서 배치할 수 있고, 물리 Alt+L과 같은 navigation queue·`runRemoteClear("pane")`를 통해 기존 pane clear API를 호출한다. activity·busy 정책과 lease 검사는 기존 PC 실행기가 소유한다. 기본 사용자 키 목록은 빈 배열이며 설정 저장·로드만으로 명령을 보내지 않는다. 개인용 `u-p1-mg`, pane/workspace 제외 ID, 인증정보는 배포 기본값에 포함하지 않는다. 유효하게 저장된 `direct`·`false`·빈 사용자 키 목록·완전한 빈 행 배치·커스텀 순서/좌표와 기존 `/clr` 사용자 키는 새 기본보다 우선한다. 누락되거나 잘못된 값만 정규화하며, 잘못된 행 구조를 기본 배치로 대체할 때는 현재 사용자 키 목록에 없는 액션을 걸러낸다. 완전하고 유효한 배치에는 새 액션을 자동 삽입하지 않는다. Remote runtime과 `describe_remote_settings`가 노출하는 공유 스키마 기본값은 일치한다.
 
 활성 플로팅 `Keys`가 있으면 행의 `Keys`를 숨겨도 확장행을 열 수 있고, 마지막 토글을 숨기면 확장행을 닫고 fit을 갱신한다. 일반 플로팅 버튼의 터치 탭은 `pointerup`에서 기존 click 액션을 호출하고 뒤따르는 native click은 소비해 한 번만 실행한다. 마우스·키보드·보조기기 click 경로는 유지한다.
 
