@@ -1,6 +1,6 @@
 # 0273. Remote 물리 키보드 상태와 탐색 단축키는 기기 표면에서 처리한다
 
-- Status: Accepted
+- Status: Accepted (partially superseded by [0276](0276-remote-keys-ignore-physical-keyboard.md))
 - Date: 2026-09-27
 - Source: 사용자 요구(물리 키보드 연결 시 플로팅·Keys 개별 숨김, 기본 활성 Remote Nav 단축키), [ADR-0149](0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md), [ADR-0209](0209-remote-display-preferences-are-device-local.md), [ADR-0237](0237-remote-floating-input-controls.md), [ADR-0243](0243-settings-mcp-scoped-discovery-and-remote-device-bridge.md), [api-contracts.md §13.4·§15.5](../architecture/api-contracts.md)
 - Extends: ADR-0149의 native 환경 정보 전달, ADR-0237의 표시 조건, ADR-0243의 기기 로컬 설정 목록

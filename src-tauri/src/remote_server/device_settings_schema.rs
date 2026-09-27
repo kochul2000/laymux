@@ -250,6 +250,8 @@ mod tests {
             json!({"spatialExcludedPaneIds":["a","a"]}),
             json!({"floatingDpadOpacity":2}),
             json!({"composerHiddenClaudeLines":25}),
+            json!({"hideKeysWithKeyboard":true}),
+            json!({"hideKeysWithKeyboard":false}),
         ] {
             assert!(prepare(&defaults, &patch).is_err(), "{patch}");
         }

@@ -20,17 +20,13 @@ const key = (overrides: Partial<KeyboardEvent> = {}) => ({
 
 describe("Remote 물리 키보드 표시", () => {
   it.each([false, null, undefined])("미연결·미지원(%s)은 자동 숨김을 하지 않는다", (connected) => {
-    expect(remoteKeyboardVisibility(connected, defaults)).toEqual({ floating: true, keys: true });
+    expect(remoteKeyboardVisibility(connected, defaults)).toEqual({ floating: true });
   });
-  it("연결 시 두 숨김 설정을 독립적으로 적용한다", () => {
-    expect(remoteKeyboardVisibility(true, defaults)).toEqual({ floating: false, keys: false });
+  it("연결 시 플로팅 숨김 설정만 적용한다", () => {
+    expect(remoteKeyboardVisibility(true, defaults)).toEqual({ floating: false });
     expect(
       remoteKeyboardVisibility(true, { ...defaults, hideFloatingWithKeyboard: false }),
-    ).toEqual({ floating: true, keys: false });
-    expect(remoteKeyboardVisibility(true, { ...defaults, hideKeysWithKeyboard: false })).toEqual({
-      floating: false,
-      keys: true,
-    });
+    ).toEqual({ floating: true });
   });
   it("지원 기능의 boolean만 신뢰하고 구형 bridge·실패는 미지원으로 둔다", () => {
     expect(readPhysicalKeyboardConnected({ isPhysicalKeyboardConnected: () => true })).toBe(true);

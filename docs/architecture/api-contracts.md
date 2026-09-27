@@ -1778,7 +1778,7 @@ Android `PhysicalKeyboardMonitor`는 `InputManager`의 비가상 문자 키보�
 
 Remote UI는 이미 확인된 연결 상태가 바뀔 때 화면 상단에 3초간 연결·해제 토스트를 표시한다. native 변경 통지와 foreground snapshot 갱신은 같은 전이 함수를 사용하므로 동일 상태의 중복 통지는 토스트를 다시 띄우거나 표시 시간을 늘리지 않는다. 빠른 연결·해제는 최신 메시지로 교체하고 표시 시간을 다시 센다. 최초 snapshot과 감지 미지원(`unknown`) 전이는 연결·해제 알림을 만들지 않는다. 문구는 기존 Remote OAuth relay와 같은 기기 언어 정책(`navigator.language`가 `ko*`이면 한국어, 나머지는 영어)을 따르며 토스트의 `lang`에도 반영한다. 토스트는 입력 포커스·터미널 레이아웃·설정을 변경하지 않는다(ADR-0273의 기존 감지 계약 직접 적용).
 
-기기 로컬 `hideFloatingWithKeyboard`·`hideKeysWithKeyboard`는 각각 기본 true다. 연결 확인 시 플로팅 또는 Keys 행·토글의 표시만 숨기고 keybar의 원래 배치·enabled·expanded를 보존한다. 분리 시 저장된 상태로 돌아간다. Keys 높이가 변하면 기존 chrome refit 경로를 사용한다. 설정 UI와 Remote settings MCP는 두 선호를 독립적으로 노출하며 감지 결과는 저장·전송하지 않는다.
+기기 로컬 `hideFloatingWithKeyboard`는 기본 true다. 연결 확인 시 플로팅 표시만 숨기고 keybar의 원래 배치·enabled·expanded를 보존한다. 분리 시 저장된 상태로 돌아간다. Keys 행과 토글은 물리 키보드 연결과 무관하게 기존 배치·펼침 설정을 따른다. `hideKeysWithKeyboard`는 설정 UI·Remote settings MCP에서 제거했으며 이전 localStorage 값도 읽지 않는다([ADR-0276](../adr/0276-remote-keys-ignore-physical-keyboard.md)). 설정 UI와 Remote settings MCP는 플로팅 숨김 선호를 노출하며 감지 결과는 저장·전송하지 않는다.
 
 `useRemoteNavigationKeys`(기본 true)와 `remoteNavigationModifiers`(기본 `alt`, `ctrlAlt|altShift|ctrlShift` 선택 가능)는 감지와 독립이다. `ui/src/remote/remote-keyboard.js`가 중앙 키바인딩과 Nav 패드의 방향 매핑을 소유하고, Remote 입력 표면의 capture handler가 기존 `enqueueNavStep`을 호출한다. ↑/↓는 spatial prev/next, ←/→는 notification recent/oldest다. 활성 시 선택 조합과 기존 Alt/Ctrl+Alt 방향키를 소비해 PC 입력으로 보내지 않는다. 반복·keyup은 소비만 하고 설정·도구 편집·IME·AltGraph는 기존 처리에 맡긴다. PC 키바인딩·host API·E2E wire 계약은 유지한다.
 

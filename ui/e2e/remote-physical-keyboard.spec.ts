@@ -128,7 +128,7 @@ test("초기 snapshot은 조용히 적용하고 복귀 중 확인된 변화는 �
   await expect(toast).toBeHidden();
 });
 
-test("연결·분리가 플로팅과 Keys 표시만 바꾸고 원래 설정을 보존한다", async ({ page }, info) => {
+test("연결·분리는 플로팅만 숨기고 Keys 표시와 원래 설정을 보존한다", async ({ page }, info) => {
   await openControls(page);
   await page.locator("#navToggle").click();
   await expect(floatingPad(page)).toBeVisible();
@@ -137,8 +137,8 @@ test("연결·분리가 플로팅과 Keys 표시만 바꾸고 원래 설정을 �
   await page.screenshot({ path: info.outputPath("keyboard-disconnected.png") });
   await keyboardConnection(page, true);
   await expect(floatingPad(page)).toHaveCount(0);
-  await expect(page.locator("#keyBar")).toBeHidden();
-  await expect(page.locator("#keyBarToggle")).toBeHidden();
+  await expect(page.locator("#keyBar")).toBeVisible();
+  await expect(page.locator("#keyBarToggle")).toBeVisible();
   expect(await keybar(page)).toBe(original);
   await page.screenshot({ path: info.outputPath("keyboard-connected.png") });
   await keyboardConnection(page, false);
@@ -148,19 +148,39 @@ test("연결·분리가 플로팅과 Keys 표시만 바꾸고 원래 설정을 �
   expect(await keybar(page)).toBe(original);
 });
 
-test("연결된 상태로 시작해도 두 숨김 옵션을 독립적으로 변경하고 저장한다", async ({
+test("물리 키보드 사용 중 Keys를 접어도 연결·해제가 수동 선택을 바꾸지 않는다", async ({
+  page,
+}) => {
+  await openControls(page, { connected: true });
+  await page.locator("#navToggle").click();
+  await page.locator("#keyBarToggle").click();
+  await expect(page.locator("#keyBar")).toBeHidden();
+  const collapsed = await keybar(page);
+  await keyboardConnection(page, false);
+  await keyboardConnection(page, true);
+  await expect(page.locator("#keyBar")).toBeHidden();
+  await expect(page.locator("#keyBarToggle")).toBeVisible();
+  expect(await keybar(page)).toBe(collapsed);
+  await page.locator("#keyBarToggle").click();
+  await expect(page.locator("#keyBar")).toBeVisible();
+});
+
+test("이전 Keys 숨김 설정은 무시하고 플로팅 숨김 옵션만 변경하고 저장한다", async ({
   page,
 }, info) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("laymux.remote.hideKeysWithKeyboard", "1");
+  });
   await openControls(page, { connected: true });
   await expect(floatingPad(page)).toHaveCount(0);
-  await expect(page.locator("#keyBar")).toBeHidden();
+  await expect(page.locator("#keyBar")).toBeVisible();
   await settings(page, "Floating");
   await page.getByLabel("Hide floating controls with physical keyboard", { exact: true }).uncheck();
   await expect(floatingPad(page)).toBeVisible();
-  await expect(page.locator("#keyBar")).toBeHidden();
+  await expect(page.locator("#keyBar")).toBeVisible();
   await page.getByLabel("Hide floating controls with physical keyboard", { exact: true }).check();
   await settings(page);
-  await page.getByLabel("Hide Keys with physical keyboard", { exact: true }).uncheck();
+  await expect(page.getByLabel("Hide Keys with physical keyboard", { exact: true })).toHaveCount(0);
   await expect(page.locator("#keyBar")).toBeVisible();
   await expect(floatingPad(page)).toHaveCount(0);
   await expect(page.getByLabel("Use Remote Nav shortcuts", { exact: true })).toBeChecked();
@@ -190,7 +210,8 @@ test("구형 Android bridge와 일반 브라우저는 키 입력 후에도 자�
 
 test("백그라운드 사이의 분리는 복귀 snapshot으로 복구한다", async ({ page }) => {
   await openControls(page, { connected: true });
-  await expect(page.locator("#keyBar")).toBeHidden();
+  await expect(page.locator("#keyBar")).toBeVisible();
+  await expect(floatingPad(page)).toHaveCount(0);
   await page.evaluate(() => {
     (window as KeyboardWindow).__keyboardConnected = false;
     window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));

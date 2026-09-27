@@ -6,13 +6,7 @@
       "type": "boolean",
       "default": true,
       "applyMode": "live",
-      "description": "Android 앱에서 물리 키보드 연결을 확인하면 플로팅을 자동으로 숨깁니다. 원래 배치·활성 상태는 보존하며 분리 시 복원합니다. Keys 자동 숨김과 독립이고 감지 미지원 브라우저에서는 적용하지 않습니다."
-    },
-    "hideKeysWithKeyboard": {
-      "type": "boolean",
-      "default": true,
-      "applyMode": "live",
-      "description": "물리 키보드 연결 시 Keys 행과 토글을 자동으로 숨깁니다. 원래 펼침 상태를 보존하며 분리 시 복원합니다. 플로팅 자동 숨김과 독립이고 감지 미지원 브라우저에서는 적용하지 않습니다."
+      "description": "Android 앱에서 물리 키보드 연결을 확인하면 플로팅을 자동으로 숨깁니다. 원래 배치·활성 상태는 보존하며 분리 시 복원합니다. 감지 미지원 브라우저에서는 적용하지 않습니다."
     },
     "useRemoteNavigationKeys": {
       "type": "boolean",

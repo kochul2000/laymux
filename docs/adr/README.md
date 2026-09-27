@@ -290,9 +290,10 @@ ADR 이 필요한 대표 기준:
 | [0270](0270-codex-status-checkpoint-probe.md) | Codex 종료 복원점은 선택적으로 `/status`로 확인한다 | Accepted |
 | [0271](0271-remote-requested-desktop-writes-carry-lease.md) | Remote 가 요청한 PC 실행 동작은 lease 로 쓴다 | Accepted |
 | [0272](0272-physical-key-fallback-never-takes-typed-text.md) | 물리 키 폴백은 사용자가 치는 문자를 가로채지 않는다 (0269 일부 대체) | Accepted |
-| [0273](0273-remote-physical-keyboard-and-navigation-keys.md) | Remote 물리 키보드 상태와 탐색 단축키는 기기 표면에서 처리한다 (0269 일부 대체) | Accepted |
+| [0273](0273-remote-physical-keyboard-and-navigation-keys.md) | Remote 물리 키보드 상태와 탐색 단축키는 기기 표면에서 처리한다 (0269 일부 대체) | Accepted (partially superseded by [0276](0276-remote-keys-ignore-physical-keyboard.md)) |
 | [0274](0274-immediate-composition-delivery-ledger.md) | 즉시 확정한 조합의 송신 기록은 native 조합 종료까지 공유한다 (0093·0230·0268 확장) | Accepted |
 | [0275](0275-remote-physical-keyboard-focus-recovery.md) | Remote 물리 키보드 입력은 안전한 입력 표면으로 포커스를 복구한다 | Accepted |
+| [0276](0276-remote-keys-ignore-physical-keyboard.md) | Remote Keys 표시는 물리 키보드 연결과 독립으로 둔다 (0273 일부 대체) | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 
