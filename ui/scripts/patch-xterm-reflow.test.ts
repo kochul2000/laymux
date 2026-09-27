@@ -105,10 +105,13 @@ describe("pinned xterm bundle patches", () => {
     expect(commonJsSource).not.toContain(staleDisableStdinGate);
   });
 
-  it("queues input and keypress observations per composition generation in both bundles", async () => {
+  it.each([
+    ["desktop CJS", commonJsTarget],
+    ["Remote CJS", remoteCommonJsTarget],
+  ])("queues composition observations in ESM and %s", async (_name, target) => {
     const [moduleSource, commonJsSource] = await Promise.all([
       readFile(moduleTarget, "utf8"),
-      readFile(commonJsTarget, "utf8"),
+      readFile(target, "utf8"),
     ]);
 
     expect(moduleSource).toContain(compositionGenerationState);

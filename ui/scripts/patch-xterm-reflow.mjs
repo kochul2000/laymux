@@ -437,13 +437,10 @@ await patchBundle(moduleTarget, [
     patchedText: moduleTextareaDiffSkipSendingPatched,
   },
 ]);
-await patchBundle(commonJsTarget, [
-  ...commonJsWheelPatches,
-  {
-    name: "disableStdin",
-    originalText: disableStdinOriginal,
-    patchedText: commonJsDisableStdinPatched,
-  },
+// Desktop and the separately shipped Remote CJS asset must reconcile the same
+// composition observations. A partial Remote list left input/keypress able to
+// send the committed word again before its deferred finalizer (ADR-0268).
+const commonJsCompositionPatches = [
   {
     name: "composition state",
     originalText: commonJsCompositionStateOriginal,
@@ -522,7 +519,11 @@ await patchBundle(commonJsTarget, [
     name: "composition generation boundary",
     originalText: compositionStartOriginal,
     patchedText: compositionStartEndDataPatched,
-    upgradeTexts: [compositionStartPatched, compositionStartBoundOnly],
+    upgradeTexts: [
+      compositionStartPatched,
+      compositionStartBoundOnly,
+      compositionStartRemotePatched,
+    ],
   },
   {
     name: "terminal composition input handoff",
@@ -543,27 +544,14 @@ await patchBundle(commonJsTarget, [
     originalText: commonJsTextareaDiffSkipSendingWhileSending,
     patchedText: commonJsTextareaDiffSkipSendingPatched,
   },
-]);
-await patchBundle(remoteCommonJsTarget, [
+];
+await patchBundle(commonJsTarget, [
   ...commonJsWheelPatches,
   {
-    name: "textarea diff skip while sending",
-    originalText: commonJsTextareaDiffSkipSending,
-    patchedText: commonJsTextareaDiffSkipSendingPatched,
-    acceptedTexts: [
-      commonJsTextareaDiffSkipSendingPatched,
-      commonJsTextareaDiffSkipSendingWhileSending,
-    ],
+    name: "disableStdin",
+    originalText: disableStdinOriginal,
+    patchedText: commonJsDisableStdinPatched,
   },
-  {
-    name: "textarea diff skip upgrade from sending flag",
-    originalText: commonJsTextareaDiffSkipSendingWhileSending,
-    patchedText: commonJsTextareaDiffSkipSendingPatched,
-  },
-  {
-    name: "composition epoch bump",
-    originalText: compositionStartOriginal,
-    patchedText: compositionStartRemotePatched,
-    acceptedTexts: [compositionStartRemotePatched],
-  },
+  ...commonJsCompositionPatches,
 ]);
+await patchBundle(remoteCommonJsTarget, [...commonJsWheelPatches, ...commonJsCompositionPatches]);
