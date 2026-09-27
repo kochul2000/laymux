@@ -33,6 +33,7 @@ Remote에 배포하는 `src-tauri/src/remote_server/assets/xterm.js`에는 데�
 - `remote-ime-preedit.spec.ts` 9개 통과. Android 모바일 조건에서 단어 확정, 전파된 keypress, 의도적 반복, 첫 HTTP 응답을 해제하지 않은 상태의 다음 단어, 확정 후 blur를 포함한다.
 - UI production build, 변경 파일 ESLint·Prettier, `git diff --check` 통과. Windows dev 빌드·기동 성공.
 - postinstall 재실행 전후 ESM·CJS·Remote 번들 SHA-256이 모두 같아 재적용의 멱등성을 확인했다.
+- PR #1086 독립 서브에이전트 리뷰에서 P1·P2 finding 없음. 리뷰어가 조합·설치 계약 테스트 44개를 별도로 통과했고 Chromium CDP 입력에서 정상 확정, 별도 조합의 반복, 조합 중 포커스 해제를 검증했다. ADR-0268을 Accepted로 전환했다.
 - 추가 실행한 `remote-input-composer.spec.ts`는 50건 중 46건 통과, 기존 4건 실패다. 실패는 snapshot을 보류한 상태에서 완료 문구를 기다리는 3건(1126·1172·1505행)과 double/triple tap의 focus 기대 1건(1578행)이다. 단일 worker 재실행도 같았고, 해당 테스트·helper·사용하는 Remote app/CSS 번들은 기준 HEAD와 동일하다. 이 파일은 실제 xterm 자산을 제거하고 mock Terminal을 사용하므로 이번 변경 자산을 실행하지 않는다.
 
 ## 검증 한계와 반영

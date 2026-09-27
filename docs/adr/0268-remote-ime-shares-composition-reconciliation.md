@@ -1,6 +1,6 @@
 # 0268. Remote Direct 입력도 공통 xterm 조합 확정 처리를 사용한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-27
 - Source: 사용자 보고(리모트의 소프트웨어·하드웨어 키보드에서 단어가 간헐적으로 반복됨), [data-flow.md §8.14](../architecture/data-flow.md#814-조합-commit-과-세대별-inputkeypress-경합-issues-527-660-xtermjs-6049)
 - Extends: [ADR-0093](0093-xterm-composition-keypress-reconciliation-owner.md), [ADR-0189](0189-ime-candidate-first-observation-fold.md), [ADR-0230](0230-xterm-compositionend-data-recovers-replaced-textarea.md)의 적용 범위를 Remote Direct 입력으로 확장한다.
