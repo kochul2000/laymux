@@ -1,6 +1,6 @@
 # 0270. Codex 종료 복원점은 선택적으로 `/status`로 확인한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-27
 - Source: 사용자 요청(기본 데몬의 세션 미식별 해결, 입력 삭제 후 `/status` 조회, 기본 켜짐), [data-flow §13.5](../architecture/data-flow.md), [ADR-0222](0222-agent-session-checkpoint-coordinator.md), [조사 기록](../codex-shared-daemon-attribution-repro-2026-09-26.md)
 - Extends: ADR-0222의 종료·업데이트 귀속 수집. 일반 저장의 수동 관측 정책은 유지한다.
@@ -17,7 +17,7 @@ Codex의 기본 공유 데몬에서는 TUI 프로세스 진단에 현재 대화 
 - backend가 짧은 수명의 조회 토큰, 대상 PTY generation, 실행 중인 Codex 프로세스, 원래 크기와 조회 출력 경계를 소유한다. 일반 종료는 입력 fence를 획득·drain하고, 업데이트는 해당 native checkpoint 요청이 이미 소유한 fence를 사용한다. 일반 입력과 Remote 제어는 이 구간에 끼어들 수 없다.
 - 전용 IPC는 정해진 편집 키, `/status`, Enter만 허용한다. Ctrl+C는 입력 삭제·작업 중단·앱 종료 사이 의미가 달라 사용하지 않는다. 기본 편집 키의 유계 반복으로 앞뒤 입력을 지운 뒤, frontend의 실제 xterm 셀에서 `/status` 명령 선택 상태를 확인한 경우에만 Enter를 보낸다. 확인 실패는 사용자 초안을 제출하지 않고 조회를 실패시킨다.
 - 조회 중에는 ID가 잘리지 않는 크기를 사용한다. frontend가 기존 parser drain·guarded fit 경로로 xterm 크기를 먼저 고정한 뒤 backend가 순서가 부여된 PTY geometry를 적용한다. 성공·실패 모두 원래 크기로 복구하고, 조회 중 실제 창 크기가 달라졌으면 기존 resize 경로로 다시 맞춘다.
-- Enter 직전의 출력 경계 이후에 새로 출력된 `/status` 카드의 전체 UUID만 받는다. 과거 scrollback, 축약 ID, 복수 ID, generation·프로세스 교체와 조회 실패는 확정 증거가 아니다. 실제 rollout의 정확한 ID·최상위 역할을 검증하며, 영속 파일 없는 새 대화는 기존 Fresh 의미로 저장한다.
+- Enter 직전의 출력 경계 이후에 새로 출력된 `/status` 카드의 전체 UUID만 받는다. 과거 scrollback, 축약 ID, 복수 ID, generation·프로세스 교체와 조회 실패는 확정 증거가 아니다. 실제 rollout의 정확한 ID·최상위 역할을 검증하며, 영속 파일 없는 새 대화는 기존 Fresh 의미로 저장한다. WSL의 파일 부재는 해당 배포판 내부에서도 확인한다. UNC에서 읽지 못하는 symlink 뒤의 기록이나 접근 실패를 Fresh로 바꿔 기존 복원점을 지우지 않는다.
 - 확인 결과는 해당 토큰과 fence 수명에서만 기존 backend 귀속 결과에 합쳐진다. critical checkpoint의 두 번 관측과 중복 소유권 검증을 유지하며 저장 이후의 Ctrl+C는 복원점을 다시 수집하지 않는다. 조회 실패는 종료·업데이트 준비를 중단하고 정리 후 fence를 해제한다. 기한은 증거만 만료시키며, 저장 중에 입력 차단을 자동 해제하지 않는다. 저장 완료 시 기한을 다시 검사하고 성공한 일반 종료는 창 파괴까지 fence를 유지한다. 이 단계에서는 기존 terminal close 정리만 허용한다. 초기 대상 수집에도 제한 시간을 적용한다.
 - native와 WSL은 같은 입력·화면 절차를 사용하되 프로세스·rollout 확인은 기존 호스트별 조회 경로를 따른다. 공유 데몬을 종료하거나 Codex 설정·rollout을 변경하지 않는다.
 - native 실행 환경은 sysinfo의 프로세스 조회로 읽는다. 실제 TUI의 홈·SQLite 경로·실행 인자·CWD를 확인할 수 없으면 Laymux 환경으로 추정하지 않는다. 조회한 환경 전체를 로그나 영속 상태에 남기지 않는다. WSL은 기존 배포판별 홈 조회와 rollout 검증을 사용한다.

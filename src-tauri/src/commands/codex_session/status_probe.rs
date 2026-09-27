@@ -6,6 +6,10 @@ mod targets;
 mod tests;
 #[cfg(windows)]
 mod wsl_config;
+#[cfg(windows)]
+mod wsl_rollout;
+#[cfg(all(test, windows))]
+mod wsl_tests;
 
 use crate::lock_ext::MutexExt;
 use crate::session_checkpoint::codex_status::{

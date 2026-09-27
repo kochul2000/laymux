@@ -139,3 +139,5 @@ Codex 0.157.1 Windows native 기본 공유 데몬을 dev 19281에서 실행했�
 단위·화면 테스트는 오래된 status 출력, 모달로 지워진 명령 메뉴, 토큰 만료와 지연 저장, generation·프로세스 변경, 실제 프로세스의 별도 Codex/SQLite 홈, 설정 override, close/update fence, 실패 후 종료 취소를 포함한다. 이 실측은 Windows native 범위이며 WSL 실제 TUI 종료·복원까지 검증한 기록은 아니다.
 
 최종 독립 리뷰에서 WSL의 실제 CWD와 설정 symlink 검사를 보완했다. Ubuntu-22.04의 별도 임시 디렉터리 fixture에서 마지막 셸 경로 A와 실제 프로세스 경로 B가 다른 경우, 설정 파일 symlink, 프로젝트 `.codex` 디렉터리 symlink를 검사해 `Ctrl+U` 제출 키 설정을 읽는 것을 확인했다. 파일이 없는 경우는 빈 설정을 반환하고, 끊어진 설정 symlink는 조회 실패로 처리했다. 사용자 설정이나 실행 중인 Codex TUI는 조작하지 않았다.
+
+재리뷰의 저장소 symlink 지적도 같은 배포판의 임시 fixture로 재현했다. 정확한 UUID의 영속 rollout이 있는데 Codex 홈이 symlink이면 수정 전에는 Fresh를 반환했다. guest 내부의 기록 부재 검사를 추가한 뒤 홈·sessions·날짜 디렉터리·rollout 파일 symlink와 끊어진 링크·순환 링크는 Fresh로 확정하지 않았다. 실제 파일이 없는 홈과 빈 sessions만 Fresh로 통과했고, 일반 영속 파일은 기존 ID를 유지했다. 이 검증은 실행 중인 TUI 없이 저장소 판정 함수를 직접 호출한다.

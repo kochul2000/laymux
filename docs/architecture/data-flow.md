@@ -1502,6 +1502,8 @@ Windows child wait와 PID tree kill은 handshake로 상호 배제한다. kill cl
 
 native 대상의 `CODEX_HOME`·`CODEX_SQLITE_HOME`·실행 인자·CWD는 sysinfo의 OS 조회로 읽고 Laymux 환경으로 대체하지 않는다. 사용자·프로젝트·시스템 설정을 TOML로 검사하며 CLI config/profile/CWD override, 편집 키 변경, Vim, 별도 설정 include·sqlite_home 설정은 미지원으로 거부한다. 편집 키와 충돌하지 않는 chat 방향키 변경은 허용한다. WSL은 해당 배포판 안에서 `/proc/<pid>/cwd`의 실제 경로와 마지막 OSC 경로의 ancestor, Codex 홈과 `/etc/codex`를 검사한다. 정적 guest script에 값은 argv로만 전달하며, 읽기는 3초와 설정 크기 제한을 적용한다. 설정 파일·디렉터리 symlink는 guest에서 따라 읽고, 끊어진 링크·접근 실패·불완전 응답은 입력 전에 거절한다. 설정 검사로 이미 실행 중인 TUI의 메모리상 키맵까지 증명할 수는 없으므로 실행 중 키맵 변경이나 다른 설정의 대화로 전환한 상태는 지원 범위 밖이다.
 
+WSL에서 UNC rollout 조회가 파일을 찾지 못했어도 곧바로 Fresh로 확정하지 않는다. 해당 배포판의 정적 script가 동일한 깊이 제한으로 symlink를 따라 실제 기록 부재를 확인해야 한다. 기록이 발견되거나 링크가 끊어졌거나 접근에 실패하면 조회를 실패시켜 기존 복원 ID를 보존한다. 이 추가 확인에도 3초 제한을 적용한다.
+
 ### 13.6 시작 시퀀스
 
 ```

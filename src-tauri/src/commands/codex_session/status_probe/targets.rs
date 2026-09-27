@@ -126,7 +126,19 @@ pub(super) fn verify_session(process: &CodexStatusProcess, id: &str) -> Result<b
     } else {
         CodexSessionStore::new(process.codex_home.clone(), process.sqlite_home.clone())
     };
-    store.verify_status_session(id)
+    let fresh = store.verify_status_session(id)?;
+    if fresh {
+        if let Some(distro) = &process.distro {
+            #[cfg(windows)]
+            super::wsl_rollout::require_absent(distro, &process.codex_home, id)?;
+            #[cfg(not(windows))]
+            {
+                let _ = distro;
+                return Err("WSL is unavailable on this host".into());
+            }
+        }
+    }
+    Ok(fresh)
 }
 
 fn require_default_editor_config(process: &CodexStatusProcess, cwd: &Path) -> Result<(), String> {
