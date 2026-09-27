@@ -1544,6 +1544,7 @@ mod tests {
         // Controller actions hit the lease-gated endpoints, taps serialize on
         // a promise chain, and the viewport follows the landing target.
         assert!(html.contains("spatial: \"/remote/v1/navigation/spatial\""));
+        assert!(html.contains("direction: \"/remote/v1/navigation/direction\""));
         assert!(html.contains("notification: \"/remote/v1/navigation/notification\""));
         assert!(html.contains("excludedPaneIds: [...spatialExcludedPaneIds]"));
         assert!(html.contains("let navStepChain = Promise.resolve();"));
@@ -1666,19 +1667,17 @@ mod tests {
         assert!(html.contains("draft.revision === submission.revision"));
         assert!(html.contains("draft.text === submission.text"));
 
-        // Enter follows the layout (ADR-0036): the mobile layout (coarse
-        // pointer OR the PC app's embedded mobile view, localApp=1) inserts a
-        // newline and sends via the button only, keeping the fragile
-        // soft-keyboard Enter off the send path; the desktop layout sends on
-        // Enter with Shift+Enter as newline. IME confirmation (isComposing /
-        // keyCode 229) never sends, and no keyboard shortcut is hardcoded
-        // outside the keybinding system (api-contracts §15.5).
+        // Send and newline are the Remote Composer keybindings on every layout
+        // (ADR-0269, partially superseding ADR-0036's layout rule): no layout
+        // branch and no hardcoded send combo (api-contracts §15.5). IME
+        // confirmation (isComposing / keyCode 229) never sends.
         assert!(html.contains("composerInput.addEventListener(\"compositionstart\""));
         assert!(html.contains("composerInput.addEventListener(\"compositionend\""));
-        assert!(html.contains("const mobileLayout = coarsePointer || localAppMode"));
-        assert!(html.contains("if (event.key !== \"Enter\" || event.shiftKey) return;"));
+        assert!(html.contains("if (remoteKeybindingMatches(event, \"composer.remote.send\")) {"));
+        assert!(html.contains("if (remoteKeybindingMatches(event, \"composer.remote.newline\")) {"));
+        assert!(html.contains("composerEditor.replaceSelection(\"\\n\");"));
+        assert!(!html.contains("if (mobileLayout) return;"));
         assert!(!html.contains("event.ctrlKey || event.metaKey"));
-        assert!(html.contains("if (mobileLayout) return;"));
         assert!(html.contains(
             "if (event.isComposing || composerIsComposing || event.keyCode === 229) return;"
         ));
@@ -1703,6 +1702,44 @@ mod tests {
         assert!(html.contains("cursorInactiveStyle = \"none\""));
         assert!(html.contains("scheduleTerminalFit();"));
         assert!(html.contains("if (currentInputMode() === \"direct\")"));
+    }
+
+    #[test]
+    fn remote_page_html_contains_physical_keyboard_shortcuts() {
+        let html = remote_client_source();
+
+        // ADR-0269: PC keybinding actions run from one capture-phase keydown,
+        // with the shared core's defaults and the host rebinds from the
+        // navigation payload.
+        assert!(html.contains("ui/src/lib/keybinding-core.ts"));
+        assert!(html.contains("const list = navigationState?.keybindings;"));
+        assert!(html
+            .contains("window.addEventListener(\"keydown\", handleRemoteShortcutKeyDown, true);"));
+        assert!(html.contains(
+            "window.removeEventListener(\"keydown\", handleRemoteShortcutKeyDown, true);"
+        ));
+        for action in [
+            "id: \"pane.focus\"",
+            "id: \"pane.clearTerminal\"",
+            "id: \"workspace.clearTerminals\"",
+            "id: \"workspace.next\"",
+            "id: \"notifications.recent\"",
+            "id: \"terminal.toggleInputMode\"",
+            "id: \"composer.remote.send\"",
+        ] {
+            assert!(html.contains(action), "missing shortcut action {action}");
+        }
+        // Host-changing actions need the lease and never repeat on a held key;
+        // foreign editors and open tools keep their keys.
+        assert!(html.contains("if (action.needsLease && !leaseId) return;"));
+        assert!(html.contains("action.needsLease && event.repeat"));
+        assert!(html
+            .contains("if (remoteOverlayOpen() || isForeignEditableTarget(event.target)) return;"));
+        // Clears go through the lease-gated relays (ADR-0271).
+        assert!(html.contains("/remote/v1/workspaces/${encodeURIComponent(workspaceId)}/clear"));
+        assert!(html.contains("/remote/v1/terminals/${encodeURIComponent(activeTerminalId)}/clear"));
+        // Read-only reference in Settings → App.
+        assert!(html.contains("id=\"keyboardShortcutList\""));
     }
 
     #[test]

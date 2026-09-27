@@ -30,6 +30,7 @@ import {
   reportFrontendHealth,
   writeToTerminal,
   writeTerminalInput,
+  writeTerminalInputForRemote,
   type AutomationRequest,
 } from "@/lib/tauri-api";
 import { frontendBridgeCounters, resetFrontendHealthForTest } from "@/lib/frontend-health-reporter";
@@ -58,6 +59,8 @@ vi.mock("@/lib/tauri-api", () => ({
   reportFrontendHealth: vi.fn().mockResolvedValue(undefined),
   writeTerminalInput: vi.fn().mockResolvedValue(undefined),
   writeToTerminal: vi.fn().mockResolvedValue(undefined),
+  writeTerminalInputForRemote: vi.fn().mockResolvedValue(undefined),
+  writeToTerminalForRemote: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("html2canvas", () => ({
   default: vi.fn(),
@@ -3655,6 +3658,41 @@ describe("navigation step actions (issue #474)", () => {
     expect(result.data).toEqual({ moved: false, reason: "no_other_target" });
   });
 
+  // ADR-0269: Remote Alt+Arrow.
+  it("directionStep moves within the active workspace and focuses the landing terminal", async () => {
+    seedTwoWorkspaces();
+    useGridStore.getState().setFocusedPane(0); // a1 (left)
+
+    const result = await handleAsyncAutomationRequest({
+      requestId: "nav-dir-1",
+      category: "action",
+      target: "navigation",
+      method: "directionStep",
+      params: { direction: "right" },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({
+      moved: true,
+      target: { workspaceId: "ws-a", terminalId: "terminal-a2", switchedWorkspace: false },
+    });
+    const landed = useTerminalStore.getState().instances.find((i) => i.id === "terminal-a2");
+    expect(landed?.isFocused).toBe(true);
+  });
+
+  it("directionStep rejects a non-grid direction", () => {
+    seedTwoWorkspaces();
+    const result = handleAutomationRequest({
+      requestId: "nav-dir-2",
+      category: "action",
+      target: "navigation",
+      method: "directionStep",
+      params: { direction: "next" },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/Invalid direction/);
+  });
+
   it("spatialStep rejects an invalid direction", () => {
     seedTwoWorkspaces();
     const result = handleAutomationRequest({
@@ -4020,6 +4058,25 @@ describe("panes.clear over the async bridge (ADR-0158)", () => {
       "clear",
       true,
     );
+  });
+
+  // ADR-0271: a Remote-requested clear writes as the lease holder.
+  it("writes as the Remote lease holder named by remoteLeaseId", async () => {
+    seedPanes();
+
+    const result = await handleAsyncAutomationRequest({
+      ...paneClearRequest("idle"),
+      params: { paneId: "idle", remoteLeaseId: "lease-1" },
+    });
+
+    expect(result.data).toMatchObject({ paneId: "idle", cleared: ["terminal-idle"] });
+    expect(vi.mocked(writeTerminalInputForRemote)).toHaveBeenCalledExactlyOnceWith(
+      "terminal-idle",
+      "clear",
+      true,
+      "lease-1",
+    );
+    expect(vi.mocked(writeTerminalInput)).not.toHaveBeenCalled();
   });
 
   it("reaches a dock pane by pane id", async () => {

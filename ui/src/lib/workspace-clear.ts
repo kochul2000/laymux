@@ -1,5 +1,5 @@
 import { toTerminalId } from "./pane-ids";
-import { writeToTerminal } from "./tauri-api";
+import { writeToTerminal, writeToTerminalForRemote } from "./tauri-api";
 import { useTerminalStore, type TerminalInstance } from "@/stores/terminal-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
@@ -63,6 +63,7 @@ export function terminalPaneIdsForWorkspace(workspaceId: string): string[] {
 async function writeCtrlL(
   paneId: string,
   instance: TerminalInstance | undefined,
+  remoteLeaseId: string | undefined,
 ): Promise<{
   cleared?: string;
   skipped?: { terminalId: string; reason: "notReady" };
@@ -75,7 +76,9 @@ async function writeCtrlL(
     return { skipped: { terminalId, reason: "notReady" } };
   }
   try {
-    await writeToTerminal(terminalId, CTRL_L);
+    await (remoteLeaseId === undefined
+      ? writeToTerminal(terminalId, CTRL_L)
+      : writeToTerminalForRemote(terminalId, CTRL_L, remoteLeaseId));
     return { cleared: terminalId };
   } catch (error) {
     return {
@@ -87,16 +90,20 @@ async function writeCtrlL(
 /**
  * Production entry point: broadcast Ctrl+L to every TerminalView pane of a
  * workspace. Terminals are written to concurrently, and a rejected write
- * never stops the others.
+ * never stops the others. `remoteLeaseId` is the Remote lease holder that
+ * requested it (ADR-0271); its writes carry that lease instead of Local input.
  */
-export async function clearWorkspace(workspaceId: string): Promise<WorkspaceClearResult> {
+export async function clearWorkspace(
+  workspaceId: string,
+  { remoteLeaseId }: { remoteLeaseId?: string } = {},
+): Promise<WorkspaceClearResult> {
   const paneIds = terminalPaneIdsForWorkspace(workspaceId);
   const byId = new Map(
     useTerminalStore.getState().instances.map((instance) => [instance.id, instance]),
   );
 
   const outcomes = await Promise.all(
-    paneIds.map((paneId) => writeCtrlL(paneId, byId.get(toTerminalId(paneId)))),
+    paneIds.map((paneId) => writeCtrlL(paneId, byId.get(toTerminalId(paneId)), remoteLeaseId)),
   );
 
   const result: WorkspaceClearResult = { cleared: [], skipped: [], failed: [] };

@@ -1,9 +1,10 @@
-//! Remote step-navigation endpoints (issue #474, ADR-0039).
+//! Remote step-navigation endpoints (issue #474, ADR-0039, ADR-0269).
 //!
 //! Thin controller handlers: validate direction + lease, relay to the
-//! frontend bridge `navigation.spatialStep`/`navigation.notificationStep`
-//! actions (which own the traversal semantics), and mirror the existing
-//! remote focus contract (best-effort mark-read + workspace-state-changed).
+//! frontend bridge `navigation.spatialStep`/`navigation.directionStep`/
+//! `navigation.notificationStep` actions (which own the traversal semantics),
+//! and mirror the existing remote focus contract (best-effort mark-read +
+//! workspace-state-changed).
 
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
@@ -25,6 +26,8 @@ use super::navigation_routes::{
 /// `notifications.recent`/`notifications.oldest`.
 const SPATIAL_DIRECTIONS: [&str; 2] = ["prev", "next"];
 const NOTIFICATION_DIRECTIONS: [&str; 2] = ["recent", "oldest"];
+/// Grid directions of the desktop `pane.focus` shortcut (ADR-0269).
+const GRID_DIRECTIONS: [&str; 4] = ["up", "down", "left", "right"];
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,39 +77,100 @@ pub(super) async fn remote_navigation_spatial_step(
     .await
     {
         Ok(data) => {
-            // Landing on a terminal consumes its unread alerts, mirroring the
-            // remote terminal-focus contract (ADR-0018). Best-effort.
-            if let Some(terminal_id) = landed_terminal_id(&data) {
-                let terminal_id = terminal_id.to_string();
-                if let Err(response) = frontend_bridge_json(
-                    &server,
-                    "action",
-                    "notifications",
-                    "markTerminalRead",
-                    serde_json::json!({ "terminalId": terminal_id.clone() }),
-                )
-                .await
-                {
-                    tracing::debug!(
-                        terminal_id,
-                        "failed to mark landed terminal notifications read: {:?}",
-                        response.status()
-                    );
-                }
-            }
-            // moved:false is a valid no-op — nothing changed, so don't wake
-            // resource subscribers with a state-changed event.
-            if step_moved(&data) {
-                emit_workspace_state_changed(
-                    &server,
-                    "remote.navigation.spatialStep",
-                    serde_json::json!({ "direction": body.direction }),
-                );
-            }
-            Json(data).into_response()
+            finish_landing_step(
+                &server,
+                data,
+                "remote.navigation.spatialStep",
+                body.direction,
+            )
+            .await
         }
         Err(response) => response,
     }
+}
+
+pub(super) async fn remote_navigation_direction_step(
+    State(server): State<ServerState>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    let body = match navigation_step_request_from_body(&body) {
+        Ok(body) => body,
+        Err(_) => return json_error(StatusCode::BAD_REQUEST, "invalid JSON body"),
+    };
+    if !GRID_DIRECTIONS.contains(&body.direction.as_str()) {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "direction must be \"up\", \"down\", \"left\" or \"right\"",
+        );
+    }
+    let lease_id = body
+        .lease_id
+        .as_deref()
+        .or_else(|| lease_id_from_headers(&headers));
+    if let Err(response) = require_active_lease(&server.app_state, lease_id) {
+        return response;
+    }
+
+    match frontend_bridge_json(
+        &server,
+        "action",
+        "navigation",
+        "directionStep",
+        serde_json::json!({ "direction": body.direction.clone() }),
+    )
+    .await
+    {
+        Ok(data) => {
+            finish_landing_step(
+                &server,
+                data,
+                "remote.navigation.directionStep",
+                body.direction,
+            )
+            .await
+        }
+        Err(response) => response,
+    }
+}
+
+/// Shared tail of the pane-landing steps (spatial, direction).
+async fn finish_landing_step(
+    server: &ServerState,
+    data: Value,
+    source: &'static str,
+    direction: String,
+) -> Response {
+    // Landing on a terminal consumes its unread alerts, mirroring the remote
+    // terminal-focus contract (ADR-0018). Best-effort.
+    if let Some(terminal_id) = landed_terminal_id(&data) {
+        let terminal_id = terminal_id.to_string();
+        if let Err(response) = frontend_bridge_json(
+            server,
+            "action",
+            "notifications",
+            "markTerminalRead",
+            serde_json::json!({ "terminalId": terminal_id.clone() }),
+        )
+        .await
+        {
+            tracing::debug!(
+                terminal_id,
+                "failed to mark landed terminal notifications read: {:?}",
+                response.status()
+            );
+        }
+    }
+    // moved:false is a valid no-op — nothing changed, so don't wake resource
+    // subscribers with a state-changed event.
+    if step_moved(&data) {
+        emit_workspace_state_changed(
+            server,
+            source,
+            serde_json::json!({ "direction": direction }),
+        );
+    }
+    Json(data).into_response()
 }
 
 pub(super) async fn remote_navigation_notification_step(
@@ -221,6 +285,11 @@ mod tests {
         assert!(NOTIFICATION_DIRECTIONS.contains(&"recent"));
         assert!(NOTIFICATION_DIRECTIONS.contains(&"oldest"));
         assert!(!NOTIFICATION_DIRECTIONS.contains(&"next"));
+        for direction in ["up", "down", "left", "right"] {
+            assert!(GRID_DIRECTIONS.contains(&direction));
+            assert!(!SPATIAL_DIRECTIONS.contains(&direction));
+        }
+        assert!(!GRID_DIRECTIONS.contains(&"next"));
     }
 
     #[test]

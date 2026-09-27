@@ -403,6 +403,13 @@
                 <div id="installHint" class="install-hint" hidden>iOS installs from the share sheet: Share → “Add to Home Screen”.</div>
               </div>
               </section>
+              <!-- Physical keyboard reference (ADR-0269). Read-only: the Remote uses
+                   the PC keybindings, so rebinding lives in PC Settings. -->
+              <section id="keyboardShortcutsSection" class="nav-section" aria-label="Keyboard shortcuts">
+              <h3 class="settings-group-title">Keyboard shortcuts</h3>
+              <p class="settings-page-description">For a physical keyboard. Rebind them in PC Settings → Keybindings.</p>
+              <dl id="keyboardShortcutList" class="keyboard-shortcut-list"></dl>
+              </section>
               <section class="nav-section" aria-label="Connection">
                 <button id="drawerConnectionButton" class="settings-connection-button" type="button" aria-label="Open connection" title="Connection">
                   <span data-remote-icon="Plug"></span> Connection

@@ -142,6 +142,29 @@ export async function writeTerminalInput(id: string, text: string, submit: boole
   return invoke("write_terminal_input", { id, text, submit });
 }
 
+/**
+ * Raw write for a desktop-executed action the Remote lease holder requested
+ * (ADR-0271). It carries that lease, so it is accepted only while the lease is
+ * active; the Local writes above are rejected while any lease is held.
+ */
+export async function writeToTerminalForRemote(
+  id: string,
+  data: string,
+  leaseId: string,
+): Promise<void> {
+  return invoke("write_to_terminal_for_remote", { id, data, leaseId });
+}
+
+/** Structured-input form of {@link writeToTerminalForRemote} (ADR-0271). */
+export async function writeTerminalInputForRemote(
+  id: string,
+  text: string,
+  submit: boolean,
+  leaseId: string,
+): Promise<void> {
+  return invoke("write_terminal_input_for_remote", { id, text, submit, leaseId });
+}
+
 export interface TerminalAttachState {
   version: number;
   generation: number;

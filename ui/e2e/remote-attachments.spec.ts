@@ -292,7 +292,7 @@ test.describe("remote terminal attachments", () => {
     await editor.press("Backspace");
     await expect(editor.locator(".composer-attachment")).toHaveCount(0);
     await page.keyboard.insertText("삭제 완료");
-    await editor.press("Enter");
+    await editor.press("Control+Enter"); // composer.remote.send (ADR-0269)
     await expect.poll(() => terminalInputs.length).toBe(1);
     expect(terminalInputs[0].text).toBe("삭제 완료");
   });
@@ -313,7 +313,7 @@ test.describe("remote terminal attachments", () => {
     await editor.press("ArrowLeft");
     await editor.press("ArrowLeft");
     await page.keyboard.insertText("앞 ");
-    await editor.press("Enter");
+    await editor.press("Control+Enter"); // composer.remote.send (ADR-0269)
     await expect.poll(() => terminalInputs.length).toBe(1);
     expect(terminalInputs[0].text).toBe("앞 C:\\Temp\\remote-1-one.txt ");
   });
@@ -360,7 +360,7 @@ test.describe("remote terminal attachments", () => {
       );
     });
     await expect(editor.locator(".composer-attachment")).toHaveCount(1);
-    await editor.press("Enter");
+    await editor.press("Control+Enter"); // composer.remote.send (ADR-0269)
     await expect.poll(() => terminalInputs.length).toBe(1);
     expect(terminalInputs[0].text).toBe(
       " C:\\Temp\\remote-2-기획서의아주긴파일명이있는최종수정본.pdf",
@@ -376,11 +376,11 @@ test.describe("remote terminal attachments", () => {
       buffer: Buffer.from("text"),
     });
     await expect(editor.locator(".composer-attachment")).toHaveText(["a b.txt"]);
-    await editor.press("Enter");
+    await editor.press("Control+Enter"); // composer.remote.send (ADR-0269)
     await expect(page.locator("#status")).toContainText("Input failed");
     await expect(editor.locator(".composer-attachment")).toHaveCount(1);
     await page.keyboard.insertText(" 확인해줘");
-    await editor.press("Enter");
+    await editor.press("Control+Enter"); // composer.remote.send (ADR-0269)
     await expect.poll(() => terminalInputs.length).toBe(2);
     expect(terminalInputs[1].text).toBe('"C:\\Temp\\remote-1-a b.txt" 확인해줘');
     await expect(editor).toBeEmpty();
@@ -399,7 +399,7 @@ test.describe("remote terminal attachments", () => {
       buffer: Buffer.from("text"),
     });
     await expect(editor.locator(".composer-attachment")).toHaveCount(1);
-    await editor.press("Enter");
+    await editor.press("Control+Enter"); // composer.remote.send (ADR-0269)
     await expect.poll(() => terminalInputs.length).toBe(1);
     await page.keyboard.insertText(" 다음 질문");
     releaseFirstTerminalInput();
@@ -409,7 +409,7 @@ test.describe("remote terminal attachments", () => {
     await page.locator("#inputModeToggle").click();
     await expect(editor).toHaveText("notes.txt 다음 질문");
     await expect(editor.locator(".composer-attachment")).toHaveCount(1);
-    await editor.press("Enter");
+    await editor.press("Control+Enter"); // composer.remote.send (ADR-0269)
     await expect.poll(() => terminalInputs.length).toBe(2);
     expect(terminalInputs[1].text).toBe("C:\\Temp\\remote-1-notes.txt 다음 질문");
   });
@@ -427,7 +427,7 @@ test.describe("remote terminal attachments", () => {
       );
     });
     await expect(editor.locator(".composer-attachment")).toHaveCount(0);
-    await editor.press("Enter");
+    await editor.press("Control+Enter"); // composer.remote.send (ADR-0269)
     await expect.poll(() => terminalInputs.length).toBe(1);
     expect(terminalInputs[0].text).toBe("C:\\normal.txt\n<Image>");
   });
@@ -448,7 +448,7 @@ test.describe("remote terminal attachments", () => {
     await expect(editor.locator("button")).toHaveCount(0);
     await editor.press("Backspace");
     await expect(editor.locator(".composer-attachment")).toHaveCount(2);
-    await editor.press("Enter");
+    await editor.press("Control+Enter"); // composer.remote.send (ADR-0269)
     await expect.poll(() => terminalInputs.length).toBe(1);
     expect(terminalInputs[0].text).toBe(
       "비교해줘 C:\\Temp\\remote-1-first.png C:\\Temp\\remote-2-second.png ",

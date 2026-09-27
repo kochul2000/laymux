@@ -1,6 +1,6 @@
 # 0269. Remote 물리 키보드는 PC 키바인딩을 공유하고, Composer 키만 PC·Remote 로 나눈다
 
-- Status: Accepted
+- Status: Accepted (partially superseded by [0272](0272-physical-key-fallback-never-takes-typed-text.md))
 - Date: 2026-09-27
 - Source: 사용자 요구(Remote 에서 물리 키보드로 pane 전환·클리어·Composer 전송, Composer 키는 PC·Remote 별도 바인딩), [api-contracts.md §15.5](../architecture/api-contracts.md#155-키보드-단축키-설계-원칙), [ADR-0034](0034-single-send-terminal-composer.md), [ADR-0036](0036-remote-composer-layout-rule.md), [ADR-0039](0039-remote-spatial-notification-step-navigation.md), [ADR-0158](0158-activity-aware-single-pane-clear.md)
 - 관계: ADR-0036 일부 대체 — Remote Composer 의 layout 기반 Enter 규칙을 Remote 전용 키바인딩으로 바꾼다. Send 버튼 등 나머지는 유지.

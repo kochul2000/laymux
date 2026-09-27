@@ -3,6 +3,7 @@ import { createRemoteSettingsBridge } from "../../../../ui/src/remote/remote-set
 import { createRemoteMemo } from "../../../../ui/src/remote/remote-memo.js";
 import { installRemoteToolSwipes, nextRemoteTool, normalizeToolSwipeRightAction } from "../../../../ui/src/remote/remote-tool-swipe.js";
 import { createComposerEditor } from "../../../../ui/src/remote/composer-editor.js";
+import { isShellOwnedCombo, keybindingMatchesEvent, resolveKeybindingFrom } from "../../../../ui/src/lib/keybinding-core.ts";
 import { readPathLinkSelection, readPathLinkLines, mapPathLinkParts, pathLinkPartsCurrent, PATH_LINK_CONTEXT_ROWS } from "../../../../ui/src/lib/path-link-lines.ts";
 import {
   commandStatusIconName,
@@ -152,6 +153,7 @@ import {
         const inputModeToggleButton = $("inputModeToggle");
         const inputModeIcon = $("inputModeIcon");
         const copyPaneIdButton = $("copyPaneId");
+        const keyboardShortcutListEl = $("keyboardShortcutList");
         const spatialExclusionButton = $("spatialExclusion");
         const keyBar = $("keyBar");
         const keyBarToggleButton = $("keyBarToggle");
@@ -8609,6 +8611,8 @@ import {
           const terminals = data.terminals || [];
           terminalInfoById = new Map(terminals.map((terminalInfo) => [terminalInfo.id, terminalInfo]));
           terminals.forEach((terminalInfo) => ensureRemoteFont(terminalInfo.appearance));
+          // Host rebinds arrive with every snapshot (ADR-0269).
+          renderKeyboardShortcutList();
           if (render) {
             renderNavigation(data);
             if (activeTerminalId) {
@@ -8807,16 +8811,25 @@ import {
         // --- Step navigation (issue #474, ADR-0039) ---
         const NAV_STEP_ENDPOINTS = {
           spatial: "/remote/v1/navigation/spatial",
+          // Alt+Arrow (`pane.focus`) grid move inside the active workspace (ADR-0269).
+          direction: "/remote/v1/navigation/direction",
           notification: "/remote/v1/navigation/notification",
         };
         const NAV_STEP_REASON_MESSAGES = {
           no_terminal_panes: "No terminal panes to navigate.",
           no_included_panes: "Every pane is excluded from pane navigation.",
           no_other_target: "No other pane to move to.",
+          no_focused_pane: "Focus a workspace terminal pane first.",
           no_unread_notifications: "No unread notifications.",
         };
         let navStepChain = Promise.resolve();
         let navStepPending = 0;
+        // Pane/workspace moves still landing (clears on the chain don't count).
+        // While one is landing the attached terminal is the one being left.
+        let navMovePending = 0;
+        // Direct input typed while a move lands; it follows the move (ADR-0269).
+        let landingInput = "";
+        const LANDING_INPUT_MAX = 4096;
 
         async function performNavStep(kind, direction) {
           if (!leaseId) return;
@@ -8851,8 +8864,16 @@ import {
         // serialize on a promise chain and cap the queue at one pending step
         // (rapid double-tap advances twice; anything faster is dropped).
         function enqueueNavStep(button, kind, direction) {
+          enqueueRemoteNavigation(() => performNavStep(kind, direction), button);
+        }
+
+        // Keyboard workspace moves share the chain (ADR-0269): a key pressed
+        // while an earlier move is still landing must not pick its target from
+        // the stale snapshot.
+        function enqueueRemoteNavigation(task, button = null, { move = true } = {}) {
           if (!leaseId || navStepPending >= 2) return;
           navStepPending += 1;
+          if (move) navMovePending += 1;
           if (button) {
             // Per-button counter: a queued double-tap must not lose its busy
             // dim when the first step's finally fires.
@@ -8860,16 +8881,355 @@ import {
             button.classList.add("busy");
           }
           navStepChain = navStepChain
-            .then(() => performNavStep(kind, direction))
+            .then(task)
             .catch((err) => setStatus(`Navigation failed: ${err.message || err}`, true))
             .finally(() => {
               navStepPending -= 1;
+              if (move) {
+                navMovePending -= 1;
+                if (navMovePending === 0) flushLandingInput();
+              }
               if (button) {
                 const remaining = (Number(button.dataset.busyCount) || 1) - 1;
                 button.dataset.busyCount = String(remaining);
                 if (remaining <= 0) button.classList.remove("busy");
               }
             });
+        }
+
+        // --- Physical keyboard shortcuts (ADR-0269) ---
+        // The Remote runs the PC keybinding actions below with the PC's own
+        // combos: defaults come from the shared keybinding core and user
+        // rebinds from the navigation payload (`keybindings`). Actions that
+        // change host state need the lease; the others only touch this view.
+        // Table order breaks ties like the desktop: pane → workspace → UI.
+        const ARROW_KEY_DIRECTIONS = {
+          ArrowUp: "up",
+          ArrowDown: "down",
+          ArrowLeft: "left",
+          ArrowRight: "right",
+        };
+        const REMOTE_SHORTCUT_ACTIONS = [
+          {
+            id: "pane.focus",
+            label: "Move to pane in direction",
+            needsLease: true,
+            run: (event) => {
+              const direction = ARROW_KEY_DIRECTIONS[event.key];
+              if (!direction) return false;
+              enqueueNavStep(null, "direction", direction);
+              return true;
+            },
+          },
+          {
+            id: "pane.clearTerminal",
+            label: "Clear this terminal",
+            needsLease: true,
+            run: () => {
+              enqueueRemoteNavigation(() => runRemoteClear("pane"), null, { move: false });
+              return true;
+            },
+          },
+          {
+            id: "workspace.clearTerminals",
+            label: "Clear workspace terminals",
+            needsLease: true,
+            run: () => {
+              enqueueRemoteNavigation(() => runRemoteClear("workspace"), null, { move: false });
+              return true;
+            },
+          },
+          ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({
+            id: `workspace.${n}`,
+            label: `Workspace ${n}`,
+            needsLease: true,
+            run: () => switchRemoteWorkspaceTo(({ visible }) => visible[n - 1]),
+          })),
+          {
+            id: "workspace.last",
+            label: "Last workspace",
+            needsLease: true,
+            run: () => switchRemoteWorkspaceTo(({ visible }) => visible[visible.length - 1]),
+          },
+          {
+            id: "workspace.next",
+            label: "Next workspace",
+            needsLease: true,
+            run: () => cycleRemoteWorkspace(1),
+          },
+          {
+            id: "workspace.prev",
+            label: "Previous workspace",
+            needsLease: true,
+            run: () => cycleRemoteWorkspace(-1),
+          },
+          {
+            id: "notifications.recent",
+            label: "Most recent unread alert",
+            needsLease: true,
+            run: () => {
+              enqueueNavStep(null, "notification", "recent");
+              return true;
+            },
+          },
+          {
+            id: "notifications.oldest",
+            label: "Oldest unread alert",
+            needsLease: true,
+            run: () => {
+              enqueueNavStep(null, "notification", "oldest");
+              return true;
+            },
+          },
+          {
+            id: "fileViewer.open",
+            label: "Open Files",
+            needsLease: true,
+            run: () => {
+              openCurrentFileExplorer();
+              return true;
+            },
+          },
+          {
+            id: "terminal.toggleInputMode",
+            label: "Toggle Direct / Composer",
+            run: () => {
+              setInputMode(currentInputMode() === "composer" ? "direct" : "composer");
+              return true;
+            },
+          },
+          {
+            id: "pane.copyIdentifier",
+            label: "Copy pane ID",
+            run: () => copyActivePaneIdentifier(),
+          },
+          {
+            id: "sidebar.toggle",
+            label: "Toggle menu",
+            run: () => {
+              setNavigationOpen(navToggleButton.getAttribute("aria-expanded") !== "true");
+              return true;
+            },
+          },
+          {
+            id: "notifications.toggle",
+            label: "Toggle alerts",
+            run: () => {
+              toggleRemoteNotificationsView();
+              return true;
+            },
+          },
+          {
+            id: "terminal.zoomIn",
+            label: "Larger terminal text",
+            run: () => stepRemoteTerminalFontSize(1),
+          },
+          {
+            id: "terminal.zoomOut",
+            label: "Smaller terminal text",
+            run: () => stepRemoteTerminalFontSize(-1),
+          },
+          {
+            id: "terminal.zoomReset",
+            label: "Reset terminal text size",
+            run: () => stepRemoteTerminalFontSize(0),
+          },
+        ];
+        // Composer keys are handled by the Composer's own keydown (ADR-0269);
+        // listed here only so the Settings reference shows them.
+        const REMOTE_COMPOSER_SHORTCUTS = [
+          { id: "composer.remote.send", label: "Send Composer" },
+          { id: "composer.remote.newline", label: "Composer newline" },
+        ];
+
+        function hostKeybindingOverrides() {
+          const list = navigationState?.keybindings;
+          if (!Array.isArray(list)) return [];
+          return list.filter(
+            (entry) =>
+              entry && typeof entry.keys === "string" && typeof entry.command === "string",
+          );
+        }
+
+        function resolveRemoteKeybinding(actionId) {
+          return resolveKeybindingFrom(hostKeybindingOverrides(), actionId);
+        }
+
+        function remoteKeybindingMatches(event, actionId) {
+          return keybindingMatchesEvent(resolveRemoteKeybinding(actionId), event);
+        }
+
+        // A contenteditable's own default already inserts a newline for
+        // Enter / Shift+Enter (composer-editor's beforeinput path).
+        function editorInsertsNewline(event) {
+          return event.key === "Enter" && !event.ctrlKey && !event.altKey && !event.metaKey;
+        }
+
+        // Editable surfaces other than the Composer and the terminal keep
+        // their keys: the memo editor, path inputs, settings fields.
+        function isForeignEditableTarget(target) {
+          if (!(target instanceof HTMLElement)) return false;
+          if (target === composerInput || (terminal && target === terminal.textarea)) return false;
+          const tag = target.tagName;
+          return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
+        }
+
+        function handleRemoteShortcutKeyDown(event) {
+          if (event.defaultPrevented) return;
+          if (event.isComposing || composerIsComposing || event.keyCode === 229) return;
+          if (remoteOverlayOpen() || isForeignEditableTarget(event.target)) return;
+          // As on the desktop terminal, Ctrl+letter/digit typed into the
+          // terminal belongs to the shell even when an IDE action is bound to
+          // it; only terminal-scoped actions (zoom) keep it.
+          const shellOwned =
+            Boolean(terminal) && event.target === terminal.textarea && isShellOwnedCombo(event);
+          for (const action of REMOTE_SHORTCUT_ACTIONS) {
+            if (!remoteKeybindingMatches(event, action.id)) continue;
+            if (shellOwned && !action.id.startsWith("terminal.")) return;
+            // An observer has no host to drive; the key keeps its usual path.
+            if (action.needsLease && !leaseId) return;
+            // A held key must not repeat host actions (a clear per repeat).
+            const handled = action.needsLease && event.repeat ? true : action.run(event);
+            if (handled === false) return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            return;
+          }
+        }
+
+        function activeRemoteWorkspaceId() {
+          return navigationState?.activeWorkspaceId || navigationState?.activeWorkspace?.id || null;
+        }
+
+        function remoteWorkspaceLists() {
+          const all = (navigationState?.workspaces || []).filter((workspace) => workspace?.id);
+          return { all, visible: all.filter((workspace) => workspace.hidden !== true) };
+        }
+
+        // Like the desktop handlers, a workspace key is consumed even when there
+        // is no such workspace, so it never falls through to the PTY. The target
+        // is picked when the move runs, after any move queued before it.
+        function switchRemoteWorkspaceTo(pick) {
+          enqueueRemoteNavigation(async () => {
+            const target = pick(remoteWorkspaceLists());
+            if (target && target.id !== activeRemoteWorkspaceId()) await switchWorkspace(target.id);
+          });
+          return true;
+        }
+
+        // Same cycle as the desktop `workspace.next`/`prev`: visible
+        // workspaces wrap, and a hidden active workspace anchors by its
+        // position in the full list.
+        function cycleRemoteWorkspace(step) {
+          return switchRemoteWorkspaceTo(({ all, visible }) => {
+            if (visible.length === 0) return null;
+            const activeId = activeRemoteWorkspaceId();
+            const index = visible.findIndex((workspace) => workspace.id === activeId);
+            if (index >= 0) return visible[(index + step + visible.length) % visible.length];
+            const fullIndex = all.findIndex((workspace) => workspace.id === activeId);
+            return step === 1
+              ? visible.find((workspace) => all.indexOf(workspace) > fullIndex) ?? visible[0]
+              : [...visible].reverse().find((workspace) => all.indexOf(workspace) < fullIndex) ??
+                  visible[visible.length - 1];
+          });
+        }
+
+        function summarizeRemoteClear(scope, data) {
+          const count = (key) => (Array.isArray(data?.[key]) ? data[key].length : 0);
+          const failed = Array.isArray(data?.failed) ? data.failed : [];
+          if (failed.length > 0) {
+            return { message: `Clear failed: ${failed[0]?.error || "write rejected"}`, error: true };
+          }
+          if (scope === "workspace") {
+            const cleared = count("cleared");
+            return {
+              message: cleared > 0 ? `Cleared ${cleared} terminal${cleared === 1 ? "" : "s"}.` : "Nothing to clear.",
+              error: false,
+            };
+          }
+          if (count("restarted") > 0) return { message: "Terminal restarted.", error: false };
+          if (count("interrupted") > 0) return { message: "Interrupted and cleared.", error: false };
+          if (count("cleared") > 0) return { message: "Cleared.", error: false };
+          const reason = data?.skipped?.[0]?.reason;
+          const reasons = {
+            busy: "Clear skipped: the terminal is busy.",
+            unsupportedApp: "Clear skipped: this app has no clear command.",
+            notReady: "Clear skipped: the terminal is not ready.",
+          };
+          return { message: reasons[reason] || "Nothing to clear.", error: false };
+        }
+
+        // pane.clearTerminal / workspace.clearTerminals: the PC owns what a
+        // clear sends and when it is safe (ADR-0158, ADR-0137); this only asks.
+        // It runs on the navigation chain, so a clear pressed while a move is
+        // landing targets where the move lands, as on the desktop.
+        async function runRemoteClear(scope) {
+          const workspaceId = activeRemoteWorkspaceId();
+          const path =
+            scope === "workspace"
+              ? workspaceId && `/remote/v1/workspaces/${encodeURIComponent(workspaceId)}/clear`
+              : activeTerminalId && `/remote/v1/terminals/${encodeURIComponent(activeTerminalId)}/clear`;
+          if (!leaseId || !path) return;
+          setBusyStatus("Clearing…");
+          await remoteFetch(path, { method: "POST", body: JSON.stringify({ leaseId }) })
+            .then((data) => {
+              const { message, error } = summarizeRemoteClear(scope, data);
+              setStatus(message, error);
+            })
+            .catch((err) => setStatus(`Clear failed: ${err.message || err}`, true));
+        }
+
+        function copyActivePaneIdentifier() {
+          const identifier = activePaneIdentifier();
+          if (!identifier) return false;
+          writeClipboardText(identifier)
+            .then(() => setStatus(`Copied ${identifier}`))
+            .catch((err) => setStatus(`Copy failed: ${err.message || err}`, true));
+          return true;
+        }
+
+        function toggleRemoteNotificationsView() {
+          const navigationOpen = navToggleButton.getAttribute("aria-expanded") === "true";
+          if (navigationOpen && drawerView === "notifications") {
+            returnToWorkspaceView();
+            setNavigationOpen(false);
+            return;
+          }
+          setNavigationOpen(true);
+          openDrawerSubview("notifications");
+        }
+
+        // terminal.zoom*: this device's terminal text size (ADR-0209). 0 resets.
+        function stepRemoteTerminalFontSize(delta) {
+          const next =
+            delta === 0
+              ? DEFAULT_REMOTE_DISPLAY_SETTINGS.terminalFontSize
+              : remoteDisplaySettings.terminalFontSize + delta;
+          const normalized = normalizeRemoteDisplaySettings({
+            ...remoteDisplaySettings,
+            terminalFontSize: next,
+          });
+          const persisted = persistDeviceDisplaySettings(normalized);
+          applyRemoteDisplaySettings(normalized);
+          setStatus(
+            persisted
+              ? `Terminal text ${normalized.terminalFontSize}px`
+              : "Could not save on this device.",
+            !persisted,
+          );
+          return true;
+        }
+
+        function renderKeyboardShortcutList() {
+          keyboardShortcutListEl.replaceChildren();
+          for (const action of [...REMOTE_SHORTCUT_ACTIONS, ...REMOTE_COMPOSER_SHORTCUTS]) {
+            const keys = resolveRemoteKeybinding(action.id);
+            const name = document.createElement("dt");
+            name.textContent = action.label;
+            const combo = document.createElement("dd");
+            combo.textContent = keys && keys.trim() ? keys.replace(/Arrow$/, "Arrows") : "Unassigned";
+            keyboardShortcutListEl.append(name, combo);
+          }
         }
 
         async function markNotificationRead(notification) {
@@ -10289,6 +10649,12 @@ import {
 
         function commitComposer() {
           if (!leaseId || !activeTerminalId || !composerReady) return;
+          // A pane/workspace move is still landing (ADR-0269): the draft belongs
+          // to the pane being left, so sending now would hit the wrong terminal.
+          if (navMovePending > 0) {
+            setStatus("Moving to another pane — send again once it opens.");
+            return;
+          }
           const terminalId = activeTerminalId;
           const activeLeaseId = leaseId;
           const draft = composerDraft(terminalId);
@@ -10410,8 +10776,25 @@ import {
           queueInputWrite(dataToSend, inputTerminalId, inputLeaseId);
         }
 
+        // Keys typed while a pane/workspace move lands belong to the pane the
+        // user is moving to, as on the desktop; hold them until it opens.
+        function holdLandingInput(data) {
+          if (navMovePending === 0) return false;
+          if (landingInput.length + data.length <= LANDING_INPUT_MAX) landingInput += data;
+          return true;
+        }
+
+        function flushLandingInput() {
+          const data = landingInput;
+          landingInput = "";
+          if (!data || !leaseId || !activeTerminalId) return;
+          flushPendingInput();
+          queueInputWrite(data, activeTerminalId, leaseId);
+        }
+
         function enqueueInput(data) {
           if (!leaseId || !activeTerminalId) return;
+          if (holdLandingInput(data)) return;
           if (
             pendingInput &&
             (pendingInputTerminalId !== activeTerminalId || pendingInputLeaseId !== leaseId)
@@ -10434,6 +10817,7 @@ import {
           ) {
             return;
           }
+          if (holdLandingInput(data.repeat(repeat))) return;
           flushPendingInput();
           const inputTerminalId = activeTerminalId;
           const inputLeaseId = leaseId;
@@ -10976,6 +11360,12 @@ import {
           if (!seq) return;
           if (def.submit === true) {
             if (!leaseId || !activeTerminalId || !composerReady) return;
+            // Like a Composer send, a submitting key never lands on the pane a
+            // move is leaving (ADR-0269).
+            if (navMovePending > 0) {
+              setStatus("Moving to another pane — send again once it opens.");
+              return;
+            }
             flushPendingInput();
             queueInputWrite(seq, activeTerminalId, leaseId, true);
           } else {
@@ -13448,6 +13838,10 @@ import {
         // taps are recognised by containment, not by stopPropagation.
         window.addEventListener("pointerdown", handleLinkChipOutsidePointerDown, true);
         window.addEventListener("keydown", handleLinkChipKeyDown, true);
+        // Physical keyboard shortcuts (ADR-0269). Capture phase so xterm never
+        // writes a bound combo to the PTY and the browser never acts on it.
+        window.addEventListener("keydown", handleRemoteShortcutKeyDown, true);
+        renderKeyboardShortcutList();
         // xterm completes a mouse selection from a document-level mouseup handler.
         // Listen at the same boundary so releasing an outside-terminal drag still
         // schedules the copy after every listener for this event has run.
@@ -13524,13 +13918,7 @@ import {
         keepInputSurfaceFocus(focusTerminalButton);
         focusTerminalButton.addEventListener("click", () => toggleInputSurfaceFocus());
         keepInputSurfaceFocus(copyPaneIdButton);
-        copyPaneIdButton.addEventListener("click", () => {
-          const identifier = activePaneIdentifier();
-          if (!identifier) return;
-          writeClipboardText(identifier)
-            .then(() => setStatus(`Copied ${identifier}`))
-            .catch((err) => setStatus(`Copy failed: ${err.message || err}`, true));
-        });
+        copyPaneIdButton.addEventListener("click", () => copyActivePaneIdentifier());
         keepInputSurfaceFocus(spatialExclusionButton);
         spatialExclusionButton.addEventListener("click", () => {
           const pane = activeWorkspacePane();
@@ -13714,14 +14102,11 @@ import {
           composerHistoryOpen = true;
           renderComposerSuggestions();
         });
-        // Enter behavior follows the layout (ADR-0036):
-        //   - mobile layout: Enter inserts a newline. Sending is the dedicated
-        //     Send button only, so the unreliable soft-keyboard Enter (keyCode
-        //     229, IME/isComposing races) is never on the send path. No
-        //     hardcoded keyboard send gesture — shortcuts outside the
-        //     keybinding system are forbidden (api-contracts §15.5).
-        //   - desktop layout: Enter sends, Shift+Enter is a newline. IME
-        //     candidate confirmation (isComposing / keyCode 229) never submits.
+        // Send and newline are the Remote Composer keybindings on every layout
+        // (ADR-0269): `composer.remote.send` (default Ctrl+Enter) and
+        // `composer.remote.newline` (default Enter). A soft keyboard has no
+        // Ctrl, so its Enter stays a newline and the Send button submits. IME
+        // candidate confirmation (isComposing / keyCode 229) never submits.
         composerInput.addEventListener("keydown", (event) => {
           const composing =
             event.isComposing || composerIsComposing || event.keyCode === 229;
@@ -13772,7 +14157,7 @@ import {
 
           // (2) While autocomplete is open (non-empty draft, issue #505) it owns
           // Tab/Escape and, once a suggestion is navigated to, Enter/arrows. With
-          // no active selection it deliberately leaves Enter alone so plain Enter
+          // no active selection it deliberately leaves Enter alone so the Composer keys
           // still sends. This block sits BEFORE the Tab-open block so a non-empty
           // draft's Tab always accepts a suggestion, never opens the recall popup.
           if (autocompleteVisible && !composing && plainKey) {
@@ -13788,7 +14173,7 @@ import {
             if (event.key === "ArrowUp" && activeAutocompleteIndex >= 0) {
               event.preventDefault();
               // Leaving the list at the top (0 → −1) keeps it open but reselects
-              // the draft, restoring plain-Enter send.
+              // the draft, restoring the plain send/newline keys.
               composerAutocompleteIndex = activeAutocompleteIndex - 1;
               renderComposerSuggestions();
               return;
@@ -13835,12 +14220,21 @@ import {
             return;
           }
 
-          // (4) Existing Enter=Send gesture (ADR-0036, desktop layout only).
-          if (event.key !== "Enter" || event.shiftKey) return;
-          if (mobileLayout) return;
-          if (event.isComposing || composerIsComposing || event.keyCode === 229) return;
-          event.preventDefault();
-          commitComposer();
+          // (4) Send / newline follow the Remote Composer keybindings whatever
+          // the layout (ADR-0269). IME candidate confirmation never submits.
+          if (composing) return;
+          if (remoteKeybindingMatches(event, "composer.remote.send")) {
+            event.preventDefault();
+            commitComposer();
+            return;
+          }
+          if (remoteKeybindingMatches(event, "composer.remote.newline")) {
+            // Enter / Shift+Enter already insert through the editor's own
+            // beforeinput path; any other combo (e.g. Ctrl+J) inserts here.
+            if (editorInsertsNewline(event)) return;
+            event.preventDefault();
+            composerEditor.replaceSelection("\n");
+          }
         });
         composerSendButton.addEventListener("click", () => {
           commitComposer();
@@ -13904,6 +14298,7 @@ import {
           window.removeEventListener("pointercancel", handlePathLinkPointerCancel, true);
           window.removeEventListener("pointerdown", handleLinkChipOutsidePointerDown, true);
           window.removeEventListener("keydown", handleLinkChipKeyDown, true);
+          window.removeEventListener("keydown", handleRemoteShortcutKeyDown, true);
           clearPathLinkSelection();
           closeFileViewer();
           closeRemoteGithubView();

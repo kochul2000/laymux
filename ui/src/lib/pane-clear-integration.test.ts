@@ -12,9 +12,17 @@ vi.mock("@/lib/tauri-api", () => ({
     ),
   writeTerminalInput: vi.fn().mockResolvedValue(undefined),
   writeToTerminal: vi.fn().mockResolvedValue(undefined),
+  writeTerminalInputForRemote: vi.fn().mockResolvedValue(undefined),
+  writeToTerminalForRemote: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { getTerminalStates, writeTerminalInput, writeToTerminal } from "@/lib/tauri-api";
+import {
+  getTerminalStates,
+  writeTerminalInput,
+  writeTerminalInputForRemote,
+  writeToTerminal,
+  writeToTerminalForRemote,
+} from "@/lib/tauri-api";
 import { observeTerminalTask } from "./terminal-task-observers";
 import { clearPane } from "./pane-clear";
 import { useDockStore } from "@/stores/dock-store";
@@ -203,6 +211,29 @@ describe("clearPane against live stores", () => {
       ["terminal-pane-a", CTRL_C],
     ]);
     expect(vi.mocked(writeTerminalInput)).toHaveBeenCalledWith("terminal-pane-a", "/clear", true);
+  });
+
+  // ADR-0271: a clear the Remote lease holder asked for writes as that holder,
+  // so the lease that locks out Local input does not reject it.
+  it("writes as the Remote lease holder when one requested the clear", async () => {
+    seedWorkspace();
+    makeBusy("pane-a");
+    await clearPane(
+      "pane-a",
+      { busyPolicy: "interrupt", interruptRounds: 1, settleMs: 0 },
+      { remoteLeaseId: "lease-1" },
+    );
+    expect(vi.mocked(writeToTerminalForRemote).mock.calls).toEqual([
+      ["terminal-pane-a", CTRL_C, "lease-1"],
+    ]);
+    expect(vi.mocked(writeTerminalInputForRemote)).toHaveBeenCalledWith(
+      "terminal-pane-a",
+      "/clear",
+      true,
+      "lease-1",
+    );
+    expect(vi.mocked(writeToTerminal)).not.toHaveBeenCalled();
+    expect(vi.mocked(writeTerminalInput)).not.toHaveBeenCalled();
   });
 
   it("restarts a busy dock pane with its live cwd", async () => {

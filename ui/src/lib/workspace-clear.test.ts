@@ -2,9 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("./tauri-api", () => ({
   writeToTerminal: vi.fn().mockResolvedValue(undefined),
+  writeToTerminalForRemote: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { writeToTerminal } from "./tauri-api";
+import { writeToTerminal, writeToTerminalForRemote } from "./tauri-api";
 import {
   CTRL_L,
   clearWorkspace,
@@ -65,6 +66,22 @@ describe("clearWorkspace", () => {
     });
     useTerminalStore.getState().updateInstanceInfo(`terminal-${paneId}`, { sessionReady: true });
   }
+
+  // ADR-0271: the Remote lease holder's request writes as that holder.
+  it("broadcasts as the Remote lease holder when one requested the clear", async () => {
+    seedWorkspace();
+    registerReady("pane-a");
+
+    const result = await clearWorkspace("ws-1", { remoteLeaseId: "lease-1" });
+
+    expect(vi.mocked(writeToTerminalForRemote)).toHaveBeenCalledExactlyOnceWith(
+      "terminal-pane-a",
+      CTRL_L,
+      "lease-1",
+    );
+    expect(vi.mocked(writeToTerminal)).not.toHaveBeenCalled();
+    expect(result.cleared).toEqual(["terminal-pane-a"]);
+  });
 
   it("broadcasts Ctrl+L to every ready terminal pane", async () => {
     seedWorkspace();

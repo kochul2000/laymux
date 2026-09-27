@@ -580,6 +580,7 @@ fn http_path_allowed(method: &Method, path: &str) -> bool {
         | (&Method::POST, "/remote/v1/session/heartbeat")
         | (&Method::POST, "/remote/v1/session/release")
         | (&Method::POST, "/remote/v1/navigation/spatial")
+        | (&Method::POST, "/remote/v1/navigation/direction")
         | (&Method::POST, "/remote/v1/navigation/notification")
         | (&Method::POST, "/remote/v1/composer/starred")
         | (&Method::GET, "/remote/v1/memos")
@@ -601,8 +602,9 @@ fn http_path_allowed(method: &Method, path: &str) -> bool {
         (&Method::POST, _) => {
             terminal_control_path(path)
                 || notification_read_path(path)
-                || visibility_path(path, "/remote/v1/workspaces/")
-                || visibility_path(path, "/remote/v1/panes/")
+                || id_action_path(path, "/remote/v1/workspaces/", "visibility")
+                || id_action_path(path, "/remote/v1/workspaces/", "clear")
+                || id_action_path(path, "/remote/v1/panes/", "visibility")
         }
         _ => false,
     }
@@ -637,7 +639,7 @@ fn terminal_control_path(path: &str) -> bool {
     valid_remote_identifier(terminal_id)
         && matches!(
             action,
-            "focus" | "write" | "input" | "resize" | "attachments"
+            "focus" | "write" | "input" | "resize" | "attachments" | "clear"
         )
 }
 
@@ -651,14 +653,14 @@ fn notification_read_path(path: &str) -> bool {
     valid_remote_identifier(notification_id) && action == "read"
 }
 
-fn visibility_path(path: &str, prefix: &str) -> bool {
+fn id_action_path(path: &str, prefix: &str, expected_action: &str) -> bool {
     let Some(rest) = path.strip_prefix(prefix) else {
         return false;
     };
     let Some((id, action)) = rest.rsplit_once('/') else {
         return false;
     };
-    valid_remote_identifier(id) && action == "visibility"
+    valid_remote_identifier(id) && action == expected_action
 }
 
 fn resource_path_allowed(path: &str) -> bool {
@@ -920,6 +922,23 @@ mod tests {
         assert!(http_path_allowed(
             &Method::POST,
             "/remote/v1/panes/pane-1/visibility"
+        ));
+        // ADR-0269 keyboard actions.
+        assert!(http_path_allowed(
+            &Method::POST,
+            "/remote/v1/navigation/direction"
+        ));
+        assert!(http_path_allowed(
+            &Method::POST,
+            "/remote/v1/terminals/term-1/clear"
+        ));
+        assert!(http_path_allowed(
+            &Method::POST,
+            "/remote/v1/workspaces/ws-1/clear"
+        ));
+        assert!(!http_path_allowed(
+            &Method::POST,
+            "/remote/v1/panes/pane-1/clear"
         ));
         assert!(http_path_allowed(
             &Method::DELETE,

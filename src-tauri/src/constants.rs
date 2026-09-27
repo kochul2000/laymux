@@ -3,6 +3,9 @@ use std::time::Duration;
 /// Static Linux x64 companion, staged beside the Windows application.
 pub const WSL_CODEX_PROBE_FILE: &str = "laymux-wsl-codex-probe";
 
+/// Terminal ids are `terminal-{paneId}` for grid and dock panes alike.
+pub const TERMINAL_ID_PREFIX: &str = "terminal-";
+
 // ── OS credential-store names ────────────────────────────────────
 
 pub const KEYRING_SERVICE: &str = "laymux";

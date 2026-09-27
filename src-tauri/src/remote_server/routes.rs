@@ -32,6 +32,7 @@ use super::assets::{
 };
 use super::attachments::remote_terminal_attachment;
 use super::auth::remote_guard;
+use super::clear_routes::{remote_terminal_clear, remote_workspace_clear};
 use super::composer_routes::{remote_composer_starred, remote_composer_starred_update};
 use super::font_assets::FONT_ROUTE_PATH;
 use super::github_repo_routes::{
@@ -52,7 +53,8 @@ use super::navigation_routes::{
     remote_workspace_visibility,
 };
 use super::navigation_step_routes::{
-    remote_navigation_notification_step, remote_navigation_spatial_step,
+    remote_navigation_direction_step, remote_navigation_notification_step,
+    remote_navigation_spatial_step,
 };
 use super::oauth_relay_routes::{remote_oauth_relay_begin, remote_oauth_relay_forward};
 use super::page::{remote_page, remote_page_redirect};
@@ -208,6 +210,10 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
             post(remote_navigation_spatial_step),
         )
         .route(
+            "/remote/v1/navigation/direction",
+            post(remote_navigation_direction_step),
+        )
+        .route(
             "/remote/v1/navigation/notification",
             post(remote_navigation_notification_step),
         )
@@ -233,6 +239,10 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
             post(remote_workspace_visibility),
         )
         .route(
+            "/remote/v1/workspaces/{id}/clear",
+            post(remote_workspace_clear),
+        )
+        .route(
             "/remote/v1/panes/{id}/visibility",
             post(remote_pane_visibility),
         )
@@ -253,6 +263,10 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         .route(
             "/remote/v1/terminals/{id}/focus",
             post(remote_terminal_focus),
+        )
+        .route(
+            "/remote/v1/terminals/{id}/clear",
+            post(remote_terminal_clear),
         )
         .route(
             "/remote/v1/terminals/{id}/write",

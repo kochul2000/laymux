@@ -8,7 +8,7 @@ import { useUiStore } from "@/stores/ui-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import type { Workspace, WorkspacePane } from "@/stores/types";
 
-import { notificationStep, spatialStep } from "./navigation-actions";
+import { directionStep, notificationStep, spatialStep } from "./navigation-actions";
 import { switchActiveWorkspace } from "./workspace-transition";
 
 function term(id: string, x: number, y: number, w = 0.5, h = 0.5): WorkspacePane {
@@ -295,6 +295,81 @@ describe("navigation-actions", () => {
         switched: true,
         landing: { paneIndex: 0, paneId: "m", paneNumber: 1, terminalId: null },
       });
+    });
+  });
+
+  // ADR-0269: Remote Alt+Arrow uses the desktop pane.focus geometry, limited to
+  // the active workspace's terminal panes.
+  describe("directionStep", () => {
+    /** ws1: a(top-left) b(top-right) / m(memo, bottom-left) d(bottom-right); ws2: c. */
+    function seedGrid() {
+      useWorkspaceStore.setState({
+        workspaces: [
+          ws("ws1", "One", [
+            term("a", 0, 0),
+            term("b", 0.5, 0),
+            memo("m", 0, 0.5),
+            term("d", 0.5, 0.5),
+          ]),
+          ws("ws2", "Two", [term("c", 0, 0, 1, 1)]),
+        ],
+        activeWorkspaceId: "ws1",
+        workspaceDisplayOrder: [],
+      });
+    }
+
+    it("moves to the terminal pane in that direction", () => {
+      seedGrid();
+      useGridStore.getState().setFocusedPane(0); // a
+
+      const result = directionStep("right");
+
+      expect(result).toMatchObject({
+        moved: true,
+        target: {
+          workspaceId: "ws1",
+          paneId: "b",
+          terminalId: "terminal-b",
+          paneIndex: 1,
+          switchedWorkspace: false,
+        },
+      });
+      expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+    });
+
+    it("skips non-terminal panes as landing targets", () => {
+      seedGrid();
+      useGridStore.getState().setFocusedPane(1); // b
+
+      const result = directionStep("down");
+
+      expect(result).toMatchObject({ moved: true, target: { paneId: "d", paneIndex: 3 } });
+    });
+
+    it("stops at the workspace edge instead of crossing into another workspace", () => {
+      seedGrid();
+      useGridStore.getState().setFocusedPane(1); // b is already rightmost
+
+      expect(directionStep("right")).toEqual({ moved: false, reason: "no_other_target" });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws1");
+      expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+    });
+
+    it("reports no anchor when a dock or non-terminal pane has focus", () => {
+      seedGrid();
+      useGridStore.getState().setFocusedPane(2); // memo
+
+      expect(directionStep("right")).toEqual({ moved: false, reason: "no_focused_pane" });
+    });
+
+    it("reports an empty workspace", () => {
+      useWorkspaceStore.setState({
+        workspaces: [ws("ws1", "One", [memo("m", 0, 0, 1, 1)])],
+        activeWorkspaceId: "ws1",
+        workspaceDisplayOrder: [],
+      });
+
+      expect(directionStep("left")).toEqual({ moved: false, reason: "no_terminal_panes" });
     });
   });
 
