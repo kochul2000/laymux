@@ -1,6 +1,6 @@
 # 0276. Remote Keys 표시는 물리 키보드 연결과 독립으로 둔다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-27
 - Source: 사용자 요구(`Hide Keys with physical keyboard` 제거), [ADR-0273](0273-remote-physical-keyboard-and-navigation-keys.md), [api-contracts.md §13.4](../architecture/api-contracts.md)
 - Supersedes in part: ADR-0273의 Keys 자동 숨김과 해당 기기 설정 노출. 물리 키보드 감지·플로팅 자동 숨김·Nav 정책은 유지한다.
