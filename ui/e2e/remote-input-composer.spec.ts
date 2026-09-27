@@ -817,16 +817,43 @@ test("custom Send Enter uses structured submit while raw keys retain their bytes
   expect(requests).toEqual(["write", "input", "write"]);
 });
 
-test("first-use Q writes one byte and /clr submits the clear command", async ({ page }) => {
+test("기본 Alt+L은 pane clear API를 호출하고 초안과 포커스를 보존한다", async ({ page }) => {
   const state = await installRemotePage(page, { coarse: true, holdInputs: true });
+  const clears: { path: string; body: unknown }[] = [];
+  await page.route("**/remote/v1/terminals/*/clear", async (route) => {
+    clears.push({
+      path: new URL(route.request().url()).pathname,
+      body: route.request().postDataJSON(),
+    });
+    await route.fulfill({
+      json: {
+        cleared: [],
+        interrupted: [],
+        restarted: [],
+        skipped: [{ terminalId: "terminal-1", reason: "busy" }],
+        failed: [],
+      },
+    });
+  });
   await connect(page);
   await page.locator('#mainActionRow [data-key="q"]').click();
   await expect.poll(() => state.writes.length).toBe(1);
   expect(state.writes[0].data).toBe("q");
-  await page.locator('#mainActionRow [data-key="u-defaultclear"]').click();
-  await expect.poll(() => state.inputs.length).toBe(1);
-  expect(state.inputs[0].body).toEqual({ leaseId: "lease-1", text: "/clear", submit: true });
-  await state.inputs[0].respond();
+  const editor = page.locator("#composerInput");
+  await editor.fill("남겨 둘 초안");
+  await editor.focus();
+  await page.locator('#mainActionRow [data-key="clearPane"]').click();
+  await expect.poll(() => clears.length).toBe(1);
+  expect(clears[0]).toEqual({
+    path: "/remote/v1/terminals/terminal-1/clear",
+    body: { leaseId: "lease-1" },
+  });
+  await expect(page.locator("#status")).toContainText("skipped");
+  expect(state.inputs).toEqual([]);
+  expect(state.writes).toHaveLength(1);
+  await expect(editor).toHaveText("남겨 둘 초안");
+  await expect(editor).toBeFocused();
+  await page.screenshot({ path: "test-results/remote-pane-clear-action.png" });
 });
 
 test("fine-pointer PC and coarse-pointer mobile can both toggle and persist the preferred mode", async ({

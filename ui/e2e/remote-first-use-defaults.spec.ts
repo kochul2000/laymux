@@ -14,6 +14,26 @@ async function open(page: Page) {
   await page.setContent(remoteClientMarkupWithoutXterm());
 }
 
+test("저장된 /clr 사용자 키와 배치는 자동 교체하지 않는다", async ({ page }) => {
+  const saved = {
+    userKeys: [{ id: "u-defaultclear", label: "/clr", seq: "/clear", submit: true }],
+    zones: {
+      main: { left: ["soft:u-defaultclear"], center: [], right: ["keys"] },
+      expanded: { left: [], center: [], right: [] },
+    },
+  };
+  await page.addInitScript(({ key, saved }) => localStorage.setItem(key, JSON.stringify(saved)), {
+    key: keybarKey,
+    saved,
+  });
+  await open(page);
+  await expect(page.locator('#mainActionRow [data-key="u-defaultclear"]')).toHaveText("/clr");
+  await expect(page.locator('#mainActionRow [data-key="clearPane"]')).toHaveCount(0);
+  expect(
+    await page.evaluate((key) => JSON.parse(localStorage.getItem(key)!), keybarKey),
+  ).toMatchObject(saved);
+});
+
 test("fresh Remote device starts in composer with the requested controls", async ({ page }) => {
   await open(page);
 
@@ -25,8 +45,8 @@ test("fresh Remote device starts in composer with the requested controls", async
       .evaluateAll((elements) =>
         elements.map((element) => (element as HTMLElement).dataset.inputAction),
       ),
-  ).toEqual(["soft:c-c", "soft:q", "soft:esc", "soft:u-defaultclear", "keyboard", "keys", "send"]);
-  await expect(page.locator('#mainActionRow [data-key="u-defaultclear"]')).toHaveText("/clr");
+  ).toEqual(["soft:c-c", "soft:q", "soft:esc", "soft:clearPane", "keyboard", "keys", "send"]);
+  await expect(page.locator('#mainActionRow [data-key="clearPane"]')).toHaveText("Alt+L");
   await expect(page.locator('#mainActionRow [data-input-action="soft:u-p1-mg"]')).toHaveCount(0);
   expect(await page.evaluate((key) => localStorage.getItem(key), displayKey)).toBeNull();
   expect(await page.evaluate((key) => localStorage.getItem(key), keybarKey)).toBeNull();
@@ -147,7 +167,7 @@ test("missing and malformed preference data fall back to fresh-device defaults",
   );
   await open(page);
   await expect(page.locator("#inputModeToggle")).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator('#mainActionRow [data-key="u-defaultclear"]')).toHaveText("/clr");
+  await expect(page.locator('#mainActionRow [data-key="clearPane"]')).toHaveText("Alt+L");
   await expect(page.locator("#floatingControls .floating-control")).toHaveCount(2);
   await page.locator("#drawerSettingsButton").click();
   await expect(page.locator("#remoteMainButtonScale")).toHaveText("100%");
@@ -160,9 +180,7 @@ test("a saved empty custom-key list cannot leave a dangling default action", asy
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await open(page);
-  await expect(
-    page.locator('#mainActionRow [data-input-action="soft:u-defaultclear"]'),
-  ).toHaveCount(0);
+  await expect(page.locator('#mainActionRow [data-input-action="soft:clearPane"]')).toHaveCount(1);
   await expect(page.locator('#mainActionRow [data-input-action="soft:q"]')).toHaveCount(1);
   expect(errors.filter((message) => /reading 'label'|reading "label"/.test(message))).toEqual([]);
   expect(

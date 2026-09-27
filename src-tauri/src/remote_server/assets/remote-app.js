@@ -10925,6 +10925,7 @@ import {
           "c-u": { label: "^U", seq: "\x15", hint: "Ctrl+U (kill line)" },
           "c-t": { label: "^T", seq: "\x14", hint: "Ctrl+T (transpose)" },
           "c-l": { label: "^L", seq: "\x0c", hint: "Ctrl+L (clear screen)" },
+          clearPane: { label: "Alt+L", clearPane: true, hint: "Alt+L (clear pane)" },
           f1: { label: "F1", seq: "\x1bOP" },
           f2: { label: "F2", seq: "\x1bOQ" },
           f3: { label: "F3", seq: "\x1bOR" },
@@ -10943,7 +10944,7 @@ import {
           "navPad", "navPrev", "navNext", "notifRecent", "notifOldest", "q",
           "esc", "tab", "stab", "dpad", "up", "down", "left", "right", "home", "end",
           "enter", "bksp", "ins", "del", "pgup", "pgdn",
-          "c-c", "c-j", "c-u", "c-t", "c-l",
+          "c-c", "c-j", "c-u", "c-t", "c-l", "clearPane",
           "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
         ];
         const KEY_ID_SET = new Set(KEY_ORDER);
@@ -10955,6 +10956,7 @@ import {
           { id: "nav", name: "Navigation", keys: ["esc", "tab", "stab", "dpad", "up", "down", "left", "right", "home", "end"] },
           { id: "edit", name: "Editing", keys: ["q", "enter", "bksp", "ins", "del", "pgup", "pgdn"] },
           { id: "ctrl", name: "Ctrl keys", keys: ["c-c", "c-j", "c-u", "c-t", "c-l"] },
+          { id: "pane", name: "Pane actions", keys: ["clearPane"] },
           { id: "fn", name: "Function", keys: ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"] },
         ];
         // Every input action lives in one of the two visible rows, inside one of
@@ -10998,15 +11000,13 @@ import {
         const USER_KEY_LABEL_MAX = 8;
         const USER_KEY_SEQ_MAX = 32;
         const USER_KEY_MAX = 24;
-        const DEFAULT_USER_KEYS = Object.freeze([
-          Object.freeze({ id: "u-defaultclear", label: "/clr", seq: "/clear", submit: true }),
-        ]);
+        const DEFAULT_USER_KEYS = Object.freeze([]);
         const DEFAULT_KEYBAR = {
           expanded: false,
           userKeys: DEFAULT_USER_KEYS,
           zones: {
             main: {
-              left: ["soft:c-c", "soft:q", "soft:esc", "soft:u-defaultclear"],
+              left: ["soft:c-c", "soft:q", "soft:esc", "soft:clearPane"],
               center: [],
               right: ["keyboard", "keys", "send"],
             },
@@ -11407,6 +11407,10 @@ import {
         function sendKey(id, button = null) {
           const def = keyDef(id);
           if (!def) return;
+          if (def.clearPane) {
+            enqueueRemoteNavigation(() => runRemoteClear("pane"), button, { move: false });
+            return;
+          }
           if (def.nav) {
             enqueueNavStep(button, def.nav[0], def.nav[1]);
             return;
