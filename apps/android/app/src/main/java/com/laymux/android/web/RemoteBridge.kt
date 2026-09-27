@@ -8,6 +8,11 @@ class RemoteBridge(
     private val activity: MainActivity,
     private val documentGeneration: Long,
 ) {
+    /** Native environment only; UI policy stays in the PC-owned Remote document. */
+    @JavascriptInterface
+    fun isPhysicalKeyboardConnected(): Boolean =
+        activity.isPhysicalKeyboardConnected(documentGeneration)
+
     /**
      * Feature probe for scroll-top history expansion (ADR-0182). A Remote page
      * only adds `historyKib` to its output open record when this answers true,

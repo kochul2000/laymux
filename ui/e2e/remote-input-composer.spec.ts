@@ -1162,6 +1162,11 @@ test("physical keyboard shortcuts drive the lease-gated host actions (ADR-0269)"
 }) => {
   const remote = await installRemotePage(page, { coarse: true, storedMode: "composer" });
   await connect(page);
+  // ADR-0273: the optional Nav override is off for PC-binding coverage.
+  await openRemoteSettings(page);
+  await page.getByRole("tab", { name: "Input bar", exact: true }).click();
+  await page.locator("#useRemoteNavigationKeys").uncheck();
+  await page.locator("#navToggle").click();
   const editor = page.locator("#composerInput");
   await editor.fill("draft");
   const posted = (path: string) =>
@@ -1202,7 +1207,7 @@ test("physical keyboard shortcuts drive the lease-gated host actions (ADR-0269)"
 
 // A pane move that takes a moment to land, landing on terminal-2 (ADR-0269).
 async function delayDirectionLanding(page: Page, delayMs = 600) {
-  await page.route("**/remote/v1/navigation/direction", async (route) => {
+  await page.route(/\/remote\/v1\/navigation\/(direction|notification)/, async (route) => {
     await new Promise((resolve) => setTimeout(resolve, delayMs));
     await route.fulfill({
       json: {

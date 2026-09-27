@@ -158,6 +158,24 @@
                 <button id="settingsTabApp" class="settings-tab" type="button" role="tab" data-settings-panel="app" aria-controls="settingsPanelApp" aria-selected="false" tabindex="-1">App</button>
               </div>
               <div id="settingsPanelInputBar" class="settings-panel" role="tabpanel" data-settings-panel="inputBar" aria-labelledby="settingsTabInputBar">
+              <section class="nav-section" aria-label="Physical keyboard">
+                <h2 class="nav-section-title">Physical keyboard</h2>
+                <div id="physicalKeyboardStatus" class="nav-settings-status" role="status"></div>
+                <label class="nav-toggle-row" for="hideKeysWithKeyboard">
+                  <input id="hideKeysWithKeyboard" type="checkbox" checked />
+                  <span class="nav-toggle-name">Hide Keys with physical keyboard</span>
+                </label>
+                <label class="nav-toggle-row" for="useRemoteNavigationKeys">
+                  <input id="useRemoteNavigationKeys" type="checkbox" checked />
+                  <span class="nav-toggle-name">Use Remote Nav shortcuts</span>
+                </label>
+                <label class="nav-number-row" for="remoteNavigationModifiers">
+                  <span class="nav-number-copy">Nav shortcut</span>
+                  <select id="remoteNavigationModifiers" aria-label="Nav shortcut"></select>
+                </label>
+                <p class="nav-settings-status">↑ / ↓: previous / next pane. ← / →: recent / oldest unread alert. Replaces PC Alt and Ctrl+Alt arrow shortcuts while enabled, regardless of keyboard detection.</p>
+                <div id="remoteKeyboardSettingsStatus" class="nav-settings-status" role="status"></div>
+              </section>
               <section id="inputLayoutSection" class="nav-section" aria-label="Input bar">
               <h2 class="nav-section-title">Input bar</h2>
               <p class="settings-page-description">Tap a key to change its position. Changes apply to this device.</p>
@@ -190,6 +208,10 @@
               <div id="settingsPanelFloating" class="settings-panel" role="tabpanel" data-settings-panel="floating" aria-labelledby="settingsTabFloating" hidden>
                 <section class="nav-section" aria-label="Floating controls">
                   <h2 class="nav-section-title">Floating controls</h2>
+                  <label class="nav-toggle-row" for="hideFloatingWithKeyboard">
+                    <input id="hideFloatingWithKeyboard" type="checkbox" checked />
+                    <span class="nav-toggle-name">Hide floating controls with physical keyboard</span>
+                  </label>
                   <div class="nav-settings-status">Hold the center of a pad, then drag to move. Drag other buttons to move.</div>
                   <div id="floatingSettingsEditor" class="input-layout-editor"></div>
                 </section>
@@ -408,7 +430,8 @@
               <section id="keyboardShortcutsSection" class="nav-section" aria-label="Keyboard shortcuts">
               <h3 class="settings-group-title">Keyboard shortcuts</h3>
               <p class="settings-page-description">For a physical keyboard. Rebind them in PC Settings → Keybindings.</p>
-              <dl id="keyboardShortcutList" class="keyboard-shortcut-list"></dl>
+                <dl id="keyboardShortcutList" class="keyboard-shortcut-list"></dl>
+                <p id="remoteNavigationShortcutNotice" class="nav-settings-status"></p>
               </section>
               <section class="nav-section" aria-label="Connection">
                 <button id="drawerConnectionButton" class="settings-connection-button" type="button" aria-label="Open connection" title="Connection">

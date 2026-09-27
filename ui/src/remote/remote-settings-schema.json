@@ -2,6 +2,31 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "hideFloatingWithKeyboard": {
+      "type": "boolean",
+      "default": true,
+      "applyMode": "live",
+      "description": "Android 앱에서 물리 키보드 연결을 확인하면 플로팅을 자동으로 숨깁니다. 원래 배치·활성 상태는 보존하며 분리 시 복원합니다. Keys 자동 숨김과 독립이고 감지 미지원 브라우저에서는 적용하지 않습니다."
+    },
+    "hideKeysWithKeyboard": {
+      "type": "boolean",
+      "default": true,
+      "applyMode": "live",
+      "description": "물리 키보드 연결 시 Keys 행과 토글을 자동으로 숨깁니다. 원래 펼침 상태를 보존하며 분리 시 복원합니다. 플로팅 자동 숨김과 독립이고 감지 미지원 브라우저에서는 적용하지 않습니다."
+    },
+    "useRemoteNavigationKeys": {
+      "type": "boolean",
+      "default": true,
+      "applyMode": "live",
+      "description": "Remote에서 보조키+방향키를 Nav 패드 동작으로 처리합니다. 물리 키보드 감지와 무관하며 기존 PC용 Alt/Ctrl+Alt 방향키 전달을 막습니다. 끄면 기존 키 입력 동작을 유지합니다."
+    },
+    "remoteNavigationModifiers": {
+      "type": "string",
+      "default": "alt",
+      "enum": ["alt", "ctrlAlt", "altShift", "ctrlShift"],
+      "applyMode": "live",
+      "description": "Remote Nav 방향키의 보조키입니다. alt=Alt, ctrlAlt=Ctrl+Alt, altShift=Alt+Shift, ctrlShift=Ctrl+Shift. 위/아래는 pane 이전/다음, 왼쪽/오른쪽은 최근/가장 오래된 미확인 알림입니다. useRemoteNavigationKeys=true일 때 적용합니다."
+    },
     "floatingEnabled": {
       "type": "boolean",
       "default": true,

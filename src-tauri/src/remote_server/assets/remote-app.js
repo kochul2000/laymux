@@ -1,6 +1,11 @@
 import { createRemoteUpdateDialog } from "../../../../ui/src/remote/remote-update-dialog.js";
 import { createRemoteSettingsBridge } from "../../../../ui/src/remote/remote-settings-mcp.js";
 import { createRemoteMemo } from "../../../../ui/src/remote/remote-memo.js";
+import {
+  DEFAULT_REMOTE_KEYBOARD_SETTINGS, REMOTE_NAV_MODIFIERS, REMOTE_NAV_TARGETS,
+  normalizeRemoteNavigationModifiers, readPhysicalKeyboardConnected,
+  remoteKeyboardVisibility, resolveRemoteNavigationKey,
+} from "../../../../ui/src/remote/remote-keyboard.js";
 import { installRemoteToolSwipes, nextRemoteTool, normalizeToolSwipeRightAction } from "../../../../ui/src/remote/remote-tool-swipe.js";
 import { createComposerEditor } from "../../../../ui/src/remote/composer-editor.js";
 import { isShellOwnedCombo, keybindingMatchesEvent, resolveKeybindingFrom } from "../../../../ui/src/lib/keybinding-core.ts";
@@ -195,6 +200,16 @@ import {
         const swipeCloseDrawersKey = "laymux.remote.swipeCloseDrawers";
         const rightSwipeViewKey = "laymux.remote.rightSwipeView";
         const toolSwipeRightActionKey = "laymux.remote.toolSwipeRightAction";
+        const hideFloatingWithKeyboardKey = "laymux.remote.hideFloatingWithKeyboard";
+        const hideKeysWithKeyboardKey = "laymux.remote.hideKeysWithKeyboard";
+        const useRemoteNavigationKeysKey = "laymux.remote.useRemoteNavigationKeys";
+        const remoteNavigationModifiersKey = "laymux.remote.remoteNavigationModifiers";
+        const keyboardSettingKeys = {
+          hideFloatingWithKeyboard: hideFloatingWithKeyboardKey,
+          hideKeysWithKeyboard: hideKeysWithKeyboardKey,
+          useRemoteNavigationKeys: useRemoteNavigationKeysKey,
+          remoteNavigationModifiers: remoteNavigationModifiersKey,
+        };
         const spatialExcludedPaneIdsKey = "laymux.remote.spatialExcludedPaneIds";
         const spatialExcludedWorkspaceIdsKey = "laymux.remote.spatialExcludedWorkspaceIds";
         // Secret resume capability issued by a successful claim. It lives in
@@ -562,6 +577,15 @@ import {
         let swipeCloseDrawersEnabled = loadLocalToggle(swipeCloseDrawersKey);
         let rightSwipeView = loadRightSwipeView();
         let toolSwipeRightAction = loadToolSwipeRightAction();
+        let remoteKeyboardSettings = { ...DEFAULT_REMOTE_KEYBOARD_SETTINGS };
+        for (const [field, storageKey] of Object.entries(keyboardSettingKeys)) {
+          try {
+            remoteKeyboardSettings[field] = field === "remoteNavigationModifiers"
+              ? normalizeRemoteNavigationModifiers(localStorage.getItem(storageKey))
+              : loadLocalToggle(storageKey);
+          } catch { /* Use the defaults if device storage is unavailable. */ }
+        }
+        let physicalKeyboardConnected = null;
         let composerHiddenAgentInputLines = loadComposerHiddenAgentInputLines();
         let composerAgentInputHideFrame = null;
         let composerAgentInputHideRequest = null;
@@ -702,6 +726,8 @@ import {
           window.LaymuxOutputTransport &&
           typeof window.LaymuxOutputTransport.postMessage === "function";
         const localAppMode = searchParams.get("localApp") === "1" || hashParams.get("localApp") === "1";
+        physicalKeyboardConnected = androidE2eMode
+          ? readPhysicalKeyboardConnected(window.LaymuxNative) : null;
         const autoConnectMode = searchParams.get("autoConnect") === "1" || hashParams.get("autoConnect") === "1";
         const clientNameFromParams = searchParams.get("clientName") || hashParams.get("clientName");
         tokenInput.value =
@@ -9078,6 +9104,10 @@ import {
           if (event.defaultPrevented) return;
           if (event.isComposing || composerIsComposing || event.keyCode === 229) return;
           if (remoteOverlayOpen() || isForeignEditableTarget(event.target)) return;
+          if (remoteKeyboardSettings.useRemoteNavigationKeys &&
+              (navigationPanel.contains(event.target) || !navScrim.hidden)) return;
+          handleRemoteNavigationKey(event);
+          if (event.defaultPrevented) return;
           // As on the desktop terminal, Ctrl+letter/digit typed into the
           // terminal belongs to the shell even when an IDE action is bound to
           // it; only terminal-scoped actions (zoom) keep it.
@@ -10968,12 +10998,7 @@ import {
         // 4-way nav flick mapping — mirrors the desktop shortcuts: vertical =
         // spatial pane step (Ctrl+Alt+Up/Down territory), horizontal = alert
         // step (Ctrl+Alt+Left/Right).
-        const NAV_FLICK_TARGETS = {
-          up: ["spatial", "prev"],
-          down: ["spatial", "next"],
-          left: ["notification", "recent"],
-          right: ["notification", "oldest"],
-        };
+        const NAV_FLICK_TARGETS = REMOTE_NAV_TARGETS;
         const KEY_FLICK_THRESHOLD_PX = 18;
         const KEY_ORDER_HOLD_MS = 180;
         // Press-and-hold auto-repeat for cursor movement, the same shape a
@@ -11423,14 +11448,18 @@ import {
             repeatTimer = 0;
             heldPointerId = null;
           };
+          const repeat = () => {
+            if (!button.isConnected || button.disabled || button.closest("[hidden]")) { stop(); return; }
+            send();
+          };
           button.addEventListener("pointerdown", (event) => {
             if (button.disabled || !event.isPrimary || event.button !== 0) return;
             stop();
             heldPointerId = event.pointerId;
             button.setPointerCapture(event.pointerId);
             delayTimer = window.setTimeout(() => {
-              send();
-              repeatTimer = window.setInterval(send, KEY_REPEAT_INTERVAL_MS);
+              repeat();
+              if (heldPointerId !== null) repeatTimer = window.setInterval(repeat, KEY_REPEAT_INTERVAL_MS);
             }, KEY_REPEAT_DELAY_MS);
           });
           const release = (event) => {
@@ -11508,11 +11537,11 @@ import {
             if (!direction) return;
             gesture.delayTimer = window.setTimeout(() => {
               if (!gesture) return;
-              if (!button.isConnected || button.disabled) { stopFlickRepeat(); return; }
+              if (!button.isConnected || button.disabled || button.closest("[hidden]")) { stopFlickRepeat(); return; }
               onDirection(direction);
               gesture.repeatTimer = window.setInterval(
                 () => {
-                  if (!button.isConnected || button.disabled) { stopFlickRepeat(); return; }
+                  if (!button.isConnected || button.disabled || button.closest("[hidden]")) { stopFlickRepeat(); return; }
                   onDirection(direction);
                 },
                 KEY_REPEAT_INTERVAL_MS,
@@ -11753,6 +11782,7 @@ import {
           for (const button of document.querySelectorAll("[data-action-proxy]")) {
             const actionId = button.dataset.actionProxy;
             const source = fixedInputActionElement(actionId);
+            button.hidden = actionId === "keys" && !keyboardControlVisibility().keys;
             if (actionProxyMarkup.get(button) !== source.innerHTML) {
               button.replaceChildren(...[...source.childNodes].map((child) => child.cloneNode(true)));
               for (const child of button.querySelectorAll("[id]")) child.removeAttribute("id");
@@ -11882,8 +11912,10 @@ import {
             document.querySelector(".app").append(layer);
           }
           layer.replaceChildren();
+          const visibility = keyboardControlVisibility();
           for (const { id, item, actionId, pad } of floatingEntries()) {
-            if (!keyBarConfig.floating.enabled || !item.enabled) continue;
+            if (!keyBarConfig.floating.enabled || !item.enabled || !visibility.floating ||
+                (actionId === "keys" && !visibility.keys)) continue;
             const element = document.createElement("div");
             element.className = "floating-control";
             element.dataset.floatingId = id;
@@ -12021,18 +12053,20 @@ import {
         function syncInputActionVisibility() {
           if (!keyBarConfig) return;
           const composerMode = currentInputMode() === "composer";
+          const visibility = keyboardControlVisibility();
           for (const actionId of FIXED_INPUT_ACTION_IDS) {
             if (ownProperty(HEADER_INPUT_ACTIONS, actionId)) continue;
             const element = fixedInputActionElement(actionId);
             const placed = inputActionZone(actionId) !== "hidden";
-            element.hidden = !placed || (actionId === "send" && !composerMode);
+            element.hidden = !placed || (actionId === "send" && !composerMode) ||
+              (actionId === "keys" && !visibility.keys);
           }
           const keysVisible = inputActionZone("keys") === "main" || hasFloatingKeysToggle();
           if (!keysVisible && keyBarConfig.expanded) {
             keyBarConfig.expanded = false;
             saveKeyBarConfig();
           }
-          keyBar.hidden = !keysVisible || !keyBarConfig.expanded;
+          keyBar.hidden = !keysVisible || !keyBarConfig.expanded || !visibility.keys;
           keyBarToggleButton.classList.toggle("active", !keyBar.hidden);
           keyBarToggleButton.setAttribute("aria-pressed", keyBar.hidden ? "false" : "true");
           syncExpandedRowEmptyState();
@@ -13009,6 +13043,58 @@ import {
           scheduleTerminalFit();
         }
 
+        function keyboardControlVisibility() {
+          return remoteKeyboardVisibility(physicalKeyboardConnected, remoteKeyboardSettings);
+        }
+
+        function renderRemoteKeyboardPreferences() {
+          for (const [key, value] of Object.entries(remoteKeyboardSettings)) {
+            if (key === "remoteNavigationModifiers") $(key).value = value;
+            else $(key).checked = value;
+          }
+          $("remoteNavigationModifiers").disabled = !remoteKeyboardSettings.useRemoteNavigationKeys;
+          $("remoteNavigationShortcutNotice").textContent = remoteKeyboardSettings.useRemoteNavigationKeys
+            ? `Remote Nav uses ${REMOTE_NAV_MODIFIERS[remoteKeyboardSettings.remoteNavigationModifiers].label} + arrows. PC Alt / Ctrl+Alt arrows above are overridden. Change this in Input bar settings.`
+            : "Remote Nav is off. The PC keybindings above apply.";
+          $("physicalKeyboardStatus").textContent = physicalKeyboardConnected === null
+            ? "Automatic keyboard detection requires the updated Android app."
+            : physicalKeyboardConnected ? "Physical keyboard connected." : "No physical keyboard connected.";
+        }
+
+        function applyRemoteKeyboardPreferences() {
+          const wasHidden = keyBar.hidden;
+          hideKeyFlickHint();
+          syncInputActionVisibility();
+          renderFloatingControls();
+          updateKeyBarControls();
+          renderRemoteKeyboardPreferences();
+          if (wasHidden !== keyBar.hidden) rebaseTerminalFit();
+        }
+
+        function refreshPhysicalKeyboard() {
+          const next = androidE2eMode ? readPhysicalKeyboardConnected(window.LaymuxNative) : null;
+          if (next === physicalKeyboardConnected) return;
+          physicalKeyboardConnected = next;
+          applyRemoteKeyboardPreferences();
+        }
+
+        function handleRemoteNavigationKey(event) {
+          if (!leaseId || event.defaultPrevented || composerIsComposing ||
+              remoteOverlayOpen() || !composerStarEditorScrim.hidden ||
+              (!remoteNavigationPinnedForViewport() && navToggleButton.getAttribute("aria-expanded") === "true")) return;
+          const target = event.target;
+          if (target instanceof Element && (navigationPanel.contains(target) ||
+              (target.closest("input, textarea, select, [contenteditable]") &&
+               !composerInput.contains(target) && !terminalHost.contains(target)))) return;
+          const action = resolveRemoteNavigationKey(event, remoteKeyboardSettings);
+          if (!action) return;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          if (event.type === "keydown" && !event.repeat && !action.blocked) {
+            enqueueNavStep(null, action.kind, action.direction);
+          }
+        }
+
         // Lowest row of the fitted screen that still carries live output: the
         // cursor row, or a lower non-blank row when a TUI draws below the
         // cursor (Claude Code's hint lines sit under its prompt). Everything
@@ -13405,6 +13491,41 @@ import {
         setKeyBarVisible(keyBarConfig.expanded, false);
         renderKeyPopover();
         installSettingsTabs();
+        for (const [value, binding] of Object.entries(REMOTE_NAV_MODIFIERS)) {
+          const option = document.createElement("option");
+          option.value = value;
+            option.textContent = binding.label;
+          $("remoteNavigationModifiers").append(option);
+        }
+        renderRemoteKeyboardPreferences();
+        for (const [key, storageKey] of Object.entries(keyboardSettingKeys)) {
+          $(key).addEventListener("change", () => {
+            remoteKeyboardSettings[key] = key === "remoteNavigationModifiers"
+              ? normalizeRemoteNavigationModifiers($(key).value) : $(key).checked;
+            try {
+              localStorage.setItem(storageKey, typeof remoteKeyboardSettings[key] === "boolean"
+                ? (remoteKeyboardSettings[key] ? "1" : "0") : remoteKeyboardSettings[key]);
+              $("remoteKeyboardSettingsStatus").textContent = "Saved on this device.";
+            } catch {
+              $("remoteKeyboardSettingsStatus").textContent = "Applied for now; device storage is unavailable.";
+            }
+            applyRemoteKeyboardPreferences();
+          });
+        }
+        if (androidE2eMode) {
+          window.laymuxPhysicalKeyboard = {
+            onChanged(connected) {
+              if (typeof connected !== "boolean" || physicalKeyboardConnected === connected) return;
+              physicalKeyboardConnected = connected;
+              applyRemoteKeyboardPreferences();
+            },
+          };
+        }
+        window.addEventListener("pageshow", refreshPhysicalKeyboard);
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") refreshPhysicalKeyboard();
+        });
+        window.addEventListener("keyup", handleRemoteNavigationKey, true);
         const actionProxyObserver = new MutationObserver(syncActionProxies);
         for (const actionId of FIXED_INPUT_ACTION_IDS) {
           actionProxyObserver.observe(fixedInputActionElement(actionId), {
@@ -13463,6 +13584,7 @@ import {
         const remoteSettingsAgentBridge = createRemoteSettingsBridge(
           () => ({
             ...remoteDisplaySettings,
+            ...remoteKeyboardSettings,
             floatingEnabled: keyBarConfig.floating.enabled,
             floatingButtons: structuredClone(keyBarConfig.floating.buttons),
             inputBarZones: structuredClone(keyBarConfig.zones),
@@ -13497,6 +13619,7 @@ import {
               rightSwipeView: rightSwipeViewKey,
               toolSwipeRightAction: toolSwipeRightActionKey,
               ...headerIconKeys,
+              ...keyboardSettingKeys,
             };
             const writes = [];
             const floatingChanged = Object.keys(patch).some(key => ["floatingEnabled", "floatingButtons", "inputBarZones", "inputBarUserKeys"].includes(key) || Object.hasOwn(floatingSettingFields, key));
@@ -13542,6 +13665,7 @@ import {
               throw error;
             }
             applyRemoteDisplaySettings(display);
+            remoteKeyboardSettings = Object.fromEntries(Object.keys(keyboardSettingKeys).map(key => [key, candidate[key]]));
             if (floatingChanged) {
               keyBarConfig = updatedKeyBar;
               rebuildUserKeyIndex();
@@ -13571,6 +13695,7 @@ import {
             swipeCloseDrawersToggle.checked = swipeCloseDrawersEnabled;
             rightSwipeViewSelect.value = rightSwipeView;
             renderToolSwipePreferences();
+            applyRemoteKeyboardPreferences();
             if (skipsChanged) {
               spatialExcludedPaneIds = new Set(candidate.spatialExcludedPaneIds);
               spatialExcludedWorkspaceIds = new Set(candidate.spatialExcludedWorkspaceIds);
@@ -14299,6 +14424,8 @@ import {
           window.removeEventListener("pointerdown", handleLinkChipOutsidePointerDown, true);
           window.removeEventListener("keydown", handleLinkChipKeyDown, true);
           window.removeEventListener("keydown", handleRemoteShortcutKeyDown, true);
+          window.removeEventListener("keyup", handleRemoteNavigationKey, true);
+          window.removeEventListener("pageshow", refreshPhysicalKeyboard);
           clearPathLinkSelection();
           closeFileViewer();
           closeRemoteGithubView();
