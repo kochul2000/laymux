@@ -16,6 +16,7 @@
  *   a user override collides with a document-level shortcut.
  */
 
+import { isShellOwnedCombo } from "./keybinding-core";
 import { DEFAULT_KEYBINDINGS, matchesKeybinding } from "./keybinding-registry";
 
 /**
@@ -45,11 +46,6 @@ const PASS_THROUGH_WHEN_MODIFIED_ACTION_IDS: readonly string[] = DEFAULT_KEYBIND
 const TERMINAL_OWNED_ACTION_IDS: readonly string[] = DEFAULT_KEYBINDINGS.filter(
   (d) => d.group === "Terminal",
 ).map((d) => d.id);
-
-/** Ctrl+single letter/digit (no Alt/Shift) is shell territory — never pass through. */
-function isShellOwnedCombo(e: KeyboardEvent): boolean {
-  return e.ctrlKey && !e.altKey && !e.shiftKey && /^[a-zA-Z0-9]$/.test(e.key);
-}
 
 export function isLxShortcut(e: KeyboardEvent): boolean {
   if (isShellOwnedCombo(e)) return false;

@@ -286,9 +286,10 @@ ADR 이 필요한 대표 기준:
 | [0266](0266-remote-file-open-on-device.md) | Remote 파일 열기는 원본 바이트를 기기 뷰어에 전달한다 | Accepted |
 | [0267](0267-codex-live-session-age-policy.md) | 프로세스 기록으로 확인한 현재 Codex 대화는 파일 나이로 만료시키지 않는다 | Accepted |
 | [0268](0268-remote-ime-shares-composition-reconciliation.md) | Remote Direct 입력도 공통 xterm 조합 확정 처리를 사용한다 | Accepted |
-| [0269](0269-remote-physical-keyboard-shortcuts.md) | Remote 물리 키보드는 PC 키바인딩을 공유하고, Composer 키만 PC·Remote 로 나눈다 (0036 일부 대체) | Accepted |
+| [0269](0269-remote-physical-keyboard-shortcuts.md) | Remote 물리 키보드는 PC 키바인딩을 공유하고, Composer 키만 PC·Remote 로 나눈다 (0036 일부 대체) | Accepted (partially superseded by [0272](0272-physical-key-fallback-never-takes-typed-text.md)) |
 | [0270](0270-codex-status-checkpoint-probe.md) | Codex 종료 복원점은 선택적으로 `/status`로 확인한다 | Accepted |
 | [0271](0271-remote-requested-desktop-writes-carry-lease.md) | Remote 가 요청한 PC 실행 동작은 lease 로 쓴다 | Accepted |
+| [0272](0272-physical-key-fallback-never-takes-typed-text.md) | 물리 키 폴백은 사용자가 치는 문자를 가로채지 않는다 (0269 일부 대체) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

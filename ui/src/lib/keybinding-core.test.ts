@@ -7,7 +7,7 @@ import {
 
 function key(
   keyValue: string,
-  opts: { ctrl?: boolean; alt?: boolean; shift?: boolean; code?: string } = {},
+  opts: { ctrl?: boolean; alt?: boolean; shift?: boolean; code?: string; altGraph?: boolean } = {},
 ): KeyboardEvent {
   return {
     key: keyValue,
@@ -15,6 +15,7 @@ function key(
     ctrlKey: opts.ctrl ?? false,
     altKey: opts.alt ?? false,
     shiftKey: opts.shift ?? false,
+    getModifierState: (name: string) => name === "AltGraph" && (opts.altGraph ?? false),
   } as unknown as KeyboardEvent;
 }
 
@@ -47,19 +48,57 @@ describe("keybinding-core", () => {
     });
   });
 
-  describe("keybindingMatchesEvent — e.code fallback (ADR-0269 §8)", () => {
-    it("matches Mac Option+L (e.key = ¬) through e.code", () => {
-      expect(keybindingMatchesEvent("Alt+L", key("¬", { alt: true, code: "KeyL" }))).toBe(true);
-    });
-
+  // ADR-0272 (narrowing ADR-0269 §8): the physical-key fallback may never take
+  // a character the user is typing.
+  describe("keybindingMatchesEvent — e.code fallback only when no text is typed", () => {
     it("matches a Korean IME letter through e.code", () => {
       expect(keybindingMatchesEvent("Alt+L", key("ㅣ", { alt: true, code: "KeyL" }))).toBe(true);
+      expect(
+        keybindingMatchesEvent("Ctrl+Alt+L", key("ㅣ", { ctrl: true, alt: true, code: "KeyL" })),
+      ).toBe(true);
     });
 
-    it("matches an AZERTY digit row symbol through e.code", () => {
+    it("matches a Ctrl-only chord on a non-Latin layout (Russian Ctrl+С)", () => {
+      expect(keybindingMatchesEvent("Ctrl+C", key("с", { ctrl: true, code: "KeyC" }))).toBe(true);
+    });
+
+    it("matches a dead key (no character yet) through e.code", () => {
+      expect(keybindingMatchesEvent("Alt+E", key("Dead", { alt: true, code: "KeyE" }))).toBe(true);
+    });
+
+    // Windows reports AltGr as Ctrl+Alt: these are characters, not shortcuts.
+    it.each([
+      ["German AltGr+7 {", "Ctrl+Alt+7", "{", "Digit7"],
+      ["French AltGr+5 [", "Ctrl+Alt+5", "[", "Digit5"],
+      ["Polish AltGr+L ł", "Ctrl+Alt+L", "ł", "KeyL"],
+      ["Hungarian AltGr+W |", "Ctrl+Alt+W", "|", "KeyW"],
+    ])("never takes Windows AltGr text: %s", (_name, combo, keyValue, code) => {
+      expect(keybindingMatchesEvent(combo, key(keyValue, { ctrl: true, alt: true, code }))).toBe(
+        false,
+      );
       expect(
-        keybindingMatchesEvent("Ctrl+Alt+1", key("&", { ctrl: true, alt: true, code: "Digit1" })),
-      ).toBe(true);
+        keybindingMatchesEvent(
+          combo,
+          key(keyValue, { ctrl: true, alt: true, code, altGraph: true }),
+        ),
+      ).toBe(false);
+    });
+
+    // Mac Option types characters; which one depends on the layout.
+    it.each([
+      ["German Mac Option+L @", "@"],
+      ["US Mac Option+L ¬", "¬"],
+      ["Polish Mac Option+L ł", "ł"],
+    ])("never takes Mac Option text: %s", (_name, keyValue) => {
+      expect(keybindingMatchesEvent("Alt+L", key(keyValue, { alt: true, code: "KeyL" }))).toBe(
+        false,
+      );
+    });
+
+    it("never uses e.code under AltGraph, even with a Ctrl-only report", () => {
+      expect(
+        keybindingMatchesEvent("Ctrl+L", key("ł", { ctrl: true, code: "KeyL", altGraph: true })),
+      ).toBe(false);
     });
 
     it("keeps a Latin e.key authoritative (Dvorak Ctrl+J on the physical C key)", () => {
@@ -75,7 +114,7 @@ describe("keybinding-core", () => {
 
     it("still requires the exact modifier set", () => {
       expect(
-        keybindingMatchesEvent("Alt+L", key("¬", { alt: true, shift: true, code: "KeyL" })),
+        keybindingMatchesEvent("Alt+L", key("ㅣ", { alt: true, shift: true, code: "KeyL" })),
       ).toBe(false);
     });
 

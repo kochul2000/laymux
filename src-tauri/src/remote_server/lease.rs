@@ -1797,6 +1797,22 @@ mod tests {
         assert!(state.reclaim_lockout_until.is_none());
     }
 
+    // ADR-0269/0271: the Remote clear and direction routes rely on this gate.
+    #[test]
+    #[serial]
+    fn require_active_lease_rejects_missing_empty_and_stale_leases() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env_guard = isolate_settings_dir(dir.path());
+        save_remote_settings(true, "token");
+        let state = state_with_active_lease("lease-1");
+
+        for lease_id in [None, Some(""), Some("lease-stale")] {
+            let response = require_active_lease(&state, lease_id).unwrap_err();
+            assert_eq!(response.status(), StatusCode::CONFLICT, "{lease_id:?}");
+        }
+        assert!(require_active_lease(&state, Some("lease-1")).is_ok());
+    }
+
     #[test]
     #[serial]
     fn remote_status_keeps_active_lease_when_enabled_with_empty_token() {

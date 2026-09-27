@@ -3,7 +3,7 @@ import { createRemoteSettingsBridge } from "../../../../ui/src/remote/remote-set
 import { createRemoteMemo } from "../../../../ui/src/remote/remote-memo.js";
 import { installRemoteToolSwipes, nextRemoteTool, normalizeToolSwipeRightAction } from "../../../../ui/src/remote/remote-tool-swipe.js";
 import { createComposerEditor } from "../../../../ui/src/remote/composer-editor.js";
-import { keybindingMatchesEvent, resolveKeybindingFrom } from "../../../../ui/src/lib/keybinding-core.ts";
+import { isShellOwnedCombo, keybindingMatchesEvent, resolveKeybindingFrom } from "../../../../ui/src/lib/keybinding-core.ts";
 import { readPathLinkSelection, readPathLinkLines, mapPathLinkParts, pathLinkPartsCurrent, PATH_LINK_CONTEXT_ROWS } from "../../../../ui/src/lib/path-link-lines.ts";
 import {
   commandStatusIconName,
@@ -8915,7 +8915,7 @@ import {
             label: "Clear this terminal",
             needsLease: true,
             run: () => {
-              runRemoteClear("pane");
+              enqueueRemoteNavigation(() => runRemoteClear("pane"));
               return true;
             },
           },
@@ -8924,7 +8924,7 @@ import {
             label: "Clear workspace terminals",
             needsLease: true,
             run: () => {
-              runRemoteClear("workspace");
+              enqueueRemoteNavigation(() => runRemoteClear("workspace"));
               return true;
             },
           },
@@ -9067,8 +9067,14 @@ import {
           if (event.defaultPrevented) return;
           if (event.isComposing || composerIsComposing || event.keyCode === 229) return;
           if (remoteOverlayOpen() || isForeignEditableTarget(event.target)) return;
+          // As on the desktop terminal, Ctrl+letter/digit typed into the
+          // terminal belongs to the shell even when an IDE action is bound to
+          // it; only terminal-scoped actions (zoom) keep it.
+          const shellOwned =
+            Boolean(terminal) && event.target === terminal.textarea && isShellOwnedCombo(event);
           for (const action of REMOTE_SHORTCUT_ACTIONS) {
             if (!remoteKeybindingMatches(event, action.id)) continue;
+            if (shellOwned && !action.id.startsWith("terminal.")) return;
             // An observer has no host to drive; the key keeps its usual path.
             if (action.needsLease && !leaseId) return;
             // A held key must not repeat host actions (a clear per repeat).
@@ -9144,7 +9150,9 @@ import {
 
         // pane.clearTerminal / workspace.clearTerminals: the PC owns what a
         // clear sends and when it is safe (ADR-0158, ADR-0137); this only asks.
-        function runRemoteClear(scope) {
+        // It runs on the navigation chain, so a clear pressed while a move is
+        // landing targets where the move lands, as on the desktop.
+        async function runRemoteClear(scope) {
           const workspaceId = activeRemoteWorkspaceId();
           const path =
             scope === "workspace"
@@ -9152,7 +9160,7 @@ import {
               : activeTerminalId && `/remote/v1/terminals/${encodeURIComponent(activeTerminalId)}/clear`;
           if (!leaseId || !path) return;
           setBusyStatus("Clearing…");
-          remoteFetch(path, { method: "POST", body: JSON.stringify({ leaseId }) })
+          await remoteFetch(path, { method: "POST", body: JSON.stringify({ leaseId }) })
             .then((data) => {
               const { message, error } = summarizeRemoteClear(scope, data);
               setStatus(message, error);
@@ -14114,7 +14122,7 @@ import {
 
           // (2) While autocomplete is open (non-empty draft, issue #505) it owns
           // Tab/Escape and, once a suggestion is navigated to, Enter/arrows. With
-          // no active selection it deliberately leaves Enter alone so plain Enter
+          // no active selection it deliberately leaves Enter alone so the Composer keys
           // still sends. This block sits BEFORE the Tab-open block so a non-empty
           // draft's Tab always accepts a suggestion, never opens the recall popup.
           if (autocompleteVisible && !composing && plainKey) {
@@ -14130,7 +14138,7 @@ import {
             if (event.key === "ArrowUp" && activeAutocompleteIndex >= 0) {
               event.preventDefault();
               // Leaving the list at the top (0 → −1) keeps it open but reselects
-              // the draft, restoring plain-Enter send.
+              // the draft, restoring the plain send/newline keys.
               composerAutocompleteIndex = activeAutocompleteIndex - 1;
               renderComposerSuggestions();
               return;

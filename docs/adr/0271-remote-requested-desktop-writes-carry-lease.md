@@ -29,5 +29,5 @@ PC 의 클리어 실행기(activity 별 입력, busy 정책, interrupt → settl
 ## Consequences
 
 - Remote Alt+L·Ctrl+Alt+L 이 PC 와 같은 클리어 결과를 낸다.
-- PC WebView 는 lease id 를 알면 Remote 로서 쓸 수 있다. lease id 는 해당 요청의 bridge params 로만 전달되고, 쓰기마다 현재 lease 와 대조된다.
+- PC WebView 는 활성 lease id 를 이미 알고 있다(remote-control 상태). 그래서 이 명령으로 Remote 로서 쓸 수 있다. PC WebView 는 원래 신뢰 범위라 권한 상승은 아니고, 쓰기마다 현재 lease 와 대조되므로 끊기거나 바뀐 lease 로는 쓰지 못한다. 실행기는 Remote 가 요청한 동작에서만 `remoteLeaseId` 를 쓴다.
 - 앞으로 Remote 가 PC 실행기를 부르는 새 동작도 같은 규칙을 따른다.

@@ -434,6 +434,8 @@ function keyTokenFromCode(code: string | undefined): string | null {
 }
 
 const LATIN_ALNUM_KEY = /^[A-Za-z0-9]$/;
+/** Hangul compatibility jamo: only a Korean IME emits these for a letter key. */
+const HANGUL_JAMO_KEY = /^[\u3131-\u318E]$/;
 
 interface KeyEventLike {
   key: string;
@@ -442,6 +444,34 @@ interface KeyEventLike {
   altKey: boolean;
   shiftKey: boolean;
   metaKey?: boolean;
+  getModifierState?: (key: string) => boolean;
+}
+
+/**
+ * True when the event's physical `e.code` letter/digit may stand in for a
+ * non-Latin `e.key` — i.e. the key press is not typing a character.
+ *
+ * - No character yet: a dead key or IME processing (`Dead`, `Process`, …).
+ * - A Korean IME letter: jamo never come from a modifier layer.
+ * - A Ctrl-only chord: Ctrl alone never types text (Russian Ctrl+С is Ctrl+C).
+ *
+ * Everything else is text: Windows reports AltGr as Ctrl+Alt (German AltGr+7
+ * = "{"), and Mac Option types layout characters (German Option+L = "@").
+ * Taking those as shortcuts would eat what the user is typing (ADR-0272).
+ */
+function physicalKeyMayStandIn(e: KeyEventLike): boolean {
+  if (e.getModifierState?.("AltGraph")) return false;
+  if (e.key.length > 1) return true;
+  if (HANGUL_JAMO_KEY.test(e.key)) return true;
+  return e.ctrlKey && !e.altKey;
+}
+
+/**
+ * Ctrl+single letter/digit (no Alt/Shift) is shell territory in a terminal:
+ * it stays with the shell even when a user binds an IDE action there.
+ */
+export function isShellOwnedCombo(e: KeyEventLike): boolean {
+  return e.ctrlKey && !e.altKey && !e.shiftKey && LATIN_ALNUM_KEY.test(e.key);
 }
 
 /**
@@ -451,10 +481,11 @@ interface KeyEventLike {
  * directional bindings like `pane.focus` = "Alt+Arrow"). Key comparison is
  * case-insensitive so hand-edited tokens like "up" or "pageup" still match.
  *
- * With Ctrl or Alt held, a non-Latin `e.key` (Mac Option+L = "¬", a Korean
- * IME letter, AZERTY "&" on the digit row) falls back to the physical
- * `e.code` letter/digit. A Latin letter/digit `e.key` stays authoritative so
- * layouts like Dvorak keep their meaning (ADR-0269 §8).
+ * With Ctrl or Alt held, a non-Latin `e.key` falls back to the physical
+ * `e.code` letter/digit only when the press types no character (see
+ * `physicalKeyMayStandIn`). A Latin letter/digit `e.key` stays authoritative
+ * so layouts like Dvorak keep their meaning (ADR-0269 §8, narrowed by
+ * ADR-0272).
  *
  * A combo cannot name Meta (Cmd/Win), so an event with Meta held never matches:
  * Cmd+Alt+Arrow stays the browser's tab switch instead of `Alt+Arrow`.
@@ -474,6 +505,7 @@ export function keybindingMatchesEvent(keys: string | undefined, e: KeyEventLike
   if (eventKey.toLowerCase() === wanted) return true;
 
   if (!(e.ctrlKey || e.altKey) || LATIN_ALNUM_KEY.test(e.key)) return false;
+  if (!physicalKeyMayStandIn(e)) return false;
   const codeKey = keyTokenFromCode(e.code);
   return codeKey !== null && codeKey.toLowerCase() === wanted;
 }
