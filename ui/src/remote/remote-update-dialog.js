@@ -1,9 +1,9 @@
 import { lifecycleCopy, lifecycleSteps, progressPercent } from "../lib/lifecycle-progress.ts";
 import "../components/ui/lifecycle.css";
-const { document, location, setTimeout, clearTimeout } = globalThis;
+const { document, setTimeout, clearTimeout } = globalThis;
 
 /** Same stages/copy as desktop, backed only by the host update snapshot. */
-export function createRemoteUpdateDialog({ check, install, getCanInstall, host = location.host }) {
+export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
   const copy = lifecycleCopy.en;
   const dialog = document.createElement("dialog");
   const backdrop = document.createElement("div");
@@ -75,7 +75,7 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall, host =
           ? "Update complete"
           : reconnectSince && installingObserved
             ? "Waiting for Laymux to restart"
-            : `PC update ? ${host}`,
+            : "Connected PC update",
       ),
     );
     const version = element("div", "lifecycle-version");
