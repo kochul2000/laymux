@@ -116,6 +116,13 @@ function dispatchKeydown(
   const keydown = new KeyboardEvent("keydown", { key, code, bubbles: true, cancelable: true });
   Object.defineProperty(keydown, "keyCode", { value: keyCode });
   textarea.dispatchEvent(keydown);
+  return keydown;
+}
+
+function dispatchKeyup(textarea: HTMLTextAreaElement, key: string, code: string, keyCode: number) {
+  const keyup = new KeyboardEvent("keyup", { key, code, bubbles: true });
+  Object.defineProperty(keyup, "keyCode", { value: keyCode });
+  textarea.dispatchEvent(keyup);
 }
 
 const flushEventLoop = () => new Promise((resolve) => setTimeout(resolve, 5));
@@ -450,4 +457,392 @@ describe.each([
 
     expect(emitted.join("")).toBe("2");
   });
+
+  it("does not replay a composition after Space keydown and native default insertion", async () => {
+    const { emitted, textarea } = openTerminal();
+    startComposition(textarea, "이미");
+    await flushEventLoop();
+
+    const keydown = dispatchKeydown(textarea, " ", "Space", 32);
+    const keypress = dispatchKeypress(textarea, " ");
+    // jsdom does not apply the browser's keypress default action. A physical
+    // Space can remain in the textarea after xterm already forwarded that key.
+    if (!keydown.defaultPrevented && !keypress.defaultPrevented) {
+      textarea.value += " ";
+      textarea.dispatchEvent(
+        new InputEvent("input", { data: " ", inputType: "insertText", bubbles: true }),
+      );
+    }
+    endComposition(textarea, "이미");
+    await flushEventLoop();
+
+    expect(emitted.join("")).toBe("이미 ");
+  });
+
+  it("does not restore a committed word after Enter clears the textarea", async () => {
+    const { emitted, textarea } = openTerminal();
+    startComposition(textarea, "이미");
+    await flushEventLoop();
+
+    dispatchKeydown(textarea, "Enter", "Enter", 13);
+    expect(textarea.value).toBe("");
+    endComposition(textarea, "이미");
+    await flushEventLoop();
+
+    expect(emitted.join("")).toBe("이미\r");
+  });
+
+  it("preserves the unsent suffix in a later composition commit", async () => {
+    const { emitted, textarea } = openTerminal();
+    startComposition(textarea, "한");
+    await flushEventLoop();
+
+    dispatchKeydown(textarea, "ArrowRight", "ArrowRight", 39);
+    textarea.value = "한글";
+    endComposition(textarea, "한글");
+    await flushEventLoop();
+
+    expect(emitted.join("")).toBe("한\x1b[C글");
+  });
+
+  it("preserves the same word in the next composition before the previous timer flushes", async () => {
+    const { emitted, textarea } = openTerminal();
+    startComposition(textarea, "이미");
+    await flushEventLoop();
+
+    dispatchKeydown(textarea, " ", "Space", 32);
+    dispatchKeypress(textarea, " ");
+    endComposition(textarea, "이미");
+    startComposition(textarea, "이미");
+    endComposition(textarea, "이미");
+    await flushEventLoop();
+
+    expect(emitted.join("")).toBe("이미 이미");
+  });
+
+  it("discards late compositionend after blur without swallowing the next physical key", async () => {
+    const { emitted, textarea } = openTerminal();
+    startComposition(textarea, "이미");
+    await flushEventLoop();
+
+    dispatchKeydown(textarea, " ", "Space", 32);
+    dispatchKeypress(textarea, " ");
+    textarea.blur();
+    endComposition(textarea, "이미");
+    textarea.focus();
+    const keydown = dispatchKeydown(textarea, "x", "KeyX", 88);
+    if (!keydown.defaultPrevented) dispatchKeypress(textarea, "x");
+    await flushEventLoop();
+
+    expect(emitted.join("")).toBe("이미 x");
+  });
+
+  it("does not deduplicate repeated physical keys outside a composition", async () => {
+    const { emitted, textarea } = openTerminal();
+    textarea.focus();
+    for (let index = 0; index < 2; index++) {
+      const keydown = dispatchKeydown(textarea, "a", "KeyA", 65);
+      if (!keydown.defaultPrevented) dispatchKeypress(textarea, "a");
+    }
+    await flushEventLoop();
+
+    expect(emitted.join("")).toBe("aa");
+  });
+
+  it.each([false, true])(
+    "reconciles input before native end with the provisional timer flushed=%s",
+    async (flushBeforeEnd) => {
+      const { emitted, textarea } = openTerminal();
+      startComposition(textarea, "한");
+      await flushEventLoop();
+
+      dispatchKeydown(textarea, "ArrowRight", "ArrowRight", 39);
+      textarea.value = "한글";
+      textarea.dispatchEvent(
+        new InputEvent("input", { data: "글", inputType: "insertText", bubbles: true }),
+      );
+      if (flushBeforeEnd) {
+        await flushEventLoop();
+        // An input-only continuation must be delivered without waiting for native end.
+        expect(emitted.join("")).toBe("한\x1b[C글");
+      }
+      endComposition(textarea, "한글");
+      await flushEventLoop();
+
+      expect(emitted.join("")).toBe("한\x1b[C글");
+    },
+  );
+
+  it.each([false, true])(
+    "preserves repeated suffix input with a timer between observations=%s",
+    async (flushBetweenInputs) => {
+      const { emitted, textarea } = openTerminal();
+      startComposition(textarea, "한");
+      await flushEventLoop();
+
+      dispatchKeydown(textarea, "ArrowRight", "ArrowRight", 39);
+      for (const text of ["한글", "한글글"]) {
+        textarea.value = text;
+        textarea.dispatchEvent(
+          new InputEvent("input", { data: "글", inputType: "insertText", bubbles: true }),
+        );
+        if (flushBetweenInputs) await flushEventLoop();
+      }
+      endComposition(textarea, "한글글");
+      await flushEventLoop();
+
+      expect(emitted.join("")).toBe("한\x1b[C글글");
+    },
+  );
+
+  it("preserves ordinary physical text between Enter and the late native end", async () => {
+    const { emitted, textarea } = openTerminal();
+    startComposition(textarea, "이미");
+    await flushEventLoop();
+
+    dispatchKeydown(textarea, "Enter", "Enter", 13);
+    for (let index = 0; index < 2; index++) {
+      const keydown = dispatchKeydown(textarea, "a", "KeyA", 65);
+      if (!keydown.defaultPrevented) dispatchKeypress(textarea, "a");
+    }
+    endComposition(textarea, "이미");
+    await flushEventLoop();
+
+    expect(emitted.join("")).toBe("이미\raa");
+  });
+
+  it.each([false, true])(
+    "preserves input-only text after Enter clears the textarea with a timer before end=%s",
+    async (flushBeforeEnd) => {
+      const { emitted, textarea } = openTerminal();
+      startComposition(textarea, "이미");
+      await flushEventLoop();
+
+      dispatchKeydown(textarea, "Enter", "Enter", 13);
+      expect(textarea.value).toBe("");
+      textarea.value = "a";
+      textarea.dispatchEvent(
+        new InputEvent("input", { data: "a", inputType: "insertText", bubbles: true }),
+      );
+      if (flushBeforeEnd) {
+        await flushEventLoop();
+        expect(emitted.join("")).toBe("이미\ra");
+      }
+      endComposition(textarea, "이미");
+      await flushEventLoop();
+
+      expect(emitted.join("")).toBe("이미\ra");
+    },
+  );
+
+  it.each(["한글", "다음"])(
+    "keeps provisional input and native end isolated from the next composition %s",
+    async (nextText) => {
+      const { emitted, textarea } = openTerminal();
+      startComposition(textarea, "한");
+      await flushEventLoop();
+
+      dispatchKeydown(textarea, "ArrowRight", "ArrowRight", 39);
+      textarea.value = "한글";
+      textarea.dispatchEvent(
+        new InputEvent("input", { data: "글", inputType: "insertText", bubbles: true }),
+      );
+      endComposition(textarea, "한글");
+      startComposition(textarea, nextText);
+      endComposition(textarea, nextText);
+      await flushEventLoop();
+
+      expect(emitted.join("")).toBe(`한\x1b[C글${nextText}`);
+    },
+  );
+
+  describe.each([
+    ["a", "a"],
+    ["한", "한글"],
+  ])("ordinary input %s → %s across an Enter clear", (word, inserted) => {
+    it.each([false, true])(
+      "preserves the input with a timer before end=%s",
+      async (flushBeforeEnd) => {
+        const { emitted, textarea } = openTerminal();
+        startComposition(textarea, word);
+        await flushEventLoop();
+
+        dispatchKeydown(textarea, "Enter", "Enter", 13);
+        // Native InputEvents are composed. Releasing Enter opens xterm's input gate.
+        dispatchKeyup(textarea, "Enter", "Enter", 13);
+        expect(textarea.value).toBe("");
+        textarea.value = inserted;
+        textarea.dispatchEvent(
+          new InputEvent("input", {
+            data: inserted,
+            inputType: "insertText",
+            bubbles: true,
+            composed: true,
+          }),
+        );
+        if (flushBeforeEnd) {
+          await flushEventLoop();
+          expect(emitted.join("")).toBe(`${word}\r${inserted}`);
+        }
+        endComposition(textarea, word);
+        await flushEventLoop();
+
+        expect(emitted.join("")).toBe(`${word}\r${inserted}`);
+      },
+    );
+  });
+
+  it("preserves the same input across two explicit textarea clear boundaries", async () => {
+    const { emitted, textarea } = openTerminal();
+    startComposition(textarea, "한");
+    await flushEventLoop();
+
+    for (let index = 0; index < 2; index++) {
+      dispatchKeydown(textarea, "Enter", "Enter", 13);
+      dispatchKeyup(textarea, "Enter", "Enter", 13);
+      expect(textarea.value).toBe("");
+      textarea.value = "a";
+      textarea.dispatchEvent(
+        new InputEvent("input", {
+          data: "a",
+          inputType: "insertText",
+          bubbles: true,
+          composed: true,
+        }),
+      );
+      await flushEventLoop();
+    }
+    endComposition(textarea, "한");
+    await flushEventLoop();
+
+    expect(emitted.join("")).toBe("한\ra\ra");
+  });
+
+  it.each([false, true])(
+    "does not replay IME-owned input after Enter clears the textarea with timer before end=%s",
+    async (flushBeforeEnd) => {
+      const { emitted, textarea } = openTerminal();
+      startComposition(textarea, "이미");
+      await flushEventLoop();
+
+      dispatchKeydown(textarea, "Enter", "Enter", 13);
+      dispatchKeyup(textarea, "Enter", "Enter", 13);
+      textarea.value = "이미";
+      textarea.dispatchEvent(
+        new InputEvent("input", {
+          data: "이미",
+          inputType: "insertText",
+          isComposing: true,
+          bubbles: true,
+          composed: true,
+        }),
+      );
+      if (flushBeforeEnd) {
+        await flushEventLoop();
+        expect(emitted.join("")).toBe("이미\r");
+      }
+      endComposition(textarea, "이미");
+      await flushEventLoop();
+
+      expect(emitted.join("")).toBe("이미\r");
+    },
+  );
+
+  it("does not replay a native suffix after a later explicit textarea clear", async () => {
+    const { emitted, textarea } = openTerminal();
+    startComposition(textarea, "한");
+    await flushEventLoop();
+
+    dispatchKeydown(textarea, "ArrowRight", "ArrowRight", 39);
+    dispatchKeyup(textarea, "ArrowRight", "ArrowRight", 39);
+    textarea.value = "한글";
+    textarea.dispatchEvent(
+      new InputEvent("input", {
+        data: "글",
+        inputType: "insertText",
+        isComposing: true,
+        bubbles: true,
+        composed: true,
+      }),
+    );
+    await flushEventLoop();
+    expect(emitted.join("")).toBe("한\x1b[C글");
+    dispatchKeydown(textarea, "Enter", "Enter", 13);
+    dispatchKeyup(textarea, "Enter", "Enter", 13);
+    endComposition(textarea, "한글");
+    await flushEventLoop();
+
+    expect(emitted.join("")).toBe("한\x1b[C글\r");
+  });
+
+  it.each([false, true])(
+    "preserves repeated IME suffixes after Enter with timer between inputs=%s",
+    async (flushBetweenInputs) => {
+      const { emitted, textarea } = openTerminal();
+      startComposition(textarea, "한");
+      await flushEventLoop();
+
+      dispatchKeydown(textarea, "Enter", "Enter", 13);
+      dispatchKeyup(textarea, "Enter", "Enter", 13);
+      for (const text of ["한글", "한글글"]) {
+        textarea.value = text;
+        textarea.dispatchEvent(
+          new InputEvent("input", {
+            data: "글",
+            inputType: "insertText",
+            isComposing: true,
+            bubbles: true,
+            composed: true,
+          }),
+        );
+        if (flushBetweenInputs) await flushEventLoop();
+      }
+      endComposition(textarea, "한글글");
+      await flushEventLoop();
+
+      expect(emitted.join("")).toBe("한\r글글");
+    },
+  );
+
+  describe.each(["ordinary-first", "native-first"] as const)(
+    "mixed input ownership after Enter: %s",
+    (order) => {
+      it.each([false, true])(
+        "preserves ordinary text and suppresses native replay with timer between inputs=%s",
+        async (flushBetweenInputs) => {
+          const { emitted, textarea } = openTerminal();
+          startComposition(textarea, "한");
+          await flushEventLoop();
+
+          dispatchKeydown(textarea, "Enter", "Enter", 13);
+          dispatchKeyup(textarea, "Enter", "Enter", 13);
+          const observations = [
+            { data: "x", isComposing: false },
+            { data: "한", isComposing: true },
+          ];
+          if (order === "native-first") observations.reverse();
+          for (let index = 0; index < observations.length; index++) {
+            const observation = observations[index];
+            textarea.value = observation.data;
+            textarea.dispatchEvent(
+              new InputEvent("input", {
+                ...observation,
+                inputType: "insertText",
+                bubbles: true,
+                composed: true,
+              }),
+            );
+            if (flushBetweenInputs && index === 0) {
+              await flushEventLoop();
+              expect(emitted.join("")).toBe(order === "ordinary-first" ? "한\rx" : "한\r");
+            }
+          }
+          endComposition(textarea, "한");
+          await flushEventLoop();
+
+          expect(emitted.join("")).toBe("한\rx");
+        },
+      );
+    },
+  );
 });

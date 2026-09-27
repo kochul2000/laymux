@@ -17,15 +17,20 @@ const commonJsUserOnlyDisableStdinGate =
   "if(this._optionsService.rawOptions.disableStdin&&t)return;";
 const compositionGenerationState = "this._pendingCompositionGenerations=[]";
 const moduleCompositionKeypressOwner =
-  "keypress(t){return this._queueCompositionObservation(t)}input(t){return this._queueCompositionObservation(t)}";
+  "keypress(t){return this._queueCompositionObservation(t)||this._sendImmediateCompositionKeypress(t)}input(t,i){return this._queueImmediateCompositionInput(t,i)||this._queueCompositionObservation(t)}";
 const commonJsCompositionKeypressOwner =
-  "keypress(e){return this._queueCompositionObservation(e)}input(e){return this._queueCompositionObservation(e)}";
+  "keypress(e){return this._queueCompositionObservation(e)||this._sendImmediateCompositionKeypress(e)}input(e,i){return this._queueImmediateCompositionInput(e,i)||this._queueCompositionObservation(e)}";
 const compositionGenerationFinalizer =
   "_flushCompositionGeneration(t){if(t.done)return;for(;this._pendingCompositionGenerations.length>0;)";
 const compositionObservationList = "observations:[]";
 const compositionEndCommitData = "committed:this._compositionEndDataAllowed?e:void 0";
 const compositionBlurFlush =
-  "blur(){this._compositionEndDataAllowed=!1,this._flushPendingCompositionGenerations()}";
+  "blur(){this._compositionEndDataAllowed=!1,this._flushPendingCompositionGenerations(),this._immediateComposition=void 0}";
+const compositionImmediateRecord = 'this._immediateComposition={prefix:t,observed:""}';
+const compositionImmediateReconcile =
+  "n=this._takeUnsentCompositionData(n,e.immediate,e.stripImmediatePrefix)";
+const compositionTextareaClearHandoff =
+  'this._compositionHelper.textareaCleared(),this.textarea.value=""),this._onKey.fire';
 const compositionEndDataEnabledAtStart = "this._compositionEndDataAllowed=!0";
 const compositionBlurHandoff =
   '_handleTextAreaBlur(){this._compositionHelper.blur(),this.textarea.value=""';
@@ -39,7 +44,7 @@ const compositionSnapshotCandidate =
 const compositionCandidateFirstFold =
   'let n=this._mergeCompositionData(r,e.committed||""),o="",l=!1;for(const t of e.observations)l?n=this._mergeCompositionData(n,t,!0):n.includes(t)?(o&&(n=this._mergeCompositionData(n,o)),l=!0):o=this._mergeCompositionData(t,o);l||!o||(n=this._mergeCompositionData(n,o))';
 const compositionAnchoredTieOrder = "i>s||o&&i===s?t+e.substring(i):e+t.substring(s)";
-const staleMergedObservationState = 'observed:""';
+const staleMergedObservationState = 'observed:"",done:!1';
 const staleMergedObservationQueue = "e.observed=this._mergeCompositionData(t,e.observed)";
 const compositionBoundaryOwner = "compositionstart(){this._boundPendingComposition()";
 const moduleCompositionKeypressHandoff =
@@ -54,8 +59,8 @@ const moduleDuplicatedCompositionKeypressHandoff =
   "this._compositionHelper.keypress(i)||this._compositionHelper.keypress(i)?this.cancel(e,!0)";
 const commonJsDuplicatedCompositionKeypressHandoff =
   "this._compositionHelper.keypress(t)||this._compositionHelper.keypress(t)?this.cancel(e,!0)";
-const moduleCompositionInputHandoff = "if(this._compositionHelper.input(i))";
-const commonJsCompositionInputHandoff = "if(this._compositionHelper.input(t))";
+const moduleCompositionInputHandoff = "if(this._compositionHelper.input(i,e.isComposing))";
+const commonJsCompositionInputHandoff = "if(this._compositionHelper.input(t,e.isComposing))";
 const moduleCompositionEndDataHandoff =
   '"compositionend",t=>this._compositionHelper.compositionend(t.data)';
 const commonJsCompositionEndDataHandoff =
@@ -126,6 +131,12 @@ describe("pinned xterm bundle patches", () => {
     expect(commonJsSource).toContain(compositionEndCommitData);
     expect(moduleSource).toContain(compositionBlurFlush);
     expect(commonJsSource).toContain(compositionBlurFlush);
+    expect(moduleSource).toContain(compositionImmediateRecord);
+    expect(commonJsSource).toContain(compositionImmediateRecord);
+    expect(moduleSource).toContain(compositionImmediateReconcile);
+    expect(commonJsSource).toContain(compositionImmediateReconcile);
+    expect(moduleSource).toContain(compositionTextareaClearHandoff);
+    expect(commonJsSource).toContain(compositionTextareaClearHandoff);
     expect(moduleSource).toContain(compositionEndDataEnabledAtStart);
     expect(commonJsSource).toContain(compositionEndDataEnabledAtStart);
     expect(moduleSource).toContain(compositionBlurHandoff);
