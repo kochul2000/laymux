@@ -281,6 +281,39 @@ test("dragging a tap button never activates it, tap activates once, and resize k
   expect(resized.y + resized.height).toBeLessThanOrEqual(260);
 });
 
+test("a pinned workspace menu never covers left-edge floating controls", async ({ page }) => {
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "laymux.remote.displaySettings",
+      JSON.stringify({ navigationPinned: true, navigationWidth: 300, navigationPinCutoff: 720 }),
+    ),
+  );
+  await page.route("http://remote.test/", (route) => route.fulfill({ body: "<!doctype html>" }));
+  await page.goto("http://remote.test/");
+  await page.setViewportSize({ width: 900, height: 800 });
+  await page.setContent(remoteClientMarkupWithoutXterm());
+  await expect(page.locator(".app")).toHaveClass(/nav-pinned/);
+  await expect
+    .poll(async () => {
+      const box = (await page.locator("#navigationPanel").boundingBox())!;
+      return box.x + box.width;
+    })
+    .toBe(300);
+  // The default Pane / alert pad sits near the left edge.
+  const leftPad = page.locator('#floatingControls [data-floating-id="navPad"]');
+  const leftPadX = async () => (await leftPad.boundingBox())!.x;
+  expect(await leftPadX()).toBeGreaterThanOrEqual(300);
+
+  // Unpinning gives the column back to the controls; re-pinning takes it again
+  // without waiting for a viewport resize.
+  await page.locator("#navigationPin").click();
+  await expect(page.locator(".app")).not.toHaveClass(/nav-pinned/);
+  await expect.poll(leftPadX).toBeLessThan(300);
+  await page.locator("#navigationPin").click();
+  await expect(page.locator(".app")).toHaveClass(/nav-pinned/);
+  await expect.poll(leftPadX).toBeGreaterThanOrEqual(300);
+});
+
 test("header actions start Hidden, can be placed on a row, and remain in the header", async ({
   page,
 }) => {

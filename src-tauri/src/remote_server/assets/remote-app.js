@@ -7372,6 +7372,7 @@ import {
           navScrim.hidden = !open || pinned;
           if (open) startNavigationViewPolling();
           else stopNavigationViewPolling();
+          positionFloatingControls();
         }
 
         function setDrawerView(view) {
@@ -11859,9 +11860,14 @@ import {
           const viewport = window.visualViewport;
           const width = viewport?.width || window.innerWidth;
           const height = viewport?.height || window.innerHeight;
-          layer.style.left = `${(viewport?.offsetLeft || 0) + 8}px`;
+          const viewportLeft = viewport?.offsetLeft || 0;
+          // A pinned workspace menu owns the grid column left of the terminal
+          // shell and paints above this layer, so the horizontal range starts
+          // at the shell instead of the viewport edge.
+          const left = Math.max(viewportLeft, terminalShell?.getBoundingClientRect().left || 0);
+          layer.style.left = `${left + 8}px`;
           layer.style.top = `${(viewport?.offsetTop || 0) + 40}px`;
-          layer.style.width = `${Math.max(0, width - 16)}px`;
+          layer.style.width = `${Math.max(0, viewportLeft + width - left - 16)}px`;
           layer.style.height = `${Math.max(0, height - 48)}px`;
           for (const { id, item } of floatingEntries()) {
             const element = layer.querySelector(`[data-floating-id="${id}"]`);
