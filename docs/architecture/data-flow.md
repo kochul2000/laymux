@@ -1500,7 +1500,7 @@ Windows child wait와 PID tree kill은 handshake로 상호 배제한다. kill cl
 
 조회는 generation·Codex 프로세스·기한에 결부된 토큰을 사용한다. 좁은 pane은 일시적으로 최소 96×40으로 확장한다. frontend의 geometry lease가 기존 parser drain·guarded fit 경로로 xterm을 먼저 고정하고, backend가 순서가 부여된 PTY geometry를 적용한다. Enter 직전 출력 sequence 이후의 새 status 카드에서 전체 UUID를 읽고 정확한 rollout ID·최상위 역할 또는 Fresh를 확인한다. 결과는 해당 fence 수명에서만 통합 귀속에 합쳐지며 중복 ID와 critical 이중 관측은 그대로 적용한다. 저장 뒤 기존 인터럽트·캐시 순서를 유지하고, 원래 크기를 복구하며 실패 시 fence를 해제한다. 조회 중 창 크기가 바뀌었으면 lease 해제 후 기존 resize 경로로 다시 맞춘다. 성공한 일반 종료는 창 파괴까지 입력 fence를 유지하고, 저장 완료 표시가 있는 경우에만 기존 pane 종료 정리를 허용한다. 토큰 만료가 입력 fence를 자동 해제하지 않으며, 저장 완료 IPC도 기한을 재검사한다. 실패한 종료 준비에는 사용자가 종료를 취소하고 돌아갈 수 있는 선택을 제공한다. 진행 중인 준비가 실제로 끝나기 전에는 취소를 제공하지 않아 늦은 Enter가 돌아온 입력창에 도착하지 않게 한다.
 
-native 대상의 `CODEX_HOME`·`CODEX_SQLITE_HOME`·실행 인자·CWD는 sysinfo의 OS 조회로 읽고 Laymux 환경으로 대체하지 않는다. 사용자·프로젝트·시스템 설정을 TOML로 검사하며 CLI config/profile/CWD override, 편집 키 변경, Vim, 별도 설정 include·sqlite_home 설정은 미지원으로 거부한다. 편집 키와 충돌하지 않는 chat 방향키 변경은 허용한다. WSL은 해당 배포판의 홈과 `/etc/codex`를 검사한다. 설정 검사로 이미 실행 중인 TUI의 메모리상 키맵까지 증명할 수는 없으므로 실행 중 키맵 변경이나 다른 설정의 대화로 전환한 상태는 지원 범위 밖이다.
+native 대상의 `CODEX_HOME`·`CODEX_SQLITE_HOME`·실행 인자·CWD는 sysinfo의 OS 조회로 읽고 Laymux 환경으로 대체하지 않는다. 사용자·프로젝트·시스템 설정을 TOML로 검사하며 CLI config/profile/CWD override, 편집 키 변경, Vim, 별도 설정 include·sqlite_home 설정은 미지원으로 거부한다. 편집 키와 충돌하지 않는 chat 방향키 변경은 허용한다. WSL은 해당 배포판 안에서 `/proc/<pid>/cwd`의 실제 경로와 마지막 OSC 경로의 ancestor, Codex 홈과 `/etc/codex`를 검사한다. 정적 guest script에 값은 argv로만 전달하며, 읽기는 3초와 설정 크기 제한을 적용한다. 설정 파일·디렉터리 symlink는 guest에서 따라 읽고, 끊어진 링크·접근 실패·불완전 응답은 입력 전에 거절한다. 설정 검사로 이미 실행 중인 TUI의 메모리상 키맵까지 증명할 수는 없으므로 실행 중 키맵 변경이나 다른 설정의 대화로 전환한 상태는 지원 범위 밖이다.
 
 ### 13.6 시작 시퀀스
 

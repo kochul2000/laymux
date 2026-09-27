@@ -137,3 +137,5 @@ Codex 0.157.1 Windows native 기본 공유 데몬을 dev 19281에서 실행했�
 - 같은 테스트 설정으로 dev를 재실행하고 workspace를 활성화하자 이전 대화가 자동 복원됐다. 다시 일반 종료한 뒤에도 동일 UUID가 저장됐다. 삭제한 최종 초안이 rollout에 없는 것을 확인했다. 설정 옵션과 실패 모달은 screenshot API로 시각 확인했다.
 
 단위·화면 테스트는 오래된 status 출력, 모달로 지워진 명령 메뉴, 토큰 만료와 지연 저장, generation·프로세스 변경, 실제 프로세스의 별도 Codex/SQLite 홈, 설정 override, close/update fence, 실패 후 종료 취소를 포함한다. 이 실측은 Windows native 범위이며 WSL 실제 TUI 종료·복원까지 검증한 기록은 아니다.
+
+최종 독립 리뷰에서 WSL의 실제 CWD와 설정 symlink 검사를 보완했다. Ubuntu-22.04의 별도 임시 디렉터리 fixture에서 마지막 셸 경로 A와 실제 프로세스 경로 B가 다른 경우, 설정 파일 symlink, 프로젝트 `.codex` 디렉터리 symlink를 검사해 `Ctrl+U` 제출 키 설정을 읽는 것을 확인했다. 파일이 없는 경우는 빈 설정을 반환하고, 끊어진 설정 symlink는 조회 실패로 처리했다. 사용자 설정이나 실행 중인 Codex TUI는 조작하지 않았다.

@@ -4,6 +4,8 @@ mod process_context;
 mod targets;
 #[cfg(test)]
 mod tests;
+#[cfg(windows)]
+mod wsl_config;
 
 use crate::lock_ext::MutexExt;
 use crate::session_checkpoint::codex_status::{

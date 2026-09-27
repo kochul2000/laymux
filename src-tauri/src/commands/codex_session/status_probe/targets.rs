@@ -137,23 +137,32 @@ fn require_default_editor_config(process: &CodexStatusProcess, cwd: &Path) -> Re
                 .into(),
         );
     }
+    if let Some(distro) = &process.distro {
+        #[cfg(windows)]
+        {
+            let configs = super::wsl_config::read_editor_configs(
+                distro,
+                process.pid,
+                &process.codex_home,
+                cwd,
+            )?;
+            if configs.iter().any(|text| has_custom_editor_config(text)) {
+                return Err("Codex status verification requires default editor keys; unsupported WSL configuration was found".into());
+            }
+            return Ok(());
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = distro;
+            return Err("WSL is unavailable on this host".into());
+        }
+    }
     let mut paths = vec![
         process.codex_home.join("config.toml"),
         process.codex_home.join("managed_config.toml"),
     ];
     paths.extend(cwd.ancestors().map(|path| path.join(".codex/config.toml")));
-    if let Some(distro) = &process.distro {
-        for file in [
-            "/etc/codex/config.toml",
-            "/etc/codex/managed_config.toml",
-            "/etc/codex/requirements.toml",
-        ] {
-            paths.push(PathBuf::from(crate::path_utils::resolve_path_for_windows(
-                file,
-                Some(distro),
-            )));
-        }
-    } else {
+    {
         let native = super::process_context::read(process.pid)?;
         if native.codex_home != process.codex_home || native.sqlite_home != process.sqlite_home {
             return Err("Codex process storage paths changed".into());
