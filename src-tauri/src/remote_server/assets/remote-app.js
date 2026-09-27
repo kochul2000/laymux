@@ -586,6 +586,15 @@ import {
           } catch { /* Use the defaults if device storage is unavailable. */ }
         }
         let physicalKeyboardConnected = null;
+        let physicalKeyboardToastTimer = null;
+        const PHYSICAL_KEYBOARD_TOAST_DURATION_MS = 3000;
+        // Match the existing Remote relay's device-local ko/en language policy.
+        const PHYSICAL_KEYBOARD_TOAST_LANG = (navigator.language || "en").toLowerCase().startsWith("ko")
+          ? "ko" : "en";
+        const PHYSICAL_KEYBOARD_TOAST_STRINGS = {
+          ko: { connected: "물리 키보드가 연결되었습니다.", disconnected: "물리 키보드 연결이 해제되었습니다." },
+          en: { connected: "Physical keyboard connected.", disconnected: "Physical keyboard disconnected." },
+        };
         let composerHiddenAgentInputLines = loadComposerHiddenAgentInputLines();
         let composerAgentInputHideFrame = null;
         let composerAgentInputHideRequest = null;
@@ -13071,11 +13080,28 @@ import {
           if (wasHidden !== keyBar.hidden) rebaseTerminalFit();
         }
 
-        function refreshPhysicalKeyboard() {
-          const next = androidE2eMode ? readPhysicalKeyboardConnected(window.LaymuxNative) : null;
+        function updatePhysicalKeyboard(next) {
           if (next === physicalKeyboardConnected) return;
+          const previous = physicalKeyboardConnected;
           physicalKeyboardConnected = next;
           applyRemoteKeyboardPreferences();
+          // Initial/unsupported snapshots are not attachment events. Native
+          // callbacks and foreground refreshes share this transition check.
+          if (typeof previous !== "boolean" || typeof next !== "boolean") return;
+          const toast = $("physicalKeyboardToast");
+          const strings = PHYSICAL_KEYBOARD_TOAST_STRINGS[PHYSICAL_KEYBOARD_TOAST_LANG];
+          window.clearTimeout(physicalKeyboardToastTimer);
+          toast.lang = PHYSICAL_KEYBOARD_TOAST_LANG;
+          toast.textContent = next ? strings.connected : strings.disconnected;
+          toast.hidden = false;
+          physicalKeyboardToastTimer = window.setTimeout(() => {
+            toast.hidden = true;
+            physicalKeyboardToastTimer = null;
+          }, PHYSICAL_KEYBOARD_TOAST_DURATION_MS);
+        }
+
+        function refreshPhysicalKeyboard() {
+          updatePhysicalKeyboard(androidE2eMode ? readPhysicalKeyboardConnected(window.LaymuxNative) : null);
         }
 
         function handleRemoteNavigationKey(event) {
@@ -13515,9 +13541,7 @@ import {
         if (androidE2eMode) {
           window.laymuxPhysicalKeyboard = {
             onChanged(connected) {
-              if (typeof connected !== "boolean" || physicalKeyboardConnected === connected) return;
-              physicalKeyboardConnected = connected;
-              applyRemoteKeyboardPreferences();
+              if (typeof connected === "boolean") updatePhysicalKeyboard(connected);
             },
           };
         }

@@ -1,3 +1,21 @@
+      #physicalKeyboardToast {
+        position: fixed;
+        top: calc(env(safe-area-inset-top, 0px) + 56px);
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 1100;
+        width: max-content;
+        max-width: calc(100% - 32px);
+        padding: 10px 16px;
+        border: 1px solid var(--accent-50);
+        border-radius: var(--radius-md);
+        background: var(--bg-overlay);
+        color: var(--text-primary);
+        box-shadow: 0 3px 12px var(--backdrop-light);
+        font-size: 14px;
+        text-align: center;
+        pointer-events: none;
+      }
       #floatingControls {
         position: fixed;
         z-index: 8;
