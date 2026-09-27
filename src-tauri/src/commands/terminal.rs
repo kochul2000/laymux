@@ -1666,6 +1666,11 @@ pub async fn close_terminal_session(
     state: State<'_, Arc<AppState>>,
     app: AppHandle,
 ) -> Result<(), String> {
+    // A committed app-close checkpoint keeps input fenced through destruction.
+    // Its own terminal teardown is the only mutation admitted in that phase.
+    if state.session_checkpoint.close_cleanup_allowed() {
+        return close_terminal_session_inner(&id, &state, &app);
+    }
     let _checkpoint_permit = state
         .session_checkpoint
         .begin_mutation_after_finalization()

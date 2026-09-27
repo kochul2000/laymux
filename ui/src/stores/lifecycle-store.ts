@@ -11,6 +11,7 @@ interface LifecycleState {
   preview: boolean;
   error: string | null;
   forceClose: (() => void) | null;
+  cancelClose: (() => void) | null;
   openUpdate: () => void;
   receiveStatus: (status: AppUpdateStatus) => void;
   startClose: (cleanup: boolean) => void;
@@ -25,6 +26,7 @@ export const useLifecycleStore = create<LifecycleState>((set) => ({
   preview: false,
   error: null,
   forceClose: null,
+  cancelClose: null,
   openUpdate: () =>
     set((state) =>
       state.kind === "close" && !state.preview
@@ -63,21 +65,29 @@ export const useLifecycleStore = create<LifecycleState>((set) => ({
     })),
 }));
 
-export async function waitForCloseDecision(error: string, pending: Promise<void>): Promise<void> {
-  let release!: () => void;
-  const forced = new Promise<void>((resolve) => {
+export async function waitForCloseDecision(
+  error: string,
+  pending: Promise<void>,
+): Promise<boolean> {
+  let release!: (proceed: boolean) => void;
+  const forced = new Promise<boolean>((resolve) => {
     release = resolve;
   });
-  useLifecycleStore.setState({ error, forceClose: release });
+  useLifecycleStore.setState({ error, forceClose: () => release(true), cancelClose: null });
   // A late successful save may still close normally; a failure waits for the user.
-  await Promise.race([
+  const proceed = await Promise.race([
     forced,
-    pending.catch((cause: unknown) => {
-      useLifecycleStore.setState({ error: String(cause) });
-      return forced;
-    }),
+    pending
+      .then(() => true)
+      .catch((cause: unknown) => {
+        // Cancellation is offered only after the preparation has settled. A
+        // timed-out but still-running probe cannot later submit into a resumed UI.
+        useLifecycleStore.setState({ error: String(cause), cancelClose: () => release(false) });
+        return forced;
+      }),
   ]);
-  useLifecycleStore.setState({ forceClose: null });
+  useLifecycleStore.setState({ forceClose: null, cancelClose: null });
+  return proceed;
 }
 
 export function keepWaitingForClose(): void {

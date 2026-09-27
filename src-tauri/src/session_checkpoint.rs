@@ -9,6 +9,7 @@ use tauri::{AppHandle, Emitter, State};
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 
+pub(crate) mod codex_status;
 mod eviction;
 pub use eviction::TerminalMutationPermit;
 #[cfg(test)]
@@ -42,9 +43,12 @@ pub struct HiddenTerminalEvictionResult {
 
 /// Backend-owned request/ack rendezvous and destructive-finalization gate.
 pub struct SessionCheckpointRuntime {
+    pub(crate) codex_status: Mutex<Option<codex_status::CodexStatusCheckpoint>>,
+    update_request_id: AtomicU64,
     next_request_id: AtomicU64,
     pending: Mutex<HashMap<u64, tokio::sync::oneshot::Sender<CheckpointResponse>>>,
     finalizing: AtomicBool,
+    close_checkpoint_committed: AtomicBool,
     eviction: Mutex<eviction::EvictionAdmission>,
     active_mutations: AtomicUsize,
     detached_mutations: Mutex<HashSet<String>>,
@@ -59,9 +63,12 @@ pub struct SessionMutationPermit<'a> {
 impl Default for SessionCheckpointRuntime {
     fn default() -> Self {
         Self {
+            codex_status: Mutex::new(None),
+            update_request_id: AtomicU64::new(0),
             next_request_id: AtomicU64::new(1),
             pending: Mutex::new(HashMap::new()),
             finalizing: AtomicBool::new(false),
+            close_checkpoint_committed: AtomicBool::new(false),
             eviction: Mutex::new(eviction::EvictionAdmission::default()),
             active_mutations: AtomicUsize::new(0),
             detached_mutations: Mutex::new(HashSet::new()),
@@ -77,6 +84,24 @@ impl Drop for SessionMutationPermit<'_> {
 }
 
 impl SessionCheckpointRuntime {
+    pub(crate) fn is_finalizing(&self) -> bool {
+        self.finalizing.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn close_cleanup_allowed(&self) -> bool {
+        self.is_finalizing() && self.close_checkpoint_committed.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn commit_close_checkpoint(&self) {
+        self.close_checkpoint_committed
+            .store(true, Ordering::Release);
+    }
+
+    pub(crate) fn owns_update_checkpoint(&self, request_id: u64) -> Result<bool, String> {
+        Ok(self.is_finalizing()
+            && self.update_request_id.load(Ordering::Acquire) == request_id
+            && self.has_pending_request(request_id)?)
+    }
     pub fn has_pending_request(&self, request_id: u64) -> Result<bool, String> {
         Ok(self.pending.lock_or_err()?.contains_key(&request_id))
     }
@@ -103,6 +128,8 @@ impl SessionCheckpointRuntime {
     }
 
     pub fn cancel_finalization(&self) {
+        self.close_checkpoint_committed
+            .store(false, Ordering::Release);
         self.finalizing.store(false, Ordering::Release);
     }
 
@@ -270,6 +297,13 @@ async fn request_frontend_checkpoint_for_terminals(
         .pending
         .lock_or_err()?
         .insert(request_id, sender);
+
+    if reason == "update" {
+        state
+            .session_checkpoint
+            .update_request_id
+            .store(request_id, Ordering::Release);
+    }
 
     if let Err(error) = app.emit(
         EVENT_SESSION_CHECKPOINT_REQUESTED,

@@ -3190,6 +3190,14 @@ function CodexSection() {
           onChange={(v) => updateCodex({ restoreSession: v })}
         />
 
+        <SettingsToggleField
+          label={t("codex.verifySessionOnExit")}
+          desc={t("codex.verifySessionOnExitDesc")}
+          testId="codex-verify-session-on-exit-toggle"
+          checked={codex.verifySessionOnExit}
+          onChange={(v) => updateCodex({ verifySessionOnExit: v })}
+        />
+
         <SettingsField label={t("codex.sessionMaxAge")} desc={t("codex.sessionMaxAgeDesc")}>
           <div className="flex items-center gap-2">
             <FocusInput

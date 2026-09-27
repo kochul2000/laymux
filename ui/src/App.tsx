@@ -8,7 +8,7 @@ import { saveBeforeClose, setBlockPersist } from "@/lib/persist-session";
 import { applySettingsSnapshot } from "@/lib/settings-snapshot";
 import { createCloseHandler } from "@/lib/window-close-handler";
 import { exitInterruptBudgetMs } from "@/lib/interrupt-terminals-on-exit";
-import { beginAppClose } from "@/lib/tauri-api";
+import { beginAppClose, cancelAppClose } from "@/lib/tauri-api";
 import { LifecycleModal } from "@/components/layout/LifecycleModal";
 import { useLifecycleStore, waitForCloseDecision } from "@/stores/lifecycle-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -76,7 +76,19 @@ export function App() {
               .startClose(useSettingsStore.getState().exit.interruptTerminals);
             return true;
           },
-          onSaveProblem: waitForCloseDecision,
+          onSaveProblem: async (error, pending) => {
+            const proceed = await waitForCloseDecision(error, pending);
+            if (!proceed) {
+              await cancelAppClose();
+              useLifecycleStore.setState({
+                open: false,
+                kind: "update",
+                error: null,
+                progress: null,
+              });
+            }
+            return proceed;
+          },
           destroy: () => appWindow.destroy(),
           close: () => appWindow.close(),
           saveBeforeClose: async () => {
@@ -88,7 +100,10 @@ export function App() {
           // Widen the base save timeout by the kill-on-exit budget (issue #451)
           // so a configured Ctrl+C settle delay is not cut off. Read at close
           // time to reflect current settings.
-          timeoutMs: () => 5000 + exitInterruptBudgetMs(useSettingsStore.getState().exit),
+          timeoutMs: () =>
+            5000 +
+            exitInterruptBudgetMs(useSettingsStore.getState().exit) +
+            (useSettingsStore.getState().codex.verifySessionOnExit ? 30_000 : 0),
         });
         appWindow
           .onCloseRequested(handler)

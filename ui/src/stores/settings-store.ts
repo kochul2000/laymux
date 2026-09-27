@@ -1351,6 +1351,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   },
   codex: {
     command: DEFAULT_CODEX_COMMAND,
+    verifySessionOnExit: true,
     restoreSession: true,
     sessionMaxAgeHours: DEFAULT_AGENT_SESSION_MAX_AGE_HOURS,
     transcriptScrollEnabled: true,
@@ -1787,6 +1788,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     const codex = data.codex
       ? {
           command: DEFAULT_CODEX_COMMAND,
+          verifySessionOnExit: true,
           restoreSession: true,
           sessionMaxAgeHours: DEFAULT_AGENT_SESSION_MAX_AGE_HOURS,
           transcriptScrollEnabled: true,

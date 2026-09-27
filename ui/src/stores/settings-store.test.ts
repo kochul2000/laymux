@@ -569,6 +569,7 @@ describe("settings-store", () => {
 
   it("has default codex settings", () => {
     const { codex } = useSettingsStore.getState();
+    expect(codex.verifySessionOnExit).toBe(true);
     expect(codex.restoreSession).toBe(true);
     expect(codex.sessionMaxAgeHours).toBe(24);
     expect(codex.transcriptScrollEnabled).toBe(true);
@@ -600,11 +601,19 @@ describe("settings-store", () => {
       codex: {} as any,
     });
     const { codex } = useSettingsStore.getState();
+    expect(codex.verifySessionOnExit).toBe(true);
     expect(codex.restoreSession).toBe(true);
     expect(codex.sessionMaxAgeHours).toBe(24);
     expect(codex.transcriptScrollEnabled).toBe(true);
     expect(codex.statusMessageMode).toBe("bullet-title");
     expect(codex.statusMessageDelimiter).toBe(" · ");
+  });
+
+  it("preserves an explicit opt-out of Codex exit verification", () => {
+    useSettingsStore.getState().loadFromSettings({
+      codex: { ...useSettingsStore.getState().codex, verifySessionOnExit: false },
+    });
+    expect(useSettingsStore.getState().codex.verifySessionOnExit).toBe(false);
   });
 
   it("defaults truecolor capability advertising to enabled", () => {

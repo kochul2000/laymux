@@ -1,4 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(async (command: string) => {
+    if (command === "begin_codex_status_checkpoint") return { token: "close-proof", targets: [] };
+  }),
+}));
 
 vi.mock("@/lib/tauri-api", () => ({
   saveSettings: vi.fn().mockResolvedValue(undefined),
@@ -60,6 +67,10 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useTerminalStore, type TerminalActivityInfo } from "@/stores/terminal-store";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 /** Register a terminal instance the way a mounted TerminalView would. */
 function registerLiveTerminal(
@@ -170,7 +181,7 @@ describe("persistSession", () => {
 
       await saveBeforeClose();
 
-      expect(getTerminalSessionAttributions).toHaveBeenCalledTimes(1);
+      expect(getTerminalSessionAttributions).toHaveBeenCalledTimes(2);
       expect(saveSettings).toHaveBeenCalledTimes(1);
       const view = vi.mocked(saveSettings).mock.calls[0][0].workspaces[0].panes[0].view;
       const field = {
@@ -517,8 +528,9 @@ describe("persistSession", () => {
     }
   });
 
-  it("saves output within the close budget when a WSL probe takes three seconds", async () => {
+  it("saves output within the base close budget when status verification is disabled", async () => {
     vi.useFakeTimers();
+    useSettingsStore.getState().setCodex({ verifySessionOnExit: false });
     const ws = useWorkspaceStore.getState();
     ws.setPaneView(0, { type: "TerminalView", lastCodexSession: "old-session" });
     const paneId = ws.workspaces[0].panes[0].id;
@@ -1714,6 +1726,43 @@ describe("saveBeforeClose", () => {
     useDockStore.setState(useDockStore.getInitialState());
     useTerminalStore.setState({ instances: [] });
     vi.clearAllMocks();
+    vi.mocked(getTerminalCwds).mockResolvedValue({});
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({});
+  });
+
+  it("uses the status checkpoint by default and commits it after saving", async () => {
+    await saveBeforeClose();
+
+    expect(vi.mocked(invoke).mock.calls.map(([command]) => command)).toEqual([
+      "begin_codex_status_checkpoint",
+      "complete_codex_status_checkpoint",
+      "finish_codex_status_checkpoint",
+    ]);
+    const calls = vi.mocked(invoke).mock.invocationCallOrder;
+    const saved = vi.mocked(saveSettings).mock.invocationCallOrder[0];
+    expect(calls[0]).toBeLessThan(saved);
+    expect(calls[1]).toBeGreaterThan(saved);
+  });
+
+  it("skips the status checkpoint when explicitly disabled", async () => {
+    useSettingsStore.getState().setCodex({ verifySessionOnExit: false });
+
+    await saveBeforeClose();
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(saveSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks close by default when attribution remains inconclusive", async () => {
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValueOnce({
+      "terminal-unknown": { generation: 1, state: "activeButUnidentified", provider: "codex" },
+    });
+
+    await expect(saveBeforeClose()).rejects.toThrow("Session attribution is not conclusive");
+
+    expect(saveSettings).not.toHaveBeenCalled();
+    expect(interruptTerminalsOnExit).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledWith("finish_codex_status_checkpoint", { token: "close-proof" });
   });
 
   it("serializes terminal outputs and saves to cache", async () => {
@@ -1752,8 +1801,8 @@ describe("saveBeforeClose", () => {
       interruptRounds: 1,
       settleMs: 0,
     });
-    vi.mocked(getCodexSessionIds).mockImplementationOnce(async () => {
-      callOrder.push("collect-codex");
+    vi.mocked(getTerminalSessionAttributions).mockImplementation(async () => {
+      callOrder.push("collect-attribution");
       return {};
     });
     vi.mocked(interruptTerminalsOnExit).mockImplementationOnce(
@@ -1766,7 +1815,7 @@ describe("saveBeforeClose", () => {
 
     const saving = saveBeforeClose();
     await vi.waitFor(() => expect(interruptTerminalsOnExit).toHaveBeenCalledTimes(1));
-    expect(callOrder).toEqual(["collect-codex", "interrupt"]);
+    expect(callOrder).toEqual(["collect-attribution", "collect-attribution", "interrupt"]);
     expect(saveSettings).toHaveBeenCalledTimes(1);
 
     finishInterrupt?.();

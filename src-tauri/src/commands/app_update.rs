@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, State};
 
 use crate::app_update::{self, UpdateStatus};
+use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 
 #[tauri::command]
@@ -13,6 +14,22 @@ pub fn get_app_update_status(state: State<'_, Arc<AppState>>) -> Result<UpdateSt
 #[tauri::command]
 pub fn begin_app_close(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     state.app_update.claim_close()
+}
+
+#[tauri::command]
+pub fn cancel_app_close(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    if state
+        .session_checkpoint
+        .codex_status
+        .lock_or_err()?
+        .is_some()
+    {
+        return Err("Wait for Codex status preparation to settle before cancelling close".into());
+    }
+    if state.app_update.cancel_close() {
+        state.session_checkpoint.cancel_finalization();
+    }
+    Ok(())
 }
 
 #[tauri::command]
