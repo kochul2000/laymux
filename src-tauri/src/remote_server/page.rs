@@ -2110,9 +2110,7 @@ mod tests {
             !output_stream.contains("focusCurrentInputSurface();"),
             "attach must not focus an input surface outside the pointer gate"
         );
-        assert!(html.contains(
-            "        function focusInputSurfaceAfterAwait() {\n          if (coarsePointer) return;\n          focusCurrentInputSurface();\n        }"
-        ));
+        assert!(html.contains("if (coarsePointer && physicalKeyboardConnected !== true) return;"));
         assert!(output_stream.contains("let outputTerminalMissing = false;"));
         assert!(output_stream.contains("payload === \"terminal session not found\""));
         assert!(output_stream.contains("loadNavigation(null, { focusInput: false }).catch"));

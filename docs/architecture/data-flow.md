@@ -1241,7 +1241,7 @@ document 레벨 단축키 실행은 `useKeyboardShortcuts` 의 **액션 ID → �
 | `composer.pc.send` / `newline`              | `Enter` / `Shift+Enter`        | PC Composer 전송 / 줄바꿈 (ADR-0269)                                                                                   |
 | `composer.remote.send` / `newline`          | `Ctrl+Enter` / `Enter`         | Remote Composer 전송 / 줄바꿈 — layout 무관 (ADR-0269)                                                                 |
 
-Remote 페이지도 같은 레지스트리(`ui/src/lib/keybinding-core.ts`)와 사용자 재정의를 쓴다. 단, 기본 활성 Remote Nav는 `remote-keyboard.js`의 기기 보조키 설정으로 방향키를 먼저 처리한다(↑/↓ spatial 이전·다음, ←/→ notification recent·oldest). 이를 끄면 PC 공유 방향키가 적용된다. Android native의 연결 snapshot·변경 통지는 플로팅과 Keys의 표시만 각각 계산하며, 배치·활성·펼침 설정을 바꾸지 않는다([ADR-0273](../adr/0273-remote-physical-keyboard-and-navigation-keys.md)). Remote가 실행하는 액션과 동작은 [api-contracts.md §13.3](api-contracts.md#133-navigation-metadata)의 "물리 키보드 단축키"를 본다([ADR-0269](../adr/0269-remote-physical-keyboard-shortcuts.md)).
+Remote 페이지도 같은 레지스트리(`ui/src/lib/keybinding-core.ts`)와 사용자 재정의를 쓴다. 단, 기본 활성 Remote Nav는 `remote-keyboard.js`의 기기 보조키 설정으로 방향키를 먼저 처리한다(↑/↓ spatial 이전·다음, ←/→ notification recent·oldest). 이를 끄면 PC 공유 방향키가 적용된다. Android native의 연결 snapshot·변경 통지는 플로팅과 Keys의 표시를 각각 계산하며, 배치·활성·펼침 설정을 바꾸지 않는다([ADR-0273](../adr/0273-remote-physical-keyboard-and-navigation-keys.md)). 연결이 확인되면 사용자 pane 진입 attach와 일반 문자 입력에서 현재 입력 표면의 포커스도 복구하되 다른 편집기·오버레이·진행 중 조합을 보호한다([ADR-0274](../adr/0274-remote-physical-keyboard-focus-recovery.md)). Remote가 실행하는 액션과 동작은 [api-contracts.md §13.3](api-contracts.md#133-navigation-metadata)의 "물리 키보드 단축키"를 본다([ADR-0269](../adr/0269-remote-physical-keyboard-shortcuts.md)).
 
 ---
 
