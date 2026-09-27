@@ -13,6 +13,7 @@ import { interruptTerminalsOnExit } from "@/lib/interrupt-terminals-on-exit";
 import { isSettingsWriteBlocked } from "@/lib/settings-write-guard";
 import type { ProgressReporter } from "@/lib/lifecycle-progress";
 import type { ExitSettings } from "@/lib/tauri-api";
+import { withCodexStatusCheckpoint } from "@/lib/codex-status-probe";
 
 export { setBlockPersist } from "@/lib/settings-write-guard";
 
@@ -265,7 +266,10 @@ export function flushSessionCheckpoint(
 ): Promise<SessionCheckpointCommit> {
   // Native watchdog/update/eviction requests bypass persistSession(). Once
   // closing starts, only the pre-interrupt close checkpoint may collect state.
-  if (preparingUpdate || (closingDown && options.reason !== "close")) {
+  if (
+    (preparingUpdate && options.reason !== "update") ||
+    (closingDown && options.reason !== "close")
+  ) {
     return Promise.reject(new Error("Window close is in progress"));
   }
   if (isSettingsWriteBlocked()) {
@@ -308,18 +312,21 @@ export function persistSession(options: SessionCheckpointOptions = {}): Promise<
 export async function saveBeforeClose(report?: ProgressReporter): Promise<void> {
   closingDown = true;
   await report?.({ stage: "checkpoint", completed: 0, total: null });
-
-  // Drain any older write and commit the final attribution before Ctrl+C can
-  // return an agent to the shell and erase the process evidence.
-  if (!isSettingsWriteBlocked()) {
-    await flushSessionCheckpoint({ reason: "close" });
+  const codex = useSettingsStore.getState().codex;
+  const verifyStatus =
+    !isSettingsWriteBlocked() && codex.restoreSession && codex.verifySessionOnExit;
+  try {
+    await withCodexStatusCheckpoint(verifyStatus, undefined, async () => {
+      // The status proof remains fenced through the final save. Ctrl+C, if
+      // enabled separately, still follows the committed restoration point.
+      if (!isSettingsWriteBlocked())
+        await flushSessionCheckpoint({ reason: "close", requireConclusive: verifyStatus });
+      await prepareTerminalExit(report);
+    });
+  } catch (error) {
+    closingDown = false;
+    throw error;
   }
-
-  // Kill-on-exit (issue #451): before serializing scrollback, send Ctrl+C to
-  // running terminals so cron/agents wind down and Claude/Codex print their
-  // resume session id. This must run before the serialize loop below so the
-  // printed id lands in the cached scrollback. Opt-in; no-op when disabled.
-  await prepareTerminalExit(report);
 }
 
 /** Shared post-checkpoint preparation; never recollect attribution after Ctrl+C. */

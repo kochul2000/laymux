@@ -2,6 +2,11 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const unlisten = vi.fn();
+vi.mock("@/lib/codex-status-probe", () => ({
+  withCodexStatusCheckpoint: vi.fn(
+    (_enabled: boolean, _request: number, checkpoint: () => Promise<unknown>) => checkpoint(),
+  ),
+}));
 let deferListenerRegistration = false;
 let finishListenerRegistration: (() => void) | undefined;
 let nativeListener:
@@ -55,6 +60,7 @@ import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { claimHiddenEvictionEligibility } from "@/lib/hidden-eviction-eligibility";
 import { useSessionCheckpointLifecycle } from "./useSessionCheckpointLifecycle";
+import { withCodexStatusCheckpoint } from "@/lib/codex-status-probe";
 
 describe("useSessionCheckpointLifecycle", () => {
   beforeEach(() => {
@@ -76,6 +82,9 @@ describe("useSessionCheckpointLifecycle", () => {
     await vi.waitFor(() => expect(onSessionCheckpointRequested).toHaveBeenCalledTimes(1));
 
     nativeListener?.({ requestId: 9, reason: "update", requireConclusive: true });
+    await vi.waitFor(() =>
+      expect(withCodexStatusCheckpoint).toHaveBeenCalledWith(true, 9, expect.any(Function)),
+    );
 
     await vi.waitFor(() => expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(9, 17));
     expect(flushSessionCheckpoint).toHaveBeenCalledWith({
@@ -83,6 +92,45 @@ describe("useSessionCheckpointLifecycle", () => {
       requireConclusive: true,
       terminalIds: undefined,
     });
+  });
+
+  it("fences optional status verification under the original update request before saving", async () => {
+    useSettingsStore.setState((state) => ({
+      codex: { ...state.codex, restoreSession: true, verifySessionOnExit: true },
+    }));
+    let finishProbe!: () => void;
+    vi.mocked(withCodexStatusCheckpoint).mockImplementationOnce(
+      async (_enabled, _id, checkpoint) => {
+        await new Promise<void>((resolve) => {
+          finishProbe = resolve;
+        });
+        return checkpoint();
+      },
+    );
+    renderHook(() => useSessionCheckpointLifecycle(true));
+    await vi.waitFor(() => expect(onSessionCheckpointRequested).toHaveBeenCalledTimes(1));
+    nativeListener?.({ requestId: 42, reason: "update", requireConclusive: true });
+    expect(setPreparingUpdate).toHaveBeenCalledWith(true);
+    expect(withCodexStatusCheckpoint).toHaveBeenCalledWith(true, 42, expect.any(Function));
+    expect(flushSessionCheckpoint).not.toHaveBeenCalled();
+    finishProbe();
+    await vi.waitFor(() => expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(42, 17));
+    expect(flushSessionCheckpoint).toHaveBeenCalledWith({
+      reason: "update",
+      requireConclusive: true,
+      terminalIds: undefined,
+    });
+  });
+
+  it("does not inject status for a watchdog request even with the option enabled", async () => {
+    useSettingsStore.setState((state) => ({
+      codex: { ...state.codex, restoreSession: true, verifySessionOnExit: true },
+    }));
+    renderHook(() => useSessionCheckpointLifecycle(true));
+    await vi.waitFor(() => expect(onSessionCheckpointRequested).toHaveBeenCalledTimes(1));
+    nativeListener?.({ requestId: 43, reason: "watchdog", requireConclusive: false });
+    await vi.waitFor(() => expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(43, 17));
+    expect(withCodexStatusCheckpoint).toHaveBeenCalledWith(false, 43, expect.any(Function));
   });
 
   it("error-acks a request delivered to a listener cancelled during StrictMode registration", async () => {

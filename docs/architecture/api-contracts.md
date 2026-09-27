@@ -13,6 +13,10 @@
 
 새 PC 설정의 `controlBar.defaultMode`는 `pinned`이고, 기본 Dock은 왼쪽 WorkspaceSelectorView와 오른쪽 MemoView / FileExplorerView / GitHubView(위부터 높이 1/3씩)다. 위·아래 Dock은 숨긴다. 이 기본 구성은 Rust `Settings::default()`와 프론트 store에 일치시키며, 기존에 저장된 컨트롤 바 모드·pane 오버라이드·Dock 배치는 그대로 적용한다. 새 값은 신규 또는 생략된 설정에만 적용한다([ADR-0265](../adr/0265-pc-remote-first-use-defaults.md)).
 
+### Codex 종료 확인
+
+`codex.verifySessionOnExit`는 기본 true인 종료·업데이트 전용 세션 확인 설정이다([ADR-0270](../adr/0270-codex-status-checkpoint-probe.md)). 미전송 텍스트를 삭제하며 기본 Codex 편집 키와 대기 중 텍스트 composer를 요구한다. `begin_codex_status_checkpoint(updateRequestId?)`가 반환한 토큰에만 `codex_status_checkpoint_input(clear | typeStatus | submit)`, `read_codex_status_checkpoint`, `complete_codex_status_checkpoint`, `finish_codex_status_checkpoint`를 허용한다. backend는 generation·프로세스·native update 요청·기한과 단계 순서를 검증한다. 임의 바이트 입력이나 상시 귀속 조회 API가 아니며 Automation·Remote raw write의 fence를 우회시키지 않는다. `cancel_app_close`는 준비 실패 후 사용자가 종료 취소를 선택했을 때 앱 종료 예약을 해제한다. 완료 IPC는 저장 후 기한과 fence 소유권을 다시 확인한다. 성공한 일반 종료는 창 파괴까지 입력 차단을 유지하고 terminal close 정리만 허용하며, 실패·종료 취소는 차단을 해제한다.
+
 ### 다국어(i18n) — 언어 설정
 
 UI 다국어는 **react-i18next** 로 구현한다(이슈 #350).
@@ -1802,6 +1806,7 @@ Remote Composer 첨부 표시([ADR-0236](../adr/0236-remote-composer-inline-atta
 문서 단일 포인터 소유자가 `data-remote-tool-swipe` 표면(도구 헤더, GitHub 목록, Files 디렉터리 목록)만 처리한다. 모바일 touch/pen에서 56px·수직 대비 1.25배 수평 이동을 확인하고 pointerup에서 한 단계 전환하며 후속 클릭을 소비한다. 입력 요소·메모 textarea·파일 렌더러·선택 중인 텍스트는 제외하고 수직 이동·다중 포인터·취소는 전환하지 않는다. 도구 상단에 별도 스와이프 안내 줄을 표시하지 않는다([ADR-0263](../adr/0263-remote-tool-swipe-hint-removal.md)). Memo 초안은 기존 문서에 남고 자동 저장하지 않는다. Files Back은 현재 파일에서 폴더 복귀를 유지하며 다른 도구에서 Files를 다시 열면 기존 terminal CWD 경로를 사용한다.
 
 ## 14. Rust 코드 설계 원칙
+
 > 추가: 2026.04.05
 
 ### 14.1 모듈 구조 원칙

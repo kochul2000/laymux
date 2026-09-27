@@ -987,6 +987,8 @@ export interface ClaudeSettings {
 }
 
 export interface CodexSettings {
+  /** Discard unsent text and verify /status before close/update (default: true). */
+  verifySessionOnExit: boolean;
   /**
    * Command that launches the Codex CLI (default: "codex"). Flags belong here —
    * session restore appends `resume <id>` to it.
@@ -1002,6 +1004,10 @@ export interface CodexSettings {
   statusMessageMode: CodexStatusMessageMode;
   /** Delimiter between bullet and title when both shown (default: " · "). */
   statusMessageDelimiter: string;
+}
+
+export async function cancelAppClose(): Promise<void> {
+  return invoke("cancel_app_close");
 }
 
 export type GrokStatusMessageMode = CodexStatusMessageMode;

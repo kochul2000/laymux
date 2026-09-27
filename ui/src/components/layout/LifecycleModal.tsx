@@ -198,6 +198,7 @@ export function LifecycleModal() {
           <div className="lifecycle-actions">
             {close && state.forceClose ? (
               <>
+                {state.cancelClose && <Button onClick={state.cancelClose}>{copy.cancel}</Button>}
                 {state.error === "timeout" && (
                   <Button onClick={keepWaitingForClose}>{copy.wait}</Button>
                 )}

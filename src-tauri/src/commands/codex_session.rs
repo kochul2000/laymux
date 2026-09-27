@@ -1,5 +1,8 @@
 mod lifecycle;
+mod status_probe;
 mod store;
+pub(crate) use status_probe::verified_status_sessions;
+pub use status_probe::*;
 pub(crate) mod turns;
 mod wsl;
 

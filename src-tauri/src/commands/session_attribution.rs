@@ -282,7 +282,7 @@ pub fn get_terminal_session_attributions(
     // Each provider owns a bounded WSL probe. Run the three independent
     // lookups together so the command consumes one probe budget rather than
     // serially multiplying it past the five-second window-close deadline.
-    let (claude, codex, grok) = collect_provider_session_lookups(
+    let (claude, mut codex, grok) = collect_provider_session_lookups(
         || {
             super::claude_session::get_claude_session_lookup_impl(
                 claude_session_max_age_hours,
@@ -295,6 +295,25 @@ pub fn get_terminal_session_attributions(
         },
         || super::grok_session::get_grok_session_lookup_impl(grok_session_max_age_hours, &state),
     )?;
+    let status_sessions = super::codex_session::verified_status_sessions(&state)?;
+    for (id, (generation, session_id, fresh)) in status_sessions {
+        if terminals
+            .iter()
+            .any(|(terminal_id, current)| terminal_id == &id && *current == generation)
+        {
+            codex
+                .attributions
+                .insert(id.clone(), Some(session_id.clone()));
+            codex.failed_terminal_ids.remove(&id);
+            if fresh {
+                codex.fresh_sessions.insert(id, session_id);
+            } else {
+                codex.fresh_sessions.remove(&id);
+            }
+        }
+    }
+    codex.attributions =
+        crate::process_tree::reject_duplicate_session_attributions(codex.attributions, "Codex");
     let observations: Vec<(String, u64, PtyAppLiveness)> = terminals
         .into_iter()
         .map(|(terminal_id, generation)| {
