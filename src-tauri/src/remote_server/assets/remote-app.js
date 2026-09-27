@@ -9104,8 +9104,8 @@ import {
           if (event.defaultPrevented) return;
           if (event.isComposing || composerIsComposing || event.keyCode === 229) return;
           if (remoteOverlayOpen() || isForeignEditableTarget(event.target)) return;
-          if (remoteKeyboardSettings.useRemoteNavigationKeys &&
-              (navigationPanel.contains(event.target) || !navScrim.hidden)) return;
+          if ((navigationPanel.contains(event.target) || !navScrim.hidden) &&
+              resolveRemoteNavigationKey(event, remoteKeyboardSettings)) return;
           handleRemoteNavigationKey(event);
           if (event.defaultPrevented) return;
           // As on the desktop terminal, Ctrl+letter/digit typed into the

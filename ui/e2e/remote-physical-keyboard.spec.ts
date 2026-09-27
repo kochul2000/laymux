@@ -289,6 +289,20 @@ test("Nav 보조키 변경·해제는 즉시 적용되고 설정 입력은 가�
   expect(state.errors).toEqual([]);
 });
 
+test("기본 Nav를 켜도 메뉴 단축키로 열고 닫으며 메뉴 안에서는 Nav를 실행하지 않는다", async ({
+  page,
+}) => {
+  const state = await connectKeyboardRemote(page);
+  await expect(page.locator("#navToggle")).toHaveAttribute("aria-expanded", "false");
+  await page.keyboard.press("Control+Shift+B");
+  await expect(page.locator("#navToggle")).toHaveAttribute("aria-expanded", "true");
+  await page.keyboard.press("Alt+ArrowDown");
+  await page.keyboard.press("Control+Shift+B");
+  await expect(page.locator("#navToggle")).toHaveAttribute("aria-expanded", "false");
+  expect(state.nav).toEqual([]);
+  expect(state.errors).toEqual([]);
+});
+
 test("Composer 초안을 보존하며 반복 키·IME 조합은 추가 탐색을 만들지 않는다", async ({ page }) => {
   const state = await connectKeyboardRemote(page, "composer");
   await state.input.fill("보존할 초안");
