@@ -1,5 +1,10 @@
+import { createRequire } from "node:module";
 import { Terminal } from "@xterm/xterm";
 import { afterEach, describe, expect, it } from "vitest";
+
+const { Terminal: RemoteTerminal } = createRequire(import.meta.url)(
+  "../../../src-tauri/src/remote_server/assets/xterm.js",
+) as { Terminal: typeof Terminal };
 
 type PatchedCompositionHelper = {
   _compositionPosition: { start: number };
@@ -27,14 +32,14 @@ function stubMatchMedia() {
 
 const mounted: Terminal[] = [];
 
-function openTerminal() {
+function openTerminalWith(TerminalConstructor: typeof Terminal) {
   stubMatchMedia();
   const host = document.createElement("div");
   Object.defineProperty(host, "clientWidth", { value: 800, configurable: true });
   Object.defineProperty(host, "clientHeight", { value: 400, configurable: true });
   document.body.appendChild(host);
 
-  const terminal = new Terminal({ allowProposedApi: true, cols: 80, rows: 25 });
+  const terminal = new TerminalConstructor({ allowProposedApi: true, cols: 80, rows: 25 });
   terminal.open(host);
   mounted.push(terminal);
 
@@ -121,7 +126,11 @@ afterEach(async () => {
   document.body.replaceChildren();
 });
 
-describe("patched xterm composition keypress reconciliation", () => {
+describe.each([
+  ["desktop", Terminal],
+  ["remote", RemoteTerminal],
+] as const)("%s xterm composition keypress reconciliation", (_surface, TerminalConstructor) => {
+  const openTerminal = () => openTerminalWith(TerminalConstructor);
   it("keeps an ordinary non-composition keypress on the immediate path", () => {
     const { emitted, textarea } = openTerminal();
 

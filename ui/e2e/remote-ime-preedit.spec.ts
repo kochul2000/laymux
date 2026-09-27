@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { devices, expect, test, type Page } from "@playwright/test";
 
 import { installRemoteClientRoutes } from "./remote-client-assets";
 
@@ -109,7 +109,12 @@ function snapshotFrames(text: string) {
   return { header, payload };
 }
 
-async function installRemoteMocks(page: Page) {
+async function installRemoteMocks(
+  page: Page,
+  writes: string[] = [],
+  writeDelayMs = 0,
+  firstWrite?: Promise<void>,
+) {
   await installRemoteClientRoutes(page);
   await page.route("http://remote.test/remote/v1/**", async (route) => {
     const url = new URL(route.request().url());
@@ -125,6 +130,13 @@ async function installRemoteMocks(page: Page) {
     }
     if (url.pathname === "/remote/v1/navigation") {
       await route.fulfill({ json: navigation });
+      return;
+    }
+    if (url.pathname === "/remote/v1/terminals/terminal-1/write") {
+      writes.push(route.request().postDataJSON().data);
+      if (writes.length === 1) await firstWrite;
+      if (writeDelayMs) await new Promise((resolve) => setTimeout(resolve, writeDelayMs));
+      await route.fulfill({ json: {} });
       return;
     }
     await route.fulfill({ json: {} });
@@ -231,5 +243,121 @@ test.describe("remote direct-mode IME preedit", () => {
     });
 
     expect(cleared).toEqual({ children: 0, active: false });
+  });
+});
+
+// Drive the shipped Remote bundle through its DOM listeners and observe the
+// actual /write bodies. Holding timers makes the composition finalizer race
+// deterministic; delaying HTTP separately distinguishes event duplication from
+// transport retries. Real OS IME event timing still needs device verification.
+test.describe("remote direct-mode IME delivery", () => {
+  test.use({
+    userAgent: devices["Pixel 7"].userAgent,
+    viewport: devices["Pixel 7"].viewport,
+    isMobile: true,
+    hasTouch: true,
+  });
+
+  async function prepare(page: Page, writeDelayMs = 0, firstWrite?: Promise<void>) {
+    const writes: string[] = [];
+    await installRemoteMocks(page, writes, writeDelayMs, firstWrite);
+    await page.addInitScript(() => localStorage.setItem("laymux.remote.inputMode", "direct"));
+    await connectRemote(page);
+    await page.clock.install({ time: new Date("2026-09-27T00:00:00Z") });
+    await page.clock.pauseAt(new Date("2026-09-27T00:00:01Z"));
+    return writes;
+  }
+
+  async function commitWords(page: Page, words: string[], propagatedKeypress = false) {
+    return page.evaluate(
+      ({ words, propagatedKeypress }) => {
+        const textarea = (window as TermWindow).__remoteTerm!.textarea;
+        textarea.focus();
+        const prevented: boolean[] = [];
+        for (const word of words) {
+          textarea.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+          textarea.value += word;
+          textarea.dispatchEvent(
+            new CompositionEvent("compositionupdate", { data: word, bubbles: true }),
+          );
+          textarea.dispatchEvent(
+            new CompositionEvent("compositionend", { data: word, bubbles: true }),
+          );
+          textarea.dispatchEvent(
+            new InputEvent("input", { data: word, inputType: "insertText", bubbles: true }),
+          );
+          if (propagatedKeypress) {
+            const key = word.at(-1)!;
+            const event = new KeyboardEvent("keypress", {
+              key,
+              charCode: key.charCodeAt(0),
+              bubbles: true,
+              cancelable: true,
+            });
+            textarea.dispatchEvent(event);
+            prevented.push(event.defaultPrevented);
+            // Synthetic keypress has no default edit; model the browser insertion
+            // only if xterm failed to consume the propagated observation.
+            if (!event.defaultPrevented) textarea.value += key;
+          }
+        }
+        return prevented;
+      },
+      { words, propagatedKeypress },
+    );
+  }
+
+  for (const writeDelayMs of [0, 150]) {
+    test(`sends a committed word once with ${writeDelayMs}ms HTTP delay`, async ({ page }) => {
+      const writes = await prepare(page, writeDelayMs);
+      await commitWords(page, ["키보드를"]);
+      await page.clock.runFor(50);
+      await expect.poll(() => writes.join("")).toBe("키보드를");
+      await page.clock.runFor(1000);
+      expect(writes).toEqual(["키보드를"]);
+    });
+  }
+
+  test("consumes the legacy keypress that propagates a committed syllable", async ({ page }) => {
+    const writes = await prepare(page);
+    expect(await commitWords(page, ["키보드를"], true)).toEqual([true]);
+    await page.clock.runFor(50);
+    await expect.poll(() => writes).toEqual(["키보드를"]);
+  });
+
+  test("preserves intentionally repeated words in separate pending compositions", async ({
+    page,
+  }) => {
+    const writes = await prepare(page);
+    await commitWords(page, ["그렇게 ", "그렇게 "]);
+    await page.clock.runFor(50);
+    await expect.poll(() => writes.join("")).toBe("그렇게 그렇게 ");
+  });
+
+  test("preserves the next word while an earlier HTTP write is still pending", async ({ page }) => {
+    let releaseFirst!: () => void;
+    const firstWrite = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const writes = await prepare(page, 0, firstWrite);
+    try {
+      await commitWords(page, ["키보드를 "]);
+      await page.clock.runFor(50);
+      await expect.poll(() => writes).toEqual(["키보드를 "]);
+      await commitWords(page, ["쓸때도"]);
+      await page.clock.runFor(50);
+      expect(writes).toEqual(["키보드를 "]);
+    } finally {
+      releaseFirst();
+    }
+    await expect.poll(() => writes).toEqual(["키보드를 ", "쓸때도"]);
+  });
+
+  test("flushes a committed word once before blur clears the helper", async ({ page }) => {
+    const writes = await prepare(page);
+    await commitWords(page, ["나오는데"]);
+    await page.evaluate(() => (window as TermWindow).__remoteTerm!.textarea.blur());
+    await page.clock.runFor(50);
+    await expect.poll(() => writes).toEqual(["나오는데"]);
   });
 });
