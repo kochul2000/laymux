@@ -201,12 +201,10 @@ import {
         const rightSwipeViewKey = "laymux.remote.rightSwipeView";
         const toolSwipeRightActionKey = "laymux.remote.toolSwipeRightAction";
         const hideFloatingWithKeyboardKey = "laymux.remote.hideFloatingWithKeyboard";
-        const hideKeysWithKeyboardKey = "laymux.remote.hideKeysWithKeyboard";
         const useRemoteNavigationKeysKey = "laymux.remote.useRemoteNavigationKeys";
         const remoteNavigationModifiersKey = "laymux.remote.remoteNavigationModifiers";
         const keyboardSettingKeys = {
           hideFloatingWithKeyboard: hideFloatingWithKeyboardKey,
-          hideKeysWithKeyboard: hideKeysWithKeyboardKey,
           useRemoteNavigationKeys: useRemoteNavigationKeysKey,
           remoteNavigationModifiers: remoteNavigationModifiersKey,
         };
@@ -11813,7 +11811,6 @@ import {
           for (const button of document.querySelectorAll("[data-action-proxy]")) {
             const actionId = button.dataset.actionProxy;
             const source = fixedInputActionElement(actionId);
-            button.hidden = actionId === "keys" && !keyboardControlVisibility().keys;
             if (actionProxyMarkup.get(button) !== source.innerHTML) {
               button.replaceChildren(...[...source.childNodes].map((child) => child.cloneNode(true)));
               for (const child of button.querySelectorAll("[id]")) child.removeAttribute("id");
@@ -11945,8 +11942,7 @@ import {
           layer.replaceChildren();
           const visibility = keyboardControlVisibility();
           for (const { id, item, actionId, pad } of floatingEntries()) {
-            if (!keyBarConfig.floating.enabled || !item.enabled || !visibility.floating ||
-                (actionId === "keys" && !visibility.keys)) continue;
+            if (!keyBarConfig.floating.enabled || !item.enabled || !visibility.floating) continue;
             const element = document.createElement("div");
             element.className = "floating-control";
             element.dataset.floatingId = id;
@@ -12084,20 +12080,18 @@ import {
         function syncInputActionVisibility() {
           if (!keyBarConfig) return;
           const composerMode = currentInputMode() === "composer";
-          const visibility = keyboardControlVisibility();
           for (const actionId of FIXED_INPUT_ACTION_IDS) {
             if (ownProperty(HEADER_INPUT_ACTIONS, actionId)) continue;
             const element = fixedInputActionElement(actionId);
             const placed = inputActionZone(actionId) !== "hidden";
-            element.hidden = !placed || (actionId === "send" && !composerMode) ||
-              (actionId === "keys" && !visibility.keys);
+            element.hidden = !placed || (actionId === "send" && !composerMode);
           }
           const keysVisible = inputActionZone("keys") === "main" || hasFloatingKeysToggle();
           if (!keysVisible && keyBarConfig.expanded) {
             keyBarConfig.expanded = false;
             saveKeyBarConfig();
           }
-          keyBar.hidden = !keysVisible || !keyBarConfig.expanded || !visibility.keys;
+          keyBar.hidden = !keysVisible || !keyBarConfig.expanded;
           keyBarToggleButton.classList.toggle("active", !keyBar.hidden);
           keyBarToggleButton.setAttribute("aria-pressed", keyBar.hidden ? "false" : "true");
           syncExpandedRowEmptyState();

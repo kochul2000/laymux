@@ -16,7 +16,6 @@ export const REMOTE_NAV_MODIFIERS = Object.freeze({
 
 export const DEFAULT_REMOTE_KEYBOARD_SETTINGS = Object.freeze({
   hideFloatingWithKeyboard: true,
-  hideKeysWithKeyboard: true,
   useRemoteNavigationKeys: true,
   remoteNavigationModifiers: "alt",
 });
@@ -39,7 +38,6 @@ export function readPhysicalKeyboardConnected(bridge) {
 export function remoteKeyboardVisibility(connected, settings) {
   return {
     floating: !(connected === true && settings.hideFloatingWithKeyboard),
-    keys: !(connected === true && settings.hideKeysWithKeyboard),
   };
 }
 
