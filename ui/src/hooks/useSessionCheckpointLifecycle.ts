@@ -20,6 +20,7 @@ import { SESSION_ATTRIBUTION_STARTUP_GRACE_MS } from "@/stores/terminal-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { areHiddenPaneIdsEligible } from "@/lib/hidden-eviction-eligibility";
 import { toPaneId } from "@/lib/pane-ids";
+import { withCodexStatusCheckpoint } from "@/lib/codex-status-probe";
 
 function hiddenEvictionTargetsRemainEligible(terminalIds: readonly string[]): boolean {
   return areHiddenPaneIdsEligible(terminalIds.map(toPaneId));
@@ -65,11 +66,17 @@ export function useSessionCheckpointLifecycle(ready: boolean): void {
         });
         return;
       }
-      void flushSessionCheckpoint({
-        reason: request.reason,
-        requireConclusive: request.requireConclusive,
-        terminalIds: request.terminalIds,
-      })
+      const codex = useSettingsStore.getState().codex;
+      const verifyStatus =
+        request.reason === "update" && codex.restoreSession && codex.verifySessionOnExit;
+      if (verifyStatus) setPreparingUpdate(true);
+      void withCodexStatusCheckpoint(verifyStatus, request.requestId, () =>
+        flushSessionCheckpoint({
+          reason: request.reason,
+          requireConclusive: request.requireConclusive,
+          terminalIds: request.terminalIds,
+        }),
+      )
         .then(async (commit) => {
           if (request.reason === "update") {
             if (cancelled) throw new Error("update preparation listener cancelled");
@@ -88,13 +95,14 @@ export function useSessionCheckpointLifecycle(ready: boolean): void {
           }
           return acknowledgeSessionCheckpoint(request.requestId, commit.checkpointCommitId);
         })
-        .catch((cause: unknown) =>
-          acknowledgeSessionCheckpoint(
+        .catch((cause: unknown) => {
+          if (verifyStatus) setPreparingUpdate(false);
+          return acknowledgeSessionCheckpoint(
             request.requestId,
             undefined,
             cause instanceof Error ? cause.message : String(cause),
-          ),
-        )
+          );
+        })
         .catch((error) => {
           console.warn("[session-checkpoint] Failed to acknowledge native request:", error);
         });

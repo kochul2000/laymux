@@ -9,7 +9,7 @@ export interface CloseHandlerDeps {
    */
   timeoutMs: number | (() => number);
   beforeClose?: () => Promise<boolean>;
-  onSaveProblem?: (error: string, pending: Promise<void>) => Promise<void>;
+  onSaveProblem?: (error: string, pending: Promise<void>) => Promise<boolean | void>;
 }
 
 /**
@@ -51,9 +51,15 @@ export function createCloseHandler(deps: CloseHandlerDeps) {
           timer = setTimeout(() => resolve("timeout"), timeoutMs);
         }),
       ]);
-      if (outcome === "timeout") await deps.onSaveProblem?.("timeout", pending);
+      if (outcome === "timeout" && (await deps.onSaveProblem?.("timeout", pending)) === false) {
+        running = false;
+        return;
+      }
     } catch (error) {
-      await deps.onSaveProblem?.(String(error), pending);
+      if ((await deps.onSaveProblem?.(String(error), pending)) === false) {
+        running = false;
+        return;
+      }
     } finally {
       clearTimeout(timer);
     }

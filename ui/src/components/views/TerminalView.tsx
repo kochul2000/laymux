@@ -178,6 +178,10 @@ import { observeTaskInput } from "@/lib/terminal-task-observers";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { loadTerminalOutputCache, setComposerStarredEntry } from "@/lib/tauri-api";
 import {
+  registerCheckpointGeometry,
+  type CheckpointGeometry,
+} from "@/lib/terminal-checkpoint-geometry";
+import {
   registerTerminalSerializer,
   unregisterTerminalSerializer,
   registerTerminalRenderCheckpointProvider,
@@ -3768,6 +3772,8 @@ export function TerminalView({
       | undefined;
     const pendingStabilizerParsedCallbacks = new DeferredParsedCallbackQueue();
     let suppressBackendResizeDuringFit = false;
+    let checkpointGeometry: CheckpointGeometry | undefined;
+    let restoringCheckpointGeometry = false;
     const clearOutputStabilizerDeadlineTimer = () => {
       if (outputStabilizerDeadlineTimer !== undefined) {
         clearTimeout(outputStabilizerDeadlineTimer);
@@ -4022,14 +4028,29 @@ export function TerminalView({
     const performTerminalFit = (request: TerminalFitRequest) => {
       recordTerminalOutputPipeline(instanceId, "fits");
       const syncBackendResize = request.syncBackendResize || remoteReturnResizeDirtyRef.current;
-      suppressBackendResizeDuringFit = syncBackendResize;
+      suppressBackendResizeDuringFit = syncBackendResize || Boolean(checkpointGeometry);
       try {
-        fitAddon.fit();
+        if (checkpointGeometry) terminal.resize(checkpointGeometry.cols, checkpointGeometry.rows);
+        else fitAddon.fit();
       } finally {
         suppressBackendResizeDuringFit = false;
       }
 
-      if (syncBackendResize) startRemoteResizeSync();
+      if (syncBackendResize && !checkpointGeometry) startRemoteResizeSync();
+      if (restoringCheckpointGeometry) {
+        checkpointGeometry = undefined;
+        restoringCheckpointGeometry = false;
+        // An OS window resize can arrive while the grid is pinned. Once the
+        // original grid is restored, reconcile the current DOM dimensions via
+        // the existing acknowledged resize path (it retries while fenced).
+        const proposed = fitAddon.proposeDimensions();
+        if (proposed && (proposed.cols !== terminal.cols || proposed.rows !== terminal.rows)) {
+          queueMicrotask(() => {
+            if (!cancelled && !checkpointGeometry)
+              requestGuardedTerminalFit({ syncBackendResize: true });
+          });
+        }
+      }
 
       if (request.rebuildAtlas || reflowDirtyRef.current) {
         rebuildTerminalRenderer();
@@ -4081,7 +4102,7 @@ export function TerminalView({
       performTerminalFit(request);
     };
     const requestGuardedTerminalFit = (request: TerminalFitRequest) => {
-      if (isContainerHiddenRef.current) {
+      if (isContainerHiddenRef.current && !checkpointGeometry) {
         if (request.rebuildAtlas) reflowDirtyRef.current = true;
         if (request.syncBackendResize) remoteReturnResizeDirtyRef.current = true;
         return;
@@ -4098,6 +4119,15 @@ export function TerminalView({
       flushDeferredTerminalFit();
     };
     guardedTerminalFitRef.current = requestGuardedTerminalFit;
+    const unregisterCheckpointGeometry = registerCheckpointGeometry(
+      instanceId,
+      (geometry, restore) => {
+        if (cancelled) return;
+        checkpointGeometry = geometry;
+        restoringCheckpointGeometry = restore;
+        requestGuardedTerminalFit({});
+      },
+    );
     const isXtermWriteBackpressure = (error: unknown) =>
       error instanceof Error && error.message.includes("write data discarded");
     const clearTerminalWriteRetryTimer = () => {
@@ -6353,6 +6383,7 @@ export function TerminalView({
         unregisterTerminalScroller(paneId);
       }
       unregisterTerminalSerializer(instanceId);
+      unregisterCheckpointGeometry();
       unregisterTerminalRenderCheckpointProvider(instanceId);
       unregisterTerminalInspector(instanceId);
       unregisterTerminalScroller(instanceId);

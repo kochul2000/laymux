@@ -41,6 +41,10 @@ impl From<crate::settings::ExitSettings> for ExitPlan {
 }
 
 impl UpdateManager {
+    pub fn cancel_close(&self) -> bool {
+        self.closing.swap(false, Ordering::AcqRel)
+    }
+
     pub fn claim_close(&self) -> Result<(), String> {
         let status = self.status.lock_or_err()?;
         if matches!(

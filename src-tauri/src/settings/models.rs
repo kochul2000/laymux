@@ -502,6 +502,9 @@ pub enum CodexStatusMessageMode {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CodexSettings {
+    /// Discard unsent Codex text and query /status before close/update (opt-in).
+    #[serde(default)]
+    pub verify_session_on_exit: bool,
     /// Command that launches the Codex CLI (default: "codex").
     ///
     /// Flags belong here — `codex --yolo` makes session restore resume with that
@@ -530,6 +533,7 @@ pub struct CodexSettings {
 impl Default for CodexSettings {
     fn default() -> Self {
         Self {
+            verify_session_on_exit: false,
             command: default_codex_command(),
             restore_session: true,
             session_max_age_hours: 24,

@@ -32,6 +32,27 @@ pub(super) struct ResolvedSession {
 }
 
 impl CodexSessionStore {
+    pub(super) fn verify_status_session(&self, id: &str) -> Result<bool, String> {
+        match self.validate_session_checked(id, None)? {
+            Some(true) => Ok(false),
+            Some(false) => Err("Codex status belongs to an auxiliary thread".into()),
+            None => {
+                let mut paths = Vec::new();
+                collect_rollout_paths_checked(
+                    &self.sessions_dir(),
+                    CODEX_SESSION_DIRECTORY_DEPTH,
+                    id,
+                    &mut paths,
+                )?;
+                if paths.is_empty() {
+                    Ok(true)
+                } else {
+                    Err("Codex status rollout is ambiguous or invalid".into())
+                }
+            }
+        }
+    }
+
     pub(super) fn resolve() -> Self {
         let (codex_home, sqlite_home) = resolve_codex_roots();
         Self::new(codex_home, sqlite_home)

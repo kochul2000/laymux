@@ -1,6 +1,7 @@
 import { render, screen, act, fireEvent, cleanup } from "@testing-library/react";
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { TerminalView } from "./TerminalView";
+import { acquireCheckpointGeometry } from "@/lib/terminal-checkpoint-geometry";
 import { setTerminalOutputV3RuntimeLoaderForTest } from "@/lib/terminal-output-v3-runtime-loader";
 import {
   _resetWebglStagger,
@@ -453,6 +454,11 @@ vi.mock("@xterm/xterm", () => ({
     };
     cols = 80;
     rows = 24;
+    resize = vi.fn((cols: number, rows: number) => {
+      this.cols = cols;
+      this.rows = rows;
+      capturedResizeHandler?.({ cols, rows });
+    });
     options: Record<string, unknown>;
   },
 }));
@@ -784,6 +790,35 @@ afterEach(async () => {
 });
 
 describe("TerminalView", () => {
+  it("applies and restores checkpoint geometry without issuing ordinary backend resizes", async () => {
+    const { unmount } = render(
+      <TerminalView instanceId="t-status-geometry" profile="PowerShell" syncGroup="" />,
+    );
+    await vi.waitFor(() => expect(mockCreateTerminalSession).toHaveBeenCalled());
+    const terminal = createdTerminals[0] as unknown as { cols: number; rows: number };
+    mockResizeTerminal.mockClear();
+    let release!: () => void;
+    act(() => {
+      release = acquireCheckpointGeometry(
+        "t-status-geometry",
+        { cols: 96, rows: 40 },
+        { cols: 80, rows: 24 },
+      );
+    });
+    await vi.waitFor(() => expect([terminal.cols, terminal.rows]).toEqual([96, 40]));
+    expect(mockResizeTerminal).not.toHaveBeenCalled();
+    act(() => release());
+    await vi.waitFor(() => expect([terminal.cols, terminal.rows]).toEqual([80, 24]));
+    expect(mockResizeTerminal).not.toHaveBeenCalled();
+    unmount();
+    expect(() =>
+      acquireCheckpointGeometry(
+        "t-status-geometry",
+        { cols: 96, rows: 40 },
+        { cols: 80, rows: 24 },
+      ),
+    ).toThrow("unavailable");
+  });
   beforeEach(() => {
     useTerminalStore.setState(useTerminalStore.getInitialState());
     useTerminalStartupStore.setState(useTerminalStartupStore.getInitialState());

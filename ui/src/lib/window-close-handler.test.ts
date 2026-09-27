@@ -2,6 +2,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createCloseHandler } from "./window-close-handler";
 
 describe("createCloseHandler", () => {
+  it("keeps the app open when failed status verification is cancelled", async () => {
+    const destroy = vi.fn();
+    const handler = createCloseHandler({
+      destroy,
+      close: vi.fn(),
+      saveBeforeClose: vi.fn().mockRejectedValue(new Error("Codex status was not verified")),
+      timeoutMs: 50,
+      onSaveProblem: vi.fn().mockResolvedValue(false),
+    });
+    await handler({ preventDefault: vi.fn() });
+    expect(destroy).not.toHaveBeenCalled();
+  });
   const mockDestroy = vi.fn<() => Promise<void>>();
   const mockClose = vi.fn<() => Promise<void>>();
   const mockSaveBeforeClose = vi.fn<() => Promise<void>>();

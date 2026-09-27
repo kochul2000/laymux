@@ -565,6 +565,8 @@
     },
     "codex": {
       "title": "Codex",
+      "verifySessionOnExit": "Verify session with /status before exit",
+      "verifySessionOnExitDesc": "Discard unsent input and confirm the conversation before closing or updating. Requires an idle text composer with Codex's default keymap. Terminal size changes briefly. Preparation stops for active tasks, attachments, dialogs, or failed verification. Runtime keymap changes and switching to a conversation with different key settings are unsupported.",
       "groupSessionRestore": "Session Restore",
       "groupTranscript": "Transcript",
       "groupStatusMessage": "Status Message",
