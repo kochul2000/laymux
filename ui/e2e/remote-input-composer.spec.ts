@@ -30,6 +30,7 @@ type RemoteState = {
   composerStarReads: ComposerStarRead[];
   starRevision: number;
   requests: Array<{ path: string; method: string; body: unknown }>;
+  writePaths: string[];
 };
 
 const pane = (terminalId: string, paneNumber: number, cwd: string, isFocused: boolean) => ({
@@ -515,6 +516,7 @@ async function installRemotePage(
     composerStarReads: [],
     starRevision: 0,
     requests: [],
+    writePaths: [],
   };
   let remainingClaimBusyResponses = options.claimBusyResponses ?? 0;
   await page.setViewportSize({ width: options.width ?? 390, height: 844 });
@@ -674,6 +676,7 @@ async function installRemotePage(
       return;
     }
     if (url.pathname.endsWith("/write")) {
+      state.writePaths.push(url.pathname);
       state.writes.push(route.request().postDataJSON() as RemoteState["writes"][number]);
       await route.fulfill({ json: { ok: true } });
       return;
@@ -1195,6 +1198,101 @@ test("physical keyboard shortcuts drive the lease-gated host actions (ADR-0269)"
   // terminal.toggleInputMode (Ctrl+Alt+M) is local: it switches to Direct.
   await editor.press("Control+Alt+m");
   await expect(page.locator("#terminalComposer")).toBeHidden();
+});
+
+// A pane move that takes a moment to land, landing on terminal-2 (ADR-0269).
+async function delayDirectionLanding(page: Page, delayMs = 600) {
+  await page.route("**/remote/v1/navigation/direction", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    await route.fulfill({
+      json: {
+        moved: true,
+        target: {
+          workspaceId: "ws-1",
+          workspaceName: "Main",
+          terminalId: "terminal-2",
+          paneId: "pane-2",
+          paneIndex: 1,
+          paneNumber: 2,
+          switchedWorkspace: false,
+        },
+      },
+    });
+  });
+}
+
+test("a clear pressed while a pane move lands targets the landing pane", async ({ page }) => {
+  const remote = await installRemotePage(page, { coarse: false, width: 1280 });
+  await delayDirectionLanding(page);
+  await connect(page);
+  const editor = page.locator("#composerInput");
+  await editor.click();
+
+  await editor.press("Alt+ArrowRight");
+  await editor.press("Alt+l");
+
+  await expect
+    .poll(() => remote.requests.find((request) => request.path.endsWith("/clear"))?.path)
+    .toBe("/remote/v1/terminals/terminal-2/clear");
+});
+
+test("Direct keys typed while a pane move lands go to the landing pane", async ({ page }) => {
+  const remote = await installRemotePage(page, {
+    coarse: false,
+    width: 1280,
+    storedMode: "direct",
+  });
+  await delayDirectionLanding(page);
+  await connect(page);
+  await page.locator("#terminal .xterm-helper-textarea").focus();
+
+  await page.keyboard.press("Alt+ArrowRight");
+  await page.evaluate(() =>
+    (
+      window as Window & { __mockTerminal: { emitData: (data: string) => void } }
+    ).__mockTerminal.emitData("ls\r"),
+  );
+
+  await expect.poll(() => remote.writes.findIndex((write) => write.data === "ls\r")).not.toBe(-1);
+  const index = remote.writes.findIndex((write) => write.data === "ls\r");
+  expect(remote.writePaths[index]).toBe("/remote/v1/terminals/terminal-2/write");
+  expect(remote.writePaths.some((path) => path.includes("terminal-1"))).toBe(false);
+});
+
+test("Ctrl+letter typed in the terminal stays with the shell even when rebound", async ({
+  page,
+}) => {
+  await installRemotePage(page, {
+    coarse: false,
+    width: 1280,
+    storedMode: "direct",
+    keybindings: [{ keys: "Ctrl+B", command: "sidebar.toggle" }],
+  });
+  await connect(page);
+  const nav = page.locator("#navToggle");
+  await page.evaluate(() => {
+    const seen: string[] = [];
+    (window as Window & { __seenKeys?: string[] }).__seenKeys = seen;
+    document.addEventListener("keydown", (event) => seen.push(event.key), true);
+  });
+  await page.locator("#terminal .xterm-helper-textarea").focus();
+
+  // Shell-owned: the Remote dispatcher lets Ctrl+B through to xterm.
+  await page.keyboard.press("Control+b");
+  await expect(nav).toHaveAttribute("aria-expanded", "false");
+  expect(
+    await page.evaluate(() => (window as Window & { __seenKeys?: string[] }).__seenKeys),
+  ).toContain("b");
+
+  // Terminal-scoped zoom keeps working from the terminal.
+  await page.keyboard.press("Control+0");
+  await expect(page.locator("#status")).toHaveText(/Terminal text \d+px/);
+
+  // From the Composer the rebound Ctrl+B is an IDE action.
+  await clickInputModeToggle(page);
+  await page.locator("#composerInput").click();
+  await page.keyboard.press("Control+b");
+  await expect(nav).toHaveAttribute("aria-expanded", "true");
 });
 
 test("Settings lists the physical keyboard shortcuts with host rebinds", async ({ page }) => {

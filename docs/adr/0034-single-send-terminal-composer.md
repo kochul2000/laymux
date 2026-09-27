@@ -1,6 +1,6 @@
 # 0034. Terminal composer는 Send 단일 action을 제공한다
 
-- Status: Accepted
+- Status: Accepted (partially superseded by [0036](0036-remote-composer-layout-rule.md), [0269](0269-remote-physical-keyboard-shortcuts.md))
 - Date: 2026-07-16
 - Source: 사용자 피드백(Insert와 Send의 구분이 일반적인 채팅형 composer 사용법과 어긋나고, Direct mode가 이미 실행 없는 터미널 편집을 제공함) · [ADR-0029](0029-detached-terminal-input-composer.md)
 

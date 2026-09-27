@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect } from "vitest";
 import {
   DEFAULT_KEYBINDINGS,
+  isShellOwnedCombo,
   keybindingMatchesEvent,
   resolveKeybindingFrom,
 } from "./keybinding-core";
@@ -131,6 +132,56 @@ describe("keybinding-core", () => {
     it("matches the Arrow wildcard", () => {
       expect(keybindingMatchesEvent("Alt+Arrow", key("ArrowLeft", { alt: true }))).toBe(true);
       expect(keybindingMatchesEvent("Alt+Arrow", key("Enter", { alt: true }))).toBe(false);
+    });
+  });
+
+  // Round 2 (PR #1088 review): Apple Ctrl chords and non-Latin shell ownership.
+  describe("Apple platforms: Ctrl never types text", () => {
+    const original = Object.getOwnPropertyDescriptor(Navigator.prototype, "platform");
+    function setPlatform(value: string) {
+      Object.defineProperty(navigator, "platform", { value, configurable: true });
+    }
+    afterEach(() => {
+      delete (navigator as unknown as Record<string, unknown>).platform;
+      if (original) Object.defineProperty(Navigator.prototype, "platform", original);
+    });
+
+    it("matches Mac Chrome Ctrl+Option+digit/letter through e.code", () => {
+      setPlatform("MacIntel");
+      expect(
+        keybindingMatchesEvent("Ctrl+Alt+1", key("¡", { ctrl: true, alt: true, code: "Digit1" })),
+      ).toBe(true);
+      expect(
+        keybindingMatchesEvent("Ctrl+Alt+L", key("¬", { ctrl: true, alt: true, code: "KeyL" })),
+      ).toBe(true);
+    });
+
+    it("still treats Option alone as text on a Mac", () => {
+      setPlatform("MacIntel");
+      expect(keybindingMatchesEvent("Alt+L", key("@", { alt: true, code: "KeyL" }))).toBe(false);
+    });
+
+    it("keeps Windows Ctrl+Alt (AltGr) text as text", () => {
+      setPlatform("Win32");
+      expect(
+        keybindingMatchesEvent("Ctrl+Alt+7", key("{", { ctrl: true, alt: true, code: "Digit7" })),
+      ).toBe(false);
+    });
+  });
+
+  describe("isShellOwnedCombo", () => {
+    it("owns Ctrl+letter/digit on Latin and non-Latin layouts alike", () => {
+      expect(isShellOwnedCombo(key("b", { ctrl: true, code: "KeyB" }))).toBe(true);
+      expect(isShellOwnedCombo(key("и", { ctrl: true, code: "KeyB" }))).toBe(true);
+      expect(isShellOwnedCombo(key("ㅠ", { ctrl: true, code: "KeyB" }))).toBe(true);
+    });
+
+    it("leaves other chords to the keybinding system", () => {
+      expect(isShellOwnedCombo(key("b", { ctrl: true, alt: true, code: "KeyB" }))).toBe(false);
+      expect(isShellOwnedCombo(key("B", { ctrl: true, shift: true, code: "KeyB" }))).toBe(false);
+      expect(isShellOwnedCombo(key("Enter", { ctrl: true, code: "Enter" }))).toBe(false);
+      expect(isShellOwnedCombo(key(",", { ctrl: true, code: "Comma" }))).toBe(false);
+      expect(isShellOwnedCombo(key("ł", { ctrl: true, code: "KeyL", altGraph: true }))).toBe(false);
     });
   });
 });

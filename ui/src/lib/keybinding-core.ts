@@ -463,15 +463,27 @@ function physicalKeyMayStandIn(e: KeyEventLike): boolean {
   if (e.getModifierState?.("AltGraph")) return false;
   if (e.key.length > 1) return true;
   if (HANGUL_JAMO_KEY.test(e.key)) return true;
+  // On Apple platforms Ctrl never types text, even with Option: Mac Chrome
+  // reports Ctrl+Option+1 as "¡" although nothing is typed.
+  if (e.ctrlKey && isApplePlatform()) return true;
   return e.ctrlKey && !e.altKey;
+}
+
+function isApplePlatform(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
 }
 
 /**
  * Ctrl+single letter/digit (no Alt/Shift) is shell territory in a terminal:
- * it stays with the shell even when a user binds an IDE action there.
+ * it stays with the shell even when a user binds an IDE action there. The
+ * letter is read the same way the matcher reads it, so a non-Latin layout
+ * (Russian Ctrl+И = Ctrl+B) is owned by the shell too.
  */
 export function isShellOwnedCombo(e: KeyEventLike): boolean {
-  return e.ctrlKey && !e.altKey && !e.shiftKey && LATIN_ALNUM_KEY.test(e.key);
+  if (!e.ctrlKey || e.altKey || e.shiftKey) return false;
+  if (LATIN_ALNUM_KEY.test(e.key)) return true;
+  return physicalKeyMayStandIn(e) && keyTokenFromCode(e.code) !== null;
 }
 
 /**

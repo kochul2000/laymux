@@ -8824,6 +8824,12 @@ import {
         };
         let navStepChain = Promise.resolve();
         let navStepPending = 0;
+        // Pane/workspace moves still landing (clears on the chain don't count).
+        // While one is landing the attached terminal is the one being left.
+        let navMovePending = 0;
+        // Direct input typed while a move lands; it follows the move (ADR-0269).
+        let landingInput = "";
+        const LANDING_INPUT_MAX = 4096;
 
         async function performNavStep(kind, direction) {
           if (!leaseId) return;
@@ -8864,9 +8870,10 @@ import {
         // Keyboard workspace moves share the chain (ADR-0269): a key pressed
         // while an earlier move is still landing must not pick its target from
         // the stale snapshot.
-        function enqueueRemoteNavigation(task, button = null) {
+        function enqueueRemoteNavigation(task, button = null, { move = true } = {}) {
           if (!leaseId || navStepPending >= 2) return;
           navStepPending += 1;
+          if (move) navMovePending += 1;
           if (button) {
             // Per-button counter: a queued double-tap must not lose its busy
             // dim when the first step's finally fires.
@@ -8878,6 +8885,10 @@ import {
             .catch((err) => setStatus(`Navigation failed: ${err.message || err}`, true))
             .finally(() => {
               navStepPending -= 1;
+              if (move) {
+                navMovePending -= 1;
+                if (navMovePending === 0) flushLandingInput();
+              }
               if (button) {
                 const remaining = (Number(button.dataset.busyCount) || 1) - 1;
                 button.dataset.busyCount = String(remaining);
@@ -8915,7 +8926,7 @@ import {
             label: "Clear this terminal",
             needsLease: true,
             run: () => {
-              enqueueRemoteNavigation(() => runRemoteClear("pane"));
+              enqueueRemoteNavigation(() => runRemoteClear("pane"), null, { move: false });
               return true;
             },
           },
@@ -8924,7 +8935,7 @@ import {
             label: "Clear workspace terminals",
             needsLease: true,
             run: () => {
-              enqueueRemoteNavigation(() => runRemoteClear("workspace"));
+              enqueueRemoteNavigation(() => runRemoteClear("workspace"), null, { move: false });
               return true;
             },
           },
@@ -10640,7 +10651,7 @@ import {
           if (!leaseId || !activeTerminalId || !composerReady) return;
           // A pane/workspace move is still landing (ADR-0269): the draft belongs
           // to the pane being left, so sending now would hit the wrong terminal.
-          if (navStepPending > 0) {
+          if (navMovePending > 0) {
             setStatus("Moving to another pane — send again once it opens.");
             return;
           }
@@ -10765,8 +10776,25 @@ import {
           queueInputWrite(dataToSend, inputTerminalId, inputLeaseId);
         }
 
+        // Keys typed while a pane/workspace move lands belong to the pane the
+        // user is moving to, as on the desktop; hold them until it opens.
+        function holdLandingInput(data) {
+          if (navMovePending === 0) return false;
+          if (landingInput.length + data.length <= LANDING_INPUT_MAX) landingInput += data;
+          return true;
+        }
+
+        function flushLandingInput() {
+          const data = landingInput;
+          landingInput = "";
+          if (!data || !leaseId || !activeTerminalId) return;
+          flushPendingInput();
+          queueInputWrite(data, activeTerminalId, leaseId);
+        }
+
         function enqueueInput(data) {
           if (!leaseId || !activeTerminalId) return;
+          if (holdLandingInput(data)) return;
           if (
             pendingInput &&
             (pendingInputTerminalId !== activeTerminalId || pendingInputLeaseId !== leaseId)
@@ -10789,6 +10817,7 @@ import {
           ) {
             return;
           }
+          if (holdLandingInput(data.repeat(repeat))) return;
           flushPendingInput();
           const inputTerminalId = activeTerminalId;
           const inputLeaseId = leaseId;
@@ -11331,6 +11360,12 @@ import {
           if (!seq) return;
           if (def.submit === true) {
             if (!leaseId || !activeTerminalId || !composerReady) return;
+            // Like a Composer send, a submitting key never lands on the pane a
+            // move is leaving (ADR-0269).
+            if (navMovePending > 0) {
+              setStatus("Moving to another pane — send again once it opens.");
+              return;
+            }
             flushPendingInput();
             queueInputWrite(seq, activeTerminalId, leaseId, true);
           } else {
