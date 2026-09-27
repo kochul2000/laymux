@@ -4281,9 +4281,31 @@ import {
         // so its next tap dismisses instead of raising (ADR-0196, generalizing
         // the boot autoConnect fix in #848 to every attach). Touch devices let
         // the first real gesture own the focus; fine pointers keep typing
-        // straight after Connect.
+        // straight after Connect. A confirmed physical keyboard does not need
+        // an IME gesture, but still must respect other input owners (ADR-0275).
         function focusInputSurfaceAfterAwait() {
-          if (coarsePointer) return;
+          if (coarsePointer && physicalKeyboardConnected !== true) return;
+          if (physicalKeyboardConnected === true && !canRestorePhysicalKeyboardFocus()) return;
+          focusCurrentInputSurface();
+        }
+
+        function canRestorePhysicalKeyboardFocus() {
+          return physicalKeyboardConnected === true && Boolean(leaseId && activeTerminalId) &&
+            document.visibilityState === "visible" && !composerIsComposing &&
+            !remoteOverlayOpen() && navScrim.hidden &&
+            !isForeignEditableTarget(document.activeElement) &&
+            !Array.from(document.querySelectorAll('dialog[open], [aria-modal="true"]'))
+              .some((dialog) => dialog.getClientRects().length > 0);
+        }
+
+        function restorePhysicalKeyboardFocusForTyping(event) {
+          if (event.defaultPrevented || !event.isTrusted || event.isComposing ||
+              event.ctrlKey || event.altKey || event.metaKey ||
+              !(event.key.length === 1 || event.key === "Dead" || event.key === "Process") ||
+              inputSurfaceFocused() || isForeignEditableTarget(event.target) ||
+              !canRestorePhysicalKeyboardFocus()) return;
+          // Let the browser deliver this same key's text/IME input to the newly
+          // focused surface; replaying keydown or writing text would duplicate it.
           focusCurrentInputSurface();
         }
 
@@ -13990,6 +14012,7 @@ import {
         // Physical keyboard shortcuts (ADR-0269). Capture phase so xterm never
         // writes a bound combo to the PTY and the browser never acts on it.
         window.addEventListener("keydown", handleRemoteShortcutKeyDown, true);
+        window.addEventListener("keydown", restorePhysicalKeyboardFocusForTyping, true);
         renderKeyboardShortcutList();
         // xterm completes a mouse selection from a document-level mouseup handler.
         // Listen at the same boundary so releasing an outside-terminal drag still
@@ -14448,6 +14471,7 @@ import {
           window.removeEventListener("pointerdown", handleLinkChipOutsidePointerDown, true);
           window.removeEventListener("keydown", handleLinkChipKeyDown, true);
           window.removeEventListener("keydown", handleRemoteShortcutKeyDown, true);
+          window.removeEventListener("keydown", restorePhysicalKeyboardFocusForTyping, true);
           window.removeEventListener("keyup", handleRemoteNavigationKey, true);
           window.removeEventListener("pageshow", refreshPhysicalKeyboard);
           clearPathLinkSelection();
