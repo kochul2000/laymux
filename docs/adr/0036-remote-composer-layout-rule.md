@@ -1,6 +1,6 @@
 # 0036. Remote composer 전송 gesture는 pointer가 아니라 layout을 따른다 (0034 보완)
 
-- Status: Accepted
+- Status: Accepted (partially superseded by [0269](0269-remote-physical-keyboard-shortcuts.md))
 - Date: 2026-07-18
 - Source: 사용자 결정(PC 앱 모바일 뷰는 "모양이 모바일이면 거동도 모바일") · PR #466 리뷰 · [ADR-0034](0034-single-send-terminal-composer.md)
 
