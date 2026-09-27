@@ -70,6 +70,64 @@ async function settings(page: Page, tab = "Input bar") {
 const keybar = (page: Page) => page.evaluate(() => localStorage.getItem("laymux.remote.keybar"));
 const floatingPad = (page: Page) => page.locator('#floatingControls [data-key="dpad"]');
 
+test.use({ locale: "ko-KR" });
+
+for (const locale of ["en-US", "fr-FR"]) {
+  test.describe(`${locale} 토스트 번역`, () => {
+    test.use({ locale });
+    test("영어와 미지원 언어는 영어 연결·해제 문구를 표시한다", async ({ page }) => {
+      await openControls(page);
+      await keyboardConnection(page, true);
+      await expect(page.locator("#physicalKeyboardToast")).toHaveText(
+        "Physical keyboard connected.",
+      );
+      await keyboardConnection(page, false);
+      await expect(page.locator("#physicalKeyboardToast")).toHaveText(
+        "Physical keyboard disconnected.",
+      );
+    });
+  });
+}
+
+test("물리 키보드 연결·해제 토스트는 최신 상태를 표시하고 중복 통지로 연장하지 않는다", async ({
+  page,
+}, info) => {
+  await openControls(page);
+  await page.clock.install();
+  const toast = page.locator("#physicalKeyboardToast");
+  await expect(toast).toBeHidden();
+  await keyboardConnection(page, true);
+  await expect(toast).toBeVisible();
+  await expect(toast).toHaveText("물리 키보드가 연결되었습니다.");
+  await page.screenshot({ path: info.outputPath("keyboard-connected-toast.png") });
+  await page.clock.fastForward(2000);
+  await keyboardConnection(page, false);
+  await expect(toast).toHaveText("물리 키보드 연결이 해제되었습니다.");
+  await page.screenshot({ path: info.outputPath("keyboard-disconnected-toast.png") });
+  await page.clock.fastForward(2000);
+  await expect(toast).toBeVisible();
+  await keyboardConnection(page, false);
+  await page.clock.fastForward(1100);
+  await expect(toast).toBeHidden();
+});
+
+test("초기 snapshot은 조용히 적용하고 복귀 중 확인된 변화는 한 번 알린다", async ({ page }) => {
+  await openControls(page, { connected: true });
+  await page.clock.install();
+  const toast = page.locator("#physicalKeyboardToast");
+  await expect(toast).toBeHidden();
+  await page.evaluate(() => {
+    (window as KeyboardWindow).__keyboardConnected = false;
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+  });
+  await expect(toast).toBeVisible();
+  await expect(toast).toHaveText("물리 키보드 연결이 해제되었습니다.");
+  await page.clock.fastForward(2000);
+  await keyboardConnection(page, false);
+  await page.clock.fastForward(1100);
+  await expect(toast).toBeHidden();
+});
+
 test("연결·분리가 플로팅과 Keys 표시만 바꾸고 원래 설정을 보존한다", async ({ page }, info) => {
   await openControls(page);
   await page.locator("#navToggle").click();
@@ -120,6 +178,7 @@ test("구형 Android bridge와 일반 브라우저는 키 입력 후에도 자�
     await openControls(page, { android, supported: false });
     await page.locator("#navToggle").click();
     await page.keyboard.press("Alt+ArrowDown");
+    await expect(page.locator("#physicalKeyboardToast")).toBeHidden();
     await expect(floatingPad(page)).toBeVisible();
     await expect(page.locator("#keyBar")).toBeVisible();
     await settings(page);
