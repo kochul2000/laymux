@@ -444,7 +444,7 @@ interface KeyEventLike {
   altKey: boolean;
   shiftKey: boolean;
   metaKey?: boolean;
-  getModifierState?: (key: string) => boolean;
+  getModifierState?: (key: "AltGraph") => boolean;
 }
 
 /**

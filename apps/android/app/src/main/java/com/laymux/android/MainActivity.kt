@@ -9,6 +9,7 @@ import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.graphics.Color
+import android.hardware.input.InputManager
 import android.net.Uri
 import android.provider.MediaStore
 import android.util.Base64
@@ -106,6 +107,8 @@ import com.laymux.android.web.JsDialogChromeClient
 import com.laymux.android.web.LocalContentWebViewClient
 import com.laymux.android.web.RemoteBackGuard
 import com.laymux.android.web.RemoteBridge
+import com.laymux.android.web.AndroidPhysicalKeyboardSource
+import com.laymux.android.web.PhysicalKeyboardMonitor
 import com.laymux.android.web.RemoteDocumentAuthority
 import com.laymux.android.web.RemoteDownloadPolicy
 import com.laymux.android.web.RemoteFileOpener
@@ -235,6 +238,12 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private val remoteDocumentAuthority = RemoteDocumentAuthority()
     private var secureWebViewGeneration = 0L
     @Volatile private var remoteLifecycleActive = false
+    private val physicalKeyboardMonitor by lazy {
+        PhysicalKeyboardMonitor(
+            AndroidPhysicalKeyboardSource(getSystemService(InputManager::class.java)),
+            ::notifyPhysicalKeyboardChanged,
+        )
+    }
 
     private val fileChooserLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -971,6 +980,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     private fun onRemoteDocumentLoaded(documentGeneration: Long) {
         if (!remoteBridgeActionsEnabled(documentGeneration)) return
+        notifyPhysicalKeyboardChanged(physicalKeyboardMonitor.connected)
         remoteLoadingOverlay.visibility = View.GONE
         // Let the overlay visibility/layout change settle before restoring the
         // touch-derived WebView focus used to create its editable InputConnection.
@@ -1161,6 +1171,19 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     fun remoteConnecting(): Boolean = remoteConnecting
 
     fun remoteSessionExpiresAt(): Long? = remoteSession?.expiresAtEpochSeconds
+
+    fun isPhysicalKeyboardConnected(documentGeneration: Long): Boolean =
+        remoteBridgeActionsEnabled(documentGeneration) && physicalKeyboardMonitor.connected
+
+    private fun notifyPhysicalKeyboardChanged(connected: Boolean) {
+        if (!remoteLifecycleActive || isDestroyed || !::webView.isInitialized ||
+            !remoteBridgeActionsEnabled(secureWebViewGeneration)
+        ) return
+        webView.evaluateJavascript(
+            "window.laymuxPhysicalKeyboard?.onChanged($connected)",
+            null,
+        )
+    }
 
     fun setRemoteLease(documentGeneration: Long, leaseId: String?) {
         if (!remoteBridgeActionsEnabled(documentGeneration)) return
@@ -3241,6 +3264,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     override fun onStart() {
         super.onStart()
         remoteLifecycleActive = true
+        physicalKeyboardMonitor.start()
         // 콜드 스타트와 전면 복귀가 유일한 트리거다. 6시간 throttle 은 컨트롤러가
         // 지키므로 여기서는 조건 없이 부른다 (ADR-0197).
         updateController.check(UpdateSchedule.Trigger.PERIODIC)
@@ -3283,6 +3307,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     override fun onStop() {
+        physicalKeyboardMonitor.stop()
         if (scannerModuleListener != null) {
             scanInFlight = false
             clearScannerModuleListener()
@@ -3310,6 +3335,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     override fun onDestroy() {
+        physicalKeyboardMonitor.stop()
         revokeRemoteDocument()
         clearRemoteBackWarning()
         cancelPendingFileChooser()

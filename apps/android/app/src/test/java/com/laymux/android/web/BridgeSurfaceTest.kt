@@ -21,6 +21,7 @@ class BridgeSurfaceTest {
                 "openRemoteFile",
                 "saveRemoteFile",
                 "supportsOutputHistoryBudget",
+                "isPhysicalKeyboardConnected",
             ),
             javascriptMethods(RemoteBridge::class.java),
         )
