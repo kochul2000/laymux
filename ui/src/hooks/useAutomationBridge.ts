@@ -138,8 +138,17 @@ function checkWorkspaceExists(workspaceId: string): HandlerResult | null {
   return null;
 }
 
+/** Remote lease holder behind a Remote-requested clear (ADR-0271), if any. */
+function remoteLeaseIdParam(params: Record<string, unknown>): string | undefined {
+  const leaseId = params.remoteLeaseId;
+  return typeof leaseId === "string" && leaseId.length > 0 ? leaseId : undefined;
+}
+
 /** Run a single-pane clear without exceeding the frontend bridge budget. */
-async function runCappedPaneClear(paneId: string): Promise<HandlerResult> {
+async function runCappedPaneClear(
+  paneId: string,
+  remoteLeaseId: string | undefined,
+): Promise<HandlerResult> {
   const settings = useSettingsStore.getState().paneClear;
   const configured = resolvePaneClear(settings);
   const effective = resolvePaneClear(settings, {
@@ -149,6 +158,7 @@ async function runCappedPaneClear(paneId: string): Promise<HandlerResult> {
     const result = await clearPane(paneId, settings, {
       maxWaitMs: AUTOMATION_PANE_CLEAR_WAIT_BUDGET_MS,
       hardDeadlineMs: AUTOMATION_PANE_CLEAR_DEADLINE_MS,
+      remoteLeaseId,
     });
     return ok({
       paneId,
@@ -687,6 +697,21 @@ const handlers: HandlerMap = {
           new Set<string>((excludedWorkspaceIds as string[] | undefined) ?? []),
         ),
       );
+    },
+    // Remote form of the desktop pane.focus shortcut (ADR-0269).
+    directionStep: (p) => {
+      const direction = p.direction;
+      if (
+        direction !== "up" &&
+        direction !== "down" &&
+        direction !== "left" &&
+        direction !== "right"
+      ) {
+        return err(
+          `Invalid direction '${String(direction)}': expected "up", "down", "left" or "right"`,
+        );
+      }
+      return ok(navigationActions.directionStep(direction));
     },
     notificationStep: (p) => {
       const direction = p.direction;
@@ -1465,14 +1490,16 @@ export async function handleAsyncAutomationRequest(
     const wsErr = checkWorkspaceExists(id);
     if (wsErr) return wsErr;
     try {
-      const result = await clearWorkspace(id);
+      const result = await clearWorkspace(id, {
+        remoteLeaseId: remoteLeaseIdParam(request.params),
+      });
       return ok({ workspaceId: id, ...result });
     } catch (e) {
       return err(`Workspace clear error: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
   if (request.target === "panes" && request.method === "clear") {
-    return runCappedPaneClear(request.params.paneId as string);
+    return runCappedPaneClear(request.params.paneId as string, remoteLeaseIdParam(request.params));
   }
   if (request.target === "terminals" && request.method === "setFocus") {
     const result = handleAutomationRequest(request);
@@ -1510,7 +1537,9 @@ export async function handleAsyncAutomationRequest(
   }
   if (
     request.target === "navigation" &&
-    (request.method === "spatialStep" || request.method === "notificationStep")
+    (request.method === "spatialStep" ||
+      request.method === "directionStep" ||
+      request.method === "notificationStep")
   ) {
     const result = handleAutomationRequest(request);
     if (!result.success) return result;

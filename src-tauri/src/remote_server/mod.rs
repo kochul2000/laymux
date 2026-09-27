@@ -6,6 +6,7 @@ mod appearance;
 mod assets;
 mod attachments;
 mod auth;
+mod clear_routes;
 mod composer_routes;
 pub(crate) mod device_settings;
 mod font_assets;

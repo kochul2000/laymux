@@ -1039,6 +1039,27 @@
         text-transform: none;
         opacity: 1;
       }
+      .keyboard-shortcut-list {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 6px 12px;
+        margin: 0 4px;
+        font-size: var(--fs-sm);
+      }
+
+      .keyboard-shortcut-list dt {
+        min-width: 0;
+        color: var(--text-primary);
+      }
+
+      .keyboard-shortcut-list dd {
+        margin: 0;
+        color: var(--muted);
+        font-family: ui-monospace, monospace;
+        text-align: right;
+        white-space: nowrap;
+      }
+
       .settings-page-description {
         margin: -8px 4px 20px;
         color: var(--text-secondary);

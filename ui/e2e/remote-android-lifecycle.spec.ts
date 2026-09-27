@@ -620,7 +620,7 @@ test("Android back dismisses the top Remote layer before the disconnect guard", 
   // without blurring the composer, so exercise the real simultaneous state.
   const composer = page.locator("#composerInput");
   await composer.fill("echo remembered");
-  await composer.press("Enter");
+  await composer.press("Control+Enter"); // composer.remote.send (ADR-0269)
   await expect(composer).toHaveText("");
   await composer.fill("echo");
   await expect(page.locator("#composerAutocompleteList")).toBeVisible();

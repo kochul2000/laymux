@@ -1576,6 +1576,43 @@ pub fn write_terminal_input(
     write_terminal_input_inner(&state, &id, &text, submit, HumanControlOrigin::Local)
 }
 
+/// Raw write for a desktop-executed action that the Remote lease holder
+/// requested (ADR-0271). The write carries that lease, so the human-control
+/// owner check accepts it only while the lease is still the active one.
+#[tauri::command]
+pub fn write_to_terminal_for_remote(
+    id: String,
+    data: String,
+    lease_id: String,
+    state: State<Arc<AppState>>,
+) -> Result<(), String> {
+    write_to_terminal_inner(
+        &state,
+        &id,
+        data.as_bytes(),
+        HumanControlOrigin::Remote { lease_id },
+    )
+}
+
+/// Structured input for a desktop-executed action that the Remote lease holder
+/// requested (ADR-0271). See [`write_to_terminal_for_remote`].
+#[tauri::command]
+pub fn write_terminal_input_for_remote(
+    id: String,
+    text: String,
+    submit: bool,
+    lease_id: String,
+    state: State<Arc<AppState>>,
+) -> Result<(), String> {
+    write_terminal_input_inner(
+        &state,
+        &id,
+        &text,
+        submit,
+        HumanControlOrigin::Remote { lease_id },
+    )
+}
+
 pub fn write_terminal_input_inner(
     state: &AppState,
     id: &str,

@@ -1,4 +1,5 @@
 import { findNotificationNavTarget } from "@/lib/notification-navigation";
+import { findPaneInDirection, type Direction } from "@/lib/pane-navigation";
 import { toPaneId, toTerminalId } from "@/lib/pane-ids";
 import { paneNumberFor } from "@/lib/pane-numbers";
 import {
@@ -21,7 +22,8 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
  * Notification navigation is shared with desktop keyboard shortcuts. Spatial
  * navigation is a Remote-only action and applies the controlling Remote
  * client's surface-local exclusions at both pane and whole-workspace
- * granularity.
+ * granularity. Direction navigation is the Remote form of the desktop
+ * `pane.focus` shortcut (ADR-0269).
  */
 
 export type NotificationDirection = "recent" | "oldest";
@@ -44,6 +46,7 @@ export type NavigationStepResult =
         | "no_terminal_panes"
         | "no_included_panes"
         | "no_other_target"
+        | "no_focused_pane"
         | "no_unread_notifications";
     };
 
@@ -117,6 +120,50 @@ export function spatialStep(
       paneIndex: target.paneIndex,
       paneNumber: target.paneNumber,
       switchedWorkspace,
+    },
+  };
+}
+
+/**
+ * Move to the terminal pane in a grid direction inside the active workspace,
+ * with the same geometry as the desktop  shortcut (ADR-0269).
+ * Only TerminalView panes are candidates because Remote can only show those.
+ * It stops at the workspace edge, never enters a dock (ADR-0020), and ignores
+ * the Remote cycle exclusions, which belong to spatialStep (ADR-0046).
+ */
+export function directionStep(direction: Direction): NavigationStepResult {
+  const workspace = useWorkspaceStore.getState().getActiveWorkspace();
+  const terminalIndexes = (workspace?.panes ?? []).flatMap((pane, index) =>
+    pane.view.type === "TerminalView" ? [index] : [],
+  );
+  if (!workspace || terminalIndexes.length === 0) {
+    return { moved: false, reason: "no_terminal_panes" };
+  }
+
+  const { focusedPaneIndex } = useGridStore.getState();
+  const dockFocused = useDockStore.getState().focusedDock !== null;
+  const anchor =
+    dockFocused || focusedPaneIndex === null ? -1 : terminalIndexes.indexOf(focusedPaneIndex);
+  if (anchor < 0) return { moved: false, reason: "no_focused_pane" };
+
+  const candidates = terminalIndexes.map((index) => workspace.panes[index]);
+  const next = findPaneInDirection(candidates, anchor, direction);
+  if (next === null) return { moved: false, reason: "no_other_target" };
+
+  const paneIndex = terminalIndexes[next];
+  const pane = workspace.panes[paneIndex];
+  focusWorkspacePane(workspace.id, paneIndex);
+
+  return {
+    moved: true,
+    target: {
+      workspaceId: workspace.id,
+      workspaceName: workspace.name,
+      terminalId: toTerminalId(pane.id),
+      paneId: pane.id,
+      paneIndex,
+      paneNumber: paneNumberFor(workspace.panes, pane.id),
+      switchedWorkspace: false,
     },
   };
 }

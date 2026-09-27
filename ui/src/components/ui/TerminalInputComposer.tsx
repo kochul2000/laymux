@@ -23,6 +23,7 @@ import {
   type ComposerAutocompleteSuggestion,
   type InputMode,
 } from "@/lib/terminal-input-composer-state";
+import { matchesKeybinding } from "@/lib/keybinding-registry";
 import { ComposerStarredEntryEditor } from "@/components/ui/ComposerStarredEntryEditor";
 import { StarIcon } from "@/components/ui/icons";
 
@@ -129,15 +130,33 @@ function joinClassNames(...parts: Array<string | undefined>): string {
   return parts.filter(Boolean).join(" ");
 }
 
+/** A textarea's own default action already inserts a newline for Enter / Shift+Enter. */
+function textareaInsertsNewline(event: ReactKeyboardEvent<HTMLTextAreaElement>): boolean {
+  return event.key === "Enter" && !event.ctrlKey && !event.altKey && !event.metaKey;
+}
+
+/**
+ * Insert "\n" over the current selection. `setRangeText` moves the caret with
+ * the edit, so the controlled re-render that follows keeps it in place.
+ */
+function insertNewlineAtSelection(
+  textarea: HTMLTextAreaElement,
+  onTextChange: (text: string) => void,
+) {
+  textarea.setRangeText("\n", textarea.selectionStart, textarea.selectionEnd, "end");
+  onTextChange(textarea.value);
+}
+
 /**
  * Bottom editor surface for the detached "Composer" input mode. The mode toggle
  * itself lives in the pane control bar (see PaneControlBar), so this component
  * only renders when Composer is active and collapses to an inert, zero-footprint
  * host in Direct mode — the terminal keeps all of its vertical space.
  *
- * There is no Send button: plain Enter submits, Shift+Enter inserts a newline.
- * `data-can-send` reflects whether Enter would submit right now (used by tests
- * and any external affordance in place of a disabled button).
+ * There is no Send button: `composer.pc.send` (default Enter) submits and
+ * `composer.pc.newline` (default Shift+Enter) inserts a newline (ADR-0269).
+ * `data-can-send` reflects whether the send key would submit right now (used by
+ * tests and any external affordance in place of a disabled button).
  *
  * Height is resized by dragging the top edge upward (not a textarea corner grip),
  * and the chosen height persists as a desktop UI preference.
@@ -482,11 +501,12 @@ export function TerminalInputComposer({
       }
     }
 
-    // Shift+Enter is the newline gesture (even on an empty draft, to start a
-    // multiline one) — never offered for passthrough. Except while the host owns the
-    // keyboard: a draft started there would be stranded, since the keys that submit
-    // or erase it belong to the app (issue #560). Then it passes through as Enter.
-    const newlineGesture = event.key === "Enter" && event.shiftKey && !keyProxyActive();
+    // `composer.pc.newline` (default Shift+Enter) is the newline gesture (even on an
+    // empty draft, to start a multiline one) — never offered for passthrough. Except
+    // while the host owns the keyboard: a draft started there would be stranded,
+    // since the keys that submit or erase it belong to the app (issue #560). Then it
+    // passes through like any other key.
+    const newlineGesture = matchesKeybinding(event, "composer.pc.newline") && !keyProxyActive();
 
     // Let the host forward empty-draft nav/control keys / full-screen-app keys
     // to the PTY. The host checks laymux keybindings first (rebind-aware).
@@ -500,11 +520,22 @@ export function TerminalInputComposer({
       return;
     }
 
-    if (event.key !== "Enter" || event.shiftKey) return;
     if (composing) return;
 
-    // Plain Enter is the Send gesture. While an action is already in flight,
-    // consume repeats without turning them into accidental draft newlines.
+    if (newlineGesture) {
+      // A textarea inserts the newline itself for Enter / Shift+Enter; any other
+      // combo (e.g. a rebound Ctrl+J) inserts it here.
+      if (textareaInsertsNewline(event)) return;
+      event.preventDefault();
+      insertNewlineAtSelection(event.currentTarget, onTextChange);
+      return;
+    }
+
+    if (!matchesKeybinding(event, "composer.pc.send")) return;
+
+    // `composer.pc.send` (default Enter) is the Send gesture. While an action is
+    // already in flight, consume repeats without turning them into accidental
+    // draft newlines.
     event.preventDefault();
     if (!actionDisabled) onSend();
   };

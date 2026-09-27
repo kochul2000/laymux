@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { act, cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TerminalInputComposer, type TerminalInputComposerLabels } from "./TerminalInputComposer";
 import {
   COMPOSER_STARRED_EDITOR_LONG_PRESS_MS,
   type InputMode,
 } from "@/lib/terminal-input-composer-state";
+import { useSettingsStore } from "@/stores/settings-store";
 
 const labels: TerminalInputComposerLabels = {
   editor: "Terminal input",
@@ -91,6 +92,80 @@ describe("TerminalInputComposer", () => {
     textarea.dispatchEvent(newlineEvent);
     expect(newlineEvent.defaultPrevented).toBe(false);
     expect(onSend).toHaveBeenCalledTimes(1);
+  });
+
+  describe("rebound Composer keys (ADR-0269)", () => {
+    afterEach(() => {
+      useSettingsStore.setState({ keybindings: [] });
+    });
+
+    it("sends on a rebound composer.pc.send and leaves plain Enter to the textarea", () => {
+      useSettingsStore.setState({
+        keybindings: [{ keys: "Ctrl+Enter", command: "composer.pc.send" }],
+      });
+      const onSend = vi.fn();
+      renderComposer({ onSend });
+      const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+      const plain = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+      textarea.dispatchEvent(plain);
+      expect(plain.defaultPrevented).toBe(false);
+      expect(onSend).not.toHaveBeenCalled();
+
+      const chord = new KeyboardEvent("keydown", {
+        key: "Enter",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      textarea.dispatchEvent(chord);
+      expect(chord.defaultPrevented).toBe(true);
+      expect(onSend).toHaveBeenCalledTimes(1);
+    });
+
+    it("inserts a newline at the caret for a rebound composer.pc.newline", () => {
+      useSettingsStore.setState({
+        keybindings: [{ keys: "Ctrl+J", command: "composer.pc.newline" }],
+      });
+      const onTextChange = vi.fn();
+      const onKeyPassthrough = vi.fn().mockReturnValue(true);
+      renderComposer({ onTextChange, onKeyPassthrough });
+      const textarea = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Terminal input" });
+      textarea.setSelectionRange(2, 2);
+
+      const event = new KeyboardEvent("keydown", {
+        key: "j",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      textarea.dispatchEvent(event);
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(onKeyPassthrough).not.toHaveBeenCalled();
+      expect(onTextChange).toHaveBeenCalledWith("dr\naft");
+    });
+
+    it("never inserts a rebound newline mid-composition", () => {
+      useSettingsStore.setState({
+        keybindings: [{ keys: "Ctrl+J", command: "composer.pc.newline" }],
+      });
+      const onTextChange = vi.fn();
+      renderComposer({ onTextChange });
+      const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+      const event = new KeyboardEvent("keydown", {
+        key: "j",
+        ctrlKey: true,
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      textarea.dispatchEvent(event);
+
+      expect(event.defaultPrevented).toBe(false);
+      expect(onTextChange).not.toHaveBeenCalled();
+    });
   });
 
   // Issue #560. Three gestures reach the draft without passing through the keydown

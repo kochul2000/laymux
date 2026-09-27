@@ -6,7 +6,9 @@ import { CTRL_C, INTERRUPT_ROUND_INTERVAL_MS } from "./terminal-interrupt";
 import {
   getTerminalStates,
   writeTerminalInput,
+  writeTerminalInputForRemote,
   writeToTerminal,
+  writeToTerminalForRemote,
   type PaneClearBusyPolicy,
   type PaneClearSettings,
 } from "./tauri-api";
@@ -55,6 +57,11 @@ export interface ResolvePaneClearOptions {
 export interface ClearPaneOptions extends ResolvePaneClearOptions {
   /** Wall-clock allowance after which this run issues no new writes. */
   hardDeadlineMs?: number;
+  /**
+   * Remote lease holder that requested this clear (ADR-0271). Its writes carry
+   * that lease instead of Local input, which a held lease rejects.
+   */
+  remoteLeaseId?: string;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -252,6 +259,7 @@ export async function clearPane(
   if (!findTerminalPane(paneId)) throw new Error(`Pane '${paneId}' is not a terminal pane`);
 
   const config = resolvePaneClear(settings, options);
+  const { remoteLeaseId } = options;
   const terminalId = toTerminalId(paneId);
   const deadlineAt =
     options.hardDeadlineMs === undefined ? undefined : Date.now() + options.hardDeadlineMs;
@@ -317,8 +325,14 @@ export async function clearPane(
   return runPaneClearAction({
     action,
     config,
-    submit: (id, text) => writeTerminalInput(id, text, true),
-    interrupt: (id) => writeToTerminal(id, CTRL_C),
+    submit: (id, text) =>
+      remoteLeaseId === undefined
+        ? writeTerminalInput(id, text, true)
+        : writeTerminalInputForRemote(id, text, true, remoteLeaseId),
+    interrupt: (id) =>
+      remoteLeaseId === undefined
+        ? writeToTerminal(id, CTRL_C)
+        : writeToTerminalForRemote(id, CTRL_C, remoteLeaseId),
     restart: (id) => {
       const pane = findTerminalPane(id);
       useTerminalRestartStore

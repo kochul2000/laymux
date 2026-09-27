@@ -29,6 +29,7 @@ type RemoteState = {
   starredEntries: Array<{ value: string; label: string; send: boolean }>;
   composerStarReads: ComposerStarRead[];
   starRevision: number;
+  requests: Array<{ path: string; method: string; body: unknown }>;
 };
 
 const pane = (terminalId: string, paneNumber: number, cwd: string, isFocused: boolean) => ({
@@ -495,6 +496,7 @@ async function installRemotePage(
     width?: number;
     starredEntries?: Array<string | { value: string; label?: string; send?: boolean }>;
     holdInitialComposerStars?: boolean;
+    keybindings?: Array<{ keys: string; command: string }>;
   },
 ): Promise<RemoteState> {
   const toStarred = (
@@ -512,6 +514,7 @@ async function installRemotePage(
     starredEntries: (options.starredEntries ?? []).map(toStarred),
     composerStarReads: [],
     starRevision: 0,
+    requests: [],
   };
   let remainingClaimBusyResponses = options.claimBusyResponses ?? 0;
   await page.setViewportSize({ width: options.width ?? 390, height: 844 });
@@ -610,7 +613,10 @@ async function installRemotePage(
       return;
     }
     if (url.pathname === "/remote/v1/navigation") {
-      const navigationWithActivity = structuredClone(navigation);
+      const navigationWithActivity: typeof navigation & {
+        keybindings?: Array<{ keys: string; command: string }>;
+      } = structuredClone(navigation);
+      if (options.keybindings) navigationWithActivity.keybindings = options.keybindings;
       if (options.activeAgent) {
         const updateActivity = (items: typeof panes) => {
           items[0].activity = { type: "interactiveApp", name: options.activeAgent };
@@ -672,6 +678,12 @@ async function installRemotePage(
       await route.fulfill({ json: { ok: true } });
       return;
     }
+    const request = route.request();
+    state.requests.push({
+      path: url.pathname,
+      method: request.method(),
+      body: request.postData() ? request.postDataJSON() : null,
+    });
     await route.fulfill({ json: { ok: true } });
   });
 
@@ -970,7 +982,7 @@ test("a terminal switch isolates the old socket and readiness before delayed hos
   await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
 });
 
-test("fine-pointer Composer sends on Enter and keeps Shift+Enter as a newline", async ({
+test("fine-pointer Composer sends on Ctrl+Enter and keeps Enter as a newline (ADR-0269)", async ({
   page,
 }) => {
   const remote = await installRemotePage(page, { coarse: false, width: 1280 });
@@ -979,32 +991,46 @@ test("fine-pointer Composer sends on Enter and keeps Shift+Enter as a newline", 
   const editor = page.locator("#composerInput");
   await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
   // Send is a configurable action and remains available in Composer on every
-  // layout; desktop Enter continues to provide the keyboard gesture too.
+  // layout; composer.remote.send provides the keyboard gesture.
   await expect(page.locator("#composerSend")).toBeVisible();
 
-  // The desktop keydown guards: Enter mid-composition (isComposing) and the
-  // soft-keyboard keyCode 229 variant never submit.
+  // IME guards: the send combo mid-composition (isComposing) and the
+  // keyCode 229 variant never submit.
   await editor.fill("한글 조합");
   await editor.dispatchEvent("compositionstart");
-  await editor.dispatchEvent("keydown", { key: "Enter", code: "Enter", isComposing: true });
+  await editor.dispatchEvent("keydown", {
+    key: "Enter",
+    code: "Enter",
+    ctrlKey: true,
+    isComposing: true,
+  });
   await page.waitForTimeout(20);
   expect(remote.inputs).toHaveLength(0);
   await editor.dispatchEvent("compositionend");
   await editor.evaluate((element) => {
-    const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    const event = new KeyboardEvent("keydown", {
+      key: "Enter",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
     Object.defineProperty(event, "keyCode", { get: () => 229 });
     element.dispatchEvent(event);
   });
   await page.waitForTimeout(20);
   expect(remote.inputs).toHaveLength(0);
 
+  // composer.remote.newline defaults to Enter on every layout; Shift+Enter keeps
+  // the editor's own newline.
   await editor.fill("line");
-  await editor.press("Shift+Enter");
+  await editor.press("Enter");
   await expect(editor).toHaveText("line\n");
+  await editor.press("Shift+Enter");
+  await expect(editor).toHaveText("line\n\n");
   expect(remote.inputs).toHaveLength(0);
 
   await editor.fill("send me");
-  await editor.press("Enter");
+  await editor.press("Control+Enter");
   await expect.poll(() => remote.inputs.length).toBe(1);
   expect(remote.inputs[0].body).toEqual({
     leaseId: "lease-1",
@@ -1073,8 +1099,8 @@ test("PC-app embedded mobile view (localApp=1) keeps the mobile send gesture on 
 
   const editor = page.locator("#composerInput");
   await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
-  // mobileLayout = coarse pointer || localApp=1 (ADR-0036): the embedded
-  // mobile view behaves mobile even though it is driven by a mouse/keyboard.
+  // The embedded mobile view keeps the mobile look, and its keys are the same
+  // Remote Composer bindings as every other layout (ADR-0269).
   await expect(page.locator("#composerSend")).toBeVisible();
 
   await editor.fill("line");
@@ -1091,6 +1117,101 @@ test("PC-app embedded mobile view (localApp=1) keeps the mobile send gesture on 
     submit: true,
   });
   await expect(editor).toHaveText("");
+
+  await editor.fill("keyboard send");
+  await editor.press("Control+Enter");
+  await expect.poll(() => remote.inputs.length).toBe(2);
+  expect(remote.inputs[1].body).toEqual({
+    leaseId: "lease-1",
+    text: "keyboard send",
+    submit: true,
+  });
+});
+
+test("Remote Composer keys follow the host rebinds (ADR-0269)", async ({ page }) => {
+  const remote = await installRemotePage(page, {
+    coarse: true,
+    keybindings: [
+      { keys: "Enter", command: "composer.remote.send" },
+      { keys: "Ctrl+J", command: "composer.remote.newline" },
+    ],
+  });
+  await connect(page);
+
+  const editor = page.locator("#composerInput");
+  await editor.fill("line");
+  await editor.press("Control+j");
+  await expect(editor).toHaveText("line\n");
+  expect(remote.inputs).toHaveLength(0);
+
+  await editor.fill("send me");
+  await editor.press("Enter");
+  await expect.poll(() => remote.inputs.length).toBe(1);
+  expect(remote.inputs[0].body).toEqual({
+    leaseId: "lease-1",
+    text: "send me",
+    submit: true,
+  });
+});
+
+test("physical keyboard shortcuts drive the lease-gated host actions (ADR-0269)", async ({
+  page,
+}) => {
+  const remote = await installRemotePage(page, { coarse: true, storedMode: "composer" });
+  await connect(page);
+  const editor = page.locator("#composerInput");
+  await editor.fill("draft");
+  const posted = (path: string) =>
+    remote.requests.filter((request) => request.method === "POST" && request.path === path);
+
+  // pane.focus (Alt+Arrow) → grid move; the arrow never reaches the draft caret.
+  await editor.press("Alt+ArrowRight");
+  await expect.poll(() => posted("/remote/v1/navigation/direction").length).toBe(1);
+  expect(posted("/remote/v1/navigation/direction")[0].body).toEqual({
+    leaseId: "lease-1",
+    direction: "right",
+  });
+
+  // pane.clearTerminal (Alt+L) and workspace.clearTerminals (Ctrl+Alt+L) ask the PC.
+  await editor.press("Alt+l");
+  await expect.poll(() => posted("/remote/v1/terminals/terminal-1/clear").length).toBe(1);
+  expect(posted("/remote/v1/terminals/terminal-1/clear")[0].body).toEqual({ leaseId: "lease-1" });
+  await editor.press("Control+Alt+l");
+  await expect.poll(() => posted("/remote/v1/workspaces/ws-1/clear").length).toBe(1);
+
+  // notifications.oldest (Ctrl+Alt+Right) → alert step.
+  await editor.press("Control+Alt+ArrowRight");
+  await expect.poll(() => posted("/remote/v1/navigation/notification").length).toBe(1);
+  expect(posted("/remote/v1/navigation/notification")[0].body).toEqual({
+    leaseId: "lease-1",
+    direction: "oldest",
+  });
+
+  // None of the combos typed into the draft or the terminal.
+  await expect(editor).toHaveText("draft");
+  expect(remote.inputs).toHaveLength(0);
+  expect(remote.writes).toHaveLength(0);
+
+  // terminal.toggleInputMode (Ctrl+Alt+M) is local: it switches to Direct.
+  await editor.press("Control+Alt+m");
+  await expect(page.locator("#terminalComposer")).toBeHidden();
+});
+
+test("Settings lists the physical keyboard shortcuts with host rebinds", async ({ page }) => {
+  await installRemotePage(page, {
+    coarse: true,
+    keybindings: [{ keys: "Ctrl+Shift+L", command: "pane.clearTerminal" }],
+  });
+  await connect(page);
+  await openRemoteSettings(page);
+  await page.locator('#settingsTabs [data-settings-panel="app"]').click();
+
+  const list = page.locator("#keyboardShortcutList");
+  await expect(list).toBeVisible();
+  await expect(list.locator("dt", { hasText: "Clear this terminal" })).toBeVisible();
+  await expect(list).toContainText("Ctrl+Shift+L");
+  await expect(list).toContainText("Alt+Arrows");
+  await expect(list).toContainText("Ctrl+Enter");
 });
 
 test("Direct paste uses structured input only after a V1 snapshot establishes readiness", async ({
@@ -1899,7 +2020,8 @@ async function sendComposerLine(
   expectedCount: number,
 ) {
   await editor.fill(text);
-  await editor.press("Enter");
+  // composer.remote.send (ADR-0269).
+  await editor.press("Control+Enter");
   await expect.poll(() => remote.inputs.length).toBe(expectedCount);
   expect(remote.inputs[expectedCount - 1].body.text).toBe(text);
   await expect(editor).toHaveText("");
@@ -2055,7 +2177,7 @@ test("VirtualKeyboard geometry is authoritative over the viewport fallback", asy
   await expect(list).toBeVisible();
 });
 
-test("as-you-type autocomplete suggests prefixes; plain Enter still sends, arrow+Enter picks (#505)", async ({
+test("as-you-type autocomplete suggests prefixes; the send key still sends, arrow+Enter picks (#505)", async ({
   page,
 }) => {
   const remote = await installRemotePage(page, { coarse: false, width: 1280 });
@@ -2072,9 +2194,9 @@ test("as-you-type autocomplete suggests prefixes; plain Enter still sends, arrow
   await editor.fill("ec");
   await expect(dropdown).toBeVisible();
   await expect(dropdown.locator('[role="option"]')).toHaveText(["echo two", "echo one"]);
-  // No initial highlight (activeIndex = -1): a plain Enter still SENDS the draft.
+  // No initial highlight (activeIndex = -1): the send key still SENDS the draft.
   await expect(dropdown.locator('[aria-selected="true"]')).toHaveCount(0);
-  await editor.press("Enter");
+  await editor.press("Control+Enter");
   await expect.poll(() => remote.inputs.length).toBe(4);
   expect(remote.inputs[3].body.text).toBe("ec");
   await expect(editor).toHaveText("");

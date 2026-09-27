@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use serde_json::{json, Map, Value};
 
 use super::terminal_info::RemoteTerminalInfo;
+use crate::settings::Keybinding;
 
 const TERMINAL_VIEW: &str = "TerminalView";
 
@@ -23,6 +24,9 @@ pub(super) struct RemoteNavigationHostState<'a> {
     /// Remote 페이지는 자기 표면의 탭 처리에만 쓴다(ADR-0218 과 같은 경로).
     pub url_link_activation: &'a str,
     pub path_link_activation: &'a str,
+    /// 사용자 키바인딩 재정의(`settings.json` `keybindings`). 기본값은 Remote
+    /// 번들이 공유 키바인딩 코어에서 가진다(ADR-0269).
+    pub keybindings: &'a [Keybinding],
 }
 
 pub(super) fn build_remote_navigation_payload(
@@ -166,6 +170,7 @@ pub(super) fn build_remote_navigation_payload(
         "codexTranscriptScrollEnabled": host_state.codex_transcript_scroll_enabled,
         "urlLinkActivation": host_state.url_link_activation,
         "pathLinkActivation": host_state.path_link_activation,
+        "keybindings": host_state.keybindings,
         "unreadNotificationCount": unread_count(notifications, None, None),
     })
 }
@@ -826,6 +831,7 @@ mod tests {
             codex_transcript_scroll_enabled: true,
             url_link_activation: "immediate",
             path_link_activation: "immediate",
+            keybindings: &[],
         }
     }
 
@@ -934,6 +940,10 @@ mod tests {
             terminal("terminal-p1", "backend title"),
             terminal("terminal-dp1", "dock backend"),
         ];
+        let keybindings = vec![Keybinding {
+            keys: "Ctrl+J".into(),
+            command: "composer.remote.send".into(),
+        }];
 
         let payload = build_remote_navigation_payload(
             &workspaces_data,
@@ -964,6 +974,7 @@ mod tests {
                 codex_transcript_scroll_enabled: false,
                 url_link_activation: "chip",
                 path_link_activation: "immediate",
+                keybindings: &keybindings,
             },
         );
 
@@ -972,6 +983,11 @@ mod tests {
         // ADR-0224: 두 키는 독립이므로 payload 도 따로 실린다.
         assert_eq!(payload["urlLinkActivation"], "chip");
         assert_eq!(payload["pathLinkActivation"], "immediate");
+        // ADR-0269: Remote 단축키는 PC 재정의를 그대로 받는다.
+        assert_eq!(
+            payload["keybindings"],
+            json!([{ "keys": "Ctrl+J", "command": "composer.remote.send" }])
+        );
         assert_eq!(payload["workspaces"][0]["terminalPaneCount"], 1);
         assert_eq!(payload["workspaces"][0]["liveTerminalCount"], 1);
         assert_eq!(
