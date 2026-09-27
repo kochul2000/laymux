@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath, URL } from "node:url";
+import { compositionLifecycleMethods } from "./xterm-composition-lifecycle.mjs";
 
 // xterm.js #5997 / e9c648f: widening can leave stale isWrapped flags on
 // retained rows. Remove this once a stable @xterm/xterm release contains it.
@@ -99,7 +100,7 @@ const compositionGenerationMethodsWithoutEndData =
   '_finalizeComposition(t){this._compositionView.classList.remove("active");const e=this._isComposing;if(this._isComposing=!1,t){const t={start:this._compositionPosition.start,end:this._compositionPosition.end,valueEnd:null,alreadySentLength:this._dataAlreadySent.length,observations:[],done:!1};this._pendingCompositionGenerations.push(t),this._isSendingComposition=!0,setTimeout(()=>this._flushCompositionGeneration(t),0)}else{this._flushPendingCompositionGenerations();if(e){const t=this._textarea.value.substring(this._compositionPosition.start,this._compositionPosition.end);t.length>0&&this._coreService.triggerDataEvent(t,!0)}}}_boundPendingComposition(){const t=this._pendingCompositionGenerations[this._pendingCompositionGenerations.length-1];t&&t.valueEnd===null&&(t.valueEnd=this._textarea.value.length)}_queueCompositionObservation(t){const e=this._pendingCompositionGenerations[this._pendingCompositionGenerations.length-1];return e&&!e.done?(e.observations.push(t),!0):!1}_flushPendingCompositionGenerations(){const t=this._pendingCompositionGenerations[this._pendingCompositionGenerations.length-1];t?this._flushCompositionGeneration(t):this._isSendingComposition=!1}_flushCompositionGeneration(t){if(t.done)return;for(;this._pendingCompositionGenerations.length>0;){const e=this._pendingCompositionGenerations.shift();e.done=!0;const i=e.start+e.alreadySentLength,s=e.valueEnd===null?this._textarea.value.length:e.valueEnd,r=this._textarea.value.substring(i,Math.max(i,s));let n=r,o="",l=!1;for(const t of e.observations)l?n=this._mergeCompositionData(n,t,!0):n.includes(t)?(o&&(n=this._mergeCompositionData(n,o)),l=!0):o=this._mergeCompositionData(t,o);l||!o||(n=this._mergeCompositionData(n,o));if(n.length>0&&this._coreService.triggerDataEvent(n,!0),e===t)break}this._isSendingComposition=this._pendingCompositionGenerations.length>0}_mergeCompositionData(t,e,o=!1){if(!t.includes(e))if(e.includes(t))t=e;else{let i=Math.min(t.length,e.length);for(;i>0&&!t.endsWith(e.substring(0,i));)i--;let s=Math.min(t.length,e.length);for(;s>0&&!e.endsWith(t.substring(0,s));)s--;t=i>s||o&&i===s?t+e.substring(i):e+t.substring(s)}return t}';
 const compositionGenerationMethodsWithEndData =
   '_finalizeComposition(t,e){this._compositionView.classList.remove("active");const i=this._isComposing;if(this._isComposing=!1,t){const t={start:this._compositionPosition.start,end:this._compositionPosition.end,valueEnd:null,alreadySentLength:this._dataAlreadySent.length,committed:e,observations:[],done:!1};this._pendingCompositionGenerations.push(t),this._isSendingComposition=!0,setTimeout(()=>this._flushCompositionGeneration(t),0)}else{this._flushPendingCompositionGenerations();if(i){const t=this._textarea.value.substring(this._compositionPosition.start,this._compositionPosition.end);t.length>0&&this._coreService.triggerDataEvent(t,!0)}}}_boundPendingComposition(){const t=this._pendingCompositionGenerations[this._pendingCompositionGenerations.length-1];t&&t.valueEnd===null&&(t.valueEnd=this._textarea.value.length)}_queueCompositionObservation(t){const e=this._pendingCompositionGenerations[this._pendingCompositionGenerations.length-1];return e&&!e.done?(e.observations.push(t),!0):!1}_flushPendingCompositionGenerations(){const t=this._pendingCompositionGenerations[this._pendingCompositionGenerations.length-1];t?this._flushCompositionGeneration(t):this._isSendingComposition=!1}_flushCompositionGeneration(t){if(t.done)return;for(;this._pendingCompositionGenerations.length>0;){const e=this._pendingCompositionGenerations.shift();e.done=!0;const i=e.start+e.alreadySentLength,s=e.valueEnd===null?this._textarea.value.length:e.valueEnd,r=this._textarea.value.substring(i,Math.max(i,s));let n=this._textarea.ownerDocument.activeElement===this._textarea?this._mergeCompositionData(r,e.committed||""):r,o="",l=!1;for(const t of e.observations)l?n=this._mergeCompositionData(n,t,!0):n.includes(t)?(o&&(n=this._mergeCompositionData(n,o)),l=!0):o=this._mergeCompositionData(t,o);l||!o||(n=this._mergeCompositionData(n,o));if(n.length>0&&this._coreService.triggerDataEvent(n,!0),e===t)break}this._isSendingComposition=this._pendingCompositionGenerations.length>0}_mergeCompositionData(t,e,o=!1){if(!t.includes(e))if(e.includes(t))t=e;else{let i=Math.min(t.length,e.length);for(;i>0&&!t.endsWith(e.substring(0,i));)i--;let s=Math.min(t.length,e.length);for(;s>0&&!e.endsWith(t.substring(0,s));)s--;t=i>s||o&&i===s?t+e.substring(i):e+t.substring(s)}return t}';
-const compositionGenerationMethods = compositionGenerationMethodsWithEndData
+const compositionGenerationMethodsBeforeImmediateTracking = compositionGenerationMethodsWithEndData
   .replace("valueEnd:null", "valueSnapshot:null")
   .replace(
     "committed:e,observations:[]",
@@ -126,20 +127,58 @@ const compositionGenerationMethods = compositionGenerationMethodsWithEndData
     'let n=this._textarea.ownerDocument.activeElement===this._textarea?this._mergeCompositionData(r,e.committed||""):r',
     'let n=this._mergeCompositionData(r,e.committed||"")',
   );
+// ADR-0274: immediate finalize와 뒤따르는 native end가 송신 기록을 공유한다.
+// 먼저 모든 candidate/관측을 합쳐야 compositionend.data가 이미 보낸 prefix를
+// 되살리지 않는다. ordinary keypress는 기존 default-cancel 경로를 사용한다.
+const compositionGenerationMethods =
+  compositionGenerationMethodsBeforeImmediateTracking
+    .replace(
+      "if(this._isComposing=!1,t){const t={",
+      "if(this._isComposing=!1,t){this._boundPendingComposition();const t={",
+    )
+    .replace(
+      "committed:this._compositionEndDataAllowed?e:void 0",
+      "immediate:this._immediateComposition,stripImmediatePrefix:!this._immediateComposition?.textareaCleared||e!==void 0,committed:this._compositionEndDataAllowed?e:void 0",
+    )
+    .replace(
+      "t.length>0&&this._coreService.triggerDataEvent(t,!0)",
+      'this._immediateComposition={prefix:t,observed:""},t.length>0&&this._coreService.triggerDataEvent(t,!0)',
+    )
+    .replace(
+      "blur(){this._compositionEndDataAllowed=!1,this._flushPendingCompositionGenerations()}",
+      "blur(){this._compositionEndDataAllowed=!1,this._flushPendingCompositionGenerations(),this._immediateComposition=void 0}",
+    )
+    .replace(
+      "if(n.length>0&&this._coreService.triggerDataEvent(n,!0)",
+      "if(n=this._takeUnsentCompositionData(n,e.immediate,e.stripImmediatePrefix),n.length>0&&this._coreService.triggerDataEvent(n,!0)",
+    ) + compositionLifecycleMethods;
+const moduleCompositionObservationOwnerImmediate = moduleCompositionObservationOwnerEndData.replace(
+  "return this._queueCompositionObservation(t)}input(t){return this._queueCompositionObservation(t)",
+  "return this._queueCompositionObservation(t)||this._sendImmediateCompositionKeypress(t)}input(t,i){return this._queueImmediateCompositionInput(t,i)||this._queueCompositionObservation(t)",
+);
+const commonJsCompositionObservationOwnerImmediate =
+  commonJsCompositionObservationOwnerEndData.replace(
+    "return this._queueCompositionObservation(e)}input(e){return this._queueCompositionObservation(e)",
+    "return this._queueCompositionObservation(e)||this._sendImmediateCompositionKeypress(e)}input(e,i){return this._queueImmediateCompositionInput(e,i)||this._queueCompositionObservation(e)",
+  );
 const compositionGenerationAcceptedTexts = [
   compositionGenerationMethods,
+  compositionGenerationMethodsBeforeImmediateTracking,
   compositionGenerationMethodsWithEndData,
   compositionGenerationMethodsWithoutEndData,
   compositionGenerationMethodsMergedObservations,
 ];
 const compositionGenerationUpgradeTexts = [
+  compositionGenerationMethodsBeforeImmediateTracking,
   compositionGenerationMethodsWithEndData,
   compositionGenerationMethodsWithoutEndData,
   compositionGenerationMethodsMergedObservations,
 ];
 
 const compositionEndOriginal = "compositionend(){this._finalizeComposition(!0)}";
-const compositionEndPatched = "compositionend(t){this._finalizeComposition(!0,t)}";
+const compositionEndBeforeImmediateTracking = "compositionend(t){this._finalizeComposition(!0,t)}";
+const compositionEndPatched =
+  "compositionend(t){this._finalizeComposition(!0,t),this._immediateComposition=void 0}";
 const moduleCompositionEndListenerOriginal =
   'this._register(L(this.textarea,"compositionend",()=>this._compositionHelper.compositionend()))';
 const moduleCompositionEndListenerPatched =
@@ -151,6 +190,9 @@ const commonJsCompositionEndListenerPatched =
 const compositionBlurOriginal = '_handleTextAreaBlur(){this.textarea.value=""';
 const compositionBlurPatched =
   '_handleTextAreaBlur(){this._compositionHelper.blur(),this.textarea.value=""';
+const compositionTextareaClearOriginal = 'this.textarea.value=""),this._onKey.fire';
+const compositionTextareaClearPatched =
+  'this._compositionHelper.textareaCleared(),this.textarea.value=""),this._onKey.fire';
 
 const compositionStartOriginal =
   "compositionstart(){this._isComposing=!0,this._compositionPosition.start=this._textarea.value.length";
@@ -158,8 +200,12 @@ const compositionStartBoundOnly =
   "compositionstart(){this._boundPendingComposition(),this._isComposing=!0,this._compositionPosition.start=this._textarea.value.length";
 const compositionStartPatched =
   "compositionstart(){this._boundPendingComposition(),this._compositionEpoch=(this._compositionEpoch||0)+1,this._isComposing=!0,this._compositionPosition.start=this._textarea.value.length";
-const compositionStartEndDataPatched =
+const compositionStartBeforeImmediateTracking =
   "compositionstart(){this._boundPendingComposition(),this._compositionEpoch=(this._compositionEpoch||0)+1,this._compositionEndDataAllowed=!0,this._isComposing=!0,this._compositionPosition.start=this._textarea.value.length";
+const compositionStartEndDataPatched = compositionStartBeforeImmediateTracking.replace(
+  "this._compositionEndDataAllowed=!0",
+  "this._compositionEndDataAllowed=!0,this._immediateComposition=void 0",
+);
 const compositionStartRemotePatched =
   "compositionstart(){this._compositionEpoch=(this._compositionEpoch||0)+1,this._isComposing=!0,this._compositionPosition.start=this._textarea.value.length";
 
@@ -178,12 +224,20 @@ const commonJsTerminalKeypressSendPatched =
 
 const moduleTerminalInputSendOriginal =
   "if(this._keyPressHandled)return!1;this._unprocessedDeadKey=!1;let i=e.data;return this.coreService.triggerDataEvent(i,!0),this.cancel(e),!0";
-const moduleTerminalInputSendPatched =
+const moduleTerminalInputSendBeforeImmediateTracking =
   "let i=e.data;if(this._compositionHelper.input(i))return this.cancel(e),!0;if(this._keyPressHandled)return!1;return this._unprocessedDeadKey=!1,this.coreService.triggerDataEvent(i,!0),this.cancel(e),!0";
+const moduleTerminalInputSendPatched = moduleTerminalInputSendBeforeImmediateTracking.replace(
+  ".input(i)",
+  ".input(i,e.isComposing)",
+);
 const commonJsTerminalInputSendOriginal =
   "if(this._keyPressHandled)return!1;this._unprocessedDeadKey=!1;const t=e.data;return this.coreService.triggerDataEvent(t,!0),this.cancel(e),!0";
-const commonJsTerminalInputSendPatched =
+const commonJsTerminalInputSendBeforeImmediateTracking =
   "const t=e.data;if(this._compositionHelper.input(t))return this.cancel(e),!0;if(this._keyPressHandled)return!1;return this._unprocessedDeadKey=!1,this.coreService.triggerDataEvent(t,!0),this.cancel(e),!0";
+const commonJsTerminalInputSendPatched = commonJsTerminalInputSendBeforeImmediateTracking.replace(
+  ".input(t)",
+  ".input(t,e.isComposing)",
+);
 
 // xterm 6.0.0 calculates the sensitivity-adjusted wheel row count for mouse
 // reporting and alternate-buffer cursor-key fallback, but then emits exactly
@@ -353,7 +407,11 @@ await patchBundle(moduleTarget, [
     name: "composition keypress owner",
     originalText: moduleCompositionKeypressOriginal,
     patchedText: moduleCompositionKeypressLegacy,
-    acceptedTexts: [moduleCompositionObservationOwner, moduleCompositionObservationOwnerEndData],
+    acceptedTexts: [
+      moduleCompositionObservationOwner,
+      moduleCompositionObservationOwnerEndData,
+      moduleCompositionObservationOwnerImmediate,
+    ],
   },
   {
     name: "composition pending reset",
@@ -388,7 +446,10 @@ await patchBundle(moduleTarget, [
     name: "composition observation owner",
     originalText: moduleCompositionKeypressLegacy,
     patchedText: moduleCompositionObservationOwner,
-    acceptedTexts: [moduleCompositionObservationOwnerEndData],
+    acceptedTexts: [
+      moduleCompositionObservationOwnerEndData,
+      moduleCompositionObservationOwnerImmediate,
+    ],
   },
   {
     name: "composition generation finalizer",
@@ -400,6 +461,12 @@ await patchBundle(moduleTarget, [
     name: "compositionend commit data",
     originalText: compositionEndOriginal,
     patchedText: compositionEndPatched,
+    upgradeTexts: [compositionEndBeforeImmediateTracking],
+  },
+  {
+    name: "immediate composition observation owner",
+    originalText: moduleCompositionObservationOwnerEndData,
+    patchedText: moduleCompositionObservationOwnerImmediate,
   },
   {
     name: "terminal compositionend data handoff",
@@ -415,12 +482,22 @@ await patchBundle(moduleTarget, [
     name: "composition generation boundary",
     originalText: compositionStartOriginal,
     patchedText: compositionStartEndDataPatched,
-    upgradeTexts: [compositionStartPatched, compositionStartBoundOnly],
+    upgradeTexts: [
+      compositionStartPatched,
+      compositionStartBoundOnly,
+      compositionStartBeforeImmediateTracking,
+    ],
   },
   {
     name: "terminal composition input handoff",
     originalText: moduleTerminalInputSendOriginal,
     patchedText: moduleTerminalInputSendPatched,
+    upgradeTexts: [moduleTerminalInputSendBeforeImmediateTracking],
+  },
+  {
+    name: "terminal composition textarea clear",
+    originalText: compositionTextareaClearOriginal,
+    patchedText: compositionTextareaClearPatched,
   },
   {
     name: "textarea diff skip while sending",
@@ -454,6 +531,7 @@ const commonJsCompositionPatches = [
     acceptedTexts: [
       commonJsCompositionObservationOwner,
       commonJsCompositionObservationOwnerEndData,
+      commonJsCompositionObservationOwnerImmediate,
     ],
   },
   {
@@ -492,6 +570,7 @@ const commonJsCompositionPatches = [
     acceptedTexts: [
       commonJsCompositionObservationOwner,
       commonJsCompositionObservationOwnerEndData,
+      commonJsCompositionObservationOwnerImmediate,
     ],
   },
   {
@@ -504,6 +583,12 @@ const commonJsCompositionPatches = [
     name: "compositionend commit data",
     originalText: compositionEndOriginal,
     patchedText: compositionEndPatched,
+    upgradeTexts: [compositionEndBeforeImmediateTracking],
+  },
+  {
+    name: "immediate composition observation owner",
+    originalText: commonJsCompositionObservationOwnerEndData,
+    patchedText: commonJsCompositionObservationOwnerImmediate,
   },
   {
     name: "terminal compositionend data handoff",
@@ -523,12 +608,19 @@ const commonJsCompositionPatches = [
       compositionStartPatched,
       compositionStartBoundOnly,
       compositionStartRemotePatched,
+      compositionStartBeforeImmediateTracking,
     ],
   },
   {
     name: "terminal composition input handoff",
     originalText: commonJsTerminalInputSendOriginal,
     patchedText: commonJsTerminalInputSendPatched,
+    upgradeTexts: [commonJsTerminalInputSendBeforeImmediateTracking],
+  },
+  {
+    name: "terminal composition textarea clear",
+    originalText: compositionTextareaClearOriginal,
+    patchedText: compositionTextareaClearPatched,
   },
   {
     name: "textarea diff skip while sending",

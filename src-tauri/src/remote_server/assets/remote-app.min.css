@@ -2,7 +2,7 @@
  * GENERATED FILE - DO NOT EDIT.
  * Sources: src-tauri/src/remote_server/assets/remote-app.{js,css} + ui/src/remote/{composer-editor,remote-icons}.js + ui/src/lib/{codex-transcript-wheel,keybinding-core}.ts + lucide package-lock identity
  * Rebuild: cd ui && npm run build:remote-page
- * Source-SHA256: remote-app.js=cf73bacd05ef280f remote-app.css=0c0611c466e430b8 remote-icons.js=39e51bf02a91062f file-kind-icon.ts=a3e373f576e5efe1 task-status-glyph.ts=635782da6d052725 codex-transcript-wheel.ts=4f150e0cb5135fb4 path-link-lines.ts=3b12de330d9d21be terminal-cell-map.ts=8ac5e8515bdfa161 composer-editor.js=667fd299c15ba7d1 remote-settings-mcp.js=c6e45d0e4c935767 remote-settings-schema.json=9d1efe36f196df76 remote-memo.js=7bb3346b0646dfe3 remote-tool-swipe.js=c2a1ddd615d812fc memo-document.ts=836742f189adc43a keybinding-core.ts=549111ad519a5368 lucide-package=76c54ab4d3db082e
+ * Source-SHA256: remote-app.js=105579c64f9a6e30 remote-app.css=0c0611c466e430b8 remote-icons.js=39e51bf02a91062f file-kind-icon.ts=a3e373f576e5efe1 task-status-glyph.ts=635782da6d052725 codex-transcript-wheel.ts=4f150e0cb5135fb4 path-link-lines.ts=3b12de330d9d21be terminal-cell-map.ts=8ac5e8515bdfa161 composer-editor.js=667fd299c15ba7d1 remote-settings-mcp.js=c6e45d0e4c935767 remote-settings-schema.json=9d1efe36f196df76 remote-memo.js=7bb3346b0646dfe3 remote-tool-swipe.js=c2a1ddd615d812fc memo-document.ts=836742f189adc43a keybinding-core.ts=549111ad519a5368 lucide-package=76c54ab4d3db082e
  * Keyboard-SHA256: 5d191cdad28f179a
  * Drift from the sources is caught by ui/src/remote/remote-page-bundle.test.ts
  */

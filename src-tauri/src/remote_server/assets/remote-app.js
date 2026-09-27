@@ -4282,7 +4282,7 @@ import {
         // the boot autoConnect fix in #848 to every attach). Touch devices let
         // the first real gesture own the focus; fine pointers keep typing
         // straight after Connect. A confirmed physical keyboard does not need
-        // an IME gesture, but still must respect other input owners (ADR-0274).
+        // an IME gesture, but still must respect other input owners (ADR-0275).
         function focusInputSurfaceAfterAwait() {
           if (coarsePointer && physicalKeyboardConnected !== true) return;
           if (physicalKeyboardConnected === true && !canRestorePhysicalKeyboardFocus()) return;
