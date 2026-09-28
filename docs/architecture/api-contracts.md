@@ -15,6 +15,8 @@
 
 ### Codex 종료 확인
 
+종료·업데이트 확인 실패 뒤 사용자가 손실을 감수하는 예외는 [ADR-0279](../adr/0279-lifecycle-explicit-loss-override.md)를 따른다. update snapshot의 `canForceInstall: boolean`은 준비 실패 후 한 번의 강행 가능 여부다. `install_app_update(force?: boolean)`와 `POST /api/v1/update/install`, `POST /remote/v1/update/install`의 선택 JSON `force`는 기본 false이며, true는 이 권한이 있는 같은 채널·후보에만 허용한다. Remote는 기존 `leaseId`/header 제어권 검사를 그대로 적용한다. 강행은 frontend 준비만 생략하고 다운로드·서명·입력 drain·설치기 정리를 유지한다. 새 확인과 설치 수락은 권한을 지우며 dev 설치 금지는 유지한다. Automation은 body 없는 기존 설치 요청도 허용한다.
+
 `codex.verifySessionOnExit`는 기본 true인 종료·업데이트 전용 세션 확인 설정이다([ADR-0270](../adr/0270-codex-status-checkpoint-probe.md)). 미전송 텍스트를 삭제하며 기본 Codex 편집 키와 대기 중 텍스트 composer를 요구한다. `begin_codex_status_checkpoint(updateRequestId?)`가 반환한 토큰에만 `codex_status_checkpoint_input(dismiss? | clear | typeStatus | submit)`, `read_codex_status_checkpoint(screen)`, `complete_codex_status_checkpoint`, `finish_codex_status_checkpoint`를 허용한다. submit은 제출 직전 `TerminalRenderCheckpointTarget`을 반환하고 다른 입력 단계는 null을 반환한다. read는 기존 xterm provider가 직렬화한 현재 viewport(`TerminalRenderCheckpoint`)를 받으며 generation·현재 출력 sequence·geometry와 마지막 카드의 완결성을 검증한다([ADR-0278](../adr/0278-codex-status-current-screen.md)). backend는 generation·프로세스·native update 요청·기한과 단계 순서를 검증한다. 임의 바이트 입력이나 상시 귀속 조회 API가 아니며 Automation·Remote raw write의 fence를 우회시키지 않는다. `cancel_app_close`는 준비 실패 후 사용자가 종료 취소를 선택했을 때 앱 종료 예약을 해제한다. 완료 IPC는 저장 후 기한과 fence 소유권을 다시 확인한다. 성공한 일반 종료는 창 파괴까지 입력 차단을 유지하고 terminal close 정리만 허용하며, 실패·종료 취소는 차단을 해제한다.
 
 ### 다국어(i18n) — 언어 설정

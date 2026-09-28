@@ -96,6 +96,50 @@ describe("LifecycleModal", () => {
     render(<LifecycleModal />);
     expect(screen.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
   });
+  it("offers an explicit loss override after pane preparation fails", async () => {
+    const failed = {
+      ...status,
+      canForceInstall: true,
+      lastError: "Cannot identify pane 2",
+      preparation: { stage: "checkpoint" as const, completed: 0, total: null },
+    };
+    api.get.mockResolvedValue(failed);
+    useLifecycleStore.setState({ status: failed, error: failed.lastError });
+    render(<LifecycleModal />);
+    expect(screen.getByRole("alert")).toHaveTextContent(/Unsaved work/);
+    expect(api.install).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Accept loss and update" }));
+    await waitFor(() => expect(api.install).toHaveBeenCalledWith(true));
+  });
+  it("does not offer the override for a download failure", () => {
+    useLifecycleStore.setState({ error: "Download failed" });
+    render(<LifecycleModal />);
+    expect(screen.queryByRole("button", { name: "Accept loss and update" })).toBeNull();
+  });
+  it("keeps the loss warning when reopening a failed update", () => {
+    useLifecycleStore.setState({
+      status: { ...status, canForceInstall: true, lastError: "Cannot identify pane 2" },
+    });
+    useLifecycleStore.getState().openUpdate();
+    render(<LifecycleModal />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Unsaved work");
+  });
+  it("keeps close cancellation and explicit loss override available after pane failure", () => {
+    const forceClose = vi.fn();
+    const cancelClose = vi.fn();
+    useLifecycleStore.setState({
+      kind: "close",
+      error: "Cannot identify pane 2",
+      forceClose,
+      cancelClose,
+    });
+    render(<LifecycleModal />);
+    expect(screen.getByRole("button", { name: "Cancel closing" })).toBeEnabled();
+    expect(screen.getByRole("alert")).toHaveTextContent(/Unsaved work/);
+    fireEvent.click(screen.getByRole("button", { name: "Accept loss and close" }));
+    expect(forceClose).toHaveBeenCalledOnce();
+    expect(cancelClose).not.toHaveBeenCalled();
+  });
   it("does not surface a background check error as an explicit action failure", async () => {
     api.get.mockResolvedValue({ ...status, lastError: "background network error" });
     render(<LifecycleModal />);

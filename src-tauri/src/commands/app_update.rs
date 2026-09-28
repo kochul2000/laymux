@@ -54,6 +54,7 @@ pub async fn check_app_update(
 pub fn install_app_update(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
+    force: Option<bool>,
 ) -> Result<UpdateStatus, String> {
-    app_update::schedule_install(app, Arc::clone(&state.app_update))
+    app_update::schedule_install(app, Arc::clone(&state.app_update), force.unwrap_or(false))
 }

@@ -38,6 +38,7 @@ import {
   Link,
   List,
   ListFilter,
+  LoaderCircle,
   Maximize2,
   Minus,
   Minimize2,
@@ -156,6 +157,10 @@ export function CameraIcon(props: IconProps) {
 
 export function CheckIcon(props: IconProps) {
   return renderIcon(Check, props);
+}
+
+export function LoaderCircleIcon(props: IconProps) {
+  return renderIcon(LoaderCircle, props);
 }
 
 export function ChevronDownIcon(props: IconProps) {

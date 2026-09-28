@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowRight } from "lucide-react";
+import { ArrowRightIcon } from "@/components/ui/icons";
 import { Button } from "@/components/ui/Button";
 import { LifecycleProgress } from "@/components/ui/LifecycleProgress";
 import { lifecycleCopy, type ExitProgress } from "@/lib/lifecycle-progress";
@@ -28,6 +28,8 @@ export function LifecycleModal() {
   const operation = status?.operation ?? "idle";
   const busy = close || ["downloading", "preparing", "installing"].includes(operation);
   const locked = close || operation === "preparing" || operation === "installing";
+  const canForceUpdate = !close && operation === "idle" && status?.canForceInstall === true;
+  const error = state.error ?? (canForceUpdate ? status?.lastError : null);
   const cleanup = close
     ? state.cleanup
     : (status?.exitSettings?.interruptTerminals ?? cleanupSetting);
@@ -93,13 +95,13 @@ export function LifecycleModal() {
     else if (!state.open && element?.open) element.close();
   }, [state.open]);
 
-  const run = async (install: boolean) => {
+  const run = async (install: boolean, force = false) => {
     if (state.preview || requesting) return;
     setRequesting(true);
     const requestStatus = useLifecycleStore.getState().status;
     useLifecycleStore.setState({ error: null });
     try {
-      const snapshot = await (install ? installAppUpdate() : checkAppUpdate());
+      const snapshot = await (install ? installAppUpdate(force) : checkAppUpdate());
       if (useLifecycleStore.getState().status === requestStatus)
         useLifecycleStore.getState().receiveStatus(snapshot);
       if (snapshot.lastError) useLifecycleStore.setState({ error: snapshot.lastError });
@@ -138,20 +140,20 @@ export function LifecycleModal() {
           {!close && (
             <div className="lifecycle-version">
               <span>{status?.currentVersion ?? "—"}</span>
-              <ArrowRight size={16} />
+              <ArrowRightIcon size={16} />
               <strong>{status?.availableVersion ?? status?.currentVersion ?? "—"}</strong>
               <span className="lifecycle-channel">
                 {status?.channel === "beta" ? copy.beta : copy.stable}
               </span>
             </div>
           )}
-          {busy || (status?.preparation && state.error) ? (
+          {busy || ((status?.preparation || (state.preview && state.progress)) && error) ? (
             <LifecycleProgress
               kind={state.kind}
               cleanup={cleanup}
               progress={progress}
               ko={ko}
-              failed={Boolean(state.error)}
+              failed={Boolean(error)}
             />
           ) : (
             <>
@@ -184,25 +186,31 @@ export function LifecycleModal() {
               {progress.warning}
             </div>
           )}
-          {state.error && (
+          {error && (
             <div className="lifecycle-error" role="alert">
-              <strong>{state.error === "timeout" ? copy.waiting : copy.failure}</strong>
+              <strong>{error === "timeout" ? copy.waiting : copy.failure}</strong>
               <br />
-              {state.error !== "timeout" && state.error}
-              {close && <p>{copy.shutdownWarning}</p>}
+              {error !== "timeout" && error}
+              {(close || canForceUpdate) && <p>{copy.lossWarning}</p>}
             </div>
           )}
           {state.preview && <div className="lifecycle-preview">{copy.preview}</div>}
         </div>
-        {(!locked || state.error || state.preview) && (
+        {(!locked || error || state.preview) && (
           <div className="lifecycle-actions">
-            {close && state.forceClose ? (
+            {close && (state.forceClose || (state.preview && error)) ? (
               <>
-                {state.cancelClose && <Button onClick={state.cancelClose}>{copy.cancel}</Button>}
-                {state.error === "timeout" && (
-                  <Button onClick={keepWaitingForClose}>{copy.wait}</Button>
+                {(state.cancelClose || state.preview) && (
+                  <Button onClick={state.preview ? dismiss : (state.cancelClose ?? undefined)}>
+                    {copy.cancel}
+                  </Button>
                 )}
-                <Button variant="primary" onClick={state.forceClose}>
+                {error === "timeout" && <Button onClick={keepWaitingForClose}>{copy.wait}</Button>}
+                <Button
+                  disabled={state.preview}
+                  title={state.preview ? copy.preview : undefined}
+                  onClick={state.forceClose ?? undefined}
+                >
                   {copy.force}
                 </Button>
               </>
@@ -229,6 +237,23 @@ export function LifecycleModal() {
                     onClick={() => void run(true)}
                   >
                     {copy.install}
+                  </Button>
+                )}
+                {canForceUpdate && (
+                  <Button
+                    disabled={requesting || !status.enabled || state.preview}
+                    title={
+                      state.preview
+                        ? copy.preview
+                        : !status.enabled
+                          ? copy.dev
+                          : requesting
+                            ? copy.updateBusy
+                            : copy.lossWarning
+                    }
+                    onClick={() => void run(true, true)}
+                  >
+                    {copy.forceUpdate}
                   </Button>
                 )}
               </>

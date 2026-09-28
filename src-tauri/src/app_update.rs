@@ -21,10 +21,17 @@ use crate::constants::{
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 
+#[path = "app_update_install.rs"]
+mod install;
 #[path = "app_update_progress.rs"]
 pub mod progress;
 #[path = "app_update_retry.rs"]
 mod retry;
+pub use install::schedule_install;
+
+#[cfg(test)]
+#[path = "app_update_force_tests.rs"]
+mod force_tests;
 
 const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 const INITIAL_UPDATE_CHECK_DELAY: Duration = Duration::from_secs(5);
@@ -106,6 +113,7 @@ pub struct UpdateStatus {
     pub last_error: Option<String>,
     pub preparation: Option<progress::ExitProgress>,
     pub exit_settings: Option<progress::ExitPlan>,
+    pub can_force_install: bool,
 }
 
 impl Default for UpdateStatus {
@@ -125,6 +133,7 @@ impl Default for UpdateStatus {
             last_error: None,
             preparation: None,
             exit_settings: None,
+            can_force_install: false,
         }
     }
 }
@@ -177,6 +186,7 @@ impl UpdateManager {
             status.published_at = None;
         }
         status.operation = UpdateOperation::Checking;
+        status.can_force_install = false;
         // `last_error` is not cleared here. A check that ends up abandoned would
         // otherwise erase the record of the last real failure without replacing
         // it; `finish_check` clears it once there is an answer.
@@ -224,6 +234,7 @@ impl UpdateManager {
 
     fn fail_operation(&self, message: String) -> Result<UpdateStatus, String> {
         let mut status = self.status.lock_or_err()?;
+        status.can_force_install = status.operation == UpdateOperation::Preparing;
         status.operation = UpdateOperation::Idle;
         status.last_error = Some(message);
         Ok(status.clone())
@@ -234,6 +245,14 @@ impl UpdateManager {
     /// switch between check and install must force a re-check instead of
     /// installing a build from the series the user just left.
     fn begin_install(&self, channel: UpdateChannel) -> Result<UpdateStatus, String> {
+        self.begin_install_with_force(channel, false)
+    }
+
+    fn begin_install_with_force(
+        &self,
+        channel: UpdateChannel,
+        force: bool,
+    ) -> Result<UpdateStatus, String> {
         let mut status = self.status.lock_or_err()?;
         if self.closing.load(Ordering::Acquire) {
             return Err("window close is in progress".into());
@@ -253,6 +272,10 @@ impl UpdateManager {
                 channel.as_str()
             ));
         }
+        if force && !status.can_force_install {
+            return Err("the pending update has no failed preparation to override".into());
+        }
+        status.can_force_install = false;
         status.operation = UpdateOperation::Downloading;
         status.preparation = None;
         status.exit_settings = Some(crate::settings::load_settings().exit.into());
@@ -541,119 +564,6 @@ fn channel_updater(
     channel_updater_builder(app, channel)?
         .build()
         .map_err(|error| error.to_string())
-}
-
-/// Accept an install request and return before the HTTP/IPC caller is severed
-/// by the installer and process restart.
-pub fn schedule_install(
-    app: AppHandle,
-    manager: Arc<UpdateManager>,
-) -> Result<UpdateStatus, String> {
-    let channel = current_channel();
-    // Refuse before accepting: a candidate found before the channel or the
-    // install format made it unreachable must not start a download that can only
-    // end in a format error.
-    if let Some(reason) = unsupported_channel_install(channel) {
-        return Err(reason);
-    }
-    let accepted = manager.begin_install(channel)?;
-    let expected_version = accepted
-        .available_version
-        .clone()
-        .ok_or_else(|| "there is no pending update".to_string())?;
-    publish(&app, &accepted);
-
-    tauri::async_runtime::spawn(async move {
-        if let Err(error) = install_and_restart(&app, &manager, channel, &expected_version).await {
-            tracing::error!(%error, "application update failed");
-            match manager.fail_operation(error) {
-                Ok(status) => publish(&app, &status),
-                Err(lock_error) => tracing::error!(%lock_error, "failed to publish update error"),
-            }
-        }
-    });
-    Ok(accepted)
-}
-
-async fn install_and_restart(
-    app: &AppHandle,
-    manager: &Arc<UpdateManager>,
-    channel: UpdateChannel,
-    expected_version: &str,
-) -> Result<(), String> {
-    // Re-check immediately before download so a withdrawn or superseded GitHub
-    // release is never installed from stale in-memory metadata. The channel is
-    // the one accepted at request time: an accepted install completes on the
-    // series the user approved even if the setting changes meanwhile (ADR-0174).
-    //
-    // `on_before_exit` is the last moment this process controls: the updater
-    // starts the installer and calls `std::process::exit(0)`, which runs no
-    // destructor, so the terminals this app spawned would otherwise survive it
-    // and keep the files the installer must overwrite (ADR-0201). Blocking here
-    // delays the installer by exactly as long as the teardown needs.
-    let guard_app = app.clone();
-    let updater = channel_updater_builder(app, channel)?
-        .on_before_exit(move || match guard_app.try_state::<Arc<AppState>>() {
-            Some(state) => crate::update_install_guard::release_installer_file_locks(&state),
-            // Nothing to tear down without the state, and panicking inside the
-            // hook would abort the process between the download and the
-            // installer — the one moment where losing the update costs the most.
-            None => tracing::warn!("app state is unavailable; installing without a teardown"),
-        })
-        .build()
-        .map_err(|error| error.to_string())?;
-    let update = retry::check(|| updater.check())
-        .await
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "the pending update is no longer available".to_string())?;
-    validate_release_candidate(channel, &update.version, &update.download_url)?;
-    validate_install_candidate(channel, expected_version, &update.version)?;
-
-    let progress_manager = Arc::clone(manager);
-    let progress_app = app.clone();
-    let bytes = update
-        .download(
-            move |chunk_length, total_bytes| match progress_manager
-                .update_download_progress(chunk_length, total_bytes)
-            {
-                Ok(status) => publish(&progress_app, &status),
-                Err(error) => tracing::warn!(%error, "failed to publish update progress"),
-            },
-            || {},
-        )
-        .await
-        .map_err(|error| error.to_string())?;
-
-    // The verified package is now local, but no terminal has been torn down and
-    // no installer has started. Establish the final durable restore point while
-    // every live process is still observable. Freeze terminal mutations before
-    // requesting it, then keep the gate through the updater's on_before_exit
-    // child/file-lock release (ADR-0222).
-    let state = app
-        .try_state::<Arc<AppState>>()
-        .ok_or_else(|| "app state is unavailable for the update checkpoint".to_string())?;
-    publish(app, &manager.mark_preparing()?);
-    state
-        .session_checkpoint
-        .begin_finalization_and_drain(&state)
-        .await?;
-    if let Err(error) =
-        crate::session_checkpoint::request_frontend_checkpoint(app, &state, "update", true).await
-    {
-        state.session_checkpoint.cancel_finalization();
-        return Err(error);
-    }
-
-    match manager.mark_installing() {
-        Ok(status) => publish(app, &status),
-        Err(error) => tracing::warn!(%error, "failed to publish installer transition"),
-    }
-    if let Err(error) = update.install(bytes) {
-        state.session_checkpoint.cancel_finalization();
-        return Err(error.to_string());
-    }
-
-    app.restart();
 }
 
 /// Re-read the channel from disk and check once, without waiting for the six-hour

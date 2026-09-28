@@ -188,6 +188,7 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
     if (error) {
       const alert = element("div", "lifecycle-error", error);
       alert.setAttribute("role", "alert");
+      if (status?.canForceInstall) alert.append(element("p", "", copy.lossWarning));
       content.append(alert);
     }
     const actions = element("div", "lifecycle-actions");
@@ -215,6 +216,21 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
         content.append(
           element("p", "lifecycle-subtitle", "Take control of the PC to install an update."),
         );
+      if (status?.canForceInstall && status.operation === "idle") {
+        const forceButton = button(
+          copy.forceUpdate,
+          () => void run(() => install(true)),
+          busyRequest || !status.enabled || !getCanInstall(),
+        );
+        forceButton.title = !getCanInstall()
+          ? "Take control of the PC to install an update."
+          : !status.enabled
+            ? copy.dev
+            : busyRequest
+              ? copy.updateBusy
+              : copy.lossWarning;
+        actions.append(forceButton);
+      }
     }
     dialog.replaceChildren(content, ...(actions.childElementCount ? [actions] : []));
     if (focused)

@@ -348,10 +348,20 @@ pub async fn update_check(AxumState(state): AxumState<ServerState>) -> impl Into
     )
 }
 
-pub async fn update_install(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
+#[derive(Default, serde::Deserialize)]
+pub struct UpdateInstallRequest {
+    #[serde(default)]
+    force: bool,
+}
+
+pub async fn update_install(
+    AxumState(state): AxumState<ServerState>,
+    body: Option<Json<UpdateInstallRequest>>,
+) -> impl IntoResponse {
     update_response(crate::app_update::schedule_install(
         state.app_handle.clone(),
         Arc::clone(&state.app_state.app_update),
+        body.is_some_and(|Json(request)| request.force),
     ))
 }
 
