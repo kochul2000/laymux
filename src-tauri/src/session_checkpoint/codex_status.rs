@@ -16,6 +16,7 @@ pub(crate) struct CodexStatusProcess {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CodexStatusStep {
+    Dismiss,
     Clear,
     TypeStatus,
     Submit,
@@ -29,6 +30,8 @@ pub(crate) struct CodexStatusTarget {
     pub original_cols: u16,
     pub original_rows: u16,
     pub resized: bool,
+    pub dismissed: bool,
+    pub clear_batches: u16,
     pub next_step: Option<CodexStatusStep>,
     pub output_start: Option<u64>,
     pub proof: Option<(String, bool)>,

@@ -20,6 +20,8 @@ fn install_probe(state: &AppState, owns_fence: bool, expired: bool) {
         original_cols: 60,
         original_rows: 20,
         resized: false,
+        dismissed: false,
+        clear_batches: 0,
         next_step: Some(CodexStatusStep::Submit),
         output_start: Some(40),
         proof: Some(("01a0e103-7bcb-7a20-89c0-2dc0472f2957".into(), false)),
