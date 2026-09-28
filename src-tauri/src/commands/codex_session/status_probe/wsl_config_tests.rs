@@ -176,6 +176,59 @@ fn wsl_missing_process_error_identifies_the_failed_step_and_target() {
 }
 
 #[test]
+#[ignore = "requires Ubuntu-22.04 WSL; run with --ignored"]
+fn wsl_regular_file_config_parent_is_absent_and_other_configs_are_still_inspected() {
+    const FIXTURE: &str = r#"
+set -eu
+root=$(mktemp -d /tmp/laymux-codex-config-test.XXXXXX)
+trap 'case "$root" in /tmp/laymux-codex-config-test.*) rm -rf -- "$root";; esac' EXIT
+mkdir -p "$root/work/nested" "$root/reported" "$root/home" "$root/.codex"
+printf 'model = "fixture-home"\n' > "$root/home/config.toml"
+printf "[tui.keymap.composer]\nsubmit = 'ctrl-u'\n" > "$root/.codex/config.toml"
+case "$2" in
+  actual-file) marker="$root/work/nested/.codex" ;;
+  ancestor-file) marker="$root/work/.codex" ;;
+  reported-file) marker="$root/reported/.codex" ;;
+  file-link)
+    marker="$root/marker"
+    ln -s "$marker" "$root/work/nested/.codex"
+    ;;
+esac
+touch "$marker"
+chmod 444 "$marker"
+cd "$root/work/nested"
+sh -c "$1" probe "$$" "$root/home" "$root/reported"
+"#;
+    for mode in ["actual-file", "ancestor-file", "reported-file", "file-link"] {
+        let mut command = crate::process::headless_command("wsl.exe");
+        command.args([
+            "-d",
+            "Ubuntu-22.04",
+            "--exec",
+            "sh",
+            "-c",
+            FIXTURE,
+            "fixture",
+            EDITOR_CONFIG_SCRIPT,
+            mode,
+        ]);
+        let result = crate::process::output_with_timeout(&mut command, Duration::from_secs(5));
+        let configs = read_config_result("Ubuntu-22.04", 42, result)
+            .unwrap_or_else(|error| panic!("{mode}: {error}"));
+        assert!(
+            configs.iter().any(|text| text.contains("fixture-home")),
+            "{mode}: {configs:?}"
+        );
+        assert!(
+            configs
+                .iter()
+                .any(|text| text.contains("submit = 'ctrl-u'")),
+            "{mode}: {configs:?}"
+        );
+    }
+}
+
+#[test]
 #[ignore = "requires non-root Ubuntu-22.04 WSL; run with --ignored"]
 fn wsl_guest_failures_identify_the_actual_guard_and_affected_path() {
     const FIXTURE: &str = r#"
