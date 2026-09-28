@@ -852,6 +852,9 @@
     },
     "update": {
       "title": "Updates",
+      "open": "Open update",
+      "openDesc": "Check versions and follow installation in one dialog.",
+      "openTitle": "Open Laymux update",
       "groupVersion": "Version",
       "groupChannel": "Channel",
       "groupCheck": "Check for updates",

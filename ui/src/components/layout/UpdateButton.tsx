@@ -4,10 +4,10 @@ import { useTranslation } from "react-i18next";
 
 export function UpdateButton() {
   const status = useLifecycleStore((s) => s.status);
-  const { i18n } = useTranslation();
+  const { t } = useTranslation("settings");
   if (!status?.enabled || !status.availableVersion) return null;
   const busy = status.operation !== "idle";
-  const title = i18n.language.startsWith("ko") ? "Laymux ???? ??" : "Open Laymux update";
+  const title = t("update.openTitle");
   return (
     <button
       data-testid="app-update-btn"
@@ -19,7 +19,7 @@ export function UpdateButton() {
       aria-label={title}
     >
       <DownloadIcon />
-      {busy && <span>?</span>}
+      {busy && <span>…</span>}
     </button>
   );
 }
