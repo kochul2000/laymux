@@ -1,6 +1,6 @@
 # 0279. 종료·업데이트 준비 실패는 명시적 손실 동의로 건너뛸 수 있다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-28
 - Source: 사용자 요청(pane 상태 확인 실패 시 종료·업데이트 강행), [ADR-0222](0222-agent-session-checkpoint-coordinator.md), [ADR-0264](0264-exit-update-progress-dialog.md), architecture/data-flow.md §13
 - 관계: ADR-0222·0264의 준비 실패 시 중단 정책에 사용자 선택 예외를 추가한다.
@@ -18,6 +18,7 @@ pane의 에이전트 세션이나 출력 상태를 확인하지 못하면 복원
 
 - 일반 종료는 기존 사용자 결정 경로로 저장 실패 또는 시간 초과 후 창을 닫는다. 준비가 끝난 실패에는 취소를, 아직 실행 중이면 계속 기다리기를 제공한다.
 - 업데이트 강행 허용 여부의 정본은 Rust UpdateManager의 `canForceInstall`이다. 준비 단계 실패·시간 초과만 이를 켜고, 새 확인 또는 설치 수락 시 지운다. 초기 설치·다운로드·서명 검증·설치기 실패는 이 권한을 만들지 않는다.
+- 수락한 강행 요청은 `forceInstall`로 snapshot에 유지한다. PC와 Remote는 생략한 준비 단계를 완료로 표시하지 않고, 단계 목록에서 제외한 뒤 생략 사실을 안내한다.
 - `install_app_update(force?)`와 Automation/Remote 설치 요청의 `force`는 기본 false다. true는 동일 채널·후보의 준비 실패 뒤에만 수락하고, 그 한 번의 설치에서 frontend checkpoint·Codex 확인·작업 정리·출력 캐시를 건너뛴다. 영구 설정을 바꾸지 않는다.
 - 강행도 후보 재확인·다운로드 서명 검증·입력 fence와 drain·설치기 직전 자식 프로세스 및 파일 잠금 정리를 유지한다. 실패하면 fence를 해제한다. 미확인 상태를 저장 성공으로 표시하지 않는다.
 - PC와 Remote는 같은 손실 문구와 강행 조건을 사용한다. Remote의 유효 제어 lease와 dev 설치 금지를 유지한다. dev Automation preview는 실제 종료·설치 없이 실패 버튼을 검증한다.

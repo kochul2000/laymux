@@ -1,6 +1,19 @@
 import { expect, test, type Page } from "@playwright/test";
 import { installRemoteClientRoutes } from "./remote-client-assets";
 
+// History expansion tests own a 4 KiB budget, independent of the product default.
+test.use({
+  storageState: {
+    cookies: [],
+    origins: [
+      {
+        origin: "http://remote.test",
+        localStorage: [{ name: "laymux.remote.displaySettings", value: '{"snapshotMaxKib":4}' }],
+      },
+    ],
+  },
+});
+
 function pane(index: number, terminalId: string, title: string) {
   return {
     id: `pane-${index + 1}`,
@@ -304,7 +317,17 @@ test("a newer status outlives the history limit notice", async ({ page }) => {
   await expect(page.locator("#status")).toHaveText("No earlier output is available.");
 
   await page.evaluate(() => {
-    Object.defineProperty(document, "execCommand", { value: () => true });
+    Object.defineProperty(document, "execCommand", {
+      value: () => {
+        document.dispatchEvent(
+          new ClipboardEvent("copy", {
+            clipboardData: new DataTransfer(),
+            cancelable: true,
+          }),
+        );
+        return true;
+      },
+    });
   });
   await page.locator("#copyPaneId").click();
   await expect(page.locator("#status")).toHaveText("Copied lx:pane:Main:1");

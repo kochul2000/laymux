@@ -116,10 +116,14 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
       const progress =
         status.operation === "downloading"
           ? { stage: "downloading", completed: status.downloadedBytes, total: status.totalBytes }
-          : status.operation === "installing"
+          : status.operation === "installing" || status.forceInstall
             ? { stage: "installing", completed: 0, total: null }
             : (status.preparation ?? { stage: "checkpoint", completed: 0, total: null });
-      const steps = lifecycleSteps("update", status.exitSettings?.interruptTerminals === true);
+      const steps = lifecycleSteps(
+        "update",
+        status.exitSettings?.interruptTerminals === true,
+        status.forceInstall === true,
+      );
       const active = steps.indexOf(progress.stage === "settling" ? "interrupting" : progress.stage);
       const list = element("ol", "lifecycle-steps");
       list.setAttribute("aria-live", "polite");
@@ -158,6 +162,8 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
         list.append(row);
       });
       content.append(list);
+      if (status.forceInstall)
+        content.append(element("div", "lifecycle-info", copy.preparationSkipped));
       if (progress.warning) content.append(element("div", "lifecycle-error", progress.warning));
     } else {
       if (status?.notes) {

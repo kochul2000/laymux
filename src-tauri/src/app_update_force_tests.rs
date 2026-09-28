@@ -30,12 +30,21 @@ fn only_a_failed_preparation_authorizes_one_forced_install() {
         .begin_install_with_force(UpdateChannel::Stable, true)
         .unwrap();
     assert!(!accepted.can_force_install);
+    assert!(accepted.force_install);
+    assert!(manager.mark_preparing().unwrap().force_install);
+    assert!(manager.mark_installing().unwrap().force_install);
     assert_eq!(accepted.operation, UpdateOperation::Downloading);
     assert!(manager
         .begin_install_with_force(UpdateChannel::Stable, true)
         .is_err());
     manager.fail_operation("signature failed".into()).unwrap();
     assert!(!manager.snapshot().unwrap().can_force_install);
+    assert!(
+        !manager
+            .begin_install(UpdateChannel::Stable)
+            .unwrap()
+            .force_install
+    );
 }
 
 #[test]

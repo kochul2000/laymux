@@ -96,6 +96,16 @@ describe("LifecycleModal", () => {
     render(<LifecycleModal />);
     expect(screen.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
   });
+  it("does not claim skipped preparation succeeded during a forced install", () => {
+    useLifecycleStore.setState({
+      status: { ...status, operation: "installing", forceInstall: true },
+    });
+    render(<LifecycleModal />);
+    expect(screen.queryByText("Save restore information")).toBeNull();
+    expect(screen.queryByText("Save terminal history")).toBeNull();
+    expect(screen.getByText("Install and restart")).toBeInTheDocument();
+    expect(screen.getByText(/Skipped saving restore information/)).toBeInTheDocument();
+  });
   it("offers an explicit loss override after pane preparation fails", async () => {
     const failed = {
       ...status,

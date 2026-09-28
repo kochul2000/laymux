@@ -114,6 +114,7 @@ pub struct UpdateStatus {
     pub preparation: Option<progress::ExitProgress>,
     pub exit_settings: Option<progress::ExitPlan>,
     pub can_force_install: bool,
+    pub force_install: bool,
 }
 
 impl Default for UpdateStatus {
@@ -134,6 +135,7 @@ impl Default for UpdateStatus {
             preparation: None,
             exit_settings: None,
             can_force_install: false,
+            force_install: false,
         }
     }
 }
@@ -187,6 +189,7 @@ impl UpdateManager {
         }
         status.operation = UpdateOperation::Checking;
         status.can_force_install = false;
+        status.force_install = false;
         // `last_error` is not cleared here. A check that ends up abandoned would
         // otherwise erase the record of the last real failure without replacing
         // it; `finish_check` clears it once there is an answer.
@@ -276,6 +279,7 @@ impl UpdateManager {
             return Err("the pending update has no failed preparation to override".into());
         }
         status.can_force_install = false;
+        status.force_install = force;
         status.operation = UpdateOperation::Downloading;
         status.preparation = None;
         status.exit_settings = Some(crate::settings::load_settings().exit.into());

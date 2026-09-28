@@ -29,6 +29,23 @@ for (const width of [320, 390]) {
     await expect(modal.getByRole("button", { name: "Accept loss and update" })).toBeDisabled();
     expect(await modal.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
     await page.screenshot({ path: `../.screenshots/lifecycle-force-remote-${width}.png` });
+    await page.route("http://remote.test/remote/v1/update/check", (route) =>
+      route.fulfill({
+        json: {
+          enabled: true,
+          currentVersion: "1.0.22",
+          availableVersion: "1.0.23",
+          operation: "installing",
+          forceInstall: true,
+          preparation: { stage: "checkpoint", completed: 0, total: null },
+          exitSettings: { interruptTerminals: true },
+        },
+      }),
+    );
+    await modal.getByRole("button", { name: "Check for updates" }).click();
+    await expect(modal.locator(".lifecycle-step")).toHaveCount(2);
+    await expect(modal.locator(".lifecycle-step.is-done")).toHaveCount(1);
+    await expect(modal).toContainText("Skipped saving restore information");
   });
   test(`Remote 업데이트 모달은 ${width}px에서 준비 상태를 표시하고 배경을 차단한다`, async ({
     page,

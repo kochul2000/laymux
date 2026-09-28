@@ -24,7 +24,13 @@ test("pane 확인 실패 뒤 손실 강행은 명시적 force 설치 요청을 �
     host.__TAURI_INTERNALS__.invoke = async (cmd, args) => {
       if (cmd !== "install_app_update") return original(cmd, args);
       await host.recordForceInstall(args);
-      return { ...status, operation: "downloading", canForceInstall: false, lastError: null };
+      return {
+        ...status,
+        operation: "installing",
+        forceInstall: true,
+        canForceInstall: false,
+        lastError: null,
+      };
     };
     host.__tauriMockEmit("app-update-status-changed", status);
     host.__tauriMockEmit("app-update-status-changed", {
@@ -47,4 +53,8 @@ test("pane 확인 실패 뒤 손실 강행은 명시적 force 설치 요청을 �
   await expect(
     modal.getByRole("button", { name: /손실 감수하고 업데이트|Accept loss and update/ }),
   ).toHaveCount(0);
+  await expect(modal.locator(".lifecycle-step")).toHaveCount(2);
+  await expect(modal.locator(".lifecycle-step.is-done")).toHaveCount(1);
+  await expect(modal).toContainText(/건너뛰고|Skipped saving restore information/);
+  await page.screenshot({ path: "../.screenshots/lifecycle-force-installing.png" });
 });

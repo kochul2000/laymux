@@ -2046,6 +2046,7 @@ export type AppUpdateChannel = "stable" | "beta";
 export interface AppUpdateStatus {
   /** One attempt after a failed preparation; never bypasses package verification. */
   canForceInstall?: boolean;
+  forceInstall?: boolean;
   preparation?: import("./lifecycle-progress").ExitProgress | null;
   exitSettings?: ExitSettings | null;
   enabled: boolean;

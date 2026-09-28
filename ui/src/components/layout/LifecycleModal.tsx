@@ -29,6 +29,7 @@ export function LifecycleModal() {
   const busy = close || ["downloading", "preparing", "installing"].includes(operation);
   const locked = close || operation === "preparing" || operation === "installing";
   const canForceUpdate = !close && operation === "idle" && status?.canForceInstall === true;
+  const skipPreparation = !close && status?.forceInstall === true;
   const error = state.error ?? (canForceUpdate ? status?.lastError : null);
   const cleanup = close
     ? state.cleanup
@@ -42,7 +43,7 @@ export function LifecycleModal() {
             completed: status?.downloadedBytes ?? 0,
             total: status?.totalBytes ?? null,
           }
-        : operation === "installing"
+        : operation === "installing" || (skipPreparation && operation === "preparing")
           ? { stage: "installing", completed: 0, total: null }
           : (status?.preparation ?? { stage: "checkpoint", completed: 0, total: null });
   const dismiss = () => {
@@ -154,6 +155,7 @@ export function LifecycleModal() {
               progress={progress}
               ko={ko}
               failed={Boolean(error)}
+              skipPreparation={skipPreparation}
             />
           ) : (
             <>
@@ -180,6 +182,9 @@ export function LifecycleModal() {
                 </Button>
               </div>
             </>
+          )}
+          {skipPreparation && busy && (
+            <div className="lifecycle-info">{copy.preparationSkipped}</div>
           )}
           {progress.warning && busy && (
             <div className="lifecycle-error" role="status">

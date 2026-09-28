@@ -274,7 +274,7 @@ async function scrollRemoteViewportUp(page: Page, lines: number) {
 }
 
 function spinnerAnimationName(spinner: Locator) {
-  return spinner.evaluate((el) => getComputedStyle(el).animationName);
+  return spinner.locator(".remote-icon").evaluate((el) => getComputedStyle(el).animationName);
 }
 
 test("a pending top-bar action shows and then clears its spinner", async ({ page }) => {
@@ -288,7 +288,7 @@ test("a pending top-bar action shows and then clears its spinner", async ({ page
   await expect(page.locator("#statusText")).toHaveText("Claiming remote control…");
   await expect(status).toHaveAttribute("aria-busy", "true");
   await expect(spinner).toBeVisible();
-  // The marker is a drawn ring, not a glyph: it carries no text at any frame.
+  // The shared Lucide loader carries no text at any frame.
   await expect(spinner).toHaveText("");
   expect(await spinnerAnimationName(spinner)).toBe("status-spinner-spin");
 
@@ -308,21 +308,16 @@ test("reduced motion keeps the pending marker static", async ({ page }) => {
   await expect(page.locator("#statusText")).toHaveText("Claiming remote control…");
   await expect(spinner).toBeVisible();
   expect(await spinnerAnimationName(spinner)).toBe("none");
-  // Static marker, but still a marker: the ring closes instead of spinning.
-  const borders = await spinner.evaluate((el) => {
+  // Reduced motion keeps the same visible SVG and removes its animation.
+  const marker = await spinner.locator("svg").evaluate((el) => {
     const style = getComputedStyle(el);
     return {
-      top: style.borderTopColor,
-      right: style.borderRightColor,
-      rightStyle: style.borderRightStyle,
+      name: el.getAttribute("data-remote-icon-name"),
       width: style.width,
       height: style.height,
     };
   });
-  expect(borders.top).toBe(borders.right);
-  expect(borders.rightStyle).toBe("solid");
-  expect(borders.width).toBe("10px");
-  expect(borders.height).toBe("10px");
+  expect(marker).toEqual({ name: "LoaderCircle", width: "10px", height: "10px" });
 });
 
 test("a disconnected paste reports a static warning instead of endless reconnect activity", async ({

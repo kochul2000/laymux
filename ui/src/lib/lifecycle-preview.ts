@@ -52,6 +52,7 @@ export async function previewLifecycle(params: Record<string, unknown>) {
     status: {
       ...snapshot,
       canForceInstall: kind === "update" && typeof params.error === "string",
+      forceInstall: kind === "update" && params.force === true,
       lastError: typeof params.error === "string" ? params.error : null,
       availableVersion: "1.0.15",
       notes:
