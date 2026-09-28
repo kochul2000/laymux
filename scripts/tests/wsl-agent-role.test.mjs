@@ -31,6 +31,7 @@ function processFixture(pid, ppid, name, args = [name], hasMarker = true) {
 
 function ancestorFixtures() {
   return [
+    processFixture(1, 0, 'init', ['init'], false),
     processFixture(10, 0, 'Relay', ['Relay'], false),
     processFixture(11, 10, 'bash'),
     processFixture(12, 10, 'chrome'),
@@ -140,6 +141,45 @@ test('Chrome helper만 남으면 Claude liveness를 유지하지 않는다', () 
   assert.deepEqual(livePids(entries), []);
   assertRole(attributionRows(entries), 30, '1');
 });
+
+test('Codex TUI 종료 뒤 남은 app-server 두 개는 대화가 아니다', () => {
+  const entries = [
+    ...ancestorFixtures(),
+    processFixture(30, 1, 'codex', ['/opt/codex', 'app-server', '--listen', 'unix:///tmp/codex.sock']),
+    processFixture(31, 30, 'codex', ['/opt/codex', 'app-server']),
+  ];
+  assert.deepEqual(livePids(entries), []);
+  const rows = attributionRows(entries);
+  assertRole(rows, 30, '1');
+  assertRole(rows, 31, '1');
+});
+
+test('Codex 서버와 함께 실행한 실제 TUI는 유지한다', () => {
+  const entries = [
+    ...ancestorFixtures(),
+    processFixture(20, 11, 'codex', ['codex', 'resume', 'session-id']),
+    processFixture(30, 1, 'codex', ['codex', 'app-server']),
+  ];
+  assert.deepEqual(livePids(entries), [20]);
+  const rows = attributionRows(entries);
+  assertRole(rows, 20, '0');
+  assertRole(rows, 30, '1');
+});
+
+for (const args of [
+  ['codex', 'app-server-extra'],
+  ['codex', 'app-server\nnot-a-role'],
+  ['codex', '--', 'app-server'],
+  ['codex', '-c', 'app-server'],
+  ['codex', 'resume', 'app-server'],
+  null,
+]) {
+  test(`명시적인 서버 역할이 아닌 Codex 인자는 유지: ${JSON.stringify(args)}`, () => {
+    const entries = [...ancestorFixtures(), processFixture(20, 11, 'codex', args)];
+    assert.deepEqual(livePids(entries), [20]);
+    assertRole(attributionRows(entries), 20, '0');
+  });
+}
 
 test('helper를 경유하는 자손의 PPID 연결은 보존한다', () => {
   const entries = [

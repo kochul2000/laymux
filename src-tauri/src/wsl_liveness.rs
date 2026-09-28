@@ -64,7 +64,7 @@ for proc in /proc/[0-9]*; do
     claude|codex|grok) ;;
     *) continue ;;
   esac
-  if laymux_is_claude_chrome_host "$proc" "$name"; then continue; fi
+  if laymux_is_agent_helper "$proc" "$name"; then continue; fi
   pid=${proc##*/}
   terminal_id=
   unreadable=0
