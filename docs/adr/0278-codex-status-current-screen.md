@@ -1,6 +1,6 @@
 # 0278. Codex 종료 확인은 명령 실행 후 현재 화면을 읽는다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-28
 - Source: 사용자 요청(반복 `/status`의 현재 화면 직접 판독), [실측 기록](../codex-status-input-repro-2026-09-28.md), [data-flow §13.5](../architecture/data-flow.md)
 - Supersedes: [ADR-0270](0270-codex-status-checkpoint-probe.md)의 새 출력 바이트만으로 전체 카드를 확인한다는 조건. 나머지 종료 확인 정책은 유지한다.
