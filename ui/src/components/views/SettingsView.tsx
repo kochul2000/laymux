@@ -189,8 +189,7 @@ function useMonospacedFonts() {
 
 /** Where the update section links out to. The updater itself pins these in Rust. */
 function UpdateSection() {
-  const { t, i18n } = useTranslation("settings");
-  const ko = i18n.language.startsWith("ko");
+  const { t } = useTranslation("settings");
   const storeUpdate = useSettingsStore((s) => s.update);
   const setUpdate = useSettingsStore((s) => s.setUpdate);
   const [update, setDraftUpdate] = useDraft("update", storeUpdate, (v) => setUpdate(v));
@@ -209,20 +208,13 @@ function UpdateSection() {
             {status?.channel === "beta" ? t("update.channelBeta") : t("update.channelStable")}
           </span>
         </SettingsField>
-        <SettingsField
-          label={ko ? "????" : "Update"}
-          desc={
-            ko
-              ? "?? ???? ?? ???? ? ???? ?????."
-              : "Check versions and follow installation in one dialog."
-          }
-        >
+        <SettingsField label={t("update.title")} desc={t("update.openDesc")}>
           <Button
             variant="primary"
             data-testid="update-open-btn"
             onClick={() => useLifecycleStore.getState().openUpdate()}
           >
-            {ko ? "???? ??" : "Open update"}
+            {t("update.open")}
           </Button>
         </SettingsField>
       </SettingsGroup>
