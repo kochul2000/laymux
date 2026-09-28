@@ -37,12 +37,15 @@ read_config() {
     base64 -w0 -- "$file" || fail config.encode "$file"
     printf '\n'
   else
-    # Only absence beneath an accessible directory is conclusive. Inaccessible
-    # or dangling parent symlinks must not silently hide a real configuration.
+    # Locate the existing parent without treating inaccessible or dangling
+    # parent symlinks as proof that a configuration is absent.
     parent=$(dirname -- "$file") || fail config.parent "$file"
     while [ ! -e "$parent" ] && [ ! -L "$parent" ] && [ "$parent" != / ]; do
       parent=$(dirname -- "$parent") || fail config.parent "$file"
     done
+    # A confirmed regular file cannot contain a child config (ENOTDIR).
+    # Return only from this read; the remaining configuration layers still apply.
+    if [ -f "$parent" ]; then return 0; fi
     [ -d "$parent" ] && [ -x "$parent" ] || fail config.parent "$parent"
   fi
 }
