@@ -1,5 +1,15 @@
 {
   "common": {
+    "codexCheckpoint": {
+      "failed": "Codex 대화 확인에 실패하여 종료·업데이트 준비를 중단했습니다.",
+      "retry": "표시된 pane의 작업을 수동으로 종료한 뒤 다시 시도하세요. 같은 오류가 계속되면 해당 pane을 닫고 다시 시도하세요.",
+      "dock": {
+        "top": "상단 Dock",
+        "bottom": "하단 Dock",
+        "left": "왼쪽 Dock",
+        "right": "오른쪽 Dock"
+      }
+    },
     "spreadsheet": {
       "sheet": "시트",
       "readOnly": "읽기 전용 · 저장된 수식 결과",
@@ -566,7 +576,7 @@
     "codex": {
       "title": "Codex",
       "verifySessionOnExit": "종료 전 /status로 세션 확인",
-      "verifySessionOnExitDesc": "종료·업데이트 전에 미전송 입력을 삭제하고 복원할 대화를 확인합니다. Codex 기본 키맵의 대기 중인 텍스트 입력창에서 사용하며, 터미널 크기가 잠시 바뀝니다. 작업·첨부·모달이 있거나 확인에 실패하면 준비를 중단합니다. 실행 중 키 설정 변경이나 다른 키 설정의 대화로 전환한 상태는 지원하지 않습니다.",
+      "verifySessionOnExitDesc": "종료·업데이트 전에 미전송 입력을 지우고 /status 화면에서 복원할 대화를 확인합니다. Codex 기본 키맵에서 사용하며 터미널 크기가 잠시 바뀝니다. 지원하는 모델·권한 메뉴는 Esc로 닫습니다. 작업·첨부·미지원 모달이 있거나 확인에 실패하면 준비를 중단합니다. 실행 중 키 설정 변경이나 다른 키 설정의 대화로 전환한 상태는 지원하지 않습니다.",
       "groupSessionRestore": "세션 복원",
       "groupTranscript": "트랜스크립트",
       "groupStatusMessage": "상태 메시지",

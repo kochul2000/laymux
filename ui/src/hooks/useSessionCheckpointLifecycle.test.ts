@@ -94,6 +94,21 @@ describe("useSessionCheckpointLifecycle", () => {
     });
   });
 
+  it("returns the pane and manual retry guidance to the PC updater without tearing down tasks", async () => {
+    const message =
+      "Codex 확인 실패 [백엔드 · pane 2 · API 작업]\n표시된 pane의 작업을 수동으로 종료한 뒤 다시 시도하세요.";
+    vi.mocked(withCodexStatusCheckpoint).mockRejectedValueOnce(new Error(message));
+    renderHook(() => useSessionCheckpointLifecycle(true));
+    await vi.waitFor(() => expect(onSessionCheckpointRequested).toHaveBeenCalledTimes(1));
+    nativeListener?.({ requestId: 29, reason: "update", requireConclusive: true });
+    await vi.waitFor(() =>
+      expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(29, undefined, message),
+    );
+    expect(flushSessionCheckpoint).not.toHaveBeenCalled();
+    expect(prepareTerminalExit).not.toHaveBeenCalled();
+    expect(setPreparingUpdate).toHaveBeenLastCalledWith(false);
+  });
+
   it("fences optional status verification under the original update request before saving", async () => {
     useSettingsStore.setState((state) => ({
       codex: { ...state.codex, restoreSession: true, verifySessionOnExit: true },

@@ -1,6 +1,6 @@
 # 0270. Codex 종료 복원점은 선택적으로 `/status`로 확인한다
 
-- Status: Accepted
+- Status: Superseded by [0278](0278-codex-status-current-screen.md)
 - Date: 2026-09-27
 - Source: 사용자 요청(기본 데몬의 세션 미식별 해결, 입력 삭제 후 `/status` 조회, 기본 켜짐), [data-flow §13.5](../architecture/data-flow.md), [ADR-0222](0222-agent-session-checkpoint-coordinator.md), [조사 기록](../codex-shared-daemon-attribution-repro-2026-09-26.md)
 - Extends: ADR-0222의 종료·업데이트 귀속 수집. 일반 저장의 수동 관측 정책은 유지한다.

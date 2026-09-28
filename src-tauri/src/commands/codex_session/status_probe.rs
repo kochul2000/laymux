@@ -1,6 +1,8 @@
 //! Explicit, fenced Codex status queries for close/update checkpoints.
+#[cfg(test)]
 mod output;
 mod process_context;
+mod screen;
 mod targets;
 #[cfg(test)]
 mod tests;
@@ -16,6 +18,7 @@ use crate::session_checkpoint::codex_status::{
     CodexStatusCheckpoint, CodexStatusStep, CodexStatusTarget,
 };
 use crate::state::AppState;
+use crate::terminal_output::{TerminalRenderCheckpoint, TerminalRenderCheckpointTarget};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,8 +28,8 @@ use tauri::State;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(25);
 const PROBE_COLS: u16 = 96;
 const PROBE_ROWS: u16 = 40;
-const CLEAR_ROUNDS: usize = 256;
-const MAX_OUTPUT_BYTES: usize = 256 * 1024;
+const CLEAR_ROUNDS: usize = 128;
+const MAX_CLEAR_BATCHES: u16 = 32;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -220,7 +223,7 @@ pub fn codex_status_checkpoint_input(
     terminal_id: String,
     step: CodexStatusStep,
     state: State<'_, Arc<AppState>>,
-) -> Result<(), String> {
+) -> Result<Option<TerminalRenderCheckpointTarget>, String> {
     input_inner(&state, &token, &terminal_id, step)
 }
 
@@ -229,85 +232,114 @@ fn input_inner(
     token: &str,
     id: &str,
     step: CodexStatusStep,
-) -> Result<(), String> {
+) -> Result<Option<TerminalRenderCheckpointTarget>, String> {
     let target = target_for(state, token, id)?;
     let _io = target.io.lock_or_err()?;
     target_for(state, token, id)?;
     let handle = current_handle(state, id, &target)?;
     // Consume the step before I/O: duplicate/retried IPC must never send a second Enter.
     change_target(state, token, id, |target| {
-        if target.next_step != Some(step) {
+        let dismiss = step == CodexStatusStep::Dismiss
+            && target.next_step == Some(CodexStatusStep::Clear)
+            && !target.dismissed;
+        let clearing =
+            step == CodexStatusStep::Clear && target.next_step == Some(CodexStatusStep::TypeStatus);
+        if target.next_step != Some(step) && !dismiss && !clearing {
             return Err("Unexpected Codex status query step".into());
         }
+        if step == CodexStatusStep::Clear {
+            if target.clear_batches >= MAX_CLEAR_BATCHES {
+                return Err("Codex draft exceeds the supported deletion limit".into());
+            }
+            target.clear_batches += 1;
+        }
         target.next_step = None;
+        target.dismissed |= dismiss;
         Ok(())
     })?;
+    let mut submitted = None;
     let data = match step {
+        CodexStatusStep::Dismiss => vec![0x1b],
         CodexStatusStep::Clear => {
-            change_target(state, token, id, |target| {
-                target.resized = true;
-                Ok(())
-            })?;
-            resize_target(
-                state,
-                id,
-                &target,
-                target.original_cols.max(PROBE_COLS),
-                target.original_rows.max(PROBE_ROWS),
-            )?;
-            b"\x05\x15\x0b".repeat(CLEAR_ROUNDS)
+            if !target.resized {
+                change_target(state, token, id, |target| {
+                    target.resized = true;
+                    Ok(())
+                })?;
+                resize_target(
+                    state,
+                    id,
+                    &target,
+                    target.original_cols.max(PROBE_COLS),
+                    target.original_rows.max(PROBE_ROWS),
+                )?;
+            }
+            // Delete on both sides of the cursor, including multiline drafts.
+            // Backspace/Delete at the boundaries are no-ops; history is retained.
+            b"\x7f\x1b[3~".repeat(CLEAR_ROUNDS)
         }
-        CodexStatusStep::TypeStatus => b"\x1b[200~/status\x1b[201~".to_vec(),
+        // Keep the command name editable: native Codex can hide the popup for
+        // an exact name. The frontend verifies the selected Status builtin.
+        CodexStatusStep::TypeStatus => b"\x1b[200~/statu\x1b[201~".to_vec(),
         CodexStatusStep::Submit => {
-            let output = crate::terminal_output::terminal_output_session_for(
+            let boundary = crate::terminal_output::terminal_render_checkpoint_target(
                 &state.terminal_protocol_states,
                 id,
-            )?
-            .ok_or("Codex output session disappeared")?;
-            let seq = output.output_buffer().snapshot(0)?.seq_end;
+            )?;
             change_target(state, token, id, |target| {
-                target.output_start = Some(seq);
+                target.output_start = Some(boundary.seq);
                 Ok(())
             })?;
+            submitted = Some(boundary);
             b"\r".to_vec()
         }
     };
     handle.write_guarded(&data, || target_for(state, token, id).is_ok())?;
     change_target(state, token, id, |target| {
         target.next_step = match step {
+            CodexStatusStep::Dismiss => Some(CodexStatusStep::Clear),
             CodexStatusStep::Clear => Some(CodexStatusStep::TypeStatus),
             CodexStatusStep::TypeStatus => Some(CodexStatusStep::Submit),
             CodexStatusStep::Submit => None,
         };
         Ok(())
-    })
+    })?;
+    Ok(submitted)
 }
 
 #[tauri::command(async)]
 pub fn read_codex_status_checkpoint(
     token: String,
     terminal_id: String,
+    screen: TerminalRenderCheckpoint,
     state: State<'_, Arc<AppState>>,
 ) -> Result<Option<String>, String> {
-    let target = target_for(&state, &token, &terminal_id)?;
-    current_handle(&state, &terminal_id, &target)?;
+    read_inner(&state, &token, &terminal_id, &screen)
+}
+
+fn read_inner(
+    state: &AppState,
+    token: &str,
+    terminal_id: &str,
+    screen: &TerminalRenderCheckpoint,
+) -> Result<Option<String>, String> {
+    let target = target_for(state, token, terminal_id)?;
+    current_handle(state, terminal_id, &target)?;
     let start = target
         .output_start
         .ok_or("Codex status command was not submitted")?;
-    let output = crate::terminal_output::terminal_output_session_for(
+    let current = crate::terminal_output::terminal_render_checkpoint_target(
         &state.terminal_protocol_states,
-        &terminal_id,
-    )?
-    .ok_or("Codex output session disappeared")?;
-    let bytes = output
-        .output_buffer()
-        .exact_snapshot_since(start, MAX_OUTPUT_BYTES)?
-        .ok_or("Codex status output was lost")?;
-    let Some(id) = output::parse_status_session(&bytes.data) else {
+        terminal_id,
+    )?;
+    if !screen::is_current_screen(screen, &current, target.generation, start)? {
+        return Ok(None);
+    }
+    let Some(id) = screen::parse_status_screen(screen) else {
         return Ok(None);
     };
     let fresh = targets::verify_session(&target.process, &id)?;
-    change_target(&state, &token, &terminal_id, |target| {
+    change_target(state, token, terminal_id, |target| {
         target.proof = Some((id.clone(), fresh));
         Ok(())
     })?;

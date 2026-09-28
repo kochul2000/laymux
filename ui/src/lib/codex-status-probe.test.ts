@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isCodexStatusCommandSelected, isCodexIdleTextComposer } from "./codex-status-probe";
+import {
+  isCodexStatusCommandSelected,
+  isCodexIdleTextComposer,
+  isCodexDismissibleMenu,
+} from "./codex-status-probe";
 import type { TerminalBufferDump } from "./terminal-serialize-registry";
 
 function screen(text: string): TerminalBufferDump {
@@ -8,6 +12,37 @@ function screen(text: string): TerminalBufferDump {
 }
 
 describe("Codex status submission guard", () => {
+  it("dismisses only supported model/permissions menus and never an active task or setup dialog", () => {
+    for (const title of ["Select Model and Effort", "Update Model Permissions"]) {
+      expect(
+        isCodexDismissibleMenu(screen(`  ${title}\n› 1. current\n\n  enter select · esc back`)),
+      ).toBe(true);
+    }
+    for (const title of [
+      "Set up the Codex agent sandbox",
+      "Task is still running",
+      "Approve command?",
+    ]) {
+      expect(
+        isCodexDismissibleMenu(screen(`  ${title}\n› 1. current\n\n  enter select · esc back`)),
+      ).toBe(false);
+    }
+    expect(
+      isCodexDismissibleMenu(screen("  Select Model and Effort\n› 1. model\n  esc to interrupt")),
+    ).toBe(false);
+  });
+  it("selects Status from the current composer while earlier status cards remain", () => {
+    const menu =
+      "› /status      show current session configuration and token usage\n\n› /statu\n\n  Context 100% left";
+    expect(isCodexStatusCommandSelected(screen(menu))).toBe(true);
+    expect(isCodexStatusCommandSelected(screen("│ Session: old-id │\n" + menu))).toBe(true);
+    expect(
+      isCodexStatusCommandSelected(screen(menu.replace("› /statu\n", "› /statu\n  leftover"))),
+    ).toBe(false);
+    expect(isCodexStatusCommandSelected(screen(menu.replace("› /status ", "› /statusline ")))).toBe(
+      false,
+    );
+  });
   it("does not confuse normal draft text or SQL with a Vim footer", () => {
     expect(
       isCodexIdleTextComposer(

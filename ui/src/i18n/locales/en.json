@@ -1,5 +1,15 @@
 {
   "common": {
+    "codexCheckpoint": {
+      "failed": "Close/update preparation stopped because the Codex conversation could not be verified.",
+      "retry": "Please manually end the work in the indicated pane(s), then try again. If the error persists, close the indicated pane(s) and try again.",
+      "dock": {
+        "top": "Top Dock",
+        "bottom": "Bottom Dock",
+        "left": "Left Dock",
+        "right": "Right Dock"
+      }
+    },
     "spreadsheet": {
       "sheet": "Sheet",
       "readOnly": "Read only · Saved formula results",
@@ -566,7 +576,7 @@
     "codex": {
       "title": "Codex",
       "verifySessionOnExit": "Verify session with /status before exit",
-      "verifySessionOnExitDesc": "Discard unsent input and confirm the conversation before closing or updating. Requires an idle text composer with Codex's default keymap. Terminal size changes briefly. Preparation stops for active tasks, attachments, dialogs, or failed verification. Runtime keymap changes and switching to a conversation with different key settings are unsupported.",
+      "verifySessionOnExitDesc": "Clear unsent input and read the /status screen before closing or updating. Requires Codex's default keymap. Terminal size changes briefly. Supported model and permissions menus are dismissed with Esc. Preparation stops for active tasks, attachments, unsupported dialogs, or failed verification. Runtime keymap changes and switching to a conversation with different key settings are unsupported.",
       "groupSessionRestore": "Session Restore",
       "groupTranscript": "Transcript",
       "groupStatusMessage": "Status Message",

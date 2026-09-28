@@ -18,12 +18,14 @@ fn processes(state: &AppState) -> Result<HashMap<String, CodexStatusProcess>, St
         if let Some((pid, "Codex")) =
             crate::process_tree::match_interactive_app_process(&snapshot, root)
         {
-            let context = super::process_context::read(pid)?;
+            let context =
+                super::process_context::read(pid).map_err(|error| format!("[{id}] {error}"))?;
             result.insert(
-                id,
+                id.clone(),
                 CodexStatusProcess {
                     pid,
-                    started_at: process_start(pid, None)?,
+                    started_at: process_start(pid, None)
+                        .map_err(|error| format!("[{id}] {error}"))?,
                     distro: None,
                     codex_home: context.codex_home,
                     sqlite_home: context.sqlite_home,
@@ -33,18 +35,41 @@ fn processes(state: &AppState) -> Result<HashMap<String, CodexStatusProcess>, St
     }
     let wsl = resolve_wsl_agent_processes(state, WslAgentProvider::Codex)?;
     if !wsl.failed_terminal_ids.is_empty() {
-        return Err("Could not verify WSL Codex processes".into());
+        let mut ids: Vec<_> = wsl
+            .failed_terminal_ids
+            .iter()
+            .map(|id| format!("[{id}]"))
+            .collect();
+        ids.sort();
+        return Err(format!(
+            "Could not verify WSL Codex processes {}",
+            ids.join(" ")
+        ));
+    }
+    let mut ambiguous: Vec<_> = wsl
+        .attributions
+        .iter()
+        .filter(|(_, process)| process.is_none())
+        .map(|(id, _)| format!("[{id}]"))
+        .collect();
+    ambiguous.sort();
+    if !ambiguous.is_empty() {
+        return Err(format!(
+            "Ambiguous WSL Codex process {}",
+            ambiguous.join(" ")
+        ));
     }
     for (id, process) in wsl.attributions {
-        let process = process.ok_or("Ambiguous WSL Codex process")?;
+        let process = process.ok_or_else(|| format!("Ambiguous WSL Codex process [{id}]"))?;
         let codex_home = process
             .codex_home_dir()
-            .ok_or("Could not resolve WSL Codex home")?;
+            .ok_or_else(|| format!("[{id}] Could not resolve WSL Codex home"))?;
         result.insert(
-            id,
+            id.clone(),
             CodexStatusProcess {
                 pid: process.pid,
-                started_at: process_start(process.pid, Some(&process.distro))?,
+                started_at: process_start(process.pid, Some(&process.distro))
+                    .map_err(|error| format!("[{id}] {error}"))?,
                 distro: Some(process.distro),
                 sqlite_home: codex_home.clone(),
                 codex_home,
@@ -60,7 +85,7 @@ pub(super) fn require_current_process(
     expected: &CodexStatusProcess,
 ) -> Result<(), String> {
     if processes(state)?.get(id) != Some(expected) {
-        return Err("Codex process changed during status query".into());
+        return Err(format!("[{id}] Codex process changed during status query"));
     }
     Ok(())
 }
@@ -87,12 +112,16 @@ pub(super) fn collect_targets(
     let handles = state.pty_handles.lock_or_err()?.clone();
     let mut targets = HashMap::new();
     for (id, process) in candidates {
-        let terminal = terminals.get(&id).ok_or("Codex terminal disappeared")?;
-        let handle = handles.get(&id).ok_or("Codex terminal disappeared")?;
+        let terminal = terminals
+            .get(&id)
+            .ok_or_else(|| format!("[{id}] Codex terminal disappeared"))?;
+        let handle = handles
+            .get(&id)
+            .ok_or_else(|| format!("[{id}] Codex terminal disappeared"))?;
         let cwd = terminal
             .0
             .as_deref()
-            .ok_or("Codex working directory is unknown")?;
+            .ok_or_else(|| format!("[{id}] Codex working directory is unknown"))?;
         let cwd = if let Some(distro) = &process.distro {
             PathBuf::from(crate::path_utils::resolve_path_for_windows(
                 cwd,
@@ -101,7 +130,7 @@ pub(super) fn collect_targets(
         } else {
             PathBuf::from(cwd)
         };
-        require_default_editor_config(&process, &cwd)?;
+        require_default_editor_config(&process, &cwd).map_err(|error| format!("[{id}] {error}"))?;
         targets.insert(
             id,
             CodexStatusTarget {
@@ -111,6 +140,8 @@ pub(super) fn collect_targets(
                 original_cols: terminal.1,
                 original_rows: terminal.2,
                 resized: false,
+                dismissed: false,
+                clear_batches: 0,
                 next_step: Some(CodexStatusStep::Clear),
                 output_start: None,
                 proof: None,

@@ -1,0 +1,42 @@
+import i18n from "@/i18n";
+import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useDockStore } from "@/stores/dock-store";
+import { useTerminalStore } from "@/stores/terminal-store";
+import { toPaneId } from "./pane-ids";
+import { paneNumberFor } from "./pane-numbers";
+
+function paneLabel(terminalId: string): string {
+  const paneId = toPaneId(terminalId);
+  const workspace = useWorkspaceStore
+    .getState()
+    .workspaces.find((item) => item.panes.some((pane) => pane.id === paneId));
+  const dock = useDockStore
+    .getState()
+    .docks.find((item) => item.panes.some((pane) => pane.id === paneId));
+  const panes = workspace?.panes ?? dock?.panes;
+  if (!panes) return terminalId;
+  const pane = panes.find((item) => item.id === paneId);
+  const instance = useTerminalStore.getState().instances.find((item) => item.id === terminalId);
+  const title = instance?.title || instance?.label || pane?.view.profile;
+  const location = workspace?.name ?? i18n.t(`codexCheckpoint.dock.${dock!.position}`);
+  return [
+    location,
+    `pane ${paneNumberFor(panes, paneId)}`,
+    typeof title === "string" ? title : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/** Rust preserves terminal IDs in diagnostic strings; layout labels stay UI-owned. */
+export function formatCodexCheckpointError(cause: unknown): Error {
+  const reason = cause instanceof Error ? cause.message : String(cause);
+  const readable = reason.replace(
+    /\[(terminal-[^\]\s]+)\]/g,
+    (_, id: string) => `[${paneLabel(id)}]`,
+  );
+  return new Error(
+    `${i18n.t("codexCheckpoint.failed")}\n${readable}\n${i18n.t("codexCheckpoint.retry")}`,
+    { cause },
+  );
+}

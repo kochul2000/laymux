@@ -259,7 +259,7 @@ fn skip_csi_params(bytes: &[u8], start: usize) -> usize {
 /// Skip a single ANSI escape sequence starting at `bytes[i]`.
 /// Returns `(new_index, csi_final_byte)` where `csi_final_byte` is `Some(b'C')` etc.
 /// for CSI sequences, `None` for OSC or other sequences.
-fn skip_ansi_escape(bytes: &[u8], i: usize) -> (usize, Option<u8>) {
+pub(crate) fn skip_ansi_escape(bytes: &[u8], i: usize) -> (usize, Option<u8>) {
     debug_assert!(bytes[i] == 0x1b && i + 1 < bytes.len());
     match bytes[i + 1] {
         b'[' => {
