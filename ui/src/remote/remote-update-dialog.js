@@ -116,10 +116,14 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
       const progress =
         status.operation === "downloading"
           ? { stage: "downloading", completed: status.downloadedBytes, total: status.totalBytes }
-          : status.operation === "installing"
+          : status.operation === "installing" || status.forceInstall
             ? { stage: "installing", completed: 0, total: null }
             : (status.preparation ?? { stage: "checkpoint", completed: 0, total: null });
-      const steps = lifecycleSteps("update", status.exitSettings?.interruptTerminals === true);
+      const steps = lifecycleSteps(
+        "update",
+        status.exitSettings?.interruptTerminals === true,
+        status.forceInstall === true,
+      );
       const active = steps.indexOf(progress.stage === "settling" ? "interrupting" : progress.stage);
       const list = element("ol", "lifecycle-steps");
       list.setAttribute("aria-live", "polite");
@@ -158,6 +162,8 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
         list.append(row);
       });
       content.append(list);
+      if (status.forceInstall)
+        content.append(element("div", "lifecycle-info", copy.preparationSkipped));
       if (progress.warning) content.append(element("div", "lifecycle-error", progress.warning));
     } else {
       if (status?.notes) {
@@ -188,6 +194,7 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
     if (error) {
       const alert = element("div", "lifecycle-error", error);
       alert.setAttribute("role", "alert");
+      if (status?.canForceInstall) alert.append(element("p", "", copy.lossWarning));
       content.append(alert);
     }
     const actions = element("div", "lifecycle-actions");
@@ -215,6 +222,21 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
         content.append(
           element("p", "lifecycle-subtitle", "Take control of the PC to install an update."),
         );
+      if (status?.canForceInstall && status.operation === "idle") {
+        const forceButton = button(
+          copy.forceUpdate,
+          () => void run(() => install(true)),
+          busyRequest || !status.enabled || !getCanInstall(),
+        );
+        forceButton.title = !getCanInstall()
+          ? "Take control of the PC to install an update."
+          : !status.enabled
+            ? copy.dev
+            : busyRequest
+              ? copy.updateBusy
+              : copy.lossWarning;
+        actions.append(forceButton);
+      }
     }
     dialog.replaceChildren(content, ...(actions.childElementCount ? [actions] : []));
     if (focused)

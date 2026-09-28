@@ -47,7 +47,12 @@ export const useLifecycleStore = create<LifecycleState>((set) => ({
           state.open ||
           (active && state.status?.operation !== status.operation) ||
           Boolean(wasActive && status.lastError),
-        error: wasActive && status.lastError ? status.lastError : state.error,
+        error:
+          (wasActive || status.canForceInstall) && status.lastError
+            ? status.lastError
+            : active
+              ? null
+              : state.error,
       };
     }),
   startClose: (cleanup) =>

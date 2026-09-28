@@ -20,12 +20,16 @@ export function progressPercent(
     ? Math.max(0, Math.min(100, Math.floor((progress.completed / progress.total) * 100)))
     : null;
 }
-export function lifecycleSteps(kind: "close" | "update", cleanup: boolean): LifecycleStage[] {
+export function lifecycleSteps(
+  kind: "close" | "update",
+  cleanup: boolean,
+  skipPreparation = false,
+): LifecycleStage[] {
   return [
     ...(kind === "update" ? ["downloading" as const] : []),
-    "checkpoint",
-    ...(cleanup ? ["interrupting" as const] : []),
-    "caching",
+    ...(skipPreparation
+      ? []
+      : ["checkpoint" as const, ...(cleanup ? ["interrupting" as const] : []), "caching" as const]),
     kind === "update" ? "installing" : "closing",
   ];
 }
@@ -59,7 +63,11 @@ export const lifecycleCopy = {
     failure: "작업 실패",
     retry: "다시 시도",
     wait: "계속 기다리기",
-    force: "저장하지 않고 종료",
+    force: "손실 감수하고 종료",
+    forceUpdate: "손실 감수하고 업데이트",
+    preparationSkipped: "복원 정보 저장·작업 정리·터미널 기록 저장을 건너뛰고 업데이트합니다.",
+    lossWarning:
+      "저장하지 못한 작업·세션 복원 정보·터미널 기록이 사라질 수 있습니다. 강행하면 실행 중인 작업이 종료됩니다.",
     cancel: "종료 취소",
     waiting: "작업이 예상보다 지연되고 있습니다.",
     preview: "미리보기 · 실제 작업은 실행되지 않습니다",
@@ -95,7 +103,11 @@ export const lifecycleCopy = {
     failure: "Unable to continue",
     retry: "Try again",
     wait: "Keep waiting",
-    force: "Close without saving",
+    force: "Accept loss and close",
+    forceUpdate: "Accept loss and update",
+    preparationSkipped: "Skipped saving restore information, task cleanup and terminal history.",
+    lossWarning:
+      "Unsaved work, session restore information and terminal history may be lost. Continuing will stop running tasks.",
     cancel: "Cancel closing",
     waiting: "This is taking longer than expected.",
     preview: "Preview · No tasks will run",

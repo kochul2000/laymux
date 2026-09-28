@@ -296,6 +296,7 @@ ADR 이 필요한 대표 기준:
 | [0276](0276-remote-keys-ignore-physical-keyboard.md) | Remote Keys 표시는 물리 키보드 연결과 독립으로 둔다 (0273 일부 대체) | Accepted |
 | [0277](0277-remote-pane-clear-soft-key.md) | Remote 기본 클리어 키는 pane clear action을 실행한다 | Accepted |
 | [0278](0278-codex-status-current-screen.md) | Codex 종료 확인은 명령 실행 후 현재 화면을 읽는다 (0270 대체) | Accepted |
+| [0279](0279-lifecycle-explicit-loss-override.md) | 종료·업데이트 준비 실패는 명시적 손실 동의로 건너뛸 수 있다 (0222·0264 확장) | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

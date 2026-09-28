@@ -2044,6 +2044,9 @@ export type AppUpdateOperation = "idle" | "checking" | "downloading" | "preparin
 export type AppUpdateChannel = "stable" | "beta";
 
 export interface AppUpdateStatus {
+  /** One attempt after a failed preparation; never bypasses package verification. */
+  canForceInstall?: boolean;
+  forceInstall?: boolean;
   preparation?: import("./lifecycle-progress").ExitProgress | null;
   exitSettings?: ExitSettings | null;
   enabled: boolean;
@@ -2068,8 +2071,8 @@ export async function checkAppUpdate(): Promise<AppUpdateStatus> {
   return invoke("check_app_update");
 }
 
-export async function installAppUpdate(): Promise<AppUpdateStatus> {
-  return invoke("install_app_update");
+export async function installAppUpdate(force = false): Promise<AppUpdateStatus> {
+  return invoke("install_app_update", { force });
 }
 
 export async function beginAppClose(): Promise<void> {

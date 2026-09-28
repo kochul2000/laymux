@@ -47,7 +47,12 @@ vi.mock("@/lib/persist-session", () => ({
   persistSession: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { acknowledgeSessionCheckpoint, onSessionCheckpointRequested } from "@/lib/tauri-api";
+import {
+  acknowledgeSessionCheckpoint,
+  onSessionCheckpointRequested,
+  onAppUpdateStatusChanged,
+  type AppUpdateStatus,
+} from "@/lib/tauri-api";
 import {
   flushSessionCheckpoint,
   prepareTerminalExit,
@@ -75,6 +80,17 @@ describe("useSessionCheckpointLifecycle", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+  it("blocks background persistence for a forced update without a checkpoint request", () => {
+    renderHook(() => useSessionCheckpointLifecycle(true));
+    const listener = vi.mocked(onAppUpdateStatusChanged).mock.calls[0][0];
+    listener({ operation: "preparing" } as AppUpdateStatus);
+    expect(setPreparingUpdate).toHaveBeenLastCalledWith(true);
+    expect(flushSessionCheckpoint).not.toHaveBeenCalled();
+    listener({ operation: "installing" } as AppUpdateStatus);
+    expect(setPreparingUpdate).toHaveBeenLastCalledWith(true);
+    listener({ operation: "idle" } as AppUpdateStatus);
+    expect(setPreparingUpdate).toHaveBeenLastCalledWith(false);
   });
 
   it("acks a native update request only after the critical checkpoint commits", async () => {

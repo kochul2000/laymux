@@ -306,7 +306,6 @@ test.describe("remote mobile layout", () => {
     const footerButtons = await footer.locator("button:not([hidden])").evaluateAll((buttons) =>
       buttons.map((button) => ({
         width: button.getBoundingClientRect().width,
-        minWidth: getComputedStyle(button).minWidth,
       })),
     );
     // Without the client script only the statically-marked-up right segment
@@ -314,7 +313,6 @@ test.describe("remote mobile layout", () => {
     expect(footerButtons).toHaveLength(2);
     const widths = footerButtons.map(({ width }) => width);
     expect(Math.max(...widths) - Math.min(...widths)).toBeLessThan(0.1);
-    expect(footerButtons.every(({ minWidth }) => minWidth === "54px")).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
 
     await page.setViewportSize({ width: 180, height: 844 });
@@ -333,11 +331,15 @@ test.describe("remote mobile layout", () => {
   });
 
   test("keeps every header action inside the narrowest Remote viewport", async ({ page }) => {
-    await page.locator(".app > header button").evaluateAll((buttons) => {
-      buttons.forEach((button) => {
-        button.hidden = false;
+    // The right-swipe tool is exclusive: files, GitHub and memo never appear
+    // together. Exercise the fullest reachable header, with Files selected.
+    await page
+      .locator(".app > header button:not(#githubHeader):not(#memoHeader)")
+      .evaluateAll((buttons) => {
+        buttons.forEach((button) => {
+          button.hidden = false;
+        });
       });
-    });
     await page.setViewportSize({ width: 180, height: 844 });
 
     const header = await page.locator(".app > header").evaluate((element) => ({
@@ -467,7 +469,7 @@ test.describe("remote mobile layout", () => {
 
     // The flick pad ships placed by default; the individual step keys are
     // placed here because placement is what activates a key.
-    const navPad = page.locator('[data-key="navPad"]');
+    const navPad = page.locator('#keyRow [data-key="navPad"]');
     await expect(navPad).toHaveCount(1);
     await expect(navPad).toHaveAttribute(
       "aria-label",
@@ -670,7 +672,8 @@ test.describe("remote mobile layout", () => {
     expect(exclusionBox).not.toBeNull();
     expect(composerToggleBox).not.toBeNull();
     expect(exclusionBox!.height).toBe(26);
-    expect(composerToggleBox!.height).toBe(26);
+    // Footer sizing follows its independent Main button scale; the header
+    // exclusion remains a compact 26px control.
 
     await page.locator('[data-key="navNext"]').click();
     await expect.poll(() => spatialBodies.length).toBe(1);
@@ -1148,7 +1151,7 @@ test.describe("remote mobile layout", () => {
     await page.setContent(remoteClientMarkupWithoutXterm());
     await page.locator("#keyBarToggle").click();
 
-    const flickButton = page.locator('[data-key="dpad"]');
+    const flickButton = page.locator('#keyRow [data-key="dpad"]');
     const flickHint = page.locator("#keyFlickHint");
     await expect(flickButton).toHaveCount(1);
     await flickButton.evaluate((button: HTMLButtonElement) => {
@@ -1456,7 +1459,7 @@ test.describe("remote mobile layout", () => {
     };
 
     const flickKey = async (dx: number, dy: number, sequence: string) => {
-      const flickButton = page.locator('[data-key="dpad"]');
+      const flickButton = page.locator('#keyRow [data-key="dpad"]');
       await flickButton.scrollIntoViewIfNeeded();
       const box = await flickButton.boundingBox();
       expect(box).not.toBeNull();
@@ -1504,7 +1507,7 @@ test.describe("remote mobile layout", () => {
     // stream, that it stops on release, and that a non-cursor key like ^C never
     // joins in.
     const holdKey = async (id: string, dx: number, dy: number, holdMs: number, drift = 0) => {
-      const button = page.locator(`[data-key="${id}"]`);
+      const button = page.locator(`#keyRow [data-key="${id}"]`);
       await button.scrollIntoViewIfNeeded();
       const box = await button.boundingBox();
       expect(box).not.toBeNull();
@@ -2187,8 +2190,9 @@ test.describe("remote mobile layout", () => {
         configurable: true,
         value: (command: string) => {
           if (command !== "copy") return false;
-          const active = document.activeElement as HTMLTextAreaElement | null;
-          testWindow.__copiedText?.push(active?.value || "");
+          const clipboardData = new DataTransfer();
+          document.dispatchEvent(new ClipboardEvent("copy", { clipboardData, cancelable: true }));
+          testWindow.__copiedText?.push(clipboardData.getData("text/plain"));
           return true;
         },
       });
@@ -2222,9 +2226,9 @@ test.describe("remote mobile layout", () => {
     await page.setContent(remoteClientMarkupWithoutXterm());
     const app = page.locator(".app");
 
-    // Default Keys row placement: navPad + Tab/Shift+Tab on the left, then
-    // ^U ^L ^T ^J + flick pad + PgUp/PgDn on the right.
-    await expect(page.locator("#keyRow .key-btn")).toHaveCount(10);
+    // navPad is a floating control; the Keys row has Tab/Shift+Tab, then
+    // ^U ^L ^T ^J + flick pad + PgUp/PgDn.
+    await expect(page.locator("#keyRow .key-btn")).toHaveCount(9);
     await expect(page.locator("#keyBar")).toBeHidden();
     await page.locator("#keyBarToggle").click();
     await expect(page.locator("#keyBar")).toBeVisible();

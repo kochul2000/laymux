@@ -51,11 +51,14 @@ export async function previewLifecycle(params: Record<string, unknown>) {
           },
     status: {
       ...snapshot,
+      canForceInstall: kind === "update" && typeof params.error === "string",
+      forceInstall: kind === "update" && params.force === true,
+      lastError: typeof params.error === "string" ? params.error : null,
       availableVersion: "1.0.15",
       notes:
         "종료와 업데이트의 진행 상황을 한 화면에서 확인합니다.\nPC와 리모트에서 같은 준비 단계를 표시합니다.",
       operation:
-        stage === "ready"
+        typeof params.error === "string" || stage === "ready"
           ? "idle"
           : stage === "downloading"
             ? "downloading"
