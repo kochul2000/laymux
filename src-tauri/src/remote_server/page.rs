@@ -272,10 +272,12 @@ fn remote_page_gzip() -> &'static [u8] {
 #[cfg(test)]
 pub(super) fn remote_client_source() -> String {
     format!(
-        "{}\n{}\n{}",
+        "{}\n{}\n{}\n{}\n{}",
         remote_page_html(),
         include_str!("assets/remote-app.css"),
         include_str!("assets/remote-app.js"),
+        include_str!("../../../ui/src/remote/remote-keyboard.js"),
+        include_str!("../../../ui/src/lib/path-link-lines.ts"),
     )
 }
 
@@ -788,7 +790,7 @@ mod tests {
         assert!(html.contains("id=\"checkPcUpdate\""));
         assert!(html.contains("/remote/v1/update/check"));
         assert!(html.contains("/remote/v1/update/install"));
-        assert!(html.contains("body: JSON.stringify({ leaseId: selectedLeaseId })"));
+        assert!(html.contains("body: JSON.stringify({ leaseId: selectedLeaseId, force })"));
         assert!(html.contains("pcUpdateDialog.open()"));
         assert!(html.contains("drawerSettingsButton.classList.toggle(\"update-available\""));
         assert!(html.contains("delay ?? (busy ? 1000 : 60000)"));
@@ -994,7 +996,7 @@ mod tests {
         assert!(!touch_selection.contains("touchGesture.forceSelection"));
         assert!(html.contains("function withPreservedInputSurfaceFocus(run)"));
         assert!(html.contains("function restorePreservedInputSurfaceFocus(surface)"));
-        assert!(html.contains("textarea.focus = function preserveInputSurfaceFocus() {}"));
+        assert!(html.contains("textarea[method] = function preserveInputSurfaceFocus() {};"));
         assert!(html.contains("function extendTouchSelection(term, gesture, point)"));
         assert!(html.contains("function handleSelectionMouseupAfterInteraction()"));
         assert!(html.contains("touchGesture.selectionSeed = selection"));
@@ -1057,7 +1059,9 @@ mod tests {
             .contains("inputModeToggleButton.setAttribute(\"aria-label\", inputModeActionLabel);"));
         assert!(html.contains("id=\"desktopModeHeader\""));
         assert!(html.contains("id=\"desktopModeDrawer\""));
-        assert!(html.contains("desktopModeHeaderButton.hidden = !localAppMode;"));
+        assert!(html.contains(
+            "desktopModeHeaderButton.hidden = !localAppMode || !headerIcons.headerDesktopMode;"
+        ));
         assert!(html.contains("desktopModeDrawerButton.hidden = !localAppMode;"));
         // The embed greets the PC app's overlay so a frame that never came up
         // is distinguishable from one that did — a refused embed still fires
@@ -1198,7 +1202,7 @@ mod tests {
     fn remote_page_file_viewer_download_asks_for_bytes_not_the_rendered_payload() {
         let html = remote_client_source();
         assert!(html.contains("id=\"fileViewerDownload\""));
-        assert!(html.contains("function downloadCurrentFileViewerFile()"));
+        assert!(html.contains("function downloadCurrentFileViewerFile(openOnDevice = false)"));
         // Its own endpoint (ADR-0185): `render` hands back a sanitized preview
         // for HTML/Markdown and no bytes at all for binary or archive kinds.
         assert!(html.contains("/remote/v1/file-viewer/download"));
@@ -1206,8 +1210,10 @@ mod tests {
         assert!(html.contains("anchor.download = payload.name;"));
         // The wrapper WebView has no download handler, so a browser-style save
         // is a silent no-op there and must not be attempted.
-        assert!(html.contains("window.LaymuxNative?.saveRemoteFile"));
-        assert!(html.contains("This app version cannot save files. Update the app."));
+        assert!(html.contains("window.LaymuxNative?.[nativeMethod]"));
+        assert!(html.contains(
+            "const nativeMethod = openOnDevice ? \"openRemoteFile\" : \"saveRemoteFile\";"
+        ));
     }
 
     #[test]
@@ -1236,9 +1242,9 @@ mod tests {
         assert!(
             html.contains("const { text, columns, endColumns } = reconstructRemoteLinkLine(line);")
         );
-        assert!(html.contains("text.slice(startOffset, endOffset + 1) === match.token"));
-        assert!(html.contains("endCol: endColumns[endOffset]"));
-        assert!(html.contains("setVerifiedPathLinks(\"selection\", matches.map((match) => ({"));
+        assert!(html.contains("text.slice(start, end + 1) === part.token"));
+        assert!(html.contains("endColumns[end] === part.endCol"));
+        assert!(html.contains("setVerifiedPathLinks(\"selection\", selections);"));
         assert!(html.contains("pathLinkAtPoint(event.clientX, event.clientY)"));
         assert!(html.contains("remote-path-link-decoration"));
         assert!(html.contains("openFileViewerOverlay(press.path)"));
@@ -1254,14 +1260,14 @@ mod tests {
         let html = remote_client_source();
         assert!(html.contains("const PATH_LINK_SCOPES = [\"selection\", \"point\", \"screen\"];"));
         assert!(html.contains("const REMOTE_PATH_LINK_IDLE_SCAN_DELAY_MS = 500;"));
-        assert!(html.contains("const REMOTE_PATH_LINK_MAX_SCREEN_LINES = 64;"));
-        assert!(html.contains("const REMOTE_PATH_LINK_MAX_SCREEN_CHARS = 8192;"));
+        assert!(html.contains("const MAX_ROWS = 64;"));
+        assert!(html.contains("const MAX_CHARS = 8192;"));
         assert!(html.contains("const REMOTE_PATH_LINK_MAX_SCREEN_CANDIDATES = 64;"));
         assert!(html.contains("function evaluatePathLinkPoint(point)"));
         assert!(html.contains("function evaluatePathLinkScreen()"));
         assert!(html.contains("function schedulePathLinkIdleScan()"));
         assert!(html.contains("function requestLineScopedPathLinks("));
-        assert!(html.contains("function mapRemoteLinePathRange(bufferLine, match)"));
+        assert!(html.contains("function mapPathLinkParts("));
         assert!(html.contains("queuePathLinkPointEvaluation(point)"));
         // Output pushes the idle scan out instead of scanning mid-stream.
         assert!(html.contains("schedulePathLinkIdleScan();"));
@@ -1294,7 +1300,7 @@ mod tests {
         assert!(html.contains("function samePathLinkEntry(entry, right)"));
         assert!(html.contains("entry.decoration.isDisposed !== true"));
         assert!(html.contains("reusableEntry.selection = selection;"));
-        assert!(html.contains("selections.length !== data.matches.length"));
+        assert!(html.contains("if (!pathLinkPartsCurrent(term.buffer.active, parts)) { clearPathLinkScope(scope); return; }"));
         assert!(html.contains("if (!setVerifiedPathLinks(scope, selections))"));
         assert!(html.contains(
             "if (term.hasSelection?.()) {\n            if (pathLinkScreenContextDirty) clearPathLinkScope(\"screen\");"
@@ -1302,7 +1308,7 @@ mod tests {
         assert!(html.contains(
             "schedulePathLinkSelectionEvaluation();\n            // A screen scan deferred by a live selection"
         ));
-        assert_eq!(html.matches("token: match.token,").count(), 2);
+        assert_eq!(html.matches("{ ...match, text: match.token }").count(), 2);
         assert!(
             html.contains("caret: { lineIndex: 0, index: caretIndex }")
                 || html.contains("{ lineIndex: 0, index: caretIndex }")
@@ -1386,7 +1392,7 @@ mod tests {
         assert!(html.contains("chip.className = \"key-chip layout-chip\";"));
         // Keys reuse the existing write path via enqueueInput, no new API.
         assert!(html.contains("function sendKey(id, button = null)"));
-        assert!(html.contains("if (seq) enqueueInput(seq);"));
+        assert!(html.contains("enqueueInput(seq);"));
         // Pointer/mouse activation must not blur the focused input surface and
         // dismiss an already-open native keyboard (#482). WebKit/iOS only honors
         // mousedown.preventDefault() for this, so both events are guarded via the
@@ -1409,7 +1415,7 @@ mod tests {
         assert!(html.contains("const KEY_FLICK_THRESHOLD_PX = 18;"));
         assert!(html.contains("function directionFromFlick(deltaX, deltaY)"));
         assert!(html.contains(
-            "installDirectionalFlick(button, onDirection = (direction) => sendKey(direction))"
+            "installDirectionalFlick(button, onDirection, repeatable = false, floating = null)"
         ));
         assert!(html.contains("onDirection(direction);"));
         assert!(html.contains("id=\"keyFlickHint\""));
@@ -1459,7 +1465,7 @@ mod tests {
         assert!(html.contains("const USER_KEY_SEQ_MAX = 32;"));
         assert!(html.contains("const USER_KEY_MAX = 24;"));
         assert!(html.contains("function normalizeUserKeys(raw)"));
-        assert!(html.contains("function addUserKey(label, seq)"));
+        assert!(html.contains("function addUserKey(label, seq, submit = false)"));
         assert!(html.contains("function removeUserKey(id)"));
         assert!(html.contains("function comboKeySequence(modifier, base, shift)"));
         assert!(html.contains("String.fromCharCode(letter.charCodeAt(0) & 0x1f)"));
@@ -1537,7 +1543,7 @@ mod tests {
         assert!(html.contains("id: \"step\", name: \"Pane/Alert nav\""));
         assert!(html.contains("\"soft:navPad\""));
         // 4-way nav flick: vertical = spatial pane step, horizontal = alerts.
-        assert!(html.contains("const NAV_FLICK_TARGETS = {"));
+        assert!(html.contains("const NAV_FLICK_TARGETS = REMOTE_NAV_TARGETS;"));
         assert!(html.contains("up: [\"spatial\", \"prev\"]"));
         assert!(html.contains("down: [\"spatial\", \"next\"]"));
         assert!(html.contains("left: [\"notification\", \"recent\"]"));
@@ -1567,7 +1573,7 @@ mod tests {
         let html = remote_client_source();
 
         assert!(html.contains("id=\"spatialExclusion\""));
-        assert!(html.contains("data-icon=\"circle-minus\""));
+        assert!(html.contains("data-remote-icon=\"CircleMinus\""));
         // Every compact Remote header action shares one explicit border-box
         // height, including the adjacent text-bearing Composer toggle.
         assert!(html.contains("--header-control-height: 26px;"));
@@ -1575,7 +1581,9 @@ mod tests {
         assert!(html.contains("laymux.remote.spatialExcludedPaneIds"));
         assert!(html.contains("let spatialExcludedPaneIds = loadSpatialExcludedPaneIds();"));
         assert!(html.contains("function activeWorkspacePane()"));
-        assert!(html.contains("spatialExclusionButton.hidden = !pane;"));
+        assert!(html.contains(
+            "spatialExclusionButton.hidden = !pane || !headerIcons.headerSpatialExclusion;"
+        ));
         assert!(html
             .contains("spatialExclusionButton.setAttribute(\"aria-pressed\", String(excluded));"));
         assert!(html.contains("spatialExclusionButton.addEventListener(\"click\", () => {"));
@@ -1595,7 +1603,7 @@ mod tests {
         assert!(html.contains("button.className = \"workspace-skip-button\";"));
         assert!(html.contains(".workspace-skip-button[aria-pressed=\"true\"]"));
         assert!(html.contains("function renderWorkspaceSkipButton(workspace)"));
-        assert!(html.contains("data-icon=\"circle-minus\""));
+        assert!(html.contains("data-remote-icon=\"CircleMinus\""));
         // Skip toggle must not also switch workspace (row click) — the handler
         // stops the click from bubbling to the row.
         assert!(html.contains("event.stopPropagation();"));
@@ -1641,12 +1649,8 @@ mod tests {
         // A configurable Send action is available whenever Composer is active.
         assert!(html.contains("id=\"composerSend\""));
         assert!(html.contains("class=\"composer-send\""));
-        assert!(html.contains(
-            "data-icon=\"paper-plane\" width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"currentColor\""
-        ));
-        assert!(html.contains(
-            "M13.47 20.21 19.91 4.09 3.8 10.53l3.75 3.77 9.14-6.99-6.99 9.14 3.77 3.76Z"
-        ));
+        assert!(html.contains("data-remote-icon=\"Send\" data-icon-size=\"20\""));
+        assert!(html.contains("hydrateRemoteIcons(document);"));
         assert!(!html.contains("M12 5l6.5 6.5-1.42 1.42L13 8.83V19h-2V8.83l-4.08 4.09L5.5 11.5z"));
         assert!(html.contains("laymux.remote.inputMode"));
         assert!(html.contains("matchMedia(\"(pointer: coarse)\")"));

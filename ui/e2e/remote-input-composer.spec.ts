@@ -697,10 +697,13 @@ async function installRemotePage(
   return state;
 }
 
-async function connect(page: Page) {
+async function connect(page: Page, snapshotPending = false) {
   await page.locator("#token").fill("test-token");
   await page.locator("#connect").click();
-  await expect(page.locator("#status")).toHaveText("Main · Pane 1");
+  await expect(page.locator("#status")).toHaveText(
+    snapshotPending ? "Claiming remote control…" : "Main · Pane 1",
+  );
+  await expect(page.locator("#terminal .xterm")).toBeVisible();
 }
 
 async function selectTerminal(page: Page, cwd: string) {
@@ -1382,7 +1385,7 @@ test("a malformed output frame stays fail-closed after a delayed snapshot write 
     delayFirstTerminalWrite: true,
     deferSocketCloseEvent: true,
   });
-  await connect(page);
+  await connect(page, true);
 
   await expect
     .poll(() =>
@@ -1432,7 +1435,7 @@ test("snapshot replay swallows xterm protocol replies but resumes real keystroke
     delayFirstTerminalWrite: true,
     deferSocketCloseEvent: true,
   });
-  await connect(page);
+  await connect(page, true);
 
   // Hold the snapshot write mid-flight so the replay guard stays active.
   await expect
@@ -1775,7 +1778,8 @@ test.describe("mobile touch Composer focus", () => {
     await expect(editor).toBeDisabled();
 
     await remote.navigations[0].respond();
-    await expect(page.locator("#status")).toHaveText("Main · Pane 1");
+    // Claim remains pending until the first snapshot write completes.
+    await expect(page.locator("#status")).toHaveText("Claiming remote control…");
     await expect(page.locator("#terminal .xterm")).toBeVisible();
     await expect(editor).not.toBeFocused();
     await expect(editor).toBeEnabled();
@@ -1826,7 +1830,7 @@ test.describe("mobile touch Composer focus", () => {
     expect(pageErrors).not.toContain("xterm constructor failed");
   });
 
-  test("double and triple terminal taps leave Composer unfocused for selection", async ({
+  test("double and triple terminal taps preserve Composer focus during selection", async ({
     page,
   }) => {
     await installRemotePage(page, { coarse: true });
@@ -1843,13 +1847,15 @@ test.describe("mobile touch Composer focus", () => {
 
     await tapTerminal();
     await tapTerminal();
-    await expect(editor).not.toBeFocused();
+    // A plain first tap opens Composer. Selection preserves that input owner
+    // so synthesizing xterm mousedown cannot dismiss an already open IME.
+    await expect(editor).toBeFocused();
 
     await page.waitForTimeout(600);
     await tapTerminal();
     await tapTerminal();
     await tapTerminal();
-    await expect(editor).not.toBeFocused();
+    await expect(editor).toBeFocused();
   });
 });
 

@@ -178,15 +178,10 @@ mod tests {
         ] {
             assert_eq!(defaults[key], expected, "{key}");
         }
-        assert_eq!(
-            defaults["inputBarUserKeys"],
-            json!([
-                {"id":"u-defaultclear","label":"/clr","seq":"/clear","submit":true}
-            ])
-        );
+        assert_eq!(defaults["inputBarUserKeys"], json!([]));
         assert_eq!(
             defaults["inputBarZones"]["main"]["left"],
-            json!(["soft:c-c", "soft:q", "soft:esc", "soft:u-defaultclear"])
+            json!(["soft:c-c", "soft:q", "soft:esc", "soft:clearPane"])
         );
         assert_eq!(
             defaults["inputBarZones"]["expanded"]["left"],

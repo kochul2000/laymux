@@ -624,7 +624,7 @@ import {
         let pcUpdateRequestInFlight = false;
         const pcUpdateDialog = createRemoteUpdateDialog({
           check: () => loadPcUpdateStatus({ check: true }),
-          install: () => installPcUpdate(),
+          install: (force) => installPcUpdate(force),
           getCanInstall: () => Boolean(leaseId),
         });
         let hiddenWorkspaceCount = 0;
@@ -1557,7 +1557,7 @@ import {
           }
         }
 
-        async function installPcUpdate() {
+        async function installPcUpdate(force = false) {
           const selectedLeaseId = leaseId;
           if (!selectedLeaseId || !pcUpdateStatus?.availableVersion || pcUpdateRequestInFlight) return;
           if (pcUpdateStatus.operation !== "idle") return;
@@ -1567,7 +1567,7 @@ import {
             pcUpdateStatus = await remoteFetch("/remote/v1/update/install", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ leaseId: selectedLeaseId }),
+              body: JSON.stringify({ leaseId: selectedLeaseId, force }),
             });
             pcUpdateDialog.update(pcUpdateStatus);
             renderPcUpdateStatus();

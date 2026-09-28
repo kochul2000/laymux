@@ -1,4 +1,4 @@
-import { Check, LoaderCircle } from "lucide-react";
+import { CheckIcon, LoaderCircleIcon } from "./icons";
 import {
   lifecycleCopy,
   lifecycleSteps,
@@ -13,15 +13,17 @@ export function LifecycleProgress({
   progress,
   ko = false,
   failed = false,
+  skipPreparation = false,
 }: {
   kind: "close" | "update";
   cleanup: boolean;
   progress: ExitProgress;
   ko?: boolean;
   failed?: boolean;
+  skipPreparation?: boolean;
 }) {
   const copy = lifecycleCopy[ko ? "ko" : "en"];
-  const steps = lifecycleSteps(kind, cleanup);
+  const steps = lifecycleSteps(kind, cleanup, skipPreparation);
   const active = steps.indexOf(progress.stage === "settling" ? "interrupting" : progress.stage);
   const percent = progress.stage === "interrupting" ? null : progressPercent(progress);
   return (
@@ -34,9 +36,9 @@ export function LifecycleProgress({
         >
           <span className="lifecycle-step-icon">
             {index < active ? (
-              <Check size={16} />
+              <CheckIcon size={16} />
             ) : index === active ? (
-              <LoaderCircle size={16} className={failed ? "" : "lifecycle-spin"} />
+              <LoaderCircleIcon size={16} className={failed ? "" : "lifecycle-spin"} />
             ) : (
               <span>{index + 1}</span>
             )}

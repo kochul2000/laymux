@@ -4,6 +4,14 @@ import { useLifecycleStore, waitForCloseDecision } from "./lifecycle-store";
 beforeEach(() => useLifecycleStore.setState(useLifecycleStore.getInitialState()));
 
 describe("close cancellation", () => {
+  it("allows explicit force while the pane check never settles", async () => {
+    const pending = new Promise<void>(() => {});
+    const decision = waitForCloseDecision("timeout", pending);
+    expect(useLifecycleStore.getState().cancelClose).toBeNull();
+    useLifecycleStore.getState().forceClose?.();
+    await expect(decision).resolves.toBe(true);
+    expect(useLifecycleStore.getState().forceClose).toBeNull();
+  });
   it("waits for failed preparation to settle before offering cancellation", async () => {
     let reject!: (error: Error) => void;
     const pending = new Promise<void>((_, fail) => {

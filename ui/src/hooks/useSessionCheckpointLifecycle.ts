@@ -33,8 +33,11 @@ export function useSessionCheckpointLifecycle(ready: boolean): void {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     let stopUpdate: (() => void) | undefined;
+    let nativePreparing = false;
     void onAppUpdateStatusChanged((status) => {
-      if (!cancelled && status.operation === "idle") setPreparingUpdate(false);
+      if (cancelled) return;
+      nativePreparing = status.operation === "preparing" || status.operation === "installing";
+      setPreparingUpdate(nativePreparing);
     })
       .then((stop) => {
         if (cancelled) stop();
@@ -96,7 +99,7 @@ export function useSessionCheckpointLifecycle(ready: boolean): void {
           return acknowledgeSessionCheckpoint(request.requestId, commit.checkpointCommitId);
         })
         .catch((cause: unknown) => {
-          if (verifyStatus) setPreparingUpdate(false);
+          if (verifyStatus && !nativePreparing) setPreparingUpdate(false);
           return acknowledgeSessionCheckpoint(
             request.requestId,
             undefined,

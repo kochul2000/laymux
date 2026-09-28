@@ -18,6 +18,8 @@ use super::{internal_error, json_error};
 #[serde(rename_all = "camelCase")]
 pub(super) struct RemoteUpdateInstallRequest {
     lease_id: Option<String>,
+    #[serde(default)]
+    force: bool,
 }
 
 pub(super) async fn remote_update_status(State(server): State<ServerState>) -> Response {
@@ -43,6 +45,7 @@ pub(super) async fn remote_update_install(
     update_response(app_update::schedule_install(
         server.app_handle.clone(),
         Arc::clone(&server.app_state.app_update),
+        body.force,
     ))
 }
 
@@ -98,7 +101,10 @@ mod tests {
         });
         let headers = HeaderMap::new();
 
-        let missing = RemoteUpdateInstallRequest { lease_id: None };
+        let missing = RemoteUpdateInstallRequest {
+            lease_id: None,
+            force: true,
+        };
         let missing_error = match begin_update_install(&app_state, &headers, &missing) {
             Ok(_) => panic!("missing lease must be rejected"),
             Err(error) => error,
@@ -107,6 +113,7 @@ mod tests {
 
         let stale = RemoteUpdateInstallRequest {
             lease_id: Some("lease-stale".into()),
+            force: true,
         };
         let stale_error = match begin_update_install(&app_state, &headers, &stale) {
             Ok(_) => panic!("stale lease must be rejected"),
@@ -116,6 +123,7 @@ mod tests {
 
         let active = RemoteUpdateInstallRequest {
             lease_id: Some("lease-active".into()),
+            force: true,
         };
         assert!(begin_update_install(&app_state, &headers, &active).is_ok());
     }
