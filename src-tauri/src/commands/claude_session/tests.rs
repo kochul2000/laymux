@@ -6,6 +6,7 @@ fn native_claude_candidates_only_include_the_top_level_provider() {
         pid,
         ppid,
         name: name.into(),
+        is_helper: false,
     };
     let snapshot = vec![
         process(100, 0, "shell"),

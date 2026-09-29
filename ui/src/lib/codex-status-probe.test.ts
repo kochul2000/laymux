@@ -72,6 +72,34 @@ describe("Codex status submission guard", () => {
     ).toBe(true);
   });
 
+  it("recognizes a selected Status description wrapped by a narrow Codex pane", () => {
+    const popup = [
+      "› /status      show current session",
+      "               configuration and token",
+      "               usage",
+      "  /statusline  configure which items",
+      "               appear in the status line",
+      "",
+      "› /statu",
+      "",
+      "  GPT-6-Astra default",
+    ].join("\n");
+    expect(isCodexStatusCommandSelected(screen(popup))).toBe(true);
+    expect(
+      isCodexStatusCommandSelected(
+        screen(popup.replace("configuration and token", "unrelated text")),
+      ),
+    ).toBe(false);
+    expect(
+      isCodexStatusCommandSelected(screen(popup.replace("› /status      ", "  /status      "))),
+    ).toBe(false);
+    expect(
+      isCodexStatusCommandSelected(
+        screen(popup.replace("               configuration", "  /other       configuration")),
+      ),
+    ).toBe(false);
+  });
+
   it.each([
     "› unsent draft/status",
     "› /status with leftover text",

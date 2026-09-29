@@ -39,10 +39,12 @@ EOF
     if [ "$key" = 'PPid:' ]; then ppid=$value; break; fi
   done < "$proc/status" 2>/dev/null
   helper=0
-  if laymux_is_claude_chrome_host "$proc" "$name"; then helper=1; fi
+  if laymux_is_agent_helper "$proc" "$name"; then helper=1; fi
   printf 'P\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$terminal_id" "${proc##*/}" "$ppid" "$name" "$home" "$codex_home" "$grok_home" "$helper"
   # Only Codex attribution consumes rollout descriptors. Keep every marked
   # process above so intermediary shells still establish the parent chain.
+  # A server can retain many conversations; none belongs to its launching pane.
+  [ "$helper" = '0' ] || continue
   case "$name" in [cC][oO][dD][eE][xX]*) ;; *) continue ;; esac
   for fd in "$proc"/fd/*; do
     target=$(readlink "$fd" 2>/dev/null) || continue
