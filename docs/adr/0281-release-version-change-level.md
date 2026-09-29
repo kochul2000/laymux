@@ -1,6 +1,6 @@
 # 0281. 릴리스 버전은 변경의 호환성과 기능 추가 여부로 결정한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-29
 - Source: 사용자 요구(기능이 들어가면 minor 증가), [ADR-0190](0190-update-release-channels.md), [architecture/api-contracts.md §업데이트 채널 설정](../architecture/api-contracts.md#업데이트-채널-설정)
 - 관계: ADR-0190의 버전 문법·채널 계약에 버전 증가 기준을 추가한다.
