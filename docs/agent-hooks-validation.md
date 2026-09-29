@@ -24,3 +24,5 @@ Codex는 TUI 연결 해제와 서버의 대화 수명이 다르다. 기존 서�
 - dev Automation API와 실제 WebView 스크린샷으로 Settings 표시·컨트롤 확인. html2canvas의 입력 글자 기준선 차이는 실제 WebView 캡처와 대조했으며 실제 입력은 잘리지 않는다.
 
 재현 시 기존 dev의 자동 복원 세션이 실행 중일 수 있다. CLI 명령을 보내기 전 반드시 해당 pane이 셸에 돌아왔는지 확인하고, dev 종료는 `bash scripts/kill-dev.sh`만 사용한다.
+
+추가 검증: Windows에서 `/` 경로로 설치한 뒤 `\\` 경로로 조회·재설치하면 다른 command로 인식하던 문제를 회귀 테스트로 재현하고 수정했다. 훅 command 생성 시 Windows 경로 구분자를 통일하며, native helper 테스트 11개가 통과했다.

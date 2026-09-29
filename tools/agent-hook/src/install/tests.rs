@@ -184,3 +184,28 @@ fn malformed_codex_preferences_do_not_prevent_hook_cleanup() {
         "[broken"
     );
 }
+
+#[cfg(windows)]
+#[test]
+fn windows_path_separators_keep_the_same_installation_identity() {
+    for provider in ["claude", "codex"] {
+        let (dir, root) = fixture(provider, &json!({}));
+        let slashed = PathBuf::from(root.to_str().unwrap().replace('\\', "/"));
+        let source = dir.path().join("helper");
+        manage(&slashed, provider, "install", &source).unwrap();
+        assert_eq!(
+            manage(&root, provider, "status", &source).unwrap()["installed"],
+            true
+        );
+        manage(&root, provider, "install", &source).unwrap();
+        let value: Value =
+            serde_json::from_slice(&fs::read(root.join(config_name(provider).unwrap())).unwrap())
+                .unwrap();
+        assert_eq!(value["hooks"]["SessionStart"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            manage(&slashed, provider, "remove", &source).unwrap()["registered"],
+            0
+        );
+        assert!(!helper_path(&root).exists());
+    }
+}

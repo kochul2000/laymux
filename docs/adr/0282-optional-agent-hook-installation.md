@@ -1,6 +1,6 @@
 # 0282. 에이전트 훅은 실행 환경별 선택 설치로 관리한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-29
 - Source: 사용자 요구(Settings의 Claude·Codex 연결에서 Windows·WSL별 훅 설치·제거, 미사용 시 기존 휴리스틱 유지), [ADR-0278](0278-codex-status-current-screen.md), [ADR-0280](0280-codex-app-server-process-role.md)
 - 관계: ADR-0278의 훅 통합을 제외한 범위를 확장한다. 상태 감지 방식의 선택·소비는 별도 PR에서 결정한다.

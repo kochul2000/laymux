@@ -97,7 +97,10 @@ pub fn handler(root: &Path, provider: &str) -> Result<Value, String> {
     #[cfg(windows)]
     let command = {
         use base64::Engine;
-        let script = format!("& '{}' emit {provider}", path.replace('\'', "''"));
+        let script = format!(
+            "& '{}' emit {provider}",
+            path.replace('/', "\\").replace('\'', "''")
+        );
         let encoded: Vec<_> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
         format!("powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand {}", base64::engine::general_purpose::STANDARD.encode(encoded))
     };
