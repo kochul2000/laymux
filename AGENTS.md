@@ -60,6 +60,8 @@ ADR 은 구현 설명서가 아니라 결정과 근거의 불변 기록이다. �
 
 ## 개발 환경
 
+- **릴리스 버전은 변경 종류로 결정한다** — [docs/release-policy.md](docs/release-policy.md), [ADR-0281](docs/adr/0281-release-version-change-level.md). 호환성 파괴는 major, 호환되는 기능 추가(기본 비활성 옵션 포함)는 minor, 기능 추가 없는 수정은 patch. PR 본문에 `버전 영향: <수준> — <이유>`를 적고, 발행 전 직전 정식 이후 누적 변경의 가장 높은 수준으로 다시 판정한다. 문서·테스트만 바꾸면 독립 릴리스는 요구하지 않는다.
+
 - **테스트는 TDD.** 전체 스위트(unit + e2e + build + 실행 검증)는 `/full-test` 스킬.
 - **화면(셀 격자) 테스트는 별도 스위트** — 실제 xterm 에 바이트를 흘려 셀을 읽는 `*.screen.test.ts` 는 `cd ui && npm run test:screen` 으로만 돈다(기본 `vitest run` 에서 제외). "이 바이트를 흘리면 화면이 이렇게 된다" 류 주장은 mock 으로 쓰지 말고 여기에 쓴다. ([ADR-0074](docs/adr/0074-xterm-cell-grid-screen-test-tier.md), [dev-repro-methodology.md §4.5](docs/dev-repro-methodology.md))
 - **`ui/` 의 npm 설치·테스트는 Windows 에서 돌린다** — `ui/node_modules` 는 Windows 설치본이다(`@rolldown/binding-win32-x64-msvc`). WSL 에서 `npm install`/`npm audit fix` 를 돌리면 플랫폼별 네이티브 패키지가 섞여 다음 `vitest` 가 `Cannot find module '@rolldown/binding-linux-x64-gnu'` 로 기동조차 못 한다. 복구는 Windows 에서 `npm ci`. WSL 에서 억지로 돌리면 `/mnt/d` 가 느려 `production-bundle.test.ts`(실제 vite 빌드, 5s 기본 타임아웃)와 `vi.waitFor`(기본 1s) 기반 `TerminalView` 테스트가 코드와 무관하게 깨진다. lockfile 자체는 플랫폼 독립이라 커밋해도 된다.
