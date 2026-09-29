@@ -645,6 +645,8 @@ OS 절전 진입을 막는 정책이다(issue #727·#733, [ADR-0114](../adr/0114
 
 ### 업데이트 채널 설정
 
+릴리스 번호의 증가 수준은 [릴리스 정책](../release-policy.md)과 [ADR-0281](../adr/0281-release-version-change-level.md)을 따른다. 직전 정식 이후 누적 변경 중 호환성 파괴는 major, 호환되는 기능 추가는 minor, 기능 추가 없는 수정은 patch이며, 다음에 서술하는 채널별 버전 문법과 전진성 검증은 별도로 유지한다.
+
 이 설치본이 따라갈 릴리스 계열을 정한다([ADR-0190](../adr/0190-update-release-channels.md), [ADR-0174](../adr/0174-github-signed-desktop-self-update.md) 확장).
 
 ```jsonc
