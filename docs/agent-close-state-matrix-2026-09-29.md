@@ -49,7 +49,7 @@ Windows·WSL × Codex·Claude × 아래 7개 상태 × `exit.interruptTerminals`
 | Rust workspace·통합·문서 | 2,362개 통과, 17개 기존 ignored |
 | UI 단위 | 5,201개 통과 |
 | 실제 xterm 화면 셀 | 94개 통과 |
-| Playwright E2E | 507개 통과 |
+| Playwright E2E | 초기 전체 507개 통과; 최종 UI 변경 후 502개 + 분리 재실행 5개 통과 |
 | TypeScript·Vite production build | 통과 |
 | `cargo check --release -j 2` | 통과 |
 | `cargo clippy --workspace --all-targets -j 2 -- -D warnings` | 통과 |
@@ -59,6 +59,8 @@ Windows·WSL × Codex·Claude × 아래 7개 상태 × `exit.interruptTerminals`
 서버 배제, 실제 TUI 공존, helper를 경유하는 조상 연결, 두 TUI의 모호성, 읽을 수 없는 cmdline, 옵션 값·부분 문자열·개행 경계를 회귀 검사한다. 신규 서버 배제와 FD 검사, native helper 테스트는 수정 전 실패를 확인한 뒤 구현했다.
 
 초기 전체 실행의 실패도 원인을 확인했다. UI 설치본의 xterm 패치를 재적용하고 병렬 부하로 App 테스트의 1초 대기가 초과되는 경우는 worker 수를 제한해 전체를 재검증했다. Rust는 과도한 병렬 컴파일의 페이징 파일 부족과 다른 워크트리의 빌드 메타데이터 재사용을 해소하고 `-j 2 -- --test-threads=4`로 전체 통과했다. 프로세스 환경 조회 테스트의 초기화 경합은 단독 실행과 최종 전체 실행에서 통과했다. 테스트 도구는 과거 출력 캐시·pane marker 재사용·Claude의 연속 Ctrl+C 간격을 수정하고 해당 케이스를 재실행했다.
+
+마지막 E2E 병렬 실행에서는 Remote 파일 뷰어 4개가 연결·context 정리 제한 시간을 넘겼고 touch focus 1개가 실패했다. 전체 실행 시간이 비정상적으로 7.8시간으로 기록된 실행이며, 코드 변경 없이 실패한 5개만 worker 1개로 분리해 6.8초에 전부 통과했다. 이 재시도를 숨기고 한 번의 최종 전체 실행이 모두 통과했다고 기록하지 않는다.
 
 ## 범위
 
