@@ -1454,6 +1454,8 @@ WSL의 Claude Chrome 호스트(`argv[1] == --chrome-native-host`)는 공통 게�
 
 같은 역할 검사에서 WSL Codex의 `argv[1] == app-server`도 대화 후보에서 제외한다([ADR-0280](../adr/0280-codex-app-server-process-role.md)). TUI 종료 후 marker를 물려받은 서버만 남아도 셸을 Codex로 유지하지 않으며, 세션 귀속·liveness·종료 `/status` 대상 선정이 같은 결과를 사용한다. native snapshot도 Codex 후보 PID만 sysinfo로 command line을 조회하고 이름·부모 PID·정확한 첫 실행 인자가 일치하면 `is_helper`로 표시한다. 양쪽 모두 서버의 PID·PPID 연결을 남기며 helper root·중간 조상을 경유하는 실제 TUI는 계속 선택한다. WSL 귀속 probe는 서버의 FD 열거를 건너뛰고 실제 TUI의 rollout FD만 수집한다. cmdline 읽기 실패·알 수 없는 모드·옵션 값이나 개행이 섞인 유사 문자열은 제외 증거로 쓰지 않는다. native 표시는 기존 1초 snapshot 캐시를 사용하고 critical 귀속은 fresh snapshot을 사용한다. 다른 Codex 실행 모드는 변경하지 않는다.
 
+WSL의 두 probe는 `/proc/<pid>/status`의 정확한 `State` 코드가 `Z`(zombie) 또는 `X`(dead)이면 해당 프로세스를 실행·세션 후보에서 제외한다. 이미 종료된 자식의 빈 cmdline을 알 수 없는 실행 역할로 해석하거나 부모의 pane marker로 되살리지 않는다. 종료가 아닌 상태(정지·추적 포함), 필드 부재·조회 실패는 제외 근거가 아니며 기존 보수적 판정을 유지한다. 서버나 프로세스를 종료해 관측 결과를 바꾸지 않는다.
+
 Codex Status builtin 선택 검사는 현재 composer 앞의 선택 항목만 읽는다. 좁은 pane에서 설명이 여러 줄로 나뉘면 같은 설명 열에 정렬된 연속 줄만 합치며, 다음 명령·composer·선택되지 않은 항목을 선택 증거로 사용하지 않는다([ADR-0278](../adr/0278-codex-status-current-screen.md)).
 
 native provider 조회는 표시용 `known_claude_terminals`·`known_codex_terminals`·`known_grok_terminals` 캐시를 대상 목록이나 부재 판정에 사용하지 않는다. live PTY 전체에서 native/WSL 도메인을 나누고, native process snapshot의 최상위 agent PID로 각 provider의 현재 대상을 선정한다. Claude도 이 PID 하나의 세션 파일만 읽으므로 다른 agent 아래 실행된 Claude나 Claude의 하위 agent를 현재 대화로 선택하지 않는다. 표시 캐시가 비거나 이전 provider를 가리켜도 실제 프로세스가 있는 pane을 누락하거나 종료된 provider의 `None` claim을 만들지 않는다. 이는 ADR-0222의 process·provider 저장소 귀속과 activity 힌트 분리를 적용한다.

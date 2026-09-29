@@ -53,7 +53,7 @@ function fixtureScript(entries) {
     const files = {
       environ: `${entry.hasMarker ? `LX_TERMINAL_ID=${marker}\0` : ''}HOME=/home/test\0`,
       comm: `${entry.name}\n`,
-      status: `Name:\t${entry.name}\nPPid:\t${entry.ppid}\n`,
+      status: `Name:\t${entry.name}\n${entry.state === null ? '' : `State:\t${entry.state ?? 'S (sleeping)'}\n`}PPid:\t${entry.ppid}\n`,
     };
     if (entry.args !== null) files.cmdline = `${entry.args.join('\0')}\0`;
     for (const [name, value] of Object.entries(files)) {
@@ -156,6 +156,36 @@ test('Codex TUI 종료 뒤 남은 app-server 두 개는 대화가 아니다', ()
   assertRole(rows, 30, '1');
   assertRole(rows, 31, '1');
 });
+
+for (const provider of ['codex', 'claude', 'grok']) {
+  for (const state of ['Z (zombie)', 'X (dead)']) {
+    test(`${provider}의 ${state} 프로세스는 실행 및 세션 후보가 아니다`, () => {
+      const dead = { ...processFixture(40, 30, provider, []), state };
+      const entries = [
+        ...ancestorFixtures(),
+        processFixture(20, 11, provider),
+        processFixture(30, 1, 'codex', ['codex', 'app-server']),
+        dead,
+      ];
+      assert.deepEqual(livePids(entries), [20]);
+      assert.ok(!attributionRows(entries).some((row) => row[2] === '40'));
+      // 실제 좀비는 자신의 환경과 cmdline이 비고 부모 marker만 남는다.
+      dead.hasMarker = false;
+      assert.deepEqual(livePids(entries), [20]);
+    });
+  }
+}
+
+for (const state of ['R (running)', 'S (sleeping)', 'D (disk sleep)', 'T (stopped)', 't (tracing stop)', null, 'Z-not-a-state']) {
+  test(`종료가 증명되지 않은 프로세스 상태는 유지: ${state}`, () => {
+    const entries = [
+      ...ancestorFixtures(),
+      { ...processFixture(20, 11, 'codex', null), state },
+    ];
+    assert.deepEqual(livePids(entries), [20]);
+    assertRole(attributionRows(entries), 20, '0');
+  });
+}
 
 test('Codex 서버와 함께 실행한 실제 TUI는 유지한다', () => {
   const entries = [

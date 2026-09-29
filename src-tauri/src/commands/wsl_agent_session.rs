@@ -33,6 +33,7 @@ for proc in /proc/[0-9]*; do
 $env_lines
 EOF
   [ -n "$terminal_id" ] || continue
+  if laymux_is_terminated_process "$proc"; then continue; fi
   IFS= read -r name < "$proc/comm" 2>/dev/null || continue
   ppid=
   while read -r key value; do

@@ -1,4 +1,19 @@
 # Shared by WSL attribution and liveness. Keep argv contents inside the guest.
+# A zombie has an empty cmdline/environ but can inherit a pane marker through
+# its live parent. Only a proven kernel exit state excludes it; stopped and
+# unreadable processes remain candidates.
+laymux_is_terminated_process() {
+  [ -r "$1/status" ] || return 1
+  while read -r laymux_state_key laymux_state_code laymux_state_detail; do
+    [ "$laymux_state_key" = 'State:' ] || continue
+    case "$laymux_state_code" in
+      Z|X) return 0 ;;
+      *) return 1 ;;
+    esac
+  done < "$1/status" 2>/dev/null
+  return 1
+}
+
 # Only the observed, explicit entry mode proves this is a Chrome host rather
 # than a conversation. An unreadable command line preserves the candidate.
 laymux_is_claude_chrome_host() {

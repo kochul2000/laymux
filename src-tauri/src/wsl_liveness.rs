@@ -64,6 +64,7 @@ for proc in /proc/[0-9]*; do
     claude|codex|grok) ;;
     *) continue ;;
   esac
+  if laymux_is_terminated_process "$proc"; then continue; fi
   if laymux_is_agent_helper "$proc" "$name"; then continue; fi
   pid=${proc##*/}
   terminal_id=
