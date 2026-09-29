@@ -341,6 +341,97 @@
 .settings-field--stack {
   grid-template-columns: minmax(0, 1fr);
 }
+.agent-hooks-panel {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+.agent-hooks-panel__heading,
+.agent-hooks-status-line,
+.agent-hooks-actions__buttons {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.agent-hooks-panel__heading {
+  justify-content: space-between;
+  align-items: start;
+}
+.agent-hooks-panel__heading h4 {
+  margin: 0 0 4px;
+  font-size: var(--settings-label-size);
+  font-weight: 600;
+}
+.agent-hooks-environment {
+  display: grid;
+  gap: 4px;
+  width: var(--settings-control-width);
+  max-width: 100%;
+  font-size: var(--settings-desc-size);
+  color: var(--text-secondary);
+}
+.agent-hooks-environment select {
+  width: 100%;
+}
+.agent-hooks-summary,
+.agent-hooks-actions,
+.agent-hooks-directory,
+.agent-hooks-details__body {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+.agent-hooks-panel p {
+  margin: 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.agent-hooks-muted,
+.agent-hooks-details {
+  font-size: var(--settings-desc-size);
+  color: var(--text-secondary);
+}
+.agent-hooks-status {
+  font-size: var(--settings-desc-size);
+  font-weight: 600;
+  padding: 2px 8px;
+  background: var(--hover-bg);
+}
+.agent-hooks-status--installed {
+  color: var(--accent);
+  background: var(--accent-20);
+}
+.agent-hooks-plan {
+  font-size: var(--settings-label-size);
+}
+.agent-hooks-notice {
+  padding-left: 12px;
+  border-left: 2px solid var(--red);
+  overflow-wrap: anywhere;
+  font-size: var(--settings-desc-size);
+}
+.agent-hooks-details {
+  padding-top: 12px;
+  border-top: 1px solid var(--hover-bg-strong);
+}
+.agent-hooks-details summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.agent-hooks-details summary:hover {
+  color: var(--text-primary);
+}
+.agent-hooks-details__body {
+  padding-top: 12px;
+  gap: 12px;
+}
+.agent-hooks-directory > span:first-child {
+  color: var(--text-primary);
+}
+.agent-hooks-path {
+  overflow-wrap: anywhere;
+  font-family: monospace;
+}
 .settings-field__text {
   display: flex;
   flex-direction: column;
