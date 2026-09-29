@@ -47,6 +47,8 @@ test("agent hooks are explicit and isolated by provider and WSL environment", as
   await page.keyboard.press("Control+,");
   await page.getByTestId("nav-codex").click();
   await expect(page.getByTestId("agent-hooks-install")).toBeEnabled();
+  await expect(page.getByTestId("agent-hooks-detection")).toHaveValue("heuristic");
+  await page.getByTestId("agent-hooks-detection").selectOption("hooks");
   expect(
     await page.evaluate(() => (window as unknown as { hookWrites: unknown[] }).hookWrites),
   ).toEqual([]);
@@ -57,9 +59,11 @@ test("agent hooks are explicit and isolated by provider and WSL environment", as
   await expect(page.getByTestId("agent-hooks-install")).toBeEnabled();
   await expect(page.getByTestId("agent-hooks-remove")).toBeDisabled();
   await page.getByTestId("nav-claude").click();
+  await expect(page.getByTestId("agent-hooks-detection")).toHaveValue("heuristic");
   await expect(page.getByTestId("agent-hooks-install")).toBeEnabled();
   await expect(page.getByTestId("agent-hooks-remove")).toBeDisabled();
   await page.getByTestId("nav-codex").click();
+  await expect(page.getByTestId("agent-hooks-detection")).toHaveValue("hooks");
   await page.getByTestId("agent-hooks-environment").selectOption("wsl:Ubuntu");
   await page.getByTestId("agent-hooks-remove").click();
   await expect(page.getByTestId("agent-hooks-remove")).toBeDisabled();
@@ -69,4 +73,9 @@ test("agent hooks are explicit and isolated by provider and WSL environment", as
     { provider: "codex", operation: "install", distro: "Ubuntu", configDir: null },
     { provider: "codex", operation: "remove", distro: "Ubuntu", configDir: null },
   ]);
+  await page.getByTestId("save-settings-btn").click();
+  await page.keyboard.press("Control+,");
+  await page.keyboard.press("Control+,");
+  await page.getByTestId("nav-codex").click();
+  await expect(page.getByTestId("agent-hooks-detection")).toHaveValue("hooks");
 });

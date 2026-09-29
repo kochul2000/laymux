@@ -113,6 +113,12 @@
   },
   "settings": {
     "agentHooks": {
+      "codexDaemon": "Codex 0.158 shared servers cannot be matched to the current pane's conversation, so detection falls back to heuristics. Start Codex with --no-daemon to use hooks. Add this option to the Codex command setting to use it during session restore too. Launch behavior is never changed automatically.",
+      "stateDetection": "Task state detection",
+      "stateDetectionDesc": "Applies to this agent in every environment. Hooks first uses events verified against the current conversation. Missing, disabled, unverified hooks or 60 seconds without a state event fall back to existing detection. Installing hooks is a separate action.",
+      "heuristic": "Existing detection (heuristic)",
+      "hooksFirst": "Hooks first",
+      "detected": "{{count}} panes use hooks in this environment · unverified panes use existing detection.",
       "title": "Laymux hooks (optional)",
       "environment": "Environment",
       "environmentDesc": "Install or remove independently on Windows and each WSL distribution.",
@@ -128,7 +134,7 @@
       "checkFailed": "Could not check installation",
       "checking": "Checking installation…",
       "disabled": "The CLI has disabled all hooks. Installation does not change that setting.",
-      "received": "Events received from {{count}} conversations in this environment",
+      "received": "Events from {{count}} conversations in this environment within 5 minutes; this does not mean they are currently running.",
       "waiting": "No event received · check after starting or resuming a session. Codex may send its start event after the first input.",
       "codexTrust": "If Codex asks you to trust these hooks, review and allow them. Execution depends on your CLI version and settings.",
       "install": "Install hooks",

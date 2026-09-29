@@ -27,7 +27,9 @@ import { isStaleActivity } from "@/lib/activity-order";
 import { extractCodexTitleMessage } from "@/lib/codex-activity-handler";
 import { subscribeCodexTurnStates } from "@/lib/codex-turn-subscription";
 import { observeTaskTitle, observeTerminalTask } from "@/lib/terminal-task-observers";
+import { heuristicTask } from "@/lib/terminal-task-detection";
 import { subscribeTerminalTasks } from "@/lib/terminal-task-subscription";
+import { subscribeAgentHookStates } from "@/lib/agent-hook-state-subscription";
 import { useSettingsStore } from "@/stores/settings-store";
 
 const CWD_PERSIST_DEBOUNCE_MS = 2000;
@@ -83,6 +85,7 @@ export function useSyncEvents() {
   useEffect(() => {
     const unsubscribeTasks = subscribeTerminalTasks();
     const unsubscribeCodexTurns = subscribeCodexTurnStates();
+    const unsubscribeAgentHooks = subscribeAgentHookStates();
     let cancelled = false;
     const unlisteners: (() => void)[] = [];
     const pendingGenerationEvents = new Map<string, (() => void)[]>();
@@ -410,9 +413,9 @@ export function useSyncEvents() {
           if (data.phase === "start") {
             observeTerminalTask(data.terminalId, {
               state: "running",
-              taskId: String((current.task?.sequence ?? 0) + 1),
+              taskId: String((heuristicTask(current)?.sequence ?? 0) + 1),
             });
-          } else if (data.phase === "end" && current.task?.state !== "idle") {
+          } else if (data.phase === "end" && heuristicTask(current)?.state !== "idle") {
             observeTerminalTask(data.terminalId, {
               state: "ended",
               result:
@@ -422,7 +425,7 @@ export function useSyncEvents() {
                     ? "success"
                     : "failure",
             });
-          } else if (data.phase === "prompt" && !current.task?.state) {
+          } else if (data.phase === "prompt" && !heuristicTask(current)?.state) {
             observeTerminalTask(data.terminalId, { state: "idle" });
           }
         }
@@ -538,7 +541,7 @@ export function useSyncEvents() {
           instance.sessionReady !== false &&
           instance.activity?.name === "Claude"
         ) {
-          if (instance.task) {
+          if (heuristicTask(instance)) {
             pendingClaudeIdle.delete(id);
             continue;
           }
@@ -574,6 +577,7 @@ export function useSyncEvents() {
       pendingGenerationEvents.clear();
       pendingClaudeIdle.clear();
       unsubscribeCodexTurns();
+      unsubscribeAgentHooks();
       unsubscribeTasks();
       unsubStore();
       if (initialSyncUnsub) initialSyncUnsub();

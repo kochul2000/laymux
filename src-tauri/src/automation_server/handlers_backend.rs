@@ -38,11 +38,15 @@ pub async fn api_docs() -> impl IntoResponse {
             },
             {
                 "method": "POST", "path": "/api/v1/agent-hooks/events",
-                "description": "Receive bounded, content-free CLI lifecycle observations with the current PTY identity token. Does not change heuristic detection."
+                "description": "Record bounded content-free CLI observations. Pane identity is only a hint; hook state requires a separate live process and exact conversation attribution."
             },
             {
                 "method": "GET", "path": "/api/v1/agent-hooks/connections",
                 "description": "Read observed hook sessions without tokens or conversation contents."
+            },
+            {
+                "method":"GET", "path":"/api/v1/agent-hooks/states",
+                "description":"Read hook task states for providers configured with stateDetection=hooks. Requires an installed, enabled integration and a matching live process, conversation and PTY generation; otherwise returns no hook state."
             },
             {
                 "method": "GET", "path": "/api/v1/health",

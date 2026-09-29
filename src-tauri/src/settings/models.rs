@@ -396,9 +396,19 @@ pub enum ClaudeStatusMessageMode {
 }
 
 /// Claude Code integration settings.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentStateDetection {
+    #[default]
+    Heuristic,
+    Hooks,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeSettings {
+    #[serde(default)]
+    pub state_detection: AgentStateDetection,
     #[serde(default)]
     pub sync_cwd: ClaudeSyncCwdMode,
     /// Command that launches Claude Code (default: "claude").
@@ -437,6 +447,7 @@ pub struct ClaudeSettings {
 impl Default for ClaudeSettings {
     fn default() -> Self {
         Self {
+            state_detection: AgentStateDetection::default(),
             sync_cwd: ClaudeSyncCwdMode::default(),
             command: default_claude_command(),
             restore_session: true,
@@ -502,6 +513,8 @@ pub enum CodexStatusMessageMode {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CodexSettings {
+    #[serde(default)]
+    pub state_detection: AgentStateDetection,
     /// Discard unsent Codex text and query /status before close/update (default: true).
     #[serde(default = "default_true")]
     pub verify_session_on_exit: bool,
@@ -533,6 +546,7 @@ pub struct CodexSettings {
 impl Default for CodexSettings {
     fn default() -> Self {
         Self {
+            state_detection: AgentStateDetection::default(),
             verify_session_on_exit: true,
             command: default_codex_command(),
             restore_session: true,

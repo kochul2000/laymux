@@ -34,6 +34,18 @@ pub const READ_ONLY_SETTINGS_PATHS: &[&str] = &[
 
 const ENTRIES: &[MetadataEntry] = &[
     MetadataEntry {
+        path: "/claude/stateDetection",
+        description: "Claude 작업 상태 감지: heuristic은 기존 감지, hooks는 현재 대화로 검증된 훅을 우선 사용하고 미수신·만료 시 기존 감지로 돌아갑니다. 훅 설치는 별도입니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
+        path: "/codex/stateDetection",
+        description: "Codex 작업 상태 감지: heuristic 또는 hooks. 훅은 실제 프로세스와 대화 귀속이 일치할 때만 사용하며 종료 체크포인트 설정과 독립입니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
         path: "/language",
         description: "앱 UI 언어. system은 OS 언어를 따르며 ko/en을 직접 선택할 수 있습니다.",
         sensitive: false,

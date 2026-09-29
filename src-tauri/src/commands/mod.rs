@@ -69,6 +69,10 @@ mod main_thread_io {
             &["list_agent_hook_environments", "manage_agent_hooks"],
         ),
         (
+            include_str!("agent_hooks/states.rs"),
+            &["get_agent_hook_states"],
+        ),
+        (
             include_str!("spreadsheet_stream.rs"),
             &[
                 "open_spreadsheet_for_viewer",

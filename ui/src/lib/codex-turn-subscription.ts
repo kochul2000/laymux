@@ -2,6 +2,7 @@ import { getCodexTurnStates, type CodexTurnSnapshot } from "./tauri-api";
 import { useTerminalStore, type TerminalInstance } from "@/stores/terminal-store";
 import { observeTaskInput, observeTerminalTask } from "./terminal-task-observers";
 import { taskSource } from "./terminal-task";
+import { heuristicTask } from "./terminal-task-detection";
 
 const POLL_MS = 1000;
 const STALE_MS = 6000;
@@ -32,7 +33,10 @@ export function subscribeCodexTurnStates(): () => void {
   function unknown(id: string) {
     const current = useTerminalStore.getState().instances.find((instance) => instance.id === id);
     if (!current || !isCodex(current)) return;
-    observeTerminalTask(id, { source: current.task?.source, state: undefined });
+    observeTerminalTask(id, {
+      source: heuristicTask(current)?.source,
+      state: undefined,
+    });
   }
 
   function schedule(delay = POLL_MS) {
@@ -94,16 +98,17 @@ export function subscribeCodexTurnStates(): () => void {
           continue;
         }
         const source = sourceKey(snapshot);
+        const task = heuristicTask(current);
         const taskId = snapshot.turnId ?? "idle";
         const deferred = current.deferredTaskInput;
-        const changedTask = current.task?.source !== source || current.task?.taskId !== taskId;
+        const changedTask = task?.source !== source || task?.taskId !== taskId;
         // A prompt can precede the first lifecycle lookup. Only the local, current
         // PTY/app scope may be rebound; a previous concrete session never transfers.
         const restoredWaiting =
           snapshot.state === "running" &&
-          current.task?.state === "waiting" &&
-          current.task.kind === "input" &&
-          current.task.source === taskSource(current);
+          task?.state === "waiting" &&
+          task.kind === "input" &&
+          task.source === taskSource(current);
         useTerminalStore.getState().updateInstanceInfo(id, {
           codexTurn: snapshot,
           ...(changedTask ? { deferredTaskInput: undefined } : {}),

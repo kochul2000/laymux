@@ -15,6 +15,7 @@ fn fixture() -> (AppState, HookEvent) {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64;
+    event.config_dir = Some("/fixture".into());
     state
         .terminals
         .lock_or_err()
@@ -44,13 +45,22 @@ fn restart_and_late_previous_session_end_cannot_replace_current_session() {
     let mut end = old.clone();
     end.event = "SessionEnd".into();
     accept(&state, end).unwrap();
-    assert_eq!(connections(&state).unwrap()[0]["sessionId"], "session-b");
+    assert_eq!(
+        state.terminals.lock_or_err().unwrap()["pane"]
+            .agent_hook
+            .as_ref()
+            .unwrap()
+            .session_id,
+        "session-b"
+    );
     state.terminals.lock_or_err().unwrap().insert(
         "pane".into(),
         TerminalSession::new("pane".into(), TerminalConfig::default()),
     );
-    assert!(accept(&state, old).is_err());
-    assert!(connections(&state).unwrap().is_empty());
+    accept(&state, old).unwrap();
+    assert!(state.terminals.lock_or_err().unwrap()["pane"]
+        .agent_hook
+        .is_none());
 }
 
 #[test]

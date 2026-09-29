@@ -6,14 +6,14 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
-pub(super) struct NativeContext {
+pub(in crate::commands::codex_session) struct NativeContext {
     pub codex_home: PathBuf,
     pub sqlite_home: PathBuf,
     pub cwd: PathBuf,
     pub arguments: Vec<String>,
 }
 
-pub(super) fn read(pid: u32) -> Result<NativeContext, String> {
+pub(in crate::commands::codex_session) fn read(pid: u32) -> Result<NativeContext, String> {
     let pid = Pid::from_u32(pid);
     let mut system = System::new();
     system.refresh_processes_specifics(

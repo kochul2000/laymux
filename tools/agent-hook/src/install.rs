@@ -5,7 +5,34 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 
 const MAX_CONFIG_BYTES: u64 = 2 * 1024 * 1024;
-pub const EVENTS: &[&str] = &["SessionStart", "SessionEnd"];
+pub const EVENTS: &[&str] = &[
+    "SessionStart",
+    "SessionEnd",
+    "UserPromptSubmit",
+    "PreToolUse",
+    "PermissionRequest",
+    "PostToolUse",
+    "Stop",
+    "PreCompact",
+    "PostCompact",
+];
+pub fn events(provider: &str) -> Vec<&'static str> {
+    EVENTS
+        .iter()
+        .copied()
+        .chain(if provider == "codex" {
+            vec!["Interrupt"]
+        } else {
+            vec![
+                "PostToolUseFailure",
+                "StopFailure",
+                "Notification",
+                "Elicitation",
+                "ElicitationResult",
+            ]
+        })
+        .collect()
+}
 const OWNED_DIRECTORY: &str = "laymux-hooks";
 
 pub fn config_name(provider: &str) -> Result<&'static str, String> {
@@ -109,8 +136,8 @@ pub fn handler(root: &Path, provider: &str) -> Result<Value, String> {
     Ok(json!({"type":"command", "command":command, "timeout":3}))
 }
 
-fn registered(value: &Value, owned: &Value) -> usize {
-    EVENTS
+fn registered(value: &Value, owned: &Value, provider: &str) -> usize {
+    events(provider)
         .iter()
         .filter(|event| {
             value
@@ -134,7 +161,7 @@ fn is_owned(handler: &Value, owned: &Value) -> bool {
 }
 
 fn status(root: &Path, provider: &str, value: &Value, owned: &Value) -> Result<Value, String> {
-    let count = registered(value, owned);
+    let count = registered(value, owned, provider);
     let present = helper_path(root).is_file();
     let disabled: Result<bool, String> = if provider == "claude" {
         Ok(value
@@ -161,13 +188,13 @@ fn status(root: &Path, provider: &str, value: &Value, owned: &Value) -> Result<V
         .err()
         .map(|e| format!("Could not inspect config.toml: {e}"));
     Ok(
-        json!({"configDir":root, "configPath":root.join(config_name(provider)?), "installed":count==EVENTS.len() && present,
-        "registered":count, "expected":EVENTS.len(), "helperPresent":present,
+        json!({"configDir":root, "configPath":root.join(config_name(provider)?), "installed":count==events(provider).len() && present,
+        "registered":count, "expected":events(provider).len(), "helperPresent":present,
         "disabled":disabled.unwrap_or(false), "warning":warning}),
     )
 }
 
-fn edit(value: &mut Value, owned: &Value, install: bool) -> Result<(), String> {
+fn edit(value: &mut Value, owned: &Value, install: bool, provider: &str) -> Result<(), String> {
     if !install && value.get("hooks").is_none() {
         return Ok(());
     }
@@ -192,9 +219,9 @@ fn edit(value: &mut Value, owned: &Value, install: bool) -> Result<(), String> {
         });
     }
     if install {
-        for event in EVENTS {
+        for event in events(provider) {
             let groups = hooks
-                .entry(*event)
+                .entry(event)
                 .or_insert_with(|| json!([]))
                 .as_array_mut()
                 .ok_or("Hook event must be an array")?;
@@ -253,7 +280,7 @@ pub fn manage(
     let mut value = parse_config(original.as_deref())?;
     status(root, provider, &value, &owned)?;
     let before = value.clone();
-    edit(&mut value, &owned, operation == "install")?;
+    edit(&mut value, &owned, operation == "install", provider)?;
     if operation == "install" {
         let destination = helper_path(root);
         if destination

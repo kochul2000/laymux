@@ -7,6 +7,34 @@ use laymux_lib::settings::{PaneClearBusyPolicy, Settings};
 use serde_json::json;
 
 #[test]
+fn hook_detection_is_opt_in_independent_and_live_applied() {
+    use laymux_lib::settings::AgentStateDetection;
+    let current = Settings::default();
+    assert_eq!(
+        current.claude.state_detection,
+        AgentStateDetection::Heuristic
+    );
+    assert_eq!(
+        current.codex.state_detection,
+        AgentStateDetection::Heuristic
+    );
+    let prepared = prepare_settings_update(&current, &json!({"codex":{"stateDetection":"hooks"}}));
+    assert!(prepared.valid, "{:?}", prepared.errors);
+    let candidate = prepared.candidate.unwrap();
+    assert_eq!(candidate.codex.state_detection, AgentStateDetection::Hooks);
+    assert_eq!(
+        candidate.claude.state_detection,
+        AgentStateDetection::Heuristic
+    );
+    for path in ["/claude/stateDetection", "/codex/stateDetection"] {
+        assert_eq!(metadata_for_path(path).apply_mode, ApplyMode::Live);
+    }
+    assert!(
+        !prepare_settings_update(&current, &json!({"claude":{"stateDetection":"invalid"}})).valid
+    );
+}
+
+#[test]
 fn every_settings_section_is_discoverable_including_optional_cwd_and_dynamic_widgets() {
     let settings = Settings::default();
     let full = select_settings_paths(&settings, &[]).unwrap();

@@ -22,12 +22,12 @@ pub enum SessionAttributionState {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalSessionAttribution {
-    generation: u64,
-    state: SessionAttributionState,
+    pub(crate) generation: u64,
+    pub(crate) state: SessionAttributionState,
     #[serde(skip_serializing_if = "Option::is_none")]
-    provider: Option<&'static str>,
+    pub(crate) provider: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    session_id: Option<String>,
+    pub(crate) session_id: Option<String>,
 }
 
 pub(crate) struct ProviderSessionLookup {
@@ -270,6 +270,20 @@ pub fn get_terminal_session_attributions(
     grok_session_max_age_hours: Option<u64>,
     state: State<Arc<AppState>>,
 ) -> Result<HashMap<String, TerminalSessionAttribution>, String> {
+    get_terminal_session_attributions_impl(
+        claude_session_max_age_hours,
+        codex_session_max_age_hours,
+        grok_session_max_age_hours,
+        &state,
+    )
+}
+
+pub(crate) fn get_terminal_session_attributions_impl(
+    claude_session_max_age_hours: Option<u64>,
+    codex_session_max_age_hours: Option<u64>,
+    grok_session_max_age_hours: Option<u64>,
+    state: &AppState,
+) -> Result<HashMap<String, TerminalSessionAttribution>, String> {
     // Capture generations before provider I/O. A terminal can be closed and
     // recreated under the same id while those lookups run; the second catalog
     // snapshot below rejects any result that crossed that boundary.
@@ -286,16 +300,16 @@ pub fn get_terminal_session_attributions(
         || {
             super::claude_session::get_claude_session_lookup_impl(
                 claude_session_max_age_hours,
-                &state,
+                state,
             )
         },
         || {
-            super::codex_session::get_codex_session_lookup_impl(codex_session_max_age_hours, &state)
+            super::codex_session::get_codex_session_lookup_impl(codex_session_max_age_hours, state)
                 .map_err(|error| error.to_string())
         },
-        || super::grok_session::get_grok_session_lookup_impl(grok_session_max_age_hours, &state),
+        || super::grok_session::get_grok_session_lookup_impl(grok_session_max_age_hours, state),
     )?;
-    let status_sessions = super::codex_session::verified_status_sessions(&state)?;
+    let status_sessions = super::codex_session::verified_status_sessions(state)?;
     for (id, (generation, session_id, fresh)) in status_sessions {
         if terminals
             .iter()
@@ -317,7 +331,7 @@ pub fn get_terminal_session_attributions(
     let observations: Vec<(String, u64, PtyAppLiveness)> = terminals
         .into_iter()
         .map(|(terminal_id, generation)| {
-            let liveness = crate::process_tree::interactive_app_in_pty_fresh(&state, &terminal_id);
+            let liveness = crate::process_tree::interactive_app_in_pty_fresh(state, &terminal_id);
             (terminal_id, generation, liveness)
         })
         .collect();

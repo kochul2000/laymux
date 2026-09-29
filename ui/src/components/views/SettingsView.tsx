@@ -2917,7 +2917,11 @@ function ClaudeSection() {
   return (
     <div className="settings-page">
       <SettingsPageTitle>{t("claude.title")}</SettingsPageTitle>
-      <AgentHooksSection provider="claude" />
+      <AgentHooksSection
+        provider="claude"
+        stateDetection={claude.stateDetection ?? "heuristic"}
+        onStateDetectionChange={(stateDetection) => updateClaude({ stateDetection })}
+      />
 
       <SettingsGroup title={t("claude.groupSyncCwd")}>
         {/* Sync CWD mode */}
@@ -3133,7 +3137,11 @@ function CodexSection() {
   return (
     <div className="settings-page">
       <SettingsPageTitle>{t("codex.title")}</SettingsPageTitle>
-      <AgentHooksSection provider="codex" />
+      <AgentHooksSection
+        provider="codex"
+        stateDetection={codex.stateDetection ?? "heuristic"}
+        onStateDetectionChange={(stateDetection) => updateCodex({ stateDetection })}
+      />
 
       <SettingsGroup title={t("codex.groupSessionRestore")}>
         {/* Launch command (flags land here, e.g. --yolo) */}

@@ -38,6 +38,8 @@ pub struct HookEvent {
     pub ancestors: Vec<ProcessIdentity>,
     pub distro: Option<String>,
     pub config_dir: Option<String>,
+    pub tool_name: Option<String>,
+    pub notification_type: Option<String>,
 }
 
 fn string(input: &Value, key: &str) -> Option<String> {
@@ -64,7 +66,7 @@ pub fn parse_event(
         })
         .ok_or("Invalid session id")?;
     let event = string(input, "hook_event_name")
-        .filter(|s| crate::install::EVENTS.contains(&s.as_str()))
+        .filter(|s| crate::install::events(provider).contains(&s.as_str()))
         .ok_or("Unsupported hook event")?;
     Ok(HookEvent {
         terminal_id,
@@ -81,6 +83,8 @@ pub fn parse_event(
         ancestors: Vec::new(),
         distro: None,
         config_dir: None,
+        tool_name: string(input, "tool_name"),
+        notification_type: string(input, "notification_type"),
     })
 }
 
@@ -135,6 +139,10 @@ pub fn emit(provider: &str) -> Result<(), String> {
     }
     let input: Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
     let mut event = parse_event(provider, &input, terminal_id, token)?;
+    event.emitted_at_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_millis() as u64;
     event.ancestors = ancestors();
     event.distro = std::env::var("WSL_DISTRO_NAME").ok();
     event.config_dir = std::env::current_exe().ok().and_then(|path| {
@@ -142,10 +150,6 @@ pub fn emit(provider: &str) -> Result<(), String> {
             .parent()
             .map(|p| p.to_string_lossy().into_owned())
     });
-    event.emitted_at_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| e.to_string())?
-        .as_millis() as u64;
     let port: u16 = std::env::var("LX_AUTOMATION_PORT")
         .map_err(|e| e.to_string())?
         .parse()

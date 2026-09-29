@@ -1340,6 +1340,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   },
   claude: {
     syncCwd: "skip" as ClaudeSyncCwdMode,
+    stateDetection: "heuristic" as const,
     command: DEFAULT_CLAUDE_COMMAND,
     restoreSession: true,
     sessionMaxAgeHours: DEFAULT_AGENT_SESSION_MAX_AGE_HOURS,
@@ -1351,6 +1352,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   },
   codex: {
     command: DEFAULT_CODEX_COMMAND,
+    stateDetection: "heuristic" as const,
     verifySessionOnExit: true,
     restoreSession: true,
     sessionMaxAgeHours: DEFAULT_AGENT_SESSION_MAX_AGE_HOURS,
@@ -1773,6 +1775,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     // Ensure claude settings have all fields (backwards compat)
     const claude = data.claude
       ? {
+          stateDetection: "heuristic" as const,
           syncCwd: "skip" as ClaudeSyncCwdMode,
           command: DEFAULT_CLAUDE_COMMAND,
           restoreSession: true,
@@ -1787,6 +1790,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       : undefined;
     const codex = data.codex
       ? {
+          stateDetection: "heuristic" as const,
           command: DEFAULT_CODEX_COMMAND,
           verifySessionOnExit: true,
           restoreSession: true,

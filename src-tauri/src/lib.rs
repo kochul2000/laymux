@@ -299,6 +299,7 @@ pub fn run() {
             commands::list_agent_hook_environments,
             commands::manage_agent_hooks,
             commands::get_agent_hook_connections,
+            commands::get_agent_hook_states,
             commands::list_system_monospace_fonts,
             commands::load_settings,
             commands::save_settings,

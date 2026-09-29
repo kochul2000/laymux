@@ -12,6 +12,7 @@ import {
   type HookStatus,
 } from "@/lib/agent-hooks-api";
 import { SettingsField, SettingsGroup } from "./SettingsLayout";
+import { useTerminalStore } from "@/stores/terminal-store";
 
 function normalizeConfigPath(path: string | null | undefined) {
   if (!path) return undefined;
@@ -21,7 +22,15 @@ function normalizeConfigPath(path: string | null | undefined) {
     : normalized;
 }
 
-export function AgentHooksSection({ provider }: { provider: HookProvider }) {
+export function AgentHooksSection({
+  provider,
+  stateDetection = "heuristic",
+  onStateDetectionChange,
+}: {
+  provider: HookProvider;
+  stateDetection?: "heuristic" | "hooks";
+  onStateDetectionChange?: (mode: "heuristic" | "hooks") => void;
+}) {
   const { t } = useTranslation("settings");
   const [environments, setEnvironments] = useState<HookEnvironment[]>([]);
   const [environment, setEnvironment] = useState("native");
@@ -35,6 +44,17 @@ export function AgentHooksSection({ provider }: { provider: HookProvider }) {
   const key = JSON.stringify([provider, distro, configDir, revision]);
   const status = result?.key === key ? result.status : undefined;
   const error = result?.key === key ? result.error : undefined;
+  const detected = useTerminalStore(
+    (s) =>
+      s.instances.filter(
+        (i) =>
+          i.taskDetectionSource === "hooks" &&
+          i.agentHook?.snapshot.provider === provider &&
+          i.agentHook.snapshot.distro === distro &&
+          normalizeConfigPath(i.agentHook.snapshot.configDir) ===
+            normalizeConfigPath(status?.configDir),
+      ).length,
+  );
 
   useEffect(() => {
     let active = true;
@@ -97,11 +117,26 @@ export function AgentHooksSection({ provider }: { provider: HookProvider }) {
     (entry) =>
       entry.provider === provider &&
       entry.distro === distro &&
-      entry.event !== "SessionEnd" &&
       normalizeConfigPath(entry.configDir) === normalizeConfigPath(status?.configDir),
   ).length;
   return (
     <SettingsGroup title={t("agentHooks.title")}>
+      {onStateDetectionChange && (
+        <SettingsField
+          label={t("agentHooks.stateDetection")}
+          desc={t("agentHooks.stateDetectionDesc")}
+        >
+          <FocusSelect
+            data-testid="agent-hooks-detection"
+            aria-label={t("agentHooks.stateDetection")}
+            value={stateDetection}
+            onChange={(e) => onStateDetectionChange(e.target.value as "heuristic" | "hooks")}
+          >
+            <option value="heuristic">{t("agentHooks.heuristic")}</option>
+            <option value="hooks">{t("agentHooks.hooksFirst")}</option>
+          </FocusSelect>
+        </SettingsField>
+      )}
       <SettingsField label={t("agentHooks.environment")} desc={t("agentHooks.environmentDesc")}>
         <FocusSelect
           data-testid="agent-hooks-environment"
@@ -164,6 +199,16 @@ export function AgentHooksSection({ provider }: { provider: HookProvider }) {
           )}
           {status?.disabled && <p>{t("agentHooks.disabled")}</p>}
           {status?.warning && <p className="break-all">{status.warning}</p>}
+          {stateDetection === "hooks" && (
+            <p data-testid="agent-hooks-detection-status">
+              {t("agentHooks.detected", { count: detected })}
+            </p>
+          )}
+          {stateDetection === "hooks" && provider === "codex" && (
+            <p className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
+              {t("agentHooks.codexDaemon")}
+            </p>
+          )}
           {status?.installed && (
             <p>
               {observed ? t("agentHooks.received", { count: observed }) : t("agentHooks.waiting")}
