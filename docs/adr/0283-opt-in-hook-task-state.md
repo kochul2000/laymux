@@ -1,6 +1,6 @@
 # 0283. 훅 상태는 현재 대화 귀속을 검증한 뒤 선택적으로 사용한다
 
-- Status: Accepted
+- Status: Superseded by [0284](0284-codex-title-hook-binding.md)
 - Date: 2026-09-29
 - Source: 사용자 요구(휴리스틱 대신 훅 감지를 선택하는 기능은 별도 PR), [ADR-0282](0282-optional-agent-hook-installation.md), [검증 결과](../agent-hooks-validation.md), [ADR-0005](0005-display-state-raw-separation-compute.md), [ADR-0250](0250-terminal-task-state-and-notification-transitions.md)
 - 관계: ADR-0282의 관찰 전용 범위를 확장한다. 지연된 서버의 원래 pane 식별자는 대화 귀속의 정본이 아니라는 점을 명시한다.

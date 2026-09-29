@@ -113,7 +113,9 @@
   },
   "settings": {
     "agentHooks": {
-      "codexDaemon": "Codex 0.158 shared servers cannot be matched to the current pane's conversation, so detection falls back to heuristics. Start Codex with --no-daemon to use hooks. Add this option to the Codex command setting to use it during session restore too. Launch behavior is never changed automatically.",
+      "codexDaemon": "Installation adds a conversation identifier to the Codex terminal title to connect shared-server conversations. Existing title items are preserved, and removal restores settings you have not edited. Restart running Codex clients after installation. Unverified connections use existing detection.",
+      "titleConfigured": "Shared-server title binding configured",
+      "titleMissing": "Shared-server title binding is not configured — install or reinstall the hooks.",
       "stateDetection": "Task state detection",
       "stateDetectionDesc": "Applies to this agent in every environment. Hooks first uses events verified against the current conversation. Missing, disabled, unverified hooks or 60 seconds without a state event fall back to existing detection. Installing hooks is a separate action.",
       "heuristic": "Existing detection (heuristic)",

@@ -549,6 +549,13 @@ pub async fn create_terminal_session(
         };
 
         for event in osc::iter_osc_events(&data) {
+            if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
+                if let Some(session) = terms.get_mut(&terminal_id) {
+                    session
+                        .codex_hook_title
+                        .observe(&event, terminal_generation);
+                }
+            }
             // Arm notify gate on user command observation (OSC 133;C or 133;E)
             if osc_hooks::should_arm_notify_gate(&event) {
                 if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
@@ -776,6 +783,11 @@ pub async fn create_terminal_session(
                 }
 
                 if cr_codex.exited {
+                    if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
+                        if let Some(session) = terms.get_mut(&terminal_id) {
+                            session.codex_hook_title.clear();
+                        }
+                    }
                     // Mirror of the Claude exit above, through the same shared
                     // helper — the Codex banner is likewise still resident in
                     // the 16KB window that `recent_buffer_contains` scans.

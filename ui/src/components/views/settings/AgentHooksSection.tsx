@@ -199,12 +199,24 @@ export function AgentHooksSection({
           )}
           {status?.disabled && <p>{t("agentHooks.disabled")}</p>}
           {status?.warning && <p className="break-all">{status.warning}</p>}
+          {provider === "codex" && status?.titleBinding && (
+            <p data-testid="agent-hooks-title-status">
+              {t(
+                status.titleBinding.configured
+                  ? "agentHooks.titleConfigured"
+                  : "agentHooks.titleMissing",
+              )}
+            </p>
+          )}
+          {status?.titleBinding?.warning && (
+            <p className="break-all">{status.titleBinding.warning}</p>
+          )}
           {stateDetection === "hooks" && (
             <p data-testid="agent-hooks-detection-status">
               {t("agentHooks.detected", { count: detected })}
             </p>
           )}
-          {stateDetection === "hooks" && provider === "codex" && (
+          {provider === "codex" && (
             <p className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
               {t("agentHooks.codexDaemon")}
             </p>
@@ -235,7 +247,11 @@ export function AgentHooksSection({
             </Button>
             <Button
               data-testid="agent-hooks-remove"
-              disabled={busy || !status || (!status.registered && !status.helperPresent)}
+              disabled={
+                busy ||
+                !status ||
+                (!status.registered && !status.helperPresent && !status.titleBinding?.managed)
+              }
               onClick={() => void change("remove")}
             >
               {t("agentHooks.remove")}

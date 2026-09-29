@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
+mod title;
 
 const MAX_CONFIG_BYTES: u64 = 2 * 1024 * 1024;
 pub const EVENTS: &[&str] = &[
@@ -190,7 +191,8 @@ fn status(root: &Path, provider: &str, value: &Value, owned: &Value) -> Result<V
     Ok(
         json!({"configDir":root, "configPath":root.join(config_name(provider)?), "installed":count==events(provider).len() && present,
         "registered":count, "expected":events(provider).len(), "helperPresent":present,
-        "disabled":disabled.unwrap_or(false), "warning":warning}),
+        "disabled":disabled.unwrap_or(false), "warning":warning,
+        "titleBinding":if provider == "codex" { Some(title::status(root)) } else { None }}),
     )
 }
 
@@ -278,6 +280,11 @@ pub fn manage(
         .map_err(|e| format!("Another Laymux hook change is in progress: {e}"))?;
     let original = read_config(&path)?;
     let mut value = parse_config(original.as_deref())?;
+    let title_change = if provider == "codex" && operation == "install" {
+        Some(title::prepare(root)?)
+    } else {
+        None
+    };
     status(root, provider, &value, &owned)?;
     let before = value.clone();
     edit(&mut value, &owned, operation == "install", provider)?;
@@ -320,6 +327,14 @@ pub fn manage(
         bytes.push(b'\n');
         atomic_write(&path, &bytes)?;
     }
+    if let Some(change) = title_change {
+        change.apply(root)?;
+    }
+    let title_warning = if provider == "codex" && operation == "remove" {
+        title::remove(root).err()
+    } else {
+        None
+    };
     if operation == "remove" {
         // No recursive delete: retain backups and any files added by the user.
         let helper = helper_path(root);
@@ -336,7 +351,11 @@ pub fn manage(
             Err(e) => return Err(format!("Hooks removed; helper cleanup failed: {e}")),
         }
     }
-    status(root, provider, &value, &owned)
+    let mut result = status(root, provider, &value, &owned)?;
+    if let Some(warning) = title_warning {
+        result["titleBinding"]["warning"] = json!(warning);
+    }
+    Ok(result)
 }
 
 #[cfg(test)]

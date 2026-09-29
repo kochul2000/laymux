@@ -39,6 +39,10 @@ test("agent hooks are explicit and isolated by provider and WSL environment", as
           expected: 2,
           helperPresent: installed.has(key),
           disabled: false,
+          titleBinding:
+            request.provider === "codex"
+              ? { configured: installed.has(key), managed: installed.has(key), warning: null }
+              : null,
         };
       }
       return original(command, args);
@@ -55,10 +59,13 @@ test("agent hooks are explicit and isolated by provider and WSL environment", as
   await page.getByTestId("agent-hooks-environment").selectOption("wsl:Ubuntu");
   await page.getByTestId("agent-hooks-install").click();
   await expect(page.getByTestId("agent-hooks-remove")).toBeEnabled();
+  await expect(page.getByTestId("agent-hooks-title-status")).toContainText("configured");
   await page.getByTestId("agent-hooks-environment").selectOption("native");
   await expect(page.getByTestId("agent-hooks-install")).toBeEnabled();
   await expect(page.getByTestId("agent-hooks-remove")).toBeDisabled();
+  await expect(page.getByTestId("agent-hooks-title-status")).toContainText("not configured");
   await page.getByTestId("nav-claude").click();
+  await expect(page.getByTestId("agent-hooks-title-status")).toHaveCount(0);
   await expect(page.getByTestId("agent-hooks-detection")).toHaveValue("heuristic");
   await expect(page.getByTestId("agent-hooks-install")).toBeEnabled();
   await expect(page.getByTestId("agent-hooks-remove")).toBeDisabled();

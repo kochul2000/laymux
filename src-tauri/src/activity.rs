@@ -2872,6 +2872,24 @@ mod tests {
     /// notices Codex is gone (ADR-0135 §4-2) the grace entry and the known-set
     /// membership already belong to the Claude session that took over.
     #[test]
+    fn shared_exit_cleanup_runs_while_reconcile_owns_terminal_catalog() {
+        let state = std::sync::Arc::new(AppState::new());
+        let catalog = state.terminals.lock().unwrap();
+        let worker_state = state.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let result =
+                apply_interactive_app_exit(&worker_state, "catalog-owned-pane", "Codex", None);
+            let _ = sender.send(result);
+        });
+        let completed = receiver.recv_timeout(std::time::Duration::from_secs(2));
+        // Release before assertion/join so a regression reports failure instead of hanging the suite.
+        drop(catalog);
+        worker.join().unwrap();
+        assert_eq!(completed, Ok(true));
+    }
+
+    #[test]
     fn an_exit_leaves_the_successors_detection_alone() {
         let state = AppState::new();
         let tid = "t-codex-handover-to-claude";

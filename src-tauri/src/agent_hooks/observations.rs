@@ -38,6 +38,26 @@ pub struct HookRegistry {
 }
 
 impl HookRegistry {
+    /// Resolve a live TUI title against all retained candidates before applying
+    /// phase expiry. An expired collision must not make a different ID unique.
+    pub fn by_codex_title(
+        &self,
+        identity: &str,
+        distro: Option<&str>,
+        now: u64,
+    ) -> Option<&Observation> {
+        let mut candidates = self.entries.iter().filter(|entry| {
+            entry.event.provider == "codex"
+                && entry.event.distro.as_deref() == distro
+                && entry.event.session_id.len() == 36
+                && entry.event.session_id.starts_with(identity)
+        });
+        let candidate = candidates.next()?;
+        if candidates.next().is_some() {
+            return None;
+        }
+        self.exact("codex", &candidate.event.session_id, distro, now)
+    }
     pub fn diagnostic_events(&self, now: u64) -> impl Iterator<Item = &HookEvent> {
         self.entries
             .iter()
@@ -197,6 +217,46 @@ mod tests {
         event.emitted_at_ms = time;
         event.config_dir = Some("/tmp/agent".into());
         event
+    }
+    #[test]
+    fn title_binding_resolves_full_identity_and_rejects_collisions_domains_expiry() {
+        let full = "01a0ec06-451a-7e61-ac51-bd98fab4ed82";
+        let prefix = &full[..29];
+        for distro in [None, Some("Ubuntu-22.04")] {
+            let mut registry = HookRegistry::default();
+            let mut first = event("codex", "UserPromptSubmit", 100, None);
+            first.session_id = full.into();
+            first.distro = distro.map(str::to_owned);
+            registry.observe(first.clone());
+            assert_eq!(
+                registry
+                    .by_codex_title(prefix, distro, 101)
+                    .unwrap()
+                    .event
+                    .session_id,
+                full
+            );
+            assert!(registry
+                .by_codex_title(prefix, Some("other-distro"), 101)
+                .is_none());
+            assert!(registry.by_codex_title(prefix, distro, 60_101).is_none());
+            let mut other = first.clone();
+            other.session_id = format!("{prefix}0000000");
+            registry.observe(other);
+            assert!(registry.by_codex_title(prefix, distro, 101).is_none());
+            assert_eq!(
+                registry
+                    .by_codex_title(full, distro, 101)
+                    .unwrap()
+                    .event
+                    .session_id,
+                full
+            );
+            let mut other_root = first;
+            other_root.config_dir = Some("/other/root".into());
+            registry.observe(other_root);
+            assert!(registry.by_codex_title(full, distro, 101).is_none());
+        }
     }
     #[test]
     fn both_providers_keep_conversation_state_independent_of_original_pane() {

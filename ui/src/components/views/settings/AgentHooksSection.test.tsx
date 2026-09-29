@@ -62,4 +62,24 @@ describe("AgentHooksSection", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Invalid hook settings");
     expect(screen.getByTestId("agent-hooks-install")).toBeDisabled();
   });
+
+  it("shows title binding status and permits cleanup after hooks were removed separately", async () => {
+    invoke.mockImplementation(async (command) => {
+      if (command === "list_agent_hook_environments" || command === "get_agent_hook_connections")
+        return [];
+      return {
+        configDir: "C:/Users/me/.codex",
+        configPath: "hooks.json",
+        installed: false,
+        registered: 0,
+        helperPresent: false,
+        disabled: false,
+        titleBinding: { configured: false, managed: true, warning: "User-edited title retained" },
+      };
+    });
+    render(<AgentHooksSection provider="codex" stateDetection="hooks" />);
+    expect(await screen.findByTestId("agent-hooks-title-status")).toBeInTheDocument();
+    expect(screen.getByText("User-edited title retained")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-hooks-remove")).toBeEnabled();
+  });
 });

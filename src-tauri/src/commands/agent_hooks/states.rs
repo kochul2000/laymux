@@ -1,5 +1,6 @@
 use crate::agent_hooks::{
     observations::{HookPhase, HookResult, Observation},
+    title::TitleBinding,
     ManageRequest,
 };
 use crate::commands::session_attribution::{
@@ -26,6 +27,7 @@ pub struct HookStateSnapshot {
     observed_at_ms: u64,
     config_dir: Option<String>,
     distro: Option<String>,
+    binding_source: &'static str,
 }
 
 #[tauri::command(async)]
@@ -72,17 +74,17 @@ pub(crate) fn get_agent_hook_states_impl(
         .iter()
         .map(|(id, h)| (id.clone(), (h.terminal_generation(), h.is_wsl_backed())))
         .collect();
-    let observations: Vec<(String, u64, Observation)> = {
+    let titles: HashMap<_, _> = state
+        .terminals
+        .lock_or_err()?
+        .iter()
+        .map(|(id, s)| (id.clone(), s.codex_hook_title.clone()))
+        .collect();
+    let observations: Vec<(String, u64, Observation, Option<TitleBinding>)> = {
         let registry = state.agent_hook_observations.lock_or_err()?;
         attributions
             .into_iter()
             .filter_map(|(id, attribution)| {
-                if !matches!(
-                    attribution.state,
-                    SessionAttributionState::Identified | SessionAttributionState::Fresh
-                ) {
-                    return None;
-                }
                 let provider = attribution.provider?;
                 if !providers.iter().any(|p| p == provider) {
                     return None;
@@ -96,16 +98,31 @@ pub(crate) fn get_agent_hook_states_impl(
                 } else {
                     None
                 };
-                registry
-                    .exact(provider, attribution.session_id.as_deref()?, distro, now)
-                    .cloned()
-                    .map(|observation| (id, *generation, observation))
+                if matches!(
+                    attribution.state,
+                    SessionAttributionState::Identified | SessionAttributionState::Fresh
+                ) {
+                    registry
+                        .exact(provider, attribution.session_id.as_deref()?, distro, now)
+                        .cloned()
+                        .map(|o| (id, *generation, o, None))
+                } else {
+                    let title = titles.get(&id)?;
+                    if !allows_title_binding(&attribution, title) {
+                        return None;
+                    }
+                    registry
+                        .by_codex_title(title.identity.as_deref()?, distro, now)
+                        .cloned()
+                        .map(|o| (id, *generation, o, Some(title.clone())))
+                }
             })
             .collect()
     };
     let mut installed = HashMap::new();
     let mut result = HashMap::new();
-    for (id, generation, observation) in observations {
+    let mut title_proofs = HashMap::new();
+    for (id, generation, observation, title) in observations {
         let event = &observation.event;
         let expected = if event.provider == "claude" {
             "Claude"
@@ -122,6 +139,7 @@ pub(crate) fn get_agent_hook_states_impl(
             event.provider.clone(),
             event.distro.clone(),
             event.config_dir.clone(),
+            title.is_some(),
         );
         let enabled = *installed.entry(key).or_insert_with(|| {
             crate::agent_hooks::manage(
@@ -137,6 +155,9 @@ pub(crate) fn get_agent_hook_states_impl(
                 value["installed"] == true
                     && value["disabled"] == false
                     && value["warning"].is_null()
+                    && (title.is_none()
+                        || (value["titleBinding"]["configured"] == true
+                            && value["titleBinding"]["warning"].is_null()))
             })
         });
         if !enabled {
@@ -145,6 +166,10 @@ pub(crate) fn get_agent_hook_states_impl(
         let Some(phase) = observation.phase else {
             continue;
         };
+        let binding_source = if title.is_some() { "title" } else { "process" };
+        if let Some(title) = title {
+            title_proofs.insert(id.clone(), title);
+        }
         result.insert(
             id,
             HookStateSnapshot {
@@ -158,6 +183,7 @@ pub(crate) fn get_agent_hook_states_impl(
                 observed_at_ms: observation.phase_at_ms,
                 config_dir: event.config_dir.clone(),
                 distro: event.distro.clone(),
+                binding_source,
             },
         );
     }
@@ -165,25 +191,68 @@ pub(crate) fn get_agent_hook_states_impl(
     // exact selection and liveness after it, not just the generation number.
     if !result.is_empty() {
         let final_attributions = get_terminal_session_attributions_impl(None, None, None, state)?;
+        let final_titles: HashMap<_, _> = state
+            .terminals
+            .lock_or_err()?
+            .iter()
+            .map(|(id, s)| (id.clone(), s.codex_hook_title.clone()))
+            .collect();
+        // Keep the observation registry a leaf lock, and propagate poison
+        // rather than reporting an apparently healthy empty result.
+        let unique_titles: std::collections::HashSet<_> = {
+            let registry = state.agent_hook_observations.lock_or_err()?;
+            result
+                .iter()
+                .filter_map(|(id, entry)| {
+                    let proof = title_proofs.get(id)?;
+                    registry
+                        .by_codex_title(proof.identity.as_deref()?, entry.distro.as_deref(), now)
+                        .filter(|o| {
+                            o.event.session_id == entry.session_id
+                                && o.event.config_dir == entry.config_dir
+                        })
+                        .map(|_| id.clone())
+                })
+                .collect()
+        };
         result.retain(|id, entry| {
-            final_attributions
-                .get(id)
-                .is_some_and(|a| same_verified_session(entry, a))
-                && crate::process_tree::interactive_app_in_pty_fresh(state, id)
-                    == crate::process_tree::PtyAppLiveness::Running(if entry.provider == "claude" {
-                        "Claude"
-                    } else {
-                        "Codex"
-                    })
+            final_attributions.get(id).is_some_and(|a| {
+                if let Some(proof) = title_proofs.get(id) {
+                    final_titles.get(id) == Some(proof)
+                        && (allows_title_binding(a, proof) || same_verified_session(entry, a))
+                        && unique_titles.contains(id)
+                } else {
+                    same_verified_session(entry, a)
+                }
+            }) && crate::process_tree::interactive_app_in_pty_fresh(state, id)
+                == crate::process_tree::PtyAppLiveness::Running(if entry.provider == "claude" {
+                    "Claude"
+                } else {
+                    "Codex"
+                })
         });
     }
+    let terminals = state.terminals.lock_or_err()?;
     let handles = state.pty_handles.lock_or_err()?;
     result.retain(|id, entry| {
         handles
             .get(id)
             .is_some_and(|h| h.terminal_generation() == entry.generation)
+            && title_proofs.get(id).is_none_or(|proof| {
+                terminals
+                    .get(id)
+                    .is_some_and(|s| &s.codex_hook_title == proof)
+            })
     });
     Ok(result)
+}
+
+fn allows_title_binding(attribution: &TerminalSessionAttribution, title: &TitleBinding) -> bool {
+    attribution.state == SessionAttributionState::ActiveButUnidentified
+        && attribution.provider == Some("codex")
+        && attribution.session_id.is_none()
+        && attribution.generation == title.generation
+        && title.identity.is_some()
 }
 
 fn same_verified_session(
@@ -202,6 +271,54 @@ fn same_verified_session(
 mod tests {
     use super::*;
     #[test]
+    fn title_fallback_requires_current_unidentified_codex_and_never_overrides_conflict() {
+        let binding = TitleBinding {
+            generation: 4,
+            revision: 1,
+            identity: Some("prefix".into()),
+        };
+        let a = TerminalSessionAttribution {
+            generation: 4,
+            state: SessionAttributionState::ActiveButUnidentified,
+            provider: Some("codex"),
+            session_id: None,
+        };
+        assert!(allows_title_binding(&a, &binding));
+        for state in [
+            SessionAttributionState::NoAgent,
+            SessionAttributionState::Unknown,
+            SessionAttributionState::RestorePending,
+            SessionAttributionState::Identified,
+            SessionAttributionState::Fresh,
+        ] {
+            assert!(!allows_title_binding(
+                &TerminalSessionAttribution { state, ..a.clone() },
+                &binding
+            ));
+        }
+        assert!(!allows_title_binding(
+            &TerminalSessionAttribution {
+                provider: Some("claude"),
+                ..a.clone()
+            },
+            &binding
+        ));
+        assert!(!allows_title_binding(
+            &TerminalSessionAttribution {
+                generation: 5,
+                ..a.clone()
+            },
+            &binding
+        ));
+        assert!(!allows_title_binding(
+            &TerminalSessionAttribution {
+                session_id: Some("other".into()),
+                ..a
+            },
+            &binding
+        ));
+    }
+    #[test]
     fn binding_requires_current_generation_provider_and_exact_conversation() {
         for provider in ["claude", "codex"] {
             let snapshot = HookStateSnapshot {
@@ -215,6 +332,7 @@ mod tests {
                 observed_at_ms: 100,
                 config_dir: None,
                 distro: None,
+                binding_source: "process",
             };
             let exact = TerminalSessionAttribution {
                 generation: 4,
