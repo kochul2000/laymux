@@ -12,7 +12,6 @@ use diagnostics::{
     find_process_thread_ids_checked, find_process_uuid_checked, is_temporary_thread_checked,
 };
 
-use super::resolve_codex_roots;
 use crate::commands::claude_session::is_valid_session_id;
 use crate::constants::{
     CODEX_SESSION_DIRECTORY_DEPTH, CODEX_SESSION_META_MAX_BYTES, CODEX_SQLITE_BUSY_TIMEOUT,
@@ -51,11 +50,6 @@ impl CodexSessionStore {
                 }
             }
         }
-    }
-
-    pub(super) fn resolve() -> Self {
-        let (codex_home, sqlite_home) = resolve_codex_roots();
-        Self::new(codex_home, sqlite_home)
     }
 
     pub(super) fn new(codex_home: PathBuf, sqlite_home: PathBuf) -> Self {

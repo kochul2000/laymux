@@ -175,6 +175,7 @@ import {
 import { useNotificationStore } from "@/stores/notification-store";
 import { resolveWorkspaceId } from "@/lib/workspace-utils";
 import { observeTaskInput } from "@/lib/terminal-task-observers";
+import { heuristicTask } from "@/lib/terminal-task-detection";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { loadTerminalOutputCache, setComposerStarredEntry } from "@/lib/tauri-api";
 import {
@@ -4597,7 +4598,7 @@ export function TerminalView({
           codexConversationMessage ??
           (currentIsFooter || !currentMessage ? codexStatusMessage : undefined);
         if (
-          (current.task?.state === "waiting" ||
+          (heuristicTask(current)?.state === "waiting" ||
             current.deferredTaskInput?.observation?.state === "waiting") &&
           text.trim() &&
           !detectCodexInputPendingFromOutput(text)
@@ -4624,10 +4625,10 @@ export function TerminalView({
           previousClaudeBuffer,
           text,
         );
-        if (claudePromptBecamePending && current.task?.state !== "waiting") {
+        if (claudePromptBecamePending && heuristicTask(current)?.state !== "waiting") {
           observeTaskInput(instanceId, true);
         } else if (
-          current.task?.state === "waiting" &&
+          heuristicTask(current)?.state === "waiting" &&
           text.trim() &&
           shouldDismissClaudeInputPendingFromOutput(claudeDismissalBuffer)
         ) {

@@ -2,6 +2,28 @@ use super::{helpers::err_json, ServerState};
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use laymux_agent_hook::runtime::HookEvent;
 
+pub async fn hook_states(State(state): State<ServerState>) -> impl IntoResponse {
+    match tokio::task::spawn_blocking(move || {
+        let settings = crate::settings::load_settings();
+        let mut providers = Vec::new();
+        if settings.claude.state_detection == crate::settings::AgentStateDetection::Hooks {
+            providers.push("claude".into());
+        }
+        if settings.codex.state_detection == crate::settings::AgentStateDetection::Hooks {
+            providers.push("codex".into());
+        }
+        crate::commands::get_agent_hook_states_impl(&providers, &state.app_state, &state.app_handle)
+    })
+    .await
+    {
+        Ok(Ok(value)) => (StatusCode::OK, Json(ok_json_data(serde_json::json!(value)))),
+        result => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(err_json(&format!("{result:?}"))),
+        ),
+    }
+}
+
 fn ok_json_data(value: serde_json::Value) -> serde_json::Value {
     serde_json::json!({"success":true,"data":value})
 }

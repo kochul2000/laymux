@@ -964,6 +964,7 @@ export type ClaudeStatusMessageMode = "bullet" | "title" | "title-bullet" | "bul
 export type CodexStatusMessageMode = ClaudeStatusMessageMode;
 
 export interface ClaudeSettings {
+  stateDetection?: "heuristic" | "hooks";
   syncCwd: ClaudeSyncCwdMode;
   /**
    * Command that launches Claude Code (default: "claude"). Flags belong here —
@@ -987,6 +988,7 @@ export interface ClaudeSettings {
 }
 
 export interface CodexSettings {
+  stateDetection?: "heuristic" | "hooks";
   /** Discard unsent text and verify /status before close/update (default: true). */
   verifySessionOnExit: boolean;
   /**

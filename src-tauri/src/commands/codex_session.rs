@@ -7,7 +7,6 @@ pub(crate) mod turns;
 mod wsl;
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use tauri::State;
@@ -15,7 +14,6 @@ use tauri::State;
 use super::claude_session::is_valid_session_id;
 use super::session_attribution::{provider_terminal_domains, ProviderSessionLookup};
 use super::wsl_agent_session::{resolve_wsl_agent_processes, WslAgentProvider};
-use crate::constants::{ENV_CODEX_HOME, ENV_CODEX_SQLITE_HOME};
 use crate::process_tree::match_interactive_app_process;
 use crate::state::AppState;
 
@@ -89,9 +87,18 @@ fn lookup_with_observer(
         }
     };
 
-    let store = CodexSessionStore::resolve();
     let mut candidates = Vec::new();
     for (terminal_id, pid) in &terminal_codex_pids {
+        // A user can select CODEX_HOME for one CLI without changing Laymux's
+        // environment. Read the actual TUI's roots, as the exit verifier does.
+        let store = match status_probe::process_context::read(*pid) {
+            Ok(context) => CodexSessionStore::new(context.codex_home, context.sqlite_home),
+            Err(error) => {
+                failed_terminal_ids.insert(terminal_id.clone());
+                tracing::warn!(pid, %error, "native Codex storage context unavailable");
+                continue;
+            }
+        };
         // Native candidates are observed, but have no WSL missing-FD evidence.
         rollout_absence.insert(terminal_id.clone(), false);
         match store.find_selection_for_pid_checked(*pid, session_max_age_hours) {
@@ -233,28 +240,10 @@ pub(crate) fn is_valid_codex_startup_command_override(
         .is_some_and(is_valid_session_id)
 }
 
-fn resolve_codex_roots() -> (PathBuf, PathBuf) {
-    let codex_home = std::env::var_os(ENV_CODEX_HOME)
-        .map(PathBuf::from)
-        .or_else(platform_codex_home)
-        .unwrap_or_else(|| PathBuf::from(".codex"));
-    let sqlite_home = std::env::var_os(ENV_CODEX_SQLITE_HOME)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| codex_home.clone());
-    (codex_home, sqlite_home)
-}
-
-fn platform_codex_home() -> Option<PathBuf> {
-    #[cfg(windows)]
-    let home = std::env::var_os("USERPROFILE");
-    #[cfg(not(windows))]
-    let home = std::env::var_os("HOME");
-    home.map(PathBuf::from).map(|path| path.join(".codex"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn exact_pid_assignment_keeps_same_cwd_panes_distinct() {

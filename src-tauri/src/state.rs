@@ -82,6 +82,8 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 /// extracted OS resource is terminated; it is never returned to operation and
 /// the mutex poison is not cleared. See ADR-0087 and api-contracts §14.3.
 pub struct AppState {
+    /// Leaf lock: clone hook observations before any process/filesystem I/O.
+    pub agent_hook_observations: Mutex<crate::agent_hooks::observations::HookRegistry>,
     pub terminals: Arc<Mutex<HashMap<String, TerminalSession>>>,
     pub sync_groups: Mutex<HashMap<String, SyncGroup>>,
     pub pty_handles: Mutex<HashMap<String, PtyHandle>>,
@@ -351,6 +353,9 @@ impl AppState {
         let settings = crate::settings::load_settings();
         Self {
             terminals: Arc::new(Mutex::new(HashMap::new())),
+            agent_hook_observations: Mutex::new(
+                crate::agent_hooks::observations::HookRegistry::default(),
+            ),
             sync_groups: Mutex::new(HashMap::new()),
             pty_handles: Mutex::new(HashMap::new()),
             ipc_socket_path: Mutex::new(None),

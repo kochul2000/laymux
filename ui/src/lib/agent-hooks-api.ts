@@ -1,6 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type HookProvider = "claude" | "codex";
+export interface HookStateSnapshot {
+  generation: number;
+  provider: HookProvider;
+  sessionId: string;
+  state: "idle" | "running" | "waiting" | "ended";
+  result: "failure" | "interrupted" | null;
+  taskId: string;
+  sequence: number;
+  observedAtMs: number;
+  configDir: string | null;
+  distro: string | null;
+}
+export const getAgentHookStates = (providers: HookProvider[]) =>
+  invoke<Record<string, HookStateSnapshot>>("get_agent_hook_states", { providers });
 export interface HookEnvironment {
   id: string;
   label: string;

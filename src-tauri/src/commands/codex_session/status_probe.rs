@@ -1,7 +1,7 @@
 //! Explicit, fenced Codex status queries for close/update checkpoints.
 #[cfg(test)]
 mod output;
-mod process_context;
+pub(super) mod process_context;
 mod screen;
 mod targets;
 #[cfg(test)]

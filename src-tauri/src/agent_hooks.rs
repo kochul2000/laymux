@@ -1,5 +1,6 @@
 //! Optional CLI integration. Installation and observations are independent of
 //! heuristic activity; consuming hook state is an explicit settings decision.
+pub mod observations;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -134,7 +135,11 @@ pub fn accept(state: &AppState, event: HookEvent) -> Result<(), AppError> {
         .map_err(|e| AppError::Other(e.to_string()))?
         .as_millis() as u64;
     if !matches!(event.provider.as_str(), "claude" | "codex")
-        || !laymux_agent_hook::install::EVENTS.contains(&event.event.as_str())
+        || serde_json::to_vec(&event)
+            .map_err(|e| AppError::Other(e.to_string()))?
+            .len()
+            > 32_768
+        || !laymux_agent_hook::install::events(&event.provider).contains(&event.event.as_str())
         || event.session_id.is_empty()
         || event.session_id.len() > 256
         || !event
@@ -149,12 +154,19 @@ pub fn accept(state: &AppState, event: HookEvent) -> Result<(), AppError> {
             "Invalid or expired hook observation".into(),
         ));
     }
+    // A shared server can keep the launching pane's environment across resume.
+    // Recording metadata cannot establish pane ownership: the state consumer
+    // separately proves the current process, conversation, domain and generation.
+    state
+        .agent_hook_observations
+        .lock_or_err()?
+        .observe(event.clone());
     let mut terminals = state.terminals.lock_or_err()?;
-    let session = terminals
-        .get_mut(&event.terminal_id)
-        .ok_or_else(|| AppError::SessionNotFound(event.terminal_id.clone()))?;
+    let Some(session) = terminals.get_mut(&event.terminal_id) else {
+        return Ok(());
+    };
     if session.agent_hook_token.is_empty() || session.agent_hook_token != event.token {
-        return Err(AppError::Other("Stale terminal hook identity".into()));
+        return Ok(());
     }
     if let Some(previous) = &session.agent_hook {
         if event.emitted_at_ms < previous.emitted_at_ms {
@@ -175,10 +187,15 @@ pub fn accept(state: &AppState, event: HookEvent) -> Result<(), AppError> {
 }
 
 pub fn connections(state: &AppState) -> Result<Vec<Value>, AppError> {
-    let terminals = state.terminals.lock_or_err()?;
-    Ok(terminals.values().filter_map(|session|session.agent_hook.as_ref()).map(|event|json!({
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| AppError::Other(e.to_string()))?
+        .as_millis() as u64;
+    let registry = state.agent_hook_observations.lock_or_err()?;
+    Ok(registry.diagnostic_events(now).map(|event|json!({
         "terminalId":event.terminal_id,"provider":event.provider,"sessionId":event.session_id,"event":event.event,
-        "receivedAtMs":event.emitted_at_ms,"distro":event.distro,"configDir":event.config_dir
+        "receivedAtMs":event.emitted_at_ms,"distro":event.distro,"configDir":event.config_dir,
+        "paneIdentity":"reported", "source":event.source,"ancestors":event.ancestors
     })).collect())
 }
 

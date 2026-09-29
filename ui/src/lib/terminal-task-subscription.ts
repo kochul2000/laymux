@@ -5,6 +5,8 @@ import { sendDesktopNotification } from "@/hooks/useOsNotification";
 import { persistSession } from "./persist-session";
 import { resolveWorkspaceId } from "./workspace-utils";
 import { observeTerminalTask } from "./terminal-task-observers";
+import { useSettingsStore } from "@/stores/settings-store";
+import { heuristicTask } from "./terminal-task-detection";
 
 /** Sole publisher of automatic task notifications (ADR-0250). */
 export function subscribeTerminalTasks(): () => void {
@@ -57,8 +59,9 @@ export function subscribeTerminalTasks(): () => void {
     }
   });
   const timer = setInterval(() => {
+    useTerminalStore.getState().refreshTaskDetection();
     for (const instance of useTerminalStore.getState().instances) {
-      const task = instance.task;
+      const task = heuristicTask(instance);
       if (
         task?.observation === "confirmed" &&
         task.expiresAfter !== undefined &&
@@ -68,8 +71,16 @@ export function subscribeTerminalTasks(): () => void {
       }
     }
   }, 1000);
+  const settingsUnsubscribe = useSettingsStore.subscribe((state, previous) => {
+    if (
+      state.claude.stateDetection !== previous.claude.stateDetection ||
+      state.codex.stateDetection !== previous.codex.stateDetection
+    )
+      useTerminalStore.getState().refreshTaskDetection();
+  });
   return () => {
     unsubscribe();
+    settingsUnsubscribe();
     clearInterval(timer);
   };
 }

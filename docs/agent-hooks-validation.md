@@ -26,3 +26,24 @@ Codex는 TUI 연결 해제와 서버의 대화 수명이 다르다. 기존 서�
 재현 시 기존 dev의 자동 복원 세션이 실행 중일 수 있다. CLI 명령을 보내기 전 반드시 해당 pane이 셸에 돌아왔는지 확인하고, dev 종료는 `bash scripts/kill-dev.sh`만 사용한다.
 
 추가 검증: Windows에서 `/` 경로로 설치한 뒤 `\\` 경로로 조회·재설치하면 다른 command로 인식하던 문제를 회귀 테스트로 재현하고 수정했다. 훅 command 생성 시 Windows 경로 구분자를 통일하며, native helper 테스트 11개가 통과했다.
+## 선택형 작업 상태 감지 (2026-09-29)
+
+설계: [ADR-0283](adr/0283-opt-in-hook-task-state.md). 동일한 격리 dev에서 Codex 0.158.0, Claude Code 2.1.284를 사용했다. Codex는 공유 서버 기본 실행과 `--no-daemon` 독립 실행을 각각 확인했다. CLI 화면, 수신 진단, 정확한 세션 귀속 API, 검증 snapshot, 실제 UI의 `taskDetectionSource`를 대조했다.
+
+| 검증 | Windows Codex 독립 실행 | WSL Codex 독립 실행 | Windows Claude | WSL Claude |
+| --- | --- | --- | --- | --- |
+| 새 대화 / 정확한 pane·대화 연결 | 통과 | 통과 | 통과 | 통과 |
+| 실제 작업 중 → 응답 종료 | 통과 | 통과 | 통과 | 통과 |
+| 실제 질문·승인 대기 | 이벤트 전이 단위 테스트 | CLI 권한 승인 대기 확인 | AskUserQuestion 확인 | AskUserQuestion 확인 |
+| 질문 답변 뒤 작업 재개·종료 | 해당 없음 | 승인 대기까지 확인 | PostToolUse → Stop 확인 | PostToolUse → Stop 확인 |
+| Esc 중단 | Interrupt·interrupted 확인 | Interrupt·interrupted 확인 | 전용 Interrupt 훅 없음 | 전용 Interrupt 훅 없음 |
+| 동일 대화 resume 후 새 입력 | 통과 | 통과 | 통과 | 통과 |
+| CLI 종료 후 셸에서 훅 상태 제거 | 통과 | 통과 | 통과 | 통과 |
+
+Codex에서 훅 우선 ↔ 휴리스틱을 전환하고 실제 표시 출처가 바뀌는 것을 확인했다. 양쪽 환경의 훅 제거 후 검증 snapshot이 비고 기존 감지로 돌아왔다. 재설치 때 외부 훅이 보존되고 등록 수가 복구됐다. 다음 입력을 보낸 뒤 이전 Stop을 다시 우선 적용하는 결함을 발견하여 입력 시각 이후 관찰만 선택하는 회귀 테스트를 추가했다.
+
+공유 서버 기본 실행에서는 양쪽 모두 이벤트를 수신했지만 현재 TUI에 대화를 귀속할 수 없으므로 훅 snapshot을 반환하지 않았다. WSL 서버가 이전 pane의 환경을 유지하는 것도 확인했다. 이 경우 Settings에 제한과 `--no-daemon` 실행 방법을 안내한다. 실행 명령·서버 기능을 자동 변경하지 않는다. 이 결과를 “공유 서버 훅 감지 지원”으로 해석해서는 안 된다.
+
+자동 회귀는 두 provider의 기본값·독립 선택·live 적용, raw 상태 분리, 훅 제거·응답 실패·6초 검증 만료·60초 상태 만료·무관한 알림, 입력 중 늦은 응답, PTY 세대 교체·셸·다른 대화·다른 배포판·중복 설정 루트·subagent·지난 turn 종료를 검증한다. 상태 감지는 복원 체크포인트를 대신하지 않는다. 다른 사용자 Stop 훅의 후속 판단, Claude 수동 중단처럼 제공되지 않는 이벤트, 미검증 CLI 버전·다른 WSL 배포판까지 성공을 보장하지 않는다.
+
+Windows UI 단위 5,210개, xterm 셀 94개, Rust workspace 2,381개(17개 ignored)가 통과했다. 이후 Windows 경로 구분자를 바꿔 조회·재설치·제거하는 helper 회귀 1개를 추가해 native helper 11개가 통과했다. WSL helper 10개, TypeScript·변경 UI ESLint·workspace clippy도 통과했다. Settings의 선택 컨트롤, 감지 중인 pane 수, 미확인 시 기존 감지 안내와 Codex 공유 서버 제한을 dev Automation 캡처와 실제 WebView 캡처로 확인했다.

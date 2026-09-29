@@ -508,11 +508,15 @@ html/markdown preview는 별도 문서(iframe)라 부모 페이지의 CSS를 상
 
 ### Claude Code 설정
 
-선택형 생명주기 훅은 [ADR-0282](../adr/0282-optional-agent-hook-installation.md)를 따른다. Settings의 Claude·Codex 페이지에서 native와 각 WSL 배포판의 설정 폴더를 선택해 설치 상태를 조회하고 즉시 설치·제거한다. 실제 CLI 설정 파일이 설치 상태의 정본이며 Laymux 설정 저장과 독립이다. 전용 helper는 기존 사용자 훅을 보존하며, 설치 여부와 현재 세션의 이벤트 수신 여부를 구분한다. 미설치 환경은 기존 휴리스틱을 유지한다. 상태 감지에서 훅을 사용하는 선택 설정은 별도 변경으로 제공한다.
+선택형 생명주기 훅은 [ADR-0282](../adr/0282-optional-agent-hook-installation.md), 선택형 작업 상태 감지는 [ADR-0283](../adr/0283-opt-in-hook-task-state.md)를 따른다. Settings의 Claude·Codex 페이지에서 native와 각 WSL 배포판의 설정 폴더를 선택해 즉시 설치·제거한다. 실제 CLI 설정 파일이 설치 상태의 정본이며 Laymux 설정 저장과 독립이다. `claude.stateDetection`/`codex.stateDetection`은 기본 `heuristic`, 선택값 `hooks`이며 일반 Settings 저장에 따라 적용한다. 설정 변경이 훅을 자동 설치하지 않는다. 훅 모드에서도 설치·비활성·미수신·정확한 귀속 실패·상태 이벤트 60초 만료는 기존 감지로 돌아간다.
 
 관리 API는 `GET /api/v1/agent-hooks/environments`, `POST /api/v1/agent-hooks/manage {provider, operation, distro?, configDir?}`다. provider는 `claude|codex`, operation은 `status|install|remove`, distro 미지정은 native이며 configDir 미지정은 해당 환경의 `CODEX_HOME`/`CLAUDE_CONFIG_DIR` 또는 사용자 홈의 기본 폴더다. 반환 `data`에는 설정 경로, 등록 이벤트 수, helper 존재 여부, 설치 완료 여부, CLI 전체 비활성 여부, 보조 설정 조회 경고가 포함된다. 손상된 훅 JSON은 수정하지 않으며 Codex 보조 `config.toml` 조회 실패는 경고로 표시해 훅 제거를 막지 않는다. 같은 관리 동작은 `list_agent_hook_environments`, `manage_agent_hooks` IPC로 제공하고 파일·프로세스 I/O는 메인 스레드 밖에서 실행한다.
 
-helper는 `SessionStart`/`SessionEnd` 메타데이터를 `POST /api/v1/agent-hooks/events`로 전송한다. 현재 PTY 토큰, provider·session ID·이벤트 스키마, 30초 수신 기한을 확인하며 다른 대화의 늦은 종료·subagent 이벤트를 반영하지 않는다. `GET /api/v1/agent-hooks/connections` 및 `get_agent_hook_connections`는 토큰·대화 내용 없이 pane별 마지막 관찰을 반환한다. 이는 연결 진단용 과거 관찰이며 현재 CLI 생존·복원 가능성의 보장이 아니다. CLI 설정 파일의 기존 내용은 변경 직전 백업하고 원자 교체하며 제거 시 다른 handler와 사용자 파일·백업을 남긴다.
+helper는 생명주기·프롬프트 제출·도구 진행·승인·응답 종료 등의 메타데이터를 `POST /api/v1/agent-hooks/events`로 전송한다. provider·session ID·이벤트 스키마, 32KiB 크기와 30초 수신 기한을 확인한다. 앱의 leaf lock 레지스트리는 최대 256개 대화 관찰을 보관하고 오래된 turn·subagent는 제외한다. `GET /api/v1/agent-hooks/connections`/`get_agent_hook_connections`는 최근 5분의 수신 진단이다. `terminalId`는 서버가 보고한 과거 pane일 수 있으므로 `paneIdentity: reported`로 표시하며 현재 실행의 증거로 사용하지 않는다. 토큰·대화 내용은 조회에 노출하지 않는다. 무관한 Notification이나 resume 수신이 이전 작업 상태의 60초 기한을 갱신하지 않는다.
+
+`get_agent_hook_states(providers)` IPC와 `GET /api/v1/agent-hooks/states`는 현재 PTY의 정확한 세션 귀속·실제 프로세스·WSL 배포판·설치 및 활성 상태를 검증한 작업 snapshot만 반환한다. REST는 저장된 hooks 설정의 provider만 조회한다. 파일·프로세스 검증은 메인 스레드 밖에서 수행하며 레지스트리 락을 I/O 중 보유하지 않는다. 프런트는 선택 provider가 있을 때만 2초 후속 poll을 하고 검증 응답이 6초간 없으면 훅의 우선권을 잃는다. 표시는 단일 선택 함수가 계산하며 훅 상태와 기존 상태의 원시값은 각각 보존한다. 이 기능은 활동 상태용이며 종료 체크포인트의 `/status`와 디스크 복원점 검증을 생략하지 않는다.
+
+native Codex의 저장 경로는 실제 TUI 환경에서 조회한다. Codex 0.158 공유 서버 모드는 TUI와 서버의 대화 귀속을 확인할 수 없어 휴리스틱을 유지하며 Settings가 `--no-daemon` 독립 실행을 안내한다. 설치나 감지 선택이 사용자의 실행 방식을 자동으로 변경하지 않는다.
 
 Claude Code 관련 동작(sync-cwd 전파, 세션 복원, 셀렉터 상태 메시지 구성, 세션 리미트 자동 복귀)을 제어한다.
 

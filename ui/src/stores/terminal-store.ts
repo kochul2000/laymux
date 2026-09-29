@@ -1,5 +1,8 @@
 import { create } from "zustand";
 import { observeTask, type TaskObservation, type TerminalTask } from "@/lib/terminal-task";
+import type { HookStateSnapshot } from "@/lib/agent-hooks-api";
+import { heuristicTask, selectDetectedTask } from "@/lib/terminal-task-detection";
+import { useSettingsStore } from "./settings-store";
 
 export const SESSION_ATTRIBUTION_STARTUP_GRACE_MS = 15_000;
 
@@ -29,6 +32,9 @@ export interface TerminalInstance {
   livenessConfirmed?: boolean;
   taskObservation?: TaskObservation;
   task?: TerminalTask;
+  heuristicTask?: TerminalTask;
+  agentHook?: { snapshot: HookStateSnapshot; task: TerminalTask; verifiedAt: number };
+  taskDetectionSource?: "heuristic" | "hooks";
   /** Codex input received after a closed turn, awaiting authoritative turn attribution. */
   deferredTaskInput?: {
     source: string;
@@ -85,6 +91,8 @@ interface TerminalStoreState {
   }) => void;
   unregisterInstance: (id: string) => void;
   observeTask: (id: string, observation: TaskObservation) => void;
+  observeAgentHook: (id: string, snapshot: HookStateSnapshot | undefined) => void;
+  refreshTaskDetection: () => void;
   getInstancesBySyncGroup: (group: string) => TerminalInstance[];
   getTerminalsForWorkspace: (workspaceId: string) => TerminalInstance[];
   updateInstanceInfo: (
@@ -119,6 +127,17 @@ interface TerminalStoreState {
   clearCommandState: (id: string) => void;
   updateTerminalActivity: (id: string) => void;
   setTerminalFocus: (id: string) => void;
+}
+
+function selectTask(instance: TerminalInstance) {
+  const settings = useSettingsStore.getState();
+  const mode =
+    instance.activity?.name === "Claude"
+      ? settings.claude.stateDetection
+      : instance.activity?.name === "Codex"
+        ? settings.codex.stateDetection
+        : undefined;
+  return selectDetectedTask(instance, mode ?? "heuristic");
 }
 
 export const useTerminalStore = create<TerminalStoreState>()((set, get) => ({
@@ -161,37 +180,42 @@ export const useTerminalStore = create<TerminalStoreState>()((set, get) => ({
       instances: state.instances.map((inst) => {
         if (inst.id !== id) return inst;
         const next = { ...inst, ...info };
+        const previousHeuristic = heuristicTask(inst);
         const changed =
           inst.activity?.name !== next.activity?.name ||
           inst.generation !== next.generation ||
           inst.appSession !== next.appSession ||
           (inst.sessionReady !== false && next.sessionReady === false);
-        return changed
-          ? {
-              ...next,
-              task: undefined,
-              taskObservation: undefined,
-              deferredTaskInput: undefined,
-              codexTurn: undefined,
-              taskEpoch: (inst.taskEpoch ?? 0) + 1,
-              livenessConfirmed: info.livenessConfirmed ?? false,
-            }
-          : {
-              ...next,
-              ...(info.lastUserInputAt !== undefined &&
-              info.lastUserInputAt !== inst.lastUserInputAt
-                ? {
-                    deferredTaskInput:
-                      next.activity?.name === "Codex" && inst.task?.state === "ended"
-                        ? {
-                            source: inst.task.source,
-                            taskId: inst.task.taskId,
-                            inputAt: info.lastUserInputAt,
-                          }
-                        : undefined,
-                  }
-                : {}),
-            };
+        return selectTask(
+          changed
+            ? {
+                ...next,
+                task: undefined,
+                heuristicTask: undefined,
+                agentHook: undefined,
+                taskObservation: undefined,
+                deferredTaskInput: undefined,
+                codexTurn: undefined,
+                taskEpoch: (inst.taskEpoch ?? 0) + 1,
+                livenessConfirmed: info.livenessConfirmed ?? false,
+              }
+            : {
+                ...next,
+                ...(info.lastUserInputAt !== undefined &&
+                info.lastUserInputAt !== inst.lastUserInputAt
+                  ? {
+                      deferredTaskInput:
+                        next.activity?.name === "Codex" && previousHeuristic?.state === "ended"
+                          ? {
+                              source: previousHeuristic.source,
+                              taskId: previousHeuristic.taskId,
+                              inputAt: info.lastUserInputAt,
+                            }
+                          : undefined,
+                    }
+                  : {}),
+              },
+        );
       }),
     }));
   },
@@ -200,15 +224,62 @@ export const useTerminalStore = create<TerminalStoreState>()((set, get) => ({
     set((state) => ({
       instances: state.instances.map((inst) =>
         inst.id === id
-          ? {
+          ? selectTask({
               ...inst,
               taskObservation: observation,
-              task: observeTask(inst.task, observation, Date.now()),
-            }
+              heuristicTask: observeTask(heuristicTask(inst), observation, Date.now()),
+            })
           : inst,
       ),
     }));
   },
+
+  observeAgentHook: (id, snapshot) => {
+    set((state) => ({
+      instances: state.instances.map((inst) => {
+        if (inst.id !== id) return inst;
+        if (!snapshot) return selectTask({ ...inst, agentHook: undefined });
+        if (
+          inst.generation !== snapshot.generation ||
+          inst.sessionReady === false ||
+          inst.activity?.type !== "interactiveApp" ||
+          inst.activity.name?.toLowerCase() !== snapshot.provider
+        )
+          return inst;
+        const source = `hook:${snapshot.generation}:${snapshot.provider}:${snapshot.sessionId}`;
+        if (
+          inst.agentHook?.task.source === source &&
+          snapshot.sequence < inst.agentHook.snapshot.sequence
+        )
+          return inst;
+        const task = observeTask(
+          inst.agentHook?.task,
+          {
+            source,
+            taskId: snapshot.taskId,
+            sequence: snapshot.sequence,
+            state: snapshot.state,
+            result: snapshot.result ?? undefined,
+            resolvesWaiting: true,
+          },
+          Date.now(),
+        );
+        return selectTask({
+          ...inst,
+          heuristicTask: heuristicTask(inst),
+          agentHook: { snapshot, task, verifiedAt: Date.now() },
+        });
+      }),
+    }));
+  },
+
+  refreshTaskDetection: () =>
+    set((state) => {
+      const instances = state.instances.map(selectTask);
+      return instances.every((instance, index) => instance === state.instances[index])
+        ? state
+        : { instances };
+    }),
 
   clearCommandState: (id) => {
     set((state) => ({
