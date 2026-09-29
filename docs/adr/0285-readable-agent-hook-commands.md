@@ -1,6 +1,6 @@
 # 0285. 훅 명령은 읽을 수 있는 형태로 설치하고 변경 개수를 먼저 안내한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-29
 - Source: 사용자 요구(EncodedCommand 제거, 추가 훅 개수 안내, Settings 재구성), [ADR-0282](0282-optional-agent-hook-installation.md), [ADR-0284](0284-codex-title-hook-binding.md)
 - 관계: ADR-0282의 선택 설치와 정확한 소유 명령 식별 원칙을 유지하며 실행 형식과 소유 명령의 알려진 이전 형식을 구체화한다.
