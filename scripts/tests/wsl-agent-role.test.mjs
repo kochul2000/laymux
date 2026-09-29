@@ -59,6 +59,9 @@ function fixtureScript(entries) {
     for (const [name, value] of Object.entries(files)) {
       commands.push(`printf '%b' '${octal(value)}' > ${directory}/${name}`);
     }
+    if (entry.rollout) {
+      commands.push(`ln -s /home/test/.codex/sessions/2026/09/29/rollout-test.jsonl ${directory}/fd/9`);
+    }
   }
   return commands.join('\n');
 }
@@ -164,6 +167,17 @@ test('Codex 서버와 함께 실행한 실제 TUI는 유지한다', () => {
   const rows = attributionRows(entries);
   assertRole(rows, 20, '0');
   assertRole(rows, 30, '1');
+});
+
+test('서버의 rollout FD는 읽지 않고 실제 TUI의 FD만 귀속에 제공한다', () => {
+  const entries = [
+    ...ancestorFixtures(),
+    { ...processFixture(20, 11, 'codex'), rollout: true },
+    { ...processFixture(30, 1, 'codex', ['codex', 'app-server']), rollout: true },
+  ];
+  const rows = runProbe('attribution', entries);
+  assertRole(rows.filter((row) => row[0] === 'P'), 30, '1');
+  assert.deepEqual(rows.filter((row) => row[0] === 'R').map((row) => Number(row[2])), [20]);
 });
 
 for (const args of [

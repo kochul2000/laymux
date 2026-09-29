@@ -1,7 +1,7 @@
 # WSL 셸의 Codex 종료 확인 오탐 재현과 수정 검증
 
 - 날짜: 2026-09-29
-- ADR: [0280](adr/0280-wsl-codex-app-server-role.md)
+- ADR: [0280](adr/0280-codex-app-server-process-role.md)
 - 환경: `D:\PycharmProjects\laymux`, main `89adf9cc` 기반 수정 빌드, dev API 19281, 격리 APPDATA·WebView, Ubuntu-22.04, Codex 0.158.0.
 
 ## 원인과 수정 전 재현
@@ -36,4 +36,4 @@ dev의 `terminal-pane-66eb69f1`에서 별도 CODEX_HOME `/tmp/laymux-shell-repro
 - `cargo clippy --workspace --all-targets -- -D warnings`: 통과.
 - 변경 Rust 파일의 rustfmt와 `git diff --check`: 통과. 전체 fmt 검사에는 이번 diff 밖 `remote_server/font_assets.rs`의 기존 서식 차이가 남아 있다.
 
-실제 업데이트 다운로드·설치 프로그램 실행, 모든 Codex 서브명령, native Windows의 서버 역할 판정까지 검증한 것은 아니다. release 19280에는 접근하지 않았다. 설정 스키마와 화면 검사 조건은 변경하지 않았다.
+이 1차 재현 단계에서는 실제 업데이트 다운로드·설치 프로그램 실행, 모든 Codex 서브명령, native Windows의 서버 역할 판정까지 검증한 것은 아니다. 후속 Windows·WSL 종료 조합 검증은 [전체 검증 기록](agent-close-state-matrix-2026-09-29.md)에 정리한다. release 19280에는 접근하지 않았다. 설정 스키마와 화면 검사 조건은 변경하지 않았다.

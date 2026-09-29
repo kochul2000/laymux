@@ -43,6 +43,8 @@ EOF
   printf 'P\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$terminal_id" "${proc##*/}" "$ppid" "$name" "$home" "$codex_home" "$grok_home" "$helper"
   # Only Codex attribution consumes rollout descriptors. Keep every marked
   # process above so intermediary shells still establish the parent chain.
+  # A server can retain many conversations; none belongs to its launching pane.
+  [ "$helper" = '0' ] || continue
   case "$name" in [cC][oO][dD][eE][xX]*) ;; *) continue ;; esac
   for fd in "$proc"/fd/*; do
     target=$(readlink "$fd" 2>/dev/null) || continue

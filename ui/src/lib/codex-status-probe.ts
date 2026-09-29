@@ -69,9 +69,21 @@ export function isCodexStatusCommandSelected(screen: TerminalBufferDump): boolea
   // The selected popup entry dispatches the builtin; text after the slash name
   // is never accepted as proof. Looking only for '/status' in scrollback would
   // allow an old card or a user's quoted prompt to authorize Enter.
-  return lines
-    .slice(Math.max(0, prompt - 6), prompt)
-    .some((line) => /^› \/status\s+show current session configuration/.test(line));
+  const popup = lines.slice(Math.max(0, prompt - 6), prompt);
+  return popup.some((line, index) => {
+    const prefix = /^› \/status\s+/.exec(line)?.[0];
+    if (!prefix) return false;
+    const description = [line.slice(prefix.length)];
+    // Codex hard-wraps the description at its own column, so these are not
+    // xterm soft-wrapped rows. Only join aligned continuation rows belonging
+    // to this selected entry, never the next command or the composer.
+    const indent = " ".repeat(prefix.length);
+    for (let next = index + 1; next < popup.length; next++) {
+      if (!popup[next].startsWith(indent)) break;
+      description.push(popup[next].trim());
+    }
+    return /^show current session configuration(?:\s|$)/.test(description.join(" "));
+  });
 }
 
 function inspect(id: string): TerminalBufferDump {
