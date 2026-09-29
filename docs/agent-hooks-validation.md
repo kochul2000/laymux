@@ -88,3 +88,11 @@ Windows UI 단위 5,210개, xterm 셀 94개, Rust workspace 2,381개(17개 ignor
 - 종료 뒤 네 조합 모두 셸 프롬프트와 빈 훅 snapshot을 확인했다. WSL Codex의 휴리스틱 표시만 남는 추가 결함을 발견했다. 실제 `/proc` 검사에서 이전 테스트 서버가 회수하지 않은 좀비 자식을 실행 중인 Codex로 세는 원인이 확인됐으며, 설정 UI 변경과 별도 수정으로 처리한다.
 
 기존 설치는 Settings의 재설치로 평문 명령을 적용한다. Codex는 명령 변경에 대한 신뢰 확인을 다시 요청할 수 있다.
+
+## WSL 종료 프로세스의 오탐 회귀 (2026-09-29)
+
+위 검증에서 `/quit` 후 셸을 Codex로 유지하던 원인은 `/proc`의 좀비 자식이었다. 해당 PID의 cmdline·환경은 비어 있었지만 부모 app-server의 pane marker를 상속해 liveness 후보가 됐다. `State: Z` 또는 `X`만 공통 검사로 제외하며, 정지·추적·조회 불가 상태는 후보로 유지한다. 기존 실행 중 프로세스 계약의 버그 수정으로 새 ADR은 필요하지 않으며, 책임 경계는 ADR-0134·ADR-0280을 유지한다.
+
+실제 프로덕션 sh 스크립트를 WSL에서 실행하는 회귀 테스트 33개가 통과했다. 수정 전 새 종료 상태 6개가 실패하는 것을 먼저 확인했다. Codex·Claude·Grok, 좀비·종료·실행·sleep·I/O 대기·정지·추적·상태 필드 부재·유사 문자열, 부모 marker, 실제 대화와 helper 공존을 포함한다. 관련 Rust 111개(기존 ignored 9개), clippy `-D warnings`, fmt도 통과했다.
+
+격리 dev 19281에서 원인이던 좀비 PID를 그대로 둔 채 네 pane의 셸 표시와 `noAgent`, 빈 훅 snapshot, 종료용 critical checkpoint 성공을 확인했다. 같은 WSL pane에서 실제 Codex 대화를 resume하면 실행 중으로 감지하고 `/quit` 뒤 셸로 복귀했다. 이어 critical checkpoint가 네 pane 모두 `noAgent`로 commit됐다. 검증 후 전용 종료 스크립트로 dev를 종료하고 격리 설정 루트의 테스트 daemon과 Windows·WSL 임시 인증 사본을 정리했다. 사용자 release 인스턴스와 기본 CLI 설정은 변경하지 않았다.
