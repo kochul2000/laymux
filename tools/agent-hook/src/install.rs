@@ -3,7 +3,10 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
+mod command;
 mod title;
+pub use command::handler;
+use command::OwnedHandlers;
 
 const MAX_CONFIG_BYTES: u64 = 2 * 1024 * 1024;
 pub const EVENTS: &[&str] = &[
@@ -118,26 +121,7 @@ fn helper_path(root: &Path) -> PathBuf {
     })
 }
 
-pub fn handler(root: &Path, provider: &str) -> Result<Value, String> {
-    config_name(provider)?;
-    let executable = helper_path(root);
-    let path = executable.to_str().ok_or("Invalid helper path")?;
-    #[cfg(windows)]
-    let command = {
-        use base64::Engine;
-        let script = format!(
-            "& '{}' emit {provider}",
-            path.replace('/', "\\").replace('\'', "''")
-        );
-        let encoded: Vec<_> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
-        format!("powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand {}", base64::engine::general_purpose::STANDARD.encode(encoded))
-    };
-    #[cfg(not(windows))]
-    let command = format!("'{}' emit {provider}", path.replace('\'', "'\\''"));
-    Ok(json!({"type":"command", "command":command, "timeout":3}))
-}
-
-fn registered(value: &Value, owned: &Value, provider: &str) -> usize {
+fn registered(value: &Value, owned: &OwnedHandlers, provider: &str) -> usize {
     events(provider)
         .iter()
         .filter(|event| {
@@ -150,18 +134,19 @@ fn registered(value: &Value, owned: &Value, provider: &str) -> usize {
                         group
                             .get("hooks")
                             .and_then(Value::as_array)
-                            .is_some_and(|hooks| hooks.iter().any(|h| is_owned(h, owned)))
+                            .is_some_and(|hooks| hooks.iter().any(|h| owned.matches(h)))
                     })
                 })
         })
         .count()
 }
 
-fn is_owned(handler: &Value, owned: &Value) -> bool {
-    handler.get("type") == owned.get("type") && handler.get("command") == owned.get("command")
-}
-
-fn status(root: &Path, provider: &str, value: &Value, owned: &Value) -> Result<Value, String> {
+fn status(
+    root: &Path,
+    provider: &str,
+    value: &Value,
+    owned: &OwnedHandlers,
+) -> Result<Value, String> {
     let count = registered(value, owned, provider);
     let present = helper_path(root).is_file();
     let disabled: Result<bool, String> = if provider == "claude" {
@@ -196,7 +181,12 @@ fn status(root: &Path, provider: &str, value: &Value, owned: &Value) -> Result<V
     )
 }
 
-fn edit(value: &mut Value, owned: &Value, install: bool, provider: &str) -> Result<(), String> {
+fn edit(
+    value: &mut Value,
+    owned: &OwnedHandlers,
+    install: bool,
+    provider: &str,
+) -> Result<(), String> {
     if !install && value.get("hooks").is_none() {
         return Ok(());
     }
@@ -216,7 +206,7 @@ fn edit(value: &mut Value, owned: &Value, install: bool, provider: &str) -> Resu
                 return true;
             };
             let before = handlers.len();
-            handlers.retain(|h| !is_owned(h, owned));
+            handlers.retain(|h| !owned.matches(h));
             handlers.len() == before || !handlers.is_empty()
         });
     }
@@ -227,7 +217,7 @@ fn edit(value: &mut Value, owned: &Value, install: bool, provider: &str) -> Resu
                 .or_insert_with(|| json!([]))
                 .as_array_mut()
                 .ok_or("Hook event must be an array")?;
-            groups.push(json!({"hooks":[owned]}));
+            groups.push(json!({"hooks":[owned.current]}));
         }
     }
     Ok(())
@@ -258,7 +248,7 @@ pub fn manage(
         return Err("Absolute config directory and valid operation required".into());
     }
     let path = root.join(name);
-    let owned = handler(root, provider)?;
+    let owned = OwnedHandlers::new(root, provider)?;
     if operation == "status" || (operation == "remove" && !root.exists()) {
         return status(
             root,

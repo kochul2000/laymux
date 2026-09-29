@@ -35,8 +35,8 @@ test("agent hooks are explicit and isolated by provider and WSL environment", as
           configDir: "/config",
           configPath: "/config/hooks.json",
           installed: installed.has(key),
-          registered: installed.has(key) ? 2 : 0,
-          expected: 2,
+          registered: installed.has(key) ? (request.provider === "codex" ? 10 : 14) : 0,
+          expected: request.provider === "codex" ? 10 : 14,
           helperPresent: installed.has(key),
           disabled: false,
           titleBinding:
@@ -51,6 +51,10 @@ test("agent hooks are explicit and isolated by provider and WSL environment", as
   await page.keyboard.press("Control+,");
   await page.getByTestId("nav-codex").click();
   await expect(page.getByTestId("agent-hooks-install")).toBeEnabled();
+  await expect(page.getByTestId("agent-hooks-install-summary")).toContainText(
+    "10 hooks will be added",
+  );
+  await expect(page.getByTestId("agent-hooks-details")).not.toHaveAttribute("open", "");
   await expect(page.getByTestId("agent-hooks-detection")).toHaveValue("heuristic");
   await page.getByTestId("agent-hooks-detection").selectOption("hooks");
   expect(
@@ -59,6 +63,9 @@ test("agent hooks are explicit and isolated by provider and WSL environment", as
   await page.getByTestId("agent-hooks-environment").selectOption("wsl:Ubuntu");
   await page.getByTestId("agent-hooks-install").click();
   await expect(page.getByTestId("agent-hooks-remove")).toBeEnabled();
+  await expect(page.getByTestId("agent-hooks-install-summary")).toContainText(
+    "10 hooks will be updated without duplicates",
+  );
   await expect(page.getByTestId("agent-hooks-title-status")).toContainText("configured");
   await page.getByTestId("agent-hooks-environment").selectOption("native");
   await expect(page.getByTestId("agent-hooks-install")).toBeEnabled();
@@ -66,6 +73,9 @@ test("agent hooks are explicit and isolated by provider and WSL environment", as
   await expect(page.getByTestId("agent-hooks-title-status")).toContainText("not configured");
   await page.getByTestId("nav-claude").click();
   await expect(page.getByTestId("agent-hooks-title-status")).toHaveCount(0);
+  await expect(page.getByTestId("agent-hooks-install-summary")).toContainText(
+    "14 hooks will be added",
+  );
   await expect(page.getByTestId("agent-hooks-detection")).toHaveValue("heuristic");
   await expect(page.getByTestId("agent-hooks-install")).toBeEnabled();
   await expect(page.getByTestId("agent-hooks-remove")).toBeDisabled();

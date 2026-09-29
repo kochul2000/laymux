@@ -1,6 +1,87 @@
 use super::*;
 use serde_json::json;
 
+#[cfg(windows)]
+#[test]
+fn windows_hook_commands_are_readable_and_old_owned_commands_are_replaced() {
+    use base64::Engine;
+    for provider in ["claude", "codex"] {
+        let (dir, root) = fixture(provider, &json!({}));
+        let source = dir.path().join("helper");
+        let path = helper_path(&root).to_str().unwrap().replace('/', "\\");
+        let script = format!("& '{}' emit {provider}", path.replace('\'', "''"));
+        let bytes: Vec<_> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let legacy = json!({"type":"command", "command":format!("powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand {}", base64::engine::general_purpose::STANDARD.encode(bytes)), "timeout":3});
+        let mut original = json!({"hooks":{}});
+        for event in events(provider) {
+            original["hooks"][event] = json!([{"hooks":[legacy.clone()]}]);
+        }
+        let mut foreign = legacy.clone();
+        foreign["command"] = json!(format!(
+            "{} ; Write-Output user",
+            legacy["command"].as_str().unwrap()
+        ));
+        original["hooks"]["Stop"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"hooks":[foreign.clone()]}));
+        let file = root.join(config_name(provider).unwrap());
+        fs::write(&file, serde_json::to_vec(&original).unwrap()).unwrap();
+        let current = handler(&root, provider).unwrap();
+        let command = current["command"].as_str().unwrap();
+        assert!(!command.contains("EncodedCommand"));
+        assert!(
+            command.contains("laymux-agent-hook.exe")
+                && command.contains(&format!("emit {provider}"))
+        );
+        manage(&root, provider, "install", &source).unwrap();
+        manage(&root, provider, "install", &source).unwrap();
+        let after: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+        for event in events(provider) {
+            let handlers: Vec<_> = after["hooks"][event]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|g| g["hooks"].as_array().unwrap())
+                .collect();
+            assert_eq!(
+                handlers
+                    .iter()
+                    .filter(|h| h["command"] == current["command"])
+                    .count(),
+                1
+            );
+            assert!(!handlers.contains(&&legacy));
+        }
+        manage(&root, provider, "remove", &source).unwrap();
+        let after: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+        assert_eq!(after["hooks"]["Stop"], json!([{"hooks":[foreign]}]));
+        fs::write(&file, serde_json::to_vec(&original).unwrap()).unwrap();
+        manage(&root, provider, "remove", &source).unwrap();
+        let after: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+        assert_eq!(after["hooks"]["SessionStart"], json!([]));
+    }
+}
+
+#[test]
+fn custom_execution_fields_are_not_treated_as_owned_handlers() {
+    let (dir, root) = fixture("codex", &json!({}));
+    let source = dir.path().join("helper");
+    manage(&root, "codex", "install", &source).unwrap();
+    let file = root.join("hooks.json");
+    let mut value: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    let mut custom = handler(&root, "codex").unwrap();
+    custom["args"] = json!(["user-argument"]);
+    value["hooks"]["Stop"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"hooks":[custom.clone()]}));
+    fs::write(&file, serde_json::to_vec(&value).unwrap()).unwrap();
+    manage(&root, "codex", "remove", &source).unwrap();
+    let after: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    assert_eq!(after["hooks"]["Stop"], json!([{"hooks":[custom]}]));
+}
+
 #[test]
 fn codex_title_keeps_comments_inside_the_array_and_does_not_restore_over_new_comments() {
     let (dir, root) = fixture("codex", &json!({}));

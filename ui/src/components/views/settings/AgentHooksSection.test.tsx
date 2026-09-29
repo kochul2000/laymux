@@ -19,12 +19,49 @@ describe("AgentHooksSection", () => {
         configDir: args.request.distro ? "/home/me/.codex" : "C:/Users/me/.codex",
         configPath: "hooks.json",
         installed: args.request.operation === "install",
-        registered: args.request.operation === "install" ? 2 : 0,
-        expected: 2,
+        registered: args.request.operation === "install" ? 10 : 0,
+        expected: 10,
         helperPresent: args.request.operation === "install",
         disabled: false,
       };
     });
+  });
+
+  it("previews added hooks before installation and explains reinstall without duplicates", async () => {
+    render(<AgentHooksSection provider="codex" />);
+    expect(await screen.findByTestId("agent-hooks-install-summary")).toHaveTextContent(
+      "10 hooks will be added",
+    );
+    fireEvent.click(screen.getByTestId("agent-hooks-install"));
+    await waitFor(() =>
+      expect(screen.getByTestId("agent-hooks-install-summary")).toHaveTextContent(
+        "10 hooks will be updated",
+      ),
+    );
+    expect(screen.getByTestId("agent-hooks-install-summary")).toHaveTextContent(
+      "without duplicates",
+    );
+  });
+
+  it("uses backend counts for a partial installation", async () => {
+    invoke.mockImplementation(async (command) => {
+      if (command === "list_agent_hook_environments" || command === "get_agent_hook_connections")
+        return [];
+      return {
+        configDir: "/config",
+        configPath: "/config/settings.json",
+        installed: false,
+        registered: 9,
+        expected: 14,
+        helperPresent: true,
+        disabled: false,
+      };
+    });
+    render(<AgentHooksSection provider="claude" />);
+    expect(await screen.findByTestId("agent-hooks-install-summary")).toHaveTextContent(
+      "5 missing hooks will be added",
+    );
+    expect(screen.getByTestId("agent-hooks-install-summary")).toHaveTextContent("14 total");
   });
 
   it("does not install on mount and installs only the selected environment", async () => {
@@ -72,6 +109,7 @@ describe("AgentHooksSection", () => {
         configPath: "hooks.json",
         installed: false,
         registered: 0,
+        expected: 10,
         helperPresent: false,
         disabled: false,
         titleBinding: { configured: false, managed: true, warning: "User-edited title retained" },

@@ -518,6 +518,8 @@ helper는 생명주기·프롬프트 제출·도구 진행·승인·응답 종�
 
 native Codex의 저장 경로는 실제 TUI 환경에서 조회한다. 공유 서버의 훅 상태는 관리된 제목 연결로 확인하고, 연결이 불가능하면 휴리스틱을 유지한다. 설치나 감지 선택이 사용자의 실행 방식 또는 공유 서버 설정을 자동으로 변경하지 않는다.
 
+훅 명령은 읽을 수 있는 평문으로 설치한다([ADR-0285](../adr/0285-readable-agent-hook-commands.md)). Windows Codex는 cmd 실행 경계를 거치는 `powershell.exe ... -Command`, Windows Claude는 `shell: powershell`과 `& '절대 경로' emit claude`, Linux/WSL은 POSIX 인용 명령을 사용한다. 설치·제거는 현재 설정 경로/provider의 신규 명령 및 정확히 일치하는 이전 EncodedCommand를 식별해 중복 등록을 정리한다. shell·args·commandWindows처럼 실행 의미를 바꾼 사용자 항목은 삭제하지 않는다. Settings는 감지 선택과 환경별 설치 패널을 분리하고 `expected`/`registered`를 기준으로 추가·누락 보완·갱신 개수를 버튼 위에 안내한다. 설치·제거의 즉시 적용 안내는 항상 표시하며 사용자 지정 폴더와 수신 진단은 펼칠 수 있는 상세 영역에 둔다.
+
 Claude Code 관련 동작(sync-cwd 전파, 세션 복원, 셀렉터 상태 메시지 구성, 세션 리미트 자동 복귀)을 제어한다.
 
 ```jsonc

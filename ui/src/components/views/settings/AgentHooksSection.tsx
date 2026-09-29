@@ -119,6 +119,8 @@ export function AgentHooksSection({
       entry.distro === distro &&
       normalizeConfigPath(entry.configDir) === normalizeConfigPath(status?.configDir),
   ).length;
+  const missing = status ? Math.max(0, status.expected - status.registered) : 0;
+  const installed = Boolean(status?.installed);
   return (
     <SettingsGroup title={t("agentHooks.title")}>
       {onStateDetectionChange && (
@@ -137,70 +139,76 @@ export function AgentHooksSection({
           </FocusSelect>
         </SettingsField>
       )}
-      <SettingsField label={t("agentHooks.environment")} desc={t("agentHooks.environmentDesc")}>
-        <FocusSelect
-          data-testid="agent-hooks-environment"
-          aria-label={t("agentHooks.environment")}
-          value={environment}
-          disabled={busy}
-          onChange={(e) => {
-            setEnvironment(e.target.value);
-            setConfigDir("");
-          }}
-        >
-          {environments.length ? (
-            environments.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-              </option>
-            ))
-          ) : (
-            <option value="native">{t("agentHooks.native")}</option>
-          )}
-        </FocusSelect>
-      </SettingsField>
-      <SettingsField
-        label={t("agentHooks.configDir")}
-        desc={t("agentHooks.configDirDesc")}
-        layout="stack"
-      >
-        <FocusInput
-          data-testid="agent-hooks-config-dir"
-          aria-label={t("agentHooks.configDir")}
-          value={configDir}
-          placeholder={status?.configDir || t("agentHooks.defaultDir")}
-          disabled={busy}
-          onChange={(e) => setConfigDir(e.target.value)}
-        />
-      </SettingsField>
-      <SettingsField
-        label={t("agentHooks.connection")}
-        desc={t("agentHooks.optionalDesc")}
-        layout="stack"
-      >
-        <div className="space-y-2" data-testid="agent-hooks-status" aria-live="polite">
-          <p>
-            {status
-              ? t(
-                  status.installed
-                    ? "agentHooks.installed"
-                    : status.registered > 0
-                      ? "agentHooks.partial"
-                      : "agentHooks.notInstalled",
-                )
-              : error
-                ? t("agentHooks.checkFailed")
-                : t("agentHooks.checking")}
-          </p>
-          {status && (
-            <p className="text-[13px] break-all" style={{ color: "var(--text-secondary)" }}>
-              {status.configPath}
+      <div className="settings-field agent-hooks-panel" data-testid="agent-hooks-panel">
+        <div className="agent-hooks-panel__heading">
+          <div>
+            <h4>{t("agentHooks.connection")}</h4>
+            <p className="agent-hooks-muted">{t("agentHooks.environmentDesc")}</p>
+          </div>
+          <label className="agent-hooks-environment">
+            <span>{t("agentHooks.environment")}</span>
+            <FocusSelect
+              data-testid="agent-hooks-environment"
+              aria-label={t("agentHooks.environment")}
+              value={environment}
+              disabled={busy}
+              onChange={(e) => {
+                setEnvironment(e.target.value);
+                setConfigDir("");
+              }}
+            >
+              {environments.length ? (
+                environments.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))
+              ) : (
+                <option value="native">{t("agentHooks.native")}</option>
+              )}
+            </FocusSelect>
+          </label>
+        </div>
+        <div className="agent-hooks-summary" data-testid="agent-hooks-status" aria-live="polite">
+          {configDir && (
+            <p className="agent-hooks-path agent-hooks-muted" data-testid="agent-hooks-target">
+              {configDir}
             </p>
           )}
-          {status?.disabled && <p>{t("agentHooks.disabled")}</p>}
-          {status?.warning && <p className="break-all">{status.warning}</p>}
+          <div className="agent-hooks-status-line">
+            <span
+              className={`agent-hooks-status${installed ? " agent-hooks-status--installed" : ""}`}
+            >
+              {status
+                ? t(
+                    installed
+                      ? "agentHooks.installed"
+                      : status.registered > 0
+                        ? "agentHooks.partial"
+                        : "agentHooks.notInstalled",
+                  )
+                : t(error ? "agentHooks.checkFailed" : "agentHooks.checking")}
+            </span>
+            {status && (
+              <span className="agent-hooks-muted">
+                {t("agentHooks.registered", { count: status.registered, total: status.expected })}
+              </span>
+            )}
+          </div>
+          {status && (
+            <p className="agent-hooks-plan" data-testid="agent-hooks-install-summary">
+              {t(
+                status.registered === 0
+                  ? "agentHooks.addPlan"
+                  : missing > 0
+                    ? "agentHooks.repairPlan"
+                    : "agentHooks.updatePlan",
+                { count: missing > 0 ? missing : status.expected, total: status.expected },
+              )}
+            </p>
+          )}
           {provider === "codex" && status?.titleBinding && (
-            <p data-testid="agent-hooks-title-status">
+            <p className="agent-hooks-muted" data-testid="agent-hooks-title-status">
               {t(
                 status.titleBinding.configured
                   ? "agentHooks.titleConfigured"
@@ -208,42 +216,33 @@ export function AgentHooksSection({
               )}
             </p>
           )}
-          {status?.titleBinding?.warning && (
-            <p className="break-all">{status.titleBinding.warning}</p>
-          )}
           {stateDetection === "hooks" && (
-            <p data-testid="agent-hooks-detection-status">
+            <p className="agent-hooks-muted" data-testid="agent-hooks-detection-status">
               {t("agentHooks.detected", { count: detected })}
             </p>
           )}
-          {provider === "codex" && (
-            <p className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
-              {t("agentHooks.codexDaemon")}
-            </p>
+          {(status?.disabled || status?.warning || status?.titleBinding?.warning || error) && (
+            <div className="agent-hooks-notice" role="alert">
+              {status?.disabled && <p>{t("agentHooks.disabled")}</p>}
+              {status?.warning && <p>{status.warning}</p>}
+              {status?.titleBinding?.warning && <p>{status.titleBinding.warning}</p>}
+              {error && <p>{error}</p>}
+            </div>
           )}
-          {status?.installed && (
-            <p>
-              {observed ? t("agentHooks.received", { count: observed }) : t("agentHooks.waiting")}
-            </p>
-          )}
-          {status?.installed && provider === "codex" && (
-            <p className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
-              {t("agentHooks.codexTrust")}
-            </p>
-          )}
-          {error && (
-            <p role="alert" className="break-all" style={{ color: "var(--red)" }}>
-              {error}
-            </p>
-          )}
-          <div className="flex gap-2 flex-wrap">
+        </div>
+        <div className="agent-hooks-actions">
+          <div className="agent-hooks-actions__buttons">
             <Button
               data-testid="agent-hooks-install"
               variant="primary"
               disabled={busy || !status}
               onClick={() => void change("install")}
             >
-              {t(status?.installed ? "agentHooks.reinstall" : "agentHooks.install")}
+              {t(
+                installed || (status?.registered ?? 0) > 0
+                  ? "agentHooks.reinstall"
+                  : "agentHooks.install",
+              )}
             </Button>
             <Button
               data-testid="agent-hooks-remove"
@@ -264,8 +263,39 @@ export function AgentHooksSection({
               {t("agentHooks.refresh")}
             </Button>
           </div>
+          <p className="agent-hooks-muted">{t("agentHooks.immediate")}</p>
         </div>
-      </SettingsField>
+        <details className="agent-hooks-details" data-testid="agent-hooks-details">
+          <summary>{t("agentHooks.details")}</summary>
+          <div className="agent-hooks-details__body">
+            <label className="agent-hooks-directory">
+              <span>{t("agentHooks.configDir")}</span>
+              <FocusInput
+                data-testid="agent-hooks-config-dir"
+                aria-label={t("agentHooks.configDir")}
+                value={configDir}
+                placeholder={status?.configDir || t("agentHooks.defaultDir")}
+                disabled={busy}
+                onChange={(e) => setConfigDir(e.target.value)}
+              />
+              <span className="agent-hooks-muted">{t("agentHooks.configDirDesc")}</span>
+            </label>
+            {status && <p className="agent-hooks-path">{status.configPath}</p>}
+            <p>{t("agentHooks.optionalDesc")}</p>
+            {status?.installed && (
+              <p>
+                {observed ? t("agentHooks.received", { count: observed }) : t("agentHooks.waiting")}
+              </p>
+            )}
+            {provider === "codex" && (
+              <>
+                <p>{t("agentHooks.codexDaemon")}</p>
+                <p>{t("agentHooks.codexTrust")}</p>
+              </>
+            )}
+          </div>
+        </details>
+      </div>
     </SettingsGroup>
   );
 }
