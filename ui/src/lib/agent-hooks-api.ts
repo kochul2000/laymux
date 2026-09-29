@@ -12,6 +12,7 @@ export interface HookStateSnapshot {
   observedAtMs: number;
   configDir: string | null;
   distro: string | null;
+  bindingSource?: "process" | "title";
 }
 export const getAgentHookStates = (providers: HookProvider[]) =>
   invoke<Record<string, HookStateSnapshot>>("get_agent_hook_states", { providers });
@@ -29,6 +30,7 @@ export interface HookStatus {
   helperPresent: boolean;
   disabled: boolean;
   warning?: string | null;
+  titleBinding?: { configured: boolean; managed: boolean; warning?: string | null } | null;
 }
 export interface HookConnection {
   terminalId: string;

@@ -1,6 +1,101 @@
 use super::*;
 use serde_json::json;
 
+#[test]
+fn codex_title_keeps_comments_inside_the_array_and_does_not_restore_over_new_comments() {
+    let (dir, root) = fixture("codex", &json!({}));
+    let helper = dir.path().join("helper");
+    let config = root.join("config.toml");
+    let original = "[tui]\nterminal_title = [\n  # project context\n  'project',\n  # model context\n  'model',\n]\n";
+    fs::write(&config, original).unwrap();
+    manage(&root, "codex", "install", &helper).unwrap();
+    let installed = fs::read_to_string(&config).unwrap();
+    assert!(installed.contains("# project context"));
+    assert!(installed.contains("# model context"));
+    manage(&root, "codex", "remove", &helper).unwrap();
+    assert_eq!(fs::read_to_string(&config).unwrap(), original);
+    manage(&root, "codex", "install", &helper).unwrap();
+    let edited = fs::read_to_string(&config)
+        .unwrap()
+        .replace("project context", "user updated comment");
+    fs::write(&config, &edited).unwrap();
+    manage(&root, "codex", "remove", &helper).unwrap();
+    assert_eq!(fs::read_to_string(&config).unwrap(), edited);
+}
+
+#[test]
+fn codex_title_install_preserves_user_fields_and_restores_only_owned_value() {
+    let (dir, root) = fixture("codex", &json!({}));
+    let helper = dir.path().join("helper");
+    let config = root.join("config.toml");
+    let original = "# user comment\nmodel = 'gpt-6-sol'\n[tui]\nterminal_title = ['project', 'model'] # keep\nanimations = false\n";
+    fs::write(&config, original).unwrap();
+    let status = manage(&root, "codex", "install", &helper).unwrap();
+    assert_eq!(status["titleBinding"]["configured"], true);
+    let installed = fs::read_to_string(&config).unwrap();
+    let parsed: toml::Value = toml::from_str(&installed).unwrap();
+    assert_eq!(
+        parsed["tui"]["terminal_title"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x.as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["app-name", "thread-id", "project", "model"]
+    );
+    assert!(installed.contains("# user comment"));
+    manage(&root, "codex", "install", &helper).unwrap();
+    fs::write(
+        &config,
+        installed.replace("animations = false", "animations = true"),
+    )
+    .unwrap();
+    manage(&root, "codex", "remove", &helper).unwrap();
+    let restored = fs::read_to_string(&config).unwrap();
+    let parsed: toml::Value = toml::from_str(&restored).unwrap();
+    assert_eq!(parsed["tui"]["terminal_title"].as_array().unwrap().len(), 2);
+    assert_eq!(parsed["tui"]["animations"].as_bool(), Some(true));
+    assert!(restored.contains("# keep"));
+    manage(&root, "codex", "install", &helper).unwrap();
+    fs::write(&config, "[tui]\nterminal_title = ['model']\n").unwrap();
+    let removed = manage(&root, "codex", "remove", &helper).unwrap();
+    assert_eq!(
+        fs::read_to_string(&config).unwrap(),
+        "[tui]\nterminal_title = ['model']\n"
+    );
+    assert!(removed["titleBinding"]["warning"].as_str().is_some());
+}
+
+#[test]
+fn codex_title_missing_default_empty_and_malformed_are_not_silently_overwritten() {
+    for previous in [None, Some("[tui]\nterminal_title = []\n")] {
+        let (dir, root) = fixture("codex", &json!({}));
+        let config = root.join("config.toml");
+        if let Some(text) = previous {
+            fs::write(&config, text).unwrap();
+        }
+        let helper = dir.path().join("helper");
+        manage(&root, "codex", "install", &helper).unwrap();
+        assert_eq!(
+            manage(&root, "codex", "status", &helper).unwrap()["titleBinding"]["configured"],
+            true
+        );
+        manage(&root, "codex", "remove", &helper).unwrap();
+        let parsed: toml::Value = toml::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+        let title = parsed.get("tui").and_then(|v| v.get("terminal_title"));
+        if previous.is_none() {
+            assert!(title.is_none());
+        } else {
+            assert!(title.unwrap().as_array().unwrap().is_empty());
+        }
+    }
+    let (dir, root) = fixture("codex", &json!({}));
+    let config = root.join("config.toml");
+    fs::write(&config, "broken [").unwrap();
+    assert!(manage(&root, "codex", "install", &dir.path().join("helper")).is_err());
+    assert_eq!(fs::read_to_string(&config).unwrap(), "broken [");
+}
+
 fn fixture(provider: &str, value: &Value) -> (tempfile::TempDir, std::path::PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("config space '한글");
@@ -115,8 +210,10 @@ fn respects_codex_disabled_feature_and_repairs_missing_helper() {
         true
     );
     assert_eq!(
-        std::fs::read_to_string(root.join("config.toml")).unwrap(),
-        "[features]\nhooks = false\n"
+        toml::from_str::<toml::Value>(&std::fs::read_to_string(root.join("config.toml")).unwrap())
+            .unwrap()["features"]["hooks"]
+            .as_bool(),
+        Some(false)
     );
 }
 

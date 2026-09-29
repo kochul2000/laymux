@@ -1,6 +1,7 @@
 //! Optional CLI integration. Installation and observations are independent of
 //! heuristic activity; consuming hook state is an explicit settings decision.
 pub mod observations;
+pub mod title;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 

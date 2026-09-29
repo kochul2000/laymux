@@ -90,6 +90,8 @@ pub struct TerminalSession {
     pub(crate) agent_hook_token: String,
     #[serde(skip)]
     pub(crate) agent_hook: Option<laymux_agent_hook::runtime::HookEvent>,
+    #[serde(skip)]
+    pub(crate) codex_hook_title: crate::agent_hooks::title::TitleBinding,
     pub id: String,
     pub title: String,
     pub config: TerminalConfig,
@@ -152,6 +154,7 @@ impl TerminalSession {
         Self {
             agent_hook_token: uuid::Uuid::new_v4().to_string(),
             agent_hook: None,
+            codex_hook_title: Default::default(),
             id,
             title: String::from("Terminal"),
             config,

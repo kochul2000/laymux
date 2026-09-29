@@ -336,6 +336,11 @@ fn apply_exit_transition(
     if !crate::activity::apply_interactive_app_exit(state, terminal_id, app_name, Some(epoch)) {
         return;
     }
+    if app_name == "Codex" {
+        if let Some(session) = terminals.get_mut(terminal_id) {
+            session.codex_hook_title.clear();
+        }
+    }
     let mut message_cleared = false;
     // `claude_*` is Claude's alone; on a Codex exit these fields either belong
     // to a Claude session that took the pane over or hold nothing at all.
