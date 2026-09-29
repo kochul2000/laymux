@@ -2244,6 +2244,7 @@ dependencies = [
  "hmac",
  "if-addrs",
  "keyring",
+ "laymux-agent-hook",
  "png 0.17.16",
  "portable-pty",
  "qrcode",
@@ -2280,6 +2281,18 @@ dependencies = [
  "windows-sys 0.59.0",
  "zeroize",
  "zip 8.6.0",
+]
+
+[[package]]
+name = "laymux-agent-hook"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "tempfile",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]

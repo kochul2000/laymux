@@ -112,6 +112,30 @@
     }
   },
   "settings": {
+    "agentHooks": {
+      "title": "Laymux hooks (optional)",
+      "environment": "Environment",
+      "environmentDesc": "Install or remove independently on Windows and each WSL distribution.",
+      "native": "This computer",
+      "configDir": "Agent configuration directory",
+      "configDirDesc": "For a custom CODEX_HOME or CLAUDE_CONFIG_DIR, enter its absolute path in this environment.",
+      "defaultDir": "Environment default directory",
+      "connection": "Hook installation and connection",
+      "optionalDesc": "Adds only Laymux hooks to the selected environment's user settings and preserves existing hooks. Without hooks, heuristic detection may be inaccurate and restoration information may be lost. Install and remove take effect immediately.",
+      "installed": "Installed",
+      "partial": "Partially installed — reinstall to repair.",
+      "notInstalled": "Not installed · using heuristic detection",
+      "checkFailed": "Could not check installation",
+      "checking": "Checking installation…",
+      "disabled": "The CLI has disabled all hooks. Installation does not change that setting.",
+      "received": "Events received from {{count}} conversations in this environment",
+      "waiting": "No event received · check after starting or resuming a session. Codex may send its start event after the first input.",
+      "codexTrust": "If Codex asks you to trust these hooks, review and allow them. Execution depends on your CLI version and settings.",
+      "install": "Install hooks",
+      "reinstall": "Reinstall",
+      "remove": "Remove hooks",
+      "refresh": "Check again"
+    },
     "common": {
       "reset": "Reset",
       "resetToDefault": "Reset to default",

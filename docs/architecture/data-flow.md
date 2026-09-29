@@ -1532,6 +1532,8 @@ Codex 확인 실패 진단에는 대상 terminal ID를 보존한다. 프론트�
 
 ### 13.6 시작 시퀀스
 
+선택 설치된 Claude·Codex 훅은 [ADR-0282](../adr/0282-optional-agent-hook-installation.md)의 별도 관찰 경로다. PTY 생성 시 `LX_AGENT_HOOK_TOKEN`을 새로 발급하고 CLI가 전달한 `SessionStart`·`SessionEnd`를 `TerminalSession.agent_hook`에 원시 상태로 보관한다. helper는 stdin JSON에서 세션 식별자와 생명주기 메타데이터만 추출해 상속한 Automation host/port로 전송하며 프롬프트·도구 인자·대화 내용은 버린다. 토큰이 다른 이전 PTY, 지연된 다른 세션의 종료, subagent 이벤트는 현재 연결을 바꾸지 않는다. 설치 관리 PR에서는 이 값을 연결 진단에만 사용하고 기존 세션 귀속·체크포인트·활동 판정을 변경하지 않는다. Codex 0.158의 시작 훅은 첫 입력 때 실행될 수 있고 TUI `/quit`은 서버의 세션 종료와 다르므로, 훅 파일 설치나 마지막 이벤트 수신을 현재 pane 실행 상태의 증거로 취급하지 않는다.
+
 ```
 [useSessionPersistence 로드]
     │  settings.json → stores 적용

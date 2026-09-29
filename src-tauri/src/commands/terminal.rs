@@ -338,6 +338,10 @@ pub async fn create_terminal_session(
     let bootstrap_da_reply =
         cfg!(windows).then(|| Arc::new(crate::terminal::TerminalBootstrapDaReplyGuard::armed()));
     let mut session = TerminalSession::new(id.clone(), config);
+    session.config.env.push((
+        laymux_agent_hook::runtime::ENV_TOKEN.into(),
+        session.agent_hook_token.clone(),
+    ));
     session.cwd_send = cwd_send.unwrap_or(true);
     session.cwd_receive = cwd_receive.unwrap_or(true);
 

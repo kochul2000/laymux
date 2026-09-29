@@ -28,6 +28,23 @@ pub async fn api_docs() -> impl IntoResponse {
         "discovery": format!("Fixed port: release={}, dev={}. Discovery file: %APPDATA%/laymux/automation.json (release) or %APPDATA%/laymux-dev/automation.json (dev) on Windows, ~/.config/laymux/ or ~/.config/laymux-dev/ on Linux. Contains port and pid. Also LX_AUTOMATION_PORT env var in spawned terminals.", super::RELEASE_PORT, super::DEV_PORT),
         "endpoints": [
             {
+                "method": "GET", "path": "/api/v1/agent-hooks/environments",
+                "description": "List native host and individually selectable WSL distributions for optional CLI hooks."
+            },
+            {
+                "method": "POST", "path": "/api/v1/agent-hooks/manage",
+                "description": "Inspect, install or remove only Laymux-owned CLI hook handlers in the selected environment.",
+                "body": {"provider":"claude | codex", "operation":"status | install | remove", "distro":"string or null for native", "configDir":"absolute directory or null for environment default"}
+            },
+            {
+                "method": "POST", "path": "/api/v1/agent-hooks/events",
+                "description": "Receive bounded, content-free CLI lifecycle observations with the current PTY identity token. Does not change heuristic detection."
+            },
+            {
+                "method": "GET", "path": "/api/v1/agent-hooks/connections",
+                "description": "Read observed hook sessions without tokens or conversation contents."
+            },
+            {
                 "method": "GET", "path": "/api/v1/health",
                 "description": "Health check plus immutable process/build identity. Dev responses include local executable/worktree paths and branch; release responses redact those fields to null.",
                 "response": "{ status, version, port, instance: { pid, buildKind: 'dev'|'release', executablePath: string|null, worktreeRoot: string|null, gitCommit: string|null, gitBranch: string|null } }"

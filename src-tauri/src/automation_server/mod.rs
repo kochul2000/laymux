@@ -1,3 +1,4 @@
+mod agent_hooks;
 pub mod handlers_backend;
 pub mod handlers_bridge;
 pub mod helpers;
@@ -153,6 +154,16 @@ pub fn build_router(
     let automation_routes = Router::new()
         .route("/api/v1/docs", get(api_docs))
         .route("/api/v1/health", get(health))
+        .route(
+            "/api/v1/agent-hooks/environments",
+            get(agent_hooks::hook_environments),
+        )
+        .route("/api/v1/agent-hooks/manage", post(agent_hooks::hook_manage))
+        .route("/api/v1/agent-hooks/events", post(agent_hooks::hook_event))
+        .route(
+            "/api/v1/agent-hooks/connections",
+            get(agent_hooks::hook_connections),
+        )
         .route("/api/v1/diagnostics/frontend", get(diagnostics_frontend))
         .route("/api/v1/update", get(update_status))
         .route("/api/v1/update/check", post(update_check))

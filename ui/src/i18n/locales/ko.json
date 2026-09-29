@@ -112,6 +112,30 @@
     }
   },
   "settings": {
+    "agentHooks": {
+      "title": "Laymux 훅 연결 (선택)",
+      "environment": "실행 환경",
+      "environmentDesc": "Windows와 각 WSL 배포판에 따로 설치하거나 제거합니다.",
+      "native": "현재 PC",
+      "configDir": "에이전트 설정 폴더",
+      "configDirDesc": "별도 CODEX_HOME 또는 CLAUDE_CONFIG_DIR을 사용하면 해당 환경의 절대 경로를 입력하세요.",
+      "defaultDir": "환경 기본 설정 폴더",
+      "connection": "훅 설치 및 연결",
+      "optionalDesc": "선택한 환경의 사용자 설정에 Laymux 훅만 추가합니다. 기존 훅은 보존하며, 훅을 사용하지 않으면 기존 추정 감지의 부정확성과 복원 정보 손실 가능성이 남습니다. 설치·제거는 즉시 적용됩니다.",
+      "installed": "설치됨",
+      "partial": "일부 항목만 설치됨 — 다시 설치해 복구하세요.",
+      "notInstalled": "미설치 · 기존 추정 감지 사용",
+      "checkFailed": "설치 상태 확인 실패",
+      "checking": "설치 상태 확인 중…",
+      "disabled": "CLI 설정에서 전체 훅이 비활성화되어 있습니다. 설치해도 이 설정은 바꾸지 않습니다.",
+      "received": "이 환경의 대화 {{count}}개에서 이벤트 수신",
+      "waiting": "이벤트 미수신 · 새 세션 또는 resume 후 확인하세요. Codex는 첫 입력 후 시작 이벤트가 올 수 있습니다.",
+      "codexTrust": "Codex에서 훅 신뢰 확인이 나타나면 내용을 확인해 허용하세요. CLI 버전·설정에 따라 훅이 실행되지 않을 수 있습니다.",
+      "install": "훅 설치",
+      "reinstall": "다시 설치",
+      "remove": "훅 제거",
+      "refresh": "다시 확인"
+    },
     "common": {
       "reset": "초기화",
       "resetToDefault": "기본값으로 초기화",

@@ -1,0 +1,72 @@
+import { test, expect } from "./fixtures";
+
+test("agent hooks are explicit and isolated by provider and WSL environment", async ({
+  appPage: page,
+}) => {
+  await page.evaluate(() => {
+    const host = window as unknown as {
+      __TAURI_INTERNALS__: {
+        invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
+      };
+      hookWrites: unknown[];
+    };
+    const original = host.__TAURI_INTERNALS__.invoke;
+    const installed = new Set<string>();
+    host.hookWrites = [];
+    host.__TAURI_INTERNALS__.invoke = async (command, args) => {
+      if (command === "list_agent_hook_environments")
+        return [
+          { id: "native", label: "Windows", distro: null },
+          { id: "wsl:Ubuntu", label: "WSL · Ubuntu", distro: "Ubuntu" },
+        ];
+      if (command === "get_agent_hook_connections") return [];
+      if (command === "manage_agent_hooks") {
+        const request = args?.request as {
+          provider: string;
+          operation: string;
+          distro: string | null;
+          configDir: string | null;
+        };
+        const key = JSON.stringify([request.provider, request.distro, request.configDir]);
+        if (request.operation !== "status") host.hookWrites.push(request);
+        if (request.operation === "install") installed.add(key);
+        if (request.operation === "remove") installed.delete(key);
+        return {
+          configDir: "/config",
+          configPath: "/config/hooks.json",
+          installed: installed.has(key),
+          registered: installed.has(key) ? 2 : 0,
+          expected: 2,
+          helperPresent: installed.has(key),
+          disabled: false,
+        };
+      }
+      return original(command, args);
+    };
+  });
+  await page.keyboard.press("Control+,");
+  await page.getByTestId("nav-codex").click();
+  await expect(page.getByTestId("agent-hooks-install")).toBeEnabled();
+  expect(
+    await page.evaluate(() => (window as unknown as { hookWrites: unknown[] }).hookWrites),
+  ).toEqual([]);
+  await page.getByTestId("agent-hooks-environment").selectOption("wsl:Ubuntu");
+  await page.getByTestId("agent-hooks-install").click();
+  await expect(page.getByTestId("agent-hooks-remove")).toBeEnabled();
+  await page.getByTestId("agent-hooks-environment").selectOption("native");
+  await expect(page.getByTestId("agent-hooks-install")).toBeEnabled();
+  await expect(page.getByTestId("agent-hooks-remove")).toBeDisabled();
+  await page.getByTestId("nav-claude").click();
+  await expect(page.getByTestId("agent-hooks-install")).toBeEnabled();
+  await expect(page.getByTestId("agent-hooks-remove")).toBeDisabled();
+  await page.getByTestId("nav-codex").click();
+  await page.getByTestId("agent-hooks-environment").selectOption("wsl:Ubuntu");
+  await page.getByTestId("agent-hooks-remove").click();
+  await expect(page.getByTestId("agent-hooks-remove")).toBeDisabled();
+  expect(
+    await page.evaluate(() => (window as unknown as { hookWrites: unknown[] }).hookWrites),
+  ).toEqual([
+    { provider: "codex", operation: "install", distro: "Ubuntu", configDir: null },
+    { provider: "codex", operation: "remove", distro: "Ubuntu", configDir: null },
+  ]);
+});

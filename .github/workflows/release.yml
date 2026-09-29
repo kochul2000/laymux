@@ -199,12 +199,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Test and build static WSL companion
         run: |
-          cargo test --locked -p laymux-wsl-codex-probe
+          cargo test --locked -p laymux-wsl-codex-probe -p laymux-agent-hook
           bash scripts/build-wsl-probe.sh
       - uses: actions/upload-artifact@v4
         with:
           name: wsl-codex-probe
-          path: src-tauri/gen/wsl/laymux-wsl-codex-probe
+          path: |
+            src-tauri/gen/wsl/laymux-wsl-codex-probe
+            src-tauri/gen/wsl/laymux-agent-hook
           if-no-files-found: error
 
   build:

@@ -188,6 +188,10 @@ pub struct HealthInstanceIdentity {
 pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("GET", "/api/v1/docs"),
     ("GET", "/api/v1/health"),
+    ("GET", "/api/v1/agent-hooks/environments"),
+    ("POST", "/api/v1/agent-hooks/manage"),
+    ("POST", "/api/v1/agent-hooks/events"),
+    ("GET", "/api/v1/agent-hooks/connections"),
     ("GET", "/api/v1/diagnostics/frontend"),
     ("GET", "/api/v1/update"),
     ("POST", "/api/v1/update/check"),

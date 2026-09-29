@@ -508,6 +508,12 @@ html/markdown preview는 별도 문서(iframe)라 부모 페이지의 CSS를 상
 
 ### Claude Code 설정
 
+선택형 생명주기 훅은 [ADR-0282](../adr/0282-optional-agent-hook-installation.md)를 따른다. Settings의 Claude·Codex 페이지에서 native와 각 WSL 배포판의 설정 폴더를 선택해 설치 상태를 조회하고 즉시 설치·제거한다. 실제 CLI 설정 파일이 설치 상태의 정본이며 Laymux 설정 저장과 독립이다. 전용 helper는 기존 사용자 훅을 보존하며, 설치 여부와 현재 세션의 이벤트 수신 여부를 구분한다. 미설치 환경은 기존 휴리스틱을 유지한다. 상태 감지에서 훅을 사용하는 선택 설정은 별도 변경으로 제공한다.
+
+관리 API는 `GET /api/v1/agent-hooks/environments`, `POST /api/v1/agent-hooks/manage {provider, operation, distro?, configDir?}`다. provider는 `claude|codex`, operation은 `status|install|remove`, distro 미지정은 native이며 configDir 미지정은 해당 환경의 `CODEX_HOME`/`CLAUDE_CONFIG_DIR` 또는 사용자 홈의 기본 폴더다. 반환 `data`에는 설정 경로, 등록 이벤트 수, helper 존재 여부, 설치 완료 여부, CLI 전체 비활성 여부, 보조 설정 조회 경고가 포함된다. 손상된 훅 JSON은 수정하지 않으며 Codex 보조 `config.toml` 조회 실패는 경고로 표시해 훅 제거를 막지 않는다. 같은 관리 동작은 `list_agent_hook_environments`, `manage_agent_hooks` IPC로 제공하고 파일·프로세스 I/O는 메인 스레드 밖에서 실행한다.
+
+helper는 `SessionStart`/`SessionEnd` 메타데이터를 `POST /api/v1/agent-hooks/events`로 전송한다. 현재 PTY 토큰, provider·session ID·이벤트 스키마, 30초 수신 기한을 확인하며 다른 대화의 늦은 종료·subagent 이벤트를 반영하지 않는다. `GET /api/v1/agent-hooks/connections` 및 `get_agent_hook_connections`는 토큰·대화 내용 없이 pane별 마지막 관찰을 반환한다. 이는 연결 진단용 과거 관찰이며 현재 CLI 생존·복원 가능성의 보장이 아니다. CLI 설정 파일의 기존 내용은 변경 직전 백업하고 원자 교체하며 제거 시 다른 handler와 사용자 파일·백업을 남긴다.
+
 Claude Code 관련 동작(sync-cwd 전파, 세션 복원, 셀렉터 상태 메시지 구성, 세션 리미트 자동 복귀)을 제어한다.
 
 ```jsonc

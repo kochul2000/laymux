@@ -2,6 +2,7 @@
 pub mod activity;
 pub mod activity_order;
 pub mod activity_reconcile;
+pub mod agent_hooks;
 pub mod android_e2e;
 pub mod android_pairing;
 pub mod app_update;
@@ -295,6 +296,9 @@ pub fn run() {
             commands::complete_codex_status_checkpoint,
             commands::get_sync_group_terminals,
             commands::handle_lx_message,
+            commands::list_agent_hook_environments,
+            commands::manage_agent_hooks,
+            commands::get_agent_hook_connections,
             commands::list_system_monospace_fonts,
             commands::load_settings,
             commands::save_settings,

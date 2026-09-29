@@ -16,6 +16,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src/conpty_runtime.rs");
     emit_build_metadata();
     stage_wsl_probe();
+    stage_agent_hooks();
 
     // tauri_build 가 resources 경로를 검증하므로 스테이징이 먼저 끝나야 한다.
     if stage_conpty_runtime() {
@@ -40,6 +41,31 @@ fn stage_wsl_probe() {
         .expect("cargo profile directory")
         .join("laymux-wsl-codex-probe");
     copy_runtime_file(&source, &destination).expect("stage bundled WSL probe");
+}
+
+fn stage_agent_hooks() {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let windows = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows");
+    let file = if windows {
+        "laymux-agent-hook.exe"
+    } else {
+        "laymux-agent-hook"
+    };
+    let mut copies = vec![(manifest.join("gen/agent-hook").join(file), file)];
+    if windows {
+        copies.push((
+            manifest.join("gen/wsl/laymux-agent-hook"),
+            "laymux-agent-hook-wsl",
+        ));
+    }
+    for (source, name) in copies {
+        println!("cargo:rerun-if-changed={}", source.display());
+        assert!(source.is_file(), "missing agent hook helper {}; run node scripts/build-agent-hook.mjs and bash scripts/build-wsl-probe.sh (WSL)", source.display());
+        let destination = cargo_target_profile_dir()
+            .expect("cargo profile directory")
+            .join(name);
+        copy_runtime_file(&source, &destination).expect("stage agent hook helper");
+    }
 }
 
 /// Inject immutable source identity without invoking `git` (and therefore
