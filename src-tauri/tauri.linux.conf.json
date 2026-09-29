@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "resources": {
+      "gen/agent-hook/laymux-agent-hook": "laymux-agent-hook"
+    }
+  }
+}

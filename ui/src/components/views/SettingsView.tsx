@@ -11,6 +11,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { AgentHooksSection } from "./settings/AgentHooksSection";
 import { useUiStore } from "@/stores/ui-store";
 import {
   useSettingsStore,
@@ -2916,6 +2917,7 @@ function ClaudeSection() {
   return (
     <div className="settings-page">
       <SettingsPageTitle>{t("claude.title")}</SettingsPageTitle>
+      <AgentHooksSection provider="claude" />
 
       <SettingsGroup title={t("claude.groupSyncCwd")}>
         {/* Sync CWD mode */}
@@ -3131,6 +3133,7 @@ function CodexSection() {
   return (
     <div className="settings-page">
       <SettingsPageTitle>{t("codex.title")}</SettingsPageTitle>
+      <AgentHooksSection provider="codex" />
 
       <SettingsGroup title={t("codex.groupSessionRestore")}>
         {/* Launch command (flags land here, e.g. --yolo) */}

@@ -9,7 +9,9 @@
     "resources": {
       "gen/conpty/conpty.dll": "conpty.dll",
       "gen/conpty/OpenConsole.exe": "OpenConsole.exe",
-      "gen/wsl/laymux-wsl-codex-probe": "laymux-wsl-codex-probe"
+      "gen/wsl/laymux-wsl-codex-probe": "laymux-wsl-codex-probe",
+      "gen/wsl/laymux-agent-hook": "laymux-agent-hook-wsl",
+      "gen/agent-hook/laymux-agent-hook.exe": "laymux-agent-hook.exe"
     }
   }
 }

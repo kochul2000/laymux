@@ -299,6 +299,7 @@ ADR 이 필요한 대표 기준:
 | [0279](0279-lifecycle-explicit-loss-override.md) | 종료·업데이트 준비 실패는 명시적 손실 동의로 건너뛸 수 있다 (0222·0264 확장) | Proposed |
 | [0280](0280-codex-app-server-process-role.md) | Codex app-server는 native·WSL 대화 프로세스 후보에서 제외한다 | Accepted |
 | [0281](0281-release-version-change-level.md) | 릴리스 버전은 변경의 호환성과 기능 추가 여부로 결정한다 | Proposed |
+| [0282](0282-optional-agent-hook-installation.md) | 에이전트 훅은 실행 환경별 선택 설치로 관리한다 | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

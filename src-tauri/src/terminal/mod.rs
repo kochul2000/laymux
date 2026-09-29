@@ -85,6 +85,11 @@ pub struct TerminalNotification {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TerminalSession {
+    /// PTY incarnation marker; never restored from persisted session data.
+    #[serde(skip)]
+    pub(crate) agent_hook_token: String,
+    #[serde(skip)]
+    pub(crate) agent_hook: Option<laymux_agent_hook::runtime::HookEvent>,
     pub id: String,
     pub title: String,
     pub config: TerminalConfig,
@@ -145,6 +150,8 @@ fn default_true() -> bool {
 impl TerminalSession {
     pub fn new(id: String, config: TerminalConfig) -> Self {
         Self {
+            agent_hook_token: uuid::Uuid::new_v4().to_string(),
+            agent_hook: None,
             id,
             title: String::from("Terminal"),
             config,
