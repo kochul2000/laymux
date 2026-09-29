@@ -1,6 +1,6 @@
 # 0284. Codex 공유 서버의 훅은 현재 TUI 제목의 대화 식별자로 연결한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-29
 - Source: 사용자 요구(제목을 통한 공유 서버 지원), [ADR-0283](0283-opt-in-hook-task-state.md), [훅 검증](../agent-hooks-validation.md)
 - 관계: ADR-0283의 공유 서버 미지원 결정을 대체한다. 원시 상태 분리·기본 휴리스틱·종료 체크포인트 계약은 유지한다.

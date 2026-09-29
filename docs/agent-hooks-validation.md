@@ -50,3 +50,29 @@ Codex에서 훅 우선 ↔ 휴리스틱을 전환하고 실제 표시 출처가 
 Windows UI 단위 5,210개, xterm 셀 94개, Rust workspace 2,381개(17개 ignored)가 통과했다. 이후 Windows 경로 구분자를 바꿔 조회·재설치·제거하는 helper 회귀 1개를 추가해 native helper 11개가 통과했다. WSL helper 10개, TypeScript·변경 UI ESLint·workspace clippy도 통과했다. Settings의 선택 컨트롤, 감지 중인 pane 수, 미확인 시 기존 감지 안내와 Codex 공유 서버 제한을 dev Automation 캡처와 실제 WebView 캡처로 확인했다.
 
 전체 E2E는 최종 508개 모두 통과했고 release 프로파일 check도 통과했다. 초기 E2E 실행은 dev 종료 뒤 테스트용 웹 서버를 재기동하지 않아 `ERR_CONNECTION_REFUSED`가 발생하는 등 100개가 실패했다. 테스트 실행 설정에 웹 서버 기동을 복구한 뒤 전체를 다시 검증했으며 최종 결과에 초기 실패를 합산하거나 성공으로 간주하지 않았다.
+
+## Codex 공유 서버의 제목 연결 (2026-09-29)
+
+설계: [ADR-0284](adr/0284-codex-title-hook-binding.md). 위의 공유 서버 미지원 결과는 v1.1.0 기준이다. 이번 변경은 관리되는 제목의 대화 식별자를 훅 전체 ID에 연결하여 해당 환경을 지원한다. 종료 체크포인트와 디스크 복원점 검증은 그대로 유지한다.
+
+격리 dev(19281)에 Windows PowerShell 2개와 WSL Ubuntu-22.04 2개 pane을 동시에 띄웠다. 각 환경의 두 TUI는 같은 설정 루트와 공유 서버를 사용했다. TUI는 Codex 0.158.0이고, 격리 루트에서 자동 갱신된 서버의 보고 버전은 0.159.0이다. 기본 사용자 설정과 release 인스턴스는 변경하지 않았다.
+
+| 검증 | Windows 공유 서버 | WSL 공유 서버 |
+| --- | --- | --- |
+| 설치·제거·재설치와 제목 설정 상태 | 통과 | 통과 |
+| 같은 서버의 서로 다른 두 대화에 훅 상태 연결 | 통과 | 통과 |
+| 실제 작업 중 → 응답 종료 | 통과 | 통과 |
+| 승인 대기 → 승인 입력 → 작업 재개 → 응답 종료 | 이벤트·제목 단위 테스트 | 실제 CLI에서 통과 |
+| `/new` 뒤 이전 훅 상태 폐기 및 새 대화 연결 | 통과 | 통과 |
+| 다른 pane에서 이전 대화를 교차 resume | 통과 | 통과 |
+| 훅 제거 시 휴리스틱 복귀, 재설치 뒤 연결 복구 | 통과 | 통과 |
+| 훅 우선 ↔ 휴리스틱 선택 및 검증 유효 시간 이후 재연결 | 통과 | 통과 |
+| `/quit` 뒤 셸 복귀 및 훅 snapshot 제거 | 통과 | 통과 |
+
+원시 훅이 서버를 처음 띄운 pane ID를 유지해도 최종 snapshot의 전체 대화 ID는 각 현재 TUI와 일치했다. 일반 세션 귀속은 `activeButUnidentified`를 유지하며, 훅 snapshot의 `bindingSource: title`과 UI의 `taskDetectionSource: hooks`를 함께 확인했다. 제목만으로 정확한 세션 귀속·복원 계약을 넓히지 않는다. Settings의 제목 연결 상태, 감지 pane 수, 재설치·제거 버튼과 안내는 Automation API 캡처와 실제 WebView 캡처로 확인했다.
+
+자동 검증은 UI 단위 5,211개, xterm 셀 94개, 관련 E2E 8개, Rust workspace 2,390개(17개 ignored), native helper 14개와 WSL helper 13개가 통과했다. 마지막 registry 오류 전파 정리 후 해당 Rust 테스트 12개를 다시 실행했다. TypeScript·변경 UI ESLint·workspace clippy `-D warnings`도 통과했다. 이 변경에서 전체 E2E 508개를 다시 실행한 것은 아니다.
+
+검증 중 발견한 Codex spinner 뒤 공백으로 이어지는 프로젝트 제목과 reconcile의 중복 락을 회귀 테스트로 고쳤다. 설치·제거 테스트는 사용자 제목 항목·주석 보존, 사용자가 설치 뒤 수정한 값 보존, 부분 실패 복구도 포함한다. 최초 병렬 Rust 링크는 Windows 페이징 파일 부족과 실행 중 dev 바이너리 잠금으로 실패하여 dev 종료 후 `-j 1`로 재실행했다. 최초 감지 방식 전환 검사는 입력 후 고정 대기만 두어 훅 선택을 확인하지 못했으며, 실제 수신을 확인한 뒤 유효 시간 만료를 포함해 다시 검증했다. 검증 후 격리 dev·테스트 서버를 종료하고 임시 인증 사본을 제거했다.
+
+미검증 Codex 버전이나 다른 WSL 배포판까지 성공을 보장하지 않는다. 제목 형식 변경·접두부 충돌·설치 해제·관찰 만료·TUI 종료는 훅 연결을 거부하고 기존 감지로 돌아간다.
