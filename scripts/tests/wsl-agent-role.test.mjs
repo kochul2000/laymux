@@ -145,6 +145,52 @@ test('Chrome helper만 남으면 Claude liveness를 유지하지 않는다', () 
   assertRole(attributionRows(entries), 30, '1');
 });
 
+test('더 얕은 Claude daemon이 실제 Codex TUI를 가리지 않는다', () => {
+  const entries = [
+    ...ancestorFixtures(),
+    processFixture(30, 10, 'claude', ['/home/test/.local/bin/claude', 'daemon']),
+    processFixture(20, 11, 'codex', ['codex', '--yolo', '--no-daemon']),
+  ];
+  assert.deepEqual(livePids(entries), [20]);
+  const rows = attributionRows(entries);
+  assertRole(rows, 20, '0');
+  assertRole(rows, 30, '1');
+});
+
+test('Claude daemon만 남으면 대화 liveness를 유지하지 않는다', () => {
+  const entries = [...ancestorFixtures(), processFixture(30, 10, 'claude', ['claude', 'daemon'])];
+  assert.deepEqual(livePids(entries), []);
+  assertRole(attributionRows(entries), 30, '1');
+});
+
+test('Claude daemon을 경유하는 실제 대화 자손은 보존한다', () => {
+  const entries = [
+    ...ancestorFixtures(),
+    processFixture(30, 10, 'claude', ['claude', 'daemon', 'start']),
+    processFixture(40, 30, 'bash'),
+    processFixture(50, 40, 'claude', ['claude', '--resume', 'conversation']),
+  ];
+  assert.deepEqual(livePids(entries), [50]);
+  const rows = attributionRows(entries);
+  assertRole(rows, 30, '1');
+  assertRole(rows, 50, '0');
+  assert.equal(rows.find((row) => row[2] === '40')[3], '30');
+});
+
+for (const args of [
+  ['claude', 'daemon-extra'],
+  ['claude', 'daemon\nnot-a-role'],
+  ['claude', '-p', 'daemon'],
+  ['claude', '--', 'daemon'],
+  ['claude', '--resume', 'daemon'],
+]) {
+  test(`daemon 역할이 아닌 Claude 인자는 유지: ${JSON.stringify(args)}`, () => {
+    const entries = [...ancestorFixtures(), processFixture(20, 11, 'claude', args)];
+    assert.deepEqual(livePids(entries), [20]);
+    assertRole(attributionRows(entries), 20, '0');
+  });
+}
+
 test('Codex TUI 종료 뒤 남은 app-server 두 개는 대화가 아니다', () => {
   const entries = [
     ...ancestorFixtures(),

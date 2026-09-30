@@ -96,3 +96,13 @@ Windows UI 단위 5,210개, xterm 셀 94개, Rust workspace 2,381개(17개 ignor
 실제 프로덕션 sh 스크립트를 WSL에서 실행하는 회귀 테스트 33개가 통과했다. 수정 전 새 종료 상태 6개가 실패하는 것을 먼저 확인했다. Codex·Claude·Grok, 좀비·종료·실행·sleep·I/O 대기·정지·추적·상태 필드 부재·유사 문자열, 부모 marker, 실제 대화와 helper 공존을 포함한다. 관련 Rust 111개(기존 ignored 9개), clippy `-D warnings`, fmt도 통과했다.
 
 격리 dev 19281에서 원인이던 좀비 PID를 그대로 둔 채 네 pane의 셸 표시와 `noAgent`, 빈 훅 snapshot, 종료용 critical checkpoint 성공을 확인했다. 같은 WSL pane에서 실제 Codex 대화를 resume하면 실행 중으로 감지하고 `/quit` 뒤 셸로 복귀했다. 이어 critical checkpoint가 네 pane 모두 `noAgent`로 commit됐다. 검증 후 전용 종료 스크립트로 dev를 종료하고 격리 설정 루트의 테스트 daemon과 Windows·WSL 임시 인증 사본을 정리했다. 사용자 release 인스턴스와 기본 CLI 설정은 변경하지 않았다.
+
+## WSL Claude daemon이 Codex를 가리는 오탐 회귀 (2026-09-30)
+
+설계: [ADR-0287](adr/0287-wsl-claude-daemon-process-role.md). 사용자가 지정한 `lx:pane:ai-inference:2`의 v1.2.1 release를 읽기 전용으로 확인했다. Codex 0.159.2 TUI는 실제 PTY에서 살아 있었지만 같은 pane marker를 가진 `claude daemon`이 더 얕은 조상 깊이로 남아 있었다. daemon은 stdin/stdout이 `/dev/null`이며, 기존 liveness가 이를 대화 Claude로 선택하여 표시와 Codex 훅 연결을 거부했다. 사용자 pane에는 입력하거나 프로세스를 종료하지 않았다.
+
+수정 전 프로덕션 게스트 프로브 회귀 3개가 실패했고, 수정 후 전체 41개가 통과했다. daemon 단독·더 얕은 daemon과 Codex 공존·daemon을 경유하는 실제 대화 자손, 부분 문자열·개행·프롬프트·옵션 종료·resume 인자를 검증했다. 변경한 liveness와 귀속 프로브를 실제 실패 pane에 읽기 전용으로 실행하면 daemon은 helper이고 Codex만 대화 후보로 남는다.
+
+수정한 dev 19281에서 5분 뒤 자동 종료하는 별도 `claude daemon` 역할 픽스처와 실제 WSL Codex 0.159.2를 같은 pane에 띄웠다. daemon이 더 얕아도 Codex를 감지했고 실제 입력의 훅을 수신했다. hooks 선택에서 Ctrl+L 후 Codex와 훅 기반 응답 종료 상태가 유지됐다. Alt+L의 `/clear`는 새 대화 ID로 전환하며 Codex 표시를 유지했고, 새 대화 상태 이벤트가 없으면 기존 감지로 돌아갔다. `/quit` 후 daemon이 살아 있어도 shell로 복귀했다. 실제 WebView 캡처와 UI 원시 상태를 함께 확인했다. 별도 픽스처를 실제 Claude daemon 실행 성공으로 주장하지 않는다.
+
+Rust liveness 15개·WSL 세션 귀속 18개·프로세스 트리 28개, dev 바이너리 빌드와 workspace fmt가 통과했다. UI 구현은 변경하지 않았다. native daemon 역할이나 미관측 Claude 실행 모드는 범위 밖이다.

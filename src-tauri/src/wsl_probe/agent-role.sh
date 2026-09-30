@@ -28,6 +28,18 @@ laymux_is_claude_chrome_host() {
   [ "$laymux_claude_mode" = '--chrome-native-host' ]
 }
 
+# Claude's supervisor can retain the pane marker after detaching from its TUI.
+# Only the observed daemon entry mode proves this is a service, not a dialogue.
+laymux_is_claude_daemon() {
+  case "$2" in
+    [cC][lL][aA][uU][dD][eE]|[cC][lL][aA][uU][dD][eE].[eE][xX][eE]) ;;
+    *) return 1 ;;
+  esac
+  [ -r "$1/cmdline" ] || return 1
+  laymux_claude_daemon_mode=$(LC_ALL=C tr '\000\n' '\n\001' < "$1/cmdline" 2>/dev/null | sed -n '2p')
+  [ "$laymux_claude_daemon_mode" = 'daemon' ]
+}
+
 # A daemon can retain LX_TERMINAL_ID after its TUI returns to the shell.
 # Only an exact argv[1] proves the observed server role; unknown modes remain
 # candidates, including when cmdline is unreadable.
@@ -42,5 +54,5 @@ laymux_is_codex_app_server() {
 }
 
 laymux_is_agent_helper() {
-  laymux_is_claude_chrome_host "$1" "$2" || laymux_is_codex_app_server "$1" "$2"
+  laymux_is_claude_chrome_host "$1" "$2" || laymux_is_claude_daemon "$1" "$2" || laymux_is_codex_app_server "$1" "$2"
 }
