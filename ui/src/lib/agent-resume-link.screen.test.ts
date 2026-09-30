@@ -33,9 +33,21 @@ it.each(["codex resume", "claude --resume", "grok --resume"])(
     expect(link.text).toBe(`${command} ${id}`);
     expect(link.range.start).toEqual({ x: 3, y: 2 });
     link.activate(new MouseEvent("click"), link.text);
-    expect(activate).toHaveBeenCalledWith({ provider: command.split(" ")[0], sessionId: id });
+    expect(activate).toHaveBeenCalledWith(
+      { provider: command.split(" ")[0], sessionId: id },
+      expect.any(Function),
+    );
   },
 );
+
+it("비동기 작업 뒤에도 클릭 당시 셀의 유효성을 확인할 수 있다", async () => {
+  const { s, links, activate } = await setup(`codex resume ${id}`);
+  links(1)[0].activate(new MouseEvent("click"), "");
+  const isCurrent = activate.mock.calls[0][1];
+  expect(isCurrent()).toBe(true);
+  await s.write("\r\x1b[2Kchanged");
+  expect(isCurrent()).toBe(false);
+});
 
 it("좁은 pane에서 ID가 자동 줄바꿈되면 모든 물리 줄에서 같은 링크를 찾는다", async () => {
   const { links } = await setup(`  claude --resume ${id}`, 24);

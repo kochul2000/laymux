@@ -69,7 +69,7 @@ function readHint(terminal: Terminal, bufferLine: number) {
 
 export function createAgentResumeLinkProvider(
   terminal: Terminal,
-  onResume: (hint: AgentResumeHint) => void,
+  onResume: (hint: AgentResumeHint, isCurrent: () => boolean) => void,
 ): ILinkProvider {
   return {
     provideLinks(bufferLine, callback) {
@@ -80,22 +80,25 @@ export function createAgentResumeLinkProvider(
       }
       const buffer = terminal.buffer.active;
       const cols = terminal.cols;
+      const isCurrent = () => {
+        if (terminal.buffer.active !== buffer || terminal.cols !== cols) return false;
+        const current = readHint(terminal, bufferLine);
+        if (
+          !current ||
+          current.text !== found.text ||
+          current.range.start.x !== found.range.start.x ||
+          current.range.start.y !== found.range.start.y ||
+          current.range.end.x !== found.range.end.x ||
+          current.range.end.y !== found.range.end.y
+        )
+          return false;
+        return true;
+      };
       const link: ILink = {
         text: found.text,
         range: found.range,
         activate: () => {
-          if (terminal.buffer.active !== buffer || terminal.cols !== cols) return;
-          const current = readHint(terminal, bufferLine);
-          if (
-            !current ||
-            current.text !== found.text ||
-            current.range.start.x !== found.range.start.x ||
-            current.range.start.y !== found.range.start.y ||
-            current.range.end.x !== found.range.end.x ||
-            current.range.end.y !== found.range.end.y
-          )
-            return;
-          onResume(current.hint);
+          if (isCurrent()) onResume(found.hint, isCurrent);
         },
       };
       callback([link]);

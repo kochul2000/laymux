@@ -1,13 +1,13 @@
 # 0286. 종료 안내의 복원 링크는 설정 명령으로 같은 셸에서 수동 실행한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-30
 - Source: 사용자 요구(CLI 종료 안내 클릭으로 Windows·WSL 세션 재진입), [ADR-0125](0125-configurable-agent-launch-command.md), [api-contracts.md 에이전트 실행 명령](../architecture/api-contracts.md)
 - Relationship: ADR-0125의 복원 명령 소유권을 명시적 사용자 클릭으로 확장한다. 자동 복원 귀속 정책은 변경하지 않는다.
 
 ## Context
 
-Codex와 Claude는 종료할 때 세션 복원 명령을 출력하지만 사용자는 이를 복사해 옵션을 다시 붙여야 한다. 이미 설정에 복원용 실행 명령과 옵션이 있다. 출력 문자열 자체는 신뢰할 수 없고, Windows와 WSL의 서로 다른 세션 저장소·CWD를 유지해야 한다. 이번 범위는 데스크톱 터미널의 명시적 클릭이며 Remote 표면과 자동 세션 귀속 변경은 포함하지 않는다.
+Codex와 Claude는 종료할 때 세션 복원 명령을 출력하지만 사용자는 이를 복사해 옵션을 다시 붙여야 한다. 이미 설정에 복원용 실행 명령과 옵션이 있다. 출력 문자열 자체는 신뢰할 수 없고, Windows와 WSL의 서로 다른 세션 저장소·CWD를 유지해야 한다. 사용자 검증 후 Remote에서도 같은 기능을 요구했다. 범위는 데스크톱과 Remote의 명시적 클릭이며 자동 세션 귀속 변경은 포함하지 않는다.
 
 ## Decision
 
@@ -17,6 +17,8 @@ Codex와 Claude는 종료할 때 세션 복원 명령을 출력하지만 사용�
 - 설정이 실행 옵션의 단일 진실원이다. 클릭 순간 ADR-0125의 정규화 함수로 실행 명령을 도출한다. 원문 명령이나 원문의 옵션은 제출하지 않는다. 자동 복원 설정 `restoreSession`은 수동 클릭을 제한하지 않는다.
 - 클릭 순간 동일한 셀 범위와 원문, buffer 종류·폭을 다시 확인한다. 로컬 제어권과 출력 준비가 있고 셸 상태인 경우에만 기존 `write_terminal_input` 경로로 한 번 제출한다. 진행 중인 제출의 중복 클릭은 무시하고 실패 시 알림을 남긴다. 재전송은 하지 않는다.
 - 기존 터미널의 셸·프로필·CWD를 사용한다. Windows·WSL 사이에 경로나 세션 ID를 이동시키지 않으며 새 PTY를 만들지 않는다. 수동으로 선택한 ID를 자동 귀속·세션 영속의 증거로 저장하지 않는다.
+- Remote는 같은 셀 파서와 링크 provider를 번들에 포함한다. 인증된 기존 navigation 응답의 `agentCommands`로 호스트 설정을 전달하고 클릭 시 다시 조회한다. Remote 기기에는 실행 명령 설정을 영속하지 않는다. 기존 입력 FIFO에서 조회와 제출을 순서화하며 lease·terminal·출력 generation·출력 준비·셸 상태·셀 유효성을 조회 전후 검사한다. 제출은 기존 lease 검증과 구조화 `/input` 경로를 사용하고 재전송하지 않는다. 이 추가 metadata는 기존 Remote/Android wire와 호환된다.
+- Remote의 기존 터치 이벤트 브리지는 탭할 때 인접 행과 실제 셀의 mousemove를 순서대로 합성해 xterm의 같은 셀·행 hover 캐시를 갱신한다. 그 후 기존 mousedown→mouseup 실행과 mouseleave 해제를 사용한다. 같은 좌표의 새 안내도 최신 셀을 검증하며 사설 xterm 상태를 수정하지 않는다.
 
 ## Alternatives Considered
 

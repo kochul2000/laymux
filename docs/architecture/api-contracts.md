@@ -620,7 +620,7 @@ Grok Build 관련 동작(세션 복원, 셀렉터 상태 메시지 구성)을 �
 
 프론트는 이 값으로 `<command> --resume <id>` / `<command> resume <id>` / `<command> --resume <uuid>` 를 만들어 `startupCommandOverride` 로 보내고, Rust 는 **디스크의 settings 에서 접두어를 다시 도출해** 그 형태와만 대조한다 — 호출자가 보낸 문자열에서 접두어를 추출하지 않으므로 사용자가 설정하지 않은 플래그는 통과하지 못한다. Claude는 `--resume`, Codex는 서브커맨드 `resume`, Grok는 플래그 `--resume`이며 Grok `<id>`는 하이픈 포함 UUID만 허용한다. 적용 시점은 `nextUse`(다음 자동 복원 또는 수동 복원 클릭)이며, 실행 중인 pane 의 명령은 바뀌지 않는다. 공백이 들어간 실행 파일 경로는 인용 문법을 두지 않아 지원하지 않는다. 이 설정은 세션 복원 경로에만 쓰이며 pane 신규 시작을 자동 기동하지 않는다.
 
-데스크톱의 종료 안내 복원 링크([ADR-0286](../adr/0286-clickable-agent-resume-hints.md))는 `codex resume <uuid>`, `claude --resume <uuid>`, `grok --resume <uuid>` 정형 줄에서 종류·UUID만 추출한다. 클릭 시 현재 `command`를 정규화해 옵션과 복원 인자를 조합하고 같은 셸에 `write_terminal_input`으로 제출한다. `restoreSession` 토글은 자동 복원에만 적용한다. 이 수동 입력은 새 PTY나 자동 세션 귀속을 만들지 않으며 기존 로컬 제어권·입력 fence를 따른다. Remote 표면은 이 복원 링크를 제공하지 않는다.
+종료 안내 복원 링크([ADR-0286](../adr/0286-clickable-agent-resume-hints.md))는 `codex resume <uuid>`, `claude --resume <uuid>`, `grok --resume <uuid>` 정형 줄에서 종류·UUID만 추출한다. 클릭 시 현재 `command`를 정규화해 옵션과 복원 인자를 조합하고 같은 셸에 `write_terminal_input`으로 제출한다. `restoreSession` 토글은 자동 복원에만 적용한다. 이 수동 입력은 새 PTY나 자동 세션 귀속을 만들지 않으며 기존 제어권·입력 fence를 따른다. Remote도 같은 파서를 번들에 포함하고 클릭 시 호스트 navigation 설정을 다시 조회한 뒤 기존 lease 전용 `/input`으로 제출한다. 조회 전후 terminal·lease·출력 generation·준비 상태·셸 상태·셀 유효성을 확인하며 실패를 자동 재전송하지 않는다.
 
 metadata apply mode는 `/codex/transcriptScrollEnabled`·`/codex/statusMessageMode`·`/codex/statusMessageDelimiter`가 부모 `/codex`의 `live`를 따르고, `/grok/statusMessageMode`와 `/grok/statusMessageDelimiter`는 부모 `/grok`의 `live`를 따른다. `/codex/restoreSession`·`/codex/sessionMaxAgeHours`·`/grok/restoreSession`·`/grok/sessionMaxAgeHours`·`/claude/command`·`/codex/command`·`/grok/command`는 `nextUse`다. transcript 스크롤은 데스크톱의 다음 휠 이벤트와 Remote의 다음 navigation snapshot부터, `restoreSession`은 다음 terminal 생성부터, 최대 나이는 다음 세션 ID 수집부터 적용된다.
 
@@ -1521,6 +1521,8 @@ PC WebView는 `remote-control-changed` Tauri event를 받아 local input overlay
 ### 13.3 Navigation Metadata
 
 `GET /remote/v1/navigation`의 최상위 `codexTranscriptScrollEnabled`는 호스트 `codex.transcriptScrollEnabled`의 현재 boolean 투영이며 Remote의 normal-buffer Codex transcript 휠·터치 라우팅을 gate한다([ADR-0218](../adr/0218-codex-transcript-pointer-scroll-toggle.md)).
+
+최상위 `agentCommands`는 `{claude:{command:string}, codex:{command:string}, grok:{command:string}}`으로 호스트의 현재 실행 명령 설정을 전달한다([ADR-0286](../adr/0286-clickable-agent-resume-hints.md)). Remote의 수동 복원 링크는 입력 FIFO 안에서 navigation을 다시 조회하고 공유 정규화 함수로 명령을 조립한다. 미지원 호스트에서 이 필드가 없으면 제출하지 않는다. 새 endpoint나 Android wire 버전 변경은 없다.
 
 최상위 `keybindings`는 호스트 `settings.json`의 `keybindings` 재정의 배열(`[{keys, command}]`)을 그대로 싣는다. 기본값은 싣지 않는다 — Remote 번들이 PC와 같은 `ui/src/lib/keybinding-core.ts`를 포함하므로 기본값과 매칭 규칙이 한 벌이다([ADR-0269](../adr/0269-remote-physical-keyboard-shortcuts.md)).
 

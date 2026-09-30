@@ -48,6 +48,9 @@ describe("remote page bundle", () => {
     expect(banner).toContain(
       `// Keyboard-SHA256: ${fileHash(path.resolve(__dirname, "remote-keyboard.js"))}`,
     );
+    expect(banner).toContain(
+      `// Resume-SHA256: ${["remote/remote-agent-resume.ts", "lib/agent-resume-link.ts", "lib/agent-command.ts"].map((file) => `${file}=${fileHash(path.resolve(__dirname, "..", file))}`).join(" ")}`,
+    );
     expect(stamp).toBe(
       `// Source-SHA256: remote-app.js=${sourceHash("remote-app.js")}` +
         ` remote-app.css=${sourceHash("remote-app.css")}` +

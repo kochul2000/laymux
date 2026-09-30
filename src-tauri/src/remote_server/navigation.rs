@@ -27,6 +27,8 @@ pub(super) struct RemoteNavigationHostState<'a> {
     /// 사용자 키바인딩 재정의(`settings.json` `keybindings`). 기본값은 Remote
     /// 번들이 공유 키바인딩 코어에서 가진다(ADR-0269).
     pub keybindings: &'a [Keybinding],
+    /// ADR-0286: 호스트 실행 명령의 설정이 정본이다.
+    pub agent_commands: [&'a str; 3],
 }
 
 pub(super) fn build_remote_navigation_payload(
@@ -171,6 +173,11 @@ pub(super) fn build_remote_navigation_payload(
         "urlLinkActivation": host_state.url_link_activation,
         "pathLinkActivation": host_state.path_link_activation,
         "keybindings": host_state.keybindings,
+        "agentCommands": {
+            "claude": { "command": host_state.agent_commands[0] },
+            "codex": { "command": host_state.agent_commands[1] },
+            "grok": { "command": host_state.agent_commands[2] },
+        },
         "unreadNotificationCount": unread_count(notifications, None, None),
     })
 }
@@ -832,6 +839,7 @@ mod tests {
             url_link_activation: "immediate",
             path_link_activation: "immediate",
             keybindings: &[],
+            agent_commands: ["claude", "codex", "grok"],
         }
     }
 
@@ -975,11 +983,24 @@ mod tests {
                 url_link_activation: "chip",
                 path_link_activation: "immediate",
                 keybindings: &keybindings,
+                agent_commands: [
+                    "claude --dangerously-skip-permissions",
+                    "codex --yolo --no-daemon",
+                    "grok --yolo",
+                ],
             },
         );
 
         assert_eq!(payload["activeWorkspaceId"], "ws-1");
         assert_eq!(payload["codexTranscriptScrollEnabled"], false);
+        assert_eq!(
+            payload["agentCommands"],
+            json!({
+                "claude": { "command": "claude --dangerously-skip-permissions" },
+                "codex": { "command": "codex --yolo --no-daemon" },
+                "grok": { "command": "grok --yolo" },
+            })
+        );
         // ADR-0224: 두 키는 독립이므로 payload 도 따로 실린다.
         assert_eq!(payload["urlLinkActivation"], "chip");
         assert_eq!(payload["pathLinkActivation"], "immediate");

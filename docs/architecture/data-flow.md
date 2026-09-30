@@ -82,6 +82,12 @@
 
 ### CLI 종료 안내의 수동 복원 링크
 
+Remote는 `remote-agent-resume.ts`로 같은 링크 provider를 등록한다. 클릭 시 pending을 설정하고 기존 `inputWriteChain`에 작업을 추가한다. navigation을 다시 조회해 호스트의 `agentCommands`와 셸 상태를 읽은 후, terminal·lease·출력 generation·출력 준비·셀 유효성을 다시 확인하고 기존 구조화 `/input`에 제출한다. 기기에는 명령 설정을 저장하지 않는다. 미지원 metadata·pane 전환·출력 재연결·제어권 상실이면 제출하지 않으며 실패 시 상태 오류를 표시하고 자동 재전송하지 않는다.
+
+Remote `activateTouchLink`는 인접 행의 mousemove→실제 탭 셀의 mousemove→mousedown→mouseup→mouseleave를 합성한다. xterm이 같은 셀·행에 남긴 hover cache를 공개 이벤트 경로로 다시 조회하게 하므로 화면이 교체된 같은 좌표의 연속 탭도 최신 링크를 실행한다. 이동 지점은 screen grid 안의 다른 행으로 계산하며 xterm의 사설 상태는 수정하지 않는다.
+
+`node scripts/verify-remote-agent-resume-links.mjs`와 `--narrow --touch`는 dev의 실제 Remote 번들을 Edge에서 열어 PowerShell·WSL 세 provider의 마우스 클릭/좁은 화면 터치 → 설정 옵션·UUID·CWD·단일 제출을 검증한다. 터치는 사전 mouse hover 없이 실행한다. 하네스가 취득한 lease만 자발적으로 반납하고 호스트의 설정·런타임 Remote 상태·workspace를 개별 정리 단계로 복구하며 결과와 스크린샷을 `.screenshots/remote-agent-resume-links/`에 저장한다.
+
 `agent-resume-link.ts`의 xterm 추가 링크 provider는 normal buffer의 정형 `codex resume <uuid>`·`claude --resume <uuid>`·`grok --resume <uuid>` 줄을 읽는다([ADR-0286](../adr/0286-clickable-agent-resume-hints.md)). ANSI가 제거된 셀과 좌표를 함께 읽고 최대 16개 물리 줄·512문자 안에서 자동 wrap만 결합한다. 실제 개행은 명령 경계이며 옵션이나 셸 문자가 추가된 줄은 링크가 아니다. 클릭 직전에 원문·범위·buffer·폭을 다시 확인한다. `TerminalView`는 셸 상태·출력 준비·로컬 제어권을 확인하고 현재 provider.command 설정을 기존 정규화 함수로 조립해 같은 terminal에 한 번 제출한다. 제출 중 중복 클릭을 막고 실패를 알리며 자동 재시도하지 않는다. 이 ID는 자동 복원 checkpoint 증거로 사용하지 않는다. 실제 클릭 검증은 기존 API로 셸 출력 준비 → dev WebView 포인터 클릭 → 출력 조회·스크린샷으로 수행한다.
 
 Windows dev에서 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9339`와 dev 전용 `WEBVIEW2_USER_DATA_FOLDER`를 지정해 실행한 뒤 `node scripts/verify-agent-resume-links.mjs` 및 `node scripts/verify-agent-resume-links.mjs --narrow`로 PowerShell·WSL의 실제 클릭을 검증한다. 하네스는 health의 워크트리·dev 신원을 확인하고 별도 검증 workspace에서 셸 함수로 세 provider의 인자·CWD·제출 횟수를 기록한다. 런타임 명령 설정만 잠시 교체하고 종료 시 설정·workspace·viewport를 복구하며 `.screenshots/agent-resume-links/`에 결과와 hover 스크린샷을 남긴다. 실제 CLI의 인증·업데이트·훅 검토 화면은 이 결정적 하네스와 별도로 확인한다. Grok의 정형 명령은 지원하지만 CLI가 종료 안내를 출력하지 않는 버전에서는 링크가 생기지 않는다.
