@@ -1,6 +1,18 @@
 import { render, screen, act, fireEvent, cleanup } from "@testing-library/react";
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { TerminalView } from "./TerminalView";
+import type { AgentResumeHint } from "@/lib/agent-resume-link";
+const mockCreateAgentResumeLinkProvider = vi.fn();
+vi.mock("@/lib/agent-resume-link", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/agent-resume-link")>();
+  return {
+    ...actual,
+    createAgentResumeLinkProvider: (...args: unknown[]) => {
+      mockCreateAgentResumeLinkProvider(...args);
+      return { provideLinks: vi.fn() };
+    },
+  };
+});
 import { acquireCheckpointGeometry } from "@/lib/terminal-checkpoint-geometry";
 import { setTerminalOutputV3RuntimeLoaderForTest } from "@/lib/terminal-output-v3-runtime-loader";
 import {
@@ -873,6 +885,111 @@ describe("TerminalView", () => {
   it("renders terminal container", () => {
     render(<TerminalView instanceId="t1" profile="PowerShell" syncGroup="default" />);
     expect(screen.getByTestId("terminal-view-t1")).toBeInTheDocument();
+  });
+
+  it("복원 링크는 클릭 시점의 옵션을 같은 셸에 한 번 제출한다", async () => {
+    render(<TerminalView instanceId="t-resume-link" profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => {
+      useTerminalStore
+        .getState()
+        .updateInstanceInfo("t-resume-link", { activity: { type: "shell" } });
+      useSettingsStore.setState({
+        codex: {
+          ...useSettingsStore.getState().codex,
+          command: "codex --yolo --no-daemon",
+          restoreSession: false,
+        },
+      });
+    });
+    const resume = mockCreateAgentResumeLinkProvider.mock.calls.at(-1)![1] as (
+      hint: AgentResumeHint,
+    ) => void;
+    const hint: AgentResumeHint = {
+      provider: "codex",
+      sessionId: "01a0ed7f-460f-74d0-bfca-2fa6b336a8a5",
+    };
+    let settle!: () => void;
+    mockWriteTerminalInput.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        settle = resolve;
+      }),
+    );
+    resume(hint);
+    resume(hint);
+    expect(mockWriteTerminalInput).toHaveBeenCalledTimes(1);
+    expect(mockWriteTerminalInput).toHaveBeenCalledWith(
+      "t-resume-link",
+      `codex --yolo --no-daemon resume ${hint.sessionId}`,
+      true,
+    );
+    await act(async () => {
+      settle();
+    });
+  });
+
+  it("실행 중인 앱의 과거 복원 안내는 셸 입력으로 보내지 않는다", async () => {
+    render(<TerminalView instanceId="t-resume-running" profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+    act(() =>
+      useTerminalStore.getState().updateInstanceInfo("t-resume-running", {
+        activity: { type: "interactiveApp", name: "Claude" },
+      }),
+    );
+    const resume = mockCreateAgentResumeLinkProvider.mock.calls.at(-1)![1] as (
+      hint: AgentResumeHint,
+    ) => void;
+    resume({ provider: "claude", sessionId: "ed8cbb69-9497-4b6c-89ed-b42a48f1197d" });
+    expect(mockWriteTerminalInput).not.toHaveBeenCalled();
+  });
+
+  it("원격 제어권이 있으면 복원 링크 입력을 제출하지 않는다", async () => {
+    render(<TerminalView instanceId="t-resume-remote" profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+    act(() => {
+      useTerminalStore
+        .getState()
+        .updateInstanceInfo("t-resume-remote", { activity: { type: "shell" } });
+      capturedRemoteControlChanged?.({ active: true });
+    });
+    const resume = mockCreateAgentResumeLinkProvider.mock.calls.at(-1)![1] as (
+      hint: AgentResumeHint,
+    ) => void;
+    resume({ provider: "codex", sessionId: "01a0ed7f-460f-74d0-bfca-2fa6b336a8a5" });
+    expect(mockWriteTerminalInput).not.toHaveBeenCalled();
+  });
+
+  it("복원 입력 실패를 알리고 자동 재전송하지 않는다", async () => {
+    render(<TerminalView instanceId="t-resume-failed" profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() =>
+      useTerminalStore
+        .getState()
+        .updateInstanceInfo("t-resume-failed", { activity: { type: "shell" } }),
+    );
+    mockWriteTerminalInput.mockRejectedValueOnce(new Error("write rejected"));
+    const resume = mockCreateAgentResumeLinkProvider.mock.calls.at(-1)![1] as (
+      hint: AgentResumeHint,
+    ) => void;
+    await act(async () => {
+      resume({ provider: "claude", sessionId: "ed8cbb69-9497-4b6c-89ed-b42a48f1197d" });
+    });
+    expect(mockWriteTerminalInput).toHaveBeenCalledTimes(1);
+    expect(useNotificationStore.getState().notifications).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          terminalId: "t-resume-failed",
+          level: "error",
+          requiresAction: true,
+        }),
+      ]),
+    );
   });
 
   // Harness self-check for the stream attach reset gate (issue #603). Every test

@@ -131,6 +131,11 @@ pub(super) async fn remote_navigation(State(server): State<ServerState>) -> Resp
             url_link_activation: &settings.terminal.url_link_activation,
             path_link_activation: &settings.terminal.path_link_activation,
             keybindings: &settings.keybindings,
+            agent_commands: [
+                &settings.claude.command,
+                &settings.codex.command,
+                &settings.grok.command,
+            ],
         },
     ))
     .into_response()

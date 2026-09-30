@@ -18,6 +18,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { createIndentedLinkProvider, readIndentedLine } from "@/lib/indented-link-provider";
 import type { IndentedLineInfo } from "@/lib/indented-link-provider";
 import { createPrLinkProvider } from "@/lib/pr-link-provider";
+import { buildAgentResumeCommand, createAgentResumeLinkProvider } from "@/lib/agent-resume-link";
 import {
   DEFAULT_FAST_SCROLL_SENSITIVITY,
   DEFAULT_SCROLL_SENSITIVITY,
@@ -1440,6 +1441,35 @@ export function TerminalView({
     };
     if (paneId) registerTerminalScroller(paneId, scrollViewport);
     registerTerminalScroller(instanceId, scrollViewport);
+
+    let resumeSubmissionPending = false;
+    terminal.registerLinkProvider(
+      createAgentResumeLinkProvider(terminal, (hint) => {
+        const instance = useTerminalStore
+          .getState()
+          .instances.find((item) => item.id === instanceId);
+        if (
+          cancelled ||
+          resumeSubmissionPending ||
+          !localControlAvailableRef.current ||
+          !outputProtocolReadyRef.current ||
+          instance?.activity?.type !== "shell"
+        )
+          return;
+        const command = buildAgentResumeCommand(hint, useSettingsStore.getState());
+        if (!command) return;
+        resumeSubmissionPending = true;
+        terminal.focus();
+        writeTerminalInput(instanceId, command, true)
+          .catch((error) => {
+            console.warn("[TerminalView] session resume failed:", error);
+            notifyHumanInputDeliveryFailure();
+          })
+          .finally(() => {
+            resumeSubmissionPending = false;
+          });
+      }),
+    );
 
     // Additional link provider for hard-wrapped indented URLs (e.g. Claude Code OAuth).
     // Always registered; checks smartLinkJoin dynamically so setting changes apply immediately.

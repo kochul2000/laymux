@@ -8,6 +8,7 @@ import {
 } from "../../../../ui/src/remote/remote-keyboard.js";
 import { installRemoteToolSwipes, nextRemoteTool, normalizeToolSwipeRightAction } from "../../../../ui/src/remote/remote-tool-swipe.js";
 import { createComposerEditor } from "../../../../ui/src/remote/composer-editor.js";
+import { createRemoteAgentResumeLinkProvider } from "../../../../ui/src/remote/remote-agent-resume.ts";
 import { isShellOwnedCombo, keybindingMatchesEvent, resolveKeybindingFrom } from "../../../../ui/src/lib/keybinding-core.ts";
 import { readPathLinkSelection, readPathLinkLines, mapPathLinkParts, pathLinkPartsCurrent, PATH_LINK_CONTEXT_ROWS } from "../../../../ui/src/lib/path-link-lines.ts";
 import {
@@ -5642,6 +5643,18 @@ import {
           const linkElement = element.querySelector(".xterm-screen");
           if (!linkElement) return false;
           const forceSelection = shouldForceTouchSelection(term);
+          // 같은 셀의 다음 탭은 xterm hover cache를 그대로 사용한다.
+          // 인접 행을 먼저 조회하여 오래된 line cache를 공개 이벤트로 비운다.
+          const screen = linkElement.getBoundingClientRect();
+          if (term.rows > 1 && screen.height > 0) {
+            const cellHeight = screen.height / term.rows;
+            const row = Math.max(0, Math.min(term.rows - 1, Math.floor((point.clientY - screen.top) / cellHeight)));
+            const neighbor = row === 0 ? 1 : row - 1;
+            dispatchTouchSelectionMouse(linkElement, "mousemove", {
+              ...point,
+              clientY: screen.top + (neighbor + 0.5) * cellHeight,
+            }, forceSelection, 0, 0);
+          }
           // xterm discovers both OSC 8 and provider links on mousemove, then
           // requires the same active link across mousedown -> mouseup. Touch
           // pointers do not emit those compatibility events because this
@@ -6536,6 +6549,28 @@ import {
           // Link providers are additive. Keep the Remote terminal usable when
           // a minimal or older xterm surface does not expose this optional API.
           if (typeof terminal.registerLinkProvider === "function") {
+            terminal.registerLinkProvider(createRemoteAgentResumeLinkProvider(terminal, {
+              getContext: () => ({
+                terminalId: activeTerminalId,
+                leaseId,
+                outputEpoch: terminalOutputGeneration,
+                ready: composerReady && terminalReplayDepth === 0 && navMovePending === 0 && socket?.readyState === 1,
+                isShell: activeTerminalContext()?.info.activity?.type === "shell" && !activeTerminalContext()?.info.commandRunning,
+              }),
+              run: (task) => {
+                flushPendingInput();
+                const operation = inputWriteChain.catch(() => {}).then(task);
+                inputWriteChain = operation.catch(() => {});
+                return operation;
+              },
+              loadCommands: async (context) => {
+                const data = await remoteFetch("/remote/v1/navigation");
+                const info = data.terminals?.find((info) => info.id === context.terminalId);
+                return { commands: data.agentCommands, isShell: info?.activity?.type === "shell" && !info.commandRunning };
+              },
+              submit: (context, command) => writeTerminalInput(context.terminalId, context.leaseId, command, true),
+              onError: (error) => setStatus(`Resume failed: ${error.message || error}`, true),
+            }));
             terminal.registerLinkProvider(createRemotePrLinkProvider(terminal));
           }
           terminal.open(terminalSizer);
