@@ -1,5 +1,5 @@
 // dev 전용 Remote 페이지의 실제 클릭 → 호스트 PTY 검증.
-// 실행: node scripts/verify-remote-agent-resume-links.mjs [--narrow]
+// 실행: node scripts/verify-remote-agent-resume-links.mjs [--narrow] [--touch]
 import { chromium } from "../ui/node_modules/playwright-core/index.mjs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -115,6 +115,8 @@ try {
       hasTouch: touch,
     });
     await context.addInitScript(() => {
+      // 실기 PTY 검증은 직접 입력 표면을 사용한다. Composer는 실제 xterm E2E에서 검증한다.
+      localStorage.setItem("laymux.remote.inputMode", "direct");
       let Constructor;
       Object.defineProperty(window, "Terminal", {
         configurable: true,
