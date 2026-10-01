@@ -1,6 +1,6 @@
 # 0287. WSL Claude daemon은 대화 프로세스 후보에서 제외한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-30
 - Source: 사용자 보고(`lx:pane:ai-inference:2`, 화면 클리어 후 실행 중 Codex가 shell로 표시), 해당 pane 읽기 전용 `/proc` 검사, Claude Code `daemon --help`, [data-flow §9](../architecture/data-flow.md)
 - Extends: [ADR-0253](0253-wsl-claude-chrome-helper-role.md), [ADR-0280](0280-codex-app-server-process-role.md)의 명시적 보조 역할 검사
