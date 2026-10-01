@@ -43,7 +43,8 @@ function hardWrapIndent(previous: BufferLineLike, next: BufferLineLike): number 
   if (!/[\\/]/.test(token) || /[.,;:)\]}]$/.test(token)) return null;
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(token)) return null;
   if (!/^[^\s"'`()<>[\]{}|/\\]/.test(continuation)) return null;
-  if (/^[A-Za-z]:|^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(continuation)) return null;
+  // 드라이브·홈 상대경로(`~/`, ADR-0288)·URL 로 시작하면 새 경로다.
+  if (/^[A-Za-z]:|^~(?:[\\/]|$)|^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(continuation)) return null;
   if (/\.[A-Za-z][A-Za-z0-9_-]{0,15}$/.test(token)) return null;
   if (!/^[^\s]*[\\/.]/.test(continuation)) return null;
   return nextIndent;

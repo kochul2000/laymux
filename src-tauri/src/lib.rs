@@ -342,6 +342,7 @@ pub fn run() {
             commands::stat_path,
             commands::stat_paths,
             commands::get_home_directory,
+            commands::get_terminal_home_directory,
             commands::get_automation_info,
             commands::load_settings_validated,
             commands::acknowledge_settings_recovery,

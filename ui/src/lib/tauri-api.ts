@@ -1480,6 +1480,15 @@ export async function getHomeDirectory(): Promise<string> {
   return invoke("get_home_directory");
 }
 
+/**
+ * The directory a pane's shell means by `~` (ADR-0288): the Linux `$HOME` for a
+ * WSL pane, the host home otherwise. `null` when it lives elsewhere (direct SSH)
+ * or cannot be resolved.
+ */
+export async function getTerminalHomeDirectory(terminalId: string): Promise<string | null> {
+  return invoke("get_terminal_home_directory", { terminalId });
+}
+
 /** Read a file and classify it for the file viewer. */
 export async function readFileForViewer(
   path: string,

@@ -3,8 +3,9 @@
  *
  * 트리거는 세 가지 — 데스크톱의 hover dwell, 이동 없는 클릭, Remote 의 단일 탭
  * (Remote 는 host bridge 를 거쳐 같은 파서를 쓴다). 어느 쪽이든 **포인터 아래
- * 지점을 덮는 상수 개 후보**(maximal token 1 + 공백 확장 접두 ≤ 8, ADR-0191)만
- * 만들어 트리거당 `stat_paths` 를 정확히 배치 1건으로 묶는다. 과거 hover 발견이
+ * 지점을 덮는 상수 개 후보**(maximal token 1 과 그 한글 꼬리 변형, 지점을 덮는
+ * 공백 확장 접두와 그 변형 — ADR-0191·0288, 배치 상한 64 이내)만 만들어
+ * 트리거당 `stat_paths` 를 정확히 배치 1건으로 묶는다. 과거 hover 발견이
  * 제거된 이유는 트리거가 아니라 "줄 전체 토큰마다 조회"였다(ADR-0148 Context)
  * — 그 실패 모드를 다시 만들지 않는 것이 이 모듈의 계약이다.
  *
@@ -15,8 +16,9 @@
 import {
   decidePathLinkAction,
   extractPathCandidatesAtOffset,
-  joinCwdPath,
+  needsPathLinkHome,
   pathPointLimits,
+  planPathLinkStat,
   resolveOverlappingRanges,
 } from "./path-link-detect";
 import type { VerifiedPathSelection } from "./path-link-provider";
@@ -39,6 +41,8 @@ export interface PathLinkPointDeps {
   getSettings: () => { enabled: boolean; maxPathLength: number };
   /** pane 의 현재 cwd(상대경로 조합용). */
   getCwd: () => string | undefined;
+  /** pane 셸의 홈(`~` 조합용, ADR-0288). `~` 후보가 있을 때만 부른다. 모르면 null. */
+  getHome: () => Promise<string | null>;
   /** 화면 좌표 → 1-based 컬럼 + 0-based 절대 버퍼 라인. 실패하면 null. */
   resolveCell: (clientX: number, clientY: number) => { col: number; absoluteLine: number } | null;
   /** 0-based 절대 버퍼 라인의 셀과 wrap 정보. 없으면 undefined. */
@@ -75,6 +79,9 @@ export function createPathLinkPointEvaluator(deps: PathLinkPointDeps): PathLinkP
   // 지금 stat 이 도는 중인 지점. 같은 지점의 중복 배치를 막는다.
   let pendingKey: string | null = null;
   let revision = 0;
+  // 홈 조회를 시작한 평가의 순번. 조회가 겹치면 마지막에 시작한 평가만 이어간다
+  // (revision 은 stat 시작에만 오르므로 먼저 끝난 앞 평가를 막지 못한다).
+  let homeSeq = 0;
 
   // 표시를 비우는 것은 진행 중 조회도 무의미하게 만든다(포인터가 다른 곳으로
   // 갔거나 기능이 꺼졌다) → revision 을 올려 늦은 결과를 버린다.
@@ -140,19 +147,16 @@ export function createPathLinkPointEvaluator(deps: PathLinkPointDeps): PathLinkP
         return;
       }
       const cwd = deps.getCwd();
-      const uniquePaths: string[] = [];
-      const pathIndexes = new Map<string, number>();
-      const pending = candidates.flatMap((candidate) => {
-        const absPath = joinCwdPath(cwd, candidate.text);
-        if (!absPath) return [];
-        let statIndex = pathIndexes.get(absPath);
-        if (statIndex === undefined) {
-          statIndex = uniquePaths.length;
-          pathIndexes.set(absPath, statIndex);
-          uniquePaths.push(absPath);
-        }
-        return [{ candidate, absPath, statIndex }];
-      });
+      let home: string | null = null;
+      if (needsPathLinkHome(candidates)) {
+        // 조회 중 끼어든 사건(invalidate·다른 지점의 조회 시작·더 늦은 홈 조회)이
+        // 있으면 이 평가는 무의미하다.
+        const before = revision;
+        const ticket = ++homeSeq;
+        home = await deps.getHome().catch(() => null);
+        if (revision !== before || ticket !== homeSeq) return;
+      }
+      const { uniquePaths, pending } = planPathLinkStat(candidates, cwd, home);
       if (pending.length === 0) {
         clearPoint();
         return;

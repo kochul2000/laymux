@@ -26,6 +26,13 @@ const FILE_EXTENSION_RE = /\.[A-Za-z][A-Za-z0-9_-]{0,15}$/;
 /** Markdown/file-link 계열이 만드는 `/C:/...` 형태의 Windows 드라이브 경로. */
 const SLASH_PREFIXED_WINDOWS_DRIVE_RE = /^\/[A-Za-z]:[\\/]/;
 
+/**
+ * 경로 바로 뒤에 띄어쓰기 없이 붙은 한글 조사·어미(`메모.docx다`, `/tmp/abc에`).
+ * 바로 앞 글자가 한글·공백·구분자가 아닐 때만 꼬리로 본다 — `보고서에` 처럼
+ * 한글 이름에 이어진 한글이나 `dir/한글` 은 이름 자체일 수 있다.
+ */
+const HANGUL_TAIL_RE = /[^\s\\/\uAC00-\uD7A3]([\uAC00-\uD7A3]+)$/;
+
 export const PATH_LINK_MAX_SELECTION_LENGTH = 1024;
 export const PATH_LINK_MAX_SELECTION_LINES = 8;
 export const PATH_LINK_MAX_CANDIDATES = 16;
@@ -111,6 +118,14 @@ export function isAbsolutePath(path: string): boolean {
 }
 
 /**
+ * 홈 상대경로 판별: `~` 단독 또는 `~/`·`~\` 로 시작(ADR-0288). `~user` 는 다루지
+ * 않는다. cwd 가 아니라 pane 셸의 홈에 붙으므로 절대경로처럼 위치가 정해진다.
+ */
+export function isHomeRelativePath(path: string): boolean {
+  return path === "~" || path.startsWith("~/") || path.startsWith("~\\");
+}
+
+/**
  * 토큰에서 경로가 아닌 장식을 떼어낸다.
  * - `:line` 또는 `:line:col`(grep/컴파일러 스타일)와 그 뒤의 문장 접미사를 제거.
  * - 후행 문장부호(`.,;:` 등) 제거.
@@ -159,6 +174,19 @@ function trimPathTail(raw: string): string {
 }
 
 /**
+ * 끝에 붙은 한글 조사·어미를 떼고 꼬리를 다시 정리한 변형(ADR-0288). 뗄 것이
+ * 없으면 null. 원문 후보를 대체하지 않고 **함께** 내므로, `v2최종` 처럼 실제
+ * 이름이 그렇게 끝나는 경로는 longest-existing-wins 로 원문이 이긴다.
+ */
+function stripHangulTail(text: string): string | null {
+  const match = HANGUL_TAIL_RE.exec(text);
+  if (!match) return null;
+  const stripped = trimPathTail(text.slice(0, text.length - match[1].length));
+  // 공백으로 끝나면(`my file .에`) 그 앞까지는 이미 앞 cut 후보다.
+  return stripped && stripped !== text && !/\s$/.test(stripped) ? stripped : null;
+}
+
+/**
  * MSYS/git-bash 스타일 cwd(`^/<drive>/...`)를 Windows 드라이브 경로로 변환한다.
  *
  * git-bash/MSYS 셸은 cwd 를 `/d/PycharmProjects/...` 처럼 POSIX 드라이브 표기로
@@ -194,22 +222,73 @@ export function normalizeMsysCwd(cwd: string): string {
  * - MSYS 스타일 cwd(`^/<drive>/...`)는 먼저 Windows 드라이브 경로로 정규화한다.
  * - cwd 가 Windows 스타일(`C:\` 또는 `\\`)이면 백슬래시로, 아니면 슬래시로 조합.
  * - cwd 가 비어 있으면 null.
+ * - 홈 상대경로(`~`, `~/...`)는 cwd 가 아니라 `home`(pane 셸의 홈, ADR-0288)에
+ *   붙인다. 홈을 모르면 null — cwd 아래 `~` 디렉토리로 오인하지 않는다.
  *
  * 실제 경로 정규화(`..`, WSL/Windows 변환)는 백엔드 `resolve_address_path`
  * 가 담당하므로 여기서는 단순 결합만 한다.
  */
-export function joinCwdPath(cwdRaw: string | undefined, relativePath: string): string | null {
+export function joinCwdPath(
+  cwdRaw: string | undefined,
+  relativePath: string,
+  home?: string | null,
+): string | null {
   if (isAbsolutePath(relativePath)) return relativePath;
+  if (isHomeRelativePath(relativePath)) {
+    if (!home) return null;
+    const rest = relativePath.slice(1).replace(/^[\\/]+/, "");
+    return rest ? joinBasePath(home, rest) : home;
+  }
   if (!cwdRaw || cwdRaw.length === 0) return null;
-  const cwd = normalizeMsysCwd(cwdRaw);
+  return joinBasePath(normalizeMsysCwd(cwdRaw), relativePath);
+}
 
-  const cwdIsWindows = /^[A-Za-z]:[\\/]/.test(cwd) || cwd.startsWith("\\\\");
-  const sep = cwdIsWindows ? "\\" : "/";
+/** 후보들 중 pane 홈이 있어야 조합되는 홈 상대경로가 있는지(ADR-0288). */
+export function needsPathLinkHome(candidates: ReadonlyArray<{ text: string }>): boolean {
+  return candidates.some((candidate) => isHomeRelativePath(candidate.text));
+}
 
-  // cwd 후행 구분자 제거.
-  const base = cwd.replace(/[\\/]+$/, "");
+/** stat 배치 안에서 후보 하나가 보는 경로와 그 결과 위치. */
+export interface PathLinkStatEntry<T> {
+  candidate: T;
+  absPath: string;
+  statIndex: number;
+}
+
+/**
+ * 후보들을 cwd·홈과 조합해 같은 경로를 한 번만 조회하는 stat 배치를 만든다
+ * (세 트리거 공통). 조합할 수 없는 후보(cwd·홈 부재)는 빠진다.
+ */
+export function planPathLinkStat<T extends { text: string }>(
+  candidates: T[],
+  cwd: string | undefined,
+  home: string | null,
+): { uniquePaths: string[]; pending: PathLinkStatEntry<T>[] } {
+  const uniquePaths: string[] = [];
+  const pathIndexes = new Map<string, number>();
+  const pending = candidates.flatMap((candidate) => {
+    const absPath = joinCwdPath(cwd, candidate.text, home);
+    if (!absPath) return [];
+    let statIndex = pathIndexes.get(absPath);
+    if (statIndex === undefined) {
+      statIndex = uniquePaths.length;
+      pathIndexes.set(absPath, statIndex);
+      uniquePaths.push(absPath);
+    }
+    return [{ candidate, absPath, statIndex }];
+  });
+  return { uniquePaths, pending };
+}
+
+/** 기준 디렉토리(Windows 면 백슬래시, 아니면 슬래시)에 상대경로를 붙인다. */
+function joinBasePath(baseDir: string, relativePath: string): string {
+  const baseIsWindows = /^[A-Za-z]:[\\/]/.test(baseDir) || baseDir.startsWith("\\\\");
+  const sep = baseIsWindows ? "\\" : "/";
+
+  // 기준 후행 구분자 제거.
+  const base = baseDir.replace(/[\\/]+$/, "");
   // 상대경로의 구분자를 대상 OS 구분자로 통일.
-  const rel = cwdIsWindows ? relativePath.replace(/\//g, "\\") : relativePath.replace(/\\/g, "/");
+  const rel = baseIsWindows ? relativePath.replace(/\//g, "\\") : relativePath.replace(/\\/g, "/");
 
   return `${base}${sep}${rel}`;
 }
@@ -300,6 +379,16 @@ export function extractPathCandidatesFromSelection(
     if (candidates.length > limits.maxCandidates) return [];
   }
 
+  // ADR-0288: 한글 조사를 뗀 변형도 발견을 더하는 best-effort 후보다. 넓은
+  // 선택에서는 기본 후보와 같은 strong 조건을 변형 쪽에 적용한다.
+  for (const token of maximalTokens) {
+    const variant = hangulTailVariant(token);
+    if (!variant || variant.text.length > limits.maxPathLength) continue;
+    if (!exactSingleToken && !variant.strong) continue;
+    if (candidates.length >= PATH_LINK_MAX_STAT_BATCH) return candidates;
+    candidates.push(candidateOf(variant));
+  }
+
   // ADR-0191: 절대경로 앵커의 공백 확장 후보를 best-effort 로 덧붙인다. 확장은
   // 발견을 더하는 것이므로 기본 토큰의 all-or-nothing 상한 대상이 아니고, 배치
   // 총량(백엔드 상한)에서만 자른다.
@@ -321,14 +410,30 @@ export function extractPathCandidatesFromSelection(
   return candidates;
 }
 
+type MaximalToken = PathSelectionCandidate & { strong: boolean; rawStart: number; rawEnd: number };
+
+function candidateOf({ text, lineIndex, startIndex, endIndex }: PathSelectionCandidate) {
+  return { text, lineIndex, startIndex, endIndex };
+}
+
+/**
+ * 토큰 끝의 한글 조사·어미를 뗀 변형(ADR-0288). 시작 offset 과 원문 범위는
+ * 토큰과 같다 — 포인터가 떼어낸 조사 위에 있어도 같은 토큰을 지목한 것이다.
+ */
+function hangulTailVariant(token: MaximalToken): MaximalToken | null {
+  const text = stripHangulTail(token.text);
+  if (!text) return null;
+  return {
+    ...token,
+    text,
+    endIndex: token.startIndex + text.length,
+    strong: looksLikeStrongPath(text),
+  };
+}
+
 /** 한 줄에서 maximal token 들을 원문 범위와 함께 읽는다(경계 규칙 단일 소유). */
-function readMaximalTokens(
-  line: string,
-  lineIndex: number,
-): Array<PathSelectionCandidate & { strong: boolean; rawStart: number; rawEnd: number }> {
-  const tokens: Array<
-    PathSelectionCandidate & { strong: boolean; rawStart: number; rawEnd: number }
-  > = [];
+function readMaximalTokens(line: string, lineIndex: number): MaximalToken[] {
+  const tokens: MaximalToken[] = [];
   const matcher = new RegExp(SELECTION_TOKEN_RE.source, "g");
   let match: RegExpExecArray | null;
   while ((match = matcher.exec(line)) !== null) {
@@ -380,7 +485,9 @@ function spaceExtensionCandidates(
   for (let i = 0; i < chunks.length - 1; i++) {
     const raw = line.slice(chunks[i].start, chunks[i].end);
     const { text: anchorText, leading } = trimPathToken(raw);
-    if (!anchorText || !isAbsolutePath(anchorText) || SCHEME_RE.test(anchorText)) continue;
+    // 홈 상대경로(`~/...`, ADR-0288)도 cwd 와 무관하게 위치가 정해지므로 앵커다.
+    const rooted = isAbsolutePath(anchorText) || isHomeRelativePath(anchorText);
+    if (!anchorText || !rooted || SCHEME_RE.test(anchorText)) continue;
     const anchorStart = chunks[i].start + leading;
     let produced: string | null = null;
     const lastCut = Math.min(i + PATH_LINK_MAX_SPACE_EXTENSIONS, chunks.length - 1);
@@ -399,6 +506,18 @@ function spaceExtensionCandidates(
         endIndex: anchorStart + text.length,
         rawEnd: chunks[k].end,
       });
+      // ADR-0288: 이 cut 끝에 붙은 한글 조사를 뗀 변형. 공백이 사라졌으면 기본
+      // 토큰의 변형과 같다 — 중복 생략.
+      const variant = stripHangulTail(text);
+      if (variant?.includes(" ")) {
+        results.push({
+          text: variant,
+          lineIndex,
+          startIndex: anchorStart,
+          endIndex: anchorStart + variant.length,
+          rawEnd: chunks[k].end,
+        });
+      }
     }
   }
   return results;
@@ -445,8 +564,8 @@ export function resolveOverlappingRanges<T>(
  * 받고, 실제 존재 여부는 `stat_paths` 가 판정한다.
  *
  * 여기에 offset 을 덮는 공백 확장 후보(ADR-0191, 절대경로 앵커 기준 접두)를
- * 더한다 — 후보 수는 1 + 앵커당 cut 상한으로 여전히 상수이며, 트리거당 stat
- * 배치는 1회다. offset 이 공백 위여도 그 공백을 **포함하는** 확장 후보는
+ * 더한다 — 후보 수는 상수이고 `PATH_LINK_MAX_STAT_BATCH` 를 넘지 않으며(넘치면
+ * 먼 앵커의 확장부터 버린다), 트리거당 stat 배치는 1회다. offset 이 공백 위여도 그 공백을 **포함하는** 확장 후보는
  * 평가한다(경로 내부의 공백 위 hover/클릭).
  *
  * offset 은 트림 *전* 원문(따옴표·괄호·`:line:col` 포함) 범위와 비교한다.
@@ -465,24 +584,24 @@ export function extractPathCandidatesAtOffset(
   if (line[offset].trim() !== "") {
     for (const token of readMaximalTokens(line, 0)) {
       if (offset < token.rawStart || offset >= token.rawEnd) continue;
-      if (token.text.length > limits.maxPathLength) break;
-      results.push({
-        text: token.text,
-        lineIndex: token.lineIndex,
-        startIndex: token.startIndex,
-        endIndex: token.endIndex,
-      });
+      if (token.text.length <= limits.maxPathLength) results.push(candidateOf(token));
+      // ADR-0288: 같은 토큰의 한글 조사 변형. 지목된 토큰이라 맨이름도 받는다.
+      const variant = hangulTailVariant(token);
+      if (variant && variant.text.length <= limits.maxPathLength) {
+        results.push(candidateOf(variant));
+      }
       break;
     }
   }
-  for (const candidate of spaceExtensionCandidates(line, 0, limits.maxPathLength)) {
-    if (offset < candidate.startIndex || offset >= candidate.rawEnd) continue;
-    results.push({
-      text: candidate.text,
-      lineIndex: candidate.lineIndex,
-      startIndex: candidate.startIndex,
-      endIndex: candidate.endIndex,
-    });
+  // 지점을 덮는 확장 후보는 가까운 앵커부터 센다. 앵커가 많은 줄(한글 조사가
+  // 붙은 경로 나열)에서도 배치 상한(백엔드가 초과 배치를 통째로 거부한다) 안에
+  // 지목 토큰과 가장 그럴듯한 확장이 남는다.
+  const extensions = spaceExtensionCandidates(line, 0, limits.maxPathLength)
+    .filter((candidate) => offset >= candidate.startIndex && offset < candidate.rawEnd)
+    .sort((a, b) => b.startIndex - a.startIndex);
+  for (const candidate of extensions) {
+    if (results.length >= PATH_LINK_MAX_STAT_BATCH) break;
+    results.push(candidateOf(candidate));
   }
   return results;
 }
@@ -520,14 +639,12 @@ export function extractPathCandidatesFromScreen(
     chars += line.length;
     if (chars > limits.maxChars) break;
     for (const token of readMaximalTokens(line, lineIndex)) {
-      if (!token.strong || token.text.length > limits.maxPathLength) continue;
-      candidates.push({
-        text: token.text,
-        lineIndex: token.lineIndex,
-        startIndex: token.startIndex,
-        endIndex: token.endIndex,
-      });
-      if (candidates.length >= limits.maxCandidates) return candidates;
+      // ADR-0288: 한글 조사를 떼야 strong 이 되는 토큰(`report.docx입니다`)도 있다.
+      for (const candidate of [token, hangulTailVariant(token)]) {
+        if (!candidate?.strong || candidate.text.length > limits.maxPathLength) continue;
+        candidates.push(candidateOf(candidate));
+        if (candidates.length >= limits.maxCandidates) return candidates;
+      }
     }
     // ADR-0191: 공백 확장 후보도 같은 상한 안에서 읽기 순서대로 센다 — 상한
     // 초과 시 뒤쪽을 버리는 부분 결과 semantics(ADR-0188)는 그대로다.

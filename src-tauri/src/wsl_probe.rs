@@ -120,6 +120,50 @@ pub(crate) fn default_distro_cached(timeout: Duration) -> Option<String> {
     fresh
 }
 
+/// `$HOME` of `distro`'s default user, cached per distribution for
+/// `WSL_DEFAULT_DISTRO_CACHE_TTL` (ADR-0288).
+///
+/// Path links expand a WSL pane's `~/...` against it, and their hover and Remote
+/// idle-scan triggers would otherwise pay a `wsl.exe` spawn per evaluation.
+/// Failures are cached too, so a cold or missing guest is asked at most once
+/// per TTL instead of on every hover.
+#[cfg(windows)]
+pub(crate) fn home_dir_cached(distro: &str, timeout: Duration) -> Option<String> {
+    type HomeCache = std::collections::HashMap<String, (Instant, Option<String>)>;
+    static CACHE: std::sync::Mutex<Option<HomeCache>> = std::sync::Mutex::new(None);
+
+    if let Ok(guard) = CACHE.lock_or_err() {
+        if let Some((resolved_at, value)) = guard.as_ref().and_then(|cache| cache.get(distro)) {
+            if resolved_at.elapsed() <= crate::constants::WSL_DEFAULT_DISTRO_CACHE_TTL {
+                return value.clone();
+            }
+        }
+    }
+    let fresh = run_probe_script(
+        distro,
+        r#"printf '%s' "$HOME""#,
+        "laymux-home-probe",
+        timeout,
+    )
+    .ok()
+    .and_then(|stdout| parse_probe_home(&stdout));
+    if let Ok(mut guard) = CACHE.lock_or_err() {
+        guard
+            .get_or_insert_with(HomeCache::new)
+            .insert(distro.to_string(), (Instant::now(), fresh.clone()));
+    }
+    fresh
+}
+
+/// Accept the probe's stdout only as one absolute Linux path.
+#[cfg(any(windows, test))]
+fn parse_probe_home(stdout: &[u8]) -> Option<String> {
+    let home = std::str::from_utf8(stdout)
+        .ok()?
+        .trim_end_matches(['\r', '\n']);
+    (home.starts_with('/') && !home.chars().any(char::is_control)).then(|| home.to_string())
+}
+
 /// Run `script` inside `distro` under a bounded timeout and return its stdout.
 ///
 /// `arg0` names the shell invocation in the guest process list so an operator
@@ -262,6 +306,16 @@ mod tests {
             remaining_timeout_at(deadline, deadline + Duration::from_millis(1)),
             None
         );
+    }
+
+    #[test]
+    fn probe_home_accepts_only_one_absolute_linux_path() {
+        assert_eq!(parse_probe_home(b"/home/me"), Some("/home/me".into()));
+        assert_eq!(parse_probe_home(b"/home/me\n"), Some("/home/me".into()));
+        assert_eq!(parse_probe_home(b""), None);
+        assert_eq!(parse_probe_home(b"home/me"), None);
+        assert_eq!(parse_probe_home(b"/home/a\nb"), None);
+        assert_eq!(parse_probe_home(b"/home/\xff"), None);
     }
 
     #[test]

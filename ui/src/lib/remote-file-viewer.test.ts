@@ -6,12 +6,14 @@ vi.mock("./tauri-api", () => ({
   statPaths: vi.fn(),
   listDirectory: vi.fn(),
   getHomeDirectory: vi.fn(),
+  getTerminalHomeDirectory: vi.fn(),
 }));
 
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import {
   getHomeDirectory,
+  getTerminalHomeDirectory,
   listDirectory,
   readFileForDownload,
   readFileForViewer,
@@ -116,6 +118,57 @@ describe("Remote FileViewer path-link bridge", () => {
         ],
       },
     });
+  });
+
+  it("홈 상대경로(~)는 pane 홈에 붙여 검증한다 (ADR-0288)", async () => {
+    registerTerminal("/mnt/c/work");
+    vi.mocked(getTerminalHomeDirectory).mockResolvedValue("/home/me");
+    // 조사가 붙은 원문은 없고, 조사를 뗀 변형만 존재한다.
+    vi.mocked(statPaths).mockResolvedValue([
+      { exists: false, isDirectory: false },
+      { exists: true, isDirectory: false },
+    ]);
+
+    const result = await handleRemoteFileViewerRequest("pathLink", {
+      terminalId: "terminal-1",
+      mode: "selection",
+      lines: ["~/data/메모.docx다."],
+    });
+
+    expect(getTerminalHomeDirectory).toHaveBeenCalledWith("terminal-1");
+    expect(statPaths).toHaveBeenCalledWith([
+      "/home/me/data/메모.docx다",
+      "/home/me/data/메모.docx",
+    ]);
+    expect(result).toEqual({
+      success: true,
+      data: {
+        valid: true,
+        matches: [
+          {
+            token: "~/data/메모.docx",
+            path: "/home/me/data/메모.docx",
+            kind: "file",
+            lineIndex: 0,
+            startIndex: 0,
+            endIndex: 14,
+          },
+        ],
+      },
+    });
+  });
+
+  it("~ 후보가 없으면 pane 홈을 조회하지 않는다", async () => {
+    registerTerminal("C:\\work");
+    vi.mocked(statPaths).mockResolvedValue([{ exists: true, isDirectory: false }]);
+
+    await handleRemoteFileViewerRequest("pathLink", {
+      terminalId: "terminal-1",
+      mode: "selection",
+      lines: ["src/main.rs"],
+    });
+
+    expect(getTerminalHomeDirectory).not.toHaveBeenCalled();
   });
 
   it("desktop과 같은 MSYS CWD 정규화를 재사용한다", async () => {
