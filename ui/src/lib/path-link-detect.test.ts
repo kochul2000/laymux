@@ -13,6 +13,7 @@ import {
   extractPathCandidatesFromScreen,
   mapLineCandidateToPathRange,
   resolveOverlappingRanges,
+  isHomeRelativePath,
   PATH_LINK_MAX_SPACE_EXTENSIONS,
 } from "./path-link-detect";
 
@@ -302,6 +303,56 @@ describe("joinCwdPath", () => {
 
   it("/mnt/ 로 시작하는 WSL 마운트 cwd 는 드라이브 변환하지 않는다", () => {
     expect(joinCwdPath("/mnt/d/proj", "a/b.txt")).toBe("/mnt/d/proj/a/b.txt");
+  });
+
+  describe("홈 상대경로(~)는 cwd 가 아니라 pane 의 홈에 붙인다", () => {
+    it("WSL·POSIX 홈이면 슬래시로 조합한다", () => {
+      expect(
+        joinCwdPath("/mnt/d/proj", "~/data_projects/v2/AHBPS-26-218_통계자문메모.docx", "/home/me"),
+      ).toBe("/home/me/data_projects/v2/AHBPS-26-218_통계자문메모.docx");
+      expect(joinCwdPath("/home/me/proj", "~/a.txt", "/home/me/")).toBe("/home/me/a.txt");
+    });
+
+    it("Windows 홈이면 백슬래시로 조합한다", () => {
+      // PowerShell pane 의 cwd 는 백엔드가 /mnt/c/... 로 정규화해 보낸다.
+      expect(joinCwdPath("/mnt/c/Users/me/proj", "~/Documents/a.docx", "C:\\Users\\me")).toBe(
+        "C:\\Users\\me\\Documents\\a.docx",
+      );
+      expect(joinCwdPath("C:\\proj", "~\\Documents\\a.txt", "C:\\Users\\me")).toBe(
+        "C:\\Users\\me\\Documents\\a.txt",
+      );
+    });
+
+    it("~ 단독은 홈 자체다", () => {
+      expect(joinCwdPath("/proj", "~", "/home/me")).toBe("/home/me");
+      expect(joinCwdPath("/proj", "~/", "C:\\Users\\me")).toBe("C:\\Users\\me");
+    });
+
+    it("홈을 모르면 cwd 에 `~` 디렉토리로 붙이지 않고 null 이다", () => {
+      expect(joinCwdPath("/home/me/proj", "~/a.txt")).toBeNull();
+      expect(joinCwdPath("/home/me/proj", "~/a.txt", null)).toBeNull();
+    });
+
+    it("cwd 가 없어도 홈만 있으면 조합한다", () => {
+      expect(joinCwdPath(undefined, "~/a.txt", "/home/me")).toBe("/home/me/a.txt");
+    });
+
+    it("~user 형태와 중간의 ~ 는 홈 상대경로가 아니다", () => {
+      expect(joinCwdPath("/proj", "~bob/a.txt", "/home/me")).toBe("/proj/~bob/a.txt");
+      expect(joinCwdPath("/proj", "a/~/b.txt", "/home/me")).toBe("/proj/a/~/b.txt");
+    });
+  });
+});
+
+describe("isHomeRelativePath", () => {
+  it("~ 단독과 ~/·~\\ 로 시작하는 경로만 홈 상대경로다", () => {
+    expect(isHomeRelativePath("~")).toBe(true);
+    expect(isHomeRelativePath("~/data/a.docx")).toBe(true);
+    expect(isHomeRelativePath("~\\Documents\\a.txt")).toBe(true);
+    expect(isHomeRelativePath("~bob/a")).toBe(false);
+    expect(isHomeRelativePath("a/~/b")).toBe(false);
+    expect(isHomeRelativePath("/tmp/abc")).toBe(false);
+    expect(isHomeRelativePath("")).toBe(false);
   });
 });
 
@@ -694,5 +745,76 @@ describe("mapLineCandidateToPathRange (ADR-0188)", () => {
       startCol: 3,
       endCol: 9,
     });
+  });
+});
+
+describe("홈 상대경로(~)는 절대경로처럼 다룬다", () => {
+  const limits = { maxPathLength: 256 };
+
+  it("~/ 로 시작하는 토큰은 공백 확장 앵커가 된다 (ADR-0191)", () => {
+    const line = "열기: ~/My Docs/a.txt 확인";
+    const offset = line.indexOf("Docs");
+    expect(extractPathCandidatesAtOffset(line, offset, limits).map((c) => c.text)).toContain(
+      "~/My Docs/a.txt",
+    );
+  });
+});
+
+describe("경로 끝에 붙은 한글 조사·어미", () => {
+  const limits = { maxPathLength: 256 };
+  const selectionLimits = {
+    maxSelectionLength: 1024,
+    maxLines: 8,
+    maxCandidates: 16,
+    maxPathLength: 256,
+  };
+  const screenLimits = { maxLines: 64, maxChars: 8192, maxCandidates: 64, maxPathLength: 256 };
+  const pointTexts = (line: string, anchor: string) =>
+    extractPathCandidatesAtOffset(line, line.indexOf(anchor), limits).map((c) => c.text);
+
+  it("point: 조사를 뗀 후보를 같은 시작 offset 으로 함께 낸다", () => {
+    const path = "~/data_projects/v2/AHBPS-26-218_통계자문메모.docx";
+    const line = `결과는 ${path}다.`;
+    const start = line.indexOf("~");
+    expect(extractPathCandidatesAtOffset(line, start + 3, limits)).toEqual([
+      { text: `${path}다`, lineIndex: 0, startIndex: start, endIndex: start + path.length + 1 },
+      { text: path, lineIndex: 0, startIndex: start, endIndex: start + path.length },
+    ]);
+    expect(pointTexts("결과는 /tmp/abc에 저장했다.", "/tmp")).toEqual(
+      expect.arrayContaining(["/tmp/abc에", "/tmp/abc"]),
+    );
+  });
+
+  it("한글 이름에 이어진 한글이나 구분자 뒤 한글은 조사로 떼지 않는다", () => {
+    expect(pointTexts("열기 ~/문서/보고서에", "~")).toEqual(["~/문서/보고서에"]);
+    expect(pointTexts("cd /tmp/한글", "/tmp")).toEqual(["/tmp/한글"]);
+  });
+
+  it("공백 확장 후보의 끝에 붙은 조사도 뗀 후보를 낸다", () => {
+    expect(pointTexts("열기: /mnt/c/My Docs/보고서.docx를 확인", "Docs")).toContain(
+      "/mnt/c/My Docs/보고서.docx",
+    );
+  });
+
+  it("selection: 넓은 선택에서는 조사를 뗀 결과가 strong 일 때만 덧붙인다", () => {
+    const texts = extractPathCandidatesFromSelection(
+      "결과는 /tmp/abc에 저장했고 notes.md를 열었다",
+      selectionLimits,
+    ).map((c) => c.text);
+    expect(texts).toEqual(expect.arrayContaining(["/tmp/abc에", "/tmp/abc", "notes.md"]));
+    expect(texts).not.toContain("notes.md를");
+    expect(texts).not.toContain("결과");
+  });
+
+  it("selection: 단일 토큰 선택이면 맨이름도 조사를 뗀 후보를 받는다", () => {
+    expect(
+      extractPathCandidatesFromSelection("laymux로", selectionLimits).map((c) => c.text),
+    ).toEqual(["laymux로", "laymux"]);
+  });
+
+  it("screen: 조사를 떼야 strong 이 되는 토큰도 찾는다", () => {
+    expect(extractPathCandidatesFromScreen(["파일은 report.docx입니다."], screenLimits)).toEqual([
+      { text: "report.docx", lineIndex: 0, startIndex: 4, endIndex: 15 },
+    ]);
   });
 });

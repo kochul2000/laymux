@@ -19,6 +19,7 @@ mod session_attribution;
 mod spreadsheet_stream;
 mod spreadsheet_viewer;
 mod terminal;
+mod terminal_home;
 mod terminal_output_delivery;
 mod terminal_output_surface;
 mod terminal_teardown;
@@ -49,6 +50,7 @@ pub use session_attribution::*;
 pub use spreadsheet_stream::*;
 pub use spreadsheet_viewer::*;
 pub use terminal::*;
+pub use terminal_home::*;
 pub use terminal_output_surface::*;
 pub use usage::*;
 pub use viewer_startup::*;
@@ -141,6 +143,10 @@ mod main_thread_io {
         ),
         (include_str!("usage.rs"), &["subscribe_usage_probe"]),
         (include_str!("os_open.rs"), &["open_in_os"]),
+        (
+            include_str!("terminal_home.rs"),
+            &["get_terminal_home_directory"],
+        ),
     ];
 
     #[test]

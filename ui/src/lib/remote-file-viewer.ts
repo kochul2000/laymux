@@ -1,5 +1,6 @@
 import {
   getHomeDirectory,
+  getTerminalHomeDirectory,
   listDirectory,
   readFileForDownload,
   readFileForViewer,
@@ -13,10 +14,11 @@ import {
   extractPathCandidatesFromScreen,
   extractPathCandidatesFromSelection,
   isPathLinkCwdCurrent,
-  joinCwdPath,
+  needsPathLinkHome,
   pathPointLimits,
   pathScreenLimits,
   pathSelectionLimits,
+  planPathLinkStat,
   resolveOverlappingRanges,
   type PathSelectionCandidate,
 } from "./path-link-detect";
@@ -238,19 +240,11 @@ export async function handleRemoteFileViewerRequest(
     );
     if (candidates.length === 0) return ok({ valid: false });
 
-    const uniquePaths: string[] = [];
-    const pathIndexes = new Map<string, number>();
-    const pending = candidates.flatMap((candidate) => {
-      const path = joinCwdPath(terminal.cwd, candidate.text);
-      if (!path) return [];
-      let statIndex = pathIndexes.get(path);
-      if (statIndex === undefined) {
-        statIndex = uniquePaths.length;
-        pathIndexes.set(path, statIndex);
-        uniquePaths.push(path);
-      }
-      return [{ candidate, path, statIndex }];
-    });
+    // 홈 조회 실패는 `~` 후보만 잃는다 — 나머지 후보 검증까지 막지 않는다.
+    const home = needsPathLinkHome(candidates)
+      ? await getTerminalHomeDirectory(terminalId).catch(() => null)
+      : null;
+    const { uniquePaths, pending } = planPathLinkStat(candidates, terminal.cwd, home);
     if (pending.length === 0) return ok({ valid: false });
 
     try {
@@ -279,9 +273,9 @@ export async function handleRemoteFileViewerRequest(
         line: candidate.lineIndex,
         start: candidate.startIndex,
         end: candidate.endIndex,
-      })).map(({ candidate, path, statIndex }) => ({
+      })).map(({ candidate, absPath, statIndex }) => ({
         token: candidate.text,
-        path,
+        path: absPath,
         kind: infos[statIndex].isDirectory ? "directory" : "file",
         lineIndex: candidate.lineIndex,
         startIndex: candidate.startIndex,

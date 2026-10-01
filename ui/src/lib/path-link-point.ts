@@ -15,8 +15,9 @@
 import {
   decidePathLinkAction,
   extractPathCandidatesAtOffset,
-  joinCwdPath,
+  needsPathLinkHome,
   pathPointLimits,
+  planPathLinkStat,
   resolveOverlappingRanges,
 } from "./path-link-detect";
 import type { VerifiedPathSelection } from "./path-link-provider";
@@ -39,6 +40,8 @@ export interface PathLinkPointDeps {
   getSettings: () => { enabled: boolean; maxPathLength: number };
   /** pane 의 현재 cwd(상대경로 조합용). */
   getCwd: () => string | undefined;
+  /** pane 셸의 홈(`~` 조합용, ADR-0288). `~` 후보가 있을 때만 부른다. 모르면 null. */
+  getHome: () => Promise<string | null>;
   /** 화면 좌표 → 1-based 컬럼 + 0-based 절대 버퍼 라인. 실패하면 null. */
   resolveCell: (clientX: number, clientY: number) => { col: number; absoluteLine: number } | null;
   /** 0-based 절대 버퍼 라인의 셀과 wrap 정보. 없으면 undefined. */
@@ -140,19 +143,14 @@ export function createPathLinkPointEvaluator(deps: PathLinkPointDeps): PathLinkP
         return;
       }
       const cwd = deps.getCwd();
-      const uniquePaths: string[] = [];
-      const pathIndexes = new Map<string, number>();
-      const pending = candidates.flatMap((candidate) => {
-        const absPath = joinCwdPath(cwd, candidate.text);
-        if (!absPath) return [];
-        let statIndex = pathIndexes.get(absPath);
-        if (statIndex === undefined) {
-          statIndex = uniquePaths.length;
-          pathIndexes.set(absPath, statIndex);
-          uniquePaths.push(absPath);
-        }
-        return [{ candidate, absPath, statIndex }];
-      });
+      let home: string | null = null;
+      if (needsPathLinkHome(candidates)) {
+        // 홈 조회도 끼어든 사건(invalidate·다른 지점의 조회 시작)이 있으면 무의미하다.
+        const before = revision;
+        home = await deps.getHome().catch(() => null);
+        if (revision !== before) return;
+      }
+      const { uniquePaths, pending } = planPathLinkStat(candidates, cwd, home);
       if (pending.length === 0) {
         clearPoint();
         return;

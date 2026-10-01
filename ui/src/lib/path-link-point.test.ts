@@ -15,6 +15,7 @@ const asciiLine = (text: string) => cellLine(asciiCells(text));
 interface Harness {
   deps: PathLinkPointDeps;
   statPaths: ReturnType<typeof vi.fn>;
+  getHome: ReturnType<typeof vi.fn>;
   apply: ReturnType<typeof vi.fn>;
   setLine: (text: string) => void;
   setVerified: (verified: boolean) => void;
@@ -31,10 +32,12 @@ function harness(
   let enabled = true;
   let cwd: string | undefined = "/proj";
   const statPaths = vi.fn(async () => stat);
+  const getHome = vi.fn(async (): Promise<string | null> => "/home/me");
   const apply = vi.fn();
   const deps: PathLinkPointDeps = {
     getSettings: () => ({ enabled, maxPathLength: 256 }),
     getCwd: () => cwd,
+    getHome,
     // clientX 를 1-based 컬럼으로, clientY 를 절대 버퍼 라인으로 쓰는 단순 매핑.
     resolveCell: (clientX, clientY) => ({ col: clientX, absoluteLine: clientY }),
     readLine: (absoluteLine) => (absoluteLine === 4 ? asciiLine(line) : undefined),
@@ -45,6 +48,7 @@ function harness(
   return {
     deps,
     statPaths,
+    getHome,
     apply,
     setLine: (text) => {
       line = text;
@@ -197,6 +201,7 @@ describe("createPathLinkPointEvaluator (ADR-0188 point 트리거)", () => {
     const evaluator = createPathLinkPointEvaluator({
       getSettings: () => ({ enabled: true, maxPathLength: 256 }),
       getCwd: () => "/proj",
+      getHome: async () => null,
       resolveCell: (clientX, clientY) => ({ col: clientX, absoluteLine: clientY }),
       readLine: () => asciiLine("cat src/a.ts"),
       statPaths,
@@ -226,6 +231,7 @@ describe("createPathLinkPointEvaluator (ADR-0188 point 트리거)", () => {
     const evaluator = createPathLinkPointEvaluator({
       getSettings: () => ({ enabled: true, maxPathLength: 256 }),
       getCwd: () => "/proj",
+      getHome: async () => null,
       resolveCell: (clientX, clientY) => ({ col: clientX, absoluteLine: clientY }),
       readLine: () => asciiLine("run G:/a b/x.exe end"),
       statPaths,
@@ -263,6 +269,7 @@ describe("createPathLinkPointEvaluator (ADR-0188 point 트리거)", () => {
     const evaluator = createPathLinkPointEvaluator({
       getSettings: () => ({ enabled: true, maxPathLength: 256 }),
       getCwd: () => "/proj",
+      getHome: async () => null,
       resolveCell: (clientX, clientY) => ({ col: clientX, absoluteLine: clientY }),
       readLine: () => asciiLine("G:/my dir name"),
       statPaths,
@@ -306,6 +313,7 @@ describe("createPathLinkPointEvaluator 상수", () => {
     const evaluator = createPathLinkPointEvaluator({
       getSettings: () => ({ enabled: true, maxPathLength: 256 }),
       getCwd: () => cwd,
+      getHome: async () => null,
       resolveCell: (clientX, clientY) => ({ col: clientX, absoluteLine: clientY }),
       readLine: () => asciiLine("cat src/a.ts"),
       statPaths: () =>
@@ -338,6 +346,7 @@ describe("createPathLinkPointEvaluator 중복 조회 방지 (ADR-0188)", () => {
     const evaluator = createPathLinkPointEvaluator({
       getSettings: () => ({ enabled: true, maxPathLength: 256 }),
       getCwd: () => "/proj",
+      getHome: async () => null,
       resolveCell: (clientX, clientY) => ({ col: clientX, absoluteLine: clientY }),
       readLine: () => asciiLine("cat src/a.ts"),
       statPaths,
@@ -367,6 +376,7 @@ describe("createPathLinkPointEvaluator 중복 조회 방지 (ADR-0188)", () => {
     const evaluator = createPathLinkPointEvaluator({
       getSettings: () => ({ enabled: true, maxPathLength: 256 }),
       getCwd: () => "/proj",
+      getHome: async () => null,
       resolveCell: (clientX, clientY) => ({ col: clientX, absoluteLine: clientY }),
       readLine: () => asciiLine("cat src/a.ts"),
       statPaths,
@@ -405,6 +415,7 @@ describe("createPathLinkPointEvaluator 중복 조회 방지 (ADR-0188)", () => {
     const evaluator = createPathLinkPointEvaluator({
       getSettings: () => ({ enabled: true, maxPathLength: 256 }),
       getCwd: () => "/proj",
+      getHome: async () => null,
       resolveCell: (clientX, clientY) => ({ col: clientX, absoluteLine: clientY }),
       readLine: () => asciiLine("cat src/a.ts"),
       statPaths,
@@ -420,5 +431,69 @@ describe("createPathLinkPointEvaluator 중복 조회 방지 (ADR-0188)", () => {
     evaluator.forget();
     await evaluator.evaluateAt(7, 4);
     expect(statPaths).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("createPathLinkPointEvaluator 홈 상대경로 (ADR-0288)", () => {
+  it("~ 후보는 pane 홈에 붙여 stat 하고 그 경로에 밑줄을 적용한다", async () => {
+    // "open ~/notes.md" — 토큰은 컬럼 6~15.
+    const h = harness("open ~/notes.md");
+
+    await createPathLinkPointEvaluator(h.deps).evaluateAt(8, 4);
+
+    expect(h.getHome).toHaveBeenCalledTimes(1);
+    expect(h.statPaths).toHaveBeenCalledWith(["/home/me/notes.md"]);
+    expect(h.apply).toHaveBeenCalledWith([
+      expect.objectContaining({
+        bufferLine: 5,
+        startCol: 6,
+        endCol: 15,
+        absPath: "/home/me/notes.md",
+        token: "~/notes.md",
+      }),
+    ]);
+  });
+
+  it("~ 후보가 없으면 홈을 조회하지 않는다", async () => {
+    const h = harness("cat src/a.ts");
+
+    await createPathLinkPointEvaluator(h.deps).evaluateAt(7, 4);
+
+    expect(h.getHome).not.toHaveBeenCalled();
+    expect(h.statPaths).toHaveBeenCalledWith(["/proj/src/a.ts"]);
+  });
+
+  it("홈을 모르거나 조회가 실패하면 ~ 후보는 stat 하지 않고 밑줄을 비운다", async () => {
+    const unknown = harness("open ~/notes.md");
+    unknown.getHome.mockResolvedValue(null);
+    await createPathLinkPointEvaluator(unknown.deps).evaluateAt(8, 4);
+    expect(unknown.statPaths).not.toHaveBeenCalled();
+    expect(unknown.apply).toHaveBeenCalledWith([]);
+
+    const failed = harness("open ~/notes.md");
+    failed.getHome.mockRejectedValue(new Error("ipc"));
+    await createPathLinkPointEvaluator(failed.deps).evaluateAt(8, 4);
+    expect(failed.statPaths).not.toHaveBeenCalled();
+    expect(failed.apply).toHaveBeenCalledWith([]);
+  });
+
+  it("홈 조회 중 invalidate 되면 stat 하지 않는다", async () => {
+    const h = harness("open ~/notes.md");
+    let release: (home: string | null) => void = () => {};
+    h.getHome.mockImplementation(
+      () =>
+        new Promise<string | null>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const evaluator = createPathLinkPointEvaluator(h.deps);
+
+    const pending = evaluator.evaluateAt(8, 4);
+    evaluator.invalidate();
+    release("/home/me");
+    await pending;
+
+    expect(h.statPaths).not.toHaveBeenCalled();
+    expect(h.apply).not.toHaveBeenCalled();
   });
 });
