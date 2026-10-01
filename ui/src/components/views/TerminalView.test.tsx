@@ -645,6 +645,7 @@ const mockSetTerminalCwdSend = vi.fn().mockResolvedValue(undefined);
 const mockSetTerminalCwdReceive = vi.fn().mockResolvedValue(undefined);
 const mockOpenExternal = vi.fn().mockResolvedValue(undefined);
 const mockStatPaths = vi.fn().mockResolvedValue([]);
+const mockGetTerminalHomeDirectory = vi.fn().mockResolvedValue("/home/me");
 const mockMarkClaudeTerminal = vi.fn().mockResolvedValue(true);
 const mockMarkCodexTerminal = vi.fn().mockResolvedValue(true);
 const mockLoadTerminalOutputCache = vi
@@ -721,6 +722,7 @@ vi.mock("@/lib/tauri-api", () => ({
   updateTerminalSyncGroup: vi.fn().mockResolvedValue(undefined),
   openExternal: (...args: unknown[]) => mockOpenExternal(...args),
   statPaths: (...args: unknown[]) => mockStatPaths(...args),
+  getTerminalHomeDirectory: (...args: unknown[]) => mockGetTerminalHomeDirectory(...args),
   resolveGitRemote: vi.fn().mockResolvedValue(null),
   loadTerminalOutputCache: (...args: unknown[]) => mockLoadTerminalOutputCache(...args),
   markClaudeTerminal: (...args: unknown[]) => mockMarkClaudeTerminal(...args),
@@ -7238,6 +7240,70 @@ describe("TerminalView", () => {
       expect(outer).toHaveClass("terminal-path-link-clickable");
     });
     expect(mockStatPaths).toHaveBeenCalledWith([String.raw`C:\work\src\main.ts`]);
+  });
+
+  it("joins a selected ~ path to the pane home, not the cwd (ADR-0288)", async () => {
+    mockGetSelection.mockReturnValue("~/notes/a.md");
+    setMockBufferLine("~/notes/a.md");
+    mockGetSelectionPosition.mockReturnValue({
+      start: { x: 0, y: 0 },
+      end: { x: 12, y: 0 },
+    });
+    mockStatPaths.mockResolvedValue([{ exists: true, isDirectory: false }]);
+
+    render(<TerminalView instanceId="t-path-home" profile="WSL" syncGroup="" />);
+
+    const outer = screen.getByTestId("terminal-view-t-path-home");
+    outer.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, clientX: 0, clientY: 0 }),
+    );
+    window.dispatchEvent(
+      new PointerEvent("pointermove", { bubbles: true, pointerId: 1, clientX: 30, clientY: 0 }),
+    );
+    window.dispatchEvent(
+      new PointerEvent("pointerup", { bubbles: true, pointerId: 1, clientX: 30, clientY: 0 }),
+    );
+    const selectionCallback = mockOnSelectionChange.mock.calls[0][0];
+    selectionCallback();
+    window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: 30, clientY: 0 }));
+
+    await vi.waitFor(() => {
+      expect(mockStatPaths).toHaveBeenCalledTimes(1);
+      expect(outer).toHaveClass("terminal-path-link-clickable");
+    });
+    expect(mockGetTerminalHomeDirectory).toHaveBeenCalledWith("t-path-home");
+    expect(mockStatPaths).toHaveBeenCalledWith(["/home/me/notes/a.md"]);
+  });
+
+  it("still validates the other selected paths when the pane home lookup fails", async () => {
+    mockGetSelection.mockReturnValue("C:/work/a.ts ~/b.md");
+    setMockBufferLine("C:/work/a.ts ~/b.md");
+    mockGetSelectionPosition.mockReturnValue({
+      start: { x: 0, y: 0 },
+      end: { x: 19, y: 0 },
+    });
+    mockGetTerminalHomeDirectory.mockRejectedValueOnce(new Error("ipc"));
+    mockStatPaths.mockResolvedValue([{ exists: true, isDirectory: false }]);
+
+    render(<TerminalView instanceId="t-path-home-failed" profile="PowerShell" syncGroup="" />);
+
+    const outer = screen.getByTestId("terminal-view-t-path-home-failed");
+    outer.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, clientX: 0, clientY: 0 }),
+    );
+    window.dispatchEvent(
+      new PointerEvent("pointermove", { bubbles: true, pointerId: 1, clientX: 30, clientY: 0 }),
+    );
+    window.dispatchEvent(
+      new PointerEvent("pointerup", { bubbles: true, pointerId: 1, clientX: 30, clientY: 0 }),
+    );
+    const selectionCallback = mockOnSelectionChange.mock.calls[0][0];
+    selectionCallback();
+    window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: 30, clientY: 0 }));
+
+    await vi.waitFor(() => expect(mockStatPaths).toHaveBeenCalledTimes(1));
+    // ~/b.md 만 빠지고, 절대경로 후보(공백 확장 포함)는 그대로 검증한다.
+    expect(mockStatPaths).toHaveBeenCalledWith(["C:/work/a.ts", "C:/work/a.ts ~/b.md"]);
   });
 
   it("invalidates the previous path link as soon as a new pointer drag moves", async () => {

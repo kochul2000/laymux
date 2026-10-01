@@ -50,9 +50,10 @@ import { createPathLinkPointEvaluator, PATH_LINK_HOVER_DWELL_MS } from "@/lib/pa
 import {
   extractPathCandidatesFromSelection,
   isPathLinkCwdCurrent,
-  joinCwdPath,
+  needsPathLinkHome,
   decidePathLinkAction,
   pathSelectionLimits,
+  planPathLinkStat,
   resolveOverlappingRanges,
 } from "@/lib/path-link-detect";
 import {
@@ -98,6 +99,7 @@ import {
   openInOs,
   resolveGitRemote,
   statPaths,
+  getTerminalHomeDirectory,
   handleLxMessage,
   markClaudeTerminal,
   markCodexTerminal,
@@ -1786,6 +1788,7 @@ export function TerminalView({
         };
       },
       getCwd: () => cwdRef.current,
+      getHome: () => getTerminalHomeDirectory(instanceId),
       resolveCell: (clientX, clientY) => {
         const t = terminalRef.current;
         if (!t) return null;
@@ -1888,94 +1891,89 @@ export function TerminalView({
         clearPathLinkSelection();
         return;
       }
-      const uniquePaths: string[] = [];
-      const pathIndexes = new Map<string, number>();
       const requestedCwd = cwdRef.current;
-      const pending = candidates.flatMap((candidate) => {
-        const absPath = joinCwdPath(requestedCwd, candidate.text);
-        if (!absPath) return [];
-        let statIndex = pathIndexes.get(absPath);
-        if (statIndex === undefined) {
-          statIndex = uniquePaths.length;
-          pathIndexes.set(absPath, statIndex);
-          uniquePaths.push(absPath);
+      const statSelection = (home: string | null) => {
+        const { uniquePaths, pending } = planPathLinkStat(candidates, requestedCwd, home);
+        if (pending.length === 0) {
+          clearPathLinkSelection();
+          return;
         }
-        return [
-          {
-            absPath,
-            statIndex,
-            candidate,
-          },
-        ];
-      });
-      if (pending.length === 0) {
-        clearPathLinkSelection();
+
+        statPaths(uniquePaths)
+          .then((infos) => {
+            if (seq !== pathLinkSelectionSeq) return; // 더 최신 선택이 있으면 무시.
+            if (!isPathLinkCwdCurrent(requestedCwd, cwdRef.current)) {
+              clearPathLinkSelection();
+              return;
+            }
+            if (t.getSelection() !== selection) return;
+            const livePosition = t.getSelectionPosition();
+            if (!livePosition) return;
+            const liveLines = readPathLinkSelection(t.buffer.active, livePosition, selection);
+            if (
+              JSON.stringify(liveLines.map((l) => l.text)) !==
+              JSON.stringify(lines.map((l) => l.text))
+            )
+              return;
+            const existing = pending.flatMap((item) => {
+              const info = infos[item.statIndex];
+              const action = info ? decidePathLinkAction(info) : "none";
+              if (action === "none") return [];
+              return [
+                {
+                  candidate: item.candidate,
+                  absPath: item.absPath,
+                  isDirectory: action === "changeDir",
+                },
+              ];
+            });
+            // 공백 확장 후보(ADR-0191)는 접두끼리 겹친다 — 존재하는 것 중 같은
+            // 줄의 겹치는 범위는 가장 긴 것만 남긴다(longest-existing-wins).
+            const verified = resolveOverlappingRanges(existing, ({ candidate }) => ({
+              line: candidate.lineIndex,
+              start: candidate.startIndex,
+              end: candidate.endIndex,
+            })).flatMap<VerifiedPathSelection>(({ candidate, absPath, isDirectory }) => {
+              const parts = mapPathLinkParts(liveLines[candidate.lineIndex], candidate);
+              if (!pathLinkPartsCurrent(t.buffer.active, parts)) return [];
+              return parts.map(({ bufferLine, startCol, endCol, token }) => ({
+                bufferLine,
+                startCol,
+                endCol,
+                token,
+                absPath,
+                isDirectory,
+                ...(parts.length > 1 ? { pathParts: parts } : {}),
+              }));
+            });
+            if (verified.length === 0) {
+              clearPathLinkSelection();
+              return;
+            }
+            // 커서를 먼저 켜 데코레이션 생성과 분리한다(밑줄 실패해도 커서는 동작).
+            // 의도적으로 hitTest 없이 켠다: 이 검증은 드래그 선택 직후에 도착하고
+            // 그 릴리스 지점은 거의 항상 선택한 경로 위이므로(=hover 중) 즉시 포인터를
+            // 보여주는 게 맞다. 마우스가 경로 밖이거나 키보드 선택인 드문 경우엔 다음
+            // mousemove 의 hitTest 가 곧바로 교정한다(데코 rect 는 다음 프레임에야
+            // 준비돼 여기서 hitTest 해도 신뢰할 수 없다).
+            setPathLinkCursor(true);
+            pathLink.setVerifiedSelections("selection", verified);
+          })
+          .catch(() => {
+            if (seq !== pathLinkSelectionSeq) return;
+            clearPathLinkSelection();
+          });
+      };
+      // ADR-0288: `~` 후보가 있을 때만 pane 홈을 묻는다 — 그 외 선택은 지금처럼
+      // 바로 stat 한다. 홈을 묻는 사이 새 선택이 시작됐으면 이 선택은 끝났다.
+      if (!needsPathLinkHome(candidates)) {
+        statSelection(null);
         return;
       }
-
-      statPaths(uniquePaths)
-        .then((infos) => {
-          if (seq !== pathLinkSelectionSeq) return; // 더 최신 선택이 있으면 무시.
-          if (!isPathLinkCwdCurrent(requestedCwd, cwdRef.current)) {
-            clearPathLinkSelection();
-            return;
-          }
-          if (t.getSelection() !== selection) return;
-          const livePosition = t.getSelectionPosition();
-          if (!livePosition) return;
-          const liveLines = readPathLinkSelection(t.buffer.active, livePosition, selection);
-          if (
-            JSON.stringify(liveLines.map((l) => l.text)) !==
-            JSON.stringify(lines.map((l) => l.text))
-          )
-            return;
-          const existing = pending.flatMap((item) => {
-            const info = infos[item.statIndex];
-            const action = info ? decidePathLinkAction(info) : "none";
-            if (action === "none") return [];
-            return [
-              {
-                candidate: item.candidate,
-                absPath: item.absPath,
-                isDirectory: action === "changeDir",
-              },
-            ];
-          });
-          // 공백 확장 후보(ADR-0191)는 접두끼리 겹친다 — 존재하는 것 중 같은
-          // 줄의 겹치는 범위는 가장 긴 것만 남긴다(longest-existing-wins).
-          const verified = resolveOverlappingRanges(existing, ({ candidate }) => ({
-            line: candidate.lineIndex,
-            start: candidate.startIndex,
-            end: candidate.endIndex,
-          })).flatMap<VerifiedPathSelection>(({ candidate, absPath, isDirectory }) => {
-            const parts = mapPathLinkParts(liveLines[candidate.lineIndex], candidate);
-            if (!pathLinkPartsCurrent(t.buffer.active, parts)) return [];
-            return parts.map(({ bufferLine, startCol, endCol, token }) => ({
-              bufferLine,
-              startCol,
-              endCol,
-              token,
-              absPath,
-              isDirectory,
-              ...(parts.length > 1 ? { pathParts: parts } : {}),
-            }));
-          });
-          if (verified.length === 0) {
-            clearPathLinkSelection();
-            return;
-          }
-          // 커서를 먼저 켜 데코레이션 생성과 분리한다(밑줄 실패해도 커서는 동작).
-          // 의도적으로 hitTest 없이 켠다: 이 검증은 드래그 선택 직후에 도착하고
-          // 그 릴리스 지점은 거의 항상 선택한 경로 위이므로(=hover 중) 즉시 포인터를
-          // 보여주는 게 맞다. 마우스가 경로 밖이거나 키보드 선택인 드문 경우엔 다음
-          // mousemove 의 hitTest 가 곧바로 교정한다(데코 rect 는 다음 프레임에야
-          // 준비돼 여기서 hitTest 해도 신뢰할 수 없다).
-          setPathLinkCursor(true);
-          pathLink.setVerifiedSelections("selection", verified);
-        })
-        .catch(() => {
-          if (seq !== pathLinkSelectionSeq) return;
-          clearPathLinkSelection();
+      void getTerminalHomeDirectory(instanceId)
+        .catch(() => null)
+        .then((home) => {
+          if (seq === pathLinkSelectionSeq) statSelection(home);
         });
     };
     terminalRef.current = terminal;

@@ -207,6 +207,15 @@ it("완성된 상대경로 목록과 URL은 hard wrap으로 결합하지 않는�
   }
 });
 
+it("다음 줄이 홈 상대경로(~/)로 시작하면 새 경로라 hard wrap으로 결합하지 않는다", async () => {
+  const s = await setup("/aaaaaaaaaaaa/bbbbb\r\n~/notes/a.md", 19);
+  expect(
+    readPathLinkLines(s.terminal.buffer.active, 0, 5)
+      .map((l) => l.text)
+      .filter(Boolean),
+  ).toEqual(["/aaaaaaaaaaaa/bbbbb", "~/notes/a.md"]);
+});
+
 it("hard wrap 중간 파일명과 3줄 경로도 원문 좌표를 유지한다", async () => {
   const s = await setup("  /long-dir/long-name\r\n  -continued-dir/abc\r\n  /file.md", 21);
   const lines = readPathLinkLines(s.terminal.buffer.active, 0, 6);

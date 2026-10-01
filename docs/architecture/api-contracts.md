@@ -508,7 +508,7 @@ html/markdown preview는 별도 문서(iframe)라 부모 페이지의 CSS를 상
 
 ### Claude Code 설정
 
-설치 훅 갱신 검사는 [ADR-0288](../adr/0288-agent-hook-update-notification.md)를 따른다. 관리 status는 기존 설치 완료 여부와 별도로 `helperCurrent: boolean|null`, `currentRegistered`, `ownedCommands`, `updateRequired`, `updateReasons: [helper_missing|helper_outdated|registrations]`, `updateWarning`을 반환한다. 파일 존재만으로 최신 helper라고 판단하지 않으며 동봉된 바이너리와 바이트를 비교한다. 구버전 훅도 정상 수신할 수 있으므로 갱신 필요만으로 상태 감지를 차단하지 않는다.
+설치 훅 갱신 검사는 [ADR-0289](../adr/0289-agent-hook-update-notification.md)를 따른다. 관리 status는 기존 설치 완료 여부와 별도로 `helperCurrent: boolean|null`, `currentRegistered`, `ownedCommands`, `updateRequired`, `updateReasons: [helper_missing|helper_outdated|registrations]`, `updateWarning`을 반환한다. 파일 존재만으로 최신 helper라고 판단하지 않으며 동봉된 바이너리와 바이트를 비교한다. 구버전 훅도 정상 수신할 수 있으므로 갱신 필요만으로 상태 감지를 차단하지 않는다.
 
 `GET /api/v1/agent-hooks/updates`와 `get_agent_hook_updates` IPC는 `{targets:[{provider,distro,status}],errors:[{provider,distro,configDir,message}]}`를 반환한다. native 기본 폴더와 실행 중으로 열거된 사용자 WSL 배포판(Docker 내부 배포판 제외) 기본 폴더 및 최근 수신 관찰의 사용자 지정 폴더를 읽기 전용으로 검사한다. 정지한 배포판이나 아직 관찰되지 않은 폴더는 Settings에서 명시적으로 확인한다. 앱 시작·포커스 복귀와 60초 주기 검사는 단일 in-flight로 합치며 알림의 대상별 갱신 버튼과 Settings가 같은 backend 판정을 사용한다. 나중에 닫기는 앱 실행 중의 안내만 숨긴다. manage의 `update` operation은 기존 설치를 갱신하며 파일 락 안에서 설치 증거가 사라졌으면 재설치하지 않는다. 자동 설치·재설치 및 CLI 전체 비활성·신뢰 승인 변경은 하지 않는다.
 
