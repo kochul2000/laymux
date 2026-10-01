@@ -13,7 +13,7 @@ import {
 } from "@/lib/agent-hooks-api";
 import { SettingsField, SettingsGroup } from "./SettingsLayout";
 import { useTerminalStore } from "@/stores/terminal-store";
-import { refreshAgentHookUpdates } from "@/lib/agent-hook-updates";
+import { manageAgentHooksAndRefresh } from "@/lib/agent-hook-updates";
 
 function normalizeConfigPath(path: string | null | undefined) {
   if (!path) return undefined;
@@ -105,9 +105,13 @@ export function AgentHooksSection({
     const request = ++sequence.current;
     setBusy(true);
     try {
-      const value = await manageAgentHooks(provider, operation, distro, configDir || null);
+      const value = await manageAgentHooksAndRefresh(
+        provider,
+        operation,
+        distro,
+        configDir || null,
+      );
       if (sequence.current === request) setResult({ key, status: value });
-      void refreshAgentHookUpdates();
     } catch (error) {
       if (sequence.current === request) setResult({ key, error: String(error) });
     } finally {
@@ -263,7 +267,10 @@ export function AgentHooksSection({
               disabled={
                 busy ||
                 !status ||
-                (!status.registered && !status.helperPresent && !status.titleBinding?.managed)
+                (!status.registered &&
+                  !status.ownedCommands &&
+                  !status.helperPresent &&
+                  !status.titleBinding?.managed)
               }
               onClick={() => void change("remove")}
             >

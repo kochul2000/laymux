@@ -31,6 +31,7 @@ export interface HookStatus {
   disabled: boolean;
   helperCurrent?: boolean | null;
   currentRegistered?: number;
+  ownedCommands?: number;
   updateRequired?: boolean;
   updateReasons?: ("helper_missing" | "helper_outdated" | "registrations")[];
   updateWarning?: string | null;

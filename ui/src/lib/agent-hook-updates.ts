@@ -4,6 +4,8 @@ import {
   manageAgentHooks,
   type HookUpdateTarget,
   type HookUpdateError,
+  type HookProvider,
+  type HookStatus,
 } from "./agent-hooks-api";
 
 interface UpdateState {
@@ -59,50 +61,67 @@ export function refreshAgentHookUpdates(): Promise<void> {
   return pending;
 }
 
-export function updateAgentHooks(target: HookUpdateTarget): Promise<void> {
-  if (pending) return pending.then(() => updateAgentHooks(target));
-  const key = hookUpdateKey(target);
+export function manageAgentHooksAndRefresh(
+  provider: HookProvider,
+  operation: "install" | "remove" | "update",
+  distro: string | null,
+  configDir: string | null,
+): Promise<HookStatus> {
+  if (pending)
+    return pending.then(() => manageAgentHooksAndRefresh(provider, operation, distro, configDir));
+  const key = JSON.stringify([provider, distro, configDir]);
   useAgentHookUpdateStore.setState({ busyKey: key });
-  pending = (async () => {
+  const task = (async () => {
     try {
-      const status = await manageAgentHooks(
-        target.provider,
-        "update",
-        target.distro,
-        target.status.configDir,
-      );
+      const status = await manageAgentHooks(provider, operation, distro, configDir);
+      const resolvedKey = JSON.stringify([provider, distro, status.configDir]);
       useAgentHookUpdateStore.setState((state) => ({
         targets: state.targets.map((value) =>
-          hookUpdateKey(value) === key ? { ...value, status } : value,
+          hookUpdateKey(value) === resolvedKey ? { ...value, status } : value,
         ),
       }));
       await audit();
+      return status;
     } catch (error) {
       useAgentHookUpdateStore.setState((state) => ({
         errors: [
           ...state.errors.filter(
-            (e) =>
-              !(
-                e.provider === target.provider &&
-                e.distro === target.distro &&
-                e.configDir === target.status.configDir
-              ),
+            (e) => !(e.provider === provider && e.distro === distro && e.configDir === configDir),
           ),
           {
-            provider: target.provider,
-            distro: target.distro,
-            configDir: target.status.configDir,
+            provider,
+            distro,
+            configDir,
             message: String(error),
           },
         ],
       }));
+      throw error;
     } finally {
       useAgentHookUpdateStore.setState({ busyKey: null });
     }
-  })().finally(() => {
-    pending = undefined;
-  });
-  return pending;
+  })();
+  pending = task
+    .then(
+      () => undefined,
+      () => undefined,
+    )
+    .finally(() => {
+      pending = undefined;
+    });
+  return task;
+}
+
+export function updateAgentHooks(target: HookUpdateTarget): Promise<void> {
+  return manageAgentHooksAndRefresh(
+    target.provider,
+    "update",
+    target.distro,
+    target.status.configDir,
+  ).then(
+    () => undefined,
+    () => undefined,
+  );
 }
 
 export function dismissHookUpdateNotice() {

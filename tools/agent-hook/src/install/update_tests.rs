@@ -111,3 +111,21 @@ fn duplicate_owned_commands_need_update_even_when_all_events_are_registered() {
     let repaired = manage(&root, "codex", "update", &source).unwrap();
     assert_eq!(repaired["updateRequired"], false);
 }
+
+#[test]
+fn owned_handler_outside_supported_events_proves_installation_when_helper_is_missing() {
+    let (_dir, root, source) = fixture("codex");
+    let config = json!({"hooks":{"FutureEvent":[{"hooks":[handler(&root, "codex").unwrap()]}]}});
+    fs::write(
+        root.join("hooks.json"),
+        serde_json::to_vec(&config).unwrap(),
+    )
+    .unwrap();
+    fs::remove_file(helper_path(&root)).unwrap();
+    let result = manage(&root, "codex", "status", &source).unwrap();
+    assert_eq!(result["registered"], 0);
+    assert_eq!(result["updateRequired"], true);
+    let repaired = manage(&root, "codex", "update", &source).unwrap();
+    assert_eq!(repaired["helperCurrent"], true);
+    assert_eq!(repaired["updateRequired"], false);
+}

@@ -204,6 +204,7 @@ fn status(
                 .count()
         })
         .unwrap_or(0);
+    result["ownedCommands"] = json!(owned_count);
     updates::append_status(
         &mut result,
         root,
@@ -311,7 +312,7 @@ pub fn manage(
     };
     let current = status(root, provider, &value, &owned, executable)?;
     // A notification can be stale after a user removes hooks. Never install anew.
-    if operation == "update" && current["registered"] == 0 && current["helperPresent"] == false {
+    if operation == "update" && current["ownedCommands"] == 0 && current["helperPresent"] == false {
         return Ok(current);
     }
     let installing = matches!(operation, "install" | "update");

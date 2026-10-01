@@ -1,11 +1,60 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentHooksSection } from "./AgentHooksSection";
+import { refreshAgentHookUpdates, useAgentHookUpdateStore } from "@/lib/agent-hook-updates";
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
 describe("AgentHooksSection", () => {
+  it("serializes a Settings update after a pending audit and publishes a new audit", async () => {
+    const stale = {
+      configDir: "/custom",
+      configPath: "/custom/hooks.json",
+      installed: true,
+      registered: 10,
+      expected: 10,
+      helperPresent: true,
+      disabled: false,
+      updateRequired: true,
+    };
+    let resolve!: (value: unknown) => void;
+    let reads = 0;
+    invoke.mockImplementation(async (command, args) => {
+      if (command === "get_agent_hook_updates") {
+        if (reads++ === 0)
+          return new Promise((done) => {
+            resolve = done;
+          });
+        return {
+          targets: [
+            { provider: "codex", distro: null, status: { ...stale, updateRequired: false } },
+          ],
+          errors: [],
+        };
+      }
+      if (command === "manage_agent_hooks")
+        return { ...stale, updateRequired: args.request.operation !== "update" };
+      return [];
+    });
+    const audit = refreshAgentHookUpdates();
+    render(<AgentHooksSection provider="codex" />);
+    await waitFor(() => expect(screen.getByTestId("agent-hooks-install")).toBeEnabled());
+    fireEvent.click(screen.getByTestId("agent-hooks-install"));
+    const prematureWrites = invoke.mock.calls.filter(
+      ([, args]) => args?.request?.operation === "update",
+    );
+    // Always release the read so a failing regression does not leave the queue stuck.
+    await act(async () => {
+      resolve({ targets: [{ provider: "codex", distro: null, status: stale }], errors: [] });
+      await audit;
+    });
+    await waitFor(() => expect(reads).toBe(2));
+    expect(prematureWrites).toHaveLength(0);
+    await waitFor(() =>
+      expect(useAgentHookUpdateStore.getState().targets[0].status.updateRequired).toBe(false),
+    );
+  });
   beforeEach(() => {
     invoke.mockReset();
     invoke.mockImplementation(async (command, args) => {
@@ -15,6 +64,7 @@ describe("AgentHooksSection", () => {
           { id: "wsl:Ubuntu", label: "WSL · Ubuntu", distro: "Ubuntu" },
         ];
       if (command === "get_agent_hook_connections") return [];
+      if (command === "get_agent_hook_updates") return { targets: [], errors: [] };
       return {
         configDir: args.request.distro ? "/home/me/.codex" : "C:/Users/me/.codex",
         configPath: "hooks.json",

@@ -51,7 +51,7 @@ pub(super) fn append_status(
     commands_current: bool,
 ) {
     let present = result["helperPresent"] == true;
-    let managed = result["registered"].as_u64().unwrap_or(0) > 0 || present;
+    let managed = result["ownedCommands"].as_u64().unwrap_or(0) > 0 || present;
     let comparison = present.then(|| same_helper(&helper_path(root), source));
     let current = comparison.as_ref().and_then(|r| r.as_ref().ok()).copied();
     let warning = comparison.and_then(Result::err);

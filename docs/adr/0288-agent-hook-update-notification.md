@@ -1,6 +1,6 @@
 # 0288. 설치된 에이전트 훅의 갱신 필요를 자동 검사하고 사용자 동작으로 갱신한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-01
 - Source: 사용자 요구(훅 재설치 필요 자동 감지와 알림), [ADR-0282](0282-optional-agent-hook-installation.md), [ADR-0285](0285-readable-agent-hook-commands.md), architecture/api-contracts.md 에이전트 훅 관리
 - 관계: ADR-0282의 선택 설치 정책을 유지하고 상태 조회·갱신 안내를 확장한다.
@@ -16,10 +16,10 @@ Windows/native와 WSL은 독립 대상이다. 백그라운드 검사는 종료�
 **설치된 훅의 helper와 명령을 동봉된 최신 내용과 비교해 갱신 필요를 알리고, 사용자가 선택한 대상만 갱신한다.**
 
 - 실제 CLI 설정과 설치 helper가 상태의 정본이다. 앱 버전 번호 대신 helper 바이트와 현재 소유 명령의 이벤트 등록을 비교한다. 조회는 읽기 전용이며 구버전·누락·조회 실패를 최신 상태로 합성하지 않는다. 설치 완료 여부와 갱신 필요는 독립 필드다.
-- 관리 status는 `helperCurrent`, `currentRegistered`, `updateRequired`, `updateReasons`를 추가한다. 기존 소유 훅 또는 설치 helper가 있는 대상만 갱신 필요로 판정한다. 외부 사용자 명령은 소유 훅으로 간주하지 않는다.
+- 관리 status는 `helperCurrent`, `currentRegistered`, `ownedCommands`, `updateRequired`, `updateReasons`를 추가한다. `ownedCommands`는 지원 이벤트 밖에 남아 있는 명령까지 포함한 전체 소유 훅 수다. 기존 소유 훅 또는 설치 helper가 있는 대상만 갱신 필요로 판정한다. 외부 사용자 명령은 소유 훅으로 간주하지 않는다.
 - 앱은 시작 후와 주기적으로 native 기본 폴더, 실행 중으로 열거된 사용자 WSL 배포판 기본 폴더 및 현재 관찰에서 알려진 사용자 지정 폴더를 검사한다. 정지 상태로 열거된 WSL과 Docker 내부 배포판은 검사 대상으로 삼지 않는다. 검사 도중 외부에서 배포판을 종료하는 경합까지 WSL CLI가 원자적으로 막지는 못한다. Settings에서 명시적으로 선택한 환경·폴더는 기존 관리 API로 검사한다. 20초 검사 예산 뒤 남은 대상은 미확인 오류로 보고한다.
 - `GET /api/v1/agent-hooks/updates`와 `get_agent_hook_updates` IPC가 공통 검사 결과와 대상별 오류를 반환한다. 기존 manage에 `update` operation을 추가한다. update는 파일 락 안에서 설치 증거를 다시 확인하고, 제거된 대상은 재설치하지 않는다. 설치·갱신은 기존 백업·원자 교체·외부 훅 보존을 따른다.
-- 앱 알림과 Settings는 같은 backend 판정을 표시한다. 알림은 작업을 막지 않으며 대상별 갱신과 나중에 닫기를 제공한다. 닫기는 현재 앱 실행의 안내만 숨기고 Settings의 경고는 유지한다. 실패는 해당 대상에 표시하고 다음 검사에서 재확인한다.
+- 앱 알림과 Settings는 같은 backend 판정을 표시한다. 두 화면의 설치·갱신·제거와 자동 검사는 같은 프론트엔드 큐에서 직렬화하고, 변경 뒤 새 검사를 수행한다. 알림은 작업을 막지 않으며 대상별 갱신과 나중에 닫기를 제공한다. 닫기는 현재 앱 실행의 안내만 숨기고 Settings의 경고는 유지한다. 실패는 해당 대상에 표시하고 다음 검사에서 재확인한다.
 - 자동 설치·자동 재설치는 하지 않는다. 감지 모드·CLI 전체 비활성·신뢰 승인·사용자 제목 편집을 강제로 변경하지 않는다. 기존 훅의 정상 수신은 갱신 안내 때문에 중단하지 않는다.
 
 ## Alternatives Considered
