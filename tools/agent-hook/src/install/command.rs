@@ -50,24 +50,29 @@ impl OwnedHandlers {
         })
     }
 
+    pub fn matches_current(&self, candidate: &Value) -> bool {
+        Self::same(&self.current, candidate)
+    }
+
+    fn same(owned: &Value, candidate: &Value) -> bool {
+        [
+            "type",
+            "command",
+            "args",
+            "shell",
+            "commandWindows",
+            "command_windows",
+        ]
+        .iter()
+        .all(|key| candidate.get(*key) == owned.get(*key))
+    }
+
     pub fn matches(&self, candidate: &Value) -> bool {
-        let same = |owned: &Value| {
-            [
-                "type",
-                "command",
-                "args",
-                "shell",
-                "commandWindows",
-                "command_windows",
-            ]
-            .iter()
-            .all(|key| candidate.get(*key) == owned.get(*key))
-        };
-        if same(&self.current) {
+        if self.matches_current(candidate) {
             return true;
         }
         #[cfg(windows)]
-        if same(&self.legacy) {
+        if Self::same(&self.legacy, candidate) {
             return true;
         }
         false

@@ -34,7 +34,11 @@ pub async fn api_docs() -> impl IntoResponse {
             {
                 "method": "POST", "path": "/api/v1/agent-hooks/manage",
                 "description": "Inspect, install or remove only Laymux-owned CLI hook handlers in the selected environment.",
-                "body": {"provider":"claude | codex", "operation":"status | install | remove", "distro":"string or null for native", "configDir":"absolute directory or null for environment default"}
+                "body": {"provider":"claude | codex", "operation":"status | install | remove | update", "distro":"string or null for native", "configDir":"absolute directory or null for environment default"}
+            },
+            {
+                "method": "GET", "path": "/api/v1/agent-hooks/updates",
+                "description": "Read-only audit of native and running WSL hook targets, including recently observed custom folders. Returns targets with updateRequired and per-target errors; never starts stopped WSL distributions or installs hooks."
             },
             {
                 "method": "POST", "path": "/api/v1/agent-hooks/events",

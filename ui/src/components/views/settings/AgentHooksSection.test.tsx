@@ -27,6 +27,35 @@ describe("AgentHooksSection", () => {
     });
   });
 
+  it("warns when installed hooks need an update instead of claiming they are current", async () => {
+    invoke.mockImplementation(async (command) => {
+      if (command === "list_agent_hook_environments" || command === "get_agent_hook_connections")
+        return [];
+      return {
+        configDir: "/custom",
+        configPath: "/custom/hooks.json",
+        installed: true,
+        registered: 10,
+        currentRegistered: 10,
+        expected: 10,
+        helperPresent: true,
+        helperCurrent: false,
+        disabled: false,
+        updateRequired: true,
+        updateReasons: ["helper_outdated"],
+      };
+    });
+    render(<AgentHooksSection provider="codex" />);
+    expect(await screen.findByTestId("agent-hooks-update-needed")).toHaveTextContent("update");
+    expect(screen.getByTestId("agent-hooks-install")).toHaveTextContent("Update hooks");
+    fireEvent.click(screen.getByTestId("agent-hooks-install"));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("manage_agent_hooks", {
+        request: { provider: "codex", operation: "update", distro: null, configDir: null },
+      }),
+    );
+  });
+
   it("previews added hooks before installation and explains reinstall without duplicates", async () => {
     render(<AgentHooksSection provider="codex" />);
     expect(await screen.findByTestId("agent-hooks-install-summary")).toHaveTextContent(

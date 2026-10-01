@@ -106,3 +106,11 @@ Windows UI 단위 5,210개, xterm 셀 94개, Rust workspace 2,381개(17개 ignor
 수정한 dev 19281에서 5분 뒤 자동 종료하는 별도 `claude daemon` 역할 픽스처와 실제 WSL Codex 0.159.2를 같은 pane에 띄웠다. daemon이 더 얕아도 Codex를 감지했고 실제 입력의 훅을 수신했다. hooks 선택에서 Ctrl+L 후 Codex와 훅 기반 응답 종료 상태가 유지됐다. Alt+L의 `/clear`는 새 대화 ID로 전환하며 Codex 표시를 유지했고, 새 대화 상태 이벤트가 없으면 기존 감지로 돌아갔다. `/quit` 후 daemon이 살아 있어도 shell로 복귀했다. 실제 WebView 캡처와 UI 원시 상태를 함께 확인했다. 별도 픽스처를 실제 Claude daemon 실행 성공으로 주장하지 않는다.
 
 Rust liveness 15개·WSL 세션 귀속 18개·프로세스 트리 28개, dev 바이너리 빌드와 workspace fmt가 통과했다. UI 구현은 변경하지 않았다. native daemon 역할이나 미관측 Claude 실행 모드는 범위 밖이다.
+
+## 설치 훅 갱신 검사·알림 (ADR-0288)
+
+관리 status는 설치 완료와 최신 여부를 구분한다. helper 바이트 변경, 누락된 이벤트와 helper, 중복 소유 명령을 갱신 대상으로 보고한다. 최신 bundle 조회 실패는 `helperCurrent: null`과 경고로 남긴다. 갱신은 외부 훅·전체 비활성·사용자 필드를 보존하며, 제거된 대상과 미설치 폴더는 다시 설치하지 않는다. 앱 알림의 나중에 닫기는 Settings 경고를 없애지 않는다. 일부 대상 조회 실패는 이전의 알려진 경고를 유지하며, 갱신 성공 뒤 재검사가 실패해도 성공 상태는 유지한다.
+
+실기 회귀는 `node scripts/tests/agent-hook-updates.e2e.mjs`다. Windows에서 dev 19281을 현재 워크트리로 실행하고 WebView2 CDP를 열어 둔다. 기본 dev URL은 `http://localhost:1438`, CDP는 `http://127.0.0.1:9341`, WSL은 `Ubuntu-22.04`이며 `LAYMUX_DEV_URL`, `LAYMUX_CDP_URL`, `LAYMUX_WSL_DISTRO`로 재정의할 수 있다. 스크립트는 health의 worktree·branch를 확인하고 Windows 임시 폴더 두 개와 WSL `/tmp/laymux-hook-updates-*` 폴더에만 훅을 설치한다. 실제 API 상태·관찰 등록으로 앱 알림을 띄우고 WebView 버튼으로 Windows Claude·Codex와 WSL Codex를 갱신한다. 외부 훅·사용자 필드 보존과 제거 뒤 오래된 update의 무동작을 확인한 뒤 fixture를 제거한다. release 19280과 실제 사용자 CLI 설정은 변경하지 않는다.
+
+2026-10-01 dev에서 세 환경의 구버전 감지·갱신·제거 경합 검증이 통과했다. 대상 목록이 길어도 나중에·다시 확인 버튼이 보이도록 목록만 스크롤하며 실제 WebView 캡처로 확인했다. Automation screenshot API는 현재 dev에서 5초 프론트 응답 제한에 걸려 CDP 캡처를 사용했다. 캡처 실패도 결과 JSON에 기록하며 기능 검증 실패와 구분한다. 산출물은 `.screenshots/hook-updates/`에 보관한다.

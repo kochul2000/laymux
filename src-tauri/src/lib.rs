@@ -298,6 +298,7 @@ pub fn run() {
             commands::handle_lx_message,
             commands::list_agent_hook_environments,
             commands::manage_agent_hooks,
+            commands::get_agent_hook_updates,
             commands::get_agent_hook_connections,
             commands::get_agent_hook_states,
             commands::list_system_monospace_fonts,

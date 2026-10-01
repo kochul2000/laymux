@@ -2,6 +2,7 @@
 //! heuristic activity; consuming hook state is an explicit settings decision.
 pub mod observations;
 pub mod title;
+pub mod updates;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -58,7 +59,10 @@ pub fn environments() -> Result<Vec<Value>, AppError> {
 
 pub fn manage(request: &ManageRequest, app: &tauri::AppHandle) -> Result<Value, AppError> {
     laymux_agent_hook::install::config_name(&request.provider).map_err(AppError::Other)?;
-    if !matches!(request.operation.as_str(), "status" | "install" | "remove") {
+    if !matches!(
+        request.operation.as_str(),
+        "status" | "install" | "remove" | "update"
+    ) {
         return Err(AppError::Other("Unknown hook operation".into()));
     }
     let directory = helper_directory(app)?;

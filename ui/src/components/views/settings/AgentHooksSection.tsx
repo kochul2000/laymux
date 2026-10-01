@@ -13,6 +13,7 @@ import {
 } from "@/lib/agent-hooks-api";
 import { SettingsField, SettingsGroup } from "./SettingsLayout";
 import { useTerminalStore } from "@/stores/terminal-store";
+import { refreshAgentHookUpdates } from "@/lib/agent-hook-updates";
 
 function normalizeConfigPath(path: string | null | undefined) {
   if (!path) return undefined;
@@ -100,12 +101,13 @@ export function AgentHooksSection({
     };
   }, [provider, distro, configDir, key]);
 
-  async function change(operation: "install" | "remove") {
+  async function change(operation: "install" | "remove" | "update") {
     const request = ++sequence.current;
     setBusy(true);
     try {
       const value = await manageAgentHooks(provider, operation, distro, configDir || null);
       if (sequence.current === request) setResult({ key, status: value });
+      void refreshAgentHookUpdates();
     } catch (error) {
       if (sequence.current === request) setResult({ key, error: String(error) });
     } finally {
@@ -207,6 +209,16 @@ export function AgentHooksSection({
               )}
             </p>
           )}
+          {status?.updateRequired && (
+            <p className="agent-hooks-notice" data-testid="agent-hooks-update-needed">
+              {t("agentHooks.updateNeeded")}
+            </p>
+          )}
+          {status?.updateWarning && (
+            <p className="agent-hooks-notice" role="alert">
+              {status.updateWarning}
+            </p>
+          )}
           {provider === "codex" && status?.titleBinding && (
             <p className="agent-hooks-muted" data-testid="agent-hooks-title-status">
               {t(
@@ -236,12 +248,14 @@ export function AgentHooksSection({
               data-testid="agent-hooks-install"
               variant="primary"
               disabled={busy || !status}
-              onClick={() => void change("install")}
+              onClick={() => void change(status?.updateRequired ? "update" : "install")}
             >
               {t(
-                installed || (status?.registered ?? 0) > 0
-                  ? "agentHooks.reinstall"
-                  : "agentHooks.install",
+                status?.updateRequired
+                  ? "agentHooks.update"
+                  : installed || (status?.registered ?? 0) > 0
+                    ? "agentHooks.reinstall"
+                    : "agentHooks.install",
               )}
             </Button>
             <Button
