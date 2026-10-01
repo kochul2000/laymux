@@ -46,6 +46,6 @@ path-link 후보는 `joinCwdPath` 로 절대경로가 된 뒤 `stat_paths` 로 �
 - WSL·Windows·Linux pane 모두 `~/...` 경로가 hover·클릭·선택·Remote 에서 링크가 되고, `...docx다.`, `/tmp/abc에` 같은 한국어 문장 속 경로도 찾는다.
 - 새 내부 IPC `get_terminal_home_directory` 가 생긴다(Automation/MCP/Remote 미노출). 파일시스템·프로세스를 건드리므로 `#[tauri::command(async)]` 계약 표(ADR-0202)에 등록한다.
 - WSL 홈 조회는 캐시가 찬 뒤 배포판당 60초에 최대 1회 `wsl.exe` spawn 이다. 캐시가 빈 순간 겹친 호출은 각자 조회할 수 있다(spawn 동안 락을 잡지 않는다) — point 는 마지막 평가만 이어가므로 결과가 섞이지 않는다. WSL 이 콜드 스타트로 3초 안에 답하지 못하면 그 60초 동안 `~` 링크가 켜지지 않는다.
-- 한계: `~user`, `wsl.exe -u <user>` 로 띄운 pane(기본 사용자 홈을 돌려준다), 기본이 아닌 배포판 pane 의 홈 아래 경로 stat(기존 POSIX 절대경로와 같은 한계). spawn 호스트 분류(`classify_spawn_target`)를 그대로 따르므로, Windows 가 아닌 호스트의 `ssh` 프로필은 `NonWindows` 로 분류되어 `~` 가 로컬 홈으로 풀리고, `System32ash.exe`(WSL 실행기) 프로필은 `NativeWindows` 로 분류되어 Windows 홈으로 풀린다. 이 중 하나가 실사용에서 문제가 되면 `stat_paths` 에 pane 배포판을 싣는 결정을 따로 한다.
+- 한계: `~user`, `wsl.exe -u <user>` 로 띄운 pane(기본 사용자 홈을 돌려준다), 기본이 아닌 배포판 pane 의 홈 아래 경로 stat(기존 POSIX 절대경로와 같은 한계). spawn 호스트 분류(`classify_spawn_target`)를 그대로 따르므로, Windows 가 아닌 호스트의 `ssh` 프로필은 `NonWindows` 로 분류되어 `~` 가 로컬 홈으로 풀리고, `System32\bash.exe`(WSL 실행기) 프로필은 `NativeWindows` 로 분류되어 Windows 홈으로 풀린다. 이 중 하나가 실사용에서 문제가 되면 `stat_paths` 에 pane 배포판을 싣는 결정을 따로 한다.
 - 한글 꼬리 변형은 조사 뒤에 다른 스크립트가 다시 오는 경우(`a.md를x`)나 한글 아닌 언어의 조사는 다루지 않는다.
 - 테스트: `path-link-detect`·`path-link-point`·`remote-file-viewer`·`TerminalView` 단위 테스트, Rust `terminal_home_directory`·`parse_probe_home` 테스트. living doc 은 [data-flow.md](../architecture/data-flow.md) 의 path-link 절을 갱신한다.
