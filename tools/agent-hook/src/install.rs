@@ -5,6 +5,9 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 mod command;
 mod title;
+#[cfg(test)]
+mod update_tests;
+mod updates;
 pub use command::handler;
 use command::OwnedHandlers;
 
@@ -121,7 +124,7 @@ fn helper_path(root: &Path) -> PathBuf {
     })
 }
 
-fn registered(value: &Value, owned: &OwnedHandlers, provider: &str) -> usize {
+fn registered(value: &Value, owned: &OwnedHandlers, provider: &str, current_only: bool) -> usize {
     events(provider)
         .iter()
         .filter(|event| {
@@ -134,7 +137,15 @@ fn registered(value: &Value, owned: &OwnedHandlers, provider: &str) -> usize {
                         group
                             .get("hooks")
                             .and_then(Value::as_array)
-                            .is_some_and(|hooks| hooks.iter().any(|h| owned.matches(h)))
+                            .is_some_and(|hooks| {
+                                hooks.iter().any(|h| {
+                                    if current_only {
+                                        owned.matches_current(h)
+                                    } else {
+                                        owned.matches(h)
+                                    }
+                                })
+                            })
                     })
                 })
         })
@@ -146,8 +157,9 @@ fn status(
     provider: &str,
     value: &Value,
     owned: &OwnedHandlers,
+    executable: &Path,
 ) -> Result<Value, String> {
-    let count = registered(value, owned, provider);
+    let count = registered(value, owned, provider, false);
     let present = helper_path(root).is_file();
     let disabled: Result<bool, String> = if provider == "claude" {
         Ok(value
@@ -173,12 +185,34 @@ fn status(
         .as_ref()
         .err()
         .map(|e| format!("Could not inspect config.toml: {e}"));
-    Ok(
-        json!({"configDir":root, "configPath":root.join(config_name(provider)?), "installed":count==events(provider).len() && present,
+    let mut result = json!({"configDir":root, "configPath":root.join(config_name(provider)?), "installed":count==events(provider).len() && present,
         "registered":count, "expected":events(provider).len(), "helperPresent":present,
         "disabled":disabled.unwrap_or(false), "warning":warning,
-        "titleBinding":if provider == "codex" { Some(title::status(root)) } else { None }}),
-    )
+        "titleBinding":if provider == "codex" { Some(title::status(root)) } else { None }});
+    let current_count = registered(value, owned, provider, true);
+    let owned_count = value
+        .get("hooks")
+        .and_then(Value::as_object)
+        .map(|hooks| {
+            hooks
+                .values()
+                .filter_map(Value::as_array)
+                .flatten()
+                .filter_map(|group| group.get("hooks").and_then(Value::as_array))
+                .flatten()
+                .filter(|handler| owned.matches(handler))
+                .count()
+        })
+        .unwrap_or(0);
+    result["ownedCommands"] = json!(owned_count);
+    updates::append_status(
+        &mut result,
+        root,
+        executable,
+        current_count,
+        current_count == events(provider).len() && owned_count == events(provider).len(),
+    );
+    Ok(result)
 }
 
 fn edit(
@@ -244,17 +278,18 @@ pub fn manage(
     executable: &Path,
 ) -> Result<Value, String> {
     let name = config_name(provider)?;
-    if !root.is_absolute() || !matches!(operation, "status" | "install" | "remove") {
+    if !root.is_absolute() || !matches!(operation, "status" | "install" | "remove" | "update") {
         return Err("Absolute config directory and valid operation required".into());
     }
     let path = root.join(name);
     let owned = OwnedHandlers::new(root, provider)?;
-    if operation == "status" || (operation == "remove" && !root.exists()) {
+    if operation == "status" || (matches!(operation, "remove" | "update") && !root.exists()) {
         return status(
             root,
             provider,
             &parse_config(read_config(&path)?.as_deref())?,
             &owned,
+            executable,
         );
     }
     // Validate before creating artifacts or touching the existing configuration.
@@ -275,10 +310,15 @@ pub fn manage(
     } else {
         None
     };
-    status(root, provider, &value, &owned)?;
+    let current = status(root, provider, &value, &owned, executable)?;
+    // A notification can be stale after a user removes hooks. Never install anew.
+    if operation == "update" && current["ownedCommands"] == 0 && current["helperPresent"] == false {
+        return Ok(current);
+    }
+    let installing = matches!(operation, "install" | "update");
     let before = value.clone();
-    edit(&mut value, &owned, operation == "install", provider)?;
-    if operation == "install" {
+    edit(&mut value, &owned, installing, provider)?;
+    if installing {
         let destination = helper_path(root);
         if destination
             .parent()
@@ -341,7 +381,7 @@ pub fn manage(
             Err(e) => return Err(format!("Hooks removed; helper cleanup failed: {e}")),
         }
     }
-    let mut result = status(root, provider, &value, &owned)?;
+    let mut result = status(root, provider, &value, &owned, executable)?;
     if let Some(warning) = title_warning {
         result["titleBinding"]["warning"] = json!(warning);
     }

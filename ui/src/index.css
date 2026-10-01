@@ -401,6 +401,50 @@
   color: var(--accent);
   background: var(--accent-20);
 }
+.agent-hook-update-notice {
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  bottom: 36px;
+  right: 16px;
+  width: min(460px, calc(100vw - 32px));
+  max-height: 50vh;
+  overflow: hidden;
+  z-index: 9500;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--accent);
+  padding: 16px;
+  box-shadow: 0 4px 18px #00000066;
+  font-size: var(--settings-label-size);
+}
+.agent-hook-update-notice p {
+  margin: 6px 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.agent-hook-update-notice__targets {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  min-height: 0;
+  overflow: auto;
+}
+.agent-hook-update-notice__target {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.agent-hook-update-notice__target > div {
+  min-width: 0;
+}
+.agent-hook-update-notice__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
 .agent-hooks-plan {
   font-size: var(--settings-label-size);
 }

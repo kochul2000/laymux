@@ -306,6 +306,7 @@ ADR 이 필요한 대표 기준:
 | [0286](0286-clickable-agent-resume-hints.md) | 종료 안내의 복원 링크는 설정 명령으로 같은 셸에서 수동 실행한다 | Proposed |
 | [0287](0287-wsl-claude-daemon-process-role.md) | WSL Claude daemon은 대화 프로세스 후보에서 제외한다 | Accepted |
 | [0288](0288-path-link-home-and-hangul-tail.md) | path-link 는 `~` 를 pane 셸의 홈으로 풀고 경로에 붙은 한글 조사를 뗀 후보를 함께 낸다 (0148·0188·0191·0235 확장) | Accepted |
+| [0289](0289-agent-hook-update-notification.md) | 설치된 에이전트 훅의 갱신 필요를 자동 검사하고 사용자 동작으로 갱신한다 | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

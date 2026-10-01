@@ -33,6 +33,8 @@ import { LocalMobileModeOverlay } from "@/components/layout/LocalMobileModeOverl
 import { useAutoRemoteAccessPrompt } from "@/hooks/useAutoRemoteAccessPrompt";
 import { useLocalMobileModeStore } from "@/stores/local-mobile-mode-store";
 import { useSessionCheckpointLifecycle } from "@/hooks/useSessionCheckpointLifecycle";
+import { subscribeAgentHookUpdates } from "@/lib/agent-hook-updates";
+import { AgentHookUpdateNotice } from "@/components/layout/AgentHookUpdateNotice";
 
 export function App() {
   useKeyboardShortcuts();
@@ -48,6 +50,9 @@ export function App() {
   const localMobileModeActive = useLocalMobileModeStore((state) => state.active);
 
   const [recoveryDismissed, setRecoveryDismissed] = useState(false);
+  useEffect(() => {
+    if (loaded) return subscribeAgentHookUpdates();
+  }, [loaded]);
 
   // Save terminal state before window close (Alt+F4, OS close, etc.)
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -184,6 +189,7 @@ export function App() {
       )}
       <LocalMobileModeOverlay />
       <LifecycleModal />
+      <AgentHookUpdateNotice />
       {!localMobileModeActive && <RemoteControlOverlay />}
     </div>
   );

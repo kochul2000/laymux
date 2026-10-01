@@ -20,7 +20,7 @@ fn main() {
 
 fn manage(args: &[String]) -> Result<serde_json::Value, String> {
     if args.len() < 3 || args[0] != "manage" {
-        return Err("Usage: laymux-agent-hook manage <claude|codex> <status|install|remove> [config-directory]".into());
+        return Err("Usage: laymux-agent-hook manage <claude|codex> <status|install|remove|update> [config-directory]".into());
     }
     let root = match args.get(3).filter(|s| !s.is_empty()) {
         Some(path) => std::path::PathBuf::from(path),

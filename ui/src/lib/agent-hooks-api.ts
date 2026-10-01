@@ -29,6 +29,12 @@ export interface HookStatus {
   expected: number;
   helperPresent: boolean;
   disabled: boolean;
+  helperCurrent?: boolean | null;
+  currentRegistered?: number;
+  ownedCommands?: number;
+  updateRequired?: boolean;
+  updateReasons?: ("helper_missing" | "helper_outdated" | "registrations")[];
+  updateWarning?: string | null;
   warning?: string | null;
   titleBinding?: { configured: boolean; managed: boolean; warning?: string | null } | null;
 }
@@ -46,7 +52,7 @@ export const listAgentHookEnvironments = () =>
 export const getAgentHookConnections = () => invoke<HookConnection[]>("get_agent_hook_connections");
 export function manageAgentHooks(
   provider: HookProvider,
-  operation: "status" | "install" | "remove",
+  operation: "status" | "install" | "remove" | "update",
   distro: string | null,
   configDir: string | null,
 ) {
@@ -54,3 +60,17 @@ export function manageAgentHooks(
     request: { provider, operation, distro, configDir },
   });
 }
+
+export interface HookUpdateTarget {
+  provider: HookProvider;
+  distro: string | null;
+  status: HookStatus;
+}
+export interface HookUpdateError {
+  provider: HookProvider | null;
+  distro: string | null;
+  configDir: string | null;
+  message: string;
+}
+export const getAgentHookUpdates = () =>
+  invoke<{ targets: HookUpdateTarget[]; errors: HookUpdateError[] }>("get_agent_hook_updates");

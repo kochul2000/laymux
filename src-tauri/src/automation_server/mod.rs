@@ -159,6 +159,10 @@ pub fn build_router(
             get(agent_hooks::hook_environments),
         )
         .route("/api/v1/agent-hooks/manage", post(agent_hooks::hook_manage))
+        .route(
+            "/api/v1/agent-hooks/updates",
+            get(agent_hooks::hook_updates),
+        )
         .route("/api/v1/agent-hooks/events", post(agent_hooks::hook_event))
         .route("/api/v1/agent-hooks/states", get(agent_hooks::hook_states))
         .route(

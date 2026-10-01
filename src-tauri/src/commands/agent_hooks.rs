@@ -20,3 +20,11 @@ pub fn get_agent_hook_connections(state: State<Arc<AppState>>) -> Result<Vec<Val
 }
 mod states;
 pub use states::*;
+
+#[tauri::command(async)]
+pub fn get_agent_hook_updates(
+    state: State<Arc<AppState>>,
+    app: tauri::AppHandle,
+) -> Result<Value, String> {
+    agent_hooks::updates::audit(&state, &app).map_err(|e| e.to_string())
+}
