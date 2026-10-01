@@ -2,8 +2,8 @@
 
 - Status: Proposed
 - Date: 2026-10-01
-- Source: 사용자 버그 신고("`~/data_projects/.../AHBPS-26-218_통계자문메모.docx다.` 나 `/tmp/abc` 처럼 root 로 시작하는 파일 경로가 제대로 파싱되지 않는다", "`~`(home)는 Windows·WSL 모두 지원"), [ADR-0148](0148-bounded-multi-path-selection-links.md), [ADR-0188](0188-path-link-ambient-detection-triggers.md), [ADR-0191](0191-path-link-space-extended-candidates.md)
-- Extends: ADR-0148, ADR-0188, ADR-0191
+- Source: 사용자 버그 신고("`~/data_projects/.../AHBPS-26-218_통계자문메모.docx다.` 나 `/tmp/abc` 처럼 root 로 시작하는 파일 경로가 제대로 파싱되지 않는다", "`~`(home)는 Windows·WSL 모두 지원"), [ADR-0148](0148-bounded-multi-path-selection-links.md), [ADR-0188](0188-path-link-ambient-detection-triggers.md), [ADR-0191](0191-path-link-space-extended-candidates.md), [ADR-0235](0235-wrapped-path-link-logical-lines.md)
+- Extends: ADR-0148, ADR-0188, ADR-0191, ADR-0235
 
 ## Context
 
@@ -27,7 +27,7 @@ path-link 후보는 `joinCwdPath` 로 절대경로가 된 뒤 `stat_paths` 로 �
   - cwd 는 판별 근거로 쓰지 않는다. `/mnt/c/...` 에 있는 WSL pane 의 `~` 도 Linux 홈이다.
 - **조합은 프론트엔드 `joinCwdPath(cwd, path, home)` 가 한다.** 홈 상대경로는 홈의 모양(Windows 면 백슬래시, 아니면 슬래시)으로 붙이고, 홈이 `null` 이면 그 후보는 조합하지 않고 버린다 — cwd 아래 `~` 디렉토리로 오인하지 않는다. 조합된 절대경로가 그대로 `stat_paths`·viewer·cwd 전파·OS 열기로 흐르므로 하류는 바뀌지 않는다.
 - **홈은 필요할 때만 묻는다.** 세 트리거(desktop selection·point, Remote 3 mode)는 후보 중 홈 상대경로가 있을 때만 홈을 조회한다. 조회 실패는 `~` 후보만 잃고 나머지 후보 검증은 그대로 진행한다. 조회를 기다리는 사이 새 선택·무효화가 끼면 그 평가는 버린다.
-- **`~/` 로 시작하는 토큰은 공백 확장 앵커다**(ADR-0191 확장). 홈 상대경로도 cwd 와 무관하게 위치가 정해지므로 절대경로와 같은 자격이다.
+- **`~/` 로 시작하는 토큰은 공백 확장 앵커다**(ADR-0191 확장). 홈 상대경로도 cwd 와 무관하게 위치가 정해지므로 절대경로와 같은 자격이다. 같은 이유로 hard wrap 결합([ADR-0235](0235-wrapped-path-link-logical-lines.md))에서 `~/` 로 시작하는 다음 줄은 새 경로로 보고 앞줄에 잇지 않는다.
 - **한글 꼬리 변형.** 후보 텍스트가 한글 음절(가–힣)로 끝나고 그 한글 연속 바로 앞 글자가 한글·공백·`/`·`\` 가 아니면, 그 한글 연속을 떼고 꼬리 정리(ADR-0191 의 `trimPathTail`)를 다시 적용한 변형을 만든다. 시작 offset 과 원문(포인터 덮기) 범위는 원 후보와 같다.
   - 원문을 **대체하지 않고 함께** 낸다. `v2최종` 처럼 실제 이름이 그렇게 끝나면 원문이 존재하고 더 길어 이긴다(longest-existing-wins). `보고서에` 처럼 한글 이름에 이어진 한글, `dir/한글` 처럼 구분자 뒤 한글은 이름일 수 있어 떼지 않는다.
   - 비용: 기본 토큰과 공백 확장 cut 마다 변형은 최대 1개다. `selection` 에서는 ADR-0191 확장과 같은 best-effort 추가 후보(기본 후보 all-or-nothing 상한 밖, 배치 총량 64 안)이며 넓은 선택에서는 변형이 strong 일 때만 받는다. `point` 는 토큰 1 + 변형 1 + 지점을 덮는 확장 cut 과 그 변형으로 여전히 상수다. `screen` 은 변형도 strong 조건과 64 상한 안에서 함께 센다.
