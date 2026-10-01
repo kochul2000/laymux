@@ -7275,6 +7275,37 @@ describe("TerminalView", () => {
     expect(mockStatPaths).toHaveBeenCalledWith(["/home/me/notes/a.md"]);
   });
 
+  it("still validates the other selected paths when the pane home lookup fails", async () => {
+    mockGetSelection.mockReturnValue("C:/work/a.ts ~/b.md");
+    setMockBufferLine("C:/work/a.ts ~/b.md");
+    mockGetSelectionPosition.mockReturnValue({
+      start: { x: 0, y: 0 },
+      end: { x: 19, y: 0 },
+    });
+    mockGetTerminalHomeDirectory.mockRejectedValueOnce(new Error("ipc"));
+    mockStatPaths.mockResolvedValue([{ exists: true, isDirectory: false }]);
+
+    render(<TerminalView instanceId="t-path-home-failed" profile="PowerShell" syncGroup="" />);
+
+    const outer = screen.getByTestId("terminal-view-t-path-home-failed");
+    outer.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, clientX: 0, clientY: 0 }),
+    );
+    window.dispatchEvent(
+      new PointerEvent("pointermove", { bubbles: true, pointerId: 1, clientX: 30, clientY: 0 }),
+    );
+    window.dispatchEvent(
+      new PointerEvent("pointerup", { bubbles: true, pointerId: 1, clientX: 30, clientY: 0 }),
+    );
+    const selectionCallback = mockOnSelectionChange.mock.calls[0][0];
+    selectionCallback();
+    window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: 30, clientY: 0 }));
+
+    await vi.waitFor(() => expect(mockStatPaths).toHaveBeenCalledTimes(1));
+    // ~/b.md 만 빠지고, 절대경로 후보(공백 확장 포함)는 그대로 검증한다.
+    expect(mockStatPaths).toHaveBeenCalledWith(["C:/work/a.ts", "C:/work/a.ts ~/b.md"]);
+  });
+
   it("invalidates the previous path link as soon as a new pointer drag moves", async () => {
     mockGetSelection.mockReturnValue(String.raw`C:\work\src\main.ts`);
     setMockBufferLine(String.raw`C:\work\src\main.ts`);

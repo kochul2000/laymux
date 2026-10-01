@@ -15,6 +15,7 @@ import {
   resolveOverlappingRanges,
   isHomeRelativePath,
   PATH_LINK_MAX_SPACE_EXTENSIONS,
+  PATH_LINK_MAX_STAT_BATCH,
 } from "./path-link-detect";
 
 describe("isPathLinkCwdCurrent", () => {
@@ -788,6 +789,28 @@ describe("경로 끝에 붙은 한글 조사·어미", () => {
   it("한글 이름에 이어진 한글이나 구분자 뒤 한글은 조사로 떼지 않는다", () => {
     expect(pointTexts("열기 ~/문서/보고서에", "~")).toEqual(["~/문서/보고서에"]);
     expect(pointTexts("cd /tmp/한글", "/tmp")).toEqual(["/tmp/한글"]);
+  });
+
+  it("point 후보는 지점과 무관하게 stat 배치 상한을 넘지 않고 지목 토큰이 먼저다", () => {
+    const line = "수정: " + Array.from({ length: 12 }, (_, i) => `/r/f${i}.ts와`).join(" ");
+    for (let offset = 0; offset < line.length; offset++) {
+      expect(extractPathCandidatesAtOffset(line, offset, limits).length).toBeLessThanOrEqual(
+        PATH_LINK_MAX_STAT_BATCH,
+      );
+    }
+    expect(pointTexts(line, "/r/f11").slice(0, 2)).toEqual(["/r/f11.ts와", "/r/f11.ts"]);
+  });
+
+  it("조사를 떼고 남은 변형이 공백으로 끝나면 버린다", () => {
+    const texts = pointTexts("/x/my file .에", "/x");
+    expect(texts).toContain("/x/my file");
+    expect(texts).not.toContain("/x/my file ");
+  });
+
+  it("point: 원 토큰이 길이 상한을 넘어도 상한 안의 변형은 낸다", () => {
+    expect(
+      extractPathCandidatesAtOffset("/tmp/abc에", 1, { maxPathLength: 8 }).map((c) => c.text),
+    ).toEqual(["/tmp/abc"]);
   });
 
   it("공백 확장 후보의 끝에 붙은 조사도 뗀 후보를 낸다", () => {

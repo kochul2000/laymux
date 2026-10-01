@@ -497,3 +497,32 @@ describe("createPathLinkPointEvaluator 홈 상대경로 (ADR-0288)", () => {
     expect(h.apply).not.toHaveBeenCalled();
   });
 });
+
+describe("createPathLinkPointEvaluator 겹친 홈 조회 (ADR-0288)", () => {
+  it("홈 조회가 겹치면 늦게 시작한 지점이 이기고 앞 지점은 stat 하지 않는다", async () => {
+    // "open ~/aaa.md and ~/bbb.md" — 첫 토큰 컬럼 6~13, 둘째 19~26.
+    const h = harness("open ~/aaa.md and ~/bbb.md");
+    const releases: Array<(home: string | null) => void> = [];
+    h.getHome.mockImplementation(
+      () =>
+        new Promise<string | null>((resolve) => {
+          releases.push(resolve);
+        }),
+    );
+    const evaluator = createPathLinkPointEvaluator(h.deps);
+
+    const first = evaluator.evaluateAt(8, 4);
+    const second = evaluator.evaluateAt(22, 4);
+    releases[0]("/home/me");
+    await first;
+    releases[1]("/home/me");
+    await second;
+
+    // 앞 지점(~/aaa.md)의 배치는 없다. 뒤 지점을 덮는 앵커 확장만 함께 나간다.
+    expect(h.statPaths).toHaveBeenCalledTimes(1);
+    expect(h.statPaths).toHaveBeenCalledWith(["/home/me/bbb.md", "/home/me/aaa.md and ~/bbb.md"]);
+    expect(h.apply).toHaveBeenLastCalledWith([
+      expect.objectContaining({ token: "~/bbb.md", absPath: "/home/me/bbb.md" }),
+    ]);
+  });
+});

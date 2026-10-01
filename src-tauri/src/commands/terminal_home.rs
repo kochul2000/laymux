@@ -39,10 +39,13 @@ pub fn terminal_home_directory(
     match host {
         // An unsafe stored or explicit distro fails closed instead of falling
         // back to the default distribution's home.
-        InitialExecutionHost::Wsl => {
-            let (distro, _needs_default) = wsl_target?.ok()?;
-            wsl_home(distro.as_deref())
-        }
+        InitialExecutionHost::Wsl => match wsl_target? {
+            Ok((distro, _needs_default)) => wsl_home(distro.as_deref()),
+            Err(error) => {
+                tracing::warn!(terminal_id, %error, "invalid WSL distro; no home for path links");
+                None
+            }
+        },
         InitialExecutionHost::NativeWindows | InitialExecutionHost::NonWindows => host_home(),
         InitialExecutionHost::DirectSsh | InitialExecutionHost::Unknown => None,
     }

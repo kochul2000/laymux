@@ -182,7 +182,8 @@ function stripHangulTail(text: string): string | null {
   const match = HANGUL_TAIL_RE.exec(text);
   if (!match) return null;
   const stripped = trimPathTail(text.slice(0, text.length - match[1].length));
-  return stripped && stripped !== text ? stripped : null;
+  // 공백으로 끝나면(`my file .에`) 그 앞까지는 이미 앞 cut 후보다.
+  return stripped && stripped !== text && !/\s$/.test(stripped) ? stripped : null;
 }
 
 /**
@@ -563,8 +564,8 @@ export function resolveOverlappingRanges<T>(
  * 받고, 실제 존재 여부는 `stat_paths` 가 판정한다.
  *
  * 여기에 offset 을 덮는 공백 확장 후보(ADR-0191, 절대경로 앵커 기준 접두)를
- * 더한다 — 후보 수는 1 + 앵커당 cut 상한으로 여전히 상수이며, 트리거당 stat
- * 배치는 1회다. offset 이 공백 위여도 그 공백을 **포함하는** 확장 후보는
+ * 더한다 — 후보 수는 상수이고 `PATH_LINK_MAX_STAT_BATCH` 를 넘지 않으며(넘치면
+ * 먼 앵커의 확장부터 버린다), 트리거당 stat 배치는 1회다. offset 이 공백 위여도 그 공백을 **포함하는** 확장 후보는
  * 평가한다(경로 내부의 공백 위 hover/클릭).
  *
  * offset 은 트림 *전* 원문(따옴표·괄호·`:line:col` 포함) 범위와 비교한다.
@@ -583,22 +584,24 @@ export function extractPathCandidatesAtOffset(
   if (line[offset].trim() !== "") {
     for (const token of readMaximalTokens(line, 0)) {
       if (offset < token.rawStart || offset >= token.rawEnd) continue;
-      if (token.text.length > limits.maxPathLength) break;
-      results.push(candidateOf(token));
+      if (token.text.length <= limits.maxPathLength) results.push(candidateOf(token));
       // ADR-0288: 같은 토큰의 한글 조사 변형. 지목된 토큰이라 맨이름도 받는다.
       const variant = hangulTailVariant(token);
-      if (variant) results.push(candidateOf(variant));
+      if (variant && variant.text.length <= limits.maxPathLength) {
+        results.push(candidateOf(variant));
+      }
       break;
     }
   }
-  for (const candidate of spaceExtensionCandidates(line, 0, limits.maxPathLength)) {
-    if (offset < candidate.startIndex || offset >= candidate.rawEnd) continue;
-    results.push({
-      text: candidate.text,
-      lineIndex: candidate.lineIndex,
-      startIndex: candidate.startIndex,
-      endIndex: candidate.endIndex,
-    });
+  // 지점을 덮는 확장 후보는 가까운 앵커부터 센다. 앵커가 많은 줄(한글 조사가
+  // 붙은 경로 나열)에서도 배치 상한(백엔드가 초과 배치를 통째로 거부한다) 안에
+  // 지목 토큰과 가장 그럴듯한 확장이 남는다.
+  const extensions = spaceExtensionCandidates(line, 0, limits.maxPathLength)
+    .filter((candidate) => offset >= candidate.startIndex && offset < candidate.rawEnd)
+    .sort((a, b) => b.startIndex - a.startIndex);
+  for (const candidate of extensions) {
+    if (results.length >= PATH_LINK_MAX_STAT_BATCH) break;
+    results.push(candidateOf(candidate));
   }
   return results;
 }

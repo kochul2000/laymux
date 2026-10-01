@@ -78,6 +78,9 @@ export function createPathLinkPointEvaluator(deps: PathLinkPointDeps): PathLinkP
   // 지금 stat 이 도는 중인 지점. 같은 지점의 중복 배치를 막는다.
   let pendingKey: string | null = null;
   let revision = 0;
+  // 홈 조회를 시작한 평가의 순번. 조회가 겹치면 마지막에 시작한 평가만 이어간다
+  // (revision 은 stat 시작에만 오르므로 먼저 끝난 앞 평가를 막지 못한다).
+  let homeSeq = 0;
 
   // 표시를 비우는 것은 진행 중 조회도 무의미하게 만든다(포인터가 다른 곳으로
   // 갔거나 기능이 꺼졌다) → revision 을 올려 늦은 결과를 버린다.
@@ -145,10 +148,12 @@ export function createPathLinkPointEvaluator(deps: PathLinkPointDeps): PathLinkP
       const cwd = deps.getCwd();
       let home: string | null = null;
       if (needsPathLinkHome(candidates)) {
-        // 홈 조회도 끼어든 사건(invalidate·다른 지점의 조회 시작)이 있으면 무의미하다.
+        // 조회 중 끼어든 사건(invalidate·다른 지점의 조회 시작·더 늦은 홈 조회)이
+        // 있으면 이 평가는 무의미하다.
         const before = revision;
+        const ticket = ++homeSeq;
         home = await deps.getHome().catch(() => null);
-        if (revision !== before) return;
+        if (revision !== before || ticket !== homeSeq) return;
       }
       const { uniquePaths, pending } = planPathLinkStat(candidates, cwd, home);
       if (pending.length === 0) {
