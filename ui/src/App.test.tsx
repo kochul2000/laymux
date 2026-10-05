@@ -138,6 +138,7 @@ vi.mock("@/lib/tauri-api", () => {
     clipboardWriteText: vi.fn().mockResolvedValue(undefined),
     setSleepInhibit: vi.fn().mockResolvedValue(false),
     onSleepInhibitChanged: vi.fn().mockResolvedValue(() => {}),
+    reportFileViewerSignal: vi.fn().mockResolvedValue(undefined),
     getAppUpdateStatus: vi.fn().mockResolvedValue({
       enabled: false,
       channel: "stable",

@@ -22,6 +22,7 @@ import { useHiddenTerminalAutoClose } from "@/hooks/useHiddenTerminalAutoClose";
 import { useHiddenItemsCoordinator } from "@/hooks/useHiddenItemsCoordinator";
 import { useTerminalStartupCoordinator } from "@/hooks/useTerminalStartupCoordinator";
 import { useSleepPrevention } from "@/hooks/useSleepPrevention";
+import { useRemoteFileViewerSignal } from "@/hooks/useRemoteFileViewerSignal";
 import { focusDockPane } from "@/lib/workspace-transition";
 import { XIcon } from "@/components/ui/icons";
 
@@ -166,6 +167,7 @@ export function AppLayout() {
   useHiddenTerminalAutoClose();
   useTerminalStartupCoordinator();
   useSleepPrevention();
+  useRemoteFileViewerSignal();
   const docks = useDockStore((s) => s.docks);
   const layoutMode = useDockStore((s) => s.layoutMode);
   const focusedDock = useDockStore((s) => s.focusedDock);

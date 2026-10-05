@@ -115,7 +115,6 @@ import {
         const fileViewerSection = $("fileViewerSection");
         const fileViewerStatusElement = $("fileViewerStatus");
         const fileViewerPathInput = $("fileViewerPath");
-        const pullHostFileViewerPathButton = $("pullHostFileViewerPath");
         const openFileViewerButton = $("openFileViewer");
         const fileViewerOverlayElement = $("fileViewerOverlay");
         const fileViewerTitleElement = $("fileViewerTitle");
@@ -238,6 +237,9 @@ import {
         const FILE_VIEWER_ZOOM_MIN = 0.25;
         const FILE_VIEWER_ZOOM_MAX = 5;
         const FILE_VIEWER_TEXT_BASE_PX = 13;
+        // How long the Files button's unread dot blinks for a new PC viewer
+        // open before it settles to a steady dot (ADR-0291).
+        const HOST_VIEWER_BLINK_MS = 8000;
         const REMOTE_FONT_SIZE_MIN = 6;
         const REMOTE_FONT_SIZE_MAX = 72;
         const REMOTE_COMPOSER_OPACITY_MIN = 20;
@@ -423,9 +425,14 @@ import {
         // skipped). Navigation now carries every workspace's pane ids, so the
         // invariant can be reconciled without first entering a workspace.
         let spatialExcludedWorkspaceIds = loadSpatialExcludedWorkspaceIds();
-        let fileViewerStatusInFlight = false;
-        let fileViewerStatusRequestRevision = 0;
-        let fileViewerPathRevision = 0;
+        // PC viewer unread signal (ADR-0291). `hostViewerSignalKey` is the open
+        // the PC shows now ("epoch:revision", null when nothing is open) and
+        // `hostViewerSeenKey` the last one this document consumed. Document
+        // memory only: a reload may light the dot again for a file still open.
+        let hostViewerSignalKey = null;
+        let hostViewerSeenKey = null;
+        let hostViewerBlinkTimer = null;
+        let hostViewerOpenRevision = 0;
         let fileViewerRequestRevision = 0;
         let fileViewerPath = null;
         let fileViewerDownloadInFlight = false;
@@ -1986,57 +1993,107 @@ import {
           fileExplorerHeaderButton.hidden = !connected || !headerIcons.headerFiles;
           fileViewerSection.classList.toggle("locked", !connected);
           fileViewerPathInput.disabled = !connected;
-          pullHostFileViewerPathButton.disabled = !connected || fileViewerStatusInFlight;
-          pullHostFileViewerPathButton.textContent = fileViewerStatusInFlight
-            ? "Loading..."
-            : "From host";
           openFileViewerButton.disabled = !connected || !fileViewerPathInput.value.trim();
           const text = message || (connected
-            ? "Enter a path or use From host."
+            ? "Enter a host file path."
             : "Connect to open a host file.");
           fileViewerStatusElement.textContent = text;
           fileViewerStatusElement.title = "";
           fileViewerStatusElement.classList.toggle("error", isError);
+          renderHostViewerIndicator();
         }
 
-        async function pullHostFileViewerPath() {
+        // The Files button carries the PC viewer's unread dot (ADR-0291): lit
+        // while the PC shows a file this document has not opened, blinking for
+        // a moment when that open is new. No banner — the dot only draws the
+        // eye to the entry point that already exists.
+        function hostViewerUnread() {
+          return Boolean(hostViewerSignalKey && hostViewerSignalKey !== hostViewerSeenKey);
+        }
+
+        function stopHostViewerBlink() {
+          if (hostViewerBlinkTimer) {
+            clearTimeout(hostViewerBlinkTimer);
+            hostViewerBlinkTimer = null;
+          }
+          fileExplorerHeaderButton.classList.remove("host-viewer-blink");
+        }
+
+        function startHostViewerBlink() {
+          stopHostViewerBlink();
+          // Restart from the first frame for every new open, not mid-cycle.
+          void fileExplorerHeaderButton.offsetWidth;
+          fileExplorerHeaderButton.classList.add("host-viewer-blink");
+          hostViewerBlinkTimer = setTimeout(() => {
+            hostViewerBlinkTimer = null;
+            fileExplorerHeaderButton.classList.remove("host-viewer-blink");
+          }, HOST_VIEWER_BLINK_MS);
+        }
+
+        function renderHostViewerIndicator() {
+          const unread = hostViewerUnread();
+          fileExplorerHeaderButton.classList.toggle("host-viewer-unread", unread);
+          if (!unread) stopHostViewerBlink();
+          const label = unread ? "Open the file shown on PC" : "Browse host files";
+          fileExplorerHeaderButton.setAttribute("aria-label", label);
+          fileExplorerHeaderButton.title = label;
+        }
+
+        function hostViewerOpenKey(source) {
+          return typeof source?.epoch === "string" && Number.isSafeInteger(source?.revision)
+            ? `${source.epoch}:${source.revision}`
+            : null;
+        }
+
+        // Heartbeats carry only whether the PC viewer shows a file and which
+        // open it is — never the path (ADR-0291, ADR-0042).
+        function applyHostViewerSignal(signal) {
+          // Absent or malformed says nothing new: keep the dot as it was.
+          if (!signal || typeof signal !== "object" || typeof signal.open !== "boolean") return;
+          const key = signal.open ? hostViewerOpenKey(signal) : null;
+          if (key === hostViewerSignalKey) return;
+          hostViewerSignalKey = key;
+          renderHostViewerIndicator();
+          if (hostViewerUnread()) startHostViewerBlink();
+        }
+
+        // A lit dot means "the PC put a file on screen you have not seen", so
+        // the same button goes straight to it. The path is read only now, behind
+        // the FileViewer capability, and Back lands in that file's folder.
+        async function openHostViewerFile() {
           if (!leaseId || !fileViewerToken) return;
-          if (fileViewerStatusInFlight) return;
-          fileViewerStatusInFlight = true;
-          const statusRequestRevision = ++fileViewerStatusRequestRevision;
-          const statusLeaseId = leaseId;
-          const statusFileViewerToken = fileViewerToken;
-          const statusPathRevision = fileViewerPathRevision;
-          let message = null;
-          let isError = false;
-          renderFileViewerState();
+          const requestRevision = ++hostViewerOpenRevision;
+          const requestLeaseId = leaseId;
+          const requestFileViewerToken = fileViewerToken;
           try {
             const data = await fileViewerFetch("/remote/v1/file-viewer/status", {
-              leaseId: statusLeaseId,
-              fileViewerToken: statusFileViewerToken,
+              leaseId: requestLeaseId,
+              fileViewerToken: requestFileViewerToken,
             });
-            if (leaseId !== statusLeaseId || fileViewerToken !== statusFileViewerToken) return;
-            if (fileViewerPathRevision !== statusPathRevision) {
-              message = "Host path was not applied because the input changed.";
+            if (
+              requestRevision !== hostViewerOpenRevision ||
+              leaseId !== requestLeaseId ||
+              fileViewerToken !== requestFileViewerToken
+            ) {
               return;
             }
-            if (data.open !== true || typeof data.path !== "string" || !data.path) {
-              message = "No file is open in the host viewer.";
+            if (data?.open !== true || typeof data.path !== "string" || !data.path) {
+              // The PC closed it before the tap: consume the dot, show plain Files.
+              hostViewerSeenKey = hostViewerSignalKey;
+              renderHostViewerIndicator();
+              openCurrentFileExplorer();
               return;
             }
-            fileViewerPathInput.value = data.path;
-            fileViewerPathRevision += 1;
-            message = "Host viewer path loaded.";
+            hostViewerSeenKey = hostViewerOpenKey(data) || hostViewerSignalKey;
+            renderHostViewerIndicator();
+            openFileViewerOverlay(
+              data.path,
+              typeof data.parent === "string" && data.parent ? data.parent : undefined,
+            );
           } catch (error) {
-            if (!(await fileViewerControlLost(error))) {
-              message = error instanceof Error ? error.message : String(error);
-              isError = true;
-            }
-          } finally {
-            if (fileViewerStatusRequestRevision === statusRequestRevision) {
-              fileViewerStatusInFlight = false;
-              renderFileViewerState(message, isError);
-            }
+            if (requestRevision !== hostViewerOpenRevision) return;
+            if (await fileViewerControlLost(error)) return;
+            setStatus(error instanceof Error ? error.message : String(error), true);
           }
         }
 
@@ -4461,9 +4518,11 @@ import {
           updateNotificationActions();
           if (!connected) {
             clearPathLinkSelection();
-            fileViewerStatusInFlight = false;
-            fileViewerStatusRequestRevision += 1;
-            fileViewerPathRevision += 1;
+            // The consumed key survives a reconnect so the same open does not
+            // light the dot twice; the live signal waits for the next heartbeat.
+            hostViewerSignalKey = null;
+            hostViewerOpenRevision += 1;
+            stopHostViewerBlink();
             fileViewerPathInput.value = "";
             closeFileViewer();
             closeRemoteGithubView();
@@ -6835,6 +6894,7 @@ import {
             });
             if (leaseId !== heartbeatLeaseId || heartbeatAbortController !== controller) return;
             settingsReplyPending = remoteSettingsAgentBridge.receive(response?.deviceSettingsCommand, heartbeatLeaseId, requestStartedAt);
+            applyHostViewerSignal(response?.fileViewer);
             lastHeartbeatOkAt = Date.now();
             if (heartbeatRetryTimer) {
               clearTimeout(heartbeatRetryTimer);
@@ -13921,13 +13981,7 @@ import {
           loadNavigation().catch((err) => setStatus(err.message, true));
         });
         fileViewerPathInput.addEventListener("input", () => {
-          fileViewerPathRevision += 1;
           renderFileViewerState();
-        });
-        pullHostFileViewerPathButton.addEventListener("click", () => {
-          pullHostFileViewerPath().catch((error) => {
-            renderFileViewerState(error instanceof Error ? error.message : String(error), true);
-          });
         });
         fileViewerPathInput.addEventListener("keydown", (event) => {
           if (
@@ -13959,6 +14013,10 @@ import {
         fileViewerDownloadButton.addEventListener("click", () => downloadCurrentFileViewerFile());
         fileViewerOpenButton.addEventListener("click", () => downloadCurrentFileViewerFile(true));
         fileExplorerHeaderButton.addEventListener("click", () => {
+          if (hostViewerUnread()) {
+            void openHostViewerFile();
+            return;
+          }
           // Open where the user is working. Without an attached terminal the
           // bridge falls back to the host home directory.
           openCurrentFileExplorer();

@@ -1497,6 +1497,18 @@ export async function readFileForViewer(
   return invoke("read_file_for_viewer", { path, maxBytes: maxBytes ?? null });
 }
 
+/** Path-less desktop viewer signal that Remote heartbeats carry (ADR-0291). */
+export interface FileViewerSignal {
+  /** A file (not the empty prompt) is on the desktop viewer. */
+  open: boolean;
+  epoch: string;
+  revision: number;
+}
+
+export async function reportFileViewerSignal(signal: FileViewerSignal): Promise<void> {
+  return invoke("report_file_viewer_signal", { signal });
+}
+
 export interface SpreadsheetContent {
   sheetNames: string[];
   sheet: string;

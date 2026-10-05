@@ -858,7 +858,36 @@
         color: var(--text-secondary);
       }
       .file-explorer-button {
+        position: relative;
         color: var(--text-secondary);
+      }
+      /* PC viewer unread dot (ADR-0291): the drawer indicator's dot, on the
+         entry point that opens the file. It blinks only while the open is new;
+         an absolutely placed pseudo-element never moves the header. */
+      .file-explorer-button.host-viewer-unread::after {
+        position: absolute;
+        right: 2px;
+        top: 2px;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--yellow);
+        content: "";
+        pointer-events: none;
+      }
+      .file-explorer-button.host-viewer-unread.host-viewer-blink::after {
+        animation: host-viewer-dot-blink 1s ease-in-out infinite;
+      }
+      @keyframes host-viewer-dot-blink {
+        50% {
+          opacity: 0.15;
+        }
+      }
+      /* Reduced motion keeps the dot and drops the blink. */
+      @media (prefers-reduced-motion: reduce) {
+        .file-explorer-button.host-viewer-unread.host-viewer-blink::after {
+          animation: none;
+        }
       }
       .github-button {
         color: var(--text-secondary);

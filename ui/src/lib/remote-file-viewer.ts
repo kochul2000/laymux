@@ -220,7 +220,16 @@ export async function handleRemoteFileViewerRequest(
   if (method === "status") {
     const viewer = useFileViewerStore.getState();
     const open = viewer.open && Boolean(viewer.path);
-    return ok({ open, path: open ? viewer.path : null });
+    // `parent` is the Files folder Back returns to; Remote owns no host path
+    // syntax, so the desktop computes it (ADR-0291, ADR-0198).
+    const parent = open ? parentPath(viewer.path) : "";
+    return ok({
+      open,
+      path: open ? viewer.path : null,
+      epoch: viewer.openEpoch,
+      revision: viewer.openRevision,
+      parent: parent && parent !== viewer.path ? parent : null,
+    });
   }
   if (method === "pathLink") {
     const terminalId = typeof params.terminalId === "string" ? params.terminalId : "";

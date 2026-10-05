@@ -1182,7 +1182,13 @@ describe("handleAsyncAutomationRequest", () => {
 
     expect(status).toEqual({
       success: true,
-      data: { open: true, path: "/tmp/readme.md" },
+      data: {
+        open: true,
+        path: "/tmp/readme.md",
+        epoch: expect.any(String),
+        revision: expect.any(Number),
+        parent: "/tmp",
+      },
     });
     expect(readFileForViewer).toHaveBeenCalledWith("/tmp/readme.md", 8_388_608);
     expect(rendered.success).toBe(true);

@@ -61,7 +61,7 @@ ADR 이 필요한 대표 기준:
 | [0041](0041-remote-served-file-viewer.md) | Remote FileViewer는 lease-gated API와 자격 증명 없는 새 탭으로 제공 | Superseded by [0044](0044-remote-file-viewer-explicit-host-path.md), [0184](0184-remote-file-viewer-in-page-overlay.md) |
 | [0042](0042-remote-file-viewer-secret-capability.md) | Remote FileViewer는 lease-bound 비밀 capability로 호스트 파일을 읽음 (0041 권한·응답 정정) | Accepted |
 | [0043](0043-global-terminal-ready-startup-slot.md) | 터미널 시작은 앱 전역 준비 완료 슬롯으로 직렬화한다 | Accepted |
-| [0044](0044-remote-file-viewer-explicit-host-path.md) | Remote FileViewer의 호스트 경로 반영은 명시적 action으로만 수행 | Accepted |
+| [0044](0044-remote-file-viewer-explicit-host-path.md) | Remote FileViewer의 호스트 경로 반영은 명시적 action으로만 수행 | `From host` 부분만 [0291](0291-remote-host-viewer-unread-signal.md)로 대체 |
 | [0045](0045-remote-path-link-reuses-desktop-parser.md) | Remote 경로 링크는 데스크톱 파서와 CWD를 재사용해 검증한다 | Proposed |
 | [0046](0046-remote-spatial-pane-exclusions.md) | Remote 공간순회 제외 상태는 Remote 클라이언트가 소유한다 | Accepted |
 | [0047](0047-remote-spatial-workspace-exclusions.md) | Remote 공간순회 워크스페이스 제외와 pane↔workspace 승격/강등 | Accepted |
@@ -307,6 +307,7 @@ ADR 이 필요한 대표 기준:
 | [0287](0287-wsl-claude-daemon-process-role.md) | WSL Claude daemon은 대화 프로세스 후보에서 제외한다 | Accepted |
 | [0288](0288-path-link-home-and-hangul-tail.md) | path-link 는 `~` 를 pane 셸의 홈으로 풀고 경로에 붙은 한글 조사를 뗀 후보를 함께 낸다 (0148·0188·0191·0235 확장) | Accepted |
 | [0289](0289-agent-hook-update-notification.md) | 설치된 에이전트 훅의 갱신 필요를 자동 검사하고 사용자 동작으로 갱신한다 | Accepted |
+| [0291](0291-remote-host-viewer-unread-signal.md) | PC 뷰어 열림은 heartbeat 의 경로 없는 신호로 알리고 Files 버튼 한 번으로 진입한다 (0044 `From host` 대체, 0198 개정) | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

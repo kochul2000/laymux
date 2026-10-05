@@ -819,6 +819,7 @@ async fn remote_session_heartbeat(
         Some(Err(error)) => response["deviceSettingsError"] = serde_json::json!(error),
         _ => {}
     }
+    super::attach_heartbeat_signal(&mut response, &server.app_state);
     Json(response).into_response()
 }
 

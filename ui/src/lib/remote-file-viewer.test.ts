@@ -11,6 +11,7 @@ vi.mock("./tauri-api", () => ({
 
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
+import { useFileViewerStore } from "@/stores/file-viewer-store";
 import {
   getHomeDirectory,
   getTerminalHomeDirectory,
@@ -839,5 +840,40 @@ describe("Remote FileViewer download payload", () => {
     expect(
       await handleRemoteFileViewerRequest("download", { path: "C:\\big.bin", maxBytes: 1024 }),
     ).toEqual({ success: false, error: "File exceeds the 8388608 byte viewer limit" });
+  });
+});
+
+describe("Remote FileViewer status (ADR-0291)", () => {
+  beforeEach(() => {
+    useFileViewerStore.getState().closeFileViewer();
+  });
+
+  it("reports the open file with its open sequence and parent directory", async () => {
+    useFileViewerStore.getState().openFileViewer("C:\\work\\docs\\report.md");
+    const { openEpoch, openRevision } = useFileViewerStore.getState();
+
+    await expect(handleRemoteFileViewerRequest("status", {})).resolves.toEqual({
+      success: true,
+      data: {
+        open: true,
+        path: "C:\\work\\docs\\report.md",
+        epoch: openEpoch,
+        revision: openRevision,
+        parent: "C:\\work\\docs",
+      },
+    });
+  });
+
+  it("has no parent for a root and nothing to report for the empty viewer", async () => {
+    useFileViewerStore.getState().openFileViewer("/report.md");
+    const opened = await handleRemoteFileViewerRequest("status", {});
+    expect(opened).toMatchObject({ data: { open: true, path: "/report.md", parent: "/" } });
+
+    useFileViewerStore.getState().openEmptyFileViewer();
+    const { openEpoch, openRevision } = useFileViewerStore.getState();
+    await expect(handleRemoteFileViewerRequest("status", {})).resolves.toEqual({
+      success: true,
+      data: { open: false, path: null, epoch: openEpoch, revision: openRevision, parent: null },
+    });
   });
 });

@@ -8,10 +8,23 @@ test.use({ channel: "chromium" });
 const PNG_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==";
 
+type HostViewerSignal = { open: boolean; epoch: string; revision: number };
+
 async function installRemoteViewerMocks(
   context: BrowserContext,
-  options: { statusDelayMs?: number; renderDelayMs?: number; downloadStatus?: number } = {},
+  options: { renderDelayMs?: number; downloadStatus?: number } = {},
 ) {
+  // What heartbeats report about the PC viewer, and what status answers once
+  // the Files button is tapped (ADR-0291). Nothing is open by default.
+  let hostViewerSignal: HostViewerSignal = { open: false, epoch: "epoch-a", revision: 0 };
+  let statusBody: Record<string, unknown> = {
+    open: true,
+    path: "C:\\work\\current.md",
+    epoch: "epoch-a",
+    revision: 1,
+    parent: "C:\\work",
+  };
+  const listRequests: Array<Record<string, unknown>> = [];
   const renderRequests: Array<{
     url: string;
     authorization: string | null;
@@ -25,10 +38,6 @@ async function installRemoteViewerMocks(
     body: Record<string, unknown>;
   }> = [];
   let statusRequestCount = 0;
-  let resolveFirstStatusResponse: (() => void) | null = null;
-  const firstStatusResponse = new Promise<void>((resolve) => {
-    resolveFirstStatusResponse = resolve;
-  });
 
   await context.route("http://remote.test/remote/**", async (route) => {
     const request = route.request();
@@ -46,7 +55,7 @@ async function installRemoteViewerMocks(
       });
     }
     if (url.pathname === "/remote/v1/session/heartbeat") {
-      return route.fulfill({ json: { ok: true } });
+      return route.fulfill({ json: { ok: true, fileViewer: hostViewerSignal } });
     }
     if (url.pathname === "/remote/v1/session/release") {
       return route.fulfill({ json: { ok: true } });
@@ -65,20 +74,21 @@ async function installRemoteViewerMocks(
       });
     }
     if (url.pathname === "/remote/v1/file-viewer/list") {
+      const body = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
+      listRequests.push(body);
       return route.fulfill({
-        json: { path: "C:\\work", parent: "C:\\", entries: [], truncated: false },
+        json: {
+          path: typeof body.path === "string" ? body.path : "C:\\work",
+          parent: "C:\\",
+          entries: [],
+          truncated: false,
+        },
       });
     }
     if (url.pathname === "/remote/v1/file-viewer/status") {
       statusRequestCount += 1;
       expect(await request.headerValue("x-laymux-remote-file-viewer")).toBe("viewer-481");
-      if (options.statusDelayMs) {
-        await new Promise((resolve) => setTimeout(resolve, options.statusDelayMs));
-      }
-      await route.fulfill({ json: { open: true, path: "C:\\work\\current.md" } });
-      resolveFirstStatusResponse?.();
-      resolveFirstStatusResponse = null;
-      return;
+      return route.fulfill({ json: statusBody });
     }
     if (url.pathname === "/remote/v1/file-viewer/download") {
       const body = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
@@ -150,8 +160,14 @@ async function installRemoteViewerMocks(
   return {
     renderRequests,
     downloadRequests,
-    firstStatusResponse,
+    listRequests,
     statusRequestCount: () => statusRequestCount,
+    setHostViewerSignal: (signal: HostViewerSignal) => {
+      hostViewerSignal = signal;
+    },
+    setStatusBody: (body: Record<string, unknown>) => {
+      statusBody = body;
+    },
   };
 }
 
@@ -171,18 +187,15 @@ test("renders a lease-gated host file in this document, not a second tab", async
   context,
   page,
 }) => {
-  const { renderRequests, firstStatusResponse, statusRequestCount } =
-    await installRemoteViewerMocks(context);
+  const { renderRequests, statusRequestCount } = await installRemoteViewerMocks(context);
   await connectRemote(page);
 
   await openRemoteFileExplorer(page);
   await page.waitForTimeout(100);
+  // Connecting and browsing never read the PC viewer path (ADR-0044, ADR-0291).
   expect(statusRequestCount()).toBe(0);
   await expect(page.locator("#fileViewerPath")).toHaveValue("");
-  await expect(page.locator("#pullHostFileViewerPath")).toHaveText("From host");
-  await page.locator("#pullHostFileViewerPath").click();
-  await firstStatusResponse;
-  await expect(page.locator("#fileViewerPath")).toHaveValue("C:\\work\\current.md");
+  await expect(page.locator("#pullHostFileViewerPath")).toHaveCount(0);
   await page.locator("#fileViewerPath").fill("C:\\work\\notes.html");
 
   // A popup would be the old contract; the overlay must appear without one.
@@ -298,21 +311,137 @@ test("a stale render never lands in the overlay of a newer file", async ({ conte
   await expect(page.locator("#fileViewerText")).toHaveText("");
 });
 
-test("keeps a newer edit when a host path request finishes", async ({ context, page }) => {
-  const { firstStatusResponse } = await installRemoteViewerMocks(context, { statusDelayMs: 200 });
-  await connectRemote(page);
-  await openRemoteFileExplorer(page);
+// Heartbeats run every 1–5 s; give the next one room to land.
+const HEARTBEAT_WAIT = { timeout: 12_000 };
 
-  await page.locator("#fileViewerPath").fill("C:\\work\\draft.txt");
-  await page.locator("#pullHostFileViewerPath").click();
-  await expect(page.locator("#pullHostFileViewerPath")).toBeDisabled();
-  await page.locator("#fileViewerPath").fill("C:\\work\\newer.txt");
-  await firstStatusResponse;
+test.describe("PC viewer unread dot (ADR-0291)", () => {
+  test("blinks for a new PC open, settles, and one tap opens that file", async ({
+    context,
+    page,
+  }) => {
+    test.setTimeout(45_000);
+    const mocks = await installRemoteViewerMocks(context);
+    await connectRemote(page);
+    const files = page.locator("#fileExplorerHeader");
+    await expect(files).toBeVisible();
+    await expect(files).not.toHaveClass(/host-viewer-unread/);
 
-  await expect(page.locator("#fileViewerPath")).toHaveValue("C:\\work\\newer.txt");
-  await expect(page.locator("#fileViewerStatus")).toHaveText(
-    "Host path was not applied because the input changed.",
-  );
+    mocks.setHostViewerSignal({ open: true, epoch: "epoch-a", revision: 1 });
+    await expect(files).toHaveClass(/host-viewer-unread/, HEARTBEAT_WAIT);
+    await expect(files).toHaveClass(/host-viewer-blink/);
+    await expect(files).toHaveAttribute("aria-label", "Open the file shown on PC");
+    // The heartbeat carries no path, and the dot alone reads nothing.
+    expect(mocks.statusRequestCount()).toBe(0);
+    // The blink draws the eye for a moment, then the dot stays lit.
+    await expect(files).not.toHaveClass(/host-viewer-blink/, { timeout: 12_000 });
+    await expect(files).toHaveClass(/host-viewer-unread/);
+
+    await files.click();
+    await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+    await expect(page.locator("#fileViewerTitle")).toHaveText("C:\\work\\current.md");
+    await expect(page.frameLocator("#fileViewerPreview").locator("h1")).toHaveText(
+      "served from the Laymux host",
+    );
+    expect(mocks.statusRequestCount()).toBe(1);
+    expect(mocks.renderRequests.at(-1)?.body).toEqual({
+      source: "path",
+      path: "C:\\work\\current.md",
+    });
+    await expect(files).not.toHaveClass(/host-viewer-unread/);
+    await expect(files).toHaveAttribute("aria-label", "Browse host files");
+    // The explorer input is never filled from the PC.
+    await expect(page.locator("#fileViewerPath")).toHaveValue("");
+
+    // Back lands in the file's folder (ADR-0259), not on the terminal.
+    await page.locator("#fileViewerBack").click();
+    await expect.poll(() => mocks.listRequests.at(-1)).toMatchObject({ path: "C:\\work" });
+    await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+  });
+
+  test("the same file opened again on the PC lights the dot again", async ({ context, page }) => {
+    const mocks = await installRemoteViewerMocks(context);
+    mocks.setHostViewerSignal({ open: true, epoch: "epoch-a", revision: 1 });
+    await connectRemote(page);
+    const files = page.locator("#fileExplorerHeader");
+    await expect(files).toHaveClass(/host-viewer-unread/, HEARTBEAT_WAIT);
+    await files.click();
+    await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+    await page.locator("#fileViewerClose").click();
+    await expect(files).not.toHaveClass(/host-viewer-unread/);
+
+    // An agent re-showing a regenerated file is a new open.
+    mocks.setStatusBody({
+      open: true,
+      path: "C:\\work\\current.md",
+      epoch: "epoch-a",
+      revision: 2,
+      parent: "C:\\work",
+    });
+    mocks.setHostViewerSignal({ open: true, epoch: "epoch-a", revision: 2 });
+    await expect(files).toHaveClass(/host-viewer-unread/, HEARTBEAT_WAIT);
+    await expect(files).toHaveClass(/host-viewer-blink/);
+  });
+
+  test("the dot goes out when the PC closes its viewer", async ({ context, page }) => {
+    const mocks = await installRemoteViewerMocks(context);
+    mocks.setHostViewerSignal({ open: true, epoch: "epoch-a", revision: 1 });
+    await connectRemote(page);
+    const files = page.locator("#fileExplorerHeader");
+    await expect(files).toHaveClass(/host-viewer-unread/, HEARTBEAT_WAIT);
+
+    mocks.setHostViewerSignal({ open: false, epoch: "epoch-a", revision: 1 });
+    await expect(files).not.toHaveClass(/host-viewer-unread/, HEARTBEAT_WAIT);
+    await expect(files).not.toHaveClass(/host-viewer-blink/);
+    await files.click();
+    // Without a dot the button browses the working directory as before.
+    await expect(page.locator("#fileViewerOverlay #fileViewerSection")).toBeVisible();
+    expect(mocks.statusRequestCount()).toBe(0);
+  });
+
+  test("a file the PC closed before the tap falls back to plain Files", async ({
+    context,
+    page,
+  }) => {
+    const mocks = await installRemoteViewerMocks(context);
+    mocks.setHostViewerSignal({ open: true, epoch: "epoch-a", revision: 1 });
+    mocks.setStatusBody({ open: false, path: null, epoch: "epoch-a", revision: 1, parent: null });
+    await connectRemote(page);
+    const files = page.locator("#fileExplorerHeader");
+    await expect(files).toHaveClass(/host-viewer-unread/, HEARTBEAT_WAIT);
+
+    await files.click();
+    await expect(page.locator("#fileViewerOverlay #fileViewerSection")).toBeVisible();
+    expect(mocks.listRequests.at(-1)).toMatchObject({ source: "terminalCwd" });
+    expect(mocks.renderRequests).toEqual([]);
+    await expect(files).not.toHaveClass(/host-viewer-unread/);
+  });
+
+  test("reduced motion keeps the dot and drops the blink", async ({ context, page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const mocks = await installRemoteViewerMocks(context);
+    mocks.setHostViewerSignal({ open: true, epoch: "epoch-a", revision: 1 });
+    await connectRemote(page);
+    const files = page.locator("#fileExplorerHeader");
+    await expect(files).toHaveClass(/host-viewer-blink/, HEARTBEAT_WAIT);
+
+    const dot = await files.evaluate((element) => {
+      const style = getComputedStyle(element, "::after");
+      return { content: style.content, animation: style.animationName };
+    });
+    expect(dot).toEqual({ content: '""', animation: "none" });
+  });
+
+  test("the dot never resizes the header", async ({ context, page }) => {
+    const mocks = await installRemoteViewerMocks(context);
+    await connectRemote(page);
+    const files = page.locator("#fileExplorerHeader");
+    await expect(files).toBeVisible();
+    const before = await files.boundingBox();
+
+    mocks.setHostViewerSignal({ open: true, epoch: "epoch-a", revision: 1 });
+    await expect(files).toHaveClass(/host-viewer-unread/, HEARTBEAT_WAIT);
+    expect(await files.boundingBox()).toEqual(before);
+  });
 });
 
 test("does not open a path while IME is committing Enter", async ({ context, page }) => {

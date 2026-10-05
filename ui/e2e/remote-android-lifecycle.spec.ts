@@ -60,6 +60,8 @@ type AndroidLifecycleState = {
   cancelledRequests: number;
   claimRequests: number;
   heartbeatRequests: number;
+  /** Whether heartbeats report a file on the PC viewer (ADR-0291). */
+  hostViewerOpen: boolean;
   fileViewerRequests: Array<{ method: string; path: string; body: unknown }>;
   heldRequestId: string | null;
   heldOauthBeginRequestId: string | null;
@@ -165,6 +167,7 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
         cancelledRequests: 0,
         claimRequests: 0,
         heartbeatRequests: 0,
+        hostViewerOpen: false,
         fileViewerRequests: [],
         heldRequestId: null,
         heldOauthBeginRequestId: null,
@@ -277,7 +280,11 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
           }
           if (path === "/remote/v1/session/heartbeat") {
             state.heartbeatRequests += 1;
-            body = { active: true, leaseId: "lease-1" };
+            body = {
+              active: true,
+              leaseId: "lease-1",
+              fileViewer: { open: state.hostViewerOpen, epoch: "epoch-android", revision: 1 },
+            };
           }
           if (path === "/remote/v1/file-viewer/download") {
             body = {
@@ -288,7 +295,13 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
             };
           }
           if (path === "/remote/v1/file-viewer/status") {
-            body = { open: true, path: "C:\\work\\notes.txt" };
+            body = {
+              open: true,
+              path: "C:\\work\\notes.txt",
+              epoch: "epoch-android",
+              revision: 1,
+              parent: "C:\\work",
+            };
           }
           if (path === "/remote/v1/file-viewer/list") {
             body = { path: "C:\\work", parent: "C:\\", entries: [], truncated: false };
@@ -562,11 +575,18 @@ test("the Android wrapper gets the file viewer, rendered in the Remote document"
     page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState);
   await expect.poll(async () => (await state()).outputOpens).toBe(1);
 
-  // Android uses the same in-overlay explorer and path controls as browsers.
+  // The PC shows a file: the next heartbeat lights the Files button's dot, and
+  // the same button opens that file in this document (ADR-0291).
+  await page.evaluate(() => {
+    (window as AndroidLifecycleWindow).__androidLifecycleState.hostViewerOpen = true;
+  });
+  await expect(page.locator("#fileExplorerHeader")).toHaveClass(/host-viewer-unread/, {
+    timeout: 12_000,
+  });
   await page.locator("#fileExplorerHeader").click();
-  await expect(page.locator("#fileViewerSection")).toBeVisible();
-  await page.locator("#pullHostFileViewerPath").click();
-  await expect(page.locator("#fileViewerPath")).toHaveValue("C:\\work\\notes.txt");
+  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+  await expect(page.locator("#fileViewerText")).toHaveText("host text in the wrapper");
+  await expect(page.locator("#fileExplorerHeader")).not.toHaveClass(/host-viewer-unread/);
   expect(
     (await state()).fileViewerRequests.find(
       (request) => request.path === "/remote/v1/file-viewer/status",
@@ -581,10 +601,6 @@ test("the Android wrapper gets the file viewer, rendered in the Remote document"
       },
     },
   });
-  await page.locator("#openFileViewer").click();
-
-  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
-  await expect(page.locator("#fileViewerText")).toHaveText("host text in the wrapper");
   expect((await state()).renderRequests).toBe(1);
   expect(
     (await state()).fileViewerRequests.find(
