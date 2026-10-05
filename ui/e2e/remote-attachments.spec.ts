@@ -39,8 +39,12 @@ async function openRemote(
   releaseRequests: () => number;
   outputSocketRevision: () => number;
   sendOutputSnapshot: () => void;
+  interruptOutput: () => void;
 }> {
   const attachments: AttachmentRequest[] = [];
+  // Keep the OS chooser pending while tests supply its result. Without
+  // interception headless Chromium immediately cancels the native dialog.
+  page.on("filechooser", () => {});
   const terminalInputs: TerminalInputRequest[] = [];
   let outputSocket: WebSocketRoute | null = null;
   let outputSocketRevision = 0;
@@ -200,6 +204,7 @@ async function openRemote(
     releaseRequests: () => releaseRequestCount,
     outputSocketRevision: () => outputSocketRevision,
     sendOutputSnapshot,
+    interruptOutput: () => outputSocket!.close({ code: 1012, reason: "transport resume" }),
   };
 }
 
@@ -513,6 +518,59 @@ test.describe("remote terminal attachments", () => {
 
     await expect.poll(() => attachments.length).toBe(1);
     await expect(page.locator("#composerInput")).toHaveText("android.txt");
+  });
+
+  test("keeps a gallery selection after focus returns before its change event", async ({
+    page,
+  }) => {
+    const { attachments } = await openRemote(page, "composer");
+    await page.locator("#attachFile").evaluate((element: HTMLButtonElement) => element.click());
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.waitForTimeout(400);
+    await page.locator("#attachmentInput").setInputFiles({
+      name: "gallery.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("late gallery result"),
+    });
+    await expect.poll(() => attachments.length).toBe(1);
+    await expect(page.locator("#composerInput")).toHaveText("gallery.txt");
+  });
+
+  test("cancel closes the chooser and ignores a later stale change", async ({ page }) => {
+    const { attachments } = await openRemote(page, "composer");
+    await page.locator("#attachFile").evaluate((element: HTMLButtonElement) => element.click());
+    await page.locator("#attachmentInput").dispatchEvent("cancel");
+    await page.locator("#attachmentInput").setInputFiles({
+      name: "stale.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("canceled"),
+    });
+    await page.waitForTimeout(100);
+    expect(attachments).toEqual([]);
+    await chooseAttachmentFiles(page, {
+      name: "fresh.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("fresh"),
+    });
+    await expect.poll(() => attachments.length).toBe(1);
+  });
+
+  test("holds the returned file until the resumed terminal snapshot is ready", async ({ page }) => {
+    const { attachments, interruptOutput, outputSocketRevision, sendOutputSnapshot } =
+      await openRemote(page, "composer");
+    await page.locator("#attachFile").evaluate((element: HTMLButtonElement) => element.click());
+    interruptOutput();
+    await expect(page.locator("#attachFile")).toBeDisabled();
+    await page.locator("#attachmentInput").setInputFiles({
+      name: "resumed.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("returned while resuming"),
+    });
+    expect(attachments).toEqual([]);
+    await expect.poll(outputSocketRevision).toBe(2);
+    sendOutputSnapshot();
+    await expect.poll(() => attachments.length).toBe(1);
+    await expect(page.locator("#composerInput")).toHaveText("resumed.txt");
   });
 
   test("does not carry a chooser focus retry into a replacement lease", async ({ page }) => {

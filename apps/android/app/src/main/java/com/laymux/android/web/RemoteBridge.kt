@@ -27,6 +27,11 @@ class RemoteBridge(
     }
 
     @JavascriptInterface
+    fun cancelSharedFiles(id: String?) {
+        activity.cancelSharedFiles(documentGeneration, id ?: return)
+    }
+
+    @JavascriptInterface
     fun requestRemoteHttp(requestId: String, method: String, path: String, bodyJson: String?) {
         activity.requestRemoteHttp(documentGeneration, requestId, method, path, bodyJson)
     }

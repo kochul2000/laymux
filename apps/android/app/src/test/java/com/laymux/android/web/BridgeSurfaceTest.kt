@@ -16,6 +16,7 @@ class BridgeSurfaceTest {
                 "cancelRemoteHttp",
                 "requestRemoteHttp",
                 "setRemoteLease",
+                "cancelSharedFiles",
                 "disconnectRemote",
                 "openExternalUrl",
                 "openRemoteFile",
