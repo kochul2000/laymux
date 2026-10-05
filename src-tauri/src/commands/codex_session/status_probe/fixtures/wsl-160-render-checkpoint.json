@@ -1,0 +1,13 @@
+{
+  "id": "01a10cdb-c344-7420-8632-802e630c5723",
+  "screen": {
+    "generation": 21,
+    "seq": 38402,
+    "geometry": {
+      "revision": 4,
+      "cols": 113,
+      "rows": 40
+    },
+    "data": "\u001b[?1049h\u001b[H \r\n\u001b[2C\u001b[38;2;99;168;248mVisit \u001b[4mhttps://chatgpt.com/codex/settings/usage\u001b[24m for up-to-date\r\n\u001b[2Cinformation on rate limits and credits\r\n\u001b[0m \r\n\u001b[2m  Model:               \u001b[0mGPT-6.1-Sol\u001b[2m (reasoning low, summaries auto)\r\n  Model provider:      \u001b[0mopenai\r\n\u001b[2m  Directory:           \u001b[0m/tmp/laymux-codex160-1791216645183\r\n\u001b[2m  Permissions:         \u001b[0mFull Access\r\n\u001b[2m  Agents.md:           \u001b[0m<none>\r\n\u001b[2m  Account:             \u001b[0mPro 200\r\n\u001b[2m  Collaboration mode:  \u001b[0mDefault\r\n\u001b[2m  Session:             \u001b[0m01a10cdb-c344-7420-8632-802e630c5723\r\n\r\n\u001b[2m  Weekly limit:        \u001b[0m[███████████████████░] 94%\u001b[1Cleft\u001b[2m (resets 2:21 PM on 11 Oct)\r\n  Credits:             \u001b[0m00000\u001b[1Ccredits\r\n \r\n\u001b[35m/status\r\n\r\n\u001b[2C\u001b[38;2;99;168;248m>_ \u001b[39;1mOpenAI Codex\u001b[22;2m (v0.160.0)\r\n\r\n\u001b[2C\u001b[38;2;99;168;248;22mVisit \u001b[4mhttps://chatgpt.com/codex/settings/usage\u001b[24m for up-to-date\r\n\u001b[2Cinformation on rate limits and credits\r\n\u001b[0m \r\n\u001b[2m  Model:               \u001b[0mGPT-6.1-Sol\u001b[2m (reasoning low, summaries auto)\r\n  Model provider:      \u001b[0mopenai\r\n\u001b[2m  Directory:           \u001b[0m/tmp/laymux-codex160-1791216645183\r\n\u001b[2m  Permissions:         \u001b[0mFull Access\r\n\u001b[2m  Agents.md:           \u001b[0m<none>\r\n\u001b[2m  Account:             \u001b[0mPro 200\r\n\u001b[2m  Collaboration mode:  \u001b[0mDefault\r\n\u001b[2m  Session:             \u001b[0m01a10cdb-c344-7420-8632-802e630c5723\r\n \r\n\u001b[2m  Weekly limit:        \u001b[0m[███████████████████░]\u001b[1C94%\u001b[1Cleft\u001b[2m (resets 2:21 PM on 11 Oct)\r\n  Credits:             \u001b[0m00000 credits\r\n\r\n\u001b[48;2;41;41;41m \u001b[112X\r\n\u001b[1m›\u001b[22m \u001b[2mAsk Codex to do anything\u001b[87X\r\n\u001b[22m \u001b[112X\r\n\u001b[0m\u001b[2C\u001b[38;2;246;226;183mGPT-6.1-Sol default\u001b[38;2;148;148;148m · \u001b[38;2;171;223;167m/tmp/laymux-codex160-1791216645183\r\n\u001b[2C\u001b[38;2;240;240;240;1m?\u001b[38;2;148;148;148;22m for shortcuts\u001b[3A\u001b[15D\u001b[0m\u001b[?2004h\u001b[?1004h\u001b[?1003h"
+  }
+}

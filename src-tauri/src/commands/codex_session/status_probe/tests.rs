@@ -25,6 +25,7 @@ fn install_probe(state: &AppState, owns_fence: bool, expired: bool) {
         next_step: Some(CodexStatusStep::Submit),
         output_start: Some(40),
         proof: Some(("01a0e103-7bcb-7a20-89c0-2dc0472f2957".into(), false)),
+        hook_title: None,
     };
     *state.session_checkpoint.codex_status.lock().unwrap() = Some(CodexStatusCheckpoint {
         token: "test-token".into(),
@@ -53,6 +54,35 @@ fn expiration_rejects_late_enter_before_process_or_pty_access() {
     .unwrap_err();
     assert!(error.contains("expired"));
     assert!(verified_status_sessions(&state).unwrap().is_empty());
+    finish_inner(&state, "test-token").unwrap();
+    assert!(state.session_checkpoint.ensure_mutations_allowed().is_ok());
+}
+
+#[test]
+fn hook_proof_rejects_all_status_input_before_accessing_a_pty() {
+    let state = AppState::new();
+    install_probe(&state, true, false);
+    state
+        .session_checkpoint
+        .codex_status
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .targets
+        .get_mut("terminal-test")
+        .unwrap()
+        .hook_title = Some(Default::default());
+    for step in [
+        CodexStatusStep::Dismiss,
+        CodexStatusStep::Clear,
+        CodexStatusStep::TypeStatus,
+        CodexStatusStep::Submit,
+    ] {
+        assert!(input_inner(&state, "test-token", "terminal-test", step)
+            .unwrap_err()
+            .contains("already verified through hooks"));
+    }
     finish_inner(&state, "test-token").unwrap();
     assert!(state.session_checkpoint.ensure_mutations_allowed().is_ok());
 }

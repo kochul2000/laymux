@@ -46,6 +46,12 @@ impl HookRegistry {
         distro: Option<&str>,
         now: u64,
     ) -> Option<&Observation> {
+        let candidate = self.codex_conversation(identity, distro)?;
+        self.exact("codex", &candidate.event.session_id, distro, now)
+    }
+    /// Conversation metadata outlives task phases. Callers must independently
+    /// prove the current TUI, title revision, storage root and rollout identity.
+    pub fn codex_conversation(&self, identity: &str, distro: Option<&str>) -> Option<&Observation> {
         let mut candidates = self.entries.iter().filter(|entry| {
             entry.event.provider == "codex"
                 && entry.event.distro.as_deref() == distro
@@ -53,10 +59,10 @@ impl HookRegistry {
                 && entry.event.session_id.starts_with(identity)
         });
         let candidate = candidates.next()?;
-        if candidates.next().is_some() {
+        if candidates.next().is_some() || candidate.event.event == "SessionEnd" {
             return None;
         }
-        self.exact("codex", &candidate.event.session_id, distro, now)
+        Some(candidate)
     }
     pub fn diagnostic_events(&self, now: u64) -> impl Iterator<Item = &HookEvent> {
         self.entries
@@ -70,9 +76,7 @@ impl HookRegistry {
         if event.agent_id.is_some() || event.config_dir.is_none() {
             return;
         }
-        self.entries.retain(|e| {
-            event.emitted_at_ms.saturating_sub(e.event.emitted_at_ms) <= MAX_OBSERVATION_AGE_MS * 5
-        });
+        // Metadata stays bounded by MAX_CONVERSATIONS, not the phase TTL.
         let previous = self
             .entries
             .iter_mut()
@@ -217,6 +221,32 @@ mod tests {
         event.emitted_at_ms = time;
         event.config_dir = Some("/tmp/agent".into());
         event
+    }
+    #[test]
+    fn lifecycle_identity_survives_phase_expiry_and_other_conversations_but_not_session_end() {
+        let id = "01a0ec06-451a-7e61-ac51-bd98fab4ed82";
+        let mut registry = HookRegistry::default();
+        let mut started = event("codex", "UserPromptSubmit", 100, None);
+        started.session_id = id.into();
+        registry.observe(started.clone());
+        registry.observe(event("claude", "Stop", 400_001, None));
+        assert!(registry.by_codex_title(&id[..29], None, 400_001).is_none());
+        assert_eq!(
+            registry
+                .codex_conversation(&id[..29], None)
+                .unwrap()
+                .event
+                .session_id,
+            id
+        );
+        assert!(registry
+            .codex_conversation(&id[..29], Some("Ubuntu"))
+            .is_none());
+        let mut ended = started;
+        ended.event = "SessionEnd".into();
+        ended.emitted_at_ms = 400_002;
+        registry.observe(ended);
+        assert!(registry.codex_conversation(id, None).is_none());
     }
     #[test]
     fn title_binding_resolves_full_identity_and_rejects_collisions_domains_expiry() {

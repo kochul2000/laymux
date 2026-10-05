@@ -1,0 +1,13 @@
+{
+  "id": "01a10ce8-aad0-7432-80a1-2d5de56372a4",
+  "screen": {
+    "generation": 18,
+    "seq": 67963,
+    "geometry": {
+      "revision": 4,
+      "cols": 113,
+      "rows": 40
+    },
+    "data": "\u001b[?1049h\u001b[H\u001b[1;2m› \u001b[0mReply only OK. Do not use tools.\r\n\u001b[2m  Model provider:      \u001b[0mopenai\r\n\u001b[2m  Directory:           \u001b[0m~\\AppData\\Local\\Temp\\laymux-codex160-p2qTSm\r\n\u001b[2m  Permissions:         \u001b[0mFull Access\r\n\u001b[2m  Agents.md:           \u001b[0m<none>\r\n\u001b[2m  Account:             \u001b[0mPro\u001b[1C200\r\n\u001b[2m  Thread name:         \u001b[0mReply\u001b[1COK\r\n\u001b[2m  Collaboration mode:  \u001b[0mDefault\r\n\u001b[2m  Session:             \u001b[0m01a10ce8-aad0-7432-80a1-2d5de56372a4\r\n\r\n\u001b[2m  Context window:      \u001b[0m98%\u001b[1Cleft\u001b[2m (16.4K used / 258K)\r\n  Weekly limit:        \u001b[0m[███████████████████░]\u001b[1C94%\u001b[1Cleft\u001b[2m (resets 2:21 PM on 11 Oct)\r\n  Credits:             \u001b[0m00000 credits\r\n\r\n/status\r\n\r\n\u001b[2C>_\u001b[1C\u001b[1mOpenAI Codex\u001b[22;2m (v0.160.0)\r\n\r\n\u001b[2C\u001b[0mVisit\u001b[1C\u001b[4mhttps://chatgpt.com/codex/settings/usage\u001b[1C\u001b[0mfor\u001b[1Cup-to-date\r\n\u001b[2Cinformation\u001b[1Con\u001b[1Crate\u001b[1Climits\u001b[1Cand\u001b[1Ccredits\r\n\r\n\u001b[2m  Model:               \u001b[0mGPT-6.1-Sol\u001b[2m (reasoning low, summaries auto)\r\n  Model provider:      \u001b[0mopenai\r\n\u001b[2m  Directory:           \u001b[0m~\\AppData\\Local\\Temp\\laymux-codex160-p2qTSm\r\n\u001b[2m  Permissions:         \u001b[0mFull\u001b[1CAccess\r\n\u001b[2m  Agents.md:           \u001b[0m<none>\r\n\u001b[2m  Account:             \u001b[0mPro\u001b[1C200\r\n\u001b[2m  Thread name:         \u001b[0mReply\u001b[1COK\r\n\u001b[2m  Collaboration mode:  \u001b[0mDefault\r\n\u001b[2m  Session:             \u001b[0m01a10ce8-aad0-7432-80a1-2d5de56372a4\r\n\r\n\u001b[2m  Context window:      \u001b[0m98%\u001b[1Cleft\u001b[2m (16.4K used / 258K)\r\n  Weekly limit:        \u001b[0m[███████████████████░]\u001b[1C94%\u001b[1Cleft\u001b[2m (resets 2:21 PM on 11 Oct)\r\n  Credits:             \u001b[0m00000 credits\r\n\r\n\r\n\u001b[1m›\u001b[1C\u001b[22;2mAsk Codex to do anything\r\n\r\n\u001b[2C\u001b[0mGPT-6.1-Sol\u001b[1Cdefault\u001b[1C·\u001b[1C~\\AppData\\Local\\Temp\\laymux-codex160-p2qTSm\u001b[1C·\u001b[1CReply\u001b[1COK\r\n\u001b[2C\u001b[1m?\u001b[1C\u001b[0mfor\u001b[1Cshortcuts\u001b[3A\u001b[15D\u001b[?2004h\u001b[?1004h\u001b[?1003h"
+  }
+}

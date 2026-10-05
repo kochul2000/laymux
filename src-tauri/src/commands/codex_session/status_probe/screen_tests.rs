@@ -109,3 +109,47 @@ fn reads_the_actual_xterm_alternate_buffer_checkpoint() {
         Some("01a0e6cb-9db1-7042-98bb-393800b4b7dd".into())
     );
 }
+
+#[test]
+fn reads_codex_160_borderless_current_screen_in_native_and_wsl() {
+    for fixture in [
+        include_str!("fixtures/native-160-render-checkpoint.json"),
+        include_str!("fixtures/wsl-160-render-checkpoint.json"),
+        include_str!("fixtures/native-160-completed-render-checkpoint.json"),
+        include_str!("fixtures/wsl-160-completed-render-checkpoint.json"),
+    ] {
+        let fixture: serde_json::Value = serde_json::from_str(fixture).unwrap();
+        let screen: TerminalRenderCheckpoint =
+            serde_json::from_value(fixture["screen"].clone()).unwrap();
+        assert_eq!(
+            parse_status_screen(&screen),
+            fixture["id"].as_str().map(str::to_owned)
+        );
+    }
+}
+
+#[test]
+fn borderless_card_rejects_missing_fields_duplicate_id_and_messages_after_response() {
+    let body = format!("/status\r\n\r\n>_ OpenAI Codex (v0.160.0)\r\nModel: gpt\r\nDirectory: /project\r\nPermissions: Full Access\r\nCollaboration mode: Default\r\nSession: {ID}\r\nWeekly limit: unavailable\r\n");
+    let suffix = "\r\n› Ask Codex to do anything\r\n\r\n? for shortcuts";
+    assert_eq!(
+        parse_status_screen(&checkpoint(format!("{body}{suffix}"))),
+        Some(ID.into())
+    );
+    for invalid in [
+        body.replace("Directory: /project", ""),
+        body.replace("Permissions: Full Access", ""),
+        body.replace("Collaboration mode: Default", ""),
+        body.replace(
+            &format!("Session: {ID}"),
+            &format!("Session: {ID}\r\nSession: {NEW_ID}"),
+        ),
+        format!("{body}• Unexpected message\r\n"),
+        format!("{} /status\r\nSession: {NEW_ID}\r\n", card(ID)),
+    ] {
+        assert_eq!(
+            parse_status_screen(&checkpoint(format!("{invalid}{suffix}"))),
+            None
+        );
+    }
+}

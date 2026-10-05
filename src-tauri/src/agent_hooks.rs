@@ -58,6 +58,13 @@ pub fn environments() -> Result<Vec<Value>, AppError> {
 }
 
 pub fn manage(request: &ManageRequest, app: &tauri::AppHandle) -> Result<Value, AppError> {
+    manage_in_directory(request, &helper_directory(app)?)
+}
+
+pub(crate) fn manage_in_directory(
+    request: &ManageRequest,
+    directory: &std::path::Path,
+) -> Result<Value, AppError> {
     laymux_agent_hook::install::config_name(&request.provider).map_err(AppError::Other)?;
     if !matches!(
         request.operation.as_str(),
@@ -65,7 +72,6 @@ pub fn manage(request: &ManageRequest, app: &tauri::AppHandle) -> Result<Value, 
     ) {
         return Err(AppError::Other("Unknown hook operation".into()));
     }
-    let directory = helper_directory(app)?;
     if let Some(distro) = &request.distro {
         if !cfg!(windows) || !crate::wsl_probe::is_safe_distro_name(distro) {
             return Err(AppError::Other("Invalid WSL distribution".into()));
