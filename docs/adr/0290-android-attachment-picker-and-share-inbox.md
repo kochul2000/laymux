@@ -1,6 +1,6 @@
 # 0290. Android 첨부 선택 결과를 복귀 후 전달하고 파일 공유를 받는다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-05
 - Source: 사용자 요구(갤러리 왕복 첨부 실패·Android 파일 공유 수신), architecture/api-contracts.md §13, ADR-0163, ADR-0181, ADR-0227
 - Extends: [ADR-0163](0163-android-foreground-preserves-remote-document.md), [ADR-0181](0181-remote-terminal-file-attachments.md)
