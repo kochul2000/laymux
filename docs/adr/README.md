@@ -215,7 +215,7 @@ ADR 이 필요한 대표 기준:
 | [0195](0195-agent-session-cleared-on-shell-return.md) | agent 를 종료한 pane 은 shell 로 복원한다 — live pane 에 주장자가 없으면 세션 id 삭제 (0120 확장) | Accepted |
 | [0196](0196-remote-coarse-pointer-attach-defers-input-focus.md) | 터치 기기의 Remote attach 는 입력 surface focus 를 선점하지 않는다 (0036 축 구분) | Proposed |
 | [0197](0197-android-update-channel-release-handoff.md) | Android 앱은 기기-로컬 채널 설정으로 릴리스 채널을 따라가고 업데이트는 GitHub 릴리스 페이지로 넘긴다 (0190 확장) | Superseded by [0223](0223-android-release-advances-only-with-apk.md) |
-| [0198](0198-remote-file-explorer-overlay.md) | Remote FileViewer 오버레이는 인-오버레이 file explorer 로 디렉터리를 탐색한다 (0184/0044/0042 확장, 0188 디렉터리 비활성 개정) | Accepted |
+| [0198](0198-remote-file-explorer-overlay.md) | Remote FileViewer 오버레이는 인-오버레이 file explorer 로 디렉터리를 탐색한다 (0184/0044/0042 확장, 0188 디렉터리 비활성 개정) | Accepted (Decision 6·8 은 [0291](0291-remote-host-viewer-unread-signal.md)로 일부 개정) |
 | [0199](0199-remote-menu-font-size-pc-owned.md) | Remote 메뉴(내비게이션 드로어) 글자 크기를 PC 소유 display-settings 계약에 추가한다 (0173 확장) | Superseded by [0209](0209-remote-display-preferences-are-device-local.md) |
 | [0200](0200-remote-composer-opacity-state-settings.md) | Remote Composer 투명도는 PC 소유 Idle·Focused·Active 3단계 표시 설정이다 (0173 확장) | Superseded by [0209](0209-remote-display-preferences-are-device-local.md) |
 | [0201](0201-update-install-releases-child-file-locks.md) | 업데이트 설치기를 부르기 전에 앱이 자기 자식 프로세스를 정리한다 (0174 확장) | Accepted |
@@ -308,7 +308,7 @@ ADR 이 필요한 대표 기준:
 | [0288](0288-path-link-home-and-hangul-tail.md) | path-link 는 `~` 를 pane 셸의 홈으로 풀고 경로에 붙은 한글 조사를 뗀 후보를 함께 낸다 (0148·0188·0191·0235 확장) | Accepted |
 | [0289](0289-agent-hook-update-notification.md) | 설치된 에이전트 훅의 갱신 필요를 자동 검사하고 사용자 동작으로 갱신한다 | Accepted |
 | [0290](0290-android-attachment-picker-and-share-inbox.md) | Android 첨부 결과를 복귀 후 전달하고 공유 파일을 기존 첨부 경로로 받는다 | Accepted |
-| [0291](0291-remote-host-viewer-unread-signal.md) | PC 뷰어 열림은 heartbeat 의 경로 없는 신호로 알리고 Files 버튼 한 번으로 진입한다 (0044 `From host` 대체, 0198 개정) | Proposed |
+| [0291](0291-remote-host-viewer-unread-signal.md) | PC 뷰어 열림은 heartbeat 의 경로 없는 신호로 알리고 Files 버튼 한 번으로 진입한다 (0044 `From host` 대체, 0198 Decision 6·8 개정) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

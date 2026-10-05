@@ -17,9 +17,10 @@ function sameSignal(a: FileViewerSignal, b: FileViewerSignal): boolean {
  * source of truth; the backend only keeps the last value so a heartbeat never
  * waits on a bridge round trip to this WebView.
  *
- * Mount once, at the app root. It subscribes instead of selecting, like
- * `useSleepPrevention`: nothing here renders, so a store update must not
- * reconcile the tree.
+ * Mount once, in `App` beside `useAutomationBridge` — not under the session
+ * loading gate, so a reloaded WebView replaces the previous epoch at once. It
+ * subscribes instead of selecting, like `useSleepPrevention`: nothing here
+ * renders, so a store update must not reconcile the tree.
  */
 export function useRemoteFileViewerSignal(): void {
   useEffect(() => {
@@ -29,6 +30,9 @@ export function useRemoteFileViewerSignal(): void {
       if (last && sameSignal(last, next)) return;
       last = next;
       reportFileViewerSignal(next).catch((error: unknown) => {
+        // Forget what was sent so the next store update reports again instead
+        // of leaving the backend on a stale value.
+        if (last === next) last = null;
         console.warn("[file-viewer] failed to report the Remote viewer signal", error);
       });
     };

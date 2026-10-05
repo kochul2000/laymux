@@ -2,7 +2,11 @@ import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, it, expect, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { App } from "./App";
-import { acknowledgeSettingsRecovery, loadSettingsValidated } from "@/lib/tauri-api";
+import {
+  acknowledgeSettingsRecovery,
+  loadSettingsValidated,
+  reportFileViewerSignal,
+} from "@/lib/tauri-api";
 import { setBlockPersist } from "@/lib/persist-session";
 import { useLocalMobileModeStore } from "@/stores/local-mobile-mode-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -194,6 +198,18 @@ describe("App", () => {
   it("renders the app root", () => {
     render(<App />);
     expect(screen.getByTestId("app-root")).toBeInTheDocument();
+  });
+
+  it("mirrors the desktop viewer signal before the session finishes loading (ADR-0291)", () => {
+    // Remote heartbeats read this mirror. Mounted under the loading gate, a
+    // reloaded WebView would leave the previous epoch lit on Remote meanwhile.
+    vi.mocked(loadSettingsValidated).mockReturnValueOnce(new Promise(() => {}));
+    vi.mocked(reportFileViewerSignal).mockClear();
+    render(<App />);
+    expect(screen.queryByTestId("workspace-area")).not.toBeInTheDocument();
+    expect(vi.mocked(reportFileViewerSignal)).toHaveBeenCalledWith(
+      expect.objectContaining({ open: false }),
+    );
   });
 
   it("shows loading screen then renders workspace area after settings load", async () => {

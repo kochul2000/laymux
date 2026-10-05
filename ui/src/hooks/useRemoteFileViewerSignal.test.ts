@@ -72,6 +72,28 @@ describe("useRemoteFileViewerSignal (ADR-0291)", () => {
     expect(sent()).toEqual([]);
   });
 
+  it("reports again after a failed report instead of leaving a stale backend", async () => {
+    renderHook(() => useRemoteFileViewerSignal());
+    reportFileViewerSignal.mockClear();
+    reportFileViewerSignal.mockRejectedValueOnce(new Error("ipc down"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    act(() => {
+      useFileViewerStore.getState().openFileViewer("/tmp/a.md");
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // Same signal, but the last send failed: it must go out again.
+    act(() => {
+      useFileViewerStore.getState().toggleMaximized();
+    });
+
+    expect(sent()).toHaveLength(2);
+    expect(sent()[1]).toEqual(sent()[0]);
+    warn.mockRestore();
+  });
+
   it("stops reporting after unmount", () => {
     const { unmount } = renderHook(() => useRemoteFileViewerSignal());
     unmount();

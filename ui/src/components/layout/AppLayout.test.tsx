@@ -44,9 +44,6 @@ vi.mock("@/lib/tauri-api", () => ({
   markNotificationsRead: vi.fn().mockResolvedValue(undefined),
   setSleepInhibit: vi.fn().mockResolvedValue(false),
   onSleepInhibitChanged: vi.fn().mockResolvedValue(() => {}),
-  reportFileViewerSignal: vi.fn().mockResolvedValue(undefined),
-  // Never settles: the viewer-signal test opens a web viewer but asserts nothing about it.
-  readFileForViewer: vi.fn(() => new Promise(() => {})),
   getAppUpdateStatus: vi.fn().mockResolvedValue({
     enabled: false,
     channel: "stable",
@@ -82,7 +79,7 @@ import { useGridStore } from "@/stores/grid-store";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { viewerInstanceId } from "@/lib/file-viewer";
-import { reportFileViewerSignal, setSleepInhibit } from "@/lib/tauri-api";
+import { setSleepInhibit } from "@/lib/tauri-api";
 
 describe("AppLayout", () => {
   beforeEach(() => {
@@ -111,19 +108,6 @@ describe("AppLayout", () => {
       useSettingsStore.getState().setPower({ keepAwake: true });
     });
     expect(vi.mocked(setSleepInhibit)).toHaveBeenCalledWith(true);
-  });
-
-  it("mirrors the desktop viewer signal from the app root (ADR-0291)", () => {
-    // Remote heartbeats read this mirror; without the mount the unread dot on
-    // Remote never lights and nothing on the desktop would show it.
-    render(<AppLayout />);
-    vi.mocked(reportFileViewerSignal).mockClear();
-    act(() => {
-      useFileViewerStore.getState().openFileViewer("/tmp/report.md");
-    });
-    expect(vi.mocked(reportFileViewerSignal)).toHaveBeenCalledWith(
-      expect.objectContaining({ open: true }),
-    );
   });
 
   it("renders left dock and workspace area by default", () => {

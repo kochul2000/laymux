@@ -434,7 +434,6 @@ import {
         let hostViewerSignalKey = null;
         let hostViewerSeenKey = null;
         let hostViewerBlinkTimer = null;
-        let hostViewerOpenRevision = 0;
         let fileViewerRequestRevision = 0;
         let fileViewerPath = null;
         let fileViewerDownloadInFlight = false;
@@ -2077,6 +2076,7 @@ import {
           // Absent or malformed says nothing new: keep the dot as it was.
           if (!signal || typeof signal !== "object" || typeof signal.open !== "boolean") return;
           const key = signal.open ? hostViewerOpenKey(signal) : null;
+          if (signal.open && !key) return;
           if (key === hostViewerSignalKey) return;
           hostViewerSignalKey = key;
           renderHostViewerIndicator();
@@ -2086,40 +2086,47 @@ import {
         // A lit dot means "the PC put a file on screen you have not seen", so
         // the same button goes straight to it. The path is read only now, behind
         // the FileViewer capability, and Back lands in that file's folder.
+        //
+        // The overlay opens at the tap, before status answers: the tap gets
+        // feedback, the header and terminal underneath stop taking input, and a
+        // slow answer cannot replace a view opened since — every other overlay
+        // action moves the file viewer revision this answer is checked against.
         async function openHostViewerFile() {
           if (!leaseId || !fileViewerToken) return;
-          const requestRevision = ++hostViewerOpenRevision;
+          // The open the user tapped for, not whatever a later heartbeat shows.
+          const tappedKey = hostViewerSignalKey;
           const requestLeaseId = leaseId;
           const requestFileViewerToken = fileViewerToken;
+          const requestRevision = showBlankFileViewerOverlay("PC viewer", "", "Loading file…");
+          const stale = () =>
+            requestRevision !== fileViewerRequestRevision ||
+            leaseId !== requestLeaseId ||
+            fileViewerToken !== requestFileViewerToken;
           try {
             const data = await fileViewerFetch("/remote/v1/file-viewer/status", {
               leaseId: requestLeaseId,
               fileViewerToken: requestFileViewerToken,
             });
-            if (
-              requestRevision !== hostViewerOpenRevision ||
-              leaseId !== requestLeaseId ||
-              fileViewerToken !== requestFileViewerToken
-            ) {
-              return;
-            }
+            if (stale()) return;
             if (data?.open !== true || typeof data.path !== "string" || !data.path) {
-              // The PC closed it before the tap: consume the dot, show plain Files.
-              hostViewerSeenKey = hostViewerSignalKey;
+              // The PC closed it before the tap: consume that open, show plain Files.
+              hostViewerSeenKey = tappedKey;
               renderHostViewerIndicator();
               openCurrentFileExplorer();
               return;
             }
-            hostViewerSeenKey = hostViewerOpenKey(data) || hostViewerSignalKey;
+            hostViewerSeenKey = hostViewerOpenKey(data) || tappedKey;
             renderHostViewerIndicator();
             openFileViewerOverlay(
               data.path,
               typeof data.parent === "string" && data.parent ? data.parent : undefined,
             );
           } catch (error) {
-            if (requestRevision !== hostViewerOpenRevision) return;
+            if (stale()) return;
+            // Control loss owns the screen: the reclaim path closes this overlay.
             if (await fileViewerControlLost(error)) return;
-            setStatus(error instanceof Error ? error.message : String(error), true);
+            if (stale()) return;
+            setFileViewerMessage(error instanceof Error ? error.message : String(error), true);
           }
         }
 
@@ -2376,33 +2383,46 @@ import {
           );
         }
 
-        function openFileExplorerOverlay(request) {
-          if (!leaseId || !fileViewerToken || !request) return;
+        // A load whose target the host has not answered yet — a directory, or
+        // the PC viewer's file (ADR-0291) — starts from a blank overlay with
+        // nothing to copy, download or go back to. Returns the request revision
+        // that the answer must still match.
+        function showBlankFileViewerOverlay(title, tooltip, message) {
           if (memoView.isOpen()) memoView.close();
           if (!githubOverlayElement.hidden) closeRemoteGithubView();
-          const explorerFallbackPath = fileViewerDirectoryPath || fileViewerExplorerReturnPath;
           const requestRevision = ++fileViewerRequestRevision;
-          const requestLeaseId = leaseId;
-          const requestFileViewerToken = fileViewerToken;
           hideFileViewerContent();
           resetFileViewerZoom();
           fileViewerKind = null;
           fileViewerZoomElement.hidden = true;
-          fileViewerTitleElement.textContent = request.path || "Host files";
-          fileViewerTitleElement.title = request.path || "";
+          fileViewerTitleElement.textContent = title;
+          fileViewerTitleElement.title = tooltip;
           fileViewerCopyPathButton.hidden = true;
           fileViewerPath = null;
           fileViewerDirectoryPath = null;
           fileViewerExplorerReturnPath = null;
           fileViewerBackButton.hidden = true;
           fileViewerSection.hidden = true;
-          // Directory mode has nothing to download — hide the affordance
-          // instead of leaving a disabled button (ADR-0198, ADR-0192).
+          // Nothing to download yet — hide the affordance instead of leaving a
+          // disabled button (ADR-0198, ADR-0192).
           fileViewerDownloadButton.hidden = true;
           fileViewerDownloadInFlight = false;
           applyFileViewerDownloadState();
           fileViewerOverlayElement.hidden = false;
-          setFileViewerMessage("Loading directory…");
+          setFileViewerMessage(message);
+          return requestRevision;
+        }
+
+        function openFileExplorerOverlay(request) {
+          if (!leaseId || !fileViewerToken || !request) return;
+          const explorerFallbackPath = fileViewerDirectoryPath || fileViewerExplorerReturnPath;
+          const requestLeaseId = leaseId;
+          const requestFileViewerToken = fileViewerToken;
+          const requestRevision = showBlankFileViewerOverlay(
+            request.path || "Host files",
+            request.path || "",
+            "Loading directory…",
+          );
           fileViewerFetch("/remote/v1/file-viewer/list", {
             method: "POST",
             leaseId: requestLeaseId,
@@ -4553,7 +4573,6 @@ import {
             // The consumed key survives a reconnect so the same open does not
             // light the dot twice; the live signal waits for the next heartbeat.
             hostViewerSignalKey = null;
-            hostViewerOpenRevision += 1;
             stopHostViewerBlink();
             fileViewerPathInput.value = "";
             closeFileViewer();

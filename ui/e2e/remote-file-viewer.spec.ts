@@ -25,6 +25,9 @@ async function installRemoteViewerMocks(
     parent: "C:\\work",
   };
   const listRequests: Array<Record<string, unknown>> = [];
+  // A held status answers only when released, to stage late responses.
+  let statusGate: Promise<void> | null = null;
+  const heartbeatWaiters: Array<{ revision: number; resolve: () => void }> = [];
   const renderRequests: Array<{
     url: string;
     authorization: string | null;
@@ -55,7 +58,13 @@ async function installRemoteViewerMocks(
       });
     }
     if (url.pathname === "/remote/v1/session/heartbeat") {
-      return route.fulfill({ json: { ok: true, fileViewer: hostViewerSignal } });
+      const served = hostViewerSignal;
+      await route.fulfill({ json: { ok: true, fileViewer: served } });
+      for (const waiter of heartbeatWaiters.splice(0)) {
+        if (served.revision === waiter.revision) waiter.resolve();
+        else heartbeatWaiters.push(waiter);
+      }
+      return;
     }
     if (url.pathname === "/remote/v1/session/release") {
       return route.fulfill({ json: { ok: true } });
@@ -88,6 +97,7 @@ async function installRemoteViewerMocks(
     if (url.pathname === "/remote/v1/file-viewer/status") {
       statusRequestCount += 1;
       expect(await request.headerValue("x-laymux-remote-file-viewer")).toBe("viewer-481");
+      if (statusGate) await statusGate;
       return route.fulfill({ json: statusBody });
     }
     if (url.pathname === "/remote/v1/file-viewer/download") {
@@ -168,6 +178,22 @@ async function installRemoteViewerMocks(
     setStatusBody: (body: Record<string, unknown>) => {
       statusBody = body;
     },
+    /** Hold status answers until the returned release is called. */
+    holdStatus: () => {
+      let release = () => {};
+      statusGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return () => {
+        statusGate = null;
+        release();
+      };
+    },
+    /** Resolves once a heartbeat has served the signal with this revision. */
+    heartbeatServed: (revision: number) =>
+      new Promise<void>((resolve) => {
+        heartbeatWaiters.push({ revision, resolve });
+      }),
   };
 }
 
@@ -414,6 +440,66 @@ test.describe("PC viewer unread dot (ADR-0291)", () => {
     expect(mocks.listRequests.at(-1)).toMatchObject({ source: "terminalCwd" });
     expect(mocks.renderRequests).toEqual([]);
     await expect(files).not.toHaveClass(/host-viewer-unread/);
+  });
+
+  test("the tap opens the overlay at once and a late answer cannot reopen it", async ({
+    context,
+    page,
+  }) => {
+    const mocks = await installRemoteViewerMocks(context);
+    mocks.setHostViewerSignal({ open: true, epoch: "epoch-a", revision: 1 });
+    await connectRemote(page);
+    const files = page.locator("#fileExplorerHeader");
+    await expect(files).toHaveClass(/host-viewer-unread/, HEARTBEAT_WAIT);
+
+    const release = mocks.holdStatus();
+    await files.click();
+    // Feedback at the tap, before the host answers — and the header beneath
+    // stops taking taps.
+    await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+    await expect(page.locator("#fileViewerTitle")).toHaveText("PC viewer");
+    await expect(page.locator("#fileViewerMessage")).toHaveText("Loading file…");
+    await expect.poll(() => mocks.statusRequestCount()).toBe(1);
+
+    // The user moves on before status answers.
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#fileViewerOverlay")).toBeHidden();
+    release();
+    await page.waitForTimeout(300);
+
+    await expect(page.locator("#fileViewerOverlay")).toBeHidden();
+    expect(mocks.renderRequests).toEqual([]);
+    // Nothing was opened, so the open is still unread.
+    await expect(files).toHaveClass(/host-viewer-unread/);
+  });
+
+  test("a fallback consumes the tapped open, not one that arrived meanwhile", async ({
+    context,
+    page,
+  }) => {
+    test.setTimeout(45_000);
+    const mocks = await installRemoteViewerMocks(context);
+    mocks.setHostViewerSignal({ open: true, epoch: "epoch-a", revision: 1 });
+    // The PC had closed the tapped file by the time status read the store…
+    mocks.setStatusBody({ open: false, path: null, epoch: "epoch-a", revision: 1, parent: null });
+    await connectRemote(page);
+    const files = page.locator("#fileExplorerHeader");
+    await expect(files).toHaveClass(/host-viewer-unread/, HEARTBEAT_WAIT);
+
+    const release = mocks.holdStatus();
+    await files.click();
+    await expect.poll(() => mocks.statusRequestCount()).toBe(1);
+    // …and opened another file whose heartbeat lands before that answer.
+    const served = mocks.heartbeatServed(2);
+    mocks.setHostViewerSignal({ open: true, epoch: "epoch-a", revision: 2 });
+    await served;
+    await page.waitForTimeout(100);
+    release();
+
+    await expect(page.locator("#fileViewerOverlay #fileViewerSection")).toBeVisible();
+    expect(mocks.listRequests.at(-1)).toMatchObject({ source: "terminalCwd" });
+    // Revision 2 was never seen: its dot must stay lit.
+    await expect(files).toHaveClass(/host-viewer-unread/);
   });
 
   test("reduced motion keeps the dot and drops the blink", async ({ context, page }) => {
