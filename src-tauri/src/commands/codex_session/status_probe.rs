@@ -1,4 +1,6 @@
 //! Explicit, fenced Codex status queries for close/update checkpoints.
+mod hooks;
+pub(crate) use hooks::verified_status_sessions;
 #[cfg(test)]
 mod output;
 pub(super) mod process_context;
@@ -94,6 +96,7 @@ pub async fn begin_codex_status_checkpoint(
         let targets = targets::collect_targets(&worker_state)?;
         let terminals: Vec<_> = targets
             .iter()
+            .filter(|(_, target)| target.proof.is_none())
             .map(|(id, target)| CodexStatusCheckpointTerminal {
                 terminal_id: id.clone(),
                 cols: target.original_cols.max(PROBE_COLS),
@@ -234,6 +237,9 @@ fn input_inner(
     step: CodexStatusStep,
 ) -> Result<Option<TerminalRenderCheckpointTarget>, String> {
     let target = target_for(state, token, id)?;
+    if target.hook_title.is_some() {
+        return Err("Codex conversation was already verified through hooks".into());
+    }
     let _io = target.io.lock_or_err()?;
     target_for(state, token, id)?;
     let handle = current_handle(state, id, &target)?;
@@ -344,43 +350,6 @@ fn read_inner(
         Ok(())
     })?;
     Ok(Some(id))
-}
-
-pub(crate) fn verified_status_sessions(
-    state: &AppState,
-) -> Result<HashMap<String, (u64, String, bool)>, String> {
-    let targets: Vec<_> = {
-        let slot = state.session_checkpoint.codex_status.lock_or_err()?;
-        let Some(checkpoint) = slot.as_ref() else {
-            return Ok(HashMap::new());
-        };
-        if checkpoint.check(&checkpoint.token).is_err()
-            || !state.session_checkpoint.is_finalizing()
-            || checkpoint.update_request_id.is_some_and(|id| {
-                !state
-                    .session_checkpoint
-                    .owns_update_checkpoint(id)
-                    .unwrap_or(false)
-            })
-        {
-            return Ok(HashMap::new());
-        }
-        checkpoint
-            .targets
-            .iter()
-            .filter(|(_, target)| target.proof.is_some())
-            .map(|(id, target)| (id.clone(), target.clone()))
-            .collect()
-    };
-    let mut result = HashMap::new();
-    for (terminal, target) in targets {
-        current_handle(state, &terminal, &target)?;
-        if let Some((id, _)) = target.proof {
-            let fresh = targets::verify_session(&target.process, &id)?;
-            result.insert(terminal, (target.generation, id, fresh));
-        }
-    }
-    Ok(result)
 }
 
 #[tauri::command]

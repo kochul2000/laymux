@@ -35,6 +35,7 @@ pub(crate) struct CodexStatusTarget {
     pub next_step: Option<CodexStatusStep>,
     pub output_start: Option<u64>,
     pub proof: Option<(String, bool)>,
+    pub hook_title: Option<crate::agent_hooks::title::TitleBinding>,
 }
 
 pub(crate) struct CodexStatusCheckpoint {

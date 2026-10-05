@@ -98,6 +98,9 @@ export const TAURI_MOCK_SCRIPT = `
 
       // App commands
       switch (cmd) {
+        // The read-only startup audit has no installed hooks in this fixture.
+        case 'get_agent_hook_updates':
+          return { targets: [], errors: [] };
         case 'load_settings':
           return Promise.resolve(SETTINGS_DATA);
 

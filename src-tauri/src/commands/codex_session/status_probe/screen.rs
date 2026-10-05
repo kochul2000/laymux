@@ -62,6 +62,9 @@ pub(super) fn parse_status_screen(checkpoint: &TerminalRenderCheckpoint) -> Opti
         .copied()
         .filter(|line| !line.is_empty())
         .collect();
+    if card.first()?.starts_with(">_ OpenAI Codex (v") {
+        return parse_borderless_card(&card);
+    }
     if !card.first()?.starts_with('╭') {
         return None;
     }
@@ -89,6 +92,68 @@ pub(super) fn parse_status_screen(checkpoint: &TerminalRenderCheckpoint) -> Opti
                 return None;
             }
             id = Some(candidate.to_owned());
+        }
+    }
+    id
+}
+
+/// Codex 0.160 removed status borders. Require the complete ordered identity
+/// fields and known status rows, rather than accepting any `Session:` text.
+fn parse_borderless_card(card: &[&str]) -> Option<String> {
+    if !card.first()?.ends_with(')') {
+        return None;
+    }
+    let fields = [
+        "Model:",
+        "Directory:",
+        "Permissions:",
+        "Collaboration mode:",
+        "Session:",
+    ];
+    let mut previous = 0;
+    let mut id = None;
+    for field in fields {
+        let mut matches = card.iter().enumerate().filter_map(|(index, line)| {
+            line.strip_prefix(field).map(|value| (index, value.trim()))
+        });
+        let (index, value) = matches.next()?;
+        if matches.next().is_some() || index <= previous || value.is_empty() {
+            return None;
+        }
+        previous = index;
+        if field == "Session:" {
+            let parsed = uuid::Uuid::parse_str(value).ok()?;
+            if parsed.hyphenated().to_string() != value.to_ascii_lowercase() {
+                return None;
+            }
+            id = Some(value.to_owned());
+        }
+    }
+    for line in &card[1..] {
+        if line.starts_with("Visit https://chatgpt.com/codex/settings/usage ")
+            || *line == "information on rate limits and credits"
+            || line.starts_with("Tip:")
+        {
+            continue;
+        }
+        let (key, value) = line.split_once(':')?;
+        if value.trim().is_empty()
+            || !(matches!(
+                key,
+                "Model"
+                    | "Model provider"
+                    | "Directory"
+                    | "Permissions"
+                    | "Agents.md"
+                    | "Account"
+                    | "Thread name"
+                    | "Context window"
+                    | "Collaboration mode"
+                    | "Session"
+                    | "Credits"
+            ) || key.ends_with(" limit"))
+        {
+            return None;
         }
     }
     id

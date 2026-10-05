@@ -9,7 +9,9 @@ import { acquireCheckpointGeometry, type CheckpointGeometry } from "./terminal-c
 import { formatCodexCheckpointError } from "./codex-checkpoint-error";
 
 const POLL_MS = 60;
-const TARGET_TIMEOUT_MS = 8_000;
+// Native/WSL process revalidation shares the backend's 25 s checkpoint budget.
+// Leave room for slow probes while reserving the rest for discovery and save.
+const TARGET_TIMEOUT_MS = 15_000;
 const SCREEN_SETTLE_MS = 180;
 const UNSUPPORTED =
   /Preparing images:|esc to interrupt|Reconnecting|Task is still running|\[Image\s*#?\d|queued message/i;
@@ -170,7 +172,14 @@ async function probeTerminal(
       // A zero scrollback budget captures the complete live viewport. Unchanged
       // cells (including the UUID) are retained by the existing xterm model.
       const screen = await provider({ ...submitted, seq: submitted.seq + 1 }, 0);
-      const signature = JSON.stringify(screen);
+      // Repainting identical cells still advances the output sequence. Compare
+      // the rendered contents while submitting the latest sequence for backend
+      // freshness validation; otherwise an idle TUI can never settle.
+      const signature = JSON.stringify({
+        generation: screen.generation,
+        geometry: screen.geometry,
+        data: screen.data,
+      });
       if (signature !== previousScreen) {
         previousScreen = signature;
         settledAt = Date.now();

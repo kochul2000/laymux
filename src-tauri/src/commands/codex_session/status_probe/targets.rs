@@ -94,6 +94,13 @@ pub(super) fn collect_targets(
     state: &AppState,
 ) -> Result<HashMap<String, CodexStatusTarget>, String> {
     let candidates = processes(state)?;
+    let prefer_hooks = crate::settings::load_settings().codex.state_detection
+        == crate::settings::AgentStateDetection::Hooks;
+    let selections = if prefer_hooks {
+        Some(super::super::get_codex_session_lookup_impl(None, state)?)
+    } else {
+        None
+    };
     let terminals: HashMap<_, _> = state
         .terminals
         .lock_or_err()?
@@ -118,19 +125,40 @@ pub(super) fn collect_targets(
         let handle = handles
             .get(&id)
             .ok_or_else(|| format!("[{id}] Codex terminal disappeared"))?;
-        let cwd = terminal
-            .0
-            .as_deref()
-            .ok_or_else(|| format!("[{id}] Codex working directory is unknown"))?;
-        let cwd = if let Some(distro) = &process.distro {
-            PathBuf::from(crate::path_utils::resolve_path_for_windows(
-                cwd,
-                Some(distro),
-            ))
+        let hook = if prefer_hooks {
+            super::hooks::resolve(
+                state,
+                &id,
+                handle.terminal_generation(),
+                &process,
+                selections
+                    .as_ref()
+                    .and_then(|s| s.attributions.get(&id))
+                    .and_then(|s| s.as_deref()),
+            )?
         } else {
-            PathBuf::from(cwd)
+            None
         };
-        require_default_editor_config(&process, &cwd).map_err(|error| format!("[{id}] {error}"))?;
+        if hook.is_none() {
+            let cwd = terminal
+                .0
+                .as_deref()
+                .ok_or_else(|| format!("[{id}] Codex working directory is unknown"))?;
+            let cwd = if let Some(distro) = &process.distro {
+                PathBuf::from(crate::path_utils::resolve_path_for_windows(
+                    cwd,
+                    Some(distro),
+                ))
+            } else {
+                PathBuf::from(cwd)
+            };
+            require_default_editor_config(&process, &cwd)
+                .map_err(|error| format!("[{id}] {error}"))?;
+        }
+        let (hook_title, proof) = match hook {
+            Some((title, id, fresh)) => (Some(title), Some((id, fresh))),
+            None => (None, None),
+        };
         targets.insert(
             id,
             CodexStatusTarget {
@@ -142,9 +170,14 @@ pub(super) fn collect_targets(
                 resized: false,
                 dismissed: false,
                 clear_batches: 0,
-                next_step: Some(CodexStatusStep::Clear),
+                next_step: if proof.is_some() {
+                    None
+                } else {
+                    Some(CodexStatusStep::Clear)
+                },
                 output_start: None,
-                proof: None,
+                proof,
+                hook_title,
             },
         );
     }

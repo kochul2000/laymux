@@ -859,9 +859,13 @@ test.describe("remote mobile layout", () => {
     await expect(alpha.locator(".pane-last-input")).toHaveCount(0);
     await expect(alpha.locator(".workspace-pane-row.compact")).toHaveCount(2);
     await expect(alpha.locator(".workspace-last-input")).toHaveText("newest pane input");
-    expect((await alpha.locator(".workspace-pane-row.compact").first().boundingBox())?.height).toBe(
-      18,
-    );
+    // Navigation refresh can replace the row between lookup and measurement.
+    await expect
+      .poll(
+        async () =>
+          (await alpha.locator(".workspace-pane-row.compact").first().boundingBox())?.height,
+      )
+      .toBe(18);
 
     await alpha.locator('[data-pane-visibility="p-a2"]').click();
     await expect(alpha.locator(".workspace-last-input")).toHaveText("older pane input");
