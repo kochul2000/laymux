@@ -646,6 +646,22 @@
         </div>
       </div>
     </div>
+    <div id="sharedFilesScrim" class="shared-files-scrim" hidden>
+      <div class="shared-files-dialog" role="dialog" aria-modal="true" aria-labelledby="sharedFilesTitle" aria-describedby="sharedFilesCount sharedFilesTarget">
+        <div id="sharedFilesTitle">공유 파일 첨부</div>
+        <div id="sharedFilesCount"></div>
+        <div id="sharedFilesTarget"></div>
+        <div class="shared-files-actions">
+          <button id="sharedFilesAttach" class="primary" type="button">여기에 첨부</button>
+          <button id="sharedFilesChange" type="button">대상 변경</button>
+          <button id="sharedFilesCancel" type="button" aria-label="첨부 취소">취소</button>
+        </div>
+        <div id="sharedFilesDestinations" class="shared-files-actions" hidden>
+          <button id="sharedFilesTerminal" type="button">다른 터미널</button>
+          <button id="sharedFilesPc" type="button">다른 PC</button>
+        </div>
+      </div>
+    </div>
     <div id="physicalKeyboardToast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
     <script src="{{ASSET:xterm.js}}"></script>
     <!-- Shared cell-width provider (issue #538). Generated from

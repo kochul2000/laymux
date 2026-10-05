@@ -36,6 +36,8 @@ instance 선택·연결 설정 진입 bridge만 있고, 네이티브 Material pa
 - Cloud presence의 검증된 Tailscale literal-IP URL이 있으면 고정 Direct E2E route를 우선하고, 최초·열린 session의 socket 네트워크 실패에만 기존 session을 폐기한 뒤 새 Cloud E2E session으로 fallback. runtime 전환은 vault 보호 정책에 따라 생체 인증을 다시 요구할 수 있음
 - 일시적 네트워크 실패에는 같은 pending ciphertext만 15분 비활성 deadline 안에서 재시도
 - background에서 bridge traffic을 중지하고 현재 deadline까지 최대 15분간 key·pending ciphertext를 보존한 뒤 foreground에서 살아 있는 PC Remote 문서는 유지한 채 HTTP/output transport만 복원(호환되지 않는 문서는 다시 적재)
+- 첨부 버튼의 `최근 파일·파일 찾아보기`와 `갤러리·다른 앱에서 선택`. 갤러리 왕복 결과는 연결·터미널 복귀 후 전달한다.
+- 다른 앱의 파일 공유에서 laymux 선택 → 현재 터미널의 확인창에서 `여기에 첨부`. 미접속이면 PC 연결 후 확인창이 자동 열린다. `대상 변경`에서 다른 터미널·PC를 고를 수 있고, 취소하면 공유 파일을 폐기한다. 여러 파일 공유도 지원하며 미첨부 공유는 앱 메모리에만 유지한다. 최근 파일은 Android 시스템 목록이며 laymux 첨부 이력을 따로 저장하지 않는다([ADR-0290](../../docs/adr/0290-android-attachment-picker-and-share-inbox.md)).
 
 데스크톱 Laymux의 Remote Access 모달은 cloud pairing 뒤 같은 초대를 QR과 복사 action으로 발급·회전·폐기하고, 첫 Android
 client nonce의 ACK를 확인한다. 이후 Android native 계층과 desktop은 같은 seed에서 방향별 session

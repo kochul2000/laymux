@@ -119,7 +119,7 @@ import com.laymux.android.web.RemoteResourceLoadResult
 import com.laymux.android.web.RemoteResourceResponse
 import com.laymux.android.web.RemoteSurfaceResumeAction
 import com.laymux.android.web.RemoteSurfaceResumePolicy
-import com.laymux.android.web.SinglePendingResult
+import com.laymux.android.web.RemoteAttachmentPicker
 import com.laymux.android.web.VisibleWebSurface
 import com.laymux.android.web.WebSurfaceLayers
 import com.laymux.android.web.WebSurfaceLayerPolicy
@@ -201,7 +201,9 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private var policyDialog: AlertDialog? = null
     private var remoteJsDialogs: JsDialogChromeClient? = null
     private var cloudJsDialogs: JsDialogChromeClient? = null
-    private val pendingFileChooser = SinglePendingResult<Array<Uri>>()
+    private val attachmentPicker: RemoteAttachmentPicker by lazy {
+        RemoteAttachmentPicker(this) { fileChooserLauncher.launch(it) }
+    }
     private var selectedCloudInstanceId: String? = null
     private var selectedTailscaleUrl: String? = null
     private var connectionSettingsInstanceId: String? = null
@@ -248,9 +250,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private val fileChooserLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
-        pendingFileChooser.complete(
-            WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data),
-        )
+        attachmentPicker.complete(result.resultCode, result.data)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -408,6 +408,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         renderUpdateState(updateController.state())
         if (savedInstanceState == null) {
             handleDebugPairingIntent(intent)
+            handleSharedFilesIntent(intent)
             showDebugNativeSurfacePreviewIfRequested()
         }
     }
@@ -648,27 +649,30 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         callback: ValueCallback<Array<Uri>>,
         params: WebChromeClient.FileChooserParams,
     ) {
-        cancelPendingFileChooser()
-        if (isFinishing || isDestroyed) {
-            callback.onReceiveValue(null)
+        val generation = secureWebViewGeneration
+        if (!remoteBridgeActionsEnabled(generation) || attachmentPicker.sharedOffer() == null) {
+            attachmentPicker.show(callback, params, visibleWebSurface == VisibleWebSurface.REMOTE)
             return
         }
-        val intent = try {
-            params.createIntent().addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        } catch (_: ActivityNotFoundException) {
-            callback.onReceiveValue(null)
-            return
-        }
-        pendingFileChooser.replace(callback::onReceiveValue)
-        try {
-            fileChooserLauncher.launch(intent)
-        } catch (_: ActivityNotFoundException) {
-            pendingFileChooser.cancel()
+        val chooserView = webView
+        chooserView.evaluateJavascript("window.laymuxRemoteUi?.takeSharedFileSelection?.() ?? null") { selected ->
+            if (isDestroyed || webView !== chooserView || !remoteBridgeActionsEnabled(generation)) {
+                callback.onReceiveValue(null)
+                return@evaluateJavascript
+            }
+            if (selected == "null") {
+                attachmentPicker.show(callback, params, allowSharedFiles = true)
+            } else {
+                val id = attachmentPicker.sharedOffer()?.id
+                if (id == null || selected != JSONObject.quote(id) ||
+                    !attachmentPicker.deliverSharedFiles(id, callback)
+                ) callback.onReceiveValue(null)
+            }
         }
     }
 
     private fun cancelPendingFileChooser() {
-        pendingFileChooser.cancel()
+        attachmentPicker.cancel()
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -982,6 +986,8 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         if (!remoteBridgeActionsEnabled(documentGeneration)) return
         notifyPhysicalKeyboardChanged(physicalKeyboardMonitor.connected)
         remoteLoadingOverlay.visibility = View.GONE
+        attachmentPicker.setReady(true)
+        notifySharedFiles()
         // Let the overlay visibility/layout change settle before restoring the
         // touch-derived WebView focus used to create its editable InputConnection.
         // Recheck the document identity inside the posted turn: the user can leave
@@ -1026,10 +1032,15 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             return
         }
         webView.evaluateJavascript(remoteForegroundResumeScript(completion)) { handled ->
-            if (handled == "true") return@evaluateJavascript
             val stale = remoteConnectionGeneration.get() != connectionGeneration ||
                 !remoteLifecycleActive || remoteSession !== session || isDestroyed
-            if (!stale) showRemoteSurface()
+            if (stale) return@evaluateJavascript
+            if (handled == "true") {
+                attachmentPicker.setReady(true)
+                notifySharedFiles()
+                return@evaluateJavascript
+            }
+            showRemoteSurface()
         }
     }
 
@@ -1650,6 +1661,41 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleDebugPairingIntent(intent)
+        handleSharedFilesIntent(intent)
+    }
+
+    private fun handleSharedFilesIntent(intent: Intent?) {
+        if (intent == null || (intent.action != Intent.ACTION_SEND && intent.action != Intent.ACTION_SEND_MULTIPLE)) return
+        val received = attachmentPicker.receiveShare(intent)
+        if (received && visibleWebSurface == VisibleWebSurface.REMOTE) {
+            notifySharedFiles()
+        } else {
+            Toast.makeText(
+                this,
+                if (received) "공유 파일을 받았습니다. PC에 연결하면 첨부 대상을 확인할 수 있습니다."
+                else "공유받은 파일을 읽을 수 없습니다. 파일을 선택해 다시 공유해주세요.",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
+
+    private fun notifySharedFiles() {
+        val offer = attachmentPicker.sharedOffer() ?: return
+        val generation = secureWebViewGeneration
+        if (!remoteLifecycleActive || remoteConnecting || !remoteBridgeActionsEnabled(generation)) return
+        webView.evaluateJavascript(
+            "window.laymuxRemoteUi?.offerSharedFiles?.({id:${JSONObject.quote(offer.id)},count:${offer.count}}) ?? false",
+        ) { handled ->
+            if (handled == "false" && remoteBridgeActionsEnabled(generation) &&
+                attachmentPicker.sharedOffer()?.id == offer.id
+            ) showCloudMessage("공유 파일을 받았습니다. 첨부 버튼에서 공유 파일을 선택해주세요.")
+        }
+    }
+
+    fun cancelSharedFiles(documentGeneration: Long, id: String) {
+        runOnUiThread {
+            if (remoteBridgeActionsEnabled(documentGeneration)) attachmentPicker.discardSharedFiles(id)
+        }
     }
 
     private fun saveAcceptedPairing(
@@ -3264,6 +3310,8 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     override fun onStart() {
         super.onStart()
         remoteLifecycleActive = true
+        // Activity Result can run before the asynchronous E2E foreground resume.
+        attachmentPicker.setReady(remoteSession == null && visibleWebSurface != VisibleWebSurface.REMOTE)
         physicalKeyboardMonitor.start()
         // 콜드 스타트와 전면 복귀가 유일한 트리거다. 6시간 throttle 은 컨트롤러가
         // 지키므로 여기서는 조건 없이 부른다 (ADR-0197).
@@ -3307,6 +3355,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     override fun onStop() {
+        if (::webView.isInitialized && visibleWebSurface == VisibleWebSurface.REMOTE) {
+            webView.evaluateJavascript("window.laymuxAndroidE2e?.onNativeBackground?.()", null)
+        }
+        attachmentPicker.setReady(false)
         physicalKeyboardMonitor.stop()
         if (scannerModuleListener != null) {
             scanInFlight = false

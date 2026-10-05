@@ -151,6 +151,8 @@ import {
         const focusTerminalButton = $("focusTerminal");
         const attachmentButton = $("attachFile");
         const attachmentInput = $("attachmentInput");
+        const sharedFilesScrim = $("sharedFilesScrim");
+        const sharedFilesAttach = $("sharedFilesAttach");
         const composerSendButton = $("composerSend");
         const mainActionRow = $("mainActionRow");
         const inputLayoutEditor = $("inputLayoutEditor");
@@ -605,6 +607,10 @@ import {
         let attachmentUploadAttempt = null;
         let attachmentChooserRevision = 0;
         let pendingAttachmentChooser = null;
+        let sharedFileOffer = null;
+        let lastSharedFileOfferId = null;
+        let sharedTargetChanging = false;
+        let sharedFileSelection = null;
         const attachmentChooserRetryTimers = new Set();
         // Tab recall popup (issue #504) UI state: open flag + highlighted row.
         let composerHistoryOpen = false;
@@ -1123,7 +1129,21 @@ import {
           };
         }
 
+        let androidRemoteBackground = false;
         window.laymuxAndroidE2e = Object.freeze({
+          onNativeBackground() {
+            if (!androidE2eMode) return false;
+            androidRemoteBackground = true;
+            // Native owns background lease retention. Local heartbeat deadlines
+            // must not retire that lease (or a gallery chooser) while RPC is paused.
+            stopHeartbeat();
+            stopOutputReconnect();
+            stopOutputAttachTimeout();
+            composerReady = false;
+            updateComposerControls();
+            resetTransientConnectionNotice();
+            return true;
+          },
           onHttpResponse(requestId, responseJson) {
             const request = androidHttpRequests.get(requestId);
             if (!request) return;
@@ -1150,6 +1170,9 @@ import {
           },
           onNativeForeground() {
             if (!androidE2eMode) return false;
+            const wasBackground = androidRemoteBackground;
+            androidRemoteBackground = false;
+            if (leaseId) startHeartbeat(heartbeatTimeoutMs / 1000);
 
             // The Android entry URL expresses standing auto-connect intent even
             // if backgrounding interrupted the very first claim before it could
@@ -1187,6 +1210,9 @@ import {
             setTimeout(() => {
               if (leaseId) heartbeat().catch((err) => handleHeartbeatError(err));
               else maybeAutoConnect();
+              if (wasBackground && leaseId && activeTerminalId && !socket) {
+                scheduleOutputReconnect(activeTerminalId, leaseId);
+              }
             }, 0);
             return true;
           },
@@ -1649,7 +1675,7 @@ import {
         });
 
         function remoteOverlayOpen() {
-          return !fileViewerOverlayElement.hidden || !githubOverlayElement.hidden || memoView.isOpen();
+          return !sharedFilesScrim.hidden || !fileViewerOverlayElement.hidden || !githubOverlayElement.hidden || memoView.isOpen();
         }
 
         function currentRemoteTool() {
@@ -4218,6 +4244,10 @@ import {
           );
           attachmentButton.disabled = !canAttach;
           attachmentInput.disabled = !canAttach;
+          if (canAttach && pendingAttachmentChooser && attachmentInput.files?.length) {
+            const chooser = pendingAttachmentChooser;
+            window.setTimeout(() => uploadSelectedAttachmentFiles(chooser), 0);
+          }
           attachmentButton.classList.toggle("busy", attachmentUploadInFlight);
           attachmentButton.setAttribute(
             "aria-busy",
@@ -4225,6 +4255,7 @@ import {
           );
           updateComposerOpacityState();
           syncInputActionVisibility();
+          refreshSharedFilePrompt();
         }
 
         function focusCurrentInputSurface() {
@@ -4290,6 +4321,7 @@ import {
 
         function canRestorePhysicalKeyboardFocus() {
           return physicalKeyboardConnected === true && Boolean(leaseId && activeTerminalId) &&
+            sharedFilesScrim.hidden &&
             document.visibilityState === "visible" && !composerIsComposing &&
             !remoteOverlayOpen() && navScrim.hidden &&
             !isForeignEditableTarget(document.activeElement) &&
@@ -6904,6 +6936,7 @@ import {
         // fails on the server. Probe it right away, the way the Android transport
         // resume already does (ADR-0204).
         function resumeControlOnReturn() {
+          if (androidRemoteBackground) return;
           if (!leaseId) {
             maybeAutoConnect();
             return;
@@ -6939,6 +6972,7 @@ import {
         }
 
         function handleHeartbeatError(err) {
+          if (androidRemoteBackground) return;
           if (!leaseId) return;
           if (isFatalRemoteControlError(err) || heartbeatTimedOut()) {
             // A heartbeat `409` is literally "your lease is not active" — it does not
@@ -7377,6 +7411,7 @@ import {
         }
 
         function setNavigationOpen(open) {
+          if (!open) sharedTargetChanging = false;
           if (open) setDrawerView(leaseId ? "workspace" : "connection");
           const pinned = remoteNavigationPinnedForViewport();
           const nextOpen = open || pinned;
@@ -7387,6 +7422,7 @@ import {
           if (nextOpen) startNavigationViewPolling();
           else stopNavigationViewPolling();
           scheduleTerminalFit(Boolean(activeTerminalId));
+          refreshSharedFilePrompt();
         }
 
         function remoteNavigationPinnedForViewport() {
@@ -7473,6 +7509,10 @@ import {
         // (ADR-0149, ADR-0219). Keep the hierarchy in this PC-served document
         // and expose only a boolean consumed/not-consumed boundary to native.
         function dismissTopRemoteLayer() {
+          if (!sharedFilesScrim.hidden) {
+            cancelSharedFileOffer();
+            return true;
+          }
           if (memoView.isOpen()) { memoView.close(); return true; }
           // Both modals have z-index 60; OAuth follows the viewer in DOM order
           // and is therefore the topmost layer if both are present.
@@ -7515,6 +7555,8 @@ import {
 
         window.laymuxRemoteUi = Object.freeze({
           dismissTopLayer: dismissTopRemoteLayer,
+          offerSharedFiles,
+          takeSharedFileSelection,
         });
 
         // ── Widget strip (ADR-0124) ─────────────────────────────────────
@@ -9661,6 +9703,7 @@ import {
         }
 
         function scheduleOutputReconnect(terminalId, outputLeaseId) {
+          if (androidRemoteBackground) return;
           if (!outputLeaseId || leaseId !== outputLeaseId || activeTerminalId !== terminalId) return;
           if (outputReconnectTimer) return;
           const delayMs = outputReconnectDelayMs(outputReconnectAttempt);
@@ -10462,6 +10505,100 @@ import {
             signal,
           });
         }
+
+        function offerSharedFiles(offer) {
+          if (!androidE2eMode || typeof window.LaymuxNative?.cancelSharedFiles !== "function" ||
+              !offer || typeof offer.id !== "string" || !/^[\w-]{1,64}$/.test(offer.id) ||
+              !Number.isInteger(offer.count) || offer.count < 1 || offer.count > 64) return false;
+          if (lastSharedFileOfferId === offer.id) return true;
+          lastSharedFileOfferId = offer.id;
+          sharedFileOffer = { id: offer.id, count: offer.count };
+          sharedTargetChanging = false;
+          if (sharedFileSelection) sharedFileSelection.invalidated = true;
+          $("sharedFilesDestinations").hidden = true;
+          refreshSharedFilePrompt();
+          return true;
+        }
+
+        function refreshSharedFilePrompt() {
+          const visible = Boolean(sharedFileOffer && !sharedTargetChanging && leaseId &&
+            activeTerminalId && composerReady && !attachmentUploadInFlight);
+          const wasHidden = sharedFilesScrim.hidden;
+          sharedFilesScrim.hidden = !visible;
+          if (!visible) return;
+          $("sharedFilesCount").textContent = `공유받은 파일 ${sharedFileOffer.count}개`;
+          $("sharedFilesTarget").textContent = `첨부 대상: 현재 PC · ${activeTerminalTitle() || activeTerminalId}`;
+          if (wasHidden) sharedFilesAttach.focus({ preventScroll: true });
+        }
+
+        function cancelSharedFileOffer() {
+          const id = sharedFileOffer?.id;
+          sharedFileOffer = null;
+          sharedFileSelection = null;
+          sharedTargetChanging = false;
+          sharedFilesScrim.hidden = true;
+          if (id) window.LaymuxNative?.cancelSharedFiles?.(id);
+        }
+
+        function takeSharedFileSelection() {
+          const selection = sharedFileSelection;
+          sharedFileSelection = null;
+          if (!selection) return null;
+          if (selection.invalidated) return false;
+          if (attachmentChooserIsCurrent(selection.chooser)) return selection.offer.id;
+          sharedFileOffer = selection.offer;
+          refreshSharedFilePrompt();
+          return false;
+        }
+
+        sharedFilesAttach.addEventListener("click", () => {
+          if (!sharedFileOffer || attachmentButton.disabled) return;
+          const chooser = beginAttachmentChooser();
+          if (!chooser) return;
+          sharedFileSelection = { offer: sharedFileOffer, chooser };
+          sharedFileOffer = null;
+          sharedFilesScrim.hidden = true;
+          // Stay in the user's DOM gesture: native evaluateJavascript cannot
+          // open a WebView file input without Chromium user activation.
+          attachmentInput.click();
+        });
+        $("sharedFilesCancel").addEventListener("click", cancelSharedFileOffer);
+        $("sharedFilesChange").addEventListener("click", () => {
+          $("sharedFilesDestinations").hidden = !$("sharedFilesDestinations").hidden;
+        });
+        $("sharedFilesTerminal").addEventListener("click", () => {
+          sharedTargetChanging = true;
+          sharedFilesScrim.hidden = true;
+          setNavigationOpen(true);
+        });
+        $("sharedFilesPc").addEventListener("click", () => {
+          sharedTargetChanging = true;
+          sharedFilesScrim.hidden = true;
+          requestDesktopMode().catch((error) => {
+            sharedTargetChanging = false;
+            refreshSharedFilePrompt();
+            setStatus(error.message, true);
+          });
+        });
+        window.addEventListener("keydown", (event) => {
+          if (sharedFilesScrim.hidden) return;
+          // The modal owns keyboard input before terminal shortcuts run.
+          event.stopImmediatePropagation();
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            cancelSharedFileOffer();
+          } else if (event.key === "Tab") {
+            const buttons = Array.from(sharedFilesScrim.querySelectorAll("button"))
+              .filter((button) => !button.closest("[hidden]"));
+            const index = buttons.indexOf(document.activeElement);
+            if (index < 0 || (!event.shiftKey && index === buttons.length - 1) ||
+                (event.shiftKey && index === 0)) {
+              event.preventDefault();
+              buttons[event.shiftKey ? buttons.length - 1 : 0]?.focus({ preventScroll: true });
+            }
+          }
+        }, { capture: true });
 
         function attachmentSelectionSnapshot() {
           const terminalId = activeTerminalId;
@@ -14172,16 +14309,22 @@ import {
             attachmentInput.value = "";
             return false;
           }
+          // Foreground transport recovery still needs a fresh output snapshot.
+          // Keep this FileList until updateComposerControls reports readiness.
+          if (!composerReady || attachmentUploadInFlight) return false;
           pendingAttachmentChooser = null;
           clearAttachmentChooserRetryTimers();
           void attachRemoteFiles(files, { snapshot: chooser.snapshot });
           return true;
         }
         attachmentInput.addEventListener("change", () => {
-          if (!uploadSelectedAttachmentFiles(pendingAttachmentChooser) && pendingAttachmentChooser) {
+          if (!attachmentInput.files?.length) {
             invalidateAttachmentChooser();
+          } else {
+            uploadSelectedAttachmentFiles(pendingAttachmentChooser);
           }
         });
+        attachmentInput.addEventListener("cancel", invalidateAttachmentChooser);
         window.addEventListener("focus", () => {
           // Some older Android System WebView builds populate FileList after
           // the system picker returns but omit the input's change event.
@@ -14197,10 +14340,9 @@ import {
                 if (pendingAttachmentChooser === chooser) invalidateAttachmentChooser();
                 return;
               }
-              const uploaded = uploadSelectedAttachmentFiles(chooser);
-              if (!uploaded && delay === 250 && pendingAttachmentChooser === chooser) {
-                invalidateAttachmentChooser();
-              }
+              // Focus can precede the result from a nested gallery activity.
+              // Only change/cancel or an identity change ends this selection.
+              uploadSelectedAttachmentFiles(chooser);
             }, delay);
             attachmentChooserRetryTimers.add(timer);
           }
