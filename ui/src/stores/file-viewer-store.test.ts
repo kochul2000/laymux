@@ -77,4 +77,34 @@ describe("file-viewer-store", () => {
     expect(s.open).toBe(true);
     expect(s.path).toBe("/tmp/c.txt");
   });
+
+  describe("open sequence (ADR-0291)", () => {
+    it("keeps one non-empty epoch for the store lifetime", () => {
+      const { openEpoch } = useFileViewerStore.getState();
+      expect(openEpoch.trim()).not.toBe("");
+      useFileViewerStore.getState().openFileViewer("/tmp/a.txt");
+      useFileViewerStore.getState().closeFileViewer();
+      expect(useFileViewerStore.getState().openEpoch).toBe(openEpoch);
+    });
+
+    it("counts every successful open, including the same path again", () => {
+      const before = useFileViewerStore.getState().openRevision;
+      useFileViewerStore.getState().openFileViewer("/tmp/a.txt");
+      expect(useFileViewerStore.getState().openRevision).toBe(before + 1);
+      // An agent re-showing a regenerated file is a new thing to look at.
+      useFileViewerStore.getState().openFileViewer("/tmp/a.txt");
+      expect(useFileViewerStore.getState().openRevision).toBe(before + 2);
+      useFileViewerStore.getState().openFileViewer("/tmp/b.txt");
+      expect(useFileViewerStore.getState().openRevision).toBe(before + 3);
+    });
+
+    it("does not count a refused path, the empty viewer, close or maximize", () => {
+      const before = useFileViewerStore.getState().openRevision;
+      useFileViewerStore.getState().openFileViewer("   ");
+      useFileViewerStore.getState().openEmptyFileViewer();
+      useFileViewerStore.getState().toggleMaximized();
+      useFileViewerStore.getState().closeFileViewer();
+      expect(useFileViewerStore.getState().openRevision).toBe(before);
+    });
+  });
 });

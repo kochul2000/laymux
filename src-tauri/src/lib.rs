@@ -361,6 +361,7 @@ pub fn run() {
             commands::get_remote_access_status,
             commands::set_remote_runtime_access,
             commands::get_remote_control_status,
+            commands::report_file_viewer_signal,
             commands::get_remote_session_active,
             commands::get_remote_host_candidates,
             commands::get_android_pairing_status,

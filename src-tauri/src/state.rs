@@ -65,6 +65,8 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 /// `session_checkpoint` likewise owns only its request/ack registry and atomic
 /// mutation admission count; its finalization drain acquires `remote_control`
 /// only after the checkpoint registry lock is released (ADR-0222).
+/// `file_viewer_signal` likewise guards only the last desktop viewer signal; the
+/// heartbeat reads it after releasing `remote_control` (ADR-0291).
 /// The Android pairing lifecycle mutex is outside `AppState`, but unlike those
 /// isolated registries it may nest `remote_access`: acquire it before every
 /// `AppState` lock and never enter it while holding one (ADR-0144).
@@ -206,6 +208,10 @@ pub struct AppState {
     pub app_update: Arc<crate::app_update::UpdateManager>,
     /// Frontend checkpoint request/ack rendezvous plus update finalization gate.
     pub session_checkpoint: crate::session_checkpoint::SessionCheckpointRuntime,
+    /// Last path-less desktop FileViewer signal, served on Remote heartbeats
+    /// without a bridge round trip (ADR-0291). Owns its own mutex and joins no
+    /// ordering above: nothing acquires it while holding another AppState lock.
+    pub file_viewer_signal: crate::remote_server::FileViewerSignalMirror,
 }
 
 /// Process-global per-terminal write/exec serialization table. See
@@ -390,6 +396,7 @@ impl AppState {
                 crate::app_update::UpdateChannel::from_settings_value(&settings.update.channel),
             )),
             session_checkpoint: crate::session_checkpoint::SessionCheckpointRuntime::default(),
+            file_viewer_signal: crate::remote_server::FileViewerSignalMirror::default(),
         }
     }
 }

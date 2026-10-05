@@ -1,6 +1,6 @@
 # 0044. Remote FileViewer의 호스트 경로 반영은 명시적 action으로만 수행한다
 
-- Status: Accepted
+- Status: Superseded by [0291](0291-remote-host-viewer-unread-signal.md) (`From host` 입력 가져오기와 Decision 3·7만; 연결·heartbeat 의 status 미조회와 입력 자동 반영 금지는 유지)
 - Date: 2026-07-21
 - Source: 사용자 요구(“버튼을 추가로 하나 둬서 호스트 뷰어 경로 당겨오게”), [api-contracts.md §13.3.1](../architecture/api-contracts.md), [ADR-0041](0041-remote-served-file-viewer.md), [ADR-0042](0042-remote-file-viewer-secret-capability.md)
 - Supersedes: [ADR-0041](0041-remote-served-file-viewer.md)의 Decision 7

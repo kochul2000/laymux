@@ -4,6 +4,7 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useSyncEvents } from "@/hooks/useSyncEvents";
 import { useSessionPersistence } from "@/hooks/useSessionPersistence";
 import { useAutomationBridge } from "@/hooks/useAutomationBridge";
+import { useRemoteFileViewerSignal } from "@/hooks/useRemoteFileViewerSignal";
 import { saveBeforeClose, setBlockPersist } from "@/lib/persist-session";
 import { applySettingsSnapshot } from "@/lib/settings-snapshot";
 import { createCloseHandler } from "@/lib/window-close-handler";
@@ -42,6 +43,9 @@ export function App() {
   const { loaded, loadStatus } = useSessionPersistence();
   useSessionCheckpointLifecycle(loaded);
   useAutomationBridge();
+  // Next to the bridge that answers Remote status: a reloaded WebView must
+  // clear the previous epoch before the session finishes loading (ADR-0291).
+  useRemoteFileViewerSignal();
   useWindowGeometry();
   useAppFocus();
   useLanguageSync();

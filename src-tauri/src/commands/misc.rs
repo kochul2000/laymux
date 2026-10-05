@@ -37,6 +37,16 @@ pub fn get_remote_control_status(
     crate::remote_server::get_remote_control_status(&state)
 }
 
+/// Synchronous on purpose: Tauri runs sync commands in arrival order, so a later
+/// viewer report never loses to an earlier one (ADR-0291).
+#[tauri::command]
+pub fn report_file_viewer_signal(
+    signal: crate::remote_server::FileViewerSignal,
+    state: State<Arc<AppState>>,
+) -> Result<(), String> {
+    crate::remote_server::report_file_viewer_signal(&state, signal)
+}
+
 #[tauri::command]
 pub fn get_remote_access_status(
     state: State<Arc<AppState>>,

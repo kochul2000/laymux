@@ -9,6 +9,7 @@ mod auth;
 mod clear_routes;
 mod composer_routes;
 pub(crate) mod device_settings;
+mod file_viewer_signal;
 mod font_assets;
 mod github_repo_routes;
 mod lease;
@@ -48,6 +49,8 @@ pub(crate) use android_e2e_output::{
 };
 pub(crate) use attachments::cleanup_stale_attachments;
 pub(crate) use auth::{RemoteTransport, TunnelAuthorized};
+pub(crate) use file_viewer_signal::attach_heartbeat_signal;
+pub use file_viewer_signal::{report_file_viewer_signal, FileViewerSignal, FileViewerSignalMirror};
 pub(crate) use lease::{
     active_lease_matches_with_timeout, begin_human_control_operation,
     human_control_operations_drained, HumanControlOrigin, HumanControlPermit,

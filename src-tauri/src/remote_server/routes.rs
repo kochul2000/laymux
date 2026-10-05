@@ -810,16 +810,28 @@ async fn remote_session_heartbeat(
             "remote controller lease is not active",
         );
     }
-    let mut response = match serde_json::to_value(status) {
-        Ok(value) => value,
-        Err(error) => return internal_error(error),
-    };
+    match heartbeat_success_body(status, device_settings, &server.app_state) {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
+/// Body of a heartbeat that refreshed the lease: controller status, the
+/// device-settings relay outcome, and the path-less PC viewer signal
+/// (ADR-0291). A refused heartbeat answers 409 before reaching this.
+fn heartbeat_success_body(
+    status: RemoteControlStatus,
+    device_settings: Option<Result<Option<serde_json::Value>, String>>,
+    app_state: &crate::state::AppState,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let mut response = serde_json::to_value(status)?;
     match device_settings {
         Some(Ok(Some(command))) => response["deviceSettingsCommand"] = command,
         Some(Err(error)) => response["deviceSettingsError"] = serde_json::json!(error),
         _ => {}
     }
-    Json(response).into_response()
+    super::attach_heartbeat_signal(&mut response, app_state);
+    Ok(response)
 }
 
 async fn remote_session_release(
@@ -1220,9 +1232,10 @@ fn terminal_size_is_positive(cols: u16, rows: u16) -> bool {
 mod tests {
     use super::{
         attempt_claim, attempt_claim_with_context, claim_input_busy_response,
-        complete_handoff_claim_attempt, exact_resize_unavailable_response,
-        terminal_control_response, terminal_size_is_positive, ClaimAttempt, ClaimRequest,
-        ClaimResponse, RemoteControlLease, RemoteControlState, RemoteQuery, TerminalResizeRequest,
+        complete_handoff_claim_attempt, exact_resize_unavailable_response, heartbeat_success_body,
+        status_from_state, terminal_control_response, terminal_size_is_positive, ClaimAttempt,
+        ClaimRequest, ClaimResponse, RemoteControlLease, RemoteControlState, RemoteQuery,
+        TerminalResizeRequest,
     };
     use crate::lock_ext::MutexExt;
     use crate::settings::models::RemoteSettings;
@@ -1238,6 +1251,36 @@ mod tests {
     use std::thread;
     use std::time::{Duration, Instant};
     use tower::ServiceExt;
+
+    #[test]
+    fn heartbeat_success_body_carries_status_relay_and_the_path_less_viewer_signal() {
+        // ADR-0291: every refreshed heartbeat tells Remote whether the PC viewer
+        // shows a file and which open it is — never where the file is.
+        let state = AppState::new();
+        state
+            .file_viewer_signal
+            .record(crate::remote_server::FileViewerSignal {
+                open: true,
+                epoch: "epoch-a".into(),
+                revision: 2,
+            })
+            .unwrap();
+        let status = status_from_state(&RemoteControlState::default(), 15);
+
+        let body = heartbeat_success_body(
+            status,
+            Some(Ok(Some(serde_json::json!({ "requestId": "r1" })))),
+            &state,
+        )
+        .unwrap();
+
+        assert_eq!(body["active"], serde_json::json!(false));
+        assert_eq!(body["deviceSettingsCommand"]["requestId"], "r1");
+        assert_eq!(
+            body["fileViewer"],
+            serde_json::json!({ "open": true, "epoch": "epoch-a", "revision": 2 })
+        );
+    }
 
     fn enabled_settings() -> RemoteSettings {
         RemoteSettings {

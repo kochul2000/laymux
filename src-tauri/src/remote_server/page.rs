@@ -1140,15 +1140,20 @@ mod tests {
             "id=\"fileViewerPath\" type=\"text\" autocomplete=\"off\" autocapitalize=\"off\""
         ));
         assert!(html.contains("id=\"openFileViewer\" type=\"button\" disabled>Open"));
-        assert!(html.contains("id=\"pullHostFileViewerPath\""));
-        assert!(html.contains(">From host</button>"));
+        // The Files button's unread dot replaced `From host` (ADR-0291): the
+        // input is never filled from the PC, and only the button tap reads the
+        // capability-gated status.
+        assert!(!html.contains("id=\"pullHostFileViewerPath\""));
+        assert!(!html.contains(">From host</button>"));
         assert!(!html.contains("id=\"openCurrentFileViewer\""));
         assert!(!html.contains("id=\"refreshFileViewer\""));
         assert!(!html.contains("id=\"openFileViewerPath\""));
         assert!(!html.contains("let fileViewerPathDirty = false;"));
-        assert!(html.contains("let fileViewerStatusRequestRevision = 0;"));
-        assert!(html.contains("let fileViewerPathRevision = 0;"));
+        assert!(!html.contains("fileViewerPathRevision"));
         assert!(!html.contains("refreshFileViewerStatus().catch(() => {});"));
+        assert!(html.contains("applyHostViewerSignal(response?.fileViewer);"));
+        assert!(html.contains("async function openHostViewerFile()"));
+        assert!(html.contains("const HOST_VIEWER_BLINK_MS = 8000;"));
         assert!(html.contains("event.isComposing ||"));
         assert!(html.contains("event.keyCode === 229 ||"));
         // The viewer renders in this document (ADR-0184): no second tab, so no
