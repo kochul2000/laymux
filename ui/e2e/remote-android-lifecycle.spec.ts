@@ -88,6 +88,8 @@ type AndroidLifecycleState = {
   releaseRequests: Array<{ leaseId: string }>;
   heldReleaseRequestId: string | null;
   disconnects: number;
+  attachments: Array<{ leaseId: string; fileName: string; data: string }>;
+  canceledShares: string[];
 };
 
 type AndroidLifecycleWindow = typeof window & {
@@ -105,6 +107,7 @@ type AndroidLifecycleWindow = typeof window & {
     disconnectRemote: () => void;
     beginOauthRelay: (sessionId: string, port: string, path: string, authUrl: string) => void;
     cancelOauthRelay: () => void;
+    cancelSharedFiles: (id: string) => void;
   };
   __activateRemoteUrl?: (uri: string) => void;
   LaymuxOutputTransport: {
@@ -114,9 +117,12 @@ type AndroidLifecycleWindow = typeof window & {
   laymuxAndroidE2e?: {
     onHttpResponse: (requestId: string, responseJson: string) => void;
     onNativeForeground?: () => boolean;
+    onNativeBackground?: () => boolean;
   };
   laymuxRemoteUi?: {
     dismissTopLayer: () => boolean;
+    offerSharedFiles: (offer: { id: string; count: number }) => boolean;
+    takeSharedFileSelection: () => string | null;
   };
   laymuxOauthRelay?: {
     onCallback: (pathAndQuery: string) => void;
@@ -132,7 +138,35 @@ function dismissTopRemoteLayer(page: Page): Promise<boolean> {
   );
 }
 
-async function installAndroidRemote(page: Page, options: { holdInitialClaim?: boolean } = {}) {
+async function installAndroidRemote(
+  page: Page,
+  options: { holdInitialClaim?: boolean; otherTerminal?: boolean } = {},
+) {
+  const fixture = structuredClone(navigation);
+  if (options.otherTerminal) {
+    const first = { ...fixture.activeWorkspace.panes[0], viewType: "TerminalView" };
+    const second = {
+      ...first,
+      id: "pane-2",
+      terminalId: "terminal-2",
+      paneNumber: 2,
+      title: "Other shell",
+      isFocused: false,
+      x: 1,
+    };
+    fixture.activeWorkspace.panes = [first, second];
+    Object.assign(fixture, {
+      workspaces: [
+        { ...fixture.activeWorkspace, isActive: true, hidden: false, terminalPaneCount: 2 },
+      ],
+    });
+    fixture.terminals.push({
+      ...fixture.terminals[0],
+      id: "terminal-2",
+      title: "Other shell",
+      paneNumber: 2,
+    });
+  }
   await page.addInitScript(
     ({ remoteNavigation, holdInitialClaim }) => {
       localStorage.setItem("laymux.remote.inputMode", "composer");
@@ -189,6 +223,8 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
         releaseRequests: [],
         heldReleaseRequestId: null,
         disconnects: 0,
+        attachments: [],
+        canceledShares: [],
       };
       target.__androidLifecycleState = state;
 
@@ -262,6 +298,10 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
             });
           }
           let body: unknown = {};
+          if (path.endsWith("/attachments")) {
+            state.attachments.push(JSON.parse(bodyJson!));
+            body = { path: "C:\\Temp\\shared.txt" };
+          }
           if (path === "/remote/v1/session/status") body = { active: false };
           if (path === "/remote/v1/session/claim") {
             state.claimRequests += 1;
@@ -362,6 +402,9 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
         cancelRemoteHttp() {
           state.cancelledRequests += 1;
         },
+        cancelSharedFiles(id) {
+          state.canceledShares.push(id);
+        },
         setRemoteLease(leaseId) {
           state.leases.push(leaseId);
         },
@@ -391,7 +434,7 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
         },
       };
     },
-    { remoteNavigation: navigation, holdInitialClaim: options.holdInitialClaim ?? false },
+    { remoteNavigation: fixture, holdInitialClaim: options.holdInitialClaim ?? false },
   );
 
   await page.route("http://remote.test/remote/**", async (route) => {
@@ -470,6 +513,257 @@ for (const reconnectDenied of [false, true]) {
     await expect.poll(async () => (await state()).disconnects).toBe(1);
   });
 }
+
+test("a shared file opens confirmation on the connected terminal and attaches in one tap", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await installAndroidRemote(page);
+  await expect(page.locator("#attachFile")).toBeEnabled();
+  expect(
+    await page.evaluate(() =>
+      (window as AndroidLifecycleWindow).laymuxRemoteUi!.offerSharedFiles({
+        id: "share-1",
+        count: 1,
+      }),
+    ),
+  ).toBe(true);
+  await expect(page.getByRole("dialog", { name: "공유 파일 첨부" })).toBeVisible();
+  await expect(page.locator("#sharedFilesTarget")).toContainText("Shell");
+  await page.screenshot({ path: testInfo.outputPath("shared-file-confirmation.png") });
+  const chooserPromise = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "여기에 첨부", exact: true }).click();
+  const chooser = await chooserPromise;
+  expect(
+    await page.evaluate(() =>
+      (window as AndroidLifecycleWindow).laymuxRemoteUi!.takeSharedFileSelection(),
+    ),
+  ).toBe("share-1");
+  expect(
+    await page.evaluate(() =>
+      (window as AndroidLifecycleWindow).laymuxRemoteUi!.takeSharedFileSelection(),
+    ),
+  ).toBeNull();
+  await chooser.setFiles({
+    name: "shared.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("shared bytes"),
+  });
+  await expect(page.locator("#composerInput")).toHaveText("shared.txt");
+  const state = await page.evaluate(
+    () => (window as AndroidLifecycleWindow).__androidLifecycleState,
+  );
+  expect(state.claimRequests).toBe(1);
+  expect(state.attachments).toHaveLength(1);
+  expect(state.attachments[0].leaseId).toBe("lease-1");
+});
+
+test("an unconnected shared file waits for terminal readiness then opens confirmation", async ({
+  page,
+}) => {
+  await installAndroidRemote(page, { holdInitialClaim: true });
+  await page.evaluate(() =>
+    (window as AndroidLifecycleWindow).laymuxRemoteUi!.offerSharedFiles({
+      id: "share-wait",
+      count: 2,
+    }),
+  );
+  await expect(page.getByRole("dialog", { name: "공유 파일 첨부" })).not.toBeVisible();
+  await page.evaluate(() => {
+    const target = window as AndroidLifecycleWindow;
+    target.laymuxAndroidE2e!.onHttpResponse(
+      target.__androidLifecycleState.heldRequestId!,
+      JSON.stringify({
+        kind: "http",
+        status: 200,
+        body: {
+          leaseId: "lease-1",
+          resumeToken: "resume-1",
+          fileViewerToken: "viewer-1",
+          heartbeatTimeoutSeconds: 45,
+        },
+      }),
+    );
+  });
+  await expect(page.getByRole("dialog", { name: "공유 파일 첨부" })).toBeVisible();
+  await expect(page.locator("#sharedFilesCount")).toHaveText("공유받은 파일 2개");
+});
+
+test("cancel and Android back discard the shared offer without uploading", async ({ page }) => {
+  await installAndroidRemote(page);
+  await expect(page.locator("#attachFile")).toBeEnabled();
+  for (const id of ["cancel-1", "cancel-2"]) {
+    await page.evaluate(
+      (id) => (window as AndroidLifecycleWindow).laymuxRemoteUi!.offerSharedFiles({ id, count: 1 }),
+      id,
+    );
+    if (id === "cancel-1")
+      await page.getByRole("button", { name: "첨부 취소", exact: true }).click();
+    else expect(await dismissTopRemoteLayer(page)).toBe(true);
+    await expect(page.getByRole("dialog", { name: "공유 파일 첨부" })).not.toBeVisible();
+  }
+  const state = await page.evaluate(
+    () => (window as AndroidLifecycleWindow).__androidLifecycleState,
+  );
+  expect(state.canceledShares).toEqual(["cancel-1", "cancel-2"]);
+  expect(state.attachments).toEqual([]);
+});
+
+test("changing the shared-file PC returns to PC selection without consuming the files", async ({
+  page,
+}) => {
+  await installAndroidRemote(page);
+  await expect(page.locator("#attachFile")).toBeEnabled();
+  await page.evaluate(() =>
+    (window as AndroidLifecycleWindow).laymuxRemoteUi!.offerSharedFiles({
+      id: "other-pc",
+      count: 1,
+    }),
+  );
+  await page.getByRole("button", { name: "대상 변경", exact: true }).click();
+  await page.getByRole("button", { name: "다른 PC", exact: true }).click();
+  await expect
+    .poll(
+      async () =>
+        (await page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState))
+          .releaseRequests.length,
+    )
+    .toBe(1);
+  await page.evaluate(() => {
+    const target = window as AndroidLifecycleWindow;
+    target.laymuxAndroidE2e!.onHttpResponse(
+      target.__androidLifecycleState.heldReleaseRequestId!,
+      JSON.stringify({ kind: "http", status: 200, body: {} }),
+    );
+  });
+  await expect
+    .poll(
+      async () =>
+        (await page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState))
+          .disconnects,
+    )
+    .toBe(1);
+  expect(
+    (await page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState))
+      .canceledShares,
+  ).toEqual([]);
+});
+
+test("changing the shared-file terminal confirms the selected target without discarding the files", async ({
+  page,
+}) => {
+  await installAndroidRemote(page, { otherTerminal: true });
+  await expect(page.locator("#attachFile")).toBeEnabled();
+  await page.evaluate(() =>
+    (window as AndroidLifecycleWindow).laymuxRemoteUi!.offerSharedFiles({
+      id: "other-terminal",
+      count: 1,
+    }),
+  );
+  await page.getByRole("button", { name: "대상 변경", exact: true }).click();
+  await page.getByRole("button", { name: "다른 터미널", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "공유 파일 첨부" })).not.toBeVisible();
+  await page.locator('[data-pane-row="pane-2"]').click();
+  await expect(page.getByRole("dialog", { name: "공유 파일 첨부" })).toBeVisible();
+  await expect(page.locator("#sharedFilesTarget")).toContainText("Pane 2");
+  expect(
+    (await page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState))
+      .canceledShares,
+  ).toEqual([]);
+});
+
+test("a new share replaces the confirmation and keyboard focus stays inside it", async ({
+  page,
+}) => {
+  await installAndroidRemote(page);
+  await expect(page.locator("#attachFile")).toBeEnabled();
+  await page.evaluate(() => {
+    const ui = (window as AndroidLifecycleWindow).laymuxRemoteUi!;
+    ui.offerSharedFiles({ id: "old-share", count: 1 });
+    ui.offerSharedFiles({ id: "new-share", count: 3 });
+  });
+  await expect(page.locator("#sharedFilesCount")).toHaveText("공유받은 파일 3개");
+  await expect(page.locator("#sharedFilesAttach")).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(page.locator("#sharedFilesCancel")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "공유 파일 첨부" })).not.toBeVisible();
+  expect(
+    (await page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState))
+      .canceledShares,
+  ).toEqual(["new-share"]);
+});
+
+test("a replaced share cannot be consumed by a pending older chooser", async ({ page }) => {
+  await installAndroidRemote(page);
+  await expect(page.locator("#attachFile")).toBeEnabled();
+  await page.evaluate(() =>
+    (window as AndroidLifecycleWindow).laymuxRemoteUi!.offerSharedFiles({
+      id: "old-selection",
+      count: 1,
+    }),
+  );
+  const chooserPromise = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "여기에 첨부", exact: true }).click();
+  await chooserPromise;
+  await page.evaluate(() =>
+    (window as AndroidLifecycleWindow).laymuxRemoteUi!.offerSharedFiles({
+      id: "new-selection",
+      count: 2,
+    }),
+  );
+  expect(
+    await page.evaluate(() =>
+      (window as AndroidLifecycleWindow).laymuxRemoteUi!.takeSharedFileSelection(),
+    ),
+  ).toBe(false);
+  await expect(page.locator("#sharedFilesCount")).toHaveText("공유받은 파일 2개");
+  expect(
+    (await page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState))
+      .attachments,
+  ).toEqual([]);
+});
+
+test("Android gallery selection survives background longer than the heartbeat deadline", async ({
+  page,
+}) => {
+  await installAndroidRemote(page);
+  const state = () =>
+    page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState);
+  await expect(page.locator("#composerInput")).toBeEnabled();
+  await page.locator("#keyBarToggle").click();
+  const selected = page.waitForEvent("filechooser");
+  await page.locator("#attachFile").click();
+  const chooser = await selected;
+  await page.clock.install();
+  const heartbeatBefore = (await state()).heartbeatRequests;
+  expect(
+    await page.evaluate(() =>
+      (window as AndroidLifecycleWindow).laymuxAndroidE2e?.onNativeBackground?.(),
+    ),
+  ).toBe(true);
+  await page.clock.fastForward(90_000);
+  expect((await state()).heartbeatRequests).toBe(heartbeatBefore);
+  expect((await state()).leases).toEqual(["lease-1"]);
+  expect(
+    await page.evaluate(() =>
+      (window as AndroidLifecycleWindow).laymuxAndroidE2e?.onNativeForeground?.(),
+    ),
+  ).toBe(true);
+  await chooser.setFiles({
+    name: "gallery.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("gallery bytes"),
+  });
+  await page.clock.runFor(2_000);
+  await expect.poll(async () => (await state()).attachments.length).toBe(1);
+  expect((await state()).attachments[0]).toMatchObject({
+    leaseId: "lease-1",
+    fileName: "gallery.png",
+  });
+  expect((await state()).claimRequests).toBe(1);
+  await expect(page.locator(".composer-attachment")).toHaveAttribute("aria-label", "gallery.png");
+});
 
 test("Android foreground resumes transport without reloading the Remote document", async ({
   page,
