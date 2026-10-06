@@ -126,6 +126,7 @@ import {
         const fileViewerZoomResetButton = $("fileViewerZoomReset");
         const fileViewerCloseButton = $("fileViewerClose");
         const fileViewerDownloadButton = $("fileViewerDownload");
+        const fileViewerDownloadLabel = $("fileViewerDownloadLabel");
         const fileViewerOpenButton = $("fileViewerOpen");
         const fileViewerBodyElement = $("fileViewerBody");
         const fileViewerMessageElement = $("fileViewerMessage");
@@ -2676,7 +2677,8 @@ import {
           fileViewerOpenButton.title = fileViewerOpenButton.disabled
             ? "Wait for the file transfer or reconnect."
             : "Open on this device";
-          fileViewerDownloadButton.textContent = fileViewerDownloadInFlight
+          // The label, not the button: the icon beside it must survive.
+          fileViewerDownloadLabel.textContent = fileViewerDownloadInFlight
             ? "Saving..."
             : "Download";
         }

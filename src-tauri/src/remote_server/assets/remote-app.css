@@ -3082,6 +3082,34 @@
         color: var(--muted);
         opacity: 0.6;
       }
+      /* Open/Download never shrink below their content: a squeezed label used
+         to spill past the border on a narrow phone. Wide headers show the
+         label alone; narrow ones swap it for the icon and keep the label for
+         the accessible name only. */
+      .file-viewer-header {
+        container: file-viewer-header / inline-size;
+      }
+      .file-viewer-download {
+        position: relative;
+        flex: 0 0 auto;
+        white-space: nowrap;
+      }
+      .file-viewer-action-icon {
+        display: none;
+      }
+      @container file-viewer-header (max-width: 400px) {
+        .file-viewer-action-icon {
+          display: inline-flex;
+        }
+        .file-viewer-action-label {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          overflow: hidden;
+          clip: rect(0 0 0 0);
+          white-space: nowrap;
+        }
+      }
       .file-viewer-zoom-level {
         min-width: 40px;
         color: var(--muted);
