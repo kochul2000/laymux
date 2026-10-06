@@ -22,6 +22,12 @@ pub enum CodexStatusStep {
     Submit,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum CodexHookBinding {
+    Title(crate::agent_hooks::title::TitleBinding),
+    Process(Option<crate::agent_hooks::title::TitleBinding>),
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct CodexStatusTarget {
     pub io: Arc<Mutex<()>>,
@@ -35,7 +41,7 @@ pub(crate) struct CodexStatusTarget {
     pub next_step: Option<CodexStatusStep>,
     pub output_start: Option<u64>,
     pub proof: Option<(String, bool)>,
-    pub hook_title: Option<crate::agent_hooks::title::TitleBinding>,
+    pub hook_binding: Option<CodexHookBinding>,
 }
 
 pub(crate) struct CodexStatusCheckpoint {
