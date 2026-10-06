@@ -54,6 +54,7 @@
   /* dimensions */
   --bar-h: 28px;
   --pane-stack-strip-h: 24px;
+  --pane-stack-drop-band-h: 40px;
   --btn-h: 22px;
   --btn-min-w: 22px;
 
@@ -1371,6 +1372,47 @@
   .pane-stack-add {
     align-self: center;
     margin: 0 4px;
+  }
+  .pane-stack-menu {
+    position: fixed;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    min-width: 140px;
+    padding: 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--bg-overlay);
+  }
+  .pane-stack-menu-item {
+    padding: 4px 8px;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-primary);
+    font-size: var(--fs-sm);
+    text-align: left;
+    cursor: pointer;
+  }
+  .pane-stack-menu-item:hover,
+  .pane-stack-menu-item:focus-visible {
+    background: var(--hover-bg-strong);
+    outline: none;
+  }
+  /* Drop band shown when a slot or tab can be stacked onto a slot. */
+  .pane-stack-drop-band {
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: var(--pane-stack-drop-band-h);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-bottom: 2px solid var(--accent);
+    background: var(--accent-20);
+    color: var(--accent);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    pointer-events: none;
   }
 
   /* Toolbar (28px header bar) */

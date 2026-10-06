@@ -22,6 +22,7 @@ import {
   layoutPaneLayers,
   makeLayoutPane,
   makeSlot,
+  moveLayerWithin,
   removeLayer,
   setActiveLayer as setActiveLayerOf,
   updateLayerView,
@@ -199,6 +200,26 @@ interface WorkspaceState {
    * pane id 와 view 설정은 보존된다. 소스가 1개뿐이면(빈 워크스페이스 방지) 무시.
    */
   movePaneToWorkspace: (paneId: string, targetWorkspaceId: string) => void;
+  /**
+   * Move a layer to slot `targetSlotId` of the active workspace (ADR-0295).
+   * `index` is the position among the target's other layers (default: after
+   * its active layer). Inside one slot this reorders; across slots the moved
+   * layer becomes active in the target, and a source left empty is removed
+   * with its space redistributed. Returns false when nothing changed.
+   */
+  moveLayer: (layerId: string, targetSlotId: string, index?: number) => boolean;
+  /**
+   * Pull a layer out of its stack into a new slot that splits the source slot
+   * like `splitPane` (ADR-0295). Returns the new slot id, or null when the
+   * layer is not stacked.
+   */
+  extractLayer: (layerId: string, direction: "horizontal" | "vertical") => string | null;
+  /**
+   * Stack every layer of slot `srcSlotId` onto slot `tgtSlotId` right after the
+   * target's active layer, show the source's active layer and remove the
+   * source slot (ADR-0295). Returns false when nothing changed.
+   */
+  mergeSlotIntoStack: (srcSlotId: string, tgtSlotId: string) => boolean;
   /** Replace the view of `layerId` (default: the active layer) in the slot. */
   setPaneView: (paneIndex: number, view: ViewInstanceConfig, layerId?: string) => void;
 
@@ -554,6 +575,107 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         return w;
       }),
     }));
+  },
+
+  moveLayer: (layerId, targetSlotId, index) => {
+    const ws = get().getActiveWorkspace();
+    if (!ws) return false;
+    const srcIndex = ws.panes.findIndex((p) => p.layers.some((layer) => layer.id === layerId));
+    const tgtIndex = ws.panes.findIndex((p) => p.id === targetSlotId);
+    if (srcIndex < 0 || tgtIndex < 0) return false;
+    const src = ws.panes[srcIndex];
+
+    if (srcIndex === tgtIndex) {
+      if (index === undefined) return false;
+      const reordered = moveLayerWithin(src, layerId, index);
+      if (reordered === src) return false;
+      set((state) => ({ workspaces: replaceSlot(state.workspaces, ws.id, srcIndex, reordered) }));
+      return true;
+    }
+
+    const layer = src.layers.find((candidate) => candidate.id === layerId)!;
+    let panes = [...ws.panes];
+    panes[tgtIndex] = insertLayer(ws.panes[tgtIndex], layer, { index });
+    const remaining = removeLayer(src, layerId);
+    if (remaining) {
+      panes[srcIndex] = remaining;
+    } else {
+      const redistributed = removePaneAndRedistribute(panes, srcIndex);
+      if (!redistributed) return false;
+      panes = redistributed;
+    }
+    set((state) => ({
+      workspaces: state.workspaces.map((w) => (w.id === ws.id ? { ...w, panes } : w)),
+    }));
+    // An emptied source slot is gone; its layer lives on in the target.
+    if (!remaining) useOverridesStore.getState().clearPaneOverride(src.id);
+    return true;
+  },
+
+  extractLayer: (layerId, direction) => {
+    const ws = get().getActiveWorkspace();
+    if (!ws) return null;
+    const srcIndex = ws.panes.findIndex((p) => p.layers.some((layer) => layer.id === layerId));
+    if (srcIndex < 0) return null;
+    const src = ws.panes[srcIndex];
+    const remaining = removeLayer(src, layerId);
+    if (!remaining || remaining === src) return null;
+    const layer = src.layers.find((candidate) => candidate.id === layerId)!;
+
+    // Creation rule: the new slot shares its layer's id when that id is free.
+    const newSlotId = ws.panes.some((p) => p.id === layerId) ? generateId("pane") : layerId;
+    let kept: Pick<WorkspacePane, "x" | "y" | "w" | "h">;
+    let rect: Pick<WorkspacePane, "x" | "y" | "w" | "h">;
+    if (direction === "horizontal") {
+      const halfH = src.h / 2;
+      kept = { x: src.x, y: src.y, w: src.w, h: halfH };
+      rect = { x: src.x, y: src.y + halfH, w: src.w, h: halfH };
+    } else {
+      const halfW = src.w / 2;
+      kept = { x: src.x, y: src.y, w: halfW, h: src.h };
+      rect = { x: src.x + halfW, y: src.y, w: halfW, h: src.h };
+    }
+    const newSlot: WorkspacePane = {
+      id: newSlotId,
+      ...rect,
+      layers: [layer],
+      activeLayerId: layer.id,
+    };
+    const panes = [...ws.panes];
+    panes[srcIndex] = { ...remaining, ...kept };
+    panes.splice(srcIndex + 1, 0, newSlot);
+    set((state) => ({
+      workspaces: state.workspaces.map((w) => (w.id === ws.id ? { ...w, panes } : w)),
+    }));
+    return newSlotId;
+  },
+
+  mergeSlotIntoStack: (srcSlotId, tgtSlotId) => {
+    const ws = get().getActiveWorkspace();
+    if (!ws || srcSlotId === tgtSlotId) return false;
+    const srcIndex = ws.panes.findIndex((p) => p.id === srcSlotId);
+    const tgtIndex = ws.panes.findIndex((p) => p.id === tgtSlotId);
+    if (srcIndex < 0 || tgtIndex < 0) return false;
+    const src = ws.panes[srcIndex];
+
+    let target = ws.panes[tgtIndex];
+    let at = activeLayerIndex(target) + 1;
+    for (const layer of src.layers) {
+      target = insertLayer(target, layer, { index: at, activate: false });
+      at += 1;
+    }
+    target = setActiveLayerOf(target, activeLayer(src).id);
+    const panes = [...ws.panes];
+    panes[tgtIndex] = target;
+    const redistributed = removePaneAndRedistribute(panes, srcIndex);
+    if (!redistributed) return false;
+    set((state) => ({
+      workspaces: state.workspaces.map((w) =>
+        w.id === ws.id ? { ...w, panes: redistributed } : w,
+      ),
+    }));
+    useOverridesStore.getState().clearPaneOverride(src.id);
+    return true;
   },
 
   setPaneView: (paneIndex, view, layerId) => {

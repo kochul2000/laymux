@@ -5,7 +5,12 @@ import { useDockStore } from "@/stores/dock-store";
 import { useUiStore } from "@/stores/ui-store";
 import type { TerminalLocation } from "@/stores/settings-store";
 import { activatePaneLayer, focusWorkspacePane } from "@/lib/workspace-transition";
-import { stackPaneAt } from "@/lib/pane-stack-actions";
+import {
+  extractLayerToSplit,
+  mergeSlotIntoStack,
+  moveLayerTo,
+  stackPaneAt,
+} from "@/lib/pane-stack-actions";
 import { PaneGrid } from "./PaneGrid";
 import { useCwdDefaultsResolver } from "./useCwdDefaultsResolver";
 
@@ -85,6 +90,27 @@ export function WorkspaceArea() {
             onActivateLayer={(_paneId, layerId) => {
               activatePaneLayer(ws.id, layerId);
             }}
+            onMoveLayer={
+              isActive
+                ? (layerId, targetPaneId, index) => {
+                    moveLayerTo(layerId, targetPaneId, index);
+                  }
+                : undefined
+            }
+            onExtractLayer={
+              isActive
+                ? (layerId, direction) => {
+                    extractLayerToSplit(layerId, direction);
+                  }
+                : undefined
+            }
+            onMergeSlot={
+              isActive
+                ? (srcPaneId, tgtPaneId) => {
+                    mergeSlotIntoStack(srcPaneId, tgtPaneId);
+                  }
+                : undefined
+            }
             onSwapPanes={
               isActive
                 ? (srcPaneId, tgtPaneId) => swapPanes(idxOf(srcPaneId), idxOf(tgtPaneId))
