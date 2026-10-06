@@ -248,6 +248,7 @@ pub fn build_router(
         .route("/api/v1/ui/remote-access", post(ui_remote_access))
         .route("/api/v1/ui/settings/navigate", post(ui_navigate_settings))
         .route("/api/v1/ui/lifecycle", post(ui_lifecycle))
+        .route("/api/v1/ui/key", post(ui_dispatch_key))
         .route("/api/v1/ui/file-viewer", post(ui_open_file_viewer))
         .route("/api/v1/settings/app-theme", put(settings_set_app_theme))
         .route(

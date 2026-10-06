@@ -284,14 +284,46 @@ describe("WorkspaceStore layer rearrangement (ADR-0295)", () => {
     expect(panes[1].layers).toEqual([{ id: "l1", view: term }]);
   });
 
-  it("extracting the slot-id layer mints a fresh slot id", () => {
+  it("extracting the slot-id layer renames the source slot so ids never collide", () => {
+    useOverridesStore.getState().setPaneOverride("L", { controlBarMode: "pinned" });
     const newSlotId = useWorkspaceStore.getState().extractLayer("L", "vertical")!;
-    expect(newSlotId).not.toBe("L");
+    expect(newSlotId).toBe("L");
     const panes = useWorkspaceStore.getState().getActiveWorkspace()!.panes;
-    expect(panes[0].id).toBe("L");
+    expect(panes[0].id).not.toBe("L");
     expect(panes[0].layers.map((l) => l.id)).toEqual(["l1", "l2"]);
+    expect(panes[1].id).toBe("L");
     expect(panes[1].layers.map((l) => l.id)).toEqual(["L"]);
     expect(panes[1].x).toBeCloseTo(0.25);
+    // the chrome override stays with the slot that kept its place
+    expect(useOverridesStore.getState().paneOverrides[panes[0].id]?.controlBarMode).toBe("pinned");
+    expect(useOverridesStore.getState().paneOverrides.L).toBeUndefined();
+  });
+
+  it("moving the slot-id layer away renames the slot it leaves", () => {
+    useOverridesStore.getState().setPaneOverride("L", { controlBarMode: "pinned" });
+    expect(useWorkspaceStore.getState().moveLayer("L", "R")).toBe(true);
+    const panes = useWorkspaceStore.getState().getActiveWorkspace()!.panes;
+    expect(panes[0].id).not.toBe("L");
+    expect(panes[0].layers.map((l) => l.id)).toEqual(["l1", "l2"]);
+    expect(panes[1].layers.map((l) => l.id)).toEqual(["R", "L"]);
+    const allSlotIds = panes.map((p) => p.id);
+    const foreignLayerIds = panes.flatMap((p) =>
+      p.layers.filter((l) => l.id !== p.id).map((l) => l.id),
+    );
+    expect(allSlotIds.some((id) => foreignLayerIds.includes(id))).toBe(false);
+    expect(useOverridesStore.getState().paneOverrides[panes[0].id]?.controlBarMode).toBe("pinned");
+  });
+
+  it("movePaneToWorkspace prefers an exact slot id over a layer id", () => {
+    const store = useWorkspaceStore.getState();
+    store.addWorkspace("Other", store.layouts[0].id);
+    const other = useWorkspaceStore.getState().workspaces.at(-1)!;
+    store.movePaneToWorkspace("R", other.id);
+    const moved = useWorkspaceStore
+      .getState()
+      .workspaces.find((w) => w.id === other.id)!
+      .panes.some((p) => p.id === "R");
+    expect(moved).toBe(true);
   });
 
   it("refuses to extract an unstacked layer", () => {

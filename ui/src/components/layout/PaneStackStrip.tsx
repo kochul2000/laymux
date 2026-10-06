@@ -5,7 +5,7 @@ import { PlusIcon, XIcon } from "@/components/ui/icons";
 import { useResolvedKeybinding } from "@/lib/keybinding-registry";
 import { getLayerDragData, LAYER_DND_MIME, setLayerDragData } from "@/lib/pane-dnd";
 import { toTerminalId } from "@/lib/pane-ids";
-import { viewLabel } from "@/lib/view-labels";
+import { layerTabTitle } from "@/lib/pane-stack-title";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import type { PaneLayer } from "@/stores/types";
@@ -73,10 +73,20 @@ export function PaneStackStrip({
   // Primitive per-tab facts so the strip re-renders only when a tab changes.
   const titles = useTerminalStore(
     useShallow((s) =>
-      terminalIds.map((id) => {
-        if (!id) return "";
-        const instance = s.instances.find((candidate) => candidate.id === id);
-        return instance?.title || instance?.label || "";
+      layers.map((layer, index) => {
+        const id = terminalIds[index];
+        const instance = id ? s.instances.find((candidate) => candidate.id === id) : undefined;
+        return layerTabTitle({
+          viewType: layer.view.type,
+          title: instance?.title,
+          label: instance?.label,
+          profile:
+            instance?.profile ||
+            (typeof layer.view.profile === "string" ? layer.view.profile : undefined),
+          cwd:
+            instance?.cwd ||
+            (typeof layer.view.lastCwd === "string" ? layer.view.lastCwd : undefined),
+        });
       }),
     ),
   );
@@ -95,12 +105,8 @@ export function PaneStackStrip({
     ),
   );
 
-  const tabs: TabState[] = layers.map((layer, index) => ({
-    title:
-      titles[index] ||
-      (layer.view.type === "TerminalView" && typeof layer.view.profile === "string"
-        ? layer.view.profile
-        : viewLabel(layer.view.type)),
+  const tabs: TabState[] = layers.map((_layer, index) => ({
+    title: titles[index],
     dot: unread[index] ? "unread" : active[index] ? "active" : null,
   }));
 

@@ -50,7 +50,7 @@
 - **재마운트 없음**: 박스 안의 열(column) 래퍼와 내용 칸은 단일 레이어일 때도 항상 렌더한다. 슬롯이 스택이 되는 순간에는 전환 줄만 끼어들고 컨트롤 바·view 는 같은 자리에 남아 터미널이 재마운트되지 않는다.
 - **소유권**: 쌓기·순환은 `lib/pane-stack-actions.ts`(`stackPaneAt`, `stackFocusedPane`, `cycleFocusedLayer`)가, 레이어 표시+포커스 commit 은 `workspace-transition.activatePaneLayer` 가 소유한다. 컴포넌트와 단축키는 이 둘만 부른다.
 - **CWD 시드**: 새 레이어의 첫 터미널 세션은 누른 슬롯 활성 레이어의 CWD 에서 시작한다(분할과 같은 재시작 요청 버스).
-- **경계 병합**: 경계선을 끝까지 끌어 슬롯이 사라지는 병합은 레이어 전체를 제거한다(`removeSlot`).
+- **경계 병합**: 경계선 병합(드래그 끝·더블클릭)은 스택 슬롯을 지우지 않고 최소 크기로 남긴다. 단일 레이어 슬롯의 병합은 슬롯을 통째로 지운다(`removeSlot`).
 - **재배치**: 레이어 이동·꺼내기·합치기는 `workspace-store` 의 `moveLayer`·`extractLayer`·`mergeSlotIntoStack` 이 기하·레이어 불변식을 한 번에 갱신하고, `pane-stack-actions` 의 `moveLayerTo`·`extractLayerToSplit`·`mergeSlotIntoStack` 이 포커스를 commit 한다. 레이어 박스가 레이어 id 로 key 되므로 슬롯을 옮겨 다녀도 터미널은 재마운트되지 않는다. 사라진 슬롯은 pane 오버라이드(`controlBarMode`)만 지우고, 옮겨 간 레이어의 view 오버라이드·hidden flag 는 그대로 따라간다.
 
 ### 크기 조절
@@ -1272,7 +1272,7 @@ document 레벨 단축키 실행은 `useKeyboardShortcuts` 의 **액션 ID → �
 | `workspace.rename`                          | `Ctrl+Alt+R`                   | 워크스페이스 이름 변경                                                                                                 |
 | `workspace.clearTerminals`                  | `Ctrl+Alt+L`                   | 활성 워크스페이스 격자의 모든 터미널에 화면 클리어용 Ctrl+L 브로드캐스트                                               |
 | `pane.focus`                                | `Alt+Arrow`                    | Pane 포커스 이동 (상하좌우). 그 방향에 Pane·보이는 Dock 이 모두 없으면 `paneStack.cycleOnBlockedArrow`(기본 켬)일 때 포커스 슬롯의 스택을 넘긴다 ([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)) |
-| `pane.layer`                                | `Alt+Shift+Arrow`              | 포커스 슬롯의 스택 레이어 순환 — 오른쪽/아래 = 다음, 왼쪽/위 = 이전, 링. 스택이 아니면 no-op ([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)) |
+| `pane.layer`                                | `Alt+Shift+Arrow`              | 포커스 슬롯의 스택 레이어 순환 — 오른쪽/아래 = 다음, 왼쪽/위 = 이전, 링. 스택이 아니면 no-op 이고 조합은 터미널 앱에 그대로 간다(스택일 때만 패스스루) ([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)) |
 | `pane.stack`                                | `Ctrl+Alt+S`                   | 포커스 슬롯에 `EmptyView` 레이어를 쌓고 표시 — 컨트롤 바 Stack 버튼과 동일 ([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)) |
 | `pane.clearTerminal`                        | `Alt+L`                        | 포커스된 terminal pane 하나에 activity별 실제 클리어(`/clear` 또는 설정된 shell 명령)                                  |
 | `pane.delete`                               | `Delete`                       | 편집 모드에서 포커스된 Pane 제거. 스택 슬롯이면 활성 레이어 하나만 닫는다                                              |

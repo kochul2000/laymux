@@ -855,6 +855,37 @@ pub async fn ui_navigate_settings(
     }
 }
 
+/// Dev-only keyboard injection for the autonomous verification loop: the
+/// frontend dispatches a `keydown` at the focused element, so shortcuts travel
+/// the real terminal pass-through → document handler path. Debug builds only.
+/// Body: `{ "key": "ArrowRight", "ctrl"?: bool, "alt"?: bool, "shift"?: bool }`.
+pub async fn ui_dispatch_key(
+    AxumState(state): AxumState<ServerState>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    if !cfg!(debug_assertions) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": "dev-only key dispatch" })),
+        );
+    }
+    if body
+        .get("key")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .is_empty()
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(err_json("'key' is required and must be non-empty")),
+        );
+    }
+    match bridge_request(&state, "action", "ui", "dispatchKey", body).await {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
 /// Dev-only visual lifecycle preview. No terminal or installer work is performed.
 pub async fn ui_lifecycle(
     AxumState(state): AxumState<ServerState>,

@@ -215,6 +215,7 @@ fn settings_round_trip_with_full_config() {
             overflow: "collapse".into(),
         },
         dock: Default::default(),
+        pane_stack: Default::default(),
         notifications: Default::default(),
         power: PowerSettings {
             keep_awake: false,

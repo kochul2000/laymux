@@ -317,6 +317,11 @@ pub async fn api_docs() -> impl IntoResponse {
                 "body": { "action": "open | close (optional)", "kind": "close | update", "stage": "ready | downloading | checkpoint | interrupting | settling | caching | installing | closing", "completed": "number (optional)", "total": "number (optional)", "cleanup": "boolean (optional)" }
             },
             {
+                "method": "POST", "path": "/api/v1/ui/key",
+                "description": "Dev-only keyboard injection: dispatch one keydown at the focused element so app shortcuts travel the real terminal pass-through path. Release returns 403.",
+                "body": { "key": "KeyboardEvent.key, e.g. \"ArrowRight\" or \"s\"", "ctrl": "(optional) bool", "alt": "(optional) bool", "shift": "(optional) bool" }
+            },
+            {
                 "method": "POST", "path": "/api/v1/ui/file-viewer",
                 "description": "Open the unified file viewer overlay for a file path (same viewer as File Explorer / Ctrl+Shift+O).",
                 "body": { "path": "string (absolute path, required)", "newWindow": "boolean (optional — fill the whole window)" }

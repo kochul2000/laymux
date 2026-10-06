@@ -85,6 +85,15 @@ function forgetLayerState(layerId: string, keepSlotOverride: boolean): void {
   useTerminalRestartStore.getState().forgetRestart(layerId);
 }
 
+/** Carry a renamed slot's chrome override (control bar mode) to its new id. */
+function movePaneOverride(fromId: string, toId: string): void {
+  const overrides = useOverridesStore.getState();
+  const existing = overrides.getPaneOverride(fromId);
+  if (!existing) return;
+  overrides.setPaneOverride(toId, existing);
+  overrides.clearPaneOverride(fromId);
+}
+
 /** Drop the side state of a removed slot and every one of its layers. */
 function forgetSlotState(slot: WorkspacePane): void {
   useOverridesStore.getState().clearAll(slot.id);
@@ -524,7 +533,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
   movePaneToWorkspace: (paneId, targetWorkspaceId) => {
     const { workspaces } = get();
-    const source = workspaces.find((w) => findSlotIndex(w.panes, paneId) >= 0);
+    // An exact slot id wins over a layer id anywhere (ADR-0295).
+    const source =
+      workspaces.find((w) => w.panes.some((p) => p.id === paneId)) ??
+      workspaces.find((w) => findSlotIndex(w.panes, paneId) >= 0);
     const target = workspaces.find((w) => w.id === targetWorkspaceId);
     if (!source || !target) return;
     // 같은 워크스페이스로의 이동은 무의미하고, 소스를 비우는 이동은 막는다.
@@ -597,8 +609,11 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     let panes = [...ws.panes];
     panes[tgtIndex] = insertLayer(ws.panes[tgtIndex], layer, { index });
     const remaining = removeLayer(src, layerId);
+    // Invariant (ADR-0295): a slot id may equal only one of its own layer ids.
+    // A slot that loses its id-sharing layer takes a fresh id.
+    const renamedFrom = remaining && layerId === src.id ? src.id : null;
     if (remaining) {
-      panes[srcIndex] = remaining;
+      panes[srcIndex] = renamedFrom ? { ...remaining, id: generateId("pane") } : remaining;
     } else {
       const redistributed = removePaneAndRedistribute(panes, srcIndex);
       if (!redistributed) return false;
@@ -609,6 +624,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     }));
     // An emptied source slot is gone; its layer lives on in the target.
     if (!remaining) useOverridesStore.getState().clearPaneOverride(src.id);
+    if (renamedFrom) movePaneOverride(renamedFrom, panes[srcIndex].id);
     return true;
   },
 
@@ -622,8 +638,12 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     if (!remaining || remaining === src) return null;
     const layer = src.layers.find((candidate) => candidate.id === layerId)!;
 
-    // Creation rule: the new slot shares its layer's id when that id is free.
-    const newSlotId = ws.panes.some((p) => p.id === layerId) ? generateId("pane") : layerId;
+    // Creation rule: the new slot shares its layer's id. When that id was the
+    // source slot's own, the source keeps its place under a fresh id so a slot
+    // id never names another slot's layer (ADR-0295).
+    const newSlotId = layerId;
+    const renamedFrom = layerId === src.id ? src.id : null;
+    const sourceId = renamedFrom ? generateId("pane") : src.id;
     let kept: Pick<WorkspacePane, "x" | "y" | "w" | "h">;
     let rect: Pick<WorkspacePane, "x" | "y" | "w" | "h">;
     if (direction === "horizontal") {
@@ -642,11 +662,12 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       activeLayerId: layer.id,
     };
     const panes = [...ws.panes];
-    panes[srcIndex] = { ...remaining, ...kept };
+    panes[srcIndex] = { ...remaining, ...kept, id: sourceId };
     panes.splice(srcIndex + 1, 0, newSlot);
     set((state) => ({
       workspaces: state.workspaces.map((w) => (w.id === ws.id ? { ...w, panes } : w)),
     }));
+    if (renamedFrom) movePaneOverride(renamedFrom, sourceId);
     return newSlotId;
   },
 
