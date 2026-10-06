@@ -101,6 +101,7 @@ export function applySettingsSnapshot(
     ...(rawSettings.usage ? { usage: rawSettings.usage } : {}),
     ...(rawSettings.widgets ? { widgets: rawSettings.widgets } : {}),
     ...(rawSettings.dock ? { dock: rawSettings.dock } : {}),
+    ...(rawSettings.paneStack ? { paneStack: rawSettings.paneStack } : {}),
     ...(rawSettings.notifications ? { notifications: rawSettings.notifications } : {}),
     ...(rawSettings.power ? { power: rawSettings.power } : {}),
     ...(rawSettings.update ? { update: rawSettings.update } : {}),

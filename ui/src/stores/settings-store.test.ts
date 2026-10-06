@@ -1120,3 +1120,27 @@ describe("settings-store", () => {
     });
   });
 });
+
+describe("paneStack settings (ADR-0295)", () => {
+  beforeEach(() => {
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+  });
+
+  it("defaults to cycling the stack on a blocked arrow", () => {
+    expect(useSettingsStore.getState().paneStack).toEqual({ cycleOnBlockedArrow: true });
+  });
+
+  it("loads and updates the cycle setting", () => {
+    useSettingsStore.getState().loadFromSettings({ paneStack: { cycleOnBlockedArrow: false } });
+    expect(useSettingsStore.getState().paneStack.cycleOnBlockedArrow).toBe(false);
+    useSettingsStore.getState().setPaneStack({ cycleOnBlockedArrow: true });
+    expect(useSettingsStore.getState().paneStack.cycleOnBlockedArrow).toBe(true);
+  });
+
+  it("fills missing fields of a partial section from defaults", () => {
+    useSettingsStore
+      .getState()
+      .loadFromSettings({ paneStack: {} as { cycleOnBlockedArrow: boolean } });
+    expect(useSettingsStore.getState().paneStack.cycleOnBlockedArrow).toBe(true);
+  });
+});

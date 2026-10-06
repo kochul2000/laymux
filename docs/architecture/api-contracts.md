@@ -13,6 +13,8 @@
 
 새 PC 설정의 `controlBar.defaultMode`는 `pinned`이고, 기본 Dock은 왼쪽 WorkspaceSelectorView와 오른쪽 MemoView / FileExplorerView / GitHubView(위부터 높이 1/3씩)다. 위·아래 Dock은 숨긴다. 이 기본 구성은 Rust `Settings::default()`와 프론트 store에 일치시키며, 기존에 저장된 컨트롤 바 모드·pane 오버라이드·Dock 배치는 그대로 적용한다. 새 값은 신규 또는 생략된 설정에만 적용한다([ADR-0265](../adr/0265-pc-remote-first-use-defaults.md)).
 
+`paneStack.cycleOnBlockedArrow`(기본 `true`)는 `Alt+Arrow` 방향에 Pane 도 보이는 Dock 도 없을 때 포커스 슬롯의 스택 레이어를 넘길지 정한다. Settings → 인터페이스 → Pane 스택에서 끄고 켠다([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)). 워크스페이스 pane 은 스택이면 `{ id, x, y, w, h, layers: [{ id, view }], activeLayerId }` 로, 아니면 기존 `{ id, x, y, w, h, view }` 축약형으로 저장된다.
+
 ### Codex 종료 확인
 
 훅 우선 모드에서는 [ADR-0292](../adr/0292-codex-hook-lifecycle-session-proof.md)와 [ADR-0294](../adr/0294-codex-process-bound-lifecycle-proof.md)에 따라 현재 TUI와 저장소에 연결된 훅 ID 또는 정확한 프로세스 진단 ID로 먼저 종료 복원점을 확인한다. 활성 훅 설치와 최상위 rollout/Fresh를 검증하며, 프로세스 진단 ID는 훅 수신과 제목 설정을 요구하지 않지만 현재 세대의 유효한 제목이 다른 ID면 거부한다. Codex는 시작 훅을 다음 요청까지 미루므로 resume 직후에도 프로세스 증거를 사용한다. 해당 pane은 `begin_codex_status_checkpoint`의 입력 대상 목록에서 제외하지만 토큰의 검증 대상에는 유지한다. I/O 후와 저장 시점에 동일 증거 종류의 대화 선택·프로세스·PTY 세대·제목 snapshot·설치·rollout을 재검증하며 프로세스 선택 소실을 제목 증거로 대체하지 않는다. 작업 phase의 만료는 대화 메타데이터의 만료가 아니다. 두 증거가 없거나 훅 제거·비활성·읽기 실패 또는 휴리스틱 모드이면 아래 `/status` 절차를 사용한다.

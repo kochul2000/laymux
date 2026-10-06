@@ -773,3 +773,77 @@ describe("PaneGrid stacked slots (ADR-0295)", () => {
     expect(onRemovePane).toHaveBeenCalledWith("slot", "under");
   });
 });
+
+describe("PaneGrid stack UI (ADR-0295)", () => {
+  const single: GridPane = {
+    id: "slot",
+    x: 0,
+    y: 0,
+    w: 1,
+    h: 1,
+    layers: [{ id: "slot", view: { type: "TerminalView" } }],
+    activeLayerId: "slot",
+  };
+  const stacked: GridPane = {
+    ...single,
+    layers: [...single.layers, { id: "under", view: { type: "MemoView" } }],
+    activeLayerId: "slot",
+  };
+  const props = {
+    testIdFn: (_p: GridPane, i: number) => `ui-pane-${i}`,
+    isFocused: () => false,
+    onPaneFocus: vi.fn(),
+    workspaceId: "ws-1",
+    workspaceName: "Test-WS",
+  };
+
+  beforeEach(() => {
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useSettingsStore.setState((s) => ({ controlBar: { ...s.controlBar, defaultMode: "pinned" } }));
+    useTerminalStartupStore.setState({ revealedPaneIds: new Set(["slot", "under"]) });
+  });
+
+  it("shows the Stack button only when stacking is wired", () => {
+    const onStackPane = vi.fn();
+    const { rerender } = render(<PaneGrid {...props} panes={[single]} />);
+    expect(screen.queryByTestId("pane-control-stack")).toBeNull();
+    rerender(<PaneGrid {...props} panes={[single]} onStackPane={onStackPane} />);
+    fireEvent.click(screen.getByTestId("pane-control-stack"));
+    expect(onStackPane).toHaveBeenCalledWith("slot");
+  });
+
+  it("renders the strip only for a stacked slot", () => {
+    const { rerender } = render(<PaneGrid {...props} panes={[single]} />);
+    expect(screen.queryByTestId("pane-stack-strip")).toBeNull();
+    rerender(<PaneGrid {...props} panes={[stacked]} />);
+    expect(screen.getAllByTestId("pane-stack-strip")).toHaveLength(1);
+  });
+
+  it("keeps the terminal mounted when its slot becomes a stack", () => {
+    const { rerender } = render(<PaneGrid {...props} panes={[single]} />);
+    const before = screen.getByTestId("mock-terminal-terminal-slot");
+    rerender(<PaneGrid {...props} panes={[stacked]} />);
+    expect(screen.getByTestId("mock-terminal-terminal-slot")).toBe(before);
+  });
+
+  it("routes strip actions to the slot callbacks", () => {
+    const onActivateLayer = vi.fn();
+    const onRemovePane = vi.fn();
+    const onStackPane = vi.fn();
+    render(
+      <PaneGrid
+        {...props}
+        panes={[stacked]}
+        onActivateLayer={onActivateLayer}
+        onRemovePane={onRemovePane}
+        onStackPane={onStackPane}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("pane-stack-tab-under"));
+    expect(onActivateLayer).toHaveBeenCalledWith("slot", "under");
+    fireEvent.click(screen.getByTestId("pane-stack-tab-close-under"));
+    expect(onRemovePane).toHaveBeenCalledWith("slot", "under");
+    fireEvent.click(screen.getByTestId("pane-stack-add"));
+    expect(onStackPane).toHaveBeenCalledWith("slot");
+  });
+});

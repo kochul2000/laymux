@@ -174,6 +174,21 @@ export const DEFAULT_KEYBINDINGS: KeybindingDef[] = [
     group: "Pane",
     passThroughTerminal: true,
   },
+  // Pane stack (ADR-0295): Right/Down = next layer, Left/Up = previous, ring.
+  {
+    id: "pane.layer",
+    label: "스택 레이어 순환",
+    defaultKeys: "Alt+Shift+Arrow",
+    group: "Pane",
+    passThroughTerminal: true,
+  },
+  {
+    id: "pane.stack",
+    label: "포커스 Pane 에 레이어 쌓기",
+    defaultKeys: "Ctrl+Alt+S",
+    group: "Pane",
+    passThroughTerminal: true,
+  },
   // pane.delete: 기본 plain Delete는 터미널이 계속 받아야 하지만,
   // 수식키 콤보로 재바인딩하면 IDE 단축키로서 pass-through 한다.
   {

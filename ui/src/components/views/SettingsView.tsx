@@ -1885,6 +1885,8 @@ function InterfaceSection() {
   const setControlBar = useSettingsStore((s) => s.setControlBar);
   const storeDock = useSettingsStore((s) => s.dock);
   const setDock = useSettingsStore((s) => s.setDock);
+  const storePaneStack = useSettingsStore((s) => s.paneStack);
+  const setPaneStack = useSettingsStore((s) => s.setPaneStack);
   const storeNotifications = useSettingsStore((s) => s.notifications);
   const setNotifications = useSettingsStore((s) => s.setNotifications);
   const storePower = useSettingsStore((s) => s.power);
@@ -1894,6 +1896,9 @@ function InterfaceSection() {
     setControlBar(v),
   );
   const [dock, setDraftDock] = useDraft("dock", storeDock, (v) => setDock(v));
+  const [paneStack, setDraftPaneStack] = useDraft("paneStack", storePaneStack, (v) =>
+    setPaneStack(v),
+  );
   const [notifications, setDraftNotifications] = useDraft(
     "notifications",
     storeNotifications,
@@ -1970,6 +1975,16 @@ function InterfaceSection() {
           testId="dock-arrow-focus-pane-toggle"
           checked={dock.arrowFocusPane}
           onChange={(v) => updateDock({ arrowFocusPane: v })}
+        />
+      </SettingsGroup>
+
+      <SettingsGroup title={t("interface.groupPaneStack")}>
+        <SettingsToggleField
+          label={t("interface.paneStackCycleOnBlockedArrow")}
+          desc={t("interface.paneStackCycleOnBlockedArrowDesc")}
+          testId="pane-stack-cycle-blocked-toggle"
+          checked={paneStack.cycleOnBlockedArrow}
+          onChange={(v) => setDraftPaneStack((prev) => ({ ...prev, cycleOnBlockedArrow: v }))}
         />
       </SettingsGroup>
 

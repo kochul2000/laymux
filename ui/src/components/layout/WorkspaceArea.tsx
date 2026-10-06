@@ -4,7 +4,8 @@ import { useGridStore } from "@/stores/grid-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useUiStore } from "@/stores/ui-store";
 import type { TerminalLocation } from "@/stores/settings-store";
-import { focusWorkspacePane } from "@/lib/workspace-transition";
+import { activatePaneLayer, focusWorkspacePane } from "@/lib/workspace-transition";
+import { stackPaneAt } from "@/lib/pane-stack-actions";
 import { PaneGrid } from "./PaneGrid";
 import { useCwdDefaultsResolver } from "./useCwdDefaultsResolver";
 
@@ -80,6 +81,10 @@ export function WorkspaceArea() {
             onRemovePane={
               isActive ? (paneId, layerId) => removePane(idxOf(paneId), layerId) : undefined
             }
+            onStackPane={isActive ? (paneId) => stackPaneAt(idxOf(paneId)) : undefined}
+            onActivateLayer={(_paneId, layerId) => {
+              activatePaneLayer(ws.id, layerId);
+            }}
             onSwapPanes={
               isActive
                 ? (srcPaneId, tgtPaneId) => swapPanes(idxOf(srcPaneId), idxOf(tgtPaneId))

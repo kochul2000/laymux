@@ -294,6 +294,7 @@ async function collectSessionCheckpointInternal(
     },
     widgets: settingsState.widgets,
     dock: { ...settingsState.dock },
+    paneStack: { ...settingsState.paneStack },
     notifications: { ...settingsState.notifications },
     power: { ...settingsState.power },
     update: { ...settingsState.update },

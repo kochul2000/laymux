@@ -11,6 +11,11 @@ import { resolveViewer } from "@/lib/file-viewer";
 import { matchesKeybinding } from "@/lib/keybinding-registry";
 import { formatPaneIdentifier, paneNumberFor } from "@/lib/pane-numbers";
 import { activeLayer } from "@/lib/pane-layers";
+import {
+  cycleFocusedLayer,
+  layerStepForDirection,
+  stackFocusedPane,
+} from "@/lib/pane-stack-actions";
 import { propagateCwdOnceForPane } from "@/lib/propagate-cwd-once";
 import { findPaneInDirection, type Direction } from "@/lib/pane-navigation";
 import { getSortedWorkspaces, notificationStep } from "@/lib/navigation-actions";
@@ -198,14 +203,30 @@ function navigatePaneFocus(e: KeyboardEvent) {
   const next = findPaneInDirection(ws.panes, current, direction);
   if (next !== null) {
     focusWorkspacePane(ws.id, next);
-  } else if (dockArrowNav) {
+    return;
+  }
+  if (dockArrowNav) {
     // No pane in that direction → try to enter a dock
     const targetDock = getDockForDirection(direction);
     const targetState = dockStore.getDock(targetDock);
     if (targetState?.visible && targetState.panes.length > 0) {
       focusDockPane(targetDock);
+      return;
     }
   }
+  // Nothing in that direction at all → step the focused stack (ADR-0295).
+  // Docks come first so a full-screen stack never traps dock entry.
+  if (useSettingsStore.getState().paneStack.cycleOnBlockedArrow) {
+    cycleFocusedLayer(layerStepForDirection(direction));
+  }
+}
+
+/** pane.layer: step the focused slot's stack. Right/Down = next, Left/Up = previous. */
+function cyclePaneLayer(e: KeyboardEvent) {
+  const direction = ARROW_TO_DIRECTION[e.key];
+  if (!direction) return;
+  e.preventDefault();
+  cycleFocusedLayer(layerStepForDirection(direction));
 }
 
 /**
@@ -276,6 +297,12 @@ const SHORTCUT_HANDLERS: Record<string, (e: KeyboardEvent) => void> = {
 
   // pane.focus (default Alt+Arrow wildcard): pane navigation (workspace + dock)
   "pane.focus": navigatePaneFocus,
+
+  // pane.layer (default Alt+Shift+Arrow wildcard) / pane.stack (default Ctrl+Alt+S): ADR-0295
+  "pane.layer": cyclePaneLayer,
+  "pane.stack": (e) => {
+    if (stackFocusedPane()) e.preventDefault();
+  },
 
   ...WORKSPACE_INDEX_HANDLERS,
 

@@ -1487,6 +1487,24 @@ impl Default for DockSettings {
     }
 }
 
+/// Pane stack behavior (ADR-0295).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PaneStackSettings {
+    /// When Alt+Arrow finds neither a pane nor a dock in that direction, step
+    /// the focused stack instead (Right/Down = next layer, Left/Up = previous).
+    #[serde(default = "default_true")]
+    pub cycle_on_blocked_arrow: bool,
+}
+
+impl Default for PaneStackSettings {
+    fn default() -> Self {
+        Self {
+            cycle_on_blocked_arrow: true,
+        }
+    }
+}
+
 /// Notification behavior settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -2222,6 +2240,9 @@ pub struct Settings {
     /// Dock behavior settings (distinct from the structural `docks` array).
     #[serde(default)]
     pub dock: DockSettings,
+    /// Pane stack behavior (ADR-0295).
+    #[serde(default)]
+    pub pane_stack: PaneStackSettings,
     #[serde(default)]
     pub notifications: NotificationSettings,
     #[serde(default)]
@@ -2359,6 +2380,7 @@ impl Default for Settings {
             usage: UsageSettings::default(),
             widgets: WidgetsSettings::default(),
             dock: DockSettings::default(),
+            pane_stack: PaneStackSettings::default(),
             notifications: NotificationSettings::default(),
             power: PowerSettings::default(),
             update: UpdateSettings::default(),
