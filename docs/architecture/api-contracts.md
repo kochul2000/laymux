@@ -15,7 +15,7 @@
 
 ### Codex 종료 확인
 
-훅 우선 모드에서는 [ADR-0292](../adr/0292-codex-hook-lifecycle-session-proof.md)에 따라 현재 TUI와 저장소에 연결된 훅 ID로 먼저 종료 복원점을 확인한다. 해당 pane은 `begin_codex_status_checkpoint`의 입력 대상 목록에서 제외하지만 토큰에 소속된 검증 대상에는 유지하며, 저장 시점에 프로세스·PTY 세대·OSC 제목 revision·훅 설치와 rollout을 다시 확인한다. 작업 phase의 만료는 대화 메타데이터의 만료가 아니다. 훅 미수신·제거·충돌·제목 연결 불가 또는 휴리스틱 모드에서는 아래 `/status` 절차를 사용한다.
+훅 우선 모드에서는 [ADR-0292](../adr/0292-codex-hook-lifecycle-session-proof.md)와 [ADR-0294](../adr/0294-codex-process-bound-lifecycle-proof.md)에 따라 현재 TUI와 저장소에 연결된 훅 ID 또는 정확한 프로세스 진단 ID로 먼저 종료 복원점을 확인한다. 활성 훅 설치와 최상위 rollout/Fresh를 검증하며, 프로세스 진단 ID는 훅 수신과 제목 설정을 요구하지 않지만 현재 세대의 유효한 제목이 다른 ID면 거부한다. Codex는 시작 훅을 다음 요청까지 미루므로 resume 직후에도 프로세스 증거를 사용한다. 해당 pane은 `begin_codex_status_checkpoint`의 입력 대상 목록에서 제외하지만 토큰의 검증 대상에는 유지한다. I/O 후와 저장 시점에 동일 증거 종류의 대화 선택·프로세스·PTY 세대·제목 snapshot·설치·rollout을 재검증하며 프로세스 선택 소실을 제목 증거로 대체하지 않는다. 작업 phase의 만료는 대화 메타데이터의 만료가 아니다. 두 증거가 없거나 훅 제거·비활성·읽기 실패 또는 휴리스틱 모드이면 아래 `/status` 절차를 사용한다.
 
 종료·업데이트 확인 실패 뒤 사용자가 손실을 감수하는 예외는 [ADR-0279](../adr/0279-lifecycle-explicit-loss-override.md)를 따른다. update snapshot의 `canForceInstall: boolean`은 준비 실패 후 한 번의 강행 가능 여부다. `install_app_update(force?: boolean)`와 `POST /api/v1/update/install`, `POST /remote/v1/update/install`의 선택 JSON `force`는 기본 false이며, true는 이 권한이 있는 같은 채널·후보에만 허용한다. Remote는 기존 `leaseId`/header 제어권 검사를 그대로 적용한다. 강행은 frontend 준비만 생략하고 다운로드·서명·입력 drain·설치기 정리를 유지한다. 새 확인과 설치 수락은 권한을 지우며 dev 설치 금지는 유지한다. Automation은 body 없는 기존 설치 요청도 허용한다.
 
@@ -520,7 +520,7 @@ html/markdown preview는 별도 문서(iframe)라 부모 페이지의 CSS를 상
 
 helper는 생명주기·프롬프트 제출·도구 진행·승인·응답 종료 등의 메타데이터를 `POST /api/v1/agent-hooks/events`로 전송한다. provider·session ID·이벤트 스키마, 32KiB 크기와 30초 수신 기한을 확인한다. 앱의 leaf lock 레지스트리는 최대 256개 대화 관찰을 보관하고 오래된 turn·subagent는 제외한다. `GET /api/v1/agent-hooks/connections`/`get_agent_hook_connections`는 최근 5분의 수신 진단이다. `terminalId`는 서버가 보고한 과거 pane일 수 있으므로 `paneIdentity: reported`로 표시하며 현재 실행의 증거로 사용하지 않는다. 토큰·대화 내용은 조회에 노출하지 않는다. 무관한 Notification이나 resume 수신이 이전 작업 상태의 60초 기한을 갱신하지 않는다.
 
-`get_agent_hook_states(providers)` IPC와 `GET /api/v1/agent-hooks/states`는 현재 PTY의 정확한 세션 귀속·실제 프로세스·WSL 배포판·설치 및 활성 상태를 검증한 작업 snapshot만 반환한다. REST는 저장된 hooks 설정의 provider만 조회한다. 파일·프로세스 검증은 메인 스레드 밖에서 수행하며 레지스트리 락을 I/O 중 보유하지 않는다. 프런트는 선택 provider가 있을 때만 2초 후속 poll을 하고 검증 응답이 6초간 없으면 훅의 우선권을 잃는다. 표시는 단일 선택 함수가 계산하며 훅 상태와 기존 상태의 원시값은 각각 보존한다. Codex 공유 서버는 live 제목 식별자와 훅 전체 ID의 유일한 대조를 대체 귀속으로 사용한다. snapshot의 `bindingSource: process|title`은 검증 경로를 나타낸다. 모호한 축약 ID·다른 설정 루트·제목 설정 해제·제목 revision 변경은 연결하지 않는다. 이 기능은 활동 상태용이며 종료 체크포인트의 `/status`와 디스크 복원점 검증을 생략하지 않는다.
+`get_agent_hook_states(providers)` IPC와 `GET /api/v1/agent-hooks/states`는 현재 PTY의 정확한 세션 귀속·실제 프로세스·WSL 배포판·설치 및 활성 상태를 검증한 작업 snapshot만 반환한다. REST는 저장된 hooks 설정의 provider만 조회한다. 파일·프로세스 검증은 메인 스레드 밖에서 수행하며 레지스트리 락을 I/O 중 보유하지 않는다. 프런트는 선택 provider가 있을 때만 2초 후속 poll을 하고 검증 응답이 6초간 없으면 훅의 우선권을 잃는다. 표시는 단일 선택 함수가 계산하며 훅 상태와 기존 상태의 원시값은 각각 보존한다. Codex 공유 서버는 live 제목 식별자와 훅 전체 ID의 유일한 대조를 대체 귀속으로 사용한다. snapshot의 `bindingSource: process|title`은 검증 경로를 나타낸다. 모호한 축약 ID·다른 설정 루트·제목 설정 해제·제목 revision 변경은 연결하지 않는다. 이 snapshot은 활동 상태용이다. 종료 복원점은 ADR-0292·0294의 별도 checkpoint에서 증거와 디스크 복원점을 검증한다.
 
 native Codex의 저장 경로는 실제 TUI 환경에서 조회한다. 공유 서버의 훅 상태는 관리된 제목 연결로 확인하고, 연결이 불가능하면 휴리스틱을 유지한다. 설치나 감지 선택이 사용자의 실행 방식 또는 공유 서버 설정을 자동으로 변경하지 않는다.
 

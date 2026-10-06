@@ -2,10 +2,73 @@
 use super::targets;
 use crate::agent_hooks::{title::TitleBinding, ManageRequest};
 use crate::lock_ext::MutexExt;
-use crate::session_checkpoint::codex_status::CodexStatusProcess;
+use crate::session_checkpoint::codex_status::{CodexHookBinding, CodexStatusProcess};
 use crate::state::AppState;
 use std::collections::HashMap;
 use std::path::Path;
+
+struct Candidate {
+    binding: CodexHookBinding,
+    id: String,
+    root: String,
+}
+
+fn candidate(
+    registry: &crate::agent_hooks::observations::HookRegistry,
+    title: Option<&TitleBinding>,
+    generation: u64,
+    process: &CodexStatusProcess,
+    selected: Option<&str>,
+    required: Option<&CodexHookBinding>,
+) -> Option<Candidate> {
+    let live_title = title.filter(|t| t.generation == generation && t.identity.is_some());
+    if !matches!(required, Some(CodexHookBinding::Process(_))) {
+        if let Some(title) = live_title {
+            if let Some(event) = registry
+                .codex_conversation(title.identity.as_deref()?, process.distro.as_deref())
+                .map(|o| &o.event)
+                .filter(|event| matches_process(event, process, selected))
+            {
+                return Some(Candidate {
+                    binding: CodexHookBinding::Title(title.clone()),
+                    id: event.session_id.clone(),
+                    root: event.config_dir.clone()?,
+                });
+            }
+        }
+    }
+    if matches!(required, Some(CodexHookBinding::Title(_))) {
+        return None;
+    }
+    let id = selected?;
+    if !uuid::Uuid::parse_str(id).is_ok_and(|parsed| parsed.to_string() == id)
+        || live_title.is_some_and(|t| !id.starts_with(t.identity.as_deref().unwrap_or_default()))
+    {
+        return None;
+    }
+    let root = process.codex_home.to_str()?;
+    let root = if process.distro.is_some() {
+        crate::path_utils::normalize_wsl_path(&root.replace('\\', "/"))
+    } else {
+        root.into()
+    };
+    // Converting the selected process root must never switch WSL domains.
+    if Path::new(&crate::path_utils::resolve_path_for_windows(
+        &root,
+        process.distro.as_deref(),
+    )) != process.codex_home
+    {
+        return None;
+    }
+    Some(Candidate {
+        binding: CodexHookBinding::Process(title.cloned()),
+        id: id.into(),
+        root,
+    })
+}
+
+#[cfg(test)]
+mod selection_tests;
 
 fn matches_process(
     event: &laymux_agent_hook::runtime::HookEvent,
@@ -31,31 +94,22 @@ pub(super) fn resolve(
     generation: u64,
     process: &CodexStatusProcess,
     selected: Option<&str>,
-) -> Result<Option<(TitleBinding, String, bool)>, String> {
+    required: Option<&CodexHookBinding>,
+) -> Result<Option<(CodexHookBinding, String, bool)>, String> {
     let title = state
         .terminals
         .lock_or_err()?
         .get(terminal)
         .map(|s| s.codex_hook_title.clone());
-    let Some(title) = title.filter(|t| t.generation == generation && t.identity.is_some()) else {
-        return Ok(None);
-    };
-    let observation = state
-        .agent_hook_observations
-        .lock_or_err()?
-        .codex_conversation(
-            title.identity.as_deref().unwrap_or_default(),
-            process.distro.as_deref(),
-        )
-        .cloned();
-    let Some(observation) = observation else {
-        return Ok(None);
-    };
-    let event = observation.event;
-    if !matches_process(&event, process, selected) {
-        return Ok(None);
-    }
-    let Some(root) = event.config_dir.as_deref() else {
+    let candidate = candidate(
+        &*state.agent_hook_observations.lock_or_err()?,
+        title.as_ref(),
+        generation,
+        process,
+        selected,
+        required,
+    );
+    let Some(candidate) = candidate else {
         return Ok(None);
     };
     let executable = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -67,7 +121,7 @@ pub(super) fn resolve(
             provider: "codex".into(),
             operation: "status".into(),
             distro: process.distro.clone(),
-            config_dir: Some(root.into()),
+            config_dir: Some(candidate.root.clone()),
         },
         directory,
     );
@@ -75,16 +129,16 @@ pub(super) fn resolve(
         v["installed"] == true
             && v["disabled"] == false
             && v["warning"].is_null()
-            && v["titleBinding"]["configured"] == true
-            && v["titleBinding"]["warning"].is_null()
+            && (matches!(candidate.binding, CodexHookBinding::Process(_))
+                || (v["titleBinding"]["configured"] == true
+                    && v["titleBinding"]["warning"].is_null()))
     }) {
         return Ok(None);
     }
-    let fresh = match targets::verify_session(process, &event.session_id) {
+    let fresh = match targets::verify_session(process, &candidate.id) {
         Ok(fresh) => fresh,
         Err(_) => return Ok(None),
     };
-    targets::require_current_process(state, terminal, process)?;
     let current_title = state
         .terminals
         .lock_or_err()?
@@ -95,22 +149,45 @@ pub(super) fn resolve(
         .lock_or_err()?
         .get(terminal)
         .map(|h| h.terminal_generation());
-    let registry = state.agent_hook_observations.lock_or_err()?;
-    let still_same = registry
-        .codex_conversation(
-            title.identity.as_deref().unwrap_or_default(),
-            process.distro.as_deref(),
-        )
-        .is_some_and(|o| {
-            o.event.session_id == event.session_id && o.event.config_dir == event.config_dir
-        });
-    if current_title.as_ref() != Some(&title)
-        || current_generation != Some(generation)
-        || !still_same
-    {
+    let still_same = match &candidate.binding {
+        CodexHookBinding::Title(title) => state
+            .agent_hook_observations
+            .lock_or_err()?
+            .codex_conversation(
+                title.identity.as_deref().unwrap_or_default(),
+                process.distro.as_deref(),
+            )
+            .is_some_and(|o| {
+                o.event.session_id == candidate.id
+                    && o.event.config_dir.as_deref() == Some(candidate.root.as_str())
+            }),
+        CodexHookBinding::Process(_) => {
+            super::super::get_codex_session_lookup_impl(None, state)?
+                .attributions
+                .get(terminal)
+                .and_then(|id| id.as_deref())
+                == Some(candidate.id.as_str())
+        }
+    };
+    // The diagnostic I/O above can outlive the TUI. Recheck its incarnation.
+    targets::require_current_process(state, terminal, process)?;
+    if current_title != title || current_generation != Some(generation) || !still_same {
         return Ok(None);
     }
-    Ok(Some((title, event.session_id, fresh)))
+    let final_title = state
+        .terminals
+        .lock_or_err()?
+        .get(terminal)
+        .map(|s| s.codex_hook_title.clone());
+    let final_generation = state
+        .pty_handles
+        .lock_or_err()?
+        .get(terminal)
+        .map(|h| h.terminal_generation());
+    if final_title != title || final_generation != Some(generation) {
+        return Ok(None);
+    }
+    Ok(Some((candidate.binding, candidate.id, fresh)))
 }
 
 #[cfg(test)]
@@ -188,14 +265,14 @@ pub(crate) fn verified_status_sessions(
             .collect()
     };
     let mut result = HashMap::new();
-    let selections = if targets.iter().any(|(_, t)| t.hook_title.is_some()) {
+    let selections = if targets.iter().any(|(_, t)| t.hook_binding.is_some()) {
         Some(super::super::get_codex_session_lookup_impl(None, state)?)
     } else {
         None
     };
     for (terminal, target) in targets {
         super::current_handle(state, &terminal, &target)?;
-        if let Some(title) = &target.hook_title {
+        if let Some(expected_binding) = &target.hook_binding {
             let current = resolve(
                 state,
                 &terminal,
@@ -205,9 +282,10 @@ pub(crate) fn verified_status_sessions(
                     .as_ref()
                     .and_then(|s| s.attributions.get(&terminal))
                     .and_then(|s| s.as_deref()),
+                Some(expected_binding),
             )?;
             if !current.is_some_and(|(binding, id, _)| {
-                &binding == title
+                &binding == expected_binding
                     && target
                         .proof
                         .as_ref()
