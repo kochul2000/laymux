@@ -271,7 +271,7 @@ export function PaneStackStrip({
                   onClose(layer.id);
                 }}
               >
-                <XIcon />
+                <XIcon size={12} />
               </button>
             )}
           </div>
