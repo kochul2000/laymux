@@ -53,6 +53,37 @@ class RemoteAttachmentPickerTest {
     }
 
     @Test
+    fun attachButtonOpensSystemPickerDirectlyAndKeepsPendingShare() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val launched = mutableListOf<Intent>()
+                val picker = RemoteAttachmentPicker(activity) { launched += it }
+                val shared = Uri.parse("content://gallery/shared")
+                picker.receiveShare(Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, shared))
+                val shareId = picker.sharedOffer()!!.id
+                val results = mutableListOf<Array<Uri>?>()
+                val params = object : WebChromeClient.FileChooserParams() {
+                    override fun getMode() = MODE_OPEN_MULTIPLE
+                    override fun getAcceptTypes() = arrayOf("image/*,application/pdf")
+                    override fun isCaptureEnabled() = false
+                    override fun getTitle(): CharSequence? = null
+                    override fun getFilenameHint(): String? = null
+                    override fun createIntent() = Intent(Intent.ACTION_GET_CONTENT)
+                }
+                picker.show({ results += it }, params)
+                assertEquals(1, launched.size)
+                assertEquals(Intent.ACTION_GET_CONTENT, launched.single().action)
+                assertTrue(launched.single().getBooleanExtra(Intent.EXTRA_ALLOW_MULTIPLE, false))
+                assertEquals(shareId, picker.sharedOffer()?.id)
+                assertTrue(results.isEmpty())
+                picker.complete(Activity.RESULT_CANCELED, null)
+                assertEquals(listOf<Array<Uri>?>(null), results)
+                assertEquals(shareId, picker.sharedOffer()?.id)
+            }
+        }
+    }
+
+    @Test
     fun installedAppReceivesSingleAndMultipleFileSharesInOneTask() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         for (action in listOf(Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE)) {
@@ -175,18 +206,17 @@ class RemoteAttachmentPickerTest {
     }
 
     @Test
-    fun recentAndGalleryPickersKeepMimeFiltersAndMultipleSelection() {
-        val recent = RemoteAttachmentPicker.selectionIntent(true, listOf("image/*", "application/pdf"), true)
-        assertEquals(Intent.ACTION_OPEN_DOCUMENT, recent.action)
-        assertEquals("*/*", recent.type)
-        assertArrayEquals(arrayOf("image/*", "application/pdf"), recent.getStringArrayExtra(Intent.EXTRA_MIME_TYPES))
-        assertTrue(recent.hasCategory(Intent.CATEGORY_OPENABLE))
-        assertTrue(recent.getBooleanExtra(Intent.EXTRA_ALLOW_MULTIPLE, false))
-        val gallery = RemoteAttachmentPicker.selectionIntent(false, listOf("image/*"), false)
-        assertEquals(Intent.ACTION_GET_CONTENT, gallery.action)
-        assertEquals("image/*", gallery.type)
-        assertFalse(gallery.getBooleanExtra(Intent.EXTRA_ALLOW_MULTIPLE, true))
-        val customExtension = RemoteAttachmentPicker.selectionIntent(true, listOf("image/*", "*/*"), false)
+    fun systemPickerKeepsMimeFiltersAndMultipleSelection() {
+        val multi = RemoteAttachmentPicker.selectionIntent(listOf("image/*", "application/pdf"), true)
+        assertEquals(Intent.ACTION_GET_CONTENT, multi.action)
+        assertEquals("*/*", multi.type)
+        assertArrayEquals(arrayOf("image/*", "application/pdf"), multi.getStringArrayExtra(Intent.EXTRA_MIME_TYPES))
+        assertTrue(multi.hasCategory(Intent.CATEGORY_OPENABLE))
+        assertTrue(multi.getBooleanExtra(Intent.EXTRA_ALLOW_MULTIPLE, false))
+        val image = RemoteAttachmentPicker.selectionIntent(listOf("image/*"), false)
+        assertEquals("image/*", image.type)
+        assertFalse(image.getBooleanExtra(Intent.EXTRA_ALLOW_MULTIPLE, true))
+        val customExtension = RemoteAttachmentPicker.selectionIntent(listOf("image/*", "*/*"), false)
         assertEquals("*/*", customExtension.type)
         assertNull(customExtension.getStringArrayExtra(Intent.EXTRA_MIME_TYPES))
     }

@@ -1,7 +1,6 @@
 package com.laymux.android.web
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
@@ -17,7 +16,6 @@ class RemoteAttachmentPicker(
     private val launch: (Intent) -> Unit,
 ) {
     private val pending = SinglePendingResult<Array<Uri>>()
-    private var dialog: AlertDialog? = null
     private var sharedUris = emptyList<Uri>()
     private var sharedId: String? = null
 
@@ -48,53 +46,21 @@ class RemoteAttachmentPicker(
         return sharedUris.isNotEmpty()
     }
 
-    fun show(
-        callback: ValueCallback<Array<Uri>>,
-        params: WebChromeClient.FileChooserParams,
-        allowSharedFiles: Boolean,
-    ) {
+    /** Opens the system picker directly; its drawer lists galleries and other apps. */
+    fun show(callback: ValueCallback<Array<Uri>>, params: WebChromeClient.FileChooserParams) {
         cancel()
         if (activity.isFinishing || activity.isDestroyed) {
             callback.onReceiveValue(null)
             return
         }
         pending.replace(callback::onReceiveValue)
-        val shared = if (allowSharedFiles) sharedUris else emptyList()
-        val labels = buildList {
-            if (shared.isNotEmpty()) add("공유받은 파일 첨부 (${shared.size}개)")
-            add("최근 파일·파일 찾아보기")
-            add("갤러리·다른 앱에서 선택")
+        val mimeTypes = params.acceptTypes.flatMap { it.split(',') }
+            .mapNotNull(::acceptMimeType).distinct()
+        try {
+            launch(selectionIntent(mimeTypes, params.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE))
+        } catch (_: ActivityNotFoundException) {
+            pending.cancel()
         }
-        var selected = false
-        dialog = AlertDialog.Builder(activity)
-            .setTitle("파일 첨부")
-            .setItems(labels.toTypedArray()) { _, index ->
-                selected = true
-                if (shared.isNotEmpty() && index == 0) {
-                    if (sharedUris === shared) {
-                        sharedUris = emptyList()
-                        sharedId = null
-                    }
-                    pending.complete(shared.toTypedArray())
-                } else {
-                    val recent = index == if (shared.isEmpty()) 0 else 1
-                    val mimeTypes = params.acceptTypes.flatMap { it.split(',') }
-                        .mapNotNull(::acceptMimeType).distinct()
-                    try {
-                        launch(selectionIntent(recent, mimeTypes, params.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE))
-                    } catch (_: ActivityNotFoundException) {
-                        pending.cancel()
-                    }
-                }
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .create().apply {
-                setOnDismissListener {
-                    dialog = null
-                    if (!selected) pending.cancel()
-                }
-                show()
-            }
     }
 
     fun complete(resultCode: Int, intent: Intent?) {
@@ -104,16 +70,14 @@ class RemoteAttachmentPicker(
     fun setReady(ready: Boolean) = pending.setReady(ready)
 
     fun cancel() {
-        dialog?.dismiss()
-        dialog = null
         pending.cancel()
     }
 
     companion object {
         private const val MAX_FILES = 64
 
-        fun selectionIntent(recent: Boolean, mimeTypes: List<String>, multiple: Boolean): Intent =
-            Intent(if (recent) Intent.ACTION_OPEN_DOCUMENT else Intent.ACTION_GET_CONTENT).apply {
+        fun selectionIntent(mimeTypes: List<String>, multiple: Boolean): Intent =
+            Intent(Intent.ACTION_GET_CONTENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
                 type = mimeTypes.singleOrNull() ?: "*/*"
                 if (mimeTypes.size > 1 && "*/*" !in mimeTypes) putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes.toTypedArray())
