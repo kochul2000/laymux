@@ -307,7 +307,7 @@ ADR 이 필요한 대표 기준:
 | [0287](0287-wsl-claude-daemon-process-role.md) | WSL Claude daemon은 대화 프로세스 후보에서 제외한다 | Accepted |
 | [0288](0288-path-link-home-and-hangul-tail.md) | path-link 는 `~` 를 pane 셸의 홈으로 풀고 경로에 붙은 한글 조사를 뗀 후보를 함께 낸다 (0148·0188·0191·0235 확장) | Accepted |
 | [0289](0289-agent-hook-update-notification.md) | 설치된 에이전트 훅의 갱신 필요를 자동 검사하고 사용자 동작으로 갱신한다 | Accepted |
-| [0290](0290-android-attachment-picker-and-share-inbox.md) | Android 첨부 결과를 복귀 후 전달하고 공유 파일을 기존 첨부 경로로 받는다 | Accepted (첨부 선택 메뉴는 [0293](0293-android-attachment-direct-system-picker.md)로 대체) |
+| [0290](0290-android-attachment-picker-and-share-inbox.md) | Android 첨부 결과를 복귀 후 전달하고 공유 파일을 기존 첨부 경로로 받는다 | 첨부 선택 메뉴 부분만 [0293](0293-android-attachment-direct-system-picker.md)로 대체 |
 | [0291](0291-remote-host-viewer-unread-signal.md) | PC 뷰어 열림은 heartbeat 의 경로 없는 신호로 알리고 Files 버튼 한 번으로 진입한다 (0044 `From host` 대체, 0198 Decision 6·8 개정) | Accepted |
 | [0292](0292-codex-hook-lifecycle-session-proof.md) | Codex 종료 복원점은 검증한 훅 대화 식별자를 우선한다 | Accepted |
 | [0293](0293-android-attachment-direct-system-picker.md) | Android 첨부 버튼은 선택 메뉴 없이 시스템 파일 선택기를 바로 연다 (0290 첨부 메뉴 대체) | Accepted |

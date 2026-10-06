@@ -53,6 +53,37 @@ class RemoteAttachmentPickerTest {
     }
 
     @Test
+    fun attachButtonOpensSystemPickerDirectlyAndKeepsPendingShare() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val launched = mutableListOf<Intent>()
+                val picker = RemoteAttachmentPicker(activity) { launched += it }
+                val shared = Uri.parse("content://gallery/shared")
+                picker.receiveShare(Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, shared))
+                val shareId = picker.sharedOffer()!!.id
+                val results = mutableListOf<Array<Uri>?>()
+                val params = object : WebChromeClient.FileChooserParams() {
+                    override fun getMode() = MODE_OPEN_MULTIPLE
+                    override fun getAcceptTypes() = arrayOf("image/*,application/pdf")
+                    override fun isCaptureEnabled() = false
+                    override fun getTitle(): CharSequence? = null
+                    override fun getFilenameHint(): String? = null
+                    override fun createIntent() = Intent(Intent.ACTION_GET_CONTENT)
+                }
+                picker.show({ results += it }, params)
+                assertEquals(1, launched.size)
+                assertEquals(Intent.ACTION_GET_CONTENT, launched.single().action)
+                assertTrue(launched.single().getBooleanExtra(Intent.EXTRA_ALLOW_MULTIPLE, false))
+                assertEquals(shareId, picker.sharedOffer()?.id)
+                assertTrue(results.isEmpty())
+                picker.complete(Activity.RESULT_CANCELED, null)
+                assertEquals(listOf<Array<Uri>?>(null), results)
+                assertEquals(shareId, picker.sharedOffer()?.id)
+            }
+        }
+    }
+
+    @Test
     fun installedAppReceivesSingleAndMultipleFileSharesInOneTask() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         for (action in listOf(Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE)) {
