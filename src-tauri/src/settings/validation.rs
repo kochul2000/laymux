@@ -133,6 +133,8 @@ fn validate_composer_starred_entries(
 
 fn validate_workspaces(settings: &mut Settings, warnings: &mut Vec<ValidationWarning>) {
     let fallback_profile = resolve_fallback_profile(settings);
+    // Content ids (terminal-<id>) must be unique app-wide (ADR-0295).
+    let mut seen_content_ids = std::collections::HashSet::new();
 
     for (ws_idx, ws) in settings.workspaces.iter_mut().enumerate() {
         let ws_path = format!("workspaces[{ws_idx}]");
@@ -158,7 +160,7 @@ fn validate_workspaces(settings: &mut Settings, warnings: &mut Vec<ValidationWar
         }
 
         // Validate panes
-        validate_workspace_panes(&mut ws.panes, &ws_path, warnings);
+        validate_workspace_panes(&mut ws.panes, &ws_path, &mut seen_content_ids, warnings);
 
         // If all panes were removed, add a default pane
         if ws.panes.is_empty() {
@@ -175,6 +177,7 @@ fn validate_workspaces(settings: &mut Settings, warnings: &mut Vec<ValidationWar
 fn validate_workspace_panes(
     panes: &mut Vec<WorkspacePane>,
     parent_path: &str,
+    seen_content_ids: &mut std::collections::HashSet<String>,
     warnings: &mut Vec<ValidationWarning>,
 ) {
     let mut to_remove = Vec::new();
@@ -211,7 +214,7 @@ fn validate_workspace_panes(
             warnings,
         );
 
-        if !validate_pane_content(pane, &pane_path, warnings) {
+        if !validate_pane_content(pane, &pane_path, seen_content_ids, warnings) {
             to_remove.push(i);
         }
     }
@@ -228,6 +231,7 @@ fn validate_workspace_panes(
 fn validate_pane_content(
     pane: &mut WorkspacePane,
     pane_path: &str,
+    seen: &mut std::collections::HashSet<String>,
     warnings: &mut Vec<ValidationWarning>,
 ) -> bool {
     if pane.layers.is_empty() {
@@ -255,6 +259,9 @@ fn validate_pane_content(
                 repaired: true,
             });
         }
+        if !pane.id.is_empty() {
+            seen.insert(pane.id.clone());
+        }
         return true;
     }
 
@@ -266,7 +273,6 @@ fn validate_pane_content(
             repaired: true,
         });
     }
-    let mut seen = std::collections::HashSet::new();
     for (layer_idx, layer) in pane.layers.iter_mut().enumerate() {
         let layer_path = format!("{pane_path}.layers[{layer_idx}]");
         if layer.id.is_empty() || !seen.insert(layer.id.clone()) {
@@ -1284,6 +1290,52 @@ mod tests {
         assert_eq!(ids[0], "a");
         assert!(!ids[1].is_empty() && ids[1] != "a");
         assert!(!ids[2].is_empty() && ids[2] != ids[1]);
+    }
+
+    #[test]
+    fn stacked_layer_ids_are_unique_across_workspaces() {
+        let mut settings = Settings::default();
+        let compact_id = settings.workspaces[0].panes[0].id.clone();
+        settings.workspaces[0]
+            .panes
+            .push(stacked_pane(serde_json::json!({
+                "id": "s1", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0,
+                "layers": [
+                    { "id": "s1", "view": { "type": "MemoView" } },
+                    { "id": compact_id, "view": { "type": "MemoView" } }
+                ],
+                "activeLayerId": "s1"
+            })));
+        let mut other = settings.workspaces[0].clone();
+        other.id = "ws-other".into();
+        other.name = "Other".into();
+        other.panes = vec![stacked_pane(serde_json::json!({
+            "id": "s2", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0,
+            "layers": [
+                { "id": "s2", "view": { "type": "MemoView" } },
+                { "id": "s1", "view": { "type": "MemoView" } }
+            ],
+            "activeLayerId": "s2"
+        }))];
+        settings.workspaces.push(other);
+        validate_and_repair(&mut settings);
+        let mut ids: Vec<String> = settings
+            .workspaces
+            .iter()
+            .flat_map(|ws| ws.panes.iter())
+            .flat_map(|pane| {
+                pane.content_views()
+                    .into_iter()
+                    .map(|(id, _)| id.to_string())
+            })
+            .collect();
+        let total = ids.len();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), total, "content ids must be unique: {ids:?}");
+        // the first occurrences keep their ids
+        assert_eq!(settings.workspaces[0].panes[1].layers[0].id, "s1");
+        assert_eq!(settings.workspaces[1].panes[0].layers[0].id, "s2");
     }
 
     #[test]

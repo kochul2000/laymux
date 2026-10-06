@@ -1273,6 +1273,7 @@ export interface Settings {
   usage: import("@/stores/settings-store").UsageSettings;
   widgets: import("@/lib/widget-placement").WidgetsSettings;
   dock: import("@/stores/settings-store").DockSettings;
+  paneStack?: import("@/stores/settings-store").PaneStackSettings;
   notifications: import("@/stores/settings-store").NotificationSettings;
   power?: import("@/stores/settings-store").PowerSettings;
   /** Release channel this install follows (ADR-0190). */

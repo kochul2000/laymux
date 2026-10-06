@@ -4437,3 +4437,88 @@ describe("bridge over stacked slots (ADR-0295)", () => {
     });
   });
 });
+
+describe("panes.stack / activateLayer / remove(layerId) bridge (ADR-0295)", () => {
+  function act(method: string, params: Record<string, unknown>) {
+    return handleAutomationRequest({
+      requestId: `stack-${method}`,
+      category: "action",
+      target: "panes",
+      method,
+      params,
+    });
+  }
+
+  beforeEach(() => {
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useGridStore.setState(useGridStore.getInitialState());
+    useDockStore.setState(useDockStore.getInitialState());
+    useTerminalStore.setState(useTerminalStore.getInitialState());
+    useTerminalRestartStore.setState({ requests: {} });
+    useGridStore.getState().setFocusedPane(1);
+  });
+
+  it("stacks a terminal layer without moving keyboard focus", () => {
+    const result = act("stack", { paneIndex: 0, profile: "WSL", cwd: "/repo" });
+    expect(result.success).toBe(true);
+    const data = result.data as { newPane: Record<string, unknown> };
+    const layerId = data.newPane.id as string;
+    expect(data.newPane).toMatchObject({
+      terminalId: `terminal-${layerId}`,
+      paneIndex: 0,
+      layerIndex: 1,
+      layerCount: 2,
+      ready: false,
+    });
+    const slot = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0];
+    expect(slot.activeLayerId).toBe(layerId);
+    expect(slot.layers[1].view).toMatchObject({
+      type: "TerminalView",
+      profile: "WSL",
+      lastCwd: "/repo",
+    });
+    expect(useTerminalRestartStore.getState().requests[layerId]?.cwd).toBe("/repo");
+    expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+  });
+
+  it("stacks a non-terminal view when asked", () => {
+    const result = act("stack", { paneIndex: 1, viewType: "MemoView" });
+    expect(result.success).toBe(true);
+    expect((result.data as { newPane: { terminalId: unknown } }).newPane.terminalId).toBeNull();
+  });
+
+  it("rejects an out-of-range slot", () => {
+    expect(act("stack", { paneIndex: 9 }).success).toBe(false);
+  });
+
+  it("activates a layer by terminal id and can leave focus alone", () => {
+    const stacked = act("stack", { paneIndex: 0 });
+    const layerId = (stacked.data as { newPane: { id: string } }).newPane.id;
+    const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
+    const firstLayer = ws.panes[0].layers[0].id;
+
+    const byTerminal = act("activateLayer", { terminalId: `terminal-${firstLayer}`, focus: false });
+    expect(byTerminal.success).toBe(true);
+    expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].activeLayerId).toBe(
+      firstLayer,
+    );
+    expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+
+    const byLayer = act("activateLayer", { layerId });
+    expect(byLayer.data).toMatchObject({ activated: layerId, paneIndex: 0, layerIndex: 1 });
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+
+    expect(act("activateLayer", { layerId: "nope" }).success).toBe(false);
+    expect(act("activateLayer", {}).success).toBe(false);
+  });
+
+  it("remove closes one named layer and reports whether the slot survived", () => {
+    const stacked = act("stack", { paneIndex: 0 });
+    const layerId = (stacked.data as { newPane: { id: string } }).newPane.id;
+    const first = act("remove", { paneIndex: 0, layerId });
+    expect(first.data).toMatchObject({ removed: true, slotRemoved: false, remainingLayers: 1 });
+    const second = act("remove", { paneIndex: 0 });
+    expect(second.data).toMatchObject({ removed: true, slotRemoved: true });
+    expect(act("remove", { paneIndex: 0, layerId: "nope" }).success).toBe(false);
+  });
+});

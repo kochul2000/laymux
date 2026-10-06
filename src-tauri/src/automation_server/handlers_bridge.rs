@@ -335,19 +335,65 @@ pub async fn panes_split(
     }
 }
 
+/// Stack a new layer on a slot (ADR-0295). Mirrors `panes_split`.
+pub async fn panes_stack(
+    AxumState(state): AxumState<ServerState>,
+    Json(body): Json<StackPaneBody>,
+) -> impl IntoResponse {
+    let mut params = serde_json::json!({ "paneIndex": body.pane_index });
+    if let Some(view_type) = body.view_type {
+        params["viewType"] = serde_json::Value::String(view_type);
+    }
+    if let Some(profile) = body.profile {
+        params["profile"] = serde_json::Value::String(profile);
+    }
+    if let Some(cwd) = body.cwd {
+        params["cwd"] = serde_json::Value::String(cwd);
+    }
+
+    match bridge_request(&state, "action", "panes", "stack", params).await {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
+/// Show one stacked layer, by layer id or terminal id (ADR-0295).
+pub async fn panes_activate_layer(
+    AxumState(state): AxumState<ServerState>,
+    Json(body): Json<ActivateLayerBody>,
+) -> impl IntoResponse {
+    if body.layer_id.is_none() == body.terminal_id.is_none() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(err_json(
+                "exactly one of 'layerId' or 'terminalId' is required",
+            )),
+        );
+    }
+    let mut params = serde_json::json!({ "focus": body.focus.unwrap_or(true) });
+    if let Some(layer_id) = body.layer_id {
+        params["layerId"] = serde_json::Value::String(layer_id);
+    }
+    if let Some(terminal_id) = body.terminal_id {
+        params["terminalId"] = serde_json::Value::String(terminal_id);
+    }
+
+    match bridge_request(&state, "action", "panes", "activateLayer", params).await {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
 pub async fn panes_remove(
     AxumState(state): AxumState<ServerState>,
     Path(index): Path<usize>,
+    Query(query): Query<RemovePaneQuery>,
 ) -> impl IntoResponse {
-    match bridge_request(
-        &state,
-        "action",
-        "panes",
-        "remove",
-        serde_json::json!({ "paneIndex": index }),
-    )
-    .await
-    {
+    let mut params = serde_json::json!({ "paneIndex": index });
+    if let Some(layer_id) = query.layer_id {
+        params["layerId"] = serde_json::Value::String(layer_id);
+    }
+    match bridge_request(&state, "action", "panes", "remove", params).await {
         Ok(data) => (StatusCode::OK, Json(data)),
         Err(e) => e,
     }
@@ -804,6 +850,37 @@ pub async fn ui_navigate_settings(
     )
     .await
     {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
+/// Dev-only keyboard injection for the autonomous verification loop: the
+/// frontend dispatches a `keydown` at the focused element, so shortcuts travel
+/// the real terminal pass-through → document handler path. Debug builds only.
+/// Body: `{ "key": "ArrowRight", "ctrl"?: bool, "alt"?: bool, "shift"?: bool }`.
+pub async fn ui_dispatch_key(
+    AxumState(state): AxumState<ServerState>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    if !cfg!(debug_assertions) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": "dev-only key dispatch" })),
+        );
+    }
+    if body
+        .get("key")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .is_empty()
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(err_json("'key' is required and must be non-empty")),
+        );
+    }
+    match bridge_request(&state, "action", "ui", "dispatchKey", body).await {
         Ok(data) => (StatusCode::OK, Json(data)),
         Err(e) => e,
     }

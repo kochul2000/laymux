@@ -9,6 +9,7 @@ import { useContainerSize } from "@/hooks/useContainerSize";
 import { PaneNumberBadge } from "@/components/ui/PaneNumberBadge";
 import { supportsCwdReceive, supportsCwdSend } from "@/lib/view-cwd-capability";
 import { FloatingPaneControlMenu } from "./FloatingPaneControlMenu";
+import { VIEW_LABELS } from "@/lib/view-labels";
 import {
   BroomIcon,
   ColumnsIcon,
@@ -18,6 +19,7 @@ import {
   EyeIcon,
   EyeOffIcon,
   KeyboardIcon,
+  LayersIcon,
   MinusIcon,
   PencilIcon,
   PinIcon,
@@ -44,6 +46,8 @@ export type { ControlBarMode } from "@/stores/settings-store";
 export interface PaneControlBarActions {
   onSplitH?: () => void;
   onSplitV?: () => void;
+  /** Stack a new layer on this slot (ADR-0295). Workspace grid only. */
+  onStack?: () => void;
   onClearTerminal?: () => void;
   onRestart?: () => void;
   onClear?: () => void;
@@ -203,6 +207,20 @@ function ClearTerminalBtn({ onClick }: { onClick: () => void }) {
       title={`Clear terminal${keys ? ` (${keys})` : ""}`}
     >
       <BroomIcon size={13} />
+    </BarBtn>
+  );
+}
+
+/** Stack a new layer on this slot (ADR-0295); sits right after the split buttons. */
+function StackBtn({ onClick }: { onClick: () => void }) {
+  const keys = useResolvedKeybinding("pane.stack");
+  return (
+    <BarBtn
+      testId="pane-control-stack"
+      onClick={onClick}
+      title={`Stack${keys ? ` (${keys})` : ""}`}
+    >
+      <LayersIcon />
     </BarBtn>
   );
 }
@@ -422,6 +440,7 @@ function BarContent({
               <ColumnsIcon />
             </BarBtn>
           )}
+          {actions.onStack && <StackBtn onClick={actions.onStack} />}
           {onToggleHidden && (
             <BarBtn
               testId="pane-control-hide"
@@ -555,21 +574,21 @@ function MinimizedButton({ onExpand }: { onExpand: () => void }) {
   );
 }
 
-// ─── View label map ─────────────────────────────────────
-const VIEW_LABELS: Partial<Record<ViewType, string>> = {
-  EmptyView: "Empty",
-  MemoView: "Memo",
-  UsageView: "Claude Usage",
-  CodexUsageView: "Codex Usage",
-  GrokUsageView: "Grok Usage",
-  IssueReporterView: "Issue Reporter",
-  FileExplorerView: "File Explorer",
-  GitHubView: "GitHub",
-};
-
 // ─── Bar left section (view label) ──────────────────────
+/** View types whose control bar shows a text label (terminals draw their own). */
+const BAR_LABEL_VIEWS: ReadonlySet<ViewType> = new Set([
+  "EmptyView",
+  "MemoView",
+  "UsageView",
+  "CodexUsageView",
+  "GrokUsageView",
+  "IssueReporterView",
+  "FileExplorerView",
+  "GitHubView",
+]);
+
 function BarLabel({ viewType }: { viewType: ViewType }) {
-  const label = VIEW_LABELS[viewType] ?? null;
+  const label = BAR_LABEL_VIEWS.has(viewType) ? VIEW_LABELS[viewType] : null;
   if (!label) return <div className="flex-1" />;
   return (
     <div className="flex min-w-0 flex-1 items-center self-stretch text-[11px]">

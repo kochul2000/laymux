@@ -280,6 +280,32 @@ export function normalizeWorkspacePane(
   return null;
 }
 
+/**
+ * Re-mint stacked layer ids already used by earlier content (`seen`), so every
+ * `terminal-<id>` stays unique app-wide (ADR-0295). A layer that shares its
+ * slot's id keeps it — that is the slot's own content. Records every kept id.
+ */
+export function dedupeLayerIds(
+  pane: WorkspacePane,
+  seen: Set<string>,
+  newId: () => string,
+): WorkspacePane {
+  let changed = false;
+  let activeLayerId = pane.activeLayerId;
+  const layers = pane.layers.map((layer) => {
+    if (layer.id !== pane.id && seen.has(layer.id)) {
+      changed = true;
+      const id = newId();
+      if (activeLayerId === layer.id) activeLayerId = id;
+      seen.add(id);
+      return { ...layer, id };
+    }
+    seen.add(layer.id);
+    return layer;
+  });
+  return changed ? { ...pane, layers, activeLayerId } : pane;
+}
+
 // ─── Layout templates ────────────────────────────────────────────────
 
 /** The layers a template slot describes, plus which one starts active. */

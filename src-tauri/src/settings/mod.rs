@@ -1944,6 +1944,19 @@ mod tests {
     }
 
     #[test]
+    fn pane_stack_settings_default_to_cycling_on_blocked_arrow() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert!(settings.pane_stack.cycle_on_blocked_arrow);
+        let partial: Settings = serde_json::from_str(r#"{"paneStack":{}}"#).unwrap();
+        assert!(partial.pane_stack.cycle_on_blocked_arrow);
+        let off: Settings =
+            serde_json::from_str(r#"{"paneStack":{"cycleOnBlockedArrow":false}}"#).unwrap();
+        assert!(!off.pane_stack.cycle_on_blocked_arrow);
+        let out = serde_json::to_value(&off).unwrap();
+        assert_eq!(out["paneStack"]["cycleOnBlockedArrow"], false);
+    }
+
+    #[test]
     fn stacked_workspace_pane_round_trips() {
         let json = r#"{"id":"slot","x":0.0,"y":0.0,"w":1.0,"h":1.0,"layers":[{"id":"a","view":{"type":"MemoView"}},{"id":"b","view":{"type":"TerminalView"}}],"activeLayerId":"b"}"#;
         let pane: WorkspacePane = serde_json::from_str(json).unwrap();

@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, within, act } from "@testing-library/react";
+import { render, screen, fireEvent, within, act, createEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock TerminalView to avoid Tauri IPC dependency
@@ -771,5 +771,222 @@ describe("PaneGrid stacked slots (ADR-0295)", () => {
     fireEvent.mouseEnter(screen.getByTestId("stack-pane-0"));
     fireEvent.click(within(screen.getByTestId("stack-pane-0")).getByTestId("pane-control-delete"));
     expect(onRemovePane).toHaveBeenCalledWith("slot", "under");
+  });
+});
+
+describe("PaneGrid stack UI (ADR-0295)", () => {
+  const single: GridPane = {
+    id: "slot",
+    x: 0,
+    y: 0,
+    w: 1,
+    h: 1,
+    layers: [{ id: "slot", view: { type: "TerminalView" } }],
+    activeLayerId: "slot",
+  };
+  const stacked: GridPane = {
+    ...single,
+    layers: [...single.layers, { id: "under", view: { type: "MemoView" } }],
+    activeLayerId: "slot",
+  };
+  const props = {
+    testIdFn: (_p: GridPane, i: number) => `ui-pane-${i}`,
+    isFocused: () => false,
+    onPaneFocus: vi.fn(),
+    workspaceId: "ws-1",
+    workspaceName: "Test-WS",
+  };
+
+  beforeEach(() => {
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useSettingsStore.setState((s) => ({ controlBar: { ...s.controlBar, defaultMode: "pinned" } }));
+    useTerminalStartupStore.setState({ revealedPaneIds: new Set(["slot", "under"]) });
+  });
+
+  it("shows the Stack button only when stacking is wired", () => {
+    const onStackPane = vi.fn();
+    const { rerender } = render(<PaneGrid {...props} panes={[single]} />);
+    expect(screen.queryByTestId("pane-control-stack")).toBeNull();
+    rerender(<PaneGrid {...props} panes={[single]} onStackPane={onStackPane} />);
+    fireEvent.click(screen.getByTestId("pane-control-stack"));
+    expect(onStackPane).toHaveBeenCalledWith("slot");
+  });
+
+  it("renders the strip only for a stacked slot", () => {
+    const { rerender } = render(<PaneGrid {...props} panes={[single]} />);
+    expect(screen.queryByTestId("pane-stack-strip")).toBeNull();
+    rerender(<PaneGrid {...props} panes={[stacked]} />);
+    expect(screen.getAllByTestId("pane-stack-strip")).toHaveLength(1);
+  });
+
+  it("keeps the terminal mounted when its slot becomes a stack", () => {
+    const { rerender } = render(<PaneGrid {...props} panes={[single]} />);
+    const before = screen.getByTestId("mock-terminal-terminal-slot");
+    rerender(<PaneGrid {...props} panes={[stacked]} />);
+    expect(screen.getByTestId("mock-terminal-terminal-slot")).toBe(before);
+  });
+
+  it("routes strip actions to the slot callbacks", () => {
+    const onActivateLayer = vi.fn();
+    const onRemovePane = vi.fn();
+    const onStackPane = vi.fn();
+    render(
+      <PaneGrid
+        {...props}
+        panes={[stacked]}
+        onActivateLayer={onActivateLayer}
+        onRemovePane={onRemovePane}
+        onStackPane={onStackPane}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("pane-stack-tab-under"));
+    expect(onActivateLayer).toHaveBeenCalledWith("slot", "under");
+    fireEvent.click(screen.getByTestId("pane-stack-tab-close-under"));
+    expect(onRemovePane).toHaveBeenCalledWith("slot", "under");
+    fireEvent.click(screen.getByTestId("pane-stack-add"));
+    expect(onStackPane).toHaveBeenCalledWith("slot");
+  });
+});
+
+describe("PaneGrid layer rearrangement (ADR-0295)", () => {
+  const makeDataTransfer = () => ({
+    data: {} as Record<string, string>,
+    types: [] as string[],
+    setData(type: string, val: string) {
+      this.data[type] = val;
+      this.types.push(type);
+    },
+    getData(type: string) {
+      return this.data[type] ?? "";
+    },
+    effectAllowed: "",
+    dropEffect: "",
+  });
+
+  const stack: GridPane = {
+    id: "A",
+    x: 0,
+    y: 0,
+    w: 0.5,
+    h: 1,
+    layers: [
+      { id: "A", view: { type: "TerminalView" } },
+      { id: "a2", view: { type: "TerminalView" } },
+      { id: "a3", view: { type: "TerminalView" } },
+    ],
+    activeLayerId: "A",
+  };
+  const other: GridPane = {
+    id: "B",
+    x: 0.5,
+    y: 0,
+    w: 0.5,
+    h: 1,
+    layers: [{ id: "B", view: { type: "TerminalView" } }],
+    activeLayerId: "B",
+  };
+  const props = {
+    panes: [stack, other],
+    testIdFn: (_p: GridPane, i: number) => `re-pane-${i}`,
+    isFocused: () => false,
+    onPaneFocus: vi.fn(),
+    workspaceId: "ws-1",
+    workspaceName: "Test-WS",
+  };
+
+  beforeEach(() => {
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useSettingsStore.setState((s) => ({ controlBar: { ...s.controlBar, defaultMode: "pinned" } }));
+    useTerminalStartupStore.setState({ revealedPaneIds: new Set(["A", "a2", "a3", "B"]) });
+  });
+
+  it("reorders a tab inside its strip", () => {
+    const onMoveLayer = vi.fn();
+    render(<PaneGrid {...props} onMoveLayer={onMoveLayer} />);
+    const dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(screen.getByTestId("pane-stack-tab-A"), { dataTransfer });
+    fireEvent.dragOver(screen.getByTestId("pane-stack-tab-a3"), { dataTransfer });
+    fireEvent.drop(screen.getByTestId("pane-stack-tab-a3"), { dataTransfer });
+    // jsdom has no layout, so the pointer counts as the leading half of the tab.
+    expect(onMoveLayer).toHaveBeenCalledWith("A", "A", 1);
+  });
+
+  it("moves a dragged tab onto another slot", () => {
+    const onMoveLayer = vi.fn();
+    render(<PaneGrid {...props} onMoveLayer={onMoveLayer} />);
+    const dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(screen.getByTestId("pane-stack-tab-a2"), { dataTransfer });
+    fireEvent.dragOver(screen.getByTestId("re-pane-1"), { dataTransfer });
+    expect(screen.getByTestId("pane-stack-drop-target-1")).toBeInTheDocument();
+    fireEvent.drop(screen.getByTestId("re-pane-1"), { dataTransfer });
+    expect(onMoveLayer).toHaveBeenCalledWith("a2", "B");
+  });
+
+  it("does not offer a drop on the own slot body of the dragged tab", () => {
+    render(<PaneGrid {...props} onMoveLayer={vi.fn()} />);
+    const dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(screen.getByTestId("pane-stack-tab-a2"), { dataTransfer });
+    fireEvent.dragOver(screen.getByTestId("re-pane-0"), { dataTransfer });
+    expect(screen.queryByTestId("pane-stack-drop-target-0")).toBeNull();
+  });
+
+  it("merges a slot dropped on the top band of another slot, swaps below it", () => {
+    const onMergeSlot = vi.fn();
+    const onSwapPanes = vi.fn();
+    render(<PaneGrid {...props} onMergeSlot={onMergeSlot} onSwapPanes={onSwapPanes} />);
+    const target = screen.getByTestId("re-pane-0");
+    vi.spyOn(target, "getBoundingClientRect").mockReturnValue({
+      top: 100,
+      left: 0,
+      bottom: 700,
+      right: 400,
+      width: 400,
+      height: 600,
+      x: 0,
+      y: 100,
+      toJSON: () => ({}),
+    });
+    const bar = within(screen.getByTestId("re-pane-1")).getByTestId("pane-control-bar");
+    // jsdom drag events ignore clientY in the init dict; set it on the event.
+    const at = (kind: "dragOver" | "drop", clientY: number, dataTransfer: object) => {
+      const event = createEvent[kind](target, { dataTransfer });
+      Object.defineProperty(event, "clientY", { value: clientY });
+      fireEvent(target, event);
+    };
+
+    let dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(bar, { dataTransfer });
+    at("dragOver", 110, dataTransfer);
+    expect(screen.getByTestId("pane-stack-drop-target-0")).toBeInTheDocument();
+    at("drop", 110, dataTransfer);
+    expect(onMergeSlot).toHaveBeenCalledWith("B", "A");
+
+    dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(bar, { dataTransfer });
+    at("dragOver", 400, dataTransfer);
+    expect(screen.getByTestId("pane-drop-target-0")).toBeInTheDocument();
+    at("drop", 400, dataTransfer);
+    expect(onSwapPanes).toHaveBeenCalledWith("B", "A");
+  });
+
+  it("splits a layer out from the tab context menu", () => {
+    const onExtractLayer = vi.fn();
+    render(<PaneGrid {...props} onExtractLayer={onExtractLayer} />);
+    fireEvent.contextMenu(screen.getByTestId("pane-stack-tab-a2"), { clientX: 10, clientY: 10 });
+    fireEvent.click(screen.getByTestId("pane-stack-menu-split-right"));
+    expect(onExtractLayer).toHaveBeenCalledWith("a2", "vertical");
+    expect(screen.queryByTestId("pane-stack-menu")).toBeNull();
+
+    fireEvent.contextMenu(screen.getByTestId("pane-stack-tab-a3"), { clientX: 10, clientY: 10 });
+    fireEvent.click(screen.getByTestId("pane-stack-menu-split-down"));
+    expect(onExtractLayer).toHaveBeenCalledWith("a3", "horizontal");
+  });
+
+  it("closes the tab menu on Escape", () => {
+    render(<PaneGrid {...props} onExtractLayer={vi.fn()} />);
+    fireEvent.contextMenu(screen.getByTestId("pane-stack-tab-a2"), { clientX: 10, clientY: 10 });
+    expect(screen.getByTestId("pane-stack-menu")).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByTestId("pane-stack-menu")).toBeNull();
   });
 });
