@@ -237,7 +237,7 @@ fn input_inner(
     step: CodexStatusStep,
 ) -> Result<Option<TerminalRenderCheckpointTarget>, String> {
     let target = target_for(state, token, id)?;
-    if target.hook_title.is_some() {
+    if target.hook_binding.is_some() {
         return Err("Codex conversation was already verified through hooks".into());
     }
     let _io = target.io.lock_or_err()?;

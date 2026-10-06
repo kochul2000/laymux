@@ -135,6 +135,7 @@ pub(super) fn collect_targets(
                     .as_ref()
                     .and_then(|s| s.attributions.get(&id))
                     .and_then(|s| s.as_deref()),
+                None,
             )?
         } else {
             None
@@ -155,7 +156,7 @@ pub(super) fn collect_targets(
             require_default_editor_config(&process, &cwd)
                 .map_err(|error| format!("[{id}] {error}"))?;
         }
-        let (hook_title, proof) = match hook {
+        let (hook_binding, proof) = match hook {
             Some((title, id, fresh)) => (Some(title), Some((id, fresh))),
             None => (None, None),
         };
@@ -177,7 +178,7 @@ pub(super) fn collect_targets(
                 },
                 output_start: None,
                 proof,
-                hook_title,
+                hook_binding,
             },
         );
     }
