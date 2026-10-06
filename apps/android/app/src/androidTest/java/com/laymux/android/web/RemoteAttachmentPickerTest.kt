@@ -175,18 +175,17 @@ class RemoteAttachmentPickerTest {
     }
 
     @Test
-    fun recentAndGalleryPickersKeepMimeFiltersAndMultipleSelection() {
-        val recent = RemoteAttachmentPicker.selectionIntent(true, listOf("image/*", "application/pdf"), true)
-        assertEquals(Intent.ACTION_OPEN_DOCUMENT, recent.action)
-        assertEquals("*/*", recent.type)
-        assertArrayEquals(arrayOf("image/*", "application/pdf"), recent.getStringArrayExtra(Intent.EXTRA_MIME_TYPES))
-        assertTrue(recent.hasCategory(Intent.CATEGORY_OPENABLE))
-        assertTrue(recent.getBooleanExtra(Intent.EXTRA_ALLOW_MULTIPLE, false))
-        val gallery = RemoteAttachmentPicker.selectionIntent(false, listOf("image/*"), false)
-        assertEquals(Intent.ACTION_GET_CONTENT, gallery.action)
-        assertEquals("image/*", gallery.type)
-        assertFalse(gallery.getBooleanExtra(Intent.EXTRA_ALLOW_MULTIPLE, true))
-        val customExtension = RemoteAttachmentPicker.selectionIntent(true, listOf("image/*", "*/*"), false)
+    fun systemPickerKeepsMimeFiltersAndMultipleSelection() {
+        val multi = RemoteAttachmentPicker.selectionIntent(listOf("image/*", "application/pdf"), true)
+        assertEquals(Intent.ACTION_GET_CONTENT, multi.action)
+        assertEquals("*/*", multi.type)
+        assertArrayEquals(arrayOf("image/*", "application/pdf"), multi.getStringArrayExtra(Intent.EXTRA_MIME_TYPES))
+        assertTrue(multi.hasCategory(Intent.CATEGORY_OPENABLE))
+        assertTrue(multi.getBooleanExtra(Intent.EXTRA_ALLOW_MULTIPLE, false))
+        val image = RemoteAttachmentPicker.selectionIntent(listOf("image/*"), false)
+        assertEquals("image/*", image.type)
+        assertFalse(image.getBooleanExtra(Intent.EXTRA_ALLOW_MULTIPLE, true))
+        val customExtension = RemoteAttachmentPicker.selectionIntent(listOf("image/*", "*/*"), false)
         assertEquals("*/*", customExtension.type)
         assertNull(customExtension.getStringArrayExtra(Intent.EXTRA_MIME_TYPES))
     }
