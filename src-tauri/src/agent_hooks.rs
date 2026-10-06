@@ -61,9 +61,25 @@ pub fn manage(request: &ManageRequest, app: &tauri::AppHandle) -> Result<Value, 
     manage_in_directory(request, &helper_directory(app)?)
 }
 
+pub(super) fn manage_with_timeout(
+    request: &ManageRequest,
+    app: &tauri::AppHandle,
+    timeout: Duration,
+) -> Result<Value, AppError> {
+    manage_in_directory_with_timeout(request, &helper_directory(app)?, timeout)
+}
+
 pub(crate) fn manage_in_directory(
     request: &ManageRequest,
     directory: &std::path::Path,
+) -> Result<Value, AppError> {
+    manage_in_directory_with_timeout(request, directory, MANAGE_TIMEOUT)
+}
+
+fn manage_in_directory_with_timeout(
+    request: &ManageRequest,
+    directory: &std::path::Path,
+    timeout: Duration,
 ) -> Result<Value, AppError> {
     laymux_agent_hook::install::config_name(&request.provider).map_err(AppError::Other)?;
     if !matches!(
@@ -98,7 +114,14 @@ pub(crate) fn manage_in_directory(
         if let Some(root) = request.config_dir.as_ref().filter(|s| !s.is_empty()) {
             command.arg(root);
         }
-        let output = output_with_timeout(&mut command, MANAGE_TIMEOUT)?;
+        if timeout.is_zero() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Hook check time budget exhausted",
+            )
+            .into());
+        }
+        let output = output_with_timeout(&mut command, timeout.min(MANAGE_TIMEOUT))?;
         let value: Value = serde_json::from_slice(&output.stdout)
             .map_err(|_| AppError::Other(format!("WSL hook helper failed ({})", output.status)))?;
         if !output.status.success() {
