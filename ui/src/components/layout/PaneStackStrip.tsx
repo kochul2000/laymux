@@ -271,7 +271,7 @@ export function PaneStackStrip({
                   onClose(layer.id);
                 }}
               >
-                <XIcon size={10} />
+                <XIcon />
               </button>
             )}
           </div>
@@ -286,7 +286,7 @@ export function PaneStackStrip({
           title={`Stack new layer${stackKeys ? ` (${stackKeys})` : ""}`}
           onClick={onAdd}
         >
-          <PlusIcon size={11} />
+          <PlusIcon />
         </button>
       )}
       {menu &&
