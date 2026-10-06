@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { DockPosition, DockPane, ViewType, ViewInstanceConfig } from "@/stores/types";
 import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -9,6 +10,7 @@ import { ViewRenderer } from "@/components/views/ViewRenderer";
 import { PaneLoadingPlaceholder } from "@/components/ui/PaneLoadingPlaceholder";
 import { PaneControlBar } from "./PaneControlBar";
 import { PaneGrid } from "./PaneGrid";
+import { singleLayerSlot } from "@/lib/pane-layers";
 import { useHoverTimer } from "@/hooks/useHoverTimer";
 import { useCwdDefaultsResolver } from "./useCwdDefaultsResolver";
 import { resolvePaneCwd } from "@/lib/pane-cwd";
@@ -279,9 +281,12 @@ function DockGrid({
   const focusedDockPaneId = useDockStore((s) => s.focusedDockPaneId);
   const resolveCwdDefaults = useCwdDefaultsResolver("dock");
 
+  // Dock panes are single-layer slots; dock stacking is out of scope (ADR-0295).
+  const gridPanes = useMemo(() => panes.map(singleLayerSlot), [panes]);
+
   return (
     <PaneGrid
-      panes={panes}
+      panes={gridPanes}
       containerTestId={`dock-${position}`}
       containerClassName="relative h-full w-full overflow-hidden"
       containerStyle={{ background: "var(--bg-surface)" }}
@@ -290,9 +295,10 @@ function DockGrid({
       onPaneFocus={(paneId) => {
         focusDockPane(position, paneId);
       }}
-      onSetPaneView={onSetPaneView}
+      // Dock panes are their own content: drop the layer id PaneGrid passes along.
+      onSetPaneView={onSetPaneView ? (paneId, view) => onSetPaneView(paneId, view) : undefined}
       onSplitPane={onSplitPane}
-      onRemovePane={onRemovePane}
+      onRemovePane={onRemovePane ? (paneId) => onRemovePane(paneId) : undefined}
       getCwdDefaults={resolveCwdDefaults}
       workspaceId={activeWorkspaceId}
       workspaceName={activeWsName}

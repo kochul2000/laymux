@@ -98,7 +98,7 @@ describe("WorkspaceStore", () => {
     useWorkspaceStore.getState().addWorkspace("New", layouts[0].id);
     const ws = useWorkspaceStore.getState().workspaces[1];
     // Pane view should have type only — profile resolution is ViewRenderer's job
-    expect(ws.panes[0].view.type).toBe("EmptyView");
+    expect(ws.panes[0].layers[0].view.type).toBe("EmptyView");
   });
 
   it("removes a workspace", () => {
@@ -274,14 +274,14 @@ describe("WorkspaceStore", () => {
     it("changes the view type of a pane", () => {
       useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView", profile: "WSL" });
       const active = useWorkspaceStore.getState().getActiveWorkspace()!;
-      expect(active.panes[0].view.type).toBe("TerminalView");
-      expect(active.panes[0].view.profile).toBe("WSL");
+      expect(active.panes[0].layers[0].view.type).toBe("TerminalView");
+      expect(active.panes[0].layers[0].view.profile).toBe("WSL");
     });
 
     it("does nothing for invalid pane index", () => {
       useWorkspaceStore.getState().setPaneView(5, { type: "TerminalView" });
       const active = useWorkspaceStore.getState().getActiveWorkspace()!;
-      expect(active.panes[0].view.type).toBe("EmptyView");
+      expect(active.panes[0].layers[0].view.type).toBe("EmptyView");
     });
 
     it("clears view overrides when view type changes", () => {
@@ -411,8 +411,8 @@ describe("WorkspaceStore", () => {
 
       const afterTgt = useWorkspaceStore.getState().workspaces.find((w) => w.id === tgtId)!;
       const arrived = afterTgt.panes.find((p) => p.id === movedPane.id)!;
-      expect(arrived.view.type).toBe("TerminalView");
-      expect(arrived.view.profile).toBe("WSL");
+      expect(arrived.layers[0].view.type).toBe("TerminalView");
+      expect(arrived.layers[0].view.profile).toBe("WSL");
     });
 
     it("keeps target panes non-overlapping (every pane fits in the unit square)", () => {
@@ -522,10 +522,10 @@ describe("WorkspaceStore", () => {
         copy = useWorkspaceStore.getState().workspaces.at(-1)!;
       }
       expect(copy.panes[0].id).not.toBe(source.panes[0].id);
-      expect(copy.panes[0].view).toEqual(config);
-      expect(copy.panes[0].view).not.toBe(view);
+      expect(copy.panes[0].layers[0].view).toEqual(config);
+      expect(copy.panes[0].layers[0].view).not.toBe(view);
       expect(useWorkspaceStore.getState().workspaces.find((w) => w.id === source.id)).toBe(source);
-      expect(source.panes[0].view).toEqual(view);
+      expect(source.panes[0].layers[0].view).toEqual(view);
     });
   });
 
@@ -587,12 +587,18 @@ describe("WorkspaceStore", () => {
       useWorkspaceStore.getState().splitPane(0, "horizontal");
       useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView", profile: "WSL" });
       const before = useWorkspaceStore.getState().getActiveWorkspace()!;
-      const structureBefore = before.panes.map(({ x, y, w, h, view }) => ({ x, y, w, h, view }));
+      const structureBefore = before.panes.map(({ x, y, w, h, layers }) => ({
+        x,
+        y,
+        w,
+        h,
+        layers,
+      }));
 
       useWorkspaceStore.getState().renameWorkspace(before.id, "Renamed");
 
       const after = useWorkspaceStore.getState().getActiveWorkspace()!;
-      const structureAfter = after.panes.map(({ x, y, w, h, view }) => ({ x, y, w, h, view }));
+      const structureAfter = after.panes.map(({ x, y, w, h, layers }) => ({ x, y, w, h, layers }));
       expect(structureAfter).toEqual(structureBefore);
     });
 
@@ -690,7 +696,17 @@ describe("WorkspaceStore", () => {
           {
             id: "ws-99",
             name: "Restored",
-            panes: [{ id: "p-1", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } }],
+            panes: [
+              {
+                id: "p-1",
+                x: 0,
+                y: 0,
+                w: 1,
+                h: 1,
+                layers: [{ id: "p-1", view: { type: "EmptyView" } }],
+                activeLayerId: "p-1",
+              },
+            ],
           },
         ],
         activeWorkspaceId: "ws-99",
@@ -723,7 +739,17 @@ describe("WorkspaceStore", () => {
           {
             id: "ws-restored",
             name: "Restored",
-            panes: [{ id: "pane-5", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } }],
+            panes: [
+              {
+                id: "pane-5",
+                x: 0,
+                y: 0,
+                w: 1,
+                h: 1,
+                layers: [{ id: "pane-5", view: { type: "EmptyView" } }],
+                activeLayerId: "pane-5",
+              },
+            ],
           },
         ],
         activeWorkspaceId: "ws-restored",

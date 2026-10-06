@@ -116,3 +116,24 @@ describe("paneNumberFor", () => {
     expect(paneNumberFor([p("L", 0, 0)], "missing")).toBeNull();
   });
 });
+
+describe("computePaneNumbers with stacked slots (ADR-0295)", () => {
+  it("numbers each layer of a stack consecutively within reading order", () => {
+    const panes: NumberablePane[] = [
+      { ...p("right", 0.5, 0), layers: [{ id: "r1" }, { id: "r2" }, { id: "r3" }] },
+      { ...p("left", 0, 0), layers: [{ id: "left" }] },
+      { ...p("bottom", 0, 0.5, 1, 0.5), layers: [{ id: "bottom" }] },
+    ];
+    const numbers = computePaneNumbers(panes);
+    expect([...numbers.entries()]).toEqual([
+      ["left", 1],
+      ["r1", 2],
+      ["r2", 3],
+      ["r3", 4],
+      ["bottom", 5],
+    ]);
+    // slot ids are not keys when they differ from every layer id
+    expect(numbers.has("right")).toBe(false);
+    expect(paneNumberFor(panes, "r3")).toBe(4);
+  });
+});

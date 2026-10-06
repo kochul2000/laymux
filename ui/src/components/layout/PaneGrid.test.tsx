@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, within, act } from "@testing-library/react";
+import { render, screen, fireEvent, within, act, createEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock TerminalView to avoid Tauri IPC dependency
@@ -52,7 +52,8 @@ import { useTerminalRestartStore } from "@/stores/terminal-restart-store";
 const makePanes = (count: number): GridPane[] =>
   Array.from({ length: count }, (_, i) => ({
     id: `pane-${i}`,
-    view: { type: "TerminalView" as const },
+    layers: [{ id: `pane-${i}`, view: { type: "TerminalView" as const } }],
+    activeLayerId: `pane-${i}`,
     x: i * (1 / count),
     y: 0,
     w: 1 / count,
@@ -153,9 +154,33 @@ describe("PaneGrid", () => {
     // Array order [TL, BL, TR] (as splice-based splitting produces) must map to
     // reading-order numbers TL=1, TR=2, BL=3 regardless of array index.
     const spatialPanes: GridPane[] = [
-      { id: "TL", view: { type: "TerminalView" }, x: 0, y: 0, w: 0.5, h: 0.5 },
-      { id: "BL", view: { type: "TerminalView" }, x: 0, y: 0.5, w: 0.5, h: 0.5 },
-      { id: "TR", view: { type: "TerminalView" }, x: 0.5, y: 0, w: 0.5, h: 0.5 },
+      {
+        id: "TL",
+        layers: [{ id: "TL", view: { type: "TerminalView" } }],
+        activeLayerId: "TL",
+        x: 0,
+        y: 0,
+        w: 0.5,
+        h: 0.5,
+      },
+      {
+        id: "BL",
+        layers: [{ id: "BL", view: { type: "TerminalView" } }],
+        activeLayerId: "BL",
+        x: 0,
+        y: 0.5,
+        w: 0.5,
+        h: 0.5,
+      },
+      {
+        id: "TR",
+        layers: [{ id: "TR", view: { type: "TerminalView" } }],
+        activeLayerId: "TR",
+        x: 0.5,
+        y: 0,
+        w: 0.5,
+        h: 0.5,
+      },
     ];
     const props = {
       ...defaultProps,
@@ -314,7 +339,7 @@ describe("PaneGrid", () => {
     fireEvent.mouseEnter(screen.getByTestId("test-pane-0"));
     fireEvent.click(screen.getByTestId("pane-control-delete"));
 
-    expect(onRemovePane).toHaveBeenCalledWith("pane-0");
+    expect(onRemovePane).toHaveBeenCalledWith("pane-0", "pane-0");
   });
 
   it("renders data-pane-index attribute on each pane div", () => {
@@ -334,7 +359,8 @@ describe("PaneGrid", () => {
     const onePane: GridPane[] = [
       {
         id: "pane-x",
-        view: { type: "TerminalView", profile: "PowerShell" },
+        layers: [{ id: "pane-x", view: { type: "TerminalView", profile: "PowerShell" } }],
+        activeLayerId: "pane-x",
         x: 0,
         y: 0,
         w: 1,
@@ -362,7 +388,8 @@ describe("PaneGrid", () => {
     const onePane: GridPane[] = [
       {
         id: "pane-x",
-        view: { type: "TerminalView", profile: "PowerShell" },
+        layers: [{ id: "pane-x", view: { type: "TerminalView", profile: "PowerShell" } }],
+        activeLayerId: "pane-x",
         x: 0,
         y: 0,
         w: 1,
@@ -388,7 +415,18 @@ describe("PaneGrid", () => {
     const onePane: GridPane[] = [
       {
         id: "pane-x",
-        view: { type: "TerminalView", profile: "PowerShell", cwdSend: false, cwdReceive: false },
+        layers: [
+          {
+            id: "pane-x",
+            view: {
+              type: "TerminalView",
+              profile: "PowerShell",
+              cwdSend: false,
+              cwdReceive: false,
+            },
+          },
+        ],
+        activeLayerId: "pane-x",
         x: 0,
         y: 0,
         w: 1,
@@ -417,7 +455,8 @@ describe("PaneGrid", () => {
     const onePane: GridPane[] = [
       {
         id: "pane-x",
-        view: { type: "TerminalView", profile: "PowerShell" },
+        layers: [{ id: "pane-x", view: { type: "TerminalView", profile: "PowerShell" } }],
+        activeLayerId: "pane-x",
         x: 0,
         y: 0,
         w: 1,
@@ -437,6 +476,7 @@ describe("PaneGrid", () => {
     expect(onSetPaneView).toHaveBeenCalledWith(
       "pane-x",
       expect.objectContaining({ cwdSend: true }),
+      "pane-x",
     );
   });
 
@@ -446,7 +486,8 @@ describe("PaneGrid", () => {
     const onePane: GridPane[] = [
       {
         id: "pane-x",
-        view: { type: "TerminalView", profile: "PowerShell" },
+        layers: [{ id: "pane-x", view: { type: "TerminalView", profile: "PowerShell" } }],
+        activeLayerId: "pane-x",
         x: 0,
         y: 0,
         w: 1,
@@ -470,7 +511,8 @@ describe("PaneGrid", () => {
     const onePane: GridPane[] = [
       {
         id: "pane-fe",
-        view: { type: "FileExplorerView" },
+        layers: [{ id: "pane-fe", view: { type: "FileExplorerView" } }],
+        activeLayerId: "pane-fe",
         x: 0,
         y: 0,
         w: 1,
@@ -533,7 +575,15 @@ describe("PaneGrid global terminal startup", () => {
   it("reveals non-terminal panes immediately without consuming the terminal slot", () => {
     const panes: GridPane[] = [
       ...makePanes(2),
-      { id: "memo", view: { type: "MemoView" }, x: 0, y: 0, w: 1, h: 1 },
+      {
+        id: "memo",
+        layers: [{ id: "memo", view: { type: "MemoView" } }],
+        activeLayerId: "memo",
+        x: 0,
+        y: 0,
+        w: 1,
+        h: 1,
+      },
     ];
     useTerminalStartupStore.getState().syncCandidates({
       knownPaneIds: ["pane-0", "pane-1"],
@@ -580,8 +630,24 @@ describe("PaneGrid global terminal startup", () => {
 
 describe("PaneGrid restart wiring (ADR-0113)", () => {
   const panes: GridPane[] = [
-    { id: "pane-0", view: { type: "TerminalView" }, x: 0, y: 0, w: 0.5, h: 1 },
-    { id: "pane-1", view: { type: "TerminalView" }, x: 0.5, y: 0, w: 0.5, h: 1 },
+    {
+      id: "pane-0",
+      layers: [{ id: "pane-0", view: { type: "TerminalView" } }],
+      activeLayerId: "pane-0",
+      x: 0,
+      y: 0,
+      w: 0.5,
+      h: 1,
+    },
+    {
+      id: "pane-1",
+      layers: [{ id: "pane-1", view: { type: "TerminalView" } }],
+      activeLayerId: "pane-1",
+      x: 0.5,
+      y: 0,
+      w: 0.5,
+      h: 1,
+    },
   ];
   const props = {
     panes,
@@ -643,5 +709,284 @@ describe("PaneGrid restart wiring (ADR-0113)", () => {
 
     expect(useTerminalRestartStore.getState().requests["pane-0"].fresh).toBe(false);
     expect(terminal("pane-0")).toHaveAttribute("data-user-restart", "false");
+  });
+});
+
+describe("PaneGrid stacked slots (ADR-0295)", () => {
+  const stackedSlot = (activeLayerId: string): GridPane => ({
+    id: "slot",
+    x: 0,
+    y: 0,
+    w: 1,
+    h: 1,
+    layers: [
+      { id: "slot", view: { type: "TerminalView" } },
+      { id: "under", view: { type: "TerminalView" } },
+    ],
+    activeLayerId,
+  });
+
+  const props = {
+    testIdFn: (_p: GridPane, i: number) => `stack-pane-${i}`,
+    isFocused: () => true,
+    onPaneFocus: vi.fn(),
+    workspaceId: "ws-1",
+    workspaceName: "Test-WS",
+  };
+
+  beforeEach(() => {
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useTerminalStartupStore.setState({ revealedPaneIds: new Set(["slot", "under"]) });
+  });
+
+  it("renders one box per layer, showing only the active layer", () => {
+    const { container } = render(<PaneGrid {...props} panes={[stackedSlot("under")]} />);
+    const boxes = container.querySelectorAll("[data-layer-id]");
+    expect(boxes).toHaveLength(2);
+    const active = container.querySelector('[data-layer-id="under"]') as HTMLElement;
+    const hidden = container.querySelector('[data-layer-id="slot"]') as HTMLElement;
+    expect(active.style.display).toBe("");
+    expect(hidden.style.display).toBe("none");
+    expect(active.getAttribute("data-testid")).toBe("stack-pane-0");
+    expect(hidden.getAttribute("data-testid")).toBeNull();
+    expect(screen.getByTestId("mock-terminal-terminal-under")).toBeInTheDocument();
+    expect(screen.getByTestId("mock-terminal-terminal-slot")).toBeInTheDocument();
+  });
+
+  it("keeps both terminals mounted when the active layer changes", () => {
+    const { rerender } = render(<PaneGrid {...props} panes={[stackedSlot("slot")]} />);
+    const before = screen.getByTestId("mock-terminal-terminal-under");
+    rerender(<PaneGrid {...props} panes={[stackedSlot("under")]} />);
+    expect(screen.getByTestId("mock-terminal-terminal-under")).toBe(before);
+  });
+
+  it("only the active layer shows the focus indicator", () => {
+    render(<PaneGrid {...props} panes={[stackedSlot("under")]} />);
+    expect(screen.getAllByTestId("pane-focus-indicator")).toHaveLength(1);
+  });
+
+  it("deletes the active layer of a stacked single slot", () => {
+    const onRemovePane = vi.fn();
+    render(<PaneGrid {...props} panes={[stackedSlot("under")]} onRemovePane={onRemovePane} />);
+    fireEvent.mouseEnter(screen.getByTestId("stack-pane-0"));
+    fireEvent.click(within(screen.getByTestId("stack-pane-0")).getByTestId("pane-control-delete"));
+    expect(onRemovePane).toHaveBeenCalledWith("slot", "under");
+  });
+});
+
+describe("PaneGrid stack UI (ADR-0295)", () => {
+  const single: GridPane = {
+    id: "slot",
+    x: 0,
+    y: 0,
+    w: 1,
+    h: 1,
+    layers: [{ id: "slot", view: { type: "TerminalView" } }],
+    activeLayerId: "slot",
+  };
+  const stacked: GridPane = {
+    ...single,
+    layers: [...single.layers, { id: "under", view: { type: "MemoView" } }],
+    activeLayerId: "slot",
+  };
+  const props = {
+    testIdFn: (_p: GridPane, i: number) => `ui-pane-${i}`,
+    isFocused: () => false,
+    onPaneFocus: vi.fn(),
+    workspaceId: "ws-1",
+    workspaceName: "Test-WS",
+  };
+
+  beforeEach(() => {
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useSettingsStore.setState((s) => ({ controlBar: { ...s.controlBar, defaultMode: "pinned" } }));
+    useTerminalStartupStore.setState({ revealedPaneIds: new Set(["slot", "under"]) });
+  });
+
+  it("shows the Stack button only when stacking is wired", () => {
+    const onStackPane = vi.fn();
+    const { rerender } = render(<PaneGrid {...props} panes={[single]} />);
+    expect(screen.queryByTestId("pane-control-stack")).toBeNull();
+    rerender(<PaneGrid {...props} panes={[single]} onStackPane={onStackPane} />);
+    fireEvent.click(screen.getByTestId("pane-control-stack"));
+    expect(onStackPane).toHaveBeenCalledWith("slot");
+  });
+
+  it("renders the strip only for a stacked slot", () => {
+    const { rerender } = render(<PaneGrid {...props} panes={[single]} />);
+    expect(screen.queryByTestId("pane-stack-strip")).toBeNull();
+    rerender(<PaneGrid {...props} panes={[stacked]} />);
+    expect(screen.getAllByTestId("pane-stack-strip")).toHaveLength(1);
+  });
+
+  it("keeps the terminal mounted when its slot becomes a stack", () => {
+    const { rerender } = render(<PaneGrid {...props} panes={[single]} />);
+    const before = screen.getByTestId("mock-terminal-terminal-slot");
+    rerender(<PaneGrid {...props} panes={[stacked]} />);
+    expect(screen.getByTestId("mock-terminal-terminal-slot")).toBe(before);
+  });
+
+  it("routes strip actions to the slot callbacks", () => {
+    const onActivateLayer = vi.fn();
+    const onRemovePane = vi.fn();
+    const onStackPane = vi.fn();
+    render(
+      <PaneGrid
+        {...props}
+        panes={[stacked]}
+        onActivateLayer={onActivateLayer}
+        onRemovePane={onRemovePane}
+        onStackPane={onStackPane}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("pane-stack-tab-under"));
+    expect(onActivateLayer).toHaveBeenCalledWith("slot", "under");
+    fireEvent.click(screen.getByTestId("pane-stack-tab-close-under"));
+    expect(onRemovePane).toHaveBeenCalledWith("slot", "under");
+    fireEvent.click(screen.getByTestId("pane-stack-add"));
+    expect(onStackPane).toHaveBeenCalledWith("slot");
+  });
+});
+
+describe("PaneGrid layer rearrangement (ADR-0295)", () => {
+  const makeDataTransfer = () => ({
+    data: {} as Record<string, string>,
+    types: [] as string[],
+    setData(type: string, val: string) {
+      this.data[type] = val;
+      this.types.push(type);
+    },
+    getData(type: string) {
+      return this.data[type] ?? "";
+    },
+    effectAllowed: "",
+    dropEffect: "",
+  });
+
+  const stack: GridPane = {
+    id: "A",
+    x: 0,
+    y: 0,
+    w: 0.5,
+    h: 1,
+    layers: [
+      { id: "A", view: { type: "TerminalView" } },
+      { id: "a2", view: { type: "TerminalView" } },
+      { id: "a3", view: { type: "TerminalView" } },
+    ],
+    activeLayerId: "A",
+  };
+  const other: GridPane = {
+    id: "B",
+    x: 0.5,
+    y: 0,
+    w: 0.5,
+    h: 1,
+    layers: [{ id: "B", view: { type: "TerminalView" } }],
+    activeLayerId: "B",
+  };
+  const props = {
+    panes: [stack, other],
+    testIdFn: (_p: GridPane, i: number) => `re-pane-${i}`,
+    isFocused: () => false,
+    onPaneFocus: vi.fn(),
+    workspaceId: "ws-1",
+    workspaceName: "Test-WS",
+  };
+
+  beforeEach(() => {
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useSettingsStore.setState((s) => ({ controlBar: { ...s.controlBar, defaultMode: "pinned" } }));
+    useTerminalStartupStore.setState({ revealedPaneIds: new Set(["A", "a2", "a3", "B"]) });
+  });
+
+  it("reorders a tab inside its strip", () => {
+    const onMoveLayer = vi.fn();
+    render(<PaneGrid {...props} onMoveLayer={onMoveLayer} />);
+    const dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(screen.getByTestId("pane-stack-tab-A"), { dataTransfer });
+    fireEvent.dragOver(screen.getByTestId("pane-stack-tab-a3"), { dataTransfer });
+    fireEvent.drop(screen.getByTestId("pane-stack-tab-a3"), { dataTransfer });
+    // jsdom has no layout, so the pointer counts as the leading half of the tab.
+    expect(onMoveLayer).toHaveBeenCalledWith("A", "A", 1);
+  });
+
+  it("moves a dragged tab onto another slot", () => {
+    const onMoveLayer = vi.fn();
+    render(<PaneGrid {...props} onMoveLayer={onMoveLayer} />);
+    const dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(screen.getByTestId("pane-stack-tab-a2"), { dataTransfer });
+    fireEvent.dragOver(screen.getByTestId("re-pane-1"), { dataTransfer });
+    expect(screen.getByTestId("pane-stack-drop-target-1")).toBeInTheDocument();
+    fireEvent.drop(screen.getByTestId("re-pane-1"), { dataTransfer });
+    expect(onMoveLayer).toHaveBeenCalledWith("a2", "B");
+  });
+
+  it("does not offer a drop on the own slot body of the dragged tab", () => {
+    render(<PaneGrid {...props} onMoveLayer={vi.fn()} />);
+    const dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(screen.getByTestId("pane-stack-tab-a2"), { dataTransfer });
+    fireEvent.dragOver(screen.getByTestId("re-pane-0"), { dataTransfer });
+    expect(screen.queryByTestId("pane-stack-drop-target-0")).toBeNull();
+  });
+
+  it("merges a slot dropped on the top band of another slot, swaps below it", () => {
+    const onMergeSlot = vi.fn();
+    const onSwapPanes = vi.fn();
+    render(<PaneGrid {...props} onMergeSlot={onMergeSlot} onSwapPanes={onSwapPanes} />);
+    const target = screen.getByTestId("re-pane-0");
+    vi.spyOn(target, "getBoundingClientRect").mockReturnValue({
+      top: 100,
+      left: 0,
+      bottom: 700,
+      right: 400,
+      width: 400,
+      height: 600,
+      x: 0,
+      y: 100,
+      toJSON: () => ({}),
+    });
+    const bar = within(screen.getByTestId("re-pane-1")).getByTestId("pane-control-bar");
+    // jsdom drag events ignore clientY in the init dict; set it on the event.
+    const at = (kind: "dragOver" | "drop", clientY: number, dataTransfer: object) => {
+      const event = createEvent[kind](target, { dataTransfer });
+      Object.defineProperty(event, "clientY", { value: clientY });
+      fireEvent(target, event);
+    };
+
+    let dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(bar, { dataTransfer });
+    at("dragOver", 110, dataTransfer);
+    expect(screen.getByTestId("pane-stack-drop-target-0")).toBeInTheDocument();
+    at("drop", 110, dataTransfer);
+    expect(onMergeSlot).toHaveBeenCalledWith("B", "A");
+
+    dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(bar, { dataTransfer });
+    at("dragOver", 400, dataTransfer);
+    expect(screen.getByTestId("pane-drop-target-0")).toBeInTheDocument();
+    at("drop", 400, dataTransfer);
+    expect(onSwapPanes).toHaveBeenCalledWith("B", "A");
+  });
+
+  it("splits a layer out from the tab context menu", () => {
+    const onExtractLayer = vi.fn();
+    render(<PaneGrid {...props} onExtractLayer={onExtractLayer} />);
+    fireEvent.contextMenu(screen.getByTestId("pane-stack-tab-a2"), { clientX: 10, clientY: 10 });
+    fireEvent.click(screen.getByTestId("pane-stack-menu-split-right"));
+    expect(onExtractLayer).toHaveBeenCalledWith("a2", "vertical");
+    expect(screen.queryByTestId("pane-stack-menu")).toBeNull();
+
+    fireEvent.contextMenu(screen.getByTestId("pane-stack-tab-a3"), { clientX: 10, clientY: 10 });
+    fireEvent.click(screen.getByTestId("pane-stack-menu-split-down"));
+    expect(onExtractLayer).toHaveBeenCalledWith("a3", "horizontal");
+  });
+
+  it("closes the tab menu on Escape", () => {
+    render(<PaneGrid {...props} onExtractLayer={vi.fn()} />);
+    fireEvent.contextMenu(screen.getByTestId("pane-stack-tab-a2"), { clientX: 10, clientY: 10 });
+    expect(screen.getByTestId("pane-stack-menu")).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByTestId("pane-stack-menu")).toBeNull();
   });
 });

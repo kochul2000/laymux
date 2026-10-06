@@ -1,10 +1,12 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import type { ViewInstanceConfig } from "@/stores/types";
+import type { PaneLayer, ViewInstanceConfig, WorkspacePane } from "@/stores/types";
+import { activeLayerIndex } from "@/lib/pane-layers";
 import type { TerminalLocation } from "@/stores/settings-store";
 import { ViewRenderer } from "@/components/views/ViewRenderer";
 import { PaneBoundaryHandles } from "./PaneBoundaryHandles";
 import { PaneControlBar } from "./PaneControlBar";
+import { PaneStackStrip } from "./PaneStackStrip";
 import { FocusIndicator } from "./FocusIndicator";
 import { useContainerSize } from "@/hooks/useContainerSize";
 import { useHoverTimer } from "@/hooks/useHoverTimer";
@@ -22,14 +24,14 @@ import {
 import { resolvePaneCwd } from "@/lib/pane-cwd";
 import { runPaneClearFromUi } from "@/lib/pane-clear-action";
 
-export interface GridPane {
-  id: string;
-  view: ViewInstanceConfig;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
+/**
+ * A grid slot: geometry plus stacked content layers (ADR-0295). Dock panes are
+ * passed as single-layer slots whose layer shares the pane id.
+ */
+export type GridPane = WorkspacePane;
+
+/** Height of the top band that turns a slot drop into "stack onto this slot". */
+const STACK_DROP_BAND_PX = 40;
 
 interface CwdDefaults {
   send: boolean;
@@ -41,14 +43,15 @@ export interface PaneGridProps {
   /** Generates data-testid for each pane. */
   testIdFn: (pane: GridPane, index: number) => string | undefined;
 
-  // Focus management (core difference between workspace and dock)
+  // Focus management (core difference between workspace and dock). Ids are slot ids.
   isFocused: (paneId: string) => boolean;
   onPaneFocus: (paneId: string) => void;
 
-  // Pane operations
-  onSetPaneView?: (paneId: string, config: ViewInstanceConfig) => void;
+  // Pane operations. `paneId` is the slot id; `layerId` names the content layer
+  // the control acted on (ADR-0295). For dock panes both are the pane id.
+  onSetPaneView?: (paneId: string, config: ViewInstanceConfig, layerId: string) => void;
   onSplitPane?: (paneId: string, dir: "horizontal" | "vertical") => void;
-  onRemovePane?: (paneId: string) => void;
+  onRemovePane?: (paneId: string, layerId: string) => void;
   /**
    * 그리드 안에서 pane 위치를 드래그&드롭으로 교환한다 (issue #377).
    * 제공되면 각 pane 컨트롤바에 드래그 핸들이 나타나고, 다른 pane 위로 드롭하면
@@ -56,6 +59,22 @@ export interface PaneGridProps {
    * 미제공이면(예: dock) 드래그 핸들/드롭 타겟이 비활성화된다.
    */
   onSwapPanes?: (srcPaneId: string, tgtPaneId: string) => void;
+  /**
+   * Pane stack (ADR-0295). `onStackPane` adds a layer to the slot (control bar
+   * Stack button and the strip `+`); `onActivateLayer` shows one of its layers.
+   * Omitted (dock) → no Stack button and no strip interaction.
+   */
+  onStackPane?: (paneId: string) => void;
+  onActivateLayer?: (paneId: string, layerId: string) => void;
+  /**
+   * Layer rearrangement (ADR-0295). `onMoveLayer` takes a dragged tab to slot
+   * `targetPaneId` (optionally at `index` among its other layers);
+   * `onExtractLayer` splits a layer out of its stack; `onMergeSlot` stacks a
+   * dragged slot onto another one.
+   */
+  onMoveLayer?: (layerId: string, targetPaneId: string, index?: number) => void;
+  onExtractLayer?: (layerId: string, direction: "horizontal" | "vertical") => void;
+  onMergeSlot?: (srcPaneId: string, tgtPaneId: string) => void;
 
   // CWD toggle defaults
   getCwdDefaults?: (view: ViewInstanceConfig) => CwdDefaults;
@@ -102,6 +121,11 @@ export function PaneGrid({
   onSplitPane,
   onRemovePane,
   onSwapPanes,
+  onStackPane,
+  onActivateLayer,
+  onMoveLayer,
+  onExtractLayer,
+  onMergeSlot,
   getCwdDefaults,
   workspaceId,
   workspaceName,
@@ -125,15 +149,32 @@ export function PaneGrid({
   // The app-global coordinator reveals only one starting terminal at a time.
   // Other view types do not allocate a PTY/xterm renderer and mount immediately.
   const startupRevealedPaneIds = useTerminalStartupStore((state) => state.revealedPaneIds);
+  // Every content layer is rendered as its own box keyed by layer id, sharing
+  // its slot's rect; only the active layer is shown (ADR-0295). Keying by layer
+  // id keeps a terminal mounted when its layer is activated, reordered or moved.
+  const boxes = useMemo(
+    () =>
+      panes.flatMap((slot, slotIndex) => {
+        const activeIndex = activeLayerIndex(slot);
+        return slot.layers.map((layer, layerIndex) => ({
+          slot,
+          slotIndex,
+          layer,
+          layerIndex,
+          active: layerIndex === activeIndex,
+        }));
+      }),
+    [panes],
+  );
   const revealed = useMemo(() => {
     const paneIds = new Set<string>();
-    for (const pane of panes) {
-      if (pane.view.type !== "TerminalView" || startupRevealedPaneIds.has(pane.id)) {
-        paneIds.add(pane.id);
+    for (const { layer } of boxes) {
+      if (layer.view.type !== "TerminalView" || startupRevealedPaneIds.has(layer.id)) {
+        paneIds.add(layer.id);
       }
     }
     return paneIds;
-  }, [panes, startupRevealedPaneIds]);
+  }, [boxes, startupRevealedPaneIds]);
 
   // Drag-to-swap (issue #377). Native HTML5 DnD, same pattern as workspace reorder
   // in WorkspaceSelectorView. dragSrcId 는 현재 드래그 중인 pane, dragOverId 는
@@ -150,36 +191,78 @@ export function PaneGrid({
     useShallow((s) => {
       const mine: Record<string, TerminalRestartRequest> = {};
       for (const pane of panes) {
-        const request = s.requests[pane.id];
-        if (request) mine[pane.id] = request;
+        for (const layer of pane.layers) {
+          const request = s.requests[layer.id];
+          if (request) mine[layer.id] = request;
+        }
       }
       return mine;
     }),
   );
   const consumeTerminalRestart = useTerminalRestartStore((s) => s.consumeRestart);
 
-  const restartTerminalView = useCallback((pane: GridPane) => {
+  const restartTerminalView = useCallback((pane: PaneLayer) => {
     useTerminalRestartStore.getState().requestRestart(pane.id, resolvePaneCwd(pane));
   }, []);
+
+  // Pane stack DnD (ADR-0295). A slot dragged by its control bar swaps with the
+  // target, or — dropped on the target's top band — merges into its stack. A
+  // stack tab dragged onto another slot joins that slot's stack.
+  const [dragZone, setDragZone] = useState<"swap" | "stack">("swap");
+  const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null);
+  const layerDragEnabled = isActive && !!onMoveLayer;
+
+  /** Top band of a slot box means "stack onto it"; needs real layout to tell. */
+  const zoneFor = (e: React.DragEvent): "swap" | "stack" => {
+    if (!onMergeSlot) return "swap";
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.height <= 0) return "swap";
+    const band = Math.min(STACK_DROP_BAND_PX, rect.height / 3);
+    return e.clientY - rect.top < band ? "stack" : "swap";
+  };
 
   const handleDragStart = (e: React.DragEvent, paneId: string) => {
     dragSrcRef.current = paneId;
     setPaneDragData(e, paneId);
   };
   const handleDragOver = (e: React.DragEvent, paneId: string) => {
+    if (draggingLayerId) {
+      // A tab can join any other slot; its own slot reorders in the strip.
+      const ownSlot = panes.find((pane) => pane.layers.some((l) => l.id === draggingLayerId));
+      if (!layerDragEnabled || ownSlot?.id === paneId) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      setDragZone("stack");
+      setDragOverId(paneId);
+      return;
+    }
     if (!dndEnabled || !dragSrcRef.current) return;
     // preventDefault 를 호출해야 drop 이 허용된다(HTML5 DnD 규약).
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
-    if (dragSrcRef.current !== paneId) setDragOverId(paneId);
+    if (dragSrcRef.current !== paneId) {
+      setDragZone(zoneFor(e));
+      setDragOverId(paneId);
+    }
   };
   const handleDrop = (e: React.DragEvent, paneId: string) => {
+    if (draggingLayerId) {
+      const layerId = draggingLayerId;
+      e.preventDefault();
+      setDraggingLayerId(null);
+      setDragOverId(null);
+      if (layerDragEnabled) onMoveLayer?.(layerId, paneId);
+      return;
+    }
     if (!dndEnabled) return;
     e.preventDefault();
     const srcId = dragSrcRef.current ?? (e.dataTransfer.getData(PANE_DND_MIME) || null);
+    const zone = zoneFor(e);
     dragSrcRef.current = null;
     setDragOverId(null);
-    if (srcId && srcId !== paneId) onSwapPanes?.(srcId, paneId);
+    if (!srcId || srcId === paneId) return;
+    if (zone === "stack") onMergeSlot?.(srcId, paneId);
+    else onSwapPanes?.(srcId, paneId);
   };
   const handleDragEnd = () => {
     dragSrcRef.current = null;
@@ -194,30 +277,36 @@ export function PaneGrid({
       className={containerClassName}
       style={containerStyle}
     >
-      {panes.map((pane, i) => {
-        const focused = isFocused(pane.id);
-        const isHovered = hover.hoveredId === pane.id || (isHoveredOverride?.(pane.id) ?? false);
+      {boxes.map(({ slot: pane, slotIndex: i, layer, active }) => {
+        // Slot-level state (focus, hover, drag, geometry) keys on the slot id;
+        // content-level state (view, terminal, restart, reveal) on the layer id.
+        const focused = active && isFocused(pane.id);
+        const isHovered =
+          active && (hover.hoveredId === pane.id || (isHoveredOverride?.(pane.id) ?? false));
+        const shown = isActive && active;
 
-        const canSendCwd = supportsCwdSend(pane.view.type);
-        const canReceiveCwd = supportsCwdReceive(pane.view.type);
+        const canSendCwd = supportsCwdSend(layer.view.type);
+        const canReceiveCwd = supportsCwdReceive(layer.view.type);
 
         // Effective CWD send/receive: per-pane override beats getCwdDefaults cascade.
         // This is the same precedence the backend applies via ViewRenderer → resolveSyncCwd,
         // so the indicator and the actual propagation stay in sync.
-        const cwdDefaults = canReceiveCwd && getCwdDefaults ? getCwdDefaults(pane.view) : null;
+        const cwdDefaults = canReceiveCwd && getCwdDefaults ? getCwdDefaults(layer.view) : null;
         const cwdSendOn =
           cwdDefaults && canSendCwd
-            ? ((pane.view.cwdSend as boolean | undefined) ?? cwdDefaults.send)
+            ? ((layer.view.cwdSend as boolean | undefined) ?? cwdDefaults.send)
             : undefined;
         const cwdReceiveOn = cwdDefaults
-          ? ((pane.view.cwdReceive as boolean | undefined) ?? cwdDefaults.receive)
+          ? ((layer.view.cwdReceive as boolean | undefined) ?? cwdDefaults.receive)
           : undefined;
 
         return (
           <div
-            key={pane.id}
-            data-testid={testIdFn(pane, i)}
+            key={layer.id}
+            data-testid={active ? testIdFn(pane, i) : undefined}
             data-pane-index={i}
+            data-layer-id={layer.id}
+            data-layer-active={active ? "true" : "false"}
             className="absolute overflow-hidden"
             onMouseDown={(e) => {
               e.stopPropagation();
@@ -227,14 +316,16 @@ export function PaneGrid({
             onMouseEnter={() => isActive && hover.activate(pane.id)}
             onMouseMove={() => isActive && hover.activate(pane.id)}
             onMouseLeave={hover.clear}
-            onDragOver={dndEnabled ? (e) => handleDragOver(e, pane.id) : undefined}
-            onDrop={dndEnabled ? (e) => handleDrop(e, pane.id) : undefined}
+            onDragOver={
+              dndEnabled || layerDragEnabled ? (e) => handleDragOver(e, pane.id) : undefined
+            }
+            onDrop={dndEnabled || layerDragEnabled ? (e) => handleDrop(e, pane.id) : undefined}
             style={{
               left: `${pane.x * 100}%`,
               top: `${pane.y * 100}%`,
               width: `${pane.w * 100}%`,
               height: `${pane.h * 100}%`,
-              display: isActive ? undefined : "none",
+              display: shown ? undefined : "none",
               // Dark backstop so a freshly-committed pane box is never painted
               // browser-default white before its view renders its own background
               // (the white-flash source when many panes mount in one commit).
@@ -244,100 +335,162 @@ export function PaneGrid({
             }}
           >
             {focused && <FocusIndicator testId="pane-focus-indicator" />}
-            {dndEnabled && dragOverId === pane.id && (
-              <div
-                data-testid={`pane-drop-target-${i}`}
-                className="pointer-events-none absolute inset-0 z-20"
-                style={{
-                  border: "2px solid var(--accent)",
-                  background: "var(--accent-20)",
-                }}
-              />
-            )}
-            <PaneControlBar
-              paneId={pane.id}
-              currentView={pane.view}
-              hovered={isActive && isHovered}
-              isActive={isActive}
-              cwdSendOn={cwdSendOn}
-              cwdReceiveOn={cwdReceiveOn}
-              paneNumber={paneNumbers?.get(pane.id)}
-              workspaceId={workspaceId}
-              workspaceName={workspaceName}
-              dndEnabled={dndEnabled}
-              onPaneDragStart={(e) => handleDragStart(e, pane.id)}
-              onPaneDragEnd={handleDragEnd}
-              showListHideToggle={location === "workspace"}
-              actions={{
-                onChangeView: onSetPaneView
-                  ? (config) => onSetPaneView(pane.id, config)
-                  : undefined,
-                onSplitH: onSplitPane ? () => onSplitPane(pane.id, "horizontal") : undefined,
-                onSplitV: onSplitPane ? () => onSplitPane(pane.id, "vertical") : undefined,
-                onClearTerminal:
-                  pane.view.type === "TerminalView"
-                    ? () => {
-                        void runPaneClearFromUi(pane.id);
-                      }
-                    : undefined,
-                onClear: onSetPaneView
-                  ? () => onSetPaneView(pane.id, { type: "EmptyView" })
-                  : undefined,
-                onRestart:
-                  pane.view.type === "TerminalView" ? () => restartTerminalView(pane) : undefined,
-                onDelete:
-                  panes.length > 1 && onRemovePane ? () => onRemovePane(pane.id) : undefined,
-                onToggleCwdSend:
-                  canSendCwd && onSetPaneView && cwdDefaults
-                    ? () => {
-                        const current =
-                          (pane.view.cwdSend as boolean | undefined) ?? cwdDefaults.send;
-                        onSetPaneView(pane.id, { ...pane.view, cwdSend: !current });
-                      }
-                    : undefined,
-                onToggleCwdReceive:
-                  canReceiveCwd && onSetPaneView && cwdDefaults
-                    ? () => {
-                        const current =
-                          (pane.view.cwdReceive as boolean | undefined) ?? cwdDefaults.receive;
-                        onSetPaneView(pane.id, { ...pane.view, cwdReceive: !current });
-                      }
-                    : undefined,
-                // 1회성 CWD 전파 (issue #293). 디스패치 로직은 키바인딩
-                // (`pane.propagateCwdOnce`, issue #324)과 공유하는 propagate-cwd-once 헬퍼에 있다.
-                onPropagateCwdOnce: canSendCwd
-                  ? () => {
-                      propagateCwdOnceForPane(pane);
-                    }
-                  : undefined,
-              }}
-            >
-              {revealed.has(pane.id) ? (
-                <ViewRenderer
-                  viewType={pane.view.type}
-                  viewConfig={pane.view}
-                  onSelectView={
-                    onSetPaneView ? (config) => onSetPaneView(pane.id, config) : undefined
+            {active &&
+              (dndEnabled || layerDragEnabled) &&
+              dragOverId === pane.id &&
+              (dragZone === "stack" ? (
+                <div
+                  data-testid={`pane-stack-drop-target-${i}`}
+                  className="pointer-events-none absolute inset-0 z-20"
+                  style={{ border: "2px solid var(--accent)" }}
+                >
+                  <div className="pane-stack-drop-band">Stack here</div>
+                </div>
+              ) : (
+                <div
+                  data-testid={`pane-drop-target-${i}`}
+                  className="pointer-events-none absolute inset-0 z-20"
+                  style={{
+                    border: "2px solid var(--accent)",
+                    background: "var(--accent-20)",
+                  }}
+                />
+              ))}
+            {/* The column wrapper and content slot are always rendered so that a
+                slot turning into a stack only inserts the strip — the control bar
+                and view keep their place and never remount (ADR-0295). */}
+            <div className="flex h-full w-full min-w-0 flex-col">
+              {active && pane.layers.length > 1 && (
+                <PaneStackStrip
+                  layers={pane.layers}
+                  activeLayerId={layer.id}
+                  paneNumbers={paneNumbers}
+                  onActivate={(layerId) =>
+                    onActivateLayer ? onActivateLayer(pane.id, layerId) : undefined
                   }
-                  workspaceName={workspaceName}
-                  workspaceId={workspaceId}
-                  paneId={pane.id}
-                  isFocused={focused}
-                  emptyViewContext={emptyViewContext}
-                  location={location}
-                  onKeyboardActivity={hover.clear}
-                  terminalRestartEpoch={terminalRestarts[pane.id]?.epoch}
-                  terminalRestartCwd={terminalRestarts[pane.id]?.cwd}
-                  terminalRestartFresh={terminalRestarts[pane.id]?.fresh}
-                  onTerminalRestartConsumed={() => consumeTerminalRestart(pane.id)}
-                  onTerminalRestart={
-                    pane.view.type === "TerminalView" ? () => restartTerminalView(pane) : undefined
+                  onClose={onRemovePane ? (layerId) => onRemovePane(pane.id, layerId) : undefined}
+                  onAdd={onStackPane ? () => onStackPane(pane.id) : undefined}
+                  onSplitOut={onExtractLayer}
+                  onTabDragStart={layerDragEnabled ? setDraggingLayerId : undefined}
+                  onTabDragEnd={() => {
+                    setDraggingLayerId(null);
+                    setDragOverId(null);
+                  }}
+                  draggingLayerId={draggingLayerId}
+                  onDropLayer={
+                    layerDragEnabled
+                      ? (layerId, index) => {
+                          setDraggingLayerId(null);
+                          setDragOverId(null);
+                          onMoveLayer?.(layerId, pane.id, index);
+                        }
+                      : undefined
                   }
                 />
-              ) : (
-                <PaneLoadingPlaceholder data-testid={`pane-loading-placeholder-${i}`} />
               )}
-            </PaneControlBar>
+              <div className="relative min-h-0 min-w-0 flex-1">
+                <PaneControlBar
+                  paneId={pane.id}
+                  contentPaneId={layer.id}
+                  currentView={layer.view}
+                  hovered={shown && isHovered}
+                  isActive={isActive}
+                  cwdSendOn={cwdSendOn}
+                  cwdReceiveOn={cwdReceiveOn}
+                  paneNumber={paneNumbers?.get(layer.id)}
+                  workspaceId={workspaceId}
+                  workspaceName={workspaceName}
+                  dndEnabled={dndEnabled}
+                  onPaneDragStart={(e) => handleDragStart(e, pane.id)}
+                  onPaneDragEnd={handleDragEnd}
+                  showListHideToggle={location === "workspace"}
+                  actions={{
+                    onChangeView: onSetPaneView
+                      ? (config) => onSetPaneView(pane.id, config, layer.id)
+                      : undefined,
+                    onSplitH: onSplitPane ? () => onSplitPane(pane.id, "horizontal") : undefined,
+                    onSplitV: onSplitPane ? () => onSplitPane(pane.id, "vertical") : undefined,
+                    onStack: onStackPane ? () => onStackPane(pane.id) : undefined,
+                    onClearTerminal:
+                      layer.view.type === "TerminalView"
+                        ? () => {
+                            void runPaneClearFromUi(layer.id);
+                          }
+                        : undefined,
+                    onClear: onSetPaneView
+                      ? () => onSetPaneView(pane.id, { type: "EmptyView" }, layer.id)
+                      : undefined,
+                    onRestart:
+                      layer.view.type === "TerminalView"
+                        ? () => restartTerminalView(layer)
+                        : undefined,
+                    onDelete:
+                      (panes.length > 1 || pane.layers.length > 1) && onRemovePane
+                        ? () => onRemovePane(pane.id, layer.id)
+                        : undefined,
+                    onToggleCwdSend:
+                      canSendCwd && onSetPaneView && cwdDefaults
+                        ? () => {
+                            const current =
+                              (layer.view.cwdSend as boolean | undefined) ?? cwdDefaults.send;
+                            onSetPaneView(pane.id, { ...layer.view, cwdSend: !current }, layer.id);
+                          }
+                        : undefined,
+                    onToggleCwdReceive:
+                      canReceiveCwd && onSetPaneView && cwdDefaults
+                        ? () => {
+                            const current =
+                              (layer.view.cwdReceive as boolean | undefined) ?? cwdDefaults.receive;
+                            onSetPaneView(
+                              pane.id,
+                              { ...layer.view, cwdReceive: !current },
+                              layer.id,
+                            );
+                          }
+                        : undefined,
+                    // 1회성 CWD 전파 (issue #293). 디스패치 로직은 키바인딩
+                    // (`pane.propagateCwdOnce`, issue #324)과 공유하는 propagate-cwd-once 헬퍼에 있다.
+                    onPropagateCwdOnce: canSendCwd
+                      ? () => {
+                          propagateCwdOnceForPane(layer);
+                        }
+                      : undefined,
+                  }}
+                >
+                  {revealed.has(layer.id) ? (
+                    <ViewRenderer
+                      viewType={layer.view.type}
+                      viewConfig={layer.view}
+                      onSelectView={
+                        onSetPaneView
+                          ? (config) => onSetPaneView(pane.id, config, layer.id)
+                          : undefined
+                      }
+                      workspaceName={workspaceName}
+                      workspaceId={workspaceId}
+                      paneId={layer.id}
+                      isFocused={focused}
+                      emptyViewContext={emptyViewContext}
+                      location={location}
+                      onKeyboardActivity={hover.clear}
+                      terminalRestartEpoch={terminalRestarts[layer.id]?.epoch}
+                      terminalRestartCwd={terminalRestarts[layer.id]?.cwd}
+                      terminalRestartFresh={terminalRestarts[layer.id]?.fresh}
+                      onTerminalRestartConsumed={() => consumeTerminalRestart(layer.id)}
+                      onTerminalRestart={
+                        layer.view.type === "TerminalView"
+                          ? () => restartTerminalView(layer)
+                          : undefined
+                      }
+                    />
+                  ) : (
+                    <PaneLoadingPlaceholder
+                      data-testid={`pane-loading-placeholder-${i}${active ? "" : `-${layer.id}`}`}
+                    />
+                  )}
+                </PaneControlBar>
+              </div>
+            </div>
           </div>
         );
       })}

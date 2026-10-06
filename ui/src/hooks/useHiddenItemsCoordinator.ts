@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { ensureActiveWorkspaceVisible } from "@/lib/hidden-item-actions";
 import { useUiStore } from "@/stores/ui-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { allLayerIds } from "@/lib/pane-layers";
 
 /**
  * Keep persisted hidden IDs and the active-workspace invariant synchronized
@@ -12,7 +13,8 @@ function reconcileHiddenItems(): void {
   const { workspaces } = useWorkspaceStore.getState();
   const validWorkspaceIds = new Set(workspaces.map((workspace) => workspace.id));
   const validPaneIds = new Set(
-    workspaces.flatMap((workspace) => workspace.panes.map((pane) => pane.id)),
+    // Hidden flags are per content layer (ADR-0295).
+    workspaces.flatMap((workspace) => allLayerIds(workspace.panes)),
   );
   useUiStore.getState().pruneHiddenIds(validWorkspaceIds, validPaneIds);
   ensureActiveWorkspaceVisible();

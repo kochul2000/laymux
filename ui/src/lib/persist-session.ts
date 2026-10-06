@@ -2,7 +2,7 @@ import { saveSettings, saveTerminalOutputCache, cleanTerminalOutputCache } from 
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
-import type { ViewInstanceConfig, WorkspacePane } from "@/stores/types";
+import type { DockPane, ViewInstanceConfig, WorkspacePane } from "@/stores/types";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 import {
   collectSessionCheckpoint,
@@ -183,38 +183,67 @@ async function persistSessionCore(
   options: SessionCheckpointOptions,
 ): Promise<SessionCheckpointCommit> {
   const collectedRevision = frontendMutationRevision;
-  const sourceViews = new Map(
-    [...useWorkspaceStore.getState().workspaces, ...useDockStore.getState().docks]
-      .flatMap((group) => group.panes)
-      .map((pane) => [pane.id, pane.view]),
-  );
+  // Content views keyed by content id: workspace layers (ADR-0295) and dock panes.
+  const sourceViews = new Map<string, ViewInstanceConfig>([
+    ...useWorkspaceStore
+      .getState()
+      .workspaces.flatMap((workspace) => workspace.panes.flatMap((pane) => pane.layers))
+      .map((layer) => [layer.id, layer.view] as const),
+    ...useDockStore
+      .getState()
+      .docks.flatMap((dock) => dock.panes)
+      .map((pane) => [pane.id, pane.view] as const),
+  ]);
   const checkpoint = await collectStableCheckpoint(options);
   await saveSettings(checkpoint.settings);
   // Unknown attribution and hidden-pane remounts read these views. Publish only
   // committed metadata, otherwise a later save can resurrect startup-era IDs.
-  const savedViews = new Map(
-    [...checkpoint.settings.workspaces, ...(checkpoint.settings.docks ?? [])]
-      .flatMap((group) => group.panes ?? [])
-      .map((pane) => [pane.id, pane.view]),
-  );
-  function updateGroups<T extends { panes: WorkspacePane[] }>(groups: T[]): T[] {
+  const savedViews = new Map<string, { [key: string]: unknown }>();
+  for (const workspace of checkpoint.settings.workspaces) {
+    for (const pane of workspace.panes ?? []) {
+      if (pane.layers?.length) {
+        for (const layer of pane.layers) savedViews.set(layer.id, layer.view);
+      } else if (pane.id && pane.view) {
+        savedViews.set(pane.id, pane.view);
+      }
+    }
+  }
+  for (const dock of checkpoint.settings.docks ?? []) {
+    for (const pane of dock.panes ?? []) savedViews.set(pane.id, pane.view);
+  }
+  /** The view with committed session fields published, or the same object. */
+  function publishedView(id: string, view: ViewInstanceConfig): ViewInstanceConfig {
+    const saved = savedViews.get(id);
+    if (
+      view.type !== "TerminalView" ||
+      view !== sourceViews.get(id) ||
+      !saved ||
+      SESSION_VIEW_FIELDS.every((key) => view[key] === saved[key])
+    )
+      return view;
+    const next: ViewInstanceConfig = { ...view };
+    for (const key of SESSION_VIEW_FIELDS) {
+      if (saved[key] === undefined) delete next[key];
+      else next[key] = saved[key];
+    }
+    return next;
+  }
+  function updateSlot(pane: WorkspacePane): WorkspacePane {
+    const layers = pane.layers.map((layer) => {
+      const view = publishedView(layer.id, layer.view);
+      return view === layer.view ? layer : { ...layer, view };
+    });
+    return layers.every((layer, index) => layer === pane.layers[index])
+      ? pane
+      : { ...pane, layers };
+  }
+  function updateDockPane(pane: DockPane): DockPane {
+    const view = publishedView(pane.id, pane.view);
+    return view === pane.view ? pane : { ...pane, view };
+  }
+  function updateGroups<P, T extends { panes: P[] }>(groups: T[], update: (pane: P) => P): T[] {
     const updated = groups.map((group) => {
-      const panes = group.panes.map((pane) => {
-        const saved = savedViews.get(pane.id);
-        if (
-          pane.view.type !== "TerminalView" ||
-          pane.view !== sourceViews.get(pane.id) ||
-          !saved ||
-          SESSION_VIEW_FIELDS.every((key) => pane.view[key] === saved[key])
-        )
-          return pane;
-        const view: ViewInstanceConfig = { ...pane.view };
-        for (const key of SESSION_VIEW_FIELDS) {
-          if (saved[key] === undefined) delete view[key];
-          else view[key] = saved[key];
-        }
-        return { ...pane, view };
-      });
+      const panes = group.panes.map(update);
       return panes.every((pane, index) => pane === group.panes[index])
         ? group
         : { ...group, panes };
@@ -223,11 +252,11 @@ async function persistSessionCore(
   }
   const revisionBeforePublication = frontendMutationRevision;
   useWorkspaceStore.setState((state) => {
-    const workspaces = updateGroups(state.workspaces);
+    const workspaces = updateGroups(state.workspaces, updateSlot);
     return workspaces === state.workspaces ? state : { workspaces };
   });
   useDockStore.setState((state) => {
-    const docks = updateGroups(state.docks);
+    const docks = updateGroups(state.docks, updateDockPane);
     return docks === state.docks ? state : { docks };
   });
   // These synchronous notifications publish metadata already saved above.
@@ -388,8 +417,10 @@ export async function prepareTerminalExit(
 
   // Clean orphaned cache files after all cache writes have completed.
   const activePaneIds: string[] = [];
+  // Output caches belong to content: every stacked layer keeps its own (ADR-0295).
   for (const ws of wsState.workspaces) {
-    for (const p of ws.panes) if (p.id) activePaneIds.push(p.id);
+    for (const p of ws.panes)
+      for (const layer of p.layers) if (layer.id) activePaneIds.push(layer.id);
   }
   for (const d of dockState.docks) {
     for (const p of d.panes) if (p.id) activePaneIds.push(p.id);

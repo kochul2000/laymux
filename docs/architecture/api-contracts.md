@@ -13,6 +13,8 @@
 
 새 PC 설정의 `controlBar.defaultMode`는 `pinned`이고, 기본 Dock은 왼쪽 WorkspaceSelectorView와 오른쪽 MemoView / FileExplorerView / GitHubView(위부터 높이 1/3씩)다. 위·아래 Dock은 숨긴다. 이 기본 구성은 Rust `Settings::default()`와 프론트 store에 일치시키며, 기존에 저장된 컨트롤 바 모드·pane 오버라이드·Dock 배치는 그대로 적용한다. 새 값은 신규 또는 생략된 설정에만 적용한다([ADR-0265](../adr/0265-pc-remote-first-use-defaults.md)).
 
+`paneStack.cycleOnBlockedArrow`(기본 `true`)는 `Alt+Arrow` 방향에 Pane 도 보이는 Dock 도 없을 때 포커스 슬롯의 스택 레이어를 넘길지 정한다. Settings → 인터페이스 → Pane 스택에서 끄고 켠다([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)). 워크스페이스 pane 은 스택이면 `{ id, x, y, w, h, layers: [{ id, view }], activeLayerId }` 로, 아니면 기존 `{ id, x, y, w, h, view }` 축약형으로 저장된다.
+
 ### Codex 종료 확인
 
 훅 우선 모드에서는 [ADR-0292](../adr/0292-codex-hook-lifecycle-session-proof.md)와 [ADR-0294](../adr/0294-codex-process-bound-lifecycle-proof.md)에 따라 현재 TUI와 저장소에 연결된 훅 ID 또는 정확한 프로세스 진단 ID로 먼저 종료 복원점을 확인한다. 활성 훅 설치와 최상위 rollout/Fresh를 검증하며, 프로세스 진단 ID는 훅 수신과 제목 설정을 요구하지 않지만 현재 세대의 유효한 제목이 다른 ID면 거부한다. Codex는 시작 훅을 다음 요청까지 미루므로 resume 직후에도 프로세스 증거를 사용한다. 해당 pane은 `begin_codex_status_checkpoint`의 입력 대상 목록에서 제외하지만 토큰의 검증 대상에는 유지한다. I/O 후와 저장 시점에 동일 증거 종류의 대화 선택·프로세스·PTY 세대·제목 snapshot·설치·rollout을 재검증하며 프로세스 선택 소실을 제목 증거로 대체하지 않는다. 작업 phase의 만료는 대화 메타데이터의 만료가 아니다. 두 증거가 없거나 훅 제거·비활성·읽기 실패 또는 휴리스틱 모드이면 아래 `/status` 절차를 사용한다.
@@ -994,7 +996,9 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | POST | `/api/v1/grid/edit-mode` | 편집 모드 설정 |
 | POST | `/api/v1/grid/focus` | Pane 포커스 |
 | POST | `/api/v1/panes/split` | Pane 분할 |
-| DELETE | `/api/v1/panes/:index` | Pane 제거 |
+| POST | `/api/v1/panes/stack` | 슬롯 활성 레이어 뒤에 새 레이어(기본 `TerminalView`)를 쌓고 표시. 키보드 포커스는 옮기지 않는다. `cwd` 생략 시 활성 레이어 CWD 상속, 응답은 split 과 같은 `newPane{id,terminalId,paneIndex,paneNumber,layerIndex,layerCount,ready}` ([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)) |
+| POST | `/api/v1/panes/layers/activate` | `layerId` 또는 `terminalId` 로 레이어 하나를 표시. 필요하면 워크스페이스를 전환하고 `focus=false` 가 아니면 그 슬롯에 포커스 ([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)) |
+| DELETE | `/api/v1/panes/:index` | Pane 제거. 스택 슬롯이면 `?layerId=` 레이어(기본 활성 레이어) 하나만 닫고 슬롯은 남는다. 마지막 레이어를 닫으면 슬롯이 사라진다. 응답 `{removed,slotRemoved,remainingLayers}` |
 | PUT | `/api/v1/panes/:index/view` | View 변경 |
 | GET | `/api/v1/docks` | 독 상태 |
 | PUT | `/api/v1/docks/:position/active-view` | 독 View 변경 |
@@ -1121,11 +1125,11 @@ lease 갱신에 성공한 heartbeat 응답은 항상 경로 없는 PC 뷰어 신
 | Tool | 구현 방식 | 설명 |
 |------|-----------|------|
 | `list_terminals` | bridge_request | 터미널 목록 조회 (워크스페이스 필터) |
-| `identify_caller` | bridge_request | 터미널 위치·이웃 정보 조회 (단일 터미널 상세는 `list_terminals`/`terminal://{id}` 리소스로 대체) |
+| `identify_caller` | bridge_request | 터미널 위치·이웃 정보 조회 (단일 터미널 상세는 `list_terminals`/`terminal://{id}` 리소스로 대체). `pane.stack = {position,count,active,layerIds}` 를 싣고, 이웃은 슬롯 기준으로 그 슬롯의 활성 레이어를 보고한다 ([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)) |
 | `write_to_terminal` | AppState 직접 | PTY 입력 전송 (기본 `enter: true`로 제출, 타이핑만 하려면 `enter: false`). 에이전트 간 메시징은 `reply_to`에 발신자 terminal ID를 주면 표준 회신 푸터를 본문 뒤에 부착 |
 | `write_to_neighbor` | bridge + AppState | 방향 기반 이웃 팬에 입력 전송 (identify + write 단축). `reply_to` 동일 지원 |
 | `read_terminal_output` | AppState 직접 | 출력 버퍼 읽기 (raw/text 포맷) |
-| `focus_terminal` | bridge_request | 터미널 포커스 — `terminal_id`/`pane_ref`/`pane_number` 해석 후 `terminals.setFocus` (안정 식별자·공간 번호 기반) |
+| `focus_terminal` | bridge_request | 터미널 포커스 — `terminal_id`/`pane_ref`/`pane_number` 해석 후 `terminals.setFocus` (안정 식별자·공간 번호 기반). 대상이 숨은 스택 레이어면 그 레이어를 표시까지 한다 ([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)) |
 | `get_terminal_states` | AppState 직접 | 전 터미널 활동 상태 감지 |
 | `execute_command` | AppState 직접 | 명령 실행 + 출력 수집 (per-terminal 세마포어, sequence number). exec lock 획득 뒤 실제 PTY write 직전에 공용 strict activity detector로 ring·known app·grace/exit cache·PTY registry 건강성과 `Shell` 상태를 다시 검증하며, 오류/TUI/실행 중 상태는 0-byte tool error로 차단 |
 
@@ -1136,7 +1140,7 @@ lease 갱신에 성공한 heartbeat 응답은 항상 경로 없는 PC 뷰어 신
 | Tool | 구현 방식 | 설명 |
 |------|-----------|------|
 | `list_workspaces` | bridge_request | 워크스페이스 목록 (summary 옵션) |
-| `get_active_workspace` | bridge_request | 활성 워크스페이스 상세 |
+| `get_active_workspace` | bridge_request | 활성 워크스페이스 상세. `panes` 는 레이어마다 한 항목(`id`·`view`·`terminalId`·`paneNumber` 는 레이어, `paneIndex`·rect 는 슬롯)이고 `slotId`·`layerIndex`·`layerCount`·`activeLayer` 를 함께 싣는다. 스택이 없으면 항목은 이전과 같다 ([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)) |
 | `switch_workspace` | bridge_request | 워크스페이스 전환 |
 | `create_workspace` | bridge_request | 워크스페이스 생성 (레이아웃/프로필 지정) |
 | `delete_workspace` | bridge_request | 워크스페이스 삭제 |
@@ -1149,7 +1153,9 @@ lease 갱신에 성공한 heartbeat 응답은 항상 경로 없는 PC 뷰어 신
 | `get_grid_state` | bridge_request | 그리드 상태 조회 (`editMode`, `focusedPane`, `activeWorkspaceId`) |
 | `focus_pane` | bridge_request | 인덱스 기반 팬 포커스 |
 | `split_pane` | bridge_request | 팬 분할 (`ready` 필드로 렌더 완료 여부 표시). `cwd` 생략 시 분할 대상 팬의 CWD 를 상속하고, 주면 그 값이 이긴다 ([ADR-0140](../adr/0140-split-pane-inherits-source-cwd.md)) |
-| `remove_pane` | bridge_request | 팬 제거 |
+| `stack_pane` | bridge_request | 슬롯에 레이어 쌓기 — `split_pane` 미러(`view_type` 기본 `TerminalView`, `profile`, `cwd`, `ready`). 키보드 포커스는 옮기지 않는다 ([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)) |
+| `activate_pane_layer` | bridge_request | `layer_id` 또는 `terminal_id` 로 스택 레이어 표시(`focus` 기본 true) ([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)) |
+| `remove_pane` | bridge_request | 팬 제거. 스택 슬롯은 `layer_id`(기본 활성 레이어) 하나만 닫는다 ([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)) |
 | `resize_pane` | bridge_request | 팬 크기 조정 — 공유 경계를 이웃과 함께 이동 (`dw`/`dh` 상대 delta, 해당 축에 경계가 없으면 오류. [ADR-0071](../adr/0071-pane-resize-single-boundary-owner.md)) |
 | `swap_panes` | bridge_request | 두 팬 위치 교환 (atomic 단일 상태 업데이트) |
 | `list_layouts` | bridge_request | 저장된 레이아웃 목록 |
@@ -1559,6 +1565,8 @@ Remote drawer 본문은 workspace 기본 화면과 Hidden workspaces·Notificati
 | `/remote/v1/workspaces/{id}/clear` | POST | active `leaseId`로 그 workspace 터미널들에 Ctrl+L 브로드캐스트 (ADR-0137) |
 
 `/remote/v1/navigation`은 bearer token과 IP/Origin gate를 통과해야 하며 lease는 요구하지 않는다. 응답의 `workspaces`는 PC WebView `WorkspaceSelectorView`와 같은 `workspaceSelector.sortOrder`/`workspaceDisplayOrder` 규칙으로 정렬된 `{id,name,isActive,hidden,collapsed,paneCount,terminalPaneCount,liveTerminalCount,unreadCount,panes,selectorSummary}` 요약이다([ADR-0151](../adr/0151-remote-workspace-selector-information-parity.md)). ADR-0018의 remote payload 호환성과 focused remote surface를 위해 숨김 워크스페이스와 숨김 pane도 제거하지 않고 `hidden`/`collapsed` 플래그로 전달한다. 다만 desktop selector는 ADR-0033 이후 숨김 행을 DOM 목록에서 필터하고 별도 보관함에서 복원하므로, remote의 `collapsed`는 remote 전용 표시 계약이지 desktop DOM 접힘 모델과의 1:1 일치를 뜻하지 않는다. 현재 active workspace는 전환 중인 raw snapshot에서도 `collapsed=false`로 유지해 현재 터미널 문맥을 잃지 않는다. `workspaces[].panes`는 선택 여부와 무관하게 모든 workspace에서 채운다. 각 pane 요약은 `{id,location,workspaceId,paneIndex,paneNumber,viewType,terminalId,terminalLive,title,profile,cwd,branch,activity,outputActive,commandRunning,lastCommand,lastExitCode,lastCommandAt,activityMessage,selectorDisplay,selectorStatus,isFocused,unreadCount,hidden,collapsed,x,y,w,h}` 형태이며, `unreadCount`는 terminal pane에만 부여하고 non-terminal pane은 항상 `0`이다. `selectorDisplay`는 frontend가 PC와 같은 formatter와 현재 path ellipsis로 계산한 `{environment,activity:{label,color},cwd}`이고, `selectorStatus`는 같은 activity handler 및 현재 Claude/Codex 상태 문구 설정으로 계산한 `{icon,color,text?}`다. Remote는 이 표시값을 재판정하지 않는다. `selectorSummary`는 `{branch,cwd,terminalCount,lastCommand,latestNotification}`이고 `lastCommand`에는 `{command,timestamp,status}`가 들어간다. 모든 `workspaces[].panes`와 `activeWorkspace.panes`는 PC selector와 동일하게 `paneNumber` 오름차순으로 정렬하며 `paneIndex`는 정렬 후 위치가 아니라 원본 `WorkspacePane[]` 인덱스를 유지한다. `docks[]`는 workspace 목록과 섞지 않는 앱 전역 요약이며, `docks[].panes`는 `location="dock"`과 `workspaceId=null`을 사용해 workspace 소속 pane이 아님을 명확히 한다. Dock pane의 `unreadCount`는 workspace filter 없이 `terminalId` 기준으로만 계산하고, dock pane의 `isFocused`는 terminal store의 focus flag가 아니라 desktop dock focus SoT인 `focusedDock`/`focusedDockPaneId`에서 계산한다. `visible=false` dock은 remote page의 dock panel에서 렌더하지 않고 preferred terminal 후보에서도 제외한다. 즉 `preferredTerminalId` short-circuit과 fallback 모두 active workspace pane terminal 또는 visible dock pane terminal만 메인 출력으로 열 수 있다. 다만 `terminalLive`는 진입 조건이 아니다([ADR-0138](../adr/0138-remote-opens-queued-panes-on-entry.md)) — workspace lazy mount와 직렬 startup slot([ADR-0127](../adr/0127-terminal-startup-slot-follows-eligibility.md)) 때문에 아직 데스크톱에서 열리지 않은 pane은 정상 상태에서도 `terminalLive=false`이므로, `terminalId`가 있는 pane은 모두 선택 가능하고 live는 후보 자격이 아니라 동순위 tie-breaker다. Remote 폴백 순서는 focused pane → active workspace live pane → active workspace 미시작 pane → visible dock live pane → visible dock 미시작 pane이며, 셋 다 없을 때(= terminal pane 자체가 없을 때)만 열 터미널이 없다고 표시한다. 최상위 `workspaceSelector`는 remote drawer가 PC selector의 표시 토글/경로 ellipsis와 맞출 수 있게 하는 현재 selector 설정이며, `unreadNotificationCount`는 전체 unread 수다. `terminals`는 `/remote/v1/terminals` 항목에 frontend bridge의 `workspaceId`, `paneNumber`, `activity`, `selectorDisplay`, `selectorStatus`, `isFocused` 등 탐색·표시에 필요한 메타데이터를 병합한 목록이다.
+
+**스택 레이어 행**([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)). frontend bridge 가 레이어마다 pane 항목을 주므로 `workspaces[].panes`·`activeWorkspace.panes` 도 레이어마다 한 행이다. 같은 슬롯의 행은 같은 `paneIndex` 를 공유하고, 각 행은 `layerIndex`·`layerCount`·`activeLayer` 를 싣는다(필드가 없으면 단일 레이어 `0`·`1`·`true`). `paneCount`·`terminalPaneCount` 는 레이어 단위로 센다. Remote drawer 는 스택 행에 `n/m` 배지를 붙이고 숨은 레이어 행은 흐리게 그리지만 선택은 막지 않는다 — 선택하면 `terminals.setFocus` 가 그 레이어를 표시까지 한다. 공간 스텝(ADR-0039)은 (슬롯 읽기순 × 레이어순)의 모든 터미널 레이어를 지나고, 방향 스텝은 슬롯 단위로 각 슬롯의 활성 레이어만 본다.
 
 ADR-0194에 따라 위 `selectorDisplay` shape에는 runtime-only `{lastInput:string|null,lastInputAt:number|null}`이 additive로 포함된다. frontend bridge가 `lastUserInput/lastUserInputAt`과 `lastCommand/lastCommandAt`에서 최신 값과 timestamp를 계산하며 Remote JavaScript는 provider 출력이나 prompt를 역파싱하지 않는다. 최상위 `workspaceSelector.lastInputMode`는 `"perPane" | "workspaceLatest"`이고 누락·유효하지 않은 값의 기본은 `"perPane"`이다. 기존 `selectorSummary`는 Automation/Remote payload 호환성을 위해 유지한다.
 
@@ -2254,3 +2262,5 @@ PowerShell의 PSReadLine 통합은 [ADR-0262](../adr/0262-powershell-command-lif
 `UpdateStatus.operation`은 idle/checking/downloading/preparing/installing이다. `preparation`은 nullable `{stage: checkpoint|interrupting|settling|caching, completed, total: number|null, warning: string|null}`이며 `exitSettings`는 설치 수락 시 저장된 종료 설정이다. idle 조회는 현재 저장된 종료 설정을 반환한다. Tauri `report_app_update_preparation(requestId,progress)`는 native request가 pending이고 update가 preparing일 때만 수락한다. 기존 Remote GET `/remote/v1/update`는 같은 진행 정보를 포함한 snapshot을 반환한다. 설치 요청은 기존 active controller lease를 유지한다.
 
 Dev POST `/api/v1/ui/lifecycle`는 `{action:"open"}`으로 실제 업데이트 모달을 열고, `{action:"close"}`로 preview를 해제한다. `{kind:"close"|"update",stage:"ready"|"downloading"|"checkpoint"|"interrupting"|"settling"|"caching"|"installing"|"closing",completed?,total?,cleanup?,error?}`는 지정한 진행 상태의 preview를 표시한다. 실제 정리나 설치를 수행하지 않고 동일한 컴포넌트를 렌더한다. Rust debug gate와 frontend DEV gate를 모두 적용한다.
+
+Dev POST `/api/v1/ui/key`는 `{key,ctrl?,alt?,shift?}`로 포커스된 요소에서 `keydown` 하나를 발생시켜, 실제 키 입력과 같은 터미널 패스스루 → 문서 단축키 경로를 자율 검증 루프에서 재현한다(OS 키 주입이 불가능한 비대화형 세션 대비). 응답은 `{dispatched,defaultPrevented,target}`이다. Rust debug gate와 frontend DEV gate를 모두 적용한다.

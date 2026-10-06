@@ -31,7 +31,17 @@ describe("Workspace Store E2E", () => {
           id: "ws-default",
           name: "Default",
 
-          panes: [{ id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } }],
+          panes: [
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              layers: [{ id: "p1", view: { type: "EmptyView" } }],
+              activeLayerId: "p1",
+            },
+          ],
         },
       ],
       activeWorkspaceId: "ws-default",
@@ -153,7 +163,7 @@ describe("Workspace Store E2E", () => {
       expect(workspaces[1].name).toBe("New-WS");
 
       expect(workspaces[1].panes.length).toBe(1);
-      expect(workspaces[1].panes[0].view.type).toBe("EmptyView");
+      expect(workspaces[1].panes[0].layers[0].view.type).toBe("EmptyView");
     });
 
     it("normalizes whitespace in new workspace names before storage", () => {
@@ -241,7 +251,7 @@ describe("Workspace Store E2E", () => {
       useWorkspaceStore.getState().addWorkspace("Test WS", "default-layout");
 
       const ws = useWorkspaceStore.getState().workspaces.find((w) => w.name === "Test-WS")!;
-      expect(ws.panes[0].view).toEqual({ type: "TerminalView", profile: "WSL" });
+      expect(ws.panes[0].layers[0].view).toEqual({ type: "TerminalView", profile: "WSL" });
     });
 
     it("exportToLayout should work consecutively on the same layout", () => {
@@ -777,7 +787,17 @@ describe("Cross-Store Integration E2E", () => {
           id: "ws-1",
           name: "Project A",
 
-          panes: [{ id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+          panes: [
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              layers: [{ id: "p1", view: { type: "TerminalView" } }],
+              activeLayerId: "p1",
+            },
+          ],
         },
       ],
       activeWorkspaceId: "ws-1",
@@ -969,9 +989,33 @@ describe("Complex Workspace Layout Scenarios", () => {
           name: "Project A",
 
           panes: [
-            { id: "p1", x: 0, y: 0, w: 1, h: 0.6, view: { type: "TerminalView" } },
-            { id: "p2", x: 0, y: 0.6, w: 0.5, h: 0.4, view: { type: "TerminalView" } },
-            { id: "p3", x: 0.5, y: 0.6, w: 0.5, h: 0.4, view: { type: "TerminalView" } },
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 0.6,
+              layers: [{ id: "p1", view: { type: "TerminalView" } }],
+              activeLayerId: "p1",
+            },
+            {
+              id: "p2",
+              x: 0,
+              y: 0.6,
+              w: 0.5,
+              h: 0.4,
+              layers: [{ id: "p2", view: { type: "TerminalView" } }],
+              activeLayerId: "p2",
+            },
+            {
+              id: "p3",
+              x: 0.5,
+              y: 0.6,
+              w: 0.5,
+              h: 0.4,
+              layers: [{ id: "p3", view: { type: "TerminalView" } }],
+              activeLayerId: "p3",
+            },
           ],
         },
       ],

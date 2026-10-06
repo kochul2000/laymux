@@ -1,4 +1,5 @@
 import { findNextVisibleWorkspaceId } from "@/lib/hidden-items";
+import { allLayerIds } from "@/lib/pane-layers";
 import { switchActiveWorkspace } from "@/lib/workspace-transition";
 import { sortWorkspaces } from "@/lib/workspace-sort";
 import { useNotificationStore } from "@/stores/notification-store";
@@ -53,11 +54,7 @@ export function setWorkspaceHiddenWithFallback(
     }
   }
 
-  useUiStore.getState().setWorkspaceHidden(
-    workspaceId,
-    hidden,
-    workspace.panes.map((pane) => pane.id),
-  );
+  useUiStore.getState().setWorkspaceHidden(workspaceId, hidden, allLayerIds(workspace.panes));
   return { hidden, blocked: false, fallbackWorkspaceId };
 }
 
@@ -79,5 +76,9 @@ export function ensureActiveWorkspaceVisible(): void {
   }
 
   const activeWorkspace = workspaceState.workspaces.find((workspace) => workspace.id === activeId);
-  uiState.setWorkspaceHidden(activeId, false, activeWorkspace?.panes.map((pane) => pane.id) ?? []);
+  uiState.setWorkspaceHidden(
+    activeId,
+    false,
+    activeWorkspace ? allLayerIds(activeWorkspace.panes) : [],
+  );
 }

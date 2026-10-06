@@ -113,14 +113,40 @@ function seedColdWorkspaces() {
       {
         id: "ws-live",
         name: "Live",
-        panes: [{ id: "live-1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+        panes: [
+          {
+            id: "live-1",
+            x: 0,
+            y: 0,
+            w: 1,
+            h: 1,
+            layers: [{ id: "live-1", view: { type: "TerminalView" } }],
+            activeLayerId: "live-1",
+          },
+        ],
       },
       {
         id: "ws-cold",
         name: "Cold",
         panes: [
-          { id: "cold-1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-          { id: "cold-2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+          {
+            id: "cold-1",
+            x: 0,
+            y: 0,
+            w: 0.5,
+            h: 1,
+            layers: [{ id: "cold-1", view: { type: "TerminalView" } }],
+            activeLayerId: "cold-1",
+          },
+          {
+            id: "cold-2",
+            x: 0.5,
+            y: 0,
+            w: 0.5,
+            h: 1,
+            layers: [{ id: "cold-2", view: { type: "TerminalView" } }],
+            activeLayerId: "cold-2",
+          },
         ],
       },
     ],
@@ -221,15 +247,49 @@ describe("handleAutomationRequest", () => {
           id: "ws-wide",
           name: "Wide",
           panes: [
-            { id: "w1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-            { id: "w2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-            { id: "w3", x: 0, y: 0.5, w: 1, h: 0.5, view: { type: "TerminalView" } },
+            {
+              id: "w1",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "w1", view: { type: "TerminalView" } }],
+              activeLayerId: "w1",
+            },
+            {
+              id: "w2",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "w2", view: { type: "TerminalView" } }],
+              activeLayerId: "w2",
+            },
+            {
+              id: "w3",
+              x: 0,
+              y: 0.5,
+              w: 1,
+              h: 0.5,
+              layers: [{ id: "w3", view: { type: "TerminalView" } }],
+              activeLayerId: "w3",
+            },
           ],
         },
         {
           id: "ws-solo",
           name: "Solo",
-          panes: [{ id: "s1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+          panes: [
+            {
+              id: "s1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              layers: [{ id: "s1", view: { type: "TerminalView" } }],
+              activeLayerId: "s1",
+            },
+          ],
         },
       ],
       activeWorkspaceId: "ws-wide",
@@ -357,12 +417,32 @@ describe("handleAutomationRequest", () => {
         {
           id: "ws-live",
           name: "Live",
-          panes: [{ id: "live-1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+          panes: [
+            {
+              id: "live-1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              layers: [{ id: "live-1", view: { type: "TerminalView" } }],
+              activeLayerId: "live-1",
+            },
+          ],
         },
         {
           id: "ws-memo",
           name: "Memo",
-          panes: [{ id: "memo-1", x: 0, y: 0, w: 1, h: 1, view: { type: "MemoView" } }],
+          panes: [
+            {
+              id: "memo-1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              layers: [{ id: "memo-1", view: { type: "MemoView" } }],
+              activeLayerId: "memo-1",
+            },
+          ],
         },
       ],
       activeWorkspaceId: "ws-live",
@@ -2595,9 +2675,33 @@ describe("identify_caller and enriched responses", () => {
           id: "ws-tj",
           name: "TJunction",
           panes: [
-            { id: "tj-0", x: 0, y: 0, w: 0.5, h: 0.5, view: { type: "TerminalView" } },
-            { id: "tj-1", x: 0, y: 0.5, w: 0.5, h: 0.5, view: { type: "TerminalView" } },
-            { id: "tj-2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            {
+              id: "tj-0",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 0.5,
+              layers: [{ id: "tj-0", view: { type: "TerminalView" } }],
+              activeLayerId: "tj-0",
+            },
+            {
+              id: "tj-1",
+              x: 0,
+              y: 0.5,
+              w: 0.5,
+              h: 0.5,
+              layers: [{ id: "tj-1", view: { type: "TerminalView" } }],
+              activeLayerId: "tj-1",
+            },
+            {
+              id: "tj-2",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "tj-2", view: { type: "TerminalView" } }],
+              activeLayerId: "tj-2",
+            },
           ],
         },
       ],
@@ -2783,9 +2887,9 @@ describe("identify_caller and enriched responses", () => {
 
     const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
     const newPane = ws.panes[1];
-    expect(newPane.view.type).toBe("TerminalView");
-    expect(newPane.view.profile).toBe("WSL");
-    expect(newPane.view.lastCwd).toBe("/home/user");
+    expect(newPane.layers[0].view.type).toBe("TerminalView");
+    expect(newPane.layers[0].view.profile).toBe("WSL");
+    expect(newPane.layers[0].view.lastCwd).toBe("/home/user");
   });
 
   // ADR-0140: 분할은 분할 대상 pane 의 CWD 를 시드로 싣는다. 호출자가 cwd 를
@@ -2880,13 +2984,13 @@ describe("identify_caller and enriched responses", () => {
     // that TerminalView panes have lastCwd set. If all panes are EmptyView,
     // the handler should still set lastCwd on them as viewConfig.
     for (const pane of ws.panes) {
-      if (pane.view.type === "TerminalView") {
-        expect(pane.view.lastCwd).toBe("/home/user/project");
+      if (pane.layers[0].view.type === "TerminalView") {
+        expect(pane.layers[0].view.lastCwd).toBe("/home/user/project");
       }
     }
     // Ensure at least one TerminalView pane exists to make this test meaningful
     // If the default layout only has EmptyView, convert one and verify
-    const termPanes = ws.panes.filter((p) => p.view.type === "TerminalView");
+    const termPanes = ws.panes.filter((p) => p.layers[0].view.type === "TerminalView");
     expect(termPanes.length).toBeGreaterThan(0);
   });
 
@@ -3202,9 +3306,33 @@ describe("spatial pane numbers (issue #256)", () => {
           id: WS_ID,
           name: "Nums",
           panes: [
-            { id: TL, x: 0, y: 0, w: 0.5, h: 0.5, view: { type: "TerminalView" } },
-            { id: BL, x: 0, y: 0.5, w: 0.5, h: 0.5, view: { type: "TerminalView" } },
-            { id: TR, x: 0.5, y: 0, w: 0.5, h: 0.5, view: { type: "TerminalView" } },
+            {
+              id: TL,
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 0.5,
+              layers: [{ id: TL, view: { type: "TerminalView" } }],
+              activeLayerId: TL,
+            },
+            {
+              id: BL,
+              x: 0,
+              y: 0.5,
+              w: 0.5,
+              h: 0.5,
+              layers: [{ id: BL, view: { type: "TerminalView" } }],
+              activeLayerId: BL,
+            },
+            {
+              id: TR,
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 0.5,
+              layers: [{ id: TR, view: { type: "TerminalView" } }],
+              activeLayerId: TR,
+            },
           ],
         },
       ],
@@ -3283,7 +3411,17 @@ describe("spatial pane numbers (issue #256)", () => {
         {
           id: "ws-live",
           name: "Live",
-          panes: [{ id: "live", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } }],
+          panes: [
+            {
+              id: "live",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              layers: [{ id: "live", view: { type: "EmptyView" } }],
+              activeLayerId: "live",
+            },
+          ],
         },
         {
           id: "ws-cold",
@@ -3295,11 +3433,17 @@ describe("spatial pane numbers (issue #256)", () => {
               y: 0,
               w: 1,
               h: 1,
-              view: {
-                type: "TerminalView",
-                profile: "WSL",
-                lastCwd: "/home/codex/projects/laymux",
-              },
+              layers: [
+                {
+                  id: "cold",
+                  view: {
+                    type: "TerminalView",
+                    profile: "WSL",
+                    lastCwd: "/home/codex/projects/laymux",
+                  },
+                },
+              ],
+              activeLayerId: "cold",
             },
           ],
         },
@@ -3477,7 +3621,17 @@ describe("spatial pane numbers (issue #256)", () => {
         {
           id: WS_ID,
           name: "Nums",
-          panes: [{ id: "pane-empty", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } }],
+          panes: [
+            {
+              id: "pane-empty",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              layers: [{ id: "pane-empty", view: { type: "EmptyView" } }],
+              activeLayerId: "pane-empty",
+            },
+          ],
         },
       ],
       activeWorkspaceId: WS_ID,
@@ -3503,14 +3657,40 @@ describe("navigation step actions (issue #474)", () => {
           id: "ws-a",
           name: "Alpha",
           panes: [
-            { id: "a1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-            { id: "a2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            {
+              id: "a1",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "a1", view: { type: "TerminalView" } }],
+              activeLayerId: "a1",
+            },
+            {
+              id: "a2",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "a2", view: { type: "TerminalView" } }],
+              activeLayerId: "a2",
+            },
           ],
         },
         {
           id: "ws-b",
           name: "Beta",
-          panes: [{ id: "b1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+          panes: [
+            {
+              id: "b1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              layers: [{ id: "b1", view: { type: "TerminalView" } }],
+              activeLayerId: "b1",
+            },
+          ],
         },
       ],
       activeWorkspaceId: "ws-a",
@@ -3644,7 +3824,17 @@ describe("navigation step actions (issue #474)", () => {
         {
           id: "ws-solo",
           name: "Solo",
-          panes: [{ id: "s1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+          panes: [
+            {
+              id: "s1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              layers: [{ id: "s1", view: { type: "TerminalView" } }],
+              activeLayerId: "s1",
+            },
+          ],
         },
       ],
       activeWorkspaceId: "ws-solo",
@@ -3839,8 +4029,24 @@ describe("grid.getState focus resolution", () => {
           id: "ws-focus",
           name: "Focus",
           panes: [
-            { id: "g1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-            { id: "g2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            {
+              id: "g1",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "g1", view: { type: "TerminalView" } }],
+              activeLayerId: "g1",
+            },
+            {
+              id: "g2",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "g2", view: { type: "TerminalView" } }],
+              activeLayerId: "g2",
+            },
           ],
         },
       ],
@@ -3912,8 +4118,24 @@ describe("workspaces.clear over the async bridge (issue #726, ADR-0137)", () => 
           id: "ws-clear",
           name: "Clear",
           panes: [
-            { id: "idle", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-            { id: "busy", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            {
+              id: "idle",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "idle", view: { type: "TerminalView" } }],
+              activeLayerId: "idle",
+            },
+            {
+              id: "busy",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "busy", view: { type: "TerminalView" } }],
+              activeLayerId: "busy",
+            },
           ],
         },
       ],
@@ -4007,8 +4229,24 @@ describe("panes.clear over the async bridge (ADR-0158)", () => {
           id: "ws-clear",
           name: "Clear",
           panes: [
-            { id: "idle", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-            { id: "memo", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "MemoView" } },
+            {
+              id: "idle",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "idle", view: { type: "TerminalView" } }],
+              activeLayerId: "idle",
+            },
+            {
+              id: "memo",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "memo", view: { type: "MemoView" } }],
+              activeLayerId: "memo",
+            },
           ],
         },
       ],
@@ -4105,5 +4343,182 @@ describe("panes.clear over the async bridge (ADR-0158)", () => {
       expect(result.error).toContain("Pane clear error");
     }
     expect(vi.mocked(writeTerminalInput)).not.toHaveBeenCalled();
+  });
+});
+
+describe("bridge over stacked slots (ADR-0295)", () => {
+  function request(target: string, method: string, params: Record<string, unknown> = {}) {
+    return handleAutomationRequest({
+      requestId: `stack-${target}-${method}`,
+      category: method === "getActive" || method === "list" ? "query" : "action",
+      target,
+      method,
+      params,
+    });
+  }
+
+  beforeEach(() => {
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useGridStore.setState(useGridStore.getInitialState());
+    useDockStore.setState(useDockStore.getInitialState());
+    useTerminalStore.setState(useTerminalStore.getInitialState());
+    useWorkspaceStore.setState({
+      activeWorkspaceId: "ws-s",
+      workspaces: [
+        {
+          id: "ws-s",
+          name: "Stacked",
+          panes: [
+            {
+              id: "left",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "left", view: { type: "TerminalView" } }],
+              activeLayerId: "left",
+            },
+            {
+              id: "right",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [
+                { id: "right", view: { type: "TerminalView" } },
+                { id: "under", view: { type: "TerminalView" } },
+              ],
+              activeLayerId: "right",
+            },
+          ],
+        },
+      ],
+    });
+    useGridStore.getState().setFocusedPane(0);
+  });
+
+  it("lists one pane entry per layer with slot index and stack fields", () => {
+    const result = request("workspaces", "getActive");
+    expect(result.success).toBe(true);
+    const panes = (result.data as { workspace: { panes: Record<string, unknown>[] } }).workspace
+      .panes;
+    expect(
+      panes.map((p) => [p.id, p.paneIndex, p.paneNumber, p.layerIndex, p.activeLayer]),
+    ).toEqual([
+      ["left", 0, 1, 0, true],
+      ["right", 1, 2, 0, true],
+      ["under", 1, 3, 1, false],
+    ]);
+    expect(panes[2]).toMatchObject({
+      terminalId: "terminal-under",
+      slotId: "right",
+      layerCount: 2,
+      x: 0.5,
+      view: { type: "TerminalView" },
+    });
+  });
+
+  it("focusing a terminal on an inactive layer activates that layer", () => {
+    const result = request("terminals", "setFocus", { id: "terminal-under" });
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({ paneIndex: 1 });
+    const slot = useWorkspaceStore.getState().workspaces[0].panes[1];
+    expect(slot.activeLayerId).toBe("under");
+    expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+  });
+
+  it("resolves a pane number to a stacked layer", () => {
+    const result = request("terminals", "resolveByNumber", { number: 3 });
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({
+      terminalId: "terminal-under",
+      paneId: "under",
+      paneIndex: 1,
+    });
+  });
+});
+
+describe("panes.stack / activateLayer / remove(layerId) bridge (ADR-0295)", () => {
+  function act(method: string, params: Record<string, unknown>) {
+    return handleAutomationRequest({
+      requestId: `stack-${method}`,
+      category: "action",
+      target: "panes",
+      method,
+      params,
+    });
+  }
+
+  beforeEach(() => {
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useGridStore.setState(useGridStore.getInitialState());
+    useDockStore.setState(useDockStore.getInitialState());
+    useTerminalStore.setState(useTerminalStore.getInitialState());
+    useTerminalRestartStore.setState({ requests: {} });
+    useGridStore.getState().setFocusedPane(1);
+  });
+
+  it("stacks a terminal layer without moving keyboard focus", () => {
+    const result = act("stack", { paneIndex: 0, profile: "WSL", cwd: "/repo" });
+    expect(result.success).toBe(true);
+    const data = result.data as { newPane: Record<string, unknown> };
+    const layerId = data.newPane.id as string;
+    expect(data.newPane).toMatchObject({
+      terminalId: `terminal-${layerId}`,
+      paneIndex: 0,
+      layerIndex: 1,
+      layerCount: 2,
+      ready: false,
+    });
+    const slot = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0];
+    expect(slot.activeLayerId).toBe(layerId);
+    expect(slot.layers[1].view).toMatchObject({
+      type: "TerminalView",
+      profile: "WSL",
+      lastCwd: "/repo",
+    });
+    expect(useTerminalRestartStore.getState().requests[layerId]?.cwd).toBe("/repo");
+    expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+  });
+
+  it("stacks a non-terminal view when asked", () => {
+    const result = act("stack", { paneIndex: 1, viewType: "MemoView" });
+    expect(result.success).toBe(true);
+    expect((result.data as { newPane: { terminalId: unknown } }).newPane.terminalId).toBeNull();
+  });
+
+  it("rejects an out-of-range slot", () => {
+    expect(act("stack", { paneIndex: 9 }).success).toBe(false);
+  });
+
+  it("activates a layer by terminal id and can leave focus alone", () => {
+    const stacked = act("stack", { paneIndex: 0 });
+    const layerId = (stacked.data as { newPane: { id: string } }).newPane.id;
+    const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
+    const firstLayer = ws.panes[0].layers[0].id;
+
+    const byTerminal = act("activateLayer", { terminalId: `terminal-${firstLayer}`, focus: false });
+    expect(byTerminal.success).toBe(true);
+    expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].activeLayerId).toBe(
+      firstLayer,
+    );
+    expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+
+    const byLayer = act("activateLayer", { layerId });
+    expect(byLayer.data).toMatchObject({ activated: layerId, paneIndex: 0, layerIndex: 1 });
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+
+    expect(act("activateLayer", { layerId: "nope" }).success).toBe(false);
+    expect(act("activateLayer", {}).success).toBe(false);
+  });
+
+  it("remove closes one named layer and reports whether the slot survived", () => {
+    const stacked = act("stack", { paneIndex: 0 });
+    const layerId = (stacked.data as { newPane: { id: string } }).newPane.id;
+    const first = act("remove", { paneIndex: 0, layerId });
+    expect(first.data).toMatchObject({ removed: true, slotRemoved: false, remainingLayers: 1 });
+    const second = act("remove", { paneIndex: 0 });
+    expect(second.data).toMatchObject({ removed: true, slotRemoved: true });
+    expect(act("remove", { paneIndex: 0, layerId: "nope" }).success).toBe(false);
   });
 });

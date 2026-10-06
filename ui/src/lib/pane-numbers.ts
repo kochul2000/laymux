@@ -21,6 +21,8 @@ export interface NumberablePane {
   y: number;
   w: number;
   h: number;
+  /** Stacked content (ADR-0295); each layer gets its own number. */
+  layers?: readonly { id: string }[];
 }
 
 /**
@@ -35,7 +37,12 @@ export const GRID_EPS = 0.01;
 /**
  * Compute the spatial reading-order number (1..N) for each pane.
  * Sort by y ascending; panes within EPS on y are the same row, sorted by x ascending.
- * Returns a map of paneId -> number. Does not mutate the input.
+ *
+ * Numbers belong to **content** (ADR-0295): a stacked workspace slot numbers
+ * each of its layers consecutively in stack order, so the map is keyed by layer
+ * id — never by slot id. Look a slot's visible number up with its active layer
+ * id. Panes without `layers` (dock panes) are keyed by their own id.
+ * Does not mutate the input.
  */
 export function computePaneNumbers(panes: readonly NumberablePane[]): Map<string, number> {
   const sorted = [...panes].sort((a, b) => {
@@ -44,13 +51,20 @@ export function computePaneNumbers(panes: readonly NumberablePane[]): Map<string
   });
 
   const numbers = new Map<string, number>();
-  sorted.forEach((pane, i) => numbers.set(pane.id, i + 1));
+  let next = 1;
+  for (const pane of sorted) {
+    if (pane.layers && pane.layers.length > 0) {
+      for (const layer of pane.layers) numbers.set(layer.id, next++);
+    } else {
+      numbers.set(pane.id, next++);
+    }
+  }
   return numbers;
 }
 
-/** Convenience: the spatial number for a single pane id, or null if not found. */
-export function paneNumberFor(panes: readonly NumberablePane[], paneId: string): number | null {
-  return computePaneNumbers(panes).get(paneId) ?? null;
+/** Convenience: the spatial number for one content id (layer id), or null if not found. */
+export function paneNumberFor(panes: readonly NumberablePane[], contentId: string): number | null {
+  return computePaneNumbers(panes).get(contentId) ?? null;
 }
 
 /**

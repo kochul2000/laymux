@@ -11,12 +11,20 @@ import {
 
 /** Terminal pane at the given normalized geometry. */
 function term(id: string, x: number, y: number, w = 0.5, h = 0.5): WorkspacePane {
-  return { id, x, y, w, h, view: { type: "TerminalView" } };
+  return {
+    id,
+    x,
+    y,
+    w,
+    h,
+    layers: [{ id: id, view: { type: "TerminalView" } }],
+    activeLayerId: id,
+  };
 }
 
 /** Non-terminal pane (memo) at the given geometry. */
 function memo(id: string, x: number, y: number, w = 0.5, h = 0.5): WorkspacePane {
-  return { id, x, y, w, h, view: { type: "MemoView" } };
+  return { id, x, y, w, h, layers: [{ id: id, view: { type: "MemoView" } }], activeLayerId: id };
 }
 
 function ws(id: string, name: string, panes: WorkspacePane[]): Workspace {
@@ -200,5 +208,29 @@ describe("findSpatialStepTarget", () => {
     expect(findSpatialStepTarget(entries, order, at("ws-gone", 1), "prev")).toMatchObject({
       paneId: "c",
     });
+  });
+});
+
+describe("buildSpatialOrder with stacked slots (ADR-0295)", () => {
+  it("visits every terminal layer in stack order with the slot index", () => {
+    const stacked: WorkspacePane = {
+      id: "s",
+      x: 0.5,
+      y: 0,
+      w: 0.5,
+      h: 1,
+      layers: [
+        { id: "s1", view: { type: "TerminalView" } },
+        { id: "s-memo", view: { type: "MemoView" } },
+        { id: "s2", view: { type: "TerminalView" } },
+      ],
+      activeLayerId: "s-memo",
+    };
+    const entries = buildSpatialOrder([ws("w", "W", [stacked, term("a", 0, 0, 0.5, 1)])]);
+    expect(entries.map((e) => [e.paneId, e.paneIndex, e.paneNumber])).toEqual([
+      ["a", 1, 1],
+      ["s1", 0, 2],
+      ["s2", 0, 4],
+    ]);
   });
 });

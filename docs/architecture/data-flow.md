@@ -26,9 +26,32 @@
 
 **새 Pane 은 분할한 그 Pane 의 CWD 에서 첫 터미널 세션을 시작한다**([ADR-0140](../adr/0140-split-pane-inherits-source-cwd.md)).
 
-- 시드 CWD 는 `lib/pane-cwd.ts` 의 `resolvePaneCwd(pane)` 로 **분할 대상 Pane 하나에서만** 뽑는다 — 살아 있는 세션이 보고한 값이 먼저이고 `view.lastCwd` 는 차선이다(`Restart View` 도 같은 함수를 쓴다). 분할한 Pane 에 CWD 가 없으면(Memo 등) 시드 없이 프로파일 기본 디렉터리이고, 다른 Pane 이나 포커스 상태로 우회하지 않는다.
+- 시드 CWD 는 `lib/pane-cwd.ts` 의 `resolvePaneCwd(pane)` 로 **분할 대상 Pane 하나에서만** 뽑는다 — 살아 있는 세션이 보고한 값이 먼저이고 `view.lastCwd` 는 차선이다(`Restart View` 도 같은 함수를 쓴다). 분할한 Pane 에 CWD 가 없으면(Memo 등) 시드 없이 프로파일 기본 디렉터리이고, 다른 Pane 이나 포커스 상태로 우회하지 않는다. 분할한 슬롯이 스택이면 기준은 그 슬롯의 활성 레이어다([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)).
 - 시드는 `terminal-restart-store` 의 요청으로 실린다("다음 세션을 이 CWD 로 새로 시작하라"). 새 Pane 은 `EmptyView` 로 태어나므로 사용자가 터미널을 고를 때까지 기다렸다가 첫 세션 생성에서 소비되고, Pane 이 사라지면 `forgetRestart`/`gcStale` 이 정리한다. 이 경로는 프로파일의 `restoreCwd` 설정과 무관하게 적용된다 — 상속은 복원이 아니다.
 - Automation `split_pane` 은 `cwd` 를 주면 그 값으로 시드를 덮어쓰고(명시값 우선), 주지 않으면 UI 분할과 같은 상속을 받는다. Dock 분할은 상속 대상이 아니다.
+
+### 스택
+
+**Pane 하나에 여러 view 를 겹쳐 두고 전환한다**([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)). 슬롯은 기하를, 레이어는 콘텐츠를 소유하며 활성 레이어 하나만 보인다. 터미널뿐 아니라 어떤 view 든 레이어가 된다. dock pane 은 스택 대상이 아니다.
+
+| 방법 | 동작 |
+| --- | --- |
+| 컨트롤 바 Stack 버튼(split 버튼 옆, Lucide `Layers`) · `pane.stack`(`Ctrl+Alt+S`) · 전환 줄 `+` | 슬롯 활성 레이어 바로 뒤에 `EmptyView` 레이어를 추가하고 표시·포커스 |
+| 전환 줄 탭 클릭 | 그 레이어 표시·포커스 |
+| 전환 줄 × · 탭 가운데 클릭 · 컨트롤 바 Delete · `pane.delete` | 그 레이어(컨트롤 바·단축키는 활성 레이어) 하나 닫기. 마지막 레이어면 슬롯이 사라지고 공간 재분배 |
+| `pane.layer`(`Alt+Shift+Arrow`) | 포커스 슬롯 레이어 순환. 오른쪽/아래 = 다음, 왼쪽/위 = 이전, 링 |
+| `pane.focus`(`Alt+Arrow`) 막힌 방향 | 이웃 슬롯 → (`dock.arrowNav`) 보이는 dock → (`paneStack.cycleOnBlockedArrow`, 기본 켬) 스택 순환 |
+| 탭 드래그 → 같은 전환 줄의 다른 탭 | 순서 변경(탭 앞/뒤 절반으로 위치 결정). 활성 레이어는 그대로 |
+| 탭 드래그 → 다른 슬롯(본문 또는 그 전환 줄) | 그 슬롯 스택으로 이동하고 표시·포커스. 원래 슬롯이 비면 사라지고 공간 재분배 |
+| 탭 우클릭 → Split out right / down | 레이어를 원래 슬롯에서 꺼내 그 슬롯을 반으로 가른 새 슬롯에 둔다. 새 슬롯 id 는 비어 있으면 레이어 id 를 그대로 쓴다 |
+| 컨트롤 바 드래그 → 다른 슬롯 위쪽 띠(`--pane-stack-drop-band-h`, 40px, 슬롯 높이 1/3 이하) | 끌어온 슬롯의 레이어 전부를 대상 스택 활성 레이어 뒤에 합치고 끌어온 슬롯의 활성 레이어를 표시. 원래 슬롯은 사라진다. 띠 아래로 떨어뜨리면 기존 swap |
+
+- **전환 줄(`PaneStackStrip`)**: 레이어가 둘 이상인 슬롯의 활성 박스 최상단에 `--pane-stack-strip-h`(24px) 높이로 고정된다. 컨트롤 바와 view 는 그 아래 칸에 놓이므로 hover 오버레이 바가 전환 줄을 가리지 않는다. 탭은 레이어 번호·상태 점(미읽음 알림 우선, 그다음 출력 활동)·제목을 보여준다. 터미널 제목은 OSC 제목 → 라벨 → 프로파일 순, 그 밖의 view 는 `lib/view-labels.ts` 이름이다.
+- **재마운트 없음**: 박스 안의 열(column) 래퍼와 내용 칸은 단일 레이어일 때도 항상 렌더한다. 슬롯이 스택이 되는 순간에는 전환 줄만 끼어들고 컨트롤 바·view 는 같은 자리에 남아 터미널이 재마운트되지 않는다.
+- **소유권**: 쌓기·순환은 `lib/pane-stack-actions.ts`(`stackPaneAt`, `stackFocusedPane`, `cycleFocusedLayer`)가, 레이어 표시+포커스 commit 은 `workspace-transition.activatePaneLayer` 가 소유한다. 컴포넌트와 단축키는 이 둘만 부른다.
+- **CWD 시드**: 새 레이어의 첫 터미널 세션은 누른 슬롯 활성 레이어의 CWD 에서 시작한다(분할과 같은 재시작 요청 버스).
+- **경계 병합**: 경계선 병합(드래그 끝·더블클릭)은 스택 슬롯을 지우지 않고 최소 크기로 남긴다. 단일 레이어 슬롯의 병합은 슬롯을 통째로 지운다(`removeSlot`).
+- **재배치**: 레이어 이동·꺼내기·합치기는 `workspace-store` 의 `moveLayer`·`extractLayer`·`mergeSlotIntoStack` 이 기하·레이어 불변식을 한 번에 갱신하고, `pane-stack-actions` 의 `moveLayerTo`·`extractLayerToSplit`·`mergeSlotIntoStack` 이 포커스를 commit 한다. 레이어 박스가 레이어 id 로 key 되므로 슬롯을 옮겨 다녀도 터미널은 재마운트되지 않는다. 사라진 슬롯은 pane 오버라이드(`controlBarMode`)만 지우고, 옮겨 간 레이어의 view 오버라이드·hidden flag 는 그대로 따라간다.
 
 ### 크기 조절
 
@@ -277,6 +300,8 @@ ResizeObserver의 hidden→visible 분기에서는 `FitAddon.proposeDimensions()
 최초 마운트의 0축 크기는 renderer 시작만 막고 terminal session 시작은 막지 않는다([ADR-0161](../adr/0161-rendererless-terminal-session-startup.md)). `TerminalView`는 xterm의 기본 `80×24` grid로 PTY를 만들고 output listener·cache/snapshot replay·rendererless checkpoint를 연결한다. xterm parser와 buffer는 `terminal.open()` 전에도 byte를 처리하므로 그 사이 출력과 Remote checkpoint가 보존된다. `ResizeObserver`가 최초 양의 폭과 높이를 보고하면 같은 xterm instance에 DOM renderer를 정확히 한 번 열고 fit/WebGL/focus를 수행하고, 그 첫 fitted grid를 authoritative PTY geometry로 동기화한다. 이 동기화는 PTY 생성 또는 초기 local-control 판정과 순서가 뒤집혀도 dirty 상태를 유지하고 성공할 때까지 기존 backend resize retry 경로를 사용한다. 0축 entry 자체로는 `fit()`이나 PTY resize를 보내지 않는다.
 
 **워크스페이스 전환은 remount 가 아니다.** `WorkspaceArea` 는 한 번 활성화된 워크스페이스를 계속 마운트해 둔 채 `display:none` 으로만 감추고(`PaneGrid` 도 pane 박스에 같은 처리), `TerminalView` 의 xterm/PTY 수명은 `[instanceId, profile, …]` 에 달려 있으며 `resizePane` 은 pane id 를 보존한다. 따라서 전환도 pane resize 도 `TerminalView` 를 unmount 하지 않고, `TERMINAL_ATTACH_SNAPSHOT_MAX_BYTES` snapshot replay 는 두 경로 어디에도 없다 — 남는 것은 위 hide→show 복귀의 atlas 재생성과 공통 스케줄러를 통과하는 fit 하나다. 실제로 remount 하는 경로는 profile 변경, hidden pane 회수(#269), `movePaneToWorkspace` 뿐이다. 폭주 중 레이아웃 변경이 프론트를 수십 초 무응답으로 만드는 비용은 이 replay 가 아니라 §8.8 의 출력 백로그이며, `attaches`/`attachReplayBytes` 카운터가 이 판정을 실기에서도 반증 가능하게 한다([ADR-0080](../adr/0080-output-backlog-coalescing-and-out-of-band-frontend-vitals.md)).
+
+**스택 레이어 전환도 remount 가 아니다**([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)). `PaneGrid` 는 슬롯을 레이어 박스로 평탄화해 그린다. 각 박스는 슬롯 rect 를 그대로 쓰는 그리드 형제이고 **레이어 id 로 key** 하며, 활성 레이어만 보이고 나머지는 `display:none` 이다. 그래서 활성 레이어 전환·순서 변경·슬롯 간 레이어 이동은 `TerminalView` 를 unmount 하지 않고, 비활성 레이어는 비활성 워크스페이스 pane 과 같은 hide→show 복귀 경로(atlas 재생성 + fit 한 번)와 parser admission background 클래스를 탄다. 비활성 워크스페이스의 hidden 회수(#269)는 레이어 단위로 걸러지고 레이어가 모두 회수된 슬롯은 그리지 않는다. 시작 코디네이터는 활성 워크스페이스의 보이는 레이어 → 보이는 dock → 숨은 스택 레이어 순으로 연다.
 
 Windows output quiet window 는 **delta 도착 시각**으로 잰다. "최근에 PTY 출력이 도착하지 않았다"는 뜻이므로 write 시점이 아니라 `applyOutputSegments` 진입에서 기록한다 — write 시점에 기록하면 stabilizer나 §8.8의 physical write FIFO에 붙들린 byte가 침묵으로 읽힌다. grid를 바꾸는 fit은 quiet window뿐 아니라 attach parser·exact repair·native stabilizer transaction과 open lexical sequence·in-flight/queued xterm write가 모두 끝날 때까지 기다린다. standalone split ESC/CSI prefix는 완결 byte가 오거나 lifecycle reset이 일어날 때까지 보류하고, xterm에 fail-open된 partial sequence도 실제 final/terminator가 올 때까지 fit barrier로 남긴다. 유한 timeout으로 한 제어 시퀀스를 old grid와 new grid 사이에 쪼개지 않는다. 이전 grid용 byte가 FIFO에 남은 채 새 grid로 넘어가는 것보다 fit 지연을 우선하므로 불완전한 시퀀스나 sustained flood에서는 fit이 오래 굶을 수 있다. exact physical boundary의 선택 설계는 [ADR-0085](../adr/0085-provenance-barrier-three-phase-geometry-cutover.md)에 있다. `pty_geometry`의 platform-independent core는 provenance capability, 고정 participant quorum, prepare/apply/adoption phase, token/status/idempotence와 lexical-neutral gate를 실행한다. 이 gate는 bundled xterm의 streaming `Utf8ToUtf32` 규칙(불완전 scalar 보류, invalid sequence 폐기·재동기화)을 먼저 적용한 codepoint만 VT transition에 넘긴다. 따라서 `ESC ] 0 ; 한`의 마지막 raw continuation `9C`는 ST가 아니고 BEL/encoded U+009C/7-bit ST만 OSC를 닫으며, decoded non-ASCII의 CSI·DCS·SOS/PM/APC 전이는 xterm VT500 table과 같은 상태를 따른다. 현재 pinned `portable-pty` fork는 Windows 전용 Read thread+`CancelSynchronousIo` handshake와 Linux PTY fd+wake pipe `poll`로 generation-scoped interruptible reader를 제공한다. native event는 `Data | Wake(generation) | EOF | Failure`를 구분하고 callback `Stop` 또는 handle teardown은 idle read를 먼저 깨운 뒤 그 terminal generation의 reader completion을 기다린다. wake는 control liveness일 뿐 byte provenance나 geometry revision을 만들지 않는다. 실제 ConPTY/Linux PTY 대조군에서도 resize 전에 이미 queued 된 byte가 resize/get-size 뒤 도착하고, `PeekNamedPipe`/`poll`이 empty를 관측한 뒤에도 보유 중인 writer가 새 byte를 만들 수 있으므로 quiet/empty는 producer barrier가 아니다. 모든 producer freeze+authoritative drain 또는 kernel byte epoch는 여전히 증명되지 않아 `exactGeometryCutover`는 false이고, Windows OpenConsole/Linux kernel 수준의 exact primitive는 issue [#643](https://github.com/kochul2000/laymux/issues/643)이 추적한다. pinned reader seam의 upstream 제안과 fork 제거는 별도 issue [#657](https://github.com/kochul2000/laymux/issues/657)이 추적한다([ADR-0089](../adr/0089-interruptible-pty-reader-is-not-provenance.md)).
 
@@ -1246,9 +1271,11 @@ document 레벨 단축키 실행은 `useKeyboardShortcuts` 의 **액션 ID → �
 | `workspace.close`                           | `Ctrl+Alt+W`                   | 워크스페이스 닫기                                                                                                      |
 | `workspace.rename`                          | `Ctrl+Alt+R`                   | 워크스페이스 이름 변경                                                                                                 |
 | `workspace.clearTerminals`                  | `Ctrl+Alt+L`                   | 활성 워크스페이스 격자의 모든 터미널에 화면 클리어용 Ctrl+L 브로드캐스트                                               |
-| `pane.focus`                                | `Alt+Arrow`                    | Pane 포커스 이동 (상하좌우)                                                                                            |
+| `pane.focus`                                | `Alt+Arrow`                    | Pane 포커스 이동 (상하좌우). 그 방향에 Pane·보이는 Dock 이 모두 없으면 `paneStack.cycleOnBlockedArrow`(기본 켬)일 때 포커스 슬롯의 스택을 넘긴다 ([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)) |
+| `pane.layer`                                | `Alt+Shift+Arrow`              | 포커스 슬롯의 스택 레이어 순환 — 오른쪽/아래 = 다음, 왼쪽/위 = 이전, 링. 스택이 아니면 no-op 이고 조합은 터미널 앱에 그대로 간다(스택일 때만 패스스루) ([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)) |
+| `pane.stack`                                | `Ctrl+Alt+S`                   | 포커스 슬롯에 `EmptyView` 레이어를 쌓고 표시 — 컨트롤 바 Stack 버튼과 동일 ([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)) |
 | `pane.clearTerminal`                        | `Alt+L`                        | 포커스된 terminal pane 하나에 activity별 실제 클리어(`/clear` 또는 설정된 shell 명령)                                  |
-| `pane.delete`                               | `Delete`                       | 편집 모드에서 포커스된 Pane 제거                                                                                       |
+| `pane.delete`                               | `Delete`                       | 편집 모드에서 포커스된 Pane 제거. 스택 슬롯이면 활성 레이어 하나만 닫는다                                              |
 | `pane.propagateCwdOnce`                     | `Ctrl+Alt+P`                   | 포커스된 Pane의 CWD를 sync group에 1회 전파 (#324) — 컨트롤 바 버튼과 동일 동작                                        |
 | `pane.copyIdentifier`                       | `Ctrl+Alt+C`                   | 포커스된 Pane 식별자를 클립보드에 복사 — Pane 번호 배지 클릭과 동일 포맷                                               |
 | `sidebar.toggle`                            | `Ctrl+Shift+B`                 | 사이드바 토글                                                                                                          |
@@ -1650,6 +1677,7 @@ Pane을 가리키는 식별자는 용도가 다른 3가지가 공존한다. 혼�
 - `paneNumber`는 `ui/src/lib/pane-numbers.ts`의 `computePaneNumbers()` **단일 함수**에서 (y 우선, 동일 y는 x 오름차순; eps 0.01) 도출하는 **파생값**이다. 어디에도 저장/캐시하지 않으며 panes가 바뀌면 재계산된다.
 - `WorkspaceSelectorView`의 pane 요약 행과 Direct Remote `/remote/v1/navigation`의 active workspace pane 배열도 이 `paneNumber` 오름차순으로 렌더/응답한다. 단, 표시 순서만 정렬하며 포커스와 `PaneMinimap.highlightIndex`, 원격 응답의 `paneIndex`는 레이아웃 조작용 원본 배열 인덱스를 계속 사용한다.
 - `paneIndex`(배열)와 `paneNumber`(공간)는 다를 수 있다. 예: 좌우 분할 후 왼쪽을 다시 가로 분할하면 배열은 `[좌상, 좌하, 우]`지만 읽기 순서는 `좌상=1, 우=2, 좌하=3`.
+- **스택 슬롯**([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)): 번호는 레이어 단위다. 슬롯 읽기 순서 안에서 그 슬롯의 레이어를 스택 순서로 연번하므로, 레이어 셋을 가진 오른쪽 슬롯과 단일 왼쪽 슬롯은 `왼쪽=1, 오른쪽 레이어=2·3·4` 가 된다. 같은 슬롯의 레이어는 같은 `paneIndex` 를 공유하므로 터미널 하나를 가리킬 때는 terminal id 나 `paneNumber` 를 쓴다.
 - 자동화 노출: `list_terminals`/`get_active_workspace`의 각 pane(번호↔terminalId 매핑), `get_active_workspace`의 `focusedPaneNumber`, `identify_caller`의 `pane.number`와 `neighbors.{dir}.paneNumber`에 포함된다.
 - 번호 직접 주소 지정: `write_to_terminal`/`read_terminal_output`/`focus_terminal`는 `terminal_id` 대신 `pane_number`(+옵션 `workspace_id`)를 받을 수 있다. 브리지 `terminals.resolveByNumber`로 호출 시점에 terminalId로 해석하며, `terminal_id`가 주어지면 항상 우선한다. 번호는 휘발성이므로 지속 참조는 `terminal_id`를 쓴다.
 - `paneNumber`는 spawn-time env var로 주입하지 않는다(레이아웃 변경 시 stale). 자기 번호가 필요하면 `identify_caller`의 `pane.number`를 라이브 조회한다.

@@ -89,21 +89,65 @@ describe("terminal startup coordinator", () => {
   });
 });
 
+/** A single-layer workspace slot (ADR-0295). */
+function slot(id: string, type: string) {
+  return { layers: [{ id, view: { type } }], activeLayerId: id };
+}
+
 describe("collectTerminalStartupCandidates", () => {
+  it("starts a stack's visible layer first and its hidden layers after visible docks", () => {
+    const result = collectTerminalStartupCandidates({
+      workspaces: [
+        {
+          id: "active",
+          panes: [
+            {
+              layers: [
+                { id: "under", view: { type: "TerminalView" } },
+                { id: "top", view: { type: "TerminalView" } },
+                { id: "memo", view: { type: "MemoView" } },
+              ],
+              activeLayerId: "top",
+            },
+            slot("plain", "TerminalView"),
+          ],
+        },
+      ],
+      activeWorkspaceId: "active",
+      focusedPaneIndex: 0,
+      docks: [
+        {
+          position: "left",
+          visible: true,
+          panes: [{ id: "dock", view: { type: "TerminalView" } }],
+        },
+      ],
+      focusedDock: null,
+      focusedDockPaneId: null,
+      persistHiddenDocks: true,
+      evictedPaneIds: new Set(),
+      requestedPaneIds: [],
+    });
+
+    expect(result.knownPaneIds).toEqual(["under", "top", "plain", "dock"]);
+    // Focused visible layer, then visible content, then hidden stacked layers.
+    expect(result.eligiblePaneIds).toEqual(["top", "plain", "dock", "under"]);
+  });
+
   it("orders Automation then focus, spans workspace+docks, and pauses hidden surfaces", () => {
     const result = collectTerminalStartupCandidates({
       workspaces: [
         {
           id: "active",
           panes: [
-            { id: "ws-1", view: { type: "TerminalView" } },
-            { id: "memo", view: { type: "MemoView" } },
-            { id: "ws-2", view: { type: "TerminalView" } },
+            slot("ws-1", "TerminalView"),
+            slot("memo", "MemoView"),
+            slot("ws-2", "TerminalView"),
           ],
         },
         {
           id: "inactive",
-          panes: [{ id: "ws-bg", view: { type: "TerminalView" } }],
+          panes: [slot("ws-bg", "TerminalView")],
         },
       ],
       activeWorkspaceId: "active",
@@ -144,11 +188,11 @@ describe("collectTerminalStartupCandidates", () => {
       workspaces: [
         {
           id: "active",
-          panes: [{ id: "active-pane", view: { type: "TerminalView" } }],
+          panes: [slot("active-pane", "TerminalView")],
         },
         {
           id: "inactive",
-          panes: [{ id: "evicted", view: { type: "TerminalView" } }],
+          panes: [slot("evicted", "TerminalView")],
         },
       ],
       activeWorkspaceId: "active",

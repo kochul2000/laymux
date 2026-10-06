@@ -99,6 +99,8 @@ fn settings_round_trip_with_full_config() {
                     h: 0.5,
                     view_type: "TerminalView".into(),
                     view_config: None,
+                    layers: Vec::new(),
+                    active_layer_index: None,
                 },
                 LayoutPane {
                     x: 0.0,
@@ -107,6 +109,8 @@ fn settings_round_trip_with_full_config() {
                     h: 0.5,
                     view_type: "TerminalView".into(),
                     view_config: None,
+                    layers: Vec::new(),
+                    active_layer_index: None,
                 },
                 LayoutPane {
                     x: 0.5,
@@ -115,6 +119,8 @@ fn settings_round_trip_with_full_config() {
                     h: 0.5,
                     view_type: "TerminalView".into(),
                     view_config: None,
+                    layers: Vec::new(),
+                    active_layer_index: None,
                 },
             ],
         }],
@@ -129,10 +135,12 @@ fn settings_round_trip_with_full_config() {
                     y: 0.0,
                     w: 1.0,
                     h: 0.5,
-                    view: WorkspacePaneView {
+                    view: Some(WorkspacePaneView {
                         view_type: "TerminalView".into(),
                         extra: serde_json::json!({"profile": "Ubuntu", "syncGroup": "Project A"}),
-                    },
+                    }),
+                    layers: Vec::new(),
+                    active_layer_id: None,
                 },
                 WorkspacePane {
                     id: "pane-e2e-2".into(),
@@ -140,10 +148,12 @@ fn settings_round_trip_with_full_config() {
                     y: 0.5,
                     w: 0.5,
                     h: 0.5,
-                    view: WorkspacePaneView {
+                    view: Some(WorkspacePaneView {
                         view_type: "TerminalView".into(),
                         extra: serde_json::json!({"profile": "Ubuntu", "syncGroup": "Project A"}),
-                    },
+                    }),
+                    layers: Vec::new(),
+                    active_layer_id: None,
                 },
                 WorkspacePane {
                     id: "pane-e2e-3".into(),
@@ -151,10 +161,12 @@ fn settings_round_trip_with_full_config() {
                     y: 0.5,
                     w: 0.5,
                     h: 0.5,
-                    view: WorkspacePaneView {
+                    view: Some(WorkspacePaneView {
                         view_type: "TerminalView".into(),
                         extra: serde_json::json!({"profile": "Ubuntu", "syncGroup": "Project A"}),
-                    },
+                    }),
+                    layers: Vec::new(),
+                    active_layer_id: None,
                 },
             ],
         }],
@@ -203,6 +215,7 @@ fn settings_round_trip_with_full_config() {
             overflow: "collapse".into(),
         },
         dock: Default::default(),
+        pane_stack: Default::default(),
         notifications: Default::default(),
         power: PowerSettings {
             keep_awake: false,
@@ -536,6 +549,8 @@ fn settings_multiple_layouts_multiple_workspaces() {
                     h: 1.0,
                     view_type: "TerminalView".into(),
                     view_config: None,
+                    layers: Vec::new(),
+                    active_layer_index: None,
                 }],
             },
             Layout {
@@ -549,6 +564,8 @@ fn settings_multiple_layouts_multiple_workspaces() {
                         h: 1.0,
                         view_type: "TerminalView".into(),
                         view_config: None,
+                        layers: Vec::new(),
+                        active_layer_index: None,
                     },
                     LayoutPane {
                         x: 0.5,
@@ -557,6 +574,8 @@ fn settings_multiple_layouts_multiple_workspaces() {
                         h: 1.0,
                         view_type: "TerminalView".into(),
                         view_config: None,
+                        layers: Vec::new(),
+                        active_layer_index: None,
                     },
                 ],
             },
@@ -571,6 +590,8 @@ fn settings_multiple_layouts_multiple_workspaces() {
                         h: 0.5,
                         view_type: "TerminalView".into(),
                         view_config: None,
+                        layers: Vec::new(),
+                        active_layer_index: None,
                     },
                     LayoutPane {
                         x: 0.5,
@@ -579,6 +600,8 @@ fn settings_multiple_layouts_multiple_workspaces() {
                         h: 0.5,
                         view_type: "TerminalView".into(),
                         view_config: None,
+                        layers: Vec::new(),
+                        active_layer_index: None,
                     },
                     LayoutPane {
                         x: 0.0,
@@ -587,6 +610,8 @@ fn settings_multiple_layouts_multiple_workspaces() {
                         h: 0.5,
                         view_type: "TerminalView".into(),
                         view_config: None,
+                        layers: Vec::new(),
+                        active_layer_index: None,
                     },
                     LayoutPane {
                         x: 0.5,
@@ -595,6 +620,8 @@ fn settings_multiple_layouts_multiple_workspaces() {
                         h: 0.5,
                         view_type: "TerminalView".into(),
                         view_config: None,
+                        layers: Vec::new(),
+                        active_layer_index: None,
                     },
                 ],
             },
@@ -610,10 +637,12 @@ fn settings_multiple_layouts_multiple_workspaces() {
                     y: 0.0,
                     w: 1.0,
                     h: 1.0,
-                    view: WorkspacePaneView {
+                    view: Some(WorkspacePaneView {
                         view_type: "TerminalView".into(),
                         extra: serde_json::json!({}),
-                    },
+                    }),
+                    layers: Vec::new(),
+                    active_layer_id: None,
                 }],
             },
             Workspace {
@@ -653,6 +682,8 @@ fn settings_pane_boundary_values() {
                 h: 0.0,
                 view_type: "EmptyView".into(),
                 view_config: None,
+                layers: Vec::new(),
+                active_layer_index: None,
             },
             LayoutPane {
                 x: 1.0,
@@ -661,6 +692,8 @@ fn settings_pane_boundary_values() {
                 h: 1.0,
                 view_type: "TerminalView".into(),
                 view_config: None,
+                layers: Vec::new(),
+                active_layer_index: None,
             },
             LayoutPane {
                 x: 0.333333,
@@ -669,6 +702,8 @@ fn settings_pane_boundary_values() {
                 h: 0.333334,
                 view_type: "TerminalView".into(),
                 view_config: None,
+                layers: Vec::new(),
+                active_layer_index: None,
             },
         ],
     };
@@ -686,7 +721,7 @@ fn settings_workspace_pane_view_extra_data_preserved() {
         y: 0.0,
         w: 1.0,
         h: 1.0,
-        view: WorkspacePaneView {
+        view: Some(WorkspacePaneView {
             view_type: "TerminalView".into(),
             extra: serde_json::json!({
                 "profile": "WSL",
@@ -696,15 +731,23 @@ fn settings_workspace_pane_view_extra_data_preserved() {
                     {"osc": 133, "param": "D", "when": "exitCode !== '0'", "run": "lx notify 'fail'"}
                 ]
             }),
-        },
+        }),
+        layers: Vec::new(),
+        active_layer_id: None,
     };
 
     let json = serde_json::to_string(&pane).unwrap();
     let parsed: WorkspacePane = serde_json::from_str(&json).unwrap();
-    assert_eq!(parsed.view.extra["profile"], "WSL");
-    assert_eq!(parsed.view.extra["syncGroup"], "myGroup");
-    assert!(parsed.view.extra["hooks"].is_array());
-    assert_eq!(parsed.view.extra["hooks"].as_array().unwrap().len(), 2);
+    assert_eq!(parsed.view.as_ref().unwrap().extra["profile"], "WSL");
+    assert_eq!(parsed.view.as_ref().unwrap().extra["syncGroup"], "myGroup");
+    assert!(parsed.view.as_ref().unwrap().extra["hooks"].is_array());
+    assert_eq!(
+        parsed.view.as_ref().unwrap().extra["hooks"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 }
 
 #[test]
@@ -1652,6 +1695,8 @@ fn e2e_settings_with_layout_workspace_relationship() {
                     h: 1.0,
                     view_type: "TerminalView".into(),
                     view_config: None,
+                    layers: Vec::new(),
+                    active_layer_index: None,
                 },
                 LayoutPane {
                     x: 0.5,
@@ -1660,6 +1705,8 @@ fn e2e_settings_with_layout_workspace_relationship() {
                     h: 1.0,
                     view_type: "TerminalView".into(),
                     view_config: None,
+                    layers: Vec::new(),
+                    active_layer_index: None,
                 },
             ],
         }],
@@ -1730,12 +1777,19 @@ fn e2e_full_settings_load_create_sessions_and_groups() {
     assert_eq!(settings.workspaces[0].name, "프로젝트A");
     assert_eq!(settings.workspaces[0].panes.len(), 3);
     assert_eq!(
-        settings.workspaces[0].panes[0].view.view_type,
+        settings.workspaces[0].panes[0]
+            .view
+            .as_ref()
+            .unwrap()
+            .view_type,
         "TerminalView"
     );
-    assert_eq!(settings.workspaces[0].panes[0].view.extra["profile"], "WSL");
     assert_eq!(
-        settings.workspaces[0].panes[0].view.extra["syncGroup"],
+        settings.workspaces[0].panes[0].view.as_ref().unwrap().extra["profile"],
+        "WSL"
+    );
+    assert_eq!(
+        settings.workspaces[0].panes[0].view.as_ref().unwrap().extra["syncGroup"],
         "프로젝트A"
     );
 
@@ -1744,10 +1798,14 @@ fn e2e_full_settings_load_create_sessions_and_groups() {
     let ws = &settings.workspaces[0];
 
     for (i, pane) in ws.panes.iter().enumerate() {
-        if pane.view.view_type == "TerminalView" {
+        if pane.view.as_ref().unwrap().view_type == "TerminalView" {
             let id = format!("{}-term-{i}", ws.id);
-            let profile = pane.view.extra["profile"].as_str().unwrap_or("PowerShell");
-            let sync_group = pane.view.extra["syncGroup"].as_str().unwrap_or("");
+            let profile = pane.view.as_ref().unwrap().extra["profile"]
+                .as_str()
+                .unwrap_or("PowerShell");
+            let sync_group = pane.view.as_ref().unwrap().extra["syncGroup"]
+                .as_str()
+                .unwrap_or("");
 
             let config = TerminalConfig {
                 profile: profile.into(),
@@ -2029,6 +2087,8 @@ fn layout_pane_view_config_round_trip() {
                     "profile": "WSL",
                     "syncGroup": "project-a"
                 })),
+                layers: Vec::new(),
+                active_layer_index: None,
             },
             LayoutPane {
                 x: 0.5,
@@ -2039,6 +2099,8 @@ fn layout_pane_view_config_round_trip() {
                 view_config: Some(serde_json::json!({
                     "type": "MemoView"
                 })),
+                layers: Vec::new(),
+                active_layer_index: None,
             },
         ],
     };
@@ -2114,6 +2176,8 @@ fn layout_pane_view_config_none_omitted_in_serialization() {
         h: 1.0,
         view_type: "TerminalView".into(),
         view_config: None,
+        layers: Vec::new(),
+        active_layer_index: None,
     };
     let json = serde_json::to_string(&pane).unwrap();
     assert!(
@@ -2129,6 +2193,8 @@ fn layout_pane_view_config_none_omitted_in_serialization() {
         h: 1.0,
         view_type: "TerminalView".into(),
         view_config: Some(serde_json::json!({"type": "TerminalView", "profile": "WSL"})),
+        layers: Vec::new(),
+        active_layer_index: None,
     };
     let json_with = serde_json::to_string(&pane_with_config).unwrap();
     assert!(
@@ -2158,6 +2224,8 @@ fn settings_full_round_trip_with_layout_view_config() {
                         "cwdSend": true,
                         "cwdReceive": true
                     })),
+                    layers: Vec::new(),
+                    active_layer_index: None,
                 },
                 LayoutPane {
                     x: 0.5,
@@ -2165,7 +2233,9 @@ fn settings_full_round_trip_with_layout_view_config() {
                     w: 0.5,
                     h: 1.0,
                     view_type: "TerminalView".into(),
-                    view_config: None, // No config — bare viewType only
+                    view_config: None, // No config — bare viewType only,
+                    layers: Vec::new(),
+                    active_layer_index: None,
                 },
             ],
         }],
@@ -2415,7 +2485,14 @@ fn validate_settings_pane_without_view_type() {
     }"#;
     let mut settings: Settings = serde_json::from_str(json).unwrap();
     let warnings = validate_and_repair(&mut settings);
-    assert_eq!(settings.workspaces[0].panes[0].view.view_type, "EmptyView");
+    assert_eq!(
+        settings.workspaces[0].panes[0]
+            .view
+            .as_ref()
+            .unwrap()
+            .view_type,
+        "EmptyView"
+    );
     assert!(warnings
         .iter()
         .any(|w| w.path.contains("view.type") && w.repaired));

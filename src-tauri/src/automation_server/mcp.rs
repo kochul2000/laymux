@@ -456,6 +456,37 @@ struct SplitPaneParam {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct StackPaneParam {
+    /// Pane (slot) index to stack a new layer on
+    pane_index: u64,
+    /// View type of the new layer (default "TerminalView")
+    view_type: Option<String>,
+    /// Terminal profile name for the new layer (e.g. "PowerShell", "WSL")
+    profile: Option<String>,
+    /// Initial working directory; omitted → the slot's active layer CWD
+    cwd: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct ActivatePaneLayerParam {
+    /// Layer id (the `id` of a pane entry in get_active_workspace). Give this or terminal_id.
+    layer_id: Option<String>,
+    /// Terminal id of the layer (e.g. "terminal-pane-1234abcd"). Give this or layer_id.
+    terminal_id: Option<String>,
+    /// Also focus the slot (default true)
+    focus: Option<bool>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct RemovePaneParam {
+    /// Pane (slot) index
+    pane_index: u64,
+    /// Layer to close in a stacked slot (default: the active layer). Closing the
+    /// last layer removes the slot.
+    layer_id: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 enum NotificationLevel {
     Info,
@@ -2685,19 +2716,64 @@ impl McpHandler {
         self.bridge("action", "panes", "split", params).await
     }
 
-    /// Remove a pane from the active workspace grid. Remaining panes redistribute space.
+    /// Stack a new layer on a pane slot (ADR-0295): the slot keeps its size and shows
+    /// the new layer, the previous content stays alive underneath. Defaults to a
+    /// TerminalView starting in the slot's active-layer CWD. Response mirrors
+    /// split_pane (`ready` field included). Switch layers with activate_pane_layer.
+    #[tool]
+    async fn stack_pane(
+        &self,
+        Parameters(p): Parameters<StackPaneParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let mut params = json!({ "paneIndex": p.pane_index });
+        if let Some(view_type) = p.view_type {
+            params["viewType"] = json!(view_type);
+        }
+        if let Some(profile) = p.profile {
+            params["profile"] = json!(profile);
+        }
+        if let Some(cwd) = p.cwd {
+            params["cwd"] = json!(cwd);
+        }
+        self.bridge("action", "panes", "stack", params).await
+    }
+
+    /// Show one stacked layer of its pane slot (ADR-0295), by layer_id or terminal_id.
+    /// Switches workspace when needed and focuses the slot unless focus=false.
+    #[tool]
+    async fn activate_pane_layer(
+        &self,
+        Parameters(p): Parameters<ActivatePaneLayerParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        if p.layer_id.is_none() == p.terminal_id.is_none() {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "Provide exactly one of layer_id or terminal_id",
+            )]));
+        }
+        let mut params = json!({ "focus": p.focus.unwrap_or(true) });
+        if let Some(layer_id) = p.layer_id {
+            params["layerId"] = json!(layer_id);
+        }
+        if let Some(terminal_id) = p.terminal_id {
+            params["terminalId"] = json!(terminal_id);
+        }
+        self.bridge("action", "panes", "activateLayer", params)
+            .await
+    }
+
+    /// Remove a pane from the active workspace grid. In a stacked slot (ADR-0295)
+    /// this closes one layer — `layer_id`, or the active layer — and the slot stays;
+    /// closing the last layer removes the slot and remaining panes redistribute space.
     #[tool]
     async fn remove_pane(
         &self,
-        Parameters(p): Parameters<PaneIndexParam>,
+        Parameters(p): Parameters<RemovePaneParam>,
     ) -> Result<CallToolResult, ErrorData> {
-        self.bridge(
-            "action",
-            "panes",
-            "remove",
-            json!({ "paneIndex": p.pane_index }),
-        )
-        .await
+        let mut params = json!({ "paneIndex": p.pane_index });
+        if let Some(layer_id) = p.layer_id {
+            params["layerId"] = json!(layer_id);
+        }
+        self.bridge("action", "panes", "remove", params).await
     }
 
     /// Resize a pane by adjusting its width and/or height by a delta value.

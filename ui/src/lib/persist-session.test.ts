@@ -416,7 +416,7 @@ describe("persistSession", () => {
       useDockStore.getState().setDockPaneView("left", dock.panes[0].id, view);
       const getPane = () =>
         surface === "workspace"
-          ? useWorkspaceStore.getState().workspaces[0].panes[0]
+          ? useWorkspaceStore.getState().workspaces[0].panes[0].layers[0]
           : useDockStore.getState().getDock("left")!.panes[0];
       const id = `terminal-${getPane().id}`;
       vi.mocked(getTerminalCwds).mockResolvedValue({ [id]: "/latest" });
@@ -470,7 +470,7 @@ describe("persistSession", () => {
       expect(vi.mocked(saveSettings).mock.calls.at(-1)![0].workspaces[0].panes[0].view).toEqual({
         type: "TerminalView",
       });
-      expect(useWorkspaceStore.getState().workspaces[0].panes[0].view).toEqual({
+      expect(useWorkspaceStore.getState().workspaces[0].panes[0].layers[0].view).toEqual({
         type: "TerminalView",
       });
     },
@@ -479,7 +479,7 @@ describe("persistSession", () => {
   it("publishes metadata only after a successful save and preserves concurrent view edits", async () => {
     const ws = useWorkspaceStore.getState();
     ws.setPaneView(0, { type: "TerminalView", lastCodexSession: "old-session" });
-    const getPane = () => useWorkspaceStore.getState().workspaces[0].panes[0];
+    const getPane = () => useWorkspaceStore.getState().workspaces[0].panes[0].layers[0];
     const original = getPane().view;
     const id = `terminal-${getPane().id}`;
     vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
@@ -618,7 +618,7 @@ describe("persistSession", () => {
     const view = vi.mocked(saveSettings).mock.calls.at(-1)?.[0].workspaces[0].panes[0].view;
     expect(view).toMatchObject({ lastAgentFresh: "codex" });
     expect(view).not.toHaveProperty("lastCodexSession");
-    expect(useWorkspaceStore.getState().workspaces[0].panes[0].view).toMatchObject({
+    expect(useWorkspaceStore.getState().workspaces[0].panes[0].layers[0].view).toMatchObject({
       lastAgentFresh: "codex",
     });
   });
@@ -712,7 +712,7 @@ describe("persistSession", () => {
     async (reason) => {
       const ws = useWorkspaceStore.getState();
       ws.setPaneView(0, { type: "TerminalView", lastCodexSession: "last-proven-session" });
-      const pane = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0];
+      const pane = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].layers[0];
       const id = `terminal-${pane.id}`;
       vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
         [id]: { generation: 7, state: "activeButUnidentified" },

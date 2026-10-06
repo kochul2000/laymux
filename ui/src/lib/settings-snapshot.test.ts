@@ -486,3 +486,65 @@ describe("settings snapshot — save/load round trip does not drop sections", ()
     });
   });
 });
+
+describe("settings snapshot — pane stacks (ADR-0295)", () => {
+  beforeEach(() => {
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useDockStore.setState(useDockStore.getInitialState());
+    vi.clearAllMocks();
+  });
+
+  it("writes unstacked panes in the compact view form", async () => {
+    const snapshot = await collectSettingsSnapshot();
+    const pane = snapshot.workspaces[0].panes[0];
+    expect(pane.view).toEqual({ type: "EmptyView" });
+    expect(pane).not.toHaveProperty("layers");
+    expect(pane).not.toHaveProperty("activeLayerId");
+  });
+
+  it("writes stacks in the layers form with per-layer session fields", async () => {
+    const store = useWorkspaceStore.getState();
+    const layerId = store.stackPane(0, { type: "TerminalView", profile: "WSL" })!;
+    vi.mocked(getTerminalCwds).mockResolvedValueOnce({ [`terminal-${layerId}`]: "/stacked" });
+    const snapshot = await collectSettingsSnapshot();
+    const pane = snapshot.workspaces[0].panes[0];
+    expect(pane).not.toHaveProperty("view");
+    expect(pane.layers?.map((layer) => layer.id)).toEqual([pane.id, layerId]);
+    expect(pane.activeLayerId).toBe(layerId);
+    expect(pane.layers?.[1].view).toMatchObject({ type: "TerminalView", lastCwd: "/stacked" });
+  });
+
+  it("round-trips a stack through save and load", async () => {
+    const layerId = useWorkspaceStore.getState().stackPane(0, { type: "MemoView" })!;
+    const before = useWorkspaceStore.getState().workspaces[0].panes[0];
+    const snapshot = await collectSettingsSnapshot();
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    applySettingsSnapshot(snapshot, { includeStructural: true });
+    const after = useWorkspaceStore.getState().workspaces[0].panes[0];
+    expect(after.id).toBe(before.id);
+    expect(after.layers).toEqual(before.layers);
+    expect(after.activeLayerId).toBe(layerId);
+  });
+
+  it("loads the legacy compact form into a single-layer slot", () => {
+    applySettingsSnapshot(
+      {
+        layouts: [
+          { id: "l", name: "L", panes: [{ x: 0, y: 0, w: 1, h: 1, viewType: "EmptyView" }] },
+        ],
+        workspaces: [
+          {
+            id: "ws-legacy",
+            name: "Legacy",
+            panes: [{ id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "MemoView" } }],
+          },
+        ],
+      } as unknown as Parameters<typeof applySettingsSnapshot>[0],
+      { includeStructural: true },
+    );
+    const pane = useWorkspaceStore.getState().workspaces[0].panes[0];
+    expect(pane.layers).toEqual([{ id: "p1", view: { type: "MemoView" } }]);
+    expect(pane.activeLayerId).toBe("p1");
+  });
+});

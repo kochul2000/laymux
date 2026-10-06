@@ -25,7 +25,7 @@ import { NotificationPanel } from "./NotificationPanel";
 import { PaneMinimap } from "./PaneMinimap";
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import { ExitFade } from "@/components/ui/ExitFade";
-import type { WorkspacePane } from "@/stores/types";
+import type { PaneLayer, WorkspacePane } from "@/stores/types";
 import { persistSession } from "@/lib/persist-session";
 import { useUiStore } from "@/stores/ui-store";
 import { useRenameWorkspaceStore } from "@/stores/rename-workspace-store";
@@ -33,10 +33,11 @@ import { getPaneDragData, isPaneDrag } from "@/lib/pane-dnd";
 import { markNotificationsRead } from "@/lib/tauri-api";
 import { toTerminalId } from "@/lib/pane-ids";
 import { computePaneNumbers } from "@/lib/pane-numbers";
+import { allLayerIds, layerEntries } from "@/lib/pane-layers";
 import { selectLatestTerminalInput } from "@/lib/terminal-last-input";
 import { deriveHiddenItems, findNextVisibleWorkspaceId } from "@/lib/hidden-items";
 import { setWorkspaceHiddenWithFallback } from "@/lib/hidden-item-actions";
-import { focusWorkspacePane, switchActiveWorkspace } from "@/lib/workspace-transition";
+import { activatePaneLayer, switchActiveWorkspace } from "@/lib/workspace-transition";
 import { runWorkspaceClearFromUi } from "@/lib/workspace-clear-action";
 import { HiddenItemsShelf } from "./workspace-selector/HiddenItemsShelf";
 import { UndoSnackbar } from "@/components/ui/UndoSnackbar";
@@ -156,7 +157,7 @@ function WorkspaceItem({
   confirmDestructiveActions: boolean;
   canHideWorkspace: boolean;
   onSelect: () => void;
-  onSelectPane: (paneIndex: number, pane: WorkspacePane) => void;
+  onSelectPane: (paneIndex: number, pane: PaneLayer) => void;
   onClose: () => void;
   onDuplicate: () => void;
   onRename: () => void;
@@ -293,7 +294,9 @@ function WorkspaceItem({
             </TwoClickConfirmButton>
             {hovered && (
               <>
-                {panes.some((pane) => pane.view.type === "TerminalView") && (
+                {panes.some((pane) =>
+                  pane.layers.some((layer) => layer.view.type === "TerminalView"),
+                ) && (
                   <TwoClickConfirmButton
                     data-testid={`workspace-clear-${ws.id}`}
                     onConfirm={() => {
@@ -375,9 +378,16 @@ function WorkspaceItem({
             {(() => {
               const showMinimap = panes.length >= 1;
               const minimapPanes = panes.map((p) => ({ x: p.x, y: p.y, w: p.w, h: p.h }));
-              const paneIndexById = new Map(panes.map((pane, index) => [pane.id, index]));
+              // Rows are content: one per stacked layer (ADR-0295). paneIndex stays
+              // the slot index for focus and the minimap.
+              const rows = layerEntries(panes).map((entry) => ({
+                ...entry.layer,
+                slotIndex: entry.slotIndex,
+                activeLayer: entry.active,
+              }));
+              const paneIndexById = new Map(rows.map((row) => [row.id, row.slotIndex]));
               const paneNumbers = computePaneNumbers(panes);
-              const panesByNumber = [...panes].sort(
+              const panesByNumber = [...rows].sort(
                 (a, b) => (paneNumbers.get(a.id) ?? 0) - (paneNumbers.get(b.id) ?? 0),
               );
               const gridFocused = isActive ? useGridStore.getState().focusedPaneIndex : null;
@@ -397,7 +407,7 @@ function WorkspaceItem({
                     // 표시 순서와 달리 focus/minimap은 WorkspacePane[] 원본 인덱스를 사용한다.
                     const paneIndex = paneIndexById.get(pane.id) ?? -1;
                     const paneNumber = paneNumbers.get(pane.id) ?? paneIndex + 1;
-                    const isFocusedPane = isActive && gridFocused === paneIndex;
+                    const isFocusedPane = isActive && gridFocused === paneIndex && pane.activeLayer;
                     if (pane.view.type === "TerminalView") {
                       const termId = toTerminalId(pane.id);
                       const ts = summary.terminalSummaries.find((t) => t.id === termId);
@@ -1202,19 +1212,21 @@ export function WorkspaceSelectorView() {
     const wsTerminalIds =
       workspaces
         .find((ws) => ws.id === wsId)
-        ?.panes.filter((p) => p.view.type === "TerminalView")
-        .map((p) => toTerminalId(p.id)) ?? [];
+        ?.panes.flatMap((p) => p.layers)
+        .filter((layer) => layer.view.type === "TerminalView")
+        .map((layer) => toTerminalId(layer.id)) ?? [];
     if (wsTerminalIds.length > 0) {
       markNotificationsRead(wsTerminalIds).catch(() => {});
     }
     switchActiveWorkspace(wsId);
   };
 
-  const handleSelectPane = (wsId: string, paneIndex: number, pane: WorkspacePane) => {
+  const handleSelectPane = (wsId: string, _paneIndex: number, pane: PaneLayer) => {
     if (pane.view.type === "TerminalView") {
       markNotificationsRead([toTerminalId(pane.id)]).catch(() => {});
     }
-    focusWorkspacePane(wsId, paneIndex);
+    // The row may be an inactive stacked layer (ADR-0295).
+    activatePaneLayer(wsId, pane.id);
   };
 
   const handleCreateWithLayout = (layoutId: string) => {
@@ -1236,7 +1248,7 @@ export function WorkspaceSelectorView() {
     setUndoItem({
       id: workspace.id,
       name: workspace.name,
-      paneIds: workspace.panes.map((pane) => pane.id),
+      paneIds: allLayerIds(workspace.panes),
       nonce: undoNonceRef.current,
     });
   };
@@ -1342,20 +1354,12 @@ export function WorkspaceSelectorView() {
             // Workspace-only shelf: restore every hidden workspace, leave
             // individually-hidden panes to their per-pane toggles.
             for (const item of hiddenItems.hiddenWorkspaces) {
-              setWorkspaceHidden(
-                item.workspace.id,
-                false,
-                item.workspace.panes.map((pane) => pane.id),
-              );
+              setWorkspaceHidden(item.workspace.id, false, allLayerIds(item.workspace.panes));
             }
             setUndoItem(null);
           }}
           onRestoreWorkspace={(item, open) => {
-            setWorkspaceHidden(
-              item.workspace.id,
-              false,
-              item.workspace.panes.map((pane) => pane.id),
-            );
+            setWorkspaceHidden(item.workspace.id, false, allLayerIds(item.workspace.panes));
             if (open) {
               setHiddenShelfOpen(false);
               if (hiddenItems.hiddenWorkspaces.length > 1) {
@@ -1390,7 +1394,9 @@ export function WorkspaceSelectorView() {
           }
           // Compute hidden pane IDs for this workspace
           const wsHiddenPaneIds = new Set(
-            [...hiddenPaneIds].filter((id) => ws.panes.some((p) => p.id === id)),
+            [...hiddenPaneIds].filter((id) =>
+              ws.panes.some((p) => p.layers.some((layer) => layer.id === id)),
+            ),
           );
 
           return (
