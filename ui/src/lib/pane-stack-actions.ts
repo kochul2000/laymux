@@ -56,3 +56,42 @@ export function cycleFocusedLayer(delta: number): boolean {
 export function layerStepForDirection(direction: "left" | "right" | "up" | "down"): 1 | -1 {
   return direction === "right" || direction === "down" ? 1 : -1;
 }
+
+/**
+ * Move a layer onto slot `targetSlotId` (drag a tab onto another slot or tab).
+ * Inside one stack it only reorders; a layer moved to another slot is shown
+ * and focused there.
+ */
+export function moveLayerTo(layerId: string, targetSlotId: string, index?: number): boolean {
+  const state = useWorkspaceStore.getState();
+  const workspace = state.getActiveWorkspace();
+  if (!workspace) return false;
+  const fromSlot = workspace.panes.find((pane) => pane.layers.some((l) => l.id === layerId));
+  if (!state.moveLayer(layerId, targetSlotId, index)) return false;
+  if (fromSlot?.id !== targetSlotId) activatePaneLayer(workspace.id, layerId);
+  return true;
+}
+
+/** Pull a stacked layer out into its own split slot and focus it. */
+export function extractLayerToSplit(
+  layerId: string,
+  direction: "horizontal" | "vertical",
+): string | null {
+  const state = useWorkspaceStore.getState();
+  const workspaceId = state.activeWorkspaceId;
+  const newSlotId = state.extractLayer(layerId, direction);
+  if (newSlotId) activatePaneLayer(workspaceId, layerId);
+  return newSlotId;
+}
+
+/** Drop a whole slot onto another slot's stack band: merge and show what was dragged. */
+export function mergeSlotIntoStack(srcSlotId: string, tgtSlotId: string): boolean {
+  const state = useWorkspaceStore.getState();
+  const workspace = state.getActiveWorkspace();
+  const src = workspace?.panes.find((pane) => pane.id === srcSlotId);
+  if (!workspace || !src) return false;
+  const shownLayerId = src.layers[activeLayerIndex(src)].id;
+  if (!state.mergeSlotIntoStack(srcSlotId, tgtSlotId)) return false;
+  activatePaneLayer(workspace.id, shownLayerId);
+  return true;
+}

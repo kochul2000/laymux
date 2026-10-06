@@ -7,7 +7,10 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 
 import {
   cycleFocusedLayer,
+  extractLayerToSplit,
   layerStepForDirection,
+  mergeSlotIntoStack,
+  moveLayerTo,
   stackFocusedPane,
   stackPaneAt,
 } from "./pane-stack-actions";
@@ -70,5 +73,64 @@ describe("pane-stack-actions (ADR-0295)", () => {
     expect(layerStepForDirection("down")).toBe(1);
     expect(layerStepForDirection("left")).toBe(-1);
     expect(layerStepForDirection("up")).toBe(-1);
+  });
+});
+
+describe("pane-stack-actions rearrangement (ADR-0295)", () => {
+  beforeEach(() => {
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useDockStore.setState(useDockStore.getInitialState());
+    useGridStore.setState(useGridStore.getInitialState());
+    useWorkspaceStore.setState({
+      activeWorkspaceId: "ws",
+      workspaces: [
+        {
+          id: "ws",
+          name: "WS",
+          panes: [
+            {
+              id: "a",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [
+                { id: "a", view: { type: "MemoView" } },
+                { id: "a2", view: { type: "MemoView" } },
+              ],
+              activeLayerId: "a",
+            },
+            makeSlot("b", { x: 0.5, y: 0, w: 0.5, h: 1 }, { type: "MemoView" }),
+          ],
+        },
+      ],
+    });
+    useGridStore.setState({ focusedPaneIndex: 0 });
+  });
+
+  const panes = () => useWorkspaceStore.getState().workspaces[0].panes;
+
+  it("moveLayerTo focuses the destination slot for cross-slot moves only", () => {
+    expect(moveLayerTo("a2", "a", 0)).toBe(true);
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+    expect(panes()[0].activeLayerId).toBe("a");
+
+    expect(moveLayerTo("a2", "b")).toBe(true);
+    expect(panes()[1].activeLayerId).toBe("a2");
+    expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+  });
+
+  it("extractLayerToSplit focuses the new slot", () => {
+    const newSlotId = extractLayerToSplit("a2", "vertical");
+    expect(newSlotId).toBe("a2");
+    expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+    expect(panes().map((p) => p.id)).toEqual(["a", "a2", "b"]);
+  });
+
+  it("mergeSlotIntoStack shows the visible layer of the dragged slot", () => {
+    expect(mergeSlotIntoStack("a", "b")).toBe(true);
+    expect(panes()).toHaveLength(1);
+    expect(panes()[0].activeLayerId).toBe("a");
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
   });
 });

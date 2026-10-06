@@ -13,7 +13,7 @@ import type {
   ViewType,
   Workspace,
 } from "@/stores/types";
-import { normalizeWorkspacePane } from "@/lib/pane-layers";
+import { dedupeLayerIds, normalizeWorkspacePane } from "@/lib/pane-layers";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
 export interface ApplySettingsSnapshotOptions {
@@ -163,12 +163,13 @@ function applyWorkspaceSnapshot(rawSettings: Settings): void {
 
   let paneCounter = 0;
   const newPaneId = () => `loaded-pane-${++paneCounter}`;
+  const seenContentIds = new Set<string>();
   // Both on-disk forms normalize into canonical slots (ADR-0295).
   const workspaces: Workspace[] = rawSettings.workspaces.map((workspace) => ({
     id: workspace.id,
     name: workspace.name,
     panes: workspace.panes.flatMap((pane) => {
-      const slot = normalizeWorkspacePane(
+      const normalized = normalizeWorkspacePane(
         {
           id: pane.id ?? "",
           x: pane.x,
@@ -181,7 +182,8 @@ function applyWorkspaceSnapshot(rawSettings: Settings): void {
         },
         newPaneId,
       );
-      if (!slot) return [];
+      if (!normalized) return [];
+      const slot = dedupeLayerIds(normalized, seenContentIds, newPaneId);
       return [
         {
           ...slot,

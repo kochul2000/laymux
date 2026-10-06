@@ -25,6 +25,18 @@ interface Props {
   onRemovePane?: (index: number) => void;
 }
 
+/**
+ * A boundary collapse never closes a pane stack (ADR-0295): that would silently
+ * kill every stacked terminal. Stacked slots stay (at minimum size) and their
+ * layers are closed explicitly instead.
+ */
+function withoutStacks(indices: readonly number[], panes: readonly GridPane[]): number[] {
+  return indices.filter((index) => {
+    const layers = (panes[index] as { layers?: readonly unknown[] } | undefined)?.layers;
+    return !layers || layers.length < 2;
+  });
+}
+
 export function PaneBoundaryHandles({
   containerWidth,
   containerHeight,
@@ -91,7 +103,7 @@ export function PaneBoundaryHandles({
           if (currentPanes && currentPanes.length > 0) {
             const mergeIndices = shouldMergeOnDragEnd(dragging.current.boundary, currentPanes);
             if (mergeIndices) {
-              const sorted = [...mergeIndices].sort((a, b) => b - a);
+              const sorted = withoutStacks(mergeIndices, currentPanes).sort((a, b) => b - a);
               for (const idx of sorted) {
                 removePane(idx);
               }
@@ -126,7 +138,7 @@ export function PaneBoundaryHandles({
       const indicesToRemove =
         leftSize <= rightSize ? boundary.leftPaneIndices : boundary.rightPaneIndices;
 
-      const sorted = [...indicesToRemove].sort((a, b) => b - a);
+      const sorted = withoutStacks(indicesToRemove, currentPanes).sort((a, b) => b - a);
       for (const idx of sorted) {
         removePane(idx);
       }

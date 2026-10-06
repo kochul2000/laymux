@@ -35,8 +35,11 @@ export interface KeybindingDef {
    * document-level, but `pane.delete` (plain Delete) must stay with the
    * terminal. Terminal/Memo/Issue Reporter actions are handled inside the
    * focused view itself and never pass through.
+   *
+   * `"whenStacked"`: passes through only while the focused grid slot is a
+   * pane stack (ADR-0295) — otherwise terminal apps keep the combo.
    */
-  passThroughTerminal?: boolean | "whenModified";
+  passThroughTerminal?: boolean | "whenModified" | "whenStacked";
 }
 
 /**
@@ -180,7 +183,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingDef[] = [
     label: "스택 레이어 순환",
     defaultKeys: "Alt+Shift+Arrow",
     group: "Pane",
-    passThroughTerminal: true,
+    passThroughTerminal: "whenStacked",
   },
   {
     id: "pane.stack",

@@ -5,6 +5,7 @@ import {
   activeLayerIndex,
   allLayerIds,
   cycleActiveLayer,
+  dedupeLayerIds,
   findLayerEntry,
   findSlotIndex,
   insertLayer,
@@ -202,5 +203,33 @@ describe("pane-layers", () => {
         viewType: "MemoView",
       });
     });
+  });
+});
+
+describe("dedupeLayerIds (ADR-0295)", () => {
+  it("re-mints stacked layer ids already used elsewhere and fixes the active id", () => {
+    const seen = new Set(["x"]);
+    let n = 0;
+    const slot = {
+      id: "s",
+      x: 0,
+      y: 0,
+      w: 1,
+      h: 1,
+      layers: [
+        { id: "s", view: { type: "MemoView" as const } },
+        { id: "x", view: { type: "MemoView" as const } },
+      ],
+      activeLayerId: "x",
+    };
+    const out = dedupeLayerIds(slot, seen, () => `new-${++n}`);
+    expect(out.layers.map((l) => l.id)).toEqual(["s", "new-1"]);
+    expect(out.activeLayerId).toBe("new-1");
+    expect([...seen].sort()).toEqual(["new-1", "s", "x"]);
+  });
+
+  it("keeps a slot whose ids are fresh untouched", () => {
+    const slot = makeSlot("p", { x: 0, y: 0, w: 1, h: 1 }, { type: "MemoView" });
+    expect(dedupeLayerIds(slot, new Set(), () => "never")).toBe(slot);
   });
 });
