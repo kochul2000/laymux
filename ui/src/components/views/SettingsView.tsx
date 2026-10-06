@@ -213,7 +213,7 @@ function UpdateSection() {
           <Button
             variant="primary"
             data-testid="update-open-btn"
-            onClick={() => useLifecycleStore.getState().openUpdate()}
+            onClick={() => useLifecycleStore.getState().openUpdate({ check: true })}
           >
             {t("update.open")}
           </Button>
