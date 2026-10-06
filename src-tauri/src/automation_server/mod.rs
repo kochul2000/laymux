@@ -187,6 +187,8 @@ pub fn build_router(
         .route("/api/v1/grid/focus", post(grid_focus_pane))
         .route("/api/v1/grid/hover", post(grid_simulate_hover))
         .route("/api/v1/panes/split", post(panes_split))
+        .route("/api/v1/panes/stack", post(panes_stack))
+        .route("/api/v1/panes/layers/activate", post(panes_activate_layer))
         .route("/api/v1/panes/{index}", delete(panes_remove))
         .route("/api/v1/panes/{index}/resize", post(panes_resize))
         .route("/api/v1/panes/{index}/view", put(panes_set_view))

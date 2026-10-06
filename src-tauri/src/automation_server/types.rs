@@ -101,6 +101,40 @@ pub struct SplitPaneBody {
     pub cwd: Option<String>,
 }
 
+/// `POST /api/v1/panes/stack` (ADR-0295): stack a new layer on a slot.
+#[derive(Deserialize)]
+pub struct StackPaneBody {
+    #[serde(rename = "paneIndex")]
+    pub pane_index: usize,
+    /// View type of the new layer. Default `TerminalView`, like `split_pane`.
+    #[serde(rename = "viewType")]
+    pub view_type: Option<String>,
+    /// Terminal profile of the new layer. Default profile when omitted.
+    pub profile: Option<String>,
+    /// Start directory of the new layer's terminal. When omitted it inherits
+    /// the slot's active layer CWD (ADR-0140 as extended by ADR-0295).
+    pub cwd: Option<String>,
+}
+
+/// `POST /api/v1/panes/layers/activate` (ADR-0295): show one stacked layer.
+/// Exactly one of `layerId` / `terminalId` identifies the layer.
+#[derive(Deserialize)]
+pub struct ActivateLayerBody {
+    #[serde(rename = "layerId")]
+    pub layer_id: Option<String>,
+    #[serde(rename = "terminalId")]
+    pub terminal_id: Option<String>,
+    /// Also move keyboard focus to the slot (default true).
+    pub focus: Option<bool>,
+}
+
+/// `DELETE /api/v1/panes/{index}?layerId=` (ADR-0295): close one layer.
+#[derive(Deserialize)]
+pub struct RemovePaneQuery {
+    #[serde(rename = "layerId")]
+    pub layer_id: Option<String>,
+}
+
 #[derive(Deserialize)]
 pub struct SetViewBody {
     #[serde(rename = "type")]
@@ -212,6 +246,8 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("POST", "/api/v1/grid/focus"),
     ("POST", "/api/v1/grid/hover"),
     ("POST", "/api/v1/panes/split"),
+    ("POST", "/api/v1/panes/stack"),
+    ("POST", "/api/v1/panes/layers/activate"),
     ("DELETE", "/api/v1/panes/{index}"),
     ("POST", "/api/v1/panes/{index}/resize"),
     ("PUT", "/api/v1/panes/{index}/view"),

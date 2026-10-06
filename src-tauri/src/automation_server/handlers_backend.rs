@@ -152,8 +152,27 @@ pub async fn api_docs() -> impl IntoResponse {
                 }
             },
             {
+                "method": "POST", "path": "/api/v1/panes/stack",
+                "description": "Stack a new layer on a pane slot (ADR-0295) right after its active layer and show it. Defaults to a TerminalView that starts in the slot's active-layer CWD unless cwd is given. Response mirrors split: newPane { id (layer id), terminalId, paneIndex, paneNumber, layerIndex, layerCount, ready }.",
+                "body": {
+                    "paneIndex": "number",
+                    "viewType": "(optional) ViewType, default \"TerminalView\"",
+                    "profile": "(optional) string",
+                    "cwd": "(optional) string"
+                }
+            },
+            {
+                "method": "POST", "path": "/api/v1/panes/layers/activate",
+                "description": "Show one stacked layer of its slot (ADR-0295), by layer id or terminal id. Switches workspace if needed and focuses the slot unless focus=false.",
+                "body": {
+                    "layerId": "(one of) string",
+                    "terminalId": "(one of) string",
+                    "focus": "(optional) bool, default true"
+                }
+            },
+            {
                 "method": "DELETE", "path": "/api/v1/panes/{index}",
-                "description": "Remove a pane. Adjacent pane absorbs the space."
+                "description": "Close one layer of a pane slot: ?layerId=<id>, or the active layer. Closing the slot's last layer removes the slot and the adjacent pane absorbs the space (ADR-0295)."
             },
             {
                 "method": "PUT", "path": "/api/v1/panes/{index}/view",

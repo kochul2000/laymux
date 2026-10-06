@@ -8425,6 +8425,13 @@ import {
           if (canSelectTerminal) row.type = "button";
           row.className = `workspace-pane-row${!perPaneInput ? " compact" : ""}${isActive ? " active" : ""}${paneHidden ? " hidden-item" : ""}`;
           row.dataset.paneRow = pane.id;
+          // Pane stack (ADR-0295): every layer gets a row; layers under the
+          // visible one stay selectable (focusing one shows it) but recede.
+          const layerCount = Number(pane.layerCount) || 1;
+          if (layerCount > 1) {
+            row.classList.add("stacked-layer");
+            if (pane.activeLayer === false) row.classList.add("stacked-inactive");
+          }
           if (canSelectTerminal) {
             const paneNumber = pane.paneNumber || panes.findIndex((item) => item.id === pane.id) + 1;
             const viewLabel =
@@ -8457,6 +8464,14 @@ import {
           main.append(primary);
           row.append(main);
           entry.append(row);
+
+          if (layerCount > 1) {
+            const badge = document.createElement("span");
+            badge.className = "pane-stack-badge";
+            badge.textContent = `${(Number(pane.layerIndex) || 0) + 1}/${layerCount}`;
+            badge.title = pane.activeLayer === false ? "Stacked layer (hidden)" : "Stacked layer (shown)";
+            primary.append(badge);
+          }
 
           if (isTerminal) {
             const selectorDisplay = pane.selectorDisplay || {};

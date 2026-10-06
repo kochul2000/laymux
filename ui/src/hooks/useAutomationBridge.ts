@@ -31,7 +31,12 @@ import {
 import type { TerminalRenderCheckpointTarget } from "@/lib/terminal-render-checkpoint";
 import { toPaneId, toTerminalId } from "@/lib/pane-ids";
 import { computePaneNumbers, GRID_EPS } from "@/lib/pane-numbers";
-import { activeLayer, findLayerEntry, layerEntries } from "@/lib/pane-layers";
+import {
+  activeLayer,
+  findLayerEntry,
+  findLayerInWorkspaces,
+  layerEntries,
+} from "@/lib/pane-layers";
 import { planPaneResize } from "@/hooks/usePaneResize";
 import { collectSettingsSnapshot, saveAndApplySettingsSnapshot } from "@/lib/settings-snapshot";
 import type { Settings } from "@/lib/tauri-api";
@@ -804,11 +809,85 @@ const handlers: HandlerMap = {
             : undefined,
       });
     },
+    // ADR-0295: a stacked slot loses one layer (`layerId`, or the active one) and
+    // stays; the last layer takes the slot with it.
     remove: (p) => {
-      const ctx = getActivePaneCtx(p.paneIndex as number);
+      const paneIndex = p.paneIndex as number;
+      const ctx = getActivePaneCtx(paneIndex);
       if ("err" in ctx) return ctx.err;
-      useWorkspaceStore.getState().removePane(p.paneIndex as number);
-      return ok({ removed: true });
+      const layerId = typeof p.layerId === "string" ? p.layerId : undefined;
+      if (layerId && !ctx.pane.layers.some((layer) => layer.id === layerId)) {
+        return err(`Layer '${layerId}' is not in pane ${paneIndex}`);
+      }
+      const before = ctx.ws.panes.length;
+      useWorkspaceStore.getState().removePane(paneIndex, layerId);
+      const ws = useWorkspaceStore.getState().getActiveWorkspace();
+      const slotRemoved = (ws?.panes.length ?? before) < before;
+      const remainingLayers = slotRemoved ? 0 : (ws?.panes[paneIndex]?.layers.length ?? 0);
+      return ok({ removed: true, slotRemoved, remainingLayers });
+    },
+    // ADR-0295: stack a new layer on a slot. Mirrors `split`: MCP callers get a
+    // usable terminal by default, and an explicit cwd beats the inherited seed.
+    stack: (p) => {
+      const paneIndex = p.paneIndex as number;
+      const ctx = getActivePaneCtx(paneIndex);
+      if ("err" in ctx) return ctx.err;
+      const viewType = ((p.viewType as string | undefined) ?? "TerminalView") as ViewType;
+      const view: ViewInstanceConfig = { type: viewType };
+      if (viewType === "TerminalView") {
+        if (p.profile) view.profile = p.profile as string;
+        if (p.cwd) view.lastCwd = p.cwd as string;
+      }
+      // Like split, Automation does not move keyboard focus: the new layer is
+      // shown in its slot but the user's focused pane keeps the keyboard.
+      const layerId = useWorkspaceStore.getState().stackPane(paneIndex, view);
+      if (!layerId) return err(`Pane ${paneIndex} could not be stacked`);
+      if (p.cwd && viewType === "TerminalView") {
+        useTerminalRestartStore.getState().requestRestart(layerId, p.cwd as string);
+      }
+      const ws = useWorkspaceStore.getState().getActiveWorkspace();
+      const entry = ws ? findLayerEntry(ws.panes, layerId) : null;
+      const terminalId = viewType === "TerminalView" ? toTerminalId(layerId) : null;
+      const terminalReady = terminalId ? isTerminalSessionReady(terminalId) : false;
+      return ok({
+        stacked: true,
+        newPane: entry
+          ? {
+              id: layerId,
+              terminalId,
+              paneIndex,
+              paneNumber: computePaneNumbers(ws!.panes).get(layerId) ?? null,
+              layerIndex: entry.layerIndex,
+              layerCount: entry.slot.layers.length,
+              ready: terminalReady,
+            }
+          : null,
+        _hint:
+          terminalId && !terminalReady
+            ? "Terminal ID is allocated but its PTY is still starting. write_to_terminal and focus_terminal wait for readiness automatically."
+            : undefined,
+      });
+    },
+    // ADR-0295: show one stacked layer (by layer id or terminal id).
+    activateLayer: (p) => {
+      const rawId =
+        typeof p.layerId === "string"
+          ? p.layerId
+          : typeof p.terminalId === "string"
+            ? toPaneId(p.terminalId)
+            : null;
+      if (!rawId) return err("layerId or terminalId required");
+      const found = findLayerInWorkspaces(useWorkspaceStore.getState().workspaces, rawId);
+      if (!found) return err(`Layer '${rawId}' not found`);
+      const focus = p.focus !== false;
+      activatePaneLayer(found.workspace.id, rawId, { focus });
+      return ok({
+        activated: rawId,
+        workspaceId: found.workspace.id,
+        paneIndex: found.entry.slotIndex,
+        layerIndex: found.entry.layerIndex,
+        focused: focus,
+      });
     },
     setView: (p) => {
       const ctx = getActivePaneCtx(p.paneIndex as number);
