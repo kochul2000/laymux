@@ -475,6 +475,9 @@ import {
         // Keep the id whose snapshot currently occupies it so a recovery can
         // preserve surface-local viewport state only for that same terminal.
         let renderedTerminalId = null;
+        // A queued pane the desktop did not open within the wait. It stays
+        // failed until the user moves on or asks for it again.
+        let terminalOpenFailedId = null;
         let fitAddon = null;
         let resizeObserver = null;
         let composerResizeObserver = null;
@@ -4517,6 +4520,7 @@ import {
             // budget restarts here, not there.
             cancelHistoryExpansion();
             resetHistoryExpansion(nextId);
+            terminalOpenFailedId = null;
           }
           activeTerminalId = nextId;
           loadActiveGithubRepo(nextId, nextId ? terminalInfoById.get(nextId)?.cwd : null);
@@ -4540,6 +4544,7 @@ import {
           renderInputSurface();
           updateHeaderPaneIdentity();
           renderGithubEntryState();
+          renderTerminalTransition();
           if (terminalChanged && !githubOverlayElement.hidden) {
             githubSnapshot = null;
             loadRemoteGithubSnapshot(false);
@@ -4580,6 +4585,7 @@ import {
           }
           renderFileViewerState();
           renderGithubEntryState();
+          renderTerminalTransition();
           if (!connected && memoView.isOpen()) memoView.close();
         }
 
@@ -7318,6 +7324,30 @@ import {
             : ctx.workspace.name;
         }
 
+        // The surface keeps the previous pane's screen until the new snapshot
+        // lands, so a switch on a slow link must show it is still under way.
+        // Derived from raw state only: the pane being moved to, the pane whose
+        // screen is on the surface, host moves still landing, and a queued pane
+        // the desktop refused to open. Same-pane reconnects never show it —
+        // the screen there is still the right pane, and the transport notice
+        // covers the wait.
+        function terminalTransitionState() {
+          if (!leaseId) return null;
+          if (activeTerminalId && terminalOpenFailedId === activeTerminalId) return "failed";
+          if (navMovePending > 0) return "pending";
+          if (activeTerminalId && renderedTerminalId !== activeTerminalId) return "pending";
+          return null;
+        }
+
+        // The surface only dims (CSS keys off `data-transition`); the status
+        // line already reports a pane the desktop failed to open.
+        function renderTerminalTransition() {
+          const state = terminalTransitionState();
+          terminalHost.setAttribute("aria-busy", state === "pending" ? "true" : "false");
+          if (state) terminalHost.setAttribute("data-transition", state);
+          else terminalHost.removeAttribute("data-transition");
+        }
+
         // lx:pane:<workspaceName>:<paneNumber> — the same LLM-facing locator the
         // desktop pane badge copies. Workspace names are stored whitespace-free;
         // guard anyway so a malformed name never produces a broken locator.
@@ -9085,7 +9115,10 @@ import {
         function enqueueRemoteNavigation(task, button = null, { move = true } = {}) {
           if (!leaseId || navStepPending >= 2) return;
           navStepPending += 1;
-          if (move) navMovePending += 1;
+          if (move) {
+            navMovePending += 1;
+            renderTerminalTransition();
+          }
           if (button) {
             // Per-button counter: a queued double-tap must not lose its busy
             // dim when the first step's finally fires.
@@ -9100,6 +9133,7 @@ import {
               if (move) {
                 navMovePending -= 1;
                 if (navMovePending === 0) flushLandingInput();
+                renderTerminalTransition();
               }
               if (button) {
                 const remaining = (Number(button.dataset.busyCount) || 1) - 1;
@@ -9552,6 +9586,11 @@ import {
         // because attaching to a terminal that has no PTY only yields a 404.
         async function attachTerminal(terminalId, options = {}) {
           if (!terminalId) return false;
+          // Asking again for a pane that failed to open is a fresh attempt.
+          if (terminalOpenFailedId === terminalId) {
+            terminalOpenFailedId = null;
+            renderTerminalTransition();
+          }
           if (terminalSessionLive(terminalId)) {
             openOutput(terminalId, options);
             return true;
@@ -9561,6 +9600,8 @@ import {
           const opened = await openTerminalOnHost(terminalId, selectionRevision);
           if (selectionRevision !== terminalSelectionRevision || activeTerminalId !== terminalId) return false;
           if (!opened) {
+            terminalOpenFailedId = terminalId;
+            renderTerminalTransition();
             setStatus("The desktop has not opened this pane yet.", true);
             return false;
           }
@@ -10083,6 +10124,7 @@ import {
                 activeTerminalId === terminalId
               ) {
                 renderedTerminalId = terminalId;
+                renderTerminalTransition();
                 restoreTerminalViewport(term, preservedViewportDistance);
                 updateScrollToBottomButton(term);
                 if (!reconnecting && currentInputMode() === "composer") {
@@ -10239,6 +10281,7 @@ import {
                   return;
                 }
                 renderedTerminalId = terminalId;
+                renderTerminalTransition();
                 // User-directed attaches land at the live tail. Same-terminal
                 // transport/lease recovery restores the surface-local distance
                 // from that tail instead of discarding a scrolled-up viewport.
