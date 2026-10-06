@@ -1287,6 +1287,30 @@ const handlers: HandlerMap = {
   },
 
   ui: {
+    // Dev-only keyboard injection (Rust gates it to debug builds). The keydown
+    // starts at the focused element — an xterm helper textarea when a terminal
+    // is focused — so it crosses the same pass-through as a real key press.
+    dispatchKey: (p) => {
+      if (!import.meta.env.DEV) return err("Key dispatch is dev-only");
+      const key = typeof p.key === "string" ? p.key : "";
+      if (!key) return err("'key' is required");
+      const target: EventTarget = document.activeElement ?? document;
+      const event = new KeyboardEvent("keydown", {
+        key,
+        ctrlKey: p.ctrl === true,
+        altKey: p.alt === true,
+        shiftKey: p.shift === true,
+        bubbles: true,
+        cancelable: true,
+      });
+      target.dispatchEvent(event);
+      const element = target instanceof Element ? target : null;
+      return ok({
+        dispatched: key,
+        defaultPrevented: event.defaultPrevented,
+        target: element ? `${element.tagName.toLowerCase()}.${element.className}` : "document",
+      });
+    },
     state: () => {
       const { hiddenShelfOpen, hiddenPaneIds, hiddenWorkspaceIds, notificationPanelOpen } =
         useUiStore.getState();

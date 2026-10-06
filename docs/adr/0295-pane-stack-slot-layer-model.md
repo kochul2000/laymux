@@ -1,6 +1,6 @@
 # 0295. Pane 스택: 슬롯/레이어 모델
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-06
 - Source: 사용자 요구(2026-10-06, pane 에 split 외 stacked 모드 추가), [overview.md](../architecture/overview.md) §4, [data-flow.md](../architecture/data-flow.md) §5·§13.7
 - 확장: [ADR-0007](0007-pane-identifier-trio.md)(식별자 3종), [ADR-0081](0081-pane-focus-transition-single-owner.md)(포커스 전환 단일 소유), [ADR-0140](0140-split-pane-inherits-source-cwd.md)(분할 CWD 상속), [ADR-0039](0039-remote-spatial-notification-step-navigation.md)(Remote 공간순서)
@@ -31,7 +31,7 @@ interface PaneLayer { id: string; view: ViewInstanceConfig }
 interface WorkspacePane { id: string; x; y; w; h; layers: PaneLayer[]; activeLayerId: string }
 ```
 
-- 슬롯 불변식: `layers.length >= 1`, `activeLayerId ∈ layers`, 레이어 id 는 앱 전체에서 유일. 기하는 슬롯에만 존재하므로 기하 소비자(리사이즈·재분배·경계·공간 이동·swap·Rust 겹침 검사)는 슬롯만 보고 바뀌지 않는다.
+- 슬롯 불변식: `layers.length >= 1`, `activeLayerId ∈ layers`, 레이어 id 는 앱 전체에서 유일하고, 슬롯 id 는 자기 레이어 id 와만 같을 수 있다(그 레이어를 다른 슬롯으로 옮기거나 꺼내면 남는 슬롯이 새 id 를 받고 pane 오버라이드를 들고 간다). 기하는 슬롯에만 존재하므로 기하 소비자(리사이즈·재분배·경계·공간 이동·swap·Rust 겹침 검사)는 슬롯만 보고 바뀌지 않는다.
 - 레이어 생성·제거·활성화·순서 변경·슬롯 간 이동은 `ui/src/lib/pane-layers.ts` 의 순수 함수와 `workspace-store` 액션만 수행한다. 컴포넌트는 `layers`/`activeLayerId` 를 직접 쓰지 않는다.
 - 단일 레이어 슬롯은 오늘의 pane 과 동일하게 동작하고 보인다. 스택 UI 는 레이어가 2개 이상일 때만 나타난다.
 
@@ -58,7 +58,7 @@ interface WorkspacePane { id: string; x; y; w; h; layers: PaneLayer[]; activeLay
 
 - **쌓기**: 컨트롤 바의 Stack 버튼(split 버튼 옆), `pane.stack` 키, Automation `stack_pane` 은 대상 슬롯 활성 레이어 바로 뒤에 `EmptyView` 레이어를 추가하고 활성화한다. 어떤 view 든 고를 수 있다.
 - **CWD 시드 (ADR-0140 확장)**: 새 레이어의 첫 터미널 세션은 누른 슬롯의 **활성 레이어** CWD 를 상속한다. 같은 재시작 요청 버스를 쓰고, 명시 `cwd` 가 이긴다.
-- **삭제**: 컨트롤 바 Delete·`pane.delete`·`remove_pane` 은 슬롯의 활성 레이어 하나를 닫는다(Automation 은 `layerId` 로 특정 레이어 지정 가능). 마지막 레이어를 닫으면 오늘처럼 슬롯이 사라지고 공간이 재분배된다. 유일 슬롯의 유일 레이어는 닫을 수 없다. 닫힌 활성 레이어의 다음 레이어(없으면 이전)가 활성이 된다.
+- **삭제**: 컨트롤 바 Delete·`pane.delete`·`remove_pane` 은 슬롯의 활성 레이어 하나를 닫는다(Automation 은 `layerId` 로 특정 레이어 지정 가능). 마지막 레이어를 닫으면 오늘처럼 슬롯이 사라지고 공간이 재분배된다. 유일 슬롯의 유일 레이어는 닫을 수 없다. 닫힌 활성 레이어의 다음 레이어(없으면 이전)가 활성이 된다. 경계선 병합(드래그 끝·더블클릭)은 스택 슬롯을 지우지 않는다 — 여러 터미널을 확인 없이 닫는 경로가 되기 때문이며, 스택 슬롯은 최소 크기로 남고 레이어는 명시적으로 닫는다.
 - **split·swap·워크스페이스 간 이동**: split 은 슬롯을 나누고 새 슬롯은 단일 레이어로 태어난다. swap 과 워크스페이스 간 이동은 슬롯 통째(모든 레이어)를 옮긴다.
 - **레이어 재배치 (2차 범위)**: 전환 줄 탭 드래그로 순서를 바꾸고, 다른 슬롯에 떨어뜨리면 그 슬롯 스택으로 옮긴다. 레이어를 split 으로 꺼내기와 이웃 슬롯을 스택으로 합치기를 제공한다. 원래 슬롯이 비면 사라지고 공간이 재분배된다.
 
@@ -66,14 +66,14 @@ interface WorkspacePane { id: string; x; y; w; h; layers: PaneLayer[]; activeLay
 
 - 포커스 대상은 계속 슬롯 인덱스(`focusedPaneIndex`)이고, 포커스된 콘텐츠는 그 슬롯의 활성 레이어다.
 - 레이어 활성화+포커스 commit 은 `workspace-transition.ts` 의 `activatePaneLayer(workspaceId, layerId, { focus })` 한 곳이 소유한다. 탭 클릭, 키보드, Automation/Remote `terminals.setFocus`, 알림 이동처럼 비활성 레이어를 가리키는 모든 흐름이 이 함수를 쓴다.
-- `pane.layer`(기본 `Alt+Shift+Arrow` 와일드카드): Right/Down 은 다음, Left/Up 은 이전 레이어, 링 순환. 스택이 아닌 슬롯에서는 no-op.
+- `pane.layer`(기본 `Alt+Shift+Arrow` 와일드카드): Right/Down 은 다음, Left/Up 은 이전 레이어, 링 순환. 스택이 아닌 슬롯에서는 no-op 이며, 이때 조합은 터미널 앱에 그대로 전달된다(포커스 슬롯이 스택일 때만 패스스루). `pane.stack`(기본 `Ctrl+Alt+S`)은 스택을 새로 만들어야 하므로 항상 앱 단축키다.
 - `pane.focus`(`Alt+Arrow`)의 막힌 방향: 이웃 슬롯 → (`dock.arrowNav` 면) 보이는 dock → (`paneStack.cycleOnBlockedArrow`, 기본 `true`) 포커스 슬롯의 스택 순환 순으로 해석한다. dock 이 스택보다 먼저인 이유는 화면 전체를 차지한 스택 슬롯에서도 dock 진입이 막히지 않게 하기 위해서다. 규칙은 "그쪽에 무엇이 있으면 거기로, 아무것도 없으면 스택을 넘긴다"이다.
 - 알림 자동 해제는 포커스된 슬롯뿐 아니라 활성 레이어 변경에도 반응한다.
 
 ### 외부 계약
 
 - Frontend bridge `workspaces.list`/`getActive` 와 MCP `get_active_workspace`·`list_terminals` 의 `panes` 는 **레이어마다 한 항목**이다. 항목은 레이어 `id`·`view`·슬롯 기하·`paneIndex`(슬롯)·`paneNumber`(레이어)·`terminalId` 를 갖고, 추가 필드 `slotId`·`layerIndex`·`layerCount`·`activeLayer` 를 싣는다. 스택이 없으면 항목과 값은 오늘과 같다.
-- 신규 계약: REST `POST /api/v1/panes/stack`·MCP `stack_pane`(split_pane 미러, `cwd`·`ready` 동일 의미), REST `POST /api/v1/panes/layers/activate`·MCP `activate_pane_layer`(`layerId` 또는 `paneRef`). `remove_pane` 은 선택 `layerId` 를 받는다.
+- 신규 계약: REST `POST /api/v1/panes/stack`·MCP `stack_pane`(split_pane 미러, `cwd`·`ready` 동일 의미), REST `POST /api/v1/panes/layers/activate`·MCP `activate_pane_layer`(`layerId` 또는 `terminalId`, 선택 `focus`). `remove_pane` 은 선택 `layerId` 를 받는다.
 - `focus_terminal`·Remote terminal focus 는 대상이 비활성 레이어면 활성화까지 수행한다. `identify_caller` 는 `pane.stack = { position, count, layerIds }` 를 추가하고, 이웃은 슬롯 기준으로 계산해 그 슬롯의 활성 레이어 터미널을 보고한다.
 - Remote navigation 의 workspace pane 행은 레이어마다 하나이며 비활성 레이어 행은 `activeLayer:false` 로 내려간다. Remote 공간순서(ADR-0039)는 (슬롯 읽기순 × 레이어순)의 터미널 레이어 전부다.
 - 워크스페이스 클리어 브로드캐스트(ADR-0137)는 비활성 레이어를 포함한 격자의 모든 터미널 레이어가 대상이다. 단일 pane 클리어·hidden 토글·자동 회수는 레이어 단위다.

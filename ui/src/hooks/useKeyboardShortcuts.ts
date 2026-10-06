@@ -225,8 +225,8 @@ function navigatePaneFocus(e: KeyboardEvent) {
 function cyclePaneLayer(e: KeyboardEvent) {
   const direction = ARROW_TO_DIRECTION[e.key];
   if (!direction) return;
-  e.preventDefault();
-  cycleFocusedLayer(layerStepForDirection(direction));
+  // Only a real stack consumes the combo; elsewhere it stays with the app.
+  if (cycleFocusedLayer(layerStepForDirection(direction))) e.preventDefault();
 }
 
 /**
