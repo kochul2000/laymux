@@ -1368,10 +1368,16 @@
   .pane-stack-tab[data-active="true"] .pane-stack-tab-close {
     visibility: visible;
   }
-  .pane-stack-tab-close:hover,
   .pane-stack-add:hover {
     background: var(--hover-bg-strong);
     color: var(--text-primary);
+  }
+  /* Same destructive red as the control bar close button. */
+  .pane-stack-tab-close {
+    color: var(--red);
+  }
+  .pane-stack-tab-close:hover {
+    background: var(--hover-bg-strong);
   }
   .pane-stack-add {
     align-self: center;

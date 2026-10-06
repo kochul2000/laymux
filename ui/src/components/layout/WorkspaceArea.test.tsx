@@ -102,7 +102,7 @@ describe("WorkspaceArea", () => {
 
     const indicator = screen.getByTestId("pane-focus-indicator");
     expect(indicator).toBeInTheDocument();
-    expect(indicator.style.boxShadow).toBe("inset 0 0 0 1px var(--accent)");
+    expect(indicator.style.boxShadow).toBe("inset 0 0 0 var(--pane-focus-border-w) var(--accent)");
     expect(indicator.className).toContain("z-30");
   });
 
@@ -113,7 +113,9 @@ describe("WorkspaceArea", () => {
 
     const indicator = screen.getByTestId("pane-focus-indicator");
     expect(indicator).toBeInTheDocument();
-    expect(indicator.style.boxShadow).toBe("inset 0 0 0 1px var(--accent-50)");
+    expect(indicator.style.boxShadow).toBe(
+      "inset 0 0 0 var(--pane-focus-border-w) var(--accent-50)",
+    );
   });
 
   // -- Hover auto-hide --

@@ -812,6 +812,25 @@ describe("PaneGrid stack UI (ADR-0295)", () => {
     expect(onStackPane).toHaveBeenCalledWith("slot");
   });
 
+  it("titles the control bar delete as closing a layer only on a stack", () => {
+    const { rerender } = render(
+      <PaneGrid
+        {...props}
+        panes={[single, { ...single, id: "other", x: 0.5 }]}
+        onRemovePane={vi.fn()}
+      />,
+    );
+    expect(screen.getAllByTestId("pane-control-delete")[0].getAttribute("title")).toBe(
+      "Delete pane",
+    );
+    rerender(<PaneGrid {...props} panes={[stacked]} onRemovePane={vi.fn()} />);
+    expect(
+      within(screen.getByTestId("ui-pane-0"))
+        .getByTestId("pane-control-delete")
+        .getAttribute("title"),
+    ).toBe("Close layer");
+  });
+
   it("renders the strip only for a stacked slot", () => {
     const { rerender } = render(<PaneGrid {...props} panes={[single]} />);
     expect(screen.queryByTestId("pane-stack-strip")).toBeNull();

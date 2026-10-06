@@ -52,6 +52,8 @@ export interface PaneControlBarActions {
   onRestart?: () => void;
   onClear?: () => void;
   onDelete?: () => void;
+  /** Tooltip of the delete button; a stacked slot closes only its visible layer (ADR-0295). */
+  deleteTitle?: string;
   onChangeView?: (config: ViewInstanceConfig) => void;
   onToggleCwdSend?: () => void;
   onToggleCwdReceive?: () => void;
@@ -473,7 +475,7 @@ function BarContent({
             <BarBtn
               testId="pane-control-delete"
               onClick={actions.onDelete}
-              title="Delete pane"
+              title={actions.deleteTitle ?? "Delete pane"}
               danger
             >
               <XIcon size={12} />

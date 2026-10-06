@@ -428,6 +428,7 @@ export function PaneGrid({
                       (panes.length > 1 || pane.layers.length > 1) && onRemovePane
                         ? () => onRemovePane(pane.id, layer.id)
                         : undefined,
+                    deleteTitle: pane.layers.length > 1 ? "Close layer" : "Delete pane",
                     onToggleCwdSend:
                       canSendCwd && onSetPaneView && cwdDefaults
                         ? () => {
