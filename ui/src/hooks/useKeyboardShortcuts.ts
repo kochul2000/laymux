@@ -10,6 +10,7 @@ import { useRenameWorkspaceStore } from "@/stores/rename-workspace-store";
 import { resolveViewer } from "@/lib/file-viewer";
 import { matchesKeybinding } from "@/lib/keybinding-registry";
 import { formatPaneIdentifier, paneNumberFor } from "@/lib/pane-numbers";
+import { activeLayer } from "@/lib/pane-layers";
 import { propagateCwdOnceForPane } from "@/lib/propagate-cwd-once";
 import { findPaneInDirection, type Direction } from "@/lib/pane-navigation";
 import { getSortedWorkspaces, notificationStep } from "@/lib/navigation-actions";
@@ -94,7 +95,7 @@ function copyFocusedPaneIdentifier(): boolean {
   const pane = ws.panes[focusedPaneIndex];
   if (!pane) return false;
 
-  const paneNumber = paneNumberFor(ws.panes, pane.id);
+  const paneNumber = paneNumberFor(ws.panes, activeLayer(pane).id);
   if (paneNumber === null) return false;
 
   try {
@@ -253,7 +254,7 @@ const SHORTCUT_HANDLERS: Record<string, (e: KeyboardEvent) => void> = {
     const pane = ws && focusedPaneIndex !== null ? ws.panes[focusedPaneIndex] : undefined;
     // 헬퍼가 실제로 전파를 디스패치했을 때만 preventDefault — CWD 없는
     // view(Memo 등)에서는 no-op 이므로 기본 동작을 막지 않는다 (PR #331 리뷰).
-    if (pane && propagateCwdOnceForPane(pane)) {
+    if (pane && propagateCwdOnceForPane(activeLayer(pane))) {
       e.preventDefault();
     }
   },

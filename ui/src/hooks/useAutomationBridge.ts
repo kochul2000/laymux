@@ -31,6 +31,7 @@ import {
 import type { TerminalRenderCheckpointTarget } from "@/lib/terminal-render-checkpoint";
 import { toPaneId, toTerminalId } from "@/lib/pane-ids";
 import { computePaneNumbers, GRID_EPS } from "@/lib/pane-numbers";
+import { activeLayer, findLayerEntry, layerEntries } from "@/lib/pane-layers";
 import { planPaneResize } from "@/hooks/usePaneResize";
 import { collectSettingsSnapshot, saveAndApplySettingsSnapshot } from "@/lib/settings-snapshot";
 import type { Settings } from "@/lib/tauri-api";
@@ -48,6 +49,7 @@ import {
   startFrontendHealthReporter,
 } from "@/lib/frontend-health-reporter";
 import {
+  activatePaneLayer,
   focusDockPane,
   focusWorkspacePane,
   switchActiveWorkspace,
@@ -183,8 +185,7 @@ function findTerminalInstance(terminalId: string) {
 function resolveTerminalPaneIndex(terminalId: string, workspaceId: string): number {
   const workspace = useWorkspaceStore.getState().workspaces.find((ws) => ws.id === workspaceId);
   if (!workspace) return -1;
-  const paneId = toPaneId(terminalId);
-  return workspace.panes.findIndex((pane) => pane.id === paneId);
+  return findLayerEntry(workspace.panes, toPaneId(terminalId))?.slotIndex ?? -1;
 }
 
 /** Check if two 1D ranges overlap (with tolerance for floating point). */
@@ -213,10 +214,12 @@ function computeNeighbors(
   for (let i = 0; i < panes.length; i++) {
     if (i === targetIndex) continue;
     const other = panes[i];
+    // Neighbors are slots; each reports its visible (active-layer) content (ADR-0295).
+    const otherContent = activeLayer(other);
     const entry: NeighborEntry = {
       paneIndex: i,
-      paneNumber: paneNumbers.get(other.id) ?? null,
-      terminalId: other.view.type === "TerminalView" ? toTerminalId(other.id) : null,
+      paneNumber: paneNumbers.get(otherContent.id) ?? null,
+      terminalId: otherContent.view.type === "TerminalView" ? toTerminalId(otherContent.id) : null,
     };
 
     // Right: other starts where target ends on x-axis, y ranges overlap
@@ -262,11 +265,12 @@ function findTerminalContext(terminalId: string) {
   const workspace = workspaces.find((ws) => ws.id === terminal.workspaceId);
   if (!workspace) return null;
 
-  const paneId = toPaneId(terminalId);
-  const paneIndex = workspace.panes.findIndex((p) => p.id === paneId);
-  const pane = paneIndex >= 0 ? workspace.panes[paneIndex] : null;
+  // The terminal is a content layer; `pane` is the slot that holds it (ADR-0295).
+  const entry = findLayerEntry(workspace.panes, toPaneId(terminalId));
+  const paneIndex = entry ? entry.slotIndex : -1;
+  const pane = entry ? entry.slot : null;
 
-  return { terminal, workspace, pane, paneIndex, activeWorkspaceId };
+  return { terminal, workspace, pane, paneIndex, entry, activeWorkspaceId };
 }
 
 function findDockPaneContext(terminalId: string) {
@@ -290,11 +294,11 @@ function findDockPaneContext(terminalId: string) {
 function findWorkspacePaneContext(terminalId: string) {
   const { workspaces } = useWorkspaceStore.getState();
   for (const workspace of workspaces) {
-    const paneIndex = workspace.panes.findIndex(
-      (pane) => pane.view.type === "TerminalView" && toTerminalId(pane.id) === terminalId,
+    const entry = layerEntries(workspace.panes).find(
+      ({ layer }) => layer.view.type === "TerminalView" && toTerminalId(layer.id) === terminalId,
     );
-    if (paneIndex >= 0) {
-      return { workspace, pane: workspace.panes[paneIndex], paneIndex };
+    if (entry) {
+      return { workspace, pane: entry.slot, paneIndex: entry.slotIndex, layer: entry.layer };
     }
   }
   return null;
@@ -375,14 +379,39 @@ async function prepareTerminalForAutomation(terminalId: string): Promise<Handler
   }
 }
 
-/** Enrich a pane with its index, spatial number, and terminal ID (null for non-terminal panes). */
-function enrichPane(p: WorkspacePane, index: number, paneNumbers: Map<string, number>) {
-  return {
-    ...p,
-    paneIndex: index,
-    paneNumber: paneNumbers.get(p.id) ?? null,
-    terminalId: p.view.type === "TerminalView" ? toTerminalId(p.id) : null,
-  };
+/**
+ * Project slots into the external pane list: one entry per content layer
+ * (ADR-0295). `id`/`view`/`terminalId`/`paneNumber` describe the layer;
+ * `paneIndex` and the rect describe its slot; the stack fields say where the
+ * layer sits. Unstacked workspaces produce the pre-stack entries plus the
+ * additive stack fields.
+ */
+function enrichPanes(panes: WorkspacePane[], paneNumbers: Map<string, number>) {
+  return layerEntries(panes).map(({ slot, slotIndex, layer, layerIndex, active }) => ({
+    id: layer.id,
+    x: slot.x,
+    y: slot.y,
+    w: slot.w,
+    h: slot.h,
+    view: layer.view,
+    paneIndex: slotIndex,
+    paneNumber: paneNumbers.get(layer.id) ?? null,
+    terminalId: layer.view.type === "TerminalView" ? toTerminalId(layer.id) : null,
+    slotId: slot.id,
+    layerIndex,
+    layerCount: slot.layers.length,
+    activeLayer: active,
+  }));
+}
+
+/** Spatial number of the focused slot's visible content, or null. */
+function focusedContentNumber(
+  panes: WorkspacePane[],
+  focusedPaneIndex: number | null,
+  paneNumbers: Map<string, number>,
+): number | null {
+  const slot = focusedPaneIndex != null ? panes[focusedPaneIndex] : undefined;
+  return slot ? (paneNumbers.get(activeLayer(slot).id) ?? null) : null;
 }
 
 function selectorStatusForTerminal(
@@ -484,7 +513,7 @@ const handlers: HandlerMap = {
         const paneNumbers = computePaneNumbers(workspace.panes);
         return {
           ...workspace,
-          panes: workspace.panes.map((pane, index) => enrichPane(pane, index, paneNumbers)),
+          panes: enrichPanes(workspace.panes, paneNumbers),
           selectorSummary: selectorSummaryForWorkspace(workspace),
         };
       });
@@ -502,11 +531,8 @@ const handlers: HandlerMap = {
       const enriched = {
         ...ws,
         focusedPaneIndex,
-        focusedPaneNumber:
-          focusedPaneIndex != null
-            ? (paneNumbers.get(ws.panes[focusedPaneIndex]?.id) ?? null)
-            : null,
-        panes: ws.panes.map((p, i) => enrichPane(p, i, paneNumbers)),
+        focusedPaneNumber: focusedContentNumber(ws.panes, focusedPaneIndex, paneNumbers),
+        panes: enrichPanes(ws.panes, paneNumbers),
       };
       return ok({ workspace: enriched });
     },
@@ -549,9 +575,9 @@ const handlers: HandlerMap = {
           const prevActiveId = store.activeWorkspaceId;
           store.setActiveWorkspace(newWs.id);
           for (let i = 0; i < newWs.panes.length; i++) {
-            const pane = newWs.panes[i];
+            const view = activeLayer(newWs.panes[i]).view;
             const viewConfig: ViewInstanceConfig = {
-              ...(pane.view.type === "TerminalView" ? pane.view : { type: "TerminalView" }),
+              ...(view.type === "TerminalView" ? view : { type: "TerminalView" }),
               lastCwd: cwd,
             };
             useWorkspaceStore.getState().setPaneView(i, viewConfig);
@@ -604,19 +630,19 @@ const handlers: HandlerMap = {
       const paneNumbers = ws ? computePaneNumbers(ws.panes) : new Map<string, number>();
       // Summary so an orchestrator can map paneNumber <-> terminalId in one call.
       const panes = ws
-        ? ws.panes
-            .map((p, i) => ({
-              paneNumber: paneNumbers.get(p.id) ?? null,
-              paneIndex: i,
-              paneId: p.id,
-              terminalId: p.view.type === "TerminalView" ? toTerminalId(p.id) : null,
+        ? layerEntries(ws.panes)
+            .map(({ layer, slotIndex, active }) => ({
+              paneNumber: paneNumbers.get(layer.id) ?? null,
+              paneIndex: slotIndex,
+              paneId: layer.id,
+              terminalId: layer.view.type === "TerminalView" ? toTerminalId(layer.id) : null,
+              activeLayer: active,
             }))
             .sort((a, b) => (a.paneNumber ?? 0) - (b.paneNumber ?? 0))
         : [];
-      const focusedPaneNumber =
-        focusedPaneIndex != null && ws
-          ? (paneNumbers.get(ws.panes[focusedPaneIndex]?.id) ?? null)
-          : null;
+      const focusedPaneNumber = ws
+        ? focusedContentNumber(ws.panes, focusedPaneIndex, paneNumbers)
+        : null;
       // Keyboard focus lives on two axes — grid pane and dock pane — and only one
       // holds it at a time (entering a dock nulls focusedPaneIndex and vice versa).
       // Resolve the winner here so callers never have to join the two stores; a
@@ -636,7 +662,8 @@ const handlers: HandlerMap = {
             ? toTerminalId(focusedDockPane.id)
             : null
           : focusedPaneIndex != null
-            ? (panes.find((p) => p.paneIndex === focusedPaneIndex)?.terminalId ?? null)
+            ? (panes.find((p) => p.paneIndex === focusedPaneIndex && p.activeLayer)?.terminalId ??
+              null)
             : null;
       return ok({
         editMode,
@@ -731,7 +758,8 @@ const handlers: HandlerMap = {
       const newPaneIndex = idx + 1;
       // Auto-convert EmptyView to TerminalView so MCP splits create usable terminals
       const wsBeforeConvert = useWorkspaceStore.getState().getActiveWorkspace();
-      const newPaneBefore = wsBeforeConvert?.panes[newPaneIndex];
+      const newSlotBefore = wsBeforeConvert?.panes[newPaneIndex];
+      const newPaneBefore = newSlotBefore ? activeLayer(newSlotBefore) : undefined;
       if (newPaneBefore) {
         if (newPaneBefore.view.type !== "TerminalView") {
           const viewConfig: ViewInstanceConfig = { type: "TerminalView" };
@@ -748,7 +776,8 @@ const handlers: HandlerMap = {
         }
       }
       const ws = useWorkspaceStore.getState().getActiveWorkspace();
-      const newPane = ws?.panes[newPaneIndex];
+      const newSlot = ws?.panes[newPaneIndex];
+      const newPane = newSlot ? { ...newSlot, ...activeLayer(newSlot) } : undefined;
       const terminalId = newPane?.view.type === "TerminalView" ? toTerminalId(newPane.id) : null;
       // PTY readiness is stricter than React registration: TerminalView enters
       // the store before its async backend session creation resolves.
@@ -888,8 +917,9 @@ const handlers: HandlerMap = {
       const enriched = [...projectedById.values()].map((inst) => {
         const ws = workspaces.find((w) => w.id === inst.workspaceId);
         const paneId = toPaneId(inst.id);
-        const paneIndex = ws?.panes.findIndex((p) => p.id === paneId) ?? -1;
-        const pane = paneIndex >= 0 ? ws!.panes[paneIndex] : null;
+        const entry = ws ? findLayerEntry(ws.panes, paneId) : null;
+        const paneIndex = entry ? entry.slotIndex : -1;
+        const pane = entry ? entry.slot : null;
         let paneNumber: number | null = null;
         if (ws) {
           let numbers = numbersByWs.get(ws.id);
@@ -913,8 +943,10 @@ const handlers: HandlerMap = {
     get: (p) => {
       const ctx = findTerminalContext(p.id as string);
       if (!ctx) return err(`Terminal '${p.id}' not found`);
-      const { terminal, workspace, pane, paneIndex, activeWorkspaceId } = ctx;
-      const paneNumber = pane ? (computePaneNumbers(workspace.panes).get(pane.id) ?? null) : null;
+      const { terminal, workspace, pane, paneIndex, entry, activeWorkspaceId } = ctx;
+      const paneNumber = entry
+        ? (computePaneNumbers(workspace.panes).get(entry.layer.id) ?? null)
+        : null;
       return ok({
         terminal: {
           ...terminal,
@@ -932,7 +964,7 @@ const handlers: HandlerMap = {
     identify: (p) => {
       const ctx = findTerminalContext(p.id as string);
       if (!ctx) return err(`Terminal '${p.id}' not found`);
-      const { terminal, workspace, pane, paneIndex, activeWorkspaceId } = ctx;
+      const { terminal, workspace, pane, paneIndex, entry, activeWorkspaceId } = ctx;
       const { focusedPaneIndex } = useGridStore.getState();
       const paneNumbers = computePaneNumbers(workspace.panes);
 
@@ -952,18 +984,29 @@ const handlers: HandlerMap = {
           isActive: workspace.id === activeWorkspaceId,
           totalPanes: workspace.panes.length,
         },
-        pane: pane
-          ? {
-              id: pane.id,
-              index: paneIndex,
-              number: paneNumbers.get(pane.id) ?? null,
-              x: pane.x,
-              y: pane.y,
-              w: pane.w,
-              h: pane.h,
-              isFocusedPane: workspace.id === activeWorkspaceId && focusedPaneIndex === paneIndex,
-            }
-          : null,
+        pane:
+          pane && entry
+            ? {
+                id: entry.layer.id,
+                index: paneIndex,
+                number: paneNumbers.get(entry.layer.id) ?? null,
+                x: pane.x,
+                y: pane.y,
+                w: pane.w,
+                h: pane.h,
+                isFocusedPane:
+                  workspace.id === activeWorkspaceId &&
+                  focusedPaneIndex === paneIndex &&
+                  entry.active,
+                // Where this terminal sits in its slot stack (ADR-0295).
+                stack: {
+                  position: entry.layerIndex,
+                  count: pane.layers.length,
+                  active: entry.active,
+                  layerIds: pane.layers.map((layer) => layer.id),
+                },
+              }
+            : null,
         neighbors: pane ? computeNeighbors(workspace.panes, paneIndex, paneNumbers) : null,
       });
     },
@@ -989,7 +1032,8 @@ const handlers: HandlerMap = {
       if (dockCtx) {
         focusDockPane(dockCtx.dock.position, dockCtx.pane.id);
       } else if (terminalWorkspaceId && paneIndex >= 0) {
-        focusWorkspacePane(terminalWorkspaceId, paneIndex);
+        // The terminal may sit on an inactive stacked layer (ADR-0295).
+        activatePaneLayer(terminalWorkspaceId, toPaneId(terminalId));
       }
 
       if (terminal) useTerminalStore.getState().setTerminalFocus(terminalId);
@@ -1032,15 +1076,17 @@ const handlers: HandlerMap = {
         : useWorkspaceStore.getState().getActiveWorkspace();
       if (!ws) return err(wsId ? `Workspace '${wsId}' not found` : "No active workspace");
       const paneNumbers = computePaneNumbers(ws.panes);
-      const entry = ws.panes.find((pane) => paneNumbers.get(pane.id) === number);
+      const entry = layerEntries(ws.panes).find(
+        ({ layer }) => paneNumbers.get(layer.id) === number,
+      );
       if (!entry) return err(`No pane numbered ${number} in workspace '${ws.id}'`);
-      if (entry.view.type !== "TerminalView") {
-        return err(`Pane ${number} is not a terminal (view: ${entry.view.type})`);
+      if (entry.layer.view.type !== "TerminalView") {
+        return err(`Pane ${number} is not a terminal (view: ${entry.layer.view.type})`);
       }
       return ok({
-        terminalId: toTerminalId(entry.id),
-        paneId: entry.id,
-        paneIndex: ws.panes.indexOf(entry),
+        terminalId: toTerminalId(entry.layer.id),
+        paneId: entry.layer.id,
+        paneIndex: entry.slotIndex,
         workspaceId: ws.id,
       });
     },
@@ -1229,7 +1275,7 @@ const handlers: HandlerMap = {
       if (typeof p.hidden !== "boolean") return err("'hidden' must be a boolean");
       const paneExists = useWorkspaceStore
         .getState()
-        .workspaces.some((workspace) => workspace.panes.some((pane) => pane.id === id));
+        .workspaces.some((workspace) => findLayerEntry(workspace.panes, id) !== null);
       if (!paneExists) return err(`pane '${id}' not found`);
       useUiStore.getState().setPaneHidden(id, p.hidden);
       return ok({ hidden: p.hidden });
@@ -1247,7 +1293,7 @@ const handlers: HandlerMap = {
       if (!id) return err("id required");
       const paneExists = useWorkspaceStore
         .getState()
-        .workspaces.some((workspace) => workspace.panes.some((pane) => pane.id === id));
+        .workspaces.some((workspace) => findLayerEntry(workspace.panes, id) !== null);
       if (!paneExists) return err(`pane '${id}' not found`);
       const hidden = !useUiStore.getState().hiddenPaneIds.has(id);
       useUiStore.getState().setPaneHidden(id, hidden);

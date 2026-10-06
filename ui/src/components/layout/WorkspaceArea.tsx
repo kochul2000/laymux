@@ -40,10 +40,18 @@ export function WorkspaceArea() {
         if (!mountedWsIds.has(ws.id)) return null;
         // Only background workspaces may have panes evicted; the active workspace
         // always renders in full so the user never sees a blanked-out pane.
+        // Eviction is per content layer (ADR-0295); a slot whose layers were all
+        // evicted renders nothing.
         const renderedPanes =
           isActive || evictedPaneIds.size === 0
             ? ws.panes
-            : ws.panes.filter((p) => !evictedPaneIds.has(p.id));
+            : ws.panes
+                .map((p) =>
+                  p.layers.some((layer) => evictedPaneIds.has(layer.id))
+                    ? { ...p, layers: p.layers.filter((layer) => !evictedPaneIds.has(layer.id)) }
+                    : p,
+                )
+                .filter((p) => p.layers.length > 0);
         const indexMap = new Map(ws.panes.map((p, i) => [p.id, i]));
         const idxOf = (paneId: string) => indexMap.get(paneId) ?? -1;
         return (
@@ -64,10 +72,14 @@ export function WorkspaceArea() {
               focusWorkspacePane(ws.id, idxOf(paneId));
             }}
             onSetPaneView={
-              isActive ? (paneId, config) => setPaneView(idxOf(paneId), config) : undefined
+              isActive
+                ? (paneId, config, layerId) => setPaneView(idxOf(paneId), config, layerId)
+                : undefined
             }
             onSplitPane={isActive ? (paneId, dir) => splitPane(idxOf(paneId), dir) : undefined}
-            onRemovePane={isActive ? (paneId) => removePane(idxOf(paneId)) : undefined}
+            onRemovePane={
+              isActive ? (paneId, layerId) => removePane(idxOf(paneId), layerId) : undefined
+            }
             onSwapPanes={
               isActive
                 ? (srcPaneId, tgtPaneId) => swapPanes(idxOf(srcPaneId), idxOf(tgtPaneId))

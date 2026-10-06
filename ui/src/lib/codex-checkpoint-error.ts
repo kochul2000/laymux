@@ -4,20 +4,21 @@ import { useDockStore } from "@/stores/dock-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { toPaneId } from "./pane-ids";
 import { paneNumberFor } from "./pane-numbers";
+import { findLayerInWorkspaces } from "./pane-layers";
 
 function paneLabel(terminalId: string): string {
   const paneId = toPaneId(terminalId);
-  const workspace = useWorkspaceStore
-    .getState()
-    .workspaces.find((item) => item.panes.some((pane) => pane.id === paneId));
+  // Workspace content lives in stacked layers (ADR-0295); dock panes are content.
+  const found = findLayerInWorkspaces(useWorkspaceStore.getState().workspaces, paneId);
+  const workspace = found?.workspace;
   const dock = useDockStore
     .getState()
     .docks.find((item) => item.panes.some((pane) => pane.id === paneId));
   const panes = workspace?.panes ?? dock?.panes;
   if (!panes) return terminalId;
-  const pane = panes.find((item) => item.id === paneId);
+  const view = found?.entry.layer.view ?? dock?.panes.find((item) => item.id === paneId)?.view;
   const instance = useTerminalStore.getState().instances.find((item) => item.id === terminalId);
-  const title = instance?.title || instance?.label || pane?.view.profile;
+  const title = instance?.title || instance?.label || view?.profile;
   const location = workspace?.name ?? i18n.t(`codexCheckpoint.dock.${dock!.position}`);
   return [
     location,

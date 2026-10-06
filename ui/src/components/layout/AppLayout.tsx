@@ -16,6 +16,7 @@ import { FileViewerOverlay } from "./FileViewerOverlay";
 import { RenameWorkspaceOverlay } from "./RenameWorkspaceOverlay";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { getPaneInstanceId } from "@/lib/view-instance-id";
+import { activeLayer } from "@/lib/pane-layers";
 import type { DockPosition, ViewType } from "@/stores/types";
 import { useAppTheme } from "@/hooks/useAppTheme";
 import { useHiddenTerminalAutoClose } from "@/hooks/useHiddenTerminalAutoClose";
@@ -182,6 +183,14 @@ export function AppLayout() {
   const closeRemoteAccessModal = useUiStore((s) => s.closeRemoteAccessModal);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const focusedPaneIndex = useGridStore((s) => s.focusedPaneIndex);
+  // Switching the focused slot's stacked layer is a focus entry too (ADR-0295).
+  const focusedLayerId = useWorkspaceStore((s) => {
+    const pane =
+      focusedPaneIndex === null
+        ? undefined
+        : s.workspaces.find((ws) => ws.id === s.activeWorkspaceId)?.panes[focusedPaneIndex];
+    return pane ? activeLayer(pane).id : null;
+  });
   const notificationDismiss = useSettingsStore((s) => s.notifications.dismiss);
   const markWorkspaceAsRead = useNotificationStore((s) => s.markWorkspaceAsRead);
   const markTerminalAsRead = useNotificationStore((s) => s.markTerminalAsRead);
@@ -204,7 +213,14 @@ export function AppLayout() {
     if (notificationDismiss === "workspace" && activeWorkspaceId && unreadCount > 0) {
       markWorkspaceAsRead(activeWorkspaceId);
     }
-  }, [notificationDismiss, activeWorkspaceId, focusedPaneIndex, unreadCount, markWorkspaceAsRead]);
+  }, [
+    notificationDismiss,
+    activeWorkspaceId,
+    focusedPaneIndex,
+    focusedLayerId,
+    unreadCount,
+    markWorkspaceAsRead,
+  ]);
 
   // "paneFocus": focusing a pane clears only *that pane's* alerts, not the whole
   // workspace. The model tracks alerts per terminal instance (Notification.terminalId),
@@ -214,9 +230,16 @@ export function AppLayout() {
       return;
     }
     const pane = useWorkspaceStore.getState().getActiveWorkspace()?.panes[focusedPaneIndex];
-    const instanceId = pane && getPaneInstanceId(pane);
+    const instanceId = pane && getPaneInstanceId(activeLayer(pane));
     if (instanceId) markTerminalAsRead(instanceId);
-  }, [notificationDismiss, activeWorkspaceId, focusedPaneIndex, unreadCount, markTerminalAsRead]);
+  }, [
+    notificationDismiss,
+    activeWorkspaceId,
+    focusedPaneIndex,
+    focusedLayerId,
+    unreadCount,
+    markTerminalAsRead,
+  ]);
 
   const top = docks.find((d) => d.position === "top");
   const bottom = docks.find((d) => d.position === "bottom");

@@ -7,7 +7,17 @@ function workspace(id: string, paneId: string, type: "TerminalView" | "MemoView"
   return {
     id,
     name: id,
-    panes: [{ id: paneId, x: 0, y: 0, w: 1, h: 1, view: { type } }],
+    panes: [
+      {
+        id: paneId,
+        x: 0,
+        y: 0,
+        w: 1,
+        h: 1,
+        layers: [{ id: paneId, view: { type } }],
+        activeLayerId: paneId,
+      },
+    ],
   };
 }
 

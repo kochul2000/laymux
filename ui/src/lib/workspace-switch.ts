@@ -2,6 +2,7 @@ import type { WorkspacePane } from "@/stores/types";
 
 import { toTerminalId } from "./pane-ids";
 import { computePaneNumbers } from "./pane-numbers";
+import { activeLayer } from "./pane-layers";
 
 /**
  * Workspace-switch landing rules (issue #311, issue #578).
@@ -66,8 +67,10 @@ export function resolveWorkspaceLandingPane(
 ): WorkspaceLandingPane | null {
   const paneIndex = resolveWorkspaceLandingPaneIndex({ ...input, paneCount: panes.length });
   if (paneIndex === null) return null;
-  const pane = panes[paneIndex];
-  if (!pane) return null;
+  const slot = panes[paneIndex];
+  if (!slot) return null;
+  // The surface lands on the slot's visible content (ADR-0295).
+  const pane = activeLayer(slot);
   return {
     paneIndex,
     paneId: pane.id,

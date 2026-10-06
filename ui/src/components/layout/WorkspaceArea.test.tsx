@@ -81,8 +81,8 @@ describe("WorkspaceArea", () => {
     fireEvent.change(select, { target: { value: "TerminalView:PowerShell" } });
 
     const active = useWorkspaceStore.getState().getActiveWorkspace()!;
-    expect(active.panes[0].view.type).toBe("TerminalView");
-    expect(active.panes[0].view.profile).toBe("PowerShell");
+    expect(active.panes[0].layers[0].view.type).toBe("TerminalView");
+    expect(active.panes[0].layers[0].view.profile).toBe("PowerShell");
   });
 
   it("splits pane via control bar", () => {
@@ -297,7 +297,9 @@ describe("WorkspaceArea", () => {
     const terminalPaneIds = useWorkspaceStore
       .getState()
       .workspaces.flatMap((workspace) =>
-        workspace.panes.filter((pane) => pane.view.type === "TerminalView").map((pane) => pane.id),
+        workspace.panes
+          .filter((pane) => pane.layers[0].view.type === "TerminalView")
+          .map((pane) => pane.id),
       );
     useTerminalStartupStore.getState().syncCandidates({
       knownPaneIds: terminalPaneIds,

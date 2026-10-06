@@ -297,8 +297,10 @@ mod tests {
     #[test]
     fn missing_required_field_widens_the_drop_to_the_parent() {
         // WorkspacePaneView.type has no default. A mistyped `type` first drops
-        // the key, then the parent view, then the pane — loss grows outward
-        // only as far as the schema forces.
+        // the key, then the parent view — loss grows outward only as far as the
+        // schema forces. `view` is optional since pane stacking (ADR-0295), so
+        // the pane survives lenient loading without content and
+        // `validate_and_repair` removes it afterwards.
         let raw = r#"{
           "workspaces": [
             {
@@ -314,13 +316,21 @@ mod tests {
         // The workspace itself survives with its name.
         assert_eq!(recovered.settings.workspaces.len(), 1);
         assert_eq!(recovered.settings.workspaces[0].name, "Keep me");
-        assert!(recovered.settings.workspaces[0].panes.is_empty());
+        let pane = &recovered.settings.workspaces[0].panes[0];
+        assert!(pane.view.is_none() && pane.layers.is_empty());
 
         let paths: Vec<&str> = recovered.dropped.iter().map(|w| w.path.as_str()).collect();
         assert!(
-            paths.contains(&"workspaces[0].panes[0]"),
-            "the pane must be reported as lost: {paths:?}"
+            paths.contains(&"workspaces[0].panes[0].view"),
+            "the view must be reported as lost: {paths:?}"
         );
+
+        let mut settings = recovered.settings;
+        crate::settings::validation::validate_and_repair(&mut settings);
+        assert!(settings.workspaces[0]
+            .panes
+            .iter()
+            .all(|pane| pane.id != "p1"));
     }
 
     #[test]
@@ -331,8 +341,9 @@ mod tests {
               "id": "ws-1",
               "name": "Keep me",
               "panes": [
-                { "id": "p1", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0, "view": { "type": 5 } },
-                { "id": "p2", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0, "view": { "type": 6 } }
+                5,
+                { "id": "p2", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0, "view": { "type": "MemoView" } },
+                6
               ]
             }
           ]
@@ -346,9 +357,11 @@ mod tests {
             "first original pane must be reported: {paths:?}"
         );
         assert!(
-            paths.contains(&"workspaces[0].panes[1]"),
-            "second original pane must be reported: {paths:?}"
+            paths.contains(&"workspaces[0].panes[2]"),
+            "third original pane must be reported at its original index: {paths:?}"
         );
+        assert_eq!(recovered.settings.workspaces[0].panes.len(), 1);
+        assert_eq!(recovered.settings.workspaces[0].panes[0].id, "p2");
     }
 
     #[test]

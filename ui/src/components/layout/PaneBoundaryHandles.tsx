@@ -35,7 +35,8 @@ export function PaneBoundaryHandles({
 }: Props) {
   const activeWorkspace = useWorkspaceStore((s) => s.getActiveWorkspace());
   const storeResizePane = useWorkspaceStore((s) => s.resizePane);
-  const storeRemovePane = useWorkspaceStore((s) => s.removePane);
+  // A collapsed boundary removes the whole slot, stacked layers included (ADR-0295).
+  const storeRemovePane = useWorkspaceStore((s) => s.removeSlot);
 
   const panes = propPanes ?? activeWorkspace?.panes ?? [];
   // The store fallback must be memoized: an inline arrow would be a new

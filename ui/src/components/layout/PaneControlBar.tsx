@@ -56,8 +56,13 @@ export interface PaneControlBarActions {
 }
 
 interface PaneControlBarProps {
-  /** Stable pane ID for persisting control bar mode across restarts. */
+  /** Stable pane (slot) ID for persisting control bar mode across restarts. */
   paneId?: string;
+  /**
+   * Content id the workspace-list hide toggle acts on: the stacked layer this bar
+   * belongs to (ADR-0295). Defaults to `paneId`.
+   */
+  contentPaneId?: string;
   currentView: ViewInstanceConfig;
   actions: PaneControlBarActions;
   hovered: boolean;
@@ -606,6 +611,7 @@ function barDragProps(
 
 export function PaneControlBar({
   paneId,
+  contentPaneId,
   currentView,
   actions,
   hovered,
@@ -623,15 +629,16 @@ export function PaneControlBar({
 }: PaneControlBarProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   // workspace selector 목록 숨김 상태(raw)를 구독해 토글 버튼 상태로 쓴다 (ADR-0035).
+  const hideTargetId = contentPaneId ?? paneId;
   const paneHidden = useUiStore((s) =>
-    showListHideToggle && paneId ? s.hiddenPaneIds.has(paneId) : false,
+    showListHideToggle && hideTargetId ? s.hiddenPaneIds.has(hideTargetId) : false,
   );
   const onToggleHidden = useMemo(
     () =>
-      showListHideToggle && paneId
-        ? () => useUiStore.getState().togglePaneHidden(paneId)
+      showListHideToggle && hideTargetId
+        ? () => useUiStore.getState().togglePaneHidden(hideTargetId)
         : undefined,
-    [showListHideToggle, paneId],
+    [showListHideToggle, hideTargetId],
   );
   const { w: paneWidth } = useContainerSize(rootRef);
   const persistedMode = useOverridesStore((s) =>

@@ -5,11 +5,19 @@ import type { WorkspacePane } from "@/stores/types";
 import { resolveWorkspaceLandingPane, resolveWorkspaceLandingPaneIndex } from "./workspace-switch";
 
 function term(id: string, x: number, y: number, w = 0.5, h = 0.5): WorkspacePane {
-  return { id, x, y, w, h, view: { type: "TerminalView" } };
+  return {
+    id,
+    x,
+    y,
+    w,
+    h,
+    layers: [{ id: id, view: { type: "TerminalView" } }],
+    activeLayerId: id,
+  };
 }
 
 function memo(id: string, x: number, y: number, w = 0.5, h = 0.5): WorkspacePane {
-  return { id, x, y, w, h, view: { type: "MemoView" } };
+  return { id, x, y, w, h, layers: [{ id: id, view: { type: "MemoView" } }], activeLayerId: id };
 }
 
 describe("resolveWorkspaceLandingPaneIndex", () => {

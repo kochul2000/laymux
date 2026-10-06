@@ -53,11 +53,17 @@ export function summarizeClearResult(result: WorkspaceClearResult): string {
   return parts.join(", ");
 }
 
-/** Pane ids of a workspace's TerminalView panes, in layout order. */
+/**
+ * Content ids of a workspace's TerminalView layers in layout order, including
+ * inactive stacked layers — the clear covers the whole grid (ADR-0295).
+ */
 export function terminalPaneIdsForWorkspace(workspaceId: string): string[] {
   const workspace = useWorkspaceStore.getState().workspaces.find((ws) => ws.id === workspaceId);
   if (!workspace) return [];
-  return workspace.panes.filter((pane) => pane.view.type === "TerminalView").map((pane) => pane.id);
+  return workspace.panes
+    .flatMap((pane) => pane.layers)
+    .filter((layer) => layer.view.type === "TerminalView")
+    .map((layer) => layer.id);
 }
 
 async function writeCtrlL(

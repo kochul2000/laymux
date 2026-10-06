@@ -1,5 +1,6 @@
 import type { Workspace } from "@/stores/types";
 
+import { layerEntries } from "./pane-layers";
 import { computePaneNumbers } from "./pane-numbers";
 
 /**
@@ -20,7 +21,7 @@ export interface SpatialEntry {
   workspaceId: string;
   workspaceName: string;
   paneId: string;
-  /** Original WorkspacePane[] index (grid focus index), not the sorted position. */
+  /** Slot index in WorkspacePane[] (grid focus index), not the sorted position. */
   paneIndex: number;
   /** Spatial reading-order number — same numbering as the pane badge. */
   paneNumber: number;
@@ -55,17 +56,18 @@ export function buildSpatialOrder(
   const entries: SpatialEntry[] = [];
   for (const workspace of visibleWorkspaces) {
     const numbers = computePaneNumbers(workspace.panes);
-    workspace.panes
-      .map((pane, paneIndex) => ({ pane, paneIndex }))
-      .filter(({ pane }) => pane.view.type === "TerminalView")
-      .sort((a, b) => (numbers.get(a.pane.id) ?? 0) - (numbers.get(b.pane.id) ?? 0))
-      .forEach(({ pane, paneIndex }) => {
+    // Every terminal layer takes part, stacked or not (ADR-0295): the walk is
+    // (slot reading order × stack order), which is exactly paneNumber order.
+    layerEntries(workspace.panes)
+      .filter(({ layer }) => layer.view.type === "TerminalView")
+      .sort((a, b) => (numbers.get(a.layer.id) ?? 0) - (numbers.get(b.layer.id) ?? 0))
+      .forEach(({ layer, slotIndex }) => {
         entries.push({
           workspaceId: workspace.id,
           workspaceName: workspace.name,
-          paneId: pane.id,
-          paneIndex,
-          paneNumber: numbers.get(pane.id) ?? 0,
+          paneId: layer.id,
+          paneIndex: slotIndex,
+          paneNumber: numbers.get(layer.id) ?? 0,
         });
       });
   }

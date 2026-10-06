@@ -1,10 +1,12 @@
 import { computePaneNumbers } from "@/lib/pane-numbers";
-import type { Workspace, WorkspacePane } from "@/stores/types";
+import { layerEntries } from "@/lib/pane-layers";
+import type { PaneLayer, Workspace } from "@/stores/types";
 
 export interface HiddenPaneItem {
   workspace: Workspace;
-  pane: WorkspacePane;
-  /** Index in the original WorkspacePane[] layout, used for focus. */
+  /** The hidden content layer (ADR-0295: hide flags are per layer). */
+  pane: PaneLayer;
+  /** Slot index in the original WorkspacePane[] layout, used for focus. */
   paneIndex: number;
   /** Stable display number derived from layout geometry. */
   paneNumber: number;
@@ -48,12 +50,12 @@ export function deriveHiddenItems(input: DeriveHiddenItemsInput): DerivedHiddenI
 
   for (const workspace of workspaces) {
     const paneNumbers = computePaneNumbers(workspace.panes);
-    workspace.panes.forEach((pane, paneIndex) => {
-      paneItemsById.set(pane.id, {
+    layerEntries(workspace.panes).forEach(({ layer, slotIndex }) => {
+      paneItemsById.set(layer.id, {
         workspace,
-        pane,
-        paneIndex,
-        paneNumber: paneNumbers.get(pane.id) ?? paneIndex + 1,
+        pane: layer,
+        paneIndex: slotIndex,
+        paneNumber: paneNumbers.get(layer.id) ?? slotIndex + 1,
       });
     });
   }
@@ -73,6 +75,7 @@ export function deriveHiddenItems(input: DeriveHiddenItemsInput): DerivedHiddenI
 
   for (const workspace of workspaces) {
     const nestedHiddenPanes = workspace.panes
+      .flatMap((pane) => pane.layers)
       .filter((pane) => validHiddenPaneIds.has(pane.id))
       .map((pane) => paneItemsById.get(pane.id))
       .filter((item): item is HiddenPaneItem => item !== undefined);

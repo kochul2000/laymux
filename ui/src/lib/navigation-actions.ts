@@ -8,7 +8,8 @@ import {
   type SpatialDirection,
 } from "@/lib/spatial-navigation";
 import { filterVisibleWorkspaces, sortWorkspaces } from "@/lib/workspace-sort";
-import { focusWorkspacePane } from "@/lib/workspace-transition";
+import { activatePaneLayer, focusWorkspacePane } from "@/lib/workspace-transition";
+import { activeLayer, findLayerEntry } from "@/lib/pane-layers";
 import { useDockStore } from "@/stores/dock-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useNotificationStore } from "@/stores/notification-store";
@@ -96,7 +97,9 @@ export function spatialStep(
   let anchorPaneNumber: number | null = null;
   if (!dockFocused && activeWorkspace && focusedPaneIndex !== null) {
     const focusedPane = activeWorkspace.panes[focusedPaneIndex];
-    if (focusedPane) anchorPaneNumber = paneNumberFor(activeWorkspace.panes, focusedPane.id);
+    if (focusedPane) {
+      anchorPaneNumber = paneNumberFor(activeWorkspace.panes, activeLayer(focusedPane).id);
+    }
   }
 
   const target = findSpatialStepTarget(
@@ -108,7 +111,8 @@ export function spatialStep(
   if (!target) return { moved: false, reason: "no_other_target" };
 
   const switchedWorkspace = target.workspaceId !== activeWorkspaceId;
-  focusWorkspacePane(target.workspaceId, target.paneIndex);
+  // The target may sit on an inactive stacked layer (ADR-0295).
+  activatePaneLayer(target.workspaceId, target.paneId);
 
   return {
     moved: true,
@@ -133,8 +137,9 @@ export function spatialStep(
  */
 export function directionStep(direction: Direction): NavigationStepResult {
   const workspace = useWorkspaceStore.getState().getActiveWorkspace();
+  // Direction moves between slots; each slot shows its active layer (ADR-0295).
   const terminalIndexes = (workspace?.panes ?? []).flatMap((pane, index) =>
-    pane.view.type === "TerminalView" ? [index] : [],
+    activeLayer(pane).view.type === "TerminalView" ? [index] : [],
   );
   if (!workspace || terminalIndexes.length === 0) {
     return { moved: false, reason: "no_terminal_panes" };
@@ -151,7 +156,7 @@ export function directionStep(direction: Direction): NavigationStepResult {
   if (next === null) return { moved: false, reason: "no_other_target" };
 
   const paneIndex = terminalIndexes[next];
-  const pane = workspace.panes[paneIndex];
+  const layer = activeLayer(workspace.panes[paneIndex]);
   focusWorkspacePane(workspace.id, paneIndex);
 
   return {
@@ -159,10 +164,10 @@ export function directionStep(direction: Direction): NavigationStepResult {
     target: {
       workspaceId: workspace.id,
       workspaceName: workspace.name,
-      terminalId: toTerminalId(pane.id),
-      paneId: pane.id,
+      terminalId: toTerminalId(layer.id),
+      paneId: layer.id,
       paneIndex,
-      paneNumber: paneNumberFor(workspace.panes, pane.id),
+      paneNumber: paneNumberFor(workspace.panes, layer.id),
       switchedWorkspace: false,
     },
   };
@@ -189,10 +194,12 @@ export function notificationStep(direction: NotificationDirection): NavigationSt
   let paneIndex = 0;
   let paneNumber: number | null = null;
   if (ws) {
-    const idx = ws.panes.findIndex((p) => p.id === paneId);
-    paneIndex = idx >= 0 ? idx : 0;
-    focusWorkspacePane(target.workspaceId, paneIndex);
-    paneNumber = idx >= 0 ? paneNumberFor(ws.panes, paneId) : null;
+    // paneId is a layer id; it may be an inactive stacked layer (ADR-0295).
+    const entry = findLayerEntry(ws.panes, paneId);
+    paneIndex = entry ? entry.slotIndex : 0;
+    if (entry) activatePaneLayer(target.workspaceId, paneId);
+    else focusWorkspacePane(target.workspaceId, paneIndex);
+    paneNumber = entry ? paneNumberFor(ws.panes, paneId) : null;
   }
 
   // Mark target notifications as read so next navigation advances.

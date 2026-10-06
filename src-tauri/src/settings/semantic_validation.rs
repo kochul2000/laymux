@@ -889,24 +889,31 @@ fn validate_workspace_profile_references(settings: &Settings, issues: &mut Vec<S
         .collect();
     for (workspace_index, workspace) in settings.workspaces.iter().enumerate() {
         for (pane_index, pane) in workspace.panes.iter().enumerate() {
-            if pane.view.view_type != "TerminalView" {
-                continue;
-            }
-            let Some(profile) = pane
-                .view
-                .extra
-                .get("profile")
-                .and_then(|value| value.as_str())
-            else {
-                continue;
-            };
-            if !profile.is_empty() && !profile_names.contains(profile) {
-                issue(
-                    issues,
-                    "invalid_reference",
-                    format!("/workspaces/{workspace_index}/panes/{pane_index}/view/profile"),
-                    format!("프로필 '{profile}'이(가) 존재하지 않습니다."),
-                );
+            let stacked = !pane.layers.is_empty();
+            // Every stacked layer is content of its own (ADR-0295).
+            for (layer_index, (_, view)) in pane.content_views().into_iter().enumerate() {
+                if view.view_type != "TerminalView" {
+                    continue;
+                }
+                let Some(profile) = view.extra.get("profile").and_then(|value| value.as_str())
+                else {
+                    continue;
+                };
+                if !profile.is_empty() && !profile_names.contains(profile) {
+                    let view_path = if stacked {
+                        format!(
+                            "/workspaces/{workspace_index}/panes/{pane_index}/layers/{layer_index}/view"
+                        )
+                    } else {
+                        format!("/workspaces/{workspace_index}/panes/{pane_index}/view")
+                    };
+                    issue(
+                        issues,
+                        "invalid_reference",
+                        format!("{view_path}/profile"),
+                        format!("프로필 '{profile}'이(가) 존재하지 않습니다."),
+                    );
+                }
             }
         }
     }

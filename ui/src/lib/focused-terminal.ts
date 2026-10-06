@@ -1,5 +1,6 @@
 import type { TerminalInstance } from "@/stores/terminal-store";
-import type { DockPane, DockPosition, Workspace, WorkspacePane } from "@/stores/types";
+import type { DockPane, DockPosition, PaneLayer, Workspace } from "@/stores/types";
+import { activeLayer } from "@/lib/pane-layers";
 import { getPaneInstanceId } from "@/lib/view-instance-id";
 
 interface FocusedTerminalTargetState {
@@ -25,8 +26,9 @@ interface FocusedTerminalCwdState extends FocusedTerminalTargetState {
  */
 export function resolveFocusedTerminalPane(
   state: FocusedTerminalTargetState,
-): WorkspacePane | DockPane | undefined {
-  const pane =
+): PaneLayer | DockPane | undefined {
+  // The focused content of a workspace slot is its active layer (ADR-0295).
+  const pane: PaneLayer | DockPane | undefined =
     state.focusedDock !== null
       ? state.docks
           .find((dock) => dock.position === state.focusedDock)
@@ -35,9 +37,11 @@ export function resolveFocusedTerminalPane(
           const workspace = state.workspaces.find(
             (candidate) => candidate.id === state.activeWorkspaceId,
           );
-          return workspace && state.focusedPaneIndex !== null
-            ? workspace.panes[state.focusedPaneIndex]
-            : undefined;
+          const slot =
+            workspace && state.focusedPaneIndex !== null
+              ? workspace.panes[state.focusedPaneIndex]
+              : undefined;
+          return slot ? activeLayer(slot) : undefined;
         })();
 
   return pane?.view.type === "TerminalView" ? pane : undefined;

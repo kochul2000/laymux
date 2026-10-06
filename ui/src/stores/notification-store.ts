@@ -5,6 +5,7 @@ import { useWorkspaceStore } from "./workspace-store";
 import { useSettingsStore } from "./settings-store";
 import { useGridStore } from "./grid-store";
 import { getPaneInstanceId } from "@/lib/view-instance-id";
+import { activeLayer } from "@/lib/pane-layers";
 
 export type NotificationLevel = "info" | "error" | "warning" | "success";
 
@@ -19,7 +20,7 @@ function focusedPaneInstanceId(): string | null {
   const idx = useGridStore.getState().focusedPaneIndex;
   if (idx === null) return null;
   const pane = useWorkspaceStore.getState().getActiveWorkspace()?.panes[idx];
-  return pane ? getPaneInstanceId(pane) : null;
+  return pane ? getPaneInstanceId(activeLayer(pane)) : null;
 }
 
 export interface Notification {
