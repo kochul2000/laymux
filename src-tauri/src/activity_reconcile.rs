@@ -339,6 +339,7 @@ fn apply_exit_transition(
     if app_name == "Codex" {
         if let Some(session) = terminals.get_mut(terminal_id) {
             session.codex_hook_title.clear();
+            state.session_checkpoint.hints.request();
         }
     }
     let mut message_cleared = false;

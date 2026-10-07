@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 #[cfg(windows)]
 use std::time::Duration;
 
-fn processes(state: &AppState) -> Result<HashMap<String, CodexStatusProcess>, String> {
+pub(super) fn processes(state: &AppState) -> Result<HashMap<String, CodexStatusProcess>, String> {
     let domains = crate::commands::session_attribution::provider_terminal_domains(state)?;
     let snapshot = crate::process_tree::try_snapshot_processes()?;
     let mut result = HashMap::new();
@@ -133,8 +133,7 @@ pub(super) fn collect_targets(
                 &process,
                 selections
                     .as_ref()
-                    .and_then(|s| s.attributions.get(&id))
-                    .and_then(|s| s.as_deref()),
+                    .and_then(|s| super::hooks::verified_selection(s, &id)),
                 None,
             )?
         } else {
@@ -182,6 +181,16 @@ pub(super) fn collect_targets(
             },
         );
     }
+    if !targets.is_empty() {
+        let current = processes(state)?;
+        for (id, target) in &targets {
+            if current.get(id) != Some(&target.process) {
+                return Err(format!(
+                    "[{id}] Codex process changed during target discovery"
+                ));
+            }
+        }
+    }
     Ok(targets)
 }
 
@@ -204,6 +213,25 @@ pub(super) fn verify_session(process: &CodexStatusProcess, id: &str) -> Result<b
         }
     }
     Ok(fresh)
+}
+
+pub(super) fn remember_checkpoint_file(
+    state: &AppState,
+    terminal: &str,
+    generation: u64,
+    process: &CodexStatusProcess,
+    id: &str,
+) {
+    let store = if process.distro.is_some() {
+        CodexSessionStore::for_guest(process.codex_home.clone())
+    } else {
+        CodexSessionStore::new(process.codex_home.clone(), process.sqlite_home.clone())
+    };
+    if let Ok(Some(path)) = store.rollout_path_checked(id) {
+        crate::session_checkpoint::receipt::remember_codex_file(
+            state, terminal, generation, id, &path,
+        );
+    }
 }
 
 fn require_default_editor_config(process: &CodexStatusProcess, cwd: &Path) -> Result<(), String> {

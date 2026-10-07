@@ -49,7 +49,9 @@ pub fn identity(title: &str) -> Option<String> {
 }
 
 impl TitleBinding {
-    pub fn observe(&mut self, event: &crate::osc::OscEvent, generation: u64) {
+    pub fn observe(&mut self, event: &crate::osc::OscEvent, generation: u64) -> bool {
+        let previous_revision = self.revision;
+        let previously_identified = self.identity.is_some();
         if event.code == 133 && matches!(event.param.as_deref(), Some("A" | "C" | "D" | "E")) {
             self.clear();
             self.generation = generation;
@@ -61,6 +63,7 @@ impl TitleBinding {
                 self.identity = next;
             }
         }
+        self.revision != previous_revision && (previously_identified || self.identity.is_some())
     }
     pub fn clear(&mut self) {
         self.identity = None;

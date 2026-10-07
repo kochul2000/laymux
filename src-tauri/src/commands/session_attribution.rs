@@ -8,6 +8,8 @@ use crate::lock_ext::MutexExt;
 use crate::process_tree::PtyAppLiveness;
 use crate::state::AppState;
 
+mod liveness;
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SessionAttributionState {
@@ -30,6 +32,7 @@ pub struct TerminalSessionAttribution {
     pub(crate) session_id: Option<String>,
 }
 
+#[derive(Default)]
 pub(crate) struct ProviderSessionLookup {
     pub attributions: HashMap<String, Option<String>>,
     pub failed_terminal_ids: HashSet<String>,
@@ -99,6 +102,22 @@ fn classify_attribution(
     // Its conflict must not be hidden by a previously exact session claim.
     if active.len() == 1 && liveness != PtyAppLiveness::Ambiguous {
         let (provider, session) = active[0];
+        let expected_app = match provider {
+            "claude" => "Claude",
+            "codex" => "Codex",
+            _ => "Grok",
+        };
+        if liveness == PtyAppLiveness::NoneAlive {
+            return TerminalSessionAttribution {
+                generation,
+                state: SessionAttributionState::NoAgent,
+                provider: None,
+                session_id: None,
+            };
+        }
+        if liveness != PtyAppLiveness::Running(expected_app) {
+            return unknown_attribution(generation);
+        }
         if let Some(session_id) = session.clone() {
             return TerminalSessionAttribution {
                 generation,
@@ -284,6 +303,7 @@ pub(crate) fn get_terminal_session_attributions_impl(
     grok_session_max_age_hours: Option<u64>,
     state: &AppState,
 ) -> Result<HashMap<String, TerminalSessionAttribution>, String> {
+    let receipt_capture = crate::session_checkpoint::receipt::collection_token(state);
     // Capture generations before provider I/O. A terminal can be closed and
     // recreated under the same id while those lookups run; the second catalog
     // snapshot below rejects any result that crossed that boundary.
@@ -309,7 +329,7 @@ pub(crate) fn get_terminal_session_attributions_impl(
         },
         || super::grok_session::get_grok_session_lookup_impl(grok_session_max_age_hours, state),
     )?;
-    let status_sessions = super::codex_session::verified_status_sessions(state)?;
+    let status_sessions = super::codex_session::verified_status_sessions(state, &codex)?;
     for (id, (generation, session_id, fresh)) in status_sessions {
         if terminals
             .iter()
@@ -328,11 +348,20 @@ pub(crate) fn get_terminal_session_attributions_impl(
     }
     codex.attributions =
         crate::process_tree::reject_duplicate_session_attributions(codex.attributions, "Codex");
+    let observed_handles = state.pty_handles.lock_or_err()?.clone();
+    let liveness = liveness::collect(
+        &observed_handles,
+        [&claude, &codex, &grok],
+        crate::process_tree::snapshot_processes,
+    );
     let observations: Vec<(String, u64, PtyAppLiveness)> = terminals
         .into_iter()
         .map(|(terminal_id, generation)| {
-            let liveness = crate::process_tree::interactive_app_in_pty_fresh(state, &terminal_id);
-            (terminal_id, generation, liveness)
+            let observed = liveness
+                .get(&terminal_id)
+                .copied()
+                .unwrap_or(PtyAppLiveness::Unknown);
+            (terminal_id, generation, observed)
         })
         .collect();
     let current_handles = state.pty_handles.lock_or_err()?.clone();
@@ -370,6 +399,18 @@ pub(crate) fn get_terminal_session_attributions_impl(
         })
         .collect();
     reject_duplicate_restore_checkpoints(&mut attributions, &current_handles);
+    if let Some(token) = receipt_capture {
+        for (id, attribution) in &attributions {
+            if attribution.state == SessionAttributionState::NoAgent {
+                crate::session_checkpoint::receipt::remember_no_agent(
+                    state,
+                    &token,
+                    id,
+                    attribution.generation,
+                );
+            }
+        }
+    }
     Ok(attributions)
 }
 

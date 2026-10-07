@@ -13,6 +13,7 @@ import {
   persistSession,
   prepareTerminalExit,
   setPreparingUpdate,
+  getReusableSessionCheckpointCommit,
 } from "@/lib/persist-session";
 import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -73,12 +74,19 @@ export function useSessionCheckpointLifecycle(ready: boolean): void {
       const verifyStatus =
         request.reason === "update" && codex.restoreSession && codex.verifySessionOnExit;
       if (verifyStatus) setPreparingUpdate(true);
-      void withCodexStatusCheckpoint(verifyStatus, request.requestId, () =>
-        flushSessionCheckpoint({
-          reason: request.reason,
-          requireConclusive: request.requireConclusive,
-          terminalIds: request.terminalIds,
-        }),
+      const committed = verifyStatus ? getReusableSessionCheckpointCommit() : undefined;
+      void withCodexStatusCheckpoint(
+        verifyStatus,
+        request.requestId,
+        (reused) =>
+          reused && committed === getReusableSessionCheckpointCommit() && committed
+            ? Promise.resolve(committed)
+            : flushSessionCheckpoint({
+                reason: request.reason,
+                requireConclusive: request.requireConclusive,
+                terminalIds: request.terminalIds,
+              }),
+        committed?.receiptToken,
       )
         .then(async (commit) => {
           if (request.reason === "update") {

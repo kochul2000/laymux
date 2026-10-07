@@ -11,6 +11,8 @@ use crate::state::AppState;
 
 pub(crate) mod codex_status;
 mod eviction;
+mod hints;
+pub(crate) mod receipt;
 pub use eviction::TerminalMutationPermit;
 #[cfg(test)]
 mod eviction_tests;
@@ -43,6 +45,8 @@ pub struct HiddenTerminalEvictionResult {
 
 /// Backend-owned request/ack rendezvous and destructive-finalization gate.
 pub struct SessionCheckpointRuntime {
+    pub(crate) receipts: Mutex<receipt::ReceiptRegistry>,
+    pub(crate) hints: hints::CheckpointHints,
     pub(crate) codex_status: Mutex<Option<codex_status::CodexStatusCheckpoint>>,
     update_request_id: AtomicU64,
     next_request_id: AtomicU64,
@@ -63,6 +67,8 @@ pub struct SessionMutationPermit<'a> {
 impl Default for SessionCheckpointRuntime {
     fn default() -> Self {
         Self {
+            receipts: Mutex::new(receipt::ReceiptRegistry::default()),
+            hints: hints::CheckpointHints::default(),
             codex_status: Mutex::new(None),
             update_request_id: AtomicU64::new(0),
             next_request_id: AtomicU64::new(1),
@@ -479,14 +485,7 @@ fn run_hidden_close_batch(
 }
 
 pub fn start_watchdog(app: AppHandle, state: std::sync::Arc<AppState>) {
-    tauri::async_runtime::spawn(async move {
-        loop {
-            tokio::time::sleep(CHECKPOINT_WATCHDOG_INTERVAL).await;
-            if let Err(error) = request_frontend_checkpoint(&app, &state, "watchdog", false).await {
-                tracing::warn!(%error, "periodic session checkpoint failed");
-            }
-        }
-    });
+    hints::start(app, state);
 }
 
 #[cfg(test)]
