@@ -191,10 +191,13 @@ pub fn accept(state: &AppState, event: HookEvent) -> Result<(), AppError> {
     // A shared server can keep the launching pane's environment across resume.
     // Recording metadata cannot establish pane ownership: the state consumer
     // separately proves the current process, conversation, domain and generation.
-    state
+    let recorded = state
         .agent_hook_observations
         .lock_or_err()?
         .observe(event.clone());
+    if recorded && event.provider == "codex" {
+        state.session_checkpoint.hints.request();
+    }
     let mut terminals = state.terminals.lock_or_err()?;
     let Some(session) = terminals.get_mut(&event.terminal_id) else {
         return Ok(());

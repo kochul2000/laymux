@@ -129,7 +129,58 @@ fn reads_codex_160_borderless_current_screen_in_native_and_wsl() {
 }
 
 #[test]
-fn borderless_card_rejects_missing_fields_duplicate_id_and_messages_after_response() {
+fn reads_actual_codex_1601_background_server_status_response() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/native-1601-server-render-checkpoint.json"
+    ))
+    .unwrap();
+    let screen: TerminalRenderCheckpoint =
+        serde_json::from_value(fixture["screen"].clone()).unwrap();
+    assert_eq!(
+        parse_status_screen(&screen),
+        fixture["id"].as_str().map(str::to_owned)
+    );
+}
+
+#[test]
+fn borderless_status_ignores_nonidentity_field_formatting() {
+    let body = format!("/status\r\n>_ OpenAI Codex (v0.160.1)\r\nServer:              Local background server\r\nModel:               gpt\r\nDirectory:           /a/long/project/\r\n                     continued:directory\r\nPermissions:         Workspace (Ask for approval)\r\nThread name:         A long name\r\n                     continues here\r\nCollaboration mode:  Default\r\nSession:             {ID}\r\n");
+    let suffix = "\r\n› Ask Codex to do anything\r\n\r\n? for shortcuts";
+    assert_eq!(
+        parse_status_screen(&checkpoint(format!("{body}{suffix}"))),
+        Some(ID.into())
+    );
+    for invalid in [
+        body.replace(
+            "                     continues here",
+            "Unexpected response after status",
+        ),
+        body.replace(
+            "                     continues here",
+            &format!("Session:             {NEW_ID}"),
+        ),
+    ] {
+        assert_eq!(
+            parse_status_screen(&checkpoint(format!("{invalid}{suffix}"))),
+            None
+        );
+    }
+    for compatible in [
+        body.replace("Thread name:", "Future transport field:"),
+        body.replace(
+            "                     continues here",
+            "                      differently aligned metadata",
+        ),
+    ] {
+        assert_eq!(
+            parse_status_screen(&checkpoint(format!("{compatible}{suffix}"))),
+            Some(ID.into())
+        );
+    }
+}
+
+#[test]
+fn borderless_card_rejects_ambiguous_identity_and_messages_after_response() {
     let body = format!("/status\r\n\r\n>_ OpenAI Codex (v0.160.0)\r\nModel: gpt\r\nDirectory: /project\r\nPermissions: Full Access\r\nCollaboration mode: Default\r\nSession: {ID}\r\nWeekly limit: unavailable\r\n");
     let suffix = "\r\n› Ask Codex to do anything\r\n\r\n? for shortcuts";
     assert_eq!(
@@ -137,9 +188,6 @@ fn borderless_card_rejects_missing_fields_duplicate_id_and_messages_after_respon
         Some(ID.into())
     );
     for invalid in [
-        body.replace("Directory: /project", ""),
-        body.replace("Permissions: Full Access", ""),
-        body.replace("Collaboration mode: Default", ""),
         body.replace(
             &format!("Session: {ID}"),
             &format!("Session: {ID}\r\nSession: {NEW_ID}"),
@@ -151,5 +199,36 @@ fn borderless_card_rejects_missing_fields_duplicate_id_and_messages_after_respon
             parse_status_screen(&checkpoint(format!("{invalid}{suffix}"))),
             None
         );
+    }
+}
+
+#[test]
+fn borderless_identity_is_independent_of_optional_fields_and_their_order() {
+    let suffix = "\r\n› Ask Codex to do anything\r\n\r\n? for shortcuts";
+    for fields in [
+        format!("Session: {ID}\r\n"),
+        format!("Transport: future mode\r\nSession: {ID}\r\nOptional diagnostic: \r\n"),
+        format!("Collaboration mode: Default\r\nSession: {ID}\r\nPermissions: Full Access\r\nDirectory: /project\r\nModel: gpt\r\n"),
+        format!("New field: first\r\nNew field: second\r\nSession: {ID}\r\n"),
+        format!("Thread name: quoted Session: {NEW_ID}\r\nSession: {ID}\r\n"),
+    ] {
+        let body = format!("/status\r\n>_ OpenAI Codex (v0.170.0)\r\n{fields}{suffix}");
+        assert_eq!(parse_status_screen(&checkpoint(body)), Some(ID.into()));
+    }
+}
+
+#[test]
+fn tolerant_metadata_never_relaxes_session_identity_or_current_response_scope() {
+    let suffix = "\r\n› Ask Codex to do anything\r\n\r\n? for shortcuts";
+    for fields in [
+        format!("Session: {ID}\r\nSession: {ID}\r\n"),
+        format!("Session: {ID}\r\nSession: {NEW_ID}\r\n"),
+        "Session: 01a0e103…\r\n".into(),
+        format!("Session: {ID} trailing text\r\n"),
+        format!("Session: {ID}\r\n>_ OpenAI Codex (v0.170.0)\r\n"),
+        format!("Session: {ID}\r\n• Could not run /status\r\n"),
+    ] {
+        let body = format!("/status\r\n>_ OpenAI Codex (v0.170.0)\r\n{fields}{suffix}");
+        assert_eq!(parse_status_screen(&checkpoint(body)), None);
     }
 }
