@@ -389,6 +389,11 @@ fn summarize_pane(
         "unreadCount": pane_unread_count,
         "hidden": hidden,
         "collapsed": hidden,
+        // Pane stack (ADR-0297): one row per layer. Missing fields (dock panes,
+        // older frontends) mean an unstacked pane whose only layer is visible.
+        "activeLayer": optional_field(pane, "activeLayer").unwrap_or(Value::Bool(true)),
+        "layerIndex": optional_field(pane, "layerIndex").unwrap_or_else(|| json!(0)),
+        "layerCount": optional_field(pane, "layerCount").unwrap_or_else(|| json!(1)),
         "x": optional_field(pane, "x"),
         "y": optional_field(pane, "y"),
         "w": optional_field(pane, "w"),
@@ -852,6 +857,90 @@ mod tests {
         );
         assert_eq!(payload["geometryCapabilities"]["interruptibleRead"], true);
         assert_eq!(payload["geometryCapabilities"]["followUpIssue"], 643);
+    }
+
+    #[test]
+    fn navigation_payload_keeps_one_row_per_stacked_layer() {
+        // ADR-0297: the frontend bridge lists one pane entry per layer with the
+        // slot index; Remote keeps every row and marks hidden layers.
+        let pane = |id: &str, number: u64, layer_index: u64, active: bool| {
+            json!({
+                "id": id,
+                "paneIndex": 0,
+                "paneNumber": number,
+                "terminalId": format!("terminal-{id}"),
+                "view": { "type": "TerminalView" },
+                "slotId": "slot",
+                "layerIndex": layer_index,
+                "layerCount": 2,
+                "activeLayer": active,
+                "x": 0, "y": 0, "w": 1, "h": 1
+            })
+        };
+        let panes = json!([pane("slot", 1, 0, true), pane("under", 2, 1, false)]);
+        let workspaces_data = json!({
+            "activeWorkspaceId": "ws-1",
+            "workspaces": [{ "id": "ws-1", "name": "Main", "panes": panes }]
+        });
+        let active_workspace_data = json!({
+            "workspace": { "id": "ws-1", "name": "Main", "focusedPaneIndex": 0, "panes": panes }
+        });
+        let terminals: Vec<RemoteTerminalInfo> = Vec::new();
+        let keybindings: Vec<Keybinding> = Vec::new();
+        let payload = build_remote_navigation_payload(
+            &workspaces_data,
+            &active_workspace_data,
+            &json!({ "docks": [] }),
+            &json!({ "instances": [] }),
+            &json!({ "notifications": [] }),
+            &json!({ "hiddenWorkspaceIds": [], "hiddenPaneIds": [] }),
+            RemoteNavigationHostState {
+                terminals: &terminals,
+                codex_transcript_scroll_enabled: false,
+                url_link_activation: "chip",
+                path_link_activation: "immediate",
+                keybindings: &keybindings,
+                agent_commands: ["claude", "codex", "grok"],
+            },
+        );
+        let rows = &payload["activeWorkspace"]["panes"];
+        assert_eq!(rows.as_array().unwrap().len(), 2);
+        assert_eq!(rows[0]["id"], "slot");
+        assert_eq!(rows[0]["activeLayer"], true);
+        assert_eq!(rows[1]["id"], "under");
+        assert_eq!(rows[1]["paneIndex"], 0);
+        assert_eq!(rows[1]["layerIndex"], 1);
+        assert_eq!(rows[1]["layerCount"], 2);
+        assert_eq!(rows[1]["activeLayer"], false);
+        assert_eq!(rows[1]["terminalId"], "terminal-under");
+        assert_eq!(payload["workspaces"][0]["terminalPaneCount"], 2);
+    }
+
+    #[test]
+    fn navigation_pane_rows_default_to_unstacked_without_stack_fields() {
+        let panes = json!([{ "id": "p1", "view": { "type": "TerminalView" }, "x": 0, "y": 0, "w": 1, "h": 1 }]);
+        let terminals: Vec<RemoteTerminalInfo> = Vec::new();
+        let keybindings: Vec<Keybinding> = Vec::new();
+        let payload = build_remote_navigation_payload(
+            &json!({ "activeWorkspaceId": "ws-1", "workspaces": [{ "id": "ws-1", "name": "M", "panes": panes }] }),
+            &json!({ "workspace": { "id": "ws-1", "name": "M", "panes": panes } }),
+            &json!({ "docks": [] }),
+            &json!({ "instances": [] }),
+            &json!({ "notifications": [] }),
+            &json!({ "hiddenWorkspaceIds": [], "hiddenPaneIds": [] }),
+            RemoteNavigationHostState {
+                terminals: &terminals,
+                codex_transcript_scroll_enabled: false,
+                url_link_activation: "chip",
+                path_link_activation: "immediate",
+                keybindings: &keybindings,
+                agent_commands: ["claude", "codex", "grok"],
+            },
+        );
+        let row = &payload["activeWorkspace"]["panes"][0];
+        assert_eq!(row["activeLayer"], true);
+        assert_eq!(row["layerIndex"], 0);
+        assert_eq!(row["layerCount"], 1);
     }
 
     #[test]

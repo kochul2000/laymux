@@ -152,8 +152,56 @@ pub async fn api_docs() -> impl IntoResponse {
                 }
             },
             {
+                "method": "POST", "path": "/api/v1/panes/stack",
+                "description": "Stack a new layer on a pane slot (ADR-0297) right after its active layer and show it. Defaults to a TerminalView that starts in the slot's active-layer CWD unless cwd is given. Response: { stacked, newPane { id (layer id), terminalId, paneIndex, paneNumber, layerIndex, layerCount, ready } } (unlike split: no x/y/w/h, no totalPanes).",
+                "body": {
+                    "paneIndex": "number",
+                    "viewType": "(optional) ViewType, default \"TerminalView\"",
+                    "profile": "(optional) string",
+                    "cwd": "(optional) string"
+                }
+            },
+            {
+                "method": "POST", "path": "/api/v1/panes/layers/activate",
+                "description": "Show one stacked layer of its slot (ADR-0297), by layer id or terminal id. By default (focus=true) switches workspace if needed and focuses the slot; focus=false only changes the shown layer, without switching workspace or focus.",
+                "body": {
+                    "layerId": "(one of) string",
+                    "terminalId": "(one of) string",
+                    "focus": "(optional) bool, default true"
+                }
+            },
+            {
+                "method": "POST", "path": "/api/v1/panes/layers/move",
+                "description": "Move a layer onto slot targetPaneIndex of the active workspace (ADR-0298), like dragging a stack tab. Inside its own slot it reorders; on another slot it joins that stack and is shown there. A slot left empty is removed. Keyboard focus does not move. Response: moved, paneIndex, layerIndex, layerCount, totalPanes.",
+                "body": {
+                    "layerId": "(one of) string",
+                    "terminalId": "(one of) string",
+                    "targetPaneIndex": "number",
+                    "index": "(optional) number, position among the target's other layers; default after its active layer"
+                }
+            },
+            {
+                "method": "POST", "path": "/api/v1/panes/layers/extract",
+                "description": "Pull a stacked layer out into its own slot, splitting its slot like panes/split (ADR-0298). Fails for a single-layer slot. Response: extracted, slotId, paneIndex, totalPanes.",
+                "body": {
+                    "layerId": "(one of) string",
+                    "terminalId": "(one of) string",
+                    "direction": "horizontal | vertical"
+                }
+            },
+            {
+                "method": "POST", "path": "/api/v1/panes/merge",
+                "description": "Stack every layer of slot sourceIndex onto slot targetIndex and remove the source slot (ADR-0298), like dropping a control bar on a pane's stack band. Response: merged, paneIndex (target), layerCount, totalPanes.",
+                "body": { "sourceIndex": "number", "targetIndex": "number" }
+            },
+            {
+                "method": "POST", "path": "/api/v1/panes/{index}/move-to-workspace",
+                "description": "Carry a whole slot (every layer) of the active workspace to another workspace (ADR-0298), like dropping a control bar on a workspace. The target's largest pane is split to host it. Refuses to empty the source workspace. Response: moved, workspaceId, paneIndex, paneNumber, totalPanes.",
+                "body": { "workspaceId": "string" }
+            },
+            {
                 "method": "DELETE", "path": "/api/v1/panes/{index}",
-                "description": "Remove a pane. Adjacent pane absorbs the space."
+                "description": "Close one layer of a pane slot: ?layerId=<id>, or the active layer. Closing the slot's last layer removes the slot and the adjacent pane absorbs the space (ADR-0297)."
             },
             {
                 "method": "PUT", "path": "/api/v1/panes/{index}/view",
@@ -296,6 +344,11 @@ pub async fn api_docs() -> impl IntoResponse {
                 "method": "POST", "path": "/api/v1/ui/lifecycle",
                 "description": "Dev-only lifecycle dialog preview. Never interrupts tasks or installs updates. Release returns 403.",
                 "body": { "action": "open | close (optional)", "kind": "close | update", "stage": "ready | downloading | checkpoint | interrupting | settling | caching | installing | closing", "completed": "number (optional)", "total": "number (optional)", "cleanup": "boolean (optional)" }
+            },
+            {
+                "method": "POST", "path": "/api/v1/ui/key",
+                "description": "Dev-only keyboard injection: dispatch one keydown at the focused element so app shortcuts travel the real terminal pass-through path. Release returns 403.",
+                "body": { "key": "KeyboardEvent.key, e.g. \"ArrowRight\" or \"s\"", "ctrl": "(optional) bool", "alt": "(optional) bool", "shift": "(optional) bool" }
             },
             {
                 "method": "POST", "path": "/api/v1/ui/file-viewer",

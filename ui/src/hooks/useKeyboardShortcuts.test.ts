@@ -441,8 +441,24 @@ describe("useKeyboardShortcuts", () => {
           name: "Default",
 
           panes: [
-            { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-            { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "p1", view: { type: "TerminalView" } }],
+              activeLayerId: "p1",
+            },
+            {
+              id: "p2",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "p2", view: { type: "EmptyView" } }],
+              activeLayerId: "p2",
+            },
           ],
         },
       ],
@@ -465,8 +481,24 @@ describe("useKeyboardShortcuts", () => {
           name: "Default",
 
           panes: [
-            { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-            { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "p1", view: { type: "TerminalView" } }],
+              activeLayerId: "p1",
+            },
+            {
+              id: "p2",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "p2", view: { type: "EmptyView" } }],
+              activeLayerId: "p2",
+            },
           ],
         },
       ],
@@ -495,8 +527,24 @@ describe("useKeyboardShortcuts", () => {
           name: "Default",
 
           panes: [
-            { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-            { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "p1", view: { type: "TerminalView" } }],
+              activeLayerId: "p1",
+            },
+            {
+              id: "p2",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "p2", view: { type: "EmptyView" } }],
+              activeLayerId: "p2",
+            },
           ],
         },
       ],
@@ -524,8 +572,24 @@ describe("useKeyboardShortcuts", () => {
           name: "Default",
 
           panes: [
-            { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-            { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "p1", view: { type: "TerminalView" } }],
+              activeLayerId: "p1",
+            },
+            {
+              id: "p2",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "p2", view: { type: "EmptyView" } }],
+              activeLayerId: "p2",
+            },
           ],
         },
       ],
@@ -555,8 +619,24 @@ describe("useKeyboardShortcuts", () => {
           name: "Default",
 
           panes: [
-            { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-            { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "p1", view: { type: "TerminalView" } }],
+              activeLayerId: "p1",
+            },
+            {
+              id: "p2",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "p2", view: { type: "EmptyView" } }],
+              activeLayerId: "p2",
+            },
           ],
         },
       ],
@@ -580,8 +660,24 @@ describe("useKeyboardShortcuts", () => {
           name: "Default",
 
           panes: [
-            { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-            { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "p1", view: { type: "TerminalView" } }],
+              activeLayerId: "p1",
+            },
+            {
+              id: "p2",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "p2", view: { type: "TerminalView" } }],
+              activeLayerId: "p2",
+            },
           ],
         },
       ],
@@ -604,8 +700,24 @@ describe("useKeyboardShortcuts", () => {
           name: "Default",
 
           panes: [
-            { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-            { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "p1", view: { type: "TerminalView" } }],
+              activeLayerId: "p1",
+            },
+            {
+              id: "p2",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "p2", view: { type: "TerminalView" } }],
+              activeLayerId: "p2",
+            },
           ],
         },
       ],
@@ -628,8 +740,24 @@ describe("useKeyboardShortcuts", () => {
           name: "Default",
 
           panes: [
-            { id: "p1", x: 0, y: 0, w: 1, h: 0.5, view: { type: "TerminalView" } },
-            { id: "p2", x: 0, y: 0.5, w: 1, h: 0.5, view: { type: "TerminalView" } },
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 0.5,
+              layers: [{ id: "p1", view: { type: "TerminalView" } }],
+              activeLayerId: "p1",
+            },
+            {
+              id: "p2",
+              x: 0,
+              y: 0.5,
+              w: 1,
+              h: 0.5,
+              layers: [{ id: "p2", view: { type: "TerminalView" } }],
+              activeLayerId: "p2",
+            },
           ],
         },
       ],
@@ -722,8 +850,24 @@ describe("useKeyboardShortcuts", () => {
           name: "Default",
 
           panes: [
-            { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-            { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "p1", view: { type: "TerminalView" } }],
+              activeLayerId: "p1",
+            },
+            {
+              id: "p2",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "p2", view: { type: "TerminalView" } }],
+              activeLayerId: "p2",
+            },
           ],
         },
       ],
@@ -749,8 +893,24 @@ describe("useKeyboardShortcuts", () => {
           name: "Default",
 
           panes: [
-            { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-            { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "p1", view: { type: "TerminalView" } }],
+              activeLayerId: "p1",
+            },
+            {
+              id: "p2",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              layers: [{ id: "p2", view: { type: "TerminalView" } }],
+              activeLayerId: "p2",
+            },
           ],
         },
       ],
@@ -856,9 +1016,33 @@ describe("useKeyboardShortcuts", () => {
           name: "Default",
 
           panes: [
-            { id: "p1", x: 0, y: 0, w: 0.33, h: 1, view: { type: "TerminalView" } },
-            { id: "p2", x: 0.33, y: 0, w: 0.34, h: 1, view: { type: "TerminalView" } },
-            { id: "p3", x: 0.67, y: 0, w: 0.33, h: 1, view: { type: "TerminalView" } },
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 0.33,
+              h: 1,
+              layers: [{ id: "p1", view: { type: "TerminalView" } }],
+              activeLayerId: "p1",
+            },
+            {
+              id: "p2",
+              x: 0.33,
+              y: 0,
+              w: 0.34,
+              h: 1,
+              layers: [{ id: "p2", view: { type: "TerminalView" } }],
+              activeLayerId: "p2",
+            },
+            {
+              id: "p3",
+              x: 0.67,
+              y: 0,
+              w: 0.33,
+              h: 1,
+              layers: [{ id: "p3", view: { type: "TerminalView" } }],
+              activeLayerId: "p3",
+            },
           ],
         },
       ],
@@ -889,8 +1073,24 @@ describe("useKeyboardShortcuts", () => {
             name: "Default",
 
             panes: [
-              { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-              { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+              {
+                id: "p1",
+                x: 0,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "p1", view: { type: "TerminalView" } }],
+                activeLayerId: "p1",
+              },
+              {
+                id: "p2",
+                x: 0.5,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "p2", view: { type: "TerminalView" } }],
+                activeLayerId: "p2",
+              },
             ],
           },
         ],
@@ -934,13 +1134,33 @@ describe("useKeyboardShortcuts", () => {
             id: "ws-1",
             name: "WS1",
 
-            panes: [{ id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+            panes: [
+              {
+                id: "p1",
+                x: 0,
+                y: 0,
+                w: 1,
+                h: 1,
+                layers: [{ id: "p1", view: { type: "TerminalView" } }],
+                activeLayerId: "p1",
+              },
+            ],
           },
           {
             id: "ws-2",
             name: "WS2",
 
-            panes: [{ id: "p2", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+            panes: [
+              {
+                id: "p2",
+                x: 0,
+                y: 0,
+                w: 1,
+                h: 1,
+                layers: [{ id: "p2", view: { type: "TerminalView" } }],
+                activeLayerId: "p2",
+              },
+            ],
           },
         ],
         activeWorkspaceId: "ws-1",
@@ -968,8 +1188,24 @@ describe("useKeyboardShortcuts", () => {
             name: "Default",
 
             panes: [
-              { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-              { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+              {
+                id: "p1",
+                x: 0,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "p1", view: { type: "TerminalView" } }],
+                activeLayerId: "p1",
+              },
+              {
+                id: "p2",
+                x: 0.5,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "p2", view: { type: "TerminalView" } }],
+                activeLayerId: "p2",
+              },
             ],
           },
         ],
@@ -1017,8 +1253,24 @@ describe("useKeyboardShortcuts", () => {
             name: "Default",
 
             panes: [
-              { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-              { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+              {
+                id: "p1",
+                x: 0,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "p1", view: { type: "TerminalView" } }],
+                activeLayerId: "p1",
+              },
+              {
+                id: "p2",
+                x: 0.5,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "p2", view: { type: "TerminalView" } }],
+                activeLayerId: "p2",
+              },
             ],
           },
         ],
@@ -1076,8 +1328,24 @@ describe("useKeyboardShortcuts", () => {
             name: "Default",
 
             panes: [
-              { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-              { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+              {
+                id: "p1",
+                x: 0,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "p1", view: { type: "TerminalView" } }],
+                activeLayerId: "p1",
+              },
+              {
+                id: "p2",
+                x: 0.5,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "p2", view: { type: "TerminalView" } }],
+                activeLayerId: "p2",
+              },
             ],
           },
         ],
@@ -1134,8 +1402,24 @@ describe("useKeyboardShortcuts", () => {
             name: "Default",
 
             panes: [
-              { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-              { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+              {
+                id: "p1",
+                x: 0,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "p1", view: { type: "TerminalView" } }],
+                activeLayerId: "p1",
+              },
+              {
+                id: "p2",
+                x: 0.5,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "p2", view: { type: "TerminalView" } }],
+                activeLayerId: "p2",
+              },
             ],
           },
         ],
@@ -1180,8 +1464,24 @@ describe("useKeyboardShortcuts", () => {
             name: "Default",
 
             panes: [
-              { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-              { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+              {
+                id: "p1",
+                x: 0,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "p1", view: { type: "TerminalView" } }],
+                activeLayerId: "p1",
+              },
+              {
+                id: "p2",
+                x: 0.5,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "p2", view: { type: "TerminalView" } }],
+                activeLayerId: "p2",
+              },
             ],
           },
         ],
@@ -1289,8 +1589,8 @@ describe("useKeyboardShortcuts", () => {
     const newWs = useWorkspaceStore.getState().workspaces[1];
     // Default layout ships a 2-pane split.
     expect(newWs.panes).toHaveLength(2);
-    expect(newWs.panes[0].view.type).toBe("EmptyView");
-    expect(newWs.panes[1].view.type).toBe("EmptyView");
+    expect(newWs.panes[0].layers[0].view.type).toBe("EmptyView");
+    expect(newWs.panes[1].layers[0].view.type).toBe("EmptyView");
   });
 
   // --- Lowercase Ctrl+Alt letter keys (case-insensitive) ---
@@ -1554,8 +1854,24 @@ describe("useKeyboardShortcuts", () => {
             id: "ws-default",
             name: "Default",
             panes: [
-              { id: "pane-a", x: 0, y: 0, w: 0.5, h: 1, view },
-              { id: "pane-b", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
+              {
+                id: "pane-a",
+                x: 0,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "pane-a", view: view }],
+                activeLayerId: "pane-a",
+              },
+              {
+                id: "pane-b",
+                x: 0.5,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "pane-b", view: { type: "EmptyView" } }],
+                activeLayerId: "pane-b",
+              },
             ],
           },
         ],
@@ -1681,7 +1997,8 @@ describe("useKeyboardShortcuts", () => {
                 y: 0,
                 w: 0.5,
                 h: 1,
-                view: { type: "TerminalView" },
+                layers: [{ id: "pane-right", view: { type: "TerminalView" } }],
+                activeLayerId: "pane-right",
               },
               {
                 id: "pane-left",
@@ -1689,7 +2006,8 @@ describe("useKeyboardShortcuts", () => {
                 y: 0,
                 w: 0.5,
                 h: 1,
-                view: { type: "TerminalView" },
+                layers: [{ id: "pane-left", view: { type: "TerminalView" } }],
+                activeLayerId: "pane-left",
               },
             ],
           },
@@ -1831,8 +2149,24 @@ describe("useKeyboardShortcuts", () => {
             id: "ws-default",
             name: "Default",
             panes: [
-              { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-              { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+              {
+                id: "p1",
+                x: 0,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "p1", view: { type: "TerminalView" } }],
+                activeLayerId: "p1",
+              },
+              {
+                id: "p2",
+                x: 0.5,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "p2", view: { type: "TerminalView" } }],
+                activeLayerId: "p2",
+              },
             ],
           },
         ],
@@ -1893,8 +2227,24 @@ describe("useKeyboardShortcuts", () => {
             id: "ws-default",
             name: "Default",
             panes: [
-              { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-              { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+              {
+                id: "p1",
+                x: 0,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "p1", view: { type: "TerminalView" } }],
+                activeLayerId: "p1",
+              },
+              {
+                id: "p2",
+                x: 0.5,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "p2", view: { type: "TerminalView" } }],
+                activeLayerId: "p2",
+              },
             ],
           },
         ],
@@ -1918,8 +2268,24 @@ describe("useKeyboardShortcuts", () => {
             id: "ws-default",
             name: "Default",
             panes: [
-              { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-              { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
+              {
+                id: "p1",
+                x: 0,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "p1", view: { type: "TerminalView" } }],
+                activeLayerId: "p1",
+              },
+              {
+                id: "p2",
+                x: 0.5,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "p2", view: { type: "EmptyView" } }],
+                activeLayerId: "p2",
+              },
             ],
           },
         ],
@@ -1943,8 +2309,24 @@ describe("useKeyboardShortcuts", () => {
             id: "ws-default",
             name: "Default",
             panes: [
-              { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-              { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
+              {
+                id: "p1",
+                x: 0,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "p1", view: { type: "TerminalView" } }],
+                activeLayerId: "p1",
+              },
+              {
+                id: "p2",
+                x: 0.5,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "p2", view: { type: "EmptyView" } }],
+                activeLayerId: "p2",
+              },
             ],
           },
         ],
@@ -2022,8 +2404,24 @@ describe("useKeyboardShortcuts", () => {
           {
             ...active,
             panes: [
-              { id: "pane-a", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-              { id: "pane-m", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "MemoView" } },
+              {
+                id: "pane-a",
+                x: 0,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "pane-a", view: { type: "TerminalView" } }],
+                activeLayerId: "pane-a",
+              },
+              {
+                id: "pane-m",
+                x: 0.5,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "pane-m", view: { type: "MemoView" } }],
+                activeLayerId: "pane-m",
+              },
             ],
           },
         ],
@@ -2078,8 +2476,24 @@ describe("useKeyboardShortcuts", () => {
           {
             ...active,
             panes: [
-              { id: "pane-a", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-              { id: "pane-b", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+              {
+                id: "pane-a",
+                x: 0,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "pane-a", view: { type: "TerminalView" } }],
+                activeLayerId: "pane-a",
+              },
+              {
+                id: "pane-b",
+                x: 0.5,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                layers: [{ id: "pane-b", view: { type: "TerminalView" } }],
+                activeLayerId: "pane-b",
+              },
             ],
           },
         ],
@@ -2091,12 +2505,10 @@ describe("useKeyboardShortcuts", () => {
           syncGroup: active.id,
           workspaceId: active.id,
         });
-        useTerminalStore
-          .getState()
-          .updateInstanceInfo(`terminal-${paneId}`, {
-            sessionReady: true,
-            activity: { type: "shell" },
-          });
+        useTerminalStore.getState().updateInstanceInfo(`terminal-${paneId}`, {
+          sessionReady: true,
+          activity: { type: "shell" },
+        });
       }
     }
 
@@ -2155,12 +2567,10 @@ describe("useKeyboardShortcuts", () => {
         syncGroup: "ws-default",
         workspaceId: "ws-default",
       });
-      useTerminalStore
-        .getState()
-        .updateInstanceInfo("terminal-dock-pane", {
-          sessionReady: true,
-          activity: { type: "shell" },
-        });
+      useTerminalStore.getState().updateInstanceInfo("terminal-dock-pane", {
+        sessionReady: true,
+        activity: { type: "shell" },
+      });
       renderHook(() => useKeyboardShortcuts());
 
       fireKey("l", { altKey: true });
@@ -2180,7 +2590,17 @@ describe("useKeyboardShortcuts", () => {
         workspaces: [
           {
             ...active,
-            panes: [{ id: "pane-m", x: 0, y: 0, w: 1, h: 1, view: { type: "MemoView" } }],
+            panes: [
+              {
+                id: "pane-m",
+                x: 0,
+                y: 0,
+                w: 1,
+                h: 1,
+                layers: [{ id: "pane-m", view: { type: "MemoView" } }],
+                activeLayerId: "pane-m",
+              },
+            ],
           },
         ],
       });

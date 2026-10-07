@@ -2173,6 +2173,20 @@
       .workspace-pane-row.hidden-item {
         opacity: 0.48;
       }
+      /* Pane stack (ADR-0297): a layer hidden under its slot's visible layer. */
+      .workspace-pane-row.stacked-inactive {
+        opacity: 0.68;
+      }
+      .pane-stack-badge {
+        flex: 0 0 auto;
+        padding: 0 4px;
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+        font-variant-numeric: tabular-nums;
+        line-height: 1.4;
+      }
       .workspace-pane-row.hidden-item .pane-row-main {
         text-decoration: line-through;
         text-decoration-thickness: 1px;

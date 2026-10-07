@@ -36,6 +36,32 @@ export function focusWorkspacePane(workspaceId: string, paneIndex: number): bool
   return true;
 }
 
+/**
+ * Show a stacked layer and (by default) focus its slot (ADR-0297 extends
+ * ADR-0081). Every flow that points at content which may sit on an inactive
+ * layer — stack tabs, keyboard cycling, notification and Remote navigation,
+ * Automation terminal focus — commits through here instead of setting
+ * `activeLayerId` and grid focus separately. The target is validated first;
+ * an unknown workspace or layer touches no store.
+ */
+export function activatePaneLayer(
+  workspaceId: string,
+  layerId: string,
+  options: { focus?: boolean } = {},
+): boolean {
+  const { focus = true } = options;
+  const workspaceState = useWorkspaceStore.getState();
+  const workspace = workspaceState.workspaces.find((candidate) => candidate.id === workspaceId);
+  if (!workspace) return false;
+  const slotIndex = workspace.panes.findIndex((pane) =>
+    pane.layers.some((layer) => layer.id === layerId),
+  );
+  if (slotIndex < 0) return false;
+
+  workspaceState.setActiveLayer(workspaceId, layerId);
+  return focus ? focusWorkspacePane(workspaceId, slotIndex) : true;
+}
+
 /** Focus an exact dock pane and relinquish workspace-grid focus. */
 export function focusDockPane(position: DockPosition, paneId?: string): boolean {
   const dockState = useDockStore.getState();

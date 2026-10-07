@@ -187,6 +187,15 @@ pub fn build_router(
         .route("/api/v1/grid/focus", post(grid_focus_pane))
         .route("/api/v1/grid/hover", post(grid_simulate_hover))
         .route("/api/v1/panes/split", post(panes_split))
+        .route("/api/v1/panes/stack", post(panes_stack))
+        .route("/api/v1/panes/layers/activate", post(panes_activate_layer))
+        .route("/api/v1/panes/layers/move", post(panes_move_layer))
+        .route("/api/v1/panes/layers/extract", post(panes_extract_layer))
+        .route("/api/v1/panes/merge", post(panes_merge))
+        .route(
+            "/api/v1/panes/{index}/move-to-workspace",
+            post(panes_move_to_workspace),
+        )
         .route("/api/v1/panes/{index}", delete(panes_remove))
         .route("/api/v1/panes/{index}/resize", post(panes_resize))
         .route("/api/v1/panes/{index}/view", put(panes_set_view))
@@ -246,6 +255,7 @@ pub fn build_router(
         .route("/api/v1/ui/remote-access", post(ui_remote_access))
         .route("/api/v1/ui/settings/navigate", post(ui_navigate_settings))
         .route("/api/v1/ui/lifecycle", post(ui_lifecycle))
+        .route("/api/v1/ui/key", post(ui_dispatch_key))
         .route("/api/v1/ui/file-viewer", post(ui_open_file_viewer))
         .route("/api/v1/settings/app-theme", put(settings_set_app_theme))
         .route(

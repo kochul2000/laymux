@@ -1,4 +1,6 @@
 import { toTerminalId } from "@/lib/pane-ids";
+import { toPersistedPane } from "@/lib/pane-layers";
+import type { ViewInstanceConfig } from "@/stores/types";
 import {
   getTerminalCwds,
   getTerminalSessionAttributions,
@@ -258,29 +260,28 @@ async function collectSessionCheckpointInternal(
         h: pane.h,
         viewType: pane.viewType,
         ...(pane.viewConfig ? { viewConfig: pane.viewConfig } : {}),
+        ...(pane.layers && pane.layers.length > 1
+          ? { layers: pane.layers, activeLayerIndex: pane.activeLayerIndex ?? 0 }
+          : {}),
       })),
     })),
     workspaces: workspaceState.workspaces.map((workspace) => ({
       id: workspace.id,
       name: workspace.name,
-      panes: workspace.panes.map((pane) => {
-        const savedView =
-          pane.view.type === "TerminalView"
-            ? applyTerminalSessionFields(
-                pane.view as SavedTerminalView,
-                toTerminalId(pane.id),
-                runtime,
-              )
-            : ({ ...pane.view } as SavedTerminalView);
-        return {
-          id: pane.id,
-          x: pane.x,
-          y: pane.y,
-          w: pane.w,
-          h: pane.h,
-          view: savedView,
-        };
-      }),
+      // Compact `view` form for unstacked panes, `layers` form for stacks (ADR-0297).
+      panes: workspace.panes.map((pane) =>
+        toPersistedPane(
+          pane,
+          (view, layer) =>
+            (view.type === "TerminalView"
+              ? applyTerminalSessionFields(
+                  view as SavedTerminalView,
+                  toTerminalId(layer.id),
+                  runtime,
+                )
+              : ({ ...view } as SavedTerminalView)) as ViewInstanceConfig,
+        ),
+      ),
     })),
     workspaceDisplayOrder: workspaceState.workspaceDisplayOrder,
     paste: { ...settingsState.paste },
@@ -293,6 +294,7 @@ async function collectSessionCheckpointInternal(
     },
     widgets: settingsState.widgets,
     dock: { ...settingsState.dock },
+    paneStack: { ...settingsState.paneStack },
     notifications: { ...settingsState.notifications },
     power: { ...settingsState.power },
     update: { ...settingsState.update },

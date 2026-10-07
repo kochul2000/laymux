@@ -1273,6 +1273,7 @@ export interface Settings {
   usage: import("@/stores/settings-store").UsageSettings;
   widgets: import("@/lib/widget-placement").WidgetsSettings;
   dock: import("@/stores/settings-store").DockSettings;
+  paneStack?: import("@/stores/settings-store").PaneStackSettings;
   notifications: import("@/stores/settings-store").NotificationSettings;
   power?: import("@/stores/settings-store").PowerSettings;
   /** Release channel this install follows (ADR-0190). */
@@ -1369,21 +1370,32 @@ export interface SettingsLayout {
     h: number;
     viewType: string;
     viewConfig?: { type: string; [key: string]: unknown };
+    /** Stacked template slot (ADR-0297). */
+    layers?: { viewType: string; viewConfig?: { type: string; [key: string]: unknown } }[];
+    activeLayerIndex?: number;
   }[];
+}
+
+/**
+ * On-disk workspace pane (ADR-0297): the legacy compact `view` form, or the
+ * stacked `layers` + `activeLayerId` form.
+ */
+export interface SettingsWorkspacePane {
+  id?: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  view?: { type: string; [key: string]: unknown };
+  layers?: { id: string; view: { type: string; [key: string]: unknown } }[];
+  activeLayerId?: string;
 }
 
 export interface SettingsWorkspace {
   id: string;
   name: string;
   layoutId?: string; // deprecated — kept for backward compat with old settings.json
-  panes: {
-    id?: string;
-    x: number;
-    y: number;
-    w: number;
-    h: number;
-    view: { type: string; [key: string]: unknown };
-  }[];
+  panes: SettingsWorkspacePane[];
 }
 
 export interface DockPaneSetting {

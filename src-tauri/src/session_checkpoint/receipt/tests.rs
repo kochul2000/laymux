@@ -228,3 +228,71 @@ fn saved_codex_and_an_idle_shell_share_the_fast_path_but_running_commands_do_not
         }
     }
 }
+
+#[test]
+fn stacked_slot_layers_are_saved_views_for_their_terminals() {
+    // ADR-0297: a stacked slot persists its terminals under `layers`, not the
+    // compact `id`/`view`. Every layer must still license the receipt.
+    let f = Fixture::new();
+    let mut shell = TerminalSession::new("terminal-shell".into(), TerminalConfig::default());
+    shell.codex_hook_title.generation = 9;
+    shell.title = "PS C:\\project>".into();
+    f.state
+        .terminals
+        .lock()
+        .unwrap()
+        .insert("terminal-shell".into(), shell);
+    f.state.pty_handles.lock().unwrap().insert(
+        "terminal-shell".into(),
+        crate::pty::PtyHandle::from_test_writer_for_generation(Box::new(std::io::sink()), 9),
+    );
+    std::fs::write(
+        &f.settings,
+        serde_json::json!({"workspaces":[{"panes":[{
+            "id":"slot","x":0.0,"y":0.0,"w":1.0,"h":1.0,
+            "layers":[
+                {"id":"pane","view":{"type":"TerminalView","lastCodexSession":ID}},
+                {"id":"shell","view":{"type":"TerminalView"}}
+            ],
+            "activeLayerId":"shell"
+        }]}],"docks":[]})
+        .to_string(),
+    )
+    .unwrap();
+    let token = capture(&f.state)
+        .unwrap()
+        .expect("terminals are observable");
+    remember_codex_file(&f.state, "terminal-pane", 7, ID, &f.rollout);
+    remember_no_agent(&f.state, &token, "terminal-shell", 9);
+    let mut coverage = f.coverage();
+    coverage.push(ReceiptCoverage {
+        terminal_id: "terminal-shell".into(),
+        generation: Some(9),
+        state: "noAgent".into(),
+        provider: None,
+        session_id: None,
+    });
+    let receipt = commit_to(&f.state, &token, &coverage, &f.settings)
+        .unwrap()
+        .expect("stacked layers must count as saved terminal views");
+    assert!(reusable(&f.state, &receipt).unwrap());
+}
+
+#[test]
+fn a_layer_and_a_compact_pane_claiming_one_terminal_invalidate_the_receipt() {
+    let f = Fixture::new();
+    std::fs::write(
+        &f.settings,
+        serde_json::json!({"workspaces":[{"panes":[
+            {"id":"pane","view":{"type":"TerminalView","lastCodexSession":ID}},
+            {"id":"slot","layers":[{"id":"pane","view":{"type":"TerminalView"}}]}
+        ]}],"docks":[]})
+        .to_string(),
+    )
+    .unwrap();
+    let token = capture(&f.state).unwrap().unwrap();
+    remember_codex_file(&f.state, "terminal-pane", 7, ID, &f.rollout);
+    assert!(commit_to(&f.state, &token, &f.coverage(), &f.settings)
+        .unwrap()
+        .is_none());
+}

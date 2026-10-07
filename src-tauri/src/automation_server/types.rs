@@ -101,6 +101,85 @@ pub struct SplitPaneBody {
     pub cwd: Option<String>,
 }
 
+/// `POST /api/v1/panes/stack` (ADR-0297): stack a new layer on a slot.
+#[derive(Deserialize)]
+pub struct StackPaneBody {
+    #[serde(rename = "paneIndex")]
+    pub pane_index: usize,
+    /// View type of the new layer. Default `TerminalView`, like `split_pane`.
+    #[serde(rename = "viewType")]
+    pub view_type: Option<String>,
+    /// Terminal profile of the new layer. Default profile when omitted.
+    pub profile: Option<String>,
+    /// Start directory of the new layer's terminal. When omitted it inherits
+    /// the slot's active layer CWD (ADR-0140 as extended by ADR-0297).
+    pub cwd: Option<String>,
+}
+
+/// `POST /api/v1/panes/layers/activate` (ADR-0297): show one stacked layer.
+/// Exactly one of `layerId` / `terminalId` identifies the layer.
+#[derive(Deserialize)]
+pub struct ActivateLayerBody {
+    #[serde(rename = "layerId")]
+    pub layer_id: Option<String>,
+    #[serde(rename = "terminalId")]
+    pub terminal_id: Option<String>,
+    /// Also move keyboard focus to the slot (default true).
+    pub focus: Option<bool>,
+}
+
+/// `POST /api/v1/panes/layers/move` (ADR-0298): move a layer onto slot
+/// `targetPaneIndex` of the active workspace. Inside one slot it reorders.
+/// Exactly one of `layerId` / `terminalId` identifies the layer.
+#[derive(Deserialize)]
+pub struct MoveLayerBody {
+    #[serde(rename = "layerId")]
+    pub layer_id: Option<String>,
+    #[serde(rename = "terminalId")]
+    pub terminal_id: Option<String>,
+    #[serde(rename = "targetPaneIndex")]
+    pub target_pane_index: usize,
+    /// Position among the target's other layers (default: after its active layer).
+    pub index: Option<usize>,
+}
+
+/// `POST /api/v1/panes/layers/extract` (ADR-0298): pull a stacked layer out
+/// into its own slot, splitting its current slot like `panes/split`.
+#[derive(Deserialize)]
+pub struct ExtractLayerBody {
+    #[serde(rename = "layerId")]
+    pub layer_id: Option<String>,
+    #[serde(rename = "terminalId")]
+    pub terminal_id: Option<String>,
+    /// `horizontal` | `vertical`, the same axis vocabulary as `panes/split`.
+    pub direction: String,
+}
+
+/// `POST /api/v1/panes/merge` (ADR-0298): stack every layer of slot
+/// `sourceIndex` onto slot `targetIndex` and remove the source slot.
+#[derive(Deserialize)]
+pub struct MergePanesBody {
+    #[serde(rename = "sourceIndex")]
+    pub source_index: usize,
+    #[serde(rename = "targetIndex")]
+    pub target_index: usize,
+}
+
+/// `POST /api/v1/panes/{index}/move-to-workspace` (ADR-0298): carry a whole
+/// slot (every layer) to another workspace.
+#[derive(Deserialize)]
+pub struct MovePaneToWorkspaceBody {
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: String,
+}
+
+/// `DELETE /api/v1/panes/{index}?layerId=` (ADR-0297): close one layer.
+#[derive(Deserialize)]
+pub struct RemovePaneQuery {
+    #[serde(rename = "layerId")]
+    pub layer_id: Option<String>,
+}
+
 #[derive(Deserialize)]
 pub struct SetViewBody {
     #[serde(rename = "type")]
@@ -212,6 +291,12 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("POST", "/api/v1/grid/focus"),
     ("POST", "/api/v1/grid/hover"),
     ("POST", "/api/v1/panes/split"),
+    ("POST", "/api/v1/panes/stack"),
+    ("POST", "/api/v1/panes/layers/activate"),
+    ("POST", "/api/v1/panes/layers/move"),
+    ("POST", "/api/v1/panes/layers/extract"),
+    ("POST", "/api/v1/panes/merge"),
+    ("POST", "/api/v1/panes/{index}/move-to-workspace"),
     ("DELETE", "/api/v1/panes/{index}"),
     ("POST", "/api/v1/panes/{index}/resize"),
     ("PUT", "/api/v1/panes/{index}/view"),
@@ -246,6 +331,7 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("POST", "/api/v1/ui/remote-access"),
     ("POST", "/api/v1/ui/settings/navigate"),
     ("POST", "/api/v1/ui/lifecycle"),
+    ("POST", "/api/v1/ui/key"),
     ("POST", "/api/v1/ui/file-viewer"),
     ("PUT", "/api/v1/settings/app-theme"),
     ("PUT", "/api/v1/settings/profile-defaults"),
@@ -412,6 +498,32 @@ mod tests {
         assert!(body.ids.is_none());
         assert!(body.before.is_none());
         assert!(body.read_only.is_none());
+    }
+
+    #[test]
+    fn rearrange_bodies_deserialize_and_register() {
+        let body: MoveLayerBody =
+            serde_json::from_str(r#"{"layerId":"a","targetPaneIndex":1}"#).unwrap();
+        assert_eq!(body.target_pane_index, 1);
+        assert!(body.index.is_none());
+        assert!(serde_json::from_str::<MoveLayerBody>(r#"{"layerId":"a"}"#).is_err());
+        let body: ExtractLayerBody =
+            serde_json::from_str(r#"{"terminalId":"terminal-a","direction":"vertical"}"#).unwrap();
+        assert_eq!(body.direction, "vertical");
+        let body: MergePanesBody =
+            serde_json::from_str(r#"{"sourceIndex":0,"targetIndex":1}"#).unwrap();
+        assert_eq!((body.source_index, body.target_index), (0, 1));
+        let body: MovePaneToWorkspaceBody =
+            serde_json::from_str(r#"{"workspaceId":"ws-2"}"#).unwrap();
+        assert_eq!(body.workspace_id, "ws-2");
+        for path in [
+            "/api/v1/panes/layers/move",
+            "/api/v1/panes/layers/extract",
+            "/api/v1/panes/merge",
+            "/api/v1/panes/{index}/move-to-workspace",
+        ] {
+            assert!(REGISTERED_ROUTES.contains(&("POST", path)), "{path}");
+        }
     }
 
     #[test]

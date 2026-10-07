@@ -133,6 +133,8 @@ fn validate_composer_starred_entries(
 
 fn validate_workspaces(settings: &mut Settings, warnings: &mut Vec<ValidationWarning>) {
     let fallback_profile = resolve_fallback_profile(settings);
+    // Content ids (terminal-<id>) must be unique app-wide (ADR-0297).
+    let mut seen_content_ids = std::collections::HashSet::new();
 
     for (ws_idx, ws) in settings.workspaces.iter_mut().enumerate() {
         let ws_path = format!("workspaces[{ws_idx}]");
@@ -158,7 +160,7 @@ fn validate_workspaces(settings: &mut Settings, warnings: &mut Vec<ValidationWar
         }
 
         // Validate panes
-        validate_workspace_panes(&mut ws.panes, &ws_path, warnings);
+        validate_workspace_panes(&mut ws.panes, &ws_path, &mut seen_content_ids, warnings);
 
         // If all panes were removed, add a default pane
         if ws.panes.is_empty() {
@@ -175,6 +177,7 @@ fn validate_workspaces(settings: &mut Settings, warnings: &mut Vec<ValidationWar
 fn validate_workspace_panes(
     panes: &mut Vec<WorkspacePane>,
     parent_path: &str,
+    seen_content_ids: &mut std::collections::HashSet<String>,
     warnings: &mut Vec<ValidationWarning>,
 ) {
     let mut to_remove = Vec::new();
@@ -211,14 +214,8 @@ fn validate_workspace_panes(
             warnings,
         );
 
-        // View type must not be empty
-        if pane.view.view_type.is_empty() {
-            pane.view.view_type = "EmptyView".into();
-            warnings.push(ValidationWarning {
-                path: format!("{pane_path}.view.type"),
-                message: "View 타입이 비어 있어 EmptyView로 설정했습니다.".into(),
-                repaired: true,
-            });
+        if !validate_pane_content(pane, &pane_path, seen_content_ids, warnings) {
+            to_remove.push(i);
         }
     }
 
@@ -226,6 +223,100 @@ fn validate_workspace_panes(
     for i in to_remove.into_iter().rev() {
         panes.remove(i);
     }
+}
+
+/// Validate a slot's content (ADR-0297): either the compact `view` or the
+/// stacked `layers` + `activeLayerId`. Returns false when the pane has no
+/// usable content and must be dropped.
+fn validate_pane_content(
+    pane: &mut WorkspacePane,
+    pane_path: &str,
+    seen: &mut std::collections::HashSet<String>,
+    warnings: &mut Vec<ValidationWarning>,
+) -> bool {
+    if pane.layers.is_empty() {
+        let Some(view) = pane.view.as_mut() else {
+            warnings.push(ValidationWarning {
+                path: pane_path.to_string(),
+                message: "Pane에 view도 layers도 없어 제거했습니다.".into(),
+                repaired: true,
+            });
+            return false;
+        };
+        // View type must not be empty
+        if view.view_type.is_empty() {
+            view.view_type = "EmptyView".into();
+            warnings.push(ValidationWarning {
+                path: format!("{pane_path}.view.type"),
+                message: "View 타입이 비어 있어 EmptyView로 설정했습니다.".into(),
+                repaired: true,
+            });
+        }
+        if pane.active_layer_id.take().is_some() {
+            warnings.push(ValidationWarning {
+                path: format!("{pane_path}.activeLayerId"),
+                message: "layers 없이 activeLayerId만 있어 제거했습니다.".into(),
+                repaired: true,
+            });
+        }
+        if !pane.id.is_empty() {
+            seen.insert(pane.id.clone());
+        }
+        return true;
+    }
+
+    // Stacked form: `layers` is authoritative.
+    if pane.view.take().is_some() {
+        warnings.push(ValidationWarning {
+            path: format!("{pane_path}.view"),
+            message: "layers와 view가 함께 있어 layers를 사용하고 view를 제거했습니다.".into(),
+            repaired: true,
+        });
+    }
+    // Ids kept by earlier layers of this slot: a later duplicate of one of them
+    // must not steal the active reference, which still resolves to the kept layer.
+    let mut kept = std::collections::HashSet::new();
+    for (layer_idx, layer) in pane.layers.iter_mut().enumerate() {
+        let layer_path = format!("{pane_path}.layers[{layer_idx}]");
+        if layer.id.is_empty() || !seen.insert(layer.id.clone()) {
+            let new_id = format!("pane-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+            // The re-issued layer stays active (mirrors TS `dedupeLayerIds`).
+            if pane.active_layer_id.as_deref() == Some(layer.id.as_str())
+                && !kept.contains(&layer.id)
+            {
+                pane.active_layer_id = Some(new_id.clone());
+            }
+            layer.id = new_id;
+            seen.insert(layer.id.clone());
+            warnings.push(ValidationWarning {
+                path: format!("{layer_path}.id"),
+                message: "레이어 ID가 비어 있거나 중복되어 새로 생성했습니다.".into(),
+                repaired: true,
+            });
+        }
+        kept.insert(layer.id.clone());
+        if layer.view.view_type.is_empty() {
+            layer.view.view_type = "EmptyView".into();
+            warnings.push(ValidationWarning {
+                path: format!("{layer_path}.view.type"),
+                message: "View 타입이 비어 있어 EmptyView로 설정했습니다.".into(),
+                repaired: true,
+            });
+        }
+    }
+    let active_is_valid = pane
+        .active_layer_id
+        .as_ref()
+        .is_some_and(|id| pane.layers.iter().any(|layer| &layer.id == id));
+    if !active_is_valid {
+        pane.active_layer_id = Some(pane.layers[0].id.clone());
+        warnings.push(ValidationWarning {
+            path: format!("{pane_path}.activeLayerId"),
+            message: "활성 레이어가 목록에 없어 첫 레이어로 설정했습니다.".into(),
+            repaired: true,
+        });
+    }
+    true
 }
 
 fn validate_layouts(settings: &mut Settings, warnings: &mut Vec<ValidationWarning>) {
@@ -259,6 +350,18 @@ fn validate_layouts(settings: &mut Settings, warnings: &mut Vec<ValidationWarnin
                         .into(),
                     repaired: true,
                 });
+            }
+            for (layer_idx, layer) in pane.layers.iter_mut().enumerate() {
+                if layer.view_type.is_empty() {
+                    layer.view_type = "TerminalView".into();
+                    warnings.push(ValidationWarning {
+                        path: format!("{pane_path}.layers[{layer_idx}].viewType"),
+                        message:
+                            "레이아웃 레이어 viewType이 비어 있어 TerminalView로 설정했습니다."
+                                .into(),
+                        repaired: true,
+                    });
+                }
             }
         }
     }
@@ -334,20 +437,27 @@ fn validate_profile_references(settings: &mut Settings, warnings: &mut Vec<Valid
     // Check workspace pane profile references
     for (ws_idx, ws) in settings.workspaces.iter().enumerate() {
         for (pane_idx, pane) in ws.panes.iter().enumerate() {
-            if pane.view.view_type == "TerminalView" {
-                if let Some(profile_name) = pane.view.extra.get("profile").and_then(|v| v.as_str())
-                {
-                    if !profile_name.is_empty()
-                        && !profile_names.contains(&profile_name.to_string())
-                    {
-                        warnings.push(ValidationWarning {
-                            path: format!("workspaces[{ws_idx}].panes[{pane_idx}].view.profile"),
-                            message: format!(
-                                "프로파일 '{profile_name}'이(가) 정의된 프로파일 목록에 없습니다."
-                            ),
-                            repaired: false,
-                        });
-                    }
+            let stacked = !pane.layers.is_empty();
+            for (layer_idx, (_, view)) in pane.content_views().into_iter().enumerate() {
+                if view.view_type != "TerminalView" {
+                    continue;
+                }
+                let Some(profile_name) = view.extra.get("profile").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                if !profile_name.is_empty() && !profile_names.contains(&profile_name.to_string()) {
+                    let view_path = if stacked {
+                        format!("workspaces[{ws_idx}].panes[{pane_idx}].layers[{layer_idx}].view")
+                    } else {
+                        format!("workspaces[{ws_idx}].panes[{pane_idx}].view")
+                    };
+                    warnings.push(ValidationWarning {
+                        path: format!("{view_path}.profile"),
+                        message: format!(
+                            "프로파일 '{profile_name}'이(가) 정의된 프로파일 목록에 없습니다."
+                        ),
+                        repaired: false,
+                    });
                 }
             }
         }
@@ -535,17 +645,17 @@ fn resolve_fallback_profile(settings: &Settings) -> String {
 }
 
 fn default_workspace_pane(profile_name: &str) -> WorkspacePane {
-    WorkspacePane {
-        id: format!("pane-{}", &uuid::Uuid::new_v4().to_string()[..8]),
-        x: 0.0,
-        y: 0.0,
-        w: 1.0,
-        h: 1.0,
-        view: super::models::WorkspacePaneView {
+    WorkspacePane::single(
+        format!("pane-{}", &uuid::Uuid::new_v4().to_string()[..8]),
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        super::models::WorkspacePaneView {
             view_type: "TerminalView".into(),
             extra: serde_json::json!({"profile": profile_name}),
         },
-    }
+    )
 }
 
 #[cfg(test)]
@@ -771,9 +881,20 @@ mod tests {
     #[test]
     fn empty_view_type_set_to_empty_view() {
         let mut settings = Settings::default();
-        settings.workspaces[0].panes[0].view.view_type = "".into();
+        settings.workspaces[0].panes[0]
+            .view
+            .as_mut()
+            .unwrap()
+            .view_type = "".into();
         let warnings = validate_and_repair(&mut settings);
-        assert_eq!(settings.workspaces[0].panes[0].view.view_type, "EmptyView");
+        assert_eq!(
+            settings.workspaces[0].panes[0]
+                .view
+                .as_ref()
+                .unwrap()
+                .view_type,
+            "EmptyView"
+        );
         assert!(warnings.iter().any(|w| w.path.contains("view.type")));
     }
 
@@ -830,10 +951,12 @@ mod tests {
             y: f64::NAN,
             w: f64::NAN,
             h: f64::NAN,
-            view: WorkspacePaneView {
+            view: Some(WorkspacePaneView {
                 view_type: "TerminalView".into(),
                 extra: serde_json::json!({}),
-            },
+            }),
+            layers: Vec::new(),
+            active_layer_id: None,
         }];
         let warnings = validate_and_repair(&mut settings);
         assert_eq!(settings.workspaces[0].panes.len(), 1);
@@ -846,9 +969,9 @@ mod tests {
     #[test]
     fn nonexistent_profile_reference_warns() {
         let mut settings = Settings::default();
-        settings.workspaces[0].panes[0].view.view_type = "TerminalView".into();
-        settings.workspaces[0].panes[0].view.extra =
-            serde_json::json!({"profile": "NonExistentProfile"});
+        let view = settings.workspaces[0].panes[0].view.as_mut().unwrap();
+        view.view_type = "TerminalView".into();
+        view.extra = serde_json::json!({"profile": "NonExistentProfile"});
         let warnings = validate_and_repair(&mut settings);
         assert!(warnings
             .iter()
@@ -1060,6 +1183,8 @@ mod tests {
         let _warnings = validate_and_repair(&mut settings);
         let profile = settings.workspaces[0].panes[0]
             .view
+            .as_ref()
+            .unwrap()
             .extra
             .get("profile")
             .and_then(|v| v.as_str())
@@ -1082,6 +1207,8 @@ mod tests {
         let _warnings = validate_and_repair(&mut settings);
         let profile = settings.workspaces[0].panes[0]
             .view
+            .as_ref()
+            .unwrap()
             .extra
             .get("profile")
             .and_then(|v| v.as_str())
@@ -1104,6 +1231,8 @@ mod tests {
         let _warnings = validate_and_repair(&mut settings);
         let profile = settings.workspaces[0].panes[0]
             .view
+            .as_ref()
+            .unwrap()
             .extra
             .get("profile")
             .and_then(|v| v.as_str())
@@ -1123,15 +1252,221 @@ mod tests {
             y: 0.0,
             w: 1.0,
             h: 1.0,
-            view: WorkspacePaneView {
+            view: Some(WorkspacePaneView {
                 view_type: "TerminalView".into(),
                 extra: serde_json::json!({}),
-            },
+            }),
+            layers: Vec::new(),
+            active_layer_id: None,
         };
         settings.workspaces[0].panes = vec![good_pane.clone(), bad_pane];
         let warnings = validate_and_repair(&mut settings);
         assert_eq!(settings.workspaces[0].panes.len(), 1);
         assert_eq!(settings.workspaces[0].panes[0].id, good_pane.id);
         assert!(warnings.iter().any(|w| w.message.contains("NaN/Infinity")));
+    }
+    // ── 스택 슬롯 검증 (ADR-0297) ──
+
+    fn stacked_pane(value: serde_json::Value) -> WorkspacePane {
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn stacked_pane_stale_active_layer_falls_back_to_first() {
+        let mut settings = Settings::default();
+        settings.workspaces[0].panes = vec![stacked_pane(serde_json::json!({
+            "id": "slot", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0,
+            "layers": [
+                { "id": "a", "view": { "type": "MemoView" } },
+                { "id": "b", "view": { "type": "" } }
+            ],
+            "activeLayerId": "gone"
+        }))];
+        let warnings = validate_and_repair(&mut settings);
+        let pane = &settings.workspaces[0].panes[0];
+        assert_eq!(pane.active_layer_id.as_deref(), Some("a"));
+        assert_eq!(pane.layers[1].view.view_type, "EmptyView");
+        assert!(warnings.iter().any(|w| w.path.ends_with(".activeLayerId")));
+        assert!(warnings
+            .iter()
+            .any(|w| w.path.ends_with("layers[1].view.type")));
+    }
+
+    #[test]
+    fn stacked_pane_repairs_empty_and_duplicate_layer_ids() {
+        let mut settings = Settings::default();
+        settings.workspaces[0].panes = vec![stacked_pane(serde_json::json!({
+            "id": "slot", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0,
+            "layers": [
+                { "id": "a", "view": { "type": "MemoView" } },
+                { "id": "a", "view": { "type": "MemoView" } },
+                { "view": { "type": "MemoView" } }
+            ],
+            "activeLayerId": "a"
+        }))];
+        validate_and_repair(&mut settings);
+        let ids: Vec<&str> = settings.workspaces[0].panes[0]
+            .layers
+            .iter()
+            .map(|layer| layer.id.as_str())
+            .collect();
+        assert_eq!(ids[0], "a");
+        assert!(!ids[1].is_empty() && ids[1] != "a");
+        assert!(!ids[2].is_empty() && ids[2] != ids[1]);
+    }
+
+    #[test]
+    fn stacked_layer_ids_are_unique_across_workspaces() {
+        let mut settings = Settings::default();
+        let compact_id = settings.workspaces[0].panes[0].id.clone();
+        settings.workspaces[0]
+            .panes
+            .push(stacked_pane(serde_json::json!({
+                "id": "s1", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0,
+                "layers": [
+                    { "id": "s1", "view": { "type": "MemoView" } },
+                    { "id": compact_id, "view": { "type": "MemoView" } }
+                ],
+                "activeLayerId": "s1"
+            })));
+        let mut other = settings.workspaces[0].clone();
+        other.id = "ws-other".into();
+        other.name = "Other".into();
+        other.panes = vec![stacked_pane(serde_json::json!({
+            "id": "s2", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0,
+            "layers": [
+                { "id": "s2", "view": { "type": "MemoView" } },
+                { "id": "s1", "view": { "type": "MemoView" } }
+            ],
+            "activeLayerId": "s2"
+        }))];
+        settings.workspaces.push(other);
+        validate_and_repair(&mut settings);
+        let mut ids: Vec<String> = settings
+            .workspaces
+            .iter()
+            .flat_map(|ws| ws.panes.iter())
+            .flat_map(|pane| {
+                pane.content_views()
+                    .into_iter()
+                    .map(|(id, _)| id.to_string())
+            })
+            .collect();
+        let total = ids.len();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), total, "content ids must be unique: {ids:?}");
+        // the first occurrences keep their ids
+        assert_eq!(settings.workspaces[0].panes[1].layers[0].id, "s1");
+        assert_eq!(settings.workspaces[1].panes[0].layers[0].id, "s2");
+    }
+
+    #[test]
+    fn stacked_pane_drops_shadowing_view() {
+        let mut settings = Settings::default();
+        settings.workspaces[0].panes = vec![stacked_pane(serde_json::json!({
+            "id": "slot", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0,
+            "view": { "type": "TerminalView" },
+            "layers": [{ "id": "a", "view": { "type": "MemoView" } }],
+            "activeLayerId": "a"
+        }))];
+        validate_and_repair(&mut settings);
+        assert!(settings.workspaces[0].panes[0].view.is_none());
+        assert_eq!(settings.workspaces[0].panes[0].layers.len(), 1);
+    }
+
+    #[test]
+    fn pane_without_content_is_removed() {
+        let mut settings = Settings::default();
+        let good = settings.workspaces[0].panes[0].clone();
+        settings.workspaces[0].panes = vec![
+            good.clone(),
+            stacked_pane(
+                serde_json::json!({ "id": "empty", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0 }),
+            ),
+        ];
+        let warnings = validate_and_repair(&mut settings);
+        assert_eq!(settings.workspaces[0].panes.len(), 1);
+        assert_eq!(settings.workspaces[0].panes[0].id, good.id);
+        assert!(warnings
+            .iter()
+            .any(|w| w.message.contains("view도 layers도")));
+    }
+
+    #[test]
+    fn stacked_layer_profile_reference_warns() {
+        let mut settings = Settings::default();
+        settings.workspaces[0].panes = vec![stacked_pane(serde_json::json!({
+            "id": "slot", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0,
+            "layers": [
+                { "id": "a", "view": { "type": "MemoView" } },
+                { "id": "b", "view": { "type": "TerminalView", "profile": "Nope" } }
+            ],
+            "activeLayerId": "a"
+        }))];
+        let warnings = validate_and_repair(&mut settings);
+        assert!(warnings
+            .iter()
+            .any(|w| w.path == "workspaces[0].panes[0].layers[1].view.profile" && !w.repaired));
+    }
+
+    #[test]
+    fn reissued_colliding_layer_id_keeps_the_active_layer() {
+        let mut settings = Settings::default();
+        let compact_id = settings.workspaces[0].panes[0].id.clone();
+        settings.workspaces[0]
+            .panes
+            .push(stacked_pane(serde_json::json!({
+                "id": "s2", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0,
+                "layers": [
+                    { "id": "s2", "view": { "type": "MemoView" } },
+                    { "id": compact_id, "view": { "type": "TerminalView" } }
+                ],
+                "activeLayerId": compact_id
+            })));
+        validate_and_repair(&mut settings);
+        let pane = &settings.workspaces[0].panes[1];
+        assert_ne!(pane.layers[1].id, compact_id);
+        assert_eq!(
+            pane.active_layer_id.as_deref(),
+            Some(pane.layers[1].id.as_str()),
+            "the active layer must follow its re-issued id"
+        );
+    }
+
+    #[test]
+    fn duplicate_layer_id_within_a_slot_keeps_the_active_on_the_kept_layer() {
+        let mut settings = Settings::default();
+        settings.workspaces[0].panes = vec![stacked_pane(serde_json::json!({
+            "id": "slot", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0,
+            "layers": [
+                { "id": "a", "view": { "type": "MemoView" } },
+                { "id": "a", "view": { "type": "MemoView" } }
+            ],
+            "activeLayerId": "a"
+        }))];
+        validate_and_repair(&mut settings);
+        let pane = &settings.workspaces[0].panes[0];
+        assert_eq!(pane.layers[0].id, "a");
+        assert_eq!(pane.active_layer_id.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn layout_layer_empty_view_type_becomes_terminal_view() {
+        let mut settings = Settings::default();
+        settings.layouts[0].panes = vec![serde_json::from_value(serde_json::json!({
+            "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0, "viewType": "MemoView",
+            "layers": [{ "viewType": "MemoView" }, { "viewType": "" }],
+            "activeLayerIndex": 0
+        }))
+        .unwrap()];
+        let warnings = validate_and_repair(&mut settings);
+        assert_eq!(
+            settings.layouts[0].panes[0].layers[1].view_type,
+            "TerminalView"
+        );
+        assert!(warnings
+            .iter()
+            .any(|w| w.path == "layouts[0].panes[0].layers[1].viewType" && w.repaired));
     }
 }

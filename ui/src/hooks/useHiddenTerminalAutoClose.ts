@@ -5,6 +5,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { checkpointAndCloseHiddenTerminals } from "@/lib/tauri-api";
 import { toPaneId, toTerminalId } from "@/lib/pane-ids";
+import { allLayerIds } from "@/lib/pane-layers";
 import {
   advanceHiddenTimers,
   computeHiddenPaneIds,
@@ -51,7 +52,8 @@ export function useHiddenTerminalAutoClose() {
 
       const ws = useWorkspaceStore.getState();
       const panes: HideCandidatePane[] = ws.workspaces.flatMap((w) =>
-        w.panes.map((p) => ({ paneId: p.id, workspaceId: w.id })),
+        // Hide flags and eviction are per content layer (ADR-0297).
+        allLayerIds(w.panes).map((paneId) => ({ paneId, workspaceId: w.id })),
       );
 
       const hiddenPaneIds = computeHiddenPaneIds({

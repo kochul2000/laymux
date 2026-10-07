@@ -161,10 +161,12 @@ fn migrate_settings(settings: &mut Settings) {
     // Migrate CMD → PowerShell in workspace pane views
     for ws in &mut settings.workspaces {
         for pane in &mut ws.panes {
-            if let Some(profile) = pane.view.extra.get("profile").and_then(|v| v.as_str()) {
-                if profile.eq_ignore_ascii_case("cmd") {
-                    if let Some(obj) = pane.view.extra.as_object_mut() {
-                        obj.insert("profile".into(), serde_json::json!("PowerShell"));
+            for view in pane.content_views_mut() {
+                if let Some(profile) = view.extra.get("profile").and_then(|v| v.as_str()) {
+                    if profile.eq_ignore_ascii_case("cmd") {
+                        if let Some(obj) = view.extra.as_object_mut() {
+                            obj.insert("profile".into(), serde_json::json!("PowerShell"));
+                        }
                     }
                 }
             }
@@ -1719,24 +1721,50 @@ mod tests {
                 id: "ws-1".into(),
                 name: "Test".into(),
                 layout_id: None,
-                panes: vec![WorkspacePane {
-                    id: "pane-test1".into(),
-                    x: 0.0,
-                    y: 0.0,
-                    w: 1.0,
-                    h: 1.0,
-                    view: serde_json::from_value(serde_json::json!({
+                panes: vec![WorkspacePane::single(
+                    "pane-test1".into(),
+                    0.0,
+                    0.0,
+                    1.0,
+                    1.0,
+                    serde_json::from_value(serde_json::json!({
                         "type": "TerminalView",
                         "profile": "CMD"
                     }))
                     .unwrap(),
-                }],
+                )],
             }],
             ..Settings::default()
         };
         migrate_settings(&mut settings);
         assert_eq!(
-            settings.workspaces[0].panes[0].view.extra["profile"],
+            settings.workspaces[0].panes[0].view.as_ref().unwrap().extra["profile"],
+            "PowerShell"
+        );
+    }
+
+    #[test]
+    fn migrate_cmd_profile_to_powershell_in_stacked_layers() {
+        let mut settings = Settings {
+            workspaces: vec![Workspace {
+                id: "ws-1".into(),
+                name: "Test".into(),
+                layout_id: None,
+                panes: vec![serde_json::from_value(serde_json::json!({
+                    "id": "slot", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0,
+                    "layers": [
+                        { "id": "a", "view": { "type": "MemoView" } },
+                        { "id": "b", "view": { "type": "TerminalView", "profile": "cmd" } }
+                    ],
+                    "activeLayerId": "b"
+                }))
+                .unwrap()],
+            }],
+            ..Settings::default()
+        };
+        migrate_settings(&mut settings);
+        assert_eq!(
+            settings.workspaces[0].panes[0].layers[1].view.extra["profile"],
             "PowerShell"
         );
     }
@@ -1899,17 +1927,47 @@ mod tests {
 
     #[test]
     fn workspace_pane_id_round_trip() {
-        let pane = WorkspacePane {
-            id: "pane-abc12345".into(),
-            x: 0.0,
-            y: 0.0,
-            w: 1.0,
-            h: 1.0,
-            view: serde_json::from_value(serde_json::json!({"type": "TerminalView"})).unwrap(),
-        };
+        let pane = WorkspacePane::single(
+            "pane-abc12345".into(),
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            serde_json::from_value(serde_json::json!({"type": "TerminalView"})).unwrap(),
+        );
         let json = serde_json::to_string(&pane).unwrap();
+        // The compact form stays compact: no stack fields are written (ADR-0297).
+        assert!(!json.contains("layers"));
+        assert!(!json.contains("activeLayerId"));
         let parsed: WorkspacePane = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.id, "pane-abc12345");
+    }
+
+    #[test]
+    fn pane_stack_settings_default_to_cycling_on_blocked_arrow() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert!(settings.pane_stack.cycle_on_blocked_arrow);
+        let partial: Settings = serde_json::from_str(r#"{"paneStack":{}}"#).unwrap();
+        assert!(partial.pane_stack.cycle_on_blocked_arrow);
+        let off: Settings =
+            serde_json::from_str(r#"{"paneStack":{"cycleOnBlockedArrow":false}}"#).unwrap();
+        assert!(!off.pane_stack.cycle_on_blocked_arrow);
+        let out = serde_json::to_value(&off).unwrap();
+        assert_eq!(out["paneStack"]["cycleOnBlockedArrow"], false);
+    }
+
+    #[test]
+    fn stacked_workspace_pane_round_trips() {
+        let json = r#"{"id":"slot","x":0.0,"y":0.0,"w":1.0,"h":1.0,"layers":[{"id":"a","view":{"type":"MemoView"}},{"id":"b","view":{"type":"TerminalView"}}],"activeLayerId":"b"}"#;
+        let pane: WorkspacePane = serde_json::from_str(json).unwrap();
+        assert!(pane.view.is_none());
+        assert_eq!(pane.layers.len(), 2);
+        assert_eq!(pane.active_layer_id.as_deref(), Some("b"));
+        let ids: Vec<&str> = pane.content_views().iter().map(|(id, _)| *id).collect();
+        assert_eq!(ids, vec!["a", "b"]);
+        let out = serde_json::to_value(&pane).unwrap();
+        assert!(out.get("view").is_none());
+        assert_eq!(out["activeLayerId"], "b");
     }
 
     #[test]

@@ -5,7 +5,15 @@ import {
   makeDefaultColorScheme,
   useSettingsStore,
 } from "@/stores/settings-store";
-import type { DockPosition, Layout, ViewType, Workspace } from "@/stores/types";
+import type {
+  DockPosition,
+  Layout,
+  PaneLayer,
+  ViewInstanceConfig,
+  ViewType,
+  Workspace,
+} from "@/stores/types";
+import { dedupeLayerIds, normalizeWorkspacePane } from "@/lib/pane-layers";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
 export interface ApplySettingsSnapshotOptions {
@@ -93,6 +101,7 @@ export function applySettingsSnapshot(
     ...(rawSettings.usage ? { usage: rawSettings.usage } : {}),
     ...(rawSettings.widgets ? { widgets: rawSettings.widgets } : {}),
     ...(rawSettings.dock ? { dock: rawSettings.dock } : {}),
+    ...(rawSettings.paneStack ? { paneStack: rawSettings.paneStack } : {}),
     ...(rawSettings.notifications ? { notifications: rawSettings.notifications } : {}),
     ...(rawSettings.power ? { power: rawSettings.power } : {}),
     ...(rawSettings.update ? { update: rawSettings.update } : {}),
@@ -138,24 +147,53 @@ function applyWorkspaceSnapshot(rawSettings: Settings): void {
       ...(pane.viewConfig
         ? { viewConfig: { ...pane.viewConfig, type: pane.viewConfig.type as ViewType } }
         : {}),
+      ...(pane.layers && pane.layers.length > 0
+        ? {
+            layers: pane.layers.map((layer) => ({
+              viewType: layer.viewType as ViewType,
+              ...(layer.viewConfig
+                ? { viewConfig: { ...layer.viewConfig, type: layer.viewConfig.type as ViewType } }
+                : {}),
+            })),
+            activeLayerIndex: pane.activeLayerIndex ?? 0,
+          }
+        : {}),
     })),
   }));
 
   let paneCounter = 0;
+  const newPaneId = () => `loaded-pane-${++paneCounter}`;
+  const seenContentIds = new Set<string>();
+  // Both on-disk forms normalize into canonical slots (ADR-0297).
   const workspaces: Workspace[] = rawSettings.workspaces.map((workspace) => ({
     id: workspace.id,
     name: workspace.name,
-    panes: workspace.panes.map((pane) => ({
-      id: pane.id || `loaded-pane-${++paneCounter}`,
-      x: pane.x,
-      y: pane.y,
-      w: pane.w || 1,
-      h: pane.h || 1,
-      view: {
-        ...pane.view,
-        type: (pane.view.type as ViewType) || "EmptyView",
-      },
-    })),
+    panes: workspace.panes.flatMap((pane) => {
+      const normalized = normalizeWorkspacePane(
+        {
+          id: pane.id ?? "",
+          x: pane.x,
+          y: pane.y,
+          w: pane.w || 1,
+          h: pane.h || 1,
+          view: pane.view as ViewInstanceConfig | undefined,
+          layers: pane.layers as PaneLayer[] | undefined,
+          activeLayerId: pane.activeLayerId,
+        },
+        newPaneId,
+      );
+      if (!normalized) return [];
+      const slot = dedupeLayerIds(normalized, seenContentIds, newPaneId);
+      return [
+        {
+          ...slot,
+          layers: slot.layers.map((layer) => ({
+            ...layer,
+            view: { ...layer.view, type: layer.view.type || "EmptyView" },
+          })),
+        },
+      ];
+    }),
   }));
   const currentActiveId = useWorkspaceStore.getState().activeWorkspaceId;
   const activeWorkspaceId = workspaces.some((workspace) => workspace.id === currentActiveId)

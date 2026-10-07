@@ -53,6 +53,10 @@
 
   /* dimensions */
   --bar-h: 28px;
+  --pane-stack-strip-h: var(--bar-h);
+  /* Pane focus outline and the pane stack selected-tab underline share one width. */
+  --pane-focus-border-w: 1px;
+  --pane-stack-drop-band-h: 40px;
   --btn-h: 22px;
   --btn-min-w: 22px;
 
@@ -1271,6 +1275,154 @@
   .pane-control-popover :is(button, select):focus-visible {
     outline: 1px solid var(--accent);
     outline-offset: -1px;
+  }
+
+  /* Pane stack strip (ADR-0297): fixed top row of a stacked slot. */
+  .pane-stack-strip {
+    display: flex;
+    flex-shrink: 0;
+    align-items: stretch;
+    height: var(--pane-stack-strip-h);
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .pane-stack-strip::-webkit-scrollbar {
+    display: none;
+  }
+  .pane-stack-tab {
+    display: flex;
+    flex: 0 1 auto;
+    align-items: center;
+    gap: 4px;
+    min-width: 44px;
+    max-width: 180px;
+    padding: 0 4px 0 6px;
+    border-bottom: var(--pane-focus-border-w) solid transparent;
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+    font-weight: 500;
+    cursor: pointer;
+    user-select: none;
+    transition: background var(--transition-fast);
+  }
+  .pane-stack-tab:hover {
+    background: var(--hover-bg);
+  }
+  .pane-stack-tab[data-active="true"] {
+    border-bottom-color: var(--accent);
+    color: var(--text-primary);
+    background: var(--accent-08);
+  }
+  .pane-stack-tab[data-drop="before"] {
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  .pane-stack-tab[data-drop="after"] {
+    box-shadow: inset -2px 0 0 var(--accent);
+  }
+  .pane-stack-tab-number {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    font-size: var(--fs-xs);
+    font-variant-numeric: tabular-nums;
+  }
+  .pane-stack-tab-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pane-stack-tab-dot {
+    flex-shrink: 0;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+  }
+  .pane-stack-tab-dot[data-kind="unread"] {
+    background: var(--accent);
+  }
+  .pane-stack-tab-dot[data-kind="active"] {
+    background: var(--green);
+  }
+  .pane-stack-tab-close,
+  .pane-stack-add {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    min-width: var(--btn-min-w);
+    height: var(--btn-h);
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .pane-stack-tab-close {
+    visibility: hidden;
+  }
+  .pane-stack-tab:hover .pane-stack-tab-close,
+  .pane-stack-tab[data-active="true"] .pane-stack-tab-close {
+    visibility: visible;
+  }
+  .pane-stack-add:hover {
+    background: var(--hover-bg-strong);
+    color: var(--text-primary);
+  }
+  /* Same destructive red as the control bar close button. */
+  .pane-stack-tab-close {
+    color: var(--red);
+  }
+  .pane-stack-tab-close:hover {
+    background: var(--hover-bg-strong);
+  }
+  .pane-stack-add {
+    align-self: center;
+    margin: 0 4px;
+  }
+  .pane-stack-menu {
+    position: fixed;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    min-width: 140px;
+    padding: 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--bg-overlay);
+  }
+  .pane-stack-menu-item {
+    padding: 4px 8px;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-primary);
+    font-size: var(--fs-sm);
+    text-align: left;
+    cursor: pointer;
+  }
+  .pane-stack-menu-item:hover,
+  .pane-stack-menu-item:focus-visible {
+    background: var(--hover-bg-strong);
+    outline: none;
+  }
+  /* Drop band shown when a slot or tab can be stacked onto a slot. */
+  .pane-stack-drop-band {
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: var(--pane-stack-drop-band-h);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-bottom: 2px solid var(--accent);
+    background: var(--accent-20);
+    color: var(--accent);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    pointer-events: none;
   }
 
   /* Toolbar (28px header bar) */

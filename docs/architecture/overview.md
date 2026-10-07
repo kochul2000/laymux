@@ -199,13 +199,21 @@ Layout은 Workspace 생성 시점에만 사용된다. 생성 후 Workspace는 �
 Layout (생성 시점에만 사용)
 ├── id
 ├── name
-└── panes: [ { x, y, w, h (비율 0.0~1.0), viewType } ]
+└── panes: [ { x, y, w, h (비율 0.0~1.0), viewType, viewConfig?, layers?, activeLayerIndex? } ]
 
 Workspace (Independent)
 ├── id
 ├── name
-└── panes: [ { x, y, w, h, viewInstanceConfig } ]
+└── panes: [ 슬롯 { id, x, y, w, h, layers: [ { id, view } ], activeLayerId } ]
 ```
+
+**Pane 은 슬롯이고 콘텐츠는 레이어다**([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)). 슬롯이 기하를, 순서 있는 `layers` 가 콘텐츠를 소유하고 `activeLayerId` 하나만 보인다. 레이어가 둘 이상이면 그 슬롯은 스택이다.
+
+- **헬퍼 단일 소유**: 활성 레이어 조회, 평탄화(`layerEntries`), 레이어 삽입·제거·활성화·순서 변경, 영속 형태 변환은 `ui/src/lib/pane-layers.ts` 순수 함수가 소유한다. 컴포넌트는 `layers`/`activeLayerId` 를 직접 쓰지 않고 `workspace-store` 액션(`stackPane`·`setActiveLayer`·`removePane(index, layerId?)`·`removeSlot`·`setPaneView(index, view, layerId?)`)을 부른다.
+- **id 역할**: 슬롯 id 는 swap·워크스페이스 간 이동·pane 오버라이드(`controlBarMode`) 키다. 레이어 id 는 콘텐츠 키다 — `terminal-<layerId>`, view 오버라이드, 메모, 재시작/CWD 시드 버스, 알림, hidden flag, 시작 코디네이터, 출력 캐시. 새 슬롯은 첫 레이어 id 를 슬롯 id 와 같게 만들지만 이는 생성 규칙이지 불변식이 아니다.
+- **번호**: `paneNumber` 는 레이어 단위다. 슬롯 읽기 순서 안에서 레이어 순서로 연번을 매기므로 `computePaneNumbers()` 결과는 레이어 id 로 조회한다. 슬롯의 보이는 번호는 활성 레이어 id 로 찾는다.
+- **영속**: 메모리는 항상 `layers` 형태다. `settings.json` 은 레이어 하나이고 그 id 가 슬롯 id 와 같으면 기존 축약형 `{ id, x, y, w, h, view }` 로, 그 밖에는 `{ id, x, y, w, h, layers, activeLayerId }` 로 쓴다(`toPersistedPane`). 읽기는 두 형태 모두 받는다(`normalizeWorkspacePane`, Rust `WorkspacePane::content_views`). 레이아웃 템플릿도 레이어가 둘 이상일 때만 `layers`·`activeLayerIndex` 를 쓰고, `viewType` 은 활성 레이어 값으로 남긴다.
+- **dock 은 대상이 아니다**: dock pane 은 `{ id, view }` 그대로이며 `PaneGrid` 에는 단일 레이어 슬롯으로 어댑트(`toGridSlot`)되어 들어간다.
 
 ### 4.1 Layout 액션
 
@@ -266,12 +274,12 @@ View:     viewOverrides[paneId]        (localStorage: "laymux-view-overrides")
 
 #### 생명주기
 
-- **Pane 삭제 시** (`workspace-store.removePane`, `dock-store.removeDockPane`, `workspace-store.removeWorkspace`):
-  `overridesStore.clearAll(paneId)` — pane/view 오버라이드 동시 제거.
+- **Pane 삭제 시** (`workspace-store.removePane`·`removeSlot`, `dock-store.removeDockPane`, `workspace-store.removeWorkspace`):
+  `overridesStore.clearAll(paneId)` — pane/view 오버라이드 동시 제거. 워크스페이스 슬롯이 사라지면 슬롯 id 와 모든 레이어 id 를 지운다. 스택에서 레이어 하나만 닫히면 그 레이어의 view 오버라이드만 지우고, 그 레이어 id 가 살아 있는 슬롯 id 와 같아도 슬롯의 pane 오버라이드는 유지한다([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)).
 - **View 타입 전환 시** (`workspace-store.setPaneView`, `dock-store.setDockPaneView`):
   새 view.type ≠ 이전 view.type이면 `overridesStore.clearViewOverride(paneId)`. pane 오버라이드는 유지.
 - **앱 기동 시** (`useSessionPersistence`):
-  워크스페이스/독 복원 완료 후 살아있는 paneId 집합을 만들어 `overridesStore.gcStale(aliveSet)` — 과거 세션의 stale 엔트리 제거.
+  워크스페이스/독 복원 완료 후 살아있는 id 집합(워크스페이스 슬롯 id·레이어 id, dock pane id)을 만들어 `overridesStore.gcStale(aliveSet)` — 과거 세션의 stale 엔트리 제거.
   - **예외 — FileViewer**: `viewOverrides`의 키가 워크스페이스/dock pane id 가 아니라 파일 경로에서 파생된 `viewerInstanceId`(`global-file-viewer:` 접두사, `lib/file-viewer.ts`)인 항목은 이 GC에서 제외한다. 파일 뷰어는 열려 있을 때만 존재해 애초에 `aliveSet`에 나타날 수 없으므로, 예외가 없으면 재시작마다 사용자가 조정한 폰트/이미지 줌이 전부 삭제된다.
 
 #### 새 필드 추가 가이드

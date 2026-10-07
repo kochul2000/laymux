@@ -10,6 +10,12 @@ import { useRenameWorkspaceStore } from "@/stores/rename-workspace-store";
 import { resolveViewer } from "@/lib/file-viewer";
 import { matchesKeybinding } from "@/lib/keybinding-registry";
 import { formatPaneIdentifier, paneNumberFor } from "@/lib/pane-numbers";
+import { activeLayer } from "@/lib/pane-layers";
+import {
+  cycleFocusedLayer,
+  layerStepForDirection,
+  stackFocusedPane,
+} from "@/lib/pane-stack-actions";
 import { propagateCwdOnceForPane } from "@/lib/propagate-cwd-once";
 import { findPaneInDirection, type Direction } from "@/lib/pane-navigation";
 import { getSortedWorkspaces, notificationStep } from "@/lib/navigation-actions";
@@ -23,6 +29,7 @@ import { clipboardWriteText } from "@/lib/tauri-api";
 import { runPaneClearFromUi } from "@/lib/pane-clear-action";
 import { runWorkspaceClearFromUi } from "@/lib/workspace-clear-action";
 import { resolveFocusedTerminalPane } from "@/lib/focused-terminal";
+import { focusedSlotIsStacked, isStackOnlyAction } from "@/lib/lx-shortcuts";
 
 const ARROW_TO_DIRECTION: Record<string, Direction> = {
   ArrowLeft: "left",
@@ -94,7 +101,7 @@ function copyFocusedPaneIdentifier(): boolean {
   const pane = ws.panes[focusedPaneIndex];
   if (!pane) return false;
 
-  const paneNumber = paneNumberFor(ws.panes, pane.id);
+  const paneNumber = paneNumberFor(ws.panes, activeLayer(pane).id);
   if (paneNumber === null) return false;
 
   try {
@@ -197,14 +204,30 @@ function navigatePaneFocus(e: KeyboardEvent) {
   const next = findPaneInDirection(ws.panes, current, direction);
   if (next !== null) {
     focusWorkspacePane(ws.id, next);
-  } else if (dockArrowNav) {
+    return;
+  }
+  if (dockArrowNav) {
     // No pane in that direction → try to enter a dock
     const targetDock = getDockForDirection(direction);
     const targetState = dockStore.getDock(targetDock);
     if (targetState?.visible && targetState.panes.length > 0) {
       focusDockPane(targetDock);
+      return;
     }
   }
+  // Nothing in that direction at all → step the focused stack (ADR-0297).
+  // Docks come first so a full-screen stack never traps dock entry.
+  if (useSettingsStore.getState().paneStack.cycleOnBlockedArrow) {
+    cycleFocusedLayer(layerStepForDirection(direction));
+  }
+}
+
+/** pane.layer: step the focused slot's stack. Right/Down = next, Left/Up = previous. */
+function cyclePaneLayer(e: KeyboardEvent) {
+  const direction = ARROW_TO_DIRECTION[e.key];
+  if (!direction) return;
+  // Only a real stack consumes the combo; elsewhere it stays with the app.
+  if (cycleFocusedLayer(layerStepForDirection(direction))) e.preventDefault();
 }
 
 /**
@@ -253,7 +276,7 @@ const SHORTCUT_HANDLERS: Record<string, (e: KeyboardEvent) => void> = {
     const pane = ws && focusedPaneIndex !== null ? ws.panes[focusedPaneIndex] : undefined;
     // 헬퍼가 실제로 전파를 디스패치했을 때만 preventDefault — CWD 없는
     // view(Memo 등)에서는 no-op 이므로 기본 동작을 막지 않는다 (PR #331 리뷰).
-    if (pane && propagateCwdOnceForPane(pane)) {
+    if (pane && propagateCwdOnceForPane(activeLayer(pane))) {
       e.preventDefault();
     }
   },
@@ -275,6 +298,12 @@ const SHORTCUT_HANDLERS: Record<string, (e: KeyboardEvent) => void> = {
 
   // pane.focus (default Alt+Arrow wildcard): pane navigation (workspace + dock)
   "pane.focus": navigatePaneFocus,
+
+  // pane.layer (default Alt+Shift+Arrow wildcard) / pane.stack (default Ctrl+Alt+S): ADR-0297
+  "pane.layer": cyclePaneLayer,
+  "pane.stack": (e) => {
+    if (stackFocusedPane()) e.preventDefault();
+  },
 
   ...WORKSPACE_INDEX_HANDLERS,
 
@@ -429,9 +458,16 @@ const SHORTCUT_ACTION_IDS = Object.keys(SHORTCUT_HANDLERS);
  * (e.g. the terminal Composer) must check this FIRST and let matching events
  * bubble — laymux controls consume before passthrough, and rebinding moves
  * this check together with the dispatcher automatically.
+ *
+ * Stack-only actions (`pane.layer`) count only while the focused slot is a
+ * stack — the same gate `isLxShortcut` applies on the xterm path — so their
+ * combo still reaches the PTY on an ordinary slot (ADR-0297).
  */
 export function matchesGlobalShortcut(e: KeyboardEvent): boolean {
-  return SHORTCUT_ACTION_IDS.some((actionId) => matchesKeybinding(e, actionId));
+  return SHORTCUT_ACTION_IDS.some(
+    (actionId) =>
+      matchesKeybinding(e, actionId) && (!isStackOnlyAction(actionId) || focusedSlotIsStacked()),
+  );
 }
 
 export function useKeyboardShortcuts() {

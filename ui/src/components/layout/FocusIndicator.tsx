@@ -8,7 +8,7 @@ export function FocusIndicator({ testId }: { testId?: string }) {
       data-testid={testId}
       className="pointer-events-none absolute inset-0 z-30"
       style={{
-        boxShadow: `inset 0 0 0 1px var(${isAppFocused ? "--accent" : "--accent-50"})`,
+        boxShadow: `inset 0 0 0 var(--pane-focus-border-w) var(${isAppFocused ? "--accent" : "--accent-50"})`,
       }}
     />
   );
