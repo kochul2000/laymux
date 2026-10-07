@@ -171,6 +171,35 @@ pub async fn api_docs() -> impl IntoResponse {
                 }
             },
             {
+                "method": "POST", "path": "/api/v1/panes/layers/move",
+                "description": "Move a layer onto slot targetPaneIndex of the active workspace (ADR-0297), like dragging a stack tab. Inside its own slot it reorders; on another slot it joins that stack and is shown there. A slot left empty is removed. Keyboard focus does not move. Response: moved, paneIndex, layerIndex, layerCount, totalPanes.",
+                "body": {
+                    "layerId": "(one of) string",
+                    "terminalId": "(one of) string",
+                    "targetPaneIndex": "number",
+                    "index": "(optional) number, position among the target's other layers; default after its active layer"
+                }
+            },
+            {
+                "method": "POST", "path": "/api/v1/panes/layers/extract",
+                "description": "Pull a stacked layer out into its own slot, splitting its slot like panes/split (ADR-0297). Fails for a single-layer slot. Response: extracted, slotId, paneIndex, totalPanes.",
+                "body": {
+                    "layerId": "(one of) string",
+                    "terminalId": "(one of) string",
+                    "direction": "horizontal | vertical"
+                }
+            },
+            {
+                "method": "POST", "path": "/api/v1/panes/merge",
+                "description": "Stack every layer of slot sourceIndex onto slot targetIndex and remove the source slot (ADR-0297), like dropping a control bar on a pane's stack band. Response: merged, paneIndex (target), layerCount, totalPanes.",
+                "body": { "sourceIndex": "number", "targetIndex": "number" }
+            },
+            {
+                "method": "POST", "path": "/api/v1/panes/{index}/move-to-workspace",
+                "description": "Carry a whole slot (every layer) of the active workspace to another workspace (ADR-0297), like dropping a control bar on a workspace. The target's largest pane is split to host it. Refuses to empty the source workspace. Response: moved, workspaceId, paneIndex, paneNumber, totalPanes.",
+                "body": { "workspaceId": "string" }
+            },
+            {
                 "method": "DELETE", "path": "/api/v1/panes/{index}",
                 "description": "Close one layer of a pane slot: ?layerId=<id>, or the active layer. Closing the slot's last layer removes the slot and the adjacent pane absorbs the space (ADR-0295)."
             },

@@ -313,6 +313,7 @@ ADR 이 필요한 대표 기준:
 | [0293](0293-android-attachment-direct-system-picker.md) | Android 첨부 버튼은 선택 메뉴 없이 시스템 파일 선택기를 바로 연다 (0290 첨부 메뉴 대체) | Accepted |
 | [0294](0294-codex-process-bound-lifecycle-proof.md) | 훅 우선 종료 확인은 정확한 프로세스 대화 귀속도 증거로 사용한다 | Accepted |
 | [0295](0295-pane-stack-slot-layer-model.md) | 워크스페이스 pane 은 기하를 소유하는 슬롯, 콘텐츠는 순서 있는 레이어 목록(스택)이 소유한다 | Accepted |
+| [0297](0297-pane-rearrangement-automation-parity.md) | Pane 재배치(레이어 이동·꺼내기·스택 합치기·워크스페이스 간 이동)를 사용자 조작 수준까지 Automation/MCP 에 연다 | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

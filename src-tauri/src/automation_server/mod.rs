@@ -189,6 +189,13 @@ pub fn build_router(
         .route("/api/v1/panes/split", post(panes_split))
         .route("/api/v1/panes/stack", post(panes_stack))
         .route("/api/v1/panes/layers/activate", post(panes_activate_layer))
+        .route("/api/v1/panes/layers/move", post(panes_move_layer))
+        .route("/api/v1/panes/layers/extract", post(panes_extract_layer))
+        .route("/api/v1/panes/merge", post(panes_merge))
+        .route(
+            "/api/v1/panes/{index}/move-to-workspace",
+            post(panes_move_to_workspace),
+        )
         .route("/api/v1/panes/{index}", delete(panes_remove))
         .route("/api/v1/panes/{index}/resize", post(panes_resize))
         .route("/api/v1/panes/{index}/view", put(panes_set_view))
