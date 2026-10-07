@@ -776,6 +776,8 @@
     "recovery": {
       "pathUnavailable": "(경로를 가져올 수 없습니다)",
       "parseErrorTitle": "설정 파일을 읽을 수 없습니다",
+      "localStateErrorTitle": "로컬 복원 상태를 읽을 수 없습니다",
+      "localStateErrorDescription": "기존 복원 데이터는 보존했습니다. 데이터베이스 경로와 오류를 확인해 복구한 뒤 다시 실행하세요. 자동 저장은 중단된 상태입니다.",
       "validationTitle": "설정 파일 검증 결과",
       "parseErrorDescription": "settings.json 파일의 JSON 구문이 올바르지 않아 기본 설정으로 시작합니다.",
       "recoveredTitle": "일부 설정 값을 읽지 못했습니다",

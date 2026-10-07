@@ -27,6 +27,7 @@ pub async fn api_docs() -> impl IntoResponse {
         "auth": "No authentication required. Access is restricted by IP allowlist: loopback (127.x, ::1), WSL2/Hyper-V (172.16.0.0/12), link-local (169.254.x, fe80::).",
         "discovery": format!("Fixed port: release={}, dev={}. Discovery file: %APPDATA%/laymux/automation.json (release) or %APPDATA%/laymux-dev/automation.json (dev) on Windows, ~/.config/laymux/ or ~/.config/laymux-dev/ on Linux. Contains port and pid. Also LX_AUTOMATION_PORT env var in spawned terminals.", super::RELEASE_PORT, super::DEV_PORT),
         "endpoints": [
+            {"method":"GET","path":"/api/v1/settings/export","description":"다른 PC로 옮길 수 있는 사용자 설정만 반환합니다. 로컬 실행 환경과 복원 상태는 제외합니다."},
             {
                 "method": "GET", "path": "/api/v1/agent-hooks/environments",
                 "description": "List native host and individually selectable WSL distributions for optional CLI hooks."

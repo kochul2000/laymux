@@ -236,9 +236,10 @@ Workspace (Independent)
 
 ### 4.2 인스턴스 오버라이드 레이어 (Pane / View)
 
-사용자 구성(`settings.json`)과 UI 상태(localStorage)를 엄격히 분리한다.
+사용자 구성(`settings.json`), PC 환경·복원 상태(`state.db`), UI 오버라이드(localStorage)를 분리한다([ADR-0299](../adr/0299-portable-settings-and-local-sqlite-state.md)).
 
-- **구성 (settings.json)**: 사용자가 의도적으로 편집·유지하는 값. 프로파일, ProfileDefaults, 키바인딩, 워크스페이스 레이아웃(pane 위치/view 타입) 등.
+- **이식 가능한 구성 (settings.json)**: 테마·글꼴·키바인딩·일반 동작 옵션, 논리 프로필, 복원 필드와 로컬 경로를 제외한 레이아웃 템플릿.
+- **PC 환경·복원 상태 (SQLite state.db)**: 실제 프로필 실행 명령·시작 디렉터리·WSL 연결, Remote 호스트 설정, 실제 workspace/dock/pane 배치, 마지막 CWD·대화 ID, 활성 workspace·열린 파일 뷰어, checkpoint revision·미확인 상태. 출력·메모는 기존 캐시 파일에 둔다.
 - **UI 상태 (localStorage)**: 재시작 간 보존되지만 "구성"은 아닌 값. 휠 줌, 컨트롤 바 모드 등. 사용자가 설정 UI를 거치지 않고 즉흥적으로 바꾸는 값은 대부분 여기에 속한다.
 
 이 구분 아래 두 개의 일급 오버라이드 공간을 둔다. 둘 다 `useOverridesStore`(`ui/src/stores/overrides-store.ts`)에서 관리.
@@ -279,7 +280,7 @@ View:     viewOverrides[paneId]        (localStorage: "laymux-view-overrides")
 - **View 타입 전환 시** (`workspace-store.setPaneView`, `dock-store.setDockPaneView`):
   새 view.type ≠ 이전 view.type이면 `overridesStore.clearViewOverride(paneId)`. pane 오버라이드는 유지.
 - **앱 기동 시** (`useSessionPersistence`):
-  워크스페이스/독 복원 완료 후 살아있는 id 집합(워크스페이스 슬롯 id·레이어 id, dock pane id)을 만들어 `overridesStore.gcStale(aliveSet)` — 과거 세션의 stale 엔트리 제거.
+  SQLite에 실제 저장된 세션의 워크스페이스/독 복원 완료 후 살아있는 id 집합(워크스페이스 슬롯 id·레이어 id, dock pane id)을 만들어 `overridesStore.gcStale(aliveSet)` — 과거 세션의 stale 엔트리 제거.
   - **예외 — FileViewer**: `viewOverrides`의 키가 워크스페이스/dock pane id 가 아니라 파일 경로에서 파생된 `viewerInstanceId`(`global-file-viewer:` 접두사, `lib/file-viewer.ts`)인 항목은 이 GC에서 제외한다. 파일 뷰어는 열려 있을 때만 존재해 애초에 `aliveSet`에 나타날 수 없으므로, 예외가 없으면 재시작마다 사용자가 조정한 폰트/이미지 줌이 전부 삭제된다.
 
 #### 새 필드 추가 가이드
@@ -294,6 +295,8 @@ View:     viewOverrides[paneId]        (localStorage: "laymux-view-overrides")
 
 ### 4.3 settings.json 예시
 
+실행 중 workspace 인스턴스는 아래 문서에 포함하지 않는다. API의 `Settings`는 JSON 구성과 SQLite 환경·복원 상태를 합성한 유효 모델이다.
+
 ```jsonc
 {
   "layouts": [
@@ -306,18 +309,8 @@ View:     viewOverrides[paneId]        (localStorage: "laymux-view-overrides")
         { "x": 0.5, "y": 0.6, "w": 0.5, "h": 0.4, "viewType": "TerminalView" }
       ]
     }
-  ],
-  "workspaces": [
-    {
-      "id": "ws-project-a",
-      "name": "프로젝트A",
-      "panes": [
-        { "x": 0.0, "y": 0.0, "view": { "type": "TerminalView", "profile": "WSL",        "syncGroup": "ws-project-a" } },
-        { "x": 0.0, "y": 0.6, "view": { "type": "TerminalView", "profile": "PowerShell", "syncGroup": "ws-project-a" } },
-        { "x": 0.5, "y": 0.6, "view": { "type": "TerminalView", "profile": "PowerShell", "syncGroup": "ws-project-a" } }
-      ]
-    }
   ]
+
 }
 ```
 

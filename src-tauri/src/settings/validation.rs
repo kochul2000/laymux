@@ -63,6 +63,8 @@ pub enum SettingsLoadResult {
         settings: Settings,
         error: String,
         settings_path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        storage_kind: Option<String>,
     },
 }
 
@@ -1139,6 +1141,7 @@ mod tests {
             settings: Settings::default(),
             error: "unexpected token".into(),
             settings_path: "/path/to/settings.json".into(),
+            storage_kind: None,
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"status\":\"parse_error\""));

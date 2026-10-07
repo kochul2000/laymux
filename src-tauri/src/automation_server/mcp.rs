@@ -1869,6 +1869,18 @@ impl McpHandler {
         })))
     }
 
+    /// 다른 PC로 옮길 수 있는 사용자 설정을 반환한다. 로컬 실행 환경과 복원 상태는 제외한다.
+    #[tool]
+    async fn export_settings(&self) -> Result<CallToolResult, ErrorData> {
+        match tokio::task::spawn_blocking(crate::commands::export_portable_settings).await {
+            Ok(Ok(settings)) => Ok(json_result(&json!({"settings":settings}))),
+            Ok(Err(error)) => Ok(CallToolResult::error(vec![Content::text(error)])),
+            Err(error) => Ok(CallToolResult::error(vec![Content::text(
+                error.to_string(),
+            )])),
+        }
+    }
+
     /// Discover PC setting keys, meanings, valid values, defaults, scope and apply timing.
     /// Omit paths for a section guide; request /section or /section/field for focused details.
     /// Terminal font: /profileDefaults/font (profile/pane overrides win). App content font:

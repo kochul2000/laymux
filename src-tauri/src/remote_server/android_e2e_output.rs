@@ -485,6 +485,17 @@ mod tests {
 
     const QUERY: &str = "instanceId=desktop-7&sessionId=UFFSU1RVVldYWVpbXF1eXw&streamNonce=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
 
+    fn fixture_state() -> Arc<AppState> {
+        let state = Arc::new(AppState::new());
+        *state.remote_access.lock_or_err().unwrap() =
+            crate::remote_server::RemoteAccessRuntimeState::new(crate::settings::RemoteSettings {
+                enabled: true,
+                auth_token: "test-output-token".into(),
+                ..Default::default()
+            });
+        state
+    }
+
     #[test]
     fn connector_local_route_accepts_only_the_remote_auth_query_extension() {
         assert!(parse_android_e2e_output_route(Some(QUERY)).is_some());
@@ -534,7 +545,7 @@ mod tests {
         let (session, cipher, mut peer) =
             crate::android_e2e::test_output_cipher_pair(now, now + 60).await;
         let prepared = PreparedAndroidE2eOutput { session, cipher };
-        let app_state = Arc::new(AppState::new());
+        let app_state = fixture_state();
         {
             let mut control = app_state.remote_control.lock_or_err().unwrap();
             control.lease = Some(crate::remote_server::RemoteControlLease {
@@ -606,7 +617,7 @@ mod tests {
         let (session, cipher, mut peer) =
             crate::android_e2e::test_output_cipher_pair(now, now + 60).await;
         let prepared = PreparedAndroidE2eOutput { session, cipher };
-        let app_state = Arc::new(AppState::new());
+        let app_state = fixture_state();
         {
             let mut control = app_state.remote_control.lock_or_err().unwrap();
             control.lease = Some(crate::remote_server::RemoteControlLease {

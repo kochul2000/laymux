@@ -34,6 +34,7 @@ export function SettingsRecoveryModal({
   const [acknowledging, setAcknowledging] = useState(false);
 
   const isParseError = currentLoadResult.status === "parse_error";
+  const isLocalStateError = isParseError && currentLoadResult.storageKind === "localState";
   const isRecovered = currentLoadResult.status === "recovered";
   /** Values the user wrote and lost. Only these count as "removed". */
   const dropped: ValidationWarning[] = isRecovered ? currentLoadResult.dropped : [];
@@ -134,7 +135,7 @@ export function SettingsRecoveryModal({
           </span>
           <span>
             {isParseError
-              ? t("recovery.parseErrorTitle")
+              ? t(isLocalStateError ? "recovery.localStateErrorTitle" : "recovery.parseErrorTitle")
               : isRecovered
                 ? t("recovery.recoveredTitle")
                 : t("recovery.validationTitle")}
@@ -153,7 +154,11 @@ export function SettingsRecoveryModal({
         {isParseError && parseError && (
           <div className="flex flex-col gap-2">
             <div style={{ color: "var(--text-secondary, #a6adc8)" }}>
-              {t("recovery.parseErrorDescription")}
+              {t(
+                isLocalStateError
+                  ? "recovery.localStateErrorDescription"
+                  : "recovery.parseErrorDescription",
+              )}
             </div>
             <pre
               className="overflow-auto rounded p-3 text-xs"
@@ -245,19 +250,21 @@ export function SettingsRecoveryModal({
               {t("recovery.showPath")}
             </button>
           )}
-          <button
-            onClick={handleReset}
-            disabled={resetting}
-            className="rounded px-4 py-1.5 text-sm"
-            style={{
-              background: "var(--error, #f38ba8)",
-              color: "var(--bg-base, #1e1e2e)",
-              opacity: resetting ? 0.5 : 1,
-            }}
-            data-testid="settings-recovery-reset"
-          >
-            {resetting ? t("recovery.resetting") : t("recovery.resetToDefault")}
-          </button>
+          {!isLocalStateError && (
+            <button
+              onClick={handleReset}
+              disabled={resetting}
+              className="rounded px-4 py-1.5 text-sm"
+              style={{
+                background: "var(--error, #f38ba8)",
+                color: "var(--bg-base, #1e1e2e)",
+                opacity: resetting ? 0.5 : 1,
+              }}
+              data-testid="settings-recovery-reset"
+            >
+              {resetting ? t("recovery.resetting") : t("recovery.resetToDefault")}
+            </button>
+          )}
           <button
             onClick={handleDismiss}
             disabled={acknowledging}
@@ -269,11 +276,13 @@ export function SettingsRecoveryModal({
             }}
             data-testid="settings-recovery-dismiss"
           >
-            {isParseError
-              ? t("recovery.continueWithDefaults")
-              : isRecovered
-                ? t("recovery.recoveredConfirm")
-                : t("recovery.confirm")}
+            {isLocalStateError
+              ? t("recovery.confirm")
+              : isParseError
+                ? t("recovery.continueWithDefaults")
+                : isRecovered
+                  ? t("recovery.recoveredConfirm")
+                  : t("recovery.confirm")}
           </button>
         </div>
       </div>

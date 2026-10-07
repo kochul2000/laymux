@@ -776,6 +776,8 @@
     "recovery": {
       "pathUnavailable": "(Unable to get the path)",
       "parseErrorTitle": "Could not read the settings file",
+      "localStateErrorTitle": "Local restore state could not be loaded",
+      "localStateErrorDescription": "Existing restore data has been preserved. Check the database path and error, recover the data, and restart. Automatic persistence is blocked.",
       "validationTitle": "Settings file validation result",
       "parseErrorDescription": "The JSON syntax in settings.json is invalid, so starting with default settings.",
       "recoveredTitle": "Some setting values could not be read",

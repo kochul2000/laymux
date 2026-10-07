@@ -1,11 +1,35 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 
+let nextLocalRevision = 1;
+function makeLocalCommit(
+  settings: import("./tauri-api").Settings,
+  coverage: import("./settings-snapshot").TerminalAttributionCoverage[] = [],
+) {
+  return {
+    revision: nextLocalRevision++,
+    needsRetry: false,
+    unresolvedTerminalIds: [],
+    snapshot: {
+      workspaces: settings.workspaces,
+      docks: settings.docks,
+      workspaceDisplayOrder: settings.workspaceDisplayOrder,
+      coverage,
+      attributionLookupFailed: false,
+      cwdLookupFailed: false,
+    },
+  };
+}
+vi.mock("./local-session", () => ({
+  saveLocalSession: vi.fn(async (settings, coverage) => makeLocalCommit(settings, coverage)),
+}));
 vi.mock("./session-checkpoint-receipt", () => ({
   captureSessionReceipt: vi.fn().mockResolvedValue(undefined),
   commitSessionReceipt: vi.fn().mockResolvedValue(undefined),
 }));
 import { captureSessionReceipt, commitSessionReceipt } from "./session-checkpoint-receipt";
+import { saveLocalSession } from "./local-session";
+import { seedSessionConfiguration } from "./session-configuration";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async (command: string) => {
@@ -58,7 +82,7 @@ import {
   truncateFromEnd,
 } from "./persist-session";
 import {
-  saveSettings,
+  saveSettings as saveUserSettings,
   saveTerminalOutputCache,
   cleanTerminalOutputCache,
   getTerminalCwds,
@@ -98,6 +122,15 @@ function registerLiveTerminal(
 }
 
 describe("persistSession", () => {
+  it("writes a session checkpoint without rewriting seeded user configuration", async () => {
+    _resetClosingDown();
+    const { collectSettingsSnapshot } = await import("./settings-snapshot");
+    seedSessionConfiguration(await collectSettingsSnapshot());
+    vi.mocked(saveUserSettings).mockClear();
+    await flushSessionCheckpoint({ reason: "completion" });
+    expect(saveUserSettings).not.toHaveBeenCalled();
+    expect(saveLocalSession).toHaveBeenCalledOnce();
+  });
   beforeEach(() => {
     _resetClosingDown();
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
@@ -105,6 +138,9 @@ describe("persistSession", () => {
     useDockStore.setState(useDockStore.getInitialState());
     useTerminalStore.setState({ instances: [] });
     vi.clearAllMocks();
+    vi.mocked(saveLocalSession).mockImplementation(async (settings, coverage) =>
+      makeLocalCommit(settings, coverage),
+    );
     vi.mocked(getTerminalCwds).mockResolvedValue({});
     vi.mocked(getClaudeSessionIds).mockResolvedValue({});
     vi.mocked(getCodexSessionIds).mockResolvedValue({});
@@ -188,8 +224,8 @@ describe("persistSession", () => {
       await saveBeforeClose();
 
       expect(getTerminalSessionAttributions).toHaveBeenCalledTimes(2);
-      expect(saveSettings).toHaveBeenCalledTimes(1);
-      const view = vi.mocked(saveSettings).mock.calls[0][0].workspaces[0].panes[0].view;
+      expect(saveLocalSession).toHaveBeenCalledTimes(1);
+      const view = vi.mocked(saveLocalSession).mock.calls[0][0].workspaces[0].panes[0].view;
       const field = {
         codex: "lastCodexSession",
         claude: "lastClaudeSession",
@@ -220,7 +256,7 @@ describe("persistSession", () => {
             "unknown",
           ] as const) {
             _resetClosingDown();
-            vi.mocked(saveSettings).mockClear();
+            vi.mocked(saveLocalSession).mockClear();
             useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
             useTerminalStore.setState({ instances: [] });
             const workspace = useWorkspaceStore.getState().workspaces[0];
@@ -261,9 +297,9 @@ describe("persistSession", () => {
             expect(await result, `${repeat}/${surface}/${state}`).toBe(
               rejected ? "rejected" : "saved",
             );
-            if (rejected) expect(saveSettings).not.toHaveBeenCalled();
+            if (rejected) expect(saveLocalSession).not.toHaveBeenCalled();
             else {
-              const view = vi.mocked(saveSettings).mock.calls.at(-1)![0].workspaces[0].panes[0]
+              const view = vi.mocked(saveLocalSession).mock.calls.at(-1)![0].workspaces[0].panes[0]
                 .view;
               expect(view.lastCodexSession).toBe(
                 !live ? "old" : state === "identified" ? "current" : undefined,
@@ -293,7 +329,7 @@ describe("persistSession", () => {
           "failure",
         ] as const) {
           _resetClosingDown();
-          vi.mocked(saveSettings).mockClear();
+          vi.mocked(saveLocalSession).mockClear();
           const pane = useWorkspaceStore.getState().workspaces[0].panes[0];
           const id = `terminal-${pane.id}`;
           const before = {
@@ -330,14 +366,14 @@ describe("persistSession", () => {
           );
           await vi.runAllTimersAsync();
           expect(await rejected, `${repeat}/${change}`).toBe(true);
-          expect(saveSettings).not.toHaveBeenCalled();
+          expect(saveLocalSession).not.toHaveBeenCalled();
           lookup.mockResolvedValue({ [id]: after });
           const retry = flushSessionCheckpoint({ reason: "update", requireConclusive: true });
           await vi.runAllTimersAsync();
           expect((await retry).coverage.find((entry) => entry.terminalId === id)?.sessionId).toBe(
             after.sessionId,
           );
-          expect(saveSettings).toHaveBeenCalledTimes(1);
+          expect(saveLocalSession).toHaveBeenCalledTimes(1);
         }
       }
     } finally {
@@ -359,7 +395,7 @@ describe("persistSession", () => {
         ] as const) {
           for (const updateFirst of [true, false]) {
             _resetClosingDown();
-            vi.mocked(saveSettings).mockClear();
+            vi.mocked(saveLocalSession).mockClear();
             const id = `terminal-${useWorkspaceStore.getState().workspaces[0].panes[0].id}`;
             let release!: () => void;
             const gate = new Promise<void>((resolve) => {
@@ -392,7 +428,7 @@ describe("persistSession", () => {
             release();
             await vi.runAllTimersAsync();
             expect(await first).toEqual(await second);
-            expect(saveSettings).toHaveBeenCalledTimes(2);
+            expect(saveLocalSession).toHaveBeenCalledTimes(2);
             expect(lookup.mock.calls.length).toBe(updateFirst || other.requireConclusive ? 4 : 3);
           }
         }
@@ -439,7 +475,7 @@ describe("persistSession", () => {
       vi.mocked(getTerminalCwds).mockResolvedValue({});
       vi.mocked(getTerminalSessionAttributions).mockResolvedValue({});
       await persistSession();
-      const saved = vi.mocked(saveSettings).mock.calls.at(-1)![0];
+      const saved = vi.mocked(saveLocalSession).mock.calls.at(-1)![0];
       const savedPane =
         surface === "workspace"
           ? saved.workspaces[0].panes[0]
@@ -473,7 +509,7 @@ describe("persistSession", () => {
         new Error("probe unavailable"),
       );
       await persistSession();
-      expect(vi.mocked(saveSettings).mock.calls.at(-1)![0].workspaces[0].panes[0].view).toEqual({
+      expect(vi.mocked(saveLocalSession).mock.calls.at(-1)![0].workspaces[0].panes[0].view).toEqual({
         type: "TerminalView",
       });
       expect(useWorkspaceStore.getState().workspaces[0].panes[0].layers[0].view).toEqual({
@@ -491,15 +527,15 @@ describe("persistSession", () => {
     vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
       [id]: { generation: 1, state: "identified", provider: "codex", sessionId: "latest-session" },
     });
-    vi.mocked(saveSettings).mockRejectedValueOnce(new Error("disk full"));
+    vi.mocked(saveLocalSession).mockRejectedValueOnce(new Error("disk full"));
     await expect(persistSession()).rejects.toThrow("disk full");
     expect(getPane().view).toBe(original);
 
     let finishSave: (() => void) | undefined;
-    vi.mocked(saveSettings).mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          finishSave = resolve;
+    vi.mocked(saveLocalSession).mockImplementationOnce(
+      (settings, coverage) =>
+        new Promise<Awaited<ReturnType<typeof saveLocalSession>>>((resolve) => {
+          finishSave = () => resolve(makeLocalCommit(settings, coverage));
         }),
     );
     const pending = persistSession();
@@ -528,7 +564,7 @@ describe("persistSession", () => {
     try {
       await persistSession();
       expect(onMutation).toHaveBeenCalledTimes(1);
-      expect(saveSettings).toHaveBeenCalledTimes(1);
+      expect(saveLocalSession).toHaveBeenCalledTimes(1);
     } finally {
       unsubscribe();
     }
@@ -575,10 +611,10 @@ describe("persistSession", () => {
       [id]: { generation: 1, state: "identified", provider: "codex", sessionId: "latest-session" },
     });
     let finishSave: (() => void) | undefined;
-    vi.mocked(saveSettings).mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          finishSave = resolve;
+    vi.mocked(saveLocalSession).mockImplementationOnce(
+      (settings, coverage) =>
+        new Promise<Awaited<ReturnType<typeof saveLocalSession>>>((resolve) => {
+          finishSave = () => resolve(makeLocalCommit(settings, coverage));
         }),
     );
     const unsubscribe = useWorkspaceStore.subscribe(markSessionCheckpointMutation);
@@ -588,11 +624,13 @@ describe("persistSession", () => {
       ws.setPaneView(1, { type: "MemoView", label: "new-view" });
       finishSave!();
       await saving;
-      expect(saveSettings).toHaveBeenCalledTimes(2);
-      expect(vi.mocked(saveSettings).mock.calls.at(-1)![0].workspaces[0].panes[1].view).toEqual({
-        type: "MemoView",
-        label: "new-view",
-      });
+      expect(saveLocalSession).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(saveLocalSession).mock.calls.at(-1)![0].workspaces[0].panes[1].view).toEqual(
+        {
+          type: "MemoView",
+          label: "new-view",
+        },
+      );
     } finally {
       unsubscribe();
       finishSave?.();
@@ -609,7 +647,7 @@ describe("persistSession", () => {
     const commit = await flushSessionCheckpoint({ reason: "update", requireConclusive: true });
     expect(commit.coverage).toEqual([]);
     expect(
-      vi.mocked(saveSettings).mock.calls.at(-1)?.[0].workspaces[0].panes[0].view,
+      vi.mocked(saveLocalSession).mock.calls.at(-1)?.[0].workspaces[0].panes[0].view,
     ).toMatchObject({ lastCodexSession: "saved-unvisited-session" });
   });
 
@@ -621,7 +659,7 @@ describe("persistSession", () => {
       [id]: { generation: 7, provider: "codex", state: "fresh", sessionId: "new-empty" },
     });
     await flushSessionCheckpoint({ reason: "update", requireConclusive: true });
-    const view = vi.mocked(saveSettings).mock.calls.at(-1)?.[0].workspaces[0].panes[0].view;
+    const view = vi.mocked(saveLocalSession).mock.calls.at(-1)?.[0].workspaces[0].panes[0].view;
     expect(view).toMatchObject({ lastAgentFresh: "codex" });
     expect(view).not.toHaveProperty("lastCodexSession");
     expect(useWorkspaceStore.getState().workspaces[0].panes[0].layers[0].view).toMatchObject({
@@ -666,7 +704,7 @@ describe("persistSession", () => {
       },
     ]);
     expect(
-      vi.mocked(saveSettings).mock.calls.at(-1)?.[0].workspaces[0].panes[0].view,
+      vi.mocked(saveLocalSession).mock.calls.at(-1)?.[0].workspaces[0].panes[0].view,
     ).toMatchObject({ lastCodexSession: "saved-session" });
   });
 
@@ -695,7 +733,7 @@ describe("persistSession", () => {
       await expect(
         flushSessionCheckpoint({ reason: "update", requireConclusive: true }),
       ).rejects.toThrow();
-      expect(saveSettings).not.toHaveBeenCalled();
+      expect(saveLocalSession).not.toHaveBeenCalled();
     },
   );
 
@@ -710,7 +748,7 @@ describe("persistSession", () => {
         flushSessionCheckpoint({ reason: "update", requireConclusive: true }),
       ).rejects.toThrow(`Session attribution is not conclusive for ${id}: activeButUnidentified`);
     }
-    expect(saveSettings).not.toHaveBeenCalled();
+    expect(saveLocalSession).not.toHaveBeenCalled();
   });
 
   it.each(["update", "eviction"] as const)(
@@ -726,7 +764,7 @@ describe("persistSession", () => {
       await expect(
         flushSessionCheckpoint({ reason, requireConclusive: true, terminalIds: [id] }),
       ).rejects.toThrow(`Session attribution is not conclusive for ${id}: activeButUnidentified`);
-      expect(saveSettings).not.toHaveBeenCalled();
+      expect(saveLocalSession).not.toHaveBeenCalled();
       expect(pane.view.lastCodexSession).toBe("last-proven-session");
     },
   );
@@ -747,7 +785,7 @@ describe("persistSession", () => {
           expect.objectContaining({ message: expect.stringContaining("activeButUnidentified") }),
         ),
       );
-      expect(saveSettings).not.toHaveBeenCalled();
+      expect(saveLocalSession).not.toHaveBeenCalled();
     } finally {
       warning.mockRestore();
     }
@@ -767,14 +805,14 @@ describe("persistSession", () => {
         }),
       ).rejects.toThrow(`Session attribution is not conclusive for ${id}: unknown`);
     }
-    expect(saveSettings).not.toHaveBeenCalled();
+    expect(saveLocalSession).not.toHaveBeenCalled();
   });
 
-  it("calls saveSettings with current state from all stores", async () => {
+  it("calls saveLocalSession with current state from all stores", async () => {
     await persistSession();
 
-    expect(saveSettings).toHaveBeenCalledTimes(1);
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(saveLocalSession).toHaveBeenCalledTimes(1);
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg).toHaveProperty("layouts");
     expect(savedArg).toHaveProperty("workspaces");
     expect(savedArg).toHaveProperty("docks");
@@ -788,7 +826,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg.docks).toHaveLength(4);
     const leftDock = savedArg.docks.find((d: { position: string }) => d.position === "left");
     expect(leftDock.activeView).toBe("SettingsView");
@@ -800,7 +838,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg.workspaces).toHaveLength(2);
     expect(savedArg.layouts).toHaveLength(1);
   });
@@ -812,7 +850,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg.profileDefaults.font.face).toBe("Fira Code");
     expect(savedArg.profileDefaults.font.size).toBe(18);
   });
@@ -828,7 +866,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg.remote).toMatchObject({
       enabled: true,
       allowedIps: ["100.64.0.0/10"],
@@ -845,7 +883,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg.profiles[0].font.face).toBe("JetBrains Mono");
     expect(savedArg.profiles[0].font.size).toBe(16);
   });
@@ -853,7 +891,7 @@ describe("persistSession", () => {
   it("does not include font in profile when no override set", async () => {
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg.profiles[0].font).toBeUndefined();
   });
 
@@ -862,7 +900,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg.profiles[0].startupCommand).toBe("/home/user/init.sh");
   });
 
@@ -874,7 +912,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     const pane = savedArg.workspaces[0].panes[0];
     expect(pane.view.type).toBe("MemoView");
     expect(pane.view.content).toBeUndefined();
@@ -906,7 +944,7 @@ describe("persistSession", () => {
 
       await persistSession();
 
-      const saved = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      const saved = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
 
       // Reset store and reload from saved payload
       useSettingsStore.setState(useSettingsStore.getInitialState());
@@ -941,7 +979,7 @@ describe("persistSession", () => {
 
       await persistSession();
 
-      const saved = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      const saved = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
       useSettingsStore.setState(useSettingsStore.getInitialState());
       useSettingsStore.getState().loadFromSettings(saved);
 
@@ -960,7 +998,7 @@ describe("persistSession", () => {
 
       await persistSession();
 
-      const saved = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      const saved = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
       useSettingsStore.setState(useSettingsStore.getInitialState());
       useSettingsStore.getState().loadFromSettings(saved);
 
@@ -979,7 +1017,7 @@ describe("persistSession", () => {
 
       await persistSession();
 
-      const saved = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      const saved = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
       useSettingsStore.setState(useSettingsStore.getInitialState());
       useSettingsStore.getState().loadFromSettings(saved);
 
@@ -994,7 +1032,7 @@ describe("persistSession", () => {
 
       await persistSession();
 
-      const saved = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      const saved = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
       useSettingsStore.setState(useSettingsStore.getInitialState());
       useSettingsStore.getState().loadFromSettings(saved);
 
@@ -1014,7 +1052,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     const leftDock = savedArg.docks.find((d: { position: string }) => d.position === "left");
     expect(leftDock).toBeDefined();
     expect(leftDock.panes).toBeDefined();
@@ -1037,7 +1075,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg.profiles[0].restoreCwd).toBe(false);
     expect(savedArg.profiles[0].restoreOutput).toBe(false);
   });
@@ -1047,7 +1085,7 @@ describe("persistSession", () => {
     // are true by default (not undefined).
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg.profiles[0].restoreCwd).toBe(true);
     expect(savedArg.profiles[0].restoreOutput).toBe(true);
   });
@@ -1060,7 +1098,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg.profileDefaults.restoreCwd).toBe(false);
     expect(savedArg.profileDefaults.restoreOutput).toBe(false);
   });
@@ -1073,7 +1111,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const saved = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const saved = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useSettingsStore.getState().loadFromSettings(saved);
 
@@ -1096,7 +1134,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg.workspaces[0].panes[0].view.lastCwd).toBe("/home/user/project");
     expect(getTerminalCwds).toHaveBeenCalledTimes(1);
   });
@@ -1116,7 +1154,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     const leftDock = savedArg.docks.find((d: { position: string }) => d.position === "left");
     expect(leftDock.panes[0].view.lastCwd).toBe("/tmp/dock-cwd");
   });
@@ -1132,7 +1170,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg.workspaces[0].panes[0].view.lastClaudeSession).toBe("session-abc-123");
     expect(getClaudeSessionIds).toHaveBeenCalledTimes(1);
     // Verify sessionMaxAgeHours from settings is passed through
@@ -1154,7 +1192,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     const leftDock = savedArg.docks.find((d: { position: string }) => d.position === "left");
     expect(leftDock.panes[0].view.lastClaudeSession).toBe("dock-session-xyz");
     expect(leftDock.panes[0].view).not.toHaveProperty("lastCodexSession");
@@ -1171,7 +1209,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg.workspaces[0].panes[0].view.lastCodexSession).toBe(
       "019fc0d8-a862-7241-a0f5-b6a66ef4ef6f",
     );
@@ -1191,7 +1229,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+    const savedView = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
       .panes[0].view;
     expect(savedView.lastCodexSession).toBe("019fc0d8-a862-7241-a0f5-b6a66ef4ef6f");
     expect(savedView.lastClaudeSession).toBeUndefined();
@@ -1211,7 +1249,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+    const savedView = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
       .panes[0].view;
     expect(savedView).not.toHaveProperty("lastClaudeSession");
     expect(savedView).not.toHaveProperty("lastCodexSession");
@@ -1230,7 +1268,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+    const savedView = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
       .panes[0].view;
     expect(savedView.lastClaudeSession).toBe("current-claude-session");
     expect(savedView).not.toHaveProperty("lastCodexSession");
@@ -1250,7 +1288,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+    const savedView = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
       .panes[0].view;
     expect(savedView).not.toHaveProperty("lastClaudeSession");
     expect(savedView).not.toHaveProperty("lastCodexSession");
@@ -1273,7 +1311,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+    const savedView = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
       .panes[0].view;
     expect(savedView).not.toHaveProperty("lastClaudeSession");
     expect(savedView).not.toHaveProperty("lastCodexSession");
@@ -1291,7 +1329,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedView = vi.mocked(saveSettings).mock.calls[0][0].workspaces[0].panes[0].view;
+    const savedView = vi.mocked(saveLocalSession).mock.calls[0][0].workspaces[0].panes[0].view;
     expect(savedView.lastCodexSession).toBe("last-proven-session");
   });
 
@@ -1307,7 +1345,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+    const savedView = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
       .panes[0].view;
     expect(savedView).not.toHaveProperty("lastClaudeSession");
   });
@@ -1327,7 +1365,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedView = vi.mocked(saveSettings).mock.calls[0][0].workspaces[0].panes[0].view;
+    const savedView = vi.mocked(saveLocalSession).mock.calls[0][0].workspaces[0].panes[0].view;
     expect(savedView.lastCodexSession).toBe("session-being-restored");
   });
 
@@ -1353,7 +1391,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedView = vi.mocked(saveSettings).mock.calls[0][0].workspaces[0].panes[0].view;
+    const savedView = vi.mocked(saveLocalSession).mock.calls[0][0].workspaces[0].panes[0].view;
     expect(savedView.lastCodexSession).toBe("session-being-restored");
   });
 
@@ -1375,7 +1413,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedView = vi.mocked(saveSettings).mock.calls[0][0].workspaces[0].panes[0].view;
+    const savedView = vi.mocked(saveLocalSession).mock.calls[0][0].workspaces[0].panes[0].view;
     expect(savedView.lastCodexSession).toBe("session-selected-for-startup");
   });
 
@@ -1388,7 +1426,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+    const savedView = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
       .panes[0].view;
     expect(savedView.lastClaudeSession).toBe("stale-claude-session");
   });
@@ -1406,7 +1444,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+    const savedView = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
       .panes[0].view;
     expect(savedView).not.toHaveProperty("lastClaudeSession");
   });
@@ -1422,7 +1460,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+    const savedView = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
       .panes[0].view;
     expect(savedView.lastClaudeSession).toBe("stale-claude-session");
   });
@@ -1438,7 +1476,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     const leftDock = savedArg.docks.find((d: { position: string }) => d.position === "left");
     expect(leftDock.panes[0].view).not.toHaveProperty("lastCodexSession");
   });
@@ -1457,7 +1495,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+    const savedView = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
       .panes[0].view;
     expect(getCodexSessionIds).toHaveBeenCalledWith(24);
     expect(savedView.lastCodexSession).toBe("current-codex-session");
@@ -1479,7 +1517,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+    const savedView = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
       .panes[0].view;
     expect(savedView.lastGrokSession).toBe("019ffa7f-b8c1-7511-872f-911e8dc8d179");
     expect(savedView).not.toHaveProperty("lastClaudeSession");
@@ -1502,7 +1540,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+    const savedView = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
       .panes[0].view;
     expect(savedView).not.toHaveProperty("lastClaudeSession");
     expect(savedView).not.toHaveProperty("lastCodexSession");
@@ -1526,7 +1564,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+    const savedView = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
       .panes[0].view;
     expect(savedView).not.toHaveProperty("lastClaudeSession");
     expect(savedView).not.toHaveProperty("lastCodexSession");
@@ -1542,7 +1580,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg.workspaces[0].panes[0].view.lastClaudeSession).toBeUndefined();
   });
 
@@ -1551,23 +1589,23 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg.workspaces[0].panes[0].view.lastCwd).toBeUndefined();
   });
 
   it("runs one trailing checkpoint when a mutation arrives during an in-flight save", async () => {
     let finishFirstSave: (() => void) | undefined;
-    vi.mocked(saveSettings)
+    vi.mocked(saveLocalSession)
       .mockImplementationOnce(
-        () =>
-          new Promise<void>((resolve) => {
-            finishFirstSave = resolve;
+        (settings, coverage) =>
+          new Promise<Awaited<ReturnType<typeof saveLocalSession>>>((resolve) => {
+            finishFirstSave = () => resolve(makeLocalCommit(settings, coverage));
           }),
       )
-      .mockResolvedValueOnce(undefined);
+      .mockImplementationOnce(async (settings, coverage) => makeLocalCommit(settings, coverage));
 
     const first = persistSession({ reason: "mutation" });
-    await vi.waitFor(() => expect(saveSettings).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(saveLocalSession).toHaveBeenCalledTimes(1));
     useWorkspaceStore
       .getState()
       .renameWorkspace(useWorkspaceStore.getState().workspaces[0].id, "Newest workspace");
@@ -1575,28 +1613,30 @@ describe("persistSession", () => {
     finishFirstSave?.();
     await Promise.all([first, second]);
 
-    expect(saveSettings).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(saveSettings).mock.calls[1][0].workspaces[0].name).toBe("Newest-workspace");
+    expect(saveLocalSession).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(saveLocalSession).mock.calls[1][0].workspaces[0].name).toBe(
+      "Newest-workspace",
+    );
   });
 
   it("does not downgrade a critical barrier when a normal request trails it", async () => {
     let finishFirstSave: (() => void) | undefined;
-    vi.mocked(saveSettings)
+    vi.mocked(saveLocalSession)
       .mockImplementationOnce(
-        () =>
-          new Promise<void>((resolve) => {
-            finishFirstSave = resolve;
+        (settings, coverage) =>
+          new Promise<Awaited<ReturnType<typeof saveLocalSession>>>((resolve) => {
+            finishFirstSave = () => resolve(makeLocalCommit(settings, coverage));
           }),
       )
-      .mockResolvedValueOnce(undefined);
+      .mockImplementationOnce(async (settings, coverage) => makeLocalCommit(settings, coverage));
 
     const critical = flushSessionCheckpoint({ reason: "update", requireConclusive: true });
-    await vi.waitFor(() => expect(saveSettings).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(saveLocalSession).toHaveBeenCalledTimes(1));
     const normal = persistSession({ reason: "completion" });
     finishFirstSave?.();
     await Promise.all([critical, normal]);
 
-    expect(saveSettings).toHaveBeenCalledTimes(2);
+    expect(saveLocalSession).toHaveBeenCalledTimes(2);
     expect(getTerminalSessionAttributions).toHaveBeenCalledTimes(4);
   });
 
@@ -1606,10 +1646,10 @@ describe("persistSession", () => {
       "terminal-unresolved": { generation: 1, state: "activeButUnidentified" },
     });
     let finishFirstSave: (() => void) | undefined;
-    vi.mocked(saveSettings).mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          finishFirstSave = resolve;
+    vi.mocked(saveLocalSession).mockImplementationOnce(
+      (settings, coverage) =>
+        new Promise<Awaited<ReturnType<typeof saveLocalSession>>>((resolve) => {
+          finishFirstSave = () => resolve(makeLocalCommit(settings, coverage));
         }),
     );
 
@@ -1618,14 +1658,14 @@ describe("persistSession", () => {
       requireConclusive: true,
       terminalIds: ["terminal-target"],
     });
-    await vi.waitFor(() => expect(saveSettings).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(saveLocalSession).toHaveBeenCalledTimes(1));
     const update = flushSessionCheckpoint({ reason: "update", requireConclusive: true });
     finishFirstSave?.();
 
     await expect(Promise.all([eviction, update])).rejects.toThrow(
       "Session attribution is not conclusive for terminal-unresolved",
     );
-    expect(saveSettings).toHaveBeenCalledTimes(1);
+    expect(saveLocalSession).toHaveBeenCalledTimes(1);
   });
 
   it("rejects a destructive checkpoint when an active agent has no stable session id", async () => {
@@ -1636,7 +1676,7 @@ describe("persistSession", () => {
     await expect(
       flushSessionCheckpoint({ reason: "update", requireConclusive: true }),
     ).rejects.toThrow("not conclusive");
-    expect(saveSettings).not.toHaveBeenCalled();
+    expect(saveLocalSession).not.toHaveBeenCalled();
   });
 
   it("rejects a destructive checkpoint when attribution lookup fails before terminals register", async () => {
@@ -1647,7 +1687,7 @@ describe("persistSession", () => {
     await expect(
       flushSessionCheckpoint({ reason: "update", requireConclusive: true }),
     ).rejects.toThrow("Session attribution lookup failed");
-    expect(saveSettings).not.toHaveBeenCalled();
+    expect(saveLocalSession).not.toHaveBeenCalled();
   });
 
   it("rejects a destructive checkpoint when the authoritative CWD lookup fails", async () => {
@@ -1666,23 +1706,23 @@ describe("persistSession", () => {
     await expect(
       flushSessionCheckpoint({ reason: "update", requireConclusive: true }),
     ).rejects.toThrow("Terminal CWD lookup failed");
-    expect(saveSettings).not.toHaveBeenCalled();
+    expect(saveLocalSession).not.toHaveBeenCalled();
   });
 
   it("is no-op after saveBeforeClose sets closingDown flag", async () => {
     vi.mocked(getTerminalSerializeMap).mockReturnValue(new Map());
     await saveBeforeClose();
-    vi.mocked(saveSettings).mockClear();
+    vi.mocked(saveLocalSession).mockClear();
 
     await persistSession();
 
-    expect(saveSettings).not.toHaveBeenCalled();
+    expect(saveLocalSession).not.toHaveBeenCalled();
   });
 
   it("includes stable pane id in saved workspace panes", async () => {
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg.workspaces[0].panes[0].id).toBeDefined();
     expect(savedArg.workspaces[0].panes[0].id).not.toBe("");
   });
@@ -1695,7 +1735,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg.syncCwdDefaults).toEqual({
       workspace: { send: true, receive: false },
       dock: { send: true, receive: true },
@@ -1709,7 +1749,7 @@ describe("persistSession", () => {
 
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg.profiles[0].syncCwd).toEqual({ send: false, receive: false });
   });
 
@@ -1717,7 +1757,7 @@ describe("persistSession", () => {
     // Default profiles have syncCwd: "default" from profileDefaults
     await persistSession();
 
-    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const savedArg = (saveLocalSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg.profiles[0].syncCwd).toBe("default");
   });
 });
@@ -1732,6 +1772,9 @@ describe("saveBeforeClose", () => {
     useDockStore.setState(useDockStore.getInitialState());
     useTerminalStore.setState({ instances: [] });
     vi.clearAllMocks();
+    vi.mocked(saveLocalSession).mockImplementation(async (settings, coverage) =>
+      makeLocalCommit(settings, coverage),
+    );
     vi.mocked(getTerminalCwds).mockResolvedValue({});
     vi.mocked(getTerminalSessionAttributions).mockResolvedValue({});
   });
@@ -1745,7 +1788,7 @@ describe("saveBeforeClose", () => {
       "finish_codex_status_checkpoint",
     ]);
     const calls = vi.mocked(invoke).mock.invocationCallOrder;
-    const saved = vi.mocked(saveSettings).mock.invocationCallOrder[0];
+    const saved = vi.mocked(saveLocalSession).mock.invocationCallOrder[0];
     expect(calls[0]).toBeLessThan(saved);
     expect(calls[1]).toBeGreaterThan(saved);
   });
@@ -1775,7 +1818,7 @@ describe("saveBeforeClose", () => {
           };
       });
       if (change === "failed-save") {
-        vi.mocked(saveSettings).mockRejectedValueOnce(new Error("disk full"));
+        vi.mocked(saveLocalSession).mockRejectedValueOnce(new Error("disk full"));
         await expect(flushSessionCheckpoint()).rejects.toThrow("disk full");
         expect(commitSessionReceipt).not.toHaveBeenCalled();
       } else {
@@ -1784,7 +1827,7 @@ describe("saveBeforeClose", () => {
       if (change === "frontend-change") markSessionCheckpointMutation();
       await saveBeforeClose();
       expect(getTerminalSessionAttributions).toHaveBeenCalledTimes(change === "unchanged" ? 1 : 3);
-      expect(saveSettings).toHaveBeenCalledTimes(change === "unchanged" ? 1 : 2);
+      expect(saveLocalSession).toHaveBeenCalledTimes(change === "unchanged" ? 1 : 2);
       expect(interruptTerminalsOnExit).toHaveBeenCalledOnce();
       vi.mocked(captureSessionReceipt).mockResolvedValue(undefined);
       vi.mocked(commitSessionReceipt).mockResolvedValue(undefined);
@@ -1797,7 +1840,7 @@ describe("saveBeforeClose", () => {
     await saveBeforeClose();
 
     expect(invoke).not.toHaveBeenCalled();
-    expect(saveSettings).toHaveBeenCalledTimes(1);
+    expect(saveLocalSession).toHaveBeenCalledTimes(1);
   });
 
   it("blocks close by default when attribution remains inconclusive", async () => {
@@ -1807,7 +1850,7 @@ describe("saveBeforeClose", () => {
 
     await expect(saveBeforeClose()).rejects.toThrow("Session attribution is not conclusive");
 
-    expect(saveSettings).not.toHaveBeenCalled();
+    expect(saveLocalSession).not.toHaveBeenCalled();
     expect(interruptTerminalsOnExit).not.toHaveBeenCalled();
     expect(invoke).toHaveBeenCalledWith("finish_codex_status_checkpoint", { token: "close-proof" });
   });
@@ -1832,12 +1875,12 @@ describe("saveBeforeClose", () => {
     expect(saveTerminalOutputCache).not.toHaveBeenCalled();
   });
 
-  it("calls persistSession (saveSettings) during close", async () => {
+  it("calls persistSession (saveLocalSession) during close", async () => {
     vi.mocked(getTerminalSerializeMap).mockReturnValue(new Map());
 
     await saveBeforeClose();
 
-    expect(saveSettings).toHaveBeenCalledTimes(1);
+    expect(saveLocalSession).toHaveBeenCalledTimes(1);
   });
 
   it("captures agent session IDs before interrupting terminals", async () => {
@@ -1863,12 +1906,12 @@ describe("saveBeforeClose", () => {
     const saving = saveBeforeClose();
     await vi.waitFor(() => expect(interruptTerminalsOnExit).toHaveBeenCalledTimes(1));
     expect(callOrder).toEqual(["collect-attribution", "collect-attribution", "interrupt"]);
-    expect(saveSettings).toHaveBeenCalledTimes(1);
+    expect(saveLocalSession).toHaveBeenCalledTimes(1);
 
     finishInterrupt?.();
     await saving;
 
-    expect(saveSettings).toHaveBeenCalledTimes(1);
+    expect(saveLocalSession).toHaveBeenCalledTimes(1);
   });
 
   it("cleans orphaned cache files after save completes", async () => {
@@ -1881,8 +1924,9 @@ describe("saveBeforeClose", () => {
 
   it("awaits saves before cleaning orphans (ordering)", async () => {
     const callOrder: string[] = [];
-    vi.mocked(saveSettings).mockImplementation(async () => {
-      callOrder.push("saveSettings");
+    vi.mocked(saveLocalSession).mockImplementation(async (settings, coverage) => {
+      callOrder.push("saveLocalSession");
+      return makeLocalCommit(settings, coverage);
     });
     vi.mocked(cleanTerminalOutputCache).mockImplementation(async () => {
       callOrder.push("cleanCache");
@@ -1892,7 +1936,7 @@ describe("saveBeforeClose", () => {
 
     await saveBeforeClose();
 
-    const saveIdx = callOrder.indexOf("saveSettings");
+    const saveIdx = callOrder.indexOf("saveLocalSession");
     const cleanIdx = callOrder.indexOf("cleanCache");
     expect(saveIdx).toBeLessThan(cleanIdx);
   });
@@ -1931,8 +1975,8 @@ describe("saveBeforeClose", () => {
 
     // Both saves were attempted despite one failing
     expect(callCount).toBe(2);
-    // persistSession (saveSettings) was still called
-    expect(saveSettings).toHaveBeenCalledTimes(1);
+    // persistSession (saveLocalSession) was still called
+    expect(saveLocalSession).toHaveBeenCalledTimes(1);
     // cleanup was still called
     expect(cleanTerminalOutputCache).toHaveBeenCalledTimes(1);
   });
@@ -1944,7 +1988,7 @@ describe("saveBeforeClose", () => {
     // Should not throw
     await saveBeforeClose();
 
-    expect(saveSettings).toHaveBeenCalledTimes(1);
+    expect(saveLocalSession).toHaveBeenCalledTimes(1);
   });
 
   it("truncates serializations exceeding 2MB keeping recent lines", async () => {

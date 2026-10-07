@@ -2199,6 +2199,8 @@ fn default_true() -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_ui_state: Option<crate::local_state::LocalUiState>,
     /// App UI language: "system" (OS locale), "ko", or "en". Opaque to the
     /// backend — resolved on the frontend. `#[serde(default)]` keeps existing
     /// settings.json (without this key) parsing cleanly.
@@ -2296,6 +2298,7 @@ fn default_language() -> String {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            local_ui_state: None,
             language: default_language(),
             color_schemes: Vec::new(),
             profiles: vec![

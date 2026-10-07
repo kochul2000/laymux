@@ -18,44 +18,110 @@ impl CheckpointHints {
     }
 }
 
-pub(super) fn start(app: tauri::AppHandle, state: std::sync::Arc<crate::state::AppState>) {
-    use std::time::Duration;
-    const HINT_SETTLE: Duration = Duration::from_millis(500);
-    const RETRY_DELAY: Duration = Duration::from_secs(1);
-    tauri::async_runtime::spawn(async move {
-        let hints = &state.session_checkpoint.hints;
-        let mut saved_revision = 0;
-        loop {
-            let hinted = tokio::select! {
-                _ = hints.changed.notified() => true,
-                _ = tokio::time::sleep(super::CHECKPOINT_WATCHDOG_INTERVAL) => false,
-            };
-            if hinted {
-                tokio::time::sleep(HINT_SETTLE).await;
-            }
-            let revision = hints.revision();
-            if hinted && revision == saved_revision {
-                continue;
-            }
-            // Do not turn a background hint into a competing final save. A
-            // cancelled close must still retain the pending dirty revision.
-            if state.session_checkpoint.is_finalizing() {
-                tokio::time::sleep(RETRY_DELAY).await;
-                hints.changed.notify_one();
-                continue;
-            }
-            let reason = if hinted { "completion" } else { "watchdog" };
-            match super::request_frontend_checkpoint(&app, &state, reason, false).await {
-                Ok(_) => saved_revision = revision,
-                Err(error) => {
-                    tracing::warn!(%error, reason, "background session checkpoint failed");
-                    if hinted {
-                        tokio::time::sleep(RETRY_DELAY).await;
-                        hints.changed.notify_one();
-                    }
-                }
-            }
+use std::time::Duration;
+struct Timing {
+    settle: Duration,
+    retry: Duration,
+    cap: Duration,
+    watchdog: Duration,
+}
+impl Default for Timing {
+    fn default() -> Self {
+        Self {
+            settle: Duration::from_millis(500),
+            retry: Duration::from_secs(1),
+            cap: Duration::from_secs(30),
+            watchdog: super::CHECKPOINT_WATCHDOG_INTERVAL,
         }
+    }
+}
+async fn run<F, Fut>(
+    hints: &CheckpointHints,
+    finalizing: impl Fn() -> bool,
+    mut checkpoint: F,
+    timing: Timing,
+) where
+    F: FnMut(&'static str) -> Fut,
+    Fut: std::future::Future<Output = Result<bool, String>>,
+{
+    let mut saved_revision = 0;
+    let mut observed_revision = 0;
+    let mut retry = None;
+    let mut attempts = 0u32;
+    loop {
+        let hinted = tokio::select! {
+            _=hints.changed.notified()=>true,
+            _=tokio::time::sleep(retry.unwrap_or(timing.watchdog))=>false,
+        };
+        if hinted {
+            tokio::time::sleep(timing.settle).await;
+        }
+        let revision = hints.revision();
+        if revision != observed_revision {
+            attempts = 0;
+            observed_revision = revision;
+        }
+        if hinted && revision == saved_revision && retry.is_none() {
+            continue;
+        }
+        if finalizing() {
+            retry = Some(timing.retry);
+            continue;
+        }
+        let reason = if hinted || retry.is_some() {
+            "completion"
+        } else {
+            "watchdog"
+        };
+        let confirmed = match checkpoint(reason).await {
+            Ok(confirmed) => confirmed,
+            Err(error) => {
+                tracing::warn!(%error,reason,"background session checkpoint failed");
+                false
+            }
+        };
+        if confirmed {
+            saved_revision = revision;
+            retry = None;
+            attempts = 0;
+        } else {
+            retry = Some(
+                timing
+                    .retry
+                    .saturating_mul(1u32 << attempts.min(5))
+                    .min(timing.cap),
+            );
+            attempts = attempts.saturating_add(1);
+        }
+    }
+}
+pub(super) fn start(app: tauri::AppHandle, state: std::sync::Arc<crate::state::AppState>) {
+    tauri::async_runtime::spawn(async move {
+        run(
+            &state.session_checkpoint.hints,
+            || state.session_checkpoint.is_finalizing(),
+            |reason| {
+                let app = app.clone();
+                let state = state.clone();
+                async move {
+                    let commit =
+                        super::request_frontend_checkpoint(&app, &state, reason, false).await?;
+                    tauri::async_runtime::spawn_blocking(move || {
+                        let store = crate::local_state::LocalStateStore::new(
+                            crate::local_state::state_path().map_err(String::from)?,
+                        );
+                        store
+                            .checkpoint_needs_retry(commit)
+                            .map(|retry| !retry)
+                            .map_err(String::from)
+                    })
+                    .await
+                    .map_err(|e| e.to_string())?
+                }
+            },
+            Timing::default(),
+        )
+        .await;
     });
 }
 
@@ -76,5 +142,45 @@ mod tests {
         hints.request();
         assert!(hints.revision() > collecting_revision);
         assert!(hints.changed.notified().now_or_never().is_some());
+    }
+    #[tokio::test]
+    async fn a_partial_success_retries_without_another_hint_and_stops_when_confirmed() {
+        use std::sync::{atomic::AtomicUsize, Arc};
+        let hints = Arc::new(CheckpointHints::default());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let worker_hints = hints.clone();
+        let worker_calls = calls.clone();
+        let worker = tokio::spawn(async move {
+            run(
+                &worker_hints,
+                || false,
+                |_| {
+                    let confirmed = worker_calls.fetch_add(1, Ordering::SeqCst) > 0;
+                    async move { Ok(confirmed) }
+                },
+                Timing {
+                    settle: Duration::from_millis(1),
+                    retry: Duration::from_millis(2),
+                    cap: Duration::from_millis(8),
+                    watchdog: Duration::from_secs(300),
+                },
+            )
+            .await;
+        });
+        hints.request();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while calls.load(Ordering::SeqCst) < 2 {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "confirmed checkpoint must not keep retrying"
+        );
+        worker.abort();
     }
 }

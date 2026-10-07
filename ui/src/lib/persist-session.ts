@@ -15,6 +15,12 @@ import type { ProgressReporter } from "@/lib/lifecycle-progress";
 import type { ExitSettings } from "@/lib/tauri-api";
 import { withCodexStatusCheckpoint } from "@/lib/codex-status-probe";
 import { captureSessionReceipt, commitSessionReceipt } from "./session-checkpoint-receipt";
+import { saveLocalSession } from "./local-session";
+import {
+  configurationNeedsSave,
+  seedSessionConfiguration,
+  resetSessionConfiguration,
+} from "./session-configuration";
 
 export { setBlockPersist } from "@/lib/settings-write-guard";
 
@@ -68,6 +74,8 @@ export interface SessionCheckpointCommit {
   frontendMutationRevision: number;
   coverage: TerminalAttributionCoverage[];
   receiptToken?: string;
+  needsRetry?: boolean;
+  unresolvedTerminalIds?: string[];
 }
 
 const CRITICAL_OBSERVATION_SETTLE_MS = 150;
@@ -78,7 +86,6 @@ const SESSION_VIEW_FIELDS = [
   "lastGrokSession",
   "lastAgentFresh",
 ] as const;
-let nextCheckpointCommitId = 1;
 let activeCheckpoint: Promise<SessionCheckpointCommit> | null = null;
 let trailingCheckpointRequested = false;
 let pendingOptions: SessionCheckpointOptions = {};
@@ -107,6 +114,7 @@ export function _resetClosingDown(): void {
   pendingOptions = {};
   frontendMutationRevision = 0;
   lastCommittedCheckpoint = undefined;
+  resetSessionConfiguration();
 }
 
 function mergeCheckpointOptions(
@@ -209,9 +217,20 @@ async function persistSessionCore(
       .map((pane) => [pane.id, pane.view] as const),
   ]);
   const checkpoint = await collectStableCheckpoint(options);
-  await saveSettings(checkpoint.settings);
+  if (configurationNeedsSave(checkpoint.settings)) {
+    await saveSettings(checkpoint.settings);
+    seedSessionConfiguration(checkpoint.settings);
+  }
+  const durable = await saveLocalSession(
+    checkpoint.settings,
+    checkpoint.coverage,
+    checkpoint.attributionLookupFailed,
+    checkpoint.cwdLookupFailed,
+  );
+  checkpoint.settings.workspaces = durable.snapshot.workspaces;
+  checkpoint.settings.docks = durable.snapshot.docks;
   const receiptToken = capturedReceipt
-    ? await commitSessionReceipt(capturedReceipt, checkpoint.coverage)
+    ? await commitSessionReceipt(capturedReceipt, checkpoint.coverage, durable.revision)
     : undefined;
   // Unknown attribution and hidden-pane remounts read these views. Publish only
   // committed metadata, otherwise a later save can resurrect startup-era IDs.
@@ -281,9 +300,11 @@ async function persistSessionCore(
   // mutation during collection/save still differs and requires a trailing pass.
   const publicationRevision = frontendMutationRevision - revisionBeforePublication;
   return {
-    checkpointCommitId: nextCheckpointCommitId++,
+    checkpointCommitId: durable.revision,
     frontendMutationRevision: collectedRevision + publicationRevision,
     coverage: checkpoint.coverage,
+    needsRetry: durable.needsRetry,
+    unresolvedTerminalIds: durable.unresolvedTerminalIds,
     ...(receiptToken ? { receiptToken } : {}),
   };
 }
