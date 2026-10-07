@@ -27,7 +27,7 @@ Windows 및 Linux 데스크톱을 지원하며, 터미널 중심의 작업 환�
 | UI | React + TypeScript |
 | 스타일 | Tailwind CSS |
 | 상태 관리 | Zustand |
-| 터미널 | xterm.js + node-pty (Tauri sidecar) |
+| 터미널 | xterm.js + portable-pty (Rust 앱 내부) |
 | 설정 | settings.json (Windows Terminal 교집합 호환) |
 | IDE CLI | `lx` 바이너리 (Rust, Tauri 동봉) |
 | 선택형 에이전트 훅 | `tools/agent-hook` 공용 Rust 라이브러리·전용 바이너리. native와 WSL 정적 Linux helper를 배포하고 환경별로 설치. 기존 설치의 갱신 필요를 자동 검사·알림하고 사용자 동작으로 갱신 ([ADR-0282](../adr/0282-optional-agent-hook-installation.md), [ADR-0289](../adr/0289-agent-hook-update-notification.md)) |

@@ -24,6 +24,7 @@
 
 ## 다음 / 검토 중
 
+- [ ] 업데이트·앱 재시작 시 사용자 작업을 유지하는 PTY 데몬 — [ADR-0300](./adr/0300-detached-pty-daemon-update-handoff.md) 설계 제안과 [단계별 구현·TDD 계획](./plans/pty-daemon-update-handoff.md). Windows runtime bundle·headless query·재연결·SQLite 소유권을 먼저 검증하며 제품 코드는 아직 미구현.
 - [ ] View 플러그인 시스템 (현재 built-in only)
 - [ ] activity 핸들러 확장 (neovim, htop 등 — [ADR-0005](./adr/0005-display-state-raw-separation-compute.md))
 - [x] Android↔desktop E2E thin wrapper — 별도 Cloud WebView의 기존 landing/dashboard + Credential Manager Google login + PC 선택, 연결 action용 native Material bottom sheet와 dashboard `…`의 별도 연결 설정, 생체 승인 후 사용 중 갱신되고 background에서도 현재 deadline까지 최대 15분 보존되는 session, 방향별 HKDF/AES-GCM key, strict sequence+직전 응답 재현, 고정 ciphertext relay route, PC Laymux 소유 Remote 문서·자산과 HTTP/V1 output native bridge. APK는 Android 전용 pairing UI만 native로 소유하고 xterm·terminal 선택을 복제하지 않는다([ADR-0146](./adr/0146-android-e2e-session-and-encrypted-remote-rpc.md), [ADR-0149](./adr/0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md), [ADR-0178](./adr/0178-android-pairing-native-material-bottom-sheet.md), [ADR-0179](./adr/0179-android-connection-settings-from-dashboard-menu.md)); emulator/실기 Google account chooser·cookie redirect·QR·background suspend/resume·biometric·렌더 왕복은 장비 준비 시 수행

@@ -1523,6 +1523,8 @@ WSL 세션 프로세스 probe는 환경과 PPID를 POSIX 셸 내장 `read`로 �
 
 ### 13.5 체크포인트 조정과 파괴 전 barrier
 
+현재 PTY·출력·체크포인트의 실행 수명은 Tauri 앱에 속하며 업데이트도 파괴 전 barrier를 지난다. 앱 재시작/업데이트 동안 작업을 유지하는 별도 PTY 데몬은 [Proposed ADR-0300](../adr/0300-detached-pty-daemon-update-handoff.md)과 [단계별 구현·검증 계획](../plans/pty-daemon-update-handoff.md)에서 검토한다. 해당 설계의 인계·headless responder·daemon session writer는 아직 제품에 구현되지 않았다.
+
 Unknown pane은 DB의 이전 검증 복원점을 보존하고 `needsRetry`·`unresolvedTerminalIds`로 확인 미완료를 알린다. 정상 pane은 독립적으로 저장한다. frontend에는 입력 snapshot 대신 DB가 실제 commit한 snapshot을 게시한다. DB 오류는 checkpoint 실패이며 종료/업데이트의 기존 barrier를 통과하지 않는다. 별도 구성 저장 성공을 세션 확인 완료로 취급하지 않는다.
 
 `save_session_checkpoint`의 성공한 부분 commit은 UI 직접 저장과 native 요청 모두에서 Rust 재시도 worker를 깨운다. 부분 저장 알림 revision은 대화 identity 변경 revision과 분리한다. worker는 1초부터 최대 30초까지 지수 backoff로 재시도하고, 재시도가 낸 부분 저장 알림은 현재 대기 deadline이나 시도 횟수를 초기화하지 않는다. 확인 완료는 저장 시작 전에 관측한 알림만 소비하므로 확인 도중 발생한 새 부분 commit은 다음 재시도로 남는다. DB의 `needsRetry`가 확인 미완료의 정본이며 알림은 그 조회를 시작하는 힌트다.
