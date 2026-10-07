@@ -563,7 +563,13 @@ export type SettingsLoadResult =
       /** SHA-256 of the exact source whose dropped paths were reviewed. */
       recoveryRevision: string;
     }
-  | { status: "parse_error"; settings: Settings; error: string; settingsPath: string };
+  | {
+      status: "parse_error";
+      settings: Settings;
+      error: string;
+      settingsPath: string;
+      storageKind?: "localState";
+    };
 
 export async function loadSettingsValidated(): Promise<SettingsLoadResult> {
   return invoke("load_settings_validated");
@@ -1253,6 +1259,7 @@ export interface RemoteSettings {
 }
 
 export interface Settings {
+  localUiState?: import("./local-session").LocalSessionSnapshot["uiState"];
   /** App UI language: "system" (OS locale), "ko", or "en". */
   language?: import("@/stores/settings-store").LanguageSetting;
   colorSchemes: ColorScheme[];

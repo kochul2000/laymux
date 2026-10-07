@@ -22,6 +22,7 @@ struct MetadataEntry {
 ///
 /// This is also the revision-ignore contract passed to the frontend concurrency guard.
 pub const READ_ONLY_SETTINGS_PATHS: &[&str] = &[
+    "/localUiState",
     "/workspaces",
     "/layouts",
     "/docks",
@@ -33,6 +34,7 @@ pub const READ_ONLY_SETTINGS_PATHS: &[&str] = &[
 ];
 
 const ENTRIES: &[MetadataEntry] = &[
+    MetadataEntry {path:"/localUiState",description:"현재 PC의 SQLite 복원 상태. 일반 설정 patch와 portable export의 대상이 아닙니다.",sensitive:true,apply_mode:ApplyMode::Restart},
     MetadataEntry {
         path: "/claude/stateDetection",
         description: "Claude 작업 상태 감지: heuristic은 기존 감지, hooks는 현재 대화로 검증된 훅을 우선 사용하고 미수신·만료 시 기존 감지로 돌아갑니다. 훅 설치는 별도입니다.",

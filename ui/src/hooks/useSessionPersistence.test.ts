@@ -8,6 +8,7 @@ vi.mock("@/lib/persist-session", () => ({
 
 vi.mock("@/lib/tauri-api", () => {
   const mockSettings = {
+    localUiState: {},
     profileDefaults: { font: { face: "Fira Code", size: 16, weight: "normal" } },
     defaultProfile: "WSL",
     profiles: [
@@ -103,7 +104,11 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useOverridesStore } from "@/stores/overrides-store";
-import { loadSettingsValidated, type SettingsLoadResult } from "@/lib/tauri-api";
+import {
+  loadSettingsValidated,
+  cleanTerminalOutputCache,
+  type SettingsLoadResult,
+} from "@/lib/tauri-api";
 import { persistSession, setBlockPersist } from "@/lib/persist-session";
 
 /** Wrap raw settings into a SettingsLoadResult with status "ok" for test mocks. */
@@ -119,6 +124,22 @@ describe("useSessionPersistence", () => {
     useOverridesStore.setState({ paneOverrides: {}, viewOverrides: {} });
     localStorage.clear();
     vi.clearAllMocks();
+  });
+
+  it("preserves old cache and overrides when no local SQLite session has been saved", async () => {
+    const initial = await loadSettingsValidated();
+    if (initial.status !== "ok") throw new Error("fixture must be healthy");
+    const settings = { ...initial.settings, localUiState: undefined };
+    vi.mocked(loadSettingsValidated).mockResolvedValueOnce(wrapOk(settings));
+    useOverridesStore.setState({ paneOverrides: { "old-pane": { controlBarMode: "pinned" } } });
+    renderHook(() => useSessionPersistence());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(cleanTerminalOutputCache).not.toHaveBeenCalled();
+    expect(useOverridesStore.getState().paneOverrides["old-pane"]).toEqual({
+      controlBarMode: "pinned",
+    });
   });
 
   it("loads settings from backend on mount", async () => {
@@ -538,6 +559,7 @@ describe("useSessionPersistence", () => {
 
     vi.mocked(loadSettingsValidated).mockResolvedValueOnce(
       wrapOk({
+        localUiState: {},
         defaultProfile: "WSL",
         profiles: [
           {

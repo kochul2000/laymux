@@ -61,7 +61,10 @@ struct CodexProof {
 struct Receipt {
     token: String,
     snapshot: Snapshot,
-    settings: FileStamp,
+    settings: Option<FileStamp>,
+    settings_path: PathBuf,
+    database_path: PathBuf,
+    database_revision: (u64, u64),
     files: Vec<FileStamp>,
 }
 #[derive(Default)]
@@ -235,11 +238,13 @@ fn saved_views(value: &serde_json::Value) -> Option<BTreeMap<String, serde_json:
     Some(result)
 }
 
-fn commit_to(
+fn commit_to_revision(
     state: &AppState,
     token: &str,
     coverage: &[ReceiptCoverage],
     path: &Path,
+    expected_revision: Option<u64>,
+    store: &crate::local_state::LocalStateStore,
 ) -> Result<Option<String>, String> {
     let (captured, proofs, no_agents) = {
         let registry = state.session_checkpoint.receipts.lock_or_err()?;
@@ -262,15 +267,19 @@ fn commit_to(
     {
         return Ok(None);
     }
-    let Ok(settings) = FileStamp::read(path) else {
+    let settings = if path.exists() {
+        Some(FileStamp::read(path)?)
+    } else {
+        None
+    };
+    let database_revision = store.revision().map_err(String::from)?;
+    if expected_revision.is_some_and(|expected| expected != database_revision.0) {
+        return Ok(None);
+    }
+    let Some(session) = store.load_session().map_err(String::from)? else {
         return Ok(None);
     };
-    let Some(value) = std::fs::read(path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-    else {
-        return Ok(None);
-    };
+    let value = serde_json::to_value(session).map_err(|e| e.to_string())?;
     let Some(saved) = saved_views(&value) else {
         return Ok(None);
     };
@@ -332,7 +341,10 @@ fn commit_to(
         }
         files.push(proof.file.clone());
     }
-    if !settings.unchanged() || snapshot(state)?.as_ref() != Some(&captured.snapshot) {
+    if !configuration_unchanged(path, settings.as_ref())
+        || store.revision().map_err(String::from)? != database_revision
+        || snapshot(state)?.as_ref() != Some(&captured.snapshot)
+    {
         return Ok(None);
     }
     let mut registry = state.session_checkpoint.receipts.lock_or_err()?;
@@ -349,6 +361,9 @@ fn commit_to(
         token: receipt_token.clone(),
         snapshot: captured.snapshot,
         settings,
+        settings_path: path.into(),
+        database_path: store.path().into(),
+        database_revision,
         files,
     });
     Ok(Some(receipt_token))
@@ -365,12 +380,36 @@ pub(crate) fn reusable(state: &AppState, token: &str) -> Result<bool, String> {
         return Ok(false);
     };
     if snapshot(state)?.as_ref() != Some(&receipt.snapshot)
-        || !receipt.settings.unchanged()
+        || !configuration_unchanged(&receipt.settings_path, receipt.settings.as_ref())
+        || crate::local_state::LocalStateStore::new(&receipt.database_path)
+            .revision()
+            .map_err(String::from)?
+            != receipt.database_revision
         || receipt.files.iter().any(|file| !file.unchanged())
     {
         return Ok(false);
     }
     Ok(snapshot(state)?.as_ref() == Some(&receipt.snapshot))
+}
+
+fn configuration_unchanged(path: &Path, stamp: Option<&FileStamp>) -> bool {
+    stamp.map_or_else(|| !path.exists(), FileStamp::unchanged)
+}
+#[cfg(test)]
+fn commit_to(
+    state: &AppState,
+    token: &str,
+    coverage: &[ReceiptCoverage],
+    path: &Path,
+) -> Result<Option<String>, String> {
+    commit_to_revision(
+        state,
+        token,
+        coverage,
+        path,
+        None,
+        &crate::settings::persistence::store_for_settings(path)?,
+    )
 }
 
 #[tauri::command(async)]
@@ -383,9 +422,17 @@ pub fn capture_session_checkpoint_receipt(
 pub fn commit_session_checkpoint_receipt(
     token: String,
     coverage: Vec<ReceiptCoverage>,
+    checkpoint_revision: u64,
     state: tauri::State<std::sync::Arc<AppState>>,
 ) -> Result<Option<String>, String> {
-    commit_to(&state, &token, &coverage, &crate::settings::settings_path())
+    commit_to_revision(
+        &state,
+        &token,
+        &coverage,
+        &crate::settings::settings_path(),
+        Some(checkpoint_revision),
+        &crate::settings::persistence::production_store()?,
+    )
 }
 #[cfg(test)]
 mod tests;

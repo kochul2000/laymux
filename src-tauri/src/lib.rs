@@ -27,6 +27,7 @@ pub mod git_watcher;
 pub mod grok_activity;
 pub mod grok_usage_probe;
 pub mod ipc_server;
+pub mod local_state;
 pub mod lock_ext;
 pub mod osc;
 pub mod osc_hooks;
@@ -303,6 +304,9 @@ pub fn run() {
             commands::get_agent_hook_states,
             commands::list_system_monospace_fonts,
             commands::load_settings,
+            commands::save_session_checkpoint,
+            commands::load_session_checkpoint,
+            commands::export_portable_settings,
             commands::save_settings,
             commands::set_composer_starred_entry,
             commands::load_memo,

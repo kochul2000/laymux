@@ -28,15 +28,42 @@ impl Fixture {
             "terminal-pane".into(),
             crate::pty::PtyHandle::from_test_writer_for_generation(Box::new(std::io::sink()), 7),
         );
-        std::fs::write(&settings, serde_json::json!({"workspaces":[{"panes":[{"id":"pane","view":{"type":"TerminalView","lastCodexSession":ID}}]}],"docks":[]}).to_string()).unwrap();
+        std::fs::write(&settings, "{}").unwrap();
         std::fs::write(&rollout, "proven history").unwrap();
         remember_codex_file(&state, "terminal-pane", 7, ID, &rollout);
-        Self {
+        let fixture = Self {
             state,
             temp,
             settings,
             rollout,
+        };
+        fixture.write_session(serde_json::json!({"workspaces":[{"panes":[{"id":"pane","view":{"type":"TerminalView","lastCodexSession":ID}}]}],"docks":[]}));
+        fixture
+    }
+    fn write_session(&self, mut value: serde_json::Value) {
+        for kind in ["workspaces", "docks"] {
+            if value.get(kind).is_none() {
+                value[kind] = serde_json::json!([]);
+            }
+            for group in value[kind].as_array_mut().into_iter().flatten() {
+                if kind == "workspaces" {
+                    group["id"] = "fixture".into();
+                    group["name"] = "fixture".into();
+                }
+                for pane in group["panes"].as_array_mut().into_iter().flatten() {
+                    for (key, default) in [("x", 0.0), ("y", 0.0), ("w", 1.0), ("h", 1.0)] {
+                        if pane.get(key).is_none() {
+                            pane[key] = serde_json::json!(default);
+                        }
+                    }
+                }
+            }
         }
+        let snapshot = serde_json::from_value(value).unwrap();
+        crate::settings::persistence::store_for_settings(&self.settings)
+            .unwrap()
+            .commit_session(&snapshot)
+            .unwrap();
     }
     fn coverage(&self) -> Vec<ReceiptCoverage> {
         vec![ReceiptCoverage {
@@ -56,7 +83,7 @@ impl Fixture {
     }
 }
 #[test]
-fn an_unchanged_committed_checkpoint_is_reusable_without_process_or_database_io() {
+fn an_unchanged_committed_checkpoint_is_reusable_with_only_local_database_revision_io() {
     let f = Fixture::new();
     let token = f.committed();
     assert!(reusable(&f.state, &token).unwrap());
@@ -73,6 +100,7 @@ fn every_observed_change_invalidates_the_committed_receipt() {
         "generation",
         "closed",
         "settings",
+        "database",
         "rollout",
     ] {
         let f = Fixture::new();
@@ -114,6 +142,11 @@ fn every_observed_change_invalidates_the_committed_receipt() {
                 f.state.pty_handles.lock().unwrap().remove("terminal-pane");
             }
             "settings" => std::fs::write(&f.settings, "changed settings").unwrap(),
+            "database" => {
+                let store = crate::settings::persistence::store_for_settings(&f.settings).unwrap();
+                let session = store.load_session().unwrap().unwrap();
+                store.commit_session(&session).unwrap();
+            }
             _ => std::fs::remove_file(&f.rollout).unwrap(),
         }
         assert!(!reusable(&f.state, &token).unwrap(), "{change}");
@@ -151,7 +184,7 @@ fn failed_partial_stale_and_changed_saves_cannot_issue_a_receipt() {
             }
             "wrong-generation" => coverage[0].generation = Some(8),
             "duplicate" => coverage.push(coverage[0].clone()),
-            "not-saved" => std::fs::write(&f.settings, "{}").unwrap(),
+            "not-saved" => f.write_session(serde_json::json!({"workspaces":[],"docks":[]})),
             _ => *f.state.session_checkpoint.receipts.lock().unwrap() = ReceiptRegistry::default(),
         }
         assert!(
@@ -170,6 +203,35 @@ fn evidence_from_before_capture_cannot_license_a_new_commit() {
     assert!(commit_to(&f.state, &token, &f.coverage(), &f.settings)
         .unwrap()
         .is_none());
+}
+
+#[test]
+fn a_receipt_requires_the_exact_durable_checkpoint_revision() {
+    let f = Fixture::new();
+    let token = capture(&f.state).unwrap().unwrap();
+    remember_codex_file(&f.state, "terminal-pane", 7, ID, &f.rollout);
+    let store = crate::settings::persistence::store_for_settings(&f.settings).unwrap();
+    let revision = store.revision().unwrap().0;
+    assert!(commit_to_revision(
+        &f.state,
+        &token,
+        &f.coverage(),
+        &f.settings,
+        Some(revision + 1),
+        &store
+    )
+    .unwrap()
+    .is_none());
+    assert!(commit_to_revision(
+        &f.state,
+        &token,
+        &f.coverage(),
+        &f.settings,
+        Some(revision),
+        &store
+    )
+    .unwrap()
+    .is_some());
 }
 
 #[test]
@@ -199,15 +261,10 @@ fn saved_codex_and_an_idle_shell_share_the_fast_path_but_running_commands_do_not
             "terminal-shell".into(),
             crate::pty::PtyHandle::from_test_writer_for_generation(Box::new(std::io::sink()), 9),
         );
-        std::fs::write(
-            &f.settings,
-            serde_json::json!({"workspaces":[{"panes":[
+        f.write_session(serde_json::json!({"workspaces":[{"panes":[
             {"id":"pane","view":{"type":"TerminalView","lastCodexSession":ID}},
             {"id":"shell","view":{"type":"TerminalView"}}
-        ]}],"docks":[]})
-            .to_string(),
-        )
-        .unwrap();
+        ]}],"docks":[]}));
         let token = capture(&f.state)
             .unwrap()
             .expect("shell metadata is observable");
@@ -246,19 +303,14 @@ fn stacked_slot_layers_are_saved_views_for_their_terminals() {
         "terminal-shell".into(),
         crate::pty::PtyHandle::from_test_writer_for_generation(Box::new(std::io::sink()), 9),
     );
-    std::fs::write(
-        &f.settings,
-        serde_json::json!({"workspaces":[{"panes":[{
+    f.write_session(serde_json::json!({"workspaces":[{"panes":[{
             "id":"slot","x":0.0,"y":0.0,"w":1.0,"h":1.0,
             "layers":[
                 {"id":"pane","view":{"type":"TerminalView","lastCodexSession":ID}},
                 {"id":"shell","view":{"type":"TerminalView"}}
             ],
             "activeLayerId":"shell"
-        }]}],"docks":[]})
-        .to_string(),
-    )
-    .unwrap();
+        }]}],"docks":[]}));
     let token = capture(&f.state)
         .unwrap()
         .expect("terminals are observable");
@@ -281,18 +333,21 @@ fn stacked_slot_layers_are_saved_views_for_their_terminals() {
 #[test]
 fn a_layer_and_a_compact_pane_claiming_one_terminal_invalidate_the_receipt() {
     let f = Fixture::new();
-    std::fs::write(
-        &f.settings,
-        serde_json::json!({"workspaces":[{"panes":[
-            {"id":"pane","view":{"type":"TerminalView","lastCodexSession":ID}},
-            {"id":"slot","layers":[{"id":"pane","view":{"type":"TerminalView"}}]}
-        ]}],"docks":[]})
-        .to_string(),
-    )
-    .unwrap();
-    let token = capture(&f.state).unwrap().unwrap();
-    remember_codex_file(&f.state, "terminal-pane", 7, ID, &f.rollout);
-    assert!(commit_to(&f.state, &token, &f.coverage(), &f.settings)
-        .unwrap()
-        .is_none());
+    let value = serde_json::json!({"workspaces":[{"id":"fixture","name":"fixture","panes":[
+        {"id":"pane","view":{"type":"TerminalView","lastCodexSession":ID}},
+        {"id":"slot","layers":[{"id":"pane","view":{"type":"TerminalView"}}]}
+    ]}],"docks":[]});
+    assert!(
+        saved_views(&value).is_none(),
+        "ambiguous content cannot license a receipt"
+    );
+    let store = crate::settings::persistence::store_for_settings(&f.settings).unwrap();
+    let revision = store.revision().unwrap();
+    let snapshot = serde_json::from_value(value).unwrap();
+    assert!(store.commit_session(&snapshot).is_err());
+    assert_eq!(
+        store.revision().unwrap(),
+        revision,
+        "rejected duplicate must preserve the last commit"
+    );
 }

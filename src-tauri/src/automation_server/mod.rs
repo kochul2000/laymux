@@ -3,6 +3,7 @@ pub mod handlers_backend;
 pub mod handlers_bridge;
 pub mod helpers;
 mod instance_identity;
+mod local_state;
 pub mod mcp;
 pub mod mcp_resources;
 pub mod settings_bridge;
@@ -258,6 +259,10 @@ pub fn build_router(
         .route("/api/v1/ui/key", post(ui_dispatch_key))
         .route("/api/v1/ui/file-viewer", post(ui_open_file_viewer))
         .route("/api/v1/settings/app-theme", put(settings_set_app_theme))
+        .route(
+            "/api/v1/settings/export",
+            get(local_state::export_configuration),
+        )
         .route(
             "/api/v1/settings/profile-defaults",
             put(settings_set_profile_defaults),

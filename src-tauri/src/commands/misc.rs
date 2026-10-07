@@ -158,7 +158,7 @@ pub fn list_system_monospace_fonts() -> Result<Vec<String>, String> {
 
 #[tauri::command(async)]
 pub fn load_settings() -> Result<crate::settings::Settings, String> {
-    Ok(crate::settings::load_settings())
+    crate::settings::load_settings_checked()
 }
 
 #[tauri::command(async)]
@@ -173,6 +173,7 @@ pub fn reset_settings(
 ) -> Result<crate::settings::Settings, String> {
     let default_settings = crate::settings::Settings::default();
     crate::settings::save_settings(&default_settings)?;
+    let default_settings = crate::settings::load_settings();
     // Reset can move the update channel (back to stable) without the frontend
     // settings-apply path ever running — the recovery modal reloads the page.
     // The process-global updater would otherwise keep the old channel and its

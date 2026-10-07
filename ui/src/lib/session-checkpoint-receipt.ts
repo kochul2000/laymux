@@ -11,10 +11,13 @@ export async function captureSessionReceipt(): Promise<string | undefined> {
 export async function commitSessionReceipt(
   token: string,
   coverage: readonly TerminalAttributionCoverage[],
+  checkpointRevision: number,
 ): Promise<string | undefined> {
   return (
-    (await invoke<string | null>("commit_session_checkpoint_receipt", { token, coverage }).catch(
-      () => null,
-    )) ?? undefined
+    (await invoke<string | null>("commit_session_checkpoint_receipt", {
+      token,
+      coverage,
+      checkpointRevision,
+    }).catch(() => null)) ?? undefined
   );
 }

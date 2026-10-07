@@ -12,6 +12,7 @@ import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { seedSessionConfiguration } from "./session-configuration";
 import {
   applySettingsSnapshot,
   type ApplySettingsSnapshotOptions,
@@ -394,6 +395,7 @@ export async function saveAndApplySettingsSnapshot(
     }
   }
   applySettingsSnapshot(settings, options);
+  seedSessionConfiguration(await collectSettingsSnapshot({ includeRuntimeStructuralState: false }));
 }
 
 function assertExpectedSettings(

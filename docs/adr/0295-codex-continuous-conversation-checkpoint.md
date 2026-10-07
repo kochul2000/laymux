@@ -1,6 +1,7 @@
 # 0295. Codex 대화 귀속을 평상시 저장과 종료 확인이 공유한다
 
 - Status: Accepted
+- Superseded by: [ADR-0299](0299-portable-settings-and-local-sqlite-state.md), settings.json 복원 상태 SoT 및 저장 완료 receipt의 영속 revision 경계에 한정한다.
 - Date: 2026-10-06
 - Source: 사용자 PC 재부팅 후 대화 복원·종료 지연 수정 및 dev/TDD 검증 요청, [ADR-0222](0222-agent-session-checkpoint-coordinator.md), [ADR-0292](0292-codex-hook-lifecycle-session-proof.md), [ADR-0294](0294-codex-process-bound-lifecycle-proof.md), architecture/data-flow.md §13.5
 - 관계: ADR-0292·0294의 대화 증거를 일반 checkpoint까지 확장하고, 복원 증거의 훅 설치 재검사 의존성을 대체한다. 입력 fence·generation·중복 소유권·원자적 저장 계약은 ADR-0222를 유지한다.

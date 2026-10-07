@@ -6,7 +6,9 @@ import {
   type ValidationWarning,
 } from "@/lib/tauri-api";
 import { persistSession, setBlockPersist } from "@/lib/persist-session";
-import { applySettingsSnapshot } from "@/lib/settings-snapshot";
+import { applySettingsSnapshot, collectSettingsSnapshot } from "@/lib/settings-snapshot";
+import { seedSessionConfiguration } from "@/lib/session-configuration";
+import { applyLocalUiState } from "@/lib/local-session";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useOverridesStore } from "@/stores/overrides-store";
@@ -33,7 +35,7 @@ export function useSessionPersistence() {
 
   useEffect(() => {
     loadSettingsValidated()
-      .then((loadResult) => {
+      .then(async (loadResult) => {
         setLoadStatus({
           result: loadResult,
           warnings:
@@ -63,6 +65,9 @@ export function useSessionPersistence() {
 
         const rawSettings = loadResult.settings;
         applySettingsSnapshot(rawSettings, { includeStructural: true });
+        seedSessionConfiguration(
+          await collectSettingsSnapshot({ includeRuntimeStructuralState: false }),
+        );
 
         // Clean orphaned terminal output cache files
         const allPaneIds: string[] = [
@@ -76,7 +81,7 @@ export function useSessionPersistence() {
             (d) => d.panes?.map((p) => p.id).filter((id): id is string => Boolean(id)) ?? [],
           ) ?? []),
         ];
-        if (allPaneIds.length > 0) {
+        if (allPaneIds.length > 0 && rawSettings.localUiState) {
           cleanTerminalOutputCache(allPaneIds).catch((err) => {
             console.warn("[useSessionPersistence] Failed to clean orphaned cache:", err);
           });
@@ -95,13 +100,17 @@ export function useSessionPersistence() {
         for (const d of useDockStore.getState().docks) {
           for (const p of d.panes ?? []) alivePaneIds.add(p.id);
         }
-        useOverridesStore.getState().gcStale(alivePaneIds);
-        useTerminalRestartStore.getState().gcStale(alivePaneIds);
+        if (rawSettings.localUiState) {
+          useOverridesStore.getState().gcStale(alivePaneIds);
+          useTerminalRestartStore.getState().gcStale(alivePaneIds);
+        }
 
+        applyLocalUiState({ uiState: rawSettings.localUiState });
         setLoaded(true);
       })
-      .catch(() => {
-        // Use defaults
+      .catch((error: unknown) => {
+        setBlockPersist(true);
+        console.warn("[useSessionPersistence] Failed to load persistent state:", error);
         setLoaded(true);
       });
   }, []);

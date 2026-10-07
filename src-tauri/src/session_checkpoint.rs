@@ -12,6 +12,7 @@ use crate::state::AppState;
 pub(crate) mod codex_status;
 mod eviction;
 mod hints;
+pub(crate) use hints::CheckpointHints;
 pub(crate) mod receipt;
 pub use eviction::TerminalMutationPermit;
 #[cfg(test)]

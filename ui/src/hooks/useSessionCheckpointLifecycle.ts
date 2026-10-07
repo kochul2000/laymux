@@ -19,6 +19,7 @@ import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { SESSION_ATTRIBUTION_STARTUP_GRACE_MS } from "@/stores/terminal-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { areHiddenPaneIdsEligible } from "@/lib/hidden-eviction-eligibility";
 import { toPaneId } from "@/lib/pane-ids";
 import { withCodexStatusCheckpoint } from "@/lib/codex-status-probe";
@@ -130,7 +131,8 @@ export function useSessionCheckpointLifecycle(ready: boolean): void {
       if (
         state.workspaces !== previous.workspaces ||
         state.layouts !== previous.layouts ||
-        state.workspaceDisplayOrder !== previous.workspaceDisplayOrder
+        state.workspaceDisplayOrder !== previous.workspaceDisplayOrder ||
+        state.activeWorkspaceId !== previous.activeWorkspaceId
       ) {
         markSessionCheckpointMutation();
       }
@@ -144,6 +146,16 @@ export function useSessionCheckpointLifecycle(ready: boolean): void {
     });
     const unsubscribeSettings = useSettingsStore.subscribe((state, previous) => {
       if (state !== previous) markSessionCheckpointMutation();
+    });
+    const unsubscribeViewer = useFileViewerStore.subscribe((state, previous) => {
+      if (
+        state.open !== previous.open ||
+        state.path !== previous.path ||
+        state.maximized !== previous.maximized
+      ) {
+        markSessionCheckpointMutation();
+        void persistSession({ reason: "mutation" });
+      }
     });
     const checkpointWhenVisible = () => {
       if (document.visibilityState === "visible") {
@@ -162,6 +174,7 @@ export function useSessionCheckpointLifecycle(ready: boolean): void {
       unsubscribeWorkspace();
       unsubscribeDock();
       unsubscribeSettings();
+      unsubscribeViewer();
       document.removeEventListener("visibilitychange", checkpointWhenVisible);
     };
   }, [ready]);
