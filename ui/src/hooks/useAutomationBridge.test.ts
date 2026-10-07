@@ -2512,6 +2512,48 @@ describe("identify_caller and enriched responses", () => {
     expect(usePaneRevealStore.getState().requestCounts[pane.id]).toBeUndefined();
   });
 
+  it("write preparation prioritizes the hidden stacked layer, not its slot (ADR-0297)", async () => {
+    const { layouts } = useWorkspaceStore.getState();
+    useWorkspaceStore.getState().addWorkspace("Stacked", layouts[0].id);
+    const ws1 = useWorkspaceStore.getState().workspaces[0];
+    const ws2 = useWorkspaceStore.getState().workspaces[1];
+    useWorkspaceStore.getState().setActiveWorkspace(ws2.id);
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    const hiddenLayerId = useWorkspaceStore
+      .getState()
+      .stackPane(0, { type: "TerminalView" }) as string;
+    const slot = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0];
+    const shownLayerId = slot.layers[0].id;
+    // The startup coordinator keys requests by layer id; the slot id equals the
+    // shown layer's id, so passing it would start the wrong terminal.
+    expect(slot.id).toBe(shownLayerId);
+    useWorkspaceStore.getState().setActiveLayer(ws2.id, shownLayerId);
+    useWorkspaceStore.getState().setActiveWorkspace(ws1.id);
+    const terminalId = `terminal-${hiddenLayerId}`;
+
+    const pending = handleAsyncAutomationRequest({
+      requestId: "write-prepare-hidden-layer",
+      category: "action",
+      target: "terminals",
+      method: "prepareForAutomation",
+      params: { id: terminalId },
+    });
+
+    expect(usePaneRevealStore.getState().requestCounts[hiddenLayerId]).toBe(1);
+    expect(usePaneRevealStore.getState().requestCounts[slot.id]).toBeUndefined();
+
+    useTerminalStore.getState().registerInstance({
+      id: terminalId,
+      profile: "PowerShell",
+      syncGroup: "",
+      workspaceId: ws2.id,
+    });
+    useTerminalStore.getState().updateInstanceInfo(terminalId, { sessionReady: true });
+
+    await expect(pending).resolves.toMatchObject({ success: true });
+    expect(usePaneRevealStore.getState().requestCounts[hiddenLayerId]).toBeUndefined();
+  });
+
   it("focus_terminal focuses dock terminal without switching workspace", () => {
     const { layouts } = useWorkspaceStore.getState();
     useWorkspaceStore.getState().addWorkspace("WS2", layouts[0].id);
@@ -2992,6 +3034,52 @@ describe("identify_caller and enriched responses", () => {
     // If the default layout only has EmptyView, convert one and verify
     const termPanes = ws.panes.filter((p) => p.layers[0].view.type === "TerminalView");
     expect(termPanes.length).toBeGreaterThan(0);
+  });
+
+  it("create_workspace applies cwd to every stacked layer, hidden ones included (ADR-0297)", () => {
+    useWorkspaceStore.setState({
+      layouts: [
+        ...useWorkspaceStore.getState().layouts,
+        {
+          id: "stacked-layout",
+          name: "Stacked",
+          panes: [
+            {
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              viewType: "EmptyView",
+              layers: [
+                { viewType: "TerminalView", viewConfig: { type: "TerminalView", profile: "WSL" } },
+                { viewType: "EmptyView" },
+                { viewType: "TerminalView" },
+              ],
+              activeLayerIndex: 0,
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = handleAutomationRequest({
+      requestId: "cw-cwd-stacked",
+      category: "action",
+      target: "workspaces",
+      method: "add",
+      params: { name: "Stacked CWD", layoutId: "stacked-layout", cwd: "/repo" },
+    });
+    expect(result.success).toBe(true);
+    const id = (result.data as { workspace: { id: string } }).workspace.id;
+    const ws = useWorkspaceStore.getState().workspaces.find((w) => w.id === id)!;
+    expect(ws.panes).toHaveLength(1);
+    expect(ws.panes[0].layers.map((layer) => layer.view)).toEqual([
+      expect.objectContaining({ type: "TerminalView", profile: "WSL", lastCwd: "/repo" }),
+      expect.objectContaining({ type: "TerminalView", lastCwd: "/repo" }),
+      expect.objectContaining({ type: "TerminalView", lastCwd: "/repo" }),
+    ]);
+    // The shown layer is unchanged.
+    expect(ws.panes[0].activeLayerId).toBe(ws.panes[0].layers[0].id);
   });
 
   it("take_screenshot pane selector uses data-pane-index on workspace pane divs", () => {
@@ -4623,5 +4711,123 @@ describe("pane rearrangement bridge (ADR-0298)", () => {
     const other = useWorkspaceStore.getState().workspaces.at(-1)!;
     while (active().panes.length > 1) act("remove", { paneIndex: 0 });
     expect(act("moveToWorkspace", { paneIndex: 0, workspaceId: other.id }).success).toBe(false);
+  });
+});
+
+describe("pane rearrangement keeps grid focus on the same slot (ADR-0298)", () => {
+  function act(method: string, params: Record<string, unknown>) {
+    return handleAutomationRequest({
+      requestId: `rearrange-focus-${method}`,
+      category: "action",
+      target: "panes",
+      method,
+      params,
+    });
+  }
+  const active = () => useWorkspaceStore.getState().getActiveWorkspace()!;
+  const focused = () => useGridStore.getState().focusedPaneIndex;
+  const focusedSlotId = () => active().panes[focused()!]?.id;
+  const term = (id: string) => ({ id, view: { type: "TerminalView" as const } });
+
+  beforeEach(() => {
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useGridStore.setState(useGridStore.getInitialState());
+    useDockStore.setState(useDockStore.getInitialState());
+    useTerminalStore.setState(useTerminalStore.getInitialState());
+    useTerminalRestartStore.setState({ requests: {} });
+    const third = 1 / 3;
+    useWorkspaceStore.setState({
+      activeWorkspaceId: "ws-f",
+      workspaces: [
+        {
+          id: "ws-f",
+          name: "Focus",
+          panes: [
+            {
+              id: "a",
+              x: 0,
+              y: 0,
+              w: third,
+              h: 1,
+              layers: [term("a"), term("a2")],
+              activeLayerId: "a",
+            },
+            { id: "b", x: third, y: 0, w: third, h: 1, layers: [term("b")], activeLayerId: "b" },
+            {
+              id: "c",
+              x: 2 * third,
+              y: 0,
+              w: third,
+              h: 1,
+              layers: [term("c")],
+              activeLayerId: "c",
+            },
+          ],
+        },
+        {
+          id: "ws-other",
+          name: "Other",
+          panes: [{ id: "o", x: 0, y: 0, w: 1, h: 1, layers: [term("o")], activeLayerId: "o" }],
+        },
+      ],
+    });
+  });
+
+  it("moveLayer that empties an earlier slot re-indexes focus to the same slot", () => {
+    act("extractLayer", { layerId: "a2", direction: "vertical" });
+    useGridStore.getState().setFocusedPane(3);
+    expect(focusedSlotId()).toBe("c");
+    expect(act("moveLayer", { layerId: "a2", targetPaneIndex: 2 }).success).toBe(true);
+    expect(focusedSlotId()).toBe("c");
+  });
+
+  it("moveLayer keeps focus on a source slot that was renamed after losing its id layer", () => {
+    useGridStore.getState().setFocusedPane(0);
+    expect(act("moveLayer", { layerId: "a", targetPaneIndex: 2 }).success).toBe(true);
+    expect(focused()).toBe(0);
+    expect(active().panes[0].layers.map((l) => l.id)).toEqual(["a2"]);
+  });
+
+  it("extractLayer inserting a slot before the focused one re-indexes focus", () => {
+    useGridStore.getState().setFocusedPane(2);
+    expect(act("extractLayer", { layerId: "a2", direction: "vertical" }).success).toBe(true);
+    expect(focused()).toBe(3);
+    expect(focusedSlotId()).toBe("c");
+  });
+
+  it("merge keeps focus on the same slot when an earlier slot is merged away", () => {
+    useGridStore.getState().setFocusedPane(2);
+    expect(act("merge", { sourceIndex: 0, targetIndex: 1 }).success).toBe(true);
+    expect(focusedSlotId()).toBe("c");
+  });
+
+  it("merge follows the focused source slot's shown layer into its target", () => {
+    useGridStore.getState().setFocusedPane(0);
+    expect(act("merge", { sourceIndex: 0, targetIndex: 2 }).success).toBe(true);
+    expect(focusedSlotId()).toBe("c");
+    expect(active().panes[focused()!].activeLayerId).toBe("a");
+  });
+
+  it("moveToWorkspace re-indexes focus and keeps it in range", () => {
+    useGridStore.getState().setFocusedPane(2);
+    expect(act("moveToWorkspace", { paneIndex: 0, workspaceId: "ws-other" }).success).toBe(true);
+    expect(focusedSlotId()).toBe("c");
+
+    // The focused slot itself leaves: focus stays on a slot that still exists.
+    expect(act("moveToWorkspace", { paneIndex: 1, workspaceId: "ws-other" }).success).toBe(true);
+    expect(focused()).toBe(0);
+    expect(focusedSlotId()).toBe("b");
+  });
+
+  it("remove of an earlier slot keeps focus on the same slot", () => {
+    useGridStore.getState().setFocusedPane(2);
+    expect(act("remove", { paneIndex: 1 }).success).toBe(true);
+    expect(focusedSlotId()).toBe("c");
+  });
+
+  it("leaves dock focus untouched", () => {
+    useGridStore.getState().setFocusedPane(null);
+    expect(act("merge", { sourceIndex: 0, targetIndex: 1 }).success).toBe(true);
+    expect(focused()).toBeNull();
   });
 });

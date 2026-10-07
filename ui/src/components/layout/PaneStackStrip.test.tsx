@@ -1,6 +1,7 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { createEvent, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { PANE_DND_MIME } from "@/lib/pane-dnd";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
@@ -110,5 +111,35 @@ describe("PaneStackStrip (ADR-0297)", () => {
     render(<PaneStackStrip layers={layers} activeLayerId="a" onActivate={vi.fn()} />);
     expect(screen.queryByTestId("pane-stack-add")).toBeNull();
     expect(screen.queryByTestId("pane-stack-tab-close-a")).toBeNull();
+  });
+
+  it("leaves a pane (non-layer) drop to the slot box", () => {
+    const onDropLayer = vi.fn();
+    const onBoxDrop = vi.fn();
+    render(
+      <div onDrop={onBoxDrop}>
+        <PaneStackStrip
+          layers={layers}
+          activeLayerId="a"
+          onActivate={vi.fn()}
+          onDropLayer={onDropLayer}
+        />
+      </div>,
+    );
+    const dataTransfer = {
+      types: [PANE_DND_MIME],
+      getData: (type: string) => (type === PANE_DND_MIME ? "other" : ""),
+      dropEffect: "",
+    };
+    for (const el of [
+      screen.getByTestId("pane-stack-strip"),
+      screen.getByTestId("pane-stack-tab-b"),
+    ]) {
+      const event = createEvent.drop(el, { dataTransfer });
+      fireEvent(el, event);
+      expect(event.defaultPrevented).toBe(false);
+    }
+    expect(onBoxDrop).toHaveBeenCalledTimes(2);
+    expect(onDropLayer).not.toHaveBeenCalled();
   });
 });

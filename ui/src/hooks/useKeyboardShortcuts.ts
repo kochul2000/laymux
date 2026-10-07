@@ -29,6 +29,7 @@ import { clipboardWriteText } from "@/lib/tauri-api";
 import { runPaneClearFromUi } from "@/lib/pane-clear-action";
 import { runWorkspaceClearFromUi } from "@/lib/workspace-clear-action";
 import { resolveFocusedTerminalPane } from "@/lib/focused-terminal";
+import { focusedSlotIsStacked, isStackOnlyAction } from "@/lib/lx-shortcuts";
 
 const ARROW_TO_DIRECTION: Record<string, Direction> = {
   ArrowLeft: "left",
@@ -457,9 +458,16 @@ const SHORTCUT_ACTION_IDS = Object.keys(SHORTCUT_HANDLERS);
  * (e.g. the terminal Composer) must check this FIRST and let matching events
  * bubble — laymux controls consume before passthrough, and rebinding moves
  * this check together with the dispatcher automatically.
+ *
+ * Stack-only actions (`pane.layer`) count only while the focused slot is a
+ * stack — the same gate `isLxShortcut` applies on the xterm path — so their
+ * combo still reaches the PTY on an ordinary slot (ADR-0297).
  */
 export function matchesGlobalShortcut(e: KeyboardEvent): boolean {
-  return SHORTCUT_ACTION_IDS.some((actionId) => matchesKeybinding(e, actionId));
+  return SHORTCUT_ACTION_IDS.some(
+    (actionId) =>
+      matchesKeybinding(e, actionId) && (!isStackOnlyAction(actionId) || focusedSlotIsStacked()),
+  );
 }
 
 export function useKeyboardShortcuts() {

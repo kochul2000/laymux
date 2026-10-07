@@ -209,16 +209,23 @@ export function PaneGrid({
   // target, or — dropped on the target's top band — merges into its stack. A
   // stack tab dragged onto another slot joins that slot's stack.
   const [dragZone, setDragZone] = useState<"swap" | "stack">("swap");
+  // Drawn height of the merge band, so it matches the hit-test in `zoneFor`.
+  const [dropBandPx, setDropBandPx] = useState(STACK_DROP_BAND_PX);
   const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null);
   const layerDragEnabled = isActive && !!onMoveLayer;
+
+  /** Merge band height of a slot box: at most a third of a short slot. */
+  const bandFor = (e: React.DragEvent): number => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    return rect.height > 0 ? Math.min(STACK_DROP_BAND_PX, rect.height / 3) : STACK_DROP_BAND_PX;
+  };
 
   /** Top band of a slot box means "stack onto it"; needs real layout to tell. */
   const zoneFor = (e: React.DragEvent): "swap" | "stack" => {
     if (!onMergeSlot) return "swap";
     const rect = e.currentTarget.getBoundingClientRect();
     if (rect.height <= 0) return "swap";
-    const band = Math.min(STACK_DROP_BAND_PX, rect.height / 3);
-    return e.clientY - rect.top < band ? "stack" : "swap";
+    return e.clientY - rect.top < bandFor(e) ? "stack" : "swap";
   };
 
   const handleDragStart = (e: React.DragEvent, paneId: string) => {
@@ -233,6 +240,7 @@ export function PaneGrid({
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
       setDragZone("stack");
+      setDropBandPx(bandFor(e));
       setDragOverId(paneId);
       return;
     }
@@ -242,6 +250,7 @@ export function PaneGrid({
     e.dataTransfer.dropEffect = "move";
     if (dragSrcRef.current !== paneId) {
       setDragZone(zoneFor(e));
+      setDropBandPx(bandFor(e));
       setDragOverId(paneId);
     }
   };
@@ -344,7 +353,9 @@ export function PaneGrid({
                   className="pointer-events-none absolute inset-0 z-20"
                   style={{ border: "2px solid var(--accent)" }}
                 >
-                  <div className="pane-stack-drop-band">Stack here</div>
+                  <div className="pane-stack-drop-band" style={{ height: dropBandPx }}>
+                    Stack here
+                  </div>
                 </div>
               ) : (
                 <div

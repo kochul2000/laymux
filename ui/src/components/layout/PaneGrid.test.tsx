@@ -988,6 +988,89 @@ describe("PaneGrid layer rearrangement (ADR-0297)", () => {
     expect(onSwapPanes).toHaveBeenCalledWith("B", "A");
   });
 
+  /** Gives the box of slot `index` a layout so the merge band can be hit-tested. */
+  const layoutBox = (index: number, top: number, height: number) => {
+    const box = screen.getByTestId(`re-pane-${index}`);
+    vi.spyOn(box, "getBoundingClientRect").mockReturnValue({
+      top,
+      left: 0,
+      bottom: top + height,
+      right: 400,
+      width: 400,
+      height,
+      x: 0,
+      y: top,
+      toJSON: () => ({}),
+    });
+    return box;
+  };
+  // jsdom drag events ignore clientY in the init dict; set it on the event.
+  const fireAt = (
+    el: HTMLElement,
+    kind: "dragOver" | "drop",
+    clientY: number,
+    dataTransfer: object,
+  ) => {
+    const event = createEvent[kind](el, { dataTransfer });
+    Object.defineProperty(event, "clientY", { value: clientY });
+    fireEvent(el, event);
+    return event;
+  };
+
+  it("merges a slot dropped on the strip of an already stacked slot", () => {
+    const onMergeSlot = vi.fn();
+    const onSwapPanes = vi.fn();
+    render(
+      <PaneGrid
+        {...props}
+        onMoveLayer={vi.fn()}
+        onMergeSlot={onMergeSlot}
+        onSwapPanes={onSwapPanes}
+      />,
+    );
+    const target = layoutBox(0, 100, 600);
+    const bar = within(screen.getByTestId("re-pane-1")).getByTestId("pane-control-bar");
+
+    // Pane drop on the strip background bubbles to the box and stacks.
+    let dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(bar, { dataTransfer });
+    fireAt(target, "dragOver", 110, dataTransfer);
+    expect(screen.getByTestId("pane-stack-drop-target-0")).toBeInTheDocument();
+    fireAt(screen.getByTestId("pane-stack-strip"), "drop", 110, dataTransfer);
+    expect(onMergeSlot).toHaveBeenCalledWith("B", "A");
+
+    // Same on a tab inside the strip.
+    onMergeSlot.mockClear();
+    dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(bar, { dataTransfer });
+    fireAt(screen.getByTestId("pane-stack-tab-a2"), "dragOver", 110, dataTransfer);
+    expect(screen.getByTestId("pane-stack-drop-target-0")).toBeInTheDocument();
+    fireAt(screen.getByTestId("pane-stack-tab-a2"), "drop", 110, dataTransfer);
+    expect(onMergeSlot).toHaveBeenCalledWith("B", "A");
+    expect(onSwapPanes).not.toHaveBeenCalled();
+  });
+
+  it("draws the merge band at the hit-tested height on a short slot", () => {
+    render(<PaneGrid {...props} onMergeSlot={vi.fn()} onSwapPanes={vi.fn()} />);
+    const target = layoutBox(0, 100, 60);
+    const bar = within(screen.getByTestId("re-pane-1")).getByTestId("pane-control-bar");
+    const dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(bar, { dataTransfer });
+    // 60px tall → band is min(40, 60/3) = 20px.
+    fireAt(target, "dragOver", 110, dataTransfer);
+    expect(screen.getByText("Stack here")).toHaveStyle({ height: "20px" });
+  });
+
+  it("draws the full merge band on a tall slot", () => {
+    render(<PaneGrid {...props} onMergeSlot={vi.fn()} onSwapPanes={vi.fn()} />);
+    const target = layoutBox(0, 100, 600);
+    const bar = within(screen.getByTestId("re-pane-1")).getByTestId("pane-control-bar");
+    const dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(bar, { dataTransfer });
+    fireAt(target, "dragOver", 110, dataTransfer);
+    expect(screen.getByText("Stack here")).toHaveStyle({ height: "40px" });
+  });
+
   it("splits a layer out from the tab context menu", () => {
     const onExtractLayer = vi.fn();
     render(<PaneGrid {...props} onExtractLayer={onExtractLayer} />);

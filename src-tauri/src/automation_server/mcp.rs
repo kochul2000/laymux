@@ -473,7 +473,7 @@ struct ActivatePaneLayerParam {
     layer_id: Option<String>,
     /// Terminal id of the layer (e.g. "terminal-pane-1234abcd"). Give this or layer_id.
     terminal_id: Option<String>,
-    /// Also focus the slot (default true)
+    /// Also switch to its workspace and focus the slot (default true). false only changes the shown layer.
     focus: Option<bool>,
 }
 
@@ -2770,8 +2770,9 @@ impl McpHandler {
 
     /// Stack a new layer on a pane slot (ADR-0297): the slot keeps its size and shows
     /// the new layer, the previous content stays alive underneath. Defaults to a
-    /// TerminalView starting in the slot's active-layer CWD. Response mirrors
-    /// split_pane (`ready` field included). Switch layers with activate_pane_layer.
+    /// TerminalView starting in the slot's active-layer CWD. Response is like
+    /// split_pane (`stacked`, `newPane` with `ready`, `layerIndex`, `layerCount`) but
+    /// without the rect or totalPanes. Switch layers with activate_pane_layer.
     #[tool]
     async fn stack_pane(
         &self,
@@ -2791,7 +2792,8 @@ impl McpHandler {
     }
 
     /// Show one stacked layer of its pane slot (ADR-0297), by layer_id or terminal_id.
-    /// Switches workspace when needed and focuses the slot unless focus=false.
+    /// By default (focus=true) switches workspace when needed and focuses the slot;
+    /// focus=false only changes the shown layer, without switching workspace or focus.
     #[tool]
     async fn activate_pane_layer(
         &self,

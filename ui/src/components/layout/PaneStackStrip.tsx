@@ -137,6 +137,9 @@ export function PaneStackStrip({
   };
 
   const finishDrop = (e: React.DragEvent, mark: DropMark) => {
+    // A slot dragged by its control bar is the box's drop (merge/swap): let it
+    // bubble so the "Stack here" band the box shows actually stacks.
+    if (!isLayerDrag(e, draggingLayerId)) return;
     e.preventDefault();
     e.stopPropagation();
     setDropMark(null);

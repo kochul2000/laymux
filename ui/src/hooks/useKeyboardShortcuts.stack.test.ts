@@ -6,7 +6,7 @@ vi.mock("@/lib/tauri-api", () => ({
   clipboardWriteText: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
+import { matchesGlobalShortcut, useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useGridStore } from "@/stores/grid-store";
@@ -144,5 +144,41 @@ describe("useKeyboardShortcuts — pane stacks", () => {
     fireKey("ArrowRight", { altKey: true });
     expect(useDockStore.getState().focusedDock).toBe("right");
     expect(activeLayerOfRight()).toBe("r0");
+  });
+});
+
+describe("matchesGlobalShortcut — pane.layer follows the stack gate (ADR-0297)", () => {
+  const altShiftRight = () =>
+    new KeyboardEvent("keydown", { key: "ArrowRight", altKey: true, shiftKey: true });
+
+  beforeEach(() => {
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useDockStore.setState(useDockStore.getInitialState());
+    useGridStore.setState(useGridStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    seed();
+    hideDocks();
+  });
+
+  it("claims Alt+Shift+Arrow while the focused slot is a stack", () => {
+    useGridStore.setState({ focusedPaneIndex: 1 });
+    expect(matchesGlobalShortcut(altShiftRight())).toBe(true);
+  });
+
+  it("leaves Alt+Shift+Arrow to the PTY on an unstacked slot", () => {
+    useGridStore.setState({ focusedPaneIndex: 0 });
+    expect(matchesGlobalShortcut(altShiftRight())).toBe(false);
+  });
+
+  it("leaves Alt+Shift+Arrow to the PTY while a dock is focused", () => {
+    useDockStore.setState({ focusedDock: "left" });
+    expect(matchesGlobalShortcut(altShiftRight())).toBe(false);
+  });
+
+  it("still claims ungated shortcuts on an unstacked slot", () => {
+    useGridStore.setState({ focusedPaneIndex: 0 });
+    expect(
+      matchesGlobalShortcut(new KeyboardEvent("keydown", { key: "ArrowRight", altKey: true })),
+    ).toBe(true);
   });
 });

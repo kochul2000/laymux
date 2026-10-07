@@ -273,10 +273,20 @@ fn validate_pane_content(
             repaired: true,
         });
     }
+    // Ids kept by earlier layers of this slot: a later duplicate of one of them
+    // must not steal the active reference, which still resolves to the kept layer.
+    let mut kept = std::collections::HashSet::new();
     for (layer_idx, layer) in pane.layers.iter_mut().enumerate() {
         let layer_path = format!("{pane_path}.layers[{layer_idx}]");
         if layer.id.is_empty() || !seen.insert(layer.id.clone()) {
-            layer.id = format!("pane-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+            let new_id = format!("pane-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+            // The re-issued layer stays active (mirrors TS `dedupeLayerIds`).
+            if pane.active_layer_id.as_deref() == Some(layer.id.as_str())
+                && !kept.contains(&layer.id)
+            {
+                pane.active_layer_id = Some(new_id.clone());
+            }
+            layer.id = new_id;
             seen.insert(layer.id.clone());
             warnings.push(ValidationWarning {
                 path: format!("{layer_path}.id"),
@@ -284,6 +294,7 @@ fn validate_pane_content(
                 repaired: true,
             });
         }
+        kept.insert(layer.id.clone());
         if layer.view.view_type.is_empty() {
             layer.view.view_type = "EmptyView".into();
             warnings.push(ValidationWarning {
@@ -339,6 +350,18 @@ fn validate_layouts(settings: &mut Settings, warnings: &mut Vec<ValidationWarnin
                         .into(),
                     repaired: true,
                 });
+            }
+            for (layer_idx, layer) in pane.layers.iter_mut().enumerate() {
+                if layer.view_type.is_empty() {
+                    layer.view_type = "TerminalView".into();
+                    warnings.push(ValidationWarning {
+                        path: format!("{pane_path}.layers[{layer_idx}].viewType"),
+                        message:
+                            "레이아웃 레이어 viewType이 비어 있어 TerminalView로 설정했습니다."
+                                .into(),
+                        repaired: true,
+                    });
+                }
             }
         }
     }
@@ -1385,5 +1408,65 @@ mod tests {
         assert!(warnings
             .iter()
             .any(|w| w.path == "workspaces[0].panes[0].layers[1].view.profile" && !w.repaired));
+    }
+
+    #[test]
+    fn reissued_colliding_layer_id_keeps_the_active_layer() {
+        let mut settings = Settings::default();
+        let compact_id = settings.workspaces[0].panes[0].id.clone();
+        settings.workspaces[0]
+            .panes
+            .push(stacked_pane(serde_json::json!({
+                "id": "s2", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0,
+                "layers": [
+                    { "id": "s2", "view": { "type": "MemoView" } },
+                    { "id": compact_id, "view": { "type": "TerminalView" } }
+                ],
+                "activeLayerId": compact_id
+            })));
+        validate_and_repair(&mut settings);
+        let pane = &settings.workspaces[0].panes[1];
+        assert_ne!(pane.layers[1].id, compact_id);
+        assert_eq!(
+            pane.active_layer_id.as_deref(),
+            Some(pane.layers[1].id.as_str()),
+            "the active layer must follow its re-issued id"
+        );
+    }
+
+    #[test]
+    fn duplicate_layer_id_within_a_slot_keeps_the_active_on_the_kept_layer() {
+        let mut settings = Settings::default();
+        settings.workspaces[0].panes = vec![stacked_pane(serde_json::json!({
+            "id": "slot", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0,
+            "layers": [
+                { "id": "a", "view": { "type": "MemoView" } },
+                { "id": "a", "view": { "type": "MemoView" } }
+            ],
+            "activeLayerId": "a"
+        }))];
+        validate_and_repair(&mut settings);
+        let pane = &settings.workspaces[0].panes[0];
+        assert_eq!(pane.layers[0].id, "a");
+        assert_eq!(pane.active_layer_id.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn layout_layer_empty_view_type_becomes_terminal_view() {
+        let mut settings = Settings::default();
+        settings.layouts[0].panes = vec![serde_json::from_value(serde_json::json!({
+            "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0, "viewType": "MemoView",
+            "layers": [{ "viewType": "MemoView" }, { "viewType": "" }],
+            "activeLayerIndex": 0
+        }))
+        .unwrap()];
+        let warnings = validate_and_repair(&mut settings);
+        assert_eq!(
+            settings.layouts[0].panes[0].layers[1].view_type,
+            "TerminalView"
+        );
+        assert!(warnings
+            .iter()
+            .any(|w| w.path == "layouts[0].panes[0].layers[1].viewType" && w.repaired));
     }
 }

@@ -153,7 +153,7 @@ pub async fn api_docs() -> impl IntoResponse {
             },
             {
                 "method": "POST", "path": "/api/v1/panes/stack",
-                "description": "Stack a new layer on a pane slot (ADR-0297) right after its active layer and show it. Defaults to a TerminalView that starts in the slot's active-layer CWD unless cwd is given. Response mirrors split: newPane { id (layer id), terminalId, paneIndex, paneNumber, layerIndex, layerCount, ready }.",
+                "description": "Stack a new layer on a pane slot (ADR-0297) right after its active layer and show it. Defaults to a TerminalView that starts in the slot's active-layer CWD unless cwd is given. Response: { stacked, newPane { id (layer id), terminalId, paneIndex, paneNumber, layerIndex, layerCount, ready } } (unlike split: no x/y/w/h, no totalPanes).",
                 "body": {
                     "paneIndex": "number",
                     "viewType": "(optional) ViewType, default \"TerminalView\"",
@@ -163,7 +163,7 @@ pub async fn api_docs() -> impl IntoResponse {
             },
             {
                 "method": "POST", "path": "/api/v1/panes/layers/activate",
-                "description": "Show one stacked layer of its slot (ADR-0297), by layer id or terminal id. Switches workspace if needed and focuses the slot unless focus=false.",
+                "description": "Show one stacked layer of its slot (ADR-0297), by layer id or terminal id. By default (focus=true) switches workspace if needed and focuses the slot; focus=false only changes the shown layer, without switching workspace or focus.",
                 "body": {
                     "layerId": "(one of) string",
                     "terminalId": "(one of) string",

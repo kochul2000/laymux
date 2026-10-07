@@ -50,8 +50,13 @@ const PASS_THROUGH_WHEN_STACKED_ACTION_IDS: readonly string[] = DEFAULT_KEYBINDI
   (d) => d.passThroughTerminal === "whenStacked",
 ).map((d) => d.id);
 
+/** True when `actionId` only applies while the focused slot is a stack (`pane.layer`). */
+export function isStackOnlyAction(actionId: string): boolean {
+  return PASS_THROUGH_WHEN_STACKED_ACTION_IDS.includes(actionId);
+}
+
 /** True when grid focus is on a slot holding two or more layers (ADR-0297). */
-function focusedSlotIsStacked(): boolean {
+export function focusedSlotIsStacked(): boolean {
   if (useDockStore.getState().focusedDock !== null) return false;
   const index = useGridStore.getState().focusedPaneIndex;
   if (index === null) return false;

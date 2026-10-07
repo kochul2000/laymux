@@ -1,6 +1,7 @@
 //! In-memory receipts for a proven, committed and unchanged Codex checkpoint.
 use crate::agent_hooks::title::TitleBinding;
 use crate::lock_ext::MutexExt;
+use crate::settings::WorkspacePane;
 use crate::state::AppState;
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashSet};
@@ -186,30 +187,50 @@ pub(crate) fn capture(state: &AppState) -> Result<Option<String>, String> {
     Ok(Some(token))
 }
 
-fn saved_views(value: &serde_json::Value) -> Option<BTreeMap<String, &serde_json::Value>> {
+fn panes<'a>(
+    value: &'a serde_json::Value,
+    group: &str,
+) -> impl Iterator<Item = &'a serde_json::Value> {
+    value
+        .get(group)
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .flat_map(|owner| {
+            owner
+                .get("panes")
+                .and_then(|v| v.as_array())
+                .into_iter()
+                .flatten()
+        })
+}
+
+/// Saved terminal views keyed by terminal id. Workspace slots go through
+/// `WorkspacePane::content_views` so a stacked slot (ADR-0297 `layers`) and the
+/// compact `id`/`view` form follow the same rule as the settings model.
+/// Docks only persist the compact form. `None` when the file is ambiguous.
+fn saved_views(value: &serde_json::Value) -> Option<BTreeMap<String, serde_json::Value>> {
     let mut result = BTreeMap::new();
-    for group in ["workspaces", "docks"].into_iter().flat_map(|name| {
-        value
-            .get(name)
-            .and_then(|v| v.as_array())
-            .into_iter()
-            .flatten()
-    }) {
-        for pane in group
-            .get("panes")
-            .and_then(|v| v.as_array())
-            .into_iter()
-            .flatten()
-        {
-            let view = &pane["view"];
-            if view["type"].as_str() != Some("TerminalView") {
-                continue;
-            }
-            let id = pane["id"].as_str()?;
-            if result.insert(format!("terminal-{id}"), view).is_some() {
-                return None;
-            }
+    let mut insert = |id: &str, view: serde_json::Value| -> Option<()> {
+        if view["type"].as_str() != Some("TerminalView") {
+            return Some(());
         }
+        if id.is_empty() || result.insert(format!("terminal-{id}"), view).is_some() {
+            return None;
+        }
+        Some(())
+    };
+    for pane in panes(value, "workspaces") {
+        let pane = WorkspacePane::deserialize(pane).ok()?;
+        for (id, view) in pane.content_views() {
+            insert(id, serde_json::to_value(view).ok()?)?;
+        }
+    }
+    for pane in panes(value, "docks") {
+        insert(
+            pane["id"].as_str().unwrap_or_default(),
+            pane["view"].clone(),
+        )?;
     }
     Some(result)
 }
