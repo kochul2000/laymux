@@ -136,6 +136,27 @@ function getActivePaneCtx(paneIndex: number): ActivePaneCtx {
   return { ws, pane: ws.panes[paneIndex] } as const;
 }
 
+/**
+ * Resolve `layerId` / `terminalId` to a layer of the active workspace. Layer
+ * rearrangement acts on the visible grid only, like the drags it mirrors.
+ */
+function activeWorkspaceLayer(
+  p: Record<string, unknown>,
+): { layerId: string } | { err: HandlerResult } {
+  const rawId =
+    typeof p.layerId === "string"
+      ? p.layerId
+      : typeof p.terminalId === "string"
+        ? toPaneId(p.terminalId)
+        : null;
+  if (!rawId) return { err: err("layerId or terminalId required") };
+  const ws = useWorkspaceStore.getState().getActiveWorkspace();
+  if (!ws || !findLayerEntry(ws.panes, rawId)) {
+    return { err: err(`Layer '${rawId}' not found in the active workspace`) };
+  }
+  return { layerId: rawId };
+}
+
 /** Check that a workspace ID exists, returning an error result if not. */
 function checkWorkspaceExists(workspaceId: string): HandlerResult | null {
   const { workspaces } = useWorkspaceStore.getState();
@@ -887,6 +908,87 @@ const handlers: HandlerMap = {
         paneIndex: found.entry.slotIndex,
         layerIndex: found.entry.layerIndex,
         focused: focus,
+      });
+    },
+    // ADR-0297: the rearrangements a user makes by dragging (ADR-0295 2nd scope)
+    // or dropping a pane on a workspace. Like split/stack, none of them move
+    // keyboard focus; the store actions keep each moved layer shown.
+    moveLayer: (p) => {
+      const found = activeWorkspaceLayer(p);
+      if ("err" in found) return found.err;
+      const targetIndex = p.targetPaneIndex as number;
+      const ctx = getActivePaneCtx(targetIndex);
+      if ("err" in ctx) return ctx.err;
+      const index = typeof p.index === "number" ? p.index : undefined;
+      const moved = useWorkspaceStore.getState().moveLayer(found.layerId, ctx.pane.id, index);
+      const entry = findLayerEntry(
+        useWorkspaceStore.getState().getActiveWorkspace()!.panes,
+        found.layerId,
+      );
+      return ok({
+        moved,
+        paneIndex: entry?.slotIndex ?? null,
+        layerIndex: entry?.layerIndex ?? null,
+        layerCount: entry?.slot.layers.length ?? null,
+        totalPanes: useWorkspaceStore.getState().getActiveWorkspace()!.panes.length,
+      });
+    },
+    extractLayer: (p) => {
+      const found = activeWorkspaceLayer(p);
+      if ("err" in found) return found.err;
+      if (p.direction !== "horizontal" && p.direction !== "vertical") {
+        return err("direction must be 'horizontal' or 'vertical'");
+      }
+      const slotId = useWorkspaceStore.getState().extractLayer(found.layerId, p.direction);
+      if (!slotId) return err(`Layer '${found.layerId}' is not stacked; nothing to extract`);
+      const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
+      return ok({
+        extracted: true,
+        slotId,
+        paneIndex: ws.panes.findIndex((pane) => pane.id === slotId),
+        totalPanes: ws.panes.length,
+      });
+    },
+    merge: (p) => {
+      const src = getActivePaneCtx(p.sourceIndex as number);
+      if ("err" in src) return src.err;
+      const tgt = getActivePaneCtx(p.targetIndex as number);
+      if ("err" in tgt) return tgt.err;
+      if (src.pane.id === tgt.pane.id) return err("sourceIndex and targetIndex must differ");
+      if (!useWorkspaceStore.getState().mergeSlotIntoStack(src.pane.id, tgt.pane.id)) {
+        return err(
+          `Pane ${p.sourceIndex as number} could not be stacked onto pane ${p.targetIndex as number}`,
+        );
+      }
+      const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
+      const paneIndex = ws.panes.findIndex((pane) => pane.id === tgt.pane.id);
+      return ok({
+        merged: true,
+        paneIndex,
+        layerCount: ws.panes[paneIndex]?.layers.length ?? null,
+        totalPanes: ws.panes.length,
+      });
+    },
+    moveToWorkspace: (p) => {
+      const ctx = getActivePaneCtx(p.paneIndex as number);
+      if ("err" in ctx) return ctx.err;
+      const workspaceId = p.workspaceId;
+      const target = useWorkspaceStore.getState().workspaces.find((w) => w.id === workspaceId);
+      if (!target) return err(`Workspace '${String(workspaceId)}' not found`);
+      if (target.id === ctx.ws.id) return err("Pane is already in that workspace");
+      if (ctx.ws.panes.length <= 1) return err("Cannot move the only pane out of its workspace");
+      const slotId = ctx.pane.id;
+      useWorkspaceStore.getState().movePaneToWorkspace(slotId, target.id);
+      const moved = useWorkspaceStore.getState().workspaces.find((w) => w.id === target.id)!;
+      const paneIndex = moved.panes.findIndex((pane) => pane.id === slotId);
+      if (paneIndex < 0) return err(`Pane ${p.paneIndex as number} could not be moved`);
+      return ok({
+        moved: true,
+        workspaceId: target.id,
+        paneIndex,
+        paneNumber:
+          computePaneNumbers(moved.panes).get(activeLayer(moved.panes[paneIndex]).id) ?? null,
+        totalPanes: moved.panes.length,
       });
     },
     setView: (p) => {

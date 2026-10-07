@@ -4522,3 +4522,106 @@ describe("panes.stack / activateLayer / remove(layerId) bridge (ADR-0295)", () =
     expect(act("remove", { paneIndex: 0, layerId: "nope" }).success).toBe(false);
   });
 });
+
+describe("pane rearrangement bridge (ADR-0297)", () => {
+  function act(method: string, params: Record<string, unknown>) {
+    return handleAutomationRequest({
+      requestId: `rearrange-${method}`,
+      category: "action",
+      target: "panes",
+      method,
+      params,
+    });
+  }
+  const active = () => useWorkspaceStore.getState().getActiveWorkspace()!;
+  const stackOn = (paneIndex: number) =>
+    (act("stack", { paneIndex }).data as { newPane: { id: string } }).newPane.id;
+
+  beforeEach(() => {
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useGridStore.setState(useGridStore.getInitialState());
+    useDockStore.setState(useDockStore.getInitialState());
+    useTerminalStore.setState(useTerminalStore.getInitialState());
+    useTerminalRestartStore.setState({ requests: {} });
+    useGridStore.getState().setFocusedPane(1);
+  });
+
+  it("moveLayer reorders inside a stack and moves a layer onto another slot", () => {
+    const layerId = stackOn(0);
+    const first = active().panes[0].layers[0].id;
+
+    const reorder = act("moveLayer", { layerId, targetPaneIndex: 0, index: 0 });
+    expect(reorder.success).toBe(true);
+    expect(active().panes[0].layers.map((l) => l.id)).toEqual([layerId, first]);
+
+    const target = active().panes[1];
+    const moved = act("moveLayer", { terminalId: `terminal-${layerId}`, targetPaneIndex: 1 });
+    expect(moved.success).toBe(true);
+    const slot = active().panes.find((p) => p.layers.some((l) => l.id === layerId))!;
+    expect(slot.id).toBe(target.id);
+    expect(slot.activeLayerId).toBe(layerId);
+    expect(moved.data).toMatchObject({ moved: true, layerCount: 2 });
+    // Automation never takes the keyboard.
+    expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+  });
+
+  it("moveLayer rejects unknown layers and out-of-range slots", () => {
+    const layerId = stackOn(0);
+    expect(act("moveLayer", { layerId: "nope", targetPaneIndex: 1 }).success).toBe(false);
+    expect(act("moveLayer", { layerId, targetPaneIndex: 9 }).success).toBe(false);
+    expect(act("moveLayer", { targetPaneIndex: 1 }).success).toBe(false);
+  });
+
+  it("extractLayer pulls a stacked layer into its own split slot", () => {
+    const layerId = stackOn(0);
+    const before = active().panes.length;
+    const result = act("extractLayer", { layerId, direction: "vertical" });
+    expect(result.success).toBe(true);
+    expect(active().panes).toHaveLength(before + 1);
+    const data = result.data as { paneIndex: number; slotId: string };
+    expect(active().panes[data.paneIndex].id).toBe(data.slotId);
+    expect(active().panes[data.paneIndex].layers.map((l) => l.id)).toEqual([layerId]);
+    expect(active().panes[0].layers).toHaveLength(1);
+    // A single-layer slot has nothing to extract.
+    expect(act("extractLayer", { layerId, direction: "vertical" }).success).toBe(false);
+    expect(act("extractLayer", { layerId, direction: "diagonal" }).success).toBe(false);
+  });
+
+  it("merge stacks a whole slot onto another and removes the source slot", () => {
+    const [src, tgt] = active().panes;
+    const result = act("merge", { sourceIndex: 0, targetIndex: 1 });
+    expect(result.success).toBe(true);
+    const merged = active().panes.find((p) => p.id === tgt.id)!;
+    expect(merged.layers.map((l) => l.id)).toEqual([tgt.layers[0].id, src.layers[0].id]);
+    expect(active().panes.some((p) => p.id === src.id)).toBe(false);
+    expect(result.data).toMatchObject({ merged: true, layerCount: 2 });
+    expect(act("merge", { sourceIndex: 0, targetIndex: 0 }).success).toBe(false);
+  });
+
+  it("moveToWorkspace carries a whole slot to another workspace", () => {
+    const layerId = stackOn(0);
+    const slotId = active().panes[0].id;
+    useWorkspaceStore.getState().addWorkspace("Other", useWorkspaceStore.getState().layouts[0].id);
+    const other = useWorkspaceStore.getState().workspaces.at(-1)!;
+    const sourceId = active().id;
+
+    const result = act("moveToWorkspace", { paneIndex: 0, workspaceId: other.id });
+    expect(result.success).toBe(true);
+    const target = useWorkspaceStore.getState().workspaces.find((w) => w.id === other.id)!;
+    const index = target.panes.findIndex((p) => p.id === slotId);
+    expect(index).toBeGreaterThanOrEqual(0);
+    expect(target.panes[index].layers.map((l) => l.id)).toContain(layerId);
+    expect(result.data).toMatchObject({ moved: true, workspaceId: other.id, paneIndex: index });
+    expect(active().id).toBe(sourceId);
+
+    expect(act("moveToWorkspace", { paneIndex: 0, workspaceId: sourceId }).success).toBe(false);
+    expect(act("moveToWorkspace", { paneIndex: 0, workspaceId: "nope" }).success).toBe(false);
+  });
+
+  it("moveToWorkspace refuses to empty the source workspace", () => {
+    useWorkspaceStore.getState().addWorkspace("Other", useWorkspaceStore.getState().layouts[0].id);
+    const other = useWorkspaceStore.getState().workspaces.at(-1)!;
+    while (active().panes.length > 1) act("remove", { paneIndex: 0 });
+    expect(act("moveToWorkspace", { paneIndex: 0, workspaceId: other.id }).success).toBe(false);
+  });
+});

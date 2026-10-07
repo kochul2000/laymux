@@ -478,6 +478,58 @@ struct ActivatePaneLayerParam {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct MovePaneLayerParam {
+    /// Layer id (the `id` of a pane entry in get_active_workspace). Give this or terminal_id.
+    layer_id: Option<String>,
+    /// Terminal id of the layer (e.g. "terminal-pane-1234abcd"). Give this or layer_id.
+    terminal_id: Option<String>,
+    /// Pane (slot) index in the active workspace to move the layer onto. Its own slot reorders.
+    target_pane_index: u64,
+    /// Position among the target slot's other layers (default: after its active layer)
+    index: Option<u64>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct ExtractPaneLayerParam {
+    /// Layer id (the `id` of a pane entry in get_active_workspace). Give this or terminal_id.
+    layer_id: Option<String>,
+    /// Terminal id of the layer (e.g. "terminal-pane-1234abcd"). Give this or layer_id.
+    terminal_id: Option<String>,
+    /// Split direction of the new slot, as in split_pane
+    direction: SplitDirection,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct MergePanesParam {
+    /// Pane (slot) index whose layers are stacked onto the target; this slot is removed
+    source_index: u64,
+    /// Pane (slot) index that receives the layers
+    target_index: u64,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct MovePaneToWorkspaceParam {
+    /// Pane (slot) index in the active workspace; every layer of the slot moves
+    pane_index: u64,
+    /// Target workspace id (from list_workspaces)
+    workspace_id: String,
+}
+
+/// Exactly one of layer_id / terminal_id, as the bridge's layer params.
+fn layer_target_json(
+    layer_id: Option<String>,
+    terminal_id: Option<String>,
+) -> Result<serde_json::Value, CallToolResult> {
+    match (layer_id, terminal_id) {
+        (Some(layer_id), None) => Ok(json!({ "layerId": layer_id })),
+        (None, Some(terminal_id)) => Ok(json!({ "terminalId": terminal_id })),
+        _ => Err(CallToolResult::error(vec![Content::text(
+            "Provide exactly one of layer_id or terminal_id",
+        )])),
+    }
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct RemovePaneParam {
     /// Pane (slot) index
     pane_index: u64,
@@ -2761,6 +2813,77 @@ impl McpHandler {
             .await
     }
 
+    /// Move a stacked layer (ADR-0297), like dragging a stack tab: onto its own slot
+    /// it reorders (`index`), onto another slot of the active workspace it joins that
+    /// stack and is shown there. A slot left empty is removed and its space
+    /// redistributed. Keyboard focus does not move. Single-layer panes are layers too,
+    /// so this also stacks one pane onto another.
+    #[tool]
+    async fn move_pane_layer(
+        &self,
+        Parameters(p): Parameters<MovePaneLayerParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let mut params = match layer_target_json(p.layer_id, p.terminal_id) {
+            Ok(params) => params,
+            Err(result) => return Ok(result),
+        };
+        params["targetPaneIndex"] = json!(p.target_pane_index);
+        if let Some(index) = p.index {
+            params["index"] = json!(index);
+        }
+        self.bridge("action", "panes", "moveLayer", params).await
+    }
+
+    /// Pull a stacked layer out into its own pane slot (ADR-0297), splitting its
+    /// current slot like split_pane. Fails when the layer's slot has only one layer.
+    #[tool]
+    async fn extract_pane_layer(
+        &self,
+        Parameters(p): Parameters<ExtractPaneLayerParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let mut params = match layer_target_json(p.layer_id, p.terminal_id) {
+            Ok(params) => params,
+            Err(result) => return Ok(result),
+        };
+        params["direction"] = json!(p.direction.to_string());
+        self.bridge("action", "panes", "extractLayer", params).await
+    }
+
+    /// Stack every layer of pane slot source_index onto slot target_index and remove
+    /// the source slot (ADR-0297), like dropping a control bar on a pane's stack band.
+    /// The source's shown layer becomes the target's shown layer.
+    #[tool]
+    async fn merge_panes(
+        &self,
+        Parameters(p): Parameters<MergePanesParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.bridge(
+            "action",
+            "panes",
+            "merge",
+            json!({ "sourceIndex": p.source_index, "targetIndex": p.target_index }),
+        )
+        .await
+    }
+
+    /// Move a whole pane slot (every stacked layer) from the active workspace to
+    /// another workspace (ADR-0297), like dropping a control bar on a workspace. The
+    /// target's largest pane is split to host it. Refuses to empty the source
+    /// workspace.
+    #[tool]
+    async fn move_pane_to_workspace(
+        &self,
+        Parameters(p): Parameters<MovePaneToWorkspaceParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.bridge(
+            "action",
+            "panes",
+            "moveToWorkspace",
+            json!({ "paneIndex": p.pane_index, "workspaceId": p.workspace_id }),
+        )
+        .await
+    }
+
     /// Remove a pane from the active workspace grid. In a stacked slot (ADR-0295)
     /// this closes one layer — `layer_id`, or the active layer — and the slot stays;
     /// closing the last layer removes the slot and remaining panes redistribute space.
@@ -4070,6 +4193,38 @@ mod tests {
         let json = r#"{"pane_index":1,"direction":"vertical"}"#;
         let p: SplitPaneParam = serde_json::from_str(json).unwrap();
         assert!(matches!(p.direction, SplitDirection::Vertical));
+    }
+
+    #[test]
+    fn rearrange_params_deserialize() {
+        let p: MovePaneLayerParam =
+            serde_json::from_str(r#"{"terminal_id":"terminal-a","target_pane_index":2,"index":0}"#)
+                .unwrap();
+        assert_eq!(p.target_pane_index, 2);
+        assert_eq!(p.index, Some(0));
+        let p: ExtractPaneLayerParam =
+            serde_json::from_str(r#"{"layer_id":"a","direction":"vertical"}"#).unwrap();
+        assert!(matches!(p.direction, SplitDirection::Vertical));
+        let p: MergePanesParam =
+            serde_json::from_str(r#"{"source_index":0,"target_index":1}"#).unwrap();
+        assert_eq!((p.source_index, p.target_index), (0, 1));
+        let p: MovePaneToWorkspaceParam =
+            serde_json::from_str(r#"{"pane_index":1,"workspace_id":"ws-2"}"#).unwrap();
+        assert_eq!(p.workspace_id, "ws-2");
+    }
+
+    #[test]
+    fn layer_target_requires_exactly_one_id() {
+        assert_eq!(
+            layer_target_json(Some("a".into()), None).unwrap(),
+            json!({ "layerId": "a" })
+        );
+        assert_eq!(
+            layer_target_json(None, Some("terminal-a".into())).unwrap(),
+            json!({ "terminalId": "terminal-a" })
+        );
+        assert!(layer_target_json(None, None).is_err());
+        assert!(layer_target_json(Some("a".into()), Some("terminal-a".into())).is_err());
     }
 
     #[test]

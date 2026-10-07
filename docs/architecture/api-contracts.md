@@ -998,6 +998,10 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | POST | `/api/v1/panes/split` | Pane 분할 |
 | POST | `/api/v1/panes/stack` | 슬롯 활성 레이어 뒤에 새 레이어(기본 `TerminalView`)를 쌓고 표시. 키보드 포커스는 옮기지 않는다. `cwd` 생략 시 활성 레이어 CWD 상속, 응답은 split 과 같은 `newPane{id,terminalId,paneIndex,paneNumber,layerIndex,layerCount,ready}` ([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)) |
 | POST | `/api/v1/panes/layers/activate` | `layerId` 또는 `terminalId` 로 레이어 하나를 표시. 필요하면 워크스페이스를 전환하고 `focus=false` 가 아니면 그 슬롯에 포커스 ([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)) |
+| POST | `/api/v1/panes/layers/move` | `{layerId/terminalId, targetPaneIndex, index?}` — 스택 탭 드래그와 같다. 활성 워크스페이스 안에서 자기 슬롯이면 순서 변경, 다른 슬롯이면 그 스택으로 옮겨 표시. 빈 슬롯은 제거·재분배. 같은 자리면 `moved:false`. 응답 `{moved,paneIndex,layerIndex,layerCount,totalPanes}` ([ADR-0297](../adr/0297-pane-rearrangement-automation-parity.md)) |
+| POST | `/api/v1/panes/layers/extract` | `{layerId/terminalId, direction: horizontal/vertical}` — 탭 메뉴 Split out 과 같다. 단일 레이어 슬롯이면 오류. 응답 `{extracted,slotId,paneIndex,totalPanes}` ([ADR-0297](../adr/0297-pane-rearrangement-automation-parity.md)) |
+| POST | `/api/v1/panes/merge` | `{sourceIndex, targetIndex}` — 컨트롤 바를 스택 띠에 떨어뜨리기와 같다. 소스 슬롯의 모든 레이어를 대상 스택에 쌓고 소스 슬롯 제거. 응답 `{merged,paneIndex,layerCount,totalPanes}` ([ADR-0297](../adr/0297-pane-rearrangement-automation-parity.md)) |
+| POST | `/api/v1/panes/:index/move-to-workspace` | `{workspaceId}` — 컨트롤 바를 워크스페이스에 떨어뜨리기와 같다. 슬롯 통째(모든 레이어)를 옮기고 대상의 가장 큰 pane 을 분할해 둔다. 소스를 비우는 이동은 거부. 응답 `{moved,workspaceId,paneIndex,paneNumber,totalPanes}` ([ADR-0297](../adr/0297-pane-rearrangement-automation-parity.md)) |
 | DELETE | `/api/v1/panes/:index` | Pane 제거. 스택 슬롯이면 `?layerId=` 레이어(기본 활성 레이어) 하나만 닫고 슬롯은 남는다. 마지막 레이어를 닫으면 슬롯이 사라진다. 응답 `{removed,slotRemoved,remainingLayers}` |
 | PUT | `/api/v1/panes/:index/view` | View 변경 |
 | GET | `/api/v1/docks` | 독 상태 |
@@ -1158,6 +1162,10 @@ lease 갱신에 성공한 heartbeat 응답은 항상 경로 없는 PC 뷰어 신
 | `remove_pane` | bridge_request | 팬 제거. 스택 슬롯은 `layer_id`(기본 활성 레이어) 하나만 닫는다 ([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)) |
 | `resize_pane` | bridge_request | 팬 크기 조정 — 공유 경계를 이웃과 함께 이동 (`dw`/`dh` 상대 delta, 해당 축에 경계가 없으면 오류. [ADR-0071](../adr/0071-pane-resize-single-boundary-owner.md)) |
 | `swap_panes` | bridge_request | 두 팬 위치 교환 (atomic 단일 상태 업데이트) |
+| `move_pane_layer` | bridge_request | 스택 탭 드래그 — 레이어 순서 변경 또는 다른 슬롯 스택으로 이동(`layer_id`/`terminal_id`, `target_pane_index`, `index`). 단일 레이어 pane 도 레이어이므로 pane 하나를 다른 pane 에 쌓는 데도 쓴다 ([ADR-0297](../adr/0297-pane-rearrangement-automation-parity.md)) |
+| `extract_pane_layer` | bridge_request | 탭 메뉴 Split out — 스택 레이어를 `direction` 으로 분할한 새 슬롯으로 꺼낸다 ([ADR-0297](../adr/0297-pane-rearrangement-automation-parity.md)) |
+| `merge_panes` | bridge_request | 컨트롤 바 → 스택 띠 — `source_index` 슬롯의 모든 레이어를 `target_index` 스택에 쌓고 소스 슬롯 제거 ([ADR-0297](../adr/0297-pane-rearrangement-automation-parity.md)) |
+| `move_pane_to_workspace` | bridge_request | 컨트롤 바 → 워크스페이스 — 슬롯 통째를 다른 워크스페이스로 이동 ([ADR-0297](../adr/0297-pane-rearrangement-automation-parity.md)) |
 | `list_layouts` | bridge_request | 저장된 레이아웃 목록 |
 
 **유틸리티 (10)**:

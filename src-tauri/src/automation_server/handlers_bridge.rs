@@ -384,6 +384,92 @@ pub async fn panes_activate_layer(
     }
 }
 
+/// Layer id or terminal id, exactly one — shared by the layer endpoints.
+fn layer_target_params(
+    layer_id: Option<String>,
+    terminal_id: Option<String>,
+) -> Result<serde_json::Value, (StatusCode, Json<serde_json::Value>)> {
+    match (layer_id, terminal_id) {
+        (Some(layer_id), None) => Ok(serde_json::json!({ "layerId": layer_id })),
+        (None, Some(terminal_id)) => Ok(serde_json::json!({ "terminalId": terminal_id })),
+        _ => Err((
+            StatusCode::BAD_REQUEST,
+            Json(err_json(
+                "exactly one of 'layerId' or 'terminalId' is required",
+            )),
+        )),
+    }
+}
+
+/// Move a layer onto a slot of the active workspace (ADR-0297).
+pub async fn panes_move_layer(
+    AxumState(state): AxumState<ServerState>,
+    Json(body): Json<MoveLayerBody>,
+) -> impl IntoResponse {
+    let mut params = match layer_target_params(body.layer_id, body.terminal_id) {
+        Ok(params) => params,
+        Err(e) => return e,
+    };
+    params["targetPaneIndex"] = serde_json::json!(body.target_pane_index);
+    if let Some(index) = body.index {
+        params["index"] = serde_json::json!(index);
+    }
+    match bridge_request(&state, "action", "panes", "moveLayer", params).await {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
+/// Pull a stacked layer out into its own split slot (ADR-0297).
+pub async fn panes_extract_layer(
+    AxumState(state): AxumState<ServerState>,
+    Json(body): Json<ExtractLayerBody>,
+) -> impl IntoResponse {
+    if body.direction != "horizontal" && body.direction != "vertical" {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(err_json("'direction' must be 'horizontal' or 'vertical'")),
+        );
+    }
+    let mut params = match layer_target_params(body.layer_id, body.terminal_id) {
+        Ok(params) => params,
+        Err(e) => return e,
+    };
+    params["direction"] = serde_json::Value::String(body.direction);
+    match bridge_request(&state, "action", "panes", "extractLayer", params).await {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
+/// Stack a whole slot onto another slot (ADR-0297).
+pub async fn panes_merge(
+    AxumState(state): AxumState<ServerState>,
+    Json(body): Json<MergePanesBody>,
+) -> impl IntoResponse {
+    let params = serde_json::json!({
+        "sourceIndex": body.source_index,
+        "targetIndex": body.target_index,
+    });
+    match bridge_request(&state, "action", "panes", "merge", params).await {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
+/// Carry a whole slot to another workspace (ADR-0297).
+pub async fn panes_move_to_workspace(
+    AxumState(state): AxumState<ServerState>,
+    Path(index): Path<usize>,
+    Json(body): Json<MovePaneToWorkspaceBody>,
+) -> impl IntoResponse {
+    let params = serde_json::json!({ "paneIndex": index, "workspaceId": body.workspace_id });
+    match bridge_request(&state, "action", "panes", "moveToWorkspace", params).await {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
 pub async fn panes_remove(
     AxumState(state): AxumState<ServerState>,
     Path(index): Path<usize>,
