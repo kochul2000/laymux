@@ -42,6 +42,8 @@ node scripts/tests/local-state-sqlite.e2e.mjs verify .tmp/sqlite-restart.json
 
 `protected-db`는 앱을 종료한 뒤 백업한 **격리 DB만** 손상 fixture로 바꿔 기동했을 때 사용한다. DB/JSON bytes 보존, 쓰기 차단, 오류 모달의 경로와 초기화 버튼 부재를 확인한다. 확인 후 앱을 종료하고 백업을 복원한다. 앱 종료는 항상 `bash scripts/kill-dev.sh`를 사용한다.
 
+`verify-status`는 자동 귀속 조회와 별도로 실제 Codex 화면의 복원을 검사하는 명시적 모드다. 새 PID와 저장된 UI 상태를 확인한 뒤, 자동 조회가 ID를 확인하지 못한 테스트 pane에 `/status`를 입력하여 새 화면의 전체 UUID를 대조한다. 결과에 `providerProbeHealthy:false`를 남기며 자동 조회 실패를 성공으로 바꾸지 않는다. 이 입력은 해당 pane의 receipt를 무효화하므로 종료 성능 측정과 별도 단계로 실행한다.
+
 ## 기존 데이터 수동 처리
 
 자동 마이그레이션은 없다. 기존 혼합 JSON의 workspace·대화 ID·로컬 명령을 새 저장 계층에 자동으로 가져오지 않는다.
@@ -55,4 +57,13 @@ node scripts/tests/local-state-sqlite.e2e.mjs verify .tmp/sqlite-restart.json
 
 ## 실행 결과
 
-전체 자동 테스트와 격리 dev의 실제 결과는 PR 검증 항목에 기록한다.
+2026-10-07, 최신 main의 pane 스택 모델을 포함한 Windows worktree에서 검증했다.
+
+- 프론트 단위 5,447개, xterm 화면 106개, Playwright 533개 통과.
+- Rust 단위 2,279개와 통합 184개 통과. 환경/외부 도구가 필요한 기존 ignored 테스트는 별도이며 실제 PC 전원 차단 테스트는 수행하지 않았다.
+- TypeScript, clippy `--all-targets -- -D warnings`, `cargo check --release`, diff whitespace 검사 통과.
+- native/WSL 두 pane이 확인 완료된 상태에서 DB revision receipt 재사용·인간 입력 후 무효화 확인. 변경 없는 종료 준비 40ms. 일반 저장과 종료 준비 전후 settings bytes·mtime 불변, REST portable export와 디스크 JSON 일치.
+- 앱 PID 61108 → 74244로 교체하고 출력 캐시를 분리했다. native는 자동 귀속에서 같은 UUID, WSL은 새 `/status` 화면에서 같은 전체 UUID를 확인했다. workspace·파일 뷰어 경로/열림 상태도 복원했다. DB를 다시 seed하지 않았다.
+- 격리 DB 손상 시 `localState` 오류, 쓰기 차단, 원본 DB/JSON bytes 불변, 초기화 버튼 부재와 실제 DB 경로 표시를 확인했다. 검증 뒤 정상 DB/WAL/SHM을 복원하고 dev를 종료했다.
+
+**관측된 잔여 범위:** WSL 자동 귀속의 cold `verify`는 guest 프로세스 조회가 기존 2초 예산을 넘어서 `Unknown`으로 실패했다. provider 경로 코드는 이번 변경에서 바꾸지 않았다. 실제 대화 UUID 복원과 자동 귀속 조회의 건강성을 구분하며, 해당 pane의 이전 ID는 보존되고 DB의 미확인 상태와 제한된 재시도는 유지된다. WSL 자동 조회 지연이 해결됐다고 주장하지 않는다. 초기 테스트에서 APPDATA만 격리하던 기존 fixture가 LOCALAPPDATA에 만든 DB는 별도 백업으로 보존했고, 이후 두 경로를 모두 격리하여 재검증했다.

@@ -7,7 +7,11 @@ import { DatabaseSync } from "node:sqlite";
 import { connectDevPage } from "./dev-cdp.mjs";
 
 const [mode, resultFile = ".tmp/sqlite-restart.json"] = process.argv.slice(2);
-assert.ok(["check", "prepare", "verify", "protected-db"].includes(mode));
+assert.ok(
+  ["check", "prepare", "verify", "verify-status", "protected-db"].includes(
+    mode,
+  ),
+);
 const root = path.resolve(".");
 const fixtureRoot = path.join(root, ".tmp") + path.sep;
 const settingsFile = path.resolve(
@@ -82,7 +86,14 @@ try {
       } catch {
         blocked = true;
       }
-      const dialog = document.querySelector('[role="dialog"]');
+      const dialog = document.querySelector(
+        '[data-testid="settings-recovery-overlay"]',
+      );
+      const pathButton = Array.from(
+        dialog?.querySelectorAll("button") || [],
+      ).find((button) => /경로|path/i.test(button.textContent || ""));
+      pathButton?.click();
+      await new Promise((resolve) => setTimeout(resolve, 50));
       return {
         blocked,
         text: dialog?.textContent,
@@ -110,7 +121,87 @@ try {
       terminals.length && terminals.every((t) => t.workspaceId === workspace),
       "격리 fixture pane만 있어야 한다",
     );
-    if (mode === "verify") {
+    if (mode === "verify-status") {
+      // Explicit alternative: verify the running CLI's full UUID on a fresh
+      // status screen. This does not turn an unhealthy provider probe healthy.
+      const before = JSON.parse(readFileSync(resultFile, "utf8"));
+      assert.notEqual(health.instance.pid, before.pid);
+      const restored = await page.evaluate(async () => {
+        const { useWorkspaceStore } =
+          await import("/src/stores/workspace-store.ts");
+        const { useFileViewerStore } =
+          await import("/src/stores/file-viewer-store.ts");
+        const viewer = useFileViewerStore.getState();
+        const ui = {
+          active: useWorkspaceStore.getState().activeWorkspaceId,
+          viewer: {
+            open: viewer.open,
+            path: viewer.path,
+            maximized: viewer.maximized,
+          },
+        };
+        viewer.closeFileViewer();
+        return ui;
+      });
+      assert.deepEqual(restored, before.ui);
+      const live = await invoke("get_terminal_session_attributions");
+      const screenVerified = [];
+      for (const [id, expected] of Object.entries(before.sessions)) {
+        if (
+          live[id]?.state === "identified" &&
+          live[id]?.sessionId === expected
+        )
+          continue;
+        const matched = await page.evaluate(
+          async ({ id, expected }) => {
+            const invoke = window.__TAURI_INTERNALS__.invoke;
+            const { getTerminalInspector } =
+              await import("/src/lib/terminal-serialize-registry.ts");
+            const inspect = getTerminalInspector(id.replace(/^terminal-/, ""));
+            if (!inspect) throw new Error("live Codex screen missing");
+            const matches = () =>
+              inspect(200)
+                .lines.map((line) => line.text)
+                .join("")
+                .replace(/\s/g, "")
+                .includes(expected);
+            if (matches())
+              throw new Error("fixture must start without an old status card");
+            await invoke("write_terminal_input", {
+              id,
+              text: "/status",
+              submit: true,
+            });
+            const deadline = Date.now() + 15000;
+            while (Date.now() < deadline && !matches())
+              await new Promise((resolve) => setTimeout(resolve, 100));
+            const confirmed = matches();
+            await invoke("write_to_terminal", { id, data: "\x1b" });
+            return confirmed;
+          },
+          { id, expected },
+        );
+        assert.ok(
+          matched,
+          `${id}: fresh /status must contain the stored full UUID`,
+        );
+        screenVerified.push(id);
+      }
+      assert.deepEqual(
+        sessions(await invoke("load_settings")),
+        before.sessions,
+      );
+      console.log(
+        JSON.stringify({
+          previousPid: before.pid,
+          pid: health.instance.pid,
+          restored: before.sessions,
+          uiRestored: true,
+          providerProbeHealthy: screenVerified.length === 0,
+          screenVerified,
+        }),
+      );
+    } else if (mode === "verify") {
       const before = JSON.parse(readFileSync(resultFile, "utf8"));
       assert.notEqual(health.instance.pid, before.pid);
       let live;
@@ -247,4 +338,6 @@ try {
   }
 } finally {
   page.close();
+  // Windows Node/libuv needs the WebSocket close event drained before exit.
+  await new Promise((resolve) => setTimeout(resolve, 50));
 }
