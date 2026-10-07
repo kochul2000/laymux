@@ -40,8 +40,10 @@ fn copying_only_settings_to_another_pc_does_not_transfer_local_state_or_machine_
     };
     settings.profiles[0].command_line = "D:/host-a/pwsh.exe".into();
     settings.profiles[0].starting_directory = "D:/host-a/project".into();
-    settings.workspaces[0].panes[0].view.extra["lastCodexSession"] = "host-a-conversation".into();
-    settings.workspaces[0].panes[0].view.extra["lastCwd"] = "D:/host-a/project".into();
+    settings.workspaces[0].panes[0].content_views_mut()[0].extra["lastCodexSession"] =
+        "host-a-conversation".into();
+    settings.workspaces[0].panes[0].content_views_mut()[0].extra["lastCwd"] =
+        "D:/host-a/project".into();
     save_settings_to(&path_a, &settings).unwrap();
     store_for_settings(&path_a)
         .unwrap()
@@ -55,7 +57,7 @@ fn copying_only_settings_to_another_pc_does_not_transfer_local_state_or_machine_
     let a = loaded(&path_a);
     let b = loaded(&path_b);
     assert_eq!(
-        a.workspaces[0].panes[0].view.extra["lastCodexSession"],
+        a.workspaces[0].panes[0].content_views()[0].1.extra["lastCodexSession"],
         "host-a-conversation"
     );
     assert_eq!(b.language, "ko");
@@ -108,13 +110,17 @@ fn layout_environment_stays_local_and_is_not_rebound_to_another_template_slot() 
     let mut settings = Settings::default();
     settings.layouts[0].panes[0].view_type = "UsageView".into();
     settings.layouts[0].panes[0].view_config = Some(
-        serde_json::json!({"type":"UsageView","configDir":"D:/private-account","lastCodexSession":"must-never-reuse"}),
+        serde_json::json!({"type":"UsageView","configDir":"D:/private-account","lastCwd":"D:/private-start-dir","lastCodexSession":"must-never-reuse"}),
     );
     save_settings_to(&path, &settings).unwrap();
     let same_pc = loaded(&path);
     assert_eq!(
         same_pc.layouts[0].panes[0].view_config.as_ref().unwrap()["configDir"],
         "D:/private-account"
+    );
+    assert_eq!(
+        same_pc.layouts[0].panes[0].view_config.as_ref().unwrap()["lastCwd"],
+        "D:/private-start-dir"
     );
     assert!(same_pc.layouts[0].panes[0]
         .view_config
@@ -148,7 +154,7 @@ fn a_first_import_uses_the_configured_logical_profile_without_foreign_bindings()
     .unwrap();
     let settings = loaded(&path);
     assert_eq!(
-        settings.workspaces[0].panes[0].view.extra["profile"],
+        settings.workspaces[0].panes[0].content_views()[0].1.extra["profile"],
         "Imported shell"
     );
     assert!(!settings.profiles[0].command_line.is_empty());

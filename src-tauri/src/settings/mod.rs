@@ -148,7 +148,9 @@ fn load_settings_document_from(path: &std::path::Path) -> SettingsLoadResult {
         settings.workspaces = Settings::default().workspaces;
         for workspace in &mut settings.workspaces {
             for pane in &mut workspace.panes {
-                pane.view.extra["profile"] = settings.default_profile.clone().into();
+                for view in pane.content_views_mut() {
+                    view.extra["profile"] = settings.default_profile.clone().into();
+                }
             }
         }
     }

@@ -38,7 +38,9 @@ pub(super) fn hydrate(
             settings.workspaces = defaults.workspaces;
             for workspace in &mut settings.workspaces {
                 for pane in &mut workspace.panes {
-                    pane.view.extra["profile"] = settings.default_profile.clone().into();
+                    for view in pane.content_views_mut() {
+                        view.extra["profile"] = settings.default_profile.clone().into();
+                    }
                 }
             }
             settings.docks = defaults.docks;

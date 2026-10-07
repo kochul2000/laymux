@@ -62,10 +62,15 @@ pub fn split_configuration(settings: &Settings) -> Result<(Value, MachineConfigu
             if let Some(panes) = layout["panes"].as_array_mut() {
                 for (index, pane) in panes.iter_mut().enumerate() {
                     let prefix = layout_prefix(&id, index, pane)?;
-                    if let Some(config) = pane["viewConfig"].as_object_mut() {
+                    for (slot, config) in configs_mut(pane) {
+                        let config = config.as_object_mut().ok_or_else(|| {
+                            AppError::Other("Template viewConfig must be an object".into())
+                        })?;
                         for (key, v) in config.iter() {
-                            if !portable_view_key(key) && !key.starts_with("last") {
-                                machine.insert(format!("{prefix}{key}"), v.clone());
+                            if !portable_view_key(key)
+                                && (!key.starts_with("last") || key == "lastCwd")
+                            {
+                                machine.insert(format!("{prefix}{slot}{key}"), v.clone());
                             }
                         }
                         config.retain(|key, _| portable_view_key(key));
@@ -115,12 +120,14 @@ pub(crate) fn apply_configuration(
                 .enumerate()
             {
                 let prefix = layout_prefix(&id, index, pane)?;
-                for (path, v) in &machine {
-                    if let Some(field) = path.strip_prefix(&prefix) {
-                        if !pane["viewConfig"].is_object() {
-                            pane["viewConfig"] = serde_json::json!({});
+                for (slot, config) in configs_mut(pane) {
+                    let config = config.as_object_mut().ok_or_else(|| {
+                        AppError::Other("Template viewConfig must be an object".into())
+                    })?;
+                    for (path, v) in &machine {
+                        if let Some(field) = path.strip_prefix(&format!("{prefix}{slot}")) {
+                            config.insert(field.into(), v.clone());
                         }
-                        pane["viewConfig"][field] = v.clone();
                     }
                 }
             }
@@ -150,7 +157,10 @@ fn portable_view_key(key: &str) -> bool {
 fn layout_prefix(id: &str, index: usize, pane: &Value) -> Result<String, AppError> {
     use sha2::Digest;
     let mut portable = pane.clone();
-    if let Some(config) = portable["viewConfig"].as_object_mut() {
+    for (_, config) in configs_mut(&mut portable) {
+        let config = config
+            .as_object_mut()
+            .ok_or_else(|| AppError::Other("Template viewConfig must be an object".into()))?;
         config.retain(|key, _| portable_view_key(key));
     }
     let digest = sha2::Sha256::digest(serde_json::to_vec(&portable)?);
@@ -169,4 +179,20 @@ fn set_pointer(value: &mut Value, path: &str, item: Value) -> Result<(), AppErro
         .ok_or_else(|| AppError::Other(format!("Local settings parent missing: {parent}")))?;
     map.insert(key.into(), item);
     Ok(())
+}
+
+fn configs_mut(pane: &mut Value) -> Vec<(String, &mut Value)> {
+    let mut configs = Vec::new();
+    for (key, value) in pane.as_object_mut().into_iter().flatten() {
+        if key == "viewConfig" {
+            configs.push(("single:".into(), value));
+        } else if key == "layers" {
+            for (index, layer) in value.as_array_mut().into_iter().flatten().enumerate() {
+                if let Some(config) = layer.get_mut("viewConfig") {
+                    configs.push((format!("layer:{index}:"), config));
+                }
+            }
+        }
+    }
+    configs
 }

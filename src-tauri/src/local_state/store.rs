@@ -1,22 +1,17 @@
 use super::models::{AttributionCoverage, CheckpointCommit, LocalSessionSnapshot};
+use super::preserve::{content_views, preserve_unknown};
 use super::projection::MachineConfiguration;
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 use rusqlite::{params, Connection, TransactionBehavior};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 const SCHEMA_VERSION: i64 = 1;
 static INITIALIZATION_GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 const BUSY_TIMEOUT: Duration = Duration::from_millis(250);
-const SESSION_FIELDS: &[&str] = &[
-    "lastCodexSession",
-    "lastClaudeSession",
-    "lastGrokSession",
-    "lastAgentFresh",
-];
 #[derive(Clone)]
 pub struct LocalStateStore {
     path: PathBuf,
@@ -64,7 +59,7 @@ impl LocalStateStore {
                 INSERT INTO state_meta VALUES (1,0,0,'[]',0,'{}');
                 CREATE TABLE machine_settings (path TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE session_groups (kind TEXT NOT NULL, id TEXT NOT NULL, ordinal INTEGER NOT NULL, metadata TEXT NOT NULL, PRIMARY KEY(kind,id));
-                CREATE TABLE session_panes (id TEXT PRIMARY KEY, kind TEXT NOT NULL, group_id TEXT NOT NULL, ordinal INTEGER NOT NULL, x REAL NOT NULL, y REAL NOT NULL, w REAL NOT NULL, h REAL NOT NULL, view TEXT NOT NULL, FOREIGN KEY(kind,group_id) REFERENCES session_groups(kind,id) ON DELETE CASCADE);
+                CREATE TABLE session_panes (id TEXT PRIMARY KEY, kind TEXT NOT NULL, group_id TEXT NOT NULL, ordinal INTEGER NOT NULL, x REAL NOT NULL, y REAL NOT NULL, w REAL NOT NULL, h REAL NOT NULL, content TEXT NOT NULL, FOREIGN KEY(kind,group_id) REFERENCES session_groups(kind,id) ON DELETE CASCADE);
                 CREATE TABLE session_attributions (terminal_id TEXT PRIMARY KEY, state TEXT NOT NULL, generation INTEGER, provider TEXT, session_id TEXT);
                 PRAGMA user_version=1; COMMIT;")?;
         } else if version != SCHEMA_VERSION {
@@ -177,6 +172,14 @@ impl LocalStateStore {
         let needs_retry = !unresolved_terminal_ids.is_empty()
             || committed.attribution_lookup_failed
             || committed.cwd_lookup_failed;
+        let mut content_ids = HashSet::new();
+        for (id, _) in content_views(&committed)? {
+            if id.is_empty() || !content_ids.insert(id.clone()) {
+                return Err(AppError::Other(format!(
+                    "Duplicate or empty local session content: {id}"
+                )));
+            }
+        }
         tx.execute("DELETE FROM session_panes", [])?;
         tx.execute("DELETE FROM session_groups", [])?;
         tx.execute("DELETE FROM session_attributions", [])?;
@@ -226,6 +229,13 @@ impl LocalStateStore {
                                 .ok_or_else(|| AppError::Other("Invalid pane geometry".into()))
                         })
                         .collect::<Result<_, _>>()?;
+                    let mut content = pane.clone();
+                    let metadata = content
+                        .as_object_mut()
+                        .ok_or_else(|| AppError::Other("Invalid pane content".into()))?;
+                    for field in ["id", "x", "y", "w", "h"] {
+                        metadata.remove(field);
+                    }
                     tx.execute(
                         "INSERT INTO session_panes VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
                         params![
@@ -237,7 +247,7 @@ impl LocalStateStore {
                             geometry[1],
                             geometry[2],
                             geometry[3],
-                            serde_json::to_string(&pane["view"])?
+                            serde_json::to_string(&content)?
                         ],
                     )?;
                 }
@@ -291,7 +301,7 @@ fn load_session(conn: &Connection) -> Result<Option<LocalSessionSnapshot>, AppEr
     })? {
         let (kind, id, metadata) = row?;
         let mut group: Value = serde_json::from_str(&metadata)?;
-        let mut panes=conn.prepare("SELECT id,x,y,w,h,view FROM session_panes WHERE kind=?1 AND group_id=?2 ORDER BY ordinal")?;
+        let mut panes=conn.prepare("SELECT id,x,y,w,h,content FROM session_panes WHERE kind=?1 AND group_id=?2 ORDER BY ordinal")?;
         let mut list = Vec::new();
         for pane in panes.query_map(params![kind, id], |r| {
             Ok((
@@ -304,7 +314,20 @@ fn load_session(conn: &Connection) -> Result<Option<LocalSessionSnapshot>, AppEr
             ))
         })? {
             let (id, x, y, w, h, view) = pane?;
-            list.push(serde_json::json!({"id":id,"x":x,"y":y,"w":w,"h":h,"view":serde_json::from_str::<Value>(&view)?}));
+            let mut pane: Value = serde_json::from_str(&view)?;
+            let metadata = pane
+                .as_object_mut()
+                .ok_or_else(|| AppError::Other("Invalid persisted pane content".into()))?;
+            for (key, value) in [
+                ("id", id.into()),
+                ("x", x.into()),
+                ("y", y.into()),
+                ("w", w.into()),
+                ("h", h.into()),
+            ] {
+                metadata.insert(key.into(), value);
+            }
+            list.push(pane);
         }
         group["panes"] = Value::Array(list);
         value[&kind]
@@ -326,81 +349,4 @@ fn load_session(conn: &Connection) -> Result<Option<LocalSessionSnapshot>, AppEr
         })?
         .collect::<Result<_, _>>()?;
     Ok(Some(snapshot))
-}
-fn preserve_unknown(
-    previous: &LocalSessionSnapshot,
-    snapshot: &mut LocalSessionSnapshot,
-) -> Result<(), AppError> {
-    let previous_value = serde_json::to_value(previous)?;
-    let mut old_views = HashMap::new();
-    for kind in ["workspaces", "docks"] {
-        for group in previous_value[kind].as_array().into_iter().flatten() {
-            for pane in group["panes"].as_array().into_iter().flatten() {
-                if let Some(id) = pane["id"].as_str() {
-                    old_views.insert(id, &pane["view"]);
-                }
-            }
-        }
-    }
-    let unknown: HashSet<_> = snapshot
-        .coverage
-        .iter()
-        .filter(|c| c.state == "unknown")
-        .map(|c| c.terminal_id.as_str())
-        .collect();
-    let mut value = serde_json::to_value(&*snapshot)?;
-    for kind in ["workspaces", "docks"] {
-        for group in value[kind].as_array_mut().into_iter().flatten() {
-            for pane in group["panes"].as_array_mut().into_iter().flatten() {
-                let id = pane["id"]
-                    .as_str()
-                    .ok_or_else(|| AppError::Other("Pane identity missing".into()))?
-                    .to_owned();
-                if pane["view"]["type"].as_str() != Some("TerminalView") {
-                    if let Some(view) = pane["view"].as_object_mut() {
-                        for field in SESSION_FIELDS {
-                            view.remove(*field);
-                        }
-                    }
-                    continue;
-                }
-                let previous = old_views
-                    .get(id.as_str())
-                    .filter(|v| v["type"].as_str() == Some("TerminalView"));
-                if snapshot.cwd_lookup_failed {
-                    let view = pane["view"]
-                        .as_object_mut()
-                        .ok_or_else(|| AppError::Other("Pane view missing".into()))?;
-                    view.remove("lastCwd");
-                    if let Some(cwd) = previous.and_then(|v| v.get("lastCwd")) {
-                        view.insert("lastCwd".into(), cwd.clone());
-                    }
-                }
-                if unknown.contains(format!("terminal-{id}").as_str())
-                    || snapshot.attribution_lookup_failed
-                {
-                    let view = pane["view"]
-                        .as_object_mut()
-                        .ok_or_else(|| AppError::Other("Pane view missing".into()))?;
-                    let fresh = view.get("lastAgentFresh").and_then(Value::as_str).is_some();
-                    for field in SESSION_FIELDS {
-                        if fresh && *field == "lastAgentFresh" {
-                            continue;
-                        }
-                        view.remove(*field);
-                        if !fresh {
-                            if let Some(old) = previous
-                                .filter(|old| old.get("profile") == view.get("profile"))
-                                .and_then(|v| v.get(field))
-                            {
-                                view.insert((*field).into(), old.clone());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    *snapshot = serde_json::from_value(value)?;
-    Ok(())
 }

@@ -24,6 +24,9 @@ fn settings_round_trip_with_full_config() {
     let path = dir.path().join("settings.json");
 
     let settings = Settings {
+        local_ui_state: Some(serde_json::from_value(serde_json::json!({
+            "activeWorkspaceId":"ws-project", "fileViewer":{"open":true,"path":"D:/fixture/readme.md","maximized":false}
+        })).unwrap()),
         language: "system".into(),
         color_schemes: vec![ColorScheme {
             name: "Solarized Dark".into(),
@@ -2557,6 +2560,7 @@ fn settings_load_result_round_trip_recovered() {
 #[test]
 fn settings_load_result_round_trip_parse_error() {
     let result = SettingsLoadResult::ParseError {
+        storage_kind: None,
         settings: Settings::default(),
         error: "expected value at line 1 column 1".into(),
         settings_path: "C:\\Users\\test\\settings.json".into(),
@@ -2567,6 +2571,23 @@ fn settings_load_result_round_trip_parse_error() {
     assert!(json.contains("\"settingsPath\""), "json: {json}");
     let parsed: SettingsLoadResult = serde_json::from_str(&json).unwrap();
     assert_eq!(result, parsed);
+}
+
+#[test]
+fn local_database_failure_retains_the_storage_kind_and_path_on_the_ipc_wire() {
+    let result = SettingsLoadResult::ParseError {
+        storage_kind: Some("localState".into()),
+        settings: Settings::default(),
+        error: "database disk image is malformed".into(),
+        settings_path: "D:/fixture/local/state.db".into(),
+    };
+    let json = serde_json::to_value(&result).unwrap();
+    assert_eq!(json["storageKind"], "localState");
+    assert_eq!(json["settingsPath"], "D:/fixture/local/state.db");
+    assert_eq!(
+        serde_json::from_value::<SettingsLoadResult>(json).unwrap(),
+        result
+    );
 }
 
 // ============================================================================

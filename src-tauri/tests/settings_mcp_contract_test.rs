@@ -593,12 +593,18 @@ fn every_sensitive_metadata_path_is_redacted_from_settings_reads() {
     assert!(!sensitive_paths.is_empty());
 
     for path in sensitive_paths {
-        let mut value = serde_json::to_value(Settings::default()).unwrap();
+        let settings = Settings {
+            local_ui_state: Some(serde_json::from_value(json!({"activeWorkspaceId":"secret","fileViewer":{"open":true,"path":"secret","maximized":false}})).unwrap()),
+            ..Settings::default()
+        };
+        let mut value = serde_json::to_value(settings).unwrap();
         let secret = value
             .pointer_mut(path)
             .unwrap_or_else(|| panic!("sensitive path must exist in Settings: {path}"));
         *secret = if secret.is_array() {
             json!([{ "value": "secret", "label": "", "send": false }])
+        } else if secret.is_object() {
+            secret.clone()
         } else {
             json!("secret")
         };
@@ -610,6 +616,19 @@ fn every_sensitive_metadata_path_is_redacted_from_settings_reads() {
             "{path} must be redacted from full settings responses"
         );
     }
+}
+
+#[test]
+fn local_ui_restore_state_cannot_be_overwritten_by_a_settings_patch() {
+    let prepared = prepare_settings_update(
+        &Settings::default(),
+        &json!({"localUiState":{"activeWorkspaceId":"another-host"}}),
+    );
+    assert!(!prepared.valid);
+    assert!(prepared
+        .errors
+        .iter()
+        .any(|issue| issue.code == "read_only" && issue.path == "/localUiState"));
 }
 
 #[test]

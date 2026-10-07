@@ -6,8 +6,10 @@ fn fixture() -> (tempfile::TempDir, LocalStateStore, LocalSessionSnapshot) {
     let store = LocalStateStore::new(temp.path().join("state.db"));
     let mut settings = Settings::default();
     settings.workspaces[0].panes[0].id = "native".into();
-    settings.workspaces[0].panes[0].view.extra["lastCodexSession"] = "conversation-a".into();
-    settings.workspaces[0].panes[0].view.extra["lastCwd"] = "D:/host-a/project".into();
+    settings.workspaces[0].panes[0].content_views_mut()[0].extra["lastCodexSession"] =
+        "conversation-a".into();
+    settings.workspaces[0].panes[0].content_views_mut()[0].extra["lastCwd"] =
+        "D:/host-a/project".into();
     let snapshot = LocalSessionSnapshot {
         workspaces: settings.workspaces,
         docks: settings.docks,
@@ -21,6 +23,45 @@ fn fixture() -> (tempfile::TempDir, LocalStateStore, LocalSessionSnapshot) {
         ..Default::default()
     };
     (temp, store, snapshot)
+}
+
+#[test]
+fn stacked_pane_round_trip_preserves_hidden_layer_conversations_and_active_layer() {
+    let (_temp, store, mut snapshot) = fixture();
+    snapshot.workspaces[0].panes[0] = serde_json::from_value(serde_json::json!({
+        "id":"slot","x":0,"y":0,"w":1,"h":1,"activeLayerId":"hidden",
+        "layers":[
+            {"id":"native","view":{"type":"TerminalView","profile":"PowerShell","lastCodexSession":"conversation-a"}},
+            {"id":"hidden","view":{"type":"TerminalView","profile":"PowerShell","lastClaudeSession":"conversation-c"}}
+        ]
+    })).unwrap();
+    store.commit_session(&snapshot).unwrap();
+    let restarted = LocalStateStore::new(store.path());
+    let loaded = restarted.load_session().unwrap().unwrap();
+    assert_eq!(
+        serde_json::to_value(&loaded.workspaces).unwrap(),
+        serde_json::to_value(&snapshot.workspaces).unwrap()
+    );
+    snapshot.coverage[0].state = "unknown".into();
+    snapshot.workspaces[0].panes[0].layers[0].view.extra["lastCodexSession"] = "unproven".into();
+    let partial = store.commit_session(&snapshot).unwrap();
+    assert_eq!(
+        partial.snapshot.workspaces[0].panes[0].layers[0].view.extra["lastCodexSession"],
+        "conversation-a"
+    );
+}
+
+#[test]
+fn portable_stacked_templates_do_not_export_layer_paths_or_conversation_ids() {
+    let mut settings = Settings::default();
+    settings.layouts[0].panes[0].layers = serde_json::from_value(serde_json::json!([
+        {"viewType":"TerminalView","viewConfig":{"profile":"PowerShell","lastCodexSession":"private-layer-id","configDir":"D:/host-a/codex"}},
+        {"viewType":"MemoView","viewConfig":{"path":"D:/host-a/memo.txt"}}
+    ])).unwrap();
+    let encoded = portable_value(&settings).unwrap().to_string();
+    assert!(!encoded.contains("private-layer-id"));
+    assert!(!encoded.contains("host-a"));
+    assert!(encoded.contains("MemoView"));
 }
 #[test]
 fn portable_settings_do_not_export_host_commands_or_runtime_or_template_restore_fields() {
@@ -55,7 +96,7 @@ fn session_commit_is_durable_and_does_not_create_or_write_user_settings() {
     let restarted = LocalStateStore::new(store.path());
     let loaded = restarted.load_session().unwrap().unwrap();
     assert_eq!(
-        loaded.workspaces[0].panes[0].view.extra["lastCodexSession"],
+        loaded.workspaces[0].panes[0].content_views()[0].1.extra["lastCodexSession"],
         "conversation-a"
     );
     assert!(!temp.path().join("settings.json").exists());
@@ -65,23 +106,25 @@ fn unknown_preserves_previous_proof_and_reports_retry_then_converges_without_new
     let (_temp, store, mut snapshot) = fixture();
     store.commit_session(&snapshot).unwrap();
     snapshot.coverage[0].state = "unknown".into();
-    snapshot.workspaces[0].panes[0].view.extra["lastCodexSession"] = "unproven-id".into();
+    snapshot.workspaces[0].panes[0].content_views_mut()[0].extra["lastCodexSession"] =
+        "unproven-id".into();
     let partial = store.commit_session(&snapshot).unwrap();
     assert!(partial.needs_retry);
     assert_eq!(partial.unresolved_terminal_ids, ["terminal-native"]);
     assert_eq!(
-        store.load_session().unwrap().unwrap().workspaces[0].panes[0]
-            .view
+        store.load_session().unwrap().unwrap().workspaces[0].panes[0].content_views()[0]
+            .1
             .extra["lastCodexSession"],
         "conversation-a"
     );
     snapshot.coverage[0].state = "identified".into();
     snapshot.coverage[0].session_id = Some("conversation-b".into());
-    snapshot.workspaces[0].panes[0].view.extra["lastCodexSession"] = "conversation-b".into();
+    snapshot.workspaces[0].panes[0].content_views_mut()[0].extra["lastCodexSession"] =
+        "conversation-b".into();
     assert!(!store.commit_session(&snapshot).unwrap().needs_retry);
     assert_eq!(
-        store.load_session().unwrap().unwrap().workspaces[0].panes[0]
-            .view
+        store.load_session().unwrap().unwrap().workspaces[0].panes[0].content_views()[0]
+            .1
             .extra["lastCodexSession"],
         "conversation-b"
     );
@@ -143,8 +186,8 @@ fn an_unknown_terminal_does_not_restore_agent_fields_into_a_replaced_memo_view()
         serde_json::from_value(serde_json::json!({"type":"MemoView"})).unwrap();
     store.commit_session(&snapshot).unwrap();
     assert!(
-        store.load_session().unwrap().unwrap().workspaces[0].panes[0]
-            .view
+        store.load_session().unwrap().unwrap().workspaces[0].panes[0].content_views()[0]
+            .1
             .extra
             .get("lastCodexSession")
             .is_none()
@@ -155,11 +198,12 @@ fn failed_cwd_observation_preserves_the_last_committed_directory() {
     let (_temp, store, mut snapshot) = fixture();
     store.commit_session(&snapshot).unwrap();
     snapshot.cwd_lookup_failed = true;
-    snapshot.workspaces[0].panes[0].view.extra["lastCwd"] = "stale-directory".into();
+    snapshot.workspaces[0].panes[0].content_views_mut()[0].extra["lastCwd"] =
+        "stale-directory".into();
     assert!(store.commit_session(&snapshot).unwrap().needs_retry);
     assert_eq!(
-        store.load_session().unwrap().unwrap().workspaces[0].panes[0]
-            .view
+        store.load_session().unwrap().unwrap().workspaces[0].panes[0].content_views()[0]
+            .1
             .extra["lastCwd"],
         "D:/host-a/project"
     );
@@ -218,7 +262,8 @@ fn unknown_does_not_resurrect_a_previous_conversation_over_an_explicit_fresh_lau
     store.commit_session(&snapshot).unwrap();
     let view = store.load_session().unwrap().unwrap().workspaces[0].panes[0]
         .view
-        .clone();
+        .clone()
+        .unwrap();
     assert!(view.extra.get("lastCodexSession").is_none());
     assert_eq!(view.extra["lastAgentFresh"], "codex");
 }
@@ -234,15 +279,16 @@ fn sqlite_full_does_not_publish_a_revision_or_lose_the_previous_checkpoint() {
     connection
         .pragma_update(None, "max_page_count", pages)
         .unwrap();
-    snapshot.workspaces[0].panes[0].view.extra["largeTestMetadata"] = "x".repeat(512 * 1024).into();
+    snapshot.workspaces[0].panes[0].content_views_mut()[0].extra["largeTestMetadata"] =
+        "x".repeat(512 * 1024).into();
     let error = LocalStateStore::commit_session_connection(&mut connection, &snapshot).unwrap_err();
     assert!(
         matches!(error,crate::error::AppError::Sqlite(rusqlite::Error::SqliteFailure(code,_)) if code.code==rusqlite::ErrorCode::DiskFull)
     );
     assert_eq!(store.revision().unwrap(), before);
     assert!(
-        store.load_session().unwrap().unwrap().workspaces[0].panes[0]
-            .view
+        store.load_session().unwrap().unwrap().workspaces[0].panes[0].content_views()[0]
+            .1
             .extra
             .get("largeTestMetadata")
             .is_none()

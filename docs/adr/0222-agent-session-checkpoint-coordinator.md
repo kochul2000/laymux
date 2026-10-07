@@ -1,6 +1,7 @@
 # 0222. Agent 세션 복원점은 통합 귀속 스냅샷과 수명주기 체크포인트로 확정한다
 
 - Status: Accepted
+- Superseded by: [ADR-0299](0299-portable-settings-and-local-sqlite-state.md), settings.json 복원 상태 SoT 및 저장 완료 receipt의 영속 revision 경계에 한정한다.
 - Superseded by: [ADR-0231](0231-hidden-eviction-target-scoped-input-admission.md), 숨김 eviction의 전역 입력 차단 범위에 한정한다.
 - Superseded by: [ADR-0232](0232-unconsumed-resume-checkpoint.md), 입력 전 명시적 resume의 startup 대기 및 critical checkpoint 허용 판정에 한정한다.
 - Date: 2026-08-31

@@ -130,6 +130,59 @@ mod tests {
     use super::*;
     use futures_util::FutureExt;
 
+    #[tokio::test]
+    async fn database_partial_ack_recovers_an_unknown_pane_without_a_new_hint() {
+        use crate::local_state::{LocalSessionSnapshot, LocalStateStore};
+        use std::sync::{atomic::AtomicUsize, Arc};
+        let temp = tempfile::tempdir().unwrap();
+        let store = LocalStateStore::new(temp.path().join("state.db"));
+        let settings = crate::settings::Settings::default();
+        let mut snapshot = LocalSessionSnapshot {
+            workspaces: settings.workspaces,
+            docks: settings.docks,
+            ..Default::default()
+        };
+        let pane_id = snapshot.workspaces[0].panes[0].id.clone();
+        snapshot.workspaces[0].panes[0].content_views_mut()[0].extra["lastCodexSession"] =
+            "previous-conversation".into();
+        store.commit_session(&snapshot).unwrap();
+        let hints = Arc::new(CheckpointHints::default());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let worker_hints = hints.clone();
+        let worker_calls = calls.clone();
+        let worker_store = store.clone();
+        let worker = tokio::spawn(async move {
+            run(&worker_hints, || false, |_| {
+                let partial = worker_calls.load(Ordering::SeqCst) == 0;
+                snapshot.coverage = serde_json::from_value(serde_json::json!([{
+                    "terminalId":format!("terminal-{pane_id}"), "state": if partial {"unknown"} else {"identified"},
+                    "generation":3,"provider":"codex","sessionId":"latest-conversation"
+                }])).unwrap();
+                snapshot.workspaces[0].panes[0].content_views_mut()[0].extra["lastCodexSession"] = "latest-conversation".into();
+                let commit = worker_store.commit_session(&snapshot).unwrap();
+                let confirmed = !worker_store.checkpoint_needs_retry(commit.revision).unwrap();
+                worker_calls.fetch_add(1, Ordering::SeqCst);
+                async move { Ok(confirmed) }
+            }, Timing { settle: Duration::from_millis(1), retry: Duration::from_millis(2), cap: Duration::from_millis(8), watchdog: Duration::from_secs(300) }).await;
+        });
+        hints.request();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while calls.load(Ordering::SeqCst) < 2 {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(!store.checkpoint_needs_retry(2).unwrap());
+        assert_eq!(
+            store.load_session().unwrap().unwrap().workspaces[0].panes[0].content_views()[0]
+                .1
+                .extra["lastCodexSession"],
+            "latest-conversation"
+        );
+        worker.abort();
+    }
+
     #[test]
     fn hints_before_subscription_coalesce_and_changes_during_a_save_remain_pending() {
         let hints = CheckpointHints::default();

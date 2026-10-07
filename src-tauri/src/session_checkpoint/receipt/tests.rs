@@ -303,19 +303,14 @@ fn stacked_slot_layers_are_saved_views_for_their_terminals() {
         "terminal-shell".into(),
         crate::pty::PtyHandle::from_test_writer_for_generation(Box::new(std::io::sink()), 9),
     );
-    std::fs::write(
-        &f.settings,
-        serde_json::json!({"workspaces":[{"panes":[{
+    f.write_session(serde_json::json!({"workspaces":[{"panes":[{
             "id":"slot","x":0.0,"y":0.0,"w":1.0,"h":1.0,
             "layers":[
                 {"id":"pane","view":{"type":"TerminalView","lastCodexSession":ID}},
                 {"id":"shell","view":{"type":"TerminalView"}}
             ],
             "activeLayerId":"shell"
-        }]}],"docks":[]})
-        .to_string(),
-    )
-    .unwrap();
+        }]}],"docks":[]}));
     let token = capture(&f.state)
         .unwrap()
         .expect("terminals are observable");
@@ -338,18 +333,21 @@ fn stacked_slot_layers_are_saved_views_for_their_terminals() {
 #[test]
 fn a_layer_and_a_compact_pane_claiming_one_terminal_invalidate_the_receipt() {
     let f = Fixture::new();
-    std::fs::write(
-        &f.settings,
-        serde_json::json!({"workspaces":[{"panes":[
-            {"id":"pane","view":{"type":"TerminalView","lastCodexSession":ID}},
-            {"id":"slot","layers":[{"id":"pane","view":{"type":"TerminalView"}}]}
-        ]}],"docks":[]})
-        .to_string(),
-    )
-    .unwrap();
-    let token = capture(&f.state).unwrap().unwrap();
-    remember_codex_file(&f.state, "terminal-pane", 7, ID, &f.rollout);
-    assert!(commit_to(&f.state, &token, &f.coverage(), &f.settings)
-        .unwrap()
-        .is_none());
+    let value = serde_json::json!({"workspaces":[{"id":"fixture","name":"fixture","panes":[
+        {"id":"pane","view":{"type":"TerminalView","lastCodexSession":ID}},
+        {"id":"slot","layers":[{"id":"pane","view":{"type":"TerminalView"}}]}
+    ]}],"docks":[]});
+    assert!(
+        saved_views(&value).is_none(),
+        "ambiguous content cannot license a receipt"
+    );
+    let store = crate::settings::persistence::store_for_settings(&f.settings).unwrap();
+    let revision = store.revision().unwrap();
+    let snapshot = serde_json::from_value(value).unwrap();
+    assert!(store.commit_session(&snapshot).is_err());
+    assert_eq!(
+        store.revision().unwrap(),
+        revision,
+        "rejected duplicate must preserve the last commit"
+    );
 }
