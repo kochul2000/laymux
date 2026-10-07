@@ -10,6 +10,66 @@ fn loaded(path: &Path) -> Settings {
 }
 
 #[test]
+fn a_missing_portable_document_does_not_erase_machine_settings_on_mutation() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("settings.json");
+    let mut settings = Settings::default();
+    settings.profiles[0].command_line = "D:/fixture/custom-shell.exe".into();
+    settings.remote.cloud_instance_id = Some("fixture-instance".into());
+    save_settings_to(&path, &settings).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(
+        loaded(&path).profiles[0].command_line,
+        "D:/fixture/custom-shell.exe"
+    );
+    let updated = crate::settings::update_settings_at(&path, |settings| {
+        settings.language = "ko".into();
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(updated.language, "ko");
+    assert_eq!(
+        updated.profiles[0].command_line,
+        "D:/fixture/custom-shell.exe"
+    );
+    assert_eq!(
+        loaded(&path).remote.cloud_instance_id.as_deref(),
+        Some("fixture-instance")
+    );
+}
+
+#[test]
+fn a_missing_portable_document_does_not_erase_backend_owned_fields_on_frontend_save() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("settings.json");
+    let mut settings = Settings::default();
+    settings.remote.cloud_enabled = true;
+    settings.remote.cloud_instance_id = Some("fixture-instance".into());
+    settings.terminal.composer_starred_entries = vec![crate::settings::ComposerStarredEntry {
+        value: "fixture-star".into(),
+        label: "fixture".into(),
+        send: false,
+    }];
+    save_settings_to(&path, &settings).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    let candidate = Settings {
+        language: "ko".into(),
+        ..Settings::default()
+    };
+    let saved = crate::settings::save_frontend_settings_to(&path, &candidate).unwrap();
+    assert!(saved.remote.cloud_enabled);
+    assert_eq!(
+        saved.remote.cloud_instance_id,
+        settings.remote.cloud_instance_id
+    );
+    assert_eq!(
+        loaded(&path).terminal.composer_starred_entries,
+        settings.terminal.composer_starred_entries
+    );
+    assert_eq!(saved.language, "ko");
+}
+
+#[test]
 fn configuration_core_uses_the_explicit_database_instead_of_inferred_os_paths() {
     let temp = tempfile::tempdir().unwrap();
     let json = temp.path().join("config/settings.json");

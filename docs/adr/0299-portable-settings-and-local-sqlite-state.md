@@ -1,6 +1,6 @@
 # 0299. 이식 가능한 설정과 로컬 SQLite 복원 상태를 분리한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-07
 - Source: 사용자 SQLite 구현 요청, [이슈 #1141](https://github.com/kochul2000/laymux/issues/1141), [이슈 #1139](https://github.com/kochul2000/laymux/issues/1139), ADR-0202/0222/0295/0296, architecture/data-flow.md §13.5
 - 관계: settings.json을 사용자 설정과 복원 상태의 공동 SoT로 사용한 기존 결정을 대체한다. 귀속 증거·입력 fence·저장 후 인터럽트는 유지한다.
@@ -19,7 +19,7 @@
 - 복원 구조는 workspace/dock 그룹과 pane 행으로 저장하며 확장 가능한 view metadata는 pane 슬롯 범위 JSON으로 저장한다. ADR-0297의 ordered layers·activeLayerId와 숨은 레이어의 복원점도 보존하고, terminal 귀속은 슬롯 ID 대신 content ID에 결합한다. 전체 Settings JSON을 DB 한 행에 보관하지 않는다. pane별 귀속 confidence와 미확인 상태, 단조로운 DB commit revision을 함께 저장한다.
 - 사용자 구성 저장과 checkpoint 저장은 별도 IPC다. checkpoint는 사용자 구성을 다시 쓰지 않는다. 구성 저장은 현재 로컬 복원 구조를 덮어쓰지 않는다. 실제 설정 변경/레이아웃 템플릿 변경만 구성 저장을 요청한다. 유효 설정 읽기는 두 계층을 합성하고 설정 export는 portable projection을 사용한다.
 - SQLite 연결과 트랜잭션은 Rust 저장 계층만 소유한다. WAL과 synchronous=FULL, 250ms busy timeout을 적용한다. SQLite가 commit마다 WAL을 동기화하는 정책을 선택하지만 저장장치/파일시스템의 fsync 보장 밖 전원 차단 내구성까지 약속하지 않는다([SQLite synchronous](https://www.sqlite.org/pragma.html#pragma_synchronous)). 파일/프로세스/WSL 귀속 조회는 트랜잭션 전에 완료하며 DB 작업은 ordered AppState 락과 함께 수행하지 않는다. SQLite 오류를 빈 상태로 합성하거나 손상 DB를 자동 삭제하지 않는다.
-- 정상 pane의 commit은 미확인 pane과 독립적으로 진행한다. Unknown은 DB의 이전 검증 복원점을 보존하며 commit 결과는 미확인 terminal 목록을 반환한다. frontend ACK는 파일/DB 쓰기 성공과 확인 완료를 구분하고 native hint worker는 미확인 결과에 제한된 지수 backoff 재시도를 수행한다. 정상 저장을 전부 실패시키지 않는다.
+- 정상 pane의 commit은 미확인 pane과 독립적으로 진행한다. Unknown은 DB의 이전 검증 복원점을 보존하며 commit 결과는 미확인 terminal 목록을 반환한다. frontend ACK는 파일/DB 쓰기 성공과 확인 완료를 구분한다. UI 직접 저장을 포함한 모든 성공한 부분 commit은 native worker의 제한된 지수 backoff 재시도를 깨운다. 부분 저장 알림은 identity 변경과 별도로 세어 재시도가 자신의 대기를 초기화하지 않고, 저장 도중 발생한 새 부분 commit을 이전 확인 완료가 소비하지 않는다. 정상 저장을 전부 실패시키지 않는다.
 - 저장 완료 receipt는 DB revision·현재 runtime snapshot·사용자 구성 파일의 변화와 rollout 파일 검증에 묶는다. 변경 없는 최종 종료는 기존 빠른 재사용을 유지한다. 재시도/설정 변화/새 DB commit은 이전 receipt를 무효화한다.
 - state.db는 Windows LOCALAPPDATA, Linux XDG_STATE_HOME(없으면 ~/.local/state)에 build별로 저장한다. settings import/export에는 포함하지 않는다. 설정 초기화는 로컬 복원 구조를 지우지 않는다. 기존 출력·메모 캐시는 독립 파일로 유지하며 Composer 초안/history의 비영속 및 비밀 저장소 계약을 확대하지 않는다.
 - 기존 혼합 JSON의 로컬 필드는 새 환경으로 자동 이관하지 않는다. 내부 개발 정책에 따라 수동 보존/처리 절차를 제공한다. schema version 불일치는 명시적인 오류다.

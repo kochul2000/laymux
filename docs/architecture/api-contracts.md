@@ -21,7 +21,9 @@
 
 환경 영역은 `remote`, provider `command`, `paneClear.shellCommand`, `paste.imageDir`, `issueReporter.shell`, usage `configDirs`, `fileExplorer.extensionViewers`, `terminal.composerStarredEntries`, 프로필 `commandLine/startupCommand/startingDirectory`다. 프로필 환경은 논리 이름으로 결합하고 중복 이름은 거절한다. 템플릿 viewConfig는 type/profile/cwdSend/cwdReceive만 portable이며 다른 로컬 설정은 layout ID·pane index·portable pane fingerprint에 결합한다. 대화 ID·Fresh marker는 템플릿 저장에서 제외하고 lastCwd는 로컬 환경에만 보존한다. 다른 PC에서 환경이 없는 프로필은 현재 OS 기본 셸로 시작한다.
 
-- `save_session_checkpoint(snapshot)` → `{revision, needsRetry, unresolvedTerminalIds, snapshot}`. snapshot에는 workspaces/docks/workspaceDisplayOrder/coverage/lookup 실패 플래그/uiState만 허용한다. DB가 실제 저장한 snapshot을 반환하며 Unknown과 쓰기 성공을 분리한다.
+JSON이 없어도 일반 설정 변경은 기본 portable 구성과 기존 DB를 합성한 뒤 적용한다. frontend 구성 저장도 DB의 최신 backend 소유 cloud identity와 Composer 즐겨찾기를 보존한다. JSON 부재를 로컬 환경 초기화로 해석하지 않는다.
+
+- `save_session_checkpoint(snapshot)` → `{revision, needsRetry, unresolvedTerminalIds, snapshot}`. snapshot에는 workspaces/docks/workspaceDisplayOrder/coverage/lookup 실패 플래그/uiState만 허용한다. DB가 실제 저장한 snapshot을 반환하며 Unknown과 쓰기 성공을 분리한다. 성공한 부분 commit은 호출 주체와 무관하게 native 재시도 worker를 깨운다.
 - `load_session_checkpoint()` → 로컬 snapshot 또는 null. 환경 설정과 사용자 구성은 포함하지 않는다.
 - `export_portable_settings()`, `GET /api/v1/settings/export`, MCP `export_settings` → portable 구성. REST/MCP envelope는 `{settings}`다. 기존 Settings 조회/patch는 로컬 유효 모델이며 이식용 export와 다르다.
 - DB 로드 실패는 `SettingsLoadResult{status:"parse_error",storageKind:"localState",settingsPath,error,...}`다. 원본 DB를 유지하고 startup/background/close 쓰기를 차단한다. DB 오류 모달에는 설정 초기화 버튼을 노출하지 않는다. `localUiState`는 유효 모델의 read-only 복원 필드이고 JSON에는 없다.

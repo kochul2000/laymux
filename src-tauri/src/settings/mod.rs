@@ -614,7 +614,7 @@ fn update_settings_with_store(
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {e}"))?;
     }
     let _guard = SETTINGS_WRITE_LOCK.lock_or_err()?;
-    let mut settings = if path.exists() {
+    let mut settings =
         match persistence::hydrate(path, load_settings_document_from(path), Ok(store.clone())) {
             SettingsLoadResult::Ok { settings, .. }
             | SettingsLoadResult::Repaired { settings, .. } => settings,
@@ -626,10 +626,7 @@ fn update_settings_with_store(
                     "Refusing to overwrite an unparseable settings file: {error}"
                 ));
             }
-        }
-    } else {
-        Settings::default()
-    };
+        };
     mutate(&mut settings)?;
     persistence::write_configuration(path, &settings, store)?;
     Ok(settings)
@@ -652,40 +649,38 @@ fn save_frontend_settings_with_store(
     }
     let _guard = SETTINGS_WRITE_LOCK.lock_or_err()?;
     let mut candidate = settings.clone();
-    if path.exists() {
-        match persistence::hydrate(path, load_settings_document_from(path), Ok(store.clone())) {
-            SettingsLoadResult::Ok {
-                settings: latest, ..
-            }
-            | SettingsLoadResult::Repaired {
-                settings: latest, ..
-            } => {
-                candidate.remote.cloud_enabled = latest.remote.cloud_enabled;
-                candidate
-                    .remote
-                    .cloud_instance_id
-                    .clone_from(&latest.remote.cloud_instance_id);
-                candidate
-                    .remote
-                    .cloud_tunnel_url
-                    .clone_from(&latest.remote.cloud_tunnel_url);
-                candidate
-                    .remote
-                    .cloud_server_base_url
-                    .clone_from(&latest.remote.cloud_server_base_url);
-                candidate
-                    .terminal
-                    .composer_starred_entries
-                    .clone_from(&latest.terminal.composer_starred_entries);
-            }
-            SettingsLoadResult::Recovered { .. } => {
-                return Err(unacknowledged_recovery_error());
-            }
-            SettingsLoadResult::ParseError { error, .. } => {
-                return Err(format!(
-                    "Refusing to overwrite an unparseable settings file: {error}"
-                ));
-            }
+    match persistence::hydrate(path, load_settings_document_from(path), Ok(store.clone())) {
+        SettingsLoadResult::Ok {
+            settings: latest, ..
+        }
+        | SettingsLoadResult::Repaired {
+            settings: latest, ..
+        } => {
+            candidate.remote.cloud_enabled = latest.remote.cloud_enabled;
+            candidate
+                .remote
+                .cloud_instance_id
+                .clone_from(&latest.remote.cloud_instance_id);
+            candidate
+                .remote
+                .cloud_tunnel_url
+                .clone_from(&latest.remote.cloud_tunnel_url);
+            candidate
+                .remote
+                .cloud_server_base_url
+                .clone_from(&latest.remote.cloud_server_base_url);
+            candidate
+                .terminal
+                .composer_starred_entries
+                .clone_from(&latest.terminal.composer_starred_entries);
+        }
+        SettingsLoadResult::Recovered { .. } => {
+            return Err(unacknowledged_recovery_error());
+        }
+        SettingsLoadResult::ParseError { error, .. } => {
+            return Err(format!(
+                "Refusing to overwrite an unparseable settings file: {error}"
+            ));
         }
     }
     persistence::write_configuration(path, &candidate, store)?;
