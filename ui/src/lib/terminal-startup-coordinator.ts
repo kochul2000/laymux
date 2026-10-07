@@ -30,7 +30,7 @@ interface CandidatePane {
   view: { type: string };
 }
 
-/** A workspace slot: its content is the stacked layers (ADR-0295). */
+/** A workspace slot: its content is the stacked layers (ADR-0297). */
 interface CandidateSlot {
   layers: readonly CandidatePane[];
   activeLayerId: string;
@@ -201,7 +201,7 @@ export function collectTerminalStartupCandidates({
   knownPaneIds.push(...foregroundTerminalIds);
 
   // Visible content first; hidden stacked layers of the active workspace start
-  // after the visible docks (ADR-0295).
+  // after the visible docks (ADR-0297).
   const layoutEligiblePaneIds = [
     ...activeLayerTerminalIds(activeWorkspace?.panes ?? []),
     ...docks.filter((dock) => dock.visible).flatMap((dock) => terminalPaneIds(dock.panes)),

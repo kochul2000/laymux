@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // isLxShortcut reads user keybinding overrides and, for stack-only actions,
-// whether the focused grid slot is a pane stack (ADR-0295).
+// whether the focused grid slot is a pane stack (ADR-0297).
 const state = {
   focusedDock: null as string | null,
   focusedPaneIndex: 0 as number | null,

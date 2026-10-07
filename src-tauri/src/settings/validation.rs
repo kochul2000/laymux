@@ -133,7 +133,7 @@ fn validate_composer_starred_entries(
 
 fn validate_workspaces(settings: &mut Settings, warnings: &mut Vec<ValidationWarning>) {
     let fallback_profile = resolve_fallback_profile(settings);
-    // Content ids (terminal-<id>) must be unique app-wide (ADR-0295).
+    // Content ids (terminal-<id>) must be unique app-wide (ADR-0297).
     let mut seen_content_ids = std::collections::HashSet::new();
 
     for (ws_idx, ws) in settings.workspaces.iter_mut().enumerate() {
@@ -225,7 +225,7 @@ fn validate_workspace_panes(
     }
 }
 
-/// Validate a slot's content (ADR-0295): either the compact `view` or the
+/// Validate a slot's content (ADR-0297): either the compact `view` or the
 /// stacked `layers` + `activeLayerId`. Returns false when the pane has no
 /// usable content and must be dropped.
 fn validate_pane_content(
@@ -1242,7 +1242,7 @@ mod tests {
         assert_eq!(settings.workspaces[0].panes[0].id, good_pane.id);
         assert!(warnings.iter().any(|w| w.message.contains("NaN/Infinity")));
     }
-    // ── 스택 슬롯 검증 (ADR-0295) ──
+    // ── 스택 슬롯 검증 (ADR-0297) ──
 
     fn stacked_pane(value: serde_json::Value) -> WorkspacePane {
         serde_json::from_value(value).unwrap()

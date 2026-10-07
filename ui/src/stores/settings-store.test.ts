@@ -1121,7 +1121,7 @@ describe("settings-store", () => {
   });
 });
 
-describe("paneStack settings (ADR-0295)", () => {
+describe("paneStack settings (ADR-0297)", () => {
   beforeEach(() => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
   });

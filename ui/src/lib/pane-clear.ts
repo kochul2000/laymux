@@ -236,7 +236,7 @@ export async function runPaneClearAction(deps: RunPaneClearActionDeps): Promise<
 
 /** Locate a clearable pane across every workspace and dock. Pane ids are global. */
 export function findTerminalPane(paneId: string): CwdBearingPane | null {
-  // Grid content is a layer, stacked or not (ADR-0295).
+  // Grid content is a layer, stacked or not (ADR-0297).
   const gridPane = useWorkspaceStore
     .getState()
     .workspaces.flatMap((workspace) => workspace.panes.flatMap((pane) => pane.layers))

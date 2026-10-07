@@ -1,6 +1,35 @@
 use super::*;
 
 #[test]
+fn an_earlier_session_claim_cannot_override_fresh_exit_or_provider_handover() {
+    let codex = HashMap::from([("t".into(), Some("earlier-codex-session".into()))]);
+    for (liveness, expected) in [
+        (PtyAppLiveness::NoneAlive, SessionAttributionState::NoAgent),
+        (PtyAppLiveness::Unknown, SessionAttributionState::Unknown),
+        (
+            PtyAppLiveness::Running("Claude"),
+            SessionAttributionState::Unknown,
+        ),
+        (
+            PtyAppLiveness::Running("Grok"),
+            SessionAttributionState::Unknown,
+        ),
+    ] {
+        let result = classify_attribution(
+            7,
+            "t",
+            &HashMap::new(),
+            &codex,
+            &HashMap::new(),
+            liveness,
+            false,
+        );
+        assert_eq!(result.state, expected, "{liveness:?}");
+        assert!(result.session_id.is_none());
+    }
+}
+
+#[test]
 fn ambiguous_native_liveness_rejects_prior_provider_claims_and_pending_resume() {
     for provider in ["claude", "codex", "grok"] {
         for prior_claim in [false, true] {

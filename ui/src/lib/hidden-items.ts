@@ -4,7 +4,7 @@ import type { PaneLayer, Workspace } from "@/stores/types";
 
 export interface HiddenPaneItem {
   workspace: Workspace;
-  /** The hidden content layer (ADR-0295: hide flags are per layer). */
+  /** The hidden content layer (ADR-0297: hide flags are per layer). */
   pane: PaneLayer;
   /** Slot index in the original WorkspacePane[] layout, used for focus. */
   paneIndex: number;

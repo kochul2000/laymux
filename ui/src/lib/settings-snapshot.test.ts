@@ -487,7 +487,7 @@ describe("settings snapshot — save/load round trip does not drop sections", ()
   });
 });
 
-describe("settings snapshot — pane stacks (ADR-0295)", () => {
+describe("settings snapshot — pane stacks (ADR-0297)", () => {
   beforeEach(() => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());

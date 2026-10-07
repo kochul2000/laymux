@@ -14,7 +14,7 @@ export interface PaneStackStripProps {
   /** The slot's layers in stack order. */
   layers: readonly PaneLayer[];
   activeLayerId: string;
-  /** Spatial numbers keyed by layer id (ADR-0295), or null when unnumbered. */
+  /** Spatial numbers keyed by layer id (ADR-0297), or null when unnumbered. */
   paneNumbers?: Map<string, number> | null;
   onActivate: (layerId: string) => void;
   onClose?: (layerId: string) => void;
@@ -42,7 +42,7 @@ function isLayerDrag(e: React.DragEvent, draggingLayerId?: string | null): boole
 }
 
 /**
- * Fixed top row of a stacked slot (ADR-0295): one tab per layer plus an add
+ * Fixed top row of a stacked slot (ADR-0297): one tab per layer plus an add
  * button. Click activates, middle-click or × closes, `+` stacks a new layer,
  * dragging a tab reorders it or moves it to another slot, and the tab context
  * menu splits a layer out into its own slot. Only rendered for slots holding

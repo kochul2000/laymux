@@ -206,7 +206,7 @@ describe("pane-layers", () => {
   });
 });
 
-describe("dedupeLayerIds (ADR-0295)", () => {
+describe("dedupeLayerIds (ADR-0297)", () => {
   it("re-mints stacked layer ids already used elsewhere and fixes the active id", () => {
     const seen = new Set(["x"]);
     let n = 0;

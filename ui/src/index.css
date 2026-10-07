@@ -1277,7 +1277,7 @@
     outline-offset: -1px;
   }
 
-  /* Pane stack strip (ADR-0295): fixed top row of a stacked slot. */
+  /* Pane stack strip (ADR-0297): fixed top row of a stacked slot. */
   .pane-stack-strip {
     display: flex;
     flex-shrink: 0;

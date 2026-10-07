@@ -14,6 +14,7 @@ import { isSettingsWriteBlocked } from "@/lib/settings-write-guard";
 import type { ProgressReporter } from "@/lib/lifecycle-progress";
 import type { ExitSettings } from "@/lib/tauri-api";
 import { withCodexStatusCheckpoint } from "@/lib/codex-status-probe";
+import { captureSessionReceipt, commitSessionReceipt } from "./session-checkpoint-receipt";
 
 export { setBlockPersist } from "@/lib/settings-write-guard";
 
@@ -66,6 +67,7 @@ export interface SessionCheckpointCommit {
   checkpointCommitId: number;
   frontendMutationRevision: number;
   coverage: TerminalAttributionCoverage[];
+  receiptToken?: string;
 }
 
 const CRITICAL_OBSERVATION_SETTLE_MS = 150;
@@ -81,6 +83,16 @@ let activeCheckpoint: Promise<SessionCheckpointCommit> | null = null;
 let trailingCheckpointRequested = false;
 let pendingOptions: SessionCheckpointOptions = {};
 let frontendMutationRevision = 0;
+let lastCommittedCheckpoint: SessionCheckpointCommit | undefined;
+
+export function getReusableSessionCheckpointCommit(): SessionCheckpointCommit | undefined {
+  if (
+    activeCheckpoint ||
+    lastCommittedCheckpoint?.frontendMutationRevision !== frontendMutationRevision
+  )
+    return undefined;
+  return lastCommittedCheckpoint?.receiptToken ? lastCommittedCheckpoint : undefined;
+}
 
 export function markSessionCheckpointMutation(): void {
   frontendMutationRevision += 1;
@@ -94,6 +106,7 @@ export function _resetClosingDown(): void {
   trailingCheckpointRequested = false;
   pendingOptions = {};
   frontendMutationRevision = 0;
+  lastCommittedCheckpoint = undefined;
 }
 
 function mergeCheckpointOptions(
@@ -183,7 +196,8 @@ async function persistSessionCore(
   options: SessionCheckpointOptions,
 ): Promise<SessionCheckpointCommit> {
   const collectedRevision = frontendMutationRevision;
-  // Content views keyed by content id: workspace layers (ADR-0295) and dock panes.
+  const capturedReceipt = await captureSessionReceipt();
+  // Content views keyed by content id: workspace layers (ADR-0297) and dock panes.
   const sourceViews = new Map<string, ViewInstanceConfig>([
     ...useWorkspaceStore
       .getState()
@@ -196,6 +210,9 @@ async function persistSessionCore(
   ]);
   const checkpoint = await collectStableCheckpoint(options);
   await saveSettings(checkpoint.settings);
+  const receiptToken = capturedReceipt
+    ? await commitSessionReceipt(capturedReceipt, checkpoint.coverage)
+    : undefined;
   // Unknown attribution and hidden-pane remounts read these views. Publish only
   // committed metadata, otherwise a later save can resurrect startup-era IDs.
   const savedViews = new Map<string, { [key: string]: unknown }>();
@@ -267,6 +284,7 @@ async function persistSessionCore(
     checkpointCommitId: nextCheckpointCommitId++,
     frontendMutationRevision: collectedRevision + publicationRevision,
     coverage: checkpoint.coverage,
+    ...(receiptToken ? { receiptToken } : {}),
   };
 }
 
@@ -286,6 +304,7 @@ async function runCheckpointCoordinator(): Promise<SessionCheckpointCommit> {
       pendingOptions = mergeCheckpointOptions(pendingOptions, options);
     }
   } while (trailingCheckpointRequested);
+  lastCommittedCheckpoint = commit;
   return commit;
 }
 
@@ -345,13 +364,22 @@ export async function saveBeforeClose(report?: ProgressReporter): Promise<void> 
   const verifyStatus =
     !isSettingsWriteBlocked() && codex.restoreSession && codex.verifySessionOnExit;
   try {
-    await withCodexStatusCheckpoint(verifyStatus, undefined, async () => {
-      // The status proof remains fenced through the final save. Ctrl+C, if
-      // enabled separately, still follows the committed restoration point.
-      if (!isSettingsWriteBlocked())
-        await flushSessionCheckpoint({ reason: "close", requireConclusive: verifyStatus });
-      await prepareTerminalExit(report);
-    });
+    const committed = getReusableSessionCheckpointCommit();
+    await withCodexStatusCheckpoint(
+      verifyStatus,
+      undefined,
+      async (reused) => {
+        // The status proof remains fenced through the final save. Ctrl+C, if
+        // enabled separately, still follows the committed restoration point.
+        if (
+          !isSettingsWriteBlocked() &&
+          !(reused && committed && committed === getReusableSessionCheckpointCommit())
+        )
+          await flushSessionCheckpoint({ reason: "close", requireConclusive: verifyStatus });
+        await prepareTerminalExit(report);
+      },
+      committed?.receiptToken,
+    );
   } catch (error) {
     closingDown = false;
     throw error;
@@ -417,7 +445,7 @@ export async function prepareTerminalExit(
 
   // Clean orphaned cache files after all cache writes have completed.
   const activePaneIds: string[] = [];
-  // Output caches belong to content: every stacked layer keeps its own (ADR-0295).
+  // Output caches belong to content: every stacked layer keeps its own (ADR-0297).
   for (const ws of wsState.workspaces) {
     for (const p of ws.panes)
       for (const layer of p.layers) if (layer.id) activePaneIds.push(layer.id);

@@ -11,7 +11,7 @@ import { useTerminalStore } from "./terminal-store";
 import { makeSlot } from "@/lib/pane-layers";
 import type { WorkspacePane } from "./types";
 
-/** Pane stack store actions (ADR-0295). */
+/** Pane stack store actions (ADR-0297). */
 describe("WorkspaceStore pane stacks", () => {
   const term = { type: "TerminalView" as const, profile: "WSL" };
 
@@ -195,7 +195,7 @@ describe("WorkspaceStore pane stacks", () => {
   });
 });
 
-describe("WorkspaceStore layer rearrangement (ADR-0295)", () => {
+describe("WorkspaceStore layer rearrangement (ADR-0297)", () => {
   const term = { type: "TerminalView" as const };
   const ids = (index: number) =>
     useWorkspaceStore

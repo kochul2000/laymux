@@ -8,7 +8,7 @@ import { findLayerInWorkspaces } from "./pane-layers";
 
 function paneLabel(terminalId: string): string {
   const paneId = toPaneId(terminalId);
-  // Workspace content lives in stacked layers (ADR-0295); dock panes are content.
+  // Workspace content lives in stacked layers (ADR-0297); dock panes are content.
   const found = findLayerInWorkspaces(useWorkspaceStore.getState().workspaces, paneId);
   const workspace = found?.workspace;
   const dock = useDockStore

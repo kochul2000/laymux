@@ -55,7 +55,7 @@ export function summarizeClearResult(result: WorkspaceClearResult): string {
 
 /**
  * Content ids of a workspace's TerminalView layers in layout order, including
- * inactive stacked layers — the clear covers the whole grid (ADR-0295).
+ * inactive stacked layers — the clear covers the whole grid (ADR-0297).
  */
 export function terminalPaneIdsForWorkspace(workspaceId: string): string[] {
   const workspace = useWorkspaceStore.getState().workspaces.find((ws) => ws.id === workspaceId);

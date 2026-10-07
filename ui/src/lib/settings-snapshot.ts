@@ -268,7 +268,7 @@ async function collectSessionCheckpointInternal(
     workspaces: workspaceState.workspaces.map((workspace) => ({
       id: workspace.id,
       name: workspace.name,
-      // Compact `view` form for unstacked panes, `layers` form for stacks (ADR-0295).
+      // Compact `view` form for unstacked panes, `layers` form for stacks (ADR-0297).
       panes: workspace.panes.map((pane) =>
         toPersistedPane(
           pane,

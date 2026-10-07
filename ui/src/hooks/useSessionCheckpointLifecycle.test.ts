@@ -45,6 +45,7 @@ vi.mock("@/lib/persist-session", () => ({
   setPreparingUpdate: vi.fn(),
   markSessionCheckpointMutation: vi.fn(),
   persistSession: vi.fn().mockResolvedValue(undefined),
+  getReusableSessionCheckpointCommit: vi.fn().mockReturnValue(undefined),
 }));
 
 import {
@@ -59,6 +60,7 @@ import {
   setPreparingUpdate,
   markSessionCheckpointMutation,
   persistSession,
+  getReusableSessionCheckpointCommit,
 } from "@/lib/persist-session";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useUiStore } from "@/stores/ui-store";
@@ -99,7 +101,12 @@ describe("useSessionCheckpointLifecycle", () => {
 
     nativeListener?.({ requestId: 9, reason: "update", requireConclusive: true });
     await vi.waitFor(() =>
-      expect(withCodexStatusCheckpoint).toHaveBeenCalledWith(true, 9, expect.any(Function)),
+      expect(withCodexStatusCheckpoint).toHaveBeenCalledWith(
+        true,
+        9,
+        expect.any(Function),
+        undefined,
+      ),
     );
 
     await vi.waitFor(() => expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(9, 17));
@@ -108,6 +115,32 @@ describe("useSessionCheckpointLifecycle", () => {
       requireConclusive: true,
       terminalIds: undefined,
     });
+  });
+
+  it("acks the committed receipt on update without repeating attribution or save", async () => {
+    const committed = {
+      checkpointCommitId: 31,
+      frontendMutationRevision: 4,
+      coverage: [],
+      receiptToken: "saved-receipt",
+    };
+    vi.mocked(getReusableSessionCheckpointCommit).mockReturnValue(committed);
+    vi.mocked(withCodexStatusCheckpoint).mockImplementationOnce(
+      async (_enabled, _request, checkpoint) => checkpoint(true),
+    );
+    renderHook(() => useSessionCheckpointLifecycle(true));
+    await vi.waitFor(() => expect(onSessionCheckpointRequested).toHaveBeenCalledTimes(1));
+    nativeListener?.({ requestId: 51, reason: "update", requireConclusive: true });
+    await vi.waitFor(() => expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(51, 31));
+    expect(withCodexStatusCheckpoint).toHaveBeenCalledWith(
+      true,
+      51,
+      expect.any(Function),
+      "saved-receipt",
+    );
+    expect(flushSessionCheckpoint).not.toHaveBeenCalled();
+    expect(prepareTerminalExit).toHaveBeenCalledOnce();
+    vi.mocked(getReusableSessionCheckpointCommit).mockReturnValue(undefined);
   });
 
   it("returns the pane and manual retry guidance to the PC updater without tearing down tasks", async () => {
@@ -142,7 +175,12 @@ describe("useSessionCheckpointLifecycle", () => {
     await vi.waitFor(() => expect(onSessionCheckpointRequested).toHaveBeenCalledTimes(1));
     nativeListener?.({ requestId: 42, reason: "update", requireConclusive: true });
     expect(setPreparingUpdate).toHaveBeenCalledWith(true);
-    expect(withCodexStatusCheckpoint).toHaveBeenCalledWith(true, 42, expect.any(Function));
+    expect(withCodexStatusCheckpoint).toHaveBeenCalledWith(
+      true,
+      42,
+      expect.any(Function),
+      undefined,
+    );
     expect(flushSessionCheckpoint).not.toHaveBeenCalled();
     finishProbe();
     await vi.waitFor(() => expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(42, 17));
@@ -161,7 +199,12 @@ describe("useSessionCheckpointLifecycle", () => {
     await vi.waitFor(() => expect(onSessionCheckpointRequested).toHaveBeenCalledTimes(1));
     nativeListener?.({ requestId: 43, reason: "watchdog", requireConclusive: false });
     await vi.waitFor(() => expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(43, 17));
-    expect(withCodexStatusCheckpoint).toHaveBeenCalledWith(false, 43, expect.any(Function));
+    expect(withCodexStatusCheckpoint).toHaveBeenCalledWith(
+      false,
+      43,
+      expect.any(Function),
+      undefined,
+    );
   });
 
   it("error-acks a request delivered to a listener cancelled during StrictMode registration", async () => {

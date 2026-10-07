@@ -281,7 +281,7 @@ function DockGrid({
   const focusedDockPaneId = useDockStore((s) => s.focusedDockPaneId);
   const resolveCwdDefaults = useCwdDefaultsResolver("dock");
 
-  // Dock panes are single-layer slots; dock stacking is out of scope (ADR-0295).
+  // Dock panes are single-layer slots; dock stacking is out of scope (ADR-0297).
   const gridPanes = useMemo(() => panes.map(singleLayerSlot), [panes]);
 
   return (

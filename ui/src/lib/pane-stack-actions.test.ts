@@ -15,7 +15,7 @@ import {
   stackPaneAt,
 } from "./pane-stack-actions";
 
-describe("pane-stack-actions (ADR-0295)", () => {
+describe("pane-stack-actions (ADR-0297)", () => {
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useDockStore.setState(useDockStore.getInitialState());
@@ -76,7 +76,7 @@ describe("pane-stack-actions (ADR-0295)", () => {
   });
 });
 
-describe("pane-stack-actions rearrangement (ADR-0295)", () => {
+describe("pane-stack-actions rearrangement (ADR-0297)", () => {
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useDockStore.setState(useDockStore.getInitialState());

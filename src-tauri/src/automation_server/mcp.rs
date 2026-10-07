@@ -2768,7 +2768,7 @@ impl McpHandler {
         self.bridge("action", "panes", "split", params).await
     }
 
-    /// Stack a new layer on a pane slot (ADR-0295): the slot keeps its size and shows
+    /// Stack a new layer on a pane slot (ADR-0297): the slot keeps its size and shows
     /// the new layer, the previous content stays alive underneath. Defaults to a
     /// TerminalView starting in the slot's active-layer CWD. Response mirrors
     /// split_pane (`ready` field included). Switch layers with activate_pane_layer.
@@ -2790,7 +2790,7 @@ impl McpHandler {
         self.bridge("action", "panes", "stack", params).await
     }
 
-    /// Show one stacked layer of its pane slot (ADR-0295), by layer_id or terminal_id.
+    /// Show one stacked layer of its pane slot (ADR-0297), by layer_id or terminal_id.
     /// Switches workspace when needed and focuses the slot unless focus=false.
     #[tool]
     async fn activate_pane_layer(
@@ -2813,7 +2813,7 @@ impl McpHandler {
             .await
     }
 
-    /// Move a stacked layer (ADR-0297), like dragging a stack tab: onto its own slot
+    /// Move a stacked layer (ADR-0298), like dragging a stack tab: onto its own slot
     /// it reorders (`index`), onto another slot of the active workspace it joins that
     /// stack and is shown there. A slot left empty is removed and its space
     /// redistributed. Keyboard focus does not move. Single-layer panes are layers too,
@@ -2834,7 +2834,7 @@ impl McpHandler {
         self.bridge("action", "panes", "moveLayer", params).await
     }
 
-    /// Pull a stacked layer out into its own pane slot (ADR-0297), splitting its
+    /// Pull a stacked layer out into its own pane slot (ADR-0298), splitting its
     /// current slot like split_pane. Fails when the layer's slot has only one layer.
     #[tool]
     async fn extract_pane_layer(
@@ -2850,7 +2850,7 @@ impl McpHandler {
     }
 
     /// Stack every layer of pane slot source_index onto slot target_index and remove
-    /// the source slot (ADR-0297), like dropping a control bar on a pane's stack band.
+    /// the source slot (ADR-0298), like dropping a control bar on a pane's stack band.
     /// The source's shown layer becomes the target's shown layer.
     #[tool]
     async fn merge_panes(
@@ -2867,7 +2867,7 @@ impl McpHandler {
     }
 
     /// Move a whole pane slot (every stacked layer) from the active workspace to
-    /// another workspace (ADR-0297), like dropping a control bar on a workspace. The
+    /// another workspace (ADR-0298), like dropping a control bar on a workspace. The
     /// target's largest pane is split to host it. Refuses to empty the source
     /// workspace.
     #[tool]
@@ -2884,7 +2884,7 @@ impl McpHandler {
         .await
     }
 
-    /// Remove a pane from the active workspace grid. In a stacked slot (ADR-0295)
+    /// Remove a pane from the active workspace grid. In a stacked slot (ADR-0297)
     /// this closes one layer — `layer_id`, or the active layer — and the slot stays;
     /// closing the last layer removes the slot and remaining panes redistribute space.
     #[tool]

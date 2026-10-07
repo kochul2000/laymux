@@ -89,7 +89,7 @@ describe("terminal startup coordinator", () => {
   });
 });
 
-/** A single-layer workspace slot (ADR-0295). */
+/** A single-layer workspace slot (ADR-0297). */
 function slot(id: string, type: string) {
   return { layers: [{ id, view: { type } }], activeLayerId: id };
 }

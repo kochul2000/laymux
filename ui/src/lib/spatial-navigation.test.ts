@@ -211,7 +211,7 @@ describe("findSpatialStepTarget", () => {
   });
 });
 
-describe("buildSpatialOrder with stacked slots (ADR-0295)", () => {
+describe("buildSpatialOrder with stacked slots (ADR-0297)", () => {
   it("visits every terminal layer in stack order with the slot index", () => {
     const stacked: WorkspacePane = {
       id: "s",

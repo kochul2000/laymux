@@ -304,7 +304,7 @@ fn default_max_output_cache_kb() -> u32 {
     256
 }
 
-/// One stacked layer of a layout template slot (ADR-0295).
+/// One stacked layer of a layout template slot (ADR-0297).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LayoutLayer {
@@ -326,7 +326,7 @@ pub struct LayoutPane {
     /// Full view config (type + profile etc). When present, used instead of bare viewType.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub view_config: Option<serde_json::Value>,
-    /// Stacked form (ADR-0295). Authoritative when non-empty.
+    /// Stacked form (ADR-0297). Authoritative when non-empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub layers: Vec<LayoutLayer>,
     /// Index into `layers` of the layer shown when a workspace is created.
@@ -369,10 +369,10 @@ pub struct WorkspacePane {
     #[serde(default)]
     pub h: f64,
     /// Legacy compact single-layer content. Written only when the slot holds one
-    /// layer whose id equals the slot id (ADR-0295); otherwise `layers` is used.
+    /// layer whose id equals the slot id (ADR-0297); otherwise `layers` is used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub view: Option<WorkspacePaneView>,
-    /// Stacked content layers (ADR-0295). Authoritative when non-empty.
+    /// Stacked content layers (ADR-0297). Authoritative when non-empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub layers: Vec<PaneLayer>,
     /// Id of the visible layer in `layers`.
@@ -384,7 +384,7 @@ pub struct WorkspacePane {
     pub active_layer_id: Option<String>,
 }
 
-/// One stacked content layer of a workspace slot (ADR-0295).
+/// One stacked content layer of a workspace slot (ADR-0297).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct PaneLayer {
     /// Content id: the terminal id is `terminal-<id>`.
@@ -1487,7 +1487,7 @@ impl Default for DockSettings {
     }
 }
 
-/// Pane stack behavior (ADR-0295).
+/// Pane stack behavior (ADR-0297).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PaneStackSettings {
@@ -2240,7 +2240,7 @@ pub struct Settings {
     /// Dock behavior settings (distinct from the structural `docks` array).
     #[serde(default)]
     pub dock: DockSettings,
-    /// Pane stack behavior (ADR-0295).
+    /// Pane stack behavior (ADR-0297).
     #[serde(default)]
     pub pane_stack: PaneStackSettings,
     #[serde(default)]

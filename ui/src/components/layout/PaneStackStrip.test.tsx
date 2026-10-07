@@ -14,7 +14,7 @@ const layers: PaneLayer[] = [
   { id: "c", view: { type: "TerminalView" } },
 ];
 
-describe("PaneStackStrip (ADR-0295)", () => {
+describe("PaneStackStrip (ADR-0297)", () => {
   beforeEach(() => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useTerminalStore.setState(useTerminalStore.getInitialState());

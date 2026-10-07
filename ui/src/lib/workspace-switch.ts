@@ -69,7 +69,7 @@ export function resolveWorkspaceLandingPane(
   if (paneIndex === null) return null;
   const slot = panes[paneIndex];
   if (!slot) return null;
-  // The surface lands on the slot's visible content (ADR-0295).
+  // The surface lands on the slot's visible content (ADR-0297).
   const pane = activeLayer(slot);
   return {
     paneIndex,

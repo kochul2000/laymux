@@ -308,7 +308,7 @@ export interface DockSettings {
   arrowFocusPane: boolean;
 }
 
-/** Pane stack behavior (ADR-0295). */
+/** Pane stack behavior (ADR-0297). */
 export interface PaneStackSettings {
   /**
    * When Alt+Arrow finds no pane and no dock in that direction, step the focused

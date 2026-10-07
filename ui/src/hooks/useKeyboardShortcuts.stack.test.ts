@@ -14,7 +14,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { makeSlot } from "@/lib/pane-layers";
 import type { WorkspacePane } from "@/stores/types";
 
-/** Pane stack keyboard behavior (ADR-0295). */
+/** Pane stack keyboard behavior (ADR-0297). */
 function fireKey(
   key: string,
   mods: { ctrlKey?: boolean; shiftKey?: boolean; altKey?: boolean } = {},

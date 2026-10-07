@@ -1,5 +1,5 @@
 /**
- * User-facing pane stack actions (ADR-0295) shared by the control bar, the
+ * User-facing pane stack actions (ADR-0297) shared by the control bar, the
  * stack strip, keyboard shortcuts and Automation. Each one resolves its target
  * from raw state and commits focus through `activatePaneLayer`, the single
  * owner of the layer-activation + focus transition.

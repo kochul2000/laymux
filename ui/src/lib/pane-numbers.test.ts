@@ -117,7 +117,7 @@ describe("paneNumberFor", () => {
   });
 });
 
-describe("computePaneNumbers with stacked slots (ADR-0295)", () => {
+describe("computePaneNumbers with stacked slots (ADR-0297)", () => {
   it("numbers each layer of a stack consecutively within reading order", () => {
     const panes: NumberablePane[] = [
       { ...p("right", 0.5, 0), layers: [{ id: "r1" }, { id: "r2" }, { id: "r3" }] },

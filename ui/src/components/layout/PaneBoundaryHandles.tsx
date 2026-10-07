@@ -26,7 +26,7 @@ interface Props {
 }
 
 /**
- * A boundary collapse never closes a pane stack (ADR-0295): that would silently
+ * A boundary collapse never closes a pane stack (ADR-0297): that would silently
  * kill every stacked terminal. Stacked slots stay (at minimum size) and their
  * layers are closed explicitly instead.
  */
@@ -47,7 +47,7 @@ export function PaneBoundaryHandles({
 }: Props) {
   const activeWorkspace = useWorkspaceStore((s) => s.getActiveWorkspace());
   const storeResizePane = useWorkspaceStore((s) => s.resizePane);
-  // A collapsed boundary removes the whole slot, stacked layers included (ADR-0295).
+  // A collapsed boundary removes the whole slot, stacked layers included (ADR-0297).
   const storeRemovePane = useWorkspaceStore((s) => s.removeSlot);
 
   const panes = propPanes ?? activeWorkspace?.panes ?? [];

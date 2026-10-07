@@ -240,7 +240,7 @@ function computeNeighbors(
   for (let i = 0; i < panes.length; i++) {
     if (i === targetIndex) continue;
     const other = panes[i];
-    // Neighbors are slots; each reports its visible (active-layer) content (ADR-0295).
+    // Neighbors are slots; each reports its visible (active-layer) content (ADR-0297).
     const otherContent = activeLayer(other);
     const entry: NeighborEntry = {
       paneIndex: i,
@@ -291,7 +291,7 @@ function findTerminalContext(terminalId: string) {
   const workspace = workspaces.find((ws) => ws.id === terminal.workspaceId);
   if (!workspace) return null;
 
-  // The terminal is a content layer; `pane` is the slot that holds it (ADR-0295).
+  // The terminal is a content layer; `pane` is the slot that holds it (ADR-0297).
   const entry = findLayerEntry(workspace.panes, toPaneId(terminalId));
   const paneIndex = entry ? entry.slotIndex : -1;
   const pane = entry ? entry.slot : null;
@@ -407,7 +407,7 @@ async function prepareTerminalForAutomation(terminalId: string): Promise<Handler
 
 /**
  * Project slots into the external pane list: one entry per content layer
- * (ADR-0295). `id`/`view`/`terminalId`/`paneNumber` describe the layer;
+ * (ADR-0297). `id`/`view`/`terminalId`/`paneNumber` describe the layer;
  * `paneIndex` and the rect describe its slot; the stack fields say where the
  * layer sits. Unstacked workspaces produce the pre-stack entries plus the
  * additive stack fields.
@@ -830,7 +830,7 @@ const handlers: HandlerMap = {
             : undefined,
       });
     },
-    // ADR-0295: a stacked slot loses one layer (`layerId`, or the active one) and
+    // ADR-0297: a stacked slot loses one layer (`layerId`, or the active one) and
     // stays; the last layer takes the slot with it.
     remove: (p) => {
       const paneIndex = p.paneIndex as number;
@@ -847,7 +847,7 @@ const handlers: HandlerMap = {
       const remainingLayers = slotRemoved ? 0 : (ws?.panes[paneIndex]?.layers.length ?? 0);
       return ok({ removed: true, slotRemoved, remainingLayers });
     },
-    // ADR-0295: stack a new layer on a slot. Mirrors `split`: MCP callers get a
+    // ADR-0297: stack a new layer on a slot. Mirrors `split`: MCP callers get a
     // usable terminal by default, and an explicit cwd beats the inherited seed.
     stack: (p) => {
       const paneIndex = p.paneIndex as number;
@@ -889,7 +889,7 @@ const handlers: HandlerMap = {
             : undefined,
       });
     },
-    // ADR-0295: show one stacked layer (by layer id or terminal id).
+    // ADR-0297: show one stacked layer (by layer id or terminal id).
     activateLayer: (p) => {
       const rawId =
         typeof p.layerId === "string"
@@ -910,7 +910,7 @@ const handlers: HandlerMap = {
         focused: focus,
       });
     },
-    // ADR-0297: the rearrangements a user makes by dragging (ADR-0295 2nd scope)
+    // ADR-0298: the rearrangements a user makes by dragging (ADR-0297 2nd scope)
     // or dropping a pane on a workspace. Like split/stack, none of them move
     // keyboard focus; the store actions keep each moved layer shown.
     moveLayer: (p) => {
@@ -1179,7 +1179,7 @@ const handlers: HandlerMap = {
                   workspace.id === activeWorkspaceId &&
                   focusedPaneIndex === paneIndex &&
                   entry.active,
-                // Where this terminal sits in its slot stack (ADR-0295).
+                // Where this terminal sits in its slot stack (ADR-0297).
                 stack: {
                   position: entry.layerIndex,
                   count: pane.layers.length,
@@ -1213,7 +1213,7 @@ const handlers: HandlerMap = {
       if (dockCtx) {
         focusDockPane(dockCtx.dock.position, dockCtx.pane.id);
       } else if (terminalWorkspaceId && paneIndex >= 0) {
-        // The terminal may sit on an inactive stacked layer (ADR-0295).
+        // The terminal may sit on an inactive stacked layer (ADR-0297).
         activatePaneLayer(terminalWorkspaceId, toPaneId(terminalId));
       }
 

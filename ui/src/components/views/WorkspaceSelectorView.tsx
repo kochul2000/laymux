@@ -378,7 +378,7 @@ function WorkspaceItem({
             {(() => {
               const showMinimap = panes.length >= 1;
               const minimapPanes = panes.map((p) => ({ x: p.x, y: p.y, w: p.w, h: p.h }));
-              // Rows are content: one per stacked layer (ADR-0295). paneIndex stays
+              // Rows are content: one per stacked layer (ADR-0297). paneIndex stays
               // the slot index for focus and the minimap.
               const rows = layerEntries(panes).map((entry) => ({
                 ...entry.layer,
@@ -1225,7 +1225,7 @@ export function WorkspaceSelectorView() {
     if (pane.view.type === "TerminalView") {
       markNotificationsRead([toTerminalId(pane.id)]).catch(() => {});
     }
-    // The row may be an inactive stacked layer (ADR-0295).
+    // The row may be an inactive stacked layer (ADR-0297).
     activatePaneLayer(wsId, pane.id);
   };
 

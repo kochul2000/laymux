@@ -214,7 +214,7 @@ function navigatePaneFocus(e: KeyboardEvent) {
       return;
     }
   }
-  // Nothing in that direction at all → step the focused stack (ADR-0295).
+  // Nothing in that direction at all → step the focused stack (ADR-0297).
   // Docks come first so a full-screen stack never traps dock entry.
   if (useSettingsStore.getState().paneStack.cycleOnBlockedArrow) {
     cycleFocusedLayer(layerStepForDirection(direction));
@@ -298,7 +298,7 @@ const SHORTCUT_HANDLERS: Record<string, (e: KeyboardEvent) => void> = {
   // pane.focus (default Alt+Arrow wildcard): pane navigation (workspace + dock)
   "pane.focus": navigatePaneFocus,
 
-  // pane.layer (default Alt+Shift+Arrow wildcard) / pane.stack (default Ctrl+Alt+S): ADR-0295
+  // pane.layer (default Alt+Shift+Arrow wildcard) / pane.stack (default Ctrl+Alt+S): ADR-0297
   "pane.layer": cyclePaneLayer,
   "pane.stack": (e) => {
     if (stackFocusedPane()) e.preventDefault();

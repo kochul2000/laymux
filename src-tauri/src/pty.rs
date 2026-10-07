@@ -1,6 +1,6 @@
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use std::io::Write;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -170,6 +170,7 @@ pub(crate) fn chunked_write_to_guarded(
 /// Handle to a running PTY process, providing write and resize capabilities.
 #[derive(Clone)]
 pub struct PtyHandle {
+    checkpoint_input_revision: Arc<AtomicU64>,
     session_restore: Option<Arc<PendingSessionRestore>>,
     /// Owns the writer on one terminal-specific FIFO thread.
     control: Arc<PtyControlWorker>,
@@ -234,10 +235,27 @@ impl PtyHandle {
             .then_some((restore.provider, restore.session_id.as_str()))
     }
 
+    /// The validated request actually dispatched at this PTY's creation.
+    /// This is only a candidate: callers must prove the current live title,
+    /// process and rollout. It never reopens the consumed startup grace.
+    pub(crate) fn session_restore_request(&self) -> Option<(&'static str, &str)> {
+        self.session_restore
+            .as_ref()
+            .map(|restore| (restore.provider, restore.session_id.as_str()))
+    }
+
     pub(crate) fn consume_session_restore(&self) {
         if let Some(restore) = &self.session_restore {
             restore.consumed.store(true, Ordering::Release);
         }
+    }
+
+    pub(crate) fn checkpoint_input_revision(&self) -> u64 {
+        self.checkpoint_input_revision.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn checkpoint_input_healthy(&self) -> bool {
+        !self.input_faulted.load(Ordering::Acquire)
     }
 
     /// Only the generation-checked protocol reply commands may use this path.
@@ -265,6 +283,7 @@ impl PtyHandle {
     ) -> Self {
         let master = Arc::new(Mutex::new(None));
         Self {
+            checkpoint_input_revision: Arc::new(AtomicU64::new(0)),
             session_restore: None,
             control: PtyControlWorker::spawn(writer, Arc::clone(&master))
                 .expect("test PTY control worker"),
@@ -414,6 +433,8 @@ impl PtyHandle {
     ) -> Result<PendingControlJob, String> {
         self.ensure_input_healthy()?;
         if !data.is_empty() || submit {
+            self.checkpoint_input_revision
+                .fetch_add(1, Ordering::AcqRel);
             self.consume_session_restore();
         }
         self.control.submit_write(data, submit, deadline)
@@ -826,6 +847,7 @@ where
     let master = Arc::new(Mutex::new(Some(pair.master)));
     let control = PtyControlWorker::spawn(writer, Arc::clone(&master))?;
     let handle = PtyHandle {
+        checkpoint_input_revision: Arc::new(AtomicU64::new(0)),
         session_restore: None,
         control,
         master,

@@ -712,7 +712,7 @@ describe("PaneGrid restart wiring (ADR-0113)", () => {
   });
 });
 
-describe("PaneGrid stacked slots (ADR-0295)", () => {
+describe("PaneGrid stacked slots (ADR-0297)", () => {
   const stackedSlot = (activeLayerId: string): GridPane => ({
     id: "slot",
     x: 0,
@@ -774,7 +774,7 @@ describe("PaneGrid stacked slots (ADR-0295)", () => {
   });
 });
 
-describe("PaneGrid stack UI (ADR-0295)", () => {
+describe("PaneGrid stack UI (ADR-0297)", () => {
   const single: GridPane = {
     id: "slot",
     x: 0,
@@ -867,7 +867,7 @@ describe("PaneGrid stack UI (ADR-0295)", () => {
   });
 });
 
-describe("PaneGrid layer rearrangement (ADR-0295)", () => {
+describe("PaneGrid layer rearrangement (ADR-0297)", () => {
   const makeDataTransfer = () => ({
     data: {} as Record<string, string>,
     types: [] as string[],

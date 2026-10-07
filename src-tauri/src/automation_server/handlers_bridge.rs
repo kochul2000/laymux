@@ -335,7 +335,7 @@ pub async fn panes_split(
     }
 }
 
-/// Stack a new layer on a slot (ADR-0295). Mirrors `panes_split`.
+/// Stack a new layer on a slot (ADR-0297). Mirrors `panes_split`.
 pub async fn panes_stack(
     AxumState(state): AxumState<ServerState>,
     Json(body): Json<StackPaneBody>,
@@ -357,7 +357,7 @@ pub async fn panes_stack(
     }
 }
 
-/// Show one stacked layer, by layer id or terminal id (ADR-0295).
+/// Show one stacked layer, by layer id or terminal id (ADR-0297).
 pub async fn panes_activate_layer(
     AxumState(state): AxumState<ServerState>,
     Json(body): Json<ActivateLayerBody>,
@@ -401,7 +401,7 @@ fn layer_target_params(
     }
 }
 
-/// Move a layer onto a slot of the active workspace (ADR-0297).
+/// Move a layer onto a slot of the active workspace (ADR-0298).
 pub async fn panes_move_layer(
     AxumState(state): AxumState<ServerState>,
     Json(body): Json<MoveLayerBody>,
@@ -420,7 +420,7 @@ pub async fn panes_move_layer(
     }
 }
 
-/// Pull a stacked layer out into its own split slot (ADR-0297).
+/// Pull a stacked layer out into its own split slot (ADR-0298).
 pub async fn panes_extract_layer(
     AxumState(state): AxumState<ServerState>,
     Json(body): Json<ExtractLayerBody>,
@@ -442,7 +442,7 @@ pub async fn panes_extract_layer(
     }
 }
 
-/// Stack a whole slot onto another slot (ADR-0297).
+/// Stack a whole slot onto another slot (ADR-0298).
 pub async fn panes_merge(
     AxumState(state): AxumState<ServerState>,
     Json(body): Json<MergePanesBody>,
@@ -457,7 +457,7 @@ pub async fn panes_merge(
     }
 }
 
-/// Carry a whole slot to another workspace (ADR-0297).
+/// Carry a whole slot to another workspace (ADR-0298).
 pub async fn panes_move_to_workspace(
     AxumState(state): AxumState<ServerState>,
     Path(index): Path<usize>,

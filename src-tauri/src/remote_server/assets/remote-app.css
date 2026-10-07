@@ -2173,7 +2173,7 @@
       .workspace-pane-row.hidden-item {
         opacity: 0.48;
       }
-      /* Pane stack (ADR-0295): a layer hidden under its slot's visible layer. */
+      /* Pane stack (ADR-0297): a layer hidden under its slot's visible layer. */
       .workspace-pane-row.stacked-inactive {
         opacity: 0.68;
       }
@@ -2419,6 +2419,24 @@
       }
       .xterm .xterm-viewport {
         background-color: transparent;
+      }
+      /* Pane switch in flight: the previous pane's screen stays until the new
+         snapshot lands, so dim it to say it is no longer the live pane. The dim
+         eases in slowly after a short delay so a fast attach never flickers,
+         and lifts quickly once the new screen is on the surface. */
+      #terminalViewport {
+        transition: opacity 150ms ease;
+      }
+      #terminal[data-transition] #terminalViewport {
+        opacity: 0.6;
+        transition: opacity 700ms ease 150ms;
+      }
+      /* Reduced motion keeps the delay (no flash) and drops the fade. */
+      @media (prefers-reduced-motion: reduce) {
+        #terminalViewport,
+        #terminal[data-transition] #terminalViewport {
+          transition-duration: 1ms;
+        }
       }
       .grow {
         flex: 1 1 auto;
@@ -3077,6 +3095,34 @@
       .file-viewer-download[disabled] {
         color: var(--muted);
         opacity: 0.6;
+      }
+      /* Open/Download never shrink below their content: a squeezed label used
+         to spill past the border on a narrow phone. Wide headers show the
+         label alone; narrow ones swap it for the icon and keep the label for
+         the accessible name only. */
+      .file-viewer-header {
+        container: file-viewer-header / inline-size;
+      }
+      .file-viewer-download {
+        position: relative;
+        flex: 0 0 auto;
+        white-space: nowrap;
+      }
+      .file-viewer-action-icon {
+        display: none;
+      }
+      @container file-viewer-header (max-width: 400px) {
+        .file-viewer-action-icon {
+          display: inline-flex;
+        }
+        .file-viewer-action-label {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          overflow: hidden;
+          clip: rect(0 0 0 0);
+          white-space: nowrap;
+        }
       }
       .file-viewer-zoom-level {
         min-width: 40px;

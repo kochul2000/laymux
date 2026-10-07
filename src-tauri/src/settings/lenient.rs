@@ -298,7 +298,7 @@ mod tests {
     fn missing_required_field_widens_the_drop_to_the_parent() {
         // WorkspacePaneView.type has no default. A mistyped `type` first drops
         // the key, then the parent view — loss grows outward only as far as the
-        // schema forces. `view` is optional since pane stacking (ADR-0295), so
+        // schema forces. `view` is optional since pane stacking (ADR-0297), so
         // the pane survives lenient loading without content and
         // `validate_and_repair` removes it afterwards.
         let raw = r#"{

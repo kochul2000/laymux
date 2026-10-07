@@ -21,7 +21,7 @@ export interface NumberablePane {
   y: number;
   w: number;
   h: number;
-  /** Stacked content (ADR-0295); each layer gets its own number. */
+  /** Stacked content (ADR-0297); each layer gets its own number. */
   layers?: readonly { id: string }[];
 }
 
@@ -38,7 +38,7 @@ export const GRID_EPS = 0.01;
  * Compute the spatial reading-order number (1..N) for each pane.
  * Sort by y ascending; panes within EPS on y are the same row, sorted by x ascending.
  *
- * Numbers belong to **content** (ADR-0295): a stacked workspace slot numbers
+ * Numbers belong to **content** (ADR-0297): a stacked workspace slot numbers
  * each of its layers consecutively in stack order, so the map is keyed by layer
  * id — never by slot id. Look a slot's visible number up with its active layer
  * id. Panes without `layers` (dock panes) are keyed by their own id.

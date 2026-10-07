@@ -25,7 +25,7 @@ import { resolvePaneCwd } from "@/lib/pane-cwd";
 import { runPaneClearFromUi } from "@/lib/pane-clear-action";
 
 /**
- * A grid slot: geometry plus stacked content layers (ADR-0295). Dock panes are
+ * A grid slot: geometry plus stacked content layers (ADR-0297). Dock panes are
  * passed as single-layer slots whose layer shares the pane id.
  */
 export type GridPane = WorkspacePane;
@@ -48,7 +48,7 @@ export interface PaneGridProps {
   onPaneFocus: (paneId: string) => void;
 
   // Pane operations. `paneId` is the slot id; `layerId` names the content layer
-  // the control acted on (ADR-0295). For dock panes both are the pane id.
+  // the control acted on (ADR-0297). For dock panes both are the pane id.
   onSetPaneView?: (paneId: string, config: ViewInstanceConfig, layerId: string) => void;
   onSplitPane?: (paneId: string, dir: "horizontal" | "vertical") => void;
   onRemovePane?: (paneId: string, layerId: string) => void;
@@ -60,14 +60,14 @@ export interface PaneGridProps {
    */
   onSwapPanes?: (srcPaneId: string, tgtPaneId: string) => void;
   /**
-   * Pane stack (ADR-0295). `onStackPane` adds a layer to the slot (control bar
+   * Pane stack (ADR-0297). `onStackPane` adds a layer to the slot (control bar
    * Stack button and the strip `+`); `onActivateLayer` shows one of its layers.
    * Omitted (dock) → no Stack button and no strip interaction.
    */
   onStackPane?: (paneId: string) => void;
   onActivateLayer?: (paneId: string, layerId: string) => void;
   /**
-   * Layer rearrangement (ADR-0295). `onMoveLayer` takes a dragged tab to slot
+   * Layer rearrangement (ADR-0297). `onMoveLayer` takes a dragged tab to slot
    * `targetPaneId` (optionally at `index` among its other layers);
    * `onExtractLayer` splits a layer out of its stack; `onMergeSlot` stacks a
    * dragged slot onto another one.
@@ -150,7 +150,7 @@ export function PaneGrid({
   // Other view types do not allocate a PTY/xterm renderer and mount immediately.
   const startupRevealedPaneIds = useTerminalStartupStore((state) => state.revealedPaneIds);
   // Every content layer is rendered as its own box keyed by layer id, sharing
-  // its slot's rect; only the active layer is shown (ADR-0295). Keying by layer
+  // its slot's rect; only the active layer is shown (ADR-0297). Keying by layer
   // id keeps a terminal mounted when its layer is activated, reordered or moved.
   const boxes = useMemo(
     () =>
@@ -205,7 +205,7 @@ export function PaneGrid({
     useTerminalRestartStore.getState().requestRestart(pane.id, resolvePaneCwd(pane));
   }, []);
 
-  // Pane stack DnD (ADR-0295). A slot dragged by its control bar swaps with the
+  // Pane stack DnD (ADR-0297). A slot dragged by its control bar swaps with the
   // target, or — dropped on the target's top band — merges into its stack. A
   // stack tab dragged onto another slot joins that slot's stack.
   const [dragZone, setDragZone] = useState<"swap" | "stack">("swap");
@@ -358,7 +358,7 @@ export function PaneGrid({
               ))}
             {/* The column wrapper and content slot are always rendered so that a
                 slot turning into a stack only inserts the strip — the control bar
-                and view keep their place and never remount (ADR-0295). */}
+                and view keep their place and never remount (ADR-0297). */}
             <div className="flex h-full w-full min-w-0 flex-col">
               {active && pane.layers.length > 1 && (
                 <PaneStackStrip

@@ -37,7 +37,7 @@ export function focusWorkspacePane(workspaceId: string, paneIndex: number): bool
 }
 
 /**
- * Show a stacked layer and (by default) focus its slot (ADR-0295 extends
+ * Show a stacked layer and (by default) focus its slot (ADR-0297 extends
  * ADR-0081). Every flow that points at content which may sit on an inactive
  * layer — stack tabs, keyboard cycling, notification and Remote navigation,
  * Automation terminal focus — commits through here instead of setting

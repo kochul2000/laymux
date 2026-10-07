@@ -53,7 +53,9 @@ fn expiration_rejects_late_enter_before_process_or_pty_access() {
     )
     .unwrap_err();
     assert!(error.contains("expired"));
-    assert!(verified_status_sessions(&state).unwrap().is_empty());
+    assert!(verified_status_sessions(&state, &Default::default())
+        .unwrap()
+        .is_empty());
     finish_inner(&state, "test-token").unwrap();
     assert!(state.session_checkpoint.ensure_mutations_allowed().is_ok());
 }
@@ -101,7 +103,9 @@ fn stale_tokens_cannot_release_a_new_checkpoint_fence() {
     assert!(state.session_checkpoint.ensure_mutations_allowed().is_err());
     finish_inner(&state, "test-token").unwrap();
     assert!(state.session_checkpoint.ensure_mutations_allowed().is_ok());
-    assert!(verified_status_sessions(&state).unwrap().is_empty());
+    assert!(verified_status_sessions(&state, &Default::default())
+        .unwrap()
+        .is_empty());
 }
 
 #[test]

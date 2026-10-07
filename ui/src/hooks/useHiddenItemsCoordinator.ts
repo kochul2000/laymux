@@ -13,7 +13,7 @@ function reconcileHiddenItems(): void {
   const { workspaces } = useWorkspaceStore.getState();
   const validWorkspaceIds = new Set(workspaces.map((workspace) => workspace.id));
   const validPaneIds = new Set(
-    // Hidden flags are per content layer (ADR-0295).
+    // Hidden flags are per content layer (ADR-0297).
     workspaces.flatMap((workspace) => allLayerIds(workspace.panes)),
   );
   useUiStore.getState().pruneHiddenIds(validWorkspaceIds, validPaneIds);

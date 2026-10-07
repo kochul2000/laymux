@@ -52,7 +52,7 @@ export function useHiddenTerminalAutoClose() {
 
       const ws = useWorkspaceStore.getState();
       const panes: HideCandidatePane[] = ws.workspaces.flatMap((w) =>
-        // Hide flags and eviction are per content layer (ADR-0295).
+        // Hide flags and eviction are per content layer (ADR-0297).
         allLayerIds(w.panes).map((paneId) => ({ paneId, workspaceId: w.id })),
       );
 

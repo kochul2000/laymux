@@ -46,7 +46,7 @@ export function WorkspaceArea() {
         if (!mountedWsIds.has(ws.id)) return null;
         // Only background workspaces may have panes evicted; the active workspace
         // always renders in full so the user never sees a blanked-out pane.
-        // Eviction is per content layer (ADR-0295); a slot whose layers were all
+        // Eviction is per content layer (ADR-0297); a slot whose layers were all
         // evicted renders nothing.
         const renderedPanes =
           isActive || evictedPaneIds.size === 0

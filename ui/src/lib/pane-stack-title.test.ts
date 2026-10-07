@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { layerTabTitle } from "./pane-stack-title";
 
-describe("layerTabTitle (ADR-0295)", () => {
+describe("layerTabTitle (ADR-0297)", () => {
   it("uses the view label for non-terminal layers", () => {
     expect(layerTabTitle({ viewType: "MemoView" })).toBe("Memo");
     expect(layerTabTitle({ viewType: "EmptyView" })).toBe("Empty");

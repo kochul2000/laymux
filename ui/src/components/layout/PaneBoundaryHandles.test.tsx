@@ -76,7 +76,7 @@ describe("PaneBoundaryHandles", () => {
     expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes).toHaveLength(1);
   });
 
-  it("double-click never closes a pane stack (ADR-0295)", () => {
+  it("double-click never closes a pane stack (ADR-0297)", () => {
     useWorkspaceStore.getState().splitPane(0, "vertical");
     // Equal halves: the left side is the one the double-click would remove.
     useWorkspaceStore.getState().stackPane(0);

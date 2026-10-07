@@ -245,7 +245,7 @@ const ENTRIES: &[MetadataEntry] = &[
     },
     MetadataEntry {
         path: "/paneStack",
-        description: "pane 스택(ADR-0295) 동작입니다. cycleOnBlockedArrow 가 켜져 있으면(기본 true) Alt+Arrow 방향에 pane 도 dock 도 없을 때 포커스된 슬롯의 스택을 순환합니다(오른쪽/아래 = 다음 레이어, 왼쪽/위 = 이전).",
+        description: "pane 스택(ADR-0297) 동작입니다. cycleOnBlockedArrow 가 켜져 있으면(기본 true) Alt+Arrow 방향에 pane 도 dock 도 없을 때 포커스된 슬롯의 스택을 순환합니다(오른쪽/아래 = 다음 레이어, 왼쪽/위 = 이전).",
         sensitive: false,
         apply_mode: ApplyMode::Live,
     },

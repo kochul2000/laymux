@@ -1370,14 +1370,14 @@ export interface SettingsLayout {
     h: number;
     viewType: string;
     viewConfig?: { type: string; [key: string]: unknown };
-    /** Stacked template slot (ADR-0295). */
+    /** Stacked template slot (ADR-0297). */
     layers?: { viewType: string; viewConfig?: { type: string; [key: string]: unknown } }[];
     activeLayerIndex?: number;
   }[];
 }
 
 /**
- * On-disk workspace pane (ADR-0295): the legacy compact `view` form, or the
+ * On-disk workspace pane (ADR-0297): the legacy compact `view` form, or the
  * stacked `layers` + `activeLayerId` form.
  */
 export interface SettingsWorkspacePane {

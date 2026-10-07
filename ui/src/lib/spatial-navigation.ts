@@ -56,7 +56,7 @@ export function buildSpatialOrder(
   const entries: SpatialEntry[] = [];
   for (const workspace of visibleWorkspaces) {
     const numbers = computePaneNumbers(workspace.panes);
-    // Every terminal layer takes part, stacked or not (ADR-0295): the walk is
+    // Every terminal layer takes part, stacked or not (ADR-0297): the walk is
     // (slot reading order × stack order), which is exactly paneNumber order.
     layerEntries(workspace.panes)
       .filter(({ layer }) => layer.view.type === "TerminalView")

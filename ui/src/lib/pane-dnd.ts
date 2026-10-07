@@ -32,7 +32,7 @@ export function isPaneDrag(e: React.DragEvent): boolean {
 }
 
 /**
- * Dragging one stacked layer (a pane stack tab, ADR-0295). Dropped on a tab it
+ * Dragging one stacked layer (a pane stack tab, ADR-0297). Dropped on a tab it
  * reorders or moves to that position; dropped on another slot it joins that
  * slot's stack.
  */

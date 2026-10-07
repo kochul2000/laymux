@@ -80,7 +80,7 @@ describe("workspace-transition", () => {
   });
 });
 
-describe("activatePaneLayer (ADR-0295)", () => {
+describe("activatePaneLayer (ADR-0297)", () => {
   const stacked: Workspace[] = [
     {
       id: "ws-a",

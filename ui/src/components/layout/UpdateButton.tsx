@@ -12,7 +12,7 @@ export function UpdateButton() {
     <button
       data-testid="app-update-btn"
       data-operation={status.operation}
-      onClick={() => useLifecycleStore.getState().openUpdate()}
+      onClick={() => useLifecycleStore.getState().openUpdate({ check: true })}
       className="flex h-6 shrink-0 cursor-pointer items-center justify-center gap-1 border-0 bg-transparent px-1 text-[10px]"
       style={{ color: busy ? "var(--accent)" : "var(--yellow)" }}
       title={title}

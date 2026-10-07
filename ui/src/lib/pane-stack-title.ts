@@ -31,7 +31,7 @@ function lastSegment(cwd: string): string {
 }
 
 /**
- * Title of a pane stack tab (ADR-0295). A program-set terminal title wins
+ * Title of a pane stack tab (ADR-0297). A program-set terminal title wins
  * ("npm run dev", "✳ Claude Code"); a shell that only reports its path gets
  * the selector-style environment label plus the directory name ("PS ·
  * PycharmProjects"); other views use their view label.

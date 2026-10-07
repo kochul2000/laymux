@@ -71,7 +71,7 @@ export function projectWorkspaceTerminals(
   instances: TerminalInstance[],
 ): TerminalInstance[] {
   const instancesById = new Map(instances.map((instance) => [instance.id, instance]));
-  // Every terminal layer is a terminal of the workspace, stacked or not (ADR-0295).
+  // Every terminal layer is a terminal of the workspace, stacked or not (ADR-0297).
   return panes
     .flatMap((slot) => slot.layers)
     .filter((pane) => pane.view.type === "TerminalView")

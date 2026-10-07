@@ -551,9 +551,12 @@ pub async fn create_terminal_session(
         for event in osc::iter_osc_events(&data) {
             if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
                 if let Some(session) = terms.get_mut(&terminal_id) {
-                    session
+                    if session
                         .codex_hook_title
-                        .observe(&event, terminal_generation);
+                        .observe(&event, terminal_generation)
+                    {
+                        state_for_pty.session_checkpoint.hints.request();
+                    }
                 }
             }
             // Arm notify gate on user command observation (OSC 133;C or 133;E)
@@ -786,6 +789,7 @@ pub async fn create_terminal_session(
                     if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
                         if let Some(session) = terms.get_mut(&terminal_id) {
                             session.codex_hook_title.clear();
+                            state_for_pty.session_checkpoint.hints.request();
                         }
                     }
                     // Mirror of the Claude exit above, through the same shared

@@ -1936,7 +1936,7 @@ mod tests {
             serde_json::from_value(serde_json::json!({"type": "TerminalView"})).unwrap(),
         );
         let json = serde_json::to_string(&pane).unwrap();
-        // The compact form stays compact: no stack fields are written (ADR-0295).
+        // The compact form stays compact: no stack fields are written (ADR-0297).
         assert!(!json.contains("layers"));
         assert!(!json.contains("activeLayerId"));
         let parsed: WorkspacePane = serde_json::from_str(&json).unwrap();

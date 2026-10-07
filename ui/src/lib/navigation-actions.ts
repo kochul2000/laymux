@@ -111,7 +111,7 @@ export function spatialStep(
   if (!target) return { moved: false, reason: "no_other_target" };
 
   const switchedWorkspace = target.workspaceId !== activeWorkspaceId;
-  // The target may sit on an inactive stacked layer (ADR-0295).
+  // The target may sit on an inactive stacked layer (ADR-0297).
   activatePaneLayer(target.workspaceId, target.paneId);
 
   return {
@@ -137,7 +137,7 @@ export function spatialStep(
  */
 export function directionStep(direction: Direction): NavigationStepResult {
   const workspace = useWorkspaceStore.getState().getActiveWorkspace();
-  // Direction moves between slots; each slot shows its active layer (ADR-0295).
+  // Direction moves between slots; each slot shows its active layer (ADR-0297).
   const terminalIndexes = (workspace?.panes ?? []).flatMap((pane, index) =>
     activeLayer(pane).view.type === "TerminalView" ? [index] : [],
   );
@@ -194,7 +194,7 @@ export function notificationStep(direction: NotificationDirection): NavigationSt
   let paneIndex = 0;
   let paneNumber: number | null = null;
   if (ws) {
-    // paneId is a layer id; it may be an inactive stacked layer (ADR-0295).
+    // paneId is a layer id; it may be an inactive stacked layer (ADR-0297).
     const entry = findLayerEntry(ws.panes, paneId);
     paneIndex = entry ? entry.slotIndex : 0;
     if (entry) activatePaneLayer(target.workspaceId, paneId);

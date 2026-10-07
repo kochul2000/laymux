@@ -68,7 +68,7 @@ export function useSessionPersistence() {
         const allPaneIds: string[] = [
           ...(rawSettings.workspaces?.flatMap((ws) =>
             ws.panes
-              // Output caches belong to content layers (ADR-0295).
+              // Output caches belong to content layers (ADR-0297).
               .flatMap((p) => (p.layers?.length ? p.layers.map((layer) => layer.id) : [p.id]))
               .filter((id): id is string => Boolean(id)),
           ) ?? []),
@@ -86,7 +86,7 @@ export function useSessionPersistence() {
         // 하이드레이션 이후 워크스페이스/독 스토어의 현재 pane 집합을 기준으로 GC.
         const alivePaneIds = new Set<string>();
         for (const ws of useWorkspaceStore.getState().workspaces) {
-          // Pane overrides key on slots, view overrides and restarts on layers (ADR-0295).
+          // Pane overrides key on slots, view overrides and restarts on layers (ADR-0297).
           for (const p of ws.panes) {
             alivePaneIds.add(p.id);
             for (const layer of p.layers) alivePaneIds.add(layer.id);

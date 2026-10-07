@@ -207,7 +207,7 @@ Workspace (Independent)
 └── panes: [ 슬롯 { id, x, y, w, h, layers: [ { id, view } ], activeLayerId } ]
 ```
 
-**Pane 은 슬롯이고 콘텐츠는 레이어다**([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)). 슬롯이 기하를, 순서 있는 `layers` 가 콘텐츠를 소유하고 `activeLayerId` 하나만 보인다. 레이어가 둘 이상이면 그 슬롯은 스택이다.
+**Pane 은 슬롯이고 콘텐츠는 레이어다**([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)). 슬롯이 기하를, 순서 있는 `layers` 가 콘텐츠를 소유하고 `activeLayerId` 하나만 보인다. 레이어가 둘 이상이면 그 슬롯은 스택이다.
 
 - **헬퍼 단일 소유**: 활성 레이어 조회, 평탄화(`layerEntries`), 레이어 삽입·제거·활성화·순서 변경, 영속 형태 변환은 `ui/src/lib/pane-layers.ts` 순수 함수가 소유한다. 컴포넌트는 `layers`/`activeLayerId` 를 직접 쓰지 않고 `workspace-store` 액션(`stackPane`·`setActiveLayer`·`removePane(index, layerId?)`·`removeSlot`·`setPaneView(index, view, layerId?)`)을 부른다.
 - **id 역할**: 슬롯 id 는 swap·워크스페이스 간 이동·pane 오버라이드(`controlBarMode`) 키다. 레이어 id 는 콘텐츠 키다 — `terminal-<layerId>`, view 오버라이드, 메모, 재시작/CWD 시드 버스, 알림, hidden flag, 시작 코디네이터, 출력 캐시. 새 슬롯은 첫 레이어 id 를 슬롯 id 와 같게 만들지만 이는 생성 규칙이지 불변식이 아니다.
@@ -275,7 +275,7 @@ View:     viewOverrides[paneId]        (localStorage: "laymux-view-overrides")
 #### 생명주기
 
 - **Pane 삭제 시** (`workspace-store.removePane`·`removeSlot`, `dock-store.removeDockPane`, `workspace-store.removeWorkspace`):
-  `overridesStore.clearAll(paneId)` — pane/view 오버라이드 동시 제거. 워크스페이스 슬롯이 사라지면 슬롯 id 와 모든 레이어 id 를 지운다. 스택에서 레이어 하나만 닫히면 그 레이어의 view 오버라이드만 지우고, 그 레이어 id 가 살아 있는 슬롯 id 와 같아도 슬롯의 pane 오버라이드는 유지한다([ADR-0295](../adr/0295-pane-stack-slot-layer-model.md)).
+  `overridesStore.clearAll(paneId)` — pane/view 오버라이드 동시 제거. 워크스페이스 슬롯이 사라지면 슬롯 id 와 모든 레이어 id 를 지운다. 스택에서 레이어 하나만 닫히면 그 레이어의 view 오버라이드만 지우고, 그 레이어 id 가 살아 있는 슬롯 id 와 같아도 슬롯의 pane 오버라이드는 유지한다([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)).
 - **View 타입 전환 시** (`workspace-store.setPaneView`, `dock-store.setDockPaneView`):
   새 view.type ≠ 이전 view.type이면 `overridesStore.clearViewOverride(paneId)`. pane 오버라이드는 유지.
 - **앱 기동 시** (`useSessionPersistence`):

@@ -101,7 +101,7 @@ pub struct SplitPaneBody {
     pub cwd: Option<String>,
 }
 
-/// `POST /api/v1/panes/stack` (ADR-0295): stack a new layer on a slot.
+/// `POST /api/v1/panes/stack` (ADR-0297): stack a new layer on a slot.
 #[derive(Deserialize)]
 pub struct StackPaneBody {
     #[serde(rename = "paneIndex")]
@@ -112,11 +112,11 @@ pub struct StackPaneBody {
     /// Terminal profile of the new layer. Default profile when omitted.
     pub profile: Option<String>,
     /// Start directory of the new layer's terminal. When omitted it inherits
-    /// the slot's active layer CWD (ADR-0140 as extended by ADR-0295).
+    /// the slot's active layer CWD (ADR-0140 as extended by ADR-0297).
     pub cwd: Option<String>,
 }
 
-/// `POST /api/v1/panes/layers/activate` (ADR-0295): show one stacked layer.
+/// `POST /api/v1/panes/layers/activate` (ADR-0297): show one stacked layer.
 /// Exactly one of `layerId` / `terminalId` identifies the layer.
 #[derive(Deserialize)]
 pub struct ActivateLayerBody {
@@ -128,7 +128,7 @@ pub struct ActivateLayerBody {
     pub focus: Option<bool>,
 }
 
-/// `POST /api/v1/panes/layers/move` (ADR-0297): move a layer onto slot
+/// `POST /api/v1/panes/layers/move` (ADR-0298): move a layer onto slot
 /// `targetPaneIndex` of the active workspace. Inside one slot it reorders.
 /// Exactly one of `layerId` / `terminalId` identifies the layer.
 #[derive(Deserialize)]
@@ -143,7 +143,7 @@ pub struct MoveLayerBody {
     pub index: Option<usize>,
 }
 
-/// `POST /api/v1/panes/layers/extract` (ADR-0297): pull a stacked layer out
+/// `POST /api/v1/panes/layers/extract` (ADR-0298): pull a stacked layer out
 /// into its own slot, splitting its current slot like `panes/split`.
 #[derive(Deserialize)]
 pub struct ExtractLayerBody {
@@ -155,7 +155,7 @@ pub struct ExtractLayerBody {
     pub direction: String,
 }
 
-/// `POST /api/v1/panes/merge` (ADR-0297): stack every layer of slot
+/// `POST /api/v1/panes/merge` (ADR-0298): stack every layer of slot
 /// `sourceIndex` onto slot `targetIndex` and remove the source slot.
 #[derive(Deserialize)]
 pub struct MergePanesBody {
@@ -165,7 +165,7 @@ pub struct MergePanesBody {
     pub target_index: usize,
 }
 
-/// `POST /api/v1/panes/{index}/move-to-workspace` (ADR-0297): carry a whole
+/// `POST /api/v1/panes/{index}/move-to-workspace` (ADR-0298): carry a whole
 /// slot (every layer) to another workspace.
 #[derive(Deserialize)]
 pub struct MovePaneToWorkspaceBody {
@@ -173,7 +173,7 @@ pub struct MovePaneToWorkspaceBody {
     pub workspace_id: String,
 }
 
-/// `DELETE /api/v1/panes/{index}?layerId=` (ADR-0295): close one layer.
+/// `DELETE /api/v1/panes/{index}?layerId=` (ADR-0297): close one layer.
 #[derive(Deserialize)]
 pub struct RemovePaneQuery {
     #[serde(rename = "layerId")]

@@ -164,7 +164,7 @@ function applyWorkspaceSnapshot(rawSettings: Settings): void {
   let paneCounter = 0;
   const newPaneId = () => `loaded-pane-${++paneCounter}`;
   const seenContentIds = new Set<string>();
-  // Both on-disk forms normalize into canonical slots (ADR-0295).
+  // Both on-disk forms normalize into canonical slots (ADR-0297).
   const workspaces: Workspace[] = rawSettings.workspaces.map((workspace) => ({
     id: workspace.id,
     name: workspace.name,

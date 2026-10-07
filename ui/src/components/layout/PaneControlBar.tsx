@@ -46,13 +46,13 @@ export type { ControlBarMode } from "@/stores/settings-store";
 export interface PaneControlBarActions {
   onSplitH?: () => void;
   onSplitV?: () => void;
-  /** Stack a new layer on this slot (ADR-0295). Workspace grid only. */
+  /** Stack a new layer on this slot (ADR-0297). Workspace grid only. */
   onStack?: () => void;
   onClearTerminal?: () => void;
   onRestart?: () => void;
   onClear?: () => void;
   onDelete?: () => void;
-  /** Tooltip of the delete button; a stacked slot closes only its visible layer (ADR-0295). */
+  /** Tooltip of the delete button; a stacked slot closes only its visible layer (ADR-0297). */
   deleteTitle?: string;
   onChangeView?: (config: ViewInstanceConfig) => void;
   onToggleCwdSend?: () => void;
@@ -66,7 +66,7 @@ interface PaneControlBarProps {
   paneId?: string;
   /**
    * Content id the workspace-list hide toggle acts on: the stacked layer this bar
-   * belongs to (ADR-0295). Defaults to `paneId`.
+   * belongs to (ADR-0297). Defaults to `paneId`.
    */
   contentPaneId?: string;
   currentView: ViewInstanceConfig;
@@ -213,7 +213,7 @@ function ClearTerminalBtn({ onClick }: { onClick: () => void }) {
   );
 }
 
-/** Stack a new layer on this slot (ADR-0295); sits right after the split buttons. */
+/** Stack a new layer on this slot (ADR-0297); sits right after the split buttons. */
 function StackBtn({ onClick }: { onClick: () => void }) {
   const keys = useResolvedKeybinding("pane.stack");
   return (

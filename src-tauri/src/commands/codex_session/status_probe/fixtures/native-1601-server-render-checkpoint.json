@@ -1,0 +1,14 @@
+{
+  "source": "dev Codex 0.160.1 /status timeout, 2026-10-07; account and conversation ID anonymized",
+  "id": "01a0e103-7bcb-7a20-89c0-2dc0472f2957",
+  "screen": {
+    "generation": 6,
+    "seq": 66560,
+    "geometry": {
+      "revision": 7,
+      "cols": 96,
+      "rows": 45
+    },
+    "data": "  information on rate limits and credits\r\n\r\n\u001b[2m  Server:              \u001b[0mLocal background server\r\n\r\n\u001b[2m  Model:               \u001b[0mGPT-6-Astra\u001b[2m (reasoning max)\r\n  Model provider:      \u001b[0mopenai\r\n\u001b[2m  Directory:           \u001b[0mD:\\PycharmProjects\\laymux-codex-checkpoint-hook-latency\\.tmp\\project\r\n\u001b[2m  Permissions:         \u001b[0mWorkspace (Ask for approval)\r\n\u001b[2m  Agents.md:           \u001b[0m..\\..\\AGENTS.md\r\n\u001b[2m  Account:             \u001b[0mTest   \r\n\u001b[2m  Thread name:         \u001b[0mReturn CHECKPOINT_NATIVE_0295\r\n\u001b[2m  Collaboration mode:  \u001b[0mDefault\r\n\u001b[2m  Session:             \u001b[0m01a0e103-7bcb-7a20-89c0-2dc0472f2957\r\n\r\n\u001b[2m  Context window:      \u001b[0m96% left\u001b[2m (22.6K used / 258K)\r\n  Weekly limit:        \u001b[0m[█████████████████░░░] 87% left\u001b[2m (resets 2:21 PM on 11 Oct)\r\n  Credits:             \u001b[0m00000 credits\r\n\r\n/status\r\n\r\n  >_ \u001b[1mOpenAI Codex\u001b[22;2m (v0.160.1)\r\n\r\n\u001b[0m  Visit \u001b[4mhttps://chatgpt.com/codex/settings/usage\u001b[0m for up-to-date\r\n  information on rate limits and credits\r\n\r\n\u001b[2m  Server:              \u001b[0mLocal background server\r\n\r\n\u001b[2m  Model:               \u001b[0mGPT-6-Astra\u001b[2m (reasoning max)\r\n  Model provider:      \u001b[0mopenai\r\n\u001b[2m  Directory:           \u001b[0mD:\\PycharmProjects\\laymux-codex-checkpoint-hook-latency\\.tmp\\project\r\n\u001b[2m  Permissions:         \u001b[0mWorkspace (Ask for approval)\r\n\u001b[2m  Agents.md:           \u001b[0m..\\..\\AGENTS.md\r\n\u001b[2m  Account:             \u001b[0mTest   \r\n\u001b[2m  Thread name:         \u001b[0mReturn CHECKPOINT_NATIVE_0295\r\n\u001b[2m  Collaboration mode:  \u001b[0mDefault\r\n\u001b[2m  Session:             \u001b[0m01a0e103-7bcb-7a20-89c0-2dc0472f2957\r\n\r\n\u001b[2m  Context window:      \u001b[0m96% left\u001b[2m (22.6K used / 258K)\r\n  Weekly limit:        \u001b[0m[█████████████████░░░] 87% left\u001b[2m (resets 2:21 PM on 11 Oct)\r\n  Credits:             \u001b[0m00000 credits\r\n \r\n \r\n\u001b[1m›\u001b[0m \u001b[2mAsk Codex to do anything\r\n\u001b[0m \r\n  GPT-6-Astra max · Context 96% left · Ask for approval · \u001b[1m←\u001b[0m for agents\u001b[2A\u001b[68D\u001b[?2004h\u001b[?1004h"
+  }
+}

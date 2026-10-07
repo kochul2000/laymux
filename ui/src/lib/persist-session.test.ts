@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 
+vi.mock("./session-checkpoint-receipt", () => ({
+  captureSessionReceipt: vi.fn().mockResolvedValue(undefined),
+  commitSessionReceipt: vi.fn().mockResolvedValue(undefined),
+}));
+import { captureSessionReceipt, commitSessionReceipt } from "./session-checkpoint-receipt";
+
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async (command: string) => {
     if (command === "begin_codex_status_checkpoint") return { token: "close-proof", targets: [] };
@@ -1743,6 +1749,47 @@ describe("saveBeforeClose", () => {
     expect(calls[0]).toBeLessThan(saved);
     expect(calls[1]).toBeGreaterThan(saved);
   });
+
+  it.each(["unchanged", "frontend-change", "backend-change", "failed-save"])(
+    "reuses only an unchanged successful commit (%s)",
+    async (change) => {
+      vi.mocked(captureSessionReceipt).mockResolvedValue("capture-token");
+      vi.mocked(commitSessionReceipt).mockResolvedValue("saved-receipt");
+      const id = "terminal-saved";
+      registerLiveTerminal(id, { type: "interactiveApp", name: "Codex" });
+      vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+        [id]: {
+          generation: 1,
+          state: "identified",
+          provider: "codex",
+          sessionId: "01a0ec06-451a-7e61-ac51-bd98fab4ed82",
+        },
+      });
+      vi.mocked(invoke).mockImplementation(async (command, args) => {
+        if (command === "begin_codex_status_checkpoint")
+          return {
+            token: "close-proof",
+            targets: [],
+            reusedCheckpoint:
+              change !== "backend-change" && args?.committedReceiptToken === "saved-receipt",
+          };
+      });
+      if (change === "failed-save") {
+        vi.mocked(saveSettings).mockRejectedValueOnce(new Error("disk full"));
+        await expect(flushSessionCheckpoint()).rejects.toThrow("disk full");
+        expect(commitSessionReceipt).not.toHaveBeenCalled();
+      } else {
+        await flushSessionCheckpoint();
+      }
+      if (change === "frontend-change") markSessionCheckpointMutation();
+      await saveBeforeClose();
+      expect(getTerminalSessionAttributions).toHaveBeenCalledTimes(change === "unchanged" ? 1 : 3);
+      expect(saveSettings).toHaveBeenCalledTimes(change === "unchanged" ? 1 : 2);
+      expect(interruptTerminalsOnExit).toHaveBeenCalledOnce();
+      vi.mocked(captureSessionReceipt).mockResolvedValue(undefined);
+      vi.mocked(commitSessionReceipt).mockResolvedValue(undefined);
+    },
+  );
 
   it("skips the status checkpoint when explicitly disabled", async () => {
     useSettingsStore.getState().setCodex({ verifySessionOnExit: false });

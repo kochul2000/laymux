@@ -4346,7 +4346,7 @@ describe("panes.clear over the async bridge (ADR-0158)", () => {
   });
 });
 
-describe("bridge over stacked slots (ADR-0295)", () => {
+describe("bridge over stacked slots (ADR-0297)", () => {
   function request(target: string, method: string, params: Record<string, unknown> = {}) {
     return handleAutomationRequest({
       requestId: `stack-${target}-${method}`,
@@ -4438,7 +4438,7 @@ describe("bridge over stacked slots (ADR-0295)", () => {
   });
 });
 
-describe("panes.stack / activateLayer / remove(layerId) bridge (ADR-0295)", () => {
+describe("panes.stack / activateLayer / remove(layerId) bridge (ADR-0297)", () => {
   function act(method: string, params: Record<string, unknown>) {
     return handleAutomationRequest({
       requestId: `stack-${method}`,
@@ -4523,7 +4523,7 @@ describe("panes.stack / activateLayer / remove(layerId) bridge (ADR-0295)", () =
   });
 });
 
-describe("pane rearrangement bridge (ADR-0297)", () => {
+describe("pane rearrangement bridge (ADR-0298)", () => {
   function act(method: string, params: Record<string, unknown>) {
     return handleAutomationRequest({
       requestId: `rearrange-${method}`,

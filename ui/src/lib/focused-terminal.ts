@@ -27,7 +27,7 @@ interface FocusedTerminalCwdState extends FocusedTerminalTargetState {
 export function resolveFocusedTerminalPane(
   state: FocusedTerminalTargetState,
 ): PaneLayer | DockPane | undefined {
-  // The focused content of a workspace slot is its active layer (ADR-0295).
+  // The focused content of a workspace slot is its active layer (ADR-0297).
   const pane: PaneLayer | DockPane | undefined =
     state.focusedDock !== null
       ? state.docks

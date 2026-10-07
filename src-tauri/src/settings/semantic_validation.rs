@@ -890,7 +890,7 @@ fn validate_workspace_profile_references(settings: &Settings, issues: &mut Vec<S
     for (workspace_index, workspace) in settings.workspaces.iter().enumerate() {
         for (pane_index, pane) in workspace.panes.iter().enumerate() {
             let stacked = !pane.layers.is_empty();
-            // Every stacked layer is content of its own (ADR-0295).
+            // Every stacked layer is content of its own (ADR-0297).
             for (layer_index, (_, view)) in pane.content_views().into_iter().enumerate() {
                 if view.view_type != "TerminalView" {
                     continue;

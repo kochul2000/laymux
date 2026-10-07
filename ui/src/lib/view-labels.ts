@@ -2,7 +2,7 @@ import type { ViewType } from "@/stores/types";
 
 /**
  * Short human labels for view types, shared by the pane control bar label and
- * the pane stack tabs (ADR-0295) so the two never name the same view
+ * the pane stack tabs (ADR-0297) so the two never name the same view
  * differently.
  */
 export const VIEW_LABELS: Record<ViewType, string> = {

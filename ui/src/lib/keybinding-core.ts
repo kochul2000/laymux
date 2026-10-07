@@ -37,7 +37,7 @@ export interface KeybindingDef {
    * focused view itself and never pass through.
    *
    * `"whenStacked"`: passes through only while the focused grid slot is a
-   * pane stack (ADR-0295) — otherwise terminal apps keep the combo.
+   * pane stack (ADR-0297) — otherwise terminal apps keep the combo.
    */
   passThroughTerminal?: boolean | "whenModified" | "whenStacked";
 }
@@ -177,7 +177,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingDef[] = [
     group: "Pane",
     passThroughTerminal: true,
   },
-  // Pane stack (ADR-0295): Right/Down = next layer, Left/Up = previous, ring.
+  // Pane stack (ADR-0297): Right/Down = next layer, Left/Up = previous, ring.
   {
     id: "pane.layer",
     label: "스택 레이어 순환",

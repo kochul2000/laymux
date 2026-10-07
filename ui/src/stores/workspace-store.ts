@@ -54,7 +54,7 @@ function toLayoutPane(p: WorkspacePane): LayoutPane {
 function toWorkspacePane(p: LayoutPane): WorkspacePane {
   const slotId = generateId("pane");
   const { layers, activeIndex } = layoutPaneLayers(p);
-  // Creation rule (ADR-0295): the first layer shares the slot id.
+  // Creation rule (ADR-0297): the first layer shares the slot id.
   const paneLayers: PaneLayer[] = layers.map((layer, index) => ({
     id: index === 0 ? slotId : generateId("pane"),
     view: layer.viewConfig ? copyViewConfig(layer.viewConfig) : { type: layer.viewType },
@@ -73,7 +73,7 @@ function toWorkspacePane(p: LayoutPane): WorkspacePane {
 /**
  * Drop the per-content side state a removed layer owns. When the layer shares
  * its id with a surviving slot, only the view-level override goes — the
- * pane-level override (control bar mode) belongs to the slot (ADR-0295).
+ * pane-level override (control bar mode) belongs to the slot (ADR-0297).
  */
 function forgetLayerState(layerId: string, keepSlotOverride: boolean): void {
   const overrides = useOverridesStore.getState();
@@ -174,7 +174,7 @@ interface WorkspaceState {
   renameWorkspace: (id: string, name: string) => void;
   reorderWorkspaces: (fromId: string, toId: string, position?: "top" | "bottom") => void;
 
-  // Pane manipulation (paneIndex = slot index, ADR-0295)
+  // Pane manipulation (paneIndex = slot index, ADR-0297)
   splitPane: (paneIndex: number, direction: "horizontal" | "vertical") => void;
   /**
    * Close one layer of the slot: `layerId`, or the active layer. Closing the
@@ -189,7 +189,7 @@ interface WorkspaceState {
   removeSlot: (paneIndex: number) => void;
   /**
    * Stack a new layer on the slot right after its active layer and activate it
-   * (ADR-0295). Returns the new layer id, or null for an invalid slot.
+   * (ADR-0297). Returns the new layer id, or null for an invalid slot.
    */
   stackPane: (paneIndex: number, view?: ViewInstanceConfig) => string | null;
   /**
@@ -210,7 +210,7 @@ interface WorkspaceState {
    */
   movePaneToWorkspace: (paneId: string, targetWorkspaceId: string) => void;
   /**
-   * Move a layer to slot `targetSlotId` of the active workspace (ADR-0295).
+   * Move a layer to slot `targetSlotId` of the active workspace (ADR-0297).
    * `index` is the position among the target's other layers (default: after
    * its active layer). Inside one slot this reorders; across slots the moved
    * layer becomes active in the target, and a source left empty is removed
@@ -219,14 +219,14 @@ interface WorkspaceState {
   moveLayer: (layerId: string, targetSlotId: string, index?: number) => boolean;
   /**
    * Pull a layer out of its stack into a new slot that splits the source slot
-   * like `splitPane` (ADR-0295). Returns the new slot id, or null when the
+   * like `splitPane` (ADR-0297). Returns the new slot id, or null when the
    * layer is not stacked.
    */
   extractLayer: (layerId: string, direction: "horizontal" | "vertical") => string | null;
   /**
    * Stack every layer of slot `srcSlotId` onto slot `tgtSlotId` right after the
    * target's active layer, show the source's active layer and remove the
-   * source slot (ADR-0295). Returns false when nothing changed.
+   * source slot (ADR-0297). Returns false when nothing changed.
    */
   mergeSlotIntoStack: (srcSlotId: string, tgtSlotId: string) => boolean;
   /** Replace the view of `layerId` (default: the active layer) in the slot. */
@@ -424,7 +424,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     // 시드는 재시작 요청 버스에 실린다 — "이 pane 의 다음 세션을 이 CWD 로 새로
     // 시작하라"는 payload·수명이 재시작과 같기 때문이다. 새 pane 은 EmptyView 로
     // 태어나므로 시드는 사용자가 터미널을 고를 때까지 기다렸다가 소비된다.
-    // 스택 슬롯이면 기준은 그 슬롯의 활성 레이어다(ADR-0295).
+    // 스택 슬롯이면 기준은 그 슬롯의 활성 레이어다(ADR-0297).
     const seedCwd = resolvePaneCwd(activeLayer(pane));
     if (seedCwd) {
       useTerminalRestartStore.getState().requestRestart(newPane.id, seedCwd);
@@ -442,7 +442,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set((state) => ({ workspaces: replaceSlot(state.workspaces, ws.id, paneIndex, updated) }));
 
     // 새 레이어의 첫 터미널 세션은 누른 슬롯의 활성 레이어 CWD 에서 시작한다
-    // (ADR-0140 을 ADR-0295 가 확장). 분할과 같은 재시작 요청 버스를 쓴다.
+    // (ADR-0140 을 ADR-0297 가 확장). 분할과 같은 재시작 요청 버스를 쓴다.
     const seedCwd = resolvePaneCwd(activeLayer(pane));
     if (seedCwd) {
       useTerminalRestartStore.getState().requestRestart(layer.id, seedCwd);
@@ -471,7 +471,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     const targetLayerId = layerId ?? activeLayer(slot).id;
     if (!slot.layers.some((layer) => layer.id === targetLayerId)) return;
 
-    // A stacked slot loses one layer and keeps its place (ADR-0295).
+    // A stacked slot loses one layer and keeps its place (ADR-0297).
     const remaining = removeLayer(slot, targetLayerId);
     if (remaining) {
       set((state) => ({ workspaces: replaceSlot(state.workspaces, ws.id, paneIndex, remaining) }));
@@ -533,7 +533,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
   movePaneToWorkspace: (paneId, targetWorkspaceId) => {
     const { workspaces } = get();
-    // An exact slot id wins over a layer id anywhere (ADR-0295).
+    // An exact slot id wins over a layer id anywhere (ADR-0297).
     const source =
       workspaces.find((w) => w.panes.some((p) => p.id === paneId)) ??
       workspaces.find((w) => findSlotIndex(w.panes, paneId) >= 0);
@@ -575,7 +575,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       movedSlot = { x: host.x, y: host.y + halfH, w: host.w, h: halfH };
     }
 
-    // 슬롯 통째(모든 레이어)를 옮긴다(ADR-0295).
+    // 슬롯 통째(모든 레이어)를 옮긴다(ADR-0297).
     const movedPane: WorkspacePane = { ...moved, ...movedSlot };
     const newTargetPanes = target.panes.map((p, i) => (i === hostIdx ? { ...p, ...hostSlot } : p));
     newTargetPanes.splice(hostIdx + 1, 0, movedPane);
@@ -609,7 +609,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     let panes = [...ws.panes];
     panes[tgtIndex] = insertLayer(ws.panes[tgtIndex], layer, { index });
     const remaining = removeLayer(src, layerId);
-    // Invariant (ADR-0295): a slot id may equal only one of its own layer ids.
+    // Invariant (ADR-0297): a slot id may equal only one of its own layer ids.
     // A slot that loses its id-sharing layer takes a fresh id.
     const renamedFrom = remaining && layerId === src.id ? src.id : null;
     if (remaining) {
@@ -640,7 +640,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
     // Creation rule: the new slot shares its layer's id. When that id was the
     // source slot's own, the source keeps its place under a fresh id so a slot
-    // id never names another slot's layer (ADR-0295).
+    // id never names another slot's layer (ADR-0297).
     const newSlotId = layerId;
     const renamedFrom = layerId === src.id ? src.id : null;
     const sourceId = renamedFrom ? generateId("pane") : src.id;

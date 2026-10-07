@@ -379,6 +379,8 @@ pub fn run() {
             commands::check_app_update,
             commands::install_app_update,
             session_checkpoint::acknowledge_session_checkpoint,
+            session_checkpoint::receipt::capture_session_checkpoint_receipt,
+            session_checkpoint::receipt::commit_session_checkpoint_receipt,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

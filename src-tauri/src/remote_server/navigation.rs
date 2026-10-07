@@ -389,7 +389,7 @@ fn summarize_pane(
         "unreadCount": pane_unread_count,
         "hidden": hidden,
         "collapsed": hidden,
-        // Pane stack (ADR-0295): one row per layer. Missing fields (dock panes,
+        // Pane stack (ADR-0297): one row per layer. Missing fields (dock panes,
         // older frontends) mean an unstacked pane whose only layer is visible.
         "activeLayer": optional_field(pane, "activeLayer").unwrap_or(Value::Bool(true)),
         "layerIndex": optional_field(pane, "layerIndex").unwrap_or_else(|| json!(0)),
@@ -861,7 +861,7 @@ mod tests {
 
     #[test]
     fn navigation_payload_keeps_one_row_per_stacked_layer() {
-        // ADR-0295: the frontend bridge lists one pane entry per layer with the
+        // ADR-0297: the frontend bridge lists one pane entry per layer with the
         // slot index; Remote keeps every row and marks hidden layers.
         let pane = |id: &str, number: u64, layer_index: u64, active: bool| {
             json!({

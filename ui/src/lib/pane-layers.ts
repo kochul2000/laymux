@@ -1,5 +1,5 @@
 /**
- * Pane stack model helpers (ADR-0295).
+ * Pane stack model helpers (ADR-0297).
  *
  * A workspace pane is a **slot**: it owns the geometry and an ordered list of
  * content **layers**, exactly one of which is active (shown). Every read of a
@@ -105,7 +105,7 @@ export function findLayerEntry(
 }
 
 /**
- * Resolve a slot from either its slot id or one of its layer ids (ADR-0295:
+ * Resolve a slot from either its slot id or one of its layer ids (ADR-0297:
  * id-based entry points accept both). Returns -1 when nothing matches.
  */
 export function findSlotIndex(panes: readonly WorkspacePane[], id: string): number {
@@ -211,7 +211,7 @@ function clampIndex(index: number, length: number): number {
   return Math.max(0, Math.min(length, Math.trunc(index)));
 }
 
-// ─── Persistence (ADR-0295 §영속과 호환) ─────────────────────────────
+// ─── Persistence (ADR-0297 §영속과 호환) ─────────────────────────────
 
 /** On-disk pane: the legacy compact form or the stacked form. */
 export interface PersistedWorkspacePane {
@@ -282,7 +282,7 @@ export function normalizeWorkspacePane(
 
 /**
  * Re-mint stacked layer ids already used by earlier content (`seen`), so every
- * `terminal-<id>` stays unique app-wide (ADR-0295). A layer that shares its
+ * `terminal-<id>` stays unique app-wide (ADR-0297). A layer that shares its
  * slot's id keeps it — that is the slot's own content. Records every kept id.
  */
 export function dedupeLayerIds(

@@ -183,7 +183,7 @@ export function AppLayout() {
   const closeRemoteAccessModal = useUiStore((s) => s.closeRemoteAccessModal);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const focusedPaneIndex = useGridStore((s) => s.focusedPaneIndex);
-  // Switching the focused slot's stacked layer is a focus entry too (ADR-0295).
+  // Switching the focused slot's stacked layer is a focus entry too (ADR-0297).
   const focusedLayerId = useWorkspaceStore((s) => {
     const pane =
       focusedPaneIndex === null
