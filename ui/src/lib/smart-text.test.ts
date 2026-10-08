@@ -284,6 +284,17 @@ describe("smartRemoveLineBreak", () => {
     expect(smartRemoveLineBreak(input)).toBe("See https://example.com/page\nThanks");
   });
 
+  it("URL 줄 다음 같은 들여쓰기의 경로 줄은 wrap 꼬리가 아니다", () => {
+    // TUI wrap 의 연속 줄은 URL 이 시작한 줄보다 깊게 내어쓴다. 같은 깊이의 다음
+    // 줄은 독립된 줄이다 — `…/pull/12src/lib/…` 로 붙이면 내용이 망가진다.
+    expect(smartRemoveLineBreak("PR: https://github.com/a/b/pull/12\nsrc/lib/smart-text.ts")).toBe(
+      "PR: https://github.com/a/b/pull/12\nsrc/lib/smart-text.ts",
+    );
+    expect(
+      smartRemoveLineBreak("  PR: https://github.com/a/b/pull/12\n  src/lib/smart-text.ts"),
+    ).toBe("  PR: https://github.com/a/b/pull/12\n  src/lib/smart-text.ts");
+  });
+
   it("줄 끝 pad 가 남아 있어도 명령 안 wrap URL 을 병합한다 (paste 경로 견고성, PR #303 리뷰)", () => {
     // applyPasteTextTransforms 는 trimSelectionTrailingWhitespace 없이 호출되므로
     // 줄 끝 pad 가 남을 수 있다. tail/continuation 계산이 이를 견뎌야 한다.

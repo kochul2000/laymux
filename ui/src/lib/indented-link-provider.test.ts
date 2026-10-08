@@ -1,7 +1,44 @@
 import { describe, it, expect, vi } from "vitest";
 import { findIndentedUrls, createIndentedLinkProvider } from "./indented-link-provider";
 import { RAW_XTERM_SELECTION, CLEAN_URL } from "./__fixtures__/right-pane-fixture";
-import { makeIndentedLines as makeLines, textCells } from "@/test/cell-lines";
+import { makeIndentedLines as makeLines, makePaddedLines, textCells } from "@/test/cell-lines";
+import { CAPTURE_COLS, CLAUDE, CODEX } from "./__fixtures__/tui-wrap-capture";
+
+describe("findIndentedUrls — dev 실측(88 cols)", () => {
+  const urlsAt = (rows: Parameters<typeof makePaddedLines>[0], queried: number) =>
+    findIndentedUrls(makePaddedLines(rows, CAPTURE_COLS), queried).map((m) => m.text);
+
+  it("Claude 목록: 마커 뒤 4칸 내어쓰기로 이어진 URL 을 한 링크로 잇는다", () => {
+    const full =
+      "https://github.com/kochul2000/laymux/blob/main/docs/architecture/data-flow.md#terminal-view-osc-pipeline-and-renderer-reflow-details";
+    expect(urlsAt(CLAUDE.list, 1)).toEqual([full]);
+    expect(urlsAt(CLAUDE.list, 2)).toEqual([full]);
+    // 다음 항목의 URL 은 한 행 안에 있으므로 WebLinksAddon 몫이다.
+    expect(urlsAt(CLAUDE.list, 3)).toEqual([]);
+  });
+
+  it("Claude: 행 끝에서 잘린 URL 의 링크에 한글 조사를 넣지 않는다", () => {
+    expect(urlsAt(CLAUDE.urlWithParticle, 1)).toEqual([
+      "https://example.com/very/long/path/segment/that/should/wrap/across/the/terminal/width/because/it/is/really/long?query=value&another=thing",
+    ]);
+  });
+
+  it("Codex 입력창 에코: URL 이 끝난 행 다음 산문의 첫 글자를 붙이지 않는다", () => {
+    expect(urlsAt(CODEX.promptEchoUrl, 2)).toEqual([
+      "https://github.com/kochul2000/laymux/blob/main/docs/architecture/data-flow.md#terminal-view-osc-pipeline-and-renderer-reflow-details",
+    ]);
+  });
+
+  it("URL 로 끝난 짧은 행 다음 같은 들여쓰기 산문은 잇지 않는다", () => {
+    const rows = ["  자세한 내용: https://github.com/a/b/pull/12", "  를 참고하세요."];
+    expect(urlsAt(rows, 1)).toEqual([]);
+    expect(urlsAt(["  See https://github.com/a/b/pull/12", "  for details."], 1)).toEqual([]);
+  });
+
+  it("Codex soft-wrap URL 은 WebLinksAddon 몫으로 남긴다", () => {
+    expect(urlsAt(CODEX.urlSoftWrapped, 2)).toEqual([]);
+  });
+});
 
 describe("findIndentedUrls", () => {
   it("detects Claude Code OAuth URL split across indented lines", () => {
@@ -201,23 +238,24 @@ describe("findIndentedUrls — 셀 좌표", () => {
     expect(range.end).toEqual({ x: 20, y: 2 });
   });
 
-  it("URL 안의 와이드 문자만큼 끝 컬럼이 밀린다", () => {
-    const range = rangeOf(["  https://example.com/문서와", "  보고서?q=1"]);
+  it("URL 은 바로 붙은 와이드 문자(조사) 앞에서 끝난다", () => {
+    const range = rangeOf(["  https://example.com/pathpath", "  /docs에서 보기"]);
     expect(range.start).toEqual({ x: 3, y: 1 });
-    // 둘째 줄: 보(3-4) 고(5-6) 서(7-8) ?(9) q(10) =(11) 1(12)
-    expect(range.end).toEqual({ x: 12, y: 2 });
-  });
-
-  it("와이드 문자로 끝나면 끝 컬럼이 뒷칸까지 덮는다", () => {
-    const range = rangeOf(["  https://example.com/pathpath", "  /문서"]);
-    // 둘째 줄: /(3) 문(4-5) 서(6-7) → 끝 셀은 7 이어야 밑줄이 절반만 그이지 않는다
+    // 둘째 줄: /(3) d(4) o(5) c(6) s(7) 에(8-9) — URL 은 셀 7 에서 끝난다
     expect(range.end).toEqual({ x: 7, y: 2 });
   });
 
-  it("이모지(서로게이트 페어)로 끝나도 두 셀을 덮는다", () => {
+  it("와이드 문자 뒤 둘째 줄 URL 꼬리도 셀 컬럼이 맞는다", () => {
+    const range = rangeOf(["  문서 https://example.com/path?q=1&f", "  oo=bar"]);
+    // 문(3-4) 서(5-6) 공백(7) → URL 은 셀 8 에서 시작, 둘째 줄 'r' 은 셀 8
+    expect(range.start).toEqual({ x: 8, y: 1 });
+    expect(range.end).toEqual({ x: 8, y: 2 });
+  });
+
+  it("URL 뒤 이모지(서로게이트 페어)는 링크에 들지 않는다", () => {
     const range = rangeOf(["  https://example.com/pathpath", "  /x😀"]);
     // 둘째 줄: /(3) x(4) 😀(5-6)
-    expect(range.end).toEqual({ x: 6, y: 2 });
+    expect(range.end).toEqual({ x: 4, y: 2 });
   });
 
   it("앞선 이모지 뒤의 URL 도 셀 컬럼이 맞는다", () => {
@@ -240,9 +278,10 @@ describe("findIndentedUrls — 셀 좌표", () => {
   it("끝쪽 패딩 공백이 있는 실제 버퍼 줄에서도 행·컬럼이 맞는다", () => {
     // 버퍼 줄은 터미널 폭만큼 공백으로 채워져 있다. 패딩을 길이 계산에 넣으면
     // 결합 문자열의 오프셋이 첫 줄 안에 다 들어가 버려 끝점이 엉뚱한 행에 찍힌다.
+    // 첫 줄은 오른쪽 여백 2칸(줄바꿈 폭 cols-2)까지 찬 TUI 행이다.
     const range = rangeOf([
-      "  https://example.com/path?q=1&foo=ba".padEnd(55, " "),
-      "  r&baz=qux&end=true".padEnd(55, " "),
+      "  https://example.com/path?q=1&foo=ba".padEnd(39, " "),
+      "  r&baz=qux&end=true".padEnd(39, " "),
     ]);
     expect(range.start).toEqual({ x: 3, y: 1 });
     expect(range.end).toEqual({ x: 20, y: 2 });

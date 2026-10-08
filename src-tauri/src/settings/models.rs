@@ -1149,13 +1149,14 @@ pub struct PasteSettings {
     /// Directory for clipboard image pastes. Empty = default temp dir.
     #[serde(default)]
     pub image_dir: String,
-    /// Strip common leading whitespace when pasting.
+    /// Strip common leading whitespace when copying a terminal selection.
     #[serde(default = "default_true")]
     pub remove_indent: bool,
-    /// Rejoin URLs split across lines when pasting.
+    /// Rejoin rows a TUI broke at the screen width when copying, and URLs split
+    /// across lines when copying or pasting.
     #[serde(default = "default_true")]
     pub remove_line_break: bool,
-    /// Detect indented multi-line URLs and make them clickable as a single link.
+    /// Detect URLs a TUI broke across rows and make them clickable as a single link.
     #[serde(default = "default_true")]
     pub link_join: bool,
     /// Show a confirmation dialog when pasting large text (like Windows Terminal).

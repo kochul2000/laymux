@@ -50,6 +50,9 @@ import {
   resetTerminalOutputV3DiagnosticsForTest,
 } from "@/lib/terminal-output-v3-diagnostics";
 import { LAYMUX_UNICODE_VERSION } from "@/lib/terminal-unicode-width";
+import { TERMINAL_URL_REGEX } from "@/lib/terminal-url";
+import { CAPTURE_COLS, CLAUDE } from "@/lib/__fixtures__/tui-wrap-capture";
+import { textCells } from "@/test/cell-lines";
 import {
   registerAtlasRebuilder,
   unregisterAtlasRebuilder,
@@ -486,16 +489,23 @@ vi.mock("@xterm/addon-fit", () => ({
 }));
 
 let capturedLinkHandler: ((event: MouseEvent, uri: string) => void) | null = null;
+let capturedWebLinksOptions: { urlRegex?: RegExp } | undefined;
 vi.mock("@xterm/addon-web-links", () => ({
   WebLinksAddon: class MockWebLinksAddon {
-    constructor(handler?: (event: MouseEvent, uri: string) => void) {
+    constructor(
+      handler?: (event: MouseEvent, uri: string) => void,
+      options?: { urlRegex?: RegExp },
+    ) {
       if (handler) capturedLinkHandler = handler;
+      capturedWebLinksOptions = options;
     }
+    readonly isWebLinksAddon = true;
     dispose = vi.fn();
   },
 }));
 
 let capturedIndentedLinkHandler: ((uri: string) => void) | null = null;
+let capturedIndentedProvider: object | null = null;
 vi.mock("@/lib/indented-link-provider", async () => ({
   // provider 생성만 가로채고 나머지(readIndentedLine 등)는 실물을 쓴다.
   ...(await vi.importActual<typeof import("@/lib/indented-link-provider")>(
@@ -503,7 +513,8 @@ vi.mock("@/lib/indented-link-provider", async () => ({
   )),
   createIndentedLinkProvider: (_terminal: unknown, onClickLink: (uri: string) => void) => {
     capturedIndentedLinkHandler = onClickLink;
-    return { provideLinks: vi.fn() };
+    capturedIndentedProvider = { provideLinks: vi.fn() };
+    return capturedIndentedProvider;
   },
 }));
 
@@ -7136,6 +7147,50 @@ describe("TerminalView", () => {
     });
   });
 
+  it("smart copy joins rows a TUI broke at the screen width, using the buffer cells", async () => {
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      terminal: { ...useSettingsStore.getState().terminal, copyOnSelect: true },
+      paste: { ...useSettingsStore.getState().paste, removeIndent: true, removeLineBreak: true },
+    });
+    const rows = CLAUDE.koreanParagraph.map((row) => row.text);
+    mockHasSelection.mockReturnValue(true);
+    mockGetSelection.mockReturnValue(rows.join("\n"));
+    mockGetSelectionPosition.mockReturnValue({ start: { x: 0, y: 0 }, end: { x: 74, y: 2 } });
+    const originalGetLine = mockBufferActive.getLine;
+    mockBufferActive.getLine = (y: number) => {
+      const cells = textCells(rows[y] ?? "");
+      while (cells.length < CAPTURE_COLS) cells.push({ chars: "", width: 1 });
+      return {
+        length: cells.length,
+        isWrapped: false,
+        getCell: (x: number) => ({
+          getChars: () => cells[x].chars,
+          getWidth: () => cells[x].width,
+        }),
+        translateToString: () => rows[y] ?? "",
+      } as unknown as MockBufferLine;
+    };
+
+    try {
+      render(<TerminalView instanceId="t-cos-tui" profile="PowerShell" syncGroup="" />);
+      for (const terminal of createdTerminals)
+        (terminal as unknown as { cols: number }).cols = CAPTURE_COLS;
+
+      mockOnSelectionChange.mock.calls[0][0]();
+
+      await vi.waitFor(() => {
+        expect(mockClipboardWriteText).toHaveBeenCalledWith(
+          "● 이 변경은 터미널 복사 경로에서 줄바꿈을 제거하는데, 실제로는 Claude Code 가 자체 " +
+            "레이아웃으로 줄을 나누기 때문에 xterm 은 이를 소프트 랩으로 보지 못하고 개행으로 " +
+            "복사하게 되며, 그 결과 사용자가 붙여넣은 문단이 화면 폭마다 끊겨 버린다.",
+        );
+      });
+    } finally {
+      mockBufferActive.getLine = originalGetLine;
+    }
+  });
+
   it("copy-on-select with all smart-copy toggles off writes raw selection (shared runTerminalCopy path)", async () => {
     // Proves the three copy sites (Ctrl+C, right-click, copy-on-select)
     // share runTerminalCopy — raw-when-off semantics apply uniformly.
@@ -10370,6 +10425,30 @@ describe("TerminalView", () => {
   // -- URL link click (issue #29) --
 
   describe("URL link click", () => {
+    it("gives WebLinksAddon the shared URL boundary and registers the row-join provider first", () => {
+      render(<TerminalView instanceId="t-link-order" profile="PowerShell" syncGroup="" />);
+
+      expect(capturedWebLinksOptions?.urlRegex).toBe(TERMINAL_URL_REGEX);
+      // xterm's Linkifier prefers earlier providers: the joined multi-row URL must
+      // win over WebLinksAddon's cut-off head on the first row.
+      const terminal = createdTerminals.find((t) =>
+        (t.registerLinkProvider as ReturnType<typeof vi.fn>).mock.calls.some(
+          ([provider]) => provider === capturedIndentedProvider,
+        ),
+      )!;
+      const register = terminal.registerLinkProvider as ReturnType<typeof vi.fn>;
+      const load = terminal.loadAddon as ReturnType<typeof vi.fn>;
+      const registeredAt =
+        register.mock.invocationCallOrder[
+          register.mock.calls.findIndex(([provider]) => provider === capturedIndentedProvider)
+        ];
+      const loadedAt =
+        load.mock.invocationCallOrder[
+          load.mock.calls.findIndex(([addon]) => addon?.isWebLinksAddon)
+        ];
+      expect(registeredAt).toBeLessThan(loadedAt);
+    });
+
     it("passes a custom handler to WebLinksAddon that calls openExternal", async () => {
       render(<TerminalView instanceId="t-link1" profile="PowerShell" syncGroup="" />);
 
