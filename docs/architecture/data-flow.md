@@ -1523,9 +1523,13 @@ WSL 세션 프로세스 probe는 환경과 PPID를 POSIX 셸 내장 `read`로 �
 
 ### 13.5 체크포인트 조정과 파괴 전 barrier
 
+GUI 초기 세션 로드는 저장된 workspace/pane/layer ID와 활성 layer를 레이아웃 템플릿 목록의 유무와 무관하게 복원한다. 템플릿이 비어 있다는 이유로 초기 `EmptyView` 구조를 남기지 않는다. 초기화 effect가 폐기되면 해당 로드의 늦은 성공·실패 응답은 store, 구성 저장 기준, 캐시 정리와 저장 차단 상태에 반영하지 않는다. 새 GUI의 유효한 복원을 이전 로드가 덮어쓰지 않도록 한다.
+
 기본 앱 경로의 PTY·출력·체크포인트 실행 수명은 Tauri 앱에 속하며 업데이트도 파괴 전 barrier를 지난다. [ADR-0300](../adr/0300-detached-pty-daemon-update-handoff.md)·[ADR-0301](../adr/0301-pty-daemon-private-ipc-and-parser-runtime.md)의 구현은 [단계별 계획](../plans/pty-daemon-update-handoff.md)에 따라 진행 중이다. 별도 실행 모드에는 GUI 비의존 PTY core·headless responder·인증 IPC·immutable runtime이 들어갔지만 GUI mirror·업데이트 인계·daemon session writer는 아직 기본 제품 경로에 활성화하지 않았다.
 
 dev의 `LAYMUX_PTY_DAEMON=1` 검증 경로에서는 GUI adapter가 terminal 생성·물리 입력 FIFO·headless 화면 attach를 daemon으로 연결한다. PTY의 source generation/sequence와 GUI-local delivery generation/sequence는 별도로 유지한다. 화면에는 VT snapshot과 미완료 UTF-8/VT prefix·검증된 parser supplement(문자셋·tab stop·mouse encoding)를 적용하며 이전 query reply를 source에 재전송하지 않는다. source gap/geometry 변경은 새 GUI delivery checkpoint를 요청한다. proxy handle의 terminate는 로컬 presentation만 닫으며 source PTY close는 명시적 close 경로에서 별도로 요청한다. 이 검증 경로는 업데이트 인계·offline session writer의 제품 활성화를 의미하지 않는다 ([ADR-0302](../adr/0302-pty-daemon-gui-projection-and-control-barriers.md)).
+
+이 경로의 CWD·provider 귀속 조회는 별도 인증 IPC 연결로 daemon의 catalog·귀속 판정을 읽는다. GUI-local PTY/PID·출력 재생을 확인 근거로 쓰지 않으며 daemon attachment 폐기·조회 실패는 호출자에게 오류로 전달한다. GUI mirror가 비어 있다는 이유로 빈 CWD/귀속 결과를 성공으로 합성하지 않는다. 귀속의 generation은 source PTY 세대이며 IPC에서 알 수 없는 provider·state 또는 0인 generation을 거절한다. 동기 조회 bridge는 Tauri의 Tokio worker에서는 `block_in_place`, current-thread runtime에서는 별도 OS thread에서 IPC runtime을 생성·실행·폐기하여 중첩 runtime panic을 피한다. receipt는 native PTY 소유자만 발급하며 external GUI projection이 하나라도 있으면 재사용 증거를 발급하지 않는다. receipt와 critical status probe의 daemon 이관은 아직 미완료다.
 
 Unknown pane은 DB의 이전 검증 복원점을 보존하고 `needsRetry`·`unresolvedTerminalIds`로 확인 미완료를 알린다. 정상 pane은 독립적으로 저장한다. frontend에는 입력 snapshot 대신 DB가 실제 commit한 snapshot을 게시한다. DB 오류는 checkpoint 실패이며 종료/업데이트의 기존 barrier를 통과하지 않는다. 별도 구성 저장 성공을 세션 확인 완료로 취급하지 않는다.
 

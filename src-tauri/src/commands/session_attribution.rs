@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::lock_ext::MutexExt;
@@ -9,8 +9,9 @@ use crate::process_tree::PtyAppLiveness;
 use crate::state::AppState;
 
 mod liveness;
+mod wire;
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SessionAttributionState {
     Identified,
@@ -303,6 +304,16 @@ pub(crate) fn get_terminal_session_attributions_impl(
     grok_session_max_age_hours: Option<u64>,
     state: &AppState,
 ) -> Result<HashMap<String, TerminalSessionAttribution>, String> {
+    if let Some(daemon) = state.daemon.get() {
+        return serde_json::from_value(daemon.read_blocking(
+            crate::daemon_requests::ReadCommand::Attributions {
+                claude_max_age_hours: claude_session_max_age_hours,
+                codex_max_age_hours: codex_session_max_age_hours,
+                grok_max_age_hours: grok_session_max_age_hours,
+            },
+        )?)
+        .map_err(|error| format!("daemon session attribution rejected: {error}"));
+    }
     let receipt_capture = crate::session_checkpoint::receipt::collection_token(state);
     // Capture generations before provider I/O. A terminal can be closed and
     // recreated under the same id while those lookups run; the second catalog

@@ -116,6 +116,11 @@ fn snapshot(state: &AppState) -> Result<Option<Snapshot>, String> {
     let handles = state.pty_handles.lock_or_err()?;
     let mut result = BTreeMap::new();
     for (id, handle) in handles.iter() {
+        // A projection has no authority over live title/input revisions.
+        // Only the daemon owning the native PTY may issue its receipt.
+        if handle.is_external() {
+            return Ok(None);
+        }
         let Some(terminal) = terminals.get(id) else {
             return Ok(None);
         };

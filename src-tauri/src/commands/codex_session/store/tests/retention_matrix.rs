@@ -215,7 +215,7 @@ fn lookup_faults_recover_without_reopening_the_store() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&rollout, std::fs::Permissions::from_mode(0)).unwrap();
+        std::fs::set_permissions(&rollout, std::fs::Permissions::from_mode(0o0)).unwrap();
         assert!(store.find_selection_for_pid_checked(101, None).is_err());
         std::fs::set_permissions(&rollout, std::fs::Permissions::from_mode(0o600)).unwrap();
     }

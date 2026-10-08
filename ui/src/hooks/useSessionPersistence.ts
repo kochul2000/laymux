@@ -34,8 +34,10 @@ export function useSessionPersistence() {
   });
 
   useEffect(() => {
+    let cancelled = false;
     loadSettingsValidated()
       .then(async (loadResult) => {
+        if (cancelled) return;
         setLoadStatus({
           result: loadResult,
           warnings:
@@ -65,9 +67,11 @@ export function useSessionPersistence() {
 
         const rawSettings = loadResult.settings;
         applySettingsSnapshot(rawSettings, { includeStructural: true });
-        seedSessionConfiguration(
-          await collectSettingsSnapshot({ includeRuntimeStructuralState: false }),
-        );
+        const configuration = await collectSettingsSnapshot({
+          includeRuntimeStructuralState: false,
+        });
+        if (cancelled) return;
+        seedSessionConfiguration(configuration);
 
         // Clean orphaned terminal output cache files
         const allPaneIds: string[] = [
@@ -109,10 +113,14 @@ export function useSessionPersistence() {
         setLoaded(true);
       })
       .catch((error: unknown) => {
+        if (cancelled) return;
         setBlockPersist(true);
         console.warn("[useSessionPersistence] Failed to load persistent state:", error);
         setLoaded(true);
       });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const save = useCallback(async () => {

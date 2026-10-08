@@ -5,6 +5,9 @@ use crate::daemon_requests::CreateTerminal;
 use crate::daemon_requests::ReadCommand;
 use tokio::io::DuplexStream;
 
+#[path = "service_observation_tests.rs"]
+mod observations;
+
 struct Fixture {
     service: Arc<DaemonService>,
     key: Capability,

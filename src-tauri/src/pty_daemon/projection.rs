@@ -32,6 +32,16 @@ struct CatalogEntry {
 }
 
 impl DaemonGateway {
+    pub(crate) fn source_cwds(&self) -> Result<std::collections::HashMap<String, String>, String> {
+        let catalog: Vec<CatalogEntry> =
+            serde_json::from_value(self.read_blocking(ReadCommand::Catalog)?)
+                .map_err(|error| format!("daemon CWD catalog rejected: {error}"))?;
+        Ok(catalog
+            .into_iter()
+            .filter_map(|entry| entry.session.cwd.map(|cwd| (entry.session.id, cwd)))
+            .collect())
+    }
+
     pub(crate) async fn source_checkpoint(&self, id: &str) -> Result<Value, String> {
         let generation = self
             .projections

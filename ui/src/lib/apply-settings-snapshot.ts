@@ -133,9 +133,9 @@ export function applySettingsSnapshot(
 }
 
 function applyWorkspaceSnapshot(rawSettings: Settings): void {
-  if (!rawSettings.layouts?.length || !rawSettings.workspaces?.length) return;
+  if (!rawSettings.workspaces?.length) return;
 
-  const layouts: Layout[] = rawSettings.layouts.map((layout) => ({
+  const layouts: Layout[] = (rawSettings.layouts ?? []).map((layout) => ({
     id: layout.id,
     name: layout.name,
     panes: layout.panes.map((pane) => ({

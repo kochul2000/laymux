@@ -22,6 +22,18 @@
 
 ## 단계와 완료 조건
 
+### 2026-10-08 후속 검증: 초기 복원과 Tokio 호출 경계
+
+레이아웃 템플릿이 비어 있을 때 `applyWorkspaceSnapshot`이 저장된 workspace까지 건너뛰는 오류를 회귀 테스트로 재현하고 수정했다. 폐기된 초기화 effect의 늦은 응답도 현재 workspace를 덮어쓰지 않는다. Linux dev(19281)에서 GUI 종료 뒤 파일 trigger를 만들었을 때 기존 셸이 작업을 완료했고, 새 GUI에서 같은 daemon incarnation·child PID·PTY generation·pane ID와 실행 결과 화면이 자동 복원됐다. 이 검증은 강제 GUI 종료/재접속이며 updater 인계나 정상 종료 barrier 검증을 대신하지 않는다.
+
+CWD·provider 귀속 조회는 인증된 source 상태로 연결했다. 실제 IPC 테스트는 GUI-local PTY가 없는 경우의 성공과 attachment 폐기 뒤 오류를 검증한다. 최초 구현은 Tauri의 `#[command(async)]` 호출 문맥에서 중첩 runtime panic을 일으켰다. 같은 문맥에서 실패를 재현한 뒤 동기 bridge의 runtime 경계를 수정했으며, 일반 스레드·multi-thread/current-thread Tokio 호출과 Linux dev 화면에서 재검증했다. GUI external projection은 checkpoint receipt를 발급하지 않는다. source receipt·critical probe 이관은 여전히 남았다.
+
+Linux 디버그 이미지의 SHA-256 전체 검증이 launcher의 5초 제한을 초과하는 것도 실측했다. dev 프로필에서 `sha2` 의존성만 최적화하여 검증이나 deadline을 생략하지 않고 자동 시작·실제 셸 입력을 통과시켰다. Linux private socket fixture도 실제 0700 디렉터리를 사용하도록 수정했다.
+
+Windows UI 검증은 격리된 Windows 사본에서 실행했다: unit 5,463개, screen 127개, Playwright 533개, TypeScript·production build·전체 ESLint 통과. Linux Rust 전체 라이브러리 테스트 2,311개(앱 2,279개·agent hook 20개·portable PTY 12개), `cargo fmt --all -- --check`와 `git diff --check`도 통과했다. `cargo clippy --locked --workspace --all-targets`와 `cargo check --locked --release`는 경고가 남은 상태로 성공했다. Windows Rust 검증은 애플리케이션 제어 정책이 build script 실행을 거부하는 `os error 4551`로 차단됐다. 이 제한은 앞선 job breakaway 실패와 별개이며, 허용된 Windows 실행 환경에서 둘 다 확인해야 한다.
+
+ADR: [0300](../adr/0300-detached-pty-daemon-update-handoff.md)·[0301](../adr/0301-pty-daemon-private-ipc-and-parser-runtime.md)·[0302](../adr/0302-pty-daemon-gui-projection-and-control-barriers.md)의 직접 적용이다. 이번 복원·runtime 경계·검증 최적화는 소유권이나 외부 계약을 추가로 변경하지 않는다. 버전 영향: minor — 전체 PR은 호환되는 PTY 데몬 기능을 추가한다. 현재 미완성 상태의 독립 릴리스는 진행하지 않는다.
+
 ### 2026-10-08 작업 인계: 미완성 구현을 draft PR에 게시
 
 실제 dev(19281)의 worktree·PID를 검증한 뒤 daemon-owned PowerShell에 API로 입력하고 실행 결과가 실제 xterm buffer와 screenshot에 나타나는 것을 확인했다. GUI를 `scripts/kill-dev.sh`로 종료한 뒤 임시 파일 trigger를 생성했고, GUI가 없는 동안 같은 자식 프로세스가 명령을 완료해 확인 파일을 썼다. 새 GUI의 인증된 catalog에서 기존 daemon incarnation·child PID·PTY generation이 유지된 것도 확인했다.
@@ -32,7 +44,8 @@ Windows에서 `cargo tauri dev`의 자식으로 실행한 분리 launcher는 `CR
 
 남은 작업:
 
-- [ ] 구조 저장·로드·초기화의 pane ID 소실을 재현 테스트로 고정하고 같은 terminal로 자동 재연결한다.
+- [x] 구조 저장·로드·초기화의 pane ID 소실을 재현 테스트로 고정하고 같은 terminal로 자동 재연결한다(Linux dev 실측).
+- [ ] 구조 revision 제출과 동시·늦은 저장의 source 검증을 연결한다.
 - [ ] GUI 구조 revision 제출과 daemon의 단일 session SQLite writer를 연결한다. GUI 없는 동안 CWD·provider 대화 변경을 저장하고 Unknown은 이전 검증 ID를 보존한다.
 - [ ] provider 귀속·receipt·critical status probe를 daemon 상태로 라우팅한다. GUI mirror의 PID·generation을 검증 증거로 사용하지 않는다.
 - [ ] business OSC/activity/hook 상태 전달, daemon 수명의 `lx`, WSL hook 수신 경로를 연결한다.

@@ -90,6 +90,22 @@ fn an_unchanged_committed_checkpoint_is_reusable_with_only_local_database_revisi
     assert!(!reusable(&f.state, "foreign-token").unwrap());
     assert!(f.temp.path().exists());
 }
+
+#[test]
+fn gui_projection_cannot_issue_a_receipt_from_mirrored_titles_and_generation() {
+    let f = Fixture::new();
+    let mirror = crate::pty::PtyHandle::from_external(
+        7,
+        std::sync::Arc::new(|_, _, _, _| panic!("receipt capture must not write to a PTY")),
+    )
+    .unwrap();
+    f.state
+        .pty_handles
+        .lock()
+        .unwrap()
+        .insert("terminal-pane".into(), mirror);
+    assert!(capture(&f.state).unwrap().is_none());
+}
 #[test]
 fn every_observed_change_invalidates_the_committed_receipt() {
     for change in [

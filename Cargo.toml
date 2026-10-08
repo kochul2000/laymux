@@ -1,3 +1,8 @@
 [workspace]
 members = ["src-tauri", "tools/wsl-codex-probe", "tools/agent-hook"]
 resolver = "2"
+
+# Daemon startup verifies the complete executable bundle. Unoptimized SHA-256
+# on debug images can exhaust the bounded launcher deadline before IPC starts.
+[profile.dev.package.sha2]
+opt-level = 3

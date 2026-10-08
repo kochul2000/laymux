@@ -59,6 +59,20 @@ pub(crate) struct DaemonGateway {
 }
 
 impl DaemonGateway {
+    #[cfg(test)]
+    pub(super) fn observer_for_test(identity: ConnectionIdentity) -> Arc<Self> {
+        let (sender, _) = tokio::sync::mpsc::channel(1);
+        let (_, ready) = tokio::sync::watch::channel(Ok(true));
+        Arc::new(Self {
+            projections: Mutex::new(std::collections::HashMap::new()),
+            sender,
+            identity: Mutex::new(Some(identity)),
+            ready,
+            alive: AtomicBool::new(true),
+            stopped: AtomicBool::new(false),
+        })
+    }
+
     pub(crate) fn start(
         settings: Settings,
         executable: PathBuf,
@@ -190,11 +204,31 @@ impl DaemonGateway {
     }
 
     pub(crate) fn read_blocking(&self, query: ReadCommand) -> Result<Value, String> {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|error| error.to_string())?;
-        runtime.block_on(self.read(query))
+        let read = || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|error| error.to_string())?;
+            runtime.block_on(self.read(query))
+        };
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+                // Tauri async commands can enter this synchronous bridge. Let
+                // Tokio replace the blocked worker before driving private IPC.
+                tokio::task::block_in_place(read)
+            }
+            Ok(_) => std::thread::scope(|scope| {
+                // A current-thread runtime cannot use block_in_place. The
+                // daemon and gateway owner run independently of this caller.
+                std::thread::Builder::new()
+                    .name("daemon-observation".into())
+                    .spawn_scoped(scope, read)
+                    .map_err(|error| error.to_string())?
+                    .join()
+                    .map_err(|_| "daemon observation worker panicked".to_string())?
+            }),
+            Err(_) => read(),
+        }
     }
 
     pub(crate) fn stop(&self) {

@@ -39,11 +39,9 @@ mod tests {
         let name = if cfg!(windows) {
             format!(r"\\.\pipe\laymux-test-{}", uuid::Uuid::new_v4())
         } else {
-            fixture
-                .path()
-                .join("daemon.sock")
-                .to_string_lossy()
-                .into_owned()
+            let private = fixture.path().join("private");
+            private_directory(&private).unwrap();
+            private.join("daemon.sock").to_string_lossy().into_owned()
         };
         let mut listener = Listener::bind(&name).unwrap();
         assert!(

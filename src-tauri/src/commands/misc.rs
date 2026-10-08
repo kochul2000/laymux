@@ -729,10 +729,19 @@ pub fn get_terminal_states(
 
 /// Tauri command: get CWD for all terminals from backend (single source of truth).
 /// Returns a map of terminal_id → normalized CWD path.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_terminal_cwds(
     state: State<Arc<AppState>>,
 ) -> Result<std::collections::HashMap<String, String>, String> {
+    get_terminal_cwds_impl(&state)
+}
+
+pub(crate) fn get_terminal_cwds_impl(
+    state: &AppState,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    if let Some(daemon) = state.daemon.get() {
+        return daemon.source_cwds();
+    }
     let terminals = state.terminals.lock_or_err()?;
     let mut result = std::collections::HashMap::new();
     for (id, session) in terminals.iter() {
