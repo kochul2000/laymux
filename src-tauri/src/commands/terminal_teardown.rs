@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use tauri::{AppHandle, Emitter};
+use crate::terminal_events::TerminalEventEmitter;
 
 use crate::activity;
 use crate::constants::EVENT_TERMINALS_LIST_CHANGED;
@@ -11,7 +11,7 @@ use crate::terminal_output::{self, TerminalOutputSession};
 
 pub(super) fn request_terminal_output_fatal_teardown(
     state: &Arc<AppState>,
-    app: &AppHandle,
+    app: &impl TerminalEventEmitter,
     terminal_id: &str,
     output_session: &Arc<TerminalOutputSession>,
     stage: &'static str,

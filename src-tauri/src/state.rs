@@ -84,6 +84,7 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 /// extracted OS resource is terminated; it is never returned to operation and
 /// the mutex poison is not cleared. See ADR-0087 and api-contracts §14.3.
 pub struct AppState {
+    pub(crate) daemon: std::sync::OnceLock<Arc<crate::pty_daemon::gateway::DaemonGateway>>,
     /// Leaf lock: clone hook observations before any process/filesystem I/O.
     pub agent_hook_observations: Mutex<crate::agent_hooks::observations::HookRegistry>,
     pub terminals: Arc<Mutex<HashMap<String, TerminalSession>>>,
@@ -357,7 +358,12 @@ impl AppState {
         // One read for every settings-derived initializer below: two reads would
         // re-run validation and could observe different snapshots of the same file.
         let settings = crate::settings::load_settings();
+        Self::from_settings(settings)
+    }
+
+    pub(crate) fn from_settings(settings: crate::settings::Settings) -> Self {
         Self {
+            daemon: std::sync::OnceLock::new(),
             terminals: Arc::new(Mutex::new(HashMap::new())),
             agent_hook_observations: Mutex::new(
                 crate::agent_hooks::observations::HookRegistry::default(),

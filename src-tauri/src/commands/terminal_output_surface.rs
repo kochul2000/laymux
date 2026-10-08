@@ -53,10 +53,17 @@ fn attach_terminal_output_response(
 }
 
 #[tauri::command]
-pub fn attach_terminal_output(
+pub async fn attach_terminal_output(
     id: String,
-    state: State<Arc<AppState>>,
+    state: State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
 ) -> Result<AttachTerminalOutputResponse, String> {
+    if let Some(daemon) = state.daemon.get() {
+        return daemon
+            .attach_surface(&state, &app, &id)
+            .await
+            .map(AttachTerminalOutputResponse::Attached);
+    }
     attach_terminal_output_response(&state.terminal_protocol_states, &id)
 }
 

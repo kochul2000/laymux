@@ -1,0 +1,16 @@
+{
+  "name": "laymux-terminal-headless",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "scripts": {
+    "postinstall": "node patch-xterm-headless.mjs && node patch-serialize.mjs"
+  },
+  "dependencies": {
+    "@xterm/headless": "6.0.0",
+    "@xterm/addon-serialize": "0.14.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  }
+}

@@ -1,6 +1,7 @@
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { Terminal } from "@xterm/xterm";
 import { activateTerminalUnicodeProvider } from "./terminal-unicode-width";
+import { applyDaemonParserState } from "./daemon-parser-state";
 import type {
   TerminalGeometry,
   TerminalOutputAppliedSegment,
@@ -78,6 +79,11 @@ export class TerminalRenderCheckpointModel {
       this.resize(attachment.state.geometry);
       if (attachment.snapshot.length > 0) {
         await this.writeData(attachment.snapshot);
+      }
+      if (attachment.daemon) {
+        applyDaemonParserState(this.terminal, attachment.daemon.parserState);
+        if (attachment.daemon.pendingBytes.length > 0)
+          await this.writeData(Uint8Array.from(attachment.daemon.pendingBytes));
       }
       this.generation = attachment.state.generation;
       this.seq = attachment.state.snapshotSeq;

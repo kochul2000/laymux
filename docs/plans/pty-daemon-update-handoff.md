@@ -1,7 +1,9 @@
 # PTY 데몬 업데이트 인계 구현·검증 계획
 
-- 상태: 설계 제안, 제품 코드 미구현
-- 결정 정본: [ADR-0300](../adr/0300-detached-pty-daemon-update-handoff.md)
+- 상태: 구현 진행 중. 기본 GUI·업데이트 경로는 기존 동작이며 daemon 인계 미활성화.
+- dev 검증 경로: `LAYMUX_PTY_DAEMON=1`에서 생성·입력·headless 화면 adapter를 연결했다. 업데이트 인계·offline writer는 아직 연결 전이며 실제 앱 기동·인계 검증이 완료될 때까지 기본 경로로 활성화하지 않는다.
+- 결정 정본: [ADR-0300](../adr/0300-detached-pty-daemon-update-handoff.md), [ADR-0301](../adr/0301-pty-daemon-private-ipc-and-parser-runtime.md)
+- GUI 계약: [ADR-0302](../adr/0302-pty-daemon-gui-projection-and-control-barriers.md). daemon 도메인 테스트 25개, bootstrap 설정 roundtrip 1개, source 완료 확인 FIFO 테스트 3개, parser 화면 비교 21개, daemon metadata admission 및 기존 attach coordinator 39개가 통과했다. TerminalView/checkpoint model 393개는 이후 resync 변경 전 결과이며, 추가 resync 회귀 테스트 1개와 최신 TypeScript 검사는 통과했다. 전체 스위트 완료를 뜻하지 않는다.
 - 기준: PR #1142가 포함된 main. Windows·Linux, dev(19281)만 실행 검증.
 
 ## 구현 전 확인할 경계
@@ -19,6 +21,33 @@
 | 런타임 배치         | ConPTY staging/build.rs/NSIS                                      | live daemon bundle pin, 새 bundle staging, idle GC       |
 
 ## 단계와 완료 조건
+
+### 2026-10-08 작업 인계: 미완성 구현을 draft PR에 게시
+
+실제 dev(19281)의 worktree·PID를 검증한 뒤 daemon-owned PowerShell에 API로 입력하고 실행 결과가 실제 xterm buffer와 screenshot에 나타나는 것을 확인했다. GUI를 `scripts/kill-dev.sh`로 종료한 뒤 임시 파일 trigger를 생성했고, GUI가 없는 동안 같은 자식 프로세스가 명령을 완료해 확인 파일을 썼다. 새 GUI의 인증된 catalog에서 기존 daemon incarnation·child PID·PTY generation이 유지된 것도 확인했다.
+
+**재시작 후 사용자 화면 복원은 실패했다.** 새 GUI가 저장된 terminal pane 대신 새로운 ID의 EmptyView pane으로 시작해서 실행 중인 기존 terminal에 자동 연결되지 않았다. SQLite의 세션 revision은 증가하고 있으나 구조 저장·로드·초기화 중 어느 단계에서 기존 pane을 대체하는지 아직 확정하지 않았다. 이 결과는 자동 복원·업데이트 인계 성공으로 기록하지 않는다.
+
+Windows에서 `cargo tauri dev`의 자식으로 실행한 분리 launcher는 `CREATE_BREAKAWAY_FROM_JOB` spawn에서 Access denied를 반환했다. 별도 실행 모드로 먼저 시작한 동일 격리 daemon에는 dev GUI가 연결됐다. 시작 제한을 우회하는 제품 코드는 추가하지 않았으며 자동 시작 경로의 지원 조건과 dev 재현 절차는 후속 검증이 필요하다. 실측용 script·trigger·screenshot·private bootstrap은 `.tmp/`·`.screenshots/`에만 있고 커밋하지 않는다.
+
+남은 작업:
+
+- [ ] 구조 저장·로드·초기화의 pane ID 소실을 재현 테스트로 고정하고 같은 terminal로 자동 재연결한다.
+- [ ] GUI 구조 revision 제출과 daemon의 단일 session SQLite writer를 연결한다. GUI 없는 동안 CWD·provider 대화 변경을 저장하고 Unknown은 이전 검증 ID를 보존한다.
+- [ ] provider 귀속·receipt·critical status probe를 daemon 상태로 라우팅한다. GUI mirror의 PID·generation을 검증 증거로 사용하지 않는다.
+- [ ] business OSC/activity/hook 상태 전달, daemon 수명의 `lx`, WSL hook 수신 경로를 연결한다.
+- [ ] GUI unmount/재연결과 명시적 삭제·profile restart를 분리한다. 현재 TerminalView cleanup의 close RPC가 source 종료로 번질 수 있는 경로를 해결한다.
+- [ ] 업데이트·앱 재시작의 구조 commit/drain/detach ACK와 설치 실패 후 재연결을 구현한다. 실제 종료·hidden eviction의 기존 critical barrier는 유지한다.
+- [ ] source/worker 소실·shutdown·idle runtime GC·버전 호환을 완성하고 다른 process나 live bundle을 임의 종료/교체하지 않음을 검증한다.
+- [ ] 큰 scrollback의 checkpoint 예산, DEC 2026/shadow cursor·누락 스타일 상태, theme 변경, Remote mirror 복원을 검증·보완한다.
+- [ ] 입력마다 만들어지는 monitor thread·output 조회 연결/runtime 비용을 줄이고 다중 pane flood·느린 GUI·Remote owner 전환을 실측한다.
+- [ ] daemon 도메인의 commands 역방향 의존·큰 파일·unused 경고를 정리하고 CLI/Node 라이선스·배포 리소스·깨끗한 checkout 빌드를 확인한다.
+- [ ] `.tmp` 실측을 재현 가능한 테스트로 승격하고 Linux·native/WSL Codex·installer 교체·PC 재기동에 준한 cold restore를 검증한다.
+- [ ] 최신 전체 unit/screen/e2e/build/fmt/clippy/lint와 독립 코드 리뷰를 완료한 뒤 기본 제품 경로 활성화 여부를 판단한다.
+
+현재 기본 제품 경로는 daemon을 사용하지 않는다. `LAYMUX_PTY_DAEMON=1`은 dev 전용이며 이 상태로 merge/release하지 않는다.
+
+2026-10-07 중간 검증: GUI 없이 실제 PTY를 실행하는 core, Windows logon 전용 pipe·상호 인증·epoch 폐기, content-addressed runtime과 detached 실행 모드를 구현했다. Windows 별도 process 실험에서 GUI 연결 없이 3초 동안 명령 출력이 진행되고 같은 child PID·generation으로 재연결됐으며 옛 GUI close는 거절됐다. 실제 patched ESM 화면 스위트 125개와 daemon 경계 테스트 17개가 통과했다. cloned Windows child killer의 성공/실패 반환 뒤집힘은 실제 process TDD로 수정했다. 이는 아래 21개 제품 시나리오의 전체 통과를 뜻하지 않는다. GUI mirror·업데이트 인계·offline DB/hook·Linux·dev 앱 검증은 계속 진행한다.
 
 각 단계는 ADR-0300을 직접 적용하는지와 새 ADR이 필요한지를 계획·PR 직전에 판정한다. 새로운 IPC schema·buffer/retention 수치·배포 런타임 선택은 구현 PR에서 먼저 기록한다. 아래 구현 PR은 선행 설계 검토 뒤 진행하며, 단계별 검증을 통과할 때만 다음 단계로 옮긴다.
 

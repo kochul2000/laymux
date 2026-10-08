@@ -219,6 +219,7 @@ impl TerminalOutputSession {
         Ok(DesktopTerminalOutputAttachment {
             attachment,
             flow_control,
+            daemon: None,
         })
     }
 

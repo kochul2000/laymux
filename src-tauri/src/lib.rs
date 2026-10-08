@@ -21,14 +21,25 @@ mod conpty_build;
 pub mod conpty_runtime;
 pub mod constants;
 pub mod crash_reporter;
+mod pty_daemon;
+pub(crate) use pty_daemon::{
+    auth as daemon_protocol, broker as headless_broker, client as daemon_client,
+    clock as daemon_clock, entry as daemon_entry, launcher as daemon_launcher,
+    reader as daemon_reader, requests as daemon_requests, runtime as daemon_runtime,
+    service as daemon_service, transport as daemon_transport, wire as daemon_wire,
+    worker as headless_worker,
+};
 pub mod error;
 pub mod frontend_health;
 pub mod git_watcher;
 pub mod grok_activity;
 pub mod grok_usage_probe;
+pub use pty_daemon::run_if_requested as run_terminal_service_if_requested;
 pub mod ipc_server;
 pub mod local_state;
 pub mod lock_ext;
+#[cfg(all(test, windows))]
+mod native_child_killer_tests;
 pub mod osc;
 pub mod osc_hooks;
 pub mod output_buffer;
@@ -49,6 +60,7 @@ pub mod settings;
 pub mod state;
 pub mod terminal;
 mod terminal_env;
+mod terminal_events;
 pub mod terminal_output;
 pub mod terminal_protocol;
 pub mod update_install_guard;
@@ -81,6 +93,24 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let app_state = Arc::new(state::AppState::new());
+            // Temporary dev activation while the lifecycle/storage integration
+            // is being verified. Production switches only with the full gate.
+            if cfg!(debug_assertions) && std::env::var("LAYMUX_PTY_DAEMON").as_deref() == Ok("1") {
+                let executable = std::env::current_exe()?;
+                let resources = executable
+                    .parent()
+                    .ok_or("daemon resource directory unavailable")?
+                    .to_path_buf();
+                let gateway = pty_daemon::gateway::DaemonGateway::start(
+                    settings::load_settings(),
+                    executable,
+                    resources,
+                )?;
+                app_state
+                    .daemon
+                    .set(gateway)
+                    .map_err(|_| "daemon gateway already installed")?;
+            }
 
             // Start IPC server for IDE CLI communication
             let session_id = format!("{}", std::process::id());

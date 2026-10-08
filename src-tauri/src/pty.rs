@@ -170,6 +170,9 @@ pub(crate) fn chunked_write_to_guarded(
 /// Handle to a running PTY process, providing write and resize capabilities.
 #[derive(Clone)]
 pub struct PtyHandle {
+    /// Presentation adapter: lifecycle teardown never terminates its source PTY.
+    external: bool,
+    presentation_generation: Option<Arc<AtomicU64>>,
     checkpoint_input_revision: Arc<AtomicU64>,
     session_restore: Option<Arc<PendingSessionRestore>>,
     /// Owns the writer on one terminal-specific FIFO thread.
@@ -218,6 +221,37 @@ struct PendingSessionRestore {
 }
 
 impl PtyHandle {
+    pub(crate) fn from_external(
+        terminal_generation: u64,
+        execute: crate::pty_control::ExternalControlExecutor,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            external: true,
+            presentation_generation: Some(Arc::new(AtomicU64::new(terminal_generation))),
+            checkpoint_input_revision: Arc::new(AtomicU64::new(0)),
+            session_restore: None,
+            control: PtyControlWorker::spawn_external(execute)?,
+            master: Arc::new(Mutex::new(None)),
+            child_killer: Arc::new(Mutex::new(None)),
+            child_pid: None,
+            child_exited: Arc::new(AtomicBool::new(true)),
+            child_exit_handshake: Arc::new(Mutex::new(())),
+            input_faulted: Arc::new(AtomicBool::new(false)),
+            reader_lifecycle: PtyReaderLifecycle::completed(terminal_generation),
+            codex_startup_color_probe: None,
+            bootstrap_da_reply: None,
+            wsl_backed: false,
+        })
+    }
+
+    pub(crate) fn is_external(&self) -> bool {
+        self.external
+    }
+    pub(crate) fn bind_delivery_generation(&self, generation: u64) {
+        if let Some(current) = &self.presentation_generation {
+            current.store(generation, Ordering::Release);
+        }
+    }
     pub(crate) fn with_session_restore(mut self, restore: Option<(&'static str, String)>) -> Self {
         self.session_restore = restore.map(|(provider, session_id)| {
             Arc::new(PendingSessionRestore {
@@ -255,11 +289,14 @@ impl PtyHandle {
     }
 
     pub(crate) fn checkpoint_input_healthy(&self) -> bool {
-        !self.input_faulted.load(Ordering::Acquire)
+        !self.input_faulted.load(Ordering::Acquire) && !(self.external && self.control.is_closed())
     }
 
     /// Only the generation-checked protocol reply commands may use this path.
     pub(crate) fn write_protocol_reply(&self, data: &[u8]) -> Result<(), String> {
+        if self.external {
+            return Ok(());
+        }
         self.ensure_input_healthy()?;
         let deadline = Instant::now() + Duration::from_millis(PTY_CONTROL_JOB_TIMEOUT_MS);
         let pending = self.control.submit_write(data, false, deadline)?;
@@ -283,6 +320,8 @@ impl PtyHandle {
     ) -> Self {
         let master = Arc::new(Mutex::new(None));
         Self {
+            external: false,
+            presentation_generation: None,
             checkpoint_input_revision: Arc::new(AtomicU64::new(0)),
             session_restore: None,
             control: PtyControlWorker::spawn(writer, Arc::clone(&master))
@@ -329,7 +368,10 @@ impl PtyHandle {
     }
 
     pub(crate) fn terminal_generation(&self) -> u64 {
-        self.reader_lifecycle.terminal_generation()
+        self.presentation_generation
+            .as_ref()
+            .map(|generation| generation.load(Ordering::Acquire))
+            .unwrap_or_else(|| self.reader_lifecycle.terminal_generation())
     }
 
     pub(crate) fn codex_startup_color_probe(&self) -> Option<&NativeWindowsCodexColorProbeGuard> {
@@ -357,6 +399,10 @@ impl PtyHandle {
     ///    handle (keeping the PID reserved) until `child_exited` flips, and
     ///    we re-check that flag immediately before killing.
     pub fn terminate(&self) -> Result<(), String> {
+        if self.external {
+            self.control.close();
+            return Ok(());
+        }
         // Stop the exact reader generation before closing writer/master state.
         // A wake failure is not success: cleanup continues and the lifecycle
         // completion below is the authoritative fallback acknowledgement.
@@ -542,7 +588,7 @@ impl PtyHandle {
     }
 
     fn ensure_input_healthy(&self) -> Result<(), String> {
-        if self.input_faulted.load(Ordering::Acquire) {
+        if !self.checkpoint_input_healthy() {
             Err("terminal input is faulted".into())
         } else {
             Ok(())
@@ -552,8 +598,10 @@ impl PtyHandle {
     /// Return a lifecycle acknowledgement when bounded cancellation had to
     /// fault this terminal but the platform worker has not exited yet.
     pub(crate) fn pending_control_completion(&self) -> Option<PtyControlCompletion> {
-        (self.input_faulted.load(Ordering::Acquire) && !self.control.exited())
-            .then(|| self.control.completion())
+        ((self.input_faulted.load(Ordering::Acquire)
+            || (self.external && self.control.has_unconfirmed_physical()))
+            && !self.control.exited())
+        .then(|| self.control.completion())
     }
 
     /// Return the worker lifecycle acknowledgement unconditionally. Handle
@@ -568,6 +616,9 @@ impl PtyHandle {
             return Ok(());
         }
         self.control.close();
+        if self.external {
+            return Ok(());
+        }
         self.close_master();
         let kill_result = self.kill_child_tree();
         let deadline = Instant::now() + Duration::from_millis(PTY_CONTROL_TERMINATE_GRACE_MS);
@@ -847,6 +898,8 @@ where
     let master = Arc::new(Mutex::new(Some(pair.master)));
     let control = PtyControlWorker::spawn(writer, Arc::clone(&master))?;
     let handle = PtyHandle {
+        external: false,
+        presentation_generation: None,
         checkpoint_input_revision: Arc::new(AtomicU64::new(0)),
         session_restore: None,
         control,

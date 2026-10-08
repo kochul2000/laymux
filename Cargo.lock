@@ -2245,6 +2245,7 @@ dependencies = [
  "if-addrs",
  "keyring",
  "laymux-agent-hook",
+ "libc",
  "png 0.17.16",
  "portable-pty",
  "qrcode",

@@ -348,6 +348,14 @@ vi.mock("@xterm/xterm", () => ({
     input = mockTerminalInput;
     private readonly userInputListeners = new Set<() => void>();
     _core = {
+      _charsetService: { charset: undefined, glevel: 0, _charsets: [] },
+      _bufferService: {
+        buffers: {
+          normal: { tabs: {}, savedCharset: undefined },
+          alt: { tabs: {}, savedCharset: undefined },
+        },
+      },
+      coreMouseService: { activeEncoding: "DEFAULT" },
       // ADR-0188 point 트리거는 xterm 코어의 좌표 변환을 쓴다. 셀 폭 10px,
       // 셀 높이 20px 로 두어 clientX/clientY 를 1-based 셀로 옮긴다.
       _mouseService: {
@@ -626,6 +634,9 @@ const mockOnTerminalOutputFailStopped = vi.fn(
     return Promise.resolve(vi.fn());
   },
 );
+let capturedDaemonResync:
+  | ((message: { terminalId: string; generation: number }) => void)
+  | undefined;
 let mockOutputSequence = 0;
 const mockGetRemoteControlStatus = vi.fn().mockResolvedValue({
   active: false,
@@ -709,6 +720,10 @@ vi.mock("@/lib/tauri-api", () => ({
     return Promise.resolve(vi.fn());
   },
   onTerminalOutputFailStopped: (...args: unknown[]) => mockOnTerminalOutputFailStopped(...args),
+  onTerminalDaemonResync: (callback: NonNullable<typeof capturedDaemonResync>) => {
+    capturedDaemonResync = callback;
+    return Promise.resolve(vi.fn());
+  },
   normalizeTerminalOutputSurfaceFailStopReason: (reason: string) =>
     reason === "control_orphan_cap" || reason.endsWith(":control_orphan_cap")
       ? "control_orphan_cap"
@@ -997,6 +1012,48 @@ describe("TerminalView", () => {
   // Harness self-check for the stream attach reset gate (issue #603). Every test
   // that drives `csiHandlers` / `oscHandlers` / `escHandlers` leans on it, so it
   // is asserted here instead of trusting that the event-loop order works out.
+  it("replaces a daemon delivery generation after source resync without closing its terminal", async () => {
+    const raw = await mockAttachTerminalOutput();
+    const daemon = {
+      version: 1,
+      incarnation: "12345678-1234-1234-1234-123456789abc",
+      nativeGeneration: 6,
+      sourceSeq: 800000,
+      pendingBytes: [],
+      parserState: {
+        version: 1,
+        charset: null,
+        charsets: [null, null, null, null],
+        glevel: 0,
+        normal: { tabs: [8], savedCharset: null },
+        alternate: { tabs: [8], savedCharset: null },
+        mouseEncoding: "DEFAULT",
+      },
+    };
+    mockAttachTerminalOutput.mockClear();
+    const payload = (generation: number) => ({
+      ...raw,
+      daemon,
+      state: { ...raw.state, generation, snapshotKind: "screen" },
+      flowControl: { ...raw.flowControl, token: `daemon-lease-${generation}`, nextEnvelopeId: 1 },
+    });
+    mockAttachTerminalOutput.mockResolvedValueOnce(payload(1)).mockResolvedValueOnce(payload(2));
+    render(
+      <TerminalView
+        instanceId="t-daemon-resync"
+        paneId="pane-daemon-resync"
+        profile="PowerShell"
+        syncGroup="default"
+      />,
+    );
+    await waitForTerminalInputReady();
+    await vi.waitFor(() => expect(mockRepairTerminalOutputEnvelope).toHaveBeenCalled());
+    const closes = mockCloseTerminalSession.mock.calls.length;
+    act(() => capturedDaemonResync?.({ terminalId: "t-daemon-resync", generation: 1 }));
+    await vi.waitFor(() => expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(2));
+    expect(mockCloseTerminalSession.mock.calls.length).toBe(closes);
+  });
+
   it("holds parser handlers until the stream attach reset lands", async () => {
     const attachPayload = await mockAttachTerminalOutput();
     mockAttachTerminalOutput.mockClear();

@@ -1000,6 +1000,8 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 |--------|------|------|
 | GET | `/api/v1/docs` | API 자기 설명 (전체 엔드포인트, 파라미터, 사용법을 JSON으로 반환) |
 | GET | `/api/v1/health` | 헬스체크 + 응답 프로세스·빌드 신원(`instance`) |
+| GET | `/api/v1/terminal-service` | terminal 소유 경로(`local`/`daemon`)와 인증된 daemon의 incarnation·catalog. daemon 연결 실패는 503이며 GUI mirror를 authoritative catalog로 대신 반환하지 않는다. hook용 spawn env는 제거한다 ([ADR-0302](../adr/0302-pty-daemon-gui-projection-and-control-barriers.md)) |
+| GET | `/api/v1/terminal-service/{id}/checkpoint` | adapter가 알고 있는 native generation의 daemon 화면 checkpoint 조회. 미활성화는 409, source 조회 실패는 503. `generation`·`sourceSeq`·geometry·VT snapshot·parser supplement를 반환하며 GUI delivery sequence와 혼용하지 않는다 |
 | GET | `/api/v1/diagnostics/frontend` | Rust terminal-output v3 상태 + 마지막 프론트엔드 vitals 합성 (브리지 미경유 — 프론트가 멈춘 동안에도 답한다) |
 | GET | `/api/v1/update` | PC updater 공통 상태 snapshot 조회. 따라가는 채널(`channel`: `stable` 또는 `beta`)을 함께 실어 보낸다(ADR-0190) (`Cache-Control: no-store`) |
 | POST | `/api/v1/update/check` | 현재 채널 매니페스트 즉시 확인. 실행 중인 작업이 있으면 그 snapshot 반환 |

@@ -9,6 +9,7 @@ pub mod mcp_resources;
 pub mod settings_bridge;
 mod surface_router;
 mod terminal_output_diagnostics;
+mod terminal_service;
 pub mod types;
 
 // Re-export key types used by other modules
@@ -155,6 +156,11 @@ pub fn build_router(
     let automation_routes = Router::new()
         .route("/api/v1/docs", get(api_docs))
         .route("/api/v1/health", get(health))
+        .route("/api/v1/terminal-service", get(terminal_service::status))
+        .route(
+            "/api/v1/terminal-service/{id}/checkpoint",
+            get(terminal_service::checkpoint),
+        )
         .route(
             "/api/v1/agent-hooks/environments",
             get(agent_hooks::hook_environments),

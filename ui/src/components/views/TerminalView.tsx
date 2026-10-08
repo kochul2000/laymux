@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 import { ChevronDownIcon } from "@/components/ui/icons";
 import i18n from "@/i18n";
 import { Terminal, type IMarker } from "@xterm/xterm";
+import { applyDaemonParserState } from "@/lib/daemon-parser-state";
 import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -90,6 +91,7 @@ import {
   onTerminalOutputV2,
   onTerminalOutputV3,
   onTerminalOutputFailStopped,
+  onTerminalDaemonResync,
   smartPaste,
   clipboardWriteText,
   setTerminalCwdSend,
@@ -114,6 +116,7 @@ import {
   resolveAgentCommand,
 } from "@/lib/agent-command";
 import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
+import { DEFAULT_TERMINAL_THEME } from "@/lib/terminal-color-defaults";
 import { transformPasteContent, prepareSelectionForCopy, formatPastePaths } from "@/lib/smart-text";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
 import { createCursorTracer } from "@/lib/cursor-trace";
@@ -1298,12 +1301,7 @@ export function TerminalView({
       ? settingsState.colorSchemes.find((cs) => cs.name === schemeName)
       : undefined;
 
-    const defaultTheme = {
-      background: "#0C0C0C",
-      foreground: "#F0F0F0",
-      cursor: "#FFFFFF",
-      selectionBackground: "#232042",
-    };
+    const defaultTheme = DEFAULT_TERMINAL_THEME;
 
     const theme = colorScheme
       ? {
@@ -4497,6 +4495,8 @@ export function TerminalView({
     let unlistenOutput: (() => void) | undefined;
     let unlistenOutputV3: (() => void) | undefined;
     let unlistenOutputFailStopped: (() => void) | undefined;
+    let unlistenDaemonResync: (() => void) | undefined;
+    let daemonAttached = false;
     let outputListenerReady: Promise<void> = Promise.resolve();
     let outputAttachRetryTimer: ReturnType<typeof setTimeout> | undefined;
     let outputRepairRetryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -4505,7 +4505,7 @@ export function TerminalView({
     let outputRepairInFlight = false;
     let outputAttachTimeoutStreak = 0;
     let outputAckTimeoutStreak = 0;
-    const outputControlOperations = terminalOutputControlOperationRegistry.mount(instanceId);
+    let outputControlOperations = terminalOutputControlOperationRegistry.mount(instanceId);
     /** Parsed-credit sender owned by exactly one backend attach lease. */
     let outputFlowAcknowledger: TerminalOutputFlowAcknowledger | undefined;
     type OutputTransportMode = "pending" | "v2" | "v3" | "fail-stop";
@@ -4516,7 +4516,7 @@ export function TerminalView({
     let outputV3FailStoppedReason: string | null = null;
     let outputV3Runtime: TerminalOutputV3Runtime | undefined;
     const outputPullWatchdogCadence = new TerminalOutputPullWatchdogCadence(monotonicNow());
-    const outputV3FailureCoordinator = new TerminalOutputV3FailureCoordinator(
+    let outputV3FailureCoordinator = new TerminalOutputV3FailureCoordinator(
       instanceId,
       failStopTerminalOutputSurface,
     );
@@ -5159,8 +5159,24 @@ export function TerminalView({
       initialDelayMs = TERMINAL_WRITE_RETRY_MS,
     ) => {
       if (outputTransportMode === "v3") {
-        failStopOutputV3("replacement_attach_forbidden");
-        return;
+        if (!daemonAttached) {
+          failStopOutputV3("replacement_attach_forbidden");
+          return;
+        }
+        outputV3Runtime?.dispose();
+        outputV3Runtime = undefined;
+        // The old delivery sender retires its mount scope. Obtain a fresh
+        // scope while the registry retains any unsettled old RPC budgets.
+        outputControlOperations = terminalOutputControlOperationRegistry.mount(instanceId);
+        outputV3ParsersReady = false;
+        outputV3FailStoppedReason = null;
+        hasBufferedOutputV3 = false;
+        bufferedOutputV3 = undefined;
+        outputTransportMode = "pending";
+        outputV3FailureCoordinator = new TerminalOutputV3FailureCoordinator(
+          instanceId,
+          failStopTerminalOutputSurface,
+        );
       }
       if (outputTransportMode === "fail-stop") return;
       if (outputAttachRetryTimer !== undefined) return;
@@ -5583,9 +5599,10 @@ export function TerminalView({
           failStopOutputV3(backendFailureReason ?? "malformed_attach_fail_stop", false);
           return;
         }
-        const cached = await cacheRestorePromise;
+        const cached = rawAttachment.daemon ? null : await cacheRestorePromise;
         if (!isCurrentAttach()) return;
         const attachment = normalizeTerminalOutputAttachment(rawAttachment);
+        daemonAttached = attachment.daemon !== undefined;
         const { token, windowBytes, nextEnvelopeId } = rawAttachment.flowControl;
         if (
           typeof token !== "string" ||
@@ -5731,6 +5748,13 @@ export function TerminalView({
                 .getState()
                 .updateInstanceInfo(instanceId, { generation: attachment.state.generation });
               terminal.reset();
+              if (
+                attachment.daemon &&
+                (terminal.cols !== attachment.state.geometry.cols ||
+                  terminal.rows !== attachment.state.geometry.rows)
+              ) {
+                terminal.resize(attachment.state.geometry.cols, attachment.state.geometry.rows);
+              }
               resetStreamDerivedCursorState();
               if (cached) {
                 await trackedTerminalWriteAsync(cached);
@@ -5782,6 +5806,13 @@ export function TerminalView({
                 attachment.state.modes.bracketedPaste ? "\x1b[?2004h" : "\x1b[?2004l",
               );
               if (!isCurrentAttach()) return;
+              if (attachment.daemon) {
+                applyDaemonParserState(terminal, attachment.daemon.parserState);
+                if (attachment.daemon.pendingBytes.length > 0) {
+                  await trackedTerminalWriteAsync(Uint8Array.from(attachment.daemon.pendingBytes));
+                  if (!isCurrentAttach()) return;
+                }
+              }
               outputGeneration = attachment.state.generation;
               if (supportsV3) {
                 await activateOutputV3(
@@ -5949,6 +5980,19 @@ export function TerminalView({
       outputV2ListenerReady,
       outputV3ListenerReady,
       outputFailStoppedListenerReady,
+      onTerminalDaemonResync((message) => {
+        if (
+          !cancelled &&
+          daemonAttached &&
+          message.terminalId === instanceId &&
+          message.generation === outputGeneration
+        ) {
+          scheduleOutputReattach(outputAttachEpoch, 100);
+        }
+      }).then((unlisten) => {
+        if (cancelled) unlisten();
+        else unlistenDaemonResync = unlisten;
+      }),
     ]).then(() => undefined);
 
     const outputPullWatchdogTimer = setInterval(() => {
@@ -6420,6 +6464,7 @@ export function TerminalView({
       unlistenOutput?.();
       unlistenOutputV3?.();
       unlistenOutputFailStopped?.();
+      unlistenDaemonResync?.();
       closeTerminalSession(instanceId).catch(() => {});
       terminal.dispose();
       renderCheckpointModel.dispose();
@@ -6655,11 +6700,8 @@ export function TerminalView({
       : undefined;
 
     const defaultTheme = {
-      background: "#0C0C0C",
-      foreground: "#F0F0F0",
-      cursor: "#FFFFFF",
+      ...DEFAULT_TERMINAL_THEME,
       cursorAccent: "#0C0C0C",
-      selectionBackground: "#232042",
     };
 
     const fontFamily = `'${font.face}', 'Cascadia Mono', 'Consolas', monospace`;

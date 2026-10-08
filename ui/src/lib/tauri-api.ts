@@ -172,13 +172,14 @@ export interface TerminalAttachState {
   snapshotSeq: number;
   sourceStartSeq: number;
   sourceSeq: number;
-  snapshotKind: "raw";
+  snapshotKind: "raw" | "screen";
   protocolRevision: number;
   modes: { bracketedPaste: boolean };
   geometry: { revision: number; cols: number; rows: number };
 }
 
 export interface TerminalOutputAttachmentPayload {
+  daemon?: import("./daemon-surface-checkpoint").DaemonSurfaceCheckpoint;
   state: TerminalAttachState;
   snapshot: number[];
   flowControl: {
@@ -1642,6 +1643,14 @@ export function onTerminalOutputFailStopped(
   callback: (failure: TerminalOutputSurfaceFailStoppedPayload) => void,
 ): Promise<UnlistenFn> {
   return listen<TerminalOutputSurfaceFailStoppedPayload>("terminal-output-fail-stopped", (event) =>
+    callback(event.payload),
+  );
+}
+
+export function onTerminalDaemonResync(
+  callback: (message: { terminalId: string; generation: number }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ terminalId: string; generation: number }>("terminal-daemon-resync", (event) =>
     callback(event.payload),
   );
 }

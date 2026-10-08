@@ -1,8 +1,9 @@
+use crate::terminal_events::TerminalEventEmitter;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, State};
 
 use crate::activity;
 use crate::claude_activity;
@@ -223,6 +224,59 @@ pub async fn create_terminal_session(
     state: State<'_, Arc<AppState>>,
     app: AppHandle,
 ) -> Result<TerminalSession, String> {
+    if let Some(daemon) = state.daemon.get() {
+        return daemon
+            .create_mirror(
+                &state,
+                crate::daemon_requests::CreateTerminal {
+                    id,
+                    profile,
+                    cols,
+                    rows,
+                    sync_group,
+                    cwd_send,
+                    cwd_receive,
+                    cwd,
+                    startup_command_override,
+                    viewer,
+                },
+            )
+            .await;
+    }
+    create_terminal_session_core(
+        id,
+        profile,
+        cols,
+        rows,
+        sync_group,
+        cwd_send,
+        cwd_receive,
+        cwd,
+        startup_command_override,
+        viewer,
+        Arc::clone(&state),
+        app.into(),
+        crate::settings::load_settings(),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn create_terminal_session_core(
+    id: String,
+    profile: String,
+    cols: u16,
+    rows: u16,
+    sync_group: String,
+    cwd_send: Option<bool>,
+    cwd_receive: Option<bool>,
+    cwd: Option<String>,
+    startup_command_override: Option<String>,
+    viewer: Option<super::ViewerStartupRequest>,
+    state: Arc<AppState>,
+    app: crate::terminal_events::TerminalEvents,
+    settings: crate::settings::Settings,
+) -> Result<TerminalSession, String> {
     let _checkpoint_permit = state
         .session_checkpoint
         .begin_mutation_after_finalization()
@@ -241,7 +295,6 @@ pub async fn create_terminal_session(
     }
 
     // Look up the profile's command_line, startup_command, and starting_directory from settings
-    let settings = crate::settings::load_settings();
     let matched_profile = settings.profiles.iter().find(|p| p.name == profile);
     let command_line = matched_profile
         .map(|p| p.command_line.clone())
@@ -365,36 +418,39 @@ pub async fn create_terminal_session(
         )?
     };
     let output_session = output_registration.session();
-    let delivery_app = app.clone();
-    let fail_stop_app = app.clone();
-    start_production_terminal_output_delivery(
-        &output_session,
-        Arc::new(move |event, envelope| {
-            delivery_app
-                .emit(event, envelope)
-                .map_err(|error| format!("failed to emit terminal output v3 envelope: {error}"))
-        }),
-        Arc::new(move |notice| {
-            if let Err(error) = fail_stop_app.emit(EVENT_TERMINAL_OUTPUT_FAIL_STOPPED, notice) {
-                tracing::error!(
-                    terminal_id = %notice.terminal_id,
-                    generation = notice.generation,
-                    reason = %notice.reason,
-                    %error,
-                    "failed to emit terminal output surface fail-stop notice"
-                );
-            }
-        }),
-    )?;
-    // The listener is registered before create, but a startup command may emit
-    // before the first attach RPC returns. Bootstrap credit makes that race
-    // finite; the first desktop attach atomically replaces this lease.
-    output_session.begin_desktop_output_bootstrap(TERMINAL_OUTPUT_DESKTOP_FLOW_WINDOW_BYTES)?;
+    app.prepare_parser(&id, output_session.generation(), &session.config)?;
+    if !app.has_output_parser() {
+        let delivery_app = app.clone();
+        let fail_stop_app = app.clone();
+        start_production_terminal_output_delivery(
+            &output_session,
+            Arc::new(move |event, envelope| {
+                delivery_app
+                    .emit(event, envelope)
+                    .map_err(|error| format!("failed to emit terminal output v3 envelope: {error}"))
+            }),
+            Arc::new(move |notice| {
+                if let Err(error) = fail_stop_app.emit(EVENT_TERMINAL_OUTPUT_FAIL_STOPPED, notice) {
+                    tracing::error!(
+                        terminal_id = %notice.terminal_id,
+                        generation = notice.generation,
+                        reason = %notice.reason,
+                        %error,
+                        "failed to emit terminal output surface fail-stop notice"
+                    );
+                }
+            }),
+        )?;
+        // The listener is registered before create, but a startup command may emit
+        // before the first attach RPC returns. Bootstrap credit makes that race
+        // finite; the first desktop attach atomically replaces this lease.
+        output_session.begin_desktop_output_bootstrap(TERMINAL_OUTPUT_DESKTOP_FLOW_WINDOW_BYTES)?;
+    }
 
     // Spawn PTY with unified OSC processing in the output callback.
     let terminal_id = id.clone();
     let app_clone = app.clone();
-    let state_for_pty = Arc::clone(&*state);
+    let state_for_pty = Arc::clone(&state);
     let burst = settings.terminal.output_activity_burst.sanitized();
     let pty_cb_state = Arc::new(activity::PtyCallbackState::new(
         burst.window_ms,
@@ -468,7 +524,22 @@ pub async fn create_terminal_session(
         // Parse protocol modes, append bytes under one prefix gate, and enqueue
         // them for the bounded v3 delivery worker. Startup bytes remain in the
         // bootstrap ring until attach; this callback emits no per-read event.
-        match pty_output_session.record_desktop_output(&data) {
+        let recorded = if app_clone.has_output_parser() {
+            pty_output_session
+                .record_output(&data)
+                .map_err(terminal_output::TerminalOutputRecordError::authoritative)
+                .and_then(|delta| {
+                    if let Some(delta) = &delta {
+                        app_clone
+                            .parse_output(&terminal_id, delta)
+                            .map_err(terminal_output::TerminalOutputRecordError::credit)?;
+                    }
+                    Ok(delta)
+                })
+        } else {
+            pty_output_session.record_desktop_output(&data)
+        };
+        match recorded {
             Ok(Some(_)) => {}
             Ok(None) => {
                 tracing::debug!(
@@ -1059,7 +1130,7 @@ pub async fn create_terminal_session(
     // Start notify gate fallback timer: arms the gate after NOTIFY_GATE_FALLBACK_MS
     // for shells without preexec (e.g., PowerShell without PSReadLine).
     {
-        let state_for_timer = Arc::clone(&*state);
+        let state_for_timer = Arc::clone(&state);
         let timer_terminal_id = id.clone();
         let timer_output_session = Arc::clone(&output_session);
         std::thread::spawn(move || {
@@ -1295,7 +1366,7 @@ pub fn resize_terminal_inner(
 /// Finish one owner-checked physical operation without publishing a false
 /// cancellation acknowledgement. A platform call that outlives bounded PTY
 /// teardown transfers its worker completion token into the owner barrier.
-fn finish_human_control_io(
+pub(crate) fn finish_human_control_io(
     permit: HumanControlPermit<'_>,
     handle: &pty::PtyHandle,
     result: Result<(), String>,
@@ -1742,8 +1813,11 @@ pub async fn close_terminal_session(
 pub(crate) fn close_terminal_session_inner(
     id: &str,
     state: &AppState,
-    app: &AppHandle,
+    app: &impl TerminalEventEmitter,
 ) -> Result<(), String> {
+    if let Some(daemon) = state.daemon.get() {
+        daemon.close_source_blocking(id)?;
+    }
     // Hold the terminal catalog from generation selection through all
     // id-keyed cleanup. Create performs its duplicate check and generation
     // reservation under the same lock, so close cannot consume state from a
@@ -2155,7 +2229,7 @@ pub fn update_terminal_sync_group(
 /// All locks are acquired and released independently to prevent deadlock.
 fn dispatch_osc_action(
     state: &AppState,
-    app: &AppHandle,
+    app: &impl TerminalEventEmitter,
     terminal_id: &str,
     sync_group: &str,
     action: &OscAction,

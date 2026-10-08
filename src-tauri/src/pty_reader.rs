@@ -37,8 +37,7 @@ impl PtyReaderLifecycle {
         }))
     }
 
-    #[cfg(test)]
-    pub(crate) fn completed_for_test(terminal_generation: u64) -> Arc<Self> {
+    pub(crate) fn completed(terminal_generation: u64) -> Arc<Self> {
         struct TerminalControl {
             terminal_generation: u64,
         }
@@ -65,6 +64,11 @@ impl PtyReaderLifecycle {
             exited: Mutex::new(true),
             exited_changed: Condvar::new(),
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn completed_for_test(terminal_generation: u64) -> Arc<Self> {
+        Self::completed(terminal_generation)
     }
 
     pub(crate) fn terminal_generation(&self) -> u64 {

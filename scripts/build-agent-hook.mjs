@@ -19,3 +19,6 @@ const file = `laymux-agent-hook${process.platform === "win32" ? ".exe" : ""}`;
 const destination = path.join(root, "src-tauri", "gen", "agent-hook");
 mkdirSync(destination, { recursive: true });
 copyFileSync(path.join(metadata.target_directory, release ? "release" : "debug", file), path.join(destination, file));
+// The detached service must carry lx with its immutable runtime. A clean dev
+// checkout also needs the CLI before any daemon-owned shell can start.
+run(["build", "--locked", "-p", "laymux", "--bin", "lx", "-j", "2", ...(release ? ["--release"] : [])]);

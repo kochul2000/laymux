@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::path_utils;
 use crate::settings::{ExtensionViewer, Profile};
@@ -7,7 +7,7 @@ use crate::terminal::{detect_shell_type, ShellType};
 /// Structured external viewer request sent by the frontend. The file path stays
 /// data until this backend validates the settings mapping and quotes it for the
 /// selected profile's shell.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewerStartupRequest {
     pub command: String,

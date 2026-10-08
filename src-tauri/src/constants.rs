@@ -379,6 +379,7 @@ pub const TERMINAL_OUTPUT_ENVELOPE_DIRECT_EVENT_GRACE_MAX_MS: u64 = 1_000;
 pub const TERMINAL_OUTPUT_ENVELOPE_EMIT_MAX_ATTEMPTS: usize = 3;
 pub const TERMINAL_OUTPUT_ENVELOPE_REPAIR_MAX_ATTEMPTS: u8 = 3;
 pub const EVENT_TERMINAL_OUTPUT_FAIL_STOPPED: &str = "terminal-output-fail-stopped";
+pub const EVENT_TERMINAL_DAEMON_RESYNC: &str = "terminal-daemon-resync";
 /// Interruptible delay between exact retries of the same envelope.
 pub const TERMINAL_OUTPUT_ENVELOPE_EMIT_RETRY_MS: u64 = 5;
 /// Maximum bytes in one normal DECSET 2026 frame continuation, opener through terminator.

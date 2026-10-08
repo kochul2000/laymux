@@ -7,6 +7,7 @@ src-tauri/target-review/
 src-tauri/gen/conpty/
 src-tauri/gen/wsl/
 src-tauri/gen/agent-hook/
+src-tauri/gen/headless/
 
 # Node
 node_modules/

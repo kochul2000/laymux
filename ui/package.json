@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "postinstall": "node scripts/patch-xterm-reflow.mjs",
+    "postinstall": "node scripts/patch-xterm-reflow.mjs && node ../scripts/build-terminal-headless.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",

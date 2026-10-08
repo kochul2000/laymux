@@ -17,12 +17,32 @@ fn main() {
     emit_build_metadata();
     stage_wsl_probe();
     stage_agent_hooks();
+    stage_headless_runtime();
 
     // tauri_build 가 resources 경로를 검증하므로 스테이징이 먼저 끝나야 한다.
     if stage_conpty_runtime() {
         suppress_tauri_build_runtime_copy();
     }
     tauri_build::build();
+}
+
+fn stage_headless_runtime() {
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("gen/headless");
+    let destination = cargo_target_profile_dir()
+        .expect("cargo profile directory")
+        .join("headless");
+    std::fs::create_dir_all(&destination).expect("create headless runtime resource directory");
+    let node = if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        "node.exe"
+    } else {
+        "node"
+    };
+    for name in ["worker.cjs", node, "node-runtime.json", "Node-LICENSE.txt"] {
+        let path = source.join(name);
+        println!("cargo:rerun-if-changed={}", path.display());
+        assert!(path.is_file(), "missing pinned headless runtime {}; run node scripts/build-terminal-headless.mjs --runtime before cargo", path.display());
+        copy_runtime_file(&path, &destination.join(name)).expect("stage pinned headless runtime");
+    }
 }
 
 fn stage_wsl_probe() {

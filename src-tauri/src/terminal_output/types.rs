@@ -78,6 +78,19 @@ pub struct DesktopTerminalOutputAttachment {
     #[serde(flatten)]
     pub attachment: TerminalOutputAttachment,
     pub flow_control: TerminalOutputFlowControl,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub daemon: Option<DaemonSurfaceCheckpoint>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DaemonSurfaceCheckpoint {
+    pub version: u8,
+    pub incarnation: String,
+    pub native_generation: u64,
+    pub source_seq: u64,
+    pub pending_bytes: Vec<u8>,
+    pub parser_state: serde_json::Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

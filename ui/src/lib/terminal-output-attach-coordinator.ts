@@ -1,4 +1,8 @@
 export const TERMINAL_OUTPUT_PROTOCOL_VERSION = 1;
+import {
+  validateDaemonSurfaceCheckpoint,
+  type DaemonSurfaceCheckpoint,
+} from "./daemon-surface-checkpoint";
 
 export interface TerminalGeometry {
   revision: number;
@@ -13,7 +17,7 @@ export interface TerminalAttachState {
   snapshotSeq: number;
   sourceStartSeq: number;
   sourceSeq: number;
-  snapshotKind: "raw";
+  snapshotKind: "raw" | "screen";
   protocolRevision: number;
   modes: {
     bracketedPaste: boolean;
@@ -24,6 +28,7 @@ export interface TerminalAttachState {
 export interface TerminalOutputAttachment {
   state: TerminalAttachState;
   snapshot: Uint8Array;
+  daemon?: DaemonSurfaceCheckpoint;
 }
 
 export interface TerminalOutputDelta {
@@ -279,8 +284,12 @@ export class TerminalOutputAttachCoordinator {
 export function normalizeTerminalOutputAttachment(value: {
   state: TerminalAttachState;
   snapshot: number[] | Uint8Array;
+  daemon?: unknown;
 }): TerminalOutputAttachment {
   const attachment = {
+    ...(value.daemon === undefined
+      ? {}
+      : { daemon: validateDaemonSurfaceCheckpoint(value.daemon) }),
     state: value.state,
     snapshot:
       value.snapshot instanceof Uint8Array ? value.snapshot : new Uint8Array(value.snapshot),
@@ -331,7 +340,7 @@ function validateAttachment(attachment: TerminalOutputAttachment): void {
   }
   if (
     !isNonnegativeSafeInteger(state.generation) ||
-    state.snapshotKind !== "raw" ||
+    (state.snapshotKind !== "raw" && !(state.snapshotKind === "screen" && attachment.daemon)) ||
     !isNonnegativeSafeInteger(state.protocolRevision) ||
     !isMetadataObject(state.modes) ||
     typeof state.modes.bracketedPaste !== "boolean" ||

@@ -19,7 +19,30 @@ use crate::constants::{
 use crate::lock_ext::MutexExt;
 use crate::pty::chunked_write_to_guarded;
 
+#[cfg(test)]
+#[path = "pty_control_external_tests.rs"]
+mod external_tests;
+
 type ControlResult = Result<(), String>;
+
+pub(crate) enum ExternalControlAction {
+    Write { data: Vec<u8>, submit: bool },
+    Resize { cols: u16, rows: u16 },
+}
+/// The final atomic is set only by authoritative physical completion evidence.
+pub(crate) type ExternalControlExecutor = Arc<
+    dyn Fn(ExternalControlAction, Instant, Arc<AtomicBool>, Arc<AtomicBool>) -> ControlResult
+        + Send
+        + Sync,
+>;
+
+enum WorkerBackend {
+    Native {
+        writer: Box<dyn Write + Send>,
+        master: Arc<Mutex<Option<Box<dyn MasterPty + Send>>>>,
+    },
+    External(ExternalControlExecutor),
+}
 
 enum ControlJob {
     Write {
@@ -59,6 +82,7 @@ struct WorkerState {
     active: Mutex<ActiveWorkerState>,
     closed: AtomicBool,
     exited: AtomicBool,
+    physical_complete: Arc<AtomicBool>,
 }
 
 /// Completion acknowledgement for a worker that was faulted during bounded
@@ -72,6 +96,7 @@ pub(crate) struct PtyControlCompletion {
 impl PtyControlCompletion {
     pub(crate) fn is_complete(&self) -> bool {
         self.state.exited.load(Ordering::Acquire)
+            && self.state.physical_complete.load(Ordering::Acquire)
     }
 }
 
@@ -81,6 +106,7 @@ impl Default for WorkerState {
             active: Mutex::new(ActiveWorkerState::default()),
             closed: AtomicBool::new(false),
             exited: AtomicBool::new(false),
+            physical_complete: Arc::new(AtomicBool::new(true)),
         }
     }
 }
@@ -96,6 +122,14 @@ impl PtyControlWorker {
         writer: Box<dyn Write + Send>,
         master: Arc<Mutex<Option<Box<dyn MasterPty + Send>>>>,
     ) -> Result<Arc<Self>, String> {
+        Self::spawn_backend(WorkerBackend::Native { writer, master })
+    }
+
+    pub(crate) fn spawn_external(execute: ExternalControlExecutor) -> Result<Arc<Self>, String> {
+        Self::spawn_backend(WorkerBackend::External(execute))
+    }
+
+    fn spawn_backend(backend: WorkerBackend) -> Result<Arc<Self>, String> {
         let (sender, receiver) = mpsc::sync_channel(PTY_CONTROL_QUEUE_CAPACITY);
         let state = Arc::new(WorkerState::default());
         let worker = Arc::new(Self {
@@ -106,7 +140,7 @@ impl PtyControlWorker {
 
         thread::Builder::new()
             .name("laymux-pty-control".into())
-            .spawn(move || run_worker(receiver, writer, master, state))
+            .spawn(move || run_worker(receiver, backend, state))
             .map_err(|error| format!("failed to spawn PTY control worker: {error}"))?;
         Ok(worker)
     }
@@ -208,7 +242,13 @@ impl PtyControlWorker {
     }
 
     pub(crate) fn exited(&self) -> bool {
-        self.state.exited.load(Ordering::Acquire)
+        self.completion().is_complete()
+    }
+    pub(crate) fn has_unconfirmed_physical(&self) -> bool {
+        !self.state.physical_complete.load(Ordering::Acquire)
+    }
+    pub(crate) fn is_closed(&self) -> bool {
+        self.state.closed.load(Ordering::Acquire)
     }
 
     pub(crate) fn completion(&self) -> PtyControlCompletion {
@@ -218,13 +258,12 @@ impl PtyControlWorker {
     }
 }
 
-fn run_worker(
-    receiver: Receiver<ControlJob>,
-    mut writer: Box<dyn Write + Send>,
-    master: Arc<Mutex<Option<Box<dyn MasterPty + Send>>>>,
-    state: Arc<WorkerState>,
-) {
-    install_platform_thread_handle(&state);
+fn run_worker(receiver: Receiver<ControlJob>, mut backend: WorkerBackend, state: Arc<WorkerState>) {
+    // External work has no platform writer on this thread. Cancelling the
+    // GUI's pipe wait cannot stand in for cancelling the source physical I/O.
+    if matches!(&backend, WorkerBackend::Native { .. }) {
+        install_platform_thread_handle(&state);
+    }
     while let Ok(job) = receiver.recv() {
         let (id, result_tx) = match &job {
             ControlJob::Write { id, result, .. } | ControlJob::Resize { id, result, .. } => {
@@ -238,8 +277,52 @@ fn run_worker(
         let result = if state.closed.load(Ordering::Acquire) {
             Err("PTY writer already closed".into())
         } else {
-            execute_job(job, writer.as_mut(), &master)
+            match &mut backend {
+                WorkerBackend::Native { writer, master } => {
+                    execute_job(job, writer.as_mut(), master)
+                }
+                WorkerBackend::External(execute) => match job {
+                    ControlJob::Write {
+                        data,
+                        submit,
+                        cancelled,
+                        deadline,
+                        ..
+                    } => ensure_job_current(&cancelled, deadline).and_then(|_| {
+                        state.physical_complete.store(false, Ordering::Release);
+                        execute(
+                            ExternalControlAction::Write { data, submit },
+                            deadline,
+                            cancelled,
+                            state.physical_complete.clone(),
+                        )
+                    }),
+                    ControlJob::Resize {
+                        cols,
+                        rows,
+                        cancelled,
+                        deadline,
+                        ..
+                    } => ensure_job_current(&cancelled, deadline).and_then(|_| {
+                        state.physical_complete.store(false, Ordering::Release);
+                        execute(
+                            ExternalControlAction::Resize { cols, rows },
+                            deadline,
+                            cancelled,
+                            state.physical_complete.clone(),
+                        )
+                    }),
+                },
+            }
         };
+
+        let quarantined = matches!(&backend, WorkerBackend::External(_))
+            && !state.physical_complete.load(Ordering::Acquire);
+        if quarantined {
+            // An ambiguous source job cannot be hidden by a successful later
+            // job. Quarantine this FIFO until its completion evidence arrives.
+            state.closed.store(true, Ordering::Release);
+        }
 
         if let Ok(mut active) = state.active.lock_or_err() {
             if active.job_id == Some(id) {
@@ -247,6 +330,9 @@ fn run_worker(
             }
         }
         let _ = result_tx.send(result);
+        if quarantined {
+            break;
+        }
     }
     uninstall_platform_thread_handle(&state);
     state.exited.store(true, Ordering::Release);

@@ -1,5 +1,6 @@
+use crate::terminal_events::TerminalEventEmitter;
 use std::time::Instant;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, State};
 
 use std::sync::Arc;
 
@@ -15,7 +16,7 @@ use crate::state::AppState;
 pub fn handle_lx_message_inner(
     message_json: &str,
     state: &AppState,
-    app: &AppHandle,
+    app: &impl TerminalEventEmitter,
 ) -> Result<LxResponse, String> {
     let message: LxMessage =
         serde_json::from_str(message_json).map_err(|e| format!("Parse error: {e}"))?;
@@ -37,7 +38,7 @@ pub fn handle_lx_message(
 
 fn handle_lx_message_dispatch(
     state: &AppState,
-    app: &AppHandle,
+    app: &impl TerminalEventEmitter,
     message: LxMessage,
 ) -> Result<LxResponse, String> {
     match message {
@@ -145,7 +146,7 @@ fn run_session_mutation<T>(
 #[allow(clippy::too_many_arguments)]
 pub fn do_sync_cwd(
     state: &AppState,
-    app: &AppHandle,
+    app: &impl TerminalEventEmitter,
     terminal_id: &str,
     group_id: &str,
     path: &str,
@@ -264,7 +265,7 @@ pub fn do_sync_cwd(
 /// Sync git branch across terminal group.
 pub fn do_sync_branch(
     state: &AppState,
-    app: &AppHandle,
+    app: &impl TerminalEventEmitter,
     terminal_id: &str,
     group_id: &str,
     branch: &str,
@@ -300,7 +301,7 @@ pub fn do_sync_branch(
 /// Send a notification (store + emit to frontend).
 pub fn do_notify(
     state: &AppState,
-    app: &AppHandle,
+    app: &impl TerminalEventEmitter,
     terminal_id: &str,
     message: &str,
     level: Option<&str>,
@@ -340,7 +341,7 @@ pub fn do_notify(
 /// Set the tab title for a terminal.
 pub fn do_set_tab_title(
     state: &AppState,
-    app: &AppHandle,
+    app: &impl TerminalEventEmitter,
     terminal_id: &str,
     title: &str,
 ) -> Result<LxResponse, String> {
@@ -363,7 +364,7 @@ pub fn do_set_tab_title(
 /// Update command status (command text, exit code, or both).
 pub fn do_set_command_status(
     state: &AppState,
-    app: &AppHandle,
+    app: &impl TerminalEventEmitter,
     terminal_id: &str,
     command: Option<&str>,
     exit_code: Option<i32>,
