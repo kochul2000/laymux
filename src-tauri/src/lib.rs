@@ -39,6 +39,7 @@ pub mod process;
 pub mod process_tree;
 pub mod pty;
 mod pty_control;
+pub mod pty_daemon;
 pub mod pty_geometry;
 mod pty_reader;
 pub mod pty_trace;
@@ -386,6 +387,17 @@ pub fn run() {
             session_checkpoint::receipt::capture_session_checkpoint_receipt,
             session_checkpoint::receipt::commit_session_checkpoint_receipt,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // In-process PTYs end with this process because the OS closes
+            // their handles; daemon-owned PTYs would only detach. Ask the
+            // daemon to end them so closing the app keeps meaning "end the
+            // work" (ADR-0300).
+            if let tauri::RunEvent::Exit = event {
+                if let Some(state) = app.try_state::<Arc<state::AppState>>() {
+                    state.terminate_daemon_sessions_on_exit();
+                }
+            }
+        });
 }

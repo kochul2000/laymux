@@ -2229,6 +2229,7 @@ name = "laymux"
 version = "1.7.0"
 dependencies = [
  "aes-gcm",
+ "anyhow",
  "axum",
  "base64 0.22.1",
  "brotli",

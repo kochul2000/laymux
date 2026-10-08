@@ -345,6 +345,13 @@ pub async fn create_terminal_session(
     session.cwd_send = cwd_send.unwrap_or(true);
     session.cwd_receive = cwd_receive.unwrap_or(true);
 
+    // Resolve the PTY owner before reserving anything, so an unreachable
+    // daemon fails this create without a generation to roll back. Starting a
+    // daemon may block briefly, so keep it off the async executor.
+    let backend = tokio::task::spawn_blocking(crate::pty_daemon::terminal_backend)
+        .await
+        .map_err(|error| format!("PTY backend selection panicked: {error}"))??;
+
     // Check and reserve while holding the terminal catalog lock. Close takes
     // the same lock before selecting a generation, so it cannot observe an
     // empty output registry and then tear down this newly-created id.
@@ -415,7 +422,7 @@ pub async fn create_terminal_session(
     // Owned by the callback (no `Arc`): the closure is the only reader.
     let output_record_failures = AtomicU64::new(0);
     let terminal_generation = output_session.generation();
-    let spawned_pty = pty::spawn_pty_for_generation(&session, terminal_generation, move |data| {
+    let spawned_pty = pty::spawn_pty_on(&backend, &session, terminal_generation, move |data| {
         // Retirement may wake a callback parked in the fatal record-error gate
         // just before close terminates the PTY handle. Drop any final queued
         // master reads without re-locking poisoned protocol state or emitting

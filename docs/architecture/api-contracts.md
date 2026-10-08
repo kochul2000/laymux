@@ -1952,7 +1952,19 @@ src-tauri/src/
 │   ├── mcp.rs                # 내장 MCP 서버 (release tool 44종 + resource 핸들러, §12.7)
 │   └── mcp_resources.rs      # MCP Resources URI 모델·구독 레지스트리
 ├── terminal/mod.rs           # 터미널 모델 (TerminalSession, Config, Notification)
-├── pty.rs                    # PTY 스폰 및 I/O
+├── pty.rs                    # PtyHandle (I/O·terminate)
+├── pty/spawn.rs              # 명령 구성·PtyBackend(Local/Daemon) spawn
+├── pty_daemon/               # opt-in PTY 데몬 (ADR-0300, data-flow §8.23)
+│   ├── mod.rs                # 공개 재수출
+│   ├── backend.rs            # PtyBackend 선택·DaemonEndpoint·세션 key
+│   ├── server.rs             # 데몬: 연결·인증·세션 catalog
+│   ├── session.rs            # 데몬 세션: attach/detach·backlog
+│   ├── client.rs             # GUI: 원격 PtySystem proxy
+│   ├── client_queue.rs       # GUI: 유계 수신 queue·exit slot
+│   ├── launcher.rs           # discovery probe·데몬 기동
+│   ├── entry.rs              # `laymux --pty-daemon` 진입점
+│   ├── wire.rs / transport.rs / discovery.rs  # frame·로컬 socket·token
+│   └── tests.rs              # 실제 PTY·셸 기반 데몬 테스트
 ├── clipboard.rs              # 클립보드 (smart paste, 이미지)
 ├── ipc_server.rs             # IPC 소켓 (lx CLI ↔ IDE)
 ├── output_buffer.rs          # 터미널 출력 링 버퍼
@@ -2071,7 +2083,7 @@ env.push((ENV_LX_SOCKET.to_string(), path));
 
 **플랫폼 분기**: `#[cfg(target_os = "windows")]` / `#[cfg(not(target_os = "windows"))]`를 사용한다. 긴 플랫폼별 코드는 별도 함수로 추출하고 `cfg` 어트리뷰트를 함수 수준에 적용한다.
 
-**프로세스 실행**: `std::process::Command::new()` 대신 반드시 `crate::process::headless_command()`를 사용한다. (Windows 콘솔 창 깜빡임 방지)
+**프로세스 실행**: `std::process::Command::new()` 대신 반드시 `crate::process::headless_command()`를 사용한다. (Windows 콘솔 창 깜빡임 방지) 예외: Windows PTY 데몬 기동(`pty_daemon/launcher.rs` `windows_spawn`)은 handle 상속을 끄기 위해 `CreateProcessW`(`bInheritHandles = FALSE`, `CREATE_NO_WINDOW`)를 직접 호출한다. std `Command`는 상속을 끌 수 없어 오래 사는 데몬이 GUI의 pipe 끝을 쥐게 된다([ADR-0300](../adr/0300-detached-pty-daemon-core.md)).
 
 **로깅**: `eprintln!()` 대신 `tracing` 매크로를 사용한다.
 ```rust

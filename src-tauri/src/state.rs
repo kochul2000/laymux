@@ -440,6 +440,51 @@ impl AppState {
             }
         }
     }
+
+    /// App exit runs no `Drop` for this state. In-process PTYs still end with
+    /// the process, but a daemon-owned PTY would merely detach, so send each
+    /// one its terminate request before the process goes away. This only
+    /// enqueues the request; it does not wait for the children (ADR-0300).
+    pub fn terminate_daemon_sessions_on_exit(&self) {
+        let handles: Vec<(String, PtyHandle)> = match self.pty_handles.lock_or_err() {
+            Ok(handles) => handles
+                .iter()
+                .map(|(id, handle)| (id.clone(), handle.clone()))
+                .collect(),
+            Err(err) => {
+                tracing::warn!(error = %err, "PTY registry unavailable at app exit");
+                return;
+            }
+        };
+        // Requests go out concurrently under one overall deadline, so an
+        // unresponsive daemon delays exit by that bound, not by N requests.
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let pending = handles.len();
+        for (terminal_id, handle) in handles {
+            let done_tx = done_tx.clone();
+            std::thread::spawn(move || {
+                let _ = done_tx.send((terminal_id, handle.request_backend_termination()));
+            });
+        }
+        drop(done_tx);
+        let deadline = std::time::Instant::now()
+            + std::time::Duration::from_millis(
+                crate::constants::PTY_DAEMON_EXIT_TERMINATE_TIMEOUT_MS,
+            );
+        for _ in 0..pending {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            match done_rx.recv_timeout(remaining) {
+                Ok((_, Ok(()))) => {}
+                Ok((terminal_id, Err(err))) => {
+                    tracing::warn!(terminal_id, error = %err, "daemon PTY terminate request failed at exit");
+                }
+                Err(_) => {
+                    tracing::warn!("daemon PTY terminate requests did not finish before exit");
+                    break;
+                }
+            }
+        }
+    }
 }
 
 impl Drop for AppState {
