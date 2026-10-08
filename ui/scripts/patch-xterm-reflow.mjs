@@ -19,7 +19,8 @@ const reflowLegacy =
 const patched =
   "m>0&&(h[c].isWrapped=c>0,u&&(u.isWrapped=!1),o.push(l+h.length-m),o.push(m)),l+=h.length-1";
 const commonJsReflowOriginal = "g>0&&(a.push(l+d.length-g),a.push(g)),l+=d.length-1";
-const commonJsReflowPatched = "g>0&&(d[u].isWrapped=u>0,c&&(c.isWrapped=!1),a.push(l+d.length-g),a.push(g)),l+=d.length-1";
+const commonJsReflowPatched =
+  "g>0&&(d[u].isWrapped=u>0,c&&(c.isWrapped=!1),a.push(l+d.length-g),a.push(g)),l+=d.length-1";
 // xterm 6.0.0 CoreService treats disableStdin as a blanket onData gate, which
 // also drops parser-generated OSC/DSR replies. Preserve the user-input gate but
 // allow protocol replies (`wasUserInput === false`) to reach Terminal.onData.
