@@ -413,6 +413,7 @@ fn wrong_token_and_wrong_protocol_are_rejected_before_any_request() {
         &ClientMessage::Hello {
             token: daemon.endpoint.token.clone(),
             protocol_version: PROTOCOL_VERSION + 1,
+            nonce: generate_token().unwrap(),
         },
     )
     .unwrap();
@@ -535,16 +536,21 @@ fn a_daemon_that_never_answers_spawn_fails_the_spawn_instead_of_hanging() {
     let dir = tempfile::tempdir().unwrap();
     let (listener, endpoint) = Listener::bind(dir.path()).unwrap();
     let token = generate_token().unwrap();
+    let fake_token = token.clone();
     std::thread::spawn(move || {
         let stream = listener.accept().unwrap();
         let mut reader = BufReader::new(stream.try_clone().unwrap());
         let mut writer = stream;
-        let _hello = read_frame::<_, ClientMessage>(&mut reader);
+        let nonce = match read_frame::<_, ClientMessage>(&mut reader) {
+            Ok(Some(Frame::Control(ClientMessage::Hello { nonce, .. }))) => nonce,
+            other => panic!("expected hello, got {other:?}"),
+        };
         write_control(
             &mut writer,
             &DaemonMessage::HelloOk {
                 protocol_version: PROTOCOL_VERSION,
                 daemon_pid: 0,
+                proof: super::discovery::handshake_proof(&fake_token, &nonce).unwrap(),
             },
         )
         .unwrap();

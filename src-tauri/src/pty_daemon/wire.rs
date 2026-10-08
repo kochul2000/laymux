@@ -11,8 +11,11 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
+use std::time::Duration;
 
-use crate::constants::PTY_DAEMON_MAX_FRAME_BYTES;
+use crate::constants::{PTY_DAEMON_INPUT_PAUSE_MAX_MS, PTY_DAEMON_MAX_FRAME_BYTES};
+
+const INPUT_PAUSE_BYTES: usize = 4;
 
 /// Bumped on any incompatible message/semantics change. A daemon and client
 /// with different versions refuse each other in the handshake.
@@ -33,6 +36,9 @@ pub enum ClientMessage {
     Hello {
         token: String,
         protocol_version: u32,
+        /// Fresh per connection; the daemon proves it holds the token by
+        /// answering with [`handshake_proof`](super::discovery::handshake_proof).
+        nonce: String,
     },
     /// Create a session and bind this connection to it as the attached client.
     Spawn {
@@ -90,6 +96,8 @@ pub enum DaemonMessage {
     HelloOk {
         protocol_version: u32,
         daemon_pid: u32,
+        /// Proof over the client's nonce keyed by the instance token.
+        proof: String,
     },
     Spawned {
         child_pid: Option<u32>,
@@ -213,6 +221,38 @@ pub fn write_control<W: Write + ?Sized, M: Serialize>(
 
 pub fn write_data<W: Write + ?Sized>(writer: &mut W, data: &[u8]) -> io::Result<()> {
     write_frame(writer, KIND_DATA, data)
+}
+
+/// Client → daemon input. Unlike output, an input data frame starts with the
+/// sender's pause since its previous input write (u32 LE milliseconds,
+/// capped). A socket accepts input long before the daemon writes it to the
+/// PTY, so the sender's own pauses — notably the gap before a submit CR
+/// (#490) — would collapse when frames queue behind a slow child. The daemon
+/// replays the pause against its own PTY write timing instead.
+pub fn write_input<W: Write + ?Sized>(
+    writer: &mut W,
+    pause: Duration,
+    data: &[u8],
+) -> io::Result<()> {
+    let pause_ms = pause
+        .as_millis()
+        .min(u128::from(PTY_DAEMON_INPUT_PAUSE_MAX_MS)) as u32;
+    let mut payload = Vec::with_capacity(INPUT_PAUSE_BYTES + data.len());
+    payload.extend_from_slice(&pause_ms.to_le_bytes());
+    payload.extend_from_slice(data);
+    write_frame(writer, KIND_DATA, &payload)
+}
+
+/// Split an input data frame into its pause (capped) and bytes.
+pub fn split_input(payload: &[u8]) -> io::Result<(Duration, &[u8])> {
+    let Some((pause, data)) = payload.split_first_chunk::<INPUT_PAUSE_BYTES>() else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "PTY daemon input frame lacks its pause prefix",
+        ));
+    };
+    let pause_ms = u64::from(u32::from_le_bytes(*pause)).min(PTY_DAEMON_INPUT_PAUSE_MAX_MS);
+    Ok((Duration::from_millis(pause_ms), data))
 }
 
 fn write_frame<W: Write + ?Sized>(writer: &mut W, kind: u8, payload: &[u8]) -> io::Result<()> {
@@ -378,6 +418,33 @@ mod tests {
 
         let too_big = vec![0u8; PTY_DAEMON_MAX_FRAME_BYTES];
         assert!(write_data(&mut Vec::new(), &too_big).is_err());
+    }
+
+    #[test]
+    fn input_frames_carry_a_capped_pause_before_their_bytes() {
+        let mut buf = Vec::new();
+        write_input(&mut buf, Duration::from_millis(300), b"\r").unwrap();
+        write_input(&mut buf, Duration::from_secs(3600), b"x").unwrap();
+        let mut cursor = Cursor::new(buf);
+        let mut next = || match read_frame::<_, ClientMessage>(&mut cursor).unwrap() {
+            Some(Frame::Data(payload)) => {
+                let (pause, data) = split_input(&payload).unwrap();
+                (pause, data.to_vec())
+            }
+            other => panic!("unexpected {other:?}"),
+        };
+        assert_eq!(next(), (Duration::from_millis(300), b"\r".to_vec()));
+        assert_eq!(
+            next(),
+            (
+                Duration::from_millis(PTY_DAEMON_INPUT_PAUSE_MAX_MS),
+                b"x".to_vec()
+            )
+        );
+        assert_eq!(
+            split_input(&[1, 0]).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
     }
 
     #[test]

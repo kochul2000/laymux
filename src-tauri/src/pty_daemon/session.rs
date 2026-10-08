@@ -74,7 +74,8 @@ pub(super) struct Session {
     /// always sink → attached.
     pub(super) attached: Mutex<Option<ClientLink>>,
     exited: AtomicBool,
-    pub(super) terminating: AtomicBool,
+    /// Shared with the teardown thread so a failed terminate can be retried.
+    terminating: Arc<AtomicBool>,
     terminate_requested: AtomicBool,
 }
 
@@ -118,7 +119,7 @@ impl Session {
             sink: Mutex::new(Sink::default()),
             attached: Mutex::new(None),
             exited: AtomicBool::new(false),
-            terminating: AtomicBool::new(false),
+            terminating: Arc::new(AtomicBool::new(false)),
             terminate_requested: AtomicBool::new(false),
         }
     }
@@ -309,9 +310,12 @@ impl Session {
         }
     }
 
-    /// Idempotent; the blocking teardown runs off the connection thread so
-    /// the connection keeps draining frames meanwhile. A request that arrives before the handle exists is remembered and
-    /// applied by the spawner right after it publishes the handle.
+    /// Idempotent while a teardown is in flight; the blocking teardown runs
+    /// off the connection thread so the connection keeps draining frames
+    /// meanwhile. A failed teardown re-arms, so a later request retries
+    /// instead of being acknowledged without effect. A request that arrives
+    /// before the handle exists is remembered and applied by the spawner
+    /// right after it publishes the handle.
     pub(super) fn terminate(&self) {
         let _ = self.terminate_owned(None);
     }
@@ -341,9 +345,11 @@ impl Session {
             return true;
         }
         let session_id = self.id.clone();
+        let terminating = Arc::clone(&self.terminating);
         thread::spawn(move || {
             if let Err(error) = handle.terminate() {
                 tracing::warn!(%session_id, %error, "PTY daemon session terminate failed");
+                terminating.store(false, Ordering::Release);
             }
         });
         true
