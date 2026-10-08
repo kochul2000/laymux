@@ -79,6 +79,21 @@ pub fn shutdown_running(paths: &DaemonPaths, timeout: Duration) -> Result<bool, 
     }
 }
 
+/// Path equality tolerant of how the daemon was launched: trailing
+/// separators, and on Windows letter case and separator style.
+fn same_path(left: &Path, right: &Path) -> bool {
+    fn normalized(path: &Path) -> String {
+        let text = path.to_string_lossy();
+        let text = text.trim_end_matches(['/', '\\']);
+        if cfg!(windows) {
+            text.replace('/', "\\").to_lowercase()
+        } else {
+            text.to_owned()
+        }
+    }
+    normalized(left) == normalized(right)
+}
+
 fn wait_released(paths: &DaemonPaths, within: Duration) -> bool {
     let deadline = Instant::now() + within;
     while daemon_instance_alive(paths) {
@@ -105,10 +120,9 @@ fn force_stop(paths: &DaemonPaths) -> Result<(), String> {
     let process = system
         .process(pid)
         .ok_or_else(|| format!("PTY daemon process {pid} is gone"))?;
-    let dir = paths.dir().as_os_str();
     let cmd = process.cmd();
-    let is_daemon =
-        cmd.iter().any(|arg| arg == PTY_DAEMON_CLI_FLAG) && cmd.iter().any(|arg| arg == dir);
+    let is_daemon = cmd.iter().any(|arg| arg == PTY_DAEMON_CLI_FLAG)
+        && cmd.iter().any(|arg| same_path(Path::new(arg), paths.dir()));
     if !is_daemon {
         return Err(format!(
             "process {pid} named by PTY daemon discovery is not this directory's daemon"

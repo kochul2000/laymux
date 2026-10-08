@@ -353,6 +353,10 @@ pub const PTY_DAEMON_LOG_FILE: &str = "daemon.log";
 /// Windows: private copies of the daemon executable and ConPTY runtime.
 #[cfg(windows)]
 pub const PTY_DAEMON_RUNTIME_DIR: &str = "runtime";
+/// A runtime copy published more recently than this is never collected:
+/// its launcher may not have started the daemon that will lock it yet.
+#[cfg(windows)]
+pub const PTY_DAEMON_RUNTIME_GC_MIN_AGE_MS: u64 = 60_000;
 #[cfg(unix)]
 pub const PTY_DAEMON_SOCKET_FILE: &str = "daemon.sock";
 

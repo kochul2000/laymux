@@ -10,16 +10,24 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, UNIX_EPOCH};
 
 use crate::conpty_runtime::CONPTY_RUNTIME_FILES;
-use crate::constants::PTY_DAEMON_RUNTIME_DIR;
+use crate::constants::{PTY_DAEMON_RUNTIME_DIR, PTY_DAEMON_RUNTIME_GC_MIN_AGE_MS};
 
 /// Copy `exe` and the ConPTY files next to it into
 /// `<daemon dir>/runtime/<key>/` (reusing an existing copy) and return the
 /// staged executable. Other runtime copies that no process is using are
 /// removed.
 pub(super) fn stage(exe: &Path, daemon_dir: &Path) -> io::Result<PathBuf> {
+    stage_with_gc_age(
+        exe,
+        daemon_dir,
+        Duration::from_millis(PTY_DAEMON_RUNTIME_GC_MIN_AGE_MS),
+    )
+}
+
+fn stage_with_gc_age(exe: &Path, daemon_dir: &Path, gc_min_age: Duration) -> io::Result<PathBuf> {
     let name = exe
         .file_name()
         .ok_or_else(|| io::Error::other("executable path has no file name"))?;
@@ -57,7 +65,7 @@ pub(super) fn stage(exe: &Path, daemon_dir: &Path) -> io::Result<PathBuf> {
             }
         }
     }
-    remove_unused_runtimes(&root, &key, name);
+    remove_unused_runtimes(&root, &key, name, gc_min_age);
     Ok(staged)
 }
 
@@ -77,7 +85,15 @@ fn runtime_key(exe: &Path) -> io::Result<String> {
 /// Windows keeps a running image locked. That image is deleted first, and
 /// only once it is gone is the rest of the copy removed, so a live daemon never
 /// loses the ConPTY files it still loads for new sessions.
-fn remove_unused_runtimes(root: &Path, keep: &str, daemon_image: &std::ffi::OsStr) {
+///
+/// A copy younger than `min_age` is skipped: another launcher may have just
+/// published it and not started its daemon yet, so its image is not locked.
+fn remove_unused_runtimes(
+    root: &Path,
+    keep: &str,
+    daemon_image: &std::ffi::OsStr,
+    min_age: Duration,
+) {
     let Ok(entries) = fs::read_dir(root) else {
         return;
     };
@@ -88,6 +104,13 @@ fn remove_unused_runtimes(root: &Path, keep: &str, daemon_image: &std::ffi::OsSt
         };
         // Skip the copy in use, and another launcher's copy in progress.
         if name == keep || name.ends_with(".tmp") || !path.is_dir() {
+            continue;
+        }
+        let young = fs::metadata(&path)
+            .and_then(|meta| meta.modified())
+            .map(|modified| modified.elapsed().unwrap_or_default() < min_age)
+            .unwrap_or(true);
+        if young {
             continue;
         }
         // Without its image there is no lock to prove the copy unused.
@@ -124,20 +147,44 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let daemon_dir = temp.path().join("daemon");
         let first = fake_build(&temp.path().join("build-1"), b"first build");
-        let staged = stage(&first, &daemon_dir).unwrap();
+        let staged = stage_with_gc_age(&first, &daemon_dir, Duration::ZERO).unwrap();
         assert_eq!(fs::read(&staged).unwrap(), b"first build");
         assert_eq!(
             fs::read(staged.parent().unwrap().join("conpty.dll")).unwrap(),
             b"conpty"
         );
         // Same build: the existing copy is reused.
-        assert_eq!(stage(&first, &daemon_dir).unwrap(), staged);
+        assert_eq!(
+            stage_with_gc_age(&first, &daemon_dir, Duration::ZERO).unwrap(),
+            staged
+        );
 
         // A new build gets its own copy and the unused old one is removed.
         let second = fake_build(&temp.path().join("build-2"), b"second build, longer");
-        let restaged = stage(&second, &daemon_dir).unwrap();
+        let restaged = stage_with_gc_age(&second, &daemon_dir, Duration::ZERO).unwrap();
         assert_ne!(restaged, staged);
         assert!(!staged.parent().unwrap().exists());
         assert_eq!(fs::read(&restaged).unwrap(), b"second build, longer");
+    }
+}
+
+#[cfg(test)]
+mod gc_age_tests {
+    use super::*;
+
+    #[test]
+    fn a_freshly_published_copy_is_not_collected() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("runtime");
+        let fresh = root.join("other-key");
+        fs::create_dir_all(&fresh).unwrap();
+        fs::write(fresh.join("laymux.exe"), b"x").unwrap();
+        remove_unused_runtimes(
+            &root,
+            "keep",
+            "laymux.exe".as_ref(),
+            Duration::from_secs(60),
+        );
+        assert!(fresh.join("laymux.exe").exists());
     }
 }

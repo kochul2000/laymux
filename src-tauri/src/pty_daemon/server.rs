@@ -258,10 +258,7 @@ impl DaemonServer {
                     let session = self.find_session(&session_id);
                     let superseded = session
                         .as_ref()
-                        .is_some_and(|session| !session.owned_by_epoch(attach_epoch));
-                    if let Some(session) = session.as_ref().filter(|_| !superseded) {
-                        session.terminate();
-                    }
+                        .is_some_and(|session| !session.terminate_owned(attach_epoch));
                     let reply = DaemonMessage::Terminating {
                         found: session.is_some(),
                         superseded,
@@ -354,6 +351,11 @@ impl DaemonServer {
             metadata,
             created_seq,
         ));
+        let link = ClientLink {
+            connection_id,
+            writer: Arc::clone(writer),
+        };
+        let attach_epoch = session.bind_spawner(link.clone());
         {
             let mut sessions = self.sessions.lock_or_err()?;
             // A shutting-down daemon admits no new work.
@@ -414,12 +416,10 @@ impl DaemonServer {
             }
         };
         let child_pid = handle.child_pid();
-        let _ = session.handle.set(handle);
         // A terminate that arrived while the child was being spawned.
-        if session.terminate_requested() {
+        if session.publish_handle(handle) {
             session.terminate();
         }
-        let attach_epoch = session.next_attach_epoch();
         if writer
             .send(&DaemonMessage::Spawned {
                 child_pid,
@@ -427,12 +427,11 @@ impl DaemonServer {
             })
             .is_ok()
         {
-            let link = ClientLink {
-                connection_id,
-                writer: Arc::clone(writer),
-            };
-            sink.client = Some(link.clone());
-            *session.attached.lock_or_err()? = Some(link);
+            sink.client = Some(link);
+        } else {
+            // The spawner vanished before learning about its child: leave
+            // the session detached rather than bound to a dead connection.
+            session.release_claim(connection_id);
         }
         tracing::info!(session_id = %session.id, ?child_pid, "PTY daemon session spawned");
         Ok(Arc::clone(&session))

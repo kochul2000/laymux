@@ -185,7 +185,8 @@ fn terminal_work_outlives_a_crashed_client_in_a_single_daemon_instance() {
     let survivor_pid = survivor.process_id().unwrap();
     let _survivor = KillOnDrop(survivor_pid);
     assert!(shutdown_running(&paths, Duration::from_secs(10)).unwrap());
-    assert!(!is_alive(daemon.0), "the daemon must have exited");
+    // The lock is released as the process exits; reaping follows shortly.
+    wait_until("daemon exit", || (!is_alive(daemon.0)).then_some(()));
     wait_until("session child exit on shutdown", || {
         (!is_alive(survivor_pid)).then_some(())
     });

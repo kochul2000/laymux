@@ -93,7 +93,8 @@ struct AdoptionChoice {
     adopt: Option<String>,
     /// Other detached sessions of this terminal. A pane shows one session,
     /// so these could never be adopted and would only keep running unseen.
-    stale: Vec<String>,
+    /// (session id, attach epoch when listed)
+    stale: Vec<(String, u64)>,
 }
 
 /// A session is a candidate when it belongs to this terminal, no GUI holds
@@ -130,19 +131,21 @@ fn choose_adoption(sessions: &[SessionInfo], terminal_id: &str, profile: &str) -
                 && !session.terminating
                 && Some(&session.session_id) != adopt.as_ref()
         })
-        .map(|session| session.session_id.clone())
+        .map(|session| (session.session_id.clone(), session.attach_epoch))
         .collect();
     AdoptionChoice { adopt, stale }
 }
 
-fn end_stale_sessions(endpoint: &DaemonEndpoint, stale: Vec<String>) {
+/// Each request carries the epoch the session was listed with, so one that
+/// was adopted in the meantime is left to its new owner.
+fn end_stale_sessions(endpoint: &DaemonEndpoint, stale: Vec<(String, u64)>) {
     if stale.is_empty() {
         return;
     }
     let endpoint = endpoint.clone();
     std::thread::spawn(move || {
-        for session_id in stale {
-            if let Err(error) = terminate_by_id(&endpoint, &session_id, None) {
+        for (session_id, attach_epoch) in stale {
+            if let Err(error) = terminate_by_id(&endpoint, &session_id, Some(attach_epoch)) {
                 tracing::warn!(%session_id, %error, "failed to end a stale PTY daemon session");
             }
         }
@@ -159,6 +162,7 @@ mod tests {
             session_id: session_id.into(),
             terminal_id: terminal_id.into(),
             created_seq,
+            attach_epoch: 1,
             metadata: BTreeMap::from([(
                 PTY_DAEMON_METADATA_PROFILE.to_owned(),
                 profile.to_owned(),
@@ -208,14 +212,14 @@ mod tests {
             "PS",
         );
         assert_eq!(choice.adopt, Some("a-new".into()));
-        assert_eq!(choice.stale, vec!["z-old".to_owned()]);
+        assert_eq!(choice.stale, vec![("z-old".to_owned(), 1)]);
     }
 
     #[test]
     fn a_session_started_with_another_profile_is_not_adopted() {
         let choice = choose_adoption(&[info("a1", "pane-a", 1, "WSL")], "pane-a", "PS");
         assert_eq!(choice.adopt, None);
-        assert_eq!(choice.stale, vec!["a1".to_owned()]);
+        assert_eq!(choice.stale, vec![("a1".to_owned(), 1)]);
     }
 
     #[test]

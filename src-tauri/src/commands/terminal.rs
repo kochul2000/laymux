@@ -338,10 +338,7 @@ pub async fn create_terminal_session(
     // Only the first create of an id in this GUI process may adopt: later
     // creates are restarts, profile changes or remounts that want a fresh
     // child, never a session this GUI already let go of.
-    let allow_adopt = state
-        .pty_daemon_adoption_seen
-        .lock_or_err()?
-        .insert(id.clone());
+    let allow_adopt = !state.pty_daemon_adoption_seen.lock_or_err()?.contains(&id);
     let backend_terminal_id = id.clone();
     let backend_profile = config.profile.clone();
     let backend = tokio::task::spawn_blocking(move || {
@@ -349,13 +346,8 @@ pub async fn create_terminal_session(
     })
     .await
     .map_err(|error| format!("PTY backend selection panicked: {error}"))?;
-    // Adopting a session an earlier GUI left running continues that child:
-    // no resume command runs and no startup-only guard applies (ADR-0301).
-    let adopting = backend.adopts();
-    let session_restore = session_restore.filter(|_| !adopting);
-
-    let codex_startup_color_probe = (startup_plan.arm_native_windows_codex_color_probe
-        && !adopting)
+    let codex_startup_color_probe = startup_plan
+        .arm_native_windows_codex_color_probe
         .then(|| Arc::new(crate::terminal::NativeWindowsCodexColorProbeGuard::armed()));
     let bootstrap_da_reply =
         cfg!(windows).then(|| Arc::new(crate::terminal::TerminalBootstrapDaReplyGuard::armed()));
@@ -1059,6 +1051,17 @@ pub async fn create_terminal_session(
         }
         tracing::info!(terminal_id = %id, "adopted a running PTY daemon session");
     }
+    // Adopting continues the child an earlier GUI left running: its resume
+    // already happened and its startup probe is long over (ADR-0301). Decided
+    // by the outcome, since the daemon may refuse an adoption and the
+    // terminal then starts the requested child after all.
+    let adopted = spawned_pty.adopted.is_some();
+    let session_restore = session_restore.filter(|_| !adopted);
+    if adopted {
+        if let Some(guard) = codex_startup_color_probe.as_ref() {
+            guard.disarm();
+        }
+    }
     // Seed the CWD from the directory the PTY was actually started in. OSC 7 is
     // only accepted while the terminal is a plain shell (issue #215), so a pane
     // restored straight into `claude --resume` / `codex resume` is classified as
@@ -1168,6 +1171,11 @@ pub async fn create_terminal_session(
         }
     };
     terminals.insert(id.clone(), session);
+    // Only a create that actually produced a terminal uses up this id's one
+    // adoption chance; a failed attempt may still adopt on retry. Leaf lock.
+    if let Ok(mut seen) = state.pty_daemon_adoption_seen.lock_or_err() {
+        seen.insert(id.clone());
+    }
     ptys.insert(id.clone(), pty_handle);
     // Published with the other id-keyed tables so an exit noticed outside the
     // PTY callback — the reconcile worker, for an app that never emitted an exit

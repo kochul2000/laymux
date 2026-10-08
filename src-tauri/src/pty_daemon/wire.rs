@@ -16,7 +16,7 @@ use crate::constants::PTY_DAEMON_MAX_FRAME_BYTES;
 
 /// Bumped on any incompatible message/semantics change. A daemon and client
 /// with different versions refuse each other in the handshake.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 const KIND_CONTROL: u8 = 0;
 const KIND_DATA: u8 = 1;
@@ -186,6 +186,9 @@ pub struct SessionInfo {
     pub terminal_id: String,
     /// Daemon-wide creation order; larger is newer.
     pub created_seq: u64,
+    /// Current attach epoch, so a terminate for a listed session can be
+    /// made conditional on nobody having attached since.
+    pub attach_epoch: u64,
     pub metadata: BTreeMap<String, String>,
     pub child_pid: Option<u32>,
     pub attached: bool,

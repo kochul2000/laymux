@@ -79,12 +79,6 @@ pub enum PtyBackend {
     },
 }
 
-impl PtyBackend {
-    pub fn adopts(&self) -> bool {
-        matches!(self, Self::Daemon { adopt: Some(_), .. })
-    }
-}
-
 pub fn spawn_pty_on<F>(
     backend: &PtyBackend,
     session: &TerminalSession,
@@ -190,8 +184,8 @@ where
                     }
                 }
             });
-            let (opened, metadata) = match adopted {
-                Some((opened, metadata)) => (opened, Some(metadata)),
+            let (opened, metadata, kill_owner) = match adopted {
+                Some((opened, metadata)) => (opened, Some(metadata), ChildKillOwner::Backend),
                 None => {
                     let system = crate::pty_daemon::DaemonPtySystem::spawn(
                         endpoint.clone(),
@@ -199,7 +193,20 @@ where
                         session.id.clone(),
                         daemon_session_metadata(session, is_wsl),
                     );
-                    (open_and_spawn(&system, size, cmd)?, None)
+                    match open_and_spawn(&system, size, cmd.clone()) {
+                        Ok(opened) => (opened, None, ChildKillOwner::Backend),
+                        // The daemon refused (for example while shutting down
+                        // for an update) or failed: same fallback as an
+                        // unreachable daemon (ADR-0301).
+                        Err(error) => {
+                            tracing::warn!(terminal_id = %session.id, %error, "PTY daemon spawn failed; using an in-process PTY");
+                            (
+                                open_and_spawn(native_pty_system().as_ref(), size, cmd)?,
+                                None,
+                                ChildKillOwner::Local,
+                            )
+                        }
+                    }
                 }
             };
             // An adopted child keeps the WSL domain it was started in.
@@ -212,7 +219,7 @@ where
                 terminal_generation,
                 SpawnOptions {
                     wsl_backed,
-                    kill_owner: ChildKillOwner::Backend,
+                    kill_owner,
                 },
                 on_output,
                 PtyLifecycleHooks::default(),

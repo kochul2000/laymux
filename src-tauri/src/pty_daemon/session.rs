@@ -198,6 +198,10 @@ impl Session {
                 previous.writer.close();
             }
         }
+        // The epoch moves with the claim, under the same lock a by-id
+        // terminate checks it under, so a stale owner's request cannot slip
+        // in between the claim and the epoch change.
+        let attach_epoch = self.next_attach_epoch_claimed();
         let mut sink = self.sink.lock_or_err()?;
         if let Some(previous) = sink.client.take() {
             previous.writer.close();
@@ -206,7 +210,6 @@ impl Session {
             return Err("PTY daemon attach was superseded by a newer attach".into());
         }
         let child_pid = self.handle.get().and_then(PtyHandle::child_pid);
-        let attach_epoch = self.next_attach_epoch();
         // Without replay the retained bytes are discarded instead of handed
         // to a client that would parse them as live output (and answer the
         // terminal queries inside them again).
@@ -249,13 +252,18 @@ impl Session {
         Ok(attach_epoch)
     }
 
-    pub(super) fn next_attach_epoch(&self) -> u64 {
+    /// Callers hold the claim (`attached`) lock.
+    fn next_attach_epoch_claimed(&self) -> u64 {
         self.attach_epoch.fetch_add(1, Ordering::AcqRel) + 1
+    }
+
+    pub(super) fn attach_epoch(&self) -> u64 {
+        self.attach_epoch.load(Ordering::Acquire)
     }
 
     /// Whether a by-id terminate from a client that attached with
     /// `attach_epoch` may still end this session.
-    pub(super) fn owned_by_epoch(&self, attach_epoch: Option<u64>) -> bool {
+    fn owned_by_epoch(&self, attach_epoch: Option<u64>) -> bool {
         attach_epoch.is_none_or(|epoch| epoch == self.attach_epoch.load(Ordering::Acquire))
     }
 
@@ -305,12 +313,32 @@ impl Session {
     /// the connection keeps draining frames meanwhile. A request that arrives before the handle exists is remembered and
     /// applied by the spawner right after it publishes the handle.
     pub(super) fn terminate(&self) {
-        self.terminate_requested.store(true, Ordering::Release);
-        let Some(handle) = self.handle.get().cloned() else {
-            return;
+        let _ = self.terminate_owned(None);
+    }
+
+    /// Terminate unless a client attached after the requester did
+    /// (`attach_epoch` older than the current one). Returns `false` when
+    /// the request was superseded and the session left running.
+    ///
+    /// The ownership check, the request flag and reading the handle happen
+    /// under the claim lock that adoption and handle publication also take,
+    /// so none of them can interleave with a terminate.
+    pub(super) fn terminate_owned(&self, attach_epoch: Option<u64>) -> bool {
+        let handle = {
+            let _claim = self
+                .attached
+                .lock_or_recover_for_discard("PTY daemon terminate claim");
+            if !self.owned_by_epoch(attach_epoch) {
+                return false;
+            }
+            self.terminate_requested.store(true, Ordering::Release);
+            self.handle.get().cloned()
+        };
+        let Some(handle) = handle else {
+            return true;
         };
         if self.terminating.swap(true, Ordering::AcqRel) {
-            return;
+            return true;
         }
         let session_id = self.id.clone();
         thread::spawn(move || {
@@ -318,6 +346,28 @@ impl Session {
                 tracing::warn!(%session_id, %error, "PTY daemon session terminate failed");
             }
         });
+        true
+    }
+
+    /// Publish the spawned handle; returns whether a terminate arrived
+    /// before it existed (the spawner must then apply it).
+    pub(super) fn publish_handle(&self, handle: PtyHandle) -> bool {
+        let _claim = self
+            .attached
+            .lock_or_recover_for_discard("PTY daemon handle publication");
+        let _ = self.handle.set(handle);
+        self.terminate_requested()
+    }
+
+    /// Bind the spawning connection as the attached client before the
+    /// session becomes visible, so listing never shows a session that is
+    /// still being spawned as adoptable. Returns the first epoch.
+    pub(super) fn bind_spawner(&self, link: ClientLink) -> u64 {
+        let mut attached = self
+            .attached
+            .lock_or_recover_for_discard("PTY daemon spawn bind");
+        *attached = Some(link);
+        self.next_attach_epoch_claimed()
     }
 
     pub(super) fn terminate_requested(&self) -> bool {
@@ -332,12 +382,17 @@ impl Session {
             session_id: self.id.clone(),
             terminal_id: self.terminal_id.clone(),
             created_seq: self.created_seq,
+            attach_epoch: self.attach_epoch(),
             metadata: self.metadata.clone(),
             child_pid: self.handle.get().and_then(PtyHandle::child_pid),
             attached,
             exited: self.exited.load(Ordering::Acquire),
             terminating: self.terminate_requested(),
         })
+    }
+
+    pub(super) fn release_claim(&self, connection_id: u64) {
+        self.forget_attached(connection_id);
     }
 
     fn forget_attached(&self, connection_id: u64) {
