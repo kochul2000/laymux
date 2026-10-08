@@ -311,7 +311,13 @@ pub const PTY_DAEMON_HELLO_MAX_BYTES: usize = 4 * 1024;
 /// connections). Further connections are refused, not queued.
 pub const PTY_DAEMON_MAX_CONNECTIONS: usize = 256;
 /// Deadline for the authenticated handshake on a fresh daemon connection.
+/// It bounds the whole handshake, not each read, so a client trickling bytes
+/// cannot hold a connection slot past it.
 pub const PTY_DAEMON_HANDSHAKE_TIMEOUT_MS: u64 = 5_000;
+/// Largest input pause a client frame can ask the daemon to replay. Pauses
+/// exist to keep deliberate gaps (the submit CR gap) intact; longer idle
+/// stretches carry no meaning at the PTY.
+pub const PTY_DAEMON_INPUT_PAUSE_MAX_MS: u64 = 1_000;
 /// Connect + acknowledge budget for one out-of-band terminate request.
 pub const PTY_DAEMON_TERMINATE_REQUEST_TIMEOUT_MS: u64 = 1_000;
 /// Overall budget for asking the daemon to end every terminal at app exit.

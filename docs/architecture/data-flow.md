@@ -988,7 +988,7 @@ GUI는 데몬 자식의 PID를 직접 kill하지 않는다(`ChildKillOwner::Back
 - `daemon.sock`: Linux 전용 0600 socket
 - `daemon.log`
 
-Windows endpoint는 loopback TCP다. frame은 `u32 LE 길이 | kind(0=JSON control, 1=raw data) | payload`이고 최대 1 MiB다. 인증 전 frame은 4 KiB, 동시 연결은 256개로 제한한다. 첫 frame `hello`의 token과 protocol version이 맞지 않으면 연결을 닫는다. 읽기를 멈춘 client가 있어도 attach는 출력 lock을 기다리기 전에 그 client를 닫고, 목록 조회는 출력 lock을 쓰지 않는다. 메시지 종류는 다음과 같다.
+Windows endpoint는 loopback TCP다. frame은 `u32 LE 길이 | kind(0=JSON control, 1=raw data) | payload`이고 최대 1 MiB다. 인증 전 frame은 4 KiB, 동시 연결은 256개로 제한하고, handshake 전체에 5초 deadline을 건다. 첫 frame `hello`의 token과 protocol version이 맞지 않으면 연결을 닫는다. `hello`에는 연결마다 새 nonce가 있고, `helloOk`는 token을 key로 한 HMAC-SHA256 `proof`로 답한다. GUI는 proof가 맞지 않는 endpoint에 아무것도 보내지 않으며, `daemon.lock`이 잡혀 있지 않으면 discovery가 남아 있어도 연결하지 않는다. client → daemon data frame은 출력과 달리 앞 4바이트에 GUI가 직전 입력 쓰기 이후 쉰 시간(u32 LE ms, 최대 1초)을 싣는다. 데몬은 자신의 직전 PTY 쓰기 시각을 기준으로 그 휴지를 재현하므로, frame이 자식 앞에 쌓여도 submit CR gap(#490)이 유지된다. 입력 완료 응답은 없다. 응답이 출력 뒤에 줄을 서면 출력 credit이 막힐 때 입력도 막히기 때문이다. 읽기를 멈춘 client가 있어도 attach는 출력 lock을 기다리기 전에 그 client를 닫고, 목록 조회는 출력 lock을 쓰지 않는다. 메시지 종류는 다음과 같다.
 
 - client → daemon: `spawn`·`attach`·`list`·`resize`·`terminate`·`terminateSession`(아무 연결에서나 id로 종료한다. GUI의 모든 종료 요청이 이 경로를 쓴다)
 - daemon → client: `helloOk`·`spawned`·`attached`·`sessions`·`terminating`·`eof`·`exit`·`error`

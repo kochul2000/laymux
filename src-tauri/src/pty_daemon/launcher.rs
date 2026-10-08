@@ -52,18 +52,22 @@ pub fn find_running(paths: &DaemonPaths) -> Result<Option<DaemonEndpoint>, Strin
 /// `Ok(None)` means no live daemon answered. A live daemon that speaks
 /// another protocol is an error: it may own running work, so it is neither
 /// replaced nor killed here.
+///
+/// Liveness is the instance lock, never a successful connect alone: the
+/// discovery of a daemon that died uncleanly names an endpoint some other
+/// program may since have taken.
 fn probe(paths: &DaemonPaths) -> Result<Option<DaemonEndpoint>, String> {
     let Some(discovery) = read_discovery(paths) else {
         return Ok(None);
     };
+    if !daemon_instance_alive(paths) {
+        return Ok(None);
+    }
     let endpoint = DaemonEndpoint {
         endpoint: discovery.endpoint,
         token: discovery.token,
     };
     if discovery.protocol_version != PROTOCOL_VERSION {
-        if !daemon_instance_alive(paths) {
-            return Ok(None);
-        }
         return Err(format!(
             "an incompatible PTY daemon (protocol {}, expected {PROTOCOL_VERSION}) is running",
             discovery.protocol_version

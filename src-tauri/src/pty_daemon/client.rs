@@ -11,7 +11,7 @@ use std::io::{self, BufReader, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use portable_pty::{
@@ -20,9 +20,10 @@ use portable_pty::{
 };
 
 use super::client_queue::{DaemonReader, DaemonReaderControl, Shared, CONNECTION_LOST_EXIT_CODE};
+use super::discovery::{generate_token, handshake_proof, tokens_match};
 use super::transport::{self, Stream};
 use super::wire::{
-    read_frame, write_control, write_data, ClientMessage, DaemonMessage, Frame, SessionInfo,
+    read_frame, write_control, write_input, ClientMessage, DaemonMessage, Frame, SessionInfo,
     WireCommand, PROTOCOL_VERSION,
 };
 use super::DaemonEndpoint;
@@ -50,18 +51,31 @@ fn connect_authenticated_within(
     stream.set_read_timeout(Some(timeout))?;
     stream.set_write_timeout(Some(timeout))?;
     let mut writer = stream.try_clone()?;
+    let nonce = generate_token().map_err(io::Error::other)?;
     write_control(
         &mut writer,
         &ClientMessage::Hello {
             token: endpoint.token.clone(),
             protocol_version: PROTOCOL_VERSION,
+            nonce: nonce.clone(),
         },
     )?;
     let mut reader = BufReader::new(stream);
     match read_frame::<_, DaemonMessage>(&mut reader)? {
         Some(Frame::Control(DaemonMessage::HelloOk {
-            protocol_version, ..
-        })) if protocol_version == PROTOCOL_VERSION => {}
+            protocol_version,
+            proof,
+            ..
+        })) if protocol_version == PROTOCOL_VERSION => {
+            // Whoever answers must hold the token too; otherwise it is some
+            // other program on a stale endpoint and gets nothing more.
+            if !tokens_match(&proof, &handshake_proof(&endpoint.token, &nonce)?) {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "PTY daemon endpoint failed to prove it holds the instance token",
+                ));
+            }
+        }
         Some(Frame::Control(DaemonMessage::Error { message })) => {
             return Err(io::Error::new(io::ErrorKind::PermissionDenied, message))
         }
@@ -348,6 +362,7 @@ impl MasterPty for DaemonMaster {
         }
         Ok(Box::new(DaemonWriter {
             connection: Arc::clone(&self.connection),
+            last_write: None,
         }))
     }
 
@@ -381,17 +396,25 @@ impl Drop for DaemonMaster {
 
 struct DaemonWriter {
     connection: Arc<Connection>,
+    /// When the previous input write returned. Each frame carries the pause
+    /// since then so the daemon can keep gaps such as the submit CR gap
+    /// (#490) that the socket's buffering would otherwise erase.
+    last_write: Option<Instant>,
 }
 
 impl Write for DaemonWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let chunk = &buf[..buf.len().min(PTY_WRITE_CHUNK_SIZE)];
+        let pause = self
+            .last_write
+            .map_or(Duration::ZERO, |last| last.elapsed());
         let mut writer = self
             .connection
             .writer
             .lock_or_err()
             .map_err(io::Error::other)?;
-        write_data(&mut *writer, chunk)?;
+        write_input(&mut *writer, pause, chunk)?;
+        self.last_write = Some(Instant::now());
         Ok(chunk.len())
     }
 

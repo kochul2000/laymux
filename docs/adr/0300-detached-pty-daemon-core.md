@@ -31,6 +31,7 @@ Superset은 Electron 앱 재시작을 넘어 터미널을 유지하려고 별도
 ### 경계와 책임
 
 - 경계는 `PtySystem` seam이다. GUI는 in-process PTY와 같은 방식으로 argv, 전체 환경, cwd를 만든다. 출력 콜백(protocol mode, OSC 단일 패스, 출력 ring·delivery credit), 제어 FIFO, `PtyHandle` 계약도 backend와 무관하게 동일하다. ADR-0001의 OSC 처리 위치는 바뀌지 않는다.
+- 입력 쓰기만은 완료 시점이 다르다. GUI의 쓰기는 socket이 받아들이면 끝나고, 데몬이 PTY에 쓰는 일은 그 뒤에 일어난다. 그래서 입력 frame마다 GUI가 직전 쓰기 이후 쉰 시간(최대 1초)을 싣고, 데몬은 자신의 직전 PTY 쓰기 시각을 기준으로 그 휴지를 재현한다. 자식이 느려 frame이 쌓여도 submit CR 앞의 gap(#490)이 사라지지 않는다. 입력 완료를 응답으로 확인하지는 않는다. 응답은 같은 연결의 출력 뒤에 줄을 서므로, 출력 credit이 막히면 입력까지 막히기 때문이다. 데몬 쪽 입력 오류는 GUI 쓰기의 반환값이 아니라 `error` frame과 로그로만 드러난다.
 - 데몬은 PTY의 생성·입력·resize·종료, 자식 대기, 출력 중계만 수행한다. OSC 해석, protocol reply, 출력 ring, 설정, DB와 같은 laymux 터미널 로직은 갖지 않는다. 데몬은 받은 명령을 그대로 spawn하며 자신의 환경을 섞지 않는다.
 - 새 사용자 터미널의 backend는 생성 시점에 정한다. opt-in이 켜져 있는데 데몬에 연결할 수 없으면 해당 터미널 생성을 실패시킨다. 수명이 다른 local PTY로 조용히 fallback하지 않는다. 숨은 usage probe PTY는 계속 GUI가 소유한다.
 
@@ -66,14 +67,14 @@ Superset은 Electron 앱 재시작을 넘어 터미널을 유지하려고 별도
 
 - 데몬 디렉터리는 build kind별로 둔다. Windows는 `%LOCALAPPDATA%\laymux[-dev]\pty-daemon`, Linux는 `$XDG_STATE_HOME/laymux[-dev]/pty-daemon`(기본 `~/.local/state`)이다. 격리된 dev·test는 `LAYMUX_PTY_DAEMON_DIR`로 디렉터리를 바꾼다. release GUI는 dev 데몬에 연결하지 않으며 그 반대도 같다.
 - Linux endpoint는 0700 디렉터리 안의 0600 Unix socket이다. Windows endpoint는 기존 `lx` IPC와 같은 loopback TCP다. loopback이 아닌 endpoint에는 연결하지 않는다. 외부 Automation 포트와 endpoint를 공유하지 않는다.
-- 모든 연결은 첫 frame에서 인스턴스마다 생성한 32바이트 random token과 protocol version을 제시한다. token은 사용자 전용 디렉터리의 discovery 파일에만 둔다. Linux는 디렉터리 0700, 파일 0600을 직접 설정한다. Windows는 별도 ACL을 설정하지 않고 `%LOCALAPPDATA%`의 기본 사용자 ACL에 의존한다. `LAYMUX_PTY_DAEMON_DIR`로 바꾼 디렉터리의 보호는 그 경로의 권한에 따른다. 데몬은 token을 상수 시간으로 비교하며, token이 틀리거나 version이 다르면 다른 요청을 처리하지 않는다. 인증 전 frame은 4 KiB, 동시 연결은 256개로 제한하고, 초과한 연결은 대기열에 넣지 않고 바로 닫는다. GUI는 spawn 응답에도 5초 deadline을 둔다.
-- 데몬 생존은 연결 성공이 아니라 디렉터리의 instance lock이 잡혀 있는지로 판정한다. 그래야 오래된 discovery의 endpoint를 다른 프로그램이 재사용해도 속지 않는다.
+- 모든 연결은 첫 frame에서 인스턴스마다 생성한 32바이트 random token과 protocol version을 제시한다. token은 사용자 전용 디렉터리의 discovery 파일에만 둔다. Linux는 디렉터리 0700, 파일 0600을 직접 설정한다. Windows는 별도 ACL을 설정하지 않고 `%LOCALAPPDATA%`의 기본 사용자 ACL에 의존한다. `LAYMUX_PTY_DAEMON_DIR`로 바꾼 디렉터리의 보호는 그 경로의 권한에 따른다. 데몬은 token을 상수 시간으로 비교하며, token이 틀리거나 version이 다르면 다른 요청을 처리하지 않는다. 인증은 양방향이다. client는 연결마다 새 nonce를 보내고, 데몬은 token을 key로 한 HMAC-SHA256 proof로 답한다. proof가 맞지 않으면 client는 spawn·입력을 보내지 않는다. 인증 전 frame은 4 KiB, 동시 연결은 256개로 제한하고, 초과한 연결은 대기열에 넣지 않고 바로 닫는다. handshake의 5초는 read마다가 아니라 handshake 전체에 거는 deadline이다. GUI는 spawn 응답에도 5초 deadline을 둔다.
+- 데몬 생존은 연결 성공이 아니라 디렉터리의 instance lock이 잡혀 있는지로 판정한다. lock이 잡혀 있지 않으면 discovery가 남아 있어도 연결하지 않는다. 그래야 정리 없이 죽은 데몬의 endpoint를 다른 프로그램이 재사용해도 속지 않는다. lock 판정과 연결 사이의 짧은 틈은 위 proof가 막는다.
 - protocol version이 다른 데몬이 살아 있으면 GUI는 그 데몬을 kill하거나 교체하지 않고 오류를 반환한다. 그 데몬이 실행 중인 작업을 소유할 수 있기 때문이다.
 - 디렉터리당 데몬은 하나다. 단일 인스턴스는 kernel file lock으로 보장한다. PID나 discovery 파일이 있다는 사실만으로 데몬을 신뢰하지 않는다. GUI의 생존 판정이 순간적으로 lock을 쥘 수 있으므로, 데몬은 lock 획득을 잠시 재시도한다. 그래도 얻지 못한 두 번째 인스턴스는 종료한다.
 - GUI는 데몬을 `current_exe --pty-daemon <dir>`로 띄운다. 디렉터리는 환경 변수가 아니라 인자로 넘긴다. GUI 환경을 바꾸면 그 환경을 상속하는 터미널에 새어 나가기 때문이다.
 - Linux에서는 `headless_command`로 독립 process group을 만든다. std가 연 descriptor는 close-on-exec라서 상속되지 않는다. 다른 라이브러리가 직접 연 descriptor는 이 보장 범위 밖이다.
 - Windows의 `std::process::Command`는 항상 handle 상속을 켠다. 그대로 쓰면 GUI의 console pipe와 GUI가 아직 소유한 in-process PTY(usage probe)의 pipe 끝이 오래 사는 데몬에 넘어가 EOF가 오지 않는다. 그래서 Windows에서는 `CreateProcessW`를 `bInheritHandles = FALSE`, `CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`으로 직접 호출한다. `headless_command`의 창 깜빡임 방지 의도는 같은 flag로 지킨다. job breakaway를 시도하고, 거절되면 job 안에서 띄운다.
-- 데몬은 세션과 연결이 모두 없는 상태가 60초 지속되면 스스로 종료한다. 연결을 받아들이는 일과 idle 종료 판정은 같은 lock으로 직렬화한다. 따라서 막 받아들인 연결은 판정 전에 계산되거나, 판정 후라면 거절된다.
+- 데몬은 세션과 연결이 모두 없는 상태가 60초 지속되면 스스로 종료한다. 연결을 받아들이는 일과 idle 종료 판정은 같은 lock으로 직렬화한다. 따라서 막 받아들인 연결은 판정 전에 계산되거나, 판정 후라면 거절된다. 판정 주기 사이에 열렸다 닫힌 연결(터미널 연결 직전의 생존 probe)도 활동으로 보고 idle 시간을 다시 잰다.
 - 데몬 연결이 끊기면 GUI는 해당 terminal의 reader를 실패로 끝내고 child를 종료된 것으로 처리한다. 데몬 안의 작업은 계속 실행된다.
 
 ## Alternatives Considered
@@ -96,13 +97,13 @@ opt-in을 켜면 GUI crash나 강제 종료 뒤에도 셸과 에이전트 작업
 - **재결합 부재:** 아직 GUI가 시작 시 detach된 세션을 pane에 재결합하지 않는다. opt-in 상태에서 GUI가 crash하면 그 세션은 다음 GUI에 보이지 않은 채 남고, 자식이 끝날 때까지 실행된다. 사용자가 끝낼 경로가 없고, 남은 세션 때문에 데몬의 idle 종료와 Windows 업데이트의 파일 잠금 해제도 막힌다. 재결합과 업데이트 전 데몬 종료가 바로 다음 단계다.
 - **업데이트 미지원:** Windows에서는 데몬이 설치 디렉터리의 `laymux.exe`와 ConPTY 이미지를 실행한다. 업데이트 설치는 마지막 세션 이후 데몬이 idle 종료할 때까지 파일 잠금에 막힐 수 있다. opt-in 상태의 업데이트는 인계 단계 전까지 지원 대상이 아니다.
 - **raw backlog replay:** backlog는 raw byte이고 1 MiB를 넘은 앞부분은 손실된다. 재결합 단계에서 화면 복원·query 재응답 방지 계약을 정해야 한다.
-- **인증 수준:** Windows endpoint의 보호는 loopback과 사용자 전용 discovery의 token에 의존한다.
+- **인증 수준:** Windows endpoint의 보호는 loopback과 사용자 전용 discovery의 token에 의존한다. 다른 로컬 사용자도 loopback 포트에 연결할 수는 있어서, token 없이도 인증 전 연결로 동시 연결 한도를 계속 채워 새 터미널 생성과 종료 요청을 막을 수 있다. handshake 전체 deadline은 한 연결이 슬롯을 붙잡는 시간을 줄일 뿐이다. 사용자 전용 transport로의 강화는 #1150에서 결정한다.
 - **process tree kill:** Windows는 생성자 PID를 기록한다. 그래서 GUI가 살아 있는 동안 GUI를 tree 단위로 끝내면(`taskkill /T`, 작업 관리자의 "프로세스 트리 끝내기", `scripts/kill-dev.sh`) 데몬과 그 작업도 함께 끝난다. 단일 프로세스 crash나 강제 종료에서는 데몬이 살아남는다. 중간 launcher를 통한 이중 spawn으로 부모 관계를 끊을지는 업데이트 인계 단계에서 결정한다.
 
 검증은 다음 수준으로 둔다.
 
-- **단위:** wire·discovery
-- **in-process 데몬 서버 + 실제 OS PTY·셸:** spawn·입출력·resize·terminate, detach 후 backlog replay, attach 인계, 중복 거절, 인증·버전 거절, 인증 전 대형 frame 거절, 응답 없는 spawn timeout, 자연 종료 reap, 멈춘 client 축출, id 기반 종료
+- **단위:** wire(입력 휴지 prefix 포함)·discovery(handshake proof)·입력 휴지 재현 계산
+- **in-process 데몬 서버 + 실제 OS PTY·셸:** spawn·입출력·resize·terminate, detach 후 backlog replay, attach 인계, 중복 거절, 인증·버전 거절, 인증 전 대형 frame 거절, handshake 전체 deadline, token을 증명하지 못하는 endpoint 거절과 lock 없는 discovery 무시, 응답 없는 spawn timeout, 자연 종료 reap, 멈춘 client 축출, id 기반 종료
 - **`AppState` 종료 경로:** 등록된 데몬 터미널이 종료 요청만으로 끝나는지 확인한다.
 
 동시 연결 상한은 테스트하지 않는다. 실제 `laymux --pty-daemon` 프로세스에 대해서는 단일 인스턴스, client 프로세스 abort 뒤 세션과 자식 프로세스의 생존, 명시적 종료를 확인하는 통합 테스트를 둔다.

@@ -8,7 +8,7 @@
 //! session.
 
 use std::collections::HashMap;
-use std::io::{self, BufReader};
+use std::io::{self, BufReader, Read};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::thread;
@@ -16,12 +16,12 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, PtySize};
 
-use super::discovery::tokens_match;
+use super::discovery::{handshake_proof, tokens_match};
 use super::session::{ClientLink, ConnWriter, Session};
 use super::transport::{self, Listener, Stream};
 use super::wire::{
-    read_frame, read_frame_limited, ClientMessage, DaemonMessage, Frame, SessionInfo, WireCommand,
-    PROTOCOL_VERSION,
+    read_frame, read_frame_limited, split_input, ClientMessage, DaemonMessage, Frame, SessionInfo,
+    WireCommand, PROTOCOL_VERSION,
 };
 use crate::constants::{
     PTY_DAEMON_ACCEPT_RETRY_MS, PTY_DAEMON_HANDSHAKE_TIMEOUT_MS, PTY_DAEMON_HELLO_MAX_BYTES,
@@ -86,7 +86,7 @@ impl DaemonServer {
                     continue;
                 }
             };
-            {
+            let connection_id = {
                 let _admission = self.admission.lock_or_err().map_err(io::Error::other)?;
                 if self.shutdown.load(Ordering::Acquire) {
                     return Ok(());
@@ -98,9 +98,11 @@ impl DaemonServer {
                     continue;
                 }
                 self.connections.fetch_add(1, Ordering::AcqRel);
-            }
+                // Allocated under the admission lock so the idle monitor can
+                // also see connections that came and went between its polls.
+                self.next_connection_id.fetch_add(1, Ordering::AcqRel)
+            };
             let server = Arc::clone(self);
-            let connection_id = self.next_connection_id.fetch_add(1, Ordering::Relaxed);
             thread::spawn(move || {
                 server.handle_connection(stream, connection_id);
                 server.connections.fetch_sub(1, Ordering::AcqRel);
@@ -148,12 +150,6 @@ impl DaemonServer {
                 return;
             }
         };
-        if stream
-            .set_read_timeout(Some(Duration::from_millis(PTY_DAEMON_HANDSHAKE_TIMEOUT_MS)))
-            .is_err()
-        {
-            return;
-        }
         let mut reader = BufReader::new(stream);
         if !self.authenticate(&mut reader, &writer) {
             writer.close();
@@ -164,6 +160,8 @@ impl DaemonServer {
         }
 
         let mut bound: Option<Arc<Session>> = None;
+        // When this connection's previous input reached the PTY.
+        let mut last_input: Option<Instant> = None;
         loop {
             let frame = match read_frame::<_, ClientMessage>(&mut reader) {
                 Ok(Some(frame)) => frame,
@@ -174,12 +172,24 @@ impl DaemonServer {
                 }
             };
             match frame {
-                Frame::Data(bytes) => {
+                Frame::Data(payload) => {
                     let Some(session) = bound.as_ref() else {
                         writer.error("input before a session was bound");
                         break;
                     };
-                    session.write_input(&bytes, &writer);
+                    let (pause, data) = match split_input(&payload) {
+                        Ok(input) => input,
+                        Err(error) => {
+                            writer.error(&error.to_string());
+                            break;
+                        }
+                    };
+                    let delay = input_delay(pause, last_input.map(|at| at.elapsed()));
+                    if !delay.is_zero() {
+                        thread::sleep(delay);
+                    }
+                    session.write_input(data, &writer);
+                    last_input = Some(Instant::now());
                 }
                 Frame::Control(ClientMessage::Spawn {
                     session_id,
@@ -240,10 +250,15 @@ impl DaemonServer {
     }
 
     fn authenticate(&self, reader: &mut BufReader<Stream>, writer: &ConnWriter) -> bool {
-        match read_frame_limited::<_, ClientMessage>(reader, PTY_DAEMON_HELLO_MAX_BYTES) {
+        let mut reader = HandshakeReader {
+            inner: reader,
+            deadline: Instant::now() + Duration::from_millis(PTY_DAEMON_HANDSHAKE_TIMEOUT_MS),
+        };
+        match read_frame_limited::<_, ClientMessage>(&mut reader, PTY_DAEMON_HELLO_MAX_BYTES) {
             Ok(Some(Frame::Control(ClientMessage::Hello {
                 token,
                 protocol_version,
+                nonce,
             }))) => {
                 if !tokens_match(&token, &self.token) {
                     writer.error("PTY daemon authentication failed");
@@ -255,10 +270,15 @@ impl DaemonServer {
                     ));
                     return false;
                 }
+                let Ok(proof) = handshake_proof(&self.token, &nonce) else {
+                    writer.error("PTY daemon could not prove its identity");
+                    return false;
+                };
                 writer
                     .send(&DaemonMessage::HelloOk {
                         protocol_version: PROTOCOL_VERSION,
                         daemon_pid: std::process::id(),
+                        proof,
                     })
                     .is_ok()
             }
@@ -395,8 +415,41 @@ impl DaemonServer {
     }
 }
 
+/// Reads the handshake against one deadline for the whole exchange. A plain
+/// socket read timeout restarts on every byte, so a client trickling its
+/// hello could hold a connection slot indefinitely.
+struct HandshakeReader<'a> {
+    inner: &'a mut BufReader<Stream>,
+    deadline: Instant,
+}
+
+impl Read for HandshakeReader<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let remaining = self.deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "PTY daemon handshake deadline passed",
+            ));
+        }
+        self.inner.get_ref().set_read_timeout(Some(remaining))?;
+        self.inner.read(buf)
+    }
+}
+
+/// How long to hold an input frame before writing it to the PTY so the
+/// client's pause before it survives socket buffering. `since_last` is the
+/// time since this connection's previous input reached the PTY; frames that
+/// arrive already spaced by their pause wait for nothing.
+pub(super) fn input_delay(pause: Duration, since_last: Option<Duration>) -> Duration {
+    since_last.map_or(Duration::ZERO, |since| pause.saturating_sub(since))
+}
+
 fn idle_monitor(server: Weak<DaemonServer>, endpoint: String, idle_exit: Duration) {
     let mut idle_since: Option<Instant> = None;
+    // A connection that opened and closed between two polls (a GUI's probe
+    // right before it opens a terminal connection) still counts as activity.
+    let mut seen_admissions = 0;
     loop {
         thread::sleep(Duration::from_millis(PTY_DAEMON_IDLE_POLL_MS));
         let Some(server) = server.upgrade() else {
@@ -405,7 +458,9 @@ fn idle_monitor(server: Weak<DaemonServer>, endpoint: String, idle_exit: Duratio
         if server.shutdown.load(Ordering::Acquire) {
             return;
         }
-        if !server.is_idle() {
+        let admissions = server.next_connection_id.load(Ordering::Acquire);
+        if !server.is_idle() || admissions != seen_admissions {
+            seen_admissions = admissions;
             idle_since = None;
             continue;
         }
@@ -417,7 +472,8 @@ fn idle_monitor(server: Weak<DaemonServer>, endpoint: String, idle_exit: Duratio
         // keeps the daemon alive.
         let still_idle = match server.admission.lock_or_err() {
             Ok(_admission) => {
-                let idle = server.is_idle();
+                let idle = server.is_idle()
+                    && server.next_connection_id.load(Ordering::Acquire) == seen_admissions;
                 if idle {
                     server.shutdown.store(true, Ordering::Release);
                 }

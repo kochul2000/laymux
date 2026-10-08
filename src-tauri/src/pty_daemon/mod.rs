@@ -23,6 +23,8 @@ mod transport;
 mod wire;
 
 #[cfg(test)]
+mod handshake_tests;
+#[cfg(test)]
 mod tests;
 
 pub use backend::{is_enabled, session_key, terminal_backend, DaemonEndpoint};

@@ -3,7 +3,7 @@
 
 use std::collections::VecDeque;
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{fence, AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 
@@ -66,7 +66,8 @@ pub(super) struct Session {
     /// always sink → attached.
     pub(super) attached: Mutex<Option<ClientLink>>,
     exited: AtomicBool,
-    pub(super) terminating: AtomicBool,
+    /// Shared with the teardown thread so a failed terminate can be retried.
+    terminating: Arc<AtomicBool>,
     terminate_requested: AtomicBool,
 }
 
@@ -101,7 +102,7 @@ impl Session {
             sink: Mutex::new(Sink::default()),
             attached: Mutex::new(None),
             exited: AtomicBool::new(false),
-            terminating: AtomicBool::new(false),
+            terminating: Arc::new(AtomicBool::new(false)),
             terminate_requested: AtomicBool::new(false),
         }
     }
@@ -254,11 +255,17 @@ impl Session {
         }
     }
 
-    /// Idempotent; the blocking teardown runs off the connection thread so
-    /// the connection keeps draining frames meanwhile. A request that arrives before the handle exists is remembered and
-    /// applied by the spawner right after it publishes the handle.
+    /// Idempotent while a teardown is in flight; the blocking teardown runs
+    /// off the connection thread so the connection keeps draining frames
+    /// meanwhile. A failed teardown re-arms, so a later request retries
+    /// instead of being acknowledged without effect. A request that arrives
+    /// before the handle exists is remembered and applied by the spawner
+    /// right after it publishes the handle.
     pub(super) fn terminate(&self) {
-        self.terminate_requested.store(true, Ordering::Release);
+        self.terminate_requested.store(true, Ordering::Relaxed);
+        // Pairs with the fence in `terminate_requested`: either this side
+        // sees the published handle or the spawner sees the request.
+        fence(Ordering::SeqCst);
         let Some(handle) = self.handle.get().cloned() else {
             return;
         };
@@ -266,15 +273,19 @@ impl Session {
             return;
         }
         let session_id = self.id.clone();
+        let terminating = Arc::clone(&self.terminating);
         thread::spawn(move || {
             if let Err(error) = handle.terminate() {
                 tracing::warn!(%session_id, %error, "PTY daemon session terminate failed");
+                terminating.store(false, Ordering::Release);
             }
         });
     }
 
+    /// Called by the spawner after it has published the handle.
     pub(super) fn terminate_requested(&self) -> bool {
-        self.terminate_requested.load(Ordering::Acquire)
+        fence(Ordering::SeqCst);
+        self.terminate_requested.load(Ordering::Relaxed)
     }
 
     /// Never takes the sink lock, so listing stays responsive while a reader

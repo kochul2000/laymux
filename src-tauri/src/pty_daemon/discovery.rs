@@ -4,9 +4,14 @@
 //! user's local state root, so a release GUI never adopts a dev daemon or vice
 //! versa. A PID or socket file alone is never trusted: a client must present
 //! the per-instance random token from `daemon.json` and receive a matching
-//! protocol version in the handshake.
+//! protocol version in the handshake. The trust is mutual: the daemon must
+//! answer the client's fresh nonce with a proof only the token holder can
+//! compute, so a program squatting on a stale endpoint never receives a
+//! terminal's command, environment or input.
 
+use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
@@ -128,9 +133,42 @@ pub fn tokens_match(presented: &str, expected: &str) -> bool {
         == 0
 }
 
+/// The daemon's answer to a client nonce: HMAC-SHA256 keyed by the instance
+/// token, hex encoded. Compare with [`tokens_match`].
+pub fn handshake_proof(token: &str, nonce: &str) -> io::Result<String> {
+    let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(token.as_bytes())
+        .map_err(|_| io::Error::other("PTY daemon proof key is invalid"))?;
+    mac.update(nonce.as_bytes());
+    Ok(mac
+        .finalize()
+        .into_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn handshake_proof_depends_on_both_token_and_nonce() {
+        let token = generate_token().unwrap();
+        let nonce = generate_token().unwrap();
+        let proof_of = |token: &str, nonce: &str| handshake_proof(token, nonce).unwrap();
+        let proof = proof_of(&token, &nonce);
+        assert_eq!(proof.len(), 64);
+        assert!(tokens_match(&proof, &proof_of(&token, &nonce)));
+        assert!(!tokens_match(&proof, &proof_of(&nonce, &token)));
+        assert!(!tokens_match(
+            &proof,
+            &proof_of(&generate_token().unwrap(), &nonce)
+        ));
+        assert!(!tokens_match(
+            &proof,
+            &proof_of(&token, &generate_token().unwrap())
+        ));
+    }
 
     #[test]
     fn discovery_round_trips_and_only_its_owner_removes_it() {
