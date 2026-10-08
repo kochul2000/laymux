@@ -15,22 +15,49 @@ pub(crate) fn save_session_checkpoint_with_store(
     Ok(commit)
 }
 
-#[tauri::command(async)]
-pub fn save_session_checkpoint(
+#[tauri::command]
+pub async fn save_session_checkpoint(
     snapshot: LocalSessionSnapshot,
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<CheckpointCommit, String> {
-    save_session_checkpoint_with_store(
-        &snapshot,
-        &LocalStateStore::new(crate::local_state::state_path().map_err(String::from)?),
-        &state.session_checkpoint.hints,
-    )
+    save_session_checkpoint_impl(snapshot, state.inner().clone()).await
 }
-#[tauri::command(async)]
-pub fn load_session_checkpoint() -> Result<Option<LocalSessionSnapshot>, String> {
-    LocalStateStore::new(crate::local_state::state_path().map_err(String::from)?)
-        .load_session()
-        .map_err(String::from)
+pub(crate) async fn save_session_checkpoint_impl(
+    snapshot: LocalSessionSnapshot,
+    state: Arc<AppState>,
+) -> Result<CheckpointCommit, String> {
+    if let Some(daemon) = state.daemon.get() {
+        return daemon.save_session(snapshot).await;
+    }
+    tokio::task::spawn_blocking(move || {
+        save_session_checkpoint_with_store(
+            &snapshot,
+            &LocalStateStore::new(crate::local_state::state_path().map_err(String::from)?),
+            &state.session_checkpoint.hints,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+#[tauri::command]
+pub async fn load_session_checkpoint(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<Option<LocalSessionSnapshot>, String> {
+    if let Some(daemon) = state.daemon.get() {
+        return serde_json::from_value(
+            daemon
+                .read(crate::daemon_requests::ReadCommand::SessionState)
+                .await?,
+        )
+        .map_err(|error| format!("daemon session snapshot rejected: {error}"));
+    }
+    tokio::task::spawn_blocking(|| {
+        LocalStateStore::new(crate::local_state::state_path().map_err(String::from)?)
+            .load_session()
+            .map_err(String::from)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 #[tauri::command(async)]
 pub fn export_portable_settings() -> Result<serde_json::Value, String> {

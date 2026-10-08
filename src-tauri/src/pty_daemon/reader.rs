@@ -51,7 +51,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> DaemonReader<T> {
         })
     }
 
-    pub(crate) async fn call(&mut self, query: ReadCommand) -> Result<Value, AppError> {
+    fn reserve_request(&mut self) -> Result<u64, AppError> {
         if self.failed {
             return Err(AppError::Other("daemon read connection unavailable".into()));
         }
@@ -59,21 +59,57 @@ impl<T: AsyncRead + AsyncWrite + Unpin> DaemonReader<T> {
             .request_id
             .checked_add(1)
             .ok_or_else(|| AppError::Other("daemon read request sequence exhausted".into()))?;
-        let deadline = if matches!(query, ReadCommand::Attributions { .. }) {
-            std::time::Duration::from_secs(35)
+        Ok(self.request_id)
+    }
+
+    pub(crate) async fn commit_session(
+        &mut self,
+        snapshot: crate::local_state::LocalSessionSnapshot,
+        structure_revision: u64,
+    ) -> Result<crate::local_state::CheckpointCommit, AppError> {
+        let request_id = self.reserve_request()?;
+        let value = self
+            .exchange(
+                Request::CommitSession {
+                    request_id,
+                    stamp: self.stamp.clone(),
+                    structure_revision,
+                    snapshot: Box::new(snapshot),
+                },
+                crate::daemon_protocol::SESSION_OBSERVATION_DEADLINE,
+            )
+            .await?;
+        Ok(serde_json::from_value(value)?)
+    }
+
+    pub(crate) async fn call(&mut self, query: ReadCommand) -> Result<Value, AppError> {
+        let request_id = self.reserve_request()?;
+        let deadline = if matches!(
+            query,
+            ReadCommand::Attributions { .. } | ReadCommand::CommitReceipt { .. }
+        ) {
+            crate::daemon_protocol::SESSION_OBSERVATION_DEADLINE
         } else {
             crate::daemon_protocol::CONNECTION_DEADLINE
         };
+        self.exchange(
+            Request::Read {
+                request_id,
+                stamp: self.stamp.clone(),
+                query,
+            },
+            deadline,
+        )
+        .await
+    }
+
+    async fn exchange(
+        &mut self,
+        request: Request,
+        deadline: std::time::Duration,
+    ) -> Result<Value, AppError> {
         let outcome = async {
-            write_frame(
-                &mut self.stream,
-                &Request::Read {
-                    request_id: self.request_id,
-                    stamp: self.stamp.clone(),
-                    query,
-                },
-            )
-            .await?;
+            write_frame(&mut self.stream, &request).await?;
             let response: Response = read_frame_with_deadline(&mut self.stream, deadline).await?;
             if response.request_id != self.request_id
                 || response.result.is_some() == response.error.is_some()

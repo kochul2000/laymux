@@ -10,7 +10,7 @@ use crate::lock_ext::MutexExt;
 use crate::settings::Settings;
 use serde_json::Value;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -56,6 +56,7 @@ pub(crate) struct DaemonGateway {
     ready: tokio::sync::watch::Receiver<Result<bool, String>>,
     alive: AtomicBool,
     stopped: AtomicBool,
+    structure_revision: AtomicU64,
 }
 
 impl DaemonGateway {
@@ -70,6 +71,7 @@ impl DaemonGateway {
             ready,
             alive: AtomicBool::new(true),
             stopped: AtomicBool::new(false),
+            structure_revision: AtomicU64::new(0),
         })
     }
 
@@ -87,6 +89,7 @@ impl DaemonGateway {
             ready,
             alive: AtomicBool::new(false),
             stopped: AtomicBool::new(false),
+            structure_revision: AtomicU64::new(0),
         });
         let worker = Arc::downgrade(&gateway);
         std::thread::Builder::new()
@@ -174,7 +177,9 @@ impl DaemonGateway {
             .map_err(|_| "daemon control outcome is ambiguous; input was not retried".to_string())?
     }
 
-    pub(crate) async fn read(&self, query: ReadCommand) -> Result<Value, String> {
+    pub(super) async fn open_reader(
+        &self,
+    ) -> Result<DaemonReader<super::transport::ClientStream>, String> {
         self.wait_ready().await?;
         if !self.alive.load(Ordering::Acquire) {
             return Err("daemon connection unavailable".into());
@@ -193,9 +198,35 @@ impl DaemonGateway {
             )
         };
         let stream = connect(&endpoint).await.map_err(String::from)?;
-        let mut reader = DaemonReader::authenticate(stream, &key, &scope, &runtime, stamp)
+        DaemonReader::authenticate(stream, &key, &scope, &runtime, stamp)
+            .await
+            .map_err(String::from)
+    }
+
+    pub(crate) async fn save_session(
+        &self,
+        snapshot: crate::local_state::LocalSessionSnapshot,
+    ) -> Result<crate::local_state::CheckpointCommit, String> {
+        let revision = self
+            .structure_revision
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |revision| {
+                revision.checked_add(1)
+            })
+            .map_err(|_| "daemon structure revision exhausted".to_string())?
+            + 1;
+        let mut reader = self.open_reader().await?;
+        let commit = reader
+            .commit_session(snapshot, revision)
             .await
             .map_err(String::from)?;
+        if !self.alive.load(Ordering::Acquire) {
+            return Err("daemon owner connection was lost during session commit".into());
+        }
+        Ok(commit)
+    }
+
+    pub(crate) async fn read(&self, query: ReadCommand) -> Result<Value, String> {
+        let mut reader = self.open_reader().await?;
         let outcome = reader.call(query).await.map_err(String::from);
         if !self.alive.load(Ordering::Acquire) {
             return Err("daemon owner connection was lost during observation".into());

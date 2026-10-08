@@ -23,6 +23,7 @@ mod terminal;
 mod terminal_home;
 mod terminal_output_delivery;
 mod terminal_output_surface;
+mod terminal_surface;
 mod terminal_teardown;
 mod usage;
 mod viewer_startup;
@@ -54,6 +55,7 @@ pub use spreadsheet_viewer::*;
 pub use terminal::*;
 pub use terminal_home::*;
 pub use terminal_output_surface::*;
+pub use terminal_surface::*;
 pub use usage::*;
 pub use viewer_startup::*;
 
@@ -165,13 +167,14 @@ mod main_thread_io {
             for command in *commands {
                 let blocking = format!("#[tauri::command]\npub fn {command}(");
                 let threadpool = format!("#[tauri::command(async)]\npub fn {command}(");
+                let asynchronous = format!("#[tauri::command]\npub async fn {command}(");
                 assert!(
                     !source.contains(&blocking),
                     "`{command}` must stay `#[tauri::command(async)]`: a plain command runs its \
                      filesystem/process work inline on the app's main thread and stalls the window"
                 );
                 assert!(
-                    source.contains(&threadpool),
+                    source.contains(&threadpool) || source.contains(&asynchronous),
                     "`{command}` no longer matches the `#[tauri::command(async)]\npub fn` shape \
                      this contract is checked against — update the table with it"
                 );

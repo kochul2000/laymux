@@ -147,6 +147,7 @@ pub(crate) async fn run(path: PathBuf) -> Result<(), AppError> {
         bootstrap.settings,
         &node,
         &bootstrap.runtime_path.join("worker.cjs"),
+        crate::local_state::LocalStateStore::new(state_path),
     )?;
     let discovery = Discovery {
         protocol: PROTOCOL_VERSION,

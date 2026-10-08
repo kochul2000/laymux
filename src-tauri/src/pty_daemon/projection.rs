@@ -19,7 +19,8 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 
 pub(super) struct Projection {
-    native_generation: u64,
+    pub(super) native_generation: u64,
+    pub(super) delivery_generation: AtomicU64,
     attach: tokio::sync::Mutex<()>,
     epoch: AtomicU64,
 }
@@ -32,6 +33,12 @@ struct CatalogEntry {
 }
 
 impl DaemonGateway {
+    pub(crate) fn release_projection(&self, id: &str) -> Result<(), String> {
+        if let Some(projection) = self.projections.lock_or_err()?.remove(id) {
+            projection.epoch.fetch_add(1, Ordering::AcqRel);
+        }
+        Ok(())
+    }
     pub(crate) fn source_cwds(&self) -> Result<std::collections::HashMap<String, String>, String> {
         let catalog: Vec<CatalogEntry> =
             serde_json::from_value(self.read_blocking(ReadCommand::Catalog)?)
@@ -62,6 +69,9 @@ impl DaemonGateway {
     ) -> Result<TerminalSession, String> {
         self.wait_ready().await?;
         let id = spec.id.clone();
+        let sync_group = spec.sync_group.clone();
+        let cwd_send = spec.cwd_send;
+        let cwd_receive = spec.cwd_receive;
         if state.terminals.lock_or_err()?.contains_key(&id) {
             return Err(format!("Session '{id}' already exists"));
         }
@@ -87,10 +97,21 @@ impl DaemonGateway {
         if entry.generation == 0 {
             return Err("daemon terminal generation unavailable".into());
         }
-        let result: TerminalSession = serde_json::from_value(
+        self.call(Command::TerminalOptions {
+            terminal_id: id.clone(),
+            generation: entry.generation,
+            sync_group: Some(sync_group.clone()),
+            cwd_send,
+            cwd_receive,
+        })
+        .await?;
+        let mut result: TerminalSession = serde_json::from_value(
             serde_json::to_value(&entry.session).map_err(|error| error.to_string())?,
         )
         .map_err(|error| error.to_string())?;
+        result.config.sync_group = sync_group.clone();
+        result.cwd_send = cwd_send.unwrap_or(true);
+        result.cwd_receive = cwd_receive.unwrap_or(true);
         // This mirror contains no native child PID, OS master or child killer.
         let handle = crate::pty::PtyHandle::from_external(
             entry.generation,
@@ -105,12 +126,52 @@ impl DaemonGateway {
             id.clone(),
             Arc::new(Projection {
                 native_generation: entry.generation,
+                delivery_generation: AtomicU64::new(0),
                 attach: tokio::sync::Mutex::new(()),
                 epoch: AtomicU64::new(0),
             }),
         );
-        terminals.insert(id, entry.session);
+        let mirror = serde_json::from_value(
+            serde_json::to_value(&result).map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?;
+        terminals.insert(id.clone(), mirror);
+        drop(terminals);
+        crate::commands::set_terminal_options_inner(
+            state,
+            &id,
+            Some(sync_group),
+            cwd_send,
+            cwd_receive,
+        )?;
         Ok(result)
+    }
+
+    pub(crate) fn source_terminal_options(
+        &self,
+        id: &str,
+        sync_group: Option<String>,
+        cwd_send: Option<bool>,
+        cwd_receive: Option<bool>,
+    ) -> Result<(), String> {
+        let generation = self
+            .projections
+            .lock_or_err()?
+            .get(id)
+            .map(|projection| projection.native_generation);
+        if let Some(generation) = generation {
+            self.call_blocking(
+                Command::TerminalOptions {
+                    terminal_id: id.into(),
+                    generation,
+                    sync_group,
+                    cwd_send,
+                    cwd_receive,
+                },
+                std::time::Instant::now() + std::time::Duration::from_secs(10),
+            )?;
+        }
+        Ok(())
     }
 
     pub(crate) async fn attach_surface(
@@ -182,6 +243,10 @@ impl DaemonGateway {
             .get(id)
             .ok_or_else(|| format!("daemon terminal '{id}' mirror unavailable"))?
             .bind_delivery_generation(session.generation());
+        projection
+            .delivery_generation
+            .store(session.generation(), Ordering::Release);
+        self.publish_catalog_state(state, app, &self.read(ReadCommand::Catalog).await?)?;
         let gateway = self.clone();
         let weak_state = Arc::downgrade(state);
         let app = app.clone();
@@ -222,8 +287,7 @@ impl DaemonGateway {
             generation: projection.native_generation,
         })
         .await?;
-        projection.epoch.fetch_add(1, Ordering::AcqRel);
-        self.projections.lock_or_err()?.remove(id);
+        self.retire_projection(id, &projection)?;
         Ok(())
     }
 
@@ -241,8 +305,19 @@ impl DaemonGateway {
             },
             std::time::Instant::now() + std::time::Duration::from_secs(10),
         )?;
-        projection.epoch.fetch_add(1, Ordering::AcqRel);
-        self.projections.lock_or_err()?.remove(id);
+        self.retire_projection(id, &projection)?;
+        Ok(())
+    }
+
+    fn retire_projection(&self, id: &str, expected: &Arc<Projection>) -> Result<(), String> {
+        let mut projections = self.projections.lock_or_err()?;
+        if projections
+            .get(id)
+            .is_some_and(|current| Arc::ptr_eq(current, expected))
+        {
+            expected.epoch.fetch_add(1, Ordering::AcqRel);
+            projections.remove(id);
+        }
         Ok(())
     }
 }

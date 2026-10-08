@@ -71,6 +71,10 @@ import {
   type TerminalActivityInfo,
 } from "@/stores/terminal-store";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
+import {
+  preserveTerminalSourceOnUnmount,
+  terminalRestartEpoch,
+} from "@/lib/terminal-surface-lifecycle";
 import { useSettingsStore, defaultProfileDefaults } from "@/stores/settings-store";
 import { useOverridesStore, FONT_ZOOM_MIN, FONT_ZOOM_MAX } from "@/stores/overrides-store";
 import { toSupportedCursorShape, toXtermCursorOptions } from "@/lib/cursor-settings";
@@ -1246,6 +1250,7 @@ export function TerminalView({
     let currentParsingGeneration: number | undefined;
     /** Generation of the attachment the coordinator is currently applying. */
     let outputGeneration: number | undefined;
+    const mountedRestartEpoch = terminalRestartEpoch(paneId);
     let humanDataEmissionDepth = 0;
     let pendingXtermUserInputOrigins = 0;
     let humanInputFailureNotified = false;
@@ -6465,7 +6470,10 @@ export function TerminalView({
       unlistenOutputV3?.();
       unlistenOutputFailStopped?.();
       unlistenDaemonResync?.();
-      closeTerminalSession(instanceId).catch(() => {});
+      closeTerminalSession(instanceId, {
+        generation: outputGeneration,
+        preserveSource: preserveTerminalSourceOnUnmount(paneId, profile, mountedRestartEpoch),
+      }).catch(() => {});
       terminal.dispose();
       renderCheckpointModel.dispose();
       terminalParserAdmission.dispose();

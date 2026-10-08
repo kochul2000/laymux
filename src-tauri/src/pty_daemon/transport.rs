@@ -7,6 +7,10 @@ mod platform;
 mod platform;
 
 pub(crate) use platform::{connect, current_identity, private_directory, Listener};
+#[cfg(target_os = "linux")]
+pub(crate) type ClientStream = tokio::net::UnixStream;
+#[cfg(windows)]
+pub(crate) type ClientStream = tokio::net::windows::named_pipe::NamedPipeClient;
 
 #[cfg(test)]
 mod tests {

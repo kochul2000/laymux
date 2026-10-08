@@ -663,6 +663,16 @@ pub(crate) async fn create_terminal_session_core(
             //    taken again to insert/remove the terminal ID.
             // This layout keeps non-Claude terminals off the #1 lock when possible.
             if event.code == 0 || event.code == 2 {
+                // A headless source must retain the live raw title even when
+                // a profile's optional display-title hook is disabled. Receipt
+                // admission reads source state, never the GUI's event replay.
+                if app_clone.has_output_parser() {
+                    if let Ok(mut terminals) = state_for_pty.terminals.lock_or_err() {
+                        if let Some(session) = terminals.get_mut(&terminal_id) {
+                            session.title = event.data.clone();
+                        }
+                    }
+                }
                 let was_detected = resolve_claude_detected(
                     &pty_cb_state.claude_detected,
                     &state_for_pty.known_claude_terminals,
@@ -1815,9 +1825,39 @@ pub(crate) fn close_terminal_session_inner(
     state: &AppState,
     app: &impl TerminalEventEmitter,
 ) -> Result<(), String> {
+    close_terminal_generation_inner(id, None, state, app)
+}
+
+pub(crate) fn close_terminal_generation_inner(
+    id: &str,
+    expected_generation: Option<u64>,
+    state: &AppState,
+    app: &impl TerminalEventEmitter,
+) -> Result<(), String> {
+    let generation = {
+        let _catalog = state.terminals.lock_or_err()?;
+        let current = state
+            .pty_handles
+            .lock_or_err()?
+            .get(id)
+            .map(|handle| handle.terminal_generation());
+        if expected_generation.is_some() && current != expected_generation {
+            return Ok(());
+        }
+        current
+    };
     if let Some(daemon) = state.daemon.get() {
         daemon.close_source_blocking(id)?;
     }
+    release_terminal_surface_inner(id, generation, state, app)
+}
+
+pub(crate) fn release_terminal_surface_inner(
+    id: &str,
+    expected_generation: Option<u64>,
+    state: &AppState,
+    app: &impl TerminalEventEmitter,
+) -> Result<(), String> {
     // Hold the terminal catalog from generation selection through all
     // id-keyed cleanup. Create performs its duplicate check and generation
     // reservation under the same lock, so close cannot consume state from a
@@ -1825,6 +1865,20 @@ pub(crate) fn close_terminal_session_inner(
     let mut terminals = state
         .terminals
         .lock_or_recover_for_discard("closing terminal catalog entry");
+    if let Some(expected) = expected_generation {
+        if state
+            .pty_handles
+            .lock_or_err()?
+            .get(id)
+            .map(|handle| handle.terminal_generation())
+            != Some(expected)
+        {
+            return Ok(());
+        }
+    }
+    if let Some(daemon) = state.daemon.get() {
+        daemon.release_projection(id)?;
+    }
     let output_retirement = terminal_output::begin_terminal_output_retirement_for_close(
         &state.terminal_protocol_states,
         &state.output_buffers,
@@ -2087,12 +2141,15 @@ pub fn is_grok_terminal(id: String, state: State<Arc<AppState>>) -> Result<bool,
     Ok(known.contains(&id))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_terminal_cwd_send(
     terminal_id: String,
     send: bool,
     state: State<Arc<AppState>>,
 ) -> Result<(), String> {
+    if let Some(daemon) = state.daemon.get() {
+        daemon.source_terminal_options(&terminal_id, None, Some(send), None)?;
+    }
     let mut terminals = state.terminals.lock_or_err()?;
     if let Some(session) = terminals.get_mut(&terminal_id) {
         session.cwd_send = send;
@@ -2100,12 +2157,15 @@ pub fn set_terminal_cwd_send(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_terminal_cwd_receive(
     terminal_id: String,
     receive: bool,
     state: State<Arc<AppState>>,
 ) -> Result<(), String> {
+    if let Some(daemon) = state.daemon.get() {
+        daemon.source_terminal_options(&terminal_id, None, None, Some(receive))?;
+    }
     let mut terminals = state.terminals.lock_or_err()?;
     if let Some(session) = terminals.get_mut(&terminal_id) {
         session.cwd_receive = receive;
@@ -2154,9 +2214,8 @@ pub fn propagate_cwd_once(
 ///
 /// P2(issue #293): sync group 은 `session.config.sync_group` 이 아니라 멤버십의
 /// 권위 소스인 `state.sync_groups` 에서 현재 그룹을 조회한다. `update_terminal_sync_group`
-/// 은 `state.sync_groups` membership 만 옮기고 `session.config.sync_group` 은 갱신하지
-/// 않으므로, config 를 읽으면 런타임에 그룹이 바뀐 터미널이 stale 한 옛 그룹으로
-/// 전파되거나 no-op 이 된다. 권위 소스를 단일화(sync_groups 조회)해 stale 위험을 없앤다.
+/// 도 catalog의 설정 projection을 갱신하지만, 전파 대상의 권위는 membership이다.
+/// membership 조회로 같은 그룹에 속한 현재 대상만 선택한다.
 ///
 /// 락 순서: `terminals`(1) → `sync_groups`(8) (state.rs Lock ordering 준수).
 fn resolve_propagate_source(
@@ -2189,12 +2248,40 @@ fn resolve_propagate_source(
     Ok(Some((cwd, sync_group)))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_terminal_sync_group(
     terminal_id: String,
     new_group: String,
     state: State<Arc<AppState>>,
 ) -> Result<(), String> {
+    if let Some(daemon) = state.daemon.get() {
+        daemon.source_terminal_options(&terminal_id, Some(new_group.clone()), None, None)?;
+    }
+    set_terminal_options_inner(&state, &terminal_id, Some(new_group), None, None)
+}
+
+pub(crate) fn set_terminal_options_inner(
+    state: &AppState,
+    terminal_id: &str,
+    new_group: Option<String>,
+    cwd_send: Option<bool>,
+    cwd_receive: Option<bool>,
+) -> Result<(), String> {
+    let mut terminals = state.terminals.lock_or_err()?;
+    if let Some(terminal) = terminals.get_mut(terminal_id) {
+        if let Some(send) = cwd_send {
+            terminal.cwd_send = send;
+        }
+        if let Some(receive) = cwd_receive {
+            terminal.cwd_receive = receive;
+        }
+        if let Some(group) = &new_group {
+            terminal.config.sync_group = group.clone();
+        }
+    }
+    let Some(new_group) = new_group else {
+        return Ok(());
+    };
     let mut groups = state.sync_groups.lock_or_err()?;
 
     // Remove from all existing groups
@@ -2218,7 +2305,7 @@ pub fn update_terminal_sync_group(
         groups
             .entry(new_group.clone())
             .or_insert_with(|| crate::terminal::SyncGroup::new(new_group))
-            .add_terminal(terminal_id);
+            .add_terminal(terminal_id.to_owned());
     }
 
     Ok(())

@@ -5836,7 +5836,10 @@ describe("TerminalView", () => {
     unmount();
 
     // closeTerminalSession is called during cleanup
-    expect(mockCloseTerminalSession).toHaveBeenCalledWith("t7");
+    expect(mockCloseTerminalSession).toHaveBeenCalledWith("t7", {
+      generation: undefined,
+      preserveSource: false,
+    });
   });
 
   it("calls terminal.focus() when isFocused becomes true after open", async () => {

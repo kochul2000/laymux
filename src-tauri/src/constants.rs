@@ -5,6 +5,19 @@ pub const WSL_CODEX_PROBE_FILE: &str = "laymux-wsl-codex-probe";
 
 /// Terminal ids are `terminal-{paneId}` for grid and dock panes alike.
 pub const TERMINAL_ID_PREFIX: &str = "terminal-";
+pub const TERMINAL_VIEW_TYPE: &str = "TerminalView";
+pub const SESSION_LAST_CWD: &str = "lastCwd";
+pub const SESSION_LAST_CODEX: &str = "lastCodexSession";
+pub const SESSION_LAST_CLAUDE: &str = "lastClaudeSession";
+pub const SESSION_LAST_GROK: &str = "lastGrokSession";
+pub const SESSION_LAST_FRESH: &str = "lastAgentFresh";
+pub const SESSION_RESTORE_FIELDS: &[&str] = &[
+    SESSION_LAST_CODEX,
+    SESSION_LAST_CLAUDE,
+    SESSION_LAST_GROK,
+    SESSION_LAST_FRESH,
+];
+pub const SESSION_ATTRIBUTION_UNKNOWN: &str = "unknown";
 
 // ── OS credential-store names ────────────────────────────────────
 

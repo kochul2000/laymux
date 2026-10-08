@@ -362,14 +362,25 @@ export async function resizeTerminal(
   return invoke("resize_terminal", { id, cols, rows, exact });
 }
 
-export async function closeTerminalSession(id: string): Promise<void> {
+export async function closeTerminalSession(
+  id: string,
+  surface?: { generation?: number; preserveSource: boolean },
+): Promise<void> {
   // A surface that requested close is already gone from the input owner's
   // perspective. Fence its diagnostics before the serialized backend close
   // starts so a prior IPC completion cannot settle into a retired/reused id.
   forgetTerminalInputDeliveryCounters(id);
   return enqueueTerminalLifecycle(id, async () => {
     try {
-      await invoke<void>("close_terminal_session", { id });
+      if (surface) {
+        await invoke<void>("release_terminal_surface", {
+          id,
+          generation: surface.generation ?? null,
+          preserveSource: surface.preserveSource,
+        });
+      } else {
+        await invoke<void>("close_terminal_session", { id });
+      }
     } finally {
       // The output ring, the generation and every sequence the recovery totals
       // describe die with the session, so the diagnostic entry has nothing left

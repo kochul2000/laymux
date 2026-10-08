@@ -16,6 +16,12 @@ pub(crate) struct Authentication {
 )]
 pub(crate) enum Request {
     Attach,
+    CommitSession {
+        request_id: u64,
+        stamp: AttachmentStamp,
+        structure_revision: u64,
+        snapshot: Box<crate::local_state::LocalSessionSnapshot>,
+    },
     Read {
         request_id: u64,
         stamp: AttachmentStamp,
@@ -41,6 +47,18 @@ pub(crate) enum ReadCommand {
     },
     Ping,
     Catalog,
+    SessionState,
+    SessionDiagnostics,
+    TerminalStates,
+    CaptureReceipt,
+    CommitReceipt {
+        token: String,
+        coverage: Vec<crate::session_checkpoint::receipt::ReceiptCoverage>,
+        checkpoint_revision: u64,
+    },
+    BusinessEvents {
+        since: Option<u64>,
+    },
     Checkpoint {
         terminal_id: String,
         generation: u64,
@@ -73,6 +91,13 @@ pub(crate) enum ReadCommand {
 pub(crate) enum Command {
     Configure {
         settings: Box<crate::settings::Settings>,
+    },
+    TerminalOptions {
+        terminal_id: String,
+        generation: u64,
+        sync_group: Option<String>,
+        cwd_send: Option<bool>,
+        cwd_receive: Option<bool>,
     },
     Physical {
         operation_id: String,

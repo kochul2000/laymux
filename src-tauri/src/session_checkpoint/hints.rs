@@ -29,11 +29,19 @@ impl CheckpointHints {
 }
 
 use std::time::Duration;
-struct Timing {
+pub(crate) struct Timing {
     settle: Duration,
     retry: Duration,
     cap: Duration,
     watchdog: Duration,
+}
+impl Timing {
+    pub(crate) fn for_daemon() -> Self {
+        Self {
+            watchdog: Duration::from_secs(5),
+            ..Self::default()
+        }
+    }
 }
 impl Default for Timing {
     fn default() -> Self {
@@ -45,7 +53,7 @@ impl Default for Timing {
         }
     }
 }
-async fn run<F, Fut>(
+pub(crate) async fn run<F, Fut>(
     hints: &CheckpointHints,
     finalizing: impl Fn() -> bool,
     mut checkpoint: F,

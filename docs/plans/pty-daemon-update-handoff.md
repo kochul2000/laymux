@@ -1,7 +1,7 @@
 # PTY 데몬 업데이트 인계 구현·검증 계획
 
 - 상태: 구현 진행 중. 기본 GUI·업데이트 경로는 기존 동작이며 daemon 인계 미활성화.
-- dev 검증 경로: `LAYMUX_PTY_DAEMON=1`에서 생성·입력·headless 화면 adapter를 연결했다. 업데이트 인계·offline writer는 아직 연결 전이며 실제 앱 기동·인계 검증이 완료될 때까지 기본 경로로 활성화하지 않는다.
+- dev 검증 경로: `LAYMUX_PTY_DAEMON=1`에서 생성·입력·headless 화면 adapter를 연결했다. source 단일 writer·offline CWD/귀속 저장·renderer detach·업무 이벤트 journal·native receipt를 연결했다. 업데이트 인계·source critical probe·hook/CLI는 계속 구현 중이며 실제 앱 기동·인계 검증이 완료될 때까지 기본 경로로 활성화하지 않는다.
 - 결정 정본: [ADR-0300](../adr/0300-detached-pty-daemon-update-handoff.md), [ADR-0301](../adr/0301-pty-daemon-private-ipc-and-parser-runtime.md)
 - GUI 계약: [ADR-0302](../adr/0302-pty-daemon-gui-projection-and-control-barriers.md). daemon 도메인 테스트 25개, bootstrap 설정 roundtrip 1개, source 완료 확인 FIFO 테스트 3개, parser 화면 비교 21개, daemon metadata admission 및 기존 attach coordinator 39개가 통과했다. TerminalView/checkpoint model 393개는 이후 resync 변경 전 결과이며, 추가 resync 회귀 테스트 1개와 최신 TypeScript 검사는 통과했다. 전체 스위트 완료를 뜻하지 않는다.
 - 기준: PR #1142가 포함된 main. Windows·Linux, dev(19281)만 실행 검증.
@@ -29,6 +29,18 @@
 
 두 PR의 ADR 판정은 불필요(기존 복원·wrap 의미를 지키는 지역적 버그 수정), 버전 영향은 patch다. main을 이 브랜치에 반영해 동일 변경을 데몬 PR diff에서 제거했다. daemon 단일 session writer·정상 GUI detach/업데이트 인계와 Windows 실행 검증은 별도 완료 조건으로 남는다.
 
+### 2026-10-08 목표 완주 진행: source 저장·renderer 수명·업무 이벤트
+
+세션 저장을 protocol 2의 독립 인증 request로 전환했다. source가 GUI 구조 revision과 epoch을 검증하고 CWD·provider 귀속을 재관측한 뒤 SQLite에 반영한다. 늦은 저장 순서 역전, stale generation, owner detach, profile 전환, source 입력/identity 변경을 거절한다. 기존 verified ID의 Unknown 보존과 DB busy 시 이전 commit 유지, 미접속 background CWD 갱신을 IPC/SQLite 테스트로 확인했다.
+
+renderer unmount는 현재 모든 workspace layer/dock content와 restart epoch를 기준으로 presentation release와 명시 source close를 구분한다. Linux dev(19281)의 workspace 이동에서 source child PID 76372·generation 1을 유지했고, 별도 cold fixture에서 view 삭제/교체는 PID 93794·generation 1을 종료하여 PID 112100·generation 3으로 교체하면서 옆 PID 93822를 유지했다. 실제 OSC CWD 변경이 GUI pane metadata와 격리 SQLite의 `lastCwd`에 모두 반영됐다. source 설정 projection은 재접속과 runtime 변경에 현재 SyncGroup/CWD flags를 반영한다.
+
+업무 이벤트는 1 MiB/4,096개 journal로 전달하고 source generation을 현재 delivery generation으로 변환한다. 최초 접속/보관 gap은 catalog 상태를 다시 게시하며 transient 알림을 새 접속에 재생하지 않는다. receipt capture/commit도 source 조회로 라우팅했다. 실제 native PTY의 OSC 제목 → source 귀속 관측 → 동일 writer DB commit → receipt 발급·재사용 및 identity 변경 시 폐기를 IPC 테스트로 검증했다. critical probe·hook/CLI·updater 인계는 구현 중이다.
+
+이번 범위의 Windows UI unit 430개·TypeScript·production build가 통과했다. Linux 전체 Rust 앱 2,297개·agent hook 20개·portable PTY 12개가 통과했으며 이후 추가한 same-generation 관측 테스트를 포함한 daemon 46개도 통과했다. 병렬 PTY 테스트가 test pipe writer를 상속하던 EOF fixture 결함은 `CLOEXEC`로 수정해 전체 스위트에서 재검증했다. 최종 전체 검증 및 Windows Rust/installer 수용 검증을 완료했다는 의미는 아니다.
+
+ADR: [0303](../adr/0303-pty-daemon-session-writer-revisions.md)·[0304](../adr/0304-pty-daemon-business-event-journal.md), renderer/receipt source 책임은 ADR-0302 직접 적용. 버전 영향: minor — PR 전체의 호환되는 데몬 기능 추가.
+
 ### 2026-10-08 후속 검증: 초기 복원과 Tokio 호출 경계
 
 레이아웃 템플릿이 비어 있을 때 `applyWorkspaceSnapshot`이 저장된 workspace까지 건너뛰는 오류를 회귀 테스트로 재현하고 수정했다. 폐기된 초기화 effect의 늦은 응답도 현재 workspace를 덮어쓰지 않는다. Linux dev(19281)에서 GUI 종료 뒤 파일 trigger를 만들었을 때 기존 셸이 작업을 완료했고, 새 GUI에서 같은 daemon incarnation·child PID·PTY generation·pane ID와 실행 결과 화면이 자동 복원됐다. 이 검증은 강제 GUI 종료/재접속이며 updater 인계나 정상 종료 barrier 검증을 대신하지 않는다.
@@ -52,11 +64,11 @@ Windows에서 `cargo tauri dev`의 자식으로 실행한 분리 launcher는 `CR
 남은 작업:
 
 - [x] 구조 저장·로드·초기화의 pane ID 소실을 재현 테스트로 고정하고 같은 terminal로 자동 재연결한다(Linux dev 실측).
-- [ ] 구조 revision 제출과 동시·늦은 저장의 source 검증을 연결한다.
-- [ ] GUI 구조 revision 제출과 daemon의 단일 session SQLite writer를 연결한다. GUI 없는 동안 CWD·provider 대화 변경을 저장하고 Unknown은 이전 검증 ID를 보존한다.
+- [x] 구조 revision 제출과 동시·늦은 저장의 source 검증을 연결한다(인증 IPC, epoch·generation·hint/입력 revision).
+- [x] GUI 구조 revision 제출과 daemon의 단일 session SQLite writer를 연결한다. 미접속 background writer·Unknown 보존을 IPC/SQLite로 검증했고 Linux dev 실제 OSC CWD 저장을 확인했다. native/WSL agent의 실제 대화 전환 수용 검증은 남았다.
 - [ ] provider 귀속·receipt·critical status probe를 daemon 상태로 라우팅한다. GUI mirror의 PID·generation을 검증 증거로 사용하지 않는다.
 - [ ] business OSC/activity/hook 상태 전달, daemon 수명의 `lx`, WSL hook 수신 경로를 연결한다.
-- [ ] GUI unmount/재연결과 명시적 삭제·profile restart를 분리한다. 현재 TerminalView cleanup의 close RPC가 source 종료로 번질 수 있는 경로를 해결한다.
+- [x] GUI unmount/재연결과 명시적 삭제·profile restart를 분리한다. Linux dev workspace 이동에서 PID·generation 유지, view 삭제/교체에서 정확한 source 종료와 새 generation을 실측했다. profile/restart 판단과 stale renderer cleanup은 회귀 테스트로 검증했다.
 - [ ] 업데이트·앱 재시작의 구조 commit/drain/detach ACK와 설치 실패 후 재연결을 구현한다. 실제 종료·hidden eviction의 기존 critical barrier는 유지한다.
 - [ ] source/worker 소실·shutdown·idle runtime GC·버전 호환을 완성하고 다른 process나 live bundle을 임의 종료/교체하지 않음을 검증한다.
 - [ ] 큰 scrollback의 checkpoint 예산, DEC 2026/shadow cursor·누락 스타일 상태, theme 변경, Remote mirror 복원을 검증·보완한다.

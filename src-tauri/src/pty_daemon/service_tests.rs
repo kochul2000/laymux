@@ -7,6 +7,8 @@ use tokio::io::DuplexStream;
 
 #[path = "service_observation_tests.rs"]
 mod observations;
+#[path = "service_session_tests.rs"]
+mod sessions;
 
 struct Fixture {
     service: Arc<DaemonService>,
@@ -15,7 +17,15 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
+        Self::with_session(None)
+    }
+    fn with_session(snapshot: Option<crate::local_state::LocalSessionSnapshot>) -> Self {
         let directory = tempfile::tempdir().unwrap();
+        if let Some(snapshot) = snapshot {
+            crate::local_state::LocalStateStore::new(directory.path().join("state.db"))
+                .commit_session(&snapshot)
+                .unwrap();
+        }
         let mut settings = Settings::default();
         settings.profiles[0].command_line = if cfg!(windows) {
             "cmd.exe /Q"
@@ -32,6 +42,7 @@ impl Fixture {
             settings,
             Path::new("node"),
             &script,
+            crate::local_state::LocalStateStore::new(directory.path().join("state.db")),
         )
         .unwrap();
         Self {

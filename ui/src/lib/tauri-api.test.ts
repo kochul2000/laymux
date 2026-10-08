@@ -313,6 +313,15 @@ describe("tauri-api", () => {
   });
 
   describe("closeTerminalSession", () => {
+    it("releases a specific renderer generation without closing its source", async () => {
+      mockInvoke.mockResolvedValue(undefined);
+      await closeTerminalSession("detached-content", { generation: 42, preserveSource: true });
+      expect(mockInvoke).toHaveBeenCalledWith("release_terminal_surface", {
+        id: "detached-content",
+        generation: 42,
+        preserveSource: true,
+      });
+    });
     it("invokes close_terminal_session", async () => {
       mockInvoke.mockResolvedValue(undefined);
       await closeTerminalSession("t1");

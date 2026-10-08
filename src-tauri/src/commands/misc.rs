@@ -720,10 +720,16 @@ pub fn report_frontend_health(
 }
 
 /// Tauri command: get terminal state for all terminals.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_terminal_states(
     state: State<Arc<AppState>>,
 ) -> Result<std::collections::HashMap<String, TerminalStateInfo>, String> {
+    if let Some(daemon) = state.daemon.get() {
+        return serde_json::from_value(
+            daemon.read_blocking(crate::daemon_requests::ReadCommand::TerminalStates)?,
+        )
+        .map_err(|error| format!("daemon terminal activity rejected: {error}"));
+    }
     activity::detect_all_terminal_states(&state).map_err(String::from)
 }
 

@@ -33,8 +33,16 @@ pub(crate) struct DaemonService {
     settings: Arc<Mutex<Settings>>,
     broker: Arc<HeadlessBroker>,
     events: TerminalEvents,
+    writer: Arc<super::session_writer::SessionWriter>,
+    lifecycle: Arc<tokio::sync::Mutex<()>>,
+    session_worker: Mutex<Option<tokio::task::AbortHandle>>,
+    journal: Arc<Mutex<super::event_journal::EventJournal>>,
     #[cfg(test)]
     read_started: tokio::sync::Notify,
+    #[cfg(test)]
+    session_read_delay: std::sync::atomic::AtomicU64,
+    #[cfg(test)]
+    session_commit_started: tokio::sync::Notify,
 }
 
 struct ConnectionLifetime(Arc<AtomicBool>);
@@ -72,6 +80,7 @@ impl DaemonService {
         settings: Settings,
         node: &Path,
         worker: &Path,
+        store: crate::local_state::LocalStateStore,
     ) -> Result<Arc<Self>, AppError> {
         let state = Arc::new(AppState::from_settings(settings.clone()));
         let settings = Arc::new(Mutex::new(settings));
@@ -81,7 +90,24 @@ impl DaemonService {
         let parser_broker = broker.clone();
         let setup_broker = broker.clone();
         let setup_settings = settings.clone();
-        let events = TerminalEvents::new(move |_, _| {
+        let journal = Arc::new(Mutex::new(super::event_journal::EventJournal::default()));
+        let event_journal = journal.clone();
+        let events = TerminalEvents::new(move |event, payload| {
+            let id = payload
+                .get("terminalId")
+                .and_then(Value::as_str)
+                .or_else(|| payload.as_str())
+                .map(str::to_owned);
+            if let Some(id) = id {
+                if let Some(generation) =
+                    event_broker.binding_generation(&id).map_err(String::from)?
+                {
+                    event_journal
+                        .lock_or_err()?
+                        .push(event, &id, generation, payload)
+                        .map_err(String::from)?;
+                }
+            }
             event_broker.flush_bootstrap_replies().map_err(String::from)
         })
         .with_output_parser(move |id, delta| parser_broker.parse(id, delta).map_err(String::from))
@@ -115,7 +141,8 @@ impl DaemonService {
                 .map_err(String::from)
         });
         let incarnation = uuid::Uuid::new_v4().to_string();
-        Ok(Arc::new(Self {
+        let writer = Arc::new(super::session_writer::SessionWriter::new(store)?);
+        let service = Arc::new(Self {
             capability,
             scope,
             runtime,
@@ -127,9 +154,19 @@ impl DaemonService {
             settings,
             broker,
             events,
+            writer,
+            lifecycle: Arc::new(tokio::sync::Mutex::new(())),
+            session_worker: Mutex::new(None),
+            journal,
             #[cfg(test)]
             read_started: tokio::sync::Notify::new(),
-        }))
+            #[cfg(test)]
+            session_read_delay: std::sync::atomic::AtomicU64::new(0),
+            #[cfg(test)]
+            session_commit_started: tokio::sync::Notify::new(),
+        });
+        service.start_session_writer()?;
+        Ok(service)
     }
 
     pub(crate) async fn serve_connection(
@@ -174,6 +211,23 @@ impl DaemonService {
         loop {
             let request: Request = read_frame(stream).await?;
             let response = match request {
+                Request::CommitSession {
+                    request_id,
+                    stamp,
+                    structure_revision,
+                    snapshot,
+                } => {
+                    if request_id == 0 || request_id <= last_request {
+                        return Err(AppError::Other(
+                            "daemon session request sequence rejected".into(),
+                        ));
+                    }
+                    last_request = request_id;
+                    let outcome = self
+                        .submit_session(stamp, structure_revision, *snapshot)
+                        .await;
+                    response(request_id, outcome)
+                }
                 Request::Read {
                     request_id,
                     stamp,
@@ -237,7 +291,8 @@ impl DaemonService {
                         Err(error) => Err(error),
                         Ok(()) => match command {
                             Command::Detach => {
-                                if !self.physical.lock_or_err()?.is_empty()
+                                if self.controls.load(Ordering::Acquire) != 0
+                                    || !self.physical.lock_or_err()?.is_empty()
                                     || !crate::remote_server::human_control_operations_drained(
                                         &self.state,
                                     )
@@ -311,277 +366,12 @@ impl DaemonService {
         }
         Ok(())
     }
-
-    async fn execute(self: &Arc<Self>, command: Command) -> Result<Value, AppError> {
-        let origin = crate::remote_server::HumanControlOrigin::Local;
-        match command {
-            Command::Configure { settings } => {
-                *self.settings.lock_or_err()? = *settings;
-                Ok(json!({"configured":true}))
-            }
-            Command::Physical {
-                operation_id,
-                terminal_id,
-                generation,
-                expires_at,
-                action,
-            } => {
-                if uuid::Uuid::parse_str(&operation_id).is_err() {
-                    return Err(AppError::Other(
-                        "daemon physical operation identity rejected".into(),
-                    ));
-                }
-                let cancelled = Arc::new(AtomicBool::new(false));
-                {
-                    let mut operations = self.physical.lock_or_err()?;
-                    if operations.contains_key(&operation_id) {
-                        return Err(AppError::Other(
-                            "daemon physical operation already exists".into(),
-                        ));
-                    }
-                    operations.insert(operation_id.clone(), cancelled.clone());
-                }
-                let operation = PhysicalLifetime {
-                    service: self.clone(),
-                    id: operation_id,
-                };
-                let source = self.clone();
-                tokio::task::spawn_blocking(move || {
-                    let _operation = operation;
-                    source.execute_physical(terminal_id, generation, expires_at, action, cancelled)
-                })
-                .await
-                .map_err(|_| AppError::Other("daemon physical control worker failed".into()))?
-            }
-            Command::Ping => Ok(json!({"incarnation":self.incarnation})),
-            Command::Catalog => self.catalog(),
-            Command::Create { spec } => {
-                self.broker.ensure_healthy(&spec.id, 0)?;
-                if spec.id.is_empty()
-                    || spec.id.len() > 512
-                    || spec.cols == 0
-                    || spec.rows == 0
-                    || spec.cols > 4096
-                    || spec.rows > 4096
-                {
-                    return Err(AppError::Other(
-                        "daemon terminal specification rejected".into(),
-                    ));
-                }
-                self.admit_geometry(&spec.id, spec.cols, spec.rows)?;
-                let settings = self.settings.lock_or_err()?.clone();
-                let id = spec.id.clone();
-                let previous_parser = self.broker.binding_generation(&id)?;
-                let created = crate::commands::create_terminal_session_core(
-                    spec.id,
-                    spec.profile,
-                    spec.cols,
-                    spec.rows,
-                    spec.sync_group,
-                    spec.cwd_send,
-                    spec.cwd_receive,
-                    spec.cwd,
-                    spec.startup_command_override,
-                    spec.viewer,
-                    self.state.clone(),
-                    self.events.clone(),
-                    settings,
-                )
-                .await;
-                let session = match created {
-                    Ok(session) => session,
-                    Err(error) => {
-                        if let Some(generation) = self.broker.binding_generation(&id)? {
-                            if Some(generation) != previous_parser {
-                                self.broker.dispose(&id, generation)?;
-                            }
-                        }
-                        return Err(AppError::Other(error));
-                    }
-                };
-                let generation = self
-                    .state
-                    .pty_handles
-                    .lock_or_err()?
-                    .get(&session.id)
-                    .map(|handle| handle.terminal_generation())
-                    .ok_or_else(|| AppError::SessionNotFound(session.id.clone()))?;
-                if let Err(error) = self.broker.ensure_healthy(&session.id, generation) {
-                    let _ = crate::commands::close_terminal_session_inner(
-                        &session.id,
-                        &self.state,
-                        &self.events,
-                    );
-                    let _ = self.broker.dispose(&session.id, generation);
-                    return Err(error);
-                }
-                Ok(json!({"id":session.id,"generation":generation}))
-            }
-            Command::Write {
-                terminal_id,
-                generation,
-                data,
-            } => {
-                self.verify_generation(&terminal_id, generation)?;
-                self.broker.ensure_healthy(&terminal_id, generation)?;
-                if data.len() > 1024 * 1024 {
-                    return Err(AppError::Other("daemon input size rejected".into()));
-                }
-                crate::commands::write_to_terminal_inner(&self.state, &terminal_id, &data, origin)
-                    .map_err(AppError::Other)?;
-                Ok(json!({"written":data.len()}))
-            }
-            Command::Resize {
-                terminal_id,
-                generation,
-                cols,
-                rows,
-            } => {
-                self.verify_generation(&terminal_id, generation)?;
-                self.broker.ensure_healthy(&terminal_id, generation)?;
-                if cols > 4096 || rows > 4096 {
-                    return Err(AppError::Other("daemon terminal geometry rejected".into()));
-                }
-                self.admit_geometry(&terminal_id, cols, rows)?;
-                crate::commands::resize_terminal_inner(
-                    &self.state,
-                    &terminal_id,
-                    cols,
-                    rows,
-                    origin,
-                )
-                .map_err(AppError::Other)?;
-                let target = crate::terminal_output::terminal_render_checkpoint_target(
-                    &self.state.terminal_protocol_states,
-                    &terminal_id,
-                )
-                .map_err(AppError::Other)?;
-                self.broker
-                    .resize_at(&terminal_id, generation, target.seq, target.geometry)?;
-                Ok(json!({"resized":true}))
-            }
-            Command::Checkpoint {
-                terminal_id,
-                generation,
-            } => {
-                self.verify_generation(&terminal_id, generation)?;
-                self.broker.checkpoint(&terminal_id, generation)
-            }
-            Command::Close {
-                terminal_id,
-                generation,
-            } => {
-                self.verify_generation(&terminal_id, generation)?;
-                crate::commands::close_terminal_session_inner(
-                    &terminal_id,
-                    &self.state,
-                    &self.events,
-                )
-                .map_err(AppError::Other)?;
-                if let Err(error) = self.broker.dispose(&terminal_id, generation) {
-                    tracing::warn!(%error, "closed terminal parser cleanup failed");
-                }
-                Ok(json!({"closed":true}))
-            }
-            Command::Detach => Err(AppError::Other(
-                "daemon detach requires attachment authority".into(),
-            )),
-        }
-    }
-
-    async fn execute_read(&self, query: ReadCommand) -> Result<Value, AppError> {
-        match query {
-            ReadCommand::CancelPhysical { operation_id } => {
-                let operations = self.physical.lock_or_err()?;
-                let cancelled = operations.get(&operation_id).is_some_and(|operation| {
-                    operation.store(true, Ordering::Release);
-                    true
-                });
-                Ok(json!({"cancelled":cancelled}))
-            }
-            ReadCommand::Ping => Ok(json!({"incarnation":self.incarnation})),
-            ReadCommand::Catalog => self.catalog(),
-            ReadCommand::Drained => Ok(
-                json!({"drained":self.physical.lock_or_err()?.is_empty() && crate::remote_server::human_control_operations_drained(&self.state).map_err(AppError::Other)?}),
-            ),
-            ReadCommand::Output {
-                terminal_id,
-                generation,
-                since_seq,
-                geometry_revision,
-            } => {
-                self.verify_generation(&terminal_id, generation)?;
-                self.broker.ensure_healthy(&terminal_id, generation)?;
-                let target = crate::terminal_output::terminal_render_checkpoint_target(
-                    &self.state.terminal_protocol_states,
-                    &terminal_id,
-                )
-                .map_err(AppError::Other)?;
-                if let Some(seq) =
-                    since_seq.filter(|_| geometry_revision == Some(target.geometry.revision))
-                {
-                    let buffer = self
-                        .state
-                        .output_buffers
-                        .lock_or_err()?
-                        .get(&terminal_id)
-                        .cloned()
-                        .ok_or_else(|| AppError::SessionNotFound(terminal_id.clone()))?;
-                    if let Some(mut delta) = buffer.delta_since(seq)? {
-                        delta.data.truncate(64 * 1024);
-                        delta.seq_end = delta.seq_start + delta.data.len() as u64;
-                        return Ok(
-                            json!({"type":"delta","generation":generation,"sourceStartSeq":delta.seq_start,"sourceSeq":delta.seq_end,"data":base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &delta.data),"geometry":target.geometry}),
-                        );
-                    }
-                }
-                let broker = self.broker.clone();
-                let mut checkpoint = tokio::task::spawn_blocking(move || {
-                    broker.checkpoint(&terminal_id, generation)
-                })
-                .await
-                .map_err(|_| AppError::Other("daemon output checkpoint worker failed".into()))??;
-                checkpoint["type"] = json!("checkpoint");
-                Ok(checkpoint)
-            }
-            ReadCommand::Checkpoint {
-                terminal_id,
-                generation,
-            } => {
-                self.verify_generation(&terminal_id, generation)?;
-                let broker = self.broker.clone();
-                tokio::task::spawn_blocking(move || broker.checkpoint(&terminal_id, generation))
-                    .await
-                    .map_err(|_| AppError::Other("daemon checkpoint worker failed".into()))?
-            }
-            ReadCommand::Attributions {
-                claude_max_age_hours,
-                codex_max_age_hours,
-                grok_max_age_hours,
-            } => {
-                let state = self.state.clone();
-                tokio::task::spawn_blocking(move || {
-                    let result = crate::commands::get_terminal_session_attributions_impl(
-                        claude_max_age_hours,
-                        codex_max_age_hours,
-                        grok_max_age_hours,
-                        &state,
-                    )
-                    .map_err(AppError::Other)?;
-                    Ok(serde_json::to_value(result)?)
-                })
-                .await
-                .map_err(|_| AppError::Other("daemon attribution worker failed".into()))?
-            }
-            #[cfg(test)]
-            ReadCommand::Delay { milliseconds } => {
-                self.read_started.notify_one();
-                tokio::time::sleep(std::time::Duration::from_millis(milliseconds)).await;
-                Ok(json!({"observed":true}))
-            }
-        }
-    }
 }
+
+#[path = "service_commands.rs"]
+mod commands;
+#[path = "service_session.rs"]
+mod sessions;
 
 #[path = "service_physical.rs"]
 mod physical;
@@ -604,3 +394,6 @@ fn response(request_id: u64, result: Result<Value, AppError>) -> Response {
 #[cfg(test)]
 #[path = "service_tests.rs"]
 mod tests;
+
+#[path = "service_reads.rs"]
+mod reads;

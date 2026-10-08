@@ -9,9 +9,11 @@ use std::sync::{
 };
 use zeroize::Zeroizing;
 
-pub(crate) const PROTOCOL_VERSION: u32 = 1;
+pub(crate) const PROTOCOL_VERSION: u32 = 2;
 pub(crate) const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 pub(crate) const CONNECTION_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+pub(crate) const SESSION_OBSERVATION_DEADLINE: std::time::Duration =
+    std::time::Duration::from_secs(35);
 
 /// Not Debug/Serialize: authentication secrets must never become diagnostics.
 pub(crate) struct Capability(Zeroizing<[u8; 32]>);
@@ -97,7 +99,7 @@ pub(crate) struct AttachmentStamp {
 pub(crate) struct AttachmentAuthority {
     incarnation: String,
     epoch: u64,
-    current: Option<(AttachmentStamp, Arc<AtomicBool>)>,
+    current: Option<(AttachmentStamp, Arc<AtomicBool>, Arc<AtomicBool>)>,
 }
 
 impl AttachmentAuthority {
@@ -118,11 +120,9 @@ impl AttachmentAuthority {
         connection: String,
         live: Arc<AtomicBool>,
     ) -> Result<AttachmentStamp, AppError> {
-        if self
-            .current
-            .as_ref()
-            .is_some_and(|(_, live)| live.load(Ordering::Acquire))
-        {
+        if self.current.as_ref().is_some_and(|(_, live, lease)| {
+            live.load(Ordering::Acquire) && lease.load(Ordering::Acquire)
+        }) {
             return Err(AppError::Other("daemon GUI is already attached".into()));
         }
         self.epoch = self
@@ -134,16 +134,17 @@ impl AttachmentAuthority {
             epoch: self.epoch,
             connection,
         };
-        self.current = Some((stamp.clone(), live));
+        if let Some((_, _, lease)) = self.current.take() {
+            lease.store(false, Ordering::Release);
+        }
+        self.current = Some((stamp.clone(), live, Arc::new(AtomicBool::new(true))));
         Ok(stamp)
     }
 
     pub(crate) fn validate(&self, stamp: &AttachmentStamp) -> Result<(), AppError> {
-        if self
-            .current
-            .as_ref()
-            .is_some_and(|(current, live)| current == stamp && live.load(Ordering::Acquire))
-            && stamp.incarnation == self.incarnation
+        if self.current.as_ref().is_some_and(|(current, live, lease)| {
+            current == stamp && live.load(Ordering::Acquire) && lease.load(Ordering::Acquire)
+        }) && stamp.incarnation == self.incarnation
         {
             Ok(())
         } else {
@@ -155,17 +156,29 @@ impl AttachmentAuthority {
 
     pub(crate) fn detach(&mut self, stamp: &AttachmentStamp) -> Result<(), AppError> {
         self.validate(stamp)?;
-        self.current = None;
+        if let Some((_, _, lease)) = self.current.take() {
+            lease.store(false, Ordering::Release);
+        }
         Ok(())
+    }
+
+    pub(crate) fn lease(&self, stamp: &AttachmentStamp) -> Result<Arc<AtomicBool>, AppError> {
+        self.validate(stamp)?;
+        self.current
+            .as_ref()
+            .map(|(_, _, lease)| lease.clone())
+            .ok_or_else(|| AppError::Other("daemon attachment authority expired".into()))
     }
 
     pub(crate) fn disconnected(&mut self, connection: &str) {
         if self
             .current
             .as_ref()
-            .is_some_and(|(stamp, _)| stamp.connection == connection)
+            .is_some_and(|(stamp, _, _)| stamp.connection == connection)
         {
-            self.current = None;
+            if let Some((_, _, lease)) = self.current.take() {
+                lease.store(false, Ordering::Release);
+            }
         }
     }
 }
@@ -196,7 +209,7 @@ mod tests {
         for field in ["protocol", "scope", "incarnation", "runtime", "nonce"] {
             let mut changed = serde_json::to_value(&hello).unwrap();
             changed[field] = if field == "protocol" {
-                serde_json::json!(2)
+                serde_json::json!(PROTOCOL_VERSION + 1)
             } else {
                 serde_json::json!("other")
             };

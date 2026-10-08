@@ -106,6 +106,7 @@ pub fn run() {
                     executable,
                     resources,
                 )?;
+                gateway.start_business_events(Arc::downgrade(&app_state), app.handle().clone());
                 app_state
                     .daemon
                     .set(gateway)
@@ -308,6 +309,7 @@ pub fn run() {
             commands::resume_terminal_output,
             commands::log_terminal_trace_batch,
             commands::close_terminal_session,
+            commands::release_terminal_surface,
             session_checkpoint::checkpoint_and_close_hidden_terminals,
             commands::mark_claude_terminal,
             commands::mark_codex_terminal,

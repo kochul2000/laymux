@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -11,7 +11,7 @@ use crate::state::AppState;
 
 pub(crate) mod codex_status;
 mod eviction;
-mod hints;
+pub(crate) mod hints;
 pub(crate) use hints::CheckpointHints;
 pub(crate) mod receipt;
 pub use eviction::TerminalMutationPermit;
@@ -47,7 +47,7 @@ pub struct HiddenTerminalEvictionResult {
 /// Backend-owned request/ack rendezvous and destructive-finalization gate.
 pub struct SessionCheckpointRuntime {
     pub(crate) receipts: Mutex<receipt::ReceiptRegistry>,
-    pub(crate) hints: hints::CheckpointHints,
+    pub(crate) hints: Arc<hints::CheckpointHints>,
     pub(crate) codex_status: Mutex<Option<codex_status::CodexStatusCheckpoint>>,
     update_request_id: AtomicU64,
     next_request_id: AtomicU64,
@@ -69,7 +69,7 @@ impl Default for SessionCheckpointRuntime {
     fn default() -> Self {
         Self {
             receipts: Mutex::new(receipt::ReceiptRegistry::default()),
-            hints: hints::CheckpointHints::default(),
+            hints: Arc::new(hints::CheckpointHints::default()),
             codex_status: Mutex::new(None),
             update_request_id: AtomicU64::new(0),
             next_request_id: AtomicU64::new(1),

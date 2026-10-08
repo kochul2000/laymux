@@ -3,14 +3,9 @@ use crate::error::AppError;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
-const SESSION_FIELDS: &[&str] = &[
-    "lastCodexSession",
-    "lastClaudeSession",
-    "lastGrokSession",
-    "lastAgentFresh",
-];
+use crate::constants::SESSION_RESTORE_FIELDS as SESSION_FIELDS;
 
-fn for_each_view(
+pub(crate) fn for_each_view(
     value: &mut Value,
     mut visit: impl FnMut(&str, &mut Value) -> Result<(), AppError>,
 ) -> Result<(), AppError> {
@@ -35,7 +30,7 @@ fn for_each_view(
     Ok(())
 }
 
-pub(super) fn content_views(
+pub(crate) fn content_views(
     snapshot: &LocalSessionSnapshot,
 ) -> Result<Vec<(String, Value)>, AppError> {
     let mut value = serde_json::to_value(snapshot)?;
@@ -47,7 +42,7 @@ pub(super) fn content_views(
     Ok(views)
 }
 
-pub(super) fn preserve_unknown(
+pub(crate) fn preserve_unknown(
     previous: &LocalSessionSnapshot,
     snapshot: &mut LocalSessionSnapshot,
 ) -> Result<(), AppError> {

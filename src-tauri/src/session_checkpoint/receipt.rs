@@ -100,7 +100,7 @@ pub(crate) fn remember_no_agent(state: &AppState, token: &str, terminal: &str, g
         }
     }
 }
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReceiptCoverage {
     terminal_id: String,
@@ -243,7 +243,7 @@ fn saved_views(value: &serde_json::Value) -> Option<BTreeMap<String, serde_json:
     Some(result)
 }
 
-fn commit_to_revision(
+pub(crate) fn commit_to_revision(
     state: &AppState,
     token: &str,
     coverage: &[ReceiptCoverage],
@@ -421,6 +421,12 @@ fn commit_to(
 pub fn capture_session_checkpoint_receipt(
     state: tauri::State<std::sync::Arc<AppState>>,
 ) -> Result<Option<String>, String> {
+    if let Some(daemon) = state.daemon.get() {
+        return serde_json::from_value(
+            daemon.read_blocking(crate::daemon_requests::ReadCommand::CaptureReceipt)?,
+        )
+        .map_err(|error| format!("source receipt capture rejected: {error}"));
+    }
     capture(&state)
 }
 #[tauri::command(async)]
@@ -430,6 +436,16 @@ pub fn commit_session_checkpoint_receipt(
     checkpoint_revision: u64,
     state: tauri::State<std::sync::Arc<AppState>>,
 ) -> Result<Option<String>, String> {
+    if let Some(daemon) = state.daemon.get() {
+        return serde_json::from_value(daemon.read_blocking(
+            crate::daemon_requests::ReadCommand::CommitReceipt {
+                token,
+                coverage,
+                checkpoint_revision,
+            },
+        )?)
+        .map_err(|error| format!("source receipt commit rejected: {error}"));
+    }
     commit_to_revision(
         &state,
         &token,

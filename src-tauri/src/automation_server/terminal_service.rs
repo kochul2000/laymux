@@ -14,12 +14,21 @@ pub(super) async fn status(State(server): State<ServerState>) -> impl IntoRespon
         .read(crate::daemon_requests::ReadCommand::Catalog)
         .await
     {
-        Ok(catalog) => (
-            StatusCode::OK,
-            Json(
-                serde_json::json!({"mode":"daemon","incarnation":daemon.incarnation().ok(),"catalog":catalog}),
+        Ok(catalog) => match daemon
+            .read(crate::daemon_requests::ReadCommand::SessionDiagnostics)
+            .await
+        {
+            Ok(persistence) => (
+                StatusCode::OK,
+                Json(
+                    serde_json::json!({"mode":"daemon","incarnation":daemon.incarnation().ok(),"catalog":catalog,"persistence":persistence}),
+                ),
             ),
-        ),
+            Err(error) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"mode":"daemon","error":error})),
+            ),
+        },
         Err(error) => (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(serde_json::json!({"mode":"daemon","error":error})),

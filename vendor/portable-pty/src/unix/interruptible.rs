@@ -476,8 +476,10 @@ mod tests {
 
     fn fake_pty_pair() -> (FileDescriptor, FileDescriptor) {
         let mut fds = [-1; 2];
-        // SAFETY: `fds` is storage for both descriptors returned by `pipe`.
-        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        // Parallel PTY tests spawn real children. Inheriting this test pipe's
+        // writer would keep EOF hidden after its owner drops it.
+        // SAFETY: `fds` is storage for both newly-owned descriptors.
+        assert_eq!(unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) }, 0);
         // SAFETY: pipe returned two newly-owned descriptors.
         unsafe {
             (
