@@ -8,7 +8,8 @@ use std::time::{Duration, Instant};
 use laymux_lib::constants::ENV_LAYMUX_PTY_DAEMON_DIR;
 use laymux_lib::process::headless_command;
 use laymux_lib::pty_daemon::{
-    find_running, list_sessions, spawn_daemon, terminate_session, DaemonPaths, DaemonPtySystem,
+    find_running, list_sessions, shutdown_running, spawn_daemon, terminate_session, DaemonPaths,
+    DaemonPtySystem,
 };
 use portable_pty::{CommandBuilder, PtySize, PtySystem};
 use sysinfo::{Pid, ProcessesToUpdate, System};
@@ -84,14 +85,19 @@ fn crash_client_role() {
     }
     let paths = DaemonPaths::for_current_build().unwrap();
     let endpoint = find_running(&paths).unwrap().expect("daemon is running");
-    let pair = DaemonPtySystem::new(endpoint, SESSION_ID.into())
-        .openpty(PtySize {
-            rows: 24,
-            cols: 80,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .unwrap();
+    let pair = DaemonPtySystem::spawn(
+        endpoint,
+        SESSION_ID.into(),
+        "crashed-pane".into(),
+        Default::default(),
+    )
+    .openpty(PtySize {
+        rows: 24,
+        cols: 80,
+        pixel_width: 0,
+        pixel_height: 0,
+    })
+    .unwrap();
     let child = pair.slave.spawn_command(sleeper()).unwrap();
     println!("CHILD_PID={}", child.process_id().unwrap());
     std::process::abort();
@@ -159,4 +165,30 @@ fn terminal_work_outlives_a_crashed_client_in_a_single_daemon_instance() {
     wait_until("terminal child exit", || {
         (!is_alive(child_pid)).then_some(())
     });
+
+    // Before an update the GUI shuts the daemon down and waits for it, so
+    // nothing keeps the executable mapped (ADR-0301).
+    let pair = DaemonPtySystem::spawn(
+        endpoint,
+        "before-update#1".into(),
+        "before-update".into(),
+        Default::default(),
+    )
+    .openpty(PtySize {
+        rows: 24,
+        cols: 80,
+        pixel_width: 0,
+        pixel_height: 0,
+    })
+    .unwrap();
+    let survivor = pair.slave.spawn_command(sleeper()).unwrap();
+    let survivor_pid = survivor.process_id().unwrap();
+    let _survivor = KillOnDrop(survivor_pid);
+    assert!(shutdown_running(&paths, Duration::from_secs(10)).unwrap());
+    // The lock is released as the process exits; reaping follows shortly.
+    wait_until("daemon exit", || (!is_alive(daemon.0)).then_some(()));
+    wait_until("session child exit on shutdown", || {
+        (!is_alive(survivor_pid)).then_some(())
+    });
+    assert!(!shutdown_running(&paths, Duration::from_secs(1)).unwrap());
 }

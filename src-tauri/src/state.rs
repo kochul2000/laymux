@@ -39,6 +39,8 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 ///     never across `.await` and never while holding another `AppState` lock)
 /// 19. `pty_callback_states` (table mutex; held only to get/insert/remove one
 ///     terminal's `Arc`, never while holding another `AppState` lock)
+/// 20. `pty_daemon_adoption_seen` (leaf: may be taken while holding any lock
+///     above, and never holds another lock itself)
 ///
 /// Never acquire a lower-numbered lock while holding a higher-numbered one.
 /// Inside one terminal-output session, nested locks have their own fixed order:
@@ -208,6 +210,9 @@ pub struct AppState {
     pub app_update: Arc<crate::app_update::UpdateManager>,
     /// Frontend checkpoint request/ack rendezvous plus update finalization gate.
     pub session_checkpoint: crate::session_checkpoint::SessionCheckpointRuntime,
+    /// Terminal ids already created once in this GUI process. Only the first
+    /// create of an id may adopt a PTY daemon session (ADR-0301).
+    pub pty_daemon_adoption_seen: Mutex<std::collections::HashSet<String>>,
     /// Last path-less desktop FileViewer signal, served on Remote heartbeats
     /// without a bridge round trip (ADR-0291). Owns its own mutex and joins no
     /// ordering above: nothing acquires it while holding another AppState lock.
@@ -396,6 +401,7 @@ impl AppState {
                 crate::app_update::UpdateChannel::from_settings_value(&settings.update.channel),
             )),
             session_checkpoint: crate::session_checkpoint::SessionCheckpointRuntime::default(),
+            pty_daemon_adoption_seen: Mutex::new(std::collections::HashSet::new()),
             file_viewer_signal: crate::remote_server::FileViewerSignalMirror::default(),
         }
     }

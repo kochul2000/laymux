@@ -7,31 +7,73 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use super::client::connect_authenticated;
+use super::control::connect_authenticated;
 use super::discovery::{read_discovery, DaemonPaths};
 use super::wire::PROTOCOL_VERSION;
+use super::wire::{write_control, ClientMessage};
 use super::DaemonEndpoint;
-#[cfg(unix)]
 use crate::constants::PTY_DAEMON_CLI_FLAG;
-use crate::constants::{PTY_DAEMON_LAUNCH_POLL_MS, PTY_DAEMON_LAUNCH_TIMEOUT_MS};
+use crate::constants::{
+    PTY_DAEMON_LAUNCH_POLL_MS, PTY_DAEMON_LAUNCH_TIMEOUT_MS, PTY_DAEMON_UNAVAILABLE_RETRY_MS,
+};
 use crate::lock_ext::MutexExt;
 
 /// Serializes launches inside one GUI so parallel terminal creation starts at
 /// most one daemon. Across processes the daemon's own instance lock decides.
 static LAUNCH: Mutex<()> = Mutex::new(());
 
+/// Until when this GUI treats the daemon as unavailable after a failed
+/// launch. Terminal creation falls back to an in-process PTY; without this
+/// every terminal (and a restored layout's panes one after another behind
+/// `LAUNCH`) would pay the full launch timeout again.
+static UNAVAILABLE_UNTIL: Mutex<Option<Instant>> = Mutex::new(None);
+
+enum Probe {
+    Ready(DaemonEndpoint),
+    /// No daemon holds the instance lock.
+    Absent,
+    /// A daemon holds the lock but did not complete an authenticated
+    /// handshake: still starting, or stuck. Launching another is pointless.
+    Unreachable,
+}
+
 pub fn ensure_running(paths: &DaemonPaths) -> Result<DaemonEndpoint, String> {
-    if let Some(endpoint) = probe(paths)? {
+    ensure_unavailability_expired()?;
+    if let Probe::Ready(endpoint) = probe(paths)? {
         return Ok(endpoint);
     }
     let _launch = LAUNCH.lock_or_err()?;
-    if let Some(endpoint) = probe(paths)? {
-        return Ok(endpoint);
+    ensure_unavailability_expired()?;
+    let launched = launch_and_wait(paths);
+    if launched.is_err() {
+        *UNAVAILABLE_UNTIL.lock_or_err()? =
+            Some(Instant::now() + Duration::from_millis(PTY_DAEMON_UNAVAILABLE_RETRY_MS));
     }
-    spawn_daemon_process(paths)?;
+    launched
+}
+
+fn ensure_unavailability_expired() -> Result<(), String> {
+    match *UNAVAILABLE_UNTIL.lock_or_err()? {
+        Some(until) if Instant::now() < until => Err(format!(
+            "PTY daemon was unavailable recently; retrying after {PTY_DAEMON_UNAVAILABLE_RETRY_MS} ms"
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Wait for a daemon to become ready, starting one only when no daemon holds
+/// the instance lock. Caller holds `LAUNCH`.
+fn launch_and_wait(paths: &DaemonPaths) -> Result<DaemonEndpoint, String> {
+    match probe(paths)? {
+        Probe::Ready(endpoint) => return Ok(endpoint),
+        Probe::Absent => spawn_daemon_process(paths)?,
+        // Maybe another GUI's daemon that is still starting: wait for it,
+        // but a second instance would only exit on the lock.
+        Probe::Unreachable => {}
+    }
     let deadline = Instant::now() + Duration::from_millis(PTY_DAEMON_LAUNCH_TIMEOUT_MS);
     loop {
-        if let Some(endpoint) = probe(paths)? {
+        if let Probe::Ready(endpoint) = probe(paths)? {
             return Ok(endpoint);
         }
         if Instant::now() >= deadline {
@@ -44,25 +86,120 @@ pub fn ensure_running(paths: &DaemonPaths) -> Result<DaemonEndpoint, String> {
     }
 }
 
-/// Find a live, authenticated daemon without starting one.
-pub fn find_running(paths: &DaemonPaths) -> Result<Option<DaemonEndpoint>, String> {
-    probe(paths)
+/// Ask the running daemon (if any) to terminate every session and exit, and
+/// wait until its instance lock is released. Used right before an update
+/// replaces the executable the daemon runs from. Returns whether a daemon was
+/// running.
+pub fn shutdown_running(paths: &DaemonPaths, timeout: Duration) -> Result<bool, String> {
+    if !daemon_instance_alive(paths) {
+        return Ok(false);
+    }
+    // A daemon that cannot be reached (or speaks another protocol) gets no
+    // request; it is handled by the forced stop below.
+    let requested = match probe(paths) {
+        Ok(Probe::Ready(endpoint)) => connect_authenticated(&endpoint)
+            .and_then(|(mut writer, _reader)| write_control(&mut writer, &ClientMessage::Shutdown))
+            .is_ok(),
+        _ => false,
+    };
+    let half = timeout / 2;
+    if requested && wait_released(paths, timeout - half) {
+        return Ok(true);
+    }
+    // Updating with a daemon still mapping the executable would fail, so a
+    // daemon that ignored the request is stopped — but only the process that
+    // discovery names *and* whose command line proves it is this directory's
+    // daemon, never a PID that was merely reused.
+    force_stop(paths)?;
+    if wait_released(paths, half) {
+        Ok(true)
+    } else {
+        Err(format!(
+            "PTY daemon did not exit within {} ms",
+            timeout.as_millis()
+        ))
+    }
 }
 
-/// `Ok(None)` means no live daemon answered. A live daemon that speaks
-/// another protocol is an error: it may own running work, so it is neither
-/// replaced nor killed here.
+/// Path equality tolerant of how the daemon was launched: trailing
+/// separators, and on Windows letter case and separator style.
+fn same_path(left: &Path, right: &Path) -> bool {
+    fn normalized(path: &Path) -> String {
+        let text = path.to_string_lossy();
+        let text = text.trim_end_matches(['/', '\\']);
+        if cfg!(windows) {
+            text.replace('/', "\\").to_lowercase()
+        } else {
+            text.to_owned()
+        }
+    }
+    normalized(left) == normalized(right)
+}
+
+fn wait_released(paths: &DaemonPaths, within: Duration) -> bool {
+    let deadline = Instant::now() + within;
+    while daemon_instance_alive(paths) {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(PTY_DAEMON_LAUNCH_POLL_MS));
+    }
+    true
+}
+
+fn force_stop(paths: &DaemonPaths) -> Result<(), String> {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+
+    let discovery = read_discovery(paths)
+        .ok_or_else(|| "PTY daemon holds its lock but published no discovery".to_string())?;
+    let pid = Pid::from_u32(discovery.pid);
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        true,
+        ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always),
+    );
+    let process = system
+        .process(pid)
+        .ok_or_else(|| format!("PTY daemon process {pid} is gone"))?;
+    let cmd = process.cmd();
+    let is_daemon = cmd.iter().any(|arg| arg == PTY_DAEMON_CLI_FLAG)
+        && cmd.iter().any(|arg| same_path(Path::new(arg), paths.dir()));
+    if !is_daemon {
+        return Err(format!(
+            "process {pid} named by PTY daemon discovery is not this directory's daemon"
+        ));
+    }
+    tracing::warn!(%pid, "PTY daemon did not shut down on request; stopping it");
+    if process.kill() {
+        Ok(())
+    } else {
+        Err(format!("failed to stop PTY daemon process {pid}"))
+    }
+}
+
+/// Find a live, authenticated daemon without starting one.
+pub fn find_running(paths: &DaemonPaths) -> Result<Option<DaemonEndpoint>, String> {
+    Ok(match probe(paths)? {
+        Probe::Ready(endpoint) => Some(endpoint),
+        Probe::Absent | Probe::Unreachable => None,
+    })
+}
+
+/// A live daemon that speaks another protocol is an error: it may own
+/// running work, so it is neither replaced nor killed here.
 ///
 /// Liveness is the instance lock, never a successful connect alone: the
 /// discovery of a daemon that died uncleanly names an endpoint some other
 /// program may since have taken.
-fn probe(paths: &DaemonPaths) -> Result<Option<DaemonEndpoint>, String> {
-    let Some(discovery) = read_discovery(paths) else {
-        return Ok(None);
-    };
+fn probe(paths: &DaemonPaths) -> Result<Probe, String> {
     if !daemon_instance_alive(paths) {
-        return Ok(None);
+        return Ok(Probe::Absent);
     }
+    // A starting daemon holds the lock before it publishes discovery.
+    let Some(discovery) = read_discovery(paths) else {
+        return Ok(Probe::Unreachable);
+    };
     let endpoint = DaemonEndpoint {
         endpoint: discovery.endpoint,
         token: discovery.token,
@@ -73,7 +210,10 @@ fn probe(paths: &DaemonPaths) -> Result<Option<DaemonEndpoint>, String> {
             discovery.protocol_version
         ));
     }
-    Ok(connect_authenticated(&endpoint).ok().map(|_| endpoint))
+    Ok(match connect_authenticated(&endpoint) {
+        Ok(_) => Probe::Ready(endpoint),
+        Err(_) => Probe::Unreachable,
+    })
 }
 
 /// Whether some daemon process holds this directory's instance lock. Unlike
@@ -107,7 +247,11 @@ pub fn spawn_daemon(exe: &Path, paths: &DaemonPaths) -> Result<u32, String> {
         .map_err(|error| format!("cannot create PTY daemon directory: {error}"))?;
     #[cfg(windows)]
     {
-        windows_spawn::spawn_detached(exe, paths.dir())
+        // Run a private copy so the original can be replaced by an update or
+        // a rebuild while the daemon lives.
+        let staged = super::staging::stage(exe, paths.dir())
+            .map_err(|error| format!("cannot stage the PTY daemon runtime: {error}"))?;
+        windows_spawn::spawn_detached(&staged, paths.dir())
     }
     #[cfg(unix)]
     {

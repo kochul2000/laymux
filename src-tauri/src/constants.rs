@@ -127,9 +127,8 @@ pub const COLORTERM_TRUECOLOR: &str = "truecolor";
 /// trace logs are only useful when diagnosing cursor/flicker issues.
 pub const ENV_LAYMUX_PTY_TRACE: &str = "LAYMUX_PTY_TRACE";
 
-/// Opt-in switch (`1`) that runs terminal PTYs inside the detached PTY daemon
-/// instead of the GUI process (ADR-0300). Unset/any other value keeps the
-/// in-process PTY path.
+/// Terminal PTYs run inside the detached PTY daemon by default (ADR-0300,
+/// ADR-0301). `0` keeps them in the GUI process as a rollback switch.
 pub const ENV_LAYMUX_PTY_DAEMON: &str = "LAYMUX_PTY_DAEMON";
 /// Overrides the PTY daemon state directory (discovery, lock, socket, log) so
 /// an isolated dev worktree or test never meets another build's daemon.
@@ -305,6 +304,14 @@ pub const PTY_DAEMON_DETACHED_BACKLOG_BYTES: usize = 1024 * 1024;
 /// When full the client stops reading its socket, which pushes backpressure
 /// back to the daemon's PTY reader exactly like a blocked in-process callback.
 pub const PTY_DAEMON_CLIENT_QUEUE_BYTES: usize = 64 * 1024;
+/// Daemon session metadata key carrying the agent hook token baked into the
+/// child's environment, so an adopting GUI accepts that child's hooks.
+pub const PTY_DAEMON_METADATA_AGENT_HOOK_TOKEN: &str = "agentHookToken";
+/// Metadata keys for the profile a session was started with and whether its
+/// child is a WSL relay, so adoption matches the profile and restores the
+/// WSL attribution domain of the running child.
+pub const PTY_DAEMON_METADATA_PROFILE: &str = "profile";
+pub const PTY_DAEMON_METADATA_WSL_BACKED: &str = "wslBacked";
 /// Largest frame accepted before a connection has authenticated.
 pub const PTY_DAEMON_HELLO_MAX_BYTES: usize = 4 * 1024;
 /// Concurrent daemon connections (one per terminal plus short control
@@ -320,10 +327,21 @@ pub const PTY_DAEMON_HANDSHAKE_TIMEOUT_MS: u64 = 5_000;
 pub const PTY_DAEMON_INPUT_PAUSE_MAX_MS: u64 = 1_000;
 /// Connect + acknowledge budget for one out-of-band terminate request.
 pub const PTY_DAEMON_TERMINATE_REQUEST_TIMEOUT_MS: u64 = 1_000;
+/// Attempts (and the pause between them) for a terminate request that
+/// nothing can report a failure for (dropping a PTY master).
+pub const PTY_DAEMON_TERMINATE_ATTEMPTS: u32 = 3;
+pub const PTY_DAEMON_TERMINATE_RETRY_MS: u64 = 200;
 /// Overall budget for asking the daemon to end every terminal at app exit.
 pub const PTY_DAEMON_EXIT_TERMINATE_TIMEOUT_MS: u64 = 2_000;
+/// How long an installing GUI waits for the daemon to end its sessions and
+/// exit (each session teardown is bounded by the PTY terminate grace).
+pub const PTY_DAEMON_SHUTDOWN_TIMEOUT_MS: u64 = 5_000;
 /// How long the GUI waits for a freshly launched daemon to publish discovery.
 pub const PTY_DAEMON_LAUNCH_TIMEOUT_MS: u64 = 5_000;
+/// After a failed launch the GUI creates terminals in-process for this long
+/// before trying the daemon again, so one unavailable daemon costs the
+/// launch timeout once rather than once per terminal.
+pub const PTY_DAEMON_UNAVAILABLE_RETRY_MS: u64 = 30_000;
 /// The daemon exits after this long with no session and no connection.
 pub const PTY_DAEMON_IDLE_EXIT_MS: u64 = 60_000;
 /// How often the daemon re-evaluates its idle state.
@@ -342,6 +360,13 @@ pub const PTY_DAEMON_DIR_NAME: &str = "pty-daemon";
 pub const PTY_DAEMON_DISCOVERY_FILE: &str = "daemon.json";
 pub const PTY_DAEMON_LOCK_FILE: &str = "daemon.lock";
 pub const PTY_DAEMON_LOG_FILE: &str = "daemon.log";
+/// Windows: private copies of the daemon executable and ConPTY runtime.
+#[cfg(windows)]
+pub const PTY_DAEMON_RUNTIME_DIR: &str = "runtime";
+/// A runtime copy published more recently than this is never collected:
+/// its launcher may not have started the daemon that will lock it yet.
+#[cfg(windows)]
+pub const PTY_DAEMON_RUNTIME_GC_MIN_AGE_MS: u64 = 60_000;
 #[cfg(unix)]
 pub const PTY_DAEMON_SOCKET_FILE: &str = "daemon.sock";
 

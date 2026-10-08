@@ -7,6 +7,7 @@
 //! Each terminal uses its own connection, so one flooding terminal never
 //! delays another terminal's output or control frames.
 
+use std::collections::BTreeMap;
 use std::io::{self, BufReader, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -20,134 +21,73 @@ use portable_pty::{
 };
 
 use super::client_queue::{DaemonReader, DaemonReaderControl, Shared, CONNECTION_LOST_EXIT_CODE};
-use super::discovery::{generate_token, handshake_proof, tokens_match};
+use super::control::{connect_authenticated, terminate_by_id};
 use super::transport::{self, Stream};
 use super::wire::{
-    read_frame, write_control, write_input, ClientMessage, DaemonMessage, Frame, SessionInfo,
-    WireCommand, PROTOCOL_VERSION,
+    read_frame, write_control, write_input, ClientMessage, DaemonMessage, Frame, WireCommand,
 };
 use super::DaemonEndpoint;
 use crate::constants::{
-    PTY_DAEMON_HANDSHAKE_TIMEOUT_MS, PTY_DAEMON_TERMINATE_REQUEST_TIMEOUT_MS, PTY_WRITE_CHUNK_SIZE,
+    PTY_DAEMON_HANDSHAKE_TIMEOUT_MS, PTY_DAEMON_TERMINATE_ATTEMPTS, PTY_DAEMON_TERMINATE_RETRY_MS,
+    PTY_WRITE_CHUNK_SIZE,
 };
 use crate::lock_ext::MutexExt;
 use crate::pty::PTY_READ_BUFFER_BYTES;
 
-/// Open an authenticated connection to the daemon.
-pub(crate) fn connect_authenticated(
-    endpoint: &DaemonEndpoint,
-) -> io::Result<(Stream, BufReader<Stream>)> {
-    connect_authenticated_within(
-        endpoint,
-        Duration::from_millis(PTY_DAEMON_HANDSHAKE_TIMEOUT_MS),
-    )
-}
-
-fn connect_authenticated_within(
-    endpoint: &DaemonEndpoint,
-    timeout: Duration,
-) -> io::Result<(Stream, BufReader<Stream>)> {
-    let stream = transport::connect(&endpoint.endpoint, timeout)?;
-    stream.set_read_timeout(Some(timeout))?;
-    stream.set_write_timeout(Some(timeout))?;
-    let mut writer = stream.try_clone()?;
-    let nonce = generate_token().map_err(io::Error::other)?;
-    write_control(
-        &mut writer,
-        &ClientMessage::Hello {
-            token: endpoint.token.clone(),
-            protocol_version: PROTOCOL_VERSION,
-            nonce: nonce.clone(),
-        },
-    )?;
-    let mut reader = BufReader::new(stream);
-    match read_frame::<_, DaemonMessage>(&mut reader)? {
-        Some(Frame::Control(DaemonMessage::HelloOk {
-            protocol_version,
-            proof,
-            ..
-        })) if protocol_version == PROTOCOL_VERSION => {
-            // Whoever answers must hold the token too; otherwise it is some
-            // other program on a stale endpoint and gets nothing more.
-            if !tokens_match(&proof, &handshake_proof(&endpoint.token, &nonce)?) {
-                return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "PTY daemon endpoint failed to prove it holds the instance token",
-                ));
-            }
-        }
-        Some(Frame::Control(DaemonMessage::Error { message })) => {
-            return Err(io::Error::new(io::ErrorKind::PermissionDenied, message))
-        }
-        other => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("unexpected PTY daemon handshake reply: {other:?}"),
-            ))
-        }
-    }
-    reader.get_ref().set_read_timeout(None)?;
-    writer.set_write_timeout(None)?;
-    Ok((writer, reader))
-}
-
-/// List the daemon's sessions on a short-lived connection.
-pub fn list_sessions(endpoint: &DaemonEndpoint) -> io::Result<Vec<SessionInfo>> {
-    let (mut writer, mut reader) = connect_authenticated(endpoint)?;
-    write_control(&mut writer, &ClientMessage::List)?;
-    match read_frame::<_, DaemonMessage>(&mut reader)? {
-        Some(Frame::Control(DaemonMessage::Sessions { sessions })) => Ok(sessions),
-        other => Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("unexpected PTY daemon list reply: {other:?}"),
-        )),
-    }
-}
-
-/// Attach to `session_id`, terminate it and wait for its exit code. This is
-/// the explicit way to end a session no GUI holds (for example after a GUI
-/// crash); output replayed by the attach is discarded.
-pub fn terminate_session(endpoint: &DaemonEndpoint, session_id: &str) -> io::Result<u32> {
-    let (mut writer, mut reader) = connect_authenticated(endpoint)?;
-    write_control(
-        &mut writer,
-        &ClientMessage::Attach {
-            session_id: session_id.to_owned(),
-        },
-    )?;
-    let mut terminate_sent = false;
-    loop {
-        match read_frame::<_, DaemonMessage>(&mut reader)? {
-            Some(Frame::Control(DaemonMessage::Attached { .. })) if !terminate_sent => {
-                write_control(&mut writer, &ClientMessage::Terminate)?;
-                terminate_sent = true;
-            }
-            Some(Frame::Control(DaemonMessage::Exit { exit_code })) => return Ok(exit_code),
-            Some(Frame::Control(DaemonMessage::Error { message })) if !terminate_sent => {
-                return Err(io::Error::new(io::ErrorKind::NotFound, message))
-            }
-            Some(_) => {}
-            None => {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "PTY daemon closed the connection before the session exited",
-                ))
-            }
-        }
-    }
+/// What the daemon PTY of one terminal is bound to.
+#[derive(Debug, Clone)]
+enum DaemonTarget {
+    /// Spawn a new child in a new session.
+    Spawn {
+        terminal_id: String,
+        metadata: BTreeMap<String, String>,
+    },
+    /// Take over a session a previous GUI left running. The command handed
+    /// to `spawn_command` is not run.
+    Adopt,
 }
 
 pub struct DaemonPtySystem {
     endpoint: DaemonEndpoint,
     session_id: String,
+    target: DaemonTarget,
+    adopted_metadata: Arc<Mutex<Option<BTreeMap<String, String>>>>,
 }
 
 impl DaemonPtySystem {
-    pub fn new(endpoint: DaemonEndpoint, session_id: String) -> Self {
+    pub fn spawn(
+        endpoint: DaemonEndpoint,
+        session_id: String,
+        terminal_id: String,
+        metadata: BTreeMap<String, String>,
+    ) -> Self {
+        Self::with_target(
+            endpoint,
+            session_id,
+            DaemonTarget::Spawn {
+                terminal_id,
+                metadata,
+            },
+        )
+    }
+
+    pub fn adopt(endpoint: DaemonEndpoint, session_id: String) -> Self {
+        Self::with_target(endpoint, session_id, DaemonTarget::Adopt)
+    }
+
+    fn with_target(endpoint: DaemonEndpoint, session_id: String, target: DaemonTarget) -> Self {
         Self {
             endpoint,
             session_id,
+            target,
+            adopted_metadata: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// The metadata stored by the GUI that spawned an adopted session, once
+    /// the adoption succeeded.
+    pub fn adopted_metadata(&self) -> Option<BTreeMap<String, String>> {
+        self.adopted_metadata.lock_or_err().ok()?.clone()
     }
 }
 
@@ -163,11 +103,15 @@ impl PtySystem for DaemonPtySystem {
             writer_taken: AtomicBool::new(false),
             endpoint: self.endpoint.clone(),
             session_id: self.session_id.clone(),
+            attach_epoch: Mutex::new(None),
+            owns_session_id: matches!(self.target, DaemonTarget::Spawn { .. }),
         });
         Ok(PtyPair {
             slave: Box::new(DaemonSlave {
                 connection: Arc::clone(&connection),
                 session_id: self.session_id.clone(),
+                target: self.target.clone(),
+                adopted_metadata: Arc::clone(&self.adopted_metadata),
             }),
             master: Box::new(DaemonMaster { connection }),
         })
@@ -185,6 +129,12 @@ struct Connection {
     /// Where to send a by-id terminate when this connection cannot.
     endpoint: DaemonEndpoint,
     session_id: String,
+    /// Epoch this connection was bound with; a terminate carrying it cannot
+    /// end the session once a newer client adopted it.
+    attach_epoch: Mutex<Option<u64>>,
+    /// The session id was minted for this connection's own spawn (not an
+    /// adoption target), so it may be ended even before an epoch arrived.
+    owns_session_id: bool,
 }
 
 impl Connection {
@@ -201,45 +151,64 @@ impl Connection {
     /// already be broken. The acknowledgement makes the request durable
     /// before an exiting GUI closes the socket.
     fn request_terminate(&self) -> io::Result<()> {
-        terminate_by_id(&self.endpoint, &self.session_id)
+        let attach_epoch = *self.attach_epoch.lock_or_err().map_err(io::Error::other)?;
+        // Without an epoch the bind never completed: our own spawn may still
+        // have created the session (end it unconditionally), but a refused
+        // adoption left someone else's session that must not be touched.
+        if attach_epoch.is_none() && !self.owns_session_id {
+            return Ok(());
+        }
+        terminate_by_id(&self.endpoint, &self.session_id, attach_epoch)
     }
-}
 
-pub(crate) fn terminate_by_id(endpoint: &DaemonEndpoint, session_id: &str) -> io::Result<()> {
-    let timeout = Duration::from_millis(PTY_DAEMON_TERMINATE_REQUEST_TIMEOUT_MS);
-    let (mut writer, mut reader) = connect_authenticated_within(endpoint, timeout)?;
-    reader.get_ref().set_read_timeout(Some(timeout))?;
-    write_control(
-        &mut writer,
-        &ClientMessage::TerminateSession {
-            session_id: session_id.to_owned(),
-        },
-    )?;
-    match read_frame::<_, DaemonMessage>(&mut reader)? {
-        // An unknown session has already ended: the request is satisfied.
-        Some(Frame::Control(DaemonMessage::Terminating { .. })) => Ok(()),
-        other => Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("unexpected PTY daemon terminate reply: {other:?}"),
-        )),
+    /// `request_terminate` with a few retries, for paths that cannot report
+    /// failure (dropping the master).
+    fn request_terminate_with_retry(&self) {
+        let mut last_error = None;
+        for attempt in 0..PTY_DAEMON_TERMINATE_ATTEMPTS {
+            if attempt > 0 {
+                thread::sleep(Duration::from_millis(PTY_DAEMON_TERMINATE_RETRY_MS));
+            }
+            match self.request_terminate() {
+                Ok(()) => return,
+                Err(error) => last_error = Some(error),
+            }
+        }
+        if let Some(error) = last_error {
+            tracing::warn!(session_id = %self.session_id, %error, "PTY daemon terminate request failed");
+        }
     }
 }
 
 struct DaemonSlave {
     connection: Arc<Connection>,
     session_id: String,
+    target: DaemonTarget,
+    adopted_metadata: Arc<Mutex<Option<BTreeMap<String, String>>>>,
 }
 
 impl SlavePty for DaemonSlave {
     fn spawn_command(&self, cmd: CommandBuilder) -> anyhow::Result<Box<dyn Child + Send + Sync>> {
-        let command = WireCommand::from_builder(&cmd).map_err(|error| anyhow!(error))?;
         let size = *self.connection.size.lock_or_err().map_err(|e| anyhow!(e))?;
-        self.connection.send(&ClientMessage::Spawn {
-            session_id: self.session_id.clone(),
-            rows: size.rows,
-            cols: size.cols,
-            command,
-        })?;
+        let request = match &self.target {
+            DaemonTarget::Spawn {
+                terminal_id,
+                metadata,
+            } => ClientMessage::Spawn {
+                session_id: self.session_id.clone(),
+                terminal_id: terminal_id.clone(),
+                rows: size.rows,
+                cols: size.cols,
+                command: WireCommand::from_builder(&cmd).map_err(|error| anyhow!(error))?,
+                metadata: metadata.clone(),
+            },
+            DaemonTarget::Adopt => ClientMessage::Attach {
+                session_id: self.session_id.clone(),
+                replay: false,
+                take_over: false,
+            },
+        };
+        self.connection.send(&request)?;
         let mut reader = self
             .connection
             .reader
@@ -252,14 +221,42 @@ impl SlavePty for DaemonSlave {
         reader
             .get_ref()
             .set_read_timeout(Some(Duration::from_millis(PTY_DAEMON_HANDSHAKE_TIMEOUT_MS)))?;
-        let child_pid = match read_frame::<_, DaemonMessage>(&mut reader)? {
-            Some(Frame::Control(DaemonMessage::Spawned { child_pid })) => child_pid,
+        let (child_pid, attach_epoch) = match read_frame::<_, DaemonMessage>(&mut reader)? {
+            Some(Frame::Control(DaemonMessage::Spawned {
+                child_pid,
+                attach_epoch,
+            })) => (child_pid, attach_epoch),
+            Some(Frame::Control(DaemonMessage::Attached {
+                child_pid,
+                attach_epoch,
+                metadata,
+                ..
+            })) if matches!(self.target, DaemonTarget::Adopt) => {
+                *self
+                    .adopted_metadata
+                    .lock_or_err()
+                    .map_err(|e| anyhow!(e))? = Some(metadata);
+                (child_pid, attach_epoch)
+            }
             Some(Frame::Control(DaemonMessage::Error { message })) => {
                 return Err(anyhow!("PTY daemon spawn failed: {message}"))
             }
             other => return Err(anyhow!("unexpected PTY daemon spawn reply: {other:?}")),
         };
         reader.get_ref().set_read_timeout(None)?;
+        *self
+            .connection
+            .attach_epoch
+            .lock_or_err()
+            .map_err(|e| anyhow!(e))? = Some(attach_epoch);
+        if matches!(self.target, DaemonTarget::Adopt) {
+            // The adopting GUI's grid may differ from the size the session
+            // last had; apply it before any new output is produced for it.
+            self.connection.send(&ClientMessage::Resize {
+                rows: size.rows,
+                cols: size.cols,
+            })?;
+        }
         let shared = Arc::clone(&self.connection.shared);
         let session_id = self.session_id.clone();
         thread::spawn(move || pump(reader, shared, session_id));
@@ -387,9 +384,7 @@ impl Drop for DaemonMaster {
         // acknowledged request must not stall resize behind a network wait.
         let connection = Arc::clone(&self.connection);
         thread::spawn(move || {
-            if let Err(error) = connection.request_terminate() {
-                tracing::warn!(session_id = %connection.session_id, %error, "PTY daemon terminate request failed");
-            }
+            connection.request_terminate_with_retry();
         });
     }
 }

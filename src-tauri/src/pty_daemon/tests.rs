@@ -1,36 +1,50 @@
 //! Real-process tests: an in-process daemon server, real OS PTYs and shells.
 
+use std::collections::BTreeMap;
 use std::io::BufReader;
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use portable_pty::{CommandBuilder, PtySize, PtySystem};
+use portable_pty::{CommandBuilder, PtySize};
 
-use super::client::{connect_authenticated, list_sessions, DaemonPtySystem};
+use super::client::DaemonPtySystem;
+use super::control::{connect_authenticated, list_sessions};
 use super::discovery::generate_token;
 use super::server::DaemonServer;
 use super::transport::{Listener, Stream};
-use super::wire::{
-    read_frame, write_control, ClientMessage, DaemonMessage, Frame, WireCommand, PROTOCOL_VERSION,
-};
+use super::wire::{read_frame, write_control, ClientMessage, DaemonMessage, Frame, WireCommand};
 use super::DaemonEndpoint;
 use crate::pty::{
     spawn_command_on, ChildKillOwner, PtyLifecycleHooks, PtyOutputControl, SpawnOptions,
 };
 
-const TIMEOUT: Duration = Duration::from_secs(20);
+pub(super) const TIMEOUT: Duration = Duration::from_secs(20);
 
-struct TestDaemon {
-    server: Arc<DaemonServer>,
-    endpoint: DaemonEndpoint,
-    thread: Option<JoinHandle<()>>,
+/// Terminal id part of a test session key (`pane-a#7` → `pane-a`).
+fn terminal_of(session_id: &str) -> String {
+    session_id
+        .split('#')
+        .next()
+        .unwrap_or(session_id)
+        .to_owned()
+}
+
+pub(super) fn spawning(endpoint: DaemonEndpoint, session_id: String) -> DaemonPtySystem {
+    let terminal_id = terminal_of(&session_id);
+    DaemonPtySystem::spawn(endpoint, session_id, terminal_id, BTreeMap::new())
+}
+
+pub(super) struct TestDaemon {
+    pub(super) server: Arc<DaemonServer>,
+    pub(super) endpoint: DaemonEndpoint,
+    pub(super) thread: Option<JoinHandle<()>>,
     _dir: tempfile::TempDir,
 }
 
 impl TestDaemon {
-    fn start() -> Self {
+    pub(super) fn start() -> Self {
         let dir = tempfile::tempdir().unwrap();
         let token = generate_token().unwrap();
         let (listener, endpoint) = Listener::bind(dir.path()).unwrap();
@@ -48,7 +62,7 @@ impl TestDaemon {
         }
     }
 
-    fn wait_for_sessions(&self, count: usize) {
+    pub(super) fn wait_for_sessions(&self, count: usize) {
         let deadline = Instant::now() + TIMEOUT;
         while self.server.session_count() != count {
             assert!(
@@ -71,7 +85,7 @@ impl Drop for TestDaemon {
     }
 }
 
-fn size() -> PtySize {
+pub(super) fn size() -> PtySize {
     PtySize {
         rows: 24,
         cols: 80,
@@ -82,7 +96,7 @@ fn size() -> PtySize {
 
 /// Interactive shell plus a line whose output (`MARK_42`) differs from its
 /// echoed input, so seeing it proves the command really ran.
-fn interactive_shell() -> (CommandBuilder, &'static [u8]) {
+pub(super) fn interactive_shell() -> (CommandBuilder, &'static [u8]) {
     #[cfg(windows)]
     {
         let mut command = CommandBuilder::new("cmd.exe");
@@ -96,7 +110,7 @@ fn interactive_shell() -> (CommandBuilder, &'static [u8]) {
 }
 
 /// Prints `LATE_2` about a second after start, then idles.
-fn delayed_printer() -> CommandBuilder {
+pub(super) fn delayed_printer() -> CommandBuilder {
     #[cfg(windows)]
     {
         let mut command = CommandBuilder::new("cmd.exe");
@@ -115,7 +129,7 @@ fn delayed_printer() -> CommandBuilder {
     }
 }
 
-fn sleeper() -> CommandBuilder {
+pub(super) fn sleeper() -> CommandBuilder {
     #[cfg(windows)]
     {
         let mut command = CommandBuilder::new("cmd.exe");
@@ -166,7 +180,7 @@ fn flooder() -> CommandBuilder {
     }
 }
 
-fn collect_until(rx: &mpsc::Receiver<Vec<u8>>, needle: &str) -> String {
+pub(super) fn collect_until(rx: &mpsc::Receiver<Vec<u8>>, needle: &str) -> String {
     let deadline = Instant::now() + TIMEOUT;
     let mut output = String::new();
     while !output.contains(needle) {
@@ -180,7 +194,7 @@ fn collect_until(rx: &mpsc::Receiver<Vec<u8>>, needle: &str) -> String {
 }
 
 /// Raw protocol client used to act like a GUI that can vanish at any time.
-fn raw_spawn(
+pub(super) fn raw_spawn(
     endpoint: &DaemonEndpoint,
     session_id: &str,
     command: CommandBuilder,
@@ -192,6 +206,8 @@ fn raw_spawn(
         &mut writer,
         &ClientMessage::Spawn {
             session_id: session_id.into(),
+            terminal_id: terminal_of(session_id),
+            metadata: BTreeMap::new(),
             rows: 24,
             cols: 80,
             command: WireCommand::from_builder(&command).unwrap(),
@@ -199,7 +215,9 @@ fn raw_spawn(
     )
     .unwrap();
     match read_frame::<_, DaemonMessage>(&mut reader).unwrap() {
-        Some(Frame::Control(DaemonMessage::Spawned { child_pid })) => assert!(child_pid.is_some()),
+        Some(Frame::Control(DaemonMessage::Spawned { child_pid, .. })) => {
+            assert!(child_pid.is_some())
+        }
         other => panic!("unexpected spawn reply {other:?}"),
     }
     (writer, reader)
@@ -213,6 +231,8 @@ fn raw_attach(endpoint: &DaemonEndpoint, session_id: &str) -> (Stream, BufReader
         &mut writer,
         &ClientMessage::Attach {
             session_id: session_id.into(),
+            replay: true,
+            take_over: true,
         },
     )
     .unwrap();
@@ -224,7 +244,7 @@ fn raw_attach(endpoint: &DaemonEndpoint, session_id: &str) -> (Stream, BufReader
 }
 
 /// Read until `stop` says so, returning all output seen.
-fn read_until(
+pub(super) fn read_until(
     reader: &mut BufReader<Stream>,
     mut stop: impl FnMut(&str, Option<&DaemonMessage>) -> bool,
 ) -> String {
@@ -250,7 +270,7 @@ fn read_until(
 #[test]
 fn pty_handle_runs_a_real_shell_inside_the_daemon() {
     let daemon = TestDaemon::start();
-    let system = DaemonPtySystem::new(daemon.endpoint.clone(), "pane-a#7".into());
+    let system = spawning(daemon.endpoint.clone(), "pane-a#7".into());
     let (tx, rx) = mpsc::channel();
     let (command, input) = interactive_shell();
     let handle = spawn_command_on(
@@ -352,6 +372,8 @@ fn duplicate_session_ids_are_refused_without_touching_the_live_one() {
         &mut dup_writer,
         &ClientMessage::Spawn {
             session_id: "pane-d#1".into(),
+            terminal_id: "pane-d".into(),
+            metadata: BTreeMap::new(),
             rows: 24,
             cols: 80,
             command: WireCommand::from_builder(&sleeper()).unwrap(),
@@ -374,41 +396,9 @@ fn duplicate_session_ids_are_refused_without_touching_the_live_one() {
 }
 
 #[test]
-fn wrong_token_and_wrong_protocol_are_rejected_before_any_request() {
-    let daemon = TestDaemon::start();
-    let forged = DaemonEndpoint {
-        endpoint: daemon.endpoint.endpoint.clone(),
-        token: generate_token().unwrap(),
-    };
-    let error = connect_authenticated(&forged).unwrap_err();
-    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
-
-    let mut stream =
-        super::transport::connect(&daemon.endpoint.endpoint, Duration::from_secs(5)).unwrap();
-    write_control(
-        &mut stream,
-        &ClientMessage::Hello {
-            token: daemon.endpoint.token.clone(),
-            protocol_version: PROTOCOL_VERSION + 1,
-            nonce: generate_token().unwrap(),
-        },
-    )
-    .unwrap();
-    let mut reader = BufReader::new(stream);
-    match read_frame::<_, DaemonMessage>(&mut reader).unwrap() {
-        Some(Frame::Control(DaemonMessage::Error { message })) => {
-            assert!(message.contains("protocol"), "{message}")
-        }
-        other => panic!("unexpected reply {other:?}"),
-    }
-    assert!(list_sessions(&forged).is_err());
-    assert_eq!(daemon.server.session_count(), 0);
-}
-
-#[test]
 fn an_exit_time_terminate_request_ends_the_session_without_any_cleanup() {
     let daemon = TestDaemon::start();
-    let system = DaemonPtySystem::new(daemon.endpoint.clone(), "pane-e#1".into());
+    let system = spawning(daemon.endpoint.clone(), "pane-e#1".into());
     let handle = spawn_command_on(
         &system,
         size(),
@@ -480,97 +470,11 @@ fn a_stalled_client_does_not_block_listing_or_a_takeover_attach() {
 fn terminate_by_session_id_works_from_a_fresh_connection() {
     let daemon = TestDaemon::start();
     let (_writer, mut reader) = raw_spawn(&daemon.endpoint, "pane-h#1", sleeper());
-    super::client::terminate_by_id(&daemon.endpoint, "pane-h#1").unwrap();
+    super::control::terminate_by_id(&daemon.endpoint, "pane-h#1", None).unwrap();
     // An unknown session already satisfies the request.
-    super::client::terminate_by_id(&daemon.endpoint, "no-such-pane#1").unwrap();
+    super::control::terminate_by_id(&daemon.endpoint, "no-such-pane#1", None).unwrap();
     read_until(&mut reader, |_, message| {
         matches!(message, Some(DaemonMessage::Exit { .. }))
     });
-    daemon.wait_for_sessions(0);
-}
-
-#[test]
-fn an_oversized_frame_before_authentication_is_refused_without_reading_it() {
-    let daemon = TestDaemon::start();
-    let mut stream =
-        super::transport::connect(&daemon.endpoint.endpoint, Duration::from_secs(5)).unwrap();
-    // Announce a body larger than the pre-auth limit; the daemon must close
-    // instead of allocating and waiting for it.
-    let body_len = (crate::constants::PTY_DAEMON_HELLO_MAX_BYTES + 1) as u32;
-    std::io::Write::write_all(&mut stream, &body_len.to_le_bytes()).unwrap();
-    stream.set_read_timeout(Some(TIMEOUT)).unwrap();
-    let mut reader = BufReader::new(stream);
-    match read_frame::<_, DaemonMessage>(&mut reader) {
-        Ok(Some(Frame::Control(DaemonMessage::Error { .. }))) | Ok(None) | Err(_) => {}
-        other => panic!("oversized hello must be refused, got {other:?}"),
-    }
-    assert_eq!(daemon.server.session_count(), 0);
-}
-
-#[test]
-fn a_daemon_that_never_answers_spawn_fails_the_spawn_instead_of_hanging() {
-    // A fake daemon that authenticates and then goes silent.
-    let dir = tempfile::tempdir().unwrap();
-    let (listener, endpoint) = Listener::bind(dir.path()).unwrap();
-    let token = generate_token().unwrap();
-    let fake_token = token.clone();
-    std::thread::spawn(move || {
-        let stream = listener.accept().unwrap();
-        let mut reader = BufReader::new(stream.try_clone().unwrap());
-        let mut writer = stream;
-        let nonce = match read_frame::<_, ClientMessage>(&mut reader) {
-            Ok(Some(Frame::Control(ClientMessage::Hello { nonce, .. }))) => nonce,
-            other => panic!("expected hello, got {other:?}"),
-        };
-        write_control(
-            &mut writer,
-            &DaemonMessage::HelloOk {
-                protocol_version: PROTOCOL_VERSION,
-                daemon_pid: 0,
-                proof: super::discovery::handshake_proof(&fake_token, &nonce).unwrap(),
-            },
-        )
-        .unwrap();
-        let _spawn = read_frame::<_, ClientMessage>(&mut reader);
-        std::thread::sleep(Duration::from_secs(30));
-        drop(writer);
-    });
-    let system = DaemonPtySystem::new(DaemonEndpoint { endpoint, token }, "pane-i#1".into());
-    let started = Instant::now();
-    let pair = system.openpty(size()).unwrap();
-    assert!(pair.slave.spawn_command(sleeper()).is_err());
-    assert!(started.elapsed() < Duration::from_secs(15));
-}
-
-#[test]
-fn app_exit_ends_daemon_terminals_registered_in_app_state() {
-    let daemon = TestDaemon::start();
-    let state = crate::state::AppState::new();
-    for index in 0..3 {
-        let system = DaemonPtySystem::new(daemon.endpoint.clone(), format!("pane-j{index}#1"));
-        let handle = spawn_command_on(
-            &system,
-            size(),
-            sleeper(),
-            1,
-            SpawnOptions {
-                wsl_backed: false,
-                kill_owner: ChildKillOwner::Backend,
-            },
-            |_| PtyOutputControl::Continue,
-            PtyLifecycleHooks::default(),
-        )
-        .unwrap();
-        state
-            .pty_handles
-            .lock()
-            .unwrap()
-            .insert(format!("pane-j{index}"), handle);
-    }
-    daemon.wait_for_sessions(3);
-
-    state.terminate_daemon_sessions_on_exit();
-    // The process would exit here without running any destructor.
-    std::mem::forget(state);
     daemon.wait_for_sessions(0);
 }

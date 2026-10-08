@@ -7,25 +7,25 @@
 //! the next attach. Only an explicit `Terminate` (or the child exiting) ends a
 //! session.
 
-use std::collections::HashMap;
-use std::io::{self, BufReader, Read};
+use std::collections::{BTreeMap, HashMap};
+use std::io::{self, BufReader};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, PtySize};
 
-use super::discovery::{handshake_proof, tokens_match};
+use super::handshake::authenticate;
+use super::idle::idle_monitor;
 use super::session::{ClientLink, ConnWriter, Session};
 use super::transport::{self, Listener, Stream};
 use super::wire::{
-    read_frame, read_frame_limited, split_input, ClientMessage, DaemonMessage, Frame, SessionInfo,
-    WireCommand, PROTOCOL_VERSION,
+    read_frame, split_input, ClientMessage, DaemonMessage, Frame, SessionInfo, WireCommand,
 };
 use crate::constants::{
-    PTY_DAEMON_ACCEPT_RETRY_MS, PTY_DAEMON_HANDSHAKE_TIMEOUT_MS, PTY_DAEMON_HELLO_MAX_BYTES,
-    PTY_DAEMON_IDLE_POLL_MS, PTY_DAEMON_MAX_CONNECTIONS, PTY_DAEMON_WAKE_CONNECT_TIMEOUT_MS,
+    PTY_DAEMON_ACCEPT_RETRY_MS, PTY_DAEMON_IDLE_POLL_MS, PTY_DAEMON_MAX_CONNECTIONS,
+    PTY_DAEMON_SHUTDOWN_TIMEOUT_MS, PTY_DAEMON_WAKE_CONNECT_TIMEOUT_MS,
 };
 use crate::lock_ext::MutexExt;
 use crate::pty::{spawn_command_on, ChildKillOwner, PtyLifecycleHooks, SpawnOptions};
@@ -39,13 +39,28 @@ pub struct DaemonServer {
     token: String,
     sessions: Mutex<HashMap<String, Arc<Session>>>,
     connections: AtomicUsize,
-    next_connection_id: AtomicU64,
-    shutdown: AtomicBool,
+    pub(super) next_connection_id: AtomicU64,
+    next_session_seq: AtomicU64,
+    pub(super) shutdown: AtomicBool,
+    /// Set by a requested shutdown: no new session is admitted while the
+    /// existing ones are torn down (the accept loop keeps serving them).
+    draining: AtomicBool,
     /// Serializes admitting a connection with the idle-shutdown decision, so
     /// a connection accepted just as the daemon goes idle is either counted
     /// before the decision or refused after it — never served by a daemon
     /// that is already exiting.
-    admission: Mutex<()>,
+    pub(super) admission: Mutex<()>,
+    /// Own endpoint, used to wake the accept loop on a requested shutdown.
+    endpoint: OnceLock<String>,
+}
+
+struct SpawnRequest {
+    session_id: String,
+    terminal_id: String,
+    rows: u16,
+    cols: u16,
+    command: WireCommand,
+    metadata: BTreeMap<String, String>,
 }
 
 impl DaemonServer {
@@ -55,8 +70,11 @@ impl DaemonServer {
             sessions: Mutex::new(HashMap::new()),
             connections: AtomicUsize::new(0),
             next_connection_id: AtomicU64::new(1),
+            next_session_seq: AtomicU64::new(1),
             shutdown: AtomicBool::new(false),
+            draining: AtomicBool::new(false),
             admission: Mutex::new(()),
+            endpoint: OnceLock::new(),
         })
     }
 
@@ -68,6 +86,7 @@ impl DaemonServer {
         endpoint: String,
         idle_exit: Option<Duration>,
     ) -> io::Result<()> {
+        let _ = self.endpoint.set(endpoint.clone());
         if let Some(idle_exit) = idle_exit {
             let server = Arc::downgrade(self);
             let endpoint = endpoint.clone();
@@ -121,16 +140,26 @@ impl DaemonServer {
         );
     }
 
-    #[cfg(test)]
+    /// Refuse new sessions, terminate every existing one (including one
+    /// still being spawned, through its pending request) and wait until they
+    /// are gone or the bound expires.
+    pub fn shut_down_sessions(&self) {
+        self.draining.store(true, Ordering::Release);
+        self.terminate_all();
+        let deadline = Instant::now() + Duration::from_millis(PTY_DAEMON_SHUTDOWN_TIMEOUT_MS);
+        while self.session_count() > 0 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(PTY_DAEMON_IDLE_POLL_MS));
+        }
+    }
+
+    /// Request termination of every session; teardowns run concurrently.
     pub fn terminate_all(&self) {
         let sessions: Vec<_> = match self.sessions.lock_or_err() {
             Ok(sessions) => sessions.values().cloned().collect(),
             Err(_) => return,
         };
         for session in sessions {
-            if let Some(handle) = session.handle.get() {
-                let _ = handle.terminate();
-            }
+            session.terminate();
         }
     }
 
@@ -138,7 +167,7 @@ impl DaemonServer {
         self.sessions.lock_or_err().map(|s| s.len()).unwrap_or(0)
     }
 
-    fn is_idle(&self) -> bool {
+    pub(super) fn is_idle(&self) -> bool {
         self.connections.load(Ordering::Acquire) == 0 && self.session_count() == 0
     }
 
@@ -151,7 +180,7 @@ impl DaemonServer {
             }
         };
         let mut reader = BufReader::new(stream);
-        if !self.authenticate(&mut reader, &writer) {
+        if !authenticate(&self.token, &mut reader, &writer) {
             writer.close();
             return;
         }
@@ -193,37 +222,67 @@ impl DaemonServer {
                 }
                 Frame::Control(ClientMessage::Spawn {
                     session_id,
+                    terminal_id,
                     rows,
                     cols,
                     command,
+                    metadata,
                 }) if bound.is_none() => {
                     match self.spawn_session(
                         &writer,
                         connection_id,
-                        session_id,
-                        rows,
-                        cols,
-                        command,
+                        SpawnRequest {
+                            session_id,
+                            terminal_id,
+                            rows,
+                            cols,
+                            command,
+                            metadata,
+                        },
                     ) {
                         Ok(session) => bound = Some(session),
                         Err(error) => writer.error(&error),
                     }
                 }
-                Frame::Control(ClientMessage::Attach { session_id }) if bound.is_none() => {
-                    match self.attach_session(&writer, connection_id, &session_id) {
+                Frame::Control(ClientMessage::Attach {
+                    session_id,
+                    replay,
+                    take_over,
+                }) if bound.is_none() => {
+                    match self.attach_session(
+                        &writer,
+                        connection_id,
+                        &session_id,
+                        replay,
+                        take_over,
+                    ) {
                         Ok(session) => bound = Some(session),
                         Err(error) => writer.error(&error),
                     }
                 }
-                Frame::Control(ClientMessage::TerminateSession { session_id }) => {
+                Frame::Control(ClientMessage::TerminateSession {
+                    session_id,
+                    attach_epoch,
+                }) => {
                     let session = self.find_session(&session_id);
-                    if let Some(session) = session.as_ref() {
-                        session.terminate();
-                    }
-                    let found = session.is_some();
-                    if writer.send(&DaemonMessage::Terminating { found }).is_err() {
+                    let superseded = session
+                        .as_ref()
+                        .is_some_and(|session| !session.terminate_owned(attach_epoch));
+                    let reply = DaemonMessage::Terminating {
+                        found: session.is_some(),
+                        superseded,
+                    };
+                    if writer.send(&reply).is_err() {
                         break;
                     }
+                }
+                Frame::Control(ClientMessage::Shutdown) => {
+                    tracing::info!("PTY daemon shutdown requested");
+                    self.shut_down_sessions();
+                    if let Some(endpoint) = self.endpoint.get() {
+                        self.request_shutdown(endpoint);
+                    }
+                    break;
                 }
                 Frame::Control(ClientMessage::List) => {
                     let sessions = self.list_sessions();
@@ -248,60 +307,39 @@ impl DaemonServer {
             session.detach(connection_id);
         }
     }
-
-    fn authenticate(&self, reader: &mut BufReader<Stream>, writer: &ConnWriter) -> bool {
-        let mut reader = HandshakeReader {
-            inner: reader,
-            deadline: Instant::now() + Duration::from_millis(PTY_DAEMON_HANDSHAKE_TIMEOUT_MS),
-        };
-        match read_frame_limited::<_, ClientMessage>(&mut reader, PTY_DAEMON_HELLO_MAX_BYTES) {
-            Ok(Some(Frame::Control(ClientMessage::Hello {
-                token,
-                protocol_version,
-                nonce,
-            }))) => {
-                if !tokens_match(&token, &self.token) {
-                    writer.error("PTY daemon authentication failed");
-                    return false;
-                }
-                if protocol_version != PROTOCOL_VERSION {
-                    writer.error(&format!(
-                        "PTY daemon protocol {PROTOCOL_VERSION} cannot serve client protocol {protocol_version}"
-                    ));
-                    return false;
-                }
-                let Ok(proof) = handshake_proof(&self.token, &nonce) else {
-                    writer.error("PTY daemon could not prove its identity");
-                    return false;
-                };
-                writer
-                    .send(&DaemonMessage::HelloOk {
-                        protocol_version: PROTOCOL_VERSION,
-                        daemon_pid: std::process::id(),
-                        proof,
-                    })
-                    .is_ok()
-            }
-            _ => {
-                writer.error("PTY daemon handshake expected hello");
-                false
-            }
-        }
-    }
-
     fn spawn_session(
         self: &Arc<Self>,
         writer: &Arc<ConnWriter>,
         connection_id: u64,
-        session_id: String,
-        rows: u16,
-        cols: u16,
-        command: WireCommand,
+        request: SpawnRequest,
     ) -> Result<Arc<Session>, String> {
+        let SpawnRequest {
+            session_id,
+            terminal_id,
+            rows,
+            cols,
+            command,
+            metadata,
+        } = request;
         let command = command.into_builder()?;
-        let session = Arc::new(Session::new(session_id.clone()));
+        let created_seq = self.next_session_seq.fetch_add(1, Ordering::Relaxed);
+        let session = Arc::new(Session::new(
+            session_id.clone(),
+            terminal_id,
+            metadata,
+            created_seq,
+        ));
+        let link = ClientLink {
+            connection_id,
+            writer: Arc::clone(writer),
+        };
+        let attach_epoch = session.bind_spawner(link.clone());
         {
             let mut sessions = self.sessions.lock_or_err()?;
+            // A shutting-down daemon admits no new work.
+            if self.draining.load(Ordering::Acquire) {
+                return Err("PTY daemon is shutting down".into());
+            }
             if sessions.contains_key(&session_id) {
                 return Err(format!("PTY daemon session '{session_id}' already exists"));
             }
@@ -356,18 +394,22 @@ impl DaemonServer {
             }
         };
         let child_pid = handle.child_pid();
-        let _ = session.handle.set(handle);
         // A terminate that arrived while the child was being spawned.
-        if session.terminate_requested() {
+        if session.publish_handle(handle) {
             session.terminate();
         }
-        if writer.send(&DaemonMessage::Spawned { child_pid }).is_ok() {
-            let link = ClientLink {
-                connection_id,
-                writer: Arc::clone(writer),
-            };
-            sink.client = Some(link.clone());
-            *session.attached.lock_or_err()? = Some(link);
+        if writer
+            .send(&DaemonMessage::Spawned {
+                child_pid,
+                attach_epoch,
+            })
+            .is_ok()
+        {
+            sink.client = Some(link);
+        } else {
+            // The spawner vanished before learning about its child: leave
+            // the session detached rather than bound to a dead connection.
+            session.release_claim(connection_id);
         }
         tracing::info!(session_id = %session.id, ?child_pid, "PTY daemon session spawned");
         Ok(Arc::clone(&session))
@@ -378,6 +420,8 @@ impl DaemonServer {
         writer: &Arc<ConnWriter>,
         connection_id: u64,
         session_id: &str,
+        replay: bool,
+        take_over: bool,
     ) -> Result<Arc<Session>, String> {
         let session = self
             .sessions
@@ -385,7 +429,7 @@ impl DaemonServer {
             .get(session_id)
             .cloned()
             .ok_or_else(|| format!("PTY daemon session '{session_id}' does not exist"))?;
-        session.attach(writer, connection_id)?;
+        session.attach(writer, connection_id, replay, take_over)?;
         Ok(session)
     }
 
@@ -415,79 +459,12 @@ impl DaemonServer {
     }
 }
 
-/// Reads the handshake against one deadline for the whole exchange. A plain
-/// socket read timeout restarts on every byte, so a client trickling its
-/// hello could hold a connection slot indefinitely.
-struct HandshakeReader<'a> {
-    inner: &'a mut BufReader<Stream>,
-    deadline: Instant,
-}
-
-impl Read for HandshakeReader<'_> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let remaining = self.deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "PTY daemon handshake deadline passed",
-            ));
-        }
-        self.inner.get_ref().set_read_timeout(Some(remaining))?;
-        self.inner.read(buf)
-    }
-}
-
 /// How long to hold an input frame before writing it to the PTY so the
 /// client's pause before it survives socket buffering. `since_last` is the
 /// time since this connection's previous input reached the PTY; frames that
 /// arrive already spaced by their pause wait for nothing.
 pub(super) fn input_delay(pause: Duration, since_last: Option<Duration>) -> Duration {
     since_last.map_or(Duration::ZERO, |since| pause.saturating_sub(since))
-}
-
-fn idle_monitor(server: Weak<DaemonServer>, endpoint: String, idle_exit: Duration) {
-    let mut idle_since: Option<Instant> = None;
-    // A connection that opened and closed between two polls (a GUI's probe
-    // right before it opens a terminal connection) still counts as activity.
-    let mut seen_admissions = 0;
-    loop {
-        thread::sleep(Duration::from_millis(PTY_DAEMON_IDLE_POLL_MS));
-        let Some(server) = server.upgrade() else {
-            return;
-        };
-        if server.shutdown.load(Ordering::Acquire) {
-            return;
-        }
-        let admissions = server.next_connection_id.load(Ordering::Acquire);
-        if !server.is_idle() || admissions != seen_admissions {
-            seen_admissions = admissions;
-            idle_since = None;
-            continue;
-        }
-        let since = *idle_since.get_or_insert_with(Instant::now);
-        if since.elapsed() < idle_exit {
-            continue;
-        }
-        // Re-check under the admission lock: a connection admitted meanwhile
-        // keeps the daemon alive.
-        let still_idle = match server.admission.lock_or_err() {
-            Ok(_admission) => {
-                let idle = server.is_idle()
-                    && server.next_connection_id.load(Ordering::Acquire) == seen_admissions;
-                if idle {
-                    server.shutdown.store(true, Ordering::Release);
-                }
-                idle
-            }
-            Err(_) => false,
-        };
-        if still_idle {
-            tracing::info!("PTY daemon idle; shutting down");
-            server.request_shutdown(&endpoint);
-            return;
-        }
-        idle_since = None;
-    }
 }
 
 fn reap_if_done(server: &Weak<DaemonServer>, session: &Arc<Session>) {

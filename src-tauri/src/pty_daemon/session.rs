@@ -1,9 +1,9 @@
 //! One daemon session: the native PTY, its attached client and the output
 //! retained while detached.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::io;
-use std::sync::atomic::{fence, AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 
@@ -58,6 +58,14 @@ pub(super) struct ClientLink {
 
 pub(super) struct Session {
     pub(super) id: String,
+    pub(super) terminal_id: String,
+    /// Opaque GUI state returned to an adopting client.
+    pub(super) metadata: BTreeMap<String, String>,
+    /// Daemon-wide creation order; picks the newest adoption candidate.
+    pub(super) created_seq: u64,
+    /// Bumped by every bind (spawn or attach). A by-id terminate carrying an
+    /// older epoch comes from a client that no longer owns the session.
+    attach_epoch: AtomicU64,
     pub(super) handle: OnceLock<PtyHandle>,
     pub(super) sink: Mutex<Sink>,
     /// Mirror of `sink.client` kept outside the sink lock. The PTY reader can
@@ -95,9 +103,18 @@ impl Sink {
 }
 
 impl Session {
-    pub(super) fn new(id: String) -> Self {
+    pub(super) fn new(
+        id: String,
+        terminal_id: String,
+        metadata: BTreeMap<String, String>,
+        created_seq: u64,
+    ) -> Self {
         Self {
             id,
+            terminal_id,
+            metadata,
+            created_seq,
+            attach_epoch: AtomicU64::new(0),
             handle: OnceLock::new(),
             sink: Mutex::new(Sink::default()),
             attached: Mutex::new(None),
@@ -160,7 +177,9 @@ impl Session {
         &self,
         writer: &Arc<ConnWriter>,
         connection_id: u64,
-    ) -> Result<(), String> {
+        replay: bool,
+        take_over: bool,
+    ) -> Result<u64, String> {
         let link = ClientLink {
             connection_id,
             writer: Arc::clone(writer),
@@ -169,9 +188,21 @@ impl Session {
         // the sink. A reader blocked writing to a stalled client releases the
         // sink only once that socket is shut down, and if this client stalls
         // during the replay below, the next attach can evict it the same way.
-        if let Some(previous) = self.attached.lock_or_err()?.replace(link.clone()) {
-            previous.writer.close();
-        }
+        let attach_epoch = {
+            let mut attached = self.attached.lock_or_err()?;
+            // Adoption is decided and claimed under this lock, so of two
+            // adopters (or an adopter racing a terminate) exactly one wins.
+            if !take_over && (attached.is_some() || self.terminate_requested()) {
+                return Err("PTY daemon session is attached or terminating".into());
+            }
+            if let Some(previous) = attached.replace(link.clone()) {
+                previous.writer.close();
+            }
+            // The epoch moves with the claim, under the same lock a by-id
+            // terminate checks it under, so a stale owner's request cannot
+            // slip in between the claim and the epoch change.
+            self.next_attach_epoch_claimed()
+        };
         let mut sink = self.sink.lock_or_err()?;
         if let Some(previous) = sink.client.take() {
             previous.writer.close();
@@ -180,12 +211,21 @@ impl Session {
             return Err("PTY daemon attach was superseded by a newer attach".into());
         }
         let child_pid = self.handle.get().and_then(PtyHandle::child_pid);
+        // Without replay the retained bytes are discarded instead of handed
+        // to a client that would parse them as live output (and answer the
+        // terminal queries inside them again).
+        if !replay {
+            sink.dropped_bytes += sink.backlog.len() as u64;
+            sink.backlog.clear();
+        }
         // Consume the backlog only once it was delivered, so a client that
         // drops mid-replay leaves it for the next attach.
         let delivered = writer
             .send(&DaemonMessage::Attached {
                 child_pid,
+                attach_epoch,
                 dropped_bytes: sink.dropped_bytes,
+                metadata: self.metadata.clone(),
             })
             .and_then(|()| {
                 let (front, back) = sink.backlog.as_slices();
@@ -210,7 +250,22 @@ impl Session {
         sink.backlog.clear();
         sink.dropped_bytes = 0;
         sink.client = Some(link);
-        Ok(())
+        Ok(attach_epoch)
+    }
+
+    /// Callers hold the claim (`attached`) lock.
+    fn next_attach_epoch_claimed(&self) -> u64 {
+        self.attach_epoch.fetch_add(1, Ordering::AcqRel) + 1
+    }
+
+    pub(super) fn attach_epoch(&self) -> u64 {
+        self.attach_epoch.load(Ordering::Acquire)
+    }
+
+    /// Whether a by-id terminate from a client that attached with
+    /// `attach_epoch` may still end this session.
+    fn owned_by_epoch(&self, attach_epoch: Option<u64>) -> bool {
+        attach_epoch.is_none_or(|epoch| epoch == self.attach_epoch.load(Ordering::Acquire))
     }
 
     fn is_attached(&self, connection_id: u64) -> bool {
@@ -262,15 +317,32 @@ impl Session {
     /// before the handle exists is remembered and applied by the spawner
     /// right after it publishes the handle.
     pub(super) fn terminate(&self) {
-        self.terminate_requested.store(true, Ordering::Relaxed);
-        // Pairs with the fence in `terminate_requested`: either this side
-        // sees the published handle or the spawner sees the request.
-        fence(Ordering::SeqCst);
-        let Some(handle) = self.handle.get().cloned() else {
-            return;
+        let _ = self.terminate_owned(None);
+    }
+
+    /// Terminate unless a client attached after the requester did
+    /// (`attach_epoch` older than the current one). Returns `false` when
+    /// the request was superseded and the session left running.
+    ///
+    /// The ownership check, the request flag and reading the handle happen
+    /// under the claim lock that adoption and handle publication also take,
+    /// so none of them can interleave with a terminate.
+    pub(super) fn terminate_owned(&self, attach_epoch: Option<u64>) -> bool {
+        let handle = {
+            let _claim = self
+                .attached
+                .lock_or_recover_for_discard("PTY daemon terminate claim");
+            if !self.owned_by_epoch(attach_epoch) {
+                return false;
+            }
+            self.terminate_requested.store(true, Ordering::Release);
+            self.handle.get().cloned()
+        };
+        let Some(handle) = handle else {
+            return true;
         };
         if self.terminating.swap(true, Ordering::AcqRel) {
-            return;
+            return true;
         }
         let session_id = self.id.clone();
         let terminating = Arc::clone(&self.terminating);
@@ -280,12 +352,32 @@ impl Session {
                 terminating.store(false, Ordering::Release);
             }
         });
+        true
     }
 
-    /// Called by the spawner after it has published the handle.
+    /// Publish the spawned handle; returns whether a terminate arrived
+    /// before it existed (the spawner must then apply it).
+    pub(super) fn publish_handle(&self, handle: PtyHandle) -> bool {
+        let _claim = self
+            .attached
+            .lock_or_recover_for_discard("PTY daemon handle publication");
+        let _ = self.handle.set(handle);
+        self.terminate_requested()
+    }
+
+    /// Bind the spawning connection as the attached client before the
+    /// session becomes visible, so listing never shows a session that is
+    /// still being spawned as adoptable. Returns the first epoch.
+    pub(super) fn bind_spawner(&self, link: ClientLink) -> u64 {
+        let mut attached = self
+            .attached
+            .lock_or_recover_for_discard("PTY daemon spawn bind");
+        *attached = Some(link);
+        self.next_attach_epoch_claimed()
+    }
+
     pub(super) fn terminate_requested(&self) -> bool {
-        fence(Ordering::SeqCst);
-        self.terminate_requested.load(Ordering::Relaxed)
+        self.terminate_requested.load(Ordering::Acquire)
     }
 
     /// Never takes the sink lock, so listing stays responsive while a reader
@@ -294,10 +386,19 @@ impl Session {
         let attached = self.attached.lock_or_err().ok()?.is_some();
         Some(SessionInfo {
             session_id: self.id.clone(),
+            terminal_id: self.terminal_id.clone(),
+            created_seq: self.created_seq,
+            attach_epoch: self.attach_epoch(),
+            metadata: self.metadata.clone(),
             child_pid: self.handle.get().and_then(PtyHandle::child_pid),
             attached,
             exited: self.exited.load(Ordering::Acquire),
+            terminating: self.terminate_requested(),
         })
+    }
+
+    pub(super) fn release_claim(&self, connection_id: u64) {
+        self.forget_attached(connection_id);
     }
 
     fn forget_attached(&self, connection_id: u64) {

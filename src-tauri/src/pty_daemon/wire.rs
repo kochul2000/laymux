@@ -9,6 +9,7 @@
 use portable_pty::CommandBuilder;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
 use std::time::Duration;
 
@@ -18,7 +19,7 @@ const INPUT_PAUSE_BYTES: usize = 4;
 
 /// Bumped on any incompatible message/semantics change. A daemon and client
 /// with different versions refuse each other in the handshake.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 const KIND_CONTROL: u8 = 0;
 const KIND_DATA: u8 = 1;
@@ -42,13 +43,26 @@ pub enum ClientMessage {
     /// Create a session and bind this connection to it as the attached client.
     Spawn {
         session_id: String,
+        /// GUI terminal (pane) identity; a later GUI adopts by this.
+        terminal_id: String,
         rows: u16,
         cols: u16,
         command: WireCommand,
+        /// Opaque GUI state the daemon stores and returns on attach, so an
+        /// adopting GUI can rebuild what the running child still relies on.
+        #[serde(default)]
+        metadata: BTreeMap<String, String>,
     },
-    /// Bind this connection to an existing session, replacing any previously
-    /// attached client. Output retained while detached is delivered first.
-    Attach { session_id: String },
+    /// Bind this connection to an existing session. With `replay`, output
+    /// retained while detached is delivered first; without it the backlog is
+    /// discarded. With `take_over` a currently attached client is replaced;
+    /// without it (adoption) the attach is refused when the session is
+    /// attached or being terminated, so two adopters never share one child.
+    Attach {
+        session_id: String,
+        replay: bool,
+        take_over: bool,
+    },
     /// Describe live sessions. Valid on an unbound connection.
     List,
     /// Resize the bound session's PTY.
@@ -58,7 +72,17 @@ pub enum ClientMessage {
     /// Terminate a session by id from any connection. The GUI uses a fresh
     /// connection for this when its terminal connection is busy or broken,
     /// so ending work never waits behind a stuck input write.
-    TerminateSession { session_id: String },
+    ///
+    /// `attach_epoch` is the epoch the requester attached with. When the
+    /// session was attached again since (adopted by a newer client), the
+    /// stale request is refused so it cannot end the newer owner's work.
+    TerminateSession {
+        session_id: String,
+        attach_epoch: Option<u64>,
+    },
+    /// Terminate every session, then exit the daemon. Used before an update
+    /// replaces the executable the daemon runs from.
+    Shutdown,
 }
 
 /// Messages the daemon sends to a client.
@@ -77,11 +101,14 @@ pub enum DaemonMessage {
     },
     Spawned {
         child_pid: Option<u32>,
+        attach_epoch: u64,
     },
     Attached {
         child_pid: Option<u32>,
+        attach_epoch: u64,
         /// Detached output that did not fit the backlog and was discarded.
         dropped_bytes: u64,
+        metadata: BTreeMap<String, String>,
     },
     Sessions {
         sessions: Vec<SessionInfo>,
@@ -93,9 +120,11 @@ pub enum DaemonMessage {
         exit_code: u32,
     },
     /// Reply to `TerminateSession`. `found` is false when no such session
-    /// exists any more, which also satisfies the request.
+    /// exists any more, which also satisfies the request. `superseded` means
+    /// a newer client owns the session now and it was left running.
     Terminating {
         found: bool,
+        superseded: bool,
     },
     Error {
         message: String,
@@ -162,9 +191,18 @@ impl WireCommand {
 #[serde(rename_all = "camelCase")]
 pub struct SessionInfo {
     pub session_id: String,
+    pub terminal_id: String,
+    /// Daemon-wide creation order; larger is newer.
+    pub created_seq: u64,
+    /// Current attach epoch, so a terminate for a listed session can be
+    /// made conditional on nobody having attached since.
+    pub attach_epoch: u64,
+    pub metadata: BTreeMap<String, String>,
     pub child_pid: Option<u32>,
     pub attached: bool,
     pub exited: bool,
+    /// A terminate was requested; the session is going away.
+    pub terminating: bool,
 }
 
 #[derive(Debug)]
@@ -286,6 +324,7 @@ mod tests {
             &mut buf,
             &DaemonMessage::Spawned {
                 child_pid: Some(42),
+                attach_epoch: 1,
             },
         )
         .unwrap();
@@ -294,7 +333,7 @@ mod tests {
 
         let mut cursor = Cursor::new(buf);
         match read_frame::<_, DaemonMessage>(&mut cursor).unwrap() {
-            Some(Frame::Control(DaemonMessage::Spawned { child_pid })) => {
+            Some(Frame::Control(DaemonMessage::Spawned { child_pid, .. })) => {
                 assert_eq!(child_pid, Some(42))
             }
             other => panic!("unexpected {other:?}"),
@@ -324,6 +363,8 @@ mod tests {
             &mut buf,
             &ClientMessage::Spawn {
                 session_id: "t:1".into(),
+                terminal_id: "t".into(),
+                metadata: BTreeMap::new(),
                 rows: 24,
                 cols: 80,
                 command: WireCommand::from_builder(&command).unwrap(),
@@ -333,6 +374,8 @@ mod tests {
         match read_frame::<_, ClientMessage>(&mut Cursor::new(buf)).unwrap() {
             Some(Frame::Control(ClientMessage::Spawn {
                 session_id,
+                terminal_id: _,
+                metadata: _,
                 rows,
                 cols,
                 command,
