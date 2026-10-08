@@ -18,6 +18,8 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // Exercise the same patched ESM engine Vite ships to the desktop.
+      "@xterm/xterm": path.resolve(__dirname, "node_modules/@xterm/xterm/lib/xterm.mjs"),
     },
   },
   test: {
