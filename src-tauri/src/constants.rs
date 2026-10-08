@@ -127,6 +127,17 @@ pub const COLORTERM_TRUECOLOR: &str = "truecolor";
 /// trace logs are only useful when diagnosing cursor/flicker issues.
 pub const ENV_LAYMUX_PTY_TRACE: &str = "LAYMUX_PTY_TRACE";
 
+/// Opt-in switch (`1`) that runs terminal PTYs inside the detached PTY daemon
+/// instead of the GUI process (ADR-0300). Unset/any other value keeps the
+/// in-process PTY path.
+pub const ENV_LAYMUX_PTY_DAEMON: &str = "LAYMUX_PTY_DAEMON";
+/// Overrides the PTY daemon state directory (discovery, lock, socket, log) so
+/// an isolated dev worktree or test never meets another build's daemon.
+pub const ENV_LAYMUX_PTY_DAEMON_DIR: &str = "LAYMUX_PTY_DAEMON_DIR";
+/// Command-line flag that makes the `laymux` binary run as the PTY daemon
+/// before any Tauri/GUI initialization.
+pub const PTY_DAEMON_CLI_FLAG: &str = "--pty-daemon";
+
 /// xterm's DEFAULT mouse encoding is the fixed-width `CSI M Pb Px Py`
 /// binary report. `onBinary` currently emits only this encoding.
 pub const XTERM_DEFAULT_MOUSE_REPORT_PREFIX: &[u8; 3] = b"\x1b[M";
@@ -282,6 +293,30 @@ pub const PTY_READER_WAKE_TIMEOUT_MS: u64 = 500;
 /// Bound for the generation-scoped reader lifecycle to reach terminal state
 /// after the PTY master/child teardown has been requested.
 pub const PTY_READER_EXIT_TIMEOUT_MS: u64 = 1_000;
+/// Private PTY daemon IPC frame ceiling. Output frames carry at most one PTY
+/// read chunk and input frames one write chunk, so anything larger is a
+/// protocol violation rather than a payload to buffer.
+pub const PTY_DAEMON_MAX_FRAME_BYTES: usize = 1024 * 1024;
+/// Output a detached daemon session retains for the next attach. The oldest
+/// bytes are dropped (and counted) so a session nobody watches never stalls
+/// its child on a full pipe nor grows without bound.
+pub const PTY_DAEMON_DETACHED_BACKLOG_BYTES: usize = 1024 * 1024;
+/// Client-side bound on received-but-unconsumed daemon output per terminal.
+/// When full the client stops reading its socket, which pushes backpressure
+/// back to the daemon's PTY reader exactly like a blocked in-process callback.
+pub const PTY_DAEMON_CLIENT_QUEUE_BYTES: usize = 64 * 1024;
+/// Largest frame accepted before a connection has authenticated.
+pub const PTY_DAEMON_HELLO_MAX_BYTES: usize = 4 * 1024;
+/// Concurrent daemon connections (one per terminal plus short control
+/// connections). Further connections are refused, not queued.
+pub const PTY_DAEMON_MAX_CONNECTIONS: usize = 256;
+/// Deadline for the authenticated handshake on a fresh daemon connection.
+pub const PTY_DAEMON_HANDSHAKE_TIMEOUT_MS: u64 = 5_000;
+/// How long the GUI waits for a freshly launched daemon to publish discovery.
+pub const PTY_DAEMON_LAUNCH_TIMEOUT_MS: u64 = 5_000;
+/// The daemon exits after this long with no session and no connection.
+pub const PTY_DAEMON_IDLE_EXIT_MS: u64 = 60_000;
+
 /// Shared upper bound for one owner transition, including worker polling,
 /// cancellation grace, terminal teardown, and scheduler slack.
 pub const REMOTE_OWNER_TRANSITION_TIMEOUT_MS: u64 = 750;

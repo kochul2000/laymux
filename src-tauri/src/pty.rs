@@ -1,4 +1,4 @@
-use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize, PtySystem};
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
@@ -209,6 +209,9 @@ pub struct PtyHandle {
     /// guest. The liveness oracle needs this to know that a Windows process
     /// snapshot has no standing over this pane at all (ADR-0134).
     wsl_backed: bool,
+    /// Whether this process may PID-kill the child tree (see
+    /// [`ChildKillOwner`]).
+    kill_owner: ChildKillOwner,
 }
 
 struct PendingSessionRestore {
@@ -297,6 +300,7 @@ impl PtyHandle {
             codex_startup_color_probe: None,
             bootstrap_da_reply: None,
             wsl_backed: false,
+            kill_owner: ChildKillOwner::Local,
         }
     }
 
@@ -383,6 +387,35 @@ impl PtyHandle {
                 Ok(()) => reader,
             }),
             (Ok(()), Ok(())) => Ok(()),
+        }
+    }
+
+    /// Ask a backend that owns the child (the PTY daemon) to terminate it,
+    /// without the local graceful-close waits of [`Self::terminate`]. A no-op
+    /// for in-process PTYs, whose children end with this process anyway.
+    pub fn request_backend_termination(&self) -> Result<(), String> {
+        if self.kill_owner != ChildKillOwner::Backend {
+            return Ok(());
+        }
+        let mut killer = self.child_killer.lock_or_err()?;
+        match killer.as_mut() {
+            Some(killer) => killer
+                .kill()
+                .map_err(|error| format!("Failed to request PTY termination: {error}")),
+            None => Ok(()),
+        }
+    }
+
+    /// Close input and the master once the child has exited on its own, so a
+    /// PTY that nothing else will tear down (a daemon session) delivers its
+    /// remaining output and then EOF. ConPTY keeps output open until the
+    /// pseudoconsole closes.
+    pub(crate) fn release_after_child_exit(&self) {
+        self.control.close();
+        let deadline = Instant::now() + Duration::from_millis(PTY_CONTROL_TERMINATE_GRACE_MS);
+        // A resize holds the master only for its platform call.
+        while !self.close_master() && Instant::now() < deadline {
+            thread::sleep(Self::GRACEFUL_SHUTDOWN_STEP);
         }
     }
 
@@ -613,7 +646,7 @@ impl PtyHandle {
         #[allow(unused_mut)]
         let mut platform_error: Option<String> = None;
         #[cfg(target_os = "windows")]
-        if let Some(pid) = self.child_pid {
+        if let (Some(pid), ChildKillOwner::Local) = (self.child_pid, self.kill_owner) {
             let mut taskkill = headless_command("taskkill");
             taskkill.args(["/PID", &pid.to_string(), "/T", "/F"]);
             match status_with_timeout(
@@ -725,18 +758,37 @@ pub fn spawn_pty_for_generation<F>(
 where
     F: Fn(Vec<u8>) -> PtyOutputControl + Send + 'static,
 {
-    let pty_system = native_pty_system();
+    spawn_pty_on(&PtyBackend::Local, session, terminal_generation, on_output)
+}
 
+/// Where a terminal's OS PTY and child process live (ADR-0300).
+///
+/// Only the owner of the master/child changes. Command construction, the
+/// output callback (protocol/OSC/delivery) and the [`PtyHandle`] contract are
+/// identical for both backends.
+#[derive(Debug, Clone)]
+pub enum PtyBackend {
+    /// The GUI process owns the PTY (default).
+    Local,
+    /// The detached PTY daemon owns the PTY; the GUI holds a proxy.
+    Daemon(crate::pty_daemon::DaemonEndpoint),
+}
+
+pub fn spawn_pty_on<F>(
+    backend: &PtyBackend,
+    session: &TerminalSession,
+    terminal_generation: u64,
+    on_output: F,
+) -> Result<SpawnedPty, String>
+where
+    F: Fn(Vec<u8>) -> PtyOutputControl + Send + 'static,
+{
     let size = PtySize {
         rows: session.config.rows,
         cols: session.config.cols,
         pixel_width: 0,
         pixel_height: 0,
     };
-
-    let pair = pty_system
-        .openpty(size)
-        .map_err(|e| format!("Failed to open PTY: {e}"))?;
 
     let (command_line, startup_command) = if session.config.command_line.is_empty() {
         // Fallback: legacy profile name-based resolution. Historically this
@@ -795,6 +847,84 @@ where
         StartDirPlan::None => {}
     }
 
+    let (pty_system, kill_owner): (Box<dyn PtySystem + Send>, ChildKillOwner) = match backend {
+        PtyBackend::Local => (native_pty_system(), ChildKillOwner::Local),
+        PtyBackend::Daemon(endpoint) => (
+            Box::new(crate::pty_daemon::DaemonPtySystem::new(
+                endpoint.clone(),
+                crate::pty_daemon::session_key(&session.id, terminal_generation),
+            )),
+            ChildKillOwner::Backend,
+        ),
+    };
+    let handle = spawn_command_on(
+        pty_system.as_ref(),
+        size,
+        cmd,
+        terminal_generation,
+        SpawnOptions {
+            wsl_backed: is_wsl,
+            kill_owner,
+        },
+        on_output,
+        PtyLifecycleHooks::default(),
+    )?;
+
+    Ok(SpawnedPty {
+        handle,
+        initial_execution_host,
+        resolved_cwd: start_dir.resolved_cwd(),
+    })
+}
+
+/// Who may kill the direct child's process tree by PID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChildKillOwner {
+    /// This process holds the OS child handle, so a PID-based tree kill is
+    /// safe from PID recycling while `child_exited` is still false.
+    Local,
+    /// Another process (the PTY daemon) holds the child handle. A PID kill
+    /// from here could hit a recycled PID, so killing is delegated to the
+    /// backend's `ChildKiller`, which performs the tree kill where the handle
+    /// lives.
+    Backend,
+}
+
+pub(crate) struct SpawnOptions {
+    pub wsl_backed: bool,
+    pub kill_owner: ChildKillOwner,
+}
+
+/// Optional observers for the two independent end-of-life signals of a PTY.
+/// The GUI derives both from its own reader/handle; the daemon forwards them
+/// to its attached client.
+#[derive(Default)]
+pub(crate) struct PtyLifecycleHooks {
+    /// Runs on the reader thread after the last output callback returned.
+    pub on_reader_end: Option<Box<dyn FnOnce() + Send>>,
+    /// Runs on the wait thread once the child exit has been published.
+    pub on_child_exit: Option<Box<dyn FnOnce(u32) + Send>>,
+}
+
+/// Open a PTY on `pty_system`, spawn `cmd` into it and start the
+/// generation-scoped reader. Shared by the in-process path, the daemon's
+/// native sessions and the GUI's daemon proxy.
+pub(crate) fn spawn_command_on<F>(
+    pty_system: &dyn PtySystem,
+    size: PtySize,
+    cmd: CommandBuilder,
+    terminal_generation: u64,
+    options: SpawnOptions,
+    on_output: F,
+    hooks: PtyLifecycleHooks,
+) -> Result<PtyHandle, String>
+where
+    F: Fn(Vec<u8>) -> PtyOutputControl + Send + 'static,
+{
+    let pair = pty_system
+        .openpty(size)
+        .map_err(|e| format!("Failed to open PTY: {e}"))?;
+
     let child = pair
         .slave
         .spawn_command(cmd)
@@ -806,6 +936,7 @@ where
     let exited_signal = Arc::clone(&child_exited);
     let child_exit_handshake = Arc::new(Mutex::new(()));
     let exited_handshake = Arc::clone(&child_exit_handshake);
+    let on_child_exit = hooks.on_child_exit;
 
     // Spawn a background thread to wait for the child process.
     // This prevents zombie processes on Unix (where unwait-ed children
@@ -820,7 +951,10 @@ where
     // now-dead shell and not an unrelated process.
     thread::spawn(move || {
         let mut child = child;
-        let _ = child.wait();
+        let exit_code = match child.wait() {
+            Ok(status) => status.exit_code(),
+            Err(_) => 1,
+        };
         if let Err(error) = publish_child_exit(&exited_handshake, &exited_signal) {
             // Dropping the process handle after a poisoned handshake could
             // make a concurrent PID-based kill unsafe. Leak it instead; this
@@ -829,6 +963,9 @@ where
             std::mem::forget(child);
         }
         // `child` drops here; Windows may recycle the PID after this point.
+        if let Some(on_child_exit) = on_child_exit {
+            on_child_exit(exit_code);
+        }
     });
     drop(pair.slave);
 
@@ -859,19 +996,20 @@ where
         reader_lifecycle: Arc::clone(&reader_lifecycle),
         codex_startup_color_probe: None,
         bootstrap_da_reply: None,
-        wsl_backed: is_wsl,
+        wsl_backed: options.wsl_backed,
+        kill_owner: options.kill_owner,
     };
 
     // Spawn reader thread
+    let on_reader_end = hooks.on_reader_end;
     thread::spawn(move || {
         run_interruptible_reader_loop(reader_pair.reader, reader_lifecycle, on_output);
+        if let Some(on_reader_end) = on_reader_end {
+            on_reader_end();
+        }
     });
 
-    Ok(SpawnedPty {
-        handle,
-        initial_execution_host,
-        resolved_cwd: start_dir.resolved_cwd(),
-    })
+    Ok(handle)
 }
 
 #[cfg(test)]

@@ -1952,7 +1952,15 @@ src-tauri/src/
 │   ├── mcp.rs                # 내장 MCP 서버 (release tool 44종 + resource 핸들러, §12.7)
 │   └── mcp_resources.rs      # MCP Resources URI 모델·구독 레지스트리
 ├── terminal/mod.rs           # 터미널 모델 (TerminalSession, Config, Notification)
-├── pty.rs                    # PTY 스폰 및 I/O
+├── pty.rs                    # PTY 스폰 및 I/O, PtyBackend(Local/Daemon) 선택
+├── pty_daemon/               # opt-in PTY 데몬 (ADR-0300, data-flow §8.23)
+│   ├── server.rs             # 데몬: 연결·인증·세션 catalog
+│   ├── session.rs            # 데몬 세션: attach/detach·backlog
+│   ├── client.rs             # GUI: 원격 PtySystem proxy
+│   ├── client_queue.rs       # GUI: 유계 수신 queue·exit slot
+│   ├── launcher.rs           # discovery probe·데몬 기동
+│   ├── entry.rs              # `laymux --pty-daemon` 진입점
+│   └── wire.rs / transport.rs / discovery.rs  # frame·로컬 socket·token
 ├── clipboard.rs              # 클립보드 (smart paste, 이미지)
 ├── ipc_server.rs             # IPC 소켓 (lx CLI ↔ IDE)
 ├── output_buffer.rs          # 터미널 출력 링 버퍼

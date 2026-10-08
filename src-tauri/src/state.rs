@@ -440,6 +440,28 @@ impl AppState {
             }
         }
     }
+
+    /// App exit runs no `Drop` for this state. In-process PTYs still end with
+    /// the process, but a daemon-owned PTY would merely detach, so send each
+    /// one its terminate request before the process goes away. This only
+    /// enqueues the request; it does not wait for the children (ADR-0300).
+    pub fn terminate_daemon_sessions_on_exit(&self) {
+        let handles: Vec<(String, PtyHandle)> = match self.pty_handles.lock_or_err() {
+            Ok(handles) => handles
+                .iter()
+                .map(|(id, handle)| (id.clone(), handle.clone()))
+                .collect(),
+            Err(err) => {
+                tracing::warn!(error = %err, "PTY registry unavailable at app exit");
+                return;
+            }
+        };
+        for (terminal_id, handle) in handles {
+            if let Err(err) = handle.request_backend_termination() {
+                tracing::warn!(terminal_id, error = %err, "daemon PTY terminate request failed at exit");
+            }
+        }
+    }
 }
 
 impl Drop for AppState {
