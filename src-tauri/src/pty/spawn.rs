@@ -2,7 +2,7 @@
 //! open/spawn/reader bring-up used by in-process PTYs, daemon sessions and
 //! the GUI's daemon proxy (ADR-0300).
 
-use portable_pty::{native_pty_system, CommandBuilder, PtySize, PtySystem};
+use portable_pty::{native_pty_system, Child, CommandBuilder, PtyPair, PtySize, PtySystem};
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
@@ -11,7 +11,10 @@ use std::thread;
 use super::{
     is_wsl_command, plan_start_dir, publish_child_exit, PtyHandle, PtyOutputControl, StartDirPlan,
 };
-use crate::constants::{ENV_WSLENV, PTY_DAEMON_METADATA_AGENT_HOOK_TOKEN};
+use crate::constants::{
+    ENV_WSLENV, PTY_DAEMON_METADATA_AGENT_HOOK_TOKEN, PTY_DAEMON_METADATA_PROFILE,
+    PTY_DAEMON_METADATA_WSL_BACKED,
+};
 use crate::pty_control::PtyControlWorker;
 use crate::pty_reader::{run_interruptible_reader_loop, PtyReaderLifecycle};
 use crate::terminal::{InitialExecutionHost, TerminalSession};
@@ -173,27 +176,48 @@ where
             None,
         ),
         PtyBackend::Daemon { endpoint, adopt } => {
-            let system = match adopt {
-                Some(session_key) => {
-                    crate::pty_daemon::DaemonPtySystem::adopt(endpoint.clone(), session_key.clone())
+            // Adoption is claimed atomically by the daemon and may be
+            // refused (another client won the race, or the session started
+            // terminating); a refused adoption starts a new child instead.
+            let adopted = adopt.as_ref().and_then(|session_key| {
+                let system =
+                    crate::pty_daemon::DaemonPtySystem::adopt(endpoint.clone(), session_key.clone());
+                match open_and_spawn(&system, size, cmd.clone()) {
+                    Ok(opened) => system.adopted_metadata().map(|metadata| (opened, metadata)),
+                    Err(error) => {
+                        tracing::warn!(terminal_id = %session.id, %error, "PTY daemon adoption refused; starting a new session");
+                        None
+                    }
                 }
-                None => crate::pty_daemon::DaemonPtySystem::spawn(
-                    endpoint.clone(),
-                    crate::pty_daemon::session_key(&session.id, terminal_generation),
-                    session.id.clone(),
-                    daemon_session_metadata(session),
-                ),
+            });
+            let (opened, metadata) = match adopted {
+                Some((opened, metadata)) => (opened, Some(metadata)),
+                None => {
+                    let system = crate::pty_daemon::DaemonPtySystem::spawn(
+                        endpoint.clone(),
+                        crate::pty_daemon::session_key(&session.id, terminal_generation),
+                        session.id.clone(),
+                        daemon_session_metadata(session, is_wsl),
+                    );
+                    (open_and_spawn(&system, size, cmd)?, None)
+                }
             };
-            let handle = spawn_command_on(
-                &system,
-                size,
-                cmd,
+            // An adopted child keeps the WSL domain it was started in.
+            let wsl_backed = metadata
+                .as_ref()
+                .and_then(|metadata| metadata.get(PTY_DAEMON_METADATA_WSL_BACKED))
+                .map_or(is_wsl, |value| value == "true");
+            let handle = start_spawned(
+                opened,
                 terminal_generation,
-                options(ChildKillOwner::Backend),
+                SpawnOptions {
+                    wsl_backed,
+                    kill_owner: ChildKillOwner::Backend,
+                },
                 on_output,
                 PtyLifecycleHooks::default(),
             )?;
-            (handle, system.adopted_metadata())
+            (handle, metadata)
         }
     };
 
@@ -210,11 +234,24 @@ where
 /// GUI state a later GUI needs to keep serving a child it adopts. The agent
 /// hook token is baked into the child's environment, so hooks from an adopted
 /// shell only authenticate if the new GUI reuses it.
-fn daemon_session_metadata(session: &TerminalSession) -> BTreeMap<String, String> {
-    BTreeMap::from([(
-        PTY_DAEMON_METADATA_AGENT_HOOK_TOKEN.to_owned(),
-        session.agent_hook_token.clone(),
-    )])
+fn daemon_session_metadata(
+    session: &TerminalSession,
+    wsl_backed: bool,
+) -> BTreeMap<String, String> {
+    BTreeMap::from([
+        (
+            PTY_DAEMON_METADATA_AGENT_HOOK_TOKEN.to_owned(),
+            session.agent_hook_token.clone(),
+        ),
+        (
+            PTY_DAEMON_METADATA_PROFILE.to_owned(),
+            session.config.profile.clone(),
+        ),
+        (
+            PTY_DAEMON_METADATA_WSL_BACKED.to_owned(),
+            wsl_backed.to_string(),
+        ),
+    ])
 }
 
 /// Who may kill the direct child's process tree by PID.
@@ -261,14 +298,46 @@ pub(crate) fn spawn_command_on<F>(
 where
     F: Fn(Vec<u8>) -> PtyOutputControl + Send + 'static,
 {
+    let spawned = open_and_spawn(pty_system, size, cmd)?;
+    start_spawned(spawned, terminal_generation, options, on_output, hooks)
+}
+
+/// A child running in a freshly opened PTY whose reader is not started yet.
+pub(crate) struct OpenedPty {
+    pair: PtyPair,
+    child: Box<dyn Child + Send + Sync>,
+}
+
+/// First half of [`spawn_command_on`]: open the PTY and start the child.
+/// Nothing consumes the output callback yet, so a caller can still try
+/// another PTY system when this fails.
+pub(crate) fn open_and_spawn(
+    pty_system: &dyn PtySystem,
+    size: PtySize,
+    cmd: CommandBuilder,
+) -> Result<OpenedPty, String> {
     let pair = pty_system
         .openpty(size)
         .map_err(|e| format!("Failed to open PTY: {e}"))?;
-
     let child = pair
         .slave
         .spawn_command(cmd)
         .map_err(|e| format!("Failed to spawn command: {e}"))?;
+    Ok(OpenedPty { pair, child })
+}
+
+/// Second half of [`spawn_command_on`]: wait thread, writer, reader.
+pub(crate) fn start_spawned<F>(
+    opened: OpenedPty,
+    terminal_generation: u64,
+    options: SpawnOptions,
+    on_output: F,
+    hooks: PtyLifecycleHooks,
+) -> Result<PtyHandle, String>
+where
+    F: Fn(Vec<u8>) -> PtyOutputControl + Send + 'static,
+{
+    let OpenedPty { pair, child } = opened;
 
     let child_pid = child.process_id();
     let child_killer = child.clone_killer();

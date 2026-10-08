@@ -25,7 +25,8 @@ use super::wire::{
 };
 use crate::constants::{
     PTY_DAEMON_ACCEPT_RETRY_MS, PTY_DAEMON_HANDSHAKE_TIMEOUT_MS, PTY_DAEMON_HELLO_MAX_BYTES,
-    PTY_DAEMON_IDLE_POLL_MS, PTY_DAEMON_MAX_CONNECTIONS, PTY_DAEMON_WAKE_CONNECT_TIMEOUT_MS,
+    PTY_DAEMON_IDLE_POLL_MS, PTY_DAEMON_MAX_CONNECTIONS, PTY_DAEMON_SHUTDOWN_TIMEOUT_MS,
+    PTY_DAEMON_WAKE_CONNECT_TIMEOUT_MS,
 };
 use crate::lock_ext::MutexExt;
 use crate::pty::{spawn_command_on, ChildKillOwner, PtyLifecycleHooks, SpawnOptions};
@@ -40,7 +41,11 @@ pub struct DaemonServer {
     sessions: Mutex<HashMap<String, Arc<Session>>>,
     connections: AtomicUsize,
     next_connection_id: AtomicU64,
+    next_session_seq: AtomicU64,
     shutdown: AtomicBool,
+    /// Set by a requested shutdown: no new session is admitted while the
+    /// existing ones are torn down (the accept loop keeps serving them).
+    draining: AtomicBool,
     /// Serializes admitting a connection with the idle-shutdown decision, so
     /// a connection accepted just as the daemon goes idle is either counted
     /// before the decision or refused after it — never served by a daemon
@@ -66,7 +71,9 @@ impl DaemonServer {
             sessions: Mutex::new(HashMap::new()),
             connections: AtomicUsize::new(0),
             next_connection_id: AtomicU64::new(1),
+            next_session_seq: AtomicU64::new(1),
             shutdown: AtomicBool::new(false),
+            draining: AtomicBool::new(false),
             admission: Mutex::new(()),
             endpoint: OnceLock::new(),
         })
@@ -132,21 +139,26 @@ impl DaemonServer {
         );
     }
 
-    /// Terminate every session concurrently and wait for each teardown.
+    /// Refuse new sessions, terminate every existing one (including one
+    /// still being spawned, through its pending request) and wait until they
+    /// are gone or the bound expires.
+    pub fn shut_down_sessions(&self) {
+        self.draining.store(true, Ordering::Release);
+        self.terminate_all();
+        let deadline = Instant::now() + Duration::from_millis(PTY_DAEMON_SHUTDOWN_TIMEOUT_MS);
+        while self.session_count() > 0 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(PTY_DAEMON_IDLE_POLL_MS));
+        }
+    }
+
+    /// Request termination of every session; teardowns run concurrently.
     pub fn terminate_all(&self) {
         let sessions: Vec<_> = match self.sessions.lock_or_err() {
             Ok(sessions) => sessions.values().cloned().collect(),
             Err(_) => return,
         };
-        let teardowns: Vec<_> = sessions
-            .into_iter()
-            .filter_map(|session| session.handle.get().cloned())
-            .map(|handle| thread::spawn(move || handle.terminate()))
-            .collect();
-        for teardown in teardowns {
-            if let Ok(Err(error)) = teardown.join() {
-                tracing::warn!(%error, "PTY daemon session terminate failed during shutdown");
-            }
+        for session in sessions {
+            session.terminate();
         }
     }
 
@@ -223,25 +235,44 @@ impl DaemonServer {
                         Err(error) => writer.error(&error),
                     }
                 }
-                Frame::Control(ClientMessage::Attach { session_id, replay }) if bound.is_none() => {
-                    match self.attach_session(&writer, connection_id, &session_id, replay) {
+                Frame::Control(ClientMessage::Attach {
+                    session_id,
+                    replay,
+                    take_over,
+                }) if bound.is_none() => {
+                    match self.attach_session(
+                        &writer,
+                        connection_id,
+                        &session_id,
+                        replay,
+                        take_over,
+                    ) {
                         Ok(session) => bound = Some(session),
                         Err(error) => writer.error(&error),
                     }
                 }
-                Frame::Control(ClientMessage::TerminateSession { session_id }) => {
+                Frame::Control(ClientMessage::TerminateSession {
+                    session_id,
+                    attach_epoch,
+                }) => {
                     let session = self.find_session(&session_id);
-                    if let Some(session) = session.as_ref() {
+                    let superseded = session
+                        .as_ref()
+                        .is_some_and(|session| !session.owned_by_epoch(attach_epoch));
+                    if let Some(session) = session.as_ref().filter(|_| !superseded) {
                         session.terminate();
                     }
-                    let found = session.is_some();
-                    if writer.send(&DaemonMessage::Terminating { found }).is_err() {
+                    let reply = DaemonMessage::Terminating {
+                        found: session.is_some(),
+                        superseded,
+                    };
+                    if writer.send(&reply).is_err() {
                         break;
                     }
                 }
                 Frame::Control(ClientMessage::Shutdown) => {
                     tracing::info!("PTY daemon shutdown requested");
-                    self.terminate_all();
+                    self.shut_down_sessions();
                     if let Some(endpoint) = self.endpoint.get() {
                         self.request_shutdown(endpoint);
                     }
@@ -316,9 +347,19 @@ impl DaemonServer {
             metadata,
         } = request;
         let command = command.into_builder()?;
-        let session = Arc::new(Session::new(session_id.clone(), terminal_id, metadata));
+        let created_seq = self.next_session_seq.fetch_add(1, Ordering::Relaxed);
+        let session = Arc::new(Session::new(
+            session_id.clone(),
+            terminal_id,
+            metadata,
+            created_seq,
+        ));
         {
             let mut sessions = self.sessions.lock_or_err()?;
+            // A shutting-down daemon admits no new work.
+            if self.draining.load(Ordering::Acquire) {
+                return Err("PTY daemon is shutting down".into());
+            }
             if sessions.contains_key(&session_id) {
                 return Err(format!("PTY daemon session '{session_id}' already exists"));
             }
@@ -378,7 +419,14 @@ impl DaemonServer {
         if session.terminate_requested() {
             session.terminate();
         }
-        if writer.send(&DaemonMessage::Spawned { child_pid }).is_ok() {
+        let attach_epoch = session.next_attach_epoch();
+        if writer
+            .send(&DaemonMessage::Spawned {
+                child_pid,
+                attach_epoch,
+            })
+            .is_ok()
+        {
             let link = ClientLink {
                 connection_id,
                 writer: Arc::clone(writer),
@@ -396,6 +444,7 @@ impl DaemonServer {
         connection_id: u64,
         session_id: &str,
         replay: bool,
+        take_over: bool,
     ) -> Result<Arc<Session>, String> {
         let session = self
             .sessions
@@ -403,7 +452,7 @@ impl DaemonServer {
             .get(session_id)
             .cloned()
             .ok_or_else(|| format!("PTY daemon session '{session_id}' does not exist"))?;
-        session.attach(writer, connection_id, replay)?;
+        session.attach(writer, connection_id, replay, take_over)?;
         Ok(session)
     }
 

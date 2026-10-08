@@ -307,6 +307,11 @@ pub const PTY_DAEMON_CLIENT_QUEUE_BYTES: usize = 64 * 1024;
 /// Daemon session metadata key carrying the agent hook token baked into the
 /// child's environment, so an adopting GUI accepts that child's hooks.
 pub const PTY_DAEMON_METADATA_AGENT_HOOK_TOKEN: &str = "agentHookToken";
+/// Metadata keys for the profile a session was started with and whether its
+/// child is a WSL relay, so adoption matches the profile and restores the
+/// WSL attribution domain of the running child.
+pub const PTY_DAEMON_METADATA_PROFILE: &str = "profile";
+pub const PTY_DAEMON_METADATA_WSL_BACKED: &str = "wslBacked";
 /// Largest frame accepted before a connection has authenticated.
 pub const PTY_DAEMON_HELLO_MAX_BYTES: usize = 4 * 1024;
 /// Concurrent daemon connections (one per terminal plus short control
@@ -316,6 +321,10 @@ pub const PTY_DAEMON_MAX_CONNECTIONS: usize = 256;
 pub const PTY_DAEMON_HANDSHAKE_TIMEOUT_MS: u64 = 5_000;
 /// Connect + acknowledge budget for one out-of-band terminate request.
 pub const PTY_DAEMON_TERMINATE_REQUEST_TIMEOUT_MS: u64 = 1_000;
+/// Attempts (and the pause between them) for a terminate request that
+/// nothing can report a failure for (dropping a PTY master).
+pub const PTY_DAEMON_TERMINATE_ATTEMPTS: u32 = 3;
+pub const PTY_DAEMON_TERMINATE_RETRY_MS: u64 = 200;
 /// Overall budget for asking the daemon to end every terminal at app exit.
 pub const PTY_DAEMON_EXIT_TERMINATE_TIMEOUT_MS: u64 = 2_000;
 /// How long an installing GUI waits for the daemon to end its sessions and

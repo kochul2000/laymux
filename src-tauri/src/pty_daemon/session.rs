@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, VecDeque};
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 
@@ -61,6 +61,11 @@ pub(super) struct Session {
     pub(super) terminal_id: String,
     /// Opaque GUI state returned to an adopting client.
     pub(super) metadata: BTreeMap<String, String>,
+    /// Daemon-wide creation order; picks the newest adoption candidate.
+    pub(super) created_seq: u64,
+    /// Bumped by every bind (spawn or attach). A by-id terminate carrying an
+    /// older epoch comes from a client that no longer owns the session.
+    attach_epoch: AtomicU64,
     pub(super) handle: OnceLock<PtyHandle>,
     pub(super) sink: Mutex<Sink>,
     /// Mirror of `sink.client` kept outside the sink lock. The PTY reader can
@@ -97,11 +102,18 @@ impl Sink {
 }
 
 impl Session {
-    pub(super) fn new(id: String, terminal_id: String, metadata: BTreeMap<String, String>) -> Self {
+    pub(super) fn new(
+        id: String,
+        terminal_id: String,
+        metadata: BTreeMap<String, String>,
+        created_seq: u64,
+    ) -> Self {
         Self {
             id,
             terminal_id,
             metadata,
+            created_seq,
+            attach_epoch: AtomicU64::new(0),
             handle: OnceLock::new(),
             sink: Mutex::new(Sink::default()),
             attached: Mutex::new(None),
@@ -165,7 +177,8 @@ impl Session {
         writer: &Arc<ConnWriter>,
         connection_id: u64,
         replay: bool,
-    ) -> Result<(), String> {
+        take_over: bool,
+    ) -> Result<u64, String> {
         let link = ClientLink {
             connection_id,
             writer: Arc::clone(writer),
@@ -174,8 +187,16 @@ impl Session {
         // the sink. A reader blocked writing to a stalled client releases the
         // sink only once that socket is shut down, and if this client stalls
         // during the replay below, the next attach can evict it the same way.
-        if let Some(previous) = self.attached.lock_or_err()?.replace(link.clone()) {
-            previous.writer.close();
+        {
+            let mut attached = self.attached.lock_or_err()?;
+            // Adoption is decided and claimed under this lock, so of two
+            // adopters (or an adopter racing a terminate) exactly one wins.
+            if !take_over && (attached.is_some() || self.terminate_requested()) {
+                return Err("PTY daemon session is attached or terminating".into());
+            }
+            if let Some(previous) = attached.replace(link.clone()) {
+                previous.writer.close();
+            }
         }
         let mut sink = self.sink.lock_or_err()?;
         if let Some(previous) = sink.client.take() {
@@ -185,6 +206,7 @@ impl Session {
             return Err("PTY daemon attach was superseded by a newer attach".into());
         }
         let child_pid = self.handle.get().and_then(PtyHandle::child_pid);
+        let attach_epoch = self.next_attach_epoch();
         // Without replay the retained bytes are discarded instead of handed
         // to a client that would parse them as live output (and answer the
         // terminal queries inside them again).
@@ -197,6 +219,7 @@ impl Session {
         let delivered = writer
             .send(&DaemonMessage::Attached {
                 child_pid,
+                attach_epoch,
                 dropped_bytes: sink.dropped_bytes,
                 metadata: self.metadata.clone(),
             })
@@ -223,7 +246,17 @@ impl Session {
         sink.backlog.clear();
         sink.dropped_bytes = 0;
         sink.client = Some(link);
-        Ok(())
+        Ok(attach_epoch)
+    }
+
+    pub(super) fn next_attach_epoch(&self) -> u64 {
+        self.attach_epoch.fetch_add(1, Ordering::AcqRel) + 1
+    }
+
+    /// Whether a by-id terminate from a client that attached with
+    /// `attach_epoch` may still end this session.
+    pub(super) fn owned_by_epoch(&self, attach_epoch: Option<u64>) -> bool {
+        attach_epoch.is_none_or(|epoch| epoch == self.attach_epoch.load(Ordering::Acquire))
     }
 
     fn is_attached(&self, connection_id: u64) -> bool {
@@ -298,6 +331,8 @@ impl Session {
         Some(SessionInfo {
             session_id: self.id.clone(),
             terminal_id: self.terminal_id.clone(),
+            created_seq: self.created_seq,
+            metadata: self.metadata.clone(),
             child_pid: self.handle.get().and_then(PtyHandle::child_pid),
             attached,
             exited: self.exited.load(Ordering::Acquire),

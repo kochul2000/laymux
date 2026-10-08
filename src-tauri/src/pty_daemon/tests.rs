@@ -216,7 +216,9 @@ fn raw_spawn(
     )
     .unwrap();
     match read_frame::<_, DaemonMessage>(&mut reader).unwrap() {
-        Some(Frame::Control(DaemonMessage::Spawned { child_pid })) => assert!(child_pid.is_some()),
+        Some(Frame::Control(DaemonMessage::Spawned { child_pid, .. })) => {
+            assert!(child_pid.is_some())
+        }
         other => panic!("unexpected spawn reply {other:?}"),
     }
     (writer, reader)
@@ -231,6 +233,7 @@ fn raw_attach(endpoint: &DaemonEndpoint, session_id: &str) -> (Stream, BufReader
         &ClientMessage::Attach {
             session_id: session_id.into(),
             replay: true,
+            take_over: true,
         },
     )
     .unwrap();
@@ -499,9 +502,9 @@ fn a_stalled_client_does_not_block_listing_or_a_takeover_attach() {
 fn terminate_by_session_id_works_from_a_fresh_connection() {
     let daemon = TestDaemon::start();
     let (_writer, mut reader) = raw_spawn(&daemon.endpoint, "pane-h#1", sleeper());
-    super::client::terminate_by_id(&daemon.endpoint, "pane-h#1").unwrap();
+    super::client::terminate_by_id(&daemon.endpoint, "pane-h#1", None).unwrap();
     // An unknown session already satisfies the request.
-    super::client::terminate_by_id(&daemon.endpoint, "no-such-pane#1").unwrap();
+    super::client::terminate_by_id(&daemon.endpoint, "no-such-pane#1", None).unwrap();
     read_until(&mut reader, |_, message| {
         matches!(message, Some(DaemonMessage::Exit { .. }))
     });
@@ -622,7 +625,7 @@ fn adoption_continues_the_same_child_and_returns_the_spawners_metadata() {
     )
     .unwrap();
     let original_pid = match read_frame::<_, DaemonMessage>(&mut reader).unwrap() {
-        Some(Frame::Control(DaemonMessage::Spawned { child_pid })) => child_pid,
+        Some(Frame::Control(DaemonMessage::Spawned { child_pid, .. })) => child_pid,
         other => panic!("unexpected spawn reply {other:?}"),
     };
     // The spawning GUI disappears.
@@ -682,6 +685,7 @@ fn attach_without_replay_discards_detached_output() {
         &ClientMessage::Attach {
             session_id: "pane-l#1".into(),
             replay: false,
+            take_over: true,
         },
     )
     .unwrap();
@@ -720,5 +724,91 @@ fn shutdown_ends_every_session_and_stops_the_daemon() {
         std::thread::sleep(Duration::from_millis(20));
     }
     thread.join().unwrap();
+    daemon.wait_for_sessions(0);
+}
+
+#[test]
+fn an_adopting_attach_is_refused_while_another_client_holds_the_session() {
+    let daemon = TestDaemon::start();
+    let (mut writer, mut reader) = raw_spawn(&daemon.endpoint, "pane-o#1", sleeper());
+    let (mut adopter, mut adopter_reader) = connect_authenticated(&daemon.endpoint).unwrap();
+    adopter_reader
+        .get_ref()
+        .set_read_timeout(Some(TIMEOUT))
+        .unwrap();
+    write_control(
+        &mut adopter,
+        &ClientMessage::Attach {
+            session_id: "pane-o#1".into(),
+            replay: false,
+            take_over: false,
+        },
+    )
+    .unwrap();
+    match read_frame::<_, DaemonMessage>(&mut adopter_reader).unwrap() {
+        Some(Frame::Control(DaemonMessage::Error { .. })) => {}
+        other => panic!("adoption of a held session must be refused, got {other:?}"),
+    }
+    assert!(list_sessions(&daemon.endpoint).unwrap()[0].attached);
+
+    write_control(&mut writer, &ClientMessage::Terminate).unwrap();
+    read_until(&mut reader, |_, message| {
+        matches!(message, Some(DaemonMessage::Exit { .. }))
+    });
+    daemon.wait_for_sessions(0);
+}
+
+#[test]
+fn a_terminate_from_the_previous_owner_cannot_end_an_adopted_session() {
+    let daemon = TestDaemon::start();
+    let (writer, mut reader) = connect_authenticated(&daemon.endpoint).unwrap();
+    let mut writer = writer;
+    write_control(
+        &mut writer,
+        &ClientMessage::Spawn {
+            session_id: "pane-p#1".into(),
+            terminal_id: "pane-p".into(),
+            rows: 24,
+            cols: 80,
+            command: WireCommand::from_builder(&sleeper()).unwrap(),
+            metadata: BTreeMap::new(),
+        },
+    )
+    .unwrap();
+    let first_epoch = match read_frame::<_, DaemonMessage>(&mut reader).unwrap() {
+        Some(Frame::Control(DaemonMessage::Spawned { attach_epoch, .. })) => attach_epoch,
+        other => panic!("unexpected spawn reply {other:?}"),
+    };
+    drop(writer);
+    drop(reader);
+    wait_detached(&daemon.endpoint, "pane-p#1");
+
+    let (mut adopter, mut adopter_reader) = connect_authenticated(&daemon.endpoint).unwrap();
+    adopter_reader
+        .get_ref()
+        .set_read_timeout(Some(TIMEOUT))
+        .unwrap();
+    write_control(
+        &mut adopter,
+        &ClientMessage::Attach {
+            session_id: "pane-p#1".into(),
+            replay: false,
+            take_over: false,
+        },
+    )
+    .unwrap();
+    let adopted_epoch = match read_frame::<_, DaemonMessage>(&mut adopter_reader).unwrap() {
+        Some(Frame::Control(DaemonMessage::Attached { attach_epoch, .. })) => attach_epoch,
+        other => panic!("unexpected attach reply {other:?}"),
+    };
+    assert!(adopted_epoch > first_epoch);
+
+    // The old owner's late request is acknowledged but leaves the work alone.
+    super::client::terminate_by_id(&daemon.endpoint, "pane-p#1", Some(first_epoch)).unwrap();
+    std::thread::sleep(Duration::from_millis(500));
+    let session = list_sessions(&daemon.endpoint).unwrap().remove(0);
+    assert!(!session.terminating && !session.exited);
+
+    super::client::terminate_by_id(&daemon.endpoint, "pane-p#1", Some(adopted_epoch)).unwrap();
     daemon.wait_for_sessions(0);
 }

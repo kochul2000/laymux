@@ -335,12 +335,20 @@ pub async fn create_terminal_session(
     // Resolve the PTY owner before reserving anything, so an unreachable
     // daemon fails this create without a generation to roll back. Starting a
     // daemon may block briefly, so keep it off the async executor.
+    // Only the first create of an id in this GUI process may adopt: later
+    // creates are restarts, profile changes or remounts that want a fresh
+    // child, never a session this GUI already let go of.
+    let allow_adopt = state
+        .pty_daemon_adoption_seen
+        .lock_or_err()?
+        .insert(id.clone());
     let backend_terminal_id = id.clone();
+    let backend_profile = config.profile.clone();
     let backend = tokio::task::spawn_blocking(move || {
-        crate::pty_daemon::terminal_backend(&backend_terminal_id)
+        crate::pty_daemon::terminal_backend(&backend_terminal_id, &backend_profile, allow_adopt)
     })
     .await
-    .map_err(|error| format!("PTY backend selection panicked: {error}"))??;
+    .map_err(|error| format!("PTY backend selection panicked: {error}"))?;
     // Adopting a session an earlier GUI left running continues that child:
     // no resume command runs and no startup-only guard applies (ADR-0301).
     let adopting = backend.adopts();

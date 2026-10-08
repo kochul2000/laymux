@@ -981,7 +981,7 @@ GUI proxy(`pty_daemon/client.rs`)는 `PtySystem`·`MasterPty`·`Child`·`Interru
 | 앱 정상 종료 | `RunEvent::Exit` → `AppState::terminate_daemon_sessions_on_exit()`가 모든 데몬 터미널의 종료를 병렬로 요청하고, 전체를 2초 deadline으로 묶는다(best-effort) |
 | 자식 스스로 종료 | 데몬이 입력·master를 닫아 남은 출력과 EOF를 받는다(ConPTY는 master를 닫아야 EOF). EOF·exit를 모두 관측하면 세션을 제거하고, attach된 client에는 `Eof`·`Exit`를 보낸다 |
 | `Attach` | 기존 client를 닫고 대체한다. `replay`가 켜져 있으면 새 client는 `Attached` → backlog → live 순서로 받는다. 꺼져 있으면 backlog를 `droppedBytes`로 버린다 |
-| 업데이트 설치 | guard가 GUI PTY를 종료한 뒤 `shutdown` → 데몬이 모든 세션을 종료하고 끝난다. instance lock이 풀릴 때까지 최대 5초 기다린다 |
+| 업데이트 설치 | guard가 GUI PTY를 종료한 뒤 `shutdown`을 보낸다. 데몬은 새 세션을 거절하고, spawn 중인 세션까지 모두 종료한 뒤 끝난다. instance lock이 풀릴 때까지 최대 5초 기다린다. 응답하지 않는 데몬은 discovery PID와 command line(`--pty-daemon <dir>`)을 확인한 뒤에만 강제 종료한다 |
 
 GUI는 데몬 자식의 PID를 직접 kill하지 않는다(`ChildKillOwner::Backend`). handle을 가진 데몬이 tree kill을 수행한다. 데몬 연결이 끊기면 GUI reader는 `Failure`로 끝나고 child는 종료로 처리된다. 데몬 안의 작업은 계속 실행되지만, 그 터미널을 teardown하거나 앱을 종료하면 `terminateSession`으로 정리된다.
 
@@ -997,12 +997,13 @@ Windows endpoint는 loopback TCP다. frame은 `u32 LE 길이 | kind(0=JSON contr
 - client → daemon: `spawn`(terminal id·metadata 포함)·`attach`(`replay`)·`list`·`resize`·`terminate`·`terminateSession`(아무 연결에서나 id로 종료한다. GUI의 모든 종료 요청이 이 경로를 쓴다)·`shutdown`
 - daemon → client: `helloOk`·`spawned`·`attached`(metadata 포함)·`sessions`(terminal id·attached·exited·terminating)·`terminating`·`eof`·`exit`·`error`
 
-**기동:** GUI는 Linux에서 `headless_command`와 독립 process group으로 데몬을 띄운다. Windows에서는 먼저 실행 파일과 ConPTY 파일을 `<데몬 디렉터리>/runtime/<크기-수정시각>/`에 복사하고, 그 사본을 handle 상속을 끈 `CreateProcessW`(`CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`, 가능하면 job breakaway)로 띄운다. 그래서 업데이트와 dev 재빌드가 원본을 교체할 수 있다. 실행 파일을 지울 수 있는 다른 사본은 그때 삭제한다. 데몬은 세션과 연결이 모두 없는 상태가 60초 지속되면 종료한다. 데몬에 연결할 수 없으면 터미널 생성은 실패하며 local로 fallback하지 않는다.
+**기동:** GUI는 Linux에서 `headless_command`와 독립 process group으로 데몬을 띄운다. Windows에서는 먼저 실행 파일과 ConPTY 파일을 `<데몬 디렉터리>/runtime/<크기-수정시각>/`에 복사하고, 그 사본을 handle 상속을 끈 `CreateProcessW`(`CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`, 가능하면 job breakaway)로 띄운다. 그래서 업데이트와 dev 재빌드가 원본을 교체할 수 있다. ConPTY 파일이 없으면 staging을 실패시킨다. 데몬 실행 파일을 지울 수 있는(실행 중이 아닌) 다른 사본은 그때 삭제한다. 데몬은 세션과 연결이 모두 없는 상태가 60초 지속되면 종료한다. 데몬을 띄우거나 연결할 수 없으면 그 터미널은 경고를 남기고 in-process PTY로 만든다.
 
-**재결합:** 터미널 생성 시 `list`에서 같은 terminal id이고, attach되지 않았고, 종료되지도 종료 요청을 받지도 않은 세션을 찾으면 그 세션을 adopt한다. 이때 다음과 같이 처리한다.
+**재결합:** GUI 프로세스 안에서 그 terminal id를 처음 만들 때만 시도한다(`AppState.pty_daemon_adoption_seen`). 이후의 생성은 재시작·프로필 변경·remount이므로 항상 새 자식을 띄운다. `list`(5초 deadline)에서 같은 terminal id이고, attach되지 않았고, 종료되지도 종료 요청을 받지도 않은 후보를 찾는다. 생성 순서상 가장 최근 후보가 같은 프로필로 시작했으면 adopt하고, 나머지 후보는 종료한다. adopt attach(`takeOver: false`)는 데몬이 원자적으로 판정해 이미 attach됐거나 종료 중이면 거절하며, 이때 GUI는 새 세션을 만든다. 이때 다음과 같이 처리한다.
 
 - GUI가 만든 명령·resume 복원 요청·Codex 시작 guard는 적용하지 않는다.
-- spawn 때 metadata로 맡긴 agent hook token을 다시 써서, 살아남은 자식의 훅을 계속 인증한다.
+- spawn 때 metadata로 맡긴 agent hook token을 다시 써서 살아남은 자식의 훅을 계속 인증하고, 맡긴 WSL relay 여부로 귀속 도메인을 복원한다.
+- 세션은 bind마다 attach epoch를 올린다. GUI의 종료 요청은 자신의 epoch를 싣고, 그 뒤 다른 client가 bind했으면 데몬은 `superseded`로 답하고 세션을 남긴다.
 - backlog replay 없이 attach한 뒤 GUI grid 크기로 resize한다. 이전 화면은 복원되지 않고 다음 출력부터 그려진다.
 - CWD는 요청된 시작 디렉터리로 시작해 다음 OSC 7을 따른다.
 

@@ -12,7 +12,6 @@ use super::discovery::{read_discovery, DaemonPaths};
 use super::wire::PROTOCOL_VERSION;
 use super::wire::{write_control, ClientMessage};
 use super::DaemonEndpoint;
-#[cfg(unix)]
 use crate::constants::PTY_DAEMON_CLI_FLAG;
 use crate::constants::{PTY_DAEMON_LAUNCH_POLL_MS, PTY_DAEMON_LAUNCH_TIMEOUT_MS};
 use crate::lock_ext::MutexExt;
@@ -53,23 +52,74 @@ pub fn shutdown_running(paths: &DaemonPaths, timeout: Duration) -> Result<bool, 
     if !daemon_instance_alive(paths) {
         return Ok(false);
     }
-    if let Some(endpoint) = probe(paths)? {
-        let (mut writer, _reader) = connect_authenticated(&endpoint)
-            .map_err(|error| format!("cannot reach PTY daemon to shut it down: {error}"))?;
-        write_control(&mut writer, &ClientMessage::Shutdown)
-            .map_err(|error| format!("cannot request PTY daemon shutdown: {error}"))?;
+    // A daemon that cannot be reached (or speaks another protocol) gets no
+    // request; it is handled by the forced stop below.
+    let requested = match probe(paths) {
+        Ok(Some(endpoint)) => connect_authenticated(&endpoint)
+            .and_then(|(mut writer, _reader)| write_control(&mut writer, &ClientMessage::Shutdown))
+            .is_ok(),
+        _ => false,
+    };
+    let half = timeout / 2;
+    if requested && wait_released(paths, timeout - half) {
+        return Ok(true);
     }
-    let deadline = Instant::now() + timeout;
+    // Updating with a daemon still mapping the executable would fail, so a
+    // daemon that ignored the request is stopped — but only the process that
+    // discovery names *and* whose command line proves it is this directory's
+    // daemon, never a PID that was merely reused.
+    force_stop(paths)?;
+    if wait_released(paths, half) {
+        Ok(true)
+    } else {
+        Err(format!(
+            "PTY daemon did not exit within {} ms",
+            timeout.as_millis()
+        ))
+    }
+}
+
+fn wait_released(paths: &DaemonPaths, within: Duration) -> bool {
+    let deadline = Instant::now() + within;
     while daemon_instance_alive(paths) {
         if Instant::now() >= deadline {
-            return Err(format!(
-                "PTY daemon did not exit within {} ms",
-                timeout.as_millis()
-            ));
+            return false;
         }
         thread::sleep(Duration::from_millis(PTY_DAEMON_LAUNCH_POLL_MS));
     }
-    Ok(true)
+    true
+}
+
+fn force_stop(paths: &DaemonPaths) -> Result<(), String> {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+
+    let discovery = read_discovery(paths)
+        .ok_or_else(|| "PTY daemon holds its lock but published no discovery".to_string())?;
+    let pid = Pid::from_u32(discovery.pid);
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        true,
+        ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always),
+    );
+    let process = system
+        .process(pid)
+        .ok_or_else(|| format!("PTY daemon process {pid} is gone"))?;
+    let dir = paths.dir().as_os_str();
+    let cmd = process.cmd();
+    let is_daemon =
+        cmd.iter().any(|arg| arg == PTY_DAEMON_CLI_FLAG) && cmd.iter().any(|arg| arg == dir);
+    if !is_daemon {
+        return Err(format!(
+            "process {pid} named by PTY daemon discovery is not this directory's daemon"
+        ));
+    }
+    tracing::warn!(%pid, "PTY daemon did not shut down on request; stopping it");
+    if process.kill() {
+        Ok(())
+    } else {
+        Err(format!("failed to stop PTY daemon process {pid}"))
+    }
 }
 
 /// Find a live, authenticated daemon without starting one.

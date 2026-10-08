@@ -33,13 +33,18 @@ pub(super) fn stage(exe: &Path, daemon_dir: &Path) -> io::Result<PathBuf> {
         let _ = fs::remove_dir_all(&temp);
         fs::create_dir_all(&temp)?;
         fs::copy(exe, temp.join(name))?;
-        if let Some(source_dir) = exe.parent() {
-            for file in CONPTY_RUNTIME_FILES {
-                let source = source_dir.join(file);
-                if source.is_file() {
-                    fs::copy(&source, temp.join(file))?;
-                }
-            }
+        // The bundled ConPTY is mandatory (ADR-0067): a daemon without it
+        // would silently fall back to the in-box conhost.
+        let source_dir = exe
+            .parent()
+            .ok_or_else(|| io::Error::other("executable path has no directory"))?;
+        for file in CONPTY_RUNTIME_FILES {
+            fs::copy(source_dir.join(file), temp.join(file)).map_err(|error| {
+                io::Error::new(
+                    error.kind(),
+                    format!("missing ConPTY runtime file {file}: {error}"),
+                )
+            })?;
         }
         // Publish complete copies only. Losing a race to another launcher
         // that published the same key is fine: its copy is identical.
@@ -52,7 +57,7 @@ pub(super) fn stage(exe: &Path, daemon_dir: &Path) -> io::Result<PathBuf> {
             }
         }
     }
-    remove_unused_runtimes(&root, &key);
+    remove_unused_runtimes(&root, &key, name);
     Ok(staged)
 }
 
@@ -68,26 +73,26 @@ fn runtime_key(exe: &Path) -> io::Result<String> {
     Ok(format!("{:x}-{modified:x}", meta.len()))
 }
 
-/// A runtime copy is unused when its executable can be deleted: Windows keeps
-/// a running image locked. Only then is the rest of the copy removed, so a
-/// live daemon never loses the ConPTY files it still loads for new sessions.
-fn remove_unused_runtimes(root: &Path, keep: &str) {
+/// A runtime copy is unused when its daemon executable can be deleted:
+/// Windows keeps a running image locked. That image is deleted first, and
+/// only once it is gone is the rest of the copy removed, so a live daemon never
+/// loses the ConPTY files it still loads for new sessions.
+fn remove_unused_runtimes(root: &Path, keep: &str, daemon_image: &std::ffi::OsStr) {
     let Ok(entries) = fs::read_dir(root) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if entry.file_name().to_str() == Some(keep) || !path.is_dir() {
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        // Skip the copy in use, and another launcher's copy in progress.
+        if name == keep || name.ends_with(".tmp") || !path.is_dir() {
             continue;
         }
-        let images: Vec<PathBuf> = fs::read_dir(&path)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .map(|file| file.path())
-            .filter(|file| file.extension().is_some_and(|ext| ext == "exe"))
-            .collect();
-        if images.iter().all(|image| fs::remove_file(image).is_ok()) {
+        // Without its image there is no lock to prove the copy unused.
+        let image = path.join(daemon_image);
+        if image.is_file() && fs::remove_file(&image).is_ok() {
             let _ = fs::remove_dir_all(&path);
         }
     }
@@ -102,7 +107,16 @@ mod tests {
         let exe = dir.join("laymux.exe");
         fs::write(&exe, content).unwrap();
         fs::write(dir.join("conpty.dll"), b"conpty").unwrap();
+        fs::write(dir.join("OpenConsole.exe"), b"console").unwrap();
         exe
+    }
+
+    #[test]
+    fn staging_refuses_a_build_without_the_bundled_conpty() {
+        let temp = tempfile::tempdir().unwrap();
+        let exe = fake_build(&temp.path().join("build"), b"build");
+        fs::remove_file(temp.path().join("build").join("OpenConsole.exe")).unwrap();
+        assert!(stage(&exe, &temp.path().join("daemon")).is_err());
     }
 
     #[test]
