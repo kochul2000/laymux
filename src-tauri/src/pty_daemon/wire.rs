@@ -84,6 +84,11 @@ pub enum DaemonMessage {
     Exit {
         exit_code: u32,
     },
+    /// Reply to `TerminateSession`. `found` is false when no such session
+    /// exists any more, which also satisfies the request.
+    Terminating {
+        found: bool,
+    },
     Error {
         message: String,
     },

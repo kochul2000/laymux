@@ -13,14 +13,12 @@ use super::wire::PROTOCOL_VERSION;
 use super::DaemonEndpoint;
 #[cfg(unix)]
 use crate::constants::PTY_DAEMON_CLI_FLAG;
-use crate::constants::PTY_DAEMON_LAUNCH_TIMEOUT_MS;
+use crate::constants::{PTY_DAEMON_LAUNCH_POLL_MS, PTY_DAEMON_LAUNCH_TIMEOUT_MS};
 use crate::lock_ext::MutexExt;
 
 /// Serializes launches inside one GUI so parallel terminal creation starts at
 /// most one daemon. Across processes the daemon's own instance lock decides.
 static LAUNCH: Mutex<()> = Mutex::new(());
-
-const LAUNCH_POLL: Duration = Duration::from_millis(50);
 
 pub fn ensure_running(paths: &DaemonPaths) -> Result<DaemonEndpoint, String> {
     if let Some(endpoint) = probe(paths)? {
@@ -42,7 +40,7 @@ pub fn ensure_running(paths: &DaemonPaths) -> Result<DaemonEndpoint, String> {
                 paths.log_file().display()
             ));
         }
-        thread::sleep(LAUNCH_POLL);
+        thread::sleep(Duration::from_millis(PTY_DAEMON_LAUNCH_POLL_MS));
     }
 }
 
@@ -63,7 +61,7 @@ fn probe(paths: &DaemonPaths) -> Result<Option<DaemonEndpoint>, String> {
         token: discovery.token,
     };
     if discovery.protocol_version != PROTOCOL_VERSION {
-        if !daemon_answers(&endpoint) {
+        if !daemon_instance_alive(paths) {
             return Ok(None);
         }
         return Err(format!(
@@ -74,8 +72,19 @@ fn probe(paths: &DaemonPaths) -> Result<Option<DaemonEndpoint>, String> {
     Ok(connect_authenticated(&endpoint).ok().map(|_| endpoint))
 }
 
-fn daemon_answers(endpoint: &DaemonEndpoint) -> bool {
-    super::transport::connect(&endpoint.endpoint, Duration::from_millis(500)).is_ok()
+/// Whether some daemon process holds this directory's instance lock. Unlike
+/// a connect probe this cannot be fooled by another program reusing a stale
+/// endpoint, and the kernel releases the lock when a daemon dies.
+fn daemon_instance_alive(paths: &DaemonPaths) -> bool {
+    let Ok(lock) = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(paths.lock_file())
+    else {
+        return false;
+    };
+    matches!(lock.try_lock(), Err(std::fs::TryLockError::WouldBlock))
 }
 
 fn spawn_daemon_process(paths: &DaemonPaths) -> Result<(), String> {

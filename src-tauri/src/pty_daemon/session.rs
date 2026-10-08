@@ -67,6 +67,7 @@ pub(super) struct Session {
     pub(super) attached: Mutex<Option<ClientLink>>,
     exited: AtomicBool,
     pub(super) terminating: AtomicBool,
+    terminate_requested: AtomicBool,
 }
 
 #[derive(Default)]
@@ -101,6 +102,7 @@ impl Session {
             attached: Mutex::new(None),
             exited: AtomicBool::new(false),
             terminating: AtomicBool::new(false),
+            terminate_requested: AtomicBool::new(false),
         }
     }
 
@@ -158,27 +160,37 @@ impl Session {
         writer: &Arc<ConnWriter>,
         connection_id: u64,
     ) -> Result<(), String> {
-        // Evict the previous client before waiting for the sink: a reader
-        // blocked writing to a stalled client releases the sink only once
-        // that client's socket is shut down.
-        if let Some(previous) = self.attached.lock_or_err()?.take() {
+        let link = ClientLink {
+            connection_id,
+            writer: Arc::clone(writer),
+        };
+        // Evict the previous client and publish this one before waiting for
+        // the sink. A reader blocked writing to a stalled client releases the
+        // sink only once that socket is shut down, and if this client stalls
+        // during the replay below, the next attach can evict it the same way.
+        if let Some(previous) = self.attached.lock_or_err()?.replace(link.clone()) {
             previous.writer.close();
         }
         let mut sink = self.sink.lock_or_err()?;
         if let Some(previous) = sink.client.take() {
             previous.writer.close();
         }
+        if !self.is_attached(connection_id) {
+            return Err("PTY daemon attach was superseded by a newer attach".into());
+        }
         let child_pid = self.handle.get().and_then(PtyHandle::child_pid);
-        let backlog: Vec<u8> = sink.backlog.drain(..).collect();
-        let dropped_bytes = std::mem::take(&mut sink.dropped_bytes);
+        // Consume the backlog only once it was delivered, so a client that
+        // drops mid-replay leaves it for the next attach.
         let delivered = writer
             .send(&DaemonMessage::Attached {
                 child_pid,
-                dropped_bytes,
+                dropped_bytes: sink.dropped_bytes,
             })
             .and_then(|()| {
-                backlog
+                let (front, back) = sink.backlog.as_slices();
+                front
                     .chunks(PTY_READ_BUFFER_BYTES)
+                    .chain(back.chunks(PTY_READ_BUFFER_BYTES))
                     .try_for_each(|chunk| writer.send_data(chunk))
             })
             .and_then(|()| {
@@ -190,14 +202,22 @@ impl Session {
                 }
                 Ok(())
             });
-        delivered.map_err(|error| format!("PTY daemon attach delivery failed: {error}"))?;
-        let link = ClientLink {
-            connection_id,
-            writer: Arc::clone(writer),
-        };
-        sink.client = Some(link.clone());
-        *self.attached.lock_or_err()? = Some(link);
+        if let Err(error) = delivered {
+            self.forget_attached(connection_id);
+            return Err(format!("PTY daemon attach delivery failed: {error}"));
+        }
+        sink.backlog.clear();
+        sink.dropped_bytes = 0;
+        sink.client = Some(link);
         Ok(())
+    }
+
+    fn is_attached(&self, connection_id: u64) -> bool {
+        self.attached.lock_or_err().is_ok_and(|attached| {
+            attached
+                .as_ref()
+                .is_some_and(|link| link.connection_id == connection_id)
+        })
     }
 
     /// Forget the client only if it is still this connection; a newer attach
@@ -235,20 +255,26 @@ impl Session {
     }
 
     /// Idempotent; the blocking teardown runs off the connection thread so
-    /// the connection keeps draining frames meanwhile.
+    /// the connection keeps draining frames meanwhile. A request that arrives before the handle exists is remembered and
+    /// applied by the spawner right after it publishes the handle.
     pub(super) fn terminate(&self) {
-        if self.terminating.swap(true, Ordering::AcqRel) {
-            return;
-        }
+        self.terminate_requested.store(true, Ordering::Release);
         let Some(handle) = self.handle.get().cloned() else {
             return;
         };
+        if self.terminating.swap(true, Ordering::AcqRel) {
+            return;
+        }
         let session_id = self.id.clone();
         thread::spawn(move || {
             if let Err(error) = handle.terminate() {
                 tracing::warn!(%session_id, %error, "PTY daemon session terminate failed");
             }
         });
+    }
+
+    pub(super) fn terminate_requested(&self) -> bool {
+        self.terminate_requested.load(Ordering::Acquire)
     }
 
     /// Never takes the sink lock, so listing stays responsive while a reader

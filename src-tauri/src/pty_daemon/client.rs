@@ -11,7 +11,7 @@ use std::io::{self, BufReader, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::anyhow;
 use portable_pty::{
@@ -19,29 +19,33 @@ use portable_pty::{
     PtyReadEvent, PtySize, PtySystem, SlavePty,
 };
 
-use super::client_queue::{DaemonReader, DaemonReaderControl, Shared};
+use super::client_queue::{DaemonReader, DaemonReaderControl, Shared, CONNECTION_LOST_EXIT_CODE};
 use super::transport::{self, Stream};
 use super::wire::{
     read_frame, write_control, write_data, ClientMessage, DaemonMessage, Frame, SessionInfo,
     WireCommand, PROTOCOL_VERSION,
 };
 use super::DaemonEndpoint;
-use crate::constants::{PTY_DAEMON_HANDSHAKE_TIMEOUT_MS, PTY_WRITE_CHUNK_SIZE};
+use crate::constants::{
+    PTY_DAEMON_HANDSHAKE_TIMEOUT_MS, PTY_DAEMON_TERMINATE_REQUEST_TIMEOUT_MS, PTY_WRITE_CHUNK_SIZE,
+};
 use crate::lock_ext::MutexExt;
 use crate::pty::PTY_READ_BUFFER_BYTES;
-
-/// Exit code reported when the daemon connection is lost before the child's
-/// real exit status arrived. The child may still be running in the daemon.
-const CONNECTION_LOST_EXIT_CODE: u32 = 1;
-
-/// How long a terminate request waits for an in-flight frame write.
-const TERMINATE_SEND_WAIT: Duration = Duration::from_millis(250);
 
 /// Open an authenticated connection to the daemon.
 pub(crate) fn connect_authenticated(
     endpoint: &DaemonEndpoint,
 ) -> io::Result<(Stream, BufReader<Stream>)> {
-    let timeout = Duration::from_millis(PTY_DAEMON_HANDSHAKE_TIMEOUT_MS);
+    connect_authenticated_within(
+        endpoint,
+        Duration::from_millis(PTY_DAEMON_HANDSHAKE_TIMEOUT_MS),
+    )
+}
+
+fn connect_authenticated_within(
+    endpoint: &DaemonEndpoint,
+    timeout: Duration,
+) -> io::Result<(Stream, BufReader<Stream>)> {
     let stream = transport::connect(&endpoint.endpoint, timeout)?;
     stream.set_read_timeout(Some(timeout))?;
     stream.set_write_timeout(Some(timeout))?;
@@ -175,40 +179,36 @@ impl Connection {
         write_control(&mut *writer, message)
     }
 
-    /// Ask the daemon to end this session, synchronously and without ever
-    /// queueing behind an in-flight input write. Teardown and app exit call
-    /// this while the control worker may be stuck writing to a daemon that is
-    /// not reading, or after this connection already broke. In both cases
-    /// the request goes over a fresh connection by session id, so it is on a
-    /// socket before an exiting GUI returns.
-    fn send_terminate(&self) {
-        let deadline = Instant::now() + TERMINATE_SEND_WAIT;
-        loop {
-            if let Ok(mut writer) = self.writer.try_lock() {
-                if write_control(&mut *writer, &ClientMessage::Terminate).is_ok() {
-                    return;
-                }
-                break;
-            }
-            if Instant::now() >= deadline {
-                break;
-            }
-            thread::sleep(Duration::from_millis(5));
-        }
-        if let Err(error) = terminate_by_id(&self.endpoint, &self.session_id) {
-            tracing::warn!(session_id = %self.session_id, %error, "PTY daemon terminate request failed");
-        }
+    /// Ask the daemon to end this session and wait for its acknowledgement.
+    ///
+    /// Always uses a fresh connection addressed by session id: on the
+    /// terminal connection the request would queue behind input frames the
+    /// daemon may be blocked writing to a child, and that connection may
+    /// already be broken. The acknowledgement makes the request durable
+    /// before an exiting GUI closes the socket.
+    fn request_terminate(&self) -> io::Result<()> {
+        terminate_by_id(&self.endpoint, &self.session_id)
     }
 }
 
-fn terminate_by_id(endpoint: &DaemonEndpoint, session_id: &str) -> io::Result<()> {
-    let (mut writer, _reader) = connect_authenticated(endpoint)?;
+pub(crate) fn terminate_by_id(endpoint: &DaemonEndpoint, session_id: &str) -> io::Result<()> {
+    let timeout = Duration::from_millis(PTY_DAEMON_TERMINATE_REQUEST_TIMEOUT_MS);
+    let (mut writer, mut reader) = connect_authenticated_within(endpoint, timeout)?;
+    reader.get_ref().set_read_timeout(Some(timeout))?;
     write_control(
         &mut writer,
         &ClientMessage::TerminateSession {
             session_id: session_id.to_owned(),
         },
-    )
+    )?;
+    match read_frame::<_, DaemonMessage>(&mut reader)? {
+        // An unknown session has already ended: the request is satisfied.
+        Some(Frame::Control(DaemonMessage::Terminating { .. })) => Ok(()),
+        other => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unexpected PTY daemon terminate reply: {other:?}"),
+        )),
+    }
 }
 
 struct DaemonSlave {
@@ -368,7 +368,14 @@ impl Drop for DaemonMaster {
     /// intent explicitly. A GUI that dies without dropping sends nothing and
     /// the daemon keeps the session (detach).
     fn drop(&mut self) {
-        self.connection.send_terminate();
+        // `PtyHandle` drops the master while holding its master lock; the
+        // acknowledged request must not stall resize behind a network wait.
+        let connection = Arc::clone(&self.connection);
+        thread::spawn(move || {
+            if let Err(error) = connection.request_terminate() {
+                tracing::warn!(session_id = %connection.session_id, %error, "PTY daemon terminate request failed");
+            }
+        });
     }
 }
 
@@ -408,8 +415,7 @@ impl std::fmt::Debug for DaemonChild {
 
 impl ChildKiller for DaemonChild {
     fn kill(&mut self) -> io::Result<()> {
-        self.connection.send_terminate();
-        Ok(())
+        self.connection.request_terminate()
     }
 
     fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
@@ -456,8 +462,7 @@ impl std::fmt::Debug for DaemonKiller {
 
 impl ChildKiller for DaemonKiller {
     fn kill(&mut self) -> io::Result<()> {
-        self.connection.send_terminate();
-        Ok(())
+        self.connection.request_terminate()
     }
 
     fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {

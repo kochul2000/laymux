@@ -967,15 +967,15 @@ overlay caret 이 켜져 있는데도 codex 입력박스에 **어두운 1셀 블
 
 **데몬은 PTY만 소유한다.** 데몬 세션(`pty_daemon/server.rs`)은 받은 명령을 native PTY에 그대로 spawn하고, 자식 대기·출력 중계·입력·resize·terminate만 수행한다. OSC, protocol reply, 출력 ring, 설정, DB는 계속 GUI의 PTY 콜백이 처리한다.
 
-GUI proxy(`pty_daemon/client.rs`)는 `PtySystem`·`MasterPty`·`Child`·`InterruptiblePtyReader`를 구현한다. 출력 frame은 4 KiB chunk로 나눈 뒤 최대 64 KiB queue를 거쳐 기존 reader loop에 들어간다. queue가 차면 socket 읽기를 멈추므로 backpressure가 데몬의 PTY reader까지 전달된다.
+GUI proxy(`pty_daemon/client.rs`)는 `PtySystem`·`MasterPty`·`Child`·`InterruptiblePtyReader`를 구현한다. 출력 frame은 4 KiB chunk로 나눈 뒤 약 64 KiB queue(검사 시점 기준 + chunk 하나)를 거쳐 기존 reader loop에 들어간다. queue가 차면 socket 읽기를 멈추므로 backpressure가 데몬의 PTY reader까지 전달된다.
 
 **수명 규칙:**
 
 | 사건 | 데몬 세션 |
 | --- | --- |
 | 연결 종료(GUI crash·강제 종료 포함) | detach. 계속 실행하며 최근 1 MiB 출력을 backlog로 유지한다(초과분은 `droppedBytes`로 센다) |
-| `PtyHandle` teardown(터미널 삭제·재시작·업데이트 guard) | master drop·kill → `Terminate` → 데몬이 graceful close와 process tree kill을 수행한다 |
-| 앱 정상 종료 | `RunEvent::Exit` → `AppState::terminate_daemon_sessions_on_exit()`가 모든 데몬 터미널에 `Terminate`를 기록한다. 응답은 기다리지 않는다 |
+| `PtyHandle` teardown(터미널 삭제·재시작·업데이트 guard) | master drop·kill → 새 연결로 `terminateSession`을 보내고 `terminating` 응답까지 기다린다(실패는 `kill` 오류로 전파된다). 데몬이 graceful close와 process tree kill을 수행한다. spawn 완료 전에 온 요청은 handle이 생기는 즉시 적용한다 |
+| 앱 정상 종료 | `RunEvent::Exit` → `AppState::terminate_daemon_sessions_on_exit()`가 모든 데몬 터미널의 종료를 병렬로 요청하고, 전체를 2초 deadline으로 묶는다(best-effort) |
 | 자식 스스로 종료 | 데몬이 입력·master를 닫아 남은 출력과 EOF를 받는다(ConPTY는 master를 닫아야 EOF). EOF·exit를 모두 관측하면 세션을 제거하고, attach된 client에는 `Eof`·`Exit`를 보낸다 |
 | `Attach` | 기존 client를 닫고 대체한다. 새 client는 `Attached` → backlog → live 순서로 받는다 |
 
@@ -984,18 +984,18 @@ GUI는 데몬 자식의 PID를 직접 kill하지 않는다(`ChildKillOwner::Back
 **IPC:** 데몬 디렉터리는 `%LOCALAPPDATA%\laymux[-dev]\pty-daemon` 또는 `$XDG_STATE_HOME/laymux[-dev]/pty-daemon`이다. `LAYMUX_PTY_DAEMON_DIR`로 바꿀 수 있다. 디렉터리에는 다음 파일이 있다.
 
 - `daemon.json`: `pid`·`endpoint`·`token`·`protocolVersion` discovery
-- `daemon.lock`: kernel file lock으로 단일 인스턴스 보장
+- `daemon.lock`: kernel file lock으로 단일 인스턴스를 보장한다. GUI도 이 lock이 잡혀 있는지로 데몬 생존을 판정한다
 - `daemon.sock`: Linux 전용 0600 socket
 - `daemon.log`
 
 Windows endpoint는 loopback TCP다. frame은 `u32 LE 길이 | kind(0=JSON control, 1=raw data) | payload`이고 최대 1 MiB다. 인증 전 frame은 4 KiB, 동시 연결은 256개로 제한한다. 첫 frame `hello`의 token과 protocol version이 맞지 않으면 연결을 닫는다. 읽기를 멈춘 client가 있어도 attach는 출력 lock을 기다리기 전에 그 client를 닫고, 목록 조회는 출력 lock을 쓰지 않는다. 메시지 종류는 다음과 같다.
 
-- client → daemon: `spawn`·`attach`·`list`·`resize`·`terminate`·`terminateSession`(아무 연결에서나 id로 종료: 터미널 연결이 바쁘거나 끊겼을 때 GUI가 새 연결로 보냄)
-- daemon → client: `helloOk`·`spawned`·`attached`·`sessions`·`eof`·`exit`·`error`
+- client → daemon: `spawn`·`attach`·`list`·`resize`·`terminate`·`terminateSession`(아무 연결에서나 id로 종료한다. GUI의 모든 종료 요청이 이 경로를 쓴다)
+- daemon → client: `helloOk`·`spawned`·`attached`·`sessions`·`terminating`·`eof`·`exit`·`error`
 
 **기동:** GUI는 Linux에서 `headless_command`와 독립 process group으로 데몬을 띄운다. Windows에서는 handle 상속을 끈 `CreateProcessW`(`CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`, 가능하면 job breakaway)를 쓴다. 데몬은 세션과 연결이 모두 없는 상태가 60초 지속되면 종료한다. opt-in 상태에서 데몬에 연결할 수 없으면 터미널 생성은 실패하며 local로 fallback하지 않는다.
 
-**아직 없는 것:** 새 GUI 시작 시 detach된 세션의 pane 재결합, 업데이트 인계, 화면 snapshot, GUI 미접속 중 OSC·훅 처리는 후속 단계다. 따라서 opt-in 상태에서 GUI가 crash하면 그 세션은 `terminate_session`으로 명시 종료할 때까지 데몬에 남는다.
+**아직 없는 것:** 새 GUI 시작 시 detach된 세션의 pane 재결합, 업데이트 인계, 화면 snapshot, GUI 미접속 중 OSC·훅 처리는 후속 단계다. 따라서 opt-in 상태에서 GUI가 crash하면 그 세션은 자식이 끝날 때까지 데몬에 남고, 이를 끝낼 사용자 경로(UI·CLI)는 아직 없다.
 
 ---
 

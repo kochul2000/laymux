@@ -24,12 +24,11 @@ use super::wire::{
     PROTOCOL_VERSION,
 };
 use crate::constants::{
-    PTY_DAEMON_HANDSHAKE_TIMEOUT_MS, PTY_DAEMON_HELLO_MAX_BYTES, PTY_DAEMON_MAX_CONNECTIONS,
+    PTY_DAEMON_ACCEPT_RETRY_MS, PTY_DAEMON_HANDSHAKE_TIMEOUT_MS, PTY_DAEMON_HELLO_MAX_BYTES,
+    PTY_DAEMON_IDLE_POLL_MS, PTY_DAEMON_MAX_CONNECTIONS, PTY_DAEMON_WAKE_CONNECT_TIMEOUT_MS,
 };
 use crate::lock_ext::MutexExt;
 use crate::pty::{spawn_command_on, ChildKillOwner, PtyLifecycleHooks, SpawnOptions};
-
-const IDLE_POLL: Duration = Duration::from_millis(250);
 
 /// Daemon sessions are created once and never respawned in place, so every
 /// native PTY runs as reader generation 1. The client-visible identity is the
@@ -42,6 +41,11 @@ pub struct DaemonServer {
     connections: AtomicUsize,
     next_connection_id: AtomicU64,
     shutdown: AtomicBool,
+    /// Serializes admitting a connection with the idle-shutdown decision, so
+    /// a connection accepted just as the daemon goes idle is either counted
+    /// before the decision or refused after it — never served by a daemon
+    /// that is already exiting.
+    admission: Mutex<()>,
 }
 
 impl DaemonServer {
@@ -52,6 +56,7 @@ impl DaemonServer {
             connections: AtomicUsize::new(0),
             next_connection_id: AtomicU64::new(1),
             shutdown: AtomicBool::new(false),
+            admission: Mutex::new(()),
         })
     }
 
@@ -70,32 +75,36 @@ impl DaemonServer {
         }
         loop {
             let accepted = listener.accept();
-            if self.shutdown.load(Ordering::Acquire) {
-                return Ok(());
-            }
-            match accepted {
-                Ok(stream)
-                    if self.connections.load(Ordering::Acquire) >= PTY_DAEMON_MAX_CONNECTIONS =>
-                {
-                    // Refuse instead of queueing: an unauthenticated local flood
-                    // must not exhaust threads or memory.
-                    tracing::warn!("PTY daemon connection limit reached; refusing");
-                    drop(stream);
-                }
-                Ok(stream) => {
-                    let server = Arc::clone(self);
-                    let connection_id = self.next_connection_id.fetch_add(1, Ordering::Relaxed);
-                    self.connections.fetch_add(1, Ordering::AcqRel);
-                    thread::spawn(move || {
-                        server.handle_connection(stream, connection_id);
-                        server.connections.fetch_sub(1, Ordering::AcqRel);
-                    });
-                }
+            let stream = match accepted {
+                Ok(stream) => stream,
                 Err(error) => {
+                    if self.shutdown.load(Ordering::Acquire) {
+                        return Ok(());
+                    }
                     tracing::warn!(%error, "PTY daemon accept failed");
-                    thread::sleep(Duration::from_millis(50));
+                    thread::sleep(Duration::from_millis(PTY_DAEMON_ACCEPT_RETRY_MS));
+                    continue;
                 }
+            };
+            {
+                let _admission = self.admission.lock_or_err().map_err(io::Error::other)?;
+                if self.shutdown.load(Ordering::Acquire) {
+                    return Ok(());
+                }
+                if self.connections.load(Ordering::Acquire) >= PTY_DAEMON_MAX_CONNECTIONS {
+                    // Refuse instead of queueing: an unauthenticated local
+                    // flood must not exhaust threads or memory.
+                    tracing::warn!("PTY daemon connection limit reached; refusing");
+                    continue;
+                }
+                self.connections.fetch_add(1, Ordering::AcqRel);
             }
+            let server = Arc::clone(self);
+            let connection_id = self.next_connection_id.fetch_add(1, Ordering::Relaxed);
+            thread::spawn(move || {
+                server.handle_connection(stream, connection_id);
+                server.connections.fetch_sub(1, Ordering::AcqRel);
+            });
         }
     }
 
@@ -104,7 +113,10 @@ impl DaemonServer {
     pub fn request_shutdown(&self, endpoint: &str) {
         self.shutdown.store(true, Ordering::Release);
         // Wake the blocking accept; the connection is dropped immediately.
-        let _ = transport::connect(endpoint, Duration::from_millis(500));
+        let _ = transport::connect(
+            endpoint,
+            Duration::from_millis(PTY_DAEMON_WAKE_CONNECT_TIMEOUT_MS),
+        );
     }
 
     #[cfg(test)]
@@ -194,10 +206,13 @@ impl DaemonServer {
                     }
                 }
                 Frame::Control(ClientMessage::TerminateSession { session_id }) => {
-                    match self.find_session(&session_id) {
-                        Some(session) => session.terminate(),
-                        None => writer
-                            .error(&format!("PTY daemon session '{session_id}' does not exist")),
+                    let session = self.find_session(&session_id);
+                    if let Some(session) = session.as_ref() {
+                        session.terminate();
+                    }
+                    let found = session.is_some();
+                    if writer.send(&DaemonMessage::Terminating { found }).is_err() {
+                        break;
                     }
                 }
                 Frame::Control(ClientMessage::List) => {
@@ -322,6 +337,10 @@ impl DaemonServer {
         };
         let child_pid = handle.child_pid();
         let _ = session.handle.set(handle);
+        // A terminate that arrived while the child was being spawned.
+        if session.terminate_requested() {
+            session.terminate();
+        }
         if writer.send(&DaemonMessage::Spawned { child_pid }).is_ok() {
             let link = ClientLink {
                 connection_id,
@@ -379,7 +398,7 @@ impl DaemonServer {
 fn idle_monitor(server: Weak<DaemonServer>, endpoint: String, idle_exit: Duration) {
     let mut idle_since: Option<Instant> = None;
     loop {
-        thread::sleep(IDLE_POLL);
+        thread::sleep(Duration::from_millis(PTY_DAEMON_IDLE_POLL_MS));
         let Some(server) = server.upgrade() else {
             return;
         };
@@ -391,11 +410,27 @@ fn idle_monitor(server: Weak<DaemonServer>, endpoint: String, idle_exit: Duratio
             continue;
         }
         let since = *idle_since.get_or_insert_with(Instant::now);
-        if since.elapsed() >= idle_exit {
+        if since.elapsed() < idle_exit {
+            continue;
+        }
+        // Re-check under the admission lock: a connection admitted meanwhile
+        // keeps the daemon alive.
+        let still_idle = match server.admission.lock_or_err() {
+            Ok(_admission) => {
+                let idle = server.is_idle();
+                if idle {
+                    server.shutdown.store(true, Ordering::Release);
+                }
+                idle
+            }
+            Err(_) => false,
+        };
+        if still_idle {
             tracing::info!("PTY daemon idle; shutting down");
             server.request_shutdown(&endpoint);
             return;
         }
+        idle_since = None;
     }
 }
 

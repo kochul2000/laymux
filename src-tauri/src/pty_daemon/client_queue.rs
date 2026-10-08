@@ -12,7 +12,11 @@ use portable_pty::{
 };
 
 use crate::constants::PTY_DAEMON_CLIENT_QUEUE_BYTES;
-use crate::lock_ext::recover_poison_for_discard;
+use crate::lock_ext::MutexExt;
+
+/// Exit code reported when the daemon connection is lost before the child's
+/// real exit status arrived. The child may still be running in the daemon.
+pub(super) const CONNECTION_LOST_EXIT_CODE: u32 = 1;
 
 /// Reader queue and exit slot shared by the pump, reader and child.
 #[derive(Default)]
@@ -35,20 +39,18 @@ pub(super) struct Queue {
 }
 
 impl Shared {
-    pub(super) fn lock_queue(&self) -> std::sync::MutexGuard<'_, Queue> {
-        self.queue
-            .lock()
-            .unwrap_or_else(|poisoned| recover_poison_for_discard(poisoned, "PTY daemon queue"))
-    }
-
     /// Block while the consumer is behind; this is what turns a slow GUI
-    /// callback into socket — and therefore PTY — backpressure.
+    /// callback into socket — and therefore PTY — backpressure. A poisoned
+    /// queue discards the data; the reader fails closed in `next_event`.
     pub(super) fn push_data(&self, data: Vec<u8>) {
-        let mut queue = self.lock_queue();
+        let Ok(mut queue) = self.queue.lock_or_err() else {
+            return;
+        };
         while queue.data_bytes >= PTY_DAEMON_CLIENT_QUEUE_BYTES && !queue.closed {
-            queue = self.queue_changed.wait(queue).unwrap_or_else(|poisoned| {
-                recover_poison_for_discard(poisoned, "PTY daemon queue")
-            });
+            queue = match self.queue_changed.wait(queue) {
+                Ok(queue) => queue,
+                Err(_) => return,
+            };
         }
         if queue.closed || queue.ended {
             return;
@@ -59,7 +61,9 @@ impl Shared {
     }
 
     pub(super) fn push_end(&self, event: PtyReadEvent) {
-        let mut queue = self.lock_queue();
+        let Ok(mut queue) = self.queue.lock_or_err() else {
+            return;
+        };
         if queue.ended {
             return;
         }
@@ -69,7 +73,9 @@ impl Shared {
     }
 
     pub(super) fn push_wake(&self, wake_generation: u64) -> PtyWakeOutcome {
-        let mut queue = self.lock_queue();
+        let Ok(mut queue) = self.queue.lock_or_err() else {
+            return PtyWakeOutcome::Terminal;
+        };
         if queue.closed || queue.ended {
             return PtyWakeOutcome::Terminal;
         }
@@ -79,7 +85,9 @@ impl Shared {
     }
 
     pub(super) fn next_event(&self) -> PtyReadEvent {
-        let mut queue = self.lock_queue();
+        let Ok(mut queue) = self.queue.lock_or_err() else {
+            return poisoned_failure();
+        };
         loop {
             if let Some(event) = queue.events.pop_front() {
                 if let PtyReadEvent::Data(bytes) = &event {
@@ -91,14 +99,19 @@ impl Shared {
             if queue.ended {
                 return PtyReadEvent::Eof;
             }
-            queue = self.queue_changed.wait(queue).unwrap_or_else(|poisoned| {
-                recover_poison_for_discard(poisoned, "PTY daemon queue")
-            });
+            queue = match self.queue_changed.wait(queue) {
+                Ok(queue) => queue,
+                Err(_) => return poisoned_failure(),
+            };
         }
     }
 
+    /// Discard-only teardown: the reader is gone and nothing below is used to
+    /// admit or account further data (ADR-0087).
     pub(super) fn close_reader(&self) {
-        let mut queue = self.lock_queue();
+        let mut queue = self
+            .queue
+            .lock_or_recover_for_discard("closing PTY daemon reader queue");
         queue.closed = true;
         queue.events.clear();
         queue.data_bytes = 0;
@@ -106,38 +119,38 @@ impl Shared {
     }
 
     pub(super) fn publish_exit(&self, exit_code: u32) {
-        let mut exit = self
-            .exit
-            .lock()
-            .unwrap_or_else(|poisoned| recover_poison_for_discard(poisoned, "PTY daemon exit"));
-        if exit.is_none() {
-            *exit = Some(exit_code);
+        if let Ok(mut exit) = self.exit.lock_or_err() {
+            if exit.is_none() {
+                *exit = Some(exit_code);
+            }
         }
         self.exit_changed.notify_all();
     }
 
     pub(super) fn exit_code(&self) -> Option<u32> {
-        *self
-            .exit
-            .lock()
-            .unwrap_or_else(|poisoned| recover_poison_for_discard(poisoned, "PTY daemon exit"))
+        self.exit.lock_or_err().ok().and_then(|exit| *exit)
     }
 
+    /// A poisoned exit slot reports the connection-lost status instead of
+    /// waiting forever.
     pub(super) fn wait_exit(&self) -> u32 {
-        let mut exit = self
-            .exit
-            .lock()
-            .unwrap_or_else(|poisoned| recover_poison_for_discard(poisoned, "PTY daemon exit"));
+        let Ok(mut exit) = self.exit.lock_or_err() else {
+            return CONNECTION_LOST_EXIT_CODE;
+        };
         loop {
             if let Some(code) = *exit {
                 return code;
             }
-            exit = self
-                .exit_changed
-                .wait(exit)
-                .unwrap_or_else(|poisoned| recover_poison_for_discard(poisoned, "PTY daemon exit"));
+            exit = match self.exit_changed.wait(exit) {
+                Ok(exit) => exit,
+                Err(_) => return CONNECTION_LOST_EXIT_CODE,
+            };
         }
     }
+}
+
+fn poisoned_failure() -> PtyReadEvent {
+    PtyReadEvent::Failure(io::Error::other("PTY daemon reader queue is poisoned"))
 }
 
 pub(super) struct DaemonReader {

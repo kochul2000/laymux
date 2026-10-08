@@ -18,11 +18,16 @@ const CRASH_CLIENT_ROLE: &str = "crash-client";
 const SESSION_ID: &str = "crashed-pane#1";
 const TIMEOUT: Duration = Duration::from_secs(20);
 
-/// Kills the launched daemon even when an assertion fails.
-struct DaemonProcess(u32);
+/// Kills a process this test started, even when an assertion fails. Only a
+/// process that is still alive is killed, so an exited PID that the OS may
+/// already have reused is never targeted.
+struct KillOnDrop(u32);
 
-impl Drop for DaemonProcess {
+impl Drop for KillOnDrop {
     fn drop(&mut self) {
+        if !is_alive(self.0) {
+            return;
+        }
         let pid = self.0.to_string();
         #[cfg(windows)]
         let _ = headless_command("taskkill")
@@ -99,11 +104,11 @@ fn terminal_work_outlives_a_crashed_client_in_a_single_daemon_instance() {
     }
     let dir = tempfile::tempdir().unwrap();
     let paths = DaemonPaths::in_dir(dir.path().join("pty-daemon"));
-    let daemon = DaemonProcess(launch(&paths));
+    let daemon = KillOnDrop(launch(&paths));
     let endpoint = wait_until("daemon discovery", || find_running(&paths).unwrap());
 
     // A second instance for the same directory yields to the live one.
-    let second = DaemonProcess(launch(&paths));
+    let second = KillOnDrop(launch(&paths));
     wait_until("second instance exit", || {
         (!is_alive(second.0)).then_some(())
     });
@@ -138,6 +143,7 @@ fn terminal_work_outlives_a_crashed_client_in_a_single_daemon_instance() {
             .into_iter()
             .find(|session| session.session_id == SESSION_ID && !session.attached)
     });
+    let _child = KillOnDrop(child_pid);
     assert_eq!(session.child_pid, Some(child_pid));
     assert!(!session.exited);
     assert!(

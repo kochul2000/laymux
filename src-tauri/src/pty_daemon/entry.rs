@@ -10,10 +10,12 @@ use super::discovery::{
 use super::server::DaemonServer;
 use super::transport::Listener;
 use super::wire::PROTOCOL_VERSION;
-use crate::constants::PTY_DAEMON_IDLE_EXIT_MS;
+use crate::constants::{
+    PTY_DAEMON_IDLE_EXIT_MS, PTY_DAEMON_LAUNCH_POLL_MS, PTY_DAEMON_LOG_ROTATE_BYTES,
+};
 
-/// Start over instead of appending once the log grows past this.
-const LOG_ROTATE_BYTES: u64 = 4 * 1024 * 1024;
+/// Short retries before concluding another daemon owns the directory.
+const LOCK_RETRIES: u32 = 10;
 
 /// Run the daemon until it goes idle. Returns the process exit code.
 pub fn run_daemon_main() -> i32 {
@@ -46,7 +48,17 @@ fn run() -> Result<(), String> {
         .write(true)
         .open(paths.lock_file())
         .map_err(|error| format!("cannot open PTY daemon lock: {error}"))?;
-    match lock.try_lock() {
+    // A GUI probing liveness holds the lock for an instant; only a lock that
+    // stays held means another daemon.
+    let mut attempt = lock.try_lock();
+    for _ in 0..LOCK_RETRIES {
+        if !matches!(attempt, Err(TryLockError::WouldBlock)) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(PTY_DAEMON_LAUNCH_POLL_MS));
+        attempt = lock.try_lock();
+    }
+    match attempt {
         Ok(()) => {}
         Err(TryLockError::WouldBlock) => {
             tracing::info!("another PTY daemon owns this directory; exiting");
@@ -86,7 +98,8 @@ fn run() -> Result<(), String> {
 
 fn init_logging(paths: &DaemonPaths) {
     let path = paths.log_file();
-    let rotate = std::fs::metadata(&path).is_ok_and(|meta| meta.len() > LOG_ROTATE_BYTES);
+    let rotate =
+        std::fs::metadata(&path).is_ok_and(|meta| meta.len() > PTY_DAEMON_LOG_ROTATE_BYTES);
     let file: Option<File> = OpenOptions::new()
         .create(true)
         .append(!rotate)

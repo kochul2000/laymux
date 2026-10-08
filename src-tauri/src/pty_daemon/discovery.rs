@@ -10,7 +10,10 @@ use serde::{Deserialize, Serialize};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use crate::constants::ENV_LAYMUX_PTY_DAEMON_DIR;
+use crate::constants::{
+    ENV_LAYMUX_PTY_DAEMON_DIR, PTY_DAEMON_DIR_NAME, PTY_DAEMON_DISCOVERY_FILE,
+    PTY_DAEMON_LOCK_FILE, PTY_DAEMON_LOG_FILE,
+};
 
 #[derive(Debug, Clone)]
 pub struct DaemonPaths {
@@ -27,7 +30,7 @@ impl DaemonPaths {
         let base = state_db
             .parent()
             .ok_or_else(|| "local state path has no parent directory".to_string())?;
-        Ok(Self::in_dir(base.join("pty-daemon")))
+        Ok(Self::in_dir(base.join(PTY_DAEMON_DIR_NAME)))
     }
 
     pub fn in_dir(dir: impl Into<PathBuf>) -> Self {
@@ -39,15 +42,15 @@ impl DaemonPaths {
     }
 
     pub fn discovery_file(&self) -> PathBuf {
-        self.dir.join("daemon.json")
+        self.dir.join(PTY_DAEMON_DISCOVERY_FILE)
     }
 
     pub fn lock_file(&self) -> PathBuf {
-        self.dir.join("daemon.lock")
+        self.dir.join(PTY_DAEMON_LOCK_FILE)
     }
 
     pub fn log_file(&self) -> PathBuf {
-        self.dir.join("daemon.log")
+        self.dir.join(PTY_DAEMON_LOG_FILE)
     }
 
     /// Create the directory readable only by the current user.

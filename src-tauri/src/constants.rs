@@ -312,10 +312,32 @@ pub const PTY_DAEMON_HELLO_MAX_BYTES: usize = 4 * 1024;
 pub const PTY_DAEMON_MAX_CONNECTIONS: usize = 256;
 /// Deadline for the authenticated handshake on a fresh daemon connection.
 pub const PTY_DAEMON_HANDSHAKE_TIMEOUT_MS: u64 = 5_000;
+/// Connect + acknowledge budget for one out-of-band terminate request.
+pub const PTY_DAEMON_TERMINATE_REQUEST_TIMEOUT_MS: u64 = 1_000;
+/// Overall budget for asking the daemon to end every terminal at app exit.
+pub const PTY_DAEMON_EXIT_TERMINATE_TIMEOUT_MS: u64 = 2_000;
 /// How long the GUI waits for a freshly launched daemon to publish discovery.
 pub const PTY_DAEMON_LAUNCH_TIMEOUT_MS: u64 = 5_000;
 /// The daemon exits after this long with no session and no connection.
 pub const PTY_DAEMON_IDLE_EXIT_MS: u64 = 60_000;
+/// How often the daemon re-evaluates its idle state.
+pub const PTY_DAEMON_IDLE_POLL_MS: u64 = 250;
+/// Back-off after a failed `accept` so a persistent error does not spin.
+pub const PTY_DAEMON_ACCEPT_RETRY_MS: u64 = 50;
+/// Connect budget for the self-connection that wakes a blocking `accept`.
+pub const PTY_DAEMON_WAKE_CONNECT_TIMEOUT_MS: u64 = 500;
+/// Poll cadence while a freshly launched daemon publishes discovery.
+pub const PTY_DAEMON_LAUNCH_POLL_MS: u64 = 50;
+/// The daemon log starts over instead of appending past this size.
+pub const PTY_DAEMON_LOG_ROTATE_BYTES: u64 = 4 * 1024 * 1024;
+/// Daemon state directory under the per-build local state root, and the
+/// files inside it (data-flow §8.23).
+pub const PTY_DAEMON_DIR_NAME: &str = "pty-daemon";
+pub const PTY_DAEMON_DISCOVERY_FILE: &str = "daemon.json";
+pub const PTY_DAEMON_LOCK_FILE: &str = "daemon.lock";
+pub const PTY_DAEMON_LOG_FILE: &str = "daemon.log";
+#[cfg(unix)]
+pub const PTY_DAEMON_SOCKET_FILE: &str = "daemon.sock";
 
 /// Shared upper bound for one owner transition, including worker polling,
 /// cancellation grace, terminal teardown, and scheduler slack.

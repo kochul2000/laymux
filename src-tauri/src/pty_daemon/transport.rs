@@ -29,7 +29,7 @@ impl Listener {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let path = dir.join("daemon.sock");
+            let path = dir.join(crate::constants::PTY_DAEMON_SOCKET_FILE);
             match std::fs::remove_file(&path) {
                 Ok(()) => {}
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {}

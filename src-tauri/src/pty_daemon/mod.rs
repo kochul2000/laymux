@@ -11,6 +11,7 @@
 //!
 //! [`ENV_LAYMUX_PTY_DAEMON`]: crate::constants::ENV_LAYMUX_PTY_DAEMON
 
+mod backend;
 mod client;
 mod client_queue;
 mod discovery;
@@ -24,49 +25,9 @@ mod wire;
 #[cfg(test)]
 mod tests;
 
+pub use backend::{is_enabled, session_key, terminal_backend, DaemonEndpoint};
 pub use client::{list_sessions, terminate_session, DaemonPtySystem};
 pub use discovery::DaemonPaths;
 pub use entry::run_daemon_main;
 pub use launcher::{ensure_running, find_running, spawn_daemon};
 pub use wire::SessionInfo;
-
-use crate::constants::ENV_LAYMUX_PTY_DAEMON;
-use crate::pty::PtyBackend;
-
-/// Address and credential of one live daemon instance.
-#[derive(Clone)]
-pub struct DaemonEndpoint {
-    pub(crate) endpoint: String,
-    pub(crate) token: String,
-}
-
-impl std::fmt::Debug for DaemonEndpoint {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DaemonEndpoint")
-            .field("endpoint", &self.endpoint)
-            .field("token", &"<redacted>")
-            .finish()
-    }
-}
-
-/// Daemon session identity for one terminal generation. A restarted terminal
-/// gets a new key, so it can never be confused with a predecessor that is
-/// still shutting down.
-pub fn session_key(terminal_id: &str, terminal_generation: u64) -> String {
-    format!("{terminal_id}#{terminal_generation}")
-}
-
-pub fn is_enabled() -> bool {
-    std::env::var(ENV_LAYMUX_PTY_DAEMON).is_ok_and(|value| value == "1")
-}
-
-/// The backend new user terminals should spawn on. When the daemon is enabled
-/// but cannot be reached this is an error rather than a silent local fallback,
-/// so a terminal never ends up with a lifetime other than the one selected.
-pub fn terminal_backend() -> Result<PtyBackend, String> {
-    if !is_enabled() {
-        return Ok(PtyBackend::Local);
-    }
-    let paths = DaemonPaths::for_current_build()?;
-    launcher::ensure_running(&paths).map(PtyBackend::Daemon)
-}
