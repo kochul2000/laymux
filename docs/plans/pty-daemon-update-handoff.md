@@ -22,6 +22,13 @@
 
 ## 단계와 완료 조건
 
+### 2026-10-08 완료된 수정의 독립 PR 분리
+
+- [PR #1145](https://github.com/kochul2000/laymux/pull/1145): 빈 레이아웃 템플릿의 세션 구조 복원과 폐기된 초기화 응답 차단을 기본 앱 수정으로 분리해 main에 머지했다. 최신 main 기반 Windows unit 5,450개·screen 106개·E2E 533개, TypeScript·production build·lint/format과 Linux 기본 앱의 격리 SQLite 복원을 검증했다. 늦은 실패가 현재 저장을 차단하는 회귀 테스트도 추가했다.
+- [PR #1146](https://github.com/kochul2000/laymux/pull/1146): 연속 wider reflow의 마지막 유지 행 soft-wrap 보존을 데스크톱 ESM/CJS·Remote CJS 수정으로 분리해 main에 머지했다. Windows unit 5,452개·screen 112개·E2E 533개와 세 번들의 실제 셀 테스트를 통과했고, Linux dev에서 15→36→72열 변경 중 95자 문단·hard line을 보존하는 것을 API buffer dump·스크린샷으로 확인했다.
+
+두 PR의 ADR 판정은 불필요(기존 복원·wrap 의미를 지키는 지역적 버그 수정), 버전 영향은 patch다. main을 이 브랜치에 반영해 동일 변경을 데몬 PR diff에서 제거했다. daemon 단일 session writer·정상 GUI detach/업데이트 인계와 Windows 실행 검증은 별도 완료 조건으로 남는다.
+
 ### 2026-10-08 후속 검증: 초기 복원과 Tokio 호출 경계
 
 레이아웃 템플릿이 비어 있을 때 `applyWorkspaceSnapshot`이 저장된 workspace까지 건너뛰는 오류를 회귀 테스트로 재현하고 수정했다. 폐기된 초기화 effect의 늦은 응답도 현재 workspace를 덮어쓰지 않는다. Linux dev(19281)에서 GUI 종료 뒤 파일 trigger를 만들었을 때 기존 셸이 작업을 완료했고, 새 GUI에서 같은 daemon incarnation·child PID·PTY generation·pane ID와 실행 결과 화면이 자동 복원됐다. 이 검증은 강제 GUI 종료/재접속이며 updater 인계나 정상 종료 barrier 검증을 대신하지 않는다.
