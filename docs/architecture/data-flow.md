@@ -338,7 +338,7 @@ Remote xterm의 세 경로 발견 트리거도 같은 FileViewer 권한 경계�
 
 Legacy in-box ConPTY는 폭 변경 뒤 현재 화면을 `ESC[?25l (ESC[8;<rows>;<cols>t)? ESC[H ... ESC[?25h` 프레임으로 다시 출력했지만, 번들 `1.23.251008001`은 normal buffer+scrollback 폭 변경에서도 이 host repaint를 내보내지 않는다. 지원 Windows 빌드는 번들 배치를 필수로 하므로 legacy 런타임은 제품 경로에서 도달할 수 없고, ADR-0026의 resize repaint 필터와 그 arm 배선은 제거했다. live PTY 출력은 어떤 repaint 필터도 거치지 않고 xterm write FIFO로 들어간다. legacy in-box 런타임을 명시적으로 다시 지원한다면 스트리밍 필터 알고리즘을 git 이력(`ui/src/lib/conpty-resize-repaint-filter.ts`)에서 되살리는 것이 선행 작업이다. Rust OSC 파이프라인과 raw output ring, Linux와 alternate buffer 동작은 변경하지 않는다([ADR-0067](../adr/0067-bundled-conpty-output-and-staging-contract.md)).
 
-xterm 6.0.0의 wider reflow는 제거된 soft-wrap 행 주변에 stale `isWrapped`를 남길 수 있다. dependency는 6.0.0으로 고정하고 upstream commit `e9c648f`의 수정 패치를 `postinstall`에서 적용한다. patch target이 달라지면 설치를 실패시켜 검토 없이 다른 bundle에 부분 적용되지 않게 한다.
+xterm 6.0.0의 wider reflow는 제거된 soft-wrap 행 주변에 stale `isWrapped`를 남길 수 있다. dependency는 6.0.0으로 고정하고 upstream commit `e9c648f`의 수정 패치를 `postinstall`에서 적용한다. 이 패치는 완전히 합쳐진 줄만 wrap을 해제하며, 여전히 여러 행에 걸친 문단의 마지막 유지 행은 continuation을 보존한다. 연속 폭 변경으로 문단이 끊어지지 않도록 데스크톱 ESM·CJS와 Remote CJS에 같은 보정을 적용한다. 셀 격자 스위트는 제품 ESM을 사용하고 세 번들의 실제 셀·wrap 상태를 함께 검증한다. patch target이 달라지면 설치를 실패시켜 검토 없이 다른 bundle에 부분 적용되지 않게 한다.
 
 #### Native Windows synchronized-output transaction / WSL strict park metadata
 
