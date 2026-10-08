@@ -10,7 +10,11 @@ const remoteCommonJsTarget = resolve(
 );
 const stale = "m>0&&(o.push(l+h.length-m),o.push(m)),l+=h.length-1";
 const fixed =
+  "m>0&&(h[c].isWrapped=c>0,u&&(u.isWrapped=!1),o.push(l+h.length-m),o.push(m)),l+=h.length-1";
+const legacy =
   "m>0&&(h[c].isWrapped=!1,u&&(u.isWrapped=!1),o.push(l+h.length-m),o.push(m)),l+=h.length-1";
+const commonJsReflowFixed =
+  "g>0&&(d[u].isWrapped=u>0,c&&(c.isWrapped=!1),a.push(l+d.length-g),a.push(g)),l+=d.length-1";
 const staleDisableStdinGate = "if(this._optionsService.rawOptions.disableStdin)return;";
 const moduleUserOnlyDisableStdinGate = "if(this._optionsService.rawOptions.disableStdin&&i)return;";
 const commonJsUserOnlyDisableStdinGate =
@@ -96,6 +100,15 @@ describe("pinned xterm bundle patches", () => {
 
     expect(source).toContain(fixed);
     expect(source).not.toContain(stale);
+    expect(source).not.toContain(legacy);
+  });
+
+  it.each([
+    ["desktop CJS", commonJsTarget],
+    ["Remote CJS", remoteCommonJsTarget],
+  ])("keeps retained wrapped rows in %s", async (_name, target) => {
+    const source = await readFile(target, "utf8");
+    expect(source).toContain(commonJsReflowFixed);
   });
 
   it("keeps parser-generated protocol replies enabled while human stdin is disabled", async () => {
