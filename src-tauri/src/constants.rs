@@ -338,6 +338,10 @@ pub const PTY_DAEMON_EXIT_TERMINATE_TIMEOUT_MS: u64 = 2_000;
 pub const PTY_DAEMON_SHUTDOWN_TIMEOUT_MS: u64 = 5_000;
 /// How long the GUI waits for a freshly launched daemon to publish discovery.
 pub const PTY_DAEMON_LAUNCH_TIMEOUT_MS: u64 = 5_000;
+/// After a failed launch the GUI creates terminals in-process for this long
+/// before trying the daemon again, so one unavailable daemon costs the
+/// launch timeout once rather than once per terminal.
+pub const PTY_DAEMON_UNAVAILABLE_RETRY_MS: u64 = 30_000;
 /// The daemon exits after this long with no session and no connection.
 pub const PTY_DAEMON_IDLE_EXIT_MS: u64 = 60_000;
 /// How often the daemon re-evaluates its idle state.

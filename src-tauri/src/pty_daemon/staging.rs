@@ -56,13 +56,19 @@ fn stage_with_gc_age(exe: &Path, daemon_dir: &Path, gc_min_age: Duration) -> io:
         }
         // Publish complete copies only. Losing a race to another launcher
         // that published the same key is fine: its copy is identical.
-        if fs::rename(&temp, &target).is_err() {
-            let _ = fs::remove_dir_all(&temp);
-            if !staged.is_file() {
-                return Err(io::Error::other(
-                    "could not publish the staged PTY daemon runtime",
-                ));
-            }
+        let mut published = fs::rename(&temp, &target).is_ok() || staged.is_file();
+        if !published {
+            // A partial copy without the daemon image (left by a cleanup
+            // that could not finish) runs no daemon but would block this
+            // rename forever; replace it once.
+            let _ = fs::remove_dir_all(&target);
+            published = fs::rename(&temp, &target).is_ok() || staged.is_file();
+        }
+        let _ = fs::remove_dir_all(&temp);
+        if !published {
+            return Err(io::Error::other(
+                "could not publish the staged PTY daemon runtime",
+            ));
         }
     }
     remove_unused_runtimes(&root, &key, name, gc_min_age);
@@ -165,6 +171,24 @@ mod tests {
         assert_ne!(restaged, staged);
         assert!(!staged.parent().unwrap().exists());
         assert_eq!(fs::read(&restaged).unwrap(), b"second build, longer");
+    }
+
+    #[test]
+    fn a_partial_copy_of_the_current_build_is_replaced() {
+        let temp = tempfile::tempdir().unwrap();
+        let daemon_dir = temp.path().join("daemon");
+        let exe = fake_build(&temp.path().join("build"), b"build");
+        // What an interrupted cleanup leaves: the image is gone, the rest
+        // of the directory is not.
+        let partial = daemon_dir
+            .join(PTY_DAEMON_RUNTIME_DIR)
+            .join(runtime_key(&exe).unwrap());
+        fs::create_dir_all(&partial).unwrap();
+        fs::write(partial.join("conpty.dll"), b"stale").unwrap();
+
+        let staged = stage_with_gc_age(&exe, &daemon_dir, Duration::ZERO).unwrap();
+        assert_eq!(fs::read(&staged).unwrap(), b"build");
+        assert_eq!(fs::read(partial.join("conpty.dll")).unwrap(), b"conpty");
     }
 }
 

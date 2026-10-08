@@ -997,14 +997,14 @@ Windows endpoint는 loopback TCP다. frame은 `u32 LE 길이 | kind(0=JSON contr
 - client → daemon: `spawn`(terminal id·metadata 포함)·`attach`(`replay`)·`list`·`resize`·`terminate`·`terminateSession`(아무 연결에서나 id로 종료한다. GUI의 모든 종료 요청이 이 경로를 쓴다)·`shutdown`
 - daemon → client: `helloOk`·`spawned`·`attached`(metadata 포함)·`sessions`(terminal id·attached·exited·terminating)·`terminating`·`eof`·`exit`·`error`
 
-**기동:** GUI는 Linux에서 `headless_command`와 독립 process group으로 데몬을 띄운다. Windows에서는 먼저 실행 파일과 ConPTY 파일을 `<데몬 디렉터리>/runtime/<크기-수정시각>/`에 복사하고, 그 사본을 handle 상속을 끈 `CreateProcessW`(`CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`, 가능하면 job breakaway)로 띄운다. 그래서 업데이트와 dev 재빌드가 원본을 교체할 수 있다. ConPTY 파일이 없으면 staging을 실패시킨다. 데몬 실행 파일을 지울 수 있는(실행 중이 아닌) 다른 사본은 그때 삭제한다. 데몬은 세션과 연결이 모두 없는 상태가 60초 지속되면 종료한다. 데몬을 띄우거나 연결할 수 없으면 그 터미널은 경고를 남기고 in-process PTY로 만든다.
+**기동:** GUI는 Linux에서 `headless_command`와 독립 process group으로 데몬을 띄운다. Windows에서는 먼저 실행 파일과 ConPTY 파일을 `<데몬 디렉터리>/runtime/<크기-수정시각>/`에 복사하고, 그 사본을 handle 상속을 끈 `CreateProcessW`(`CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`, 가능하면 job breakaway)로 띄운다. 그래서 업데이트와 dev 재빌드가 원본을 교체할 수 있다. ConPTY 파일이 없으면 staging을 실패시킨다. 데몬 실행 파일을 지울 수 있는(실행 중이 아닌) 다른 사본은 그때 삭제한다. 데몬은 세션과 연결이 모두 없는 상태가 60초 지속되면 종료한다. 데몬을 띄우거나 연결할 수 없으면 그 터미널은 경고를 남기고 in-process PTY로 만든다. instance lock을 쥔 데몬이 handshake에 답하지 않으면 새 데몬을 띄우지 않고 기동 timeout까지만 기다린다. 기동이 실패하면 30초 동안은 데몬을 시도하지 않고 바로 in-process로 만든다(`PTY_DAEMON_UNAVAILABLE_RETRY_MS`). 반쯤 지워진 현재 build의 runtime 사본은 한 번 지우고 다시 publish한다.
 
 **재결합:** GUI 프로세스 안에서 그 terminal id를 처음 만들 때만 시도한다(`AppState.pty_daemon_adoption_seen`). 이후의 생성은 재시작·프로필 변경·remount이므로 항상 새 자식을 띄운다. `list`(5초 deadline)에서 같은 terminal id이고, attach되지 않았고, 종료되지도 종료 요청을 받지도 않은 후보를 찾는다. 생성 순서상 가장 최근 후보가 같은 프로필로 시작했으면 adopt하고, 나머지 후보는 종료한다. adopt attach(`takeOver: false`)는 데몬이 원자적으로 판정해 이미 attach됐거나 종료 중이면 거절하며, 이때 GUI는 새 세션을 만든다. 이때 다음과 같이 처리한다.
 
 - GUI가 만든 명령·resume 복원 요청·Codex 시작 guard는 적용하지 않는다.
 - spawn 때 metadata로 맡긴 agent hook token을 다시 써서 살아남은 자식의 훅을 계속 인증하고, 맡긴 WSL relay 여부로 귀속 도메인을 복원한다.
 - 세션은 bind마다 attach epoch를 올린다. GUI의 종료 요청은 자신의 epoch를 싣고, 그 뒤 다른 client가 bind했으면 데몬은 `superseded`로 답하고 세션을 남긴다.
-- backlog replay 없이 attach한 뒤 GUI grid 크기로 resize한다. 이전 화면은 복원되지 않고 다음 출력부터 그려진다.
+- backlog replay 없이 attach한 뒤 GUI grid 크기로 resize한다. 이전 화면은 복원되지 않고 다음 출력부터 그려진다. protocol 상태와 xterm도 기본 모드로 시작하므로, 시작 때 한 번만 bracketed paste를 켠 TUI에는 재결합 뒤 여러 줄 입력이 bracketed 없이 들어간다(모드 복원은 #1151).
 - CWD는 요청된 시작 디렉터리로 시작해 다음 OSC 7을 따른다.
 
 dev 빌드의 StrictMode는 TerminalView를 한 번 닫았다 다시 열어서, 재결합한 세션을 바로 종료한다. PTY 수명을 dev에서 확인할 때는 `VITE_LAYMUX_STRICT_MODE=0`으로 띄운다([dev-repro-methodology.md §4.7](../dev-repro-methodology.md)).

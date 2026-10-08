@@ -8,7 +8,7 @@
 //! session.
 
 use std::collections::{BTreeMap, HashMap};
-use std::io::{self, BufReader, Read};
+use std::io::{self, BufReader};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::thread;
@@ -16,17 +16,16 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, PtySize};
 
-use super::discovery::{handshake_proof, tokens_match};
+use super::handshake::authenticate;
+use super::idle::idle_monitor;
 use super::session::{ClientLink, ConnWriter, Session};
 use super::transport::{self, Listener, Stream};
 use super::wire::{
-    read_frame, read_frame_limited, split_input, ClientMessage, DaemonMessage, Frame, SessionInfo,
-    WireCommand, PROTOCOL_VERSION,
+    read_frame, split_input, ClientMessage, DaemonMessage, Frame, SessionInfo, WireCommand,
 };
 use crate::constants::{
-    PTY_DAEMON_ACCEPT_RETRY_MS, PTY_DAEMON_HANDSHAKE_TIMEOUT_MS, PTY_DAEMON_HELLO_MAX_BYTES,
-    PTY_DAEMON_IDLE_POLL_MS, PTY_DAEMON_MAX_CONNECTIONS, PTY_DAEMON_SHUTDOWN_TIMEOUT_MS,
-    PTY_DAEMON_WAKE_CONNECT_TIMEOUT_MS,
+    PTY_DAEMON_ACCEPT_RETRY_MS, PTY_DAEMON_IDLE_POLL_MS, PTY_DAEMON_MAX_CONNECTIONS,
+    PTY_DAEMON_SHUTDOWN_TIMEOUT_MS, PTY_DAEMON_WAKE_CONNECT_TIMEOUT_MS,
 };
 use crate::lock_ext::MutexExt;
 use crate::pty::{spawn_command_on, ChildKillOwner, PtyLifecycleHooks, SpawnOptions};
@@ -40,9 +39,9 @@ pub struct DaemonServer {
     token: String,
     sessions: Mutex<HashMap<String, Arc<Session>>>,
     connections: AtomicUsize,
-    next_connection_id: AtomicU64,
+    pub(super) next_connection_id: AtomicU64,
     next_session_seq: AtomicU64,
-    shutdown: AtomicBool,
+    pub(super) shutdown: AtomicBool,
     /// Set by a requested shutdown: no new session is admitted while the
     /// existing ones are torn down (the accept loop keeps serving them).
     draining: AtomicBool,
@@ -50,7 +49,7 @@ pub struct DaemonServer {
     /// a connection accepted just as the daemon goes idle is either counted
     /// before the decision or refused after it — never served by a daemon
     /// that is already exiting.
-    admission: Mutex<()>,
+    pub(super) admission: Mutex<()>,
     /// Own endpoint, used to wake the accept loop on a requested shutdown.
     endpoint: OnceLock<String>,
 }
@@ -168,7 +167,7 @@ impl DaemonServer {
         self.sessions.lock_or_err().map(|s| s.len()).unwrap_or(0)
     }
 
-    fn is_idle(&self) -> bool {
+    pub(super) fn is_idle(&self) -> bool {
         self.connections.load(Ordering::Acquire) == 0 && self.session_count() == 0
     }
 
@@ -181,7 +180,7 @@ impl DaemonServer {
             }
         };
         let mut reader = BufReader::new(stream);
-        if !self.authenticate(&mut reader, &writer) {
+        if !authenticate(&self.token, &mut reader, &writer) {
             writer.close();
             return;
         }
@@ -308,47 +307,6 @@ impl DaemonServer {
             session.detach(connection_id);
         }
     }
-
-    fn authenticate(&self, reader: &mut BufReader<Stream>, writer: &ConnWriter) -> bool {
-        let mut reader = HandshakeReader {
-            inner: reader,
-            deadline: Instant::now() + Duration::from_millis(PTY_DAEMON_HANDSHAKE_TIMEOUT_MS),
-        };
-        match read_frame_limited::<_, ClientMessage>(&mut reader, PTY_DAEMON_HELLO_MAX_BYTES) {
-            Ok(Some(Frame::Control(ClientMessage::Hello {
-                token,
-                protocol_version,
-                nonce,
-            }))) => {
-                if !tokens_match(&token, &self.token) {
-                    writer.error("PTY daemon authentication failed");
-                    return false;
-                }
-                if protocol_version != PROTOCOL_VERSION {
-                    writer.error(&format!(
-                        "PTY daemon protocol {PROTOCOL_VERSION} cannot serve client protocol {protocol_version}"
-                    ));
-                    return false;
-                }
-                let Ok(proof) = handshake_proof(&self.token, &nonce) else {
-                    writer.error("PTY daemon could not prove its identity");
-                    return false;
-                };
-                writer
-                    .send(&DaemonMessage::HelloOk {
-                        protocol_version: PROTOCOL_VERSION,
-                        daemon_pid: std::process::id(),
-                        proof,
-                    })
-                    .is_ok()
-            }
-            _ => {
-                writer.error("PTY daemon handshake expected hello");
-                false
-            }
-        }
-    }
-
     fn spawn_session(
         self: &Arc<Self>,
         writer: &Arc<ConnWriter>,
@@ -501,79 +459,12 @@ impl DaemonServer {
     }
 }
 
-/// Reads the handshake against one deadline for the whole exchange. A plain
-/// socket read timeout restarts on every byte, so a client trickling its
-/// hello could hold a connection slot indefinitely.
-struct HandshakeReader<'a> {
-    inner: &'a mut BufReader<Stream>,
-    deadline: Instant,
-}
-
-impl Read for HandshakeReader<'_> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let remaining = self.deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "PTY daemon handshake deadline passed",
-            ));
-        }
-        self.inner.get_ref().set_read_timeout(Some(remaining))?;
-        self.inner.read(buf)
-    }
-}
-
 /// How long to hold an input frame before writing it to the PTY so the
 /// client's pause before it survives socket buffering. `since_last` is the
 /// time since this connection's previous input reached the PTY; frames that
 /// arrive already spaced by their pause wait for nothing.
 pub(super) fn input_delay(pause: Duration, since_last: Option<Duration>) -> Duration {
     since_last.map_or(Duration::ZERO, |since| pause.saturating_sub(since))
-}
-
-fn idle_monitor(server: Weak<DaemonServer>, endpoint: String, idle_exit: Duration) {
-    let mut idle_since: Option<Instant> = None;
-    // A connection that opened and closed between two polls (a GUI's probe
-    // right before it opens a terminal connection) still counts as activity.
-    let mut seen_admissions = 0;
-    loop {
-        thread::sleep(Duration::from_millis(PTY_DAEMON_IDLE_POLL_MS));
-        let Some(server) = server.upgrade() else {
-            return;
-        };
-        if server.shutdown.load(Ordering::Acquire) {
-            return;
-        }
-        let admissions = server.next_connection_id.load(Ordering::Acquire);
-        if !server.is_idle() || admissions != seen_admissions {
-            seen_admissions = admissions;
-            idle_since = None;
-            continue;
-        }
-        let since = *idle_since.get_or_insert_with(Instant::now);
-        if since.elapsed() < idle_exit {
-            continue;
-        }
-        // Re-check under the admission lock: a connection admitted meanwhile
-        // keeps the daemon alive.
-        let still_idle = match server.admission.lock_or_err() {
-            Ok(_admission) => {
-                let idle = server.is_idle()
-                    && server.next_connection_id.load(Ordering::Acquire) == seen_admissions;
-                if idle {
-                    server.shutdown.store(true, Ordering::Release);
-                }
-                idle
-            }
-            Err(_) => false,
-        };
-        if still_idle {
-            tracing::info!("PTY daemon idle; shutting down");
-            server.request_shutdown(&endpoint);
-            return;
-        }
-        idle_since = None;
-    }
 }
 
 fn reap_if_done(server: &Weak<DaemonServer>, session: &Arc<Session>) {

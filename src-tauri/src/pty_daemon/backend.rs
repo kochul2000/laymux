@@ -1,6 +1,6 @@
 //! Backend selection for new terminals and the daemon endpoint identity.
 
-use super::client::{list_sessions, terminate_by_id};
+use super::control::{list_sessions, terminate_by_id};
 use super::launcher;
 use super::wire::SessionInfo;
 use super::DaemonPaths;

@@ -39,6 +39,8 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 ///     never across `.await` and never while holding another `AppState` lock)
 /// 19. `pty_callback_states` (table mutex; held only to get/insert/remove one
 ///     terminal's `Arc`, never while holding another `AppState` lock)
+/// 20. `pty_daemon_adoption_seen` (leaf: may be taken while holding any lock
+///     above, and never holds another lock itself)
 ///
 /// Never acquire a lower-numbered lock while holding a higher-numbered one.
 /// Inside one terminal-output session, nested locks have their own fixed order:

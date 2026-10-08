@@ -188,7 +188,7 @@ impl Session {
         // the sink. A reader blocked writing to a stalled client releases the
         // sink only once that socket is shut down, and if this client stalls
         // during the replay below, the next attach can evict it the same way.
-        {
+        let attach_epoch = {
             let mut attached = self.attached.lock_or_err()?;
             // Adoption is decided and claimed under this lock, so of two
             // adopters (or an adopter racing a terminate) exactly one wins.
@@ -198,11 +198,11 @@ impl Session {
             if let Some(previous) = attached.replace(link.clone()) {
                 previous.writer.close();
             }
-        }
-        // The epoch moves with the claim, under the same lock a by-id
-        // terminate checks it under, so a stale owner's request cannot slip
-        // in between the claim and the epoch change.
-        let attach_epoch = self.next_attach_epoch_claimed();
+            // The epoch moves with the claim, under the same lock a by-id
+            // terminate checks it under, so a stale owner's request cannot
+            // slip in between the claim and the epoch change.
+            self.next_attach_epoch_claimed()
+        };
         let mut sink = self.sink.lock_or_err()?;
         if let Some(previous) = sink.client.take() {
             previous.writer.close();

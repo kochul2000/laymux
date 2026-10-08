@@ -21,129 +21,18 @@ use portable_pty::{
 };
 
 use super::client_queue::{DaemonReader, DaemonReaderControl, Shared, CONNECTION_LOST_EXIT_CODE};
-use super::discovery::{generate_token, handshake_proof, tokens_match};
+use super::control::{connect_authenticated, terminate_by_id};
 use super::transport::{self, Stream};
 use super::wire::{
-    read_frame, write_control, write_input, ClientMessage, DaemonMessage, Frame, SessionInfo,
-    WireCommand, PROTOCOL_VERSION,
+    read_frame, write_control, write_input, ClientMessage, DaemonMessage, Frame, WireCommand,
 };
 use super::DaemonEndpoint;
 use crate::constants::{
-    PTY_DAEMON_HANDSHAKE_TIMEOUT_MS, PTY_DAEMON_TERMINATE_ATTEMPTS,
-    PTY_DAEMON_TERMINATE_REQUEST_TIMEOUT_MS, PTY_DAEMON_TERMINATE_RETRY_MS, PTY_WRITE_CHUNK_SIZE,
+    PTY_DAEMON_HANDSHAKE_TIMEOUT_MS, PTY_DAEMON_TERMINATE_ATTEMPTS, PTY_DAEMON_TERMINATE_RETRY_MS,
+    PTY_WRITE_CHUNK_SIZE,
 };
 use crate::lock_ext::MutexExt;
 use crate::pty::PTY_READ_BUFFER_BYTES;
-
-/// Open an authenticated connection to the daemon.
-pub(crate) fn connect_authenticated(
-    endpoint: &DaemonEndpoint,
-) -> io::Result<(Stream, BufReader<Stream>)> {
-    connect_authenticated_within(
-        endpoint,
-        Duration::from_millis(PTY_DAEMON_HANDSHAKE_TIMEOUT_MS),
-    )
-}
-
-fn connect_authenticated_within(
-    endpoint: &DaemonEndpoint,
-    timeout: Duration,
-) -> io::Result<(Stream, BufReader<Stream>)> {
-    let stream = transport::connect(&endpoint.endpoint, timeout)?;
-    stream.set_read_timeout(Some(timeout))?;
-    stream.set_write_timeout(Some(timeout))?;
-    let mut writer = stream.try_clone()?;
-    let nonce = generate_token().map_err(io::Error::other)?;
-    write_control(
-        &mut writer,
-        &ClientMessage::Hello {
-            token: endpoint.token.clone(),
-            protocol_version: PROTOCOL_VERSION,
-            nonce: nonce.clone(),
-        },
-    )?;
-    let mut reader = BufReader::new(stream);
-    match read_frame::<_, DaemonMessage>(&mut reader)? {
-        Some(Frame::Control(DaemonMessage::HelloOk {
-            protocol_version,
-            proof,
-            ..
-        })) if protocol_version == PROTOCOL_VERSION => {
-            // Whoever answers must hold the token too; otherwise it is some
-            // other program on a stale endpoint and gets nothing more.
-            if !tokens_match(&proof, &handshake_proof(&endpoint.token, &nonce)?) {
-                return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "PTY daemon endpoint failed to prove it holds the instance token",
-                ));
-            }
-        }
-        Some(Frame::Control(DaemonMessage::Error { message })) => {
-            return Err(io::Error::new(io::ErrorKind::PermissionDenied, message))
-        }
-        other => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("unexpected PTY daemon handshake reply: {other:?}"),
-            ))
-        }
-    }
-    reader.get_ref().set_read_timeout(None)?;
-    writer.set_write_timeout(None)?;
-    Ok((writer, reader))
-}
-
-/// List the daemon's sessions on a short-lived connection.
-pub fn list_sessions(endpoint: &DaemonEndpoint) -> io::Result<Vec<SessionInfo>> {
-    let (mut writer, mut reader) = connect_authenticated(endpoint)?;
-    // A wedged daemon must not hang terminal creation, which lists first.
-    reader
-        .get_ref()
-        .set_read_timeout(Some(Duration::from_millis(PTY_DAEMON_HANDSHAKE_TIMEOUT_MS)))?;
-    write_control(&mut writer, &ClientMessage::List)?;
-    match read_frame::<_, DaemonMessage>(&mut reader)? {
-        Some(Frame::Control(DaemonMessage::Sessions { sessions })) => Ok(sessions),
-        other => Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("unexpected PTY daemon list reply: {other:?}"),
-        )),
-    }
-}
-
-/// Attach to `session_id`, terminate it and wait for its exit code. This is
-/// the explicit way to end a session no GUI holds (for example after a GUI
-/// crash); output replayed by the attach is discarded.
-pub fn terminate_session(endpoint: &DaemonEndpoint, session_id: &str) -> io::Result<u32> {
-    let (mut writer, mut reader) = connect_authenticated(endpoint)?;
-    write_control(
-        &mut writer,
-        &ClientMessage::Attach {
-            session_id: session_id.to_owned(),
-            replay: false,
-            take_over: true,
-        },
-    )?;
-    let mut terminate_sent = false;
-    loop {
-        match read_frame::<_, DaemonMessage>(&mut reader)? {
-            Some(Frame::Control(DaemonMessage::Attached { .. })) if !terminate_sent => {
-                write_control(&mut writer, &ClientMessage::Terminate)?;
-                terminate_sent = true;
-            }
-            Some(Frame::Control(DaemonMessage::Exit { exit_code })) => return Ok(exit_code),
-            Some(Frame::Control(DaemonMessage::Error { message })) if !terminate_sent => {
-                return Err(io::Error::new(io::ErrorKind::NotFound, message))
-            }
-            Some(_) => {}
-            None => {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "PTY daemon closed the connection before the session exited",
-                ))
-            }
-        }
-    }
-}
 
 /// What the daemon PTY of one terminal is bound to.
 #[derive(Debug, Clone)]
@@ -198,7 +87,7 @@ impl DaemonPtySystem {
     /// The metadata stored by the GUI that spawned an adopted session, once
     /// the adoption succeeded.
     pub fn adopted_metadata(&self) -> Option<BTreeMap<String, String>> {
-        self.adopted_metadata.lock().ok()?.clone()
+        self.adopted_metadata.lock_or_err().ok()?.clone()
     }
 }
 
@@ -288,32 +177,6 @@ impl Connection {
         if let Some(error) = last_error {
             tracing::warn!(session_id = %self.session_id, %error, "PTY daemon terminate request failed");
         }
-    }
-}
-
-pub(crate) fn terminate_by_id(
-    endpoint: &DaemonEndpoint,
-    session_id: &str,
-    attach_epoch: Option<u64>,
-) -> io::Result<()> {
-    let timeout = Duration::from_millis(PTY_DAEMON_TERMINATE_REQUEST_TIMEOUT_MS);
-    let (mut writer, mut reader) = connect_authenticated_within(endpoint, timeout)?;
-    reader.get_ref().set_read_timeout(Some(timeout))?;
-    write_control(
-        &mut writer,
-        &ClientMessage::TerminateSession {
-            session_id: session_id.to_owned(),
-            attach_epoch,
-        },
-    )?;
-    match read_frame::<_, DaemonMessage>(&mut reader)? {
-        // An unknown session has already ended and a superseded one belongs
-        // to its newer owner: either way nothing of the requester's is left.
-        Some(Frame::Control(DaemonMessage::Terminating { .. })) => Ok(()),
-        other => Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("unexpected PTY daemon terminate reply: {other:?}"),
-        )),
     }
 }
 

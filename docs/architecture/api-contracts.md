@@ -1957,15 +1957,18 @@ src-tauri/src/
 ├── pty_daemon/               # PTY 데몬 (ADR-0300·0301, data-flow §8.23)
 │   ├── mod.rs                # 공개 재수출
 │   ├── backend.rs            # PtyBackend 선택·DaemonEndpoint·세션 key
-│   ├── server.rs             # 데몬: 연결·인증·세션 catalog
+│   ├── server.rs             # 데몬: 연결·세션 catalog
+│   ├── handshake.rs          # 데몬: 인증 handshake(전체 deadline·proof)
+│   ├── idle.rs               # 데몬: idle 종료 판정
 │   ├── session.rs            # 데몬 세션: attach/detach·backlog
 │   ├── client.rs             # GUI: 원격 PtySystem proxy
+│   ├── control.rs            # GUI: 인증 연결·세션 목록·id 기반 종료
 │   ├── client_queue.rs       # GUI: 유계 수신 queue·exit slot
 │   ├── launcher.rs           # discovery probe·데몬 기동·업데이트 전 shutdown
 │   ├── staging.rs            # Windows: 데몬 실행 파일·ConPTY 사본
 │   ├── entry.rs              # `laymux --pty-daemon` 진입점
 │   ├── wire.rs / transport.rs / discovery.rs  # frame·로컬 socket·token
-│   └── tests.rs              # 실제 PTY·셸 기반 데몬 테스트
+│   └── tests.rs / adoption_tests.rs / handshake_tests.rs  # 실제 PTY·셸 기반 데몬 테스트
 ├── clipboard.rs              # 클립보드 (smart paste, 이미지)
 ├── ipc_server.rs             # IPC 소켓 (lx CLI ↔ IDE)
 ├── output_buffer.rs          # 터미널 출력 링 버퍼
