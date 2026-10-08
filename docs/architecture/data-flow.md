@@ -126,7 +126,8 @@ Windows dev에서 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port
 - Windows 자식은 in-box conhost 가 아니라 실행 파일 옆에 배치한 Microsoft ConPTY
   재배포본(`conpty.dll` + `OpenConsole.exe`)으로 뜬다. `portable-pty` 가
   `LoadLibrary("conpty.dll")` 로 사이드로드본을 kernel32 보다 먼저 찾으므로 PTY 코드에는
-  분기가 없다. 벤더 트리 `src-tauri/vendor/conpty/<version>/`가 정본이고, `build.rs`가
+  분기가 없다. PTY 데몬은 실행 파일과 이 두 파일을 데몬 디렉터리의 `runtime/` 사본으로
+  복사해 그곳에서 실행되므로, 같은 규칙으로 사본 옆의 ConPTY를 쓴다(§8.23). 벤더 트리 `src-tauri/vendor/conpty/<version>/`가 정본이고, `build.rs`가
   dev·`cargo run`용 `target/<profile>/`과 installer용 `gen/conpty/`에 바이트가 정확히
   같은 파일만 배치한다. build script 내부의 `tauri-build` resource 재복사는 제외하고
   부모 Tauri CLI bundling만 `tauri.windows.conf.json` resource map을 사용한다. 지원하지
@@ -947,17 +948,19 @@ overlay caret 이 켜져 있는데도 codex 입력박스에 **어두운 1셀 블
 
 판정과 대안 비교는 [ADR-0079](../adr/0079-dec2026-cursor-gate-lifecycle-bypass.md).
 
-### 8.23 PTY 소유자와 PTY 데몬 (opt-in)
+### 8.23 PTY 소유자와 PTY 데몬
 
-사용자 터미널의 OS PTY와 자식 프로세스를 누가 소유할지는 생성 시점의 `PtyBackend`가 정한다([ADR-0300](../adr/0300-detached-pty-daemon-core.md)). 기본값은 `Local`이며, GUI 프로세스가 `portable-pty` native PTY를 직접 소유한다. `LAYMUX_PTY_DAEMON=1`이면 `Daemon`이 되어, 같은 실행 파일의 `laymux --pty-daemon <dir>` 프로세스가 소유한다. usage probe PTY는 항상 GUI가 소유한다.
+사용자 터미널의 OS PTY와 자식 프로세스를 누가 소유할지는 생성 시점의 `PtyBackend`가 정한다([ADR-0300](../adr/0300-detached-pty-daemon-core.md)). 기본값은 `Daemon`이다. 같은 실행 파일의 `laymux --pty-daemon <dir>` 프로세스가 PTY를 소유한다([ADR-0301](../adr/0301-pty-daemon-default-adoption.md)). `LAYMUX_PTY_DAEMON=0`이면 `Local`이 되어 GUI 프로세스가 `portable-pty` native PTY를 직접 소유한다. 되돌리기용 스위치다. usage probe PTY는 항상 GUI가 소유한다.
 
 ```
 [create_terminal_session]
-    │  pty_daemon::terminal_backend()     (spawn_blocking: 필요 시 데몬 기동·인증 probe)
+    │  pty_daemon::terminal_backend(id)   (spawn_blocking: 필요 시 데몬 기동·인증 probe,
+    │                                      같은 terminal id의 분리 세션이 있으면 adopt)
     │  pty::spawn_pty_on(backend, session, generation, on_output)
     │    명령 구성(argv·전체 env·cwd)은 backend와 무관하게 동일
     │    Local  → native_pty_system()
-    │    Daemon → DaemonPtySystem (터미널마다 연결 1개)
+    │    Daemon → DaemonPtySystem::spawn(새 자식) / ::adopt(살아 있는 세션 attach,
+    │             명령 미실행) — 터미널마다 연결 1개
     ▼
 [pty::spawn_command_on]  ← in-process·데몬 세션·GUI proxy가 공유하는 spawn
     │  PtyHandle(제어 FIFO·reader lifecycle·terminate) — 계약 동일
@@ -977,7 +980,8 @@ GUI proxy(`pty_daemon/client.rs`)는 `PtySystem`·`MasterPty`·`Child`·`Interru
 | `PtyHandle` teardown(터미널 삭제·재시작·업데이트 guard) | master drop·kill → 새 연결로 `terminateSession`을 보내고 `terminating` 응답까지 기다린다(실패는 `kill` 오류로 전파된다). 데몬이 graceful close와 process tree kill을 수행한다. spawn 완료 전에 온 요청은 handle이 생기는 즉시 적용한다 |
 | 앱 정상 종료 | `RunEvent::Exit` → `AppState::terminate_daemon_sessions_on_exit()`가 모든 데몬 터미널의 종료를 병렬로 요청하고, 전체를 2초 deadline으로 묶는다(best-effort) |
 | 자식 스스로 종료 | 데몬이 입력·master를 닫아 남은 출력과 EOF를 받는다(ConPTY는 master를 닫아야 EOF). EOF·exit를 모두 관측하면 세션을 제거하고, attach된 client에는 `Eof`·`Exit`를 보낸다 |
-| `Attach` | 기존 client를 닫고 대체한다. 새 client는 `Attached` → backlog → live 순서로 받는다 |
+| `Attach` | 기존 client를 닫고 대체한다. `replay`가 켜져 있으면 새 client는 `Attached` → backlog → live 순서로 받는다. 꺼져 있으면 backlog를 `droppedBytes`로 버린다 |
+| 업데이트 설치 | guard가 GUI PTY를 종료한 뒤 `shutdown` → 데몬이 모든 세션을 종료하고 끝난다. instance lock이 풀릴 때까지 최대 5초 기다린다 |
 
 GUI는 데몬 자식의 PID를 직접 kill하지 않는다(`ChildKillOwner::Backend`). handle을 가진 데몬이 tree kill을 수행한다. 데몬 연결이 끊기면 GUI reader는 `Failure`로 끝나고 child는 종료로 처리된다. 데몬 안의 작업은 계속 실행되지만, 그 터미널을 teardown하거나 앱을 종료하면 `terminateSession`으로 정리된다.
 
@@ -990,12 +994,21 @@ GUI는 데몬 자식의 PID를 직접 kill하지 않는다(`ChildKillOwner::Back
 
 Windows endpoint는 loopback TCP다. frame은 `u32 LE 길이 | kind(0=JSON control, 1=raw data) | payload`이고 최대 1 MiB다. 인증 전 frame은 4 KiB, 동시 연결은 256개로 제한한다. 첫 frame `hello`의 token과 protocol version이 맞지 않으면 연결을 닫는다. 읽기를 멈춘 client가 있어도 attach는 출력 lock을 기다리기 전에 그 client를 닫고, 목록 조회는 출력 lock을 쓰지 않는다. 메시지 종류는 다음과 같다.
 
-- client → daemon: `spawn`·`attach`·`list`·`resize`·`terminate`·`terminateSession`(아무 연결에서나 id로 종료한다. GUI의 모든 종료 요청이 이 경로를 쓴다)
-- daemon → client: `helloOk`·`spawned`·`attached`·`sessions`·`terminating`·`eof`·`exit`·`error`
+- client → daemon: `spawn`(terminal id·metadata 포함)·`attach`(`replay`)·`list`·`resize`·`terminate`·`terminateSession`(아무 연결에서나 id로 종료한다. GUI의 모든 종료 요청이 이 경로를 쓴다)·`shutdown`
+- daemon → client: `helloOk`·`spawned`·`attached`(metadata 포함)·`sessions`(terminal id·attached·exited·terminating)·`terminating`·`eof`·`exit`·`error`
 
-**기동:** GUI는 Linux에서 `headless_command`와 독립 process group으로 데몬을 띄운다. Windows에서는 handle 상속을 끈 `CreateProcessW`(`CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`, 가능하면 job breakaway)를 쓴다. 데몬은 세션과 연결이 모두 없는 상태가 60초 지속되면 종료한다. opt-in 상태에서 데몬에 연결할 수 없으면 터미널 생성은 실패하며 local로 fallback하지 않는다.
+**기동:** GUI는 Linux에서 `headless_command`와 독립 process group으로 데몬을 띄운다. Windows에서는 먼저 실행 파일과 ConPTY 파일을 `<데몬 디렉터리>/runtime/<크기-수정시각>/`에 복사하고, 그 사본을 handle 상속을 끈 `CreateProcessW`(`CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`, 가능하면 job breakaway)로 띄운다. 그래서 업데이트와 dev 재빌드가 원본을 교체할 수 있다. 실행 파일을 지울 수 있는 다른 사본은 그때 삭제한다. 데몬은 세션과 연결이 모두 없는 상태가 60초 지속되면 종료한다. 데몬에 연결할 수 없으면 터미널 생성은 실패하며 local로 fallback하지 않는다.
 
-**아직 없는 것:** 새 GUI 시작 시 detach된 세션의 pane 재결합, 업데이트 인계, 화면 snapshot, GUI 미접속 중 OSC·훅 처리는 후속 단계다. 따라서 opt-in 상태에서 GUI가 crash하면 그 세션은 자식이 끝날 때까지 데몬에 남고, 이를 끝낼 사용자 경로(UI·CLI)는 아직 없다.
+**재결합:** 터미널 생성 시 `list`에서 같은 terminal id이고, attach되지 않았고, 종료되지도 종료 요청을 받지도 않은 세션을 찾으면 그 세션을 adopt한다. 이때 다음과 같이 처리한다.
+
+- GUI가 만든 명령·resume 복원 요청·Codex 시작 guard는 적용하지 않는다.
+- spawn 때 metadata로 맡긴 agent hook token을 다시 써서, 살아남은 자식의 훅을 계속 인증한다.
+- backlog replay 없이 attach한 뒤 GUI grid 크기로 resize한다. 이전 화면은 복원되지 않고 다음 출력부터 그려진다.
+- CWD는 요청된 시작 디렉터리로 시작해 다음 OSC 7을 따른다.
+
+dev 빌드의 StrictMode는 TerminalView를 한 번 닫았다 다시 열어서, 재결합한 세션을 바로 종료한다. PTY 수명을 dev에서 확인할 때는 `VITE_LAYMUX_STRICT_MODE=0`으로 띄운다([dev-repro-methodology.md §4.7](../dev-repro-methodology.md)).
+
+**아직 없는 것:** 업데이트 인계(업데이트 중 작업 유지), 화면 snapshot, GUI 미접속 중 OSC·훅 처리, 재결합한 셸의 `lx`(`LX_SOCKET`이 이전 GUI를 가리킴), 어느 pane에도 속하지 않는 분리 세션을 보여 주거나 끝내는 사용자 경로는 후속 단계다.
 
 ---
 

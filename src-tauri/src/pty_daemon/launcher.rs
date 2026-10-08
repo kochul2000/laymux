@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use super::client::connect_authenticated;
 use super::discovery::{read_discovery, DaemonPaths};
 use super::wire::PROTOCOL_VERSION;
+use super::wire::{write_control, ClientMessage};
 use super::DaemonEndpoint;
 #[cfg(unix)]
 use crate::constants::PTY_DAEMON_CLI_FLAG;
@@ -42,6 +43,33 @@ pub fn ensure_running(paths: &DaemonPaths) -> Result<DaemonEndpoint, String> {
         }
         thread::sleep(Duration::from_millis(PTY_DAEMON_LAUNCH_POLL_MS));
     }
+}
+
+/// Ask the running daemon (if any) to terminate every session and exit, and
+/// wait until its instance lock is released. Used right before an update
+/// replaces the executable the daemon runs from. Returns whether a daemon was
+/// running.
+pub fn shutdown_running(paths: &DaemonPaths, timeout: Duration) -> Result<bool, String> {
+    if !daemon_instance_alive(paths) {
+        return Ok(false);
+    }
+    if let Some(endpoint) = probe(paths)? {
+        let (mut writer, _reader) = connect_authenticated(&endpoint)
+            .map_err(|error| format!("cannot reach PTY daemon to shut it down: {error}"))?;
+        write_control(&mut writer, &ClientMessage::Shutdown)
+            .map_err(|error| format!("cannot request PTY daemon shutdown: {error}"))?;
+    }
+    let deadline = Instant::now() + timeout;
+    while daemon_instance_alive(paths) {
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "PTY daemon did not exit within {} ms",
+                timeout.as_millis()
+            ));
+        }
+        thread::sleep(Duration::from_millis(PTY_DAEMON_LAUNCH_POLL_MS));
+    }
+    Ok(true)
 }
 
 /// Find a live, authenticated daemon without starting one.
@@ -103,7 +131,11 @@ pub fn spawn_daemon(exe: &Path, paths: &DaemonPaths) -> Result<u32, String> {
         .map_err(|error| format!("cannot create PTY daemon directory: {error}"))?;
     #[cfg(windows)]
     {
-        windows_spawn::spawn_detached(exe, paths.dir())
+        // Run a private copy so the original can be replaced by an update or
+        // a rebuild while the daemon lives.
+        let staged = super::staging::stage(exe, paths.dir())
+            .map_err(|error| format!("cannot stage the PTY daemon runtime: {error}"))?;
+        windows_spawn::spawn_detached(&staged, paths.dir())
     }
     #[cfg(unix)]
     {

@@ -9,6 +9,7 @@
 use portable_pty::CommandBuilder;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
 
 use crate::constants::PTY_DAEMON_MAX_FRAME_BYTES;
@@ -36,13 +37,20 @@ pub enum ClientMessage {
     /// Create a session and bind this connection to it as the attached client.
     Spawn {
         session_id: String,
+        /// GUI terminal (pane) identity; a later GUI adopts by this.
+        terminal_id: String,
         rows: u16,
         cols: u16,
         command: WireCommand,
+        /// Opaque GUI state the daemon stores and returns on attach, so an
+        /// adopting GUI can rebuild what the running child still relies on.
+        #[serde(default)]
+        metadata: BTreeMap<String, String>,
     },
     /// Bind this connection to an existing session, replacing any previously
-    /// attached client. Output retained while detached is delivered first.
-    Attach { session_id: String },
+    /// attached client. With `replay`, output retained while detached is
+    /// delivered first; without it the backlog is discarded.
+    Attach { session_id: String, replay: bool },
     /// Describe live sessions. Valid on an unbound connection.
     List,
     /// Resize the bound session's PTY.
@@ -53,6 +61,9 @@ pub enum ClientMessage {
     /// connection for this when its terminal connection is busy or broken,
     /// so ending work never waits behind a stuck input write.
     TerminateSession { session_id: String },
+    /// Terminate every session, then exit the daemon. Used before an update
+    /// replaces the executable the daemon runs from.
+    Shutdown,
 }
 
 /// Messages the daemon sends to a client.
@@ -74,6 +85,7 @@ pub enum DaemonMessage {
         child_pid: Option<u32>,
         /// Detached output that did not fit the backlog and was discarded.
         dropped_bytes: u64,
+        metadata: BTreeMap<String, String>,
     },
     Sessions {
         sessions: Vec<SessionInfo>,
@@ -154,9 +166,12 @@ impl WireCommand {
 #[serde(rename_all = "camelCase")]
 pub struct SessionInfo {
     pub session_id: String,
+    pub terminal_id: String,
     pub child_pid: Option<u32>,
     pub attached: bool,
     pub exited: bool,
+    /// A terminate was requested; the session is going away.
+    pub terminating: bool,
 }
 
 #[derive(Debug)]
@@ -284,6 +299,8 @@ mod tests {
             &mut buf,
             &ClientMessage::Spawn {
                 session_id: "t:1".into(),
+                terminal_id: "t".into(),
+                metadata: BTreeMap::new(),
                 rows: 24,
                 cols: 80,
                 command: WireCommand::from_builder(&command).unwrap(),
@@ -293,6 +310,8 @@ mod tests {
         match read_frame::<_, ClientMessage>(&mut Cursor::new(buf)).unwrap() {
             Some(Frame::Control(ClientMessage::Spawn {
                 session_id,
+                terminal_id: _,
+                metadata: _,
                 rows,
                 cols,
                 command,

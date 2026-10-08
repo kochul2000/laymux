@@ -19,6 +19,8 @@ mod entry;
 mod launcher;
 mod server;
 mod session;
+#[cfg(windows)]
+mod staging;
 mod transport;
 mod wire;
 
@@ -29,5 +31,5 @@ pub use backend::{is_enabled, session_key, terminal_backend, DaemonEndpoint};
 pub use client::{list_sessions, terminate_session, DaemonPtySystem};
 pub use discovery::DaemonPaths;
 pub use entry::run_daemon_main;
-pub use launcher::{ensure_running, find_running, spawn_daemon};
+pub use launcher::{ensure_running, find_running, shutdown_running, spawn_daemon};
 pub use wire::SessionInfo;

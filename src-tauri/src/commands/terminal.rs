@@ -332,8 +332,22 @@ pub async fn create_terminal_session(
         advertise_true_color: settings.terminal.advertise_true_color,
     };
 
-    let codex_startup_color_probe = startup_plan
-        .arm_native_windows_codex_color_probe
+    // Resolve the PTY owner before reserving anything, so an unreachable
+    // daemon fails this create without a generation to roll back. Starting a
+    // daemon may block briefly, so keep it off the async executor.
+    let backend_terminal_id = id.clone();
+    let backend = tokio::task::spawn_blocking(move || {
+        crate::pty_daemon::terminal_backend(&backend_terminal_id)
+    })
+    .await
+    .map_err(|error| format!("PTY backend selection panicked: {error}"))??;
+    // Adopting a session an earlier GUI left running continues that child:
+    // no resume command runs and no startup-only guard applies (ADR-0301).
+    let adopting = backend.adopts();
+    let session_restore = session_restore.filter(|_| !adopting);
+
+    let codex_startup_color_probe = (startup_plan.arm_native_windows_codex_color_probe
+        && !adopting)
         .then(|| Arc::new(crate::terminal::NativeWindowsCodexColorProbeGuard::armed()));
     let bootstrap_da_reply =
         cfg!(windows).then(|| Arc::new(crate::terminal::TerminalBootstrapDaReplyGuard::armed()));
@@ -344,13 +358,6 @@ pub async fn create_terminal_session(
     ));
     session.cwd_send = cwd_send.unwrap_or(true);
     session.cwd_receive = cwd_receive.unwrap_or(true);
-
-    // Resolve the PTY owner before reserving anything, so an unreachable
-    // daemon fails this create without a generation to roll back. Starting a
-    // daemon may block briefly, so keep it off the async executor.
-    let backend = tokio::task::spawn_blocking(crate::pty_daemon::terminal_backend)
-        .await
-        .map_err(|error| format!("PTY backend selection panicked: {error}"))??;
 
     // Check and reserve while holding the terminal catalog lock. Close takes
     // the same lock before selecting a generation, so it cannot observe an
@@ -1036,6 +1043,14 @@ pub async fn create_terminal_session(
         pty::PtyOutputControl::Continue
     })?;
     session.initial_execution_host = spawned_pty.initial_execution_host;
+    if let Some(metadata) = spawned_pty.adopted.as_ref() {
+        // The adopted child authenticates its hooks with the token it was
+        // started with.
+        if let Some(token) = metadata.get(PTY_DAEMON_METADATA_AGENT_HOOK_TOKEN) {
+            session.agent_hook_token = token.clone();
+        }
+        tracing::info!(terminal_id = %id, "adopted a running PTY daemon session");
+    }
     // Seed the CWD from the directory the PTY was actually started in. OSC 7 is
     // only accepted while the terminal is a plain shell (issue #215), so a pane
     // restored straight into `claude --resume` / `codex resume` is classified as

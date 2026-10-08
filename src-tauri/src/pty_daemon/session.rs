@@ -1,7 +1,7 @@
 //! One daemon session: the native PTY, its attached client and the output
 //! retained while detached.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -58,6 +58,9 @@ pub(super) struct ClientLink {
 
 pub(super) struct Session {
     pub(super) id: String,
+    pub(super) terminal_id: String,
+    /// Opaque GUI state returned to an adopting client.
+    pub(super) metadata: BTreeMap<String, String>,
     pub(super) handle: OnceLock<PtyHandle>,
     pub(super) sink: Mutex<Sink>,
     /// Mirror of `sink.client` kept outside the sink lock. The PTY reader can
@@ -94,9 +97,11 @@ impl Sink {
 }
 
 impl Session {
-    pub(super) fn new(id: String) -> Self {
+    pub(super) fn new(id: String, terminal_id: String, metadata: BTreeMap<String, String>) -> Self {
         Self {
             id,
+            terminal_id,
+            metadata,
             handle: OnceLock::new(),
             sink: Mutex::new(Sink::default()),
             attached: Mutex::new(None),
@@ -159,6 +164,7 @@ impl Session {
         &self,
         writer: &Arc<ConnWriter>,
         connection_id: u64,
+        replay: bool,
     ) -> Result<(), String> {
         let link = ClientLink {
             connection_id,
@@ -179,12 +185,20 @@ impl Session {
             return Err("PTY daemon attach was superseded by a newer attach".into());
         }
         let child_pid = self.handle.get().and_then(PtyHandle::child_pid);
+        // Without replay the retained bytes are discarded instead of handed
+        // to a client that would parse them as live output (and answer the
+        // terminal queries inside them again).
+        if !replay {
+            sink.dropped_bytes += sink.backlog.len() as u64;
+            sink.backlog.clear();
+        }
         // Consume the backlog only once it was delivered, so a client that
         // drops mid-replay leaves it for the next attach.
         let delivered = writer
             .send(&DaemonMessage::Attached {
                 child_pid,
                 dropped_bytes: sink.dropped_bytes,
+                metadata: self.metadata.clone(),
             })
             .and_then(|()| {
                 let (front, back) = sink.backlog.as_slices();
@@ -283,9 +297,11 @@ impl Session {
         let attached = self.attached.lock_or_err().ok()?.is_some();
         Some(SessionInfo {
             session_id: self.id.clone(),
+            terminal_id: self.terminal_id.clone(),
             child_pid: self.handle.get().and_then(PtyHandle::child_pid),
             attached,
             exited: self.exited.load(Ordering::Acquire),
+            terminating: self.terminate_requested(),
         })
     }
 

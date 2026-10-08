@@ -7,6 +7,7 @@
 //! Each terminal uses its own connection, so one flooding terminal never
 //! delays another terminal's output or control frames.
 
+use std::collections::BTreeMap;
 use std::io::{self, BufReader, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -99,6 +100,7 @@ pub fn terminate_session(endpoint: &DaemonEndpoint, session_id: &str) -> io::Res
         &mut writer,
         &ClientMessage::Attach {
             session_id: session_id.to_owned(),
+            replay: false,
         },
     )?;
     let mut terminate_sent = false;
@@ -123,17 +125,60 @@ pub fn terminate_session(endpoint: &DaemonEndpoint, session_id: &str) -> io::Res
     }
 }
 
+/// What the daemon PTY of one terminal is bound to.
+#[derive(Debug, Clone)]
+enum DaemonTarget {
+    /// Spawn a new child in a new session.
+    Spawn {
+        terminal_id: String,
+        metadata: BTreeMap<String, String>,
+    },
+    /// Take over a session a previous GUI left running. The command handed
+    /// to `spawn_command` is not run.
+    Adopt,
+}
+
 pub struct DaemonPtySystem {
     endpoint: DaemonEndpoint,
     session_id: String,
+    target: DaemonTarget,
+    adopted_metadata: Arc<Mutex<Option<BTreeMap<String, String>>>>,
 }
 
 impl DaemonPtySystem {
-    pub fn new(endpoint: DaemonEndpoint, session_id: String) -> Self {
+    pub fn spawn(
+        endpoint: DaemonEndpoint,
+        session_id: String,
+        terminal_id: String,
+        metadata: BTreeMap<String, String>,
+    ) -> Self {
+        Self::with_target(
+            endpoint,
+            session_id,
+            DaemonTarget::Spawn {
+                terminal_id,
+                metadata,
+            },
+        )
+    }
+
+    pub fn adopt(endpoint: DaemonEndpoint, session_id: String) -> Self {
+        Self::with_target(endpoint, session_id, DaemonTarget::Adopt)
+    }
+
+    fn with_target(endpoint: DaemonEndpoint, session_id: String, target: DaemonTarget) -> Self {
         Self {
             endpoint,
             session_id,
+            target,
+            adopted_metadata: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// The metadata stored by the GUI that spawned an adopted session, once
+    /// the adoption succeeded.
+    pub fn adopted_metadata(&self) -> Option<BTreeMap<String, String>> {
+        self.adopted_metadata.lock().ok()?.clone()
     }
 }
 
@@ -154,6 +199,8 @@ impl PtySystem for DaemonPtySystem {
             slave: Box::new(DaemonSlave {
                 connection: Arc::clone(&connection),
                 session_id: self.session_id.clone(),
+                target: self.target.clone(),
+                adopted_metadata: Arc::clone(&self.adopted_metadata),
             }),
             master: Box::new(DaemonMaster { connection }),
         })
@@ -214,18 +261,31 @@ pub(crate) fn terminate_by_id(endpoint: &DaemonEndpoint, session_id: &str) -> io
 struct DaemonSlave {
     connection: Arc<Connection>,
     session_id: String,
+    target: DaemonTarget,
+    adopted_metadata: Arc<Mutex<Option<BTreeMap<String, String>>>>,
 }
 
 impl SlavePty for DaemonSlave {
     fn spawn_command(&self, cmd: CommandBuilder) -> anyhow::Result<Box<dyn Child + Send + Sync>> {
-        let command = WireCommand::from_builder(&cmd).map_err(|error| anyhow!(error))?;
         let size = *self.connection.size.lock_or_err().map_err(|e| anyhow!(e))?;
-        self.connection.send(&ClientMessage::Spawn {
-            session_id: self.session_id.clone(),
-            rows: size.rows,
-            cols: size.cols,
-            command,
-        })?;
+        let request = match &self.target {
+            DaemonTarget::Spawn {
+                terminal_id,
+                metadata,
+            } => ClientMessage::Spawn {
+                session_id: self.session_id.clone(),
+                terminal_id: terminal_id.clone(),
+                rows: size.rows,
+                cols: size.cols,
+                command: WireCommand::from_builder(&cmd).map_err(|error| anyhow!(error))?,
+                metadata: metadata.clone(),
+            },
+            DaemonTarget::Adopt => ClientMessage::Attach {
+                session_id: self.session_id.clone(),
+                replay: false,
+            },
+        };
+        self.connection.send(&request)?;
         let mut reader = self
             .connection
             .reader
@@ -240,12 +300,31 @@ impl SlavePty for DaemonSlave {
             .set_read_timeout(Some(Duration::from_millis(PTY_DAEMON_HANDSHAKE_TIMEOUT_MS)))?;
         let child_pid = match read_frame::<_, DaemonMessage>(&mut reader)? {
             Some(Frame::Control(DaemonMessage::Spawned { child_pid })) => child_pid,
+            Some(Frame::Control(DaemonMessage::Attached {
+                child_pid,
+                metadata,
+                ..
+            })) if matches!(self.target, DaemonTarget::Adopt) => {
+                *self
+                    .adopted_metadata
+                    .lock_or_err()
+                    .map_err(|e| anyhow!(e))? = Some(metadata);
+                child_pid
+            }
             Some(Frame::Control(DaemonMessage::Error { message })) => {
                 return Err(anyhow!("PTY daemon spawn failed: {message}"))
             }
             other => return Err(anyhow!("unexpected PTY daemon spawn reply: {other:?}")),
         };
         reader.get_ref().set_read_timeout(None)?;
+        if matches!(self.target, DaemonTarget::Adopt) {
+            // The adopting GUI's grid may differ from the size the session
+            // last had; apply it before any new output is produced for it.
+            self.connection.send(&ClientMessage::Resize {
+                rows: size.rows,
+                cols: size.cols,
+            })?;
+        }
         let shared = Arc::clone(&self.connection.shared);
         let session_id = self.session_id.clone();
         thread::spawn(move || pump(reader, shared, session_id));
