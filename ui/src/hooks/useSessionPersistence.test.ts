@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, waitFor } from "@testing-library/react";
 
 vi.mock("@/lib/persist-session", () => ({
   persistSession: vi.fn().mockResolvedValue(undefined),
@@ -183,10 +183,7 @@ describe("useSessionPersistence", () => {
     };
     vi.mocked(loadSettingsValidated).mockResolvedValueOnce(wrapOk(saved));
     const { result } = renderHook(() => useSessionPersistence());
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    });
-    expect(result.current.loaded).toBe(true);
+    await waitFor(() => expect(result.current.loaded).toBe(true));
     expect(useWorkspaceStore.getState().workspaces).toEqual(saved.workspaces);
     expect(useWorkspaceStore.getState().layouts).toEqual([]);
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("saved-workspace");
@@ -212,14 +209,33 @@ describe("useSessionPersistence", () => {
       })),
     };
     vi.mocked(loadSettingsValidated).mockResolvedValueOnce(wrapOk(current));
-    renderHook(() => useSessionPersistence());
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    });
+    const { result } = renderHook(() => useSessionPersistence());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
     await act(async () => {
       resolveRetired(initial);
     });
     expect(useWorkspaceStore.getState().workspaces[0].id).toBe("current-workspace");
+  });
+
+  it("does not block current persistence when a retired loader fails late", async () => {
+    let rejectRetired!: (error: Error) => void;
+    vi.mocked(loadSettingsValidated).mockReturnValueOnce(
+      new Promise((_resolve, reject) => {
+        rejectRetired = reject;
+      }),
+    );
+    const retired = renderHook(() => useSessionPersistence());
+    retired.unmount();
+    const { result } = renderHook(() => useSessionPersistence());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    expect(setBlockPersist).not.toHaveBeenCalled();
+
+    await act(async () => {
+      rejectRetired(new Error("retired read failed"));
+    });
+
+    expect(result.current.loaded).toBe(true);
+    expect(setBlockPersist).not.toHaveBeenCalled();
   });
 
   it("applies loaded settings to settings store", async () => {
