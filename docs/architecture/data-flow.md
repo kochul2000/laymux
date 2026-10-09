@@ -144,7 +144,7 @@ IDE가 TerminalView를 spawn할 때 아래 환경변수를 자동 주입한다(`
 
 ```bash
 # IDE가 터미널 spawn 시 자동 주입
-LX_SOCKET=...            # IDE IPC 엔드포인트 — Linux: /tmp/lx-{session}.sock (Unix socket) / Windows: 127.0.0.1:{port} (TCP)
+LX_ENDPOINT_FILE=...     # build kind별 고정 endpoint 파일 경로(설정 디렉터리의 lx-endpoint.json, ADR-0304). lx 가 호출마다 읽어 현재 GUI 의 IPC 엔드포인트(Linux: /tmp/lx-{session}.sock / Windows: 127.0.0.1:{port})를 얻는다
 LX_TERMINAL_ID=...       # 현재 터미널 인스턴스 ID (terminal-pane-{uuid8})
 LX_GROUP_ID=...          # 현재 SyncGroup ID
 LX_AUTOMATION_PORT=...   # Automation API 포트 (release 19280 / dev 19281)
@@ -1011,7 +1011,7 @@ Windows endpoint는 loopback TCP다. frame은 `u32 LE 길이 | kind(0=JSON contr
 
 dev 빌드의 StrictMode는 TerminalView를 한 번 닫았다 다시 열어서, 재결합한 세션을 바로 종료한다. PTY 수명을 dev에서 확인할 때는 `VITE_LAYMUX_STRICT_MODE=0`으로 띄운다([dev-repro-methodology.md §4.7](../dev-repro-methodology.md)).
 
-**아직 없는 것:** 업데이트 인계(업데이트 중 작업 유지), 화면 snapshot, GUI 미접속 중 OSC·훅 처리, 재결합한 셸의 `lx`(`LX_SOCKET`이 이전 GUI를 가리킴), 어느 pane에도 속하지 않는 분리 세션을 보여 주거나 끝내는 사용자 경로는 후속 단계다.
+**아직 없는 것:** 업데이트 인계(업데이트 중 작업 유지), 화면 snapshot, GUI 미접속 중 OSC·훅 처리, 어느 pane에도 속하지 않는 분리 세션을 보여 주거나 끝내는 사용자 경로는 후속 단계다.
 
 ---
 

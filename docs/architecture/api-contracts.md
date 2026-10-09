@@ -1972,6 +1972,7 @@ src-tauri/src/
 │   └── tests.rs / adoption_tests.rs / handshake_tests.rs  # 실제 PTY·셸 기반 데몬 테스트
 ├── clipboard.rs              # 클립보드 (smart paste, 이미지)
 ├── ipc_server.rs             # IPC 소켓 (lx CLI ↔ IDE)
+├── lx_endpoint.rs            # lx endpoint 파일 게시·해석 (ADR-0304)
 ├── output_buffer.rs          # 터미널 출력 링 버퍼
 ├── port_detect.rs            # 리스닝 포트 감지
 ├── git_watcher.rs            # Git 브랜치 감지
@@ -2063,12 +2064,12 @@ poison recovery도 이 순서를 바꾸지 않는다. discard helper는 역순 �
 ```rust
 // ❌ 금지 — 문자열 리터럴 직접 사용
 app.emit("terminal-cwd-changed", payload);
-env.push(("LX_SOCKET".to_string(), path));
+env.push(("LX_ENDPOINT_FILE".to_string(), path));
 
 // ✅ 사용
 use crate::constants::*;
 app.emit(EVENT_TERMINAL_CWD_CHANGED, payload);
-env.push((ENV_LX_SOCKET.to_string(), path));
+env.push((ENV_LX_ENDPOINT_FILE.to_string(), path));
 ```
 
 **예외**: 해당 모듈에서만 사용되는 내부 상수는 모듈 내에 정의해도 된다.
