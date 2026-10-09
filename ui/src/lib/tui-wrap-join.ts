@@ -203,10 +203,10 @@ export function joinTuiWrappedLines(
       line.length > join.contentOffset
     ) {
       // 앱이 행 끝까지 공백을 직접 쓰면 선택 문자열에 그대로 남아 있다.
+      // 선택이 앞 행 내용 오른쪽 빈칸에서 시작했으면 앞 줄이 비어 있다 — 구분자를 넣지 않는다.
+      const head = out[out.length - 1].replace(/[ \t]+$/, "");
       out[out.length - 1] =
-        out[out.length - 1].replace(/[ \t]+$/, "") +
-        join.separator +
-        line.slice(join.contentOffset);
+        head + (head === "" ? "" : join.separator) + line.slice(join.contentOffset);
     } else {
       out.push(line);
     }

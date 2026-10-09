@@ -20,6 +20,22 @@ describe("TERMINAL_URL_REGEX", () => {
     expect(urls("[link](https://example.com/a)")).toEqual(["https://example.com/a"]);
   });
 
+  it("작은따옴표에서 끝난다 — 코드의 문자열 리터럴 경계", () => {
+    expect(urls("origins = ['http://localhost:3000','http://localhost:5173']")).toEqual([
+      "http://localhost:3000",
+      "http://localhost:5173",
+    ]);
+    expect(urls("fetch('https://api.x.com/v1/'+id)")).toEqual(["https://api.x.com/v1/"]);
+    expect(urls("echo 'https://a.com/x';ls")).toEqual(["https://a.com/x"]);
+  });
+
+  it("짝이 맞는 대괄호(배열 쿼리)는 포함하고, 감싸는 대괄호는 뺀다", () => {
+    expect(urls("https://api.example.com/items?filter[name]=foo&page[size]=10")).toEqual([
+      "https://api.example.com/items?filter[name]=foo&page[size]=10",
+    ]);
+    expect(urls("[https://example.com/a]")).toEqual(["https://example.com/a"]);
+  });
+
   it("전각 구두점에서 끝난다", () => {
     expect(urls("https://example.com/a。")).toEqual(["https://example.com/a"]);
     expect(urls("「https://example.com/a」")).toEqual(["https://example.com/a"]);

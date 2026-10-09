@@ -233,6 +233,16 @@ describe("joinTuiWrappedLines — xterm 선택 문자열 규칙", () => {
     ]);
   });
 
+  it("선택이 앞 행 내용 오른쪽 빈칸에서 시작해 첫 줄이 비면 선두 공백을 넣지 않는다", () => {
+    const rows = makePaddedLines(CLAUDE.englishParagraph, CAPTURE_COLS);
+    const lines = selectionLines(CLAUDE.englishParagraph);
+    lines[0] = "";
+    expect(joinTuiWrappedLines(lines, rows, CAPTURE_COLS)).toEqual([
+      "has to wrap it across several visual rows, which lets us observe whether the wrapped " +
+        "rows are stored as soft wraps or hard newlines.",
+    ]);
+  });
+
   it("버퍼의 NBSP 는 선택 문자열에서 공백이다", () => {
     const texts = ["  aaaaaaaa bbbbbbbbb", "  cccc"];
     const rows = makePaddedLines(texts, 20);
