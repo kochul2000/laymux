@@ -1,15 +1,16 @@
 //! PTY daemon session inventory for the settings panel and automation
-//! (ADR-0306). The daemon calls block on local IPC, so every entry point runs
-//! off the async runtime.
+//! (ADR-0306). The daemon calls block on local IPC and the layout read on
+//! disk, so every entry point runs off the async runtime.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use serde::Deserialize;
 use tauri::State;
 
 use crate::lock_ext::MutexExt;
-use crate::pty_daemon::{self, PtySessionInventory, TerminateOutcome};
+use crate::pty_daemon::{
+    self, KnownTerminals, PtySessionInventory, TerminateDetachedResult, TerminateOutcome,
+};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -21,17 +22,31 @@ pub struct TerminatePtySessionRequest {
     pub attach_epoch: u64,
 }
 
-/// Terminals this GUI's panes own.
-fn pane_terminal_ids(state: &AppState) -> Result<HashSet<String>, String> {
-    Ok(state.pty_handles.lock_or_err()?.keys().cloned().collect())
+/// This GUI's live panes and the saved layout's terminals.
+fn known_terminals(state: &AppState) -> Result<KnownTerminals, String> {
+    let panes = state.pty_handles.lock_or_err()?.keys().cloned().collect();
+    KnownTerminals::load(panes)
 }
 
 pub fn list_pty_sessions_inner(state: &AppState) -> Result<PtySessionInventory, String> {
-    pty_daemon::inventory(&pane_terminal_ids(state)?)
+    pty_daemon::inventory(&known_terminals(state)?)
 }
 
-pub fn terminate_detached_pty_sessions_inner(state: &AppState) -> Result<usize, String> {
-    pty_daemon::terminate_detached(&pane_terminal_ids(state)?)
+pub fn terminate_pty_session_inner(
+    state: &AppState,
+    request: &TerminatePtySessionRequest,
+) -> Result<TerminateOutcome, String> {
+    pty_daemon::terminate_listed_session(
+        &request.session_id,
+        request.attach_epoch,
+        &known_terminals(state)?,
+    )
+}
+
+pub fn terminate_detached_pty_sessions_inner(
+    state: &AppState,
+) -> Result<TerminateDetachedResult, String> {
+    pty_daemon::terminate_detached(&known_terminals(state)?)
 }
 
 async fn blocking<T: Send + 'static>(
@@ -52,18 +67,17 @@ pub async fn list_pty_sessions(
 
 #[tauri::command(async)]
 pub async fn terminate_pty_session(
+    state: State<'_, Arc<AppState>>,
     request: TerminatePtySessionRequest,
 ) -> Result<TerminateOutcome, String> {
-    blocking(move || {
-        pty_daemon::terminate_listed_session(&request.session_id, request.attach_epoch)
-    })
-    .await
+    let state = Arc::clone(&state);
+    blocking(move || terminate_pty_session_inner(&state, &request)).await
 }
 
 #[tauri::command(async)]
 pub async fn terminate_detached_pty_sessions(
     state: State<'_, Arc<AppState>>,
-) -> Result<usize, String> {
+) -> Result<TerminateDetachedResult, String> {
     let state = Arc::clone(&state);
     blocking(move || terminate_detached_pty_sessions_inner(&state)).await
 }

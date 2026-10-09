@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/Button";
+import { TwoClickConfirmButton } from "@/components/ui/TwoClickConfirmButton";
 import {
   listPtySessions,
   terminateDetachedPtySessions,
@@ -10,13 +10,17 @@ import {
 } from "@/lib/pty-sessions-api";
 import { SettingsGroup } from "./SettingsLayout";
 
-/** Sessions held by this GUI's panes are ended by closing the pane, not here. */
+/**
+ * Only sessions nothing will ever hold again can be ended here. A pane's
+ * session ends with its pane, and one the saved layout awaits (an unopened
+ * workspace, a dock) is adopted when that pane mounts.
+ */
 const ENDABLE_STATES = new Set<PtySessionEntry["state"]>(["detached"]);
 
 /**
  * PTY daemon session inventory (ADR-0306): what still runs in the daemon and
- * a way to end what no pane holds any more — work left behind when the GUI
- * crashed before its layout was saved.
+ * a way to end what no pane holds or will hold — work left behind when the
+ * GUI crashed before its layout was saved.
  */
 export function PtySessionsSection() {
   const { t } = useTranslation("settings");
@@ -67,7 +71,13 @@ export function PtySessionsSection() {
   const endOne = (entry: PtySessionEntry) =>
     run(async () => t(`ptySessions.outcome.${await terminatePtySession(entry)}`));
   const endDetached = () =>
-    run(async () => t("ptySessions.endedCount", { count: await terminateDetachedPtySessions() }));
+    run(async () => {
+      const result = await terminateDetachedPtySessions();
+      const ended = t("ptySessions.endedCount", { count: result.ended });
+      return result.failed.length === 0
+        ? ended
+        : `${ended} ${t("ptySessions.failedSome", { failures: result.failed.join("; ") })}`;
+    });
 
   const sessions = inventory?.sessions ?? [];
   const detached = sessions.filter((entry) => entry.state === "detached").length;
@@ -85,39 +95,50 @@ export function PtySessionsSection() {
                   ? t("ptySessions.notRunning")
                   : t("ptySessions.summary", { count: sessions.length, detached })}
           </p>
-          <Button
-            onClick={endDetached}
+          <TwoClickConfirmButton
+            className="ui-btn ui-btn-secondary"
+            onConfirm={() => void endDetached()}
+            confirmLabel={t("ptySessions.endDetachedConfirm", { count: detached })}
+            confirmChildren={t("ptySessions.confirm")}
             disabled={busy || detached === 0}
             data-testid="pty-sessions-end-detached"
           >
             {t("ptySessions.endDetached")}
-          </Button>
+          </TwoClickConfirmButton>
         </div>
         {sessions.length > 0 && (
           <table className="pty-sessions-table" data-testid="pty-sessions-table">
             <thead>
               <tr>
                 <th>{t("ptySessions.terminal")}</th>
+                <th>{t("ptySessions.profile")}</th>
                 <th>{t("ptySessions.pid")}</th>
                 <th>{t("ptySessions.state")}</th>
-                <th />
+                <th aria-label={t("ptySessions.actions")} />
               </tr>
             </thead>
             <tbody>
               {sessions.map((entry) => (
                 <tr key={entry.sessionId} data-state={entry.state}>
                   <td className="pty-sessions-table__terminal">{entry.terminalId}</td>
+                  <td>{entry.profile ?? "—"}</td>
                   <td>{entry.childPid ?? "—"}</td>
                   <td>{t(`ptySessions.states.${entry.state}`)}</td>
                   <td>
                     {ENDABLE_STATES.has(entry.state) && (
-                      <Button
-                        onClick={() => void endOne(entry)}
+                      <TwoClickConfirmButton
+                        className="ui-btn ui-btn-secondary"
+                        onConfirm={() => void endOne(entry)}
+                        aria-label={t("ptySessions.endOne", { terminal: entry.terminalId })}
+                        confirmLabel={t("ptySessions.endOneConfirm", {
+                          terminal: entry.terminalId,
+                        })}
+                        confirmChildren={t("ptySessions.confirm")}
                         disabled={busy}
                         data-testid={`pty-session-end-${entry.sessionId}`}
                       >
                         {t("ptySessions.end")}
-                      </Button>
+                      </TwoClickConfirmButton>
                     )}
                   </td>
                 </tr>
@@ -126,7 +147,7 @@ export function PtySessionsSection() {
           </table>
         )}
         {notice && (
-          <p className="pty-sessions-muted" data-testid="pty-sessions-notice">
+          <p className="pty-sessions-muted" aria-live="polite" data-testid="pty-sessions-notice">
             {notice}
           </p>
         )}

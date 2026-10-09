@@ -937,19 +937,29 @@
     },
     "ptySessions": {
       "title": "PTY sessions",
-      "description": "Shells and agents run in the PTY daemon so they survive a GUI crash. Sessions no pane holds — left behind when the app crashed before its layout was saved — keep running until they end here.",
+      "description": "Shells and agents run in the PTY daemon so they survive a GUI crash. A session no pane holds and the saved layout will not restore — left behind when the app crashed before its layout was saved — keeps running until it is ended here. Sessions of workspaces not opened yet are kept for their panes.",
       "loading": "Loading…",
       "notRunning": "The PTY daemon is not running.",
-      "unavailable": "The PTY daemon did not answer: {{error}}",
-      "summary": "{{count}} session(s), {{detached}} not held by any pane.",
+      "unavailable": "Could not list PTY sessions: {{error}}",
+      "summary_one": "{{count}} session, {{detached}} detached.",
+      "summary_other": "{{count}} sessions, {{detached}} detached.",
       "endDetached": "End all detached",
+      "endDetachedConfirm": "Click again to end {{count}} detached session(s)",
       "end": "End",
-      "endedCount": "Ended {{count}} detached session(s).",
+      "endOne": "End session {{terminal}}",
+      "endOneConfirm": "Click again to end session {{terminal}}",
+      "confirm": "Confirm",
+      "endedCount_one": "Ended {{count}} detached session.",
+      "endedCount_other": "Ended {{count}} detached sessions.",
+      "failedSome": "Some could not be ended: {{failures}}",
       "terminal": "Terminal",
+      "profile": "Profile",
       "pid": "PID",
       "state": "State",
+      "actions": "Actions",
       "states": {
         "pane": "In a pane",
+        "awaitingPane": "Waiting for its pane",
         "detached": "Detached",
         "otherClient": "Other client",
         "ending": "Ending"
@@ -957,6 +967,7 @@
       "outcome": {
         "terminated": "The session is ending.",
         "superseded": "A pane attached to the session in the meantime; it was left running.",
+        "notDetached": "The session is no longer detached; it was left running.",
         "gone": "The session had already ended."
       }
     }

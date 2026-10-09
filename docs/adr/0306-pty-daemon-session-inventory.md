@@ -25,18 +25,19 @@ Orca 사고에서 얻은 규칙이 둘 있다. 목록 조회 실패를 "세션 �
 
 ## Decision
 
-**GUI는 PTY 데몬 세션 목록을 사용자에게 보여 주고, 어느 pane도 잡고 있지 않은 세션만 사용자가 끝낼 수 있게 한다. 종료 요청에는 목록에서 본 attach epoch를 싣는다.**
+**GUI는 PTY 데몬 세션 목록을 사용자에게 보여 준다. 어느 pane도 잡고 있지 않고 저장된 레이아웃도 다시 붙이지 않을 세션만 사용자가 끝낼 수 있다. 종료 요청에는 목록에서 본 attach epoch를 싣는다.**
 
-- **분류.** 세션은 다음 넷 중 하나로 보여 준다.
+- **분류.** 세션은 다음 다섯 가지 중 하나로 보여 준다. "이 GUI가 아는 터미널"은 지금 살아 있는 pane과, **저장된 레이아웃(로컬 상태 DB의 세션 스냅샷)이 복원할 모든 TerminalView**를 합한 것이다. 레이아웃에는 아직 열지 않은 워크스페이스의 pane, 스택의 모든 layer, dock pane이 포함된다.
   - `pane`: attach됐고 이 GUI의 터미널이 잡고 있음
-  - `detached`: attach된 client가 없음
+  - `awaitingPane`: attach된 client는 없지만 이 GUI가 아는 터미널. 워크스페이스는 처음 열 때 마운트되므로(lazy mount), crash 뒤 열지 않은 워크스페이스의 세션은 그 pane이 마운트될 때 재결합된다.
+  - `detached`: attach된 client가 없고 이 GUI가 아는 어느 터미널도 아님
   - `otherClient`: 이 GUI가 아닌 client가 attach함
   - `ending`: 자식이 종료됐거나 종료 요청을 받음
-- **종료 범위.** 이 경로로는 `detached`만 끝낼 수 있다. pane이 잡은 세션은 그 pane을 닫아 끝낸다(ADR-0300의 수명 규칙).
-- **epoch.** 종료 요청은 목록에서 본 attach epoch를 싣는다(ADR-0301의 by-id 종료 규칙). 목록을 본 뒤 그 세션이 다시 attach됐으면 데몬은 `superseded`로 답하고 세션을 남긴다. 결과는 `terminated | superseded | gone`으로 보고한다.
-- **실패 처리.** 목록 조회가 실패하면 오류로 보여 준다. 빈 목록으로 바꾸지 않는다. 데몬이 실행 중이 아닐 때만 빈 목록이다.
+- **종료 범위.** 이 경로로는 `detached`만 끝낼 수 있다. backend가 종료 직전에 다시 분류해서 이를 강제한다. 다른 상태면 `notDetached`로 답하고 아무것도 하지 않는다. REST로 현재 epoch를 알아도 pane 세션이나 `awaitingPane` 세션은 끝낼 수 없다. pane이 잡은 세션은 그 pane을 닫아 끝낸다(ADR-0300의 수명 규칙).
+- **epoch.** 종료 요청은 목록에서 본 attach epoch를 싣는다(ADR-0301의 by-id 종료 규칙). 목록을 본 뒤 그 세션이 다시 attach됐으면 데몬은 `superseded`로 답하고 세션을 남긴다. 결과는 `terminated | superseded | notDetached | gone`으로 보고한다.
+- **실패 처리.** 목록 조회 실패, lock은 쥐었지만 응답하지 않는 데몬, 읽을 수 없는 저장 레이아웃은 모두 오류로 보여 준다. 빈 목록으로 바꾸지 않는다. 데몬이 실행 중이 아닐 때만 빈 목록이다. 목록·종료는 데몬을 띄우지 않는 읽기 경로라서 `LAYMUX_PTY_DAEMON=0`인 GUI에서도 남은 세션을 보여 준다. 일괄 종료는 세션별 실패를 모아 `{ended, failed}`로 보고한다.
 - **자동 정리는 하지 않는다.** 정리는 사용자가 실행한다. 레이아웃에 없다는 사실만으로 세션을 끝내지 않는다.
-- **경로.** 설정 › 터미널 › PTY 세션 패널을 둔다. 같은 동작을 Tauri 명령(`list_pty_sessions`, `terminate_pty_session`, `terminate_detached_pty_sessions`)과 Automation REST(`GET /api/v1/pty-sessions`, `POST /api/v1/pty-sessions/terminate`, `POST /api/v1/pty-sessions/terminate-detached`)로 제공한다. REST가 있어 자율 검증 루프에서도 확인할 수 있다.
+- **경로.** 설정 › 터미널 › PTY 세션 패널을 둔다. 행에는 터미널, 프로필, PID, 상태를 표시한다. 종료 버튼은 두 번 눌러야 실행된다(`TwoClickConfirmButton`). 같은 동작을 Tauri 명령(`list_pty_sessions`, `terminate_pty_session`, `terminate_detached_pty_sessions`)과 Automation REST(`GET /api/v1/pty-sessions`, `POST /api/v1/pty-sessions/terminate`, `POST /api/v1/pty-sessions/terminate-detached`)로도 제공해 자율 검증 루프에서 확인할 수 있게 한다.
 
 ## Alternatives Considered
 

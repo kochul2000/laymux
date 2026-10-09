@@ -186,6 +186,17 @@ pub fn find_running(paths: &DaemonPaths) -> Result<Option<DaemonEndpoint>, Strin
     })
 }
 
+/// Like [`find_running`], but a daemon that holds its instance lock without
+/// answering is an error rather than "no daemon": reporting it as absent
+/// would hide sessions that are still running.
+pub fn find_reachable(paths: &DaemonPaths) -> Result<Option<DaemonEndpoint>, String> {
+    match probe(paths)? {
+        Probe::Ready(endpoint) => Ok(Some(endpoint)),
+        Probe::Absent => Ok(None),
+        Probe::Unreachable => Err("PTY daemon is running but does not answer".to_string()),
+    }
+}
+
 /// A live daemon that speaks another protocol is an error: it may own
 /// running work, so it is neither replaced nor killed here.
 ///

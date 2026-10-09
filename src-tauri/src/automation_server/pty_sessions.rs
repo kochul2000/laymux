@@ -9,7 +9,8 @@ use axum::Json;
 use super::helpers::err_json;
 use super::ServerState;
 use crate::commands::{
-    list_pty_sessions_inner, terminate_detached_pty_sessions_inner, TerminatePtySessionRequest,
+    list_pty_sessions_inner, terminate_detached_pty_sessions_inner, terminate_pty_session_inner,
+    TerminatePtySessionRequest,
 };
 
 async fn respond<T: serde::Serialize + Send + 'static>(
@@ -32,11 +33,11 @@ pub async fn list(State(state): State<ServerState>) -> impl IntoResponse {
     respond(move || list_pty_sessions_inner(&state.app_state)).await
 }
 
-pub async fn terminate(Json(request): Json<TerminatePtySessionRequest>) -> impl IntoResponse {
-    respond(move || {
-        crate::pty_daemon::terminate_listed_session(&request.session_id, request.attach_epoch)
-    })
-    .await
+pub async fn terminate(
+    State(state): State<ServerState>,
+    Json(request): Json<TerminatePtySessionRequest>,
+) -> impl IntoResponse {
+    respond(move || terminate_pty_session_inner(&state.app_state, &request)).await
 }
 
 pub async fn terminate_detached(State(state): State<ServerState>) -> impl IntoResponse {
