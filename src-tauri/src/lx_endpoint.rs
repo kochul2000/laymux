@@ -24,7 +24,7 @@ use crate::state::AppState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LxEndpoint {
-    /// `127.0.0.1:{port}` on Windows, a Unix socket path elsewhere.
+    /// The IPC server's Unix domain socket path (ADR-0305).
     pub endpoint: String,
     /// The publishing GUI, for diagnostics only.
     pub pid: u32,
@@ -124,10 +124,7 @@ pub type LxConnection = (Box<dyn io::BufRead>, Box<dyn io::Write>);
 
 /// Connect to an IDE endpoint as published by [`publish`].
 pub fn connect(endpoint: &str) -> io::Result<LxConnection> {
-    #[cfg(windows)]
-    let stream = std::net::TcpStream::connect(endpoint)?;
-    #[cfg(unix)]
-    let stream = std::os::unix::net::UnixStream::connect(endpoint)?;
+    let stream = crate::local_socket::Stream::connect(endpoint)?;
     let writer = stream.try_clone()?;
     Ok((Box::new(io::BufReader::new(stream)), Box::new(writer)))
 }
@@ -169,9 +166,10 @@ mod tests {
         let env_value = path.to_string_lossy().into_owned();
         // Two GUIs in turn: the shell keeps the same environment value.
         for gui in ["first", "second"] {
-            let session = format!("lx-endpoint-test-{gui}-{}", std::process::id());
-            let endpoint = crate::ipc_server::start_ipc_server(
-                session,
+            let session = format!("test-{gui}");
+            let endpoint = crate::ipc_server::start_ipc_server_in(
+                dir.path(),
+                &session,
                 Arc::new(move |_message: LxMessage| LxResponse::ok(Some(gui.into()))),
             )
             .unwrap();

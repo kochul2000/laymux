@@ -85,6 +85,9 @@ pub const REMOTE_SESSION_POLL: Duration = Duration::from_secs(2);
 pub const ENV_LX_ENDPOINT_FILE: &str = "LX_ENDPOINT_FILE";
 /// File name of the `lx` endpoint file in the settings directory.
 pub const LX_ENDPOINT_FILE_NAME: &str = "lx-endpoint.json";
+/// `lx` IPC socket name in the settings directory: prefix + GUI pid + suffix.
+pub const LX_SOCKET_PREFIX: &str = "lx-";
+pub const LX_SOCKET_SUFFIX: &str = ".sock";
 /// Attempts, with doubling delay from `LX_ENDPOINT_PUBLISH_RETRY_MS`, to
 /// replace the endpoint file while another process briefly holds it.
 pub const LX_ENDPOINT_PUBLISH_ATTEMPTS: u32 = 5;
@@ -375,7 +378,6 @@ pub const PTY_DAEMON_RUNTIME_DIR: &str = "runtime";
 /// its launcher may not have started the daemon that will lock it yet.
 #[cfg(windows)]
 pub const PTY_DAEMON_RUNTIME_GC_MIN_AGE_MS: u64 = 60_000;
-#[cfg(unix)]
 pub const PTY_DAEMON_SOCKET_FILE: &str = "daemon.sock";
 
 /// Shared upper bound for one owner transition, including worker polling,

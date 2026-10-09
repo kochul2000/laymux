@@ -1972,6 +1972,8 @@ src-tauri/src/
 │   └── tests.rs / adoption_tests.rs / handshake_tests.rs  # 실제 PTY·셸 기반 데몬 테스트
 ├── clipboard.rs              # 클립보드 (smart paste, 이미지)
 ├── ipc_server.rs             # IPC 소켓 (lx CLI ↔ IDE)
+├── local_socket.rs           # 현재 사용자 전용 Unix domain socket (ADR-0305)
+├── win_acl.rs                # Windows: 파일 DACL 을 현재 사용자·SYSTEM 으로 제한
 ├── lx_endpoint.rs            # lx endpoint 파일 게시·해석 (ADR-0304)
 ├── output_buffer.rs          # 터미널 출력 링 버퍼
 ├── port_detect.rs            # 리스닝 포트 감지

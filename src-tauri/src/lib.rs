@@ -27,6 +27,7 @@ pub mod git_watcher;
 pub mod grok_activity;
 pub mod grok_usage_probe;
 pub mod ipc_server;
+pub mod local_socket;
 pub mod local_state;
 pub mod lock_ext;
 pub mod lx_endpoint;
@@ -55,6 +56,8 @@ pub mod terminal_output;
 pub mod terminal_protocol;
 pub mod update_install_guard;
 pub mod usage_probe;
+#[cfg(windows)]
+pub mod win_acl;
 pub mod wsl_liveness;
 pub mod wsl_probe;
 
