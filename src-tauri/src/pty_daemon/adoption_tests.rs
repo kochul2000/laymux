@@ -285,6 +285,47 @@ fn app_exit_ends_daemon_terminals_registered_in_app_state() {
     daemon.wait_for_sessions(0);
 }
 
+#[test]
+fn an_update_handoff_leaves_daemon_terminals_running_for_the_updated_gui() {
+    let daemon = TestDaemon::start();
+    let state = crate::state::AppState::new();
+    let system = spawning(daemon.endpoint.clone(), "pane-h#1".into());
+    let handle = spawn_command_on(
+        &system,
+        size(),
+        sleeper(),
+        1,
+        SpawnOptions {
+            wsl_backed: false,
+            kill_owner: ChildKillOwner::Backend,
+        },
+        |_| PtyOutputControl::Continue,
+        PtyLifecycleHooks::default(),
+    )
+    .unwrap();
+    state
+        .pty_handles
+        .lock()
+        .unwrap()
+        .insert("pane-h".into(), handle);
+    daemon.wait_for_sessions(1);
+
+    state.begin_update_handoff();
+    // Windows: the installer teardown. Linux: the restart's exit path. Both,
+    // and the state's own drop, leave the session running (ADR-0308).
+    state.terminate_child_processes();
+    state.terminate_daemon_sessions_on_exit();
+    assert!(state.pty_handles.lock().unwrap().is_empty());
+    drop(state);
+    std::thread::sleep(Duration::from_millis(500));
+    let sessions = list_sessions(&daemon.endpoint).unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert!(!sessions[0].terminating && !sessions[0].exited);
+
+    super::control::terminate_by_id(&daemon.endpoint, "pane-h#1", None).unwrap();
+    daemon.wait_for_sessions(0);
+}
+
 /// Turns on bracketed paste about a second after start, then idles. Unix
 /// only: test binaries do not sit next to the bundled ConPTY, and the inbox
 /// conhost they fall back to swallows DECSET 2004 instead of passing it on.

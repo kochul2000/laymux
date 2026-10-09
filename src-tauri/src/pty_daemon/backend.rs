@@ -1,10 +1,15 @@
 //! Backend selection for new terminals and the daemon endpoint identity.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
 use super::control::{list_sessions, terminate_by_id};
+use super::discovery::DaemonRoot;
 use super::launcher;
 use super::wire::SessionInfo;
-use super::DaemonPaths;
-use crate::constants::{ENV_LAYMUX_PTY_DAEMON, PTY_DAEMON_METADATA_PROFILE};
+use crate::constants::{
+    ENV_LAYMUX_PTY_DAEMON, PTY_DAEMON_GENERATION_GC_MIN_AGE_MS, PTY_DAEMON_METADATA_PROFILE,
+};
 use crate::pty::PtyBackend;
 
 /// Address and credential of one live daemon instance.
@@ -44,13 +49,23 @@ fn enabled_for(value: Option<&str>) -> bool {
     value != Some("0")
 }
 
+/// A live session of an earlier GUI to take over, and the daemon (of
+/// whichever generation) that runs it.
+#[derive(Debug, Clone)]
+pub struct DaemonAdoption {
+    pub endpoint: DaemonEndpoint,
+    pub session_id: String,
+}
+
 /// The backend a user terminal should use.
 ///
-/// With `allow_adopt` (the first create of this terminal id in this GUI
-/// process), a live session an earlier GUI left detached for the same
-/// terminal and profile is adopted instead of spawning a new child, so a
-/// crashed or killed GUI does not start the same work twice. Later creates of
-/// the id (restart, profile change, StrictMode remount) always start fresh.
+/// New sessions always go to the current build's daemon generation
+/// (ADR-0308). With `allow_adopt` (the first create of this terminal id in
+/// this GUI process), a live session an earlier GUI left detached for the
+/// same terminal and profile is adopted instead of spawning a new child, from
+/// any live generation that speaks this protocol, so a crashed, killed or
+/// updated GUI does not start the same work twice. Later creates of the id
+/// (restart, profile change, StrictMode remount) always start fresh.
 ///
 /// When the daemon cannot be started or reached, the terminal falls back to
 /// an in-process PTY: with the daemon on by default, failing every terminal
@@ -59,21 +74,32 @@ pub fn terminal_backend(terminal_id: &str, profile: &str, allow_adopt: bool) -> 
     if !is_enabled() {
         return PtyBackend::Local;
     }
-    let endpoint = match DaemonPaths::for_current_build()
-        .and_then(|paths| launcher::ensure_running(&paths))
-    {
-        Ok(endpoint) => endpoint,
+    let started = DaemonRoot::for_current_build().and_then(|root| {
+        let paths = root.current()?;
+        let endpoint = launcher::ensure_running(&paths)?;
+        Ok((root, paths.generation(), endpoint))
+    });
+    let (root, current, endpoint) = match started {
+        Ok(started) => started,
         Err(error) => {
             tracing::warn!(terminal_id, %error, "PTY daemon unavailable; using an in-process PTY");
             return PtyBackend::Local;
         }
     };
+    collect_unused_generations_once(&root, &current);
     let adopt = if allow_adopt {
-        match list_sessions(&endpoint) {
-            Ok(sessions) => {
-                let choice = choose_adoption(&sessions, terminal_id, profile);
-                end_stale_sessions(&endpoint, choice.stale);
-                choice.adopt
+        match catalogs(&root, &current, &endpoint) {
+            Ok(catalogs) => {
+                let listings: Vec<&[SessionInfo]> = catalogs
+                    .iter()
+                    .map(|(_, sessions)| sessions.as_slice())
+                    .collect();
+                let choice = choose_adoption(&listings, terminal_id, profile);
+                end_stale_sessions(&catalogs, choice.stale);
+                choice.adopt.map(|(catalog, session_id)| DaemonAdoption {
+                    endpoint: catalogs[catalog].0.clone(),
+                    session_id,
+                })
             }
             Err(error) => {
                 // Without the catalog the safe choice is a new child:
@@ -88,63 +114,116 @@ pub fn terminal_backend(terminal_id: &str, profile: &str, allow_adopt: bool) -> 
     PtyBackend::Daemon { endpoint, adopt }
 }
 
+/// The current generation's sessions first, then those of every other live
+/// generation of this protocol. A current catalog that cannot be read is an
+/// error; another generation that cannot be read is skipped, since none of
+/// its sessions could be adopted anyway.
+fn catalogs(
+    root: &DaemonRoot,
+    current: &str,
+    endpoint: &DaemonEndpoint,
+) -> Result<Vec<(DaemonEndpoint, Vec<SessionInfo>)>, String> {
+    let mut catalogs = vec![(
+        endpoint.clone(),
+        list_sessions(endpoint).map_err(|error| error.to_string())?,
+    )];
+    for live in launcher::live_generations(root, |generation| generation != current)? {
+        let launcher::GenerationState::Ready(endpoint) = live.state else {
+            continue;
+        };
+        match list_sessions(&endpoint) {
+            Ok(sessions) => catalogs.push((endpoint, sessions)),
+            Err(error) => {
+                tracing::warn!(generation = %live.generation, %error, "PTY daemon generation did not list its sessions");
+            }
+        }
+    }
+    Ok(catalogs)
+}
+
+/// Collect generations no daemon uses, once per GUI process and off the
+/// terminal-creation path.
+fn collect_unused_generations_once(root: &DaemonRoot, current: &str) {
+    static COLLECTED: AtomicBool = AtomicBool::new(false);
+    if COLLECTED.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let (root, current) = (root.clone(), current.to_owned());
+    std::thread::spawn(move || {
+        launcher::collect_unused_generations(
+            &root,
+            &current,
+            Duration::from_millis(PTY_DAEMON_GENERATION_GC_MIN_AGE_MS),
+        );
+    });
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct AdoptionChoice {
-    adopt: Option<String>,
+    /// (catalog index, session id)
+    adopt: Option<(usize, String)>,
     /// Other detached sessions of this terminal. A pane shows one session,
     /// so these could never be adopted and would only keep running unseen.
-    /// (session id, attach epoch when listed)
-    stale: Vec<(String, u64)>,
+    /// (catalog index, session id, attach epoch when listed)
+    stale: Vec<(usize, String, u64)>,
 }
 
 /// A session is a candidate when it belongs to this terminal, no GUI holds
-/// it, and it is neither exiting nor being terminated. The newest candidate
-/// (by daemon creation order) is adopted if it was started with the same
-/// profile; every other candidate is stale.
-fn choose_adoption(sessions: &[SessionInfo], terminal_id: &str, profile: &str) -> AdoptionChoice {
-    let mut candidates: Vec<&SessionInfo> = sessions
+/// it, and it is neither exiting nor being terminated. The first candidate
+/// wins: catalogs are in preference order (the current generation first),
+/// and within one the newest by that daemon's creation order. It is adopted
+/// if it was started with the same profile; every other candidate is stale.
+fn choose_adoption(
+    catalogs: &[&[SessionInfo]],
+    terminal_id: &str,
+    profile: &str,
+) -> AdoptionChoice {
+    let mut candidates: Vec<(usize, &SessionInfo)> = catalogs
         .iter()
-        .filter(|session| {
+        .enumerate()
+        .flat_map(|(catalog, sessions)| sessions.iter().map(move |session| (catalog, session)))
+        .filter(|(_, session)| {
             session.terminal_id == terminal_id
                 && !session.attached
                 && !session.exited
                 && !session.terminating
         })
         .collect();
-    candidates.sort_by_key(|session| std::cmp::Reverse(session.created_seq));
-    let mut candidates = candidates.into_iter();
+    candidates.sort_by_key(|(catalog, session)| (*catalog, std::cmp::Reverse(session.created_seq)));
     let adopt = candidates
-        .next()
-        .filter(|newest| {
-            newest
+        .first()
+        .filter(|(_, first)| {
+            first
                 .metadata
                 .get(PTY_DAEMON_METADATA_PROFILE)
                 .is_some_and(|started_with| started_with == profile)
         })
-        .map(|newest| newest.session_id.clone());
-    let stale = sessions
+        .map(|(catalog, first)| (*catalog, first.session_id.clone()));
+    let stale = candidates
         .iter()
-        .filter(|session| {
-            session.terminal_id == terminal_id
-                && !session.attached
-                && !session.exited
-                && !session.terminating
-                && Some(&session.session_id) != adopt.as_ref()
+        .filter(|(catalog, session)| {
+            adopt.as_ref() != Some(&(*catalog, session.session_id.clone()))
         })
-        .map(|session| (session.session_id.clone(), session.attach_epoch))
+        .map(|(catalog, session)| (*catalog, session.session_id.clone(), session.attach_epoch))
         .collect();
     AdoptionChoice { adopt, stale }
 }
 
 /// Each request carries the epoch the session was listed with, so one that
 /// was adopted in the meantime is left to its new owner.
-fn end_stale_sessions(endpoint: &DaemonEndpoint, stale: Vec<(String, u64)>) {
+fn end_stale_sessions(
+    catalogs: &[(DaemonEndpoint, Vec<SessionInfo>)],
+    stale: Vec<(usize, String, u64)>,
+) {
     if stale.is_empty() {
         return;
     }
-    let endpoint = endpoint.clone();
+    let stale: Vec<_> = stale
+        .into_iter()
+        .map(|(catalog, session_id, epoch)| (catalogs[catalog].0.clone(), session_id, epoch))
+        .collect();
     std::thread::spawn(move || {
-        for (session_id, attach_epoch) in stale {
+        for (endpoint, session_id, attach_epoch) in stale {
             if let Err(error) = terminate_by_id(&endpoint, &session_id, Some(attach_epoch)) {
                 tracing::warn!(%session_id, %error, "failed to end a stale PTY daemon session");
             }
@@ -174,6 +253,10 @@ mod tests {
         }
     }
 
+    fn choose(sessions: &[SessionInfo], terminal_id: &str, profile: &str) -> AdoptionChoice {
+        choose_adoption(&[sessions], terminal_id, profile)
+    }
+
     #[test]
     fn only_a_detached_live_session_of_the_same_terminal_is_a_candidate() {
         let mut attached = info("a1", "pane-a", 1, "PS");
@@ -184,7 +267,7 @@ mod tests {
         terminating.terminating = true;
         let other = info("b1", "pane-b", 4, "PS");
         assert_eq!(
-            choose_adoption(
+            choose(
                 &[attached, exited, terminating, other.clone()],
                 "pane-a",
                 "PS"
@@ -195,15 +278,15 @@ mod tests {
             }
         );
         assert_eq!(
-            choose_adoption(&[other, info("a4", "pane-a", 5, "PS")], "pane-a", "PS").adopt,
-            Some("a4".into())
+            choose(&[other, info("a4", "pane-a", 5, "PS")], "pane-a", "PS").adopt,
+            Some((0, "a4".into()))
         );
     }
 
     #[test]
     fn the_newest_candidate_wins_by_creation_order_and_the_rest_are_stale() {
         // Keys sort opposite to creation order on purpose.
-        let choice = choose_adoption(
+        let choice = choose(
             &[
                 info("z-old", "pane-a", 1, "PS"),
                 info("a-new", "pane-a", 9, "PS"),
@@ -211,15 +294,34 @@ mod tests {
             "pane-a",
             "PS",
         );
-        assert_eq!(choice.adopt, Some("a-new".into()));
-        assert_eq!(choice.stale, vec![("z-old".to_owned(), 1)]);
+        assert_eq!(choice.adopt, Some((0, "a-new".into())));
+        assert_eq!(choice.stale, vec![(0, "z-old".to_owned(), 1)]);
     }
 
     #[test]
     fn a_session_started_with_another_profile_is_not_adopted() {
-        let choice = choose_adoption(&[info("a1", "pane-a", 1, "WSL")], "pane-a", "PS");
+        let choice = choose(&[info("a1", "pane-a", 1, "WSL")], "pane-a", "PS");
         assert_eq!(choice.adopt, None);
-        assert_eq!(choice.stale, vec![("a1".to_owned(), 1)]);
+        assert_eq!(choice.stale, vec![(0, "a1".to_owned(), 1)]);
+    }
+
+    #[test]
+    fn a_session_of_an_earlier_generation_is_adopted_from_its_own_daemon() {
+        let current = [info("b1", "pane-b", 1, "PS")];
+        let earlier = [info("a1", "pane-a", 7, "PS")];
+        let choice = choose_adoption(&[&current, &earlier], "pane-a", "PS");
+        assert_eq!(choice.adopt, Some((1, "a1".into())));
+        assert!(choice.stale.is_empty());
+    }
+
+    #[test]
+    fn the_current_generation_is_preferred_whatever_the_creation_order() {
+        // Creation order is per daemon and says nothing across generations.
+        let current = [info("new", "pane-a", 1, "PS")];
+        let earlier = [info("old", "pane-a", 50, "PS")];
+        let choice = choose_adoption(&[&current, &earlier], "pane-a", "PS");
+        assert_eq!(choice.adopt, Some((0, "new".into())));
+        assert_eq!(choice.stale, vec![(1, "old".to_owned(), 1)]);
     }
 
     #[test]

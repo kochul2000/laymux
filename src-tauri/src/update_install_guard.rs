@@ -6,7 +6,8 @@
 //! directory (ADR-0066/0067) and every open terminal keeps `OpenConsole.exe`
 //! mapped, which makes the installer fail with a sharing violation on a file
 //! this app owns. The install path therefore terminates its own children and
-//! waits for those files to become writable before handing over.
+//! waits for those files to become writable before handing over. PTY daemon
+//! sessions are the exception: they are handed to the updated GUI (ADR-0308).
 
 #[cfg(any(windows, test))]
 use std::path::{Path, PathBuf};
@@ -26,31 +27,16 @@ const LOCKABLE_IMAGE_EXTENSIONS: [&str; 2] = ["exe", "dll"];
 /// than cancelling the update, because refusing to install is worse than the
 /// installer's own retry prompt.
 pub fn release_installer_file_locks(state: &AppState) {
+    // Daemon sessions are handed to the updated GUI rather than ended. The
+    // daemon runs from a staged copy under its own image name, so it holds
+    // nothing in the install directory and the installer leaves it alone
+    // (ADR-0308).
+    state.begin_update_handoff();
     state.terminate_child_processes();
-    // The PTY daemon runs this build's executable and ConPTY images and would
-    // otherwise linger until its idle timeout (or forever, with sessions an
-    // earlier GUI left behind). Update handoff will replace this shutdown.
-    release_pty_daemon();
     wait_for_install_directory(
         Duration::from_millis(crate::constants::UPDATE_INSTALL_LOCK_RELEASE_TIMEOUT_MS),
         Duration::from_millis(crate::constants::UPDATE_INSTALL_LOCK_RELEASE_POLL_MS),
     );
-}
-
-fn release_pty_daemon() {
-    let paths = match crate::pty_daemon::DaemonPaths::for_current_build() {
-        Ok(paths) => paths,
-        Err(error) => {
-            tracing::warn!(%error, "cannot locate the PTY daemon before installing");
-            return;
-        }
-    };
-    let timeout = Duration::from_millis(crate::constants::PTY_DAEMON_SHUTDOWN_TIMEOUT_MS);
-    match crate::pty_daemon::shutdown_running(&paths, timeout) {
-        Ok(true) => tracing::info!("PTY daemon shut down before installing"),
-        Ok(false) => {}
-        Err(error) => tracing::warn!(%error, "PTY daemon shutdown before installing failed"),
-    }
 }
 
 /// Only Windows refuses to overwrite a mapped image; elsewhere the installer

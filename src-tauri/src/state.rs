@@ -213,6 +213,9 @@ pub struct AppState {
     /// Terminal ids already created once in this GUI process. Only the first
     /// create of an id may adopt a PTY daemon session (ADR-0301).
     pub pty_daemon_adoption_seen: Mutex<std::collections::HashSet<String>>,
+    /// Set while an update replaces this GUI: its PTY daemon sessions are left
+    /// running for the updated GUI to adopt instead of being ended (ADR-0308).
+    pub pty_daemon_update_handoff: std::sync::atomic::AtomicBool,
     /// Last path-less desktop FileViewer signal, served on Remote heartbeats
     /// without a bridge round trip (ADR-0291). Owns its own mutex and joins no
     /// ordering above: nothing acquires it while holding another AppState lock.
@@ -402,6 +405,7 @@ impl AppState {
             )),
             session_checkpoint: crate::session_checkpoint::SessionCheckpointRuntime::default(),
             pty_daemon_adoption_seen: Mutex::new(std::collections::HashSet::new()),
+            pty_daemon_update_handoff: std::sync::atomic::AtomicBool::new(false),
             file_viewer_signal: crate::remote_server::FileViewerSignalMirror::default(),
         }
     }
@@ -440,11 +444,39 @@ impl AppState {
             .lock_or_recover_for_discard("draining PTY handle registry")
             .drain()
             .collect();
+        let hand_off = self.update_handoff_started();
         for (terminal_id, handle) in handles {
+            // A daemon session handed to an update keeps running for the next
+            // GUI. Dropping its handle would drop the daemon master, which asks
+            // the daemon to end the session, so the handle is leaked; the
+            // process is about to go away (ADR-0308).
+            if hand_off && handle.is_backend_owned() {
+                std::mem::forget(handle);
+                continue;
+            }
             if let Err(err) = handle.terminate() {
                 tracing::warn!(terminal_id, error = %err, "PTY cleanup during app shutdown failed");
             }
         }
+    }
+
+    /// From now on this GUI detaches from its PTY daemon sessions instead of
+    /// ending them: the installer teardown and the app exit path leave them
+    /// running for the updated GUI to adopt (ADR-0308).
+    pub fn begin_update_handoff(&self) {
+        self.pty_daemon_update_handoff
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// The update did not happen; closing the app ends its work again.
+    pub fn cancel_update_handoff(&self) {
+        self.pty_daemon_update_handoff
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+
+    fn update_handoff_started(&self) -> bool {
+        self.pty_daemon_update_handoff
+            .load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// App exit runs no `Drop` for this state. In-process PTYs still end with
@@ -452,6 +484,10 @@ impl AppState {
     /// one its terminate request before the process goes away. This only
     /// enqueues the request; it does not wait for the children (ADR-0300).
     pub fn terminate_daemon_sessions_on_exit(&self) {
+        // Restarting into an update hands the sessions over instead (ADR-0308).
+        if self.update_handoff_started() {
+            return;
+        }
         let handles: Vec<(String, PtyHandle)> = match self.pty_handles.lock_or_err() {
             Ok(handles) => handles
                 .iter()

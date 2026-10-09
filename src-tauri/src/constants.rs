@@ -382,6 +382,17 @@ pub const PTY_DAEMON_RUNTIME_DIR: &str = "runtime";
 #[cfg(windows)]
 pub const PTY_DAEMON_RUNTIME_GC_MIN_AGE_MS: u64 = 60_000;
 pub const PTY_DAEMON_SOCKET_FILE: &str = "daemon.sock";
+/// Each executable build runs its own daemon in a generation directory
+/// `<pty-daemon>/g<protocol>-<build>/` (ADR-0308).
+pub const PTY_DAEMON_GENERATION_PREFIX: &str = "g";
+/// An unused generation directory younger than this is never collected: a
+/// GUI of that build may be about to start its daemon.
+pub const PTY_DAEMON_GENERATION_GC_MIN_AGE_MS: u64 = 60_000;
+/// Windows: image name of the staged daemon copy. The update installer ends
+/// every running `laymux.exe` by image name, so the daemon must not carry it
+/// (ADR-0308).
+#[cfg(windows)]
+pub const PTY_DAEMON_STAGED_IMAGE: &str = "laymux-pty-daemon.exe";
 
 /// Shared upper bound for one owner transition, including worker polling,
 /// cancellation grace, terminal teardown, and scheduler slack.

@@ -75,7 +75,7 @@ pub enum PtyBackend {
     /// earlier GUI) instead of spawning, and the built command is not run.
     Daemon {
         endpoint: crate::pty_daemon::DaemonEndpoint,
-        adopt: Option<String>,
+        adopt: Option<crate::pty_daemon::DaemonAdoption>,
     },
 }
 
@@ -173,9 +173,13 @@ where
             // Adoption is claimed atomically by the daemon and may be
             // refused (another client won the race, or the session started
             // terminating); a refused adoption starts a new child instead.
-            let adopted = adopt.as_ref().and_then(|session_key| {
-                let system =
-                    crate::pty_daemon::DaemonPtySystem::adopt(endpoint.clone(), session_key.clone());
+            let adopted = adopt.as_ref().and_then(|adoption| {
+                // The session may belong to an earlier daemon generation
+                // (ADR-0308); it stays with the daemon that runs it.
+                let system = crate::pty_daemon::DaemonPtySystem::adopt(
+                    adoption.endpoint.clone(),
+                    adoption.session_id.clone(),
+                );
                 match open_and_spawn(&system, size, cmd.clone()) {
                     Ok(opened) => system.adopted_metadata().map(|metadata| (opened, metadata)),
                     Err(error) => {

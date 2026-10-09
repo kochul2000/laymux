@@ -393,6 +393,11 @@ impl PtyHandle {
         }
     }
 
+    /// Whether another process (the PTY daemon) owns the child.
+    pub fn is_backend_owned(&self) -> bool {
+        self.kill_owner == ChildKillOwner::Backend
+    }
+
     /// Ask a backend that owns the child (the PTY daemon) to terminate it,
     /// without the local graceful-close waits of [`Self::terminate`]. A no-op
     /// for in-process PTYs, whose children end with this process anyway.
