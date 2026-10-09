@@ -1837,6 +1837,12 @@ impl TerminalOscPass {
         let terminal_generation = self.terminal_generation;
         let pty_cb_state = &self.callback_state;
         let presets = &self.presets;
+        let missed_buffer = missed
+            .then(|| {
+                let buffer = crate::output_buffer::TerminalOutputBuffer::default();
+                buffer.push_sequenced(data).ok().map(|_| buffer)
+            })
+            .flatten();
         // ── Unified OSC processing loop ──
         // Single pass: parse all OSC sequences, match against presets, dispatch actions,
         // and emit structured events. Replaces the old per-code extraction blocks.
@@ -2218,12 +2224,19 @@ impl TerminalOscPass {
             // OSC 7 of its own; both are noise that must not mutate the local
             // CWD. Apply the same source-activity gate (Shell-only) before
             // local state is mutated or events are emitted.
+            //
+            // Missed output never reached the output ring, so it is judged by
+            // the state it leaves the shell in itself: a CWD it reports is
+            // taken only if it ends at a prompt (ADR-0309).
             if event.code == 7 || (event.code == 9 && event.param.as_deref() == Some("9")) {
                 let accept_source_cwd = match state_for_pty.output_buffers.lock_or_err() {
                     Ok(buffers) => super::ipc_dispatch::should_accept_source_cwd_event(
                         &state_for_pty,
                         &terminal_id,
-                        buffers.get(&terminal_id),
+                        match missed_buffer.as_ref() {
+                            Some(missed) => Some(missed),
+                            None => buffers.get(&terminal_id),
+                        },
                     )
                     .unwrap_or_else(|error| {
                         tracing::warn!(terminal_id, %error, "terminal cwd update blocked by degraded activity state");

@@ -31,6 +31,7 @@ GUI가 없는 동안(crash, 업데이트 설치)에도 데몬 세션의 셸과 �
 - **놓친 출력의 처리.**
   - xterm에 보내지 않고, ring·delivery·`TerminalProtocolState`·startup query guard·출력 activity 이벤트도 거치지 않는다. 그래서 그 안의 query에 아무도 다시 답하지 않는다(ADR-0068).
   - OSC 단일 패스(ADR-0001)는 그대로 돈다. title 상태 기계, CWD, OSC 133 명령 상태, OSC hook preset이 live 출력과 같은 코드로 처리된다.
+  - CWD 변경은 셸이 프롬프트에 있을 때만 받는다는 기존 규칙을 따른다. 다만 놓친 출력은 출력 ring에 없으므로, 그 바이트 자체가 셸을 어떤 상태로 끝내는지로 판정한다. 놓친 출력이 프롬프트로 끝나면 그 안의 CWD를 받고, 명령 실행 중에 끝나면 받지 않는다.
   - 예외는 `SyncCwd`다. 같은 sync group의 다른 터미널에 `cd`를 입력하므로, 지나간 CWD 변경으로 지금 다른 pane을 움직이지 않는다. 자기 터미널의 CWD는 갱신한다.
   - OSC 알림은 늦게라도 전달한다. 사용자가 없는 동안 온 알림이기 때문이다.
 - **범위.** backlog가 1 MiB를 넘어 앞부분이 버려졌으면(`droppedBytes`) 그 부분의 사실은 잃는다. backlog 처음에서 잘린 OSC sequence도 버린다.
