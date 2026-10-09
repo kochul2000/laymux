@@ -12,7 +12,7 @@ use portable_pty::CommandBuilder;
 
 use super::client::DaemonPtySystem;
 use super::control::{connect_authenticated, list_sessions};
-use super::session::{ConnWriter, Session};
+use super::session::{AttachOptions, ConnWriter, Session};
 use super::tests::{
     collect_until, delayed_printer, interactive_shell, raw_spawn, read_until, size, sleeper,
     spawning, TestDaemon, TIMEOUT,
@@ -67,7 +67,11 @@ fn adoption_continues_the_same_child_and_returns_the_spawners_metadata() {
     drop(reader);
     wait_detached(&daemon.endpoint, "pane-k#1-a");
 
-    let system = DaemonPtySystem::adopt(daemon.endpoint.clone(), "pane-k#1-a".into());
+    let system = DaemonPtySystem::adopt(
+        daemon.endpoint.clone(),
+        "pane-k#1-a".into(),
+        Default::default(),
+    );
     let (tx, rx) = mpsc::channel();
     // The command is ignored on adoption; a different one proves it.
     let handle = spawn_command_on(
@@ -103,6 +107,67 @@ fn adoption_continues_the_same_child_and_returns_the_spawners_metadata() {
 }
 
 #[test]
+fn an_adopting_terminal_reads_what_it_missed_first_and_knows_where_it_ends() {
+    let daemon = TestDaemon::start();
+    let (writer, reader) = raw_spawn(&daemon.endpoint, "pane-g#1", delayed_printer());
+    drop(writer);
+    drop(reader);
+    wait_detached(&daemon.endpoint, "pane-g#1");
+    // Let the child print while nobody is attached.
+    std::thread::sleep(Duration::from_millis(2500));
+
+    let missed_output = Arc::new(super::client::MissedOutput::default());
+    let system = DaemonPtySystem::adopt(
+        daemon.endpoint.clone(),
+        "pane-g#1".into(),
+        Arc::clone(&missed_output),
+    );
+    let (tx, rx) = mpsc::channel();
+    let tally = Arc::clone(&missed_output);
+    let handle = spawn_command_on(
+        &system,
+        size(),
+        sleeper(),
+        1,
+        SpawnOptions {
+            wsl_backed: false,
+            kill_owner: ChildKillOwner::Backend,
+        },
+        move |data: Vec<u8>| {
+            // What the terminal output callback does (ADR-0309).
+            let missed = tally.take(data.len());
+            let _ = tx.send((data[..missed].to_vec(), data[missed..].to_vec()));
+            PtyOutputControl::Continue
+        },
+        PtyLifecycleHooks::default(),
+    )
+    .unwrap();
+    let (mut missed, mut live) = (Vec::new(), Vec::new());
+    let deadline = Instant::now() + TIMEOUT;
+    while live.is_empty() {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let (missed_part, live_part) = rx.recv_timeout(remaining).expect("output");
+        missed.extend(missed_part);
+        live.extend(live_part);
+    }
+    // Everything the child printed while detached is counted as missed,
+    // and live output starts with the redraw.
+    assert!(!missed.is_empty());
+    assert!(
+        String::from_utf8_lossy(&live).contains("[H[J"),
+        "{:?}",
+        String::from_utf8_lossy(&live)
+    );
+    // The inbox conhost the Windows test binary falls back to may hold the
+    // echo back; a Unix PTY passes it straight through.
+    #[cfg(unix)]
+    assert!(String::from_utf8_lossy(&missed).contains("LATE_2"));
+    assert!(!live.starts_with(&missed));
+    handle.terminate().unwrap();
+    daemon.wait_for_sessions(0);
+}
+
+#[test]
 fn attach_without_replay_discards_detached_output() {
     let daemon = TestDaemon::start();
     let (writer, reader) = raw_spawn(&daemon.endpoint, "pane-l#1", delayed_printer());
@@ -121,6 +186,7 @@ fn attach_without_replay_discards_detached_output() {
             replay: false,
             take_over: true,
             size: None,
+            missed_output: false,
         },
     )
     .unwrap();
@@ -180,6 +246,7 @@ fn an_adopting_attach_is_refused_while_another_client_holds_the_session() {
             replay: false,
             take_over: false,
             size: None,
+            missed_output: false,
         },
     )
     .unwrap();
@@ -233,6 +300,7 @@ fn a_terminate_from_the_previous_owner_cannot_end_an_adopted_session() {
             replay: false,
             take_over: false,
             size: None,
+            missed_output: false,
         },
     )
     .unwrap();
@@ -387,6 +455,7 @@ fn an_adopting_attach_reasserts_modes_set_while_detached() {
             replay: false,
             take_over: false,
             size: None,
+            missed_output: false,
         },
     )
     .unwrap();
@@ -412,6 +481,16 @@ fn an_adopting_attach_reasserts_modes_set_while_detached() {
 
 /// A session fed output directly, attached over a real local connection.
 fn attach_after_output(output: &[u8], replay: bool) -> BufReader<Stream> {
+    attach_after_output_with(
+        output,
+        AttachOptions {
+            replay,
+            ..AttachOptions::default()
+        },
+    )
+}
+
+fn attach_after_output_with(output: &[u8], options: AttachOptions) -> BufReader<Stream> {
     let dir = tempfile::tempdir().unwrap();
     let (listener, endpoint) = Listener::bind(dir.path()).unwrap();
     let client = transport::connect(&endpoint).unwrap();
@@ -419,7 +498,7 @@ fn attach_after_output(output: &[u8], replay: bool) -> BufReader<Stream> {
     let session = Session::new("pane-s#1".into(), "pane-s".into(), BTreeMap::new(), 1);
     let _ = session.deliver_output(output);
     let writer = Arc::new(ConnWriter::new(&server_side).unwrap());
-    session.attach(&writer, 1, replay, false, None).unwrap();
+    session.attach(&writer, 1, options).unwrap();
     client
         .set_read_timeout(Some(Duration::from_millis(500)))
         .unwrap();
@@ -525,6 +604,43 @@ fn assert_redraw_only(bytes: &[u8]) {
 }
 
 #[test]
+fn a_client_that_asks_gets_the_missed_backlog_marked_ahead_of_the_redraw() {
+    let output = b"]0;a titleshown";
+    let mut reader = attach_after_output_with(
+        output,
+        AttachOptions {
+            missed_output: true,
+            ..AttachOptions::default()
+        },
+    );
+    let mut next = || read_frame::<_, DaemonMessage>(&mut reader).unwrap();
+    assert!(matches!(
+        next(),
+        Some(Frame::Control(DaemonMessage::MissedOutputBegin))
+    ));
+    match next() {
+        Some(Frame::Data(bytes)) => assert_eq!(bytes, output),
+        other => panic!("expected the missed backlog, got {other:?}"),
+    }
+    assert!(matches!(
+        next(),
+        Some(Frame::Control(DaemonMessage::MissedOutputEnd))
+    ));
+    let (bytes, _) = first_data(&mut reader);
+    assert!(String::from_utf8_lossy(&bytes).contains("shown"));
+    assert_redraw_only(&bytes);
+}
+
+#[test]
+fn a_client_that_does_not_ask_gets_no_missed_output() {
+    let mut reader = attach_after_output(b"]0;a titleshown", false);
+    assert!(matches!(
+        read_frame::<_, DaemonMessage>(&mut reader).unwrap(),
+        Some(Frame::Data(_))
+    ));
+}
+
+#[test]
 fn a_replaying_attach_gets_the_backlog_without_a_preamble() {
     let output = b"old screen \x1b[?2004h more";
     let mut reader = attach_after_output(output, true);
@@ -549,7 +665,7 @@ fn modes_set_while_a_client_was_attached_survive_into_the_next_adoption() {
     let first_client = transport::connect(&endpoint).unwrap();
     let first_server = listener.accept().unwrap();
     let first = Arc::new(ConnWriter::new(&first_server).unwrap());
-    session.attach(&first, 1, false, false, None).unwrap();
+    session.attach(&first, 1, AttachOptions::default()).unwrap();
     let _ = session.deliver_output(b"\x1b[?2004h prompt");
     session.detach(1);
     drop(first_client);
@@ -557,7 +673,9 @@ fn modes_set_while_a_client_was_attached_survive_into_the_next_adoption() {
     let client = transport::connect(&endpoint).unwrap();
     let server_side = listener.accept().unwrap();
     let writer = Arc::new(ConnWriter::new(&server_side).unwrap());
-    session.attach(&writer, 2, false, false, None).unwrap();
+    session
+        .attach(&writer, 2, AttachOptions::default())
+        .unwrap();
     client
         .set_read_timeout(Some(Duration::from_millis(500)))
         .unwrap();

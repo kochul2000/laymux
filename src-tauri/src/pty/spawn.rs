@@ -179,6 +179,7 @@ where
                 let system = crate::pty_daemon::DaemonPtySystem::adopt(
                     adoption.endpoint.clone(),
                     adoption.session_id.clone(),
+                    Arc::clone(&adoption.missed_output),
                 );
                 match open_and_spawn(&system, size, cmd.clone()) {
                     Ok(opened) => system.adopted_metadata().map(|metadata| (opened, metadata)),

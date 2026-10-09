@@ -38,7 +38,7 @@ mod handshake_tests;
 mod tests;
 
 pub use backend::{is_enabled, session_key, terminal_backend, DaemonAdoption, DaemonEndpoint};
-pub use client::DaemonPtySystem;
+pub use client::{DaemonPtySystem, MissedOutput};
 pub use control::{list_sessions, terminate_session};
 pub use discovery::{DaemonPaths, DaemonRoot};
 pub use entry::run_daemon_main;

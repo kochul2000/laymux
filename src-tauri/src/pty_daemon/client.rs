@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 use std::io::{self, BufReader, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -44,8 +44,37 @@ enum DaemonTarget {
         metadata: BTreeMap<String, String>,
     },
     /// Take over a session a previous GUI left running. The command handed
-    /// to `spawn_command` is not run.
-    Adopt,
+    /// to `spawn_command` is not run. The output it missed while detached is
+    /// counted into the given tally as it arrives (ADR-0309).
+    Adopt(Arc<MissedOutput>),
+}
+
+/// How much of a terminal's output stream, from where its reader stands, is
+/// output the terminal missed while detached (ADR-0309). The pump adds a
+/// missed frame's length before queuing the frame; the output callback takes
+/// from the head of what it reads, so the split is exact however reads
+/// chunk the stream.
+#[derive(Debug, Default)]
+pub struct MissedOutput {
+    remaining: AtomicUsize,
+}
+
+impl MissedOutput {
+    fn add(&self, bytes: usize) {
+        self.remaining.fetch_add(bytes, Ordering::AcqRel);
+    }
+
+    /// How many of the next `len` bytes read are missed output.
+    pub fn take(&self, len: usize) -> usize {
+        let mut taken = 0;
+        let _ = self
+            .remaining
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |remaining| {
+                taken = remaining.min(len);
+                Some(remaining - taken)
+            });
+        taken
+    }
 }
 
 pub struct DaemonPtySystem {
@@ -72,8 +101,12 @@ impl DaemonPtySystem {
         )
     }
 
-    pub fn adopt(endpoint: DaemonEndpoint, session_id: String) -> Self {
-        Self::with_target(endpoint, session_id, DaemonTarget::Adopt)
+    pub fn adopt(
+        endpoint: DaemonEndpoint,
+        session_id: String,
+        missed_output: Arc<MissedOutput>,
+    ) -> Self {
+        Self::with_target(endpoint, session_id, DaemonTarget::Adopt(missed_output))
     }
 
     fn with_target(endpoint: DaemonEndpoint, session_id: String, target: DaemonTarget) -> Self {
@@ -203,7 +236,7 @@ impl SlavePty for DaemonSlave {
                 command: WireCommand::from_builder(&cmd).map_err(|error| anyhow!(error))?,
                 metadata: metadata.clone(),
             },
-            DaemonTarget::Adopt => ClientMessage::Attach {
+            DaemonTarget::Adopt(_) => ClientMessage::Attach {
                 session_id: self.session_id.clone(),
                 replay: false,
                 take_over: false,
@@ -211,6 +244,7 @@ impl SlavePty for DaemonSlave {
                     rows: size.rows,
                     cols: size.cols,
                 }),
+                missed_output: true,
             },
         };
         self.connection.send(&request)?;
@@ -236,7 +270,7 @@ impl SlavePty for DaemonSlave {
                 attach_epoch,
                 metadata,
                 ..
-            })) if matches!(self.target, DaemonTarget::Adopt) => {
+            })) if matches!(self.target, DaemonTarget::Adopt(_)) => {
                 *self
                     .adopted_metadata
                     .lock_or_err()
@@ -254,7 +288,7 @@ impl SlavePty for DaemonSlave {
             .attach_epoch
             .lock_or_err()
             .map_err(|e| anyhow!(e))? = Some(attach_epoch);
-        if matches!(self.target, DaemonTarget::Adopt) {
+        if matches!(self.target, DaemonTarget::Adopt(_)) {
             // The attach already carried this size (ADR-0307); a daemon of
             // an earlier build that ignores it still gets the grid here,
             // before any new output is produced for it.
@@ -265,7 +299,11 @@ impl SlavePty for DaemonSlave {
         }
         let shared = Arc::clone(&self.connection.shared);
         let session_id = self.session_id.clone();
-        thread::spawn(move || pump(reader, shared, session_id));
+        let missed_output = match &self.target {
+            DaemonTarget::Adopt(missed_output) => Some(Arc::clone(missed_output)),
+            DaemonTarget::Spawn { .. } => None,
+        };
+        thread::spawn(move || pump(reader, shared, session_id, missed_output));
         Ok(Box::new(DaemonChild {
             connection: Arc::clone(&self.connection),
             child_pid,
@@ -275,16 +313,29 @@ impl SlavePty for DaemonSlave {
 
 /// Route daemon frames into the reader queue and the child exit slot until
 /// the daemon has reported both end-of-output and exit, or the link drops.
-fn pump(mut reader: BufReader<Stream>, shared: Arc<Shared>, session_id: String) {
+fn pump(
+    mut reader: BufReader<Stream>,
+    shared: Arc<Shared>,
+    session_id: String,
+    missed_output: Option<Arc<MissedOutput>>,
+) {
     let mut reader_ended = false;
     let mut child_exited = false;
+    let mut in_missed = false;
     while !(reader_ended && child_exited) {
         match read_frame::<_, DaemonMessage>(&mut reader) {
             Ok(Some(Frame::Data(bytes))) => {
+                if in_missed {
+                    if let Some(missed_output) = missed_output.as_ref() {
+                        missed_output.add(bytes.len());
+                    }
+                }
                 for chunk in bytes.chunks(PTY_READ_BUFFER_BYTES) {
                     shared.push_data(chunk.to_vec());
                 }
             }
+            Ok(Some(Frame::Control(DaemonMessage::MissedOutputBegin))) => in_missed = true,
+            Ok(Some(Frame::Control(DaemonMessage::MissedOutputEnd))) => in_missed = false,
             Ok(Some(Frame::Control(DaemonMessage::Eof))) => {
                 reader_ended = true;
                 shared.push_end(PtyReadEvent::Eof);
@@ -493,5 +544,20 @@ impl ChildKiller for DaemonKiller {
         Box::new(DaemonKiller {
             connection: Arc::clone(&self.connection),
         })
+    }
+}
+
+#[cfg(test)]
+mod missed_output_tests {
+    use super::MissedOutput;
+
+    #[test]
+    fn missed_output_is_taken_from_the_head_of_the_stream_across_reads() {
+        let missed = MissedOutput::default();
+        assert_eq!(missed.take(10), 0);
+        missed.add(6);
+        assert_eq!(missed.take(4), 4);
+        assert_eq!(missed.take(4), 2, "the rest of the read is live");
+        assert_eq!(missed.take(4), 0);
     }
 }

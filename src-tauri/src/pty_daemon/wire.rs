@@ -67,6 +67,12 @@ pub enum ClientMessage {
         take_over: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         size: Option<AttachSize>,
+        /// Without replay, also hand over the discarded backlog between
+        /// `missedOutputBegin` and `missedOutputEnd`, ahead of the redraw, so
+        /// the client can take the OSC facts in it without showing it
+        /// (ADR-0309). A daemon that predates the field ignores it.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        missed_output: bool,
     },
     /// Describe live sessions. Valid on an unbound connection.
     List,
@@ -118,6 +124,10 @@ pub enum DaemonMessage {
     Sessions {
         sessions: Vec<SessionInfo>,
     },
+    /// The data frames up to `MissedOutputEnd` are output the client missed
+    /// while detached (ADR-0309): not for display.
+    MissedOutputBegin,
+    MissedOutputEnd,
     /// The session's PTY reader reached end of output. No data follows.
     Eof,
     /// The session's direct child exited.
@@ -343,6 +353,7 @@ mod tests {
             replay: false,
             take_over: false,
             size: None,
+            missed_output: false,
         };
         assert!(!serde_json::to_string(&sizeless).unwrap().contains("size"));
     }
