@@ -271,11 +271,11 @@ impl Session {
         // Without replay the retained bytes are discarded instead of handed
         // to a client that would parse them as live output (and answer the
         // terminal queries inside them again).
-        // A client that asks for it still gets them, marked as missed, to
-        // take their OSC facts without showing or answering them (ADR-0309).
-        let missed =
-            (!replay && missed_output).then(|| sink.backlog.iter().copied().collect::<Vec<u8>>());
-        if !replay {
+        // A client that asks for them still gets them, marked as missed, to
+        // take their OSC facts without showing or answering them (ADR-0309);
+        // `droppedBytes` then counts only what the backlog could not keep.
+        let hand_over_missed = !replay && missed_output;
+        if !replay && !hand_over_missed {
             sink.dropped_bytes += sink.backlog.len() as u64;
             sink.backlog.clear();
         }
@@ -289,21 +289,18 @@ impl Session {
                 metadata: self.metadata.clone(),
             })
             .and_then(|()| {
+                if hand_over_missed {
+                    writer.send(&DaemonMessage::MissedOutputBegin)?;
+                }
                 let (front, back) = sink.backlog.as_slices();
                 front
                     .chunks(PTY_READ_BUFFER_BYTES)
                     .chain(back.chunks(PTY_READ_BUFFER_BYTES))
-                    .try_for_each(|chunk| writer.send_data(chunk))
-            })
-            .and_then(|()| match &missed {
-                Some(missed) => {
-                    writer.send(&DaemonMessage::MissedOutputBegin)?;
-                    missed
-                        .chunks(PTY_READ_BUFFER_BYTES)
-                        .try_for_each(|chunk| writer.send_data(chunk))?;
-                    writer.send(&DaemonMessage::MissedOutputEnd)
+                    .try_for_each(|chunk| writer.send_data(chunk))?;
+                if hand_over_missed {
+                    writer.send(&DaemonMessage::MissedOutputEnd)?;
                 }
-                None => Ok(()),
+                Ok(())
             })
             .and_then(|()| {
                 // A large redraw (a full screen of true-color cells) can

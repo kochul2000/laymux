@@ -448,6 +448,7 @@ pub async fn create_terminal_session(
         callback_state: Arc::clone(&pty_cb_state),
         presets: osc_hooks::default_presets(),
         gate: OscOutputGate::new(missed_output.is_some()),
+        missed_ring: crate::output_buffer::TerminalOutputBuffer::default(),
     });
     let callback_osc_pass = Arc::clone(&osc_pass);
     let callback_missed_output = missed_output;
@@ -619,6 +620,10 @@ pub async fn create_terminal_session(
         if let Some(guard) = codex_startup_color_probe.as_ref() {
             guard.disarm();
         }
+        // The notify gate holds back startup noise, which an adopted child
+        // left behind long ago; what it reported while detached is real
+        // (ADR-0309).
+        session.notify_gate_armed = true;
     }
     // Seed the CWD from the directory the PTY was actually started in. OSC 7 is
     // only accepted while the terminal is a plain shell (issue #215), so a pane
@@ -782,6 +787,14 @@ pub async fn create_terminal_session(
     }
     drop(terminals);
     osc_pass.open();
+    // The missed output may have moved the CWD (ADR-0309). The frontend seeds
+    // its store from this reply, after the change event, so the reply must
+    // not carry the spawn directory over it.
+    if let Ok(terminals) = state.terminals.lock_or_err() {
+        if let Some(session) = terminals.get(&id) {
+            result.cwd = session.cwd.clone();
+        }
+    }
 
     // Notify MCP resource bridge that the terminal catalog grew. This drives
     // `notifications/resources/list_changed` on all subscribed peers (advertised
@@ -1747,9 +1760,6 @@ pub fn update_terminal_sync_group(
     Ok(())
 }
 
-/// Dispatch an OSC hook action from the PTY callback.
-/// Called for each matched hook after OSC parsing.
-/// All locks are acquired and released independently to prevent deadlock.
 /// Holds a terminal's output for the OSC pass until the terminal is
 /// registered, then passes it through in stream order (ADR-0309).
 struct OscOutputGate {
@@ -1812,6 +1822,10 @@ struct TerminalOscPass {
     callback_state: Arc<activity::PtyCallbackState>,
     presets: Vec<osc_hooks::OscHookDef>,
     gate: OscOutputGate,
+    /// The missed output so far, as the live ring would hold it: what the
+    /// CWD gate judges the shell state by, since missed output never enters
+    /// the ring (ADR-0309).
+    missed_ring: crate::output_buffer::TerminalOutputBuffer,
 }
 
 impl TerminalOscPass {
@@ -1837,12 +1851,12 @@ impl TerminalOscPass {
         let terminal_generation = self.terminal_generation;
         let pty_cb_state = &self.callback_state;
         let presets = &self.presets;
-        let missed_buffer = missed
-            .then(|| {
-                let buffer = crate::output_buffer::TerminalOutputBuffer::default();
-                buffer.push_sequenced(data).ok().map(|_| buffer)
-            })
-            .flatten();
+        let missed_buffer = missed.then(|| {
+            if let Err(error) = self.missed_ring.push_sequenced(data) {
+                tracing::warn!(terminal_id, %error, "missed output could not be judged for CWD");
+            }
+            &self.missed_ring
+        });
         // ── Unified OSC processing loop ──
         // Single pass: parse all OSC sequences, match against presets, dispatch actions,
         // and emit structured events. Replaces the old per-code extraction blocks.
@@ -2233,7 +2247,7 @@ impl TerminalOscPass {
                     Ok(buffers) => super::ipc_dispatch::should_accept_source_cwd_event(
                         &state_for_pty,
                         &terminal_id,
-                        match missed_buffer.as_ref() {
+                        match missed_buffer {
                             Some(missed) => Some(missed),
                             None => buffers.get(&terminal_id),
                         },
@@ -2343,6 +2357,9 @@ impl TerminalOscPass {
     }
 }
 
+/// Dispatch an OSC hook action from the PTY callback.
+/// Called for each matched hook after OSC parsing.
+/// All locks are acquired and released independently to prevent deadlock.
 fn dispatch_osc_action(
     state: &AppState,
     app: &AppHandle,
@@ -2440,6 +2457,11 @@ fn dispatch_osc_action(
 mod tests {
     use super::*;
     use crate::claude_activity::ClaudeTitleResult;
+    use crate::remote_server::RemoteControlLease;
+    use std::io::Write;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn a_closed_osc_gate_keeps_stream_order_until_it_opens() {
@@ -2477,11 +2499,6 @@ mod tests {
         });
         assert_eq!(seen, vec![(b"live".to_vec(), false)]);
     }
-    use crate::remote_server::RemoteControlLease;
-    use std::io::Write;
-    use std::sync::mpsc;
-    use std::thread;
-    use std::time::{Duration, Instant};
 
     struct SharedTestWriter(Arc<Mutex<Vec<u8>>>);
 
