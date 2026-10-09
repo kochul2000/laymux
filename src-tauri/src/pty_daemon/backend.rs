@@ -1,9 +1,10 @@
 //! Backend selection for new terminals and the daemon endpoint identity.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use super::client::MissedOutput;
 use super::control::{list_sessions, terminate_by_id};
 use super::discovery::DaemonRoot;
 use super::launcher;
@@ -58,6 +59,9 @@ fn enabled_for(value: Option<&str>) -> bool {
 pub struct DaemonAdoption {
     pub endpoint: DaemonEndpoint,
     pub session_id: String,
+    /// What of the terminal's first output is the backlog it missed
+    /// (ADR-0309).
+    pub missed_output: Arc<MissedOutput>,
 }
 
 /// The backend a user terminal should use.
@@ -102,6 +106,7 @@ pub fn terminal_backend(terminal_id: &str, profile: &str, allow_adopt: bool) -> 
                 choice.adopt.map(|(catalog, session_id)| DaemonAdoption {
                     endpoint: catalogs[catalog].0.clone(),
                     session_id,
+                    missed_output: Arc::default(),
                 })
             }
             Err(error) => {

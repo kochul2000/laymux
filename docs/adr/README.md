@@ -326,6 +326,7 @@ ADR 이 필요한 대표 기준:
 | [0306](0306-pty-daemon-session-inventory.md) | 분리된 PTY 데몬 세션을 보고, pane이 잡지 않은 세션만 목록 epoch로 끝낸다 | Proposed |
 | [0307](0307-pty-daemon-adoption-screen-redraw.md) | 데몬이 출력으로 화면 모델(vt100)을 유지하고, replay 없는 재결합에서 preamble 뒤에 현재 화면을 다시 그린다 (0303 범위 확장) | Proposed |
 | [0308](0308-pty-daemon-generations-across-updates.md) | 업데이트 중에도 데몬 세션을 유지하고 데몬 세대를 공존시킨다 (0301·0201 일부 대체) | Proposed |
+| [0309](0309-adopted-terminal-takes-missed-osc-facts.md) | 재결합한 GUI가 놓친 출력의 OSC 사실을 단일 패스로 처리한다 | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

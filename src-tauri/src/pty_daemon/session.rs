@@ -87,6 +87,19 @@ pub(super) struct Session {
     pub(super) pty_size: Mutex<Option<(u16, u16)>>,
 }
 
+/// How a client binds to a session (wire `Attach`).
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct AttachOptions {
+    /// Deliver the detached backlog as live output first.
+    pub(super) replay: bool,
+    /// Replace an attached client instead of refusing.
+    pub(super) take_over: bool,
+    /// The client's grid, applied to the PTY before the redraw (ADR-0307).
+    pub(super) size: Option<(u16, u16)>,
+    /// Hand over the discarded backlog marked as missed (ADR-0309).
+    pub(super) missed_output: bool,
+}
+
 #[derive(Default)]
 pub(super) struct Sink {
     pub(super) client: Option<ClientLink>,
@@ -198,10 +211,14 @@ impl Session {
         &self,
         writer: &Arc<ConnWriter>,
         connection_id: u64,
-        replay: bool,
-        take_over: bool,
-        size: Option<(u16, u16)>,
+        options: AttachOptions,
     ) -> Result<u64, String> {
+        let AttachOptions {
+            replay,
+            take_over,
+            size,
+            missed_output,
+        } = options;
         let link = ClientLink {
             connection_id,
             writer: Arc::clone(writer),
@@ -254,7 +271,11 @@ impl Session {
         // Without replay the retained bytes are discarded instead of handed
         // to a client that would parse them as live output (and answer the
         // terminal queries inside them again).
-        if !replay {
+        // A client that asks for them still gets them, marked as missed, to
+        // take their OSC facts without showing or answering them (ADR-0309);
+        // `droppedBytes` then counts only what the backlog could not keep.
+        let hand_over_missed = !replay && missed_output;
+        if !replay && !hand_over_missed {
             sink.dropped_bytes += sink.backlog.len() as u64;
             sink.backlog.clear();
         }
@@ -268,11 +289,18 @@ impl Session {
                 metadata: self.metadata.clone(),
             })
             .and_then(|()| {
+                if hand_over_missed {
+                    writer.send(&DaemonMessage::MissedOutputBegin)?;
+                }
                 let (front, back) = sink.backlog.as_slices();
                 front
                     .chunks(PTY_READ_BUFFER_BYTES)
                     .chain(back.chunks(PTY_READ_BUFFER_BYTES))
-                    .try_for_each(|chunk| writer.send_data(chunk))
+                    .try_for_each(|chunk| writer.send_data(chunk))?;
+                if hand_over_missed {
+                    writer.send(&DaemonMessage::MissedOutputEnd)?;
+                }
+                Ok(())
             })
             .and_then(|()| {
                 // A large redraw (a full screen of true-color cells) can

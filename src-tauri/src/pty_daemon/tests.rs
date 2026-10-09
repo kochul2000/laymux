@@ -234,6 +234,7 @@ fn raw_attach(endpoint: &DaemonEndpoint, session_id: &str) -> (Stream, BufReader
             replay: true,
             take_over: true,
             size: None,
+            missed_output: false,
         },
     )
     .unwrap();

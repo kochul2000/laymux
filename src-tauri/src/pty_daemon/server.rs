@@ -19,7 +19,7 @@ use portable_pty::{native_pty_system, PtySize};
 use super::handshake::authenticate;
 use super::idle::idle_monitor;
 use super::screen::ScreenModel;
-use super::session::{ClientLink, ConnWriter, Session};
+use super::session::{AttachOptions, ClientLink, ConnWriter, Session};
 use super::transport::{self, Listener, Stream};
 use super::wire::{
     read_frame, split_input, ClientMessage, DaemonMessage, Frame, SessionInfo, WireCommand,
@@ -247,15 +247,15 @@ impl DaemonServer {
                     replay,
                     take_over,
                     size,
+                    missed_output,
                 }) if bound.is_none() => {
-                    match self.attach_session(
-                        &writer,
-                        connection_id,
-                        &session_id,
+                    let options = AttachOptions {
                         replay,
                         take_over,
-                        size.map(|size| (size.rows, size.cols)),
-                    ) {
+                        size: size.map(|size| (size.rows, size.cols)),
+                        missed_output,
+                    };
+                    match self.attach_session(&writer, connection_id, &session_id, options) {
                         Ok(session) => bound = Some(session),
                         Err(error) => writer.error(&error),
                     }
@@ -425,9 +425,7 @@ impl DaemonServer {
         writer: &Arc<ConnWriter>,
         connection_id: u64,
         session_id: &str,
-        replay: bool,
-        take_over: bool,
-        size: Option<(u16, u16)>,
+        options: AttachOptions,
     ) -> Result<Arc<Session>, String> {
         let session = self
             .sessions
@@ -435,7 +433,7 @@ impl DaemonServer {
             .get(session_id)
             .cloned()
             .ok_or_else(|| format!("PTY daemon session '{session_id}' does not exist"))?;
-        session.attach(writer, connection_id, replay, take_over, size)?;
+        session.attach(writer, connection_id, options)?;
         Ok(session)
     }
 
