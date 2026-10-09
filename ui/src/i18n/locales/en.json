@@ -958,7 +958,7 @@
       "profile": "Profile",
       "daemon": "Daemon",
       "daemonCurrent": "Current",
-      "daemonPrevious": "Previous build",
+      "daemonOther": "Other build",
       "pid": "PID",
       "state": "State",
       "actions": "Actions",

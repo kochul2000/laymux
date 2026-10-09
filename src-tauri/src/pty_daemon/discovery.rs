@@ -62,12 +62,19 @@ impl DaemonRoot {
     }
 
     /// The generation of the running executable.
+    ///
+    /// Identified once per process: the executable may be replaced (a
+    /// package upgrade) while this build keeps running.
     pub fn current(&self) -> Result<DaemonPaths, String> {
+        static CURRENT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+        if let Some(key) = CURRENT.get() {
+            return Ok(self.generation(key));
+        }
         let exe = std::env::current_exe()
             .map_err(|error| format!("cannot locate the laymux executable: {error}"))?;
         let key = generation_key(&exe)
             .map_err(|error| format!("cannot identify the laymux build: {error}"))?;
-        Ok(self.generation(&key))
+        Ok(self.generation(CURRENT.get_or_init(|| key)))
     }
 
     /// Every generation directory present, live or not.

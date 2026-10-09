@@ -125,6 +125,9 @@ pub struct LiveGeneration {
     /// The generation key (ADR-0308).
     pub generation: String,
     pub state: GenerationState,
+    /// When its daemon published itself; the key itself says nothing about
+    /// which build came later.
+    pub started: Option<std::time::SystemTime>,
 }
 
 #[derive(Debug, Clone)]
@@ -158,8 +161,13 @@ pub fn live_generations(
         live.push(LiveGeneration {
             generation: paths.generation(),
             state,
+            started: std::fs::metadata(paths.discovery_file())
+                .and_then(|meta| meta.modified())
+                .ok(),
         });
     }
+    // Newest first.
+    live.sort_by(|left, right| right.started.cmp(&left.started));
     Ok(live)
 }
 
@@ -175,14 +183,10 @@ pub fn collect_unused_generations(root: &DaemonRoot, current: &str, min_age: Dur
             .unwrap_or(true)
     };
     for paths in root.generations() {
-        if paths.generation() == current
-            || young(&paths.lock_file())
-            || young(paths.dir())
-            || daemon_instance_alive(&paths)
-        {
+        if paths.generation() == current || young(&paths.lock_file()) || young(paths.dir()) {
             continue;
         }
-        if let Err(error) = std::fs::remove_dir_all(paths.dir()) {
+        if let Err(error) = remove_unused_generation(&paths) {
             tracing::debug!(dir = %paths.dir().display(), %error, "unused PTY daemon generation not removed");
         }
     }
@@ -197,6 +201,31 @@ pub fn collect_unused_generations(root: &DaemonRoot, current: &str, min_age: Dur
             };
         }
     }
+}
+
+/// Remove a generation directory while holding its instance lock, so a daemon
+/// of that build starting meanwhile either finds the lock taken and gives up,
+/// or starts after the directory is gone and makes a new one. The lock file
+/// goes last.
+fn remove_unused_generation(paths: &DaemonPaths) -> std::io::Result<()> {
+    let lock = std::fs::OpenOptions::new()
+        .write(true)
+        .open(paths.lock_file())?;
+    lock.try_lock().map_err(std::io::Error::other)?;
+    for entry in std::fs::read_dir(paths.dir())? {
+        let path = entry?.path();
+        if path == paths.lock_file() {
+            continue;
+        }
+        if path.is_dir() {
+            std::fs::remove_dir_all(&path)?;
+        } else {
+            std::fs::remove_file(&path)?;
+        }
+    }
+    drop(lock);
+    std::fs::remove_file(paths.lock_file())?;
+    std::fs::remove_dir(paths.dir())
 }
 
 /// What a daemon kept directly in the root before generations (ADR-0301).
@@ -474,11 +503,12 @@ mod generation_tests {
             .iter()
             .map(|live| (live.generation.as_str(), live.state.clone()))
             .collect();
+        // Newest published first; one that has not published yet is last.
         assert!(matches!(
             states.as_slice(),
             [
-                ("g3-000000000002", GenerationState::Unreachable),
                 ("g999-000000000001", GenerationState::Incompatible(999)),
+                ("g3-000000000002", GenerationState::Unreachable),
             ]
         ));
         assert!(live_generations(&root, |key| key != "g3-000000000002")

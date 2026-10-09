@@ -388,11 +388,17 @@ pub const PTY_DAEMON_GENERATION_PREFIX: &str = "g";
 /// An unused generation directory younger than this is never collected: a
 /// GUI of that build may be about to start its daemon.
 pub const PTY_DAEMON_GENERATION_GC_MIN_AGE_MS: u64 = 60_000;
+/// How long a GUI reuses its listing of the other daemon generations when it
+/// looks for a session to adopt (ADR-0308).
+pub const PTY_DAEMON_OTHER_GENERATIONS_TTL_MS: u64 = 30_000;
 /// Windows: image name of the staged daemon copy. The update installer ends
-/// every running `laymux.exe` by image name, so the daemon must not carry it
-/// (ADR-0308).
-#[cfg(windows)]
+/// every running `laymux.exe` by image name, so the daemon must not carry it;
+/// the uninstaller ends the release one by this name (ADR-0308). A dev
+/// build's daemon has its own, so uninstalling the release never ends it.
+#[cfg(all(windows, not(debug_assertions)))]
 pub const PTY_DAEMON_STAGED_IMAGE: &str = "laymux-pty-daemon.exe";
+#[cfg(all(windows, debug_assertions))]
+pub const PTY_DAEMON_STAGED_IMAGE: &str = "laymux-dev-pty-daemon.exe";
 
 /// Shared upper bound for one owner transition, including worker polling,
 /// cancellation grace, terminal teardown, and scheduler slack.

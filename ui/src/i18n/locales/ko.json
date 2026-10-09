@@ -958,7 +958,7 @@
       "profile": "프로필",
       "daemon": "데몬",
       "daemonCurrent": "현재",
-      "daemonPrevious": "이전 빌드",
+      "daemonOther": "다른 빌드",
       "pid": "PID",
       "state": "상태",
       "actions": "동작",

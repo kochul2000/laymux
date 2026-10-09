@@ -25,15 +25,17 @@ ADR-0301은 업데이트 guard가 데몬에 `Shutdown`을 보내 모든 세션�
 
 - Windows staging 사본(ADR-0301)의 이미지 이름을 `laymux-pty-daemon.exe`로 바꾼다. 내용은 `laymux.exe` 사본 그대로이고, 실행 인자 `--pty-daemon <dir>`로 데몬이 된다.
 - 설치기는 `laymux.exe`라는 이름만 끝내므로 데몬과 그 ConPTY(`OpenConsole.exe`, staging 디렉터리에 있음)는 남는다. 설치 디렉터리의 파일은 데몬이 잡고 있지 않다.
+- **설치 제거는 데몬을 끝낸다.** 이름이 바뀌어 제거기의 실행 중 확인에도 걸리지 않으므로, installer hook(`NSIS_HOOK_PREUNINSTALL`)이 `$UpdateMode`가 아닐 때 `laymux-pty-daemon.exe`를 끝낸다. 업데이트는 이전 제거기를 `/UPDATE`로 실행하므로 데몬이 남는다.
+- dev build의 사본 이름은 `laymux-dev-pty-daemon.exe`다. release를 제거해도 dev 데몬은 끝나지 않는다.
 
 ### 세대
 
-- 세대 key는 `p{PROTOCOL_VERSION}-{실행 파일 크기}-{수정 시각}`이다. staging key(ADR-0301)와 같은 정보로, 업데이트나 dev 재빌드마다 새 세대가 된다.
+- 세대 key는 `g<PROTOCOL_VERSION>-<digest>`다. digest는 실행 파일 크기·수정 시각(staging key와 같은 정보)의 SHA-256 앞 12자리로, 디렉터리와 그 안 socket 경로를 짧게 유지한다. 업데이트나 dev 재빌드마다 새 세대가 된다. GUI는 key를 프로세스당 한 번 계산한다. 실행 중에 패키지가 실행 파일을 교체해도 그 프로세스의 세대는 바뀌지 않는다.
 - 데몬 디렉터리 구조는 `<state>/pty-daemon/<세대 key>/{daemon.json, daemon.lock, daemon.log, runtime/}`이다. instance lock, discovery, 로그, staging 사본이 모두 세대 디렉터리 안에 있다. 세대마다 데몬은 하나다.
 - **새 세션은 현재 세대 데몬에만 만든다.** 이전 세대는 새 세션을 받지 않으므로, 남은 세션이 끝나면 idle exit으로 사라진다. 별도 retire 메시지나 wire 변경은 없다.
-- **재결합은 살아 있는 모든 호환 세대에서 찾는다.** 호환은 discovery의 protocol version이 같은 것이다. 같은 terminal의 후보는 현재 세대를 먼저 고르고, 같은 세대 안에서는 생성 순서가 가장 늦은 것을 고른다. 고르지 않은 후보는 ADR-0301처럼 stale로 끝낸다. 재결합한 세션은 소유 세대의 데몬과 연결을 유지한다. 그래서 한 GUI가 여러 세대 데몬과 동시에 이야기할 수 있다.
+- **재결합은 살아 있는 모든 호환 세대에서 찾는다.** 호환은 discovery의 protocol version이 같은 것이다. 같은 terminal의 후보는 현재 세대를 먼저, 다른 세대는 데몬이 늦게 시작한(discovery를 늦게 게시한) 순서로, 같은 세대 안에서는 생성 순서가 가장 늦은 것을 고른다. 다른 세대의 목록은 30초 동안 재사용한다. 복원하는 pane마다 다시 묻지 않기 위해서이고, 특히 응답 없는 세대가 pane마다 handshake 제한 시간을 쓰게 하지 않기 위해서다. 낡은 목록이어도 adoption은 데몬이 원자적으로 판정하고, stale 종료는 목록의 epoch를 싣는다. 고르지 않은 후보는 ADR-0301처럼 stale로 끝낸다. 재결합한 세션은 소유 세대의 데몬과 연결을 유지한다. 그래서 한 GUI가 여러 세대 데몬과 동시에 이야기할 수 있다.
 - **호환되지 않는 세대**(protocol이 다름)는 재결합하지도 끝내지도 않는다. PTY 세션 패널(ADR-0306)에 "다른 protocol의 데몬이 실행 중"으로 보이고, 그 안의 세션은 목록에 나오지 않는다. 세션이 끝나면 그 데몬도 idle exit으로 사라진다.
-- **정리:** GUI는 처음 데몬을 쓸 때 한 번, lock이 풀려 있고 일정 시간보다 오래된 이전 세대 디렉터리를 지운다. 현재 세대와 막 만들어진 디렉터리는 건드리지 않는다. 세대 디렉터리가 생기기 전 구조(데몬 디렉터리 바로 아래의 `daemon.lock`·`daemon.json`·`runtime/`)도 lock이 풀려 있으면 같은 규칙으로 지운다.
+- **정리:** GUI는 처음 데몬을 쓸 때 한 번, lock이 풀려 있고 일정 시간보다 오래된 이전 세대 디렉터리를 지운다. 지우는 동안 그 세대의 instance lock을 쥐어, 그 사이 시작하는 데몬은 lock에서 물러나며 lock 파일은 마지막에 지운다. 현재 세대와 막 만들어진 디렉터리는 건드리지 않는다. 세대 디렉터리가 생기기 전 구조(데몬 디렉터리 바로 아래의 `daemon.lock`·`daemon.json`·`runtime/`)도 lock이 풀려 있으면 같은 규칙으로 지운다.
 
 ### 업데이트 guard
 
@@ -60,9 +62,12 @@ ADR-0301은 업데이트 guard가 데몬에 `Shutdown`을 보내 모든 세션�
 - 업데이트 뒤 셸·Codex·빌드가 같은 pane에서 계속된다. 설치하는 동안 GUI가 없으므로 그 사이의 OSC·훅 이벤트는 잃는다(단계 G).
 - dev 재빌드마다 새 세대가 생긴다. 재빌드 전의 세션은 이전 세대에서 재결합되고, 새 터미널은 새 binary로 실행된다. 예전처럼 "이전 binary 데몬이 새 세션까지 받는" 일이 없다.
 - 이전 세대 데몬은 남은 세션이 끝날 때까지 실행된다. 그동안 세대마다 데몬 프로세스와 staging 사본(실행 파일 + ConPTY)이 하나씩 있다.
+- PTY 세션 패널이 열려 있는 동안에는 목록 조회가 이전 세대 데몬에도 연결하므로, 세션이 없는 이전 세대도 패널을 닫은 뒤에야 idle exit한다.
+- 세대 이전 build(v1.5.x)에서 이 build로 올리는 첫 업데이트는 실행 중인 이전 guard가 데몬을 끝내므로 세션이 유지되지 않는다. 그다음 업데이트부터 유지된다.
 - protocol을 바꾸는 업데이트는 이전 세대 세션을 재결합하지 못한다. 그 세션은 패널에 "다른 protocol"로만 보이고 끝날 때까지 실행된다. protocol 변경은 이 비용을 감수해야 한다.
 - 남은 위험:
   - 설치 중 agent 훅이 설치 디렉터리의 `laymux-agent-hook.exe`를 실행하는 순간과 설치기의 파일 교체가 겹치면 설치기가 그 파일을 쓰지 못할 수 있다. 훅은 짧게 실행되므로 창은 작고, passive 설치기는 재시도한다.
+  - 같은 root를 쓰는 다른 build의 GUI가 동시에 실행될 때(dev 워크트리 여러 개) 정리와 그 build의 데몬 기동이 겹칠 수 있다. lock을 쥐고 지우므로 남는 창은 lock 파일을 지우는 순간뿐이다.
   - Linux AppImage는 데몬 실행 파일이 AppImage 마운트 안에 있다. 이 ADR은 마운트 수명을 다루지 않는다. deb 설치는 실행 중 binary를 교체해도 문제가 없다.
 - 검증:
   - 세대 key·디렉터리 정리·세대 간 재결합 선택 단위 테스트.

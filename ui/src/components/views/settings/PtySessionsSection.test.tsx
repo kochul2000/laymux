@@ -95,7 +95,7 @@ describe("PtySessionsSection", () => {
     expect(screen.getByTestId("pty-sessions-end-detached")).toBeDisabled();
   });
 
-  it("marks an earlier build's sessions and reports daemons it cannot list", async () => {
+  it("marks another build's sessions and reports daemons it cannot list", async () => {
     respond({
       list_pty_sessions: {
         ...inventory,
@@ -110,7 +110,7 @@ describe("PtySessionsSection", () => {
     render(<PtySessionsSection />);
     await waitFor(() => expect(screen.getByTestId("pty-sessions-table")).toBeInTheDocument());
     const earlier = screen.getByTestId("pty-session-end-pane-o#1-q").closest("tr");
-    expect(earlier).toHaveTextContent(/Previous build|이전 빌드/);
+    expect(earlier).toHaveTextContent(/Other build|다른 빌드/);
     expect(screen.getByTestId("pty-sessions-unavailable-g2-0000000000bb")).toHaveTextContent(
       "protocol 2",
     );

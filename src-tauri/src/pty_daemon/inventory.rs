@@ -58,7 +58,7 @@ pub struct PtySessionInventory {
     /// Whether any daemon generation is alive.
     pub daemon_running: bool,
     /// This build's generation: new terminals start there, so a session of
-    /// any other runs on an earlier build.
+    /// any other runs on another (usually earlier) build.
     pub current_daemon: Option<String>,
     pub sessions: Vec<PtySessionEntry>,
     /// Live generations whose sessions could not be listed.

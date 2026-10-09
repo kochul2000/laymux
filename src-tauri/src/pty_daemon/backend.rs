@@ -1,7 +1,8 @@
 //! Backend selection for new terminals and the daemon endpoint identity.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use super::control::{list_sessions, terminate_by_id};
 use super::discovery::DaemonRoot;
@@ -9,7 +10,9 @@ use super::launcher;
 use super::wire::SessionInfo;
 use crate::constants::{
     ENV_LAYMUX_PTY_DAEMON, PTY_DAEMON_GENERATION_GC_MIN_AGE_MS, PTY_DAEMON_METADATA_PROFILE,
+    PTY_DAEMON_OTHER_GENERATIONS_TTL_MS,
 };
+use crate::lock_ext::MutexExt;
 use crate::pty::PtyBackend;
 
 /// Address and credential of one live daemon instance.
@@ -127,6 +130,27 @@ fn catalogs(
         endpoint.clone(),
         list_sessions(endpoint).map_err(|error| error.to_string())?,
     )];
+    catalogs.extend(other_generations(root, current)?);
+    Ok(catalogs)
+}
+
+type Catalog = (DaemonEndpoint, Vec<SessionInfo>);
+
+/// The other live generations' sessions, newest generation first, listed
+/// at most once per `PTY_DAEMON_OTHER_GENERATIONS_TTL_MS`. A restored layout
+/// creates its panes one after another, and a generation that holds its lock
+/// without answering would otherwise cost every pane the handshake timeout.
+/// A listing that went stale is safe: adoption is claimed atomically, and a
+/// stale session is ended only with the epoch it was listed with.
+fn other_generations(root: &DaemonRoot, current: &str) -> Result<Vec<Catalog>, String> {
+    static LISTED: Mutex<Option<(Instant, Vec<Catalog>)>> = Mutex::new(None);
+    let mut listed = LISTED.lock_or_err()?;
+    if let Some((at, catalogs)) = listed.as_ref() {
+        if at.elapsed() < Duration::from_millis(PTY_DAEMON_OTHER_GENERATIONS_TTL_MS) {
+            return Ok(catalogs.clone());
+        }
+    }
+    let mut catalogs = Vec::new();
     for live in launcher::live_generations(root, |generation| generation != current)? {
         let launcher::GenerationState::Ready(endpoint) = live.state else {
             continue;
@@ -138,6 +162,7 @@ fn catalogs(
             }
         }
     }
+    *listed = Some((Instant::now(), catalogs.clone()));
     Ok(catalogs)
 }
 

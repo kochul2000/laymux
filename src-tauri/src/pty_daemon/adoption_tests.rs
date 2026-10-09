@@ -285,11 +285,10 @@ fn app_exit_ends_daemon_terminals_registered_in_app_state() {
     daemon.wait_for_sessions(0);
 }
 
-#[test]
-fn an_update_handoff_leaves_daemon_terminals_running_for_the_updated_gui() {
-    let daemon = TestDaemon::start();
+/// One daemon terminal registered in a fresh app state, as a GUI has it.
+fn state_with_daemon_terminal(daemon: &TestDaemon, session_id: &str) -> crate::state::AppState {
     let state = crate::state::AppState::new();
-    let system = spawning(daemon.endpoint.clone(), "pane-h#1".into());
+    let system = spawning(daemon.endpoint.clone(), session_id.into());
     let handle = spawn_command_on(
         &system,
         size(),
@@ -307,22 +306,54 @@ fn an_update_handoff_leaves_daemon_terminals_running_for_the_updated_gui() {
         .pty_handles
         .lock()
         .unwrap()
-        .insert("pane-h".into(), handle);
+        .insert(session_id.into(), handle);
     daemon.wait_for_sessions(1);
+    state
+}
 
-    state.begin_update_handoff();
-    // Windows: the installer teardown. Linux: the restart's exit path. Both,
-    // and the state's own drop, leave the session running (ADR-0308).
-    state.terminate_child_processes();
-    state.terminate_daemon_sessions_on_exit();
-    assert!(state.pty_handles.lock().unwrap().is_empty());
-    drop(state);
+fn assert_session_keeps_running(daemon: &TestDaemon) {
     std::thread::sleep(Duration::from_millis(500));
     let sessions = list_sessions(&daemon.endpoint).unwrap();
     assert_eq!(sessions.len(), 1);
     assert!(!sessions[0].terminating && !sessions[0].exited);
+}
 
+#[test]
+fn the_installer_teardown_hands_daemon_terminals_to_the_updated_gui() {
+    let daemon = TestDaemon::start();
+    let state = state_with_daemon_terminal(&daemon, "pane-h#1");
+    state.begin_update_handoff();
+    // Windows: `on_before_exit`, then `process::exit` (ADR-0308).
+    state.terminate_child_processes();
+    assert!(state.pty_handles.lock().unwrap().is_empty());
+    std::mem::forget(state);
+    assert_session_keeps_running(&daemon);
     super::control::terminate_by_id(&daemon.endpoint, "pane-h#1", None).unwrap();
+    daemon.wait_for_sessions(0);
+}
+
+#[test]
+fn the_restart_into_an_update_hands_daemon_terminals_to_the_updated_gui() {
+    let daemon = TestDaemon::start();
+    let state = state_with_daemon_terminal(&daemon, "pane-u#1");
+    state.begin_update_handoff();
+    // Linux: `app.restart()` runs the app exit path, and the state may drop.
+    state.terminate_daemon_sessions_on_exit();
+    assert_session_keeps_running(&daemon);
+    drop(state);
+    assert_session_keeps_running(&daemon);
+    super::control::terminate_by_id(&daemon.endpoint, "pane-u#1", None).unwrap();
+    daemon.wait_for_sessions(0);
+}
+
+#[test]
+fn a_failed_update_ends_daemon_terminals_on_exit_again() {
+    let daemon = TestDaemon::start();
+    let state = state_with_daemon_terminal(&daemon, "pane-f#1");
+    state.begin_update_handoff();
+    state.cancel_update_handoff();
+    state.terminate_daemon_sessions_on_exit();
+    std::mem::forget(state);
     daemon.wait_for_sessions(0);
 }
 

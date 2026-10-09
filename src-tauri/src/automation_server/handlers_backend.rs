@@ -39,18 +39,18 @@ pub async fn api_docs() -> impl IntoResponse {
             },
             {
                 "method": "GET", "path": "/api/v1/pty-sessions",
-                "description": "PTY daemon session inventory: daemonRunning and sessions[{sessionId, terminalId, profile, createdSeq, childPid, attachEpoch, state: pane | awaitingPane | detached | otherClient | ending}]. awaitingPane: no client yet, but the saved layout (an unopened workspace, a dock) will adopt it when its pane mounts; a terminal this GUI already created once is not awaited. A daemon that does not answer, or an unreadable saved layout, is an error, never an empty list."
+                "description": "PTY daemon session inventory across every live daemon generation (one per build, ADR-0308): daemonRunning, currentDaemon (this build's generation), sessions[{daemon, sessionId, terminalId, profile, createdSeq, childPid, attachEpoch, state: pane | awaitingPane | detached | otherClient | ending}] and unavailableDaemons[{daemon, problem: notAnswering | incompatible, protocolVersion}]. awaitingPane: no client yet, but the saved layout (an unopened workspace, a dock) will adopt it when its pane mounts; a terminal this GUI already created once is not awaited. A generation that cannot be listed is reported in unavailableDaemons, never as no sessions; an unreadable saved layout is an error."
             },
             {
                 "method": "POST", "path": "/api/v1/pty-sessions/terminate",
                 "description": "End one session listed as detached. It is classified again first: anything but detached is notDetached. attachEpoch must be the one listed: a session attached again since is left running (superseded).",
-                "body": {"sessionId":"string", "attachEpoch":"number from GET /api/v1/pty-sessions"},
+                "body": {"daemon":"generation key from GET /api/v1/pty-sessions", "sessionId":"string", "attachEpoch":"number from GET /api/v1/pty-sessions"},
                 "response": "terminated | superseded | notDetached | gone"
             },
             {
                 "method": "POST", "path": "/api/v1/pty-sessions/terminate-detached",
                 "description": "End the sessions the caller listed as detached, each with the epoch it listed. Each is classified again first; one that is no longer detached or was attached again since is left running. Returns {ended, failed[]}.",
-                "body": {"sessions":"[{sessionId, attachEpoch}] from GET /api/v1/pty-sessions (state detached)"}
+                "body": {"sessions":"[{daemon, sessionId, attachEpoch}] from GET /api/v1/pty-sessions (state detached)"}
             },
             {
                 "method": "GET", "path": "/api/v1/agent-hooks/updates",

@@ -146,7 +146,7 @@ export function PtySessionsSection() {
                   <td title={entry.daemon}>
                     {entry.daemon === inventory?.currentDaemon
                       ? t("ptySessions.daemonCurrent")
-                      : t("ptySessions.daemonPrevious")}
+                      : t("ptySessions.daemonOther")}
                   </td>
                   <td>{entry.childPid ?? "—"}</td>
                   <td>{t(`ptySessions.states.${entry.state}`)}</td>

@@ -29,7 +29,7 @@ export interface UnavailableDaemon {
 
 export interface PtySessionInventory {
   daemonRunning: boolean;
-  /** This build's generation; sessions of any other run on an earlier build. */
+  /** This build's generation; sessions of any other run on another build. */
   currentDaemon: string | null;
   sessions: PtySessionEntry[];
   unavailableDaemons: UnavailableDaemon[];
