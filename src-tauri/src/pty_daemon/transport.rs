@@ -7,7 +7,6 @@
 
 use std::io;
 use std::path::Path;
-use std::time::Duration;
 
 use crate::constants::PTY_DAEMON_SOCKET_FILE;
 use crate::local_socket;
@@ -38,10 +37,9 @@ impl Listener {
     }
 }
 
-/// Connect to a daemon socket. A local socket connects or fails at once, so
-/// `timeout` only matters to the handshake the caller bounds next.
-pub fn connect(endpoint: &str, timeout: Duration) -> io::Result<Stream> {
-    let _ = timeout;
+/// Connect to a daemon socket. A local socket connects or fails at once; the
+/// caller bounds the handshake that follows.
+pub fn connect(endpoint: &str) -> io::Result<Stream> {
     Stream::connect(endpoint)
 }
 

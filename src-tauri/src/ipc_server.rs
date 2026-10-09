@@ -46,15 +46,6 @@ where
     Ok(())
 }
 
-/// Directory of this build kind's `lx` sockets: the settings directory, next
-/// to the endpoint file that names the current one (ADR-0304).
-pub fn socket_dir() -> PathBuf {
-    crate::settings::settings_path()
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."))
-}
-
 /// This GUI's socket. Per process, so a second, accidental GUI of the same
 /// build kind never unbinds the first one's socket.
 pub fn socket_path_in(dir: &Path, session_id: &str) -> PathBuf {
@@ -67,7 +58,9 @@ pub fn start_ipc_server<F>(session_id: String, handler: Arc<F>) -> Result<String
 where
     F: Fn(LxMessage) -> LxResponse + Send + Sync + 'static,
 {
-    start_ipc_server_in(&socket_dir(), &session_id, handler)
+    let dir =
+        crate::lx_endpoint::lx_dir().ok_or_else(|| "cannot locate the lx directory".to_string())?;
+    start_ipc_server_in(&dir, &session_id, handler)
 }
 
 pub fn start_ipc_server_in<F>(
@@ -78,7 +71,7 @@ pub fn start_ipc_server_in<F>(
 where
     F: Fn(LxMessage) -> LxResponse + Send + Sync + 'static,
 {
-    std::fs::create_dir_all(dir).map_err(|e| format!("Socket directory error: {e}"))?;
+    local_socket::ensure_private_dir(dir).map_err(|e| format!("Socket directory error: {e}"))?;
     remove_dead_sockets(dir);
     let path = socket_path_in(dir, session_id);
     let listener = local_socket::bind_user_only(&path).map_err(|e| format!("Bind error: {e}"))?;

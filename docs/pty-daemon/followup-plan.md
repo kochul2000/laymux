@@ -81,11 +81,8 @@ ADR-0301까지로 다음이 가능하다. PTY는 데몬이 소유하고 기본�
 
 **수정안**
 
-- Windows 데몬 endpoint를 `CreateNamedPipeW`(현재 사용자 SID + SYSTEM DACL, `PIPE_REJECT_REMOTE_CLIENTS`, 첫 인스턴스는 `FILE_FLAG_FIRST_PIPE_INSTANCE`)로 바꾼다. `windows-sys`는 이미 의존성에 있다.
-- pipe 이름은 build kind와 사용자로 결정한다.
-- 기존 token과 HMAC 양방향 proof는 유지한다.
-- 연결은 계속 터미널마다 하나를 쓴다. 인증 전 연결 한도와 handshake deadline도 유지한다.
-- **ADR:** 새 ADR(Windows 데몬 transport). ADR-0300의 Alternatives에서 보류했던 항목을 채택한다.
+- **결정(ADR-0305):** named pipe 대신 **AF_UNIX(Windows 10 1803+)**를 쓴다. 동기 named pipe는 read timeout이 없어 handshake·spawn·종료 deadline을 다시 만들어야 하지만, AF_UNIX는 기존 socket 코드를 그대로 쓴다. socket 파일과 그 디렉터리에 현재 사용자·SYSTEM 전용 protected DACL을 건다(연결에 쓰기 권한 필요). 같은 방식으로 `lx` IPC(인증 없던 loopback TCP)도 옮긴다.
+- 기존 token과 HMAC 양방향 proof, 인증 전 연결 한도, handshake deadline은 유지한다.
 
 ### 3.4 분리 세션 인벤토리와 정리
 

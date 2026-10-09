@@ -83,9 +83,11 @@ pub const REMOTE_SESSION_POLL: Duration = Duration::from_secs(2);
 /// Fixed path of this build kind's `lx` endpoint file (ADR-0304). The file, not
 /// the environment, names the current GUI's IPC endpoint.
 pub const ENV_LX_ENDPOINT_FILE: &str = "LX_ENDPOINT_FILE";
-/// File name of the `lx` endpoint file in the settings directory.
-pub const LX_ENDPOINT_FILE_NAME: &str = "lx-endpoint.json";
-/// `lx` IPC socket name in the settings directory: prefix + GUI pid + suffix.
+/// Private `lx` directory beside the local state database, and the endpoint
+/// file in it (ADR-0304, ADR-0305).
+pub const LX_DIR_NAME: &str = "lx";
+pub const LX_ENDPOINT_FILE_NAME: &str = "endpoint.json";
+/// `lx` IPC socket name in `LX_DIR_NAME`: prefix + GUI pid + suffix.
 pub const LX_SOCKET_PREFIX: &str = "lx-";
 pub const LX_SOCKET_SUFFIX: &str = ".sock";
 /// Attempts, with doubling delay from `LX_ENDPOINT_PUBLISH_RETRY_MS`, to
@@ -359,8 +361,6 @@ pub const PTY_DAEMON_IDLE_EXIT_MS: u64 = 60_000;
 pub const PTY_DAEMON_IDLE_POLL_MS: u64 = 250;
 /// Back-off after a failed `accept` so a persistent error does not spin.
 pub const PTY_DAEMON_ACCEPT_RETRY_MS: u64 = 50;
-/// Connect budget for the self-connection that wakes a blocking `accept`.
-pub const PTY_DAEMON_WAKE_CONNECT_TIMEOUT_MS: u64 = 500;
 /// Poll cadence while a freshly launched daemon publishes discovery.
 pub const PTY_DAEMON_LAUNCH_POLL_MS: u64 = 50;
 /// The daemon log starts over instead of appending past this size.

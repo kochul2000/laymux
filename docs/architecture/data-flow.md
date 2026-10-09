@@ -144,7 +144,7 @@ IDE가 TerminalView를 spawn할 때 아래 환경변수를 자동 주입한다(`
 
 ```bash
 # IDE가 터미널 spawn 시 자동 주입
-LX_ENDPOINT_FILE=...     # build kind별 고정 endpoint 파일 경로(설정 디렉터리의 lx-endpoint.json, ADR-0304). lx 가 호출마다 읽어 현재 GUI 의 IPC 엔드포인트(설정 디렉터리의 현재 사용자 전용 Unix domain socket `lx-{pid}.sock`, ADR-0305)를 얻는다
+LX_ENDPOINT_FILE=...     # build kind별 고정 endpoint 파일 경로(로컬 상태 디렉터리의 사용자 전용 lx/endpoint.json, ADR-0304·0305). lx 가 호출마다 읽어 현재 GUI 의 IPC 엔드포인트(같은 디렉터리의 사용자 전용 Unix domain socket lx-{pid}.sock)를 얻는다
 LX_TERMINAL_ID=...       # 현재 터미널 인스턴스 ID (terminal-pane-{uuid8})
 LX_GROUP_ID=...          # 현재 SyncGroup ID
 LX_AUTOMATION_PORT=...   # Automation API 포트 (release 19280 / dev 19281)
@@ -991,7 +991,7 @@ GUI는 데몬 자식의 PID를 직접 kill하지 않는다(`ChildKillOwner::Back
 
 - `daemon.json`: `pid`·`endpoint`·`token`·`protocolVersion` discovery
 - `daemon.lock`: kernel file lock으로 단일 인스턴스를 보장한다. GUI도 이 lock이 잡혀 있는지로 데몬 생존을 판정한다
-- `daemon.sock`: 현재 사용자만 연결할 수 있는 Unix domain socket(Linux 0600, Windows AF_UNIX + 사용자·SYSTEM 전용 protected DACL, ADR-0305)
+- `daemon.sock`: 현재 사용자만 연결할 수 있는 Unix domain socket(Linux 0600, Windows AF_UNIX + 사용자·SYSTEM 전용 protected DACL, ADR-0305). 디렉터리 자체도 사용자 전용(Linux 0700, Windows 상속 DACL)이라 안의 파일은 생성 순간부터 사용자 전용이다
 - `daemon.log`
 
 endpoint는 두 플랫폼 모두 이 socket이며, 다른 로컬 계정은 OS가 연결을 거부한다. frame은 `u32 LE 길이 | kind(0=JSON control, 1=raw data) | payload`이고 최대 1 MiB다. 인증 전 frame은 4 KiB, 동시 연결은 256개로 제한하고, handshake 전체에 5초 deadline을 건다. 첫 frame `hello`의 token과 protocol version이 맞지 않으면 연결을 닫는다. `hello`에는 연결마다 새 nonce가 있고, `helloOk`는 token을 key로 한 HMAC-SHA256 `proof`로 답한다. GUI는 proof가 맞지 않는 endpoint에 아무것도 보내지 않으며, `daemon.lock`이 잡혀 있지 않으면 discovery가 남아 있어도 연결하지 않는다. client → daemon data frame은 출력과 달리 앞 4바이트에 GUI가 직전 입력 쓰기 이후 쉰 시간(u32 LE ms, 최대 1초)을 싣는다. 데몬은 자신의 직전 PTY 쓰기 시각을 기준으로 그 휴지를 재현하므로, frame이 자식 앞에 쌓여도 submit CR gap(#490)이 유지된다. 입력 완료 응답은 없다. 응답이 출력 뒤에 줄을 서면 출력 credit이 막힐 때 입력도 막히기 때문이다. 읽기를 멈춘 client가 있어도 attach는 출력 lock을 기다리기 전에 그 client를 닫고, 목록 조회는 출력 lock을 쓰지 않는다. 메시지 종류는 다음과 같다.

@@ -409,6 +409,13 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 if let Some(state) = app.try_state::<Arc<state::AppState>>() {
                     state.terminate_daemon_sessions_on_exit();
+                    // This process's own lx socket (ADR-0305); a crash leaves
+                    // it for the next GUI's sweep.
+                    if let Ok(path) = state.ipc_socket_path.lock_or_err() {
+                        if let Some(path) = path.as_ref() {
+                            let _ = std::fs::remove_file(path);
+                        }
+                    }
                 }
             }
         });

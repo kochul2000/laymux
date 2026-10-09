@@ -137,7 +137,7 @@ fn a_trickled_hello_is_cut_off_at_the_handshake_deadline() {
         std::thread::spawn(move || server.run(listener, endpoint, None).unwrap())
     };
 
-    let mut stream = transport::connect(&endpoint, Duration::from_secs(5)).unwrap();
+    let mut stream = transport::connect(&endpoint).unwrap();
     // Announce a small hello, then send it one byte at a time, each well
     // inside a per-read timeout.
     stream.write_all(&100u32.to_le_bytes()).unwrap();
@@ -209,8 +209,7 @@ fn wrong_token_and_wrong_protocol_are_rejected_before_any_request() {
     let error = connect_authenticated(&forged).unwrap_err();
     assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
 
-    let mut stream =
-        super::transport::connect(&daemon.endpoint.endpoint, Duration::from_secs(5)).unwrap();
+    let mut stream = super::transport::connect(&daemon.endpoint.endpoint).unwrap();
     write_control(
         &mut stream,
         &ClientMessage::Hello {
@@ -234,8 +233,7 @@ fn wrong_token_and_wrong_protocol_are_rejected_before_any_request() {
 #[test]
 fn an_oversized_frame_before_authentication_is_refused_without_reading_it() {
     let daemon = TestDaemon::start();
-    let mut stream =
-        super::transport::connect(&daemon.endpoint.endpoint, Duration::from_secs(5)).unwrap();
+    let mut stream = super::transport::connect(&daemon.endpoint.endpoint).unwrap();
     // Announce a body larger than the pre-auth limit; the daemon must close
     // instead of allocating and waiting for it.
     let body_len = (crate::constants::PTY_DAEMON_HELLO_MAX_BYTES + 1) as u32;
@@ -282,4 +280,35 @@ fn a_daemon_that_never_answers_spawn_fails_the_spawn_instead_of_hanging() {
     let pair = system.openpty(size()).unwrap();
     assert!(pair.slave.spawn_command(sleeper()).is_err());
     assert!(started.elapsed() < Duration::from_secs(15));
+}
+
+#[test]
+fn connections_past_the_limit_are_refused_until_slots_free_up() {
+    use crate::constants::PTY_DAEMON_MAX_CONNECTIONS;
+
+    let daemon = TestDaemon::start();
+    // Connect with a short retry: the accept backlog is smaller than the limit.
+    let connect = || {
+        let deadline = Instant::now() + TIMEOUT;
+        loop {
+            match transport::connect(&daemon.endpoint.endpoint) {
+                Ok(stream) => return stream,
+                Err(error) => {
+                    assert!(Instant::now() < deadline, "connect kept failing: {error}");
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+        }
+    };
+    let held: Vec<_> = (0..PTY_DAEMON_MAX_CONNECTIONS).map(|_| connect()).collect();
+    // Accepted in order, so by the time this one is accepted every held
+    // connection has been counted and it is refused instead of queued.
+    assert!(connect_authenticated(&daemon.endpoint).is_err());
+
+    drop(held);
+    let deadline = Instant::now() + TIMEOUT;
+    while connect_authenticated(&daemon.endpoint).is_err() {
+        assert!(Instant::now() < deadline, "slots were never released");
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }

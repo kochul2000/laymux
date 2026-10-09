@@ -26,7 +26,20 @@ use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken}
 /// and SYSTEM only, and stops inheriting entries from the parent directory.
 pub fn restrict_to_current_user(path: &Path) -> io::Result<()> {
     let sid = current_user_sid()?;
-    let sddl = wide(&format!("D:P(A;;FA;;;{sid})(A;;FA;;;SY)"));
+    apply_protected_dacl(path, &format!("D:P(A;;FA;;;{sid})(A;;FA;;;SY)"))
+}
+
+/// Like [`restrict_to_current_user`] for a directory, with entries that
+/// files and directories created inside inherit. A file created there is
+/// private from its first moment, so nothing races its own DACL change.
+pub fn restrict_dir_to_current_user(dir: &Path) -> io::Result<()> {
+    let sid = current_user_sid()?;
+    apply_protected_dacl(dir, &format!("D:P(A;OICI;FA;;;{sid})(A;OICI;FA;;;SY)"))
+}
+
+/// Set `path`'s DACL from an SDDL `D:` string, protected from inheritance.
+pub(crate) fn apply_protected_dacl(path: &Path, sddl: &str) -> io::Result<()> {
+    let sddl = wide(sddl);
     let mut descriptor: PSECURITY_DESCRIPTOR = ptr::null_mut();
     // SAFETY: `sddl` is NUL-terminated; on success the API allocates
     // `descriptor`, which `LocalGuard` frees.
@@ -51,6 +64,10 @@ pub fn restrict_to_current_user(path: &Path) -> io::Result<()> {
         == 0
     {
         return Err(io::Error::last_os_error());
+    }
+    // A missing or NULL DACL would grant everyone everything: fail closed.
+    if present == 0 || dacl.is_null() {
+        return Err(io::Error::other("security descriptor has no DACL"));
     }
     let target = wide_path(path);
     // SAFETY: `target` is NUL-terminated and `dacl` is valid (see above).

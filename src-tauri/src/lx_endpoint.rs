@@ -16,7 +16,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::constants::{
-    ENV_LX_ENDPOINT_FILE, LX_ENDPOINT_FILE_NAME, LX_ENDPOINT_PUBLISH_ATTEMPTS,
+    ENV_LX_ENDPOINT_FILE, LX_DIR_NAME, LX_ENDPOINT_FILE_NAME, LX_ENDPOINT_PUBLISH_ATTEMPTS,
     LX_ENDPOINT_PUBLISH_RETRY_MS,
 };
 use crate::lock_ext::MutexExt;
@@ -30,13 +30,21 @@ pub struct LxEndpoint {
     pub pid: u32,
 }
 
-/// This build kind's endpoint file, next to `automation.json` in the
-/// settings directory (`%APPDATA%\laymux[-dev]`, `~/.config/laymux[-dev]`).
-/// `None` when that directory cannot be located: a relative path would be
-/// resolved against each shell's own working directory.
+/// This build kind's private `lx` directory, beside the local state database
+/// (`%LOCALAPPDATA%\laymux[-dev]\lx`, `$XDG_STATE_HOME/laymux[-dev]/lx`). It
+/// holds the endpoint file and the GUIs' sockets and is private to the
+/// current user (ADR-0305). `None` when it cannot be located as an absolute
+/// path: a relative one would be resolved against each shell's own working
+/// directory.
+pub fn lx_dir() -> Option<PathBuf> {
+    let state = crate::local_state::state_path().ok()?;
+    let dir = state.parent()?.join(LX_DIR_NAME);
+    dir.is_absolute().then_some(dir)
+}
+
+/// This build kind's endpoint file in [`lx_dir`].
 pub fn endpoint_file_path() -> Option<PathBuf> {
-    let path = endpoint_file_path_in(crate::settings::settings_path().parent()?);
-    path.is_absolute().then_some(path)
+    lx_dir().map(|dir| endpoint_file_path_in(&dir))
 }
 
 pub fn endpoint_file_path_in(dir: &Path) -> PathBuf {
@@ -76,7 +84,7 @@ pub fn publish_ipc_endpoint(state: &AppState) {
 /// virus scanner) can hold the file without delete sharing for a moment.
 pub fn publish(path: &Path, endpoint: &LxEndpoint) -> io::Result<()> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        crate::local_socket::ensure_private_dir(parent)?;
     }
     let json = serde_json::to_vec_pretty(endpoint).map_err(io::Error::other)?;
     let temp = path.with_extension(format!("json.{}.tmp", endpoint.pid));

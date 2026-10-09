@@ -58,15 +58,10 @@ impl DaemonPaths {
         self.dir.join(PTY_DAEMON_LOG_FILE)
     }
 
-    /// Create the directory readable only by the current user.
+    /// Create the directory private to the current user (ADR-0305), so the
+    /// token, lock and socket inside are too, wherever the directory is.
     pub fn ensure_dir(&self) -> io::Result<()> {
-        std::fs::create_dir_all(&self.dir)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&self.dir, std::fs::Permissions::from_mode(0o700))?;
-        }
-        Ok(())
+        crate::local_socket::ensure_private_dir(&self.dir)
     }
 }
 

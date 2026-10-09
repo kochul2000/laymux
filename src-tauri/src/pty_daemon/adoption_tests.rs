@@ -336,7 +336,7 @@ fn an_adopting_attach_reasserts_modes_set_while_detached() {
 fn attach_after_output(output: &[u8], replay: bool) -> BufReader<Stream> {
     let dir = tempfile::tempdir().unwrap();
     let (listener, endpoint) = Listener::bind(dir.path()).unwrap();
-    let client = transport::connect(&endpoint, Duration::from_secs(5)).unwrap();
+    let client = transport::connect(&endpoint).unwrap();
     let server_side = listener.accept().unwrap();
     let session = Session::new("pane-s#1".into(), "pane-s".into(), BTreeMap::new(), 1);
     let _ = session.deliver_output(output);
@@ -389,7 +389,7 @@ fn modes_set_while_a_client_was_attached_survive_into_the_next_adoption() {
 
     // The first GUI is attached when the application turns the mode on, so
     // the bytes reach that GUI and never enter the detached backlog.
-    let first_client = transport::connect(&endpoint, Duration::from_secs(5)).unwrap();
+    let first_client = transport::connect(&endpoint).unwrap();
     let first_server = listener.accept().unwrap();
     let first = Arc::new(ConnWriter::new(&first_server).unwrap());
     session.attach(&first, 1, false, false).unwrap();
@@ -397,7 +397,7 @@ fn modes_set_while_a_client_was_attached_survive_into_the_next_adoption() {
     session.detach(1);
     drop(first_client);
 
-    let client = transport::connect(&endpoint, Duration::from_secs(5)).unwrap();
+    let client = transport::connect(&endpoint).unwrap();
     let server_side = listener.accept().unwrap();
     let writer = Arc::new(ConnWriter::new(&server_side).unwrap());
     session.attach(&writer, 2, false, false).unwrap();
