@@ -19,7 +19,7 @@ const INPUT_PAUSE_BYTES: usize = 4;
 
 /// Bumped on any incompatible message/semantics change. A daemon and client
 /// with different versions refuse each other in the handshake.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 const KIND_CONTROL: u8 = 0;
 const KIND_DATA: u8 = 1;

@@ -1,7 +1,10 @@
 use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::cli::{LxMessage, LxResponse};
+use crate::constants::{LX_SOCKET_PREFIX, LX_SOCKET_SUFFIX};
+use crate::local_socket;
 
 /// Handle a single IPC connection by reading JSON messages and returning responses.
 /// Each line is a JSON LxMessage; the response is a JSON LxResponse on one line.
@@ -43,102 +46,83 @@ where
     Ok(())
 }
 
-/// Generate a unique socket path for this IDE session.
-pub fn socket_path(session_id: &str) -> String {
-    #[cfg(target_os = "windows")]
-    {
-        // Windows named pipe
-        format!(r"\\.\pipe\lx-{session_id}")
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        format!("/tmp/lx-{session_id}.sock")
-    }
+/// This GUI's socket. Per process, so a second, accidental GUI of the same
+/// build kind never unbinds the first one's socket.
+pub fn socket_path_in(dir: &Path, session_id: &str) -> PathBuf {
+    dir.join(format!("{LX_SOCKET_PREFIX}{session_id}{LX_SOCKET_SUFFIX}"))
 }
 
-/// Start the IPC server in a background thread.
-/// On Windows, uses a named pipe. On Linux, uses a Unix domain socket.
-pub fn start_ipc_server<F>(
-    #[allow(unused_variables)] session_id: String,
+/// Start the IPC server in a background thread on a Unix domain socket that
+/// only the current user can connect to (ADR-0305). Returns the socket path.
+pub fn start_ipc_server<F>(session_id: String, handler: Arc<F>) -> Result<String, String>
+where
+    F: Fn(LxMessage) -> LxResponse + Send + Sync + 'static,
+{
+    let dir =
+        crate::lx_endpoint::lx_dir().ok_or_else(|| "cannot locate the lx directory".to_string())?;
+    start_ipc_server_in(&dir, &session_id, handler)
+}
+
+pub fn start_ipc_server_in<F>(
+    dir: &Path,
+    session_id: &str,
     handler: Arc<F>,
 ) -> Result<String, String>
 where
     F: Fn(LxMessage) -> LxResponse + Send + Sync + 'static,
 {
-    #[cfg(not(target_os = "windows"))]
-    let path = socket_path(&session_id);
+    local_socket::ensure_private_dir(dir).map_err(|e| format!("Socket directory error: {e}"))?;
+    remove_dead_sockets(dir);
+    let path = socket_path_in(dir, session_id);
+    let listener = local_socket::bind_user_only(&path).map_err(|e| format!("Bind error: {e}"))?;
+    let endpoint = path
+        .to_str()
+        .ok_or_else(|| "IPC socket path is not valid Unicode".to_string())?
+        .to_owned();
 
-    #[cfg(not(target_os = "windows"))]
-    {
-        use std::os::unix::net::UnixListener;
-
-        // Remove stale socket
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            match stream {
+                Ok(stream) => {
+                    let handler = Arc::clone(&handler);
+                    std::thread::spawn(move || {
+                        let mut reader = BufReader::new(&stream);
+                        let mut writer = &stream;
+                        let _ = handle_ipc_stream(&mut reader, &mut writer, |msg| handler(msg));
+                    });
+                }
+                Err(_) => break,
+            }
+        }
         let _ = std::fs::remove_file(&path);
+    });
 
-        let listener = UnixListener::bind(&path).map_err(|e| format!("Bind error: {e}"))?;
+    Ok(endpoint)
+}
 
-        let path_clone = path.clone();
-        std::thread::spawn(move || {
-            for stream in listener.incoming() {
-                match stream {
-                    Ok(stream) => {
-                        let handler = Arc::clone(&handler);
-                        std::thread::spawn(move || {
-                            let mut reader = BufReader::new(&stream);
-                            let mut writer = &stream;
-                            let _ = handle_ipc_stream(&mut reader, &mut writer, |msg| handler(msg));
-                        });
-                    }
-                    Err(_) => break,
-                }
-            }
-            let _ = std::fs::remove_file(&path_clone);
-        });
+/// Remove sockets left by GUIs that died without cleaning up. A socket whose
+/// process still runs is kept: it may be another GUI's live server.
+fn remove_dead_sockets(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut system = sysinfo::System::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(pid) = name
+            .to_str()
+            .and_then(|name| name.strip_prefix(LX_SOCKET_PREFIX))
+            .and_then(|rest| rest.strip_suffix(LX_SOCKET_SUFFIX))
+            .and_then(|pid| pid.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let pid = sysinfo::Pid::from_u32(pid);
+        system.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
+        if system.process(pid).is_none() {
+            let _ = std::fs::remove_file(entry.path());
+        }
     }
-
-    #[cfg(target_os = "windows")]
-    {
-        // On Windows, use a TCP listener on localhost as a simple IPC mechanism.
-        // Named pipes require additional crate support; TCP localhost is simpler and works.
-        let listener =
-            std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| format!("Bind error: {e}"))?;
-        let local_addr = listener
-            .local_addr()
-            .map_err(|e| format!("Addr error: {e}"))?;
-        let port = local_addr.port();
-        let path = format!("127.0.0.1:{port}");
-
-        let path_clone = path.clone();
-        std::thread::spawn(move || {
-            for stream in listener.incoming() {
-                match stream {
-                    Ok(stream) => {
-                        let handler = Arc::clone(&handler);
-                        std::thread::spawn(move || {
-                            let writer = match stream.try_clone() {
-                                Ok(w) => w,
-                                Err(e) => {
-                                    tracing::warn!(error = %e, "IPC stream clone failed");
-                                    return;
-                                }
-                            };
-                            let mut reader = BufReader::new(&stream);
-                            let mut writer = writer;
-                            let _ = handle_ipc_stream(&mut reader, &mut writer, |msg| handler(msg));
-                        });
-                    }
-                    Err(_) => break,
-                }
-            }
-            drop(path_clone);
-        });
-
-        Ok(path)
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    Ok(path)
 }
 
 #[cfg(test)]
@@ -211,9 +195,39 @@ mod tests {
     }
 
     #[test]
-    fn socket_path_is_valid() {
-        let path = socket_path("test123");
-        assert!(!path.is_empty());
-        assert!(path.contains("test123") || path.contains("127.0.0.1"));
+    fn sockets_are_per_process_and_dead_ones_are_swept() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = socket_path_in(dir.path(), "4242");
+        assert_eq!(path.file_name().unwrap(), "lx-4242.sock");
+
+        // A socket file of a process that no longer exists is removed; a live
+        // process's socket and unrelated files are kept.
+        let dead = socket_path_in(dir.path(), "4294967294");
+        std::fs::write(&dead, b"").unwrap();
+        let live = socket_path_in(dir.path(), &std::process::id().to_string());
+        std::fs::write(&live, b"").unwrap();
+        let other = dir.path().join("settings.json");
+        std::fs::write(&other, b"{}").unwrap();
+        remove_dead_sockets(dir.path());
+        assert!(!dead.exists());
+        assert!(live.exists());
+        assert!(other.exists());
+    }
+
+    #[test]
+    fn the_ipc_server_answers_on_its_user_only_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        let endpoint = start_ipc_server_in(
+            dir.path(),
+            "ipc-test",
+            Arc::new(|_message: LxMessage| LxResponse::ok(Some("pong".into()))),
+        )
+        .unwrap();
+        let (mut reader, mut writer) = crate::lx_endpoint::connect(&endpoint).unwrap();
+        let message = LxMessage::GetCwd {
+            terminal_id: "t1".into(),
+        };
+        let response = crate::cli::cli::send_message(&message, &mut reader, &mut writer).unwrap();
+        assert_eq!(response.data.as_deref(), Some("pong"));
     }
 }

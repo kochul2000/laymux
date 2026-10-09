@@ -27,7 +27,7 @@ fn connect_authenticated_within(
     endpoint: &DaemonEndpoint,
     timeout: Duration,
 ) -> io::Result<(Stream, BufReader<Stream>)> {
-    let stream = transport::connect(&endpoint.endpoint, timeout)?;
+    let stream = transport::connect(&endpoint.endpoint)?;
     stream.set_read_timeout(Some(timeout))?;
     stream.set_write_timeout(Some(timeout))?;
     let mut writer = stream.try_clone()?;

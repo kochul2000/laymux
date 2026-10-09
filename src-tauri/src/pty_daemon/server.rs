@@ -25,7 +25,7 @@ use super::wire::{
 };
 use crate::constants::{
     PTY_DAEMON_ACCEPT_RETRY_MS, PTY_DAEMON_IDLE_POLL_MS, PTY_DAEMON_MAX_CONNECTIONS,
-    PTY_DAEMON_SHUTDOWN_TIMEOUT_MS, PTY_DAEMON_WAKE_CONNECT_TIMEOUT_MS,
+    PTY_DAEMON_SHUTDOWN_TIMEOUT_MS,
 };
 use crate::lock_ext::MutexExt;
 use crate::pty::{spawn_command_on, ChildKillOwner, PtyLifecycleHooks, SpawnOptions};
@@ -134,10 +134,7 @@ impl DaemonServer {
     pub fn request_shutdown(&self, endpoint: &str) {
         self.shutdown.store(true, Ordering::Release);
         // Wake the blocking accept; the connection is dropped immediately.
-        let _ = transport::connect(
-            endpoint,
-            Duration::from_millis(PTY_DAEMON_WAKE_CONNECT_TIMEOUT_MS),
-        );
+        let _ = transport::connect(endpoint);
     }
 
     /// Refuse new sessions, terminate every existing one (including one

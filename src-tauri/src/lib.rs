@@ -27,6 +27,7 @@ pub mod git_watcher;
 pub mod grok_activity;
 pub mod grok_usage_probe;
 pub mod ipc_server;
+pub mod local_socket;
 pub mod local_state;
 pub mod lock_ext;
 pub mod lx_endpoint;
@@ -55,6 +56,8 @@ pub mod terminal_output;
 pub mod terminal_protocol;
 pub mod update_install_guard;
 pub mod usage_probe;
+#[cfg(windows)]
+pub mod win_acl;
 pub mod wsl_liveness;
 pub mod wsl_probe;
 
@@ -406,6 +409,13 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 if let Some(state) = app.try_state::<Arc<state::AppState>>() {
                     state.terminate_daemon_sessions_on_exit();
+                    // This process's own lx socket (ADR-0305); a crash leaves
+                    // it for the next GUI's sweep.
+                    if let Ok(path) = state.ipc_socket_path.lock_or_err() {
+                        if let Some(path) = path.as_ref() {
+                            let _ = std::fs::remove_file(path);
+                        }
+                    }
                 }
             }
         });
