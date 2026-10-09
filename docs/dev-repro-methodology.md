@@ -99,6 +99,21 @@ python scripts/bench/terminal_output_661.py \
 - `test_terminal_output_661.py` — 하네스 자체의 유닛 테스트. 하네스를 고치면 여기부터 돌린다.
 - 포트는 dev(19281) 고정이며 discovery 파일의 실사용 경로를 건드리지 않는다(§1 · [`AGENTS.md`](../AGENTS.md) 포트 규칙). 계약은 [ADR-0097](adr/0097-transport-lossless-presentation-lossy-ownership.md).
 
+## 4.7. PTY 수명은 StrictMode 없이 잰다
+
+dev 빌드는 React StrictMode로 mount한다. 그래서 모든 TerminalView가 처음에 PTY를 한 번 닫았다 다시 연다(generation 1→2). release에는 이 동작이 없다. PTY 수명을 확인하는 검증은 이 차이 때문에 dev에서 거짓 결과를 낸다. 예를 들면 PTY 데몬 세션 재결합(ADR-0301), pane 이동 뒤 셸 유지가 있다. 이런 검증은 release와 같은 mount로 띄워서 한다.
+
+```bash
+VITE_LAYMUX_STRICT_MODE=0 cargo tauri dev
+```
+
+데몬 재결합은 다음 순서로 확인한다.
+
+1. 터미널에서 `$PID`를 기록하고 긴 명령을 시작한다.
+2. dev GUI PID만 `Stop-Process -Id <pid> -Force`로 끝낸다. `scripts/kill-dev.sh`는 `taskkill /T`라서 데몬까지 끝내므로 쓰지 않는다.
+3. 위 명령으로 다시 띄운다.
+4. 같은 `$PID`가 응답하는지, dev 로그에 `adopted a running PTY daemon session`이 찍혔는지, 데몬 로그(`%LOCALAPPDATA%\laymux-dev\pty-daemon\daemon.log`)에 새 spawn이 없는지 확인한다.
+
 ## 5. 사보타주 검증 — 테스트가 결함을 못박고 있지 않은지
 
 수정을 되돌려 **의도한 테스트가 실제로 실패하는지** 확인한다. 통과하면 그 테스트는 아무것도 지키지 않는다.

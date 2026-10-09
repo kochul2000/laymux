@@ -39,6 +39,8 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 ///     never across `.await` and never while holding another `AppState` lock)
 /// 19. `pty_callback_states` (table mutex; held only to get/insert/remove one
 ///     terminal's `Arc`, never while holding another `AppState` lock)
+/// 20. `pty_daemon_adoption_seen` (leaf: may be taken while holding any lock
+///     above, and never holds another lock itself)
 ///
 /// Never acquire a lower-numbered lock while holding a higher-numbered one.
 /// Inside one terminal-output session, nested locks have their own fixed order:
@@ -208,6 +210,9 @@ pub struct AppState {
     pub app_update: Arc<crate::app_update::UpdateManager>,
     /// Frontend checkpoint request/ack rendezvous plus update finalization gate.
     pub session_checkpoint: crate::session_checkpoint::SessionCheckpointRuntime,
+    /// Terminal ids already created once in this GUI process. Only the first
+    /// create of an id may adopt a PTY daemon session (ADR-0301).
+    pub pty_daemon_adoption_seen: Mutex<std::collections::HashSet<String>>,
     /// Last path-less desktop FileViewer signal, served on Remote heartbeats
     /// without a bridge round trip (ADR-0291). Owns its own mutex and joins no
     /// ordering above: nothing acquires it while holding another AppState lock.
@@ -396,6 +401,7 @@ impl AppState {
                 crate::app_update::UpdateChannel::from_settings_value(&settings.update.channel),
             )),
             session_checkpoint: crate::session_checkpoint::SessionCheckpointRuntime::default(),
+            pty_daemon_adoption_seen: Mutex::new(std::collections::HashSet::new()),
             file_viewer_signal: crate::remote_server::FileViewerSignalMirror::default(),
         }
     }
@@ -437,6 +443,51 @@ impl AppState {
         for (terminal_id, handle) in handles {
             if let Err(err) = handle.terminate() {
                 tracing::warn!(terminal_id, error = %err, "PTY cleanup during app shutdown failed");
+            }
+        }
+    }
+
+    /// App exit runs no `Drop` for this state. In-process PTYs still end with
+    /// the process, but a daemon-owned PTY would merely detach, so send each
+    /// one its terminate request before the process goes away. This only
+    /// enqueues the request; it does not wait for the children (ADR-0300).
+    pub fn terminate_daemon_sessions_on_exit(&self) {
+        let handles: Vec<(String, PtyHandle)> = match self.pty_handles.lock_or_err() {
+            Ok(handles) => handles
+                .iter()
+                .map(|(id, handle)| (id.clone(), handle.clone()))
+                .collect(),
+            Err(err) => {
+                tracing::warn!(error = %err, "PTY registry unavailable at app exit");
+                return;
+            }
+        };
+        // Requests go out concurrently under one overall deadline, so an
+        // unresponsive daemon delays exit by that bound, not by N requests.
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let pending = handles.len();
+        for (terminal_id, handle) in handles {
+            let done_tx = done_tx.clone();
+            std::thread::spawn(move || {
+                let _ = done_tx.send((terminal_id, handle.request_backend_termination()));
+            });
+        }
+        drop(done_tx);
+        let deadline = std::time::Instant::now()
+            + std::time::Duration::from_millis(
+                crate::constants::PTY_DAEMON_EXIT_TERMINATE_TIMEOUT_MS,
+            );
+        for _ in 0..pending {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            match done_rx.recv_timeout(remaining) {
+                Ok((_, Ok(()))) => {}
+                Ok((terminal_id, Err(err))) => {
+                    tracing::warn!(terminal_id, error = %err, "daemon PTY terminate request failed at exit");
+                }
+                Err(_) => {
+                    tracing::warn!("daemon PTY terminate requests did not finish before exit");
+                    break;
+                }
             }
         }
     }
