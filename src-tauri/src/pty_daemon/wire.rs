@@ -55,7 +55,8 @@ pub enum ClientMessage {
     },
     /// Bind this connection to an existing session. With `replay`, output
     /// retained while detached is delivered first; without it the backlog is
-    /// discarded. With `take_over` a currently attached client is replaced;
+    /// discarded and the first data frame re-asserts the session's terminal
+    /// modes instead (ADR-0303). With `take_over` a currently attached client is replaced;
     /// without it (adoption) the attach is refused when the session is
     /// attached or being terminated, so two adopters never share one child.
     Attach {

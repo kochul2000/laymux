@@ -177,8 +177,9 @@ impl Session {
     }
 
     /// Replace the attached client. Under the sink lock the new client gets
-    /// `Attached`, then the retained backlog, then any end-of-life notices,
-    /// so no live output can interleave ahead of the replay.
+    /// `Attached`, then either the retained backlog (with `replay`) or the
+    /// mode preamble (without it, ADR-0303), then any end-of-life notices,
+    /// so no live output can interleave ahead of them.
     pub(super) fn attach(
         &self,
         writer: &Arc<ConnWriter>,
@@ -219,7 +220,9 @@ impl Session {
         let child_pid = self.handle.get().and_then(PtyHandle::child_pid);
         // Without replay the client never sees the output that set the
         // session's modes, so it gets them re-asserted instead (ADR-0303).
-        // A replay carries those mode changes itself.
+        // A replay (no production path yet) is left to phase F: the backlog
+        // holds only output from while no client was attached, so it does
+        // not carry the modes by itself.
         let preamble = if replay {
             Vec::new()
         } else {

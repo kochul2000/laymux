@@ -33,15 +33,14 @@ ADR-0301은 재결합할 때 backlog를 replay하지 않는다. 그래서 새 GU
 
 **데몬 세션은 PTY 출력에서 터미널 입력·표시 모드만 추적하고, replay 없는 attach에서는 기본값과 다른 모드를 단언하는 DECSET/DECRST 바이트(preamble)를 첫 출력으로 보낸다.**
 
-- **추적 범위.** 출력 전체를 경량 상태기로 본다. 대상은 다음과 같다.
+- **추적 범위.** 출력 전체를 경량 상태기로 본다. GUI 터미널이 xterm.js이므로 모든 전이는 xterm.js 시맨틱을 따른다. 그래야 다시 단언했을 때 새 GUI가 이전 GUI와 정확히 같은 상태가 된다. 대상은 다음과 같다.
   - DEC private mode: 1(DECCKM), 7(autowrap), 25(커서 표시), 1004(focus), 2004(bracketed paste)
-  - 마우스 추적: 9/1000/1002/1003 중 하나가 활성
-  - 마우스 인코딩: 1005/1006/1015/1016 중 하나가 활성
+  - 마우스 추적: 9/1000/1002/1003 중 하나가 활성. 어느 것을 해제해도 추적이 꺼진다(xterm.js·xterm과 같다).
+  - 마우스 인코딩: xterm.js가 구현하는 1006(SGR)과 1016(SGR-pixels)만 추적한다. 둘 중 하나를 해제하면 기본 인코딩으로 돌아간다. xterm.js가 무시하는 1005·1015는 추적하지 않는다.
   - alt screen: 47/1047/1049
   - ANSI IRM(4)
   - keypad: DECKPAM `ESC =` / DECKPNM `ESC >`
-  - kitty keyboard flags: `CSI > n u` push, `CSI < n u` pop, `CSI = n ; m u` set. 스택 깊이에 상한을 둔다.
-  - RIS(`ESC c`)는 모두 기본값으로 되돌린다. DECSTR(`CSI ! p`)는 soft reset 대상 모드를 되돌린다.
+  - RIS(`ESC c`)는 모두 기본값으로 되돌린다. DECSTR(`CSI ! p`)는 xterm.js처럼 IRM과 기본 DEC private mode(DECCKM·keypad·커서 표시·autowrap·focus·bracketed paste)를 되돌리고, 화면 버퍼와 마우스 상태는 유지한다.
 - **책임 경계.** 데몬은 모드를 "추적"만 한다.
   - OSC 해석, query 응답, 출력 변형, 화면 모델, DB·설정은 갖지 않는다.
   - 출력 바이트는 지금처럼 그대로 중계한다.
@@ -49,11 +48,11 @@ ADR-0301은 재결합할 때 backlog를 replay하지 않는다. 그래서 새 GU
 - **preamble.**
   - 기본값과 다른 모드만 담는다. 새로 만든 GUI 상태는 기본값이므로 같은 값을 다시 보낼 필요가 없다.
   - alt screen 진입을 먼저 보내고 나머지를 그 뒤에 보낸다. 마우스 추적과 인코딩은 각각 활성 레벨 하나만 켠다.
-  - **query는 절대 넣지 않는다.** preamble이 응답을 유발하지 않으므로 재응답 문제가 생기지 않는다.
+  - **query는 절대 넣지 않는다.** 단언은 응답을 요구하지 않는다. 다만 xterm.js는 focus 보고(1004)가 켜지는 순간 현재 포커스를 한 번 보고한다(`CSI I`/`CSI O`). 앱이 그 모드를 켜 두었으므로 정당한 입력이다.
 - **전달.**
   - 데몬은 preamble을 `Attached` 직후, 첫 live 출력보다 먼저 일반 data frame으로 보낸다. sink lock 안에서 보내므로 live 출력이 끼어들지 않는다.
   - GUI는 이를 일반 PTY 출력으로 처리한다. 그러면 Rust `TerminalProtocolState`(bracketed paste 인코딩)와 xterm이 같은 단일 패스로 같은 상태가 된다. GUI 코드와 wire 형식은 바뀌지 않는다.
-- **replay 있는 attach에는 preamble을 붙이지 않는다.** backlog 자체가 모드를 다시 설정한다. 거기에 preamble을 더하면 `?1049h`처럼 부수효과가 있는 모드가 replay한 화면을 지울 수 있다. backlog가 잘려 앞부분 모드 설정을 잃은 경우의 처리는 단계 F에서 replay와 함께 정한다.
+- **replay 있는 attach에는 preamble을 붙이지 않는다.** 그런 attach는 아직 프로덕션 경로가 없다. backlog에는 client가 없던 동안의 출력만 남으므로, backlog가 모드를 보장하지 않는다. replay와 preamble을 어떻게 함께 쓸지(`?1049h`처럼 부수효과가 있는 모드가 replay한 화면을 지우지 않게 하는 순서 포함)는 단계 F에서 정한다.
 
 ## Alternatives Considered
 
@@ -67,5 +66,5 @@ ADR-0301은 재결합할 때 backlog를 replay하지 않는다. 그래서 새 GU
 - 재결합한 Codex·Claude pane에서도 여러 줄 입력이 bracketed paste로 들어간다. 커서 키·마우스·포커스·커서 표시가 실제 앱 상태와 맞는다.
 - alt screen을 쓰는 앱은 재결합 뒤 빈 alt 화면에서 시작하며, 앱이 다시 그릴 때까지 비어 있다. 다시 그리기 유도(resize nudge)와 화면 복원은 단계 F에서 다룬다.
 - 데몬은 출력 바이트마다 상태기를 한 번 더 돌린다. 분기만 있는 바이트 단위 상태기라 비용은 출력 중계에 비해 작다.
-- mouse 1001(highlight tracking), 2026(synchronized output, 일시 상태), DECSCUSR(커서 모양), 색 팔레트는 추적하지 않는다. 필요해지면 이 ADR의 추적 범위를 확장하는 새 ADR로 다룬다.
-- 검증: 모드 상태기 단위 테스트(chunk 경계, 상호 배타 레벨, RIS·DECSTR, kitty 스택)와 실제 셸 데몬 테스트(모드 설정 후 detach → adopt 첫 출력의 preamble → `TerminalProtocolState`가 bracketed paste를 켬)를 둔다.
+- mouse 1001(highlight tracking), 2026(synchronized output, 일시 상태), DECSCUSR(커서 모양), 색 팔레트는 추적하지 않는다. kitty keyboard flags와 win32-input-mode(9001)도 추적하지 않는다. GUI(xterm.js)가 구현하지 않아 이전 GUI에서도 효과가 없었기 때문이다. 필요해지면 이 ADR의 추적 범위를 확장하는 새 ADR로 다룬다.
+- 검증: 모드 상태기 단위 테스트(chunk 경계, xterm.js 마우스 시맨틱, RIS·DECSTR, 잘못된 시퀀스 무시), 세션 수준 테스트(attach 중 켠 모드가 다음 adopt에서 복원됨, replay 여부별 첫 출력), 실제 셸 데몬 테스트(detach 중 모드 설정 → adopt 첫 출력의 preamble → `TerminalProtocolState`가 bracketed paste를 켬), dev 실기(GUI만 강제 종료 → 재결합 첫 chunk의 preamble)를 둔다.

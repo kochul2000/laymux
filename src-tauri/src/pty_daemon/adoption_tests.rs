@@ -380,3 +380,37 @@ fn a_replaying_attach_gets_the_backlog_without_a_preamble() {
         Ok(Some(_))
     ));
 }
+
+#[test]
+fn modes_set_while_a_client_was_attached_survive_into_the_next_adoption() {
+    let dir = tempfile::tempdir().unwrap();
+    let (listener, endpoint) = Listener::bind(dir.path()).unwrap();
+    let session = Session::new("pane-t#1".into(), "pane-t".into(), BTreeMap::new(), 1);
+
+    // The first GUI is attached when the application turns the mode on, so
+    // the bytes reach that GUI and never enter the detached backlog.
+    let first_client = transport::connect(&endpoint, Duration::from_secs(5)).unwrap();
+    let first_server = listener.accept().unwrap();
+    let first = Arc::new(ConnWriter::new(&first_server).unwrap());
+    session.attach(&first, 1, false, false).unwrap();
+    let _ = session.deliver_output(b"\x1b[?2004h prompt");
+    session.detach(1);
+    drop(first_client);
+
+    let client = transport::connect(&endpoint, Duration::from_secs(5)).unwrap();
+    let server_side = listener.accept().unwrap();
+    let writer = Arc::new(ConnWriter::new(&server_side).unwrap());
+    session.attach(&writer, 2, false, false).unwrap();
+    client
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .unwrap();
+    let mut reader = BufReader::new(client);
+    match read_frame::<_, DaemonMessage>(&mut reader).unwrap() {
+        Some(Frame::Control(DaemonMessage::Attached { .. })) => {}
+        other => panic!("unexpected attach reply {other:?}"),
+    }
+    match read_frame::<_, DaemonMessage>(&mut reader).unwrap() {
+        Some(Frame::Data(bytes)) => assert_eq!(bytes, b"\x1b[?2004h"),
+        other => panic!("expected the mode preamble, got {other:?}"),
+    }
+}

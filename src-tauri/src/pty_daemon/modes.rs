@@ -7,10 +7,10 @@
 //! was attached, so it tracks the modes and hands a fresh GUI a preamble that
 //! re-asserts the ones that differ from the defaults. The tracker only
 //! observes: output is relayed unchanged and nothing here answers a query.
-
-/// Kitty keyboard flag stack depth kept per session; deeper pushes drop the
-/// oldest entry, as terminals bound the stack too.
-const KITTY_STACK_LIMIT: usize = 16;
+//!
+//! The GUI terminal is xterm.js, so every transition follows xterm.js
+//! semantics: re-asserting a mode must leave the fresh GUI exactly where the
+//! previous one was.
 
 /// Parameters kept per control sequence; later ones are ignored.
 const MAX_PARAMS: usize = 16;
@@ -23,11 +23,10 @@ enum MouseTracking {
     AnyEvent = 1003,
 }
 
+/// Only the encodings xterm.js implements; it ignores 1005 and 1015.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MouseEncoding {
-    Utf8 = 1005,
     Sgr = 1006,
-    Urxvt = 1015,
     SgrPixels = 1016,
 }
 
@@ -43,8 +42,6 @@ pub struct TerminalModes {
     application_keypad: bool,
     mouse_tracking: Option<MouseTracking>,
     mouse_encoding: Option<MouseEncoding>,
-    kitty_flags: u32,
-    kitty_stack: Vec<u32>,
     parser: Parser,
 }
 
@@ -61,8 +58,6 @@ impl Default for TerminalModes {
             application_keypad: false,
             mouse_tracking: None,
             mouse_encoding: None,
-            kitty_flags: 0,
-            kitty_stack: Vec::new(),
             parser: Parser::default(),
         }
     }
@@ -81,9 +76,10 @@ impl TerminalModes {
     }
 
     /// Bytes that bring a terminal in its default state to these modes. They
-    /// only set modes and never contain a query, so writing them produces no
-    /// reply. Alternate screen comes first: entering it must not undo the
-    /// modes asserted after it.
+    /// only set modes and contain no query; the one reply they can cause is
+    /// the focus report xterm.js sends when focus events turn on, which the
+    /// application asked for by enabling them. Alternate screen comes first:
+    /// entering it must not undo the modes asserted after it.
     pub fn preamble(&self) -> Vec<u8> {
         let defaults = Self::default();
         let mut set = Vec::new();
@@ -121,9 +117,6 @@ impl TerminalModes {
         if self.application_keypad {
             out.extend_from_slice(b"\x1b=");
         }
-        if self.kitty_flags != 0 {
-            out.extend_from_slice(format!("\x1b[={};1u", self.kitty_flags).as_bytes());
-        }
         out
     }
 
@@ -140,39 +133,15 @@ impl TerminalModes {
                 };
             }
             Action::SoftReset => {
-                // The modes xterm.js resets on DECSTR, plus bracketed paste so
-                // this agrees with the GUI's input encoder (`terminal_protocol`).
+                // xterm.js DECSTR resets the insert mode and all default DEC
+                // private modes; screen buffer and mouse state survive.
                 self.insert_mode = false;
                 self.application_cursor = false;
                 self.application_keypad = false;
                 self.cursor_visible = true;
                 self.autowrap = true;
+                self.focus_events = false;
                 self.bracketed_paste = false;
-            }
-            Action::KittyPush(flags) => {
-                if self.kitty_stack.len() == KITTY_STACK_LIMIT {
-                    self.kitty_stack.remove(0);
-                }
-                self.kitty_stack.push(self.kitty_flags);
-                self.kitty_flags = flags;
-            }
-            Action::KittyPop(count) => {
-                for _ in 0..count.max(1) {
-                    match self.kitty_stack.pop() {
-                        Some(flags) => self.kitty_flags = flags,
-                        None => {
-                            self.kitty_flags = 0;
-                            break;
-                        }
-                    }
-                }
-            }
-            Action::KittySet { flags, mode } => {
-                self.kitty_flags = match mode {
-                    2 => self.kitty_flags | flags,
-                    3 => self.kitty_flags & !flags,
-                    _ => flags,
-                };
             }
         }
     }
@@ -185,31 +154,23 @@ impl TerminalModes {
             1004 => self.focus_events = enabled,
             2004 => self.bracketed_paste = enabled,
             47 | 1047 | 1049 => self.alternate_screen = enabled,
+            // One active tracking protocol; resetting any of them turns
+            // tracking off, as in xterm.js and xterm.
             9 | 1000 | 1002 | 1003 => {
-                let tracking = match mode {
+                self.mouse_tracking = enabled.then_some(match mode {
                     9 => MouseTracking::X10,
                     1000 => MouseTracking::Normal,
                     1002 => MouseTracking::ButtonEvent,
                     _ => MouseTracking::AnyEvent,
-                };
-                if enabled {
-                    self.mouse_tracking = Some(tracking);
-                } else if self.mouse_tracking == Some(tracking) {
-                    self.mouse_tracking = None;
-                }
+                });
             }
-            1005 | 1006 | 1015 | 1016 => {
-                let encoding = match mode {
-                    1005 => MouseEncoding::Utf8,
-                    1006 => MouseEncoding::Sgr,
-                    1015 => MouseEncoding::Urxvt,
-                    _ => MouseEncoding::SgrPixels,
-                };
-                if enabled {
-                    self.mouse_encoding = Some(encoding);
-                } else if self.mouse_encoding == Some(encoding) {
-                    self.mouse_encoding = None;
-                }
+            // Resetting either encoding returns to the default encoding.
+            1006 | 1016 => {
+                self.mouse_encoding = enabled.then_some(if mode == 1006 {
+                    MouseEncoding::Sgr
+                } else {
+                    MouseEncoding::SgrPixels
+                });
             }
             _ => {}
         }
@@ -223,12 +184,9 @@ enum Action {
     Keypad(bool),
     FullReset,
     SoftReset,
-    KittyPush(u32),
-    KittyPop(u32),
-    KittySet { flags: u32, mode: u32 },
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 enum State {
     #[default]
     Ground,
@@ -236,13 +194,16 @@ enum State {
     Csi(Csi),
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// A control sequence being parsed. Fixed-size, so parsing allocates nothing
+/// while the session's sink lock is held.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct Csi {
     /// `?`, `>`, `<` or `=` right after the introducer.
     marker: Option<u8>,
     /// First intermediate byte (0x20..=0x2f), e.g. `!` of DECSTR.
     intermediate: Option<u8>,
-    params: Vec<Option<u32>>,
+    params: [Option<u32>; MAX_PARAMS],
+    param_count: usize,
     current: Option<u32>,
     /// Bytes seen since the introducer; a marker is only valid first.
     len: usize,
@@ -252,14 +213,15 @@ struct Csi {
 
 impl Csi {
     fn finish_param(&mut self) {
-        if self.params.len() < MAX_PARAMS {
-            self.params.push(self.current.take());
+        if self.param_count < MAX_PARAMS {
+            self.params[self.param_count] = self.current;
+            self.param_count += 1;
         }
         self.current = None;
     }
 
-    fn param(&self, index: usize) -> Option<u32> {
-        self.params.get(index).copied().flatten()
+    fn params(&self) -> impl Iterator<Item = u32> + '_ {
+        self.params[..self.param_count].iter().flatten().copied()
     }
 }
 
@@ -339,24 +301,15 @@ impl Parser {
 fn dispatch(csi: &Csi, final_byte: u8, out: &mut Vec<Action>) {
     let enabled = final_byte == b'h';
     match (csi.marker, csi.intermediate, final_byte) {
-        (Some(b'?'), None, b'h' | b'l') => out.extend(
-            csi.params
-                .iter()
-                .flatten()
-                .map(|&mode| Action::Private { mode, enabled }),
-        ),
+        (Some(b'?'), None, b'h' | b'l') => {
+            out.extend(csi.params().map(|mode| Action::Private { mode, enabled }))
+        }
         (None, None, b'h' | b'l') => {
-            if csi.params.iter().flatten().any(|&mode| mode == 4) {
+            if csi.params().any(|mode| mode == 4) {
                 out.push(Action::InsertMode(enabled));
             }
         }
         (None, Some(b'!'), b'p') => out.push(Action::SoftReset),
-        (Some(b'>'), None, b'u') => out.push(Action::KittyPush(csi.param(0).unwrap_or(0))),
-        (Some(b'<'), None, b'u') => out.push(Action::KittyPop(csi.param(0).unwrap_or(1))),
-        (Some(b'='), None, b'u') => out.push(Action::KittySet {
-            flags: csi.param(0).unwrap_or(0),
-            mode: csi.param(1).unwrap_or(1),
-        }),
         _ => {}
     }
 }
@@ -398,47 +351,49 @@ mod tests {
     }
 
     #[test]
-    fn alternate_screen_comes_first_and_mouse_keeps_one_active_level() {
-        let modes = modes_after(&[
-            b"\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?1049h\x1b[?1004h",
-            // Clearing a level that is not active leaves the active one.
-            b"\x1b[?1000l",
-        ]);
+    fn alternate_screen_comes_first_and_mouse_follows_xterm_js() {
+        let modes = modes_after(&[b"\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?1049h\x1b[?1004h"]);
         assert_eq!(
             modes.preamble(),
             b"\x1b[?1049h\x1b[?1004h\x1b[?1002h\x1b[?1006h"
         );
-        let cleared = modes_after(&[b"\x1b[?1002h\x1b[?1006h\x1b[?1002l\x1b[?1006l"]);
-        assert!(cleared.preamble().is_empty());
+        // Resetting any tracking protocol turns tracking off, even one that
+        // is not the active protocol.
+        assert!(modes_after(&[b"\x1b[?1003h\x1b[?1000l"])
+            .preamble()
+            .is_empty());
+        // xterm.js ignores the UTF-8 and urxvt encodings, so they neither
+        // replace SGR nor get re-asserted.
+        assert_eq!(
+            modes_after(&[b"\x1b[?1006h\x1b[?1015h\x1b[?1005h"]).preamble(),
+            b"\x1b[?1006h"
+        );
+        // Resetting either SGR encoding returns to the default encoding.
+        assert!(modes_after(&[b"\x1b[?1016h\x1b[?1006l"])
+            .preamble()
+            .is_empty());
     }
 
     #[test]
-    fn full_and_soft_reset_return_to_defaults() {
-        assert!(
-            modes_after(&[b"\x1b[?2004h\x1b[?1049h\x1b[>5u\x1b=", b"\x1bc"])
-                .preamble()
-                .is_empty()
-        );
-        // DECSTR resets input modes but keeps screen and mouse state.
-        let soft = modes_after(&[b"\x1b[?2004h\x1b[?1h\x1b[4h\x1b=\x1b[?1000h", b"\x1b[!p"]);
-        assert_eq!(soft.preamble(), b"\x1b[?1000h");
+    fn full_and_soft_reset_follow_xterm_js() {
+        assert!(modes_after(&[b"\x1b[?2004h\x1b[?1049h\x1b=", b"\x1bc"])
+            .preamble()
+            .is_empty());
+        // DECSTR resets input and focus modes but keeps screen and mouse state.
+        let soft = modes_after(&[
+            b"\x1b[?2004h\x1b[?1h\x1b[4h\x1b=\x1b[?1004h\x1b[?1049h\x1b[?1000h",
+            b"\x1b[!p",
+        ]);
+        assert_eq!(soft.preamble(), b"\x1b[?1049h\x1b[?1000h");
     }
 
     #[test]
-    fn keypad_insert_mode_and_kitty_flags_are_restored() {
-        let modes = modes_after(&[b"\x1b=\x1b[4h\x1b[>1u\x1b[>3u"]);
-        assert_eq!(modes.preamble(), b"\x1b[4h\x1b=\x1b[=3;1u");
-        // Pop returns to the pushed value; popping past the bottom is zero.
-        assert_eq!(
-            modes_after(&[b"\x1b[>1u\x1b[>3u\x1b[<u"]).preamble(),
-            b"\x1b[=1;1u"
-        );
-        assert!(modes_after(&[b"\x1b[>1u\x1b[<5u"]).preamble().is_empty());
-        // `=` sets, ors or clears flags.
-        assert_eq!(
-            modes_after(&[b"\x1b[=1u\x1b[=4;2u\x1b[=1;3u"]).preamble(),
-            b"\x1b[=4;1u"
-        );
+    fn keypad_and_insert_mode_are_restored() {
+        let modes = modes_after(&[b"\x1b=\x1b[4h"]);
+        assert_eq!(modes.preamble(), b"\x1b[4h\x1b=");
+        assert!(modes_after(&[b"\x1b=\x1b[4h\x1b>\x1b[4l"])
+            .preamble()
+            .is_empty());
     }
 
     #[test]
@@ -446,6 +401,8 @@ mod tests {
         let modes = modes_after(&[
             b"\x1b[31m\x1b[2J\x1b]0;title\x07\x1b[?2004\x18h",
             b"\x1b[?20;04$h\x1b[1;2004h\x1b[?99999999999h",
+            // modifyOtherKeys, kitty keyboard, DECRQM, charset and DECSC.
+            b"\x1b[>4;2m\x1b[>1u\x1b[?2004$p\x1b(=\x1b7",
         ]);
         assert!(modes.preamble().is_empty());
     }
@@ -467,7 +424,7 @@ mod tests {
             assert!(
                 sequence == "="
                     || (sequence.starts_with('[')
-                        && sequence.ends_with(['h', 'l', 'u'])
+                        && sequence.ends_with(['h', 'l'])
                         && !sequence.contains('$')),
                 "{sequence:?} in {text:?} is not a plain mode setting"
             );
