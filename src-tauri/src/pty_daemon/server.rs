@@ -346,6 +346,7 @@ impl DaemonServer {
         // Hold the sink across spawn so `Spawned` is the first frame the
         // client sees: early output and exit callbacks wait on this lock.
         let mut sink = session.sink.lock_or_err()?;
+        sink.screen.screen_mut().set_size(rows, cols);
         let output_session = Arc::clone(&session);
         let reader_end = (Arc::downgrade(self), Arc::clone(&session));
         let child_exit = (Arc::downgrade(self), Arc::clone(&session));

@@ -354,17 +354,34 @@ fn attach_after_output(output: &[u8], replay: bool) -> BufReader<Stream> {
 }
 
 #[test]
-fn a_replayless_attach_starts_with_only_the_modes_output_set() {
-    let mut reader = attach_after_output(b"old screen \x1b[?2004h\x1b[?1h more", false);
-    match read_frame::<_, DaemonMessage>(&mut reader).unwrap() {
-        Some(Frame::Data(bytes)) => assert_eq!(bytes, b"\x1b[?1h\x1b[?2004h"),
-        other => panic!("expected the mode preamble, got {other:?}"),
-    }
-    // The discarded output itself never follows.
+fn a_replayless_attach_starts_with_the_modes_then_the_screen_it_missed() {
+    let mut reader = attach_after_output(b"old screen [?2004h[?1h more", false);
+    let bytes = match read_frame::<_, DaemonMessage>(&mut reader).unwrap() {
+        Some(Frame::Data(bytes)) => bytes,
+        other => panic!("expected the mode preamble and screen, got {other:?}"),
+    };
+    // Modes first (ADR-0303), then a redraw of the screen (ADR-0307).
+    assert!(bytes.starts_with(b"[?1h[?2004h"), "{bytes:?}");
+    let mut screen = vt100::Parser::new(24, 80, 0);
+    screen.process(&bytes);
+    assert_eq!(screen.screen().contents(), "old screen  more");
+    assert_eq!(screen.screen().cursor_position(), (0, 16));
+    assert_redraw_only(&bytes);
+    // The discarded raw output itself never follows.
     assert!(!matches!(
         read_frame::<_, DaemonMessage>(&mut reader),
         Ok(Some(_))
     ));
+}
+
+/// A redraw must only set cells, attributes, cursor and modes: an OSC or a
+/// device query in it would be processed or answered a second time.
+fn assert_redraw_only(bytes: &[u8]) {
+    let text = String::from_utf8_lossy(bytes);
+    assert!(!text.contains("]"), "OSC in redraw: {text:?}");
+    for query in ["[c", "[0c", "[>c", "[5n", "[6n", "$p"] {
+        assert!(!text.contains(query), "query {query:?} in redraw: {text:?}");
+    }
 }
 
 #[test]
@@ -410,7 +427,13 @@ fn modes_set_while_a_client_was_attached_survive_into_the_next_adoption() {
         other => panic!("unexpected attach reply {other:?}"),
     }
     match read_frame::<_, DaemonMessage>(&mut reader).unwrap() {
-        Some(Frame::Data(bytes)) => assert_eq!(bytes, b"\x1b[?2004h"),
-        other => panic!("expected the mode preamble, got {other:?}"),
+        Some(Frame::Data(bytes)) => {
+            assert!(bytes.starts_with(b"\x1b[?2004h"), "{bytes:?}");
+            // The screen the first GUI saw is redrawn for the next one.
+            let mut screen = vt100::Parser::new(24, 80, 0);
+            screen.process(&bytes);
+            assert_eq!(screen.screen().contents(), " prompt");
+        }
+        other => panic!("expected the mode preamble and screen, got {other:?}"),
     }
 }

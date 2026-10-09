@@ -1006,14 +1006,14 @@ endpoint는 두 플랫폼 모두 이 socket이며, 다른 로컬 계정은 OS가
 - GUI가 만든 명령·resume 복원 요청·Codex 시작 guard는 적용하지 않는다.
 - spawn 때 metadata로 맡긴 agent hook token을 다시 써서 살아남은 자식의 훅을 계속 인증하고, 맡긴 WSL relay 여부로 귀속 도메인을 복원한다.
 - 세션은 bind마다 attach epoch를 올린다. GUI의 종료 요청은 자신의 epoch를 싣고, 그 뒤 다른 client가 bind했으면 데몬은 `superseded`로 답하고 세션을 남긴다.
-- backlog replay 없이 attach한 뒤 GUI grid 크기로 resize한다. 이전 화면은 복원되지 않고 다음 출력부터 그려진다. 대신 데몬 세션이 출력 전체에서 추적한 터미널 모드(DECCKM·autowrap·커서 표시·focus·bracketed paste·마우스 추적과 SGR 인코딩·alt screen·IRM·keypad, 모두 xterm.js 시맨틱) 중 기본값과 다른 것을 `Attached` 직후 첫 data frame(preamble)으로 다시 단언한다. preamble은 DECSET/DECRST·IRM·`ESC =`만 담고 query는 담지 않으며(focus 보고가 켜지면 xterm.js가 현재 포커스를 한 번 보고한다), GUI는 이를 일반 출력으로 처리하므로 Rust `TerminalProtocolState`와 xterm이 같은 단일 패스로 맞춰진다([ADR-0303](../adr/0303-pty-daemon-mode-tracking-and-adoption-preamble.md)). replay 있는 attach에는 preamble을 붙이지 않는다. alt screen 앱은 재결합 뒤 빈 alt 화면에서 시작하며 앱이 다시 그릴 때까지 비어 있다.
+- backlog replay 없이 attach한 뒤 GUI grid 크기로 resize한다. 데몬 세션이 모든 출력으로 유지한 화면 모델(`vt100`, scrollback 없음)로 현재 보이는 화면을 다시 그린다([ADR-0307](../adr/0307-pty-daemon-adoption-screen-redraw.md)). 그 전에 데몬 세션이 출력 전체에서 추적한 터미널 모드(DECCKM·autowrap·커서 표시·focus·bracketed paste·마우스 추적과 SGR 인코딩·alt screen·IRM·keypad, 모두 xterm.js 시맨틱) 중 기본값과 다른 것을 `Attached` 직후 첫 data frame의 앞부분(preamble)으로 다시 단언하고, 같은 frame에 화면 지우기·셀·속성·커서로 이루어진 redraw가 이어진다(OSC·query 없음). preamble은 DECSET/DECRST·IRM·`ESC =`만 담고 query는 담지 않으며(focus 보고가 켜지면 xterm.js가 현재 포커스를 한 번 보고한다), GUI는 이를 일반 출력으로 처리하므로 Rust `TerminalProtocolState`와 xterm이 같은 단일 패스로 맞춰진다([ADR-0303](../adr/0303-pty-daemon-mode-tracking-and-adoption-preamble.md)). replay 있는 attach에는 preamble을 붙이지 않는다. alt screen 앱은 재결합 뒤 빈 alt 화면에서 시작하며 앱이 다시 그릴 때까지 비어 있다.
 - CWD는 요청된 시작 디렉터리로 시작해 다음 OSC 7을 따른다.
 
 dev 빌드의 StrictMode는 TerminalView를 한 번 닫았다 다시 열어서, 재결합한 세션을 바로 종료한다. PTY 수명을 dev에서 확인할 때는 `VITE_LAYMUX_STRICT_MODE=0`으로 띄운다([dev-repro-methodology.md §4.7](../dev-repro-methodology.md)).
 
 **분리 세션 관리:** 설정 › 터미널 › PTY 세션 패널이 데몬 세션을 `pane`(이 GUI의 터미널)·`awaitingPane`(client는 없지만 저장된 레이아웃의 터미널이고 이 GUI가 아직 만들지 않아 adopt할 기회가 남은 것, 예: 아직 열지 않은 워크스페이스)·`detached`(client도, 복원할 pane도 없음)·`otherClient`·`ending`으로 보여 준다. 종료는 `detached`만 가능하며, backend가 직전에 다시 분류해 다른 상태면 `notDetached`로 답하고, 목록에서 본 attach epoch를 실어 사이에 다시 attach된 세션은 `superseded`로 남긴다. 목록 조회 실패·응답 없는 데몬·읽을 수 없는 저장 레이아웃은 빈 목록이 아니라 오류이며 자동 정리는 하지 않는다. 같은 동작을 `list_pty_sessions`·`terminate_pty_session`·`terminate_detached_pty_sessions` IPC와 `GET /api/v1/pty-sessions`·`POST /api/v1/pty-sessions/terminate {sessionId, attachEpoch}`·`POST /api/v1/pty-sessions/terminate-detached`로 제공한다([ADR-0306](../adr/0306-pty-daemon-session-inventory.md)).
 
-**아직 없는 것:** 업데이트 인계(업데이트 중 작업 유지), 화면 snapshot, GUI 미접속 중 OSC·훅 처리, 분리 세션을 새 pane에 붙이는 adopt는 후속 단계다.
+**아직 없는 것:** 업데이트 인계(업데이트 중 작업 유지), scrollback 복원, GUI 미접속 중 OSC·훅 처리, 분리 세션을 새 pane에 붙이는 adopt는 후속 단계다.
 
 ---
 
