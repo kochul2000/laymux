@@ -137,8 +137,10 @@ fn attach_without_replay_discards_detached_output() {
     let output = read_until(&mut reader, |_, message| {
         matches!(message, Some(DaemonMessage::Exit { .. }))
     });
+    // The screen it drew is redrawn once (ADR-0307); the raw output itself
+    // is never replayed on top of it.
     assert!(
-        !output.contains("LATE_2"),
+        output.matches("LATE_2").count() <= 1,
         "replay must not deliver {output:?}"
     );
     daemon.wait_for_sessions(0);
