@@ -29,6 +29,7 @@ pub mod grok_usage_probe;
 pub mod ipc_server;
 pub mod local_state;
 pub mod lock_ext;
+pub mod lx_endpoint;
 pub mod osc;
 pub mod osc_hooks;
 pub mod output_buffer;
@@ -105,14 +106,29 @@ pub fn run() {
                     }
                 }),
             ) {
-                Ok(socket_path) => match app_state.ipc_socket_path.lock_or_err() {
-                    Ok(mut path) => {
-                        path.replace(socket_path);
+                Ok(socket_path) => {
+                    // Shells re-adopted from the PTY daemon carry the fixed
+                    // file path, not this process's endpoint (ADR-0304).
+                    let published = lx_endpoint::publish(
+                        &lx_endpoint::endpoint_file_path(),
+                        &lx_endpoint::LxEndpoint {
+                            endpoint: socket_path.clone(),
+                            pid: std::process::id(),
+                        },
+                    );
+                    if let Err(error) = published {
+                        tracing::warn!(%error, "failed to publish the lx endpoint file");
+                    } else {
+                        match app_state.ipc_socket_path.lock_or_err() {
+                            Ok(mut path) => {
+                                path.replace(socket_path);
+                            }
+                            Err(error) => {
+                                tracing::warn!(%error, "failed to store IPC socket path");
+                            }
+                        }
                     }
-                    Err(error) => {
-                        tracing::warn!(%error, "failed to store IPC socket path");
-                    }
-                },
+                }
                 Err(e) => {
                     tracing::warn!(error = %e, "IPC server failed to start");
                 }

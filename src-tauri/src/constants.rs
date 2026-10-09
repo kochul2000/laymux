@@ -80,7 +80,11 @@ pub const REMOTE_SESSION_POLL: Duration = Duration::from_secs(2);
 
 // ── Environment variable names ─────────────────────────────────────
 
-pub const ENV_LX_SOCKET: &str = "LX_SOCKET";
+/// Fixed path of this build kind's `lx` endpoint file (ADR-0304). The file, not
+/// the environment, names the current GUI's IPC endpoint.
+pub const ENV_LX_ENDPOINT_FILE: &str = "LX_ENDPOINT_FILE";
+/// File name of the `lx` endpoint file in the settings directory.
+pub const LX_ENDPOINT_FILE_NAME: &str = "lx-endpoint.json";
 pub const ENV_LX_TERMINAL_ID: &str = "LX_TERMINAL_ID";
 pub const ENV_LX_GROUP_ID: &str = "LX_GROUP_ID";
 pub const ENV_LX_AUTOMATION_PORT: &str = "LX_AUTOMATION_PORT";
@@ -820,7 +824,7 @@ mod tests {
     #[test]
     fn env_names_are_screaming_snake_case() {
         let envs = [
-            ENV_LX_SOCKET,
+            ENV_LX_ENDPOINT_FILE,
             ENV_LX_TERMINAL_ID,
             ENV_LX_GROUP_ID,
             ENV_LX_AUTOMATION_PORT,

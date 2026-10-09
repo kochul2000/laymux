@@ -227,11 +227,18 @@ pub async fn create_terminal_session(
         .session_checkpoint
         .begin_mutation_after_finalization()
         .await;
-    // Inject LX_SOCKET and LX_AUTOMATION_PORT env vars
+    // Inject LX_ENDPOINT_FILE and LX_AUTOMATION_PORT env vars. Both stay
+    // valid for a shell that outlives this GUI (ADR-0304).
     let mut env = Vec::new();
     if let Ok(path_lock) = state.ipc_socket_path.lock_or_err() {
-        if let Some(ref socket_path) = *path_lock {
-            env.push((ENV_LX_SOCKET.to_string(), socket_path.clone()));
+        // Set only once the endpoint file was published for this GUI.
+        if path_lock.is_some() {
+            env.push((
+                ENV_LX_ENDPOINT_FILE.to_string(),
+                crate::lx_endpoint::endpoint_file_path()
+                    .to_string_lossy()
+                    .into_owned(),
+            ));
         }
     }
     if let Ok(port_lock) = state.automation_port.lock_or_err() {
