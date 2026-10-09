@@ -353,6 +353,7 @@ impl DaemonServer {
         // client sees: early output and exit callbacks wait on this lock.
         let mut sink = session.sink.lock_or_err()?;
         sink.screen = ScreenModel::new(rows, cols);
+        *session.pty_size.lock_or_err()? = Some((rows, cols));
         let output_session = Arc::clone(&session);
         let reader_end = (Arc::downgrade(self), Arc::clone(&session));
         let child_exit = (Arc::downgrade(self), Arc::clone(&session));

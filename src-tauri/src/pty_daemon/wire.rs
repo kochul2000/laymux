@@ -330,6 +330,24 @@ mod tests {
     use std::io::Cursor;
 
     #[test]
+    fn an_attach_size_is_optional_on_the_wire() {
+        let without = serde_json::json!({
+            "type": "attach", "sessionId": "s", "replay": false, "takeOver": false
+        });
+        let ClientMessage::Attach { size, .. } = serde_json::from_value(without).unwrap() else {
+            panic!("not an attach");
+        };
+        assert_eq!(size, None);
+        let sizeless = ClientMessage::Attach {
+            session_id: "s".into(),
+            replay: false,
+            take_over: false,
+            size: None,
+        };
+        assert!(!serde_json::to_string(&sizeless).unwrap().contains("size"));
+    }
+
+    #[test]
     fn control_and_data_frames_round_trip_in_order() {
         let mut buf = Vec::new();
         write_control(

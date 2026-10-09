@@ -42,26 +42,37 @@ impl ScreenModel {
         let parser = &mut self.parser;
         if catch_unwind(AssertUnwindSafe(|| parser.process(data))).is_err() {
             self.reset("output");
+            // What the chunk drew is still worth keeping; a chunk that fails
+            // again on a blank model is dropped.
+            let parser = &mut self.parser;
+            if catch_unwind(AssertUnwindSafe(|| parser.process(data))).is_err() {
+                self.reset("output");
+            }
         }
     }
 
-    /// Resize like a terminal emulator does: when rows go away, the top of
-    /// the main screen scrolls off so the cursor's row stays visible (xterm
-    /// and ConPTY), instead of `vt100`'s cutting the bottom rows — which
-    /// would drop a shell's prompt.
+    /// Resize like a terminal emulator does, not like `vt100`:
+    /// - when rows go away, the top of the main screen scrolls off so the
+    ///   cursor's row stays visible (xterm and ConPTY); `vt100` cuts the
+    ///   bottom rows, which drops a shell's prompt;
+    /// - when columns go away, a wide character the new last column would cut
+    ///   in half is erased; `vt100` keeps its first half there, which shifts
+    ///   every later row of a redraw and panics when that cell is written.
+    ///
+    /// The corrections run on a copy of the screen in a fresh parser, so a
+    /// sequence the live parser is in the middle of (a resize lands between
+    /// two PTY reads) is neither cut nor shown as text.
     pub(super) fn set_size(&mut self, rows: u16, cols: u16) {
         let (rows, cols) = clamp(rows, cols);
         let parser = &mut self.parser;
         let resized = catch_unwind(AssertUnwindSafe(|| {
-            let screen = parser.screen();
-            let (old_rows, _) = screen.size();
-            let (cursor_row, cursor_col) = screen.cursor_position();
-            if !screen.alternate_screen() && rows < old_rows && cursor_row >= rows {
-                let scroll = usize::from(cursor_row - rows + 1);
-                let mut bytes = format!("\x1b[{old_rows};1H").into_bytes();
-                bytes.extend(std::iter::repeat_n(b'\n', scroll));
-                bytes.extend(format!("\x1b[{rows};{}H", cursor_col + 1).into_bytes());
-                parser.process(&bytes);
+            let fix = resize_corrections(parser.screen(), rows, cols);
+            if !fix.is_empty() {
+                let (old_rows, old_cols) = parser.screen().size();
+                let mut copy = vt100::Parser::new(old_rows, old_cols, 0);
+                *copy.screen_mut() = parser.screen().clone();
+                copy.process(&fix);
+                *parser.screen_mut() = copy.screen().clone();
             }
             parser.screen_mut().set_size(rows, cols);
         }));
@@ -93,6 +104,35 @@ impl ScreenModel {
     }
 }
 
+/// Bytes that prepare `screen` for `vt100`'s resize to `rows`x`cols`; see
+/// [`ScreenModel::set_size`].
+fn resize_corrections(screen: &vt100::Screen, rows: u16, cols: u16) -> Vec<u8> {
+    let (old_rows, old_cols) = screen.size();
+    let (cursor_row, cursor_col) = screen.cursor_position();
+    let mut fix = Vec::new();
+    if cols < old_cols {
+        for row in 0..old_rows {
+            if screen.cell(row, cols - 1).is_some_and(vt100::Cell::is_wide) {
+                fix.extend(format!("\x1b[{};{cols}H\x1b[X", row + 1).into_bytes());
+            }
+        }
+    }
+    if !screen.alternate_screen() && rows < old_rows && cursor_row >= rows {
+        // Scrolling must move the whole screen, whatever region or origin
+        // mode the application left set.
+        fix.extend_from_slice(b"\x1b[?6l\x1b[r");
+        fix.extend(format!("\x1b[{old_rows};1H").into_bytes());
+        fix.extend(std::iter::repeat_n(
+            b'\n',
+            usize::from(cursor_row - rows + 1),
+        ));
+        fix.extend(format!("\x1b[{rows};{}H", cursor_col + 1).into_bytes());
+    } else if !fix.is_empty() {
+        fix.extend(format!("\x1b[{};{}H", cursor_row + 1, cursor_col + 1).into_bytes());
+    }
+    fix
+}
+
 fn clamp(rows: u16, cols: u16) -> (u16, u16) {
     (rows.max(MIN_ROWS), cols.max(MIN_COLS))
 }
@@ -121,6 +161,40 @@ mod tests {
         model.process(b"\r\x1b[8Cx");
         model.process(b"\r\nstill here");
         assert!(contents(&model).contains("still here"));
+    }
+
+    #[test]
+    fn a_narrower_grid_erases_the_wide_character_it_would_cut() {
+        let mut model = ScreenModel::new(5, 10);
+        model.process("abcdefgh한\r\nline2\r\nline3\r\nPROMPT> ".as_bytes());
+        model.set_size(5, 9);
+        // Redrawn on a terminal of the new width, every row stays in place
+        // and the cursor is still on the prompt.
+        assert_eq!(contents(&model), model.parser.screen().contents());
+        assert!(contents(&model).trim_end().ends_with("line3\nPROMPT>"));
+        assert_eq!(model.parser.screen().cursor_position(), (3, 8));
+        // Writing where the cut character was is safe.
+        model.process(b"\x1b[1;9Hx");
+        assert!(contents(&model).starts_with("abcdefghx"));
+    }
+
+    #[test]
+    fn a_resize_between_two_reads_does_not_cut_the_sequence_in_flight() {
+        let mut model = ScreenModel::new(10, 20);
+        for line in 0..9 {
+            model.process(format!("line{line}\r\n").as_bytes());
+        }
+        model.process(b"PROMPT> \x1b]0;my ti");
+        model.set_size(5, 20);
+        model.process(b"tle\x07ls");
+        let shown = contents(&model);
+        assert!(shown.ends_with("PROMPT> ls"), "{shown:?}");
+
+        let mut model = ScreenModel::new(10, 20);
+        model.process(b"P> \xed\x95");
+        model.set_size(10, 19);
+        model.process(b"\x9c");
+        assert!(contents(&model).starts_with("P> 한"));
     }
 
     #[test]

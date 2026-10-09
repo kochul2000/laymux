@@ -31,7 +31,9 @@ GUI가 crash하기 전 출력은 이전 GUI에만 전달됐다. 데몬 backlog�
   - 세션마다 `vt100::Parser`를 둔다. scrollback은 0이고 크기는 PTY 크기다. spawn할 때 크기를 정한다. resize는 PTY에 적용하기 전에 새 크기를 기록하고(실패하면 되돌린다), 모델은 sink lock 안에서 그 뒤 출력을 parse하기 직전에 그 크기를 적용한다. resize가 멈춘 client 때문에 sink lock을 기다리지 않게 하기 위해서다.
   - 출력은 attach 여부와 상관없이 모두 이 모델을 거친다.
   - **모델은 세션을 멈추게 할 수 없다.** `vt100` 0.16은 일부 resize 뒤 쓰기에서 panic한다(좁아진 grid가 자른 wide 문자 위에 쓰기, 1행 grid의 줄바꿈). 모델 호출은 모두 `catch_unwind`로 감싸고, panic한 모델은 같은 크기의 빈 모델로 바꾼다. 그래서 sink lock이 poison되지 않고 PTY 출력 중계는 계속된다. 모델 크기는 최소 2×2이고, 0 크기의 spawn·resize는 거부한다.
-  - 행이 줄면 터미널처럼 main 화면의 위쪽을 밀어 올려 커서 행을 남긴 뒤 크기를 바꾼다(`vt100`은 아래 행을 버려 셸 프롬프트를 잃는다).
+  - 크기를 바꾸기 전에 터미널처럼 보정한다. 행이 줄면 main 화면의 위쪽을 밀어 올려 커서 행을 남긴다(`vt100`은 아래 행을 버려 셸 프롬프트를 잃는다). 이때 scroll region과 origin mode는 해제한다. 열이 줄면 새 마지막 열에 걸려 반으로 잘릴 wide 문자를 지운다(`vt100`은 앞 절반을 남겨, redraw의 이후 행이 한 줄씩 밀리고 그 셀에 다시 쓰면 panic한다).
+  - 보정 바이트는 화면 사본을 담은 새 parser에서 처리한 뒤 화면만 되돌린다. resize는 두 PTY read 사이에 오므로 원래 parser는 escape sequence나 UTF-8 문자의 중간에 있을 수 있고, 그 상태를 건드리지 않기 위해서다.
+  - PTY가 이미 그 크기면 resize를 건너뛴다(자식에게 크기 변경 신호만 보낸다). resize가 거부되면 PTY가 아직 가진 크기를 모델에 기록한다.
 - **redraw.** 내용은 `contents_formatted()`(화면 지우기, 셀·속성, 커서 숨김 상태)와 `cursor_state_formatted()`(커서 위치·표시)로 만든다.
   - **OSC와 device query는 넣지 않는다.** 셀, 속성, 커서, 모드 설정만 담는다. 그래서 GUI의 OSC 단일 패스(ADR-0001)가 업무 이벤트를 다시 처리하지 않고, xterm이 응답할 것도 없다(ADR-0068).
   - 순서는 alt screen 진입, redraw, 나머지 모드(ADR-0303), 커서 표시 여부, 그다음 live 출력이다. redraw는 새 터미널의 autowrap과 replace 모드를 전제로 그리므로(`vt100`은 DECAWM을 처리하지 않아 wrap된 행을 자동 줄바꿈에 맡긴다), 그 모드를 바꾸는 `?7l`·IRM은 redraw 뒤에 온다. 커서 표시는 모드 추적 결과로 마지막에 명시한다(DECSTR 뒤 xterm.js는 커서를 보이고 `vt100`은 숨긴 채로 둔다).
@@ -59,7 +61,8 @@ GUI가 crash하기 전 출력은 이전 GUI에만 전달됐다. 데몬 backlog�
   - 폭이 줄면 xterm.js는 wrap된 행을 reflow하지만 `vt100`은 오른쪽 열을 버린다. 폭을 줄인 뒤 재결합하면 그 행의 잘린 부분은 복원되지 않는다.
   - SGR: 밑줄 색(`58;5;n`, `58;2;…`)을 다른 속성으로 잘못 읽고, 취소선(9)과 밑줄 모양(`4:3`)을 버린다.
   - pending-wrap 상태(마지막 열에 쓴 직후)에서는 `cursor_state_formatted`가 마지막 셀을 다시 그린 뒤 SGR을 초기화한다. 다음 출력이 SGR 없이 이어지면 속성이 기본값으로 보인다.
-- scrollback 복원은 하지 않는다. 필요하면 별도로 결정한다.
+- scrollback 복원은 하지 않는다. 필요하면 별도로 결정한다. GUI의 출력 캐시 복원(restoreOutput)은 재결합과 별개로 실행되므로, 캐시된 이전 출력은 scrollback에 남고 redraw는 그 아래 보이는 화면을 지우고 다시 그린다.
+- alt screen에 있는 동안 행이 줄면 main 화면의 보정은 하지 않는다. 그래서 그 뒤 main 화면으로 돌아오면 아래 행이 잘려 있을 수 있다. 앱이 alt screen을 나가며 다시 그리는 경우가 많다.
 - 검증:
   - 세션 수준 테스트: replay 없는 attach의 첫 data를 parse하면 놓친 화면과 커서가 나오고, OSC와 query가 없다. `?7l`·IRM은 redraw 뒤에 오고, alt screen은 진입 뒤에 그려지며, DECSTR 뒤 커서 표시가 모드를 따른다. 큰 redraw는 여러 frame으로 나뉜다.
   - 모델 테스트: wide 문자 + 폭 축소 + 덮어쓰기, 1행·0 크기에서 panic 없이 계속 동작한다. 행이 줄면 프롬프트 행이 남는다.

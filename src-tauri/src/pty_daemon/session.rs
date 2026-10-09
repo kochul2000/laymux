@@ -82,6 +82,9 @@ pub(super) struct Session {
     /// PTY size applied by the latest resize, for the screen model to adopt
     /// under the sink lock (a resize must not wait behind a stalled client).
     pending_screen_size: Mutex<Option<(u16, u16)>>,
+    /// The size the PTY last took (set at spawn). Held across a resize, so
+    /// resizes apply one at a time.
+    pub(super) pty_size: Mutex<Option<(u16, u16)>>,
 }
 
 #[derive(Default)]
@@ -132,6 +135,7 @@ impl Session {
             terminating: Arc::new(AtomicBool::new(false)),
             terminate_requested: AtomicBool::new(false),
             pending_screen_size: Mutex::new(None),
+            pty_size: Mutex::new(None),
         }
     }
 
@@ -352,7 +356,8 @@ impl Session {
 
     /// The new size is recorded for the screen model before the PTY takes
     /// it, so output the child lays out for it is never parsed at the old
-    /// one; a refused resize restores the record.
+    /// one. A refused resize records the size the PTY still has. A resize to
+    /// the current size is skipped: it would only signal the child.
     fn resize_pty(&self, rows: u16, cols: u16) -> Result<(), String> {
         if rows == 0 || cols == 0 {
             return Err(format!("invalid PTY size {rows}x{cols}"));
@@ -360,15 +365,19 @@ impl Session {
         let Some(handle) = self.handle.get() else {
             return Ok(());
         };
-        let previous = self
-            .pending_screen_size
-            .lock_or_err()?
-            .replace((rows, cols));
+        let mut pty_size = self.pty_size.lock_or_err()?;
+        if *pty_size == Some((rows, cols)) {
+            return Ok(());
+        }
+        *self.pending_screen_size.lock_or_err()? = Some((rows, cols));
         let resized = handle.resize(cols, rows);
-        if resized.is_err() {
-            if let Ok(mut pending) = self.pending_screen_size.lock_or_err() {
-                if *pending == Some((rows, cols)) {
-                    *pending = previous;
+        match &resized {
+            Ok(()) => *pty_size = Some((rows, cols)),
+            Err(_) => {
+                if let (Some(current), Ok(mut pending)) =
+                    (*pty_size, self.pending_screen_size.lock_or_err())
+                {
+                    *pending = Some(current);
                 }
             }
         }
