@@ -1,4 +1,5 @@
 mod agent_hooks;
+mod dev_update;
 pub mod handlers_backend;
 pub mod handlers_bridge;
 pub mod helpers;
@@ -163,10 +164,6 @@ pub fn build_router(
         .route("/api/v1/agent-hooks/manage", post(agent_hooks::hook_manage))
         .route("/api/v1/pty-sessions", get(pty_sessions::list))
         .route(
-            "/api/v1/dev/update-handoff",
-            post(pty_sessions::dev_update_handoff),
-        )
-        .route(
             "/api/v1/pty-sessions/terminate",
             post(pty_sessions::terminate),
         )
@@ -270,6 +267,10 @@ pub fn build_router(
         .route("/api/v1/ui/remote-access", post(ui_remote_access))
         .route("/api/v1/ui/settings/navigate", post(ui_navigate_settings))
         .route("/api/v1/ui/lifecycle", post(ui_lifecycle))
+        .route(
+            "/api/v1/dev/update-handoff",
+            post(dev_update::update_handoff),
+        )
         .route("/api/v1/ui/key", post(ui_dispatch_key))
         .route("/api/v1/ui/file-viewer", post(ui_open_file_viewer))
         .route("/api/v1/settings/app-theme", put(settings_set_app_theme))

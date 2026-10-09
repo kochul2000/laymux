@@ -363,7 +363,7 @@ pub async fn api_docs() -> impl IntoResponse {
             },
             {
                 "method": "POST", "path": "/api/v1/dev/update-handoff",
-                "description": "Dev-only update handoff without an installer (ADR-0308): installer runs the installer teardown then exits the process; restart marks the handoff and restarts the app. The next GUI adopts the daemon sessions. Release returns 403.",
+                "description": "Dev-only update handoff without an installer (ADR-0308): installer runs the installer teardown then exits the process; restart marks the handoff and restarts the app. The update checkpoint and input freeze before an install are not run. The next GUI adopts the daemon sessions. Release returns 403.",
                 "body": { "mode": "installer | restart" }
             },
             {

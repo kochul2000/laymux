@@ -119,6 +119,7 @@ VITE_LAYMUX_STRICT_MODE=0 cargo tauri dev
 - `{"mode":"installer"}`는 Windows 경로다. updater의 `on_before_exit`가 부르는 `release_installer_file_locks`를 실행한 뒤 `process::exit(0)`으로 끝난다.
 - `{"mode":"restart"}`는 Linux 경로다. 인계를 표시하고 `app.restart()`를 부른다. dev에서는 재시작한 프로세스가 `cargo tauri dev`의 vite를 잃으므로, 그 GUI만 끝내고 위 명령으로 다시 띄운다.
 - 그다음 위 4번처럼 같은 `$PID`로 재결합되는지 확인한다.
+- 이 endpoint는 설치 뒤의 경로만 실행한다. 업데이트 checkpoint 저장과 입력 차단(`prepare`)은 실행하지 않으므로, checkpoint의 agent resume 판정은 이 방법으로 확인되지 않는다.
 
 ## 5. 사보타주 검증 — 테스트가 결함을 못박고 있지 않은지
 
