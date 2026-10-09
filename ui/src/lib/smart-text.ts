@@ -135,7 +135,9 @@ export function smartRemoveIndent(text: string): string {
  *     its own line is a separate URL, not a wrapped tail.
  *   - the continuation is indented deeper than the line the URL run started on
  *     — TUI wraps hang their continuation rows, while an unrelated next line
- *     (`PR: https://…/pull/12` + `src/lib/x.ts`) sits at the same depth.
+ *     (`PR: https://…/pull/12` + `src/lib/x.ts`) sits at the same depth. The
+ *     same depth is accepted only when the URL is the whole line so far: a URL
+ *     on its own row wraps flush with its indent (Claude OAuth, Codex input box).
  *
  * Copy from laymux's own terminal does not depend on this guess: the buffer
  * knows which rows were broken at the screen width (`tui-wrap-join`) and joins
@@ -146,6 +148,10 @@ export function smartRemoveIndent(text: string): string {
  * decision holds on the paste path too, where smartRemoveLineBreak runs without
  * a prior trimSelectionTrailingWhitespace.
  */
+/** The output line being built is nothing but (indent +) one URL token. */
+const urlOwnsLine = (result: string) =>
+  /^[ \t]*https?:\/\/\S*[ \t]*$/.test(result.slice(result.lastIndexOf("\n") + 1));
+
 function mergeWrappedUrlLines(text: string): string {
   if (!/\r?\n/.test(text)) return text;
   const eol = text.includes("\r\n") ? "\r\n" : "\n";
@@ -159,8 +165,9 @@ function mergeWrappedUrlLines(text: string): string {
     const continuation = lines[i].replace(/^[ \t]+/, "").replace(/[ \t]+$/, "");
     const resultTrimmedEnd = result.replace(/[ \t]+$/, "");
     const tail = /\S*$/.exec(resultTrimmedEnd)?.[0] ?? "";
+    const depth = indentOf(lines[i]);
     const isWrappedUrlTail =
-      indentOf(lines[i]) > lineIndent &&
+      (depth > lineIndent || (depth === lineIndent && urlOwnsLine(result))) &&
       continuation.length > 0 &&
       /^\S+$/.test(continuation) &&
       /[/:?=&%#@]/.test(continuation) &&

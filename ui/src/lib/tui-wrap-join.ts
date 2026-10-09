@@ -112,7 +112,9 @@ export function detectTuiWrap(
   }
 
   const prevEnd = cellsThrough(prev, p.last);
-  const token = /^\S+/.exec(next.text.slice(n.indent))![0];
+  // 들여쓰기를 `[ \t]` 로 찾았으니 토큰도 같은 문자 집합으로 끊는다 — `\S` 로
+  // 끊으면 U+3000·NBSP 로 시작하는 행에서 매치가 없어 예외가 난다.
+  const token = /^[^ \t]+/.exec(next.text.slice(n.indent))![0];
   const tokenCells = cellsThrough(next, n.indent + token.length - 1) - nextIndentCells;
   if (prevEnd + 1 + tokenCells <= cols) return null;
 
@@ -126,11 +128,13 @@ export function detectTuiWrap(
   const midToken = prevEnd >= cols - WRAP_MARGIN && headCells + tokenCells > cols - nextIndentCells;
 
   // 음절 사이에서도 자르는 줄바꿈기: 와이드 문자끼리 맞닿은 경계에서 다음 글자가
-  // 앞 행에 들어갈 자리가 없었다면 단어 중간으로 본다.
+  // 앞 행에 들어갈 자리가 없었다면 단어 중간으로 본다. 줄바꿈 폭은 cols-1 일 수
+  // 있다(Codex 입력창) — 1셀 여백 안에서 구분되지 않는 경계는 공백 없이 잇는 쪽으로
+  // 기운다(위 `WrapStyle` 설명과 같은 방향).
   const lastWide = prevEnd - cellsBefore(prev, p.last) > 1;
   const firstCells = cellsThrough(next, n.indent) - nextIndentCells;
   const midSyllable =
-    style === "anywhere" && lastWide && firstCells > 1 && prevEnd + firstCells > cols;
+    style === "anywhere" && lastWide && firstCells > 1 && prevEnd + firstCells > cols - 1;
 
   return { separator: midToken || midSyllable ? "" : " ", contentOffset: n.indent };
 }
@@ -144,9 +148,15 @@ export interface WrapRow extends ReconstructedLine {
  * `getSelection()` 의 논리 줄들 사이에서 화면 폭 줄바꿈을 지운다.
  *
  * `rows` 는 선택 범위의 물리 행 전체(행 전체 텍스트)다. xterm 은 `isWrapped`
- * 연속 행을 개행 없이 붙이므로 논리 줄 수가 `lines` 길이와 같아야 하고, 아니면
- * (열 선택 모드 등) 매핑을 믿을 수 없어 `null` 을 돌려준다. 연속 줄은 선택이
- * 0열부터 시작하므로 내어쓰기 오프셋이 버퍼 행과 같다.
+ * 연속 행을 개행 없이 붙이므로 논리 줄 수가 `lines` 길이와 같아야 한다. 일반
+ * 선택은 첫 줄이 행 끝까지, 나머지 줄이 0열부터 이어지므로 각 줄이 버퍼 행
+ * 텍스트와 맞아야 한다(첫 줄은 접미, 가운데 줄은 전체, 마지막 줄은 접두). 아니면
+ * (열 선택 모드 등) 매핑을 믿을 수 없어 `null` 을 돌려준다.
+ *
+ * 내어쓰기 없는(0열에서 시작하는) 연속 행은 잇지 않는다. TUI 의 연속 행은 항상
+ * 내어쓰기(2칸 이상)가 있고, 0열 행이 화면 폭을 채우는 출력은 대부분 셸 출력이다
+ * — pytest 진행 줄·`ps aux` 처럼 폭에 맞춰 채우거나 잘린 행을 한 줄로 합치면 안
+ * 된다.
  */
 export function joinTuiWrappedLines(
   lines: string[],
@@ -160,6 +170,7 @@ export function joinTuiWrappedLines(
     else groups.push([row]);
   }
   if (groups.length !== lines.length) return null;
+  if (!selectionMatchesRows(lines, groups)) return null;
 
   const out = [lines[0]];
   for (let i = 1; i < lines.length; i++) {
@@ -173,13 +184,33 @@ export function joinTuiWrappedLines(
     );
     const line = lines[i];
     const indent = line.slice(0, join?.contentOffset ?? 0);
-    if (join && /^[ \t]*$/.test(indent) && line.length > join.contentOffset) {
+    if (
+      join &&
+      join.contentOffset > 0 &&
+      /^[ \t]*$/.test(indent) &&
+      line.length > join.contentOffset
+    ) {
       out[out.length - 1] += join.separator + line.slice(join.contentOffset);
     } else {
       out.push(line);
     }
   }
   return out;
+}
+
+/**
+ * 선택 문자열이 일반(행 단위) 선택으로 버퍼 행에서 나왔는지 확인한다. xterm 은
+ * 행마다 끝 공백을 지우고 `isWrapped` 행을 개행 없이 붙이므로 같은 규칙으로
+ * 논리 줄 텍스트를 만든다. 열 선택은 둘째 줄부터 선택 시작 열에서 잘리므로
+ * 여기서 걸러진다.
+ */
+function selectionMatchesRows(lines: string[], groups: WrapRow[][]): boolean {
+  const last = lines.length - 1;
+  return lines.every((line, i) => {
+    const text = groups[i].map((row) => row.text.trimEnd()).join("");
+    if (i === 0) return text.endsWith(line);
+    return i === last ? text.startsWith(line) : text === line;
+  });
 }
 
 /** `joinTuiWrappedSelection` 이 쓰는 xterm `Terminal` 의 최소 표면. */

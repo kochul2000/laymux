@@ -159,6 +159,21 @@ describe("detectTuiWrap — 경계 조건", () => {
     expect(detectTuiWrap(a, b, 20)).toBeNull();
   });
 
+  it("U+3000·NBSP 로 시작하는 행에서도 예외 없이 판정한다", () => {
+    const [a, b] = lines(["第一章第一章第一章第一", "　本文が始まる。"], 20);
+    expect(() => detectTuiWrap(a, b, 20)).not.toThrow();
+    const [c, d] = lines(["aaaaaaaaaaaaaaaaaaaa", " bbbb"], 20);
+    expect(() => detectTuiWrap(c, d, 20)).not.toThrow();
+  });
+
+  it("anywhere: 줄바꿈 폭이 cols-1 이면 cols-2 에서 끝난 와이드 경계도 음절 중간이다", () => {
+    // Codex 입력창(폭 cols-1=19): 앞 행이 18셀에서 끝났고 다음 '자'(2셀)는 19칸에
+    // 들어가지 못해 넘어갔다. 마지막 어절(14셀)+'자차'(4셀)는 한 행에 들어가므로
+    // 긴 토큰 판정(midToken)이 아니라 음절 판정만으로 잇는 경우다.
+    const [a, b] = lines(["  a 가나다라마바사", "  자차"], 20);
+    expect(detectTuiWrap(a, b, 20, "anywhere")).toEqual({ separator: "", contentOffset: 2 });
+  });
+
   it("빈 행 앞뒤는 잇지 않는다", () => {
     const [a, b] = lines(["  aaaaaaaaaaaaaaaaaa", ""], 20);
     expect(detectTuiWrap(a, b, 20)).toBeNull();
@@ -172,11 +187,66 @@ describe("joinTuiWrappedLines — 매핑 검증", () => {
     expect(joinTuiWrappedLines(["only one"], rows, CAPTURE_COLS)).toBeNull();
   });
 
-  it("연속 줄의 내어쓰기 자리에 공백이 아닌 글자가 있으면 그 줄은 잇지 않는다", () => {
+  it("선택 문자열이 버퍼 행과 다르면 null", () => {
     const rows = makePaddedLines(CLAUDE.englishParagraph, CAPTURE_COLS);
     const lines = selectionLines(CLAUDE.englishParagraph).map((l, i) =>
       i === 1 ? "xx" + l.slice(2) : l,
     );
-    expect(joinTuiWrappedLines(lines, rows, CAPTURE_COLS)?.length).toBe(2);
+    expect(joinTuiWrappedLines(lines, rows, CAPTURE_COLS)).toBeNull();
+  });
+
+  it("열 선택(둘째 줄부터 시작 열에서 잘림)은 줄 수가 같아도 null", () => {
+    // xterm COLUMN 모드는 행마다 [startCol, endCol) 만 담는다 — 줄 수는 행 수와 같다.
+    const rows = makePaddedLines(CLAUDE.koreanParagraph, CAPTURE_COLS);
+    const lines = selectionLines(CLAUDE.koreanParagraph).map((l) => l.slice(4, 30).trimEnd());
+    expect(joinTuiWrappedLines(lines, rows, CAPTURE_COLS)).toBeNull();
+  });
+
+  it("일반 선택은 첫 줄이 행 중간에서, 마지막 줄이 행 중간에서 끝나도 잇는다", () => {
+    const rows = makePaddedLines(CLAUDE.englishParagraph, CAPTURE_COLS);
+    const lines = selectionLines(CLAUDE.englishParagraph);
+    lines[0] = lines[0].slice(7);
+    lines[2] = lines[2].slice(0, 10);
+    expect(joinTuiWrappedLines(lines, rows, CAPTURE_COLS)).toEqual([
+      "paragraph is intentionally long English prose so that the terminal user interface " +
+        "has to wrap it across several visual rows, which lets us observe whether the wrapped " +
+        "rows are",
+    ]);
+  });
+});
+
+describe("joinTuiWrappedLines — 셸 출력", () => {
+  const COLS = 40;
+  const join = (texts: string[], style: WrapStyle = "word") =>
+    joinTuiWrappedLines(
+      texts.map((t) => t.trimEnd()),
+      makePaddedLines(texts, COLS),
+      COLS,
+      style,
+    );
+
+  it("화면 폭까지 채운 0열 행(pytest 진행 줄)은 잇지 않는다", () => {
+    const texts = [
+      "tests/test_a.py ....             [ 50%]",
+      "tests/test_b.py ....             [100%]",
+    ];
+    expect(join(texts)).toEqual(texts);
+  });
+
+  it("폭에서 잘린 0열 행(ps aux)은 잇지 않는다", () => {
+    const texts = [
+      "root  1  0.0  0.1 /sbin/init splash quie",
+      "root  2  0.0  0.0 [kthreadd] something l",
+    ];
+    expect(join(texts)).toEqual(texts);
+  });
+
+  it("폭을 채운 0열 경로 목록은 공백 없이 붙이지 않는다", () => {
+    const texts = [
+      "/home/user/projects/laymux/ui/src/a.txt",
+      "/home/user/projects/laymux/ui/src/b.txt",
+    ];
+    expect(join(texts)).toEqual(texts);
+    expect(join(texts, "anywhere")).toEqual(texts);
   });
 });
