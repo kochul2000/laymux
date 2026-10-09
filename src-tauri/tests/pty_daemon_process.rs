@@ -122,6 +122,27 @@ fn terminal_work_outlives_a_crashed_client_in_a_single_daemon_instance() {
         (!is_alive(second.0)).then_some(())
     });
     assert!(is_alive(daemon.0));
+    // The daemon runs in its own directory, not the launcher's: it would
+    // otherwise keep the GUI's start directory from being removed.
+    {
+        use sysinfo::{ProcessRefreshKind, UpdateKind};
+        let pid = Pid::from_u32(daemon.0);
+        let mut system = System::new();
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[pid]),
+            true,
+            ProcessRefreshKind::nothing().with_cwd(UpdateKind::Always),
+        );
+        let cwd = system
+            .process(pid)
+            .and_then(|process| process.cwd())
+            .map(|cwd| cwd.to_path_buf())
+            .expect("daemon working directory");
+        assert_eq!(
+            std::fs::canonicalize(&cwd).unwrap(),
+            std::fs::canonicalize(paths.dir()).unwrap()
+        );
+    }
     assert!(list_sessions(&endpoint).unwrap().is_empty());
 
     let output = headless_command(std::env::current_exe().unwrap())

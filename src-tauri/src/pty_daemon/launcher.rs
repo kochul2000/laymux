@@ -305,9 +305,11 @@ pub fn spawn_daemon(exe: &Path, paths: &DaemonPaths) -> Result<u32, String> {
         // Own process group: job-control signals aimed at the GUI's group
         // never reach the daemon. std opens descriptors close-on-exec, so the
         // daemon inherits nothing but these null stdio handles.
+        // Its own directory, not the GUI's (see the Windows launch).
         let child = crate::process::headless_command(exe)
             .arg(PTY_DAEMON_CLI_FLAG)
             .arg(paths.dir())
+            .current_dir(paths.dir())
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -367,15 +369,18 @@ mod windows_spawn {
         command_line.extend(quote(dir.as_os_str()));
         command_line.push(0);
         let application: Vec<u16> = exe.as_os_str().encode_wide().chain(Some(0)).collect();
+        // Its own directory, not the GUI's: a long-lived daemon would keep
+        // whatever directory the GUI was started in from being removed.
+        let current_directory: Vec<u16> = dir.as_os_str().encode_wide().chain(Some(0)).collect();
 
         // SAFETY: zeroed STARTUPINFOW/PROCESS_INFORMATION are valid initial
         // values; `cb` is set before use.
         let mut startup: STARTUPINFOW = unsafe { std::mem::zeroed() };
         startup.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
         let mut info: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
-        // SAFETY: both strings are NUL-terminated and outlive the call; the
-        // command line buffer is mutable as CreateProcessW requires; null
-        // attributes/environment/directory select the documented defaults.
+        // SAFETY: all three strings are NUL-terminated and outlive the call;
+        // the command line buffer is mutable as CreateProcessW requires; null
+        // attributes/environment select the documented defaults.
         let created = unsafe {
             CreateProcessW(
                 application.as_ptr(),
@@ -385,7 +390,7 @@ mod windows_spawn {
                 0,
                 flags,
                 std::ptr::null(),
-                std::ptr::null(),
+                current_directory.as_ptr(),
                 &startup,
                 &mut info,
             )
