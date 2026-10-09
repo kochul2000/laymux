@@ -123,11 +123,29 @@ pub fn terminate_session(endpoint: &DaemonEndpoint, session_id: &str) -> io::Res
     }
 }
 
+/// The daemon's answer to a by-id terminate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TerminateReply {
+    pub found: bool,
+    /// A newer client attached after `attach_epoch`; the session runs on.
+    pub superseded: bool,
+}
+
 pub(crate) fn terminate_by_id(
     endpoint: &DaemonEndpoint,
     session_id: &str,
     attach_epoch: Option<u64>,
 ) -> io::Result<()> {
+    // An unknown session has already ended and a superseded one belongs
+    // to its newer owner: either way nothing of the requester's is left.
+    request_terminate(endpoint, session_id, attach_epoch).map(|_| ())
+}
+
+pub(crate) fn request_terminate(
+    endpoint: &DaemonEndpoint,
+    session_id: &str,
+    attach_epoch: Option<u64>,
+) -> io::Result<TerminateReply> {
     let timeout = Duration::from_millis(PTY_DAEMON_TERMINATE_REQUEST_TIMEOUT_MS);
     let (mut writer, mut reader) = connect_authenticated_within(endpoint, timeout)?;
     reader.get_ref().set_read_timeout(Some(timeout))?;
@@ -139,9 +157,9 @@ pub(crate) fn terminate_by_id(
         },
     )?;
     match read_frame::<_, DaemonMessage>(&mut reader)? {
-        // An unknown session has already ended and a superseded one belongs
-        // to its newer owner: either way nothing of the requester's is left.
-        Some(Frame::Control(DaemonMessage::Terminating { .. })) => Ok(()),
+        Some(Frame::Control(DaemonMessage::Terminating { found, superseded })) => {
+            Ok(TerminateReply { found, superseded })
+        }
         other => Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("unexpected PTY daemon terminate reply: {other:?}"),

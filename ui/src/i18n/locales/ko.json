@@ -202,7 +202,8 @@
       "deleteProfile": "프로필 삭제",
       "widgets": "위젯",
       "groupGeneral": "일반",
-      "update": "업데이트"
+      "update": "업데이트",
+      "ptySessions": "PTY 세션"
     },
     "save": {
       "save": "저장",
@@ -933,6 +934,42 @@
       "installConfirm": "Laymux {{version}} 을 설치하고 지금 재시작할까요?",
       "disabledInDev": "개발 빌드에서는 자동 업데이트가 꺼져 있습니다.",
       "manualCheck": "새로고침"
+    },
+    "ptySessions": {
+      "title": "PTY 세션",
+      "description": "셸과 에이전트는 GUI가 crash해도 살아남도록 PTY 데몬에서 실행됩니다. 어느 pane도 잡지 않고 저장된 레이아웃도 복원하지 않을 세션(레이아웃이 저장되기 전에 앱이 crash해 남은 것)은 여기서 끝낼 때까지 계속 실행됩니다. 아직 열지 않은 워크스페이스의 세션은 그 pane을 위해 남겨 둡니다.",
+      "loading": "불러오는 중…",
+      "notRunning": "PTY 데몬이 실행 중이 아닙니다.",
+      "unavailable": "PTY 세션 목록을 가져오지 못했습니다: {{error}}",
+      "summary_one": "세션 {{count}}개, 그중 분리된 세션 {{detached}}개",
+      "summary_other": "세션 {{count}}개, 그중 분리된 세션 {{detached}}개",
+      "endDetached": "분리된 세션 모두 끝내기",
+      "endDetachedConfirm": "한 번 더 누르면 분리된 세션 {{count}}개를 끝냅니다",
+      "end": "끝내기",
+      "endOne": "{{terminal}} 세션 끝내기",
+      "endOneConfirm": "한 번 더 누르면 {{terminal}} 세션을 끝냅니다",
+      "confirm": "확인",
+      "endedCount_one": "분리된 세션 {{count}}개를 끝냈습니다.",
+      "endedCount_other": "분리된 세션 {{count}}개를 끝냈습니다.",
+      "failedSome": "일부는 끝내지 못했습니다: {{failures}}",
+      "terminal": "터미널",
+      "profile": "프로필",
+      "pid": "PID",
+      "state": "상태",
+      "actions": "동작",
+      "states": {
+        "pane": "pane 사용 중",
+        "awaitingPane": "pane 대기 중",
+        "detached": "분리됨",
+        "otherClient": "다른 client",
+        "ending": "종료 중"
+      },
+      "outcome": {
+        "terminated": "세션을 끝내는 중입니다.",
+        "superseded": "그 사이 pane이 세션에 다시 붙어서 그대로 두었습니다.",
+        "notDetached": "세션이 더 이상 분리 상태가 아니어서 그대로 두었습니다.",
+        "gone": "세션이 이미 끝나 있었습니다."
+      }
     }
   },
   "workspace": {

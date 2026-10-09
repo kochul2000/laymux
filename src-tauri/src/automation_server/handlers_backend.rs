@@ -38,6 +38,21 @@ pub async fn api_docs() -> impl IntoResponse {
                 "body": {"provider":"claude | codex", "operation":"status | install | remove | update", "distro":"string or null for native", "configDir":"absolute directory or null for environment default"}
             },
             {
+                "method": "GET", "path": "/api/v1/pty-sessions",
+                "description": "PTY daemon session inventory: daemonRunning and sessions[{sessionId, terminalId, profile, createdSeq, childPid, attachEpoch, state: pane | awaitingPane | detached | otherClient | ending}]. awaitingPane: no client yet, but the saved layout (an unopened workspace, a dock) will adopt it when its pane mounts; a terminal this GUI already created once is not awaited. A daemon that does not answer, or an unreadable saved layout, is an error, never an empty list."
+            },
+            {
+                "method": "POST", "path": "/api/v1/pty-sessions/terminate",
+                "description": "End one session listed as detached. It is classified again first: anything but detached is notDetached. attachEpoch must be the one listed: a session attached again since is left running (superseded).",
+                "body": {"sessionId":"string", "attachEpoch":"number from GET /api/v1/pty-sessions"},
+                "response": "terminated | superseded | notDetached | gone"
+            },
+            {
+                "method": "POST", "path": "/api/v1/pty-sessions/terminate-detached",
+                "description": "End the sessions the caller listed as detached, each with the epoch it listed. Each is classified again first; one that is no longer detached or was attached again since is left running. Returns {ended, failed[]}.",
+                "body": {"sessions":"[{sessionId, attachEpoch}] from GET /api/v1/pty-sessions (state detached)"}
+            },
+            {
                 "method": "GET", "path": "/api/v1/agent-hooks/updates",
                 "description": "Read-only audit of native and running WSL hook targets, including recently observed custom folders. Returns targets with updateRequired and per-target errors; never starts stopped WSL distributions or installs hooks."
             },

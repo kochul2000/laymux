@@ -390,6 +390,45 @@
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
+.pty-sessions-panel {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+.pty-sessions-panel__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.pty-sessions-panel p {
+  margin: 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.pty-sessions-muted {
+  font-size: var(--settings-desc-size);
+  color: var(--text-secondary);
+}
+.pty-sessions-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--settings-desc-size);
+}
+.pty-sessions-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.pty-sessions-table th,
+.pty-sessions-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.pty-sessions-table__terminal {
+  font-family: monospace;
+  overflow-wrap: anywhere;
+}
 .agent-hooks-muted,
 .agent-hooks-details {
   font-size: var(--settings-desc-size);

@@ -6,6 +6,7 @@ mod instance_identity;
 mod local_state;
 pub mod mcp;
 pub mod mcp_resources;
+mod pty_sessions;
 pub mod settings_bridge;
 mod surface_router;
 mod terminal_output_diagnostics;
@@ -160,6 +161,15 @@ pub fn build_router(
             get(agent_hooks::hook_environments),
         )
         .route("/api/v1/agent-hooks/manage", post(agent_hooks::hook_manage))
+        .route("/api/v1/pty-sessions", get(pty_sessions::list))
+        .route(
+            "/api/v1/pty-sessions/terminate",
+            post(pty_sessions::terminate),
+        )
+        .route(
+            "/api/v1/pty-sessions/terminate-detached",
+            post(pty_sessions::terminate_detached),
+        )
         .route(
             "/api/v1/agent-hooks/updates",
             get(agent_hooks::hook_updates),
