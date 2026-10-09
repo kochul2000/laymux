@@ -1,8 +1,9 @@
 //! Where a PTY daemon instance publishes itself and how clients trust it.
 //!
-//! The daemon directory is per build kind (`laymux` / `laymux-dev`) under the
+//! The daemon root is per build kind (`laymux` / `laymux-dev`) under the
 //! user's local state root, so a release GUI never adopts a dev daemon or vice
-//! versa. A PID or socket file alone is never trusted: a client must present
+//! versa. Inside it each executable build has its own generation directory
+//! and daemon (ADR-0308). A PID or socket file alone is never trusted: a client must present
 //! the per-instance random token from `daemon.json` and receive a matching
 //! protocol version in the handshake. The trust is mutual: the daemon must
 //! answer the client's fresh nonce with a proof only the token holder can
@@ -17,15 +18,19 @@ use std::path::{Path, PathBuf};
 
 use crate::constants::{
     ENV_LAYMUX_PTY_DAEMON_DIR, PTY_DAEMON_DIR_NAME, PTY_DAEMON_DISCOVERY_FILE,
-    PTY_DAEMON_LOCK_FILE, PTY_DAEMON_LOG_FILE,
+    PTY_DAEMON_GENERATION_PREFIX, PTY_DAEMON_LOCK_FILE, PTY_DAEMON_LOG_FILE,
 };
 
+/// The per-build-kind directory that holds one subdirectory per daemon
+/// generation (ADR-0308). Every executable build is its own generation, so an
+/// update or a rebuild starts a new daemon for new terminals while the
+/// previous generation keeps the sessions it already runs until they end.
 #[derive(Debug, Clone)]
-pub struct DaemonPaths {
+pub struct DaemonRoot {
     dir: PathBuf,
 }
 
-impl DaemonPaths {
+impl DaemonRoot {
     pub fn for_current_build() -> Result<Self, String> {
         if let Some(dir) = std::env::var_os(ENV_LAYMUX_PTY_DAEMON_DIR).filter(|dir| !dir.is_empty())
         {
@@ -44,6 +49,113 @@ impl DaemonPaths {
 
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+
+    fn generation(&self, key: &str) -> DaemonPaths {
+        DaemonPaths::in_dir(self.dir.join(key))
+    }
+
+    /// The generation named by a caller, only if `key` is a well-formed
+    /// generation key: it is joined to the root, so nothing else may pass.
+    pub fn named_generation(&self, key: &str) -> Option<DaemonPaths> {
+        is_generation_key(key).then(|| self.generation(key))
+    }
+
+    /// The generation of the running executable.
+    ///
+    /// Identified once per process: the executable may be replaced (a
+    /// package upgrade) while this build keeps running.
+    pub fn current(&self) -> Result<DaemonPaths, String> {
+        static CURRENT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+        if let Some(key) = CURRENT.get() {
+            return Ok(self.generation(key));
+        }
+        let exe = std::env::current_exe()
+            .map_err(|error| format!("cannot locate the laymux executable: {error}"))?;
+        let key = generation_key(&exe)
+            .map_err(|error| format!("cannot identify the laymux build: {error}"))?;
+        Ok(self.generation(CURRENT.get_or_init(|| key)))
+    }
+
+    /// Every generation directory present, live or not.
+    pub fn generations(&self) -> Vec<DaemonPaths> {
+        let Ok(entries) = std::fs::read_dir(&self.dir) else {
+            return Vec::new();
+        };
+        let mut generations: Vec<_> = entries
+            .flatten()
+            .filter(|entry| entry.path().is_dir())
+            .filter_map(|entry| entry.file_name().to_str().map(str::to_owned))
+            .filter(|name| is_generation_key(name))
+            .map(|name| self.generation(&name))
+            .collect();
+        generations.sort_by(|left, right| left.dir.cmp(&right.dir));
+        generations
+    }
+}
+
+/// `g<protocol>-<build>`: the wire protocol and a digest of the executable's
+/// size and modification time, the same identity staging uses (ADR-0301). A
+/// digest keeps the directory, and the socket inside it, short.
+pub fn generation_key(exe: &Path) -> io::Result<String> {
+    let meta = std::fs::metadata(exe)?;
+    let modified = meta
+        .modified()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(io::Error::other)?
+        .as_nanos();
+    let digest = <Sha256 as sha2::Digest>::digest(format!("{}:{modified}", meta.len()));
+    let build: String = digest[..GENERATION_DIGEST_BYTES]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Ok(format!(
+        "{PTY_DAEMON_GENERATION_PREFIX}{}-{build}",
+        super::wire::PROTOCOL_VERSION
+    ))
+}
+
+const GENERATION_DIGEST_BYTES: usize = 6;
+
+fn is_generation_key(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix(PTY_DAEMON_GENERATION_PREFIX) else {
+        return false;
+    };
+    let Some((protocol, build)) = rest.split_once('-') else {
+        return false;
+    };
+    !protocol.is_empty()
+        && protocol.bytes().all(|byte| byte.is_ascii_digit())
+        && build.len() == GENERATION_DIGEST_BYTES * 2
+        && build.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+/// One daemon generation's directory.
+#[derive(Debug, Clone)]
+pub struct DaemonPaths {
+    dir: PathBuf,
+}
+
+impl DaemonPaths {
+    /// The current build's generation.
+    pub fn for_current_build() -> Result<Self, String> {
+        DaemonRoot::for_current_build()?.current()
+    }
+
+    pub fn in_dir(dir: impl Into<PathBuf>) -> Self {
+        Self { dir: dir.into() }
+    }
+
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    /// The generation key: the directory's name.
+    pub fn generation(&self) -> String {
+        self.dir
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default()
     }
 
     pub fn discovery_file(&self) -> PathBuf {
@@ -203,6 +315,41 @@ mod tests {
         let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(paths.dir()), 0o700);
         assert_eq!(mode(&paths.discovery_file()), 0o600);
+    }
+
+    #[test]
+    fn each_build_is_its_own_generation_of_this_protocol() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("laymux.exe");
+        std::fs::write(&exe, b"first build").unwrap();
+        let first = generation_key(&exe).unwrap();
+        assert!(is_generation_key(&first), "{first}");
+        assert!(first.starts_with(&format!("g{}-", super::super::wire::PROTOCOL_VERSION)));
+        assert_eq!(generation_key(&exe).unwrap(), first);
+
+        std::fs::write(&exe, b"second build, longer").unwrap();
+        assert_ne!(generation_key(&exe).unwrap(), first);
+    }
+
+    #[test]
+    fn only_generation_directories_are_generations_and_names_cannot_escape() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = DaemonRoot::in_dir(dir.path());
+        for name in ["g3-0123456789ab", "g4-ba9876543210", "runtime", "g3-xyz"] {
+            std::fs::create_dir_all(dir.path().join(name)).unwrap();
+        }
+        std::fs::write(dir.path().join("g3-aaaaaaaaaaaa"), b"a file").unwrap();
+        let names: Vec<_> = root
+            .generations()
+            .iter()
+            .map(DaemonPaths::generation)
+            .collect();
+        assert_eq!(names, ["g3-0123456789ab", "g4-ba9876543210"]);
+
+        assert!(root.named_generation("g3-0123456789ab").is_some());
+        for bad in ["..", "g3-../../x", "g3-0123456789ab/..", "runtime", ""] {
+            assert!(root.named_generation(bad).is_none(), "{bad}");
+        }
     }
 
     #[test]

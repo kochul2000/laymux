@@ -7,10 +7,12 @@ import { invoke } from "@tauri-apps/api/core";
 export type PtySessionState = "pane" | "awaitingPane" | "detached" | "otherClient" | "ending";
 
 export interface PtySessionEntry {
+  /** The daemon generation (one per build, ADR-0308) that runs it. */
+  daemon: string;
   sessionId: string;
   terminalId: string;
   profile: string | null;
-  /** Daemon-wide creation order; larger is newer. */
+  /** Creation order within its daemon; larger is newer. */
   createdSeq: number;
   childPid: number | null;
   /** Must be passed back when ending the session, so one re-adopted since is kept. */
@@ -18,9 +20,19 @@ export interface PtySessionEntry {
   state: PtySessionState;
 }
 
+/** A live daemon generation whose sessions could not be listed. */
+export interface UnavailableDaemon {
+  daemon: string;
+  problem: "notAnswering" | "incompatible";
+  protocolVersion: number | null;
+}
+
 export interface PtySessionInventory {
   daemonRunning: boolean;
+  /** This build's generation; sessions of any other run on another build. */
+  currentDaemon: string | null;
   sessions: PtySessionEntry[];
+  unavailableDaemons: UnavailableDaemon[];
 }
 
 export type TerminateOutcome = "terminated" | "superseded" | "notDetached" | "gone";
@@ -30,19 +42,21 @@ export interface TerminateDetachedResult {
   failed: string[];
 }
 
+type ListedSession = Pick<PtySessionEntry, "daemon" | "sessionId" | "attachEpoch">;
+
+const listed = ({ daemon, sessionId, attachEpoch }: ListedSession) => ({
+  daemon,
+  sessionId,
+  attachEpoch,
+});
+
 export const listPtySessions = () => invoke<PtySessionInventory>("list_pty_sessions");
 
-export const terminatePtySession = (entry: Pick<PtySessionEntry, "sessionId" | "attachEpoch">) =>
-  invoke<TerminateOutcome>("terminate_pty_session", {
-    request: { sessionId: entry.sessionId, attachEpoch: entry.attachEpoch },
-  });
+export const terminatePtySession = (entry: ListedSession) =>
+  invoke<TerminateOutcome>("terminate_pty_session", { request: listed(entry) });
 
 /** End the detached sessions the caller saw, each with the epoch it saw. */
-export const terminateDetachedPtySessions = (
-  entries: readonly Pick<PtySessionEntry, "sessionId" | "attachEpoch">[],
-) =>
+export const terminateDetachedPtySessions = (entries: readonly ListedSession[]) =>
   invoke<TerminateDetachedResult>("terminate_detached_pty_sessions", {
-    request: {
-      sessions: entries.map(({ sessionId, attachEpoch }) => ({ sessionId, attachEpoch })),
-    },
+    request: { sessions: entries.map(listed) },
   });

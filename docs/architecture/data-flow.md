@@ -979,15 +979,15 @@ GUI proxy(`pty_daemon/client.rs`)는 `PtySystem`·`MasterPty`·`Child`·`Interru
 | 사건 | 데몬 세션 |
 | --- | --- |
 | 연결 종료(GUI crash·강제 종료 포함) | detach. 계속 실행하며 최근 1 MiB 출력을 backlog로 유지한다(초과분은 `droppedBytes`로 센다) |
-| `PtyHandle` teardown(터미널 삭제·재시작·업데이트 guard) | master drop·kill → 새 연결로 `terminateSession`을 보내고 `terminating` 응답까지 기다린다(실패는 `kill` 오류로 전파된다). 데몬이 graceful close와 process tree kill을 수행한다. spawn 완료 전에 온 요청은 handle이 생기는 즉시 적용한다 |
-| 앱 정상 종료 | `RunEvent::Exit` → `AppState::terminate_daemon_sessions_on_exit()`가 모든 데몬 터미널의 종료를 병렬로 요청하고, 전체를 2초 deadline으로 묶는다(best-effort) |
+| `PtyHandle` teardown(터미널 삭제·재시작) | master drop·kill → 새 연결로 `terminateSession`을 보내고 `terminating` 응답까지 기다린다(실패는 `kill` 오류로 전파된다). 데몬이 graceful close와 process tree kill을 수행한다. spawn 완료 전에 온 요청은 handle이 생기는 즉시 적용한다 |
+| 앱 정상 종료 | `RunEvent::Exit` → `AppState::terminate_daemon_sessions_on_exit()`가 모든 데몬 터미널의 종료를 병렬로 요청하고, 전체를 2초 deadline으로 묶는다(best-effort). 업데이트로 재시작하는 종료는 예외다(아래) |
 | 자식 스스로 종료 | 데몬이 입력·master를 닫아 남은 출력과 EOF를 받는다(ConPTY는 master를 닫아야 EOF). EOF·exit를 모두 관측하면 세션을 제거하고, attach된 client에는 `Eof`·`Exit`를 보낸다 |
 | `Attach` | 기존 client를 닫고 대체한다. `replay`가 켜져 있으면 새 client는 `Attached` → backlog → live 순서로 받는다. 꺼져 있으면 backlog를 `droppedBytes`로 버리고 `Attached` → 화면 redraw와 모드 단언(ADR-0303·0307) → live 순서로 받는다. 선택 필드 `size`가 있으면 그 전에 PTY를 그 크기로 바꾼다 |
-| 업데이트 설치 | guard가 GUI PTY를 종료한 뒤 `shutdown`을 보낸다. 데몬은 새 세션을 거절하고, spawn 중인 세션까지 모두 종료한 뒤 끝난다. instance lock이 풀릴 때까지 최대 5초 기다린다. 응답하지 않는 데몬은 discovery PID와 command line(`--pty-daemon <dir>`)을 확인한 뒤에만 강제 종료한다 |
+| 업데이트 설치 | 데몬 세션은 끝내지 않고 업데이트된 GUI에 넘긴다(ADR-0308). 설치 guard와 Linux 재시작 경로가 `AppState::begin_update_handoff()`를 표시하면, in-process PTY·probe만 끝내고 데몬 터미널의 handle은 terminate 없이 놓는다(master drop이 종료 요청을 보내지 않도록 leak). 앱 종료 경로도 데몬 세션 종료를 건너뛴다. 설치가 실패하면 표시를 지운다. 프로세스가 끝나면 연결이 닫혀 세션은 detach되고, 재시작한 GUI가 재결합한다. Windows 설치기는 `laymux.exe`를 이미지 이름으로 찾아 끝내므로 데몬은 다른 이름의 사본으로 실행한다(아래 기동) |
 
 GUI는 데몬 자식의 PID를 직접 kill하지 않는다(`ChildKillOwner::Backend`). handle을 가진 데몬이 tree kill을 수행한다. 데몬 연결이 끊기면 GUI reader는 `Failure`로 끝나고 child는 종료로 처리된다. 데몬 안의 작업은 계속 실행되지만, 그 터미널을 teardown하거나 앱을 종료하면 `terminateSession`으로 정리된다.
 
-**IPC:** 데몬 디렉터리는 `%LOCALAPPDATA%\laymux[-dev]\pty-daemon` 또는 `$XDG_STATE_HOME/laymux[-dev]/pty-daemon`이다. `LAYMUX_PTY_DAEMON_DIR`로 바꿀 수 있다. 디렉터리에는 다음 파일이 있다.
+**IPC:** 데몬 root는 `%LOCALAPPDATA%\laymux[-dev]\pty-daemon` 또는 `$XDG_STATE_HOME/laymux[-dev]/pty-daemon`이다. `LAYMUX_PTY_DAEMON_DIR`로 바꿀 수 있다. 실행 파일 build마다 세대 디렉터리 `<root>/g<protocol>-<build>`(build = 실행 파일 크기·수정 시각의 digest 12자리)가 있고 세대마다 데몬이 하나다(ADR-0308). 새 세션은 현재 build의 세대에만 만들고, 이전 세대 데몬은 남은 세션이 끝나면 idle 종료한다. 세대 디렉터리에는 다음 파일이 있다.
 
 - `daemon.json`: `pid`·`endpoint`·`token`·`protocolVersion` discovery
 - `daemon.lock`: kernel file lock으로 단일 인스턴스를 보장한다. GUI도 이 lock이 잡혀 있는지로 데몬 생존을 판정한다
@@ -999,9 +999,9 @@ endpoint는 두 플랫폼 모두 이 socket이며, 다른 로컬 계정은 OS가
 - client → daemon: `spawn`(terminal id·metadata 포함)·`attach`(`replay`)·`list`·`resize`·`terminate`·`terminateSession`(아무 연결에서나 id로 종료한다. GUI의 모든 종료 요청이 이 경로를 쓴다)·`shutdown`
 - daemon → client: `helloOk`·`spawned`·`attached`(metadata 포함)·`sessions`(terminal id·attached·exited·terminating)·`terminating`·`eof`·`exit`·`error`
 
-**기동:** GUI는 Linux에서 `headless_command`와 독립 process group으로 데몬을 띄운다. Windows에서는 먼저 실행 파일과 ConPTY 파일을 `<데몬 디렉터리>/runtime/<크기-수정시각>/`에 복사하고, 그 사본을 handle 상속을 끈 `CreateProcessW`(`CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`, 가능하면 job breakaway)로 띄운다. 그래서 업데이트와 dev 재빌드가 원본을 교체할 수 있다. ConPTY 파일이 없으면 staging을 실패시킨다. 데몬 실행 파일을 지울 수 있는(실행 중이 아닌) 다른 사본은 그때 삭제한다. 데몬은 세션과 연결이 모두 없는 상태가 60초 지속되면 종료한다. 데몬을 띄우거나 연결할 수 없으면 그 터미널은 경고를 남기고 in-process PTY로 만든다. instance lock을 쥔 데몬이 handshake에 답하지 않으면 새 데몬을 띄우지 않고 기동 timeout까지만 기다린다. 기동이 실패하면 30초 동안은 데몬을 시도하지 않고 바로 in-process로 만든다(`PTY_DAEMON_UNAVAILABLE_RETRY_MS`). 반쯤 지워진 현재 build의 runtime 사본은 한 번 지우고 다시 publish한다.
+**기동:** GUI는 Linux에서 `headless_command`와 독립 process group으로 데몬을 띄운다. Windows에서는 먼저 실행 파일과 ConPTY 파일을 `<데몬 디렉터리>/runtime/<크기-수정시각>/`에 복사하고, 그 사본을 handle 상속을 끈 `CreateProcessW`(`CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`, 가능하면 job breakaway)로 띄운다. 그래서 업데이트와 dev 재빌드가 원본을 교체할 수 있다. 사본의 실행 파일 이름은 `laymux-pty-daemon.exe`(dev build는 `laymux-dev-pty-daemon.exe`)다. Tauri NSIS 설치기는 실행 중인 `laymux.exe`를 경로가 아니라 이미지 이름으로 찾아 끝내기 때문이다. 설치 제거(`/UPDATE`가 아닌 제거기)는 installer hook(`src-tauri/windows/installer-hooks.nsh`)이 release 데몬을 끝낸다(ADR-0308). ConPTY 파일이 없으면 staging을 실패시킨다. 데몬 실행 파일을 지울 수 있는(실행 중이 아닌) 다른 사본은 그때 삭제한다. 데몬은 세션과 연결이 모두 없는 상태가 60초 지속되면 종료한다. GUI는 처음 데몬을 쓸 때 한 번, lock이 풀려 있고 60초보다 오래된 이전 세대 디렉터리와 세대 이전 구조(root 바로 아래의 `daemon.lock`·`daemon.json`·`runtime/` 등)를 지운다. 데몬을 띄우거나 연결할 수 없으면 그 터미널은 경고를 남기고 in-process PTY로 만든다. instance lock을 쥔 데몬이 handshake에 답하지 않으면 새 데몬을 띄우지 않고 기동 timeout까지만 기다린다. 기동이 실패하면 30초 동안은 데몬을 시도하지 않고 바로 in-process로 만든다(`PTY_DAEMON_UNAVAILABLE_RETRY_MS`). 반쯤 지워진 현재 build의 runtime 사본은 한 번 지우고 다시 publish한다.
 
-**재결합:** GUI 프로세스 안에서 그 terminal id를 처음 만들 때만 시도한다(`AppState.pty_daemon_adoption_seen`). 이후의 생성은 재시작·프로필 변경·remount이므로 항상 새 자식을 띄운다. `list`(5초 deadline)에서 같은 terminal id이고, attach되지 않았고, 종료되지도 종료 요청을 받지도 않은 후보를 찾는다. 생성 순서상 가장 최근 후보가 같은 프로필로 시작했으면 adopt하고, 나머지 후보는 종료한다. adopt attach(`takeOver: false`)는 데몬이 원자적으로 판정해 이미 attach됐거나 종료 중이면 거절하며, 이때 GUI는 새 세션을 만든다. 이때 다음과 같이 처리한다.
+**재결합:** GUI 프로세스 안에서 그 terminal id를 처음 만들 때만 시도한다(`AppState.pty_daemon_adoption_seen`). 이후의 생성은 재시작·프로필 변경·remount이므로 항상 새 자식을 띄운다. 현재 세대와 살아 있는 같은 protocol의 다른 세대 데몬 모두의 `list`(5초 deadline)에서 같은 terminal id이고, attach되지 않았고, 종료되지도 종료 요청을 받지도 않은 후보를 찾는다(현재 세대 목록을 읽지 못하면 adopt하지 않고, 다른 세대 목록 실패는 건너뛴다. 다른 세대 목록은 30초 동안 재사용한다). 현재 세대를 먼저, 다른 세대는 데몬이 늦게 시작한 순서로, 같은 세대 안에서는 생성 순서상 가장 최근 후보를 고르고, 그 후보가 같은 프로필로 시작했으면 adopt하고, 나머지 후보는 종료한다. adopt attach(`takeOver: false`)는 데몬이 원자적으로 판정해 이미 attach됐거나 종료 중이면 거절하며, 이때 GUI는 새 세션을 만든다. 이때 다음과 같이 처리한다.
 
 - GUI가 만든 명령·resume 복원 요청·Codex 시작 guard는 적용하지 않는다.
 - spawn 때 metadata로 맡긴 agent hook token을 다시 써서 살아남은 자식의 훅을 계속 인증하고, 맡긴 WSL relay 여부로 귀속 도메인을 복원한다.
@@ -1011,7 +1011,7 @@ endpoint는 두 플랫폼 모두 이 socket이며, 다른 로컬 계정은 OS가
 
 dev 빌드의 StrictMode는 TerminalView를 한 번 닫았다 다시 열어서, 재결합한 세션을 바로 종료한다. PTY 수명을 dev에서 확인할 때는 `VITE_LAYMUX_STRICT_MODE=0`으로 띄운다([dev-repro-methodology.md §4.7](../dev-repro-methodology.md)).
 
-**분리 세션 관리:** 설정 › 터미널 › PTY 세션 패널이 데몬 세션을 `pane`(이 GUI의 터미널)·`awaitingPane`(client는 없지만 저장된 레이아웃의 터미널이고 이 GUI가 아직 만들지 않아 adopt할 기회가 남은 것, 예: 아직 열지 않은 워크스페이스)·`detached`(client도, 복원할 pane도 없음)·`otherClient`·`ending`으로 보여 준다. 종료는 `detached`만 가능하며, backend가 직전에 다시 분류해 다른 상태면 `notDetached`로 답하고, 목록에서 본 attach epoch를 실어 사이에 다시 attach된 세션은 `superseded`로 남긴다. 목록 조회 실패·응답 없는 데몬·읽을 수 없는 저장 레이아웃은 빈 목록이 아니라 오류이며 자동 정리는 하지 않는다. 같은 동작을 `list_pty_sessions`·`terminate_pty_session`·`terminate_detached_pty_sessions` IPC와 `GET /api/v1/pty-sessions`·`POST /api/v1/pty-sessions/terminate {sessionId, attachEpoch}`·`POST /api/v1/pty-sessions/terminate-detached`로 제공한다([ADR-0306](../adr/0306-pty-daemon-session-inventory.md)).
+**분리 세션 관리:** 설정 › 터미널 › PTY 세션 패널이 데몬 세션을 `pane`(이 GUI의 터미널)·`awaitingPane`(client는 없지만 저장된 레이아웃의 터미널이고 이 GUI가 아직 만들지 않아 adopt할 기회가 남은 것, 예: 아직 열지 않은 워크스페이스)·`detached`(client도, 복원할 pane도 없음)·`otherClient`·`ending`으로 보여 준다. 종료는 `detached`만 가능하며, backend가 직전에 다시 분류해 다른 상태면 `notDetached`로 답하고, 목록에서 본 attach epoch를 실어 사이에 다시 attach된 세션은 `superseded`로 남긴다. 목록은 살아 있는 모든 세대의 세션을 합치고, 항목마다 소유 세대(`daemon`)를 싣는다. 현재 build의 세대는 `currentDaemon`이며, 다른 세대의 세션은 "다른 빌드"로 표시된다. 응답 없는 세대와 다른 protocol의 세대는 `unavailableDaemons`(`notAnswering`·`incompatible`+`protocolVersion`)로 따로 보고한다(ADR-0308). 읽을 수 없는 저장 레이아웃은 빈 목록이 아니라 오류이며 자동 정리는 하지 않는다. 같은 동작을 `list_pty_sessions`·`terminate_pty_session`·`terminate_detached_pty_sessions` IPC와 `GET /api/v1/pty-sessions`·`POST /api/v1/pty-sessions/terminate {daemon, sessionId, attachEpoch}`·`POST /api/v1/pty-sessions/terminate-detached {sessions: [{daemon, sessionId, attachEpoch}]}`로 제공한다. `daemon`은 세대 key 형식만 받는다([ADR-0306](../adr/0306-pty-daemon-session-inventory.md)).
 
 **아직 없는 것:** 업데이트 인계(업데이트 중 작업 유지), scrollback 복원, GUI 미접속 중 OSC·훅 처리, 분리 세션을 새 pane에 붙이는 adopt는 후속 단계다.
 

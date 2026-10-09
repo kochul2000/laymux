@@ -111,17 +111,18 @@ ADR-0301까지로 다음이 가능하다. PTY는 데몬이 소유하고 기본�
 - **Superset v2(Unix 전용)의 fd 인계:** 스냅샷과 PTY master fd를 상속시켜 새 데몬을 띄운다. 실패하면 이전 데몬을 유지한다. 강제 재시작은 사용자가 확인했을 때만 한다.
 - VS Code·tmux·zellij·WezTerm은 인계하지 않는다.
 
-**수정안 — 세대 공존(인계 없음)을 기본으로 한다**
+**결정(ADR-0308) — 세대 공존(인계 없음)**
 
-- Windows ConPTY는 handle을 다른 프로세스로 넘기는 공식 경로가 없다. 그래서 fd 인계 대신 Orca식 세대 공존을 택한다.
-- laymux는 ADR-0301에서 이미 runtime staging 사본으로 데몬을 띄운다. 따라서 업데이트 설치는 데몬과 무관하게 원본 실행 파일을 교체할 수 있다. **확인할 것:** Tauri NSIS `CheckIfAppIsRunning`이 Restart Manager에 `$INSTDIR` 경로만 등록하는지(staging 사본이 종료 대상에서 빠지는지)를 사용 중인 tauri-cli 템플릿으로 검증한다.
+- Windows ConPTY는 handle을 다른 프로세스로 넘기는 공식 경로가 없다. 그래서 fd 인계 대신 Orca식 세대 공존을 택했다.
+- **확인 결과:** tauri-cli 2.10.1 NSIS 템플릿의 `CheckIfAppIsRunning`은 `nsis_tauri_utils::FindProcessCurrentUser`/`KillProcessCurrentUser`로 `laymux.exe`를 **이미지 이름**으로 찾아 끝낸다(경로를 보지 않는다). staging 사본도 이름이 같아 설치기가 데몬을 끝내므로, 사본 이름을 `laymux-pty-daemon.exe`로 바꿨다.
+- 세대는 protocol version이 아니라 **실행 파일 build**(protocol + 크기·수정 시각 digest)마다 둔다. protocol만 쓰면 같은 protocol의 업데이트 뒤에도 이전 binary 데몬이 새 세션을 계속 받아 데몬 수정이 적용되지 않는다.
 - 변경 내용:
-  1. 업데이트 guard는 데몬과 세션을 끝내지 않는다.
-  2. discovery, endpoint, lock을 protocol version별로 둔다.
-  3. 새 GUI는 재결합할 때 각 세션을 그 세션을 소유한 세대의 데몬으로 보낸다. 이전 세대에서는 새 세션을 만들지 않는다.
-  4. 이전 세대 데몬은 세션이 0이 되는 순간 admission fence와 함께 종료한다.
-- Linux fd 인계는 필요해지면 별도로 검토한다(SCM_RIGHTS나 exec-in-place). 이번 범위는 아니다.
-- **ADR:** 새 ADR(업데이트 시 데몬 세대 공존). ADR-0301의 "업데이트 전 데몬 종료"를 대체한다.
+  1. 업데이트 guard와 Linux 재시작 경로는 `AppState`에 인계를 표시하고 데몬 세션을 끝내지 않는다(데몬 `Shutdown`도 보내지 않는다).
+  2. discovery, endpoint, lock, staging 사본을 `<root>/g<protocol>-<build>/`에 둔다.
+  3. 새 세션은 현재 세대에만 만들고, 재결합은 같은 protocol의 모든 살아 있는 세대에서 찾는다(현재 세대 우선).
+  4. 이전 세대는 새 세션을 받지 않으므로 남은 세션이 끝나면 기존 idle exit(admission lock 재확인)으로 끝난다. retire 메시지는 두지 않았다.
+  5. PTY 세션 패널은 모든 세대를 합쳐 보이고, 응답 없는·다른 protocol의 세대를 따로 보고한다.
+- Linux fd 인계는 필요해지면 별도로 검토한다(SCM_RIGHTS나 exec-in-place). Linux AppImage의 마운트 수명도 범위 밖이다.
 
 ### 3.6 재결합 시 화면 복원
 
@@ -162,7 +163,7 @@ ADR-0301까지로 다음이 가능하다. PTY는 데몬이 소유하고 기본�
 | B | 터미널 env endpoint 간접화(`lx`·훅·automation) | 5 | 소~중 | — |
 | C | Windows named pipe 사용자 전용 transport | 4 (#1150) | 중 | — |
 | D | 분리 세션 패널·API (adopt는 후속) | 7 | 중 | C 이후 권장 |
-| E | 업데이트 세대 공존 | 1 | 대 | A·C(버전별 endpoint) |
+| E | 업데이트 세대 공존(build별 데몬, ADR-0308) | 1 | 대 | A·C |
 | F | 데몬 화면 모델(vt100) redraw | 2 | 중 | A |
 | G | GUI 미접속 이벤트 journal | 6 | 대 | B·F |
 

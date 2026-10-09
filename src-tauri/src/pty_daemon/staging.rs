@@ -13,7 +13,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
 use crate::conpty_runtime::CONPTY_RUNTIME_FILES;
-use crate::constants::{PTY_DAEMON_RUNTIME_DIR, PTY_DAEMON_RUNTIME_GC_MIN_AGE_MS};
+use crate::constants::{
+    PTY_DAEMON_RUNTIME_DIR, PTY_DAEMON_RUNTIME_GC_MIN_AGE_MS, PTY_DAEMON_STAGED_IMAGE,
+};
 
 /// Copy `exe` and the ConPTY files next to it into
 /// `<daemon dir>/runtime/<key>/` (reusing an existing copy) and return the
@@ -28,9 +30,9 @@ pub(super) fn stage(exe: &Path, daemon_dir: &Path) -> io::Result<PathBuf> {
 }
 
 fn stage_with_gc_age(exe: &Path, daemon_dir: &Path, gc_min_age: Duration) -> io::Result<PathBuf> {
-    let name = exe
-        .file_name()
-        .ok_or_else(|| io::Error::other("executable path has no file name"))?;
+    // Not the executable's own name: the update installer ends every
+    // running `laymux.exe` by image name (ADR-0308).
+    let name = std::ffi::OsStr::new(PTY_DAEMON_STAGED_IMAGE);
     let key = runtime_key(exe)?;
     let root = daemon_dir.join(PTY_DAEMON_RUNTIME_DIR);
     let target = root.join(&key);

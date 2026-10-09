@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 use laymux_lib::constants::ENV_LAYMUX_PTY_DAEMON_DIR;
 use laymux_lib::process::headless_command;
 use laymux_lib::pty_daemon::{
-    find_running, list_sessions, shutdown_running, spawn_daemon, terminate_session, DaemonPaths,
-    DaemonPtySystem,
+    find_running, list_sessions, spawn_daemon, terminate_session, DaemonPaths, DaemonPtySystem,
+    DaemonRoot,
 };
 use portable_pty::{CommandBuilder, PtySize, PtySystem};
 use sysinfo::{Pid, ProcessesToUpdate, System};
@@ -83,6 +83,8 @@ fn crash_client_role() {
     if std::env::var(ROLE_ENV).as_deref() != Ok(CRASH_CLIENT_ROLE) {
         return;
     }
+    // The parent names the daemon root; this is the same executable, so the
+    // same generation (ADR-0308).
     let paths = DaemonPaths::for_current_build().unwrap();
     let endpoint = find_running(&paths).unwrap().expect("daemon is running");
     let pair = DaemonPtySystem::spawn(
@@ -109,7 +111,8 @@ fn terminal_work_outlives_a_crashed_client_in_a_single_daemon_instance() {
         return;
     }
     let dir = tempfile::tempdir().unwrap();
-    let paths = DaemonPaths::in_dir(dir.path().join("pty-daemon"));
+    let root = DaemonRoot::in_dir(dir.path().join("pty-daemon"));
+    let paths = root.current().unwrap();
     let daemon = KillOnDrop(launch(&paths));
     let endpoint = wait_until("daemon discovery", || find_running(&paths).unwrap());
 
@@ -129,7 +132,7 @@ fn terminal_work_outlives_a_crashed_client_in_a_single_daemon_instance() {
             "--test-threads=1",
         ])
         .env(ROLE_ENV, CRASH_CLIENT_ROLE)
-        .env(ENV_LAYMUX_PTY_DAEMON_DIR, paths.dir())
+        .env(ENV_LAYMUX_PTY_DAEMON_DIR, root.dir())
         .output()
         .unwrap();
     assert!(!output.status.success(), "the client role must abort");
@@ -166,29 +169,20 @@ fn terminal_work_outlives_a_crashed_client_in_a_single_daemon_instance() {
         (!is_alive(child_pid)).then_some(())
     });
 
-    // Before an update the GUI shuts the daemon down and waits for it, so
-    // nothing keeps the executable mapped (ADR-0301).
-    let pair = DaemonPtySystem::spawn(
-        endpoint,
-        "before-update#1".into(),
-        "before-update".into(),
-        Default::default(),
-    )
-    .openpty(PtySize {
-        rows: 24,
-        cols: 80,
-        pixel_width: 0,
-        pixel_height: 0,
-    })
-    .unwrap();
-    let survivor = pair.slave.spawn_command(sleeper()).unwrap();
-    let survivor_pid = survivor.process_id().unwrap();
-    let _survivor = KillOnDrop(survivor_pid);
-    assert!(shutdown_running(&paths, Duration::from_secs(10)).unwrap());
-    // The lock is released as the process exits; reaping follows shortly.
-    wait_until("daemon exit", || (!is_alive(daemon.0)).then_some(()));
-    wait_until("session child exit on shutdown", || {
-        (!is_alive(survivor_pid)).then_some(())
-    });
-    assert!(!shutdown_running(&paths, Duration::from_secs(1)).unwrap());
+    // The update installer ends running `laymux.exe` processes by image
+    // name, so the staged daemon must carry another one to outlive an
+    // update with its sessions (ADR-0308).
+    #[cfg(windows)]
+    {
+        let pid = Pid::from_u32(daemon.0);
+        let mut system = System::new();
+        system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
+        let name = system
+            .process(pid)
+            .expect("daemon is running")
+            .name()
+            .to_string_lossy()
+            .to_lowercase();
+        assert_eq!(name, laymux_lib::constants::PTY_DAEMON_STAGED_IMAGE);
+    }
 }

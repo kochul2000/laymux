@@ -12,8 +12,8 @@ use std::collections::HashSet;
 use serde::Serialize;
 
 use super::control::{list_sessions, request_terminate};
-use super::discovery::DaemonPaths;
-use super::launcher::find_reachable;
+use super::discovery::DaemonRoot;
+use super::launcher::{find_reachable, live_generations, GenerationState};
 use super::wire::SessionInfo;
 use super::DaemonEndpoint;
 use crate::constants::{PTY_DAEMON_METADATA_PROFILE, TERMINAL_ID_PREFIX};
@@ -39,6 +39,8 @@ pub enum PtySessionState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PtySessionEntry {
+    /// The daemon generation that runs it (ADR-0308).
+    pub daemon: String,
     pub session_id: String,
     pub terminal_id: String,
     /// The profile the session was started with.
@@ -53,8 +55,33 @@ pub struct PtySessionEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PtySessionInventory {
+    /// Whether any daemon generation is alive.
     pub daemon_running: bool,
+    /// This build's generation: new terminals start there, so a session of
+    /// any other runs on another (usually earlier) build.
+    pub current_daemon: Option<String>,
     pub sessions: Vec<PtySessionEntry>,
+    /// Live generations whose sessions could not be listed.
+    pub unavailable_daemons: Vec<UnavailableDaemon>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnavailableDaemon {
+    pub daemon: String,
+    pub problem: DaemonProblem,
+    /// The protocol it speaks, when that is the problem.
+    pub protocol_version: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DaemonProblem {
+    /// Holds its instance lock but does not answer.
+    NotAnswering,
+    /// Speaks another protocol (an older or newer build); its sessions end
+    /// on their own and it exits after them.
+    Incompatible,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -113,35 +140,66 @@ impl KnownTerminals {
     }
 }
 
-/// List the daemon's sessions. No daemon running is an empty inventory; a
-/// daemon that does not answer is an error. Read-only: never starts a daemon,
-/// and works whether or not this GUI uses the daemon for new terminals.
+/// List the sessions of every live daemon generation (ADR-0308). No daemon
+/// running is an empty inventory. A generation that does not answer, or
+/// speaks another protocol, is reported rather than taken as "no sessions".
+/// Read-only: never starts a daemon, and works whether or not this GUI uses
+/// the daemon for new terminals.
 pub fn inventory(known: &KnownTerminals) -> Result<PtySessionInventory, String> {
-    let Some(endpoint) = running_daemon()? else {
-        return Ok(PtySessionInventory {
-            daemon_running: false,
-            sessions: Vec::new(),
-        });
+    let root = DaemonRoot::for_current_build()?;
+    let mut inventory = PtySessionInventory {
+        daemon_running: false,
+        current_daemon: root.current().ok().map(|paths| paths.generation()),
+        sessions: Vec::new(),
+        unavailable_daemons: Vec::new(),
     };
-    Ok(PtySessionInventory {
-        daemon_running: true,
-        sessions: classify(listed(&endpoint)?, known),
-    })
+    for live in live_generations(&root, |_| true)? {
+        inventory.daemon_running = true;
+        let unavailable = |problem, protocol_version| UnavailableDaemon {
+            daemon: live.generation.clone(),
+            problem,
+            protocol_version,
+        };
+        match live.state {
+            GenerationState::Ready(endpoint) => match listed(&endpoint) {
+                Ok(sessions) => {
+                    inventory
+                        .sessions
+                        .extend(classify(sessions, &live.generation, known))
+                }
+                Err(error) => {
+                    tracing::warn!(generation = %live.generation, %error, "PTY daemon generation did not list its sessions");
+                    inventory
+                        .unavailable_daemons
+                        .push(unavailable(DaemonProblem::NotAnswering, None));
+                }
+            },
+            GenerationState::Unreachable => inventory
+                .unavailable_daemons
+                .push(unavailable(DaemonProblem::NotAnswering, None)),
+            GenerationState::Incompatible(protocol) => inventory
+                .unavailable_daemons
+                .push(unavailable(DaemonProblem::Incompatible, Some(protocol))),
+        }
+    }
+    sort_entries(&mut inventory.sessions);
+    Ok(inventory)
 }
 
 /// End a session listed as detached with `attach_epoch`. The session is
 /// classified again first, so a pane's session (or one the layout awaits)
 /// cannot be ended through this path even with its current epoch.
 pub fn terminate(
+    daemon: &str,
     session_id: &str,
     attach_epoch: u64,
     known: &KnownTerminals,
 ) -> Result<TerminateOutcome, String> {
     // No daemon: the session is gone with it.
-    let Some(endpoint) = running_daemon()? else {
+    let Some(endpoint) = running_daemon(daemon)? else {
         return Ok(TerminateOutcome::Gone);
     };
-    let entry = classify(listed(&endpoint)?, known)
+    let entry = classify(listed(&endpoint)?, daemon, known)
         .into_iter()
         .find(|entry| entry.session_id == session_id);
     match entry {
@@ -159,6 +217,8 @@ pub fn terminate(
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListedSession {
+    /// The generation whose daemon runs it.
+    pub daemon: String,
     pub session_id: String,
     pub attach_epoch: u64,
 }
@@ -174,26 +234,46 @@ pub fn terminate_detached(
         ended: 0,
         failed: Vec::new(),
     };
-    let Some(endpoint) = running_daemon()? else {
-        return Ok(result);
-    };
-    let current = classify(listed(&endpoint)?, known);
-    for wanted in listed_sessions {
-        let Some(entry) = current
-            .iter()
-            .find(|entry| entry.session_id == wanted.session_id)
-        else {
-            continue;
+    let mut daemons: Vec<&str> = listed_sessions
+        .iter()
+        .map(|listed| listed.daemon.as_str())
+        .collect();
+    daemons.sort_unstable();
+    daemons.dedup();
+    for daemon in daemons {
+        let current = match running_daemon(daemon).and_then(|endpoint| match endpoint {
+            Some(endpoint) => Ok(Some((listed(&endpoint)?, endpoint))),
+            None => Ok(None),
+        }) {
+            Ok(Some((sessions, endpoint))) => (classify(sessions, daemon, known), endpoint),
+            // Gone with its daemon.
+            Ok(None) => continue,
+            Err(error) => {
+                result.failed.push(format!("{daemon}: {error}"));
+                continue;
+            }
         };
-        if entry.state != PtySessionState::Detached {
-            continue;
-        }
-        match terminate_on(&endpoint, &entry.session_id, wanted.attach_epoch) {
-            Ok(TerminateOutcome::Terminated) => result.ended += 1,
-            Ok(_) => {}
-            Err(error) => result
-                .failed
-                .push(format!("{}: {error}", entry.terminal_id)),
+        let (entries, endpoint) = current;
+        for wanted in listed_sessions
+            .iter()
+            .filter(|wanted| wanted.daemon == daemon)
+        {
+            let Some(entry) = entries
+                .iter()
+                .find(|entry| entry.session_id == wanted.session_id)
+            else {
+                continue;
+            };
+            if entry.state != PtySessionState::Detached {
+                continue;
+            }
+            match terminate_on(&endpoint, &entry.session_id, wanted.attach_epoch) {
+                Ok(TerminateOutcome::Terminated) => result.ended += 1,
+                Ok(_) => {}
+                Err(error) => result
+                    .failed
+                    .push(format!("{}: {error}", entry.terminal_id)),
+            }
         }
     }
     Ok(result)
@@ -220,8 +300,13 @@ fn terminate_on(
     })
 }
 
-fn running_daemon() -> Result<Option<DaemonEndpoint>, String> {
-    find_reachable(&DaemonPaths::for_current_build()?)
+/// The daemon of the generation a caller named. A name that is not a
+/// generation key is refused, since it becomes a path.
+fn running_daemon(daemon: &str) -> Result<Option<DaemonEndpoint>, String> {
+    let paths = DaemonRoot::for_current_build()?
+        .named_generation(daemon)
+        .ok_or_else(|| format!("not a PTY daemon generation: {daemon}"))?;
+    find_reachable(&paths)
 }
 
 /// Terminal ids of every TerminalView the saved layout restores: workspace
@@ -247,7 +332,11 @@ fn layout_terminal_ids(snapshot: &LocalSessionSnapshot) -> HashSet<String> {
         .collect()
 }
 
-fn classify(sessions: Vec<SessionInfo>, known: &KnownTerminals) -> Vec<PtySessionEntry> {
+fn classify(
+    sessions: Vec<SessionInfo>,
+    daemon: &str,
+    known: &KnownTerminals,
+) -> Vec<PtySessionEntry> {
     let mut entries: Vec<_> = sessions
         .into_iter()
         .map(|session| {
@@ -268,6 +357,7 @@ fn classify(sessions: Vec<SessionInfo>, known: &KnownTerminals) -> Vec<PtySessio
                 PtySessionState::Detached
             };
             PtySessionEntry {
+                daemon: daemon.to_owned(),
                 profile: session.metadata.get(PTY_DAEMON_METADATA_PROFILE).cloned(),
                 session_id: session.session_id,
                 terminal_id: session.terminal_id,
@@ -278,8 +368,12 @@ fn classify(sessions: Vec<SessionInfo>, known: &KnownTerminals) -> Vec<PtySessio
             }
         })
         .collect();
-    entries.sort_by_key(|entry| (entry.state as u8, entry.terminal_id.clone()));
+    sort_entries(&mut entries);
     entries
+}
+
+fn sort_entries(entries: &mut [PtySessionEntry]) {
+    entries.sort_by_key(|entry| (entry.state as u8, entry.terminal_id.clone()));
 }
 
 #[cfg(test)]
@@ -321,6 +415,7 @@ mod tests {
                 // An unopened workspace's pane: the layout will adopt it.
                 session("e#1", "pane-e", false, false),
             ],
+            "g3-000000000000",
             &known(&["pane-a"], &["pane-a", "pane-e"]),
         );
         let states: Vec<_> = entries
@@ -346,21 +441,21 @@ mod tests {
         let sessions = || vec![session("e#1", "pane-e", false, false)];
         let mut known = known(&[], &["pane-e"]);
         assert_eq!(
-            classify(sessions(), &known)[0].state,
+            classify(sessions(), "g3-000000000000", &known)[0].state,
             PtySessionState::AwaitingPane
         );
         // Its pane was created once already (and adopted something else or
         // spawned fresh): this session will never be adopted.
         known.adoption_seen.insert("pane-e".into());
         assert_eq!(
-            classify(sessions(), &known)[0].state,
+            classify(sessions(), "g3-000000000000", &known)[0].state,
             PtySessionState::Detached
         );
         // A GUI that does not use the daemon adopts nothing.
         known.adoption_seen.clear();
         known.adopts = false;
         assert_eq!(
-            classify(sessions(), &known)[0].state,
+            classify(sessions(), "g3-000000000000", &known)[0].state,
             PtySessionState::Detached
         );
     }
@@ -417,6 +512,7 @@ mod daemon_tests {
             let sessions = list_sessions(&daemon.endpoint).unwrap();
             let entries = classify(
                 sessions,
+                "g3-000000000000",
                 &KnownTerminals {
                     adoption_seen: HashSet::new(),
                     adopts: true,

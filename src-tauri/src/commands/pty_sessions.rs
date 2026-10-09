@@ -17,6 +17,8 @@ use crate::state::AppState;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminatePtySessionRequest {
+    /// The daemon generation the session was listed under (ADR-0308).
+    pub daemon: String,
     pub session_id: String,
     /// The epoch the session was listed with; a session attached again since
     /// is left running.
@@ -39,6 +41,7 @@ pub fn terminate_pty_session_inner(
     request: &TerminatePtySessionRequest,
 ) -> Result<TerminateOutcome, String> {
     pty_daemon::terminate_listed_session(
+        &request.daemon,
         &request.session_id,
         request.attach_epoch,
         &known_terminals(state)?,

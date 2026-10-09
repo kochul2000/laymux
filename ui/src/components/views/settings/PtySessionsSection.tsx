@@ -20,7 +20,9 @@ const ENDABLE_STATES = new Set<PtySessionEntry["state"]>(["detached"]);
 /**
  * PTY daemon session inventory (ADR-0306): what still runs in the daemon and
  * a way to end what no pane holds or will hold — work left behind when the
- * GUI crashed before its layout was saved.
+ * GUI crashed before its layout was saved. Sessions of every daemon
+ * generation are listed; one per build, so an update leaves the earlier
+ * build's sessions running in its own daemon (ADR-0308).
  */
 export function PtySessionsSection() {
   const { t } = useTranslation("settings");
@@ -69,6 +71,7 @@ export function PtySessionsSection() {
   };
 
   const sessions = inventory?.sessions ?? [];
+  const unavailableDaemons = inventory?.unavailableDaemons ?? [];
   const detachedEntries = sessions.filter((entry) => entry.state === "detached");
   const detached = detachedEntries.length;
 
@@ -108,12 +111,28 @@ export function PtySessionsSection() {
             {t("ptySessions.endDetached")}
           </TwoClickConfirmButton>
         </div>
+        {unavailableDaemons.map((daemon) => (
+          <p
+            key={daemon.daemon}
+            className="pty-sessions-muted"
+            role="alert"
+            data-testid={`pty-sessions-unavailable-${daemon.daemon}`}
+          >
+            {daemon.problem === "incompatible"
+              ? t("ptySessions.daemonIncompatible", {
+                  daemon: daemon.daemon,
+                  protocol: daemon.protocolVersion,
+                })
+              : t("ptySessions.daemonNotAnswering", { daemon: daemon.daemon })}
+          </p>
+        ))}
         {sessions.length > 0 && (
           <table className="pty-sessions-table" data-testid="pty-sessions-table">
             <thead>
               <tr>
                 <th>{t("ptySessions.terminal")}</th>
                 <th>{t("ptySessions.profile")}</th>
+                <th>{t("ptySessions.daemon")}</th>
                 <th>{t("ptySessions.pid")}</th>
                 <th>{t("ptySessions.state")}</th>
                 <th aria-label={t("ptySessions.actions")} />
@@ -121,9 +140,14 @@ export function PtySessionsSection() {
             </thead>
             <tbody>
               {sessions.map((entry) => (
-                <tr key={entry.sessionId} data-state={entry.state}>
+                <tr key={`${entry.daemon}/${entry.sessionId}`} data-state={entry.state}>
                   <td className="pty-sessions-table__terminal">{entry.terminalId}</td>
                   <td>{entry.profile ?? "—"}</td>
+                  <td title={entry.daemon}>
+                    {entry.daemon === inventory?.currentDaemon
+                      ? t("ptySessions.daemonCurrent")
+                      : t("ptySessions.daemonOther")}
+                  </td>
                   <td>{entry.childPid ?? "—"}</td>
                   <td>{t(`ptySessions.states.${entry.state}`)}</td>
                   <td>

@@ -713,7 +713,7 @@ OS 절전 진입을 막는 정책이다(issue #727·#733, [ADR-0114](../adr/0114
 - **beta 는 deb/rpm 설치본에서 거절된다**(`unsupported_channel_install`). updater 는 `{os}-{arch}-{installer}` 가 없으면 맨 `{os}-{arch}`(AppImage) 로 폴백하므로, 그대로 두면 설치 단계에서 형식 오류가 난다. 확인·설치 둘 다 이유를 담은 오류로 거절한다.
 - **업데이트 화면(`UpdateSection`)이 버전·채널·동작을 한자리에 모은다.** 현재 버전과 채널(`update-current-version`·`update-current-channel`), 채널 선택, 수동 확인(`update-check-btn`)과 마지막 확인 시각(`update-checked-at`), 발견된 버전의 릴리스 시각(`update-published-at`)·노트·설치(`update-install-btn`), GitHub 릴리스 페이지 링크를 제공한다. 채널은 다른 설정처럼 draft 라 저장해야 적용되고, 확인·설치는 설정이 아니라 action 이므로 즉시 실행된다. 상단 바 action 은 업데이트가 있을 때만 나타나는 설치 전용 버튼이라 수동 확인 수단이 되지 못했다 — 그 공백을 이 화면이 메운다. 프로세스 전역 `lastError` 중 시작·주기·채널 저장·설정 초기화가 일으킨 백그라운드 확인 오류는 Settings 본문에 표시하지 않고, 이 화면에서 사용자가 직접 시작한 확인·설치의 오류만 표시한다. 오류 문자열은 URL처럼 공백 없는 긴 값도 화면 폭 안에서 줄바꿈한다.
 - **설정 초기화도 재확인을 건다.** `reset_settings` 는 디스크에 기본값을 쓰고 프론트는 페이지를 다시 로드할 뿐이라 설정 적용 경로를 타지 않는다. 커맨드가 `app_update::schedule_channel_recheck` 로 직접 재확인을 걸어, 프로세스 전역 매니저가 옛 채널과 후보를 들고 있지 않게 한다.
-- **설치기를 띄우기 전에 앱이 자기 자식을 정리한다**([ADR-0201](../adr/0201-update-install-releases-child-file-locks.md)). updater 는 설치기를 실행한 뒤 `std::process::exit(0)` 하므로 소멸자가 돌지 않는다. 그래서 install 경로는 `channel_updater_builder(...).on_before_exit(...)` 로 `update_install_guard::release_installer_file_locks` 를 걸고, 그 안에서 `AppState::terminate_child_processes()`(레지스트리 PTY + ADR-0102 probe PTY, 앱 종료와 같은 절차)를 먼저 돌린다. Windows 는 이어서 설치 디렉터리의 `*.exe`/`*.dll` 중 실행 중인 자기 실행 파일을 뺀 전부가 쓰기로 열릴 때까지 최대 `UPDATE_INSTALL_LOCK_RELEASE_TIMEOUT_MS` 를 기다린다 — 번들 ConPTY 런타임(ADR-0066/0067)의 `OpenConsole.exe` 는 터미널이 살아 있는 동안 매핑돼 있어 설치기가 공유 위반으로 실패한다. 판정은 프로세스 열거가 아니라 설치기가 실제로 겪는 조건(쓰기 열기)이며, 상한을 넘겨도 경고만 남기고 설치는 진행한다.
+- **설치기를 띄우기 전에 앱이 자기 자식을 정리한다**([ADR-0201](../adr/0201-update-install-releases-child-file-locks.md)). updater 는 설치기를 실행한 뒤 `std::process::exit(0)` 하므로 소멸자가 돌지 않는다. 그래서 install 경로는 `channel_updater_builder(...).on_before_exit(...)` 로 `update_install_guard::release_installer_file_locks` 를 걸고, 그 안에서 `AppState::begin_update_handoff()` 로 데몬 세션 인계를 표시한 뒤 `AppState::terminate_child_processes()`(in-process 레지스트리 PTY + ADR-0102 probe PTY)를 먼저 돌린다. PTY 데몬 세션은 끝내지 않고 업데이트된 GUI가 재결합하도록 남긴다. 데몬은 설치기가 이름으로 끝내지 않는 `laymux-pty-daemon.exe` 사본으로 실행되고 설치 디렉터리의 파일을 쥐지 않는다([ADR-0308](../adr/0308-pty-daemon-generations-across-updates.md)). 설치가 실패하면 인계 표시를 지운다. Windows 는 이어서 설치 디렉터리의 `*.exe`/`*.dll` 중 실행 중인 자기 실행 파일을 뺀 전부가 쓰기로 열릴 때까지 최대 `UPDATE_INSTALL_LOCK_RELEASE_TIMEOUT_MS` 를 기다린다 — 번들 ConPTY 런타임(ADR-0066/0067)의 `OpenConsole.exe` 는 터미널이 살아 있는 동안 매핑돼 있어 설치기가 공유 위반으로 실패한다. 판정은 프로세스 열거가 아니라 설치기가 실제로 겪는 조건(쓰기 열기)이며, 상한을 넘겨도 경고만 남기고 설치는 진행한다.
 
 #### Android 채널 매니페스트
 
@@ -1967,8 +1967,8 @@ src-tauri/src/
 │   ├── client.rs             # GUI: 원격 PtySystem proxy
 │   ├── control.rs            # GUI: 인증 연결·세션 목록·id 기반 종료
 │   ├── client_queue.rs       # GUI: 유계 수신 queue·exit slot
-│   ├── launcher.rs           # discovery probe·데몬 기동·업데이트 전 shutdown
-│   ├── staging.rs            # Windows: 데몬 실행 파일·ConPTY 사본
+│   ├── launcher.rs           # discovery probe·데몬 기동·세대 조회·안 쓰는 세대 정리 (ADR-0308)
+│   ├── staging.rs            # Windows: 데몬 실행 파일(`laymux-pty-daemon.exe`)·ConPTY 사본
 │   ├── entry.rs              # `laymux --pty-daemon` 진입점
 │   ├── wire.rs / transport.rs / discovery.rs  # frame·로컬 socket·token
 │   └── tests.rs / adoption_tests.rs / handshake_tests.rs  # 실제 PTY·셸 기반 데몬 테스트

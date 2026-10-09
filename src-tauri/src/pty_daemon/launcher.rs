@@ -8,10 +8,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::control::connect_authenticated;
-use super::discovery::{read_discovery, DaemonPaths};
+use super::discovery::{read_discovery, DaemonPaths, DaemonRoot};
 use super::wire::PROTOCOL_VERSION;
-use super::wire::{write_control, ClientMessage};
 use super::DaemonEndpoint;
+#[cfg(unix)]
 use crate::constants::PTY_DAEMON_CLI_FLAG;
 use crate::constants::{
     PTY_DAEMON_LAUNCH_POLL_MS, PTY_DAEMON_LAUNCH_TIMEOUT_MS, PTY_DAEMON_UNAVAILABLE_RETRY_MS,
@@ -35,6 +35,9 @@ enum Probe {
     /// A daemon holds the lock but did not complete an authenticated
     /// handshake: still starting, or stuck. Launching another is pointless.
     Unreachable,
+    /// A live daemon that speaks another protocol. It may own running work,
+    /// so it is neither replaced nor killed.
+    Incompatible(u32),
 }
 
 pub fn ensure_running(paths: &DaemonPaths) -> Result<DaemonEndpoint, String> {
@@ -70,11 +73,14 @@ fn launch_and_wait(paths: &DaemonPaths) -> Result<DaemonEndpoint, String> {
         // Maybe another GUI's daemon that is still starting: wait for it,
         // but a second instance would only exit on the lock.
         Probe::Unreachable => {}
+        Probe::Incompatible(protocol) => return Err(incompatible(protocol)),
     }
     let deadline = Instant::now() + Duration::from_millis(PTY_DAEMON_LAUNCH_TIMEOUT_MS);
     loop {
-        if let Probe::Ready(endpoint) = probe(paths)? {
-            return Ok(endpoint);
+        match probe(paths)? {
+            Probe::Ready(endpoint) => return Ok(endpoint),
+            Probe::Incompatible(protocol) => return Err(incompatible(protocol)),
+            Probe::Absent | Probe::Unreachable => {}
         }
         if Instant::now() >= deadline {
             return Err(format!(
@@ -86,104 +92,19 @@ fn launch_and_wait(paths: &DaemonPaths) -> Result<DaemonEndpoint, String> {
     }
 }
 
-/// Ask the running daemon (if any) to terminate every session and exit, and
-/// wait until its instance lock is released. Used right before an update
-/// replaces the executable the daemon runs from. Returns whether a daemon was
-/// running.
-pub fn shutdown_running(paths: &DaemonPaths, timeout: Duration) -> Result<bool, String> {
-    if !daemon_instance_alive(paths) {
-        return Ok(false);
-    }
-    // A daemon that cannot be reached (or speaks another protocol) gets no
-    // request; it is handled by the forced stop below.
-    let requested = match probe(paths) {
-        Ok(Probe::Ready(endpoint)) => connect_authenticated(&endpoint)
-            .and_then(|(mut writer, _reader)| write_control(&mut writer, &ClientMessage::Shutdown))
-            .is_ok(),
-        _ => false,
-    };
-    let half = timeout / 2;
-    if requested && wait_released(paths, timeout - half) {
-        return Ok(true);
-    }
-    // Updating with a daemon still mapping the executable would fail, so a
-    // daemon that ignored the request is stopped — but only the process that
-    // discovery names *and* whose command line proves it is this directory's
-    // daemon, never a PID that was merely reused.
-    force_stop(paths)?;
-    if wait_released(paths, half) {
-        Ok(true)
-    } else {
-        Err(format!(
-            "PTY daemon did not exit within {} ms",
-            timeout.as_millis()
-        ))
-    }
-}
-
-/// Path equality tolerant of how the daemon was launched: trailing
-/// separators, and on Windows letter case and separator style.
-fn same_path(left: &Path, right: &Path) -> bool {
-    fn normalized(path: &Path) -> String {
-        let text = path.to_string_lossy();
-        let text = text.trim_end_matches(['/', '\\']);
-        if cfg!(windows) {
-            text.replace('/', "\\").to_lowercase()
-        } else {
-            text.to_owned()
-        }
-    }
-    normalized(left) == normalized(right)
-}
-
-fn wait_released(paths: &DaemonPaths, within: Duration) -> bool {
-    let deadline = Instant::now() + within;
-    while daemon_instance_alive(paths) {
-        if Instant::now() >= deadline {
-            return false;
-        }
-        thread::sleep(Duration::from_millis(PTY_DAEMON_LAUNCH_POLL_MS));
-    }
-    true
-}
-
-fn force_stop(paths: &DaemonPaths) -> Result<(), String> {
-    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
-
-    let discovery = read_discovery(paths)
-        .ok_or_else(|| "PTY daemon holds its lock but published no discovery".to_string())?;
-    let pid = Pid::from_u32(discovery.pid);
-    let mut system = System::new();
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::Some(&[pid]),
-        true,
-        ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always),
-    );
-    let process = system
-        .process(pid)
-        .ok_or_else(|| format!("PTY daemon process {pid} is gone"))?;
-    let cmd = process.cmd();
-    let is_daemon = cmd.iter().any(|arg| arg == PTY_DAEMON_CLI_FLAG)
-        && cmd.iter().any(|arg| same_path(Path::new(arg), paths.dir()));
-    if !is_daemon {
-        return Err(format!(
-            "process {pid} named by PTY daemon discovery is not this directory's daemon"
-        ));
-    }
-    tracing::warn!(%pid, "PTY daemon did not shut down on request; stopping it");
-    if process.kill() {
-        Ok(())
-    } else {
-        Err(format!("failed to stop PTY daemon process {pid}"))
-    }
+fn incompatible(protocol: u32) -> String {
+    format!(
+        "an incompatible PTY daemon (protocol {protocol}, expected {PROTOCOL_VERSION}) is running"
+    )
 }
 
 /// Find a live, authenticated daemon without starting one.
 pub fn find_running(paths: &DaemonPaths) -> Result<Option<DaemonEndpoint>, String> {
-    Ok(match probe(paths)? {
-        Probe::Ready(endpoint) => Some(endpoint),
-        Probe::Absent | Probe::Unreachable => None,
-    })
+    match probe(paths)? {
+        Probe::Ready(endpoint) => Ok(Some(endpoint)),
+        Probe::Absent | Probe::Unreachable => Ok(None),
+        Probe::Incompatible(protocol) => Err(incompatible(protocol)),
+    }
 }
 
 /// Like [`find_running`], but a daemon that holds its instance lock without
@@ -194,12 +115,129 @@ pub fn find_reachable(paths: &DaemonPaths) -> Result<Option<DaemonEndpoint>, Str
         Probe::Ready(endpoint) => Ok(Some(endpoint)),
         Probe::Absent => Ok(None),
         Probe::Unreachable => Err("PTY daemon is running but does not answer".to_string()),
+        Probe::Incompatible(protocol) => Err(incompatible(protocol)),
     }
 }
 
-/// A live daemon that speaks another protocol is an error: it may own
-/// running work, so it is neither replaced nor killed here.
-///
+/// A live daemon generation as a client sees it.
+#[derive(Debug, Clone)]
+pub struct LiveGeneration {
+    /// The generation key (ADR-0308).
+    pub generation: String,
+    pub state: GenerationState,
+    /// When its daemon published itself; the key itself says nothing about
+    /// which build came later.
+    pub started: Option<std::time::SystemTime>,
+}
+
+#[derive(Debug, Clone)]
+pub enum GenerationState {
+    Ready(DaemonEndpoint),
+    /// Holds its instance lock without answering. Reporting it as absent
+    /// would hide sessions that are still running.
+    Unreachable,
+    /// Speaks another protocol: its sessions can be neither listed nor
+    /// adopted, and it ends by itself once they are gone.
+    Incompatible(u32),
+}
+
+/// Every generation `include` accepts whose daemon is alive, without starting
+/// one. Read-only.
+pub fn live_generations(
+    root: &DaemonRoot,
+    include: impl Fn(&str) -> bool,
+) -> Result<Vec<LiveGeneration>, String> {
+    let mut live = Vec::new();
+    for paths in root.generations() {
+        if !include(&paths.generation()) {
+            continue;
+        }
+        let state = match probe(&paths)? {
+            Probe::Absent => continue,
+            Probe::Ready(endpoint) => GenerationState::Ready(endpoint),
+            Probe::Unreachable => GenerationState::Unreachable,
+            Probe::Incompatible(protocol) => GenerationState::Incompatible(protocol),
+        };
+        live.push(LiveGeneration {
+            generation: paths.generation(),
+            state,
+            started: std::fs::metadata(paths.discovery_file())
+                .and_then(|meta| meta.modified())
+                .ok(),
+        });
+    }
+    // Newest first.
+    live.sort_by(|left, right| right.started.cmp(&left.started));
+    Ok(live)
+}
+
+/// Remove generation directories no daemon uses, other than `current`, and
+/// what the single-directory layout before generations left in the root.
+/// A directory touched within `min_age` is kept: a GUI of that build may be
+/// about to start its daemon there.
+pub fn collect_unused_generations(root: &DaemonRoot, current: &str, min_age: Duration) {
+    let young = |path: &Path| {
+        std::fs::metadata(path)
+            .and_then(|meta| meta.modified())
+            .map(|modified| modified.elapsed().unwrap_or_default() < min_age)
+            .unwrap_or(true)
+    };
+    for paths in root.generations() {
+        if paths.generation() == current || young(&paths.lock_file()) || young(paths.dir()) {
+            continue;
+        }
+        if let Err(error) = remove_unused_generation(&paths) {
+            tracing::debug!(dir = %paths.dir().display(), %error, "unused PTY daemon generation not removed");
+        }
+    }
+    let legacy = DaemonPaths::in_dir(root.dir());
+    if legacy.lock_file().is_file() && !daemon_instance_alive(&legacy) {
+        for name in LEGACY_ROOT_ENTRIES {
+            let path = root.dir().join(name);
+            let _ = if path.is_dir() {
+                std::fs::remove_dir_all(&path)
+            } else {
+                std::fs::remove_file(&path)
+            };
+        }
+    }
+}
+
+/// Remove a generation directory while holding its instance lock, so a daemon
+/// of that build starting meanwhile either finds the lock taken and gives up,
+/// or starts after the directory is gone and makes a new one. The lock file
+/// goes last.
+fn remove_unused_generation(paths: &DaemonPaths) -> std::io::Result<()> {
+    let lock = std::fs::OpenOptions::new()
+        .write(true)
+        .open(paths.lock_file())?;
+    lock.try_lock().map_err(std::io::Error::other)?;
+    for entry in std::fs::read_dir(paths.dir())? {
+        let path = entry?.path();
+        if path == paths.lock_file() {
+            continue;
+        }
+        if path.is_dir() {
+            std::fs::remove_dir_all(&path)?;
+        } else {
+            std::fs::remove_file(&path)?;
+        }
+    }
+    drop(lock);
+    std::fs::remove_file(paths.lock_file())?;
+    std::fs::remove_dir(paths.dir())
+}
+
+/// What a daemon kept directly in the root before generations (ADR-0301).
+const LEGACY_ROOT_ENTRIES: [&str; 5] = [
+    crate::constants::PTY_DAEMON_DISCOVERY_FILE,
+    crate::constants::PTY_DAEMON_LOG_FILE,
+    crate::constants::PTY_DAEMON_SOCKET_FILE,
+    "runtime",
+    // Last: while it exists, a GUI can still tell that the rest is stale.
+    crate::constants::PTY_DAEMON_LOCK_FILE,
+];
+
 /// Liveness is the instance lock, never a successful connect alone: the
 /// discovery of a daemon that died uncleanly names an endpoint some other
 /// program may since have taken.
@@ -216,10 +254,7 @@ fn probe(paths: &DaemonPaths) -> Result<Probe, String> {
         token: discovery.token,
     };
     if discovery.protocol_version != PROTOCOL_VERSION {
-        return Err(format!(
-            "an incompatible PTY daemon (protocol {}, expected {PROTOCOL_VERSION}) is running",
-            discovery.protocol_version
-        ));
+        return Ok(Probe::Incompatible(discovery.protocol_version));
     }
     Ok(match connect_authenticated(&endpoint) {
         Ok(_) => Probe::Ready(endpoint),
@@ -390,5 +425,95 @@ mod windows_spawn {
                 String::from_utf16(&super::quote(r"C:\Program Files\x\".as_ref())).unwrap();
             assert_eq!(quoted, r#""C:\Program Files\x\\""#);
         }
+    }
+}
+
+#[cfg(test)]
+mod generation_tests {
+    use super::*;
+    use crate::pty_daemon::discovery::{write_discovery, Discovery};
+    use std::fs::{self, File};
+
+    /// What a running daemon holds: its directory's instance lock.
+    fn hold_lock(paths: &DaemonPaths) -> File {
+        fs::create_dir_all(paths.dir()).unwrap();
+        let lock = File::create(paths.lock_file()).unwrap();
+        lock.try_lock().unwrap();
+        lock
+    }
+
+    fn generation(root: &DaemonRoot, key: &str) -> DaemonPaths {
+        root.named_generation(key).unwrap()
+    }
+
+    #[test]
+    fn unused_generations_and_the_old_layout_go_while_live_and_current_ones_stay() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = DaemonRoot::in_dir(dir.path());
+        let current = generation(&root, "g3-000000000001");
+        let dead = generation(&root, "g3-000000000002");
+        let live = generation(&root, "g2-000000000003");
+        for paths in [&current, &dead, &live] {
+            fs::create_dir_all(paths.dir().join("runtime")).unwrap();
+            fs::write(paths.lock_file(), b"").unwrap();
+        }
+        let _live = hold_lock(&live);
+        // The single-directory layout from before generations.
+        fs::write(root.dir().join("daemon.lock"), b"").unwrap();
+        fs::write(root.dir().join("daemon.json"), b"{}").unwrap();
+        fs::create_dir_all(root.dir().join("runtime").join("old")).unwrap();
+
+        // A recently touched directory may be about to start its daemon.
+        collect_unused_generations(&root, "g3-000000000001", Duration::from_secs(3600));
+        assert!(dead.dir().exists());
+
+        collect_unused_generations(&root, "g3-000000000001", Duration::ZERO);
+        assert!(current.dir().exists());
+        assert!(live.dir().exists());
+        assert!(!dead.dir().exists());
+        for legacy in ["daemon.lock", "daemon.json", "runtime"] {
+            assert!(!root.dir().join(legacy).exists(), "{legacy}");
+        }
+    }
+
+    #[test]
+    fn a_live_generation_that_cannot_be_listed_is_reported_not_hidden() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = DaemonRoot::in_dir(dir.path());
+        let other_protocol = generation(&root, "g999-000000000001");
+        let starting = generation(&root, "g3-000000000002");
+        let gone = generation(&root, "g3-000000000003");
+        fs::create_dir_all(gone.dir()).unwrap();
+        let _other = hold_lock(&other_protocol);
+        write_discovery(
+            &other_protocol,
+            &Discovery {
+                pid: 1,
+                endpoint: "unused".into(),
+                token: "unused".into(),
+                protocol_version: 999,
+            },
+        )
+        .unwrap();
+        // Holds its lock but has not published discovery yet.
+        let _starting = hold_lock(&starting);
+
+        let live = live_generations(&root, |_| true).unwrap();
+        let states: Vec<_> = live
+            .iter()
+            .map(|live| (live.generation.as_str(), live.state.clone()))
+            .collect();
+        // Newest published first; one that has not published yet is last.
+        assert!(matches!(
+            states.as_slice(),
+            [
+                ("g999-000000000001", GenerationState::Incompatible(999)),
+                ("g3-000000000002", GenerationState::Unreachable),
+            ]
+        ));
+        assert!(live_generations(&root, |key| key != "g3-000000000002")
+            .unwrap()
+            .iter()
+            .all(|live| live.generation != "g3-000000000002"));
     }
 }

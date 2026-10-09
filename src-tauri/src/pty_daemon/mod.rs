@@ -37,15 +37,15 @@ mod handshake_tests;
 #[cfg(test)]
 mod tests;
 
-pub use backend::{is_enabled, session_key, terminal_backend, DaemonEndpoint};
+pub use backend::{is_enabled, session_key, terminal_backend, DaemonAdoption, DaemonEndpoint};
 pub use client::DaemonPtySystem;
 pub use control::{list_sessions, terminate_session};
-pub use discovery::DaemonPaths;
+pub use discovery::{DaemonPaths, DaemonRoot};
 pub use entry::run_daemon_main;
 pub use inventory::{
-    inventory, terminate as terminate_listed_session, terminate_detached, KnownTerminals,
-    ListedSession, PtySessionEntry, PtySessionInventory, PtySessionState, TerminateDetachedResult,
-    TerminateOutcome,
+    inventory, terminate as terminate_listed_session, terminate_detached, DaemonProblem,
+    KnownTerminals, ListedSession, PtySessionEntry, PtySessionInventory, PtySessionState,
+    TerminateDetachedResult, TerminateOutcome, UnavailableDaemon,
 };
-pub use launcher::{ensure_running, find_running, shutdown_running, spawn_daemon};
+pub use launcher::{ensure_running, find_running, spawn_daemon};
 pub use wire::SessionInfo;

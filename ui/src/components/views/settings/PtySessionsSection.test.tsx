@@ -5,7 +5,10 @@ import { PtySessionsSection } from "./PtySessionsSection";
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
-const entry = (sessionId: string, state: string, attachEpoch = 1) => ({
+const CURRENT = "g3-000000000001";
+
+const entry = (sessionId: string, state: string, attachEpoch = 1, daemon = CURRENT) => ({
+  daemon,
   sessionId,
   terminalId: sessionId.split("#")[0],
   profile: "PowerShell",
@@ -17,6 +20,8 @@ const entry = (sessionId: string, state: string, attachEpoch = 1) => ({
 
 const inventory = {
   daemonRunning: true,
+  currentDaemon: CURRENT,
+  unavailableDaemons: [],
   sessions: [
     entry("pane-a#1-x", "pane"),
     entry("pane-w#1-z", "awaitingPane"),
@@ -60,7 +65,7 @@ describe("PtySessionsSection", () => {
 
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("terminate_pty_session", {
-        request: { sessionId: "pane-b#1-y", attachEpoch: 4 },
+        request: { daemon: CURRENT, sessionId: "pane-b#1-y", attachEpoch: 4 },
       }),
     );
     await waitFor(() =>
@@ -90,6 +95,38 @@ describe("PtySessionsSection", () => {
     expect(screen.getByTestId("pty-sessions-end-detached")).toBeDisabled();
   });
 
+  it("marks another build's sessions and reports daemons it cannot list", async () => {
+    respond({
+      list_pty_sessions: {
+        ...inventory,
+        sessions: [...inventory.sessions, entry("pane-o#1-q", "detached", 2, "g3-0000000000aa")],
+        unavailableDaemons: [
+          { daemon: "g2-0000000000bb", problem: "incompatible", protocolVersion: 2 },
+          { daemon: "g3-0000000000cc", problem: "notAnswering", protocolVersion: null },
+        ],
+      },
+      terminate_pty_session: "terminated",
+    });
+    render(<PtySessionsSection />);
+    await waitFor(() => expect(screen.getByTestId("pty-sessions-table")).toBeInTheDocument());
+    const earlier = screen.getByTestId("pty-session-end-pane-o#1-q").closest("tr");
+    expect(earlier).toHaveTextContent(/Other build|다른 빌드/);
+    expect(screen.getByTestId("pty-sessions-unavailable-g2-0000000000bb")).toHaveTextContent(
+      "protocol 2",
+    );
+    expect(screen.getByTestId("pty-sessions-unavailable-g3-0000000000cc")).toHaveTextContent(
+      "g3-0000000000cc",
+    );
+
+    // The session is ended through the daemon that runs it.
+    confirm("pty-session-end-pane-o#1-q");
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("terminate_pty_session", {
+        request: { daemon: "g3-0000000000aa", sessionId: "pane-o#1-q", attachEpoch: 2 },
+      }),
+    );
+  });
+
   it("ends every detached session at once and reports the ones that failed", async () => {
     respond({
       list_pty_sessions: inventory,
@@ -100,7 +137,7 @@ describe("PtySessionsSection", () => {
     confirm("pty-sessions-end-detached");
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("terminate_detached_pty_sessions", {
-        request: { sessions: [{ sessionId: "pane-b#1-y", attachEpoch: 4 }] },
+        request: { sessions: [{ daemon: CURRENT, sessionId: "pane-b#1-y", attachEpoch: 4 }] },
       }),
     );
     await waitFor(() =>
