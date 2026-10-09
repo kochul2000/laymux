@@ -120,7 +120,9 @@ export function findIndentedUrls(lines: IndentedLineInfo[], queriedLine: number)
     while (endIdx + 1 < logical.length) {
       const prev = logical[endIdx];
       const next = logical[endIdx + 1];
-      const join = detectTuiWrap(prev[prev.length - 1], next[0], cols, "word", prev[0]);
+      // soft-wrap 으로 이어진 논리 줄 다음 행은 hard wrap 으로 보지 않는다(detectTuiWrap).
+      if (prev.length > 1) break;
+      const join = detectTuiWrap(prev[0], next[0], cols, "word");
       if (!join || join.separator !== "") break;
       parts.push({ line: next[0], from: join.contentOffset });
       for (const line of next.slice(1)) parts.push({ line, from: 0 });

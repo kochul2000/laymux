@@ -272,6 +272,36 @@ describe("joinTuiWrappedLines — prose 끔(TUI 실행 중 아님)", () => {
   });
 });
 
+describe("joinTuiWrappedLines — 셸에서 단어 중간 결합은 URL 만", () => {
+  const PEM_A = "MIIDdzCCAl+gAwIBAgIE" + "A".repeat(44);
+  const PEM_B = "MIIEpAIBAAKCAQEA" + "B".repeat(48);
+
+  it("들여쓴 고정폭 토큰 행(YAML 안 PEM)이 폭을 채워도 잇지 않는다", () => {
+    const texts = [`    ${PEM_A}`, `    ${PEM_B}`];
+    const rows = makePaddedLines(texts, 68);
+    expect(joinTuiWrappedLines(texts, rows, 68, "word", false)).toEqual(texts);
+    // TUI 실행 중에는 한 행보다 긴 토큰의 꼬리로 본다(수용한 모호성).
+    expect(joinTuiWrappedLines(texts, rows, 68, "word", true)).toEqual([`    ${PEM_A}${PEM_B}`]);
+  });
+
+  it("soft-wrap 된 논리 줄 다음 행은 TUI 실행 중에도 잇지 않는다", () => {
+    // `  tls.crt: <긴 base64>` 가 soft-wrap 되고 꼬리 행이 끝 칸까지 찼다.
+    const head = "  tls.crt: " + "A".repeat(29);
+    const tail = "B".repeat(40);
+    const rows = makePaddedLines([head, { text: tail, wrapped: true }, "  tls.key: CCCC"], 40);
+    const lines = [head + tail, "  tls.key: CCCC"];
+    expect(joinTuiWrappedLines(lines, rows, 40, "word", true)).toEqual(lines);
+  });
+
+  it("다음 행이 새 URL 로 시작하면 앞 URL 꼬리가 아니다", () => {
+    const [a, b] = makePaddedLines(
+      ["  https://example.com/" + "a".repeat(17), "  https://example.com/b"],
+      40,
+    );
+    expect(detectTuiWrap(a, b, 40)).toEqual({ separator: " ", contentOffset: 2 });
+  });
+});
+
 describe("joinTuiWrappedSelection — 행 상한", () => {
   it(`선택이 MAX_JOIN_ROWS 를 넘으면 버퍼를 읽지 않고 원문을 돌려준다`, () => {
     const getLine = vi.fn();

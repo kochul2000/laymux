@@ -286,6 +286,28 @@ describe("findIndentedUrls — 셀 좌표", () => {
     expect(range.start).toEqual({ x: 3, y: 1 });
     expect(range.end).toEqual({ x: 20, y: 2 });
   });
+
+  it("soft-wrap 된 URL 줄 다음 행의 단어를 URL 에 붙이지 않는다", () => {
+    // `  u: https://…` 가 soft-wrap 되고 꼬리 행이 끝 칸까지 찼다. 다음 키는
+    // 같은 들여쓰기지만 URL 의 연속이 아니다 — 한 논리 줄 URL 은 WebLinksAddon 몫.
+    const lines = makePaddedLines(
+      [
+        "  u: https://example.com/" + "a".repeat(15),
+        { text: "b".repeat(40), wrapped: true },
+        "  name: foo",
+      ],
+      40,
+    );
+    expect(findIndentedUrls(lines, 3)).toEqual([]);
+  });
+
+  it("다음 행이 새 URL 로 시작하면 두 URL 을 한 링크로 합치지 않는다", () => {
+    const lines = makePaddedLines(
+      ["  https://example.com/" + "a".repeat(17), "  https://example.com/b"],
+      40,
+    );
+    expect(findIndentedUrls(lines, 1)).toEqual([]);
+  });
 });
 
 describe("createIndentedLinkProvider", () => {

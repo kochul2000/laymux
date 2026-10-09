@@ -80,34 +80,35 @@ const cellsThrough = (line: ReconstructedLine, offset: number) => line.endColumn
 /**
  * `next` 가 `prev` 에서 화면 폭 때문에 넘어간 연속 행인지 판정한다.
  *
- * @param prev 이전 논리 줄의 **마지막** 물리 행(행이 찼는지 본다).
+ * 이전 논리 줄은 물리 행 하나여야 한다 — 터미널 soft-wrap(`isWrapped`) 으로
+ * 이어진 줄 다음 행은 호출부가 판정하지 않는다. TUI 는 한 행보다 긴
+ * 토큰을 soft-wrap 에 맡길 때 그 토큰을 자기 행으로 빼고 다음 내용을 새 행에서
+ * 시작하며(Codex), soft-wrap 꼬리 행이 끝 칸까지 찼는지는 앞 내용 길이로 우연히
+ * 정해져 셸 출력(`tls.crt: <긴 base64>` 다음 키)을 오결합한다.
+ *
+ * @param prev 이전 논리 줄(물리 행 하나).
  * @param next 다음 논리 줄의 첫 물리 행.
  * @param cols 터미널 폭(셀).
- * @param lead 이전 논리 줄의 **첫** 물리 행 — 내어쓰기 정렬의 기준. 기본 `prev`.
  */
 export function detectTuiWrap(
   prev: ReconstructedLine,
   next: ReconstructedLine,
   cols: number,
   style: WrapStyle = "word",
-  lead: ReconstructedLine = prev,
 ): WrapJoin | null {
-  if (FRAME_RE.test(prev.text) || FRAME_RE.test(next.text) || FRAME_RE.test(lead.text)) {
-    return null;
-  }
+  if (FRAME_RE.test(prev.text) || FRAME_RE.test(next.text)) return null;
   if (TRUNCATED_RE.test(prev.text)) return null;
   const p = rowShape(prev);
   const n = rowShape(next);
-  const l = rowShape(lead);
-  if (!p || !n || !l) return null;
+  if (!p || !n) return null;
   if (MARKER_RE.test(next.text.slice(n.indent))) return null;
 
   // 연속 행은 이전 문단의 내어쓰기에 정렬된다 — 마커 뒤 내용 시작(`● `·`  - `
   // 다음) 또는 마커 없는 행이면 그 행의 들여쓰기.
   const nextIndentCells = cellsBefore(next, n.indent);
   if (
-    nextIndentCells !== cellsBefore(lead, l.indent) &&
-    nextIndentCells !== cellsBefore(lead, l.contentStart)
+    nextIndentCells !== cellsBefore(prev, p.indent) &&
+    nextIndentCells !== cellsBefore(prev, p.contentStart)
   ) {
     return null;
   }
@@ -128,7 +129,11 @@ export function detectTuiWrap(
   const headMatch = prev.text.slice(0, p.last + 1).search(/\S+$/);
   const headStart = headMatch < 0 ? p.last : headMatch;
   const headCells = prevEnd - cellsBefore(prev, headStart);
-  const midToken = prevEnd >= cols - WRAP_MARGIN && headCells + tokenCells > cols - nextIndentCells;
+  // 다음 행이 새 URL 로 시작하면 앞 토큰의 꼬리가 아니다(URL 두 개가 연달아 온 경우).
+  const midToken =
+    prevEnd >= cols - WRAP_MARGIN &&
+    headCells + tokenCells > cols - nextIndentCells &&
+    !/^https?:\/\//i.test(token);
 
   // 음절 사이에서도 자르는 줄바꿈기: 와이드 문자끼리 맞닿은 경계에서 다음 글자가
   // 앞 행에 들어갈 자리가 없었다면 단어 중간으로 본다. 줄바꿈 폭은 cols-1 일 수
@@ -161,10 +166,12 @@ export interface WrapRow extends ReconstructedLine {
  * — pytest 진행 줄·`ps aux` 처럼 폭에 맞춰 채우거나 잘린 행을 한 줄로 합치면 안
  * 된다.
  *
- * `prose` 가 거짓이면 단어 중간에서 잘린 연속 행(구분자 `""`, 행 끝에서 잘린
- * URL 등)만 잇는다. 어절 경계 결합은 줄바꿈기가 산문을 다시 흘려 배치했다는
- * 가정에 기대므로, 같은 깊이의 코드·설정 파일 줄(`cat` 출력)이 우연히 행 끝
- * 근처에서 끝나면 원래 개행을 지운다 — TUI 가 실행 중일 때만 켠다.
+ * `prose` 가 거짓이면 행 끝에서 잘린 URL 의 꼬리(구분자 `""` 이고 이어 붙일 앞
+ * 토큰이 `http(s)://` 를 담은 경우)만 잇는다. 어절 경계 결합은 줄바꿈기가 산문을
+ * 다시 흘려 배치했다는 가정에 기대므로, 같은 깊이의 코드·설정 파일 줄(`cat`
+ * 출력)이 우연히 행 끝 근처에서 끝나면 원래 개행을 지운다. 단어 중간 결합도
+ * 들여쓴 고정폭 토큰 행(YAML 안 PEM 블록)이 폭을 채우면 성립하므로 셸에서는 URL
+ * 로 한정한다 — 둘 다 TUI 가 실행 중일 때만 넓게 켠다.
  */
 export function joinTuiWrappedLines(
   lines: string[],
@@ -184,18 +191,13 @@ export function joinTuiWrappedLines(
   const out = [lines[0]];
   for (let i = 1; i < lines.length; i++) {
     const prevGroup = groups[i - 1];
-    const join = detectTuiWrap(
-      prevGroup[prevGroup.length - 1],
-      groups[i][0],
-      cols,
-      style,
-      prevGroup[0],
-    );
+    const join =
+      prevGroup.length === 1 ? detectTuiWrap(prevGroup[0], groups[i][0], cols, style) : null;
     const line = lines[i];
     const indent = line.slice(0, join?.contentOffset ?? 0);
     if (
       join &&
-      (prose || join.separator === "") &&
+      (prose || (join.separator === "" && endsInUrlToken(out[out.length - 1]))) &&
       join.contentOffset > 0 &&
       /^[ \t]*$/.test(indent) &&
       line.length > join.contentOffset
@@ -233,6 +235,11 @@ function selectionMatchesRows(lines: string[], groups: WrapRow[][]): boolean {
     if (i === 0) return text.endsWith(line);
     return i === last ? text.startsWith(line) : text === line;
   });
+}
+
+/** 끝 공백을 뺀 마지막 토큰이 URL 을 담는가 — 여러 행에 걸친 URL 이면 이어 붙인 결과를 본다. */
+function endsInUrlToken(text: string): boolean {
+  return /https?:\/\/\S*$/i.test(text.replace(/[ \t]+$/, ""));
 }
 
 /** 버퍼 결합을 시도하는 최대 선택 행 수 — 넘으면(전체 scrollback 복사 등) 원문을 쓴다. */
