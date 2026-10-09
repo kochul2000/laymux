@@ -163,6 +163,10 @@ pub fn build_router(
         .route("/api/v1/agent-hooks/manage", post(agent_hooks::hook_manage))
         .route("/api/v1/pty-sessions", get(pty_sessions::list))
         .route(
+            "/api/v1/dev/update-handoff",
+            post(pty_sessions::dev_update_handoff),
+        )
+        .route(
             "/api/v1/pty-sessions/terminate",
             post(pty_sessions::terminate),
         )

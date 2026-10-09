@@ -112,7 +112,13 @@ VITE_LAYMUX_STRICT_MODE=0 cargo tauri dev
 1. 터미널에서 `$PID`를 기록하고 긴 명령을 시작한다.
 2. dev GUI PID만 `Stop-Process -Id <pid> -Force`로 끝낸다. `scripts/kill-dev.sh`는 `taskkill /T`라서 데몬까지 끝내므로 쓰지 않는다.
 3. 위 명령으로 다시 띄운다.
-4. 같은 `$PID`가 응답하는지, dev 로그에 `adopted a running PTY daemon session`이 찍혔는지, 데몬 로그(`%LOCALAPPDATA%\laymux-dev\pty-daemon\daemon.log`)에 새 spawn이 없는지 확인한다.
+4. 같은 `$PID`가 응답하는지, dev 로그에 `adopted a running PTY daemon session`이 찍혔는지, 데몬 로그(`%LOCALAPPDATA%\laymux-dev\pty-daemon\g<protocol>-<build>\daemon.log`, ADR-0308)에 새 spawn이 없는지 확인한다.
+
+업데이트 인계(ADR-0308)는 설치기 없이 dev 전용 `POST /api/v1/dev/update-handoff`로 확인한다.
+
+- `{"mode":"installer"}`는 Windows 경로다. updater의 `on_before_exit`가 부르는 `release_installer_file_locks`를 실행한 뒤 `process::exit(0)`으로 끝난다.
+- `{"mode":"restart"}`는 Linux 경로다. 인계를 표시하고 `app.restart()`를 부른다. dev에서는 재시작한 프로세스가 `cargo tauri dev`의 vite를 잃으므로, 그 GUI만 끝내고 위 명령으로 다시 띄운다.
+- 그다음 위 4번처럼 같은 `$PID`로 재결합되는지 확인한다.
 
 ## 5. 사보타주 검증 — 테스트가 결함을 못박고 있지 않은지
 

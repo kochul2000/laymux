@@ -2314,4 +2314,6 @@ PowerShell의 PSReadLine 통합은 [ADR-0262](../adr/0262-powershell-command-lif
 
 Dev POST `/api/v1/ui/lifecycle`는 `{action:"open"}`으로 실제 업데이트 모달을 열고, `{action:"close"}`로 preview를 해제한다. `{kind:"close"|"update",stage:"ready"|"downloading"|"checkpoint"|"interrupting"|"settling"|"caching"|"installing"|"closing",completed?,total?,cleanup?,error?}`는 지정한 진행 상태의 preview를 표시한다. 실제 정리나 설치를 수행하지 않고 동일한 컴포넌트를 렌더한다. Rust debug gate와 frontend DEV gate를 모두 적용한다.
 
+Dev POST `/api/v1/dev/update-handoff`는 설치기 없이 업데이트 인계(ADR-0308)를 실행한다. `{mode:"installer"}`는 설치 직전 teardown(`release_installer_file_locks`)을 실행한 뒤 `process::exit(0)`으로 끝나고, `{mode:"restart"}`는 인계를 표시한 뒤 `app.restart()`를 부른다. 응답(202) 직후 프로세스가 끝난다. release는 403이다.
+
 Dev POST `/api/v1/ui/key`는 `{key,ctrl?,alt?,shift?}`로 포커스된 요소에서 `keydown` 하나를 발생시켜, 실제 키 입력과 같은 터미널 패스스루 → 문서 단축키 경로를 자율 검증 루프에서 재현한다(OS 키 주입이 불가능한 비대화형 세션 대비). 응답은 `{dispatched,defaultPrevented,target}`이다. Rust debug gate와 frontend DEV gate를 모두 적용한다.

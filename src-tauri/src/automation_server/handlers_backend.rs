@@ -362,6 +362,11 @@ pub async fn api_docs() -> impl IntoResponse {
                 "body": { "action": "open | close (optional)", "kind": "close | update", "stage": "ready | downloading | checkpoint | interrupting | settling | caching | installing | closing", "completed": "number (optional)", "total": "number (optional)", "cleanup": "boolean (optional)" }
             },
             {
+                "method": "POST", "path": "/api/v1/dev/update-handoff",
+                "description": "Dev-only update handoff without an installer (ADR-0308): installer runs the installer teardown then exits the process; restart marks the handoff and restarts the app. The next GUI adopts the daemon sessions. Release returns 403.",
+                "body": { "mode": "installer | restart" }
+            },
+            {
                 "method": "POST", "path": "/api/v1/ui/key",
                 "description": "Dev-only keyboard injection: dispatch one keydown at the focused element so app shortcuts travel the real terminal pass-through path. Release returns 403.",
                 "body": { "key": "KeyboardEvent.key, e.g. \"ArrowRight\" or \"s\"", "ctrl": "(optional) bool", "alt": "(optional) bool", "shift": "(optional) bool" }
