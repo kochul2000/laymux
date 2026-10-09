@@ -117,10 +117,11 @@ fn plan_start_dir(starting_directory: &str, cmd_path: &str) -> StartDirPlan {
     } else {
         dir
     };
-    if std::path::Path::new(&effective_dir).is_dir() {
-        StartDirPlan::ChildCwd(effective_dir)
-    } else {
-        StartDirPlan::None
+    // Absolute against this process, as checked: the PTY daemon resolves a
+    // relative directory against its own working directory instead.
+    match std::path::absolute(&effective_dir) {
+        Ok(dir) if dir.is_dir() => StartDirPlan::ChildCwd(dir.to_string_lossy().into_owned()),
+        _ => StartDirPlan::None,
     }
 }
 
@@ -1791,6 +1792,18 @@ printf 'RAW_BYTES:%s\r\n' "$hex"
         assert!(!is_unix_path("C:\\Users\\test"));
         assert!(!is_unix_path(""));
         assert!(!is_unix_path("relative/path"));
+    }
+
+    #[test]
+    fn plan_start_dir_makes_a_relative_directory_absolute_against_the_gui() {
+        // The PTY daemon would resolve it against its own directory.
+        let StartDirPlan::ChildCwd(dir) = plan_start_dir(".", "powershell.exe") else {
+            panic!("an existing directory is planned");
+        };
+        assert_eq!(
+            std::path::Path::new(&dir),
+            std::path::absolute(".").unwrap()
+        );
     }
 
     #[test]
