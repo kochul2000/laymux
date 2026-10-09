@@ -8,12 +8,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 
 use super::modes::TerminalModes;
+use super::screen::ScreenModel;
 use super::transport::{self, Stream};
 use super::wire::{write_control, write_data, DaemonMessage, SessionInfo};
-use crate::constants::{
-    PTY_DAEMON_DETACHED_BACKLOG_BYTES, PTY_DAEMON_SCREEN_DEFAULT_COLS,
-    PTY_DAEMON_SCREEN_DEFAULT_ROWS,
-};
+use crate::constants::PTY_DAEMON_DETACHED_BACKLOG_BYTES;
 use crate::lock_ext::MutexExt;
 use crate::pty::{PtyHandle, PtyOutputControl, PTY_READ_BUFFER_BYTES};
 
@@ -86,6 +84,7 @@ pub(super) struct Session {
     pending_screen_size: Mutex<Option<(u16, u16)>>,
 }
 
+#[derive(Default)]
 pub(super) struct Sink {
     pub(super) client: Option<ClientLink>,
     pub(super) backlog: VecDeque<u8>,
@@ -95,27 +94,8 @@ pub(super) struct Sink {
     /// Modes set by all output so far, attached or not (ADR-0303).
     pub(super) modes: TerminalModes,
     /// The visible screen as all output so far left it, for the next
-    /// replay-less attach to redraw (ADR-0307).
-    pub(super) screen: vt100::Parser,
-}
-
-impl Default for Sink {
-    fn default() -> Self {
-        Self {
-            client: None,
-            backlog: VecDeque::new(),
-            dropped_bytes: 0,
-            reader_ended: false,
-            exit_code: None,
-            modes: TerminalModes::default(),
-            // Sized for real at spawn; no scrollback is kept.
-            screen: vt100::Parser::new(
-                PTY_DAEMON_SCREEN_DEFAULT_ROWS,
-                PTY_DAEMON_SCREEN_DEFAULT_COLS,
-                0,
-            ),
-        }
-    }
+    /// replay-less attach to redraw (ADR-0307). Sized for real at spawn.
+    pub(super) screen: ScreenModel,
 }
 
 impl Sink {
@@ -216,6 +196,7 @@ impl Session {
         connection_id: u64,
         replay: bool,
         take_over: bool,
+        size: Option<(u16, u16)>,
     ) -> Result<u64, String> {
         let link = ClientLink {
             connection_id,
@@ -240,6 +221,13 @@ impl Session {
             // slip in between the claim and the epoch change.
             self.next_attach_epoch_claimed()
         };
+        // The redraw is laid out for the PTY's size; take the new client's
+        // size first so it lands on the client's grid as drawn (ADR-0307).
+        if let Some((rows, cols)) = size {
+            if let Err(error) = self.resize_pty(rows, cols) {
+                tracing::warn!(session_id = %self.id, %error, "PTY daemon resize on attach failed");
+            }
+        }
         let mut sink = self.sink.lock_or_err()?;
         if let Some(previous) = sink.client.take() {
             previous.writer.close();
@@ -250,21 +238,14 @@ impl Session {
         let child_pid = self.handle.get().and_then(PtyHandle::child_pid);
         // Without replay the client never sees the output that set the
         // session's modes and drew its screen, so it gets the modes
-        // re-asserted (ADR-0303) and then the screen redrawn (ADR-0307):
-        // cells, attributes and cursor only — no query, no OSC. A replay (no
-        // production path yet) carries neither: the backlog holds only
+        // re-asserted (ADR-0303) and the screen redrawn (ADR-0307). A replay
+        // (no production path yet) carries neither: the backlog holds only
         // output from while no client was attached.
         let preamble = if replay {
             Vec::new()
         } else {
             self.apply_pending_screen_size(&mut sink);
-            let screen = sink.screen.screen();
-            [
-                sink.modes.preamble(),
-                screen.contents_formatted(),
-                screen.cursor_state_formatted(),
-            ]
-            .concat()
+            adoption_frame(&sink.modes, &sink.screen)
         };
         // Without replay the retained bytes are discarded instead of handed
         // to a client that would parse them as live output (and answer the
@@ -290,11 +271,11 @@ impl Session {
                     .try_for_each(|chunk| writer.send_data(chunk))
             })
             .and_then(|()| {
-                if preamble.is_empty() {
-                    Ok(())
-                } else {
-                    writer.send_data(&preamble)
-                }
+                // A large redraw (a full screen of true-color cells) can
+                // exceed one frame.
+                preamble
+                    .chunks(PTY_READ_BUFFER_BYTES)
+                    .try_for_each(|chunk| writer.send_data(chunk))
             })
             .and_then(|()| {
                 if sink.reader_ended {
@@ -364,16 +345,34 @@ impl Session {
     }
 
     pub(super) fn resize(&self, rows: u16, cols: u16, writer: &ConnWriter) {
-        let Some(handle) = self.handle.get() else {
-            return;
-        };
-        if let Err(error) = handle.resize(cols, rows) {
+        if let Err(error) = self.resize_pty(rows, cols) {
             writer.error(&format!("PTY daemon resize failed: {error}"));
-            return;
         }
-        if let Ok(mut pending) = self.pending_screen_size.lock_or_err() {
-            *pending = Some((rows, cols));
+    }
+
+    /// The new size is recorded for the screen model before the PTY takes
+    /// it, so output the child lays out for it is never parsed at the old
+    /// one; a refused resize restores the record.
+    fn resize_pty(&self, rows: u16, cols: u16) -> Result<(), String> {
+        if rows == 0 || cols == 0 {
+            return Err(format!("invalid PTY size {rows}x{cols}"));
         }
+        let Some(handle) = self.handle.get() else {
+            return Ok(());
+        };
+        let previous = self
+            .pending_screen_size
+            .lock_or_err()?
+            .replace((rows, cols));
+        let resized = handle.resize(cols, rows);
+        if resized.is_err() {
+            if let Ok(mut pending) = self.pending_screen_size.lock_or_err() {
+                if *pending == Some((rows, cols)) {
+                    *pending = previous;
+                }
+            }
+        }
+        resized
     }
 
     /// Give the screen model the PTY's latest size. Output after a resize is
@@ -385,7 +384,7 @@ impl Session {
             .ok()
             .and_then(|mut pending| pending.take());
         if let Some((rows, cols)) = pending {
-            sink.screen.screen_mut().set_size(rows, cols);
+            sink.screen.set_size(rows, cols);
         }
     }
 
@@ -489,6 +488,31 @@ impl Session {
                 *attached = None;
             }
         }
+    }
+}
+
+/// What a client that adopts the session without replay sees first: the
+/// buffer switch, the redrawn screen, then every other mode and the cursor's
+/// visibility as the modes have it. The redraw needs a fresh terminal's
+/// autowrap and replace mode, so the modes that change those follow it. It
+/// holds cells, attributes and the cursor only — no query, no OSC.
+///
+/// A model that disagrees with the modes about the buffer (`?1047`, which
+/// `vt100` ignores) would draw the main screen into the alternate one, so
+/// then only the modes are restored.
+fn adoption_frame(modes: &TerminalModes, screen: &ScreenModel) -> Vec<u8> {
+    match screen
+        .redraw()
+        .filter(|_| screen.alternate_screen() == modes.alternate_screen())
+    {
+        Some(redraw) => [
+            modes.screen_preamble(),
+            &redraw,
+            &modes.mode_preamble(),
+            modes.cursor_visibility(),
+        ]
+        .concat(),
+        None => modes.preamble(),
     }
 }
 

@@ -59,10 +59,14 @@ pub enum ClientMessage {
     /// modes instead (ADR-0303). With `take_over` a currently attached client is replaced;
     /// without it (adoption) the attach is refused when the session is
     /// attached or being terminated, so two adopters never share one child.
+    /// With `size` the PTY takes the client's size before the screen is
+    /// redrawn for it (ADR-0307); a daemon that predates the field ignores it.
     Attach {
         session_id: String,
         replay: bool,
         take_over: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size: Option<AttachSize>,
     },
     /// Describe live sessions. Valid on an unbound connection.
     List,
@@ -186,6 +190,13 @@ impl WireCommand {
         }
         Ok(command)
     }
+}
+
+/// A client's terminal grid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttachSize {
+    pub rows: u16,
+    pub cols: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

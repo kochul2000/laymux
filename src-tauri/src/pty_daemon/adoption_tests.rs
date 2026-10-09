@@ -120,6 +120,7 @@ fn attach_without_replay_discards_detached_output() {
             session_id: "pane-l#1".into(),
             replay: false,
             take_over: true,
+            size: None,
         },
     )
     .unwrap();
@@ -176,6 +177,7 @@ fn an_adopting_attach_is_refused_while_another_client_holds_the_session() {
             session_id: "pane-o#1".into(),
             replay: false,
             take_over: false,
+            size: None,
         },
     )
     .unwrap();
@@ -228,6 +230,7 @@ fn a_terminate_from_the_previous_owner_cannot_end_an_adopted_session() {
             session_id: "pane-p#1".into(),
             replay: false,
             take_over: false,
+            size: None,
         },
     )
     .unwrap();
@@ -309,6 +312,7 @@ fn an_adopting_attach_reasserts_modes_set_while_detached() {
             session_id: "pane-r#1".into(),
             replay: false,
             take_over: false,
+            size: None,
         },
     )
     .unwrap();
@@ -341,7 +345,7 @@ fn attach_after_output(output: &[u8], replay: bool) -> BufReader<Stream> {
     let session = Session::new("pane-s#1".into(), "pane-s".into(), BTreeMap::new(), 1);
     let _ = session.deliver_output(output);
     let writer = Arc::new(ConnWriter::new(&server_side).unwrap());
-    session.attach(&writer, 1, replay, false).unwrap();
+    session.attach(&writer, 1, replay, false, None).unwrap();
     client
         .set_read_timeout(Some(Duration::from_millis(500)))
         .unwrap();
@@ -353,33 +357,95 @@ fn attach_after_output(output: &[u8], replay: bool) -> BufReader<Stream> {
     reader
 }
 
+/// Every data frame the client gets before the connection goes quiet, and
+/// how many there were.
+fn first_data(reader: &mut BufReader<Stream>) -> (Vec<u8>, usize) {
+    let mut bytes = Vec::new();
+    let mut frames = 0;
+    while let Ok(Some(Frame::Data(data))) = read_frame::<_, DaemonMessage>(reader) {
+        bytes.extend(data);
+        frames += 1;
+    }
+    (bytes, frames)
+}
+
+fn position(haystack: &[u8], needle: &[u8]) -> usize {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+        .unwrap_or_else(|| panic!("{needle:?} not in {:?}", String::from_utf8_lossy(haystack)))
+}
+
 #[test]
-fn a_replayless_attach_starts_with_the_modes_then_the_screen_it_missed() {
-    let mut reader = attach_after_output(b"old screen [?2004h[?1h more", false);
-    let bytes = match read_frame::<_, DaemonMessage>(&mut reader).unwrap() {
-        Some(Frame::Data(bytes)) => bytes,
-        other => panic!("expected the mode preamble and screen, got {other:?}"),
-    };
-    // Modes first (ADR-0303), then a redraw of the screen (ADR-0307).
-    assert!(bytes.starts_with(b"[?1h[?2004h"), "{bytes:?}");
+fn a_replayless_attach_redraws_the_screen_it_missed_then_asserts_the_modes() {
+    let mut reader = attach_after_output(b"old screen \x1b[?2004h\x1b[?1h more", false);
+    let (bytes, _) = first_data(&mut reader);
     let mut screen = vt100::Parser::new(24, 80, 0);
     screen.process(&bytes);
     assert_eq!(screen.screen().contents(), "old screen  more");
     assert_eq!(screen.screen().cursor_position(), (0, 16));
+    // The modes (ADR-0303) follow the redraw (ADR-0307), and the cursor's
+    // visibility is stated last.
+    assert!(
+        bytes.ends_with(b"\x1b[?1h\x1b[?2004h\x1b[?25h"),
+        "{:?}",
+        String::from_utf8_lossy(&bytes)
+    );
     assert_redraw_only(&bytes);
-    // The discarded raw output itself never follows.
-    assert!(!matches!(
-        read_frame::<_, DaemonMessage>(&mut reader),
-        Ok(Some(_))
-    ));
+}
+
+#[test]
+fn modes_that_change_how_text_is_drawn_follow_the_redraw() {
+    // Without autowrap a redrawn wrapped row would overwrite its last cell
+    // instead of continuing on the next row.
+    let wrapped = format!("{}\x1b[?7l\x1b[4h", "x".repeat(100));
+    let mut reader = attach_after_output(wrapped.as_bytes(), false);
+    let (bytes, _) = first_data(&mut reader);
+    let last_x = bytes.iter().rposition(|byte| *byte == b'x').unwrap();
+    assert!(last_x < position(&bytes, b"\x1b[?7l"));
+    assert!(last_x < position(&bytes, b"\x1b[4h"));
+}
+
+#[test]
+fn the_alternate_screen_is_entered_before_it_is_redrawn() {
+    let mut reader = attach_after_output(b"main\x1b[?1049h\x1b[HALT SCREEN", false);
+    let (bytes, _) = first_data(&mut reader);
+    assert!(bytes.starts_with(b"\x1b[?1049h"));
+    let mut screen = vt100::Parser::new(24, 80, 0);
+    screen.process(&bytes);
+    assert!(screen.screen().alternate_screen());
+    assert_eq!(screen.screen().contents(), "ALT SCREEN");
+}
+
+#[test]
+fn the_cursor_visibility_follows_the_modes_after_a_soft_reset() {
+    // DECSTR shows the cursor in xterm.js; vt100 keeps it hidden.
+    let mut reader = attach_after_output(b"\x1b[?25lprompt\x1b[!p", false);
+    let (bytes, _) = first_data(&mut reader);
+    assert!(bytes.ends_with(b"\x1b[?25h"));
+}
+
+#[test]
+fn a_large_redraw_is_split_into_frames() {
+    let mut cells = String::new();
+    for index in 0..(24 * 80 - 1) {
+        let shade = index % 256;
+        cells.push_str(&format!("\x1b[38;2;{shade};1;2;48;2;3;{shade};4mX"));
+    }
+    let mut reader = attach_after_output(cells.as_bytes(), false);
+    let (bytes, frames) = first_data(&mut reader);
+    assert!(frames > 1, "{} bytes in one frame", bytes.len());
+    let mut screen = vt100::Parser::new(24, 80, 0);
+    screen.process(&bytes);
+    assert_eq!(screen.screen().contents().matches('X').count(), 24 * 80 - 1);
 }
 
 /// A redraw must only set cells, attributes, cursor and modes: an OSC or a
 /// device query in it would be processed or answered a second time.
 fn assert_redraw_only(bytes: &[u8]) {
     let text = String::from_utf8_lossy(bytes);
-    assert!(!text.contains("]"), "OSC in redraw: {text:?}");
-    for query in ["[c", "[0c", "[>c", "[5n", "[6n", "$p"] {
+    assert!(!text.contains("\x1b]"), "OSC in redraw: {text:?}");
+    for query in ["\x1b[c", "\x1b[0c", "\x1b[>c", "\x1b[5n", "\x1b[6n", "$p"] {
         assert!(!text.contains(query), "query {query:?} in redraw: {text:?}");
     }
 }
@@ -409,7 +475,7 @@ fn modes_set_while_a_client_was_attached_survive_into_the_next_adoption() {
     let first_client = transport::connect(&endpoint).unwrap();
     let first_server = listener.accept().unwrap();
     let first = Arc::new(ConnWriter::new(&first_server).unwrap());
-    session.attach(&first, 1, false, false).unwrap();
+    session.attach(&first, 1, false, false, None).unwrap();
     let _ = session.deliver_output(b"\x1b[?2004h prompt");
     session.detach(1);
     drop(first_client);
@@ -417,7 +483,7 @@ fn modes_set_while_a_client_was_attached_survive_into_the_next_adoption() {
     let client = transport::connect(&endpoint).unwrap();
     let server_side = listener.accept().unwrap();
     let writer = Arc::new(ConnWriter::new(&server_side).unwrap());
-    session.attach(&writer, 2, false, false).unwrap();
+    session.attach(&writer, 2, false, false, None).unwrap();
     client
         .set_read_timeout(Some(Duration::from_millis(500)))
         .unwrap();
@@ -426,14 +492,10 @@ fn modes_set_while_a_client_was_attached_survive_into_the_next_adoption() {
         Some(Frame::Control(DaemonMessage::Attached { .. })) => {}
         other => panic!("unexpected attach reply {other:?}"),
     }
-    match read_frame::<_, DaemonMessage>(&mut reader).unwrap() {
-        Some(Frame::Data(bytes)) => {
-            assert!(bytes.starts_with(b"\x1b[?2004h"), "{bytes:?}");
-            // The screen the first GUI saw is redrawn for the next one.
-            let mut screen = vt100::Parser::new(24, 80, 0);
-            screen.process(&bytes);
-            assert_eq!(screen.screen().contents(), " prompt");
-        }
-        other => panic!("expected the mode preamble and screen, got {other:?}"),
-    }
+    let (bytes, _) = first_data(&mut reader);
+    assert!(bytes.ends_with(b"\x1b[?2004h\x1b[?25h"), "{bytes:?}");
+    // The screen the first GUI saw is redrawn for the next one.
+    let mut screen = vt100::Parser::new(24, 80, 0);
+    screen.process(&bytes);
+    assert_eq!(screen.screen().contents(), " prompt");
 }

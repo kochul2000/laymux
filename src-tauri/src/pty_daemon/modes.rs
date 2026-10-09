@@ -81,6 +81,37 @@ impl TerminalModes {
     /// application asked for by enabling them. Alternate screen comes first:
     /// entering it must not undo the modes asserted after it.
     pub fn preamble(&self) -> Vec<u8> {
+        [self.screen_preamble(), &self.mode_preamble()].concat()
+    }
+
+    /// The buffer switch alone. A screen redraw (ADR-0307) goes between it
+    /// and [`Self::mode_preamble`]: it draws into the active buffer, and
+    /// relies on a fresh terminal's autowrap and replace mode.
+    pub fn screen_preamble(&self) -> &'static [u8] {
+        if self.alternate_screen {
+            b"\x1b[?1049h"
+        } else {
+            b""
+        }
+    }
+
+    pub fn alternate_screen(&self) -> bool {
+        self.alternate_screen
+    }
+
+    /// The cursor's visibility, stated whatever it is: it overrides the one a
+    /// redraw sets, which can disagree after a soft reset (DECSTR shows the
+    /// cursor in xterm.js, not in `vt100`).
+    pub fn cursor_visibility(&self) -> &'static [u8] {
+        if self.cursor_visible {
+            b"\x1b[?25h"
+        } else {
+            b"\x1b[?25l"
+        }
+    }
+
+    /// Every mode but the buffer switch.
+    pub fn mode_preamble(&self) -> Vec<u8> {
         let defaults = Self::default();
         let mut set = Vec::new();
         let mut reset = Vec::new();
@@ -102,9 +133,6 @@ impl TerminalModes {
         }
 
         let mut out = Vec::new();
-        if self.alternate_screen {
-            out.extend_from_slice(b"\x1b[?1049h");
-        }
         for mode in set {
             out.extend_from_slice(format!("\x1b[?{mode}h").as_bytes());
         }

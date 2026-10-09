@@ -28,12 +28,16 @@ GUI가 crash하기 전 출력은 이전 GUI에만 전달됐다. 데몬 backlog�
 **데몬 세션은 PTY 출력으로 화면 모델(`vt100`)을 유지하고, replay 없는 attach에서는 모드 preamble(ADR-0303) 뒤에 현재 화면을 그리는 바이트를 첫 출력으로 보낸다.**
 
 - **화면 모델.**
-  - 세션마다 `vt100::Parser`를 둔다. scrollback은 0이고 크기는 PTY 크기다. spawn할 때 크기를 정하고, resize가 성공하면 그 크기를 기록한다.
-  - 크기 변경은 sink lock 안에서, 그 뒤 출력을 parse하기 직전에 적용한다. resize가 멈춘 client 때문에 sink lock을 기다리지 않게 하기 위해서다.
+  - 세션마다 `vt100::Parser`를 둔다. scrollback은 0이고 크기는 PTY 크기다. spawn할 때 크기를 정한다. resize는 PTY에 적용하기 전에 새 크기를 기록하고(실패하면 되돌린다), 모델은 sink lock 안에서 그 뒤 출력을 parse하기 직전에 그 크기를 적용한다. resize가 멈춘 client 때문에 sink lock을 기다리지 않게 하기 위해서다.
   - 출력은 attach 여부와 상관없이 모두 이 모델을 거친다.
+  - **모델은 세션을 멈추게 할 수 없다.** `vt100` 0.16은 일부 resize 뒤 쓰기에서 panic한다(좁아진 grid가 자른 wide 문자 위에 쓰기, 1행 grid의 줄바꿈). 모델 호출은 모두 `catch_unwind`로 감싸고, panic한 모델은 같은 크기의 빈 모델로 바꾼다. 그래서 sink lock이 poison되지 않고 PTY 출력 중계는 계속된다. 모델 크기는 최소 2×2이고, 0 크기의 spawn·resize는 거부한다.
+  - 행이 줄면 터미널처럼 main 화면의 위쪽을 밀어 올려 커서 행을 남긴 뒤 크기를 바꾼다(`vt100`은 아래 행을 버려 셸 프롬프트를 잃는다).
 - **redraw.** 내용은 `contents_formatted()`(화면 지우기, 셀·속성, 커서 숨김 상태)와 `cursor_state_formatted()`(커서 위치·표시)로 만든다.
   - **OSC와 device query는 넣지 않는다.** 셀, 속성, 커서, 모드 설정만 담는다. 그래서 GUI의 OSC 단일 패스(ADR-0001)가 업무 이벤트를 다시 처리하지 않고, xterm이 응답할 것도 없다(ADR-0068).
-  - 순서는 preamble(alt screen 진입 포함), 그다음 redraw, 그다음 live 출력이다. 모두 sink lock 안에서 보낸다.
+  - 순서는 alt screen 진입, redraw, 나머지 모드(ADR-0303), 커서 표시 여부, 그다음 live 출력이다. redraw는 새 터미널의 autowrap과 replace 모드를 전제로 그리므로(`vt100`은 DECAWM을 처리하지 않아 wrap된 행을 자동 줄바꿈에 맡긴다), 그 모드를 바꾸는 `?7l`·IRM은 redraw 뒤에 온다. 커서 표시는 모드 추적 결과로 마지막에 명시한다(DECSTR 뒤 xterm.js는 커서를 보이고 `vt100`은 숨긴 채로 둔다).
+  - 모델과 모드가 활성 버퍼를 다르게 볼 때(`vt100`이 무시하는 `?1047`)는 redraw 없이 모드만 복원한다. main 화면을 alt 버퍼에 그리지 않기 위해서다.
+  - 모두 sink lock 안에서, 한 frame 한도를 넘지 않게 나눠 보낸다(true color로 가득 찬 화면은 수백 KB다).
+- **크기.** 재결합하는 GUI는 attach 요청에 자기 grid 크기를 싣는다. 데몬은 adoption을 확정한 뒤 PTY와 모델을 그 크기로 바꾸고 나서 redraw를 만든다. redraw는 절대 좌표로 그리므로 GUI grid와 크기가 다르면 행이 접히고 커서가 엇나간다. 이 필드는 선택이라 이전 빌드 데몬은 무시하고, GUI는 attach 뒤에도 resize를 보낸다.
 - **보존 범위.** 지금 보이는 화면만 복원한다. alt screen이 활성이면 alt 화면이 복원되고, 그 뒤의 main buffer와 scrollback은 복원하지 않는다.
 - **resize nudge는 쓰지 않는다.** 위 측정에서 셸 복원에 효과가 없었고 Codex 중복 출력 위험이 있다.
 - **책임 경계.**
@@ -51,10 +55,13 @@ GUI가 crash하기 전 출력은 이전 GUI에만 전달됐다. 데몬 backlog�
 
 - 재결합한 셸 pane에 프롬프트와 이전 화면이 다시 보인다. TUI는 화면이 복원된 뒤 스스로 다시 그리면 그 내용으로 덮인다.
 - 데몬은 모든 출력을 `vt100`으로 한 번 더 parse한다. 비용은 출력량에 비례하고, 세션마다 화면 한 장 분량의 메모리가 든다.
-- `vt100`과 xterm.js의 시맨틱 차이로 일부 화면이 정확히 같지 않을 수 있다(복잡한 문자 폭, 일부 SGR 확장 등). 그래도 화면이 비어 있는 것보다 낫다. 차이가 문제가 되면 이 ADR의 범위를 다시 검토한다.
-- 화면 크기는 데몬 PTY 크기 기준이다. GUI 크기가 다르면 redraw 뒤 GUI resize가 이어지고, 앱이 그 크기에 맞춰 다시 그린다.
+- `vt100`과 xterm.js의 시맨틱 차이로 일부 화면이 정확히 같지 않을 수 있다. 그래도 화면이 비어 있는 것보다 낫다. 차이가 문제가 되면 reflow를 지원하는 모델(`alacritty_terminal` 등)로 바꾸는 것을 검토한다. 확인된 차이는 다음과 같다.
+  - 폭이 줄면 xterm.js는 wrap된 행을 reflow하지만 `vt100`은 오른쪽 열을 버린다. 폭을 줄인 뒤 재결합하면 그 행의 잘린 부분은 복원되지 않는다.
+  - SGR: 밑줄 색(`58;5;n`, `58;2;…`)을 다른 속성으로 잘못 읽고, 취소선(9)과 밑줄 모양(`4:3`)을 버린다.
+  - pending-wrap 상태(마지막 열에 쓴 직후)에서는 `cursor_state_formatted`가 마지막 셀을 다시 그린 뒤 SGR을 초기화한다. 다음 출력이 SGR 없이 이어지면 속성이 기본값으로 보인다.
 - scrollback 복원은 하지 않는다. 필요하면 별도로 결정한다.
 - 검증:
-  - 세션 수준 테스트: replay 없는 attach의 첫 frame을 parse하면 놓친 화면과 커서가 나오고, OSC와 query가 없다.
+  - 세션 수준 테스트: replay 없는 attach의 첫 data를 parse하면 놓친 화면과 커서가 나오고, OSC와 query가 없다. `?7l`·IRM은 redraw 뒤에 오고, alt screen은 진입 뒤에 그려지며, DECSTR 뒤 커서 표시가 모드를 따른다. 큰 redraw는 여러 frame으로 나뉜다.
+  - 모델 테스트: wide 문자 + 폭 축소 + 덮어쓰기, 1행·0 크기에서 panic 없이 계속 동작한다. 행이 줄면 프롬프트 행이 남는다.
   - 기존 모드 preamble 테스트.
   - dev 실기: crash 뒤 PowerShell 프롬프트와 Codex 화면 복원. A/B로 main 빌드에서 비어 있는 것과 비교한다.

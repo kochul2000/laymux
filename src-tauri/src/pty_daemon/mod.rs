@@ -22,6 +22,7 @@ mod idle;
 mod inventory;
 mod launcher;
 mod modes;
+mod screen;
 mod server;
 mod session;
 #[cfg(windows)]
