@@ -23,13 +23,13 @@ agent hook은 `LX_AUTOMATION_PORT`(build kind별 고정 포트)와 metadata로 �
 
 ## Decision
 
-**터미널 env에는 IDE endpoint 대신 build kind별 고정 경로의 endpoint 파일 위치(`LX_ENDPOINT_FILE`)를 넣는다. GUI는 IPC 서버를 연 직후 그 파일을 원자적으로 다시 게시하고, `lx`는 실행할 때마다 파일을 읽어 현재 GUI에 연결한다.**
+**터미널 env에는 IDE endpoint 대신 build kind별 고정 경로의 endpoint 파일 위치(`LX_ENDPOINT_FILE`)를 넣는다. build kind의 automation 포트를 잡은 GUI가 그 파일을 원자적으로 다시 게시하고, `lx`는 실행할 때마다 파일을 읽어 현재 GUI에 연결한다.**
 
 - **파일.** 설정 디렉터리에 `automation.json`과 나란히 `lx-endpoint.json`을 둔다(`%APPDATA%\laymux[-dev]`, `~/.config/laymux[-dev]`). 내용은 `{ "endpoint", "pid" }`이며 `pid`는 진단용이다.
   - 같은 디렉터리에 임시 파일로 쓴 뒤 rename으로 교체한다. 동시에 실행된 `lx`는 이전 endpoint나 새 endpoint 중 하나를 읽고, 쓰다 만 파일은 읽지 않는다.
-- **build kind 분리.** release와 dev는 디렉터리가 다르므로 서로의 파일을 읽지 않는다. build kind당 GUI는 하나다(AGENTS.md).
+- **build kind 분리와 게시 시점.** release와 dev는 디렉터리가 다르므로 서로의 파일을 읽지 않는다. build kind당 GUI는 하나라는 규칙(AGENTS.md)을 코드가 막지는 않는다. 그래서 고정 automation 포트 bind에 성공한 GUI만 파일을 게시한다. 실수로 같은 build kind의 GUI가 하나 더 떠도 먼저 떠 있던 GUI의 파일을 빼앗지 않는다. rename은 짧게 재시도한다(Windows에서 인덱서·백신이 파일을 잠깐 잡는 경우).
 - **env.** `LX_SOCKET`을 없애고 `LX_ENDPOINT_FILE`로 대체한다. 내부 개발 단계이므로 둘을 함께 두는 호환 기간을 두지 않는다.
-  - GUI가 파일을 게시하지 못하면 이 변수를 넣지 않는다. 그러면 `lx`는 "Laymux 터미널이 아니다"로 실패한다.
+  - IPC 서버를 열지 못했거나 설정 디렉터리가 절대 경로로 정해지지 않으면 이 변수를 넣지 않는다. 그러면 `lx`는 "Laymux 터미널이 아니다"로 실패한다. 상대 경로는 셸마다 다른 작업 디렉터리를 기준으로 해석되기 때문이다. 경로가 고정이므로 GUI가 파일을 게시하기 전에 만든 터미널도 게시 후에는 같은 파일을 읽는다.
 - **연결.** `lx`는 Windows에서는 TCP, Unix에서는 Unix socket으로 연결한다. 연결이 실패하면 endpoint와 원인을 출력하고 실패한다. 다른 경로를 추측해 찾지 않는다.
 - **이번 결정에 포함하지 않는 것.**
   - Windows IPC가 loopback TCP라서 다른 로컬 사용자도 연결할 수 있다. 사용자 전용 transport는 단계 C(#1150)에서 데몬 transport와 함께 정한다.

@@ -69,7 +69,7 @@ A shadow-cursor layer mirrors xterm.js's real cursor position so that the OS IME
 - Built-in MCP server (rmcp, Streamable HTTP) exposing **33 tools** for terminals, workspaces, grid/panes, screenshots, notifications, output search, and a file/image viewer.
 
 ### `lx` CLI
-The `lx` binary is auto-injected into every Laymux terminal via `PATH` and configured through `LX_ENDPOINT_FILE` / `LX_TERMINAL_ID` / `LX_GROUP_ID` environment variables. It exposes 10 commands:
+The `lx` binary must be on the shell's `PATH` (Laymux does not modify `PATH`); inside a Laymux terminal it is configured through `LX_ENDPOINT_FILE` / `LX_TERMINAL_ID` / `LX_GROUP_ID` environment variables. It exposes 10 commands:
 
 ```
 lx sync-cwd [path]            # sync CWD to group (or --all)

@@ -106,29 +106,16 @@ pub fn run() {
                     }
                 }),
             ) {
-                Ok(socket_path) => {
-                    // Shells re-adopted from the PTY daemon carry the fixed
-                    // file path, not this process's endpoint (ADR-0304).
-                    let published = lx_endpoint::publish(
-                        &lx_endpoint::endpoint_file_path(),
-                        &lx_endpoint::LxEndpoint {
-                            endpoint: socket_path.clone(),
-                            pid: std::process::id(),
-                        },
-                    );
-                    if let Err(error) = published {
-                        tracing::warn!(%error, "failed to publish the lx endpoint file");
-                    } else {
-                        match app_state.ipc_socket_path.lock_or_err() {
-                            Ok(mut path) => {
-                                path.replace(socket_path);
-                            }
-                            Err(error) => {
-                                tracing::warn!(%error, "failed to store IPC socket path");
-                            }
-                        }
+                // Published to the lx endpoint file once the automation port
+                // proves this is the build kind's only GUI (ADR-0304).
+                Ok(socket_path) => match app_state.ipc_socket_path.lock_or_err() {
+                    Ok(mut path) => {
+                        path.replace(socket_path);
                     }
-                }
+                    Err(error) => {
+                        tracing::warn!(%error, "failed to store IPC socket path");
+                    }
+                },
                 Err(e) => {
                     tracing::warn!(error = %e, "IPC server failed to start");
                 }
@@ -167,9 +154,15 @@ pub fn run() {
             // Start automation HTTP server
             let app_handle = app.handle().clone();
             let auto_state = app_state.clone();
+            let lx_state = app_state.clone();
             tauri::async_runtime::spawn(async move {
                 match automation_server::start(auto_state, app_handle).await {
-                    Ok(port) => tracing::info!(port, "Automation API ready"),
+                    Ok(port) => {
+                        tracing::info!(port, "Automation API ready");
+                        // The fixed port is held by one GUI per build kind, so
+                        // only that GUI takes over the lx endpoint file.
+                        lx_endpoint::publish_ipc_endpoint(&lx_state);
+                    }
                     Err(e) => tracing::warn!(error = %e, "Automation server failed to start"),
                 }
             });

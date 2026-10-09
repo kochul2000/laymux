@@ -4,15 +4,23 @@
 //! port on Windows, a per-session socket on Linux). A shell outlives the GUI
 //! that started it — the PTY daemon re-adopts it into the next GUI — so the
 //! environment cannot carry the endpoint itself. It carries the fixed path of
-//! this build kind's endpoint file instead; every GUI republishes the file at
-//! startup and `lx` reads it on every invocation.
+//! this build kind's endpoint file instead; the GUI that holds the build
+//! kind's automation port republishes the file and `lx` reads it on every
+//! invocation.
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::constants::{ENV_LX_ENDPOINT_FILE, LX_ENDPOINT_FILE_NAME};
+use crate::constants::{
+    ENV_LX_ENDPOINT_FILE, LX_ENDPOINT_FILE_NAME, LX_ENDPOINT_PUBLISH_ATTEMPTS,
+    LX_ENDPOINT_PUBLISH_RETRY_MS,
+};
+use crate::lock_ext::MutexExt;
+use crate::state::AppState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LxEndpoint {
@@ -24,20 +32,48 @@ pub struct LxEndpoint {
 
 /// This build kind's endpoint file, next to `automation.json` in the
 /// settings directory (`%APPDATA%\laymux[-dev]`, `~/.config/laymux[-dev]`).
-pub fn endpoint_file_path() -> PathBuf {
-    endpoint_file_path_in(
-        crate::settings::settings_path()
-            .parent()
-            .unwrap_or_else(|| Path::new(".")),
-    )
+/// `None` when that directory cannot be located: a relative path would be
+/// resolved against each shell's own working directory.
+pub fn endpoint_file_path() -> Option<PathBuf> {
+    let path = endpoint_file_path_in(crate::settings::settings_path().parent()?);
+    path.is_absolute().then_some(path)
 }
 
 pub fn endpoint_file_path_in(dir: &Path) -> PathBuf {
     dir.join(LX_ENDPOINT_FILE_NAME)
 }
 
+/// Publish this GUI's IPC endpoint. Called once the GUI holds the build
+/// kind's automation port, so a second, accidental GUI never takes the file
+/// over from the first.
+pub fn publish_ipc_endpoint(state: &AppState) {
+    let endpoint = match state.ipc_socket_path.lock_or_err() {
+        Ok(path) => path.clone(),
+        Err(error) => {
+            tracing::warn!(%error, "failed to read the IPC endpoint");
+            return;
+        }
+    };
+    let (Some(endpoint), Some(path)) = (endpoint, endpoint_file_path()) else {
+        tracing::warn!("no IPC endpoint or endpoint file location; lx is unavailable");
+        return;
+    };
+    let published = publish(
+        &path,
+        &LxEndpoint {
+            endpoint,
+            pid: std::process::id(),
+        },
+    );
+    if let Err(error) = published {
+        tracing::warn!(%error, path = %path.display(), "failed to publish the lx endpoint file");
+    }
+}
+
 /// Replace the endpoint file atomically, so an `lx` running concurrently
-/// reads either the previous or the new endpoint, never a partial file.
+/// reads either the previous or the new endpoint, never a partial file. The
+/// rename is retried briefly: on Windows another process (an indexer or
+/// virus scanner) can hold the file without delete sharing for a moment.
 pub fn publish(path: &Path, endpoint: &LxEndpoint) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -45,9 +81,22 @@ pub fn publish(path: &Path, endpoint: &LxEndpoint) -> io::Result<()> {
     let json = serde_json::to_vec_pretty(endpoint).map_err(io::Error::other)?;
     let temp = path.with_extension(format!("json.{}.tmp", endpoint.pid));
     std::fs::write(&temp, json)?;
-    std::fs::rename(&temp, path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&temp);
-    })
+    let mut attempt = 1;
+    loop {
+        match std::fs::rename(&temp, path) {
+            Ok(()) => return Ok(()),
+            Err(_) if attempt < LX_ENDPOINT_PUBLISH_ATTEMPTS => {
+                thread::sleep(Duration::from_millis(
+                    LX_ENDPOINT_PUBLISH_RETRY_MS << (attempt - 1),
+                ));
+                attempt += 1;
+            }
+            Err(error) => {
+                let _ = std::fs::remove_file(&temp);
+                return Err(error);
+            }
+        }
+    }
 }
 
 pub fn read(path: &Path) -> io::Result<LxEndpoint> {

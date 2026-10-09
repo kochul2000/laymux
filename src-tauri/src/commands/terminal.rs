@@ -231,14 +231,15 @@ pub async fn create_terminal_session(
     // valid for a shell that outlives this GUI (ADR-0304).
     let mut env = Vec::new();
     if let Ok(path_lock) = state.ipc_socket_path.lock_or_err() {
-        // Set only once the endpoint file was published for this GUI.
+        // The path is fixed, so a terminal created before this GUI publishes
+        // the file still finds it once published.
         if path_lock.is_some() {
-            env.push((
-                ENV_LX_ENDPOINT_FILE.to_string(),
-                crate::lx_endpoint::endpoint_file_path()
-                    .to_string_lossy()
-                    .into_owned(),
-            ));
+            if let Some(file) = crate::lx_endpoint::endpoint_file_path() {
+                env.push((
+                    ENV_LX_ENDPOINT_FILE.to_string(),
+                    file.to_string_lossy().into_owned(),
+                ));
+            }
         }
     }
     if let Ok(port_lock) = state.automation_port.lock_or_err() {

@@ -85,6 +85,10 @@ pub const REMOTE_SESSION_POLL: Duration = Duration::from_secs(2);
 pub const ENV_LX_ENDPOINT_FILE: &str = "LX_ENDPOINT_FILE";
 /// File name of the `lx` endpoint file in the settings directory.
 pub const LX_ENDPOINT_FILE_NAME: &str = "lx-endpoint.json";
+/// Attempts, with doubling delay from `LX_ENDPOINT_PUBLISH_RETRY_MS`, to
+/// replace the endpoint file while another process briefly holds it.
+pub const LX_ENDPOINT_PUBLISH_ATTEMPTS: u32 = 5;
+pub const LX_ENDPOINT_PUBLISH_RETRY_MS: u64 = 20;
 pub const ENV_LX_TERMINAL_ID: &str = "LX_TERMINAL_ID";
 pub const ENV_LX_GROUP_ID: &str = "LX_GROUP_ID";
 pub const ENV_LX_AUTOMATION_PORT: &str = "LX_AUTOMATION_PORT";
