@@ -2,20 +2,29 @@
 //! attach epochs, replay policy and shutdown.
 
 use std::collections::BTreeMap;
+use std::io::BufReader;
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+#[cfg(unix)]
+use portable_pty::CommandBuilder;
 
 use super::client::DaemonPtySystem;
 use super::control::{connect_authenticated, list_sessions};
+use super::session::{ConnWriter, Session};
 use super::tests::{
     collect_until, delayed_printer, interactive_shell, raw_spawn, read_until, size, sleeper,
     spawning, TestDaemon, TIMEOUT,
 };
+use super::transport::{self, Listener, Stream};
 use super::wire::{read_frame, write_control, ClientMessage, DaemonMessage, Frame, WireCommand};
 use super::DaemonEndpoint;
 use crate::pty::{
     spawn_command_on, ChildKillOwner, PtyLifecycleHooks, PtyOutputControl, SpawnOptions,
 };
+#[cfg(unix)]
+use crate::terminal_protocol::TerminalProtocolState;
 
 fn wait_detached(endpoint: &DaemonEndpoint, session_id: &str) {
     let deadline = Instant::now() + TIMEOUT;
@@ -269,4 +278,105 @@ fn app_exit_ends_daemon_terminals_registered_in_app_state() {
     // The process would exit here without running any destructor.
     std::mem::forget(state);
     daemon.wait_for_sessions(0);
+}
+
+/// Turns on bracketed paste about a second after start, then idles. Unix
+/// only: test binaries do not sit next to the bundled ConPTY, and the inbox
+/// conhost they fall back to swallows DECSET 2004 instead of passing it on.
+#[cfg(unix)]
+fn late_bracketed_paste() -> CommandBuilder {
+    let mut command = CommandBuilder::new("/bin/sh");
+    command.args(["-c", "sleep 1; printf '\\033[?2004h'; sleep 60"]);
+    command
+}
+
+#[cfg(unix)]
+#[test]
+fn an_adopting_attach_reasserts_modes_set_while_detached() {
+    let daemon = TestDaemon::start();
+    let (writer, reader) = raw_spawn(&daemon.endpoint, "pane-r#1", late_bracketed_paste());
+    drop(writer);
+    drop(reader);
+    wait_detached(&daemon.endpoint, "pane-r#1");
+    // The mode is set while nobody is attached.
+    std::thread::sleep(Duration::from_millis(4000));
+
+    let (mut writer, mut reader) = connect_authenticated(&daemon.endpoint).unwrap();
+    reader.get_ref().set_read_timeout(Some(TIMEOUT)).unwrap();
+    write_control(
+        &mut writer,
+        &ClientMessage::Attach {
+            session_id: "pane-r#1".into(),
+            replay: false,
+            take_over: false,
+        },
+    )
+    .unwrap();
+    match read_frame::<_, DaemonMessage>(&mut reader).unwrap() {
+        Some(Frame::Control(DaemonMessage::Attached { .. })) => {}
+        other => panic!("unexpected attach reply {other:?}"),
+    }
+    // The first output a fresh GUI parses re-asserts the mode.
+    let preamble = match read_frame::<_, DaemonMessage>(&mut reader).unwrap() {
+        Some(Frame::Data(bytes)) => bytes,
+        other => panic!("expected the mode preamble, got {other:?}"),
+    };
+    let mut protocol = TerminalProtocolState::new();
+    protocol.process_output(&preamble);
+    assert!(
+        protocol.bracketed_paste(),
+        "preamble {:?} must turn on bracketed paste",
+        String::from_utf8_lossy(&preamble)
+    );
+    write_control(&mut writer, &ClientMessage::Terminate).unwrap();
+    daemon.wait_for_sessions(0);
+}
+
+/// A session fed output directly, attached over a real local connection.
+fn attach_after_output(output: &[u8], replay: bool) -> BufReader<Stream> {
+    let dir = tempfile::tempdir().unwrap();
+    let (listener, endpoint) = Listener::bind(dir.path()).unwrap();
+    let client = transport::connect(&endpoint, Duration::from_secs(5)).unwrap();
+    let server_side = listener.accept().unwrap();
+    let session = Session::new("pane-s#1".into(), "pane-s".into(), BTreeMap::new(), 1);
+    let _ = session.deliver_output(output);
+    let writer = Arc::new(ConnWriter::new(&server_side).unwrap());
+    session.attach(&writer, 1, replay, false).unwrap();
+    client
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .unwrap();
+    let mut reader = BufReader::new(client);
+    match read_frame::<_, DaemonMessage>(&mut reader).unwrap() {
+        Some(Frame::Control(DaemonMessage::Attached { .. })) => {}
+        other => panic!("unexpected attach reply {other:?}"),
+    }
+    reader
+}
+
+#[test]
+fn a_replayless_attach_starts_with_only_the_modes_output_set() {
+    let mut reader = attach_after_output(b"old screen \x1b[?2004h\x1b[?1h more", false);
+    match read_frame::<_, DaemonMessage>(&mut reader).unwrap() {
+        Some(Frame::Data(bytes)) => assert_eq!(bytes, b"\x1b[?1h\x1b[?2004h"),
+        other => panic!("expected the mode preamble, got {other:?}"),
+    }
+    // The discarded output itself never follows.
+    assert!(!matches!(
+        read_frame::<_, DaemonMessage>(&mut reader),
+        Ok(Some(_))
+    ));
+}
+
+#[test]
+fn a_replaying_attach_gets_the_backlog_without_a_preamble() {
+    let output = b"old screen \x1b[?2004h more";
+    let mut reader = attach_after_output(output, true);
+    match read_frame::<_, DaemonMessage>(&mut reader).unwrap() {
+        Some(Frame::Data(bytes)) => assert_eq!(bytes, output),
+        other => panic!("expected the backlog, got {other:?}"),
+    }
+    assert!(!matches!(
+        read_frame::<_, DaemonMessage>(&mut reader),
+        Ok(Some(_))
+    ));
 }

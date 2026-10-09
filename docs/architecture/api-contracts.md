@@ -1961,6 +1961,7 @@ src-tauri/src/
 │   ├── handshake.rs          # 데몬: 인증 handshake(전체 deadline·proof)
 │   ├── idle.rs               # 데몬: idle 종료 판정
 │   ├── session.rs            # 데몬 세션: attach/detach·backlog
+│   ├── modes.rs              # 데몬 세션: 출력에서 추적한 터미널 모드·재결합 preamble
 │   ├── client.rs             # GUI: 원격 PtySystem proxy
 │   ├── control.rs            # GUI: 인증 연결·세션 목록·id 기반 종료
 │   ├── client_queue.rs       # GUI: 유계 수신 queue·exit slot

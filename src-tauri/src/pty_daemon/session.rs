@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 
+use super::modes::TerminalModes;
 use super::transport::{self, Stream};
 use super::wire::{write_control, write_data, DaemonMessage, SessionInfo};
 use crate::constants::PTY_DAEMON_DETACHED_BACKLOG_BYTES;
@@ -86,6 +87,8 @@ pub(super) struct Sink {
     pub(super) dropped_bytes: u64,
     pub(super) reader_ended: bool,
     pub(super) exit_code: Option<u32>,
+    /// Modes set by all output so far, attached or not (ADR-0302).
+    pub(super) modes: TerminalModes,
 }
 
 impl Sink {
@@ -132,6 +135,9 @@ impl Session {
         let Ok(mut sink) = self.sink.lock_or_err() else {
             return PtyOutputControl::Stop;
         };
+        // Under the sink lock, so an attach's preamble reflects exactly the
+        // output that precedes the client's first live frame.
+        sink.modes.process(data);
         if let Some(client) = sink.client.as_ref() {
             if client.writer.send_data(data).is_ok() {
                 return PtyOutputControl::Continue;
@@ -211,6 +217,14 @@ impl Session {
             return Err("PTY daemon attach was superseded by a newer attach".into());
         }
         let child_pid = self.handle.get().and_then(PtyHandle::child_pid);
+        // Without replay the client never sees the output that set the
+        // session's modes, so it gets them re-asserted instead (ADR-0302).
+        // A replay carries those mode changes itself.
+        let preamble = if replay {
+            Vec::new()
+        } else {
+            sink.modes.preamble()
+        };
         // Without replay the retained bytes are discarded instead of handed
         // to a client that would parse them as live output (and answer the
         // terminal queries inside them again).
@@ -233,6 +247,13 @@ impl Session {
                     .chunks(PTY_READ_BUFFER_BYTES)
                     .chain(back.chunks(PTY_READ_BUFFER_BYTES))
                     .try_for_each(|chunk| writer.send_data(chunk))
+            })
+            .and_then(|()| {
+                if preamble.is_empty() {
+                    Ok(())
+                } else {
+                    writer.send_data(&preamble)
+                }
             })
             .and_then(|()| {
                 if sink.reader_ended {
