@@ -1011,7 +1011,9 @@ endpoint는 두 플랫폼 모두 이 socket이며, 다른 로컬 계정은 OS가
 
 dev 빌드의 StrictMode는 TerminalView를 한 번 닫았다 다시 열어서, 재결합한 세션을 바로 종료한다. PTY 수명을 dev에서 확인할 때는 `VITE_LAYMUX_STRICT_MODE=0`으로 띄운다([dev-repro-methodology.md §4.7](../dev-repro-methodology.md)).
 
-**아직 없는 것:** 업데이트 인계(업데이트 중 작업 유지), 화면 snapshot, GUI 미접속 중 OSC·훅 처리, 어느 pane에도 속하지 않는 분리 세션을 보여 주거나 끝내는 사용자 경로는 후속 단계다.
+**분리 세션 관리:** 설정 › 터미널 › PTY 세션 패널이 데몬 세션을 `pane`(이 GUI의 터미널)·`detached`(client 없음)·`otherClient`·`ending`으로 보여 주고, `detached`만 목록에서 본 attach epoch로 끝낸다(사이에 다시 attach됐으면 `superseded`로 남는다). 목록 조회 실패는 빈 목록이 아니라 오류로 표시하고 자동 정리는 하지 않는다. 같은 동작을 `list_pty_sessions`·`terminate_pty_session`·`terminate_detached_pty_sessions` IPC와 `GET /api/v1/pty-sessions`·`POST /api/v1/pty-sessions/terminate {sessionId, attachEpoch}`·`POST /api/v1/pty-sessions/terminate-detached`로 제공한다([ADR-0306](../adr/0306-pty-daemon-session-inventory.md)).
+
+**아직 없는 것:** 업데이트 인계(업데이트 중 작업 유지), 화면 snapshot, GUI 미접속 중 OSC·훅 처리, 분리 세션을 새 pane에 붙이는 adopt는 후속 단계다.
 
 ---
 

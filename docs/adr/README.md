@@ -323,6 +323,7 @@ ADR 이 필요한 대표 기준:
 | [0303](0303-pty-daemon-mode-tracking-and-adoption-preamble.md) | PTY 데몬이 출력에서 터미널 모드를 추적하고, replay 없는 재결합에서 preamble로 다시 단언한다 (0300 경계 정정) | Proposed |
 | [0304](0304-lx-endpoint-file.md) | 터미널의 `lx`는 고정 경로 endpoint 파일(`LX_ENDPOINT_FILE`)로 현재 GUI를 찾는다 | Proposed |
 | [0305](0305-user-only-local-socket-transport.md) | PTY 데몬과 `lx` IPC는 현재 사용자 전용 Unix domain socket(Windows AF_UNIX + DACL)을 쓴다 (0300의 Windows loopback TCP 정정) | Proposed |
+| [0306](0306-pty-daemon-session-inventory.md) | 분리된 PTY 데몬 세션을 보고, pane이 잡지 않은 세션만 목록 epoch로 끝낸다 | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

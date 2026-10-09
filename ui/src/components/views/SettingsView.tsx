@@ -12,6 +12,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { AgentHooksSection } from "./settings/AgentHooksSection";
+import { PtySessionsSection } from "./settings/PtySessionsSection";
 import { useUiStore } from "@/stores/ui-store";
 import {
   useSettingsStore,
@@ -5164,6 +5165,7 @@ export function SettingsView() {
               <ProfileSection key={activeNav} profileIndex={parseInt(activeNav.split("-")[1])} />
             )}
             {activeNav === "colorSchemes" && <ColorSchemesSection />}
+            {activeNav === "ptySessions" && <PtySessionsSection />}
             {activeNav === "keybindings" && <KeybindingsSection />}
             {activeNav === "terminal" && <TerminalSection />}
             {activeNav === "paste" && <PasteSection />}

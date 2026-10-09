@@ -38,6 +38,20 @@ pub async fn api_docs() -> impl IntoResponse {
                 "body": {"provider":"claude | codex", "operation":"status | install | remove | update", "distro":"string or null for native", "configDir":"absolute directory or null for environment default"}
             },
             {
+                "method": "GET", "path": "/api/v1/pty-sessions",
+                "description": "PTY daemon session inventory: daemonRunning and sessions[{sessionId, terminalId, childPid, attachEpoch, state: pane | detached | otherClient | ending}]. A daemon that does not answer is an error, never an empty list."
+            },
+            {
+                "method": "POST", "path": "/api/v1/pty-sessions/terminate",
+                "description": "End one listed session. attachEpoch must be the one listed: a session attached again since is left running (superseded).",
+                "body": {"sessionId":"string", "attachEpoch":"number from GET /api/v1/pty-sessions"},
+                "response": "terminated | superseded | gone"
+            },
+            {
+                "method": "POST", "path": "/api/v1/pty-sessions/terminate-detached",
+                "description": "End every session nobody holds (state detached), each with its listed epoch. Returns how many were ended."
+            },
+            {
                 "method": "GET", "path": "/api/v1/agent-hooks/updates",
                 "description": "Read-only audit of native and running WSL hook targets, including recently observed custom folders. Returns targets with updateRequired and per-target errors; never starts stopped WSL distributions or installs hooks."
             },
