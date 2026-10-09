@@ -130,15 +130,8 @@ ADR-0301까지로 다음이 가능하다. PTY는 데몬이 소유하고 기본�
 - VS Code·Orca·Superset v1: 데몬(호스트)이 headless xterm과 SerializeAddon으로 화면 snapshot을 만든다. VS Code는 scrollback 100줄, Superset v1은 5000줄이다.
 - Superset v2: 이 방식에서 물러났다. 데몬은 원본 바이트 ring만 갖고, host가 `epoch`·`outputSeq`로 정확한 catch-up을 한다. 위치를 알 수 없으면 아무것도 보내지 않고 SIGWINCH 두 번으로 앱이 다시 그리게 한다("never synthesize screen content", #6290).
 
-**수정안 — 2단계**
-
-1. **ring replay + replay guard.** 데몬 backlog(1 MiB)를 replay하되 다음 두 가지를 지킨다.
-   - (a) GUI가 replay 구간 동안 xterm·Rust 양쪽에서 PTY로 가는 자동 응답(DA/DSR/CPR/DECRQM/OSC 색 질의 응답)을 막는다. Orca 방식이며 실제 키 입력은 통과시킨다.
-   - (b) replay 구간의 OSC 업무 처리(알림·훅·CWD·attribution)는 "replay" 표시로 부수효과를 막는다. ADR-0001·0068과의 정합은 이 표시로 지킨다.
-   - backlog가 넘쳐 위치가 끊겼으면 Superset v2처럼 resize nudge로 다시 그리게 한다.
-2. **headless VT snapshot.** 필요하면 데몬에 Rust VT 모델(alacritty_terminal·vt100 등)을 두어 정확한 화면을 보낸다. 3.1의 모드 스캐너와 통합할 수 있다. 1단계로 충분한지 실기로 판단한 뒤 진행한다.
-
-- **ADR:** 새 ADR(재결합 replay와 replay guard). ADR-0301의 "replay하지 않는다"를 정정한다.
+**수정안**
+- **결정(ADR-0307):** dev 실기 측정 결과 resize nudge는 PowerShell 셸을 복원하지 못했고(번들 ConPTY는 resize 때 다시 칠하지 않음), Codex는 nudge 없이도 다시 그렸다. backlog에는 client가 없던 동안의 출력만 있어 이전 화면을 복원하지 못한다. 그래서 데몬이 출력으로 `vt100` 화면 모델(scrollback 없음)을 유지하고, replay 없는 재결합 때 모드 preamble 뒤에 현재 화면 redraw(셀·속성·커서, OSC·query 없음)를 보낸다. scrollback 복원과 detached 중 출력 replay는 필요해지면 따로 결정한다.
 
 ### 3.7 GUI가 없는 동안의 이벤트
 
@@ -170,7 +163,7 @@ ADR-0301까지로 다음이 가능하다. PTY는 데몬이 소유하고 기본�
 | C | Windows named pipe 사용자 전용 transport | 4 (#1150) | 중 | — |
 | D | 분리 세션 패널·API (adopt는 후속) | 7 | 중 | C 이후 권장 |
 | E | 업데이트 세대 공존 | 1 | 대 | A·C(버전별 endpoint) |
-| F | ring replay + replay guard (→ 필요하면 headless VT) | 2 | 중~대 | A |
+| F | 데몬 화면 모델(vt100) redraw | 2 | 중 | A |
 | G | GUI 미접속 이벤트 journal | 6 | 대 | B·F |
 
 - 우선순위는 사용자 체감 영향 순이다. 재결합 뒤 Codex 입력이 오동작하는 문제가 가장 크므로 A를 먼저 하고, 이어서 B와 C를 한다.

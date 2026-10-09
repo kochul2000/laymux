@@ -99,6 +99,7 @@ pub fn terminate_session(endpoint: &DaemonEndpoint, session_id: &str) -> io::Res
             session_id: session_id.to_owned(),
             replay: false,
             take_over: true,
+            size: None,
         },
     )?;
     let mut terminate_sent = false;

@@ -18,6 +18,7 @@ use portable_pty::{native_pty_system, PtySize};
 
 use super::handshake::authenticate;
 use super::idle::idle_monitor;
+use super::screen::ScreenModel;
 use super::session::{ClientLink, ConnWriter, Session};
 use super::transport::{self, Listener, Stream};
 use super::wire::{
@@ -245,6 +246,7 @@ impl DaemonServer {
                     session_id,
                     replay,
                     take_over,
+                    size,
                 }) if bound.is_none() => {
                     match self.attach_session(
                         &writer,
@@ -252,6 +254,7 @@ impl DaemonServer {
                         &session_id,
                         replay,
                         take_over,
+                        size.map(|size| (size.rows, size.cols)),
                     ) {
                         Ok(session) => bound = Some(session),
                         Err(error) => writer.error(&error),
@@ -318,6 +321,9 @@ impl DaemonServer {
             command,
             metadata,
         } = request;
+        if rows == 0 || cols == 0 {
+            return Err(format!("invalid PTY size {rows}x{cols}"));
+        }
         let command = command.into_builder()?;
         let created_seq = self.next_session_seq.fetch_add(1, Ordering::Relaxed);
         let session = Arc::new(Session::new(
@@ -346,6 +352,8 @@ impl DaemonServer {
         // Hold the sink across spawn so `Spawned` is the first frame the
         // client sees: early output and exit callbacks wait on this lock.
         let mut sink = session.sink.lock_or_err()?;
+        sink.screen = ScreenModel::new(rows, cols);
+        *session.pty_size.lock_or_err()? = Some((rows, cols));
         let output_session = Arc::clone(&session);
         let reader_end = (Arc::downgrade(self), Arc::clone(&session));
         let child_exit = (Arc::downgrade(self), Arc::clone(&session));
@@ -419,6 +427,7 @@ impl DaemonServer {
         session_id: &str,
         replay: bool,
         take_over: bool,
+        size: Option<(u16, u16)>,
     ) -> Result<Arc<Session>, String> {
         let session = self
             .sessions
@@ -426,7 +435,7 @@ impl DaemonServer {
             .get(session_id)
             .cloned()
             .ok_or_else(|| format!("PTY daemon session '{session_id}' does not exist"))?;
-        session.attach(writer, connection_id, replay, take_over)?;
+        session.attach(writer, connection_id, replay, take_over, size)?;
         Ok(session)
     }
 

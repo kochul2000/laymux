@@ -24,7 +24,8 @@ use super::client_queue::{DaemonReader, DaemonReaderControl, Shared, CONNECTION_
 use super::control::{connect_authenticated, terminate_by_id};
 use super::transport::{self, Stream};
 use super::wire::{
-    read_frame, write_control, write_input, ClientMessage, DaemonMessage, Frame, WireCommand,
+    read_frame, write_control, write_input, AttachSize, ClientMessage, DaemonMessage, Frame,
+    WireCommand,
 };
 use super::DaemonEndpoint;
 use crate::constants::{
@@ -206,6 +207,10 @@ impl SlavePty for DaemonSlave {
                 session_id: self.session_id.clone(),
                 replay: false,
                 take_over: false,
+                size: Some(AttachSize {
+                    rows: size.rows,
+                    cols: size.cols,
+                }),
             },
         };
         self.connection.send(&request)?;
@@ -250,8 +255,9 @@ impl SlavePty for DaemonSlave {
             .lock_or_err()
             .map_err(|e| anyhow!(e))? = Some(attach_epoch);
         if matches!(self.target, DaemonTarget::Adopt) {
-            // The adopting GUI's grid may differ from the size the session
-            // last had; apply it before any new output is produced for it.
+            // The attach already carried this size (ADR-0307); a daemon of
+            // an earlier build that ignores it still gets the grid here,
+            // before any new output is produced for it.
             self.connection.send(&ClientMessage::Resize {
                 rows: size.rows,
                 cols: size.cols,

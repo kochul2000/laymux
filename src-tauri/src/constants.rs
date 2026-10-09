@@ -313,6 +313,9 @@ pub const PTY_DAEMON_MAX_FRAME_BYTES: usize = 1024 * 1024;
 /// bytes are dropped (and counted) so a session nobody watches never stalls
 /// its child on a full pipe nor grows without bound.
 pub const PTY_DAEMON_DETACHED_BACKLOG_BYTES: usize = 1024 * 1024;
+/// Size of a session's screen model until its PTY is spawned with the real size.
+pub const PTY_DAEMON_SCREEN_DEFAULT_ROWS: u16 = 24;
+pub const PTY_DAEMON_SCREEN_DEFAULT_COLS: u16 = 80;
 /// Client-side bound on received-but-unconsumed daemon output per terminal.
 /// When full the client stops reading its socket, which pushes backpressure
 /// back to the daemon's PTY reader exactly like a blocked in-process callback.

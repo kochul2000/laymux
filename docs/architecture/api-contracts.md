@@ -1962,6 +1962,7 @@ src-tauri/src/
 │   ├── idle.rs               # 데몬: idle 종료 판정
 │   ├── session.rs            # 데몬 세션: attach/detach·backlog
 │   ├── modes.rs              # 데몬 세션: 출력에서 추적한 터미널 모드·재결합 preamble
+│   ├── screen.rs             # 데몬 세션: 재결합 redraw용 화면 모델(vt100, panic 격리, ADR-0307)
 │   ├── inventory.rs          # GUI: 세션 목록 분류·분리 세션 epoch 종료 (ADR-0306)
 │   ├── client.rs             # GUI: 원격 PtySystem proxy
 │   ├── control.rs            # GUI: 인증 연결·세션 목록·id 기반 종료
