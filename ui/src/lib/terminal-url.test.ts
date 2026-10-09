@@ -11,6 +11,15 @@ describe("TERMINAL_URL_REGEX", () => {
     ]);
   });
 
+  it("IPv6 호스트의 대괄호는 URL 에 포함한다", () => {
+    expect(urls("Serving HTTP on :: port 8000 (http://[::]:8000/) ...")).toEqual([
+      "http://[::]:8000/",
+    ]);
+    expect(urls("listening on http://[::1]:3000")).toEqual(["http://[::1]:3000"]);
+    expect(urls("http://[::1]")).toEqual(["http://[::1]"]);
+    expect(urls("[link](https://example.com/a)")).toEqual(["https://example.com/a"]);
+  });
+
   it("전각 구두점에서 끝난다", () => {
     expect(urls("https://example.com/a。")).toEqual(["https://example.com/a"]);
     expect(urls("「https://example.com/a」")).toEqual(["https://example.com/a"]);

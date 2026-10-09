@@ -7147,7 +7147,25 @@ describe("TerminalView", () => {
     });
   });
 
-  it("smart copy joins rows a TUI broke at the screen width, using the buffer cells", async () => {
+  const tuiParagraphJoined =
+    "● 이 변경은 터미널 복사 경로에서 줄바꿈을 제거하는데, 실제로는 Claude Code 가 자체 " +
+    "레이아웃으로 줄을 나누기 때문에 xterm 은 이를 소프트 랩으로 보지 못하고 개행으로 " +
+    "복사하게 되며, 그 결과 사용자가 붙여넣은 문단이 화면 폭마다 끊겨 버린다.";
+
+  it.each([
+    {
+      name: "joins prose rows while Claude Code runs",
+      app: "Claude" as const,
+      expected: tuiParagraphJoined,
+    },
+    {
+      // A same-depth code line ending near the edge (`cat`) looks the same as a
+      // reflowed paragraph — outside a TUI only mid-token breaks are rejoined.
+      name: "keeps prose rows apart in a plain shell",
+      app: null,
+      expected: CLAUDE.koreanParagraph.map((row) => row.text).join("\n"),
+    },
+  ])("smart copy, using the buffer cells, $name", async ({ app, expected }) => {
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
       terminal: { ...useSettingsStore.getState().terminal, copyOnSelect: true },
@@ -7173,18 +7191,20 @@ describe("TerminalView", () => {
     };
 
     try {
-      render(<TerminalView instanceId="t-cos-tui" profile="PowerShell" syncGroup="" />);
+      const instanceId = `t-cos-tui-${app ?? "shell"}`;
+      render(<TerminalView instanceId={instanceId} profile="PowerShell" syncGroup="" />);
       for (const terminal of createdTerminals)
         (terminal as unknown as { cols: number }).cols = CAPTURE_COLS;
+      act(() =>
+        useTerminalStore.getState().updateInstanceInfo(instanceId, {
+          activity: app ? { type: "interactiveApp", name: app } : { type: "shell" },
+        }),
+      );
 
       mockOnSelectionChange.mock.calls[0][0]();
 
       await vi.waitFor(() => {
-        expect(mockClipboardWriteText).toHaveBeenCalledWith(
-          "● 이 변경은 터미널 복사 경로에서 줄바꿈을 제거하는데, 실제로는 Claude Code 가 자체 " +
-            "레이아웃으로 줄을 나누기 때문에 xterm 은 이를 소프트 랩으로 보지 못하고 개행으로 " +
-            "복사하게 되며, 그 결과 사용자가 붙여넣은 문단이 화면 폭마다 끊겨 버린다.",
-        );
+        expect(mockClipboardWriteText).toHaveBeenCalledWith(expected);
       });
     } finally {
       mockBufferActive.getLine = originalGetLine;

@@ -1,5 +1,11 @@
-import { describe, it, expect } from "vitest";
-import { detectTuiWrap, joinTuiWrappedLines, type WrapStyle } from "./tui-wrap-join";
+import { describe, it, expect, vi } from "vitest";
+import {
+  detectTuiWrap,
+  joinTuiWrappedLines,
+  joinTuiWrappedSelection,
+  MAX_JOIN_ROWS,
+  type WrapStyle,
+} from "./tui-wrap-join";
 import { CAPTURE_COLS, CLAUDE, CODEX, type CaptureRow } from "./__fixtures__/tui-wrap-capture";
 import { makePaddedLines } from "@/test/cell-lines";
 
@@ -212,6 +218,71 @@ describe("joinTuiWrappedLines — 매핑 검증", () => {
         "has to wrap it across several visual rows, which lets us observe whether the wrapped " +
         "rows are",
     ]);
+  });
+});
+
+describe("joinTuiWrappedLines — xterm 선택 문자열 규칙", () => {
+  it("앱이 직접 쓴 끝 공백이 선택 문자열에 남아도 잇고, 공백을 겹치지 않는다", () => {
+    // xterm `translateToString(true)` 는 빈 셀만 자른다 — 명시적으로 쓴 공백은 남는다.
+    const rows = makePaddedLines(CLAUDE.englishParagraph, CAPTURE_COLS);
+    const lines = selectionLines(CLAUDE.englishParagraph).map((l) => l + "   ");
+    expect(joinTuiWrappedLines(lines, rows, CAPTURE_COLS)).toEqual([
+      "  This paragraph is intentionally long English prose so that the terminal user interface " +
+        "has to wrap it across several visual rows, which lets us observe whether the wrapped " +
+        "rows are stored as soft wraps or hard newlines.   ",
+    ]);
+  });
+
+  it("버퍼의 NBSP 는 선택 문자열에서 공백이다", () => {
+    const texts = ["  aaaaaaaa bbbbbbbbb", "  cccc"];
+    const rows = makePaddedLines(texts, 20);
+    expect(joinTuiWrappedLines(["  aaaaaaaa bbbbbbbbb", "  cccc"], rows, 20)).toEqual([
+      "  aaaaaaaa bbbbbbbbb cccc",
+    ]);
+  });
+
+  it("공백 문자만 있는 행(전각 공백)은 꽉 찬 행으로 보지 않는다", () => {
+    const [a, b] = makePaddedLines(["  　", "  next"], 40);
+    expect(detectTuiWrap(a, b, 40)).toBeNull();
+  });
+});
+
+describe("joinTuiWrappedLines — prose 끔(TUI 실행 중 아님)", () => {
+  const join = (rows: CaptureRow[] | string[], cols: number) =>
+    joinTuiWrappedLines(
+      (rows as (CaptureRow | string)[]).map((r) => (typeof r === "string" ? r : r.text).trimEnd()),
+      makePaddedLines(rows, cols),
+      cols,
+      "word",
+      false,
+    );
+
+  it("같은 깊이의 코드 줄이 행 끝 근처에서 끝나도 잇지 않는다", () => {
+    const texts = ["  if ok:", "      value = compute_total(items, tax)", "      return value"];
+    expect(join(texts, 40)).toEqual(texts);
+  });
+
+  it("행 끝에서 잘린 URL 은 잇고, 산문 행은 그대로 둔다", () => {
+    expect(join(CLAUDE.list, CAPTURE_COLS)).toEqual([
+      "  - 목록 항목 문서는 https://github.com/kochul2000/laymux/blob/main/docs/architecture/" +
+        "data-flow.md#terminal-view-osc-pipeline-and-renderer-reflow-details 를 참고하세요.",
+      "  - PR 링크는 https://github.com/kochul2000/laymux/pull/1146 이고 뒤에 이어지는 설명",
+      "    문장이 충분히 길어서 다음 줄로 넘어가야 한다.",
+    ]);
+  });
+});
+
+describe("joinTuiWrappedSelection — 행 상한", () => {
+  it(`선택이 MAX_JOIN_ROWS 를 넘으면 버퍼를 읽지 않고 원문을 돌려준다`, () => {
+    const getLine = vi.fn();
+    const text = "a\nb";
+    const terminal = {
+      cols: 80,
+      getSelectionPosition: () => ({ start: { y: 0 }, end: { y: MAX_JOIN_ROWS } }),
+      buffer: { active: { getLine } },
+    };
+    expect(joinTuiWrappedSelection(terminal, text)).toBe(text);
+    expect(getLine).not.toHaveBeenCalled();
   });
 });
 

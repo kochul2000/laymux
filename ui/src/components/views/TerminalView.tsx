@@ -472,13 +472,20 @@ function pasteFromBrowserClipboard(writeText: (text: string) => void, logPrefix:
 }
 
 /**
- * Codex breaks Hangul/CJK between syllables; Claude Code (Ink) and plain output
- * break at spaces. Only the live activity tells them apart — once the app exits
- * its scrollback falls back to the space-preserving `word` style.
+ * How copy rejoins screen-width breaks for this pane. Codex breaks Hangul/CJK
+ * between syllables; Claude Code (Ink) and plain output break at spaces. Prose
+ * rows are rejoined only while Claude Code or Codex runs — elsewhere a
+ * same-depth code line that happens to end near the right edge (`cat` output)
+ * is indistinguishable from a reflowed paragraph, so only mid-token breaks
+ * (URLs cut at the edge) are rejoined. Only the live activity tells them apart.
  */
-function tuiWrapStyleFor(instanceId: string): WrapStyle {
+function tuiWrapModeFor(instanceId: string): { style: WrapStyle; prose: boolean } {
   const activity = useTerminalStore.getState().instances.find((i) => i.id === instanceId)?.activity;
-  return activity?.type === "interactiveApp" && activity.name === "Codex" ? "anywhere" : "word";
+  const app = activity?.type === "interactiveApp" ? activity.name : undefined;
+  return {
+    style: app === "Codex" ? "anywhere" : "word",
+    prose: app === "Codex" || app === "Claude",
+  };
 }
 
 /**
@@ -502,8 +509,9 @@ function runTerminalCopy(terminal: Terminal, instanceId: string): void {
   if (!terminal.hasSelection()) return;
   const { paste } = useSettingsStore.getState();
   const useSmart = paste.removeIndent || paste.removeLineBreak;
-  const selection = paste.removeLineBreak
-    ? joinTuiWrappedSelection(terminal, terminal.getSelection(), tuiWrapStyleFor(instanceId))
+  const wrapMode = paste.removeLineBreak ? tuiWrapModeFor(instanceId) : undefined;
+  const selection = wrapMode
+    ? joinTuiWrappedSelection(terminal, terminal.getSelection(), wrapMode.style, wrapMode.prose)
     : terminal.getSelection();
   const text = useSmart
     ? prepareSelectionForCopy(selection, {

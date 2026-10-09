@@ -67,7 +67,8 @@ function rowShape(line: ReconstructedLine): RowShape | null {
   return {
     indent,
     contentStart: indent + (marker ? marker[0].length : 0),
-    last: line.text.search(/\S\s*$/),
+    // 들여쓰기와 같은 문자 집합으로 찾는다 — U+3000·NBSP 만 있는 행도 -1 이 아니다.
+    last: line.text.search(/[^ \t][ \t]*$/),
   };
 }
 
@@ -123,7 +124,9 @@ export function detectTuiWrap(
   // 본다 — 짧은 앞 단어 뒤로 긴 URL 이 통째로 다음 행에 놓인 경우(`문서는` +
   // URL 행)는 어절 경계다. 줄바꿈 폭은 cols 보다 작을 수 있다: Codex 입력창은
   // cols-1, Claude OAuth 화면은 오른쪽 여백 2칸(cols-2)에서 자른다.
-  const headStart = prev.text.slice(0, p.last + 1).search(/\S+$/);
+  // 행이 전각 공백·NBSP 로 끝나면 `\S` 토큰이 없다 — 그 글자 하나를 머리로 본다.
+  const headMatch = prev.text.slice(0, p.last + 1).search(/\S+$/);
+  const headStart = headMatch < 0 ? p.last : headMatch;
   const headCells = prevEnd - cellsBefore(prev, headStart);
   const midToken = prevEnd >= cols - WRAP_MARGIN && headCells + tokenCells > cols - nextIndentCells;
 
@@ -157,12 +160,18 @@ export interface WrapRow extends ReconstructedLine {
  * 내어쓰기(2칸 이상)가 있고, 0열 행이 화면 폭을 채우는 출력은 대부분 셸 출력이다
  * — pytest 진행 줄·`ps aux` 처럼 폭에 맞춰 채우거나 잘린 행을 한 줄로 합치면 안
  * 된다.
+ *
+ * `prose` 가 거짓이면 단어 중간에서 잘린 연속 행(구분자 `""`, 행 끝에서 잘린
+ * URL 등)만 잇는다. 어절 경계 결합은 줄바꿈기가 산문을 다시 흘려 배치했다는
+ * 가정에 기대므로, 같은 깊이의 코드·설정 파일 줄(`cat` 출력)이 우연히 행 끝
+ * 근처에서 끝나면 원래 개행을 지운다 — TUI 가 실행 중일 때만 켠다.
  */
 export function joinTuiWrappedLines(
   lines: string[],
   rows: WrapRow[],
   cols: number,
   style: WrapStyle = "word",
+  prose = true,
 ): string[] | null {
   const groups: WrapRow[][] = [];
   for (const row of rows) {
@@ -186,11 +195,16 @@ export function joinTuiWrappedLines(
     const indent = line.slice(0, join?.contentOffset ?? 0);
     if (
       join &&
+      (prose || join.separator === "") &&
       join.contentOffset > 0 &&
       /^[ \t]*$/.test(indent) &&
       line.length > join.contentOffset
     ) {
-      out[out.length - 1] += join.separator + line.slice(join.contentOffset);
+      // 앱이 행 끝까지 공백을 직접 쓰면 선택 문자열에 그대로 남아 있다.
+      out[out.length - 1] =
+        out[out.length - 1].replace(/[ \t]+$/, "") +
+        join.separator +
+        line.slice(join.contentOffset);
     } else {
       out.push(line);
     }
@@ -200,18 +214,29 @@ export function joinTuiWrappedLines(
 
 /**
  * 선택 문자열이 일반(행 단위) 선택으로 버퍼 행에서 나왔는지 확인한다. xterm 은
- * 행마다 끝 공백을 지우고 `isWrapped` 행을 개행 없이 붙이므로 같은 규칙으로
- * 논리 줄 텍스트를 만든다. 열 선택은 둘째 줄부터 선택 시작 열에서 잘리므로
- * 여기서 걸러진다.
+ * `isWrapped` 행을 개행 없이 붙이고 행마다 빈 셀만 잘라 낸다 — 앱이 직접 쓴 끝
+ * 공백은 남고 NBSP 는 공백으로 바뀐다. 그래서 양쪽을 같은 규칙(NBSP → 공백, 끝
+ * `[ \t]` 제거)으로 맞춘 뒤 비교한다. 열 선택은 둘째 줄부터 선택 시작 열에서
+ * 잘리므로 여기서 걸러진다.
  */
 function selectionMatchesRows(lines: string[], groups: WrapRow[][]): boolean {
+  const NBSP = String.fromCharCode(0xa0);
+  const norm = (s: string) =>
+    s
+      .split(NBSP)
+      .join(" ")
+      .replace(/[ \t]+$/, "");
   const last = lines.length - 1;
-  return lines.every((line, i) => {
-    const text = groups[i].map((row) => row.text.trimEnd()).join("");
+  return lines.every((raw, i) => {
+    const text = norm(groups[i].map((row) => norm(row.text)).join(""));
+    const line = norm(raw);
     if (i === 0) return text.endsWith(line);
     return i === last ? text.startsWith(line) : text === line;
   });
 }
+
+/** 버퍼 결합을 시도하는 최대 선택 행 수 — 넘으면(전체 scrollback 복사 등) 원문을 쓴다. */
+export const MAX_JOIN_ROWS = 2000;
 
 /** `joinTuiWrappedSelection` 이 쓰는 xterm `Terminal` 의 최소 표면. */
 export interface SelectionSource {
@@ -224,18 +249,21 @@ export interface SelectionSource {
 
 /**
  * 현재 선택의 버퍼 행을 읽어 `text`(= `getSelection()`) 에서 화면 폭 줄바꿈을
- * 지운다. 선택 위치·행을 읽지 못하거나 논리 줄 매핑이 맞지 않으면 `text` 를
- * 그대로 돌려준다 — 복사가 원문보다 나빠지는 일은 없다.
+ * 지운다. 선택 위치·행을 읽지 못하거나, 행이 `MAX_JOIN_ROWS` 를 넘거나, 논리 줄
+ * 매핑이 맞지 않으면 `text` 를 그대로 돌려준다 — 복사가 원문보다 나빠지는 일은
+ * 없다. `prose` 는 `joinTuiWrappedLines` 와 같다.
  */
 export function joinTuiWrappedSelection(
   terminal: SelectionSource,
   text: string,
   style: WrapStyle = "word",
+  prose = true,
 ): string {
   const position = terminal.getSelectionPosition();
   if (!position || !text.includes("\n")) return text;
   const startY = Math.min(position.start.y, position.end.y);
   const endY = Math.max(position.start.y, position.end.y);
+  if (endY - startY + 1 > MAX_JOIN_ROWS) return text;
   const rows: WrapRow[] = [];
   for (let y = startY; y <= endY; y++) {
     const line = terminal.buffer.active.getLine(y);
@@ -243,6 +271,6 @@ export function joinTuiWrappedSelection(
     rows.push({ ...reconstructLine(readLineCells(line)), isWrapped: line.isWrapped });
   }
   const eol = text.includes("\r\n") ? "\r\n" : "\n";
-  const joined = joinTuiWrappedLines(text.split(/\r?\n/), rows, terminal.cols, style);
+  const joined = joinTuiWrappedLines(text.split(/\r?\n/), rows, terminal.cols, style, prose);
   return joined ? joined.join(eol) : text;
 }
