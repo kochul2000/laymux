@@ -16,6 +16,7 @@ import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { createIndentedLinkProvider, readIndentedLine } from "@/lib/indented-link-provider";
+import { TERMINAL_URL_REGEX } from "@/lib/terminal-url";
 import type { IndentedLineInfo } from "@/lib/indented-link-provider";
 import { createPrLinkProvider } from "@/lib/pr-link-provider";
 import { buildAgentResumeCommand, createAgentResumeLinkProvider } from "@/lib/agent-resume-link";
@@ -115,6 +116,7 @@ import {
 } from "@/lib/agent-command";
 import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
 import { transformPasteContent, prepareSelectionForCopy, formatPastePaths } from "@/lib/smart-text";
+import { joinTuiWrappedSelection, type WrapStyle } from "@/lib/tui-wrap-join";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
 import { createCursorTracer } from "@/lib/cursor-trace";
 import { matchesKeybinding } from "@/lib/keybinding-registry";
@@ -470,6 +472,23 @@ function pasteFromBrowserClipboard(writeText: (text: string) => void, logPrefix:
 }
 
 /**
+ * How copy rejoins screen-width breaks for this pane. Codex breaks Hangul/CJK
+ * between syllables; Claude Code (Ink) and plain output break at spaces. Prose
+ * rows are rejoined only while Claude Code or Codex runs — elsewhere a
+ * same-depth code line that happens to end near the right edge (`cat` output)
+ * is indistinguishable from a reflowed paragraph, so only mid-token breaks
+ * (URLs cut at the edge) are rejoined. Only the live activity tells them apart.
+ */
+function tuiWrapModeFor(instanceId: string): { style: WrapStyle; prose: boolean } {
+  const activity = useTerminalStore.getState().instances.find((i) => i.id === instanceId)?.activity;
+  const app = activity?.type === "interactiveApp" ? activity.name : undefined;
+  return {
+    style: app === "Codex" ? "anywhere" : "word",
+    prose: app === "Codex" || app === "Claude",
+  };
+}
+
+/**
  * Copy the current xterm selection to the system clipboard. Shared by the
  * terminal.copy keybinding, right-click copy, and copy-on-select so all three
  * paths produce byte-identical clipboard contents.
@@ -481,17 +500,25 @@ function pasteFromBrowserClipboard(writeText: (text: string) => void, logPrefix:
  *
  * No-op when there is no selection so every call site can delegate the
  * has-selection check without repeating it.
+ *
+ * `smartRemoveLineBreak` first rejoins rows that a TUI (Claude Code, Codex)
+ * broke at the screen width with real newlines — that decision needs the
+ * buffer cells, so it runs here before the string-only transforms.
  */
-function runTerminalCopy(terminal: Terminal): void {
+function runTerminalCopy(terminal: Terminal, instanceId: string): void {
   if (!terminal.hasSelection()) return;
   const { paste } = useSettingsStore.getState();
   const useSmart = paste.removeIndent || paste.removeLineBreak;
+  const wrapMode = paste.removeLineBreak ? tuiWrapModeFor(instanceId) : undefined;
+  const selection = wrapMode
+    ? joinTuiWrappedSelection(terminal, terminal.getSelection(), wrapMode.style, wrapMode.prose)
+    : terminal.getSelection();
   const text = useSmart
-    ? prepareSelectionForCopy(terminal.getSelection(), {
+    ? prepareSelectionForCopy(selection, {
         smartRemoveIndent: paste.removeIndent,
         smartRemoveLineBreak: paste.removeLineBreak,
       })
-    : terminal.getSelection();
+    : selection;
   clipboardWriteText(text).catch((err) => {
     console.warn("[TerminalView] copy to clipboard failed:", err);
   });
@@ -1384,9 +1411,27 @@ export function TerminalView({
     activateTerminalUnicodeProvider(terminal);
 
     const fitAddon = new FitAddon();
-    const webLinksAddon = new WebLinksAddon((event, uri) => {
-      activateUrlLink(uri, event);
-    });
+    // Shared URL boundary: stops at Hangul particles, full-width punctuation and
+    // markdown emphasis, keeps balanced parentheses (`terminal-url.ts`).
+    const webLinksAddon = new WebLinksAddon(
+      (event, uri) => {
+        activateUrlLink(uri, event);
+      },
+      { urlRegex: TERMINAL_URL_REGEX },
+    );
+
+    // URLs a TUI (Claude Code, Codex input) broke across rows with hard newlines.
+    // Registered BEFORE WebLinksAddon: xterm's Linkifier prefers earlier
+    // providers and drops intersecting later links, so the joined URL wins over
+    // WebLinksAddon's cut-off head on the first row. Checks linkJoin
+    // dynamically so setting changes apply immediately.
+    terminal.registerLinkProvider(
+      createIndentedLinkProvider(
+        terminal,
+        (uri, event, range) => activateUrlLink(uri, event, range),
+        () => useSettingsStore.getState().paste.linkJoin,
+      ),
+    );
 
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(webLinksAddon);
@@ -1471,16 +1516,6 @@ export function TerminalView({
             resumeSubmissionPending = false;
           });
       }),
-    );
-
-    // Additional link provider for hard-wrapped indented URLs (e.g. Claude Code OAuth).
-    // Always registered; checks smartLinkJoin dynamically so setting changes apply immediately.
-    terminal.registerLinkProvider(
-      createIndentedLinkProvider(
-        terminal,
-        (uri, event, range) => activateUrlLink(uri, event, range),
-        () => useSettingsStore.getState().paste.linkJoin,
-      ),
     );
 
     // Issue #439: bare `#123` issue/PR references. Claude Code prints these as
@@ -3324,7 +3359,7 @@ export function TerminalView({
       if (matchesKeybinding(e, "terminal.copy")) {
         // No selection: let xterm process the raw key (default Ctrl+C → SIGINT).
         if (!terminal.hasSelection()) return true;
-        runTerminalCopy(terminal);
+        runTerminalCopy(terminal, instanceId);
         e.preventDefault();
         return false;
       }
@@ -3539,7 +3574,7 @@ export function TerminalView({
         cancelPathLinkHoverDwell();
         void pathLinkPoint.evaluateAt(gesture.startX, gesture.startY);
       }
-      if (useSettingsStore.getState().terminal.copyOnSelect) runTerminalCopy(terminal);
+      if (useSettingsStore.getState().terminal.copyOnSelect) runTerminalCopy(terminal, instanceId);
     };
     const handlePointerSelectionUp = (event: PointerEvent) => {
       const gesture = pointerSelectionGesture;
@@ -3560,7 +3595,7 @@ export function TerminalView({
     // branching, keeping this path in lockstep with Ctrl+C and right-click.
     terminal.onSelectionChange(() => {
       if (useSettingsStore.getState().terminal.copyOnSelect) {
-        runTerminalCopy(terminal);
+        runTerminalCopy(terminal, instanceId);
       }
       if (pointerSelectionGesture) pointerSelectionGesture.selectionChanged = true;
       // Issue #363/#ADR-0165: 선택 변경에서는 stale 링크와 진행 중인 검증만
@@ -5991,7 +6026,7 @@ export function TerminalView({
       e.preventDefault();
       if (terminal.hasSelection()) {
         // Selection exists → copy via the shared helper, then clear.
-        runTerminalCopy(terminal);
+        runTerminalCopy(terminal, instanceId);
         terminal.clearSelection();
       } else {
         // No selection → paste via the shared smart-paste pipeline.

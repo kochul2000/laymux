@@ -319,6 +319,7 @@ ADR 이 필요한 대표 기준:
 | [0299](0299-portable-settings-and-local-sqlite-state.md) | 이식 가능한 설정과 로컬 SQLite 복원 상태를 분리한다 | Accepted |
 | [0300](0300-detached-pty-daemon-core.md) | 터미널 PTY와 자식 프로세스는 GUI와 분리된 PTY 데몬이 소유한다 (opt-in 코어) | Proposed |
 | [0301](0301-pty-daemon-default-adoption.md) | PTY 데몬을 기본으로 켜고, 새 GUI는 살아 있는 세션을 재결합한다 (0300의 opt-in 대체) | Proposed |
+| [0302](0302-tui-screen-width-wrap-join.md) | TUI 화면 폭 줄바꿈은 버퍼 셀 폭으로 판정해 복사·여러 줄 URL 링크가 공유한다 | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 
