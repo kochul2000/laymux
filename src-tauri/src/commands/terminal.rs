@@ -448,7 +448,11 @@ pub async fn create_terminal_session(
         callback_state: Arc::clone(&pty_cb_state),
         presets: osc_hooks::default_presets(),
         gate: OscOutputGate::new(missed_output.is_some()),
-        missed_ring: crate::output_buffer::TerminalOutputBuffer::default(),
+        missed_ring: Mutex::new(
+            missed_output
+                .is_some()
+                .then(crate::output_buffer::TerminalOutputBuffer::default),
+        ),
     });
     let callback_osc_pass = Arc::clone(&osc_pass);
     let callback_missed_output = missed_output;
@@ -1823,9 +1827,11 @@ struct TerminalOscPass {
     presets: Vec<osc_hooks::OscHookDef>,
     gate: OscOutputGate,
     /// The missed output so far, as the live ring would hold it: what the
-    /// CWD gate judges the shell state by, since missed output never enters
-    /// the ring (ADR-0309).
-    missed_ring: crate::output_buffer::TerminalOutputBuffer,
+    /// state the missed facts depend on (CWD gate, interactive app, a
+    /// finished task's message) is judged by, since missed output never
+    /// enters the ring (ADR-0309). Only for an adopting terminal, and dropped
+    /// once live output begins.
+    missed_ring: Mutex<Option<crate::output_buffer::TerminalOutputBuffer>>,
 }
 
 impl TerminalOscPass {
@@ -1851,12 +1857,21 @@ impl TerminalOscPass {
         let terminal_generation = self.terminal_generation;
         let pty_cb_state = &self.callback_state;
         let presets = &self.presets;
-        let missed_buffer = missed.then(|| {
-            if let Err(error) = self.missed_ring.push_sequenced(data) {
-                tracing::warn!(terminal_id, %error, "missed output could not be judged for CWD");
+        let mut missed_ring = self.missed_ring.lock_or_err().ok();
+        if !missed {
+            // Live output has begun; no missed output follows it.
+            if let Some(ring) = missed_ring.as_mut() {
+                ring.take();
             }
-            &self.missed_ring
-        });
+        }
+        let missed_buffer = missed
+            .then(|| missed_ring.as_deref().and_then(Option::as_ref))
+            .flatten();
+        if let Some(ring) = missed_buffer {
+            if let Err(error) = ring.push_sequenced(data) {
+                tracing::warn!(terminal_id, %error, "missed output could not be judged");
+            }
+        }
         // ── Unified OSC processing loop ──
         // Single pass: parse all OSC sequences, match against presets, dispatch actions,
         // and emit structured events. Replaces the old per-code extraction blocks.
@@ -1987,7 +2002,7 @@ impl TerminalOscPass {
                 } else if cr.task_completed.is_some() {
                     // Task completed (working→idle): extract from output buffer
                     if let Ok(buffers) = state_for_pty.output_buffers.lock_or_err() {
-                        buffers.get(&terminal_id).and_then(|buf| {
+                        missed_buffer.or(buffers.get(&terminal_id)).and_then(|buf| {
                             buf.recent_bytes(ACTIVITY_SCAN_BYTES)
                                 .ok()
                                 .and_then(|recent| {
@@ -2192,7 +2207,7 @@ impl TerminalOscPass {
                             &state_for_pty,
                             &terminal_id,
                             &event.data,
-                            buffers.get(&terminal_id),
+                            missed_buffer.or(buffers.get(&terminal_id)),
                         )
                     } else {
                         activity::detect_interactive_app_from_live_title(
@@ -2247,10 +2262,7 @@ impl TerminalOscPass {
                     Ok(buffers) => super::ipc_dispatch::should_accept_source_cwd_event(
                         &state_for_pty,
                         &terminal_id,
-                        match missed_buffer {
-                            Some(missed) => Some(missed),
-                            None => buffers.get(&terminal_id),
-                        },
+                        missed_buffer.or(buffers.get(&terminal_id)),
                     )
                     .unwrap_or_else(|error| {
                         tracing::warn!(terminal_id, %error, "terminal cwd update blocked by degraded activity state");
