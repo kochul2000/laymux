@@ -37,5 +37,12 @@ export const terminatePtySession = (entry: Pick<PtySessionEntry, "sessionId" | "
     request: { sessionId: entry.sessionId, attachEpoch: entry.attachEpoch },
   });
 
-export const terminateDetachedPtySessions = () =>
-  invoke<TerminateDetachedResult>("terminate_detached_pty_sessions");
+/** End the detached sessions the caller saw, each with the epoch it saw. */
+export const terminateDetachedPtySessions = (
+  entries: readonly Pick<PtySessionEntry, "sessionId" | "attachEpoch">[],
+) =>
+  invoke<TerminateDetachedResult>("terminate_detached_pty_sessions", {
+    request: {
+      sessions: entries.map(({ sessionId, attachEpoch }) => ({ sessionId, attachEpoch })),
+    },
+  });

@@ -78,23 +78,33 @@ pub struct TerminateDetachedResult {
     pub failed: Vec<String>,
 }
 
-/// Terminals this GUI owns: live panes, and every terminal the saved layout
-/// will create (and so adopt) when its workspace or dock mounts.
+/// Terminals this GUI owns or may still adopt.
 pub struct KnownTerminals {
+    /// This GUI's live panes.
     pub panes: HashSet<String>,
+    /// Terminals the saved layout restores when their workspace or dock
+    /// mounts.
     pub layout: HashSet<String>,
+    /// Terminals this GUI already created once and so will never adopt
+    /// for (`AppState::pty_daemon_adoption_seen`).
+    pub adoption_seen: HashSet<String>,
+    /// Whether this GUI adopts daemon sessions at all.
+    pub adopts: bool,
 }
 
 impl KnownTerminals {
-    /// Live panes plus the saved layout. A layout that cannot be read is an
-    /// error: without it a session waiting for its pane would look detached.
-    pub fn load(panes: HashSet<String>) -> Result<Self, String> {
+    /// Live panes, adoption history and the saved layout. A layout that
+    /// cannot be read is an error: without it a session waiting for its
+    /// pane would look detached.
+    pub fn load(panes: HashSet<String>, adoption_seen: HashSet<String>) -> Result<Self, String> {
         let path = crate::local_state::state_path().map_err(String::from)?;
         let snapshot = LocalStateStore::new(path)
             .load_session()
             .map_err(|error| format!("cannot read the saved layout: {error}"))?;
         Ok(Self {
             panes,
+            adoption_seen,
+            adopts: super::is_enabled(),
             layout: snapshot
                 .as_ref()
                 .map(layout_terminal_ids)
@@ -127,7 +137,10 @@ pub fn terminate(
     attach_epoch: u64,
     known: &KnownTerminals,
 ) -> Result<TerminateOutcome, String> {
-    let endpoint = running_daemon()?.ok_or_else(|| "PTY daemon is not running".to_string())?;
+    // No daemon: the session is gone with it.
+    let Some(endpoint) = running_daemon()? else {
+        return Ok(TerminateOutcome::Gone);
+    };
     let entry = classify(listed(&endpoint)?, known)
         .into_iter()
         .find(|entry| entry.session_id == session_id);
@@ -142,8 +155,21 @@ pub fn terminate(
     }
 }
 
-/// End every detached session, each with the epoch it is listed with.
-pub fn terminate_detached(known: &KnownTerminals) -> Result<TerminateDetachedResult, String> {
+/// A session as the caller listed it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListedSession {
+    pub session_id: String,
+    pub attach_epoch: u64,
+}
+
+/// End the sessions the caller saw as detached, each with the epoch it saw.
+/// Sessions are classified again first; any that is no longer detached, or
+/// was attached again since, is left running.
+pub fn terminate_detached(
+    listed_sessions: &[ListedSession],
+    known: &KnownTerminals,
+) -> Result<TerminateDetachedResult, String> {
     let mut result = TerminateDetachedResult {
         ended: 0,
         failed: Vec::new(),
@@ -151,11 +177,18 @@ pub fn terminate_detached(known: &KnownTerminals) -> Result<TerminateDetachedRes
     let Some(endpoint) = running_daemon()? else {
         return Ok(result);
     };
-    for entry in classify(listed(&endpoint)?, known) {
+    let current = classify(listed(&endpoint)?, known);
+    for wanted in listed_sessions {
+        let Some(entry) = current
+            .iter()
+            .find(|entry| entry.session_id == wanted.session_id)
+        else {
+            continue;
+        };
         if entry.state != PtySessionState::Detached {
             continue;
         }
-        match terminate_on(&endpoint, &entry.session_id, entry.attach_epoch) {
+        match terminate_on(&endpoint, &entry.session_id, wanted.attach_epoch) {
             Ok(TerminateOutcome::Terminated) => result.ended += 1,
             Ok(_) => {}
             Err(error) => result
@@ -226,8 +259,9 @@ fn classify(sessions: Vec<SessionInfo>, known: &KnownTerminals) -> Vec<PtySessio
                 } else {
                     PtySessionState::OtherClient
                 }
-            } else if known.layout.contains(&session.terminal_id)
-                || known.panes.contains(&session.terminal_id)
+            } else if known.adopts
+                && known.layout.contains(&session.terminal_id)
+                && !known.adoption_seen.contains(&session.terminal_id)
             {
                 PtySessionState::AwaitingPane
             } else {
@@ -269,6 +303,8 @@ mod tests {
 
     fn known(panes: &[&str], layout: &[&str]) -> KnownTerminals {
         KnownTerminals {
+            adoption_seen: HashSet::new(),
+            adopts: true,
             panes: panes.iter().map(|id| id.to_string()).collect(),
             layout: layout.iter().map(|id| id.to_string()).collect(),
         }
@@ -303,6 +339,30 @@ mod tests {
         );
         assert_eq!(entries[2].attach_epoch, 3);
         assert_eq!(entries[2].profile.as_deref(), Some("PowerShell"));
+    }
+
+    #[test]
+    fn a_layout_terminal_is_awaited_only_while_this_gui_can_still_adopt_it() {
+        let sessions = || vec![session("e#1", "pane-e", false, false)];
+        let mut known = known(&[], &["pane-e"]);
+        assert_eq!(
+            classify(sessions(), &known)[0].state,
+            PtySessionState::AwaitingPane
+        );
+        // Its pane was created once already (and adopted something else or
+        // spawned fresh): this session will never be adopted.
+        known.adoption_seen.insert("pane-e".into());
+        assert_eq!(
+            classify(sessions(), &known)[0].state,
+            PtySessionState::Detached
+        );
+        // A GUI that does not use the daemon adopts nothing.
+        known.adoption_seen.clear();
+        known.adopts = false;
+        assert_eq!(
+            classify(sessions(), &known)[0].state,
+            PtySessionState::Detached
+        );
     }
 
     #[test]
@@ -358,6 +418,8 @@ mod daemon_tests {
             let entries = classify(
                 sessions,
                 &KnownTerminals {
+                    adoption_seen: HashSet::new(),
+                    adopts: true,
                     panes: HashSet::new(),
                     layout: HashSet::new(),
                 },

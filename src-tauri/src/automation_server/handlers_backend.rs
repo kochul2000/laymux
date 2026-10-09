@@ -39,7 +39,7 @@ pub async fn api_docs() -> impl IntoResponse {
             },
             {
                 "method": "GET", "path": "/api/v1/pty-sessions",
-                "description": "PTY daemon session inventory: daemonRunning and sessions[{sessionId, terminalId, profile, createdSeq, childPid, attachEpoch, state: pane | awaitingPane | detached | otherClient | ending}]. awaitingPane: no client yet, but the saved layout (an unopened workspace, a dock) will adopt it. A daemon that does not answer, or an unreadable saved layout, is an error, never an empty list."
+                "description": "PTY daemon session inventory: daemonRunning and sessions[{sessionId, terminalId, profile, createdSeq, childPid, attachEpoch, state: pane | awaitingPane | detached | otherClient | ending}]. awaitingPane: no client yet, but the saved layout (an unopened workspace, a dock) will adopt it when its pane mounts; a terminal this GUI already created once is not awaited. A daemon that does not answer, or an unreadable saved layout, is an error, never an empty list."
             },
             {
                 "method": "POST", "path": "/api/v1/pty-sessions/terminate",
@@ -49,7 +49,8 @@ pub async fn api_docs() -> impl IntoResponse {
             },
             {
                 "method": "POST", "path": "/api/v1/pty-sessions/terminate-detached",
-                "description": "End every detached session (never pane or awaitingPane), each with its listed epoch. Returns {ended, failed[]}."
+                "description": "End the sessions the caller listed as detached, each with the epoch it listed. Each is classified again first; one that is no longer detached or was attached again since is left running. Returns {ended, failed[]}.",
+                "body": {"sessions":"[{sessionId, attachEpoch}] from GET /api/v1/pty-sessions (state detached)"}
             },
             {
                 "method": "GET", "path": "/api/v1/agent-hooks/updates",

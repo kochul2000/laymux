@@ -1011,7 +1011,7 @@ endpoint는 두 플랫폼 모두 이 socket이며, 다른 로컬 계정은 OS가
 
 dev 빌드의 StrictMode는 TerminalView를 한 번 닫았다 다시 열어서, 재결합한 세션을 바로 종료한다. PTY 수명을 dev에서 확인할 때는 `VITE_LAYMUX_STRICT_MODE=0`으로 띄운다([dev-repro-methodology.md §4.7](../dev-repro-methodology.md)).
 
-**분리 세션 관리:** 설정 › 터미널 › PTY 세션 패널이 데몬 세션을 `pane`(이 GUI의 터미널)·`awaitingPane`(client는 없지만 저장된 레이아웃이 복원할 터미널, 예: 아직 열지 않은 워크스페이스)·`detached`(client도, 복원할 pane도 없음)·`otherClient`·`ending`으로 보여 준다. 종료는 `detached`만 가능하며, backend가 직전에 다시 분류해 다른 상태면 `notDetached`로 답하고, 목록에서 본 attach epoch를 실어 사이에 다시 attach된 세션은 `superseded`로 남긴다. 목록 조회 실패·응답 없는 데몬·읽을 수 없는 저장 레이아웃은 빈 목록이 아니라 오류이며 자동 정리는 하지 않는다. 같은 동작을 `list_pty_sessions`·`terminate_pty_session`·`terminate_detached_pty_sessions` IPC와 `GET /api/v1/pty-sessions`·`POST /api/v1/pty-sessions/terminate {sessionId, attachEpoch}`·`POST /api/v1/pty-sessions/terminate-detached`로 제공한다([ADR-0306](../adr/0306-pty-daemon-session-inventory.md)).
+**분리 세션 관리:** 설정 › 터미널 › PTY 세션 패널이 데몬 세션을 `pane`(이 GUI의 터미널)·`awaitingPane`(client는 없지만 저장된 레이아웃의 터미널이고 이 GUI가 아직 만들지 않아 adopt할 기회가 남은 것, 예: 아직 열지 않은 워크스페이스)·`detached`(client도, 복원할 pane도 없음)·`otherClient`·`ending`으로 보여 준다. 종료는 `detached`만 가능하며, backend가 직전에 다시 분류해 다른 상태면 `notDetached`로 답하고, 목록에서 본 attach epoch를 실어 사이에 다시 attach된 세션은 `superseded`로 남긴다. 목록 조회 실패·응답 없는 데몬·읽을 수 없는 저장 레이아웃은 빈 목록이 아니라 오류이며 자동 정리는 하지 않는다. 같은 동작을 `list_pty_sessions`·`terminate_pty_session`·`terminate_detached_pty_sessions` IPC와 `GET /api/v1/pty-sessions`·`POST /api/v1/pty-sessions/terminate {sessionId, attachEpoch}`·`POST /api/v1/pty-sessions/terminate-detached`로 제공한다([ADR-0306](../adr/0306-pty-daemon-session-inventory.md)).
 
 **아직 없는 것:** 업데이트 인계(업데이트 중 작업 유지), 화면 snapshot, GUI 미접속 중 OSC·훅 처리, 분리 세션을 새 pane에 붙이는 adopt는 후속 단계다.
 

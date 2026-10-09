@@ -9,7 +9,8 @@ use tauri::State;
 
 use crate::lock_ext::MutexExt;
 use crate::pty_daemon::{
-    self, KnownTerminals, PtySessionInventory, TerminateDetachedResult, TerminateOutcome,
+    self, KnownTerminals, ListedSession, PtySessionInventory, TerminateDetachedResult,
+    TerminateOutcome,
 };
 use crate::state::AppState;
 
@@ -22,10 +23,11 @@ pub struct TerminatePtySessionRequest {
     pub attach_epoch: u64,
 }
 
-/// This GUI's live panes and the saved layout's terminals.
+/// This GUI's live panes, adoption history and the saved layout's terminals.
 fn known_terminals(state: &AppState) -> Result<KnownTerminals, String> {
     let panes = state.pty_handles.lock_or_err()?.keys().cloned().collect();
-    KnownTerminals::load(panes)
+    let adoption_seen = state.pty_daemon_adoption_seen.lock_or_err()?.clone();
+    KnownTerminals::load(panes, adoption_seen)
 }
 
 pub fn list_pty_sessions_inner(state: &AppState) -> Result<PtySessionInventory, String> {
@@ -45,8 +47,9 @@ pub fn terminate_pty_session_inner(
 
 pub fn terminate_detached_pty_sessions_inner(
     state: &AppState,
+    request: &TerminateDetachedPtySessionsRequest,
 ) -> Result<TerminateDetachedResult, String> {
-    pty_daemon::terminate_detached(&known_terminals(state)?)
+    pty_daemon::terminate_detached(&request.sessions, &known_terminals(state)?)
 }
 
 async fn blocking<T: Send + 'static>(
@@ -77,7 +80,15 @@ pub async fn terminate_pty_session(
 #[tauri::command(async)]
 pub async fn terminate_detached_pty_sessions(
     state: State<'_, Arc<AppState>>,
+    request: TerminateDetachedPtySessionsRequest,
 ) -> Result<TerminateDetachedResult, String> {
     let state = Arc::clone(&state);
-    blocking(move || terminate_detached_pty_sessions_inner(&state)).await
+    blocking(move || terminate_detached_pty_sessions_inner(&state, &request)).await
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminateDetachedPtySessionsRequest {
+    /// The detached sessions the caller saw, with the epochs it saw.
+    pub sessions: Vec<ListedSession>,
 }

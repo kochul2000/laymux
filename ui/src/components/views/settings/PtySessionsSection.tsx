@@ -68,19 +68,21 @@ export function PtySessionsSection() {
     }
   };
 
+  const sessions = inventory?.sessions ?? [];
+  const detachedEntries = sessions.filter((entry) => entry.state === "detached");
+  const detached = detachedEntries.length;
+
   const endOne = (entry: PtySessionEntry) =>
     run(async () => t(`ptySessions.outcome.${await terminatePtySession(entry)}`));
+  // Exactly the sessions shown (and confirmed) as detached, with their epochs.
   const endDetached = () =>
     run(async () => {
-      const result = await terminateDetachedPtySessions();
+      const result = await terminateDetachedPtySessions(detachedEntries);
       const ended = t("ptySessions.endedCount", { count: result.ended });
       return result.failed.length === 0
         ? ended
         : `${ended} ${t("ptySessions.failedSome", { failures: result.failed.join("; ") })}`;
     });
-
-  const sessions = inventory?.sessions ?? [];
-  const detached = sessions.filter((entry) => entry.state === "detached").length;
 
   return (
     <SettingsGroup title={t("ptySessions.title")} description={t("ptySessions.description")}>

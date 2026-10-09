@@ -43,7 +43,7 @@ pub use discovery::DaemonPaths;
 pub use entry::run_daemon_main;
 pub use inventory::{
     inventory, terminate as terminate_listed_session, terminate_detached, KnownTerminals,
-    PtySessionEntry, PtySessionInventory, PtySessionState, TerminateDetachedResult,
+    ListedSession, PtySessionEntry, PtySessionInventory, PtySessionState, TerminateDetachedResult,
     TerminateOutcome,
 };
 pub use launcher::{ensure_running, find_running, shutdown_running, spawn_daemon};

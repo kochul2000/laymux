@@ -98,7 +98,11 @@ describe("PtySessionsSection", () => {
     render(<PtySessionsSection />);
     await waitFor(() => expect(screen.getByTestId("pty-sessions-end-detached")).toBeEnabled());
     confirm("pty-sessions-end-detached");
-    await waitFor(() => expect(invoke).toHaveBeenCalledWith("terminate_detached_pty_sessions"));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("terminate_detached_pty_sessions", {
+        request: { sessions: [{ sessionId: "pane-b#1-y", attachEpoch: 4 }] },
+      }),
+    );
     await waitFor(() =>
       expect(screen.getByTestId("pty-sessions-notice")).toHaveTextContent("pane-c: timed out"),
     );
