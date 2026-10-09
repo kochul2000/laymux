@@ -20,6 +20,7 @@ mod entry;
 mod handshake;
 mod idle;
 mod launcher;
+mod modes;
 mod server;
 mod session;
 #[cfg(windows)]

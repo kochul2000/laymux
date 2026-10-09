@@ -970,7 +970,7 @@ overlay caret 이 켜져 있는데도 codex 입력박스에 **어두운 1셀 블
 [on_output 콜백]  protocol mode → output ring/delivery → OSC 단일 패스 (§8.3, 변경 없음)
 ```
 
-**데몬은 PTY만 소유한다.** 데몬 세션(`pty_daemon/server.rs`)은 받은 명령을 native PTY에 그대로 spawn하고, 자식 대기·출력 중계·입력·resize·terminate만 수행한다. OSC, protocol reply, 출력 ring, 설정, DB는 계속 GUI의 PTY 콜백이 처리한다.
+**데몬은 PTY와 그 출력에서 도출한 터미널 모드만 소유한다.** 데몬 세션(`pty_daemon/server.rs`)은 받은 명령을 native PTY에 그대로 spawn하고, 자식 대기·출력 중계·입력·resize·terminate와 재결합용 모드 추적(`pty_daemon/modes.rs`, ADR-0303)만 수행한다. 출력 바이트는 변형하지 않는다. OSC, protocol reply, 출력 ring, 설정, DB는 계속 GUI의 PTY 콜백이 처리한다.
 
 GUI proxy(`pty_daemon/client.rs`)는 `PtySystem`·`MasterPty`·`Child`·`InterruptiblePtyReader`를 구현한다. 출력 frame은 4 KiB chunk로 나눈 뒤 약 64 KiB queue(검사 시점 기준 + chunk 하나)를 거쳐 기존 reader loop에 들어간다. queue가 차면 socket 읽기를 멈추므로 backpressure가 데몬의 PTY reader까지 전달된다.
 
@@ -982,7 +982,7 @@ GUI proxy(`pty_daemon/client.rs`)는 `PtySystem`·`MasterPty`·`Child`·`Interru
 | `PtyHandle` teardown(터미널 삭제·재시작·업데이트 guard) | master drop·kill → 새 연결로 `terminateSession`을 보내고 `terminating` 응답까지 기다린다(실패는 `kill` 오류로 전파된다). 데몬이 graceful close와 process tree kill을 수행한다. spawn 완료 전에 온 요청은 handle이 생기는 즉시 적용한다 |
 | 앱 정상 종료 | `RunEvent::Exit` → `AppState::terminate_daemon_sessions_on_exit()`가 모든 데몬 터미널의 종료를 병렬로 요청하고, 전체를 2초 deadline으로 묶는다(best-effort) |
 | 자식 스스로 종료 | 데몬이 입력·master를 닫아 남은 출력과 EOF를 받는다(ConPTY는 master를 닫아야 EOF). EOF·exit를 모두 관측하면 세션을 제거하고, attach된 client에는 `Eof`·`Exit`를 보낸다 |
-| `Attach` | 기존 client를 닫고 대체한다. `replay`가 켜져 있으면 새 client는 `Attached` → backlog → live 순서로 받는다. 꺼져 있으면 backlog를 `droppedBytes`로 버린다 |
+| `Attach` | 기존 client를 닫고 대체한다. `replay`가 켜져 있으면 새 client는 `Attached` → backlog → live 순서로 받는다. 꺼져 있으면 backlog를 `droppedBytes`로 버리고 `Attached` → 모드 preamble(ADR-0303) → live 순서로 받는다 |
 | 업데이트 설치 | guard가 GUI PTY를 종료한 뒤 `shutdown`을 보낸다. 데몬은 새 세션을 거절하고, spawn 중인 세션까지 모두 종료한 뒤 끝난다. instance lock이 풀릴 때까지 최대 5초 기다린다. 응답하지 않는 데몬은 discovery PID와 command line(`--pty-daemon <dir>`)을 확인한 뒤에만 강제 종료한다 |
 
 GUI는 데몬 자식의 PID를 직접 kill하지 않는다(`ChildKillOwner::Backend`). handle을 가진 데몬이 tree kill을 수행한다. 데몬 연결이 끊기면 GUI reader는 `Failure`로 끝나고 child는 종료로 처리된다. 데몬 안의 작업은 계속 실행되지만, 그 터미널을 teardown하거나 앱을 종료하면 `terminateSession`으로 정리된다.
@@ -1006,7 +1006,7 @@ Windows endpoint는 loopback TCP다. frame은 `u32 LE 길이 | kind(0=JSON contr
 - GUI가 만든 명령·resume 복원 요청·Codex 시작 guard는 적용하지 않는다.
 - spawn 때 metadata로 맡긴 agent hook token을 다시 써서 살아남은 자식의 훅을 계속 인증하고, 맡긴 WSL relay 여부로 귀속 도메인을 복원한다.
 - 세션은 bind마다 attach epoch를 올린다. GUI의 종료 요청은 자신의 epoch를 싣고, 그 뒤 다른 client가 bind했으면 데몬은 `superseded`로 답하고 세션을 남긴다.
-- backlog replay 없이 attach한 뒤 GUI grid 크기로 resize한다. 이전 화면은 복원되지 않고 다음 출력부터 그려진다. protocol 상태와 xterm도 기본 모드로 시작하므로, 시작 때 한 번만 bracketed paste를 켠 TUI에는 재결합 뒤 여러 줄 입력이 bracketed 없이 들어간다(모드 복원은 #1151).
+- backlog replay 없이 attach한 뒤 GUI grid 크기로 resize한다. 이전 화면은 복원되지 않고 다음 출력부터 그려진다. 대신 데몬 세션이 출력 전체에서 추적한 터미널 모드(DECCKM·autowrap·커서 표시·focus·bracketed paste·마우스 추적과 SGR 인코딩·alt screen·IRM·keypad, 모두 xterm.js 시맨틱) 중 기본값과 다른 것을 `Attached` 직후 첫 data frame(preamble)으로 다시 단언한다. preamble은 DECSET/DECRST·IRM·`ESC =`만 담고 query는 담지 않으며(focus 보고가 켜지면 xterm.js가 현재 포커스를 한 번 보고한다), GUI는 이를 일반 출력으로 처리하므로 Rust `TerminalProtocolState`와 xterm이 같은 단일 패스로 맞춰진다([ADR-0303](../adr/0303-pty-daemon-mode-tracking-and-adoption-preamble.md)). replay 있는 attach에는 preamble을 붙이지 않는다. alt screen 앱은 재결합 뒤 빈 alt 화면에서 시작하며 앱이 다시 그릴 때까지 비어 있다.
 - CWD는 요청된 시작 디렉터리로 시작해 다음 OSC 7을 따른다.
 
 dev 빌드의 StrictMode는 TerminalView를 한 번 닫았다 다시 열어서, 재결합한 세션을 바로 종료한다. PTY 수명을 dev에서 확인할 때는 `VITE_LAYMUX_STRICT_MODE=0`으로 띄운다([dev-repro-methodology.md §4.7](../dev-repro-methodology.md)).
