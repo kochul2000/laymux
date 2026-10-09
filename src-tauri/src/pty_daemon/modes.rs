@@ -1,5 +1,5 @@
 //! Terminal input/display modes a daemon session derives from its PTY output
-//! (ADR-0302).
+//! (ADR-0303).
 //!
 //! An application sets modes such as bracketed paste once and never repeats
 //! them, while a re-adopting GUI starts from terminal defaults. The daemon is

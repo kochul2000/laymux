@@ -123,11 +123,14 @@ export interface PasteSettings {
   smart: boolean;
   /** Directory for clipboard image pastes. Empty = default temp dir. */
   imageDir: string;
-  /** Strip common leading whitespace when pasting. */
+  /** Strip common leading whitespace when copying a terminal selection. */
   removeIndent: boolean;
-  /** Rejoin URLs split across lines when pasting. */
+  /**
+   * Rejoin rows a TUI broke at the screen width when copying, and URLs split
+   * across lines when copying or pasting.
+   */
   removeLineBreak: boolean;
-  /** Detect indented multi-line URLs and make them clickable as a single link. */
+  /** Detect URLs a TUI broke across rows and make them clickable as a single link. */
   linkJoin: boolean;
   /** Show a confirmation dialog when pasting large text. */
   largeWarning: boolean;

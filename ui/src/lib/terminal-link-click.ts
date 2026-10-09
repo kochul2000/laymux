@@ -23,15 +23,14 @@
 
 import { findIndentedUrls, type IndentedLineInfo } from "./indented-link-provider";
 import { findPrTokens } from "./pr-link-provider";
+import { TERMINAL_URL_REGEX } from "./terminal-url";
 
 /**
- * WebLinksAddon 이 쓰는 기본 URL 정규식과 동일하게 유지한다.
- * (`@xterm/addon-web-links` lib 내부 상수를 그대로 복제)
+ * WebLinksAddon 에 `urlRegex` 로 넘기는 것과 같은 정규식이다.
  * 평문 URL 클릭 시 WebLinksAddon 과 같은 경계로 URL 을 잘라야 일반 셸과
  * TUI 우회 경로의 동작이 일치한다.
  */
-export const WEB_LINK_REGEX =
-  /(https?|HTTPS?):[/]{2}[^\s"'!*(){}|\\^<>`]*[^\s"':,.!?{}|\\^~[\]`()<>]/;
+export const WEB_LINK_REGEX = TERMINAL_URL_REGEX;
 
 /**
  * 한 줄 텍스트에서, 주어진 1-based 컬럼을 포함하는 평문 URL 을 찾는다.

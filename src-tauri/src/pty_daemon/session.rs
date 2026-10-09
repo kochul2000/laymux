@@ -87,7 +87,7 @@ pub(super) struct Sink {
     pub(super) dropped_bytes: u64,
     pub(super) reader_ended: bool,
     pub(super) exit_code: Option<u32>,
-    /// Modes set by all output so far, attached or not (ADR-0302).
+    /// Modes set by all output so far, attached or not (ADR-0303).
     pub(super) modes: TerminalModes,
 }
 
@@ -218,7 +218,7 @@ impl Session {
         }
         let child_pid = self.handle.get().and_then(PtyHandle::child_pid);
         // Without replay the client never sees the output that set the
-        // session's modes, so it gets them re-asserted instead (ADR-0302).
+        // session's modes, so it gets them re-asserted instead (ADR-0303).
         // A replay carries those mode changes itself.
         let preamble = if replay {
             Vec::new()

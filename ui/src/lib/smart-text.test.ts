@@ -284,6 +284,31 @@ describe("smartRemoveLineBreak", () => {
     expect(smartRemoveLineBreak(input)).toBe("See https://example.com/page\nThanks");
   });
 
+  it("URL 줄 다음 같은 들여쓰기의 경로 줄은 wrap 꼬리가 아니다", () => {
+    // TUI wrap 의 연속 줄은 URL 이 시작한 줄보다 깊게 내어쓴다. 같은 깊이의 다음
+    // 줄은 독립된 줄이다 — `…/pull/12src/lib/…` 로 붙이면 내용이 망가진다.
+    expect(smartRemoveLineBreak("PR: https://github.com/a/b/pull/12\nsrc/lib/smart-text.ts")).toBe(
+      "PR: https://github.com/a/b/pull/12\nsrc/lib/smart-text.ts",
+    );
+    expect(
+      smartRemoveLineBreak("  PR: https://github.com/a/b/pull/12\n  src/lib/smart-text.ts"),
+    ).toBe("  PR: https://github.com/a/b/pull/12\n  src/lib/smart-text.ts");
+  });
+
+  it("자기 줄을 차지한 URL 은 같은 깊이의 연속 줄도 wrap 꼬리로 잇는다 (Claude OAuth)", () => {
+    // URL 만 있는 행은 내어쓰기 그대로 다음 행으로 잘린다 — 안내 문장이 앞에 있어
+    // 전체 collapse 가 동작하지 않아도 URL 을 복원해야 한다.
+    const input =
+      "Browser didn't open? Use the url below to sign in:\n\n" +
+      "  https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61\n" +
+      "  b-44d9-88ed-5944d1962f5e&response_type=code";
+    expect(smartRemoveLineBreak(input)).toBe(
+      "Browser didn't open? Use the url below to sign in:\n\n" +
+        "  https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61" +
+        "b-44d9-88ed-5944d1962f5e&response_type=code",
+    );
+  });
+
   it("줄 끝 pad 가 남아 있어도 명령 안 wrap URL 을 병합한다 (paste 경로 견고성, PR #303 리뷰)", () => {
     // applyPasteTextTransforms 는 trimSelectionTrailingWhitespace 없이 호출되므로
     // 줄 끝 pad 가 남을 수 있다. tail/continuation 계산이 이를 견뎌야 한다.

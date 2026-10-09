@@ -1,4 +1,4 @@
-# 0302. PTY 데몬의 터미널 모드 추적과 재결합 preamble
+# 0303. PTY 데몬의 터미널 모드 추적과 재결합 preamble
 
 - Status: Proposed
 - Date: 2026-10-09
