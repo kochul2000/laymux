@@ -34,7 +34,7 @@ impl DaemonRoot {
     pub fn for_current_build() -> Result<Self, String> {
         if let Some(dir) = std::env::var_os(ENV_LAYMUX_PTY_DAEMON_DIR).filter(|dir| !dir.is_empty())
         {
-            return Ok(Self::in_dir(PathBuf::from(dir)));
+            return Self::overridden(Path::new(&dir));
         }
         let state_db = crate::local_state::state_path().map_err(|error| error.to_string())?;
         let base = state_db
@@ -45,6 +45,15 @@ impl DaemonRoot {
 
     pub fn in_dir(dir: impl Into<PathBuf>) -> Self {
         Self { dir: dir.into() }
+    }
+
+    /// A root named by `LAYMUX_PTY_DAEMON_DIR`, made absolute against this
+    /// process: the daemon runs in its generation directory, where a relative
+    /// path would mean somewhere else.
+    fn overridden(dir: &Path) -> Result<Self, String> {
+        std::path::absolute(dir)
+            .map(Self::in_dir)
+            .map_err(|error| format!("invalid {ENV_LAYMUX_PTY_DAEMON_DIR}: {error}"))
     }
 
     pub fn dir(&self) -> &Path {
@@ -315,6 +324,13 @@ mod tests {
         let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(paths.dir()), 0o700);
         assert_eq!(mode(&paths.discovery_file()), 0o600);
+    }
+
+    #[test]
+    fn an_overridden_root_is_absolute_whatever_the_daemon_runs_in() {
+        let root = DaemonRoot::overridden(Path::new("tmp/pd")).unwrap();
+        assert!(root.dir().is_absolute());
+        assert!(root.dir().ends_with(Path::new("tmp").join("pd")));
     }
 
     #[test]
