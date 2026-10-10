@@ -112,7 +112,7 @@ VITE_LAYMUX_STRICT_MODE=0 cargo tauri dev
 
 1. 터미널에서 `$PID`를 기록하고 긴 명령을 시작한다.
 2. `bash scripts/kill-dev.sh`로 검증된 dev GUI PID만 강제 종료한다. Windows에서도 `/T`를 사용하지 않아 데몬과 셸을 유지한다.
-3. 위 명령으로 다시 띄운다.
+3. 위 명령으로 다시 띄운다. 데몬은 GUI가 없으면 유예 시간(`terminal.ptyDaemonGraceMinutes`, 기본 10분, ADR-0312) 뒤 세션을 모두 끝내므로 그 안에 띄운다.
 4. 같은 `$PID`가 응답하는지, dev 로그에 `adopted a running PTY daemon session`이 찍혔는지, 데몬 로그(`%LOCALAPPDATA%\laymux-dev\pty-daemon\g<protocol>-<build>\daemon.log`, ADR-0308)에 새 spawn이 없는지 확인한다.
 
 업데이트 인계(ADR-0308)는 설치기 없이 dev 전용 `POST /api/v1/dev/update-handoff`로 확인한다.
