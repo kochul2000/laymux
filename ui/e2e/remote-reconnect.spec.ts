@@ -99,6 +99,8 @@ type RemoteMockOptions = {
   reconnectPayloadDelayMs?: number;
   stalledReconnectSnapshots?: number;
   snapshotLineCount?: number;
+  navigationFailures?: number;
+  navigationFailureStatus?: number;
 };
 
 type RemoteTerminal = {
@@ -119,6 +121,7 @@ async function installRemoteMocks(page: Page, options: RemoteMockOptions = {}) {
     claimTransitionConflictsRemaining: options.claimTransitionConflicts ?? 0,
     heartbeatRequests: 0,
     heartbeatFailuresRemaining: options.heartbeatFailures ?? 0,
+    navigationFailuresRemaining: options.navigationFailures ?? 0,
     sockets: [] as WebSocketRoute[],
   };
 
@@ -172,6 +175,14 @@ async function installRemoteMocks(page: Page, options: RemoteMockOptions = {}) {
       return;
     }
     if (url.pathname === "/remote/v1/navigation") {
+      if (state.navigationFailuresRemaining > 0) {
+        state.navigationFailuresRemaining -= 1;
+        await route.fulfill({
+          status: options.navigationFailureStatus ?? 504,
+          json: { error: "Frontend response timeout" },
+        });
+        return;
+      }
       await route.fulfill({ json: navigation });
       return;
     }
@@ -275,6 +286,37 @@ async function scrollRemoteViewportUp(page: Page, lines: number) {
 
 function spinnerAnimationName(spinner: Locator) {
   return spinner.locator(".remote-icon").evaluate((el) => getComputedStyle(el).animationName);
+}
+
+for (const status of [502, 503, 504]) {
+  test(`manual connect recovers when initial navigation returns ${status}`, async ({ page }) => {
+    const state = await installRemoteMocks(page, {
+      navigationFailures: 1,
+      navigationFailureStatus: status,
+    });
+    await instrumentRemotePage(page);
+    await page.locator("#connect").click();
+    await expect.poll(() => resetCount(page), { timeout: 10000 }).toBe(1);
+    expect(state.sockets).toHaveLength(1);
+    expect(state.claimRequests).toBe(2);
+  });
+}
+
+for (const status of [401, 403, 409]) {
+  test(`manual connect does not retry a navigation refusal ${status}`, async ({ page }) => {
+    const state = await installRemoteMocks(page, {
+      navigationFailures: 1,
+      navigationFailureStatus: status,
+    });
+    await instrumentRemotePage(page);
+    await page.locator("#connect").click();
+    await expect(page.locator("#statusText")).toHaveText("Frontend response timeout");
+    await page.waitForTimeout(2000);
+    expect(state.claimRequests).toBe(1);
+    expect(
+      await page.evaluate(() => sessionStorage.getItem("laymux.remote.autoConnect")),
+    ).toBeNull();
+  });
 }
 
 test("a pending top-bar action shows and then clears its spinner", async ({ page }) => {

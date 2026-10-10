@@ -10641,7 +10641,12 @@ import {
               setStatus(err.message, true);
               return;
             }
-            if (auto) {
+            // A successful manual claim already armed this tab's connection intent.
+            // The host frontend can still be booting when initial navigation times
+            // out; recover through the same visible-document retry as auto-connect.
+            const transientStartupFailure = failedLease && err &&
+              [502, 503, 504].includes(err.status);
+            if (auto || transientStartupFailure) {
               scheduleAutoConnectRetry();
               // Transient (offline, relay still down): keep the reason visible but
               // do not paint it as a failure the user has to act on.
