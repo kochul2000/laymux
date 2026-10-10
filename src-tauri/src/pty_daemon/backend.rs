@@ -93,6 +93,8 @@ pub fn terminal_backend(terminal_id: &str, profile: &str, allow_adopt: bool) -> 
             return PtyBackend::Local;
         }
     };
+    // Its sessions must not end while this GUI runs (ADR-0312).
+    super::presence::keep(&endpoint);
     collect_unused_generations_once(&root, &current);
     let adopt = if allow_adopt {
         match catalogs(&root, &current, &endpoint) {
@@ -103,10 +105,13 @@ pub fn terminal_backend(terminal_id: &str, profile: &str, allow_adopt: bool) -> 
                     .collect();
                 let choice = choose_adoption(&listings, terminal_id, profile);
                 end_stale_sessions(&catalogs, choice.stale);
-                choice.adopt.map(|(catalog, session_id)| DaemonAdoption {
-                    endpoint: catalogs[catalog].0.clone(),
-                    session_id,
-                    missed_output: Arc::default(),
+                choice.adopt.map(|(catalog, session_id)| {
+                    super::presence::keep(&catalogs[catalog].0);
+                    DaemonAdoption {
+                        endpoint: catalogs[catalog].0.clone(),
+                        session_id,
+                        missed_output: Arc::default(),
+                    }
                 })
             }
             Err(error) => {
@@ -160,6 +165,8 @@ fn other_generations(root: &DaemonRoot, current: &str) -> Result<Vec<Catalog>, S
         let launcher::GenerationState::Ready(endpoint) = live.state else {
             continue;
         };
+        // Its sessions may wait for a pane this GUI has not mounted yet.
+        super::presence::keep(&endpoint);
         match list_sessions(&endpoint) {
             Ok(sessions) => catalogs.push((endpoint, sessions)),
             Err(error) => {

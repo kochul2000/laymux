@@ -1,6 +1,6 @@
 # 0301. PTY 데몬을 기본으로 켜고, 새 GUI는 살아 있는 세션을 재결합한다
 
-- Status: Proposed. Superseded by [0308](0308-pty-daemon-generations-across-updates.md) ("업데이트 전 데몬 종료"와 단일 데몬 디렉터리만; 기본 활성화·재결합·staging은 유지)
+- Status: Proposed. Superseded by [0308](0308-pty-daemon-generations-across-updates.md) ("업데이트 전 데몬 종료"와 단일 데몬 디렉터리만; 기본 활성화·재결합·staging은 유지), [0312](0312-pty-daemon-grace-without-gui.md) (GUI 없이 무기한 실행되는 crash 생존만; 유예 안의 재결합은 유지)
 - Date: 2026-10-08
 - Source: 사용자 결정("모든 작업이 끝나면 떼는거 맞니?" → 기본 활성화를 막는 회귀만 막히면 opt-in 제거), [ADR-0300](0300-detached-pty-daemon-core.md), [PR #1147](https://github.com/kochul2000/laymux/pull/1147), [data-flow.md §8.23](../architecture/data-flow.md#823-pty-소유자와-pty-데몬)
 - 관계: ADR-0300의 "이번 단계는 opt-in" 결정과 "데몬에 연결할 수 없으면 터미널 생성 실패" 결정을 대체한다. 그 밖의 경계(데몬은 PTY만 소유)·수명·IPC 결정은 그대로 따른다. ADR-0201의 업데이트 전 PTY 종료는 유지하고, 그 경로에 데몬 종료를 더한다.

@@ -132,6 +132,12 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::NextUse,
     },
     MetadataEntry {
+        path: "/terminal/ptyDaemonGraceMinutes",
+        description: "GUI가 없을 때 PTY 데몬이 터미널을 유지하는 시간(분, 1~1440, 기본 10)입니다. 업데이트 뒤 새 GUI가 세션을 이어받을 시간이며, 이 시간이 지나도록 GUI가 없으면 데몬이 터미널을 모두 끝냅니다. 설정 UI는 없습니다. 저장 뒤 새 터미널을 만들 때 실행 중인 데몬에 알립니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
         path: "/terminal/advertiseTrueColor",
         description: "새 PTY 자식에 truecolor 지원을 광고합니다. 저장 후 새로 생성하거나 재시작한 터미널부터 적용됩니다.",
         sensitive: false,

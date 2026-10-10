@@ -401,6 +401,13 @@ fn validate_terminal(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
     );
     range_u64(
         issues,
+        "/terminal/ptyDaemonGraceMinutes",
+        u64::from(settings.terminal.pty_daemon_grace_minutes),
+        u64::from(crate::constants::PTY_DAEMON_GRACE_MIN_MINUTES),
+        u64::from(crate::constants::PTY_DAEMON_GRACE_MAX_MINUTES),
+    );
+    range_u64(
+        issues,
         "/terminal/outputActivityBurst/windowMs",
         settings.terminal.output_activity_burst.window_ms,
         100,
@@ -930,6 +937,29 @@ mod tests {
         settings.codex.command = "codex --yolo".into();
         let issues = validate_settings(&settings);
         assert!(!issues.iter().any(|issue| issue.path.ends_with("/command")));
+    }
+
+    #[test]
+    fn the_pty_daemon_grace_defaults_to_ten_minutes_and_is_kept_in_range() {
+        let mut settings = Settings::default();
+        assert_eq!(settings.terminal.pty_daemon_grace_minutes, 10);
+        let path = "/terminal/ptyDaemonGraceMinutes";
+        assert!(!validate_settings(&settings)
+            .iter()
+            .any(|issue| issue.path == path));
+        for out_of_range in [0, 24 * 60 + 1] {
+            settings.terminal.pty_daemon_grace_minutes = out_of_range;
+            assert!(validate_settings(&settings)
+                .iter()
+                .any(|issue| issue.path == path && issue.code == "out_of_range"));
+        }
+    }
+
+    #[test]
+    fn a_settings_file_without_the_pty_daemon_grace_gets_the_default() {
+        let settings: Settings =
+            serde_json::from_value(serde_json::json!({ "terminal": {} })).unwrap();
+        assert_eq!(settings.terminal.pty_daemon_grace_minutes, 10);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # 0306. 분리된 PTY 데몬 세션을 보고 끝내는 사용자 경로
 
-- Status: Proposed
+- Status: Proposed. Superseded by [0312](0312-pty-daemon-grace-without-gui.md) (분리 세션을 사용자가 끝낼 때까지 두는 것만; GUI가 1분마다 자동으로 끝낸다. 패널과 분류는 유지)
 - Date: 2026-10-09
 - Source: [ADR-0301](0301-pty-daemon-default-adoption.md) Consequences "남은 세션", [PTY 데몬 후속 계획](../pty-daemon/followup-plan.md) §3.4 단계 D
 

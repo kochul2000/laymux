@@ -150,6 +150,18 @@ native 셸은 `CommandBuilder::env`/`env_remove`, WSL은 같은 mutation의 rcfi
 
 `terminal.parserAdmission`은 앱 전역 xterm parser admission turn 을 **pane 단위가 아니라 클래스 단위**로 나누는 비율이다([ADR-0101](../adr/0101-active-workspace-weighted-parser-admission.md)). 세 값은 상대값이고 합이 한 admission cycle 이므로 기본값 `5/3/2`는 focused 50%, 활성 workspace 의 나머지 visible 30%, hidden 전체 20%를 뜻한다. 클래스 안에서는 pane 들이 round-robin 으로 돌아가므로 hidden pane 이 3개든 300개든 활성 workspace 몫은 변하지 않는다.
 
+### PTY 데몬 유예 시간
+
+```jsonc
+{
+  "terminal": {
+    "ptyDaemonGraceMinutes": 10 // GUI가 없을 때 데몬이 터미널을 유지하는 시간(분, 1~1440)
+  }
+}
+```
+
+**Settings UI 는 없다** — settings.json 직접 편집 전용 값이다([ADR-0312](../adr/0312-pty-daemon-grace-without-gui.md)). PTY 데몬은 GUI 연결이 하나도 없는 상태가 이 시간 동안 이어지면 터미널을 모두 끝내고 종료한다. 업데이트 설치와 새 GUI 기동을 넘길 시간이다. `validate_settings` 가 범위 밖 값을 `/terminal/ptyDaemonGraceMinutes` 로 `out_of_range` 보고하고, 실행 경로는 범위 안으로 clamp 한다. 적용 시점은 **nextUse** 다 — GUI는 터미널을 만들 때 값을 읽어 각 데몬의 presence 연결로 다시 알린다.
+
 **Settings UI 는 없다** — settings.json 직접 편집 전용 튜닝 값이다. 각 값의 유효 범위는 `1..=1000`이고 `validate_settings`가 범위를 벗어난 값을 `/terminal/parserAdmission/<field>` 경로로 보고한다. `0`은 그 클래스의 parser 를 멈추는 뜻이 되므로 허용하지 않으며, Rust `ParserAdmissionSettings::sanitized()`와 프론트엔드 `sanitizeTerminalWriteClassShare()`가 같은 범위로 clamp 한다. 기본값·범위 상수는 Rust `constants.rs`(`PARSER_ADMISSION_*`)와 `terminal-write-fair-scheduler.ts`(`TERMINAL_WRITE_DEFAULT_CLASS_SHARE`, `TERMINAL_WRITE_MIN_CLASS_SHARE`, `TERMINAL_WRITE_MAX_CLASS_SHARE`)에 각각 한 곳씩 있다.
 
 값 오류는 종류별로 처리가 다르다. **누락**은 `#[serde(default)]`와 프론트 기본값으로 채운다. **범위 밖 수치**는 양쪽에서 clamp 한다. **타입 오류**(`"2"`, `null`, 소수)는 이 필드만 드롭되어 기본값으로 대체되고 나머지 설정은 그대로 살아남는다 — 이 필드 전용 규칙이 아니라 `Settings` 전체에 균일하게 적용되는 로딩 정책이다(위 [로딩 실패와 부분 복구](#로딩-실패와-부분-복구), [ADR-0119](../adr/0119-settings-type-error-partial-recovery.md)). 프론트엔드 sanitizer 는 이미 로드된 snapshot 에 비수치 값이 들어 있을 때 그 항목만 기본값으로 되돌린다.
@@ -1966,7 +1978,8 @@ src-tauri/src/
 │   ├── backend.rs            # PtyBackend 선택·DaemonEndpoint·세션 key
 │   ├── server.rs             # 데몬: 연결·세션 catalog
 │   ├── handshake.rs          # 데몬: 인증 handshake(전체 deadline·proof)
-│   ├── idle.rs               # 데몬: idle 종료 판정
+│   ├── idle.rs               # 데몬: idle 종료·GUI 없음 유예 종료 판정 (ADR-0312)
+│   ├── presence.rs           # GUI: 데몬마다 presence 연결 유지 (ADR-0312)
 │   ├── session.rs            # 데몬 세션: attach/detach·backlog·놓친 출력 전달(ADR-0309)
 │   ├── modes.rs              # 데몬 세션: 출력에서 추적한 터미널 모드·재결합 preamble
 │   ├── screen.rs             # 데몬 세션: 재결합 redraw용 화면 모델(vt100, panic 격리, ADR-0307)
