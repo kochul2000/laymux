@@ -1,6 +1,33 @@
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
 import { installRemoteClientRoutes, remoteClientMarkupWithoutXterm } from "./remote-client-assets";
 
+test("저장 완료 후 템플릿 목록 조회 실패는 저장 재시도를 유도하지 않는다", async ({ page }) => {
+  await routeRemoteWithWorkspaces(page, []);
+  let posts = 0;
+  let failRefresh = true;
+  await page.route("http://remote.test/remote/v1/layouts", async (route) => {
+    if (route.request().method() === "POST") posts += 1;
+    else if (failRefresh) {
+      failRefresh = false;
+      await route.fulfill({ status: 502, json: { error: "List refresh failed" } });
+      return;
+    }
+    await route.fallback();
+  });
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.locator("#connect").click();
+  await page.locator("#navToggle").click();
+  await page.locator('[data-workspace-manage="ws-a"]').click();
+  await page.locator('[data-workspace-action="template"]').click();
+  await page.locator("#workspaceNameInput").fill("저장 완료 템플릿");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await expect(page.locator("#statusText")).toContainText("saved");
+  await page.locator("#newWorkspace").click();
+  await expect(page.locator("#newWorkspacePanel")).toContainText("저장 완료 템플릿");
+  expect(posts).toBe(1);
+});
+
 test("리모트는 비활성 workspace를 템플릿으로 저장하고 생성 목록에 표시한다", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const controls = await routeRemoteWithWorkspaces(page, []);

@@ -358,7 +358,17 @@ import {
               body: JSON.stringify({ workspaceId, name, leaseId: selectedLeaseId }),
             });
             if (leaseId !== selectedLeaseId) return;
-            await loadWorkspaceLayouts();
+            // The POST has committed a new template. A failed list refresh
+            // must not offer another Save that would create a second copy.
+            try {
+              await loadWorkspaceLayouts();
+            } catch (error) {
+              if (leaseId === selectedLeaseId) {
+                setStatus(`Workspace template saved. Reopen the template list to refresh it: ${error.message || String(error)}`, true);
+              }
+              return;
+            }
+            if (leaseId !== selectedLeaseId) return;
             setStatus("Workspace template saved.");
           },
         });
