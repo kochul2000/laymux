@@ -1,7 +1,7 @@
 import { setRemoteIcon } from "./remote-icons.js";
 
 // Workspace operations stay local to the Remote surface; the host owns names.
-export function createWorkspaceManager({ getLease, rename, hide }) {
+export function createWorkspaceManager({ getLease, rename, hide, saveTemplate }) {
   const { document, window } = globalThis;
   const dialog = document.createElement("dialog");
   dialog.className = "workspace-manager";
@@ -14,6 +14,7 @@ export function createWorkspaceManager({ getLease, rename, hide }) {
     </div>
     <div id="workspaceManagerActions">
       <button type="button" data-workspace-action="rename">Rename workspace</button>
+      <button type="button" data-workspace-action="template">Save as template</button>
       <button type="button" data-workspace-action="hide">Hide workspace</button>
     </div>
     <form id="workspaceRenameForm" hidden>
@@ -39,6 +40,7 @@ export function createWorkspaceManager({ getLease, rename, hide }) {
   let revision = 0;
   let busy = false;
   let canHide = false;
+  let formMode = "rename";
 
   function close() {
     revision += 1;
@@ -82,6 +84,18 @@ export function createWorkspaceManager({ getLease, rename, hide }) {
     if (!authorized()) return;
     actions.hidden = true;
     form.hidden = false;
+    formMode = "rename";
+    form.querySelector("label").textContent = "Workspace name";
+    input.value = target.name;
+    input.focus();
+    input.select();
+  });
+  dialog.querySelector('[data-workspace-action="template"]').addEventListener("click", () => {
+    if (!authorized()) return;
+    formMode = "template";
+    actions.hidden = true;
+    form.hidden = false;
+    form.querySelector("label").textContent = "Template name";
     input.value = target.name;
     input.focus();
     input.select();
@@ -94,12 +108,14 @@ export function createWorkspaceManager({ getLease, rename, hide }) {
     if (!authorized()) return;
     const name = input.value.trim();
     if (!name) {
-      error.textContent = "Enter a workspace name.";
+      error.textContent =
+        formMode === "template" ? "Enter a template name." : "Enter a workspace name.";
       error.hidden = false;
       input.focus();
       return;
     }
-    void perform((id, lease) => rename(id, name, lease));
+    const action = formMode === "template" ? saveTemplate : rename;
+    void perform((id, lease) => action(id, name, lease));
   });
   for (const action of ["close", "cancel"]) {
     dialog.querySelector(`[data-workspace-action="${action}"]`).addEventListener("click", close);

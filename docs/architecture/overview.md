@@ -217,6 +217,8 @@ Workspace (Independent)
 
 ### 4.1 Layout 액션
 
+Remote 템플릿 저장은 내보내기 함수에 source workspace id를 명시해 활성 전환 없이 저장한다. source id 없는 desktop 내보내기는 기존처럼 활성 workspace를 사용한다. 슬롯·레이어·view 설정 복사와 대화 복원점 제외, 기존 템플릿 영속 경로는 공통 함수를 그대로 따른다([ADR-0311](../adr/0311-remote-save-workspace-template.md)).
+
 | 액션 | 동작 |
 |---|---|
 | Create from layout | Layout으로 새 Workspace 생성. 이후 연결 끊김 |

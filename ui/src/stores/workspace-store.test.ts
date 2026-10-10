@@ -530,6 +530,28 @@ describe("WorkspaceStore", () => {
   });
 
   describe("exportAsNewLayout", () => {
+    it("지정한 비활성 workspace를 내보내고 현재 workspace와 원본을 유지한다", () => {
+      const store = useWorkspaceStore.getState();
+      const activeId = store.activeWorkspaceId;
+      store.addWorkspace("Source", store.layouts[0].id);
+      const source = useWorkspaceStore.getState().workspaces.find((ws) => ws.id !== activeId)!;
+      store.setActiveWorkspace(source.id);
+      useWorkspaceStore.getState().splitPane(0, "vertical");
+      useWorkspaceStore.getState().setActiveWorkspace(activeId);
+      const before = useWorkspaceStore.getState().workspaces.find((ws) => ws.id === source.id)!;
+      expect(useWorkspaceStore.getState().exportAsNewLayout("Saved", source.id)).toBe(true);
+      const after = useWorkspaceStore.getState();
+      expect(after.activeWorkspaceId).toBe(activeId);
+      expect(after.layouts.at(-1)!.panes).toHaveLength(3);
+      expect(after.workspaces.find((ws) => ws.id === source.id)).toBe(before);
+    });
+
+    it("없는 source workspace는 다른 workspace를 대신 저장하지 않는다", () => {
+      const before = useWorkspaceStore.getState().layouts;
+      expect(useWorkspaceStore.getState().exportAsNewLayout("Invalid", "missing")).toBe(false);
+      expect(useWorkspaceStore.getState().layouts).toBe(before);
+      expect(persistSession).not.toHaveBeenCalled();
+    });
     it("creates a new layout from current workspace panes", () => {
       useWorkspaceStore.getState().splitPane(0, "horizontal");
       useWorkspaceStore.getState().exportAsNewLayout("My Layout");

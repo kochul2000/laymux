@@ -181,6 +181,18 @@ describe("bridge timing budget", () => {
 });
 
 describe("handleAutomationRequest", () => {
+  it("템플릿 저장의 source 소실을 오류로 반환하고 다른 workspace는 저장하지 않는다", () => {
+    const before = useWorkspaceStore.getState().layouts;
+    const result = handleAutomationRequest({
+      requestId: "missing-template-source",
+      category: "action",
+      target: "layouts",
+      method: "exportNew",
+      params: { name: "Saved", workspaceId: "missing" },
+    });
+    expect(result.success).toBe(false);
+    expect(useWorkspaceStore.getState().layouts).toBe(before);
+  });
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useGridStore.setState(useGridStore.getInitialState());

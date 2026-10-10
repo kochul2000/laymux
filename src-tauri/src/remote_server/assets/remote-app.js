@@ -352,6 +352,15 @@ import {
             setStatus("Workspace renamed.");
           },
           hide: (id) => setWorkspaceVisibility(id, true),
+          saveTemplate: async (workspaceId, name, selectedLeaseId) => {
+            await remoteFetch("/remote/v1/layouts", {
+              method: "POST",
+              body: JSON.stringify({ workspaceId, name, leaseId: selectedLeaseId }),
+            });
+            if (leaseId !== selectedLeaseId) return;
+            await loadWorkspaceLayouts();
+            setStatus("Workspace template saved.");
+          },
         });
         const headerIconFields = {
           headerFiles: "Files", headerGithub: "GitHub", headerMemo: "Memo",
