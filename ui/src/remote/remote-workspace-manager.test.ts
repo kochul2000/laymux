@@ -50,6 +50,9 @@ it("공백 이름을 거부하고 저장 실패 시 입력을 유지한다", asy
 it("마지막 표시 워크스페이스는 숨길 수 없고 제어권 상실 후 전송하지 않는다", () => {
   const { manager, rename, hide, loseLease } = setup();
   manager.open({ id: "ws-1", name: "Alpha" }, false, document.createElement("button"));
+  expect(document.querySelector<HTMLButtonElement>("[data-workspace-action=hide]")!.title).toBe(
+    "The last visible workspace cannot be hidden",
+  );
   expect(document.querySelector<HTMLButtonElement>("[data-workspace-action=hide]")!.disabled).toBe(
     true,
   );

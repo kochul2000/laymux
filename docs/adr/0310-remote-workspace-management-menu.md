@@ -1,6 +1,6 @@
 # 0310. Remote 워크스페이스 관리는 명시적 메뉴와 호스트 이름 변경을 사용한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-10
 - Source: 사용자 요청(롱탭 제외, 워크스페이스 ⋯ 메뉴), architecture/api-contracts.md §13.3, ADR-0149·0166·0187
 - Relationship: ADR-0149의 호스트 소유 Remote UI와 ADR-0166의 controller action을 이름 변경으로 확장한다.

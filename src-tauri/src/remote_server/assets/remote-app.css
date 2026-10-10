@@ -1894,7 +1894,7 @@
         color: var(--text-secondary);
         background: transparent;
         border: 0;
-        border-radius: 6px;
+        border-radius: 0;
       }
       .workspace-manage-button:hover:not(:disabled) {
         background: var(--hover-bg);
@@ -1908,7 +1908,7 @@
         color: var(--text-primary);
         background: var(--bg-surface);
         border: 1px solid var(--border);
-        border-radius: 12px;
+        border-radius: 0;
         font-size: var(--remote-menu-font-size);
       }
       .workspace-manager::backdrop { background: var(--backdrop-light); }

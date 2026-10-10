@@ -58,6 +58,7 @@ export function createWorkspaceManager({ getLease, rename, hide }) {
       element.disabled = value;
     });
     hideButton.disabled = value || !canHide;
+    hideButton.title = canHide ? "Hide workspace" : "The last visible workspace cannot be hidden";
   }
 
   async function perform(operation) {
@@ -165,6 +166,7 @@ export function createWorkspaceManager({ getLease, rename, hide }) {
       }
       canHide = !workspace.isActive || workspaces.filter((item) => !item.hidden).length > 1;
       hideButton.disabled = busy || !canHide;
+      hideButton.title = canHide ? "Hide workspace" : "The last visible workspace cannot be hidden";
     },
     isOpen: () => dialog.open,
     isOpenFor: (id) => dialog.open && target?.id === id,
