@@ -101,6 +101,7 @@ type RemoteMockOptions = {
   snapshotLineCount?: number;
   navigationFailures?: number;
   navigationFailureStatus?: number;
+  navigationFailureMessage?: string;
 };
 
 type RemoteTerminal = {
@@ -118,6 +119,8 @@ type InstrumentedRemoteWindow = typeof window & {
 async function installRemoteMocks(page: Page, options: RemoteMockOptions = {}) {
   const state = {
     claimRequests: 0,
+    claimTimes: [] as number[],
+    releaseRequests: 0,
     claimTransitionConflictsRemaining: options.claimTransitionConflicts ?? 0,
     heartbeatRequests: 0,
     heartbeatFailuresRemaining: options.heartbeatFailures ?? 0,
@@ -128,8 +131,14 @@ async function installRemoteMocks(page: Page, options: RemoteMockOptions = {}) {
   await installRemoteClientRoutes(page);
   await page.route("http://remote.test/remote/v1/**", async (route) => {
     const url = new URL(route.request().url());
+    if (url.pathname === "/remote/v1/session/release") {
+      state.releaseRequests += 1;
+      await route.fulfill({ json: {} });
+      return;
+    }
     if (url.pathname === "/remote/v1/session/claim") {
       state.claimRequests += 1;
+      state.claimTimes.push(Date.now());
       if (options.claimDelayMs) {
         await new Promise((resolve) => setTimeout(resolve, options.claimDelayMs));
       }
@@ -179,7 +188,7 @@ async function installRemoteMocks(page: Page, options: RemoteMockOptions = {}) {
         state.navigationFailuresRemaining -= 1;
         await route.fulfill({
           status: options.navigationFailureStatus ?? 504,
-          json: { error: "Frontend response timeout" },
+          json: { error: options.navigationFailureMessage ?? "Frontend response timeout" },
         });
         return;
       }
@@ -299,18 +308,37 @@ for (const status of [502, 503, 504]) {
     await expect.poll(() => resetCount(page), { timeout: 10000 }).toBe(1);
     expect(state.sockets).toHaveLength(1);
     expect(state.claimRequests).toBe(2);
+    // The lease the failed navigation came with is handed back.
+    expect(state.releaseRequests).toBe(1);
   });
 }
+
+test("repeated initial navigation failures back off between reclaims", async ({ page }) => {
+  const state = await installRemoteMocks(page, {
+    navigationFailures: 3,
+    navigationFailureStatus: 504,
+  });
+  await instrumentRemotePage(page);
+  await page.locator("#connect").click();
+  await expect.poll(() => resetCount(page), { timeout: 20000 }).toBe(1);
+  expect(state.claimRequests).toBe(4);
+  expect(state.releaseRequests).toBe(3);
+  // A claim that succeeds only for its navigation to fail must not reset the
+  // backoff: the waits grow (1 s, 2 s, 4 s) instead of staying at 1 s.
+  const gaps = state.claimTimes.slice(1).map((time, index) => time - state.claimTimes[index]);
+  expect(gaps[2]).toBeGreaterThan(gaps[0] + 1500);
+});
 
 for (const status of [401, 403, 409]) {
   test(`manual connect does not retry a navigation refusal ${status}`, async ({ page }) => {
     const state = await installRemoteMocks(page, {
       navigationFailures: 1,
       navigationFailureStatus: status,
+      navigationFailureMessage: "Remote control refused",
     });
     await instrumentRemotePage(page);
     await page.locator("#connect").click();
-    await expect(page.locator("#statusText")).toHaveText("Frontend response timeout");
+    await expect(page.locator("#statusText")).toHaveText("Remote control refused");
     await page.waitForTimeout(2000);
     expect(state.claimRequests).toBe(1);
     expect(

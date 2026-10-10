@@ -1,4 +1,4 @@
-// 격리 dev만 사용한다. prepare 뒤 kill-dev.sh로 종료하고 같은 프로파일을
+// 격리 dev만 사용한다. prepare 뒤 kill-dev.sh --with-daemon으로 종료하고 같은 프로파일을
 // 재기동한 뒤 verify를 실행한다. 실제 PC 전원 종료나 업데이트 설치는 하지 않는다.
 // node scripts/tests/codex-restart-checkpoint.e2e.mjs prepare|verify .tmp/restart.json
 // 환경: LAYMUX_CODEX_WORKSPACE, LAYMUX_CDP_URL, LAYMUX_DEV_URL

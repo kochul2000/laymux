@@ -10,6 +10,17 @@ set -euo pipefail
 APPDATA_DIR="${APPDATA:-$HOME/AppData/Roaming}"
 CONFIG="$APPDATA_DIR/laymux-dev/automation.json"
 DEV_PORT=19281
+# --with-daemon: also end the dev PTY daemons and every terminal they run. By
+# default only the GUI goes, so its sessions can be adopted on restart within
+# the daemon grace (ADR-0312); a validation that needs a real restart from disk
+# must pass this.
+WITH_DAEMON=0
+for arg in "$@"; do
+  case "$arg" in
+    --with-daemon) WITH_DAEMON=1 ;;
+    *) echo "unknown option: $arg" >&2; exit 2 ;;
+  esac
+done
 FILE_PORT=""
 
 # discovery 파일은 평평한 JSON(api-contracts §12.2)이라 숫자 필드는 sed 로 충분하다.
@@ -83,6 +94,27 @@ kill_pid() {
   return 1
 }
 
+# Only the dev build's daemons: their command line names the laymux-dev daemon
+# root. A release daemon lives under laymux/ and never matches.
+stop_dev_daemons() {
+  if [[ "$(uname -o 2>/dev/null)" == "Msys" || "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
+    LAYMUX_KILL_DEV_DAEMON_ROOT='\laymux-dev\pty-daemon\' powershell.exe -NoProfile -NonInteractive -Command \
+      '$root = $env:LAYMUX_KILL_DEV_DAEMON_ROOT; Get-CimInstance Win32_Process | Where-Object { $_.Name -like "laymux*pty-daemon*.exe" -and $_.CommandLine -like "*--pty-daemon*" -and $_.CommandLine -like ("*" + $root + "*") } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force; "Stopped dev PTY daemon " + $_.ProcessId }' \
+      | tr -d '\r' || true
+  elif command -v pkill &>/dev/null; then
+    if pkill -9 -f -- '--pty-daemon .*/laymux-dev/pty-daemon/'; then
+      echo "Stopped dev PTY daemons"
+    fi
+  fi
+}
+
+finish() {
+  if [ "$WITH_DAEMON" = 1 ]; then
+    stop_dev_daemons
+  fi
+  exit "$1"
+}
+
 # 1순위: automation.json에서 port + PID 읽기
 # port 를 반드시 검증한다 — dev 디렉터리에 있어도 19281 을 주장하지 않는 파일은
 # dev 인스턴스의 것이 아니다(예: 테스트가 남긴 잔재). 신뢰하면 엉뚱한 프로세스를 죽인다.
@@ -93,7 +125,7 @@ if [ -f "$CONFIG" ]; then
     # PID 가 죽어 있으면(=stale 파일) 여기서 멈추지 않고 2순위로 넘어간다.
     if kill_pid "$PID" "automation.json"; then
       rm -f "$CONFIG"
-      exit 0
+      finish 0
     fi
   fi
   if [ -n "$FILE_PORT" ] && [ "$FILE_PORT" != "$DEV_PORT" ]; then
@@ -112,12 +144,12 @@ if command -v netstat &>/dev/null; then
       if [ -z "$FILE_PORT" ] || [ "$FILE_PORT" = "$DEV_PORT" ]; then
         rm -f "$CONFIG"
       fi
-      exit 0
+      finish 0
     fi
     # 포트 소유자를 못 죽였다(권한 거부 등). dev 가 살아 있을 수 있으니 파일은 남기고
     # 실패로 알린다 — 파일까지 지우면 다음 실행이 1순위를 못 쓴다.
     echo "Failed to kill PID $DEV_PID on port $DEV_PORT" >&2
-    exit 1
+    finish 1
   fi
 fi
 
@@ -128,3 +160,4 @@ if [ -f "$CONFIG" ] && [ "$FILE_PORT" = "$DEV_PORT" ]; then
 fi
 
 echo "No dev instance found"
+finish 0

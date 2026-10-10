@@ -28,7 +28,7 @@
   포그라운드 확인도 프로세스 **이름이 아니라 pid** 로 한다. 다만 19281도 다른 워크트리 dev가 이어서 소유할 수 있으므로 포트만으로 대상 확인을 끝내지 않는다.
 - **health에서 워크트리 신원을 확인한다.** 측정 전에 `GET http://127.0.0.1:19281/api/v1/health`의 `instance.pid`·`executablePath`·`worktreeRoot`·`gitCommit`을 지금 띄운 워크트리의 기대값과 대조한다. `status: ok`와 `port: 19281`만 맞는 것은 충분하지 않다([ADR-0083](adr/0083-automation-health-instance-identity.md)).
 - **dev 기동은 워크트리에서 `cargo tauri dev`, 종료는 `bash scripts/kill-dev.sh`.** 브랜치 코드를 실기에서 보려면 그 워크트리에서 띄운다. 종료 출력의 PID와 실행 경로가 health에서 확인한 대상과 같은지 본다. 새 워크트리는 `ui/` 에서 `npm ci` 가 필요하다(xterm 패치가 postinstall 로 붙는다).
-- Windows 강제 종료는 검증된 GUI PID 하나에만 적용하고 `taskkill /T`를 쓰지 않는다. 분리된 PTY 데몬도 생성 당시 GUI를 부모 PID로 기록하므로 트리 종료는 데몬과 셸까지 끝내 재결합 검증을 무효화한다. 생존은 종료 전 출력·캐시가 아니라 종료 완료 뒤에도 증가하는 fixture tick과 실제 child PID·daemon session id로 확인한다.
+- Windows 강제 종료는 검증된 GUI PID 하나에만 적용하고 `taskkill /T`를 쓰지 않는다. 데몬 없이 새로 시작해야 하는 검증(디스크 복원, resume)은 `kill-dev.sh --with-daemon`으로 dev 데몬까지 끝낸다. 분리된 PTY 데몬도 생성 당시 GUI를 부모 PID로 기록하므로 트리 종료는 데몬과 셸까지 끝내 재결합 검증을 무효화한다. 생존은 종료 전 출력·캐시가 아니라 종료 완료 뒤에도 증가하는 fixture tick과 실제 child PID·daemon session id로 확인한다.
 - **재현 환경은 끝까지 세팅해 놓는다.** "vim 을 띄우고 insert 모드까지 들어간 pane" 처럼, 사용자가 할 일이 **키 몇 번**만 남도록 만든다. MCP `write_to_terminal` 로 앱 실행·모드 진입까지 미리 해둘 수 있다.
 
 ## 2. 사람이 해야만 하는 입력을 구분한다

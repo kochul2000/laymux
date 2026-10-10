@@ -10481,8 +10481,10 @@ import {
         // holds — every attempt here is tied to the document becoming *visible*, and
         // a definitive refusal (401/403/409: bad token, remote disabled, someone else
         // holds control, local reclaim lockout) disarms it until the user acts.
+        // Arming keeps the backoff: a claim that succeeds only for its navigation
+        // to fail must not reset the retry delay, or a host that stays unready is
+        // reclaimed every few seconds forever. A usable connection resets it.
         function armAutoConnect() {
-          autoConnectAttempt = 0;
           try {
             sessionStorage.setItem(autoConnectKey, "1");
           } catch (_) {}
@@ -10621,6 +10623,7 @@ import {
               focusInput,
               preserveViewport: auto,
             });
+            autoConnectAttempt = 0;
             setNavigationOpen(false);
           } catch (err) {
             if (attemptRevision !== claimAttemptRevision) return;
