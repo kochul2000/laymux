@@ -1416,7 +1416,14 @@ const handlers: HandlerMap = {
       return ok({ layouts });
     },
     exportNew: (p) => {
-      useWorkspaceStore.getState().exportAsNewLayout(p.name as string);
+      const workspaceId = p.workspaceId as string | undefined;
+      if (workspaceId !== undefined) {
+        const wsErr = checkWorkspaceExists(workspaceId);
+        if (wsErr) return wsErr;
+      }
+      if (!useWorkspaceStore.getState().exportAsNewLayout(p.name as string, workspaceId)) {
+        return err("source workspace not found");
+      }
       return ok({ exported: true });
     },
     exportTo: (p) => {

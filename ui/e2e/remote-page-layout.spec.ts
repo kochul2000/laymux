@@ -1,6 +1,79 @@
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
 import { installRemoteClientRoutes, remoteClientMarkupWithoutXterm } from "./remote-client-assets";
 
+test("저장 완료 후 템플릿 목록 조회 실패는 저장 재시도를 유도하지 않는다", async ({ page }) => {
+  await routeRemoteWithWorkspaces(page, []);
+  let posts = 0;
+  let failRefresh = true;
+  await page.route("http://remote.test/remote/v1/layouts", async (route) => {
+    if (route.request().method() === "POST") posts += 1;
+    else if (failRefresh) {
+      failRefresh = false;
+      await route.fulfill({ status: 502, json: { error: "List refresh failed" } });
+      return;
+    }
+    await route.fallback();
+  });
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.locator("#connect").click();
+  await page.locator("#navToggle").click();
+  await page.locator('[data-workspace-manage="ws-a"]').click();
+  await page.locator('[data-workspace-action="template"]').click();
+  await page.locator("#workspaceNameInput").fill("저장 완료 템플릿");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await expect(page.locator("#statusText")).toContainText("saved");
+  await page.locator("#newWorkspace").click();
+  await expect(page.locator("#newWorkspacePanel")).toContainText("저장 완료 템플릿");
+  expect(posts).toBe(1);
+});
+
+test("리모트는 비활성 workspace를 템플릿으로 저장하고 생성 목록에 표시한다", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const controls = await routeRemoteWithWorkspaces(page, []);
+  const posts: unknown[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/remote/v1/layouts" && request.method() === "POST")
+      posts.push(request.postDataJSON());
+  });
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.locator("#connect").click();
+  await expect.poll(() => controls.outputAttachments).toEqual(["term-a1"]);
+  await page.locator("#navToggle").click();
+  await page.locator('[data-workspace-manage="ws-b"]').click();
+  await page.locator('[data-workspace-action="template"]').click();
+  await expect(page.getByLabel("Template name", { exact: true })).toHaveValue("Beta");
+  await page.locator("#workspaceNameInput").fill("개발 템플릿");
+  await page.screenshot({ path: "../.screenshots/remote-workspace-template-mobile.png" });
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  expect(posts).toEqual([{ workspaceId: "ws-b", name: "개발 템플릿", leaseId: "lease-1" }]);
+  expect(controls.outputAttachments).toEqual(["term-a1"]);
+  await expect(page.locator('[data-workspace-item="ws-a"]')).toHaveClass(/active/);
+  await page.locator("#newWorkspace").click();
+  await expect(page.locator("#newWorkspacePanel")).toContainText("개발 템플릿");
+});
+
+test("리모트 템플릿 저장 실패는 이름 입력을 유지한다", async ({ page }) => {
+  await routeRemoteWithWorkspaces(page, []);
+  await page.route("http://remote.test/remote/v1/layouts", (route) =>
+    route.request().method() === "POST"
+      ? route.fulfill({ status: 502, json: { error: "Template save failed" } })
+      : route.fallback(),
+  );
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.locator("#connect").click();
+  await page.locator("#navToggle").click();
+  await page.locator('[data-workspace-manage="ws-a"]').click();
+  await page.locator('[data-workspace-action="template"]').click();
+  await page.locator("#workspaceNameInput").fill("새 템플릿");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.locator("#workspaceManager [role=alert]")).toContainText(
+    "Template save failed",
+  );
+  await expect(page.locator("#workspaceNameInput")).toHaveValue("새 템플릿");
+});
+
 test("워크스페이스 관리 메뉴는 전환 없이 이름을 변경하고 output 연결을 유지한다", async ({
   page,
 }) => {
@@ -153,6 +226,7 @@ async function routeRemoteWithWorkspaces(
   const focusRequests: Array<{ terminalId: string; body: { leaseId: string } }> = [];
   const hiddenWorkspaceIds = new Set(options.initialHiddenWorkspaceIds ?? []);
   const hiddenPaneIds = new Set<string>();
+  const savedLayouts: Array<{ id: string; name: string }> = [];
   const outputAttachments: string[] = [];
   let activeWorkspaceId = "ws-a";
   const workspaceNames: Record<string, string> = { "ws-a": "Alpha", "ws-b": "Beta" };
@@ -219,6 +293,18 @@ async function routeRemoteWithWorkspaces(
   await installRemoteClientRoutes(page);
   await page.route("http://remote.test/remote/v1/**", async (route) => {
     const url = new URL(route.request().url());
+    if (url.pathname === "/remote/v1/layouts") {
+      if (route.request().method() === "POST") {
+        savedLayouts.push({
+          id: `layout-${savedLayouts.length + 1}`,
+          name: route.request().postDataJSON().name,
+        });
+        await route.fulfill({ status: 201, json: { success: true, data: { exported: true } } });
+      } else {
+        await route.fulfill({ json: { layouts: savedLayouts } });
+      }
+      return;
+    }
     if (url.pathname === "/remote/v1/session/claim") {
       await route.fulfill({ json: { leaseId: "lease-1", heartbeatTimeoutSeconds: 45 } });
       return;

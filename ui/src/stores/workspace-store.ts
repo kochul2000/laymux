@@ -233,7 +233,7 @@ interface WorkspaceState {
   setPaneView: (paneIndex: number, view: ViewInstanceConfig, layerId?: string) => void;
 
   // Layout actions
-  exportAsNewLayout: (name: string) => void;
+  exportAsNewLayout: (name: string, workspaceId?: string) => boolean;
   exportToLayout: (layoutId: string) => boolean;
 
   // Layout management
@@ -726,9 +726,12 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
 
   // Layout actions per docs/architecture/overview.md §4.1
-  exportAsNewLayout: (name) => {
-    const ws = get().getActiveWorkspace();
-    if (!ws) return;
+  exportAsNewLayout: (name, workspaceId) => {
+    const ws =
+      workspaceId === undefined
+        ? get().getActiveWorkspace()
+        : get().workspaces.find((workspace) => workspace.id === workspaceId);
+    if (!ws) return false;
 
     const newLayout: Layout = {
       id: generateId("layout"),
@@ -738,6 +741,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
     set((state) => ({ layouts: [...state.layouts, newLayout] }));
     persistSession();
+    return true;
   },
 
   exportToLayout: (layoutId) => {

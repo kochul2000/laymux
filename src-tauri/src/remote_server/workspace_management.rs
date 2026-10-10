@@ -18,6 +18,47 @@ pub(super) struct WorkspaceRenameRequest {
     lease_id: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct WorkspaceTemplateRequest {
+    workspace_id: String,
+    name: String,
+    lease_id: Option<String>,
+}
+
+pub(super) async fn remote_workspace_template_save(
+    State(server): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<WorkspaceTemplateRequest>,
+) -> Response {
+    if body.workspace_id.trim().is_empty() || body.name.trim().is_empty() {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "workspace id and template name are required",
+        );
+    }
+    let lease_id = body.lease_id.as_deref().or_else(|| {
+        headers
+            .get(REMOTE_LEASE_HEADER)
+            .and_then(|value| value.to_str().ok())
+    });
+    if let Err(response) = require_active_lease(&server.app_state, lease_id) {
+        return response;
+    }
+    match frontend_bridge_json(
+        &server,
+        "action",
+        "layouts",
+        "exportNew",
+        serde_json::json!({ "workspaceId": body.workspace_id, "name": body.name.trim() }),
+    )
+    .await
+    {
+        Ok(data) => (StatusCode::CREATED, Json(data)).into_response(),
+        Err(response) => response,
+    }
+}
+
 pub(super) async fn remote_workspace_rename(
     State(server): State<ServerState>,
     Path(id): Path<String>,

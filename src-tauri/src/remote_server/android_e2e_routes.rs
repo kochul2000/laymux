@@ -573,6 +573,7 @@ fn http_path_allowed(method: &Method, path: &str) -> bool {
         | (&Method::GET, "/remote/v1/navigation")
         | (&Method::GET, "/remote/v1/composer/starred")
         | (&Method::GET, "/remote/v1/layouts")
+        | (&Method::POST, "/remote/v1/layouts")
         | (&Method::GET, "/remote/v1/widgets")
         | (&Method::GET, "/remote/v1/update")
         | (&Method::GET, "/remote/v1/terminals")
@@ -859,6 +860,8 @@ mod tests {
             "/remote/v1/composer/starred"
         ));
         assert!(http_path_allowed(&Method::GET, "/remote/v1/layouts"));
+        assert!(http_path_allowed(&Method::POST, "/remote/v1/layouts"));
+        assert!(!http_path_allowed(&Method::PUT, "/remote/v1/layouts"));
         assert!(http_path_allowed(&Method::GET, "/remote/v1/update"));
         assert!(http_path_allowed(&Method::POST, "/remote/v1/update/check"));
         assert!(http_path_allowed(

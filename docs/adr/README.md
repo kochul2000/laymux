@@ -328,6 +328,7 @@ ADR 이 필요한 대표 기준:
 | [0308](0308-pty-daemon-generations-across-updates.md) | 업데이트 중에도 데몬 세션을 유지하고 데몬 세대를 공존시킨다 (0301·0201 일부 대체) | Proposed |
 | [0309](0309-adopted-terminal-takes-missed-osc-facts.md) | 재결합한 GUI가 놓친 출력의 OSC 사실을 단일 패스로 처리한다 | Proposed |
 | [0310](0310-remote-workspace-management-menu.md) | Remote 워크스페이스 관리는 명시적 메뉴와 호스트 이름 변경을 사용한다 | Accepted |
+| [0311](0311-remote-save-workspace-template.md) | Remote는 지정한 워크스페이스를 전환 없이 새 템플릿으로 저장한다 | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 
