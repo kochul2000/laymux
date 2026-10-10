@@ -1883,6 +1883,60 @@
         color: var(--text-secondary);
         opacity: 0.7;
       }
+      .workspace-manage-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        min-height: 36px;
+        padding: 0;
+        flex: 0 0 auto;
+        color: var(--text-secondary);
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+      }
+      .workspace-manage-button:hover:not(:disabled) {
+        background: var(--hover-bg);
+      }
+      .workspace-manager {
+        width: min(380px, calc(100vw - 32px));
+        box-sizing: border-box;
+        max-height: calc(100dvh - 32px);
+        overflow: auto;
+        padding: 16px;
+        color: var(--text-primary);
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: 0;
+        font-size: var(--remote-menu-font-size);
+      }
+      .workspace-manager::backdrop { background: var(--backdrop-light); }
+      .workspace-manager-heading, .workspace-manager-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .workspace-manager h2 {
+        margin: 0;
+        font-size: 1em;
+        overflow-wrap: anywhere;
+      }
+      .workspace-manager button { min-height: 44px; }
+      #workspaceManagerActions button {
+        display: block;
+        width: 100%;
+        text-align: left;
+        margin-top: 8px;
+      }
+      #workspaceRenameForm label { display: block; margin-top: 16px; }
+      #workspaceNameInput { width: 100%; box-sizing: border-box; margin: 8px 0 16px; font-size: max(16px, 1em); }
+      .workspace-manager-footer { justify-content: flex-end; }
+      .workspace-manager [role="alert"] { color: var(--red); margin-bottom: 0; }
+      @media (max-width: 600px) {
+        .workspace-manager { margin: auto auto 16px; }
+      }
       .visibility-button {
         width: 24px;
         height: 24px;

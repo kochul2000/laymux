@@ -65,6 +65,7 @@ describe("remote page bundle", () => {
         ` remote-settings-schema.json=${fileHash(path.resolve(__dirname, "remote-settings-schema.json"))}` +
         ` remote-memo.js=${fileHash(path.resolve(__dirname, "remote-memo.js"))}` +
         ` remote-tool-swipe.js=${fileHash(path.resolve(__dirname, "remote-tool-swipe.js"))}` +
+        ` remote-workspace-manager.js=${fileHash(path.resolve(__dirname, "remote-workspace-manager.js"))}` +
         ` memo-document.ts=${fileHash(path.resolve(__dirname, "../lib/memo-document.ts"))}` +
         ` keybinding-core.ts=${fileHash(path.resolve(__dirname, "../lib/keybinding-core.ts"))}` +
         ` lucide-package=${packageInputHash(lock, "lucide")}`,

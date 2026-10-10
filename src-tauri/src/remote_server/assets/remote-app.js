@@ -1,6 +1,7 @@
 import { createRemoteUpdateDialog } from "../../../../ui/src/remote/remote-update-dialog.js";
 import { createRemoteSettingsBridge } from "../../../../ui/src/remote/remote-settings-mcp.js";
 import { createRemoteMemo } from "../../../../ui/src/remote/remote-memo.js";
+import { createWorkspaceManager } from "../../../../ui/src/remote/remote-workspace-manager.js";
 import {
   DEFAULT_REMOTE_KEYBOARD_SETTINGS, REMOTE_NAV_MODIFIERS, REMOTE_NAV_TARGETS,
   normalizeRemoteNavigationModifiers, readPhysicalKeyboardConnected,
@@ -339,6 +340,19 @@ import {
         const REMOTE_LONG_TEXT_ATTACHMENT_THRESHOLD_BYTES = 5 * 1024;
         const attachmentTextEncoder = new TextEncoder();
         let leaseId = null;
+        const workspaceManager = createWorkspaceManager({
+          getLease: () => leaseId,
+          rename: async (id, name, selectedLeaseId) => {
+            await remoteFetch(`/remote/v1/workspaces/${encodeURIComponent(id)}`, {
+              method: "PUT",
+              body: JSON.stringify({ name, leaseId: selectedLeaseId }),
+            });
+            if (leaseId !== selectedLeaseId) return;
+            await loadNavigation(activeTerminalId, { openOutput: false });
+            setStatus("Workspace renamed.");
+          },
+          hide: (id) => setWorkspaceVisibility(id, true),
+        });
         const headerIconFields = {
           headerFiles: "Files", headerGithub: "GitHub", headerMemo: "Memo",
           headerSpatialExclusion: "Pane navigation exclusion", headerDesktopMode: "PC mode",
@@ -7620,6 +7634,7 @@ import {
         // (ADR-0149, ADR-0219). Keep the hierarchy in this PC-served document
         // and expose only a boolean consumed/not-consumed boundary to native.
         function dismissTopRemoteLayer() {
+          if (workspaceManager.isOpen()) { workspaceManager.close(); return true; }
           if (!sharedFilesScrim.hidden) {
             cancelSharedFileOffer();
             return true;
@@ -8236,11 +8251,11 @@ import {
                 } else if (drawerView === "workspace") {
                   const restoredVisibility = Array.from(
                     workspaceListEl.querySelectorAll(
-                      "[data-workspace-visibility]",
+                      "[data-workspace-manage]",
                     ),
                   ).find(
                     (button) =>
-                      button.dataset.workspaceVisibility === workspace.id,
+                      button.dataset.workspaceManage === workspace.id,
                   );
                   (restoredVisibility || newWorkspaceButton).focus();
                 }
@@ -8256,6 +8271,7 @@ import {
         }
 
         function renderWorkspaceList(workspaces) {
+          workspaceManager.sync(workspaces);
           workspaceListEl.innerHTML = "";
           const hiddenWorkspaces = workspaces.filter(
             (workspace) => workspace.hidden === true,
@@ -8334,33 +8350,22 @@ import {
             fillCountBadge(badge, workspace.unreadCount);
             right.append(badge);
           }
-          const visibility = document.createElement("button");
-          visibility.type = "button";
-          visibility.className = "visibility-button";
-          visibility.dataset.workspaceVisibility = workspace.id;
-          setVisibilityIcon(visibility, false);
-          visibility.disabled = !leaseId || !canHideWorkspace;
-          visibility.setAttribute("aria-pressed", "false");
-          const visibilityLabel = canHideWorkspace
-            ? workspace.isActive
-              ? "Hide workspace and move to the next visible workspace"
-              : "Hide workspace from the list"
-            : "The last visible workspace cannot be hidden";
-          visibility.setAttribute("aria-label", visibilityLabel);
-          visibility.title = visibilityLabel;
-          keepInputSurfaceFocus(visibility);
-          visibility.addEventListener("click", async (event) => {
+          const manage = document.createElement("button");
+          manage.type = "button";
+          manage.className = "workspace-manage-button";
+          manage.dataset.workspaceManage = workspace.id;
+          setRemoteIcon(manage, "Ellipsis");
+          manage.disabled = !leaseId;
+          manage.setAttribute("aria-haspopup", "dialog");
+          manage.setAttribute("aria-controls", "workspaceManager");
+          manage.setAttribute("aria-expanded", String(workspaceManager.isOpenFor(workspace.id)));
+          manage.setAttribute("aria-label", `Manage ${workspace.name || "workspace"}`);
+          manage.title = "Manage workspace";
+          manage.addEventListener("click", (event) => {
             event.stopPropagation();
-            visibility.disabled = true;
-            try {
-              await setWorkspaceVisibility(workspace.id, true);
-            } catch (err) {
-              setStatus(err.message || String(err), true);
-            } finally {
-              visibility.disabled = !leaseId || !canHideWorkspace;
-            }
+            workspaceManager.open(workspace, canHideWorkspace, manage);
           });
-          right.append(visibility);
+          right.append(manage);
           // Whole-workspace skip toggle (issue #507). Only meaningful for
           // workspaces that contribute terminal panes to the spatial cycle.
           if ((workspace.terminalPaneCount || 0) > 0) {
@@ -13748,6 +13753,7 @@ import {
           // reconnect would skip its own return trip (issue #561). The stashed resume
           // capability above is what lets the reclaim follow the release drain.
           leaseId = null;
+          workspaceManager.close();
           resetComposerStars();
         }
 

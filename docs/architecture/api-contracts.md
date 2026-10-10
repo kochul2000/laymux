@@ -1563,6 +1563,8 @@ PC WebView는 `remote-control-changed` Tauri event를 받아 local input overlay
 
 ### 13.3 Navigation Metadata
 
+Remote 워크스페이스 행의 `⋯` 버튼은 현재 터미널을 전환하지 않고 이름 변경·숨김 관리 dialog를 연다. 롱탭은 사용하지 않는다. 이름 변경은 `PUT /remote/v1/workspaces/{id}`에 `{name, leaseId?}`를 보내며 기존 Remote 인증과 active controller lease(body 또는 `x-laymux-remote-lease`)를 요구한다. 공백뿐인 이름은 `400`으로 거부하고, 호스트 `workspaces.rename` bridge가 기존 store의 이름 정규화·중복 처리와 영속을 소유한다. 성공 시 `workspace-state-changed`를 발행하고 navigation만 새로 읽어 output 연결을 유지한다. 실패 시 dialog에 오류와 입력을 보존하고, 제어권 상실 시 창을 닫는다. Escape와 Android system back은 이 창을 먼저 닫으며 기존 숨김 제한·fallback은 유지한다. Android E2E exact allowlist는 이 PUT을 허용하며 삭제 route는 추가하지 않는다([ADR-0310](../adr/0310-remote-workspace-management-menu.md)).
+
 `GET /remote/v1/navigation`의 최상위 `codexTranscriptScrollEnabled`는 호스트 `codex.transcriptScrollEnabled`의 현재 boolean 투영이며 Remote의 normal-buffer Codex transcript 휠·터치 라우팅을 gate한다([ADR-0218](../adr/0218-codex-transcript-pointer-scroll-toggle.md)).
 
 최상위 `agentCommands`는 `{claude:{command:string}, codex:{command:string}, grok:{command:string}}`으로 호스트의 현재 실행 명령 설정을 전달한다([ADR-0286](../adr/0286-clickable-agent-resume-hints.md)). Remote의 수동 복원 링크는 입력 FIFO 안에서 navigation을 다시 조회하고 공유 정규화 함수로 명령을 조립한다. 미지원 호스트에서 이 필드가 없으면 제출하지 않는다. 새 endpoint나 Android wire 버전 변경은 없다.
@@ -1578,6 +1580,7 @@ Remote drawer 본문은 workspace 기본 화면과 Hidden workspaces·Notificati
 | Endpoint | Method | 용도 |
 |---|---|---|
 | `/remote/v1/navigation` | GET | workspace 목록과 모든 workspace pane 표시 요약, dock pane 요약, terminal 표시 메타데이터 |
+| `/remote/v1/workspaces/{id}`            | PUT    | workspace 이름 변경 (`name`, active controller lease 필요)                              |
 | `/remote/v1/workspaces/{id}/visibility` | POST | workspace의 목표 숨김 상태 설정 (`hidden`, active controller lease 필요) |
 | `/remote/v1/panes/{id}/visibility` | POST | workspace pane의 목표 숨김 상태 설정 (`hidden`, active controller lease 필요) |
 | `/remote/v1/notifications/{id}/read` | POST | active `leaseId`로 단일 notification id를 읽음 처리 |
