@@ -362,6 +362,18 @@ pub const PTY_DAEMON_UNAVAILABLE_RETRY_MS: u64 = 30_000;
 pub const PTY_DAEMON_IDLE_EXIT_MS: u64 = 60_000;
 /// How often the daemon re-evaluates its idle state.
 pub const PTY_DAEMON_IDLE_POLL_MS: u64 = 250;
+/// How long the daemon keeps its sessions with no GUI connected
+/// (`terminal.ptyDaemonGraceMinutes`, ADR-0312): long enough for an update to
+/// install and start the new GUI, which adopts them.
+pub const PTY_DAEMON_GRACE_DEFAULT_MINUTES: u32 = 10;
+pub const PTY_DAEMON_GRACE_MIN_MINUTES: u32 = 1;
+pub const PTY_DAEMON_GRACE_MAX_MINUTES: u32 = 24 * 60;
+/// How often a GUI's presence connection checks for a changed grace.
+pub const PTY_DAEMON_PRESENCE_POLL_MS: u64 = 1_000;
+/// How often a GUI ends the daemon sessions no pane will ever adopt and
+/// renews its presence. Longer than the idle exit: each pass connects to every
+/// daemon, which would otherwise keep an empty one from ever exiting.
+pub const PTY_DAEMON_DETACHED_SWEEP_MS: u64 = 120_000;
 /// Back-off after a failed `accept` so a persistent error does not spin.
 pub const PTY_DAEMON_ACCEPT_RETRY_MS: u64 = 50;
 /// Poll cadence while a freshly launched daemon publishes discovery.

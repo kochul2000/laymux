@@ -22,6 +22,7 @@ mod idle;
 mod inventory;
 mod launcher;
 mod modes;
+mod presence;
 mod screen;
 mod server;
 mod session;
@@ -32,6 +33,8 @@ mod wire;
 
 #[cfg(test)]
 mod adoption_tests;
+#[cfg(test)]
+mod grace_tests;
 #[cfg(test)]
 mod handshake_tests;
 #[cfg(test)]
@@ -48,4 +51,5 @@ pub use inventory::{
     TerminateDetachedResult, TerminateOutcome, UnavailableDaemon,
 };
 pub use launcher::{ensure_running, find_running, spawn_daemon};
+pub use presence::{keep_presence_on_live_daemons, set_grace_minutes};
 pub use wire::SessionInfo;

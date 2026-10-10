@@ -1047,6 +1047,15 @@ pub struct TerminalSettings {
     /// surface on this host (ADR-0226, ADR-0229).
     #[serde(default)]
     pub composer_starred_entries: Vec<ComposerStarredEntry>,
+    /// Minutes the PTY daemon keeps terminals running with no GUI, so an
+    /// update's restart can adopt them (ADR-0312). No settings UI: a
+    /// settings.json value.
+    #[serde(default = "default_pty_daemon_grace_minutes")]
+    pub pty_daemon_grace_minutes: u32,
+}
+
+fn default_pty_daemon_grace_minutes() -> u32 {
+    crate::constants::PTY_DAEMON_GRACE_DEFAULT_MINUTES
 }
 
 impl Default for TerminalSettings {
@@ -1069,6 +1078,7 @@ impl Default for TerminalSettings {
             composer_history_popup: true,
             composer_autocomplete: true,
             composer_starred_entries: Vec::new(),
+            pty_daemon_grace_minutes: default_pty_daemon_grace_minutes(),
         }
     }
 }

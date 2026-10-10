@@ -187,6 +187,9 @@ pub fn run() {
                 }
             });
 
+            // End daemon sessions no pane will adopt (ADR-0312).
+            commands::start_detached_pty_session_sweep(Arc::clone(&app_state));
+
             // Watch for OS remote-desktop (RDP) session transitions and push
             // them to the UI so it can auto-open the Remote Access panel when
             // the window is entered from a phone. Windows-only; other platforms

@@ -349,6 +349,9 @@ pub async fn create_terminal_session(
     let allow_adopt = !state.pty_daemon_adoption_seen.lock_or_err()?.contains(&id);
     let backend_terminal_id = id.clone();
     let backend_profile = config.profile.clone();
+    // A daemon keeps sessions this long with no GUI (ADR-0312); its
+    // presence connection reports a changed value.
+    crate::pty_daemon::set_grace_minutes(settings.terminal.pty_daemon_grace_minutes);
     let backend = tokio::task::spawn_blocking(move || {
         crate::pty_daemon::terminal_backend(&backend_terminal_id, &backend_profile, allow_adopt)
     })

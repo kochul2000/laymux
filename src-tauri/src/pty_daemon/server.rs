@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use portable_pty::{native_pty_system, PtySize};
 
 use super::handshake::authenticate;
-use super::idle::idle_monitor;
+use super::idle::{idle_monitor, unattended_monitor};
 use super::screen::ScreenModel;
 use super::session::{AttachOptions, ClientLink, ConnWriter, Session};
 use super::transport::{self, Listener, Stream};
@@ -25,7 +25,8 @@ use super::wire::{
     read_frame, split_input, ClientMessage, DaemonMessage, Frame, SessionInfo, WireCommand,
 };
 use crate::constants::{
-    PTY_DAEMON_ACCEPT_RETRY_MS, PTY_DAEMON_IDLE_POLL_MS, PTY_DAEMON_MAX_CONNECTIONS,
+    PTY_DAEMON_ACCEPT_RETRY_MS, PTY_DAEMON_GRACE_DEFAULT_MINUTES, PTY_DAEMON_GRACE_MAX_MINUTES,
+    PTY_DAEMON_GRACE_MIN_MINUTES, PTY_DAEMON_IDLE_POLL_MS, PTY_DAEMON_MAX_CONNECTIONS,
     PTY_DAEMON_SHUTDOWN_TIMEOUT_MS,
 };
 use crate::lock_ext::MutexExt;
@@ -45,7 +46,13 @@ pub struct DaemonServer {
     pub(super) shutdown: AtomicBool,
     /// Set by a requested shutdown: no new session is admitted while the
     /// existing ones are torn down (the accept loop keeps serving them).
-    draining: AtomicBool,
+    pub(super) draining: AtomicBool,
+    /// Open connections that are a GUI's presence (ADR-0312): they keep the
+    /// sessions, but not an empty daemon.
+    presence_connections: AtomicUsize,
+    /// How long sessions outlive the last connection (ADR-0312), as the
+    /// latest GUI presence reported it.
+    grace_ms: AtomicU64,
     /// Serializes admitting a connection with the idle-shutdown decision, so
     /// a connection accepted just as the daemon goes idle is either counted
     /// before the decision or refused after it — never served by a daemon
@@ -74,6 +81,8 @@ impl DaemonServer {
             next_session_seq: AtomicU64::new(1),
             shutdown: AtomicBool::new(false),
             draining: AtomicBool::new(false),
+            presence_connections: AtomicUsize::new(0),
+            grace_ms: AtomicU64::new(u64::from(PTY_DAEMON_GRACE_DEFAULT_MINUTES) * 60 * 1000),
             admission: Mutex::new(()),
             endpoint: OnceLock::new(),
         })
@@ -88,6 +97,11 @@ impl DaemonServer {
         idle_exit: Option<Duration>,
     ) -> io::Result<()> {
         let _ = self.endpoint.set(endpoint.clone());
+        {
+            let server = Arc::downgrade(self);
+            let endpoint = endpoint.clone();
+            thread::spawn(move || unattended_monitor(server, endpoint));
+        }
         if let Some(idle_exit) = idle_exit {
             let server = Arc::downgrade(self);
             let endpoint = endpoint.clone();
@@ -165,8 +179,42 @@ impl DaemonServer {
         self.sessions.lock_or_err().map(|s| s.len()).unwrap_or(0)
     }
 
+    /// Clamped to the range the setting allows.
+    pub(super) fn set_grace(&self, grace: Duration) {
+        let minute = 60 * 1000;
+        let ms = (grace.as_millis() as u64).clamp(
+            u64::from(PTY_DAEMON_GRACE_MIN_MINUTES) * minute,
+            u64::from(PTY_DAEMON_GRACE_MAX_MINUTES) * minute,
+        );
+        self.grace_ms.store(ms, Ordering::Release);
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_grace_unclamped(&self, grace: Duration) {
+        self.grace_ms
+            .store(grace.as_millis() as u64, Ordering::Release);
+    }
+
+    #[cfg(test)]
+    pub(super) fn presence_count(&self) -> usize {
+        self.presence_connections.load(Ordering::Acquire)
+    }
+
+    pub(super) fn grace(&self) -> Duration {
+        Duration::from_millis(self.grace_ms.load(Ordering::Acquire))
+    }
+
+    /// Sessions run, but no connection is open: no GUI is present.
+    pub(super) fn is_unattended(&self) -> bool {
+        self.connections.load(Ordering::Acquire) == 0 && self.session_count() > 0
+    }
+
+    /// No session and no connection but GUI presence: a GUI that still runs
+    /// does not keep a daemon it has no work on.
     pub(super) fn is_idle(&self) -> bool {
-        self.connections.load(Ordering::Acquire) == 0 && self.session_count() == 0
+        let connections = self.connections.load(Ordering::Acquire);
+        let presence = self.presence_connections.load(Ordering::Acquire);
+        connections.saturating_sub(presence) == 0 && self.session_count() == 0
     }
 
     fn handle_connection(self: &Arc<Self>, stream: Stream, connection_id: u64) {
@@ -187,6 +235,7 @@ impl DaemonServer {
         }
 
         let mut bound: Option<Arc<Session>> = None;
+        let mut presence = false;
         // When this connection's previous input reached the PTY.
         let mut last_input: Option<Instant> = None;
         loop {
@@ -276,6 +325,13 @@ impl DaemonServer {
                         break;
                     }
                 }
+                Frame::Control(ClientMessage::Presence { grace_ms }) => {
+                    self.set_grace(Duration::from_millis(grace_ms));
+                    if !presence {
+                        presence = true;
+                        self.presence_connections.fetch_add(1, Ordering::AcqRel);
+                    }
+                }
                 Frame::Control(ClientMessage::Shutdown) => {
                     tracing::info!("PTY daemon shutdown requested");
                     self.shut_down_sessions();
@@ -305,6 +361,9 @@ impl DaemonServer {
         }
         if let Some(session) = bound {
             session.detach(connection_id);
+        }
+        if presence {
+            self.presence_connections.fetch_sub(1, Ordering::AcqRel);
         }
     }
     fn spawn_session(

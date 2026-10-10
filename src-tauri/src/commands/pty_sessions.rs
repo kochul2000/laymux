@@ -95,3 +95,60 @@ pub struct TerminateDetachedPtySessionsRequest {
     /// The detached sessions the caller saw, with the epochs it saw.
     pub sessions: Vec<ListedSession>,
 }
+
+/// End the daemon sessions this GUI's panes will never adopt (ADR-0312):
+/// ones left by a GUI that crashed before its layout was saved. A session the
+/// saved layout still awaits, or another client holds, is left alone, and
+/// each is ended with the epoch it was listed with. A failed listing or an
+/// unreadable layout ends nothing.
+pub fn sweep_detached_pty_sessions(state: &AppState) {
+    let swept = known_terminals(state).and_then(|known| {
+        let listed: Vec<ListedSession> = pty_daemon::inventory(&known)?
+            .sessions
+            .into_iter()
+            .filter(|entry| entry.state == pty_daemon::PtySessionState::Detached)
+            .map(|entry| ListedSession {
+                daemon: entry.daemon,
+                session_id: entry.session_id,
+                attach_epoch: entry.attach_epoch,
+            })
+            .collect();
+        if listed.is_empty() {
+            return Ok(None);
+        }
+        pty_daemon::terminate_detached(&listed, &known).map(Some)
+    });
+    match swept {
+        Ok(Some(result)) => tracing::info!(
+            ended = result.ended,
+            failed = result.failed.len(),
+            "ended PTY daemon sessions no pane will adopt"
+        ),
+        Ok(None) => {}
+        Err(error) => tracing::debug!(%error, "PTY daemon session sweep skipped"),
+    }
+}
+
+/// From start, hold this GUI's presence on every live daemon (ADR-0312),
+/// even before it opens a terminal, and renew it every
+/// `PTY_DAEMON_DETACHED_SWEEP_MS` (a daemon may have restarted). Sweep
+/// detached sessions on the same period, the first time one period after
+/// start: the restored layout's panes adopt their sessions first.
+pub fn start_detached_pty_session_sweep(state: Arc<AppState>) {
+    std::thread::spawn(move || loop {
+        if pty_daemon::is_enabled() {
+            pty_daemon::set_grace_minutes(
+                crate::settings::load_settings()
+                    .terminal
+                    .pty_daemon_grace_minutes,
+            );
+            pty_daemon::keep_presence_on_live_daemons();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(
+            crate::constants::PTY_DAEMON_DETACHED_SWEEP_MS,
+        ));
+        if pty_daemon::is_enabled() {
+            sweep_detached_pty_sessions(&state);
+        }
+    });
+}

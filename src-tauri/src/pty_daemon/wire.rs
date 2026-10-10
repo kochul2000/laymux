@@ -94,6 +94,13 @@ pub enum ClientMessage {
     /// Terminate every session, then exit the daemon. Used before an update
     /// replaces the executable the daemon runs from.
     Shutdown,
+    /// A GUI is running. The connection is held for the GUI's lifetime, so
+    /// the daemon counts the GUI as present even with no terminal open on it
+    /// (a workspace not opened yet), and keeps its sessions only for
+    /// `grace_ms` after the last connection closes (ADR-0312). Sent again
+    /// when the grace changes. A daemon that predates it closes the
+    /// connection.
+    Presence { grace_ms: u64 },
 }
 
 /// Messages the daemon sends to a client.

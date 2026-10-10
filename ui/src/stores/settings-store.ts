@@ -158,6 +158,11 @@ export interface TerminalSettings {
    * this is a settings.json tuning knob.
    */
   parserAdmission?: { focusedShare: number; visibleShare: number; hiddenShare: number };
+  /**
+   * ADR-0312: minutes the PTY daemon keeps terminals running with no GUI, so
+   * an update's restart can adopt them. No settings UI — a settings.json value.
+   */
+  ptyDaemonGraceMinutes?: number;
   /** Advertise 24-bit color support to programs started in newly created terminals. */
   advertiseTrueColor: boolean;
   /** Automatically copy text to clipboard when selected in terminal. */
@@ -828,6 +833,7 @@ export const DEFAULT_TERMINAL: TerminalSettings = {
     visibleShare: TERMINAL_WRITE_DEFAULT_CLASS_SHARE.foreground,
     hiddenShare: TERMINAL_WRITE_DEFAULT_CLASS_SHARE.background,
   },
+  ptyDaemonGraceMinutes: 10,
   advertiseTrueColor: true,
   copyOnSelect: true,
   pathLinkEnabled: true,
