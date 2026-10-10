@@ -66,7 +66,10 @@ kill_pid() {
     executable_path="<unavailable>"
   fi
   if [[ "$(uname -o 2>/dev/null)" == "Msys" || "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
-    if taskkill //PID "$pid" //F //T >/dev/null 2>&1; then
+    # A detached Windows PTY daemon still records this GUI as its parent.
+    # /T would kill that independent owner and its shells, defeating crash
+    # adoption (ADR-0300/0308). Terminate only the verified dev GUI PID.
+    if taskkill //PID "$pid" //F >/dev/null 2>&1; then
       echo "Dev (PID $pid) killed ($source) — executable: $executable_path"
       return 0
     fi

@@ -87,7 +87,10 @@ test_discovery_pid_reports_its_executable() {
 
   assert_contains "$output" "Dev (PID 4242) killed (automation.json)"
   assert_contains "$output" 'D:\trees\pid-4242\target\debug\laymux.exe'
-  assert_file_contains "$KILL_DEV_TEST_TASKKILL_LOG" "//PID 4242 //F //T"
+  assert_file_contains "$KILL_DEV_TEST_TASKKILL_LOG" "//PID 4242 //F"
+  if grep -F -- "//T" "$KILL_DEV_TEST_TASKKILL_LOG" >/dev/null; then
+    fail "GUI-only crash must not terminate its detached PTY daemon tree"
+  fi
   if grep -F -- "7777" "$KILL_DEV_TEST_TASKKILL_LOG" >/dev/null; then
     fail "valid discovery pid must win over the port fallback"
   fi
@@ -101,7 +104,10 @@ test_wrong_port_discovery_falls_back_and_reports_port_owner() {
 
   assert_contains "$output" "Dev (PID 7777) killed (port 19281)"
   assert_contains "$output" 'D:\trees\pid-7777\target\debug\laymux.exe'
-  assert_file_contains "$KILL_DEV_TEST_TASKKILL_LOG" "//PID 7777 //F //T"
+  assert_file_contains "$KILL_DEV_TEST_TASKKILL_LOG" "//PID 7777 //F"
+  if grep -F -- "//T" "$KILL_DEV_TEST_TASKKILL_LOG" >/dev/null; then
+    fail "port fallback must also leave the PTY daemon tree alive"
+  fi
   if grep -F -- "4242" "$KILL_DEV_TEST_TASKKILL_LOG" >/dev/null; then
     fail "a discovery file for the release port must never select its pid"
   fi
