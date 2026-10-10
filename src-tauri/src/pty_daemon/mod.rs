@@ -51,5 +51,5 @@ pub use inventory::{
     TerminateDetachedResult, TerminateOutcome, UnavailableDaemon,
 };
 pub use launcher::{ensure_running, find_running, spawn_daemon};
-pub use presence::set_grace_minutes;
+pub use presence::{keep_presence_on_live_daemons, set_grace_minutes};
 pub use wire::SessionInfo;

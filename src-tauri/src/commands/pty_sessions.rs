@@ -129,10 +129,21 @@ pub fn sweep_detached_pty_sessions(state: &AppState) {
     }
 }
 
-/// Sweep every `PTY_DAEMON_DETACHED_SWEEP_MS`, the first time one interval
-/// after start: the restored layout's panes adopt their sessions first.
+/// From start, hold this GUI's presence on every live daemon (ADR-0312),
+/// even before it opens a terminal, and renew it every
+/// `PTY_DAEMON_DETACHED_SWEEP_MS` (a daemon may have restarted). Sweep
+/// detached sessions on the same period, the first time one period after
+/// start: the restored layout's panes adopt their sessions first.
 pub fn start_detached_pty_session_sweep(state: Arc<AppState>) {
     std::thread::spawn(move || loop {
+        if pty_daemon::is_enabled() {
+            pty_daemon::set_grace_minutes(
+                crate::settings::load_settings()
+                    .terminal
+                    .pty_daemon_grace_minutes,
+            );
+            pty_daemon::keep_presence_on_live_daemons();
+        }
         std::thread::sleep(std::time::Duration::from_millis(
             crate::constants::PTY_DAEMON_DETACHED_SWEEP_MS,
         ));

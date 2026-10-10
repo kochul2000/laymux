@@ -61,6 +61,23 @@ pub(super) fn keep(endpoint: &DaemonEndpoint) {
     });
 }
 
+/// Hold presence on every live daemon of this build kind that speaks this
+/// protocol, without starting one.
+pub fn keep_presence_on_live_daemons() {
+    let live = super::discovery::DaemonRoot::for_current_build()
+        .and_then(|root| super::launcher::live_generations(&root, |_| true));
+    match live {
+        Ok(live) => {
+            for generation in live {
+                if let super::launcher::GenerationState::Ready(endpoint) = generation.state {
+                    keep(&endpoint);
+                }
+            }
+        }
+        Err(error) => tracing::debug!(%error, "PTY daemon presence refresh skipped"),
+    }
+}
+
 /// Report the grace, then wait for the daemon to close the connection,
 /// reporting the grace again whenever it changes.
 fn hold(endpoint: &DaemonEndpoint) -> io::Result<()> {

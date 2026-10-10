@@ -117,6 +117,10 @@ pub struct KnownTerminals {
     pub adoption_seen: HashSet<String>,
     /// Whether this GUI adopts daemon sessions at all.
     pub adopts: bool,
+    /// The saved layout reopens the file viewer, whose terminal id is derived
+    /// from the file path on the frontend. Every viewer terminal counts as
+    /// awaited while it is.
+    pub file_viewer_open: bool,
 }
 
 impl KnownTerminals {
@@ -136,9 +140,24 @@ impl KnownTerminals {
                 .as_ref()
                 .map(layout_terminal_ids)
                 .unwrap_or_default(),
+            file_viewer_open: snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.ui_state.file_viewer.as_ref())
+                .is_some_and(|viewer| viewer.open && !viewer.path.is_empty()),
         })
     }
 }
+
+impl KnownTerminals {
+    /// The saved layout (or the file viewer it reopens) mounts this terminal.
+    fn restores(&self, terminal_id: &str) -> bool {
+        self.layout.contains(terminal_id)
+            || (self.file_viewer_open && terminal_id.starts_with(FILE_VIEWER_TERMINAL_ID_PREFIX))
+    }
+}
+
+/// `terminal-` + the frontend's `FILE_VIEWER_OVERRIDE_ID_PREFIX`.
+const FILE_VIEWER_TERMINAL_ID_PREFIX: &str = "terminal-global-file-viewer:";
 
 /// List the sessions of every live daemon generation (ADR-0308). No daemon
 /// running is an empty inventory. A generation that does not answer, or
@@ -349,7 +368,7 @@ fn classify(
                     PtySessionState::OtherClient
                 }
             } else if known.adopts
-                && known.layout.contains(&session.terminal_id)
+                && known.restores(&session.terminal_id)
                 && !known.adoption_seen.contains(&session.terminal_id)
             {
                 PtySessionState::AwaitingPane
@@ -401,6 +420,7 @@ mod tests {
             adopts: true,
             panes: panes.iter().map(|id| id.to_string()).collect(),
             layout: layout.iter().map(|id| id.to_string()).collect(),
+            file_viewer_open: false,
         }
     }
 
@@ -434,6 +454,29 @@ mod tests {
         );
         assert_eq!(entries[2].attach_epoch, 3);
         assert_eq!(entries[2].profile.as_deref(), Some("PowerShell"));
+    }
+
+    #[test]
+    fn a_viewer_terminal_is_awaited_while_the_saved_viewer_reopens() {
+        let sessions = || {
+            vec![session(
+                "v#1",
+                "terminal-global-file-viewer:a_txt:1f",
+                false,
+                false,
+            )]
+        };
+        let mut known = known(&[], &[]);
+        known.file_viewer_open = true;
+        assert_eq!(
+            classify(sessions(), "g3-000000000000", &known)[0].state,
+            PtySessionState::AwaitingPane
+        );
+        known.file_viewer_open = false;
+        assert_eq!(
+            classify(sessions(), "g3-000000000000", &known)[0].state,
+            PtySessionState::Detached
+        );
     }
 
     #[test]
@@ -518,6 +561,7 @@ mod daemon_tests {
                     adopts: true,
                     panes: HashSet::new(),
                     layout: HashSet::new(),
+                    file_viewer_open: false,
                 },
             );
             if let Some(entry) = entries

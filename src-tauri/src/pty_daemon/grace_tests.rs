@@ -80,6 +80,19 @@ fn a_presence_does_not_keep_an_empty_daemon_running() {
 }
 
 #[test]
+fn a_presence_sweep_cannot_keep_an_empty_daemon_from_its_idle_exit() {
+    // Each sweep connects to every daemon; the idle exit needs a quiet
+    // stretch longer than its own timeout between two of them.
+    let sweep = crate::constants::PTY_DAEMON_DETACHED_SWEEP_MS;
+    let idle =
+        crate::constants::PTY_DAEMON_IDLE_EXIT_MS + 2 * crate::constants::PTY_DAEMON_IDLE_POLL_MS;
+    assert!(
+        sweep > idle,
+        "sweep {sweep} ms must exceed idle exit {idle} ms"
+    );
+}
+
+#[test]
 fn a_reported_grace_is_kept_within_the_setting_range() {
     let daemon = TestDaemon::start();
     let minute = Duration::from_secs(60);
@@ -92,7 +105,7 @@ fn a_reported_grace_is_kept_within_the_setting_range() {
 }
 
 #[test]
-fn a_gui_holds_one_presence_per_daemon_until_the_daemon_goes() {
+fn a_gui_holds_one_presence_per_daemon() {
     let daemon = TestDaemon::start();
     super::presence::keep(&daemon.endpoint);
     super::presence::keep(&daemon.endpoint);
