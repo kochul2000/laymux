@@ -19,7 +19,7 @@
 | 디스크 부족 | 실제 SQLITE_FULL 발생 시 전체 rollback, revision과 이전 복원점 유지 | `local_state/tests.rs`의 `max_page_count` fixture |
 | 손상·schema 오류 | 원본 보존, 기본값으로 덮어쓰기 안 함, 설정 초기화 버튼 숨김 | Rust persistence·UI recovery·dev 오류 검증 |
 | 종료·업데이트 취소 | 기존 fence/critical barrier 유지, 실패를 성공 ACK로 처리하지 않음 | 기존 lifecycle·status·checkpoint 테스트 |
-| 완전 앱 종료 후 재기동 | 새 PID에서 native/WSL의 동일 대화 ID·workspace·파일 뷰어 복원 | dev harness `prepare` → kill-dev → `verify` |
+| 완전 앱 종료 후 재기동 | 새 PID에서 native/WSL의 동일 대화 ID·workspace·파일 뷰어 복원 | dev harness `prepare` → `kill-dev.sh --with-daemon` → `verify` |
 | 출력 캐시 유실 | 출력 캐시 없이 DB 복원 메타데이터로 같은 대화 복원 | 격리 dev 재시작 검증 |
 | 변경 없는 종료 | DB revision으로 receipt 검증, provider/WSL 재조회와 settings 재쓰기 생략 | receipt 테스트·dev 재사용/종료 측정 |
 
@@ -37,7 +37,8 @@ $env:LAYMUX_CDP_URL='http://127.0.0.1:9229'
 $env:LAYMUX_DEV_URL='http://localhost:1420'
 node scripts/tests/local-state-sqlite.e2e.mjs check
 node scripts/tests/local-state-sqlite.e2e.mjs prepare .tmp/sqlite-restart.json
-# APPDATA를 격리 경로로 지정한 상태에서 bash scripts/kill-dev.sh
+# APPDATA를 격리 경로로 지정한 상태에서 bash scripts/kill-dev.sh --with-daemon
+# (데몬이 남으면 재기동이 살아 있는 세션을 재결합해 디스크 복원을 거치지 않는다)
 # 같은 APPDATA/LOCALAPPDATA로 새 dev 프로세스를 실행한 뒤:
 node scripts/tests/local-state-sqlite.e2e.mjs verify .tmp/sqlite-restart.json
 ```

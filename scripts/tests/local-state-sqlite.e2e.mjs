@@ -1,5 +1,5 @@
 // APPDATA/LOCALAPPDATA가 현재 worktree의 .tmp인 격리 dev에서만 실행한다.
-// prepare 후 kill-dev.sh로 앱을 종료하고 같은 경로로 재기동해 verify한다.
+// prepare 후 kill-dev.sh --with-daemon으로 앱과 dev PTY 데몬을 종료하고 같은 경로로 재기동해 verify한다.
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync, statSync } from "node:fs";
 import path from "node:path";

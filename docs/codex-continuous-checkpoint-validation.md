@@ -54,7 +54,8 @@
 node scripts/tests/codex-resume-checkpoint.e2e.mjs
 node scripts/tests/codex-checkpoint-reuse.e2e.mjs
 node scripts/tests/codex-restart-checkpoint.e2e.mjs prepare .tmp/restart.json
-# 해당 격리 APPDATA와 dev health를 확인한 뒤 scripts/kill-dev.sh로 종료한다.
+# 해당 격리 APPDATA와 dev health를 확인한 뒤 scripts/kill-dev.sh --with-daemon으로 종료한다.
+# 데몬이 남으면 재기동이 살아 있는 Codex를 재결합해 복원점의 resume 경로를 거치지 않는다.
 # 같은 APPDATA/CODEX_HOME으로 dev를 다시 기동한다. ID를 다시 주입하지 않는다.
 node scripts/tests/codex-restart-checkpoint.e2e.mjs verify .tmp/restart.json
 ```

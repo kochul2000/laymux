@@ -10481,8 +10481,10 @@ import {
         // holds — every attempt here is tied to the document becoming *visible*, and
         // a definitive refusal (401/403/409: bad token, remote disabled, someone else
         // holds control, local reclaim lockout) disarms it until the user acts.
+        // Arming keeps the backoff: a claim that succeeds only for its navigation
+        // to fail must not reset the retry delay, or a host that stays unready is
+        // reclaimed every few seconds forever. A usable connection resets it.
         function armAutoConnect() {
-          autoConnectAttempt = 0;
           try {
             sessionStorage.setItem(autoConnectKey, "1");
           } catch (_) {}
@@ -10621,6 +10623,7 @@ import {
               focusInput,
               preserveViewport: auto,
             });
+            autoConnectAttempt = 0;
             setNavigationOpen(false);
           } catch (err) {
             if (attemptRevision !== claimAttemptRevision) return;
@@ -10641,7 +10644,12 @@ import {
               setStatus(err.message, true);
               return;
             }
-            if (auto) {
+            // A successful manual claim already armed this tab's connection intent.
+            // The host frontend can still be booting when initial navigation times
+            // out; recover through the same visible-document retry as auto-connect.
+            const transientStartupFailure = failedLease && err &&
+              [502, 503, 504].includes(err.status);
+            if (auto || transientStartupFailure) {
               scheduleAutoConnectRetry();
               // Transient (offline, relay still down): keep the reason visible but
               // do not paint it as a failure the user has to act on.

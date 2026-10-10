@@ -28,6 +28,7 @@
   포그라운드 확인도 프로세스 **이름이 아니라 pid** 로 한다. 다만 19281도 다른 워크트리 dev가 이어서 소유할 수 있으므로 포트만으로 대상 확인을 끝내지 않는다.
 - **health에서 워크트리 신원을 확인한다.** 측정 전에 `GET http://127.0.0.1:19281/api/v1/health`의 `instance.pid`·`executablePath`·`worktreeRoot`·`gitCommit`을 지금 띄운 워크트리의 기대값과 대조한다. `status: ok`와 `port: 19281`만 맞는 것은 충분하지 않다([ADR-0083](adr/0083-automation-health-instance-identity.md)).
 - **dev 기동은 워크트리에서 `cargo tauri dev`, 종료는 `bash scripts/kill-dev.sh`.** 브랜치 코드를 실기에서 보려면 그 워크트리에서 띄운다. 종료 출력의 PID와 실행 경로가 health에서 확인한 대상과 같은지 본다. 새 워크트리는 `ui/` 에서 `npm ci` 가 필요하다(xterm 패치가 postinstall 로 붙는다).
+- Windows 강제 종료는 검증된 GUI PID 하나에만 적용하고 `taskkill /T`를 쓰지 않는다. 데몬 없이 새로 시작해야 하는 검증(디스크 복원, resume)은 `kill-dev.sh --with-daemon`으로 dev 데몬까지 끝낸다. 분리된 PTY 데몬도 생성 당시 GUI를 부모 PID로 기록하므로 트리 종료는 데몬과 셸까지 끝내 재결합 검증을 무효화한다. 생존은 종료 전 출력·캐시가 아니라 종료 완료 뒤에도 증가하는 fixture tick과 실제 child PID·daemon session id로 확인한다.
 - **재현 환경은 끝까지 세팅해 놓는다.** "vim 을 띄우고 insert 모드까지 들어간 pane" 처럼, 사용자가 할 일이 **키 몇 번**만 남도록 만든다. MCP `write_to_terminal` 로 앱 실행·모드 진입까지 미리 해둘 수 있다.
 
 ## 2. 사람이 해야만 하는 입력을 구분한다
@@ -110,8 +111,8 @@ VITE_LAYMUX_STRICT_MODE=0 cargo tauri dev
 데몬 재결합은 다음 순서로 확인한다.
 
 1. 터미널에서 `$PID`를 기록하고 긴 명령을 시작한다.
-2. dev GUI PID만 `Stop-Process -Id <pid> -Force`로 끝낸다. `scripts/kill-dev.sh`는 `taskkill /T`라서 데몬까지 끝내므로 쓰지 않는다.
-3. 위 명령으로 다시 띄운다.
+2. `bash scripts/kill-dev.sh`로 검증된 dev GUI PID만 강제 종료한다. Windows에서도 `/T`를 사용하지 않아 데몬과 셸을 유지한다.
+3. 위 명령으로 다시 띄운다. 데몬은 GUI가 없으면 유예 시간(`terminal.ptyDaemonGraceMinutes`, 기본 10분, ADR-0312) 뒤 세션을 모두 끝내므로 그 안에 띄운다.
 4. 같은 `$PID`가 응답하는지, dev 로그에 `adopted a running PTY daemon session`이 찍혔는지, 데몬 로그(`%LOCALAPPDATA%\laymux-dev\pty-daemon\g<protocol>-<build>\daemon.log`, ADR-0308)에 새 spawn이 없는지 확인한다.
 
 업데이트 인계(ADR-0308)는 설치기 없이 dev 전용 `POST /api/v1/dev/update-handoff`로 확인한다.
