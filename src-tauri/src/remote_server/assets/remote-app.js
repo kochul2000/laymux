@@ -12581,6 +12581,9 @@ import {
           chip.addEventListener("pointerdown", (event) => {
             if (event.button !== 0 || event.isPrimary === false) return;
             event.stopPropagation();
+            // A swipe that became a browser pan ends in pointercancel with no
+            // click to consume the previous suppression.
+            suppressClick = false;
             gesture = {
               pointerId: event.pointerId,
               x: event.clientX,
@@ -12650,7 +12653,7 @@ import {
           };
 
           // The chip lets the browser pan so a swipe that starts on it scrolls
-          // Settings or its overflowing row. Once the long press has armed a drag, the
+          // Settings. Once the long press has armed a drag, the
           // first move must not start that pan: it would cancel the pointer
           // mid-drag. Pointer preventDefault cannot stop a browser pan.
           chip.addEventListener(

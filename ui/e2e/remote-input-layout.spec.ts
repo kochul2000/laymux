@@ -842,6 +842,28 @@ test.describe("Remote input action layout touch", () => {
       .toBeGreaterThan(before + 50);
   });
 
+  test("a chip still answers its next tap after a swipe started on it", async ({ page }) => {
+    await openMarkup(page);
+    await page.setViewportSize({ width: 390, height: 640 });
+    await page.locator("#drawerSettingsButton").click();
+    await openSetup(page, "inputAvailableKeys");
+
+    const target = page.locator("#inputAvailableKeys .layout-chip").first();
+    const actionId = (await target.getAttribute("data-layout-action"))!;
+    await target.evaluate((element) => element.scrollIntoView({ block: "end" }));
+    let box = (await target.boundingBox())!;
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    await touchPath(page, verticalPath(x, y, y + 120));
+
+    box = (await target.boundingBox())!;
+    const tap = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    await touchPath(page, [tap]);
+    await expect(
+      page.locator(`#inputAvailableKeys [data-layout-action="${actionId}"]`),
+    ).toHaveCount(0);
+  });
+
   test("a long-press touch drag still moves a chip", async ({ page }) => {
     await openMarkup(page);
     await page.locator("#drawerSettingsButton").click();
