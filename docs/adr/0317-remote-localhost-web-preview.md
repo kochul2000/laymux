@@ -1,10 +1,11 @@
 # 0317. Remote localhost 웹 프리뷰는 고정 origin의 읽기 세션과 격리된 실행 표면을 사용한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-11
 - Source: 사용자 요구(`http://localhost:8765`의 Godot 게임을 Remote에서 실행), [api-contracts.md §13](../architecture/api-contracts.md), [ADR-0175](0175-remote-oauth-loopback-relay.md)
 - Extends: ADR-0175의 loopback 중계. OAuth의 1회용 callback 계약은 유지한다.
 - Extends: [ADR-0208](0208-android-e2e-file-viewer-typed-capability.md)의 비밀 capability·정확한 E2E 소유자·캐시 재전송 검증을 localhost 읽기에 적용한다.
+- Applies: [ADR-0215](0215-remote-page-frames-only-the-desktop-app.md)의 앱 조상 allowlist를 직접 접속 프리뷰에 그대로 적용한다. Cloud는 기존 Remote origin의 같은-origin framing만 허용한다.
 
 ## Context
 

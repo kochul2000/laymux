@@ -58,7 +58,6 @@ fn android_authority(
         AndroidE2eFileViewerProof::new(context.clone(), "preview-lease".into(), token.clone());
     let authorization =
         preview_authorization(app, &HeaderMap::new(), Some(&proof), "preview-lease")
-            .ok()
             .expect("owner authority");
     (context, token, authorization)
 }

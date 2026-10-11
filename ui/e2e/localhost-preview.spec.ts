@@ -12,8 +12,11 @@ const wasm = Buffer.from(
   "0061736d010000000105016000017f0302010007070103616e7300000a06010400412a0b",
   "hex",
 );
+const appFrameAncestors = readFileSync(root + "page.rs", "utf8").match(
+  /const APP_FRAME_ANCESTORS: &str = if cfg!\(debug_assertions\) \{\s*"([^"]+)"/,
+)![1];
 
-async function harness(page: Page, live = false) {
+async function harness(page: Page, live = false, outerOrigin: string | null = null) {
   const target = process.env.LAYMUX_PREVIEW_REPRO_URL || "http://localhost:8765/";
   const resources = new Map<string, { bytes: Buffer; contentType: string }>();
   resources.set("/", {
@@ -40,7 +43,14 @@ async function harness(page: Page, live = false) {
     if (path === "/remote/")
       return route.fulfill({
         contentType: "text/html",
-        headers: { "Content-Security-Policy": remoteClientCsp("https://remote.test") },
+        headers: {
+          "Content-Security-Policy": outerOrigin
+            ? remoteClientCsp("https://remote.test").replace(
+                "frame-ancestors 'none'",
+                "frame-ancestors " + appFrameAncestors,
+              )
+            : remoteClientCsp("https://remote.test"),
+        },
         body: `<!doctype html><link rel="stylesheet" href="/remote/vendor/remote-app.css"><button id="play">Play</button><script type="module" src="/remote/controller.js"></script>`,
       });
     if (path === "/remote/controller.js")
@@ -57,7 +67,9 @@ async function harness(page: Page, live = false) {
       return route.fulfill({
         contentType: "text/html",
         headers: {
-          "Content-Security-Policy": readFileSync(root + "preview-csp.txt", "utf8").trim(),
+          "Content-Security-Policy": readFileSync(root + "preview-csp.txt", "utf8")
+            .trim()
+            .replace("__APP_FRAME_ANCESTORS__", appFrameAncestors),
         },
         body: readFileSync(root + "preview.html", "utf8").replace(
           "{{BOOTSTRAP}}",
@@ -120,8 +132,17 @@ async function harness(page: Page, live = false) {
     }
     return route.fulfill({ status: 404 });
   });
-  await page.goto("https://remote.test/remote/");
-  await page.locator("#play").click();
+  if (outerOrigin) {
+    await page.route(outerOrigin + "/mobile-preview", (route) =>
+      route.fulfill({
+        contentType: "text/html",
+        body: '<iframe id="mobile-remote" src="https://remote.test/remote/"></iframe>',
+      }),
+    );
+  }
+  await page.goto(outerOrigin ? outerOrigin + "/mobile-preview" : "https://remote.test/remote/");
+  const shell = outerOrigin ? page.frameLocator("#mobile-remote") : page;
+  await shell.locator("#play").click();
   return { closes, requests };
 }
 
@@ -138,6 +159,18 @@ test("isolated localhost preview runs external scripts and chunked WASM without 
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await expect(page.locator(".localhost-preview-overlay")).toBeHidden();
   await expect.poll(() => closes).toEqual(["preview-test"]);
+});
+
+test("desktop mobile mode permits its trusted app ancestor while keeping the game opaque", async ({
+  page,
+}) => {
+  await harness(page, false, "http://localhost:1420");
+  const preview = page
+    .frameLocator("#mobile-remote")
+    .frameLocator(".localhost-preview-overlay iframe");
+  await expect(preview.locator("#result")).toHaveText("42");
+  await expect(preview.locator("body")).toHaveAttribute("data-parent-blocked", "true");
+  await expect(preview.locator("body")).toHaveAttribute("data-storage-blocked", "true");
 });
 
 test("live single-thread Godot export finishes loading through the bounded resource bridge", async ({

@@ -91,6 +91,7 @@ impl FileViewerAuthorization {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     pub(super) fn revalidate(
         &self,
         app: &AppState,
