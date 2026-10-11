@@ -9,7 +9,7 @@ import {
 } from "../../../../ui/src/remote/remote-keyboard.js";
 import { installRemoteToolSwipes, nextRemoteTool, normalizeToolSwipeRightAction } from "../../../../ui/src/remote/remote-tool-swipe.js";
 import { createComposerEditor } from "../../../../ui/src/remote/composer-editor.js";
-import { createRemoteAgentResumeLinkProvider } from "../../../../ui/src/remote/remote-agent-resume.ts";
+import { createRemoteAgentResumeLinkProvider, installAgentResumeUnderlines } from "../../../../ui/src/remote/remote-agent-resume.ts";
 import { isShellOwnedCombo, keybindingMatchesEvent, resolveKeybindingFrom } from "../../../../ui/src/lib/keybinding-core.ts";
 import { readPathLinkSelection, readPathLinkLines, mapPathLinkParts, pathLinkPartsCurrent, PATH_LINK_CONTEXT_ROWS } from "../../../../ui/src/lib/path-link-lines.ts";
 import {
@@ -6737,6 +6737,8 @@ import {
               submit: (context, command) => writeTerminalInput(context.terminalId, context.leaseId, command, true),
               onError: (error) => setStatus(`Resume failed: ${error.message || error}`, true),
             }));
+            // Touch has no hover to reveal a provider link (ADR-0316).
+            installAgentResumeUnderlines(terminal, "remote-resume-link-decoration");
             terminal.registerLinkProvider(createRemotePrLinkProvider(terminal));
           }
           terminal.open(terminalSizer);

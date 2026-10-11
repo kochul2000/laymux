@@ -224,3 +224,60 @@ test("a hint tapped while the host still runs the agent is not typed into it", a
   await page.waitForTimeout(300);
   expect(submissions).toEqual([]);
 });
+
+async function sendDelta(output: WebSocketRoute, seq: number, text: string) {
+  const payload = Buffer.from(text);
+  output.send(
+    JSON.stringify({
+      type: "terminal.output",
+      version: 1,
+      phase: "delta",
+      seqStart: seq,
+      seqEnd: seq + payload.length,
+      byteLength: payload.length,
+    }),
+  );
+  output.send(payload);
+  return seq + payload.length;
+}
+
+// Touch has no hover, so the xterm hover underline never shows on a phone.
+// A visible hint keeps its underline without any pointer over it.
+test("a visible resume hint stays underlined without hover, wrapped rows included", async ({
+  page,
+}) => {
+  const { output } = await openResumeRemote(page);
+  const id = "11111111-2222-4333-8444-555555555555";
+  const underlines = page.locator("#terminal .remote-resume-link-decoration");
+  const geometry = await page.evaluate(() => {
+    const terminal = (window as unknown as { resumeTerminal: { cols: number } }).resumeTerminal;
+    return { cols: terminal.cols };
+  });
+  // Indent the hint so it wraps onto a second row at this pane width.
+  const indent = " ".repeat(Math.max(2, geometry.cols - 20));
+  const hint = `claude --resume ${id}`;
+  const seq = await sendDelta(
+    output,
+    0,
+    `\x1b[2J\x1b[H^C\r\nResume this session with:\r\n${indent}${hint}\r\n$ `,
+  );
+
+  await expect(underlines).toHaveCount(2);
+  const [first, second] = await underlines.evaluateAll((elements) =>
+    elements
+      .map((element) => element.getBoundingClientRect())
+      .sort((a, b) => a.top - b.top)
+      .map((rect) => ({ left: rect.left, top: rect.top, width: rect.width })),
+  );
+  const screen = (await page.locator("#terminal .xterm-screen").boundingBox())!;
+  const cell = screen.width / geometry.cols;
+  expect(first.left).toBeCloseTo(screen.x + indent.length * cell, 0);
+  expect(first.width).toBeCloseTo((geometry.cols - indent.length) * cell, 0);
+  expect(second.top).toBeGreaterThan(first.top);
+  expect(second.left).toBeCloseTo(screen.x, 0);
+  expect(first.width + second.width).toBeCloseTo(hint.length * cell, 0);
+
+  // Overwritten output retires the underline.
+  await sendDelta(output, seq, "\x1b[2J\x1b[H$ ");
+  await expect(underlines).toHaveCount(0);
+});

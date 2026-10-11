@@ -105,7 +105,7 @@
 
 ### CLI 종료 안내의 수동 복원 링크
 
-Remote는 `remote-agent-resume.ts`로 같은 링크 provider를 등록한다. 클릭 시 pending을 설정하고 기존 `inputWriteChain`에 작업을 추가한다. navigation을 다시 조회해 호스트의 `agentCommands`와 셸 상태를 읽은 후, terminal·lease·출력 generation·출력 준비·셀 유효성을 다시 확인하고 기존 구조화 `/input`에 제출한다. 기기에는 명령 설정을 저장하지 않는다. 미지원 metadata·pane 전환·출력 재연결·제어권 상실이면 제출하지 않으며 실패 시 상태 오류를 표시하고 자동 재전송하지 않는다.
+Remote는 `remote-agent-resume.ts`로 같은 링크 provider를 등록한다. 클릭 시 pending을 설정하고 기존 `inputWriteChain`에 작업을 추가한다. navigation을 다시 조회해 호스트의 `agentCommands`와 셸 상태를 읽은 후, terminal·lease·출력 generation·출력 준비·셀 유효성을 다시 확인하고 기존 구조화 `/input`에 제출한다. 기기에는 명령 설정을 저장하지 않는다. 미지원 metadata·pane 전환·출력 재연결·제어권 상실이면 제출하지 않으며 실패 시 상태 오류를 표시하고 자동 재전송하지 않는다. 터치에는 hover가 없으므로 Remote는 `installAgentResumeUnderlines`로 같은 셀 파서가 찾은 viewport의 안내마다 xterm decoration 밑줄을 상시 둔다. 출력 파싱·스크롤·크기 변경·buffer 전환 뒤 frame 하나로 묶어 다시 읽고, 같은 위치의 밑줄은 유지하며 alternate buffer에서는 두지 않는다([ADR-0316](../adr/0316-remote-resume-hint-persistent-underline.md)).
 
 Remote `activateTouchLink`는 인접 행의 mousemove→실제 탭 셀의 mousemove→mousedown→mouseup→mouseleave를 합성한다. xterm이 같은 셀·행에 남긴 hover cache를 공개 이벤트 경로로 다시 조회하게 하므로 화면이 교체된 같은 좌표의 연속 탭도 최신 링크를 실행한다. 이동 지점은 screen grid 안의 다른 행으로 계산하며 xterm의 사설 상태는 수정하지 않는다.
 
