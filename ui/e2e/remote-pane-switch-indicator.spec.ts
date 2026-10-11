@@ -164,6 +164,14 @@ test.describe("remote pane switch indicator", () => {
     // The old screen is still there (the contract keeps it until the new
     // snapshot arrives), but dimmed so it no longer reads as the live pane.
     await expect(surface(page)).toHaveAttribute("data-transition", "pending");
+    // The dim lands at full strength the moment the switch starts; only the
+    // release fades.
+    expect(
+      await page.locator("#terminalViewport").evaluate((viewport) => ({
+        opacity: getComputedStyle(viewport).opacity,
+        animating: viewport.getAnimations().length > 0,
+      })),
+    ).toEqual({ opacity: "0.6", animating: false });
     await expect(page.locator("#terminalMeta")).toContainText("A2");
     await expect(page.locator("#terminal")).toHaveAttribute("aria-busy", "true");
     await expect(page.locator(".xterm-rows")).toContainText("pane one");
