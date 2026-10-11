@@ -73,11 +73,9 @@ export function installAgentResumeUnderlines(terminal: Terminal, className: stri
   let frame = 0;
   const refresh = () => {
     frame = 0;
-    // A synchronized-output frame may blank rows it is about to redraw.
-    if (terminal.modes.synchronizedOutputMode) {
-      schedule();
-      return;
-    }
+    // A synchronized-output frame may blank rows it is about to redraw; the
+    // write that ends it is parsed and schedules the next read.
+    if (terminal.modes.synchronizedOutputMode) return;
     const buffer = terminal.buffer.active;
     const segments =
       buffer.type === "normal"

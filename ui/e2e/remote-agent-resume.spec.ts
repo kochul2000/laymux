@@ -307,3 +307,22 @@ test("a hint replayed onto the same rows after a reset keeps its underline", asy
   await page.waitForTimeout(300);
   await expect(underlines).toHaveCount(shown);
 });
+
+// An agent TUI on the alternate buffer hides the shell hint until it exits.
+test("the alternate buffer hides hint underlines until it exits", async ({ page }) => {
+  const { output } = await openResumeRemote(page);
+  const underlines = page.locator("#terminal .remote-resume-link-decoration");
+  let seq = await sendDelta(
+    output,
+    0,
+    "\x1b[2J\x1b[H^C\r\nResume this session with:\r\n  claude --resume 11111111-2222-4333-8444-555555555555\r\n$ ",
+  );
+  await expect(underlines).not.toHaveCount(0);
+  const shown = await underlines.count();
+
+  seq = await sendDelta(output, seq, "\x1b[?1049h\x1b[2J\x1b[Hagent");
+  await expect(underlines).toHaveCount(0);
+
+  await sendDelta(output, seq, "\x1b[?1049l");
+  await expect(underlines).toHaveCount(shown);
+});
