@@ -6446,6 +6446,22 @@ import {
 
           surface.addEventListener("pointerup", finishTouchSelection, pointerOptions);
           surface.addEventListener("pointercancel", finishTouchSelection, pointerOptions);
+
+          // Every touch gesture on the surface is driven by the pointer handlers
+          // above, so the browser must not run its own. `touch-action: none`
+          // does not hold here: the viewport and xterm's scrollers are scroll
+          // containers, which restart the effective touch-action. A fast swipe
+          // (the edge flick that opens the menu, a terminal scroll) then leaves
+          // an invisible browser fling, and the next tap within about a second
+          // only stops that fling and produces no click. Pointer
+          // preventDefault cannot cancel browser gestures; touchmove can.
+          surface.addEventListener(
+            "touchmove",
+            (event) => {
+              if (event.cancelable) event.preventDefault();
+            },
+            pointerOptions
+          );
         }
 
         // CSI query sequences whose only effect is to make the terminal emit a
