@@ -716,7 +716,7 @@ test.describe("remote mobile layout", () => {
     await expect(page.locator("#drawerConnectionView")).toBeHidden();
     await expect(page.locator("#drawerSettingsView")).toBeHidden();
     await expect(page.locator("#navClose")).toHaveCount(0);
-    await expect(page.locator(".drawer-header")).toHaveCSS("height", "32px");
+    await expect(page.locator(".drawer-header")).toHaveCSS("height", "40px");
 
     await page.locator("#drawerNotificationsButton").click();
     await expect(page.locator("#drawerBack")).toBeFocused();
@@ -841,9 +841,9 @@ test.describe("remote mobile layout", () => {
     ]);
     expect(exclusionBox).not.toBeNull();
     expect(composerToggleBox).not.toBeNull();
-    expect(exclusionBox!.height).toBe(26);
+    expect(exclusionBox!.height).toBe(32);
     // Footer sizing follows its independent Main button scale; the header
-    // exclusion remains a compact 26px control.
+    // exclusion keeps the shared 32px toolbar control size.
 
     await page.locator('[data-key="navNext"]').click();
     await expect.poll(() => spatialBodies.length).toBe(1);
