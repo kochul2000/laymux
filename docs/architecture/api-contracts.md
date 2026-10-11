@@ -1701,7 +1701,7 @@ Android 저장·열기 호출은 주입된 `LaymuxNative` 객체의 메서드로
 
 ### 13.3.3 Localhost 웹 프리뷰
 
-Remote의 HTTP localhost 링크는 별도 웹 프리뷰로 열린다([ADR-0316](../adr/0316-remote-localhost-web-preview.md)). `/remote/v1/localhost-preview/{begin,resource,close}` POST는 Remote 인증·body의 `leaseId`와 FileViewer 비밀 capability를 요구한다. 브라우저는 `X-Laymux-Remote-File-Viewer` 헤더를 사용하고 Android E2E는 `fileViewerAuthorization:{leaseId,fileViewerToken}`을 암호화 body에 포함한다. E2E dispatcher가 구조적 proof를 추출하여 정확한 claim 소유 instance/session·owner epoch·capability generation을 검사한다. begin의 `{url,leaseId}`는 HTTP loopback origin 하나(포트 ≥1024, 19280/19281 제외)를 30분·단일 슬롯 세션으로 등록하고 `{sessionId,url,chunkBytes}`를 반환한다. resource의 `{sessionId,leaseId,pathAndQuery,offset}`는 같은 origin의 GET snapshot을 최대 512 KiB씩 `{status,contentType,body,offset,nextOffset,totalBytes}`로 반환하며 body는 base64다. 파일별 64 MiB·세션 합계 128 MiB·파일 수 128개로 제한한다. close의 `{sessionId,leaseId}`는 일치하는 세션을 폐기한다. 응답 직전과 E2E 캐시 재전송에도 권한과 슬롯 수명을 재검증하여 close·교체·만료 뒤 이전 응답을 읽을 수 없다. 세션은 생성한 lease에 귀속되며 다른 origin redirect·upstream 인증/쿠키 전달·환경 프록시는 허용하지 않는다.
+Remote의 HTTP localhost 링크는 별도 웹 프리뷰로 열린다([ADR-0317](../adr/0317-remote-localhost-web-preview.md)). `/remote/v1/localhost-preview/{begin,resource,close}` POST는 Remote 인증·body의 `leaseId`와 FileViewer 비밀 capability를 요구한다. 브라우저는 `X-Laymux-Remote-File-Viewer` 헤더를 사용하고 Android E2E는 `fileViewerAuthorization:{leaseId,fileViewerToken}`을 암호화 body에 포함한다. E2E dispatcher가 구조적 proof를 추출하여 정확한 claim 소유 instance/session·owner epoch·capability generation을 검사한다. begin의 `{url,leaseId}`는 HTTP loopback origin 하나(포트 ≥1024, 19280/19281 제외)를 30분·단일 슬롯 세션으로 등록하고 `{sessionId,url,chunkBytes}`를 반환한다. resource의 `{sessionId,leaseId,pathAndQuery,offset}`는 같은 origin의 GET snapshot을 최대 512 KiB씩 `{status,contentType,body,offset,nextOffset,totalBytes}`로 반환하며 body는 base64다. 파일별 64 MiB·세션 합계 128 MiB·파일 수 128개로 제한한다. close의 `{sessionId,leaseId}`는 일치하는 세션을 폐기한다. 응답 직전과 E2E 캐시 재전송에도 권한과 슬롯 수명을 재검증하여 close·교체·만료 뒤 이전 응답을 읽을 수 없다. 세션은 생성한 lease에 귀속되며 다른 origin redirect·upstream 인증/쿠키 전달·환경 프록시는 허용하지 않는다.
 
 브라우저 bootstrap(`/remote/localhost-preview/`)은 별도 opaque-origin sandbox 문서이며 부모 Remote가 검증한 resource 메시지로 정적 앱과 WASM을 읽는다. 비밀 토큰은 부모의 API 요청 및 Android native transport에만 보관하고 게임 JavaScript에는 전달하지 않는다. Android는 원격 브리지 없는 별도 synthetic-origin WebView의 native resource interceptor를 사용한다. Remote 셸의 script/network 정책과 OAuth relay 계약은 유지하며 Cloud의 framing은 정확한 bootstrap URL과 기존 blob 파일 문서만 허용한다. Caddy는 경로별 배타적 deferred CSP/XFO를 적용한다. POST·WebSocket·Service Worker·멀티스레드 WASM은 지원하지 않는다. 자산을 바꾼 뒤에는 프리뷰를 다시 열어 새 snapshot을 읽는다.
 
@@ -2093,7 +2093,7 @@ poison recovery도 이 순서를 바꾸지 않는다. discard helper는 역순 �
 
 **콜백 내 락**: PTY 콜백 등 비동기 콜백에서는 독립적으로 락을 획득한다. 호출자의 락을 전달하지 않는다.
 
-Localhost preview의 비동기 세션 슬롯은 Remote 상태 락보다 먼저 획득한다([ADR-0316](../adr/0316-remote-localhost-web-preview.md)). 슬롯을 기다리는 동안 번호 락을 보유하지 않으며, 슬롯을 얻은 뒤 capability와 claim 소유자를 다시 검증한다. 다운로드·캐시 삽입·세션 교체는 이 슬롯으로 직렬화한다. 완료 응답의 권한 검증은 슬롯을 놓은 뒤 수행한다. E2E receipt에는 슬롯의 약한 수명 참조와 만료 시각을 붙여 캐시 검증에 비동기 슬롯 락이 필요하지 않게 한다.
+Localhost preview의 비동기 세션 슬롯은 Remote 상태 락보다 먼저 획득한다([ADR-0317](../adr/0317-remote-localhost-web-preview.md)). 슬롯을 기다리는 동안 번호 락을 보유하지 않으며, 슬롯을 얻은 뒤 capability와 claim 소유자를 다시 검증한다. 다운로드·캐시 삽입·세션 교체는 이 슬롯으로 직렬화한다. 완료 응답의 권한 검증은 슬롯을 놓은 뒤 수행한다. E2E receipt에는 슬롯의 약한 수명 참조와 만료 시각을 붙여 캐시 검증에 비동기 슬롯 락이 필요하지 않게 한다.
 
 ### 14.4 상수 관리
 

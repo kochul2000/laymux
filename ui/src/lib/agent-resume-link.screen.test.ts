@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import type { ILink } from "@xterm/xterm";
 import { createScreenTerminal, type ScreenTerminal } from "@/test/screen/xterm-screen";
-import { createAgentResumeLinkProvider } from "./agent-resume-link";
+import { createAgentResumeLinkProvider, findAgentResumeRanges } from "./agent-resume-link";
 
 const id = "ed8cbb69-9497-4b6c-89ed-b42a48f1197d";
 const screens: ScreenTerminal[] = [];
@@ -91,4 +91,17 @@ it("리사이즈로 reflow되면 옛 좌표의 링크를 폐기하고 새 좌표
   old.activate(new MouseEvent("click"), old.text);
   expect(activate).not.toHaveBeenCalled();
   expect(links(2)[0].range.end.y).toBe(3);
+});
+
+it("화면 범위의 안내는 자동 줄바꿈된 물리 줄 수와 관계없이 한 번씩만 찾는다", async () => {
+  const { s } = await setup(`  claude --resume ${id}\r\nplain\r\ncodex resume ${id}`, 24);
+  expect(findAgentResumeRanges(s.terminal, 1, 20)).toEqual([
+    { start: { x: 3, y: 1 }, end: { x: 6, y: 3 } },
+    { start: { x: 1, y: 5 }, end: { x: 1, y: 7 } },
+  ]);
+  expect(findAgentResumeRanges(s.terminal, 4, 4)).toEqual([]);
+  // 화면이 줄바꿈된 안내의 중간 행부터 시작해도 그 안내를 찾는다.
+  expect(findAgentResumeRanges(s.terminal, 2, 3)).toEqual([
+    { start: { x: 3, y: 1 }, end: { x: 6, y: 3 } },
+  ]);
 });

@@ -2650,7 +2650,8 @@
       .xterm-screen .xterm-decoration-top {
         pointer-events: none;
       }
-      .remote-path-link-decoration {
+      .remote-path-link-decoration,
+      .remote-resume-link-decoration {
         box-sizing: border-box;
         border-bottom: 1px solid currentColor;
         pointer-events: none;
