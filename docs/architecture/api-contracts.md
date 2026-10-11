@@ -2334,9 +2334,9 @@ PowerShell의 PSReadLine 통합은 [ADR-0262](../adr/0262-powershell-command-lif
 
 ### 종료·업데이트 진행 계약 (ADR-0264)
 
-`UpdateStatus.operation`은 idle/checking/downloading/preparing/installing이다. `preparation`은 nullable `{stage: checkpoint|interrupting|settling|caching, completed, total: number|null, warning: string|null}`이며 `exitSettings`는 설치 수락 시 저장된 종료 설정이다. idle 조회는 현재 저장된 종료 설정을 반환한다. Tauri `report_app_update_preparation(requestId,progress)`는 native request가 pending이고 update가 preparing일 때만 수락한다. 기존 Remote GET `/remote/v1/update`는 같은 진행 정보를 포함한 snapshot을 반환한다. 설치 요청은 기존 active controller lease를 유지한다.
+`UpdateStatus.operation`은 idle/checking/downloading/preparing/installing이다. `preparation`은 nullable `{stage: checkpoint|caching, completed, total: number|null, warning: string|null}`이다. 업데이트는 터미널을 인터럽트하지 않으므로 종료 설정(`exit`)을 싣지 않는다([ADR-0314](../adr/0314-update-never-interrupts-terminals.md)). Tauri `report_app_update_preparation(requestId,progress)`는 native request가 pending이고 update가 preparing일 때만 수락한다. 기존 Remote GET `/remote/v1/update`는 같은 진행 정보를 포함한 snapshot을 반환한다. 설치 요청은 기존 active controller lease를 유지한다.
 
-Dev POST `/api/v1/ui/lifecycle`는 `{action:"open"}`으로 실제 업데이트 모달을 열고, `{action:"close"}`로 preview를 해제한다. `{kind:"close"|"update",stage:"ready"|"downloading"|"checkpoint"|"interrupting"|"settling"|"caching"|"installing"|"closing",completed?,total?,cleanup?,error?}`는 지정한 진행 상태의 preview를 표시한다. 실제 정리나 설치를 수행하지 않고 동일한 컴포넌트를 렌더한다. Rust debug gate와 frontend DEV gate를 모두 적용한다.
+Dev POST `/api/v1/ui/lifecycle`는 `{action:"open"}`으로 실제 업데이트 모달을 열고, `{action:"close"}`로 preview를 해제한다. `{kind:"close"|"update",stage:"ready"|"downloading"|"checkpoint"|"interrupting"|"settling"|"caching"|"installing"|"closing",completed?,total?,cleanup?,error?}`는 지정한 진행 상태의 preview를 표시한다. `interrupting`·`settling`과 `cleanup`은 close에만 적용되며 update preview에 주면 거부한다. 실제 정리나 설치를 수행하지 않고 동일한 컴포넌트를 렌더한다. Rust debug gate와 frontend DEV gate를 모두 적용한다.
 
 Dev POST `/api/v1/dev/update-handoff`는 설치기 없이 업데이트 인계(ADR-0308)를 실행한다. `{mode:"installer"}`는 설치 직전 teardown(`release_installer_file_locks`)을 실행한 뒤 `process::exit(0)`으로 끝나고, `{mode:"restart"}`는 인계를 표시한 뒤 `app.restart()`를 부른다. 설치 뒤의 경로만 실행한다. 업데이트 checkpoint 저장과 입력 차단(`prepare`)은 실행하지 않으므로, 데몬 세션이 GUI보다 오래 사는지만 확인하고 checkpoint의 agent resume 판정은 확인하지 않는다. 응답(202) 직후 프로세스가 끝난다. release는 403이다.
 

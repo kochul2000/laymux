@@ -21,7 +21,7 @@ export async function previewLifecycle(params: Record<string, unknown>) {
     return { open: true };
   }
   const kind = params.kind === "close" ? "close" : "update";
-  const stage = typeof params.stage === "string" ? params.stage : "settling";
+  const stage = typeof params.stage === "string" ? params.stage : "caching";
   const stages = [
     "ready",
     "downloading",
@@ -33,7 +33,10 @@ export async function previewLifecycle(params: Record<string, unknown>) {
     "closing",
   ];
   if (!stages.includes(stage)) throw new Error("Unknown lifecycle stage");
-  const cleanup = params.cleanup !== false;
+  // Only an explicit close interrupts terminals (ADR-0314).
+  if (kind === "update" && (stage === "interrupting" || stage === "settling"))
+    throw new Error("An update has no terminal cleanup stage");
+  const cleanup = kind === "close" && params.cleanup !== false;
   const snapshot = await getAppUpdateStatus();
   useLifecycleStore.setState({
     open: true,
@@ -65,7 +68,6 @@ export async function previewLifecycle(params: Record<string, unknown>) {
             : stage === "installing"
               ? "installing"
               : "preparing",
-      exitSettings: { interruptTerminals: cleanup, interruptRounds: 3, settleMs: 700 },
     },
   });
   return { open: true, preview: true, kind, stage };

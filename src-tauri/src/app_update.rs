@@ -112,7 +112,6 @@ pub struct UpdateStatus {
     pub checked_at_ms: Option<u64>,
     pub last_error: Option<String>,
     pub preparation: Option<progress::ExitProgress>,
-    pub exit_settings: Option<progress::ExitPlan>,
     pub can_force_install: bool,
     pub force_install: bool,
 }
@@ -133,7 +132,6 @@ impl Default for UpdateStatus {
             checked_at_ms: None,
             last_error: None,
             preparation: None,
-            exit_settings: None,
             can_force_install: false,
             force_install: false,
         }
@@ -282,7 +280,6 @@ impl UpdateManager {
         status.force_install = force;
         status.operation = UpdateOperation::Downloading;
         status.preparation = None;
-        status.exit_settings = Some(crate::settings::load_settings().exit.into());
         status.downloaded_bytes = 0;
         status.total_bytes = None;
         status.last_error = None;
