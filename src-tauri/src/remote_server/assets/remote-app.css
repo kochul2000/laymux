@@ -3000,9 +3000,12 @@
         font-size: var(--fs-xs);
         font-weight: 600;
       }
+      /* A swipe that starts on a chip scrolls the Settings panel (or its
+         overflowing row sideways); only an active long-press drag claims the
+         touch (installChipDrag). */
       .layout-chip {
         position: relative;
-        touch-action: none;
+        touch-action: pan-x pan-y;
         cursor: grab;
       }
       .layout-chip.dragging {

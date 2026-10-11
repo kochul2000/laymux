@@ -12649,6 +12649,17 @@ import {
             }
           };
 
+          // The chip lets the browser pan so a swipe that starts on it scrolls
+          // Settings or its overflowing row. Once the long press has armed a drag, the
+          // first move must not start that pan: it would cancel the pointer
+          // mid-drag. Pointer preventDefault cannot stop a browser pan.
+          chip.addEventListener(
+            "touchmove",
+            (event) => {
+              if (gesture?.active && event.cancelable) event.preventDefault();
+            },
+            { passive: false }
+          );
           chip.addEventListener("pointerup", (event) => finishDrag(event, true));
           chip.addEventListener("pointercancel", (event) => finishDrag(event, false));
           chip.addEventListener("click", (event) => {
