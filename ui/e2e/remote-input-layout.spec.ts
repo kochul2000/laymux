@@ -867,6 +867,8 @@ test.describe("Remote input action layout touch", () => {
     }));
     await touchPath(page, path, { holdMs: 300 });
 
-    await expect(page.locator(`#inputAvailableKeys [data-layout-action="${actionId}"]`)).toHaveCount(0);
+    await expect(
+      page.locator(`#inputAvailableKeys [data-layout-action="${actionId}"]`),
+    ).toHaveCount(0);
   });
 });
