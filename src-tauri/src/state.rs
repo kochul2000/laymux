@@ -212,6 +212,7 @@ pub struct AppState {
     /// without a bridge round trip (ADR-0291). Owns its own mutex and joins no
     /// ordering above: nothing acquires it while holding another AppState lock.
     pub file_viewer_signal: crate::remote_server::FileViewerSignalMirror,
+    pub localhost_preview: crate::remote_server::PreviewState,
 }
 
 /// Process-global per-terminal write/exec serialization table. See
@@ -397,6 +398,7 @@ impl AppState {
             )),
             session_checkpoint: crate::session_checkpoint::SessionCheckpointRuntime::default(),
             file_viewer_signal: crate::remote_server::FileViewerSignalMirror::default(),
+            localhost_preview: crate::remote_server::PreviewState::default(),
         }
     }
 }

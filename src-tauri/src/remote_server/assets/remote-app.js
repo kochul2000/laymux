@@ -1,6 +1,7 @@
 import { createRemoteUpdateDialog } from "../../../../ui/src/remote/remote-update-dialog.js";
 import { createRemoteSettingsBridge } from "../../../../ui/src/remote/remote-settings-mcp.js";
 import { createRemoteMemo } from "../../../../ui/src/remote/remote-memo.js";
+import { createLocalhostPreview, localhostPreviewUrl } from "../../../../ui/src/remote/localhost-preview.js";
 import {
   DEFAULT_REMOTE_KEYBOARD_SETTINGS, REMOTE_NAV_MODIFIERS, REMOTE_NAV_TARGETS,
   normalizeRemoteNavigationModifiers, readPhysicalKeyboardConnected,
@@ -338,6 +339,7 @@ import {
         const REMOTE_LONG_TEXT_ATTACHMENT_THRESHOLD_BYTES = 5 * 1024;
         const attachmentTextEncoder = new TextEncoder();
         let leaseId = null;
+        const localhostPreview = createLocalhostPreview({api:remoteFetch, getLease:() => leaseId, isAndroid:() => androidE2eMode});
         const headerIconFields = {
           headerFiles: "Files", headerGithub: "GitHub", headerMemo: "Memo",
           headerSpatialExclusion: "Pane navigation exclusion", headerDesktopMode: "PC mode",
@@ -4807,6 +4809,10 @@ import {
           try {
             const url = new URL(uri);
             if (url.protocol !== "http:" && url.protocol !== "https:") return;
+            if (leaseId && localhostPreviewUrl(url.href)) {
+              localhostPreview.open(url);
+              return;
+            }
             // An installed-app OAuth link redirects to the *desktop's*
             // loopback listener; opened plainly from this device the code
             // would land on the phone's localhost and die. Route it through
@@ -7588,6 +7594,7 @@ import {
         // (ADR-0149, ADR-0219). Keep the hierarchy in this PC-served document
         // and expose only a boolean consumed/not-consumed boundary to native.
         function dismissTopRemoteLayer() {
+          if (localhostPreview.isOpen()) { localhostPreview.close(); return true; }
           if (!sharedFilesScrim.hidden) {
             cancelSharedFileOffer();
             return true;
@@ -7633,6 +7640,7 @@ import {
         }
 
         window.laymuxRemoteUi = Object.freeze({
+          onLocalhostPreviewClosed: () => localhostPreview.close(),
           dismissTopLayer: dismissTopRemoteLayer,
           offerSharedFiles,
           takeSharedFileSelection,
@@ -13688,6 +13696,7 @@ import {
           // reconnect would skip its own return trip (issue #561). The stashed resume
           // capability above is what lets the reclaim follow the release drain.
           leaseId = null;
+          localhostPreview.close();
           resetComposerStars();
         }
 
@@ -13726,6 +13735,7 @@ import {
           leaseId = null;
           resetComposerStars();
           if (androidE2eMode) window.LaymuxNative.setRemoteLease(null);
+          localhostPreview.close();
           fileViewerToken = null;
           closeFileViewer();
           setActiveTerminal(null);
