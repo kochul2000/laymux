@@ -28,10 +28,7 @@ vi.mock("@/lib/tauri-api", () => ({
   }),
   acknowledgeSessionCheckpoint: vi.fn().mockResolvedValue(undefined),
   onAppUpdateStatusChanged: vi.fn().mockResolvedValue(() => {}),
-  getAppUpdateStatus: vi.fn().mockResolvedValue({
-    operation: "preparing",
-    exitSettings: { interruptTerminals: true, interruptRounds: 2, settleMs: 500 },
-  }),
+
   reportAppUpdatePreparation: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -42,6 +39,7 @@ vi.mock("@/lib/persist-session", () => ({
     coverage: [],
   }),
   prepareTerminalExit: vi.fn().mockResolvedValue(undefined),
+  cacheTerminalOutputs: vi.fn().mockResolvedValue(undefined),
   setPreparingUpdate: vi.fn(),
   markSessionCheckpointMutation: vi.fn(),
   persistSession: vi.fn().mockResolvedValue(undefined),
@@ -57,6 +55,7 @@ import {
 import {
   flushSessionCheckpoint,
   prepareTerminalExit,
+  cacheTerminalOutputs,
   setPreparingUpdate,
   markSessionCheckpointMutation,
   persistSession,
@@ -139,7 +138,7 @@ describe("useSessionCheckpointLifecycle", () => {
       "saved-receipt",
     );
     expect(flushSessionCheckpoint).not.toHaveBeenCalled();
-    expect(prepareTerminalExit).toHaveBeenCalledOnce();
+    expect(cacheTerminalOutputs).toHaveBeenCalledOnce();
     vi.mocked(getReusableSessionCheckpointCommit).mockReturnValue(undefined);
   });
 
@@ -154,7 +153,7 @@ describe("useSessionCheckpointLifecycle", () => {
       expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(29, undefined, message),
     );
     expect(flushSessionCheckpoint).not.toHaveBeenCalled();
-    expect(prepareTerminalExit).not.toHaveBeenCalled();
+    expect(cacheTerminalOutputs).not.toHaveBeenCalled();
     expect(setPreparingUpdate).toHaveBeenLastCalledWith(false);
   });
 
@@ -348,9 +347,9 @@ describe("useSessionCheckpointLifecycle", () => {
   });
 });
 
-it("does not ACK success until task cleanup and history saving finish", async () => {
+it("does not ACK success until terminal history saving finishes", async () => {
   let finish!: () => void;
-  vi.mocked(prepareTerminalExit).mockImplementationOnce(
+  vi.mocked(cacheTerminalOutputs).mockImplementationOnce(
     () =>
       new Promise<void>((resolve) => {
         finish = resolve;
@@ -362,17 +361,24 @@ it("does not ACK success until task cleanup and history saving finish", async ()
   nativeListener?.({ requestId: 91, reason: "update", requireConclusive: true });
   await vi.waitFor(() => expect(finish).toBeDefined());
   expect(setPreparingUpdate).toHaveBeenCalledWith(true);
-  expect(prepareTerminalExit).toHaveBeenLastCalledWith(expect.any(Function), {
-    interruptTerminals: true,
-    interruptRounds: 2,
-    settleMs: 500,
-  });
+  expect(cacheTerminalOutputs).toHaveBeenLastCalledWith(expect.any(Function));
   expect(acknowledgeSessionCheckpoint).not.toHaveBeenCalled();
   finish();
   await vi.waitFor(() => expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(91, 17));
 });
+// The PTY daemon keeps every session across an update (ADR-0308), so the
+// explicit-exit Ctrl+C would only break the work the update preserves.
+it("never interrupts terminals for an update, even with exit cleanup on", async () => {
+  vi.mocked(acknowledgeSessionCheckpoint).mockClear();
+  renderHook(() => useSessionCheckpointLifecycle(true));
+  await vi.waitFor(() => expect(nativeListener).toBeDefined());
+  nativeListener?.({ requestId: 93, reason: "update", requireConclusive: true });
+  await vi.waitFor(() => expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(93, 17));
+  expect(prepareTerminalExit).not.toHaveBeenCalled();
+  expect(cacheTerminalOutputs).toHaveBeenCalled();
+});
 it("rejects installation when output preparation fails", async () => {
-  vi.mocked(prepareTerminalExit).mockRejectedValueOnce(new Error("cache failed"));
+  vi.mocked(cacheTerminalOutputs).mockRejectedValueOnce(new Error("cache failed"));
   renderHook(() => useSessionCheckpointLifecycle(true));
   await vi.waitFor(() => expect(nativeListener).toBeDefined());
   nativeListener?.({ requestId: 92, reason: "update", requireConclusive: true });

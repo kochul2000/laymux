@@ -111,11 +111,8 @@ export async function runInterruptTerminals(deps: RunInterruptDeps): Promise<num
 }
 
 /** Production entry point: read live settings + terminals and run the interrupt. */
-export async function interruptTerminalsOnExit(
-  report?: ProgressReporter,
-  settings?: Partial<ExitSettings>,
-): Promise<void> {
-  const config = resolveExitInterrupt(settings ?? useSettingsStore.getState().exit);
+export async function interruptTerminalsOnExit(report?: ProgressReporter): Promise<void> {
+  const config = resolveExitInterrupt(useSettingsStore.getState().exit);
   if (!config.enabled) return;
   try {
     await runInterruptTerminals({

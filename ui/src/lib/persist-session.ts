@@ -12,7 +12,6 @@ import {
 import { interruptTerminalsOnExit } from "@/lib/interrupt-terminals-on-exit";
 import { isSettingsWriteBlocked } from "@/lib/settings-write-guard";
 import type { ProgressReporter } from "@/lib/lifecycle-progress";
-import type { ExitSettings } from "@/lib/tauri-api";
 import { withCodexStatusCheckpoint } from "@/lib/codex-status-probe";
 import { captureSessionReceipt, commitSessionReceipt } from "./session-checkpoint-receipt";
 import { saveLocalSession } from "./local-session";
@@ -407,12 +406,20 @@ export async function saveBeforeClose(report?: ProgressReporter): Promise<void> 
   }
 }
 
-/** Shared post-checkpoint preparation; never recollect attribution after Ctrl+C. */
-export async function prepareTerminalExit(
-  report?: ProgressReporter,
-  exit?: Partial<ExitSettings>,
-): Promise<void> {
-  await interruptTerminalsOnExit(report, exit);
+/**
+ * Explicit-exit preparation after the checkpoint: the optional Ctrl+C
+ * cleanup, then the history cache. Never recollect attribution after Ctrl+C.
+ * An update must not use this: the PTY daemon keeps every session across the
+ * restart (ADR-0308), so interrupting would end the work the update
+ * preserves (ADR-0314). It caches history with `cacheTerminalOutputs` only.
+ */
+export async function prepareTerminalExit(report?: ProgressReporter): Promise<void> {
+  await interruptTerminalsOnExit(report);
+  await cacheTerminalOutputs(report);
+}
+
+/** Serialize and cache every terminal's history for the next launch. */
+export async function cacheTerminalOutputs(report?: ProgressReporter): Promise<void> {
   await report?.({ stage: "caching", completed: 0, total: null });
 
   // When settings had a parse error, don't overwrite the user's original file with defaults.

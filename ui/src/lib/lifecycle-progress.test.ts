@@ -3,12 +3,23 @@ import { lifecycleSteps, progressPercent } from "./lifecycle-progress";
 
 describe("lifecycle progress", () => {
   it("skips optional cleanup without skipping durable restore or output saving", () => {
-    expect(lifecycleSteps("close", false)).toEqual(["checkpoint", "caching", "closing"]);
-    expect(lifecycleSteps("update", true)).toEqual([
-      "downloading",
+    expect(lifecycleSteps("close")).toEqual(["checkpoint", "caching", "closing"]);
+    expect(lifecycleSteps("close", { cleanup: true })).toEqual([
       "checkpoint",
       "interrupting",
       "caching",
+      "closing",
+    ]);
+  });
+  it("never interrupts terminals for an update (ADR-0314)", () => {
+    expect(lifecycleSteps("update", { cleanup: true })).toEqual([
+      "downloading",
+      "checkpoint",
+      "caching",
+      "installing",
+    ]);
+    expect(lifecycleSteps("update", { skipPreparation: true })).toEqual([
+      "downloading",
       "installing",
     ]);
   });

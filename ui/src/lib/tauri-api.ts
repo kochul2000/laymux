@@ -2090,7 +2090,6 @@ export interface AppUpdateStatus {
   canForceInstall?: boolean;
   forceInstall?: boolean;
   preparation?: import("./lifecycle-progress").ExitProgress | null;
-  exitSettings?: ExitSettings | null;
   enabled: boolean;
   /** Release channel the backend used for the last check (ADR-0190). */
   channel: AppUpdateChannel;

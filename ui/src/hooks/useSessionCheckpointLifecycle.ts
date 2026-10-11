@@ -3,7 +3,6 @@ import { useEffect } from "react";
 import {
   acknowledgeSessionCheckpoint,
   onSessionCheckpointRequested,
-  getAppUpdateStatus,
   onAppUpdateStatusChanged,
   reportAppUpdatePreparation,
 } from "@/lib/tauri-api";
@@ -11,7 +10,7 @@ import {
   flushSessionCheckpoint,
   markSessionCheckpointMutation,
   persistSession,
-  prepareTerminalExit,
+  cacheTerminalOutputs,
   setPreparingUpdate,
   getReusableSessionCheckpointCommit,
 } from "@/lib/persist-session";
@@ -93,11 +92,12 @@ export function useSessionCheckpointLifecycle(ready: boolean): void {
           if (request.reason === "update") {
             if (cancelled) throw new Error("update preparation listener cancelled");
             setPreparingUpdate(true);
-            const status = await getAppUpdateStatus();
-            await prepareTerminalExit(async (progress) => {
+            // Never the explicit-exit Ctrl+C: the PTY daemon keeps every
+            // session across the restart (ADR-0308, ADR-0314).
+            await cacheTerminalOutputs(async (progress) => {
               if (cancelled) throw new Error("update preparation listener cancelled");
               await reportAppUpdatePreparation(request.requestId, progress);
-            }, status.exitSettings ?? undefined);
+            });
           }
           if (
             request.reason === "eviction" &&

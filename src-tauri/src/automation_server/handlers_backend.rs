@@ -359,7 +359,7 @@ pub async fn api_docs() -> impl IntoResponse {
             {
                 "method": "POST", "path": "/api/v1/ui/lifecycle",
                 "description": "Dev-only lifecycle dialog preview. Never interrupts tasks or installs updates. Release returns 403.",
-                "body": { "action": "open | close (optional)", "kind": "close | update", "stage": "ready | downloading | checkpoint | interrupting | settling | caching | installing | closing", "completed": "number (optional)", "total": "number (optional)", "cleanup": "boolean (optional)" }
+                "body": { "action": "open | close (optional)", "kind": "close | update", "stage": "ready | downloading | checkpoint | interrupting | settling | caching | installing | closing (interrupting and settling are close-only)", "completed": "number (optional)", "total": "number (optional)", "cleanup": "boolean (optional)" }
             },
             {
                 "method": "POST", "path": "/api/v1/dev/update-handoff",

@@ -18,7 +18,6 @@ test("pane 확인 실패 뒤 손실 강행은 명시적 force 설치 요청을 �
       downloadedBytes: 100,
       totalBytes: 100,
       preparation: { stage: "checkpoint", completed: 0, total: null },
-      exitSettings: { interruptTerminals: true, interruptRounds: 3, settleMs: 700 },
     };
     const original = host.__TAURI_INTERNALS__.invoke;
     host.__TAURI_INTERNALS__.invoke = async (cmd, args) => {

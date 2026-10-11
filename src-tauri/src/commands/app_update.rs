@@ -8,7 +8,7 @@ use crate::state::AppState;
 
 #[tauri::command]
 pub fn get_app_update_status(state: State<'_, Arc<AppState>>) -> Result<UpdateStatus, String> {
-    state.app_update.status_with_settings()
+    state.app_update.snapshot()
 }
 
 #[tauri::command]

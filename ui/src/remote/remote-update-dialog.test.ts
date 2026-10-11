@@ -17,9 +17,28 @@ const status = {
   currentVersion: "1.0.0",
   availableVersion: "1.1.0",
   operation: "idle",
-  exitSettings: { interruptTerminals: true },
 };
 describe("Remote update dialog", () => {
+  it("says terminals keep running and never lists a cleanup step for an update", () => {
+    const modal = createRemoteUpdateDialog({
+      check: vi.fn(),
+      install: vi.fn(),
+      getCanInstall: () => true,
+    });
+    modal.update(status);
+    modal.open();
+    expect(document.body.textContent).toContain(
+      "Terminal sessions keep running through the update",
+    );
+    modal.update({
+      ...status,
+      operation: "preparing",
+      preparation: { stage: "caching", completed: 1, total: 2 },
+    });
+    expect(document.body.textContent).not.toContain("Clean up terminal tasks");
+    expect(document.querySelectorAll(".lifecycle-step")).toHaveLength(4);
+    modal.destroy();
+  });
   it("does not mark skipped preparation as complete after a forced install", () => {
     const modal = createRemoteUpdateDialog({
       check: vi.fn(),
