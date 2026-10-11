@@ -787,6 +787,7 @@
         --fs-md: var(--remote-menu-font-size);
         --count-badge-base: calc(var(--remote-menu-font-size) * 10 / 13);
         font-size: var(--remote-menu-font-size);
+        container: navigation-panel / inline-size;
         position: absolute;
         inset: 0 auto 0 0;
         z-index: 20;
@@ -2600,6 +2601,18 @@
           padding-right: 1px;
           padding-left: 1px;
         }
+        .app > header .desktop-mode-button {
+          width: 24px;
+          min-width: 24px;
+          padding-right: 0;
+          padding-left: 0;
+          font-size: var(--fs-xs);
+        }
+      }
+      /* The drawer compacts on its own width, not the viewport's: a narrow
+         Menu width setting needs it as much as a narrow phone does. Below
+         240px the full-size action row no longer fits (ADR-0313). */
+      @container navigation-panel (max-width: 239px) {
         .drawer-header {
           padding-right: 1px;
           padding-left: 1px;
@@ -2619,13 +2632,13 @@
           min-width: 0;
         }
         .drawer-header-button,
-        .desktop-mode-button {
+        .drawer-header .desktop-mode-button {
           width: 24px;
           min-width: 24px;
           padding-right: 0;
           padding-left: 0;
         }
-        .desktop-mode-button {
+        .drawer-header .desktop-mode-button {
           font-size: var(--fs-xs);
         }
       }

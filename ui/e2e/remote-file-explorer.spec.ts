@@ -910,6 +910,9 @@ test("every Remote toolbar shares one row height, control size and icon size", a
 
   await page.locator("#navToggle").click();
   await expect(page.locator(".app")).toHaveClass(/nav-open/);
+  await page.waitForFunction(
+    () => document.querySelector(".navigation-panel")!.getAnimations().length === 0,
+  );
   await expectToolbar(".drawer-header");
   await page.locator("#navScrim").evaluate((button: HTMLButtonElement) => button.click());
   await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
@@ -927,3 +930,41 @@ test("every Remote toolbar shares one row height, control size and icon size", a
   await expect(page.locator("#memoToolbar")).toBeVisible();
   await expectToolbar("#memoToolbar");
 });
+
+for (const { viewport, menuWidth } of [
+  { viewport: 250, menuWidth: null },
+  { viewport: 390, menuWidth: "200px" },
+]) {
+  test(`the drawer header keeps every action in one row at drawer width ${menuWidth ?? `viewport ${viewport}`}`, async ({
+    context,
+    page,
+  }) => {
+    await installRemoteExplorerMocks(context, true);
+    await page.setViewportSize({ width: viewport, height: 640 });
+    await connectRemote(page, true);
+    if (menuWidth) {
+      await page.evaluate(
+        (width) => document.documentElement.style.setProperty("--remote-navigation-width", width),
+        menuWidth,
+      );
+    }
+    await page.locator("#navToggle").click();
+    await expect(page.locator(".app")).toHaveClass(/nav-open/);
+    await page.waitForFunction(
+      () => document.querySelector(".navigation-panel")!.getAnimations().length === 0,
+    );
+
+    // The widest row: the local app's PC action plus the hidden-workspace entry.
+    const fit = await page.evaluate(() => {
+      document.getElementById("hiddenWorkspaceToggle")!.hidden = false;
+      const header = document.querySelector<HTMLElement>(".drawer-header")!;
+      const settings = document.getElementById("drawerSettingsButton")!.getBoundingClientRect();
+      return {
+        overflow: header.scrollWidth - header.clientWidth,
+        settingsInside: settings.right <= header.getBoundingClientRect().right,
+        height: header.getBoundingClientRect().height,
+      };
+    });
+    expect(fit).toEqual({ overflow: 0, settingsInside: true, height: 40 });
+  });
+}
