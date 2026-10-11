@@ -100,4 +100,8 @@ it("화면 범위의 안내는 자동 줄바꿈된 물리 줄 수와 관계없�
     { start: { x: 1, y: 5 }, end: { x: 1, y: 7 } },
   ]);
   expect(findAgentResumeRanges(s.terminal, 4, 4)).toEqual([]);
+  // 화면이 줄바꿈된 안내의 중간 행부터 시작해도 그 안내를 찾는다.
+  expect(findAgentResumeRanges(s.terminal, 2, 3)).toEqual([
+    { start: { x: 3, y: 1 }, end: { x: 6, y: 3 } },
+  ]);
 });

@@ -178,6 +178,8 @@ async function showResumeHintAndTap(page: Page, output: WebSocketRoute, hint: st
         .includes(hint.slice(0, 24)),
     hint,
   );
+  // The tap lands on the persistent underline, which must not swallow it.
+  await expect(page.locator("#terminal .remote-resume-link-decoration")).not.toHaveCount(0);
   const rect = (await page.locator("#terminal .xterm-screen").boundingBox())!;
   const geometry = await page.evaluate(() => {
     const terminal = (window as unknown as { resumeTerminal: { cols: number; rows: number } })
@@ -280,4 +282,28 @@ test("a visible resume hint stays underlined without hover, wrapped rows include
   // Overwritten output retires the underline.
   await sendDelta(output, seq, "\x1b[2J\x1b[H$ ");
   await expect(underlines).toHaveCount(0);
+});
+
+// A reconnect resets xterm and replays the same snapshot onto the same rows:
+// the reset drops every decoration while the old buffer's markers survive.
+test("a hint replayed onto the same rows after a reset keeps its underline", async ({ page }) => {
+  const { output } = await openResumeRemote(page);
+  const underlines = page.locator("#terminal .remote-resume-link-decoration");
+  const screen =
+    "\x1b[2J\x1b[H^C\r\nResume this session with:\r\n  claude --resume 11111111-2222-4333-8444-555555555555\r\n$ ";
+  await sendDelta(output, 0, screen);
+  await expect(underlines).not.toHaveCount(0);
+  await page.waitForTimeout(100);
+  const shown = await underlines.count();
+
+  await page.evaluate((screen) => {
+    const terminal = (
+      window as unknown as { resumeTerminal: { reset: () => void; write: (data: string) => void } }
+    ).resumeTerminal;
+    terminal.reset();
+    terminal.write(screen);
+  }, screen);
+
+  await page.waitForTimeout(300);
+  await expect(underlines).toHaveCount(shown);
 });

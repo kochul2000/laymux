@@ -66,13 +66,18 @@ interface Underline {
 
 /**
  * ADR-0316: 터치에는 hover가 없으므로 보이는 복원 안내에 밑줄을 상시 둔다.
- * 출력·스크롤·크기 변경 뒤 화면을 다시 읽고, 같은 셀의 밑줄은 유지한다.
+ * 출력·스크롤·크기 변경 뒤 화면을 다시 읽고, 같은 셀의 살아 있는 밑줄은 유지한다.
  */
 export function installAgentResumeUnderlines(terminal: Terminal, className: string) {
   let underlines: Underline[] = [];
   let frame = 0;
   const refresh = () => {
     frame = 0;
+    // A synchronized-output frame may blank rows it is about to redraw.
+    if (terminal.modes.synchronizedOutputMode) {
+      schedule();
+      return;
+    }
     const buffer = terminal.buffer.active;
     const segments =
       buffer.type === "normal"
@@ -92,8 +97,10 @@ export function installAgentResumeUnderlines(terminal: Terminal, className: stri
     const previous = underlines;
     underlines = [];
     for (const segment of segments) {
+      // reset() disposes decorations but leaves the old buffer markers alive.
       const reused = previous.findIndex(
         (underline) =>
+          !underline.decoration.isDisposed &&
           !underline.marker.isDisposed &&
           underline.marker.line === segment.line &&
           underline.x === segment.x &&
