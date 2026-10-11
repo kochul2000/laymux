@@ -178,6 +178,8 @@ async function showResumeHintAndTap(page: Page, output: WebSocketRoute, hint: st
         .includes(hint.slice(0, 24)),
     hint,
   );
+  // The tap lands on the persistent underline, which must not swallow it.
+  await expect(page.locator("#terminal .remote-resume-link-decoration")).not.toHaveCount(0);
   const rect = (await page.locator("#terminal .xterm-screen").boundingBox())!;
   const geometry = await page.evaluate(() => {
     const terminal = (window as unknown as { resumeTerminal: { cols: number; rows: number } })
@@ -223,4 +225,104 @@ test("a hint tapped while the host still runs the agent is not typed into it", a
   await expect.poll(() => navigationReads.count).toBeGreaterThan(readsBeforeTap);
   await page.waitForTimeout(300);
   expect(submissions).toEqual([]);
+});
+
+async function sendDelta(output: WebSocketRoute, seq: number, text: string) {
+  const payload = Buffer.from(text);
+  output.send(
+    JSON.stringify({
+      type: "terminal.output",
+      version: 1,
+      phase: "delta",
+      seqStart: seq,
+      seqEnd: seq + payload.length,
+      byteLength: payload.length,
+    }),
+  );
+  output.send(payload);
+  return seq + payload.length;
+}
+
+// Touch has no hover, so the xterm hover underline never shows on a phone.
+// A visible hint keeps its underline without any pointer over it.
+test("a visible resume hint stays underlined without hover, wrapped rows included", async ({
+  page,
+}) => {
+  const { output } = await openResumeRemote(page);
+  const id = "11111111-2222-4333-8444-555555555555";
+  const underlines = page.locator("#terminal .remote-resume-link-decoration");
+  const geometry = await page.evaluate(() => {
+    const terminal = (window as unknown as { resumeTerminal: { cols: number } }).resumeTerminal;
+    return { cols: terminal.cols };
+  });
+  // Indent the hint so it wraps onto a second row at this pane width.
+  const indent = " ".repeat(Math.max(2, geometry.cols - 20));
+  const hint = `claude --resume ${id}`;
+  const seq = await sendDelta(
+    output,
+    0,
+    `\x1b[2J\x1b[H^C\r\nResume this session with:\r\n${indent}${hint}\r\n$ `,
+  );
+
+  await expect(underlines).toHaveCount(2);
+  const [first, second] = await underlines.evaluateAll((elements) =>
+    elements
+      .map((element) => element.getBoundingClientRect())
+      .sort((a, b) => a.top - b.top)
+      .map((rect) => ({ left: rect.left, top: rect.top, width: rect.width })),
+  );
+  const screen = (await page.locator("#terminal .xterm-screen").boundingBox())!;
+  const cell = screen.width / geometry.cols;
+  expect(first.left).toBeCloseTo(screen.x + indent.length * cell, 0);
+  expect(first.width).toBeCloseTo((geometry.cols - indent.length) * cell, 0);
+  expect(second.top).toBeGreaterThan(first.top);
+  expect(second.left).toBeCloseTo(screen.x, 0);
+  expect(first.width + second.width).toBeCloseTo(hint.length * cell, 0);
+
+  // Overwritten output retires the underline.
+  await sendDelta(output, seq, "\x1b[2J\x1b[H$ ");
+  await expect(underlines).toHaveCount(0);
+});
+
+// A reconnect resets xterm and replays the same snapshot onto the same rows:
+// the reset drops every decoration while the old buffer's markers survive.
+test("a hint replayed onto the same rows after a reset keeps its underline", async ({ page }) => {
+  const { output } = await openResumeRemote(page);
+  const underlines = page.locator("#terminal .remote-resume-link-decoration");
+  const screen =
+    "\x1b[2J\x1b[H^C\r\nResume this session with:\r\n  claude --resume 11111111-2222-4333-8444-555555555555\r\n$ ";
+  await sendDelta(output, 0, screen);
+  await expect(underlines).not.toHaveCount(0);
+  await page.waitForTimeout(100);
+  const shown = await underlines.count();
+
+  await page.evaluate((screen) => {
+    const terminal = (
+      window as unknown as { resumeTerminal: { reset: () => void; write: (data: string) => void } }
+    ).resumeTerminal;
+    terminal.reset();
+    terminal.write(screen);
+  }, screen);
+
+  await page.waitForTimeout(300);
+  await expect(underlines).toHaveCount(shown);
+});
+
+// An agent TUI on the alternate buffer hides the shell hint until it exits.
+test("the alternate buffer hides hint underlines until it exits", async ({ page }) => {
+  const { output } = await openResumeRemote(page);
+  const underlines = page.locator("#terminal .remote-resume-link-decoration");
+  let seq = await sendDelta(
+    output,
+    0,
+    "\x1b[2J\x1b[H^C\r\nResume this session with:\r\n  claude --resume 11111111-2222-4333-8444-555555555555\r\n$ ",
+  );
+  await expect(underlines).not.toHaveCount(0);
+  const shown = await underlines.count();
+
+  seq = await sendDelta(output, seq, "\x1b[?1049h\x1b[2J\x1b[Hagent");
+  await expect(underlines).toHaveCount(0);
+
+  await sendDelta(output, seq, "\x1b[?1049l");
+  await expect(underlines).toHaveCount(shown);
 });

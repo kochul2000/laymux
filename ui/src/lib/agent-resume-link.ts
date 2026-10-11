@@ -67,6 +67,21 @@ function readHint(terminal: Terminal, bufferLine: number) {
   return null;
 }
 
+/** 화면 줄 범위에서 보이는 안내의 셀 범위를 논리 줄마다 한 번씩만 읽어 돌려준다. */
+export function findAgentResumeRanges(terminal: Terminal, firstLine: number, lastLine: number) {
+  const ranges = new Map<string, NonNullable<ReturnType<typeof readHint>>["range"]>();
+  const buffer = terminal.buffer.active;
+  for (let line = firstLine; line <= lastLine; line++) {
+    // A wrapped row belongs to the logical line read from its first row.
+    if (line > firstLine && buffer.getLine(line - 1)?.isWrapped) continue;
+    const found = readHint(terminal, line);
+    if (!found) continue;
+    const { start, end } = found.range;
+    ranges.set(`${start.x}:${start.y}:${end.x}:${end.y}`, found.range);
+  }
+  return [...ranges.values()];
+}
+
 export function createAgentResumeLinkProvider(
   terminal: Terminal,
   onResume: (hint: AgentResumeHint, isCurrent: () => boolean) => void,
