@@ -6722,7 +6722,6 @@ import {
                 leaseId,
                 outputEpoch: terminalOutputGeneration,
                 ready: composerReady && terminalReplayDepth === 0 && navMovePending === 0 && socket?.readyState === 1,
-                isShell: activeTerminalContext()?.info.activity?.type === "shell" && !activeTerminalContext()?.info.commandRunning,
               }),
               run: (task) => {
                 flushPendingInput();
