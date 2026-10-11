@@ -4,7 +4,6 @@ mod validation;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{sync::Weak, time::Instant};
 
 #[cfg(test)]
 pub(crate) use state::test_output_cipher_pair;
@@ -34,14 +33,13 @@ pub(crate) const ESTABLISH_RESPONSE_DOMAIN: &[u8] = b"laymux.android-e2e.establi
 /// Non-secret authority snapshot attached only to a successful sensitive
 /// inner response. It never crosses the Android E2E wire; the session cache
 /// uses it to decide whether the exact ciphertext may be replayed (ADR-0208).
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct AndroidE2eReplayGuard {
     lease_id: String,
     owner_epoch: u64,
     capability_generation: u64,
     instance_id: String,
     session_id: String,
-    resource_lifetime: Option<(Weak<()>, Instant)>,
 }
 
 impl AndroidE2eReplayGuard {
@@ -58,27 +56,7 @@ impl AndroidE2eReplayGuard {
             capability_generation,
             instance_id,
             session_id,
-            resource_lifetime: None,
         }
-    }
-
-    pub(crate) fn with_resource_lifetime(mut self, lifetime: Weak<()>, deadline: Instant) -> Self {
-        self.resource_lifetime = Some((lifetime, deadline));
-        self
-    }
-
-    pub(crate) fn matches_current(&self, current: &Self) -> bool {
-        self.lease_id == current.lease_id
-            && self.owner_epoch == current.owner_epoch
-            && self.capability_generation == current.capability_generation
-            && self.instance_id == current.instance_id
-            && self.session_id == current.session_id
-            && self
-                .resource_lifetime
-                .as_ref()
-                .is_none_or(|(lifetime, deadline)| {
-                    Instant::now() < *deadline && lifetime.upgrade().is_some()
-                })
     }
 }
 

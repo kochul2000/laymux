@@ -1,7 +1,6 @@
 import { createRemoteUpdateDialog } from "../../../../ui/src/remote/remote-update-dialog.js";
 import { createRemoteSettingsBridge } from "../../../../ui/src/remote/remote-settings-mcp.js";
 import { createRemoteMemo } from "../../../../ui/src/remote/remote-memo.js";
-import { createLocalhostPreview, localhostPreviewUrl } from "../../../../ui/src/remote/localhost-preview.js";
 import { createWorkspaceManager } from "../../../../ui/src/remote/remote-workspace-manager.js";
 import {
   DEFAULT_REMOTE_KEYBOARD_SETTINGS, REMOTE_NAV_MODIFIERS, REMOTE_NAV_TARGETS,
@@ -341,15 +340,6 @@ import {
         const REMOTE_LONG_TEXT_ATTACHMENT_THRESHOLD_BYTES = 5 * 1024;
         const attachmentTextEncoder = new TextEncoder();
         let leaseId = null;
-        const localhostPreview = createLocalhostPreview({
-          api: (path, options) => {
-            const body = JSON.parse(options.body);
-            return fileViewerFetch(path, { ...options, body, leaseId: body.leaseId });
-          },
-          getLease: () => leaseId,
-          getToken: () => fileViewerToken,
-          isAndroid: () => androidE2eMode,
-        });
         const workspaceManager = createWorkspaceManager({
           getLease: () => leaseId,
           rename: async (id, name, selectedLeaseId) => {
@@ -4858,10 +4848,6 @@ import {
           try {
             const url = new URL(uri);
             if (url.protocol !== "http:" && url.protocol !== "https:") return;
-            if (leaseId && localhostPreviewUrl(url.href)) {
-              localhostPreview.open(url);
-              return;
-            }
             // An installed-app OAuth link redirects to the *desktop's*
             // loopback listener; opened plainly from this device the code
             // would land on the phone's localhost and die. Route it through
@@ -7685,7 +7671,6 @@ import {
         // and expose only a boolean consumed/not-consumed boundary to native.
         function dismissTopRemoteLayer() {
           if (workspaceManager.isOpen()) { workspaceManager.close(); return true; }
-          if (localhostPreview.isOpen()) { localhostPreview.close(); return true; }
           if (!sharedFilesScrim.hidden) {
             cancelSharedFileOffer();
             return true;
@@ -7731,7 +7716,6 @@ import {
         }
 
         window.laymuxRemoteUi = Object.freeze({
-          onLocalhostPreviewClosed: () => localhostPreview.close(),
           dismissTopLayer: dismissTopRemoteLayer,
           offerSharedFiles,
           takeSharedFileSelection,
@@ -13828,7 +13812,6 @@ import {
           // capability above is what lets the reclaim follow the release drain.
           leaseId = null;
           workspaceManager.close();
-          localhostPreview.close();
           resetComposerStars();
         }
 
@@ -13867,7 +13850,6 @@ import {
           leaseId = null;
           resetComposerStars();
           if (androidE2eMode) window.LaymuxNative.setRemoteLease(null);
-          localhostPreview.close();
           fileViewerToken = null;
           closeFileViewer();
           setActiveTerminal(null);

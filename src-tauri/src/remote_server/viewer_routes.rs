@@ -71,8 +71,7 @@ pub(super) struct FileViewerListRequest {
     lease_id: Option<String>,
 }
 
-#[derive(Clone)]
-pub(super) enum FileViewerAuthorization {
+enum FileViewerAuthorization {
     Browser {
         lease_id: String,
         capability: String,
@@ -84,34 +83,6 @@ pub(super) enum FileViewerAuthorization {
 }
 
 impl FileViewerAuthorization {
-    pub(super) fn lease_id(&self) -> &str {
-        match self {
-            Self::Browser { lease_id, .. } => lease_id,
-            Self::AndroidE2e { proof, .. } => proof.lease_id(),
-        }
-    }
-
-    #[allow(clippy::result_large_err)]
-    pub(super) fn revalidate(
-        &self,
-        app: &AppState,
-    ) -> Result<Option<crate::android_e2e::AndroidE2eReplayGuard>, Response> {
-        match self {
-            Self::Browser {
-                lease_id,
-                capability,
-            } => {
-                require_file_viewer_capability(app, Some(lease_id), Some(capability))?;
-                Ok(None)
-            }
-            Self::AndroidE2e {
-                proof,
-                replay_guard,
-            } => require_android_e2e_file_viewer_capability(app, proof, None, Some(replay_guard))
-                .map(Some),
-        }
-    }
-
     fn max_bytes(&self) -> usize {
         match self {
             Self::Browser { .. } => MAX_REMOTE_FILE_VIEWER_BYTES,
@@ -277,7 +248,7 @@ pub(super) async fn remote_file_viewer_list(
 }
 
 #[allow(clippy::result_large_err)] // Axum handlers return this Response directly.
-pub(super) fn file_viewer_authorization(
+fn file_viewer_authorization(
     app_state: &AppState,
     body_lease_id: Option<&str>,
     header_lease_id: Option<&str>,
@@ -307,7 +278,7 @@ pub(super) fn file_viewer_authorization(
     })
 }
 
-pub(super) fn file_viewer_capability_from_headers(headers: &HeaderMap) -> Option<&str> {
+fn file_viewer_capability_from_headers(headers: &HeaderMap) -> Option<&str> {
     headers
         .get(REMOTE_FILE_VIEWER_CAPABILITY_HEADER)
         .and_then(|value| value.to_str().ok())
@@ -460,9 +431,30 @@ fn file_viewer_bridge_result(
     authorization: &FileViewerAuthorization,
     result: Result<Value, (StatusCode, Json<Value>)>,
 ) -> Response {
-    let replay_guard = match authorization.revalidate(app_state) {
-        Ok(guard) => guard,
-        Err(response) => return no_store(response),
+    let replay_guard = match authorization {
+        FileViewerAuthorization::Browser {
+            lease_id,
+            capability,
+        } => {
+            if let Err(response) =
+                require_file_viewer_capability(app_state, Some(lease_id), Some(capability))
+            {
+                return no_store(response);
+            }
+            None
+        }
+        FileViewerAuthorization::AndroidE2e {
+            proof,
+            replay_guard,
+        } => match require_android_e2e_file_viewer_capability(
+            app_state,
+            proof,
+            None,
+            Some(replay_guard),
+        ) {
+            Ok(current_guard) => Some(current_guard),
+            Err(response) => return no_store(response),
+        },
     };
 
     let response = match result {

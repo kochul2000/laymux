@@ -54,10 +54,6 @@ pub(super) struct AndroidE2eFileViewerProof {
 }
 
 impl AndroidE2eFileViewerProof {
-    pub(super) fn lease_id(&self) -> &str {
-        &self.lease_id
-    }
-
     pub(super) fn new(
         context: AndroidE2eRequestContext,
         lease_id: String,
@@ -1319,7 +1315,7 @@ pub(super) fn require_android_e2e_file_viewer_capability(
         tag.instance_id,
         tag.session_id,
     );
-    if expected_guard.is_some_and(|expected| !expected.matches_current(&guard)) {
+    if expected_guard.is_some_and(|expected| expected != &guard) {
         return Err(forbidden());
     }
     Ok(guard)

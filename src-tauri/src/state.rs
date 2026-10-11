@@ -220,7 +220,6 @@ pub struct AppState {
     /// without a bridge round trip (ADR-0291). Owns its own mutex and joins no
     /// ordering above: nothing acquires it while holding another AppState lock.
     pub file_viewer_signal: crate::remote_server::FileViewerSignalMirror,
-    pub localhost_preview: crate::remote_server::PreviewState,
 }
 
 /// Process-global per-terminal write/exec serialization table. See
@@ -408,7 +407,6 @@ impl AppState {
             pty_daemon_adoption_seen: Mutex::new(std::collections::HashSet::new()),
             pty_daemon_update_handoff: std::sync::atomic::AtomicBool::new(false),
             file_viewer_signal: crate::remote_server::FileViewerSignalMirror::default(),
-            localhost_preview: crate::remote_server::PreviewState::default(),
         }
     }
 }
