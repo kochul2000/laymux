@@ -94,6 +94,8 @@ describe("Remote 복원 링크 입력", () => {
   // state read at tap time decides.
   it("로컬 스냅샷이 아니라 탭 시점의 호스트 상태로 셸 여부를 판정한다", async () => {
     const s = setup();
+    // A stale local snapshot field must not be consulted.
+    s.update({ isShell: false } as Partial<{ ready: boolean }>);
     s.activate();
     await vi.waitFor(() => expect(s.submit).toHaveBeenCalledTimes(1));
     expect(s.loadCommands).toHaveBeenCalledTimes(1);

@@ -303,7 +303,7 @@ ADR 이 필요한 대표 기준:
 | [0283](0283-opt-in-hook-task-state.md) | 훅 상태는 현재 대화 귀속을 검증한 뒤 선택적으로 사용한다 | Superseded by 0284 |
 | [0284](0284-codex-title-hook-binding.md) | Codex 공유 서버의 훅은 현재 TUI 제목의 대화 식별자로 연결한다 | Accepted |
 | [0285](0285-readable-agent-hook-commands.md) | 훅 명령은 읽을 수 있는 형태로 설치하고 변경 개수를 먼저 안내한다 | Accepted |
-| [0286](0286-clickable-agent-resume-hints.md) | 종료 안내의 복원 링크는 설정 명령으로 같은 셸에서 수동 실행한다 | Proposed (partially superseded by [0315](0315-remote-resume-shell-state-from-host.md)) |
+| [0286](0286-clickable-agent-resume-hints.md) | 종료 안내의 복원 링크는 설정 명령으로 같은 셸에서 수동 실행한다 | Accepted (partially superseded by [0315](0315-remote-resume-shell-state-from-host.md)) |
 | [0287](0287-wsl-claude-daemon-process-role.md) | WSL Claude daemon은 대화 프로세스 후보에서 제외한다 | Accepted |
 | [0288](0288-path-link-home-and-hangul-tail.md) | path-link 는 `~` 를 pane 셸의 홈으로 풀고 경로에 붙은 한글 조사를 뗀 후보를 함께 낸다 (0148·0188·0191·0235 확장) | Accepted |
 | [0289](0289-agent-hook-update-notification.md) | 설치된 에이전트 훅의 갱신 필요를 자동 검사하고 사용자 동작으로 갱신한다 | Accepted |

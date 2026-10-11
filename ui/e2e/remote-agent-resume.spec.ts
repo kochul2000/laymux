@@ -11,6 +11,7 @@ async function openResumeRemote(
 ) {
   let output: WebSocketRoute | undefined;
   const submissions: Array<{ text: string; submit: boolean; leaseId: string }> = [];
+  const navigationReads = { count: 0 };
   await page.addInitScript(() => {
     let Constructor: unknown;
     Object.defineProperty(window, "Terminal", {
@@ -32,6 +33,7 @@ async function openResumeRemote(
     if (url.pathname.endsWith("/session/claim")) {
       await route.fulfill({ json: { leaseId: "lease-1", heartbeatTimeoutSeconds: 45 } });
     } else if (url.pathname.endsWith("/navigation")) {
+      navigationReads.count += 1;
       await route.fulfill({
         json: {
           terminals: [
@@ -89,7 +91,7 @@ async function openResumeRemote(
   );
   output!.send(Buffer.alloc(0));
   await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
-  return { output: output!, submissions };
+  return { output: output!, submissions, navigationReads };
 }
 
 test("동일 좌표의 연속 터치가 최신 복원 안내와 호스트 옵션을 제출한다", async ({ page }) => {
@@ -213,9 +215,12 @@ test("a hint left after the agent exits resumes although the loaded snapshot sti
 
 test("a hint tapped while the host still runs the agent is not typed into it", async ({ page }) => {
   const host = { activity: { type: "interactiveApp", name: "Claude" }, commandRunning: true };
-  const { output, submissions } = await openResumeRemote(page, host);
+  const { output, submissions, navigationReads } = await openResumeRemote(page, host);
+  const readsBeforeTap = navigationReads.count;
   await showResumeHintAndTap(page, output, "claude --resume 11111111-2222-4333-8444-555555555555");
 
-  await page.waitForTimeout(500);
+  // The tap reached the link and asked the host, which refused it.
+  await expect.poll(() => navigationReads.count).toBeGreaterThan(readsBeforeTap);
+  await page.waitForTimeout(300);
   expect(submissions).toEqual([]);
 });
