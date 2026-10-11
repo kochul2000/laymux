@@ -1,0 +1,1 @@
+default-src 'none'; script-src 'self' blob: 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline' blob:; img-src blob: data:; media-src blob:; connect-src blob:; worker-src 'none'; base-uri 'none'; object-src 'none'; form-action 'none'; sandbox allow-scripts allow-pointer-lock; frame-ancestors 'self' __APP_FRAME_ANCESTORS__

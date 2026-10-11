@@ -29,6 +29,9 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import com.laymux.android.web.LocalhostPreviewView
+import com.laymux.android.web.LocalhostPreviewPolicy
+import com.laymux.android.web.LocalhostPreviewTransport
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -216,6 +219,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     @Volatile private var remoteOpeningSession: RemoteSession? = null
     @Volatile private var remoteConnecting = false
     @Volatile private var remoteLeaseId: String? = null
+    @Volatile private var localhostPreviewView: LocalhostPreviewView? = null
     private var oauthRelay: OauthLoopbackRelay? = null
     private var oauthRelayDocumentGeneration: Long? = null
     private var pendingOauthCallback: PendingOauthCallback? = null
@@ -506,6 +510,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     private fun dismissRemoteLayerOrGuardDisconnect() {
+        if (localhostPreviewView != null) { closeLocalhostPreview(); return }
         remoteBackGuard.onNativeLoadingOverlayBackPressed(
             visible = remoteLoadingOverlay.visibility == View.VISIBLE,
         )?.let { action ->
@@ -1198,7 +1203,9 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     fun setRemoteLease(documentGeneration: Long, leaseId: String?) {
         if (!remoteBridgeActionsEnabled(documentGeneration)) return
-        remoteLeaseId = leaseId?.takeIf { it.isNotBlank() }
+        val next = leaseId?.takeIf { it.isNotBlank() }
+        if (remoteLeaseId != next) runOnUiThread { closeLocalhostPreview() }
+        remoteLeaseId = next
     }
 
     /**
@@ -2486,6 +2493,42 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         }
     }
 
+    fun openLocalhostPreview(documentGeneration: Long, sessionId: String, url: String, leaseId: String, fileViewerToken: String) {
+        if (!remoteBridgeActionsEnabled(documentGeneration) || remoteLeaseId != leaseId) return
+        if (fileViewerToken.isBlank() || fileViewerToken.length > 128) return
+        val startUrl = LocalhostPreviewPolicy.startUrl(sessionId, url) ?: return
+        val session = remoteSession ?: return
+        runOnUiThread {
+            if (!remoteBridgeActionsEnabled(documentGeneration) || remoteLeaseId != leaseId || remoteSession !== session) return@runOnUiThread
+            closeLocalhostPreview(notify = false)
+            val transport = LocalhostPreviewTransport(sessionId, leaseId, fileViewerToken,
+                current = { remoteBridgeActionsEnabled(documentGeneration) && remoteLifecycleActive &&
+                    remoteSession === session && remoteLeaseId == leaseId && localhostPreviewView?.sessionId == sessionId },
+                request = { path, body ->
+                    val response = e2eRemoteClient.rpc(session, remoteHttpRequestPlaintext("POST", path, body.toString()))
+                    check(response.getInt("status") in 200..299) { "PC web preview request failed" }
+                    response.getJSONObject("body")
+                },
+            )
+            val preview = LocalhostPreviewView(this, sessionId, startUrl, url,
+                load = { path -> remoteExecutor.submit<com.laymux.android.web.PreviewResource> { transport.read(path) }.get(120, TimeUnit.SECONDS) },
+                close = { closeLocalhostPreview() },
+            )
+            localhostPreviewView = preview
+            root.addView(preview, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        }
+    }
+
+    private fun closeLocalhostPreview(notify: Boolean = true) {
+        val preview = localhostPreviewView ?: return
+        localhostPreviewView = null
+        root.removeView(preview)
+        preview.destroy()
+        if (notify && ::webView.isInitialized) {
+            webView.evaluateJavascript("window.laymuxRemoteUi?.onLocalhostPreviewClosed?.()", null)
+        }
+    }
+
     fun requestRemoteHttp(
         documentGeneration: Long,
         requestId: String,
@@ -2968,6 +3011,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     private fun closeRemoteSession() {
+        runOnUiThread { closeLocalhostPreview() }
         remoteConnectionGeneration.incrementAndGet()
         remoteHttpRequests.clear()
         remoteHttpResumeTracker.clear()
@@ -3309,6 +3353,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     override fun onStart() {
         super.onStart()
+        localhostPreviewView?.webView?.onResume()
         remoteLifecycleActive = true
         // Activity Result can run before the asynchronous E2E foreground resume.
         attachmentPicker.setReady(remoteSession == null && visibleWebSurface != VisibleWebSurface.REMOTE)
@@ -3355,6 +3400,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     override fun onStop() {
+        localhostPreviewView?.webView?.onPause()
         if (::webView.isInitialized && visibleWebSurface == VisibleWebSurface.REMOTE) {
             webView.evaluateJavascript("window.laymuxAndroidE2e?.onNativeBackground?.()", null)
         }

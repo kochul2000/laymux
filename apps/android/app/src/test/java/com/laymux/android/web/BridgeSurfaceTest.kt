@@ -19,6 +19,7 @@ class BridgeSurfaceTest {
                 "cancelSharedFiles",
                 "disconnectRemote",
                 "openExternalUrl",
+                "openLocalhostPreview",
                 "openRemoteFile",
                 "saveRemoteFile",
                 "supportsOutputHistoryBudget",
@@ -26,6 +27,11 @@ class BridgeSurfaceTest {
             ),
             javascriptMethods(RemoteBridge::class.java),
         )
+    }
+
+    @Test
+    fun webPreviewExposesNoNativeJavascriptCapabilities() {
+        assertEquals(emptySet<String>(), javascriptMethods(LocalhostPreviewView::class.java))
     }
 
     @Test
