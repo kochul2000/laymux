@@ -829,8 +829,20 @@ test("a native edge flick does not swallow the next pane-row tap", async ({ cont
   await connectRemote(page, true);
   await expect(page.locator("#terminal .xterm")).toBeVisible();
 
+  // Timing-independent guard: the surface must cancel every native touchmove,
+  // so no browser fling can start however slow the run is.
+  await page.evaluate(() => {
+    const seen: boolean[] = [];
+    (window as unknown as { touchMovePrevented: boolean[] }).touchMovePrevented = seen;
+    window.addEventListener("touchmove", (event) => seen.push(event.defaultPrevented));
+  });
   await flickSurface(page, "#terminal", 120, "left");
   await expect(page.locator(".app")).toHaveClass(/nav-open/);
+  const prevented = await page.evaluate(
+    () => (window as unknown as { touchMovePrevented: boolean[] }).touchMovePrevented,
+  );
+  expect(prevented.length).toBeGreaterThan(0);
+  expect(prevented.every(Boolean)).toBe(true);
 
   // A browser fling left behind by the flick turns the next tap into a
   // fling-cancel: pointer events arrive but no click, so the menu stays open.
