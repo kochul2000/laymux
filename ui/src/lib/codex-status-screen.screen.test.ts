@@ -7,6 +7,33 @@ import { isCodexStatusCommandSelected } from "./codex-status-probe";
 import type { TerminalBufferDump } from "./terminal-serialize-registry";
 
 describe("Codex repeated status screen", () => {
+  it("keeps the complete 0.160.1 background-server card from the reproduced dev timeout", async () => {
+    const fixture = JSON.parse(
+      readFileSync(
+        resolve(
+          process.cwd(),
+          "../src-tauri/src/commands/codex_session/status_probe/fixtures/native-1601-server-render-checkpoint.json",
+        ),
+        "utf8",
+      ),
+    );
+    const surface = createScreenTerminal(fixture.screen.geometry);
+    try {
+      await surface.write(fixture.screen.data);
+      const buffer = surface.terminal.buffer.active;
+      const lines = Array.from(
+        { length: buffer.length },
+        (_, i) => buffer.getLine(i)?.translateToString(true) ?? "",
+      );
+      const response = lines.slice(lines.lastIndexOf("/status") + 1).join("\n");
+      expect(response).toContain("Server:");
+      expect(response).toContain("Local background server");
+      expect(response).toContain(fixture.id);
+      expect(response).toContain("› Ask Codex to do anything");
+    } finally {
+      surface.dispose();
+    }
+  });
   it.each(["native", "wsl"])(
     "captures unchanged Session cells after the real %s differential response",
     async (host) => {

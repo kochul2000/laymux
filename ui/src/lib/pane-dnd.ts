@@ -30,3 +30,19 @@ export function getPaneDragData(e: React.DragEvent): string | null {
 export function isPaneDrag(e: React.DragEvent): boolean {
   return e.dataTransfer.types?.includes(PANE_DND_MIME) ?? false;
 }
+
+/**
+ * Dragging one stacked layer (a pane stack tab, ADR-0297). Dropped on a tab it
+ * reorders or moves to that position; dropped on another slot it joins that
+ * slot's stack.
+ */
+export const LAYER_DND_MIME = "application/x-laymux-layer";
+
+export function setLayerDragData(e: React.DragEvent, layerId: string): void {
+  e.dataTransfer.setData(LAYER_DND_MIME, layerId);
+  e.dataTransfer.effectAllowed = "move";
+}
+
+export function getLayerDragData(e: React.DragEvent): string | null {
+  return e.dataTransfer.getData(LAYER_DND_MIME) || null;
+}

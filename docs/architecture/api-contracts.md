@@ -13,15 +13,36 @@
 
 새 PC 설정의 `controlBar.defaultMode`는 `pinned`이고, 기본 Dock은 왼쪽 WorkspaceSelectorView와 오른쪽 MemoView / FileExplorerView / GitHubView(위부터 높이 1/3씩)다. 위·아래 Dock은 숨긴다. 이 기본 구성은 Rust `Settings::default()`와 프론트 store에 일치시키며, 기존에 저장된 컨트롤 바 모드·pane 오버라이드·Dock 배치는 그대로 적용한다. 새 값은 신규 또는 생략된 설정에만 적용한다([ADR-0265](../adr/0265-pc-remote-first-use-defaults.md)).
 
+`paneStack.cycleOnBlockedArrow`(기본 `true`)는 `Alt+Arrow` 방향에 Pane 도 보이는 Dock 도 없을 때 포커스 슬롯의 스택 레이어를 넘길지 정한다. Settings → 인터페이스 → Pane 스택에서 끄고 켠다([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)). 워크스페이스 pane 은 스택이면 `{ id, x, y, w, h, layers: [{ id, view }], activeLayerId }` 로, 아니면 기존 `{ id, x, y, w, h, view }` 축약형으로 저장된다.
+
+### 저장 경계와 로컬 상태 API
+
+[ADR-0299](../adr/0299-portable-settings-and-local-sqlite-state.md)에 따라 디스크 `settings.json`과 IPC/Automation의 유효 `Settings`를 구분한다. JSON에는 이식 가능한 구성만 저장한다. PC 환경과 실제 workspace/dock/pane·CWD·대화 ID·복원할 파일은 로컬 SQLite가 소유하며 `load_settings[_validated]`는 두 저장 계층을 합성한다. `save_settings`·settings patch는 구성/PC 환경만 저장하며 열린 세션을 교체하지 않는다. 설정 초기화도 로컬 세션 행을 보존한다.
+
+환경 영역은 `remote`, provider `command`, `paneClear.shellCommand`, `paste.imageDir`, `issueReporter.shell`, usage `configDirs`, `fileExplorer.extensionViewers`, `terminal.composerStarredEntries`, 프로필 `commandLine/startupCommand/startingDirectory`다. 프로필 환경은 논리 이름으로 결합하고 중복 이름은 거절한다. 템플릿 viewConfig는 type/profile/cwdSend/cwdReceive만 portable이며 다른 로컬 설정은 layout ID·pane index·portable pane fingerprint에 결합한다. 대화 ID·Fresh marker는 템플릿 저장에서 제외하고 lastCwd는 로컬 환경에만 보존한다. 다른 PC에서 환경이 없는 프로필은 현재 OS 기본 셸로 시작한다.
+
+JSON이 없어도 일반 설정 변경은 기본 portable 구성과 기존 DB를 합성한 뒤 적용한다. frontend 구성 저장도 DB의 최신 backend 소유 cloud identity와 Composer 즐겨찾기를 보존한다. JSON 부재를 로컬 환경 초기화로 해석하지 않는다.
+
+- `save_session_checkpoint(snapshot)` → `{revision, needsRetry, unresolvedTerminalIds, snapshot}`. snapshot에는 workspaces/docks/workspaceDisplayOrder/coverage/lookup 실패 플래그/uiState만 허용한다. DB가 실제 저장한 snapshot을 반환하며 Unknown과 쓰기 성공을 분리한다. 성공한 부분 commit은 호출 주체와 무관하게 native 재시도 worker를 깨운다.
+- `load_session_checkpoint()` → 로컬 snapshot 또는 null. 환경 설정과 사용자 구성은 포함하지 않는다.
+- `export_portable_settings()`, `GET /api/v1/settings/export`, MCP `export_settings` → portable 구성. REST/MCP envelope는 `{settings}`다. 기존 Settings 조회/patch는 로컬 유효 모델이며 이식용 export와 다르다.
+- DB 로드 실패는 `SettingsLoadResult{status:"parse_error",storageKind:"localState",settingsPath,error,...}`다. 원본 DB를 유지하고 startup/background/close 쓰기를 차단한다. DB 오류 모달에는 설정 초기화 버튼을 노출하지 않는다. `localUiState`는 유효 모델의 read-only 복원 필드이고 JSON에는 없다.
+
+settings와 DB를 아우르는 원자적 구성 transaction은 없다. 계층별 실패를 호출자에 반환한다. 로더는 DB를 읽기 전용으로 열며 조회만으로 DB를 만들지 않는다. DB 쓰기는 main thread 밖에서 수행한다. settings write gate 뒤 초기 연결 gate를 취할 수 있지만 DB 초기화/transaction은 AppState 락을 획득하지 않는다. 테스트는 APPDATA/LOCALAPPDATA 또는 HOME/XDG_STATE_HOME을 모두 임시 경로에 격리한다. 기존 혼합 JSON의 수동 처리와 검증 절차는 [검증 문서](../local-state-sqlite-validation.md)에 있다.
+
 ### Codex 종료 확인
 
-훅 우선 모드에서는 [ADR-0292](../adr/0292-codex-hook-lifecycle-session-proof.md)와 [ADR-0294](../adr/0294-codex-process-bound-lifecycle-proof.md)에 따라 현재 TUI와 저장소에 연결된 훅 ID 또는 정확한 프로세스 진단 ID로 먼저 종료 복원점을 확인한다. 활성 훅 설치와 최상위 rollout/Fresh를 검증하며, 프로세스 진단 ID는 훅 수신과 제목 설정을 요구하지 않지만 현재 세대의 유효한 제목이 다른 ID면 거부한다. Codex는 시작 훅을 다음 요청까지 미루므로 resume 직후에도 프로세스 증거를 사용한다. 해당 pane은 `begin_codex_status_checkpoint`의 입력 대상 목록에서 제외하지만 토큰의 검증 대상에는 유지한다. I/O 후와 저장 시점에 동일 증거 종류의 대화 선택·프로세스·PTY 세대·제목 snapshot·설치·rollout을 재검증하며 프로세스 선택 소실을 제목 증거로 대체하지 않는다. 작업 phase의 만료는 대화 메타데이터의 만료가 아니다. 두 증거가 없거나 훅 제거·비활성·읽기 실패 또는 휴리스틱 모드이면 아래 `/status` 절차를 사용한다.
+[ADR-0296](../adr/0296-committed-checkpoint-reuse-on-finalization.md)의 내부 IPC `capture_session_checkpoint_receipt`/`commit_session_checkpoint_receipt(token,coverage,checkpointRevision)`는 검증·저장 성공과 같은 runtime snapshot을 연결한다. `begin_codex_status_checkpoint(updateRequestId?,committedReceiptToken?)`는 fence/drain 후 변경 없는 receipt이면 입력 대상 없이 `reusedCheckpoint:true`를 반환한다. frontend는 해당 성공 commit을 재사용하고 terminal 기록 정리를 계속한다. 토큰·파일·입력·제목·catalog·frontend revision 변화는 기존 검증으로 fallback한다. Automation/Remote에 receipt 등록 API를 노출하지 않는다.
+
+공유 서버의 resume 직후 새 훅·TUI 진단이 없어도, 해당 PTY generation에 실제 전달한 검증된 resume ID와 현재 live OSC 제목·최상위 rollout이 일치하면 현재 대화를 확인한다. 일반 입력 이후에는 미소비 요청의 RestorePending 유예를 재사용하지 않고 이 세 증거를 요구한다. 제목 부재와 파일 검증 실패는 Unknown, 다른 대화 제목은 이전 resume 후보를 거부한다. 따라서 재기동 뒤 대화가 보이는데도 일반 저장이 복원 ID를 지우는 현상을 막는다.
+
+훅 우선 모드에서는 [ADR-0316](../adr/0295-codex-continuous-conversation-checkpoint.md)에 따라 일반 자동 저장과 종료 확인이 같은 Codex 대화 귀속을 사용한다. 실제 TUI 프로세스가 선택한 정확한 ID 또는 같은 저장소·배포판의 live OSC 제목과 유일하게 연결된 훅 ID를 검증한다. 프로세스 선택과 현재 제목이 충돌하면 Unknown이다. 훅 ID는 정확한 최상위 rollout을 요구하며 파일 부재를 Fresh로 합성하지 않는다. 프로세스 진단 ID는 시작 훅·제목 설정 없이도 사용할 수 있다. 이미 확인된 대화는 설치 helper의 현재 상태와 독립적이다. `begin_codex_status_checkpoint`는 검증한 pane을 입력 대상에서 제외하되 토큰에 보관하고, 저장 시 현재 선택·프로세스 incarnation·PTY 세대·제목·rollout을 다시 확인한다. 전체 조회는 pane마다 중첩하지 않고 batch로 공유한다. 작업 phase 만료는 대화 메타데이터 만료가 아니다. 현재 증거가 없거나 휴리스틱 모드이면 아래 `/status` 절차를 사용한다. 훅 수신과 제목 변경은 500ms 동안 합치는 일반 checkpoint 힌트이며 별도 ID 저장 경로를 만들지 않는다.
 
 종료·업데이트 확인 실패 뒤 사용자가 손실을 감수하는 예외는 [ADR-0279](../adr/0279-lifecycle-explicit-loss-override.md)를 따른다. update snapshot의 `canForceInstall: boolean`은 준비 실패 후 한 번의 강행 가능 여부다. `install_app_update(force?: boolean)`와 `POST /api/v1/update/install`, `POST /remote/v1/update/install`의 선택 JSON `force`는 기본 false이며, true는 이 권한이 있는 같은 채널·후보에만 허용한다. Remote는 기존 `leaseId`/header 제어권 검사를 그대로 적용한다. 강행은 frontend 준비만 생략하고 다운로드·서명·입력 drain·설치기 정리를 유지한다. 새 확인과 설치 수락은 권한을 지우며 dev 설치 금지는 유지한다. Automation은 body 없는 기존 설치 요청도 허용한다.
 
 수락한 설치의 `forceInstall: boolean`은 다운로드·준비·설치 snapshot에 유지된다. PC와 Remote는 true일 때 생략한 저장·작업 정리 단계를 완료로 표시하지 않고, 목록에서 제외하고 생략 사실을 안내한다. 새 확인 또는 일반 설치 수락은 false로 되돌린다. dev preview의 `force?: boolean`도 이 표시를 검증하며 실제 설치는 수행하지 않는다.
 
-`codex.verifySessionOnExit`는 기본 true인 종료·업데이트 전용 세션 확인 설정이다([ADR-0270](../adr/0270-codex-status-checkpoint-probe.md)). `/status` fallback은 미전송 텍스트를 삭제하며 기본 Codex 편집 키와 대기 중 텍스트 composer를 요구한다. `begin_codex_status_checkpoint(updateRequestId?)`가 반환한 토큰에만 `codex_status_checkpoint_input(dismiss? | clear | typeStatus | submit)`, `read_codex_status_checkpoint(screen)`, `complete_codex_status_checkpoint`, `finish_codex_status_checkpoint`를 허용한다. submit은 제출 직전 `TerminalRenderCheckpointTarget`을 반환하고 다른 입력 단계는 null을 반환한다. read는 기존 xterm provider가 직렬화한 현재 viewport(`TerminalRenderCheckpoint`)를 받으며 generation·현재 출력 sequence·geometry와 마지막 카드의 완결성을 검증한다. 기존 테두리 카드와 Codex 0.160의 테두리 없는 카드를 지원하며, 후자는 헤더·순서가 일치하는 Model/Directory/Permissions/Collaboration mode/Session 필드와 알려진 status 행을 요구한다([ADR-0278](../adr/0278-codex-status-current-screen.md)). backend는 generation·프로세스·native update 요청·기한과 단계 순서를 검증한다. 임의 바이트 입력이나 상시 귀속 조회 API가 아니며 Automation·Remote raw write의 fence를 우회시키지 않는다. `cancel_app_close`는 준비 실패 후 사용자가 종료 취소를 선택했을 때 앱 종료 예약을 해제한다. 완료 IPC는 저장 후 기한과 fence 소유권을 다시 확인한다. 성공한 일반 종료는 창 파괴까지 입력 차단을 유지하고 terminal close 정리만 허용하며, 실패·종료 취소는 차단을 해제한다.
+`codex.verifySessionOnExit`는 기본 true인 종료·업데이트 전용 세션 확인 설정이다([ADR-0270](../adr/0270-codex-status-checkpoint-probe.md)). `/status` fallback은 미전송 텍스트를 삭제하며 기본 Codex 편집 키와 대기 중 텍스트 composer를 요구한다. `begin_codex_status_checkpoint(updateRequestId?)`가 반환한 토큰에만 `codex_status_checkpoint_input(dismiss? | clear | typeStatus | submit)`, `read_codex_status_checkpoint(screen)`, `complete_codex_status_checkpoint`, `finish_codex_status_checkpoint`를 허용한다. submit은 제출 직전 `TerminalRenderCheckpointTarget`을 반환하고 다른 입력 단계는 null을 반환한다. read는 기존 xterm provider가 직렬화한 현재 viewport(`TerminalRenderCheckpoint`)를 받으며 generation·현재 출력 sequence·geometry와 마지막 카드의 완결성을 검증한다. 기존 테두리 카드와 Codex 0.160의 테두리 없는 카드를 지원하며, 후자는 현재 응답 헤더와 유일한 Session/Session ID 전체 UUID를 요구하고 부가 필드 추가·누락·순서 변경은 허용한다([ADR-0278](../adr/0278-codex-status-current-screen.md)). backend는 generation·프로세스·native update 요청·기한과 단계 순서를 검증한다. 임의 바이트 입력이나 상시 귀속 조회 API가 아니며 Automation·Remote raw write의 fence를 우회시키지 않는다. `cancel_app_close`는 준비 실패 후 사용자가 종료 취소를 선택했을 때 앱 종료 예약을 해제한다. 완료 IPC는 저장 후 기한과 fence 소유권을 다시 확인한다. 성공한 일반 종료는 창 파괴까지 입력 차단을 유지하고 terminal close 정리만 허용하며, 실패·종료 취소는 차단을 해제한다.
 
 ### 다국어(i18n) — 언어 설정
 
@@ -128,6 +149,18 @@ native 셸은 `CommandBuilder::env`/`env_remove`, WSL은 같은 mutation의 rcfi
 ```
 
 `terminal.parserAdmission`은 앱 전역 xterm parser admission turn 을 **pane 단위가 아니라 클래스 단위**로 나누는 비율이다([ADR-0101](../adr/0101-active-workspace-weighted-parser-admission.md)). 세 값은 상대값이고 합이 한 admission cycle 이므로 기본값 `5/3/2`는 focused 50%, 활성 workspace 의 나머지 visible 30%, hidden 전체 20%를 뜻한다. 클래스 안에서는 pane 들이 round-robin 으로 돌아가므로 hidden pane 이 3개든 300개든 활성 workspace 몫은 변하지 않는다.
+
+### PTY 데몬 유예 시간
+
+```jsonc
+{
+  "terminal": {
+    "ptyDaemonGraceMinutes": 10 // GUI가 없을 때 데몬이 터미널을 유지하는 시간(분, 1~1440)
+  }
+}
+```
+
+**Settings UI 는 없다** — settings.json 직접 편집 전용 값이다([ADR-0312](../adr/0312-pty-daemon-grace-without-gui.md)). PTY 데몬은 GUI 연결이 하나도 없는 상태가 이 시간 동안 이어지면 터미널을 모두 끝내고 종료한다. 업데이트 설치와 새 GUI 기동을 넘길 시간이다. `validate_settings` 가 범위 밖 값을 `/terminal/ptyDaemonGraceMinutes` 로 `out_of_range` 보고하고, 실행 경로는 범위 안으로 clamp 한다. 적용 시점은 **nextUse** 다 — GUI는 터미널을 만들 때 값을 읽어 각 데몬의 presence 연결로 다시 알린다.
 
 **Settings UI 는 없다** — settings.json 직접 편집 전용 튜닝 값이다. 각 값의 유효 범위는 `1..=1000`이고 `validate_settings`가 범위를 벗어난 값을 `/terminal/parserAdmission/<field>` 경로로 보고한다. `0`은 그 클래스의 parser 를 멈추는 뜻이 되므로 허용하지 않으며, Rust `ParserAdmissionSettings::sanitized()`와 프론트엔드 `sanitizeTerminalWriteClassShare()`가 같은 범위로 clamp 한다. 기본값·범위 상수는 Rust `constants.rs`(`PARSER_ADMISSION_*`)와 `terminal-write-fair-scheduler.ts`(`TERMINAL_WRITE_DEFAULT_CLASS_SHARE`, `TERMINAL_WRITE_MIN_CLASS_SHARE`, `TERMINAL_WRITE_MAX_CLASS_SHARE`)에 각각 한 곳씩 있다.
 
@@ -341,6 +374,8 @@ Remote도 같은 프로세스 전역 snapshot registry와 action allowlist를 �
 
 Remote header는 File Explorer 옆에 GitHub 버튼을 두고 연결된 active terminal의 CWD로 overlay를 연다. Issues/PRs, 수동 새로고침, 링크·브랜치 복사와 데스크톱과 같은 두 단계 확인 action을 제공한다. 우측 가장자리 스와이프 대상은 기기 로컬 `localStorage["laymux.remote.rightSwipeView"]`(`"files" | "github" | "memo"`, 기본 `"files"`)가 정하고 Remote Settings → Panels와 Remote settings MCP가 함께 편집한다. 터미널의 좌측 가장자리 제스처는 계속 workspace menu를 연다. 열린 도구 안에서는 왼쪽이 표시·사용 가능한 Issues → PRs → Files → Memo 순환이며, 오른쪽은 `toolSwipeRightAction`의 기본 닫기 또는 역순 순환이다([ADR-0261](../adr/0261-remote-visible-tool-swipe-cycle.md)).
 
+Remote의 툴바(앱 최상단 헤더, workspace drawer 헤더, 파일 뷰어·GitHub·메모 헤더)는 `--toolbar-height` 40px(아래 테두리 포함), `--toolbar-control-size` 32px, `--toolbar-icon-size` 16px, `--toolbar-padding-x` 6px, `--toolbar-gap` 4px를 공유한다. 페이지의 모든 `<header>`와 `.drawer-header`가 한 규칙으로 행 기하와 툴바 버튼 아이콘 크기를 소유하고, 아이콘 버튼은 정사각형, 텍스트 버튼은 같은 높이에 폭만 내용에 맞춘다. 앱 헤더는 viewport 240px 이하에서, drawer 헤더는 `.navigation-panel` container 폭 240px 미만에서 제목을 숨기고 control을 24px로 압축해 모든 action을 한 행에 둔다. 사용자 배율을 가진 입력 행과 플로팅 컨트롤은 이 토큰을 따르지 않는다([ADR-0313](../adr/0313-remote-toolbar-shared-size-tokens.md)).
+
 ### Direct Remote Mode 설정
 
 브라우저 원격 접속은 명시적 opt-in 설정이다. 기본값은 꺼짐이며, remote API는 Automation API/MCP의 IP allowlist와 별도 인증/Origin/IP 정책을 사용한다([ADR-0013](../adr/0013-direct-remote-mode.md)).
@@ -510,6 +545,8 @@ html/markdown preview는 별도 문서(iframe)라 부모 페이지의 CSS를 상
 
 ### Claude Code 설정
 
+훅 갱신 검사의 20초 예산은 WSL 배포판 열거부터 공유한다. 각 WSL helper 호출의 제한은 8초와 남은 검사 예산 중 작은 값이며, 읽기 전용 `status`의 I/O 시간 초과만 남은 예산 안에서 한 번 재시도한다. 예산이 소진되면 추가 호출을 시작하지 않고 미확인 오류를 유지한다. 설치·갱신·제거, 설정 오류와 native 조회는 자동 재시도하지 않는다. 기본 폴더 검사에서 실제 `configDir`를 확인했다면 같은 provider·환경의 관찰 폴더가 그 경로와 일치할 때 추가 검사하지 않는다. Windows native 경로는 대소문자와 구분자를 정규화하고 WSL 경로의 대소문자는 구분한다.
+
 설치 훅 갱신 검사는 [ADR-0289](../adr/0289-agent-hook-update-notification.md)를 따른다. 관리 status는 기존 설치 완료 여부와 별도로 `helperCurrent: boolean|null`, `currentRegistered`, `ownedCommands`, `updateRequired`, `updateReasons: [helper_missing|helper_outdated|registrations]`, `updateWarning`을 반환한다. 파일 존재만으로 최신 helper라고 판단하지 않으며 동봉된 바이너리와 바이트를 비교한다. 구버전 훅도 정상 수신할 수 있으므로 갱신 필요만으로 상태 감지를 차단하지 않는다.
 
 `GET /api/v1/agent-hooks/updates`와 `get_agent_hook_updates` IPC는 `{targets:[{provider,distro,status}],errors:[{provider,distro,configDir,message}]}`를 반환한다. native 기본 폴더와 실행 중으로 열거된 사용자 WSL 배포판(Docker 내부 배포판 제외) 기본 폴더 및 최근 수신 관찰의 사용자 지정 폴더를 읽기 전용으로 검사한다. 정지한 배포판이나 아직 관찰되지 않은 폴더는 Settings에서 명시적으로 확인한다. 앱 시작·포커스 복귀와 60초 주기 검사는 단일 in-flight로 합치며 알림의 대상별 갱신 버튼과 Settings가 같은 backend 판정을 사용한다. 나중에 닫기는 앱 실행 중의 안내만 숨긴다. manage의 `update` operation은 기존 설치를 갱신하며 파일 락 안에서 설치 증거가 사라졌으면 재설치하지 않는다. 자동 설치·재설치 및 CLI 전체 비활성·신뢰 승인 변경은 하지 않는다.
@@ -520,7 +557,7 @@ html/markdown preview는 별도 문서(iframe)라 부모 페이지의 CSS를 상
 
 helper는 생명주기·프롬프트 제출·도구 진행·승인·응답 종료 등의 메타데이터를 `POST /api/v1/agent-hooks/events`로 전송한다. provider·session ID·이벤트 스키마, 32KiB 크기와 30초 수신 기한을 확인한다. 앱의 leaf lock 레지스트리는 최대 256개 대화 관찰을 보관하고 오래된 turn·subagent는 제외한다. `GET /api/v1/agent-hooks/connections`/`get_agent_hook_connections`는 최근 5분의 수신 진단이다. `terminalId`는 서버가 보고한 과거 pane일 수 있으므로 `paneIdentity: reported`로 표시하며 현재 실행의 증거로 사용하지 않는다. 토큰·대화 내용은 조회에 노출하지 않는다. 무관한 Notification이나 resume 수신이 이전 작업 상태의 60초 기한을 갱신하지 않는다.
 
-`get_agent_hook_states(providers)` IPC와 `GET /api/v1/agent-hooks/states`는 현재 PTY의 정확한 세션 귀속·실제 프로세스·WSL 배포판·설치 및 활성 상태를 검증한 작업 snapshot만 반환한다. REST는 저장된 hooks 설정의 provider만 조회한다. 파일·프로세스 검증은 메인 스레드 밖에서 수행하며 레지스트리 락을 I/O 중 보유하지 않는다. 프런트는 선택 provider가 있을 때만 2초 후속 poll을 하고 검증 응답이 6초간 없으면 훅의 우선권을 잃는다. 표시는 단일 선택 함수가 계산하며 훅 상태와 기존 상태의 원시값은 각각 보존한다. Codex 공유 서버는 live 제목 식별자와 훅 전체 ID의 유일한 대조를 대체 귀속으로 사용한다. snapshot의 `bindingSource: process|title`은 검증 경로를 나타낸다. 모호한 축약 ID·다른 설정 루트·제목 설정 해제·제목 revision 변경은 연결하지 않는다. 이 snapshot은 활동 상태용이다. 종료 복원점은 ADR-0292·0294의 별도 checkpoint에서 증거와 디스크 복원점을 검증한다.
+`get_agent_hook_states(providers)` IPC와 `GET /api/v1/agent-hooks/states`는 현재 PTY의 정확한 세션 귀속·실제 프로세스·WSL 배포판·설치 및 활성 상태를 검증한 작업 snapshot만 반환한다. REST는 저장된 hooks 설정의 provider만 조회한다. 파일·프로세스 검증은 메인 스레드 밖에서 수행하며 레지스트리 락을 I/O 중 보유하지 않는다. 프런트는 선택 provider가 있을 때만 2초 후속 poll을 하고 검증 응답이 6초간 없으면 훅의 우선권을 잃는다. 표시는 단일 선택 함수가 계산하며 훅 상태와 기존 상태의 원시값은 각각 보존한다. Codex 공유 서버는 live 제목 식별자와 훅 전체 ID의 유일한 대조를 대체 귀속으로 사용한다. snapshot의 `bindingSource: process|title`은 검증 경로를 나타낸다. 모호한 축약 ID·다른 설정 루트·제목 설정 해제·제목 revision 변경은 연결하지 않는다. 이 snapshot은 활동 상태용이다. 복원점은 ADR-0316의 공통 귀속과 checkpoint에서 검증하며, 작업 상태용 설치 검사와 phase 기한을 복원 증거의 조건으로 사용하지 않는다.
 
 native Codex의 저장 경로는 실제 TUI 환경에서 조회한다. 공유 서버의 훅 상태는 관리된 제목 연결로 확인하고, 연결이 불가능하면 휴리스틱을 유지한다. 설치나 감지 선택이 사용자의 실행 방식 또는 공유 서버 설정을 자동으로 변경하지 않는다.
 
@@ -626,7 +663,7 @@ Grok Build 관련 동작(세션 복원, 셀렉터 상태 메시지 구성)을 �
 
 프론트는 이 값으로 `<command> --resume <id>` / `<command> resume <id>` / `<command> --resume <uuid>` 를 만들어 `startupCommandOverride` 로 보내고, Rust 는 **디스크의 settings 에서 접두어를 다시 도출해** 그 형태와만 대조한다 — 호출자가 보낸 문자열에서 접두어를 추출하지 않으므로 사용자가 설정하지 않은 플래그는 통과하지 못한다. Claude는 `--resume`, Codex는 서브커맨드 `resume`, Grok는 플래그 `--resume`이며 Grok `<id>`는 하이픈 포함 UUID만 허용한다. 적용 시점은 `nextUse`(다음 자동 복원 또는 수동 복원 클릭)이며, 실행 중인 pane 의 명령은 바뀌지 않는다. 공백이 들어간 실행 파일 경로는 인용 문법을 두지 않아 지원하지 않는다. 이 설정은 세션 복원 경로에만 쓰이며 pane 신규 시작을 자동 기동하지 않는다.
 
-종료 안내 복원 링크([ADR-0286](../adr/0286-clickable-agent-resume-hints.md))는 `codex resume <uuid>`, `claude --resume <uuid>`, `grok --resume <uuid>` 정형 줄에서 종류·UUID만 추출한다. 클릭 시 현재 `command`를 정규화해 옵션과 복원 인자를 조합하고 같은 셸에 `write_terminal_input`으로 제출한다. `restoreSession` 토글은 자동 복원에만 적용한다. 이 수동 입력은 새 PTY나 자동 세션 귀속을 만들지 않으며 기존 제어권·입력 fence를 따른다. Remote도 같은 파서를 번들에 포함하고 클릭 시 호스트 navigation 설정을 다시 조회한 뒤 기존 lease 전용 `/input`으로 제출한다. 조회 전후 terminal·lease·출력 generation·준비 상태·셸 상태·셀 유효성을 확인하며 실패를 자동 재전송하지 않는다.
+종료 안내 복원 링크([ADR-0286](../adr/0286-clickable-agent-resume-hints.md))는 `codex resume <uuid>`, `claude --resume <uuid>`, `grok --resume <uuid>` 정형 줄에서 종류·UUID만 추출한다. 클릭 시 현재 `command`를 정규화해 옵션과 복원 인자를 조합하고 같은 셸에 `write_terminal_input`으로 제출한다. `restoreSession` 토글은 자동 복원에만 적용한다. 이 수동 입력은 새 PTY나 자동 세션 귀속을 만들지 않으며 기존 제어권·입력 fence를 따른다. Remote도 같은 파서를 번들에 포함하고 클릭 시 호스트 navigation 설정을 다시 조회한 뒤 기존 lease 전용 `/input`으로 제출한다. 조회 전후 terminal·lease·출력 generation·준비 상태·셀 유효성을 확인하며 실패를 자동 재전송하지 않는다. 셸 여부는 탭할 때 다시 조회한 호스트 상태(activity `shell`, 명령 실행 중 아님)로만 판정한다. Remote가 보관한 navigation 스냅샷은 drawer가 열려 있을 때만 갱신되어 종료된 에이전트를 계속 보여 줄 수 있기 때문이다([ADR-0315](../adr/0315-remote-resume-shell-state-from-host.md)).
 
 metadata apply mode는 `/codex/transcriptScrollEnabled`·`/codex/statusMessageMode`·`/codex/statusMessageDelimiter`가 부모 `/codex`의 `live`를 따르고, `/grok/statusMessageMode`와 `/grok/statusMessageDelimiter`는 부모 `/grok`의 `live`를 따른다. `/codex/restoreSession`·`/codex/sessionMaxAgeHours`·`/grok/restoreSession`·`/grok/sessionMaxAgeHours`·`/claude/command`·`/codex/command`·`/grok/command`는 `nextUse`다. transcript 스크롤은 데스크톱의 다음 휠 이벤트와 Remote의 다음 navigation snapshot부터, `restoreSession`은 다음 terminal 생성부터, 최대 나이는 다음 세션 ID 수집부터 적용된다.
 
@@ -690,7 +727,7 @@ OS 절전 진입을 막는 정책이다(issue #727·#733, [ADR-0114](../adr/0114
 - **beta 는 deb/rpm 설치본에서 거절된다**(`unsupported_channel_install`). updater 는 `{os}-{arch}-{installer}` 가 없으면 맨 `{os}-{arch}`(AppImage) 로 폴백하므로, 그대로 두면 설치 단계에서 형식 오류가 난다. 확인·설치 둘 다 이유를 담은 오류로 거절한다.
 - **업데이트 화면(`UpdateSection`)이 버전·채널·동작을 한자리에 모은다.** 현재 버전과 채널(`update-current-version`·`update-current-channel`), 채널 선택, 수동 확인(`update-check-btn`)과 마지막 확인 시각(`update-checked-at`), 발견된 버전의 릴리스 시각(`update-published-at`)·노트·설치(`update-install-btn`), GitHub 릴리스 페이지 링크를 제공한다. 채널은 다른 설정처럼 draft 라 저장해야 적용되고, 확인·설치는 설정이 아니라 action 이므로 즉시 실행된다. 상단 바 action 은 업데이트가 있을 때만 나타나는 설치 전용 버튼이라 수동 확인 수단이 되지 못했다 — 그 공백을 이 화면이 메운다. 프로세스 전역 `lastError` 중 시작·주기·채널 저장·설정 초기화가 일으킨 백그라운드 확인 오류는 Settings 본문에 표시하지 않고, 이 화면에서 사용자가 직접 시작한 확인·설치의 오류만 표시한다. 오류 문자열은 URL처럼 공백 없는 긴 값도 화면 폭 안에서 줄바꿈한다.
 - **설정 초기화도 재확인을 건다.** `reset_settings` 는 디스크에 기본값을 쓰고 프론트는 페이지를 다시 로드할 뿐이라 설정 적용 경로를 타지 않는다. 커맨드가 `app_update::schedule_channel_recheck` 로 직접 재확인을 걸어, 프로세스 전역 매니저가 옛 채널과 후보를 들고 있지 않게 한다.
-- **설치기를 띄우기 전에 앱이 자기 자식을 정리한다**([ADR-0201](../adr/0201-update-install-releases-child-file-locks.md)). updater 는 설치기를 실행한 뒤 `std::process::exit(0)` 하므로 소멸자가 돌지 않는다. 그래서 install 경로는 `channel_updater_builder(...).on_before_exit(...)` 로 `update_install_guard::release_installer_file_locks` 를 걸고, 그 안에서 `AppState::terminate_child_processes()`(레지스트리 PTY + ADR-0102 probe PTY, 앱 종료와 같은 절차)를 먼저 돌린다. Windows 는 이어서 설치 디렉터리의 `*.exe`/`*.dll` 중 실행 중인 자기 실행 파일을 뺀 전부가 쓰기로 열릴 때까지 최대 `UPDATE_INSTALL_LOCK_RELEASE_TIMEOUT_MS` 를 기다린다 — 번들 ConPTY 런타임(ADR-0066/0067)의 `OpenConsole.exe` 는 터미널이 살아 있는 동안 매핑돼 있어 설치기가 공유 위반으로 실패한다. 판정은 프로세스 열거가 아니라 설치기가 실제로 겪는 조건(쓰기 열기)이며, 상한을 넘겨도 경고만 남기고 설치는 진행한다.
+- **설치기를 띄우기 전에 앱이 자기 자식을 정리한다**([ADR-0201](../adr/0201-update-install-releases-child-file-locks.md)). updater 는 설치기를 실행한 뒤 `std::process::exit(0)` 하므로 소멸자가 돌지 않는다. 그래서 install 경로는 `channel_updater_builder(...).on_before_exit(...)` 로 `update_install_guard::release_installer_file_locks` 를 걸고, 그 안에서 `AppState::begin_update_handoff()` 로 데몬 세션 인계를 표시한 뒤 `AppState::terminate_child_processes()`(in-process 레지스트리 PTY + ADR-0102 probe PTY)를 먼저 돌린다. PTY 데몬 세션은 끝내지 않고 업데이트된 GUI가 재결합하도록 남긴다. 데몬은 설치기가 이름으로 끝내지 않는 `laymux-pty-daemon.exe` 사본으로 실행되고 설치 디렉터리의 파일을 쥐지 않는다([ADR-0308](../adr/0308-pty-daemon-generations-across-updates.md)). 설치가 실패하면 인계 표시를 지운다. Windows 는 이어서 설치 디렉터리의 `*.exe`/`*.dll` 중 실행 중인 자기 실행 파일을 뺀 전부가 쓰기로 열릴 때까지 최대 `UPDATE_INSTALL_LOCK_RELEASE_TIMEOUT_MS` 를 기다린다 — 번들 ConPTY 런타임(ADR-0066/0067)의 `OpenConsole.exe` 는 터미널이 살아 있는 동안 매핑돼 있어 설치기가 공유 위반으로 실패한다. 판정은 프로세스 열거가 아니라 설치기가 실제로 겪는 조건(쓰기 열기)이며, 상한을 넘겨도 경고만 남기고 설치는 진행한다.
 
 #### Android 채널 매니페스트
 
@@ -994,7 +1031,13 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | POST | `/api/v1/grid/edit-mode` | 편집 모드 설정 |
 | POST | `/api/v1/grid/focus` | Pane 포커스 |
 | POST | `/api/v1/panes/split` | Pane 분할 |
-| DELETE | `/api/v1/panes/:index` | Pane 제거 |
+| POST | `/api/v1/panes/stack` | 슬롯 활성 레이어 뒤에 새 레이어(기본 `TerminalView`)를 쌓고 표시. 키보드 포커스는 옮기지 않는다. `cwd` 생략 시 활성 레이어 CWD 상속, 응답은 `{stacked, newPane{id,terminalId,paneIndex,paneNumber,layerIndex,layerCount,ready}}` — split 과 달리 rect(`x/y/w/h`)·`totalPanes` 는 없다(슬롯 기하가 그대로이므로) ([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)) |
+| POST | `/api/v1/panes/layers/activate` | `layerId` 또는 `terminalId` 로 레이어 하나를 표시. 기본(`focus=true`)은 필요하면 워크스페이스를 전환하고 그 슬롯에 포커스한다. `focus=false` 면 워크스페이스 전환·포커스 없이 표시 레이어만 바꾼다 ([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)) |
+| POST | `/api/v1/panes/layers/move` | `{layerId/terminalId, targetPaneIndex, index?}` — 스택 탭 드래그와 같다. 활성 워크스페이스 안에서 자기 슬롯이면 순서 변경, 다른 슬롯이면 그 스택으로 옮겨 표시. 빈 슬롯은 제거·재분배. 같은 자리면 `moved:false`. 응답 `{moved,paneIndex,layerIndex,layerCount,totalPanes}` ([ADR-0298](../adr/0298-pane-rearrangement-automation-parity.md)) |
+| POST | `/api/v1/panes/layers/extract` | `{layerId/terminalId, direction: horizontal/vertical}` — 탭 메뉴 Split out 과 같다. 단일 레이어 슬롯이면 오류. 응답 `{extracted,slotId,paneIndex,totalPanes}` ([ADR-0298](../adr/0298-pane-rearrangement-automation-parity.md)) |
+| POST | `/api/v1/panes/merge` | `{sourceIndex, targetIndex}` — 컨트롤 바를 스택 띠에 떨어뜨리기와 같다. 소스 슬롯의 모든 레이어를 대상 스택에 쌓고 소스 슬롯 제거. 응답 `{merged,paneIndex,layerCount,totalPanes}` ([ADR-0298](../adr/0298-pane-rearrangement-automation-parity.md)) |
+| POST | `/api/v1/panes/:index/move-to-workspace` | `{workspaceId}` — 컨트롤 바를 워크스페이스에 떨어뜨리기와 같다. 슬롯 통째(모든 레이어)를 옮기고 대상의 가장 큰 pane 을 분할해 둔다. 소스를 비우는 이동은 거부. 응답 `{moved,workspaceId,paneIndex,paneNumber,totalPanes}` ([ADR-0298](../adr/0298-pane-rearrangement-automation-parity.md)) |
+| DELETE | `/api/v1/panes/:index` | Pane 제거. 스택 슬롯이면 `?layerId=` 레이어(기본 활성 레이어) 하나만 닫고 슬롯은 남는다. 마지막 레이어를 닫으면 슬롯이 사라진다. 응답 `{removed,slotRemoved,remainingLayers}` |
 | PUT | `/api/v1/panes/:index/view` | View 변경 |
 | GET | `/api/v1/docks` | 독 상태 |
 | PUT | `/api/v1/docks/:position/active-view` | 독 View 변경 |
@@ -1100,7 +1143,7 @@ MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. rel
 | `get_settings_context` | 현재 human-control owner | 설정 작업 시작·변경 직전에 기본 범위(`pc`/`remoteDevice`/null), `targetReady`, `clientId`, `ownerEpoch` 조회. 명시적 사용자 대상이 우선하며 전환·만료는 미확정. 프로세스 OS나 localhost로 사용자 표면을 추측하지 않음 |
 | `describe_settings` | Rust settings contract + 필요한 runtime catalog | 경로 생략은 34개 섹션 안내. 경로 지정은 해당 필드만 포함하는 독립 스키마·기본값·의미·허용값·권한·적용 시점 조회. `/keybindings`는 frontend의 실제 command·label·defaultKeys·group, `/widgets`는 실제 위젯의 type·기본 옵션·옵션 제약도 반환 |
 | `validate_settings` | snapshot bridge + Rust strict validator | 부분 patch dry-run. 객체는 재귀 병합, 배열은 전체 교체하며 오류·기존 위반(`existingIssues`)·diff·후보 revision을 반환하고 저장하지 않음 |
-| `update_settings` | strict validator → `settings.applySnapshot` bridge | 검증된 후보만 `settings.json`에 저장하고 store에 적용. 선택적 `expected_revision`/`expectedRevision` 충돌 검사 지원 |
+| `update_settings` | strict validator → `settings.applySnapshot` bridge | 검증된 구성/로컬 환경 후보만 각 저장 계층에 저장하고 store에 적용. 선택적 `expected_revision`/`expectedRevision` 충돌 검사 지원 |
 | `describe_remote_settings` | PC·Remote 공용 기기 설정 schema | 기기 로컬 표시·스크롤·입력·플로팅·배치·탐색 제외 44개 최상위 키의 타입·기본값·범위·의미·적용 시점, 액션 목록과 제외 이유를 연결 없이 조회 |
 | `get_remote_settings` | 현재 controller의 heartbeat snapshot | `clientId`, `revision`, `settings` 반환. 미연결·15초 이상 지난 snapshot·구버전 기기는 오류 |
 | `validate_remote_settings` | 공용 기기 schema 검증 | 최상위 키별 교체 patch의 dry-run(그 안의 객체·배열은 전체 교체). 미지원 키·타입·범위·필수 필드·입력바 중복/참조·플로팅 액션과 `idle ≤ focused ≤ active` 순서를 거부. 탐색 제외의 현재 workspace/pane 관계는 기기에서 쓰기 전에 추가 검사 |
@@ -1121,11 +1164,11 @@ lease 갱신에 성공한 heartbeat 응답은 항상 경로 없는 PC 뷰어 신
 | Tool | 구현 방식 | 설명 |
 |------|-----------|------|
 | `list_terminals` | bridge_request | 터미널 목록 조회 (워크스페이스 필터) |
-| `identify_caller` | bridge_request | 터미널 위치·이웃 정보 조회 (단일 터미널 상세는 `list_terminals`/`terminal://{id}` 리소스로 대체) |
+| `identify_caller` | bridge_request | 터미널 위치·이웃 정보 조회 (단일 터미널 상세는 `list_terminals`/`terminal://{id}` 리소스로 대체). `pane.stack = {position,count,active,layerIds}` 를 싣고, 이웃은 슬롯 기준으로 그 슬롯의 활성 레이어를 보고한다 ([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)) |
 | `write_to_terminal` | AppState 직접 | PTY 입력 전송 (기본 `enter: true`로 제출, 타이핑만 하려면 `enter: false`). 에이전트 간 메시징은 `reply_to`에 발신자 terminal ID를 주면 표준 회신 푸터를 본문 뒤에 부착 |
 | `write_to_neighbor` | bridge + AppState | 방향 기반 이웃 팬에 입력 전송 (identify + write 단축). `reply_to` 동일 지원 |
 | `read_terminal_output` | AppState 직접 | 출력 버퍼 읽기 (raw/text 포맷) |
-| `focus_terminal` | bridge_request | 터미널 포커스 — `terminal_id`/`pane_ref`/`pane_number` 해석 후 `terminals.setFocus` (안정 식별자·공간 번호 기반) |
+| `focus_terminal` | bridge_request | 터미널 포커스 — `terminal_id`/`pane_ref`/`pane_number` 해석 후 `terminals.setFocus` (안정 식별자·공간 번호 기반). 대상이 숨은 스택 레이어면 그 레이어를 표시까지 한다 ([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)) |
 | `get_terminal_states` | AppState 직접 | 전 터미널 활동 상태 감지 |
 | `execute_command` | AppState 직접 | 명령 실행 + 출력 수집 (per-terminal 세마포어, sequence number). exec lock 획득 뒤 실제 PTY write 직전에 공용 strict activity detector로 ring·known app·grace/exit cache·PTY registry 건강성과 `Shell` 상태를 다시 검증하며, 오류/TUI/실행 중 상태는 0-byte tool error로 차단 |
 
@@ -1135,23 +1178,29 @@ lease 갱신에 성공한 heartbeat 응답은 항상 경로 없는 PC 뷰어 신
 
 | Tool | 구현 방식 | 설명 |
 |------|-----------|------|
-| `list_workspaces` | bridge_request | 워크스페이스 목록 (summary 옵션) |
-| `get_active_workspace` | bridge_request | 활성 워크스페이스 상세 |
+| `list_workspaces` | bridge_request | 워크스페이스 목록 (summary 옵션). summary 의 `paneCount` 는 **레이어 수**다(스택 레이어마다 1, [ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)) — `create_workspace`·`identify_caller`·`move_pane_to_workspace` 등의 `paneCount`/`totalPanes` 는 슬롯 수라 스택이 있으면 값이 다르다 |
+| `get_active_workspace` | bridge_request | 활성 워크스페이스 상세. `panes` 는 레이어마다 한 항목(`id`·`view`·`terminalId`·`paneNumber` 는 레이어, `paneIndex`·rect 는 슬롯)이고 `slotId`·`layerIndex`·`layerCount`·`activeLayer` 를 함께 싣는다. 스택이 없으면 항목은 이전과 같다 ([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)) |
 | `switch_workspace` | bridge_request | 워크스페이스 전환 |
 | `create_workspace` | bridge_request | 워크스페이스 생성 (레이아웃/프로필 지정) |
 | `delete_workspace` | bridge_request | 워크스페이스 삭제 |
 | `rename_workspace` | bridge_request | 워크스페이스 이름 변경 |
 
-**그리드/팬 (7)**:
+**그리드/팬 (13)**:
 
 | Tool | 구현 방식 | 설명 |
 |------|-----------|------|
 | `get_grid_state` | bridge_request | 그리드 상태 조회 (`editMode`, `focusedPane`, `activeWorkspaceId`) |
 | `focus_pane` | bridge_request | 인덱스 기반 팬 포커스 |
 | `split_pane` | bridge_request | 팬 분할 (`ready` 필드로 렌더 완료 여부 표시). `cwd` 생략 시 분할 대상 팬의 CWD 를 상속하고, 주면 그 값이 이긴다 ([ADR-0140](../adr/0140-split-pane-inherits-source-cwd.md)) |
-| `remove_pane` | bridge_request | 팬 제거 |
+| `stack_pane` | bridge_request | 슬롯에 레이어 쌓기 — `split_pane` 미러(`view_type` 기본 `TerminalView`, `profile`, `cwd`, `ready`). 키보드 포커스는 옮기지 않는다 ([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)) |
+| `activate_pane_layer` | bridge_request | `layer_id` 또는 `terminal_id` 로 스택 레이어 표시. `focus` 기본 true 는 필요 시 워크스페이스 전환 + 슬롯 포커스, `focus=false` 면 워크스페이스 전환·포커스 없이 표시 레이어만 바꾼다 ([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)) |
+| `remove_pane` | bridge_request | 팬 제거. 스택 슬롯은 `layer_id`(기본 활성 레이어) 하나만 닫는다 ([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)) |
 | `resize_pane` | bridge_request | 팬 크기 조정 — 공유 경계를 이웃과 함께 이동 (`dw`/`dh` 상대 delta, 해당 축에 경계가 없으면 오류. [ADR-0071](../adr/0071-pane-resize-single-boundary-owner.md)) |
 | `swap_panes` | bridge_request | 두 팬 위치 교환 (atomic 단일 상태 업데이트) |
+| `move_pane_layer` | bridge_request | 스택 탭 드래그 — 레이어 순서 변경 또는 다른 슬롯 스택으로 이동(`layer_id`/`terminal_id`, `target_pane_index`, `index`). 단일 레이어 pane 도 레이어이므로 pane 하나를 다른 pane 에 쌓는 데도 쓴다 ([ADR-0298](../adr/0298-pane-rearrangement-automation-parity.md)) |
+| `extract_pane_layer` | bridge_request | 탭 메뉴 Split out — 스택 레이어를 `direction` 으로 분할한 새 슬롯으로 꺼낸다 ([ADR-0298](../adr/0298-pane-rearrangement-automation-parity.md)) |
+| `merge_panes` | bridge_request | 컨트롤 바 → 스택 띠 — `source_index` 슬롯의 모든 레이어를 `target_index` 스택에 쌓고 소스 슬롯 제거 ([ADR-0298](../adr/0298-pane-rearrangement-automation-parity.md)) |
+| `move_pane_to_workspace` | bridge_request | 컨트롤 바 → 워크스페이스 — 슬롯 통째를 다른 워크스페이스로 이동 ([ADR-0298](../adr/0298-pane-rearrangement-automation-parity.md)) |
 | `list_layouts` | bridge_request | 저장된 레이아웃 목록 |
 
 **유틸리티 (10)**:
@@ -1242,7 +1291,7 @@ tool 폴링 대신 구독 가능한 read-only 상태를 MCP Resources 로 노출
 | URI | 내용 |
 |---|---|
 | `workspace://active` | 활성 워크스페이스 (panes + activity) |
-| `workspace://list` | 워크스페이스 요약 목록 |
+| `workspace://list` | 워크스페이스 요약 목록. `paneCount` 는 `list_workspaces(summary)` 와 같이 레이어 수 |
 | `profile://list` | 터미널 프로파일 목록 |
 | `terminal://{id}` | 단일 터미널 상태 |
 | `terminal://{id}/output` | 최근 터미널 출력 (ANSI 제거 텍스트) |
@@ -1404,7 +1453,7 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 
 `/remote`와 `/remote/`는 remote가 실효적으로 켜져 있고(`settings.remote.enabled || runtimeRemoteAccess.enabled`), 실효 remote token이 있으며, remote IP allowlist를 통과할 때 응답한다. Cloud tunnel 내부 요청은 크레이트 내부 전용 `TunnelAuthorized` marker가 있을 때 token/IP/Origin 검사를 우회하지만, 이 page route도 실효 enabled gate는 반드시 통과해야 한다. 이 HTML 문서 자체는 토큰 값을 요구하지 않지만, 페이지가 호출하는 `/remote/v1/*` 제어 API는 아래 인증 정책을 그대로 따른다. 사용자는 브라우저 주소창에서 `http://<laymux-host>:19280/remote/` 또는 dev의 `:19281/remote/`를 열고 remote token을 입력해 controller lease를 claim한다. 편의를 위해 `/remote/#token=<url-encoded-token>`도 허용하며, 이 값은 remote 페이지의 token 입력란을 미리 채우는 용도다. fragment는 HTTP 요청에 포함되지 않으므로 링크 공유용 prefill에는 query string보다 이 형태를 우선 사용한다.
 
-`settings.json`은 Remote 설정의 영속 정본이다. Rust는 앱 시작 시 `settings.remote`를 `AppState.remote_access`의 메모리 snapshot으로 적재하고, `save_settings`/`reset_settings` 및 cloud pairing/disconnect 설정 저장이 디스크에 성공한 뒤 같은 snapshot을 갱신한다. `save_settings`/`reset_settings`가 실효 enabled 상태를 바꾸면 snapshot 교체와 owner gate 전환을 한 트랜잭션으로 시작하고 `remote-control-changed`를 발행하며, 전환 결과에 맞춰 cloud tunnel lifecycle도 reconcile한다. 실효 enabled는 그대로지만 `cloudAccessMode`가 바뀌면 실행 중인 Cloud tunnel만 재시작한다. cloud pairing/disconnect는 access gate와 access mode를 건드리지 않고 pairing 소유 필드만 snapshot에 반영한다. human-control permit 생성과 resize/write 입력 핫패스는 이 snapshot에 runtime access override만 합성하며 설정 파일을 다시 읽거나 JSON migration·validation을 수행하지 않는다. loader 결과가 `Recovered`이면 frontend save와 backend patch는 모두 원본을 보존하며 실패한다. loader가 원문에 결부한 `recoveryRevision`과 현재 원문의 revision이 일치하는 복구 모달 승인만 `acknowledge_settings_recovery(expectedRecoveryRevision)`로 lenient recovery 결과를 atomic replace할 수 있다. 오류는 `{kind:"recoveryDocumentRejected",message}`와 `{kind:"runtimeReconcileFailed",message}`로 구분한다. document 거절만 최신 dropped path를 다시 로드하고, commit 뒤 runtime 실패는 모달과 write-block을 유지해 같은 command로 재조정을 재시도한다. 프론트는 성공 반환본을 store에 적용한 뒤 persistence를 재개한다. `reset_settings`는 사용자가 선택한 별도 초기화 경로다.
+`state.db`의 machine 영역은 Remote 설정의 영속 정본이다. Rust는 앱 시작 시 `settings.remote`를 `AppState.remote_access`의 메모리 snapshot으로 적재하고, `save_settings`/`reset_settings` 및 cloud pairing/disconnect 설정 저장이 디스크에 성공한 뒤 같은 snapshot을 갱신한다. `save_settings`/`reset_settings`가 실효 enabled 상태를 바꾸면 snapshot 교체와 owner gate 전환을 한 트랜잭션으로 시작하고 `remote-control-changed`를 발행하며, 전환 결과에 맞춰 cloud tunnel lifecycle도 reconcile한다. 실효 enabled는 그대로지만 `cloudAccessMode`가 바뀌면 실행 중인 Cloud tunnel만 재시작한다. cloud pairing/disconnect는 access gate와 access mode를 건드리지 않고 pairing 소유 필드만 snapshot에 반영한다. human-control permit 생성과 resize/write 입력 핫패스는 이 snapshot에 runtime access override만 합성하며 설정 파일을 다시 읽거나 JSON migration·validation을 수행하지 않는다. loader 결과가 `Recovered`이면 frontend save와 backend patch는 모두 원본을 보존하며 실패한다. loader가 원문에 결부한 `recoveryRevision`과 현재 원문의 revision이 일치하는 복구 모달 승인만 `acknowledge_settings_recovery(expectedRecoveryRevision)`로 lenient recovery 결과를 atomic replace할 수 있다. 오류는 `{kind:"recoveryDocumentRejected",message}`와 `{kind:"runtimeReconcileFailed",message}`로 구분한다. document 거절만 최신 dropped path를 다시 로드하고, commit 뒤 runtime 실패는 모달과 write-block을 유지해 같은 command로 재조정을 재시도한다. 프론트는 성공 반환본을 store에 적용한 뒤 persistence를 재개한다. `reset_settings`는 사용자가 선택한 별도 초기화 경로다.
 
 현재 브라우저 entry는 Rust remote server가 self-hosted xterm.js 자산을 콘텐츠 해시 `/remote/asset/*`(호환용 `/remote/vendor/*` 병행, [ADR-0169](../adr/0169-remote-client-hashed-immutable-assets-and-gzip.md))에서 제공하는 중간 구현이다. CDN이나 Vite dev server에 의존하지 않으며, 출력 WebSocket의 PTY byte stream을 xterm에 그대로 기록하고 xterm 입력/resize 이벤트를 Remote UI API로 다시 보낸다. ADR-0013의 최종 목표인 같은 React bundle 기반 Full UI/Focused UI 전환과 `RemoteHttpWsClient` adapter 추출은 후속 리팩터링 대상이다.
 
@@ -1528,6 +1577,12 @@ PC WebView는 `remote-control-changed` Tauri event를 받아 local input overlay
 
 ### 13.3 Navigation Metadata
 
+템플릿 저장 POST 성공 후 목록 GET만 실패하면 저장 완료로 처리해 입력창을 닫고 목록 조회 재시도를 안내한다. 저장 POST 자체가 실패한 경우에만 입력을 유지한다. 목록 갱신 오류를 저장 실패로 취급해 동일 템플릿을 다시 생성하지 않는다.
+
+Remote 관리 메뉴의 `Save as template`은 `POST /remote/v1/layouts`에 `{workspaceId,name,leaseId?}`를 보낸다. 이름·source id를 검증하고 기존 Remote 인증과 active lease를 요구한 뒤 `layouts.exportNew` bridge를 사용한다. 명시적 source가 없으면 실패하고 활성 workspace로 대체하지 않는다. store의 기존 복사·영속 경로가 새 템플릿 id를 만들고, Remote는 목록만 다시 읽어 현재 output·workspace를 유지한다. Android E2E exact allowlist에도 해당 POST를 허용한다([ADR-0311](../adr/0311-remote-save-workspace-template.md)).
+
+Remote 워크스페이스 행의 `⋯` 버튼은 현재 터미널을 전환하지 않고 이름 변경·숨김 관리 dialog를 연다. 롱탭은 사용하지 않는다. 이름 변경은 `PUT /remote/v1/workspaces/{id}`에 `{name, leaseId?}`를 보내며 기존 Remote 인증과 active controller lease(body 또는 `x-laymux-remote-lease`)를 요구한다. 공백뿐인 이름은 `400`으로 거부하고, 호스트 `workspaces.rename` bridge가 기존 store의 이름 정규화·중복 처리와 영속을 소유한다. 성공 시 `workspace-state-changed`를 발행하고 navigation만 새로 읽어 output 연결을 유지한다. 실패 시 dialog에 오류와 입력을 보존하고, 제어권 상실 시 창을 닫는다. Escape와 Android system back은 이 창을 먼저 닫으며 기존 숨김 제한·fallback은 유지한다. Android E2E exact allowlist는 이 PUT을 허용하며 삭제 route는 추가하지 않는다([ADR-0310](../adr/0310-remote-workspace-management-menu.md)).
+
 `GET /remote/v1/navigation`의 최상위 `codexTranscriptScrollEnabled`는 호스트 `codex.transcriptScrollEnabled`의 현재 boolean 투영이며 Remote의 normal-buffer Codex transcript 휠·터치 라우팅을 gate한다([ADR-0218](../adr/0218-codex-transcript-pointer-scroll-toggle.md)).
 
 최상위 `agentCommands`는 `{claude:{command:string}, codex:{command:string}, grok:{command:string}}`으로 호스트의 현재 실행 명령 설정을 전달한다([ADR-0286](../adr/0286-clickable-agent-resume-hints.md)). Remote의 수동 복원 링크는 입력 FIFO 안에서 navigation을 다시 조회하고 공유 정규화 함수로 명령을 조립한다. 미지원 호스트에서 이 필드가 없으면 제출하지 않는다. 새 endpoint나 Android wire 버전 변경은 없다.
@@ -1543,6 +1598,7 @@ Remote drawer 본문은 workspace 기본 화면과 Hidden workspaces·Notificati
 | Endpoint | Method | 용도 |
 |---|---|---|
 | `/remote/v1/navigation` | GET | workspace 목록과 모든 workspace pane 표시 요약, dock pane 요약, terminal 표시 메타데이터 |
+| `/remote/v1/workspaces/{id}`            | PUT    | workspace 이름 변경 (`name`, active controller lease 필요)                              |
 | `/remote/v1/workspaces/{id}/visibility` | POST | workspace의 목표 숨김 상태 설정 (`hidden`, active controller lease 필요) |
 | `/remote/v1/panes/{id}/visibility` | POST | workspace pane의 목표 숨김 상태 설정 (`hidden`, active controller lease 필요) |
 | `/remote/v1/notifications/{id}/read` | POST | active `leaseId`로 단일 notification id를 읽음 처리 |
@@ -1559,6 +1615,8 @@ Remote drawer 본문은 workspace 기본 화면과 Hidden workspaces·Notificati
 | `/remote/v1/workspaces/{id}/clear` | POST | active `leaseId`로 그 workspace 터미널들에 Ctrl+L 브로드캐스트 (ADR-0137) |
 
 `/remote/v1/navigation`은 bearer token과 IP/Origin gate를 통과해야 하며 lease는 요구하지 않는다. 응답의 `workspaces`는 PC WebView `WorkspaceSelectorView`와 같은 `workspaceSelector.sortOrder`/`workspaceDisplayOrder` 규칙으로 정렬된 `{id,name,isActive,hidden,collapsed,paneCount,terminalPaneCount,liveTerminalCount,unreadCount,panes,selectorSummary}` 요약이다([ADR-0151](../adr/0151-remote-workspace-selector-information-parity.md)). ADR-0018의 remote payload 호환성과 focused remote surface를 위해 숨김 워크스페이스와 숨김 pane도 제거하지 않고 `hidden`/`collapsed` 플래그로 전달한다. 다만 desktop selector는 ADR-0033 이후 숨김 행을 DOM 목록에서 필터하고 별도 보관함에서 복원하므로, remote의 `collapsed`는 remote 전용 표시 계약이지 desktop DOM 접힘 모델과의 1:1 일치를 뜻하지 않는다. 현재 active workspace는 전환 중인 raw snapshot에서도 `collapsed=false`로 유지해 현재 터미널 문맥을 잃지 않는다. `workspaces[].panes`는 선택 여부와 무관하게 모든 workspace에서 채운다. 각 pane 요약은 `{id,location,workspaceId,paneIndex,paneNumber,viewType,terminalId,terminalLive,title,profile,cwd,branch,activity,outputActive,commandRunning,lastCommand,lastExitCode,lastCommandAt,activityMessage,selectorDisplay,selectorStatus,isFocused,unreadCount,hidden,collapsed,x,y,w,h}` 형태이며, `unreadCount`는 terminal pane에만 부여하고 non-terminal pane은 항상 `0`이다. `selectorDisplay`는 frontend가 PC와 같은 formatter와 현재 path ellipsis로 계산한 `{environment,activity:{label,color},cwd}`이고, `selectorStatus`는 같은 activity handler 및 현재 Claude/Codex 상태 문구 설정으로 계산한 `{icon,color,text?}`다. Remote는 이 표시값을 재판정하지 않는다. `selectorSummary`는 `{branch,cwd,terminalCount,lastCommand,latestNotification}`이고 `lastCommand`에는 `{command,timestamp,status}`가 들어간다. 모든 `workspaces[].panes`와 `activeWorkspace.panes`는 PC selector와 동일하게 `paneNumber` 오름차순으로 정렬하며 `paneIndex`는 정렬 후 위치가 아니라 원본 `WorkspacePane[]` 인덱스를 유지한다. `docks[]`는 workspace 목록과 섞지 않는 앱 전역 요약이며, `docks[].panes`는 `location="dock"`과 `workspaceId=null`을 사용해 workspace 소속 pane이 아님을 명확히 한다. Dock pane의 `unreadCount`는 workspace filter 없이 `terminalId` 기준으로만 계산하고, dock pane의 `isFocused`는 terminal store의 focus flag가 아니라 desktop dock focus SoT인 `focusedDock`/`focusedDockPaneId`에서 계산한다. `visible=false` dock은 remote page의 dock panel에서 렌더하지 않고 preferred terminal 후보에서도 제외한다. 즉 `preferredTerminalId` short-circuit과 fallback 모두 active workspace pane terminal 또는 visible dock pane terminal만 메인 출력으로 열 수 있다. 다만 `terminalLive`는 진입 조건이 아니다([ADR-0138](../adr/0138-remote-opens-queued-panes-on-entry.md)) — workspace lazy mount와 직렬 startup slot([ADR-0127](../adr/0127-terminal-startup-slot-follows-eligibility.md)) 때문에 아직 데스크톱에서 열리지 않은 pane은 정상 상태에서도 `terminalLive=false`이므로, `terminalId`가 있는 pane은 모두 선택 가능하고 live는 후보 자격이 아니라 동순위 tie-breaker다. Remote 폴백 순서는 focused pane → active workspace live pane → active workspace 미시작 pane → visible dock live pane → visible dock 미시작 pane이며, 셋 다 없을 때(= terminal pane 자체가 없을 때)만 열 터미널이 없다고 표시한다. 최상위 `workspaceSelector`는 remote drawer가 PC selector의 표시 토글/경로 ellipsis와 맞출 수 있게 하는 현재 selector 설정이며, `unreadNotificationCount`는 전체 unread 수다. `terminals`는 `/remote/v1/terminals` 항목에 frontend bridge의 `workspaceId`, `paneNumber`, `activity`, `selectorDisplay`, `selectorStatus`, `isFocused` 등 탐색·표시에 필요한 메타데이터를 병합한 목록이다.
+
+**스택 레이어 행**([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)). frontend bridge 가 레이어마다 pane 항목을 주므로 `workspaces[].panes`·`activeWorkspace.panes` 도 레이어마다 한 행이다. 같은 슬롯의 행은 같은 `paneIndex` 를 공유하고, 각 행은 `layerIndex`·`layerCount`·`activeLayer` 를 싣는다(필드가 없으면 단일 레이어 `0`·`1`·`true`). `paneCount`·`terminalPaneCount` 는 레이어 단위로 센다. Remote drawer 는 스택 행에 `n/m` 배지를 붙이고 숨은 레이어 행은 흐리게 그리지만 선택은 막지 않는다 — 선택하면 `terminals.setFocus` 가 그 레이어를 표시까지 한다. 공간 스텝(ADR-0039)은 (슬롯 읽기순 × 레이어순)의 모든 터미널 레이어를 지나고, 방향 스텝은 슬롯 단위로 각 슬롯의 활성 레이어만 본다.
 
 ADR-0194에 따라 위 `selectorDisplay` shape에는 runtime-only `{lastInput:string|null,lastInputAt:number|null}`이 additive로 포함된다. frontend bridge가 `lastUserInput/lastUserInputAt`과 `lastCommand/lastCommandAt`에서 최신 값과 timestamp를 계산하며 Remote JavaScript는 provider 출력이나 prompt를 역파싱하지 않는다. 최상위 `workspaceSelector.lastInputMode`는 `"perPane" | "workspaceLatest"`이고 누락·유효하지 않은 값의 기본은 `"perPane"`이다. 기존 `selectorSummary`는 Automation/Remote payload 호환성을 위해 유지한다.
 
@@ -1643,7 +1701,7 @@ Android 저장·열기 호출은 주입된 `LaymuxNative` 객체의 메서드로
 
 ### 13.3.3 Localhost 웹 프리뷰
 
-Remote의 HTTP localhost 링크는 별도 웹 프리뷰로 열린다([ADR-0295](../adr/0295-remote-localhost-web-preview.md)). `/remote/v1/localhost-preview/{begin,resource,close}` POST는 Remote 인증과 body의 `leaseId`를 요구한다. begin의 `{url,leaseId}`는 HTTP loopback origin 하나(포트 ≥1024, 19280/19281 제외)를 30분·단일 슬롯 세션으로 등록하고 `{sessionId,url,chunkBytes}`를 반환한다. resource의 `{sessionId,leaseId,pathAndQuery,offset}`는 같은 origin의 GET snapshot을 최대 512 KiB씩 `{status,contentType,body,offset,nextOffset,totalBytes}`로 반환하며 body는 base64다. 파일별 64 MiB·세션 합계 128 MiB·파일 수 128개로 제한한다. close의 `{sessionId,leaseId}`는 일치하는 세션을 폐기한다. 세션은 생성한 lease에 귀속되며 다른 origin redirect·upstream 인증/쿠키 전달·환경 프록시는 허용하지 않는다.
+Remote의 HTTP localhost 링크는 별도 웹 프리뷰로 열린다([ADR-0316](../adr/0316-remote-localhost-web-preview.md)). `/remote/v1/localhost-preview/{begin,resource,close}` POST는 Remote 인증과 body의 `leaseId`를 요구한다. begin의 `{url,leaseId}`는 HTTP loopback origin 하나(포트 ≥1024, 19280/19281 제외)를 30분·단일 슬롯 세션으로 등록하고 `{sessionId,url,chunkBytes}`를 반환한다. resource의 `{sessionId,leaseId,pathAndQuery,offset}`는 같은 origin의 GET snapshot을 최대 512 KiB씩 `{status,contentType,body,offset,nextOffset,totalBytes}`로 반환하며 body는 base64다. 파일별 64 MiB·세션 합계 128 MiB·파일 수 128개로 제한한다. close의 `{sessionId,leaseId}`는 일치하는 세션을 폐기한다. 세션은 생성한 lease에 귀속되며 다른 origin redirect·upstream 인증/쿠키 전달·환경 프록시는 허용하지 않는다.
 
 브라우저 bootstrap(`/remote/localhost-preview/`)은 별도 opaque-origin sandbox 문서이며 부모 Remote가 검증한 resource 메시지로 정적 앱과 WASM을 읽는다. Android는 원격 브리지 없는 별도 synthetic-origin WebView의 native resource interceptor를 사용한다. 기존 Remote 셸의 CSP와 OAuth relay 계약은 유지한다. POST·WebSocket·Service Worker·멀티스레드 WASM은 지원하지 않는다. 자산을 바꾼 뒤에는 프리뷰를 다시 열어 새 snapshot을 읽는다.
 
@@ -1713,9 +1771,9 @@ Remote drawer Settings는 헤더 아래 tablist로 `Input bar` · `Floating` · 
 
 Remote 설정 화면도 Windows Terminal형 개별 행과 제목 계층을 사용한다. 본문 섹션 제목(`Composer`, `App` 등)은 기본 16px이며, 기기 메뉴 글자 크기가 더 크면 그 값을 따른다. 설정 drawer 안에서만 시스템 UI 폰트·최소 14px 라벨·12px 설명·36px 입력 높이를 적용하며, 터미널 글꼴과 키 바·워크스페이스 밀도는 변경하지 않는다. 설명은 라벨 아래에서 줄바꿈하고 토글은 오른쪽 같은 축에 정렬한다. Display는 글자 크기·Composer 불투명도·워크스페이스 메뉴·히스토리/스크롤·선택/위젯으로 묶고, 44px 탭 줄은 가로 스크롤과 기존 키보드 탐색을 유지한다. 기기 로컬 저장·즉시 적용·연결 전 편집·기존 DOM ID는 그대로다.
 
-Panels 탭의 `Swipe to open`과 `Swipe to close`는 모바일 Remote의 열기·닫기 제스처를 독립적으로 켠다. 열기 선택은 기존 surface-local `localStorage["laymux.remote.edgeSwipeDrawers"]`에 저장하며 키가 없거나 값이 `"0"`이 아니면 기본 on이다. 닫기 선택은 `localStorage["laymux.remote.swipeCloseDrawers"]`에 저장하며 열기와 동일하게 명시적인 `"0"`만 off이고 기본 on이다. 열기가 켜진 `mobileLayout`에서 terminal viewport 전체(하단 정렬 crop으로 xterm 위에 드러난 빈 배경 포함)의 왼쪽 24px 안에서 시작해 오른쪽으로 56px 이상 이동하고 수평 이동이 수직 이동의 1.25배를 넘으면 기존 workspace drawer를 연다. 오른쪽 24px 안에서 시작한 대칭 제스처는 rightSwipeView의 Files/GitHub/Memo를 각 lease/capability 조건 아래 연다. Files는 현재 terminal CWD(terminal이 없으면 host home)에서 연다. 닫기가 켜져 있으면 열린 floating workspace drawer는 패널을 왼쪽으로, 열린 도구는 toolSwipeRightAction=close일 때 헤더·안내 줄 또는 GitHub/Files 목록에서 오른쪽으로 같은 임계값만큼 flick하면 닫힌다. 열린 도구의 왼쪽/설정된 역방향 순환은 아래 ADR-0261 절을 따른다. drawer 안쪽의 workspace/dock 목록·숨긴 workspace 목록·알림 목록·업데이트 노트도 각각 `touch-action: pan-y`를 지정해 브라우저가 가로 드래그를 스크롤로 가져가 pointer를 취소하지 않도록 한다. 반대 방향 또는 수직 우세 이동은 기존 한 손가락 스크롤 경로로 되돌리고, 데스크톱 pointer에서는 이 제스처를 적용하지 않는다([ADR-0209](../adr/0209-remote-display-preferences-are-device-local.md), [ADR-0198](../adr/0198-remote-file-explorer-overlay.md)).
+Panels 탭의 `Swipe to open`과 `Swipe to close`는 모바일 Remote의 열기·닫기 제스처를 독립적으로 켠다. 열기 선택은 기존 surface-local `localStorage["laymux.remote.edgeSwipeDrawers"]`에 저장하며 키가 없거나 값이 `"0"`이 아니면 기본 on이다. 닫기 선택은 `localStorage["laymux.remote.swipeCloseDrawers"]`에 저장하며 열기와 동일하게 명시적인 `"0"`만 off이고 기본 on이다. 열기가 켜진 `mobileLayout`에서 terminal viewport 전체(하단 정렬 crop으로 xterm 위에 드러난 빈 배경 포함)의 왼쪽 24px 안에서 시작해 오른쪽으로 56px 이상 이동하고 수평 이동이 수직 이동의 1.25배를 넘으면 기존 workspace drawer를 연다. 오른쪽 24px 안에서 시작한 대칭 제스처는 rightSwipeView의 Files/GitHub/Memo를 각 lease/capability 조건 아래 연다. Files는 현재 terminal CWD(terminal이 없으면 host home)에서 연다. 닫기가 켜져 있으면 열린 floating workspace drawer는 패널을 왼쪽으로, 열린 도구는 toolSwipeRightAction=close일 때 헤더·안내 줄 또는 GitHub/Files 목록에서 오른쪽으로 같은 임계값만큼 flick하면 닫힌다. 열린 도구의 왼쪽/설정된 역방향 순환은 아래 ADR-0261 절을 따른다. drawer 안쪽의 workspace/dock 목록·숨긴 workspace 목록·알림 목록·업데이트 노트도 각각 `touch-action: pan-y`를 지정해 브라우저가 가로 드래그를 스크롤로 가져가 pointer를 취소하지 않도록 한다. 반대 방향 또는 수직 우세 이동은 기존 한 손가락 스크롤 경로로 되돌리고, 데스크톱 pointer에서는 이 제스처를 적용하지 않는다. terminal viewport의 모든 touch 제스처는 pointer 핸들러가 소유하므로 viewport는 cancelable `touchmove`를 preventDefault해 브라우저 제스처를 시작하지 않는다. viewport와 xterm scroller가 scroll container라 `touch-action: none`이 이어지지 않고, 빠른 flick이 남긴 보이지 않는 브라우저 fling은 약 1초 안의 다음 탭을 click 없이 소비하기 때문이다(엣지 flick 직후 drawer pane 탭 무반응)([ADR-0209](../adr/0209-remote-display-preferences-are-device-local.md), [ADR-0198](../adr/0198-remote-file-explorer-overlay.md)).
 
-`Input bar` 편집기는 배치와 순서를 하나의 칩 모델로 다룬다. Main 행·Keys 행의 각 구역과 `Hidden` 목록이 모두 드롭 대상이고, 고정 action과 소프트키를 구분 없이 칩으로 보여 준다. long-press Pointer Events drag(HTML native DnD 아님)와 삽입 표시선으로 구역·행·`Hidden` 경계를 넘어 옮기며, `Keys` 칩만은 확장행 구역을 drag target으로 받지 않는다. **숨겨진 칩을 탭하면 곧바로 Keys 행 끝(`Keys`는 main 행)에 배치되고 선택 상태로 남는다** — 새로 등록한 사용자 키도 같은 자리에 놓인다. 배치된 칩을 탭하면 선택만 토글한다. 선택 시 행·구역 select(`Main · Left` … `Keys · Right`, `Hidden`)와 구역 내 `First`·`←`·`→`·`Last`가 열리고, 사용자 등록 키에는 `Delete`가 함께 붙는다 — drag는 enhancement이고 이 탭 경로가 정본이다. `Hidden` 목록은 미배치 action을 카테고리(Actions / Pane·Alert nav / Navigation / Editing / Ctrl keys / Function / Custom keys)로 묶어 보여 준다. `Reset`은 배치와 확장 상태만 기본값으로 되돌리고 등록된 사용자 키는 지우지 않는다. 두 행은 CSS grid 3열 + `justify-content: space-between`으로 그리며, 구역 컨테이너에는 `min-width: 0`을 주지 않는다(트랙의 자동 최소 크기가 0이 되면 구역이 내용보다 좁아져 이웃과 겹친다). 화면 폭보다 길면 각 행 내부에서만 좌우 스크롤하며 한 줄을 유지하고 scrollbar track은 노출하지 않는다. app/header/main/footer/key-bar 경계는 `min-width: 0`을 유지해 문서 outer overflow를 만들지 않는다.
+`Input bar` 편집기는 배치와 순서를 하나의 칩 모델로 다룬다. Main 행·Keys 행의 각 구역과 `Hidden` 목록이 모두 드롭 대상이고, 고정 action과 소프트키를 구분 없이 칩으로 보여 준다. long-press Pointer Events drag(HTML native DnD 아님)와 삽입 표시선으로 구역·행·`Hidden` 경계를 넘어 옮기며, `Keys` 칩만은 확장행 구역을 drag target으로 받지 않는다. 칩은 `touch-action: pan-y`라 칩에서 시작한 스와이프도 Settings 패널을 스크롤한다. long-press로 drag가 활성화된 뒤에만 칩의 cancelable `touchmove`를 preventDefault해 브라우저 팬이 drag pointer를 취소하지 못하게 하고, 팬으로 끝난 스와이프가 남긴 click 억제는 다음 `pointerdown`에서 해제한다. **숨겨진 칩을 탭하면 곧바로 Keys 행 끝(`Keys`는 main 행)에 배치되고 선택 상태로 남는다** — 새로 등록한 사용자 키도 같은 자리에 놓인다. 배치된 칩을 탭하면 선택만 토글한다. 선택 시 행·구역 select(`Main · Left` … `Keys · Right`, `Hidden`)와 구역 내 `First`·`←`·`→`·`Last`가 열리고, 사용자 등록 키에는 `Delete`가 함께 붙는다 — drag는 enhancement이고 이 탭 경로가 정본이다. `Hidden` 목록은 미배치 action을 카테고리(Actions / Pane·Alert nav / Navigation / Editing / Ctrl keys / Function / Custom keys)로 묶어 보여 준다. `Reset`은 배치와 확장 상태만 기본값으로 되돌리고 등록된 사용자 키는 지우지 않는다. 두 행은 CSS grid 3열 + `justify-content: space-between`으로 그리며, 구역 컨테이너에는 `min-width: 0`을 주지 않는다(트랙의 자동 최소 크기가 0이 되면 구역이 내용보다 좁아져 이웃과 겹친다). 화면 폭보다 길면 각 행 내부에서만 좌우 스크롤하며 한 줄을 유지하고 scrollbar track은 노출하지 않는다. app/header/main/footer/key-bar 경계는 `min-width: 0`을 유지해 문서 outer overflow를 만들지 않는다.
 
 `Input bar`는 Main·Keys 배치 카드를 먼저 보여 주고, 미배치 키 목록은 기본 접힌 `Add keys`, 사용자 키 등록은 `Create custom key`, 행별 배율은 `Button sizes`에서 펼친다. 선택한 키의 이동 조작만 해당 구역 옆에 표시하며, 새로 추가한 키는 조작부까지 스크롤한다. 펼침 상태와 미완성 등록 입력은 편집 중 재렌더에 유지하지만 별도 영속하지 않는다. 접힌 `Add keys`도 숨김 드롭 대상이고, `Hidden` 이동·한 번 탭해 Keys 행에 추가·드래그·키 시퀀스 계약은 그대로다(ADR-0213 직접 적용).
 
@@ -1762,7 +1820,7 @@ Structured input body는 `{ "leaseId": "...", "text": "...", "submit": true|fals
 
 Direct WebSocket output은 첫 frame부터 공통 pair 계약을 쓴다. `TerminalOutputFrameHeaderV1 { type:"terminal.output", version:1, phase:"snapshot"|"delta", seqStart, seqEnd, byteLength, state? }` JSON text frame 바로 뒤에 정확히 한 개의 binary frame을 보낸다. snapshot만 `state { version, generation, snapshotStartSeq, snapshotSeq, sourceStartSeq, sourceSeq, snapshotKind, protocolRevision, modes:{bracketedPaste}, geometry:{revision,cols,rows} }`를 포함하고, 빈 snapshot도 길이 0 binary frame을 보낸다. Remote snapshot의 `snapshotKind`는 `screen`이다. desktop WebView의 rendererless xterm은 visible xterm과 같은 sequenced PTY bytes, authoritative PTY geometry, Unicode provider를 사용해 normal/alternate buffer·cursor·mode를 직렬화한다. Remote browser는 output WebSocket을 열기 전에 현재 viewport를 fit하고 같은 lease의 `/resize` 완료를 기다린다. attach 중 surface fit은 잠그며, snapshot은 `state.geometry`로 xterm을 먼저 resize한 뒤 reset/replay하고 나서 일반 viewport fit을 재개한다. Server는 요청 시점의 `{generation,seq,geometry}`를 frontend bridge에 제시하고, 반환 checkpoint가 같은 generation/geometry인지와 그 뒤 raw suffix가 ring에 남아 있는지를 검증한다. 검증과 suffix 캡처, bounded subscriber 등록은 같은 session lock 구간에서 원자적으로 이뤄진다. 경합하면 최대 3회 새 target으로 다시 시도하고, 안정화되지 않으면 연결을 닫아 client가 재attach하게 한다. frontend bridge가 끝난 뒤에는 첫 header/binary를 보내기 전에 active lease를 다시 검사해 attach 대기 중 release·expiry·reclaim된 controller에 화면을 보내지 않는다.
 
-screen checkpoint의 직렬화 길이는 원본 PTY sequence에 없으므로 V1 wire sequence에는 그 길이만큼 offset을 둔다. snapshot header의 `seqEnd - seqStart`와 binary 길이는 계속 같고 후속 delta도 같은 offset을 적용한다. 원본 PTY 경계는 `sourceStartSeq`/`sourceSeq`가 따로 나타낸다. 기기 로컬 `snapshotMaxKib`는 scrollback 보존량을 고르는 최초 요청 소프트 예산이며 현재 viewport·alternate buffer·복원 mode를 담은 최소 checkpoint는 이를 넘을 수 있다. 값을 보내지 못하는 구형 client에는 서버가 4 KiB fallback을 사용하고, 모든 checkpoint에는 1 MiB 절대 상한을 적용한다. slow consumer queue overflow·generation retire·sequence gap이면 socket을 닫는다. Cloud host도 같은 checkpoint/subscription 경로와 wire offset을 쓰고 공통 계약을 relay에 전달한다. 일시적인 checkpoint bridge/race/gap은 retryable `terminal_output_gap`, terminal 소멸은 `terminal_not_found`, malformed/절대 상한 위반은 `terminal_output_unavailable`로 전달한다. Remote page는 재접속이나 workspace 전환 시작에 기존 xterm을 먼저 비우지 않고, 새 snapshot header/binary pair를 완전히 검증한 직후 reset하고 적용한다. 사용자 주도 최초 연결·pane 전환은 replay 뒤 live tail에 착지하지만, 같은 terminal의 Output WebSocket 재접속과 자동 lease reclaim은 replay 전 surface-local viewport의 live tail 기준 행 오프셋을 복원한다. 새 checkpoint가 보존한 scrollback보다 오프셋이 크면 xterm 경계에서 clamp한다. 확장 metadata가 없는 과거 raw V1 snapshot은 pre-attach resize geometry에서만 legacy 호환으로 재생하고, `snapshotKind:"screen"`은 generation/source/geometry 전체를 필수 검증한다.
+screen checkpoint의 직렬화 길이는 원본 PTY sequence에 없으므로 V1 wire sequence에는 그 길이만큼 offset을 둔다. snapshot header의 `seqEnd - seqStart`와 binary 길이는 계속 같고 후속 delta도 같은 offset을 적용한다. 원본 PTY 경계는 `sourceStartSeq`/`sourceSeq`가 따로 나타낸다. 기기 로컬 `snapshotMaxKib`는 scrollback 보존량을 고르는 최초 요청 소프트 예산이며 현재 viewport·alternate buffer·복원 mode를 담은 최소 checkpoint는 이를 넘을 수 있다. 값을 보내지 못하는 구형 client에는 서버가 4 KiB fallback을 사용하고, 모든 checkpoint에는 1 MiB 절대 상한을 적용한다. slow consumer queue overflow·generation retire·sequence gap이면 socket을 닫는다. Cloud host도 같은 checkpoint/subscription 경로와 wire offset을 쓰고 공통 계약을 relay에 전달한다. 일시적인 checkpoint bridge/race/gap은 retryable `terminal_output_gap`, terminal 소멸은 `terminal_not_found`, malformed/절대 상한 위반은 `terminal_output_unavailable`로 전달한다. Remote page는 재접속이나 workspace 전환 시작에 기존 xterm을 먼저 비우지 않고, 새 snapshot header/binary pair를 완전히 검증한 직후 reset하고 적용한다. 그 사이 이전 pane 화면이 새 pane 이름 아래 멈춰 보이지 않도록, 표시 중인 terminal(`renderedTerminalId`)이 선택된 terminal과 다르거나 host가 step 이동을 아직 해석 중이면 terminal host에 `data-transition="pending"`을 걸어 이전 화면만 약하게 딤한다(문구·카드 없음). 상태는 이 원시 상태들에서만 계산하고, 딤은 150ms 지연 뒤 700ms에 걸쳐 opacity 0.6까지 천천히 내려가 빠른 전환에서는 깜빡이지 않으며 새 화면이 오면 150ms에 걸쳐 복귀한다. 포인터 입력은 막지 않는다. 같은 terminal 재접속은 화면이 이미 맞는 pane이므로 띄우지 않는다(transport 알림이 담당). desktop이 대기 pane을 끝내 열지 못하면 `data-transition="failed"`로 바꿔 딤은 유지하되 busy가 아님을 나타내고(실패 문구는 상태줄이 담당), 다른 pane으로 옮기거나 같은 pane을 다시 요청하면 해제한다. 사용자 주도 최초 연결·pane 전환은 replay 뒤 live tail에 착지하지만, 같은 terminal의 Output WebSocket 재접속과 자동 lease reclaim은 replay 전 surface-local viewport의 live tail 기준 행 오프셋을 복원한다. 새 checkpoint가 보존한 scrollback보다 오프셋이 크면 xterm 경계에서 clamp한다. 확장 metadata가 없는 과거 raw V1 snapshot은 pre-attach resize geometry에서만 legacy 호환으로 재생하고, `snapshotKind:"screen"`은 generation/source/geometry 전체를 필수 검증한다.
 
 scroll-top history expansion([ADR-0182](../adr/0182-remote-scroll-top-history-expansion.md)): output attach는 선택적 history 예산을 함께 보낼 수 있다. Direct/Cloud는 output WebSocket 쿼리 `historyKib`, Android E2E는 암호화 open record의 선택 필드 `historyKib`다. bundled Remote page는 최초 attach부터 기기 로컬 `snapshotMaxKib`를 보낸다. 서버가 쓰는 실제 예산은 `max(4 KiB fallback, clamp(historyKib, 1..=1024))`이며 파싱 불가능하거나 누락된 값은 세 transport 모두 fail-open으로 4 KiB attach가 된다. 1 MiB 절대 상한과 checkpoint 검증 경로는 그대로다. Remote page는 normal buffer이면서 mouse tracking이 아닐 때, 스크롤 제스처(위쪽 wheel·위쪽 드래그·Shift+PageUp)가 viewport를 최상단으로 *도달*시키거나 그 상태로 위쪽 드래그/wheel이 오면 재attach하며(제스처 없이 출력이 밀어낸 최상단 도달과 포인터 누름은 무시, 연결 중단 알림 중에는 요청 안 함), 요청 예산은 지금 들고 있는 화면에서 유도한다 — `clamp(현재 snapshot bytes × 4, 64 KiB, 1024 KiB)`. 재attach는 재접속 경로와 동일하게 live tail 기준 행 오프셋을 복원해 읽던 줄을 유지한다. 각 요청은 요청 id로 자기 attach의 snapshot만 정산하고, 끼어든 attach(재접속·pane 전환·조기 실패·소켓 종료·타임아웃)는 요청을 취소하면서 예산을 요청 직전 값으로 되돌린다. 전달된 snapshot의 binary 길이가 직전보다 크지 않으면 그 terminal에서는 더 이상 요청하지 않는다(행 수는 replay geometry와 이후 fit reflow 때문에 attach 간 비교 불가). 이미 client 상한(1024 KiB)으로 요청한 뒤 다음 요청이 다시 상한을 넘게 계산되고 직전 checkpoint가 그 예산을 실제로 채웠다면, attach 없이 "더 큰 checkpoint를 요구할 수 없다"는 별도 문구로 알리고 같은 상태로 들어간다(예산을 못 채운 checkpoint는 데스크톱이 먼저 바닥난 것이므로 "이전 출력 없음"으로 알린다). 두 한계 문구는 2초 동안만 표시한 뒤 현재 terminal 제목으로 돌아가며, 그 사이 다른 상태가 표시되면 덮어쓰지 않는다. 예산·소진 상태는 attach 대상 terminal에 귀속되어 pane 전환·연결 해제 시 초기화되고, 사용자가 직접 다시 attach하는 경우(같은 pane 재선택 포함)도 기기 예산에서 시작한다. 자동 재접속만 확장 예산을 유지하며, 소켓이 연속으로 열리지 않으면 기기 예산으로 내려가면서 소진 상태도 함께 푼다. `LaymuxNative.supportsOutputHistoryBudget()`이 없는 구버전 Android 커넥터에는 예산 필드를 보내지 않는다. 커넥터는 범위 밖 `historyKib`를 stream 실패가 아니라 "확장 없음"(0)으로 떨어뜨린다. `snapshotKind`가 없는 legacy 무순번 host는 attach 전에 알 수 없어 요청 1회를 쓴 뒤 확장 대상에서 제외된다.
 
@@ -1786,7 +1844,7 @@ Local `get_terminal_geometry_capabilities()`는 `{exactGeometryCutover:false,int
 
 Remote composer도 데스크톱과 동일하게 두 가지 과거 입력 recall 경로를 노출한다(issues #504/#505, [data-flow §8.8](./data-flow.md)). (1) 빈·포커스 초안에서 **Tab** 은 최신순·중복 제거·blank skip·최대 N개(기본 8)로 만든 listbox 를 에디터 위에 띄우고, (2) 비어 있지 않은 초안 타이핑 중에는 prefix(대소문자 무시)·최신순·중복 제거·`value` 완전 일치 제외이되 `send:true` 별표는 유지·cap 자동완성 dropdown 을 같은 자리에 띄운다. 두 목록은 초안 길이(0 vs >0)로 상호 배타이며, keydown 에서 자동완성 블록을 Tab-open 블록보다 앞에 둬 비어 있지 않은 초안의 Tab 이 팝업을 열지 않고 추천을 채우게 한다. 자동완성은 초기 강조가 없어(activeIndex=−1) Composer 키(`composer.remote.send`·`composer.remote.newline`, [ADR-0269](../adr/0269-remote-physical-keyboard-shortcuts.md))가 그대로 동작하고, ↑/↓ 로 강조가 생겨야 Enter 가 선택으로 바뀐다. **과거 입력 텍스트(history)와 일반 초안은 페이지 runtime Map(history 는 `Map<scopeKey, string[]>`, 버킷당 최대 200개)에만 두고 `localStorage`/`sessionStorage`/디스크 어디에도 영속하지 않는다. 단, 사용자가 선택한 text 파일과 5 KiB 초과 clipboard paste는 ADR-0181의 명시적 첨부 정책에 따라 bounded host cache 파일이 된다.** 이외의 초안은 ADR-0029 의 미전송·전송 문자열 비영속 경계를 Remote 로 그대로 확장한 것으로, 셸에 입력한 비밀번호 등 민감 문자열이 recall 표면이나 페이지 unload 뒤로 새지 않게 하는 보안 경계다. `commitComposer` 성공 콜백에서 전송된 텍스트만 이 Map 에 append 한다.
 
-[ADR-0226](../adr/0226-composer-stars-are-host-global-persistent-state.md)·[ADR-0229](../adr/0229-composer-starred-entries-have-label-and-send.md)에 따라 사용자가 recall/자동완성 행의 별표 버튼을 명시적으로 누르거나 Desktop Settings의 Terminal 섹션에서 직접 추가·편집한 항목만 비영속 경계의 예외다. SoT는 `settings.json`의 backend-owned `terminal.composerStarredEntries: {value,label,send}[]`이며 workspace·pane·history scope와 무관한 호스트 전역 ordered set이다. 정체성은 `value`다. 레거시 `string[]`은 `{value,label:"",send:false}`로 읽는다. 최대 200개, `value` UTF-8 16 KiB, `label` 256바이트이고 빈 `value`·중복·한도 초과는 거절한다. 일반 settings patch에서는 `/terminal/composerStarredEntries`가 sensitive read-only이고 frontend checkpoint는 디스크 최신값을 보존한다. Desktop Settings는 전체 목록을 표시하며 추가·삭제·행 클릭 편집을 일반 Save 초안과 분리해 즉시 전용 IPC로 반영한다. Desktop IPC `set_composer_starred_entry(text,starred,label?,send?,previousText?)` 반환과 `composer-starred-entries-changed` event payload는 객체 배열이다. bearer/IP/origin guard + active controller lease를 모두 요구하는 `GET /remote/v1/composer/starred?leaseId=...`, `POST /remote/v1/composer/starred`만 Remote 진입점이다. POST 본문은 `value`(JSON `text`는 alias)·`starred`·선택적 `label`/`send`/`previousValue`다. `text`와 `value`가 둘 다 있고 다르면 400이다. 생략된 `label`/`send`는 기존 항목이면 유지하고 신규면 `""`/`false`다. `previousValue`가 있으면 그 항목을 제자리에서 이름 변경하고, 새 `value`가 다른 항목과 겹치면 400이다. GET/POST 응답은 `{revision:number,entries?:{value,label,send}[]}`이고 mutation은 atomic replace 뒤 event를 내보낸다. Remote는 claim 직후 목록을 읽고 `localStorage` 사본을 만들지 않는다. 자동완성은 별표 최신순을 runtime history보다 먼저 합성하고 value/label prefix로 매칭한다. exact-query 제외는 `value` 완전 일치이며 `send:true`면 제외하지 않는다. 수락 시 초안을 `value`로 채우고 send면 Composer Send를 이어서 호출한다. 자동완성 롱클릭(500ms)은 Settings 행과 같은 편집기를 연다. 롱클릭 문턱을 넘긴 pointer는 pick/Send를 소비한다. 별표 버튼 pointer action은 행 선택을 막고 editor focus를 유지한다. 아래의 “Remote는 host settings를 읽지 않는다”는 설명은 이 좁은 별표 전용 endpoint를 제외한 범용 settings surface가 없다는 뜻이다.
+[ADR-0226](../adr/0226-composer-stars-are-host-global-persistent-state.md)·[ADR-0229](../adr/0229-composer-starred-entries-have-label-and-send.md)에 따라 사용자가 recall/자동완성 행의 별표 버튼을 명시적으로 누르거나 Desktop Settings의 Terminal 섹션에서 직접 추가·편집한 항목만 비영속 경계의 예외다. SoT는 로컬 SQLite 환경 영역의 backend-owned `terminal.composerStarredEntries: {value,label,send}[]`이며 workspace·pane·history scope와 무관한 호스트 전역 ordered set이다. 정체성은 `value`다. 레거시 `string[]`은 `{value,label:"",send:false}`로 읽는다. 최대 200개, `value` UTF-8 16 KiB, `label` 256바이트이고 빈 `value`·중복·한도 초과는 거절한다. 일반 settings patch에서는 `/terminal/composerStarredEntries`가 sensitive read-only이고 frontend checkpoint는 디스크 최신값을 보존한다. Desktop Settings는 전체 목록을 표시하며 추가·삭제·행 클릭 편집을 일반 Save 초안과 분리해 즉시 전용 IPC로 반영한다. Desktop IPC `set_composer_starred_entry(text,starred,label?,send?,previousText?)` 반환과 `composer-starred-entries-changed` event payload는 객체 배열이다. bearer/IP/origin guard + active controller lease를 모두 요구하는 `GET /remote/v1/composer/starred?leaseId=...`, `POST /remote/v1/composer/starred`만 Remote 진입점이다. POST 본문은 `value`(JSON `text`는 alias)·`starred`·선택적 `label`/`send`/`previousValue`다. `text`와 `value`가 둘 다 있고 다르면 400이다. 생략된 `label`/`send`는 기존 항목이면 유지하고 신규면 `""`/`false`다. `previousValue`가 있으면 그 항목을 제자리에서 이름 변경하고, 새 `value`가 다른 항목과 겹치면 400이다. GET/POST 응답은 `{revision:number,entries?:{value,label,send}[]}`이고 mutation은 atomic replace 뒤 event를 내보낸다. Remote는 claim 직후 목록을 읽고 `localStorage` 사본을 만들지 않는다. 자동완성은 별표 최신순을 runtime history보다 먼저 합성하고 value/label prefix로 매칭한다. exact-query 제외는 `value` 완전 일치이며 `send:true`면 제외하지 않는다. 수락 시 초안을 `value`로 채우고 send면 Composer Send를 이어서 호출한다. 자동완성 롱클릭(500ms)은 Settings 행과 같은 편집기를 연다. 롱클릭 문턱을 넘긴 pointer는 pick/Send를 소비한다. 별표 버튼 pointer action은 행 선택을 막고 editor focus를 유지한다. 아래의 “Remote는 host settings를 읽지 않는다”는 설명은 이 좁은 별표 전용 endpoint를 제외한 범용 settings surface가 없다는 뜻이다.
 
 자동완성 항목과 그 별표 버튼은 공용 `keepInputSurfaceFocus`로 `mousedown`·`pointerdown`의 기본 포커스 이동을 모두 막는다. 따라서 터치로 값을 채우거나 별표를 토글해도 Composer가 포커스와 열린 소프트 키보드를 유지한다. 실제 동작은 계속 `pointerup`/`click`이 담당한다.
 
@@ -1802,6 +1860,8 @@ Remote 는 host `settings.json` 을 읽지 않으므로(설정 endpoint 없음) 
 
 Remote page는 heartbeat와 output WebSocket을 별도 failure domain으로 취급한다. Heartbeat가 `401`/`403`/`409`처럼 권한·lease 상실을 명시하면 즉시 local control로 돌려주지만, 일시적 fetch 실패는 `heartbeatTimeoutSeconds`가 지날 때까지 재시도한다. Heartbeat는 최대 5초마다 보내고 실패 시 1초 뒤 빠르게 재시도하며, 개별 request는 최대 4초에 abort하므로 pending request 하나가 lease 유예 전체를 소진하지 않는다. Output WebSocket close/error는 곧바로 lease를 반납하지 않고, heartbeat가 active lease를 유지하는 동안 같은 terminal output stream을 지수 backoff로 다시 연다. 두 경로의 일시 오류 표시는 2초간 보류해 그 안에 복구되면 기존 연결 문구와 terminal surface를 그대로 유지한다. Output 재접속 중에도 기존 surface를 보존하고, 서버가 보내는 첫 V1 snapshot header/binary pair를 검증한 뒤 적용 직전에만 reset하여 tail 중복을 막는다. WebSocket `open`만으로는 복구 완료가 아니며, 첫 snapshot(legacy host는 첫 output)이 surface에 적용돼야 연결 문구와 backoff를 정상 상태로 정산한다. 열린 socket이 첫 snapshot을 20초 안에 주지 않으면 client가 닫고 같은 재attach backoff로 되돌린다. 헤더/바이너리 길이·phase·state 범위·sequence가 어긋나면 stream 전체를 버리고 재attach한다. 서버가 기존 lease 상실을 확정한 뒤에는 새 lease를 자동 claim하지 않는다 — 단 **문서가 보이는 순간**은 예외다([ADR-0027](../adr/0027-remote-connection-graceful-recovery.md), [ADR-0063](../adr/0063-remote-foreground-auto-reclaim.md)). 페이지는 떠날 때 lease를 반납하고(ADR-0037) 긴 백그라운드는 어차피 만료시키므로, 복귀는 항상 끊긴 상태로 시작한다. Connect 성공이 "이 탭이 제어권을 갖겠다"는 의사를 `laymux.remote.autoConnect`(**sessionStorage** — 의도는 탭 범위다. localStorage면 다른 탭이 상속해, 살아 있는 옛 탭이 lease를 계속 재확보하고 새 진입이 `409`를 맞는다)에 남기고 Release가 철회한다. 자동 경로는 claim 전에 `session/status`를 조회해 다른 클라이언트가 제어권을 가지고 있으면(`active`) 물러나며, 예외는 이 탭이 소유했던 lease만 대체할 수 있는 resume capability를 보유한 경우다. 이 조회는 자문이므로 실패해도 claim을 막지 않으며 `401`/`403`만 의사를 해제한다. `pagehide` release는 로컬 `leaseId`도 비운다 — bfcache 복원이 문서 변수를 되살리므로 남은 `leaseId`가 복귀를 건너뛰게 만든다. 의사가 남아 있으면 `visibilitychange`(보임)·`pageshow`(bfcache 복귀)·`online` 세 신호에서 자동으로 claim을 시도하며, 배경 탭에서는 어떤 경로로도 시도하지 않는다. `401`/`403`/`409`는 확정적 거절이므로 의사를 해제하고 사용자 조작을 기다리고, 일시 오류만 1초→최대 15초 지수 backoff로 보이는 동안 재시도한다. heartbeat의 `409`("lease is not active")는 **누가 제어권을 가졌는지 말하지 않으므로** 확정으로 취급하지 않는다 — 자리를 비운 사이의 만료와 호스트 탈취가 같은 응답을 낸다. heartbeat 단계의 확정은 `401`(토큰)·`403`(원격 비활성)뿐이고, 소유권은 재claim의 응답이 판정한다. claim의 `409`는 소유권 handoff drain 중(`transitioning: true`)이면 backoff 후 재시도하고, 그 외(다른 controller 보유, PC reclaim lockout)는 의사를 해제한다. 이를 위해 conflict 본문의 `active`/`transitioning`을 클라이언트 오류 객체로 올린다. 되찾는 경로에서는 만료를 오류로 표시하지 않고 `Reconnecting...`만 보여주며(가시성과 무관하게 — 배경에서 빨간 문구·네비게이션 열기를 해두면 복귀 시 깜빡임으로만 드러난다), 만료된 lease를 반납하지 않는다 — 반납은 서버를 `transitioning` drain으로 만들어 자신의 재claim이 `409`를 받게 하고 의사가 해제된다. resume capability도 이 경로에서만 유지한다(자기 lease 대체 한정, ADR-0037).
 
+수동 Connect의 claim이 성공한 뒤 최초 navigation 조회가 `502`/`503`/`504`로 실패하면, 이미 저장한 연결 의사를 유지하고 실패한 lease를 반납한 후 위 visible-document 재접속 타이머를 시작한다. 백엔드가 열렸지만 호스트 프론트엔드가 아직 준비되지 않은 콜드 스타트도 이 경로로 복구한다. 최초 claim 자체의 실패에는 이 보완을 적용하지 않으며, `401`/`403`/`409`의 확정적 거절은 기존대로 의사를 해제한다.
+
 위 output attach 20초는 WebSocket constructor 직후 시작하므로 handshake와 첫 snapshot 전달 시간을 모두 포함한다.
 
 Android E2E wrapper는 native bridge가 지원하면 위 heartbeat의 `AbortSignal`을 `cancelRemoteHttp(requestId)`로 전달한다. 이 메서드는 혼합 버전의 기존 APK가 최신 desktop 제공 페이지를 계속 열 수 있도록 E2E mode 진입 조건이 아닌 선택적 capability다. 이미 순차 AEAD의 in-flight가 된 exact ciphertext는 ADR-0146대로 응답·suspend·만료까지 소유권을 유지하지만, 최신 bridge에서 취소된 대기 heartbeat는 native 단일 executor에서 RPC를 시작하지 않아 뒤의 status/claim 재연결 요청을 막지 않는다. 문서별 난수 request-id prefix와 generation/session 검증으로 이전 WebView 문서의 늦은 완료도 새 요청에 전달하지 않는다.
@@ -1810,7 +1870,7 @@ Android native는 `onStop`에서 현재 Remote 문서의 `laymuxAndroidE2e.onNat
 
 Remote Composer 첨부 표시([ADR-0236](../adr/0236-remote-composer-inline-attachments.md))는 contenteditable의 파일별 인라인 칩이며, 기존 `/attachments` 응답과 `/input` 요청은 변경하지 않는다. 전송·복사 시 칩은 원래 quoting된 경로로 직렬화한다. 네이티브 편집의 Backspace/Delete·선택 삭제에 첨부 원자성을 적용하고 새 단축키는 추가하지 않는다. 칩 글자는 활성 `Keys` 버튼과 같은 theme accent를 사용해 surface 배경과 구분한다. Remote의 수직 resize와 ResizeObserver는 contenteditable 표면에 적용되며 Desktop textarea는 그대로다.
 
-Android 첨부 선택과 공유 수신([ADR-0290](../adr/0290-android-attachment-picker-and-share-inbox.md))은 `RemoteAttachmentPicker`가 소유한다. 선택 메뉴는 `최근 파일·파일 찾아보기`(OPEN_DOCUMENT)와 `갤러리·다른 앱에서 선택`(GET_CONTENT)을 제공하며 OPENABLE·accept MIME·multiple을 반영한다. MainActivity는 단일 task에서 SEND/SEND_MULTIPLE의 EXTRA_STREAM·ClipData content URI(중복 제거, 최대 64개)를 메모리로 받아 `공유받은 파일 첨부` 항목으로 제공한다. 이미 접속 중이면 현재 PC·터미널을 그대로 쓰고, 미접속이면 PC 연결과 터미널 준비를 기다린다. native는 무작위 공유 ID·개수만 `laymuxRemoteUi.offerSharedFiles({id,count})`로 보내고 페이지는 준비 완료 후 대상 이름을 표시하는 확인창을 자동 연다. `여기에 첨부` 클릭은 원래 chooser snapshot을 고정하고 file input을 같은 사용자 gesture 안에서 연다. native는 같은 문서의 `takeSharedFileSelection()`가 돌려준 ID만 기존 file callback으로 전달하며, 오래된 chooser/lease/terminal은 거절한다. `대상 변경`은 터미널 drawer 또는 PC 선택으로 이동하면서 파일을 유지하고, 새 대상 준비 후 재확인한다. 취소·system back은 문서 세대를 검증하는 `LaymuxNative.cancelSharedFiles(id)`로 해당 ID만 폐기한다. 새 공유는 이전 미첨부 공유를 대체하며, 구 PC 문서는 기존 첨부 메뉴로 fallback한다. URI·바이트·지속 접근 권한을 저장하지 않는다. 최근 파일은 시스템 제공 목록이고 앱 자체 첨부 이력은 아니다. 모든 파일은 기존 WebView file callback과 PC 업로드 정책을 따른다. onStop 동안 선택 결과는 유예하고 같은 문서의 foreground 복구 완료 후 한 번 전달한다. 문서 교체와 종료는 유예 결과를 즉시 취소한다. Remote 페이지는 focus 후 빈 FileList를 취소로 간주하지 않고 change·cancel 또는 lease/terminal 교체까지 chooser identity를 유지한다.
+Android 첨부 선택과 공유 수신([ADR-0290](../adr/0290-android-attachment-picker-and-share-inbox.md), [ADR-0293](../adr/0293-android-attachment-direct-system-picker.md))은 `RemoteAttachmentPicker`가 소유한다. 첨부 버튼은 메뉴 없이 OPENABLE·accept MIME·multiple을 반영한 GET_CONTENT 시스템 선택기를 바로 연다. 갤러리·다른 앱은 선택기 drawer에서 고른다. MainActivity는 단일 task에서 SEND/SEND_MULTIPLE의 EXTRA_STREAM·ClipData content URI(중복 제거, 최대 64개)를 메모리로 받는다. 이미 접속 중이면 현재 PC·터미널을 그대로 쓰고, 미접속이면 PC 연결과 터미널 준비를 기다린다. native는 무작위 공유 ID·개수만 `laymuxRemoteUi.offerSharedFiles({id,count})`로 보내고 페이지는 준비 완료 후 대상 이름을 표시하는 확인창을 자동 연다. `여기에 첨부` 클릭은 원래 chooser snapshot을 고정하고 file input을 같은 사용자 gesture 안에서 연다. native는 같은 문서의 `takeSharedFileSelection()`가 돌려준 ID만 기존 file callback으로 전달하며, 오래된 chooser/lease/terminal은 거절한다. `대상 변경`은 터미널 drawer 또는 PC 선택으로 이동하면서 파일을 유지하고, 새 대상 준비 후 재확인한다. 취소·system back은 문서 세대를 검증하는 `LaymuxNative.cancelSharedFiles(id)`로 해당 ID만 폐기한다. 새 공유는 이전 미첨부 공유를 대체한다. 일반 첨부 버튼은 공유를 소비하지 않으며, `offerSharedFiles`가 없는 구 PC 문서에서는 공유 첨부가 불가하다. URI·바이트·지속 접근 권한을 저장하지 않는다. 최근 파일은 시스템 제공 목록이고 앱 자체 첨부 이력은 아니다. 모든 파일은 기존 WebView file callback과 PC 업로드 정책을 따른다. onStop 동안 선택 결과는 유예하고 같은 문서의 foreground 복구 완료 후 한 번 전달한다. 문서 교체와 종료는 유예 결과를 즉시 취소한다. Remote 페이지는 focus 후 빈 FileList를 취소로 간주하지 않고 change·cancel 또는 lease/terminal 교체까지 chooser identity를 유지한다.
 
 #### Remote 물리 키보드와 Nav 단축키 (ADR-0273)
 
@@ -1923,9 +1983,32 @@ src-tauri/src/
 │   ├── mcp.rs                # 내장 MCP 서버 (release tool 44종 + resource 핸들러, §12.7)
 │   └── mcp_resources.rs      # MCP Resources URI 모델·구독 레지스트리
 ├── terminal/mod.rs           # 터미널 모델 (TerminalSession, Config, Notification)
-├── pty.rs                    # PTY 스폰 및 I/O
+├── pty.rs                    # PtyHandle (I/O·terminate)
+├── pty/spawn.rs              # 명령 구성·PtyBackend(Local/Daemon) spawn
+├── pty_daemon/               # PTY 데몬 (ADR-0300·0301, data-flow §8.23)
+│   ├── mod.rs                # 공개 재수출
+│   ├── backend.rs            # PtyBackend 선택·DaemonEndpoint·세션 key
+│   ├── server.rs             # 데몬: 연결·세션 catalog
+│   ├── handshake.rs          # 데몬: 인증 handshake(전체 deadline·proof)
+│   ├── idle.rs               # 데몬: idle 종료·GUI 없음 유예 종료 판정 (ADR-0312)
+│   ├── presence.rs           # GUI: 데몬마다 presence 연결 유지 (ADR-0312)
+│   ├── session.rs            # 데몬 세션: attach/detach·backlog·놓친 출력 전달(ADR-0309)
+│   ├── modes.rs              # 데몬 세션: 출력에서 추적한 터미널 모드·재결합 preamble
+│   ├── screen.rs             # 데몬 세션: 재결합 redraw용 화면 모델(vt100, panic 격리, ADR-0307)
+│   ├── inventory.rs          # GUI: 세션 목록 분류·분리 세션 epoch 종료 (ADR-0306)
+│   ├── client.rs             # GUI: 원격 PtySystem proxy
+│   ├── control.rs            # GUI: 인증 연결·세션 목록·id 기반 종료
+│   ├── client_queue.rs       # GUI: 유계 수신 queue·exit slot
+│   ├── launcher.rs           # discovery probe·데몬 기동·세대 조회·안 쓰는 세대 정리 (ADR-0308)
+│   ├── staging.rs            # Windows: 데몬 실행 파일(`laymux-pty-daemon.exe`)·ConPTY 사본
+│   ├── entry.rs              # `laymux --pty-daemon` 진입점
+│   ├── wire.rs / transport.rs / discovery.rs  # frame·로컬 socket·token
+│   └── tests.rs / adoption_tests.rs / handshake_tests.rs  # 실제 PTY·셸 기반 데몬 테스트
 ├── clipboard.rs              # 클립보드 (smart paste, 이미지)
 ├── ipc_server.rs             # IPC 소켓 (lx CLI ↔ IDE)
+├── local_socket.rs           # 현재 사용자 전용 Unix domain socket (ADR-0305)
+├── win_acl.rs                # Windows: 파일 DACL 을 현재 사용자·SYSTEM 으로 제한
+├── lx_endpoint.rs            # lx endpoint 파일 게시·해석 (ADR-0304)
 ├── output_buffer.rs          # 터미널 출력 링 버퍼
 ├── port_detect.rs            # 리스닝 포트 감지
 ├── git_watcher.rs            # Git 브랜치 감지
@@ -2002,7 +2085,7 @@ Android pairing lifecycle mutex는 `AppState` 밖에 있지만 QR 생성과 clou
 
 Android E2E 세션 레지스트리도 `AppState`의 번호 락보다 앞서는 외부 predecessor다. 일반 검증은 레지스트리 guard를 놓고 `remote_access`/`remote_control`을 읽지만, E2E claim 커밋은 세션 교체와 소유권 설치 사이의 TOCTOU를 없애기 위해 짧은 구간 동안 `Android E2E registry → remote_access → remote_control` 순서로 중첩한다. pairing lifecycle까지 함께 잡는 경로의 전체 상대 순서는 `pairing lifecycle → Android E2E registry → remote_access → remote_control`이다. 어떤 번호 락을 보유한 상태에서도 E2E 레지스트리로 역진입하지 않는다([ADR-0208](../adr/0208-android-e2e-file-viewer-typed-capability.md)).
 
-설정 파일 쓰기 게이트(`settings::SETTINGS_WRITE_LOCK`, `settings::MEMO_LOCK`)도 `AppState` 밖에 있지만 **leaf 락**이다 — 보유한 상태에서 다른 락을 잡지 않고 파일 하나를 쓴 뒤 곧바로 놓는다. 그래서 어느 `AppState` 락 안에서 획득해도 위 번호 순서를 깨지 않으며, 실제 호출자(`save_settings` → `update_persistent_remote_settings`)는 게이트를 놓은 뒤에야 `remote_access` 를 잡는다. leaf 성질이 데드락 자유의 근거이므로, 이 게이트를 보유한 채 `AppState` 락이나 다른 게이트를 잡는 역방향은 금지한다 — 쓰기 대상이 늘어나면 게이트를 추가하지 말고 이 leaf 규칙을 지키는지 먼저 확인한다 (ADR-0202).
+설정 쓰기 게이트(`settings::SETTINGS_WRITE_LOCK`)와 메모 게이트(`settings::MEMO_LOCK`)는 `AppState` 밖에 있다. 이들 게이트 안에서는 `AppState` 락을 획득하지 않는다. 설정 게이트는 SQLite 초기 연결 gate를 뒤에 취할 수 있고, DB 초기화와 transaction은 `AppState` 락이나 설정 게이트를 역으로 획득하지 않는다([ADR-0299](../adr/0299-portable-settings-and-local-sqlite-state.md)). 실제 runtime reconcile은 설정 저장이 끝나 게이트를 놓은 뒤 수행한다. 메모 게이트는 기존 leaf 규칙을 유지한다.
 
 terminal-output session 내부에서 둘 이상의 세부 락을 중첩할 때는 `per-terminal protocol gate → session runtime → output ring → desktop flow` 순서를 따른다. retirement처럼 일부 락을 건너뛰는 경로도 남은 락의 상대 순서는 유지한다.
 
@@ -2010,7 +2093,7 @@ poison recovery도 이 순서를 바꾸지 않는다. discard helper는 역순 �
 
 **콜백 내 락**: PTY 콜백 등 비동기 콜백에서는 독립적으로 락을 획득한다. 호출자의 락을 전달하지 않는다.
 
-Localhost preview의 비동기 세션 슬롯은 Remote 상태 락보다 먼저 획득한다([ADR-0295](../adr/0295-remote-localhost-web-preview.md)). 슬롯을 기다리는 동안 번호 락을 보유하지 않으며, 슬롯을 얻은 뒤 lease를 다시 검증한다. 다운로드·캐시 삽입·세션 교체는 이 슬롯으로 직렬화한다. 완료 응답의 lease 검증은 슬롯을 놓은 뒤 수행한다.
+Localhost preview의 비동기 세션 슬롯은 Remote 상태 락보다 먼저 획득한다([ADR-0316](../adr/0316-remote-localhost-web-preview.md)). 슬롯을 기다리는 동안 번호 락을 보유하지 않으며, 슬롯을 얻은 뒤 lease를 다시 검증한다. 다운로드·캐시 삽입·세션 교체는 이 슬롯으로 직렬화한다. 완료 응답의 lease 검증은 슬롯을 놓은 뒤 수행한다.
 
 ### 14.4 상수 관리
 
@@ -2019,12 +2102,12 @@ Localhost preview의 비동기 세션 슬롯은 Remote 상태 락보다 먼저 �
 ```rust
 // ❌ 금지 — 문자열 리터럴 직접 사용
 app.emit("terminal-cwd-changed", payload);
-env.push(("LX_SOCKET".to_string(), path));
+env.push(("LX_ENDPOINT_FILE".to_string(), path));
 
 // ✅ 사용
 use crate::constants::*;
 app.emit(EVENT_TERMINAL_CWD_CHANGED, payload);
-env.push((ENV_LX_SOCKET.to_string(), path));
+env.push((ENV_LX_ENDPOINT_FILE.to_string(), path));
 ```
 
 **예외**: 해당 모듈에서만 사용되는 내부 상수는 모듈 내에 정의해도 된다.
@@ -2044,7 +2127,7 @@ env.push((ENV_LX_SOCKET.to_string(), path));
 
 **플랫폼 분기**: `#[cfg(target_os = "windows")]` / `#[cfg(not(target_os = "windows"))]`를 사용한다. 긴 플랫폼별 코드는 별도 함수로 추출하고 `cfg` 어트리뷰트를 함수 수준에 적용한다.
 
-**프로세스 실행**: `std::process::Command::new()` 대신 반드시 `crate::process::headless_command()`를 사용한다. (Windows 콘솔 창 깜빡임 방지)
+**프로세스 실행**: `std::process::Command::new()` 대신 반드시 `crate::process::headless_command()`를 사용한다. (Windows 콘솔 창 깜빡임 방지) 예외: Windows PTY 데몬 기동(`pty_daemon/launcher.rs` `windows_spawn`)은 handle 상속을 끄기 위해 `CreateProcessW`(`bInheritHandles = FALSE`, `CREATE_NO_WINDOW`)를 직접 호출한다. std `Command`는 상속을 끌 수 없어 오래 사는 데몬이 GUI의 pipe 끝을 쥐게 된다([ADR-0300](../adr/0300-detached-pty-daemon-core.md)).
 
 **로깅**: `eprintln!()` 대신 `tracing` 매크로를 사용한다.
 ```rust
@@ -2083,7 +2166,7 @@ pub fn get_terminal_summaries_inner(
 
 **xterm binary mouse 입력**: desktop 전용 `write_terminal_binary_input(id, generation, data: number[])`은 xterm 6.0.0 DEFAULT mouse `onBinary`의 `CSI M Pb Px Py`를 문자열 UTF-8 경계 없이 전달한다([ADR-0216](../adr/0216-xterm-legacy-mouse-binary-input-boundary.md)). UI는 각 code unit이 `0x00..0xff`인지 검사하고 Rust는 정확한 6바이트 형식, current PTY generation과 Local human-control owner를 다시 검증한다. command는 입력 IPC/FIFO 순서를 유지하는 plain command이며 Automation/Remote API에는 노출하지 않는다. Linux는 payload의 모든 바이트를 보존하고, Windows는 UTF-8인 ConPTY 경계에서 바뀌는 `0x80..0xff` payload를 enqueue 전에 거부한다. 실패는 재시도하지 않는 human-input delivery failure이며 SGR `onData`, protocol reply, replay와 최근 사용자 입력 모델에는 영향을 주지 않는다.
 
-**메인 스레드 직렬화에 기대지 않기**: threadpool 로 옮긴 커맨드는 동시에 실행될 수 있다. 같은 파일을 쓰는 경로는 명시적 게이트가 필요하다 — settings.json 은 `SETTINGS_WRITE_LOCK` 으로 직렬화하고 임시 파일 + `fs::rename` 으로 교체한다(이 게이트는 §14.3 의 leaf 락이다 — 보유 중에 다른 락을 잡지 않는다). pane 별 출력 캐시나 창 지오메트리처럼 파일당 writer 가 하나인 경로는 게이트를 두지 않는다.
+**메인 스레드 직렬화에 기대지 않기**: threadpool 로 옮긴 커맨드는 동시에 실행될 수 있다. 같은 파일을 쓰는 경로는 명시적 게이트가 필요하다 — settings.json 은 `SETTINGS_WRITE_LOCK` 으로 직렬화하고 임시 파일 + `fs::rename` 으로 교체한다(이 게이트는 AppState 락을 획득하지 않는다 — DB 초기 연결 gate만 뒤에 취할 수 있다). pane 별 출력 캐시나 창 지오메트리처럼 파일당 writer 가 하나인 경로는 게이트를 두지 않는다.
 
 **`pub use` 재수출**: `commands/mod.rs`는 서브모듈을 `pub use *`로 재수출하여, `lib.rs`의 `generate_handler![]` 매크로가 `commands::function_name`으로 참조할 수 있게 한다. 서브모듈 분할 시에도 외부 인터페이스는 변하지 않는다.
 
@@ -2261,6 +2344,10 @@ PowerShell의 PSReadLine 통합은 [ADR-0262](../adr/0262-powershell-command-lif
 
 ### 종료·업데이트 진행 계약 (ADR-0264)
 
-`UpdateStatus.operation`은 idle/checking/downloading/preparing/installing이다. `preparation`은 nullable `{stage: checkpoint|interrupting|settling|caching, completed, total: number|null, warning: string|null}`이며 `exitSettings`는 설치 수락 시 저장된 종료 설정이다. idle 조회는 현재 저장된 종료 설정을 반환한다. Tauri `report_app_update_preparation(requestId,progress)`는 native request가 pending이고 update가 preparing일 때만 수락한다. 기존 Remote GET `/remote/v1/update`는 같은 진행 정보를 포함한 snapshot을 반환한다. 설치 요청은 기존 active controller lease를 유지한다.
+`UpdateStatus.operation`은 idle/checking/downloading/preparing/installing이다. `preparation`은 nullable `{stage: checkpoint|caching, completed, total: number|null, warning: string|null}`이다. 업데이트는 터미널을 인터럽트하지 않으므로 종료 설정(`exit`)을 싣지 않는다([ADR-0314](../adr/0314-update-never-interrupts-terminals.md)). Tauri `report_app_update_preparation(requestId,progress)`는 native request가 pending이고 update가 preparing일 때만 수락한다. 기존 Remote GET `/remote/v1/update`는 같은 진행 정보를 포함한 snapshot을 반환한다. 설치 요청은 기존 active controller lease를 유지한다.
 
-Dev POST `/api/v1/ui/lifecycle`는 `{action:"open"}`으로 실제 업데이트 모달을 열고, `{action:"close"}`로 preview를 해제한다. `{kind:"close"|"update",stage:"ready"|"downloading"|"checkpoint"|"interrupting"|"settling"|"caching"|"installing"|"closing",completed?,total?,cleanup?,error?}`는 지정한 진행 상태의 preview를 표시한다. 실제 정리나 설치를 수행하지 않고 동일한 컴포넌트를 렌더한다. Rust debug gate와 frontend DEV gate를 모두 적용한다.
+Dev POST `/api/v1/ui/lifecycle`는 `{action:"open"}`으로 실제 업데이트 모달을 열고, `{action:"close"}`로 preview를 해제한다. `{kind:"close"|"update",stage:"ready"|"downloading"|"checkpoint"|"interrupting"|"settling"|"caching"|"installing"|"closing",completed?,total?,cleanup?,error?}`는 지정한 진행 상태의 preview를 표시한다. `interrupting`·`settling`과 `cleanup`은 close에만 적용되며 update preview에 주면 거부한다. 실제 정리나 설치를 수행하지 않고 동일한 컴포넌트를 렌더한다. Rust debug gate와 frontend DEV gate를 모두 적용한다.
+
+Dev POST `/api/v1/dev/update-handoff`는 설치기 없이 업데이트 인계(ADR-0308)를 실행한다. `{mode:"installer"}`는 설치 직전 teardown(`release_installer_file_locks`)을 실행한 뒤 `process::exit(0)`으로 끝나고, `{mode:"restart"}`는 인계를 표시한 뒤 `app.restart()`를 부른다. 설치 뒤의 경로만 실행한다. 업데이트 checkpoint 저장과 입력 차단(`prepare`)은 실행하지 않으므로, 데몬 세션이 GUI보다 오래 사는지만 확인하고 checkpoint의 agent resume 판정은 확인하지 않는다. 응답(202) 직후 프로세스가 끝난다. release는 403이다.
+
+Dev POST `/api/v1/ui/key`는 `{key,ctrl?,alt?,shift?}`로 포커스된 요소에서 `keydown` 하나를 발생시켜, 실제 키 입력과 같은 터미널 패스스루 → 문서 단축키 경로를 자율 검증 루프에서 재현한다(OS 키 주입이 불가능한 비대화형 세션 대비). 응답은 `{dispatched,defaultPrevented,target}`이다. Rust debug gate와 frontend DEV gate를 모두 적용한다.

@@ -281,7 +281,7 @@ ADR 이 필요한 대표 기준:
 | [0261](0261-remote-visible-tool-swipe-cycle.md) | Remote 도구 스와이프는 표시된 도구를 고정 순서로 순환한다 | Superseded by 0263 (안내 줄만) |
 | [0262](0262-powershell-command-lifecycle.md) | PowerShell 작업 경계는 수락된 줄 입력과 프롬프트가 소유한다 | Accepted |
 | [0263](0263-remote-tool-swipe-hint-removal.md) | Remote 도구의 상단 스와이프 안내 줄을 제거한다 | Accepted |
-| [0264](0264-exit-update-progress-dialog.md) | 종료·업데이트 준비 단계와 전용 진행 모달 공유 | Accepted |
+| [0264](0264-exit-update-progress-dialog.md) | 종료·업데이트 준비 단계와 전용 진행 모달 공유 | Accepted (partially superseded by [0314](0314-update-never-interrupts-terminals.md)) |
 | [0265](0265-pc-remote-first-use-defaults.md) | PC·Remote의 첫 사용 기본 구성을 정한다 | Accepted (partially superseded by [0277](0277-remote-pane-clear-soft-key.md)) |
 | [0266](0266-remote-file-open-on-device.md) | Remote 파일 열기는 원본 바이트를 기기 뷰어에 전달한다 | Accepted |
 | [0267](0267-codex-live-session-age-policy.md) | 프로세스 기록으로 확인한 현재 Codex 대화는 파일 나이로 만료시키지 않는다 | Accepted |
@@ -303,15 +303,37 @@ ADR 이 필요한 대표 기준:
 | [0283](0283-opt-in-hook-task-state.md) | 훅 상태는 현재 대화 귀속을 검증한 뒤 선택적으로 사용한다 | Superseded by 0284 |
 | [0284](0284-codex-title-hook-binding.md) | Codex 공유 서버의 훅은 현재 TUI 제목의 대화 식별자로 연결한다 | Accepted |
 | [0285](0285-readable-agent-hook-commands.md) | 훅 명령은 읽을 수 있는 형태로 설치하고 변경 개수를 먼저 안내한다 | Accepted |
-| [0286](0286-clickable-agent-resume-hints.md) | 종료 안내의 복원 링크는 설정 명령으로 같은 셸에서 수동 실행한다 | Proposed |
+| [0286](0286-clickable-agent-resume-hints.md) | 종료 안내의 복원 링크는 설정 명령으로 같은 셸에서 수동 실행한다 | Accepted (partially superseded by [0315](0315-remote-resume-shell-state-from-host.md)) |
 | [0287](0287-wsl-claude-daemon-process-role.md) | WSL Claude daemon은 대화 프로세스 후보에서 제외한다 | Accepted |
 | [0288](0288-path-link-home-and-hangul-tail.md) | path-link 는 `~` 를 pane 셸의 홈으로 풀고 경로에 붙은 한글 조사를 뗀 후보를 함께 낸다 (0148·0188·0191·0235 확장) | Accepted |
 | [0289](0289-agent-hook-update-notification.md) | 설치된 에이전트 훅의 갱신 필요를 자동 검사하고 사용자 동작으로 갱신한다 | Accepted |
-| [0290](0290-android-attachment-picker-and-share-inbox.md) | Android 첨부 결과를 복귀 후 전달하고 공유 파일을 기존 첨부 경로로 받는다 | Accepted |
+| [0290](0290-android-attachment-picker-and-share-inbox.md) | Android 첨부 결과를 복귀 후 전달하고 공유 파일을 기존 첨부 경로로 받는다 | 첨부 선택 메뉴 부분만 [0293](0293-android-attachment-direct-system-picker.md)로 대체 |
 | [0291](0291-remote-host-viewer-unread-signal.md) | PC 뷰어 열림은 heartbeat 의 경로 없는 신호로 알리고 Files 버튼 한 번으로 진입한다 (0044 `From host` 대체, 0198 Decision 6·8 개정) | Accepted |
 | [0292](0292-codex-hook-lifecycle-session-proof.md) | Codex 종료 복원점은 검증한 훅 대화 식별자를 우선한다 | Accepted |
+| [0293](0293-android-attachment-direct-system-picker.md) | Android 첨부 버튼은 선택 메뉴 없이 시스템 파일 선택기를 바로 연다 (0290 첨부 메뉴 대체) | Accepted |
 | [0294](0294-codex-process-bound-lifecycle-proof.md) | 훅 우선 종료 확인은 정확한 프로세스 대화 귀속도 증거로 사용한다 | Accepted |
-| [0295](0295-remote-localhost-web-preview.md) | Remote localhost 웹 프리뷰는 고정 origin의 읽기 세션과 격리된 실행 표면을 사용한다 | Proposed |
+| [0295](0295-codex-continuous-conversation-checkpoint.md) | Codex 대화 귀속을 평상시 저장과 종료 확인이 공유한다 | Accepted |
+| [0296](0296-committed-checkpoint-reuse-on-finalization.md) | 변경 없는 저장 완료 복원점을 종료·업데이트에서 재사용한다 | Accepted |
+| [0297](0297-pane-stack-slot-layer-model.md) | 워크스페이스 pane 은 기하를 소유하는 슬롯, 콘텐츠는 순서 있는 레이어 목록(스택)이 소유한다 | Accepted |
+| [0298](0298-pane-rearrangement-automation-parity.md) | Pane 재배치(레이어 이동·꺼내기·스택 합치기·워크스페이스 간 이동)를 사용자 조작 수준까지 Automation/MCP 에 연다 | Accepted |
+| [0299](0299-portable-settings-and-local-sqlite-state.md) | 이식 가능한 설정과 로컬 SQLite 복원 상태를 분리한다 | Accepted |
+| [0300](0300-detached-pty-daemon-core.md) | 터미널 PTY와 자식 프로세스는 GUI와 분리된 PTY 데몬이 소유한다 (opt-in 코어) | Proposed |
+| [0301](0301-pty-daemon-default-adoption.md) | PTY 데몬을 기본으로 켜고, 새 GUI는 살아 있는 세션을 재결합한다 (0300의 opt-in 대체) | Proposed |
+| [0302](0302-tui-screen-width-wrap-join.md) | TUI 화면 폭 줄바꿈은 버퍼 셀 폭으로 판정해 복사·여러 줄 URL 링크가 공유한다 | Accepted |
+| [0303](0303-pty-daemon-mode-tracking-and-adoption-preamble.md) | PTY 데몬이 출력에서 터미널 모드를 추적하고, replay 없는 재결합에서 preamble로 다시 단언한다 (0300 경계 정정) | Proposed |
+| [0304](0304-lx-endpoint-file.md) | 터미널의 `lx`는 고정 경로 endpoint 파일(`LX_ENDPOINT_FILE`)로 현재 GUI를 찾는다 | Proposed |
+| [0305](0305-user-only-local-socket-transport.md) | PTY 데몬과 `lx` IPC는 현재 사용자 전용 Unix domain socket(Windows AF_UNIX + DACL)을 쓴다 (0300의 Windows loopback TCP 정정) | Proposed |
+| [0306](0306-pty-daemon-session-inventory.md) | 분리된 PTY 데몬 세션을 보고, pane이 잡지 않은 세션만 목록 epoch로 끝낸다 | Proposed |
+| [0307](0307-pty-daemon-adoption-screen-redraw.md) | 데몬이 출력으로 화면 모델(vt100)을 유지하고, replay 없는 재결합에서 preamble 뒤에 현재 화면을 다시 그린다 (0303 범위 확장) | Proposed |
+| [0308](0308-pty-daemon-generations-across-updates.md) | 업데이트 중에도 데몬 세션을 유지하고 데몬 세대를 공존시킨다 (0301·0201 일부 대체) | Proposed |
+| [0309](0309-adopted-terminal-takes-missed-osc-facts.md) | 재결합한 GUI가 놓친 출력의 OSC 사실을 단일 패스로 처리한다 | Proposed |
+| [0310](0310-remote-workspace-management-menu.md) | Remote 워크스페이스 관리는 명시적 메뉴와 호스트 이름 변경을 사용한다 | Accepted |
+| [0311](0311-remote-save-workspace-template.md) | Remote는 지정한 워크스페이스를 전환 없이 새 템플릿으로 저장한다 | Accepted |
+| [0312](0312-pty-daemon-grace-without-gui.md) | PTY 데몬은 업데이트 재시작을 넘길 만큼만 세션을 유지한다 (0301·0306 일부 대체) | Proposed |
+| [0313](0313-remote-toolbar-shared-size-tokens.md) | Remote 툴바는 하나의 크기 토큰을 공유하고 드로어 헤더는 자기 폭으로 압축한다 (0180 일부 정정) | Accepted |
+| [0314](0314-update-never-interrupts-terminals.md) | 업데이트는 터미널을 인터럽트하지 않고, Ctrl+C 정리는 명시적 종료에만 쓴다 (0264 일부 대체) | Accepted |
+| [0315](0315-remote-resume-shell-state-from-host.md) | Remote 복원 링크의 셸 판정은 탭 시점의 호스트 상태만 쓴다 (0286 일부 정정) | Accepted |
+| [0316](0316-remote-localhost-web-preview.md) | Remote localhost 웹 프리뷰는 고정 origin의 읽기 세션과 격리된 실행 표면을 사용한다 | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

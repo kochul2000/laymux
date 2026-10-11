@@ -1,6 +1,156 @@
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
 import { installRemoteClientRoutes, remoteClientMarkupWithoutXterm } from "./remote-client-assets";
 
+test("저장 완료 후 템플릿 목록 조회 실패는 저장 재시도를 유도하지 않는다", async ({ page }) => {
+  await routeRemoteWithWorkspaces(page, []);
+  let posts = 0;
+  let failRefresh = true;
+  await page.route("http://remote.test/remote/v1/layouts", async (route) => {
+    if (route.request().method() === "POST") posts += 1;
+    else if (failRefresh) {
+      failRefresh = false;
+      await route.fulfill({ status: 502, json: { error: "List refresh failed" } });
+      return;
+    }
+    await route.fallback();
+  });
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.locator("#connect").click();
+  await page.locator("#navToggle").click();
+  await page.locator('[data-workspace-manage="ws-a"]').click();
+  await page.locator('[data-workspace-action="template"]').click();
+  await page.locator("#workspaceNameInput").fill("저장 완료 템플릿");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await expect(page.locator("#statusText")).toContainText("saved");
+  await page.locator("#newWorkspace").click();
+  await expect(page.locator("#newWorkspacePanel")).toContainText("저장 완료 템플릿");
+  expect(posts).toBe(1);
+});
+
+test("리모트는 비활성 workspace를 템플릿으로 저장하고 생성 목록에 표시한다", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const controls = await routeRemoteWithWorkspaces(page, []);
+  const posts: unknown[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/remote/v1/layouts" && request.method() === "POST")
+      posts.push(request.postDataJSON());
+  });
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.locator("#connect").click();
+  await expect.poll(() => controls.outputAttachments).toEqual(["term-a1"]);
+  await page.locator("#navToggle").click();
+  await page.locator('[data-workspace-manage="ws-b"]').click();
+  await page.locator('[data-workspace-action="template"]').click();
+  await expect(page.getByLabel("Template name", { exact: true })).toHaveValue("Beta");
+  await page.locator("#workspaceNameInput").fill("개발 템플릿");
+  await page.screenshot({ path: "../.screenshots/remote-workspace-template-mobile.png" });
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  expect(posts).toEqual([{ workspaceId: "ws-b", name: "개발 템플릿", leaseId: "lease-1" }]);
+  expect(controls.outputAttachments).toEqual(["term-a1"]);
+  await expect(page.locator('[data-workspace-item="ws-a"]')).toHaveClass(/active/);
+  await page.locator("#newWorkspace").click();
+  await expect(page.locator("#newWorkspacePanel")).toContainText("개발 템플릿");
+});
+
+test("리모트 템플릿 저장 실패는 이름 입력을 유지한다", async ({ page }) => {
+  await routeRemoteWithWorkspaces(page, []);
+  await page.route("http://remote.test/remote/v1/layouts", (route) =>
+    route.request().method() === "POST"
+      ? route.fulfill({ status: 502, json: { error: "Template save failed" } })
+      : route.fallback(),
+  );
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.locator("#connect").click();
+  await page.locator("#navToggle").click();
+  await page.locator('[data-workspace-manage="ws-a"]').click();
+  await page.locator('[data-workspace-action="template"]').click();
+  await page.locator("#workspaceNameInput").fill("새 템플릿");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.locator("#workspaceManager [role=alert]")).toContainText(
+    "Template save failed",
+  );
+  await expect(page.locator("#workspaceNameInput")).toHaveValue("새 템플릿");
+});
+
+test("워크스페이스 관리 메뉴는 전환 없이 이름을 변경하고 output 연결을 유지한다", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const controls = await routeRemoteWithWorkspaces(page, []);
+  const mutations: Array<{ path: string; method: string; body: unknown }> = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/workspaces/") && request.method() !== "GET") {
+      mutations.push({
+        path: new URL(request.url()).pathname,
+        method: request.method(),
+        body: request.postDataJSON(),
+      });
+    }
+  });
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.locator("#connect").click();
+  await expect.poll(() => controls.outputAttachments).toEqual(["term-a1"]);
+  await page.locator("#navToggle").click();
+  const trigger = page.locator('[data-workspace-manage="ws-b"]');
+  await trigger.click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.locator("#workspaceManagerTitle")).toHaveText("Beta");
+  expect(mutations).toEqual([]);
+  await page.screenshot({ path: "../.screenshots/remote-workspace-management-mobile.png" });
+  await page.locator('[data-workspace-action="rename"]').click();
+  await expect(page.locator("#workspaceNameInput")).toHaveValue("Beta");
+  await page.locator("#workspaceNameInput").fill("새 작업");
+  await page.screenshot({ path: "../.screenshots/remote-workspace-rename-mobile.png" });
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await expect(page.locator('[data-workspace-item="ws-b"] .workspace-name')).toHaveText("새 작업");
+  expect(mutations).toEqual([
+    {
+      path: "/remote/v1/workspaces/ws-b",
+      method: "PUT",
+      body: { name: "새 작업", leaseId: "lease-1" },
+    },
+  ]);
+  expect(controls.outputAttachments).toEqual(["term-a1"]);
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await trigger.click();
+  expect(
+    await page.evaluate(() =>
+      (
+        window as typeof window & { laymuxRemoteUi: { dismissTopLayer: () => boolean } }
+      ).laymuxRemoteUi.dismissTopLayer(),
+    ),
+  ).toBe(true);
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await expect(page.locator("#drawerWorkspaceView")).toBeVisible();
+});
+
+test("관리 메뉴는 마지막 표시 워크스페이스의 숨김을 막고 이름 변경 오류를 보존한다", async ({
+  page,
+}) => {
+  await routeRemoteWithWorkspaces(page, [], { initialHiddenWorkspaceIds: ["ws-b"] });
+  await page.route("http://remote.test/remote/v1/workspaces/ws-a", (route) =>
+    route.fulfill({ status: 502, json: { error: "Rename failed" } }),
+  );
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.locator("#connect").click();
+  await page.locator("#navToggle").click();
+  await page.locator('[data-workspace-manage="ws-a"]').click();
+  await expect(page.locator('[data-workspace-action="hide"]')).toBeDisabled();
+  await page.locator('[data-workspace-action="rename"]').click();
+  await page.locator("#workspaceNameInput").fill("유지할 이름");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.locator("#workspaceManager [role=alert]")).toContainText("Rename failed");
+  await expect(page.locator("#workspaceNameInput")).toHaveValue("유지할 이름");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+});
+
 /**
  * Seed a v2 key-bar layout placing `softKeyIds` in the Keys row. Placement is
  * the only activation signal, so a test that drives a specific key has to put
@@ -76,8 +226,10 @@ async function routeRemoteWithWorkspaces(
   const focusRequests: Array<{ terminalId: string; body: { leaseId: string } }> = [];
   const hiddenWorkspaceIds = new Set(options.initialHiddenWorkspaceIds ?? []);
   const hiddenPaneIds = new Set<string>();
+  const savedLayouts: Array<{ id: string; name: string }> = [];
   const outputAttachments: string[] = [];
   let activeWorkspaceId = "ws-a";
+  const workspaceNames: Record<string, string> = { "ws-a": "Alpha", "ws-b": "Beta" };
   let notifications: Array<Record<string, unknown>> = [];
   let unreadNotificationCount = 0;
   let visibilityFallbackWorkspaceId: string | null = null;
@@ -141,6 +293,18 @@ async function routeRemoteWithWorkspaces(
   await installRemoteClientRoutes(page);
   await page.route("http://remote.test/remote/v1/**", async (route) => {
     const url = new URL(route.request().url());
+    if (url.pathname === "/remote/v1/layouts") {
+      if (route.request().method() === "POST") {
+        savedLayouts.push({
+          id: `layout-${savedLayouts.length + 1}`,
+          name: route.request().postDataJSON().name,
+        });
+        await route.fulfill({ status: 201, json: { success: true, data: { exported: true } } });
+      } else {
+        await route.fulfill({ json: { layouts: savedLayouts } });
+      }
+      return;
+    }
     if (url.pathname === "/remote/v1/session/claim") {
       await route.fulfill({ json: { leaseId: "lease-1", heartbeatTimeoutSeconds: 45 } });
       return;
@@ -160,7 +324,7 @@ async function routeRemoteWithWorkspaces(
           ],
           activeWorkspace: {
             id: activeWorkspaceId,
-            name: activeWorkspaceId === "ws-a" ? "Alpha" : "Beta",
+            name: workspaceNames[activeWorkspaceId],
             panes:
               activeWorkspaceId === "ws-a"
                 ? [paneWithVisibility(paneA1), paneWithVisibility(paneA2)]
@@ -169,7 +333,7 @@ async function routeRemoteWithWorkspaces(
           workspaces: [
             {
               id: "ws-a",
-              name: "Alpha",
+              name: workspaceNames["ws-a"],
               isActive: activeWorkspaceId === "ws-a",
               terminalPaneCount: 2,
               selectorSummary: { terminalCount: 2, lastCommand: null, latestNotification: null },
@@ -179,7 +343,7 @@ async function routeRemoteWithWorkspaces(
             },
             {
               id: "ws-b",
-              name: "Beta",
+              name: workspaceNames["ws-b"],
               isActive: activeWorkspaceId === "ws-b",
               terminalPaneCount: 1,
               selectorSummary: {
@@ -224,6 +388,12 @@ async function routeRemoteWithWorkspaces(
           },
         },
       });
+      return;
+    }
+    if (route.request().method() === "PUT" && url.pathname.startsWith("/remote/v1/workspaces/")) {
+      const id = url.pathname.split("/").at(-1)!;
+      workspaceNames[id] = route.request().postDataJSON().name;
+      await route.fulfill({ json: { success: true, data: { renamed: id } } });
       return;
     }
     const workspaceVisibilityMatch = url.pathname.match(
@@ -546,7 +716,7 @@ test.describe("remote mobile layout", () => {
     await expect(page.locator("#drawerConnectionView")).toBeHidden();
     await expect(page.locator("#drawerSettingsView")).toBeHidden();
     await expect(page.locator("#navClose")).toHaveCount(0);
-    await expect(page.locator(".drawer-header")).toHaveCSS("height", "32px");
+    await expect(page.locator(".drawer-header")).toHaveCSS("height", "40px");
 
     await page.locator("#drawerNotificationsButton").click();
     await expect(page.locator("#drawerBack")).toBeFocused();
@@ -671,9 +841,9 @@ test.describe("remote mobile layout", () => {
     ]);
     expect(exclusionBox).not.toBeNull();
     expect(composerToggleBox).not.toBeNull();
-    expect(exclusionBox!.height).toBe(26);
+    expect(exclusionBox!.height).toBe(32);
     // Footer sizing follows its independent Main button scale; the header
-    // exclusion remains a compact 26px control.
+    // exclusion keeps the shared 32px toolbar control size.
 
     await page.locator('[data-key="navNext"]').click();
     await expect.poll(() => spatialBodies.length).toBe(1);
@@ -884,7 +1054,8 @@ test.describe("remote mobile layout", () => {
     await expect(page.locator("#workspaceSection > .workspace-section-heading")).toHaveCount(0);
     await expect(page.locator(".drawer-header-actions > #hiddenWorkspaceToggle")).toBeAttached();
     await expect(page.locator("#hiddenWorkspaceToggle")).toBeHidden();
-    await page.locator('[data-workspace-visibility="ws-b"]').click();
+    await page.locator('[data-workspace-manage="ws-b"]').click();
+    await page.locator('[data-workspace-action="hide"]').click();
     await expect(page.locator('[data-workspace-item="ws-b"]')).toHaveCount(0);
     await expect(page.locator("#hiddenWorkspaceToggle")).toBeVisible();
     await expect(page.locator("#hiddenWorkspaceToggle svg")).toHaveCount(1);
@@ -983,7 +1154,7 @@ test.describe("remote mobile layout", () => {
 
     await page.locator('[data-hidden-workspace-restore="ws-c"]').click();
     await expect(page.locator("#drawerWorkspaceView")).toBeVisible();
-    await expect(page.locator('[data-workspace-visibility="ws-c"]')).toBeFocused();
+    await expect(page.locator('[data-workspace-manage="ws-c"]')).toBeFocused();
   });
 
   test("uses settings-sized dots for hidden and notification status", async ({ page }) => {
@@ -1008,7 +1179,8 @@ test.describe("remote mobile layout", () => {
     await page.goto("http://remote.test/remote/#token=test-token");
     await page.locator("#connect").click();
     await page.locator("#navToggle").click();
-    await page.locator('[data-workspace-visibility="ws-b"]').click();
+    await page.locator('[data-workspace-manage="ws-b"]').click();
+    await page.locator('[data-workspace-action="hide"]').click();
 
     await expect(page.locator("#hiddenWorkspaceToggle")).toBeVisible();
     await expect(page.locator("#hiddenWorkspaceToggle")).toHaveClass(/status-indicator/);
@@ -1072,7 +1244,8 @@ test.describe("remote mobile layout", () => {
     // active workspace before processing the hide. The bridge response is the
     // authoritative proof that fallback moved the active output.
     controls.setVisibilityFallbackWorkspaceId("ws-a");
-    await page.locator('[data-workspace-visibility="ws-b"]').click();
+    await page.locator('[data-workspace-manage="ws-b"]').click();
+    await page.locator('[data-workspace-action="hide"]').click();
 
     await expect.poll(() => controls.outputAttachments).toEqual(["term-a1", "term-a1"]);
   });

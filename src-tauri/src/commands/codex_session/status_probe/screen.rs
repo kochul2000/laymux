@@ -36,7 +36,8 @@ pub(super) fn parse_status_screen(checkpoint: &TerminalRenderCheckpoint) -> Opti
     // Codex runs in the alternate buffer. Read whichever buffer is active in
     // the xterm checkpoint, never the underlying shell/normal-buffer history.
     let contents = screen.contents();
-    let lines: Vec<_> = contents.lines().map(str::trim).collect();
+    let raw_lines: Vec<_> = contents.lines().collect();
+    let lines: Vec<_> = raw_lines.iter().map(|line| line.trim()).collect();
     let prompt = lines.iter().rposition(|line| line.starts_with('›'))?;
     let composer = lines[prompt].strip_prefix('›')?.trim();
     if composer.starts_with('/')
@@ -63,7 +64,12 @@ pub(super) fn parse_status_screen(checkpoint: &TerminalRenderCheckpoint) -> Opti
         .filter(|line| !line.is_empty())
         .collect();
     if card.first()?.starts_with(">_ OpenAI Codex (v") {
-        return parse_borderless_card(&card);
+        let raw_card: Vec<_> = raw_lines[echo + 1..prompt]
+            .iter()
+            .copied()
+            .filter(|line| !line.trim().is_empty())
+            .collect();
+        return parse_borderless_card(&raw_card);
     }
     if !card.first()?.starts_with('╭') {
         return None;
@@ -97,66 +103,63 @@ pub(super) fn parse_status_screen(checkpoint: &TerminalRenderCheckpoint) -> Opti
     id
 }
 
-/// Codex 0.160 removed status borders. Require the complete ordered identity
-/// fields and known status rows, rather than accepting any `Session:` text.
+/// Only the session field identifies a conversation. Optional status fields
+/// may be added, removed, reordered or wrapped without invalidating that ID.
 fn parse_borderless_card(card: &[&str]) -> Option<String> {
-    if !card.first()?.ends_with(')') {
+    if !card.first()?.trim().ends_with(')') {
         return None;
     }
-    let fields = [
-        "Model:",
-        "Directory:",
-        "Permissions:",
-        "Collaboration mode:",
-        "Session:",
-    ];
-    let mut previous = 0;
-    let mut id = None;
-    for field in fields {
-        let mut matches = card.iter().enumerate().filter_map(|(index, line)| {
-            line.strip_prefix(field).map(|value| (index, value.trim()))
-        });
-        let (index, value) = matches.next()?;
-        if matches.next().is_some() || index <= previous || value.is_empty() {
-            return None;
-        }
-        previous = index;
-        if field == "Session:" {
-            let parsed = uuid::Uuid::parse_str(value).ok()?;
-            if parsed.hyphenated().to_string() != value.to_ascii_lowercase() {
-                return None;
-            }
-            id = Some(value.to_owned());
-        }
-    }
-    for line in &card[1..] {
+    let indent = card.first()?.len() - card.first()?.trim_start().len();
+    let mut session: Option<(String, usize)> = None;
+    let mut has_field = false;
+    let mut last_was_session = false;
+    for raw in &card[1..] {
+        let line = raw.trim();
         if line.starts_with("Visit https://chatgpt.com/codex/settings/usage ")
-            || *line == "information on rate limits and credits"
+            || line == "information on rate limits and credits"
             || line.starts_with("Tip:")
         {
+            has_field = false;
+            last_was_session = false;
             continue;
         }
-        let (key, value) = line.split_once(':')?;
-        if value.trim().is_empty()
-            || !(matches!(
-                key,
-                "Model"
-                    | "Model provider"
-                    | "Directory"
-                    | "Permissions"
-                    | "Agents.md"
-                    | "Account"
-                    | "Thread name"
-                    | "Context window"
-                    | "Collaboration mode"
-                    | "Session"
-                    | "Credits"
-            ) || key.ends_with(" limit"))
-        {
+        if line.starts_with(['•', '›', '╭', '╰']) || line.starts_with(">_ OpenAI Codex") {
             return None;
         }
+        let leading = raw.len() - raw.trim_start().len();
+        if leading == indent {
+            let (key, value) = line.split_once(':')?;
+            if key.trim().is_empty() {
+                return None;
+            }
+            last_was_session =
+                key.eq_ignore_ascii_case("Session") || key.eq_ignore_ascii_case("Session ID");
+            if last_was_session {
+                if session.is_some() || value.trim().is_empty() {
+                    return None;
+                }
+                let column = raw.len() - raw.split_once(':')?.1.trim_start().len();
+                session = Some((value.trim().to_owned(), column));
+            }
+            has_field = true;
+        } else {
+            if !has_field || leading < indent {
+                return None;
+            }
+            if last_was_session {
+                // A wrapped identity is still exact. Metadata continuation
+                // spacing, by contrast, has no bearing on conversation proof.
+                let (value, column) = session.as_mut()?;
+                if leading != *column {
+                    return None;
+                }
+                value.push_str(line);
+            }
+        }
     }
-    id
+    let (id, _) = session?;
+    let parsed = uuid::Uuid::parse_str(&id).ok()?;
+    (parsed.hyphenated().to_string() == id.to_ascii_lowercase()).then_some(id)
 }
 
 #[cfg(test)]

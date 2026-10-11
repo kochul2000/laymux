@@ -11,12 +11,32 @@ const workspaces: Workspace[] = [
   {
     id: "ws-a",
     name: "A",
-    panes: [{ id: "pane-a", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } }],
+    panes: [
+      {
+        id: "pane-a",
+        x: 0,
+        y: 0,
+        w: 1,
+        h: 1,
+        layers: [{ id: "pane-a", view: { type: "EmptyView" } }],
+        activeLayerId: "pane-a",
+      },
+    ],
   },
   {
     id: "ws-b",
     name: "B",
-    panes: [{ id: "pane-b", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } }],
+    panes: [
+      {
+        id: "pane-b",
+        x: 0,
+        y: 0,
+        w: 1,
+        h: 1,
+        layers: [{ id: "pane-b", view: { type: "EmptyView" } }],
+        activeLayerId: "pane-b",
+      },
+    ],
   },
 ];
 

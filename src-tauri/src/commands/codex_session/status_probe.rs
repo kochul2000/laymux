@@ -38,6 +38,7 @@ const MAX_CLEAR_BATCHES: u16 = 32;
 pub struct CodexStatusCheckpointStart {
     token: String,
     targets: Vec<CodexStatusCheckpointTerminal>,
+    reused_checkpoint: bool,
 }
 
 #[derive(Serialize)]
@@ -51,6 +52,7 @@ pub struct CodexStatusCheckpointTerminal {
 #[tauri::command]
 pub async fn begin_codex_status_checkpoint(
     update_request_id: Option<u64>,
+    committed_receipt_token: Option<String>,
     state: State<'_, Arc<AppState>>,
 ) -> Result<CodexStatusCheckpointStart, String> {
     let state = Arc::clone(&state);
@@ -93,6 +95,16 @@ pub async fn begin_codex_status_checkpoint(
     // Start the deadline before discovery: inaccessible guest config paths must
     // not leave an unbounded global input fence while begin() is still pending.
     let worker = tauri::async_runtime::spawn_blocking(move || {
+        if committed_receipt_token.as_deref().is_some_and(|receipt| {
+            crate::session_checkpoint::receipt::reusable(&worker_state, receipt).unwrap_or(false)
+        }) {
+            let slot = worker_state.session_checkpoint.codex_status.lock_or_err()?;
+            slot.as_ref()
+                .ok_or("Codex status checkpoint was cancelled")?
+                .check(&worker_token)?;
+            tracing::info!("reusing committed Codex session checkpoint");
+            return Ok::<_, String>((Vec::new(), true));
+        }
         let targets = targets::collect_targets(&worker_state)?;
         let terminals: Vec<_> = targets
             .iter()
@@ -109,14 +121,14 @@ pub async fn begin_codex_status_checkpoint(
             .ok_or("Codex status checkpoint was cancelled")?;
         checkpoint.check(&worker_token)?;
         checkpoint.targets = targets;
-        Ok::<_, String>(terminals)
+        Ok::<_, String>((terminals, false))
     });
     let result = tokio::time::timeout(PROBE_TIMEOUT, worker)
         .await
         .map_err(|_| "Codex status target discovery timed out".to_owned())
         .and_then(|result| result.map_err(|error| error.to_string()))
         .and_then(|result| result);
-    let terminals = match result {
+    let (terminals, reused_checkpoint) = match result {
         Ok(ids) => ids,
         Err(error) => {
             finish_inner(&state, &token)?;
@@ -126,6 +138,7 @@ pub async fn begin_codex_status_checkpoint(
     Ok(CodexStatusCheckpointStart {
         token,
         targets: terminals,
+        reused_checkpoint,
     })
 }
 
@@ -345,6 +358,15 @@ fn read_inner(
         return Ok(None);
     };
     let fresh = targets::verify_session(&target.process, &id)?;
+    if !fresh {
+        targets::remember_checkpoint_file(
+            state,
+            terminal_id,
+            target.generation,
+            &target.process,
+            &id,
+        );
+    }
     change_target(state, token, terminal_id, |target| {
         target.proof = Some((id.clone(), fresh));
         Ok(())

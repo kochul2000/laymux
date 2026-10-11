@@ -27,12 +27,22 @@ afterEach(() => {
   while (terminals.length > 0) terminals.pop()?.dispose();
 });
 
+/** 실제 xterm 이 이 줄을 몇 셀에 그리는지 — 넓은 터미널에 써 보고 잰다. */
+async function measureCells(line: string): Promise<number> {
+  const s = screen(200);
+  await s.write(line);
+  return s.terminal.buffer.active.cursorX;
+}
+
 /**
  * 하드랩된 줄들을 실제 터미널에 흘린 뒤, 그 버퍼 셀로 결합 URL 의 범위를 구한다.
  * `TerminalView`/provider 와 같은 경로: `buffer.getLine(y-1)` → 셀 → 컬럼 맵.
+ *
+ * TUI 는 행을 화면 폭(또는 오른쪽 여백 `margin` 만큼 좁은 폭)까지 채운 뒤 끊는다.
+ * 그래서 터미널 폭은 첫 줄이 실제로 차지하는 셀 수 + `margin` 이다.
  */
-async function linkRange(lines: string[], queriedLine = 1) {
-  const s = screen();
+async function linkRange(lines: string[], queriedLine = 1, margin = 0) {
+  const s = screen((await measureCells(lines[0])) + margin);
   await s.write(lines.join("\r\n"));
   const buffer = s.terminal.buffer.active;
   const infos = lines.map((_, i) => {
@@ -69,38 +79,39 @@ describe("들여쓰기 하드랩 URL 범위 (실제 xterm 셀)", () => {
     expect(match.range.end).toEqual({ x: 20, y: 2 });
   });
 
-  it("URL 안의 한글도 셀 기준으로 끝난다", async () => {
-    const match = await linkRange(["  https://example.com/문서와", "  보고서?q=1"]);
-    expect(match.text).toBe("https://example.com/문서와보고서?q=1");
+  it("URL 은 바로 붙은 한글 조사 앞 셀에서 끝난다", async () => {
+    const match = await linkRange(["  https://example.com/pathpath", "  /docs에서 보기"]);
+    expect(match.text).toBe("https://example.com/pathpath/docs");
     expect(match.range.start).toEqual({ x: 3, y: 1 });
-    // 보(3-4) 고(5-6) 서(7-8) ?(9) q(10) =(11) 1(12)
-    expect(match.range.end).toEqual({ x: 12, y: 2 });
-  });
-
-  it("와이드 문자로 끝나면 끝 컬럼이 뒷칸까지 덮는다", async () => {
-    const match = await linkRange(["  https://example.com/pathpath", "  /문서"]);
-    expect(match.text).toBe("https://example.com/pathpath/문서");
-    // /(3) 문(4-5) 서(6-7) — 6 이면 밑줄이 마지막 글자의 절반만 덮는다
+    // /(3) d(4) o(5) c(6) s(7) 에(8-9)
     expect(match.range.end).toEqual({ x: 7, y: 2 });
   });
 
   it("이모지가 섞여도 시작·끝 컬럼이 맞는다", async () => {
     const match = await linkRange(["  🔗 https://example.com/pathpath", "  /x😀"]);
-    expect(match.text).toBe("https://example.com/pathpath/x😀");
+    expect(match.text).toBe("https://example.com/pathpath/x");
     // 🔗(3-4) 공백(5) → URL 은 셀 6 에서 시작
     expect(match.range.start).toEqual({ x: 6, y: 1 });
-    // /(3) x(4) 😀(5-6)
-    expect(match.range.end).toEqual({ x: 6, y: 2 });
+    // /(3) x(4) — 😀(5-6) 는 URL 문자가 아니다
+    expect(match.range.end).toEqual({ x: 4, y: 2 });
   });
 
   it("3줄 결합에서도 중간 줄 질의가 같은 범위를 낸다", async () => {
-    const lines = ["  메모 https://example.com/문서?a=1&b=", "  2&c=3&계속=예&d=", "  4&끝=true"];
+    // 가운데 줄도 화면 폭(첫 줄 38셀)을 거의 채워야 다음 줄로 이어진다.
+    const lines = [
+      "  메모 https://example.com/docs?a=1&b=",
+      "  2&c=3&more=yesyesyesyesyesyesyes&d=",
+      "  4&end=true",
+    ];
     const first = await linkRange(lines, 1);
     const middle = await linkRange(lines, 2);
     expect(middle).toEqual(first);
+    expect(first.text).toBe(
+      "https://example.com/docs?a=1&b=2&c=3&more=yesyesyesyesyesyesyes&d=4&end=true",
+    );
     expect(first.range.start).toEqual({ x: 8, y: 1 });
-    // 셋째 줄: 4(3) &(4) 끝(5-6) =(7) t(8) r(9) u(10) e(11)
-    expect(first.range.end).toEqual({ x: 11, y: 3 });
+    // 셋째 줄: 4(3) &(4) e(5) n(6) d(7) =(8) t(9) r(10) u(11) e(12)
+    expect(first.range.end).toEqual({ x: 12, y: 3 });
   });
 
   it("탭 들여쓰기는 실제로 빈 셀로 펼쳐진다", async () => {

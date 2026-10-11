@@ -30,9 +30,15 @@ interface CandidatePane {
   view: { type: string };
 }
 
+/** A workspace slot: its content is the stacked layers (ADR-0297). */
+interface CandidateSlot {
+  layers: readonly CandidatePane[];
+  activeLayerId: string;
+}
+
 interface CandidateWorkspace {
   id: string;
-  panes: readonly CandidatePane[];
+  panes: readonly CandidateSlot[];
 }
 
 interface CandidateDock {
@@ -143,6 +149,25 @@ function terminalPaneIds(panes: readonly CandidatePane[]): string[] {
   return panes.filter((pane) => pane.view.type === "TerminalView").map((pane) => pane.id);
 }
 
+function slotActiveLayer(slot: CandidateSlot): CandidatePane | undefined {
+  return slot.layers.find((layer) => layer.id === slot.activeLayerId) ?? slot.layers[0];
+}
+
+/** Visible (active-layer) terminal content of the slots, in slot order. */
+function activeLayerTerminalIds(slots: readonly CandidateSlot[]): string[] {
+  return terminalPaneIds(slots.flatMap((slot) => slotActiveLayer(slot) ?? []));
+}
+
+/** Hidden stacked terminal layers of the slots, in slot then stack order. */
+function inactiveLayerTerminalIds(slots: readonly CandidateSlot[]): string[] {
+  return terminalPaneIds(
+    slots.flatMap((slot) => {
+      const active = slotActiveLayer(slot);
+      return slot.layers.filter((layer) => layer !== active);
+    }),
+  );
+}
+
 /**
  * Build global membership and pending order. Automation requests win, then the
  * focused pane, then active-workspace and visible-dock reading order.
@@ -163,7 +188,7 @@ export function collectTerminalStartupCandidates({
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId);
 
   for (const workspace of workspaces) {
-    for (const paneId of terminalPaneIds(workspace.panes)) {
+    for (const paneId of terminalPaneIds(workspace.panes.flatMap((slot) => slot.layers))) {
       if (workspace.id !== activeWorkspaceId && evictedPaneIds.has(paneId)) continue;
       knownPaneIds.push(paneId);
     }
@@ -175,9 +200,12 @@ export function collectTerminalStartupCandidates({
   }
   knownPaneIds.push(...foregroundTerminalIds);
 
+  // Visible content first; hidden stacked layers of the active workspace start
+  // after the visible docks (ADR-0297).
   const layoutEligiblePaneIds = [
-    ...terminalPaneIds(activeWorkspace?.panes ?? []),
+    ...activeLayerTerminalIds(activeWorkspace?.panes ?? []),
     ...docks.filter((dock) => dock.visible).flatMap((dock) => terminalPaneIds(dock.panes)),
+    ...inactiveLayerTerminalIds(activeWorkspace?.panes ?? []),
   ];
   const baseEligiblePaneIds = [...foregroundTerminalIds, ...layoutEligiblePaneIds];
   const eligiblePaneSet = new Set(baseEligiblePaneIds);
@@ -186,7 +214,8 @@ export function collectTerminalStartupCandidates({
   if (focusedDock !== null) {
     focusedPaneId = focusedDockPaneId;
   } else if (focusedPaneIndex !== null) {
-    const pane = activeWorkspace?.panes[focusedPaneIndex];
+    const slot = activeWorkspace?.panes[focusedPaneIndex];
+    const pane = slot ? slotActiveLayer(slot) : undefined;
     focusedPaneId = pane?.view.type === "TerminalView" ? pane.id : null;
   }
 

@@ -1,7 +1,8 @@
-// 격리 dev에서 이미 resume한 실제 Codex를 검증한다. 모델 요청과 앱 종료는 하지 않는다.
+// 격리 dev의 실제 Codex를 검증한다. 모델 요청과 앱 종료는 하지 않는다.
 // LAYMUX_CODEX_WORKSPACE, LAYMUX_CODEX_HOMES={terminalId:{root,distro}},
 // LAYMUX_DEV_URL(기본 1439), LAYMUX_CDP_URL(기본 9342)을 지정한다.
-import { chromium } from "../../ui/node_modules/playwright-core/index.mjs";
+// LAYMUX_EXPECT_NO_HOOKS=1이면 새 훅 없는 resume도 검증한다.
+import { connectDevPage } from "./dev-cdp.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
@@ -37,15 +38,10 @@ assert.equal(
     encoding: "utf8",
   }).trim(),
 );
-const browser = await chromium.connectOverCDP(
+const page = await connectDevPage(
   process.env.LAYMUX_CDP_URL || "http://127.0.0.1:9342",
+  process.env.LAYMUX_DEV_URL || "http://localhost:1439",
 );
-const page = browser
-  .contexts()
-  .flatMap((c) => c.pages())
-  .find((p) =>
-    p.url().startsWith(process.env.LAYMUX_DEV_URL || "http://localhost:1439"),
-  );
 assert.ok(page, "dev WebView가 필요하다");
 const invoke = (command, args = {}) =>
   page.evaluate(
@@ -73,9 +69,10 @@ for (const id of ids) {
   assert.ok(
     home.startsWith(
       homes[id].distro
-        ? "/tmp/laymux-codex"
+        ? "/tmp/laymux-"
         : os.tmpdir().replaceAll("\\", "/").toLowerCase() + "/laymux-codex",
-    ),
+    ) ||
+      (!homes[id].distro && /^[a-z]:\/(?:lm|laymux)-codex-[^/]+$/.test(home)),
   );
 }
 let token;
@@ -92,9 +89,14 @@ const finish = async () => {
   }
 };
 const mode = (stateDetection) =>
-  invoke("save_settings", {
-    settings: { ...original, codex: { ...original.codex, stateDetection } },
-  });
+  page.evaluate(async (stateDetection) => {
+    const invoke = window.__TAURI_INTERNALS__.invoke;
+    const current = await invoke("load_settings");
+    const codex = { ...current.codex, stateDetection };
+    const { useSettingsStore } = await import("/src/stores/settings-store.ts");
+    useSettingsStore.setState({ codex });
+    await invoke("save_settings", { settings: { ...current, codex } });
+  }, stateDetection);
 const results = [];
 try {
   await api("/workspaces/active", { id: workspace });
@@ -104,20 +106,21 @@ try {
   for (const id of ids) {
     assert.equal(sessions[id]?.provider, "codex");
     assert.equal(sessions[id]?.state, "identified");
-    assert.ok(
-      !observations.some(
-        (o) =>
-          o.sessionId === sessions[id].sessionId && o.event !== "SessionEnd",
-      ),
-      "새 훅이 없는 resume를 재현해야 한다",
-    );
+    if (process.env.LAYMUX_EXPECT_NO_HOOKS === "1")
+      assert.ok(
+        !observations.some(
+          (o) =>
+            o.sessionId === sessions[id].sessionId && o.event !== "SessionEnd",
+        ),
+        "새 훅이 없는 resume를 재현해야 한다",
+      );
     await invoke("write_terminal_input", {
       id,
       text: "resume-draft-preserved",
       submit: false,
     });
   }
-  await page.waitForTimeout(300);
+  await new Promise((resolve) => setTimeout(resolve, 300));
   const before = new Map(
     await Promise.all(
       ids.map(async (id) => [
@@ -126,6 +129,7 @@ try {
       ]),
     ),
   );
+  const started = performance.now();
   const checkpoint = await begin();
   assert.deepEqual(
     checkpoint.targets,
@@ -151,28 +155,43 @@ try {
       "입력 초안이 유지되어야 한다",
     );
   }
+  const committed = await page.evaluate(async () => {
+    const { flushSessionCheckpoint } =
+      await import("/src/lib/persist-session.ts");
+    return flushSessionCheckpoint({ reason: "close", requireConclusive: true });
+  });
+  const saved = await invoke("load_settings");
+  for (const id of ids) {
+    const paneId = terminals
+      .find((t) => t.id === id)
+      .id.replace(/^terminal-/, "");
+    const pane = saved.workspaces
+      .find((w) => w.id === workspace)
+      .panes.find((p) => p.id === paneId);
+    assert.equal(pane.view.lastCodexSession, sessions[id].sessionId);
+  }
+  const checkpointMs = Math.round(performance.now() - started);
   await finish();
   results.push(
-    "새 훅 없는 실제 resume: 정확한 ID, /status·resize 생략, 초안 보존",
+    `실제 대화: 정확한 ID와 디스크 commit ${committed.checkpointCommitId}, /status·resize 생략, 초안 보존 (${checkpointMs}ms)`,
   );
   for (const id of ids) {
     await begin();
     try {
       await manage(id, "remove");
-      await assert.rejects(
-        invoke("get_terminal_session_attributions"),
-        /hook conversation changed/,
-      );
+      const current = await invoke("get_terminal_session_attributions");
+      assert.equal(current[id].sessionId, sessions[id].sessionId);
     } finally {
       await finish();
       await manage(id, "install");
     }
     try {
       await manage(id, "remove");
-      const fallback = await begin();
+      const current = await begin();
       assert.deepEqual(
-        fallback.targets.map((t) => t.terminalId),
-        [id],
+        current.targets,
+        [],
+        "설치 제거가 현재 대화 증거를 지우지 않는다",
       );
     } finally {
       await finish();
@@ -180,7 +199,7 @@ try {
     }
   }
   results.push(
-    "프로세스 증거도 훅 제거를 저장 시 재검증하고 /status 대상으로 전환",
+    "현재 대화 증거는 훅 설치 제거 후에도 유효하며 설치 검사 I/O가 필요 없다",
   );
   await mode("heuristic");
   const fallback = await begin();
@@ -206,6 +225,6 @@ try {
   );
 } finally {
   await finish();
-  await invoke("save_settings", { settings: original });
-  await browser.close();
+  await mode(original.codex.stateDetection);
+  await page.close();
 }

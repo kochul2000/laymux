@@ -6,7 +6,8 @@
 //! directory (ADR-0066/0067) and every open terminal keeps `OpenConsole.exe`
 //! mapped, which makes the installer fail with a sharing violation on a file
 //! this app owns. The install path therefore terminates its own children and
-//! waits for those files to become writable before handing over.
+//! waits for those files to become writable before handing over. PTY daemon
+//! sessions are the exception: they are handed to the updated GUI (ADR-0308).
 
 #[cfg(any(windows, test))]
 use std::path::{Path, PathBuf};
@@ -26,6 +27,11 @@ const LOCKABLE_IMAGE_EXTENSIONS: [&str; 2] = ["exe", "dll"];
 /// than cancelling the update, because refusing to install is worse than the
 /// installer's own retry prompt.
 pub fn release_installer_file_locks(state: &AppState) {
+    // Daemon sessions are handed to the updated GUI rather than ended. The
+    // daemon runs from a staged copy under its own image name, so it holds
+    // nothing in the install directory and the installer leaves it alone
+    // (ADR-0308).
+    state.begin_update_handoff();
     state.terminate_child_processes();
     wait_for_install_directory(
         Duration::from_millis(crate::constants::UPDATE_INSTALL_LOCK_RELEASE_TIMEOUT_MS),

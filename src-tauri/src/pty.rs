@@ -1,6 +1,6 @@
-use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{ChildKiller, MasterPty};
 use std::io::Write;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -11,12 +11,15 @@ use crate::lock_ext::MutexExt;
 #[cfg(target_os = "windows")]
 use crate::process::{headless_command, status_with_timeout};
 use crate::pty_control::{PendingControlJob, PtyControlCompletion, PtyControlWorker};
-use crate::pty_reader::{run_interruptible_reader_loop, PtyReaderLifecycle};
-use crate::terminal::{
-    InitialExecutionHost, NativeWindowsCodexColorProbeGuard, TerminalBootstrapDaReplyGuard,
-    TerminalSession,
+use crate::pty_reader::PtyReaderLifecycle;
+use crate::terminal::{NativeWindowsCodexColorProbeGuard, TerminalBootstrapDaReplyGuard};
+
+mod spawn;
+pub(crate) use spawn::{spawn_command_on, ChildKillOwner, PtyLifecycleHooks, SpawnOptions};
+pub use spawn::{
+    spawn_pty, spawn_pty_for_generation, spawn_pty_on, spawn_pty_with_metadata, PtyBackend,
+    SpawnedPty,
 };
-use crate::terminal_env::TerminalEnvPlan;
 
 /// One maximum native reader Data event. Desktop output credit may exceed its
 /// window by at most this amount because backpressure is applied after a
@@ -114,10 +117,11 @@ fn plan_start_dir(starting_directory: &str, cmd_path: &str) -> StartDirPlan {
     } else {
         dir
     };
-    if std::path::Path::new(&effective_dir).is_dir() {
-        StartDirPlan::ChildCwd(effective_dir)
-    } else {
-        StartDirPlan::None
+    // Absolute against this process, as checked: the PTY daemon resolves a
+    // relative directory against its own working directory instead.
+    match std::path::absolute(&effective_dir) {
+        Ok(dir) if dir.is_dir() => StartDirPlan::ChildCwd(dir.to_string_lossy().into_owned()),
+        _ => StartDirPlan::None,
     }
 }
 
@@ -170,6 +174,7 @@ pub(crate) fn chunked_write_to_guarded(
 /// Handle to a running PTY process, providing write and resize capabilities.
 #[derive(Clone)]
 pub struct PtyHandle {
+    checkpoint_input_revision: Arc<AtomicU64>,
     session_restore: Option<Arc<PendingSessionRestore>>,
     /// Owns the writer on one terminal-specific FIFO thread.
     control: Arc<PtyControlWorker>,
@@ -208,6 +213,9 @@ pub struct PtyHandle {
     /// guest. The liveness oracle needs this to know that a Windows process
     /// snapshot has no standing over this pane at all (ADR-0134).
     wsl_backed: bool,
+    /// Whether this process may PID-kill the child tree (see
+    /// [`ChildKillOwner`]).
+    kill_owner: ChildKillOwner,
 }
 
 struct PendingSessionRestore {
@@ -234,10 +242,27 @@ impl PtyHandle {
             .then_some((restore.provider, restore.session_id.as_str()))
     }
 
+    /// The validated request actually dispatched at this PTY's creation.
+    /// This is only a candidate: callers must prove the current live title,
+    /// process and rollout. It never reopens the consumed startup grace.
+    pub(crate) fn session_restore_request(&self) -> Option<(&'static str, &str)> {
+        self.session_restore
+            .as_ref()
+            .map(|restore| (restore.provider, restore.session_id.as_str()))
+    }
+
     pub(crate) fn consume_session_restore(&self) {
         if let Some(restore) = &self.session_restore {
             restore.consumed.store(true, Ordering::Release);
         }
+    }
+
+    pub(crate) fn checkpoint_input_revision(&self) -> u64 {
+        self.checkpoint_input_revision.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn checkpoint_input_healthy(&self) -> bool {
+        !self.input_faulted.load(Ordering::Acquire)
     }
 
     /// Only the generation-checked protocol reply commands may use this path.
@@ -265,6 +290,7 @@ impl PtyHandle {
     ) -> Self {
         let master = Arc::new(Mutex::new(None));
         Self {
+            checkpoint_input_revision: Arc::new(AtomicU64::new(0)),
             session_restore: None,
             control: PtyControlWorker::spawn(writer, Arc::clone(&master))
                 .expect("test PTY control worker"),
@@ -278,6 +304,7 @@ impl PtyHandle {
             codex_startup_color_probe: None,
             bootstrap_da_reply: None,
             wsl_backed: false,
+            kill_owner: ChildKillOwner::Local,
         }
     }
 
@@ -367,6 +394,50 @@ impl PtyHandle {
         }
     }
 
+    /// Whether another process (the PTY daemon) owns the child.
+    pub fn is_backend_owned(&self) -> bool {
+        self.kill_owner == ChildKillOwner::Backend
+    }
+
+    /// Ask a backend that owns the child (the PTY daemon) to terminate it,
+    /// without the local graceful-close waits of [`Self::terminate`]. A no-op
+    /// for in-process PTYs, whose children end with this process anyway.
+    pub fn request_backend_termination(&self) -> Result<(), String> {
+        if self.kill_owner != ChildKillOwner::Backend {
+            return Ok(());
+        }
+        let mut killer = self.child_killer.lock_or_err()?;
+        match killer.as_mut() {
+            Some(killer) => killer
+                .kill()
+                .map_err(|error| format!("Failed to request PTY termination: {error}")),
+            None => Ok(()),
+        }
+    }
+
+    /// Close input and the master once the child has exited on its own, so a
+    /// PTY that nothing else will tear down (a daemon session) delivers its
+    /// remaining output and then EOF. ConPTY keeps output open until the
+    /// pseudoconsole closes.
+    pub(crate) fn release_after_child_exit(&self) {
+        self.control.close();
+        let deadline = Instant::now() + Duration::from_millis(PTY_CONTROL_TERMINATE_GRACE_MS);
+        // A resize holds the master only for its platform call.
+        while !self.close_master() {
+            if Instant::now() >= deadline {
+                // Nothing else will close this PTY, and the session is only
+                // reaped after EOF, so wait for the lock rather than give up.
+                // Taking the master to drop it is discard-only.
+                tracing::warn!("PTY master busy after child exit; waiting to release it");
+                self.master
+                    .lock_or_recover_for_discard("releasing PTY master after child exit")
+                    .take();
+                return;
+            }
+            thread::sleep(Self::GRACEFUL_SHUTDOWN_STEP);
+        }
+    }
+
     /// Write data (user input) to the PTY.
     ///
     /// Large payloads are split into [`PTY_WRITE_CHUNK_SIZE`]-byte chunks and
@@ -414,6 +485,8 @@ impl PtyHandle {
     ) -> Result<PendingControlJob, String> {
         self.ensure_input_healthy()?;
         if !data.is_empty() || submit {
+            self.checkpoint_input_revision
+                .fetch_add(1, Ordering::AcqRel);
             self.consume_session_restore();
         }
         self.control.submit_write(data, submit, deadline)
@@ -592,7 +665,7 @@ impl PtyHandle {
         #[allow(unused_mut)]
         let mut platform_error: Option<String> = None;
         #[cfg(target_os = "windows")]
-        if let Some(pid) = self.child_pid {
+        if let (Some(pid), ChildKillOwner::Local) = (self.child_pid, self.kill_owner) {
             let mut taskkill = headless_command("taskkill");
             taskkill.args(["/PID", &pid.to_string(), "/T", "/F"]);
             match status_with_timeout(
@@ -669,195 +742,13 @@ fn wait_for_child_with_master_close_retry(
     }
 }
 
-/// Spawn a PTY process for the given terminal session.
-/// Returns a PtyHandle and starts a reader thread that calls `on_output` with data chunks.
-pub struct SpawnedPty {
-    pub handle: PtyHandle,
-    pub initial_execution_host: InitialExecutionHost,
-    /// The directory the child was actually started in, canonicalized like an
-    /// OSC 7 CWD, or `None` when no starting directory could be applied.
-    pub resolved_cwd: Option<String>,
-}
-
-pub fn spawn_pty<F>(session: &TerminalSession, on_output: F) -> Result<PtyHandle, String>
-where
-    F: Fn(Vec<u8>) -> PtyOutputControl + Send + 'static,
-{
-    spawn_pty_for_generation(session, 1, on_output).map(|spawned| spawned.handle)
-}
-
-pub fn spawn_pty_with_metadata<F>(
-    session: &TerminalSession,
-    on_output: F,
-) -> Result<SpawnedPty, String>
-where
-    F: Fn(Vec<u8>) -> PtyOutputControl + Send + 'static,
-{
-    spawn_pty_for_generation(session, 1, on_output)
-}
-
-pub fn spawn_pty_for_generation<F>(
-    session: &TerminalSession,
-    terminal_generation: u64,
-    on_output: F,
-) -> Result<SpawnedPty, String>
-where
-    F: Fn(Vec<u8>) -> PtyOutputControl + Send + 'static,
-{
-    let pty_system = native_pty_system();
-
-    let size = PtySize {
-        rows: session.config.rows,
-        cols: session.config.cols,
-        pixel_width: 0,
-        pixel_height: 0,
-    };
-
-    let pair = pty_system
-        .openpty(size)
-        .map_err(|e| format!("Failed to open PTY: {e}"))?;
-
-    let (command_line, startup_command) = if session.config.command_line.is_empty() {
-        // Fallback: legacy profile name-based resolution. Historically this
-        // path did not consume startup_command, so preserve that behavior.
-        (
-            TerminalSession::profile_command_line(&session.config.profile),
-            "",
-        )
-    } else {
-        (
-            session.config.command_line.as_str(),
-            session.config.startup_command.as_str(),
-        )
-    };
-    let executable = command_line
-        .split_whitespace()
-        .next()
-        .unwrap_or("powershell.exe");
-    let is_wsl = is_wsl_command(executable);
-    let inherited_wslenv = is_wsl.then(|| std::env::var(ENV_WSLENV).ok()).flatten();
-    let env_plan = TerminalEnvPlan::for_session(
-        &session.config.env,
-        &session.id,
-        &session.config.sync_group,
-        session.config.advertise_true_color,
-        is_wsl,
-        inherited_wslenv.as_deref(),
-    );
-
-    let (cmd_path, args) = TerminalSession::command_line_to_command_with_env_plan(
-        command_line,
-        &env_plan,
-        startup_command,
-    );
-    let initial_execution_host = InitialExecutionHost::for_current_platform(Some(&cmd_path));
-    let mut cmd = CommandBuilder::new(&cmd_path);
-    for arg in &args {
-        cmd.arg(arg);
-    }
-    env_plan.apply_to_command(&mut cmd);
-
-    // Set starting directory if configured
-    let start_dir = plan_start_dir(&session.config.starting_directory, &cmd_path);
-    match &start_dir {
-        StartDirPlan::WslCd(dir) => {
-            // WSL terminal with Unix path: inject --cd flag before existing args
-            cmd = CommandBuilder::new(&cmd_path);
-            cmd.arg("--cd");
-            cmd.arg(dir);
-            for arg in &args {
-                cmd.arg(arg);
-            }
-            env_plan.apply_to_command(&mut cmd);
-        }
-        StartDirPlan::ChildCwd(dir) => cmd.cwd(std::path::Path::new(dir)),
-        StartDirPlan::None => {}
-    }
-
-    let child = pair
-        .slave
-        .spawn_command(cmd)
-        .map_err(|e| format!("Failed to spawn command: {e}"))?;
-
-    let child_pid = child.process_id();
-    let child_killer = child.clone_killer();
-    let child_exited = Arc::new(AtomicBool::new(false));
-    let exited_signal = Arc::clone(&child_exited);
-    let child_exit_handshake = Arc::new(Mutex::new(()));
-    let exited_handshake = Arc::clone(&child_exit_handshake);
-
-    // Spawn a background thread to wait for the child process.
-    // This prevents zombie processes on Unix (where unwait-ed children
-    // linger in the process table). On Windows, this closes the process
-    // handle cleanly after exit. The thread exits naturally when the
-    // shell terminates (e.g., via PTY master close → SIGHUP).
-    //
-    // The `child_exited` flip MUST happen before `child` drops: while the
-    // `Box<dyn Child>` is alive the OS keeps the PID reserved to this
-    // process (Windows won't recycle it), so any observer that sees
-    // `child_exited == true` can safely conclude the PID belongs to the
-    // now-dead shell and not an unrelated process.
-    thread::spawn(move || {
-        let mut child = child;
-        let _ = child.wait();
-        if let Err(error) = publish_child_exit(&exited_handshake, &exited_signal) {
-            // Dropping the process handle after a poisoned handshake could
-            // make a concurrent PID-based kill unsafe. Leak it instead; this
-            // is a terminal-local fail-safe on an already-corrupted path.
-            tracing::error!(%error, "child exit handshake failed; retaining process handle");
-            std::mem::forget(child);
-        }
-        // `child` drops here; Windows may recycle the PID after this point.
-    });
-    drop(pair.slave);
-
-    let writer = pair
-        .master
-        .take_writer()
-        .map_err(|e| format!("Failed to take writer: {e}"))?;
-
-    let reader_pair = pair
-        .master
-        .try_clone_interruptible_reader(terminal_generation)
-        .map_err(|e| format!("Failed to clone interruptible reader: {e}"))?
-        .ok_or_else(|| "Native PTY does not provide an interruptible reader".to_string())?;
-    let reader_lifecycle = PtyReaderLifecycle::new(terminal_generation, reader_pair.control)?;
-
-    let master = Arc::new(Mutex::new(Some(pair.master)));
-    let control = PtyControlWorker::spawn(writer, Arc::clone(&master))?;
-    let handle = PtyHandle {
-        session_restore: None,
-        control,
-        master,
-        child_killer: Arc::new(Mutex::new(Some(child_killer))),
-        child_pid,
-        child_exited,
-        child_exit_handshake,
-        input_faulted: Arc::new(AtomicBool::new(false)),
-        reader_lifecycle: Arc::clone(&reader_lifecycle),
-        codex_startup_color_probe: None,
-        bootstrap_da_reply: None,
-        wsl_backed: is_wsl,
-    };
-
-    // Spawn reader thread
-    thread::spawn(move || {
-        run_interruptible_reader_loop(reader_pair.reader, reader_lifecycle, on_output);
-    });
-
-    Ok(SpawnedPty {
-        handle,
-        initial_execution_host,
-        resolved_cwd: start_dir.resolved_cwd(),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::terminal::InitialExecutionHost;
+    use crate::pty_reader::run_interruptible_reader_loop;
     #[cfg(any(windows, target_os = "linux"))]
     use crate::terminal::TerminalConfig;
+    use crate::terminal::{InitialExecutionHost, TerminalSession};
     use std::cell::Cell;
     use std::sync::mpsc;
     use std::sync::Condvar;
@@ -1901,6 +1792,18 @@ printf 'RAW_BYTES:%s\r\n' "$hex"
         assert!(!is_unix_path("C:\\Users\\test"));
         assert!(!is_unix_path(""));
         assert!(!is_unix_path("relative/path"));
+    }
+
+    #[test]
+    fn plan_start_dir_makes_a_relative_directory_absolute_against_the_gui() {
+        // The PTY daemon would resolve it against its own directory.
+        let StartDirPlan::ChildCwd(dir) = plan_start_dir(".", "powershell.exe") else {
+            panic!("an existing directory is planned");
+        };
+        assert_eq!(
+            std::path::Path::new(&dir),
+            std::path::absolute(".").unwrap()
+        );
     }
 
     #[test]

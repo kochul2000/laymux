@@ -646,12 +646,13 @@ mod tests {
         assert!(html.contains("id=\"drawerBack\""));
         assert!(!html.contains("id=\"navClose\""));
         assert!(!html.contains("class=\"drawer-close\""));
-        let drawer_header_css = html
-            .split(".drawer-header {")
+        // The drawer header shares the toolbar geometry with every <header>.
+        let toolbar_css = html
+            .split("      .drawer-header {")
             .nth(1)
             .and_then(|rules| rules.split('}').next())
-            .expect("the drawer header CSS is present");
-        assert!(drawer_header_css.contains("height: 32px;"));
+            .expect("the shared toolbar CSS is present");
+        assert!(toolbar_css.contains("height: var(--toolbar-height);"));
         assert!(html.contains("function setDrawerView(view)"));
         assert!(html.contains("setDrawerView(leaseId ? \"workspace\" : \"connection\");"));
     }
@@ -1579,10 +1580,9 @@ mod tests {
 
         assert!(html.contains("id=\"spatialExclusion\""));
         assert!(html.contains("data-remote-icon=\"CircleMinus\""));
-        // Every compact Remote header action shares one explicit border-box
-        // height, including the adjacent text-bearing Composer toggle.
-        assert!(html.contains("--header-control-height: 26px;"));
-        assert!(html.contains("height: var(--header-control-height);"));
+        // Every Remote toolbar action shares one explicit border-box size.
+        assert!(html.contains("--toolbar-control-size: 32px;"));
+        assert!(html.contains("height: var(--toolbar-control-size);"));
         assert!(html.contains("laymux.remote.spatialExcludedPaneIds"));
         assert!(html.contains("let spatialExcludedPaneIds = loadSpatialExcludedPaneIds();"));
         assert!(html.contains("function activeWorkspacePane()"));

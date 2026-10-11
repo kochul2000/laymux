@@ -1,6 +1,6 @@
 # 0264. 종료와 업데이트의 준비 단계를 공유하고 전용 진행 모달로 표시한다
 
-- Status: Accepted
+- Status: Accepted. Superseded by [0314](0314-update-never-interrupts-terminals.md) (업데이트 준비의 선택적 Ctrl+C·출력 대기만; 공유 진행 모달·checkpoint·출력 캐시는 유지)
 - Date: 2026-09-22
 - Source: 사용자 UX 기획·구현 요청, ADR-0048, ADR-0174, ADR-0201, ADR-0222, architecture/data-flow.md §13
 - 관계: ADR-0048의 선택적 인터럽트를 업데이트로 확장한다. critical checkpoint와 설치 전 자식 정리의 순서는 유지한다.

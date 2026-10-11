@@ -13,14 +13,26 @@ export type ViewType =
 
 export type DockPosition = "top" | "bottom" | "left" | "right";
 
+/** One stacked layer of a layout template slot (ADR-0297). */
+export interface LayoutLayer {
+  viewType: ViewType;
+  /** View configuration (profile, CWD, etc.), excluding pane-owned agent restore state. */
+  viewConfig?: ViewInstanceConfig;
+}
+
 export interface LayoutPane {
   x: number;
   y: number;
   w: number;
   h: number;
+  /** Single-layer form. Ignored when `layers` is non-empty. */
   viewType: ViewType;
   /** View configuration (profile, CWD, etc.), excluding pane-owned agent restore state. */
   viewConfig?: ViewInstanceConfig;
+  /** Stacked form (ADR-0297). Written only when the template slot holds 2+ layers. */
+  layers?: LayoutLayer[];
+  /** Index into `layers` of the layer shown when a workspace is created from this template. */
+  activeLayerIndex?: number;
 }
 
 export interface Layout {
@@ -34,13 +46,32 @@ export interface ViewInstanceConfig {
   [key: string]: unknown;
 }
 
+/**
+ * One piece of content stacked in a workspace slot (ADR-0297).
+ *
+ * The layer id plays every content role a "pane id" played before stacking:
+ * `terminal-<layerId>`, view overrides, memo key, restart/CWD seed bus,
+ * notifications, hidden flag and startup reveal.
+ */
+export interface PaneLayer {
+  id: string;
+  view: ViewInstanceConfig;
+}
+
+/**
+ * A workspace grid slot (ADR-0297). The slot owns the geometry; its content is
+ * the ordered `layers` list, of which exactly one (`activeLayerId`) is shown.
+ * Invariants: `layers.length >= 1` and `activeLayerId` names one of them.
+ * Mutate only through `lib/pane-layers.ts` and workspace-store actions.
+ */
 export interface WorkspacePane {
   id: string;
   x: number;
   y: number;
   w: number;
   h: number;
-  view: ViewInstanceConfig;
+  layers: PaneLayer[];
+  activeLayerId: string;
 }
 
 export interface Workspace {

@@ -221,6 +221,12 @@ impl NativeWindowsCodexColorProbeGuard {
         Ok(filtered)
     }
 
+    /// Stop filtering: the child this guard was armed for will not run its
+    /// startup probe (an adopted, already running session).
+    pub(crate) fn disarm(&self) {
+        self.active.store(false, Ordering::Release);
+    }
+
     pub(crate) fn should_report_observation_failure(&self) -> bool {
         !self
             .observation_failure_reported

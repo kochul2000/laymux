@@ -80,7 +80,20 @@ pub const REMOTE_SESSION_POLL: Duration = Duration::from_secs(2);
 
 // ── Environment variable names ─────────────────────────────────────
 
-pub const ENV_LX_SOCKET: &str = "LX_SOCKET";
+/// Fixed path of this build kind's `lx` endpoint file (ADR-0304). The file, not
+/// the environment, names the current GUI's IPC endpoint.
+pub const ENV_LX_ENDPOINT_FILE: &str = "LX_ENDPOINT_FILE";
+/// Private `lx` directory beside the local state database, and the endpoint
+/// file in it (ADR-0304, ADR-0305).
+pub const LX_DIR_NAME: &str = "lx";
+pub const LX_ENDPOINT_FILE_NAME: &str = "endpoint.json";
+/// `lx` IPC socket name in `LX_DIR_NAME`: prefix + GUI pid + suffix.
+pub const LX_SOCKET_PREFIX: &str = "lx-";
+pub const LX_SOCKET_SUFFIX: &str = ".sock";
+/// Attempts, with doubling delay from `LX_ENDPOINT_PUBLISH_RETRY_MS`, to
+/// replace the endpoint file while another process briefly holds it.
+pub const LX_ENDPOINT_PUBLISH_ATTEMPTS: u32 = 5;
+pub const LX_ENDPOINT_PUBLISH_RETRY_MS: u64 = 20;
 pub const ENV_LX_TERMINAL_ID: &str = "LX_TERMINAL_ID";
 pub const ENV_LX_GROUP_ID: &str = "LX_GROUP_ID";
 pub const ENV_LX_AUTOMATION_PORT: &str = "LX_AUTOMATION_PORT";
@@ -126,6 +139,16 @@ pub const COLORTERM_TRUECOLOR: &str = "truecolor";
 /// escape-sequence signals, printable preview). Off by default — the
 /// trace logs are only useful when diagnosing cursor/flicker issues.
 pub const ENV_LAYMUX_PTY_TRACE: &str = "LAYMUX_PTY_TRACE";
+
+/// Terminal PTYs run inside the detached PTY daemon by default (ADR-0300,
+/// ADR-0301). `0` keeps them in the GUI process as a rollback switch.
+pub const ENV_LAYMUX_PTY_DAEMON: &str = "LAYMUX_PTY_DAEMON";
+/// Overrides the PTY daemon state directory (discovery, lock, socket, log) so
+/// an isolated dev worktree or test never meets another build's daemon.
+pub const ENV_LAYMUX_PTY_DAEMON_DIR: &str = "LAYMUX_PTY_DAEMON_DIR";
+/// Command-line flag that makes the `laymux` binary run as the PTY daemon
+/// before any Tauri/GUI initialization.
+pub const PTY_DAEMON_CLI_FLAG: &str = "--pty-daemon";
 
 /// xterm's DEFAULT mouse encoding is the fixed-width `CSI M Pb Px Py`
 /// binary report. `onBinary` currently emits only this encoding.
@@ -282,6 +305,113 @@ pub const PTY_READER_WAKE_TIMEOUT_MS: u64 = 500;
 /// Bound for the generation-scoped reader lifecycle to reach terminal state
 /// after the PTY master/child teardown has been requested.
 pub const PTY_READER_EXIT_TIMEOUT_MS: u64 = 1_000;
+/// Private PTY daemon IPC frame ceiling. Output frames carry at most one PTY
+/// read chunk and input frames one write chunk, so anything larger is a
+/// protocol violation rather than a payload to buffer.
+pub const PTY_DAEMON_MAX_FRAME_BYTES: usize = 1024 * 1024;
+/// Output a detached daemon session retains for the next attach. The oldest
+/// bytes are dropped (and counted) so a session nobody watches never stalls
+/// its child on a full pipe nor grows without bound.
+pub const PTY_DAEMON_DETACHED_BACKLOG_BYTES: usize = 1024 * 1024;
+/// Size of a session's screen model until its PTY is spawned with the real size.
+pub const PTY_DAEMON_SCREEN_DEFAULT_ROWS: u16 = 24;
+pub const PTY_DAEMON_SCREEN_DEFAULT_COLS: u16 = 80;
+/// Client-side bound on received-but-unconsumed daemon output per terminal.
+/// When full the client stops reading its socket, which pushes backpressure
+/// back to the daemon's PTY reader exactly like a blocked in-process callback.
+pub const PTY_DAEMON_CLIENT_QUEUE_BYTES: usize = 64 * 1024;
+/// Daemon session metadata key carrying the agent hook token baked into the
+/// child's environment, so an adopting GUI accepts that child's hooks.
+pub const PTY_DAEMON_METADATA_AGENT_HOOK_TOKEN: &str = "agentHookToken";
+/// Metadata keys for the profile a session was started with and whether its
+/// child is a WSL relay, so adoption matches the profile and restores the
+/// WSL attribution domain of the running child.
+pub const PTY_DAEMON_METADATA_PROFILE: &str = "profile";
+pub const PTY_DAEMON_METADATA_WSL_BACKED: &str = "wslBacked";
+/// Largest frame accepted before a connection has authenticated.
+pub const PTY_DAEMON_HELLO_MAX_BYTES: usize = 4 * 1024;
+/// Concurrent daemon connections (one per terminal plus short control
+/// connections). Further connections are refused, not queued.
+pub const PTY_DAEMON_MAX_CONNECTIONS: usize = 256;
+/// Deadline for the authenticated handshake on a fresh daemon connection.
+/// It bounds the whole handshake, not each read, so a client trickling bytes
+/// cannot hold a connection slot past it.
+pub const PTY_DAEMON_HANDSHAKE_TIMEOUT_MS: u64 = 5_000;
+/// Largest input pause a client frame can ask the daemon to replay. Pauses
+/// exist to keep deliberate gaps (the submit CR gap) intact; longer idle
+/// stretches carry no meaning at the PTY.
+pub const PTY_DAEMON_INPUT_PAUSE_MAX_MS: u64 = 1_000;
+/// Connect + acknowledge budget for one out-of-band terminate request.
+pub const PTY_DAEMON_TERMINATE_REQUEST_TIMEOUT_MS: u64 = 1_000;
+/// Attempts (and the pause between them) for a terminate request that
+/// nothing can report a failure for (dropping a PTY master).
+pub const PTY_DAEMON_TERMINATE_ATTEMPTS: u32 = 3;
+pub const PTY_DAEMON_TERMINATE_RETRY_MS: u64 = 200;
+/// Overall budget for asking the daemon to end every terminal at app exit.
+pub const PTY_DAEMON_EXIT_TERMINATE_TIMEOUT_MS: u64 = 2_000;
+/// How long an installing GUI waits for the daemon to end its sessions and
+/// exit (each session teardown is bounded by the PTY terminate grace).
+pub const PTY_DAEMON_SHUTDOWN_TIMEOUT_MS: u64 = 5_000;
+/// How long the GUI waits for a freshly launched daemon to publish discovery.
+pub const PTY_DAEMON_LAUNCH_TIMEOUT_MS: u64 = 5_000;
+/// After a failed launch the GUI creates terminals in-process for this long
+/// before trying the daemon again, so one unavailable daemon costs the
+/// launch timeout once rather than once per terminal.
+pub const PTY_DAEMON_UNAVAILABLE_RETRY_MS: u64 = 30_000;
+/// The daemon exits after this long with no session and no connection.
+pub const PTY_DAEMON_IDLE_EXIT_MS: u64 = 60_000;
+/// How often the daemon re-evaluates its idle state.
+pub const PTY_DAEMON_IDLE_POLL_MS: u64 = 250;
+/// How long the daemon keeps its sessions with no GUI connected
+/// (`terminal.ptyDaemonGraceMinutes`, ADR-0312): long enough for an update to
+/// install and start the new GUI, which adopts them.
+pub const PTY_DAEMON_GRACE_DEFAULT_MINUTES: u32 = 10;
+pub const PTY_DAEMON_GRACE_MIN_MINUTES: u32 = 1;
+pub const PTY_DAEMON_GRACE_MAX_MINUTES: u32 = 24 * 60;
+/// How often a GUI's presence connection checks for a changed grace.
+pub const PTY_DAEMON_PRESENCE_POLL_MS: u64 = 1_000;
+/// How often a GUI ends the daemon sessions no pane will ever adopt and
+/// renews its presence. Longer than the idle exit: each pass connects to every
+/// daemon, which would otherwise keep an empty one from ever exiting.
+pub const PTY_DAEMON_DETACHED_SWEEP_MS: u64 = 120_000;
+/// Back-off after a failed `accept` so a persistent error does not spin.
+pub const PTY_DAEMON_ACCEPT_RETRY_MS: u64 = 50;
+/// Poll cadence while a freshly launched daemon publishes discovery.
+pub const PTY_DAEMON_LAUNCH_POLL_MS: u64 = 50;
+/// The daemon log starts over instead of appending past this size.
+pub const PTY_DAEMON_LOG_ROTATE_BYTES: u64 = 4 * 1024 * 1024;
+/// Daemon state directory under the per-build local state root, and the
+/// files inside it (data-flow §8.23).
+pub const PTY_DAEMON_DIR_NAME: &str = "pty-daemon";
+pub const PTY_DAEMON_DISCOVERY_FILE: &str = "daemon.json";
+pub const PTY_DAEMON_LOCK_FILE: &str = "daemon.lock";
+pub const PTY_DAEMON_LOG_FILE: &str = "daemon.log";
+/// Windows: private copies of the daemon executable and ConPTY runtime.
+#[cfg(windows)]
+pub const PTY_DAEMON_RUNTIME_DIR: &str = "runtime";
+/// A runtime copy published more recently than this is never collected:
+/// its launcher may not have started the daemon that will lock it yet.
+#[cfg(windows)]
+pub const PTY_DAEMON_RUNTIME_GC_MIN_AGE_MS: u64 = 60_000;
+pub const PTY_DAEMON_SOCKET_FILE: &str = "daemon.sock";
+/// Each executable build runs its own daemon in a generation directory
+/// `<pty-daemon>/g<protocol>-<build>/` (ADR-0308).
+pub const PTY_DAEMON_GENERATION_PREFIX: &str = "g";
+/// An unused generation directory younger than this is never collected: a
+/// GUI of that build may be about to start its daemon.
+pub const PTY_DAEMON_GENERATION_GC_MIN_AGE_MS: u64 = 60_000;
+/// How long a GUI reuses its listing of the other daemon generations when it
+/// looks for a session to adopt (ADR-0308).
+pub const PTY_DAEMON_OTHER_GENERATIONS_TTL_MS: u64 = 30_000;
+/// Windows: image name of the staged daemon copy. The update installer ends
+/// every running `laymux.exe` by image name, so the daemon must not carry it;
+/// the uninstaller ends the release one by this name (ADR-0308). A dev
+/// build's daemon has its own, so uninstalling the release never ends it.
+#[cfg(all(windows, not(debug_assertions)))]
+pub const PTY_DAEMON_STAGED_IMAGE: &str = "laymux-pty-daemon.exe";
+#[cfg(all(windows, debug_assertions))]
+pub const PTY_DAEMON_STAGED_IMAGE: &str = "laymux-dev-pty-daemon.exe";
+
 /// Shared upper bound for one owner transition, including worker polling,
 /// cancellation grace, terminal teardown, and scheduler slack.
 pub const REMOTE_OWNER_TRANSITION_TIMEOUT_MS: u64 = 750;
@@ -732,7 +862,7 @@ mod tests {
     #[test]
     fn env_names_are_screaming_snake_case() {
         let envs = [
-            ENV_LX_SOCKET,
+            ENV_LX_ENDPOINT_FILE,
             ENV_LX_TERMINAL_ID,
             ENV_LX_GROUP_ID,
             ENV_LX_AUTOMATION_PORT,

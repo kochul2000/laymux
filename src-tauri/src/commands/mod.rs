@@ -11,9 +11,11 @@ mod github_repo;
 mod grok_session;
 mod grok_usage;
 mod ipc_dispatch;
+mod local_state;
 mod misc;
 mod os_open;
 mod power;
+mod pty_sessions;
 mod remote_hosts;
 mod session_attribution;
 mod spreadsheet_stream;
@@ -42,9 +44,11 @@ pub use github_repo::*;
 pub use grok_session::*;
 pub use grok_usage::*;
 pub use ipc_dispatch::*;
+pub use local_state::*;
 pub use misc::*;
 pub use os_open::*;
 pub use power::*;
+pub use pty_sessions::*;
 pub use remote_hosts::*;
 pub use session_attribution::*;
 pub use spreadsheet_stream::*;
@@ -66,6 +70,14 @@ pub use viewer_startup::*;
 mod main_thread_io {
     /// `(file source, commands that must carry `#[tauri::command(async)]`)`.
     const OFF_MAIN_THREAD: &[(&str, &[&str])] = &[
+        (
+            include_str!("local_state.rs"),
+            &[
+                "save_session_checkpoint",
+                "load_session_checkpoint",
+                "export_portable_settings",
+            ],
+        ),
         (
             include_str!("agent_hooks.rs"),
             &["list_agent_hook_environments", "manage_agent_hooks"],

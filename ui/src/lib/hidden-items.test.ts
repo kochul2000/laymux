@@ -7,19 +7,55 @@ const workspaces: Workspace[] = [
     id: "ws-1",
     name: "Main",
     panes: [
-      { id: "p-1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-      { id: "p-2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "MemoView" } },
+      {
+        id: "p-1",
+        x: 0,
+        y: 0,
+        w: 0.5,
+        h: 1,
+        layers: [{ id: "p-1", view: { type: "TerminalView" } }],
+        activeLayerId: "p-1",
+      },
+      {
+        id: "p-2",
+        x: 0.5,
+        y: 0,
+        w: 0.5,
+        h: 1,
+        layers: [{ id: "p-2", view: { type: "MemoView" } }],
+        activeLayerId: "p-2",
+      },
     ],
   },
   {
     id: "ws-2",
     name: "Experiments",
-    panes: [{ id: "p-3", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+    panes: [
+      {
+        id: "p-3",
+        x: 0,
+        y: 0,
+        w: 1,
+        h: 1,
+        layers: [{ id: "p-3", view: { type: "TerminalView" } }],
+        activeLayerId: "p-3",
+      },
+    ],
   },
   {
     id: "ws-3",
     name: "Docs",
-    panes: [{ id: "p-4", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } }],
+    panes: [
+      {
+        id: "p-4",
+        x: 0,
+        y: 0,
+        w: 1,
+        h: 1,
+        layers: [{ id: "p-4", view: { type: "EmptyView" } }],
+        activeLayerId: "p-4",
+      },
+    ],
   },
 ];
 

@@ -46,6 +46,23 @@ export function textCells(text: string): CellInfo[] {
 }
 
 /**
+ * 실제 버퍼 행처럼 `cols` 셀까지 공백으로 채운 줄 정보. xterm 버퍼 행은 항상
+ * 터미널 폭만큼 셀을 가지므로, "행이 화면 끝까지 찼는가" 판정은 패딩된 행으로
+ * 시험해야 프로덕션과 같은 입력이 된다.
+ */
+export function makePaddedLines(
+  rows: (string | { text: string; wrapped?: boolean })[],
+  cols: number,
+): IndentedLineInfo[] {
+  return rows.map((row, i) => {
+    const { text, wrapped } = typeof row === "string" ? { text: row, wrapped: false } : row;
+    const cells = textCells(text);
+    while (cells.length < cols) cells.push({ chars: "", width: 1 });
+    return { ...reconstructLine(cells), isWrapped: wrapped ?? false, lineNumber: i + 1 };
+  });
+}
+
+/**
  * 들여쓰기 하드랩 URL 탐지용 줄 정보. 텍스트와 컬럼 맵을 프로덕션과 같은
  * `reconstructLine` 으로 만든다.
  */

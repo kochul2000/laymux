@@ -786,3 +786,126 @@ test.describe("Remote input action layout", () => {
     await expect(segment(page, "keyRow", "right").locator("#attachFile")).toHaveCount(1);
   });
 });
+
+/** Native touch through CDP so the browser, not the page, decides about panning. */
+async function touchPath(
+  page: Page,
+  points: { x: number; y: number }[],
+  { holdMs = 0, restMs = 0 }: { holdMs?: number; restMs?: number } = {},
+) {
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    const [first, ...rest] = points;
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ ...first, id: 1 }],
+    });
+    if (holdMs) await page.waitForTimeout(holdMs);
+    for (const point of rest) {
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ ...point, id: 1 }],
+      });
+    }
+    if (restMs) {
+      // Resting before lifting releases the finger at zero velocity: no fling.
+      await page.waitForTimeout(restMs);
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ ...points.at(-1)!, id: 1 }],
+      });
+    }
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  } finally {
+    await cdp.detach();
+  }
+}
+
+function verticalPath(x: number, fromY: number, toY: number, steps = 10) {
+  return Array.from({ length: steps + 1 }, (_, step) => ({
+    x,
+    y: fromY + ((toY - fromY) * step) / steps,
+  }));
+}
+
+test.describe("Remote input action layout touch", () => {
+  test("a swipe that starts on a key chip scrolls the Settings panel", async ({ page }) => {
+    await openMarkup(page);
+    await page.setViewportSize({ width: 390, height: 640 });
+    await page.locator("#drawerSettingsButton").click();
+    await openSetup(page, "inputAvailableKeys");
+
+    const settingsView = page.locator("#drawerSettingsView");
+    const target = page.locator("#inputAvailableKeys .layout-chip").first();
+    await target.evaluate((element) => element.scrollIntoView({ block: "center" }));
+    const box = (await target.boundingBox())!;
+    const before = await settingsView.evaluate((element) => element.scrollTop);
+
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    await touchPath(page, verticalPath(x, y, y - 200));
+
+    await expect
+      .poll(() => settingsView.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(before + 50);
+  });
+
+  test("a chip still answers its next tap after a swipe started on it", async ({ page }) => {
+    await openMarkup(page);
+    await page.setViewportSize({ width: 390, height: 640 });
+    await page.locator("#drawerSettingsButton").click();
+    await openSetup(page, "inputAvailableKeys");
+
+    const target = page.locator("#inputAvailableKeys .layout-chip").first();
+    const actionId = (await target.getAttribute("data-layout-action"))!;
+    await target.evaluate((element) => element.scrollIntoView({ block: "center" }));
+    let box = (await target.boundingBox())!;
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    const settingsView = page.locator("#drawerSettingsView");
+    const before = await settingsView.evaluate((element) => element.scrollTop);
+    // Rest before lifting: a fling would make the next tap only stop it,
+    // which is native behavior and not what this test is about.
+    await touchPath(page, verticalPath(x, y, y - 120), { restMs: 300 });
+    // The swipe must have become a browser pan, or the tap below proves nothing.
+    await expect
+      .poll(() => settingsView.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(before);
+
+    box = (await target.boundingBox())!;
+    await touchPath(page, [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }]);
+    await expect(
+      page.locator(`#inputAvailableKeys [data-layout-action="${actionId}"]`),
+    ).toHaveCount(0);
+  });
+
+  test("a long-press touch drag still moves a chip", async ({ page }) => {
+    await openMarkup(page);
+    await page.locator("#drawerSettingsButton").click();
+    await openSetup(page, "inputAvailableKeys");
+
+    const from = page.locator("#inputAvailableKeys .layout-chip").first();
+    const actionId = (await from.getAttribute("data-layout-action"))!;
+    // The nearest placed chip keeps both ends of the drag on screen.
+    const to = page
+      .locator("#inputLayoutEditor .layout-chip:not(#inputAvailableKeys .layout-chip)")
+      .last();
+    await from.evaluate((element) => element.scrollIntoView({ block: "end" }));
+    const fromBox = (await from.boundingBox())!;
+    const toBox = (await to.boundingBox())!;
+    expect(toBox.y).toBeGreaterThan(80);
+
+    const fromX = fromBox.x + fromBox.width / 2;
+    const fromY = fromBox.y + fromBox.height / 2;
+    const toX = toBox.x + toBox.width - 2;
+    const path = verticalPath(fromX, fromY, toBox.y + toBox.height / 2).map((point, step, all) => ({
+      x: fromX + ((toX - fromX) * step) / (all.length - 1),
+      y: point.y,
+    }));
+    await touchPath(page, path, { holdMs: 300 });
+
+    await expect(
+      page.locator(`#inputAvailableKeys [data-layout-action="${actionId}"]`),
+    ).toHaveCount(0);
+  });
+});

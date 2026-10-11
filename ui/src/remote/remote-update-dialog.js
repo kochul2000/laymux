@@ -119,12 +119,8 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
           : status.operation === "installing" || status.forceInstall
             ? { stage: "installing", completed: 0, total: null }
             : (status.preparation ?? { stage: "checkpoint", completed: 0, total: null });
-      const steps = lifecycleSteps(
-        "update",
-        status.exitSettings?.interruptTerminals === true,
-        status.forceInstall === true,
-      );
-      const active = steps.indexOf(progress.stage === "settling" ? "interrupting" : progress.stage);
+      const steps = lifecycleSteps("update", { skipPreparation: status.forceInstall === true });
+      const active = steps.indexOf(progress.stage);
       const list = element("ol", "lifecycle-steps");
       list.setAttribute("aria-live", "polite");
       steps.forEach((stage, index) => {
@@ -137,16 +133,8 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
         );
         const body = element("div", "lifecycle-step-body", copy[stage]);
         if (index === active) {
-          const percent = progress.stage === "interrupting" ? null : progressPercent(progress);
-          const detail = element(
-            "div",
-            "lifecycle-step-detail",
-            progress.stage === "settling"
-              ? copy.settling
-              : progress.stage === "interrupting"
-                ? copy.interrupted
-                : "",
-          );
+          const percent = progressPercent(progress);
+          const detail = element("div", "lifecycle-step-detail");
           detail.append(element("span", "", percent === null ? "" : `${percent}%`));
           body.append(detail);
           const track = element("div", "lifecycle-track");
@@ -183,13 +171,7 @@ export function createRemoteUpdateDialog({ check, install, getCanInstall }) {
               : copy.latest,
         ),
       );
-      content.append(
-        element(
-          "div",
-          "lifecycle-info",
-          status?.exitSettings?.interruptTerminals ? copy.cleanupOn : copy.cleanupOff,
-        ),
-      );
+      content.append(element("div", "lifecycle-info", copy.updateKeepsTerminals));
     }
     if (error) {
       const alert = element("div", "lifecycle-error", error);

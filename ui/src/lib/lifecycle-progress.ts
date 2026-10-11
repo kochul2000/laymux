@@ -20,16 +20,28 @@ export function progressPercent(
     ? Math.max(0, Math.min(100, Math.floor((progress.completed / progress.total) * 100)))
     : null;
 }
+/**
+ * Only an explicit close runs the optional Ctrl+C cleanup. An update keeps
+ * every terminal session alive in the PTY daemon (ADR-0308), so it never
+ * interrupts them (ADR-0314).
+ */
 export function lifecycleSteps(
   kind: "close" | "update",
-  cleanup: boolean,
-  skipPreparation = false,
+  {
+    cleanup = false,
+    skipPreparation = false,
+  }: { cleanup?: boolean; skipPreparation?: boolean } = {},
 ): LifecycleStage[] {
+  const interrupt = kind === "close" && cleanup;
   return [
     ...(kind === "update" ? ["downloading" as const] : []),
     ...(skipPreparation
       ? []
-      : ["checkpoint" as const, ...(cleanup ? ["interrupting" as const] : []), "caching" as const]),
+      : [
+          "checkpoint" as const,
+          ...(interrupt ? ["interrupting" as const] : []),
+          "caching" as const,
+        ]),
     kind === "update" ? "installing" : "closing",
   ];
 }
@@ -47,14 +59,12 @@ export const lifecycleCopy = {
     updateBusy: "Laymux 업데이트 중",
     subtitle: "실행 중인 작업을 정리하고 기록을 저장합니다.",
     ready: "업데이트 후 Laymux가 다시 시작됩니다.",
-    cleanupOn: "작업 정리 켜짐 · 실행 중인 작업이 중단됩니다.",
-    cleanupOff: "작업 정리 꺼짐 · 설치 전 터미널은 종료됩니다.",
+    updateKeepsTerminals: "터미널 작업은 업데이트 동안에도 계속 실행됩니다.",
     check: "업데이트 확인",
     install: "업데이트 후 재시작",
     later: "나중에",
     hide: "접어두기",
     details: "변경 사항",
-    settings: "설정",
     stable: "정식 채널",
     beta: "베타 채널",
     latest: "현재 최신 버전입니다.",
@@ -65,7 +75,7 @@ export const lifecycleCopy = {
     wait: "계속 기다리기",
     force: "손실 감수하고 종료",
     forceUpdate: "손실 감수하고 업데이트",
-    preparationSkipped: "복원 정보 저장·작업 정리·터미널 기록 저장을 건너뛰고 업데이트합니다.",
+    preparationSkipped: "복원 정보 저장·터미널 기록 저장을 건너뛰고 업데이트합니다.",
     lossWarning:
       "저장하지 못한 작업·세션 복원 정보·터미널 기록이 사라질 수 있습니다. 강행하면 실행 중인 작업이 종료됩니다.",
     cancel: "종료 취소",
@@ -87,14 +97,12 @@ export const lifecycleCopy = {
     updateBusy: "Updating Laymux",
     subtitle: "Cleaning up tasks and saving terminal history.",
     ready: "Laymux will restart after the update.",
-    cleanupOn: "Task cleanup is on · Running tasks will be interrupted.",
-    cleanupOff: "Task cleanup is off · Terminals will close before installation.",
+    updateKeepsTerminals: "Terminal sessions keep running through the update.",
     check: "Check for updates",
     install: "Update and restart",
     later: "Later",
     hide: "Minimize",
     details: "What's new",
-    settings: "Settings",
     stable: "Stable channel",
     beta: "Beta channel",
     latest: "You're up to date.",
@@ -105,7 +113,7 @@ export const lifecycleCopy = {
     wait: "Keep waiting",
     force: "Accept loss and close",
     forceUpdate: "Accept loss and update",
-    preparationSkipped: "Skipped saving restore information, task cleanup and terminal history.",
+    preparationSkipped: "Skipped saving restore information and terminal history.",
     lossWarning:
       "Unsaved work, session restore information and terminal history may be lost. Continuing will stop running tasks.",
     cancel: "Cancel closing",

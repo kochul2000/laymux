@@ -11,8 +11,6 @@ import {
   onAppUpdateStatusChanged,
 } from "@/lib/tauri-api";
 import { useLifecycleStore, keepWaitingForClose } from "@/stores/lifecycle-store";
-import { useSettingsStore } from "@/stores/settings-store";
-import { useUiStore } from "@/stores/ui-store";
 
 /** Mounted above Settings: closing the dialog never discards a settings draft. */
 export function LifecycleModal() {
@@ -20,7 +18,6 @@ export function LifecycleModal() {
   const { i18n } = useTranslation();
   const ko = i18n.language.startsWith("ko");
   const copy = lifecycleCopy[ko ? "ko" : "en"];
-  const cleanupSetting = useSettingsStore((s) => s.exit.interruptTerminals);
   const dialog = useRef<HTMLDialogElement>(null);
   const [requesting, setRequesting] = useState(false);
   const status = state.status;
@@ -31,9 +28,6 @@ export function LifecycleModal() {
   const canForceUpdate = !close && operation === "idle" && status?.canForceInstall === true;
   const skipPreparation = !close && status?.forceInstall === true;
   const error = state.error ?? (canForceUpdate ? status?.lastError : null);
-  const cleanup = close
-    ? state.cleanup
-    : (status?.exitSettings?.interruptTerminals ?? cleanupSetting);
   const progress: ExitProgress =
     state.progress && (close || state.preview)
       ? state.progress
@@ -112,11 +106,6 @@ export function LifecycleModal() {
       setRequesting(false);
     }
   };
-  const openSettings = () => {
-    dismiss();
-    useUiStore.getState().setSettingsNavTarget("terminal");
-    useUiStore.getState().openSettingsModal();
-  };
 
   return (
     <>
@@ -151,7 +140,7 @@ export function LifecycleModal() {
           {busy || ((status?.preparation || (state.preview && state.progress)) && error) ? (
             <LifecycleProgress
               kind={state.kind}
-              cleanup={cleanup}
+              cleanup={close && state.cleanup}
               progress={progress}
               ko={ko}
               failed={Boolean(error)}
@@ -174,13 +163,7 @@ export function LifecycleModal() {
                       ? copy.latest
                       : ""}
               </p>
-              <div className="lifecycle-info">
-                {cleanup ? copy.cleanupOn : copy.cleanupOff}
-                <br />
-                <Button variant="secondary" onClick={openSettings}>
-                  {copy.settings}
-                </Button>
-              </div>
+              <div className="lifecycle-info">{copy.updateKeepsTerminals}</div>
             </>
           )}
           {skipPreparation && busy && (

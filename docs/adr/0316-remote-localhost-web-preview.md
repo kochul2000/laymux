@@ -1,4 +1,4 @@
-# 0295. Remote localhost 웹 프리뷰는 고정 origin의 읽기 세션과 격리된 실행 표면을 사용한다
+# 0316. Remote localhost 웹 프리뷰는 고정 origin의 읽기 세션과 격리된 실행 표면을 사용한다
 
 - Status: Proposed
 - Date: 2026-10-11

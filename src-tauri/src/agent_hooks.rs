@@ -61,9 +61,25 @@ pub fn manage(request: &ManageRequest, app: &tauri::AppHandle) -> Result<Value, 
     manage_in_directory(request, &helper_directory(app)?)
 }
 
+pub(super) fn manage_with_timeout(
+    request: &ManageRequest,
+    app: &tauri::AppHandle,
+    timeout: Duration,
+) -> Result<Value, AppError> {
+    manage_in_directory_with_timeout(request, &helper_directory(app)?, timeout)
+}
+
 pub(crate) fn manage_in_directory(
     request: &ManageRequest,
     directory: &std::path::Path,
+) -> Result<Value, AppError> {
+    manage_in_directory_with_timeout(request, directory, MANAGE_TIMEOUT)
+}
+
+fn manage_in_directory_with_timeout(
+    request: &ManageRequest,
+    directory: &std::path::Path,
+    timeout: Duration,
 ) -> Result<Value, AppError> {
     laymux_agent_hook::install::config_name(&request.provider).map_err(AppError::Other)?;
     if !matches!(
@@ -98,7 +114,14 @@ pub(crate) fn manage_in_directory(
         if let Some(root) = request.config_dir.as_ref().filter(|s| !s.is_empty()) {
             command.arg(root);
         }
-        let output = output_with_timeout(&mut command, MANAGE_TIMEOUT)?;
+        if timeout.is_zero() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Hook check time budget exhausted",
+            )
+            .into());
+        }
+        let output = output_with_timeout(&mut command, timeout.min(MANAGE_TIMEOUT))?;
         let value: Value = serde_json::from_slice(&output.stdout)
             .map_err(|_| AppError::Other(format!("WSL hook helper failed ({})", output.status)))?;
         if !output.status.success() {
@@ -168,10 +191,13 @@ pub fn accept(state: &AppState, event: HookEvent) -> Result<(), AppError> {
     // A shared server can keep the launching pane's environment across resume.
     // Recording metadata cannot establish pane ownership: the state consumer
     // separately proves the current process, conversation, domain and generation.
-    state
+    let recorded = state
         .agent_hook_observations
         .lock_or_err()?
         .observe(event.clone());
+    if recorded && event.provider == "codex" {
+        state.session_checkpoint.hints.request();
+    }
     let mut terminals = state.terminals.lock_or_err()?;
     let Some(session) = terminals.get_mut(&event.terminal_id) else {
         return Ok(());

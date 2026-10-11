@@ -8,6 +8,8 @@ export const TAURI_MOCK_SCRIPT = `
   var cbId = 0;
   var callbacks = {};
   var eventListeners = {};
+  var checkpointRevision = 0;
+  var localSession = null;
 
   var SETTINGS_DATA = {
     appearance: { themeId: 'catppuccin-mocha', font: { face: 'Consolas', size: 14, weight: 'normal' } },
@@ -109,6 +111,13 @@ export const TAURI_MOCK_SCRIPT = `
 
         case 'save_settings':
           return Promise.resolve(undefined);
+
+        case 'save_session_checkpoint':
+          localSession = args.snapshot;
+          return Promise.resolve({ revision: ++checkpointRevision, needsRetry: false, unresolvedTerminalIds: [], snapshot: localSession });
+
+        case 'load_session_checkpoint':
+          return Promise.resolve(localSession);
 
         case 'create_terminal_session':
           return Promise.resolve({

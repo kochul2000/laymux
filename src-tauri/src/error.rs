@@ -10,6 +10,8 @@ pub enum AppError {
     Io(#[from] std::io::Error),
     #[error("JSON: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("Local state SQLite: {0}")]
+    Sqlite(#[from] rusqlite::Error),
     #[error("{0}")]
     Other(String),
 }

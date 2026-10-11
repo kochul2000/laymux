@@ -17,12 +17,32 @@ import { checkpointAndCloseHiddenTerminals } from "@/lib/tauri-api";
 const wsA: Workspace = {
   id: "wsA",
   name: "A",
-  panes: [{ id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+  panes: [
+    {
+      id: "p1",
+      x: 0,
+      y: 0,
+      w: 1,
+      h: 1,
+      layers: [{ id: "p1", view: { type: "TerminalView" } }],
+      activeLayerId: "p1",
+    },
+  ],
 };
 const wsB: Workspace = {
   id: "wsB",
   name: "B",
-  panes: [{ id: "p2", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+  panes: [
+    {
+      id: "p2",
+      x: 0,
+      y: 0,
+      w: 1,
+      h: 1,
+      layers: [{ id: "p2", view: { type: "TerminalView" } }],
+      activeLayerId: "p2",
+    },
+  ],
 };
 
 describe("useHiddenTerminalAutoClose", () => {

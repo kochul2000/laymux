@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppUpdateStatus } from "@/lib/tauri-api";
 import { useLifecycleStore } from "@/stores/lifecycle-store";
+import { useSettingsStore } from "@/stores/settings-store";
 
 const api = vi.hoisted(() => ({ check: vi.fn(), install: vi.fn(), get: vi.fn(), listen: vi.fn() }));
 vi.mock("@/lib/tauri-api", () => ({
@@ -23,7 +24,6 @@ const status: AppUpdateStatus = {
   totalBytes: null,
   checkedAtMs: null,
   lastError: null,
-  exitSettings: { interruptTerminals: true, interruptRounds: 3, settleMs: 700 },
 };
 beforeEach(() => {
   vi.clearAllMocks();
@@ -64,10 +64,16 @@ describe("LifecycleModal", () => {
     expect(useLifecycleStore.getState().open).toBe(false);
     expect(api.install).not.toHaveBeenCalled();
   });
-  it("shows channel and interruption impact before one explicit install action", async () => {
+  it("shows the channel and that terminals keep running before one explicit install", async () => {
+    useSettingsStore.setState({
+      exit: { interruptTerminals: true, interruptRounds: 3, settleMs: 700 },
+    });
     render(<LifecycleModal />);
     expect(screen.getByText("Beta channel")).toBeInTheDocument();
-    expect(screen.getByText(/Running tasks will be interrupted/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Terminal sessions keep running through the update/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/interrupted/)).toBeNull();
     expect(api.install).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Update and restart" }));
     await waitFor(() => expect(screen.getByText("Updating Laymux")).toBeInTheDocument());
@@ -83,7 +89,7 @@ describe("LifecycleModal", () => {
       useLifecycleStore.getState().receiveStatus({
         ...status,
         operation: "preparing",
-        preparation: { stage: "settling", completed: 350, total: 700 },
+        preparation: { stage: "caching", completed: 1, total: 2 },
       }),
     );
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "50");

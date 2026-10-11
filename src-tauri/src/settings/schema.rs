@@ -22,6 +22,7 @@ struct MetadataEntry {
 ///
 /// This is also the revision-ignore contract passed to the frontend concurrency guard.
 pub const READ_ONLY_SETTINGS_PATHS: &[&str] = &[
+    "/localUiState",
     "/workspaces",
     "/layouts",
     "/docks",
@@ -33,6 +34,7 @@ pub const READ_ONLY_SETTINGS_PATHS: &[&str] = &[
 ];
 
 const ENTRIES: &[MetadataEntry] = &[
+    MetadataEntry {path:"/localUiState",description:"현재 PC의 SQLite 복원 상태. 일반 설정 patch와 portable export의 대상이 아닙니다.",sensitive:true,apply_mode:ApplyMode::Restart},
     MetadataEntry {
         path: "/claude/stateDetection",
         description: "Claude 작업 상태 감지: heuristic은 기존 감지, hooks는 현재 대화로 검증된 훅을 우선 사용하고 미수신·만료 시 기존 감지로 돌아갑니다. 훅 설치는 별도입니다.",
@@ -126,6 +128,12 @@ const ENTRIES: &[MetadataEntry] = &[
     MetadataEntry {
         path: "/terminal/outputActivityBurst",
         description: "출력 활동(⏳) 감지 임계입니다. 두 검출기는 PTY 생성 시점에 터미널당 하나씩 만들어지므로, 저장 후 새로 생성한 터미널부터 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
+        path: "/terminal/ptyDaemonGraceMinutes",
+        description: "GUI가 없을 때 PTY 데몬이 터미널을 유지하는 시간(분, 1~1440, 기본 10)입니다. 업데이트 뒤 새 GUI가 세션을 이어받을 시간이며, 이 시간이 지나도록 GUI가 없으면 데몬이 터미널을 모두 끝냅니다. 설정 UI는 없습니다. 저장 뒤 새 터미널을 만들 때 실행 중인 데몬에 알립니다.",
         sensitive: false,
         apply_mode: ApplyMode::NextUse,
     },
@@ -240,6 +248,12 @@ const ENTRIES: &[MetadataEntry] = &[
     MetadataEntry {
         path: "/workspaceSelector",
         description: "workspace selector 표시·마지막 입력 배치·정렬·파괴적 action 확인·숨김 터미널 정리 설정입니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
+        path: "/paneStack",
+        description: "pane 스택(ADR-0297) 동작입니다. cycleOnBlockedArrow 가 켜져 있으면(기본 true) Alt+Arrow 방향에 pane 도 dock 도 없을 때 포커스된 슬롯의 스택을 순환합니다(오른쪽/아래 = 다음 레이어, 왼쪽/위 = 이전).",
         sensitive: false,
         apply_mode: ApplyMode::Live,
     },

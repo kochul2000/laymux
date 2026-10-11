@@ -27,7 +27,10 @@ pub mod git_watcher;
 pub mod grok_activity;
 pub mod grok_usage_probe;
 pub mod ipc_server;
+pub mod local_socket;
+pub mod local_state;
 pub mod lock_ext;
+pub mod lx_endpoint;
 pub mod osc;
 pub mod osc_hooks;
 pub mod output_buffer;
@@ -38,6 +41,7 @@ pub mod process;
 pub mod process_tree;
 pub mod pty;
 mod pty_control;
+pub mod pty_daemon;
 pub mod pty_geometry;
 mod pty_reader;
 pub mod pty_trace;
@@ -52,6 +56,8 @@ pub mod terminal_output;
 pub mod terminal_protocol;
 pub mod update_install_guard;
 pub mod usage_probe;
+#[cfg(windows)]
+pub mod win_acl;
 pub mod wsl_liveness;
 pub mod wsl_probe;
 
@@ -103,6 +109,8 @@ pub fn run() {
                     }
                 }),
             ) {
+                // Published to the lx endpoint file once the automation port
+                // proves this is the build kind's only GUI (ADR-0304).
                 Ok(socket_path) => match app_state.ipc_socket_path.lock_or_err() {
                     Ok(mut path) => {
                         path.replace(socket_path);
@@ -149,9 +157,15 @@ pub fn run() {
             // Start automation HTTP server
             let app_handle = app.handle().clone();
             let auto_state = app_state.clone();
+            let lx_state = app_state.clone();
             tauri::async_runtime::spawn(async move {
                 match automation_server::start(auto_state, app_handle).await {
-                    Ok(port) => tracing::info!(port, "Automation API ready"),
+                    Ok(port) => {
+                        tracing::info!(port, "Automation API ready");
+                        // The fixed port is held by one GUI per build kind, so
+                        // only that GUI takes over the lx endpoint file.
+                        lx_endpoint::publish_ipc_endpoint(&lx_state);
+                    }
                     Err(e) => tracing::warn!(error = %e, "Automation server failed to start"),
                 }
             });
@@ -172,6 +186,9 @@ pub fn run() {
                     Err(e) => tracing::warn!(error = %e, "Cloud tunnel auto-reconnect failed"),
                 }
             });
+
+            // End daemon sessions no pane will adopt (ADR-0312).
+            commands::start_detached_pty_session_sweep(Arc::clone(&app_state));
 
             // Watch for OS remote-desktop (RDP) session transitions and push
             // them to the UI so it can auto-open the Remote Access panel when
@@ -303,6 +320,9 @@ pub fn run() {
             commands::get_agent_hook_states,
             commands::list_system_monospace_fonts,
             commands::load_settings,
+            commands::save_session_checkpoint,
+            commands::load_session_checkpoint,
+            commands::export_portable_settings,
             commands::save_settings,
             commands::set_composer_starred_entry,
             commands::load_memo,
@@ -372,6 +392,9 @@ pub fn run() {
             commands::cloud_connect_start,
             commands::cloud_disconnect,
             commands::set_sleep_inhibit,
+            commands::list_pty_sessions,
+            commands::terminate_pty_session,
+            commands::terminate_detached_pty_sessions,
             commands::get_app_update_status,
             commands::begin_app_close,
             commands::cancel_app_close,
@@ -379,7 +402,27 @@ pub fn run() {
             commands::check_app_update,
             commands::install_app_update,
             session_checkpoint::acknowledge_session_checkpoint,
+            session_checkpoint::receipt::capture_session_checkpoint_receipt,
+            session_checkpoint::receipt::commit_session_checkpoint_receipt,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // In-process PTYs end with this process because the OS closes
+            // their handles; daemon-owned PTYs would only detach. Ask the
+            // daemon to end them so closing the app keeps meaning "end the
+            // work" (ADR-0300).
+            if let tauri::RunEvent::Exit = event {
+                if let Some(state) = app.try_state::<Arc<state::AppState>>() {
+                    state.terminate_daemon_sessions_on_exit();
+                    // This process's own lx socket (ADR-0305); a crash leaves
+                    // it for the next GUI's sweep.
+                    if let Ok(path) = state.ipc_socket_path.lock_or_err() {
+                        if let Some(path) = path.as_ref() {
+                            let _ = std::fs::remove_file(path);
+                        }
+                    }
+                }
+            }
+        });
 }

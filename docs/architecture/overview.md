@@ -27,7 +27,7 @@ Windows 및 Linux 데스크톱을 지원하며, 터미널 중심의 작업 환�
 | UI | React + TypeScript |
 | 스타일 | Tailwind CSS |
 | 상태 관리 | Zustand |
-| 터미널 | xterm.js + node-pty (Tauri sidecar) |
+| 터미널 | xterm.js + Rust `portable-pty` (PTY 데몬이 소유, [ADR-0300](../adr/0300-detached-pty-daemon-core.md)·[ADR-0301](../adr/0301-pty-daemon-default-adoption.md)) |
 | 설정 | settings.json (Windows Terminal 교집합 호환) |
 | IDE CLI | `lx` 바이너리 (Rust, Tauri 동봉) |
 | 선택형 에이전트 훅 | `tools/agent-hook` 공용 Rust 라이브러리·전용 바이너리. native와 WSL 정적 Linux helper를 배포하고 환경별로 설치. 기존 설치의 갱신 필요를 자동 검사·알림하고 사용자 동작으로 갱신 ([ADR-0282](../adr/0282-optional-agent-hook-installation.md), [ADR-0289](../adr/0289-agent-hook-update-notification.md)) |
@@ -199,15 +199,25 @@ Layout은 Workspace 생성 시점에만 사용된다. 생성 후 Workspace는 �
 Layout (생성 시점에만 사용)
 ├── id
 ├── name
-└── panes: [ { x, y, w, h (비율 0.0~1.0), viewType } ]
+└── panes: [ { x, y, w, h (비율 0.0~1.0), viewType, viewConfig?, layers?, activeLayerIndex? } ]
 
 Workspace (Independent)
 ├── id
 ├── name
-└── panes: [ { x, y, w, h, viewInstanceConfig } ]
+└── panes: [ 슬롯 { id, x, y, w, h, layers: [ { id, view } ], activeLayerId } ]
 ```
 
+**Pane 은 슬롯이고 콘텐츠는 레이어다**([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)). 슬롯이 기하를, 순서 있는 `layers` 가 콘텐츠를 소유하고 `activeLayerId` 하나만 보인다. 레이어가 둘 이상이면 그 슬롯은 스택이다.
+
+- **헬퍼 단일 소유**: 활성 레이어 조회, 평탄화(`layerEntries`), 레이어 삽입·제거·활성화·순서 변경, 영속 형태 변환은 `ui/src/lib/pane-layers.ts` 순수 함수가 소유한다. 컴포넌트는 `layers`/`activeLayerId` 를 직접 쓰지 않고 `workspace-store` 액션(`stackPane`·`setActiveLayer`·`removePane(index, layerId?)`·`removeSlot`·`setPaneView(index, view, layerId?)`)을 부른다.
+- **id 역할**: 슬롯 id 는 swap·워크스페이스 간 이동·pane 오버라이드(`controlBarMode`) 키다. 레이어 id 는 콘텐츠 키다 — `terminal-<layerId>`, view 오버라이드, 메모, 재시작/CWD 시드 버스, 알림, hidden flag, 시작 코디네이터, 출력 캐시. 새 슬롯은 첫 레이어 id 를 슬롯 id 와 같게 만들지만 이는 생성 규칙이지 불변식이 아니다.
+- **번호**: `paneNumber` 는 레이어 단위다. 슬롯 읽기 순서 안에서 레이어 순서로 연번을 매기므로 `computePaneNumbers()` 결과는 레이어 id 로 조회한다. 슬롯의 보이는 번호는 활성 레이어 id 로 찾는다.
+- **영속**: 메모리는 항상 `layers` 형태다. `settings.json` 은 레이어 하나이고 그 id 가 슬롯 id 와 같으면 기존 축약형 `{ id, x, y, w, h, view }` 로, 그 밖에는 `{ id, x, y, w, h, layers, activeLayerId }` 로 쓴다(`toPersistedPane`). 읽기는 두 형태 모두 받는다(`normalizeWorkspacePane`, Rust `WorkspacePane::content_views`). 레이아웃 템플릿도 레이어가 둘 이상일 때만 `layers`·`activeLayerIndex` 를 쓰고, `viewType` 은 활성 레이어 값으로 남긴다.
+- **dock 은 대상이 아니다**: dock pane 은 `{ id, view }` 그대로이며 `PaneGrid` 에는 단일 레이어 슬롯으로 어댑트(`toGridSlot`)되어 들어간다.
+
 ### 4.1 Layout 액션
+
+Remote 템플릿 저장은 내보내기 함수에 source workspace id를 명시해 활성 전환 없이 저장한다. source id 없는 desktop 내보내기는 기존처럼 활성 workspace를 사용한다. 슬롯·레이어·view 설정 복사와 대화 복원점 제외, 기존 템플릿 영속 경로는 공통 함수를 그대로 따른다([ADR-0311](../adr/0311-remote-save-workspace-template.md)).
 
 | 액션 | 동작 |
 |---|---|
@@ -228,9 +238,10 @@ Workspace (Independent)
 
 ### 4.2 인스턴스 오버라이드 레이어 (Pane / View)
 
-사용자 구성(`settings.json`)과 UI 상태(localStorage)를 엄격히 분리한다.
+사용자 구성(`settings.json`), PC 환경·복원 상태(`state.db`), UI 오버라이드(localStorage)를 분리한다([ADR-0299](../adr/0299-portable-settings-and-local-sqlite-state.md)).
 
-- **구성 (settings.json)**: 사용자가 의도적으로 편집·유지하는 값. 프로파일, ProfileDefaults, 키바인딩, 워크스페이스 레이아웃(pane 위치/view 타입) 등.
+- **이식 가능한 구성 (settings.json)**: 테마·글꼴·키바인딩·일반 동작 옵션, 논리 프로필, 복원 필드와 로컬 경로를 제외한 레이아웃 템플릿.
+- **PC 환경·복원 상태 (SQLite state.db)**: 실제 프로필 실행 명령·시작 디렉터리·WSL 연결, Remote 호스트 설정, 실제 workspace/dock/pane 배치, 마지막 CWD·대화 ID, 활성 workspace·열린 파일 뷰어, checkpoint revision·미확인 상태. 출력·메모는 기존 캐시 파일에 둔다.
 - **UI 상태 (localStorage)**: 재시작 간 보존되지만 "구성"은 아닌 값. 휠 줌, 컨트롤 바 모드 등. 사용자가 설정 UI를 거치지 않고 즉흥적으로 바꾸는 값은 대부분 여기에 속한다.
 
 이 구분 아래 두 개의 일급 오버라이드 공간을 둔다. 둘 다 `useOverridesStore`(`ui/src/stores/overrides-store.ts`)에서 관리.
@@ -266,12 +277,12 @@ View:     viewOverrides[paneId]        (localStorage: "laymux-view-overrides")
 
 #### 생명주기
 
-- **Pane 삭제 시** (`workspace-store.removePane`, `dock-store.removeDockPane`, `workspace-store.removeWorkspace`):
-  `overridesStore.clearAll(paneId)` — pane/view 오버라이드 동시 제거.
+- **Pane 삭제 시** (`workspace-store.removePane`·`removeSlot`, `dock-store.removeDockPane`, `workspace-store.removeWorkspace`):
+  `overridesStore.clearAll(paneId)` — pane/view 오버라이드 동시 제거. 워크스페이스 슬롯이 사라지면 슬롯 id 와 모든 레이어 id 를 지운다. 스택에서 레이어 하나만 닫히면 그 레이어의 view 오버라이드만 지우고, 그 레이어 id 가 살아 있는 슬롯 id 와 같아도 슬롯의 pane 오버라이드는 유지한다([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)).
 - **View 타입 전환 시** (`workspace-store.setPaneView`, `dock-store.setDockPaneView`):
   새 view.type ≠ 이전 view.type이면 `overridesStore.clearViewOverride(paneId)`. pane 오버라이드는 유지.
 - **앱 기동 시** (`useSessionPersistence`):
-  워크스페이스/독 복원 완료 후 살아있는 paneId 집합을 만들어 `overridesStore.gcStale(aliveSet)` — 과거 세션의 stale 엔트리 제거.
+  SQLite에 실제 저장된 세션의 워크스페이스/독 복원 완료 후 살아있는 id 집합(워크스페이스 슬롯 id·레이어 id, dock pane id)을 만들어 `overridesStore.gcStale(aliveSet)` — 과거 세션의 stale 엔트리 제거.
   - **예외 — FileViewer**: `viewOverrides`의 키가 워크스페이스/dock pane id 가 아니라 파일 경로에서 파생된 `viewerInstanceId`(`global-file-viewer:` 접두사, `lib/file-viewer.ts`)인 항목은 이 GC에서 제외한다. 파일 뷰어는 열려 있을 때만 존재해 애초에 `aliveSet`에 나타날 수 없으므로, 예외가 없으면 재시작마다 사용자가 조정한 폰트/이미지 줌이 전부 삭제된다.
 
 #### 새 필드 추가 가이드
@@ -286,6 +297,8 @@ View:     viewOverrides[paneId]        (localStorage: "laymux-view-overrides")
 
 ### 4.3 settings.json 예시
 
+실행 중 workspace 인스턴스는 아래 문서에 포함하지 않는다. API의 `Settings`는 JSON 구성과 SQLite 환경·복원 상태를 합성한 유효 모델이다.
+
 ```jsonc
 {
   "layouts": [
@@ -298,18 +311,8 @@ View:     viewOverrides[paneId]        (localStorage: "laymux-view-overrides")
         { "x": 0.5, "y": 0.6, "w": 0.5, "h": 0.4, "viewType": "TerminalView" }
       ]
     }
-  ],
-  "workspaces": [
-    {
-      "id": "ws-project-a",
-      "name": "프로젝트A",
-      "panes": [
-        { "x": 0.0, "y": 0.0, "view": { "type": "TerminalView", "profile": "WSL",        "syncGroup": "ws-project-a" } },
-        { "x": 0.0, "y": 0.6, "view": { "type": "TerminalView", "profile": "PowerShell", "syncGroup": "ws-project-a" } },
-        { "x": 0.5, "y": 0.6, "view": { "type": "TerminalView", "profile": "PowerShell", "syncGroup": "ws-project-a" } }
-      ]
-    }
   ]
+
 }
 ```
 

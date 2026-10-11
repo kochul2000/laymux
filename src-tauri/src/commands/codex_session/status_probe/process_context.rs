@@ -116,6 +116,7 @@ pub(super) fn system_config_dir() -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{BufRead, BufReader};
     use std::process::Stdio;
 
     #[test]
@@ -126,20 +127,26 @@ mod tests {
         #[cfg(windows)]
         let mut command = crate::process::headless_command("cmd.exe");
         #[cfg(windows)]
-        command.args(["/c", "pause"]);
+        command.args(["/c", "echo LAYMUX_CONTEXT_READY& pause"]);
         #[cfg(not(windows))]
         let mut command = crate::process::headless_command("sh");
         #[cfg(not(windows))]
-        command.args(["-c", "read value"]);
+        command.args(["-c", "printf 'LAYMUX_CONTEXT_READY\\n'; read value"]);
         let mut child = command
             .env("CODEX_HOME", &home)
             .env("CODEX_SQLITE_HOME", &sqlite)
             .current_dir(temp.path())
             .stdin(Stdio::piped())
-            .stdout(Stdio::null())
+            .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
+        // CreateProcess can return before the child's process parameters are
+        // readable. Wait for the fixture itself, not an arbitrary sleep.
+        let mut stdout = BufReader::new(child.stdout.take().unwrap());
+        let mut ready = String::new();
+        stdout.read_line(&mut ready).unwrap();
+        assert_eq!(ready.trim(), "LAYMUX_CONTEXT_READY");
         let result = read(child.id());
         let _ = child.kill();
         let _ = child.wait();

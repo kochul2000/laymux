@@ -227,11 +227,19 @@ pub async fn create_terminal_session(
         .session_checkpoint
         .begin_mutation_after_finalization()
         .await;
-    // Inject LX_SOCKET and LX_AUTOMATION_PORT env vars
+    // Inject LX_ENDPOINT_FILE and LX_AUTOMATION_PORT env vars. Both stay
+    // valid for a shell that outlives this GUI (ADR-0304).
     let mut env = Vec::new();
     if let Ok(path_lock) = state.ipc_socket_path.lock_or_err() {
-        if let Some(ref socket_path) = *path_lock {
-            env.push((ENV_LX_SOCKET.to_string(), socket_path.clone()));
+        // The path is fixed, so a terminal created before this GUI publishes
+        // the file still finds it once published.
+        if path_lock.is_some() {
+            if let Some(file) = crate::lx_endpoint::endpoint_file_path() {
+                env.push((
+                    ENV_LX_ENDPOINT_FILE.to_string(),
+                    file.to_string_lossy().into_owned(),
+                ));
+            }
         }
     }
     if let Ok(port_lock) = state.automation_port.lock_or_err() {
@@ -332,6 +340,23 @@ pub async fn create_terminal_session(
         advertise_true_color: settings.terminal.advertise_true_color,
     };
 
+    // Resolve the PTY owner before reserving anything, so an unreachable
+    // daemon fails this create without a generation to roll back. Starting a
+    // daemon may block briefly, so keep it off the async executor.
+    // Only the first create of an id in this GUI process may adopt: later
+    // creates are restarts, profile changes or remounts that want a fresh
+    // child, never a session this GUI already let go of.
+    let allow_adopt = !state.pty_daemon_adoption_seen.lock_or_err()?.contains(&id);
+    let backend_terminal_id = id.clone();
+    let backend_profile = config.profile.clone();
+    // A daemon keeps sessions this long with no GUI (ADR-0312); its
+    // presence connection reports a changed value.
+    crate::pty_daemon::set_grace_minutes(settings.terminal.pty_daemon_grace_minutes);
+    let backend = tokio::task::spawn_blocking(move || {
+        crate::pty_daemon::terminal_backend(&backend_terminal_id, &backend_profile, allow_adopt)
+    })
+    .await
+    .map_err(|error| format!("PTY backend selection panicked: {error}"))?;
     let codex_startup_color_probe = startup_plan
         .arm_native_windows_codex_color_probe
         .then(|| Arc::new(crate::terminal::NativeWindowsCodexColorProbeGuard::armed()));
@@ -408,20 +433,61 @@ pub async fn create_terminal_session(
     // every spawn failure, because nothing has committed yet and no close will
     // run for this id.
     let registered_callback_state = Arc::clone(&pty_cb_state);
-    let presets = osc_hooks::default_presets();
+    let missed_output = match &backend {
+        pty::PtyBackend::Daemon {
+            adopt: Some(adoption),
+            ..
+        } => Some(Arc::clone(&adoption.missed_output)),
+        _ => None,
+    };
+    // An adopting terminal holds its OSC facts until it is registered below:
+    // the missed backlog arrives at once, before the session is in the table
+    // the facts update (ADR-0309).
+    let osc_pass = Arc::new(TerminalOscPass {
+        state: Arc::clone(&*state),
+        app: app.clone(),
+        terminal_id: id.clone(),
+        terminal_generation: output_session.generation(),
+        callback_state: Arc::clone(&pty_cb_state),
+        presets: osc_hooks::default_presets(),
+        gate: OscOutputGate::new(missed_output.is_some()),
+        missed_ring: Mutex::new(
+            missed_output
+                .is_some()
+                .then(crate::output_buffer::TerminalOutputBuffer::default),
+        ),
+    });
+    let callback_osc_pass = Arc::clone(&osc_pass);
+    let callback_missed_output = missed_output;
     let pty_output_session = Arc::clone(&output_session);
     let callback_codex_startup_color_probe = codex_startup_color_probe.clone();
     let callback_bootstrap_da_reply = bootstrap_da_reply.clone();
     // Owned by the callback (no `Arc`): the closure is the only reader.
     let output_record_failures = AtomicU64::new(0);
     let terminal_generation = output_session.generation();
-    let spawned_pty = pty::spawn_pty_for_generation(&session, terminal_generation, move |data| {
+    let spawned_pty = pty::spawn_pty_on(&backend, &session, terminal_generation, move |data| {
         // Retirement may wake a callback parked in the fatal record-error gate
         // just before close terminates the PTY handle. Drop any final queued
         // master reads without re-locking poisoned protocol state or emitting
         // repeated fatal diagnostics during that cleanup window.
         if pty_output_session.is_terminal_output_retired() {
             return pty::PtyOutputControl::Stop;
+        }
+        // An adopted terminal's first bytes may be the backlog it missed
+        // while detached: OSC facts only, never shown (ADR-0309).
+        let missed_len = callback_missed_output
+            .as_ref()
+            .map_or(0, |missed| missed.take(data.len()));
+        let (missed, data) = if missed_len == 0 {
+            (Vec::new(), data)
+        } else {
+            let mut data = data;
+            let live = data.split_off(missed_len);
+            (data, live)
+        };
+        if data.is_empty() {
+            callback_osc_pass.submit(&missed, &data);
+            return pty::PtyOutputControl::Continue;
         }
         if pty_trace::is_pty_trace_enabled() {
             let signals = pty_trace::detect_terminal_signals(&data);
@@ -534,489 +600,7 @@ pub async fn create_terminal_session(
             );
         }
 
-        // ── Unified OSC processing loop ──
-        // Single pass: parse all OSC sequences, match against presets, dispatch actions,
-        // and emit structured events. Replaces the old per-code extraction blocks.
-        let sync_group = {
-            if let Ok(terms) = state_for_pty.terminals.lock_or_err() {
-                terms
-                    .get(&terminal_id)
-                    .map(|s| s.config.sync_group.clone())
-                    .unwrap_or_default()
-            } else {
-                String::new()
-            }
-        };
-
-        for event in osc::iter_osc_events(&data) {
-            if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
-                if let Some(session) = terms.get_mut(&terminal_id) {
-                    session
-                        .codex_hook_title
-                        .observe(&event, terminal_generation);
-                }
-            }
-            // Arm notify gate on user command observation (OSC 133;C or 133;E)
-            if osc_hooks::should_arm_notify_gate(&event) {
-                if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
-                    if let Some(session) = terms.get_mut(&terminal_id) {
-                        session.notify_gate_armed = true;
-                    }
-                }
-            }
-
-            // Propagated to the `terminal-title-changed` payload below so the
-            // frontend's title handler can distinguish "the OSC 0 title just
-            // happens to read like a shell prompt" (issue #234 — keep Claude
-            // pinned) from "the PTY callback's Claude/Codex state machine
-            // just confirmed exit" (must clear the interactive-app pin).
-            let mut interactive_app_exited = false;
-
-            // ── Claude Code title state machine (single pass) ──
-            // Handles entry/exit detection, working→idle task completion,
-            // and known_claude_terminals tracking for OSC 0/2 title changes.
-            //
-            // Lock strategy: each mutex is acquired and RELEASED before the next
-            // is taken — no overlapping holds, so the #1 → #3 numerical ordering
-            // rule (which prevents deadlock between concurrent threads holding
-            // multiple locks) does not apply. In order:
-            // 1. `resolve_claude_detected` briefly takes `known_claude_terminals`
-            //    (#3) to check the command-detection fallback; released on return.
-            // 2. `terminals` (#1) is taken to read was_working/prev_working_title.
-            // 3. Terminals lock is re-acquired later to write back state via
-            //    `apply_claude_title_state`.
-            // 4. On `cr.entered` or `cr.exited`, `known_claude_terminals` (#3) is
-            //    taken again to insert/remove the terminal ID.
-            // This layout keeps non-Claude terminals off the #1 lock when possible.
-            if event.code == 0 || event.code == 2 {
-                let was_detected = resolve_claude_detected(
-                    &pty_cb_state.claude_detected,
-                    &state_for_pty.known_claude_terminals,
-                    &terminal_id,
-                );
-                let (was_working, prev_working_title) = if was_detected {
-                    if let Ok(terms) = state_for_pty.terminals.lock_or_err() {
-                        match terms.get(&terminal_id) {
-                            Some(s) => (s.claude_was_working, s.claude_last_working_title.clone()),
-                            None => (false, None),
-                        }
-                    } else {
-                        (false, None)
-                    }
-                } else {
-                    (false, None)
-                };
-
-                let mut cr = claude_activity::process_claude_title(
-                    &event.data,
-                    was_detected,
-                    was_working,
-                    prev_working_title.as_deref(),
-                );
-
-                // False-exit suppression (ADR-0009). `process_claude_title`
-                // reports `exited` whenever the new title is not Claude-shaped
-                // — but a transient non-Claude title (a subprocess's OSC title,
-                // a path-like prompt, a compaction frame) is NOT Claude exiting
-                // if the claude process is still alive under this PTY. The
-                // process tree is ground truth: when it still sees `claude`,
-                // neutralize the exit so detection, the cache, the grace window,
-                // and `claude_was_working` survive untouched, and no spurious
-                // "task completed" notification fires. The genuine exit (process
-                // gone) flows through unchanged.
-                if cr.exited
-                    && crate::process_tree::suppresses_false_exit(
-                        "Claude",
-                        crate::process_tree::interactive_app_in_pty_fresh(
-                            &state_for_pty,
-                            &terminal_id,
-                        ),
-                    )
-                {
-                    cr.exited = false;
-                    cr.task_completed = None;
-                }
-
-                if cr.entered {
-                    pty_cb_state
-                        .claude_detected
-                        .store(true, std::sync::atomic::Ordering::Relaxed);
-                    if let Ok(mut known) = state_for_pty.known_claude_terminals.lock_or_err() {
-                        known.insert(terminal_id.clone());
-                    }
-                    // A fresh entry invalidates any pending exit marker from
-                    // a previous session in the same pane — otherwise the
-                    // buffer-scan strong-signal suppression would mis-block
-                    // an immediate Claude relaunch. It also invalidates any
-                    // exit verdict already in flight about the session this
-                    // one replaces, which the epoch carries (ADR-0136 §5).
-                    activity::clear_interactive_app_exit_marker(&state_for_pty, &terminal_id);
-                    activity::record_interactive_app_entry(&state_for_pty, &terminal_id);
-                    let _ = app_clone.emit(EVENT_CLAUDE_TERMINAL_DETECTED, &terminal_id);
-                }
-
-                // Determine claude_message before acquiring the terminals lock
-                let new_message = if cr.exited {
-                    None // will clear in the block below
-                } else if cr.task_completed.is_some() {
-                    // Task completed (working→idle): extract from output buffer
-                    if let Ok(buffers) = state_for_pty.output_buffers.lock_or_err() {
-                        buffers.get(&terminal_id).and_then(|buf| {
-                            buf.recent_bytes(ACTIVITY_SCAN_BYTES)
-                                .ok()
-                                .and_then(|recent| {
-                                    claude_bullet::extract_claude_status_message(&recent)
-                                })
-                        })
-                    } else {
-                        None
-                    }
-                } else if cr.now_working {
-                    // Working: use title text (strip spinner prefix)
-                    let text = claude_activity::strip_claude_spinner_prefix(&event.data);
-                    if text.is_empty() || text == "Claude Code" {
-                        None
-                    } else {
-                        Some(text.to_string())
-                    }
-                } else {
-                    None
-                };
-
-                // Outer guard keeps non-Claude terminals out of the terminals
-                // lock entirely. `apply_claude_title_state` is also guarded
-                // internally (defense in depth — see its doc comment).
-                let mut message_changed = false;
-                if cr.exited || cr.in_claude_session {
-                    if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
-                        if let Some(session) = terms.get_mut(&terminal_id) {
-                            message_changed = apply_claude_title_state(
-                                session,
-                                &cr,
-                                &event.data,
-                                new_message.as_deref(),
-                            );
-                        }
-                    }
-                }
-
-                if cr.exited {
-                    // Detection flag, known-terminal set, grace window and
-                    // exit marker, all scoped to Claude. Shared with the
-                    // reconcile worker so an exit it notices first leaves the
-                    // same state behind (ADR-0135 §4-2). Each lock inside is
-                    // taken and released on its own, so this keeps the
-                    // callback's no-overlapping-holds layout.
-                    activity::apply_interactive_app_exit(
-                        &state_for_pty,
-                        &terminal_id,
-                        "Claude",
-                        None,
-                    );
-                    // Tell the frontend's title-changed handler to drop the
-                    // interactive-app pin even though
-                    // `ClaudeActivityHandler.shouldPreserveActivityOnTitleReset`
-                    // would otherwise hold it across title resets (issue #234).
-                    interactive_app_exited = true;
-                }
-
-                if message_changed {
-                    let msg_payload = if cr.exited { None } else { new_message.clone() };
-                    let _ = app_clone.emit(
-                        EVENT_CLAUDE_MESSAGE_CHANGED,
-                        serde_json::json!({
-                            "terminalId": terminal_id,
-                            "message": msg_payload,
-                        }),
-                    );
-                }
-                // ADR-0250: titles are observations only. The frontend owns task
-                // transitions; no synthetic success, output activity or notification.
-            }
-
-            // ── Codex (OpenAI Codex CLI) title state machine ──
-            // Mirror of the Claude block above but simpler: no working/idle
-            // tracking, only entry + exit. Without this branch Codex sessions
-            // had no way to clear `known_codex_terminals` once they ended,
-            // so a pane that previously ran Codex stayed pinned as
-            // InteractiveApp{Codex} forever (PR 242 follow-up).
-            //
-            // Lock note: `sync_known_caches` and `known_codex_terminals.lock`
-            // each acquire and release the relevant mutex independently —
-            // no overlap with the Claude-block locks above.
-            if event.code == 0 || event.code == 2 {
-                let was_detected = pty_cb_state.codex_detected.load(Ordering::Relaxed)
-                    || state_for_pty
-                        .known_codex_terminals
-                        .lock_or_err()
-                        .map(|known| known.contains(&terminal_id))
-                        .unwrap_or(false);
-
-                let mut cr_codex = codex_activity::process_codex_title(&event.data, was_detected);
-
-                // False-exit suppression (ADR-0009), mirror of the Claude path:
-                // a non-Codex title while the `codex` process is still alive
-                // under this PTY is a transient title, not an exit.
-                if cr_codex.exited
-                    && crate::process_tree::suppresses_false_exit(
-                        "Codex",
-                        crate::process_tree::interactive_app_in_pty_fresh(
-                            &state_for_pty,
-                            &terminal_id,
-                        ),
-                    )
-                {
-                    cr_codex.exited = false;
-                }
-
-                if cr_codex.entered {
-                    pty_cb_state.codex_detected.store(true, Ordering::Relaxed);
-                    // Mutually-exclusive: also clears any stale Claude
-                    // membership left over from a previous session in this
-                    // pane (and inserts into known_codex_terminals). It
-                    // also clears the recently-exited marker as part of
-                    // its confirmed-detection contract.
-                    activity::sync_known_caches(&state_for_pty, &terminal_id, "Codex");
-                    // Mirror of the Claude entry: invalidate any exit verdict
-                    // in flight about the session this one replaces.
-                    activity::record_interactive_app_entry(&state_for_pty, &terminal_id);
-                }
-
-                if cr_codex.exited {
-                    if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
-                        if let Some(session) = terms.get_mut(&terminal_id) {
-                            session.codex_hook_title.clear();
-                        }
-                    }
-                    // Mirror of the Claude exit above, through the same shared
-                    // helper — the Codex banner is likewise still resident in
-                    // the 16KB window that `recent_buffer_contains` scans.
-                    activity::apply_interactive_app_exit(
-                        &state_for_pty,
-                        &terminal_id,
-                        "Codex",
-                        None,
-                    );
-                    // Mirror of the Claude exit flag: tell the frontend to
-                    // unpin the interactive-app activity even though Codex's
-                    // handler also preserves across title resets.
-                    interactive_app_exited = true;
-                }
-            }
-
-            // ── Grok Build title state machine (ADR-0156) ──
-            if event.code == 0 || event.code == 2 {
-                let was_detected = pty_cb_state.grok_detected.load(Ordering::Relaxed)
-                    || state_for_pty
-                        .known_grok_terminals
-                        .lock_or_err()
-                        .map(|known| known.contains(&terminal_id))
-                        .unwrap_or(false);
-
-                let mut cr_grok =
-                    crate::grok_activity::process_grok_title(&event.data, was_detected);
-
-                if cr_grok.exited
-                    && crate::process_tree::suppresses_false_exit(
-                        "Grok",
-                        crate::process_tree::interactive_app_in_pty_fresh(
-                            &state_for_pty,
-                            &terminal_id,
-                        ),
-                    )
-                {
-                    cr_grok.exited = false;
-                }
-
-                if cr_grok.entered {
-                    pty_cb_state.grok_detected.store(true, Ordering::Relaxed);
-                    activity::sync_known_caches(&state_for_pty, &terminal_id, "Grok");
-                    activity::record_interactive_app_entry(&state_for_pty, &terminal_id);
-                }
-
-                if cr_grok.exited {
-                    activity::apply_interactive_app_exit(
-                        &state_for_pty,
-                        &terminal_id,
-                        "Grok",
-                        None,
-                    );
-                    interactive_app_exited = true;
-                }
-            }
-
-            // Emit structured title change event (OSC 0/2) for frontend activity detection.
-            //
-            // `detect_interactive_app_from_live_title` already walks every
-            // fallback layer: direct title match → known_claude_terminals
-            // fast path → Codex spinner+banner → grace window (#237). The
-            // callback therefore only needs to call it once and emit the
-            // result.
-            if event.code == 0 || event.code == 2 {
-                // Taken before the activity is derived, not before it is
-                // emitted: the reconcile worker derives from a snapshot and
-                // emits much later, so only a derivation-time stamp tells the
-                // frontend which of the two verdicts is actually newer
-                // (`activity_order`).
-                let activity_sequence = crate::activity_order::next_activity_sequence();
-                let interactive_app =
-                    if let Ok(buffers) = state_for_pty.output_buffers.lock_or_err() {
-                        activity::detect_interactive_app_from_live_title(
-                            &state_for_pty,
-                            &terminal_id,
-                            &event.data,
-                            buffers.get(&terminal_id),
-                        )
-                    } else {
-                        activity::detect_interactive_app_from_live_title(
-                            &state_for_pty,
-                            &terminal_id,
-                            &event.data,
-                            None,
-                        )
-                    };
-                let notify_gate_armed = if let Ok(terms) = state_for_pty.terminals.lock_or_err() {
-                    terms.get(&terminal_id).is_some_and(|s| s.notify_gate_armed)
-                } else {
-                    false
-                };
-                let _ = app_clone.emit(
-                    EVENT_TERMINAL_TITLE_CHANGED,
-                    serde_json::json!({
-                        "terminalId": terminal_id,
-                        "title": event.data,
-                        "generation": terminal_generation,
-                        "appSession": pty_cb_state.detection_epoch.load(Ordering::Relaxed),
-                        "interactiveApp": interactive_app,
-                        "notifyGateArmed": notify_gate_armed,
-                        // True iff the Claude/Codex title state machine just
-                        // observed an exit. Frontend uses this to override
-                        // its `shouldPreserveActivityOnTitleReset` guard
-                        // (which would otherwise keep the pane pinned as
-                        // InteractiveApp{Claude} after `/exit`, since the
-                        // following PowerShell-prompt title still passes
-                        // the heuristic guard from issue #234).
-                        "interactiveAppExited": interactive_app_exited,
-                        // Orders this verdict against the reconcile worker's.
-                        // Only the activity fields are ordered by it — the
-                        // title itself is always current.
-                        "activitySequence": activity_sequence,
-                    }),
-                );
-            }
-
-            // Proactive CWD update (single source of truth in session.cwd).
-            // Interactive apps can trigger shell prompt/title repaints that
-            // re-emit stale OSC 7/9;9 values, and a running command can emit
-            // OSC 7 of its own; both are noise that must not mutate the local
-            // CWD. Apply the same source-activity gate (Shell-only) before
-            // local state is mutated or events are emitted.
-            if event.code == 7 || (event.code == 9 && event.param.as_deref() == Some("9")) {
-                let accept_source_cwd = match state_for_pty.output_buffers.lock_or_err() {
-                    Ok(buffers) => super::ipc_dispatch::should_accept_source_cwd_event(
-                        &state_for_pty,
-                        &terminal_id,
-                        buffers.get(&terminal_id),
-                    )
-                    .unwrap_or_else(|error| {
-                        tracing::warn!(terminal_id, %error, "terminal cwd update blocked by degraded activity state");
-                        false
-                    }),
-                    Err(error) => {
-                        tracing::warn!(terminal_id, %error, "terminal cwd update blocked by poisoned output registry");
-                        false
-                    }
-                };
-                if !accept_source_cwd {
-                    tracing::debug!(
-                        terminal_id,
-                        cwd = %event.data,
-                        "terminal cwd update suppressed: source terminal has non-shell activity"
-                    );
-                    continue;
-                }
-
-                // Both OSC 7 and OSC 9;9 provide CWD in event.data
-                // (OSC 9;9 "9;" prefix is already stripped by iter_osc_events)
-                let raw_cwd = &event.data;
-                let normalized = path_utils::normalize_wsl_path(raw_cwd);
-                let mut changed = false;
-                let mut source_cwd_send = true;
-                if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
-                    if let Some(session) = terms.get_mut(&terminal_id) {
-                        source_cwd_send = session.cwd_send;
-                        if session.cwd.as_deref() != Some(&normalized) {
-                            if session.wsl_distro.is_none() {
-                                if let Some(distro) =
-                                    path_utils::extract_wsl_distro_from_path(raw_cwd)
-                                {
-                                    session.wsl_distro = Some(distro);
-                                }
-                            }
-                            session.cwd = Some(normalized.clone());
-                            changed = true;
-                        }
-                    }
-                }
-                if changed {
-                    let _ = app_clone.emit(
-                        EVENT_TERMINAL_CWD_CHANGED,
-                        serde_json::json!({
-                            "terminalId": terminal_id,
-                            "cwd": normalized,
-                            "cwdSend": source_cwd_send,
-                        }),
-                    );
-                }
-            }
-
-            // Lifecycle has a distinct phase even when OSC 133 D has no exit code.
-            // The original command-status hooks below retain command metadata.
-            if event.code == 133
-                && !super::ipc_dispatch::is_propagated(&state_for_pty, &terminal_id).unwrap_or(true)
-            {
-                if let Some((phase, exit_code)) = osc_hooks::task_lifecycle(&event) {
-                    let mut payload = serde_json::json!({
-                        "terminalId": terminal_id,
-                        "generation": terminal_generation,
-                        "phase": phase,
-                    });
-                    if let Some(code) = exit_code {
-                        payload["exitCode"] = serde_json::json!(code);
-                    }
-                    let _ = app_clone.emit(EVENT_COMMAND_STATUS, payload);
-                }
-            }
-
-            // Match hooks and dispatch actions
-            let matched = osc_hooks::match_hooks(&event, &presets);
-            for hook in matched {
-                // Automatic OSC 133 task alerts are published by the common frontend transition.
-                if event.code == 133 && osc_hooks::is_notify_action(&hook.action) {
-                    continue;
-                }
-                // Check notify gate for notification actions
-                if osc_hooks::is_notify_action(&hook.action) {
-                    let armed = if let Ok(terms) = state_for_pty.terminals.lock_or_err() {
-                        terms.get(&terminal_id).is_some_and(|s| s.notify_gate_armed)
-                    } else {
-                        false
-                    };
-                    if !armed {
-                        continue;
-                    }
-                }
-
-                dispatch_osc_action(
-                    &state_for_pty,
-                    &app_clone,
-                    &terminal_id,
-                    &sync_group,
-                    &hook.action,
-                    &event,
-                );
-            }
-        }
+        callback_osc_pass.submit(&missed, &data);
 
         // Claude Code status message is updated in two places:
         // 1. Working title → strip spinner prefix → claude_message (in OSC title handler below)
@@ -1025,6 +609,29 @@ pub async fn create_terminal_session(
         pty::PtyOutputControl::Continue
     })?;
     session.initial_execution_host = spawned_pty.initial_execution_host;
+    if let Some(metadata) = spawned_pty.adopted.as_ref() {
+        // The adopted child authenticates its hooks with the token it was
+        // started with.
+        if let Some(token) = metadata.get(PTY_DAEMON_METADATA_AGENT_HOOK_TOKEN) {
+            session.agent_hook_token = token.clone();
+        }
+        tracing::info!(terminal_id = %id, "adopted a running PTY daemon session");
+    }
+    // Adopting continues the child an earlier GUI left running: its resume
+    // already happened and its startup probe is long over (ADR-0301). Decided
+    // by the outcome, since the daemon may refuse an adoption and the
+    // terminal then starts the requested child after all.
+    let adopted = spawned_pty.adopted.is_some();
+    let session_restore = session_restore.filter(|_| !adopted);
+    if adopted {
+        if let Some(guard) = codex_startup_color_probe.as_ref() {
+            guard.disarm();
+        }
+        // The notify gate holds back startup noise, which an adopted child
+        // left behind long ago; what it reported while detached is real
+        // (ADR-0309).
+        session.notify_gate_armed = true;
+    }
     // Seed the CWD from the directory the PTY was actually started in. OSC 7 is
     // only accepted while the terminal is a plain shell (issue #215), so a pane
     // restored straight into `claude --resume` / `codex resume` is classified as
@@ -1134,6 +741,11 @@ pub async fn create_terminal_session(
         }
     };
     terminals.insert(id.clone(), session);
+    // Only a create that actually produced a terminal uses up this id's one
+    // adoption chance; a failed attempt may still adopt on retry. Leaf lock.
+    if let Ok(mut seen) = state.pty_daemon_adoption_seen.lock_or_err() {
+        seen.insert(id.clone());
+    }
     ptys.insert(id.clone(), pty_handle);
     // Published with the other id-keyed tables so an exit noticed outside the
     // PTY callback — the reconcile worker, for an app that never emitted an exit
@@ -1181,6 +793,15 @@ pub async fn create_terminal_session(
         });
     }
     drop(terminals);
+    osc_pass.open();
+    // The missed output may have moved the CWD (ADR-0309). The frontend seeds
+    // its store from this reply, after the change event, so the reply must
+    // not carry the spawn directory over it.
+    if let Ok(terminals) = state.terminals.lock_or_err() {
+        if let Some(session) = terminals.get(&id) {
+            result.cwd = session.cwd.clone();
+        }
+    }
 
     // Notify MCP resource bridge that the terminal catalog grew. This drives
     // `notifications/resources/list_changed` on all subscribed peers (advertised
@@ -2146,6 +1767,611 @@ pub fn update_terminal_sync_group(
     Ok(())
 }
 
+/// Holds a terminal's output for the OSC pass until the terminal is
+/// registered, then passes it through in stream order (ADR-0309).
+struct OscOutputGate {
+    /// While `Some`, output waits here, flagged missed or live.
+    pending: Mutex<Option<Vec<PendingOscOutput>>>,
+}
+
+/// Output held for the OSC pass, and whether it is missed output.
+type PendingOscOutput = (Vec<u8>, bool);
+
+impl OscOutputGate {
+    fn new(closed: bool) -> Self {
+        Self {
+            pending: Mutex::new(closed.then(Vec::new)),
+        }
+    }
+
+    /// Missed output first: it precedes `live` in the stream.
+    fn submit(&self, missed: &[u8], live: &[u8], mut pass: impl FnMut(&[u8], bool)) {
+        let Ok(mut pending) = self.pending.lock_or_err() else {
+            return;
+        };
+        let segments = [(missed, true), (live, false)];
+        if let Some(queue) = pending.as_mut() {
+            queue.extend(
+                segments
+                    .into_iter()
+                    .filter(|(data, _)| !data.is_empty())
+                    .map(|(data, missed)| (data.to_vec(), missed)),
+            );
+            return;
+        }
+        // Under the lock, so nothing overtakes what `open` is still draining.
+        for (data, missed) in segments {
+            if !data.is_empty() {
+                pass(data, missed);
+            }
+        }
+    }
+
+    /// Run what waited, then pass output through.
+    fn open(&self, mut pass: impl FnMut(&[u8], bool)) {
+        let Ok(mut pending) = self.pending.lock_or_err() else {
+            return;
+        };
+        for (data, missed) in pending.take().unwrap_or_default() {
+            pass(&data, missed);
+        }
+    }
+}
+
+/// The OSC single pass over one terminal generation's output (ADR-0001).
+/// The live output callback runs it on every read; an adopted terminal also
+/// runs it once over the backlog it missed while detached (ADR-0309).
+struct TerminalOscPass {
+    state: Arc<AppState>,
+    app: AppHandle,
+    terminal_id: String,
+    terminal_generation: u64,
+    callback_state: Arc<activity::PtyCallbackState>,
+    presets: Vec<osc_hooks::OscHookDef>,
+    gate: OscOutputGate,
+    /// The missed output so far, as the live ring would hold it: what the
+    /// state the missed facts depend on (CWD gate, interactive app, a
+    /// finished task's message) is judged by, since missed output never
+    /// enters the ring (ADR-0309). Only for an adopting terminal, and dropped
+    /// once live output begins.
+    missed_ring: Mutex<Option<crate::output_buffer::TerminalOutputBuffer>>,
+}
+
+impl TerminalOscPass {
+    fn submit(&self, missed: &[u8], live: &[u8]) {
+        self.gate
+            .submit(missed, live, |data, missed| self.process(data, missed));
+    }
+
+    /// The terminal is registered: the facts it waited for can land.
+    fn open(&self) {
+        self.gate.open(|data, missed| self.process(data, missed));
+    }
+
+    /// Missed output takes every fact except `SyncCwd`, which would type
+    /// `cd` into the other terminals of the group for a change long past.
+    fn process(&self, data: &[u8], missed: bool) {
+        if data.is_empty() {
+            return;
+        }
+        let state_for_pty = Arc::clone(&self.state);
+        let app_clone = self.app.clone();
+        let terminal_id = self.terminal_id.clone();
+        let terminal_generation = self.terminal_generation;
+        let pty_cb_state = &self.callback_state;
+        let presets = &self.presets;
+        let mut missed_ring = self.missed_ring.lock_or_err().ok();
+        if !missed {
+            // Live output has begun; no missed output follows it.
+            if let Some(ring) = missed_ring.as_mut() {
+                ring.take();
+            }
+        }
+        let missed_buffer = missed
+            .then(|| missed_ring.as_deref().and_then(Option::as_ref))
+            .flatten();
+        if let Some(ring) = missed_buffer {
+            if let Err(error) = ring.push_sequenced(data) {
+                tracing::warn!(terminal_id, %error, "missed output could not be judged");
+            }
+        }
+        // ── Unified OSC processing loop ──
+        // Single pass: parse all OSC sequences, match against presets, dispatch actions,
+        // and emit structured events. Replaces the old per-code extraction blocks.
+        let sync_group = {
+            if let Ok(terms) = state_for_pty.terminals.lock_or_err() {
+                terms
+                    .get(&terminal_id)
+                    .map(|s| s.config.sync_group.clone())
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            }
+        };
+
+        for event in osc::iter_osc_events(data) {
+            if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
+                if let Some(session) = terms.get_mut(&terminal_id) {
+                    if session
+                        .codex_hook_title
+                        .observe(&event, terminal_generation)
+                    {
+                        state_for_pty.session_checkpoint.hints.request();
+                    }
+                }
+            }
+            // Arm notify gate on user command observation (OSC 133;C or 133;E)
+            if osc_hooks::should_arm_notify_gate(&event) {
+                if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
+                    if let Some(session) = terms.get_mut(&terminal_id) {
+                        session.notify_gate_armed = true;
+                    }
+                }
+            }
+
+            // Propagated to the `terminal-title-changed` payload below so the
+            // frontend's title handler can distinguish "the OSC 0 title just
+            // happens to read like a shell prompt" (issue #234 — keep Claude
+            // pinned) from "the PTY callback's Claude/Codex state machine
+            // just confirmed exit" (must clear the interactive-app pin).
+            let mut interactive_app_exited = false;
+
+            // ── Claude Code title state machine (single pass) ──
+            // Handles entry/exit detection, working→idle task completion,
+            // and known_claude_terminals tracking for OSC 0/2 title changes.
+            //
+            // Lock strategy: each mutex is acquired and RELEASED before the next
+            // is taken — no overlapping holds, so the #1 → #3 numerical ordering
+            // rule (which prevents deadlock between concurrent threads holding
+            // multiple locks) does not apply. In order:
+            // 1. `resolve_claude_detected` briefly takes `known_claude_terminals`
+            //    (#3) to check the command-detection fallback; released on return.
+            // 2. `terminals` (#1) is taken to read was_working/prev_working_title.
+            // 3. Terminals lock is re-acquired later to write back state via
+            //    `apply_claude_title_state`.
+            // 4. On `cr.entered` or `cr.exited`, `known_claude_terminals` (#3) is
+            //    taken again to insert/remove the terminal ID.
+            // This layout keeps non-Claude terminals off the #1 lock when possible.
+            if event.code == 0 || event.code == 2 {
+                let was_detected = resolve_claude_detected(
+                    &pty_cb_state.claude_detected,
+                    &state_for_pty.known_claude_terminals,
+                    &terminal_id,
+                );
+                let (was_working, prev_working_title) = if was_detected {
+                    if let Ok(terms) = state_for_pty.terminals.lock_or_err() {
+                        match terms.get(&terminal_id) {
+                            Some(s) => (s.claude_was_working, s.claude_last_working_title.clone()),
+                            None => (false, None),
+                        }
+                    } else {
+                        (false, None)
+                    }
+                } else {
+                    (false, None)
+                };
+
+                let mut cr = claude_activity::process_claude_title(
+                    &event.data,
+                    was_detected,
+                    was_working,
+                    prev_working_title.as_deref(),
+                );
+
+                // False-exit suppression (ADR-0009). `process_claude_title`
+                // reports `exited` whenever the new title is not Claude-shaped
+                // — but a transient non-Claude title (a subprocess's OSC title,
+                // a path-like prompt, a compaction frame) is NOT Claude exiting
+                // if the claude process is still alive under this PTY. The
+                // process tree is ground truth: when it still sees `claude`,
+                // neutralize the exit so detection, the cache, the grace window,
+                // and `claude_was_working` survive untouched, and no spurious
+                // "task completed" notification fires. The genuine exit (process
+                // gone) flows through unchanged.
+                if cr.exited
+                    && crate::process_tree::suppresses_false_exit(
+                        "Claude",
+                        crate::process_tree::interactive_app_in_pty_fresh(
+                            &state_for_pty,
+                            &terminal_id,
+                        ),
+                    )
+                {
+                    cr.exited = false;
+                    cr.task_completed = None;
+                }
+
+                if cr.entered {
+                    pty_cb_state
+                        .claude_detected
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    if let Ok(mut known) = state_for_pty.known_claude_terminals.lock_or_err() {
+                        known.insert(terminal_id.clone());
+                    }
+                    // A fresh entry invalidates any pending exit marker from
+                    // a previous session in the same pane — otherwise the
+                    // buffer-scan strong-signal suppression would mis-block
+                    // an immediate Claude relaunch. It also invalidates any
+                    // exit verdict already in flight about the session this
+                    // one replaces, which the epoch carries (ADR-0136 §5).
+                    activity::clear_interactive_app_exit_marker(&state_for_pty, &terminal_id);
+                    activity::record_interactive_app_entry(&state_for_pty, &terminal_id);
+                    let _ = app_clone.emit(EVENT_CLAUDE_TERMINAL_DETECTED, &terminal_id);
+                }
+
+                // Determine claude_message before acquiring the terminals lock
+                let new_message = if cr.exited {
+                    None // will clear in the block below
+                } else if cr.task_completed.is_some() {
+                    // Task completed (working→idle): extract from output buffer
+                    if let Ok(buffers) = state_for_pty.output_buffers.lock_or_err() {
+                        missed_buffer.or(buffers.get(&terminal_id)).and_then(|buf| {
+                            buf.recent_bytes(ACTIVITY_SCAN_BYTES)
+                                .ok()
+                                .and_then(|recent| {
+                                    claude_bullet::extract_claude_status_message(&recent)
+                                })
+                        })
+                    } else {
+                        None
+                    }
+                } else if cr.now_working {
+                    // Working: use title text (strip spinner prefix)
+                    let text = claude_activity::strip_claude_spinner_prefix(&event.data);
+                    if text.is_empty() || text == "Claude Code" {
+                        None
+                    } else {
+                        Some(text.to_string())
+                    }
+                } else {
+                    None
+                };
+
+                // Outer guard keeps non-Claude terminals out of the terminals
+                // lock entirely. `apply_claude_title_state` is also guarded
+                // internally (defense in depth — see its doc comment).
+                let mut message_changed = false;
+                if cr.exited || cr.in_claude_session {
+                    if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
+                        if let Some(session) = terms.get_mut(&terminal_id) {
+                            message_changed = apply_claude_title_state(
+                                session,
+                                &cr,
+                                &event.data,
+                                new_message.as_deref(),
+                            );
+                        }
+                    }
+                }
+
+                if cr.exited {
+                    // Detection flag, known-terminal set, grace window and
+                    // exit marker, all scoped to Claude. Shared with the
+                    // reconcile worker so an exit it notices first leaves the
+                    // same state behind (ADR-0135 §4-2). Each lock inside is
+                    // taken and released on its own, so this keeps the
+                    // callback's no-overlapping-holds layout.
+                    activity::apply_interactive_app_exit(
+                        &state_for_pty,
+                        &terminal_id,
+                        "Claude",
+                        None,
+                    );
+                    // Tell the frontend's title-changed handler to drop the
+                    // interactive-app pin even though
+                    // `ClaudeActivityHandler.shouldPreserveActivityOnTitleReset`
+                    // would otherwise hold it across title resets (issue #234).
+                    interactive_app_exited = true;
+                }
+
+                if message_changed {
+                    let msg_payload = if cr.exited { None } else { new_message.clone() };
+                    let _ = app_clone.emit(
+                        EVENT_CLAUDE_MESSAGE_CHANGED,
+                        serde_json::json!({
+                            "terminalId": terminal_id,
+                            "message": msg_payload,
+                        }),
+                    );
+                }
+                // ADR-0250: titles are observations only. The frontend owns task
+                // transitions; no synthetic success, output activity or notification.
+            }
+
+            // ── Codex (OpenAI Codex CLI) title state machine ──
+            // Mirror of the Claude block above but simpler: no working/idle
+            // tracking, only entry + exit. Without this branch Codex sessions
+            // had no way to clear `known_codex_terminals` once they ended,
+            // so a pane that previously ran Codex stayed pinned as
+            // InteractiveApp{Codex} forever (PR 242 follow-up).
+            //
+            // Lock note: `sync_known_caches` and `known_codex_terminals.lock`
+            // each acquire and release the relevant mutex independently —
+            // no overlap with the Claude-block locks above.
+            if event.code == 0 || event.code == 2 {
+                let was_detected = pty_cb_state.codex_detected.load(Ordering::Relaxed)
+                    || state_for_pty
+                        .known_codex_terminals
+                        .lock_or_err()
+                        .map(|known| known.contains(&terminal_id))
+                        .unwrap_or(false);
+
+                let mut cr_codex = codex_activity::process_codex_title(&event.data, was_detected);
+
+                // False-exit suppression (ADR-0009), mirror of the Claude path:
+                // a non-Codex title while the `codex` process is still alive
+                // under this PTY is a transient title, not an exit.
+                if cr_codex.exited
+                    && crate::process_tree::suppresses_false_exit(
+                        "Codex",
+                        crate::process_tree::interactive_app_in_pty_fresh(
+                            &state_for_pty,
+                            &terminal_id,
+                        ),
+                    )
+                {
+                    cr_codex.exited = false;
+                }
+
+                if cr_codex.entered {
+                    pty_cb_state.codex_detected.store(true, Ordering::Relaxed);
+                    // Mutually-exclusive: also clears any stale Claude
+                    // membership left over from a previous session in this
+                    // pane (and inserts into known_codex_terminals). It
+                    // also clears the recently-exited marker as part of
+                    // its confirmed-detection contract.
+                    activity::sync_known_caches(&state_for_pty, &terminal_id, "Codex");
+                    // Mirror of the Claude entry: invalidate any exit verdict
+                    // in flight about the session this one replaces.
+                    activity::record_interactive_app_entry(&state_for_pty, &terminal_id);
+                }
+
+                if cr_codex.exited {
+                    if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
+                        if let Some(session) = terms.get_mut(&terminal_id) {
+                            session.codex_hook_title.clear();
+                            state_for_pty.session_checkpoint.hints.request();
+                        }
+                    }
+                    // Mirror of the Claude exit above, through the same shared
+                    // helper — the Codex banner is likewise still resident in
+                    // the 16KB window that `recent_buffer_contains` scans.
+                    activity::apply_interactive_app_exit(
+                        &state_for_pty,
+                        &terminal_id,
+                        "Codex",
+                        None,
+                    );
+                    // Mirror of the Claude exit flag: tell the frontend to
+                    // unpin the interactive-app activity even though Codex's
+                    // handler also preserves across title resets.
+                    interactive_app_exited = true;
+                }
+            }
+
+            // ── Grok Build title state machine (ADR-0156) ──
+            if event.code == 0 || event.code == 2 {
+                let was_detected = pty_cb_state.grok_detected.load(Ordering::Relaxed)
+                    || state_for_pty
+                        .known_grok_terminals
+                        .lock_or_err()
+                        .map(|known| known.contains(&terminal_id))
+                        .unwrap_or(false);
+
+                let mut cr_grok =
+                    crate::grok_activity::process_grok_title(&event.data, was_detected);
+
+                if cr_grok.exited
+                    && crate::process_tree::suppresses_false_exit(
+                        "Grok",
+                        crate::process_tree::interactive_app_in_pty_fresh(
+                            &state_for_pty,
+                            &terminal_id,
+                        ),
+                    )
+                {
+                    cr_grok.exited = false;
+                }
+
+                if cr_grok.entered {
+                    pty_cb_state.grok_detected.store(true, Ordering::Relaxed);
+                    activity::sync_known_caches(&state_for_pty, &terminal_id, "Grok");
+                    activity::record_interactive_app_entry(&state_for_pty, &terminal_id);
+                }
+
+                if cr_grok.exited {
+                    activity::apply_interactive_app_exit(
+                        &state_for_pty,
+                        &terminal_id,
+                        "Grok",
+                        None,
+                    );
+                    interactive_app_exited = true;
+                }
+            }
+
+            // Emit structured title change event (OSC 0/2) for frontend activity detection.
+            //
+            // `detect_interactive_app_from_live_title` already walks every
+            // fallback layer: direct title match → known_claude_terminals
+            // fast path → Codex spinner+banner → grace window (#237). The
+            // callback therefore only needs to call it once and emit the
+            // result.
+            if event.code == 0 || event.code == 2 {
+                // Taken before the activity is derived, not before it is
+                // emitted: the reconcile worker derives from a snapshot and
+                // emits much later, so only a derivation-time stamp tells the
+                // frontend which of the two verdicts is actually newer
+                // (`activity_order`).
+                let activity_sequence = crate::activity_order::next_activity_sequence();
+                let interactive_app =
+                    if let Ok(buffers) = state_for_pty.output_buffers.lock_or_err() {
+                        activity::detect_interactive_app_from_live_title(
+                            &state_for_pty,
+                            &terminal_id,
+                            &event.data,
+                            missed_buffer.or(buffers.get(&terminal_id)),
+                        )
+                    } else {
+                        activity::detect_interactive_app_from_live_title(
+                            &state_for_pty,
+                            &terminal_id,
+                            &event.data,
+                            None,
+                        )
+                    };
+                let notify_gate_armed = if let Ok(terms) = state_for_pty.terminals.lock_or_err() {
+                    terms.get(&terminal_id).is_some_and(|s| s.notify_gate_armed)
+                } else {
+                    false
+                };
+                let _ = app_clone.emit(
+                    EVENT_TERMINAL_TITLE_CHANGED,
+                    serde_json::json!({
+                        "terminalId": terminal_id,
+                        "title": event.data,
+                        "generation": terminal_generation,
+                        "appSession": pty_cb_state.detection_epoch.load(Ordering::Relaxed),
+                        "interactiveApp": interactive_app,
+                        "notifyGateArmed": notify_gate_armed,
+                        // True iff the Claude/Codex title state machine just
+                        // observed an exit. Frontend uses this to override
+                        // its `shouldPreserveActivityOnTitleReset` guard
+                        // (which would otherwise keep the pane pinned as
+                        // InteractiveApp{Claude} after `/exit`, since the
+                        // following PowerShell-prompt title still passes
+                        // the heuristic guard from issue #234).
+                        "interactiveAppExited": interactive_app_exited,
+                        // Orders this verdict against the reconcile worker's.
+                        // Only the activity fields are ordered by it — the
+                        // title itself is always current.
+                        "activitySequence": activity_sequence,
+                    }),
+                );
+            }
+
+            // Proactive CWD update (single source of truth in session.cwd).
+            // Interactive apps can trigger shell prompt/title repaints that
+            // re-emit stale OSC 7/9;9 values, and a running command can emit
+            // OSC 7 of its own; both are noise that must not mutate the local
+            // CWD. Apply the same source-activity gate (Shell-only) before
+            // local state is mutated or events are emitted.
+            //
+            // Missed output never reached the output ring, so it is judged by
+            // the state it leaves the shell in itself: a CWD it reports is
+            // taken only if it ends at a prompt (ADR-0309).
+            if event.code == 7 || (event.code == 9 && event.param.as_deref() == Some("9")) {
+                let accept_source_cwd = match state_for_pty.output_buffers.lock_or_err() {
+                    Ok(buffers) => super::ipc_dispatch::should_accept_source_cwd_event(
+                        &state_for_pty,
+                        &terminal_id,
+                        missed_buffer.or(buffers.get(&terminal_id)),
+                    )
+                    .unwrap_or_else(|error| {
+                        tracing::warn!(terminal_id, %error, "terminal cwd update blocked by degraded activity state");
+                        false
+                    }),
+                    Err(error) => {
+                        tracing::warn!(terminal_id, %error, "terminal cwd update blocked by poisoned output registry");
+                        false
+                    }
+                };
+                if !accept_source_cwd {
+                    tracing::debug!(
+                        terminal_id,
+                        cwd = %event.data,
+                        "terminal cwd update suppressed: source terminal has non-shell activity"
+                    );
+                    continue;
+                }
+
+                // Both OSC 7 and OSC 9;9 provide CWD in event.data
+                // (OSC 9;9 "9;" prefix is already stripped by iter_osc_events)
+                let raw_cwd = &event.data;
+                let normalized = path_utils::normalize_wsl_path(raw_cwd);
+                let mut changed = false;
+                let mut source_cwd_send = true;
+                if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
+                    if let Some(session) = terms.get_mut(&terminal_id) {
+                        source_cwd_send = session.cwd_send;
+                        if session.cwd.as_deref() != Some(&normalized) {
+                            if session.wsl_distro.is_none() {
+                                if let Some(distro) =
+                                    path_utils::extract_wsl_distro_from_path(raw_cwd)
+                                {
+                                    session.wsl_distro = Some(distro);
+                                }
+                            }
+                            session.cwd = Some(normalized.clone());
+                            changed = true;
+                        }
+                    }
+                }
+                if changed {
+                    let _ = app_clone.emit(
+                        EVENT_TERMINAL_CWD_CHANGED,
+                        serde_json::json!({
+                            "terminalId": terminal_id,
+                            "cwd": normalized,
+                            "cwdSend": source_cwd_send,
+                        }),
+                    );
+                }
+            }
+
+            // Lifecycle has a distinct phase even when OSC 133 D has no exit code.
+            // The original command-status hooks below retain command metadata.
+            if event.code == 133
+                && !super::ipc_dispatch::is_propagated(&state_for_pty, &terminal_id).unwrap_or(true)
+            {
+                if let Some((phase, exit_code)) = osc_hooks::task_lifecycle(&event) {
+                    let mut payload = serde_json::json!({
+                        "terminalId": terminal_id,
+                        "generation": terminal_generation,
+                        "phase": phase,
+                    });
+                    if let Some(code) = exit_code {
+                        payload["exitCode"] = serde_json::json!(code);
+                    }
+                    let _ = app_clone.emit(EVENT_COMMAND_STATUS, payload);
+                }
+            }
+
+            // Match hooks and dispatch actions
+            let matched = osc_hooks::match_hooks(&event, presets);
+            for hook in matched {
+                if missed && matches!(hook.action, OscAction::SyncCwd) {
+                    continue;
+                }
+                // Automatic OSC 133 task alerts are published by the common frontend transition.
+                if event.code == 133 && osc_hooks::is_notify_action(&hook.action) {
+                    continue;
+                }
+                // Check notify gate for notification actions
+                if osc_hooks::is_notify_action(&hook.action) {
+                    let armed = if let Ok(terms) = state_for_pty.terminals.lock_or_err() {
+                        terms.get(&terminal_id).is_some_and(|s| s.notify_gate_armed)
+                    } else {
+                        false
+                    };
+                    if !armed {
+                        continue;
+                    }
+                }
+
+                dispatch_osc_action(
+                    &state_for_pty,
+                    &app_clone,
+                    &terminal_id,
+                    &sync_group,
+                    &hook.action,
+                    &event,
+                );
+            }
+        }
+    }
+}
+
 /// Dispatch an OSC hook action from the PTY callback.
 /// Called for each matched hook after OSC parsing.
 /// All locks are acquired and released independently to prevent deadlock.
@@ -2251,6 +2477,43 @@ mod tests {
     use std::sync::mpsc;
     use std::thread;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_closed_osc_gate_keeps_stream_order_until_it_opens() {
+        let gate = OscOutputGate::new(true);
+        let mut seen = Vec::new();
+        gate.submit(b"missed-1", b"", |data, missed| {
+            seen.push((data.to_vec(), missed))
+        });
+        gate.submit(b"missed-2", b"live-1", |data, missed| {
+            seen.push((data.to_vec(), missed))
+        });
+        assert!(
+            seen.is_empty(),
+            "nothing passes before the terminal is registered"
+        );
+        gate.open(|data, missed| seen.push((data.to_vec(), missed)));
+        gate.submit(b"", b"live-2", |data, missed| {
+            seen.push((data.to_vec(), missed))
+        });
+        let expected: Vec<(Vec<u8>, bool)> = vec![
+            (b"missed-1".to_vec(), true),
+            (b"missed-2".to_vec(), true),
+            (b"live-1".to_vec(), false),
+            (b"live-2".to_vec(), false),
+        ];
+        assert_eq!(seen, expected);
+    }
+
+    #[test]
+    fn an_open_osc_gate_passes_output_straight_through() {
+        let gate = OscOutputGate::new(false);
+        let mut seen = Vec::new();
+        gate.submit(b"", b"live", |data, missed| {
+            seen.push((data.to_vec(), missed))
+        });
+        assert_eq!(seen, vec![(b"live".to_vec(), false)]);
+    }
 
     struct SharedTestWriter(Arc<Mutex<Vec<u8>>>);
 

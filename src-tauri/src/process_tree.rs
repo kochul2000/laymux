@@ -265,7 +265,7 @@ pub enum PtyAppLiveness {
 /// - non-empty snapshot, app found → `Running`.
 /// - multiple shallowest agents → `Ambiguous` (never an authoritative exit).
 /// - non-empty snapshot, no app found → `NoneAlive` (authoritative negative).
-fn classify(child_pid: Option<u32>, snapshot: &[ProcessEntry]) -> PtyAppLiveness {
+pub(crate) fn classify(child_pid: Option<u32>, snapshot: &[ProcessEntry]) -> PtyAppLiveness {
     let Some(pid) = child_pid else {
         return PtyAppLiveness::Unknown;
     };

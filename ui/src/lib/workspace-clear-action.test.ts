@@ -15,7 +15,17 @@ function seedWorkspace() {
       {
         id: "ws-clear",
         name: "Clear",
-        panes: [{ id: "pane-a", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+        panes: [
+          {
+            id: "pane-a",
+            x: 0,
+            y: 0,
+            w: 1,
+            h: 1,
+            layers: [{ id: "pane-a", view: { type: "TerminalView" } }],
+            activeLayerId: "pane-a",
+          },
+        ],
       },
     ],
     activeWorkspaceId: "ws-clear",
