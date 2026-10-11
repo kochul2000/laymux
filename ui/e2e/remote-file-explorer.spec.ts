@@ -822,3 +822,45 @@ test("edge gestures preserve taps without treating a returned drag as one", asyn
   await expect(page.locator(".xterm-helper-textarea")).not.toBeFocused();
   await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
 });
+
+test("a native edge flick does not swallow the next pane-row tap", async ({ context, page }) => {
+  await installRemoteExplorerMocks(context, true);
+  await page.setViewportSize({ width: 390, height: 720 });
+  await connectRemote(page, true);
+  await expect(page.locator("#terminal .xterm")).toBeVisible();
+
+  // Timing-independent guard: the surface must cancel every native touchmove,
+  // so no browser fling can start however slow the run is.
+  await page.evaluate(() => {
+    const seen: boolean[] = [];
+    (window as unknown as { touchMovePrevented: boolean[] }).touchMovePrevented = seen;
+    window.addEventListener("touchmove", (event) => seen.push(event.defaultPrevented));
+  });
+  await flickSurface(page, "#terminal", 120, "left");
+  await expect(page.locator(".app")).toHaveClass(/nav-open/);
+  const prevented = await page.evaluate(
+    () => (window as unknown as { touchMovePrevented: boolean[] }).touchMovePrevented,
+  );
+  expect(prevented.length).toBeGreaterThan(0);
+  expect(prevented.every(Boolean)).toBe(true);
+
+  // A browser fling left behind by the flick turns the next tap into a
+  // fling-cancel: pointer events arrive but no click, so the menu stays open.
+  // Wait out the drawer transition so only the fling can eat the tap.
+  await page.waitForFunction(
+    () => document.querySelector(".navigation-panel")!.getAnimations().length === 0,
+  );
+  // Drawer polling rebuilds the rows, so read the position in one evaluation.
+  const point = await page.evaluate(() => {
+    const box = document.querySelector("[data-pane-row]")!.getBoundingClientRect();
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2, id: 1 };
+  });
+  const cdp = await context.newCDPSession(page);
+  try {
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  } finally {
+    await cdp.detach();
+  }
+  await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
+});
