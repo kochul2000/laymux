@@ -6,7 +6,6 @@ interface ResumeContext {
   leaseId: string | null;
   outputEpoch: number;
   ready: boolean;
-  isShell: boolean;
 }
 interface ResumeDependencies {
   getContext: () => ResumeContext;
@@ -24,13 +23,11 @@ export function createRemoteAgentResumeLinkProvider(terminal: Terminal, deps: Re
   let pending = false;
   return createAgentResumeLinkProvider(terminal, (hint, isCurrent) => {
     const context = deps.getContext();
-    if (pending || !context.ready || !context.isShell || !context.terminalId || !context.leaseId)
-      return;
+    if (pending || !context.ready || !context.terminalId || !context.leaseId) return;
     const stillAllowed = () => {
       const current = deps.getContext();
       return (
         current.ready &&
-        current.isShell &&
         current.terminalId === context.terminalId &&
         current.leaseId === context.leaseId &&
         current.outputEpoch === context.outputEpoch &&
@@ -41,6 +38,9 @@ export function createRemoteAgentResumeLinkProvider(terminal: Terminal, deps: Re
     void deps
       .run(async () => {
         if (!stillAllowed()) return;
+        // Only the host decides whether a shell owns the prompt: the local
+        // navigation snapshot is polled only while the drawer is open, so it
+        // can still show the agent that printed this hint.
         const host = await deps.loadCommands(context);
         if (!stillAllowed() || !host.isShell || !host.commands) return;
         const command = buildAgentResumeCommand(hint, host.commands);

@@ -1,6 +1,6 @@
 # 0286. 종료 안내의 복원 링크는 설정 명령으로 같은 셸에서 수동 실행한다
 
-- Status: Accepted
+- Status: Accepted (partially superseded by [0315](0315-remote-resume-shell-state-from-host.md): Remote의 조회 전 셸 상태 검사만, 나머지 검사·제출 경로는 유지)
 - Date: 2026-09-30
 - Source: 사용자 요구(CLI 종료 안내 클릭으로 Windows·WSL 세션 재진입), [ADR-0125](0125-configurable-agent-launch-command.md), [api-contracts.md 에이전트 실행 명령](../architecture/api-contracts.md)
 - Relationship: ADR-0125의 복원 명령 소유권을 명시적 사용자 클릭으로 확장한다. 자동 복원 귀속 정책은 변경하지 않는다.
