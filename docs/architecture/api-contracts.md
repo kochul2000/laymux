@@ -1699,13 +1699,9 @@ Android 저장·열기 호출은 주입된 `LaymuxNative` 객체의 메서드로
 
 두 라우트 모두 기존 remote guard + active controller lease(body `leaseId` 또는 `X-Laymux-Remote-Lease`) 필수이며 Android E2E exact allowlist 에 이 두 POST 만 추가돼 있다. 범용 localhost 프록시가 되지 않도록 forward 대상 호스트·포트·경로는 오직 begin 시점의 auth URL 이 결정하고, 검증 실패·만료·id 불일치는 모두 `409`/`400` 으로 fail closed 한다. Android 앱은 네이티브 `beginOauthRelay` 가 auth URL 의 `redirect_uri` 를 다시 파싱해 전달받은 포트·경로와 일치하는지 확인하고, `localhost`/`127.0.0.1`은 IPv4 loopback, `[::1]`은 IPv6 loopback 에 1회용 리스너(절대 deadline 10분, 비일치 요청으로 연장 불가)를 연다. redirect 도착 즉시 브라우저에 "앱으로 돌아가라" 정적 페이지를 응답한 뒤 콜백을 보관한다 — OS 브라우저 전면 동안 E2E 세션이 suspend 라 새 RPC 가 거부되므로(ADR-0146) `forward` 는 앱 복귀(onStart) 후 Remote 문서가 backoff 재시도로 수행한다. 일반 브라우저 Remote 는 Start 클릭 시 동기로 연 빈 창을 begin 후 auth URL 로 이동시키고(팝업 차단 회피), 로그인 후 주소창의 `http://localhost:{port}/...` 전체를 붙여넣는 수동 폴백 모달로 같은 `forward` 를 태운다.
 
-### 13.3.3 Localhost 웹 프리뷰
+### 13.3.3 Localhost 웹서비스 접근
 
-Remote의 HTTP localhost 링크는 별도 웹 프리뷰로 열린다([ADR-0317](../adr/0317-remote-localhost-web-preview.md)). `/remote/v1/localhost-preview/{begin,resource,close}` POST는 Remote 인증·body의 `leaseId`와 FileViewer 비밀 capability를 요구한다. 브라우저는 `X-Laymux-Remote-File-Viewer` 헤더를 사용하고 Android E2E는 `fileViewerAuthorization:{leaseId,fileViewerToken}`을 암호화 body에 포함한다. E2E dispatcher가 구조적 proof를 추출하여 정확한 claim 소유 instance/session·owner epoch·capability generation을 검사한다. begin의 `{url,leaseId}`는 HTTP loopback origin 하나(포트 ≥1024, 19280/19281 제외)를 30분·단일 슬롯 세션으로 등록하고 `{sessionId,url,chunkBytes}`를 반환한다. resource의 `{sessionId,leaseId,pathAndQuery,offset}`는 같은 origin의 GET snapshot을 최대 512 KiB씩 `{status,contentType,body,offset,nextOffset,totalBytes}`로 반환하며 body는 base64다. 파일별 64 MiB·세션 합계 128 MiB·파일 수 128개로 제한한다. close의 `{sessionId,leaseId}`는 일치하는 세션을 폐기한다. 응답 직전과 E2E 캐시 재전송에도 권한과 슬롯 수명을 재검증하여 close·교체·만료 뒤 이전 응답을 읽을 수 없다. 세션은 생성한 lease에 귀속되며 다른 origin redirect·upstream 인증/쿠키 전달·환경 프록시는 허용하지 않는다.
-
-브라우저 bootstrap(`/remote/localhost-preview/`)은 별도 opaque-origin sandbox 문서이며 부모 Remote가 검증한 resource 메시지로 정적 앱과 WASM을 읽는다. 직접 접속의 조상은 부모 Remote의 같은 origin과 ADR-0215의 앱 allowlist만 허용한다. Vite 1420은 debug 빌드에서만 포함하며 Cloud는 같은 origin만 허용한다. 비밀 토큰은 부모의 API 요청 및 Android native transport에만 보관하고 게임 JavaScript에는 전달하지 않는다. Android는 원격 브리지 없는 별도 synthetic-origin WebView의 native resource interceptor를 사용한다. Remote 셸의 script/network 정책과 OAuth relay 계약은 유지하며 Cloud의 framing은 정확한 bootstrap URL과 기존 blob 파일 문서만 허용한다. Caddy는 경로별 배타적 deferred CSP/XFO를 적용한다. POST·WebSocket·Service Worker·멀티스레드 WASM은 지원하지 않는다. 자산을 바꾼 뒤에는 프리뷰를 다시 열어 새 snapshot을 읽는다.
-
-실행 검증은 전용 APPDATA·WebView2 user data folder와 CDP 9339를 사용하는 dev에서 `node scripts/verify-localhost-preview.mjs`로 수행한다. 하네스는 워크트리·dev 신원과 기존 lease 부재를 확인한 뒤 일시적으로 Remote를 허용하고 실제 Rust 읽기 API를 브라우저 테스트에 연결한다. 실제 Godot의 WASM·게임 데이터·오디오 모듈 로딩, opaque-origin 격리, 모바일 화면과 dev Screenshot API를 확인하고 테스트 lease·런타임 허용 상태를 복구한다. 브라우저 하네스는 HTML의 classic script·이미지·링크 자산과 fetch를 중계하며 모듈의 상대 import·XHR·CSS 내부 상대 자원은 현재 범위 밖이다.
+v1.9.0의 내장 localhost 프리뷰는 v1.9.1에서 철회했다([ADR-0318](../adr/0318-revert-remote-localhost-preview.md)). 프리뷰 API·bootstrap·Android bridge와 Cloud의 프리뷰 CSP 예외는 제공하지 않는다. 일반 URL 열기와 OAuth 전용 loopback 중계는 기존 계약을 따른다. PC의 로컬 웹서비스는 사용자가 구성한 Tailscale 등 별도 네트워크 경로로 접근한다.
 
 ### 13.4 Terminal Control
 
@@ -2092,8 +2088,6 @@ terminal-output session 내부에서 둘 이상의 세부 락을 중첩할 때�
 poison recovery도 이 순서를 바꾸지 않는다. discard helper는 역순 획득이나 상위 registry 재진입을 허용하지 않으며, 잠재적으로 blocking인 PTY `terminate()`는 모든 AppState guard를 놓은 뒤 실행한다.
 
 **콜백 내 락**: PTY 콜백 등 비동기 콜백에서는 독립적으로 락을 획득한다. 호출자의 락을 전달하지 않는다.
-
-Localhost preview의 비동기 세션 슬롯은 Remote 상태 락보다 먼저 획득한다([ADR-0317](../adr/0317-remote-localhost-web-preview.md)). 슬롯을 기다리는 동안 번호 락을 보유하지 않으며, 슬롯을 얻은 뒤 capability와 claim 소유자를 다시 검증한다. 다운로드·캐시 삽입·세션 교체는 이 슬롯으로 직렬화한다. 완료 응답의 권한 검증은 슬롯을 놓은 뒤 수행한다. E2E receipt에는 슬롯의 약한 수명 참조와 만료 시각을 붙여 캐시 검증에 비동기 슬롯 락이 필요하지 않게 한다.
 
 ### 14.4 상수 관리
 

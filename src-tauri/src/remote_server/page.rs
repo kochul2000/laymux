@@ -115,7 +115,7 @@ const LAST_RESORT_CSP: &str = "default-src 'none'; frame-ancestors 'none'";
 /// need to be: its wrapper loads the shell as a top-level document over HTTPS
 /// (ADR-0149), never framed. The Vite dev origin is compiled in only for debug
 /// builds; a shipped binary must not trust whatever answers on port 1420.
-pub(super) const APP_FRAME_ANCESTORS: &str = if cfg!(debug_assertions) {
+const APP_FRAME_ANCESTORS: &str = if cfg!(debug_assertions) {
     "tauri://localhost http://tauri.localhost http://localhost:1420"
 } else {
     "tauri://localhost http://tauri.localhost"

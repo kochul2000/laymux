@@ -1,6 +1,6 @@
 # 0317. Remote localhost 웹 프리뷰는 고정 origin의 읽기 세션과 격리된 실행 표면을 사용한다
 
-- Status: Accepted
+- Status: Superseded by [0318](0318-revert-remote-localhost-preview.md)
 - Date: 2026-10-11
 - Source: 사용자 요구(`http://localhost:8765`의 Godot 게임을 Remote에서 실행), [api-contracts.md §13](../architecture/api-contracts.md), [ADR-0175](0175-remote-oauth-loopback-relay.md)
 - Extends: ADR-0175의 loopback 중계. OAuth의 1회용 callback 계약은 유지한다.

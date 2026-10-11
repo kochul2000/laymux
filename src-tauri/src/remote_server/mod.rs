@@ -13,9 +13,6 @@ mod file_viewer_signal;
 mod font_assets;
 mod github_repo_routes;
 mod lease;
-mod localhost_preview;
-#[cfg(test)]
-mod localhost_preview_tests;
 mod memo_routes;
 mod navigation;
 mod navigation_routes;
@@ -23,7 +20,6 @@ mod navigation_step_routes;
 mod oauth_relay_routes;
 mod page;
 mod page_assets;
-mod preview_page;
 mod pwa;
 mod render_checkpoint;
 mod routes;
@@ -64,7 +60,6 @@ pub use lease::{
     get_remote_control_status, reclaim_remote_control, RemoteControlLease, RemoteControlState,
     RemoteControlStatus,
 };
-pub use localhost_preview::PreviewState;
 pub(crate) use render_checkpoint::{
     attach_and_subscribe_render_checkpoint, RenderCheckpointAttachError,
     RenderCheckpointAttachErrorKind,

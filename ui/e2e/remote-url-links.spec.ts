@@ -185,7 +185,6 @@ async function installRemoteMocks(context: BrowserContext) {
         json: {
           active: true,
           leaseId: "lease-links",
-          fileViewerToken: "viewer-links",
           resumeToken: "resume-links",
           heartbeatTimeoutSeconds: 45,
         },
@@ -259,7 +258,6 @@ async function installAndroidWrapperBridge(
           return {
             active: true,
             leaseId: "lease-links",
-            fileViewerToken: "viewer-links",
             resumeToken: "resume-links",
             heartbeatTimeoutSeconds: 45,
           };
@@ -334,72 +332,6 @@ async function installAndroidWrapperBridge(
     },
   );
 }
-
-test("Remote xterm opens localhost links through the PC preview with its active lease", async ({
-  context,
-  page,
-}) => {
-  await installRemoteMocks(context);
-  const begins: unknown[] = [];
-  await page.route("**/remote/v1/localhost-preview/begin", (route) => {
-    expect(route.request().headers()["x-laymux-remote-file-viewer"]).toBe("viewer-links");
-    begins.push(route.request().postDataJSON());
-    return route.fulfill({
-      json: { sessionId: "preview-link", url: "http://localhost:8765/", chunkBytes: 512 * 1024 },
-    });
-  });
-  await page.route("**/remote/localhost-preview/", (route) =>
-    route.fulfill({ contentType: "text/html", body: "<p>PC app</p>" }),
-  );
-  await page.routeWebSocket(/\/remote\/v1\/terminals\/terminal-1\/output/, (socket) => {
-    const { header, payload } = snapshotFrames("Play: http://localhost:8765/\r\n");
-    socket.send(header);
-    socket.send(payload);
-  });
-  await page.goto("http://remote.test/remote/#token=remote-secret");
-  await page.evaluate(() => {
-    const target = window as RemoteTerminalWindow;
-    const reset = target.Terminal.prototype.reset;
-    target.Terminal.prototype.reset = function () {
-      target.__remoteTerm = this as never;
-      return reset.call(this);
-    };
-  });
-  await page.locator("#connect").click();
-  await expect
-    .poll(() =>
-      page.evaluate(() =>
-        (window as RemoteTerminalWindow).__remoteTerm?.buffer.active
-          .getLine(0)
-          ?.translateToString(),
-      ),
-    )
-    .toContain("localhost:8765");
-  const geometry = await page.evaluate(() => ({
-    cols: (window as RemoteTerminalWindow).__remoteTerm!.cols,
-    rows: (window as RemoteTerminalWindow).__remoteTerm!.rows,
-  }));
-  const box = (await page.locator(".xterm-screen").boundingBox())!;
-  const pages = context.pages().length;
-  await page.mouse.move(
-    box.x + (9 * box.width) / geometry.cols,
-    box.y + (0.5 * box.height) / geometry.rows,
-  );
-  await page.waitForTimeout(150);
-  await page.mouse.click(
-    box.x + (9 * box.width) / geometry.cols,
-    box.y + (0.5 * box.height) / geometry.rows,
-  );
-  await expect(page.locator(".localhost-preview-overlay")).toBeVisible();
-  await expect(page.frameLocator(".localhost-preview-overlay iframe").locator("p")).toHaveText(
-    "PC app",
-  );
-  expect(begins).toEqual([{ url: "http://localhost:8765/", leaseId: "lease-links" }]);
-  expect(context.pages()).toHaveLength(pages);
-  expect(
-    await page.locator(".localhost-preview-overlay iframe").getAttribute("sandbox"),
-  ).not.toContain("allow-same-origin");
-});
 
 test("Remote xterm opens URL and GitHub issue/PR links in safe new tabs", async ({
   context,

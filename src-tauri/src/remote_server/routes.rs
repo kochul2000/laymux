@@ -45,9 +45,6 @@ use super::lease::{
     ClaimReservationAttempt, HumanControlOrigin, RemoteControlLease, RemoteControlState,
     RemoteControlStatus, RemoteOwnerTransition,
 };
-use super::localhost_preview::{
-    remote_preview_begin, remote_preview_close, remote_preview_resource,
-};
 use super::memo_routes::{remote_memo_save, remote_memos};
 use super::navigation_routes::{
     remote_layouts_list, remote_navigation, remote_notification_mark_read,
@@ -62,7 +59,6 @@ use super::navigation_step_routes::{
 use super::oauth_relay_routes::{remote_oauth_relay_begin, remote_oauth_relay_forward};
 use super::page::{remote_page, remote_page_redirect};
 use super::page_assets::remote_hashed_asset;
-use super::preview_page::remote_preview_page;
 use super::pwa::{remote_manifest, remote_pwa_icon, ICON_ROUTE_PATH, MANIFEST_ROUTE_PATH};
 use super::terminal_info::remote_terminal_infos;
 use super::update_routes::{remote_update_check, remote_update_install, remote_update_status};
@@ -317,18 +313,6 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         )
         .route("/remote/v1/file-viewer/list", post(remote_file_viewer_list))
         // OAuth loopback relay (ADR-0175). Sized for an auth URL / callback
-        .route(
-            "/remote/v1/localhost-preview/begin",
-            post(remote_preview_begin).layer(DefaultBodyLimit::max(16 * 1024)),
-        )
-        .route(
-            "/remote/v1/localhost-preview/resource",
-            post(remote_preview_resource).layer(DefaultBodyLimit::max(16 * 1024)),
-        )
-        .route(
-            "/remote/v1/localhost-preview/close",
-            post(remote_preview_close).layer(DefaultBodyLimit::max(1024)),
-        )
         // query, both bounded well under these caps by the handlers.
         .route(
             "/remote/v1/oauth-relay/begin",
@@ -355,7 +339,6 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
     Router::new()
         .route("/remote", get(remote_page_redirect))
         .route("/remote/", get(remote_page))
-        .route("/remote/localhost-preview/", get(remote_preview_page))
         // Content-hashed immutable client assets (ADR-0169) — what the served
         // page actually references. The fixed vendor paths below stay for
         // compatibility with older clients and the E2E allowlist.

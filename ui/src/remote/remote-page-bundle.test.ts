@@ -45,7 +45,6 @@ describe("remote page bundle", () => {
     const banner = readFileSync(path.join(ASSETS_DIR, "remote-app.min.js"), "utf8").split("\n", 8);
     const stamp = banner.find((line) => line.startsWith("// Source-SHA256:"));
     const lock = JSON.parse(readFileSync(PACKAGE_LOCK_PATH, "utf8")) as PackageLock;
-    expect(banner).toContain(`// Preview-SHA256: ${fileHash(path.resolve(__dirname, "localhost-preview.js"))}`);
     expect(banner).toContain(
       `// Keyboard-SHA256: ${fileHash(path.resolve(__dirname, "remote-keyboard.js"))}`,
     );
