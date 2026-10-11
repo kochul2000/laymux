@@ -34,7 +34,10 @@ export async function previewLifecycle(params: Record<string, unknown>) {
   ];
   if (!stages.includes(stage)) throw new Error("Unknown lifecycle stage");
   // Only an explicit close interrupts terminals (ADR-0314).
-  if (kind === "update" && (stage === "interrupting" || stage === "settling"))
+  if (
+    kind === "update" &&
+    (stage === "interrupting" || stage === "settling" || params.cleanup !== undefined)
+  )
     throw new Error("An update has no terminal cleanup stage");
   const cleanup = kind === "close" && params.cleanup !== false;
   const snapshot = await getAppUpdateStatus();

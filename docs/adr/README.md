@@ -281,7 +281,7 @@ ADR 이 필요한 대표 기준:
 | [0261](0261-remote-visible-tool-swipe-cycle.md) | Remote 도구 스와이프는 표시된 도구를 고정 순서로 순환한다 | Superseded by 0263 (안내 줄만) |
 | [0262](0262-powershell-command-lifecycle.md) | PowerShell 작업 경계는 수락된 줄 입력과 프롬프트가 소유한다 | Accepted |
 | [0263](0263-remote-tool-swipe-hint-removal.md) | Remote 도구의 상단 스와이프 안내 줄을 제거한다 | Accepted |
-| [0264](0264-exit-update-progress-dialog.md) | 종료·업데이트 준비 단계와 전용 진행 모달 공유 | Accepted |
+| [0264](0264-exit-update-progress-dialog.md) | 종료·업데이트 준비 단계와 전용 진행 모달 공유 | Accepted (partially superseded by [0314](0314-update-never-interrupts-terminals.md)) |
 | [0265](0265-pc-remote-first-use-defaults.md) | PC·Remote의 첫 사용 기본 구성을 정한다 | Accepted (partially superseded by [0277](0277-remote-pane-clear-soft-key.md)) |
 | [0266](0266-remote-file-open-on-device.md) | Remote 파일 열기는 원본 바이트를 기기 뷰어에 전달한다 | Accepted |
 | [0267](0267-codex-live-session-age-policy.md) | 프로세스 기록으로 확인한 현재 Codex 대화는 파일 나이로 만료시키지 않는다 | Accepted |
