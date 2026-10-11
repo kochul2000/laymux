@@ -8,6 +8,7 @@ import org.json.JSONObject
 internal class LocalhostPreviewTransport(
     private val sessionId: String,
     private val leaseId: String,
+    private val fileViewerToken: String,
     private val current: () -> Boolean,
     private val request: (String, JSONObject) -> JSONObject,
 ) {
@@ -23,9 +24,7 @@ internal class LocalhostPreviewTransport(
                 request("/remote/v1/session/heartbeat", JSONObject().put("leaseId", leaseId))
                 heartbeatAt = SystemClock.elapsedRealtime()
             }
-            val chunk = request("/remote/v1/localhost-preview/resource", JSONObject()
-                .put("sessionId", sessionId).put("leaseId", leaseId)
-                .put("pathAndQuery", path).put("offset", offset))
+            val chunk = request("/remote/v1/localhost-preview/resource", previewResourceRequest(sessionId, leaseId, fileViewerToken, path, offset))
             check(current())
             val total = chunk.getLong("totalBytes")
             check(total in 0..64L * 1024 * 1024)
@@ -42,3 +41,8 @@ internal class LocalhostPreviewTransport(
         return PreviewResource(status, contentType, bytes)
     }
 }
+
+internal fun previewResourceRequest(sessionId: String, leaseId: String, token: String, path: String, offset: Int): JSONObject =
+    JSONObject().put("sessionId", sessionId).put("leaseId", leaseId)
+        .put("fileViewerAuthorization", JSONObject().put("leaseId", leaseId).put("fileViewerToken", token))
+        .put("pathAndQuery", path).put("offset", offset)

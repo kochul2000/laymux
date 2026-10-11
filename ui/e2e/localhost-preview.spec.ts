@@ -49,7 +49,7 @@ async function harness(page: Page, live = false) {
         body:
           controller +
           `
-      const preview=createLocalhostPreview({getLease:()=>${JSON.stringify(live ? process.env.LAYMUX_PREVIEW_BACKEND_LEASE || "test-lease" : "test-lease")},isAndroid:()=>false,api:async(path,options)=>{const r=await fetch(path,options);if(!r.ok)throw Error("Preview failed");return r.json();}});
+      const preview=createLocalhostPreview({getLease:()=>${JSON.stringify(live ? process.env.LAYMUX_PREVIEW_BACKEND_LEASE || "test-lease" : "test-lease")},getToken:()=>${JSON.stringify(live ? process.env.LAYMUX_PREVIEW_VIEWER_TOKEN || "test-viewer" : "test-viewer")},isAndroid:()=>false,api:async(path,options)=>{const r=await fetch(path,{...options,headers:{"x-laymux-remote-file-viewer":options.fileViewerToken}});if(!r.ok)throw Error("Preview failed");return r.json();}});
       document.getElementById("play").onclick=()=>preview.open(new URL(${JSON.stringify(target)}));
     `,
       });
@@ -76,6 +76,7 @@ async function harness(page: Page, live = false) {
         headers: {
           "content-type": "application/json",
           authorization: "Bearer " + process.env.LAYMUX_PREVIEW_BACKEND_TOKEN,
+          "x-laymux-remote-file-viewer": route.request().headers()["x-laymux-remote-file-viewer"],
         },
         body: JSON.stringify(body),
       });

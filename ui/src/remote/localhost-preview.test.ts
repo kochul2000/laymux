@@ -24,7 +24,8 @@ describe("localhost web preview", () => {
 
   it("assembles binary chunks without forwarding authentication or changing origins", async () => {
     const calls: unknown[] = [];
-    const api = async (path: string, options: { body: string }) => {
+    const api = async (path: string, options: { body: string; fileViewerToken: string }) => {
+      expect(options.fileViewerToken).toBe("secret-viewer");
       const body = JSON.parse(options.body);
       calls.push({ path, body });
       return {
@@ -38,7 +39,12 @@ describe("localhost web preview", () => {
     };
     const result = await readPreviewResource(
       api,
-      { sessionId: "session", leaseId: "lease", url: "http://localhost:8765/game/" },
+      {
+        sessionId: "session",
+        leaseId: "lease",
+        fileViewerToken: "secret-viewer",
+        url: "http://localhost:8765/game/",
+      },
       "index.wasm",
     );
     expect([...result.bytes]).toEqual([0, 255, 1, 127]);

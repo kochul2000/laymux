@@ -33,7 +33,7 @@ const invoke = (command, args) =>
   );
 const access = await invoke("get_remote_access_status");
 const control = await invoke("get_remote_control_status");
-if (control.lease) {
+if (control.active || control.leaseId || control.transitioning) {
   await desktop.close();
   throw new Error("기존 Remote 제어권이 있어 검증하지 않습니다.");
 }
@@ -82,6 +82,7 @@ try {
             process.env.LAYMUX_PREVIEW_REPRO_URL || "http://localhost:8765/",
           LAYMUX_PREVIEW_BACKEND_TOKEN: token,
           LAYMUX_PREVIEW_BACKEND_LEASE: ownedLease,
+          LAYMUX_PREVIEW_VIEWER_TOKEN: claim.fileViewerToken,
         },
       },
     );

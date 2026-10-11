@@ -185,6 +185,7 @@ async function installRemoteMocks(context: BrowserContext) {
         json: {
           active: true,
           leaseId: "lease-links",
+          fileViewerToken: "viewer-links",
           resumeToken: "resume-links",
           heartbeatTimeoutSeconds: 45,
         },
@@ -258,6 +259,7 @@ async function installAndroidWrapperBridge(
           return {
             active: true,
             leaseId: "lease-links",
+            fileViewerToken: "viewer-links",
             resumeToken: "resume-links",
             heartbeatTimeoutSeconds: 45,
           };
@@ -340,6 +342,7 @@ test("Remote xterm opens localhost links through the PC preview with its active 
   await installRemoteMocks(context);
   const begins: unknown[] = [];
   await page.route("**/remote/v1/localhost-preview/begin", (route) => {
+    expect(route.request().headers()["x-laymux-remote-file-viewer"]).toBe("viewer-links");
     begins.push(route.request().postDataJSON());
     return route.fulfill({
       json: { sessionId: "preview-link", url: "http://localhost:8765/", chunkBytes: 512 * 1024 },

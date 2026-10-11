@@ -52,8 +52,8 @@ class RemoteBridge(
     }
 
     @JavascriptInterface
-    fun openLocalhostPreview(sessionId: String?, url: String?, leaseId: String?) {
-        activity.openLocalhostPreview(documentGeneration, sessionId ?: return, url ?: return, leaseId ?: return)
+    fun openLocalhostPreview(sessionId: String?, url: String?, leaseId: String?, fileViewerToken: String?) {
+        activity.openLocalhostPreview(documentGeneration, sessionId ?: return, url ?: return, leaseId ?: return, fileViewerToken ?: return)
     }
 
     /** Open host bytes with the device's associated viewer (ADR-0266). */

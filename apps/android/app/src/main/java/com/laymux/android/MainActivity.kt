@@ -2493,14 +2493,15 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         }
     }
 
-    fun openLocalhostPreview(documentGeneration: Long, sessionId: String, url: String, leaseId: String) {
+    fun openLocalhostPreview(documentGeneration: Long, sessionId: String, url: String, leaseId: String, fileViewerToken: String) {
         if (!remoteBridgeActionsEnabled(documentGeneration) || remoteLeaseId != leaseId) return
+        if (fileViewerToken.isBlank() || fileViewerToken.length > 128) return
         val startUrl = LocalhostPreviewPolicy.startUrl(sessionId, url) ?: return
         val session = remoteSession ?: return
         runOnUiThread {
             if (!remoteBridgeActionsEnabled(documentGeneration) || remoteLeaseId != leaseId || remoteSession !== session) return@runOnUiThread
             closeLocalhostPreview(notify = false)
-            val transport = LocalhostPreviewTransport(sessionId, leaseId,
+            val transport = LocalhostPreviewTransport(sessionId, leaseId, fileViewerToken,
                 current = { remoteBridgeActionsEnabled(documentGeneration) && remoteLifecycleActive &&
                     remoteSession === session && remoteLeaseId == leaseId && localhostPreviewView?.sessionId == sessionId },
                 request = { path, body ->

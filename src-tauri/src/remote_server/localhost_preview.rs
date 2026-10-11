@@ -1,14 +1,22 @@
-use super::{json_error, lease::require_active_lease};
+use super::{
+    json_error,
+    lease::AndroidE2eFileViewerProof,
+    navigation_routes::lease_id_from_headers,
+    viewer_routes::{
+        file_viewer_authorization, file_viewer_capability_from_headers, FileViewerAuthorization,
+    },
+};
 use crate::{automation_server::ServerState, state::AppState};
 use axum::{
-    extract::State,
-    http::StatusCode,
+    extract::{Extension, State},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 use url::{Host, Url};
 
@@ -29,6 +37,7 @@ struct PreviewSession {
     lease_id: String,
     target: Url,
     deadline: Instant,
+    lifetime: Arc<()>,
     files: HashMap<String, PreviewFile>,
     bytes: usize,
 }
@@ -44,6 +53,8 @@ pub(super) struct PreviewBegin {
     pub session_id: String,
     url: String,
     chunk_bytes: usize,
+    #[serde(skip)]
+    lifetime: PreviewLifetime,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -54,6 +65,40 @@ pub(super) struct PreviewChunk {
     offset: usize,
     pub next_offset: usize,
     total_bytes: usize,
+    #[serde(skip)]
+    lifetime: PreviewLifetime,
+}
+
+impl PreviewChunk {
+    pub(super) fn response(
+        self,
+        app: &AppState,
+        authorization: &FileViewerAuthorization,
+    ) -> Response {
+        preview_response(
+            app,
+            authorization,
+            &self.lifetime,
+            serde_json::to_value(&self),
+        )
+    }
+}
+
+struct PreviewLifetime {
+    owner: Weak<()>,
+    deadline: Instant,
+}
+
+impl PreviewLifetime {
+    fn snapshot(session: &PreviewSession) -> Self {
+        Self {
+            owner: Arc::downgrade(&session.lifetime),
+            deadline: session.deadline,
+        }
+    }
+    fn is_current(&self) -> bool {
+        Instant::now() < self.deadline && self.owner.upgrade().is_some()
+    }
 }
 
 pub(super) fn preview_target(value: &str) -> Result<Url, String> {
@@ -99,8 +144,10 @@ pub(super) fn resource_url(target: &Url, path: &str) -> Result<Url, String> {
     Ok(url)
 }
 
-fn check_lease(app: &AppState, lease: &str) -> Result<(), String> {
-    require_active_lease(app, Some(lease))
+fn check_authority(app: &AppState, authorization: &FileViewerAuthorization) -> Result<(), String> {
+    authorization
+        .revalidate(app)
+        .map(|_| ())
         .map_err(|_| "preview controller lease is not active".into())
 }
 
@@ -108,20 +155,22 @@ impl PreviewState {
     pub(super) async fn begin(
         &self,
         app: &AppState,
-        lease: &str,
+        authorization: &FileViewerAuthorization,
         value: &str,
     ) -> Result<PreviewBegin, String> {
-        check_lease(app, lease)?;
+        check_authority(app, authorization)?;
+        let lease = authorization.lease_id();
         let target = preview_target(value)?;
         let id = uuid::Uuid::new_v4().to_string();
         let mut slot = self.slot.lock().await;
         // A controller may have changed while another download held the slot.
-        check_lease(app, lease)?;
+        check_authority(app, authorization)?;
         *slot = Some(PreviewSession {
             id: id.clone(),
             lease_id: lease.into(),
             target,
             deadline: Instant::now() + SESSION_TTL,
+            lifetime: Arc::new(()),
             files: HashMap::new(),
             bytes: 0,
         });
@@ -129,20 +178,24 @@ impl PreviewState {
             session_id: id,
             url: value.into(),
             chunk_bytes: CHUNK_BYTES,
+            lifetime: PreviewLifetime::snapshot(
+                slot.as_ref().ok_or("preview session unavailable")?,
+            ),
         })
     }
 
     pub(super) async fn read(
         &self,
         app: &AppState,
-        lease: &str,
+        authorization: &FileViewerAuthorization,
         id: &str,
         path: &str,
         offset: usize,
     ) -> Result<PreviewChunk, String> {
-        check_lease(app, lease)?;
+        check_authority(app, authorization)?;
+        let lease = authorization.lease_id();
         let mut slot = self.slot.lock().await;
-        check_lease(app, lease)?;
+        check_authority(app, authorization)?;
         let session = slot
             .as_mut()
             .filter(|s| s.id == id && s.lease_id == lease && Instant::now() < s.deadline)
@@ -175,20 +228,28 @@ impl PreviewState {
             offset,
             next_offset: end,
             total_bytes: file.bytes.len(),
+            lifetime: PreviewLifetime::snapshot(session),
         };
         // Release the slot before checking the completed request's controller state.
         let expired = Instant::now() >= session.deadline;
         drop(slot);
-        check_lease(app, lease)?;
+        check_authority(app, authorization)?;
         if expired {
             return Err("preview session expired".into());
         }
         Ok(result)
     }
 
-    pub(super) async fn close(&self, app: &AppState, lease: &str, id: &str) -> Result<(), String> {
-        check_lease(app, lease)?;
+    pub(super) async fn close(
+        &self,
+        app: &AppState,
+        authorization: &FileViewerAuthorization,
+        id: &str,
+    ) -> Result<(), String> {
+        check_authority(app, authorization)?;
+        let lease = authorization.lease_id();
         let mut slot = self.slot.lock().await;
+        check_authority(app, authorization)?;
         if slot
             .as_ref()
             .is_some_and(|s| s.id == id && s.lease_id == lease)
@@ -297,58 +358,134 @@ pub(super) struct CloseRequest {
 
 pub(super) async fn remote_preview_begin(
     State(server): State<ServerState>,
+    headers: HeaderMap,
+    proof: Option<Extension<AndroidE2eFileViewerProof>>,
     Json(body): Json<BeginRequest>,
 ) -> Response {
-    if let Err(response) = require_active_lease(&server.app_state, Some(&body.lease_id)) {
-        return response;
-    }
+    let authorization = match preview_authorization(
+        &server.app_state,
+        &headers,
+        proof.as_ref().map(|p| &p.0),
+        &body.lease_id,
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
     match server
         .app_state
         .localhost_preview
-        .begin(&server.app_state, &body.lease_id, &body.url)
+        .begin(&server.app_state, &authorization, &body.url)
         .await
     {
-        Ok(result) => Json(result).into_response(),
+        Ok(result) => preview_response(
+            &server.app_state,
+            &authorization,
+            &result.lifetime,
+            serde_json::to_value(&result),
+        ),
         Err(e) => json_error(StatusCode::BAD_REQUEST, &e),
     }
 }
 pub(super) async fn remote_preview_resource(
     State(server): State<ServerState>,
+    headers: HeaderMap,
+    proof: Option<Extension<AndroidE2eFileViewerProof>>,
     Json(body): Json<ResourceRequest>,
 ) -> Response {
-    if let Err(response) = require_active_lease(&server.app_state, Some(&body.lease_id)) {
-        return response;
-    }
+    let authorization = match preview_authorization(
+        &server.app_state,
+        &headers,
+        proof.as_ref().map(|p| &p.0),
+        &body.lease_id,
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
     match server
         .app_state
         .localhost_preview
         .read(
             &server.app_state,
-            &body.lease_id,
+            &authorization,
             &body.session_id,
             &body.path_and_query,
             body.offset,
         )
         .await
     {
-        Ok(result) => Json(result).into_response(),
+        Ok(result) => result.response(&server.app_state, &authorization),
         Err(e) => json_error(StatusCode::BAD_REQUEST, &e),
     }
 }
 pub(super) async fn remote_preview_close(
     State(server): State<ServerState>,
+    headers: HeaderMap,
+    proof: Option<Extension<AndroidE2eFileViewerProof>>,
     Json(body): Json<CloseRequest>,
 ) -> Response {
-    if let Err(response) = require_active_lease(&server.app_state, Some(&body.lease_id)) {
-        return response;
-    }
+    let authorization = match preview_authorization(
+        &server.app_state,
+        &headers,
+        proof.as_ref().map(|p| &p.0),
+        &body.lease_id,
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
     match server
         .app_state
         .localhost_preview
-        .close(&server.app_state, &body.lease_id, &body.session_id)
+        .close(&server.app_state, &authorization, &body.session_id)
         .await
     {
         Ok(()) => Json(serde_json::json!({"closed": true})).into_response(),
         Err(e) => json_error(StatusCode::BAD_REQUEST, &e),
     }
+}
+
+#[allow(clippy::result_large_err)]
+pub(super) fn preview_authorization(
+    app: &AppState,
+    headers: &HeaderMap,
+    proof: Option<&AndroidE2eFileViewerProof>,
+    lease: &str,
+) -> Result<FileViewerAuthorization, Response> {
+    file_viewer_authorization(
+        app,
+        Some(lease),
+        lease_id_from_headers(headers),
+        file_viewer_capability_from_headers(headers),
+        proof,
+    )
+}
+
+fn preview_response(
+    app: &AppState,
+    authorization: &FileViewerAuthorization,
+    lifetime: &PreviewLifetime,
+    result: Result<serde_json::Value, serde_json::Error>,
+) -> Response {
+    let guard = match authorization.revalidate(app) {
+        Ok(guard) => guard,
+        Err(response) => return response,
+    };
+    if !lifetime.is_current() {
+        return json_error(StatusCode::FORBIDDEN, "preview session expired or changed");
+    }
+    let mut response = match result {
+        Ok(value) => Json(value).into_response(),
+        Err(_) => json_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "preview serialization failed",
+        ),
+    };
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    if let Some(guard) = guard {
+        response
+            .extensions_mut()
+            .insert(guard.with_resource_lifetime(lifetime.owner.clone(), lifetime.deadline));
+    }
+    response
 }

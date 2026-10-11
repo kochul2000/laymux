@@ -4,6 +4,7 @@
 - Date: 2026-10-11
 - Source: 사용자 요구(`http://localhost:8765`의 Godot 게임을 Remote에서 실행), [api-contracts.md §13](../architecture/api-contracts.md), [ADR-0175](0175-remote-oauth-loopback-relay.md)
 - Extends: ADR-0175의 loopback 중계. OAuth의 1회용 callback 계약은 유지한다.
+- Extends: [ADR-0208](0208-android-e2e-file-viewer-typed-capability.md)의 비밀 capability·정확한 E2E 소유자·캐시 재전송 검증을 localhost 읽기에 적용한다.
 
 ## Context
 
@@ -15,11 +16,11 @@ Remote에서 localhost 링크를 그대로 열면 원격 기기의 loopback에 �
 
 **명시적으로 연 localhost 링크의 HTTP origin 하나를 active lease에 묶어 읽고, 웹 앱은 Remote 권한을 갖지 않는 별도 표면에서 실행한다.**
 
-- `begin/resource/close` POST는 기존 Remote 인증과 active lease를 요구한다. 대상은 HTTP loopback의 1024 이상 포트이며 laymux의 19280/19281은 거부한다. 등록 후 host·port는 변경되지 않고 다른 origin으로 redirect하지 않는다. 프록시 환경변수·Remote 토큰·쿠키·인증 헤더를 upstream으로 전달하지 않는다.
+- `begin/resource/close` POST는 기존 Remote 인증·active lease와 제어권 claim에서 발급한 비밀 FileViewer capability를 요구한다. 공개된 lease ID만으로는 접근할 수 없다. Android E2E는 암호화된 구조적 proof로 capability와 lease를 전달하고 정확한 instance/session·owner epoch·capability generation을 검사한다. 대상은 HTTP loopback의 1024 이상 포트이며 laymux의 19280/19281은 거부한다. 등록 후 host·port는 변경되지 않고 다른 origin으로 redirect하지 않는다. 프록시 환경변수·Remote 토큰·쿠키·인증 헤더를 upstream으로 전달하지 않는다.
 - 세션은 AppState가 소유하는 단일 슬롯이며 새 begin은 이전 세션을 대체한다. lease id 변경·만료·Remote 비활성화 후에는 읽을 수 없다. 절대 수명은 30분이고 명시적 close는 캐시를 폐기한다.
-- 비동기 슬롯은 Remote access/control 락보다 앞서는 predecessor다. 번호 락을 잡은 채 슬롯을 기다리지 않으며, 슬롯 획득 뒤와 다운로드 완료 뒤에 lease를 검증한다.
+- 비동기 슬롯은 Remote access/control 락보다 앞서는 predecessor다. 번호 락을 잡은 채 슬롯을 기다리지 않으며, 슬롯 획득 뒤와 다운로드 완료 뒤에 capability와 소유자를 재검증한다. E2E 캐시 재전송도 동일하게 검사하며, 응답의 비밀 아닌 receipt에 해당 프리뷰 슬롯의 약한 수명 참조·절대 만료 시각을 붙여 close·새 begin·수명 종료 후 이전 응답을 반환하지 않는다.
 - upstream 파일은 한 번 읽어 세션 안에서 보관한다. 파일별 64 MiB·세션 합계 128 MiB·파일 수 128개를 상한으로 하고, 실제 스트림 수신 중 상한을 검사한다. resource는 최대 512 KiB씩 base64 JSON으로 반환하여 기존 Browser 및 Android E2E transport를 사용한다. 세션 슬롯의 비동기 직렬화로 겹치는 다운로드와 교체가 메모리 상한을 우회하지 못한다.
-- 브라우저에서는 별도 bootstrap 문서의 opaque-origin sandbox 안에서 앱을 실행한다. 부모 Remote가 검증한 메시지만 읽기 API로 전달한다. bootstrap 문서만 inline script·WASM 실행을 허용하며 Remote 셸의 script 정책은 넓히지 않는다. Cloud도 이 문서에 별도 고정 sandbox 정책을 적용한다.
+- 브라우저에서는 별도 bootstrap 문서의 opaque-origin sandbox 안에서 앱을 실행한다. 부모 Remote가 검증한 메시지만 읽기 API로 전달한다. bootstrap 문서만 inline script·WASM 실행을 허용하며 Remote 셸의 script 정책은 넓히지 않는다. Cloud는 셸 framing을 정확한 bootstrap URL과 기존 blob 파일 문서로 제한하고, 이 문서에만 별도 고정 sandbox 정책을 적용한다. Caddy의 상호 배타적 deferred 헤더로 upstream과의 중복 CSP/XFO를 방지한다.
 - Android에서는 브리지 없는 별도 WebView가 전용 synthetic origin의 요청을 native에서 읽기 API로 변환한다. 원격 셸과 키·네트워크 권한을 공유하는 JavaScriptInterface를 설치하지 않는다. 기존 foreground/E2E 수명 정책을 유지한다.
 
 ## Alternatives Considered

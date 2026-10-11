@@ -33,6 +33,7 @@ export async function readPreviewResource(api, session, value, signal) {
   do {
     const chunk = await api("/remote/v1/localhost-preview/resource", {
       method: "POST",
+      fileViewerToken: session.fileViewerToken,
       signal,
       body: JSON.stringify({
         sessionId: session.sessionId,
@@ -70,7 +71,7 @@ export async function readPreviewResource(api, session, value, signal) {
 }
 
 /** The trusted controller owns credentials; the sandbox only requests read-only resources. */
-export function createLocalhostPreview({ api, getLease, isAndroid }) {
+export function createLocalhostPreview({ api, getLease, getToken, isAndroid }) {
   const ko = (navigator.language || "en").toLowerCase().startsWith("ko");
   const overlay = document.createElement("div");
   overlay.className = "localhost-preview-overlay";
@@ -106,6 +107,7 @@ export function createLocalhostPreview({ api, getLease, isAndroid }) {
     if (old && old.leaseId === getLease()) {
       api("/remote/v1/localhost-preview/close", {
         method: "POST",
+        fileViewerToken: old.fileViewerToken,
         body: JSON.stringify({ sessionId: old.sessionId, leaseId: old.leaseId }),
       }).catch(() => {});
     }
@@ -115,7 +117,8 @@ export function createLocalhostPreview({ api, getLease, isAndroid }) {
   async function open(url) {
     close();
     const leaseId = getLease();
-    if (!leaseId) return;
+    const fileViewerToken = getToken();
+    if (!leaseId || !fileViewerToken) return;
     const current = revision;
     abort = new AbortController();
     title.textContent = url.href;
@@ -132,13 +135,19 @@ export function createLocalhostPreview({ api, getLease, isAndroid }) {
       }
       const result = await api("/remote/v1/localhost-preview/begin", {
         method: "POST",
+        fileViewerToken,
         signal: abort.signal,
         body: JSON.stringify({ url: url.href, leaseId }),
       });
-      if (revision !== current || getLease() !== leaseId) return;
-      session = { ...result, leaseId };
+      if (revision !== current || getLease() !== leaseId || getToken() !== fileViewerToken) return;
+      session = { ...result, leaseId, fileViewerToken };
       if (isAndroid()) {
-        window.LaymuxNative.openLocalhostPreview(session.sessionId, session.url, leaseId);
+        window.LaymuxNative.openLocalhostPreview(
+          session.sessionId,
+          session.url,
+          leaseId,
+          fileViewerToken,
+        );
         overlay.hidden = true;
         return;
       }
@@ -181,7 +190,8 @@ export function createLocalhostPreview({ api, getLease, isAndroid }) {
     const active = session;
     pending += 1;
     try {
-      if (active.leaseId !== getLease()) throw new Error("프리뷰 연결이 바뀌었습니다.");
+      if (active.leaseId !== getLease() || active.fileViewerToken !== getToken())
+        throw new Error("프리뷰 연결이 바뀌었습니다.");
       const result = await readPreviewResource(api, active, data.url, abort.signal);
       if (revision !== current) return;
       target.postMessage({ type: "laymux.preview.resource", id: data.id, ...result }, "*", [

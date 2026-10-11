@@ -192,7 +192,12 @@ pub(super) async fn remote_android_e2e_rpc(
                     dispatch_plain_request(dispatch_server, context, request, via_cloud_relay)
                 },
                 move |context, request, guard| {
-                    revalidate_cached_file_viewer_request(&replay_server, context, request, &guard)
+                    revalidate_cached_file_viewer_request(
+                        &replay_server.app_state,
+                        context,
+                        request,
+                        &guard,
+                    )
                 },
             )
             .await
@@ -508,11 +513,14 @@ fn file_viewer_path(method: &Method, path: &str) -> bool {
             | (&Method::POST, "/remote/v1/file-viewer/download")
             | (&Method::POST, "/remote/v1/file-viewer/path-link")
             | (&Method::POST, "/remote/v1/file-viewer/list")
+            | (&Method::POST, "/remote/v1/localhost-preview/begin")
+            | (&Method::POST, "/remote/v1/localhost-preview/resource")
+            | (&Method::POST, "/remote/v1/localhost-preview/close")
     )
 }
 
-fn revalidate_cached_file_viewer_request(
-    server: &ServerState,
+pub(super) fn revalidate_cached_file_viewer_request(
+    app: &crate::state::AppState,
     context: AndroidE2eRequestContext,
     value: Value,
     guard: &AndroidE2eReplayGuard,
@@ -535,14 +543,9 @@ fn revalidate_cached_file_viewer_request(
         .and_then(Value::as_object)
         .and_then(|object| object.get("leaseId"))
         .and_then(Value::as_str);
-    require_android_e2e_file_viewer_capability(
-        &server.app_state,
-        &proof,
-        presented_lease_id,
-        Some(guard),
-    )
-    .map(|_| ())
-    .map_err(|_| E2eError::Invalid)
+    require_android_e2e_file_viewer_capability(app, &proof, presented_lease_id, Some(guard))
+        .map(|_| ())
+        .map_err(|_| E2eError::Invalid)
 }
 
 fn http_path_allowed(method: &Method, path: &str) -> bool {
