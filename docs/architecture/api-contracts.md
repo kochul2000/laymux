@@ -374,6 +374,8 @@ Remote도 같은 프로세스 전역 snapshot registry와 action allowlist를 �
 
 Remote header는 File Explorer 옆에 GitHub 버튼을 두고 연결된 active terminal의 CWD로 overlay를 연다. Issues/PRs, 수동 새로고침, 링크·브랜치 복사와 데스크톱과 같은 두 단계 확인 action을 제공한다. 우측 가장자리 스와이프 대상은 기기 로컬 `localStorage["laymux.remote.rightSwipeView"]`(`"files" | "github" | "memo"`, 기본 `"files"`)가 정하고 Remote Settings → Panels와 Remote settings MCP가 함께 편집한다. 터미널의 좌측 가장자리 제스처는 계속 workspace menu를 연다. 열린 도구 안에서는 왼쪽이 표시·사용 가능한 Issues → PRs → Files → Memo 순환이며, 오른쪽은 `toolSwipeRightAction`의 기본 닫기 또는 역순 순환이다([ADR-0261](../adr/0261-remote-visible-tool-swipe-cycle.md)).
 
+Remote의 툴바(앱 최상단 헤더, workspace drawer 헤더, 파일 뷰어·GitHub·메모 헤더)는 `--toolbar-height` 40px(아래 테두리 포함), `--toolbar-control-size` 32px, `--toolbar-icon-size` 16px, `--toolbar-padding-x` 6px, `--toolbar-gap` 4px를 공유한다. 페이지의 모든 `<header>`와 `.drawer-header`가 한 규칙으로 행 기하와 툴바 버튼 아이콘 크기를 소유하고, 아이콘 버튼은 정사각형, 텍스트 버튼은 같은 높이에 폭만 내용에 맞춘다. 앱 헤더는 viewport 240px 이하에서, drawer 헤더는 `.navigation-panel` container 폭 240px 미만에서 제목을 숨기고 control을 24px로 압축해 모든 action을 한 행에 둔다. 사용자 배율을 가진 입력 행과 플로팅 컨트롤은 이 토큰을 따르지 않는다([ADR-0313](../adr/0313-remote-toolbar-shared-size-tokens.md)).
+
 ### Direct Remote Mode 설정
 
 브라우저 원격 접속은 명시적 opt-in 설정이다. 기본값은 꺼짐이며, remote API는 Automation API/MCP의 IP allowlist와 별도 인증/Origin/IP 정책을 사용한다([ADR-0013](../adr/0013-direct-remote-mode.md)).

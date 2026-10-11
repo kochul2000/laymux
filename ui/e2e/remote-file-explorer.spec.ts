@@ -864,3 +864,107 @@ test("a native edge flick does not swallow the next pane-row tap", async ({ cont
   }
   await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
 });
+
+test("every Remote toolbar shares one row height, control size and icon size", async ({
+  context,
+  page,
+}) => {
+  await installRemoteExplorerMocks(context, true);
+  await page.setViewportSize({ width: 390, height: 720 });
+  await connectRemote(page, true);
+
+  const toolbar = (selector: string) =>
+    page.evaluate((root) => {
+      const bar = document.querySelector<HTMLElement>(root)!;
+      const buttons = [...bar.querySelectorAll<HTMLElement>("button")].filter(
+        (button) => button.offsetParent !== null,
+      );
+      return {
+        height: bar.getBoundingClientRect().height,
+        buttons: buttons.map((button) => {
+          const box = button.getBoundingClientRect();
+          const icon = button.querySelector("svg")?.getBoundingClientRect();
+          return {
+            id: button.id,
+            height: box.height,
+            width: box.width,
+            hasText: (button.textContent || "").trim().length > 0,
+            icon: icon ? [icon.width, icon.height] : null,
+          };
+        }),
+      };
+    }, selector);
+  const expectToolbar = async (selector: string) => {
+    const bar = await toolbar(selector);
+    expect(bar.height, selector).toBe(40);
+    expect(bar.buttons.length, selector).toBeGreaterThan(0);
+    for (const button of bar.buttons) {
+      expect(button.height, `${selector} #${button.id}`).toBe(32);
+      if (!button.hasText) expect(button.width, `${selector} #${button.id}`).toBe(32);
+      else expect(button.width, `${selector} #${button.id}`).toBeGreaterThanOrEqual(32);
+      if (button.icon) expect(button.icon, `${selector} #${button.id}`).toEqual([16, 16]);
+    }
+  };
+
+  await expectToolbar(".app > header");
+
+  await page.locator("#navToggle").click();
+  await expect(page.locator(".app")).toHaveClass(/nav-open/);
+  await page.waitForFunction(
+    () => document.querySelector(".navigation-panel")!.getAnimations().length === 0,
+  );
+  await expectToolbar(".drawer-header");
+  await page.locator("#navScrim").evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
+
+  await page.locator("#fileExplorerHeader").click();
+  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+  await expectToolbar("#fileViewerToolbar");
+  await page.locator("#fileViewerDirectory").getByText("notes.txt").click();
+  await expect(page.locator("#fileViewerZoom")).toBeVisible();
+  await expectToolbar("#fileViewerToolbar");
+  await page.locator("#fileViewerClose").click();
+  await expect(page.locator("#fileViewerOverlay")).toBeHidden();
+
+  await page.locator("#memoHeader").click();
+  await expect(page.locator("#memoToolbar")).toBeVisible();
+  await expectToolbar("#memoToolbar");
+});
+
+for (const { viewport, menuWidth } of [
+  { viewport: 250, menuWidth: null },
+  { viewport: 390, menuWidth: "200px" },
+]) {
+  test(`the drawer header keeps every action in one row at drawer width ${menuWidth ?? `viewport ${viewport}`}`, async ({
+    context,
+    page,
+  }) => {
+    await installRemoteExplorerMocks(context, true);
+    await page.setViewportSize({ width: viewport, height: 640 });
+    await connectRemote(page, true);
+    if (menuWidth) {
+      await page.evaluate(
+        (width) => document.documentElement.style.setProperty("--remote-navigation-width", width),
+        menuWidth,
+      );
+    }
+    await page.locator("#navToggle").click();
+    await expect(page.locator(".app")).toHaveClass(/nav-open/);
+    await page.waitForFunction(
+      () => document.querySelector(".navigation-panel")!.getAnimations().length === 0,
+    );
+
+    // The widest row: the local app's PC action plus the hidden-workspace entry.
+    const fit = await page.evaluate(() => {
+      document.getElementById("hiddenWorkspaceToggle")!.hidden = false;
+      const header = document.querySelector<HTMLElement>(".drawer-header")!;
+      const settings = document.getElementById("drawerSettingsButton")!.getBoundingClientRect();
+      return {
+        overflow: header.scrollWidth - header.clientWidth,
+        settingsInside: settings.right <= header.getBoundingClientRect().right,
+        height: header.getBoundingClientRect().height,
+      };
+    });
+    expect(fit).toEqual({ overflow: 0, settingsInside: true, height: 40 });
+  });
+}

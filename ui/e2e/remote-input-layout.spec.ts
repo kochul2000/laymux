@@ -791,7 +791,7 @@ test.describe("Remote input action layout", () => {
 async function touchPath(
   page: Page,
   points: { x: number; y: number }[],
-  { holdMs = 0 }: { holdMs?: number } = {},
+  { holdMs = 0, restMs = 0 }: { holdMs?: number; restMs?: number } = {},
 ) {
   const cdp = await page.context().newCDPSession(page);
   try {
@@ -805,6 +805,14 @@ async function touchPath(
       await cdp.send("Input.dispatchTouchEvent", {
         type: "touchMove",
         touchPoints: [{ ...point, id: 1 }],
+      });
+    }
+    if (restMs) {
+      // Resting before lifting releases the finger at zero velocity: no fling.
+      await page.waitForTimeout(restMs);
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ ...points.at(-1)!, id: 1 }],
       });
     }
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
@@ -850,15 +858,22 @@ test.describe("Remote input action layout touch", () => {
 
     const target = page.locator("#inputAvailableKeys .layout-chip").first();
     const actionId = (await target.getAttribute("data-layout-action"))!;
-    await target.evaluate((element) => element.scrollIntoView({ block: "end" }));
+    await target.evaluate((element) => element.scrollIntoView({ block: "center" }));
     let box = (await target.boundingBox())!;
     const x = box.x + box.width / 2;
     const y = box.y + box.height / 2;
-    await touchPath(page, verticalPath(x, y, y + 120));
+    const settingsView = page.locator("#drawerSettingsView");
+    const before = await settingsView.evaluate((element) => element.scrollTop);
+    // Rest before lifting: a fling would make the next tap only stop it,
+    // which is native behavior and not what this test is about.
+    await touchPath(page, verticalPath(x, y, y - 120), { restMs: 300 });
+    // The swipe must have become a browser pan, or the tap below proves nothing.
+    await expect
+      .poll(() => settingsView.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(before);
 
     box = (await target.boundingBox())!;
-    const tap = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-    await touchPath(page, [tap]);
+    await touchPath(page, [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }]);
     await expect(
       page.locator(`#inputAvailableKeys [data-layout-action="${actionId}"]`),
     ).toHaveCount(0);
