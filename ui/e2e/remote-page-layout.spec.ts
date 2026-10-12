@@ -460,6 +460,61 @@ async function routeRemoteWithWorkspaces(
 test.describe("remote mobile layout", () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
 
+  test("aligns workspace and pane skip/hide actions on mobile", async ({ page }) => {
+    await routeRemoteWithWorkspaces(page, [], { includeGamma: true });
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await page.locator("#navToggle").click();
+    await expect(page.locator("header #spatialExclusion")).toHaveCount(0);
+    const paneSkip = page.locator('[data-pane-skip="p-a2"]');
+    const paneHide = page.locator('[data-pane-visibility="p-a2"]');
+    await expect(paneSkip).toBeVisible();
+    // Read one DOM generation: navigation refresh can replace all rows.
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const boxes = [
+            '[data-workspace-skip="ws-a"]',
+            '[data-workspace-visibility="ws-a"]',
+            '[data-pane-skip="p-a2"]',
+            '[data-pane-visibility="p-a2"]',
+            '[data-workspace-visibility="ws-c"]',
+          ].map((selector) => document.querySelector(selector)?.getBoundingClientRect());
+          if (boxes.some((box) => !box || box.width === 0)) return false;
+          return (
+            boxes[0]!.x < boxes[1]!.x &&
+            boxes[2]!.x < boxes[3]!.x &&
+            Math.abs(boxes[0]!.x - boxes[2]!.x) < 1 &&
+            Math.abs(boxes[1]!.x - boxes[3]!.x) < 1 &&
+            Math.abs(boxes[1]!.x - boxes[4]!.x) < 1
+          );
+        }),
+      )
+      .toBe(true);
+    await paneSkip.click();
+    await expect(paneSkip).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator('[data-pane-row="p-a2"]')).toBeVisible();
+    await paneHide.click();
+    await expect(paneHide).toHaveAttribute("aria-pressed", "true");
+    await expect(paneSkip).toHaveAttribute("aria-pressed", "true");
+    await paneHide.click();
+    await expect(paneHide).toHaveAttribute("aria-pressed", "false");
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const lastInput = document.querySelector('[data-pane-last-input="p-b1"]');
+          const item = lastInput?.closest(".workspace-item");
+          if (!lastInput || !item) return null;
+          return item.getBoundingClientRect().bottom - lastInput.getBoundingClientRect().bottom;
+        }),
+      )
+      .toBeLessThanOrEqual(5);
+    await expect(
+      page.locator(".workspace-item", { hasText: "Gamma" }).locator(".workspace-summary-line"),
+    ).toBeHidden();
+    await page.screenshot({ path: "../.screenshots/remote-actions-mobile.png" });
+  });
+
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.setContent(remoteClientMarkupWithoutXterm({ script: false }));
@@ -754,7 +809,7 @@ test.describe("remote mobile layout", () => {
     await expect(page.locator("#drawerWorkspaceView")).toBeVisible();
   });
 
-  test("excludes the current workspace pane from spatial navigation in the Remote header", async ({
+  test("excludes the current workspace pane from spatial navigation in the Remote drawer", async ({
     page,
   }) => {
     const spatialBodies: Array<{ leaseId: string; direction: string; excludedPaneIds: string[] }> =
@@ -828,27 +883,24 @@ test.describe("remote mobile layout", () => {
     await page.goto("http://remote.test/remote/#token=test-token");
     await page.locator("#connect").click();
 
-    const exclusion = page.locator("#spatialExclusion");
+    await page.locator("#navToggle").click();
+    const exclusion = page.locator('[data-pane-skip="pane-a"]');
     await expect(exclusion).toBeVisible();
     await expect(exclusion.locator('svg[data-remote-icon-name="CircleMinus"]')).toHaveCount(1);
     await expect(exclusion).toHaveAttribute("aria-pressed", "false");
     await expect(exclusion).toHaveAttribute("aria-label", "Exclude this pane from pane navigation");
 
-    await page.locator("#keyBarToggle").click();
-    const [exclusionBox, composerToggleBox] = await Promise.all([
-      exclusion.boundingBox(),
-      page.locator("#inputModeToggle").boundingBox(),
-    ]);
+    const exclusionBox = await exclusion.boundingBox();
     expect(exclusionBox).not.toBeNull();
-    expect(composerToggleBox).not.toBeNull();
-    expect(exclusionBox!.height).toBe(32);
-    // Footer sizing follows its independent Main button scale; the header
-    // exclusion keeps the shared 32px toolbar control size.
+    expect(exclusionBox!.height).toBe(18);
+    await page.locator("#navToggle").click();
+    await page.locator("#keyBarToggle").click();
 
     await page.locator('[data-key="navNext"]').click();
     await expect.poll(() => spatialBodies.length).toBe(1);
     expect(spatialBodies[0].excludedPaneIds).toEqual([]);
 
+    await page.locator("#navToggle").click();
     await exclusion.click();
     await expect(exclusion).toHaveAttribute("aria-pressed", "true");
     await expect(exclusion).toHaveAttribute("aria-label", "Include this pane in pane navigation");
@@ -860,10 +912,12 @@ test.describe("remote mobile layout", () => {
       )
       .toEqual(["pane-a"]);
 
+    await page.locator("#navToggle").click();
     await page.locator('[data-key="navNext"]').click();
     await expect.poll(() => spatialBodies.length).toBe(2);
     expect(spatialBodies[1].excludedPaneIds).toEqual(["pane-a"]);
 
+    await page.locator("#navToggle").click();
     await exclusion.click();
     await expect(exclusion).toHaveAttribute("aria-pressed", "false");
 
@@ -926,7 +980,7 @@ test.describe("remote mobile layout", () => {
         ),
       )
       .toEqual(["p-a1", "p-a2", "p-b1"]);
-    await expect(page.locator("#spatialExclusion")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator('[data-pane-skip="p-a1"]')).toHaveAttribute("aria-pressed", "true");
 
     await skipA.click();
     await expect(skipA).toHaveAttribute("aria-pressed", "false");
@@ -937,7 +991,7 @@ test.describe("remote mobile layout", () => {
         ),
       )
       .toEqual(["p-b1"]);
-    await expect(page.locator("#spatialExclusion")).toHaveAttribute("aria-pressed", "false");
+    await expect(page.locator('[data-pane-skip="p-a1"]')).toHaveAttribute("aria-pressed", "false");
   });
 
   test("shows one status icon without output or stale badges", async ({ page }) => {
@@ -1285,11 +1339,10 @@ test.describe("remote mobile layout", () => {
     await page.locator("#navToggle").click();
     const skipA = page.locator('[data-workspace-skip="ws-a"]');
     await expect(skipA).toHaveAttribute("aria-pressed", "false");
-    await page.locator("#navToggle").click();
 
-    // Exclude the active pane (p-a1) via the header — now every pane of ws-a is
+    // Exclude the active pane (p-a1) in the drawer — now every pane of ws-a is
     // excluded, so the workspace auto-promotes to skipped.
-    const exclusion = page.locator("#spatialExclusion");
+    const exclusion = page.locator('[data-pane-skip="p-a1"]');
     await exclusion.click();
     await expect(exclusion).toHaveAttribute("aria-pressed", "true");
     await expect
@@ -1299,11 +1352,9 @@ test.describe("remote mobile layout", () => {
         ),
       )
       .toEqual(["ws-a"]);
-    await page.locator("#navToggle").click();
     await expect(skipA).toHaveAttribute("aria-pressed", "true");
 
     // Re-including one pane demotes the workspace back out of the skip set.
-    await page.locator("#navToggle").click();
     await exclusion.click();
     await expect(exclusion).toHaveAttribute("aria-pressed", "false");
     await expect
@@ -1313,7 +1364,6 @@ test.describe("remote mobile layout", () => {
         ),
       )
       .toEqual([]);
-    await page.locator("#navToggle").click();
     await expect(skipA).toHaveAttribute("aria-pressed", "false");
   });
 

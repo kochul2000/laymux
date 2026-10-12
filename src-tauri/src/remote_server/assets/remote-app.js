@@ -374,7 +374,7 @@ import {
         });
         const headerIconFields = {
           headerFiles: "Files", headerGithub: "GitHub", headerMemo: "Memo",
-          headerSpatialExclusion: "Pane navigation exclusion", headerDesktopMode: "PC mode",
+          headerSpatialExclusion: "Pane navigation shortcut", headerDesktopMode: "PC mode",
         };
         const headerIconKeys = Object.fromEntries(Object.keys(headerIconFields).map(key => [key, `laymux.remote.${key}`]));
         let headerIcons = Object.fromEntries(Object.entries(headerIconKeys).map(([key, storageKey]) => [key, loadLocalToggle(storageKey)]));
@@ -8386,6 +8386,32 @@ import {
             fillCountBadge(badge, workspace.unreadCount);
             right.append(badge);
           }
+          const visibility = document.createElement("button");
+          visibility.type = "button";
+          visibility.className = "visibility-button";
+          visibility.dataset.workspaceVisibility = workspace.id;
+          setVisibilityIcon(visibility, false);
+          visibility.disabled = !leaseId || !canHideWorkspace;
+          visibility.setAttribute("aria-pressed", "false");
+          const visibilityLabel = canHideWorkspace
+            ? workspace.isActive
+              ? "Hide workspace and move to the next visible workspace"
+              : "Hide workspace from the list"
+            : "The last visible workspace cannot be hidden";
+          visibility.setAttribute("aria-label", visibilityLabel);
+          visibility.title = visibilityLabel;
+          keepInputSurfaceFocus(visibility);
+          visibility.addEventListener("click", async (event) => {
+            event.stopPropagation();
+            visibility.disabled = true;
+            try {
+              await setWorkspaceVisibility(workspace.id, true);
+            } catch (err) {
+              setStatus(err.message || String(err), true);
+            } finally {
+              visibility.disabled = !leaseId || !canHideWorkspace;
+            }
+          });
           const manage = document.createElement("button");
           manage.type = "button";
           manage.className = "workspace-manage-button";
@@ -8406,7 +8432,12 @@ import {
           // workspaces that contribute terminal panes to the spatial cycle.
           if ((workspace.terminalPaneCount || 0) > 0) {
             right.append(renderWorkspaceSkipButton(workspace));
+          } else {
+            const spacer = document.createElement("span");
+            spacer.className = "navigation-action-spacer";
+            right.append(spacer);
           }
+          right.append(visibility);
 
           if (panes.length > 0) {
             const paneList = document.createElement("div");
@@ -8470,6 +8501,7 @@ import {
             saveSpatialExcludedWorkspaceIds();
             applyWorkspaceSkipState(button, workspace.id);
             updateHeaderPaneIdentity();
+            if (navigationState) renderWorkspaceList(navigationState.workspaces || []);
             const wsLabel = workspace.name || workspace.id || "Workspace";
             setStatus(
               next.willExclude
@@ -8478,6 +8510,47 @@ import {
             );
           });
           return button;
+        }
+
+        function renderPaneSkipButton(pane, workspace) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "workspace-skip-button";
+          button.dataset.paneSkip = pane.id;
+          setRemoteIcon(button, "CircleMinus", { size: 13 });
+          const excluded = spatialExcludedPaneIds.has(pane.id);
+          button.setAttribute("aria-pressed", String(excluded));
+          const label = excluded
+            ? "Include this pane in pane navigation"
+            : "Exclude this pane from pane navigation";
+          button.setAttribute("aria-label", label);
+          button.title = label;
+          keepInputSurfaceFocus(button);
+          button.addEventListener("click", (event) => {
+            event.stopPropagation();
+            togglePaneSkip(pane, workspace.id);
+          });
+          return button;
+        }
+
+        function togglePaneSkip(pane, workspaceId) {
+          const next = computeSkipStateAfterPaneToggle({
+            workspaceId,
+            terminalPaneIds: workspaceTerminalPaneIds(workspaceId),
+            paneId: pane.id,
+            excludedPaneIds: [...spatialExcludedPaneIds],
+            excludedWorkspaceIds: [...spatialExcludedWorkspaceIds],
+          });
+          spatialExcludedPaneIds = new Set(next.paneIds);
+          spatialExcludedWorkspaceIds = new Set(next.workspaceIds);
+          saveSpatialExcludedPaneIds();
+          saveSpatialExcludedWorkspaceIds();
+          updateHeaderPaneIdentity();
+          if (navigationState) renderWorkspaceList(navigationState.workspaces || []);
+          const paneLabel = pane.title || pane.profile || "This pane";
+          setStatus(next.willExclude
+            ? `${paneLabel} excluded from pane navigation.`
+            : `${paneLabel} included in pane navigation.`);
         }
 
         function renderPaneRow(pane, panes, workspace) {
@@ -8643,7 +8716,17 @@ import {
               visibility.disabled = !leaseId;
             }
           });
-          entry.append(visibility);
+          const actions = document.createElement("div");
+          actions.className = "pane-row-actions";
+          if (isTerminal) {
+            actions.append(renderPaneSkipButton(pane, workspace));
+          } else {
+            const spacer = document.createElement("span");
+            spacer.className = "navigation-action-spacer";
+            actions.append(spacer);
+          }
+          actions.append(visibility);
+          entry.append(actions);
 
           return entry;
         }
@@ -14474,28 +14557,7 @@ import {
           const pane = activeWorkspacePane();
           if (!pane) return;
           const workspaceId = terminalInfoById.get(activeTerminalId)?.workspaceId || null;
-          // Toggle this pane, then promote/demote the owning workspace so that
-          // "every pane skipped" and "workspace skipped" stay in sync (#507).
-          const next = computeSkipStateAfterPaneToggle({
-            workspaceId,
-            terminalPaneIds: workspaceTerminalPaneIds(workspaceId),
-            paneId: pane.id,
-            excludedPaneIds: [...spatialExcludedPaneIds],
-            excludedWorkspaceIds: [...spatialExcludedWorkspaceIds],
-          });
-          spatialExcludedPaneIds = new Set(next.paneIds);
-          spatialExcludedWorkspaceIds = new Set(next.workspaceIds);
-          saveSpatialExcludedPaneIds();
-          saveSpatialExcludedWorkspaceIds();
-          updateHeaderPaneIdentity();
-          // A promotion/demotion changes the drawer workspace toggle too.
-          if (navigationState) renderWorkspaceList(navigationState.workspaces || []);
-          const paneLabel = activeTerminalTitle() || "This pane";
-          setStatus(
-            next.willExclude
-              ? `${paneLabel} excluded from pane navigation.`
-              : `${paneLabel} included in pane navigation.`
-          );
+          togglePaneSkip(pane, workspaceId);
         });
         keepInputSurfaceFocus(attachmentButton);
         attachmentButton.addEventListener("click", () => {

@@ -281,7 +281,7 @@
       "type": "boolean",
       "default": true,
       "applyMode": "live",
-      "description": "우상단 pane 탐색 제외 아이콘 표시. 실제 제외 상태는 변경하지 않습니다."
+      "description": "키 바·플로팅에 배치한 pane 탐색 제외 단축 액션 표시. 드로어의 제외 버튼과 실제 제외 상태는 변경하지 않습니다."
     },
     "headerDesktopMode": {
       "type": "boolean",

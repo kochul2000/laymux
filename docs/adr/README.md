@@ -338,6 +338,7 @@ ADR 이 필요한 대표 기준:
 | [0317](0317-remote-localhost-web-preview.md) | Remote localhost 웹 프리뷰는 고정 origin의 읽기 세션과 격리된 실행 표면을 사용한다 | Superseded by [0318](0318-revert-remote-localhost-preview.md) |
 | [0318](0318-revert-remote-localhost-preview.md) | Remote localhost 프리뷰를 철회하고 기존 Remote 보안 경계를 복원한다 | Accepted |
 | [0319](0319-update-handoff-carries-terminal-title.md) | 업데이트 인계는 터미널의 마지막 title을 새 GUI에 넘긴다 (0309 보완) | Accepted |
+| [0320](0320-remote-drawer-skip-visibility-columns.md) | Remote 드로어는 페인과 워크스페이스의 스킵·숨김 열을 통일한다 | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 
