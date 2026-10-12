@@ -59,5 +59,6 @@ Codex는 rollout의 턴 기록을 프로세스 귀속으로 읽으므로(ADR-024
   - Rust 단위 테스트: Claude `status` 파싱, Grok 턴 경계(사용자 메시지·`turn_completed`·중단·쓰는 중인 줄·읽을 수 없는 줄·잘린 끝·1 MiB 상한).
   - 프론트 단위 테스트: 모름→기록의 대기 확정과 clear 허용, title 확정 시 미조회, Grok stale→기록의 완료와 알림, 기록 소유와 title 인계, Claude 기록 대기의 직전 작업 종료, 기록의 waiting 미사용, 읽는 중 입력·다른 generation 폐기, Codex·셸 제외.
   - dev 실기
+    - 업데이트 재부착(`VITE_LAYMUX_STRICT_MODE=0`, `dev/update-handoff` installer 뒤 ADR-0319 title 파일을 지우고 재기동): 같은 자식 pid로 재결합한 Windows Claude·WSL Grok pane이 title 없이 기록으로 idle·ended 확정(2초 안), 둘 다 clear 성공.
     - WSL Grok: 새로 띄운 pane이 기록으로 idle 확정, 턴 끝에 ended·success 확정과 완료 알림, pane이 다시 떠 `--resume`된 뒤 기록으로 ended 확정, clear 성공.
     - Windows Claude(title 끔): title 없이 기록으로 idle 확정, 턴 동안 running, 끝에 ended와 완료 알림, clear 성공.
