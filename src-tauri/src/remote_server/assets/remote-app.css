@@ -1776,7 +1776,7 @@
         flex: 0 0 auto;
         grid-template-rows: 1fr;
         overflow: hidden;
-        padding: 7px 10px 7px 9px;
+        padding: 7px 10px 3px 9px;
         text-align: left;
         border: 0;
         border-left: 3px solid transparent;
@@ -1830,6 +1830,7 @@
       }
       .workspace-primary-right {
         flex: 0 0 auto;
+        gap: 2px;
       }
       /* Workspace-list text sizes are em so they follow the drawer's device-local
          menu base (--remote-menu-font-size, 13px default): NNpx/13. */
@@ -1867,11 +1868,10 @@
         background: var(--hover-bg);
         opacity: 0.7;
       }
-      /* Whole-workspace skip toggle in the drawer — same circle-minus icon and
-         danger pressed style as the header pane exclusion toggle (issue #507). */
+      /* Workspace and pane skip toggles share the drawer's action columns. */
       .workspace-skip-button {
-        width: 24px;
-        height: 24px;
+        width: 20px;
+        height: 18px;
         display: inline-flex;
         flex: 0 0 auto;
         align-items: center;
@@ -1884,8 +1884,8 @@
         opacity: 0.7;
       }
       .visibility-button {
-        width: 24px;
-        height: 24px;
+        width: 20px;
+        height: 18px;
         display: inline-flex;
         flex: 0 0 auto;
         align-items: center;
@@ -1906,8 +1906,6 @@
         opacity: 0.28;
       }
       .visibility-button[aria-pressed="true"] {
-        border-color: var(--accent);
-        background: var(--accent-12);
         color: var(--accent);
         opacity: 1;
       }
@@ -1916,8 +1914,6 @@
         opacity: 1;
       }
       .workspace-skip-button[aria-pressed="true"] {
-        border-color: var(--danger);
-        background: var(--danger-bg);
         color: var(--danger);
         opacity: 1;
       }
@@ -2101,8 +2097,19 @@
       .workspace-pane-entry {
         display: flex;
         min-width: 0;
+        align-items: flex-start;
+        gap: 2px;
+      }
+      .pane-row-actions {
+        display: flex;
+        flex: 0 0 auto;
         align-items: center;
         gap: 2px;
+      }
+      .navigation-action-spacer {
+        width: 20px;
+        height: 18px;
+        flex: 0 0 auto;
       }
       .workspace-pane-entry > .workspace-pane-row {
         width: auto;
@@ -2134,14 +2141,15 @@
           margin 160ms ease;
       }
       .workspace-pane-row {
-        min-height: 36px;
-        max-height: 36px;
+        min-height: 32px;
+        max-height: none;
         align-items: flex-start;
       }
       .workspace-pane-row.compact {
         min-height: 18px;
         max-height: 18px;
         align-items: center;
+        padding-top: 1px;
       }
       .dock-terminal-row {
         min-height: 18px;
@@ -2324,6 +2332,9 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+      .workspace-summary-line:empty {
+        display: none;
       }
       .nav-empty {
         margin: 0 8px 7px;

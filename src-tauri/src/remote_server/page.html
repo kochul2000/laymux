@@ -50,11 +50,14 @@
         <button id="memoHeader" class="github-button" type="button" hidden aria-label="Open shared memos" title="Shared memos">
           <span data-remote-icon="Pencil"></span>
         </button>
+        <button id="desktopModeHeader" class="desktop-mode-button" type="button" hidden>PC</button>
+      </header>
+      <!-- Source for optional key-bar/floating shortcuts; pane management lives in the drawer. -->
+      <div hidden>
         <button id="spatialExclusion" class="spatial-exclusion-button" type="button" hidden aria-label="Exclude this pane from pane navigation" aria-pressed="false" title="Exclude this pane from pane navigation">
           <span data-remote-icon="CircleMinus"></span>
         </button>
-        <button id="desktopModeHeader" class="desktop-mode-button" type="button" hidden>PC</button>
-      </header>
+      </div>
       <!-- Mirrors the widgets the desktop is drawing (ADR-0124). Placement,
            options and every value are owned there; this row only draws. -->
       <!-- Not a live region: the row rewrites itself every poll, and announcing
