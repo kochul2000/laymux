@@ -30,6 +30,20 @@ pub(crate) fn get_claude_session_lookup_impl(
     session_max_age_hours: Option<u64>,
     state: &AppState,
 ) -> Result<ProviderSessionLookup, String> {
+    Ok(get_claude_session_records_impl(session_max_age_hours, state)?.lookup)
+}
+
+/// Session attribution plus each attributed session's self-reported status.
+pub(crate) struct ClaudeSessionRecords {
+    pub lookup: ProviderSessionLookup,
+    /// Keyed by session ID; only sessions whose file reports a known status.
+    pub statuses: HashMap<String, ClaudeSessionStatus>,
+}
+
+pub(crate) fn get_claude_session_records_impl(
+    session_max_age_hours: Option<u64>,
+    state: &AppState,
+) -> Result<ClaudeSessionRecords, String> {
     let domains = provider_terminal_domains(state)?;
     let terminal_roots = domains.native_roots;
     let native_terminal_ids: HashSet<String> = terminal_roots
@@ -72,11 +86,15 @@ pub(crate) fn get_claude_session_lookup_impl(
         .iter()
         .map(|(id, _)| id.clone())
         .collect();
+    let mut statuses = HashMap::new();
     let candidates = native_descendants
         .into_iter()
         .filter_map(|(terminal_id, descendants)| {
-            find_session_by_pids(&session_files, &descendants)
-                .map(|session_id| (terminal_id, session_id))
+            let session = find_session_file_by_pids(&session_files, &descendants)?;
+            if let Some(status) = session.status {
+                statuses.insert(session.session_id.clone(), status);
+            }
+            Some((terminal_id, session.session_id.clone()))
         })
         .collect();
     let mut result = crate::process_tree::complete_agent_session_attributions(
@@ -90,7 +108,12 @@ pub(crate) fn get_claude_session_lookup_impl(
                 let session_id = match process {
                     Some(process) => {
                         match find_wsl_claude_session_checked(&process, session_max_age_hours) {
-                            Ok(session_id) => session_id,
+                            Ok(session) => session.map(|session| {
+                                if let Some(status) = session.status {
+                                    statuses.insert(session.session_id.clone(), status);
+                                }
+                                session.session_id
+                            }),
                             Err(error) => {
                                 failed_terminal_ids.insert(terminal_id.clone());
                                 tracing::warn!(%error, "WSL Claude session file lookup failed");
@@ -108,11 +131,16 @@ pub(crate) fn get_claude_session_lookup_impl(
             tracing::warn!(%error, "WSL Claude attribution failed");
         }
     }
-    Ok(ProviderSessionLookup {
-        attributions: crate::process_tree::reject_duplicate_session_attributions(result, "Claude"),
-        failed_terminal_ids,
-        rollout_absence: HashMap::new(),
-        fresh_sessions: HashMap::new(),
+    Ok(ClaudeSessionRecords {
+        lookup: ProviderSessionLookup {
+            attributions: crate::process_tree::reject_duplicate_session_attributions(
+                result, "Claude",
+            ),
+            failed_terminal_ids,
+            rollout_absence: HashMap::new(),
+            fresh_sessions: HashMap::new(),
+        },
+        statuses,
     })
 }
 
@@ -133,7 +161,7 @@ fn native_claude_candidates(
 fn find_wsl_claude_session_checked(
     process: &WslAgentProcess,
     session_max_age_hours: Option<u64>,
-) -> Result<Option<String>, String> {
+) -> Result<Option<ClaudeSessionFile>, String> {
     let Some(directory) = process.claude_sessions_dir() else {
         return Ok(None);
     };
@@ -149,10 +177,7 @@ fn find_wsl_claude_session_checked(
             directory.display()
         ));
     }
-    Ok(find_session_by_pids(
-        &sessions,
-        &HashSet::from([process.pid]),
-    ))
+    Ok(find_session_file_by_pids(&sessions, &HashSet::from([process.pid])).cloned())
 }
 
 /// A parsed Claude session file entry.
@@ -161,6 +186,28 @@ struct ClaudeSessionFile {
     pid: u32,
     session_id: String,
     started_at: u64,
+    status: Option<ClaudeSessionStatus>,
+}
+
+/// The `status` Claude Code writes to its own session file whenever its
+/// loading or dialog state changes. Older builds omit it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ClaudeSessionStatus {
+    Busy,
+    Idle,
+    /// A permission prompt, question, or dialog is open (`waitingFor`).
+    Waiting,
+}
+
+impl ClaudeSessionStatus {
+    fn parse(value: &serde_json::Value) -> Option<Self> {
+        match value.as_str()? {
+            "busy" => Some(Self::Busy),
+            "idle" => Some(Self::Idle),
+            "waiting" => Some(Self::Waiting),
+            _ => None,
+        }
+    }
 }
 
 /// Validate that a startup command override is safe to execute.
@@ -317,6 +364,7 @@ fn read_claude_session_files_for_pids_detailed(
                     .unwrap_or("")
                     .to_string();
                 let started_at = val.get("startedAt").and_then(|v| v.as_u64()).unwrap_or(0);
+                let status = val.get("status").and_then(ClaudeSessionStatus::parse);
 
                 // Skip stale sessions
                 if let Some(min_ts) = cutoff {
@@ -330,6 +378,7 @@ fn read_claude_session_files_for_pids_detailed(
                         pid,
                         session_id,
                         started_at,
+                        status,
                     });
                 }
             }
@@ -366,12 +415,19 @@ fn affected_native_terminal_ids(
 
 /// Find a Claude session ID by matching any of the given PIDs against session file PIDs.
 /// When multiple sessions match, the most recently started one wins.
+#[cfg(test)]
 fn find_session_by_pids(sessions: &[ClaudeSessionFile], pids: &HashSet<u32>) -> Option<String> {
+    find_session_file_by_pids(sessions, pids).map(|s| s.session_id.clone())
+}
+
+fn find_session_file_by_pids<'a>(
+    sessions: &'a [ClaudeSessionFile],
+    pids: &HashSet<u32>,
+) -> Option<&'a ClaudeSessionFile> {
     sessions
         .iter()
         .filter(|s| pids.contains(&s.pid))
         .max_by_key(|s| s.started_at)
-        .map(|s| s.session_id.clone())
 }
 
 fn remove_duplicate_attributions(candidates: Vec<(String, String)>) -> HashMap<String, String> {

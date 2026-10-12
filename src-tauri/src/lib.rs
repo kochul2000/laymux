@@ -308,6 +308,7 @@ pub fn run() {
             commands::get_codex_session_ids,
             commands::get_codex_turn_states,
             commands::get_grok_session_ids,
+            commands::get_agent_session_states,
             commands::get_terminal_session_attributions,
             commands::begin_codex_status_checkpoint,
             commands::codex_status_checkpoint_input,

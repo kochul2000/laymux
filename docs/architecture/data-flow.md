@@ -1202,6 +1202,15 @@ Claude Code 가 세션 리미트에 걸리면 스크롤백에 `⎿  You've hit y
 
 `commands/codex_session/turns`가 소유하는 reader는 최초 마지막 1 MiB와 이후 추가된 바이트를 회당 최대 1 MiB 읽는다. 마지막 64바이트 anchor로 축소·경계 내용 변경을 감지해 다시 시드하며, 불완전한 줄·미처리 backlog·잘못된 lifecycle은 이전 성공 상태를 유지하지 않는다. 현재 턴 ID에 맞는 `task_started`/`task_complete`/`turn_aborted`를 running/completed/failed/interrupted로 해석한다. 종료의 error가 있으면 failed이며 다른 턴의 종료는 무시한다. 같은 세션에서도 새로운 시작이 이후 상태를 결정한다. Windows native/Linux는 일반 파일 I/O, WSL은 기존 guest 경로 변환을 쓰며 SQLite는 bundled Linux probe가 계속 소유한다. reader 캐시의 leaf mutex는 AppState 락과 겹치지 않는다.
 
+#### Claude·Grok 세션 기록의 작업 상태
+
+[ADR-0321](../adr/0321-agent-session-record-fills-unconfirmed-task.md)에 따라 휴리스틱 작업이 확정되지 않은 Claude·Grok pane은 `get_agent_session_states`로 에이전트가 자기 세션 파일에 남긴 상태를 읽는다. 확정되지 않음은 관찰 없음, unknown, stale, 만료를 뜻하고, 세션 기록이 마지막으로 쓴 작업도 포함한다. 프론트 `agent-session-subscription`은 대상이 있을 때만 1초마다 한 요청을 보낸다. 응답은 요청 이후 generation·task epoch·입력·앱·작업 sequence가 그대로일 때만 반영한다.
+
+- Claude: 기존 pid 귀속이 읽는 `~/.claude/sessions/<pid>.json`의 `status`(`busy`→running, `idle`, `waiting`). waiting은 프론트가 쓰지 않는다.
+- Grok: 귀속된 세션 디렉터리의 `updates.jsonl` 끝 1 MiB에서 마지막 턴 경계. 사용자 메시지(`user_message_chunk`)는 running, `turn_completed`는 ended(`end_turn` success, `cancelled` interrupted)다. 경계가 없는 전체 파일은 idle, 잘린 끝·읽을 수 없는 줄은 결과에서 뺀다.
+
+재부착 뒤 title을 받지 못한 대기 Claude, 턴 끝을 title로 알리지 않는 Grok, 훅이 만료된 pane이 이 경로로 확정된다. title이나 입력이 관찰하면 그 관찰이 상태를 넘겨받는다.
+
 Codex `/review`는 하위 턴의 시작과 부모 턴의 완료를 같은 rollout에 기록할 수 있다([ADR-0249](../adr/0249-codex-review-parent-turn-boundaries.md)). Legacy의 `entered_review_mode`/`exited_review_mode`, Paginated의 `item_completed` 내 `EnteredReviewMode`/`ExitedReviewMode`는 부모 turn_id로 running을 복원한다. 리뷰 종료 경계만으로 성공을 만들지 않고 뒤따르는 부모 완료·오류·중단을 기다린다. 초기 읽기에서 진입 경계가 빠졌어도 종료 경계로 복원하며, 이후 일반 턴의 다른 ID 종료 방어는 유지한다.
 
 `useSyncEvents`가 `subscribeCodexTurnStates`를 시작한다. 한 번에 한 요청을 보내고 응답 후 1초 뒤 다시 조회한다. 6초 지연·오류·불완전 기록은 마지막 유효 작업과 알림 이력을 보존한 지연 관측을 전달한다. pane generation·앱 epoch·제출 입력이 요청 시작 때와 다르면 늦은 응답을 버린다. 새 입력은 재조회를 유도하지만 /status 같은 로컬 명령을 새 턴으로 합성하지 않는다. source는 generation·selectionKey·sessionId, taskId는 turnId이며 새 source의 종료·입력 대기는 무알림 복원이다. /review 부모 턴 처리는 Rust reader의 ADR-0249 계약을 유지한다.

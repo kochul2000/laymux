@@ -118,16 +118,18 @@ fn summary_within_age_checked(path: &Path, max_age_hours: Option<u64>) -> Result
 
 #[cfg(test)]
 fn session_id_for_pid(home: &Path, pid: u32, max_age_hours: Option<u64>) -> Option<String> {
-    session_id_for_pid_checked(home, pid, max_age_hours)
+    session_for_pid_checked(home, pid, max_age_hours)
         .ok()
         .flatten()
+        .map(|(session_id, _)| session_id)
 }
 
-fn session_id_for_pid_checked(
+/// The live session ID of `pid` and its session directory.
+fn session_for_pid_checked(
     home: &Path,
     pid: u32,
     max_age_hours: Option<u64>,
-) -> Result<Option<String>, String> {
+) -> Result<Option<(String, PathBuf)>, String> {
     let mut session_ids: Vec<String> = read_active_sessions_checked(home)?
         .into_iter()
         .filter(|entry| entry.pid == pid)
@@ -150,7 +152,10 @@ fn session_id_for_pid_checked(
     if !summary_within_age_checked(&summary, max_age_hours)? {
         return Ok(None);
     }
-    Ok(Some(session_id))
+    let Some(directory) = summary.parent() else {
+        return Ok(None);
+    };
+    Ok(Some((session_id, directory.to_path_buf())))
 }
 
 #[tauri::command(async)]
@@ -172,7 +177,22 @@ pub(crate) fn get_grok_session_lookup_impl(
     session_max_age_hours: Option<u64>,
     state: &AppState,
 ) -> Result<ProviderSessionLookup, String> {
+    Ok(get_grok_session_records_impl(session_max_age_hours, state)?.lookup)
+}
+
+/// Session attribution plus each attributed session's directory.
+pub(crate) struct GrokSessionRecords {
+    pub lookup: ProviderSessionLookup,
+    /// Keyed by session ID.
+    pub directories: HashMap<String, PathBuf>,
+}
+
+pub(crate) fn get_grok_session_records_impl(
+    session_max_age_hours: Option<u64>,
+    state: &AppState,
+) -> Result<GrokSessionRecords, String> {
     let home = grok_home();
+    let mut directories = HashMap::new();
     let domains = provider_terminal_domains(state)?;
     let terminal_roots = domains.native_roots;
     let native_terminal_ids: HashSet<String> = terminal_roots
@@ -195,8 +215,11 @@ pub(crate) fn get_grok_session_lookup_impl(
                         continue;
                     }
                     observed.push(terminal_id.clone());
-                    match session_id_for_pid_checked(&home, pid, session_max_age_hours) {
-                        Ok(Some(session_id)) => candidates.push((terminal_id, session_id)),
+                    match session_for_pid_checked(&home, pid, session_max_age_hours) {
+                        Ok(Some((session_id, directory))) => {
+                            directories.insert(session_id.clone(), directory);
+                            candidates.push((terminal_id, session_id));
+                        }
                         Ok(None) => {}
                         Err(error) => {
                             failed_terminal_ids.insert(terminal_id.clone());
@@ -230,18 +253,20 @@ pub(crate) fn get_grok_session_lookup_impl(
             for (terminal_id, process) in lookup.attributions {
                 let session_id = match process {
                     Some(process) => match process.grok_home_dir() {
-                        Some(home) => match session_id_for_pid_checked(
-                            &home,
-                            process.pid,
-                            session_max_age_hours,
-                        ) {
-                            Ok(session_id) => session_id,
-                            Err(error) => {
-                                failed_terminal_ids.insert(terminal_id.clone());
-                                tracing::warn!(%error, "WSL Grok session lookup failed");
-                                None
+                        Some(home) => {
+                            match session_for_pid_checked(&home, process.pid, session_max_age_hours)
+                            {
+                                Ok(session) => session.map(|(session_id, directory)| {
+                                    directories.insert(session_id.clone(), directory);
+                                    session_id
+                                }),
+                                Err(error) => {
+                                    failed_terminal_ids.insert(terminal_id.clone());
+                                    tracing::warn!(%error, "WSL Grok session lookup failed");
+                                    None
+                                }
                             }
-                        },
+                        }
                         None => None,
                     },
                     None => None,
@@ -254,11 +279,16 @@ pub(crate) fn get_grok_session_lookup_impl(
             tracing::warn!(%error, "WSL Grok attribution failed");
         }
     }
-    Ok(ProviderSessionLookup {
-        attributions: crate::process_tree::reject_duplicate_session_attributions(result, "Grok"),
-        failed_terminal_ids,
-        rollout_absence: HashMap::new(),
-        fresh_sessions: HashMap::new(),
+    Ok(GrokSessionRecords {
+        lookup: ProviderSessionLookup {
+            attributions: crate::process_tree::reject_duplicate_session_attributions(
+                result, "Grok",
+            ),
+            failed_terminal_ids,
+            rollout_absence: HashMap::new(),
+            fresh_sessions: HashMap::new(),
+        },
+        directories,
     })
 }
 

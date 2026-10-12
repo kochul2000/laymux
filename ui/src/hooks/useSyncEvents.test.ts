@@ -31,6 +31,7 @@ const mockSendDesktopNotification = vi.fn().mockResolvedValue(undefined);
 const mockGetTerminalSerializeMap = vi.fn();
 const mockGetTerminalStates = vi.fn().mockResolvedValue({});
 const mockGetCodexTurnStates = vi.fn().mockResolvedValue({});
+const mockGetAgentSessionStates = vi.fn().mockResolvedValue({});
 
 vi.mock("@/lib/tauri-api", () => ({
   onSyncCwd: (...args: unknown[]) => mockOnSyncCwd(...args),
@@ -49,6 +50,7 @@ vi.mock("@/lib/tauri-api", () => ({
   markClaudeTerminal: (...args: unknown[]) => mockMarkClaudeTerminal(...args),
   getTerminalStates: (...args: unknown[]) => mockGetTerminalStates(...args),
   getCodexTurnStates: (...args: unknown[]) => mockGetCodexTurnStates(...args),
+  getAgentSessionStates: (...args: unknown[]) => mockGetAgentSessionStates(...args),
   sendOsNotification: vi.fn().mockResolvedValue(undefined),
 }));
 

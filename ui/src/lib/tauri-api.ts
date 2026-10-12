@@ -1975,6 +1975,22 @@ export async function getCodexTurnStates(): Promise<Record<string, CodexTurnSnap
   return invoke("get_codex_turn_states");
 }
 
+/** Task state an agent recorded in its own session file (ADR-0321). */
+export interface AgentSessionState {
+  generation: number;
+  sessionId: string;
+  status: "running" | "idle" | "waiting" | "ended";
+  result?: "success" | "interrupted";
+}
+
+/** A terminal is missing when its session or recorded state is not known. */
+export async function getAgentSessionStates(
+  claudeTerminalIds: string[],
+  grokTerminalIds: string[],
+): Promise<Record<string, AgentSessionState>> {
+  return invoke("get_agent_session_states", { claudeTerminalIds, grokTerminalIds });
+}
+
 export async function getGrokSessionIds(
   sessionMaxAgeHours?: number,
 ): Promise<Record<string, string | null>> {

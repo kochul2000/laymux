@@ -1,4 +1,5 @@
 mod agent_hooks;
+mod agent_session_state;
 mod android_pairing;
 mod app_update;
 mod archive_listing;
@@ -31,6 +32,7 @@ mod wsl_agent_session;
 
 pub use crate::cloud::commands::*;
 pub use agent_hooks::*;
+pub use agent_session_state::*;
 pub use android_pairing::*;
 pub use app_update::*;
 pub use archive_listing::*;
@@ -145,6 +147,10 @@ mod main_thread_io {
             &["get_codex_turn_states"],
         ),
         (include_str!("grok_session.rs"), &["get_grok_session_ids"]),
+        (
+            include_str!("agent_session_state.rs"),
+            &["get_agent_session_states"],
+        ),
         (
             include_str!("codex_usage.rs"),
             &["get_codex_usage_snapshot"],
