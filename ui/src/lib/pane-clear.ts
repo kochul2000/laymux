@@ -1,5 +1,5 @@
 import { getHandler, isRegisteredInteractiveApp } from "./activity-handler";
-import { terminalTaskPolicy } from "./terminal-task";
+import { isTaskObservedAgent, terminalTaskPolicy } from "./terminal-task";
 import { resolvePaneCwd, type CwdBearingPane } from "./pane-cwd";
 import { toPaneId, toTerminalId } from "./pane-ids";
 import { CTRL_C, INTERRUPT_ROUND_INTERVAL_MS } from "./terminal-interrupt";
@@ -17,7 +17,7 @@ import { useTerminalRestartStore } from "@/stores/terminal-restart-store";
 import { useTerminalStore, type TerminalInstance } from "@/stores/terminal-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
-export type PaneClearSkipReason = "busy" | "unsupportedApp" | "notReady";
+export type PaneClearSkipReason = "busy" | "stateUnknown" | "unsupportedApp" | "notReady";
 
 export type PaneClearActionKind = "submit" | "interruptThenSubmit" | "restart" | "skip";
 
@@ -133,9 +133,16 @@ export function planTerminalClear(
 
   const handler = getHandler(activity);
   const input = handler.clearInput(config.shellCommand);
-  if (terminalTaskPolicy(instance).clearAllowed) {
+  const policy = terminalTaskPolicy(instance);
+  if (policy.clearAllowed) {
     return { ...base, kind: "submit", input };
   }
+  // An agent nothing has reported on yet, such as one adopted after an
+  // update, is not known to be working (ADR-0319).
+  const reason =
+    isTaskObservedAgent(instance) && policy.state === undefined && !policy.outputActive
+      ? "stateUnknown"
+      : "busy";
 
   switch (config.busyPolicy) {
     case "interrupt":
@@ -143,7 +150,7 @@ export function planTerminalClear(
     case "restart":
       return { ...base, kind: "restart" };
     default:
-      return { ...base, kind: "skip", reason: "busy" };
+      return { ...base, kind: "skip", reason };
   }
 }
 

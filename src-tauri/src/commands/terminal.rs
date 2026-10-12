@@ -631,6 +631,14 @@ pub async fn create_terminal_session(
         // left behind long ago; what it reported while detached is real
         // (ADR-0309).
         session.notify_gate_armed = true;
+        // The title its agent set before an update handoff is not in the
+        // missed output, and an idle agent sets no new one (ADR-0319).
+        if let Some(title) = crate::update_title_handoff::take(&id, spawned_pty.handle.child_pid())
+        {
+            osc_pass
+                .gate
+                .prepend_missed(crate::update_title_handoff::osc_title_sequence(&title));
+        }
     }
     // Seed the CWD from the directory the PTY was actually started in. OSC 7 is
     // only accepted while the terminal is a plain shell (issue #215), so a pane
@@ -1807,6 +1815,16 @@ impl OscOutputGate {
         }
     }
 
+    /// Missed output from before everything the daemon handed over: the title
+    /// the previous GUI saw last (ADR-0319). Only while the gate is closed.
+    fn prepend_missed(&self, data: Vec<u8>) {
+        if let Ok(mut pending) = self.pending.lock_or_err() {
+            if let Some(queue) = pending.as_mut() {
+                queue.insert(0, (data, true));
+            }
+        }
+    }
+
     /// Run what waited, then pass output through.
     fn open(&self, mut pass: impl FnMut(&[u8], bool)) {
         let Ok(mut pending) = self.pending.lock_or_err() else {
@@ -1897,6 +1915,9 @@ impl TerminalOscPass {
                         .observe(&event, terminal_generation)
                     {
                         state_for_pty.session_checkpoint.hints.request();
+                    }
+                    if event.code == 0 || event.code == 2 {
+                        session.osc_title = Some(event.data.clone());
                     }
                 }
             }
@@ -2501,6 +2522,25 @@ mod tests {
             (b"missed-2".to_vec(), true),
             (b"live-1".to_vec(), false),
             (b"live-2".to_vec(), false),
+        ];
+        assert_eq!(seen, expected);
+    }
+
+    #[test]
+    fn a_handed_title_goes_ahead_of_output_the_gate_already_holds() {
+        let gate = OscOutputGate::new(true);
+        let mut seen = Vec::new();
+        gate.submit(b"missed", b"live", |data, missed| {
+            seen.push((data.to_vec(), missed))
+        });
+        gate.prepend_missed(b"title".to_vec());
+        gate.open(|data, missed| seen.push((data.to_vec(), missed)));
+        // Once open, nothing can go ahead of output that already passed.
+        gate.prepend_missed(b"late".to_vec());
+        let expected: Vec<(Vec<u8>, bool)> = vec![
+            (b"title".to_vec(), true),
+            (b"missed".to_vec(), true),
+            (b"live".to_vec(), false),
         ];
         assert_eq!(seen, expected);
     }

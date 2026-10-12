@@ -32,11 +32,15 @@ pub fn release_installer_file_locks(state: &AppState) {
     // nothing in the install directory and the installer leaves it alone
     // (ADR-0308).
     state.begin_update_handoff();
+    let titles = crate::update_title_handoff::begin(state);
     state.terminate_child_processes();
     wait_for_install_directory(
         Duration::from_millis(crate::constants::UPDATE_INSTALL_LOCK_RELEASE_TIMEOUT_MS),
         Duration::from_millis(crate::constants::UPDATE_INSTALL_LOCK_RELEASE_POLL_MS),
     );
+    // The detached sessions report to this GUI until the installer starts,
+    // so the titles are written last (ADR-0319).
+    titles.save(state);
 }
 
 /// Only Windows refuses to overwrite a mapped image; elsewhere the installer

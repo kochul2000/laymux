@@ -139,6 +139,23 @@ describe("planTerminalClear", () => {
       }
     });
 
+    it("names an agent with no observed task as unknown rather than busy", () => {
+      for (const name of ["Claude", "Codex", "Grok"]) {
+        const unobserved = instance({
+          id: "terminal-pane-a",
+          activity: { type: "interactiveApp", name },
+        });
+        expect(planTerminalClear(unobserved, config)).toMatchObject({
+          kind: "skip",
+          reason: "stateUnknown",
+        });
+        expect(planTerminalClear({ ...unobserved, outputActive: true }, config)).toMatchObject({
+          kind: "skip",
+          reason: "busy",
+        });
+      }
+    });
+
     it("interrupts before the activity-specific input when configured", () => {
       const interrupting: ResolvedPaneClear = { ...config, busyPolicy: "interrupt" };
       expect(planTerminalClear(workingClaude, interrupting)).toMatchObject({

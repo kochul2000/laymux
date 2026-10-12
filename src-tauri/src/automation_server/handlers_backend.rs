@@ -232,7 +232,7 @@ pub async fn api_docs() -> impl IntoResponse {
             {
                 "method": "POST", "path": "/api/v1/panes/{paneId}/clear",
                 "description": "Actually clear one grid or dock terminal pane. Shells receive settings.paneClear.shellCommand; Claude Code, Codex, and Grok receive '/clear'. Unknown interactive apps are skipped. Busy panes follow settings.paneClear.busyPolicy (skip | interrupt | restart). The Automation interrupt wait is capped below the frontend bridge timeout.",
-                "response": "{ paneId: string, cleared: string[], interrupted: string[], restarted: string[], skipped: { terminalId: string, reason: 'busy' | 'unsupportedApp' | 'notReady' }[], failed: { terminalId: string, error: string }[], waitCapped: boolean, interruptRounds: number, settleMs: number }"
+                "response": "{ paneId: string, cleared: string[], interrupted: string[], restarted: string[], skipped: { terminalId: string, reason: 'busy' | 'stateUnknown' | 'unsupportedApp' | 'notReady' }[], failed: { terminalId: string, error: string }[], waitCapped: boolean, interruptRounds: number, settleMs: number }"
             },
             {
                 "method": "GET", "path": "/api/v1/docks",

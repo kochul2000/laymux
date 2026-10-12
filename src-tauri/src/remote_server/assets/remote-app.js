@@ -9461,6 +9461,7 @@ import {
           const reason = data?.skipped?.[0]?.reason;
           const reasons = {
             busy: "Clear skipped: the terminal is busy.",
+            stateUnknown: "Clear skipped: the agent's state is not known yet.",
             unsupportedApp: "Clear skipped: this app has no clear command.",
             notReady: "Clear skipped: the terminal is not ready.",
           };

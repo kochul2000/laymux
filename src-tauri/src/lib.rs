@@ -55,6 +55,7 @@ mod terminal_env;
 pub mod terminal_output;
 pub mod terminal_protocol;
 pub mod update_install_guard;
+pub mod update_title_handoff;
 pub mod usage_probe;
 #[cfg(windows)]
 pub mod win_acl;
@@ -86,6 +87,8 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let app_state = Arc::new(state::AppState::new());
+            // Titles a previous GUI handed to this launch (ADR-0319).
+            update_title_handoff::claim();
 
             // Start IPC server for IDE CLI communication
             let session_id = format!("{}", std::process::id());
