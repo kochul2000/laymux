@@ -32,6 +32,7 @@ pub fn release_installer_file_locks(state: &AppState) {
     // nothing in the install directory and the installer leaves it alone
     // (ADR-0308).
     state.begin_update_handoff();
+    crate::update_title_handoff::save(state);
     state.terminate_child_processes();
     wait_for_install_directory(
         Duration::from_millis(crate::constants::UPDATE_INSTALL_LOCK_RELEASE_TIMEOUT_MS),

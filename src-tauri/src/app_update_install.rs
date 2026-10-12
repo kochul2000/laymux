@@ -112,6 +112,7 @@ async fn install_and_restart(
         // The Windows teardown may already have begun the daemon handoff;
         // this GUI stays, so closing it must end its work again.
         state.cancel_update_handoff();
+        crate::update_title_handoff::discard();
         state.session_checkpoint.cancel_finalization();
         return Err(error.to_string());
     }
@@ -119,6 +120,7 @@ async fn install_and_restart(
     // Restarting runs the app exit path, which would end the daemon
     // sessions; the updated GUI adopts them instead (ADR-0308).
     state.begin_update_handoff();
+    crate::update_title_handoff::save(&state);
     app.restart();
 }
 
