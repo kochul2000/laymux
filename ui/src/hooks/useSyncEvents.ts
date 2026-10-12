@@ -26,6 +26,7 @@ import { getHandler, type RawTerminalState } from "@/lib/activity-handler";
 import { isStaleActivity } from "@/lib/activity-order";
 import { extractCodexTitleMessage } from "@/lib/codex-activity-handler";
 import { subscribeCodexTurnStates } from "@/lib/codex-turn-subscription";
+import { subscribeAgentSessionStates } from "@/lib/agent-session-subscription";
 import { observeTaskTitle, observeTerminalTask } from "@/lib/terminal-task-observers";
 import { heuristicTask } from "@/lib/terminal-task-detection";
 import { subscribeTerminalTasks } from "@/lib/terminal-task-subscription";
@@ -85,6 +86,7 @@ export function useSyncEvents() {
   useEffect(() => {
     const unsubscribeTasks = subscribeTerminalTasks();
     const unsubscribeCodexTurns = subscribeCodexTurnStates();
+    const unsubscribeAgentSessions = subscribeAgentSessionStates();
     const unsubscribeAgentHooks = subscribeAgentHookStates();
     let cancelled = false;
     const unlisteners: (() => void)[] = [];
@@ -577,6 +579,7 @@ export function useSyncEvents() {
       pendingGenerationEvents.clear();
       pendingClaudeIdle.clear();
       unsubscribeCodexTurns();
+      unsubscribeAgentSessions();
       unsubscribeAgentHooks();
       unsubscribeTasks();
       unsubStore();

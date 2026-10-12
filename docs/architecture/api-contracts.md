@@ -2312,6 +2312,8 @@ Direct Remote 페이지도 이 원칙을 따른다. 기본 조합과 매칭 규�
 
 `get_codex_turn_states`는 인자 없이 `Record<terminalId, { generation, sessionId?, selectionKey?, turnId?, state }>`를 반환한다. `state`는 `running | completed | failed | interrupted | idle | unknown`이고 정확 귀속·읽기 실패는 unknown이다. 프로세스별 selectionKey는 호출자가 합성하거나 재사용하지 않는다. blocking I/O는 Tauri threadpool에서 실행하며 전후 generation을 검증한다. Windows·Linux·WSL 파일 경로와 /review 부모 턴 경계는 ADR-0248·0249를 그대로 따른다. 프론트 조회 실패는 직전 상태를 지우지 않고 지연으로 처리한다.
 
+`get_agent_session_states`는 `claudeTerminalIds`, `grokTerminalIds`를 받아 `Record<terminalId, { generation, sessionId, status, result? }>`를 반환한다([ADR-0321](../adr/0321-agent-session-record-fills-unconfirmed-task.md)). `status`는 `running | idle | waiting | ended`, `result`는 ended의 `success | interrupted`다. 세션 귀속이나 기록을 확인하지 못한 터미널은 결과에 없다. blocking I/O는 Tauri threadpool에서 실행하며 전후 generation을 검증한다.
+
 정상 Codex 응답은 6초 지연 후에도 구독·pane·앱·제출 입력·generation 검사를 통과하면 반영한다([ADR-0255](../adr/0255-codex-delayed-observation-recovery.md)). 지연 기준은 결과 폐기 기한이 아니며, 실제 오류·unknown과 영구 미응답에는 기존 보호가 유지된다. 확인된 `idle`의 아이콘은 출력과 관계없이 대시다([ADR-0254](../adr/0254-confirmed-idle-before-output-activity.md)).
 
 **이벤트 계약**: 기존 `command-status`의 command/exitCode 메타데이터와 별도로 OSC 133 lifecycle 발행에는 `phase: start | end | prompt`와 `generation`이 있다. D 결과를 읽지 못하면 exitCode를 생략한다. title 이벤트에는 `generation`과 `appSession`(기존 process detection epoch)이 추가되며, 이전 generation/낡은 activity sequence의 작업 관측은 수락하지 않는다. 출력 활동 이벤트는 frame/volume만 발행하고 타이틀로 출력 활동 타이머를 갱신하지 않는다.

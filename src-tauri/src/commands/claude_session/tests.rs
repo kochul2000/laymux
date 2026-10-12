@@ -48,6 +48,29 @@ fn read_claude_session_files_valid_json() {
     assert_eq!(sessions[0].pid, 12345);
     assert_eq!(sessions[0].session_id, "abc-123");
     assert_eq!(sessions[0].started_at, 1000);
+    assert_eq!(sessions[0].status, None);
+}
+
+#[test]
+fn read_claude_session_files_reads_the_reported_status() {
+    let tmp = tempfile::tempdir().unwrap();
+    for (pid, status) in [(1, "busy"), (2, "idle"), (3, "waiting"), (4, "sleeping")] {
+        let content =
+            format!(r#"{{"pid":{pid},"sessionId":"s{pid}","startedAt":1000,"status":"{status}"}}"#);
+        std::fs::write(tmp.path().join(format!("{pid}.json")), content).unwrap();
+    }
+    let mut sessions = read_claude_session_files(tmp.path(), None);
+    sessions.sort_by_key(|session| session.pid);
+    let statuses: Vec<_> = sessions.iter().map(|session| session.status).collect();
+    assert_eq!(
+        statuses,
+        [
+            Some(ClaudeSessionStatus::Busy),
+            Some(ClaudeSessionStatus::Idle),
+            Some(ClaudeSessionStatus::Waiting),
+            None,
+        ]
+    );
 }
 
 #[test]
@@ -121,11 +144,13 @@ fn find_session_by_pids_matches() {
             pid: 100,
             session_id: "s1".into(),
             started_at: 1,
+            status: None,
         },
         ClaudeSessionFile {
             pid: 200,
             session_id: "s2".into(),
             started_at: 2,
+            status: None,
         },
     ];
     assert_eq!(
@@ -267,11 +292,13 @@ fn find_session_by_pids_picks_most_recent_on_multiple_matches() {
             pid: 100,
             session_id: "old-session".into(),
             started_at: 1,
+            status: None,
         },
         ClaudeSessionFile {
             pid: 200,
             session_id: "new-session".into(),
             started_at: 10,
+            status: None,
         },
     ];
     // Both PIDs match — should pick the most recent (started_at=10)
