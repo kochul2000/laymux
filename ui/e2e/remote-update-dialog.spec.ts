@@ -16,7 +16,6 @@ for (const origin of ["https://remote.laymux.invalid", "http://remote.test"]) {
           availableVersion: null,
           channel: "beta",
           operation: "idle",
-          exitSettings: { interruptTerminals: false },
         },
       }),
     );

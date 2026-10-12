@@ -1,10 +1,13 @@
 mod agent_hooks;
+mod dev_update;
 pub mod handlers_backend;
 pub mod handlers_bridge;
 pub mod helpers;
 mod instance_identity;
+mod local_state;
 pub mod mcp;
 pub mod mcp_resources;
+mod pty_sessions;
 pub mod settings_bridge;
 mod surface_router;
 mod terminal_output_diagnostics;
@@ -159,6 +162,15 @@ pub fn build_router(
             get(agent_hooks::hook_environments),
         )
         .route("/api/v1/agent-hooks/manage", post(agent_hooks::hook_manage))
+        .route("/api/v1/pty-sessions", get(pty_sessions::list))
+        .route(
+            "/api/v1/pty-sessions/terminate",
+            post(pty_sessions::terminate),
+        )
+        .route(
+            "/api/v1/pty-sessions/terminate-detached",
+            post(pty_sessions::terminate_detached),
+        )
         .route(
             "/api/v1/agent-hooks/updates",
             get(agent_hooks::hook_updates),
@@ -187,6 +199,15 @@ pub fn build_router(
         .route("/api/v1/grid/focus", post(grid_focus_pane))
         .route("/api/v1/grid/hover", post(grid_simulate_hover))
         .route("/api/v1/panes/split", post(panes_split))
+        .route("/api/v1/panes/stack", post(panes_stack))
+        .route("/api/v1/panes/layers/activate", post(panes_activate_layer))
+        .route("/api/v1/panes/layers/move", post(panes_move_layer))
+        .route("/api/v1/panes/layers/extract", post(panes_extract_layer))
+        .route("/api/v1/panes/merge", post(panes_merge))
+        .route(
+            "/api/v1/panes/{index}/move-to-workspace",
+            post(panes_move_to_workspace),
+        )
         .route("/api/v1/panes/{index}", delete(panes_remove))
         .route("/api/v1/panes/{index}/resize", post(panes_resize))
         .route("/api/v1/panes/{index}/view", put(panes_set_view))
@@ -246,8 +267,17 @@ pub fn build_router(
         .route("/api/v1/ui/remote-access", post(ui_remote_access))
         .route("/api/v1/ui/settings/navigate", post(ui_navigate_settings))
         .route("/api/v1/ui/lifecycle", post(ui_lifecycle))
+        .route(
+            "/api/v1/dev/update-handoff",
+            post(dev_update::update_handoff),
+        )
+        .route("/api/v1/ui/key", post(ui_dispatch_key))
         .route("/api/v1/ui/file-viewer", post(ui_open_file_viewer))
         .route("/api/v1/settings/app-theme", put(settings_set_app_theme))
+        .route(
+            "/api/v1/settings/export",
+            get(local_state::export_configuration),
+        )
         .route(
             "/api/v1/settings/profile-defaults",
             put(settings_set_profile_defaults),

@@ -27,6 +27,7 @@ mod terminal_info;
 mod update_routes;
 mod viewer_routes;
 mod widget_routes;
+mod workspace_management;
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};

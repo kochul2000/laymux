@@ -28,6 +28,24 @@ import { acknowledgeSettingsRecovery, loadSettingsValidated } from "@/lib/tauri-
 import { SettingsRecoveryModal } from "./SettingsRecoveryModal";
 import type { SettingsLoadResult } from "@/lib/tauri-api";
 
+it("keeps a failed local database protected and does not offer a settings reset", () => {
+  render(
+    <SettingsRecoveryModal
+      loadResult={{
+        status: "parse_error",
+        storageKind: "localState",
+        settings: {} as never,
+        error: "database is corrupt",
+        settingsPath: "C:/local/state.db",
+      }}
+      onDismiss={vi.fn()}
+      onReset={vi.fn()}
+    />,
+  );
+  expect(screen.getByText("recovery.localStateErrorTitle")).toBeInTheDocument();
+  expect(screen.getByText("database is corrupt")).toBeInTheDocument();
+  expect(screen.queryByTestId("settings-recovery-reset")).not.toBeInTheDocument();
+});
 const RECOVERED: SettingsLoadResult = {
   status: "recovered",
   settings: {} as never,

@@ -1,6 +1,7 @@
 //! Fenced lifecycle identity; task phase expiry is deliberately irrelevant.
 use super::targets;
-use crate::agent_hooks::{title::TitleBinding, ManageRequest};
+use crate::agent_hooks::title::TitleBinding;
+use crate::commands::session_attribution::ProviderSessionLookup;
 use crate::lock_ext::MutexExt;
 use crate::session_checkpoint::codex_status::{CodexHookBinding, CodexStatusProcess};
 use crate::state::AppState;
@@ -68,6 +69,8 @@ fn candidate(
 }
 
 #[cfg(test)]
+mod batch_tests;
+#[cfg(test)]
 mod selection_tests;
 
 fn matches_process(
@@ -93,9 +96,14 @@ pub(super) fn resolve(
     terminal: &str,
     generation: u64,
     process: &CodexStatusProcess,
-    selected: Option<&str>,
+    selection: Option<(&str, bool)>,
     required: Option<&CodexHookBinding>,
 ) -> Result<Option<(CodexHookBinding, String, bool)>, String> {
+    // The common lookup already validated process selection or title/hook plus
+    // rollout. Installation status is not evidence of a live conversation.
+    let Some((selected, fresh)) = selection else {
+        return Ok(None);
+    };
     let title = state
         .terminals
         .lock_or_err()?
@@ -106,94 +114,194 @@ pub(super) fn resolve(
         title.as_ref(),
         generation,
         process,
-        selected,
+        Some(selected),
         required,
     );
     let Some(candidate) = candidate else {
         return Ok(None);
     };
-    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
-    let directory = executable
-        .parent()
-        .ok_or("Codex hook helper directory unavailable")?;
-    let status = crate::agent_hooks::manage_in_directory(
-        &ManageRequest {
-            provider: "codex".into(),
-            operation: "status".into(),
-            distro: process.distro.clone(),
-            config_dir: Some(candidate.root.clone()),
-        },
-        directory,
-    );
-    if !status.is_ok_and(|v| {
-        v["installed"] == true
-            && v["disabled"] == false
-            && v["warning"].is_null()
-            && (matches!(candidate.binding, CodexHookBinding::Process(_))
-                || (v["titleBinding"]["configured"] == true
-                    && v["titleBinding"]["warning"].is_null()))
-    }) {
+    if candidate.id != selected
+        || Path::new(&crate::path_utils::resolve_path_for_windows(
+            &candidate.root,
+            process.distro.as_deref(),
+        )) != process.codex_home
+    {
         return Ok(None);
     }
-    let fresh = match targets::verify_session(process, &candidate.id) {
-        Ok(fresh) => fresh,
-        Err(_) => return Ok(None),
-    };
-    let current_title = state
-        .terminals
-        .lock_or_err()?
-        .get(terminal)
-        .map(|s| s.codex_hook_title.clone());
     let current_generation = state
         .pty_handles
         .lock_or_err()?
         .get(terminal)
         .map(|h| h.terminal_generation());
-    let still_same = match &candidate.binding {
-        CodexHookBinding::Title(title) => state
-            .agent_hook_observations
-            .lock_or_err()?
-            .codex_conversation(
-                title.identity.as_deref().unwrap_or_default(),
-                process.distro.as_deref(),
-            )
-            .is_some_and(|o| {
-                o.event.session_id == candidate.id
-                    && o.event.config_dir.as_deref() == Some(candidate.root.as_str())
-            }),
-        CodexHookBinding::Process(_) => {
-            super::super::get_codex_session_lookup_impl(None, state)?
-                .attributions
-                .get(terminal)
-                .and_then(|id| id.as_deref())
-                == Some(candidate.id.as_str())
-        }
-    };
-    // The diagnostic I/O above can outlive the TUI. Recheck its incarnation.
-    targets::require_current_process(state, terminal, process)?;
-    if current_title != title || current_generation != Some(generation) || !still_same {
-        return Ok(None);
-    }
     let final_title = state
         .terminals
         .lock_or_err()?
         .get(terminal)
         .map(|s| s.codex_hook_title.clone());
-    let final_generation = state
-        .pty_handles
-        .lock_or_err()?
-        .get(terminal)
-        .map(|h| h.terminal_generation());
-    if final_title != title || final_generation != Some(generation) {
+    if final_title != title || current_generation != Some(generation) {
         return Ok(None);
     }
     Ok(Some((candidate.binding, candidate.id, fresh)))
+}
+
+pub(crate) fn verified_status_sessions(
+    state: &AppState,
+    lookup: &ProviderSessionLookup,
+) -> Result<HashMap<String, (u64, String, bool)>, String> {
+    verified_with_processes(state, lookup, || targets::processes(state))
+}
+
+fn verified_with_processes(
+    state: &AppState,
+    lookup: &ProviderSessionLookup,
+    processes: impl FnOnce() -> Result<HashMap<String, CodexStatusProcess>, String>,
+) -> Result<HashMap<String, (u64, String, bool)>, String> {
+    let (token, targets): (_, Vec<_>) = {
+        let slot = state.session_checkpoint.codex_status.lock_or_err()?;
+        let Some(checkpoint) = slot.as_ref() else {
+            return Ok(HashMap::new());
+        };
+        if checkpoint.check(&checkpoint.token).is_err()
+            || !state.session_checkpoint.is_finalizing()
+            || checkpoint.update_request_id.is_some_and(|id| {
+                !state
+                    .session_checkpoint
+                    .owns_update_checkpoint(id)
+                    .unwrap_or(false)
+            })
+        {
+            return Ok(HashMap::new());
+        }
+        let targets = checkpoint
+            .targets
+            .iter()
+            .filter(|(_, target)| target.proof.is_some())
+            .map(|(id, target)| (id.clone(), target.clone()))
+            .collect();
+        (checkpoint.token.clone(), targets)
+    };
+    if targets.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let mut result = HashMap::new();
+    // One current process snapshot for the whole checkpoint, not one global
+    // discovery for each pane followed by another for each hook resolver.
+    let processes = processes()?;
+    let handles = state.pty_handles.lock_or_err()?.clone();
+    for (terminal, target) in targets {
+        if processes.get(&terminal) != Some(&target.process)
+            || handles
+                .get(&terminal)
+                .is_none_or(|h| h.terminal_generation() != target.generation)
+        {
+            return Err(format!(
+                "[{terminal}] Codex process or terminal generation changed during checkpoint"
+            ));
+        }
+        if let Some(expected_binding) = &target.hook_binding {
+            let current = resolve(
+                state,
+                &terminal,
+                target.generation,
+                &target.process,
+                verified_selection(lookup, &terminal),
+                Some(expected_binding),
+            )?;
+            if !current.is_some_and(|(binding, id, _)| {
+                &binding == expected_binding
+                    && target
+                        .proof
+                        .as_ref()
+                        .is_some_and(|(expected, _)| expected == &id)
+            }) {
+                return Err(format!(
+                    "[{terminal}] Codex hook conversation changed during checkpoint"
+                ));
+            }
+        }
+        if let Some((id, _)) = target.proof {
+            if lookup
+                .attributions
+                .get(&terminal)
+                .and_then(Option::as_deref)
+                .is_some_and(|current| current != id)
+            {
+                return Err(format!(
+                    "[{terminal}] Codex conversation changed after status verification"
+                ));
+            }
+            let fresh = if target.hook_binding.is_some() {
+                lookup.fresh_sessions.get(&terminal) == Some(&id)
+            } else {
+                targets::verify_session(&target.process, &id)?
+            };
+            if !fresh && target.hook_binding.is_none() {
+                targets::remember_checkpoint_file(
+                    state,
+                    &terminal,
+                    target.generation,
+                    &target.process,
+                    &id,
+                );
+            }
+            result.insert(terminal, (target.generation, id, fresh));
+        }
+    }
+    let slot = state.session_checkpoint.codex_status.lock_or_err()?;
+    let checkpoint = slot
+        .as_ref()
+        .ok_or("Codex status checkpoint was cancelled")?;
+    checkpoint.check(&token)?;
+    if !state.session_checkpoint.is_finalizing() {
+        return Err("Codex checkpoint lost its input fence during verification".into());
+    }
+    Ok(result)
+}
+
+pub(super) fn verified_selection<'a>(
+    lookup: &'a ProviderSessionLookup,
+    terminal: &str,
+) -> Option<(&'a str, bool)> {
+    if lookup.failed_terminal_ids.contains(terminal) {
+        return None;
+    }
+    let id = lookup.attributions.get(terminal)?.as_deref()?;
+    Some((
+        id,
+        lookup
+            .fresh_sessions
+            .get(terminal)
+            .is_some_and(|fresh| fresh == id),
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn verified_current_conversation_does_not_require_hook_installation_io() {
+        let state = AppState::new();
+        let home = tempfile::tempdir().unwrap();
+        let process = CodexStatusProcess {
+            pid: 1,
+            started_at: 2,
+            distro: None,
+            codex_home: home.path().into(),
+            sqlite_home: home.path().into(),
+        };
+        state.pty_handles.lock().unwrap().insert(
+            "pane".into(),
+            crate::pty::PtyHandle::from_test_writer_for_generation(Box::new(std::io::sink()), 3),
+        );
+        let id = "01a0ec06-451a-7e61-ac51-bd98fab4ed82";
+        assert!(
+            resolve(&state, "pane", 3, &process, Some((id, false)), None)
+                .unwrap()
+                .is_some()
+        );
+    }
 
     #[test]
     fn lifecycle_candidate_requires_exact_environment_root_and_never_overrides_a_selection() {
@@ -237,69 +345,4 @@ mod tests {
             }
         }
     }
-}
-pub(crate) fn verified_status_sessions(
-    state: &AppState,
-) -> Result<HashMap<String, (u64, String, bool)>, String> {
-    let targets: Vec<_> = {
-        let slot = state.session_checkpoint.codex_status.lock_or_err()?;
-        let Some(checkpoint) = slot.as_ref() else {
-            return Ok(HashMap::new());
-        };
-        if checkpoint.check(&checkpoint.token).is_err()
-            || !state.session_checkpoint.is_finalizing()
-            || checkpoint.update_request_id.is_some_and(|id| {
-                !state
-                    .session_checkpoint
-                    .owns_update_checkpoint(id)
-                    .unwrap_or(false)
-            })
-        {
-            return Ok(HashMap::new());
-        }
-        checkpoint
-            .targets
-            .iter()
-            .filter(|(_, target)| target.proof.is_some())
-            .map(|(id, target)| (id.clone(), target.clone()))
-            .collect()
-    };
-    let mut result = HashMap::new();
-    let selections = if targets.iter().any(|(_, t)| t.hook_binding.is_some()) {
-        Some(super::super::get_codex_session_lookup_impl(None, state)?)
-    } else {
-        None
-    };
-    for (terminal, target) in targets {
-        super::current_handle(state, &terminal, &target)?;
-        if let Some(expected_binding) = &target.hook_binding {
-            let current = resolve(
-                state,
-                &terminal,
-                target.generation,
-                &target.process,
-                selections
-                    .as_ref()
-                    .and_then(|s| s.attributions.get(&terminal))
-                    .and_then(|s| s.as_deref()),
-                Some(expected_binding),
-            )?;
-            if !current.is_some_and(|(binding, id, _)| {
-                &binding == expected_binding
-                    && target
-                        .proof
-                        .as_ref()
-                        .is_some_and(|(expected, _)| expected == &id)
-            }) {
-                return Err(format!(
-                    "[{terminal}] Codex hook conversation changed during checkpoint"
-                ));
-            }
-        }
-        if let Some((id, _)) = target.proof {
-            let fresh = targets::verify_session(&target.process, &id)?;
-            result.insert(terminal, (target.generation, id, fresh));
-        }
-    }
-    Ok(result)
 }

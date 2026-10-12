@@ -28,10 +28,7 @@ vi.mock("@/lib/tauri-api", () => ({
   }),
   acknowledgeSessionCheckpoint: vi.fn().mockResolvedValue(undefined),
   onAppUpdateStatusChanged: vi.fn().mockResolvedValue(() => {}),
-  getAppUpdateStatus: vi.fn().mockResolvedValue({
-    operation: "preparing",
-    exitSettings: { interruptTerminals: true, interruptRounds: 2, settleMs: 500 },
-  }),
+
   reportAppUpdatePreparation: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -42,9 +39,11 @@ vi.mock("@/lib/persist-session", () => ({
     coverage: [],
   }),
   prepareTerminalExit: vi.fn().mockResolvedValue(undefined),
+  cacheTerminalOutputs: vi.fn().mockResolvedValue(undefined),
   setPreparingUpdate: vi.fn(),
   markSessionCheckpointMutation: vi.fn(),
   persistSession: vi.fn().mockResolvedValue(undefined),
+  getReusableSessionCheckpointCommit: vi.fn().mockReturnValue(undefined),
 }));
 
 import {
@@ -56,9 +55,11 @@ import {
 import {
   flushSessionCheckpoint,
   prepareTerminalExit,
+  cacheTerminalOutputs,
   setPreparingUpdate,
   markSessionCheckpointMutation,
   persistSession,
+  getReusableSessionCheckpointCommit,
 } from "@/lib/persist-session";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useUiStore } from "@/stores/ui-store";
@@ -99,7 +100,12 @@ describe("useSessionCheckpointLifecycle", () => {
 
     nativeListener?.({ requestId: 9, reason: "update", requireConclusive: true });
     await vi.waitFor(() =>
-      expect(withCodexStatusCheckpoint).toHaveBeenCalledWith(true, 9, expect.any(Function)),
+      expect(withCodexStatusCheckpoint).toHaveBeenCalledWith(
+        true,
+        9,
+        expect.any(Function),
+        undefined,
+      ),
     );
 
     await vi.waitFor(() => expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(9, 17));
@@ -108,6 +114,32 @@ describe("useSessionCheckpointLifecycle", () => {
       requireConclusive: true,
       terminalIds: undefined,
     });
+  });
+
+  it("acks the committed receipt on update without repeating attribution or save", async () => {
+    const committed = {
+      checkpointCommitId: 31,
+      frontendMutationRevision: 4,
+      coverage: [],
+      receiptToken: "saved-receipt",
+    };
+    vi.mocked(getReusableSessionCheckpointCommit).mockReturnValue(committed);
+    vi.mocked(withCodexStatusCheckpoint).mockImplementationOnce(
+      async (_enabled, _request, checkpoint) => checkpoint(true),
+    );
+    renderHook(() => useSessionCheckpointLifecycle(true));
+    await vi.waitFor(() => expect(onSessionCheckpointRequested).toHaveBeenCalledTimes(1));
+    nativeListener?.({ requestId: 51, reason: "update", requireConclusive: true });
+    await vi.waitFor(() => expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(51, 31));
+    expect(withCodexStatusCheckpoint).toHaveBeenCalledWith(
+      true,
+      51,
+      expect.any(Function),
+      "saved-receipt",
+    );
+    expect(flushSessionCheckpoint).not.toHaveBeenCalled();
+    expect(cacheTerminalOutputs).toHaveBeenCalledOnce();
+    vi.mocked(getReusableSessionCheckpointCommit).mockReturnValue(undefined);
   });
 
   it("returns the pane and manual retry guidance to the PC updater without tearing down tasks", async () => {
@@ -121,7 +153,7 @@ describe("useSessionCheckpointLifecycle", () => {
       expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(29, undefined, message),
     );
     expect(flushSessionCheckpoint).not.toHaveBeenCalled();
-    expect(prepareTerminalExit).not.toHaveBeenCalled();
+    expect(cacheTerminalOutputs).not.toHaveBeenCalled();
     expect(setPreparingUpdate).toHaveBeenLastCalledWith(false);
   });
 
@@ -142,7 +174,12 @@ describe("useSessionCheckpointLifecycle", () => {
     await vi.waitFor(() => expect(onSessionCheckpointRequested).toHaveBeenCalledTimes(1));
     nativeListener?.({ requestId: 42, reason: "update", requireConclusive: true });
     expect(setPreparingUpdate).toHaveBeenCalledWith(true);
-    expect(withCodexStatusCheckpoint).toHaveBeenCalledWith(true, 42, expect.any(Function));
+    expect(withCodexStatusCheckpoint).toHaveBeenCalledWith(
+      true,
+      42,
+      expect.any(Function),
+      undefined,
+    );
     expect(flushSessionCheckpoint).not.toHaveBeenCalled();
     finishProbe();
     await vi.waitFor(() => expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(42, 17));
@@ -161,7 +198,12 @@ describe("useSessionCheckpointLifecycle", () => {
     await vi.waitFor(() => expect(onSessionCheckpointRequested).toHaveBeenCalledTimes(1));
     nativeListener?.({ requestId: 43, reason: "watchdog", requireConclusive: false });
     await vi.waitFor(() => expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(43, 17));
-    expect(withCodexStatusCheckpoint).toHaveBeenCalledWith(false, 43, expect.any(Function));
+    expect(withCodexStatusCheckpoint).toHaveBeenCalledWith(
+      false,
+      43,
+      expect.any(Function),
+      undefined,
+    );
   });
 
   it("error-acks a request delivered to a listener cancelled during StrictMode registration", async () => {
@@ -220,7 +262,8 @@ describe("useSessionCheckpointLifecycle", () => {
               y: 0,
               w: 1,
               h: 1,
-              view: { type: "TerminalView" },
+              layers: [{ id: "p-hidden", view: { type: "TerminalView" } }],
+              activeLayerId: "p-hidden",
             },
           ],
         },
@@ -304,9 +347,9 @@ describe("useSessionCheckpointLifecycle", () => {
   });
 });
 
-it("does not ACK success until task cleanup and history saving finish", async () => {
+it("does not ACK success until terminal history saving finishes", async () => {
   let finish!: () => void;
-  vi.mocked(prepareTerminalExit).mockImplementationOnce(
+  vi.mocked(cacheTerminalOutputs).mockImplementationOnce(
     () =>
       new Promise<void>((resolve) => {
         finish = resolve;
@@ -318,17 +361,24 @@ it("does not ACK success until task cleanup and history saving finish", async ()
   nativeListener?.({ requestId: 91, reason: "update", requireConclusive: true });
   await vi.waitFor(() => expect(finish).toBeDefined());
   expect(setPreparingUpdate).toHaveBeenCalledWith(true);
-  expect(prepareTerminalExit).toHaveBeenLastCalledWith(expect.any(Function), {
-    interruptTerminals: true,
-    interruptRounds: 2,
-    settleMs: 500,
-  });
+  expect(cacheTerminalOutputs).toHaveBeenLastCalledWith(expect.any(Function));
   expect(acknowledgeSessionCheckpoint).not.toHaveBeenCalled();
   finish();
   await vi.waitFor(() => expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(91, 17));
 });
+// The PTY daemon keeps every session across an update (ADR-0308), so the
+// explicit-exit Ctrl+C would only break the work the update preserves.
+it("never interrupts terminals for an update, even with exit cleanup on", async () => {
+  vi.mocked(acknowledgeSessionCheckpoint).mockClear();
+  renderHook(() => useSessionCheckpointLifecycle(true));
+  await vi.waitFor(() => expect(nativeListener).toBeDefined());
+  nativeListener?.({ requestId: 93, reason: "update", requireConclusive: true });
+  await vi.waitFor(() => expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(93, 17));
+  expect(prepareTerminalExit).not.toHaveBeenCalled();
+  expect(cacheTerminalOutputs).toHaveBeenCalled();
+});
 it("rejects installation when output preparation fails", async () => {
-  vi.mocked(prepareTerminalExit).mockRejectedValueOnce(new Error("cache failed"));
+  vi.mocked(cacheTerminalOutputs).mockRejectedValueOnce(new Error("cache failed"));
   renderHook(() => useSessionCheckpointLifecycle(true));
   await vi.waitFor(() => expect(nativeListener).toBeDefined());
   nativeListener?.({ requestId: 92, reason: "update", requireConclusive: true });

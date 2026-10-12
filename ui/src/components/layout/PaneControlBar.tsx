@@ -9,6 +9,7 @@ import { useContainerSize } from "@/hooks/useContainerSize";
 import { PaneNumberBadge } from "@/components/ui/PaneNumberBadge";
 import { supportsCwdReceive, supportsCwdSend } from "@/lib/view-cwd-capability";
 import { FloatingPaneControlMenu } from "./FloatingPaneControlMenu";
+import { VIEW_LABELS } from "@/lib/view-labels";
 import {
   BroomIcon,
   ColumnsIcon,
@@ -18,6 +19,7 @@ import {
   EyeIcon,
   EyeOffIcon,
   KeyboardIcon,
+  LayersIcon,
   MinusIcon,
   PencilIcon,
   PinIcon,
@@ -44,10 +46,14 @@ export type { ControlBarMode } from "@/stores/settings-store";
 export interface PaneControlBarActions {
   onSplitH?: () => void;
   onSplitV?: () => void;
+  /** Stack a new layer on this slot (ADR-0297). Workspace grid only. */
+  onStack?: () => void;
   onClearTerminal?: () => void;
   onRestart?: () => void;
   onClear?: () => void;
   onDelete?: () => void;
+  /** Tooltip of the delete button; a stacked slot closes only its visible layer (ADR-0297). */
+  deleteTitle?: string;
   onChangeView?: (config: ViewInstanceConfig) => void;
   onToggleCwdSend?: () => void;
   onToggleCwdReceive?: () => void;
@@ -56,8 +62,13 @@ export interface PaneControlBarActions {
 }
 
 interface PaneControlBarProps {
-  /** Stable pane ID for persisting control bar mode across restarts. */
+  /** Stable pane (slot) ID for persisting control bar mode across restarts. */
   paneId?: string;
+  /**
+   * Content id the workspace-list hide toggle acts on: the stacked layer this bar
+   * belongs to (ADR-0297). Defaults to `paneId`.
+   */
+  contentPaneId?: string;
   currentView: ViewInstanceConfig;
   actions: PaneControlBarActions;
   hovered: boolean;
@@ -198,6 +209,20 @@ function ClearTerminalBtn({ onClick }: { onClick: () => void }) {
       title={`Clear terminal${keys ? ` (${keys})` : ""}`}
     >
       <BroomIcon size={13} />
+    </BarBtn>
+  );
+}
+
+/** Stack a new layer on this slot (ADR-0297); sits right after the split buttons. */
+function StackBtn({ onClick }: { onClick: () => void }) {
+  const keys = useResolvedKeybinding("pane.stack");
+  return (
+    <BarBtn
+      testId="pane-control-stack"
+      onClick={onClick}
+      title={`Stack${keys ? ` (${keys})` : ""}`}
+    >
+      <LayersIcon />
     </BarBtn>
   );
 }
@@ -417,6 +442,7 @@ function BarContent({
               <ColumnsIcon />
             </BarBtn>
           )}
+          {actions.onStack && <StackBtn onClick={actions.onStack} />}
           {onToggleHidden && (
             <BarBtn
               testId="pane-control-hide"
@@ -449,7 +475,7 @@ function BarContent({
             <BarBtn
               testId="pane-control-delete"
               onClick={actions.onDelete}
-              title="Delete pane"
+              title={actions.deleteTitle ?? "Delete pane"}
               danger
             >
               <XIcon size={12} />
@@ -550,21 +576,21 @@ function MinimizedButton({ onExpand }: { onExpand: () => void }) {
   );
 }
 
-// ─── View label map ─────────────────────────────────────
-const VIEW_LABELS: Partial<Record<ViewType, string>> = {
-  EmptyView: "Empty",
-  MemoView: "Memo",
-  UsageView: "Claude Usage",
-  CodexUsageView: "Codex Usage",
-  GrokUsageView: "Grok Usage",
-  IssueReporterView: "Issue Reporter",
-  FileExplorerView: "File Explorer",
-  GitHubView: "GitHub",
-};
-
 // ─── Bar left section (view label) ──────────────────────
+/** View types whose control bar shows a text label (terminals draw their own). */
+const BAR_LABEL_VIEWS: ReadonlySet<ViewType> = new Set([
+  "EmptyView",
+  "MemoView",
+  "UsageView",
+  "CodexUsageView",
+  "GrokUsageView",
+  "IssueReporterView",
+  "FileExplorerView",
+  "GitHubView",
+]);
+
 function BarLabel({ viewType }: { viewType: ViewType }) {
-  const label = VIEW_LABELS[viewType] ?? null;
+  const label = BAR_LABEL_VIEWS.has(viewType) ? VIEW_LABELS[viewType] : null;
   if (!label) return <div className="flex-1" />;
   return (
     <div className="flex min-w-0 flex-1 items-center self-stretch text-[11px]">
@@ -606,6 +632,7 @@ function barDragProps(
 
 export function PaneControlBar({
   paneId,
+  contentPaneId,
   currentView,
   actions,
   hovered,
@@ -623,15 +650,16 @@ export function PaneControlBar({
 }: PaneControlBarProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   // workspace selector 목록 숨김 상태(raw)를 구독해 토글 버튼 상태로 쓴다 (ADR-0035).
+  const hideTargetId = contentPaneId ?? paneId;
   const paneHidden = useUiStore((s) =>
-    showListHideToggle && paneId ? s.hiddenPaneIds.has(paneId) : false,
+    showListHideToggle && hideTargetId ? s.hiddenPaneIds.has(hideTargetId) : false,
   );
   const onToggleHidden = useMemo(
     () =>
-      showListHideToggle && paneId
-        ? () => useUiStore.getState().togglePaneHidden(paneId)
+      showListHideToggle && hideTargetId
+        ? () => useUiStore.getState().togglePaneHidden(hideTargetId)
         : undefined,
-    [showListHideToggle, paneId],
+    [showListHideToggle, hideTargetId],
   );
   const { w: paneWidth } = useContainerSize(rootRef);
   const persistedMode = useOverridesStore((s) =>

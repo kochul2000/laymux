@@ -18,6 +18,9 @@
 
 import { isShellOwnedCombo } from "./keybinding-core";
 import { DEFAULT_KEYBINDINGS, matchesKeybinding } from "./keybinding-registry";
+import { useDockStore } from "@/stores/dock-store";
+import { useGridStore } from "@/stores/grid-store";
+import { useWorkspaceStore } from "@/stores/workspace-store";
 
 /**
  * Actions dispatched by the document-level handler (useKeyboardShortcuts).
@@ -42,6 +45,25 @@ const PASS_THROUGH_WHEN_MODIFIED_ACTION_IDS: readonly string[] = DEFAULT_KEYBIND
   (d) => d.passThroughTerminal === "whenModified",
 ).map((d) => d.id);
 
+/** Stack-only actions (`pane.layer`): they pass through only while the focused slot is a stack. */
+const PASS_THROUGH_WHEN_STACKED_ACTION_IDS: readonly string[] = DEFAULT_KEYBINDINGS.filter(
+  (d) => d.passThroughTerminal === "whenStacked",
+).map((d) => d.id);
+
+/** True when `actionId` only applies while the focused slot is a stack (`pane.layer`). */
+export function isStackOnlyAction(actionId: string): boolean {
+  return PASS_THROUGH_WHEN_STACKED_ACTION_IDS.includes(actionId);
+}
+
+/** True when grid focus is on a slot holding two or more layers (ADR-0297). */
+export function focusedSlotIsStacked(): boolean {
+  if (useDockStore.getState().focusedDock !== null) return false;
+  const index = useGridStore.getState().focusedPaneIndex;
+  if (index === null) return false;
+  const slot = useWorkspaceStore.getState().getActiveWorkspace()?.panes[index];
+  return (slot?.layers.length ?? 0) > 1;
+}
+
 /** Terminal-owned actions: their (possibly overridden) combos never pass through. */
 const TERMINAL_OWNED_ACTION_IDS: readonly string[] = DEFAULT_KEYBINDINGS.filter(
   (d) => d.group === "Terminal",
@@ -51,6 +73,12 @@ export function isLxShortcut(e: KeyboardEvent): boolean {
   if (isShellOwnedCombo(e)) return false;
   if (TERMINAL_OWNED_ACTION_IDS.some((id) => matchesKeybinding(e, id))) return false;
   if (PASS_THROUGH_ACTION_IDS.some((id) => matchesKeybinding(e, id))) return true;
+  if (
+    PASS_THROUGH_WHEN_STACKED_ACTION_IDS.some((id) => matchesKeybinding(e, id)) &&
+    focusedSlotIsStacked()
+  ) {
+    return true;
+  }
   return (
     (e.ctrlKey || e.altKey || e.shiftKey) &&
     PASS_THROUGH_WHEN_MODIFIED_ACTION_IDS.some((id) => matchesKeybinding(e, id))

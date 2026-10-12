@@ -27,6 +27,7 @@ pub async fn api_docs() -> impl IntoResponse {
         "auth": "No authentication required. Access is restricted by IP allowlist: loopback (127.x, ::1), WSL2/Hyper-V (172.16.0.0/12), link-local (169.254.x, fe80::).",
         "discovery": format!("Fixed port: release={}, dev={}. Discovery file: %APPDATA%/laymux/automation.json (release) or %APPDATA%/laymux-dev/automation.json (dev) on Windows, ~/.config/laymux/ or ~/.config/laymux-dev/ on Linux. Contains port and pid. Also LX_AUTOMATION_PORT env var in spawned terminals.", super::RELEASE_PORT, super::DEV_PORT),
         "endpoints": [
+            {"method":"GET","path":"/api/v1/settings/export","description":"다른 PC로 옮길 수 있는 사용자 설정만 반환합니다. 로컬 실행 환경과 복원 상태는 제외합니다."},
             {
                 "method": "GET", "path": "/api/v1/agent-hooks/environments",
                 "description": "List native host and individually selectable WSL distributions for optional CLI hooks."
@@ -35,6 +36,21 @@ pub async fn api_docs() -> impl IntoResponse {
                 "method": "POST", "path": "/api/v1/agent-hooks/manage",
                 "description": "Inspect, install or remove only Laymux-owned CLI hook handlers in the selected environment.",
                 "body": {"provider":"claude | codex", "operation":"status | install | remove | update", "distro":"string or null for native", "configDir":"absolute directory or null for environment default"}
+            },
+            {
+                "method": "GET", "path": "/api/v1/pty-sessions",
+                "description": "PTY daemon session inventory across every live daemon generation (one per build, ADR-0308): daemonRunning, currentDaemon (this build's generation), sessions[{daemon, sessionId, terminalId, profile, createdSeq, childPid, attachEpoch, state: pane | awaitingPane | detached | otherClient | ending}] and unavailableDaemons[{daemon, problem: notAnswering | incompatible, protocolVersion}]. awaitingPane: no client yet, but the saved layout (an unopened workspace, a dock) will adopt it when its pane mounts; a terminal this GUI already created once is not awaited. A generation that cannot be listed is reported in unavailableDaemons, never as no sessions; an unreadable saved layout is an error."
+            },
+            {
+                "method": "POST", "path": "/api/v1/pty-sessions/terminate",
+                "description": "End one session listed as detached. It is classified again first: anything but detached is notDetached. attachEpoch must be the one listed: a session attached again since is left running (superseded).",
+                "body": {"daemon":"generation key from GET /api/v1/pty-sessions", "sessionId":"string", "attachEpoch":"number from GET /api/v1/pty-sessions"},
+                "response": "terminated | superseded | notDetached | gone"
+            },
+            {
+                "method": "POST", "path": "/api/v1/pty-sessions/terminate-detached",
+                "description": "End the sessions the caller listed as detached, each with the epoch it listed. Each is classified again first; one that is no longer detached or was attached again since is left running. Returns {ended, failed[]}.",
+                "body": {"sessions":"[{daemon, sessionId, attachEpoch}] from GET /api/v1/pty-sessions (state detached)"}
             },
             {
                 "method": "GET", "path": "/api/v1/agent-hooks/updates",
@@ -152,8 +168,56 @@ pub async fn api_docs() -> impl IntoResponse {
                 }
             },
             {
+                "method": "POST", "path": "/api/v1/panes/stack",
+                "description": "Stack a new layer on a pane slot (ADR-0297) right after its active layer and show it. Defaults to a TerminalView that starts in the slot's active-layer CWD unless cwd is given. Response: { stacked, newPane { id (layer id), terminalId, paneIndex, paneNumber, layerIndex, layerCount, ready } } (unlike split: no x/y/w/h, no totalPanes).",
+                "body": {
+                    "paneIndex": "number",
+                    "viewType": "(optional) ViewType, default \"TerminalView\"",
+                    "profile": "(optional) string",
+                    "cwd": "(optional) string"
+                }
+            },
+            {
+                "method": "POST", "path": "/api/v1/panes/layers/activate",
+                "description": "Show one stacked layer of its slot (ADR-0297), by layer id or terminal id. By default (focus=true) switches workspace if needed and focuses the slot; focus=false only changes the shown layer, without switching workspace or focus.",
+                "body": {
+                    "layerId": "(one of) string",
+                    "terminalId": "(one of) string",
+                    "focus": "(optional) bool, default true"
+                }
+            },
+            {
+                "method": "POST", "path": "/api/v1/panes/layers/move",
+                "description": "Move a layer onto slot targetPaneIndex of the active workspace (ADR-0298), like dragging a stack tab. Inside its own slot it reorders; on another slot it joins that stack and is shown there. A slot left empty is removed. Keyboard focus does not move. Response: moved, paneIndex, layerIndex, layerCount, totalPanes.",
+                "body": {
+                    "layerId": "(one of) string",
+                    "terminalId": "(one of) string",
+                    "targetPaneIndex": "number",
+                    "index": "(optional) number, position among the target's other layers; default after its active layer"
+                }
+            },
+            {
+                "method": "POST", "path": "/api/v1/panes/layers/extract",
+                "description": "Pull a stacked layer out into its own slot, splitting its slot like panes/split (ADR-0298). Fails for a single-layer slot. Response: extracted, slotId, paneIndex, totalPanes.",
+                "body": {
+                    "layerId": "(one of) string",
+                    "terminalId": "(one of) string",
+                    "direction": "horizontal | vertical"
+                }
+            },
+            {
+                "method": "POST", "path": "/api/v1/panes/merge",
+                "description": "Stack every layer of slot sourceIndex onto slot targetIndex and remove the source slot (ADR-0298), like dropping a control bar on a pane's stack band. Response: merged, paneIndex (target), layerCount, totalPanes.",
+                "body": { "sourceIndex": "number", "targetIndex": "number" }
+            },
+            {
+                "method": "POST", "path": "/api/v1/panes/{index}/move-to-workspace",
+                "description": "Carry a whole slot (every layer) of the active workspace to another workspace (ADR-0298), like dropping a control bar on a workspace. The target's largest pane is split to host it. Refuses to empty the source workspace. Response: moved, workspaceId, paneIndex, paneNumber, totalPanes.",
+                "body": { "workspaceId": "string" }
+            },
+            {
                 "method": "DELETE", "path": "/api/v1/panes/{index}",
-                "description": "Remove a pane. Adjacent pane absorbs the space."
+                "description": "Close one layer of a pane slot: ?layerId=<id>, or the active layer. Closing the slot's last layer removes the slot and the adjacent pane absorbs the space (ADR-0297)."
             },
             {
                 "method": "PUT", "path": "/api/v1/panes/{index}/view",
@@ -168,7 +232,7 @@ pub async fn api_docs() -> impl IntoResponse {
             {
                 "method": "POST", "path": "/api/v1/panes/{paneId}/clear",
                 "description": "Actually clear one grid or dock terminal pane. Shells receive settings.paneClear.shellCommand; Claude Code, Codex, and Grok receive '/clear'. Unknown interactive apps are skipped. Busy panes follow settings.paneClear.busyPolicy (skip | interrupt | restart). The Automation interrupt wait is capped below the frontend bridge timeout.",
-                "response": "{ paneId: string, cleared: string[], interrupted: string[], restarted: string[], skipped: { terminalId: string, reason: 'busy' | 'unsupportedApp' | 'notReady' }[], failed: { terminalId: string, error: string }[], waitCapped: boolean, interruptRounds: number, settleMs: number }"
+                "response": "{ paneId: string, cleared: string[], interrupted: string[], restarted: string[], skipped: { terminalId: string, reason: 'busy' | 'stateUnknown' | 'unsupportedApp' | 'notReady' }[], failed: { terminalId: string, error: string }[], waitCapped: boolean, interruptRounds: number, settleMs: number }"
             },
             {
                 "method": "GET", "path": "/api/v1/docks",
@@ -295,7 +359,17 @@ pub async fn api_docs() -> impl IntoResponse {
             {
                 "method": "POST", "path": "/api/v1/ui/lifecycle",
                 "description": "Dev-only lifecycle dialog preview. Never interrupts tasks or installs updates. Release returns 403.",
-                "body": { "action": "open | close (optional)", "kind": "close | update", "stage": "ready | downloading | checkpoint | interrupting | settling | caching | installing | closing", "completed": "number (optional)", "total": "number (optional)", "cleanup": "boolean (optional)" }
+                "body": { "action": "open | close (optional)", "kind": "close | update", "stage": "ready | downloading | checkpoint | interrupting | settling | caching | installing | closing (interrupting and settling are close-only)", "completed": "number (optional)", "total": "number (optional)", "cleanup": "boolean (optional)" }
+            },
+            {
+                "method": "POST", "path": "/api/v1/dev/update-handoff",
+                "description": "Dev-only update handoff without an installer (ADR-0308): installer runs the installer teardown then exits the process; restart marks the handoff and restarts the app. The update checkpoint and input freeze before an install are not run. The next GUI adopts the daemon sessions. Release returns 403.",
+                "body": { "mode": "installer | restart" }
+            },
+            {
+                "method": "POST", "path": "/api/v1/ui/key",
+                "description": "Dev-only keyboard injection: dispatch one keydown at the focused element so app shortcuts travel the real terminal pass-through path. Release returns 403.",
+                "body": { "key": "KeyboardEvent.key, e.g. \"ArrowRight\" or \"s\"", "ctrl": "(optional) bool", "alt": "(optional) bool", "shift": "(optional) bool" }
             },
             {
                 "method": "POST", "path": "/api/v1/ui/file-viewer",

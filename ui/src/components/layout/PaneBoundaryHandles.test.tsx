@@ -76,6 +76,17 @@ describe("PaneBoundaryHandles", () => {
     expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes).toHaveLength(1);
   });
 
+  it("double-click never closes a pane stack (ADR-0297)", () => {
+    useWorkspaceStore.getState().splitPane(0, "vertical");
+    // Equal halves: the left side is the one the double-click would remove.
+    useWorkspaceStore.getState().stackPane(0);
+    render(<PaneBoundaryHandles containerWidth={1000} containerHeight={600} />);
+    fireEvent.doubleClick(screen.getByTestId(/^boundary-handle/));
+    const panes = useWorkspaceStore.getState().getActiveWorkspace()!.panes;
+    expect(panes).toHaveLength(2);
+    expect(panes[0].layers).toHaveLength(2);
+  });
+
   it("drags one merged vertical handle to resize all panes on the split side", () => {
     const panes = [
       { x: 0, y: 0, w: 0.5, h: 1 },

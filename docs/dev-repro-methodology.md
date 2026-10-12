@@ -28,6 +28,7 @@
   포그라운드 확인도 프로세스 **이름이 아니라 pid** 로 한다. 다만 19281도 다른 워크트리 dev가 이어서 소유할 수 있으므로 포트만으로 대상 확인을 끝내지 않는다.
 - **health에서 워크트리 신원을 확인한다.** 측정 전에 `GET http://127.0.0.1:19281/api/v1/health`의 `instance.pid`·`executablePath`·`worktreeRoot`·`gitCommit`을 지금 띄운 워크트리의 기대값과 대조한다. `status: ok`와 `port: 19281`만 맞는 것은 충분하지 않다([ADR-0083](adr/0083-automation-health-instance-identity.md)).
 - **dev 기동은 워크트리에서 `cargo tauri dev`, 종료는 `bash scripts/kill-dev.sh`.** 브랜치 코드를 실기에서 보려면 그 워크트리에서 띄운다. 종료 출력의 PID와 실행 경로가 health에서 확인한 대상과 같은지 본다. 새 워크트리는 `ui/` 에서 `npm ci` 가 필요하다(xterm 패치가 postinstall 로 붙는다).
+- Windows 강제 종료는 검증된 GUI PID 하나에만 적용하고 `taskkill /T`를 쓰지 않는다. 데몬 없이 새로 시작해야 하는 검증(디스크 복원, resume)은 `kill-dev.sh --with-daemon`으로 dev 데몬까지 끝낸다. 분리된 PTY 데몬도 생성 당시 GUI를 부모 PID로 기록하므로 트리 종료는 데몬과 셸까지 끝내 재결합 검증을 무효화한다. 생존은 종료 전 출력·캐시가 아니라 종료 완료 뒤에도 증가하는 fixture tick과 실제 child PID·daemon session id로 확인한다.
 - **재현 환경은 끝까지 세팅해 놓는다.** "vim 을 띄우고 insert 모드까지 들어간 pane" 처럼, 사용자가 할 일이 **키 몇 번**만 남도록 만든다. MCP `write_to_terminal` 로 앱 실행·모드 진입까지 미리 해둘 수 있다.
 
 ## 2. 사람이 해야만 하는 입력을 구분한다
@@ -98,6 +99,28 @@ python scripts/bench/terminal_output_661.py \
 - `terminal-output-flood.ps1` — 실제 부하 생성기. `ARMED-` 를 찍고 barrier 파일을 기다렸다가 결정적 라인(`L%06d-runId-termId-…`)을 쏟는다. **barrier 로 pane 시작을 정렬**하기 때문에 동시성이 재현된다.
 - `test_terminal_output_661.py` — 하네스 자체의 유닛 테스트. 하네스를 고치면 여기부터 돌린다.
 - 포트는 dev(19281) 고정이며 discovery 파일의 실사용 경로를 건드리지 않는다(§1 · [`AGENTS.md`](../AGENTS.md) 포트 규칙). 계약은 [ADR-0097](adr/0097-transport-lossless-presentation-lossy-ownership.md).
+
+## 4.7. PTY 수명은 StrictMode 없이 잰다
+
+dev 빌드는 React StrictMode로 mount한다. 그래서 모든 TerminalView가 처음에 PTY를 한 번 닫았다 다시 연다(generation 1→2). release에는 이 동작이 없다. PTY 수명을 확인하는 검증은 이 차이 때문에 dev에서 거짓 결과를 낸다. 예를 들면 PTY 데몬 세션 재결합(ADR-0301), pane 이동 뒤 셸 유지가 있다. 이런 검증은 release와 같은 mount로 띄워서 한다.
+
+```bash
+VITE_LAYMUX_STRICT_MODE=0 cargo tauri dev
+```
+
+데몬 재결합은 다음 순서로 확인한다.
+
+1. 터미널에서 `$PID`를 기록하고 긴 명령을 시작한다.
+2. `bash scripts/kill-dev.sh`로 검증된 dev GUI PID만 강제 종료한다. Windows에서도 `/T`를 사용하지 않아 데몬과 셸을 유지한다.
+3. 위 명령으로 다시 띄운다. 데몬은 GUI가 없으면 유예 시간(`terminal.ptyDaemonGraceMinutes`, 기본 10분, ADR-0312) 뒤 세션을 모두 끝내므로 그 안에 띄운다.
+4. 같은 `$PID`가 응답하는지, dev 로그에 `adopted a running PTY daemon session`이 찍혔는지, 데몬 로그(`%LOCALAPPDATA%\laymux-dev\pty-daemon\g<protocol>-<build>\daemon.log`, ADR-0308)에 새 spawn이 없는지 확인한다.
+
+업데이트 인계(ADR-0308)는 설치기 없이 dev 전용 `POST /api/v1/dev/update-handoff`로 확인한다.
+
+- `{"mode":"installer"}`는 Windows 경로다. updater의 `on_before_exit`가 부르는 `release_installer_file_locks`를 실행한 뒤 `process::exit(0)`으로 끝난다.
+- `{"mode":"restart"}`는 Linux 경로다. 인계를 표시하고 `app.restart()`를 부른다. dev에서는 재시작한 프로세스가 `cargo tauri dev`의 vite를 잃으므로, 그 GUI만 끝내고 위 명령으로 다시 띄운다.
+- 그다음 위 4번처럼 같은 `$PID`로 재결합되는지 확인한다.
+- 이 endpoint는 설치 뒤의 경로만 실행한다. 업데이트 checkpoint 저장과 입력 차단(`prepare`)은 실행하지 않으므로, checkpoint의 agent resume 판정은 이 방법으로 확인되지 않는다.
 
 ## 5. 사보타주 검증 — 테스트가 결함을 못박고 있지 않은지
 

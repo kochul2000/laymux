@@ -1,5 +1,5 @@
 //! Read-only audit of existing hooks in distributions enumerated as running.
-use super::{connections, manage, ManageRequest};
+use super::{connections, manage_with_timeout, ManageRequest, MANAGE_TIMEOUT};
 use crate::{error::AppError, state::AppState};
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -79,24 +79,53 @@ fn requests(running: &[String], observations: &[Value]) -> Vec<ManageRequest> {
     requests
 }
 
-fn scan(
+fn target_key(request: &ManageRequest, path: &str) -> (String, Option<String>, String) {
+    let mut path = path.trim_end_matches(['/', '\\']).to_owned();
+    if request.distro.is_none() && cfg!(windows) {
+        path = path.replace('\\', "/").to_lowercase();
+    }
+    (request.provider.clone(), request.distro.clone(), path)
+}
+
+fn scan_with_budget(
     requests: &[ManageRequest],
-    mut inspect: impl FnMut(&ManageRequest) -> Result<Value, AppError>,
+    mut remaining: impl FnMut() -> Duration,
+    mut inspect: impl FnMut(&ManageRequest, Duration) -> Result<Value, AppError>,
 ) -> Value {
     let mut targets = Vec::new();
     let mut errors = Vec::new();
     let mut seen = HashSet::new();
-    let started = Instant::now();
     for request in requests {
-        if started.elapsed() >= AUDIT_BUDGET {
+        // A default root may also be reported by a live CLI observation. Skip
+        // that alias before launching WSL, rather than deduplicating only output.
+        if request
+            .config_dir
+            .as_deref()
+            .is_some_and(|path| seen.contains(&target_key(request, path)))
+        {
+            continue;
+        }
+        let timeout = remaining().min(MANAGE_TIMEOUT);
+        if timeout.is_zero() {
             errors.push(json!({"provider":null,"distro":null,"configDir":null,"message":"Hook update check exceeded its time budget; remaining targets were not checked"}));
             break;
         }
-        match inspect(request) {
+        let mut result = inspect(request, timeout);
+        // Only a read-only WSL status timeout can be transient. Do not retry
+        // configuration errors or any mutation, and share the audit deadline.
+        if request.distro.is_some()
+            && request.operation == "status"
+            && matches!(&result, Err(AppError::Io(error)) if error.kind() == std::io::ErrorKind::TimedOut)
+        {
+            let timeout = remaining().min(MANAGE_TIMEOUT);
+            if !timeout.is_zero() {
+                result = inspect(request, timeout);
+            }
+        }
+        match result {
             Ok(status) => {
-                let mut path = status["configDir"].as_str().unwrap_or_default().trim_end_matches(['/', '\\']).to_owned();
-                if request.distro.is_none() && cfg!(windows) { path = path.replace('\\', "/").to_lowercase(); }
-                if seen.insert((request.provider.clone(), request.distro.clone(), path)) {
+                let path = status["configDir"].as_str().unwrap_or_default();
+                if seen.insert(target_key(request, path)) {
                     targets.push(json!({"provider":request.provider,"distro":request.distro,"status":status}));
                 }
             }
@@ -107,6 +136,7 @@ fn scan(
 }
 
 pub fn audit(state: &AppState, app: &tauri::AppHandle) -> Result<Value, AppError> {
+    let deadline = Instant::now() + AUDIT_BUDGET;
     #[cfg(windows)]
     let (running, environment_error) = match running_distros() {
         Ok(running) => (running, None),
@@ -116,7 +146,11 @@ pub fn audit(state: &AppState, app: &tauri::AppHandle) -> Result<Value, AppError
     let (running, environment_error): (Vec<String>, Option<String>) = (Vec::new(), None);
     // Release the observation lock before any file I/O or child process call.
     let requests = requests(&running, &connections(state)?);
-    let mut result = scan(&requests, |request| manage(request, app));
+    let mut result = scan_with_budget(
+        &requests,
+        || deadline.saturating_duration_since(Instant::now()),
+        |request, timeout| manage_with_timeout(request, app, timeout),
+    );
     if let Some(message) = environment_error {
         if let Some(errors) = result["errors"].as_array_mut() {
             errors.push(json!({"provider":null,"distro":null,"configDir":null,"message":message}));
@@ -155,12 +189,16 @@ mod tests {
     #[test]
     fn one_failed_target_does_not_hide_updates_in_other_environments() {
         let values = requests(&["Ubuntu".into()], &[]);
-        let result = scan(&values, |r| {
-            if r.provider == "claude" && r.distro.is_none() {
-                return Err(AppError::Other("invalid config".into()));
-            }
-            Ok(json!({"configDir":"/config", "updateRequired":r.distro.is_some()}))
-        });
+        let result = scan_with_budget(
+            &values,
+            || AUDIT_BUDGET,
+            |r, _| {
+                if r.provider == "claude" && r.distro.is_none() {
+                    return Err(AppError::Other("invalid config".into()));
+                }
+                Ok(json!({"configDir":"/config", "updateRequired":r.distro.is_some()}))
+            },
+        );
         assert_eq!(result["errors"].as_array().unwrap().len(), 1);
         assert_eq!(result["targets"].as_array().unwrap().len(), 3);
         assert!(result["targets"]
@@ -168,5 +206,225 @@ mod tests {
             .unwrap()
             .iter()
             .any(|t| t["status"]["updateRequired"] == true));
+    }
+
+    fn timed_out() -> AppError {
+        std::io::Error::new(std::io::ErrorKind::TimedOut, "WSL stalled").into()
+    }
+
+    #[test]
+    fn a_transient_wsl_timeout_is_retried_without_reporting_a_false_failure() {
+        let values = requests(&["Ubuntu".into()], &[]);
+        let mut attempts = 0;
+        let result = scan_with_budget(
+            &values,
+            || AUDIT_BUDGET,
+            |r, _| {
+                if r.distro.is_some() && r.provider == "claude" {
+                    attempts += 1;
+                    if attempts == 1 {
+                        return Err(timed_out());
+                    }
+                }
+                Ok(json!({"configDir":format!("/{}", r.provider)}))
+            },
+        );
+        assert_eq!(attempts, 2);
+        assert!(result["errors"].as_array().unwrap().is_empty());
+        assert_eq!(result["targets"].as_array().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn persistent_timeouts_are_retried_once_and_other_errors_are_not_retried() {
+        let values = requests(&["Ubuntu".into()], &[]);
+        let mut attempts = Vec::new();
+        let result = scan_with_budget(
+            &values,
+            || AUDIT_BUDGET,
+            |r, _| {
+                attempts.push((r.provider.clone(), r.distro.clone()));
+                if r.distro.is_some() && r.provider == "claude" {
+                    Err(timed_out())
+                } else {
+                    Err(AppError::Other("invalid config".into()))
+                }
+            },
+        );
+        assert_eq!(attempts.len(), 5);
+        assert_eq!(result["errors"].as_array().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn retries_and_later_targets_share_the_remaining_audit_budget() {
+        use std::cell::Cell;
+        let remaining = Cell::new(AUDIT_BUDGET);
+        let values = requests(&["Ubuntu".into()], &[]);
+        let mut wsl_limits = Vec::new();
+        let result = scan_with_budget(
+            &values,
+            || remaining.get(),
+            |r, timeout| {
+                if r.distro.is_some() {
+                    wsl_limits.push(timeout);
+                    remaining.set(remaining.get().saturating_sub(timeout));
+                    return Err(timed_out());
+                }
+                Ok(json!({"configDir":format!("/{}", r.provider)}))
+            },
+        );
+        assert_eq!(
+            wsl_limits,
+            vec![
+                Duration::from_secs(8),
+                Duration::from_secs(8),
+                Duration::from_secs(4)
+            ]
+        );
+        assert_eq!(remaining.get(), Duration::ZERO);
+        assert_eq!(result["targets"].as_array().unwrap().len(), 2);
+        assert_eq!(result["errors"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn an_observed_default_root_is_not_inspected_twice() {
+        let observations =
+            vec![json!({"provider":"claude","distro":"Ubuntu","configDir":"/home/user/.claude/"})];
+        let values = requests(&["Ubuntu".into()], &observations);
+        let mut calls = 0;
+        let result = scan_with_budget(
+            &values,
+            || AUDIT_BUDGET,
+            |r, _| {
+                if r.provider == "claude" && r.distro.is_some() {
+                    calls += 1;
+                    if r.config_dir.is_some() {
+                        return Err(timed_out());
+                    }
+                }
+                Ok(json!({"configDir":format!("/home/user/.{}", r.provider)}))
+            },
+        );
+        assert_eq!(calls, 1);
+        assert!(result["errors"].as_array().unwrap().is_empty());
+        assert_eq!(result["targets"].as_array().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn no_process_is_started_after_the_audit_budget_is_exhausted() {
+        let values = requests(&["Ubuntu".into()], &[]);
+        let result = scan_with_budget(
+            &values,
+            || Duration::ZERO,
+            |_, _| panic!("exhausted audit must not inspect another target"),
+        );
+        assert!(result["targets"].as_array().unwrap().is_empty());
+        assert_eq!(result["errors"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn native_timeouts_and_mutations_are_not_retried() {
+        let values = vec![
+            ManageRequest {
+                provider: "claude".into(),
+                operation: "status".into(),
+                distro: None,
+                config_dir: None,
+            },
+            ManageRequest {
+                provider: "codex".into(),
+                operation: "update".into(),
+                distro: Some("Ubuntu".into()),
+                config_dir: None,
+            },
+        ];
+        let mut attempts = 0;
+        let result = scan_with_budget(
+            &values,
+            || AUDIT_BUDGET,
+            |_, _| {
+                attempts += 1;
+                Err(timed_out())
+            },
+        );
+        assert_eq!(attempts, 2);
+        assert_eq!(result["errors"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_timeout_that_exhausts_the_budget_is_not_retried() {
+        use std::cell::Cell;
+        let remaining = Cell::new(Duration::from_secs(1));
+        let values = requests(&["Ubuntu".into()], &[]);
+        let mut attempts = 0;
+        let result = scan_with_budget(
+            &values[2..],
+            || remaining.get(),
+            |_, timeout| {
+                assert_eq!(timeout, Duration::from_secs(1));
+                attempts += 1;
+                remaining.set(Duration::ZERO);
+                Err(timed_out())
+            },
+        );
+        assert_eq!(attempts, 1);
+        assert_eq!(result["errors"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn distinct_wsl_roots_and_providers_are_still_inspected() {
+        let observations = vec![
+            json!({"provider":"claude","distro":"Ubuntu","configDir":"/home/user/.Claude"}),
+            json!({"provider":"codex","distro":"Ubuntu","configDir":"/home/user/.claude"}),
+        ];
+        let values = requests(&["Ubuntu".into()], &observations);
+        let mut attempts = 0;
+        let result = scan_with_budget(
+            &values,
+            || AUDIT_BUDGET,
+            |r, _| {
+                attempts += 1;
+                Ok(
+                    json!({"configDir":r.config_dir.clone().unwrap_or_else(|| format!("/home/user/.{}", r.provider))}),
+                )
+            },
+        );
+        assert_eq!(attempts, 6);
+        assert_eq!(result["targets"].as_array().unwrap().len(), 6);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn live_wsl_status_timeout_recovers_with_one_read_only_retry() {
+        let Ok(distro) = std::env::var("LAYMUX_TEST_WSL_DISTRO") else {
+            return;
+        };
+        // The timeout marker stays in this fixture; no real CLI settings or
+        // discovery file is modified, and no running CLI is restarted.
+        let fixture = tempfile::tempdir().unwrap();
+        let executable = fixture.path().join("laymux-agent-hook-wsl");
+        std::fs::write(&executable, b"#!/bin/sh\nmarker=\"${0}.attempt\"\nif [ ! -f \"$marker\" ]; then\n  printf first > \"$marker\"\n  exec sleep 3\nfi\nprintf '{\"configDir\":\"/fixture\",\"updateRequired\":false}\\n'\n").unwrap();
+        let request = ManageRequest {
+            provider: "claude".into(),
+            operation: "status".into(),
+            distro: Some(distro),
+            config_dir: Some("/fixture".into()),
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut attempts = 0;
+        let result = scan_with_budget(
+            &[request],
+            || deadline.saturating_duration_since(Instant::now()),
+            |request, timeout| {
+                attempts += 1;
+                super::super::manage_in_directory_with_timeout(
+                    request,
+                    fixture.path(),
+                    timeout.min(Duration::from_secs(1)),
+                )
+            },
+        );
+        assert_eq!(attempts, 2);
+        assert!(result["errors"].as_array().unwrap().is_empty(), "{result}");
+        assert_eq!(result["targets"][0]["status"]["configDir"], "/fixture");
     }
 }

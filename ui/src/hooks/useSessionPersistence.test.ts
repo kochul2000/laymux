@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, waitFor } from "@testing-library/react";
 
 vi.mock("@/lib/persist-session", () => ({
   persistSession: vi.fn().mockResolvedValue(undefined),
@@ -8,6 +8,7 @@ vi.mock("@/lib/persist-session", () => ({
 
 vi.mock("@/lib/tauri-api", () => {
   const mockSettings = {
+    localUiState: {},
     profileDefaults: { font: { face: "Fira Code", size: 16, weight: "normal" } },
     defaultProfile: "WSL",
     profiles: [
@@ -103,7 +104,11 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useOverridesStore } from "@/stores/overrides-store";
-import { loadSettingsValidated, type SettingsLoadResult } from "@/lib/tauri-api";
+import {
+  loadSettingsValidated,
+  cleanTerminalOutputCache,
+  type SettingsLoadResult,
+} from "@/lib/tauri-api";
 import { persistSession, setBlockPersist } from "@/lib/persist-session";
 
 /** Wrap raw settings into a SettingsLoadResult with status "ok" for test mocks. */
@@ -121,6 +126,22 @@ describe("useSessionPersistence", () => {
     vi.clearAllMocks();
   });
 
+  it("preserves old cache and overrides when no local SQLite session has been saved", async () => {
+    const initial = await loadSettingsValidated();
+    if (initial.status !== "ok") throw new Error("fixture must be healthy");
+    const settings = { ...initial.settings, localUiState: undefined };
+    vi.mocked(loadSettingsValidated).mockResolvedValueOnce(wrapOk(settings));
+    useOverridesStore.setState({ paneOverrides: { "old-pane": { controlBarMode: "pinned" } } });
+    renderHook(() => useSessionPersistence());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(cleanTerminalOutputCache).not.toHaveBeenCalled();
+    expect(useOverridesStore.getState().paneOverrides["old-pane"]).toEqual({
+      controlBarMode: "pinned",
+    });
+  });
+
   it("loads settings from backend on mount", async () => {
     const { result } = renderHook(() => useSessionPersistence());
 
@@ -130,6 +151,91 @@ describe("useSessionPersistence", () => {
 
     expect(loadSettingsValidated).toHaveBeenCalledTimes(1);
     expect(result.current.loaded).toBe(true);
+  });
+
+  it("restores saved terminal identities even when there are no layout templates", async () => {
+    const initial = await loadSettingsValidated();
+    if (initial.status !== "ok") throw new Error("fixture must be healthy");
+    const saved = {
+      ...initial.settings,
+      layouts: [],
+      workspaces: [
+        {
+          id: "saved-workspace",
+          name: "Saved terminal",
+          panes: [
+            {
+              id: "saved-slot",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              layers: [
+                { id: "running-terminal", view: { type: "TerminalView", profile: "WSL" } },
+                { id: "hidden-terminal", view: { type: "TerminalView", profile: "WSL" } },
+              ],
+              activeLayerId: "running-terminal",
+            },
+          ],
+        },
+      ],
+      localUiState: { activeWorkspaceId: "saved-workspace" },
+    };
+    vi.mocked(loadSettingsValidated).mockResolvedValueOnce(wrapOk(saved));
+    const { result } = renderHook(() => useSessionPersistence());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    expect(useWorkspaceStore.getState().workspaces).toEqual(saved.workspaces);
+    expect(useWorkspaceStore.getState().layouts).toEqual([]);
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("saved-workspace");
+  });
+
+  it("does not let a retired loader replace the current restored workspace", async () => {
+    const initial = await loadSettingsValidated();
+    if (initial.status !== "ok") throw new Error("fixture must be healthy");
+    let resolveRetired!: (value: SettingsLoadResult) => void;
+    vi.mocked(loadSettingsValidated).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRetired = resolve;
+      }),
+    );
+    const retired = renderHook(() => useSessionPersistence());
+    retired.unmount();
+    const current = {
+      ...initial.settings,
+      workspaces: initial.settings.workspaces.map((workspace) => ({
+        ...workspace,
+        id: "current-workspace",
+        name: "Current workspace",
+      })),
+    };
+    vi.mocked(loadSettingsValidated).mockResolvedValueOnce(wrapOk(current));
+    const { result } = renderHook(() => useSessionPersistence());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    await act(async () => {
+      resolveRetired(initial);
+    });
+    expect(useWorkspaceStore.getState().workspaces[0].id).toBe("current-workspace");
+  });
+
+  it("does not block current persistence when a retired loader fails late", async () => {
+    let rejectRetired!: (error: Error) => void;
+    vi.mocked(loadSettingsValidated).mockReturnValueOnce(
+      new Promise((_resolve, reject) => {
+        rejectRetired = reject;
+      }),
+    );
+    const retired = renderHook(() => useSessionPersistence());
+    retired.unmount();
+    const { result } = renderHook(() => useSessionPersistence());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    expect(setBlockPersist).not.toHaveBeenCalled();
+
+    await act(async () => {
+      rejectRetired(new Error("retired read failed"));
+    });
+
+    expect(result.current.loaded).toBe(true);
+    expect(setBlockPersist).not.toHaveBeenCalled();
   });
 
   it("applies loaded settings to settings store", async () => {
@@ -538,6 +644,7 @@ describe("useSessionPersistence", () => {
 
     vi.mocked(loadSettingsValidated).mockResolvedValueOnce(
       wrapOk({
+        localUiState: {},
         defaultProfile: "WSL",
         profiles: [
           {

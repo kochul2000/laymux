@@ -128,8 +128,14 @@
         --remote-main-button-scale: var(--remote-button-baseline-scale);
         --remote-keys-button-scale: var(--remote-button-baseline-scale);
         --touch-selection-handle-size: 22px;
-        /* Compact controls in the Remote header share one border-box height. */
-        --header-control-height: 26px;
+        /* Every Remote toolbar (app header, drawer header, file viewer,
+           GitHub/memo) shares one row height, control size and icon size.
+           Heights are border-box and include the toolbar's bottom border. */
+        --toolbar-height: 40px;
+        --toolbar-control-size: 32px;
+        --toolbar-icon-size: 16px;
+        --toolbar-padding-x: 6px;
+        --toolbar-gap: 4px;
         --key-bar-control-height: 26px;
         --terminal-scroll-btn-right: 26px;
       }
@@ -196,17 +202,29 @@
         width: 100%;
         min-width: 0;
         max-width: 100%;
-        gap: 8px;
         align-items: center;
-        padding: 6px 8px;
         border-color: var(--border);
         background: var(--panel);
       }
-      header {
-        border-bottom: 1px solid var(--border);
+      /* Every <header> is a toolbar; the drawer header is the one toolbar
+         that is not a <header>. They own the shared toolbar geometry. */
+      header,
+      .drawer-header {
+        height: var(--toolbar-height);
+        flex: 0 0 auto;
         flex-wrap: nowrap;
+        gap: var(--toolbar-gap);
+        padding: 0 var(--toolbar-padding-x);
+        border-bottom: 1px solid var(--border);
+      }
+      header button .remote-icon,
+      .drawer-header button .remote-icon {
+        width: var(--toolbar-icon-size);
+        height: var(--toolbar-icon-size);
       }
       footer {
+        gap: 8px;
+        padding: 6px 8px;
         border-top: 1px solid var(--border);
       }
       /* Both input rows are three alignment segments, not one run of buttons:
@@ -769,6 +787,7 @@
         --fs-md: var(--remote-menu-font-size);
         --count-badge-base: calc(var(--remote-menu-font-size) * 10 / 13);
         font-size: var(--remote-menu-font-size);
+        container: navigation-panel / inline-size;
         position: absolute;
         inset: 0 auto 0 0;
         z-index: 20;
@@ -828,8 +847,8 @@
       .github-button,
       .navigation-pin-button,
       .spatial-exclusion-button {
-        width: 28px;
-        height: var(--header-control-height);
+        width: var(--toolbar-control-size);
+        height: var(--toolbar-control-size);
         display: inline-flex;
         flex: 0 0 auto;
         align-items: center;
@@ -910,21 +929,16 @@
       }
       .desktop-mode-button {
         width: auto;
-        min-width: 34px;
+        min-width: var(--toolbar-control-size);
         padding: 0 8px;
         color: var(--accent);
         font-size: var(--fs-sm);
         font-weight: 650;
       }
       .drawer-header {
-        height: 32px;
         display: flex;
-        flex: 0 0 auto;
         align-items: center;
         justify-content: space-between;
-        gap: 4px;
-        padding: 0 6px 0 9px;
-        border-bottom: 1px solid var(--border);
       }
       .drawer-heading {
         display: flex;
@@ -935,8 +949,8 @@
         overflow: hidden;
       }
       .drawer-header-button {
-        width: 28px;
-        height: var(--header-control-height);
+        width: var(--toolbar-control-size);
+        height: var(--toolbar-control-size);
         display: inline-flex;
         flex: 0 0 auto;
         align-items: center;
@@ -1883,6 +1897,60 @@
         color: var(--text-secondary);
         opacity: 0.7;
       }
+      .workspace-manage-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        min-height: 18px;
+        padding: 0;
+        flex: 0 0 auto;
+        color: var(--text-secondary);
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+      }
+      .workspace-manage-button:hover:not(:disabled) {
+        background: var(--hover-bg);
+      }
+      .workspace-manager {
+        width: min(380px, calc(100vw - 32px));
+        box-sizing: border-box;
+        max-height: calc(100dvh - 32px);
+        overflow: auto;
+        padding: 16px;
+        color: var(--text-primary);
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: 0;
+        font-size: var(--remote-menu-font-size);
+      }
+      .workspace-manager::backdrop { background: var(--backdrop-light); }
+      .workspace-manager-heading, .workspace-manager-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .workspace-manager h2 {
+        margin: 0;
+        font-size: 1em;
+        overflow-wrap: anywhere;
+      }
+      .workspace-manager button { min-height: 44px; }
+      #workspaceManagerActions button {
+        display: block;
+        width: 100%;
+        text-align: left;
+        margin-top: 8px;
+      }
+      #workspaceRenameForm label { display: block; margin-top: 16px; }
+      #workspaceNameInput { width: 100%; box-sizing: border-box; margin: 8px 0 16px; font-size: max(16px, 1em); }
+      .workspace-manager-footer { justify-content: flex-end; }
+      .workspace-manager [role="alert"] { color: var(--red); margin-bottom: 0; }
+      @media (max-width: 600px) {
+        .workspace-manager { margin: auto auto 16px; }
+      }
       .visibility-button {
         width: 20px;
         height: 18px;
@@ -2181,6 +2249,20 @@
       .workspace-pane-row.hidden-item {
         opacity: 0.48;
       }
+      /* Pane stack (ADR-0297): a layer hidden under its slot's visible layer. */
+      .workspace-pane-row.stacked-inactive {
+        opacity: 0.68;
+      }
+      .pane-stack-badge {
+        flex: 0 0 auto;
+        padding: 0 4px;
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+        font-variant-numeric: tabular-nums;
+        line-height: 1.4;
+      }
       .workspace-pane-row.hidden-item .pane-row-main {
         text-decoration: line-through;
         text-decoration-thickness: 1px;
@@ -2417,6 +2499,24 @@
       .xterm .xterm-viewport {
         background-color: transparent;
       }
+      /* Pane switch in flight: the previous pane's screen stays until the new
+         snapshot lands, so dim it to say it is no longer the live pane. The dim
+         lands at full strength the moment the switch starts (a slow fade-in
+         read as the screen flickering), and lifts quickly once the new screen
+         is on the surface. */
+      #terminalViewport {
+        transition: opacity 150ms ease;
+      }
+      #terminal[data-transition] #terminalViewport {
+        opacity: 0.6;
+        transition: none;
+      }
+      /* Reduced motion also drops the release fade. */
+      @media (prefers-reduced-motion: reduce) {
+        #terminalViewport {
+          transition: none;
+        }
+      }
       .grow {
         flex: 1 1 auto;
       }
@@ -2512,6 +2612,18 @@
           padding-right: 1px;
           padding-left: 1px;
         }
+        .app > header .desktop-mode-button {
+          width: 24px;
+          min-width: 24px;
+          padding-right: 0;
+          padding-left: 0;
+          font-size: var(--fs-xs);
+        }
+      }
+      /* The drawer compacts on its own width, not the viewport's: a narrow
+         Menu width setting needs it as much as a narrow phone does. Below
+         240px the full-size action row no longer fits (ADR-0313). */
+      @container navigation-panel (max-width: 239px) {
         .drawer-header {
           padding-right: 1px;
           padding-left: 1px;
@@ -2531,13 +2643,13 @@
           min-width: 0;
         }
         .drawer-header-button,
-        .desktop-mode-button {
+        .drawer-header .desktop-mode-button {
           width: 24px;
           min-width: 24px;
           padding-right: 0;
           padding-left: 0;
         }
-        .desktop-mode-button {
+        .drawer-header .desktop-mode-button {
           font-size: var(--fs-xs);
         }
       }
@@ -2549,7 +2661,8 @@
       .xterm-screen .xterm-decoration-top {
         pointer-events: none;
       }
-      .remote-path-link-decoration {
+      .remote-path-link-decoration,
+      .remote-resume-link-decoration {
         box-sizing: border-box;
         border-bottom: 1px solid currentColor;
         pointer-events: none;
@@ -2925,9 +3038,11 @@
         font-size: var(--fs-xs);
         font-weight: 600;
       }
+      /* A swipe that starts on a chip scrolls the Settings panel; only an
+         active long-press drag claims the touch (installChipDrag). */
       .layout-chip {
         position: relative;
-        touch-action: none;
+        touch-action: pan-y;
         cursor: grab;
       }
       .layout-chip.dragging {
@@ -3014,12 +3129,6 @@
         overflow: hidden;
       }
       .file-viewer-header {
-        display: flex;
-        flex: 0 0 auto;
-        align-items: center;
-        gap: 8px;
-        padding: 8px 10px;
-        border-bottom: 1px solid var(--border);
         background: var(--bg-surface);
       }
       .file-viewer-title-slot {
@@ -3048,23 +3157,27 @@
         align-items: center;
         gap: 4px;
       }
+      /* Icon-only buttons come out square: a 16px icon plus 8px each side. */
+      .file-viewer-back,
       .file-viewer-zoom button,
       .file-viewer-copy-path,
       .file-viewer-download,
       .file-viewer-close {
         display: inline-flex;
+        flex: 0 0 auto;
         align-items: center;
         justify-content: center;
-        min-width: 26px;
-        height: 24px;
-        padding: 0 6px;
-        border: 1px solid var(--border);
+        min-width: var(--toolbar-control-size);
+        height: var(--toolbar-control-size);
+        padding: 0 8px;
+        border: 0;
         border-radius: var(--radius-md);
-        background: var(--bg-base);
-        color: var(--text);
+        background: transparent;
+        color: var(--text-secondary);
         font-size: var(--fs-sm);
         line-height: 1;
       }
+      .file-viewer-back:hover,
       .file-viewer-zoom button:hover,
       .file-viewer-copy-path:hover,
       .file-viewer-download:hover,
@@ -3075,6 +3188,34 @@
         color: var(--muted);
         opacity: 0.6;
       }
+      /* Open/Download never shrink below their content: a squeezed label used
+         to spill past the border on a narrow phone. Wide headers show the
+         label alone; narrow ones swap it for the icon and keep the label for
+         the accessible name only. */
+      .file-viewer-header {
+        container: file-viewer-header / inline-size;
+      }
+      .file-viewer-download {
+        position: relative;
+        flex: 0 0 auto;
+        white-space: nowrap;
+      }
+      .file-viewer-action-icon {
+        display: none;
+      }
+      @container file-viewer-header (max-width: 400px) {
+        .file-viewer-action-icon {
+          display: inline-flex;
+        }
+        .file-viewer-action-label {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          overflow: hidden;
+          clip: rect(0 0 0 0);
+          white-space: nowrap;
+        }
+      }
       .file-viewer-zoom-level {
         min-width: 40px;
         color: var(--muted);
@@ -3082,10 +3223,6 @@
         text-align: center;
       }
       @media (max-width: 360px) {
-        .file-viewer-header {
-          gap: 4px;
-          padding-inline: 6px;
-        }
         .file-viewer-zoom-level,
         #fileViewerZoomReset {
           display: none;
@@ -3133,23 +3270,6 @@
         min-height: 320px;
         border: 0;
         background: var(--bg-surface);
-      }
-      .file-viewer-back {
-        display: inline-flex;
-        flex: 0 0 auto;
-        align-items: center;
-        justify-content: center;
-        min-width: 26px;
-        height: 24px;
-        padding: 0 6px;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        background: var(--bg-base);
-        color: var(--text);
-        line-height: 1;
-      }
-      .file-viewer-back:hover {
-        background: var(--hover-bg);
       }
       /* Explorer mode (ADR-0197): a single-panel directory listing inside the
          same overlay body. Rows are buttons sized for touch. */
@@ -3226,14 +3346,6 @@
         touch-action: pan-y;
       }
       .github-header {
-        display: flex;
-        flex: 0 0 auto;
-        min-width: 0;
-        align-items: center;
-        gap: 6px;
-        min-height: 40px;
-        padding: 4px 6px;
-        border-bottom: 1px solid var(--border);
         background: var(--bg-surface);
       }
       .github-tabs {
@@ -3250,7 +3362,7 @@
         color: var(--text-secondary);
       }
       .github-tab {
-        min-height: 30px;
+        min-height: var(--toolbar-control-size);
         padding: 0 8px;
         white-space: nowrap;
       }
@@ -3274,8 +3386,8 @@
         flex: 0 0 auto;
         align-items: center;
         justify-content: center;
-        width: 30px;
-        height: 30px;
+        width: var(--toolbar-control-size);
+        height: var(--toolbar-control-size);
         padding: 0;
       }
       .github-header-action:hover,
@@ -3294,7 +3406,7 @@
           flex: 1 1 auto;
           min-width: 0;
           max-width: 100%;
-          min-height: 32px;
+          min-height: var(--toolbar-control-size);
           background: var(--bg-base);
           color: var(--text-primary);
           border: 1px solid var(--border);
@@ -3423,9 +3535,6 @@
           width: 100%;
           border-width: 0;
           border-radius: 0;
-        }
-        .github-header {
-          gap: 3px;
         }
         .github-tab {
           padding: 0 6px;

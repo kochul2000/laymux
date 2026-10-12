@@ -2,7 +2,7 @@ import { saveSettings, saveTerminalOutputCache, cleanTerminalOutputCache } from 
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
-import type { ViewInstanceConfig, WorkspacePane } from "@/stores/types";
+import type { DockPane, ViewInstanceConfig, WorkspacePane } from "@/stores/types";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 import {
   collectSessionCheckpoint,
@@ -12,8 +12,14 @@ import {
 import { interruptTerminalsOnExit } from "@/lib/interrupt-terminals-on-exit";
 import { isSettingsWriteBlocked } from "@/lib/settings-write-guard";
 import type { ProgressReporter } from "@/lib/lifecycle-progress";
-import type { ExitSettings } from "@/lib/tauri-api";
 import { withCodexStatusCheckpoint } from "@/lib/codex-status-probe";
+import { captureSessionReceipt, commitSessionReceipt } from "./session-checkpoint-receipt";
+import { saveLocalSession } from "./local-session";
+import {
+  configurationNeedsSave,
+  seedSessionConfiguration,
+  resetSessionConfiguration,
+} from "./session-configuration";
 
 export { setBlockPersist } from "@/lib/settings-write-guard";
 
@@ -66,6 +72,9 @@ export interface SessionCheckpointCommit {
   checkpointCommitId: number;
   frontendMutationRevision: number;
   coverage: TerminalAttributionCoverage[];
+  receiptToken?: string;
+  needsRetry?: boolean;
+  unresolvedTerminalIds?: string[];
 }
 
 const CRITICAL_OBSERVATION_SETTLE_MS = 150;
@@ -76,11 +85,20 @@ const SESSION_VIEW_FIELDS = [
   "lastGrokSession",
   "lastAgentFresh",
 ] as const;
-let nextCheckpointCommitId = 1;
 let activeCheckpoint: Promise<SessionCheckpointCommit> | null = null;
 let trailingCheckpointRequested = false;
 let pendingOptions: SessionCheckpointOptions = {};
 let frontendMutationRevision = 0;
+let lastCommittedCheckpoint: SessionCheckpointCommit | undefined;
+
+export function getReusableSessionCheckpointCommit(): SessionCheckpointCommit | undefined {
+  if (
+    activeCheckpoint ||
+    lastCommittedCheckpoint?.frontendMutationRevision !== frontendMutationRevision
+  )
+    return undefined;
+  return lastCommittedCheckpoint?.receiptToken ? lastCommittedCheckpoint : undefined;
+}
 
 export function markSessionCheckpointMutation(): void {
   frontendMutationRevision += 1;
@@ -94,6 +112,8 @@ export function _resetClosingDown(): void {
   trailingCheckpointRequested = false;
   pendingOptions = {};
   frontendMutationRevision = 0;
+  lastCommittedCheckpoint = undefined;
+  resetSessionConfiguration();
 }
 
 function mergeCheckpointOptions(
@@ -183,38 +203,82 @@ async function persistSessionCore(
   options: SessionCheckpointOptions,
 ): Promise<SessionCheckpointCommit> {
   const collectedRevision = frontendMutationRevision;
-  const sourceViews = new Map(
-    [...useWorkspaceStore.getState().workspaces, ...useDockStore.getState().docks]
-      .flatMap((group) => group.panes)
-      .map((pane) => [pane.id, pane.view]),
-  );
+  const capturedReceipt = await captureSessionReceipt();
+  // Content views keyed by content id: workspace layers (ADR-0297) and dock panes.
+  const sourceViews = new Map<string, ViewInstanceConfig>([
+    ...useWorkspaceStore
+      .getState()
+      .workspaces.flatMap((workspace) => workspace.panes.flatMap((pane) => pane.layers))
+      .map((layer) => [layer.id, layer.view] as const),
+    ...useDockStore
+      .getState()
+      .docks.flatMap((dock) => dock.panes)
+      .map((pane) => [pane.id, pane.view] as const),
+  ]);
   const checkpoint = await collectStableCheckpoint(options);
-  await saveSettings(checkpoint.settings);
+  if (configurationNeedsSave(checkpoint.settings)) {
+    await saveSettings(checkpoint.settings);
+    seedSessionConfiguration(checkpoint.settings);
+  }
+  const durable = await saveLocalSession(
+    checkpoint.settings,
+    checkpoint.coverage,
+    checkpoint.attributionLookupFailed,
+    checkpoint.cwdLookupFailed,
+  );
+  checkpoint.settings.workspaces = durable.snapshot.workspaces;
+  checkpoint.settings.docks = durable.snapshot.docks;
+  const receiptToken = capturedReceipt
+    ? await commitSessionReceipt(capturedReceipt, checkpoint.coverage, durable.revision)
+    : undefined;
   // Unknown attribution and hidden-pane remounts read these views. Publish only
   // committed metadata, otherwise a later save can resurrect startup-era IDs.
-  const savedViews = new Map(
-    [...checkpoint.settings.workspaces, ...(checkpoint.settings.docks ?? [])]
-      .flatMap((group) => group.panes ?? [])
-      .map((pane) => [pane.id, pane.view]),
-  );
-  function updateGroups<T extends { panes: WorkspacePane[] }>(groups: T[]): T[] {
+  const savedViews = new Map<string, { [key: string]: unknown }>();
+  for (const workspace of checkpoint.settings.workspaces) {
+    for (const pane of workspace.panes ?? []) {
+      if (pane.layers?.length) {
+        for (const layer of pane.layers) savedViews.set(layer.id, layer.view);
+      } else if (pane.id && pane.view) {
+        savedViews.set(pane.id, pane.view);
+      }
+    }
+  }
+  for (const dock of checkpoint.settings.docks ?? []) {
+    for (const pane of dock.panes ?? []) savedViews.set(pane.id, pane.view);
+  }
+  /** The view with committed session fields published, or the same object. */
+  function publishedView(id: string, view: ViewInstanceConfig): ViewInstanceConfig {
+    const saved = savedViews.get(id);
+    if (
+      view.type !== "TerminalView" ||
+      view !== sourceViews.get(id) ||
+      !saved ||
+      SESSION_VIEW_FIELDS.every((key) => view[key] === saved[key])
+    )
+      return view;
+    const next: ViewInstanceConfig = { ...view };
+    for (const key of SESSION_VIEW_FIELDS) {
+      if (saved[key] === undefined) delete next[key];
+      else next[key] = saved[key];
+    }
+    return next;
+  }
+  function updateSlot(pane: WorkspacePane): WorkspacePane {
+    const layers = pane.layers.map((layer) => {
+      const view = publishedView(layer.id, layer.view);
+      return view === layer.view ? layer : { ...layer, view };
+    });
+    return layers.every((layer, index) => layer === pane.layers[index])
+      ? pane
+      : { ...pane, layers };
+  }
+  function updateDockPane(pane: DockPane): DockPane {
+    const view = publishedView(pane.id, pane.view);
+    return view === pane.view ? pane : { ...pane, view };
+  }
+  function updateGroups<P, T extends { panes: P[] }>(groups: T[], update: (pane: P) => P): T[] {
     const updated = groups.map((group) => {
-      const panes = group.panes.map((pane) => {
-        const saved = savedViews.get(pane.id);
-        if (
-          pane.view.type !== "TerminalView" ||
-          pane.view !== sourceViews.get(pane.id) ||
-          !saved ||
-          SESSION_VIEW_FIELDS.every((key) => pane.view[key] === saved[key])
-        )
-          return pane;
-        const view: ViewInstanceConfig = { ...pane.view };
-        for (const key of SESSION_VIEW_FIELDS) {
-          if (saved[key] === undefined) delete view[key];
-          else view[key] = saved[key];
-        }
-        return { ...pane, view };
-      });
+      const panes = group.panes.map(update);
       return panes.every((pane, index) => pane === group.panes[index])
         ? group
         : { ...group, panes };
@@ -223,11 +287,11 @@ async function persistSessionCore(
   }
   const revisionBeforePublication = frontendMutationRevision;
   useWorkspaceStore.setState((state) => {
-    const workspaces = updateGroups(state.workspaces);
+    const workspaces = updateGroups(state.workspaces, updateSlot);
     return workspaces === state.workspaces ? state : { workspaces };
   });
   useDockStore.setState((state) => {
-    const docks = updateGroups(state.docks);
+    const docks = updateGroups(state.docks, updateDockPane);
     return docks === state.docks ? state : { docks };
   });
   // These synchronous notifications publish metadata already saved above.
@@ -235,9 +299,12 @@ async function persistSessionCore(
   // mutation during collection/save still differs and requires a trailing pass.
   const publicationRevision = frontendMutationRevision - revisionBeforePublication;
   return {
-    checkpointCommitId: nextCheckpointCommitId++,
+    checkpointCommitId: durable.revision,
     frontendMutationRevision: collectedRevision + publicationRevision,
     coverage: checkpoint.coverage,
+    needsRetry: durable.needsRetry,
+    unresolvedTerminalIds: durable.unresolvedTerminalIds,
+    ...(receiptToken ? { receiptToken } : {}),
   };
 }
 
@@ -257,6 +324,7 @@ async function runCheckpointCoordinator(): Promise<SessionCheckpointCommit> {
       pendingOptions = mergeCheckpointOptions(pendingOptions, options);
     }
   } while (trailingCheckpointRequested);
+  lastCommittedCheckpoint = commit;
   return commit;
 }
 
@@ -316,25 +384,42 @@ export async function saveBeforeClose(report?: ProgressReporter): Promise<void> 
   const verifyStatus =
     !isSettingsWriteBlocked() && codex.restoreSession && codex.verifySessionOnExit;
   try {
-    await withCodexStatusCheckpoint(verifyStatus, undefined, async () => {
-      // The status proof remains fenced through the final save. Ctrl+C, if
-      // enabled separately, still follows the committed restoration point.
-      if (!isSettingsWriteBlocked())
-        await flushSessionCheckpoint({ reason: "close", requireConclusive: verifyStatus });
-      await prepareTerminalExit(report);
-    });
+    const committed = getReusableSessionCheckpointCommit();
+    await withCodexStatusCheckpoint(
+      verifyStatus,
+      undefined,
+      async (reused) => {
+        // The status proof remains fenced through the final save. Ctrl+C, if
+        // enabled separately, still follows the committed restoration point.
+        if (
+          !isSettingsWriteBlocked() &&
+          !(reused && committed && committed === getReusableSessionCheckpointCommit())
+        )
+          await flushSessionCheckpoint({ reason: "close", requireConclusive: verifyStatus });
+        await prepareTerminalExit(report);
+      },
+      committed?.receiptToken,
+    );
   } catch (error) {
     closingDown = false;
     throw error;
   }
 }
 
-/** Shared post-checkpoint preparation; never recollect attribution after Ctrl+C. */
-export async function prepareTerminalExit(
-  report?: ProgressReporter,
-  exit?: Partial<ExitSettings>,
-): Promise<void> {
-  await interruptTerminalsOnExit(report, exit);
+/**
+ * Explicit-exit preparation after the checkpoint: the optional Ctrl+C
+ * cleanup, then the history cache. Never recollect attribution after Ctrl+C.
+ * An update must not use this: the PTY daemon keeps every session across the
+ * restart (ADR-0308), so interrupting would end the work the update
+ * preserves (ADR-0314). It caches history with `cacheTerminalOutputs` only.
+ */
+export async function prepareTerminalExit(report?: ProgressReporter): Promise<void> {
+  await interruptTerminalsOnExit(report);
+  await cacheTerminalOutputs(report);
+}
+
+/** Serialize and cache every terminal's history for the next launch. */
+export async function cacheTerminalOutputs(report?: ProgressReporter): Promise<void> {
   await report?.({ stage: "caching", completed: 0, total: null });
 
   // When settings had a parse error, don't overwrite the user's original file with defaults.
@@ -388,8 +473,10 @@ export async function prepareTerminalExit(
 
   // Clean orphaned cache files after all cache writes have completed.
   const activePaneIds: string[] = [];
+  // Output caches belong to content: every stacked layer keeps its own (ADR-0297).
   for (const ws of wsState.workspaces) {
-    for (const p of ws.panes) if (p.id) activePaneIds.push(p.id);
+    for (const p of ws.panes)
+      for (const layer of p.layers) if (layer.id) activePaneIds.push(layer.id);
   }
   for (const d of dockState.docks) {
     for (const p of d.panes) if (p.id) activePaneIds.push(p.id);

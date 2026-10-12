@@ -12,6 +12,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { AgentHooksSection } from "./settings/AgentHooksSection";
+import { PtySessionsSection } from "./settings/PtySessionsSection";
 import { useUiStore } from "@/stores/ui-store";
 import {
   useSettingsStore,
@@ -213,7 +214,7 @@ function UpdateSection() {
           <Button
             variant="primary"
             data-testid="update-open-btn"
-            onClick={() => useLifecycleStore.getState().openUpdate()}
+            onClick={() => useLifecycleStore.getState().openUpdate({ check: true })}
           >
             {t("update.open")}
           </Button>
@@ -1885,6 +1886,8 @@ function InterfaceSection() {
   const setControlBar = useSettingsStore((s) => s.setControlBar);
   const storeDock = useSettingsStore((s) => s.dock);
   const setDock = useSettingsStore((s) => s.setDock);
+  const storePaneStack = useSettingsStore((s) => s.paneStack);
+  const setPaneStack = useSettingsStore((s) => s.setPaneStack);
   const storeNotifications = useSettingsStore((s) => s.notifications);
   const setNotifications = useSettingsStore((s) => s.setNotifications);
   const storePower = useSettingsStore((s) => s.power);
@@ -1894,6 +1897,9 @@ function InterfaceSection() {
     setControlBar(v),
   );
   const [dock, setDraftDock] = useDraft("dock", storeDock, (v) => setDock(v));
+  const [paneStack, setDraftPaneStack] = useDraft("paneStack", storePaneStack, (v) =>
+    setPaneStack(v),
+  );
   const [notifications, setDraftNotifications] = useDraft(
     "notifications",
     storeNotifications,
@@ -1970,6 +1976,16 @@ function InterfaceSection() {
           testId="dock-arrow-focus-pane-toggle"
           checked={dock.arrowFocusPane}
           onChange={(v) => updateDock({ arrowFocusPane: v })}
+        />
+      </SettingsGroup>
+
+      <SettingsGroup title={t("interface.groupPaneStack")}>
+        <SettingsToggleField
+          label={t("interface.paneStackCycleOnBlockedArrow")}
+          desc={t("interface.paneStackCycleOnBlockedArrowDesc")}
+          testId="pane-stack-cycle-blocked-toggle"
+          checked={paneStack.cycleOnBlockedArrow}
+          onChange={(v) => setDraftPaneStack((prev) => ({ ...prev, cycleOnBlockedArrow: v }))}
         />
       </SettingsGroup>
 
@@ -5149,6 +5165,7 @@ export function SettingsView() {
               <ProfileSection key={activeNav} profileIndex={parseInt(activeNav.split("-")[1])} />
             )}
             {activeNav === "colorSchemes" && <ColorSchemesSection />}
+            {activeNav === "ptySessions" && <PtySessionsSection />}
             {activeNav === "keybindings" && <KeybindingsSection />}
             {activeNav === "terminal" && <TerminalSection />}
             {activeNav === "paste" && <PasteSection />}

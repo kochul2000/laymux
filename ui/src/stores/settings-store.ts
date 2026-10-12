@@ -123,11 +123,14 @@ export interface PasteSettings {
   smart: boolean;
   /** Directory for clipboard image pastes. Empty = default temp dir. */
   imageDir: string;
-  /** Strip common leading whitespace when pasting. */
+  /** Strip common leading whitespace when copying a terminal selection. */
   removeIndent: boolean;
-  /** Rejoin URLs split across lines when pasting. */
+  /**
+   * Rejoin rows a TUI broke at the screen width when copying, and URLs split
+   * across lines when copying or pasting.
+   */
   removeLineBreak: boolean;
-  /** Detect indented multi-line URLs and make them clickable as a single link. */
+  /** Detect URLs a TUI broke across rows and make them clickable as a single link. */
   linkJoin: boolean;
   /** Show a confirmation dialog when pasting large text. */
   largeWarning: boolean;
@@ -155,6 +158,11 @@ export interface TerminalSettings {
    * this is a settings.json tuning knob.
    */
   parserAdmission?: { focusedShare: number; visibleShare: number; hiddenShare: number };
+  /**
+   * ADR-0312: minutes the PTY daemon keeps terminals running with no GUI, so
+   * an update's restart can adopt them. No settings UI — a settings.json value.
+   */
+  ptyDaemonGraceMinutes?: number;
   /** Advertise 24-bit color support to programs started in newly created terminals. */
   advertiseTrueColor: boolean;
   /** Automatically copy text to clipboard when selected in terminal. */
@@ -306,6 +314,15 @@ export interface DockSettings {
    * focus is preserved across the switch (memo-style). Default: true. See #311.
    */
   arrowFocusPane: boolean;
+}
+
+/** Pane stack behavior (ADR-0297). */
+export interface PaneStackSettings {
+  /**
+   * When Alt+Arrow finds no pane and no dock in that direction, step the focused
+   * stack instead (Right/Down = next layer, Left/Up = previous). Default: true.
+   */
+  cycleOnBlockedArrow: boolean;
 }
 
 /** Notification behavior. */
@@ -570,6 +587,7 @@ interface SettingsState {
   /** Status widget placement for the top bar and the status line (ADR-0105). */
   widgets: WidgetsSettings;
   dock: DockSettings;
+  paneStack: PaneStackSettings;
   notifications: NotificationSettings;
   power: PowerSettings;
   update: UpdateSettings;
@@ -595,6 +613,7 @@ interface SettingsState {
   setTerminal: (data: Partial<TerminalSettings>) => void;
   setControlBar: (data: Partial<ControlBarSettings>) => void;
   setDock: (data: Partial<DockSettings>) => void;
+  setPaneStack: (data: Partial<PaneStackSettings>) => void;
   setNotifications: (data: Partial<NotificationSettings>) => void;
   setPower: (data: Partial<PowerSettings>) => void;
   setUpdate: (data: Partial<UpdateSettings>) => void;
@@ -664,6 +683,7 @@ interface SettingsState {
         | "usage"
         | "widgets"
         | "dock"
+        | "paneStack"
         | "notifications"
         | "power"
         | "update"
@@ -813,6 +833,7 @@ export const DEFAULT_TERMINAL: TerminalSettings = {
     visibleShare: TERMINAL_WRITE_DEFAULT_CLASS_SHARE.foreground,
     hiddenShare: TERMINAL_WRITE_DEFAULT_CLASS_SHARE.background,
   },
+  ptyDaemonGraceMinutes: 10,
   advertiseTrueColor: true,
   copyOnSelect: true,
   pathLinkEnabled: true,
@@ -917,6 +938,10 @@ export const DEFAULT_DOCK: DockSettings = {
   persistState: true,
   arrowNav: true,
   arrowFocusPane: true,
+};
+
+export const DEFAULT_PANE_STACK: PaneStackSettings = {
+  cycleOnBlockedArrow: true,
 };
 
 export const DEFAULT_NOTIFICATIONS: NotificationSettings = {
@@ -1331,6 +1356,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   },
   widgets: defaultWidgets(),
   dock: { ...DEFAULT_DOCK },
+  paneStack: { ...DEFAULT_PANE_STACK },
   notifications: { ...DEFAULT_NOTIFICATIONS },
   power: { ...DEFAULT_POWER },
   update: { ...DEFAULT_UPDATE },
@@ -1406,6 +1432,11 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   setDock: (data) =>
     set((state) => ({
       dock: { ...state.dock, ...data },
+    })),
+
+  setPaneStack: (data) =>
+    set((state) => ({
+      paneStack: { ...state.paneStack, ...data },
     })),
 
   setNotifications: (data) =>
@@ -1742,6 +1773,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     // an unknown widget type has to survive the trip (ADR-0105).
     const widgets = data.widgets ? normalizeWidgets(data.widgets) : undefined;
     const dock = data.dock ? { ...DEFAULT_DOCK, ...data.dock } : undefined;
+    const paneStack = data.paneStack ? { ...DEFAULT_PANE_STACK, ...data.paneStack } : undefined;
     const notifications = data.notifications
       ? { ...DEFAULT_NOTIFICATIONS, ...data.notifications }
       : undefined;
@@ -1873,6 +1905,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       usage: _rawUsage,
       widgets: _rawWidgets,
       dock: _rawDock,
+      paneStack: _rawPaneStack,
       notifications: _rawNotifications,
       power: _rawPower,
       update: _rawUpdate,
@@ -1903,6 +1936,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(usage ? { usage } : {}),
       ...(widgets ? { widgets } : {}),
       ...(dock ? { dock } : {}),
+      ...(paneStack ? { paneStack } : {}),
       ...(notifications ? { notifications } : {}),
       ...(power ? { power } : {}),
       ...(update ? { update } : {}),

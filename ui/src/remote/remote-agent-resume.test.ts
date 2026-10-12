@@ -14,7 +14,7 @@ vi.mock("../lib/agent-resume-link", async (importOriginal) => ({
 }));
 const hint = { provider: "codex", sessionId: "11111111-2222-4333-8444-555555555555" };
 function setup() {
-  let context = { terminalId: "t1", leaseId: "l1", outputEpoch: 1, ready: true, isShell: true };
+  let context = { terminalId: "t1", leaseId: "l1", outputEpoch: 1, ready: true };
   let current = true;
   const submit = vi.fn().mockResolvedValue(undefined);
   const onError = vi.fn();
@@ -53,7 +53,7 @@ describe("Remote 복원 링크 입력", () => {
       `codex --yolo --no-daemon resume ${hint.sessionId}`,
     );
   });
-  for (const patch of [{ ready: false }, { isShell: false }, { leaseId: "" }]) {
+  for (const patch of [{ ready: false }, { leaseId: "" }]) {
     it(`입력 gate를 지킨다: ${JSON.stringify(patch)}`, async () => {
       const s = setup();
       s.update(patch);
@@ -67,7 +67,6 @@ describe("Remote 복원 링크 입력", () => {
     { leaseId: "l2" },
     { outputEpoch: 2 },
     { ready: false },
-    { isShell: false },
   ]) {
     it(`조회 중 문맥 변경을 폐기한다: ${JSON.stringify(patch)}`, async () => {
       const s = setup();
@@ -89,6 +88,17 @@ describe("Remote 복원 링크 입력", () => {
     s.activate();
     await vi.waitFor(() => expect(s.loadCommands).toHaveBeenCalled());
     expect(s.submit).not.toHaveBeenCalled();
+  });
+  // The Remote's navigation snapshot is only polled while its drawer is open,
+  // so it can still show the agent that printed this hint. Only the host's
+  // state read at tap time decides.
+  it("로컬 스냅샷이 아니라 탭 시점의 호스트 상태로 셸 여부를 판정한다", async () => {
+    const s = setup();
+    // A stale local snapshot field must not be consulted.
+    s.update({ isShell: false } as Partial<{ ready: boolean }>);
+    s.activate();
+    await vi.waitFor(() => expect(s.submit).toHaveBeenCalledTimes(1));
+    expect(s.loadCommands).toHaveBeenCalledTimes(1);
   });
   it("호스트가 실행 중이면 제출하지 않는다", async () => {
     const s = setup();

@@ -6,7 +6,7 @@ use axum::extract::{ConnectInfo, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use serde::Deserialize;
 use tokio::time;
@@ -67,6 +67,7 @@ use super::viewer_routes::{
     remote_file_viewer_render, remote_file_viewer_status, remote_file_viewer_status_android,
 };
 use super::widget_routes::remote_widgets;
+use super::workspace_management::{remote_workspace_rename, remote_workspace_template_save};
 use super::{internal_error, json_error};
 
 pub(super) const REMOTE_LEASE_HEADER: &str = "x-laymux-remote-lease";
@@ -199,7 +200,10 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
                     crate::constants::REMOTE_COMPOSER_STARRED_REQUEST_MAX_BYTES,
                 )),
         )
-        .route("/remote/v1/layouts", get(remote_layouts_list))
+        .route(
+            "/remote/v1/layouts",
+            get(remote_layouts_list).post(remote_workspace_template_save),
+        )
         // Lease-free like `navigation`: the strip only reads (ADR-0124).
         .route("/remote/v1/widgets", get(remote_widgets))
         .route("/remote/v1/update", get(remote_update_status))
@@ -234,6 +238,7 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
             post(remote_workspace_switch_active),
         )
         .route("/remote/v1/workspaces", post(remote_workspace_create))
+        .route("/remote/v1/workspaces/{id}", put(remote_workspace_rename))
         .route(
             "/remote/v1/workspaces/{id}/visibility",
             post(remote_workspace_visibility),

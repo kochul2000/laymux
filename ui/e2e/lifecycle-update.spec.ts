@@ -15,7 +15,6 @@ for (const width of [320, 390]) {
           operation: "idle",
           canForceInstall: true,
           lastError: "Cannot identify pane 2",
-          exitSettings: { interruptTerminals: true },
         },
       }),
     );
@@ -38,7 +37,6 @@ for (const width of [320, 390]) {
           operation: "installing",
           forceInstall: true,
           preparation: { stage: "checkpoint", completed: 0, total: null },
-          exitSettings: { interruptTerminals: true },
         },
       }),
     );
@@ -62,7 +60,6 @@ for (const width of [320, 390]) {
       downloadedBytes: 0,
       totalBytes: null,
       lastError: null,
-      exitSettings: { interruptTerminals: true, interruptRounds: 3, settleMs: 700 },
     };
     await page.route("http://remote.test/remote/v1/update", (route) =>
       route.fulfill({ json: status }),
@@ -72,7 +69,7 @@ for (const width of [320, 390]) {
         json: {
           ...status,
           operation: "preparing",
-          preparation: { stage: "settling", completed: 350, total: 700 },
+          preparation: { stage: "caching", completed: 1, total: 2 },
         },
       }),
     );

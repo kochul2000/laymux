@@ -22,8 +22,24 @@ describe("usePaneResize", () => {
   describe("findPaneBoundaries", () => {
     it("finds vertical boundary between two side-by-side panes", () => {
       const panes: WorkspacePane[] = [
-        { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
-        { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
+        {
+          id: "p1",
+          x: 0,
+          y: 0,
+          w: 0.5,
+          h: 1,
+          layers: [{ id: "p1", view: { type: "EmptyView" } }],
+          activeLayerId: "p1",
+        },
+        {
+          id: "p2",
+          x: 0.5,
+          y: 0,
+          w: 0.5,
+          h: 1,
+          layers: [{ id: "p2", view: { type: "EmptyView" } }],
+          activeLayerId: "p2",
+        },
       ];
       const boundaries = findPaneBoundaries(panes);
       expect(boundaries).toHaveLength(1);
@@ -35,8 +51,24 @@ describe("usePaneResize", () => {
 
     it("finds horizontal boundary between stacked panes", () => {
       const panes: WorkspacePane[] = [
-        { id: "p1", x: 0, y: 0, w: 1, h: 0.5, view: { type: "EmptyView" } },
-        { id: "p2", x: 0, y: 0.5, w: 1, h: 0.5, view: { type: "EmptyView" } },
+        {
+          id: "p1",
+          x: 0,
+          y: 0,
+          w: 1,
+          h: 0.5,
+          layers: [{ id: "p1", view: { type: "EmptyView" } }],
+          activeLayerId: "p1",
+        },
+        {
+          id: "p2",
+          x: 0,
+          y: 0.5,
+          w: 1,
+          h: 0.5,
+          layers: [{ id: "p2", view: { type: "EmptyView" } }],
+          activeLayerId: "p2",
+        },
       ];
       const boundaries = findPaneBoundaries(panes);
       expect(boundaries).toHaveLength(1);
@@ -48,9 +80,33 @@ describe("usePaneResize", () => {
 
     it("finds multiple boundaries in a 3-pane layout", () => {
       const panes: WorkspacePane[] = [
-        { id: "p1", x: 0, y: 0, w: 1, h: 0.5, view: { type: "EmptyView" } },
-        { id: "p2", x: 0, y: 0.5, w: 0.5, h: 0.5, view: { type: "EmptyView" } },
-        { id: "p3", x: 0.5, y: 0.5, w: 0.5, h: 0.5, view: { type: "EmptyView" } },
+        {
+          id: "p1",
+          x: 0,
+          y: 0,
+          w: 1,
+          h: 0.5,
+          layers: [{ id: "p1", view: { type: "EmptyView" } }],
+          activeLayerId: "p1",
+        },
+        {
+          id: "p2",
+          x: 0,
+          y: 0.5,
+          w: 0.5,
+          h: 0.5,
+          layers: [{ id: "p2", view: { type: "EmptyView" } }],
+          activeLayerId: "p2",
+        },
+        {
+          id: "p3",
+          x: 0.5,
+          y: 0.5,
+          w: 0.5,
+          h: 0.5,
+          layers: [{ id: "p3", view: { type: "EmptyView" } }],
+          activeLayerId: "p3",
+        },
       ];
       const boundaries = findPaneBoundaries(panes);
       // Horizontal at y=0.5 (between pane 0 and panes 1,2)
@@ -60,9 +116,33 @@ describe("usePaneResize", () => {
 
     it("merges adjacent vertical boundary segments so stacked panes resize together", () => {
       const panes: WorkspacePane[] = [
-        { id: "left", x: 0, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
-        { id: "right-top", x: 0.5, y: 0, w: 0.5, h: 0.5, view: { type: "EmptyView" } },
-        { id: "right-bottom", x: 0.5, y: 0.5, w: 0.5, h: 0.5, view: { type: "EmptyView" } },
+        {
+          id: "left",
+          x: 0,
+          y: 0,
+          w: 0.5,
+          h: 1,
+          layers: [{ id: "left", view: { type: "EmptyView" } }],
+          activeLayerId: "left",
+        },
+        {
+          id: "right-top",
+          x: 0.5,
+          y: 0,
+          w: 0.5,
+          h: 0.5,
+          layers: [{ id: "right-top", view: { type: "EmptyView" } }],
+          activeLayerId: "right-top",
+        },
+        {
+          id: "right-bottom",
+          x: 0.5,
+          y: 0.5,
+          w: 0.5,
+          h: 0.5,
+          layers: [{ id: "right-bottom", view: { type: "EmptyView" } }],
+          activeLayerId: "right-bottom",
+        },
       ];
 
       const boundaries = findPaneBoundaries(panes);
@@ -78,9 +158,33 @@ describe("usePaneResize", () => {
 
     it("merges adjacent horizontal boundary segments so side-by-side panes resize together", () => {
       const panes: WorkspacePane[] = [
-        { id: "top-left", x: 0, y: 0, w: 0.5, h: 0.5, view: { type: "EmptyView" } },
-        { id: "top-right", x: 0.5, y: 0, w: 0.5, h: 0.5, view: { type: "EmptyView" } },
-        { id: "bottom", x: 0, y: 0.5, w: 1, h: 0.5, view: { type: "EmptyView" } },
+        {
+          id: "top-left",
+          x: 0,
+          y: 0,
+          w: 0.5,
+          h: 0.5,
+          layers: [{ id: "top-left", view: { type: "EmptyView" } }],
+          activeLayerId: "top-left",
+        },
+        {
+          id: "top-right",
+          x: 0.5,
+          y: 0,
+          w: 0.5,
+          h: 0.5,
+          layers: [{ id: "top-right", view: { type: "EmptyView" } }],
+          activeLayerId: "top-right",
+        },
+        {
+          id: "bottom",
+          x: 0,
+          y: 0.5,
+          w: 1,
+          h: 0.5,
+          layers: [{ id: "bottom", view: { type: "EmptyView" } }],
+          activeLayerId: "bottom",
+        },
       ];
 
       const boundaries = findPaneBoundaries(panes);
@@ -97,10 +201,42 @@ describe("usePaneResize", () => {
     it("merges three or more adjacent vertical segments into a single boundary", () => {
       // Layout [2, [1, 1, 1]] — left full-height, right split into three stacked panes
       const panes: WorkspacePane[] = [
-        { id: "left", x: 0, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
-        { id: "r-top", x: 0.5, y: 0, w: 0.5, h: 1 / 3, view: { type: "EmptyView" } },
-        { id: "r-mid", x: 0.5, y: 1 / 3, w: 0.5, h: 1 / 3, view: { type: "EmptyView" } },
-        { id: "r-bot", x: 0.5, y: 2 / 3, w: 0.5, h: 1 / 3, view: { type: "EmptyView" } },
+        {
+          id: "left",
+          x: 0,
+          y: 0,
+          w: 0.5,
+          h: 1,
+          layers: [{ id: "left", view: { type: "EmptyView" } }],
+          activeLayerId: "left",
+        },
+        {
+          id: "r-top",
+          x: 0.5,
+          y: 0,
+          w: 0.5,
+          h: 1 / 3,
+          layers: [{ id: "r-top", view: { type: "EmptyView" } }],
+          activeLayerId: "r-top",
+        },
+        {
+          id: "r-mid",
+          x: 0.5,
+          y: 1 / 3,
+          w: 0.5,
+          h: 1 / 3,
+          layers: [{ id: "r-mid", view: { type: "EmptyView" } }],
+          activeLayerId: "r-mid",
+        },
+        {
+          id: "r-bot",
+          x: 0.5,
+          y: 2 / 3,
+          w: 0.5,
+          h: 1 / 3,
+          layers: [{ id: "r-bot", view: { type: "EmptyView" } }],
+          activeLayerId: "r-bot",
+        },
       ];
 
       const vertical = findPaneBoundaries(panes).filter((bd) => bd.direction === "vertical");
@@ -115,9 +251,33 @@ describe("usePaneResize", () => {
     it("merges segments even when sub-split sizes are uneven", () => {
       // Right side split into uneven heights (e.g., user resized the inner boundary)
       const panes: WorkspacePane[] = [
-        { id: "left", x: 0, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
-        { id: "right-top", x: 0.5, y: 0, w: 0.5, h: 0.7, view: { type: "EmptyView" } },
-        { id: "right-bottom", x: 0.5, y: 0.7, w: 0.5, h: 0.3, view: { type: "EmptyView" } },
+        {
+          id: "left",
+          x: 0,
+          y: 0,
+          w: 0.5,
+          h: 1,
+          layers: [{ id: "left", view: { type: "EmptyView" } }],
+          activeLayerId: "left",
+        },
+        {
+          id: "right-top",
+          x: 0.5,
+          y: 0,
+          w: 0.5,
+          h: 0.7,
+          layers: [{ id: "right-top", view: { type: "EmptyView" } }],
+          activeLayerId: "right-top",
+        },
+        {
+          id: "right-bottom",
+          x: 0.5,
+          y: 0.7,
+          w: 0.5,
+          h: 0.3,
+          layers: [{ id: "right-bottom", view: { type: "EmptyView" } }],
+          activeLayerId: "right-bottom",
+        },
       ];
 
       const vertical = findPaneBoundaries(panes).filter((bd) => bd.direction === "vertical");
@@ -131,10 +291,42 @@ describe("usePaneResize", () => {
 
     it("merges 2x2 grid boundary so dragging moves all four panes together", () => {
       const panes: WorkspacePane[] = [
-        { id: "tl", x: 0, y: 0, w: 0.5, h: 0.5, view: { type: "EmptyView" } },
-        { id: "tr", x: 0.5, y: 0, w: 0.5, h: 0.5, view: { type: "EmptyView" } },
-        { id: "bl", x: 0, y: 0.5, w: 0.5, h: 0.5, view: { type: "EmptyView" } },
-        { id: "br", x: 0.5, y: 0.5, w: 0.5, h: 0.5, view: { type: "EmptyView" } },
+        {
+          id: "tl",
+          x: 0,
+          y: 0,
+          w: 0.5,
+          h: 0.5,
+          layers: [{ id: "tl", view: { type: "EmptyView" } }],
+          activeLayerId: "tl",
+        },
+        {
+          id: "tr",
+          x: 0.5,
+          y: 0,
+          w: 0.5,
+          h: 0.5,
+          layers: [{ id: "tr", view: { type: "EmptyView" } }],
+          activeLayerId: "tr",
+        },
+        {
+          id: "bl",
+          x: 0,
+          y: 0.5,
+          w: 0.5,
+          h: 0.5,
+          layers: [{ id: "bl", view: { type: "EmptyView" } }],
+          activeLayerId: "bl",
+        },
+        {
+          id: "br",
+          x: 0.5,
+          y: 0.5,
+          w: 0.5,
+          h: 0.5,
+          layers: [{ id: "br", view: { type: "EmptyView" } }],
+          activeLayerId: "br",
+        },
       ];
 
       const vertical = findPaneBoundaries(panes).filter((bd) => bd.direction === "vertical");
@@ -146,11 +338,51 @@ describe("usePaneResize", () => {
 
     it("keeps same-position boundary segments separate when their ranges are disconnected", () => {
       const panes: WorkspacePane[] = [
-        { id: "left-top", x: 0, y: 0, w: 0.5, h: 0.25, view: { type: "EmptyView" } },
-        { id: "right-top", x: 0.5, y: 0, w: 0.5, h: 0.25, view: { type: "EmptyView" } },
-        { id: "middle", x: 0, y: 0.25, w: 1, h: 0.5, view: { type: "EmptyView" } },
-        { id: "left-bottom", x: 0, y: 0.75, w: 0.5, h: 0.25, view: { type: "EmptyView" } },
-        { id: "right-bottom", x: 0.5, y: 0.75, w: 0.5, h: 0.25, view: { type: "EmptyView" } },
+        {
+          id: "left-top",
+          x: 0,
+          y: 0,
+          w: 0.5,
+          h: 0.25,
+          layers: [{ id: "left-top", view: { type: "EmptyView" } }],
+          activeLayerId: "left-top",
+        },
+        {
+          id: "right-top",
+          x: 0.5,
+          y: 0,
+          w: 0.5,
+          h: 0.25,
+          layers: [{ id: "right-top", view: { type: "EmptyView" } }],
+          activeLayerId: "right-top",
+        },
+        {
+          id: "middle",
+          x: 0,
+          y: 0.25,
+          w: 1,
+          h: 0.5,
+          layers: [{ id: "middle", view: { type: "EmptyView" } }],
+          activeLayerId: "middle",
+        },
+        {
+          id: "left-bottom",
+          x: 0,
+          y: 0.75,
+          w: 0.5,
+          h: 0.25,
+          layers: [{ id: "left-bottom", view: { type: "EmptyView" } }],
+          activeLayerId: "left-bottom",
+        },
+        {
+          id: "right-bottom",
+          x: 0.5,
+          y: 0.75,
+          w: 0.5,
+          h: 0.25,
+          layers: [{ id: "right-bottom", view: { type: "EmptyView" } }],
+          activeLayerId: "right-bottom",
+        },
       ];
 
       const vertical = findPaneBoundaries(panes).filter((bd) => bd.direction === "vertical");
@@ -164,7 +396,15 @@ describe("usePaneResize", () => {
 
     it("returns empty for single pane", () => {
       const panes: WorkspacePane[] = [
-        { id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } },
+        {
+          id: "p1",
+          x: 0,
+          y: 0,
+          w: 1,
+          h: 1,
+          layers: [{ id: "p1", view: { type: "EmptyView" } }],
+          activeLayerId: "p1",
+        },
       ];
       const boundaries = findPaneBoundaries(panes);
       expect(boundaries).toHaveLength(0);
@@ -188,8 +428,24 @@ describe("usePaneResize", () => {
 
     it("clamps delta to enforce minimum pane size", () => {
       const panes: WorkspacePane[] = [
-        { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
-        { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
+        {
+          id: "p1",
+          x: 0,
+          y: 0,
+          w: 0.5,
+          h: 1,
+          layers: [{ id: "p1", view: { type: "EmptyView" } }],
+          activeLayerId: "p1",
+        },
+        {
+          id: "p2",
+          x: 0.5,
+          y: 0,
+          w: 0.5,
+          h: 1,
+          layers: [{ id: "p2", view: { type: "EmptyView" } }],
+          activeLayerId: "p2",
+        },
       ];
       const boundary: PaneBoundary = {
         direction: "vertical",
@@ -208,8 +464,24 @@ describe("usePaneResize", () => {
 
     it("clamps negative delta to not shrink left pane below minimum", () => {
       const panes: WorkspacePane[] = [
-        { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
-        { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
+        {
+          id: "p1",
+          x: 0,
+          y: 0,
+          w: 0.5,
+          h: 1,
+          layers: [{ id: "p1", view: { type: "EmptyView" } }],
+          activeLayerId: "p1",
+        },
+        {
+          id: "p2",
+          x: 0.5,
+          y: 0,
+          w: 0.5,
+          h: 1,
+          layers: [{ id: "p2", view: { type: "EmptyView" } }],
+          activeLayerId: "p2",
+        },
       ];
       const boundary: PaneBoundary = {
         direction: "vertical",
@@ -229,8 +501,24 @@ describe("usePaneResize", () => {
   describe("shouldMergeOnDragEnd", () => {
     it("returns indices to remove when right pane is at minimum size", () => {
       const panes: WorkspacePane[] = [
-        { id: "p1", x: 0, y: 0, w: 0.95, h: 1, view: { type: "EmptyView" } },
-        { id: "p2", x: 0.95, y: 0, w: 0.05, h: 1, view: { type: "EmptyView" } },
+        {
+          id: "p1",
+          x: 0,
+          y: 0,
+          w: 0.95,
+          h: 1,
+          layers: [{ id: "p1", view: { type: "EmptyView" } }],
+          activeLayerId: "p1",
+        },
+        {
+          id: "p2",
+          x: 0.95,
+          y: 0,
+          w: 0.05,
+          h: 1,
+          layers: [{ id: "p2", view: { type: "EmptyView" } }],
+          activeLayerId: "p2",
+        },
       ];
       const boundary: PaneBoundary = {
         direction: "vertical",
@@ -246,8 +534,24 @@ describe("usePaneResize", () => {
 
     it("returns indices to remove when left pane is at minimum size", () => {
       const panes: WorkspacePane[] = [
-        { id: "p1", x: 0, y: 0, w: 0.05, h: 1, view: { type: "EmptyView" } },
-        { id: "p2", x: 0.05, y: 0, w: 0.95, h: 1, view: { type: "EmptyView" } },
+        {
+          id: "p1",
+          x: 0,
+          y: 0,
+          w: 0.05,
+          h: 1,
+          layers: [{ id: "p1", view: { type: "EmptyView" } }],
+          activeLayerId: "p1",
+        },
+        {
+          id: "p2",
+          x: 0.05,
+          y: 0,
+          w: 0.95,
+          h: 1,
+          layers: [{ id: "p2", view: { type: "EmptyView" } }],
+          activeLayerId: "p2",
+        },
       ];
       const boundary: PaneBoundary = {
         direction: "vertical",
@@ -263,8 +567,24 @@ describe("usePaneResize", () => {
 
     it("returns indices for horizontal drag-to-edge", () => {
       const panes: WorkspacePane[] = [
-        { id: "p1", x: 0, y: 0, w: 1, h: 0.95, view: { type: "EmptyView" } },
-        { id: "p2", x: 0, y: 0.95, w: 1, h: 0.05, view: { type: "EmptyView" } },
+        {
+          id: "p1",
+          x: 0,
+          y: 0,
+          w: 1,
+          h: 0.95,
+          layers: [{ id: "p1", view: { type: "EmptyView" } }],
+          activeLayerId: "p1",
+        },
+        {
+          id: "p2",
+          x: 0,
+          y: 0.95,
+          w: 1,
+          h: 0.05,
+          layers: [{ id: "p2", view: { type: "EmptyView" } }],
+          activeLayerId: "p2",
+        },
       ];
       const boundary: PaneBoundary = {
         direction: "horizontal",
@@ -280,8 +600,24 @@ describe("usePaneResize", () => {
 
     it("returns null when no pane is at minimum size", () => {
       const panes: WorkspacePane[] = [
-        { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
-        { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
+        {
+          id: "p1",
+          x: 0,
+          y: 0,
+          w: 0.5,
+          h: 1,
+          layers: [{ id: "p1", view: { type: "EmptyView" } }],
+          activeLayerId: "p1",
+        },
+        {
+          id: "p2",
+          x: 0.5,
+          y: 0,
+          w: 0.5,
+          h: 1,
+          layers: [{ id: "p2", view: { type: "EmptyView" } }],
+          activeLayerId: "p2",
+        },
       ];
       const boundary: PaneBoundary = {
         direction: "vertical",

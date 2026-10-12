@@ -563,7 +563,13 @@ export type SettingsLoadResult =
       /** SHA-256 of the exact source whose dropped paths were reviewed. */
       recoveryRevision: string;
     }
-  | { status: "parse_error"; settings: Settings; error: string; settingsPath: string };
+  | {
+      status: "parse_error";
+      settings: Settings;
+      error: string;
+      settingsPath: string;
+      storageKind?: "localState";
+    };
 
 export async function loadSettingsValidated(): Promise<SettingsLoadResult> {
   return invoke("load_settings_validated");
@@ -1253,6 +1259,7 @@ export interface RemoteSettings {
 }
 
 export interface Settings {
+  localUiState?: import("./local-session").LocalSessionSnapshot["uiState"];
   /** App UI language: "system" (OS locale), "ko", or "en". */
   language?: import("@/stores/settings-store").LanguageSetting;
   colorSchemes: ColorScheme[];
@@ -1273,6 +1280,7 @@ export interface Settings {
   usage: import("@/stores/settings-store").UsageSettings;
   widgets: import("@/lib/widget-placement").WidgetsSettings;
   dock: import("@/stores/settings-store").DockSettings;
+  paneStack?: import("@/stores/settings-store").PaneStackSettings;
   notifications: import("@/stores/settings-store").NotificationSettings;
   power?: import("@/stores/settings-store").PowerSettings;
   /** Release channel this install follows (ADR-0190). */
@@ -1369,21 +1377,32 @@ export interface SettingsLayout {
     h: number;
     viewType: string;
     viewConfig?: { type: string; [key: string]: unknown };
+    /** Stacked template slot (ADR-0297). */
+    layers?: { viewType: string; viewConfig?: { type: string; [key: string]: unknown } }[];
+    activeLayerIndex?: number;
   }[];
+}
+
+/**
+ * On-disk workspace pane (ADR-0297): the legacy compact `view` form, or the
+ * stacked `layers` + `activeLayerId` form.
+ */
+export interface SettingsWorkspacePane {
+  id?: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  view?: { type: string; [key: string]: unknown };
+  layers?: { id: string; view: { type: string; [key: string]: unknown } }[];
+  activeLayerId?: string;
 }
 
 export interface SettingsWorkspace {
   id: string;
   name: string;
   layoutId?: string; // deprecated — kept for backward compat with old settings.json
-  panes: {
-    id?: string;
-    x: number;
-    y: number;
-    w: number;
-    h: number;
-    view: { type: string; [key: string]: unknown };
-  }[];
+  panes: SettingsWorkspacePane[];
 }
 
 export interface DockPaneSetting {
@@ -2071,7 +2090,6 @@ export interface AppUpdateStatus {
   canForceInstall?: boolean;
   forceInstall?: boolean;
   preparation?: import("./lifecycle-progress").ExitProgress | null;
-  exitSettings?: ExitSettings | null;
   enabled: boolean;
   /** Release channel the backend used for the last check (ADR-0190). */
   channel: AppUpdateChannel;

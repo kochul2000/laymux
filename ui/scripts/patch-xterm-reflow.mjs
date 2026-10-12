@@ -14,8 +14,13 @@ const remoteCommonJsTarget = fileURLToPath(
   new URL("../../src-tauri/src/remote_server/assets/xterm.js", import.meta.url),
 );
 const original = "m>0&&(o.push(l+h.length-m),o.push(m)),l+=h.length-1";
-const patched =
+const reflowLegacy =
   "m>0&&(h[c].isWrapped=!1,u&&(u.isWrapped=!1),o.push(l+h.length-m),o.push(m)),l+=h.length-1";
+const patched =
+  "m>0&&(h[c].isWrapped=c>0,u&&(u.isWrapped=!1),o.push(l+h.length-m),o.push(m)),l+=h.length-1";
+const commonJsReflowOriginal = "g>0&&(a.push(l+d.length-g),a.push(g)),l+=d.length-1";
+const commonJsReflowPatched =
+  "g>0&&(d[u].isWrapped=u>0,c&&(c.isWrapped=!1),a.push(l+d.length-g),a.push(g)),l+=d.length-1";
 // xterm 6.0.0 CoreService treats disableStdin as a blanket onData gate, which
 // also drops parser-generated OSC/DSR replies. Preserve the user-input gate but
 // allow protocol replies (`wasUserInput === false`) to reach Terminal.onData.
@@ -391,7 +396,8 @@ async function patchBundle(target, replacements) {
 
 await patchBundle(moduleTarget, [
   ...moduleWheelPatches,
-  { name: "reflow", originalText: original, patchedText: patched },
+  { name: "reflow", originalText: original, patchedText: patched, acceptedTexts: [reflowLegacy] },
+  { name: "reflow retained continuation", originalText: reflowLegacy, patchedText: patched },
   {
     name: "disableStdin",
     originalText: disableStdinOriginal,
@@ -639,6 +645,7 @@ const commonJsCompositionPatches = [
 ];
 await patchBundle(commonJsTarget, [
   ...commonJsWheelPatches,
+  { name: "reflow", originalText: commonJsReflowOriginal, patchedText: commonJsReflowPatched },
   {
     name: "disableStdin",
     originalText: disableStdinOriginal,
@@ -646,4 +653,8 @@ await patchBundle(commonJsTarget, [
   },
   ...commonJsCompositionPatches,
 ]);
-await patchBundle(remoteCommonJsTarget, [...commonJsWheelPatches, ...commonJsCompositionPatches]);
+await patchBundle(remoteCommonJsTarget, [
+  ...commonJsWheelPatches,
+  { name: "reflow", originalText: commonJsReflowOriginal, patchedText: commonJsReflowPatched },
+  ...commonJsCompositionPatches,
+]);

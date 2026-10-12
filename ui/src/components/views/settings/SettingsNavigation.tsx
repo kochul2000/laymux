@@ -48,6 +48,7 @@ const groups: { label: string; items: NavigationItem[] }[] = [
     items: [
       { id: "terminal", label: "terminal", icon: TerminalIcon },
       { id: "colorSchemes", label: "colorSchemes", icon: PaletteIcon },
+      { id: "ptySessions", label: "ptySessions", icon: TerminalIcon },
     ],
   },
   {

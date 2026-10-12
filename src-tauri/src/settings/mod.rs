@@ -3,6 +3,7 @@ pub mod contract;
 mod description;
 mod lenient;
 pub mod models;
+pub(crate) mod persistence;
 mod schema;
 mod semantic_validation;
 pub mod validation;
@@ -29,9 +30,8 @@ pub use memo_shared::{load_shared_memos, save_shared_memo, MemoWriteError};
 /// interleaved writers to the same path can leave a torn file, so the write
 /// itself is gated here rather than relying on the main thread to serialize it.
 ///
-/// This is a leaf lock: nothing else is acquired while it is held, so it takes
-/// no place in the `AppState` lock order (api-contracts.md §14.3). Holding it
-/// across an `AppState` lock is what would break that — do not.
+/// No AppState lock may be acquired under this gate. The local database's
+/// initialization gate is acquired after it and never acquires AppState locks.
 static SETTINGS_WRITE_LOCK: Mutex<()> = Mutex::new(());
 /// Keeps the dedicated Composer mutation event in the same order as its disk writes.
 static COMPOSER_STAR_UPDATE_LOCK: Mutex<()> = Mutex::new(());
@@ -77,15 +77,37 @@ pub fn load_settings() -> Settings {
         SettingsLoadResult::ParseError { settings, .. } => settings,
     }
 }
+pub fn load_settings_checked() -> Result<Settings, String> {
+    match load_settings_validated() {
+        SettingsLoadResult::Ok { settings, .. } | SettingsLoadResult::Repaired { settings, .. } => {
+            Ok(settings)
+        }
+        SettingsLoadResult::Recovered { .. } => Err(unacknowledged_recovery_error()),
+        SettingsLoadResult::ParseError { error, .. } => Err(error),
+    }
+}
 
 /// Load settings from disk with full validation result.
 /// Returns a `SettingsLoadResult` that the frontend can use to show recovery UI.
 pub fn load_settings_validated() -> SettingsLoadResult {
-    load_settings_validated_from(&settings_path())
+    persistence::hydrate(
+        &settings_path(),
+        load_settings_document_from(&settings_path()),
+        persistence::production_store(),
+    )
 }
 
 /// Path-injectable core of [`load_settings_validated`].
+#[cfg(test)]
 fn load_settings_validated_from(path: &std::path::Path) -> SettingsLoadResult {
+    persistence::hydrate(
+        path,
+        load_settings_document_from(path),
+        persistence::store_for_settings(path),
+    )
+}
+
+fn load_settings_document_from(path: &std::path::Path) -> SettingsLoadResult {
     let path_str = path.display().to_string();
 
     let raw_content = match fs::read_to_string(path) {
@@ -110,12 +132,28 @@ fn load_settings_validated_from(path: &std::path::Path) -> SettingsLoadResult {
                 settings: Settings::default(),
                 error: e,
                 settings_path: path_str,
+                storage_kind: None,
             };
         }
     };
 
     // Apply migrations
     migrate_settings(&mut settings);
+
+    // Runtime structures are absent from a portable document by design. Seed
+    // their validation context without treating that absence as damaged JSON.
+    if serde_json::from_str::<serde_json::Value>(&raw_content)
+        .is_ok_and(|v| v.get("workspaces").is_none())
+    {
+        settings.workspaces = Settings::default().workspaces;
+        for workspace in &mut settings.workspaces {
+            for pane in &mut workspace.panes {
+                for view in pane.content_views_mut() {
+                    view.extra["profile"] = settings.default_profile.clone().into();
+                }
+            }
+        }
+    }
 
     // Validate and repair
     let warnings = validation::validate_and_repair(&mut settings);
@@ -161,10 +199,12 @@ fn migrate_settings(settings: &mut Settings) {
     // Migrate CMD → PowerShell in workspace pane views
     for ws in &mut settings.workspaces {
         for pane in &mut ws.panes {
-            if let Some(profile) = pane.view.extra.get("profile").and_then(|v| v.as_str()) {
-                if profile.eq_ignore_ascii_case("cmd") {
-                    if let Some(obj) = pane.view.extra.as_object_mut() {
-                        obj.insert("profile".into(), serde_json::json!("PowerShell"));
+            for view in pane.content_views_mut() {
+                if let Some(profile) = view.extra.get("profile").and_then(|v| v.as_str()) {
+                    if profile.eq_ignore_ascii_case("cmd") {
+                        if let Some(obj) = view.extra.as_object_mut() {
+                            obj.insert("profile".into(), serde_json::json!("PowerShell"));
+                        }
                     }
                 }
             }
@@ -290,13 +330,21 @@ fn save_memo_to(path: &PathBuf, key: &str, content: &str) -> Result<(), String> 
 /// temporary file, so a concurrent save cannot interleave bytes and a reader
 /// never observes a half-written settings.json (ADR-0202).
 pub fn save_settings(settings: &Settings) -> Result<(), String> {
-    save_settings_to(&settings_path(), settings)
+    save_settings_with_store(
+        &settings_path(),
+        settings,
+        &persistence::production_store()?,
+    )
 }
 
 /// Commit a frontend-owned checkpoint without overwriting cloud identity that
 /// a backend worker may have refreshed after the WebView collected its snapshot.
 pub fn save_frontend_settings(settings: &Settings) -> Result<Settings, String> {
-    save_frontend_settings_to(&settings_path(), settings)
+    save_frontend_settings_with_store(
+        &settings_path(),
+        settings,
+        &persistence::production_store()?,
+    )
 }
 
 /// Atomically load the latest document, mutate only caller-owned fields, and
@@ -304,7 +352,7 @@ pub fn save_frontend_settings(settings: &Settings) -> Result<Settings, String> {
 pub fn update_settings(
     mutate: impl FnOnce(&mut Settings) -> Result<(), String>,
 ) -> Result<Settings, String> {
-    update_settings_at(&settings_path(), mutate)
+    update_settings_with_store(&settings_path(), mutate, &persistence::production_store()?)
 }
 
 pub(crate) const COMPOSER_STARRED_ENTRIES_FULL_ERROR: &str = "Composer starred entry limit reached";
@@ -360,7 +408,7 @@ pub(crate) fn update_composer_starred_entry_snapshot(
 ) -> Result<ComposerStarredSnapshot, String> {
     let _guard = COMPOSER_STAR_UPDATE_LOCK.lock_or_err()?;
     let (entries, changed) = update_composer_starred_entry_at_with_change(
-        &settings_path(),
+        (&settings_path(), &persistence::production_store()?),
         value,
         starred,
         label,
@@ -389,7 +437,7 @@ fn update_composer_starred_entry_at(
     previous_value: Option<&str>,
 ) -> Result<Vec<ComposerStarredEntry>, String> {
     Ok(update_composer_starred_entry_at_with_change(
-        path,
+        (path, &persistence::store_for_settings(path)?),
         value,
         starred,
         label,
@@ -400,7 +448,7 @@ fn update_composer_starred_entry_at(
 }
 
 fn update_composer_starred_entry_at_with_change(
-    path: &std::path::Path,
+    repository: (&std::path::Path, &crate::local_state::LocalStateStore),
     value: &str,
     starred: bool,
     label: Option<&str>,
@@ -408,17 +456,21 @@ fn update_composer_starred_entry_at_with_change(
     previous_value: Option<&str>,
 ) -> Result<(Vec<ComposerStarredEntry>, bool), String> {
     let mut changed = false;
-    let settings = update_settings_at(path, |settings| {
-        changed = mutate_composer_starred_entries(
-            &mut settings.terminal.composer_starred_entries,
-            value,
-            starred,
-            label,
-            send,
-            previous_value,
-        )?;
-        Ok(())
-    })?;
+    let settings = update_settings_with_store(
+        repository.0,
+        |settings| {
+            changed = mutate_composer_starred_entries(
+                &mut settings.terminal.composer_starred_entries,
+                value,
+                starred,
+                label,
+                send,
+                previous_value,
+            )?;
+            Ok(())
+        },
+        repository.1,
+    )?;
     Ok((settings.terminal.composer_starred_entries, changed))
 }
 
@@ -528,7 +580,11 @@ fn apply_composer_starred_metadata(
 /// Commit the leniently recovered document only after the user has reviewed
 /// the dropped paths. Background writers cannot implicitly acknowledge loss.
 pub fn acknowledge_settings_recovery(expected_recovery_revision: &str) -> Result<Settings, String> {
-    acknowledge_settings_recovery_at(&settings_path(), expected_recovery_revision)
+    acknowledge_settings_recovery_with_store(
+        &settings_path(),
+        expected_recovery_revision,
+        &persistence::production_store()?,
+    )
 }
 
 fn recovery_revision(raw_content: &str) -> String {
@@ -542,16 +598,24 @@ fn unacknowledged_recovery_error() -> String {
     "Refusing to overwrite recovered settings before recovery is acknowledged".into()
 }
 
+#[cfg(test)]
 fn update_settings_at(
     path: &std::path::Path,
     mutate: impl FnOnce(&mut Settings) -> Result<(), String>,
+) -> Result<Settings, String> {
+    update_settings_with_store(path, mutate, &persistence::store_for_settings(path)?)
+}
+fn update_settings_with_store(
+    path: &std::path::Path,
+    mutate: impl FnOnce(&mut Settings) -> Result<(), String>,
+    store: &crate::local_state::LocalStateStore,
 ) -> Result<Settings, String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {e}"))?;
     }
     let _guard = SETTINGS_WRITE_LOCK.lock_or_err()?;
-    let mut settings = if path.exists() {
-        match load_settings_validated_from(path) {
+    let mut settings =
+        match persistence::hydrate(path, load_settings_document_from(path), Ok(store.clone())) {
             SettingsLoadResult::Ok { settings, .. }
             | SettingsLoadResult::Repaired { settings, .. } => settings,
             SettingsLoadResult::Recovered { .. } => {
@@ -562,74 +626,85 @@ fn update_settings_at(
                     "Refusing to overwrite an unparseable settings file: {error}"
                 ));
             }
-        }
-    } else {
-        Settings::default()
-    };
+        };
     mutate(&mut settings)?;
-    let json =
-        serde_json::to_string_pretty(&settings).map_err(|e| format!("Serialize error: {e}"))?;
-    write_file_atomically(path, json.as_bytes())?;
+    persistence::write_configuration(path, &settings, store)?;
     Ok(settings)
 }
 
+#[cfg(test)]
 fn save_frontend_settings_to(
     path: &std::path::Path,
     settings: &Settings,
+) -> Result<Settings, String> {
+    save_frontend_settings_with_store(path, settings, &persistence::store_for_settings(path)?)
+}
+fn save_frontend_settings_with_store(
+    path: &std::path::Path,
+    settings: &Settings,
+    store: &crate::local_state::LocalStateStore,
 ) -> Result<Settings, String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {e}"))?;
     }
     let _guard = SETTINGS_WRITE_LOCK.lock_or_err()?;
     let mut candidate = settings.clone();
-    if path.exists() {
-        match load_settings_validated_from(path) {
-            SettingsLoadResult::Ok {
-                settings: latest, ..
-            }
-            | SettingsLoadResult::Repaired {
-                settings: latest, ..
-            } => {
-                candidate.remote.cloud_enabled = latest.remote.cloud_enabled;
-                candidate
-                    .remote
-                    .cloud_instance_id
-                    .clone_from(&latest.remote.cloud_instance_id);
-                candidate
-                    .remote
-                    .cloud_tunnel_url
-                    .clone_from(&latest.remote.cloud_tunnel_url);
-                candidate
-                    .remote
-                    .cloud_server_base_url
-                    .clone_from(&latest.remote.cloud_server_base_url);
-                candidate
-                    .terminal
-                    .composer_starred_entries
-                    .clone_from(&latest.terminal.composer_starred_entries);
-            }
-            SettingsLoadResult::Recovered { .. } => {
-                return Err(unacknowledged_recovery_error());
-            }
-            SettingsLoadResult::ParseError { error, .. } => {
-                return Err(format!(
-                    "Refusing to overwrite an unparseable settings file: {error}"
-                ));
-            }
+    match persistence::hydrate(path, load_settings_document_from(path), Ok(store.clone())) {
+        SettingsLoadResult::Ok {
+            settings: latest, ..
+        }
+        | SettingsLoadResult::Repaired {
+            settings: latest, ..
+        } => {
+            candidate.remote.cloud_enabled = latest.remote.cloud_enabled;
+            candidate
+                .remote
+                .cloud_instance_id
+                .clone_from(&latest.remote.cloud_instance_id);
+            candidate
+                .remote
+                .cloud_tunnel_url
+                .clone_from(&latest.remote.cloud_tunnel_url);
+            candidate
+                .remote
+                .cloud_server_base_url
+                .clone_from(&latest.remote.cloud_server_base_url);
+            candidate
+                .terminal
+                .composer_starred_entries
+                .clone_from(&latest.terminal.composer_starred_entries);
+        }
+        SettingsLoadResult::Recovered { .. } => {
+            return Err(unacknowledged_recovery_error());
+        }
+        SettingsLoadResult::ParseError { error, .. } => {
+            return Err(format!(
+                "Refusing to overwrite an unparseable settings file: {error}"
+            ));
         }
     }
-    let json =
-        serde_json::to_string_pretty(&candidate).map_err(|e| format!("Serialize error: {e}"))?;
-    write_file_atomically(path, json.as_bytes())?;
+    persistence::write_configuration(path, &candidate, store)?;
     Ok(candidate)
 }
 
+#[cfg(test)]
 fn acknowledge_settings_recovery_at(
     path: &std::path::Path,
     expected_recovery_revision: &str,
 ) -> Result<Settings, String> {
+    acknowledge_settings_recovery_with_store(
+        path,
+        expected_recovery_revision,
+        &persistence::store_for_settings(path)?,
+    )
+}
+fn acknowledge_settings_recovery_with_store(
+    path: &std::path::Path,
+    expected_recovery_revision: &str,
+    store: &crate::local_state::LocalStateStore,
+) -> Result<Settings, String> {
     let _guard = SETTINGS_WRITE_LOCK.lock_or_err()?;
-    match load_settings_validated_from(path) {
+    match persistence::hydrate(path, load_settings_document_from(path), Ok(store.clone())) {
         SettingsLoadResult::Recovered {
             settings,
             recovery_revision,
@@ -641,9 +716,7 @@ fn acknowledge_settings_recovery_at(
                         .into(),
                 );
             }
-            let json = serde_json::to_string_pretty(&settings)
-                .map_err(|error| format!("Serialize error: {error}"))?;
-            write_file_atomically(path, json.as_bytes())?;
+            persistence::write_configuration(path, &settings, store)?;
             Ok(settings)
         }
         SettingsLoadResult::Ok { settings, .. } | SettingsLoadResult::Repaired { settings, .. } => {
@@ -657,14 +730,20 @@ fn acknowledge_settings_recovery_at(
 
 /// `save_settings` against an explicit path, so the write contract is testable
 /// without reaching for the real config directory.
+#[cfg(test)]
 pub(crate) fn save_settings_to(path: &std::path::Path, settings: &Settings) -> Result<(), String> {
+    save_settings_with_store(path, settings, &persistence::store_for_settings(path)?)
+}
+fn save_settings_with_store(
+    path: &std::path::Path,
+    settings: &Settings,
+    store: &crate::local_state::LocalStateStore,
+) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {e}"))?;
     }
     let _guard = SETTINGS_WRITE_LOCK.lock_or_err()?;
-    let json =
-        serde_json::to_string_pretty(settings).map_err(|e| format!("Serialize error: {e}"))?;
-    write_file_atomically(path, json.as_bytes())
+    persistence::write_configuration(path, settings, store)
 }
 
 /// Write `bytes` to `path` by way of a sibling temporary file.
@@ -686,6 +765,18 @@ fn write_file_atomically(path: &std::path::Path, bytes: &[u8]) -> Result<(), Str
 
 #[cfg(test)]
 mod tests {
+    fn commit_local_fixture(path: &std::path::Path, settings: &super::Settings) {
+        let snapshot = crate::local_state::LocalSessionSnapshot {
+            workspaces: settings.workspaces.clone(),
+            docks: settings.docks.clone(),
+            workspace_display_order: settings.workspace_display_order.clone(),
+            ..Default::default()
+        };
+        super::persistence::store_for_settings(path)
+            .unwrap()
+            .commit_session(&snapshot)
+            .unwrap();
+    }
     use super::*;
 
     // ── settings.json 쓰기 (ADR-0202) ──
@@ -715,14 +806,16 @@ mod tests {
         latest.remote.cloud_instance_id = Some("new-instance".into());
         latest.remote.cloud_tunnel_url = Some("wss://new.example.test".into());
         latest.remote.cloud_server_base_url = Some("https://new.example.test".into());
+        latest.workspaces[0].name = "new workspace checkpoint".into();
         save_settings_to(&path, &latest).unwrap();
+        commit_local_fixture(&path, &latest);
 
         let mut stale_frontend = latest.clone();
         stale_frontend.remote.cloud_enabled = false;
         stale_frontend.remote.cloud_instance_id = Some("old-instance".into());
         stale_frontend.remote.cloud_tunnel_url = None;
         stale_frontend.remote.cloud_server_base_url = None;
-        stale_frontend.workspaces[0].name = "new workspace checkpoint".into();
+        stale_frontend.workspaces[0].name = "config write must not replace local workspace".into();
         save_frontend_settings_to(&path, &stale_frontend).unwrap();
 
         let saved = match load_settings_validated_from(&path) {
@@ -746,6 +839,7 @@ mod tests {
         let mut stale_frontend = Settings::default();
         stale_frontend.workspaces[0].name = "new workspace checkpoint".into();
         save_settings_to(&path, &stale_frontend).unwrap();
+        commit_local_fixture(&path, &stale_frontend);
 
         let entries =
             update_composer_starred_entry_at(&path, "git status", true, None, None, None).unwrap();
@@ -956,6 +1050,7 @@ mod tests {
         let mut checkpoint = Settings::default();
         checkpoint.workspaces[0].name = "latest session checkpoint".into();
         save_settings_to(&path, &checkpoint).unwrap();
+        commit_local_fixture(&path, &checkpoint);
 
         let updated = update_settings_at(&path, |settings| {
             settings.remote.cloud_enabled = true;
@@ -1081,8 +1176,12 @@ mod tests {
         let defaults = Settings::default();
         let large = Settings {
             language: "en".into(),
-            profiles: std::iter::repeat_with(|| defaults.profiles[0].clone())
-                .take(200)
+            profiles: (0..200)
+                .map(|index| {
+                    let mut profile = defaults.profiles[0].clone();
+                    profile.name = format!("Profile {index}");
+                    profile
+                })
                 .collect(),
             ..defaults.clone()
         };
@@ -1323,7 +1422,8 @@ mod tests {
                 w: 1.0,
                 h: 1.0,
             }];
-            fs::write(&path, serde_json::to_vec(&saved).unwrap()).unwrap();
+            save_settings_to(&path, &saved).unwrap();
+            commit_local_fixture(&path, &saved);
 
             let result = load_settings_validated_from(&path);
             let SettingsLoadResult::Ok { settings, .. } = result else {
@@ -1719,24 +1819,50 @@ mod tests {
                 id: "ws-1".into(),
                 name: "Test".into(),
                 layout_id: None,
-                panes: vec![WorkspacePane {
-                    id: "pane-test1".into(),
-                    x: 0.0,
-                    y: 0.0,
-                    w: 1.0,
-                    h: 1.0,
-                    view: serde_json::from_value(serde_json::json!({
+                panes: vec![WorkspacePane::single(
+                    "pane-test1".into(),
+                    0.0,
+                    0.0,
+                    1.0,
+                    1.0,
+                    serde_json::from_value(serde_json::json!({
                         "type": "TerminalView",
                         "profile": "CMD"
                     }))
                     .unwrap(),
-                }],
+                )],
             }],
             ..Settings::default()
         };
         migrate_settings(&mut settings);
         assert_eq!(
-            settings.workspaces[0].panes[0].view.extra["profile"],
+            settings.workspaces[0].panes[0].view.as_ref().unwrap().extra["profile"],
+            "PowerShell"
+        );
+    }
+
+    #[test]
+    fn migrate_cmd_profile_to_powershell_in_stacked_layers() {
+        let mut settings = Settings {
+            workspaces: vec![Workspace {
+                id: "ws-1".into(),
+                name: "Test".into(),
+                layout_id: None,
+                panes: vec![serde_json::from_value(serde_json::json!({
+                    "id": "slot", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0,
+                    "layers": [
+                        { "id": "a", "view": { "type": "MemoView" } },
+                        { "id": "b", "view": { "type": "TerminalView", "profile": "cmd" } }
+                    ],
+                    "activeLayerId": "b"
+                }))
+                .unwrap()],
+            }],
+            ..Settings::default()
+        };
+        migrate_settings(&mut settings);
+        assert_eq!(
+            settings.workspaces[0].panes[0].layers[1].view.extra["profile"],
             "PowerShell"
         );
     }
@@ -1899,17 +2025,47 @@ mod tests {
 
     #[test]
     fn workspace_pane_id_round_trip() {
-        let pane = WorkspacePane {
-            id: "pane-abc12345".into(),
-            x: 0.0,
-            y: 0.0,
-            w: 1.0,
-            h: 1.0,
-            view: serde_json::from_value(serde_json::json!({"type": "TerminalView"})).unwrap(),
-        };
+        let pane = WorkspacePane::single(
+            "pane-abc12345".into(),
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            serde_json::from_value(serde_json::json!({"type": "TerminalView"})).unwrap(),
+        );
         let json = serde_json::to_string(&pane).unwrap();
+        // The compact form stays compact: no stack fields are written (ADR-0297).
+        assert!(!json.contains("layers"));
+        assert!(!json.contains("activeLayerId"));
         let parsed: WorkspacePane = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.id, "pane-abc12345");
+    }
+
+    #[test]
+    fn pane_stack_settings_default_to_cycling_on_blocked_arrow() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert!(settings.pane_stack.cycle_on_blocked_arrow);
+        let partial: Settings = serde_json::from_str(r#"{"paneStack":{}}"#).unwrap();
+        assert!(partial.pane_stack.cycle_on_blocked_arrow);
+        let off: Settings =
+            serde_json::from_str(r#"{"paneStack":{"cycleOnBlockedArrow":false}}"#).unwrap();
+        assert!(!off.pane_stack.cycle_on_blocked_arrow);
+        let out = serde_json::to_value(&off).unwrap();
+        assert_eq!(out["paneStack"]["cycleOnBlockedArrow"], false);
+    }
+
+    #[test]
+    fn stacked_workspace_pane_round_trips() {
+        let json = r#"{"id":"slot","x":0.0,"y":0.0,"w":1.0,"h":1.0,"layers":[{"id":"a","view":{"type":"MemoView"}},{"id":"b","view":{"type":"TerminalView"}}],"activeLayerId":"b"}"#;
+        let pane: WorkspacePane = serde_json::from_str(json).unwrap();
+        assert!(pane.view.is_none());
+        assert_eq!(pane.layers.len(), 2);
+        assert_eq!(pane.active_layer_id.as_deref(), Some("b"));
+        let ids: Vec<&str> = pane.content_views().iter().map(|(id, _)| *id).collect();
+        assert_eq!(ids, vec!["a", "b"]);
+        let out = serde_json::to_value(&pane).unwrap();
+        assert!(out.get("view").is_none());
+        assert_eq!(out["activeLayerId"], "b");
     }
 
     #[test]

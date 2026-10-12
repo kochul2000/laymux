@@ -72,9 +72,9 @@ impl HookRegistry {
             })
             .map(|entry| &entry.event)
     }
-    pub fn observe(&mut self, event: HookEvent) {
+    pub fn observe(&mut self, event: HookEvent) -> bool {
         if event.agent_id.is_some() || event.config_dir.is_none() {
-            return;
+            return false;
         }
         // Metadata stays bounded by MAX_CONVERSATIONS, not the phase TTL.
         let previous = self
@@ -83,7 +83,7 @@ impl HookRegistry {
             .find(|e| same_conversation(&e.event, &event));
         if let Some(previous) = previous {
             if event.emitted_at_ms < previous.event.emitted_at_ms {
-                return;
+                return false;
             }
             if event.turn_id.is_some()
                 && previous.turn.is_some()
@@ -93,7 +93,7 @@ impl HookRegistry {
                     "UserPromptSubmit" | "SessionStart" | "SessionEnd"
                 )
             {
-                return;
+                return false;
             }
         }
         self.sequence = self.sequence.saturating_add(1);
@@ -150,6 +150,7 @@ impl HookRegistry {
         }
         entry.sequence = self.sequence;
         entry.event = event;
+        true
     }
 
     pub fn exact(

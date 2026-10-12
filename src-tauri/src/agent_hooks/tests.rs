@@ -1,6 +1,23 @@
 use super::*;
 use crate::terminal::{TerminalConfig, TerminalSession};
 
+#[test]
+fn accepted_top_level_codex_metadata_requests_an_ordinary_checkpoint() {
+    let (state, event) = fixture();
+    let before = state.session_checkpoint.hints.revision();
+    accept(&state, event.clone()).unwrap();
+    assert!(state.session_checkpoint.hints.revision() > before);
+    let after = state.session_checkpoint.hints.revision();
+    let mut child = event.clone();
+    child.agent_id = Some("child".into());
+    accept(&state, child).unwrap();
+    assert_eq!(state.session_checkpoint.hints.revision(), after);
+    let mut invalid = event;
+    invalid.emitted_at_ms = 0;
+    assert!(accept(&state, invalid).is_err());
+    assert_eq!(state.session_checkpoint.hints.revision(), after);
+}
+
 fn fixture() -> (AppState, HookEvent) {
     let state = AppState::new();
     let session = TerminalSession::new("pane".into(), TerminalConfig::default());

@@ -651,7 +651,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     ) {
         val generation = secureWebViewGeneration
         if (!remoteBridgeActionsEnabled(generation) || attachmentPicker.sharedOffer() == null) {
-            attachmentPicker.show(callback, params, visibleWebSurface == VisibleWebSurface.REMOTE)
+            attachmentPicker.show(callback, params)
             return
         }
         val chooserView = webView
@@ -661,7 +661,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 return@evaluateJavascript
             }
             if (selected == "null") {
-                attachmentPicker.show(callback, params, allowSharedFiles = true)
+                attachmentPicker.show(callback, params)
             } else {
                 val id = attachmentPicker.sharedOffer()?.id
                 if (id == null || selected != JSONObject.quote(id) ||
@@ -1688,7 +1688,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         ) { handled ->
             if (handled == "false" && remoteBridgeActionsEnabled(generation) &&
                 attachmentPicker.sharedOffer()?.id == offer.id
-            ) showCloudMessage("공유 파일을 받았습니다. 첨부 버튼에서 공유 파일을 선택해주세요.")
+            ) showCloudMessage("공유 파일을 받았습니다. PC 앱을 업데이트하면 공유 파일을 첨부할 수 있습니다.")
         }
     }
 

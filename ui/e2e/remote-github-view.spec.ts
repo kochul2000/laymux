@@ -412,6 +412,33 @@ test.describe("Remote GitHub view", () => {
     await page.screenshot({ path: "test-results/remote-panels-settings.png" });
   });
 
+  test("the GitHub toolbar shares the Remote toolbar size tokens", async ({ context, page }) => {
+    await installMocks(context);
+    await connect(page);
+    await page.locator("#githubHeader").click();
+    await expect(page.locator("#githubToolbar")).toBeVisible();
+
+    const bar = await page.locator("#githubToolbar").evaluate((toolbar) => ({
+      height: toolbar.getBoundingClientRect().height,
+      buttons: [...toolbar.querySelectorAll<HTMLElement>("button")]
+        .filter((button) => button.offsetParent !== null)
+        .map((button) => {
+          const icon = button.querySelector("svg")?.getBoundingClientRect();
+          return {
+            id: button.id,
+            height: button.getBoundingClientRect().height,
+            icon: icon ? [icon.width, icon.height] : null,
+          };
+        }),
+    }));
+    expect(bar.height).toBe(40);
+    expect(bar.buttons.length).toBeGreaterThan(0);
+    for (const button of bar.buttons) {
+      expect(button.height, button.id).toBe(32);
+      if (button.icon) expect(button.icon, button.id).toEqual([16, 16]);
+    }
+  });
+
   test("opens beside Explorer and provides the desktop list actions", async ({ context, page }) => {
     const requests = await installMocks(context);
     await connect(page);

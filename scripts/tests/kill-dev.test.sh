@@ -55,6 +55,11 @@ if [[ "$#" -ne 4 || "$1" != "-NoProfile" || "$2" != "-NonInteractive" || "$3" !=
   echo "mock PowerShell 5.1: arguments after the command text are parsed as command text" >&2
   exit 64
 fi
+if [[ "$4" == *'$env:LAYMUX_KILL_DEV_DAEMON_ROOT'* ]]; then
+  printf '%s\n' "${LAYMUX_KILL_DEV_DAEMON_ROOT:-}" >>"$KILL_DEV_TEST_DAEMON_LOG"
+  echo "Stopped dev PTY daemon 5555"
+  exit 0
+fi
 if [[ "$4" != *'$env:LAYMUX_KILL_DEV_TARGET_PID'* ]]; then
   echo "mock PowerShell 5.1: command must read the one-shot PID environment variable" >&2
   exit 65
@@ -64,6 +69,7 @@ printf 'D:\\trees\\pid-%s\\target\\debug\\laymux.exe\n' "$pid"
 EOF
   chmod +x "$FIXTURE/bin/uname" "$FIXTURE/bin/taskkill" "$FIXTURE/bin/netstat" "$FIXTURE/bin/powershell.exe"
   export KILL_DEV_TEST_TASKKILL_LOG="$FIXTURE/taskkill.log"
+  export KILL_DEV_TEST_DAEMON_LOG="$FIXTURE/daemon.log"
   export PATH="$FIXTURE/bin:$PATH"
 }
 
@@ -87,7 +93,10 @@ test_discovery_pid_reports_its_executable() {
 
   assert_contains "$output" "Dev (PID 4242) killed (automation.json)"
   assert_contains "$output" 'D:\trees\pid-4242\target\debug\laymux.exe'
-  assert_file_contains "$KILL_DEV_TEST_TASKKILL_LOG" "//PID 4242 //F //T"
+  assert_file_contains "$KILL_DEV_TEST_TASKKILL_LOG" "//PID 4242 //F"
+  if grep -F -- "//T" "$KILL_DEV_TEST_TASKKILL_LOG" >/dev/null; then
+    fail "GUI-only crash must not terminate its detached PTY daemon tree"
+  fi
   if grep -F -- "7777" "$KILL_DEV_TEST_TASKKILL_LOG" >/dev/null; then
     fail "valid discovery pid must win over the port fallback"
   fi
@@ -101,13 +110,61 @@ test_wrong_port_discovery_falls_back_and_reports_port_owner() {
 
   assert_contains "$output" "Dev (PID 7777) killed (port 19281)"
   assert_contains "$output" 'D:\trees\pid-7777\target\debug\laymux.exe'
-  assert_file_contains "$KILL_DEV_TEST_TASKKILL_LOG" "//PID 7777 //F //T"
+  assert_file_contains "$KILL_DEV_TEST_TASKKILL_LOG" "//PID 7777 //F"
+  if grep -F -- "//T" "$KILL_DEV_TEST_TASKKILL_LOG" >/dev/null; then
+    fail "port fallback must also leave the PTY daemon tree alive"
+  fi
   if grep -F -- "4242" "$KILL_DEV_TEST_TASKKILL_LOG" >/dev/null; then
     fail "a discovery file for the release port must never select its pid"
   fi
 }
 
+test_by_default_the_dev_daemons_are_left_running() {
+  make_fixture
+  printf '{"port":19281,"pid":4242}\n' >"$FIXTURE/appdata/laymux-dev/automation.json"
+
+  output=$(APPDATA="$FIXTURE/appdata" bash "$SCRIPT" 2>&1)
+
+  if [[ -f "$KILL_DEV_TEST_DAEMON_LOG" ]]; then
+    fail "a plain kill-dev must not stop the dev PTY daemons"
+  fi
+  [[ "$output" != *"Stopped dev PTY daemon"* ]] || fail "unexpected daemon stop: $output"
+}
+
+test_with_daemon_also_stops_only_the_dev_daemons() {
+  make_fixture
+  printf '{"port":19281,"pid":4242}\n' >"$FIXTURE/appdata/laymux-dev/automation.json"
+
+  output=$(APPDATA="$FIXTURE/appdata" bash "$SCRIPT" --with-daemon 2>&1)
+
+  assert_contains "$output" "Dev (PID 4242) killed (automation.json)"
+  assert_contains "$output" "Stopped dev PTY daemon 5555"
+  assert_file_contains "$KILL_DEV_TEST_DAEMON_LOG" '\laymux-dev\pty-daemon\'
+  if grep -F -- "//T" "$KILL_DEV_TEST_TASKKILL_LOG" >/dev/null; then
+    fail "--with-daemon stops the daemons by name, never by tree"
+  fi
+}
+
+test_with_daemon_stops_the_daemons_even_without_a_gui() {
+  make_fixture
+
+  output=$(APPDATA="$FIXTURE/appdata" KILL_DEV_TEST_PORT_PID="" bash "$SCRIPT" --with-daemon 2>&1 || true)
+
+  assert_contains "$output" "Stopped dev PTY daemon 5555"
+}
+
+test_an_unknown_option_is_refused() {
+  make_fixture
+  if APPDATA="$FIXTURE/appdata" bash "$SCRIPT" --bogus >/dev/null 2>&1; then
+    fail "an unknown option must not run"
+  fi
+}
+
 test_real_powershell_51_reads_the_one_shot_pid_when_available
 test_discovery_pid_reports_its_executable
+test_by_default_the_dev_daemons_are_left_running
+test_with_daemon_also_stops_only_the_dev_daemons
+test_with_daemon_stops_the_daemons_even_without_a_gui
+test_an_unknown_option_is_refused
 test_wrong_port_discovery_falls_back_and_reports_port_owner
 echo "kill-dev tests passed"

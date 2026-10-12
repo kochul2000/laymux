@@ -757,6 +757,36 @@ test("keeps Open and Download beside zoom at narrow phone width", async ({ conte
   await page.screenshot({ path: "test-results/remote-file-open-zoom-mobile.png" });
 });
 
+// The header used to squeeze Open/Download below their label width, so the text
+// spilled out of the button border on a narrow phone.
+for (const width of [320, 360, 390]) {
+  test(`keeps every header button's content inside its border at ${width}px`, async ({
+    context,
+    page,
+  }) => {
+    await installRemoteViewerMocks(context);
+    await page.setViewportSize({ width, height: 640 });
+    await connectRemote(page);
+    await openRemoteFileExplorer(page);
+    await page.locator("#fileViewerPath").fill("C:\\work\\shot.png");
+    await page.locator("#openFileViewer").click();
+    await expect(page.locator("#fileViewerZoom")).toBeVisible();
+    const overflow = await page.locator(".file-viewer-header").evaluate((header) => {
+      const spilled = [...header.querySelectorAll("button")]
+        .filter((button) => !button.hidden && button.offsetParent !== null)
+        .filter((button) => button.scrollWidth > button.clientWidth)
+        .map((button) => button.id);
+      return { spilled, headerOverflow: header.scrollWidth - header.clientWidth };
+    });
+    expect(overflow).toEqual({ spilled: [], headerOverflow: 0 });
+    for (const id of ["#fileViewerOpen", "#fileViewerDownload"]) {
+      await expect(page.locator(id)).toHaveAccessibleName(
+        id === "#fileViewerOpen" ? "Open" : "Download",
+      );
+    }
+  });
+}
+
 test("discards a late open response after switching files", async ({ context, page }) => {
   await installRemoteViewerMocks(context);
   let finishDownload: (() => Promise<void>) | undefined;

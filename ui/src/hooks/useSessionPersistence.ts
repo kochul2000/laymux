@@ -6,7 +6,9 @@ import {
   type ValidationWarning,
 } from "@/lib/tauri-api";
 import { persistSession, setBlockPersist } from "@/lib/persist-session";
-import { applySettingsSnapshot } from "@/lib/settings-snapshot";
+import { applySettingsSnapshot, collectSettingsSnapshot } from "@/lib/settings-snapshot";
+import { seedSessionConfiguration } from "@/lib/session-configuration";
+import { applyLocalUiState } from "@/lib/local-session";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useOverridesStore } from "@/stores/overrides-store";
@@ -32,8 +34,10 @@ export function useSessionPersistence() {
   });
 
   useEffect(() => {
+    let cancelled = false;
     loadSettingsValidated()
-      .then((loadResult) => {
+      .then(async (loadResult) => {
+        if (cancelled) return;
         setLoadStatus({
           result: loadResult,
           warnings:
@@ -63,17 +67,25 @@ export function useSessionPersistence() {
 
         const rawSettings = loadResult.settings;
         applySettingsSnapshot(rawSettings, { includeStructural: true });
+        const configuration = await collectSettingsSnapshot({
+          includeRuntimeStructuralState: false,
+        });
+        if (cancelled) return;
+        seedSessionConfiguration(configuration);
 
         // Clean orphaned terminal output cache files
         const allPaneIds: string[] = [
           ...(rawSettings.workspaces?.flatMap((ws) =>
-            ws.panes.map((p) => p.id).filter((id): id is string => Boolean(id)),
+            ws.panes
+              // Output caches belong to content layers (ADR-0297).
+              .flatMap((p) => (p.layers?.length ? p.layers.map((layer) => layer.id) : [p.id]))
+              .filter((id): id is string => Boolean(id)),
           ) ?? []),
           ...(rawSettings.docks?.flatMap(
             (d) => d.panes?.map((p) => p.id).filter((id): id is string => Boolean(id)) ?? [],
           ) ?? []),
         ];
-        if (allPaneIds.length > 0) {
+        if (allPaneIds.length > 0 && rawSettings.localUiState) {
           cleanTerminalOutputCache(allPaneIds).catch((err) => {
             console.warn("[useSessionPersistence] Failed to clean orphaned cache:", err);
           });
@@ -83,20 +95,32 @@ export function useSessionPersistence() {
         // 하이드레이션 이후 워크스페이스/독 스토어의 현재 pane 집합을 기준으로 GC.
         const alivePaneIds = new Set<string>();
         for (const ws of useWorkspaceStore.getState().workspaces) {
-          for (const p of ws.panes) alivePaneIds.add(p.id);
+          // Pane overrides key on slots, view overrides and restarts on layers (ADR-0297).
+          for (const p of ws.panes) {
+            alivePaneIds.add(p.id);
+            for (const layer of p.layers) alivePaneIds.add(layer.id);
+          }
         }
         for (const d of useDockStore.getState().docks) {
           for (const p of d.panes ?? []) alivePaneIds.add(p.id);
         }
-        useOverridesStore.getState().gcStale(alivePaneIds);
-        useTerminalRestartStore.getState().gcStale(alivePaneIds);
+        if (rawSettings.localUiState) {
+          useOverridesStore.getState().gcStale(alivePaneIds);
+          useTerminalRestartStore.getState().gcStale(alivePaneIds);
+        }
 
+        applyLocalUiState({ uiState: rawSettings.localUiState });
         setLoaded(true);
       })
-      .catch(() => {
-        // Use defaults
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setBlockPersist(true);
+        console.warn("[useSessionPersistence] Failed to load persistent state:", error);
         setLoaded(true);
       });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const save = useCallback(async () => {

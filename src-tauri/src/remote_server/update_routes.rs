@@ -23,7 +23,7 @@ pub(super) struct RemoteUpdateInstallRequest {
 }
 
 pub(super) async fn remote_update_status(State(server): State<ServerState>) -> Response {
-    update_response(server.app_state.app_update.status_with_settings())
+    update_response(server.app_state.app_update.snapshot())
 }
 
 pub(super) async fn remote_update_check(State(server): State<ServerState>) -> Response {

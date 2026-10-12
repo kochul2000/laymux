@@ -304,6 +304,15 @@ fn default_max_output_cache_kb() -> u32 {
     256
 }
 
+/// One stacked layer of a layout template slot (ADR-0297).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LayoutLayer {
+    pub view_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view_config: Option<serde_json::Value>,
+}
+
 /// Layout pane definition.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -312,10 +321,17 @@ pub struct LayoutPane {
     pub y: f64,
     pub w: f64,
     pub h: f64,
+    /// Single-layer form; for a stack, the active layer's type (kept for older readers).
     pub view_type: String,
     /// Full view config (type + profile etc). When present, used instead of bare viewType.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub view_config: Option<serde_json::Value>,
+    /// Stacked form (ADR-0297). Authoritative when non-empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<LayoutLayer>,
+    /// Index into `layers` of the layer shown when a workspace is created.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_layer_index: Option<usize>,
 }
 
 /// Layout definition.
@@ -352,7 +368,73 @@ pub struct WorkspacePane {
     pub w: f64,
     #[serde(default)]
     pub h: f64,
+    /// Legacy compact single-layer content. Written only when the slot holds one
+    /// layer whose id equals the slot id (ADR-0297); otherwise `layers` is used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<WorkspacePaneView>,
+    /// Stacked content layers (ADR-0297). Authoritative when non-empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<PaneLayer>,
+    /// Id of the visible layer in `layers`.
+    #[serde(
+        default,
+        rename = "activeLayerId",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub active_layer_id: Option<String>,
+}
+
+/// One stacked content layer of a workspace slot (ADR-0297).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct PaneLayer {
+    /// Content id: the terminal id is `terminal-<id>`.
+    #[serde(default)]
+    pub id: String,
     pub view: WorkspacePaneView,
+}
+
+impl WorkspacePane {
+    /// Build a legacy single-layer pane (compact on-disk form).
+    pub fn single(id: String, x: f64, y: f64, w: f64, h: f64, view: WorkspacePaneView) -> Self {
+        Self {
+            id,
+            x,
+            y,
+            w,
+            h,
+            view: Some(view),
+            layers: Vec::new(),
+            active_layer_id: None,
+        }
+    }
+
+    /// Every content view of the slot with its content id, in stack order.
+    /// The compact form yields one entry keyed by the slot id.
+    pub fn content_views(&self) -> Vec<(&str, &WorkspacePaneView)> {
+        if !self.layers.is_empty() {
+            return self
+                .layers
+                .iter()
+                .map(|layer| (layer.id.as_str(), &layer.view))
+                .collect();
+        }
+        self.view
+            .iter()
+            .map(|view| (self.id.as_str(), view))
+            .collect()
+    }
+
+    /// Mutable access to every content view of the slot, in stack order.
+    pub fn content_views_mut(&mut self) -> Vec<&mut WorkspacePaneView> {
+        if !self.layers.is_empty() {
+            return self
+                .layers
+                .iter_mut()
+                .map(|layer| &mut layer.view)
+                .collect();
+        }
+        self.view.iter_mut().collect()
+    }
 }
 
 /// Workspace definition.
@@ -965,6 +1047,15 @@ pub struct TerminalSettings {
     /// surface on this host (ADR-0226, ADR-0229).
     #[serde(default)]
     pub composer_starred_entries: Vec<ComposerStarredEntry>,
+    /// Minutes the PTY daemon keeps terminals running with no GUI, so an
+    /// update's restart can adopt them (ADR-0312). No settings UI: a
+    /// settings.json value.
+    #[serde(default = "default_pty_daemon_grace_minutes")]
+    pub pty_daemon_grace_minutes: u32,
+}
+
+fn default_pty_daemon_grace_minutes() -> u32 {
+    crate::constants::PTY_DAEMON_GRACE_DEFAULT_MINUTES
 }
 
 impl Default for TerminalSettings {
@@ -987,6 +1078,7 @@ impl Default for TerminalSettings {
             composer_history_popup: true,
             composer_autocomplete: true,
             composer_starred_entries: Vec::new(),
+            pty_daemon_grace_minutes: default_pty_daemon_grace_minutes(),
         }
     }
 }
@@ -1067,13 +1159,14 @@ pub struct PasteSettings {
     /// Directory for clipboard image pastes. Empty = default temp dir.
     #[serde(default)]
     pub image_dir: String,
-    /// Strip common leading whitespace when pasting.
+    /// Strip common leading whitespace when copying a terminal selection.
     #[serde(default = "default_true")]
     pub remove_indent: bool,
-    /// Rejoin URLs split across lines when pasting.
+    /// Rejoin rows a TUI broke at the screen width when copying, and URLs split
+    /// across lines when copying or pasting.
     #[serde(default = "default_true")]
     pub remove_line_break: bool,
-    /// Detect indented multi-line URLs and make them clickable as a single link.
+    /// Detect URLs a TUI broke across rows and make them clickable as a single link.
     #[serde(default = "default_true")]
     pub link_join: bool,
     /// Show a confirmation dialog when pasting large text (like Windows Terminal).
@@ -1401,6 +1494,24 @@ impl Default for DockSettings {
             persist_state: true,
             arrow_nav: true,
             arrow_focus_pane: true,
+        }
+    }
+}
+
+/// Pane stack behavior (ADR-0297).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PaneStackSettings {
+    /// When Alt+Arrow finds neither a pane nor a dock in that direction, step
+    /// the focused stack instead (Right/Down = next layer, Left/Up = previous).
+    #[serde(default = "default_true")]
+    pub cycle_on_blocked_arrow: bool,
+}
+
+impl Default for PaneStackSettings {
+    fn default() -> Self {
+        Self {
+            cycle_on_blocked_arrow: true,
         }
     }
 }
@@ -2099,6 +2210,8 @@ fn default_true() -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_ui_state: Option<crate::local_state::LocalUiState>,
     /// App UI language: "system" (OS locale), "ko", or "en". Opaque to the
     /// backend — resolved on the frontend. `#[serde(default)]` keeps existing
     /// settings.json (without this key) parsing cleanly.
@@ -2140,6 +2253,9 @@ pub struct Settings {
     /// Dock behavior settings (distinct from the structural `docks` array).
     #[serde(default)]
     pub dock: DockSettings,
+    /// Pane stack behavior (ADR-0297).
+    #[serde(default)]
+    pub pane_stack: PaneStackSettings,
     #[serde(default)]
     pub notifications: NotificationSettings,
     #[serde(default)]
@@ -2193,6 +2309,7 @@ fn default_language() -> String {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            local_ui_state: None,
             language: default_language(),
             color_schemes: Vec::new(),
             profiles: vec![
@@ -2222,23 +2339,25 @@ impl Default for Settings {
                     h: 1.0,
                     view_type: "TerminalView".into(),
                     view_config: None,
+                    layers: Vec::new(),
+                    active_layer_index: None,
                 }],
             }],
             workspaces: vec![Workspace {
                 id: "ws-default".into(),
                 name: "Default".into(),
                 layout_id: None,
-                panes: vec![WorkspacePane {
-                    id: format!("pane-{}", &uuid::Uuid::new_v4().to_string()[..8]),
-                    x: 0.0,
-                    y: 0.0,
-                    w: 1.0,
-                    h: 1.0,
-                    view: WorkspacePaneView {
+                panes: vec![WorkspacePane::single(
+                    format!("pane-{}", &uuid::Uuid::new_v4().to_string()[..8]),
+                    0.0,
+                    0.0,
+                    1.0,
+                    1.0,
+                    WorkspacePaneView {
                         view_type: "TerminalView".into(),
                         extra: serde_json::json!({"profile": "PowerShell", "syncGroup": "Default"}),
                     },
-                }],
+                )],
             }],
             docks: vec![
                 DockSetting {
@@ -2275,6 +2394,7 @@ impl Default for Settings {
             usage: UsageSettings::default(),
             widgets: WidgetsSettings::default(),
             dock: DockSettings::default(),
+            pane_stack: PaneStackSettings::default(),
             notifications: NotificationSettings::default(),
             power: PowerSettings::default(),
             update: UpdateSettings::default(),

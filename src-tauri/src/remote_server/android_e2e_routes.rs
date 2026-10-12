@@ -573,6 +573,7 @@ fn http_path_allowed(method: &Method, path: &str) -> bool {
         | (&Method::GET, "/remote/v1/navigation")
         | (&Method::GET, "/remote/v1/composer/starred")
         | (&Method::GET, "/remote/v1/layouts")
+        | (&Method::POST, "/remote/v1/layouts")
         | (&Method::GET, "/remote/v1/widgets")
         | (&Method::GET, "/remote/v1/update")
         | (&Method::GET, "/remote/v1/terminals")
@@ -599,6 +600,9 @@ fn http_path_allowed(method: &Method, path: &str) -> bool {
         | (&Method::POST, "/remote/v1/update/install")
         | (&Method::DELETE, "/remote/v1/notifications") => true,
         (&Method::GET, _) => terminal_read_path(path),
+        (&Method::PUT, _) => path
+            .strip_prefix("/remote/v1/workspaces/")
+            .is_some_and(valid_remote_identifier),
         (&Method::POST, _) => {
             terminal_control_path(path)
                 || notification_read_path(path)
@@ -856,6 +860,8 @@ mod tests {
             "/remote/v1/composer/starred"
         ));
         assert!(http_path_allowed(&Method::GET, "/remote/v1/layouts"));
+        assert!(http_path_allowed(&Method::POST, "/remote/v1/layouts"));
+        assert!(!http_path_allowed(&Method::PUT, "/remote/v1/layouts"));
         assert!(http_path_allowed(&Method::GET, "/remote/v1/update"));
         assert!(http_path_allowed(&Method::POST, "/remote/v1/update/check"));
         assert!(http_path_allowed(
@@ -915,6 +921,22 @@ mod tests {
             "/remote/v1/file-viewer/status"
         ));
         assert!(http_path_allowed(&Method::POST, "/remote/v1/workspaces"));
+        assert!(http_path_allowed(
+            &Method::PUT,
+            "/remote/v1/workspaces/ws-1"
+        ));
+        assert!(!http_path_allowed(
+            &Method::PUT,
+            "/remote/v1/workspaces/ws-1/visibility"
+        ));
+        assert!(!http_path_allowed(
+            &Method::DELETE,
+            "/remote/v1/workspaces/ws-1"
+        ));
+        assert!(!http_path_allowed(
+            &Method::PUT,
+            "/remote/v1/workspaces/ws-1?extra=1"
+        ));
         assert!(http_path_allowed(
             &Method::POST,
             "/remote/v1/workspaces/ws-1/visibility"

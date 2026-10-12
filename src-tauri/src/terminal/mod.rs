@@ -143,6 +143,10 @@ pub struct TerminalSession {
     /// transition lands on a generic idle title like `✳ Claude Code`.
     #[serde(skip)]
     pub claude_last_working_title: Option<String>,
+    /// Last OSC 0/2 title the PTY output set, handed to the GUI that adopts
+    /// this session after an update (ADR-0319).
+    #[serde(skip)]
+    pub osc_title: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -172,6 +176,7 @@ impl TerminalSession {
             notify_gate_armed: false,
             claude_was_working: false,
             claude_last_working_title: None,
+            osc_title: None,
         }
     }
 

@@ -108,14 +108,19 @@ export function taskPolicy(
   };
 }
 
-export function terminalTaskPolicy(instance: TerminalInstance, now = Date.now()) {
-  const supported =
+/** Agents whose task state is observed; without an observation they may be working. */
+export function isTaskObservedAgent(instance: TerminalInstance) {
+  return (
     instance.activity?.type === "interactiveApp" &&
-    ["Claude", "Codex", "Grok"].includes(instance.activity.name ?? "");
+    ["Claude", "Codex", "Grok"].includes(instance.activity.name ?? "")
+  );
+}
+
+export function terminalTaskPolicy(instance: TerminalInstance, now = Date.now()) {
   return taskPolicy(
     instance.task,
     instance.outputActive ?? false,
-    supported,
+    isTaskObservedAgent(instance),
     instance.sessionReady === true &&
       instance.activity?.type === "shell" &&
       instance.livenessConfirmed === true,

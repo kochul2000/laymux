@@ -31,6 +31,10 @@ pub(super) struct ResolvedSession {
 }
 
 impl CodexSessionStore {
+    pub(super) fn codex_home(&self) -> &Path {
+        &self.codex_home
+    }
+
     pub(super) fn verify_status_session(&self, id: &str) -> Result<bool, String> {
         match self.validate_session_checked(id, None)? {
             Some(true) => Ok(false),

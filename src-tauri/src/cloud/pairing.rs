@@ -603,13 +603,19 @@ mod tests {
     }
 
     #[cfg(target_os = "windows")]
-    fn isolate_settings_dir(dir: &Path) -> EnvVarGuard {
-        EnvVarGuard::set_path("APPDATA", dir)
+    fn isolate_settings_dir(dir: &Path) -> Vec<EnvVarGuard> {
+        vec![
+            EnvVarGuard::set_path("APPDATA", dir),
+            EnvVarGuard::set_path("LOCALAPPDATA", dir),
+        ]
     }
 
     #[cfg(not(target_os = "windows"))]
-    fn isolate_settings_dir(dir: &Path) -> EnvVarGuard {
-        EnvVarGuard::set_path("HOME", dir)
+    fn isolate_settings_dir(dir: &Path) -> Vec<EnvVarGuard> {
+        vec![
+            EnvVarGuard::set_path("HOME", dir),
+            EnvVarGuard::set_path("XDG_STATE_HOME", dir),
+        ]
     }
 
     const TEST_PORT: u16 = 8080;

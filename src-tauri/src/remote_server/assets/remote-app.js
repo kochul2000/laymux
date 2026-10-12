@@ -1,6 +1,7 @@
 import { createRemoteUpdateDialog } from "../../../../ui/src/remote/remote-update-dialog.js";
 import { createRemoteSettingsBridge } from "../../../../ui/src/remote/remote-settings-mcp.js";
 import { createRemoteMemo } from "../../../../ui/src/remote/remote-memo.js";
+import { createWorkspaceManager } from "../../../../ui/src/remote/remote-workspace-manager.js";
 import {
   DEFAULT_REMOTE_KEYBOARD_SETTINGS, REMOTE_NAV_MODIFIERS, REMOTE_NAV_TARGETS,
   normalizeRemoteNavigationModifiers, readPhysicalKeyboardConnected,
@@ -8,7 +9,7 @@ import {
 } from "../../../../ui/src/remote/remote-keyboard.js";
 import { installRemoteToolSwipes, nextRemoteTool, normalizeToolSwipeRightAction } from "../../../../ui/src/remote/remote-tool-swipe.js";
 import { createComposerEditor } from "../../../../ui/src/remote/composer-editor.js";
-import { createRemoteAgentResumeLinkProvider } from "../../../../ui/src/remote/remote-agent-resume.ts";
+import { createRemoteAgentResumeLinkProvider, installAgentResumeUnderlines } from "../../../../ui/src/remote/remote-agent-resume.ts";
 import { isShellOwnedCombo, keybindingMatchesEvent, resolveKeybindingFrom } from "../../../../ui/src/lib/keybinding-core.ts";
 import { readPathLinkSelection, readPathLinkLines, mapPathLinkParts, pathLinkPartsCurrent, PATH_LINK_CONTEXT_ROWS } from "../../../../ui/src/lib/path-link-lines.ts";
 import {
@@ -126,6 +127,7 @@ import {
         const fileViewerZoomResetButton = $("fileViewerZoomReset");
         const fileViewerCloseButton = $("fileViewerClose");
         const fileViewerDownloadButton = $("fileViewerDownload");
+        const fileViewerDownloadLabel = $("fileViewerDownloadLabel");
         const fileViewerOpenButton = $("fileViewerOpen");
         const fileViewerBodyElement = $("fileViewerBody");
         const fileViewerMessageElement = $("fileViewerMessage");
@@ -338,6 +340,38 @@ import {
         const REMOTE_LONG_TEXT_ATTACHMENT_THRESHOLD_BYTES = 5 * 1024;
         const attachmentTextEncoder = new TextEncoder();
         let leaseId = null;
+        const workspaceManager = createWorkspaceManager({
+          getLease: () => leaseId,
+          rename: async (id, name, selectedLeaseId) => {
+            await remoteFetch(`/remote/v1/workspaces/${encodeURIComponent(id)}`, {
+              method: "PUT",
+              body: JSON.stringify({ name, leaseId: selectedLeaseId }),
+            });
+            if (leaseId !== selectedLeaseId) return;
+            await loadNavigation(activeTerminalId, { openOutput: false });
+            setStatus("Workspace renamed.");
+          },
+          hide: (id) => setWorkspaceVisibility(id, true),
+          saveTemplate: async (workspaceId, name, selectedLeaseId) => {
+            await remoteFetch("/remote/v1/layouts", {
+              method: "POST",
+              body: JSON.stringify({ workspaceId, name, leaseId: selectedLeaseId }),
+            });
+            if (leaseId !== selectedLeaseId) return;
+            // The POST has committed a new template. A failed list refresh
+            // must not offer another Save that would create a second copy.
+            try {
+              await loadWorkspaceLayouts();
+            } catch (error) {
+              if (leaseId === selectedLeaseId) {
+                setStatus(`Workspace template saved. Reopen the template list to refresh it: ${error.message || String(error)}`, true);
+              }
+              return;
+            }
+            if (leaseId !== selectedLeaseId) return;
+            setStatus("Workspace template saved.");
+          },
+        });
         const headerIconFields = {
           headerFiles: "Files", headerGithub: "GitHub", headerMemo: "Memo",
           headerSpatialExclusion: "Pane navigation shortcut", headerDesktopMode: "PC mode",
@@ -475,6 +509,9 @@ import {
         // Keep the id whose snapshot currently occupies it so a recovery can
         // preserve surface-local viewport state only for that same terminal.
         let renderedTerminalId = null;
+        // A queued pane the desktop did not open within the wait. It stays
+        // failed until the user moves on or asks for it again.
+        let terminalOpenFailedId = null;
         let fitAddon = null;
         let resizeObserver = null;
         let composerResizeObserver = null;
@@ -2673,7 +2710,8 @@ import {
           fileViewerOpenButton.title = fileViewerOpenButton.disabled
             ? "Wait for the file transfer or reconnect."
             : "Open on this device";
-          fileViewerDownloadButton.textContent = fileViewerDownloadInFlight
+          // The label, not the button: the icon beside it must survive.
+          fileViewerDownloadLabel.textContent = fileViewerDownloadInFlight
             ? "Saving..."
             : "Download";
         }
@@ -4517,6 +4555,7 @@ import {
             // budget restarts here, not there.
             cancelHistoryExpansion();
             resetHistoryExpansion(nextId);
+            terminalOpenFailedId = null;
           }
           activeTerminalId = nextId;
           loadActiveGithubRepo(nextId, nextId ? terminalInfoById.get(nextId)?.cwd : null);
@@ -4540,6 +4579,7 @@ import {
           renderInputSurface();
           updateHeaderPaneIdentity();
           renderGithubEntryState();
+          renderTerminalTransition();
           if (terminalChanged && !githubOverlayElement.hidden) {
             githubSnapshot = null;
             loadRemoteGithubSnapshot(false);
@@ -4580,6 +4620,7 @@ import {
           }
           renderFileViewerState();
           renderGithubEntryState();
+          renderTerminalTransition();
           if (!connected && memoView.isOpen()) memoView.close();
         }
 
@@ -6405,6 +6446,22 @@ import {
 
           surface.addEventListener("pointerup", finishTouchSelection, pointerOptions);
           surface.addEventListener("pointercancel", finishTouchSelection, pointerOptions);
+
+          // Every touch gesture on the surface is driven by the pointer handlers
+          // above, so the browser must not run its own. `touch-action: none`
+          // does not hold here: the viewport and xterm's scrollers are scroll
+          // containers, which restart the effective touch-action. A fast swipe
+          // (the edge flick that opens the menu, a terminal scroll) then leaves
+          // an invisible browser fling, and the next tap within about a second
+          // only stops that fling and produces no click. Pointer
+          // preventDefault cannot cancel browser gestures; touchmove can.
+          surface.addEventListener(
+            "touchmove",
+            (event) => {
+              if (event.cancelable) event.preventDefault();
+            },
+            pointerOptions
+          );
         }
 
         // CSI query sequences whose only effect is to make the terminal emit a
@@ -6665,7 +6722,6 @@ import {
                 leaseId,
                 outputEpoch: terminalOutputGeneration,
                 ready: composerReady && terminalReplayDepth === 0 && navMovePending === 0 && socket?.readyState === 1,
-                isShell: activeTerminalContext()?.info.activity?.type === "shell" && !activeTerminalContext()?.info.commandRunning,
               }),
               run: (task) => {
                 flushPendingInput();
@@ -6681,6 +6737,8 @@ import {
               submit: (context, command) => writeTerminalInput(context.terminalId, context.leaseId, command, true),
               onError: (error) => setStatus(`Resume failed: ${error.message || error}`, true),
             }));
+            // Touch has no hover to reveal a provider link (ADR-0316).
+            installAgentResumeUnderlines(terminal, "remote-resume-link-decoration");
             terminal.registerLinkProvider(createRemotePrLinkProvider(terminal));
           }
           terminal.open(terminalSizer);
@@ -7318,6 +7376,30 @@ import {
             : ctx.workspace.name;
         }
 
+        // The surface keeps the previous pane's screen until the new snapshot
+        // lands, so a switch on a slow link must show it is still under way.
+        // Derived from raw state only: the pane being moved to, the pane whose
+        // screen is on the surface, host moves still landing, and a queued pane
+        // the desktop refused to open. Same-pane reconnects never show it —
+        // the screen there is still the right pane, and the transport notice
+        // covers the wait.
+        function terminalTransitionState() {
+          if (!leaseId) return null;
+          if (activeTerminalId && terminalOpenFailedId === activeTerminalId) return "failed";
+          if (navMovePending > 0) return "pending";
+          if (activeTerminalId && renderedTerminalId !== activeTerminalId) return "pending";
+          return null;
+        }
+
+        // The surface only dims (CSS keys off `data-transition`); the status
+        // line already reports a pane the desktop failed to open.
+        function renderTerminalTransition() {
+          const state = terminalTransitionState();
+          terminalHost.setAttribute("aria-busy", state === "pending" ? "true" : "false");
+          if (state) terminalHost.setAttribute("data-transition", state);
+          else terminalHost.removeAttribute("data-transition");
+        }
+
         // lx:pane:<workspaceName>:<paneNumber> — the same LLM-facing locator the
         // desktop pane badge copies. Workspace names are stored whitespace-free;
         // guard anyway so a malformed name never produces a broken locator.
@@ -7588,6 +7670,7 @@ import {
         // (ADR-0149, ADR-0219). Keep the hierarchy in this PC-served document
         // and expose only a boolean consumed/not-consumed boundary to native.
         function dismissTopRemoteLayer() {
+          if (workspaceManager.isOpen()) { workspaceManager.close(); return true; }
           if (!sharedFilesScrim.hidden) {
             cancelSharedFileOffer();
             return true;
@@ -8204,11 +8287,11 @@ import {
                 } else if (drawerView === "workspace") {
                   const restoredVisibility = Array.from(
                     workspaceListEl.querySelectorAll(
-                      "[data-workspace-visibility]",
+                      "[data-workspace-manage]",
                     ),
                   ).find(
                     (button) =>
-                      button.dataset.workspaceVisibility === workspace.id,
+                      button.dataset.workspaceManage === workspace.id,
                   );
                   (restoredVisibility || newWorkspaceButton).focus();
                 }
@@ -8224,6 +8307,7 @@ import {
         }
 
         function renderWorkspaceList(workspaces) {
+          workspaceManager.sync(workspaces);
           workspaceListEl.innerHTML = "";
           const hiddenWorkspaces = workspaces.filter(
             (workspace) => workspace.hidden === true,
@@ -8328,6 +8412,22 @@ import {
               visibility.disabled = !leaseId || !canHideWorkspace;
             }
           });
+          const manage = document.createElement("button");
+          manage.type = "button";
+          manage.className = "workspace-manage-button";
+          manage.dataset.workspaceManage = workspace.id;
+          setRemoteIcon(manage, "Ellipsis");
+          manage.disabled = !leaseId;
+          manage.setAttribute("aria-haspopup", "dialog");
+          manage.setAttribute("aria-controls", "workspaceManager");
+          manage.setAttribute("aria-expanded", String(workspaceManager.isOpenFor(workspace.id)));
+          manage.setAttribute("aria-label", `Manage ${workspace.name || "workspace"}`);
+          manage.title = "Manage workspace";
+          manage.addEventListener("click", (event) => {
+            event.stopPropagation();
+            workspaceManager.open(workspace, canHideWorkspace, manage);
+          });
+          right.append(manage);
           // Whole-workspace skip toggle (issue #507). Only meaningful for
           // workspaces that contribute terminal panes to the spatial cycle.
           if ((workspace.terminalPaneCount || 0) > 0) {
@@ -8471,6 +8571,13 @@ import {
           if (canSelectTerminal) row.type = "button";
           row.className = `workspace-pane-row${!perPaneInput ? " compact" : ""}${isActive ? " active" : ""}${paneHidden ? " hidden-item" : ""}`;
           row.dataset.paneRow = pane.id;
+          // Pane stack (ADR-0297): every layer gets a row; layers under the
+          // visible one stay selectable (focusing one shows it) but recede.
+          const layerCount = Number(pane.layerCount) || 1;
+          if (layerCount > 1) {
+            row.classList.add("stacked-layer");
+            if (pane.activeLayer === false) row.classList.add("stacked-inactive");
+          }
           if (canSelectTerminal) {
             const paneNumber = pane.paneNumber || panes.findIndex((item) => item.id === pane.id) + 1;
             const viewLabel =
@@ -8503,6 +8610,14 @@ import {
           main.append(primary);
           row.append(main);
           entry.append(row);
+
+          if (layerCount > 1) {
+            const badge = document.createElement("span");
+            badge.className = "pane-stack-badge";
+            badge.textContent = `${(Number(pane.layerIndex) || 0) + 1}/${layerCount}`;
+            badge.title = pane.activeLayer === false ? "Stacked layer (hidden)" : "Stacked layer (shown)";
+            primary.append(badge);
+          }
 
           if (isTerminal) {
             const selectorDisplay = pane.selectorDisplay || {};
@@ -9141,7 +9256,10 @@ import {
         function enqueueRemoteNavigation(task, button = null, { move = true } = {}) {
           if (!leaseId || navStepPending >= 2) return;
           navStepPending += 1;
-          if (move) navMovePending += 1;
+          if (move) {
+            navMovePending += 1;
+            renderTerminalTransition();
+          }
           if (button) {
             // Per-button counter: a queued double-tap must not lose its busy
             // dim when the first step's finally fires.
@@ -9156,6 +9274,7 @@ import {
               if (move) {
                 navMovePending -= 1;
                 if (navMovePending === 0) flushLandingInput();
+                renderTerminalTransition();
               }
               if (button) {
                 const remaining = (Number(button.dataset.busyCount) || 1) - 1;
@@ -9425,6 +9544,7 @@ import {
           const reason = data?.skipped?.[0]?.reason;
           const reasons = {
             busy: "Clear skipped: the terminal is busy.",
+            stateUnknown: "Clear skipped: the agent's state is not known yet.",
             unsupportedApp: "Clear skipped: this app has no clear command.",
             notReady: "Clear skipped: the terminal is not ready.",
           };
@@ -9608,6 +9728,11 @@ import {
         // because attaching to a terminal that has no PTY only yields a 404.
         async function attachTerminal(terminalId, options = {}) {
           if (!terminalId) return false;
+          // Asking again for a pane that failed to open is a fresh attempt.
+          if (terminalOpenFailedId === terminalId) {
+            terminalOpenFailedId = null;
+            renderTerminalTransition();
+          }
           if (terminalSessionLive(terminalId)) {
             openOutput(terminalId, options);
             return true;
@@ -9617,6 +9742,8 @@ import {
           const opened = await openTerminalOnHost(terminalId, selectionRevision);
           if (selectionRevision !== terminalSelectionRevision || activeTerminalId !== terminalId) return false;
           if (!opened) {
+            terminalOpenFailedId = terminalId;
+            renderTerminalTransition();
             setStatus("The desktop has not opened this pane yet.", true);
             return false;
           }
@@ -10139,6 +10266,7 @@ import {
                 activeTerminalId === terminalId
               ) {
                 renderedTerminalId = terminalId;
+                renderTerminalTransition();
                 restoreTerminalViewport(term, preservedViewportDistance);
                 updateScrollToBottomButton(term);
                 if (!reconnecting && currentInputMode() === "composer") {
@@ -10295,6 +10423,7 @@ import {
                   return;
                 }
                 renderedTerminalId = terminalId;
+                renderTerminalTransition();
                 // User-directed attaches land at the live tail. Same-terminal
                 // transport/lease recovery restores the surface-local distance
                 // from that tail instead of discarding a scrolled-up viewport.
@@ -10453,8 +10582,10 @@ import {
         // holds — every attempt here is tied to the document becoming *visible*, and
         // a definitive refusal (401/403/409: bad token, remote disabled, someone else
         // holds control, local reclaim lockout) disarms it until the user acts.
+        // Arming keeps the backoff: a claim that succeeds only for its navigation
+        // to fail must not reset the retry delay, or a host that stays unready is
+        // reclaimed every few seconds forever. A usable connection resets it.
         function armAutoConnect() {
-          autoConnectAttempt = 0;
           try {
             sessionStorage.setItem(autoConnectKey, "1");
           } catch (_) {}
@@ -10593,6 +10724,7 @@ import {
               focusInput,
               preserveViewport: auto,
             });
+            autoConnectAttempt = 0;
             setNavigationOpen(false);
           } catch (err) {
             if (attemptRevision !== claimAttemptRevision) return;
@@ -10613,7 +10745,12 @@ import {
               setStatus(err.message, true);
               return;
             }
-            if (auto) {
+            // A successful manual claim already armed this tab's connection intent.
+            // The host frontend can still be booting when initial navigation times
+            // out; recover through the same visible-document retry as auto-connect.
+            const transientStartupFailure = failedLease && err &&
+              [502, 503, 504].includes(err.status);
+            if (auto || transientStartupFailure) {
               scheduleAutoConnectRetry();
               // Transient (offline, relay still down): keep the reason visible but
               // do not paint it as a failure the user has to act on.
@@ -12529,6 +12666,9 @@ import {
           chip.addEventListener("pointerdown", (event) => {
             if (event.button !== 0 || event.isPrimary === false) return;
             event.stopPropagation();
+            // A swipe that became a browser pan ends in pointercancel with no
+            // click to consume the previous suppression.
+            suppressClick = false;
             gesture = {
               pointerId: event.pointerId,
               x: event.clientX,
@@ -12597,6 +12737,17 @@ import {
             }
           };
 
+          // The chip lets the browser pan so a swipe that starts on it scrolls
+          // Settings. Once the long press has armed a drag, the
+          // first move must not start that pan: it would cancel the pointer
+          // mid-drag. Pointer preventDefault cannot stop a browser pan.
+          chip.addEventListener(
+            "touchmove",
+            (event) => {
+              if (gesture?.active && event.cancelable) event.preventDefault();
+            },
+            { passive: false }
+          );
           chip.addEventListener("pointerup", (event) => finishDrag(event, true));
           chip.addEventListener("pointercancel", (event) => finishDrag(event, false));
           chip.addEventListener("click", (event) => {
@@ -13744,6 +13895,7 @@ import {
           // reconnect would skip its own return trip (issue #561). The stashed resume
           // capability above is what lets the reclaim follow the release drain.
           leaseId = null;
+          workspaceManager.close();
           resetComposerStars();
         }
 

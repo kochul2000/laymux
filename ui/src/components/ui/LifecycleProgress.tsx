@@ -23,7 +23,7 @@ export function LifecycleProgress({
   skipPreparation?: boolean;
 }) {
   const copy = lifecycleCopy[ko ? "ko" : "en"];
-  const steps = lifecycleSteps(kind, cleanup, skipPreparation);
+  const steps = lifecycleSteps(kind, { cleanup, skipPreparation });
   const active = steps.indexOf(progress.stage === "settling" ? "interrupting" : progress.stage);
   const percent = progress.stage === "interrupting" ? null : progressPercent(progress);
   return (

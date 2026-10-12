@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { AppUpdateStatus } from "@/lib/tauri-api";
+import { checkAppUpdate, type AppUpdateStatus } from "@/lib/tauri-api";
 import type { ExitProgress } from "@/lib/lifecycle-progress";
 
 interface LifecycleState {
@@ -12,12 +12,13 @@ interface LifecycleState {
   error: string | null;
   forceClose: (() => void) | null;
   cancelClose: (() => void) | null;
-  openUpdate: () => void;
+  /** `check`: a user opened the dialog, so look for a newer release right away. */
+  openUpdate: (options?: { check?: boolean }) => void;
   receiveStatus: (status: AppUpdateStatus) => void;
   startClose: (cleanup: boolean) => void;
   report: (progress: ExitProgress) => void;
 }
-export const useLifecycleStore = create<LifecycleState>((set) => ({
+export const useLifecycleStore = create<LifecycleState>((set, get) => ({
   open: false,
   kind: "update",
   status: null,
@@ -27,12 +28,14 @@ export const useLifecycleStore = create<LifecycleState>((set) => ({
   error: null,
   forceClose: null,
   cancelClose: null,
-  openUpdate: () =>
+  openUpdate: (options) => {
     set((state) =>
       state.kind === "close" && !state.preview
         ? {}
         : { open: true, kind: "update", preview: false, error: null, progress: null },
-    ),
+    );
+    if (options?.check) checkOnOpen(get);
+  },
   receiveStatus: (status) =>
     set((state) => {
       if (state.preview || state.kind === "close") return {};
@@ -69,6 +72,30 @@ export const useLifecycleStore = create<LifecycleState>((set) => ({
       progress: { ...progress, warning: progress.warning ?? state.progress?.warning },
     })),
 }));
+
+// Only from an idle, enabled updater: an open that surfaces a running download
+// or a failed install must show that state, not replace it with a check (a
+// failed install's loss override would otherwise disappear with its error).
+// The host refuses overlapping operations itself, and its `checking` event
+// disables the dialog's own Check button meanwhile.
+function checkOnOpen(get: () => LifecycleState) {
+  const { open, kind, preview, status } = get();
+  if (!open || kind !== "update" || preview) return;
+  if (!status?.enabled || status.operation !== "idle" || status.canForceInstall) return;
+  void checkAppUpdate()
+    .then((snapshot) => {
+      const state = get();
+      // A newer status event already describes this check, or a later one.
+      if (state.status === status) state.receiveStatus(snapshot);
+      if (snapshot.lastError && state.open && state.kind === "update")
+        useLifecycleStore.setState({ error: snapshot.lastError });
+    })
+    .catch((cause: unknown) => {
+      const state = get();
+      if (state.open && state.kind === "update")
+        useLifecycleStore.setState({ error: String(cause) });
+    });
+}
 
 export async function waitForCloseDecision(
   error: string,

@@ -202,13 +202,18 @@ async function probeTerminal(
 export async function withCodexStatusCheckpoint<T>(
   enabled: boolean,
   updateRequestId: number | undefined,
-  checkpoint: () => Promise<T>,
+  checkpoint: (reusedCheckpoint?: boolean) => Promise<T>,
+  committedReceiptToken?: string,
 ): Promise<T> {
-  if (!enabled) return checkpoint();
-  const { token, targets } = await invoke<{
+  if (!enabled) return checkpoint(false);
+  const { token, targets, reusedCheckpoint } = await invoke<{
     token: string;
     targets: (CheckpointGeometry & { terminalId: string })[];
-  }>("begin_codex_status_checkpoint", { updateRequestId }).catch((error: unknown) => {
+    reusedCheckpoint?: boolean;
+  }>("begin_codex_status_checkpoint", {
+    updateRequestId,
+    ...(committedReceiptToken ? { committedReceiptToken } : {}),
+  }).catch((error: unknown) => {
     throw formatCodexCheckpointError(error);
   });
   const releases: (() => void)[] = [];
@@ -232,7 +237,7 @@ export async function withCodexStatusCheckpoint<T>(
         : [],
     );
     if (failures.length) throw formatCodexCheckpointError(failures.join("\n"));
-    const result = await checkpoint();
+    const result = await checkpoint(Boolean(reusedCheckpoint));
     // A delayed save must not succeed after the proof's deadline. Successful
     // close keeps native admission fenced until the window is destroyed.
     await invoke("complete_codex_status_checkpoint", { token });

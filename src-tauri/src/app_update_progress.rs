@@ -7,10 +7,11 @@ use tauri::AppHandle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// An update never interrupts terminals: the PTY daemon keeps every session
+/// across the restart (ADR-0308), so only an explicit close runs the Ctrl+C
+/// cleanup (ADR-0314).
 pub enum PreparationStage {
     Checkpoint,
-    Interrupting,
-    Settling,
     Caching,
 }
 
@@ -21,23 +22,6 @@ pub struct ExitProgress {
     pub completed: u64,
     pub total: Option<u64>,
     pub warning: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExitPlan {
-    pub interrupt_terminals: bool,
-    pub interrupt_rounds: u32,
-    pub settle_ms: u64,
-}
-impl From<crate::settings::ExitSettings> for ExitPlan {
-    fn from(value: crate::settings::ExitSettings) -> Self {
-        Self {
-            interrupt_terminals: value.interrupt_terminals,
-            interrupt_rounds: value.interrupt_rounds.clamp(1, 10),
-            settle_ms: value.settle_ms.min(10_000),
-        }
-    }
 }
 
 impl UpdateManager {
@@ -55,17 +39,6 @@ impl UpdateManager {
         }
         self.closing.store(true, Ordering::Release);
         Ok(())
-    }
-
-    pub fn status_with_settings(&self) -> Result<UpdateStatus, String> {
-        let mut status = self.snapshot()?;
-        if matches!(
-            status.operation,
-            UpdateOperation::Idle | UpdateOperation::Checking
-        ) {
-            status.exit_settings = Some(crate::settings::load_settings().exit.into());
-        }
-        Ok(status)
     }
 
     pub(super) fn mark_preparing(&self) -> Result<UpdateStatus, String> {
@@ -120,7 +93,7 @@ mod tests {
         let manager = UpdateManager::default();
         manager.mark_preparing().unwrap();
         let progress = ExitProgress {
-            stage: PreparationStage::Settling,
+            stage: PreparationStage::Caching,
             completed: 300,
             total: Some(700),
             warning: None,
