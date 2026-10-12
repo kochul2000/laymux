@@ -87,6 +87,8 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let app_state = Arc::new(state::AppState::new());
+            // Titles a previous GUI handed to this launch (ADR-0319).
+            update_title_handoff::claim();
 
             // Start IPC server for IDE CLI communication
             let session_id = format!("{}", std::process::id());

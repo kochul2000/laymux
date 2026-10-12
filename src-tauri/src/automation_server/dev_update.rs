@@ -50,7 +50,7 @@ pub async fn update_handoff(
             }
             UpdateHandoffMode::Restart => {
                 state.app_state.begin_update_handoff();
-                crate::update_title_handoff::save(&state.app_state);
+                crate::update_title_handoff::begin(&state.app_state).save(&state.app_state);
                 state.app_handle.restart();
             }
         }

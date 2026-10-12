@@ -120,7 +120,7 @@ async fn install_and_restart(
     // Restarting runs the app exit path, which would end the daemon
     // sessions; the updated GUI adopts them instead (ADR-0308).
     state.begin_update_handoff();
-    crate::update_title_handoff::save(&state);
+    crate::update_title_handoff::begin(&state).save(&state);
     app.restart();
 }
 

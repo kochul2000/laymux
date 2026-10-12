@@ -1,5 +1,6 @@
-//! The OSC title each daemon terminal last showed, handed from the GUI that
-//! installs an update to the GUI that adopts its sessions (ADR-0319).
+//! The OSC title each daemon terminal running an agent last showed, handed
+//! from the GUI that installs an update to the GUI that adopts its sessions
+//! (ADR-0319).
 //!
 //! An adopted terminal takes the output it missed while no GUI was attached
 //! through the OSC pass (ADR-0309). The title an agent set before the handoff
@@ -7,9 +8,9 @@
 //! title stays the only sign that it is idle until its next turn. Without it
 //! the updated GUI cannot tell an idle agent from a busy one.
 //!
-//! The file is consumed by the first GUI that adopts a terminal. A title only
-//! applies to the same terminal id running the same child, and goes ahead of
-//! the missed output, which holds everything that child printed since.
+//! The next GUI consumes the file when it starts. A title only applies to the
+//! same terminal id running the same child, and goes ahead of the missed
+//! output, which holds everything that child printed since.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -19,6 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
+use crate::terminal::TerminalActivity;
 
 const FILE_NAME: &str = "update-handoff-titles.json";
 
@@ -34,14 +36,25 @@ fn file_path() -> Option<PathBuf> {
     crate::settings::cache_dir_path().map(|dir| dir.join(FILE_NAME))
 }
 
-/// Record the title of every daemon terminal this GUI hands to the update.
-/// Runs while the PTY handles are still registered.
-pub fn save(state: &AppState) {
-    let Some(path) = file_path() else {
-        return;
-    };
-    if let Err(error) = write_to(&path, &collect(state)) {
-        tracing::warn!(%error, "could not hand terminal titles to the update");
+/// The daemon terminals running an agent, picked while their PTY handles are
+/// still registered.
+pub struct Handoff(Vec<(String, u32)>);
+
+/// Pick what to hand over. The installer teardown releases the handles next.
+pub fn begin(state: &AppState) -> Handoff {
+    Handoff(agent_children(state))
+}
+
+impl Handoff {
+    /// Write the titles as they are now. The detached sessions still report to
+    /// this GUI until it exits, so the later this runs, the less is lost.
+    pub fn save(self, state: &AppState) {
+        let Some(path) = file_path() else {
+            return;
+        };
+        if let Err(error) = write_to(&path, &titles(state, self.0)) {
+            tracing::warn!(%error, "could not hand terminal titles to the update");
+        }
     }
 }
 
@@ -52,12 +65,20 @@ pub fn discard() {
     }
 }
 
+fn handed() -> &'static Mutex<HashMap<String, HandedTitle>> {
+    static HANDED: OnceLock<Mutex<HashMap<String, HandedTitle>>> = OnceLock::new();
+    HANDED.get_or_init(|| Mutex::new(file_path().map(|path| load_from(&path)).unwrap_or_default()))
+}
+
+/// Take over what the previous GUI handed over, at startup: the file belongs
+/// to this launch only, whether or not any terminal adopts.
+pub fn claim() {
+    handed();
+}
+
 /// The title handed over for the session this terminal just adopted, once.
 pub fn take(terminal_id: &str, child_pid: Option<u32>) -> Option<String> {
-    static HANDED: OnceLock<Mutex<HashMap<String, HandedTitle>>> = OnceLock::new();
-    let handed = HANDED
-        .get_or_init(|| Mutex::new(file_path().map(|path| load_from(&path)).unwrap_or_default()));
-    take_from(&mut *handed.lock_or_err().ok()?, terminal_id, child_pid?)
+    take_from(&mut *handed().lock_or_err().ok()?, terminal_id, child_pid?)
 }
 
 /// The title as the OSC pass reads it from output. Control characters cannot
@@ -67,15 +88,40 @@ pub fn osc_title_sequence(title: &str) -> Vec<u8> {
     format!("\x1b]2;{title}\x07").into_bytes()
 }
 
-fn collect(state: &AppState) -> Vec<HandedTitle> {
-    let children: Vec<(String, u32)> = match state.pty_handles.lock_or_err() {
-        Ok(handles) => handles
-            .iter()
-            .filter(|(_, handle)| handle.is_backend_owned())
-            .filter_map(|(id, handle)| Some((id.clone(), handle.child_pid()?)))
-            .collect(),
-        Err(_) => return Vec::new(),
+/// Only a terminal the backend sees running Claude, Codex or Grok: an agent
+/// that left without resetting the title must not mark a shell as an agent
+/// in the next GUI.
+fn agent_children(state: &AppState) -> Vec<(String, u32)> {
+    let activities = match crate::activity::detect_all_terminal_states(state) {
+        Ok(activities) => activities,
+        Err(error) => {
+            tracing::warn!(%error, "terminal activity unavailable; handing over no titles");
+            return Vec::new();
+        }
     };
+    let Ok(handles) = state.pty_handles.lock_or_err() else {
+        return Vec::new();
+    };
+    handles
+        .iter()
+        .filter(|(id, handle)| {
+            handle.is_backend_owned()
+                && activities
+                    .get(*id)
+                    .is_some_and(|info| is_agent(&info.activity))
+        })
+        .filter_map(|(id, handle)| Some((id.clone(), handle.child_pid()?)))
+        .collect()
+}
+
+fn is_agent(activity: &TerminalActivity) -> bool {
+    matches!(
+        activity,
+        TerminalActivity::InteractiveApp { name } if matches!(name.as_str(), "Claude" | "Codex" | "Grok")
+    )
+}
+
+fn titles(state: &AppState, children: Vec<(String, u32)>) -> Vec<HandedTitle> {
     let Ok(terminals) = state.terminals.lock_or_err() else {
         return Vec::new();
     };
@@ -172,6 +218,44 @@ mod tests {
         std::fs::write(&path, b"not json").unwrap();
         assert!(load_from(&path).is_empty());
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn only_a_running_agent_hands_over_its_title() {
+        for name in ["Claude", "Codex", "Grok"] {
+            assert!(is_agent(&TerminalActivity::InteractiveApp {
+                name: name.into()
+            }));
+        }
+        assert!(!is_agent(&TerminalActivity::InteractiveApp {
+            name: "vim".into()
+        }));
+        assert!(!is_agent(&TerminalActivity::Shell));
+        assert!(!is_agent(&TerminalActivity::Running));
+    }
+
+    #[test]
+    fn titles_skip_terminals_that_left_no_title_or_are_gone() {
+        let state = AppState::new();
+        let config = || crate::terminal::TerminalConfig::default();
+        let mut session = crate::terminal::TerminalSession::new("terminal-a".into(), config());
+        session.osc_title = Some("✳ Claude Code".into());
+        let mut terminals = state.terminals.lock().unwrap();
+        terminals.insert("terminal-a".into(), session);
+        terminals.insert(
+            "terminal-b".into(),
+            crate::terminal::TerminalSession::new("terminal-b".into(), config()),
+        );
+        drop(terminals);
+        let children = vec![
+            ("terminal-a".into(), 41),
+            ("terminal-b".into(), 42),
+            ("terminal-gone".into(), 43),
+        ];
+        assert_eq!(
+            titles(&state, children),
+            vec![entry("terminal-a", 41, "✳ Claude Code")]
+        );
     }
 
     #[test]
