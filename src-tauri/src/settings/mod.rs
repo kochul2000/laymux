@@ -1338,6 +1338,29 @@ mod tests {
     }
 
     #[test]
+    fn default_workspace_inherits_its_sync_group_after_rename_and_duplicate() {
+        let settings = Settings::default();
+        let source = &settings.workspaces[0];
+        let mut duplicate = source.clone();
+        duplicate.id = "ws-copy".into();
+        duplicate.name = "Renamed-Copy".into();
+
+        for workspace in [source, &duplicate] {
+            for pane in &workspace.panes {
+                for (_, view) in pane.content_views() {
+                    let configured_group = view.extra["syncGroup"].as_str().unwrap_or("");
+                    let effective_group = if configured_group.is_empty() {
+                        workspace.id.as_str()
+                    } else {
+                        configured_group
+                    };
+                    assert_eq!(effective_group, workspace.id);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn default_settings_has_profiles() {
         let settings = Settings::default();
         assert_eq!(settings.profiles.len(), 2);

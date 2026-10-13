@@ -363,6 +363,8 @@ v1은 Built-in only. 플러그인 시스템은 추후 고려.
 
 - SyncGroup은 **문자열** 하나로 식별
 - 기본값: 소속 Workspace의 **ID** (자동 설정, rename에 안정적)
+- 초기 기본 workspace의 터미널도 `syncGroup`을 생략해 이 기본값을 사용한다. workspace 복제 시 생략된 그룹은 복제본의 ID로 계산되고, 명시적인 커스텀 그룹은 그대로 보존된다.
+- 워크스페이스 간 pane 이동은 모든 레이어의 ID와 설정을 유지한다. 그룹이 생략되거나 빈 레이어는 도착한 workspace의 ID를 사용하며, 명시적인 그룹(`none` 포함)은 이동·스택 병합·레이어 추출에도 유지된다. 새 분할 pane·새 스택 레이어는 별도 그룹을 지정하지 않으면 소속 workspace의 기본 그룹을 사용한다.
 - 같은 syncGroup 값을 가진 모든 TerminalView가 동기화 대상
 - 크로스 워크스페이스 동기화: 명시적 커스텀 syncGroup 문자열을 지정하면 Workspace를 넘나드는 동기화 가능
 - 독립 터미널: `"none"` 으로 설정
