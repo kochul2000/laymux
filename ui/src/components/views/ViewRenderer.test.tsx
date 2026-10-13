@@ -103,15 +103,131 @@ vi.mock("./GitHubView", () => ({
 import { ViewRenderer } from "./ViewRenderer";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useWorkspaceStore } from "@/stores/workspace-store";
+import { makeSlot } from "@/lib/pane-layers";
+import type { ViewInstanceConfig } from "@/stores/types";
 
 describe("ViewRenderer", () => {
   beforeEach(() => {
     useTerminalStore.setState(useTerminalStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     terminalViewProps.length = 0;
     fileExplorerProps.length = 0;
     githubProps.length = 0;
   });
+
+  describe.each(["TerminalView", "FileExplorerView"] as const)(
+    "%s sync groups across workspace and stack operations",
+    (viewType) => {
+      it.each(["split", "stack"])(
+        "$operation creates content in the workspace default group",
+        (operation) => {
+          const store = useWorkspaceStore.getState();
+          store.setPaneView(0, { type: viewType, syncGroup: "shared-dev" });
+          let paneIndex = 0;
+          if (operation === "split") {
+            store.splitPane(0, "vertical");
+            paneIndex = 1;
+          } else {
+            store.stackPane(0);
+          }
+          store.setPaneView(paneIndex, { type: viewType });
+          const workspace = useWorkspaceStore.getState().getActiveWorkspace()!;
+          const slot = workspace.panes[paneIndex];
+          const layer = slot.layers.find((item) => item.id === slot.activeLayerId)!;
+          render(
+            <ViewRenderer
+              viewType={viewType}
+              viewConfig={layer.view}
+              workspaceId={workspace.id}
+              paneId={layer.id}
+            />,
+          );
+          const props = viewType === "TerminalView" ? terminalViewProps : fileExplorerProps;
+          expect(props.at(-1)?.syncGroup).toBe(workspace.id);
+          expect(workspace.panes[0].layers[0].view.syncGroup).toBe("shared-dev");
+        },
+      );
+
+      it.each(
+        [undefined, "", "shared-dev", "none"].flatMap((syncGroup) =>
+          ["move", "duplicate", "layout", "rename", "extract", "merge"].map((operation) => ({
+            syncGroup,
+            operation,
+          })),
+        ),
+      )("$operation with configured group '$syncGroup'", ({ syncGroup, operation }) => {
+        const view: ViewInstanceConfig = { type: viewType };
+        if (syncGroup !== undefined) view.syncGroup = syncGroup;
+        const sourcePane = makeSlot("source-pane", { x: 0, y: 0, w: 0.5, h: 1 }, view);
+        useWorkspaceStore.setState({
+          activeWorkspaceId: "source",
+          workspaces: [
+            {
+              id: "source",
+              name: "Source",
+              panes: [
+                sourcePane,
+                makeSlot("source-spare", { x: 0.5, y: 0, w: 0.5, h: 1 }, { type: "MemoView" }),
+              ],
+            },
+            {
+              id: "target",
+              name: "Target",
+              panes: [makeSlot("target-pane", { x: 0, y: 0, w: 1, h: 1 }, { type: "MemoView" })],
+            },
+          ],
+        });
+        const store = useWorkspaceStore.getState();
+        let ownerId = "source";
+        let layerId = "source-pane";
+        if (operation === "move") {
+          // Moving a stacked pane must rehome every layer, including inactive ones.
+          store.stackPane(0, { type: "MemoView" });
+          store.movePaneToWorkspace(layerId, "target");
+          ownerId = "target";
+        } else if (operation === "duplicate") {
+          const result = store.duplicateWorkspace("source")!;
+          ownerId = result.newWorkspaceId;
+          layerId = result.paneIdMap[layerId];
+        } else if (operation === "layout") {
+          store.exportAsNewLayout("Template");
+          const layout = useWorkspaceStore.getState().layouts.at(-1)!;
+          store.addWorkspace("From template", layout.id);
+          const created = useWorkspaceStore.getState().workspaces.at(-1)!;
+          ownerId = created.id;
+          layerId = created.panes[0].layers[0].id;
+        } else if (operation === "rename") {
+          store.renameWorkspace("source", "Renamed");
+        } else if (operation === "extract") {
+          store.stackPane(0, { type: "MemoView" });
+          expect(store.extractLayer(layerId, "vertical")).toBe(layerId);
+        } else {
+          expect(store.mergeSlotIntoStack("source-pane", "source-spare")).toBe(true);
+        }
+        const owner = useWorkspaceStore.getState().workspaces.find((ws) => ws.id === ownerId)!;
+        const layer = owner.panes
+          .flatMap((pane) => pane.layers)
+          .find((item) => item.id === layerId)!;
+        render(
+          <ViewRenderer
+            viewType={viewType}
+            viewConfig={layer.view}
+            workspaceId={owner.id}
+            workspaceName={owner.name}
+            paneId={layer.id}
+          />,
+        );
+        const props = viewType === "TerminalView" ? terminalViewProps : fileExplorerProps;
+        expect(props.at(-1)?.syncGroup).toBe(syncGroup || owner.id);
+        expect(layer.view.syncGroup).toBe(syncGroup);
+        if (operation === "move" || operation === "extract" || operation === "merge") {
+          expect(layer.id).toBe("source-pane");
+        }
+      });
+    },
+  );
 
   it("renders EmptyView for EmptyView type", () => {
     render(<ViewRenderer viewType="EmptyView" />);

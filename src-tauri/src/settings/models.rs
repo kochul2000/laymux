@@ -2355,7 +2355,7 @@ impl Default for Settings {
                     1.0,
                     WorkspacePaneView {
                         view_type: "TerminalView".into(),
-                        extra: serde_json::json!({"profile": "PowerShell", "syncGroup": "Default"}),
+                        extra: serde_json::json!({"profile": "PowerShell"}),
                     },
                 )],
             }],

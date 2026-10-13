@@ -1906,6 +1906,23 @@ describe("useKeyboardShortcuts", () => {
       expect(useCwdPropagateStore.getState().requests["pane-a"]).toBe(1);
     });
 
+    it("propagates from the new terminal after duplicating a workspace", () => {
+      setActivePanes({ type: "TerminalView", profile: "PowerShell" });
+      useGridStore.getState().setFocusedPane(0);
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("d", { ctrlKey: true, altKey: true });
+      const duplicate = useWorkspaceStore.getState().getActiveWorkspace()!;
+      const layer = duplicate.panes[0].layers[0];
+      expect(duplicate.id).not.toBe("ws-default");
+      expect(layer.id).not.toBe("pane-a");
+      expect(layer.view.syncGroup).toBeUndefined();
+
+      fireKey("p", { ctrlKey: true, altKey: true });
+
+      expect(propagateCwdOnce).toHaveBeenCalledExactlyOnceWith(`terminal-${layer.id}`);
+    });
+
     it("does nothing when the focused pane has no CWD-capable view", () => {
       setActivePanes({ type: "MemoView" });
       useGridStore.getState().setFocusedPane(0);
