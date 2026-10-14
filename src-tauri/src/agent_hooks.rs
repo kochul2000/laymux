@@ -19,7 +19,7 @@ use crate::state::AppState;
 const MANAGE_TIMEOUT: Duration = Duration::from_secs(8);
 const EVENT_MAX_AGE_MS: u64 = 30_000;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ManageRequest {
     pub provider: String,

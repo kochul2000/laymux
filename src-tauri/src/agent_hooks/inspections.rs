@@ -2,7 +2,7 @@
 use super::ManageRequest;
 use crate::{error::AppError, lock_ext::MutexExt};
 use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard};
 
 use crate::constants::AGENT_HOOK_INSPECTION_MAX_TARGETS as MAX_TARGETS;
@@ -32,22 +32,28 @@ impl Target {
             }),
         }
     }
-    pub fn request(&self) -> ManageRequest {
-        ManageRequest {
-            provider: self.provider.clone(),
-            operation: "status".into(),
-            distro: self.distro.clone(),
-            config_dir: self.config_dir.clone(),
-        }
+}
+
+struct Entry {
+    /// Normalized keys must never become I/O paths: owned commands compare
+    /// the original helper path exactly, even on Windows.
+    request: ManageRequest,
+    result: Option<Result<Value, String>>,
+}
+
+fn status_request(request: &ManageRequest) -> ManageRequest {
+    ManageRequest {
+        operation: "status".into(),
+        ..request.clone()
     }
 }
 
 #[derive(Default)]
 struct Cache {
     initialized: bool,
-    entries: HashMap<Target, Option<Result<Value, String>>>,
+    entries: HashMap<Target, Entry>,
     aliases: HashMap<Target, Target>,
-    announced: HashSet<Target>,
+    announced: HashMap<Target, ManageRequest>,
     capacity_exceeded: bool,
     environment_error: Option<String>,
 }
@@ -80,8 +86,8 @@ impl InspectionCache {
             .cache
             .lock_or_err()?
             .announced
-            .iter()
-            .map(Target::request)
+            .values()
+            .cloned()
             .collect())
     }
     pub(crate) fn attempted(&self, request: &ManageRequest) -> Result<bool, AppError> {
@@ -97,7 +103,7 @@ impl InspectionCache {
         if cache
             .entries
             .contains_key(cache.aliases.get(&target).unwrap_or(&target))
-            || cache.announced.contains(&target)
+            || cache.announced.contains_key(&target)
         {
             return Ok(false);
         }
@@ -106,7 +112,8 @@ impl InspectionCache {
             cache.capacity_exceeded = true;
             return Ok(first);
         }
-        Ok(cache.announced.insert(target))
+        cache.announced.insert(target, status_request(request));
+        Ok(true)
     }
     pub(crate) fn begin(&self, request: &ManageRequest) -> Result<(), AppError> {
         let mut cache = self.cache.lock_or_err()?;
@@ -118,7 +125,20 @@ impl InspectionCache {
                 "Hook installation inspection target limit reached".into(),
             ));
         }
-        cache.entries.insert(key.clone(), None);
+        // Keep the target's display/I/O spelling stable while an equivalent
+        // path request is pending or fails.
+        let io_request = cache
+            .entries
+            .get(&key)
+            .map(|entry| entry.request.clone())
+            .unwrap_or_else(|| status_request(request));
+        cache.entries.insert(
+            key.clone(),
+            Entry {
+                request: io_request,
+                result: None,
+            },
+        );
         cache.announced.remove(&key);
         Ok(())
     }
@@ -147,15 +167,26 @@ impl InspectionCache {
                 })
             })
             .unwrap_or_else(|| previous.clone());
-        cache.entries.remove(&previous);
+        let previous_entry = cache.entries.remove(&previous);
+        let mut io_request = status_request(request);
+        io_request.config_dir = result
+            .as_ref()
+            .ok()
+            .and_then(|s| s["configDir"].as_str())
+            .map(Into::into)
+            .or_else(|| previous_entry.and_then(|entry| entry.request.config_dir))
+            .or_else(|| request.config_dir.clone());
         cache.entries.insert(
             canonical.clone(),
-            Some(
-                result
-                    .as_ref()
-                    .map(Clone::clone)
-                    .map_err(ToString::to_string),
-            ),
+            Entry {
+                request: io_request,
+                result: Some(
+                    result
+                        .as_ref()
+                        .map(Clone::clone)
+                        .map_err(ToString::to_string),
+                ),
+            },
         );
         for alias in cache.aliases.values_mut() {
             if *alias == previous {
@@ -174,8 +205,8 @@ impl InspectionCache {
             .cache
             .lock_or_err()?
             .entries
-            .keys()
-            .map(Target::request)
+            .values()
+            .map(|entry| entry.request.clone())
             .collect())
     }
     pub(crate) fn enabled(
@@ -193,10 +224,13 @@ impl InspectionCache {
         };
         let cache = self.cache.lock_or_err()?;
         let target = Target::new(&request);
-        let Some(Some(Ok(value))) = cache
+        let Some(entry) = cache
             .entries
             .get(cache.aliases.get(&target).unwrap_or(&target))
         else {
+            return Ok(false);
+        };
+        let Some(Ok(value)) = &entry.result else {
             return Ok(false);
         };
         Ok(value["installed"] == true
@@ -210,10 +244,10 @@ impl InspectionCache {
         let cache = self.cache.lock_or_err()?;
         let mut targets = Vec::new();
         let mut errors = Vec::new();
-        for (target, result) in &cache.entries {
-            match result {
+        for (target, entry) in &cache.entries {
+            match &entry.result {
                 Some(Ok(status))=>targets.push(json!({"provider":target.provider,"distro":target.distro,"status":status})),
-                _=>errors.push(json!({"provider":target.provider,"distro":target.distro,"configDir":target.config_dir,"message":result.as_ref().and_then(|r|r.as_ref().err()).map(String::as_str).unwrap_or("Hook installation inspection has not completed")})),
+                _=>errors.push(json!({"provider":target.provider,"distro":target.distro,"configDir":entry.request.config_dir,"message":entry.result.as_ref().and_then(|r|r.as_ref().err()).map(String::as_str).unwrap_or("Hook installation inspection has not completed")})),
             }
         }
         if cache.capacity_exceeded {
@@ -241,6 +275,72 @@ mod tests {
     }
     fn healthy(root: &str) -> Value {
         json!({"configDir":root,"installed":true,"disabled":false,"warning":null,"titleBinding":{"configured":true,"warning":null}})
+    }
+    #[test]
+    fn discovered_requests_preserve_the_original_io_path() {
+        let cache = InspectionCache::default();
+        let req = request(Some("D:/Mixed/CustomRoot"), None);
+        cache.announce(&req).unwrap();
+        assert_eq!(
+            cache.discovered_requests().unwrap()[0].config_dir,
+            req.config_dir
+        );
+    }
+    #[cfg(windows)]
+    #[test]
+    fn equivalent_path_error_keeps_the_targets_original_spelling() {
+        let cache = InspectionCache::default();
+        let original = request(Some("D:/Mixed/CustomRoot"), None);
+        let equivalent = request(Some("d:\\mixed\\customroot\\"), None);
+        cache.begin(&original).unwrap();
+        cache
+            .record(&original, &Err(AppError::Other("first error".into())))
+            .unwrap();
+        cache.begin(&equivalent).unwrap();
+        cache
+            .record(&equivalent, &Err(AppError::Other("second error".into())))
+            .unwrap();
+        assert_eq!(
+            cache.snapshot().unwrap()["errors"][0]["configDir"],
+            "D:/Mixed/CustomRoot"
+        );
+        assert_eq!(
+            cache.known_requests().unwrap()[0].config_dir,
+            original.config_dir
+        );
+    }
+    #[cfg(windows)]
+    #[test]
+    fn cached_custom_root_without_recent_observation_preserves_real_owned_handlers() {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path().join("MixedCaseConfig");
+        let source = fixture.path().join("laymux-agent-hook.exe");
+        std::fs::write(&source, b"inspection fixture helper").unwrap();
+        let manage = |root: &std::path::Path, operation| {
+            laymux_agent_hook::install::manage(root, "codex", operation, &source).unwrap()
+        };
+        let installed = manage(&root, "install");
+        assert_eq!(installed["installed"], true);
+        let cache = InspectionCache::default();
+        let req = request(root.to_str(), None);
+        cache.begin(&req).unwrap();
+        cache.record(&req, &Ok(installed)).unwrap();
+        let remembered = cache.known_requests().unwrap().remove(0);
+        let remembered_root = std::path::PathBuf::from(remembered.config_dir.unwrap());
+        let status = manage(&remembered_root, "status");
+        assert_eq!(
+            status["installed"], true,
+            "cached inspection must retain command ownership"
+        );
+        assert_eq!(status["registered"], 10);
+        assert_eq!(status["ownedCommands"], 10);
+        let updated = manage(&remembered_root, "update");
+        assert_eq!(updated["registered"], 10);
+        assert_eq!(updated["ownedCommands"], 10);
+        let removed = manage(&remembered_root, "remove");
+        assert_eq!(removed["registered"], 0);
+        assert_eq!(removed["ownedCommands"], 0);
+        assert_eq!(manage(&root, "status")["registered"], 0);
     }
     #[test]
     fn installed_evidence_is_reused_and_default_roots_alias_the_resolved_directory() {

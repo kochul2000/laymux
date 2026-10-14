@@ -32,3 +32,9 @@ TDD에서 주기·포커스 검사를 제거하는 UI 회귀 4개가 기존 코�
 초기 전체 검증은 UI 5,624개, Rust 2,417개 통과(10개 ignored), 훅 관리 Playwright 1개 통과였다. 후속 큐 수정은 관련 UI 25개와 타입·lint 검사로 확인했다. 관리 결과도 안내 갱신 이벤트를 발행하도록 하여 Settings/REST 관리 후 자동 타이머 없이 캐시 결과를 표시한다. 실제 dev 재기동 뒤 명시적 status의 실패 결과가 별도 갱신 호출 없이 화면 안내에 표시됐고, backend 설치 호출은 그 status 1회뿐이었다. 최종 훅 관련 Rust 테스트 34개도 통과했다. 독립 리뷰 결과는 PR 본문에 기록한다.
 
 원시 증거는 로컬 `.tmp/hook-inspection-once/`의 `dev.log`, `poll.json`, `first-discovery.json`, `wsl-discovery.json`, `repeat-wsl.json`, `manual.json`, `manual-rest.json`, `bench.json`, 각 테스트 로그에 있다. dev 종료에는 `scripts/kill-dev.sh --with-daemon`을 사용한다.
+
+## 독립 리뷰 후 경로 보존 수정
+
+첫 리뷰는 Windows 정규화 키를 I/O 경로로 재사용하는 P1을 재현했다. 동일 fixture에 원본 `D:/PycharmProjects/...`로 status하면 등록 10개를 인식하지만 소문자 경로는 등록 0개로 판단했다. 최근 관찰이 사라진 뒤의 전체 검사와 갱신·제거에서 소유권을 잃을 수 있었다. 캐시 entry와 발견 큐에 원본 요청을 별도 보존하고, 성공 시 원본 status.configDir를 사용하도록 수정했다. 정규화는 조회·중복 제거 키에만 적용한다.
+
+새 회귀 2개가 수정 전 실패했다. 실제 설치 라이브러리로 임시 폴더에 설치한 훅을 최근 관찰 없이 캐시 요청으로 재검사·갱신·제거하는 Windows 회귀에서 등록/소유 명령이 10개로 유지되고 제거 뒤 0개가 됨을 확인했다. 동등한 경로 표기로 재검사가 실패해도 오류 안내의 기존 경로 표기를 보존하는 회귀를 추가했다. 최종 P1 수정의 dev 검사와 새 독립 리뷰 결과는 PR 본문에 기록한다.
