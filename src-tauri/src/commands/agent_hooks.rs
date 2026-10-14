@@ -40,7 +40,7 @@ pub fn get_agent_hook_updates(
     app: tauri::AppHandle,
     automatic: Option<bool>,
 ) -> Result<Value, String> {
-    if automatic == Some(true) {
+    if automatic == Some(true) && !state.agent_mcp_inspections.warmed().unwrap_or(true) {
         // MCP registration shares the startup lifecycle (ADR-0325) but must not
         // delay the hook notice, so it runs once in the background.
         let (state, app) = (Arc::clone(&state), app.clone());

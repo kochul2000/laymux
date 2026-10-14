@@ -90,6 +90,15 @@ impl McpInspections {
         }
         Ok(())
     }
+    /// A failed change may still have been written (e.g. a timed-out WSL
+    /// helper), so forget the target and check it again on the next view.
+    fn invalidate(&self, key: &Key) -> Result<(), AppError> {
+        self.cache.lock_or_err()?.entries.remove(key);
+        Ok(())
+    }
+    pub(crate) fn warmed(&self) -> Result<bool, AppError> {
+        Ok(self.cache.lock_or_err()?.warmed)
+    }
     fn claim_warm_up(&self) -> Result<bool, AppError> {
         let mut cache = self.cache.lock_or_err()?;
         Ok(!std::mem::replace(&mut cache.warmed, true))
@@ -131,16 +140,35 @@ pub fn manage(
         return Err(AppError::Other("Invalid MCP registration request".into()));
     }
     let dir = config_dir(request);
+    // Reject partial or relative folders before they take the gate or a cache
+    // slot (WSL paths are Linux paths).
+    if let Some(dir) = dir {
+        let absolute = match request.distro {
+            Some(_) => dir.starts_with('/'),
+            None => std::path::Path::new(dir).is_absolute(),
+        };
+        if !absolute {
+            return Err(AppError::Other(
+                "Configuration folder must be an absolute path".into(),
+            ));
+        }
+    }
     let key = Key::new(&request.provider, request.distro.as_deref(), dir);
-    manage_with(&state.agent_mcp_inspections, key, request.cached, || {
-        run(request, dir, app)
-    })
+    let management = request.operation != "status";
+    manage_with(
+        &state.agent_mcp_inspections,
+        key,
+        request.cached,
+        management,
+        || run(request, dir, app),
+    )
 }
 
 fn manage_with(
     cache: &McpInspections,
     key: Key,
     cached: bool,
+    management: bool,
     run: impl FnOnce() -> Result<Value, AppError>,
 ) -> Result<Value, AppError> {
     let hit = |cache: &McpInspections| -> Result<Option<Result<Value, AppError>>, AppError> {
@@ -159,7 +187,11 @@ fn manage_with(
         return hit;
     }
     let result = run();
-    cache.record(key, &result)?;
+    if management && result.is_err() {
+        cache.invalidate(&key)?;
+    } else {
+        cache.record(key, &result)?;
+    }
     result
 }
 
@@ -267,11 +299,23 @@ mod tests {
             calls.set(calls.get() + 1);
             Ok(json!({"state": "installed", "n": calls.get()}))
         };
-        assert_eq!(manage_with(&cache, key(None), true, run).unwrap()["n"], 1);
-        assert_eq!(manage_with(&cache, key(None), true, run).unwrap()["n"], 1);
+        assert_eq!(
+            manage_with(&cache, key(None), true, false, run).unwrap()["n"],
+            1
+        );
+        assert_eq!(
+            manage_with(&cache, key(None), true, false, run).unwrap()["n"],
+            1
+        );
         // Refresh and management always do I/O and update the cache.
-        assert_eq!(manage_with(&cache, key(None), false, run).unwrap()["n"], 2);
-        assert_eq!(manage_with(&cache, key(None), true, run).unwrap()["n"], 2);
+        assert_eq!(
+            manage_with(&cache, key(None), false, false, run).unwrap()["n"],
+            2
+        );
+        assert_eq!(
+            manage_with(&cache, key(None), true, false, run).unwrap()["n"],
+            2
+        );
         assert_eq!(calls.get(), 2);
     }
 
@@ -283,9 +327,28 @@ mod tests {
             calls.set(calls.get() + 1);
             Err(AppError::Other("WSL helper failed".into()))
         };
-        assert!(manage_with(&cache, key(None), true, run).is_err());
-        assert!(manage_with(&cache, key(None), true, run).is_err());
+        assert!(manage_with(&cache, key(None), true, false, run).is_err());
+        assert!(manage_with(&cache, key(None), true, false, run).is_err());
         assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn failed_management_forgets_the_target_instead_of_caching_the_error() {
+        let cache = McpInspections::default();
+        let ok = || Ok(json!({"state": "installed"}));
+        manage_with(&cache, key(None), true, false, ok).unwrap();
+        let failed = || Err(AppError::Other("changed concurrently".into()));
+        assert!(manage_with(&cache, key(None), false, true, failed).is_err());
+        let calls = Cell::new(0);
+        let recheck = || {
+            calls.set(calls.get() + 1);
+            Ok(json!({"state": "missing"}))
+        };
+        let status = manage_with(&cache, key(None), true, false, recheck).unwrap();
+        assert_eq!(
+            (status["state"].as_str(), calls.get()),
+            (Some("missing"), 1)
+        );
     }
 
     #[test]

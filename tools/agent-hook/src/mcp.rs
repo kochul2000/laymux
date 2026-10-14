@@ -11,7 +11,7 @@ use serde_json::value::RawValue;
 use serde_json::{json, Value};
 use toml_edit::{DocumentMut, InlineTable, Item, Table};
 
-use crate::install::{atomic_write, lock_config_dir, read_limited};
+use crate::install::{lock_config_dir, read_limited};
 
 // `.claude.json` keeps per-project history and can grow far beyond hook files.
 const MAX_CONFIG_BYTES: u64 = 64 * 1024 * 1024;
@@ -109,12 +109,19 @@ fn probe(host: Ipv4Addr, port: u16) -> bool {
     let _ = stream.set_read_timeout(Some(PROBE_TIMEOUT));
     let _ = stream.set_write_timeout(Some(PROBE_TIMEOUT));
     let request = format!("GET /api/v1/health HTTP/1.0\r\nHost: {host}:{port}\r\n\r\n");
-    let mut head = [0u8; 16];
-    stream.write_all(request.as_bytes()).is_ok()
-        && stream.read(&mut head).is_ok_and(|n| {
-            let head = &head[..n];
-            head.starts_with(b"HTTP/1.") && head.get(9..12) == Some(b"200")
-        })
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+    // The status line may arrive in several segments.
+    let mut head = [0u8; 12];
+    let mut filled = 0;
+    while filled < head.len() {
+        match stream.read(&mut head[filled..]) {
+            Ok(0) | Err(_) => return false,
+            Ok(n) => filled += n,
+        }
+    }
+    head.starts_with(b"HTTP/1.") && &head[9..12] == b"200"
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -445,16 +452,39 @@ pub fn manage_at(
     } else {
         Some(lock_config_dir(parent)?)
     };
-    if let Some(original) = &original {
-        let mut backup = path.as_os_str().to_owned();
-        backup.push(".laymux-backup");
-        atomic_write(Path::new(&backup), original)?;
-    }
-    if read_limited(path, MAX_CONFIG_BYTES)? != original {
+    replace_if_unchanged(path, original.as_deref(), &bytes)?;
+    Ok(result)
+}
+
+/// Stage the new file and its backup fully (write + fsync) first, then compare
+/// with the original and only rename. This keeps the window in which a CLI
+/// rewrite could be lost to the rename itself, and a refused change leaves the
+/// previous backup untouched.
+fn replace_if_unchanged(path: &Path, original: Option<&[u8]>, bytes: &[u8]) -> Result<(), String> {
+    let parent = path.parent().ok_or("Missing config parent")?;
+    let stage = |content: &[u8]| -> Result<tempfile::NamedTempFile, String> {
+        let mut temp = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+        temp.write_all(content).map_err(|e| e.to_string())?;
+        if let Ok(meta) = std::fs::metadata(path) {
+            temp.as_file()
+                .set_permissions(meta.permissions())
+                .map_err(|e| e.to_string())?;
+        }
+        temp.as_file().sync_all().map_err(|e| e.to_string())?;
+        Ok(temp)
+    };
+    let staged = stage(bytes)?;
+    let backup = original.map(stage).transpose()?;
+    if read_limited(path, MAX_CONFIG_BYTES)?.as_deref() != original {
         return Err("Agent settings changed concurrently; retry".into());
     }
-    atomic_write(path, &bytes)?;
-    Ok(result)
+    if let Some(backup) = backup {
+        let mut backup_path = path.as_os_str().to_owned();
+        backup_path.push(".laymux-backup");
+        backup.persist(&backup_path).map_err(|e| e.to_string())?;
+    }
+    staged.persist(path).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[cfg(test)]

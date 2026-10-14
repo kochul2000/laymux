@@ -235,3 +235,17 @@ fn explicit_config_directory_overrides_environment_defaults() {
     );
     assert!(manage("codex", "status", "laymux", 1, Some(Path::new("relative"))).is_err());
 }
+
+#[test]
+fn refused_replacement_keeps_file_and_previous_backup() {
+    let (_dir, path) = fixture("config.toml", Some("model = \"new\"\n"));
+    let backup = path.with_file_name("config.toml.laymux-backup");
+    std::fs::write(&backup, "previous backup").unwrap();
+    // Rendered from an original that is no longer on disk.
+    let error = replace_if_unchanged(&path, Some(b"model = \"old\"\n"), b"x").unwrap_err();
+    assert!(error.contains("concurrently"));
+    assert_eq!(read(&path), "model = \"new\"\n");
+    assert_eq!(read(&backup), "previous backup");
+    let leftovers = std::fs::read_dir(path.parent().unwrap()).unwrap().count();
+    assert_eq!(leftovers, 2, "staged temp files must be cleaned up");
+}

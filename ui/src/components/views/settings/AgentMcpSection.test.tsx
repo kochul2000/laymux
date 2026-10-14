@@ -124,6 +124,12 @@ describe("AgentMcpSection", () => {
     fireEvent.change(screen.getByTestId("agent-mcp-config-dir"), {
       target: { value: "/home/me/.codex-work" },
     });
+    // Typing alone checks nothing; committing the folder does, once.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(
+      invoke.mock.calls.filter(([, args]) => args?.request?.configDir === "/home/me/.codex-work"),
+    ).toHaveLength(0);
+    fireEvent.blur(screen.getByTestId("agent-mcp-config-dir"));
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("manage_agent_mcp", {
         request: {

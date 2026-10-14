@@ -23,6 +23,9 @@ export function AgentMcpSection({ provider }: { provider: McpProvider }) {
   const [environments, setEnvironments] = useState<HookEnvironment[]>([]);
   const [environment, setEnvironment] = useState("native");
   const [configDir, setConfigDir] = useState("");
+  // Typed text becomes a target only when committed, so partial paths are
+  // never checked (each new target costs one helper run per app lifetime).
+  const [configDraft, setConfigDraft] = useState("");
   const [result, setResult] = useState<{ key: string; status?: McpStatus; error?: string }>();
   const [busy, setBusy] = useState(false);
   const [revision, setRevision] = useState(0);
@@ -108,6 +111,7 @@ export function AgentMcpSection({ provider }: { provider: McpProvider }) {
               onChange={(e) => {
                 setEnvironment(e.target.value);
                 setConfigDir("");
+                setConfigDraft("");
               }}
             >
               {environments.length ? (
@@ -199,10 +203,14 @@ export function AgentMcpSection({ provider }: { provider: McpProvider }) {
               <FocusInput
                 data-testid="agent-mcp-config-dir"
                 aria-label={t("agentHooks.configDir")}
-                value={configDir}
+                value={configDraft}
                 placeholder={t("agentHooks.defaultDir")}
                 disabled={busy}
-                onChange={(e) => setConfigDir(e.target.value)}
+                onChange={(e) => setConfigDraft(e.target.value)}
+                onBlur={() => setConfigDir(configDraft.trim())}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") setConfigDir(configDraft.trim());
+                }}
               />
               <span className="agent-hooks-muted">
                 {t("agentMcp.configDirDesc", { env: CONFIG_DIR_ENV[provider] })}
