@@ -547,15 +547,25 @@ test.describe("remote mobile layout", () => {
 
   test("workspace long press enters rename without switching workspace", async ({ page }) => {
     const controls = await routeRemoteWithWorkspaces(page, []);
+    const now = new Date();
+    await page.clock.install({ time: now });
+    await page.clock.pauseAt(now);
     await page.goto("http://remote.test/remote/#token=test-token");
     await page.locator("#connect").click();
+    await expect.poll(() => controls.outputAttachments).toEqual(["term-a1"]);
+    const initialRow = await page.locator('[data-workspace-item="ws-b"]').elementHandle();
+    expect(initialRow).not.toBeNull();
     await page.locator("#navToggle").click();
+    // Opening the drawer refreshes its rows; begin the gesture on the new row.
+    await expect.poll(() => initialRow!.evaluate((row) => row.isConnected)).toBe(false);
     let switches = 0;
     page.on("request", (request) => {
       if (new URL(request.url()).pathname === "/remote/v1/workspaces/active") switches += 1;
     });
     const name = page.locator('[data-workspace-item="ws-b"] .workspace-name');
+    await expect(page.locator('[data-workspace-manage="ws-b"]')).toBeEnabled();
     await name.dispatchEvent("pointerdown", { button: 0, clientX: 20, clientY: 30 });
+    await page.clock.runFor(450);
     await expect(page.locator("#workspaceRenameForm")).toBeVisible();
     await expect(page.locator("#workspaceNameInput")).toHaveValue("Beta");
     await expect(page.locator("#workspaceNameInput")).toBeFocused();
