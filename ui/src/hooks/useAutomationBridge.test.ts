@@ -4707,20 +4707,8 @@ describe("panes.stack / activateLayer / remove(layerId) bridge (ADR-0297)", () =
     );
     expect(useGridStore.getState().focusedPaneIndex).toBe(1);
 
-    // Focus is opt-in (ADR-0324): the default only changes the shown layer.
-    const byDefault = act("activateLayer", { layerId });
-    expect(byDefault.data).toMatchObject({ activated: layerId, focused: false });
-    expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].activeLayerId).toBe(layerId);
-    expect(useGridStore.getState().focusedPaneIndex).toBe(1);
-
-    act("activateLayer", { terminalId: `terminal-${firstLayer}` });
-    const byLayer = act("activateLayer", { layerId, focus: true });
-    expect(byLayer.data).toMatchObject({
-      activated: layerId,
-      paneIndex: 0,
-      layerIndex: 1,
-      focused: true,
-    });
+    const byLayer = act("activateLayer", { layerId });
+    expect(byLayer.data).toMatchObject({ activated: layerId, paneIndex: 0, layerIndex: 1 });
     expect(useGridStore.getState().focusedPaneIndex).toBe(0);
 
     expect(act("activateLayer", { layerId: "nope" }).success).toBe(false);

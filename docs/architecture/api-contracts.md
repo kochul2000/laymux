@@ -1032,7 +1032,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | POST | `/api/v1/grid/focus` | Pane 포커스 |
 | POST | `/api/v1/panes/split` | Pane 분할 |
 | POST | `/api/v1/panes/stack` | 슬롯 활성 레이어 뒤에 새 레이어(기본 `TerminalView`)를 쌓고 표시. 키보드 포커스는 옮기지 않는다. `cwd` 생략 시 활성 레이어 CWD 상속, 응답은 `{stacked, newPane{id,terminalId,paneIndex,paneNumber,layerIndex,layerCount,ready}}` — split 과 달리 rect(`x/y/w/h`)·`totalPanes` 는 없다(슬롯 기하가 그대로이므로) ([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)) |
-| POST | `/api/v1/panes/layers/activate` | `layerId` 또는 `terminalId` 로 레이어 하나를 표시. 기본(`focus=false`)은 워크스페이스 전환·포커스 없이 표시 레이어만 바꾼다. `focus=true` 면 필요하면 워크스페이스를 전환하고 그 슬롯에 포커스한다 ([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md), [ADR-0324](../adr/0324-automation-never-navigates-user.md)) |
+| POST | `/api/v1/panes/layers/activate` | `layerId` 또는 `terminalId` 로 레이어 하나를 표시. 기본(`focus=true`)은 필요하면 워크스페이스를 전환하고 그 슬롯에 포커스한다. `focus=false` 면 워크스페이스 전환·포커스 없이 표시 레이어만 바꾼다 ([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)) |
 | POST | `/api/v1/panes/layers/move` | `{layerId/terminalId, targetPaneIndex, index?}` — 스택 탭 드래그와 같다. 활성 워크스페이스 안에서 자기 슬롯이면 순서 변경, 다른 슬롯이면 그 스택으로 옮겨 표시. 빈 슬롯은 제거·재분배. 같은 자리면 `moved:false`. 응답 `{moved,paneIndex,layerIndex,layerCount,totalPanes}` ([ADR-0298](../adr/0298-pane-rearrangement-automation-parity.md)) |
 | POST | `/api/v1/panes/layers/extract` | `{layerId/terminalId, direction: horizontal/vertical}` — 탭 메뉴 Split out 과 같다. 단일 레이어 슬롯이면 오류. 응답 `{extracted,slotId,paneIndex,totalPanes}` ([ADR-0298](../adr/0298-pane-rearrangement-automation-parity.md)) |
 | POST | `/api/v1/panes/merge` | `{sourceIndex, targetIndex}` — 컨트롤 바를 스택 띠에 떨어뜨리기와 같다. 소스 슬롯의 모든 레이어를 대상 스택에 쌓고 소스 슬롯 제거. 응답 `{merged,paneIndex,layerCount,totalPanes}` ([ADR-0298](../adr/0298-pane-rearrangement-automation-parity.md)) |
@@ -1193,7 +1193,7 @@ lease 갱신에 성공한 heartbeat 응답은 항상 경로 없는 PC 뷰어 신
 | `focus_pane` | bridge_request | 인덱스 기반 팬 포커스 |
 | `split_pane` | bridge_request | 팬 분할 (`ready` 필드로 렌더 완료 여부 표시). `cwd` 생략 시 분할 대상 팬의 CWD 를 상속하고, 주면 그 값이 이긴다 ([ADR-0140](../adr/0140-split-pane-inherits-source-cwd.md)). 키보드 포커스는 사용자가 보던 슬롯에 남는다 ([ADR-0324](../adr/0324-automation-never-navigates-user.md)) |
 | `stack_pane` | bridge_request | 슬롯에 레이어 쌓기 — `split_pane` 미러(`view_type` 기본 `TerminalView`, `profile`, `cwd`, `ready`). 키보드 포커스는 옮기지 않는다 ([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)) |
-| `activate_pane_layer` | bridge_request | `layer_id` 또는 `terminal_id` 로 스택 레이어 표시. `focus` 기본 false 는 워크스페이스 전환·포커스 없이 표시 레이어만 바꾸고, `focus=true` 면 필요 시 워크스페이스 전환 + 슬롯 포커스 ([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md), [ADR-0324](../adr/0324-automation-never-navigates-user.md)) |
+| `activate_pane_layer` | bridge_request | `layer_id` 또는 `terminal_id` 로 스택 레이어 표시. `focus` 기본 true 는 필요 시 워크스페이스 전환 + 슬롯 포커스, `focus=false` 면 워크스페이스 전환·포커스 없이 표시 레이어만 바꾼다 ([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)) |
 | `remove_pane` | bridge_request | 팬 제거. 스택 슬롯은 `layer_id`(기본 활성 레이어) 하나만 닫는다 ([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)) |
 | `resize_pane` | bridge_request | 팬 크기 조정 — 공유 경계를 이웃과 함께 이동 (`dw`/`dh` 상대 delta, 해당 축에 경계가 없으면 오류. [ADR-0071](../adr/0071-pane-resize-single-boundary-owner.md)) |
 | `swap_panes` | bridge_request | 두 팬 위치 교환 (atomic 단일 상태 업데이트) |

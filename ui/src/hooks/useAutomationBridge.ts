@@ -946,8 +946,7 @@ const handlers: HandlerMap = {
       if (!rawId) return err("layerId or terminalId required");
       const found = findLayerInWorkspaces(useWorkspaceStore.getState().workspaces, rawId);
       if (!found) return err(`Layer '${rawId}' not found`);
-      // Automation does not navigate unless asked (ADR-0324): focus is opt-in.
-      const focus = p.focus === true;
+      const focus = p.focus !== false;
       activatePaneLayer(found.workspace.id, rawId, { focus });
       return ok({
         activated: rawId,

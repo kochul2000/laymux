@@ -370,7 +370,7 @@ pub async fn panes_activate_layer(
             )),
         );
     }
-    let mut params = serde_json::json!({ "focus": body.focus.unwrap_or(false) });
+    let mut params = serde_json::json!({ "focus": body.focus.unwrap_or(true) });
     if let Some(layer_id) = body.layer_id {
         params["layerId"] = serde_json::Value::String(layer_id);
     }

@@ -473,7 +473,7 @@ struct ActivatePaneLayerParam {
     layer_id: Option<String>,
     /// Terminal id of the layer (e.g. "terminal-pane-1234abcd"). Give this or layer_id.
     terminal_id: Option<String>,
-    /// Also switch to its workspace and focus the slot (default false: only the shown layer changes).
+    /// Also switch to its workspace and focus the slot (default true). false only changes the shown layer.
     focus: Option<bool>,
 }
 
@@ -2806,8 +2806,8 @@ impl McpHandler {
     }
 
     /// Show one stacked layer of its pane slot (ADR-0297), by layer_id or terminal_id.
-    /// By default only the shown layer changes, without switching workspace or moving
-    /// focus (ADR-0324); focus=true also switches workspace when needed and focuses the slot.
+    /// By default (focus=true) switches workspace when needed and focuses the slot;
+    /// focus=false only changes the shown layer, without switching workspace or focus.
     #[tool]
     async fn activate_pane_layer(
         &self,
@@ -2818,7 +2818,7 @@ impl McpHandler {
                 "Provide exactly one of layer_id or terminal_id",
             )]));
         }
-        let mut params = json!({ "focus": p.focus.unwrap_or(false) });
+        let mut params = json!({ "focus": p.focus.unwrap_or(true) });
         if let Some(layer_id) = p.layer_id {
             params["layerId"] = json!(layer_id);
         }
