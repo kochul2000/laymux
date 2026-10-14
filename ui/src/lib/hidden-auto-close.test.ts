@@ -32,6 +32,17 @@ describe("computeHiddenPaneIds", () => {
     expect([...result].sort()).toEqual(["p1", "p2"]);
   });
 
+  it("never marks panes an Automation request is using (ADR-0324)", () => {
+    const result = computeHiddenPaneIds({
+      panes,
+      hiddenPaneIds: new Set(),
+      hiddenWorkspaceIds: new Set(["wsA"]),
+      activeWorkspaceId: "wsB",
+      inUsePaneIds: new Set(["p2"]),
+    });
+    expect([...result]).toEqual(["p1"]);
+  });
+
   it("never marks panes in the active workspace", () => {
     const result = computeHiddenPaneIds({
       panes,

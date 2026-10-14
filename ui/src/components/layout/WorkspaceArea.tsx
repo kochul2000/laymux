@@ -3,6 +3,7 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useUiStore } from "@/stores/ui-store";
+import { usePaneRevealStore } from "@/stores/pane-reveal-store";
 import type { TerminalLocation } from "@/stores/settings-store";
 import { activatePaneLayer, focusWorkspacePane } from "@/lib/workspace-transition";
 import {
@@ -30,13 +31,26 @@ export function WorkspaceArea() {
   const swapPanes = useWorkspaceStore((s) => s.swapPanes);
   const location: TerminalLocation = "workspace";
   const resolveCwdDefaults = useCwdDefaultsResolver(location);
+  const revealRequests = usePaneRevealStore((s) => s.requestCounts);
 
   // Lazy mount: only render panes for workspaces that have been activated at least once.
   // Prevents unnecessary TerminalView/WebGL initialization for never-visited workspaces,
   // reducing GPU pressure at startup (fixes WebView2 GPU process crash).
+  // A workspace holding a pane that an Automation request is starting is mounted
+  // too, still display:none: the terminal starts rendererless without the user
+  // being switched there (ADR-0324).
   const [mountedWsIds, setMountedWsIds] = useState(() => new Set([activeWorkspaceId]));
-  if (!mountedWsIds.has(activeWorkspaceId)) {
-    setMountedWsIds(new Set(mountedWsIds).add(activeWorkspaceId));
+  const requiredWsIds = [activeWorkspaceId];
+  if (Object.keys(revealRequests).length > 0) {
+    for (const ws of workspaces) {
+      if (ws.panes.some((slot) => slot.layers.some((layer) => revealRequests[layer.id]))) {
+        requiredWsIds.push(ws.id);
+      }
+    }
+  }
+  const unmountedWsIds = requiredWsIds.filter((id) => !mountedWsIds.has(id));
+  if (unmountedWsIds.length > 0) {
+    setMountedWsIds(new Set([...mountedWsIds, ...unmountedWsIds]));
   }
 
   return (

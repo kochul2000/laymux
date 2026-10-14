@@ -17,6 +17,7 @@ import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
+import { usePaneRevealStore } from "@/stores/pane-reveal-store";
 describe("WorkspaceArea", () => {
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
@@ -229,6 +230,29 @@ describe("WorkspaceArea", () => {
     const activePanes = screen.getAllByTestId(/^workspace-pane-/);
     const activeWs = useWorkspaceStore.getState().workspaces[0];
     expect(activePanes).toHaveLength(activeWs.panes.length);
+  });
+
+  it("mounts a never-visited workspace hidden for an Automation reveal request (ADR-0324)", () => {
+    const store = useWorkspaceStore.getState();
+    store.addWorkspace("WS2", store.layouts[0].id);
+    const [ws1, ws2] = useWorkspaceStore.getState().workspaces;
+    const requestedLayerId = ws2.panes[0].layers[0].id;
+
+    render(<WorkspaceArea />);
+    expect(document.querySelector(`[data-layer-id='${requestedLayerId}']`)).toBeNull();
+
+    let release = () => {};
+    act(() => {
+      release = usePaneRevealStore.getState().requestReveal(requestedLayerId);
+    });
+
+    const box = document.querySelector(`[data-layer-id='${requestedLayerId}']`) as HTMLElement;
+    expect(box).not.toBeNull();
+    // The grid container of the background workspace stays display:none.
+    expect((box.parentElement as HTMLElement).style.display).toBe("none");
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws1.id);
+
+    act(() => release());
   });
 
   it("mounts workspace panes when first activated", () => {

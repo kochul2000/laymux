@@ -162,7 +162,7 @@ manifest가 아니라 `version`·`versionCode`·`releaseUrl`·`apkUrl`·`apkSha2
 - 자유 비율 그리드로 Pane 배치
 - 각 Pane은 하나의 View가 전체 영역을 채움
 - 선택된 Workspace에 따라 레이아웃 + View 구성 전체가 전환됨
-- **Lazy mount**: 한 번이라도 활성화된 워크스페이스만 마운트되며, 비활성 워크스페이스는 `display: none`으로 유지된다(PTY/WebGL 보존).
+- **Lazy mount**: 한 번이라도 활성화된 워크스페이스, 그리고 Automation 이 시작 중인 pane 을 가진 워크스페이스만 마운트되며, 비활성 워크스페이스는 `display: none`으로 유지된다(PTY/WebGL 보존, [ADR-0324](../adr/0324-automation-never-navigates-user.md)).
 
 #### Terminal startup coordinator (흰 화면 방지)
 
@@ -172,8 +172,8 @@ manifest가 아니라 `version`·`versionCode`·`releaseUrl`·`apkUrl`·`apkSha2
 - **전역 단일 슬롯**: `useTerminalStartupCoordinator`가 workspace·dock의 terminal pane과 terminal-backed FileViewer를 `terminal-startup-store` 한 곳에서 조정한다. 시작 슬롯을 받은 terminal 하나만 `ViewRenderer`/`TerminalView`를 마운트하고 나머지는 `PaneLoadingPlaceholder`를 렌더한다. non-terminal view는 즉시 마운트한다.
 - **준비 완료 경계**: 슬롯은 backend `createTerminalSession` 성공과 xterm 첫 `onRender`가 모두 관측된 뒤 다음 terminal로 넘어간다. 생성 실패는 즉시 다음 슬롯을 열고, 어느 한 신호가 오지 않는 결함에는 10초 watchdog이 liveness를 보장한다. 준비 전 slot owner가 workspace 전환·dock 숨김 등으로 현재 후보 eligibility를 잃으면 같은 상태 전이에서 즉시 다음 eligible terminal로 slot을 넘긴다. 이전 terminal은 reveal 집합에 남고 늦은 settle은 현재 slot을 바꾸지 않는다([ADR-0127](../adr/0127-terminal-startup-slot-follows-eligibility.md)).
 - **0축 시작**: RDP 최소 폭이나 초기 flex 계산으로 host가 `0×N`/`N×0`이어도 PTY는 기본 `80×24` grid로 생성되고 output attach·cache replay·serializer/inspector가 rendererless xterm에 연결된다. `terminal.open()`·fit·WebGL·focus만 최초 양의 크기까지 보류한다. 크기가 계속 0이면 첫 `onRender`가 없으므로 기존 10초 watchdog이 다음 슬롯을 연다.
-- **대상과 우선순위**: 활성 workspace, visible dock, 현재 열린 terminal-backed FileViewer가 새 시작 후보가 된다. Automation 요청 → 전경 FileViewer terminal → 현재 focused pane terminal → 활성 workspace 배열 순서 → visible dock 순서로 대기열을 계산한다. 비활성 workspace와 숨은 dock은 보류하지만 이미 시작한 PTY는 기존 lazy-mount/persist 정책에 따라 유지한다. `prefers-reduced-motion`은 spinner 애니메이션만 멈추며 리소스 안전 경계인 직렬화는 우회하지 않는다.
-- **Automation 대기**: 아직 마운트되지 않은 deterministic terminal id도 layout에서 찾아 요청 우선순위를 올린다. 비활성 workspace 대상이면 세션 생성 동안 활성화한 뒤 원래 workspace로 복원하며, focus/write 응답은 PTY 등록을 최대 20초 기다린다. 요청은 진행 중 슬롯을 선점하거나 동시 시작시키지 않는다.
+- **대상과 우선순위**: 활성 workspace, visible dock, 현재 열린 terminal-backed FileViewer가 새 시작 후보가 된다. Automation 요청 → 전경 FileViewer terminal → 현재 focused pane terminal → 활성 workspace 배열 순서 → visible dock 순서로 대기열을 계산한다. 비활성 workspace(Automation 요청 대상 제외)와 숨은 dock은 보류하지만 이미 시작한 PTY는 기존 lazy-mount/persist 정책에 따라 유지한다. `prefers-reduced-motion`은 spinner 애니메이션만 멈추며 리소스 안전 경계인 직렬화는 우회하지 않는다.
+- **Automation 대기**: 아직 마운트되지 않은 deterministic terminal id도 layout에서 찾아 요청 우선순위를 올린다. 비활성 workspace 대상이어도 활성 workspace를 바꾸지 않는다. 요청된 workspace 터미널은 비활성 workspace에 있어도 시작 후보가 되고 `WorkspaceArea`가 그 workspace를 숨긴 채 마운트해 rendererless로 시작하며, 숨김 자동 종료도 요청 동안 그 pane을 사용 중으로 본다([ADR-0324](../adr/0324-automation-never-navigates-user.md)). focus/write 응답은 PTY 등록을 최대 20초 기다린다. 요청은 진행 중 슬롯을 선점하거나 동시 시작시키지 않는다.
 - **WebGL 예약 타임라인**: 기존 전역 150ms WebGL 예약 간격은 별도 2차 안전장치로 유지한다. 시작 슬롯은 PTY+xterm 준비를, WebGL 타임라인은 GPU context 생성 간격을 각각 책임진다.
 
 #### 숨김 터미널 자동 종료 (issue #269)

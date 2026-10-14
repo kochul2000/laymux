@@ -124,7 +124,7 @@ pub struct ActivateLayerBody {
     pub layer_id: Option<String>,
     #[serde(rename = "terminalId")]
     pub terminal_id: Option<String>,
-    /// Also move keyboard focus to the slot (default true).
+    /// Also switch to its workspace and focus the slot (default false, ADR-0324).
     pub focus: Option<bool>,
 }
 

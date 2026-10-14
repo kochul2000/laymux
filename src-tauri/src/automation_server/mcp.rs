@@ -473,7 +473,7 @@ struct ActivatePaneLayerParam {
     layer_id: Option<String>,
     /// Terminal id of the layer (e.g. "terminal-pane-1234abcd"). Give this or layer_id.
     terminal_id: Option<String>,
-    /// Also switch to its workspace and focus the slot (default true). false only changes the shown layer.
+    /// Also switch to its workspace and focus the slot (default false: only the shown layer changes).
     focus: Option<bool>,
 }
 
@@ -2654,6 +2654,7 @@ impl McpHandler {
     }
 
     /// Create a new workspace, optionally from a layout template. Returns the new workspace's id, name, and pane count.
+    /// The user stays where they are (ADR-0324); call switch_workspace to go there.
     #[tool]
     async fn create_workspace(
         &self,
@@ -2762,6 +2763,7 @@ impl McpHandler {
     }
 
     /// Split a pane horizontally or vertically. Returns info about the new pane created.
+    /// Keyboard focus stays on the pane the user had focused (ADR-0324).
     /// The response includes a `ready` field: when false, the terminal is allocated but
     /// its PTY is still starting. `write_to_terminal` and `focus_terminal` wait for that
     /// session automatically before completing.
@@ -2804,8 +2806,8 @@ impl McpHandler {
     }
 
     /// Show one stacked layer of its pane slot (ADR-0297), by layer_id or terminal_id.
-    /// By default (focus=true) switches workspace when needed and focuses the slot;
-    /// focus=false only changes the shown layer, without switching workspace or focus.
+    /// By default only the shown layer changes, without switching workspace or moving
+    /// focus (ADR-0324); focus=true also switches workspace when needed and focuses the slot.
     #[tool]
     async fn activate_pane_layer(
         &self,
@@ -2816,7 +2818,7 @@ impl McpHandler {
                 "Provide exactly one of layer_id or terminal_id",
             )]));
         }
-        let mut params = json!({ "focus": p.focus.unwrap_or(true) });
+        let mut params = json!({ "focus": p.focus.unwrap_or(false) });
         if let Some(layer_id) = p.layer_id {
             params["layerId"] = json!(layer_id);
         }
