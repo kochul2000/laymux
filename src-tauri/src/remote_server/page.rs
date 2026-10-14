@@ -881,7 +881,9 @@ mod tests {
         assert!(html.contains("JSON.stringify({ leaseId: selectedLeaseId, layoutId })"));
         assert!(html.contains("id=\"hiddenWorkspaceShelf\""));
         assert!(html.contains("function setWorkspaceVisibility(workspaceId, hidden)"));
-        assert!(html.contains("function setPaneVisibility(paneId, hidden)"));
+        assert!(
+            html.contains("function setPaneVisibility(paneId, hidden, selectedLeaseId = leaseId)")
+        );
         assert!(html.contains("/remote/v1/terminals/${encodeURIComponent(terminalId)}/focus"));
         assert!(html.contains("/remote/v1/terminals"));
         assert!(
