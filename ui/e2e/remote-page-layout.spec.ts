@@ -190,6 +190,8 @@ async function routeRemoteWithWorkspaces(
   spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }>,
   options: {
     includeGamma?: boolean;
+    includeMemoPane?: boolean;
+    initialHiddenPaneIds?: string[];
     initialHiddenWorkspaceIds?: string[];
     selectorStatus?: Record<string, unknown>;
     paneUnreadCount?: number;
@@ -206,6 +208,7 @@ async function routeRemoteWithWorkspaces(
   ) => void;
   setLastInputMode: (mode: "perPane" | "workspaceLatest") => void;
   visibilityRequests: Array<{ path: string; body: { hidden: boolean; leaseId: string } }>;
+  closeRequests: Array<{ id: string; leaseId: string }>;
   focusRequests: Array<{ terminalId: string; body: { leaseId: string } }>;
   outputAttachments: string[];
   setVisibilityFallbackWorkspaceId: (workspaceId: string | null) => void;
@@ -225,7 +228,9 @@ async function routeRemoteWithWorkspaces(
   }> = [];
   const focusRequests: Array<{ terminalId: string; body: { leaseId: string } }> = [];
   const hiddenWorkspaceIds = new Set(options.initialHiddenWorkspaceIds ?? []);
-  const hiddenPaneIds = new Set<string>();
+  const hiddenPaneIds = new Set<string>(options.initialHiddenPaneIds ?? []);
+  const closedPaneIds = new Set<string>();
+  const closeRequests: Array<{ id: string; leaseId: string }> = [];
   const savedLayouts: Array<{ id: string; name: string }> = [];
   const outputAttachments: string[] = [];
   let activeWorkspaceId = "ws-a";
@@ -327,7 +332,9 @@ async function routeRemoteWithWorkspaces(
             name: workspaceNames[activeWorkspaceId],
             panes:
               activeWorkspaceId === "ws-a"
-                ? [paneWithVisibility(paneA1), paneWithVisibility(paneA2)]
+                ? [paneWithVisibility(paneA1), paneWithVisibility(paneA2)].filter(
+                    (pane) => !closedPaneIds.has(pane.id),
+                  )
                 : [paneWithVisibility(paneB1)],
           },
           workspaces: [
@@ -339,7 +346,9 @@ async function routeRemoteWithWorkspaces(
               selectorSummary: { terminalCount: 2, lastCommand: null, latestNotification: null },
               hidden: hiddenWorkspaceIds.has("ws-a"),
               collapsed: hiddenWorkspaceIds.has("ws-a"),
-              panes: [paneWithVisibility(paneA1), paneWithVisibility(paneA2)],
+              panes: [paneWithVisibility(paneA1), paneWithVisibility(paneA2)].filter(
+                (pane) => !closedPaneIds.has(pane.id),
+              ),
             },
             {
               id: "ws-b",
@@ -373,7 +382,9 @@ async function routeRemoteWithWorkspaces(
                     },
                     hidden: hiddenWorkspaceIds.has("ws-c"),
                     collapsed: hiddenWorkspaceIds.has("ws-c"),
-                    panes: [],
+                    panes: options.includeMemoPane
+                      ? [paneWithVisibility({ id: "p-c1", viewType: "MemoView" })]
+                      : [],
                   },
                 ]
               : []),
@@ -415,6 +426,14 @@ async function routeRemoteWithWorkspaces(
       });
       return;
     }
+    const closeMatch = url.pathname.match(/^\/remote\/v1\/panes\/([^/]+)\/close$/);
+    if (closeMatch) {
+      const id = decodeURIComponent(closeMatch[1]);
+      closeRequests.push({ id, leaseId: route.request().postDataJSON().leaseId });
+      closedPaneIds.add(id);
+      await route.fulfill({ json: { success: true, data: { closed: id } } });
+      return;
+    }
     const focusMatch = url.pathname.match(/^\/remote\/v1\/terminals\/([^/]+)\/focus$/);
     if (focusMatch) {
       const terminalId = decodeURIComponent(focusMatch[1]);
@@ -441,6 +460,7 @@ async function routeRemoteWithWorkspaces(
     outputAttachments,
     focusRequests,
     visibilityRequests,
+    closeRequests,
     setVisibilityFallbackWorkspaceId(workspaceId) {
       visibilityFallbackWorkspaceId = workspaceId;
     },
@@ -460,59 +480,90 @@ async function routeRemoteWithWorkspaces(
 test.describe("remote mobile layout", () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
 
-  test("aligns workspace and pane skip/hide actions on mobile", async ({ page }) => {
-    await routeRemoteWithWorkspaces(page, [], { includeGamma: true });
+  async function openPaneMenu(page: Page, id: string) {
+    await expect(page.locator(`[data-pane-manage="${id}"]`)).toBeAttached();
+    if (
+      (await page.locator("#drawerWorkspaceView").isHidden()) &&
+      (await page.locator("#navToggle").getAttribute("aria-expanded")) === "true"
+    ) {
+      await page.locator("#navToggle").click();
+    }
+    if ((await page.locator("#navToggle").getAttribute("aria-expanded")) !== "true")
+      await page.locator("#navToggle").click();
+    await page.locator(`[data-pane-manage="${id}"]`).click();
+    await expect(page.locator("#paneManager")).toBeVisible();
+  }
+
+  test("workspace and pane rows use manage then skip and menu visibility", async ({ page }) => {
+    await routeRemoteWithWorkspaces(page, []);
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await openPaneMenu(page, "p-a2");
+    await expect(page.locator("#paneManagerTitle")).toContainText("Alpha");
+    await page.screenshot({ path: "../.screenshots/remote-pane-menu-mobile.png" });
+    await page.locator('[data-pane-action="hide"]').click();
+    await expect(page.locator("#paneManager")).not.toBeVisible();
+    await expect(page.locator('[data-pane-row="p-a2"]')).toHaveClass(/hidden-item/);
+    await openPaneMenu(page, "p-a2");
+    await expect(page.locator('[data-pane-action="hide"]')).toHaveText("Show pane");
+    await page.locator('[data-pane-action="hide"]').click();
+    const positions = await page.evaluate(() =>
+      [
+        '[data-workspace-manage="ws-a"]',
+        '[data-workspace-skip="ws-a"]',
+        '[data-pane-manage="p-a2"]',
+        '[data-pane-skip="p-a2"]',
+      ].map((s) => document.querySelector(s)!.getBoundingClientRect().x),
+    );
+    expect(positions[0]).toBeLessThan(positions[1]);
+    expect(positions[2]).toBeLessThan(positions[3]);
+    expect(Math.abs(positions[1] - positions[3])).toBeLessThan(1);
+    await page.screenshot({ path: "../.screenshots/remote-manage-skip-mobile.png" });
+  });
+
+  test("pane menu closes only after two taps and preserves confirmation across refresh", async ({
+    page,
+  }) => {
+    const controls = await routeRemoteWithWorkspaces(page, []);
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await openPaneMenu(page, "p-a2");
+    const close = page.locator('[data-pane-action="close-pane"]');
+    await expect(close).not.toHaveCSS("color", "rgb(243, 139, 168)");
+    await close.tap();
+    expect(controls.closeRequests).toHaveLength(0);
+    await expect(close).toHaveCSS("color", "rgb(243, 139, 168)");
+    await expect(close).toHaveText("Close pane");
+    await page.waitForTimeout(1200);
+    await expect(close).toHaveAttribute("data-confirming", "true");
+    await page.screenshot({ path: "../.screenshots/remote-pane-menu-armed-mobile.png" });
+    await close.tap();
+    await expect.poll(() => controls.closeRequests.length).toBe(1);
+    expect(controls.closeRequests[0]).toEqual({ id: "p-a2", leaseId: "lease-1" });
+    await expect(page.locator("#paneManager")).not.toBeVisible();
+    await expect(page.locator('[data-pane-row="p-a2"]')).toHaveCount(0);
+    await expect(page.locator('[data-pane-row="p-a1"]')).toBeVisible();
+  });
+
+  test("workspace long press enters rename without switching workspace", async ({ page }) => {
+    const controls = await routeRemoteWithWorkspaces(page, []);
     await page.goto("http://remote.test/remote/#token=test-token");
     await page.locator("#connect").click();
     await page.locator("#navToggle").click();
-    await expect(page.locator("header #spatialExclusion")).toHaveCount(0);
-    const paneSkip = page.locator('[data-pane-skip="p-a2"]');
-    const paneHide = page.locator('[data-pane-visibility="p-a2"]');
-    await expect(paneSkip).toBeVisible();
-    // Read one DOM generation: navigation refresh can replace all rows.
-    await expect
-      .poll(() =>
-        page.evaluate(() => {
-          const boxes = [
-            '[data-workspace-skip="ws-a"]',
-            '[data-workspace-visibility="ws-a"]',
-            '[data-pane-skip="p-a2"]',
-            '[data-pane-visibility="p-a2"]',
-            '[data-workspace-visibility="ws-c"]',
-          ].map((selector) => document.querySelector(selector)?.getBoundingClientRect());
-          if (boxes.some((box) => !box || box.width === 0)) return false;
-          return (
-            boxes[0]!.x < boxes[1]!.x &&
-            boxes[2]!.x < boxes[3]!.x &&
-            Math.abs(boxes[0]!.x - boxes[2]!.x) < 1 &&
-            Math.abs(boxes[1]!.x - boxes[3]!.x) < 1 &&
-            Math.abs(boxes[1]!.x - boxes[4]!.x) < 1
-          );
-        }),
-      )
-      .toBe(true);
-    await paneSkip.click();
-    await expect(paneSkip).toHaveAttribute("aria-pressed", "true");
-    await expect(page.locator('[data-pane-row="p-a2"]')).toBeVisible();
-    await paneHide.click();
-    await expect(paneHide).toHaveAttribute("aria-pressed", "true");
-    await expect(paneSkip).toHaveAttribute("aria-pressed", "true");
-    await paneHide.click();
-    await expect(paneHide).toHaveAttribute("aria-pressed", "false");
-    await expect
-      .poll(() =>
-        page.evaluate(() => {
-          const lastInput = document.querySelector('[data-pane-last-input="p-b1"]');
-          const item = lastInput?.closest(".workspace-item");
-          if (!lastInput || !item) return null;
-          return item.getBoundingClientRect().bottom - lastInput.getBoundingClientRect().bottom;
-        }),
-      )
-      .toBeLessThanOrEqual(5);
-    await expect(
-      page.locator(".workspace-item", { hasText: "Gamma" }).locator(".workspace-summary-line"),
-    ).toBeHidden();
-    await page.screenshot({ path: "../.screenshots/remote-actions-mobile.png" });
+    let switches = 0;
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/remote/v1/workspaces/active") switches += 1;
+    });
+    const name = page.locator('[data-workspace-item="ws-b"] .workspace-name');
+    await name.dispatchEvent("pointerdown", { button: 0, clientX: 20, clientY: 30 });
+    await expect(page.locator("#workspaceRenameForm")).toBeVisible();
+    await expect(page.locator("#workspaceNameInput")).toHaveValue("Beta");
+    await expect(page.locator("#workspaceNameInput")).toBeFocused();
+    await name.dispatchEvent("pointerup");
+    await name.dispatchEvent("click");
+    expect(controls.focusRequests).toHaveLength(0);
+    expect(switches).toBe(0);
+    await page.screenshot({ path: "../.screenshots/remote-workspace-long-rename.png" });
   });
 
   test.beforeEach(async ({ page }) => {
@@ -573,6 +624,26 @@ test.describe("remote mobile layout", () => {
     }));
     expect(header.scrollWidth).toBe(header.clientWidth);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(180);
+  });
+
+  test("header skip follows the title and management stays in the drawer", async ({ page }) => {
+    await page.setViewportSize({ width: 700, height: 390 });
+    await page.locator("#statusText").evaluate((el) => {
+      el.textContent = "Alpha";
+    });
+    await page.locator("#spatialExclusion, #fileExplorerHeader").evaluateAll((buttons) =>
+      buttons.forEach((button) => {
+        button.hidden = false;
+      }),
+    );
+    const gap = await page.evaluate(
+      () =>
+        document.querySelector("#spatialExclusion")!.getBoundingClientRect().left -
+        document.querySelector("#statusText")!.getBoundingClientRect().right,
+    );
+    expect(gap).toBeGreaterThanOrEqual(0);
+    expect(gap).toBeLessThanOrEqual(8);
+    await expect(page.locator("#paneVisibilityHeader, #paneCloseHeader")).toHaveCount(0);
   });
 
   test("keeps terminal metadata out of the footer in wide landscape", async ({ page }) => {
@@ -1091,7 +1162,8 @@ test.describe("remote mobile layout", () => {
       )
       .toBe(18);
 
-    await alpha.locator('[data-pane-visibility="p-a2"]').click();
+    await openPaneMenu(page, "p-a2");
+    await page.locator('[data-pane-action="hide"]').click();
     await expect(alpha.locator(".workspace-last-input")).toHaveText("older pane input");
   });
 
@@ -1175,18 +1247,20 @@ test.describe("remote mobile layout", () => {
     await expect(page.locator("#hiddenWorkspaceToggle")).toBeHidden();
     await expect(page.locator("#drawerWorkspaceView")).toBeVisible();
 
-    const paneToggle = page.locator('[data-pane-visibility="p-a2"]');
+    await openPaneMenu(page, "p-a2");
+    const paneToggle = page.locator('[data-pane-action="hide"]');
     await paneToggle.click();
     await expect(page.locator('[data-pane-row="p-a2"]')).toHaveClass(/hidden-item/);
-    await expect(paneToggle).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator("#paneManager")).not.toBeVisible();
     expect(controls.visibilityRequests.at(-1)).toEqual({
       path: "/remote/v1/panes/p-a2/visibility",
       body: { hidden: true, leaseId: "lease-1" },
     });
 
+    await openPaneMenu(page, "p-a2");
     await paneToggle.click();
     await expect(page.locator('[data-pane-row="p-a2"]')).not.toHaveClass(/hidden-item/);
-    await expect(paneToggle).toHaveAttribute("aria-pressed", "false");
+    await expect(page.locator("#paneManager")).not.toBeVisible();
   });
 
   test("keeps keyboard focus after partial and final hidden workspace restores", async ({

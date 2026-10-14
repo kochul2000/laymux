@@ -486,8 +486,15 @@
         white-space: nowrap;
         vertical-align: bottom;
       }
-      .status {
+      .pane-header-identity {
+        display: flex;
         flex: 1 1 auto;
+        min-width: 0;
+        align-items: center;
+        gap: var(--toolbar-gap);
+      }
+      .status {
+        flex: 0 1 auto;
         min-width: 0;
         padding: 0;
         color: var(--muted);
@@ -875,6 +882,12 @@
       }
       .copy-pane-button {
         color: var(--text-secondary);
+      }
+      .pane-close-button[data-confirming="true"] {
+        color: var(--red);
+        background: var(--danger-bg);
+        box-shadow: inset 0 0 0 1px var(--red);
+        opacity: 1;
       }
       .file-explorer-button {
         position: relative;
@@ -1934,11 +1947,41 @@
       }
       .workspace-manager h2 {
         margin: 0;
+        min-width: 0;
         font-size: 1em;
         overflow-wrap: anywhere;
       }
       .workspace-manager button { min-height: 44px; }
-      #workspaceManagerActions button {
+      .workspace-manager .item-manager-dismiss {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 44px;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: transparent;
+        color: var(--text-secondary);
+        -webkit-tap-highlight-color: transparent;
+      }
+      .item-manager-dismiss .remote-icon { width: 18px; height: 18px; }
+      .workspace-manager .item-manager-dismiss:hover:not(:disabled),
+      .workspace-manager .item-manager-dismiss:active:not(:disabled) {
+        background: var(--hover-bg);
+        color: var(--text-primary);
+      }
+      .workspace-manager .item-manager-dismiss:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      .workspace-manager .pane-close-button:not([data-confirming="true"]) {
+        color: var(--text-secondary);
+        -webkit-tap-highlight-color: transparent;
+      }
+      #workspaceManagerActions button,
+      .item-manager-actions button {
         display: block;
         width: 100%;
         text-align: left;

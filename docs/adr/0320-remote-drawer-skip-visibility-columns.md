@@ -1,6 +1,6 @@
 # 0320. Remote 드로어는 페인과 워크스페이스의 스킵·숨김 열을 통일한다
 
-- Status: Accepted
+- Status: Superseded by [0322](0322-remote-item-management-menus.md)
 - Date: 2026-10-12
 - Source: 사용자 요청 및 모바일 화면 승인, [api-contracts.md §13.3](../architecture/api-contracts.md), [ADR-0047](0047-remote-spatial-workspace-exclusions.md), [ADR-0153](0153-remote-hidden-item-visibility-controls.md), [ADR-0310](0310-remote-workspace-management-menu.md)
 - Amends: ADR-0310의 숨김 진입점 통합. 이름 변경·템플릿 저장 관리 메뉴와 호스트 계약은 유지한다.

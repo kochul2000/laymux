@@ -44,6 +44,9 @@ describe("remote page bundle", () => {
   it("committed minified artifacts match the sources", () => {
     const banner = readFileSync(path.join(ASSETS_DIR, "remote-app.min.js"), "utf8").split("\n", 8);
     const stamp = banner.find((line) => line.startsWith("// Source-SHA256:"));
+    expect(banner).toContain(
+      `// Pane-controls-SHA256: ${fileHash(path.resolve(__dirname, "remote-pane-controls.js"))}`,
+    );
     const lock = JSON.parse(readFileSync(PACKAGE_LOCK_PATH, "utf8")) as PackageLock;
     expect(banner).toContain(
       `// Keyboard-SHA256: ${fileHash(path.resolve(__dirname, "remote-keyboard.js"))}`,

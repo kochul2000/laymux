@@ -667,7 +667,15 @@ const handlers: HandlerMap = {
       const id = p.id as string;
       const wsErr = checkWorkspaceExists(id);
       if (wsErr) return wsErr;
+      if (useWorkspaceStore.getState().workspaces.length <= 1)
+        return err("Cannot close the last workspace");
+      const wasActive = useWorkspaceStore.getState().activeWorkspaceId === id;
       useWorkspaceStore.getState().removeWorkspace(id);
+      if (wasActive) {
+        switchActiveWorkspace(useWorkspaceStore.getState().activeWorkspaceId, {
+          preserveDockFocus: useDockStore.getState().focusedDock !== null,
+        });
+      }
       return ok({ removed: id });
     },
     rename: (p) => {
@@ -890,6 +898,27 @@ const handlers: HandlerMap = {
       const slotRemoved = (ws?.panes.length ?? before) < before;
       const remainingLayers = slotRemoved ? 0 : (ws?.panes[paneIndex]?.layers.length ?? 0);
       return ok({ removed: true, slotRemoved, remainingLayers });
+    },
+    closeById: (p) => {
+      const paneId = p.paneId;
+      if (typeof paneId !== "string" || !paneId.trim()) return err("paneId required");
+      const workspaceState = useWorkspaceStore.getState();
+      const workspace = workspaceState.workspaces.find((ws) =>
+        ws.panes.some((slot) => slot.layers.some((layer) => layer.id === paneId)),
+      );
+      if (workspace) {
+        const removed = keepGridFocusOnSlot(() => workspaceState.removePaneById(paneId));
+        return removed ? ok({ closed: paneId }) : err("Cannot close the last pane");
+      }
+      const dockState = useDockStore.getState();
+      const dock = dockState.docks.find((item) => item.panes.some((pane) => pane.id === paneId));
+      if (!dock) return err(`Pane '${paneId}' not found`);
+      if (dock.panes.length <= 1) return err("Cannot close the last dock pane");
+      dockState.removeDockPane(dock.position, paneId);
+      if (dockState.focusedDock === dock.position && dockState.focusedDockPaneId === paneId) {
+        focusDockPane(dock.position);
+      }
+      return ok({ closed: paneId });
     },
     // ADR-0297: stack a new layer on a slot. Mirrors `split`: MCP callers get a
     // usable terminal by default, and an explicit cwd beats the inherited seed.

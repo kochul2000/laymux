@@ -4558,6 +4558,79 @@ describe("panes.stack / activateLayer / remove(layerId) bridge (ADR-0297)", () =
     useGridStore.getState().setFocusedPane(1);
   });
 
+  it("closeById removes only the named stacked layer and clears its side state", () => {
+    const added = act("stack", { paneIndex: 0, profile: "WSL", cwd: "/repo" });
+    const layerId = (added.data as { newPane: { id: string } }).newPane.id;
+    const before = useWorkspaceStore.getState().getActiveWorkspace()!;
+    const result = act("closeById", { paneId: layerId });
+    expect(result.success).toBe(true);
+    expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes).toHaveLength(
+      before.panes.length,
+    );
+    expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].layers).toHaveLength(1);
+    expect(useTerminalRestartStore.getState().requests[layerId]).toBeUndefined();
+    expect(act("closeById", { paneId: layerId }).success).toBe(false);
+  });
+
+  it("closeById resolves the current index after pane rearrangement", () => {
+    const store = useWorkspaceStore.getState();
+    const selectedId = store.getActiveWorkspace()!.panes[0].layers[0].id;
+    store.swapPanes(0, 1);
+    expect(act("closeById", { paneId: selectedId }).success).toBe(true);
+    expect(
+      store
+        .getActiveWorkspace()!
+        .panes.flatMap((pane) => pane.layers)
+        .map((layer) => layer.id),
+    ).not.toContain(selectedId);
+  });
+
+  it("closeById handles an inactive workspace without switching workspace or focus", () => {
+    const store = useWorkspaceStore.getState();
+    const source = store.getActiveWorkspace()!;
+    const copied = store.duplicateWorkspace(source.id)!;
+    const paneId = copied.paneIdMap[source.panes[0].layers[0].id];
+    expect(act("closeById", { paneId }).success).toBe(true);
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(source.id);
+    expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+  });
+
+  it("closeById rejects unknown ids and the last workspace layer", () => {
+    expect(act("closeById", { paneId: "missing" }).success).toBe(false);
+    while (useWorkspaceStore.getState().getActiveWorkspace()!.panes.length > 1)
+      act("remove", { paneIndex: 0 });
+    const paneId = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].layers[0].id;
+    expect(act("closeById", { paneId }).success).toBe(false);
+    expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes).toHaveLength(1);
+  });
+
+  it("closeById closes a dock pane, repairs dock focus and rejects its last pane", () => {
+    const initial = useDockStore.getState();
+    useDockStore.setState({
+      docks: initial.docks.map((dock) =>
+        dock.position === "right"
+          ? {
+              ...dock,
+              panes: ["dock-a", "dock-b"].map((id, i) => ({
+                id,
+                x: 0,
+                y: i * 0.5,
+                w: 1,
+                h: 0.5,
+                view: { type: "TerminalView" as const },
+              })),
+            }
+          : dock,
+      ),
+    });
+    useDockStore.getState().setFocusedDock("right", "dock-a");
+    useGridStore.getState().setFocusedPane(null);
+    expect(act("closeById", { paneId: "dock-a" }).success).toBe(true);
+    expect(useDockStore.getState().focusedDockPaneId).toBe("dock-b");
+    expect(useGridStore.getState().focusedPaneIndex).toBeNull();
+    expect(act("closeById", { paneId: "dock-b" }).success).toBe(false);
+  });
+
   it("stacks a terminal layer without moving keyboard focus", () => {
     const result = act("stack", { paneIndex: 0, profile: "WSL", cwd: "/repo" });
     expect(result.success).toBe(true);
