@@ -2,6 +2,19 @@ use super::*;
 use crate::terminal::{TerminalConfig, TerminalSession};
 
 #[test]
+fn installation_discovery_is_once_per_top_level_target_including_shared_server_metadata() {
+    let (state, mut event) = fixture();
+    event.token = "historical-server-token".into();
+    assert!(accept(&state, event.clone()).unwrap());
+    assert!(!accept(&state, event.clone()).unwrap());
+    event.config_dir = Some("/second".into());
+    event.agent_id = Some("child".into());
+    assert!(!accept(&state, event.clone()).unwrap());
+    event.agent_id = None;
+    assert!(accept(&state, event).unwrap());
+}
+
+#[test]
 fn accepted_top_level_codex_metadata_requests_an_ordinary_checkpoint() {
     let (state, event) = fixture();
     let before = state.session_checkpoint.hints.revision();

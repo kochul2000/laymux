@@ -878,3 +878,5 @@ mod tests {
         }
     }
 }
+pub const EVENT_AGENT_HOOK_INSPECTION_NEEDED: &str = "agent-hook-inspection-needed";
+pub const AGENT_HOOK_INSPECTION_MAX_TARGETS: usize = 512;

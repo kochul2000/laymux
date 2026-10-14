@@ -1,5 +1,6 @@
 //! Optional CLI integration. Installation and observations are independent of
 //! heuristic activity; consuming hook state is an explicit settings decision.
+pub mod inspections;
 pub mod observations;
 pub mod title;
 pub mod updates;
@@ -57,8 +58,28 @@ pub fn environments() -> Result<Vec<Value>, AppError> {
     Ok(values)
 }
 
-pub fn manage(request: &ManageRequest, app: &tauri::AppHandle) -> Result<Value, AppError> {
-    manage_in_directory(request, &helper_directory(app)?)
+pub fn manage(
+    request: &ManageRequest,
+    state: &AppState,
+    app: &tauri::AppHandle,
+) -> Result<Value, AppError> {
+    laymux_agent_hook::install::config_name(&request.provider).map_err(AppError::Other)?;
+    if !matches!(
+        request.operation.as_str(),
+        "status" | "install" | "remove" | "update"
+    ) || request
+        .distro
+        .as_ref()
+        .is_some_and(|d| !cfg!(windows) || !crate::wsl_probe::is_safe_distro_name(d))
+    {
+        return Err(AppError::Other("Invalid hook management request".into()));
+    }
+    let _gate = state.agent_hook_inspections.gate()?;
+    state.agent_hook_inspections.begin(request)?;
+    let result =
+        helper_directory(app).and_then(|directory| manage_in_directory(request, &directory));
+    state.agent_hook_inspections.record(request, &result)?;
+    result
 }
 
 pub(super) fn manage_with_timeout(
@@ -81,6 +102,7 @@ fn manage_in_directory_with_timeout(
     directory: &std::path::Path,
     timeout: Duration,
 ) -> Result<Value, AppError> {
+    tracing::debug!(provider=%request.provider, operation=%request.operation, distro=?request.distro, config_dir=?request.config_dir, "Inspecting agent hook installation");
     laymux_agent_hook::install::config_name(&request.provider).map_err(AppError::Other)?;
     if !matches!(
         request.operation.as_str(),
@@ -163,7 +185,7 @@ fn helper_directory(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
         .map_err(|e| AppError::Other(e.to_string()))
 }
 
-pub fn accept(state: &AppState, event: HookEvent) -> Result<(), AppError> {
+pub fn accept(state: &AppState, event: HookEvent) -> Result<bool, AppError> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| AppError::Other(e.to_string()))?
@@ -198,29 +220,41 @@ pub fn accept(state: &AppState, event: HookEvent) -> Result<(), AppError> {
     if recorded && event.provider == "codex" {
         state.session_checkpoint.hints.request();
     }
+    let needed = recorded
+        && event.agent_id.is_none()
+        && event
+            .config_dir
+            .as_ref()
+            .is_some_and(|root| !root.is_empty())
+        && state.agent_hook_inspections.announce(&ManageRequest {
+            provider: event.provider.clone(),
+            operation: "status".into(),
+            distro: event.distro.clone(),
+            config_dir: event.config_dir.clone(),
+        })?;
     let mut terminals = state.terminals.lock_or_err()?;
     let Some(session) = terminals.get_mut(&event.terminal_id) else {
-        return Ok(());
+        return Ok(needed);
     };
     if session.agent_hook_token.is_empty() || session.agent_hook_token != event.token {
-        return Ok(());
+        return Ok(needed);
     }
     if let Some(previous) = &session.agent_hook {
         if event.emitted_at_ms < previous.emitted_at_ms {
-            return Ok(());
+            return Ok(needed);
         }
         if event.event == "SessionEnd"
             && (previous.session_id != event.session_id || previous.provider != event.provider)
         {
-            return Ok(());
+            return Ok(needed);
         }
     }
     // Subagent sessions must not replace the parent pane's conversation.
     if event.agent_id.is_some() {
-        return Ok(());
+        return Ok(needed);
     }
     session.agent_hook = Some(event);
-    Ok(())
+    Ok(needed)
 }
 
 pub fn connections(state: &AppState) -> Result<Vec<Value>, AppError> {

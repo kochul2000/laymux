@@ -47,7 +47,18 @@ pub async fn hook_event(
     Json(event): Json<HookEvent>,
 ) -> impl IntoResponse {
     match crate::agent_hooks::accept(&state.app_state, event) {
-        Ok(()) => (StatusCode::OK, Json(ok_json_data(serde_json::json!({})))),
+        Ok(needed) => {
+            if needed {
+                use tauri::Emitter;
+                if let Err(error) = state
+                    .app_handle
+                    .emit(crate::constants::EVENT_AGENT_HOOK_INSPECTION_NEEDED, ())
+                {
+                    tracing::warn!(%error, "Could not notify hook target discovery");
+                }
+            }
+            (StatusCode::OK, Json(ok_json_data(serde_json::json!({}))))
+        }
         Err(e) => (StatusCode::BAD_REQUEST, Json(err_json(&e.to_string()))),
     }
 }
@@ -77,7 +88,7 @@ pub async fn hook_manage(
     Json(request): Json<crate::agent_hooks::ManageRequest>,
 ) -> impl IntoResponse {
     match tokio::task::spawn_blocking(move || {
-        crate::agent_hooks::manage(&request, &state.app_handle)
+        crate::agent_hooks::manage(&request, &state.app_state, &state.app_handle)
     })
     .await
     {

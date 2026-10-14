@@ -6,7 +6,17 @@ import {
   useAgentHookUpdateStore,
 } from "./agent-hook-updates";
 const invoke = vi.hoisted(() => vi.fn());
+const events = vi.hoisted(() => ({
+  handler: undefined as (() => void) | undefined,
+  stop: vi.fn(),
+}));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(async (_event, handler) => {
+    events.handler = handler;
+    return events.stop;
+  }),
+}));
 const target = {
   provider: "codex" as const,
   distro: "Ubuntu",
@@ -24,9 +34,51 @@ const target = {
 afterEach(() => {
   vi.useRealTimers();
   invoke.mockReset();
+  events.handler = undefined;
+  events.stop.mockReset();
 });
 
 describe("agent hook update coordinator", () => {
+  it("queues a manual reinspection after an in-flight automatic check", async () => {
+    let resolve!: (value: unknown) => void;
+    invoke.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    invoke.mockResolvedValue({ targets: [], errors: [] });
+    const automatic = refreshAgentHookUpdates(true);
+    const manual = refreshAgentHookUpdates();
+    expect(invoke).toHaveBeenCalledTimes(1);
+    resolve({ targets: [], errors: [] });
+    await automatic;
+    await manual;
+    expect(invoke.mock.calls.map((call) => call[1])).toEqual([
+      { automatic: true },
+      { automatic: false },
+    ]);
+  });
+  it("coalesces discovery during a slow startup into one follow-up cached check", async () => {
+    vi.useFakeTimers();
+    let resolve!: (value: unknown) => void;
+    invoke.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    invoke.mockResolvedValue({ targets: [], errors: [] });
+    const stop = subscribeAgentHookUpdates();
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      for (let i = 0; i < 10; i++) events.handler?.();
+      expect(invoke).toHaveBeenCalledTimes(1);
+      resolve({ targets: [], errors: [] });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(invoke).toHaveBeenCalledTimes(2);
+    } finally {
+      stop();
+    }
+  });
   it("keeps a known stale target when only that environment fails in a partial audit", async () => {
     useAgentHookUpdateStore.setState({ targets: [target] });
     invoke.mockResolvedValue({
@@ -87,36 +139,37 @@ describe("agent hook update coordinator", () => {
     expect(useAgentHookUpdateStore.getState().targets).toEqual([target]);
     expect(useAgentHookUpdateStore.getState().errors[0].message).toContain("WSL timeout");
   });
-  it("checks again after 60 seconds and stops checking after unmount", async () => {
+  it("does not inspect again on elapsed time or focus and unsubscribes on unmount", async () => {
     vi.useFakeTimers();
     invoke.mockResolvedValue({ targets: [], errors: [] });
     const stop = subscribeAgentHookUpdates();
-    await refreshAgentHookUpdates();
+    await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(invoke).toHaveBeenCalledTimes(1);
     stop();
     await vi.advanceTimersByTimeAsync(120_000);
     window.dispatchEvent(new Event("focus"));
-    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(events.stop).toHaveBeenCalled();
   });
   it("does not repeat automatic checks when focus returns during the 60-second interval", async () => {
     vi.useFakeTimers();
     invoke.mockResolvedValue({ targets: [], errors: [] });
     const stop = subscribeAgentHookUpdates();
     try {
-      await refreshAgentHookUpdates();
+      await vi.advanceTimersByTimeAsync(0);
       for (let i = 0; i < 20; i++) {
         window.dispatchEvent(new Event("focus"));
         await vi.advanceTimersByTimeAsync(1000);
       }
       expect(invoke).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(40_000);
-      expect(invoke).toHaveBeenCalledTimes(2);
+      expect(invoke).toHaveBeenCalledTimes(1);
     } finally {
       stop();
     }
   });
-  it("shares a slow automatic check and starts its interval after that check completes", async () => {
+  it("does not schedule another inspection after a slow automatic check", async () => {
     vi.useFakeTimers();
     let resolve!: (value: unknown) => void;
     invoke.mockReturnValueOnce(
@@ -130,12 +183,12 @@ describe("agent hook update coordinator", () => {
       await vi.advanceTimersByTimeAsync(20_000);
       window.dispatchEvent(new Event("focus"));
       resolve({ targets: [], errors: [] });
-      await refreshAgentHookUpdates();
+      await vi.advanceTimersByTimeAsync(0);
       window.dispatchEvent(new Event("focus"));
       await vi.advanceTimersByTimeAsync(59_999);
       expect(invoke).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(1);
-      expect(invoke).toHaveBeenCalledTimes(2);
+      expect(invoke).toHaveBeenCalledTimes(1);
     } finally {
       stop();
     }
@@ -145,10 +198,28 @@ describe("agent hook update coordinator", () => {
     invoke.mockResolvedValue({ targets: [], errors: [] });
     const stop = subscribeAgentHookUpdates();
     try {
-      await refreshAgentHookUpdates();
+      await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(1000);
       await refreshAgentHookUpdates();
       expect(invoke).toHaveBeenCalledTimes(2);
+    } finally {
+      stop();
+    }
+  });
+  it("checks only uninspected targets when a new target is announced", async () => {
+    vi.useFakeTimers();
+    invoke.mockResolvedValue({ targets: [], errors: [] });
+    const stop = subscribeAgentHookUpdates();
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      events.handler?.();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(invoke.mock.calls).toEqual([
+        ["get_agent_hook_updates", { automatic: true }],
+        ["get_agent_hook_updates", { automatic: true }],
+      ]);
+      await refreshAgentHookUpdates();
+      expect(invoke).toHaveBeenLastCalledWith("get_agent_hook_updates", { automatic: false });
     } finally {
       stop();
     }

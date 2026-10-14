@@ -88,6 +88,9 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 pub struct AppState {
     /// Leaf lock: clone hook observations before any process/filesystem I/O.
     pub agent_hook_observations: Mutex<crate::agent_hooks::observations::HookRegistry>,
+    /// Inspection gate precedes AppState locks; cache is a leaf, never held for I/O.
+    /// State polling only reads the cache and never waits on the inspection gate.
+    pub agent_hook_inspections: crate::agent_hooks::inspections::InspectionCache,
     pub terminals: Arc<Mutex<HashMap<String, TerminalSession>>>,
     pub sync_groups: Mutex<HashMap<String, SyncGroup>>,
     pub pty_handles: Mutex<HashMap<String, PtyHandle>>,
@@ -370,6 +373,7 @@ impl AppState {
             agent_hook_observations: Mutex::new(
                 crate::agent_hooks::observations::HookRegistry::default(),
             ),
+            agent_hook_inspections: Default::default(),
             sync_groups: Mutex::new(HashMap::new()),
             pty_handles: Mutex::new(HashMap::new()),
             ipc_socket_path: Mutex::new(None),
