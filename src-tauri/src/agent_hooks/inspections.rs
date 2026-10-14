@@ -115,15 +115,16 @@ impl InspectionCache {
         cache.announced.insert(target, status_request(request));
         Ok(true)
     }
-    pub(crate) fn begin(&self, request: &ManageRequest) -> Result<(), AppError> {
+    /// False is a bounded admission rejection, not a failed inspection.
+    /// Callers must skip that new target while finishing already admitted work.
+    pub(crate) fn begin(&self, request: &ManageRequest) -> Result<bool, AppError> {
         let mut cache = self.cache.lock_or_err()?;
         let target = Target::new(request);
         let key = cache.aliases.get(&target).cloned().unwrap_or(target);
         if !cache.entries.contains_key(&key) && cache.entries.len() >= MAX_TARGETS {
             cache.capacity_exceeded = true;
-            return Err(AppError::Other(
-                "Hook installation inspection target limit reached".into(),
-            ));
+            cache.announced.remove(&key);
+            return Ok(false);
         }
         // Keep the target's display/I/O spelling stable while an equivalent
         // path request is pending or fails.
@@ -140,7 +141,7 @@ impl InspectionCache {
             },
         );
         cache.announced.remove(&key);
-        Ok(())
+        Ok(true)
     }
     pub(crate) fn record(
         &self,

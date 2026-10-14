@@ -75,7 +75,11 @@ pub fn manage(
         return Err(AppError::Other("Invalid hook management request".into()));
     }
     let _gate = state.agent_hook_inspections.gate()?;
-    state.agent_hook_inspections.begin(request)?;
+    if !state.agent_hook_inspections.begin(request)? {
+        return Err(AppError::Other(
+            "Hook installation inspection target limit reached".into(),
+        ));
+    }
     let result =
         helper_directory(app).and_then(|directory| manage_in_directory(request, &directory));
     state.agent_hook_inspections.record(request, &result)?;

@@ -60,7 +60,9 @@ pub(super) fn run(
             // Do not start stopped WSL. A first discovery is still attempted,
             // so a repeated event cannot trigger unbounded enumeration retries.
             if !cache.attempted(&request)? {
-                cache.begin(&request)?;
+                if !cache.begin(&request)? {
+                    continue;
+                }
                 cache.record(
                     &request,
                     &Err(AppError::Other(
@@ -84,10 +86,12 @@ pub(super) fn run(
             unchecked.push(request);
         }
     }
-    let planned = unchecked;
     cache.initialize()?;
-    for request in &planned {
-        cache.begin(request)?;
+    let mut planned = Vec::new();
+    for request in unchecked {
+        if cache.begin(&request)? {
+            planned.push(request);
+        }
     }
     let mut completed = HashSet::new();
     scan_with_budget(
@@ -119,6 +123,56 @@ mod tests {
     fn healthy(request: &ManageRequest) -> Value {
         json!({"configDir":request.config_dir.clone().unwrap_or_else(||format!("/{}",request.provider)),
             "installed":true,"disabled":false,"warning":null})
+    }
+    #[test]
+    fn full_cache_skips_overflow_without_leaving_healthy_targets_pending() {
+        let cache = InspectionCache::default();
+        // Use each request's literal root as the returned status path so a
+        // capacity reservation cannot disappear through a default-root alias.
+        for provider in ["claude", "codex"] {
+            let r = ManageRequest {
+                provider: provider.into(),
+                operation: "status".into(),
+                distro: None,
+                config_dir: None,
+            };
+            cache.begin(&r).unwrap();
+            cache
+                .record(
+                    &r,
+                    &Ok(json!({"installed":true,"disabled":false,"warning":null})),
+                )
+                .unwrap();
+        }
+        for index in 0..crate::constants::AGENT_HOOK_INSPECTION_MAX_TARGETS - 2 {
+            let r = ManageRequest {
+                provider: "codex".into(),
+                operation: "status".into(),
+                distro: None,
+                config_dir: Some(format!("/cached/{index}")),
+            };
+            cache.begin(&r).unwrap();
+            cache.record(&r, &Ok(healthy(&r))).unwrap();
+        }
+        cache.initialize().unwrap();
+        let calls = Cell::new(0);
+        let observed = vec![json!({"provider":"codex","configDir":"/overflow"})];
+        let result=run(&cache,&observed,false,||Ok(Vec::new()),|r,_| {
+            assert_ne!(r.config_dir.as_deref(),Some("/overflow"));calls.set(calls.get()+1);
+            Ok(json!({"configDir":r.config_dir,"installed":true,"disabled":false,"warning":null}))
+        }).unwrap();
+        assert_eq!(
+            calls.get(),
+            crate::constants::AGENT_HOOK_INSPECTION_MAX_TARGETS
+        );
+        assert_eq!(result["errors"].as_array().unwrap().len(), 1);
+        assert!(cache.enabled("claude", None, None, false).unwrap());
+        assert!(cache
+            .enabled("codex", None, Some("/cached/0"), false)
+            .unwrap());
+        assert!(!cache
+            .enabled("codex", None, Some("/overflow"), false)
+            .unwrap());
     }
     #[test]
     fn automatic_checks_once_then_only_new_targets_and_manual_forces_reinspection() {
