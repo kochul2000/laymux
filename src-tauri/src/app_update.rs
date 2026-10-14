@@ -21,6 +21,9 @@ use crate::constants::{
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 
+#[cfg(debug_assertions)]
+#[path = "app_update_dev.rs"]
+pub(crate) mod dev;
 #[path = "app_update_install.rs"]
 mod install;
 #[path = "app_update_progress.rs"]
