@@ -182,6 +182,8 @@ interface WorkspaceState {
    * layer of the only slot cannot be closed.
    */
   removePane: (paneIndex: number, layerId?: string) => void;
+  /** Close one content layer by stable id without switching its owning workspace. */
+  removePaneById: (layerId: string) => boolean;
   /**
    * Remove the whole slot with all of its layers and redistribute its space.
    * Used when the slot's geometry itself goes away (boundary collapse).
@@ -469,17 +471,37 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     const slot = ws.panes[paneIndex];
     if (!slot) return;
     const targetLayerId = layerId ?? activeLayer(slot).id;
-    if (!slot.layers.some((layer) => layer.id === targetLayerId)) return;
+    if (slot.layers.some((layer) => layer.id === targetLayerId))
+      get().removePaneById(targetLayerId);
+  },
+
+  removePaneById: (targetLayerId) => {
+    const ws = get().workspaces.find((workspace) =>
+      workspace.panes.some((pane) => pane.layers.some((layer) => layer.id === targetLayerId)),
+    );
+    if (!ws) return false;
+    const paneIndex = ws.panes.findIndex((pane) =>
+      pane.layers.some((layer) => layer.id === targetLayerId),
+    );
+    const slot = ws.panes[paneIndex];
 
     // A stacked slot loses one layer and keeps its place (ADR-0297).
     const remaining = removeLayer(slot, targetLayerId);
     if (remaining) {
       set((state) => ({ workspaces: replaceSlot(state.workspaces, ws.id, paneIndex, remaining) }));
       forgetLayerState(targetLayerId, targetLayerId === slot.id);
-      return;
+      return true;
     }
 
-    get().removeSlot(paneIndex);
+    const panes = removePaneAndRedistribute(ws.panes, paneIndex);
+    if (!panes) return false;
+    set((state) => ({
+      workspaces: state.workspaces.map((workspace) =>
+        workspace.id === ws.id ? { ...workspace, panes } : workspace,
+      ),
+    }));
+    forgetSlotState(slot);
+    return true;
   },
 
   removeSlot: (paneIndex) => {

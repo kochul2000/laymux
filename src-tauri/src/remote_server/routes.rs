@@ -59,6 +59,7 @@ use super::navigation_step_routes::{
 use super::oauth_relay_routes::{remote_oauth_relay_begin, remote_oauth_relay_forward};
 use super::page::{remote_page, remote_page_redirect};
 use super::page_assets::remote_hashed_asset;
+use super::pane_routes::{remote_pane_close, remote_workspace_close};
 use super::pwa::{remote_manifest, remote_pwa_icon, ICON_ROUTE_PATH, MANIFEST_ROUTE_PATH};
 use super::terminal_info::remote_terminal_infos;
 use super::update_routes::{remote_update_check, remote_update_install, remote_update_status};
@@ -250,6 +251,11 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         .route(
             "/remote/v1/panes/{id}/visibility",
             post(remote_pane_visibility),
+        )
+        .route("/remote/v1/panes/{id}/close", post(remote_pane_close))
+        .route(
+            "/remote/v1/workspaces/{id}/close",
+            post(remote_workspace_close),
         )
         .route("/remote/v1/terminals", get(remote_terminals_list))
         .route(

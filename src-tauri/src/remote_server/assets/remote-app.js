@@ -2,6 +2,7 @@ import { createRemoteUpdateDialog } from "../../../../ui/src/remote/remote-updat
 import { createRemoteSettingsBridge } from "../../../../ui/src/remote/remote-settings-mcp.js";
 import { createRemoteMemo } from "../../../../ui/src/remote/remote-memo.js";
 import { createWorkspaceManager } from "../../../../ui/src/remote/remote-workspace-manager.js";
+import { createPaneManager, installWorkspaceRenameGesture } from "../../../../ui/src/remote/remote-pane-controls.js";
 import {
   DEFAULT_REMOTE_KEYBOARD_SETTINGS, REMOTE_NAV_MODIFIERS, REMOTE_NAV_TARGETS,
   normalizeRemoteNavigationModifiers, readPhysicalKeyboardConnected,
@@ -352,6 +353,14 @@ import {
             setStatus("Workspace renamed.");
           },
           hide: (id) => setWorkspaceVisibility(id, true),
+          remove: async (id, selectedLeaseId) => {
+            const closingCurrent = navigationState?.activeWorkspace?.id === id;
+            await remoteFetch(`/remote/v1/workspaces/${encodeURIComponent(id)}/close`, {
+              method: "POST", body: JSON.stringify({ leaseId: selectedLeaseId }),
+            });
+            if (leaseId !== selectedLeaseId) return;
+            await loadNavigation(activeTerminalId, { openOutput: closingCurrent });
+          },
           saveTemplate: async (workspaceId, name, selectedLeaseId) => {
             await remoteFetch("/remote/v1/layouts", {
               method: "POST",
@@ -372,6 +381,37 @@ import {
             setStatus("Workspace template saved.");
           },
         });
+        const paneManager = createPaneManager({
+          getLease: () => leaseId,
+          hide: (id, hidden, selectedLeaseId) => setPaneVisibility(id, hidden, selectedLeaseId),
+          close: async (id, selectedLeaseId) => {
+            const selectedTerminal = remotePaneTargets().find((pane) => pane.id === id)?.terminalId;
+            await remoteFetch(`/remote/v1/panes/${encodeURIComponent(id)}/close`, {
+              method: "POST", body: JSON.stringify({ leaseId: selectedLeaseId }),
+            });
+            if (leaseId !== selectedLeaseId) return;
+            await loadNavigation(activeTerminalId, { openOutput: selectedTerminal === activeTerminalId });
+          },
+        });
+        function remotePaneTargets() {
+          if (!navigationState) return [];
+          const targets = (navigationState.workspaces || []).flatMap((workspace) => {
+            const panes = workspace.panes || [];
+            const slots = new Set(panes.map((pane) => pane.slotId || pane.id));
+            return panes.map((pane) => ({
+              ...pane, label: `${workspace.name} \u00b7 Pane ${pane.paneNumber || ""}`,
+              hidden: Boolean(pane.hidden), canHide: true,
+              canClose: slots.size > 1 || Number(pane.layerCount) > 1,
+            }));
+          });
+          for (const dock of navigationState.docks || []) {
+            for (const pane of dock.panes || []) targets.push({
+              ...pane, label: `${dock.position} \u00b7 ${pane.profile || pane.viewType}`,
+              canHide: false, canClose: dock.panes.length > 1,
+            });
+          }
+          return targets;
+        }
         const headerIconFields = {
           headerFiles: "Files", headerGithub: "GitHub", headerMemo: "Memo",
           headerSpatialExclusion: "Pane navigation shortcut", headerDesktopMode: "PC mode",
@@ -4606,6 +4646,7 @@ import {
           }
           connectButton.disabled = connected;
           updateTerminalControls();
+          updateHeaderPaneIdentity();
           renderInputSurface();
           updateNotificationActions();
           if (!connected) {
@@ -7670,6 +7711,7 @@ import {
         // (ADR-0149, ADR-0219). Keep the hierarchy in this PC-served document
         // and expose only a boolean consumed/not-consumed boundary to native.
         function dismissTopRemoteLayer() {
+          if (paneManager.isOpen()) { paneManager.close(); return true; }
           if (workspaceManager.isOpen()) { workspaceManager.close(); return true; }
           if (!sharedFilesScrim.hidden) {
             cancelSharedFileOffer();
@@ -8103,6 +8145,7 @@ import {
           // Nav step keys gate on unread count — refresh their state and badge.
           updateKeyBarControls();
           updateHeaderPaneIdentity();
+          paneManager.sync(remotePaneTargets());
         }
 
         function renderDockList(docks) {
@@ -8386,32 +8429,6 @@ import {
             fillCountBadge(badge, workspace.unreadCount);
             right.append(badge);
           }
-          const visibility = document.createElement("button");
-          visibility.type = "button";
-          visibility.className = "visibility-button";
-          visibility.dataset.workspaceVisibility = workspace.id;
-          setVisibilityIcon(visibility, false);
-          visibility.disabled = !leaseId || !canHideWorkspace;
-          visibility.setAttribute("aria-pressed", "false");
-          const visibilityLabel = canHideWorkspace
-            ? workspace.isActive
-              ? "Hide workspace and move to the next visible workspace"
-              : "Hide workspace from the list"
-            : "The last visible workspace cannot be hidden";
-          visibility.setAttribute("aria-label", visibilityLabel);
-          visibility.title = visibilityLabel;
-          keepInputSurfaceFocus(visibility);
-          visibility.addEventListener("click", async (event) => {
-            event.stopPropagation();
-            visibility.disabled = true;
-            try {
-              await setWorkspaceVisibility(workspace.id, true);
-            } catch (err) {
-              setStatus(err.message || String(err), true);
-            } finally {
-              visibility.disabled = !leaseId || !canHideWorkspace;
-            }
-          });
           const manage = document.createElement("button");
           manage.type = "button";
           manage.className = "workspace-manage-button";
@@ -8425,9 +8442,13 @@ import {
           manage.title = "Manage workspace";
           manage.addEventListener("click", (event) => {
             event.stopPropagation();
-            workspaceManager.open(workspace, canHideWorkspace, manage);
+            workspaceManager.open(workspace, canHideWorkspace, manage, { canClose: (navigationState.workspaces || []).length > 1 });
           });
           right.append(manage);
+          installWorkspaceRenameGesture(item, () => workspaceManager.open(
+            workspace, canHideWorkspace, manage,
+            { rename: true, canClose: (navigationState.workspaces || []).length > 1 },
+          ));
           // Whole-workspace skip toggle (issue #507). Only meaningful for
           // workspaces that contribute terminal panes to the spatial cycle.
           if ((workspace.terminalPaneCount || 0) > 0) {
@@ -8437,7 +8458,6 @@ import {
             spacer.className = "navigation-action-spacer";
             right.append(spacer);
           }
-          right.append(visibility);
 
           if (panes.length > 0) {
             const paneList = document.createElement("div");
@@ -8692,40 +8712,30 @@ import {
             primary.append(label);
           }
 
-          const visibility = document.createElement("button");
-          visibility.type = "button";
-          visibility.className = "visibility-button";
-          visibility.dataset.paneVisibility = pane.id;
-          setVisibilityIcon(visibility, paneHidden);
-          visibility.disabled = !leaseId;
-          visibility.setAttribute("aria-pressed", String(paneHidden));
-          const visibilityLabel = paneHidden
-            ? "Show pane in workspace list"
-            : "Hide pane from workspace list";
-          visibility.setAttribute("aria-label", visibilityLabel);
-          visibility.title = visibilityLabel;
-          keepInputSurfaceFocus(visibility);
-          visibility.addEventListener("click", async (event) => {
-            event.stopPropagation();
-            visibility.disabled = true;
-            try {
-              await setPaneVisibility(pane.id, !paneHidden);
-            } catch (err) {
-              setStatus(err.message || String(err), true);
-            } finally {
-              visibility.disabled = !leaseId;
-            }
-          });
           const actions = document.createElement("div");
           actions.className = "pane-row-actions";
-          if (isTerminal) {
-            actions.append(renderPaneSkipButton(pane, workspace));
-          } else {
+          const manage = document.createElement("button");
+          manage.type = "button";
+          manage.className = "workspace-manage-button";
+          manage.dataset.paneManage = pane.id;
+          manage.disabled = !leaseId;
+          manage.setAttribute("aria-label", `Manage pane ${pane.paneNumber || ""}`);
+          manage.setAttribute("aria-haspopup", "dialog");
+          manage.setAttribute("aria-controls", "paneManager");
+          manage.setAttribute("aria-expanded", String(paneManager.isOpenFor(pane.id)));
+          setRemoteIcon(manage, "Ellipsis");
+          manage.addEventListener("click", (event) => {
+            event.stopPropagation();
+            const target = remotePaneTargets().find((item) => item.id === pane.id);
+            if (target) paneManager.open(target, manage);
+          });
+          actions.append(manage);
+          if (isTerminal) actions.append(renderPaneSkipButton(pane, workspace));
+          else {
             const spacer = document.createElement("span");
             spacer.className = "navigation-action-spacer";
             actions.append(spacer);
           }
-          actions.append(visibility);
           entry.append(actions);
 
           return entry;
@@ -9156,9 +9166,9 @@ import {
           setStatus(hidden ? "Workspace hidden." : "Workspace shown.");
         }
 
-        async function setPaneVisibility(paneId, hidden) {
+        async function setPaneVisibility(paneId, hidden, selectedLeaseId = leaseId) {
           if (!leaseId || !paneId) return;
-          const selectedLeaseId = leaseId;
+          if (leaseId !== selectedLeaseId) return;
           await remoteFetch(
             `/remote/v1/panes/${encodeURIComponent(paneId)}/visibility`,
             {
@@ -13896,6 +13906,7 @@ import {
           // capability above is what lets the reclaim follow the release drain.
           leaseId = null;
           workspaceManager.close();
+          paneManager.close();
           resetComposerStars();
         }
 

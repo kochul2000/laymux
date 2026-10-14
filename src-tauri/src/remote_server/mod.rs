@@ -20,6 +20,7 @@ mod navigation_step_routes;
 mod oauth_relay_routes;
 mod page;
 mod page_assets;
+mod pane_routes;
 mod pwa;
 mod render_checkpoint;
 mod routes;
