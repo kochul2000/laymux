@@ -1,6 +1,6 @@
 # 0323. 업데이트 복원점의 대화 확정은 종료되는 PTY에만 요구한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-14
 - Source: 사용자 보고(업데이트 때 Codex CLI override 확인 실패, 데몬 방식에서 확인이 필요한지 검증하고 수정 PR 요청), [ADR-0222](0222-agent-session-checkpoint-coordinator.md), [ADR-0270](0270-codex-status-checkpoint-probe.md), [ADR-0308](0308-pty-daemon-generations-across-updates.md), [ADR-0314](0314-update-never-interrupts-terminals.md), [data-flow.md §13.5](../architecture/data-flow.md)
 - 관계: ADR-0222의 업데이트 전체 terminal critical barrier와 ADR-0270·[ADR-0278](0278-codex-status-current-screen.md)의 업데이트 `/status` 확인을 일부 대체한다. ADR-0314의 checkpoint·출력 캐시 단계는 유지하고 checkpoint 대상 정책을 확장한다. [ADR-0296](0296-committed-checkpoint-reuse-on-finalization.md)의 receipt 재사용은 명시적 종료로 한정한다.

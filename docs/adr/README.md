@@ -342,7 +342,7 @@ ADR 이 필요한 대표 기준:
 | [0321](0321-agent-session-record-fills-unconfirmed-task.md) | title이 확정하지 않은 Claude·Grok 작업 상태는 에이전트의 세션 기록으로 채운다 (0319·0156 보완) | Accepted |
 | [0322](0322-remote-item-management-menus.md) | Remote 워크스페이스와 페인은 관리 메뉴·스킵 두 버튼을 제공한다 | Accepted |
 
-| [0323](0323-update-checkpoint-follows-pty-ownership.md) | 업데이트 복원점의 대화 확정은 종료되는 PTY에만 요구한다 (0222·0270 일부 대체, 0314 확장) | Proposed |
+| [0323](0323-update-checkpoint-follows-pty-ownership.md) | 업데이트 복원점의 대화 확정은 종료되는 PTY에만 요구한다 (0222·0270 일부 대체, 0314 확장) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 
