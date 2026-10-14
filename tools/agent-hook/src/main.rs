@@ -8,7 +8,11 @@ fn main() {
         println!("{{}}");
         return;
     }
-    let result = manage(&args);
+    let result = if args.first().map(String::as_str) == Some("mcp") {
+        mcp(&args)
+    } else {
+        manage(&args)
+    };
     match result {
         Ok(value) => println!("{value}"),
         Err(error) => {
@@ -16,6 +20,30 @@ fn main() {
             std::process::exit(1);
         }
     }
+}
+
+fn mcp(args: &[String]) -> Result<serde_json::Value, String> {
+    let (Some(provider), Some(operation), Some(name), Some(port), None) = (
+        args.get(1),
+        args.get(2),
+        args.get(3),
+        args.get(4),
+        args.get(6),
+    ) else {
+        return Err("Usage: laymux-agent-hook mcp <claude|codex|grok|all> <status|install|remove> <name> <port> [config-directory]".into());
+    };
+    let port = port.parse().map_err(|_| "Invalid port".to_string())?;
+    if provider == "all" {
+        if operation != "status" || args.len() != 5 {
+            return Err("mcp all supports only status of default locations".into());
+        }
+        return Ok(laymux_agent_hook::mcp::status_all(name, port));
+    }
+    let dir = args
+        .get(5)
+        .filter(|s| !s.is_empty())
+        .map(std::path::Path::new);
+    laymux_agent_hook::mcp::manage(provider, operation, name, port, dir)
 }
 
 fn manage(args: &[String]) -> Result<serde_json::Value, String> {

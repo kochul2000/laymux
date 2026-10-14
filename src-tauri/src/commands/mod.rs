@@ -82,7 +82,11 @@ mod main_thread_io {
         ),
         (
             include_str!("agent_hooks.rs"),
-            &["list_agent_hook_environments", "manage_agent_hooks"],
+            &[
+                "list_agent_hook_environments",
+                "manage_agent_hooks",
+                "manage_agent_mcp",
+            ],
         ),
         (
             include_str!("agent_hooks/states.rs"),

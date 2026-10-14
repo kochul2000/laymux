@@ -12,6 +12,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { AgentHooksSection } from "./settings/AgentHooksSection";
+import { AgentMcpSection } from "./settings/AgentMcpSection";
 import { PtySessionsSection } from "./settings/PtySessionsSection";
 import { useUiStore } from "@/stores/ui-store";
 import {
@@ -2938,6 +2939,7 @@ function ClaudeSection() {
         stateDetection={claude.stateDetection ?? "heuristic"}
         onStateDetectionChange={(stateDetection) => updateClaude({ stateDetection })}
       />
+      <AgentMcpSection provider="claude" />
 
       <SettingsGroup title={t("claude.groupSyncCwd")}>
         {/* Sync CWD mode */}
@@ -3158,6 +3160,7 @@ function CodexSection() {
         stateDetection={codex.stateDetection ?? "heuristic"}
         onStateDetectionChange={(stateDetection) => updateCodex({ stateDetection })}
       />
+      <AgentMcpSection provider="codex" />
 
       <SettingsGroup title={t("codex.groupSessionRestore")}>
         {/* Launch command (flags land here, e.g. --yolo) */}
@@ -3319,6 +3322,7 @@ function GrokSection() {
   return (
     <div className="settings-page">
       <SettingsPageTitle>{t("grok.title")}</SettingsPageTitle>
+      <AgentMcpSection provider="grok" />
       <SettingsGroup title={t("grok.groupSessionRestore")}>
         <SettingsField label={t("grok.command")} layout="stack">
           <FocusInput

@@ -1,6 +1,7 @@
 //! Optional CLI integration. Installation and observations are independent of
 //! heuristic activity; consuming hook state is an explicit settings decision.
 pub mod inspections;
+pub mod mcp;
 pub mod observations;
 pub mod title;
 pub mod updates;
@@ -17,6 +18,8 @@ use crate::process::{headless_command, output_with_timeout};
 use crate::state::AppState;
 
 const MANAGE_TIMEOUT: Duration = Duration::from_secs(8);
+// WSL cold start plus up to three host probes (connect + read) per check.
+pub(crate) const MCP_WSL_TIMEOUT: Duration = Duration::from_secs(20);
 const EVENT_MAX_AGE_MS: u64 = 30_000;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -123,51 +126,11 @@ fn manage_in_directory_with_timeout(
         return Err(AppError::Other("Unknown hook operation".into()));
     }
     if let Some(distro) = &request.distro {
-        if !cfg!(windows) || !crate::wsl_probe::is_safe_distro_name(distro) {
-            return Err(AppError::Other("Invalid WSL distribution".into()));
-        }
-        let executable = directory.join("laymux-agent-hook-wsl");
-        if !executable.is_file() {
-            return Err(AppError::Other("Bundled WSL hook helper missing".into()));
-        }
-        let executable = crate::path_utils::windows_to_wsl_path(
-            executable
-                .to_str()
-                .ok_or_else(|| AppError::Other("Invalid helper path".into()))?,
-        );
-        let mut command = headless_command("wsl.exe");
-        command.args([
-            "-d",
-            distro,
-            "--exec",
-            &executable,
-            "manage",
-            &request.provider,
-            &request.operation,
-        ]);
+        let mut args = vec!["manage", request.provider.as_str(), &request.operation];
         if let Some(root) = request.config_dir.as_ref().filter(|s| !s.is_empty()) {
-            command.arg(root);
+            args.push(root);
         }
-        if timeout.is_zero() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "Hook check time budget exhausted",
-            )
-            .into());
-        }
-        let output = output_with_timeout(&mut command, timeout.min(MANAGE_TIMEOUT))?;
-        let value: Value = serde_json::from_slice(&output.stdout)
-            .map_err(|_| AppError::Other(format!("WSL hook helper failed ({})", output.status)))?;
-        if !output.status.success() {
-            return Err(AppError::Other(
-                value
-                    .get("error")
-                    .and_then(Value::as_str)
-                    .unwrap_or("WSL hook operation failed")
-                    .into(),
-            ));
-        }
-        return Ok(value);
+        return run_wsl_helper(directory, distro, &args, timeout.min(MANAGE_TIMEOUT));
     }
     let root = match request.config_dir.as_ref().filter(|s| !s.is_empty()) {
         Some(root) => PathBuf::from(root),
@@ -184,7 +147,51 @@ fn manage_in_directory_with_timeout(
         .map_err(AppError::Other)
 }
 
-fn helper_directory(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
+pub(crate) fn run_wsl_helper(
+    directory: &std::path::Path,
+    distro: &str,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<Value, AppError> {
+    if !cfg!(windows) || !crate::wsl_probe::is_safe_distro_name(distro) {
+        return Err(AppError::Other("Invalid WSL distribution".into()));
+    }
+    let executable = directory.join("laymux-agent-hook-wsl");
+    if !executable.is_file() {
+        return Err(AppError::Other("Bundled WSL helper missing".into()));
+    }
+    let executable = crate::path_utils::windows_to_wsl_path(
+        executable
+            .to_str()
+            .ok_or_else(|| AppError::Other("Invalid helper path".into()))?,
+    );
+    let mut command = headless_command("wsl.exe");
+    command
+        .args(["-d", distro, "--exec", &executable])
+        .args(args);
+    if timeout.is_zero() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "Hook check time budget exhausted",
+        )
+        .into());
+    }
+    let output = output_with_timeout(&mut command, timeout)?;
+    let value: Value = serde_json::from_slice(&output.stdout)
+        .map_err(|_| AppError::Other(format!("WSL helper failed ({})", output.status)))?;
+    if !output.status.success() {
+        return Err(AppError::Other(
+            value
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("WSL helper operation failed")
+                .into(),
+        ));
+    }
+    Ok(value)
+}
+
+pub(crate) fn helper_directory(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
     if cfg!(windows) || cfg!(debug_assertions) {
         return std::env::current_exe()?
             .parent()
