@@ -239,7 +239,7 @@ ADR 이 필요한 대표 기준:
 | [0219](0219-android-back-defers-to-remote-ui-stack.md) | Android system back은 Remote UI stack을 순서대로 닫는다 (0149 확장) | FileViewer 정책만 [0259](0259-remote-file-viewer-system-back-to-explorer.md)로 대체 |
 | [0220](0220-path-link-stable-frame-lifetime.md) | path-link 수명 판정은 synchronized-output 안정 프레임에서 수행한다 (0188 정정) | Accepted |
 | [0221](0221-codex-position-first-in-frame-cursor-park.md) | Codex position-first 인프레임 커서 주차도 권위 tail로 인정한다 (0076·0078 확장) | Accepted |
-| [0222](0222-agent-session-checkpoint-coordinator.md) | Agent 세션 복원점은 통합 귀속 스냅샷과 수명주기 체크포인트로 확정한다 (0118·0120·0195·0201 정정, 0174 확장) | Accepted |
+| [0222](0222-agent-session-checkpoint-coordinator.md) | Agent 세션 복원점은 통합 귀속 스냅샷과 수명주기 체크포인트로 확정한다 (0118·0120·0195·0201 정정, 0174 확장) | Accepted (partially superseded by [0323](0323-update-checkpoint-follows-pty-ownership.md)) |
 | [0223](0223-android-release-advances-only-with-apk.md) | Android 릴리스 채널은 APK를 명시적으로 발행할 때만 전진한다 (0190 정정, 0197 대체) | Accepted |
 | [0224](0224-link-activation-chip-gate.md) | 링크 실행은 activation 설정으로 게이트하고, deliberate 모드는 액션 칩으로 명시 실행한다 (0188 확장) | Accepted |
 | [0225](0225-android-oauth-loopback-address-family.md) | Android OAuth loopback listener는 redirect 주소 패밀리를 따른다 (0175 Android bind 정정) | Accepted |
@@ -295,7 +295,7 @@ ADR 이 필요한 대표 기준:
 | [0275](0275-remote-physical-keyboard-focus-recovery.md) | Remote 물리 키보드 입력은 안전한 입력 표면으로 포커스를 복구한다 | Accepted |
 | [0276](0276-remote-keys-ignore-physical-keyboard.md) | Remote Keys 표시는 물리 키보드 연결과 독립으로 둔다 (0273 일부 대체) | Accepted |
 | [0277](0277-remote-pane-clear-soft-key.md) | Remote 기본 클리어 키는 pane clear action을 실행한다 | Accepted |
-| [0278](0278-codex-status-current-screen.md) | Codex 종료 확인은 명령 실행 후 현재 화면을 읽는다 (0270 대체) | Accepted |
+| [0278](0278-codex-status-current-screen.md) | Codex 종료 확인은 명령 실행 후 현재 화면을 읽는다 (0270 대체) | Accepted (partially superseded by [0323](0323-update-checkpoint-follows-pty-ownership.md)) |
 | [0279](0279-lifecycle-explicit-loss-override.md) | 종료·업데이트 준비 실패는 명시적 손실 동의로 건너뛸 수 있다 (0222·0264 확장) | Proposed |
 | [0280](0280-codex-app-server-process-role.md) | Codex app-server는 native·WSL 대화 프로세스 후보에서 제외한다 | Accepted |
 | [0281](0281-release-version-change-level.md) | 릴리스 버전은 변경의 호환성과 기능 추가 여부로 결정한다 | Proposed |
@@ -313,7 +313,7 @@ ADR 이 필요한 대표 기준:
 | [0293](0293-android-attachment-direct-system-picker.md) | Android 첨부 버튼은 선택 메뉴 없이 시스템 파일 선택기를 바로 연다 (0290 첨부 메뉴 대체) | Accepted |
 | [0294](0294-codex-process-bound-lifecycle-proof.md) | 훅 우선 종료 확인은 정확한 프로세스 대화 귀속도 증거로 사용한다 | Accepted |
 | [0295](0295-codex-continuous-conversation-checkpoint.md) | Codex 대화 귀속을 평상시 저장과 종료 확인이 공유한다 | Accepted |
-| [0296](0296-committed-checkpoint-reuse-on-finalization.md) | 변경 없는 저장 완료 복원점을 종료·업데이트에서 재사용한다 | Accepted |
+| [0296](0296-committed-checkpoint-reuse-on-finalization.md) | 변경 없는 저장 완료 복원점을 종료·업데이트에서 재사용한다 | Accepted (partially superseded by [0323](0323-update-checkpoint-follows-pty-ownership.md)) |
 | [0297](0297-pane-stack-slot-layer-model.md) | 워크스페이스 pane 은 기하를 소유하는 슬롯, 콘텐츠는 순서 있는 레이어 목록(스택)이 소유한다 | Accepted |
 | [0298](0298-pane-rearrangement-automation-parity.md) | Pane 재배치(레이어 이동·꺼내기·스택 합치기·워크스페이스 간 이동)를 사용자 조작 수준까지 Automation/MCP 에 연다 | Accepted |
 | [0299](0299-portable-settings-and-local-sqlite-state.md) | 이식 가능한 설정과 로컬 SQLite 복원 상태를 분리한다 | Accepted |
@@ -341,6 +341,8 @@ ADR 이 필요한 대표 기준:
 | [0320](0320-remote-drawer-skip-visibility-columns.md) | Remote 드로어는 페인과 워크스페이스의 스킵·숨김 열을 통일한다 | Superseded by 0322 |
 | [0321](0321-agent-session-record-fills-unconfirmed-task.md) | title이 확정하지 않은 Claude·Grok 작업 상태는 에이전트의 세션 기록으로 채운다 (0319·0156 보완) | Accepted |
 | [0322](0322-remote-item-management-menus.md) | Remote 워크스페이스와 페인은 관리 메뉴·스킵 두 버튼을 제공한다 | Accepted |
+
+| [0323](0323-update-checkpoint-follows-pty-ownership.md) | 업데이트 복원점의 대화 확정은 종료되는 PTY에만 요구한다 (0222·0270 일부 대체, 0314 확장) | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

@@ -14,6 +14,7 @@ mod eviction;
 mod hints;
 pub(crate) use hints::CheckpointHints;
 pub(crate) mod receipt;
+pub(crate) mod update;
 pub use eviction::TerminalMutationPermit;
 #[cfg(test)]
 mod eviction_tests;
@@ -284,6 +285,9 @@ pub async fn request_frontend_checkpoint(
     reason: &'static str,
     require_conclusive: bool,
 ) -> Result<u64, String> {
+    if reason == "update" {
+        return update::request(app, state).await;
+    }
     request_frontend_checkpoint_for_terminals(app, state, reason, require_conclusive, None).await
 }
 
