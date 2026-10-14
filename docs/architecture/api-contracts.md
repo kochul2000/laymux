@@ -1380,7 +1380,20 @@ impl McpHandler {
 
 #### 설정
 
-`scripts/setup-mcp.sh` (WSL/Linux) 또는 `scripts/setup-mcp.ps1` (Windows PowerShell)을 실행하면 `claude mcp add-json`으로 MCP 설정을 자동 등록한다. 인증 불필요 — URL만 등록하면 영구 유효 (laymux 재시작해도 재등록 불필요).
+**앱 내 등록 ([ADR-0325](../adr/0325-agent-mcp-registration.md))** — Settings의 Claude·Codex·Grok 페이지 "Laymux MCP 연결"에서 실행 환경(Windows·WSL 배포판)별로 등록 상태를 확인하고 등록·제거한다. Tauri 명령 `manage_agent_mcp({provider, operation: status|install|remove, distro, configDir})`가 처리한다. Windows(native)는 helper 라이브러리 `laymux_agent_hook::mcp::manage`를 프로세스 안에서 호출하고, WSL은 `wsl.exe -d <distro> --exec laymux-agent-hook-wsl mcp <provider> <operation> <name> <port> [configDir]`를 실행한다(대기 20초). `configDir`는 `CLAUDE_CONFIG_DIR`/`CODEX_HOME`/`GROK_HOME`와 같은 의미의 절대 경로이며 비우면 프로세스 환경 변수, 그다음 기본 위치를 쓴다.
+
+| provider | 파일 | 항목 |
+|---|---|---|
+| claude | `$CLAUDE_CONFIG_DIR/.claude.json` (기본 `~/.claude.json`) | `mcpServers.<name> = {"type":"http","url":...}` |
+| codex | `$CODEX_HOME/config.toml` (기본 `~/.codex`) | `[mcp_servers.<name>] url` |
+| grok | `$GROK_HOME/config.toml` (기본 `~/.grok`) | `[mcp_servers.<name>] url` |
+
+- 이름·포트는 빌드가 정한다: release `laymux`·19280, dev `laymux-dev`·19281.
+- 응답: `{provider, configPath, name, url, currentUrl, state: missing|installed|different|unverified, installed, disabled, reachable}`. `url`은 해당 환경에서 닿는 주소이고 WSL에서 응답하는 호스트가 없으면 `null`이다(설치 거부, 기존 항목은 `unverified`). stdio 전용 필드(`command`·`args`·`env`·`env_vars`·`cwd`)가 남았거나 Claude `type`이 `http`가 아니면 주소가 같아도 `different`다.
+- WSL 호스트 후보: `127.0.0.1` → `/proc/net/route` 기본 게이트웨이 → `/etc/resolv.conf` nameserver, 각각 `GET /api/v1/health` 200 확인.
+- 결과 문서를 다시 파싱해 변경이 적용됐는지 확인한 뒤 원본을 `<파일>.laymux-backup`에 덮어쓰고, 교체 직전 원본과 같을 때만 원자 교체한다. `config.toml`은 훅 설치기와 같은 `.laymux-hooks.lock`을 잡는다. 같은 이름 항목의 다른 필드(Codex 도구 승인 등)와 나머지 키 순서·TOML 서식은 보존한다.
+
+**스크립트 등록** — `scripts/setup-mcp.sh` (WSL/Linux) 또는 `scripts/setup-mcp.ps1` (Windows PowerShell)을 실행하면 `claude mcp add-json`으로 MCP 설정을 자동 등록한다. 인증 불필요 — URL만 등록하면 영구 유효 (laymux 재시작해도 재등록 불필요).
 
 ```bash
 # 전역 등록

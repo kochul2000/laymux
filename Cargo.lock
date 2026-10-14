@@ -2290,6 +2290,7 @@ name = "laymux-agent-hook"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "indexmap 2.13.0",
  "serde",
  "serde_json",
  "sysinfo",

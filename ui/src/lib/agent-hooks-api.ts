@@ -79,3 +79,24 @@ export const getAgentHookUpdates = (automatic = false) =>
   });
 export const onAgentHookInspectionNeeded = (handler: () => void) =>
   listen("agent-hook-inspection-needed", handler);
+
+export type McpProvider = "claude" | "codex" | "grok";
+export interface McpStatus {
+  provider: McpProvider;
+  configPath: string;
+  name: string;
+  /** Address reachable from the environment; null when Laymux is unreachable (WSL). */
+  url: string | null;
+  currentUrl: string | null;
+  /** `unverified`: registered, but Laymux is unreachable so the address cannot be judged. */
+  state: "missing" | "installed" | "different" | "unverified";
+  installed: boolean;
+  disabled: boolean;
+  reachable: boolean;
+}
+export const manageAgentMcp = (
+  provider: McpProvider,
+  operation: "status" | "install" | "remove",
+  distro: string | null,
+  configDir: string | null = null,
+) => invoke<McpStatus>("manage_agent_mcp", { request: { provider, operation, distro, configDir } });

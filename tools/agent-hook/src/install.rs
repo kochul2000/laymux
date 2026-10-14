@@ -70,22 +70,26 @@ pub fn default_root(provider: &str) -> Result<PathBuf, String> {
 }
 
 fn read_config(path: &Path) -> Result<Option<Vec<u8>>, String> {
+    read_limited(path, MAX_CONFIG_BYTES)
+}
+
+pub(crate) fn read_limited(path: &Path, limit: u64) -> Result<Option<Vec<u8>>, String> {
     match fs::symlink_metadata(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e.to_string()),
         Ok(meta) if !meta.is_file() || meta.file_type().is_symlink() => {
-            return Err("Hook settings must be a regular file (symlink is not modified)".into());
+            return Err("Settings file must be a regular file (symlink is not modified)".into());
         }
         Ok(_) => {}
     }
     let mut data = Vec::new();
     fs::File::open(path)
         .map_err(|e| e.to_string())?
-        .take(MAX_CONFIG_BYTES + 1)
+        .take(limit + 1)
         .read_to_end(&mut data)
         .map_err(|e| e.to_string())?;
-    if data.len() as u64 > MAX_CONFIG_BYTES {
-        return Err("Hook settings are too large".into());
+    if data.len() as u64 > limit {
+        return Err("Settings file is too large".into());
     }
     Ok(Some(data))
 }
@@ -257,7 +261,21 @@ fn edit(
     Ok(())
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
+/// Serialize Laymux writes to one agent configuration folder. Hooks and MCP
+/// registration share it because both can edit Codex `config.toml`.
+pub(crate) fn lock_config_dir(root: &Path) -> Result<fs::File, String> {
+    let lock = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(root.join(".laymux-hooks.lock"))
+        .map_err(|e| e.to_string())?;
+    lock.try_lock()
+        .map_err(|e| format!("Another Laymux settings change is in progress: {e}"))?;
+    Ok(lock)
+}
+
+pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let parent = path.parent().ok_or("Missing settings parent")?;
     let mut temp = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
     temp.write_all(bytes).map_err(|e| e.to_string())?;
@@ -295,14 +313,7 @@ pub fn manage(
     // Validate before creating artifacts or touching the existing configuration.
     parse_config(read_config(&path)?.as_deref())?;
     fs::create_dir_all(root).map_err(|e| e.to_string())?;
-    let lock = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(root.join(".laymux-hooks.lock"))
-        .map_err(|e| e.to_string())?;
-    lock.try_lock()
-        .map_err(|e| format!("Another Laymux hook change is in progress: {e}"))?;
+    let _lock = lock_config_dir(root)?;
     let original = read_config(&path)?;
     let mut value = parse_config(original.as_deref())?;
     let title_change = if provider == "codex" && operation == "install" {

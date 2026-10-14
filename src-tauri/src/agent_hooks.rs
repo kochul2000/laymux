@@ -17,6 +17,8 @@ use crate::process::{headless_command, output_with_timeout};
 use crate::state::AppState;
 
 const MANAGE_TIMEOUT: Duration = Duration::from_secs(8);
+// WSL cold start plus up to three host probes (connect + read) per check.
+const MCP_WSL_TIMEOUT: Duration = Duration::from_secs(20);
 const EVENT_MAX_AGE_MS: u64 = 30_000;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -123,51 +125,11 @@ fn manage_in_directory_with_timeout(
         return Err(AppError::Other("Unknown hook operation".into()));
     }
     if let Some(distro) = &request.distro {
-        if !cfg!(windows) || !crate::wsl_probe::is_safe_distro_name(distro) {
-            return Err(AppError::Other("Invalid WSL distribution".into()));
-        }
-        let executable = directory.join("laymux-agent-hook-wsl");
-        if !executable.is_file() {
-            return Err(AppError::Other("Bundled WSL hook helper missing".into()));
-        }
-        let executable = crate::path_utils::windows_to_wsl_path(
-            executable
-                .to_str()
-                .ok_or_else(|| AppError::Other("Invalid helper path".into()))?,
-        );
-        let mut command = headless_command("wsl.exe");
-        command.args([
-            "-d",
-            distro,
-            "--exec",
-            &executable,
-            "manage",
-            &request.provider,
-            &request.operation,
-        ]);
+        let mut args = vec!["manage", request.provider.as_str(), &request.operation];
         if let Some(root) = request.config_dir.as_ref().filter(|s| !s.is_empty()) {
-            command.arg(root);
+            args.push(root);
         }
-        if timeout.is_zero() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "Hook check time budget exhausted",
-            )
-            .into());
-        }
-        let output = output_with_timeout(&mut command, timeout.min(MANAGE_TIMEOUT))?;
-        let value: Value = serde_json::from_slice(&output.stdout)
-            .map_err(|_| AppError::Other(format!("WSL hook helper failed ({})", output.status)))?;
-        if !output.status.success() {
-            return Err(AppError::Other(
-                value
-                    .get("error")
-                    .and_then(Value::as_str)
-                    .unwrap_or("WSL hook operation failed")
-                    .into(),
-            ));
-        }
-        return Ok(value);
+        return run_wsl_helper(directory, distro, &args, timeout.min(MANAGE_TIMEOUT));
     }
     let root = match request.config_dir.as_ref().filter(|s| !s.is_empty()) {
         Some(root) => PathBuf::from(root),
@@ -182,6 +144,99 @@ fn manage_in_directory_with_timeout(
     });
     laymux_agent_hook::install::manage(&root, &request.provider, &request.operation, &executable)
         .map_err(AppError::Other)
+}
+
+fn run_wsl_helper(
+    directory: &std::path::Path,
+    distro: &str,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<Value, AppError> {
+    if !cfg!(windows) || !crate::wsl_probe::is_safe_distro_name(distro) {
+        return Err(AppError::Other("Invalid WSL distribution".into()));
+    }
+    let executable = directory.join("laymux-agent-hook-wsl");
+    if !executable.is_file() {
+        return Err(AppError::Other("Bundled WSL helper missing".into()));
+    }
+    let executable = crate::path_utils::windows_to_wsl_path(
+        executable
+            .to_str()
+            .ok_or_else(|| AppError::Other("Invalid helper path".into()))?,
+    );
+    let mut command = headless_command("wsl.exe");
+    command
+        .args(["-d", distro, "--exec", &executable])
+        .args(args);
+    if timeout.is_zero() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "Hook check time budget exhausted",
+        )
+        .into());
+    }
+    let output = output_with_timeout(&mut command, timeout)?;
+    let value: Value = serde_json::from_slice(&output.stdout)
+        .map_err(|_| AppError::Other(format!("WSL helper failed ({})", output.status)))?;
+    if !output.status.success() {
+        return Err(AppError::Other(
+            value
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("WSL helper operation failed")
+                .into(),
+        ));
+    }
+    Ok(value)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpRequest {
+    pub provider: String,
+    pub operation: String,
+    pub distro: Option<String>,
+    /// CLI configuration folder (`CLAUDE_CONFIG_DIR`/`CODEX_HOME`/`GROK_HOME`
+    /// meaning). WSL `--exec` cannot see variables exported by shell profiles.
+    pub config_dir: Option<String>,
+}
+
+/// Register this build's MCP endpoint (ADR-0325): release and dev keep
+/// separate names so both can stay registered side by side.
+pub fn manage_mcp(request: &McpRequest, app: &tauri::AppHandle) -> Result<Value, AppError> {
+    use crate::automation_server::{automation_port, DEV_PORT};
+    if !matches!(request.provider.as_str(), "claude" | "codex" | "grok")
+        || !matches!(request.operation.as_str(), "status" | "install" | "remove")
+    {
+        return Err(AppError::Other("Invalid MCP registration request".into()));
+    }
+    let port = automation_port();
+    let name = if port == DEV_PORT {
+        "laymux-dev"
+    } else {
+        "laymux"
+    };
+    let config_dir = request
+        .config_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    match &request.distro {
+        Some(distro) => {
+            let port = port.to_string();
+            let mut args = vec!["mcp", &request.provider, &request.operation, name, &port];
+            args.extend(config_dir);
+            run_wsl_helper(&helper_directory(app)?, distro, &args, MCP_WSL_TIMEOUT)
+        }
+        None => laymux_agent_hook::mcp::manage(
+            &request.provider,
+            &request.operation,
+            name,
+            port,
+            config_dir.map(std::path::Path::new),
+        )
+        .map_err(AppError::Other),
+    }
 }
 
 fn helper_directory(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {

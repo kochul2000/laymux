@@ -18,6 +18,14 @@ pub fn manage_agent_hooks(
     agent_hooks::manage(&request, &state, &app).map_err(|e| e.to_string())
 }
 
+#[tauri::command(async)]
+pub fn manage_agent_mcp(
+    request: agent_hooks::McpRequest,
+    app: tauri::AppHandle,
+) -> Result<Value, String> {
+    agent_hooks::manage_mcp(&request, &app).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn get_agent_hook_connections(state: State<Arc<AppState>>) -> Result<Vec<Value>, String> {
     agent_hooks::connections(&state).map_err(|e| e.to_string())
