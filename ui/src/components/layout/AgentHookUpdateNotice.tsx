@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/Button";
 import {
   useAgentHookUpdateStore,
   hookUpdateKey,
+  hookUpdateErrorKey,
   updateAgentHooks,
   dismissHookUpdateNotice,
   refreshAgentHookUpdates,
@@ -16,7 +17,7 @@ export function AgentHookUpdateNotice() {
       (target.status.updateRequired || target.status.updateWarning) &&
       !dismissed.includes(hookUpdateKey(target)),
   );
-  const visibleErrors = errors.filter((error) => !dismissed.includes(JSON.stringify(error)));
+  const visibleErrors = errors.filter((error) => !dismissed.includes(hookUpdateErrorKey(error)));
   if (!visible.length && !visibleErrors.length) return null;
   return (
     <aside

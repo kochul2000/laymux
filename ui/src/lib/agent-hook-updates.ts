@@ -22,6 +22,9 @@ export const useAgentHookUpdateStore = create<UpdateState>(() => ({
 }));
 export const hookUpdateKey = (target: HookUpdateTarget) =>
   JSON.stringify([target.provider, target.distro, target.status.configDir]);
+// Errors identify the checked environment, not a timeout's changing wording.
+export const hookUpdateErrorKey = (error: HookUpdateError) =>
+  JSON.stringify(["error", error.provider, error.distro, error.configDir]);
 let pending: Promise<void> | undefined;
 
 async function audit() {
@@ -131,21 +134,46 @@ export function dismissHookUpdateNotice() {
       ...state.targets
         .filter((t) => t.status.updateRequired || t.status.updateWarning)
         .map(hookUpdateKey),
-      ...state.errors.map((e) => JSON.stringify(e)),
+      ...state.errors.map(hookUpdateErrorKey),
     ],
   }));
 }
 
 /** One mounted app owns the timer; concurrent checks share the same promise. */
 export function subscribeAgentHookUpdates() {
+  const intervalMs = 60_000;
   let disposed = false;
+  let checking = false;
+  let nextCheckAt = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  function schedule(delayMs: number) {
+    if (disposed) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = undefined;
+      void poll();
+    }, delayMs);
+  }
   async function poll() {
-    await refreshAgentHookUpdates();
-    if (!disposed) timer = setTimeout(() => void poll(), 60_000);
+    if (disposed || checking) return;
+    const remainingMs = nextCheckAt - Date.now();
+    if (remainingMs > 0) {
+      if (timer === undefined) schedule(remainingMs);
+      return;
+    }
+    checking = true;
+    clearTimeout(timer);
+    timer = undefined;
+    try {
+      await refreshAgentHookUpdates();
+    } finally {
+      checking = false;
+      nextCheckAt = Date.now() + intervalMs;
+      schedule(intervalMs);
+    }
   }
   const focus = () => {
-    void refreshAgentHookUpdates();
+    void poll();
   };
   window.addEventListener("focus", focus);
   void poll();

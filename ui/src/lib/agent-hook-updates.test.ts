@@ -99,4 +99,58 @@ describe("agent hook update coordinator", () => {
     window.dispatchEvent(new Event("focus"));
     expect(invoke).toHaveBeenCalledTimes(2);
   });
+  it("does not repeat automatic checks when focus returns during the 60-second interval", async () => {
+    vi.useFakeTimers();
+    invoke.mockResolvedValue({ targets: [], errors: [] });
+    const stop = subscribeAgentHookUpdates();
+    try {
+      await refreshAgentHookUpdates();
+      for (let i = 0; i < 20; i++) {
+        window.dispatchEvent(new Event("focus"));
+        await vi.advanceTimersByTimeAsync(1000);
+      }
+      expect(invoke).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(40_000);
+      expect(invoke).toHaveBeenCalledTimes(2);
+    } finally {
+      stop();
+    }
+  });
+  it("shares a slow automatic check and starts its interval after that check completes", async () => {
+    vi.useFakeTimers();
+    let resolve!: (value: unknown) => void;
+    invoke.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    invoke.mockResolvedValue({ targets: [], errors: [] });
+    const stop = subscribeAgentHookUpdates();
+    try {
+      await vi.advanceTimersByTimeAsync(20_000);
+      window.dispatchEvent(new Event("focus"));
+      resolve({ targets: [], errors: [] });
+      await refreshAgentHookUpdates();
+      window.dispatchEvent(new Event("focus"));
+      await vi.advanceTimersByTimeAsync(59_999);
+      expect(invoke).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(invoke).toHaveBeenCalledTimes(2);
+    } finally {
+      stop();
+    }
+  });
+  it("keeps explicit refresh available during the automatic check interval", async () => {
+    vi.useFakeTimers();
+    invoke.mockResolvedValue({ targets: [], errors: [] });
+    const stop = subscribeAgentHookUpdates();
+    try {
+      await refreshAgentHookUpdates();
+      await vi.advanceTimersByTimeAsync(1000);
+      await refreshAgentHookUpdates();
+      expect(invoke).toHaveBeenCalledTimes(2);
+    } finally {
+      stop();
+    }
+  });
 });
