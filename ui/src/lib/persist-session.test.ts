@@ -509,9 +509,11 @@ describe("persistSession", () => {
         new Error("probe unavailable"),
       );
       await persistSession();
-      expect(vi.mocked(saveLocalSession).mock.calls.at(-1)![0].workspaces[0].panes[0].view).toEqual({
-        type: "TerminalView",
-      });
+      expect(vi.mocked(saveLocalSession).mock.calls.at(-1)![0].workspaces[0].panes[0].view).toEqual(
+        {
+          type: "TerminalView",
+        },
+      );
       expect(useWorkspaceStore.getState().workspaces[0].panes[0].layers[0].view).toEqual({
         type: "TerminalView",
       });
@@ -737,7 +739,45 @@ describe("persistSession", () => {
     },
   );
 
-  it("reproduces update refusal for an unfocused live Codex without a durable session", async () => {
+  it("saves every pane when daemon-only update attribution remains unidentified", async () => {
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView", profile: "PowerShell" });
+    const workspace = useWorkspaceStore.getState().getActiveWorkspace()!;
+    const id = `terminal-${workspace.panes[0].layers[0].id}`;
+    vi.mocked(getTerminalCwds).mockResolvedValue({ [id]: "D:/work" });
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+      [id]: { generation: 1, provider: "codex", state: "activeButUnidentified" },
+    });
+
+    await flushSessionCheckpoint({ reason: "update", requireConclusive: false, terminalIds: [] });
+
+    expect(saveLocalSession).toHaveBeenCalledOnce();
+    const [snapshot, coverage] = vi.mocked(saveLocalSession).mock.calls[0];
+    expect(snapshot.workspaces).toHaveLength(useWorkspaceStore.getState().workspaces.length);
+    expect(snapshot.workspaces[0].panes[0].view.lastCwd).toBe("D:/work");
+    expect(coverage).toContainEqual({
+      terminalId: id,
+      generation: 1,
+      provider: "codex",
+      state: "activeButUnidentified",
+    });
+    expect(invoke).not.toHaveBeenCalledWith("begin_codex_status_checkpoint", expect.anything());
+  });
+
+  it("validates only local fallback PTYs while saving unidentified daemon panes too", async () => {
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+      "terminal-daemon": { generation: 1, provider: "codex", state: "activeButUnidentified" },
+      "terminal-local": { generation: 2, state: "noAgent" },
+    });
+    await flushSessionCheckpoint({
+      reason: "update",
+      requireConclusive: true,
+      terminalIds: ["terminal-local"],
+    });
+    expect(getTerminalSessionAttributions).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(saveLocalSession).mock.calls[0][1]).toHaveLength(2);
+  });
+
+  it("blocks an update when a local fallback Codex has no durable session", async () => {
     const id = "terminal-unfocused-codex";
     // No frontend instance/focus is needed: the backend live catalog is authoritative.
     vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
@@ -745,7 +785,7 @@ describe("persistSession", () => {
     });
     for (let attempt = 0; attempt < 3; attempt += 1) {
       await expect(
-        flushSessionCheckpoint({ reason: "update", requireConclusive: true }),
+        flushSessionCheckpoint({ reason: "update", requireConclusive: true, terminalIds: [id] }),
       ).rejects.toThrow(`Session attribution is not conclusive for ${id}: activeButUnidentified`);
     }
     expect(saveLocalSession).not.toHaveBeenCalled();

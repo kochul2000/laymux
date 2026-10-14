@@ -13,6 +13,9 @@ use super::ServerState;
 #[derive(Debug, Clone, Copy, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum UpdateHandoffMode {
+    /// Run actual checkpoint/cache preparation, then release the fence without
+    /// installing or exiting. Distinct from the legacy post-install handoff.
+    Prepare,
     /// The Windows path: the installer teardown, then the updater's
     /// `process::exit`.
     Installer,
@@ -25,11 +28,9 @@ pub struct UpdateHandoffRequest {
     pub mode: UpdateHandoffMode,
 }
 
-/// Runs what the GUI does after an update is installed, not the update
-/// checkpoint and input freeze before it (`app_update_install::prepare`):
-/// it verifies that the daemon sessions outlive the GUI, not the agent
-/// resume decisions of a checkpoint. The process exits right after the
-/// reply.
+/// `prepare` exercises the real pre-install fence, checkpoint and output cache,
+/// then restores the dev status. `installer`/`restart` exercise only the
+/// post-install handoff and exit shortly after the reply.
 pub async fn update_handoff(
     State(state): State<ServerState>,
     Json(request): Json<UpdateHandoffRequest>,
@@ -40,10 +41,34 @@ pub async fn update_handoff(
             Json(err_json("dev-only update handoff")),
         );
     }
+    if matches!(request.mode, UpdateHandoffMode::Prepare) {
+        #[cfg(debug_assertions)]
+        {
+            // Keep preparation alive if the HTTP caller disconnects. Its guard
+            // must release status/fence only after the frontend work settles.
+            let result = tokio::spawn(crate::app_update::dev::prepare(
+                state.app_handle.clone(),
+                state.app_state.clone(),
+            ))
+            .await;
+            return match result {
+                Ok(Ok(result)) => (
+                    StatusCode::OK,
+                    Json(serde_json::json!({ "success": true, "result": result })),
+                ),
+                Ok(Err(error)) => (StatusCode::CONFLICT, Json(err_json(&error))),
+                Err(error) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(err_json(&error.to_string())),
+                ),
+            };
+        }
+    }
     tokio::spawn(async move {
         // Let the reply leave first.
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         match request.mode {
+            UpdateHandoffMode::Prepare => {}
             UpdateHandoffMode::Installer => {
                 crate::update_install_guard::release_installer_file_locks(&state.app_state);
                 std::process::exit(0);

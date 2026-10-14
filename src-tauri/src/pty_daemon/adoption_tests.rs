@@ -386,6 +386,47 @@ fn assert_session_keeps_running(daemon: &TestDaemon) {
     assert!(!sessions[0].terminating && !sessions[0].exited);
 }
 
+#[tokio::test]
+async fn update_restore_targets_exclude_live_daemon_children_but_keep_local_fallbacks() {
+    let daemon = TestDaemon::start();
+    let state = state_with_daemon_terminal(&daemon, "pane-checkpoint#1");
+    state
+        .session_checkpoint
+        .begin_finalization_and_drain(&state)
+        .await
+        .unwrap();
+    assert!(crate::session_checkpoint::update::restore_targets(&state)
+        .unwrap()
+        .is_empty());
+    state.session_checkpoint.cancel_finalization();
+
+    // The setting can enable the daemon while a particular spawn falls back
+    // to a local PTY. The live handle, not that setting, decides its protection.
+    state.pty_handles.lock().unwrap().insert(
+        "terminal-local-fallback".into(),
+        crate::pty::PtyHandle::from_test_writer(Box::new(Vec::<u8>::new())),
+    );
+    state
+        .session_checkpoint
+        .begin_finalization_and_drain(&state)
+        .await
+        .unwrap();
+    assert_eq!(
+        crate::session_checkpoint::update::restore_targets(&state).unwrap(),
+        vec!["terminal-local-fallback"]
+    );
+
+    // Selection is read-only; the subsequent installer handoff keeps the same
+    // daemon session alive, just like the real update path.
+    assert_session_keeps_running(&daemon);
+    state.begin_update_handoff();
+    state.terminate_child_processes();
+    drop(state);
+    assert_session_keeps_running(&daemon);
+    super::control::terminate_by_id(&daemon.endpoint, "pane-checkpoint#1", None).unwrap();
+    daemon.wait_for_sessions(0);
+}
+
 #[test]
 fn the_installer_teardown_hands_daemon_terminals_to_the_updated_gui() {
     let daemon = TestDaemon::start();

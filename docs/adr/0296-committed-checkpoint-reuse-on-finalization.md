@@ -1,6 +1,6 @@
 # 0296. 변경 없는 저장 완료 복원점을 종료·업데이트에서 재사용한다
 
-- Status: Accepted
+- Status: Accepted (partially superseded by [0323](0323-update-checkpoint-follows-pty-ownership.md))
 - Superseded by: [ADR-0299](0299-portable-settings-and-local-sqlite-state.md), settings.json 복원 상태 SoT 및 저장 완료 receipt의 영속 revision 경계에 한정한다.
 - Date: 2026-10-07
 - Source: 사용자 “이미 세션 저장이 되어 있으면 건너뛰면 되잖아” 요구, [ADR-0222](0222-agent-session-checkpoint-coordinator.md), [ADR-0295](0295-codex-continuous-conversation-checkpoint.md), architecture/data-flow.md §13.5
