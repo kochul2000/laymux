@@ -1,0 +1,44 @@
+# 훅 설치 검사 재사용 dev 검증 — 2026-10-14
+
+관련 변경: PR #1189, [ADR-0324](adr/0324-agent-hook-inspection-on-discovery.md).
+
+## 환경과 측정
+
+- Windows native Tauri dev API 19281, CDP 9229. 초기 실행 head `099bafa0`, branch `fix/hook-warning-repeat`를 health로 확인했다.
+- APPDATA·LOCALAPPDATA·WebView 데이터는 격리했다. release 19280과 사용자 CLI 설정을 수정하지 않았다. 기본 native·WSL 훅 폴더는 읽기 전용으로 검사했고 설치·손상 fixture는 리포의 `.tmp/`에 한정했다.
+- `Inspecting agent hook installation` backend debug 기록으로 실제 설치 status·관리 진입 횟수를 셌다. IPC 성공 응답이나 설치 결과를 mock하지 않았다.
+- 최초 실행에 native Claude/Codex와 실행 중 Ubuntu-22.04의 Claude/Codex를 각각 한 번 검사했다(총 4회). 같은 앱의 자동 캐시 조회는 추가 설치 검사를 실행하지 않았다.
+
+## 실제 CLI와 반복 조회
+
+기존 터미널 8개가 모두 ready인 상태에서 격리 CODEX_HOME에 동봉 helper를 명시적으로 설치했다. 실제 Codex를 `--no-daemon --no-alt-screen`으로 실행해 fixture의 폴더·훅 trust를 통과하고 도구 사용 없는 `OK` 응답을 받았다. 사용자 홈에서 시작하면 기본 폴더와 사용자 지정 폴더의 훅이 같은 대화에 중복 수신되어 기존 모호성 방어가 snapshot을 거절했다. 리포 경로에서 새 대화를 시작한 후에는 실제 프로세스 귀속의 훅 snapshot이 반환됐다.
+
+포커스 복귀·`get_agent_hook_states(['codex'])`·자동 캐시 조회를 20회 반복했다. 약 33.42초 동안 19개 sample에서 실제 Codex snapshot이 반환됐고, 설치 검사 추가 횟수는 **0회**였다. 조회와 캐시 조회를 합친 sample의 최대 시간은 약 207ms였다. 이 수치는 이벤트 전송 자체의 시간 측정이 아니다. 실제 현재 대화·프로세스 검증은 유지한다.
+
+## 대상 발견과 명시적 검사
+
+- native fixture helper가 실제 dev PTY 환경에서 새 설정 폴더의 SessionStart를 보냈다. 알림 이벤트 직후 backend가 그 폴더만 한 번 검사하고 실제 JSON 파싱 오류를 캐시했다.
+- WSL pane에서 동봉 Linux helper로 새 `/mnt/d/.../.tmp/hi-wsl` 폴더의 SessionStart를 보냈다. 실행 중 Ubuntu-22.04에서 이 폴더만 한 번 검사했다. 같은 이벤트 5회와 캐시 조회 10회·포커스 복귀를 반복해도 설치 검사 횟수는 증가하지 않았다.
+- 두 fixture 파일의 오류를 EOF에서 다른 파싱 오류로 바꿨다. 자동 조회는 기존 캐시 오류를 유지했다. native 명시적 status는 해당 대상만 한 번 검사하고 새 오류를 반영했다. REST updates 명시적 전체 조회는 알려진 7개 대상을 실제 재검사했다.
+- 실제 안내의 ‘나중에’ 버튼을 클릭한 후 캐시 안내를 갱신했다. 오류 결과를 보존하면서 안내는 숨겨졌다. 같은 대상의 문구 변경은 별도 UI 회귀 테스트로도 검증했다.
+- 실제 Ubuntu-22.04 fixture의 첫 status를 시간 초과시키는 Rust 테스트에서 제한된 읽기 전용 재시도 1회로 성공했다. 정지 배포판을 자동 시작하지 않는 정책은 검사 실행 횟수를 세는 단위 회귀로 검증했다.
+
+## 출력 부하와 회귀
+
+기존 8개 터미널을 유지하고 결정적 background 4-pane 플러드 벤치에서 각 pane에 150,000행을 흘렸다. final marker·frontier·입력 echo·서비스 간격·catch-up·bridge·diagnostics·스크린샷 기준이 모두 통과했다. 판정은 `acceptance.passed: true`였다.
+
+TDD에서 주기·포커스 검사를 제거하는 UI 회귀 4개가 기존 코드에서 실패했다. Rust의 최초 검사 재사용 회귀는 20회 반복 조회에서 42번 검사하는 기존 방식으로 실패했다. 별도 회귀는 수동 검사가 진행 중일 때 새 대상 알림을 놓치는 경우를 재현했고, 완료 뒤 캐시 조회를 예약하도록 수정했다. 대상 발견·WSL·오류 보관·재검사 무효화·경로 별칭·대화/제목 안전성 테스트를 함께 실행했다.
+
+초기 전체 검증은 UI 5,624개, Rust 2,417개 통과(10개 ignored), 훅 관리 Playwright 1개 통과였다. 후속 큐 수정은 관련 UI 25개와 타입·lint 검사로 확인했다. 관리 결과도 안내 갱신 이벤트를 발행하도록 하여 Settings/REST 관리 후 자동 타이머 없이 캐시 결과를 표시한다. 실제 dev 재기동 뒤 명시적 status의 실패 결과가 별도 갱신 호출 없이 화면 안내에 표시됐고, backend 설치 호출은 그 status 1회뿐이었다. 최종 훅 관련 Rust 테스트 34개도 통과했다. 독립 리뷰 결과는 PR 본문에 기록한다.
+
+원시 증거는 로컬 `.tmp/hook-inspection-once/`의 `dev.log`, `poll.json`, `first-discovery.json`, `wsl-discovery.json`, `repeat-wsl.json`, `manual.json`, `manual-rest.json`, `bench.json`, 각 테스트 로그에 있다. dev 종료에는 `scripts/kill-dev.sh --with-daemon`을 사용한다.
+
+## 독립 리뷰 후 경로 보존 수정
+
+첫 리뷰는 Windows 정규화 키를 I/O 경로로 재사용하는 P1을 재현했다. 동일 fixture에 원본 `D:/PycharmProjects/...`로 status하면 등록 10개를 인식하지만 소문자 경로는 등록 0개로 판단했다. 최근 관찰이 사라진 뒤의 전체 검사와 갱신·제거에서 소유권을 잃을 수 있었다. 캐시 entry와 발견 큐에 원본 요청을 별도 보존하고, 성공 시 원본 status.configDir를 사용하도록 수정했다. 정규화는 조회·중복 제거 키에만 적용한다.
+
+새 회귀 2개가 수정 전 실패했다. 실제 설치 라이브러리로 임시 폴더에 설치한 훅을 최근 관찰 없이 캐시 요청으로 재검사·갱신·제거하는 Windows 회귀에서 등록/소유 명령이 10개로 유지되고 제거 뒤 0개가 됨을 확인했다. 동등한 경로 표기로 재검사가 실패해도 오류 안내의 기존 경로 표기를 보존하는 회귀를 추가했다. 훅 Rust 37개가 통과했고, 실제 dev head `2408da9c`에서도 관찰이 없는 사용자 지정 폴더를 status로 시딩한 뒤 전체 재검사·갱신·제거에서 10/10/0 등록을 확인했다. 설치 호출은 status 1회·전체 5회·갱신 1회·제거 1회였으며 추가 자동 검사는 없었다(`p1-live.json`).
+
+새 독립 리뷰어의 두 번째 전체 리뷰에서는 P1이 없었고, 캐시 512개 포화 시 전체 검사 계획의 조기 반환으로 정상 대상이 pending에 남는 P2를 지적했다. 초과 대상의 예약 거절은 글로벌 용량 오류로 유지하되 검사 계획에서 제외하여 기존 대상은 검사·결과 기록을 완료하도록 수정했다. 포화된 512개와 513번째 새 대상의 경계 회귀가 수정 전 실패했으며, 수정 후 기존 건강한 대상의 자격 유지·초과 대상 미실행을 검증했다. 추가 ADR급 후속 이슈는 없다.
+
+최종 훅 Rust 38개가 통과했다. 실제 dev head `ff0b2faf`에서 기본 4개와 존재하지 않는 fixture 경로의 읽기 전용 status 508개로 캐시를 채우고, 실제 helper로 513번째 대상 이벤트를 보냈다. 이후 명시적 전체 검사는 기존 512개 결과를 모두 기록하고 글로벌 용량 오류 1개를 반환했다. 건강한 native Claude 설치 증거와 등록 수를 유지했으며 초과 폴더 설치 검사는 실행되지 않았다. backend trace는 최초 4회·시딩 508회·전체 검사 512회로 총 1,024회였고 자동 추가 검사는 0회였다(`p2-live.json`). 검증 후 dev GUI와 데몬을 같은 종료 스크립트로 정리했다.

@@ -1,7 +1,6 @@
 use crate::agent_hooks::{
     observations::{HookPhase, HookResult, Observation},
     title::TitleBinding,
-    ManageRequest,
 };
 use crate::commands::session_attribution::{
     get_terminal_session_attributions_impl, SessionAttributionState, TerminalSessionAttribution,
@@ -42,7 +41,7 @@ pub fn get_agent_hook_states(
 pub(crate) fn get_agent_hook_states_impl(
     providers: &[String],
     state: &AppState,
-    app: &tauri::AppHandle,
+    _app: &tauri::AppHandle,
 ) -> Result<HashMap<String, HookStateSnapshot>, String> {
     if providers.is_empty() {
         return Ok(HashMap::new());
@@ -119,7 +118,6 @@ pub(crate) fn get_agent_hook_states_impl(
             })
             .collect()
     };
-    let mut installed = HashMap::new();
     let mut result = HashMap::new();
     let mut title_proofs = HashMap::new();
     for (id, generation, observation, title) in observations {
@@ -135,31 +133,15 @@ pub(crate) fn get_agent_hook_states_impl(
         {
             continue;
         }
-        let key = (
-            event.provider.clone(),
-            event.distro.clone(),
-            event.config_dir.clone(),
-            title.is_some(),
-        );
-        let enabled = *installed.entry(key).or_insert_with(|| {
-            crate::agent_hooks::manage(
-                &ManageRequest {
-                    provider: event.provider.clone(),
-                    operation: "status".into(),
-                    distro: event.distro.clone(),
-                    config_dir: event.config_dir.clone(),
-                },
-                app,
+        let enabled = state
+            .agent_hook_inspections
+            .enabled(
+                &event.provider,
+                event.distro.as_deref(),
+                event.config_dir.as_deref(),
+                title.is_some(),
             )
-            .is_ok_and(|value| {
-                value["installed"] == true
-                    && value["disabled"] == false
-                    && value["warning"].is_null()
-                    && (title.is_none()
-                        || (value["titleBinding"]["configured"] == true
-                            && value["titleBinding"]["warning"].is_null()))
-            })
-        });
+            .map_err(|error| error.to_string())?;
         if !enabled {
             continue;
         }
@@ -187,8 +169,8 @@ pub(crate) fn get_agent_hook_states_impl(
             },
         );
     }
-    // Installation I/O can span a session switch within the same PTY. Recheck
-    // exact selection and liveness after it, not just the generation number.
+    // Process attribution can span a session switch within the same PTY.
+    // Recheck exact selection and liveness, not just the generation number.
     if !result.is_empty() {
         let final_attributions = get_terminal_session_attributions_impl(None, None, None, state)?;
         let final_titles: HashMap<_, _> = state

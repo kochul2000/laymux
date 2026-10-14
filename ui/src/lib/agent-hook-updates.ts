@@ -2,6 +2,7 @@ import { create } from "zustand";
 import {
   getAgentHookUpdates,
   manageAgentHooks,
+  onAgentHookInspectionNeeded,
   type HookUpdateTarget,
   type HookUpdateError,
   type HookProvider,
@@ -22,11 +23,15 @@ export const useAgentHookUpdateStore = create<UpdateState>(() => ({
 }));
 export const hookUpdateKey = (target: HookUpdateTarget) =>
   JSON.stringify([target.provider, target.distro, target.status.configDir]);
+// Errors identify the checked environment, not a timeout's changing wording.
+export const hookUpdateErrorKey = (error: HookUpdateError) =>
+  JSON.stringify(["error", error.provider, error.distro, error.configDir]);
 let pending: Promise<void> | undefined;
+let pendingAutomatic = false;
 
-async function audit() {
+async function audit(automatic = false) {
   try {
-    const result = await getAgentHookUpdates();
+    const result = await getAgentHookUpdates(automatic);
     const checked = new Set(result.targets.map(hookUpdateKey));
     useAgentHookUpdateStore.setState((state) => ({
       targets: [
@@ -53,10 +58,18 @@ async function audit() {
   }
 }
 
-export function refreshAgentHookUpdates(): Promise<void> {
-  if (pending) return pending;
-  pending = audit().finally(() => {
+export function refreshAgentHookUpdates(automatic = false): Promise<void> {
+  if (pending) {
+    // Discovery can arrive after the in-flight task captured its target list.
+    // Follow it with a cached check so that first notification is not lost.
+    if (automatic) return pending.then(() => refreshAgentHookUpdates(true));
+    if (!automatic && pendingAutomatic) return pending.then(() => refreshAgentHookUpdates());
+    return pending;
+  }
+  pendingAutomatic = automatic;
+  pending = audit(automatic).finally(() => {
     pending = undefined;
+    pendingAutomatic = false;
   });
   return pending;
 }
@@ -80,7 +93,7 @@ export function manageAgentHooksAndRefresh(
           hookUpdateKey(value) === resolvedKey ? { ...value, status } : value,
         ),
       }));
-      await audit();
+      await audit(true);
       return status;
     } catch (error) {
       useAgentHookUpdateStore.setState((state) => ({
@@ -131,27 +144,36 @@ export function dismissHookUpdateNotice() {
       ...state.targets
         .filter((t) => t.status.updateRequired || t.status.updateWarning)
         .map(hookUpdateKey),
-      ...state.errors.map((e) => JSON.stringify(e)),
+      ...state.errors.map(hookUpdateErrorKey),
     ],
   }));
 }
 
-/** One mounted app owns the timer; concurrent checks share the same promise. */
+/** Startup and target discovery own automatic checks; focus/time do not. */
 export function subscribeAgentHookUpdates() {
   let disposed = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  async function poll() {
-    await refreshAgentHookUpdates();
-    if (!disposed) timer = setTimeout(() => void poll(), 60_000);
+  let checking = false;
+  let dirty = false;
+  async function check() {
+    if (disposed) return;
+    dirty = true;
+    if (checking) return;
+    checking = true;
+    try {
+      do {
+        dirty = false;
+        await refreshAgentHookUpdates(true);
+      } while (dirty && !disposed);
+    } finally {
+      checking = false;
+    }
   }
-  const focus = () => {
-    void refreshAgentHookUpdates();
-  };
-  window.addEventListener("focus", focus);
-  void poll();
+  const subscription = onAgentHookInspectionNeeded(() => {
+    void check();
+  });
+  void subscription.then(() => check()).catch(() => check());
   return () => {
     disposed = true;
-    clearTimeout(timer);
-    window.removeEventListener("focus", focus);
+    void subscription.then((stop) => stop()).catch(() => undefined);
   };
 }

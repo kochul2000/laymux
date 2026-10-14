@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 const AUDIT_BUDGET: Duration = Duration::from_secs(20);
+mod automatic;
 
 #[cfg(any(windows, test))]
 fn is_audit_distro(name: &str) -> bool {
@@ -136,27 +137,31 @@ fn scan_with_budget(
 }
 
 pub fn audit(state: &AppState, app: &tauri::AppHandle) -> Result<Value, AppError> {
-    let deadline = Instant::now() + AUDIT_BUDGET;
-    #[cfg(windows)]
-    let (running, environment_error) = match running_distros() {
-        Ok(running) => (running, None),
-        Err(error) => (Vec::new(), Some(error.to_string())),
-    };
-    #[cfg(not(windows))]
-    let (running, environment_error): (Vec<String>, Option<String>) = (Vec::new(), None);
-    // Release the observation lock before any file I/O or child process call.
-    let requests = requests(&running, &connections(state)?);
-    let mut result = scan_with_budget(
-        &requests,
-        || deadline.saturating_duration_since(Instant::now()),
+    audit_with_mode(state, app, false)
+}
+
+pub fn audit_with_mode(
+    state: &AppState,
+    app: &tauri::AppHandle,
+    automatic: bool,
+) -> Result<Value, AppError> {
+    let observations = connections(state)?;
+    automatic::run(
+        &state.agent_hook_inspections,
+        &observations,
+        automatic,
+        || {
+            #[cfg(windows)]
+            {
+                running_distros()
+            }
+            #[cfg(not(windows))]
+            {
+                Ok(Vec::new())
+            }
+        },
         |request, timeout| manage_with_timeout(request, app, timeout),
-    );
-    if let Some(message) = environment_error {
-        if let Some(errors) = result["errors"].as_array_mut() {
-            errors.push(json!({"provider":null,"distro":null,"configDir":null,"message":message}));
-        }
-    }
-    Ok(result)
+    )
 }
 
 #[cfg(test)]

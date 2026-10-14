@@ -78,4 +78,42 @@ describe("AgentHookUpdateNotice", () => {
     expect(useAgentHookUpdateStore.getState().targets).toHaveLength(1);
     expect(invoke.mock.calls.filter(([c]) => c === "manage_agent_hooks")).toHaveLength(0);
   });
+  it("keeps a dismissed environment error hidden when the next timeout has different text", async () => {
+    const error = {
+      provider: "codex",
+      distro: "Ubuntu",
+      configDir: "/custom/.codex",
+      message: "process timed out after 8s",
+    };
+    invoke.mockResolvedValue({ targets: [], errors: [error] });
+    render(<AgentHookUpdateNotice />);
+    await act(() => refreshAgentHookUpdates());
+    fireEvent.click(screen.getByTestId("agent-hook-update-dismiss"));
+    invoke.mockResolvedValue({
+      targets: [],
+      errors: [{ ...error, message: "process timed out after 3s" }],
+    });
+    await act(() => refreshAgentHookUpdates());
+    expect(screen.queryByTestId("agent-hook-update-notice")).not.toBeInTheDocument();
+    expect(useAgentHookUpdateStore.getState().errors[0].message).toBe("process timed out after 3s");
+  });
+  it("still displays errors from a different environment after dismissing the first", async () => {
+    const error = {
+      provider: "codex",
+      distro: "Ubuntu",
+      configDir: "/custom/.codex",
+      message: "timeout",
+    };
+    invoke.mockResolvedValue({ targets: [], errors: [error] });
+    render(<AgentHookUpdateNotice />);
+    await act(() => refreshAgentHookUpdates());
+    fireEvent.click(screen.getByTestId("agent-hook-update-dismiss"));
+    invoke.mockResolvedValue({
+      targets: [],
+      errors: [error, { ...error, distro: "Debian", message: "Debian failed" }],
+    });
+    await act(() => refreshAgentHookUpdates());
+    expect(screen.getByTestId("agent-hook-update-notice")).toHaveTextContent("Debian failed");
+    expect(screen.queryByText("timeout")).not.toBeInTheDocument();
+  });
 });

@@ -10,8 +10,12 @@ pub fn list_agent_hook_environments() -> Result<Vec<Value>, String> {
 }
 
 #[tauri::command(async)]
-pub fn manage_agent_hooks(request: ManageRequest, app: tauri::AppHandle) -> Result<Value, String> {
-    agent_hooks::manage(&request, &app).map_err(|e| e.to_string())
+pub fn manage_agent_hooks(
+    request: ManageRequest,
+    state: State<Arc<AppState>>,
+    app: tauri::AppHandle,
+) -> Result<Value, String> {
+    agent_hooks::manage(&request, &state, &app).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -25,6 +29,8 @@ pub use states::*;
 pub fn get_agent_hook_updates(
     state: State<Arc<AppState>>,
     app: tauri::AppHandle,
+    automatic: Option<bool>,
 ) -> Result<Value, String> {
-    agent_hooks::updates::audit(&state, &app).map_err(|e| e.to_string())
+    agent_hooks::updates::audit_with_mode(&state, &app, automatic.unwrap_or(false))
+        .map_err(|e| e.to_string())
 }

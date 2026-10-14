@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 export type HookProvider = "claude" | "codex";
 export interface HookStateSnapshot {
@@ -72,5 +73,9 @@ export interface HookUpdateError {
   configDir: string | null;
   message: string;
 }
-export const getAgentHookUpdates = () =>
-  invoke<{ targets: HookUpdateTarget[]; errors: HookUpdateError[] }>("get_agent_hook_updates");
+export const getAgentHookUpdates = (automatic = false) =>
+  invoke<{ targets: HookUpdateTarget[]; errors: HookUpdateError[] }>("get_agent_hook_updates", {
+    automatic,
+  });
+export const onAgentHookInspectionNeeded = (handler: () => void) =>
+  listen("agent-hook-inspection-needed", handler);
