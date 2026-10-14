@@ -404,9 +404,10 @@ function waitForTerminalSessionReady(
 }
 
 /**
- * Wake a queued terminal for a backend Automation write without leaving the UI
- * focused on (or switched to) the target. Inactive workspaces are activated only
- * until the PTY exists because a display:none terminal has no usable dimensions.
+ * Wake a queued terminal for a backend Automation write without moving the user
+ * (ADR-0324). The reveal request prioritizes the pane in the startup queue and
+ * lets a background workspace mount it hidden; the PTY starts rendererless
+ * (ADR-0161), so the active workspace and keyboard focus never change.
  */
 async function prepareTerminalForAutomation(terminalId: string): Promise<HandlerResult> {
   if (isTerminalSessionReady(terminalId)) {
@@ -425,14 +426,6 @@ async function prepareTerminalForAutomation(terminalId: string): Promise<Handler
   // requested by its own id (ADR-0297).
   const paneId = workspaceCtx?.layer.id ?? dockCtx?.pane.id;
   const releaseReveal = paneId ? usePaneRevealStore.getState().requestReveal(paneId) : () => {};
-  const previousWorkspaceId = useWorkspaceStore.getState().activeWorkspaceId;
-  const targetWorkspaceId = workspaceCtx?.workspace.id;
-  const switchedWorkspace =
-    targetWorkspaceId !== undefined && targetWorkspaceId !== previousWorkspaceId;
-
-  if (switchedWorkspace) {
-    useWorkspaceStore.getState().setActiveWorkspace(targetWorkspaceId);
-  }
 
   try {
     const ready = await waitForTerminalSessionReady(terminalId);
@@ -442,10 +435,6 @@ async function prepareTerminalForAutomation(terminalId: string): Promise<Handler
     return ok({ terminalId, ready: true });
   } finally {
     releaseReveal();
-    // Do not override navigation the user performed while this request waited.
-    if (switchedWorkspace && useWorkspaceStore.getState().activeWorkspaceId === targetWorkspaceId) {
-      useWorkspaceStore.getState().setActiveWorkspace(previousWorkspaceId);
-    }
   }
 }
 
@@ -629,33 +618,13 @@ const handlers: HandlerMap = {
       const layoutId = (p.layoutId as string | undefined) ?? layouts[0]?.id;
       if (!layoutId) return err("No layouts available");
       const before = useWorkspaceStore.getState().workspaces;
-      useWorkspaceStore.getState().addWorkspace(p.name as string, layoutId);
+      // cwd is applied while building the workspace, so creation never touches
+      // the active workspace (ADR-0324).
+      const cwd = typeof p.cwd === "string" && p.cwd ? p.cwd : undefined;
+      useWorkspaceStore.getState().addWorkspace(p.name as string, layoutId, { cwd });
       const after = useWorkspaceStore.getState().workspaces;
       const newWs = after.find((ws) => !before.some((b) => b.id === ws.id));
       if (!newWs) return err(`Failed to create workspace: layout '${layoutId}' not found`);
-
-      // Apply cwd to all panes — convert EmptyView to TerminalView with lastCwd
-      const cwd = p.cwd as string | undefined;
-      if (cwd) {
-        const store = useWorkspaceStore.getState();
-        // Find index of new workspace to operate on its panes
-        const wsIdx = store.workspaces.findIndex((ws) => ws.id === newWs.id);
-        if (wsIdx >= 0) {
-          // Temporarily switch active to the new workspace so setPaneView works on it
-          const prevActiveId = store.activeWorkspaceId;
-          store.setActiveWorkspace(newWs.id);
-          // Every layer of every slot, hidden stacked layers included (ADR-0297).
-          for (const { slotIndex, layer } of layerEntries(newWs.panes)) {
-            const viewConfig: ViewInstanceConfig = {
-              ...(layer.view.type === "TerminalView" ? layer.view : { type: "TerminalView" }),
-              lastCwd: cwd,
-            };
-            useWorkspaceStore.getState().setPaneView(slotIndex, viewConfig, layer.id);
-          }
-          // Restore previous active workspace
-          store.setActiveWorkspace(prevActiveId);
-        }
-      }
 
       const updatedWs = useWorkspaceStore.getState().workspaces.find((ws) => ws.id === newWs.id)!;
       return ok({
@@ -832,7 +801,11 @@ const handlers: HandlerMap = {
       const idx = p.paneIndex as number;
       const ctx = getActivePaneCtx(idx);
       if ("err" in ctx) return ctx.err;
-      useWorkspaceStore.getState().splitPane(idx, p.direction as "horizontal" | "vertical");
+      // The new slot is inserted after `idx`, shifting later slot indices; keep
+      // the keyboard on the slot the user had focused (ADR-0298, ADR-0324).
+      keepGridFocusOnSlot(() =>
+        useWorkspaceStore.getState().splitPane(idx, p.direction as "horizontal" | "vertical"),
+      );
       const newPaneIndex = idx + 1;
       // Auto-convert EmptyView to TerminalView so MCP splits create usable terminals
       const wsBeforeConvert = useWorkspaceStore.getState().getActiveWorkspace();

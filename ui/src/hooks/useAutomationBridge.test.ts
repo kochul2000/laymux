@@ -2489,7 +2489,7 @@ describe("identify_caller and enriched responses", () => {
     expect(useTerminalStore.getState().instances[0].isFocused).toBe(true);
   });
 
-  it("write preparation forces reveal and restores the previous workspace after PTY readiness", async () => {
+  it("write preparation forces reveal without switching the active workspace (ADR-0324)", async () => {
     const { layouts } = useWorkspaceStore.getState();
     useWorkspaceStore.getState().addWorkspace("Queued", layouts[0].id);
     const ws1 = useWorkspaceStore.getState().workspaces[0];
@@ -2508,7 +2508,7 @@ describe("identify_caller and enriched responses", () => {
       params: { id: terminalId },
     });
 
-    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws2.id);
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws1.id);
     expect(usePaneRevealStore.getState().requestCounts[pane.id]).toBe(1);
 
     useTerminalStore.getState().registerInstance({
@@ -3046,6 +3046,26 @@ describe("identify_caller and enriched responses", () => {
     // If the default layout only has EmptyView, convert one and verify
     const termPanes = ws.panes.filter((p) => p.layers[0].view.type === "TerminalView");
     expect(termPanes.length).toBeGreaterThan(0);
+  });
+
+  it("create_workspace with cwd never activates the new workspace (ADR-0324)", () => {
+    const activeBefore = useWorkspaceStore.getState().activeWorkspaceId;
+    const seen: string[] = [];
+    const unsubscribe = useWorkspaceStore.subscribe((state, previous) => {
+      if (state.activeWorkspaceId !== previous.activeWorkspaceId)
+        seen.push(state.activeWorkspaceId);
+    });
+    const result = handleAutomationRequest({
+      requestId: "cw-cwd-stay",
+      category: "action",
+      target: "workspaces",
+      method: "add",
+      params: { name: "Background", cwd: "/repo" },
+    });
+    unsubscribe();
+    expect(result.success).toBe(true);
+    expect(seen).toEqual([]);
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(activeBefore);
   });
 
   it("create_workspace applies cwd to every stacked layer, hidden ones included (ADR-0297)", () => {
@@ -4629,6 +4649,16 @@ describe("panes.stack / activateLayer / remove(layerId) bridge (ADR-0297)", () =
     expect(useDockStore.getState().focusedDockPaneId).toBe("dock-b");
     expect(useGridStore.getState().focusedPaneIndex).toBeNull();
     expect(act("closeById", { paneId: "dock-b" }).success).toBe(false);
+  });
+
+  it("splits an earlier pane without moving keyboard focus off the focused slot (ADR-0324)", () => {
+    const focusedSlotId = useWorkspaceStore.getState().getActiveWorkspace()!.panes[1].id;
+    const result = act("split", { paneIndex: 0, direction: "vertical" });
+    expect(result.success).toBe(true);
+    const panes = useWorkspaceStore.getState().getActiveWorkspace()!.panes;
+    // The new slot sits at index 1, so the focused slot shifted to index 2.
+    expect(panes[2].id).toBe(focusedSlotId);
+    expect(useGridStore.getState().focusedPaneIndex).toBe(2);
   });
 
   it("stacks a terminal layer without moving keyboard focus", () => {

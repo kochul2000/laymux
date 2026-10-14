@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useUiStore } from "@/stores/ui-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { usePaneRevealStore } from "@/stores/pane-reveal-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { checkpointAndCloseHiddenTerminals } from "@/lib/tauri-api";
@@ -61,6 +62,7 @@ export function useHiddenTerminalAutoClose() {
         hiddenPaneIds: ui.hiddenPaneIds,
         hiddenWorkspaceIds: ui.hiddenWorkspaceIds,
         activeWorkspaceId: ws.activeWorkspaceId,
+        inUsePaneIds: new Set(Object.keys(usePaneRevealStore.getState().requestCounts)),
       });
 
       const { hiddenSince, evictPaneIds } = advanceHiddenTimers({
@@ -146,6 +148,11 @@ export function useHiddenTerminalAutoClose() {
         evaluate();
       }
     });
+    // An Automation write to an evicted pane brings it back for the request
+    // instead of switching to its workspace (ADR-0324).
+    const unsubscribeReveal = usePaneRevealStore.subscribe((state, previous) => {
+      if (state.requestCounts !== previous.requestCounts) evaluate();
+    });
     const unsubscribeSettings = useSettingsStore.subscribe((state, previous) => {
       if (
         state.workspaceSelector.hiddenAutoCloseSeconds !==
@@ -161,6 +168,7 @@ export function useHiddenTerminalAutoClose() {
       pendingEvictions.clear();
       unsubscribeUi();
       unsubscribeWorkspaces();
+      unsubscribeReveal();
       unsubscribeSettings();
       eligibility.release();
     };

@@ -31,18 +31,25 @@ export interface ComputeHiddenInput {
    * considered hidden — the user is looking at them.
    */
   activeWorkspaceId: string | null;
+  /**
+   * Panes an Automation request is starting in place (ADR-0324). Like the
+   * active workspace, they are in use and must not count down or stay evicted.
+   */
+  inUsePaneIds?: ReadonlySet<string>;
 }
 
 /**
  * Returns the set of pane ids that are currently hidden and therefore eligible
  * for the auto-close countdown. A pane is hidden when it (or its workspace) is
- * flagged hidden AND it does not belong to the active workspace.
+ * flagged hidden AND it does not belong to the active workspace AND no
+ * Automation request is using it.
  */
 export function computeHiddenPaneIds(input: ComputeHiddenInput): Set<string> {
-  const { panes, hiddenPaneIds, hiddenWorkspaceIds, activeWorkspaceId } = input;
+  const { panes, hiddenPaneIds, hiddenWorkspaceIds, activeWorkspaceId, inUsePaneIds } = input;
   const result = new Set<string>();
   for (const pane of panes) {
     if (pane.workspaceId === activeWorkspaceId) continue;
+    if (inUsePaneIds?.has(pane.paneId)) continue;
     const hidden = hiddenPaneIds.has(pane.paneId) || hiddenWorkspaceIds.has(pane.workspaceId);
     if (hidden) result.add(pane.paneId);
   }

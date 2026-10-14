@@ -214,4 +214,35 @@ describe("collectTerminalStartupCandidates", () => {
     expect(result.knownPaneIds).toEqual(["active-pane"]);
     expect(result.eligiblePaneIds).toEqual(["active-pane"]);
   });
+
+  it("starts a requested background-workspace terminal in place, but no hidden dock (ADR-0324)", () => {
+    const result = collectTerminalStartupCandidates({
+      workspaces: [
+        { id: "active", panes: [slot("active-pane", "TerminalView")] },
+        {
+          id: "background",
+          panes: [slot("requested", "TerminalView"), slot("sibling", "TerminalView")],
+        },
+        { id: "evicted-ws", panes: [slot("evicted", "TerminalView")] },
+      ],
+      activeWorkspaceId: "active",
+      focusedPaneIndex: 0,
+      docks: [
+        {
+          position: "bottom",
+          visible: false,
+          panes: [{ id: "hidden-dock", view: { type: "TerminalView" } }],
+        },
+      ],
+      focusedDock: null,
+      focusedDockPaneId: null,
+      persistHiddenDocks: true,
+      evictedPaneIds: new Set(["evicted"]),
+      requestedPaneIds: ["requested", "evicted", "hidden-dock"],
+    });
+
+    // Only the requested pane of the background workspace becomes eligible;
+    // its siblings keep waiting for the user to visit that workspace.
+    expect(result.eligiblePaneIds).toEqual(["requested", "active-pane"]);
+  });
 });

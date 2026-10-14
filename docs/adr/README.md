@@ -343,6 +343,7 @@ ADR 이 필요한 대표 기준:
 | [0322](0322-remote-item-management-menus.md) | Remote 워크스페이스와 페인은 관리 메뉴·스킵 두 버튼을 제공한다 | Accepted |
 
 | [0323](0323-update-checkpoint-follows-pty-ownership.md) | 업데이트 복원점의 대화 확정은 종료되는 PTY에만 요구한다 (0222·0270 일부 대체, 0314 확장) | Accepted |
+| [0324](0324-automation-never-navigates-user.md) | Automation 은 사용자를 다른 워크스페이스·pane 으로 옮기지 않는다 (0298 확장) | Accepted |
 
 | [0324](0324-agent-hook-inspection-on-discovery.md) | 훅 설치 검사는 대상 발견과 명시적 관리에만 수행한다 (0289 일부 대체, 0283 확장) | Accepted |
 

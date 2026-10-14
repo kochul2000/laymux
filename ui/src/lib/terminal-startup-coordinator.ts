@@ -170,7 +170,8 @@ function inactiveLayerTerminalIds(slots: readonly CandidateSlot[]): string[] {
 
 /**
  * Build global membership and pending order. Automation requests win, then the
- * focused pane, then active-workspace and visible-dock reading order.
+ * focused pane, then active-workspace and visible-dock reading order. A request
+ * also makes a background-workspace terminal eligible (ADR-0324).
  */
 export function collectTerminalStartupCandidates({
   workspaces,
@@ -186,11 +187,16 @@ export function collectTerminalStartupCandidates({
 }: CollectTerminalStartupCandidatesInput): TerminalStartupCandidates {
   const knownPaneIds: string[] = [];
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId);
+  // Workspace terminals an Automation request may start in place, background
+  // workspaces included: WorkspaceArea mounts a requested pane's workspace
+  // hidden, so the request never has to switch workspaces (ADR-0324).
+  const workspacePaneSet = new Set<string>();
 
   for (const workspace of workspaces) {
     for (const paneId of terminalPaneIds(workspace.panes.flatMap((slot) => slot.layers))) {
       if (workspace.id !== activeWorkspaceId && evictedPaneIds.has(paneId)) continue;
       knownPaneIds.push(paneId);
+      workspacePaneSet.add(paneId);
     }
   }
 
@@ -220,7 +226,7 @@ export function collectTerminalStartupCandidates({
   }
 
   const eligiblePaneIds = unique([
-    ...requestedPaneIds.filter((id) => eligiblePaneSet.has(id)),
+    ...requestedPaneIds.filter((id) => eligiblePaneSet.has(id) || workspacePaneSet.has(id)),
     ...foregroundTerminalIds,
     ...(focusedPaneId && eligiblePaneSet.has(focusedPaneId) ? [focusedPaneId] : []),
     ...layoutEligiblePaneIds,

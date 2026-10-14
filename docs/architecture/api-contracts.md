@@ -1181,7 +1181,7 @@ lease 갱신에 성공한 heartbeat 응답은 항상 경로 없는 PC 뷰어 신
 | `list_workspaces` | bridge_request | 워크스페이스 목록 (summary 옵션). summary 의 `paneCount` 는 **레이어 수**다(스택 레이어마다 1, [ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)) — `create_workspace`·`identify_caller`·`move_pane_to_workspace` 등의 `paneCount`/`totalPanes` 는 슬롯 수라 스택이 있으면 값이 다르다 |
 | `get_active_workspace` | bridge_request | 활성 워크스페이스 상세. `panes` 는 레이어마다 한 항목(`id`·`view`·`terminalId`·`paneNumber` 는 레이어, `paneIndex`·rect 는 슬롯)이고 `slotId`·`layerIndex`·`layerCount`·`activeLayer` 를 함께 싣는다. 스택이 없으면 항목은 이전과 같다 ([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)) |
 | `switch_workspace` | bridge_request | 워크스페이스 전환 |
-| `create_workspace` | bridge_request | 워크스페이스 생성 (레이아웃/프로필 지정) |
+| `create_workspace` | bridge_request | 워크스페이스 생성 (레이아웃/프로필 지정). 새 워크스페이스로 전환하지 않는다 — 이동은 `switch_workspace` ([ADR-0324](../adr/0324-automation-never-navigates-user.md)) |
 | `delete_workspace` | bridge_request | 워크스페이스 삭제 |
 | `rename_workspace` | bridge_request | 워크스페이스 이름 변경 |
 
@@ -1191,7 +1191,7 @@ lease 갱신에 성공한 heartbeat 응답은 항상 경로 없는 PC 뷰어 신
 |------|-----------|------|
 | `get_grid_state` | bridge_request | 그리드 상태 조회 (`editMode`, `focusedPane`, `activeWorkspaceId`) |
 | `focus_pane` | bridge_request | 인덱스 기반 팬 포커스 |
-| `split_pane` | bridge_request | 팬 분할 (`ready` 필드로 렌더 완료 여부 표시). `cwd` 생략 시 분할 대상 팬의 CWD 를 상속하고, 주면 그 값이 이긴다 ([ADR-0140](../adr/0140-split-pane-inherits-source-cwd.md)) |
+| `split_pane` | bridge_request | 팬 분할 (`ready` 필드로 렌더 완료 여부 표시). `cwd` 생략 시 분할 대상 팬의 CWD 를 상속하고, 주면 그 값이 이긴다 ([ADR-0140](../adr/0140-split-pane-inherits-source-cwd.md)). 키보드 포커스는 사용자가 보던 슬롯에 남는다 ([ADR-0324](../adr/0324-automation-never-navigates-user.md)) |
 | `stack_pane` | bridge_request | 슬롯에 레이어 쌓기 — `split_pane` 미러(`view_type` 기본 `TerminalView`, `profile`, `cwd`, `ready`). 키보드 포커스는 옮기지 않는다 ([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)) |
 | `activate_pane_layer` | bridge_request | `layer_id` 또는 `terminal_id` 로 스택 레이어 표시. `focus` 기본 true 는 필요 시 워크스페이스 전환 + 슬롯 포커스, `focus=false` 면 워크스페이스 전환·포커스 없이 표시 레이어만 바꾼다 ([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)) |
 | `remove_pane` | bridge_request | 팬 제거. 스택 슬롯은 `layer_id`(기본 활성 레이어) 하나만 닫는다 ([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)) |
@@ -1349,8 +1349,9 @@ impl McpHandler {
 **`write_to_terminal` / `write_to_neighbor` 리턴 계약** (#426):
 - 대상 `terminalId`가 workspace layout에는 할당됐지만 전역 terminal startup queue 뒤에 있어
   PTY가 아직 없으면 404로 실패하지 않는다. 프론트엔드 내부
-  `terminals.prepareForAutomation` 브리지가 해당 pane을 다음 순서로 우선하고, 필요하면 대상
-  workspace를 PTY 생성 동안만 활성화한 뒤 원래 workspace로 복원한다. REST
+  `terminals.prepareForAutomation` 브리지가 해당 pane을 다음 순서로 우선한다. 대상이 비활성
+  workspace에 있어도 활성 workspace·포커스는 바꾸지 않고, 그 workspace를 숨긴 채 마운트해
+  대상 pane만 rendererless로 시작한다([ADR-0324](../adr/0324-automation-never-navigates-user.md)). REST
   `POST /terminals/{id}/write`와 MCP `write_to_terminal` 모두 세션 준비를 최대 20초 기다린 뒤 쓴다.
   이미 시작 중인 terminal은 선점하지 않으며 Automation 요청도 전역 동시 시작 수를 늘리지
   않는다([ADR-0043](../adr/0043-global-terminal-ready-startup-slot.md)).

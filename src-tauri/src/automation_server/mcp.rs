@@ -2654,6 +2654,7 @@ impl McpHandler {
     }
 
     /// Create a new workspace, optionally from a layout template. Returns the new workspace's id, name, and pane count.
+    /// The user stays where they are (ADR-0324); call switch_workspace to go there.
     #[tool]
     async fn create_workspace(
         &self,
@@ -2762,6 +2763,7 @@ impl McpHandler {
     }
 
     /// Split a pane horizontally or vertically. Returns info about the new pane created.
+    /// Keyboard focus stays on the pane the user had focused (ADR-0324).
     /// The response includes a `ready` field: when false, the terminal is allocated but
     /// its PTY is still starting. `write_to_terminal` and `focus_terminal` wait for that
     /// session automatically before completing.

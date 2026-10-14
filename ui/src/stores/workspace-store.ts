@@ -160,7 +160,12 @@ interface WorkspaceState {
   /** Return workspaces sorted by display order (respects DnD reordering). */
   getOrderedWorkspaces: () => Workspace[];
   setActiveWorkspace: (id: string) => void;
-  addWorkspace: (name: string, layoutId: string) => void;
+  /**
+   * Append a workspace built from `layoutId` without activating it. With
+   * `cwd`, every layer becomes a TerminalView starting there (Automation
+   * `create_workspace`, ADR-0324).
+   */
+  addWorkspace: (name: string, layoutId: string, options?: { cwd?: string }) => void;
   /**
    * Clone a workspace and return the IDs needed to propagate per-pane UI state
    * (e.g. `ui-store.hiddenPaneIds`). Returns `null` if the source does not exist.
@@ -272,17 +277,31 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     }
   },
 
-  addWorkspace: (name, layoutId) => {
+  addWorkspace: (name, layoutId, options = {}) => {
     const { layouts, workspaces } = get();
     const layout = layouts.find((l) => l.id === layoutId);
     if (!layout) return;
 
     const uniqueName = ensureUniqueName(normalizeWorkspaceName(name), workspaces);
+    const { cwd } = options;
+    const panes = layout.panes.map(toWorkspacePane);
 
     const ws: Workspace = {
       id: generateId("ws"),
       name: uniqueName,
-      panes: layout.panes.map(toWorkspacePane),
+      // Every layer of every slot, hidden stacked layers included (ADR-0297).
+      panes: cwd
+        ? panes.map((slot) => ({
+            ...slot,
+            layers: slot.layers.map((layer) => ({
+              ...layer,
+              view: {
+                ...(layer.view.type === "TerminalView" ? layer.view : { type: "TerminalView" }),
+                lastCwd: cwd,
+              },
+            })),
+          }))
+        : panes,
     };
 
     set((state) => ({
