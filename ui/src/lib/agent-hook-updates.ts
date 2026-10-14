@@ -60,6 +60,9 @@ async function audit(automatic = false) {
 
 export function refreshAgentHookUpdates(automatic = false): Promise<void> {
   if (pending) {
+    // Discovery can arrive after the in-flight task captured its target list.
+    // Follow it with a cached check so that first notification is not lost.
+    if (automatic) return pending.then(() => refreshAgentHookUpdates(true));
     if (!automatic && pendingAutomatic) return pending.then(() => refreshAgentHookUpdates());
     return pending;
   }

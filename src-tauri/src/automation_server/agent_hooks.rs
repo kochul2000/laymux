@@ -49,13 +49,7 @@ pub async fn hook_event(
     match crate::agent_hooks::accept(&state.app_state, event) {
         Ok(needed) => {
             if needed {
-                use tauri::Emitter;
-                if let Err(error) = state
-                    .app_handle
-                    .emit(crate::constants::EVENT_AGENT_HOOK_INSPECTION_NEEDED, ())
-                {
-                    tracing::warn!(%error, "Could not notify hook target discovery");
-                }
+                crate::agent_hooks::notify_inspection_needed(&state.app_handle);
             }
             (StatusCode::OK, Json(ok_json_data(serde_json::json!({}))))
         }

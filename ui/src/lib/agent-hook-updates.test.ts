@@ -39,6 +39,24 @@ afterEach(() => {
 });
 
 describe("agent hook update coordinator", () => {
+  it("does not lose discovery while an unrelated manual inspection is in flight", async () => {
+    let resolve!: (value: unknown) => void;
+    invoke.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    invoke.mockResolvedValue({ targets: [], errors: [] });
+    const manual = refreshAgentHookUpdates();
+    const discovered = refreshAgentHookUpdates(true);
+    resolve({ targets: [], errors: [] });
+    await manual;
+    await discovered;
+    expect(invoke.mock.calls.map((call) => call[1])).toEqual([
+      { automatic: false },
+      { automatic: true },
+    ]);
+  });
   it("queues a manual reinspection after an in-flight automatic check", async () => {
     let resolve!: (value: unknown) => void;
     invoke.mockReturnValueOnce(

@@ -79,7 +79,15 @@ pub fn manage(
     let result =
         helper_directory(app).and_then(|directory| manage_in_directory(request, &directory));
     state.agent_hook_inspections.record(request, &result)?;
+    notify_inspection_needed(app);
     result
+}
+
+pub(crate) fn notify_inspection_needed(app: &tauri::AppHandle) {
+    use tauri::Emitter;
+    if let Err(error) = app.emit(crate::constants::EVENT_AGENT_HOOK_INSPECTION_NEEDED, ()) {
+        tracing::warn!(%error, "Could not notify hook inspection result or discovery");
+    }
 }
 
 pub(super) fn manage_with_timeout(
