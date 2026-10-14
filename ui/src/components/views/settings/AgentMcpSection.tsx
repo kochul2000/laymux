@@ -26,6 +26,8 @@ export function AgentMcpSection({ provider }: { provider: McpProvider }) {
   const [result, setResult] = useState<{ key: string; status?: McpStatus; error?: string }>();
   const [busy, setBusy] = useState(false);
   const [revision, setRevision] = useState(0);
+  // Startup already checked the defaults; only an explicit refresh re-reads.
+  const refreshed = useRef(false);
   const sequence = useRef(0);
   const distro = environment === "native" ? null : environment.slice(4);
   const key = JSON.stringify([provider, distro, configDir, revision]);
@@ -51,7 +53,9 @@ export function AgentMcpSection({ provider }: { provider: McpProvider }) {
     let active = true;
     // Debounced so typing a folder does not probe each keystroke.
     const timer = setTimeout(() => {
-      void manageAgentMcp(provider, "status", distro, configDir || null).then(
+      const cached = !refreshed.current;
+      refreshed.current = false;
+      void manageAgentMcp(provider, "status", distro, configDir || null, cached).then(
         (value) => {
           if (active && sequence.current === request) setResult({ key, status: value });
         },
@@ -177,7 +181,10 @@ export function AgentMcpSection({ provider }: { provider: McpProvider }) {
             <Button
               data-testid="agent-mcp-refresh"
               disabled={busy}
-              onClick={() => setRevision((v) => v + 1)}
+              onClick={() => {
+                refreshed.current = true;
+                setRevision((v) => v + 1);
+              }}
             >
               {t("agentHooks.refresh")}
             </Button>

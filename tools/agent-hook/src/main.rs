@@ -30,9 +30,15 @@ fn mcp(args: &[String]) -> Result<serde_json::Value, String> {
         args.get(4),
         args.get(6),
     ) else {
-        return Err("Usage: laymux-agent-hook mcp <claude|codex|grok> <status|install|remove> <name> <port> [config-directory]".into());
+        return Err("Usage: laymux-agent-hook mcp <claude|codex|grok|all> <status|install|remove> <name> <port> [config-directory]".into());
     };
     let port = port.parse().map_err(|_| "Invalid port".to_string())?;
+    if provider == "all" {
+        if operation != "status" || args.len() != 5 {
+            return Err("mcp all supports only status of default locations".into());
+        }
+        return Ok(laymux_agent_hook::mcp::status_all(name, port));
+    }
     let dir = args
         .get(5)
         .filter(|s| !s.is_empty())

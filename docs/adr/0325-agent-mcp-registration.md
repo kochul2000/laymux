@@ -2,8 +2,8 @@
 
 - Status: Proposed
 - Date: 2026-10-14
-- Source: 사용자 요구(훅처럼 Claude·Codex·Grok MCP 등록 상태 확인과 한 번에 설치), [ADR-0006](0006-embedded-mcp-server.md), [ADR-0282](0282-optional-agent-hook-installation.md), [ADR-0156](0156-grok-first-class-agent.md)
-- 관계: ADR-0006의 `scripts/setup-mcp.*` 수동 등록을 앱 내 선택 동작으로 확장한다. ADR-0282의 환경별 선택 설치·동일 helper 원칙을 MCP 등록에 적용한다.
+- Source: 사용자 요구(훅처럼 Claude·Codex·Grok MCP 등록 상태 확인과 한 번에 설치), [ADR-0006](0006-embedded-mcp-server.md), [ADR-0282](0282-optional-agent-hook-installation.md), [ADR-0156](0156-grok-first-class-agent.md), [ADR-0324](0324-agent-hook-inspection-on-discovery.md)
+- 관계: ADR-0006의 `scripts/setup-mcp.*` 수동 등록을 앱 내 선택 동작으로 확장한다. ADR-0282의 환경별 선택 설치·동일 helper 원칙과 ADR-0324의 검사 시점을 MCP 등록에 적용한다.
 
 ## Context
 
@@ -21,6 +21,7 @@
 - 상태는 설정 파일이 정본이다. 미등록·등록됨(주소 일치)·다른 주소로 등록됨·주소 확인 불가(항목은 있으나 Laymux 미도달)를 구분하고, Codex `enabled = false`와 Grok `disabled_mcp_servers` 비활성은 경고로만 보여주고 바꾸지 않는다.
 - WSL은 지정 배포판의 기본 사용자로 Linux helper가 처리한다. helper가 `127.0.0.1`, 기본 게이트웨이, `resolv.conf` nameserver 순으로 `/api/v1/health`를 확인해 처음 응답한 호스트를 주소로 쓴다. 응답이 없으면 설치를 거부하고 기존 항목은 "주소 확인 불가"로 둔다. 네트워킹 모드나 게이트웨이가 바뀌면 상태가 "다른 주소"로 바뀌어 재설치를 안내한다. WSL 기동과 호스트 확인을 고려해 helper 대기 시간은 훅보다 길게 둔다.
 - 쓰기는 결과 문서를 다시 파싱해 의도한 상태가 됐는지 확인한 뒤에만 진행한다. 바꾸기 전 내용을 `<파일>.laymux-backup` 하나에 덮어쓰고, 교체 직전 원본과 같을 때만 원자 교체한다. `config.toml` 폴더는 훅 설치기(Codex 제목 연결)와 같은 `.laymux-hooks.lock`으로 직렬화한다. `.claude.json`은 Claude Code가 락 없이 다시 쓰므로 교체 직전 비교가 유일한 보호다. 손상·예상하지 못한 구조(객체·테이블이 아닌 항목 포함)·동시 외부 변경은 원본을 보존한 채 실패한다. 설치·제거는 명시적 즉시 동작이며 앱 실행·Settings 저장은 등록을 바꾸지 않는다. 실행 중인 CLI는 재시작해야 반영된다.
+- 등록 상태 검사는 훅 설치 검사(ADR-0324)와 같은 수명을 따른다. Rust AppState가 provider·WSL 배포판·설정 폴더별 성공·오류를 앱 실행 동안 보관하고 재시작 때 비운다. 앱 시작 시 훅 자동 검사가 처음 실행될 때 native와 이미 실행 중인 WSL의 기본 위치를 한 번 확인하며(배포판마다 helper 한 번, 호스트 확인 한 번) 정지한 WSL은 시작하지 않는다. 이 검사는 훅 안내를 지연시키지 않도록 별도로 진행한다. Settings를 열거나 처음 보는 설정 폴더를 입력하면 캐시를 읽고, 없을 때만 한 번 검사한다. 다시 확인·등록·제거만 파일을 다시 읽고 캐시를 갱신한다. 실패도 보관하며 외부에서 바꾼 CLI 설정은 다시 확인이나 앱 재시작으로 반영한다.
 
 ## Alternatives Considered
 

@@ -50,7 +50,13 @@ describe("AgentMcpSection", () => {
     await waitFor(() => expect(screen.getByTestId("agent-mcp-remove")).toBeEnabled());
     expect(screen.getByTestId("agent-mcp-install")).toBeDisabled();
     expect(invoke).toHaveBeenCalledWith("manage_agent_mcp", {
-      request: { provider: "codex", operation: "install", distro: null, configDir: null },
+      request: {
+        provider: "codex",
+        operation: "install",
+        distro: null,
+        configDir: null,
+        cached: false,
+      },
     });
   });
 
@@ -77,7 +83,13 @@ describe("AgentMcpSection", () => {
     expect(screen.getByTestId("agent-mcp-install")).toBeDisabled();
     expect(screen.getByTestId("agent-mcp-remove")).toBeEnabled();
     expect(invoke).toHaveBeenCalledWith("manage_agent_mcp", {
-      request: { provider: "grok", operation: "status", distro: "Ubuntu", configDir: null },
+      request: {
+        provider: "grok",
+        operation: "status",
+        distro: "Ubuntu",
+        configDir: null,
+        cached: true,
+      },
     });
   });
 
@@ -119,6 +131,7 @@ describe("AgentMcpSection", () => {
           operation: "status",
           distro: null,
           configDir: "/home/me/.codex-work",
+          cached: true,
         },
       }),
     );
@@ -132,5 +145,18 @@ describe("AgentMcpSection", () => {
       "do not fit an HTTP connection",
     );
     expect(screen.queryByTestId("agent-mcp-current")).toBeNull();
+  });
+
+  it("reads the startup check on open and re-reads the CLI only on explicit refresh", async () => {
+    mockStatus(() => ({ state: "missing" }));
+    render(<AgentMcpSection provider="claude" />);
+    await waitFor(() => expect(screen.getByTestId("agent-mcp-install")).toBeEnabled());
+    const statusCalls = () =>
+      invoke.mock.calls
+        .filter(([command]) => command === "manage_agent_mcp")
+        .map(([, args]) => args.request.cached);
+    expect(statusCalls()).toEqual([true]);
+    fireEvent.click(screen.getByTestId("agent-mcp-refresh"));
+    await waitFor(() => expect(statusCalls()).toEqual([true, false]));
   });
 });

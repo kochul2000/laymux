@@ -94,9 +94,15 @@ export interface McpStatus {
   disabled: boolean;
   reachable: boolean;
 }
+/** A `cached` status answers from this app run's check (ADR-0325); refresh and
+ *  management always read the CLI configuration again. */
 export const manageAgentMcp = (
   provider: McpProvider,
   operation: "status" | "install" | "remove",
   distro: string | null,
   configDir: string | null = null,
-) => invoke<McpStatus>("manage_agent_mcp", { request: { provider, operation, distro, configDir } });
+  cached = false,
+) =>
+  invoke<McpStatus>("manage_agent_mcp", {
+    request: { provider, operation, distro, configDir, cached },
+  });

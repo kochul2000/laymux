@@ -1,6 +1,7 @@
 //! Optional CLI integration. Installation and observations are independent of
 //! heuristic activity; consuming hook state is an explicit settings decision.
 pub mod inspections;
+pub mod mcp;
 pub mod observations;
 pub mod title;
 pub mod updates;
@@ -18,7 +19,7 @@ use crate::state::AppState;
 
 const MANAGE_TIMEOUT: Duration = Duration::from_secs(8);
 // WSL cold start plus up to three host probes (connect + read) per check.
-const MCP_WSL_TIMEOUT: Duration = Duration::from_secs(20);
+pub(crate) const MCP_WSL_TIMEOUT: Duration = Duration::from_secs(20);
 const EVENT_MAX_AGE_MS: u64 = 30_000;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -146,7 +147,7 @@ fn manage_in_directory_with_timeout(
         .map_err(AppError::Other)
 }
 
-fn run_wsl_helper(
+pub(crate) fn run_wsl_helper(
     directory: &std::path::Path,
     distro: &str,
     args: &[&str],
@@ -190,56 +191,7 @@ fn run_wsl_helper(
     Ok(value)
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpRequest {
-    pub provider: String,
-    pub operation: String,
-    pub distro: Option<String>,
-    /// CLI configuration folder (`CLAUDE_CONFIG_DIR`/`CODEX_HOME`/`GROK_HOME`
-    /// meaning). WSL `--exec` cannot see variables exported by shell profiles.
-    pub config_dir: Option<String>,
-}
-
-/// Register this build's MCP endpoint (ADR-0325): release and dev keep
-/// separate names so both can stay registered side by side.
-pub fn manage_mcp(request: &McpRequest, app: &tauri::AppHandle) -> Result<Value, AppError> {
-    use crate::automation_server::{automation_port, DEV_PORT};
-    if !matches!(request.provider.as_str(), "claude" | "codex" | "grok")
-        || !matches!(request.operation.as_str(), "status" | "install" | "remove")
-    {
-        return Err(AppError::Other("Invalid MCP registration request".into()));
-    }
-    let port = automation_port();
-    let name = if port == DEV_PORT {
-        "laymux-dev"
-    } else {
-        "laymux"
-    };
-    let config_dir = request
-        .config_dir
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    match &request.distro {
-        Some(distro) => {
-            let port = port.to_string();
-            let mut args = vec!["mcp", &request.provider, &request.operation, name, &port];
-            args.extend(config_dir);
-            run_wsl_helper(&helper_directory(app)?, distro, &args, MCP_WSL_TIMEOUT)
-        }
-        None => laymux_agent_hook::mcp::manage(
-            &request.provider,
-            &request.operation,
-            name,
-            port,
-            config_dir.map(std::path::Path::new),
-        )
-        .map_err(AppError::Other),
-    }
-}
-
-fn helper_directory(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
+pub(crate) fn helper_directory(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
     if cfg!(windows) || cfg!(debug_assertions) {
         return std::env::current_exe()?
             .parent()

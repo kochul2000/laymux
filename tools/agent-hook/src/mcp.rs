@@ -344,6 +344,24 @@ fn status(
     })
 }
 
+pub const PROVIDERS: [&str; 3] = ["claude", "codex", "grok"];
+
+/// Status of every provider's default location with one host probe, so a
+/// startup check costs one helper process per WSL distribution.
+pub fn status_all(name: &str, port: u16) -> Value {
+    let url = resolve_url(port);
+    let mut statuses = serde_json::Map::new();
+    for provider in PROVIDERS {
+        let status = config_path(provider, None)
+            .and_then(|path| manage_at(&path, provider, "status", name, url.as_deref()));
+        statuses.insert(
+            provider.into(),
+            status.unwrap_or_else(|error| json!({ "error": error })),
+        );
+    }
+    Value::Object(statuses)
+}
+
 pub fn manage(
     provider: &str,
     operation: &str,

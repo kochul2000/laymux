@@ -15,7 +15,7 @@ fn is_audit_distro(name: &str) -> bool {
 }
 
 #[cfg(windows)]
-fn running_distros() -> Result<Vec<String>, AppError> {
+pub(super) fn running_distros() -> Result<Vec<String>, AppError> {
     let mut command = crate::process::headless_command("wsl.exe");
     command.args(["--list", "--running", "--quiet"]);
     let output =

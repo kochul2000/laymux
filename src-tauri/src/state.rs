@@ -91,6 +91,8 @@ pub struct AppState {
     /// Inspection gate precedes AppState locks; cache is a leaf, never held for I/O.
     /// State polling only reads the cache and never waits on the inspection gate.
     pub agent_hook_inspections: crate::agent_hooks::inspections::InspectionCache,
+    /// App-lifetime MCP registration status (ADR-0325, ADR-0324 lifecycle).
+    pub agent_mcp_inspections: crate::agent_hooks::mcp::McpInspections,
     pub terminals: Arc<Mutex<HashMap<String, TerminalSession>>>,
     pub sync_groups: Mutex<HashMap<String, SyncGroup>>,
     pub pty_handles: Mutex<HashMap<String, PtyHandle>>,
@@ -374,6 +376,7 @@ impl AppState {
                 crate::agent_hooks::observations::HookRegistry::default(),
             ),
             agent_hook_inspections: Default::default(),
+            agent_mcp_inspections: Default::default(),
             sync_groups: Mutex::new(HashMap::new()),
             pty_handles: Mutex::new(HashMap::new()),
             ipc_socket_path: Mutex::new(None),

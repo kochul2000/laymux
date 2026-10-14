@@ -1389,6 +1389,7 @@ impl McpHandler {
 | grok | `$GROK_HOME/config.toml` (기본 `~/.grok`) | `[mcp_servers.<name>] url` |
 
 - 이름·포트는 빌드가 정한다: release `laymux`·19280, dev `laymux-dev`·19281.
+- 검사 시점(ADR-0324와 같은 수명): `request.cached = true`인 `status`는 앱 실행 동안의 `AppState.agent_mcp_inspections` 결과(성공·오류)를 그대로 반환하고, 없을 때만 한 번 검사한다. `cached`가 없거나 false인 `status`(Settings "다시 확인")와 `install`·`remove`는 항상 파일을 읽고 캐시를 갱신한다. `get_agent_hook_updates({automatic: true})`가 처음 불릴 때 백그라운드로 native와 실행 중인 WSL 기본 위치를 한 번 채운다. WSL은 `laymux-agent-hook-wsl mcp all status <name> <port>` 한 번으로 세 CLI를 확인한다. 정지한 WSL은 시작하지 않는다.
 - 응답: `{provider, configPath, name, url, currentUrl, state: missing|installed|different|unverified, installed, disabled, reachable}`. `url`은 해당 환경에서 닿는 주소이고 WSL에서 응답하는 호스트가 없으면 `null`이다(설치 거부, 기존 항목은 `unverified`). stdio 전용 필드(`command`·`args`·`env`·`env_vars`·`cwd`)가 남았거나 Claude `type`이 `http`가 아니면 주소가 같아도 `different`다.
 - WSL 호스트 후보: `127.0.0.1` → `/proc/net/route` 기본 게이트웨이 → `/etc/resolv.conf` nameserver, 각각 `GET /api/v1/health` 200 확인.
 - 결과 문서를 다시 파싱해 변경이 적용됐는지 확인한 뒤 원본을 `<파일>.laymux-backup`에 덮어쓰고, 교체 직전 원본과 같을 때만 원자 교체한다. `config.toml`은 훅 설치기와 같은 `.laymux-hooks.lock`을 잡는다. 같은 이름 항목의 다른 필드(Codex 도구 승인 등)와 나머지 키 순서·TOML 서식은 보존한다.
