@@ -2,22 +2,30 @@ import { create } from "zustand";
 import {
   getAgentHookUpdates,
   manageAgentHooks,
+  manageAgentMcp,
   onAgentHookInspectionNeeded,
+  type HookMissingTarget,
   type HookUpdateTarget,
   type HookUpdateError,
   type HookProvider,
   type HookStatus,
+  type McpProvider,
+  type McpStatus,
 } from "./agent-hooks-api";
+import { useSettingsStore } from "@/stores/settings-store";
+import { useTerminalStore } from "@/stores/terminal-store";
 
 interface UpdateState {
   targets: HookUpdateTarget[];
   errors: HookUpdateError[];
+  missing: HookMissingTarget[];
   dismissed: string[];
   busyKey: string | null;
 }
 export const useAgentHookUpdateStore = create<UpdateState>(() => ({
   targets: [],
   errors: [],
+  missing: [],
   dismissed: [],
   busyKey: null,
 }));
@@ -26,12 +34,17 @@ export const hookUpdateKey = (target: HookUpdateTarget) =>
 // Errors identify the checked environment, not a timeout's changing wording.
 export const hookUpdateErrorKey = (error: HookUpdateError) =>
   JSON.stringify(["error", error.provider, error.distro, error.configDir]);
+export const hookMissingKey = (target: Pick<HookMissingTarget, "provider" | "distro">) =>
+  JSON.stringify(["missing", target.provider, target.distro]);
+/** Display preference only; the backend reports the same judgment either way (ADR-0330). */
+export const missingNoticeEnabled = () =>
+  useSettingsStore.getState().notifications.agentIntegrationMissing !== false;
 let pending: Promise<void> | undefined;
 let pendingAutomatic = false;
 
 async function audit(automatic = false) {
   try {
-    const result = await getAgentHookUpdates(automatic);
+    const result = await getAgentHookUpdates(automatic, missingNoticeEnabled());
     const checked = new Set(result.targets.map(hookUpdateKey));
     useAgentHookUpdateStore.setState((state) => ({
       targets: [
@@ -49,6 +62,7 @@ async function audit(automatic = false) {
         ),
       ],
       errors: result.errors,
+      missing: result.missing ?? [],
     }));
   } catch (error) {
     // Keep known updates while reporting that the latest check failed.
@@ -74,39 +88,38 @@ export function refreshAgentHookUpdates(automatic = false): Promise<void> {
   return pending;
 }
 
-export function manageAgentHooksAndRefresh(
-  provider: HookProvider,
-  operation: "install" | "remove" | "update",
-  distro: string | null,
-  configDir: string | null,
-): Promise<HookStatus> {
-  if (pending)
-    return pending.then(() => manageAgentHooksAndRefresh(provider, operation, distro, configDir));
-  const key = JSON.stringify([provider, distro, configDir]);
+/**
+ * One queue for every hook and MCP change from the notice and Settings, so two
+ * Laymux writers never race for the same configuration folder lock (ADR-0325,
+ * ADR-0330). A failure is reported against `target` unless the caller shows it.
+ */
+function manageAndRefresh<T>(
+  key: string,
+  target: Pick<HookUpdateError, "provider" | "distro" | "configDir"> | null,
+  change: () => Promise<T>,
+  applied: (value: T) => void = () => {},
+): Promise<T> {
+  if (pending) return pending.then(() => manageAndRefresh(key, target, change, applied));
   useAgentHookUpdateStore.setState({ busyKey: key });
   const task = (async () => {
     try {
-      const status = await manageAgentHooks(provider, operation, distro, configDir);
-      const resolvedKey = JSON.stringify([provider, distro, status.configDir]);
-      useAgentHookUpdateStore.setState((state) => ({
-        targets: state.targets.map((value) =>
-          hookUpdateKey(value) === resolvedKey ? { ...value, status } : value,
-        ),
-      }));
+      const value = await change();
+      applied(value);
       await audit(true);
-      return status;
+      return value;
     } catch (error) {
+      if (!target) throw error;
       useAgentHookUpdateStore.setState((state) => ({
         errors: [
           ...state.errors.filter(
-            (e) => !(e.provider === provider && e.distro === distro && e.configDir === configDir),
+            (e) =>
+              !(
+                e.provider === target.provider &&
+                e.distro === target.distro &&
+                e.configDir === target.configDir
+              ),
           ),
-          {
-            provider,
-            distro,
-            configDir,
-            message: String(error),
-          },
+          { ...target, message: String(error) },
         ],
       }));
       throw error;
@@ -125,6 +138,42 @@ export function manageAgentHooksAndRefresh(
   return task;
 }
 
+export function manageAgentHooksAndRefresh(
+  provider: HookProvider,
+  operation: "install" | "remove" | "update",
+  distro: string | null,
+  configDir: string | null,
+): Promise<HookStatus> {
+  return manageAndRefresh(
+    JSON.stringify([provider, distro, configDir]),
+    { provider, distro, configDir },
+    () => manageAgentHooks(provider, operation, distro, configDir),
+    (status) => {
+      const resolvedKey = JSON.stringify([provider, distro, status.configDir]);
+      useAgentHookUpdateStore.setState((state) => ({
+        targets: state.targets.map((value) =>
+          hookUpdateKey(value) === resolvedKey ? { ...value, status } : value,
+        ),
+      }));
+    },
+  );
+}
+
+/** Settings shows its own MCP errors; the notice passes the target to report. */
+export function manageAgentMcpAndRefresh(
+  provider: McpProvider,
+  operation: "install" | "remove",
+  distro: string | null,
+  configDir: string | null,
+  report: HookProvider | null = null,
+): Promise<McpStatus> {
+  return manageAndRefresh(
+    JSON.stringify(["mcp", provider, distro, configDir]),
+    report && { provider: report, distro, configDir },
+    () => manageAgentMcp(provider, operation, distro, configDir),
+  );
+}
+
 export function updateAgentHooks(target: HookUpdateTarget): Promise<void> {
   return manageAgentHooksAndRefresh(
     target.provider,
@@ -132,6 +181,26 @@ export function updateAgentHooks(target: HookUpdateTarget): Promise<void> {
     target.distro,
     target.status.configDir,
   ).then(
+    () => undefined,
+    () => undefined,
+  );
+}
+
+export const missingInstallKey = (target: HookMissingTarget, integration: "hook" | "mcp") =>
+  integration === "hook"
+    ? JSON.stringify([target.provider, target.distro, null])
+    : JSON.stringify(["mcp", target.provider, target.distro, null]);
+
+/** Install into the default folder of a used environment, only on user action. */
+export function installMissingIntegration(
+  target: HookMissingTarget,
+  integration: "hook" | "mcp",
+): Promise<void> {
+  const change =
+    integration === "hook"
+      ? manageAgentHooksAndRefresh(target.provider, "install", target.distro, null)
+      : manageAgentMcpAndRefresh(target.provider, "install", target.distro, null, target.provider);
+  return change.then(
     () => undefined,
     () => undefined,
   );
@@ -145,11 +214,15 @@ export function dismissHookUpdateNotice() {
         .filter((t) => t.status.updateRequired || t.status.updateWarning)
         .map(hookUpdateKey),
       ...state.errors.map(hookUpdateErrorKey),
+      ...state.missing.map(hookMissingKey),
     ],
   }));
 }
 
-/** Startup and target discovery own automatic checks; focus/time do not. */
+const AGENT_APPS = new Set(["Claude", "Codex"]);
+
+/** Startup, target discovery and the first sighting of Claude/Codex in a
+ *  terminal own automatic checks; focus/time do not. */
 export function subscribeAgentHookUpdates() {
   let disposed = false;
   let checking = false;
@@ -172,8 +245,24 @@ export function subscribeAgentHookUpdates() {
     void check();
   });
   void subscription.then(() => check()).catch(() => check());
+  // The backend records the sighting; this only asks it to resolve and judge.
+  const sighted = new Set<string>();
+  const stopTerminals = useTerminalStore.subscribe((state) => {
+    let fresh = false;
+    for (const instance of state.instances) {
+      const name = instance.activity?.type === "interactiveApp" ? instance.activity.name : "";
+      if (!name || !AGENT_APPS.has(name)) continue;
+      const key = `${instance.id}\u0000${name}`;
+      if (!sighted.has(key)) {
+        sighted.add(key);
+        fresh = true;
+      }
+    }
+    if (fresh) void check();
+  });
   return () => {
     disposed = true;
+    stopTerminals();
     void subscription.then((stop) => stop()).catch(() => undefined);
   };
 }

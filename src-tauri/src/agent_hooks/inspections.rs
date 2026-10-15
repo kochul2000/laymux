@@ -241,6 +241,41 @@ impl InspectionCache {
                 || (value["titleBinding"]["configured"] == true
                     && value["titleBinding"]["warning"].is_null())))
     }
+    /// ADR-0330: the default folder was inspected and owns nothing, and no
+    /// other inspected folder of the same provider and environment (e.g. one
+    /// discovered from hook metadata) owns Laymux hooks. Unchecked or failed
+    /// targets are never reported as missing.
+    pub(crate) fn hook_missing(
+        &self,
+        provider: &str,
+        distro: Option<&str>,
+    ) -> Result<bool, AppError> {
+        fn owns(status: &Value) -> bool {
+            status["installed"] == true
+                || status["helperPresent"] == true
+                || status["ownedCommands"].as_u64().unwrap_or(0) > 0
+        }
+        let cache = self.cache.lock_or_err()?;
+        let default = Target {
+            provider: provider.into(),
+            distro: distro.map(Into::into),
+            config_dir: None,
+        };
+        let Some(Entry {
+            result: Some(Ok(_)),
+            ..
+        }) = cache
+            .entries
+            .get(cache.aliases.get(&default).unwrap_or(&default))
+        else {
+            return Ok(false);
+        };
+        Ok(!cache.entries.iter().any(|(target, entry)| {
+            target.provider == provider
+                && target.distro.as_deref() == distro
+                && matches!(&entry.result, Some(Ok(status)) if owns(status))
+        }))
+    }
     pub(crate) fn snapshot(&self) -> Result<Value, AppError> {
         let cache = self.cache.lock_or_err()?;
         let mut targets = Vec::new();
@@ -276,6 +311,54 @@ mod tests {
     }
     fn healthy(root: &str) -> Value {
         json!({"configDir":root,"installed":true,"disabled":false,"warning":null,"titleBinding":{"configured":true,"warning":null}})
+    }
+    fn absent(root: &str) -> Value {
+        json!({"configDir":root,"installed":false,"helperPresent":false,"ownedCommands":0,"disabled":false,"warning":null})
+    }
+    fn inspect(cache: &InspectionCache, req: &ManageRequest, status: Result<Value, AppError>) {
+        cache.begin(req).unwrap();
+        cache.record(req, &status).unwrap();
+    }
+    #[test]
+    fn hook_missing_requires_a_successful_default_inspection_without_ownership() {
+        let cache = InspectionCache::default();
+        assert!(!cache.hook_missing("codex", None).unwrap());
+        inspect(&cache, &request(None, None), Ok(absent("/home/u/.codex")));
+        assert!(cache.hook_missing("codex", None).unwrap());
+        assert!(!cache.hook_missing("claude", None).unwrap());
+        assert!(!cache.hook_missing("codex", Some("Ubuntu")).unwrap());
+
+        let failed = InspectionCache::default();
+        inspect(
+            &failed,
+            &request(None, None),
+            Err(AppError::Other("x".into())),
+        );
+        assert!(!failed.hook_missing("codex", None).unwrap());
+
+        let partial = InspectionCache::default();
+        let mut stale = absent("/home/u/.codex");
+        stale["helperPresent"] = json!(true);
+        inspect(&partial, &request(None, None), Ok(stale));
+        assert!(!partial.hook_missing("codex", None).unwrap());
+    }
+    #[test]
+    fn a_custom_folder_with_laymux_hooks_suppresses_the_default_missing_notice() {
+        let cache = InspectionCache::default();
+        inspect(&cache, &request(None, None), Ok(absent("/home/u/.codex")));
+        inspect(
+            &cache,
+            &request(Some("/work/codex"), None),
+            Ok(healthy("/work/codex")),
+        );
+        assert!(!cache.hook_missing("codex", None).unwrap());
+        // Another environment's installation is not evidence for this one.
+        inspect(
+            &cache,
+            &request(None, Some("Ubuntu")),
+            Ok(absent("/home/u/.codex")),
+        );
+        assert!(cache.hook_missing("codex", Some("Ubuntu")).unwrap());
     }
     #[test]
     fn discovered_requests_preserve_the_original_io_path() {

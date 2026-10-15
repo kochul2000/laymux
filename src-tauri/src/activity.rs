@@ -555,6 +555,7 @@ pub fn is_grok_terminal_from_buffer(
 /// and whenever the PTY callback observes a Codex/Claude entry transition
 /// or the frontend command-text detector marks a terminal.
 pub fn sync_known_caches(state: &AppState, terminal_id: &str, app_name: &str) {
+    state.agent_usage.observe(terminal_id, app_name);
     match app_name {
         "Codex" => {
             if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
@@ -610,6 +611,7 @@ pub fn sync_known_caches(state: &AppState, terminal_id: &str, app_name: &str) {
 /// hit and the multi-second Claude startup window would misclassify the
 /// pane as Shell.
 pub fn record_interactive_app_detection(state: &AppState, terminal_id: &str, app_name: &str) {
+    state.agent_usage.observe(terminal_id, app_name);
     if let Ok(mut guard) = state.last_detected_interactive_app.lock_or_err() {
         guard.insert(
             terminal_id.to_string(),

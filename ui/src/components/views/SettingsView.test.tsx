@@ -1591,6 +1591,25 @@ describe("SettingsView", () => {
     expect(screen.getByTestId("claude-sync-cwd-select")).toBeInTheDocument();
   });
 
+  it("turns the missing hooks/MCP notice back on from the Codex page on Save", async () => {
+    // The notice's "don't show again" writes this same field (ADR-0330).
+    const user = userEvent.setup();
+    useSettingsStore.getState().setNotifications({ agentIntegrationMissing: false });
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-codex"));
+    const toggle = screen.getByTestId("agent-integration-missing-toggle");
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+    expect(useSettingsStore.getState().notifications.agentIntegrationMissing).toBe(false);
+    await user.click(screen.getByTestId("save-settings-btn"));
+
+    expect(useSettingsStore.getState().notifications).toEqual({
+      dismiss: "workspace",
+      agentIntegrationMissing: true,
+    });
+  });
+
   it("claude sync cwd defaults to skip", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);

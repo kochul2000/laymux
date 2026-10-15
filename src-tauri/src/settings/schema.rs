@@ -223,7 +223,7 @@ const ENTRIES: &[MetadataEntry] = &[
     },
     MetadataEntry {
         path: "/notifications",
-        description: "알림을 읽음 처리하는 시점 등 알림 동작 설정입니다.",
+        description: "알림을 읽음 처리하는 시점 등 알림 동작 설정입니다. agentIntegrationMissing(기본 true)은 Claude·Codex를 실행한 환경에 훅·MCP가 미설치일 때 앱 안내를 표시할지 정합니다(ADR-0330).",
         sensitive: false,
         apply_mode: ApplyMode::Live,
     },

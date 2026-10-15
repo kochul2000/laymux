@@ -4,6 +4,7 @@ use crate::agent_hooks::inspections::{InspectionCache, Target};
 pub(super) fn run(
     cache: &InspectionCache,
     observations: &[Value],
+    used: &[ManageRequest],
     automatic: bool,
     mut enumerate: impl FnMut() -> Result<Vec<String>, AppError>,
     mut inspect: impl FnMut(&ManageRequest, Duration) -> Result<Value, AppError>,
@@ -12,6 +13,7 @@ pub(super) fn run(
     let deadline = Instant::now() + AUDIT_BUDGET;
     let first = !cache.initialized()?;
     let mut discovered = cache.discovered_requests()?;
+    discovered.extend(used.iter().cloned());
     // Preserve new discovery even if its diagnostic observation expires while
     // another inspection holds the gate.
     for entry in observations {
@@ -157,7 +159,7 @@ mod tests {
         cache.initialize().unwrap();
         let calls = Cell::new(0);
         let observed = vec![json!({"provider":"codex","configDir":"/overflow"})];
-        let result=run(&cache,&observed,false,||Ok(Vec::new()),|r,_| {
+        let result=run(&cache, &observed, &[], false,||Ok(Vec::new()),|r,_| {
             assert_ne!(r.config_dir.as_deref(),Some("/overflow"));calls.set(calls.get()+1);
             Ok(json!({"configDir":r.config_dir,"installed":true,"disabled":false,"warning":null}))
         }).unwrap();
@@ -187,17 +189,17 @@ mod tests {
             calls.set(calls.get() + 1);
             Ok(healthy(r))
         };
-        run(&cache, &[], true, enumerate, inspect).unwrap();
+        run(&cache, &[], &[], true, enumerate, inspect).unwrap();
         assert_eq!(calls.get(), 2);
         for _ in 0..20 {
-            run(&cache, &[], true, enumerate, inspect).unwrap();
+            run(&cache, &[], &[], true, enumerate, inspect).unwrap();
         }
         assert_eq!(calls.get(), 2);
         assert_eq!(enumerations.get(), 1);
         let observed = vec![json!({"provider":"codex","configDir":"/new"})];
-        run(&cache, &observed, true, enumerate, inspect).unwrap();
+        run(&cache, &observed, &[], true, enumerate, inspect).unwrap();
         assert_eq!(calls.get(), 3);
-        run(&cache, &observed, false, enumerate, inspect).unwrap();
+        run(&cache, &observed, &[], false, enumerate, inspect).unwrap();
         assert_eq!(calls.get(), 6);
         assert_eq!(enumerations.get(), 2);
     }
@@ -209,9 +211,10 @@ mod tests {
             calls.set(calls.get() + 1);
             Err(AppError::Other("invalid config".into()))
         };
-        run(&cache, &[], true, || Ok(Vec::new()), inspect).unwrap();
+        run(&cache, &[], &[], true, || Ok(Vec::new()), inspect).unwrap();
         let result = run(
             &cache,
+            &[],
             &[],
             true,
             || panic!("no repeated enumeration"),
@@ -235,23 +238,52 @@ mod tests {
             calls.set(calls.get() + 1);
             Ok(healthy(r))
         };
-        run(&cache, &[], true, enumerate, inspect).unwrap();
+        run(&cache, &[], &[], true, enumerate, inspect).unwrap();
         assert_eq!(calls.get(), 4);
         let observed = vec![json!({"provider":"codex","distro":"Ubuntu","configDir":"/codex"})];
         for _ in 0..20 {
-            run(&cache, &observed, true, enumerate, inspect).unwrap();
+            run(&cache, &observed, &[], true, enumerate, inspect).unwrap();
         }
         assert_eq!(calls.get(), 4);
         assert_eq!(enumerations.get(), 1);
         let stopped = vec![json!({"provider":"codex","distro":"Stopped","configDir":"/custom"})];
-        run(&cache, &stopped, true, enumerate, inspect).unwrap();
-        run(&cache, &stopped, true, enumerate, inspect).unwrap();
+        run(&cache, &stopped, &[], true, enumerate, inspect).unwrap();
+        run(&cache, &stopped, &[], true, enumerate, inspect).unwrap();
         assert_eq!(calls.get(), 4);
         assert_eq!(enumerations.get(), 2);
         let new = vec![json!({"provider":"codex","distro":"Ubuntu","configDir":"/new"})];
-        run(&cache, &new, true, enumerate, inspect).unwrap();
+        run(&cache, &new, &[], true, enumerate, inspect).unwrap();
         assert_eq!(calls.get(), 5);
         assert_eq!(enumerations.get(), 3);
+    }
+    #[test]
+    fn a_used_environment_default_folder_is_inspected_once_when_its_wsl_is_running() {
+        let cache = InspectionCache::default();
+        let inspected = std::cell::RefCell::new(Vec::new());
+        let inspect = |r: &ManageRequest, _| {
+            inspected.borrow_mut().push((
+                r.provider.clone(),
+                r.distro.clone(),
+                r.config_dir.clone(),
+            ));
+            Ok(healthy(r))
+        };
+        run(&cache, &[], &[], true, || Ok(Vec::new()), inspect).unwrap();
+        inspected.borrow_mut().clear();
+        let used = [ManageRequest {
+            provider: "claude".into(),
+            operation: "status".into(),
+            distro: Some("Ubuntu".into()),
+            config_dir: None,
+        }];
+        let enumerate = || Ok(vec!["Ubuntu".into()]);
+        run(&cache, &[], &used, true, enumerate, inspect).unwrap();
+        let first = inspected.borrow().len();
+        run(&cache, &[], &used, true, enumerate, inspect).unwrap();
+        let inspected = inspected.borrow();
+        assert_eq!(inspected.len(), first);
+        let used = ("claude".to_string(), Some("Ubuntu".to_string()), None);
+        assert_eq!(inspected.iter().filter(|r| **r == used).count(), 1);
     }
     #[test]
     fn discovery_during_io_is_not_lost_when_the_diagnostic_observation_expires() {
@@ -259,6 +291,7 @@ mod tests {
         let count = Cell::new(0);
         run(
             &cache,
+            &[],
             &[],
             true,
             || Ok(Vec::new()),
@@ -276,6 +309,7 @@ mod tests {
         .unwrap();
         run(
             &cache,
+            &[],
             &[],
             true,
             || panic!("native discovery needs no WSL enumeration"),

@@ -329,6 +329,8 @@ export interface PaneStackSettings {
 export interface NotificationSettings {
   /** When to auto-dismiss notifications as read. */
   dismiss: NotificationDismissMode;
+  /** Notice for used Claude/Codex environments missing hooks or MCP (ADR-0330). */
+  agentIntegrationMissing: boolean;
 }
 
 /**
@@ -946,6 +948,7 @@ export const DEFAULT_PANE_STACK: PaneStackSettings = {
 
 export const DEFAULT_NOTIFICATIONS: NotificationSettings = {
   dismiss: "workspace",
+  agentIntegrationMissing: true,
 };
 
 export const DEFAULT_POWER: PowerSettings = { ...DEFAULT_SLEEP_PREVENTION_AXES };

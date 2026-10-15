@@ -54,7 +54,7 @@ pub async fn api_docs() -> impl IntoResponse {
             },
             {
                 "method": "GET", "path": "/api/v1/agent-hooks/updates",
-                "description": "Read-only audit of native and running WSL hook targets, including recently observed custom folders. Returns targets with updateRequired and per-target errors; never starts stopped WSL distributions or installs hooks."
+                "description": "Read-only audit of native and running WSL hook targets, including recently observed custom folders. Returns targets with updateRequired, per-target errors, and missing hook/MCP integrations of environments that ran Claude/Codex (MCP judged from the app-lifetime cache); never starts stopped WSL distributions or installs hooks."
             },
             {
                 "method": "POST", "path": "/api/v1/agent-hooks/events",

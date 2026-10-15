@@ -1524,6 +1524,11 @@ pub struct NotificationSettings {
     /// "workspace" (default) | "paneFocus" | "manual".
     #[serde(default = "default_notification_dismiss")]
     pub dismiss: String,
+    /// Show the app notice when an environment that ran Claude/Codex lacks
+    /// Laymux hooks or MCP registration (default: true, ADR-0330). The notice's
+    /// "don't show again" sets it to false; update notices are unaffected.
+    #[serde(default = "default_true")]
+    pub agent_integration_missing: bool,
 }
 
 fn default_notification_dismiss() -> String {
@@ -1534,6 +1539,7 @@ impl Default for NotificationSettings {
     fn default() -> Self {
         Self {
             dismiss: default_notification_dismiss(),
+            agent_integration_missing: true,
         }
     }
 }
