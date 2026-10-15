@@ -217,8 +217,15 @@ describe("production UI bundle", () => {
       expect(settingsModules).toHaveLength(1);
       expect(settingsModules[0]?.endsWith(SETTINGS_VIEW_SUFFIX)).toBe(true);
 
-      expect(entry?.imports).toContain(settings?.fileName);
-      expect(entry?.dynamicImports).not.toContain(settings?.fileName);
+      // Static: loaded with startup, never behind a dynamic import. Rolldown
+      // may route the edge through a shared startup chunk instead of the entry
+      // itself (Vite 8.3), so assert closure membership, not a direct import.
+      expect(startupNames.has(settings!.fileName)).toBe(true);
+      expect(
+        chunks
+          .filter((chunk) => chunk.dynamicImports.includes(settings!.fileName))
+          .map((chunk) => chunk.fileName),
+      ).toEqual([]);
       expect(settings?.dynamicImports).toEqual([]);
 
       const moduleOwners = new Map<string, string>();
