@@ -1,6 +1,6 @@
 # 0194. Workspace selector는 마지막 사용자 입력 표시 모드를 제공한다
 
-- Status: Accepted
+- Status: Superseded by [0329](0329-daemon-retains-workspace-display-context.md) (입력의 휘발성 메모리 보관 범위에 한함)
 - Date: 2026-08-21
 - Source: 사용자 요구(기본은 terminal pane별 2줄, 선택 시 pane은 한 줄이고 workspace별 최신 제출 입력 한 줄); [architecture/data-flow.md §9](../architecture/data-flow.md); [architecture/api-contracts.md §13.3](../architecture/api-contracts.md); [ADR-0005](0005-display-state-raw-separation-compute.md); [ADR-0151](0151-remote-workspace-selector-information-parity.md)의 하단 상태 행 결정 정정
 

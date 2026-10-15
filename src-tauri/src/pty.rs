@@ -174,6 +174,7 @@ pub(crate) fn chunked_write_to_guarded(
 /// Handle to a running PTY process, providing write and resize capabilities.
 #[derive(Clone)]
 pub struct PtyHandle {
+    pub(crate) display_context_owner: Option<crate::pty_daemon::DisplayContextOwner>,
     checkpoint_input_revision: Arc<AtomicU64>,
     session_restore: Option<Arc<PendingSessionRestore>>,
     /// Owns the writer on one terminal-specific FIFO thread.
@@ -290,6 +291,7 @@ impl PtyHandle {
     ) -> Self {
         let master = Arc::new(Mutex::new(None));
         Self {
+            display_context_owner: None,
             checkpoint_input_revision: Arc::new(AtomicU64::new(0)),
             session_restore: None,
             control: PtyControlWorker::spawn(writer, Arc::clone(&master))

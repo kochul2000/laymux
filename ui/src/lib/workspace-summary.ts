@@ -1,4 +1,5 @@
 import type { TerminalInstance, TerminalActivityInfo } from "@/stores/terminal-store";
+import { projectTerminalDisplay, type TerminalDisplayContext } from "./terminal-display-context";
 import type { Notification } from "@/stores/notification-store";
 import type { WorkspacePane } from "@/stores/types";
 import type { TerminalSummaryResponse } from "@/lib/tauri-api";
@@ -69,6 +70,7 @@ export function projectWorkspaceTerminals(
   workspaceId: string,
   panes: WorkspacePane[],
   instances: TerminalInstance[],
+  displayContexts: Record<string, TerminalDisplayContext> = {},
 ): TerminalInstance[] {
   const instancesById = new Map(instances.map((instance) => [instance.id, instance]));
   // Every terminal layer is a terminal of the workspace, stacked or not (ADR-0297).
@@ -80,20 +82,26 @@ export function projectWorkspaceTerminals(
       const instance = instancesById.get(terminalId);
       const lastCwd = pane.view.lastCwd as string | undefined;
       if (instance) {
-        return !instance.cwd && lastCwd ? { ...instance, cwd: lastCwd } : instance;
+        return projectTerminalDisplay(
+          !instance.cwd && lastCwd ? { ...instance, cwd: lastCwd } : instance,
+          displayContexts[terminalId],
+        );
       }
       const configuredProfile = pane.view.profile as string | undefined;
       const profile = configuredProfile || "PowerShell";
-      return {
-        id: terminalId,
-        profile,
-        syncGroup: workspaceId,
-        workspaceId,
-        label: configuredProfile || "Terminal",
-        cwd: lastCwd,
-        lastActivityAt: 0,
-        isFocused: false,
-      };
+      return projectTerminalDisplay(
+        {
+          id: terminalId,
+          profile,
+          syncGroup: workspaceId,
+          workspaceId,
+          label: configuredProfile || "Terminal",
+          cwd: lastCwd,
+          lastActivityAt: 0,
+          isFocused: false,
+        },
+        displayContexts[terminalId],
+      );
     });
 }
 

@@ -32,6 +32,15 @@ const KIND_DATA: u8 = 1;
     rename_all_fields = "camelCase"
 )]
 pub enum ClientMessage {
+    ReadDisplayContexts {
+        session_ids: Vec<String>,
+    },
+    /// Opaque GUI display history, held only for this live session (ADR-0329).
+    UpdateDisplayContext {
+        session_id: String,
+        attach_epoch: u64,
+        context: super::display_context::DisplayContext,
+    },
     /// First frame on every connection.
     Hello {
         token: String,
@@ -77,7 +86,10 @@ pub enum ClientMessage {
     /// Describe live sessions. Valid on an unbound connection.
     List,
     /// Resize the bound session's PTY.
-    Resize { rows: u16, cols: u16 },
+    Resize {
+        rows: u16,
+        cols: u16,
+    },
     /// Terminate the bound session's child process tree.
     Terminate,
     /// Terminate a session by id from any connection. The GUI uses a fresh
@@ -100,17 +112,25 @@ pub enum ClientMessage {
     /// `grace_ms` after the last connection closes (ADR-0312). Sent again
     /// when the grace changes. A daemon that predates it closes the
     /// connection.
-    Presence { grace_ms: u64 },
+    Presence {
+        grace_ms: u64,
+    },
 }
 
 /// Messages the daemon sends to a client.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
 pub enum DaemonMessage {
+    DisplayContexts {
+        contexts: BTreeMap<String, super::display_context::DisplayContext>,
+    },
+    DisplayContextStored {
+        accepted: bool,
+    },
     HelloOk {
         protocol_version: u32,
         daemon_pid: u32,
@@ -151,6 +171,27 @@ pub enum DaemonMessage {
     Error {
         message: String,
     },
+}
+
+// Replies may carry private submitted input in attach metadata/context maps.
+// Protocol error paths must never dump these payloads (ADR-0329).
+impl std::fmt::Debug for DaemonMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::HelloOk { .. } => "HelloOk",
+            Self::Spawned { .. } => "Spawned",
+            Self::Attached { .. } => "Attached(<redacted metadata>)",
+            Self::Sessions { .. } => "Sessions",
+            Self::DisplayContexts { .. } => "DisplayContexts(<redacted>)",
+            Self::DisplayContextStored { .. } => "DisplayContextStored",
+            Self::MissedOutputBegin => "MissedOutputBegin",
+            Self::MissedOutputEnd => "MissedOutputEnd",
+            Self::Eof => "Eof",
+            Self::Exit { .. } => "Exit",
+            Self::Terminating { .. } => "Terminating",
+            Self::Error { .. } => "Error",
+        })
+    }
 }
 
 /// The fully resolved child command. The GUI builds it exactly as for an

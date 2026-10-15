@@ -16,6 +16,7 @@ mod client;
 mod client_queue;
 mod control;
 mod discovery;
+mod display_context;
 mod entry;
 mod handshake;
 mod idle;
@@ -44,6 +45,9 @@ pub use backend::{is_enabled, session_key, terminal_backend, DaemonAdoption, Dae
 pub use client::{DaemonPtySystem, MissedOutput};
 pub use control::{list_sessions, terminate_session};
 pub use discovery::{DaemonPaths, DaemonRoot};
+pub use display_context::{
+    load_contexts as load_display_contexts, DisplayContext, DisplayContextOwner,
+};
 pub use entry::run_daemon_main;
 pub use inventory::{
     inventory, terminate as terminate_listed_session, terminate_detached, DaemonProblem,

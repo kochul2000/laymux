@@ -610,6 +610,7 @@ pub async fn create_terminal_session(
     })?;
     session.initial_execution_host = spawned_pty.initial_execution_host;
     if let Some(metadata) = spawned_pty.adopted.as_ref() {
+        super::terminal_display_context::restore(&mut session, metadata);
         // The adopted child authenticates its hooks with the token it was
         // started with.
         if let Some(token) = metadata.get(PTY_DAEMON_METADATA_AGENT_HOOK_TOKEN) {
@@ -634,6 +635,7 @@ pub async fn create_terminal_session(
         // The title its agent set before an update handoff is not in the
         // missed output, and an idle agent sets no new one (ADR-0319).
         if let Some(title) = crate::update_title_handoff::take(&id, spawned_pty.handle.child_pid())
+            .or_else(|| session.osc_title.clone())
         {
             osc_pass
                 .gate

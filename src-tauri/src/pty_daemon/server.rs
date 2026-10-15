@@ -309,6 +309,43 @@ impl DaemonServer {
                         Err(error) => writer.error(&error),
                     }
                 }
+                Frame::Control(ClientMessage::ReadDisplayContexts { session_ids }) => {
+                    if session_ids.len() > super::display_context::READ_BATCH_SIZE {
+                        writer.error("too many display contexts requested");
+                        continue;
+                    }
+                    let contexts = session_ids
+                        .into_iter()
+                        .filter_map(|id| {
+                            let session = self.find_session(&id)?;
+                            Some((id, session.display_context()?))
+                        })
+                        .collect();
+                    if writer
+                        .send(&DaemonMessage::DisplayContexts { contexts })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Frame::Control(ClientMessage::UpdateDisplayContext {
+                    session_id,
+                    attach_epoch,
+                    context,
+                }) => {
+                    let accepted = self
+                        .find_session(&session_id)
+                        .and_then(|session| {
+                            session.store_display_context(attach_epoch, context).ok()
+                        })
+                        .unwrap_or(false);
+                    if writer
+                        .send(&DaemonMessage::DisplayContextStored { accepted })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
                 Frame::Control(ClientMessage::TerminateSession {
                     session_id,
                     attach_epoch,
