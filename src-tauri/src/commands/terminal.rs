@@ -1442,6 +1442,7 @@ pub(crate) fn close_terminal_session_inner(
     // Clean up interactive-app grace window (#237) so a new terminal that
     // happens to reuse this ID does not inherit stale detection.
     activity::clear_interactive_app_grace_window(state, id);
+    state.agent_usage.forget(id);
     // Mirror cleanup for the recently-exited marker so a fresh terminal
     // reusing this ID does not start under a stale Claude/Codex exit
     // suppression.
@@ -2011,6 +2012,7 @@ impl TerminalOscPass {
                     if let Ok(mut known) = state_for_pty.known_claude_terminals.lock_or_err() {
                         known.insert(terminal_id.clone());
                     }
+                    state_for_pty.agent_usage.observe(&terminal_id, "Claude");
                     // A fresh entry invalidates any pending exit marker from
                     // a previous session in the same pane — otherwise the
                     // buffer-scan strong-signal suppression would mis-block
@@ -2313,6 +2315,7 @@ impl TerminalOscPass {
                 let raw_cwd = &event.data;
                 let normalized = path_utils::normalize_wsl_path(raw_cwd);
                 let mut changed = false;
+                let mut first_distro = false;
                 let mut source_cwd_send = true;
                 if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
                     if let Some(session) = terms.get_mut(&terminal_id) {
@@ -2323,6 +2326,7 @@ impl TerminalOscPass {
                                     path_utils::extract_wsl_distro_from_path(raw_cwd)
                                 {
                                     session.wsl_distro = Some(distro);
+                                    first_distro = true;
                                 }
                             }
                             session.cwd = Some(normalized.clone());
@@ -2330,6 +2334,12 @@ impl TerminalOscPass {
                         }
                     }
                 }
+                super::ipc_dispatch::notify_agent_usage_environment(
+                    &state_for_pty,
+                    &app_clone,
+                    &terminal_id,
+                    first_distro,
+                );
                 if changed {
                     let _ = app_clone.emit(
                         EVENT_TERMINAL_CWD_CHANGED,
@@ -2442,7 +2452,7 @@ fn dispatch_osc_action(
             let _ = super::ipc_dispatch::do_set_tab_title(state, app, terminal_id, &event.data);
         }
         OscAction::SetWslDistro => {
-            let _ = super::ipc_dispatch::do_set_wsl_distro(state, terminal_id, &event.data);
+            let _ = super::ipc_dispatch::do_set_wsl_distro(state, app, terminal_id, &event.data);
         }
         OscAction::SetCommandStatus(field) => {
             // Skip all command status updates for propagated terminals (LX_PROPAGATED=1 cd).

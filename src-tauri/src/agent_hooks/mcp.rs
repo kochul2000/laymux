@@ -2,16 +2,21 @@
 //! inspection lifecycle (ADR-0324): checked once per app run at startup, on the
 //! first view of a new target, and on explicit refresh or management. Opening
 //! Settings reads the app-lifetime cache instead of touching files or WSL.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Mutex, MutexGuard};
 
 use serde::Deserialize;
 use serde_json::Value;
 
+use super::usage::{Integration, UsageTarget};
 use super::{helper_directory, run_wsl_helper, MCP_WSL_TIMEOUT};
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
+
+mod usage_check;
+pub use usage_check::check_usage;
 
 const MAX_TARGETS: usize = 256;
 
@@ -60,6 +65,8 @@ impl Key {
 struct Cache {
     warmed: bool,
     entries: HashMap<Key, Result<Value, String>>,
+    /// Usage targets (ADR-0330) already checked once by the background pass.
+    usage_checked: HashSet<Key>,
 }
 
 #[derive(Default)]
@@ -68,6 +75,10 @@ pub struct McpInspections {
     gate: Mutex<()>,
     /// Leaf lock; never held during filesystem/process I/O.
     cache: Mutex<Cache>,
+    /// One background usage pass at a time (ADR-0330).
+    usage_running: AtomicBool,
+    /// Set by each request; the running pass repeats while it is set.
+    usage_rerun: AtomicBool,
 }
 
 impl McpInspections {
@@ -98,6 +109,17 @@ impl McpInspections {
     }
     pub(crate) fn warmed(&self) -> Result<bool, AppError> {
         Ok(self.cache.lock_or_err()?.warmed)
+    }
+    /// ADR-0330: only a successful "not registered" answer counts.
+    pub(crate) fn registration_missing(
+        &self,
+        provider: &str,
+        distro: Option<&str>,
+    ) -> Result<bool, AppError> {
+        Ok(matches!(
+            self.get(&Key::new(provider, distro, None))?,
+            Some(Ok(status)) if status["state"] == "missing"
+        ))
     }
     fn claim_warm_up(&self) -> Result<bool, AppError> {
         let mut cache = self.cache.lock_or_err()?;
@@ -155,13 +177,27 @@ pub fn manage(
     }
     let key = Key::new(&request.provider, request.distro.as_deref(), dir);
     let management = request.operation != "status";
-    manage_with(
+    let result = manage_with(
         &state.agent_mcp_inspections,
         key,
         request.cached,
         management,
         || run(request, dir, app),
-    )
+    );
+    if management && result.is_ok() {
+        if dir.is_none() {
+            let target = UsageTarget {
+                provider: request.provider.clone(),
+                distro: request.distro.clone(),
+            };
+            let removed = request.operation == "remove";
+            state
+                .agent_usage
+                .set_removed(Integration::Mcp, target, removed);
+        }
+        super::notify_inspection_needed(app);
+    }
+    result
 }
 
 fn manage_with(
@@ -233,6 +269,7 @@ pub fn warm_up(state: &AppState, app: &tauri::AppHandle) -> Result<(), AppError>
             .into_iter()
             .map(Some),
     );
+    let mut recorded = false;
     for distro in distros {
         let _gate = cache.gate()?;
         let keys: Vec<_> = laymux_agent_hook::mcp::PROVIDERS
@@ -262,6 +299,11 @@ pub fn warm_up(state: &AppState, app: &tauri::AppHandle) -> Result<(), AppError>
         for key in unchecked {
             cache.record(key.clone(), &split(&statuses, &key.provider))?;
         }
+        recorded = true;
+    }
+    // Usage targets judged before this finished need a refreshed notice (ADR-0330).
+    if recorded {
+        super::notify_inspection_needed(app);
     }
     Ok(())
 }
@@ -363,6 +405,24 @@ mod tests {
             Key::new("codex", Some("Ubuntu"), Some("/home/Me")),
             Key::new("codex", Some("Ubuntu"), Some("/home/me"))
         );
+    }
+
+    #[test]
+    fn registration_missing_needs_a_successful_missing_state() {
+        let cache = McpInspections::default();
+        assert!(!cache.registration_missing("codex", None).unwrap());
+        cache
+            .record(key(None), &Ok(json!({"state": "missing"})))
+            .unwrap();
+        assert!(cache.registration_missing("codex", None).unwrap());
+        cache
+            .record(key(None), &Ok(json!({"state": "different"})))
+            .unwrap();
+        assert!(!cache.registration_missing("codex", None).unwrap());
+        cache
+            .record(key(None), &Err(AppError::Other("x".into())))
+            .unwrap();
+        assert!(!cache.registration_missing("codex", None).unwrap());
     }
 
     #[test]

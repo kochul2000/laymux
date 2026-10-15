@@ -2000,9 +2000,10 @@ function InterfaceSection() {
             className={inputCls}
             value={notifications.dismiss}
             onChange={(e) =>
-              setDraftNotifications({
+              setDraftNotifications((prev) => ({
+                ...prev,
                 dismiss: e.target.value as "workspace" | "paneFocus" | "manual",
-              })
+              }))
             }
           >
             <option value="workspace">{t("interface.dismissWorkspace")}</option>
@@ -2923,6 +2924,32 @@ function WorkspacesSection() {
 
 const DEFAULT_STATUS_MESSAGE_DELIMITER = " · ";
 
+/** Global display switch for the missing hooks/MCP notice (ADR-0330), shared by
+ *  the Claude and Codex pages through the same `notifications` draft. */
+function AgentMissingNoticeGroup() {
+  const { t } = useTranslation("settings");
+  const storeNotifications = useSettingsStore((s) => s.notifications);
+  const setNotifications = useSettingsStore((s) => s.setNotifications);
+  const [notifications, setDraftNotifications] = useDraft(
+    "notifications",
+    storeNotifications,
+    (v) => setNotifications(v),
+  );
+  return (
+    <SettingsGroup title={t("agentHooks.missingNoticeGroup")}>
+      <SettingsToggleField
+        label={t("agentHooks.missingNoticeSetting")}
+        desc={t("agentHooks.missingNoticeSettingDesc")}
+        testId="agent-integration-missing-toggle"
+        checked={notifications.agentIntegrationMissing !== false}
+        onChange={(agentIntegrationMissing) =>
+          setDraftNotifications((prev) => ({ ...prev, agentIntegrationMissing }))
+        }
+      />
+    </SettingsGroup>
+  );
+}
+
 function ClaudeSection() {
   const { t } = useTranslation("settings");
   const storeClaude = useSettingsStore((s) => s.claude);
@@ -2940,6 +2967,7 @@ function ClaudeSection() {
         onStateDetectionChange={(stateDetection) => updateClaude({ stateDetection })}
       />
       <AgentMcpSection provider="claude" />
+      <AgentMissingNoticeGroup />
 
       <SettingsGroup title={t("claude.groupSyncCwd")}>
         {/* Sync CWD mode */}
@@ -3161,6 +3189,7 @@ function CodexSection() {
         onStateDetectionChange={(stateDetection) => updateCodex({ stateDetection })}
       />
       <AgentMcpSection provider="codex" />
+      <AgentMissingNoticeGroup />
 
       <SettingsGroup title={t("codex.groupSessionRestore")}>
         {/* Launch command (flags land here, e.g. --yolo) */}
@@ -5104,8 +5133,12 @@ export function SettingsView() {
     const shouldReconcileRemote = dirtySetRef.current.has("remoteConnection");
     const previousRemoteEnabled = useSettingsStore.getState().remote.enabled;
     const previousUpdateChannel = useSettingsStore.getState().update.channel;
-    // Flush all draft states to store first
-    for (const fn of flushMapRef.current.values()) fn();
+    // Flush only edited drafts: an untouched draft can be older than a store
+    // value written outside Settings (e.g. the missing-integration notice's
+    // "don't show again", ADR-0330) and would silently revert it.
+    for (const [id, fn] of flushMapRef.current) {
+      if (dirtySetRef.current.has(id)) fn();
+    }
     const nextRemoteEnabled = useSettingsStore.getState().remote.enabled;
     const nextUpdateChannel = useSettingsStore.getState().update.channel;
     draftValuesRef.current.clear();

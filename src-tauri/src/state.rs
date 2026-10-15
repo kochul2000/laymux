@@ -41,6 +41,9 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 ///     terminal's `Arc`, never while holding another `AppState` lock)
 /// 20. `pty_daemon_adoption_seen` (leaf: may be taken while holding any lock
 ///     above, and never holds another lock itself)
+/// 21. `agent_usage` (leaf, ADR-0330: the detection path records into it while
+///     holding any lock above; resolution copies it out and releases it before
+///     taking `terminals`, and it is never held across a gate or I/O)
 ///
 /// Never acquire a lower-numbered lock while holding a higher-numbered one.
 /// Inside one terminal-output session, nested locks have their own fixed order:
@@ -93,6 +96,8 @@ pub struct AppState {
     pub agent_hook_inspections: crate::agent_hooks::inspections::InspectionCache,
     /// App-lifetime MCP registration status (ADR-0325, ADR-0324 lifecycle).
     pub agent_mcp_inspections: crate::agent_hooks::mcp::McpInspections,
+    /// Heuristic Claude/Codex usage per environment for missing notices (ADR-0330).
+    pub agent_usage: crate::agent_hooks::usage::AgentUsage,
     pub terminals: Arc<Mutex<HashMap<String, TerminalSession>>>,
     pub sync_groups: Mutex<HashMap<String, SyncGroup>>,
     pub pty_handles: Mutex<HashMap<String, PtyHandle>>,
@@ -377,6 +382,7 @@ impl AppState {
             ),
             agent_hook_inspections: Default::default(),
             agent_mcp_inspections: Default::default(),
+            agent_usage: Default::default(),
             sync_groups: Mutex::new(HashMap::new()),
             pty_handles: Mutex::new(HashMap::new()),
             ipc_socket_path: Mutex::new(None),

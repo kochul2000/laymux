@@ -146,9 +146,21 @@ pub fn audit_with_mode(
     automatic: bool,
 ) -> Result<Value, AppError> {
     let observations = connections(state)?;
-    automatic::run(
+    let usage = super::usage::resolve(state)?;
+    // A newly used environment's default folder is a discovered target (ADR-0330).
+    let used: Vec<_> = usage
+        .iter()
+        .map(|target| ManageRequest {
+            provider: target.provider.clone(),
+            operation: "status".into(),
+            distro: target.distro.clone(),
+            config_dir: None,
+        })
+        .collect();
+    let mut snapshot = automatic::run(
         &state.agent_hook_inspections,
         &observations,
+        &used,
         automatic,
         || {
             #[cfg(windows)]
@@ -161,7 +173,9 @@ pub fn audit_with_mode(
             }
         },
         |request, timeout| manage_with_timeout(request, app, timeout),
-    )
+    )?;
+    snapshot["missing"] = super::usage::missing(state, &usage)?;
+    Ok(snapshot)
 }
 
 #[cfg(test)]

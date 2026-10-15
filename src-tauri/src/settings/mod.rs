@@ -1767,6 +1767,21 @@ mod tests {
     }
 
     #[test]
+    fn agent_integration_missing_notice_defaults_on_and_round_trips_off() {
+        assert!(Settings::default().notifications.agent_integration_missing);
+        // A file written before the field existed keeps the notice on.
+        let settings: Settings =
+            serde_json::from_str(r#"{ "notifications": { "dismiss": "manual" } }"#).unwrap();
+        assert!(settings.notifications.agent_integration_missing);
+
+        let json = r#"{ "notifications": { "agentIntegrationMissing": false } }"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert!(!settings.notifications.agent_integration_missing);
+        let serialized = serde_json::to_string(&settings).unwrap();
+        assert!(serialized.contains("\"agentIntegrationMissing\":false"));
+    }
+
+    #[test]
     fn workspace_selector_hidden_auto_close_default_is_disabled() {
         // Default must be 0 (disabled) so existing users see no behavior change.
         let settings = Settings::default();

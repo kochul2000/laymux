@@ -39,6 +39,7 @@ pub fn get_agent_hook_updates(
     state: State<Arc<AppState>>,
     app: tauri::AppHandle,
     automatic: Option<bool>,
+    missing_notice: Option<bool>,
 ) -> Result<Value, String> {
     if automatic == Some(true) && !state.agent_mcp_inspections.warmed().unwrap_or(true) {
         // MCP registration shares the startup lifecycle (ADR-0325) but must not
@@ -50,6 +51,17 @@ pub fn get_agent_hook_updates(
             }
         });
     }
-    agent_hooks::updates::audit_with_mode(&state, &app, automatic.unwrap_or(false))
-        .map_err(|e| e.to_string())
+    let result = agent_hooks::updates::audit_with_mode(&state, &app, automatic.unwrap_or(false))
+        .map_err(|e| e.to_string())?;
+    if automatic == Some(true) && missing_notice != Some(false) {
+        // Notice-only MCP checks of newly used environments (ADR-0330) run in
+        // the background and hint the notice when they finish.
+        let (state, app) = (Arc::clone(&state), app.clone());
+        std::thread::spawn(move || {
+            if let Err(error) = agent_hooks::mcp::check_usage(&state, &app) {
+                tracing::warn!(%error, "MCP usage check failed");
+            }
+        });
+    }
+    Ok(result)
 }

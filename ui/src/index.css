@@ -488,6 +488,21 @@
   gap: 8px;
   margin-top: 12px;
 }
+.agent-hook-update-notice__installs {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+.agent-hook-update-notice__never {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  cursor: pointer;
+}
+.agent-hook-update-notice__never input {
+  accent-color: var(--accent);
+}
 .agent-hooks-plan {
   font-size: var(--settings-label-size);
 }

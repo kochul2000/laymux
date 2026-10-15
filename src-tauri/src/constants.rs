@@ -881,3 +881,8 @@ mod tests {
 }
 pub const EVENT_AGENT_HOOK_INSPECTION_NEEDED: &str = "agent-hook-inspection-needed";
 pub const AGENT_HOOK_INSPECTION_MAX_TARGETS: usize = 512;
+/// Live (terminal, Claude|Codex) usage observations kept for missing-integration
+/// notices (ADR-0330); closed terminals are forgotten.
+pub const AGENT_USAGE_MAX_OBSERVATIONS: usize = 1024;
+/// Resolved (provider, environment) usage targets kept for the app run (ADR-0330).
+pub const AGENT_USAGE_MAX_TARGETS: usize = 64;

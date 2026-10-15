@@ -2,9 +2,13 @@ import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentHookUpdateNotice } from "./AgentHookUpdateNotice";
 import { useAgentHookUpdateStore, refreshAgentHookUpdates } from "@/lib/agent-hook-updates";
+import { useSettingsStore } from "@/stores/settings-store";
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+const persistSession = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock("@/lib/persist-session", () => ({ persistSession }));
+const missing = { provider: "codex", distro: "Ubuntu", hook: true, mcp: false };
 const target = {
   provider: "codex",
   distro: "Ubuntu",
@@ -25,8 +29,18 @@ const target = {
 
 describe("AgentHookUpdateNotice", () => {
   beforeEach(() => {
-    useAgentHookUpdateStore.setState({ targets: [], errors: [], dismissed: [], busyKey: null });
+    useAgentHookUpdateStore.setState({
+      targets: [],
+      errors: [],
+      missing: [],
+      dismissed: [],
+      busyKey: null,
+    });
+    useSettingsStore.setState((s) => ({
+      notifications: { ...s.notifications, agentIntegrationMissing: true },
+    }));
     invoke.mockReset();
+    persistSession.mockClear();
   });
   it("notifies outside Settings and updates only the selected WSL custom folder", async () => {
     invoke.mockImplementation(async (command) =>
@@ -115,5 +129,52 @@ describe("AgentHookUpdateNotice", () => {
     await act(() => refreshAgentHookUpdates());
     expect(screen.getByTestId("agent-hook-update-notice")).toHaveTextContent("Debian failed");
     expect(screen.queryByText("timeout")).not.toBeInTheDocument();
+  });
+  it("offers only the missing integration of a used environment and installs on click", async () => {
+    invoke.mockResolvedValue({ targets: [], errors: [], missing: [missing] });
+    render(<AgentHookUpdateNotice />);
+    await act(() => refreshAgentHookUpdates(true));
+    const row = screen.getByTestId("agent-integration-missing");
+    expect(row).toHaveTextContent("Codex");
+    expect(row).toHaveTextContent("Ubuntu");
+    expect(screen.queryByTestId("agent-integration-install-mcp")).not.toBeInTheDocument();
+    expect(invoke.mock.calls.filter(([c]) => c === "manage_agent_hooks")).toHaveLength(0);
+    invoke.mockImplementation(async (command) =>
+      command === "get_agent_hook_updates"
+        ? { targets: [], errors: [], missing: [] }
+        : { ...target.status },
+    );
+    fireEvent.click(screen.getByTestId("agent-integration-install-hook"));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("manage_agent_hooks", {
+        request: { provider: "codex", operation: "install", distro: "Ubuntu", configDir: null },
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByTestId("agent-hook-update-notice")).not.toBeInTheDocument(),
+    );
+  });
+  it("turns the missing notice off when dismissed with don't show again", async () => {
+    invoke.mockResolvedValue({ targets: [target], errors: [], missing: [missing] });
+    render(<AgentHookUpdateNotice />);
+    await act(() => refreshAgentHookUpdates(true));
+    fireEvent.click(screen.getByTestId("agent-integration-never-show"));
+    fireEvent.click(screen.getByTestId("agent-hook-update-dismiss"));
+    expect(useSettingsStore.getState().notifications.agentIntegrationMissing).toBe(false);
+    expect(persistSession).toHaveBeenCalledTimes(1);
+    // Update notices are not governed by the switch: a new run still shows them.
+    act(() => useAgentHookUpdateStore.setState({ dismissed: [] }));
+    expect(screen.getByTestId("agent-hook-update-notice")).toHaveTextContent("Ubuntu");
+    expect(screen.queryByTestId("agent-integration-missing")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("agent-integration-never-show")).not.toBeInTheDocument();
+  });
+  it("hides only the current run's rows when dismissed without the checkbox", async () => {
+    invoke.mockResolvedValue({ targets: [], errors: [], missing: [missing] });
+    render(<AgentHookUpdateNotice />);
+    await act(() => refreshAgentHookUpdates(true));
+    fireEvent.click(screen.getByTestId("agent-hook-update-dismiss"));
+    expect(screen.queryByTestId("agent-hook-update-notice")).not.toBeInTheDocument();
+    expect(useSettingsStore.getState().notifications.agentIntegrationMissing).toBe(true);
+    expect(persistSession).not.toHaveBeenCalled();
   });
 });

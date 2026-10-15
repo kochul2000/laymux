@@ -73,10 +73,21 @@ export interface HookUpdateError {
   configDir: string | null;
   message: string;
 }
-export const getAgentHookUpdates = (automatic = false) =>
-  invoke<{ targets: HookUpdateTarget[]; errors: HookUpdateError[] }>("get_agent_hook_updates", {
-    automatic,
-  });
+/** A used environment's default folder without Laymux hooks or MCP (ADR-0330). */
+export interface HookMissingTarget {
+  provider: HookProvider;
+  distro: string | null;
+  hook: boolean;
+  mcp: boolean;
+}
+export interface HookUpdates {
+  targets: HookUpdateTarget[];
+  errors: HookUpdateError[];
+  missing?: HookMissingTarget[];
+}
+/** `missingNotice: false` skips the notice-only MCP checks of used environments. */
+export const getAgentHookUpdates = (automatic = false, missingNotice = true) =>
+  invoke<HookUpdates>("get_agent_hook_updates", { automatic, missingNotice });
 export const onAgentHookInspectionNeeded = (handler: () => void) =>
   listen("agent-hook-inspection-needed", handler);
 

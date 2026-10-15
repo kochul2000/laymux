@@ -187,6 +187,7 @@ fn detach_terminal_output_generation_with_post_unlock(
                 callback_states.remove(terminal_id);
             }
             activity::clear_interactive_app_grace_window(state, terminal_id);
+            state.agent_usage.forget(terminal_id);
             activity::clear_interactive_app_exit_marker(state, terminal_id);
             // A guest verdict describes a specific PTY generation. Drop it here
             // too so a probe pass still in flight cannot resurrect it for the

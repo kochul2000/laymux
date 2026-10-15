@@ -9,6 +9,7 @@ import {
   type McpProvider,
   type McpStatus,
 } from "@/lib/agent-hooks-api";
+import { manageAgentMcpAndRefresh } from "@/lib/agent-hook-updates";
 import { SettingsGroup } from "./SettingsLayout";
 
 const CONFIG_DIR_ENV: Record<McpProvider, string> = {
@@ -77,7 +78,8 @@ export function AgentMcpSection({ provider }: { provider: McpProvider }) {
     const request = ++sequence.current;
     setBusy(true);
     try {
-      const value = await manageAgentMcp(provider, operation, distro, configDir || null);
+      // Shares the notice's queue so hook/MCP writers never race (ADR-0330).
+      const value = await manageAgentMcpAndRefresh(provider, operation, distro, configDir || null);
       if (sequence.current === request) setResult({ key, status: value });
     } catch (error) {
       // Nothing was written on failure, so the last known status still holds.

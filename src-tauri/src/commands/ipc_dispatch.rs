@@ -120,7 +120,7 @@ fn handle_lx_message_dispatch(
             exit_code,
         } => do_set_command_status(state, app, &terminal_id, command.as_deref(), exit_code),
         LxMessage::SetWslDistro { path, terminal_id } => {
-            do_set_wsl_distro(state, &terminal_id, &path)
+            do_set_wsl_distro(state, app, &terminal_id, &path)
         }
     }
 }
@@ -409,17 +409,34 @@ pub fn do_set_command_status(
     Ok(LxResponse::ok(Some(desc)))
 }
 
+/// A WSL shell's first distribution report lets a deferred agent usage
+/// observation resolve (ADR-0330); hint the notice only in that case.
+pub(crate) fn notify_agent_usage_environment(
+    state: &AppState,
+    app: &AppHandle,
+    terminal_id: &str,
+    first_distro: bool,
+) {
+    if first_distro && state.agent_usage.has_pending(terminal_id) {
+        crate::agent_hooks::notify_inspection_needed(app);
+    }
+}
+
 /// Set WSL distro name from a path containing UNC distro information.
 pub fn do_set_wsl_distro(
     state: &AppState,
+    app: &AppHandle,
     terminal_id: &str,
     path: &str,
 ) -> Result<LxResponse, String> {
     if let Some(distro) = path_utils::extract_wsl_distro_from_path(path) {
-        let mut terminals = state.terminals.lock_or_err()?;
-        if let Some(session) = terminals.get_mut(terminal_id) {
-            session.wsl_distro = Some(distro.clone());
-        }
+        let first = {
+            let mut terminals = state.terminals.lock_or_err()?;
+            terminals
+                .get_mut(terminal_id)
+                .is_some_and(|session| session.wsl_distro.replace(distro.clone()).is_none())
+        };
+        notify_agent_usage_environment(state, app, terminal_id, first);
         Ok(LxResponse::ok(Some(format!("wsl-distro set: {distro}"))))
     } else {
         Ok(LxResponse::ok(Some("no distro found in path".into())))

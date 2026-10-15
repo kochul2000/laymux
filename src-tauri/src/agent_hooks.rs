@@ -5,6 +5,7 @@ pub mod mcp;
 pub mod observations;
 pub mod title;
 pub mod updates;
+pub mod usage;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -86,6 +87,25 @@ pub fn manage(
     let result =
         helper_directory(app).and_then(|directory| manage_in_directory(request, &directory));
     state.agent_hook_inspections.record(request, &result)?;
+    let default_folder = || {
+        state
+            .agent_hook_inspections
+            .is_default_folder(request)
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error, "Could not classify the hook folder");
+                false
+            })
+    };
+    if result.is_ok() && request.operation != "status" && default_folder() {
+        let target = usage::UsageTarget {
+            provider: request.provider.clone(),
+            distro: request.distro.clone(),
+        };
+        let removed = request.operation == "remove";
+        state
+            .agent_usage
+            .set_removed(usage::Integration::Hook, target, removed);
+    }
     notify_inspection_needed(app);
     result
 }
