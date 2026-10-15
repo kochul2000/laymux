@@ -4687,6 +4687,8 @@ describe("panes.stack / activateLayer / remove(layerId) bridge (ADR-0297)", () =
   });
 
   it("stacks a terminal layer without moving keyboard focus", () => {
+    const previousLayerId = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0]
+      .activeLayerId;
     const result = act("stack", { paneIndex: 0, profile: "WSL", cwd: "/repo" });
     expect(result.success).toBe(true);
     const data = result.data as { newPane: Record<string, unknown> };
@@ -4699,7 +4701,7 @@ describe("panes.stack / activateLayer / remove(layerId) bridge (ADR-0297)", () =
       ready: false,
     });
     const slot = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0];
-    expect(slot.activeLayerId).toBe(layerId);
+    expect(slot.activeLayerId).toBe(previousLayerId);
     expect(slot.layers[1].view).toMatchObject({
       type: "TerminalView",
       profile: "WSL",
@@ -4708,6 +4710,30 @@ describe("panes.stack / activateLayer / remove(layerId) bridge (ADR-0297)", () =
     expect(useTerminalRestartStore.getState().requests[layerId]?.cwd).toBe("/repo");
     expect(useGridStore.getState().focusedPaneIndex).toBe(1);
   });
+
+  it.each(["TerminalView", "MemoView"])(
+    "never activates a new %s layer even transiently when stacking the focused slot",
+    (viewType) => {
+      useGridStore.getState().setFocusedPane(0);
+      const before = useWorkspaceStore.getState().getActiveWorkspace()!;
+      const previousLayerId = before.panes[0].activeLayerId;
+      const observed: string[] = [];
+      const unsubscribe = useWorkspaceStore.subscribe((state) => {
+        observed.push(state.getActiveWorkspace()!.panes[0].activeLayerId);
+      });
+      try {
+        const result = act("stack", { paneIndex: 0, viewType });
+        expect(result.success).toBe(true);
+        expect(observed.length).toBeGreaterThan(0);
+        expect(observed.every((id) => id === previousLayerId)).toBe(true);
+        expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(before.id);
+        expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+        expect(useDockStore.getState().focusedDock).toBeNull();
+      } finally {
+        unsubscribe();
+      }
+    },
+  );
 
   it("stacks a non-terminal view when asked", () => {
     const result = act("stack", { paneIndex: 1, viewType: "MemoView" });

@@ -2782,9 +2782,10 @@ impl McpHandler {
         self.bridge("action", "panes", "split", params).await
     }
 
-    /// Stack a new layer on a pane slot (ADR-0297): the slot keeps its size and shows
-    /// the new layer, the previous content stays alive underneath. Defaults to a
-    /// TerminalView starting in the slot's active-layer CWD. Response is like
+    /// Stack a new background layer on a pane slot (ADR-0328), preserving its size,
+    /// displayed layer and keyboard focus throughout creation. Defaults to a
+    /// TerminalView starting in the slot's active-layer CWD, ready for input without
+    /// being displayed. write_to_terminal waits for readiness without navigation. Response is like
     /// split_pane (`stacked`, `newPane` with `ready`, `layerIndex`, `layerCount`) but
     /// without the rect or totalPanes. Switch layers with activate_pane_layer.
     #[tool]
