@@ -1,6 +1,6 @@
 # 0329. 데몬 재결합은 워크스페이스 표시 문맥을 메모리로 인계한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-15
 - Source: 사용자 요구(데몬 재결합 후 마지막 입력·상태 메시지·activity 및 최대화 상태 보존), [ADR-0194](0194-workspace-pane-last-input-second-line.md), [ADR-0301](0301-pty-daemon-default-adoption.md), [ADR-0319](0319-update-handoff-carries-terminal-title.md), [data-flow.md §8.23·§13](../architecture/data-flow.md)
 - 관계: ADR-0194의 입력 보관 범위를 Zustand 단독에서 같은 사용자 GUI·PTY 데몬의 휘발성 메모리로 확장한다. 입력을 디스크에 저장하지 않는 원칙은 유지한다. ADR-0319의 기존 빌드 업데이트 title 인계는 유지한다.
