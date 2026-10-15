@@ -32,12 +32,7 @@ interface CollectSettingsSnapshotOptions {
 }
 
 export type TerminalAttributionState =
-  | "identified"
-  | "restorePending"
-  | "fresh"
-  | "noAgent"
-  | "activeButUnidentified"
-  | "unknown";
+  "identified" | "restorePending" | "fresh" | "noAgent" | "activeButUnidentified" | "unknown";
 
 export interface TerminalAttributionCoverage {
   terminalId: string;

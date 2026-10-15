@@ -186,7 +186,10 @@ it("선택 앞뒤의 텍스트는 포함하지 않고 자동 wrap 뒤의 별도 
     pathScreenLimits(256),
   );
   expect(
-    mapPathLinkParts(lines[1], candidates.find((c) => c.text === "/other.md")!)[0],
+    mapPathLinkParts(
+      lines[1],
+      candidates.find((c) => c.text === "/other.md")!,
+    )[0],
   ).toMatchObject({ bufferLine: 3, startCol: 1, endCol: 9 });
 });
 

@@ -1,7 +1,5 @@
 export type TerminalOutputControlOutcome<T> =
-  | { kind: "resolved"; value: T }
-  | { kind: "rejected"; error: unknown }
-  | { kind: "timeout" };
+  { kind: "resolved"; value: T } | { kind: "rejected"; error: unknown } | { kind: "timeout" };
 
 export interface TerminalOutputControlWatchdogOptions {
   onTimeout?: () => void;

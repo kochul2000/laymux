@@ -1,11 +1,5 @@
 export type LifecycleStage =
-  | "downloading"
-  | "checkpoint"
-  | "interrupting"
-  | "settling"
-  | "caching"
-  | "installing"
-  | "closing";
+  "downloading" | "checkpoint" | "interrupting" | "settling" | "caching" | "installing" | "closing";
 export interface ExitProgress {
   stage: LifecycleStage;
   completed: number;

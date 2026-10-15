@@ -40,8 +40,7 @@ describe("terminal output v3 Tauri API", () => {
 
     expect(mockListen).toHaveBeenCalledWith("terminal-output-v3-term-7", expect.any(Function));
     const handler = mockListen.mock.calls[0]?.[1] as
-      | ((event: { payload: TerminalOutputEnvelopePayload }) => void)
-      | undefined;
+      ((event: { payload: TerminalOutputEnvelopePayload }) => void) | undefined;
     const payload: TerminalOutputEnvelopePayload = {
       version: 3,
       generation: 9,

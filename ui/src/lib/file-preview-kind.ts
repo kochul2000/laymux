@@ -17,13 +17,7 @@ import { previewLanguage } from "./preview/code-highlight";
  * Adding a kind means picking a family, and the family decides the renderer.
  */
 export type FilePreviewKind =
-  | DocumentPreviewKind
-  | "json"
-  | "jsonl"
-  | "diff"
-  | "csv"
-  | "log"
-  | "code";
+  DocumentPreviewKind | "json" | "jsonl" | "diff" | "csv" | "log" | "code";
 
 /** Kinds whose renderer is the sandboxed iframe rather than React DOM. */
 export function isDocumentPreviewKind(kind: FilePreviewKind): kind is DocumentPreviewKind {

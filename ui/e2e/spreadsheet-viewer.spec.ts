@@ -102,7 +102,7 @@ test("four spreadsheet extensions open in the viewer with sheet search and TSV c
   });
   const gridBox = await page.getByTestId("spreadsheet-grid").boundingBox();
   if (!gridBox) throw new Error("Missing grid");
-  await expect(page.getByRole("button", {name: "A1: 상품"})).toBeVisible();
+  await expect(page.getByRole("button", { name: "A1: 상품" })).toBeVisible();
   await page.mouse.move(start.x + 4, start.y + 4);
   await page.mouse.down();
   await page.mouse.move(start.x + 4, gridBox.y + gridBox.height - 3, { steps: 5 });

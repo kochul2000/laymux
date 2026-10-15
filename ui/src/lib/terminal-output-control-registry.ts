@@ -367,7 +367,7 @@ export class TerminalOutputControlOperationRegistry {
       kind === "receipt" || kind === "hold" || kind === "close" ? "delivery" : kind;
     if (!this.globalBudgets[budgetKind].canStart) return;
     const waiters = this.capacityWaiters[budgetKind];
-    for (let index = 0; index < waiters.length; ) {
+    for (let index = 0; index < waiters.length;) {
       const waiter = waiters[index];
       if (!waiter.isCurrent()) {
         waiters.splice(index, 1);

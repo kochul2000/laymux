@@ -109,7 +109,7 @@ export function createDirectInputCapture(): DirectInputCapture {
       }
 
       const submitted: string[] = [];
-      for (let index = 0; index < input.length; ) {
+      for (let index = 0; index < input.length;) {
         const rest = input.slice(index);
         // ECMA-48 CSI uses parameter bytes 0x30..0x3f, optional intermediate
         // bytes 0x20..0x2f, and a final byte 0x40..0x7e. In particular, SGR

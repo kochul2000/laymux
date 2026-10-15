@@ -1115,8 +1115,7 @@ describe("TerminalView", () => {
     expect(overlay).not.toHaveClass("visible");
 
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
     await act(async () => {
       onOutput?.(new TextEncoder().encode("busy output"));
     });
@@ -1670,8 +1669,7 @@ describe("TerminalView", () => {
     await act(async () => {
       capturedScrollHandler?.();
       const overlayFrame = mockRequestAnimationFrame.mock.calls.at(-1)?.[0] as
-        | FrameRequestCallback
-        | undefined;
+        FrameRequestCallback | undefined;
       overlayFrame?.(performance.now());
     });
     expect(overlay.style.opacity).toBe("0");
@@ -2293,8 +2291,7 @@ describe("TerminalView", () => {
     terminal.buffer.active.baseY = 0;
     await act(async () => {
       const frame = mockRequestAnimationFrame.mock.calls.at(-1)?.[0] as
-        | FrameRequestCallback
-        | undefined;
+        FrameRequestCallback | undefined;
       frame?.(performance.now());
     });
 
@@ -2469,8 +2466,7 @@ describe("TerminalView", () => {
 
     expect(container).not.toHaveClass("terminal-ime-composition-active");
     const overlayFrame = mockRequestAnimationFrame.mock.calls.at(-1)?.[0] as
-      | FrameRequestCallback
-      | undefined;
+      FrameRequestCallback | undefined;
     act(() => {
       overlayFrame?.(performance.now());
     });
@@ -2553,8 +2549,7 @@ describe("TerminalView", () => {
         expect(mockOnTerminalOutput).toHaveBeenCalled();
       });
       const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
       act(() => {
         useTerminalStore.getState().updateInstanceInfo("t-park-defer", {
           activity: { type: "interactiveApp", name: "Codex" },
@@ -2684,8 +2679,7 @@ describe("TerminalView", () => {
         expect(csiHandlers.get("?:h")).toBeTypeOf("function");
       });
       const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-        | ((data: Uint8Array | Record<string, unknown>) => void)
-        | undefined;
+        ((data: Uint8Array | Record<string, unknown>) => void) | undefined;
       expect(onOutput).toBeTypeOf("function");
       act(() => {
         useTerminalStore.getState().updateInstanceInfo("t-gap-reattach", {
@@ -2842,8 +2836,7 @@ describe("TerminalView", () => {
         // seeded after its reset, not before.
         await waitForTerminalInputReady();
         const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
-          | ((data: Uint8Array | Record<string, unknown>) => void)
-          | undefined;
+          ((data: Uint8Array | Record<string, unknown>) => void) | undefined;
         expect(onOutput).toBeTypeOf("function");
 
         // Deep scrollback: the reset's `baseY → 0` is the whole defect, so it has
@@ -3052,8 +3045,7 @@ describe("TerminalView", () => {
         expect(csiHandlers.get("?:h")).toBeTypeOf("function");
       });
       const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-        | ((data: Uint8Array | Record<string, unknown>) => void)
-        | undefined;
+        ((data: Uint8Array | Record<string, unknown>) => void) | undefined;
       expect(onOutput).toBeTypeOf("function");
       await waitForStreamAttachReset();
       act(() => {
@@ -3169,8 +3161,7 @@ describe("TerminalView", () => {
       expect(mockOnTerminalOutput).toHaveBeenCalled();
     });
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
 
     terminal.buffer.active.baseY = 0;
     terminal.buffer.active.cursorX = 2;
@@ -3217,8 +3208,7 @@ describe("TerminalView", () => {
     });
 
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
     expect(onOutput).toBeTypeOf("function");
 
     const container = screen.getByTestId("terminal-view-t-sync-write");
@@ -3274,8 +3264,7 @@ describe("TerminalView", () => {
     await waitForTerminalInputReady();
     const terminal = createdTerminals.find((candidate) => candidate.wasOpened);
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
     expect(terminal).toBeDefined();
     expect(onOutput).toBeTypeOf("function");
 
@@ -3651,8 +3640,7 @@ describe("TerminalView", () => {
     });
 
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
     expect(onOutput).toBeTypeOf("function");
 
     act(() => {
@@ -3677,8 +3665,7 @@ describe("TerminalView", () => {
     });
 
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
     expect(onOutput).toBeTypeOf("function");
 
     act(() => {
@@ -3705,8 +3692,7 @@ describe("TerminalView", () => {
     });
 
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
     expect(onOutput).toBeTypeOf("function");
 
     act(() => {
@@ -3778,8 +3764,7 @@ describe("TerminalView", () => {
     });
 
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
     expect(onOutput).toBeTypeOf("function");
 
     act(() => {
@@ -3822,8 +3807,7 @@ describe("TerminalView", () => {
     });
 
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
     expect(onOutput).toBeTypeOf("function");
 
     act(() => {
@@ -3943,8 +3927,7 @@ describe("TerminalView", () => {
     });
 
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
     expect(onOutput).toBeTypeOf("function");
 
     act(() => {
@@ -3986,8 +3969,7 @@ describe("TerminalView", () => {
     });
 
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
     expect(onOutput).toBeTypeOf("function");
 
     act(() => {
@@ -4017,8 +3999,7 @@ describe("TerminalView", () => {
     });
 
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
     expect(onOutput).toBeTypeOf("function");
     stopTaskSubscription = subscribeTerminalTasks();
     observeTerminalTask("t-claude-prompt", { state: "running" });
@@ -4084,8 +4065,7 @@ describe("TerminalView", () => {
       expect(mockOnTerminalOutput).toHaveBeenCalled();
     });
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
 
     act(() => {
       onOutput?.(new TextEncoder().encode(localSessionLimitBanner()));
@@ -4134,8 +4114,7 @@ describe("TerminalView", () => {
       expect(mockOnTerminalOutput).toHaveBeenCalled();
     });
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
 
     act(() => {
       onOutput?.(new TextEncoder().encode(localSessionLimitBanner()));
@@ -4164,8 +4143,7 @@ describe("TerminalView", () => {
       expect(mockOnTerminalOutput).toHaveBeenCalled();
     });
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
 
     act(() => {
       onOutput?.(new TextEncoder().encode(localSessionLimitBanner()));
@@ -4208,8 +4186,7 @@ describe("TerminalView", () => {
       expect(mockOnTerminalOutput).toHaveBeenCalled();
     });
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
 
     act(() => {
       onOutput?.(new TextEncoder().encode(localSessionLimitBanner()));
@@ -4231,8 +4208,7 @@ describe("TerminalView", () => {
     });
 
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
     expect(onOutput).toBeTypeOf("function");
     stopTaskSubscription = subscribeTerminalTasks();
     observeTerminalTask("t-claude-prompt-done", { state: "running" });
@@ -4292,8 +4268,7 @@ describe("TerminalView", () => {
     });
 
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
     expect(onOutput).toBeTypeOf("function");
     stopTaskSubscription = subscribeTerminalTasks();
     observeTerminalTask("t-claude-normal-prompt", { state: "running" });
@@ -4348,8 +4323,7 @@ describe("TerminalView", () => {
       expect(mockOnTerminalOutput).toHaveBeenCalled();
     });
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
     expect(onOutput).toBeTypeOf("function");
     stopTaskSubscription = subscribeTerminalTasks();
     observeTerminalTask("t-claude-chunked", { state: "running" });
@@ -4396,8 +4370,7 @@ describe("TerminalView", () => {
       expect(mockOnTerminalOutput).toHaveBeenCalled();
     });
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
     expect(onOutput).toBeTypeOf("function");
     stopTaskSubscription = subscribeTerminalTasks();
     observeTerminalTask("t-claude-second-modal", { state: "running" });
@@ -4461,8 +4434,7 @@ describe("TerminalView", () => {
     });
 
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
     expect(onOutput).toBeTypeOf("function");
 
     act(() => {
@@ -4491,8 +4463,7 @@ describe("TerminalView", () => {
     });
 
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
     expect(onOutput).toBeTypeOf("function");
 
     act(() => {
@@ -4515,8 +4486,7 @@ describe("TerminalView", () => {
     });
 
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
     expect(onOutput).toBeTypeOf("function");
 
     act(() => {
@@ -4543,8 +4513,7 @@ describe("TerminalView", () => {
     });
 
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
     expect(onOutput).toBeTypeOf("function");
 
     act(() => {
@@ -4847,8 +4816,7 @@ describe("TerminalView", () => {
   describe("terminal protocol reply ownership", () => {
     const emitLive = (terminalId: string, value: string) => {
       const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
       act(() => onOutput?.(new TextEncoder().encode(value)));
     };
 
@@ -5122,8 +5090,7 @@ describe("TerminalView", () => {
       mockWrite.mockClear();
       mockRefresh.mockClear();
       const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
       const raw = "\x1b[?2026hbody\x1b[?25h\x1b[?2026l\x1b[?25l\x1b[3;4H\x1b[?25h";
       const expected = "\x1b[?2026hbody\x1b[?2026l\x1b[?25l\x1b[3;4H\x1b[?25h";
 
@@ -5147,8 +5114,7 @@ describe("TerminalView", () => {
       await waitForTerminalInputReady();
       mockWrite.mockClear();
       const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
 
       act(() => onOutput?.(new TextEncoder().encode(raw)));
 
@@ -5453,8 +5419,7 @@ describe("TerminalView", () => {
         callback?.();
       });
       const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
 
       act(() => {
         onOutput?.(
@@ -5480,8 +5445,7 @@ describe("TerminalView", () => {
       mockWrite.mockClear();
       mockRefresh.mockClear();
       const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
       const raw =
         "\x1b[?2026h" + "x".repeat(70_000) + "\x1b[?25h\x1b[?2026l\x1b[?25l\x1b[3;4H\x1b[?25h";
 
@@ -5509,8 +5473,7 @@ describe("TerminalView", () => {
         finishBusyWrite = callback;
       });
       const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
       const frameStart = "\x1b[?2026hbody\x1b[?25h";
       const afterDeadline = "late\x1b[?2026l\x1b[?25l\x1b[3;4H\x1b[?25h";
 
@@ -5556,8 +5519,7 @@ describe("TerminalView", () => {
       );
       await waitForTerminalInputReady();
       const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
       const order: string[] = [];
       mockWrite.mockClear();
       mockFit.mockClear();
@@ -5631,8 +5593,7 @@ describe("TerminalView", () => {
         finishLiveWrite = callback;
       });
       const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
 
       act(() => {
         onOutput?.(new TextEncoder().encode("\x1b[?2026hbody\x1b[?25h\x1b[?2026l"));
@@ -5668,8 +5629,7 @@ describe("TerminalView", () => {
       await waitForTerminalInputReady();
       mockWrite.mockClear();
       const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
       const raw = "\x1b[?2026hbody\x1b[?25h\x1b[?2026l\x1b[?25l\x1b[3;4H\x1b[?25h";
 
       act(() => onOutput?.(new TextEncoder().encode(raw)));
@@ -5686,8 +5646,7 @@ describe("TerminalView", () => {
     const latestOnKey = () => {
       const calls = mockOnKey.mock.calls;
       return calls[calls.length - 1]?.[0] as
-        | ((event: { key: string; domEvent: KeyboardEvent }) => void)
-        | undefined;
+        ((event: { key: string; domEvent: KeyboardEvent }) => void) | undefined;
     };
     const waitForLocalControl = async () => {
       await vi.waitFor(() => {
@@ -7429,8 +7388,7 @@ describe("TerminalView", () => {
       end: { x: 19, y: 0 },
     });
     let resolveStat:
-      | ((value: Array<{ exists: boolean; isDirectory: boolean }>) => void)
-      | undefined;
+      ((value: Array<{ exists: boolean; isDirectory: boolean }>) => void) | undefined;
     mockStatPaths.mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -7579,8 +7537,7 @@ describe("TerminalView", () => {
     // the matching component state explicitly.
     await vi.waitFor(() => expect(mockOnTerminalOutput).toHaveBeenCalled());
     const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
     act(() => onOutput?.(new TextEncoder().encode("\x1b[?2026hframe")));
     await vi.waitFor(() => expect(mockWrite).toHaveBeenCalled());
 
@@ -8234,8 +8191,7 @@ describe("TerminalView", () => {
       });
       await new Promise((resolve) => setTimeout(resolve, 30));
       const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
       mockWrite.mockImplementationOnce((_: string | Uint8Array, callback?: () => void) => {
         if (callback) finishWrites.push(callback);
       });
@@ -8318,8 +8274,7 @@ describe("TerminalView", () => {
         expect(capturedRemoteControlChanged).toBeTruthy();
       });
       const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
       mockBufferActive.baseY = 40;
       mockFit.mockClear();
       mockResizeTerminal.mockClear();
@@ -8358,8 +8313,7 @@ describe("TerminalView", () => {
         expect(capturedRemoteControlChanged).toBeTruthy();
       });
       const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
       mockBufferActive.baseY = 40;
       mockFit.mockImplementationOnce(() => {
         (createdTerminals[0] as unknown as { cols: number }).cols = 100;
@@ -8542,8 +8496,7 @@ describe("TerminalView", () => {
         expect(capturedRemoteControlChanged).toBeTruthy();
       });
       const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
       mockWrite.mockImplementationOnce((_: string | Uint8Array, callback?: () => void) => {
         if (callback) finishWrites.push(callback);
       });
@@ -8682,8 +8635,7 @@ describe("TerminalView", () => {
       ([id]) => id === "t-remote-owned",
     )?.[1] as ((data: Uint8Array) => void) | undefined;
     const resizeHandler = mockOnResize.mock.calls.at(-1)?.[0] as
-      | ((size: { cols: number; rows: number }) => void)
-      | undefined;
+      ((size: { cols: number; rows: number }) => void) | undefined;
     expect(onOutput).toBeDefined();
     expect(resizeHandler).toBeDefined();
     expect(capturedKeyHandler).toBeTypeOf("function");
@@ -8766,8 +8718,7 @@ describe("TerminalView", () => {
     });
 
     const resizeHandler = mockOnResize.mock.calls.at(-1)?.[0] as
-      | ((size: { cols: number; rows: number }) => void)
-      | undefined;
+      ((size: { cols: number; rows: number }) => void) | undefined;
     expect(resizeHandler).toBeDefined();
 
     mockResizeTerminal.mockClear();
@@ -9030,8 +8981,7 @@ describe("TerminalView", () => {
       // container returns to the same pixel size. Repaint immediately, but
       // preserve the ConPTY quiet window before mutating the xterm buffer.
       const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
       mockFit.mockClear();
       mockClearTextureAtlas.mockClear();
       mockRefresh.mockClear();
@@ -9139,8 +9089,7 @@ describe("TerminalView", () => {
       });
       await new Promise((resolve) => setTimeout(resolve, 30));
       const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
       mockWrite.mockImplementationOnce((_: string | Uint8Array, callback?: () => void) => {
         if (callback) finishWrites.push(callback);
       });
@@ -9303,8 +9252,7 @@ describe("TerminalView", () => {
       });
 
       const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
       const finishWrites: Array<() => void> = [];
       const holdWrite = function (_: string | Uint8Array, callback?: () => void) {
         if (callback) finishWrites.push(callback);
@@ -9395,8 +9343,7 @@ describe("TerminalView", () => {
         expect(mockOnTerminalOutput).toHaveBeenCalled();
       });
       const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
       const obs = observers[0];
       const target = obs.target as Element;
       mockFit.mockClear();
@@ -9524,8 +9471,7 @@ describe("TerminalView", () => {
       });
 
       const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
       mockBufferActive.baseY = 40;
       mockWrite.mockClear();
       mockResizeTerminal.mockClear();
@@ -9569,8 +9515,7 @@ describe("TerminalView", () => {
       });
 
       const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
       mockBufferActive.baseY = 40;
       mockWrite.mockClear();
       mockResizeTerminal.mockClear();
@@ -9634,8 +9579,7 @@ describe("TerminalView", () => {
         expect(mockOnTerminalOutput).toHaveBeenCalled();
       });
       const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
       const obs = observers[0];
       const target = obs.target as Element;
       mockBufferActive.baseY = 1;
@@ -9681,8 +9625,7 @@ describe("TerminalView", () => {
         expect(capturedResizeHandler).not.toBeNull();
       });
       const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
       mockBufferActive.baseY = 40;
       mockWrite.mockClear();
 
@@ -9715,8 +9658,7 @@ describe("TerminalView", () => {
         expect(capturedResizeHandler).not.toBeNull();
       });
       const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
       mockBufferActive.baseY = 40;
       mockWrite.mockClear();
 
@@ -9774,8 +9716,7 @@ describe("TerminalView", () => {
       render(<TerminalView instanceId="t-write-throw" profile="PowerShell" syncGroup="" />);
       await waitForTerminalInputReady();
       const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
       const countersBefore = terminalOutputPipelineCounters("t-write-throw");
       mockWrite.mockClear();
       mockWrite.mockImplementationOnce(() => {
@@ -10137,8 +10078,7 @@ describe("TerminalView", () => {
       });
       await waitForTerminalRendererOpen();
       const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
-        | ((data: Uint8Array) => void)
-        | undefined;
+        ((data: Uint8Array) => void) | undefined;
       const obs = observers[0];
       const target = obs.target as Element;
 
@@ -11736,8 +11676,7 @@ describe("TerminalView desktop input composer", () => {
   // Feed raw output so OSC 133 flips the prompt/program phase ↑/↓ routing depends on.
   const emitOutput = (terminalId: string, str: string) => {
     const onOutput = mockOnTerminalOutput.mock.calls.find((call) => call[0] === terminalId)?.[1] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+      ((data: Uint8Array) => void) | undefined;
     act(() => onOutput?.(new TextEncoder().encode(str)));
   };
 
@@ -11928,8 +11867,7 @@ describe("TerminalView desktop input composer", () => {
       ([registeredTerminalId]) => registeredTerminalId === terminalId,
     );
     const emitOutput = registeredOutput?.[1] as
-      | ((data: Uint8Array | Record<string, unknown>) => void)
-      | undefined;
+      ((data: Uint8Array | Record<string, unknown>) => void) | undefined;
     expect(emitOutput).toBeDefined();
 
     const attachCallsBeforeMalformedDelta = mockAttachTerminalOutput.mock.calls.length;
@@ -11968,8 +11906,7 @@ describe("TerminalView desktop input composer", () => {
       ([registeredTerminalId]) => registeredTerminalId === terminalId,
     );
     const emitOutput = registered?.[1] as
-      | ((data: Uint8Array | Record<string, unknown>) => void)
-      | undefined;
+      ((data: Uint8Array | Record<string, unknown>) => void) | undefined;
     expect(emitOutput).toBeDefined();
     return emitOutput as (data: Uint8Array | Record<string, unknown>) => void;
   }
@@ -13391,8 +13328,7 @@ describe("TerminalView desktop input composer", () => {
         expect(mockOnTerminalOutput).toHaveBeenCalledWith(terminalId, expect.any(Function)),
       );
       const emitOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
-        | ((data: Uint8Array | Record<string, unknown>) => void)
-        | undefined;
+        ((data: Uint8Array | Record<string, unknown>) => void) | undefined;
       expect(emitOutput).toBeDefined();
 
       for (let orphan = 0; orphan < 6; orphan += 1) {
@@ -14399,8 +14335,7 @@ describe("TerminalView desktop input composer", () => {
       expect(mockOnTerminalOutput).toHaveBeenCalledWith(terminalId, expect.any(Function));
     });
     const emitOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
-      | ((data: Uint8Array | Record<string, unknown>) => void)
-      | undefined;
+      ((data: Uint8Array | Record<string, unknown>) => void) | undefined;
     expect(emitOutput).toBeDefined();
 
     act(() => emitOutput?.(outputDelta(0, stale)));
@@ -14475,8 +14410,7 @@ describe("TerminalView desktop input composer", () => {
       expect(mockOnTerminalOutput).toHaveBeenCalledWith(terminalId, expect.any(Function));
     });
     const emitOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
-      | ((data: Uint8Array | Record<string, unknown>) => void)
-      | undefined;
+      ((data: Uint8Array | Record<string, unknown>) => void) | undefined;
     expect(emitOutput).toBeDefined();
     const resetsBeforeReattach = mockReset.mock.calls.length;
 
@@ -14515,8 +14449,7 @@ describe("TerminalView desktop input composer", () => {
     await waitForTerminalInputReady();
 
     const emitOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
-      | ((data: Uint8Array | Record<string, unknown>) => void)
-      | undefined;
+      ((data: Uint8Array | Record<string, unknown>) => void) | undefined;
     expect(emitOutput).toBeDefined();
 
     // xterm 6.0.0 drains one queued write at a time and schedules the next drain
@@ -14611,8 +14544,7 @@ describe("TerminalView desktop input composer", () => {
     await waitForTerminalInputReady();
     const registered = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId);
     const emitOutput = registered?.[1] as
-      | ((data: Uint8Array | Record<string, unknown>) => void)
-      | undefined;
+      ((data: Uint8Array | Record<string, unknown>) => void) | undefined;
     expect(emitOutput).toBeDefined();
 
     let finishFirstWrite: (() => void) | undefined;
@@ -14643,8 +14575,7 @@ describe("TerminalView desktop input composer", () => {
     await waitForTerminalInputReady();
     const registered = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId);
     const emitOutput = registered?.[1] as
-      | ((data: Uint8Array | Record<string, unknown>) => void)
-      | undefined;
+      ((data: Uint8Array | Record<string, unknown>) => void) | undefined;
     expect(emitOutput).toBeDefined();
     const order: string[] = [];
     let finishFirstWrite: (() => void) | undefined;
@@ -14695,8 +14626,7 @@ describe("TerminalView desktop input composer", () => {
     await waitForTerminalInputReady();
     const registered = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId);
     const emitOutput = registered?.[1] as
-      | ((data: Uint8Array | Record<string, unknown>) => void)
-      | undefined;
+      ((data: Uint8Array | Record<string, unknown>) => void) | undefined;
     expect(emitOutput).toBeDefined();
 
     let finishFirstWrite: (() => void) | undefined;

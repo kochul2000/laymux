@@ -3073,10 +3073,7 @@ function ClaudeSection() {
             onChange={(e) =>
               updateClaude({
                 statusMessageMode: e.target.value as
-                  | "bullet"
-                  | "title"
-                  | "bullet-title"
-                  | "title-bullet",
+                  "bullet" | "title" | "bullet-title" | "title-bullet",
               })
             }
           >
@@ -3292,10 +3289,7 @@ function CodexSection() {
             onChange={(e) =>
               updateCodex({
                 statusMessageMode: e.target.value as
-                  | "bullet"
-                  | "title"
-                  | "bullet-title"
-                  | "title-bullet",
+                  "bullet" | "title" | "bullet-title" | "title-bullet",
               })
             }
           >
@@ -3397,10 +3391,7 @@ function GrokSection() {
           onChange={(e) =>
             updateGrok({
               statusMessageMode: e.target.value as
-                | "bullet"
-                | "title"
-                | "bullet-title"
-                | "title-bullet",
+                "bullet" | "title" | "bullet-title" | "title-bullet",
             })
           }
         >
@@ -3529,10 +3520,7 @@ function FileExplorerSection() {
           <SettingsInlineFields>
             {(["Top", "Right", "Bottom", "Left"] as const).map((dir) => {
               const key = `padding${dir}` as
-                | "paddingTop"
-                | "paddingRight"
-                | "paddingBottom"
-                | "paddingLeft";
+                "paddingTop" | "paddingRight" | "paddingBottom" | "paddingLeft";
               return (
                 <SettingsMiniField key={dir} label={t(`appearance.${dir.toLowerCase()}`)}>
                   <input
@@ -3703,10 +3691,7 @@ function ViewerSection() {
           <SettingsInlineFields>
             {(["Top", "Right", "Bottom", "Left"] as const).map((dir) => {
               const key = `padding${dir}` as
-                | "paddingTop"
-                | "paddingRight"
-                | "paddingBottom"
-                | "paddingLeft";
+                "paddingTop" | "paddingRight" | "paddingBottom" | "paddingLeft";
               return (
                 <SettingsMiniField key={dir} label={t(`appearance.${dir.toLowerCase()}`)}>
                   <input
@@ -4526,10 +4511,7 @@ function MemoSection() {
           <SettingsInlineFields>
             {(["Top", "Right", "Bottom", "Left"] as const).map((dir) => {
               const key = `padding${dir}` as
-                | "paddingTop"
-                | "paddingRight"
-                | "paddingBottom"
-                | "paddingLeft";
+                "paddingTop" | "paddingRight" | "paddingBottom" | "paddingLeft";
               return (
                 <SettingsMiniField key={dir} label={t(`appearance.${dir.toLowerCase()}`)}>
                   <input

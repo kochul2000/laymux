@@ -8,13 +8,7 @@ import { UsagePresentation } from "./UsageView";
 
 const TICK_MS = 30_000;
 
-export function GrokUsageView({
-  paneId,
-  configDir = "",
-}: {
-  paneId?: string;
-  configDir?: string;
-}) {
+export function GrokUsageView({ paneId, configDir = "" }: { paneId?: string; configDir?: string }) {
   const now = useNowTick(TICK_MS);
   const usage = useSettingsStore((s) => s.usage.grok);
   const { snapshot, error, refresh } = useGrokUsageSnapshot(
