@@ -8,6 +8,18 @@ import org.junit.Test
 
 class CloudNavigationPolicyTest {
     @Test
+    fun reconnectCarriesOnlyTheSelectedIdInTheDashboardFragment() {
+        val policy = CloudNavigationPolicy("https://app.laymux.com")
+        val id = "00000000-0000-4000-8000-000000000001"
+        assertEquals(
+            "https://app.laymux.com/dashboard?client=android#reconnect=$id",
+            policy.reconnectDashboardUrl(id),
+        )
+        assertEquals(policy.dashboardUrl, policy.reconnectDashboardUrl("https://evil.test"))
+        assertEquals(policy.dashboardUrl, policy.reconnectDashboardUrl(null))
+    }
+
+    @Test
     fun allowsOnlyTheConfiguredHttpsOrigin() {
         val policy = CloudNavigationPolicy("https://app.laymux.com")
 

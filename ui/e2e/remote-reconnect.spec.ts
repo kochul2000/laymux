@@ -91,6 +91,7 @@ const navigation = {
 };
 
 type RemoteMockOptions = {
+  resumeToken?: string;
   claimDelayMs?: number;
   heartbeatTimeoutSeconds?: number;
   heartbeatFailures?: number;
@@ -159,6 +160,7 @@ async function installRemoteMocks(page: Page, options: RemoteMockOptions = {}) {
         json: {
           active: true,
           leaseId: "lease-1",
+          resumeToken: options.resumeToken,
           heartbeatTimeoutSeconds: options.heartbeatTimeoutSeconds ?? 45,
         },
       });
@@ -241,8 +243,10 @@ async function installRemoteMocks(page: Page, options: RemoteMockOptions = {}) {
   return state;
 }
 
-async function instrumentRemotePage(page: Page) {
-  await page.goto("http://remote.test/remote/#token=test-token");
+async function instrumentRemotePage(page: Page, cloud = false) {
+  await page.goto(
+    `http://remote.test/remote/#token=${cloud ? "laymux-cloud-placeholder" : "test-token"}`,
+  );
   await page.evaluate(() => {
     const target = window as InstrumentedRemoteWindow;
     target.__remoteResetCount = 0;
@@ -295,6 +299,42 @@ async function scrollRemoteViewportUp(page: Page, lines: number) {
 
 function spinnerAnimationName(spinner: Locator) {
   return spinner.locator(".remote-icon").evaluate((el) => getComputedStyle(el).animationName);
+}
+
+test("a connected Cloud page discards its capability and returns through the Cloud dashboard after a desktop gateway failure", async ({
+  page,
+}) => {
+  const state = await installRemoteMocks(page, {
+    navigationFailureStatus: 503,
+    resumeToken: "old-resume-capability",
+  });
+  await page.route("http://remote.test/remote/reconnect", (route) =>
+    route.fulfill({ contentType: "text/html", body: "Cloud dashboard return" }),
+  );
+  await instrumentRemotePage(page, true);
+  await page.locator("#connect").click();
+  await expect.poll(() => resetCount(page)).toBe(1);
+  state.navigationFailuresRemaining = 1;
+  await page.locator("#navToggle").click();
+  await expect(page).toHaveURL("http://remote.test/remote/reconnect", { timeout: 15000 });
+  expect(await page.evaluate(() => sessionStorage.getItem("laymux.remote.resumeToken"))).toBeNull();
+  expect(await page.evaluate(() => sessionStorage.getItem("laymux.remote.autoConnect"))).toBeNull();
+});
+
+for (const status of [401, 403, 409]) {
+  test(`Cloud permission refusal ${status} never returns through the dashboard`, async ({
+    page,
+  }) => {
+    const state = await installRemoteMocks(page, { navigationFailureStatus: status });
+    await instrumentRemotePage(page, true);
+    await page.locator("#connect").click();
+    await expect.poll(() => resetCount(page)).toBe(1);
+    state.navigationFailuresRemaining = 1;
+    await page.locator("#navToggle").click();
+    await expect.poll(() => state.navigationFailuresRemaining).toBe(0);
+    await expect(page).toHaveURL(/remote\/#token=laymux-cloud-placeholder/);
+    expect(state.claimRequests).toBe(1);
+  });
 }
 
 for (const status of [502, 503, 504]) {

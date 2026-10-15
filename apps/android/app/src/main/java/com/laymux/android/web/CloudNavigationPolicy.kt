@@ -11,6 +11,11 @@ class CloudNavigationPolicy(baseUrl: String) {
     val googleAuthUrl: String =
         "$originUrl/api/android/auth/google"
 
+    fun reconnectDashboardUrl(instanceId: String?): String =
+        if (instanceId != null && CloudBridgeInput.isValidInstanceId(instanceId)) {
+            "$dashboardUrl#reconnect=$instanceId"
+        } else dashboardUrl
+
     fun isAllowed(rawUrl: String): Boolean = try {
         val candidate = URI(rawUrl)
         candidate.scheme.equals(origin.scheme, ignoreCase = true) &&

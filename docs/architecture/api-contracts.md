@@ -1592,6 +1592,8 @@ PC WebView는 `remote-control-changed` Tauri event를 받아 local input overlay
 
 ### 13.3 Navigation Metadata
 
+업데이트·일시 단절 뒤 Cloud 복귀는 [ADR-0326](../adr/0326-remote-return-through-dashboard.md)의 기존 대시보드 연결 경로를 사용한다. 웹은 이전 resume capability와 연결 의도를 폐기하고 PC 소스가 필요 없는 Cloud `GET /remote/reconnect`로 이동한다. Cloud는 유효한 relay 쿠키와 현재 소유권으로 인스턴스 ID만 확인하여 public `/dashboard#reconnect=<id>`로 전달하며, 확인할 수 없으면 일반 대시보드로 돌아간다. 복귀 endpoint는 인증을 발급·갱신하지 않는다. Android는 기존 세션을 닫고 실패 후 대시보드 복귀에 선택 ID를 `#reconnect=<id>`로 전달한다. native의 Cloud 문서 READY 알림 후 기존 버튼이 실행된다. 대시보드의 기존 온라인 목록 갱신을 기다려 정확한 한 인스턴스의 연결 버튼만 한 번 누른다. 다른 연결·로그아웃은 대기 의도를 취소하고, 선택 전 의도를 소비한다. 키·lease·새 인증 우회·별도 복구 poll은 추가하지 않으며 설정된 지문과 소유권 검증은 기존 새 연결 절차를 다시 수행한다. 명시적 Exit·취소는 복귀 의도를 만들지 않는다. Cloud 서버를 클라이언트보다 먼저 배포한다.
+
 템플릿 저장 POST 성공 후 목록 GET만 실패하면 저장 완료로 처리해 입력창을 닫고 목록 조회 재시도를 안내한다. 저장 POST 자체가 실패한 경우에만 입력을 유지한다. 목록 갱신 오류를 저장 실패로 취급해 동일 템플릿을 다시 생성하지 않는다.
 
 Remote 관리 메뉴의 `Save as template`은 `POST /remote/v1/layouts`에 `{workspaceId,name,leaseId?}`를 보낸다. 이름·source id를 검증하고 기존 Remote 인증과 active lease를 요구한 뒤 `layouts.exportNew` bridge를 사용한다. 명시적 source가 없으면 실패하고 활성 workspace로 대체하지 않는다. store의 기존 복사·영속 경로가 새 템플릿 id를 만들고, Remote는 목록만 다시 읽어 현재 output·workspace를 유지한다. Android E2E exact allowlist에도 해당 POST를 허용한다([ADR-0311](../adr/0311-remote-save-workspace-template.md)).
