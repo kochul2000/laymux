@@ -50,6 +50,22 @@ describe("WorkspaceStore pane stacks", () => {
     expect(useWorkspaceStore.getState().stackPane(5)).toBeNull();
   });
 
+  it("can append a background layer without publishing a different active layer", () => {
+    const observed: string[] = [];
+    const unsubscribe = useWorkspaceStore.subscribe((state) => {
+      observed.push(state.getActiveWorkspace()!.panes[0].activeLayerId);
+    });
+    try {
+      const layerId = useWorkspaceStore.getState().stackPane(0, term, { activate: false })!;
+      const slot = active().panes[0];
+      expect(slot.layers.map((layer) => layer.id)).toEqual(["p0", layerId]);
+      expect(slot.activeLayerId).toBe("p0");
+      expect(observed).toEqual(["p0"]);
+    } finally {
+      unsubscribe();
+    }
+  });
+
   it("stackPane seeds the new layer with the active layer's live CWD", () => {
     useTerminalStore.getState().registerInstance({
       id: "terminal-p0",

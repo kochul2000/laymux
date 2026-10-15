@@ -37,6 +37,7 @@
 | 방법 | 동작 |
 | --- | --- |
 | 컨트롤 바 Stack 버튼(split 버튼 옆, Lucide `Layers`) · `pane.stack`(`Ctrl+Alt+S`) · 전환 줄 `+` | 슬롯 활성 레이어 바로 뒤에 `EmptyView` 레이어를 추가하고 표시·포커스 |
+| Automation `stack_pane` · REST `/api/v1/panes/stack` | 활성 레이어 뒤에 새 레이어(기본 `TerminalView`)를 추가하되 기존 표시·포커스를 유지. 생성 도중에도 새 레이어를 활성화하지 않음 ([ADR-0328](../adr/0328-automation-stack-keeps-visible-layer.md)) |
 | 전환 줄 탭 클릭 | 그 레이어 표시·포커스 |
 | 전환 줄 × · 탭 가운데 클릭 · 컨트롤 바 Delete · `pane.delete` | 그 레이어(컨트롤 바·단축키는 활성 레이어) 하나 닫기. 마지막 레이어면 슬롯이 사라지고 공간 재분배 |
 | `pane.layer`(`Alt+Shift+Arrow`) | 포커스 슬롯 레이어 순환. 오른쪽/아래 = 다음, 왼쪽/위 = 이전, 링 |
@@ -50,6 +51,7 @@
 - **재마운트 없음**: 박스 안의 열(column) 래퍼와 내용 칸은 단일 레이어일 때도 항상 렌더한다. 슬롯이 스택이 되는 순간에는 전환 줄만 끼어들고 컨트롤 바·view 는 같은 자리에 남아 터미널이 재마운트되지 않는다.
 - **소유권**: 쌓기·순환은 `lib/pane-stack-actions.ts`(`stackPaneAt`, `stackFocusedPane`, `cycleFocusedLayer`)가, 레이어 표시+포커스 commit 은 `workspace-transition.activatePaneLayer` 가 소유한다. 컴포넌트와 단축키는 이 둘만 부른다.
 - **CWD 시드**: 새 레이어의 첫 터미널 세션은 누른 슬롯 활성 레이어의 CWD 에서 시작한다(분할과 같은 재시작 요청 버스).
+- **Automation 비활성 생성**: `workspace-store.stackPane`의 내부 `activate: false` 옵션이 삽입과 기존 활성 레이어 보존을 한 번에 반영한다. 비활성 터미널도 기존 시작 큐에서 렌더러 없이 PTY를 준비하므로 생성·readiness 대기·입력에 화면 전환이 필요 없다. UI/Remote Stack 조작은 기본 활성 삽입을 사용한다.
 - **경계 병합**: 경계선 병합(드래그 끝·더블클릭)은 스택 슬롯을 지우지 않고 최소 크기로 남긴다. 단일 레이어 슬롯의 병합은 슬롯을 통째로 지운다(`removeSlot`).
 - **재배치**: 레이어 이동·꺼내기·합치기는 `workspace-store` 의 `moveLayer`·`extractLayer`·`mergeSlotIntoStack` 이 기하·레이어 불변식을 한 번에 갱신하고, `pane-stack-actions` 의 `moveLayerTo`·`extractLayerToSplit`·`mergeSlotIntoStack` 이 포커스를 commit 한다. 레이어 박스가 레이어 id 로 key 되므로 슬롯을 옮겨 다녀도 터미널은 재마운트되지 않는다. 사라진 슬롯은 pane 오버라이드(`controlBarMode`)만 지우고, 옮겨 간 레이어의 view 오버라이드·hidden flag 는 그대로 따라간다.
 

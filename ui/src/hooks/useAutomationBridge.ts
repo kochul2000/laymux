@@ -921,9 +921,9 @@ const handlers: HandlerMap = {
         if (p.profile) view.profile = p.profile as string;
         if (p.cwd) view.lastCwd = p.cwd as string;
       }
-      // Like split, Automation does not move keyboard focus: the new layer is
-      // shown in its slot but the user's focused pane keeps the keyboard.
-      const layerId = useWorkspaceStore.getState().stackPane(paneIndex, view);
+      // ADR-0328: preserve the displayed layer at insertion time. Activating and
+      // restoring it later would expose a navigation/focus change to the user.
+      const layerId = useWorkspaceStore.getState().stackPane(paneIndex, view, { activate: false });
       if (!layerId) return err(`Pane ${paneIndex} could not be stacked`);
       if (p.cwd && viewType === "TerminalView") {
         useTerminalRestartStore.getState().requestRestart(layerId, p.cwd as string);
@@ -947,7 +947,7 @@ const handlers: HandlerMap = {
           : null,
         _hint:
           terminalId && !terminalReady
-            ? "Terminal ID is allocated but its PTY is still starting. write_to_terminal and focus_terminal wait for readiness automatically."
+            ? "Terminal ID is allocated but its PTY is still starting. write_to_terminal waits for readiness without changing the displayed layer."
             : undefined,
       });
     },

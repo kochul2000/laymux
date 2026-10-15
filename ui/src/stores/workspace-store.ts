@@ -195,10 +195,15 @@ interface WorkspaceState {
    */
   removeSlot: (paneIndex: number) => void;
   /**
-   * Stack a new layer on the slot right after its active layer and activate it
-   * (ADR-0297). Returns the new layer id, or null for an invalid slot.
+   * Stack a new layer right after the active layer (ADR-0297). Automation uses
+   * activate: false to preserve the displayed layer atomically (ADR-0328).
+   * Returns the new layer id, or null for an invalid slot.
    */
-  stackPane: (paneIndex: number, view?: ViewInstanceConfig) => string | null;
+  stackPane: (
+    paneIndex: number,
+    view?: ViewInstanceConfig,
+    options?: { activate?: boolean },
+  ) => string | null;
   /**
    * Make `layerId` the active layer of its slot in `workspaceId`. A pure state
    * setter: focus commits go through `workspace-transition.activatePaneLayer`.
@@ -452,14 +457,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     }
   },
 
-  stackPane: (paneIndex, view = { type: "EmptyView" }) => {
+  stackPane: (paneIndex, view = { type: "EmptyView" }, options = {}) => {
     const ws = get().getActiveWorkspace();
     if (!ws) return null;
     const pane = ws.panes[paneIndex];
     if (!pane) return null;
 
     const layer: PaneLayer = { id: generateId("pane"), view };
-    const updated = insertLayer(pane, layer);
+    const updated = insertLayer(pane, layer, options);
     set((state) => ({ workspaces: replaceSlot(state.workspaces, ws.id, paneIndex, updated) }));
 
     // 새 레이어의 첫 터미널 세션은 누른 슬롯의 활성 레이어 CWD 에서 시작한다
