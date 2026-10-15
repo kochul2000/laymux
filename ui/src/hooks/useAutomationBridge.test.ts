@@ -4592,6 +4592,31 @@ describe("panes.stack / activateLayer / remove(layerId) bridge (ADR-0297)", () =
     expect(act("closeById", { paneId: layerId }).success).toBe(false);
   });
 
+  it("stackById stacks an EmptyView layer on the slot holding the pane and focuses it (ADR-0327)", () => {
+    const store = useWorkspaceStore.getState();
+    const selectedId = store.getActiveWorkspace()!.panes[0].layers[0].id;
+    store.swapPanes(0, 1);
+    const result = act("stackById", { paneId: selectedId });
+    expect(result.success).toBe(true);
+    const layerId = (result.data as { layerId: string }).layerId;
+    const panes = useWorkspaceStore.getState().getActiveWorkspace()!.panes;
+    const slotIndex = panes.findIndex((pane) => pane.layers.some((l) => l.id === selectedId));
+    const slot = panes[slotIndex];
+    expect(slot.layers.map((layer) => layer.id)).toEqual([selectedId, layerId]);
+    expect(slot.layers[1].view).toEqual({ type: "EmptyView" });
+    expect(slot.activeLayerId).toBe(layerId);
+    expect(useGridStore.getState().focusedPaneIndex).toBe(slotIndex);
+  });
+
+  it("stackById rejects a pane outside the active workspace", () => {
+    const store = useWorkspaceStore.getState();
+    const source = store.getActiveWorkspace()!;
+    const copied = store.duplicateWorkspace(source.id)!;
+    const paneId = copied.paneIdMap[source.panes[0].layers[0].id];
+    expect(act("stackById", { paneId }).success).toBe(false);
+    expect(act("stackById", {}).success).toBe(false);
+  });
+
   it("closeById resolves the current index after pane rearrangement", () => {
     const store = useWorkspaceStore.getState();
     const selectedId = store.getActiveWorkspace()!.panes[0].layers[0].id;

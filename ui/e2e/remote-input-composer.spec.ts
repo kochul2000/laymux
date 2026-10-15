@@ -820,7 +820,60 @@ test("custom Send Enter uses structured submit while raw keys retain their bytes
   expect(requests).toEqual(["write", "input", "write"]);
 });
 
-test("기본 Alt+L은 pane clear API를 호출하고 초안과 포커스를 보존한다", async ({ page }) => {
+test("Pane action 키는 아이콘으로 올라오고 PC의 Stack·Close pane 동작을 요청한다", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "laymux.remote.keybar",
+      JSON.stringify({
+        zones: {
+          main: {
+            left: ["soft:clearPane", "soft:stackPane", "soft:closePane"],
+            center: [],
+            right: [],
+          },
+          expanded: { left: [], center: [], right: [] },
+        },
+      }),
+    );
+  });
+  await installRemotePage(page, { coarse: true });
+  const actions: { path: string; body: unknown }[] = [];
+  await page.route(/\/remote\/v1\/panes\/[^/]+\/(stack|close)$/, async (route) => {
+    actions.push({
+      path: new URL(route.request().url()).pathname,
+      body: route.request().postDataJSON(),
+    });
+    await route.fulfill({ json: { ok: true } });
+  });
+  await connect(page);
+  for (const [key, name] of [
+    ["clearPane", "Clear pane"],
+    ["stackPane", "Stack"],
+    ["closePane", "Close pane"],
+  ]) {
+    const button = page.locator(`#mainActionRow [data-key="${key}"]`);
+    await expect(button).toHaveAttribute("aria-label", name);
+    await expect(button.locator("svg")).toHaveCount(1);
+    await expect(button).toHaveText("");
+    await expect(button).toBeEnabled();
+  }
+  await page.locator('#mainActionRow [data-key="stackPane"]').click();
+  await expect.poll(() => actions.length).toBe(1);
+  await expect(page.locator("#status")).toContainText("Stacked a new layer.");
+  await page.locator('#mainActionRow [data-key="closePane"]').click();
+  await expect.poll(() => actions.length).toBe(2);
+  expect(actions).toEqual([
+    { path: "/remote/v1/panes/pane-1/stack", body: { leaseId: "lease-1" } },
+    { path: "/remote/v1/panes/pane-1/close", body: { leaseId: "lease-1" } },
+  ]);
+  await page.screenshot({ path: "test-results/remote-pane-action-keys.png" });
+});
+
+test("기본 Clear pane 키는 pane clear API를 호출하고 초안과 포커스를 보존한다", async ({
+  page,
+}) => {
   const state = await installRemotePage(page, { coarse: true, holdInputs: true });
   const clears: { path: string; body: unknown }[] = [];
   await page.route("**/remote/v1/terminals/*/clear", async (route) => {

@@ -93,24 +93,58 @@ async function dragChipOnto(page: Page, sourceId: string, targetId: string, toRi
 }
 
 test.describe("Remote input action layout", () => {
-  test("Add keys에서 Alt+L을 다시 배치하고 저장한다", async ({ page }) => {
+  test("Add keys에서 Clear pane을 다시 배치하고 저장한다", async ({ page }) => {
     await openMarkup(page);
-    await expect(page.locator('#mainActionRow [data-key="clearPane"]')).toHaveText("Alt+L");
+    await expect(page.locator('#mainActionRow [data-key="clearPane"]')).toHaveAttribute(
+      "aria-label",
+      "Clear pane",
+    );
     await page.locator("#drawerSettingsButton").click();
-    await place(page, "soft:clearPane", "Alt+L (clear pane)", "hidden");
+    await place(page, "soft:clearPane", "Clear pane", "hidden");
     await openSetup(page, "inputAvailableKeys");
     await expect(
       page.locator('#inputAvailableKeys [data-layout-action="soft:clearPane"]'),
     ).toBeVisible();
-    await place(page, "soft:clearPane", "Alt+L (clear pane)", "expanded:center");
+    await place(page, "soft:clearPane", "Clear pane", "expanded:center");
     await page.reload();
     await page.setContent(remoteClientMarkupWithoutXterm());
     await page.locator("#keyBarToggle").click();
-    await expect(segment(page, "keyRow", "center").locator('[data-key="clearPane"]')).toHaveText(
-      "Alt+L",
-    );
+    await expect(
+      segment(page, "keyRow", "center").locator('[data-key="clearPane"]'),
+    ).toHaveAttribute("aria-label", "Clear pane");
     await page.locator("#drawerSettingsButton").click();
     await page.screenshot({ path: "test-results/remote-pane-clear-layout.png" });
+  });
+
+  test("Add keys는 아이콘 동작을 아이콘과 흐린 이름으로 보여 주고 PC mode는 없다", async ({
+    page,
+  }) => {
+    await openMarkup(page);
+    await page.locator("#drawerSettingsButton").click();
+    await openSetup(page, "inputAvailableKeys");
+    for (const [actionId, name] of [
+      ["menu", "Menu"],
+      ["copyPane", "Copy pane ID"],
+      ["viewer", "Viewer"],
+      ["skip", "Skip pane"],
+      ["soft:stackPane", "Stack"],
+      ["soft:closePane", "Close pane"],
+    ]) {
+      const target = page.locator(`#inputAvailableKeys [data-layout-action="${actionId}"]`);
+      await expect(target.locator(".layout-chip-icon svg")).toHaveCount(1);
+      await expect(target.locator(".layout-chip-name")).toHaveText(name);
+    }
+    const name = page.locator('#inputAvailableKeys [data-layout-action="menu"] .layout-chip-name');
+    const icon = page.locator('#inputAvailableKeys [data-layout-action="menu"] .layout-chip-icon');
+    const colors = await Promise.all(
+      [name, icon].map((item) => item.evaluate((el) => getComputedStyle(el).color)),
+    );
+    expect(colors[0]).not.toBe(colors[1]);
+    await expect(page.locator('[data-layout-action="desktop"]')).toHaveCount(0);
+    await expect(
+      page.locator('#inputAvailableKeys [data-layout-action="soft:tab"] .layout-chip-icon'),
+    ).toHaveCount(0);
+    await page.screenshot({ path: "test-results/remote-add-keys-icons.png" });
   });
 
   test("터치 화면에서 추가한 키의 조작부를 바로 보여 주고 접힘 상태를 유지한다", async ({

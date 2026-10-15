@@ -610,6 +610,7 @@ fn http_path_allowed(method: &Method, path: &str) -> bool {
                 || id_action_path(path, "/remote/v1/workspaces/", "clear")
                 || id_action_path(path, "/remote/v1/panes/", "visibility")
                 || id_action_path(path, "/remote/v1/panes/", "close")
+                || id_action_path(path, "/remote/v1/panes/", "stack")
                 || id_action_path(path, "/remote/v1/workspaces/", "close")
         }
         _ => false,
@@ -975,6 +976,15 @@ mod tests {
         assert!(!http_path_allowed(
             &Method::POST,
             "/remote/v1/panes/pane-1/close?extra=1"
+        ));
+        // ADR-0327 Stack key.
+        assert!(http_path_allowed(
+            &Method::POST,
+            "/remote/v1/panes/pane-1/stack"
+        ));
+        assert!(!http_path_allowed(
+            &Method::POST,
+            "/remote/v1/panes/pane-1/stack/extra"
         ));
         // ADR-0269 keyboard actions.
         assert!(http_path_allowed(

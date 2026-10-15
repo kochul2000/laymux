@@ -3088,6 +3088,24 @@
         touch-action: pan-y;
         cursor: grab;
       }
+      /* Icon actions: the bar's icon in full color, the name a step dimmer. */
+      .layout-chip.with-icon {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .layout-chip-icon {
+        display: inline-flex;
+        color: var(--text);
+      }
+      .layout-chip-name {
+        color: var(--muted);
+        font-weight: 500;
+      }
+      .layout-chip.selected .layout-chip-icon,
+      .layout-chip.selected .layout-chip-name {
+        color: inherit;
+      }
       .layout-chip.dragging {
         opacity: 0.45;
         cursor: grabbing;

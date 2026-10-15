@@ -64,6 +64,7 @@ import {
   handleRemoteFileViewerRequest,
 } from "@/lib/remote-file-viewer";
 import * as navigationActions from "@/lib/navigation-actions";
+import { stackPaneAt } from "@/lib/pane-stack-actions";
 import { allLiveTerminalOutputV3Diagnostics } from "@/lib/terminal-output-v3-diagnostics";
 import { clearWorkspace } from "@/lib/workspace-clear";
 import { clearPane, paneClearWaitBudgetMs, resolvePaneClear } from "@/lib/pane-clear";
@@ -892,6 +893,21 @@ const handlers: HandlerMap = {
         focusDockPane(dock.position);
       }
       return ok({ closed: paneId });
+    },
+    // ADR-0327: the Remote Stack key is the PC Stack button on the slot holding
+    // `paneId` — an EmptyView layer, shown and focused.
+    stackById: (p) => {
+      const paneId = p.paneId;
+      if (typeof paneId !== "string" || !paneId.trim()) return err("paneId required");
+      const workspace = useWorkspaceStore.getState().getActiveWorkspace();
+      const paneIndex =
+        workspace?.panes.findIndex((slot) => slot.layers.some((layer) => layer.id === paneId)) ??
+        -1;
+      if (paneIndex < 0) return err(`Pane '${paneId}' is not in the active workspace`);
+      const layerId = stackPaneAt(paneIndex);
+      return layerId
+        ? ok({ stacked: paneId, layerId })
+        : err(`Pane '${paneId}' could not be stacked`);
     },
     // ADR-0297: stack a new layer on a slot. Mirrors `split`: MCP callers get a
     // usable terminal by default, and an explicit cwd beats the inherited seed.
