@@ -1610,6 +1610,23 @@ describe("SettingsView", () => {
     });
   });
 
+  it("does not revert the notice's don't-show-again with an untouched Settings draft", async () => {
+    // Visiting the Codex page drafts `notifications`; the notice then writes the
+    // same field outside Settings (ADR-0330). Saving another page must keep it.
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-codex"));
+    expect(screen.getByTestId("agent-integration-missing-toggle")).toBeChecked();
+    await user.click(screen.getByTestId("nav-viewer"));
+    act(() => useSettingsStore.getState().setNotifications({ agentIntegrationMissing: false }));
+    fireEvent.change(screen.getByTestId("viewer-font-size"), { target: { value: "18" } });
+    await user.click(screen.getByTestId("save-settings-btn"));
+
+    expect(useSettingsStore.getState().viewer.fontSize).toBe(18);
+    expect(useSettingsStore.getState().notifications.agentIntegrationMissing).toBe(false);
+  });
+
   it("claude sync cwd defaults to skip", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);

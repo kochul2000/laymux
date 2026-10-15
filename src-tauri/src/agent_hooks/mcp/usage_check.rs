@@ -57,12 +57,15 @@ pub fn check_usage(state: &AppState, app: &tauri::AppHandle) -> Result<(), AppEr
         if cache.usage_running.swap(true, Ordering::SeqCst) {
             return Ok(());
         }
-        let mut checked: Result<bool, AppError> = Ok(false);
+        let mut checked = false;
         while cache.usage_rerun.swap(false, Ordering::SeqCst) {
-            checked = checked.and_then(|done| Ok(pass(state, app)? || done));
+            match pass(state, app) {
+                Ok(done) => checked |= done,
+                Err(error) => tracing::warn!(%error, "MCP usage pass failed"),
+            }
         }
         cache.usage_running.store(false, Ordering::SeqCst);
-        if checked? {
+        if checked {
             crate::agent_hooks::notify_inspection_needed(app);
         }
         // A request that saw the pass still running is served here.

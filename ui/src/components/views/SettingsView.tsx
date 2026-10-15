@@ -5133,8 +5133,12 @@ export function SettingsView() {
     const shouldReconcileRemote = dirtySetRef.current.has("remoteConnection");
     const previousRemoteEnabled = useSettingsStore.getState().remote.enabled;
     const previousUpdateChannel = useSettingsStore.getState().update.channel;
-    // Flush all draft states to store first
-    for (const fn of flushMapRef.current.values()) fn();
+    // Flush only edited drafts: an untouched draft can be older than a store
+    // value written outside Settings (e.g. the missing-integration notice's
+    // "don't show again", ADR-0330) and would silently revert it.
+    for (const [id, fn] of flushMapRef.current) {
+      if (dirtySetRef.current.has(id)) fn();
+    }
     const nextRemoteEnabled = useSettingsStore.getState().remote.enabled;
     const nextUpdateChannel = useSettingsStore.getState().update.channel;
     draftValuesRef.current.clear();

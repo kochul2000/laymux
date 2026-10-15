@@ -86,6 +86,10 @@ const NOTIFY_COALESCE: Duration = Duration::from_millis(100);
 impl AgentUsage {
     /// Start the hint thread once; later calls are ignored.
     pub fn start_notifier(&self, notify: impl Fn() + Send + 'static) {
+        self.start_notifier_with(NOTIFY_COALESCE, notify);
+    }
+
+    fn start_notifier_with(&self, coalesce: Duration, notify: impl Fn() + Send + 'static) {
         let (sender, receiver) = channel::<()>();
         if self.notifier.set(sender).is_err() {
             return;
@@ -94,7 +98,7 @@ impl AgentUsage {
             .name("agent-usage-notifier".into())
             .spawn(move || {
                 while receiver.recv().is_ok() {
-                    std::thread::sleep(NOTIFY_COALESCE);
+                    std::thread::sleep(coalesce);
                     while receiver.try_recv().is_ok() {}
                     notify();
                 }
@@ -146,9 +150,9 @@ impl AgentUsage {
         Ok(self.registry.lock_or_err()?.pending.clone())
     }
 
-    /// `environments[i]` belongs to `pending[i]`; `None` means the terminal
-    /// closed before its environment was known, so the observation is dropped.
-    /// Still-pending observations stay queued.
+    /// `environments[i]` belongs to `pending[i]`; `None` (session not
+    /// registered yet) and `Pending` stay queued, since a closed terminal is
+    /// already removed by `forget`.
     fn settle(
         &self,
         pending: Vec<(String, &'static str)>,
@@ -157,10 +161,10 @@ impl AgentUsage {
         let mut registry = self.registry.lock_or_err()?;
         for (key, environment) in pending.into_iter().zip(environments) {
             let distro = match environment {
-                Some(Environment::Pending) => continue,
+                Some(Environment::Pending) | None => continue,
                 Some(Environment::Native) => None,
                 Some(Environment::Wsl(distro)) => Some(distro),
-                Some(Environment::Excluded) | None => {
+                Some(Environment::Excluded) => {
                     registry.pending.retain(|queued| *queued != key);
                     continue;
                 }
@@ -309,9 +313,9 @@ mod tests {
     }
 
     #[test]
-    fn settle_keeps_pending_wsl_and_drops_closed_or_excluded_terminals() {
+    fn settle_keeps_unresolved_terminals_queued_and_drops_excluded_ones() {
         let usage = AgentUsage::default();
-        for id in ["native", "wsl", "pending", "ssh", "closed"] {
+        for id in ["native", "wsl", "pending", "ssh", "unregistered"] {
             usage.observe(id, "Claude");
         }
         let pending = usage.pending_snapshot().unwrap();
@@ -323,6 +327,7 @@ mod tests {
                     Some(Environment::Wsl("Ubuntu".into())),
                     Some(Environment::Pending),
                     Some(Environment::Excluded),
+                    // Spawned but not registered in `terminals` yet.
                     None,
                 ],
             )
@@ -332,9 +337,10 @@ mod tests {
             vec![target("claude", None), target("claude", Some("Ubuntu"))]
         );
         assert!(usage.has_pending("pending"));
+        assert!(usage.has_pending("unregistered"));
         assert!(!usage.has_pending("ssh"));
         assert!(!usage.has_pending("native"));
-        assert_eq!(usage.pending_snapshot().unwrap().len(), 1);
+        assert_eq!(usage.pending_snapshot().unwrap().len(), 2);
     }
 
     #[test]
@@ -370,16 +376,17 @@ mod tests {
     fn a_new_observation_wakes_the_notice_once_per_burst() {
         let usage = AgentUsage::default();
         let (sender, receiver) = std::sync::mpsc::channel();
-        usage.start_notifier(move || {
+        // A long window keeps the burst inside it even under test load.
+        usage.start_notifier_with(Duration::from_secs(1), move || {
             let _ = sender.send(());
         });
         usage.observe("a", "Claude");
         usage.observe("a", "Codex");
         usage.observe("a", "Claude");
-        assert!(receiver.recv_timeout(Duration::from_secs(5)).is_ok());
+        assert!(receiver.recv_timeout(Duration::from_secs(10)).is_ok());
         assert!(receiver.recv_timeout(Duration::from_millis(300)).is_err());
         usage.observe("b", "vim");
-        assert!(receiver.recv_timeout(Duration::from_millis(300)).is_err());
+        assert!(receiver.recv_timeout(Duration::from_millis(1500)).is_err());
     }
 
     #[test]

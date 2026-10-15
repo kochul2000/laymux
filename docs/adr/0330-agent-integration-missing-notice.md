@@ -1,6 +1,6 @@
 # 0330. 실제 사용한 에이전트 환경의 훅·MCP 미설치를 앱 알림으로 안내한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-15
 - Source: 사용자 요구(훅·MCP 미설치 때도 갱신 알림처럼 자동 안내, 다시 보지 않기 포함), [ADR-0282](0282-optional-agent-hook-installation.md), [ADR-0289](0289-agent-hook-update-notification.md), [ADR-0324](0324-agent-hook-inspection-on-discovery.md), [ADR-0325](0325-agent-mcp-registration.md), architecture/api-contracts.md 에이전트 훅 관리
 - 관계: ADR-0289의 앱 알림을 미설치 안내로 확장한다. ADR-0324의 자동 검사 발견 근거에 휴리스틱 사용 관찰을, ADR-0325의 MCP 자동 검사 시점에 새 사용 대상을 추가한다(확장). ADR-0282의 선택 설치(자동 설치 금지)와 두 ADR의 앱 수명 검사 캐시·정지 WSL 미기동은 그대로 따른다.

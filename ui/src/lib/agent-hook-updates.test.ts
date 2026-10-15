@@ -37,9 +37,9 @@ const target = {
 };
 const missing = { provider: "claude" as const, distro: null, hook: true, mcp: true };
 afterEach(() => {
-  useSettingsStore.setState((s) => ({
-    notifications: { ...s.notifications, agentIntegrationMissing: true },
-  }));
+  useSettingsStore.setState({
+    notifications: { dismiss: "workspace", agentIntegrationMissing: true },
+  });
   useAgentHookUpdateStore.setState({ targets: [], errors: [], missing: [], dismissed: [] });
   vi.useRealTimers();
   invoke.mockReset();
@@ -250,6 +250,34 @@ describe("agent hook update coordinator", () => {
         automatic: false,
         missingNotice: true,
       });
+    } finally {
+      stop();
+    }
+  });
+  it("checks again when the missing notice is turned back on", async () => {
+    vi.useFakeTimers();
+    invoke.mockResolvedValue({ targets: [], errors: [] });
+    useSettingsStore.setState((s) => ({
+      notifications: { ...s.notifications, agentIntegrationMissing: false },
+    }));
+    const stop = subscribeAgentHookUpdates();
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(invoke).toHaveBeenCalledTimes(1);
+      useSettingsStore.setState((s) => ({
+        notifications: { ...s.notifications, dismiss: "manual" },
+      }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(invoke).toHaveBeenCalledTimes(1);
+      useSettingsStore.setState((s) => ({
+        notifications: { ...s.notifications, agentIntegrationMissing: true },
+      }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(invoke).toHaveBeenLastCalledWith("get_agent_hook_updates", {
+        automatic: true,
+        missingNotice: true,
+      });
+      expect(invoke).toHaveBeenCalledTimes(2);
     } finally {
       stop();
     }

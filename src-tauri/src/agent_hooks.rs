@@ -87,10 +87,16 @@ pub fn manage(
     let result =
         helper_directory(app).and_then(|directory| manage_in_directory(request, &directory));
     state.agent_hook_inspections.record(request, &result)?;
-    if result.is_ok()
-        && request.operation != "status"
-        && state.agent_hook_inspections.is_default_folder(request)?
-    {
+    let default_folder = || {
+        state
+            .agent_hook_inspections
+            .is_default_folder(request)
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error, "Could not classify the hook folder");
+                false
+            })
+    };
+    if result.is_ok() && request.operation != "status" && default_folder() {
         let target = usage::UsageTarget {
             provider: request.provider.clone(),
             distro: request.distro.clone(),

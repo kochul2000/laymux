@@ -243,8 +243,17 @@ export function subscribeAgentHookUpdates() {
     void check();
   });
   void subscription.then(() => check()).catch(() => check());
+  // Re-enabling the notice starts the MCP checks it skipped while off.
+  const stopSettings = useSettingsStore.subscribe((state, previous) => {
+    if (
+      state.notifications.agentIntegrationMissing !== false &&
+      previous.notifications.agentIntegrationMissing === false
+    )
+      void check();
+  });
   return () => {
     disposed = true;
+    stopSettings();
     void subscription.then((stop) => stop()).catch(() => undefined);
   };
 }
