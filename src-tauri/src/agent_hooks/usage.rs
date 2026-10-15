@@ -2,17 +2,19 @@
 //! (ADR-0330). Missing-integration notices are limited to these targets so
 //! unused CLIs and idle WSL distributions never raise one.
 use std::collections::{BTreeSet, HashSet};
-use std::sync::Mutex;
+use std::sync::mpsc::{channel, Sender};
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 use serde_json::{json, Value};
 
+use crate::constants::{
+    AGENT_USAGE_MAX_OBSERVATIONS as MAX_OBSERVATIONS, AGENT_USAGE_MAX_TARGETS as MAX_TARGETS,
+};
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 use crate::terminal::{InitialExecutionHost, TerminalSession};
-
-const MAX_OBSERVATIONS: usize = 1024;
-const MAX_TARGETS: usize = 64;
 
 /// Provider and execution environment; the default configuration folder is
 /// implied because heuristic detection never knows a custom folder.
@@ -73,23 +75,63 @@ struct Registry {
 #[derive(Default)]
 pub struct AgentUsage {
     registry: Mutex<Registry>,
+    /// Wakes the notice when a new observation arrives. The detection path may
+    /// hold other locks, so the hint is emitted on a separate thread.
+    notifier: OnceLock<Sender<()>>,
 }
 
+/// Coalesces a burst of first sightings into one hint.
+const NOTIFY_COALESCE: Duration = Duration::from_millis(100);
+
 impl AgentUsage {
+    /// Start the hint thread once; later calls are ignored.
+    pub fn start_notifier(&self, notify: impl Fn() + Send + 'static) {
+        let (sender, receiver) = channel::<()>();
+        if self.notifier.set(sender).is_err() {
+            return;
+        }
+        let spawned = std::thread::Builder::new()
+            .name("agent-usage-notifier".into())
+            .spawn(move || {
+                while receiver.recv().is_ok() {
+                    std::thread::sleep(NOTIFY_COALESCE);
+                    while receiver.try_recv().is_ok() {}
+                    notify();
+                }
+            });
+        if let Err(error) = spawned {
+            tracing::warn!(%error, "Could not start the agent usage notifier");
+        }
+    }
+
     /// Record one (terminal, provider) observation from the detection path.
     pub fn observe(&self, terminal_id: &str, app_name: &str) {
         let Some(provider) = provider(app_name) else {
             return;
         };
-        let Ok(mut registry) = self.registry.lock_or_err() else {
-            return;
-        };
-        let key = (terminal_id.to_owned(), provider);
-        if registry.seen.contains(&key) || registry.seen.len() >= MAX_OBSERVATIONS {
-            return;
+        {
+            let Ok(mut registry) = self.registry.lock_or_err() else {
+                return;
+            };
+            let key = (terminal_id.to_owned(), provider);
+            if registry.seen.contains(&key) || registry.seen.len() >= MAX_OBSERVATIONS {
+                return;
+            }
+            registry.seen.insert(key.clone());
+            registry.pending.push(key);
         }
-        registry.seen.insert(key.clone());
-        registry.pending.push(key);
+        if let Some(notifier) = self.notifier.get() {
+            let _ = notifier.send(());
+        }
+    }
+
+    /// A closed terminal's observations stop counting toward the bound;
+    /// resolved targets stay for the app run.
+    pub fn forget(&self, terminal_id: &str) {
+        if let Ok(mut registry) = self.registry.lock_or_err() {
+            registry.seen.retain(|(id, _)| id != terminal_id);
+            registry.pending.retain(|(id, _)| id != terminal_id);
+        }
     }
 
     pub fn has_pending(&self, terminal_id: &str) -> bool {
@@ -98,31 +140,35 @@ impl AgentUsage {
             .is_ok_and(|registry| registry.pending.iter().any(|(id, _)| id == terminal_id))
     }
 
-    fn take_pending(&self) -> Result<Vec<(String, &'static str)>, AppError> {
-        Ok(std::mem::take(&mut self.registry.lock_or_err()?.pending))
+    /// Copy, not take: a distribution report racing with resolution must still
+    /// find the observation pending.
+    fn pending_snapshot(&self) -> Result<Vec<(String, &'static str)>, AppError> {
+        Ok(self.registry.lock_or_err()?.pending.clone())
     }
 
     /// `environments[i]` belongs to `pending[i]`; `None` means the terminal
     /// closed before its environment was known, so the observation is dropped.
+    /// Still-pending observations stay queued.
     fn settle(
         &self,
         pending: Vec<(String, &'static str)>,
         environments: Vec<Option<Environment>>,
     ) -> Result<Vec<UsageTarget>, AppError> {
         let mut registry = self.registry.lock_or_err()?;
-        for ((terminal_id, provider), environment) in pending.into_iter().zip(environments) {
+        for (key, environment) in pending.into_iter().zip(environments) {
             let distro = match environment {
+                Some(Environment::Pending) => continue,
                 Some(Environment::Native) => None,
                 Some(Environment::Wsl(distro)) => Some(distro),
-                Some(Environment::Pending) => {
-                    registry.pending.push((terminal_id, provider));
+                Some(Environment::Excluded) | None => {
+                    registry.pending.retain(|queued| *queued != key);
                     continue;
                 }
-                Some(Environment::Excluded) | None => continue,
             };
+            registry.pending.retain(|queued| *queued != key);
             if registry.targets.len() < MAX_TARGETS {
                 registry.targets.insert(UsageTarget {
-                    provider: provider.into(),
+                    provider: key.1.into(),
                     distro,
                 });
             }
@@ -163,7 +209,7 @@ impl AgentUsage {
 
 /// Resolve pending observations without nesting the registry and `terminals`.
 pub fn resolve(state: &AppState) -> Result<Vec<UsageTarget>, AppError> {
-    let pending = state.agent_usage.take_pending()?;
+    let pending = state.agent_usage.pending_snapshot()?;
     let environments = {
         let terminals = state.terminals.lock_or_err()?;
         pending
@@ -256,10 +302,10 @@ mod tests {
         usage.observe("a", "Codex");
         usage.observe("a", "Grok");
         usage.observe("a", "vim");
-        let pending = usage.take_pending().unwrap();
+        let pending = usage.pending_snapshot().unwrap();
         assert_eq!(pending, vec![("a".into(), "claude"), ("a".into(), "codex")]);
         usage.observe("a", "Claude");
-        assert!(usage.take_pending().unwrap().is_empty());
+        assert_eq!(usage.pending_snapshot().unwrap().len(), 2);
     }
 
     #[test]
@@ -268,7 +314,7 @@ mod tests {
         for id in ["native", "wsl", "pending", "ssh", "closed"] {
             usage.observe(id, "Claude");
         }
-        let pending = usage.take_pending().unwrap();
+        let pending = usage.pending_snapshot().unwrap();
         let targets = usage
             .settle(
                 pending,
@@ -287,6 +333,53 @@ mod tests {
         );
         assert!(usage.has_pending("pending"));
         assert!(!usage.has_pending("ssh"));
+        assert!(!usage.has_pending("native"));
+        assert_eq!(usage.pending_snapshot().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_distribution_report_during_resolution_still_finds_the_observation() {
+        let usage = AgentUsage::default();
+        usage.observe("wsl", "Codex");
+        let pending = usage.pending_snapshot().unwrap();
+        // The shell reports its distribution between snapshot and settle.
+        assert!(usage.has_pending("wsl"));
+        usage
+            .settle(pending, vec![Some(Environment::Pending)])
+            .unwrap();
+        assert!(usage.has_pending("wsl"));
+    }
+
+    #[test]
+    fn closing_a_terminal_frees_its_observations_but_keeps_resolved_targets() {
+        let usage = AgentUsage::default();
+        usage.observe("a", "Claude");
+        let pending = usage.pending_snapshot().unwrap();
+        usage
+            .settle(pending, vec![Some(Environment::Native)])
+            .unwrap();
+        usage.observe("b", "Codex");
+        usage.forget("a");
+        usage.forget("b");
+        assert!(usage.pending_snapshot().unwrap().is_empty());
+        assert!(usage.registry.lock().unwrap().seen.is_empty());
+        assert_eq!(usage.targets().unwrap(), vec![target("claude", None)]);
+    }
+
+    #[test]
+    fn a_new_observation_wakes_the_notice_once_per_burst() {
+        let usage = AgentUsage::default();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        usage.start_notifier(move || {
+            let _ = sender.send(());
+        });
+        usage.observe("a", "Claude");
+        usage.observe("a", "Codex");
+        usage.observe("a", "Claude");
+        assert!(receiver.recv_timeout(Duration::from_secs(5)).is_ok());
+        assert!(receiver.recv_timeout(Duration::from_millis(300)).is_err());
+        usage.observe("b", "vim");
+        assert!(receiver.recv_timeout(Duration::from_millis(300)).is_err());
     }
 
     #[test]

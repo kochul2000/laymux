@@ -270,6 +270,13 @@ pub fn run() {
             app_update::start_periodic_checks(app.handle().clone(), app_state.app_update.clone());
             session_checkpoint::start_watchdog(app.handle().clone(), app_state.clone());
 
+            {
+                // First Claude/Codex sightings hint the missing notice (ADR-0330).
+                let handle = app.handle().clone();
+                app_state
+                    .agent_usage
+                    .start_notifier(move || agent_hooks::notify_inspection_needed(&handle));
+            }
             app.manage(app_state);
             app.manage(commands::SpreadsheetStreams::default());
             Ok(())

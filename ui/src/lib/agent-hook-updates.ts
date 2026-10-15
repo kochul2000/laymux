@@ -13,7 +13,6 @@ import {
   type McpStatus,
 } from "./agent-hooks-api";
 import { useSettingsStore } from "@/stores/settings-store";
-import { useTerminalStore } from "@/stores/terminal-store";
 
 interface UpdateState {
   targets: HookUpdateTarget[];
@@ -34,8 +33,9 @@ export const hookUpdateKey = (target: HookUpdateTarget) =>
 // Errors identify the checked environment, not a timeout's changing wording.
 export const hookUpdateErrorKey = (error: HookUpdateError) =>
   JSON.stringify(["error", error.provider, error.distro, error.configDir]);
-export const hookMissingKey = (target: Pick<HookMissingTarget, "provider" | "distro">) =>
-  JSON.stringify(["missing", target.provider, target.distro]);
+// A later-arriving MCP result for the same environment is a new notice.
+export const hookMissingKey = (target: HookMissingTarget) =>
+  JSON.stringify(["missing", target.provider, target.distro, target.hook, target.mcp]);
 /** Display preference only; the backend reports the same judgment either way (ADR-0330). */
 export const missingNoticeEnabled = () =>
   useSettingsStore.getState().notifications.agentIntegrationMissing !== false;
@@ -219,10 +219,8 @@ export function dismissHookUpdateNotice() {
   }));
 }
 
-const AGENT_APPS = new Set(["Claude", "Codex"]);
-
-/** Startup, target discovery and the first sighting of Claude/Codex in a
- *  terminal own automatic checks; focus/time do not. */
+/** Startup and backend hints (target discovery, first Claude/Codex sighting,
+ *  management) own automatic checks; focus/time do not. */
 export function subscribeAgentHookUpdates() {
   let disposed = false;
   let checking = false;
@@ -245,24 +243,8 @@ export function subscribeAgentHookUpdates() {
     void check();
   });
   void subscription.then(() => check()).catch(() => check());
-  // The backend records the sighting; this only asks it to resolve and judge.
-  const sighted = new Set<string>();
-  const stopTerminals = useTerminalStore.subscribe((state) => {
-    let fresh = false;
-    for (const instance of state.instances) {
-      const name = instance.activity?.type === "interactiveApp" ? instance.activity.name : "";
-      if (!name || !AGENT_APPS.has(name)) continue;
-      const key = `${instance.id}\u0000${name}`;
-      if (!sighted.has(key)) {
-        sighted.add(key);
-        fresh = true;
-      }
-    }
-    if (fresh) void check();
-  });
   return () => {
     disposed = true;
-    stopTerminals();
     void subscription.then((stop) => stop()).catch(() => undefined);
   };
 }

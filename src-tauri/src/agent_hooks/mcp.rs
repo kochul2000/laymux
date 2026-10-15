@@ -3,7 +3,7 @@
 //! first view of a new target, and on explicit refresh or management. Opening
 //! Settings reads the app-lifetime cache instead of touching files or WSL.
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Mutex, MutexGuard};
 
 use serde::Deserialize;
@@ -14,6 +14,9 @@ use super::{helper_directory, run_wsl_helper, MCP_WSL_TIMEOUT};
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
+
+mod usage_check;
+pub use usage_check::check_usage;
 
 const MAX_TARGETS: usize = 256;
 
@@ -72,8 +75,10 @@ pub struct McpInspections {
     gate: Mutex<()>,
     /// Leaf lock; never held during filesystem/process I/O.
     cache: Mutex<Cache>,
-    /// One background usage pass at a time.
+    /// One background usage pass at a time (ADR-0330).
     usage_running: AtomicBool,
+    /// Set by each request; the running pass repeats while it is set.
+    usage_rerun: AtomicBool,
 }
 
 impl McpInspections {
@@ -115,28 +120,6 @@ impl McpInspections {
             self.get(&Key::new(provider, distro, None))?,
             Some(Ok(status)) if status["state"] == "missing"
         ))
-    }
-    /// Usage targets still unchecked, claimed once each. WSL targets wait
-    /// until their distribution is running so it is never started.
-    fn claim_usage_checks(
-        &self,
-        targets: &[UsageTarget],
-        running: &[String],
-    ) -> Result<Vec<UsageTarget>, AppError> {
-        let mut cache = self.cache.lock_or_err()?;
-        let mut claimed = Vec::new();
-        for target in targets {
-            let key = Key::new(&target.provider, target.distro.as_deref(), None);
-            if cache.entries.contains_key(&key)
-                || cache.usage_checked.contains(&key)
-                || target.distro.as_ref().is_some_and(|d| !running.contains(d))
-            {
-                continue;
-            }
-            cache.usage_checked.insert(key);
-            claimed.push(target.clone());
-        }
-        Ok(claimed)
     }
     fn claim_warm_up(&self) -> Result<bool, AppError> {
         let mut cache = self.cache.lock_or_err()?;
@@ -268,48 +251,6 @@ fn run(request: &McpRequest, dir: Option<&str>, app: &tauri::AppHandle) -> Resul
     }
 }
 
-/// Background pass for the default location of each usage target (ADR-0330),
-/// once per target and app run. It never delays the hook notice and hints the
-/// notice to refresh only when it actually checked something.
-pub fn check_usage(state: &AppState, app: &tauri::AppHandle) -> Result<(), AppError> {
-    let cache = &state.agent_mcp_inspections;
-    if cache.usage_running.swap(true, Ordering::AcqRel) {
-        return Ok(());
-    }
-    struct Release<'a>(&'a AtomicBool);
-    impl Drop for Release<'_> {
-        fn drop(&mut self) {
-            self.0.store(false, Ordering::Release);
-        }
-    }
-    let _release = Release(&cache.usage_running);
-    let targets = state.agent_usage.targets()?;
-    #[allow(unused_mut)] // WSL enumeration fills the list only on Windows.
-    let mut running = Vec::new();
-    #[cfg(windows)]
-    if targets.iter().any(|target| target.distro.is_some()) {
-        running = super::updates::running_distros().unwrap_or_default();
-    }
-    let claimed = cache.claim_usage_checks(&targets, &running)?;
-    for target in &claimed {
-        let request = McpRequest {
-            provider: target.provider.clone(),
-            operation: "status".into(),
-            distro: target.distro.clone(),
-            config_dir: None,
-            cached: true,
-        };
-        let key = Key::new(&target.provider, target.distro.as_deref(), None);
-        if let Err(error) = manage_with(cache, key, true, false, || run(&request, None, app)) {
-            tracing::warn!(%error, provider = %target.provider, "MCP usage check failed");
-        }
-    }
-    if !claimed.is_empty() {
-        super::notify_inspection_needed(app);
-    }
-    Ok(())
-}
-
 /// Startup check, once per app run (ADR-0324 lifecycle): default locations in
 /// native and in WSL distributions already running. Stopped WSL is not started.
 pub fn warm_up(state: &AppState, app: &tauri::AppHandle) -> Result<(), AppError> {
@@ -328,6 +269,7 @@ pub fn warm_up(state: &AppState, app: &tauri::AppHandle) -> Result<(), AppError>
             .into_iter()
             .map(Some),
     );
+    let mut recorded = false;
     for distro in distros {
         let _gate = cache.gate()?;
         let keys: Vec<_> = laymux_agent_hook::mcp::PROVIDERS
@@ -357,6 +299,11 @@ pub fn warm_up(state: &AppState, app: &tauri::AppHandle) -> Result<(), AppError>
         for key in unchecked {
             cache.record(key.clone(), &split(&statuses, &key.provider))?;
         }
+        recorded = true;
+    }
+    // Usage targets judged before this finished need a refreshed notice (ADR-0330).
+    if recorded {
+        super::notify_inspection_needed(app);
     }
     Ok(())
 }
@@ -460,13 +407,6 @@ mod tests {
         );
     }
 
-    fn target(distro: Option<&str>) -> UsageTarget {
-        UsageTarget {
-            provider: "codex".into(),
-            distro: distro.map(Into::into),
-        }
-    }
-
     #[test]
     fn registration_missing_needs_a_successful_missing_state() {
         let cache = McpInspections::default();
@@ -483,36 +423,6 @@ mod tests {
             .record(key(None), &Err(AppError::Other("x".into())))
             .unwrap();
         assert!(!cache.registration_missing("codex", None).unwrap());
-    }
-
-    #[test]
-    fn usage_checks_are_claimed_once_and_skip_cached_or_stopped_targets() {
-        let cache = McpInspections::default();
-        cache
-            .record(Key::new("codex", Some("Cached"), None), &Ok(json!({})))
-            .unwrap();
-        let targets = [
-            target(None),
-            target(Some("Cached")),
-            target(Some("Stopped")),
-            target(Some("Ubuntu")),
-        ];
-        let running = ["Cached".to_string(), "Ubuntu".to_string()];
-        assert_eq!(
-            cache.claim_usage_checks(&targets, &running).unwrap(),
-            vec![target(None), target(Some("Ubuntu"))]
-        );
-        assert!(cache
-            .claim_usage_checks(&targets, &running)
-            .unwrap()
-            .is_empty());
-        // A stopped distribution is checked once it is running.
-        assert_eq!(
-            cache
-                .claim_usage_checks(&targets, &["Stopped".to_string()])
-                .unwrap(),
-            vec![target(Some("Stopped"))]
-        );
     }
 
     #[test]

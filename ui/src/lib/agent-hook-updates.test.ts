@@ -9,7 +9,6 @@ import {
   useAgentHookUpdateStore,
 } from "./agent-hook-updates";
 import { useSettingsStore } from "@/stores/settings-store";
-import { useTerminalStore, type TerminalInstance } from "@/stores/terminal-store";
 const invoke = vi.hoisted(() => vi.fn());
 const events = vi.hoisted(() => ({
   handler: undefined as (() => void) | undefined,
@@ -37,13 +36,7 @@ const target = {
   },
 };
 const missing = { provider: "claude" as const, distro: null, hook: true, mcp: true };
-const terminal = (id: string, name?: string) =>
-  ({
-    id,
-    activity: name ? { type: "interactiveApp", name } : { type: "shell" },
-  }) as TerminalInstance;
 afterEach(() => {
-  useTerminalStore.setState({ instances: [] });
   useSettingsStore.setState((s) => ({
     notifications: { ...s.notifications, agentIntegrationMissing: true },
   }));
@@ -261,32 +254,6 @@ describe("agent hook update coordinator", () => {
       stop();
     }
   });
-  it("asks for a cached check once per terminal and agent the first time Claude or Codex appears", async () => {
-    vi.useFakeTimers();
-    invoke.mockResolvedValue({ targets: [], errors: [] });
-    const stop = subscribeAgentHookUpdates();
-    try {
-      await vi.advanceTimersByTimeAsync(0);
-      expect(invoke).toHaveBeenCalledTimes(1);
-      useTerminalStore.setState({ instances: [terminal("a", "vim"), terminal("b")] });
-      await vi.advanceTimersByTimeAsync(0);
-      expect(invoke).toHaveBeenCalledTimes(1);
-      useTerminalStore.setState({ instances: [terminal("a", "Claude")] });
-      await vi.advanceTimersByTimeAsync(0);
-      useTerminalStore.setState({ instances: [terminal("a", "Claude"), terminal("b")] });
-      await vi.advanceTimersByTimeAsync(0);
-      expect(invoke).toHaveBeenCalledTimes(2);
-      expect(invoke).toHaveBeenLastCalledWith("get_agent_hook_updates", {
-        automatic: true,
-        missingNotice: true,
-      });
-      useTerminalStore.setState({ instances: [terminal("a", "Codex")] });
-      await vi.advanceTimersByTimeAsync(0);
-      expect(invoke).toHaveBeenCalledTimes(3);
-    } finally {
-      stop();
-    }
-  });
   it("stores missing targets and tells the backend when the notice is turned off", async () => {
     invoke.mockResolvedValue({ targets: [], errors: [], missing: [missing] });
     await refreshAgentHookUpdates(true);
@@ -339,9 +306,12 @@ describe("agent hook update coordinator", () => {
     ]);
     expect(useAgentHookUpdateStore.getState().errors[0].message).toContain("folder is locked");
   });
-  it("dismisses missing rows for this run only", () => {
-    useAgentHookUpdateStore.setState({ missing: [missing] });
+  it("dismisses missing rows for this run but shows a later MCP result again", () => {
+    const hookOnly = { ...missing, mcp: false };
+    useAgentHookUpdateStore.setState({ missing: [hookOnly] });
     dismissHookUpdateNotice();
-    expect(useAgentHookUpdateStore.getState().dismissed).toContain(hookMissingKey(missing));
+    const { dismissed } = useAgentHookUpdateStore.getState();
+    expect(dismissed).toContain(hookMissingKey(hookOnly));
+    expect(dismissed).not.toContain(hookMissingKey(missing));
   });
 });

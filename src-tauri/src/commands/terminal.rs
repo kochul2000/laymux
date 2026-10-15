@@ -1440,6 +1440,7 @@ pub(crate) fn close_terminal_session_inner(
     // Clean up interactive-app grace window (#237) so a new terminal that
     // happens to reuse this ID does not inherit stale detection.
     activity::clear_interactive_app_grace_window(state, id);
+    state.agent_usage.forget(id);
     // Mirror cleanup for the recently-exited marker so a fresh terminal
     // reusing this ID does not start under a stale Claude/Codex exit
     // suppression.

@@ -87,7 +87,10 @@ pub fn manage(
     let result =
         helper_directory(app).and_then(|directory| manage_in_directory(request, &directory));
     state.agent_hook_inspections.record(request, &result)?;
-    if result.is_ok() && request.operation != "status" && request.config_dir.is_none() {
+    if result.is_ok()
+        && request.operation != "status"
+        && state.agent_hook_inspections.is_default_folder(request)?
+    {
         let target = usage::UsageTarget {
             provider: request.provider.clone(),
             distro: request.distro.clone(),
