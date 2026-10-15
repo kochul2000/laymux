@@ -653,8 +653,7 @@ describe("tauri-api", () => {
 
       expect(mockListen).toHaveBeenCalledWith("terminal-output-v2-t1", expect.any(Function));
       const handler = mockListen.mock.calls.at(-1)?.[1] as
-        | ((event: { payload: unknown }) => void)
-        | undefined;
+        ((event: { payload: unknown }) => void) | undefined;
       const payload = { seqStart: 4, seqEnd: 6, data: [65, 66] };
       handler?.({ payload });
       expect(callback).toHaveBeenCalledWith(payload);

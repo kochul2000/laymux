@@ -20,8 +20,7 @@ export interface TerminalOutputSurfaceLifecycle {
 }
 
 export type TerminalOutputSurfaceAvailability =
-  | { kind: "healthy"; backpressured: boolean }
-  | { kind: "unavailable"; reason: string };
+  { kind: "healthy"; backpressured: boolean } | { kind: "unavailable"; reason: string };
 
 export type TerminalOutputReplacementDecision = "allow" | "wait-for-grant-close" | "fail-stop";
 

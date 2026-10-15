@@ -90,9 +90,12 @@ try {
     await page.waitForFunction(async () => {
       const { useTerminalStore } = await import("/src/stores/terminal-store.ts");
       return ["claude", "codex", "grok"].every((provider) =>
-        useTerminalStore.getState().instances.some(
-          (instance) => instance.id === `terminal-pane-empty-repro-${provider}` && instance.sessionReady,
-        ),
+        useTerminalStore
+          .getState()
+          .instances.some(
+            (instance) =>
+              instance.id === `terminal-pane-empty-repro-${provider}` && instance.sessionReady,
+          ),
       );
     });
   }

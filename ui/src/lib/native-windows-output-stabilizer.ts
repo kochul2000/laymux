@@ -17,11 +17,7 @@ type LexicalState =
 type TransactionPhase = "holdingFrame" | "awaitingRestore";
 type RestoreStage = "hide" | "position" | "show";
 type InFrameParkStage =
-  | "none"
-  | "positionsBeforeShow"
-  | "shown"
-  | "showThenPositioned"
-  | "positionThenShown";
+  "none" | "positionsBeforeShow" | "shown" | "showThenPositioned" | "positionThenShown";
 
 interface Transaction {
   phase: TransactionPhase;

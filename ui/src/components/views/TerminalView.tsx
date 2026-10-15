@@ -315,12 +315,7 @@ import {
 import { TerminalParserAdmission, terminalParserPriority } from "@/lib/terminal-parser-admission";
 
 type TerminalWriteCallbackFailureStage =
-  | "metrics"
-  | "monitor"
-  | "consumer"
-  | "refresh"
-  | "drain"
-  | "unknown";
+  "metrics" | "monitor" | "consumer" | "refresh" | "drain" | "unknown";
 
 const TERMINAL_WRITE_CALLBACK_STAGE_COUNTER: Record<
   TerminalWriteCallbackFailureStage,

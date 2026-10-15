@@ -1133,8 +1133,7 @@ const handlers: HandlerMap = {
     splitPane: (p) => {
       const paneId = typeof p.paneId === "string" ? p.paneId : undefined;
       const direction = (p.direction === "vertical" ? "vertical" : "horizontal") as
-        | "horizontal"
-        | "vertical";
+        "horizontal" | "vertical";
       useDockStore.getState().splitDockPane(p.position as DockPosition, direction, paneId);
       return ok({ split: true });
     },

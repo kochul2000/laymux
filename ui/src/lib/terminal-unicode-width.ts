@@ -517,7 +517,7 @@ type CodePointStep = {
 
 function forEachCodePoint(text: string, visit: (step: CodePointStep) => void): void {
   let precedingProperties = 0;
-  for (let index = 0; index < text.length; ) {
+  for (let index = 0; index < text.length;) {
     const codePoint = text.codePointAt(index);
     if (codePoint === undefined) break;
     const length = codePoint > 0xffff ? 2 : 1;

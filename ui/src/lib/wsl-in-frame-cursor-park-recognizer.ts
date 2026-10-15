@@ -9,11 +9,7 @@ type LexicalState =
   | { kind: "csi"; bytes: number[]; startOffset: number }
   | { kind: "control"; control: ControlStringKind; previousEsc: boolean };
 type InFrameParkStage =
-  | "none"
-  | "positionsBeforeShow"
-  | "shown"
-  | "showThenPositioned"
-  | "positionThenShown";
+  "none" | "positionsBeforeShow" | "shown" | "showThenPositioned" | "positionThenShown";
 type CsiKind = "frameStart" | "frameEnd" | "frameEndCombined" | "cursorShow" | "position" | "other";
 
 export interface WslCursorMetadataEmission {

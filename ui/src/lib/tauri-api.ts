@@ -196,8 +196,7 @@ export interface TerminalOutputAttachFailStoppedPayload {
 }
 
 export type TerminalOutputAttachResult =
-  | TerminalOutputAttachmentPayload
-  | TerminalOutputAttachFailStoppedPayload;
+  TerminalOutputAttachmentPayload | TerminalOutputAttachFailStoppedPayload;
 
 export interface TerminalOutputDeltaPayload {
   generation: number;
@@ -239,13 +238,7 @@ export async function acknowledgeTerminalOutputEnvelope(
 }
 
 export type TerminalOutputEnvelopeRepairStatus =
-  | "idle"
-  | "eventPending"
-  | "exact"
-  | "stale"
-  | "alreadyReceipted"
-  | "mismatch"
-  | "exhausted";
+  "idle" | "eventPending" | "exact" | "stale" | "alreadyReceipted" | "mismatch" | "exhausted";
 
 export interface TerminalOutputEnvelopeRepairResponse {
   status: TerminalOutputEnvelopeRepairStatus;
@@ -638,12 +631,7 @@ export function onComposerStarredEntriesChanged(
 export interface TerminalSessionAttribution {
   generation: number;
   state:
-    | "identified"
-    | "restorePending"
-    | "fresh"
-    | "noAgent"
-    | "activeButUnidentified"
-    | "unknown";
+    "identified" | "restorePending" | "fresh" | "noAgent" | "activeButUnidentified" | "unknown";
   provider?: "claude" | "codex" | "grok";
   sessionId?: string;
 }
@@ -883,12 +871,7 @@ export interface GithubRepoSnapshot {
 
 /** Every mutating action the GitHub view may ask the backend to run. */
 export type GithubItemAction =
-  | "issue.close"
-  | "issue.closeNotPlanned"
-  | "pr.merge"
-  | "pr.squash"
-  | "pr.rebase"
-  | "pr.close";
+  "issue.close" | "issue.closeNotPlanned" | "pr.merge" | "pr.squash" | "pr.rebase" | "pr.close";
 
 /**
  * Read the shared open issue/PR snapshot for the repository containing
@@ -1120,13 +1103,7 @@ export interface ViewerSettings {
 
 /** Palette tokens offered for the `#123` emphasis. Names, so themes still own the hue. */
 export type GithubNumberColor =
-  | "yellow"
-  | "accent"
-  | "green"
-  | "red"
-  | "primary"
-  | "secondary"
-  | "muted";
+  "yellow" | "accent" | "green" | "red" | "primary" | "secondary" | "muted";
 
 export interface GithubSettings {
   /** Tab shown when the view first mounts. */

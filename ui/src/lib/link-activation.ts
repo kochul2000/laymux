@@ -47,13 +47,7 @@ export type LinkSurface = "desktop" | "remote";
  * - `copy` — 대상 문자열(경로 또는 URL) 클립보드 복사
  */
 export type LinkAction =
-  | "viewer"
-  | "changeDir"
-  | "explorer"
-  | "osOpen"
-  | "osReveal"
-  | "browser"
-  | "copy";
+  "viewer" | "changeDir" | "explorer" | "osOpen" | "osReveal" | "browser" | "copy";
 
 /**
  * 칩 버튼이 될 수 있는 액션. `osReveal`(Ctrl+Shift 의 "파일 관리자에서 선택

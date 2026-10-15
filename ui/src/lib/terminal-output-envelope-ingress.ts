@@ -44,11 +44,7 @@ export type TerminalOutputReceiptCompletion = "accepted" | "duplicate" | "stale"
 export type TerminalOutputParsedCompletion = "accepted" | "duplicate" | "stale";
 
 export type TerminalOutputEnvelopeIngressErrorCode =
-  | "receipt-pending"
-  | "session-mismatch"
-  | "envelope-order"
-  | "sequence"
-  | "parsed-range";
+  "receipt-pending" | "session-mismatch" | "envelope-order" | "sequence" | "parsed-range";
 
 export class TerminalOutputEnvelopeIngressError extends Error {
   constructor(

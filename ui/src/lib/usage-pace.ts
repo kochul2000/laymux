@@ -73,7 +73,15 @@ export function resolveResetInstant(
     if (targetDow < 0) return null;
     const hour = to24Hour(Number(weekday[2]), weekday[4]);
     const minute = weekday[3] ? Number(weekday[3]) : 0;
-    const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, minute, 0, 0);
+    const candidate = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      hour,
+      minute,
+      0,
+      0,
+    );
     const deltaDays = (targetDow - candidate.getDay() + 7) % 7;
     candidate.setDate(candidate.getDate() + deltaDays);
     if (candidate.getTime() <= now.getTime()) {

@@ -258,8 +258,7 @@ export type PaneResizeUpdate = { index: number; rect: Partial<GridRect> };
 export type PaneResizeAxis = "w" | "h";
 
 export type PaneResizePlan =
-  | { ok: true; updates: PaneResizeUpdate[] }
-  | { ok: false; error: string };
+  { ok: true; updates: PaneResizeUpdate[] } | { ok: false; error: string };
 
 /**
  * Translate a boundary move into per-pane absolute rects: the left/top group
