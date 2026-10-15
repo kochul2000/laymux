@@ -1,6 +1,6 @@
 # 0328. Automation 스택 생성은 기존 표시 레이어를 유지한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-15
 - Source: 사용자 요구(MCP로 stack pane을 만들 때 새 레이어로 잠시라도 이동하지 않는다), [ADR-0324](0324-automation-never-navigates-user.md), [ADR-0297](0297-pane-stack-slot-layer-model.md), [data-flow.md 스택](../architecture/data-flow.md#스택)
 - 관계: ADR-0297의 Automation 스택 생성 시 새 레이어를 표시하는 계약만 대체한다. ADR-0324의 탐색 상태 보존을 슬롯의 활성 레이어까지 구체화한다. UI 스택 생성과 명시적 레이어 활성화는 유지한다.
