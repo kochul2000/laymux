@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { act, renderHook, waitFor } from "@testing-library/react";
 
 const mockLoadWindowGeometry = vi.fn();
 const mockSaveWindowGeometry = vi.fn();
@@ -36,12 +37,41 @@ import {
   captureWindowGeometry,
   _resetCachedGeometry,
   _getCachedGeometry,
+  useWindowGeometry,
 } from "./useWindowGeometry";
 
 describe("useWindowGeometry", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     _resetCachedGeometry();
+  });
+
+  it("persists a maximize resize without requiring the normal close handler", async () => {
+    let resized: (() => void) | undefined;
+    mockLoadWindowGeometry.mockResolvedValue(null);
+    mockGetCurrentWindow.mockReturnValue({
+      onMoved: vi.fn().mockResolvedValue(() => {}),
+      onResized: vi.fn().mockImplementation((listener) => {
+        resized = listener;
+        return Promise.resolve(() => {});
+      }),
+      isMinimized: vi.fn().mockResolvedValue(false),
+      outerPosition: vi.fn().mockResolvedValue({ x: 0, y: 0 }),
+      innerSize: vi.fn().mockResolvedValue({ width: 1920, height: 1080 }),
+      isMaximized: vi.fn().mockResolvedValue(true),
+    });
+    renderHook(() => useWindowGeometry());
+    await waitFor(() => expect(resized).toBeDefined());
+    act(() => resized!());
+    await waitFor(() =>
+      expect(mockSaveWindowGeometry).toHaveBeenCalledWith({
+        x: 0,
+        y: 0,
+        width: 1920,
+        height: 1080,
+        maximized: true,
+      }),
+    );
   });
 
   describe("restoreWindowGeometry", () => {

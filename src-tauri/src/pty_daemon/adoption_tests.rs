@@ -42,6 +42,114 @@ fn wait_detached(endpoint: &DaemonEndpoint, session_id: &str) {
 }
 
 #[test]
+fn display_context_follows_the_same_child_and_rejects_the_previous_owner() {
+    use super::display_context::{update_context, DisplayContext, MAX_CONTEXT_BYTES, METADATA_KEY};
+    let daemon = TestDaemon::start();
+    let (writer, reader) = raw_spawn(&daemon.endpoint, "context#1", sleeper());
+    let context =
+        DisplayContext(r#"{"lastUserInput":"private question","activityMessage":"done"}"#.into());
+    assert!(update_context(&daemon.endpoint, "context#1", 1, context.clone()).unwrap());
+    assert!(!update_context(
+        &daemon.endpoint,
+        "context#1",
+        1,
+        DisplayContext("x".repeat(MAX_CONTEXT_BYTES + 1))
+    )
+    .unwrap());
+    assert!(!format!("{context:?}").contains("private question"));
+    assert!(!list_sessions(&daemon.endpoint).unwrap()[0]
+        .metadata
+        .contains_key(METADATA_KEY));
+    drop(writer);
+    drop(reader);
+    wait_detached(&daemon.endpoint, "context#1");
+    let system = DaemonPtySystem::adopt(
+        daemon.endpoint.clone(),
+        "context#1".into(),
+        Default::default(),
+    );
+    let handle = spawn_command_on(
+        &system,
+        size(),
+        sleeper(),
+        2,
+        SpawnOptions {
+            wsl_backed: false,
+            kill_owner: ChildKillOwner::Backend,
+        },
+        |_| PtyOutputControl::Continue,
+        PtyLifecycleHooks::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        system.adopted_metadata().unwrap().get(METADATA_KEY),
+        Some(&context.0)
+    );
+    assert!(!update_context(
+        &daemon.endpoint,
+        "context#1",
+        1,
+        DisplayContext("old owner".into())
+    )
+    .unwrap());
+    assert!(update_context(
+        &daemon.endpoint,
+        "context#1",
+        2,
+        DisplayContext("new owner".into())
+    )
+    .unwrap());
+    handle.terminate().unwrap();
+    daemon.wait_for_sessions(0);
+    assert!(!update_context(&daemon.endpoint, "context#1", 2, context).unwrap());
+}
+
+#[test]
+fn display_context_batch_fits_the_wire_limit_even_with_escaped_payloads() {
+    use super::display_context::{update_context, DisplayContext, MAX_CONTEXT_BYTES};
+    let daemon = TestDaemon::start();
+    let mut connections = Vec::new();
+    for id in ["large-a#1", "large-b#1"] {
+        connections.push(raw_spawn(&daemon.endpoint, id, sleeper()));
+        assert!(update_context(
+            &daemon.endpoint,
+            id,
+            1,
+            DisplayContext("\0".repeat(MAX_CONTEXT_BYTES))
+        )
+        .unwrap());
+    }
+    let (mut writer, mut reader) = connect_authenticated(&daemon.endpoint).unwrap();
+    reader.get_ref().set_read_timeout(Some(TIMEOUT)).unwrap();
+    write_control(
+        &mut writer,
+        &ClientMessage::ReadDisplayContexts {
+            session_ids: vec!["large-a#1".into(), "large-b#1".into()],
+        },
+    )
+    .unwrap();
+    match read_frame::<_, DaemonMessage>(&mut reader).unwrap() {
+        Some(Frame::Control(DaemonMessage::DisplayContexts { contexts })) => {
+            assert_eq!(contexts.len(), 2);
+            assert!(contexts.values().all(|c| c.0.len() == MAX_CONTEXT_BYTES));
+        }
+        _ => panic!("bounded display context batch was not returned"),
+    }
+    write_control(
+        &mut writer,
+        &ClientMessage::ReadDisplayContexts {
+            session_ids: vec!["a".into(), "b".into(), "c".into()],
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        read_frame::<_, DaemonMessage>(&mut reader).unwrap(),
+        Some(Frame::Control(DaemonMessage::Error { .. }))
+    ));
+    drop(connections);
+}
+
+#[test]
 fn adoption_continues_the_same_child_and_returns_the_spawners_metadata() {
     let daemon = TestDaemon::start();
     let (command, input) = interactive_shell();

@@ -20,6 +20,8 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { areHiddenPaneIdsEligible } from "@/lib/hidden-eviction-eligibility";
 import { toPaneId } from "@/lib/pane-ids";
+import { captureWindowGeometry } from "./useWindowGeometry";
+import { flushTerminalDisplayContexts } from "@/lib/terminal-display-context";
 
 function hiddenEvictionTargetsRemainEligible(terminalIds: readonly string[]): boolean {
   return areHiddenPaneIdsEligible(terminalIds.map(toPaneId));
@@ -82,12 +84,14 @@ export function useSessionCheckpointLifecycle(ready: boolean): void {
           if (request.reason === "update") {
             if (cancelled) throw new Error("update preparation listener cancelled");
             setPreparingUpdate(true);
+            await captureWindowGeometry();
             // Never the explicit-exit Ctrl+C: the PTY daemon keeps every
             // session across the restart (ADR-0308, ADR-0314).
             await cacheTerminalOutputs(async (progress) => {
               if (cancelled) throw new Error("update preparation listener cancelled");
               await reportAppUpdatePreparation(request.requestId, progress);
             });
+            await flushTerminalDisplayContexts();
           }
           if (
             request.reason === "eviction" &&

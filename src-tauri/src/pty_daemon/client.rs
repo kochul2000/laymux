@@ -78,6 +78,7 @@ impl MissedOutput {
 }
 
 pub struct DaemonPtySystem {
+    display_owner: super::DisplayContextOwner,
     endpoint: DaemonEndpoint,
     session_id: String,
     target: DaemonTarget,
@@ -111,6 +112,12 @@ impl DaemonPtySystem {
 
     fn with_target(endpoint: DaemonEndpoint, session_id: String, target: DaemonTarget) -> Self {
         Self {
+            display_owner: super::DisplayContextOwner {
+                endpoint: endpoint.clone(),
+                session_id: session_id.clone(),
+                epoch: Arc::new(Mutex::new(None)),
+                unsupported: Arc::new(AtomicBool::new(false)),
+            },
             endpoint,
             session_id,
             target,
@@ -122,6 +129,10 @@ impl DaemonPtySystem {
     /// the adoption succeeded.
     pub fn adopted_metadata(&self) -> Option<BTreeMap<String, String>> {
         self.adopted_metadata.lock_or_err().ok()?.clone()
+    }
+
+    pub fn display_context_owner(&self) -> super::DisplayContextOwner {
+        self.display_owner.clone()
     }
 }
 
@@ -137,7 +148,7 @@ impl PtySystem for DaemonPtySystem {
             writer_taken: AtomicBool::new(false),
             endpoint: self.endpoint.clone(),
             session_id: self.session_id.clone(),
-            attach_epoch: Mutex::new(None),
+            attach_epoch: Arc::clone(&self.display_owner.epoch),
             owns_session_id: matches!(self.target, DaemonTarget::Spawn { .. }),
         });
         Ok(PtyPair {
@@ -165,7 +176,7 @@ struct Connection {
     session_id: String,
     /// Epoch this connection was bound with; a terminate carrying it cannot
     /// end the session once a newer client adopted it.
-    attach_epoch: Mutex<Option<u64>>,
+    attach_epoch: Arc<Mutex<Option<u64>>>,
     /// The session id was minted for this connection's own spawn (not an
     /// adoption target), so it may be ended even before an epoch arrived.
     owns_session_id: bool,

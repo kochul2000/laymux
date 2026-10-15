@@ -59,6 +59,7 @@ pub(super) struct ClientLink {
 }
 
 pub(super) struct Session {
+    display_context: Mutex<Option<super::display_context::DisplayContext>>,
     pub(super) id: String,
     pub(super) terminal_id: String,
     /// Opaque GUI state returned to an adopting client.
@@ -129,6 +130,37 @@ impl Sink {
 }
 
 impl Session {
+    pub(super) fn display_context(&self) -> Option<super::display_context::DisplayContext> {
+        self.display_context.lock_or_err().ok()?.clone()
+    }
+    pub(super) fn store_display_context(
+        &self,
+        epoch: u64,
+        context: super::display_context::DisplayContext,
+    ) -> Result<bool, String> {
+        let attached = self.attached.lock_or_err()?;
+        if attached.is_none()
+            || self.attach_epoch.load(Ordering::Acquire) != epoch
+            || self.terminate_requested()
+            || context.0.len() > super::display_context::MAX_CONTEXT_BYTES
+        {
+            return Ok(false);
+        }
+        *self.display_context.lock_or_err()? = Some(context);
+        Ok(true)
+    }
+
+    fn attach_metadata(&self) -> Result<BTreeMap<String, String>, String> {
+        let mut metadata = self.metadata.clone();
+        if let Some(context) = self.display_context.lock_or_err()?.as_ref() {
+            metadata.insert(
+                super::display_context::METADATA_KEY.into(),
+                context.0.clone(),
+            );
+        }
+        Ok(metadata)
+    }
+
     pub(super) fn new(
         id: String,
         terminal_id: String,
@@ -136,6 +168,7 @@ impl Session {
         created_seq: u64,
     ) -> Self {
         Self {
+            display_context: Mutex::new(None),
             id,
             terminal_id,
             metadata,
@@ -286,7 +319,7 @@ impl Session {
                 child_pid,
                 attach_epoch,
                 dropped_bytes: sink.dropped_bytes,
-                metadata: self.metadata.clone(),
+                metadata: self.attach_metadata()?,
             })
             .and_then(|()| {
                 if hand_over_missed {

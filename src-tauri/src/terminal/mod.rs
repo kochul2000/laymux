@@ -85,6 +85,9 @@ pub struct TerminalNotification {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TerminalSession {
+    /// Private GUI handoff, never part of terminal summaries or disk sessions.
+    #[serde(skip)]
+    pub display_context: Option<crate::pty_daemon::DisplayContext>,
     /// PTY incarnation marker; never restored from persisted session data.
     #[serde(skip)]
     pub(crate) agent_hook_token: String,
@@ -157,6 +160,7 @@ impl TerminalSession {
     pub fn new(id: String, config: TerminalConfig) -> Self {
         Self {
             agent_hook_token: uuid::Uuid::new_v4().to_string(),
+            display_context: None,
             agent_hook: None,
             codex_hook_title: Default::default(),
             id,
