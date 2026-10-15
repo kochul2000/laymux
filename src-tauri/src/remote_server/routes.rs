@@ -1598,10 +1598,31 @@ mod tests {
 
     #[test]
     fn exact_resize_rejects_an_expired_lease_before_capability_rejection() {
-        let state = state_with_route_test_lease(
-            "stale",
-            Instant::now() - Duration::from_secs(24 * 60 * 60),
+        // Pin the default timeout so the developer's settings file cannot move
+        // the expiry, then age the heartbeat just past it. A fixed far-past
+        // offset (24h) underflows `Instant` on a machine booted more recently.
+        let state = AppState::new();
+        super::super::access::update_persistent_remote_settings_for_test(
+            &state,
+            crate::settings::RemoteSettings::default(),
+        )
+        .unwrap();
+        let timeout = Duration::from_secs(super::effective_heartbeat_timeout_seconds(
+            &super::effective_remote_settings(&state).unwrap(),
+        ));
+        assert_eq!(
+            timeout.as_secs(),
+            crate::constants::DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS
         );
+        let stale = Instant::now()
+            .checked_sub(timeout + Duration::from_secs(1))
+            .expect("system uptime exceeds the default heartbeat timeout");
+        state.remote_control.lock_or_err().unwrap().lease = Some(RemoteControlLease {
+            lease_id: "stale".into(),
+            remote_addr: "127.0.0.1:1".into(),
+            client_name: None,
+            last_heartbeat: stale,
+        });
 
         let stale = exact_resize_unavailable_response(&state, "stale");
 
