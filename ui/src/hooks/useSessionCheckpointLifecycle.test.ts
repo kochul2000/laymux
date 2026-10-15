@@ -166,35 +166,12 @@ describe("useSessionCheckpointLifecycle", () => {
     expect(setPreparingUpdate).toHaveBeenLastCalledWith(false);
   });
 
-  it("waits for maximized window geometry to be saved before acknowledging an update", async () => {
-    let finish!: () => void;
-    vi.mocked(captureWindowGeometry).mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          finish = resolve;
-        }),
-    );
+  it("does not recapture window geometry during update preparation", async () => {
     renderHook(() => useSessionCheckpointLifecycle(true));
     await vi.waitFor(() => expect(onSessionCheckpointRequested).toHaveBeenCalled());
     nativeListener?.({ requestId: 77, reason: "update", requireConclusive: false });
-    await vi.waitFor(() => expect(captureWindowGeometry).toHaveBeenCalled());
-    expect(acknowledgeSessionCheckpoint).not.toHaveBeenCalled();
-    finish();
     await vi.waitFor(() => expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(77, 17));
-  });
-
-  it("reports a window geometry save failure without approving the update", async () => {
-    vi.mocked(captureWindowGeometry).mockRejectedValueOnce(new Error("window save failed"));
-    renderHook(() => useSessionCheckpointLifecycle(true));
-    await vi.waitFor(() => expect(onSessionCheckpointRequested).toHaveBeenCalled());
-    nativeListener?.({ requestId: 78, reason: "update", requireConclusive: false });
-    await vi.waitFor(() =>
-      expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(
-        78,
-        undefined,
-        "window save failed",
-      ),
-    );
+    expect(captureWindowGeometry).not.toHaveBeenCalled();
   });
 
   it("never probes Codex during update even when exit verification is enabled", async () => {
