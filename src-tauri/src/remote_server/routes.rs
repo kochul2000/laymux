@@ -1598,10 +1598,23 @@ mod tests {
 
     #[test]
     fn exact_resize_rejects_an_expired_lease_before_capability_rejection() {
-        let state = state_with_route_test_lease(
-            "stale",
-            Instant::now() - Duration::from_secs(24 * 60 * 60),
-        );
+        let state = state_with_route_test_lease("stale", Instant::now());
+        // Age the heartbeat just past the effective timeout. A fixed far-past
+        // offset (24h) underflows `Instant` on a machine booted more recently.
+        let timeout = Duration::from_secs(super::effective_heartbeat_timeout_seconds(
+            &super::effective_remote_settings(&state).unwrap(),
+        ));
+        let stale = Instant::now()
+            .checked_sub(timeout + Duration::from_secs(1))
+            .expect("system uptime exceeds the heartbeat timeout");
+        state
+            .remote_control
+            .lock_or_err()
+            .unwrap()
+            .lease
+            .as_mut()
+            .unwrap()
+            .last_heartbeat = stale;
 
         let stale = exact_resize_unavailable_response(&state, "stale");
 
