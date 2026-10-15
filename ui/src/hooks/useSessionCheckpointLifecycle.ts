@@ -20,6 +20,7 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { areHiddenPaneIdsEligible } from "@/lib/hidden-eviction-eligibility";
 import { toPaneId } from "@/lib/pane-ids";
+import { flushTerminalDisplayContexts } from "@/lib/terminal-display-context";
 
 function hiddenEvictionTargetsRemainEligible(terminalIds: readonly string[]): boolean {
   return areHiddenPaneIdsEligible(terminalIds.map(toPaneId));
@@ -88,6 +89,7 @@ export function useSessionCheckpointLifecycle(ready: boolean): void {
               if (cancelled) throw new Error("update preparation listener cancelled");
               await reportAppUpdatePreparation(request.requestId, progress);
             });
+            await flushTerminalDisplayContexts();
           }
           if (
             request.reason === "eviction" &&

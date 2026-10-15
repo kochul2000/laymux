@@ -2,6 +2,9 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const unlisten = vi.fn();
+vi.mock("./useWindowGeometry", () => ({
+  captureWindowGeometry: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@/lib/codex-status-probe", () => ({
   withCodexStatusCheckpoint: vi.fn(
     (_enabled: boolean, _request: number, checkpoint: () => Promise<unknown>) => checkpoint(),
@@ -67,6 +70,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { claimHiddenEvictionEligibility } from "@/lib/hidden-eviction-eligibility";
 import { useSessionCheckpointLifecycle } from "./useSessionCheckpointLifecycle";
 import { withCodexStatusCheckpoint } from "@/lib/codex-status-probe";
+import { captureWindowGeometry } from "./useWindowGeometry";
 
 describe("useSessionCheckpointLifecycle", () => {
   beforeEach(() => {
@@ -160,6 +164,14 @@ describe("useSessionCheckpointLifecycle", () => {
     expect(flushSessionCheckpoint).toHaveBeenCalledOnce();
     expect(cacheTerminalOutputs).not.toHaveBeenCalled();
     expect(setPreparingUpdate).toHaveBeenLastCalledWith(false);
+  });
+
+  it("does not recapture window geometry during update preparation", async () => {
+    renderHook(() => useSessionCheckpointLifecycle(true));
+    await vi.waitFor(() => expect(onSessionCheckpointRequested).toHaveBeenCalled());
+    nativeListener?.({ requestId: 77, reason: "update", requireConclusive: false });
+    await vi.waitFor(() => expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(77, 17));
+    expect(captureWindowGeometry).not.toHaveBeenCalled();
   });
 
   it("never probes Codex during update even when exit verification is enabled", async () => {

@@ -327,6 +327,7 @@ pub const PTY_DAEMON_METADATA_AGENT_HOOK_TOKEN: &str = "agentHookToken";
 /// child is a WSL relay, so adoption matches the profile and restores the
 /// WSL attribution domain of the running child.
 pub const PTY_DAEMON_METADATA_PROFILE: &str = "profile";
+pub const PTY_DAEMON_METADATA_DISPLAY_CONTEXT: &str = "displayContext";
 pub const PTY_DAEMON_METADATA_WSL_BACKED: &str = "wslBacked";
 /// Largest frame accepted before a connection has authenticated.
 pub const PTY_DAEMON_HELLO_MAX_BYTES: usize = 4 * 1024;

@@ -119,32 +119,43 @@ export async function captureWindowGeometry(): Promise<void> {
  */
 export function useWindowGeometry() {
   useEffect(() => {
-    restoreWindowGeometry().catch((err) => {
+    let cancelled = false;
+    let saveTimer: ReturnType<typeof setTimeout> | undefined;
+    const restored = restoreWindowGeometry().catch((err) => {
       console.warn("[useWindowGeometry] Failed to restore:", err);
     });
+    const changed = () => {
+      void snapshotGeometry().catch(() => {});
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        void restored
+          .then(() => {
+            if (!cancelled) return captureWindowGeometry();
+          })
+          .catch((err) => {
+            console.warn("[useWindowGeometry] Failed to save:", err);
+          });
+      }, 250);
+    };
 
     let unlistenMove: (() => void) | null = null;
     let unlistenResize: (() => void) | null = null;
 
     import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
       const appWindow = getCurrentWindow();
-      appWindow
-        .onMoved(() => {
-          snapshotGeometry().catch(() => {});
-        })
-        .then((fn) => {
-          unlistenMove = fn;
-        });
-      appWindow
-        .onResized(() => {
-          snapshotGeometry().catch(() => {});
-        })
-        .then((fn) => {
-          unlistenResize = fn;
-        });
+      appWindow.onMoved(changed).then((fn) => {
+        if (cancelled) fn();
+        else unlistenMove = fn;
+      });
+      appWindow.onResized(changed).then((fn) => {
+        if (cancelled) fn();
+        else unlistenResize = fn;
+      });
     });
 
     return () => {
+      cancelled = true;
+      if (saveTimer) clearTimeout(saveTimer);
       unlistenMove?.();
       unlistenResize?.();
     };

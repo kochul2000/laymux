@@ -6,6 +6,7 @@ import { useNotificationStore } from "@/stores/notification-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { taskSource, terminalTaskPolicy } from "@/lib/terminal-task";
+import { projectTerminalDisplay } from "@/lib/terminal-display-context";
 
 vi.mock("@/lib/persist-session", () => ({
   persistSession: vi.fn().mockResolvedValue(undefined),
@@ -1329,6 +1330,27 @@ describe("useSyncEvents", () => {
 
     const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
     expect(instance?.activityMessage).toBe("gpt-5.4 medium · 93% left · C:\\Users");
+  });
+
+  it("preserves the restored Codex message when an idle title has no status text", () => {
+    const store = useTerminalStore.getState();
+    store.registerInstance({ id: "t1", profile: "PowerShell", syncGroup: "g1" });
+    store.updateInstanceInfo("t1", { activity: { type: "interactiveApp", name: "Codex" } });
+    renderHook(() => useSyncEvents());
+    mockOnTerminalTitleChanged.mock.calls[0][0]({
+      terminalId: "t1",
+      title: "Codex",
+      interactiveApp: "Codex",
+    });
+    const instance = useTerminalStore.getState().instances[0];
+    expect(
+      projectTerminalDisplay(instance, {
+        version: 1,
+        profile: "PowerShell",
+        activity: { type: "interactiveApp", name: "Codex" },
+        activityMessage: "previous status message",
+      }).activityMessage,
+    ).toBe("previous status message");
   });
 
   it("returns Codex terminal to shell on exitCode", () => {

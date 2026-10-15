@@ -5,6 +5,7 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useTerminalStore } from "@/stores/terminal-store";
+import { useTerminalDisplayStore } from "@/stores/terminal-display-store";
 import { useNotificationStore, type NotificationLevel } from "@/stores/notification-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -515,7 +516,12 @@ function selectorDisplayForTerminal(
 function selectorSummaryForWorkspace(workspace: Workspace) {
   const { instances } = useTerminalStore.getState();
   const { notifications } = useNotificationStore.getState();
-  const projected = projectWorkspaceTerminals(workspace.id, workspace.panes, instances);
+  const projected = projectWorkspaceTerminals(
+    workspace.id,
+    workspace.panes,
+    instances,
+    useTerminalDisplayStore.getState().contexts,
+  );
   const summary = computeWorkspaceSummary(workspace.id, projected, new Map(), notifications);
   const lastCommand = summary.lastCommand;
   let displayLastCommand = null;
@@ -1161,6 +1167,7 @@ const handlers: HandlerMap = {
           workspace.id,
           workspace.panes,
           instances,
+          useTerminalDisplayStore.getState().contexts,
         )) {
           projectedById.set(terminal.id, terminal);
         }

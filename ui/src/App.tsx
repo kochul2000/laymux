@@ -34,6 +34,7 @@ import { LocalMobileModeOverlay } from "@/components/layout/LocalMobileModeOverl
 import { useAutoRemoteAccessPrompt } from "@/hooks/useAutoRemoteAccessPrompt";
 import { useLocalMobileModeStore } from "@/stores/local-mobile-mode-store";
 import { useSessionCheckpointLifecycle } from "@/hooks/useSessionCheckpointLifecycle";
+import { useTerminalDisplayContext } from "@/hooks/useTerminalDisplayContext";
 import { subscribeAgentHookUpdates } from "@/lib/agent-hook-updates";
 import { AgentHookUpdateNotice } from "@/components/layout/AgentHookUpdateNotice";
 
@@ -42,6 +43,7 @@ export function App() {
   useSyncEvents();
   const { loaded, loadStatus } = useSessionPersistence();
   useSessionCheckpointLifecycle(loaded);
+  useTerminalDisplayContext(loaded);
   useAutomationBridge();
   // Next to the bridge that answers Remote status: a reloaded WebView must
   // clear the previous epoch before the session finishes loading (ADR-0291).

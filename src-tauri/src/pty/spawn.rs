@@ -156,7 +156,8 @@ where
         wsl_backed: is_wsl,
         kill_owner,
     };
-    let (handle, adopted) = match backend {
+    let mut display_context_owner = None;
+    let (mut handle, adopted) = match backend {
         PtyBackend::Local => (
             spawn_command_on(
                 native_pty_system().as_ref(),
@@ -182,7 +183,10 @@ where
                     Arc::clone(&adoption.missed_output),
                 );
                 match open_and_spawn(&system, size, cmd.clone()) {
-                    Ok(opened) => system.adopted_metadata().map(|metadata| (opened, metadata)),
+                    Ok(opened) => {
+                        display_context_owner = Some(system.display_context_owner());
+                        system.adopted_metadata().map(|metadata| (opened, metadata))
+                    },
                     Err(error) => {
                         tracing::warn!(terminal_id = %session.id, %error, "PTY daemon adoption refused; starting a new session");
                         None
@@ -199,7 +203,10 @@ where
                         daemon_session_metadata(session, is_wsl),
                     );
                     match open_and_spawn(&system, size, cmd.clone()) {
-                        Ok(opened) => (opened, None, ChildKillOwner::Backend),
+                        Ok(opened) => {
+                            display_context_owner = Some(system.display_context_owner());
+                            (opened, None, ChildKillOwner::Backend)
+                        }
                         // The daemon refused (for example while shutting down
                         // for an update) or failed: same fallback as an
                         // unreachable daemon (ADR-0301).
@@ -233,6 +240,7 @@ where
         }
     };
 
+    handle.display_context_owner = display_context_owner;
     Ok(SpawnedPty {
         handle,
         initial_execution_host,
@@ -405,6 +413,7 @@ where
     let master = Arc::new(Mutex::new(Some(pair.master)));
     let control = PtyControlWorker::spawn(writer, Arc::clone(&master))?;
     let handle = PtyHandle {
+        display_context_owner: None,
         checkpoint_input_revision: Arc::new(AtomicU64::new(0)),
         session_restore: None,
         control,

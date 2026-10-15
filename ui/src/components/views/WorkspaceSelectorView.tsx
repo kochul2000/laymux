@@ -20,6 +20,7 @@ import {
   shortWorkspaceLabel,
 } from "@/lib/workspace-summary";
 import { useTerminalStore } from "@/stores/terminal-store";
+import { useTerminalDisplayStore } from "@/stores/terminal-display-store";
 import { usePortDetection } from "@/hooks/usePortDetection";
 import { NotificationPanel } from "./NotificationPanel";
 import { PaneMinimap } from "./PaneMinimap";
@@ -1072,6 +1073,7 @@ export function WorkspaceSelectorView() {
   const workspaceSortOrder = useSettingsStore((s) => s.workspaceSelector.sortOrder);
   const setWorkspaceSelector = useSettingsStore((s) => s.setWorkspaceSelector);
   const terminalInstances = useTerminalStore((s) => s.instances);
+  const terminalDisplayContexts = useTerminalDisplayStore((s) => s.contexts);
   const listeningPorts = usePortDetection();
   const portNumbers = useMemo(
     () => [...new Set(listeningPorts.map((p) => p.port))].sort((a, b) => a - b),
@@ -1381,7 +1383,12 @@ export function WorkspaceSelectorView() {
           // Compute summary from frontend stores (event-driven, no polling).
           // Include lastCwd from settings as fallback for terminals that haven't
           // emitted OSC 7 yet, or that don't have a session yet (early startup).
-          const wsTerminals = projectWorkspaceTerminals(ws.id, ws.panes, terminalInstances);
+          const wsTerminals = projectWorkspaceTerminals(
+            ws.id,
+            ws.panes,
+            terminalInstances,
+            terminalDisplayContexts,
+          );
           const summary = computeWorkspaceSummary(
             ws.id,
             wsTerminals,

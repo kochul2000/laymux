@@ -253,7 +253,9 @@ export function useSyncEvents() {
           resolvedActivity?.type === "interactiveApp" && resolvedActivity.name === "Codex";
         if (codexActivity) {
           const titleMessage = extractCodexTitleMessage(data.title);
-          if (titleMessage !== undefined || !instance?.activityMessage) {
+          // A plain idle title has no new message. Keeping the key absent
+          // also preserves the daemon display history after reattachment.
+          if (titleMessage !== undefined) {
             updates.activityMessage = titleMessage;
           }
         }
