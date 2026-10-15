@@ -46,7 +46,10 @@ test("fresh Remote device starts in composer with the requested controls", async
         elements.map((element) => (element as HTMLElement).dataset.inputAction),
       ),
   ).toEqual(["soft:c-c", "soft:q", "soft:esc", "soft:clearPane", "keyboard", "keys", "send"]);
-  await expect(page.locator('#mainActionRow [data-key="clearPane"]')).toHaveText("Alt+L");
+  await expect(page.locator('#mainActionRow [data-key="clearPane"]')).toHaveAttribute(
+    "aria-label",
+    "Clear pane",
+  );
   await expect(page.locator('#mainActionRow [data-input-action="soft:u-p1-mg"]')).toHaveCount(0);
   expect(await page.evaluate((key) => localStorage.getItem(key), displayKey)).toBeNull();
   expect(await page.evaluate((key) => localStorage.getItem(key), keybarKey)).toBeNull();
@@ -167,7 +170,10 @@ test("missing and malformed preference data fall back to fresh-device defaults",
   );
   await open(page);
   await expect(page.locator("#inputModeToggle")).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator('#mainActionRow [data-key="clearPane"]')).toHaveText("Alt+L");
+  await expect(page.locator('#mainActionRow [data-key="clearPane"]')).toHaveAttribute(
+    "aria-label",
+    "Clear pane",
+  );
   await expect(page.locator("#floatingControls .floating-control")).toHaveCount(2);
   await page.locator("#drawerSettingsButton").click();
   await expect(page.locator("#remoteMainButtonScale")).toHaveText("100%");

@@ -319,7 +319,7 @@ test("header actions start Hidden, can be placed on a row, and remain in the hea
 }) => {
   await open(page);
   await page.getByRole("tab", { name: "Input bar", exact: true }).click();
-  for (const action of ["menu", "copyPane", "viewer", "skip", "desktop"]) {
+  for (const action of ["menu", "copyPane", "viewer", "skip"]) {
     await expect(page.locator(`.layout-hidden [data-layout-action="${action}"]`)).toHaveCount(1);
   }
   await page.locator("#inputAvailableKeys > summary").click();

@@ -294,7 +294,7 @@ ADR 이 필요한 대표 기준:
 | [0274](0274-immediate-composition-delivery-ledger.md) | 즉시 확정한 조합의 송신 기록은 native 조합 종료까지 공유한다 (0093·0230·0268 확장) | Accepted |
 | [0275](0275-remote-physical-keyboard-focus-recovery.md) | Remote 물리 키보드 입력은 안전한 입력 표면으로 포커스를 복구한다 | Accepted |
 | [0276](0276-remote-keys-ignore-physical-keyboard.md) | Remote Keys 표시는 물리 키보드 연결과 독립으로 둔다 (0273 일부 대체) | Accepted |
-| [0277](0277-remote-pane-clear-soft-key.md) | Remote 기본 클리어 키는 pane clear action을 실행한다 | Accepted |
+| [0277](0277-remote-pane-clear-soft-key.md) | Remote 기본 클리어 키는 pane clear action을 실행한다 | Accepted (label superseded by [0327](0327-remote-pane-action-keys-mirror-pc-control-bar.md)) |
 | [0278](0278-codex-status-current-screen.md) | Codex 종료 확인은 명령 실행 후 현재 화면을 읽는다 (0270 대체) | Accepted (partially superseded by [0323](0323-update-checkpoint-follows-pty-ownership.md)) |
 | [0279](0279-lifecycle-explicit-loss-override.md) | 종료·업데이트 준비 실패는 명시적 손실 동의로 건너뛸 수 있다 (0222·0264 확장) | Proposed |
 | [0280](0280-codex-app-server-process-role.md) | Codex app-server는 native·WSL 대화 프로세스 후보에서 제외한다 | Accepted |
@@ -349,6 +349,8 @@ ADR 이 필요한 대표 기준:
 
 | [0325](0325-agent-mcp-registration.md) | 에이전트 MCP 등록은 Settings에서 실행 환경별로 확인·설치한다 (0006·0282 확장, 0324 수명 적용) | Accepted |
 | [0326](0326-remote-return-through-dashboard.md) | 원격 연결 복귀는 대시보드의 기존 인스턴스 선택을 재사용한다 | Accepted |
+
+| [0327](0327-remote-pane-action-keys-mirror-pc-control-bar.md) | Remote pane action 키는 PC 컨트롤 바 동작을 아이콘으로 실행한다 (0277 label 대체, 0237 PC 모드 제외) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

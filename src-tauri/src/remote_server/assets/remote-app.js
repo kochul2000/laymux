@@ -384,15 +384,16 @@ import {
         const paneManager = createPaneManager({
           getLease: () => leaseId,
           hide: (id, hidden, selectedLeaseId) => setPaneVisibility(id, hidden, selectedLeaseId),
-          close: async (id, selectedLeaseId) => {
-            const selectedTerminal = remotePaneTargets().find((pane) => pane.id === id)?.terminalId;
-            await remoteFetch(`/remote/v1/panes/${encodeURIComponent(id)}/close`, {
-              method: "POST", body: JSON.stringify({ leaseId: selectedLeaseId }),
-            });
-            if (leaseId !== selectedLeaseId) return;
-            await loadNavigation(activeTerminalId, { openOutput: selectedTerminal === activeTerminalId });
-          },
+          close: closeRemotePane,
         });
+        async function closeRemotePane(id, selectedLeaseId) {
+          const selectedTerminal = remotePaneTargets().find((pane) => pane.id === id)?.terminalId;
+          await remoteFetch(`/remote/v1/panes/${encodeURIComponent(id)}/close`, {
+            method: "POST", body: JSON.stringify({ leaseId: selectedLeaseId }),
+          });
+          if (leaseId !== selectedLeaseId) return;
+          await loadNavigation(activeTerminalId, { openOutput: selectedTerminal === activeTerminalId });
+        }
         function remotePaneTargets() {
           if (!navigationState) return [];
           const targets = (navigationState.workspaces || []).flatMap((workspace) => {
@@ -9591,6 +9592,50 @@ import {
             .catch((err) => setStatus(`Clear failed: ${err.message || err}`, true));
         }
 
+        // The pane the open terminal belongs to, as the pane manager sees it:
+        // its close availability follows the PC Delete pane / Close layer button.
+        function activePaneTarget() {
+          if (!activeTerminalId) return null;
+          return remotePaneTargets().find((pane) => pane.terminalId === activeTerminalId) || null;
+        }
+
+        function canRunRemotePaneAction(action) {
+          if (action === "close") return Boolean(activePaneTarget()?.canClose);
+          // The PC stacks grid slots of the active workspace only.
+          if (action === "stack") return Boolean(activeWorkspacePane());
+          return true;
+        }
+
+        // Pane action keys (ADR-0327) run the PC pane control-bar actions on the
+        // pane the open terminal belongs to. Like clear they ride the navigation
+        // chain, so a key pressed while a move is landing targets where it lands.
+        async function runRemotePaneAction(action) {
+          if (action === "clear") return runRemoteClear("pane");
+          if (!leaseId || !canRunRemotePaneAction(action)) return;
+          const selectedLeaseId = leaseId;
+          if (action === "close") {
+            const pane = activePaneTarget();
+            setBusyStatus("Closing pane…");
+            await closeRemotePane(pane.id, selectedLeaseId)
+              .then(() => setStatus("Pane closed."))
+              .catch((err) => setStatus(`Close failed: ${err.message || err}`, true));
+            return;
+          }
+          if (action === "stack") {
+            const pane = activeWorkspacePane();
+            setBusyStatus("Stacking…");
+            await remoteFetch(`/remote/v1/panes/${encodeURIComponent(pane.id)}/stack`, {
+              method: "POST", body: JSON.stringify({ leaseId: selectedLeaseId }),
+            })
+              .then(async () => {
+                if (leaseId !== selectedLeaseId) return;
+                await loadNavigation(activeTerminalId, { openOutput: false });
+                setStatus("Stacked a new layer.");
+              })
+              .catch((err) => setStatus(`Stack failed: ${err.message || err}`, true));
+          }
+        }
+
         function copyActivePaneIdentifier() {
           const identifier = activePaneIdentifier();
           if (!identifier) return false;
@@ -11389,7 +11434,11 @@ import {
           "c-u": { label: "^U", seq: "\x15", hint: "Ctrl+U (kill line)" },
           "c-t": { label: "^T", seq: "\x14", hint: "Ctrl+T (transpose)" },
           "c-l": { label: "^L", seq: "\x0c", hint: "Ctrl+L (clear screen)" },
-          clearPane: { label: "Alt+L", clearPane: true, hint: "Alt+L (clear pane)" },
+          // Pane actions run the PC pane control-bar actions, not key bytes
+          // (ADR-0277, ADR-0327). The bar shows the PC icon; the label names it.
+          clearPane: { label: "Clear pane", icon: "BrushCleaning", paneAction: "clear" },
+          closePane: { label: "Close pane", icon: "X", paneAction: "close" },
+          stackPane: { label: "Stack", icon: "Layers", paneAction: "stack" },
           f1: { label: "F1", seq: "\x1bOP" },
           f2: { label: "F2", seq: "\x1bOQ" },
           f3: { label: "F3", seq: "\x1bOR" },
@@ -11408,7 +11457,7 @@ import {
           "navPad", "navPrev", "navNext", "notifRecent", "notifOldest", "q",
           "esc", "tab", "stab", "dpad", "up", "down", "left", "right", "home", "end",
           "enter", "bksp", "ins", "del", "pgup", "pgdn",
-          "c-c", "c-j", "c-u", "c-t", "c-l", "clearPane",
+          "c-c", "c-j", "c-u", "c-t", "c-l", "clearPane", "closePane", "stackPane",
           "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
         ];
         const KEY_ID_SET = new Set(KEY_ORDER);
@@ -11420,7 +11469,7 @@ import {
           { id: "nav", name: "Navigation", keys: ["esc", "tab", "stab", "dpad", "up", "down", "left", "right", "home", "end"] },
           { id: "edit", name: "Editing", keys: ["q", "enter", "bksp", "ins", "del", "pgup", "pgdn"] },
           { id: "ctrl", name: "Ctrl keys", keys: ["c-c", "c-j", "c-u", "c-t", "c-l"] },
-          { id: "pane", name: "Pane actions", keys: ["clearPane"] },
+          { id: "pane", name: "Pane actions", keys: ["clearPane", "closePane", "stackPane"] },
           { id: "fn", name: "Function", keys: ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"] },
         ];
         // Every input action lives in one of the two visible rows, inside one of
@@ -11437,11 +11486,11 @@ import {
           "send",
           "composer",
           "attachment",
-          "menu", "copyPane", "viewer", "skip", "desktop",
+          "menu", "copyPane", "viewer", "skip",
         ];
         const HEADER_INPUT_ACTIONS = {
           menu: "navToggle", copyPane: "copyPaneId", viewer: "fileExplorerHeader",
-          skip: "spatialExclusion", desktop: "desktopModeHeader",
+          skip: "spatialExclusion",
         };
         const INPUT_ACTION_LABELS = {
           keyboard: "Keyboard",
@@ -11449,7 +11498,16 @@ import {
           send: "Send",
           composer: "Composer",
           attachment: "Attach file",
-          menu: "Menu", copyPane: "Copy pane ID", viewer: "Viewer", skip: "Skip pane", desktop: "PC mode",
+          menu: "Menu", copyPane: "Copy pane ID", viewer: "Viewer", skip: "Skip pane",
+        };
+        // Icon an Add keys chip shows beside the action's name (ADR-0327).
+        // The bar itself shows the action's own button content.
+        const INPUT_ACTION_ICONS = {
+          keyboard: "Keyboard",
+          send: "Send",
+          composer: "Pencil",
+          attachment: "Paperclip",
+          menu: "Menu", copyPane: "Copy", viewer: "FolderOpen", skip: "CircleMinus",
         };
         const softInputActionId = (keyId) => `soft:${keyId}`;
         const softKeyIdFromAction = (actionId) =>
@@ -11871,8 +11929,8 @@ import {
         function sendKey(id, button = null) {
           const def = keyDef(id);
           if (!def) return;
-          if (def.clearPane) {
-            enqueueRemoteNavigation(() => runRemoteClear("pane"), button, { move: false });
+          if (def.paneAction) {
+            enqueueRemoteNavigation(() => runRemotePaneAction(def.paneAction), button, { move: false });
             return;
           }
           if (def.nav) {
@@ -12149,6 +12207,9 @@ import {
               // terminal-less workspace); alert keys idle at zero unread.
               const isAlertKey = def.nav && def.nav[0] === "notification";
               btn.disabled = !connected || (isAlertKey && unread <= 0);
+            } else if (def.paneAction) {
+              // The PC hides Delete pane / Stack where they cannot apply.
+              btn.disabled = !canControl || !canRunRemotePaneAction(def.paneAction);
             } else {
               btn.disabled = !canControl;
             }
@@ -12194,6 +12255,12 @@ import {
           return def?.hint || def?.label || keyId;
         }
 
+        function inputActionIcon(actionId) {
+          const keyId = softKeyIdFromAction(actionId);
+          if (!keyId) return INPUT_ACTION_ICONS[actionId] || "";
+          return keyDef(keyId)?.icon || "";
+        }
+
         function fixedInputActionElement(actionId) {
           if (ownProperty(HEADER_INPUT_ACTIONS, actionId)) return $(HEADER_INPUT_ACTIONS[actionId]);
           return {
@@ -12213,6 +12280,10 @@ import {
           btn.dataset.key = id;
           btn.dataset.inputAction = softInputActionId(id);
           btn.textContent = def.label;
+          if (def.icon) {
+            setRemoteIcon(btn, def.icon);
+            btn.setAttribute("aria-label", def.hint || def.label);
+          }
           if (def.navFlick) setRemoteIcon(btn, "GamepadDirectional");
           if (def.flick) setRemoteIcon(btn, "Move");
           btn.title = def.hint || def.label;
@@ -12792,7 +12863,21 @@ import {
           chip.type = "button";
           chip.className = "key-chip layout-chip";
           chip.dataset.layoutAction = actionId;
-          chip.textContent = inputActionLabel(actionId);
+          // An action with an icon reads as icon + muted name: the icon is what
+          // the bar will show, the name says what it does (ADR-0327).
+          const icon = inputActionIcon(actionId);
+          if (icon) {
+            const glyph = document.createElement("span");
+            glyph.className = "layout-chip-icon";
+            setRemoteIcon(glyph, icon, { size: 13 });
+            const name = document.createElement("span");
+            name.className = "layout-chip-name";
+            name.textContent = inputActionLabel(actionId);
+            chip.classList.add("with-icon");
+            chip.append(glyph, name);
+          } else {
+            chip.textContent = inputActionLabel(actionId);
+          }
           const hint = inputActionHint(actionId);
           chip.title = `${hint} — hold and drag to move`;
           chip.setAttribute("aria-label", hint);
