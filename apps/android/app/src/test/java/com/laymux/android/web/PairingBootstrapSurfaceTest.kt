@@ -27,7 +27,7 @@ class PairingBootstrapSurfaceTest {
         ).readText()
         val activitySource = source("java/com/laymux/android/MainActivity.kt").readText()
         val selectionSource = activitySource.substringAfter("fun selectCloudInstance(")
-            .substringBefore("fun showCloudDashboard()")
+            .substringBefore("fun showCloudDashboard(")
 
         assertTrue(layout.contains("pairing_connect_button"))
         assertTrue(layout.contains("pairing_scan_button"))

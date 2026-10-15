@@ -769,6 +769,12 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         applyCloudDocumentLayers(
             WebSurfaceLayerPolicy.forSurface(visibleWebSurface, presentation),
         )
+        if (presentation == CloudDocumentPresentation.READY && ::cloudWebView.isInitialized) {
+            cloudWebView.evaluateJavascript(
+                "window.laymuxCloudDocumentReady=true;window.dispatchEvent(new Event('laymux:cloud-ready'));",
+                null,
+            )
+        }
     }
 
     private fun applyCloudDocumentLayers(layers: WebSurfaceLayers) {
@@ -922,7 +928,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         }
     }
 
-    fun showCloudDashboard() {
+    fun showCloudDashboard(reconnectInstanceId: String? = null) {
         closeRemoteSession()
         debugPairingPreviewActive = false
         debugConnectionSettingsPreviewActive = false
@@ -933,7 +939,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         if (!::cloudWebView.isInitialized || isDestroyed) return
         if (::pairingSheet.isInitialized) pairingSheet.dismiss()
         if (::connectionSettingsDialog.isInitialized) connectionSettingsDialog.dismiss()
-        loadCloudDocument(cloudNavigation.dashboardUrl, replaceWebView = true)
+        loadCloudDocument(cloudNavigation.reconnectDashboardUrl(reconnectInstanceId), replaceWebView = true)
         applyWebSurfaceLayers(VisibleWebSurface.CLOUD)
     }
 
@@ -2991,9 +2997,13 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         }
         val failureKind = (error as? E2eTransportException)?.failureKind
         if (failureKind != null && requestCloudSessionFallback(failedSession, failureKind)) return
-        closeRemoteSession()
         runOnUiThread {
-            if (::webView.isInitialized && !isDestroyed) showCloudDashboard()
+            if (remoteSession === failedSession && !isDestroyed) {
+                val reconnectId = selectedCloudInstanceId.takeIf {
+                    remoteLifecycleActive && visibleWebSurface == VisibleWebSurface.REMOTE
+                }
+                showCloudDashboard(reconnectInstanceId = reconnectId)
+            }
         }
     }
 

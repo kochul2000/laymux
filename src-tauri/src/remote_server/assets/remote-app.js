@@ -710,6 +710,7 @@ import {
         let dockPanelOpen = false;
         let drawerView = "workspace";
         let pcUpdateStatus = null;
+        let cloudDashboardReturnPending = false;
         let pcUpdatePollTimer = null;
         let pcUpdateRequestInFlight = false;
         const pcUpdateDialog = createRemoteUpdateDialog({
@@ -1312,6 +1313,15 @@ import {
           });
           if (!response.ok) {
             const body = await response.json().catch(() => ({}));
+            // The Cloud dashboard is available while the PC is restarting.
+            // Reuse its ordinary selection flow; never retry a control refusal.
+            if (!cloudDashboardReturnPending && token() === "laymux-cloud-placeholder" &&
+                autoConnectArmed() && [502, 503, 504].includes(response.status)) {
+              cloudDashboardReturnPending = true;
+              discardResumeToken();
+              disarmAutoConnect();
+              location.replace("/remote/reconnect");
+            }
             throw remoteResponseError(response.status, body);
           }
           return response.json();
