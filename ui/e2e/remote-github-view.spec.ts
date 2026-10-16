@@ -240,8 +240,110 @@ async function flickTool(page: Page, selector: string, direction: number, dy = 0
   );
 }
 
+// Native touch input lets Chromium arbitrate scrolling against pointer handlers.
+// dispatchEvent alone cannot expose a textarea consuming the horizontal fling.
+async function flickMemo(page: Page, dx: number, dy = 0) {
+  const textarea = page.locator("#memoText");
+  await expect(textarea).toBeEnabled();
+  const box = (await textarea.boundingBox())!;
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x, y, id: 1 }],
+    });
+    for (let step = 1; step <= 8; step += 1) {
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x: x + (dx * step) / 8, y: y + (dy * step) / 8, id: 1 }],
+      });
+    }
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  } finally {
+    await cdp.detach();
+  }
+}
+
 test.describe("Remote GitHub view", () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 720 } });
+
+  test("native memo body flings change tools and retain the unsaved draft", async ({
+    context,
+    page,
+  }) => {
+    const mocks = await installMocks(context);
+    await connect(page);
+    await page.locator("#memoHeader").click();
+    await expect(page.locator("#memoText")).toHaveValue("PC에서 쓴 메모\n공유 확인");
+    await page.locator("#memoText").fill("플링 뒤에도 남는 메모 초안");
+    await flickMemo(page, -120);
+    await expect(page.locator("#memoOverlay")).toBeHidden();
+    await expect(page.locator("#githubIssuesTab")).toHaveAttribute("aria-selected", "true");
+    await page.locator("#githubClose").click();
+    await page.locator("#memoHeader").click();
+    await expect(page.locator("#memoText")).toHaveValue("플링 뒤에도 남는 메모 초안");
+    await flickMemo(page, 120);
+    await expect(page.locator("#memoOverlay")).toBeHidden();
+    expect(mocks.memoRequests).toEqual([]);
+  });
+
+  test("memo body flings respect previous-tool and disabled-close settings", async ({
+    context,
+    page,
+  }) => {
+    await installMocks(context);
+    await context.addInitScript(() => {
+      localStorage.setItem("laymux.remote.toolSwipeRightAction", "previous");
+      localStorage.setItem("laymux.remote.swipeCloseDrawers", "0");
+    });
+    await connect(page);
+    await page.locator("#memoHeader").click();
+    await flickMemo(page, 120);
+    await expect(page.locator("#fileViewerDirectory")).toBeVisible();
+    await page.locator("#fileViewerClose").click();
+    await page.locator("#navToggle").click();
+    await page.locator("#drawerSettingsButton").click();
+    await page.locator("#settingsTabPanels").click();
+    await page.locator("#toolSwipeRightAction").selectOption("close");
+    await page.locator("#navToggle").click();
+    await page.locator("#memoHeader").click();
+    await flickMemo(page, 120);
+    await expect(page.locator("#memoOverlay")).toBeVisible();
+  });
+
+  test("memo body keeps native tapping, selected text and vertical scrolling", async ({
+    context,
+    page,
+  }) => {
+    const mocks = await installMocks(context);
+    const content = Array.from(
+      { length: 160 },
+      (_, index) => `メモ ${index}: 세로 스크롤 확인`,
+    ).join("\n");
+    mocks.changePcMemo(content);
+    await connect(page);
+    await page.locator("#memoHeader").click();
+    const textarea = page.locator("#memoText");
+    await expect(textarea).toHaveValue(content);
+    await textarea.tap();
+    await expect(textarea).toBeFocused();
+    await textarea.evaluate((element: HTMLTextAreaElement) => element.setSelectionRange(0, 6));
+    await flickMemo(page, -120);
+    await expect(page.locator("#memoOverlay")).toBeVisible();
+    await textarea.evaluate((element: HTMLTextAreaElement) => {
+      element.setSelectionRange(0, 0);
+      element.blur();
+      element.scrollTop = 0;
+    });
+    await flickMemo(page, 0, -160);
+    await expect.poll(() => textarea.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await expect(page.locator("#memoOverlay")).toBeVisible();
+    await expect(textarea).toHaveValue(content);
+    expect(mocks.memoRequests).toEqual([]);
+    await page.screenshot({ path: "../.screenshots/remote-memo-fling.png" });
+  });
 
   test("cycles one step per fling through Issues, PRs, Files and Memo without losing drafts", async ({
     context,
@@ -258,8 +360,6 @@ test.describe("Remote GitHub view", () => {
     await expect(page.locator("#memoText")).toHaveValue("PC에서 쓴 메모\n공유 확인");
     await page.locator("#memoText").fill("순회 중 보존할 초안");
     await flickTool(page, "#memoText", -1);
-    await expect(page.locator("#memoOverlay")).toBeVisible();
-    await flickTool(page, "#memoToolbar", -1);
     await expect(page.locator("#githubIssuesTab")).toHaveAttribute("aria-selected", "true");
     await flickTool(page, "#githubList", -1);
     await flickTool(page, "#githubList", -1);
