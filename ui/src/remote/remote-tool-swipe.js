@@ -18,11 +18,17 @@ export function nextRemoteTool(current, direction, available) {
   return null;
 }
 
-/** One pointer owner across all tool surfaces; never take over editor/file content. */
+/** One pointer owner across tool surfaces; only the memo editor opts in. */
 export function installRemoteToolSwipes({ getCurrent, enabled, resolveAction, perform }) {
   let gesture = null;
   let suppressClick = false;
-  const selectionActive = () => Boolean(document.getSelection()?.toString());
+  const selectionActive = () => {
+    const editor = document.activeElement;
+    return (
+      Boolean(document.getSelection()?.toString()) ||
+      (editor?.matches("#memoText") && editor.selectionStart !== editor.selectionEnd)
+    );
+  };
   const valid = () => gesture && enabled() && getCurrent() === gesture.current;
   document.addEventListener(
     "pointerdown",
@@ -37,7 +43,8 @@ export function installRemoteToolSwipes({ getCurrent, enabled, resolveAction, pe
       const current = getCurrent();
       const group = current === "issues" || current === "pulls" ? "github" : current;
       if (!surface || surface.dataset.remoteToolSwipe !== group || selectionActive()) return;
-      if (event.target.closest?.("input, textarea, select, [contenteditable]")) return;
+      const editor = event.target.closest?.("input, textarea, select, [contenteditable]");
+      if (editor && !(current === "memo" && editor.matches("textarea#memoText"))) return;
       gesture = {
         pointerId: event.pointerId,
         x: event.clientX,
