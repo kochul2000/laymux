@@ -97,7 +97,7 @@ ADR 이 필요한 대표 기준:
 | [0077](0077-remote-terminal-font-serving.md) | Remote 터미널 폰트는 데스크톱 시스템 폰트를 sfnt 그대로 서빙한다 (woff2 변환 없음, 기본 off) | Accepted |
 | [0078](0078-wsl-in-frame-cursor-park-metadata.md) | WSL 인프레임 커서 주차는 바이트 보류 없이 reset 메타데이터로 전달 | Accepted |
 | [0079](0079-dec2026-cursor-gate-lifecycle-bypass.md) | DEC 2026 커서는 renderer lifecycle 우회까지 raw gate로 막는다 | Accepted |
-| [0080](0080-output-backlog-coalescing-and-out-of-band-frontend-vitals.md) | 스트림 의미는 원래 경계에서 처리하고 xterm 물리 쓰기만 제한적으로 묶는다 | Accepted |
+| [0080](0080-output-backlog-coalescing-and-out-of-band-frontend-vitals.md) | 스트림 의미는 원래 경계에서 처리하고 xterm 물리 쓰기만 제한적으로 묶는다 | Accepted (partially superseded by [0336](0336-webview2-process-failure-gui-restart.md)) |
 | [0081](0081-pane-focus-transition-single-owner.md) | Pane 포커스 전환은 단일 도메인 액션이 소유한다 | Accepted |
 | [0082](0082-terminal-helper-ime-focus-refresh.md) | 앱 복귀 시 DOM-active xterm helper 는 blur/focus 로 IME 문맥을 재활성화 (0057 확장) | Superseded by [0108](0108-windows-ime-editable-focus-relay.md) |
 | [0083](0083-automation-health-instance-identity.md) | Automation health는 프로세스·빌드 신원을 함께 공개한다 | Accepted |
@@ -359,6 +359,7 @@ ADR 이 필요한 대표 기준:
 | [0333](0333-destructive-confirmation-global-and-pane-control-bar.md) | 파괴적 action 두 번 확인을 전역 설정으로 올리고 pane 컨트롤 바에도 적용한다 (0211 설정 키·적용 범위 대체) | Accepted |
 | [0334](0334-console-less-wsl-runs.md) | laymux가 띄우는 파이프 기반 WSL 실행은 콘솔 없이 lifted `wsl.exe`를 직접 띄운다 (0120·0104 실행 수단 일부 대체) | Accepted |
 | [0335](0335-shared-wsl-guest-observations.md) | WSL 게스트 관측은 distribution별 공유 run으로 합치고, 신선도는 호출자가 계약한다 (0120 probe 실행 단위·0238 진단 실행 방식 확장) | Accepted |
+| [0336](0336-webview2-process-failure-gui-restart.md) | WebView2 프로세스가 실패하면 PTY 데몬 세션을 인계하고 GUI를 다시 시작하며, 재시작 예산으로 반복을 멈춘다 (0080 일부 대체) | Accepted |
 | [0337](0337-legacy-wsl-client-warning.md) | inbox(구형) WSL 클라이언트로 WSL을 쓰면 경고만 띄운다 (0334 후속) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.

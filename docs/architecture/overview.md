@@ -38,6 +38,15 @@ crash reporter의 `MessageDialog`이며, headless test에서는 대화상자를 
 GTK3 개발·런타임 라이브러리는 Tauri/WebKitGTK의 기존 Linux prerequisite를 그대로
 재사용한다. Windows dependency에는 Linux backend feature를 전달하지 않는다.
 
+Windows에서는 WebView2 프로세스가 GUI와 따로 죽을 수 있다. GUI는 메인 WebView의
+`ProcessFailed`를 구독한다. browser나 main frame renderer가 죽거나, 프론트가 30초 넘게 멈춘
+창에 입력이 들어오면, PTY 데몬 세션을 업데이트처럼 인계하고 다음 GUI 프로세스로 바뀐다.
+최근 10분 안에 자동 재시작이 2번 있었으면 `rfd` 대화상자로 다시 시작할지 묻는다
+([ADR-0336](../adr/0336-webview2-process-failure-gui-restart.md),
+[data-flow.md §13.9](data-flow.md#139-webview2-프로세스-실패-복구-windows)). Windows의 `rfd`
+사용처는 crash reporter와 이 복구 안내다. 이를 위해 `webview2-com`·`windows-core`를 wry와 같은
+버전으로 Windows 전용 직접 의존에 둔다.
+
 Android 앱은 Cargo/Tauri workspace 구성원이 아니다. Cloud WebView는 기존 Laymux Cloud의
 landing/dashboard와 HttpOnly account session을 표시하고 Google login·PC 선택·연결 설정 진입만 좁은 native bridge에
 위임한다. Google OAuth page를 embedded WebView에서 열지 않고 Credential Manager가 받은 ID token을
