@@ -18,6 +18,16 @@ export function nextRemoteTool(current, direction, available) {
   return null;
 }
 
+/** Close mode first returns to the first tab of the current GitHub panel. */
+export function resolveToolSwipe(current, direction, available, rightAction, canClose) {
+  if (!current) return null;
+  if (direction === -1 && rightAction === "close") {
+    if (current === "pulls") return "issues";
+    return canClose ? "close" : null;
+  }
+  return nextRemoteTool(current, direction, available);
+}
+
 /** One pointer owner across tool surfaces; only the memo editor opts in. */
 export function installRemoteToolSwipes({ getCurrent, enabled, resolveAction, perform }) {
   let gesture = null;

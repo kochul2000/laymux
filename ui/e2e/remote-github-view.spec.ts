@@ -242,10 +242,10 @@ async function flickTool(page: Page, selector: string, direction: number, dy = 0
 
 // Native touch input lets Chromium arbitrate scrolling against pointer handlers.
 // dispatchEvent alone cannot expose a textarea consuming the horizontal fling.
-async function flickMemo(page: Page, dx: number, dy = 0) {
-  const textarea = page.locator("#memoText");
-  await expect(textarea).toBeEnabled();
-  const box = (await textarea.boundingBox())!;
+async function flickSurface(page: Page, selector: string, dx: number, dy = 0) {
+  const surface = page.locator(selector);
+  await expect(surface).toBeVisible();
+  const box = (await surface.boundingBox())!;
   const x = box.x + box.width / 2;
   const y = box.y + box.height / 2;
   const cdp = await page.context().newCDPSession(page);
@@ -266,8 +266,202 @@ async function flickMemo(page: Page, dx: number, dy = 0) {
   }
 }
 
+async function flickMemo(page: Page, dx: number, dy = 0) {
+  await expect(page.locator("#memoText")).toBeEnabled();
+  await flickSurface(page, "#memoText", dx, dy);
+}
+
+async function openPanelSettings(page: Page) {
+  await page.locator("#navToggle").click();
+  await page.locator("#drawerSettingsButton").click();
+  await page.locator("#settingsTabPanels").click();
+}
+
+async function expectToolControls(page: Page, toolbar: string, body: string, bottom: boolean) {
+  const controls = (await page.locator(toolbar).boundingBox())!;
+  const content = (await page.locator(body).boundingBox())!;
+  expect(controls.height).toBe(40);
+  expect(controls.x).toBeGreaterThanOrEqual(0);
+  expect(controls.x + controls.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+  expect(controls.y + controls.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+  if (bottom) expect(content.y + content.height).toBeLessThanOrEqual(controls.y + 1);
+  else expect(controls.y + controls.height).toBeLessThanOrEqual(content.y + 1);
+}
+
 test.describe("Remote GitHub view", () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 720 } });
+
+  test("native right flings return from PRs to Issues before closing", async ({
+    context,
+    page,
+  }) => {
+    await installMocks(context);
+    await connect(page);
+    await page.locator("#githubHeader").click();
+    await page.locator("#githubPullsTab").click();
+    await flickSurface(page, "#githubList", 120);
+    await expect(page.locator("#githubOverlay")).toBeVisible();
+    await expect(page.locator("#githubIssuesTab")).toHaveAttribute("aria-selected", "true");
+    await flickSurface(page, "#githubList", 120);
+    await expect(page.locator("#githubOverlay")).toBeHidden();
+  });
+
+  test("PRs can return to Issues with close and the GitHub header icon disabled", async ({
+    context,
+    page,
+  }) => {
+    await installMocks(context);
+    await context.addInitScript(() => {
+      localStorage.setItem("laymux.remote.swipeCloseDrawers", "0");
+      localStorage.setItem("laymux.remote.headerGithub", "0");
+      localStorage.setItem("laymux.remote.rightSwipeView", "github");
+    });
+    await page.goto("http://remote.test/remote/");
+    await page.locator("#token").fill("remote-secret");
+    await page.locator("#connect").click();
+    await expect(page.locator("#terminal .xterm")).toBeVisible();
+    await flickRightEdge(page);
+    await page.locator("#githubPullsTab").click();
+    await flickSurface(page, "#githubList", 120);
+    await expect(page.locator("#githubIssuesTab")).toHaveAttribute("aria-selected", "true");
+    await flickSurface(page, "#githubList", 120);
+    await expect(page.locator("#githubOverlay")).toBeVisible();
+  });
+
+  test("all right tools default to bottom controls and retain the top preference after reload", async ({
+    context,
+    page,
+  }) => {
+    await installMocks(context);
+    await connect(page);
+    for (const width of [390, 900]) {
+      await page.setViewportSize({ width, height: 720 });
+      await page.locator("#githubHeader").click();
+      await expect(page.locator("#githubList .github-row")).toHaveCount(1);
+      await expectToolControls(page, "#githubToolbar", "#githubList", true);
+      await page.screenshot({ path: `../.screenshots/remote-github-controls-bottom-${width}.png` });
+      await page.locator("#githubClose").click();
+      await page.locator("#memoHeader").click();
+      await expect(page.locator("#memoText")).toBeEnabled();
+      await expectToolControls(page, "#memoToolbar", "#memoText", true);
+      await page.screenshot({ path: `../.screenshots/remote-memo-controls-bottom-${width}.png` });
+      await page.locator("#memoClose").click();
+      await page.locator("#fileExplorerHeader").click();
+      await expect(page.locator("#fileViewerDirectory")).toBeVisible();
+      await expectToolControls(page, "#fileViewerToolbar", "#fileViewerBody", true);
+      await page.locator(".file-viewer-directory-row", { hasText: "notes.txt" }).click();
+      await expect(page.locator("#fileViewerText")).toBeVisible();
+      await expectToolControls(page, "#fileViewerToolbar", "#fileViewerBody", true);
+      await page.screenshot({ path: `../.screenshots/remote-file-controls-bottom-${width}.png` });
+      await page.locator("#fileViewerClose").click();
+    }
+    await openPanelSettings(page);
+    await expect(page.locator("#toolControlsBottomToggle")).toBeChecked();
+    await page.locator("#toolControlsBottomToggle").uncheck();
+    expect(
+      await page.evaluate(() => localStorage.getItem("laymux.remote.toolControlsBottom")),
+    ).toBe("0");
+    await page.locator("#navToggle").click();
+    await page.locator("#githubHeader").click();
+    await expectToolControls(page, "#githubToolbar", "#githubList", false);
+    await page.locator("#githubClose").click();
+    await page.locator("#memoHeader").click();
+    await expectToolControls(page, "#memoToolbar", "#memoText", false);
+    await page.locator("#memoText").fill("배치 옵션 뒤에도 보존할 초안");
+    await page.locator("#memoClose").click();
+    await page.locator("#fileExplorerHeader").click();
+    await expectToolControls(page, "#fileViewerToolbar", "#fileViewerBody", false);
+    await page.locator("#fileViewerClose").click();
+    await openPanelSettings(page);
+    await page.locator("#toolControlsBottomToggle").check();
+    await page.locator("#navToggle").click();
+    await page.locator("#memoHeader").click();
+    await expectToolControls(page, "#memoToolbar", "#memoText", true);
+    await expect(page.locator("#memoText")).toHaveValue("배치 옵션 뒤에도 보존할 초안");
+    await page.locator("#memoClose").click();
+    await openPanelSettings(page);
+    await page.locator("#toolControlsBottomToggle").uncheck();
+    await page.reload();
+    await openPanelSettings(page);
+    await expect(page.locator("#toolControlsBottomToggle")).not.toBeChecked();
+    await page.locator("#navToggle").click();
+    await expect(page.locator("#githubHeader")).toBeVisible();
+    await page.locator("#githubHeader").click();
+    await expectToolControls(page, "#githubToolbar", "#githubList", false);
+  });
+
+  test("bottom tool controls follow the visible viewport when the keyboard reduces it", async ({
+    context,
+    page,
+  }) => {
+    await installMocks(context);
+    await connect(page);
+    await page.locator("#memoHeader").click();
+    await expect(page.locator("#memoText")).toBeEnabled();
+    await page.evaluate(() => {
+      Object.defineProperty(window.visualViewport, "height", { configurable: true, value: 400 });
+      window.visualViewport!.dispatchEvent(new Event("resize"));
+    });
+    const controls = (await page.locator("#memoToolbar").boundingBox())!;
+    expect(controls.y + controls.height).toBeLessThanOrEqual(400);
+    await expectToolControls(page, "#memoToolbar", "#memoText", true);
+    await page.screenshot({ path: "../.screenshots/remote-memo-controls-keyboard.png" });
+  });
+
+  test("MCP changes tool control placement live without resetting the memo editor", async ({
+    context,
+    page,
+  }) => {
+    await installMocks(context);
+    let pending: { toolControlsBottom: boolean } | null = null;
+    let ack: { requestId: string; success: boolean } | undefined;
+    let serial = 0;
+    let reportedBottom: boolean | undefined;
+    await context.route("http://remote.test/remote/v1/session/heartbeat", async (route) => {
+      const { deviceSettings: device, leaseId } = route.request().postDataJSON();
+      reportedBottom = device.settings.toolControlsBottom;
+      ack = device.result;
+      const command = pending
+        ? {
+            requestId: String(++serial),
+            clientId: device.clientId,
+            leaseId,
+            expectedRevision: device.revision,
+            validForMs: 10000,
+            patch: pending,
+          }
+        : null;
+      pending = null;
+      await route.fulfill({ json: { active: true, leaseId, deviceSettingsCommand: command } });
+    });
+    await connect(page);
+    await page.locator("#memoHeader").click();
+    await expect(page.locator("#memoText")).toBeEnabled();
+    await page.locator("#memoText").fill("위치를 바꿔도 보존되는 메모 초안");
+    await page
+      .locator("#memoText")
+      .evaluate((element: HTMLTextAreaElement) => element.setSelectionRange(2, 6));
+    for (const bottom of [false, true]) {
+      const requestId = String(serial + 1);
+      pending = { toolControlsBottom: bottom };
+      await expect.poll(() => ack, { timeout: 15000 }).toMatchObject({ requestId, success: true });
+      expect(reportedBottom).toBe(bottom);
+      await expectToolControls(page, "#memoToolbar", "#memoText", bottom);
+      await expect(page.locator("#memoText")).toBeFocused();
+      await expect(page.locator("#memoText")).toHaveValue("위치를 바꿔도 보존되는 메모 초안");
+      expect(
+        await page
+          .locator("#memoText")
+          .evaluate((element: HTMLTextAreaElement) => [
+            element.selectionStart,
+            element.selectionEnd,
+          ]),
+      ).toEqual([2, 6]);
+      expect(
+        await page.evaluate(() => localStorage.getItem("laymux.remote.toolControlsBottom")),
+      ).toBe(bottom ? "1" : "0");
+    }
+  });
 
   test("native memo body flings change tools and retain the unsaved draft", async ({
     context,

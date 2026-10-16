@@ -248,9 +248,15 @@
     "toolSwipeRightAction": {
       "type": "string",
       "enum": ["close", "previous"],
-      "description": "열린 도구창에서 오른쪽 스와이프 동작: close는 기존 닫기(닫기 토글 적용), previous는 표시된 도구의 역순 순환. 왼쪽은 항상 다음 도구입니다.",
+      "description": "열린 도구창에서 오른쪽 스와이프 동작: close는 PRs에서 Issues로 돌아간 뒤 닫기(닫기 토글 적용), previous는 표시된 도구의 역순 순환. 탭 이동은 닫기 토글과 독립이며 왼쪽은 항상 다음 도구입니다.",
       "default": "close",
       "applyMode": "live"
+    },
+    "toolControlsBottom": {
+      "type": "boolean",
+      "default": true,
+      "applyMode": "live",
+      "description": "Remote 우측 도구(메모·GitHub·파일 뷰어/탐색기)의 컨트롤바를 하단에 배치합니다. false면 상단이며 이 기기에만 저장합니다."
     },
     "rightSwipeView": {
       "type": "string",
