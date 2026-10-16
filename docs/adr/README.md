@@ -354,7 +354,7 @@ ADR 이 필요한 대표 기준:
 | [0328](0328-automation-stack-keeps-visible-layer.md) | Automation 스택 생성은 기존 표시 레이어를 유지한다 | Accepted |
 | [0329](0329-daemon-retains-workspace-display-context.md) | 데몬 재결합은 워크스페이스 표시 문맥을 메모리로 인계한다 | Accepted |
 | [0330](0330-agent-integration-missing-notice.md) | 실제 사용한 에이전트 환경의 훅·MCP 미설치를 앱 알림으로 안내한다 (0289·0324·0325 확장, 0282 준수) | Accepted |
-| [0331](0331-remote-memo-body-tool-swipe.md) | Remote 메모 본문은 수평 도구 스와이프를 받는다 (0261 입력칸 제외 규칙 일부 대체) | Proposed |
+| [0331](0331-remote-memo-body-tool-swipe.md) | Remote 메모 본문은 수평 도구 스와이프를 받는다 (0261 입력칸 제외 규칙 일부 대체) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 
