@@ -1943,7 +1943,7 @@ Remote UI는 이미 확인된 연결 상태가 바뀔 때 화면 상단에 3초�
 
 `remote-tool-swipe.js`는 고정 Issues → PRs → Files → Memo 순서에서 헤더 표시 설정 AND 가용성(lease, GitHub active terminal, Files capability)에 맞는 다음 항목을 계산한다. 현재 항목이 숨겨져 있어도 원래 위치를 기준으로 찾으며 다른 항목이 없으면 no-op이다. 기존 `rightSwipeView`는 숨긴 도구도 직접 열 수 있다. 탐색 제외·PC 모드는 도구가 아니므로 순환 대상이 아니다.
 
-문서 단일 포인터 소유자가 `data-remote-tool-swipe` 표면(도구 헤더, GitHub 목록, Files 디렉터리 목록)만 처리한다. 모바일 touch/pen에서 56px·수직 대비 1.25배 수평 이동을 확인하고 pointerup에서 한 단계 전환하며 후속 클릭을 소비한다. 입력 요소·메모 textarea·파일 렌더러·선택 중인 텍스트는 제외하고 수직 이동·다중 포인터·취소는 전환하지 않는다. 도구 상단에 별도 스와이프 안내 줄을 표시하지 않는다([ADR-0263](../adr/0263-remote-tool-swipe-hint-removal.md)). Memo 초안은 기존 문서에 남고 자동 저장하지 않는다. Files Back은 현재 파일에서 폴더 복귀를 유지하며 다른 도구에서 Files를 다시 열면 기존 terminal CWD 경로를 사용한다.
+문서 단일 포인터 소유자가 `data-remote-tool-swipe` 표면(도구 헤더, GitHub 목록, Files 디렉터리 목록, 메모 본문 textarea)을 처리한다. 모바일 touch/pen에서 56px·수직 대비 1.25배 수평 이동을 확인하고 pointerup에서 한 단계 전환하며 후속 클릭을 소비한다. 메모 본문은 입력칸 제외 규칙의 유일한 예외이며 본문의 `touch-action: pan-y`로 세로 스크롤을 보존한다. 다른 입력 요소·파일 렌더러·문서 선택 또는 포커스된 메모의 선택 범위는 제외하고 수직 이동·다중 포인터·취소는 전환하지 않는다([ADR-0331](../adr/0331-remote-memo-body-tool-swipe.md)). 도구 상단에 별도 스와이프 안내 줄을 표시하지 않는다([ADR-0263](../adr/0263-remote-tool-swipe-hint-removal.md)). Memo 초안은 기존 문서에 남고 자동 저장하지 않는다. Files Back은 현재 파일에서 폴더 복귀를 유지하며 다른 도구에서 Files를 다시 열면 기존 terminal CWD 경로를 사용한다.
 
 ## 14. Rust 코드 설계 원칙
 
