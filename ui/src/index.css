@@ -466,6 +466,39 @@
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
+/* Legacy WSL warning (ADR-0337) — bottom-left so it never covers the hook notice. */
+.legacy-wsl-notice {
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  bottom: 36px;
+  left: 16px;
+  width: min(460px, calc(100vw - 32px));
+  z-index: 9500;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--yellow);
+  padding: 16px;
+  box-shadow: 0 4px 18px #00000066;
+  font-size: var(--settings-label-size);
+}
+.legacy-wsl-notice p {
+  margin: 6px 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.legacy-wsl-notice__command {
+  align-self: flex-start;
+  padding: 2px 6px;
+  background: var(--yellow-08);
+  border: 1px solid var(--border);
+  font-family: monospace;
+}
+.legacy-wsl-notice__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
 .agent-hook-update-notice__targets {
   display: grid;
   gap: 12px;
