@@ -1,6 +1,6 @@
 # 0336. WebView2 프로세스가 실패하면 PTY 데몬 세션을 인계하고 GUI를 다시 시작하며, 재시작 예산으로 반복을 멈춘다 (0080 일부 대체)
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-16
 - Source: [issue #1215](https://github.com/kochul2000/laymux/issues/1215), 2026-10-16 18:33 사고([ADR-0334](0334-console-less-wsl-runs.md) Context), [WebView2 process-related events](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/process-related-events), [data-flow.md §8.23](../architecture/data-flow.md#823-pty-소유자와-pty-데몬), [data-flow.md §13.9](../architecture/data-flow.md#139-webview2-프로세스-실패-복구-windows), dev 실기(아래 Consequences)
 - 관계: [ADR-0084](0084-desktop-terminal-output-parsed-credit.md)가 비목표로 남긴 WebView 프로세스 복구와 [ADR-0334](0334-console-less-wsl-runs.md)가 후속으로 남긴 `ProcessFailed` 복구를 결정한다. [ADR-0308](0308-pty-daemon-generations-across-updates.md)의 업데이트 인계(데몬 세션을 끝내지 않고 다음 GUI가 재결합)를 WebView 복구 재시작에 그대로 쓰며, [ADR-0301](0301-pty-daemon-default-adoption.md)의 재결합, [ADR-0312](0312-pty-daemon-grace-without-gui.md)의 유예, [ADR-0319](0319-update-handoff-carries-terminal-title.md)의 title 인계는 바꾸지 않는다. [ADR-0080](0080-output-backlog-coalescing-and-out-of-band-frontend-vitals.md)의 "어떤 control path도 이 metric으로 동작을 바꾸지 않는다"를 일부 대체한다. WebView 무응답 복구 하나만 마지막 frontend health report의 **시각**을 읽는다.
