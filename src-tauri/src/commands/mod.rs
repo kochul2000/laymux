@@ -30,6 +30,7 @@ mod terminal_teardown;
 mod usage;
 mod viewer_startup;
 mod wsl_agent_session;
+mod wsl_client;
 
 pub use crate::cloud::commands::*;
 pub use agent_hooks::*;
@@ -62,6 +63,7 @@ pub use terminal_home::*;
 pub use terminal_output_surface::*;
 pub use usage::*;
 pub use viewer_startup::*;
+pub use wsl_client::*;
 
 /// Commands whose body reaches the filesystem, spawns a process or enumerates
 /// a system resource must not run on the main thread (ADR-0202).
@@ -171,6 +173,7 @@ mod main_thread_io {
             include_str!("terminal_home.rs"),
             &["get_terminal_home_directory"],
         ),
+        (include_str!("wsl_client.rs"), &["get_legacy_wsl_notice"]),
     ];
 
     #[test]
