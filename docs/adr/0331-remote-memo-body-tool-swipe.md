@@ -1,6 +1,6 @@
 # 0331. Remote 메모 본문은 수평 도구 스와이프를 받는다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-16
 - Source: 사용자 요구("메모플링만 해결하고 말아라", "깃헙은 그대로 둬"), [ADR-0261](0261-remote-visible-tool-swipe-cycle.md), [ADR-0263](0263-remote-tool-swipe-hint-removal.md), [api-contracts.md §13](../architecture/api-contracts.md)
 - Partially supersedes: ADR-0261의 textarea 제외 규칙 중 Remote 메모 본문에 한정한다.
