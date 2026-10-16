@@ -1785,15 +1785,15 @@ test.describe("remote mobile layout", () => {
         type: "touchMove",
         touchPoints: [{ x: x + dx, y: y + dy, id: 1 }],
       });
-      // Settle before lifting, well inside the 400 ms repeat delay. A synthetic
-      // 32 px jump released instantly reads as a fling to Chromium 156+, which
-      // then spends the next tap on stopping it and synthesizes no click — a
-      // harness artifact a real thumb does not produce (#1204).
-      await page.waitForTimeout(120);
+      // Lifted while still moving on purpose: a fast flick must not leave a
+      // browser fling that swallows the next soft-key tap's click (#1204).
       await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
       await expect(helperTextarea).toBeFocused();
       await expect.poll(() => writes.length).toBe(writeIndex + 1);
       expect(writes[writeIndex]).toBe(sequence);
+      // A flick sends once on release; a late repeat would land here.
+      await page.waitForTimeout(150);
+      expect(writes.length).toBe(writeIndex + 1);
     };
 
     for (const key of fixedCases) {
