@@ -365,7 +365,7 @@ fn process_arguments(process: &CodexStatusProcess) -> Result<Vec<String>, String
     #[cfg(windows)]
     {
         if let Some(distro) = &process.distro {
-            let mut command = crate::process::headless_command("wsl.exe");
+            let mut command = crate::process::headless_wsl_command();
             command.args([
                 "-d",
                 distro,
@@ -415,7 +415,7 @@ fn process_start(pid: u32, distro: Option<&str>) -> Result<u64, String> {
     }
     #[cfg(windows)]
     let stat = {
-        let mut command = crate::process::headless_command("wsl.exe");
+        let mut command = crate::process::headless_wsl_command();
         command.args([
             "-d",
             distro.ok_or("Missing WSL distro")?,

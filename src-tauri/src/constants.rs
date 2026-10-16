@@ -749,6 +749,19 @@ pub const WSL_LIVENESS_POSITIVE_MAX_AGE: Duration = Duration::from_secs(20);
 /// second `wsl.exe` spawn, and it only changes on `wsl --set-default`.
 pub const WSL_DEFAULT_DISTRO_CACHE_TTL: Duration = Duration::from_secs(60);
 
+// ── Console-less WSL runs (ADR-0334) ───────────────────────────────
+
+/// File name of the WSL client. Bare, it resolves to the inbox launcher in
+/// `System32`; joined to the lifted install location it is the real client.
+pub const WSL_EXE: &str = "wsl.exe";
+
+/// Registry key (under `HKEY_LOCAL_MACHINE`) where the lifted WSL package
+/// records where it is installed.
+pub const WSL_MSI_REGISTRY_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI";
+
+/// Value under [`WSL_MSI_REGISTRY_KEY`] holding the install directory.
+pub const WSL_MSI_INSTALL_LOCATION_VALUE: &str = "InstallLocation";
+
 // ── Sleep prevention (ADR-0114) ────────────────────────────────────
 
 /// How often a held inhibitor is checked for having died behind our back.

@@ -38,7 +38,9 @@ fn wsl_command(
     starting_directory: &str,
     config_dir: &str,
 ) -> Result<std::process::Command, ReadError> {
-    let mut command = crate::process::headless_command(&parts[0]);
+    // `parts[0]` only told us this is WSL; the run itself must not own a
+    // console (ADR-0334).
+    let mut command = crate::process::headless_wsl_command();
     let mut args = parts[1..].iter().peekable();
     while let Some(arg) = args.next() {
         if arg == "--" && args.peek().is_none() {
@@ -150,7 +152,11 @@ mod tests {
         settings.usage.codex.profile.clear();
         let home = "/home/alice/account ' $(echo unexpected)";
         let command = command(&settings, home).unwrap();
-        assert_eq!(command.get_program(), "wsl.exe");
+        // The profile only selects WSL; the client is the console-less one (ADR-0334).
+        assert_eq!(
+            command.get_program(),
+            crate::process::headless_wsl_command().get_program()
+        );
         let args: Vec<_> = command
             .get_args()
             .map(|arg| arg.to_string_lossy())
@@ -209,7 +215,7 @@ while IFS= read -r line; do
   fi
 done
 "#).unwrap();
-        let status = crate::process::headless_command("wsl.exe")
+        let status = crate::process::headless_wsl_command()
             .args(["--exec", "chmod", "+x", &format!("{home}/codex")])
             .status()
             .unwrap();
@@ -218,7 +224,7 @@ done
         let query = || {
             let command = command(&settings, &account).unwrap();
             // WSL은 HOME을 자체 설정한다. 테스트 전용 rcfile로 실제 CLI·계정을 격리한다.
-            let mut isolated = crate::process::headless_command(command.get_program());
+            let mut isolated = crate::process::headless_wsl_command();
             for arg in command.get_args() {
                 if arg == "-ic" {
                     isolated.args(["--rcfile", &format!("{home}/.bashrc")]);
