@@ -25,7 +25,7 @@ laymux가 띄우는 파이프 기반 `wsl.exe` 실행은 `crate::process::headle
 
 - lifted 클라이언트 위치의 SoT는 `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI`의 `InstallLocation`이다(64-bit view). 프로세스 수명 동안 한 번 읽고, 실행마다 `<InstallLocation>\wsl.exe`가 파일로 있는지 확인한다.
 - 값이 없거나 파일이 없으면(inbox 전용 WSL, 제거된 설치) 기존 `headless_command("wsl.exe")`로 되돌아간다. 이 경로는 기존과 같이 실행마다 콘솔을 만든다.
-- issue reporter shell prefix의 첫 프로그램이 WSL 클라이언트(파일 이름 `wsl`/`wsl.exe`)면 그 프로그램 대신 이 헬퍼를 쓰고 나머지 prefix 인자는 그대로 둔다. 다른 프로그램은 쓰인 그대로 `headless_command`로 띄운다.
+- Windows에서 issue reporter shell prefix의 첫 프로그램이 WSL 클라이언트(파일 이름 `wsl`/`wsl.exe`)면 그 프로그램 대신 이 헬퍼를 쓰고 나머지 prefix 인자는 그대로 둔다. 다른 프로그램과 비Windows의 prefix는 쓰인 그대로 `headless_command`로 띄운다.
 - 인자 구성·distribution 검증·stdio·timeout은 호출부 책임 그대로다. 콘솔 없는 실행은 stdin/stdout/stderr를 파이프나 NUL로 받는 실행에만 쓴다.
 - 불변식: 소스 트리에 `headless_command("wsl.exe")` 호출 형식이 없다(소스 가드 테스트가 이 문자열을 검사한다). 대화형 WSL(PTY)은 이 헬퍼를 쓰지 않는다.
 - WSL은 콘솔 없는 클라이언트를 console ID 0 하나의 매핑으로 묶어 session leader를 공유한다. laymux 실행은 콘솔 상태나 TTY에 의존하지 않으므로 이 공유를 가정하지도, 피하지도 않는다.

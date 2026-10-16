@@ -82,7 +82,7 @@ UI/디자인 변경은 `/screenshot` 스킬로 최종 결과를 확인한다. �
 ## 작업 규칙 (코드 짜기 전 확인)
 
 - **Rust 설계 원칙** — [api-contracts.md §14](docs/architecture/api-contracts.md). 에러 `AppError`(프로덕션 `unwrap()` 금지), 락 `MutexExt::lock_or_err()` + `state.rs` 순서, 매직 스트링은 `constants.rs`, 파일 500줄↑ 분할, `#[tauri::command]` 는 얇은 진입점(핵심 로직은 `&AppState` 내부 함수), `eprintln!` 대신 `tracing`.
-- **외부 프로세스는 `crate::process::headless_command()`** — `std::process::Command::new()` 금지(Windows 콘솔 창 깜빡임 방지). laymux가 띄우는 파이프 기반 `wsl.exe` 실행(WSL gh prefix 포함)은 `crate::process::headless_wsl_command()` — 실행마다 콘솔(`conhost.exe`)을 만들지 않는다. PTY 는 대상이 아니다([ADR-0334](docs/adr/0334-console-less-wsl-runs.md)).
+- **외부 프로세스는 `crate::process::headless_command()`** — `std::process::Command::new()` 금지(Windows 콘솔 창 깜빡임 방지). laymux가 띄우는 파이프 기반 `wsl.exe` 실행(Windows 의 WSL gh prefix 포함)은 `crate::process::headless_wsl_command()` — lifted WSL 이면 클라이언트를 콘솔 없이 직접 띄워 실행마다 `conhost.exe` 를 만들지 않는다(inbox fallback 은 기존처럼 콘솔을 만든다). PTY 는 대상이 아니다([ADR-0334](docs/adr/0334-console-less-wsl-runs.md)).
 - **OSC 처리는 Rust 전용** — 파싱(`osc.rs`)·훅(`osc_hooks.rs`)·디스패치(`dispatch_osc_action`)는 Rust PTY 콜백 단일 패스. 프론트는 구조화 Tauri 이벤트만 구독. ([ADR-0001](docs/adr/0001-osc-rust-single-pass.md))
 - **CWD 는 SyncGroup 으로** — 백그라운드 셸을 만들지 말고 `terminalStore` 의 syncGroup CWD 를 구독. FS 접근은 Rust `std::fs`. ([ADR-0003](docs/adr/0003-cwd-single-source-syncgroup.md))
 - **원시 상태 분리 → 단일 계산 함수** — 여러 시스템이 한 표시에 관여할 때 각자 원시 상태만 저장하고, 표시는 계산 함수에서 도출. ([ADR-0005](docs/adr/0005-display-state-raw-separation-compute.md))
