@@ -818,6 +818,38 @@ pub const AGENT_USAGE_MAX_OBSERVATIONS: usize = 1024;
 /// Resolved (provider, environment) usage targets kept for the app run (ADR-0330).
 pub const AGENT_USAGE_MAX_TARGETS: usize = 64;
 
+// ── WebView2 process failure recovery (ADR-0336) ───────────────────
+
+/// Label of the one webview window `tauri.conf.json` declares.
+pub const MAIN_WINDOW_LABEL: &str = "main";
+
+/// Automatic GUI restarts allowed inside [`WEBVIEW_RECOVERY_WINDOW_MS`]. A
+/// session that keeps killing WebView2 — the USER handle exhaustion of
+/// ADR-0334 — fails again right after a restart, so the budget is small and
+/// the next failure asks the user instead.
+pub const WEBVIEW_RECOVERY_MAX_RESTARTS: usize = 2;
+
+/// Sliding window of the restart budget. Kept on disk with the restarts:
+/// each restart is a new process that remembers nothing of the last one.
+pub const WEBVIEW_RECOVERY_WINDOW_MS: u64 = 10 * 60 * 1000;
+
+/// An unresponsive-renderer report restarts the GUI only once the frontend
+/// has sent no health report (ADR-0080, every second while its main thread
+/// runs) for this long. An output flood can keep the main thread busy for
+/// seconds (#606) and still let the probe through.
+pub const WEBVIEW_HANG_SILENCE_MS: u64 = 30_000;
+
+/// The recent recovery restarts, in the cache directory.
+pub const WEBVIEW_RECOVERY_HISTORY_FILE: &str = "webview-recovery.json";
+
+/// First argument of a GUI started to replace one whose WebView failed; the
+/// second is the PID of that predecessor.
+pub const GUI_RELAUNCH_AFTER_CLI_FLAG: &str = "--relaunch-after";
+
+/// How long a relaunched GUI waits for its predecessor to exit before it
+/// starts anyway. Exiting normally takes well under a second.
+pub const GUI_RELAUNCH_PREDECESSOR_WAIT_MS: u32 = 10_000;
+
 #[cfg(test)]
 mod tests {
     use super::*;

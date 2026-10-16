@@ -987,6 +987,7 @@ GUI proxy(`pty_daemon/client.rs`)는 `PtySystem`·`MasterPty`·`Child`·`Interru
 | 자식 스스로 종료 | 데몬이 입력·master를 닫아 남은 출력과 EOF를 받는다(ConPTY는 master를 닫아야 EOF). EOF·exit를 모두 관측하면 세션을 제거하고, attach된 client에는 `Eof`·`Exit`를 보낸다 |
 | `Attach` | 기존 client를 닫고 대체한다. `replay`가 켜져 있으면 새 client는 `Attached` → backlog → live 순서로 받는다. 꺼져 있으면 backlog를 버리고 `droppedBytes`에 센 뒤 `Attached` → 화면 redraw와 모드 단언(ADR-0303·0307) → live 순서로 받는다. 선택 필드 `missedOutput`이면 backlog를 세지 않고 `Attached` 다음 표지 사이로 넘긴다(ADR-0309). 선택 필드 `size`가 있으면 그 전에 PTY를 그 크기로 바꾼다 |
 | 업데이트 설치 | 데몬 세션은 끝내지 않고 업데이트된 GUI에 넘긴다(ADR-0308). 설치 guard와 Linux 재시작 경로가 `AppState::begin_update_handoff()`를 표시하면, in-process PTY·probe만 끝내고 데몬 터미널의 handle은 terminate 없이 놓는다(master drop이 종료 요청을 보내지 않도록 leak). 앱 종료 경로도 데몬 세션 종료를 건너뛴다. 설치가 실패하면 표시를 지운다. 프로세스가 끝나면 연결이 닫혀 세션은 detach되고, 재시작한 GUI가 재결합한다. Windows 설치기는 `laymux.exe`를 이미지 이름으로 찾아 끝내므로 데몬은 다른 이름의 사본으로 실행한다(아래 기동) |
+| WebView2 실패 복구(Windows) | 업데이트와 같은 인계로 GUI만 바꾼다(ADR-0336, §13.9). 같은 순서(인계 표시 → title 선택 → `terminate_child_processes` → title 저장)로 정리하고, 다음 GUI를 handle 상속 없이 `--relaunch-after <pid>`로 띄운 뒤 정상 종료한다. 다음 GUI는 이전 GUI가 끝난 뒤 시작해 재결합한다. 사용자가 대화상자에서 종료를 고르면 인계만 하고 끝나며, 유예 시간 안에 다시 연 GUI가 재결합한다 |
 
 GUI는 데몬 자식의 PID를 직접 kill하지 않는다(`ChildKillOwner::Backend`). handle을 가진 데몬이 tree kill을 수행한다. 데몬 연결이 끊기면 GUI reader는 `Failure`로 끝나고 child는 종료로 처리된다. 데몬 안의 작업은 계속 실행되지만, 그 터미널을 teardown하거나 앱을 종료하면 `terminateSession`으로 정리된다.
 
@@ -1804,6 +1805,40 @@ Pane을 가리키는 식별자는 용도가 다른 3가지가 공존한다. 혼�
 - `paneNumber`는 spawn-time env var로 주입하지 않는다(레이아웃 변경 시 stale). 자기 번호가 필요하면 `identify_caller`의 `pane.number`를 라이브 조회한다.
 - **workspace name invariant**: 신규 생성/rename 적용 시 `workspace.name`의 모든 공백류는 `-`로 치환하고 앞뒤 공백은 제거한다. 예: `"My Workspace"` → `"My-Workspace"`. 마이그레이션은 하지 않으며, 기존 데이터는 다음 rename 이후 이 규칙이 적용된다. 콜론(`:`)은 정규화하지 않으므로 이름에 남을 수 있다 — locator 파싱은 이를 고려해 마지막 `:` 기준으로 분리한다(아래).
 - **식별자 복사 (issue #276)**: 컨트롤바 `PaneNumberBadge`를 클릭하거나 `pane.copyIdentifier` 키바인딩(기본 `Ctrl+Alt+C`)을 누르면 해당 pane의 식별자를 클립보드에 복사한다. 포맷은 `ui/src/lib/pane-numbers.ts`의 순수 함수 `formatPaneIdentifier()`가 생성하며, `lx:pane:<workspaceName>:<paneNumber>` 형태다. 예: `lx:pane:Default:1`. 이 문자열은 자동화/MCP `write_to_terminal`·`read_terminal_output`·`focus_terminal`에서 `terminal_id` 또는 `pane_ref`로 그대로 사용할 수 있다. MCP는 locator를 마지막 `:` 기준으로 분리해(`rsplit_once`) 마지막 세그먼트를 pane number, 그 앞 전체를 workspace name으로 본다(이름에 `:`가 있어도 안전). 그런 다음 workspace name을 현재 workspace 목록에서 id로 해석한 뒤 `terminals.resolveByNumber` 경로로 terminalId를 찾는다. `paneNumber`는 휘발성이므로 복사값도 시점 참조다. 배지는 `workspaceId`와 `workspaceName`이 주어진 컨트롤바 컨텍스트(PaneGrid)에서만 클릭-복사 가능하며, dock 등 번호 없는 위치에서는 비대화형 라벨로 렌더된다.
+
+### 13.9 WebView2 프로세스 실패 복구 (Windows)
+
+WebView가 UI 전체이므로, WebView2 browser나 main frame renderer가 죽으면 GUI는 살아 있어도 화면이 멈춘다. Windows GUI는 메인 WebView의 `ProcessFailed`를 구독하고, 업데이트와 같은 데몬 인계로 자신을 다음 GUI로 바꾼다([ADR-0336](../adr/0336-webview2-process-failure-gui-restart.md)). 코드는 `src-tauri/src/webview_recovery/`다. 정책(`policy.rs`)·재시작 기록(`history.rs`)·안내문(`notice.rs`)은 플랫폼 중립이고, 구독(`process_failed.rs`)과 재기동(`relaunch.rs`)은 Windows 전용이다. Linux에는 복구가 없다.
+
+```
+[setup 끝] with_webview → controller().CoreWebView2() → add_ProcessFailed (한 번)
+    ▼
+[ProcessFailed, UI 스레드] args(kind·Reason·ExitCode·ProcessDescription·FailureSourceModulePath) 읽기
+    │  frontend 침묵 = now − 마지막 health report 도착(없으면 구독 시작) (ADR-0080 report 시각)
+    │  assess(kind, 침묵) → Record | Wait | Recover | Ignore,  tracing 기록
+    ▼ Recover (세션 로그오프·종료 중이면 중단)
+[worker] claim_restart(cache/webview-recovery.json)
+    ├─ Granted(기록 완료) → 인계(인계 표시 → title 선택 → terminate_child_processes → title 저장)
+    │                     → CreateProcessW(상속 없음) "laymux.exe --relaunch-after <pid>" → exit(0)
+    │                       (기동 실패면 MessageBoxW: 예 → 기록·다시 기동)
+    └─ Exhausted | Unrecorded → MessageBoxW(예/아니요) → 인계
+          ├─ 예   → 기록 → 다음 GUI 기동 → exit(0)
+          └─ 아니요 → exit(0)   (유예 시간 안에 다시 연 GUI가 재결합)
+[다음 GUI main()] --relaunch-after: 그 PID가 끝날 때까지 최대 10초 대기 → run() → 레이아웃 복원·재결합
+```
+
+| `ProcessFailedKind` | 판단 |
+| --- | --- |
+| `BROWSER_PROCESS_EXITED`, `RENDER_PROCESS_EXITED` | Recover |
+| `RENDER_PROCESS_UNRESPONSIVE` | 프론트 침묵 ≥ 30초(`WEBVIEW_HANG_SILENCE_MS`)면 Recover, 아니면 Wait |
+| 그 밖의 종류·모르는 값 | Record(WebView2가 스스로 복구하거나 main frame이 남는다) |
+
+- 무응답 보고는 응답받지 못한 입력 약 15초 뒤에 오고, dev 실측에서는 새 입력 없이 반복되지 않았다. 그래서 정지 시간은 보고 횟수가 아니라 프론트의 1초 health report(api-contracts §12.1)가 끊긴 시간으로 잰다. 한 번 Recover로 판단하면 그 프로세스의 이후 보고는 Ignore다.
+- 재시작 예산: `webview-recovery.json`(`{"restartsMs": [...]}`, 설정 cache 디렉터리)에 자동 재시작 시각을 둔다. 지금 앞뒤 10분 안의 기록이 2개 이상이면 소진이다. 허가된 재시작은 다음 GUI를 띄우기 전에 기록한다. 기록을 읽거나 쓰지 못하면 재시작하지 않고 묻는다. 파일이 없거나 파싱되지 않으면 기록 0이다. 사용자가 대화상자에서 고른 재시작도 기록한다.
+- 다음 GUI는 이전 GUI가 끝난 뒤 시작한다. 그래서 고정 Automation 포트, lx endpoint, WebView2 프로필을 이전 GUI가 놓은 뒤에 잡는다. std `Command`(Tauri `restart`)로 띄우면 이전 GUI의 listen 소켓을 물려받아 포트를 잡지 못한다.
+- 새 GUI는 마지막으로 commit된 복원점으로 시작한다. 죽은 프론트는 checkpoint·출력 캐시를 남기지 못한다. 데몬 터미널은 재결합해 화면을 다시 그린다(§8.23). GUI 소유 PTY는 새로 시작한다.
+- 같은 프로세스에서 페이지를 reload하면 `TerminalView`가 같은 id로 `create_terminal_session`을 다시 불러 `Session '…' already exists`로 실패한다. 그래서 Reload는 복구 수단으로 쓰지 않는다.
+- dev 검증은 [dev-repro-methodology.md §4.8](../dev-repro-methodology.md)을 따른다.
 
 ---
 

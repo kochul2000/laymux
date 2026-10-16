@@ -1,6 +1,6 @@
 # 0080. 스트림 의미는 원래 경계에서 처리하고 xterm 물리 쓰기만 제한적으로 묶는다
 
-- Status: Accepted
+- Status: Accepted (partially superseded by [0336](0336-webview2-process-failure-gui-restart.md) — WebView 무응답 복구가 마지막 health report의 도착 시각을 읽는다)
 - Date: 2026-07-28
 - Source: 사용자 보고(출력 폭주와 레이아웃 변경이 겹칠 때 프론트 42~87초 무응답) · issue #606 · [architecture/data-flow.md §8.4·§8.8](../architecture/data-flow.md) · [architecture/api-contracts.md §12](../architecture/api-contracts.md) · [ADR-0008](0008-shell-cursor-shadow-cursor.md) · [ADR-0026](0026-conpty-width-resize-repaint-filter.md) · [ADR-0069](0069-remote-render-checkpoint-attach.md) · [ADR-0072](0072-terminal-output-gap-sequence-exact-repair.md) · [ADR-0074](0074-xterm-cell-grid-screen-test-tier.md) · [ADR-0078](0078-wsl-in-frame-cursor-park-metadata.md) · [ADR-0079](0079-dec2026-cursor-gate-lifecycle-bypass.md)
 - Relation: ADR-0008·0078·0079의 커서 안정화 경계와 ADR-0072의 sequence 복구 순서를 유지한다. ADR-0026의 공통 fit 스케줄러에는 출력 도착 시각과 물리 write drain 불변식을 명시한다. ADR-0069 checkpoint는 별도 renderer로서 같은 바이트 순서를 유지한다. ADR-0002의 IP allowlist 아래에 backend-served 진단 endpoint를 추가한다.
