@@ -1,6 +1,6 @@
 # 0332. Remote 우측 도구는 하단 컨트롤바를 기본으로 하고 PRs에서 Issues로 돌아간 뒤 닫는다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-16
 - Source: 사용자 요구("이슈까지 갔다가 닫히도록", "우측 툴은 컨트롤바 하단을 옵션으로 주고 기본 true", "메모 뷰어 깃헙 등등"), [ADR-0261](0261-remote-visible-tool-swipe-cycle.md), [ADR-0313](0313-remote-toolbar-shared-size-tokens.md), [api-contracts.md §13](../architecture/api-contracts.md)
 - Partially supersedes: ADR-0261의 오른쪽 close 동작 중 PRs에서 즉시 닫는 규칙만 대체한다. ADR-0313의 공통 툴바 크기 토큰을 그대로 적용한다.
