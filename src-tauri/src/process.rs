@@ -54,6 +54,22 @@ pub fn headless_wsl_command() -> Command {
     headless_command(crate::constants::WSL_EXE)
 }
 
+/// Whether laymux-internal WSL runs fall back to the inbox launcher, which
+/// still gives every run a console of its own (ADR-0334). Always false off
+/// Windows. True on a Windows install without WSL too, so callers must also
+/// establish that WSL is in use.
+pub fn wsl_client_is_inbox() -> bool {
+    #[cfg(windows)]
+    {
+        wsl_launcher(lifted_wsl_install_dir().as_deref(), |path| path.is_file())
+            == WslLauncher::Inbox
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
 /// Which binary a laymux-internal WSL run starts.
 #[cfg(any(windows, test))]
 #[derive(Debug, Clone, PartialEq, Eq)]

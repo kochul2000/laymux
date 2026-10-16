@@ -37,6 +37,7 @@ import { useSessionCheckpointLifecycle } from "@/hooks/useSessionCheckpointLifec
 import { useTerminalDisplayContext } from "@/hooks/useTerminalDisplayContext";
 import { subscribeAgentHookUpdates } from "@/lib/agent-hook-updates";
 import { AgentHookUpdateNotice } from "@/components/layout/AgentHookUpdateNotice";
+import { LegacyWslNotice } from "@/components/layout/LegacyWslNotice";
 
 export function App() {
   useKeyboardShortcuts();
@@ -196,6 +197,7 @@ export function App() {
       <LocalMobileModeOverlay />
       <LifecycleModal />
       <AgentHookUpdateNotice />
+      <LegacyWslNotice />
       {!localMobileModeActive && <RemoteControlOverlay />}
     </div>
   );
