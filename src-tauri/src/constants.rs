@@ -128,9 +128,13 @@ pub const CODEX_SQLITE_STATE_PREFIX: &str = "state_";
 /// Do not wait through shutdown when Codex has an SQLite writer lock.
 pub const CODEX_SQLITE_BUSY_TIMEOUT: u64 = 100;
 /// Upper bound for each Windows→WSL metadata probe used during session save.
+/// A shared guest run (ADR-0335) gets exactly this as its own timeout.
 pub const WSL_AGENT_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
-/// Bound per-pane Codex helper launches within the shared WSL deadline.
-pub const WSL_CODEX_PROBE_CONCURRENCY: usize = 4;
+/// Panes one WSL Codex diagnostics run reads, one after another inside the
+/// guest: one `wsl.exe` per chunk instead of one per pane. Chunks of the same
+/// distribution run concurrently, so a large SQLite log cannot serialize many
+/// panes past the shared deadline (ADR-0335).
+pub const WSL_CODEX_PROBE_BATCH_PANES: usize = 4;
 
 pub const TERM_PROGRAM_LAYMUX: &str = "laymux";
 pub const COLORTERM_TRUECOLOR: &str = "truecolor";
@@ -748,6 +752,21 @@ pub const WSL_LIVENESS_POSITIVE_MAX_AGE: Duration = Duration::from_secs(20);
 /// How long the resolved default WSL distribution is reused. Resolving it is a
 /// second `wsl.exe` spawn, and it only changes on `wsl --set-default`.
 pub const WSL_DEFAULT_DISTRO_CACHE_TTL: Duration = Duration::from_secs(60);
+
+// ── Shared WSL guest observations (ADR-0335) ───────────────────────
+
+/// How long a completed WSL guest observation — the agent process scan or a
+/// Codex diagnostics batch — keeps serving display polling.
+///
+/// Persistence and exit verification never take it on age: they accept only an
+/// observation that started at or after their own boundary. Two bounds, both
+/// asserted in `wsl_probe::snapshot`:
+///
+/// - at least `WSL_AGENT_PROBE_TIMEOUT`, so a polling caller joins a run that is
+///   still in flight instead of starting a second one beside it;
+/// - at most `ACTIVITY_RECONCILE_INTERVAL`, so attribution polling is never
+///   staler than one pass of the liveness verdict it is combined with.
+pub const WSL_GUEST_SNAPSHOT_MAX_AGE: Duration = Duration::from_secs(3);
 
 // ── Console-less WSL runs (ADR-0334) ───────────────────────────────
 

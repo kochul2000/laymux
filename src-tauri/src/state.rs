@@ -72,6 +72,10 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 /// only after the checkpoint registry lock is released (ADR-0222).
 /// `file_viewer_signal` likewise guards only the last desktop viewer signal; the
 /// heartbeat reads it after releasing `remote_control` (ADR-0291).
+/// `wsl_guest_snapshots` likewise owns only its run table and per-run outcome
+/// mutexes. Callers read `pty_handles` for the catalog and release it before
+/// entering; neither mutex is held across guest I/O, while waiting on the
+/// other, or with any ordered `AppState` lock (ADR-0335).
 /// The Android pairing lifecycle mutex is outside `AppState`, but unlike those
 /// isolated registries it may nest `remote_access`: acquire it before every
 /// `AppState` lock and never enter it while holding one (ADR-0144).
@@ -230,6 +234,10 @@ pub struct AppState {
     /// without a bridge round trip (ADR-0291). Owns its own mutex and joins no
     /// ordering above: nothing acquires it while holding another AppState lock.
     pub file_viewer_signal: crate::remote_server::FileViewerSignalMirror,
+    /// Shared WSL guest probe runs — agent process scans and Codex diagnostics
+    /// — with single-flight and per-caller freshness (ADR-0335). Leaf: see the
+    /// lock-ordering notes above.
+    pub wsl_guest_snapshots: crate::wsl_probe::snapshot::GuestProbeCache,
 }
 
 /// Process-global per-terminal write/exec serialization table. See
@@ -420,6 +428,7 @@ impl AppState {
             pty_daemon_adoption_seen: Mutex::new(std::collections::HashSet::new()),
             pty_daemon_update_handoff: std::sync::atomic::AtomicBool::new(false),
             file_viewer_signal: crate::remote_server::FileViewerSignalMirror::default(),
+            wsl_guest_snapshots: crate::wsl_probe::snapshot::GuestProbeCache::default(),
         }
     }
 }

@@ -10,6 +10,12 @@
 //! distribution, a safe distribution name, and a bounded `wsl.exe --exec` run.
 //! Those live here so the two probes cannot drift apart on the security-
 //! relevant parts (distro validation, single deadline for all distros).
+//!
+//! The session-attribution side reads the guest from several callers at once,
+//! so its runs go through [`snapshot`]: one shared run per distribution, with
+//! the freshness each caller needs (ADR-0335).
+
+pub mod snapshot;
 
 use std::time::{Duration, Instant};
 
@@ -33,7 +39,7 @@ pub(crate) fn with_agent_role_probe(script: &str) -> String {
 /// Every WSL-backed terminal and the distribution its probe must run in.
 /// `None` means the pane uses the default distribution, which the caller
 /// resolves once per probe pass.
-#[cfg(windows)]
+#[cfg_attr(not(windows), allow(dead_code))]
 pub struct WslTerminalTargets {
     pub targets: Vec<(String, Option<String>)>,
     /// At least one WSL-backed pane could not be assigned a trustworthy distro.

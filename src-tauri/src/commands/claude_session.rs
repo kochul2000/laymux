@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tauri::State;
 
 use crate::state::AppState;
+use crate::wsl_probe::snapshot::GuestObservation;
 
 use super::session_attribution::{provider_terminal_domains, ProviderSessionLookup};
 use super::wsl_agent_session::{resolve_wsl_agent_processes, WslAgentProcess, WslAgentProvider};
@@ -16,21 +17,27 @@ pub fn get_claude_session_ids(
     session_max_age_hours: Option<u64>,
     state: State<Arc<AppState>>,
 ) -> Result<HashMap<String, Option<String>>, String> {
-    get_claude_session_ids_impl(session_max_age_hours, &state)
+    get_claude_session_ids_impl(
+        session_max_age_hours,
+        &state,
+        GuestObservation::starting_now(),
+    )
 }
 
 pub(crate) fn get_claude_session_ids_impl(
     session_max_age_hours: Option<u64>,
     state: &AppState,
+    observation: GuestObservation,
 ) -> Result<HashMap<String, Option<String>>, String> {
-    Ok(get_claude_session_lookup_impl(session_max_age_hours, state)?.attributions)
+    Ok(get_claude_session_lookup_impl(session_max_age_hours, state, observation)?.attributions)
 }
 
 pub(crate) fn get_claude_session_lookup_impl(
     session_max_age_hours: Option<u64>,
     state: &AppState,
+    observation: GuestObservation,
 ) -> Result<ProviderSessionLookup, String> {
-    Ok(get_claude_session_records_impl(session_max_age_hours, state)?.lookup)
+    Ok(get_claude_session_records_impl(session_max_age_hours, state, observation)?.lookup)
 }
 
 /// Session attribution plus each attributed session's self-reported status.
@@ -40,9 +47,11 @@ pub(crate) struct ClaudeSessionRecords {
     pub statuses: HashMap<String, ClaudeSessionStatus>,
 }
 
+/// `observation` is the freshness the WSL guest scan must have (ADR-0335).
 pub(crate) fn get_claude_session_records_impl(
     session_max_age_hours: Option<u64>,
     state: &AppState,
+    observation: GuestObservation,
 ) -> Result<ClaudeSessionRecords, String> {
     let domains = provider_terminal_domains(state)?;
     let terminal_roots = domains.native_roots;
@@ -101,7 +110,7 @@ pub(crate) fn get_claude_session_records_impl(
         &observed,
         remove_duplicate_attributions(candidates),
     );
-    match resolve_wsl_agent_processes(state, WslAgentProvider::Claude) {
+    match resolve_wsl_agent_processes(state, WslAgentProvider::Claude, observation) {
         Ok(lookup) => {
             failed_terminal_ids.extend(lookup.failed_terminal_ids);
             for (terminal_id, process) in lookup.attributions {
