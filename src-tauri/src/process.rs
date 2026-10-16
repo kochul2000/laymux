@@ -425,8 +425,15 @@ mod tests {
     #[cfg(windows)]
     #[test]
     #[ignore = "requires WSL; set LAYMUX_TEST_WSL_DISTRO and run with --ignored"]
-    fn a_wsl_run_gets_no_console_host_and_keeps_its_pipes() {
+    fn a_wsl_run_keeps_its_pipes_and_owns_no_console_host_when_lifted() {
         let distro = std::env::var("LAYMUX_TEST_WSL_DISTRO").unwrap();
+        // Without a lifted install the inbox launcher is the documented
+        // fallback, and it owns a console host by design (ADR-0334).
+        let expected_hosts =
+            match wsl_launcher(lifted_wsl_install_dir().as_deref(), |path| path.is_file()) {
+                WslLauncher::Lifted(_) => 0,
+                WslLauncher::Inbox => 1,
+            };
         let child = headless_wsl_command()
             .args(["-d", &distro, "--exec", "sh", "-c"])
             .arg("sleep 1; echo probe-out; echo probe-err >&2; exit 7")
@@ -437,7 +444,10 @@ mod tests {
             .expect("wsl.exe spawns");
         let hosts = console_hosts_of(child.id(), Duration::from_millis(700));
         let output = child.wait_with_output().expect("wsl.exe finishes");
-        assert_eq!(hosts, 0, "a WSL run must not own a console host");
+        assert_eq!(
+            hosts, expected_hosts,
+            "a lifted WSL run must not own a console host"
+        );
         assert_eq!(output.status.code(), Some(7));
         assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "probe-out");
         assert_eq!(String::from_utf8_lossy(&output.stderr).trim(), "probe-err");

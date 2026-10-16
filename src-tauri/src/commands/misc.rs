@@ -337,12 +337,22 @@ pub(super) fn split_shell_prefix(input: &str) -> Vec<String> {
 /// When set (e.g. `wsl.exe -d "My Distro" --`), gh is invoked as:
 ///   `wsl.exe -d "My Distro" -- gh {args...}`
 /// Supports single/double-quoted arguments in the prefix.
+///
+/// A WSL prefix runs through [`crate::process::headless_wsl_command`]: the
+/// GitHub view polls through here, so a console per run would be the same
+/// per-run console leak as the internal probes (ADR-0334). Any other prefix
+/// program is kept as written.
 fn build_gh_command(shell_prefix: &str) -> std::process::Command {
     let parts = split_shell_prefix(shell_prefix);
     if parts.is_empty() {
         crate::process::headless_command("gh")
     } else {
-        let mut cmd = crate::process::headless_command(&parts[0]);
+        let mut cmd =
+            if crate::terminal::detect_shell_type(&parts[0]) == crate::terminal::ShellType::Wsl {
+                crate::process::headless_wsl_command()
+            } else {
+                crate::process::headless_command(&parts[0])
+            };
         for part in &parts[1..] {
             cmd.arg(part);
         }
@@ -1305,7 +1315,22 @@ mod tests {
     #[test]
     fn build_gh_command_with_shell_prefix() {
         let cmd = build_gh_command("wsl.exe -d Ubuntu --");
-        assert_eq!(cmd.get_program(), "wsl.exe");
+        // A WSL prefix runs gh through the console-less client (ADR-0334).
+        assert_eq!(
+            cmd.get_program(),
+            crate::process::headless_wsl_command().get_program()
+        );
+        let args: Vec<_> = cmd.get_args().collect();
+        assert_eq!(args, vec!["-d", "Ubuntu", "--", "gh"]);
+    }
+
+    #[test]
+    fn build_gh_command_full_path_wsl_prefix_uses_the_console_less_client() {
+        let cmd = build_gh_command(r"C:\Windows\System32\wsl.exe -d Ubuntu --");
+        assert_eq!(
+            cmd.get_program(),
+            crate::process::headless_wsl_command().get_program()
+        );
         let args: Vec<_> = cmd.get_args().collect();
         assert_eq!(args, vec!["-d", "Ubuntu", "--", "gh"]);
     }
@@ -1328,7 +1353,11 @@ mod tests {
     #[test]
     fn build_gh_command_double_quoted_arg() {
         let cmd = build_gh_command(r#"wsl.exe -d "My Distro" --"#);
-        assert_eq!(cmd.get_program(), "wsl.exe");
+        // A WSL prefix runs gh through the console-less client (ADR-0334).
+        assert_eq!(
+            cmd.get_program(),
+            crate::process::headless_wsl_command().get_program()
+        );
         let args: Vec<_> = cmd.get_args().collect();
         assert_eq!(args, vec!["-d", "My Distro", "--", "gh"]);
     }
@@ -1336,7 +1365,11 @@ mod tests {
     #[test]
     fn build_gh_command_single_quoted_arg() {
         let cmd = build_gh_command("wsl.exe -d 'My Distro' --");
-        assert_eq!(cmd.get_program(), "wsl.exe");
+        // A WSL prefix runs gh through the console-less client (ADR-0334).
+        assert_eq!(
+            cmd.get_program(),
+            crate::process::headless_wsl_command().get_program()
+        );
         let args: Vec<_> = cmd.get_args().collect();
         assert_eq!(args, vec!["-d", "My Distro", "--", "gh"]);
     }
