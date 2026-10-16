@@ -12191,6 +12191,20 @@ import {
           button.addEventListener("pointercancel", (event) => finishFlick(event, false));
           button.addEventListener("lostpointercapture", (event) => finishFlick(event, false));
           button.addEventListener("contextmenu", (event) => event.preventDefault());
+          // The pointer handlers own the whole flick, so the browser must not
+          // run a gesture of its own. The key row is a scroll container, which
+          // restarts the effective touch-action, so `touch-action: none` on the
+          // pad does not hold: a fast flick leaves an invisible browser fling
+          // and the next soft-key tap only stops it, with no click (#1204, the
+          // same leak #1168 closed on the terminal viewport). Pointer
+          // preventDefault cannot cancel browser gestures; touchmove can.
+          button.addEventListener(
+            "touchmove",
+            (event) => {
+              if (event.cancelable) event.preventDefault();
+            },
+            { passive: false }
+          );
         }
 
         function updateKeyBarControls() {

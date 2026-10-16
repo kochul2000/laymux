@@ -1785,10 +1785,15 @@ test.describe("remote mobile layout", () => {
         type: "touchMove",
         touchPoints: [{ x: x + dx, y: y + dy, id: 1 }],
       });
+      // Lifted while still moving on purpose: a fast flick must not leave a
+      // browser fling that swallows the next soft-key tap's click (#1204).
       await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
       await expect(helperTextarea).toBeFocused();
       await expect.poll(() => writes.length).toBe(writeIndex + 1);
       expect(writes[writeIndex]).toBe(sequence);
+      // A flick sends once on release; a late repeat would land here.
+      await page.waitForTimeout(150);
+      expect(writes.length).toBe(writeIndex + 1);
     };
 
     for (const key of fixedCases) {
