@@ -232,7 +232,7 @@ describe("WorkspaceSelectorView", () => {
   });
 
   it("deletes a saved layout on the first click when confirmation is disabled", () => {
-    useSettingsStore.getState().setWorkspaceSelector({ confirmDestructiveActions: false });
+    useSettingsStore.getState().setConfirmDestructiveActions(false);
     useWorkspaceStore.getState().exportAsNewLayout("Extra");
     const extra = useWorkspaceStore.getState().layouts.find((layout) => layout.name === "Extra")!;
     render(<WorkspaceSelectorView />);
@@ -1448,7 +1448,7 @@ describe("WorkspaceSelectorView", () => {
   });
 
   it("removes a workspace on the first close click when confirmation is disabled", () => {
-    useSettingsStore.getState().setWorkspaceSelector({ confirmDestructiveActions: false });
+    useSettingsStore.getState().setConfirmDestructiveActions(false);
     useWorkspaceStore.getState().addWorkspace("Second", "default-layout");
     render(<WorkspaceSelectorView />);
 
@@ -2695,7 +2695,7 @@ describe("WorkspaceSelectorView", () => {
     });
 
     it("hides on the first click when destructive confirmation is disabled", () => {
-      useSettingsStore.getState().setWorkspaceSelector({ confirmDestructiveActions: false });
+      useSettingsStore.getState().setConfirmDestructiveActions(false);
       render(<WorkspaceSelectorView />);
       fireEvent.mouseEnter(screen.getByTestId("workspace-item-ws-2"));
       fireEvent.click(screen.getByTestId("workspace-hide-ws-2"));
@@ -2957,7 +2957,7 @@ describe("WorkspaceSelectorView", () => {
 
     it("clears on the first click when destructive confirmation is disabled", async () => {
       setup();
-      useSettingsStore.getState().setWorkspaceSelector({ confirmDestructiveActions: false });
+      useSettingsStore.getState().setConfirmDestructiveActions(false);
       render(<WorkspaceSelectorView />);
       fireEvent.mouseEnter(screen.getByTestId("workspace-item-ws-term"));
       vi.mocked(writeToTerminal).mockClear();

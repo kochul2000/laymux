@@ -960,20 +960,19 @@ describe("settings-store", () => {
     expect(useSettingsStore.getState().workspaceSelector.lastInputMode).toBe("perPane");
   });
 
-  it("defaults destructive workspace actions to two-click confirmation", () => {
-    expect(useSettingsStore.getState().workspaceSelector.confirmDestructiveActions).toBe(true);
+  it("defaults destructive actions to two-click confirmation", () => {
+    expect(useSettingsStore.getState().confirmDestructiveActions).toBe(true);
+    expect(useSettingsStore.getState().workspaceSelector).not.toHaveProperty(
+      "confirmDestructiveActions",
+    );
   });
 
   it("loads an explicit destructive-action confirmation opt-out and rejects invalid values", () => {
-    useSettingsStore.getState().loadFromSettings({
-      workspaceSelector: { confirmDestructiveActions: false } as any,
-    });
-    expect(useSettingsStore.getState().workspaceSelector.confirmDestructiveActions).toBe(false);
+    useSettingsStore.getState().loadFromSettings({ confirmDestructiveActions: false });
+    expect(useSettingsStore.getState().confirmDestructiveActions).toBe(false);
 
-    useSettingsStore.getState().loadFromSettings({
-      workspaceSelector: { confirmDestructiveActions: "no" } as any,
-    });
-    expect(useSettingsStore.getState().workspaceSelector.confirmDestructiveActions).toBe(true);
+    useSettingsStore.getState().loadFromSettings({ confirmDestructiveActions: "no" as any });
+    expect(useSettingsStore.getState().confirmDestructiveActions).toBe(true);
   });
 
   it("has default automatic mobile mode width threshold", () => {

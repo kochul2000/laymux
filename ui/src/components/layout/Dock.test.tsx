@@ -461,6 +461,8 @@ describe("Dock", () => {
     );
     const pane = screen.getByTestId("dock-pane-dp-1");
     fireEvent.mouseEnter(pane);
+    // Arm, then confirm (ADR-0333).
+    fireEvent.click(screen.getByTestId("pane-control-clear"));
     fireEvent.click(screen.getByTestId("pane-control-clear"));
 
     expect(onSetPaneView).toHaveBeenCalledWith("dp-1", { type: "EmptyView" });
@@ -840,6 +842,8 @@ describe("Dock restart wiring (ADR-0113)", () => {
 
   it("routes Restart View through the store with the pane's id", () => {
     renderDock();
+    // Arm, then confirm (ADR-0333).
+    fireEvent.click(screen.getByTestId("pane-control-restart"));
     fireEvent.click(screen.getByTestId("pane-control-restart"));
 
     expect(useTerminalRestartStore.getState().requests["dp-term"]).toMatchObject({

@@ -3171,20 +3171,28 @@ describe("SettingsView", () => {
       expect(useSettingsStore.getState().workspaceSelector.lastInputMode).toBe("workspaceLatest");
     });
 
-    it("defaults destructive action confirmation on and saves an opt-out", async () => {
+    it("defaults destructive action confirmation on in Interface and saves an opt-out", async () => {
       const user = userEvent.setup();
       render(<SettingsView />);
-      await user.click(screen.getByTestId("nav-workspaceDisplay"));
+      await user.click(screen.getByTestId("nav-interface"));
 
-      const toggle = screen.getByTestId("workspace-destructive-confirm-toggle") as HTMLInputElement;
+      const toggle = screen.getByTestId("destructive-confirm-toggle") as HTMLInputElement;
       expect(toggle.checked).toBe(true);
 
       await user.click(toggle);
       expect(toggle.checked).toBe(false);
-      expect(useSettingsStore.getState().workspaceSelector.confirmDestructiveActions).toBe(true);
+      expect(useSettingsStore.getState().confirmDestructiveActions).toBe(true);
 
       await user.click(screen.getByTestId("save-settings-btn"));
-      expect(useSettingsStore.getState().workspaceSelector.confirmDestructiveActions).toBe(false);
+      expect(useSettingsStore.getState().confirmDestructiveActions).toBe(false);
+    });
+
+    it("does not own the destructive action confirmation toggle", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+      await user.click(screen.getByTestId("nav-workspaceDisplay"));
+
+      expect(screen.queryByTestId("destructive-confirm-toggle")).not.toBeInTheDocument();
     });
 
     it("toggling a checkbox and saving updates store", async () => {

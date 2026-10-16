@@ -435,6 +435,18 @@ describe("settings snapshot — save/load round trip does not drop sections", ()
     expect(snapshot?.keepAwake).toBe(false);
   });
 
+  it("round-trips the destructive action confirmation opt-out", async () => {
+    applySettingsSnapshot(
+      { confirmDestructiveActions: false } as unknown as Parameters<
+        typeof applySettingsSnapshot
+      >[0],
+      { includeStructural: false },
+    );
+
+    expect(useSettingsStore.getState().confirmDestructiveActions).toBe(false);
+    expect((await collectSettingsSnapshot()).confirmDestructiveActions).toBe(false);
+  });
+
   it("round-trips the update channel", async () => {
     applySettingsSnapshot(
       { update: { channel: "beta" } } as unknown as Parameters<typeof applySettingsSnapshot>[0],

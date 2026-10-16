@@ -1067,9 +1067,7 @@ export function WorkspaceSelectorView() {
   const setWorkspaceHidden = useUiStore((s) => s.setWorkspaceHidden);
 
   const pathEllipsis = useSettingsStore((s) => s.workspaceSelector.pathEllipsis);
-  const confirmDestructiveActions = useSettingsStore(
-    (s) => s.workspaceSelector.confirmDestructiveActions,
-  );
+  const confirmDestructiveActions = useSettingsStore((s) => s.confirmDestructiveActions);
   const workspaceSortOrder = useSettingsStore((s) => s.workspaceSelector.sortOrder);
   const setWorkspaceSelector = useSettingsStore((s) => s.setWorkspaceSelector);
   const terminalInstances = useTerminalStore((s) => s.instances);

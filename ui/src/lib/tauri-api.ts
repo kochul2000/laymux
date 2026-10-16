@@ -1239,6 +1239,8 @@ export interface Settings {
   localUiState?: import("./local-session").LocalSessionSnapshot["uiState"];
   /** App UI language: "system" (OS locale), "ko", or "en". */
   language?: import("@/stores/settings-store").LanguageSetting;
+  /** Two-activation gate for destructive click controls (ADR-0333). */
+  confirmDestructiveActions?: boolean;
   colorSchemes: ColorScheme[];
   profiles: Profile[];
   keybindings: Keybinding[];

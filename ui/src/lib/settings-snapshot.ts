@@ -186,6 +186,7 @@ async function collectSessionCheckpointInternal(
 
   const settings: Settings = {
     language: settingsState.language,
+    confirmDestructiveActions: settingsState.confirmDestructiveActions,
     defaultProfile: settingsState.defaultProfile,
     profileDefaults: { ...settingsState.profileDefaults },
     viewOrder: settingsState.viewOrder ?? [],

@@ -383,8 +383,6 @@ export interface WorkspaceSelectorSettings {
   pathEllipsis: PathEllipsisMode;
   /** Last submitted input layout: per terminal pane or one latest line per workspace. */
   lastInputMode: WorkspaceLastInputMode;
-  /** Require two activations for destructive WorkspaceSelectorView controls. */
-  confirmDestructiveActions: boolean;
   /**
    * Seconds a pane/workspace must stay hidden before its terminal (PTY)
    * is automatically closed to free memory/CPU. 0 = disabled. See issue #269.
@@ -570,6 +568,11 @@ export const builtinAppThemes: AppTheme[] = [
 interface SettingsState {
   /** App UI language. "system" follows the OS/browser locale (ko* → Korean, else English). */
   language: LanguageSetting;
+  /**
+   * Require two activations for destructive click controls in the workspace
+   * selector and the pane control bar (ADR-0333).
+   */
+  confirmDestructiveActions: boolean;
   defaultProfile: string;
   profileDefaults: ProfileDefaults;
   profiles: Profile[];
@@ -603,6 +606,7 @@ interface SettingsState {
   syncCwdDefaults: SyncCwdDefaults;
 
   setLanguage: (language: LanguageSetting) => void;
+  setConfirmDestructiveActions: (enabled: boolean) => void;
   setDefaultProfile: (profile: string) => void;
   setViewOrder: (order: string[]) => void;
   setAppearance: (data: Partial<AppearanceSettings>) => void;
@@ -667,6 +671,7 @@ interface SettingsState {
       Pick<
         SettingsState,
         | "language"
+        | "confirmDestructiveActions"
         | "defaultProfile"
         | "profileDefaults"
         | "profiles"
@@ -970,7 +975,6 @@ export const DEFAULT_WORKSPACE_SELECTOR: WorkspaceSelectorSettings = {
   sortOrder: "manual",
   pathEllipsis: "start",
   lastInputMode: "perPane",
-  confirmDestructiveActions: true,
   hiddenAutoCloseSeconds: 0,
 };
 
@@ -1325,6 +1329,7 @@ export const builtinColorSchemes: ColorScheme[] = [
 
 export const useSettingsStore = create<SettingsState>()((set, get) => ({
   language: DEFAULT_LANGUAGE,
+  confirmDestructiveActions: true,
   defaultProfile: "PowerShell",
   profileDefaults: { ...defaultProfileDefaults },
   profiles: [makeProfile("PowerShell", "powershell.exe -NoLogo"), makeProfile("WSL", "wsl.exe")],
@@ -1571,6 +1576,8 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
 
   setLanguage: (language) => set({ language }),
 
+  setConfirmDestructiveActions: (confirmDestructiveActions) => set({ confirmDestructiveActions }),
+
   setDefaultProfile: (defaultProfile) => set({ defaultProfile }),
 
   setViewOrder: (viewOrder) => set({ viewOrder }),
@@ -1796,10 +1803,6 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           lastInputMode: validLastInputModes.includes(data.workspaceSelector.lastInputMode)
             ? data.workspaceSelector.lastInputMode
             : DEFAULT_WORKSPACE_SELECTOR.lastInputMode,
-          confirmDestructiveActions:
-            typeof data.workspaceSelector.confirmDestructiveActions === "boolean"
-              ? data.workspaceSelector.confirmDestructiveActions
-              : DEFAULT_WORKSPACE_SELECTOR.confirmDestructiveActions,
         }
       : undefined;
     // Ensure claude settings have all fields (backwards compat)
@@ -1894,6 +1897,13 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           ? data.language
           : DEFAULT_LANGUAGE
         : undefined;
+    // A present but non-boolean value fails safe to confirmation (ADR-0333).
+    const confirmDestructiveActions =
+      data.confirmDestructiveActions !== undefined
+        ? typeof data.confirmDestructiveActions === "boolean"
+          ? data.confirmDestructiveActions
+          : true
+        : undefined;
 
     const {
       appearance: _rawAppearance,
@@ -1911,6 +1921,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       paneClear: _rawPaneClear,
       remote: _rawRemote,
       language: _rawLanguage,
+      confirmDestructiveActions: _rawConfirmDestructiveActions,
       ...rest
     } = data;
     // Only spread keys that are actually present (not undefined). A caller that
@@ -1924,6 +1935,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...state,
       ...definedRest,
       ...(language ? { language } : {}),
+      ...(confirmDestructiveActions !== undefined ? { confirmDestructiveActions } : {}),
       ...(profiles ? { profiles } : {}),
       ...(profileDefaults ? { profileDefaults } : {}),
       ...(mergedSchemes ? { colorSchemes: mergedSchemes } : {}),

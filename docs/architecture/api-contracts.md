@@ -520,7 +520,7 @@ html/markdown preview는 별도 문서(iframe)라 부모 페이지의 CSS를 상
 
 ### Workspace selector 설정
 
-`settings.workspaceSelector`는 workspace 목록의 표시·동작 정책을 소유한다. `confirmDestructiveActions`는 desktop `WorkspaceSelectorView`의 숨기기·터미널 지우기·layout 삭제·workspace 닫기 버튼에만 적용하며, 키바인딩·Automation·MCP·Remote action은 우회한다([ADR-0211](../adr/0211-workspace-selector-destructive-actions-require-two-activations.md)).
+`settings.workspaceSelector`는 workspace 목록의 표시·동작 정책을 소유한다. 파괴적 버튼의 두 번 확인은 이 섹션이 아니라 root `confirmDestructiveActions`가 소유한다(아래 "파괴적 action 확인 설정").
 
 ```jsonc
 {
@@ -535,13 +535,22 @@ html/markdown preview는 별도 문서(iframe)라 부모 페이지의 CSS를 상
     "sortOrder": "manual",
     "pathEllipsis": "start",
     "lastInputMode": "perPane",
-    "confirmDestructiveActions": true, // 파괴적 버튼은 같은 컨트롤을 두 번 활성화해야 실행
     "hiddenAutoCloseSeconds": 0
   }
 }
 ```
 
-`confirmDestructiveActions`가 누락되거나 boolean이 아니면 `true`로 정규화한다. `false`이면 버튼의 첫 활성화가 기존 domain action을 즉시 호출한다. 설정 UI의 Workspaces → Behavior 토글은 draft/save 흐름을 거쳐 이 값을 영구 저장한다.
+### 파괴적 action 확인 설정
+
+root `settings.confirmDestructiveActions`(boolean, 기본 `true`)는 desktop 클릭 컨트롤의 두 번 활성화 gate다. 적용 대상은 `WorkspaceSelectorView`의 숨기기·터미널 지우기·layout 삭제·workspace 닫기와 pane 컨트롤 바의 Restart view·Clear view·Delete pane(stack이면 Close layer)이다. pane 컨트롤 바의 Clear terminal(빗자루), 키바인딩, Automation·MCP·Remote action은 우회한다([ADR-0211](../adr/0211-workspace-selector-destructive-actions-require-two-activations.md), [ADR-0333](../adr/0333-destructive-confirmation-global-and-pane-control-bar.md)).
+
+```jsonc
+{
+  "confirmDestructiveActions": true // 파괴적 버튼은 같은 컨트롤을 두 번 활성화해야 실행
+}
+```
+
+누락되거나 boolean이 아니면 `true`로 정규화한다. `false`이면 버튼의 첫 활성화가 기존 domain action을 즉시 호출한다. 설정 UI의 Interface → Confirmation 토글은 draft/save 흐름을 거쳐 이 값을 영구 저장한다.
 
 ### Claude Code 설정
 

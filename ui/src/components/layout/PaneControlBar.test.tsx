@@ -16,7 +16,7 @@ vi.mock("@/lib/tauri-api", () => ({
 }));
 
 import { useContext, useEffect, type ReactNode } from "react";
-import { PaneControlBar } from "./PaneControlBar";
+import { PaneControlBar, type PaneControlBarActions } from "./PaneControlBar";
 import { PaneControlContext } from "./PaneControlContext";
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -287,7 +287,78 @@ describe("PaneControlBar", () => {
       </PaneControlBar>,
     );
     await user.click(screen.getByTestId("pane-control-clear"));
-    expect(defaultActions.onClear).toHaveBeenCalled();
+    expect(defaultActions.onClear).not.toHaveBeenCalled();
+    await user.click(screen.getByTestId("pane-control-clear"));
+    expect(defaultActions.onClear).toHaveBeenCalledTimes(1);
+  });
+
+  describe("destructive buttons require two activations (ADR-0333)", () => {
+    const cases = [
+      { testId: "pane-control-restart", title: "Restart view", action: "onRestart" },
+      { testId: "pane-control-clear", title: "Clear view", action: "onClear" },
+      { testId: "pane-control-delete", title: "Delete pane", action: "onDelete" },
+    ] as const;
+
+    function renderWith(actions: Partial<PaneControlBarActions>) {
+      return render(
+        <PaneControlBar
+          currentView={defaultView}
+          actions={{ ...defaultActions, ...actions }}
+          hovered={true}
+        >
+          <div>content</div>
+        </PaneControlBar>,
+      );
+    }
+
+    it.each(cases)("$testId arms on the first click and runs on the second", async (c) => {
+      const action = vi.fn();
+      const user = userEvent.setup();
+      renderWith({ [c.action]: action });
+
+      const button = screen.getByTestId(c.testId);
+      await user.click(button);
+      expect(action).not.toHaveBeenCalled();
+      expect(button).toHaveAttribute("data-confirming", "true");
+      expect(button).toHaveAttribute("title", `Click again to ${c.title.toLowerCase()}`);
+
+      await user.click(button);
+      expect(action).toHaveBeenCalledTimes(1);
+      expect(button).not.toHaveAttribute("data-confirming");
+      expect(button).toHaveAttribute("title", c.title);
+    });
+
+    it.each(cases)("$testId cancels the armed state when the pointer leaves", async (c) => {
+      const action = vi.fn();
+      const user = userEvent.setup();
+      renderWith({ [c.action]: action });
+
+      const button = screen.getByTestId(c.testId);
+      await user.click(button);
+      await user.unhover(button);
+      expect(button).not.toHaveAttribute("data-confirming");
+      await user.click(button);
+      expect(action).not.toHaveBeenCalled();
+    });
+
+    it.each(cases)("$testId runs on one click when confirmation is off", async (c) => {
+      useSettingsStore.getState().setConfirmDestructiveActions(false);
+      const action = vi.fn();
+      const user = userEvent.setup();
+      renderWith({ [c.action]: action });
+
+      await user.click(screen.getByTestId(c.testId));
+      expect(action).toHaveBeenCalledTimes(1);
+    });
+
+    it("uses the layer close title in the armed delete label", async () => {
+      const user = userEvent.setup();
+      renderWith({ onDelete: vi.fn(), deleteTitle: "Close layer" });
+
+      const button = screen.getByTestId("pane-control-delete");
+      await user.click(button);
+      expect(button).toHaveAttribute("title", "Click again to close layer");
+    });
   });
 
   it("터미널 실제 클리어 버튼은 단축키를 표시하고 전용 동작을 호출한다", async () => {
@@ -340,6 +411,8 @@ describe("PaneControlBar", () => {
     expect(button).toHaveAttribute("title", "Restart view");
     expect(button.style.color).toBe("var(--red)");
     await user.click(button);
+    expect(onRestart).not.toHaveBeenCalled();
+    await user.click(button);
     expect(onRestart).toHaveBeenCalledTimes(1);
 
     rerender(
@@ -386,6 +459,37 @@ describe("PaneControlBar", () => {
 
     await user.click(pinButton);
     expect(screen.getByTestId("pane-control-pinned")).toBeInTheDocument();
+  });
+
+  it("requires two activations for delete inside the floating menu (ADR-0333)", async () => {
+    stubPaneWidth(320);
+    const onDelete = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar
+        currentView={defaultView}
+        actions={{ ...defaultActions, onDelete }}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("pane-control-menu-btn")).toBeInTheDocument());
+    await user.click(screen.getByTestId("pane-control-menu-btn"));
+    // The menu stays hidden until placed, then focuses its first control; a
+    // real click can only land after that, so wait for placement first.
+    await waitFor(() =>
+      expect(screen.getByTestId("pane-control-floating-menu")).toHaveAttribute("data-placement"),
+    );
+    const button = screen.getByTestId("pane-control-delete");
+    expect(screen.getByTestId("pane-control-floating-content")).toContainElement(button);
+
+    await user.click(button);
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(button).toHaveAttribute("data-confirming", "true");
+    await user.click(button);
+    expect(onDelete).toHaveBeenCalledTimes(1);
   });
 
   it("keeps terminal clear available in the narrow hover menu", async () => {
@@ -1002,7 +1106,9 @@ describe("PaneControlBar", () => {
       </PaneControlBar>,
     );
     await user.click(screen.getByTestId("pane-control-delete"));
-    expect(onDelete).toHaveBeenCalled();
+    expect(onDelete).not.toHaveBeenCalled();
+    await user.click(screen.getByTestId("pane-control-delete"));
+    expect(onDelete).toHaveBeenCalledTimes(1);
   });
 
   it("view selector includes Memo option", () => {
