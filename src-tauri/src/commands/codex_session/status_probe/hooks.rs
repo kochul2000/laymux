@@ -144,11 +144,14 @@ pub(super) fn resolve(
     Ok(Some((candidate.binding, candidate.id, fresh)))
 }
 
+/// `observation` is the attribution command's own: inside a checkpoint the
+/// process snapshot here is the guest scan its provider lookups just read.
 pub(crate) fn verified_status_sessions(
     state: &AppState,
     lookup: &ProviderSessionLookup,
+    observation: crate::wsl_probe::snapshot::GuestObservation,
 ) -> Result<HashMap<String, (u64, String, bool)>, String> {
-    verified_with_processes(state, lookup, || targets::processes(state))
+    verified_with_processes(state, lookup, || targets::processes(state, observation))
 }
 
 fn verified_with_processes(

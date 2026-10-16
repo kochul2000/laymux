@@ -12,6 +12,7 @@ use tauri::State;
 
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
+use crate::wsl_probe::snapshot::GuestObservation;
 
 use super::claude_session::{get_claude_session_records_impl, ClaudeSessionStatus};
 use super::grok_session::get_grok_session_records_impl;
@@ -63,8 +64,10 @@ pub(crate) fn get_agent_session_states_impl(
 ) -> Result<HashMap<String, AgentSessionState>, String> {
     let generations = terminal_generations(state)?;
     let mut states = HashMap::new();
+    // Display polling: both providers may read one shared guest scan (ADR-0335).
+    let observation = GuestObservation::Reusable;
     if !claude_terminal_ids.is_empty() {
-        let records = get_claude_session_records_impl(None, state)?;
+        let records = get_claude_session_records_impl(None, state, observation)?;
         for id in claude_terminal_ids {
             let (Some(generation), Some(session_id)) =
                 (generations.get(id), attributed(&records.lookup, id))
@@ -91,7 +94,7 @@ pub(crate) fn get_agent_session_states_impl(
         }
     }
     if !grok_terminal_ids.is_empty() {
-        let records = get_grok_session_records_impl(None, state)?;
+        let records = get_grok_session_records_impl(None, state, observation)?;
         for id in grok_terminal_ids {
             let (Some(generation), Some(session_id)) =
                 (generations.get(id), attributed(&records.lookup, id))
