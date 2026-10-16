@@ -3409,6 +3409,23 @@
       .github-header {
         background: var(--bg-surface);
       }
+      /* ADR-0332: one device preference for all right-side tools. Keep the
+         toolbar in flex flow so the final content row stays reachable. */
+      .tool-controls-bottom .github-overlay,
+      .tool-controls-bottom .file-viewer-overlay {
+        bottom: auto;
+        height: var(--remote-viewport-height, 100%);
+      }
+      .tool-controls-bottom .github-dialog,
+      .tool-controls-bottom .file-viewer-dialog {
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+      }
+      .tool-controls-bottom .github-dialog > header,
+      .tool-controls-bottom .file-viewer-dialog > header {
+        order: 1;
+        border-bottom: 0;
+        border-top: 1px solid var(--border);
+      }
       .github-tabs {
         display: flex;
         flex: 0 0 auto;

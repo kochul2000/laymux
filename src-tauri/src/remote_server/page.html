@@ -29,7 +29,7 @@
     <link rel="stylesheet" href="{{ASSET:xterm.css}}" />
     <link rel="stylesheet" href="{{ASSET:remote-app.css}}" />
   </head>
-  <body>
+  <body class="tool-controls-bottom">
     <div class="app">
       <header>
         <button id="navToggle" class="menu-button" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="navigationPanel">
@@ -363,6 +363,11 @@
               <section class="nav-section" aria-label="Panels and header icons">
               <h2 class="nav-section-title">Panels</h2>
               <p class="settings-page-description">Choose your tools and how to open them.</p>
+              <label class="nav-toggle-row" for="toolControlsBottomToggle">
+                <input id="toolControlsBottomToggle" type="checkbox" checked />
+                <span class="nav-toggle-name">Tool controls at bottom</span>
+                <span class="nav-toggle-desc">Memo, GitHub and Files · turn off for top controls</span>
+              </label>
               <h3 class="settings-group-title">Header icons</h3>
               <div id="headerIconSettings"></div>
               <div class="nav-settings-status">Saved on this device. Hidden tools are skipped when cycling; the selected edge shortcut still opens them.</div>
@@ -394,7 +399,7 @@
                   <span class="nav-toggle-desc">Left always cycles to the next visible tool</span>
                 </span>
                 <select id="toolSwipeRightAction">
-                  <option value="close">Close panel</option>
+                  <option value="close">Issues, then close panel</option>
                   <option value="previous">Previous tool</option>
                 </select>
               </label>

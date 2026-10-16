@@ -8,7 +8,7 @@ import {
   normalizeRemoteNavigationModifiers, readPhysicalKeyboardConnected,
   remoteKeyboardVisibility, resolveRemoteNavigationKey,
 } from "../../../../ui/src/remote/remote-keyboard.js";
-import { installRemoteToolSwipes, nextRemoteTool, normalizeToolSwipeRightAction } from "../../../../ui/src/remote/remote-tool-swipe.js";
+import { installRemoteToolSwipes, resolveToolSwipe, normalizeToolSwipeRightAction } from "../../../../ui/src/remote/remote-tool-swipe.js";
 import { createComposerEditor } from "../../../../ui/src/remote/composer-editor.js";
 import { createRemoteAgentResumeLinkProvider, installAgentResumeUnderlines } from "../../../../ui/src/remote/remote-agent-resume.ts";
 import { isShellOwnedCombo, keybindingMatchesEvent, resolveKeybindingFrom } from "../../../../ui/src/lib/keybinding-core.ts";
@@ -205,6 +205,7 @@ import {
         const swipeCloseDrawersKey = "laymux.remote.swipeCloseDrawers";
         const rightSwipeViewKey = "laymux.remote.rightSwipeView";
         const toolSwipeRightActionKey = "laymux.remote.toolSwipeRightAction";
+        const toolControlsBottomKey = "laymux.remote.toolControlsBottom";
         const hideFloatingWithKeyboardKey = "laymux.remote.hideFloatingWithKeyboard";
         const useRemoteNavigationKeysKey = "laymux.remote.useRemoteNavigationKeys";
         const remoteNavigationModifiersKey = "laymux.remote.remoteNavigationModifiers";
@@ -662,6 +663,8 @@ import {
         let swipeCloseDrawersEnabled = loadLocalToggle(swipeCloseDrawersKey);
         let rightSwipeView = loadRightSwipeView();
         let toolSwipeRightAction = loadToolSwipeRightAction();
+        let toolControlsBottom = loadLocalToggle(toolControlsBottomKey);
+        document.body.classList.toggle("tool-controls-bottom", toolControlsBottom);
         let remoteKeyboardSettings = { ...DEFAULT_REMOTE_KEYBOARD_SETTINGS };
         for (const [field, storageKey] of Object.entries(keyboardSettingKeys)) {
           try {
@@ -1780,14 +1783,11 @@ import {
         }
 
         function resolveRemoteToolSwipe(direction) {
-          if (direction === -1 && toolSwipeRightAction === "close") {
-            return swipeCloseDrawersEnabled ? "close" : null;
-          }
-          return nextRemoteTool(currentRemoteTool(), direction, {
+          return resolveToolSwipe(currentRemoteTool(), direction, {
             github: Boolean(leaseId && activeTerminalId && headerIcons.headerGithub),
             files: Boolean(leaseId && fileViewerToken && headerIcons.headerFiles),
             memo: Boolean(leaseId && headerIcons.headerMemo),
-          });
+          }, toolSwipeRightAction, swipeCloseDrawersEnabled);
         }
 
         function performRemoteToolSwipe(tool) {
@@ -1807,6 +1807,8 @@ import {
 
         function renderToolSwipePreferences() {
           toolSwipeRightActionSelect.value = toolSwipeRightAction;
+          toolControlsBottomToggle.checked = toolControlsBottom;
+          document.body.classList.toggle("tool-controls-bottom", toolControlsBottom);
         }
 
         function githubStatusMessage(status) {
@@ -7788,6 +7790,7 @@ import {
         const swipeCloseDrawersToggle = $("swipeCloseDrawersToggle");
         const rightSwipeViewSelect = $("rightSwipeView");
         const toolSwipeRightActionSelect = $("toolSwipeRightAction");
+        const toolControlsBottomToggle = $("toolControlsBottomToggle");
         // Fixed and client-owned: the strip is a viewer, not probe demand, so it
         // has no business following `usage.*.refreshSeconds`. Fast enough for
         // the activity and notification counts, which are the parts that move.
@@ -14232,6 +14235,7 @@ import {
             swipeCloseDrawers: swipeCloseDrawersEnabled,
             rightSwipeView,
             toolSwipeRightAction,
+            toolControlsBottom,
             ...headerIcons,
           }),
           (candidate, patch) => {
@@ -14247,6 +14251,7 @@ import {
               swipeCloseDrawers: swipeCloseDrawersKey,
               rightSwipeView: rightSwipeViewKey,
               toolSwipeRightAction: toolSwipeRightActionKey,
+              toolControlsBottom: toolControlsBottomKey,
               ...headerIconKeys,
               ...keyboardSettingKeys,
             };
@@ -14318,6 +14323,7 @@ import {
             swipeCloseDrawersEnabled = candidate.swipeCloseDrawers;
             rightSwipeView = candidate.rightSwipeView;
             toolSwipeRightAction = candidate.toolSwipeRightAction;
+            toolControlsBottom = candidate.toolControlsBottom;
             headerIcons = Object.fromEntries(Object.keys(headerIconFields).map(key => [key, candidate[key]]));
             renderHeaderIconPreferences();
             edgeSwipeDrawersToggle.checked = edgeSwipeDrawersEnabled;
@@ -14352,6 +14358,11 @@ import {
           toolSwipeRightAction = normalizeToolSwipeRightAction(toolSwipeRightActionSelect.value);
           try { localStorage.setItem(toolSwipeRightActionKey, toolSwipeRightAction); }
           catch { /* Device storage can be unavailable; retain the live preference. */ }
+          renderToolSwipePreferences();
+        });
+        toolControlsBottomToggle.addEventListener("change", () => {
+          toolControlsBottom = toolControlsBottomToggle.checked;
+          saveLocalToggle(toolControlsBottomKey, toolControlsBottom);
           renderToolSwipePreferences();
         });
         rightSwipeViewSelect.addEventListener("change", () => {

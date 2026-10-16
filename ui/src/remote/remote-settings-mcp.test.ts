@@ -51,6 +51,7 @@ describe("Remote 설정 MCP 기기 적용", () => {
       "swipeCloseDrawers",
       "rightSwipeView",
       "toolSwipeRightAction",
+      "toolControlsBottom",
       "hideFloatingWithKeyboard",
       "useRemoteNavigationKeys",
       "remoteNavigationModifiers",
@@ -72,6 +73,7 @@ describe("Remote 설정 MCP 기기 적용", () => {
     }
   });
   it.each([
+    { toolControlsBottom: "true" },
     { remoteNavigationModifiers: "meta" },
     { hideFloatingWithKeyboard: "true" },
     { hideKeysWithKeyboard: true },

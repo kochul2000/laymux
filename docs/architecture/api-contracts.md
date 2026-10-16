@@ -1939,11 +1939,17 @@ Remote UI는 이미 확인된 연결 상태가 바뀔 때 화면 상단에 3초�
 
 ### Remote 도구 순환 (ADR-0261)
 
-`toolSwipeRightAction`은 `close | previous`(기본 close, live)이며 `laymux.remote.toolSwipeRightAction`에 저장한다. Panels와 Remote settings MCP가 함께 편집하며 host settings/API에는 보내지 않는다. close는 기존 `swipeCloseDrawers`가 켜져야 동작하고 previous와 왼쪽 다음 도구 순환은 그 토글과 독립이다. 미지 저장값은 close로 복구한다.
+`toolSwipeRightAction`은 `close | previous`(기본 close, live)이며 `laymux.remote.toolSwipeRightAction`에 저장한다. Panels와 Remote settings MCP가 함께 편집하며 host settings/API에는 보내지 않는다. close 모드에서 PRs의 오른쪽 플링은 먼저 Issues로 돌아가며, Issues와 다른 도구에서만 `swipeCloseDrawers`가 켜져 있을 때 닫는다. PRs → Issues는 같은 패널 내부 탭 이동이므로 GitHub 아이콘 숨김과 닫기 토글에 관계없이 동작한다([ADR-0332](../adr/0332-remote-tool-bottom-controls-and-github-back.md)). previous와 왼쪽 다음 도구 순환도 그 토글과 독립이다. 미지 저장값은 close로 복구한다.
 
 `remote-tool-swipe.js`는 고정 Issues → PRs → Files → Memo 순서에서 헤더 표시 설정 AND 가용성(lease, GitHub active terminal, Files capability)에 맞는 다음 항목을 계산한다. 현재 항목이 숨겨져 있어도 원래 위치를 기준으로 찾으며 다른 항목이 없으면 no-op이다. 기존 `rightSwipeView`는 숨긴 도구도 직접 열 수 있다. 탐색 제외·PC 모드는 도구가 아니므로 순환 대상이 아니다.
 
 문서 단일 포인터 소유자가 `data-remote-tool-swipe` 표면(도구 헤더, GitHub 목록, Files 디렉터리 목록, 메모 본문 textarea)을 처리한다. 모바일 touch/pen에서 56px·수직 대비 1.25배 수평 이동을 확인하고 pointerup에서 한 단계 전환하며 후속 클릭을 소비한다. 메모 본문은 입력칸 제외 규칙의 유일한 예외이며 본문의 `touch-action: pan-y`로 세로 스크롤을 보존한다. 다른 입력 요소·파일 렌더러·문서 선택 또는 포커스된 메모의 선택 범위는 제외하고 수직 이동·다중 포인터·취소는 전환하지 않는다([ADR-0331](../adr/0331-remote-memo-body-tool-swipe.md)). 도구 상단에 별도 스와이프 안내 줄을 표시하지 않는다([ADR-0263](../adr/0263-remote-tool-swipe-hint-removal.md)). Memo 초안은 기존 문서에 남고 자동 저장하지 않는다. Files Back은 현재 파일에서 폴더 복귀를 유지하며 다른 도구에서 Files를 다시 열면 기존 terminal CWD 경로를 사용한다.
+
+### Remote 우측 도구 컨트롤바 배치 (ADR-0332)
+
+`toolControlsBottom`은 boolean(기본 true, live)이며 `laymux.remote.toolControlsBottom`에 `1 | 0`으로 저장한다. 값이 없거나 저장소 읽기가 실패하면 true다. Settings → Panels의 **Tool controls at bottom**과 Remote settings MCP가 같은 값을 읽고 편집하며 PC 설정으로 동기화하지 않는다. 브라우저·PWA·Android wrapper 모두 같은 기본값이다.
+
+메모·GitHub·파일 뷰어/탐색기의 기존 컨트롤바 전체가 공통 배치 설정을 따른다. true에서는 flex 본문 뒤에 컨트롤바를 놓고 하단 안전 영역을 확보하며, false에서는 기존 상단 배치다. 하단 배치의 overlay 높이는 기존 `--remote-viewport-height`를 따라 키보드로 줄어든 표시 영역 안에 컨트롤바를 유지한다. 컨트롤바는 본문을 덮지 않고 기존 40/32/16px 툴바 토큰과 DOM/이벤트 처리기를 보존한다. 옵션 변경은 연결 전후 즉시 적용하고 메모 초안·목록 상태·파일 미리보기를 초기화하거나 저장하지 않는다([ADR-0332](../adr/0332-remote-tool-bottom-controls-and-github-back.md)).
 
 ## 14. Rust 코드 설계 원칙
 

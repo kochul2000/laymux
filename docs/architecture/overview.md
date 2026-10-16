@@ -344,6 +344,8 @@ View:     viewOverrides[paneId]        (localStorage: "laymux-view-overrides")
 
 Remote는 PC 메모와 같은 키를 사용하는 Memo overlay를 제공한다. 저장된 메모와 navigation의 비어 있는 MemoView pane을 선택할 수 있다. Settings의 `Panels` 탭에서 Files/GitHub/Memo/탐색 제외/PC 모드 헤더 버튼을 각각 표시하거나 숨기고 우측 가장자리 스와이프 대상을 선택한다. 설정은 기기 로컬이며 숨김은 가용성·권한·기존 가장자리 열기를 바꾸지 않는다([ADR-0260](../adr/0260-remote-shared-memo-and-panel-preferences.md)). 열린 도구는 왼쪽 스와이프로 표시·사용 가능한 Issues → PRs → Files → Memo를 순환하며, 오른쪽은 기본 닫기 또는 설정한 역순 순환이다. 헤더와 GitHub/Files 목록, 메모 본문에서 동작하며 메모의 세로 스크롤·텍스트 선택·초안을 보존한다([ADR-0261](../adr/0261-remote-visible-tool-swipe-cycle.md), [ADR-0331](../adr/0331-remote-memo-body-tool-swipe.md)).
 
+Remote 우측 도구(메모·GitHub·파일 뷰어/탐색기)는 기기 로컬 `toolControlsBottom`(기본 true)으로 컨트롤바를 하단에 놓고, Panels에서 끄면 상단으로 돌린다. Remote settings MCP에서도 즉시 편집할 수 있다. 기본 닫기 모드에서 PRs의 오른쪽 플링은 Issues로 먼저 돌아가고, Issues에서 다시 오른쪽 플링하면 닫는다([ADR-0332](../adr/0332-remote-tool-bottom-controls-and-github-back.md)).
+
 ### 6.2 EmptyView
 
 Pane 또는 Dock에 View가 지정되지 않은 경우 표시된다.

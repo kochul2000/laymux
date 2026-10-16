@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   installRemoteToolSwipes,
   nextRemoteTool,
+  resolveToolSwipe,
   normalizeToolSwipeRightAction,
 } from "./remote-tool-swipe.js";
 
@@ -32,6 +33,20 @@ describe("Remote 도구 순환", () => {
     for (const value of [null, undefined, "close", "bad", true]) {
       expect(normalizeToolSwipeRightAction(value)).toBe("close");
     }
+  });
+  it("닫기 모드에서도 PRs는 먼저 Issues로 돌아가며 그 다음에만 닫는다", () => {
+    expect(resolveToolSwipe("pulls", -1, all, "close", true)).toBe("issues");
+    expect(resolveToolSwipe("issues", -1, all, "close", true)).toBe("close");
+    expect(resolveToolSwipe("files", -1, all, "close", true)).toBe("close");
+    expect(resolveToolSwipe("memo", -1, all, "close", true)).toBe("close");
+    expect(resolveToolSwipe("pulls", -1, {}, "close", false)).toBe("issues");
+    expect(resolveToolSwipe("issues", -1, all, "close", false)).toBeNull();
+    expect(resolveToolSwipe(null, -1, all, "close", true)).toBeNull();
+  });
+  it("이전 도구 모드와 왼쪽 순환은 닫기 토글과 독립이다", () => {
+    expect(resolveToolSwipe("issues", -1, all, "previous", false)).toBe("memo");
+    expect(resolveToolSwipe("pulls", -1, all, "previous", false)).toBe("issues");
+    expect(resolveToolSwipe("pulls", 1, all, "close", false)).toBe("files");
   });
   it("릴리스에서 한 단계만 이동하고 돌아온 drag·취소·본문 선택·후속 클릭을 구분한다", () => {
     document.body.innerHTML =
