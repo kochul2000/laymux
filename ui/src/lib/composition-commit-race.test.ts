@@ -1,10 +1,6 @@
 import { Terminal } from "@xterm/xterm";
 import { afterEach, describe, expect, it } from "vitest";
 
-import {
-  XTERM_PENDING_COMPOSITION_FIELDS,
-  readPendingCompositionSend,
-} from "./xterm-pending-composition";
 import { createImeCompositionController } from "./ime-composition-controller";
 import { createTerminalFocusOwnership } from "./terminal-focus-ownership";
 
@@ -141,37 +137,6 @@ describe("xterm app-focus recovery with a new IME composition (issue #620)", () 
   });
 });
 
-describe("xterm pending-composition contract", () => {
-  it("exposes the pending flag used by blur recovery", () => {
-    // A version bump must not silently disable issue #555's blur recovery.
-    const { terminal, helper } = mountTerminal();
-    composeAndCommit(helper);
-
-    const pending = readPendingCompositionSend(terminal);
-    expect(pending).not.toBeNull();
-    expect(pending!.pending).toBe(true);
-  });
-
-  it("names the fields it depends on so a break is readable", () => {
-    expect(XTERM_PENDING_COMPOSITION_FIELDS).toEqual([
-      "_compositionHelper",
-      "_isSendingComposition",
-    ]);
-  });
-
-  it("reports no pending send once the finalizer has run", async () => {
-    const { terminal, helper } = mountTerminal();
-    composeAndCommit(helper);
-    await flushFinalizer();
-
-    expect(readPendingCompositionSend(terminal)?.pending).toBe(false);
-  });
-
-  it("returns null for an object that is not a terminal", () => {
-    expect(readPendingCompositionSend({} as never)).toBeNull();
-  });
-});
-
 describe("xterm blur contract during composition (issue #555)", () => {
   /**
    * The load-bearing assumption behind committing an interrupted composition
@@ -211,7 +176,6 @@ describe("xterm blur contract during composition (issue #555)", () => {
     const controller = createImeCompositionController({
       getCols: () => 80,
       getAnchor: () => ({ cursorX: 0, cursorAbsY: 0 }),
-      getXtermPendingSend: () => readPendingCompositionSend(terminal)?.pending ?? false,
       onCommit: (text) => data.push(text),
     });
     controller.bind(helper);
@@ -237,12 +201,19 @@ describe("xterm blur contract during composition (issue #555)", () => {
     controller.dispose();
   });
 
-  it("flushes finalized text before blur clears the textarea", async () => {
+  it("flushes finalized text before blur clears the textarea without a controller commit", async () => {
     // WebView2 can blur inside xterm's deferred send window. The patched blur handler
     // must consume that pending generation before clearing its only DOM source.
     const { terminal, helper } = mountTerminal();
     const data: string[] = [];
     terminal.onData((d) => data.push(d));
+    const committed: string[] = [];
+    const controller = createImeCompositionController({
+      getCols: () => 80,
+      getAnchor: () => ({ cursorX: 0, cursorAbsY: 0 }),
+      onCommit: (text) => committed.push(text),
+    });
+    controller.bind(helper);
 
     helper.focus();
     helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
@@ -253,16 +224,18 @@ describe("xterm blur contract during composition (issue #555)", () => {
     helper.dispatchEvent(new Event("input"));
     helper.dispatchEvent(new CompositionEvent("compositionend", { data: "\uac00" }));
 
-    // The send is scheduled but has not run.
-    expect(readPendingCompositionSend(terminal)?.pending).toBe(true);
+    // The send is scheduled but has not run. xterm owns the pending generation.
+    expect(data).toEqual([]);
 
     helper.blur();
-    expect(readPendingCompositionSend(terminal)?.pending).toBe(false);
     expect(helper.value).toBe("");
     expect(data).toEqual(["\uac00"]);
+    expect(committed).toEqual([]);
 
     await flushFinalizer();
     expect(data).toEqual(["\uac00"]);
+    expect(committed).toEqual([]);
+    controller.dispose();
   });
 
   it("flushes event data only once even if the helper is refocused", async () => {
@@ -293,7 +266,6 @@ describe("xterm blur contract during composition (issue #555)", () => {
     const controller = createImeCompositionController({
       getCols: () => 80,
       getAnchor: () => ({ cursorX: 0, cursorAbsY: 0 }),
-      getXtermPendingSend: () => readPendingCompositionSend(terminal)?.pending ?? false,
       onCommit: (text) => data.push(text),
     });
     controller.bind(helper);
@@ -322,11 +294,11 @@ describe("xterm blur contract during composition (issue #555)", () => {
     const { terminal, helper } = mountTerminal();
     const data: string[] = [];
     terminal.onData((text) => data.push(text));
+    const committed: string[] = [];
     const controller = createImeCompositionController({
       getCols: () => 80,
       getAnchor: () => ({ cursorX: 0, cursorAbsY: 0 }),
-      getXtermPendingSend: () => readPendingCompositionSend(terminal)?.pending ?? false,
-      onCommit: (text) => data.push(text),
+      onCommit: (text) => committed.push(text),
     });
     controller.bind(helper);
 
@@ -334,21 +306,92 @@ describe("xterm blur contract during composition (issue #555)", () => {
     helper.value = "";
     composeAndCommit(helper, "나");
     helper.blur();
+    expect(data).toEqual(["가", "나"]);
+    expect(committed).toEqual([]);
     await flushFinalizer();
 
-    expect(data.join("")).toBe("가나");
+    expect(data).toEqual(["가", "나"]);
+    expect(committed).toEqual([]);
     controller.dispose();
   });
 
-  it("does send it when compositionend comes before the blur", async () => {
-    // The ordering where xterm really does send. The controller stays out of this path
-    // by reading xterm's pending flag — NOT by its own phase, which is
-    // `pending-finalize` in both this ordering and the losing one above. An earlier form
-    // of this comment claimed the phase check was load-bearing; it was wrong, and the
-    // measurement in the previous test is what corrected it.
+  it("sends the finalized syllable before the live syllable exactly once on blur", async () => {
+    const { terminal, helper } = mountTerminal();
+    const sent: { source: "xterm" | "controller"; text: string }[] = [];
+    terminal.onData((text) => sent.push({ source: "xterm", text }));
+    const controller = createImeCompositionController({
+      getCols: () => 80,
+      getAnchor: () => ({ cursorX: 0, cursorAbsY: 0 }),
+      onCommit: (text) => sent.push({ source: "controller", text }),
+    });
+    controller.bind(helper);
+
+    composeAndCommit(helper, "가");
+    helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    helper.value = "가나";
+    helper.selectionStart = 2;
+    helper.selectionEnd = 2;
+    helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "나" }));
+    helper.dispatchEvent(new Event("input"));
+
+    helper.blur();
+    expect(sent).toEqual([
+      { source: "xterm", text: "가" },
+      { source: "controller", text: "나" },
+    ]);
+    expect(controller.getState().active).toBe(false);
+
+    await flushFinalizer();
+    expect(sent).toEqual([
+      { source: "xterm", text: "가" },
+      { source: "controller", text: "나" },
+    ]);
+    controller.dispose();
+  });
+
+  it("does not repeat a finalized send when blur runs before the controller reset", async () => {
+    const { terminal, helper } = mountTerminal();
+    const data: string[] = [];
+    const committed: string[] = [];
+    const controller = createImeCompositionController({
+      getCols: () => 80,
+      getAnchor: () => ({ cursorX: 0, cursorAbsY: 0 }),
+      onCommit: (text) => committed.push(text),
+    });
+    controller.bind(helper);
+    let activeBeforeBlur: boolean | undefined;
+    terminal.onData((text) => {
+      data.push(text);
+      if (data.length === 1) {
+        // xterm's earlier finalizer has emitted, while the controller's later
+        // reset timer has not run. Blur must not submit that generation again.
+        activeBeforeBlur = controller.getState().active;
+        helper.blur();
+      }
+    });
+
+    composeAndCommit(helper, "가");
+    expect(data).toEqual([]);
+    await flushFinalizer();
+
+    expect(activeBeforeBlur).toBe(true);
+    expect(data).toEqual(["가"]);
+    expect(committed).toEqual([]);
+    expect(controller.getState().active).toBe(false);
+    controller.dispose();
+  });
+
+  it("does not repeat a finalized send when its timer runs before blur", async () => {
     const { terminal, helper } = mountTerminal();
     const data: string[] = [];
     terminal.onData((d) => data.push(d));
+    const committed: string[] = [];
+    const controller = createImeCompositionController({
+      getCols: () => 80,
+      getAnchor: () => ({ cursorX: 0, cursorAbsY: 0 }),
+      onCommit: (text) => committed.push(text),
+    });
+    controller.bind(helper);
 
     composeAndCommit(helper, "\uac00");
     await flushFinalizer();
@@ -359,5 +402,7 @@ describe("xterm blur contract during composition (issue #555)", () => {
 
     // Still exactly once — the blur itself adds nothing.
     expect(data).toEqual(["\uac00"]);
+    expect(committed).toEqual([]);
+    controller.dispose();
   });
 });

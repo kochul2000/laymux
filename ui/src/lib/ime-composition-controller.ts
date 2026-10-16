@@ -38,11 +38,6 @@ type CompositionControllerOptions = {
    * cannot be relied on to send it and why this cannot double up (issue #555).
    */
   onCommit?: (text: string) => void;
-  /**
-   * Whether xterm still has a composition send scheduled. Measured discriminator
-   * for the blur commit — see `handleBlur` (issue #555).
-   */
-  getXtermPendingSend?: () => boolean;
   onStateChange?: (state: CompositionPreviewState) => void;
   onTrace?: (event: string, payload: Record<string, unknown>) => void;
   /**
@@ -383,10 +378,6 @@ export function createImeCompositionController(
   let compositionBaseText = "";
   // Latest compositionupdate event.data — used for Korean split-time display
   let latestCompositionDisplayText = "";
-  // Text handed to xterm at the last compositionend. xterm sends it from a deferred
-  // timeout, so a blur landing inside that window destroys the source and this is the
-  // only surviving copy (issue #555).
-  let lastFinalizedText = "";
 
   let pendingAnimationFrame: number | null = null;
   let pendingTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -437,7 +428,6 @@ export function createImeCompositionController(
     chainAnchorMeasured = false;
     compositionBaseText = "";
     latestCompositionDisplayText = "";
-    lastFinalizedText = "";
     state = createEmptyState();
     emit();
   };
@@ -681,25 +671,13 @@ export function createImeCompositionController(
     schedulePreviewSync();
   };
 
-  const handleCompositionEnd = (event?: CompositionEvent) => {
+  const handleCompositionEnd = () => {
     // Don't finalize immediately — schedule a deferred reset.
     // If a new compositionstart arrives in the same event-loop tick
     // (Korean carry-over), we cancel this timeout and continue.
     // This mirrors WT's pattern where OnEndComposition decrements
     // the counter and only finalizes when it reaches 0.
     phase = "pending-finalize";
-    // Read the event's own data. It is the only thing that distinguishes a commit
-    // from a cancel: pressing Esc mid-composition ends it with `data: ""`, and
-    // without looking at that this would keep the previous syllable and inject it if
-    // a blur followed (issue #555 review). `compositionupdate` is already trusted
-    // the same way a few lines up, so the posture is consistent.
-    //
-    // Fall back to the preview text only when the event is absent — a synthetic
-    // dispatch, or a browser that omits `data`. `state.text` can still be empty when
-    // the last `compositionupdate` has not reached its deferred sync yet, so the
-    // synchronous `latestCompositionDisplayText` backs it up.
-    lastFinalizedText =
-      typeof event?.data === "string" ? event.data : state.text || latestCompositionDisplayText;
     latestCompositionDisplayText = "";
 
     traceComposition(options, "ime-composition-end", {
@@ -773,42 +751,23 @@ export function createImeCompositionController(
     // still commits the text the user could see. For Korean — and CJK generally — a
     // focus change is a commit, not a cancel.
     //
-    // Phase alone is NOT the discriminator. WebView2 + Windows IME can fire
-    // `compositionend` before blur, leaving this controller in `pending-finalize` even
-    // though xterm's earlier blur listener has just flushed that generation.
-    //
-    // What separates "xterm already sent it" from a compatibility fallback is xterm's
-    // pending flag after that listener ran:
-    //
-    //   end → blur           pending false  synchronously flushed → do not commit
-    //   end → timer → blur   pending false  already on the wire   → do not commit
-    //   pending remains true               older contract         → commit fallback
-    //
-    // A carry-over can still expose two texts at once. The patched helper flushes the
-    // finalized FIFO first and this controller commits only the live composition. If a
-    // pending generation survives for compatibility, its text is `lastFinalizedText` —
-    // not `state.text`, which already holds the newer syllable.
-    //
-    // Neither comes from the textarea: xterm clears it in its own blur handler, which
-    // is registered first (at `terminal.open()`), so reading it here would depend on
-    // listener order.
-    const xtermSendPending = options.getXtermPendingSend?.() ?? false;
-    const doomedFinalized = xtermSendPending ? lastFinalizedText : "";
+    // Completed generations belong to xterm (ADR-0230). Its listener is registered
+    // first, at terminal.open(), and flushes them before clearing the textarea.
+    // A pending-finalize phase therefore needs only a reset; during carry-over,
+    // xterm sends the completed syllables before we commit the live one below.
+    // Read the preview snapshot because xterm has already cleared the textarea.
     // `state.text` lags: the preview sync is deferred to a rAF/timeout, so a blur can
     // arrive before the last `compositionupdate` has been applied. The display text from
     // that update is synchronous and, per the preview logic, the same source — so it is a
     // backstop, not a different value.
     const inFlight = phase === "composing" ? state.text || latestCompositionDisplayText : "";
-    const commitOnBlur = doomedFinalized + inFlight;
     traceComposition(options, "ime-composition-blur-reset", {
       phase,
       textareaValue: textarea?.value ?? "",
-      xtermSendPending,
-      doomedFinalized,
       inFlight,
-      commitOnBlur,
+      commitOnBlur: inFlight,
     });
-    if (commitOnBlur) options.onCommit?.(commitOnBlur);
+    if (inFlight) options.onCommit?.(inFlight);
     reset();
   };
 
