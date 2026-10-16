@@ -181,12 +181,7 @@ impl InspectionCache {
             canonical.clone(),
             Entry {
                 request: io_request,
-                result: Some(
-                    result
-                        .as_ref()
-                        .map(Clone::clone)
-                        .map_err(ToString::to_string),
-                ),
+                result: Some(result.as_ref().cloned().map_err(ToString::to_string)),
             },
         );
         for alias in cache.aliases.values_mut() {
