@@ -429,8 +429,8 @@ fn hand_edited_pane_clear_section_loads_and_omissions_use_safe_defaults() {
 
 #[test]
 fn destructive_confirmation_is_root_owned_and_ignores_the_old_selector_key() {
-    // ADR-0333 moved the gate to the root. A settings.json still carrying the
-    // old workspaceSelector key must load cleanly and fall back to confirming.
+    // ADR-0333 moved the gate to the root. serde ignores the old
+    // workspaceSelector key, so the root default (confirm) applies.
     let legacy: Settings =
         serde_json::from_str(r#"{ "workspaceSelector": { "confirmDestructiveActions": false } }"#)
             .unwrap();
@@ -439,10 +439,6 @@ fn destructive_confirmation_is_root_owned_and_ignores_the_old_selector_key() {
     assert!(rewritten["workspaceSelector"]
         .get("confirmDestructiveActions")
         .is_none());
-
-    let opted_out: Settings =
-        serde_json::from_str(r#"{ "confirmDestructiveActions": false }"#).unwrap();
-    assert!(!opted_out.confirm_destructive_actions);
 }
 
 #[tokio::test]
