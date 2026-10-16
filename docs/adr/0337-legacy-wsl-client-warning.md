@@ -1,6 +1,6 @@
 # 0337. inbox(구형) WSL 클라이언트로 WSL을 쓰면 경고만 띄운다 (0334 후속)
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-16
 - Source: 사용자 요구("구형 감지해서 경고 띄우는 것만") · [ADR-0334](0334-console-less-wsl-runs.md) 후속 항목 · [api-contracts.md](../architecture/api-contracts.md) §14 프로세스 실행
 - 관계: ADR-0334의 "inbox fallback 경로의 콘솔 누수 감지" 후속 항목을 경고로 좁힌다. 감지·차단은 하지 않는다.
