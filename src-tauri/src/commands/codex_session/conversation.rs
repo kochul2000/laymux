@@ -32,6 +32,10 @@ pub(super) struct ConversationLookup<'a> {
     state: &'a AppState,
     enabled: bool,
     before: HashMap<String, Observation>,
+    /// Display polling may read a guest view older than this lookup
+    /// (ADR-0335). Such a view must not become a receipt proof: it could
+    /// overwrite the proof the checkpoint's own observation just recorded.
+    records_evidence: bool,
 }
 
 impl<'a> ConversationLookup<'a> {
@@ -42,6 +46,7 @@ impl<'a> ConversationLookup<'a> {
         session: &ResolvedSession,
     ) {
         if session.fresh
+            || !self.records_evidence
             || self
                 .state
                 .session_checkpoint
@@ -64,7 +69,11 @@ impl<'a> ConversationLookup<'a> {
             );
         }
     }
-    pub(super) fn new(state: &'a AppState, enabled: bool) -> Result<Self, String> {
+    pub(super) fn new(
+        state: &'a AppState,
+        enabled: bool,
+        observation: crate::wsl_probe::snapshot::GuestObservation,
+    ) -> Result<Self, String> {
         let terminals = state.terminals.lock_or_err()?;
         let handles = state.pty_handles.lock_or_err()?;
         let before = handles
@@ -75,6 +84,7 @@ impl<'a> ConversationLookup<'a> {
             state,
             enabled,
             before,
+            records_evidence: !observation.is_reusable(),
         })
     }
 

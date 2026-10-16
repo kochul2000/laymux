@@ -1,5 +1,6 @@
 use super::*;
 use crate::session_checkpoint::codex_status::{CodexStatusCheckpoint, CodexStatusTarget};
+use crate::wsl_probe::snapshot::GuestObservation;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -70,7 +71,10 @@ fn fixture() -> (
 #[test]
 fn eight_panes_share_process_discovery_and_the_already_collected_conversations() {
     let (state, lookup, processes) = fixture();
-    let result = verified_with_processes(&state, &lookup, || Ok(processes)).unwrap();
+    let result = verified_with_processes(&state, &lookup, GuestObservation::starting_now(), || {
+        Ok(processes)
+    })
+    .unwrap();
     assert_eq!(result.len(), 8);
     for (terminal, (_, id, fresh)) in result {
         assert_eq!(lookup.attributions[&terminal].as_deref(), Some(id.as_str()));
@@ -97,7 +101,10 @@ fn a_failed_lost_or_changed_selection_cannot_be_overwritten_by_the_earlier_proof
             }
         }
         assert!(
-            verified_with_processes(&state, &lookup, || Ok(processes)).is_err(),
+            verified_with_processes(&state, &lookup, GuestObservation::starting_now(), || Ok(
+                processes
+            ))
+            .is_err(),
             "{change}"
         );
     }
@@ -123,7 +130,10 @@ fn current_pid_incarnation_and_terminal_generation_are_still_required() {
             }
         }
         assert!(
-            verified_with_processes(&state, &lookup, || Ok(processes)).is_err(),
+            verified_with_processes(&state, &lookup, GuestObservation::starting_now(), || Ok(
+                processes
+            ))
+            .is_err(),
             "{change}"
         );
     }
@@ -132,7 +142,7 @@ fn current_pid_incarnation_and_terminal_generation_are_still_required() {
 #[test]
 fn expiry_during_process_discovery_does_not_return_a_successful_proof() {
     let (state, lookup, processes) = fixture();
-    let result = verified_with_processes(&state, &lookup, || {
+    let result = verified_with_processes(&state, &lookup, GuestObservation::starting_now(), || {
         state
             .session_checkpoint
             .codex_status
@@ -144,4 +154,76 @@ fn expiry_during_process_discovery_does_not_return_a_successful_proof() {
         Ok(processes)
     });
     assert!(result.is_err());
+}
+
+#[test]
+fn reusable_status_fallback_does_not_add_or_refresh_checkpoint_evidence() {
+    let (state, lookup, mut processes) = fixture();
+    let home = tempfile::tempdir().unwrap();
+    let terminal = "pane-0";
+    let id = lookup.attributions[terminal].as_ref().unwrap();
+    let sessions = home.path().join("sessions");
+    std::fs::create_dir_all(&sessions).unwrap();
+    let rollout = sessions.join(format!("rollout-test-{id}.jsonl"));
+    let header = serde_json::json!({"type":"session_meta", "payload":{
+        "id":id, "cwd":"/project", "source":"cli"
+    }})
+    .to_string()
+        + "\n";
+    std::fs::write(&rollout, &header).unwrap();
+    processes.retain(|id, _| id == terminal);
+    state
+        .pty_handles
+        .lock()
+        .unwrap()
+        .retain(|id, _| id == terminal);
+    let process = processes.get_mut(terminal).unwrap();
+    process.codex_home = home.path().into();
+    process.sqlite_home = home.path().into();
+    {
+        let mut slot = state.session_checkpoint.codex_status.lock().unwrap();
+        let targets = &mut slot.as_mut().unwrap().targets;
+        targets.retain(|id, _| id == terminal);
+        let target = targets.get_mut(terminal).unwrap();
+        target.process = process.clone();
+        target.hook_binding = None;
+    }
+    for id in processes.keys() {
+        let mut session = crate::terminal::TerminalSession::new(
+            id.clone(),
+            crate::terminal::TerminalConfig::default(),
+        );
+        session.codex_hook_title.generation = 7;
+        state.terminals.lock().unwrap().insert(id.clone(), session);
+    }
+    crate::session_checkpoint::receipt::capture(&state)
+        .unwrap()
+        .expect("a receipt capture is active during finalization");
+    let current_proof = || {
+        state
+            .session_checkpoint
+            .receipts
+            .lock()
+            .unwrap()
+            .has_current_codex_file_for_test(terminal, &rollout)
+    };
+    // The same fallback can be visited by the hook poll and the final save.
+    // Polling must neither create a proof nor overwrite a prior file stamp.
+    for has_previous_proof in [false, true] {
+        let result = verified_with_processes(&state, &lookup, GuestObservation::Reusable, || {
+            Ok(processes.clone())
+        })
+        .unwrap();
+        assert_eq!(result[terminal], (7, id.clone(), false));
+        assert!(
+            !current_proof(),
+            "polling refreshed evidence: {has_previous_proof}"
+        );
+        verified_with_processes(&state, &lookup, GuestObservation::starting_now(), || {
+            Ok(processes.clone())
+        })
+        .unwrap();
+        assert!(current_proof(), "a new observation must record evidence");
+        std::fs::write(&rollout, header.clone() + "{\"type\":\"event_msg\"}\n").unwrap();
+    }
 }

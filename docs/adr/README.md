@@ -358,6 +358,7 @@ ADR 이 필요한 대표 기준:
 | [0332](0332-remote-tool-bottom-controls-and-github-back.md) | Remote 우측 도구는 하단 컨트롤바를 기본으로 하고 PRs에서 Issues로 돌아간 뒤 닫는다 (0261 close 동작 일부 대체) | Accepted |
 | [0333](0333-destructive-confirmation-global-and-pane-control-bar.md) | 파괴적 action 두 번 확인을 전역 설정으로 올리고 pane 컨트롤 바에도 적용한다 (0211 설정 키·적용 범위 대체) | Accepted |
 | [0334](0334-console-less-wsl-runs.md) | laymux가 띄우는 파이프 기반 WSL 실행은 콘솔 없이 lifted `wsl.exe`를 직접 띄운다 (0120·0104 실행 수단 일부 대체) | Accepted |
+| [0335](0335-shared-wsl-guest-observations.md) | WSL 게스트 관측은 distribution별 공유 run으로 합치고, 신선도는 호출자가 계약한다 (0120 probe 실행 단위·0238 진단 실행 방식 확장) | Accepted |
 | [0336](0336-webview2-process-failure-gui-restart.md) | WebView2 프로세스가 실패하면 PTY 데몬 세션을 인계하고 GUI를 다시 시작하며, 재시작 예산으로 반복을 멈춘다 (0080 일부 대체) | Accepted |
 | [0337](0337-legacy-wsl-client-warning.md) | inbox(구형) WSL 클라이언트로 WSL을 쓰면 경고만 띄운다 (0334 후속) | Accepted |
 
