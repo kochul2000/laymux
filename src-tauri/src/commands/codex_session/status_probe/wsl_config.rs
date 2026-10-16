@@ -91,7 +91,7 @@ pub(super) fn read_editor_configs(
         }
         Ok(path)
     };
-    let mut command = crate::process::headless_command("wsl.exe");
+    let mut command = crate::process::headless_wsl_command();
     command.args([
         "-d",
         distro,
