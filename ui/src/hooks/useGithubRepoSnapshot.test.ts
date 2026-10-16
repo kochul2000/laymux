@@ -64,6 +64,80 @@ describe("useGithubRepoSnapshot", () => {
     expect(getGithubRepoSnapshot).toHaveBeenLastCalledWith("/repo", true);
   });
 
+  it("keeps a post-action refresh forced through contention and intervening polls", async () => {
+    vi.useFakeTimers();
+    const before: GithubRepoSnapshot = {
+      ...ready("owner/repo"),
+      pulls: [
+        {
+          number: 12,
+          title: "Merge me",
+          author: "alice",
+          url: "https://github.com/owner/repo/pull/12",
+          updatedAt: "2026-10-16T00:00:00Z",
+          labels: [],
+          isDraft: false,
+          headRefName: "fix/refresh",
+        },
+      ],
+    };
+    const pending = { ...ready("owner/repo"), status: { type: "pending" } };
+    getGithubRepoSnapshot.mockResolvedValueOnce(before);
+    const { result } = renderHook(() => useGithubRepoSnapshot("/repo", 500));
+    await act(async () => {});
+    expect(result.current.snapshot.pulls).toHaveLength(1);
+
+    // A background list fetch owns the token when the merge completes.
+    getGithubRepoSnapshot.mockResolvedValue(pending);
+    await act(async () => result.current.refresh());
+    expect(result.current.snapshot.pulls).toHaveLength(1);
+    getGithubRepoSnapshot.mockClear();
+    await act(async () => vi.advanceTimersByTimeAsync(GITHUB_PENDING_RETRY_MS));
+    expect(getGithubRepoSnapshot.mock.calls.length).toBeGreaterThan(0);
+    expect(getGithubRepoSnapshot.mock.calls.every(([, force]) => force === true)).toBe(true);
+
+    getGithubRepoSnapshot.mockResolvedValue(ready("owner/repo"));
+    await act(async () => vi.advanceTimersByTimeAsync(GITHUB_PENDING_RETRY_MS));
+    expect(result.current.snapshot.pulls).toHaveLength(0);
+    getGithubRepoSnapshot.mockClear();
+    await act(async () => vi.advanceTimersByTimeAsync(500));
+    expect(getGithubRepoSnapshot).toHaveBeenLastCalledWith("/repo", false);
+  });
+
+  it("lets a slow forced refresh finish even when polls fire while it is in flight", async () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useGithubRepoSnapshot("/repo"));
+    await act(async () => {});
+    let finish!: (snapshot: GithubRepoSnapshot) => void;
+    getGithubRepoSnapshot.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await act(async () => result.current.refresh());
+    await act(async () => vi.advanceTimersByTimeAsync(GITHUB_POLL_MS * 2));
+    await act(async () => finish({ ...ready("owner/repo"), fetchedAtMs: 42 }));
+    expect(result.current.snapshot.fetchedAtMs).toBe(42);
+  });
+
+  it("starts a new post-action refresh even if an earlier manual refresh is in flight", async () => {
+    const { result } = renderHook(() => useGithubRepoSnapshot("/repo"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    let finishOld!: (snapshot: GithubRepoSnapshot) => void;
+    getGithubRepoSnapshot.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishOld = resolve;
+        }),
+    );
+    await act(async () => result.current.refresh());
+    getGithubRepoSnapshot.mockResolvedValue({ ...ready("owner/repo"), fetchedAtMs: 42 });
+    await act(async () => result.current.refresh());
+    await act(async () => finishOld(ready("owner/repo")));
+    expect(result.current.snapshot.fetchedAtMs).toBe(42);
+  });
+
   it("drops a slow read from the previous repository", async () => {
     let resolveFirst: ((snapshot: GithubRepoSnapshot) => void) | undefined;
     getGithubRepoSnapshot.mockImplementationOnce(
