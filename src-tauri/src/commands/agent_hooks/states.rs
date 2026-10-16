@@ -54,8 +54,9 @@ pub(crate) fn get_agent_hook_states_impl(
         return Err("Unsupported hook provider".into());
     }
     // Two-second display polling. Both attribution passes below may read the
-    // shared guest scan; the recheck re-reads session selection, titles and
-    // hook bindings, not necessarily the guest itself (ADR-0335).
+    // same shared WSL guest run (scan and Codex diagnostics); the recheck still
+    // re-reads titles, hook bindings, generations, native processes and session
+    // files (ADR-0335).
     let observation = GuestObservation::Reusable;
     let attributions =
         get_terminal_session_attributions_impl(None, None, None, state, observation)?;

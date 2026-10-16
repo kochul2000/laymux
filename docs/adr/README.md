@@ -358,6 +358,7 @@ ADR 이 필요한 대표 기준:
 | [0332](0332-remote-tool-bottom-controls-and-github-back.md) | Remote 우측 도구는 하단 컨트롤바를 기본으로 하고 PRs에서 Issues로 돌아간 뒤 닫는다 (0261 close 동작 일부 대체) | Accepted |
 | [0333](0333-destructive-confirmation-global-and-pane-control-bar.md) | 파괴적 action 두 번 확인을 전역 설정으로 올리고 pane 컨트롤 바에도 적용한다 (0211 설정 키·적용 범위 대체) | Accepted |
 | [0334](0334-console-less-wsl-runs.md) | laymux가 띄우는 파이프 기반 WSL 실행은 콘솔 없이 lifted `wsl.exe`를 직접 띄운다 (0120·0104 실행 수단 일부 대체) | Proposed |
+| [0335](0335-shared-wsl-guest-observations.md) | WSL 게스트 관측은 distribution별 공유 run으로 합치고, 신선도는 호출자가 계약한다 (0120 probe 실행 단위·0238 진단 실행 방식 확장) | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 
