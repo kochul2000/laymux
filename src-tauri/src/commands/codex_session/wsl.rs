@@ -73,7 +73,7 @@ pub(super) fn read_rows(
     }
     let helper =
         crate::path_utils::windows_to_wsl_path(helper.to_str().ok_or("invalid WSL probe path")?);
-    let mut command = crate::process::headless_command("wsl.exe");
+    let mut command = crate::process::headless_wsl_command();
     command.args([
         "-d",
         &process.distro,

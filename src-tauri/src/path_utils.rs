@@ -268,7 +268,7 @@ fn wsl_follow_symlink(path: &str, wsl_distro: Option<&str>) -> Option<String> {
         return None;
     };
 
-    let mut cmd = crate::process::headless_command("wsl.exe");
+    let mut cmd = crate::process::headless_wsl_command();
     if let Some(ref d) = distro {
         cmd.args(["-d", d]);
     }
@@ -331,7 +331,7 @@ pub fn get_default_wsl_distro() -> Option<String> {
 
 #[cfg(windows)]
 pub(crate) fn get_default_wsl_distro_with_timeout(timeout: std::time::Duration) -> Option<String> {
-    let mut command = crate::process::headless_command("wsl.exe");
+    let mut command = crate::process::headless_wsl_command();
     command.args(["--list", "--quiet"]);
     let output = crate::process::output_with_timeout(&mut command, timeout).ok()?;
     // wsl.exe outputs UTF-16LE — decode it properly

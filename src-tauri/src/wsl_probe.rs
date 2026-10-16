@@ -18,7 +18,7 @@ use crate::error::AppError;
 #[cfg(windows)]
 use crate::lock_ext::MutexExt;
 #[cfg(windows)]
-use crate::process::{headless_command, output_with_timeout};
+use crate::process::{headless_wsl_command, output_with_timeout};
 #[cfg(windows)]
 use crate::state::AppState;
 #[cfg(windows)]
@@ -178,7 +178,7 @@ pub fn run_probe_script(
     if !is_safe_distro_name(distro) {
         return Err("unsafe WSL distribution name".into());
     }
-    let mut command = headless_command("wsl.exe");
+    let mut command = headless_wsl_command();
     command.args(["-d", distro, "--exec", "sh", "-c", script, arg0]);
     let output = output_with_timeout(&mut command, timeout).map_err(|error| error.to_string())?;
     if !output.status.success() {

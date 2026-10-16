@@ -32,7 +32,7 @@ pub(super) fn require_absent(distro: &str, codex_home: &Path, id: &str) -> Resul
         return Err("WSL Codex home requires an absolute path".into());
     }
     let depth = u16::from(crate::constants::CODEX_SESSION_DIRECTORY_DEPTH) + 1;
-    let mut command = crate::process::headless_command("wsl.exe");
+    let mut command = crate::process::headless_wsl_command();
     command.args([
         "-d",
         distro,
