@@ -1,6 +1,6 @@
 # 0334. laymux가 띄우는 파이프 기반 WSL 실행은 콘솔 없이 lifted `wsl.exe`를 직접 띄운다 (0120·0104 실행 수단 일부 대체)
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-16
 - Source: 2026-10-16 prod 멈춤 조사(세션 USER 자원 고갈) · [AGENTS.md](../../AGENTS.md) "외부 프로세스는 `headless_command()`" · [api-contracts.md](../architecture/api-contracts.md) §14 프로세스 실행 · [ADR-0120](0120-wsl-agent-session-attribution.md) · [ADR-0134](0134-wsl-guest-interactive-app-liveness.md) · [ADR-0104](0104-codex-usage-app-server-probe.md)
 - Supersedes: ADR-0120의 "`crate::process::headless_command()`로 `wsl.exe … --exec sh` probe를 실행한다"와 ADR-0104 WSL usage profile의 app-server 실행 수단. probe 내용·주기·deadline·인자 검증은 유지한다.

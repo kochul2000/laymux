@@ -60,9 +60,9 @@ impl GithubRepoSnapshot {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum GithubRepoStatus {
     Ready,
-    /// Another caller is already running `gh` for this repository and there is
-    /// no cached result to serve yet. Not an error and not an empty list — the
-    /// caller simply has no answer yet and should ask again shortly.
+    /// A fetch is in flight or was invalidated, and there is no suitable answer
+    /// yet (forced reads cannot accept cached results). Not an error or an
+    /// empty list — the caller should ask again shortly.
     Pending,
     /// The working dir has no GitHub `origin` — a normal display state, not an
     /// error: a pane may simply be parked outside a repository.
@@ -150,6 +150,8 @@ fn parse_item_list(stdout: &str) -> Result<Vec<GithubItem>, String> {
 struct RepoCache {
     snapshot: Option<GithubRepoSnapshot>,
     fetched_at: Option<Instant>,
+    // Invalidating a cache also invalidates results of reads already in flight.
+    revision: u64,
 }
 
 /// One repository's registry entry.
@@ -520,7 +522,25 @@ impl Served {
 /// blocking worker per polling pane for as long as the network took, and a
 /// stalled `gh` would drain the pool the whole app shares.
 fn fetch_into_cache(entry: &RepoEntry, repo: &RepoRef, force: bool) -> GithubRepoSnapshot {
+    fetch_into_cache_with(entry, repo, force, || fetch_snapshot(&repo.slug, &repo.url))
+}
+
+fn fetch_into_cache_with(
+    entry: &RepoEntry,
+    repo: &RepoRef,
+    force: bool,
+    fetch: impl FnOnce() -> GithubRepoSnapshot,
+) -> GithubRepoSnapshot {
     let Ok(_token) = entry.fetch.try_lock() else {
+        // A forced refresh must never accept an older list just because a
+        // background fetch owns the token. Pending schedules a short retry.
+        if force {
+            return GithubRepoSnapshot::failed(
+                Some(repo.slug.clone()),
+                Some(repo.url.clone()),
+                GithubRepoStatus::Pending,
+            );
+        }
         return match snapshot_for_contention(entry, repo) {
             Ok(snapshot) => snapshot,
             Err(message) => failed_for(repo, message),
@@ -533,9 +553,20 @@ fn fetch_into_cache(entry: &RepoEntry, repo: &RepoRef, force: bool) -> GithubRep
         Ok(None) => {}
         Err(message) => return failed_for(repo, message),
     }
-    let snapshot = fetch_snapshot(&repo.slug, &repo.url);
+    let revision = match entry.cache.lock_or_err() {
+        Ok(guard) => guard.revision,
+        Err(error) => return failed_for(repo, error.to_string()),
+    };
+    let snapshot = fetch();
     match entry.cache.lock_or_err() {
         Ok(mut guard) => {
+            if guard.revision != revision {
+                return GithubRepoSnapshot::failed(
+                    Some(repo.slug.clone()),
+                    Some(repo.url.clone()),
+                    GithubRepoStatus::Pending,
+                );
+            }
             guard.snapshot = Some(snapshot.clone());
             guard.fetched_at = Some(Instant::now());
         }
@@ -631,6 +662,7 @@ fn invalidate(repo: &str) {
     };
     guard.snapshot = None;
     guard.fetched_at = None;
+    guard.revision = guard.revision.wrapping_add(1);
 }
 
 /// Apply one issue/PR action through `gh`. Mutating GitHub state is always a
@@ -798,6 +830,45 @@ mod tests {
         let guard = entry.cache.lock_or_err().unwrap();
         assert!(guard.snapshot.is_none());
         assert!(!is_fresh(guard.fetched_at, Instant::now()));
+    }
+
+    #[test]
+    fn a_post_action_refresh_retries_instead_of_accepting_a_contended_cache() {
+        let entry = RepoEntry::default();
+        store(&entry, GithubRepoStatus::Ready);
+        let _token = entry.fetch.try_lock().unwrap();
+        let snapshot = fetch_into_cache(&entry, &repo_ref(), true);
+        assert!(matches!(snapshot.status, GithubRepoStatus::Pending));
+    }
+
+    #[test]
+    fn a_fetch_started_before_an_action_cannot_restore_the_invalidated_cache() {
+        let slug = "owner/action-during-fetch";
+        let entry = repo_entry(slug).unwrap();
+        let repo = RepoRef {
+            slug: slug.into(),
+            url: format!("https://github.com/{slug}"),
+        };
+        let snapshot = fetch_into_cache_with(&entry, &repo, true, || {
+            // The merge finishes while a list read holds the fetch token.
+            invalidate(slug);
+            GithubRepoSnapshot::failed(
+                Some(slug.into()),
+                Some(repo.url.clone()),
+                GithubRepoStatus::Ready,
+            )
+        });
+        assert!(matches!(snapshot.status, GithubRepoStatus::Pending));
+        assert!(entry.cache.lock_or_err().unwrap().snapshot.is_none());
+        let next = fetch_into_cache_with(&entry, &repo, false, || {
+            GithubRepoSnapshot::failed(
+                Some(slug.into()),
+                Some(repo.url.clone()),
+                GithubRepoStatus::Ready,
+            )
+        });
+        assert!(matches!(next.status, GithubRepoStatus::Ready));
+        assert!(entry.cache.lock_or_err().unwrap().snapshot.is_some());
     }
 
     fn store(entry: &RepoEntry, status: GithubRepoStatus) {

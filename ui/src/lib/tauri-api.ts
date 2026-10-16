@@ -1487,6 +1487,14 @@ export async function getTerminalHomeDirectory(terminalId: string): Promise<stri
   return invoke("get_terminal_home_directory", { terminalId });
 }
 
+/**
+ * Whether laymux's WSL runs fall back to the inbox (legacy) WSL client, which
+ * creates a console per run, while a WSL terminal is open (ADR-0337).
+ */
+export async function getLegacyWslNotice(): Promise<boolean> {
+  return invoke("get_legacy_wsl_notice");
+}
+
 /** Read a file and classify it for the file viewer. */
 export async function readFileForViewer(
   path: string,
