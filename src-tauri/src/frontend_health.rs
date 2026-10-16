@@ -14,7 +14,10 @@
 //! serves both without a bridge round-trip. The *age* of the last report is the
 //! primary signal — it is readable while the stall is happening.
 //!
-//! Everything here is diagnostic. No control path reads it.
+//! Everything here is diagnostic, with one exception: when WebView2 reports
+//! the renderer unresponsive, the recovery reads when the last report landed
+//! to tell how long the main thread has been stuck (ADR-0336). No other
+//! control path reads it, and none reads the report's contents.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -89,6 +92,13 @@ impl FrontendHealthState {
         Ok(())
     }
 
+    /// When the last report landed (wall clock), `None` before the first.
+    /// The WebView hang recovery reads it as how long the frontend's main
+    /// thread has been stuck (ADR-0336).
+    pub fn last_report_at_ms(&self) -> Result<Option<u64>, AppError> {
+        Ok(self.last_report.lock_or_err()?.as_ref().map(|(at, _)| *at))
+    }
+
     pub fn snapshot(&self) -> Result<serde_json::Value, AppError> {
         let now = epoch_millis();
         let slot = self.last_report.lock_or_err()?;
@@ -148,6 +158,31 @@ mod tests {
         assert_eq!(snapshot["bridge"]["responsesOrphaned"], 2);
         assert_eq!(snapshot["frontend"]["probeLagMaxMs"], 42);
         assert!(snapshot["lastReportAgeMs"].as_u64().is_some());
+    }
+
+    #[test]
+    fn the_last_report_time_is_none_until_the_first_report() {
+        let state = FrontendHealthState::default();
+        assert_eq!(state.last_report_at_ms().unwrap(), None);
+
+        let before = epoch_millis();
+        state.store_report(serde_json::json!({})).unwrap();
+        let at = state.last_report_at_ms().unwrap().unwrap();
+        assert!(at >= before && at <= epoch_millis());
+    }
+
+    #[test]
+    fn the_last_report_time_returns_lock_error_instead_of_reporting_never_seen() {
+        // Read as "never reported", a poisoned slot would make the WebView
+        // recovery treat a live frontend as silent (ADR-0336).
+        let state = FrontendHealthState::default();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = state.last_report.lock().unwrap();
+            panic!("intentional poison");
+        }));
+
+        let error = state.last_report_at_ms().unwrap_err();
+        assert!(matches!(error, crate::error::AppError::Lock(_)));
     }
 
     #[test]

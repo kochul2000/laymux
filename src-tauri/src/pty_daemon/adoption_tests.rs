@@ -564,6 +564,22 @@ fn the_restart_into_an_update_hands_daemon_terminals_to_the_updated_gui() {
 }
 
 #[test]
+fn a_webview_recovery_restart_hands_daemon_terminals_to_the_next_gui() {
+    let daemon = TestDaemon::start();
+    let state = state_with_daemon_terminal(&daemon, "pane-w#1");
+    // The recovery teardown, then the exit path `request_restart` runs on the
+    // way to the fresh GUI (ADR-0336).
+    state.begin_update_handoff();
+    state.terminate_child_processes();
+    state.terminate_daemon_sessions_on_exit();
+    assert!(state.pty_handles.lock().unwrap().is_empty());
+    std::mem::forget(state);
+    assert_session_keeps_running(&daemon);
+    super::control::terminate_by_id(&daemon.endpoint, "pane-w#1", None).unwrap();
+    daemon.wait_for_sessions(0);
+}
+
+#[test]
 fn a_failed_update_ends_daemon_terminals_on_exit_again() {
     let daemon = TestDaemon::start();
     let state = state_with_daemon_terminal(&daemon, "pane-f#1");

@@ -972,6 +972,8 @@ OSC 7은 일부 셸(예: PowerShell의 `prompt` 함수)이 프롬프트가 재�
 }
 ```
 
+마지막 report의 **도착 시각**은 진단 밖에서 한 곳만 읽는다. Windows GUI는 WebView2가 renderer 무응답을 보고했을 때 이 시각부터 30초 넘게 report가 없었으면 GUI를 다시 시작한다([ADR-0336](../adr/0336-webview2-process-failure-gui-restart.md), [data-flow.md §13.9](data-flow.md#139-webview2-프로세스-실패-복구-windows)). report 내용은 어떤 제어 경로도 읽지 않는다.
+
 판정 순서는 `lastReportAgeMs` 먼저다 — **큰 값이면 WebView 메인 스레드 자체가 멈춘 것**이고, **작은 값 옆에서 `bridge.requestTimeouts`만 오르면** 스레드는 살아 있고 `automation-request` 이벤트가 큐에 밀린 것이다. `terminalOutput[]`은 WebView를 거치지 않고 현재 Rust `TerminalOutputSession`에서 합성한 backend SoT라 프론트가 멈춰도 `healthy | backpressured | failStopped`, reason, generation/token, parsed/write/ring/delivery bounds, active grant와 receipt slot을 읽을 수 있다. `frontend.terminalOutputV3`는 마지막 health report가 전달한 mount-local surface identity/frontier이므로 report age와 함께 읽고 backend 상태를 대체하지 않는다. 두 쪽 모두 terminal payload bytes를 담지 않는다. 프론트의 `responsesSent`는 Rust가 IPC command를 받아들였다는 뜻이고 실제 HTTP waiter와의 결합은 Rust의 `responsesMatched`/`responsesOrphaned`가 구분한다. `writeBackpressure`는 xterm이 아직 받아들이지 않은 batch를 같은 byte로 재시도한 횟수이고, `writeCallbackFailures`와 source/stage별 하위 카운터는 xterm이 이미 받아들인 byte 뒤 embedder 완료 작업의 실패다. 후자는 sequence gap이 아니며 callback에서 절대 재시도하지 않는다([ADR-0084](../adr/0084-desktop-terminal-output-parsed-credit.md)). `frontend.inputDelivery`는 human raw input의 한 번 제출과 IPC completion만 기록한다. 실패는 backend 미수락의 증명이 아니므로 counter나 health report가 retry/recovery 결정을 만들지 않으며 payload는 절대 포함하지 않는다([ADR-0096](../adr/0096-terminal-human-input-write-failure-observability.md)). `frontend.pipeline`과 v3 terminal state의 나머지 terminal별 의미는 [data-flow.md §8.8](data-flow.md)이 소유한다. 응답은 identity·상태·카운터·지연·sequence 수치뿐이며 터미널 바이트·경로·설정을 담지 않고, 기존 IP allowlist 아래 있다.
 
 ### 12.2 포트 규칙
@@ -2045,6 +2047,12 @@ src-tauri/src/
 │   ├── entry.rs              # `laymux --pty-daemon` 진입점
 │   ├── wire.rs / transport.rs / discovery.rs  # frame·로컬 socket·token
 │   └── tests.rs / adoption_tests.rs / handshake_tests.rs  # 실제 PTY·셸 기반 데몬 테스트
+├── webview_recovery/         # WebView2 프로세스 실패 복구 (ADR-0336, data-flow §13.9)
+│   ├── policy.rs             # 순수 정책: 실패 종류 판단·프론트 침묵·재시작 예산
+│   ├── history.rs            # 재시작 기록 파일(fail closed claim)
+│   ├── notice.rs             # 재시작하지 않을 때의 대화상자 문구
+│   ├── process_failed.rs     # Windows: ProcessFailed 구독·인계·대화상자
+│   └── relaunch.rs           # Windows: 상속 없는 다음 GUI 기동·이전 GUI 종료 대기
 ├── clipboard.rs              # 클립보드 (smart paste, 이미지)
 ├── ipc_server.rs             # IPC 소켓 (lx CLI ↔ IDE)
 ├── local_socket.rs           # 현재 사용자 전용 Unix domain socket (ADR-0305)
@@ -2166,7 +2174,7 @@ env.push((ENV_LX_ENDPOINT_FILE.to_string(), path));
 
 **플랫폼 분기**: `#[cfg(target_os = "windows")]` / `#[cfg(not(target_os = "windows"))]`를 사용한다. 긴 플랫폼별 코드는 별도 함수로 추출하고 `cfg` 어트리뷰트를 함수 수준에 적용한다.
 
-**프로세스 실행**: `std::process::Command::new()` 대신 반드시 `crate::process::headless_command()`를 사용한다. (Windows 콘솔 창 깜빡임 방지) laymux가 띄우는 파이프 기반 `wsl.exe` 실행(probe·helper·`--list`·usage app-server, Windows에서 첫 프로그램이 WSL 클라이언트인 issue reporter gh prefix)은 `crate::process::headless_wsl_command()`만 쓴다. lifted WSL(`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI` `InstallLocation`)이 있으면 그 `wsl.exe`를 `DETACHED_PROCESS`로 직접 띄워 콘솔을 만들지 않고, 없으면 inbox 런처를 `headless_command`로 띄운다. inbox 런처는 콘솔 없이 띄우면 클라이언트에 보이는 콘솔을 새로 붙이고 리다이렉트한 출력을 잃는다. 소스 가드 테스트가 `headless_command("wsl.exe")` 호출 형식의 재유입을 막는다(다른 형식까지 보증하지는 않는다). PTY pane의 WSL 셸은 대상이 아니다([ADR-0334](../adr/0334-console-less-wsl-runs.md)). 예외: Windows PTY 데몬 기동(`pty_daemon/launcher.rs` `windows_spawn`)은 handle 상속을 끄기 위해 `CreateProcessW`(`bInheritHandles = FALSE`, `CREATE_NO_WINDOW`)를 직접 호출한다. std `Command`는 상속을 끌 수 없어 오래 사는 데몬이 GUI의 pipe 끝을 쥐게 된다([ADR-0300](../adr/0300-detached-pty-daemon-core.md)).
+**프로세스 실행**: `std::process::Command::new()` 대신 반드시 `crate::process::headless_command()`를 사용한다. (Windows 콘솔 창 깜빡임 방지) laymux가 띄우는 파이프 기반 `wsl.exe` 실행(probe·helper·`--list`·usage app-server, Windows에서 첫 프로그램이 WSL 클라이언트인 issue reporter gh prefix)은 `crate::process::headless_wsl_command()`만 쓴다. lifted WSL(`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI` `InstallLocation`)이 있으면 그 `wsl.exe`를 `DETACHED_PROCESS`로 직접 띄워 콘솔을 만들지 않고, 없으면 inbox 런처를 `headless_command`로 띄운다. inbox 런처는 콘솔 없이 띄우면 클라이언트에 보이는 콘솔을 새로 붙이고 리다이렉트한 출력을 잃는다. 소스 가드 테스트가 `headless_command("wsl.exe")` 호출 형식의 재유입을 막는다(다른 형식까지 보증하지는 않는다). PTY pane의 WSL 셸은 대상이 아니다([ADR-0334](../adr/0334-console-less-wsl-runs.md)). 예외: Windows PTY 데몬 기동(`pty_daemon/launcher.rs` `windows_spawn`)은 handle 상속을 끄기 위해 `CreateProcessW`(`bInheritHandles = FALSE`, `CREATE_NO_WINDOW`)를 직접 호출한다. std `Command`는 상속을 끌 수 없어 오래 사는 데몬이 GUI의 pipe 끝을 쥐게 된다([ADR-0300](../adr/0300-detached-pty-daemon-core.md)). WebView 복구의 다음 GUI 기동(`webview_recovery/relaunch.rs`)도 같은 이유로 `CreateProcessW`(`bInheritHandles = FALSE`)를 직접 호출한다. 상속하면 다음 GUI가 이전 GUI의 Automation listen 소켓을 쥐어 포트를 잡지 못한다([ADR-0336](../adr/0336-webview2-process-failure-gui-restart.md)).
 
 **로깅**: `eprintln!()` 대신 `tracing` 매크로를 사용한다.
 ```rust
