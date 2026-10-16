@@ -461,6 +461,37 @@ describe("PaneControlBar", () => {
     expect(screen.getByTestId("pane-control-pinned")).toBeInTheDocument();
   });
 
+  it("requires two activations for delete inside the floating menu (ADR-0333)", async () => {
+    stubPaneWidth(320);
+    const onDelete = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar
+        currentView={defaultView}
+        actions={{ ...defaultActions, onDelete }}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("pane-control-menu-btn")).toBeInTheDocument());
+    await user.click(screen.getByTestId("pane-control-menu-btn"));
+    // The menu stays hidden until placed, then focuses its first control; a
+    // real click can only land after that, so wait for placement first.
+    await waitFor(() =>
+      expect(screen.getByTestId("pane-control-floating-menu")).toHaveAttribute("data-placement"),
+    );
+    const button = screen.getByTestId("pane-control-delete");
+    expect(screen.getByTestId("pane-control-floating-content")).toContainElement(button);
+
+    await user.click(button);
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(button).toHaveAttribute("data-confirming", "true");
+    await user.click(button);
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps terminal clear available in the narrow hover menu", async () => {
     stubPaneWidth(320);
     const onClearTerminal = vi.fn();

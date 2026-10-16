@@ -1,6 +1,6 @@
 # 0333. 파괴적 action 두 번 확인을 전역 설정으로 올리고 pane 컨트롤 바에도 적용한다 (0211 설정 키·적용 범위 대체)
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-16
 - Source: 사용자 요구(pane 컨트롤 바의 Restart view·Clear view·Delete pane이 한 번 클릭에 실행됨) · [ADR-0211](0211-workspace-selector-destructive-actions-require-two-activations.md) · [api-contracts.md](../architecture/api-contracts.md) Settings
 - Supersedes: ADR-0211의 설정 키(`workspaceSelector.confirmDestructiveActions`)와 "pane control bar는 비목표" 범위 조항. 두 번 활성화 규칙 자체는 유지한다.

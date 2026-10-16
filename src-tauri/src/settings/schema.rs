@@ -54,6 +54,12 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::Live,
     },
     MetadataEntry {
+        path: "/confirmDestructiveActions",
+        description: "파괴적 버튼을 같은 컨트롤 두 번 클릭으로만 실행합니다(기본 true, ADR-0333). workspace selector의 숨기기·터미널 지우기·layout 삭제·workspace 닫기와 pane 컨트롤 바의 Restart view·Clear view·Delete pane에 적용되며, 키바인딩·Automation·MCP·Remote 요청은 우회합니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
         path: "/appearance",
         description: "앱 테마와 터미널 외 UI의 기본 폰트 설정입니다.",
         sensitive: false,
@@ -247,7 +253,7 @@ const ENTRIES: &[MetadataEntry] = &[
     },
     MetadataEntry {
         path: "/workspaceSelector",
-        description: "workspace selector 표시·마지막 입력 배치·정렬·파괴적 action 확인·숨김 터미널 정리 설정입니다.",
+        description: "workspace selector 표시·마지막 입력 배치·정렬·숨김 터미널 정리 설정입니다.",
         sensitive: false,
         apply_mode: ApplyMode::Live,
     },

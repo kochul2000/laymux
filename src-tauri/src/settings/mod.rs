@@ -1838,6 +1838,16 @@ mod tests {
     }
 
     #[test]
+    fn destructive_confirmation_metadata_is_root_owned_and_live() {
+        let metadata = contract::metadata_for_path("/confirmDestructiveActions");
+        assert_eq!(metadata.apply_mode, contract::ApplyMode::Live);
+        assert!(metadata.description.contains("pane"));
+        assert!(!contract::metadata_for_path("/workspaceSelector")
+            .description
+            .contains("파괴적"));
+    }
+
+    #[test]
     fn destructive_confirmation_round_trip() {
         let settings: Settings =
             serde_json::from_str(r#"{ "confirmDestructiveActions": false }"#).unwrap();
