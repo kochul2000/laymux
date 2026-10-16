@@ -679,8 +679,21 @@ test("버튼 크기는 기존 terminal crop을 유지하고 모바일·가로 �
   await page.locator("#connect").click();
   await expect(page.locator("#terminal .xterm-rows")).toBeVisible();
   const rowCount = () => page.locator("#terminal .xterm-rows > div").count();
-  await expect.poll(rowCount).toBeGreaterThan(5);
-  const before = await rowCount();
+  // xterm opens at its 24-row default and only then fits the host, so wait for
+  // the fitted count to hold still before taking it as the baseline.
+  let lastCount = -1;
+  await expect
+    .poll(
+      async () => {
+        const count = await rowCount();
+        const settled = count > 5 && count === lastCount;
+        lastCount = count;
+        return settled;
+      },
+      { intervals: [300] },
+    )
+    .toBe(true);
+  const before = lastCount;
   const hostHeight = await page.locator("#terminal").evaluate((host) => host.clientHeight);
   await page.locator("#keyBarToggle").click();
   await page.locator("#navToggle").click();

@@ -1785,6 +1785,11 @@ test.describe("remote mobile layout", () => {
         type: "touchMove",
         touchPoints: [{ x: x + dx, y: y + dy, id: 1 }],
       });
+      // Settle before lifting, well inside the 400 ms repeat delay. A synthetic
+      // 32 px jump released instantly reads as a fling to Chromium 156+, which
+      // then spends the next tap on stopping it and synthesizes no click — a
+      // harness artifact a real thumb does not produce (#1204).
+      await page.waitForTimeout(120);
       await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
       await expect(helperTextarea).toBeFocused();
       await expect.poll(() => writes.length).toBe(writeIndex + 1);
