@@ -228,7 +228,7 @@ ADR 이 필요한 대표 기준:
 | [0208](0208-android-e2e-file-viewer-typed-capability.md) | Android E2E FileViewer는 타입화 capability와 exact claim binding을 함께 검증 | Accepted |
 | [0209](0209-remote-display-preferences-are-device-local.md) | Remote 표시·입력 감도·기본 checkpoint 예산은 기기 로컬로 소유한다 (0173·0199·0200 대체) | Accepted |
 | [0210](0210-remote-lucide-icon-boundary.md) | Remote 범용 아이콘도 Lucide DOM 경계에서 렌더한다 (0205·0169 확장) | Accepted |
-| [0211](0211-workspace-selector-destructive-actions-require-two-activations.md) | Workspace selector 파괴적 action은 같은 컨트롤의 연속 두 번 활성화를 요구한다 (0033·0035 정정) | Accepted |
+| [0211](0211-workspace-selector-destructive-actions-require-two-activations.md) | Workspace selector 파괴적 action은 같은 컨트롤의 연속 두 번 활성화를 요구한다 (0033·0035 정정) | Superseded by 0333 (설정 키·적용 범위만) |
 | [0212](0212-android-pairing-invitation-copy-paste.md) | Android 페어링 초대는 QR과 명시적 복사·붙여넣기를 함께 제공한다 (0145·0178 확장, 0176 범위 정정) | Accepted |
 | [0213](0213-remote-input-action-segment-placement-and-user-keys.md) | Remote 입력 action은 행 안의 정렬 구역에 배치하고, 조합키는 사용자가 등록한다 (0028 확장, 0186·0040 정정) | Proposed |
 | [0214](0214-remote-settings-paginates-into-tabs.md) | Remote Settings는 탭으로 나누고 선택한 탭만 기기에 남긴다 (0187 확장) | Proposed |
@@ -356,6 +356,7 @@ ADR 이 필요한 대표 기준:
 | [0330](0330-agent-integration-missing-notice.md) | 실제 사용한 에이전트 환경의 훅·MCP 미설치를 앱 알림으로 안내한다 (0289·0324·0325 확장, 0282 준수) | Accepted |
 | [0331](0331-remote-memo-body-tool-swipe.md) | Remote 메모 본문은 수평 도구 스와이프를 받는다 (0261 입력칸 제외 규칙 일부 대체) | Accepted |
 | [0332](0332-remote-tool-bottom-controls-and-github-back.md) | Remote 우측 도구는 하단 컨트롤바를 기본으로 하고 PRs에서 Issues로 돌아간 뒤 닫는다 (0261 close 동작 일부 대체) | Accepted |
+| [0333](0333-destructive-confirmation-global-and-pane-control-bar.md) | 파괴적 action 두 번 확인을 전역 설정으로 올리고 pane 컨트롤 바에도 적용한다 (0211 설정 키·적용 범위 대체) | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

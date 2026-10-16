@@ -187,7 +187,7 @@ Remote drawer의 workspace·pane 행은 오른쪽 고정 열에 `[건너뛰기] 
 Remote workspace 항목의 하단 패딩은 3px이며, 두 줄 pane 행은 최소 32px에서 내용 높이에 맞춰 늘어난다. 페인이 없고 branch·cwd 요약도 비어 있으면 빈 요약 줄을 표시하지 않는다.
 
 - **설정**: `workspaceSelector.hiddenAutoCloseSeconds`(초, `0` = 비활성화). Rust `WorkspaceSelectorSettings`와 프론트 settings-store 양쪽에 존재하며 `settings.json`에 영구 저장된다.
-- **파괴적 action 확인 설정**: `workspaceSelector.confirmDestructiveActions`(기본 `true`)가 켜져 있으면 desktop Workspace selector의 숨기기·터미널 지우기·layout 삭제·workspace 닫기 버튼은 같은 컨트롤을 두 번 활성화해야 실행된다. Settings → Workspaces → Behavior에서 끌 수 있다([ADR-0211](../adr/0211-workspace-selector-destructive-actions-require-two-activations.md)).
+- **파괴적 action 확인 설정**: root `confirmDestructiveActions`(기본 `true`)가 켜져 있으면 desktop Workspace selector의 숨기기·터미널 지우기·layout 삭제·workspace 닫기 버튼과 pane 컨트롤 바의 Restart view·Clear view·Delete pane(stack이면 Close layer) 버튼은 같은 컨트롤을 두 번 활성화해야 실행된다. Settings → Interface → Confirmation에서 끌 수 있다([ADR-0211](../adr/0211-workspace-selector-destructive-actions-require-two-activations.md), [ADR-0333](../adr/0333-destructive-confirmation-global-and-pane-control-bar.md)).
 - **판정/타이머**: `lib/hidden-auto-close.ts`의 순수 함수(`computeHiddenPaneIds`, `advanceHiddenTimers`)가 "현재 숨김인 Pane"과 "타임아웃 경과 여부"를 계산한다. **활성 워크스페이스의 Pane은 절대 종료 대상이 아니다.**
 - **오케스트레이션**: `useHiddenTerminalAutoClose` 훅(AppLayout에서 1회 구동)이 hidden/active/settings raw state 변경을 즉시 평가하고, 5초 interval은 타임아웃 만료 판정에만 사용한다. 타임아웃이 지난 Pane id는 `uiStore.evictedPaneIds`에 기록하며 비활성화(`0`) 시 타이머와 기존 eviction을 즉시 클리어한다.
 - **정밀도**: 숨김 시작·해제 stamp는 raw state 전환을 구독해 즉시 기록·초기화한다. 만료 판정만 5초(`TICK_INTERVAL_MS`) tick 경계에서 수행하므로 실제 종료 시점은 설정한 타임아웃보다 최대 ~1틱(약 5초) 늦을 수 있다(리소스 절약이 목적이라 지연 자체는 무해). 또한 `Date.now()` 벽시계 기준이므로 시스템 절전→복귀 시 숨김 경과 시간을 한꺼번에 인식해 복귀 직후 evict될 수 있다(역시 의도된 동작).

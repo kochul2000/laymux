@@ -1,6 +1,6 @@
 # 0211. Workspace selector 파괴적 action은 같은 컨트롤의 연속 두 번 활성화를 요구한다 (0033·0035 정정)
 
-- Status: Accepted
+- Status: Superseded by [0333](0333-destructive-confirmation-global-and-pane-control-bar.md) (설정 키·적용 범위만)
 - Date: 2026-08-27
 - Source: 사용자 요구 · [data-flow.md §9](../architecture/data-flow.md) · [ADR-0033](0033-hidden-items-shelf-set-contract.md) · [ADR-0035](0035-workspace-only-shelf-per-pane-hide-toggle.md)
 - Corrects: ADR-0033/0035의 desktop workspace quick-hide 즉시 실행 조항

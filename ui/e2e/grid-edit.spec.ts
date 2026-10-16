@@ -82,7 +82,12 @@ test.describe("Pane Delete", () => {
 
     // Hover second pane and delete it
     await hoverPane(page, 1);
-    await page.getByTestId("pane-control-delete").click();
+    const deleteButton = page.getByTestId("pane-control-delete");
+    // First activation only arms the button (ADR-0333).
+    await deleteButton.click();
+    await expect(deleteButton).toHaveAttribute("data-confirming", "true");
+    await expect(page.locator("[data-testid^='workspace-pane-']")).toHaveCount(2);
+    await deleteButton.click();
 
     await expect(page.locator("[data-testid^='workspace-pane-']")).toHaveCount(1);
   });

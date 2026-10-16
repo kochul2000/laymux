@@ -1625,9 +1625,6 @@ pub struct WorkspaceSelectorSettings {
     /// Last submitted input layout: "perPane" (default) | "workspaceLatest".
     #[serde(default = "default_workspace_last_input_mode")]
     pub last_input_mode: String,
-    /// Require two activations for destructive WorkspaceSelectorView controls.
-    #[serde(default = "default_true")]
-    pub confirm_destructive_actions: bool,
     /// Seconds a pane/workspace must stay hidden before its terminal (PTY)
     /// is automatically closed to save resources. 0 = disabled. See issue #269.
     #[serde(default)]
@@ -1649,7 +1646,6 @@ impl Default for WorkspaceSelectorSettings {
             sort_order: default_workspace_sort_order(),
             path_ellipsis: PathEllipsisMode::default(),
             last_input_mode: default_workspace_last_input_mode(),
-            confirm_destructive_actions: true,
             hidden_auto_close_seconds: 0,
         }
     }
@@ -2223,6 +2219,10 @@ pub struct Settings {
     /// settings.json (without this key) parsing cleanly.
     #[serde(default = "default_language")]
     pub language: String,
+    /// Require two activations for destructive click controls in the
+    /// workspace selector and the pane control bar (ADR-0333).
+    #[serde(default = "default_true")]
+    pub confirm_destructive_actions: bool,
     #[serde(default)]
     pub color_schemes: Vec<ColorScheme>,
     #[serde(default)]
@@ -2317,6 +2317,7 @@ impl Default for Settings {
         Self {
             local_ui_state: None,
             language: default_language(),
+            confirm_destructive_actions: true,
             color_schemes: Vec::new(),
             profiles: vec![
                 Profile {

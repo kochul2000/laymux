@@ -37,6 +37,9 @@ export function applySettingsSnapshot(
 
   useSettingsStore.getState().loadFromSettings({
     ...(rawSettings.language ? { language: rawSettings.language } : {}),
+    ...(rawSettings.confirmDestructiveActions !== undefined
+      ? { confirmDestructiveActions: rawSettings.confirmDestructiveActions }
+      : {}),
     defaultProfile: rawSettings.defaultProfile,
     profileDefaults: sProfileDefaults as Parameters<
       ReturnType<typeof useSettingsStore.getState>["loadFromSettings"]

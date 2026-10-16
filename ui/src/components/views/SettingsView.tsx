@@ -1893,7 +1893,14 @@ function InterfaceSection() {
   const setNotifications = useSettingsStore((s) => s.setNotifications);
   const storePower = useSettingsStore((s) => s.power);
   const setPower = useSettingsStore((s) => s.setPower);
+  const storeConfirmDestructive = useSettingsStore((s) => s.confirmDestructiveActions);
+  const setConfirmDestructiveActions = useSettingsStore((s) => s.setConfirmDestructiveActions);
 
+  const [confirmDestructive, setDraftConfirmDestructive] = useDraft(
+    "confirmDestructiveActions",
+    storeConfirmDestructive,
+    setConfirmDestructiveActions,
+  );
   const [controlBar, setDraftControlBar] = useDraft("controlBar", storeControlBar, (v) =>
     setControlBar(v),
   );
@@ -1915,6 +1922,16 @@ function InterfaceSection() {
   return (
     <div className="settings-page">
       <SettingsPageTitle>{t("interface.title")}</SettingsPageTitle>
+
+      <SettingsGroup title={t("interface.groupConfirmation")}>
+        <SettingsToggleField
+          label={t("interface.confirmDestructiveActions")}
+          desc={t("interface.confirmDestructiveActionsDesc")}
+          testId="destructive-confirm-toggle"
+          checked={confirmDestructive}
+          onChange={setDraftConfirmDestructive}
+        />
+      </SettingsGroup>
 
       <SettingsGroup title={t("interface.groupControlBar")}>
         <SettingsField label={t("interface.hoverAutoHide")} desc={t("interface.hoverAutoHideDesc")}>
@@ -2834,14 +2851,6 @@ function WorkspacesSection() {
       </SettingsGroup>
 
       <SettingsGroup title={t("workspaces.groupBehavior")}>
-        <SettingsToggleField
-          label={t("workspaces.confirmDestructiveActions")}
-          desc={t("workspaces.confirmDestructiveActionsDesc")}
-          testId="workspace-destructive-confirm-toggle"
-          checked={wsSelector.confirmDestructiveActions}
-          onChange={(value) => updateWsSelector({ confirmDestructiveActions: value })}
-        />
-
         <SettingsField label={t("workspaces.pathEllipsis")} desc={t("workspaces.pathEllipsisDesc")}>
           <FocusSelect
             data-testid="path-ellipsis-select"

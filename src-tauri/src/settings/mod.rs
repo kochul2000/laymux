@@ -1831,20 +1831,17 @@ mod tests {
     }
 
     #[test]
-    fn workspace_selector_destructive_confirmation_defaults_on() {
-        let settings: Settings = serde_json::from_str(r#"{ "workspaceSelector": {} }"#).unwrap();
-        assert!(settings.workspace_selector.confirm_destructive_actions);
+    fn destructive_confirmation_defaults_on() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert!(settings.confirm_destructive_actions);
+        assert!(Settings::default().confirm_destructive_actions);
     }
 
     #[test]
-    fn workspace_selector_destructive_confirmation_round_trip() {
-        let json = r#"{
-          "workspaceSelector": {
-            "confirmDestructiveActions": false
-          }
-        }"#;
-        let settings: Settings = serde_json::from_str(json).unwrap();
-        assert!(!settings.workspace_selector.confirm_destructive_actions);
+    fn destructive_confirmation_round_trip() {
+        let settings: Settings =
+            serde_json::from_str(r#"{ "confirmDestructiveActions": false }"#).unwrap();
+        assert!(!settings.confirm_destructive_actions);
 
         let serialized = serde_json::to_string(&settings).unwrap();
         assert!(serialized.contains("\"confirmDestructiveActions\":false"));

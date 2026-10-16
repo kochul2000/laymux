@@ -337,6 +337,8 @@ describe("PaneGrid", () => {
 
     // Hover to show PaneControlBar
     fireEvent.mouseEnter(screen.getByTestId("test-pane-0"));
+    // Arm, then confirm (ADR-0333).
+    fireEvent.click(screen.getByTestId("pane-control-delete"));
     fireEvent.click(screen.getByTestId("pane-control-delete"));
 
     expect(onRemovePane).toHaveBeenCalledWith("pane-0", "pane-0");
@@ -673,6 +675,8 @@ describe("PaneGrid restart wiring (ADR-0113)", () => {
 
   it("routes the control bar's Restart View through the store", () => {
     render(<PaneGrid {...props} />);
+    // Arm, then confirm (ADR-0333).
+    fireEvent.click(within(screen.getByTestId("test-pane-0")).getByTestId("pane-control-restart"));
     fireEvent.click(within(screen.getByTestId("test-pane-0")).getByTestId("pane-control-restart"));
 
     expect(useTerminalRestartStore.getState().requests["pane-0"]).toMatchObject({
@@ -769,6 +773,8 @@ describe("PaneGrid stacked slots (ADR-0297)", () => {
     const onRemovePane = vi.fn();
     render(<PaneGrid {...props} panes={[stackedSlot("under")]} onRemovePane={onRemovePane} />);
     fireEvent.mouseEnter(screen.getByTestId("stack-pane-0"));
+    // Arm, then confirm (ADR-0333).
+    fireEvent.click(within(screen.getByTestId("stack-pane-0")).getByTestId("pane-control-delete"));
     fireEvent.click(within(screen.getByTestId("stack-pane-0")).getByTestId("pane-control-delete"));
     expect(onRemovePane).toHaveBeenCalledWith("slot", "under");
   });

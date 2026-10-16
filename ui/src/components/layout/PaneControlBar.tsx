@@ -9,6 +9,7 @@ import { useContainerSize } from "@/hooks/useContainerSize";
 import { PaneNumberBadge } from "@/components/ui/PaneNumberBadge";
 import { supportsCwdReceive, supportsCwdSend } from "@/lib/view-cwd-capability";
 import { FloatingPaneControlMenu } from "./FloatingPaneControlMenu";
+import { TwoClickConfirmButton } from "@/components/ui/TwoClickConfirmButton";
 import { VIEW_LABELS } from "@/lib/view-labels";
 import {
   BroomIcon,
@@ -119,12 +120,26 @@ const borderClr = "var(--border)";
 const sepClr = "var(--separator-bg)";
 
 // ─── Shared Button ───────────────────────────────────────
+const BAR_BTN_CLASS =
+  "hover-bg-strong flex shrink-0 cursor-pointer items-center justify-center rounded px-0 text-[11px]";
+
+function barBtnStyle(color: string, style?: React.CSSProperties): React.CSSProperties {
+  return {
+    height: BTN_H,
+    minWidth: BTN_MIN_W,
+    color,
+    border: "none",
+    borderRadius: "var(--radius-sm)",
+    transition: "background var(--transition-fast)",
+    ...style,
+  };
+}
+
 function BarBtn({
   children,
   onClick,
   title,
   active,
-  danger,
   testId,
   style,
 }: {
@@ -132,7 +147,6 @@ function BarBtn({
   onClick: () => void;
   title: string;
   active?: boolean;
-  danger?: boolean;
   testId?: string;
   style?: React.CSSProperties;
 }) {
@@ -141,19 +155,42 @@ function BarBtn({
       data-testid={testId}
       onClick={onClick}
       title={title}
-      className="hover-bg-strong flex shrink-0 cursor-pointer items-center justify-center rounded px-0 text-[11px]"
-      style={{
-        height: BTN_H,
-        minWidth: BTN_MIN_W,
-        color: danger ? "var(--red)" : active ? "var(--accent)" : "var(--text-secondary)",
-        border: "none",
-        borderRadius: "var(--radius-sm)",
-        transition: "background var(--transition-fast)",
-        ...style,
-      }}
+      className={BAR_BTN_CLASS}
+      style={barBtnStyle(active ? "var(--accent)" : "var(--text-secondary)", style)}
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * Destructive bar button: arms on the first activation and runs on the second
+ * while `confirmDestructiveActions` is on (ADR-0333).
+ */
+function DestructiveBarBtn({
+  children,
+  onConfirm,
+  title,
+  testId,
+}: {
+  children: React.ReactNode;
+  onConfirm: () => void;
+  title: string;
+  testId: string;
+}) {
+  const confirmationEnabled = useSettingsStore((s) => s.confirmDestructiveActions);
+  return (
+    <TwoClickConfirmButton
+      data-testid={testId}
+      onConfirm={() => onConfirm()}
+      confirmationEnabled={confirmationEnabled}
+      confirmLabel={`Click again to ${title.toLowerCase()}`}
+      title={title}
+      className={BAR_BTN_CLASS}
+      style={barBtnStyle("var(--red)")}
+    >
+      {children}
+    </TwoClickConfirmButton>
   );
 }
 
@@ -457,29 +494,31 @@ function BarContent({
             <ClearTerminalBtn onClick={actions.onClearTerminal} />
           )}
           {currentView.type === "TerminalView" && actions.onRestart && (
-            <BarBtn
+            <DestructiveBarBtn
               testId="pane-control-restart"
-              onClick={actions.onRestart}
+              onConfirm={actions.onRestart}
               title="Restart view"
-              danger
             >
               <RefreshIcon size={13} />
-            </BarBtn>
+            </DestructiveBarBtn>
           )}
           {actions.onClear && (
-            <BarBtn testId="pane-control-clear" onClick={actions.onClear} title="Clear view" danger>
+            <DestructiveBarBtn
+              testId="pane-control-clear"
+              onConfirm={actions.onClear}
+              title="Clear view"
+            >
               <EraserIcon size={13} />
-            </BarBtn>
+            </DestructiveBarBtn>
           )}
           {actions.onDelete && (
-            <BarBtn
+            <DestructiveBarBtn
               testId="pane-control-delete"
-              onClick={actions.onDelete}
+              onConfirm={actions.onDelete}
               title={actions.deleteTitle ?? "Delete pane"}
-              danger
             >
               <XIcon size={12} />
-            </BarBtn>
+            </DestructiveBarBtn>
           )}
 
           <Sep />

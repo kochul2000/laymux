@@ -504,6 +504,9 @@
     },
     "interface": {
       "title": "인터페이스",
+      "groupConfirmation": "확인",
+      "confirmDestructiveActions": "파괴적 동작 두 번 확인",
+      "confirmDestructiveActionsDesc": "워크스페이스 숨기기·터미널 지우기·레이아웃 삭제·워크스페이스 닫기와 Pane 재시작·비우기·삭제를 두 번 클릭해 실행",
       "groupControlBar": "컨트롤 바",
       "groupDock": "독",
       "groupNotifications": "알림",
@@ -608,8 +611,6 @@
       "pathDesc": "Git 브랜치 및 현재 경로",
       "result": "결과",
       "resultDesc": "명령 실행 결과 및 알림",
-      "confirmDestructiveActions": "파괴적 동작 두 번 확인",
-      "confirmDestructiveActionsDesc": "워크스페이스 숨기기·터미널 지우기·레이아웃 삭제·워크스페이스 닫기를 두 번 클릭해 실행",
       "pathEllipsis": "경로 생략",
       "pathEllipsisDesc": "경로가 길 때 생략 방향 (워크스페이스 목록)",
       "ellipsisStart": "앞부분 생략 (.../dir/file)",
