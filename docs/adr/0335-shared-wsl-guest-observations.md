@@ -1,6 +1,6 @@
 # 0335. WSL 게스트 관측은 distribution별 공유 run으로 합치고, 신선도는 호출자가 계약한다 (0120 probe 실행 단위·0238 진단 실행 방식 확장)
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-16
 - Source: issue #1214, 2026-10-16 prod 멈춤 조사(PR #1213, [ADR-0334](0334-console-less-wsl-runs.md)의 후속 항목) · [architecture/data-flow.md](../architecture/data-flow.md) §9 "WSL pane — 게스트 프로브가 권위"·§13.4·§13.5 · [api-contracts.md](../architecture/api-contracts.md) §14
 - Extends: [ADR-0120](0120-wsl-agent-session-attribution.md)(WSL 귀속 probe의 실행 단위와 deadline 적용 방식), [ADR-0238](0238-codex-lifecycle-storage-checkpoint.md)(WSL Codex 진단 도구의 실행 방식)

@@ -1606,7 +1606,7 @@ native tree에서 가장 얕은 깊이에 agent가 둘 이상 있으면 같은 p
 | `get_{claude,codex,grok}_session_ids` | 호출 시각 이후 시작된 run만 |
 | `get_codex_turn_states`·`get_agent_hook_states`·`get_agent_session_states`(표시 폴링) | `WSL_GUEST_SNAPSHOT_MAX_AGE`(3초) 안에 시작된 run 재사용(실행 중이면 합류) |
 
-재사용 창은 `WSL_AGENT_PROBE_TIMEOUT` 이상(폴링이 실행 중 run에 합류)이고 `ACTIVITY_RECONCILE_INTERVAL` 이하(liveness 판정보다 한 패스 넘게 늦지 않음)다. 실패도 창 안에서 공유하므로 고장 난 guest를 폴링은 창마다 한 번만 묻는다. 재사용된 표시용 조회는 receipt에 NoAgent를 기록하지 않고 Codex proof도 남기지 않는다. 훅 상태의 재검증은 제목·훅 연결·generation과 native 프로세스·세션 파일을 다시 읽고, WSL 게스트 스캔·Codex 진단은 같은 run일 수 있다. liveness 프로브는 이 테이블을 쓰지 않는다.
+재사용 창은 `WSL_AGENT_PROBE_TIMEOUT` 이상(폴링이 실행 중 run에 합류)이고 `ACTIVITY_RECONCILE_INTERVAL` 이하(liveness 판정보다 한 패스 넘게 늦지 않음)다. 실패도 창 안에서 공유하므로 고장 난 guest를 폴링은 창마다 한 번만 묻는다. 재사용된 표시용 조회는 receipt에 NoAgent를 기록하지 않고 Codex proof도 남기지 않는다. 종료 `/status` fallback 증거가 이미 있어도 표시 폴링은 receipt의 rollout 파일 stamp를 추가하거나 갱신하지 않는다. 훅 상태의 재검증은 제목·훅 연결·generation과 native 프로세스·세션 파일을 다시 읽고, WSL 게스트 스캔·Codex 진단은 같은 run일 수 있다. liveness 프로브는 이 테이블을 쓰지 않는다.
 
 background 저장 힌트가 critical checkpoint에 합류하면 같은 실패를 받을 수 있다. `persistSession`은 반환 promise에 오류 기록 handler를 즉시 연결하여 대기하지 않는 이벤트 호출의 unhandled rejection을 막고, 반환 promise 자체의 실패는 그대로 유지한다. 명시적으로 기다리는 설정 저장·update·eviction 호출자가 실패를 성공으로 오인하지 않는다.
 

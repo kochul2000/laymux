@@ -151,12 +151,15 @@ pub(crate) fn verified_status_sessions(
     lookup: &ProviderSessionLookup,
     observation: crate::wsl_probe::snapshot::GuestObservation,
 ) -> Result<HashMap<String, (u64, String, bool)>, String> {
-    verified_with_processes(state, lookup, || targets::processes(state, observation))
+    verified_with_processes(state, lookup, observation, || {
+        targets::processes(state, observation)
+    })
 }
 
 fn verified_with_processes(
     state: &AppState,
     lookup: &ProviderSessionLookup,
+    observation: crate::wsl_probe::snapshot::GuestObservation,
     processes: impl FnOnce() -> Result<HashMap<String, CodexStatusProcess>, String>,
 ) -> Result<HashMap<String, (u64, String, bool)>, String> {
     let (token, targets): (_, Vec<_>) = {
@@ -238,7 +241,9 @@ fn verified_with_processes(
             } else {
                 targets::verify_session(&target.process, &id)?
             };
-            if !fresh && target.hook_binding.is_none() {
+            // Hook display polling may reuse a guest view taken before this
+            // capture. Only a boundary-bound lookup may update its receipt.
+            if !fresh && target.hook_binding.is_none() && !observation.is_reusable() {
                 targets::remember_checkpoint_file(
                     state,
                     &terminal,
