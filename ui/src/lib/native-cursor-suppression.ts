@@ -36,9 +36,9 @@
  * survives, is readable as `appCursorHidden`, and is restored verbatim on
  * `dispose()`.
  *
- * Failure policy, matching `xterm-pending-composition.ts`: when the shape is not
- * what this module was written against it returns `supported: false` and does
- * nothing. The native cursor then stays visible per the user's cursor settings —
+ * Failure policy: when the shape is not what this module was written against,
+ * it returns `supported: false` and does nothing. The native cursor then stays
+ * visible per the user's cursor settings —
  * a doubled caret, which is honest and reversible — instead of reviving the
  * background-colour disguise that produced #598. `XTERM_NATIVE_CURSOR_FIELDS` is
  * asserted by a contract test against a real `Terminal`, so an xterm bump breaks

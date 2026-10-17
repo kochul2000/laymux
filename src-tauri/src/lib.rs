@@ -57,6 +57,9 @@ pub mod terminal_protocol;
 pub mod update_install_guard;
 pub mod update_title_handoff;
 pub mod usage_probe;
+// Only Windows subscribes; the policy is unit-tested everywhere (ADR-0336).
+#[cfg(any(windows, test))]
+pub mod webview_recovery;
 #[cfg(windows)]
 pub mod win_acl;
 pub mod wsl_liveness;
@@ -238,7 +241,7 @@ pub fn run() {
             }
 
             // Set window icon (for taskbar in dev mode)
-            if let Some(window) = app.get_webview_window("main") {
+            if let Some(window) = app.get_webview_window(constants::MAIN_WINDOW_LABEL) {
                 if let Ok(icon) = Image::from_bytes(include_bytes!("../icons/icon.png")) {
                     let _ = window.set_icon(icon);
                 }
@@ -279,6 +282,11 @@ pub fn run() {
             }
             app.manage(app_state);
             app.manage(commands::SpreadsheetStreams::default());
+            // A dead WebView2 browser or main-frame renderer, or a renderer
+            // stuck long enough, leaves no UI; restart into a fresh GUI that
+            // adopts the daemon sessions (ADR-0336). Needs the state above.
+            #[cfg(windows)]
+            webview_recovery::watch_main_webview(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -379,6 +387,7 @@ pub fn run() {
             commands::stat_paths,
             commands::get_home_directory,
             commands::get_terminal_home_directory,
+            commands::get_legacy_wsl_notice,
             commands::get_automation_info,
             commands::load_settings_validated,
             commands::acknowledge_settings_recovery,

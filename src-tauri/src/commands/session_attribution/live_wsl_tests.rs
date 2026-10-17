@@ -49,13 +49,30 @@ fn assert_live_wsl_attribution(provider: &str, expected_state: SessionAttributio
     // Two independent observations exercise the same stability requirement as
     // the critical checkpoint, without writing the user's settings or PTY.
     for _ in 0..2 {
+        let observation = GuestObservation::starting_now();
         let (claude, codex, grok) = collect_provider_session_lookups(
-            || super::super::claude_session::get_claude_session_lookup_impl(Some(24), &state),
             || {
-                super::super::codex_session::get_codex_session_lookup_impl(Some(24), &state)
-                    .map_err(|error| error.to_string())
+                super::super::claude_session::get_claude_session_lookup_impl(
+                    Some(24),
+                    &state,
+                    observation,
+                )
             },
-            || super::super::grok_session::get_grok_session_lookup_impl(Some(24), &state),
+            || {
+                super::super::codex_session::get_codex_session_lookup_impl(
+                    Some(24),
+                    &state,
+                    observation,
+                )
+                .map_err(|error| error.to_string())
+            },
+            || {
+                super::super::grok_session::get_grok_session_lookup_impl(
+                    Some(24),
+                    &state,
+                    observation,
+                )
+            },
         )
         .unwrap();
         crate::wsl_liveness::refresh(&state);

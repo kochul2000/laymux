@@ -5,12 +5,20 @@ use crate::session_checkpoint::codex_status::{
     CodexStatusProcess, CodexStatusStep, CodexStatusTarget,
 };
 use crate::state::AppState;
+use crate::wsl_probe::snapshot::GuestObservation;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 #[cfg(windows)]
 use std::time::Duration;
 
-pub(super) fn processes(state: &AppState) -> Result<HashMap<String, CodexStatusProcess>, String> {
+/// The live Codex processes the exit `/status` verification acts on. The
+/// verification steps here pass a fresh boundary — they exist to notice a
+/// process that changed, which a reused guest view could hide. Attribution
+/// passes its own observation through `verified_status_sessions` (ADR-0335).
+pub(super) fn processes(
+    state: &AppState,
+    observation: GuestObservation,
+) -> Result<HashMap<String, CodexStatusProcess>, String> {
     let domains = crate::commands::session_attribution::provider_terminal_domains(state)?;
     let snapshot = crate::process_tree::try_snapshot_processes()?;
     let mut result = HashMap::new();
@@ -33,7 +41,7 @@ pub(super) fn processes(state: &AppState) -> Result<HashMap<String, CodexStatusP
             );
         }
     }
-    let wsl = resolve_wsl_agent_processes(state, WslAgentProvider::Codex)?;
+    let wsl = resolve_wsl_agent_processes(state, WslAgentProvider::Codex, observation)?;
     if !wsl.failed_terminal_ids.is_empty() {
         let mut ids: Vec<_> = wsl
             .failed_terminal_ids
@@ -84,7 +92,7 @@ pub(super) fn require_current_process(
     id: &str,
     expected: &CodexStatusProcess,
 ) -> Result<(), String> {
-    if processes(state)?.get(id) != Some(expected) {
+    if processes(state, GuestObservation::starting_now())?.get(id) != Some(expected) {
         return Err(format!("[{id}] Codex process changed during status query"));
     }
     Ok(())
@@ -93,11 +101,16 @@ pub(super) fn require_current_process(
 pub(super) fn collect_targets(
     state: &AppState,
 ) -> Result<HashMap<String, CodexStatusTarget>, String> {
-    let candidates = processes(state)?;
+    // Discovery and its hook selection describe one moment; the recheck at the
+    // end needs a later observation of its own.
+    let discovery = GuestObservation::starting_now();
+    let candidates = processes(state, discovery)?;
     let prefer_hooks = crate::settings::load_settings().codex.state_detection
         == crate::settings::AgentStateDetection::Hooks;
     let selections = if prefer_hooks {
-        Some(super::super::get_codex_session_lookup_impl(None, state)?)
+        Some(super::super::get_codex_session_lookup_impl(
+            None, state, discovery,
+        )?)
     } else {
         None
     };
@@ -182,7 +195,7 @@ pub(super) fn collect_targets(
         );
     }
     if !targets.is_empty() {
-        let current = processes(state)?;
+        let current = processes(state, GuestObservation::starting_now())?;
         for (id, target) in &targets {
             if current.get(id) != Some(&target.process) {
                 return Err(format!(
@@ -365,7 +378,7 @@ fn process_arguments(process: &CodexStatusProcess) -> Result<Vec<String>, String
     #[cfg(windows)]
     {
         if let Some(distro) = &process.distro {
-            let mut command = crate::process::headless_command("wsl.exe");
+            let mut command = crate::process::headless_wsl_command();
             command.args([
                 "-d",
                 distro,
@@ -415,7 +428,7 @@ fn process_start(pid: u32, distro: Option<&str>) -> Result<u64, String> {
     }
     #[cfg(windows)]
     let stat = {
-        let mut command = crate::process::headless_command("wsl.exe");
+        let mut command = crate::process::headless_wsl_command();
         command.args([
             "-d",
             distro.ok_or("Missing WSL distro")?,

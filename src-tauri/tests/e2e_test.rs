@@ -28,6 +28,7 @@ fn settings_round_trip_with_full_config() {
             "activeWorkspaceId":"ws-project", "fileViewer":{"open":true,"path":"D:/fixture/readme.md","maximized":false}
         })).unwrap()),
         language: "system".into(),
+        confirm_destructive_actions: false,
         color_schemes: vec![ColorScheme {
             name: "Solarized Dark".into(),
             foreground: "#839496".into(),
@@ -302,6 +303,7 @@ fn settings_round_trip_with_full_config() {
     // Spot-check a non-default value: a section left at its default would round
     // trip even if it never reached the file at all.
     assert!(loaded.power.keep_awake_when_busy);
+    assert!(!loaded.confirm_destructive_actions);
     assert_eq!(loaded.update.channel, "beta");
     assert_eq!(loaded.grok.command, "grok --yolo");
     assert!(!loaded.grok.restore_session);
@@ -423,6 +425,20 @@ fn hand_edited_pane_clear_section_loads_and_omissions_use_safe_defaults() {
     assert_eq!(bare.pane_clear.busy_policy, PaneClearBusyPolicy::Skip);
     assert_eq!(bare.pane_clear.interrupt_rounds, 2);
     assert_eq!(bare.pane_clear.settle_ms, 400);
+}
+
+#[test]
+fn destructive_confirmation_is_root_owned_and_ignores_the_old_selector_key() {
+    // ADR-0333 moved the gate to the root. serde ignores the old
+    // workspaceSelector key, so the root default (confirm) applies.
+    let legacy: Settings =
+        serde_json::from_str(r#"{ "workspaceSelector": { "confirmDestructiveActions": false } }"#)
+            .unwrap();
+    assert!(legacy.confirm_destructive_actions);
+    let rewritten = serde_json::to_value(&legacy).unwrap();
+    assert!(rewritten["workspaceSelector"]
+        .get("confirmDestructiveActions")
+        .is_none());
 }
 
 #[tokio::test]

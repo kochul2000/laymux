@@ -17,6 +17,7 @@ use super::session_attribution::{provider_terminal_domains, ProviderSessionLooku
 use super::wsl_agent_session::{resolve_wsl_agent_processes, WslAgentProvider};
 use crate::process_tree::match_interactive_app_process;
 use crate::state::AppState;
+use crate::wsl_probe::snapshot::GuestObservation;
 
 use self::store::CodexSessionStore;
 
@@ -30,14 +31,20 @@ pub fn get_codex_session_ids(
     session_max_age_hours: Option<u64>,
     state: State<Arc<AppState>>,
 ) -> Result<HashMap<String, Option<String>>, String> {
-    get_codex_session_ids_impl(session_max_age_hours, &state).map_err(|error| error.to_string())
+    get_codex_session_ids_impl(
+        session_max_age_hours,
+        &state,
+        GuestObservation::starting_now(),
+    )
+    .map_err(|error| error.to_string())
 }
 
 pub(crate) fn get_codex_session_ids_impl(
     session_max_age_hours: Option<u64>,
     state: &AppState,
+    observation: GuestObservation,
 ) -> Result<HashMap<String, Option<String>>, crate::error::AppError> {
-    let mut lookup = get_codex_session_lookup_impl(session_max_age_hours, state)?;
+    let mut lookup = get_codex_session_lookup_impl(session_max_age_hours, state, observation)?;
     // The legacy ID-only command cannot express a fresh launch. Never expose
     // an unpersisted ID as a resumable conversation through that projection.
     for terminal_id in lookup.fresh_sessions.keys() {
@@ -51,19 +58,24 @@ pub(crate) fn get_codex_session_ids_impl(
 pub(crate) fn get_codex_session_lookup_impl(
     session_max_age_hours: Option<u64>,
     state: &AppState,
+    observation: GuestObservation,
 ) -> Result<ProviderSessionLookup, crate::error::AppError> {
-    lookup_with_observer(session_max_age_hours, state, |_, _, _| {})
+    lookup_with_observer(session_max_age_hours, state, observation, |_, _, _| {})
 }
 
+/// `observation` is the freshness the WSL process scan and the Codex
+/// diagnostics must both have (ADR-0335).
 fn lookup_with_observer(
     session_max_age_hours: Option<u64>,
     state: &AppState,
+    observation: GuestObservation,
     mut observe: impl FnMut(&str, &CodexSessionStore, &store::ResolvedSession),
 ) -> Result<ProviderSessionLookup, crate::error::AppError> {
     let conversations = conversation::ConversationLookup::new(
         state,
         crate::settings::load_settings().codex.state_detection
             == crate::settings::AgentStateDetection::Hooks,
+        observation,
     )
     .map_err(crate::error::AppError::Other)?;
     let domains = provider_terminal_domains(state)?;
@@ -138,9 +150,10 @@ fn lookup_with_observer(
     let mut result = crate::process_tree::complete_agent_session_attributions(&observed, exact);
     // Native DB I/O must not consume the guest's process + diagnostics budget.
     let deadline = std::time::Instant::now() + crate::constants::WSL_AGENT_PROBE_TIMEOUT;
-    match resolve_wsl_agent_processes(state, WslAgentProvider::Codex) {
+    match resolve_wsl_agent_processes(state, WslAgentProvider::Codex, observation) {
         Ok(lookup) => {
-            let mut process_rows = wsl::read_rows_batch(&lookup.attributions, deadline);
+            let mut process_rows =
+                wsl::read_rows_batch(state, &lookup.attributions, observation, deadline);
             failed_terminal_ids.extend(lookup.failed_terminal_ids);
             for (terminal_id, process) in lookup.attributions {
                 rollout_absence.insert(

@@ -47,8 +47,14 @@ export function useGithubRepoSnapshot(workingDir: string, pollMs: number = GITHU
   // tell that it belongs to a repository the hook has already left.
   // Mirrored in a layout effect, never during render.
   const currentDirRef = useRef(workingDir);
+  // A forced read remains forced until it gets a real answer. Otherwise a
+  // pending retry (or an intervening poll) can accept the pre-action cache.
+  const forcePendingRef = useRef(false);
+  const inFlightRef = useRef(false);
   useLayoutEffect(() => {
     currentDirRef.current = workingDir;
+    forcePendingRef.current = false;
+    inFlightRef.current = false;
   }, [workingDir]);
 
   const read = useCallback(
@@ -63,21 +69,31 @@ export function useGithubRepoSnapshot(workingDir: string, pollMs: number = GITHU
         requestSeq.current += 1;
         return;
       }
+      // A poll must not supersede the forced read it is waiting for. On a
+      // slow connection that would discard its fresh result indefinitely.
+      if (!force && forcePendingRef.current && inFlightRef.current) return;
       const seq = ++requestSeq.current;
-      getGithubRepoSnapshot(workingDir, force)
+      forcePendingRef.current ||= force;
+      inFlightRef.current = true;
+      getGithubRepoSnapshot(workingDir, forcePendingRef.current)
         .then((next) => {
           if (seq !== requestSeq.current) return;
+          inFlightRef.current = false;
           // Publishing a pending reply would show its empty lists as "no open
           // issues"; the view stays in whatever state it already had.
           if (next.status.type === "pending") {
             setPendingNonce((n) => n + 1);
             return;
           }
+          forcePendingRef.current = false;
           setResult({ cwd: workingDir, snapshot: next });
         })
         .catch((error: unknown) => {
-          if (seq === requestSeq.current)
+          if (seq === requestSeq.current) {
+            inFlightRef.current = false;
+            forcePendingRef.current = false;
             setResult({ cwd: workingDir, snapshot: failed(String(error)) });
+          }
         });
     },
     [workingDir],

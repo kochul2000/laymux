@@ -112,6 +112,11 @@
     }
   },
   "settings": {
+    "legacyWsl": {
+      "title": "Legacy WSL detected",
+      "description": "This PC uses the inbox WSL client, so every WSL check laymux runs creates a console host (conhost.exe). If WSL stops cleaning those up, the Windows session runs out of resources and apps can freeze. Install the current WSL from PowerShell with the command below, then restart laymux.",
+      "dismiss": "Dismiss"
+    },
     "agentHooks": {
       "codexDaemon": "Installation adds a conversation identifier to the Codex terminal title to connect shared-server conversations. Existing title items are preserved, and removal restores settings you have not edited. Restart running Codex clients after installation. Unverified connections use existing detection.",
       "titleConfigured": "Shared-server title binding configured · restart Codex after changes",
@@ -504,6 +509,9 @@
     },
     "interface": {
       "title": "Interface",
+      "groupConfirmation": "Confirmation",
+      "confirmDestructiveActions": "Confirm Destructive Actions",
+      "confirmDestructiveActionsDesc": "Require two clicks for workspace hide, terminal clear, layout delete, and workspace close, and for pane restart, clear, and delete",
       "groupControlBar": "Control Bar",
       "groupDock": "Dock",
       "groupNotifications": "Notifications",
@@ -608,8 +616,6 @@
       "pathDesc": "Git branch and current path",
       "result": "Result",
       "resultDesc": "Command results and notifications",
-      "confirmDestructiveActions": "Confirm Destructive Actions",
-      "confirmDestructiveActionsDesc": "Require two clicks for workspace hide, terminal clear, layout delete, and workspace close",
       "pathEllipsis": "Path Ellipsis",
       "pathEllipsisDesc": "Truncation direction for long paths (workspace list)",
       "ellipsisStart": "Truncate start (.../dir/file)",

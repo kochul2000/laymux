@@ -38,6 +38,15 @@ crash reporter의 `MessageDialog`이며, headless test에서는 대화상자를 
 GTK3 개발·런타임 라이브러리는 Tauri/WebKitGTK의 기존 Linux prerequisite를 그대로
 재사용한다. Windows dependency에는 Linux backend feature를 전달하지 않는다.
 
+Windows에서는 WebView2 프로세스가 GUI와 따로 죽을 수 있다. GUI는 메인 WebView의
+`ProcessFailed`를 구독한다. browser나 main frame renderer가 죽거나, 프론트가 30초 넘게 멈춘
+창에 입력이 들어오면, PTY 데몬 세션을 업데이트처럼 인계하고 다음 GUI 프로세스로 바뀐다.
+최근 10분 안에 자동 재시작이 2번 있었으면 `rfd` 대화상자로 다시 시작할지 묻는다
+([ADR-0336](../adr/0336-webview2-process-failure-gui-restart.md),
+[data-flow.md §13.9](data-flow.md#139-webview2-프로세스-실패-복구-windows)). Windows의 `rfd`
+사용처는 crash reporter와 이 복구 안내다. 이를 위해 `webview2-com`·`windows-core`를 wry와 같은
+버전으로 Windows 전용 직접 의존에 둔다.
+
 Android 앱은 Cargo/Tauri workspace 구성원이 아니다. Cloud WebView는 기존 Laymux Cloud의
 landing/dashboard와 HttpOnly account session을 표시하고 Google login·PC 선택·연결 설정 진입만 좁은 native bridge에
 위임한다. Google OAuth page를 embedded WebView에서 열지 않고 Credential Manager가 받은 ID token을
@@ -187,7 +196,7 @@ Remote drawer의 workspace·pane 행은 오른쪽 고정 열에 `[건너뛰기] 
 Remote workspace 항목의 하단 패딩은 3px이며, 두 줄 pane 행은 최소 32px에서 내용 높이에 맞춰 늘어난다. 페인이 없고 branch·cwd 요약도 비어 있으면 빈 요약 줄을 표시하지 않는다.
 
 - **설정**: `workspaceSelector.hiddenAutoCloseSeconds`(초, `0` = 비활성화). Rust `WorkspaceSelectorSettings`와 프론트 settings-store 양쪽에 존재하며 `settings.json`에 영구 저장된다.
-- **파괴적 action 확인 설정**: `workspaceSelector.confirmDestructiveActions`(기본 `true`)가 켜져 있으면 desktop Workspace selector의 숨기기·터미널 지우기·layout 삭제·workspace 닫기 버튼은 같은 컨트롤을 두 번 활성화해야 실행된다. Settings → Workspaces → Behavior에서 끌 수 있다([ADR-0211](../adr/0211-workspace-selector-destructive-actions-require-two-activations.md)).
+- **파괴적 action 확인 설정**: root `confirmDestructiveActions`(기본 `true`)가 켜져 있으면 desktop Workspace selector의 숨기기·터미널 지우기·layout 삭제·workspace 닫기 버튼과 pane 컨트롤 바의 Restart view·Clear view·Delete pane(stack이면 Close layer) 버튼은 같은 컨트롤을 두 번 활성화해야 실행된다. Settings → Interface → Confirmation에서 끌 수 있다([ADR-0211](../adr/0211-workspace-selector-destructive-actions-require-two-activations.md), [ADR-0333](../adr/0333-destructive-confirmation-global-and-pane-control-bar.md)).
 - **판정/타이머**: `lib/hidden-auto-close.ts`의 순수 함수(`computeHiddenPaneIds`, `advanceHiddenTimers`)가 "현재 숨김인 Pane"과 "타임아웃 경과 여부"를 계산한다. **활성 워크스페이스의 Pane은 절대 종료 대상이 아니다.**
 - **오케스트레이션**: `useHiddenTerminalAutoClose` 훅(AppLayout에서 1회 구동)이 hidden/active/settings raw state 변경을 즉시 평가하고, 5초 interval은 타임아웃 만료 판정에만 사용한다. 타임아웃이 지난 Pane id는 `uiStore.evictedPaneIds`에 기록하며 비활성화(`0`) 시 타이머와 기존 eviction을 즉시 클리어한다.
 - **정밀도**: 숨김 시작·해제 stamp는 raw state 전환을 구독해 즉시 기록·초기화한다. 만료 판정만 5초(`TICK_INTERVAL_MS`) tick 경계에서 수행하므로 실제 종료 시점은 설정한 타임아웃보다 최대 ~1틱(약 5초) 늦을 수 있다(리소스 절약이 목적이라 지연 자체는 무해). 또한 `Date.now()` 벽시계 기준이므로 시스템 절전→복귀 시 숨김 경과 시간을 한꺼번에 인식해 복귀 직후 evict될 수 있다(역시 의도된 동작).

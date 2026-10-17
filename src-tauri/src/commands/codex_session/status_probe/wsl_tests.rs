@@ -10,7 +10,7 @@ struct Fixture(String);
 
 impl Drop for Fixture {
     fn drop(&mut self) {
-        let mut command = crate::process::headless_command("wsl.exe");
+        let mut command = crate::process::headless_wsl_command();
         command.args([
             "-d",
             DISTRO,
@@ -45,7 +45,7 @@ ln -s sessions "$root/loop/sessions"
 printf '%s\n' "$root"
 trap - EXIT
 "#;
-    let mut command = crate::process::headless_command("wsl.exe");
+    let mut command = crate::process::headless_wsl_command();
     command.args(["-d", DISTRO, "--exec", "sh", "-c", SETUP, "fixture", ID]);
     let output = crate::process::output_with_timeout(&mut command, Duration::from_secs(5)).unwrap();
     assert!(

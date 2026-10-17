@@ -7,6 +7,7 @@ use crate::commands::session_attribution::{
 };
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
+use crate::wsl_probe::snapshot::GuestObservation;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -52,7 +53,13 @@ pub(crate) fn get_agent_hook_states_impl(
     {
         return Err("Unsupported hook provider".into());
     }
-    let attributions = get_terminal_session_attributions_impl(None, None, None, state)?;
+    // Two-second display polling. Both attribution passes below may read the
+    // same shared WSL guest run (scan and Codex diagnostics); the recheck still
+    // re-reads titles, hook bindings, generations, native processes and session
+    // files (ADR-0335).
+    let observation = GuestObservation::Reusable;
+    let attributions =
+        get_terminal_session_attributions_impl(None, None, None, state, observation)?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| e.to_string())?
@@ -172,7 +179,8 @@ pub(crate) fn get_agent_hook_states_impl(
     // Process attribution can span a session switch within the same PTY.
     // Recheck exact selection and liveness, not just the generation number.
     if !result.is_empty() {
-        let final_attributions = get_terminal_session_attributions_impl(None, None, None, state)?;
+        let final_attributions =
+            get_terminal_session_attributions_impl(None, None, None, state, observation)?;
         let final_titles: HashMap<_, _> = state
             .terminals
             .lock_or_err()?

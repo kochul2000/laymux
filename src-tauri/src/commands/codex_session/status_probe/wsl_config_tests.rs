@@ -200,7 +200,7 @@ cd "$root/work/nested"
 sh -c "$1" probe "$$" "$root/home" "$root/reported"
 "#;
     for mode in ["actual-file", "ancestor-file", "reported-file", "file-link"] {
-        let mut command = crate::process::headless_command("wsl.exe");
+        let mut command = crate::process::headless_wsl_command();
         command.args([
             "-d",
             "Ubuntu-22.04",
@@ -277,7 +277,7 @@ sh -c "$1" probe "$$" "$root/home" "$root/A"
         ("config.encode", "/home/config.toml"),
         ("cwd.resolve", "/cwd"),
     ] {
-        let mut command = crate::process::headless_command("wsl.exe");
+        let mut command = crate::process::headless_wsl_command();
         command.args([
             "-d",
             "Ubuntu-22.04",
@@ -354,7 +354,7 @@ sh -c "$1" probe "$$" "$root/home" "$root/A"
         "broken-link",
         "missing",
     ] {
-        let mut command = crate::process::headless_command("wsl.exe");
+        let mut command = crate::process::headless_wsl_command();
         command.args([
             "-d",
             "Ubuntu-22.04",

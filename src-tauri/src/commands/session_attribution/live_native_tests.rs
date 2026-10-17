@@ -26,13 +26,30 @@ fn live_native_codex_panes_keep_their_distinct_current_sessions() {
         );
     }
     for _ in 0..2 {
+        let observation = GuestObservation::starting_now();
         let (claude, codex, grok) = collect_provider_session_lookups(
-            || super::super::claude_session::get_claude_session_lookup_impl(Some(72), &state),
             || {
-                super::super::codex_session::get_codex_session_lookup_impl(Some(72), &state)
-                    .map_err(|error| error.to_string())
+                super::super::claude_session::get_claude_session_lookup_impl(
+                    Some(72),
+                    &state,
+                    observation,
+                )
             },
-            || super::super::grok_session::get_grok_session_lookup_impl(Some(72), &state),
+            || {
+                super::super::codex_session::get_codex_session_lookup_impl(
+                    Some(72),
+                    &state,
+                    observation,
+                )
+                .map_err(|error| error.to_string())
+            },
+            || {
+                super::super::grok_session::get_grok_session_lookup_impl(
+                    Some(72),
+                    &state,
+                    observation,
+                )
+            },
         )
         .unwrap();
         for pane in &panes {

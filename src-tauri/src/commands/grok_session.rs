@@ -7,6 +7,7 @@ use serde::Deserialize;
 use tauri::State;
 
 use crate::state::AppState;
+use crate::wsl_probe::snapshot::GuestObservation;
 
 use super::session_attribution::{provider_terminal_domains, ProviderSessionLookup};
 use super::wsl_agent_session::{resolve_wsl_agent_processes, WslAgentProvider};
@@ -163,21 +164,27 @@ pub fn get_grok_session_ids(
     session_max_age_hours: Option<u64>,
     state: State<Arc<AppState>>,
 ) -> Result<HashMap<String, Option<String>>, String> {
-    get_grok_session_ids_impl(session_max_age_hours, &state)
+    get_grok_session_ids_impl(
+        session_max_age_hours,
+        &state,
+        GuestObservation::starting_now(),
+    )
 }
 
 pub(crate) fn get_grok_session_ids_impl(
     session_max_age_hours: Option<u64>,
     state: &AppState,
+    observation: GuestObservation,
 ) -> Result<HashMap<String, Option<String>>, String> {
-    Ok(get_grok_session_lookup_impl(session_max_age_hours, state)?.attributions)
+    Ok(get_grok_session_lookup_impl(session_max_age_hours, state, observation)?.attributions)
 }
 
 pub(crate) fn get_grok_session_lookup_impl(
     session_max_age_hours: Option<u64>,
     state: &AppState,
+    observation: GuestObservation,
 ) -> Result<ProviderSessionLookup, String> {
-    Ok(get_grok_session_records_impl(session_max_age_hours, state)?.lookup)
+    Ok(get_grok_session_records_impl(session_max_age_hours, state, observation)?.lookup)
 }
 
 /// Session attribution plus each attributed session's directory.
@@ -187,9 +194,11 @@ pub(crate) struct GrokSessionRecords {
     pub directories: HashMap<String, PathBuf>,
 }
 
+/// `observation` is the freshness the WSL guest scan must have (ADR-0335).
 pub(crate) fn get_grok_session_records_impl(
     session_max_age_hours: Option<u64>,
     state: &AppState,
+    observation: GuestObservation,
 ) -> Result<GrokSessionRecords, String> {
     let home = grok_home();
     let mut directories = HashMap::new();
@@ -247,7 +256,7 @@ pub(crate) fn get_grok_session_records_impl(
         .filter_map(|(id, session)| session.map(|session| (id, session)))
         .collect(),
     );
-    match resolve_wsl_agent_processes(state, WslAgentProvider::Grok) {
+    match resolve_wsl_agent_processes(state, WslAgentProvider::Grok, observation) {
         Ok(lookup) => {
             failed_terminal_ids.extend(lookup.failed_terminal_ids);
             for (terminal_id, process) in lookup.attributions {

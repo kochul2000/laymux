@@ -97,7 +97,7 @@ ADR 이 필요한 대표 기준:
 | [0077](0077-remote-terminal-font-serving.md) | Remote 터미널 폰트는 데스크톱 시스템 폰트를 sfnt 그대로 서빙한다 (woff2 변환 없음, 기본 off) | Accepted |
 | [0078](0078-wsl-in-frame-cursor-park-metadata.md) | WSL 인프레임 커서 주차는 바이트 보류 없이 reset 메타데이터로 전달 | Accepted |
 | [0079](0079-dec2026-cursor-gate-lifecycle-bypass.md) | DEC 2026 커서는 renderer lifecycle 우회까지 raw gate로 막는다 | Accepted |
-| [0080](0080-output-backlog-coalescing-and-out-of-band-frontend-vitals.md) | 스트림 의미는 원래 경계에서 처리하고 xterm 물리 쓰기만 제한적으로 묶는다 | Accepted |
+| [0080](0080-output-backlog-coalescing-and-out-of-band-frontend-vitals.md) | 스트림 의미는 원래 경계에서 처리하고 xterm 물리 쓰기만 제한적으로 묶는다 | Accepted (partially superseded by [0336](0336-webview2-process-failure-gui-restart.md)) |
 | [0081](0081-pane-focus-transition-single-owner.md) | Pane 포커스 전환은 단일 도메인 액션이 소유한다 | Accepted |
 | [0082](0082-terminal-helper-ime-focus-refresh.md) | 앱 복귀 시 DOM-active xterm helper 는 blur/focus 로 IME 문맥을 재활성화 (0057 확장) | Superseded by [0108](0108-windows-ime-editable-focus-relay.md) |
 | [0083](0083-automation-health-instance-identity.md) | Automation health는 프로세스·빌드 신원을 함께 공개한다 | Accepted |
@@ -121,7 +121,7 @@ ADR 이 필요한 대표 기준:
 | [0101](0101-active-workspace-weighted-parser-admission.md) | parser admission 은 pane 가중치가 아니라 클래스 몫으로 나누고 그 몫은 설정값이다 (0098 가중치·aging·설정 노출 정정) | Accepted |
 | [0102](0102-claude-usage-probe-headless-pty.md) | Claude 사용량은 레지스트리 밖 headless probe PTY 가 소유한다 | Proposed |
 | [0103](0103-usage-view-visible-rows.md) | UsageView 표시 행은 전역 사용량 설정이 소유한다 | Accepted |
-| [0104](0104-codex-usage-app-server-probe.md) | Codex 사용량은 app-server rate-limit API로 수집한다 | Accepted |
+| [0104](0104-codex-usage-app-server-probe.md) | Codex 사용량은 app-server rate-limit API로 수집한다 | Accepted (WSL 실행 수단은 [0334](0334-console-less-wsl-runs.md)가 대체) |
 | [0105](0105-widget-slots-and-status-line.md) | 위젯 배치는 설정의 슬롯 배열이 소유하고 status line 은 슬롯 영역 하나일 뿐이다 | Accepted |
 | [0106](0106-github-list-view-repo-registry.md) | GitHub 이슈/PR 목록은 repo 단위 레지스트리가 소유한다 | Proposed |
 | [0107](0107-widget-typography-and-usage-bar-width.md) | 위젯 글꼴은 전역 표시 설정이, 사용량 막대 너비는 인스턴스 옵션이 소유한다 | Accepted |
@@ -137,7 +137,7 @@ ADR 이 필요한 대표 기준:
 | [0117](0117-codex-session-restore.md) | Codex CLI 세션은 최상위 rollout과 terminal CWD를 연결해 안전한 resume 명령으로 복원 | Superseded by 0118 |
 | [0118](0118-codex-session-pid-attribution.md) | Codex 세션은 PTY 자식 PID와 Codex 진단 DB가 함께 증명한 thread로만 복원 | Accepted |
 | [0119](0119-settings-type-error-partial-recovery.md) | settings.json 타입 오류는 경로 단위로 드롭해 부분 복구하고, 확인 전까지 파일에 쓰지 않는다 | Proposed |
-| [0120](0120-wsl-agent-session-attribution.md) | WSL agent 세션은 distro 내부 terminal 환경 marker와 Linux PID로만 정확히 귀속 | Accepted |
+| [0120](0120-wsl-agent-session-attribution.md) | WSL agent 세션은 distro 내부 terminal 환경 marker와 Linux PID로만 정확히 귀속 | Accepted (probe 실행 수단은 [0334](0334-console-less-wsl-runs.md)가 대체) |
 | [0121](0121-single-pane-clear-user-pointed-scope.md) | 단일 pane 클리어는 사용자가 가리킨 pane 하나를 범위로 삼고, dock 을 포함한다 | Superseded by 0137 |
 | [0122](0122-terminal-output-server-delivery-expiry.md) | backend receipt·continuation grant expiry는 최장 직렬 복구 경로를 덮는 30초다 | Superseded by ADR-0126 |
 | [0123](0123-top-bar-window-controls-outrank-everything.md) | 상단 바에서 창 버튼(최소화·최대화·닫기)은 다른 모든 점유자보다 우선한다 | Accepted |
@@ -228,7 +228,7 @@ ADR 이 필요한 대표 기준:
 | [0208](0208-android-e2e-file-viewer-typed-capability.md) | Android E2E FileViewer는 타입화 capability와 exact claim binding을 함께 검증 | Accepted |
 | [0209](0209-remote-display-preferences-are-device-local.md) | Remote 표시·입력 감도·기본 checkpoint 예산은 기기 로컬로 소유한다 (0173·0199·0200 대체) | Accepted |
 | [0210](0210-remote-lucide-icon-boundary.md) | Remote 범용 아이콘도 Lucide DOM 경계에서 렌더한다 (0205·0169 확장) | Accepted |
-| [0211](0211-workspace-selector-destructive-actions-require-two-activations.md) | Workspace selector 파괴적 action은 같은 컨트롤의 연속 두 번 활성화를 요구한다 (0033·0035 정정) | Accepted |
+| [0211](0211-workspace-selector-destructive-actions-require-two-activations.md) | Workspace selector 파괴적 action은 같은 컨트롤의 연속 두 번 활성화를 요구한다 (0033·0035 정정) | Accepted (partially superseded by [0333](0333-destructive-confirmation-global-and-pane-control-bar.md)) |
 | [0212](0212-android-pairing-invitation-copy-paste.md) | Android 페어링 초대는 QR과 명시적 복사·붙여넣기를 함께 제공한다 (0145·0178 확장, 0176 범위 정정) | Accepted |
 | [0213](0213-remote-input-action-segment-placement-and-user-keys.md) | Remote 입력 action은 행 안의 정렬 구역에 배치하고, 조합키는 사용자가 등록한다 (0028 확장, 0186·0040 정정) | Proposed |
 | [0214](0214-remote-settings-paginates-into-tabs.md) | Remote Settings는 탭으로 나누고 선택한 탭만 기기에 남긴다 (0187 확장) | Proposed |
@@ -356,6 +356,11 @@ ADR 이 필요한 대표 기준:
 | [0330](0330-agent-integration-missing-notice.md) | 실제 사용한 에이전트 환경의 훅·MCP 미설치를 앱 알림으로 안내한다 (0289·0324·0325 확장, 0282 준수) | Accepted |
 | [0331](0331-remote-memo-body-tool-swipe.md) | Remote 메모 본문은 수평 도구 스와이프를 받는다 (0261 입력칸 제외 규칙 일부 대체) | Accepted |
 | [0332](0332-remote-tool-bottom-controls-and-github-back.md) | Remote 우측 도구는 하단 컨트롤바를 기본으로 하고 PRs에서 Issues로 돌아간 뒤 닫는다 (0261 close 동작 일부 대체) | Accepted |
+| [0333](0333-destructive-confirmation-global-and-pane-control-bar.md) | 파괴적 action 두 번 확인을 전역 설정으로 올리고 pane 컨트롤 바에도 적용한다 (0211 설정 키·적용 범위 대체) | Accepted |
+| [0334](0334-console-less-wsl-runs.md) | laymux가 띄우는 파이프 기반 WSL 실행은 콘솔 없이 lifted `wsl.exe`를 직접 띄운다 (0120·0104 실행 수단 일부 대체) | Accepted |
+| [0335](0335-shared-wsl-guest-observations.md) | WSL 게스트 관측은 distribution별 공유 run으로 합치고, 신선도는 호출자가 계약한다 (0120 probe 실행 단위·0238 진단 실행 방식 확장) | Accepted |
+| [0336](0336-webview2-process-failure-gui-restart.md) | WebView2 프로세스가 실패하면 PTY 데몬 세션을 인계하고 GUI를 다시 시작하며, 재시작 예산으로 반복을 멈춘다 (0080 일부 대체) | Accepted |
+| [0337](0337-legacy-wsl-client-warning.md) | inbox(구형) WSL 클라이언트로 WSL을 쓰면 경고만 띄운다 (0334 후속) | Accepted |
 | [0338](0338-remote-text-keys-edit-composer-draft.md) | Remote 텍스트 사용자 키는 Composer 초안을 편집한다 (0234 일부 정정) | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.

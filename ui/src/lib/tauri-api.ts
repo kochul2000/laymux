@@ -1239,6 +1239,8 @@ export interface Settings {
   localUiState?: import("./local-session").LocalSessionSnapshot["uiState"];
   /** App UI language: "system" (OS locale), "ko", or "en". */
   language?: import("@/stores/settings-store").LanguageSetting;
+  /** Two-activation gate for destructive click controls (ADR-0333). */
+  confirmDestructiveActions?: boolean;
   colorSchemes: ColorScheme[];
   profiles: Profile[];
   keybindings: Keybinding[];
@@ -1483,6 +1485,14 @@ export async function getHomeDirectory(): Promise<string> {
  */
 export async function getTerminalHomeDirectory(terminalId: string): Promise<string | null> {
   return invoke("get_terminal_home_directory", { terminalId });
+}
+
+/**
+ * Whether laymux's WSL runs fall back to the inbox (legacy) WSL client, which
+ * creates a console per run, while a WSL terminal is open (ADR-0337).
+ */
+export async function getLegacyWslNotice(): Promise<boolean> {
+  return invoke("get_legacy_wsl_notice");
 }
 
 /** Read a file and classify it for the file viewer. */

@@ -345,12 +345,12 @@ Tauri command 는 두 개다([ADR-0106](../adr/0106-github-list-view-repo-regist
 
 - **스냅샷 소유자는 `owner/repo` 키 레지스트리다.** 갱신 주기는 10초이며, 그 창 안의 요청은 리포별 `fetch` 토큰으로 합쳐져 `gh` 를 한 번만 실행한다. 같은 리포를 보는 pane 이 몇 개든 비용은 동일하다. 이 레지스트리는 `AppState` 를 건드리지 않아 `state.rs` 락 순서에 참여하지 않는다.
 - **만료는 캐시 미스가 아니다 — stale-while-revalidate.** 갱신 주기를 넘긴 읽기는 기억된 스냅샷을 그대로(만료 표시 없이, 저장 당시 `fetchedAtMs` 로) 즉시 반환하고 `gh` 재조회는 응답 뒤 백그라운드에서 돈다. 기억된 스냅샷이 없을 때만 인라인으로 기다린다. `force`(사용자 새로고침)는 stale 을 받지 않고 인라인 조회한다. 오랜만에 워크스페이스에 들어온 pane 이 빈 목록을 보지 않게 하는 정책이다([ADR-0110](../adr/0110-github-snapshot-stale-while-revalidate.md)).
-- **토큰은 `try_lock` 으로만 잡는다 — 대기열이 없다.** 진행 중인 조회가 있으면 다른 호출자는 기다리지 않고 캐시된 스냅샷을, 캐시가 없으면 `pending` 상태를 즉시 받는다. `pending` 은 "아직 답이 없다"는 뜻이고 빈 목록이 아니다 — 프론트는 이를 표시하지 않고 1초 뒤 재조회한다(`GITHUB_PENDING_RETRY_MS`).
+- **토큰은 `try_lock` 으로만 잡는다 — 대기열이 없다.** 진행 중인 조회가 있으면 일반 호출자는 기다리지 않고 캐시된 스냅샷을, 캐시가 없으면 `pending` 상태를 즉시 받는다. `force` 호출자는 오래된 캐시를 받지 않고 `pending`을 받는다. `pending` 은 "아직 답이 없다"는 뜻이고 빈 목록이 아니다 — 프론트는 이를 표시하지 않고 1초 뒤 재조회한다(`GITHUB_PENDING_RETRY_MS`). 데스크톱 훅의 강제 갱신이 `pending`이면 재시도와 그 사이의 폴링도 실제 결과를 받을 때까지 `force`를 유지하며, 진행 중인 강제 조회를 폴링으로 덮어쓰지 않는다.
 - **`gh` 는 마감을 넘기면 죽는다.** 목록 15초, 변경 조작 60초(`process::output_with_timeout`). 초과하면 `failed{message}` 로 내려온다.
 - **행의 복사 버튼은 두 개다.** 링크 복사(`⧉`)는 모든 행에 상시 노출하고, 브랜치 복사(`⎇`)는 `headRefName` 이 있는 행 — 즉 PR — 에만 그 왼쪽에 붙는다. 이슈는 브랜치가 없어 필드가 빈 문자열이고 버튼도 그리지 않는다. 눌린 버튼만 1.2초 동안 `✓` 로 바뀐다(행 번호 + 버튼 종류로 구분).
 - **조회는 항상 `gh {issue|pr} list --repo owner/repo --state open --limit 50 --json …`** 이며, PR 목록만 `isDraft`·`headRefName` 을 추가로 요청한다(둘 다 PR 전용 필드라 이슈 목록에 넣으면 `gh` 가 호출 전체를 거부한다). CWD 상속으로 실행하지 않으므로 레지스트리 키와 질의 대상이 어긋날 수 없고, `issueReporter.shell` 프리픽스(예: WSL)에서도 그대로 동작한다.
 - **`action` 은 `issue.close`, `issue.closeNotPlanned`, `pr.merge`, `pr.squash`, `pr.rebase`, `pr.close` 만 허용**하며, 파싱 실패는 프로세스 기동 전에 거부된다. 머지 방식은 액션이 정하며 각각 `--merge`/`--squash`/`--rebase` 로 고정 전달한다(`gh pr merge` 는 방식 없이는 대화형이다).
-- **성공한 조작은 해당 리포 캐시를 무효화**해 다음 폴링이 즉시 재조회한다. 프론트는 `⋯` 메뉴에서 조작을 장전한 뒤 별도 Confirm 클릭에서만 command 를 호출한다.
+- **성공한 조작은 해당 리포 캐시를 무효화하고 프론트가 즉시 강제 재조회**한다. 무효화 전에 시작한 조회 결과는 반환·캐시 저장하지 않고 `pending`으로 버려, 머지·닫기 전 목록이 캐시를 다시 채우지 못하게 한다. 프론트는 `⋯` 메뉴에서 조작을 장전한 뒤 별도 Confirm 클릭에서만 command 를 호출한다.
 - `gh` 미설치·미인증은 각각 `ghMissing`/`unauthorized` 상태로 내려오며, 그 외 실패는 `failed{message}` 로 `gh` stderr 를 그대로 전달한다.
 
 뷰의 기본값은 `settings.github` 이 소유한다 — `defaultTab`(`"issues"`|`"pulls"`, 기본 `issues`, 아직 탭을 고르지 않은 pane 에만 적용. 고른 뒤에는 `viewOverrides.githubTab` 이 이긴다 — [ADR-0115](../adr/0115-github-view-tab-per-pane-state.md)), `refreshSeconds`(기본 10, Settings UI 하한 10), `hideDraftPulls`(기본 false). 편집 UI 는 Settings → **Views → GitHub** 다. `refreshSeconds` 는 프론트가 폴링 간격으로만 쓰며 백엔드 갱신 창(10초 상수)은 바꾸지 않으므로, 10초 미만 값은 캐시를 다시 읽는 데 그친다. 손으로 0·음수를 넣은 settings.json 도 폴링이 타이트 루프가 되지 않도록 뷰에서 1초로 바닥을 잡는다.
@@ -520,7 +520,7 @@ html/markdown preview는 별도 문서(iframe)라 부모 페이지의 CSS를 상
 
 ### Workspace selector 설정
 
-`settings.workspaceSelector`는 workspace 목록의 표시·동작 정책을 소유한다. `confirmDestructiveActions`는 desktop `WorkspaceSelectorView`의 숨기기·터미널 지우기·layout 삭제·workspace 닫기 버튼에만 적용하며, 키바인딩·Automation·MCP·Remote action은 우회한다([ADR-0211](../adr/0211-workspace-selector-destructive-actions-require-two-activations.md)).
+`settings.workspaceSelector`는 workspace 목록의 표시·동작 정책을 소유한다. 파괴적 버튼의 두 번 확인은 이 섹션이 아니라 root `confirmDestructiveActions`가 소유한다(아래 "파괴적 action 확인 설정").
 
 ```jsonc
 {
@@ -535,13 +535,22 @@ html/markdown preview는 별도 문서(iframe)라 부모 페이지의 CSS를 상
     "sortOrder": "manual",
     "pathEllipsis": "start",
     "lastInputMode": "perPane",
-    "confirmDestructiveActions": true, // 파괴적 버튼은 같은 컨트롤을 두 번 활성화해야 실행
     "hiddenAutoCloseSeconds": 0
   }
 }
 ```
 
-`confirmDestructiveActions`가 누락되거나 boolean이 아니면 `true`로 정규화한다. `false`이면 버튼의 첫 활성화가 기존 domain action을 즉시 호출한다. 설정 UI의 Workspaces → Behavior 토글은 draft/save 흐름을 거쳐 이 값을 영구 저장한다.
+### 파괴적 action 확인 설정
+
+root `settings.confirmDestructiveActions`(boolean, 기본 `true`)는 desktop 클릭 컨트롤의 두 번 활성화 gate다. 적용 대상은 `WorkspaceSelectorView`의 숨기기·터미널 지우기·layout 삭제·workspace 닫기와 pane 컨트롤 바의 Restart view·Clear view·Delete pane(stack이면 Close layer)이다. pane 컨트롤 바의 Clear terminal(빗자루), 키바인딩, Automation·MCP·Remote action은 우회한다([ADR-0211](../adr/0211-workspace-selector-destructive-actions-require-two-activations.md), [ADR-0333](../adr/0333-destructive-confirmation-global-and-pane-control-bar.md)).
+
+```jsonc
+{
+  "confirmDestructiveActions": true // 파괴적 버튼은 같은 컨트롤을 두 번 활성화해야 실행
+}
+```
+
+누락되거나 boolean이 아니면 `true`로 정규화한다. `false`이면 버튼의 첫 활성화가 기존 domain action을 즉시 호출한다. 설정 UI의 Interface → Confirmation 토글은 draft/save 흐름을 거쳐 이 값을 영구 저장한다.
 
 ### Claude Code 설정
 
@@ -629,7 +638,7 @@ Codex 관련 동작(세션 복원, transcript 포인터 스크롤, 셀렉터 상
 
 `restoreSession`은 세션 영속([data-flow.md §13](./data-flow.md))에서 검증된 Codex thread ID를 다음 시작 명령 `codex resume <id>`로 사용할지를 제어한다([ADR-0118](../adr/0118-codex-session-pid-attribution.md)). `sessionMaxAgeHours`는 lifecycle 증거가 없는 native 구버전의 후보 조회에만 적용한다. 현재 프로세스의 명시적 선택 또는 유일한 미종료 최상위 loop로 확인한 대화는 rollout 나이로 만료시키지 않는다([ADR-0267](../adr/0267-codex-live-session-age-policy.md)). `transcriptScrollEnabled`는 위 normal-buffer transcript의 데스크톱 휠과 Remote 휠·터치 방향키 변환을 함께 gate한다([ADR-0218](../adr/0218-codex-transcript-pointer-scroll-toggle.md)). 저장 시에는 terminal PTY의 가장 얕은 Codex descendant PID를 얻고, Codex의 읽기 전용 `logs_*.sqlite`에서 그 PID의 현재 `process_uuid`와 thread ID를 연결한다. `state_*.sqlite`가 제공한 rollout 경로(없으면 정확한 ID가 파일명에 있는 rollout 검색)의 첫 `session_meta`를 대조해 최상위 interactive thread만 허용한다. terminal CWD와 최신 rollout은 귀속에 사용하지 않는다. 서로 다른 terminal이 같은 ID를 얻거나 DB·스키마·rollout 중 하나라도 검증되지 않으면 관련 pane은 복원하지 않는다.
 
-rollout 나이 필터는 파일의 nanosecond 수정 시각만 사용하며, 생성일인 `sessions/YYYY/MM/DD` 디렉터리명으로 미리 pruning하지 않는다. 세션 ID는 영숫자로 시작하고 이후 영숫자·`-`·`_`만 허용한다. Rust의 비구조화 startup override도 `<claude.command> --resume <id>`와 `<codex.command> resume <id>`, `<grok.command> --resume <uuid>` 세 형태와 ADR-0238의 설정된 Codex 명령 그대로의 fresh 시작만 허용한다. `restoreSession`은 다음 시작에서 resume할지만 제어하므로 꺼져 있어도 Claude/Codex/Grok의 현재 ID를 수집·보존한다. native host의 `CODEX_HOME`(rollout, 기본 host OS 사용자 홈의 `.codex`)과 `CODEX_SQLITE_HOME`(DB, 기본 `CODEX_HOME`)을 지원한다. Windows host의 WSL terminal은 자신의 distro 안에서 `LX_TERMINAL_ID`를 상속한 Linux provider PID를 선택한다. Claude/Codex/Grok가 중첩 실행됐으면 provider별 최상위가 아니라 세 provider 전체에서 유일한 최상위 agent 하나만 활성 provider로 인정한다. Claude는 해당 PID 세션 파일을 읽고, Codex는 동봉 정적 Linux 도구가 해당 PID의 SQLite lifecycle을 읽고 선택된 ID의 rollout을 검증한다. 검증된 미영속 새 대화는 ADR-0238의 fresh로 저장한다. Grok는 guest `GROK_HOME`(없으면 guest `HOME/.grok`)의 `active_sessions.json`에서 그 PID와 일치하는 유효 UUID가 정확히 하나일 때만 저장한다([ADR-0120](../adr/0120-wsl-agent-session-attribution.md), [ADR-0156](../adr/0156-grok-first-class-agent.md)). native·WSL 결과를 모두 합친 뒤 같은 session ID가 둘 이상의 terminal에 귀속되면 충돌한 terminal을 전부 `null`로 만든다. 명시 distro가 잘못됐으면 bare WSL로 재해석하지 않으며, default-distro 조회와 여러 distro probe는 하나의 3초 종료 예산을 공유한다. WSL live SQLite는 Windows UNC에서 열지 않고 Linux 안에서 읽는다. 동봉 도구는 Python·sqlite3 CLI를 요구하지 않는다. WSL에서도 CWD·최신 파일·다른 distro fallback은 허용하지 않는다.
+rollout 나이 필터는 파일의 nanosecond 수정 시각만 사용하며, 생성일인 `sessions/YYYY/MM/DD` 디렉터리명으로 미리 pruning하지 않는다. 세션 ID는 영숫자로 시작하고 이후 영숫자·`-`·`_`만 허용한다. Rust의 비구조화 startup override도 `<claude.command> --resume <id>`와 `<codex.command> resume <id>`, `<grok.command> --resume <uuid>` 세 형태와 ADR-0238의 설정된 Codex 명령 그대로의 fresh 시작만 허용한다. `restoreSession`은 다음 시작에서 resume할지만 제어하므로 꺼져 있어도 Claude/Codex/Grok의 현재 ID를 수집·보존한다. native host의 `CODEX_HOME`(rollout, 기본 host OS 사용자 홈의 `.codex`)과 `CODEX_SQLITE_HOME`(DB, 기본 `CODEX_HOME`)을 지원한다. Windows host의 WSL terminal은 자신의 distro 안에서 `LX_TERMINAL_ID`를 상속한 Linux provider PID를 선택한다. Claude/Codex/Grok가 중첩 실행됐으면 provider별 최상위가 아니라 세 provider 전체에서 유일한 최상위 agent 하나만 활성 provider로 인정한다. Claude는 해당 PID 세션 파일을 읽고, Codex는 동봉 정적 Linux 도구가 해당 PID의 SQLite lifecycle을 읽고 선택된 ID의 rollout을 검증한다. 검증된 미영속 새 대화는 ADR-0238의 fresh로 저장한다. Grok는 guest `GROK_HOME`(없으면 guest `HOME/.grok`)의 `active_sessions.json`에서 그 PID와 일치하는 유효 UUID가 정확히 하나일 때만 저장한다([ADR-0120](../adr/0120-wsl-agent-session-attribution.md), [ADR-0156](../adr/0156-grok-first-class-agent.md)). native·WSL 결과를 모두 합친 뒤 같은 session ID가 둘 이상의 terminal에 귀속되면 충돌한 terminal을 전부 `null`로 만든다. 명시 distro가 잘못됐으면 bare WSL로 재해석하지 않으며, default-distro 조회와 여러 distro probe 대기는 하나의 3초 종료 예산을 공유한다. 같은 distribution의 귀속 스캔과 Codex 진단 실행은 호출자 사이에서 공유한다. `get_terminal_session_attributions`·종료 `/status` 확인·`get_*_session_ids`는 요청 이후 시작된 관측만 쓰고, 표시 폴링(`get_codex_turn_states`·`get_agent_hook_states`·`get_agent_session_states`)은 3초 안에 시작된 관측을 재사용한다([ADR-0335](../adr/0335-shared-wsl-guest-observations.md)). WSL live SQLite는 Windows UNC에서 열지 않고 Linux 안에서 읽는다. 동봉 도구는 Python·sqlite3 CLI를 요구하지 않는다. WSL에서도 CWD·최신 파일·다른 distro fallback은 허용하지 않는다.
 
 한 TerminalView의 `lastClaudeSession`/`lastCodexSession`/`lastGrokSession`은 상호배타적으로 영속한다. 저장 시 새 provider ID를 얻으면 나머지 두 stale 키를 제거하고, `get_claude_session_ids`/`get_codex_session_ids`/`get_grok_session_ids`가 실행 중이지만 정확한 ID를 증명하지 못한 terminal을 `null`로 반환하면 세 stale 키를 모두 제거한다. backend 결과나 손편집 설정에 둘 이상이 동시에 귀속되면 provider를 추측하지 않고 셋 다 복원하지 않는다. 사용자가 누른 Restart View는 세 agent 복원을 모두 건너뛴다.
 
@@ -962,6 +971,8 @@ OSC 7은 일부 셸(예: PowerShell의 `prompt` 함수)이 프롬프트가 재�
   }
 }
 ```
+
+마지막 report의 **도착 시각**은 진단 밖에서 한 곳만 읽는다. Windows GUI는 WebView2가 renderer 무응답을 보고했을 때 이 시각부터 30초 넘게 report가 없었으면 GUI를 다시 시작한다([ADR-0336](../adr/0336-webview2-process-failure-gui-restart.md), [data-flow.md §13.9](data-flow.md#139-webview2-프로세스-실패-복구-windows)). report 내용은 어떤 제어 경로도 읽지 않는다.
 
 판정 순서는 `lastReportAgeMs` 먼저다 — **큰 값이면 WebView 메인 스레드 자체가 멈춘 것**이고, **작은 값 옆에서 `bridge.requestTimeouts`만 오르면** 스레드는 살아 있고 `automation-request` 이벤트가 큐에 밀린 것이다. `terminalOutput[]`은 WebView를 거치지 않고 현재 Rust `TerminalOutputSession`에서 합성한 backend SoT라 프론트가 멈춰도 `healthy | backpressured | failStopped`, reason, generation/token, parsed/write/ring/delivery bounds, active grant와 receipt slot을 읽을 수 있다. `frontend.terminalOutputV3`는 마지막 health report가 전달한 mount-local surface identity/frontier이므로 report age와 함께 읽고 backend 상태를 대체하지 않는다. 두 쪽 모두 terminal payload bytes를 담지 않는다. 프론트의 `responsesSent`는 Rust가 IPC command를 받아들였다는 뜻이고 실제 HTTP waiter와의 결합은 Rust의 `responsesMatched`/`responsesOrphaned`가 구분한다. `writeBackpressure`는 xterm이 아직 받아들이지 않은 batch를 같은 byte로 재시도한 횟수이고, `writeCallbackFailures`와 source/stage별 하위 카운터는 xterm이 이미 받아들인 byte 뒤 embedder 완료 작업의 실패다. 후자는 sequence gap이 아니며 callback에서 절대 재시도하지 않는다([ADR-0084](../adr/0084-desktop-terminal-output-parsed-credit.md)). `frontend.inputDelivery`는 human raw input의 한 번 제출과 IPC completion만 기록한다. 실패는 backend 미수락의 증명이 아니므로 counter나 health report가 retry/recovery 결정을 만들지 않으며 payload는 절대 포함하지 않는다([ADR-0096](../adr/0096-terminal-human-input-write-failure-observability.md)). `frontend.pipeline`과 v3 terminal state의 나머지 terminal별 의미는 [data-flow.md §8.8](data-flow.md)이 소유한다. 응답은 identity·상태·카운터·지연·sequence 수치뿐이며 터미널 바이트·경로·설정을 담지 않고, 기존 IP allowlist 아래 있다.
 
@@ -1985,6 +1996,7 @@ src-tauri/src/
 ├── process_tree.rs           # PTY 자식 프로세스 트리 liveness (ADR-0009)
 ├── wsl_liveness.rs           # WSL pane 게스트 프로브 liveness (ADR-0134)
 ├── wsl_probe.rs              # WSL distribution 해석/검증 + wsl.exe --exec 실행
+├── wsl_probe/snapshot.rs     # WSL 게스트 관측 공유 run·신선도 계약 (ADR-0335)
 ├── pty_trace.rs              # PTY/커서 트레이스 (LAYMUX_PTY_TRACE / LAYMUX_CURSOR_TRACE)
 ├── crash_reporter.rs         # 크래시 리포트
 ├── state.rs                  # AppState — 전역 상태
@@ -2038,6 +2050,12 @@ src-tauri/src/
 │   ├── entry.rs              # `laymux --pty-daemon` 진입점
 │   ├── wire.rs / transport.rs / discovery.rs  # frame·로컬 socket·token
 │   └── tests.rs / adoption_tests.rs / handshake_tests.rs  # 실제 PTY·셸 기반 데몬 테스트
+├── webview_recovery/         # WebView2 프로세스 실패 복구 (ADR-0336, data-flow §13.9)
+│   ├── policy.rs             # 순수 정책: 실패 종류 판단·프론트 침묵·재시작 예산
+│   ├── history.rs            # 재시작 기록 파일(fail closed claim)
+│   ├── notice.rs             # 재시작하지 않을 때의 대화상자 문구
+│   ├── process_failed.rs     # Windows: ProcessFailed 구독·인계·대화상자
+│   └── relaunch.rs           # Windows: 상속 없는 다음 GUI 기동·이전 GUI 종료 대기
 ├── clipboard.rs              # 클립보드 (smart paste, 이미지)
 ├── ipc_server.rs             # IPC 소켓 (lx CLI ↔ IDE)
 ├── local_socket.rs           # 현재 사용자 전용 Unix domain socket (ADR-0305)
@@ -2046,7 +2064,7 @@ src-tauri/src/
 ├── output_buffer.rs          # 터미널 출력 링 버퍼
 ├── port_detect.rs            # 리스닝 포트 감지
 ├── git_watcher.rs            # Git 브랜치 감지
-└── process.rs                # headless_command (Windows CREATE_NO_WINDOW)
+└── process.rs                # headless_command (Windows CREATE_NO_WINDOW) · headless_wsl_command (콘솔 없는 lifted wsl.exe, ADR-0334)
 ```
 
 ### 14.2 에러 처리
@@ -2159,7 +2177,7 @@ env.push((ENV_LX_ENDPOINT_FILE.to_string(), path));
 
 **플랫폼 분기**: `#[cfg(target_os = "windows")]` / `#[cfg(not(target_os = "windows"))]`를 사용한다. 긴 플랫폼별 코드는 별도 함수로 추출하고 `cfg` 어트리뷰트를 함수 수준에 적용한다.
 
-**프로세스 실행**: `std::process::Command::new()` 대신 반드시 `crate::process::headless_command()`를 사용한다. (Windows 콘솔 창 깜빡임 방지) 예외: Windows PTY 데몬 기동(`pty_daemon/launcher.rs` `windows_spawn`)은 handle 상속을 끄기 위해 `CreateProcessW`(`bInheritHandles = FALSE`, `CREATE_NO_WINDOW`)를 직접 호출한다. std `Command`는 상속을 끌 수 없어 오래 사는 데몬이 GUI의 pipe 끝을 쥐게 된다([ADR-0300](../adr/0300-detached-pty-daemon-core.md)).
+**프로세스 실행**: `std::process::Command::new()` 대신 반드시 `crate::process::headless_command()`를 사용한다. (Windows 콘솔 창 깜빡임 방지) laymux가 띄우는 파이프 기반 `wsl.exe` 실행(probe·helper·`--list`·usage app-server, Windows에서 첫 프로그램이 WSL 클라이언트인 issue reporter gh prefix)은 `crate::process::headless_wsl_command()`만 쓴다. lifted WSL(`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI` `InstallLocation`)이 있으면 그 `wsl.exe`를 `DETACHED_PROCESS`로 직접 띄워 콘솔을 만들지 않고, 없으면 inbox 런처를 `headless_command`로 띄운다. inbox 런처는 콘솔 없이 띄우면 클라이언트에 보이는 콘솔을 새로 붙이고 리다이렉트한 출력을 잃는다. 소스 가드 테스트가 `headless_command("wsl.exe")` 호출 형식의 재유입을 막는다(다른 형식까지 보증하지는 않는다). PTY pane의 WSL 셸은 대상이 아니다([ADR-0334](../adr/0334-console-less-wsl-runs.md)). inbox 런처로 해석되고(`crate::process::wsl_client_is_inbox()`) `initial_execution_host == Wsl`인 터미널 세션이 열려 있으면 `get_legacy_wsl_notice` IPC가 `true`를 돌려주고, 데스크톱은 좌하단 `LegacyWslNotice`로 `wsl --update` 설치를 권한다. 닫으면 그 실행 동안만 숨기며 콘솔 누수 감지·차단은 하지 않는다([ADR-0337](../adr/0337-legacy-wsl-client-warning.md)). 게스트 에이전트 프로세스 스캔과 Codex 진단은 직접 실행하지 않고 `AppState.wsl_guest_snapshots`(`wsl_probe::snapshot`)의 공유 run으로만 요청하며, 호출자는 `GuestObservation`으로 신선도를 밝힌다. 세션 영속·종료 확인처럼 관측이 저장·파괴 결정을 바꾸는 경로는 `StartedAfter`, 표시 폴링만 `Reusable`이다([ADR-0335](../adr/0335-shared-wsl-guest-observations.md)). 예외: Windows PTY 데몬 기동(`pty_daemon/launcher.rs` `windows_spawn`)은 handle 상속을 끄기 위해 `CreateProcessW`(`bInheritHandles = FALSE`, `CREATE_NO_WINDOW`)를 직접 호출한다. std `Command`는 상속을 끌 수 없어 오래 사는 데몬이 GUI의 pipe 끝을 쥐게 된다([ADR-0300](../adr/0300-detached-pty-daemon-core.md)). WebView 복구의 다음 GUI 기동(`webview_recovery/relaunch.rs`)도 같은 이유로 `CreateProcessW`(`bInheritHandles = FALSE`)를 직접 호출한다. 상속하면 다음 GUI가 이전 GUI의 Automation listen 소켓을 쥐어 포트를 잡지 못한다([ADR-0336](../adr/0336-webview2-process-failure-gui-restart.md)).
 
 **로깅**: `eprintln!()` 대신 `tracing` 매크로를 사용한다.
 ```rust
