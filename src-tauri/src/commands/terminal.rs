@@ -2481,7 +2481,9 @@ fn dispatch_osc_action(
                     );
                 }
                 CommandStatusField::ExitCode => {
-                    let exit_code = osc_hooks::osc_133_exit_code(&event.data);
+                    // One D reading for both paths: an interruption has no exit code.
+                    let exit_code =
+                        osc_hooks::task_lifecycle(event).and_then(|lifecycle| lifecycle.exit_code);
                     let _ = super::ipc_dispatch::do_set_command_status(
                         state,
                         app,

@@ -287,7 +287,7 @@ pub const OSC_133_INTERRUPTED_OPTION: &str = "lx=interrupted";
 
 /// OSC 133 D data is `exit-code[;option...]`. The exit code is the first
 /// field and counts only when it is an integer.
-pub fn osc_133_exit_code(data: &str) -> Option<i32> {
+fn osc_133_exit_code(data: &str) -> Option<i32> {
     data.split(';').next()?.parse().ok()
 }
 

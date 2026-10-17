@@ -87,3 +87,9 @@ path = "src/main.rs"
 [[bin]]
 name = "lx"
 path = "src/bin/lx.rs"
+
+# ADR-0341: process-global console state; runs alone without the libtest harness.
+[[test]]
+name = "ctrl_c_inheritance"
+path = "tests/ctrl_c_inheritance.rs"
+harness = false
