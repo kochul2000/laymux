@@ -5,6 +5,7 @@ export function createComposerEditor(element) {
   const window = document.defaultView;
   const { Node, InputEvent } = window;
   const chips = new WeakMap();
+  let pendingCaretOffset = null;
 
   function read() {
     let text = "";
@@ -44,6 +45,9 @@ export function createComposerEditor(element) {
 
   function selection() {
     const state = read();
+    if (pendingCaretOffset != null) {
+      return { start: pendingCaretOffset, end: pendingCaretOffset };
+    }
     const selected = window.getSelection();
     if (!selected?.rangeCount) return { start: state.text.length, end: state.text.length };
     const range = selected.getRangeAt(0);
@@ -71,6 +75,7 @@ export function createComposerEditor(element) {
   }
 
   function setSelectionRange(start, end = start) {
+    pendingCaretOffset = null;
     const state = read();
     const range = document.createRange();
     range.setStart(...pointAt(start, state));
@@ -94,13 +99,23 @@ export function createComposerEditor(element) {
     if (editor.disabled) return;
     const selected = selection();
     const { start, end } = expandSelection(selected.start, selected.end);
-    setSelectionRange(start, end);
-    const range = window.getSelection().getRangeAt(0);
+    const state = read();
+    const range = document.createRange();
+    range.setStart(...pointAt(start, state));
+    range.setEnd(...pointAt(end, state));
     range.deleteContents();
     if (text) range.insertNode(document.createTextNode(text.replace(/\r\n?/g, "\n")));
-    setSelectionRange(start + text.replace(/\r\n?/g, "\n").length);
+    const caret = start + text.replace(/\r\n?/g, "\n").length;
+    // Selection.addRange focuses contenteditable in Chromium. Defer it until
+    // explicit focus so a text soft key cannot reopen a dismissed keyboard.
+    if (document.activeElement === element) setSelectionRange(caret);
+    else pendingCaretOffset = caret;
     element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
   }
+
+  element.addEventListener("focus", () => {
+    if (pendingCaretOffset != null) setSelectionRange(pendingCaretOffset);
+  });
 
   function refreshImageLabels() {
     const images = [...element.querySelectorAll(".composer-attachment")].filter(
@@ -121,6 +136,7 @@ export function createComposerEditor(element) {
       JSON.stringify(current.attachments) === JSON.stringify(attachments)
     )
       return;
+    pendingCaretOffset = null;
     const nodes = [];
     let offset = 0;
     for (const attachment of attachments) {
