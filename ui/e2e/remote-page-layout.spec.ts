@@ -1279,7 +1279,7 @@ test.describe("remote mobile layout", () => {
     [390, 200],
     [390, 300],
   ]) {
-    test(`숨김 워크스페이스는 ${width}px 화면·${navigationWidth}px 메뉴에서 44px 터치 영역을 제공한다`, async ({
+    test(`숨김 워크스페이스는 ${width}px 화면·${navigationWidth}px 메뉴에서 32px 터치 영역을 제공한다`, async ({
       page,
     }) => {
       await page.setViewportSize({ width, height: 844 });
@@ -1312,18 +1312,18 @@ test.describe("remote mobile layout", () => {
         const primary = (await row.locator(".hidden-workspace-primary").boundingBox())!;
         const restore = (await row.locator(".visibility-button").boundingBox())!;
         const bounds = (await row.boundingBox())!;
-        expect(primary.height).toBeGreaterThanOrEqual(44);
-        expect(restore.width).toBe(44);
-        expect(restore.height).toBe(44);
+        expect(primary.height).toBe(32);
+        expect(restore.width).toBe(32);
+        expect(restore.height).toBe(32);
         expect(primary.x + primary.width).toBeLessThanOrEqual(restore.x);
         expect(restore.x + restore.width).toBeLessThanOrEqual(bounds.x + bounds.width + 1);
       }
       await page.screenshot({
-        path: `../.screenshots/remote-hidden-workspace-${width}-${navigationWidth}.png`,
+        path: `../.screenshots/remote-hidden-workspace-${width}-${navigationWidth}-32px.png`,
       });
       await page
         .locator('[data-hidden-workspace-restore="ws-b"]')
-        .tap({ position: { x: 22, y: 40 } });
+        .tap({ position: { x: 16, y: 28 } });
       await expect(page.locator('[data-hidden-workspace="ws-b"]')).toHaveCount(0);
       await expect(page.locator('[data-hidden-workspace-restore="ws-c"]')).toBeFocused();
       expect(controls.visibilityRequests).toEqual([
@@ -1334,7 +1334,7 @@ test.describe("remote mobile layout", () => {
       ]);
       await page
         .locator('[data-hidden-workspace="ws-c"] .hidden-workspace-primary')
-        .tap({ position: { x: 10, y: 40 } });
+        .tap({ position: { x: 10, y: 28 } });
       await expect(page.locator("#hiddenWorkspaceToggle")).toBeHidden();
       expect(controls.visibilityRequests).toHaveLength(2);
     });

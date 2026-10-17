@@ -128,7 +128,7 @@
         --remote-main-button-scale: var(--remote-button-baseline-scale);
         --remote-keys-button-scale: var(--remote-button-baseline-scale);
         --touch-selection-handle-size: 22px;
-        --hidden-workspace-control-size: 44px;
+        --hidden-workspace-control-size: 32px;
         /* Every Remote toolbar (app header, drawer header, file viewer,
            GitHub/memo) shares one row height, control size and icon size.
            Heights are border-box and include the toolbar's bottom border. */
