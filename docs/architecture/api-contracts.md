@@ -1146,13 +1146,24 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 
 MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. release(`19280`)에서는 운영·사용자 상태 조작에 필요한 안정 툴만 노출하고, laymux-dev(`19281`)에서는 UI 검증/설정 모달/hover 시뮬레이션처럼 기능 개발 e2e 구동에 필요한 dev 전용 툴을 추가 노출한다. dev 전용 툴은 release 의 `tools/list` 결과에서 숨기며, 이름을 직접 호출해도 `tool not found` 로 거부한다([ADR-0017](../adr/0017-mcp-dev-only-tools.md)).
 
-#### Tool 목록 (release 44개 + dev 전용 20개)
+#### 에이전트 설명과 이미지 표시 안내
 
-**설정 (9)** — release/dev 공통. PC는 frontend snapshot bridge, Remote 기기는 controller heartbeat bridge를 사용한다([ADR-0032](../adr/0032-llm-settings-introspection-and-safe-mutation.md), [ADR-0243](../adr/0243-settings-mcp-scoped-discovery-and-remote-device-bridge.md)):
+MCP `initialize`의 `instructions`와 `tools/list`의 개별 description은 기존 기능을 사용자의 요청과 연결한다. 공통 안내 첫머리와 표시 도구 설명에는 한국어·영어로 이미지·차트·파일을 화면에 보여 달라는 요청(`이미지를 화면에 보여줘`, `띄워줘`, `show me the chart`)의 선택 기준과 실제 호출 의무를 둔다. 호스트가 읽을 수 있는 파일은 `open_file_viewer({path})`, 파일 없이 이미지 바이트만 있으면 `show_image({data,mime_type?})`를 사용한다. 생성한 이미지도 파일로 저장돼 있으면 경로 전달을 우선한다. 실제 표시 도구의 성공 응답을 받기 전에는 열었다고 보고하지 않도록 명시한다. `take_screenshot`은 현재 화면을 에이전트에게 반환하는 캡처이고, 에이전트 전용 이미지 읽기나 채팅의 경로·링크·Markdown 이미지·data URI·표시 완료 문구만으로는 laymux 뷰어가 열리지 않는다. 사용자가 특정 앱이나 표시 위치를 명시하면 그 요청을 따른다.
+
+두 표시 도구는 데스크톱 공용 FileViewer를 열며, 기본은 떠 있는 오버레이, `new_window=true`는 기존 앱 창 안에서 최대화다. Remote는 자동으로 오버레이를 열지 않고 Files 버튼의 unread dot을 눌러 진입한다([ADR-0291](../adr/0291-remote-host-viewer-unread-signal.md)). 표시 요청으로 연 뷰어는 사용자가 볼 수 있도록 유지하고, 닫기 요청이나 임시 검증 정리 때 `close_file_viewer`를 쓴다. 성공 응답은 뷰어 열기 요청이 적용됐다는 뜻이며 파일 읽기·렌더 완료를 증명하지 않는다.
+
+설명은 클라이언트의 도구 선택을 강제하지 않는다. 실제 Codex 검증에서는 설명을 강화해도 내장 `view_image`만 호출하고 표시 완료라고 답하는 경우가 재현됐다. 이 저장소의 `AGENTS.md`에도 같은 표시 규칙을 두어 내장 도구와 MCP 도구를 구분한다. 다른 저장소·클라이언트까지 이 지침이 적용되는 것은 아니므로, 실제 MCP 호출과 뷰어 렌더를 각각 확인한다.
+
+`path`는 URL이 아닌 호스트 접근 가능한 절대 파일 경로다. Windows에서 `/mnt/c/...`는 `C:/...`로 변환되고 `/home/...`는 기본 WSL 배포판에서 해석되므로, 다른 배포판의 파일은 `//wsl.localhost/<distro>/...` 같은 명시적 UNC 경로로 지정한다. 확장자 외부 뷰어 설정은 기존 우선순위를 유지한다. 새 도구·입출력·권한·경로 해석 정책을 추가하지 않는다.
+
+#### Tool 목록 (release 51개 + dev 전용 20개)
+
+**설정 (10)** — release/dev 공통. PC는 frontend snapshot bridge, Remote 기기는 controller heartbeat bridge를 사용한다([ADR-0032](../adr/0032-llm-settings-introspection-and-safe-mutation.md), [ADR-0243](../adr/0243-settings-mcp-scoped-discovery-and-remote-device-bridge.md)):
 
 | Tool | 구현 방식 | 설명 |
 |------|-----------|------|
 | `get_settings` | `settings.getSnapshot` bridge | 현재 store에서 합성한 설정과 revision 조회. `paths`는 RFC 6901 JSON Pointer 배열이며, `remote.authToken`은 항상 마스킹 |
+| `export_settings` | portable settings export | 로컬 실행 환경·복원 상태를 제외한 이식용 사용자 설정을 `{settings}`로 반환 |
 | `get_settings_context` | 현재 human-control owner | 설정 작업 시작·변경 직전에 기본 범위(`pc`/`remoteDevice`/null), `targetReady`, `clientId`, `ownerEpoch` 조회. 명시적 사용자 대상이 우선하며 전환·만료는 미확정. 프로세스 OS나 localhost로 사용자 표면을 추측하지 않음 |
 | `describe_settings` | Rust settings contract + 필요한 runtime catalog | 경로 생략은 34개 섹션 안내. 경로 지정은 해당 필드만 포함하는 독립 스키마·기본값·의미·허용값·권한·적용 시점 조회. `/keybindings`는 frontend의 실제 command·label·defaultKeys·group, `/widgets`는 실제 위젯의 type·기본 옵션·옵션 제약도 반환 |
 | `validate_settings` | snapshot bridge + Rust strict validator | 부분 patch dry-run. 객체는 재귀 병합, 배열은 전체 교체하며 오류·기존 위반(`existingIssues`)·diff·후보 revision을 반환하고 저장하지 않음 |
@@ -1220,15 +1231,15 @@ lease 갱신에 성공한 heartbeat 응답은 항상 경로 없는 PC 뷰어 신
 
 | Tool | 구현 방식 | 설명 |
 |------|-----------|------|
-| `take_screenshot` | bridge_request → image content | 스크린샷 캡처 (팬 단위 가능) |
+| `take_screenshot` | bridge_request → image content | 현재 화면을 PNG로 에이전트에게 반환 (팬 단위 가능). 사용자 화면에 파일을 표시하려면 `open_file_viewer`/`show_image` |
 | `list_notifications` | bridge_request | 알림 목록 (최신순 정렬, limit 지원) |
 | `send_notification` | bridge_request | 알림 생성 (terminal→workspace 자동 매핑) |
-| `clear_notifications` | bridge_request | 알림 제거 — `ids` 또는 `before`(타임스탬프) 중 정확히 하나, `read_only` 옵션 (읽음 처리만) |
+| `clear_notifications` | bridge_request | 알림 제거 — `ids` 또는 `before`(타임스탬프) 중 정확히 하나. `before`와 `read_only=true`를 함께 주면 이미 읽은 오래된 알림만 삭제하고 미확인 알림은 보존 |
 | `search_terminal_output` | AppState 직접 | 출력 패턴 검색 (`max_lines` 조절 가능) |
 | `broadcast_write` | AppState 직접 | 다중 터미널 동시 입력 — 각 터미널을 `write_to_terminal`과 동일 경로(`write_input`)로 전송하므로 `enter`(기본 true) 제출 시 #314 paste-burst 방지 body→CR 지연·per-terminal 직렬화 적용 |
 | `list_profiles` | AppState 직접 | 사용 가능한 터미널 프로필 목록 |
-| `open_file_viewer` | bridge_request | 통합 파일 뷰어 오버레이 열기 (`path` 필수, `new_window` 선택). File Explorer·Ctrl+Shift+O와 동일한 뷰어 (#277/#279) |
-| `show_image` | base64 디코드 → 임시 파일 → bridge_request | MCP 클라이언트가 메모리에 가진 이미지를 바로 표시 (`data` 필수: base64 또는 `data:` URI, `mime_type`·`new_window` 선택). cache `mcp-images/`에 임시 저장 후 `open_file_viewer`와 동일 뷰어 재사용 (#287) |
+| `open_file_viewer` | bridge_request | 사용자에게 이미지·차트·파일을 화면에 표시 (`path` 필수, `new_window` 선택). 기존 파일·파일로 저장한 생성 이미지의 우선 경로. File Explorer와 동일한 데스크톱 뷰어이며 Remote는 Files dot으로 진입 (#277/#279) |
+| `show_image` | base64 디코드 → 임시 파일 → bridge_request | 호스트 파일 없이 이미지 바이트만 있을 때 사용자에게 표시 (`data` 필수: base64 또는 `data:` URI, `mime_type`·`new_window` 선택). cache `mcp-images/`에 임시 저장 후 동일 뷰어 재사용. 기존 파일은 `open_file_viewer` 우선 (#287) |
 | `close_file_viewer` | bridge_request | 파일 뷰어 오버레이 닫기 (`ui.closeFileViewer`). 열려 있지 않으면 no-op — `open_file_viewer`/`show_image`와 짝 |
 
 **FileViewer preview 정책 (#404/#446, [ADR-0109](../adr/0109-file-viewer-typed-preview-renderers.md))** — File Explorer, `Ctrl+Shift+O`, REST `/api/v1/ui/file-viewer`, MCP `open_file_viewer`/`show_image`는 모두 `ui/src/components/ui/FileViewer.tsx`의 단일 렌더 경로를 재사용한다.
@@ -1263,12 +1274,17 @@ Rust 의 `TEXT_EXTENSIONS`(`commands/file_viewer.rs`)는 표시 힌트가 아니
 
 `.html`/`.htm`과 `.md`/`.markdown`은 기본 `preview` 모드로 열리지만, `settings.fileExplorer.extensionViewers`에 해당 확장자 매핑이 있으면 외부 터미널 뷰어가 우선한다. 이때 프론트엔드는 `create_terminal_session`에 profile과 구조화된 `viewer: { command, path }`를 전달하고, Rust가 현재 settings의 확장자·command·profile 조합 및 profile 존재를 다시 검증한다. Rust는 `profile.commandLine`의 대상 환경에 맞춰 `path_utils`로 경로를 변환하고 path 인자를 WSL/POSIX 또는 PowerShell 규칙으로 quote한다. explicit `\\wsl.localhost\<distro>` pure-Linux 경로를 WSL profile에 전달할 때는 unquoted `-d`/`--distribution` 선택 distro와 source distro가 일치해야 하며, mismatch·bare WSL·quoted distro는 거부한다(`/mnt/<drive>`는 distro 공용 예외). 일반 `startupCommandOverride`는 `<claude.command> --resume <session-id>`와 `<codex.command> resume <session-id>` 두 정확한 세션 복원 형식만 허용하며(접두어는 디스크 settings 에서 재도출, [ADR-0125](../adr/0125-configurable-agent-launch-command.md)) raw viewer 문자열은 거부한다([ADR-0117](../adr/0117-codex-session-restore.md)). 내장 preview의 `source` 토글은 Rust `read_file_for_viewer`가 반환한 기존 raw text를 그대로 표시한다. HTML preview는 `srcdoc` iframe + `sandbox="allow-same-origin"` + 제한 CSP를 사용한다. Markdown은 `marked`의 동기 GFM 모드로 HTML을 만들고 `github-markdown-css`의 `markdown-body` 스타일을 iframe 문서에 내장한 뒤, HTML preview와 동일한 sanitizer/CSP 경로를 탄다. 스크립트, 이벤트 핸들러, 폼, iframe/object/embed, 위험 URL은 제거하며, 링크 클릭은 부모가 `openExternal`로 처리한다. 상대 이미지/CSS 등 로컬 상대 리소스는 이번 설계에서 지원하지 않고 차단한다. 임의 파일 노출을 피하기 위한 보수적 기본값이며, 상대 리소스가 필요해지면 별도 allowlist/custom endpoint/custom protocol 설계와 경계 테스트를 추가한다.
 
-**메모 (2)** — `cache/memo.json` 파일 시스템 기반, 읽기 전용:
+**사용량 (2)** — probe를 시작하지 않는 캐시 조회:
 
 | Tool | 구현 방식 | 설명 |
 |------|-----------|------|
 | `get_claude_usage` | 백엔드 상태 | Claude 사용량 스냅샷 (config dir 당 1개). 최대 10분 낡을 수 있고(`capturedAtMs`) 조회가 probe 를 기동시키지 않는다 |
 | `get_grok_usage` | 백엔드 상태 | Grok 사용량 스냅샷 (`GROK_HOME` 당 1개). 조회가 probe 를 기동시키지 않는다 |
+
+**메모 (2)** — `cache/memo.json` 파일 시스템 기반, 읽기 전용:
+
+| Tool | 구현 방식 | 설명 |
+|------|-----------|------|
 | `list_memos` | 파일 시스템 | `cache/memo.json`의 모든 `{ key, content }` 항목 (key 알파벳 정렬) |
 | `read_memo` | 파일 시스템 | 특정 키의 메모 내용 조회 (없으면 에러) |
 
@@ -1320,7 +1336,6 @@ pub struct McpHandler {
     state: ServerState,           // Arc<AppState> + AppHandle
     tool_router: ToolRouter<Self>,
     is_dev: bool,                 // release/dev tool gating
-    exec_locks: Arc<TokioMutex<HashMap<String, Arc<TokioMutex<()>>>>>,  // per-terminal 세마포어
 }
 
 #[tool_router]
@@ -1382,7 +1397,7 @@ impl McpHandler {
   byte count, target id, `captureFailed=true`, `captureError`, `sideEffect`를 보존한 tool error를
   반환하므로 호출자가 이미 적용된 입력을 맹목적으로 재시도하지 않는다. 대기는 exec 락 밖에서
   하므로 같은 pane의 다른 write를 블록하지 않는다.
-- 교차 MCP 세션 write 직렬화는 `exec_locks` 가 세션별 handler 소유라 보장되지 않음(선존 한계).
+- 교차 MCP 세션 write도 `AppState.exec_locks`의 terminal id·generation별 공용 락으로 직렬화한다(#427). MCP handler마다 별도 락을 만들지 않는다.
 
 #### Tool 추가 시
 
@@ -2030,7 +2045,7 @@ src-tauri/src/
 │   ├── handlers_bridge.rs    # 프론트엔드 브릿지 핸들러
 │   ├── helpers.rs            # bridge_request, JSON 응답 헬퍼
 │   ├── settings_bridge.rs    # frontend settings snapshot/apply 공통 브리지·쓰기 직렬화
-│   ├── mcp.rs                # 내장 MCP 서버 (release tool 44종 + resource 핸들러, §12.7)
+│   ├── mcp.rs                # 내장 MCP 서버 (release tool 51종 + resource 핸들러, §12.7)
 │   └── mcp_resources.rs      # MCP Resources URI 모델·구독 레지스트리
 ├── terminal/mod.rs           # 터미널 모델 (TerminalSession, Config, Notification)
 ├── pty.rs                    # PtyHandle (I/O·terminate)

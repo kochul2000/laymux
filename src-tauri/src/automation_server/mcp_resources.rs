@@ -119,7 +119,7 @@ pub fn static_resources() -> Vec<Resource> {
             RawResource::new(MCP_URI_WORKSPACE_ACTIVE, "active-workspace")
                 .with_title("Active workspace")
                 .with_description(
-                    "Currently active workspace with panes, terminal activity, and focused pane.",
+                    "Currently active workspace with panes, terminal activity, and focusedPaneIndex. Each panes entry is a stacked layer; paneIndex is the 0-based slot index.",
                 )
                 .with_mime_type("application/json"),
             None,
@@ -127,7 +127,7 @@ pub fn static_resources() -> Vec<Resource> {
         Annotated::new(
             RawResource::new(MCP_URI_WORKSPACE_LIST, "workspace-list")
                 .with_title("Workspace list")
-                .with_description("Summary of all workspaces (id, name, pane count, active flag).")
+                .with_description("Workspace summaries: id, name, paneCount (stacked layers, not slots), isActive; plus activeWorkspaceId.")
                 .with_mime_type("application/json"),
             None,
         ),
@@ -161,7 +161,7 @@ pub fn resource_templates() -> Vec<ResourceTemplate> {
             )
             .with_title("Terminal output")
             .with_description(
-                "Recent terminal output with ANSI escape sequences stripped (text mode).",
+                "Recent terminal output (up to 500 raw buffer lines), with ANSI escapes stripped. For the rendered TUI screen use take_screenshot; to display a file to the user use open_file_viewer.",
             )
             .with_mime_type("text/plain"),
             None,
