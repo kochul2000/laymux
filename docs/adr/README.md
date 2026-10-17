@@ -363,6 +363,7 @@ ADR 이 필요한 대표 기준:
 | [0337](0337-legacy-wsl-client-warning.md) | inbox(구형) WSL 클라이언트로 WSL을 쓰면 경고만 띄운다 (0334 후속) | Accepted |
 | [0338](0338-remote-text-keys-edit-composer-draft.md) | Remote 텍스트 사용자 키는 Composer 초안을 편집한다 (0234 일부 정정) | Accepted |
 | [0339](0339-remote-stack-creates-enterable-terminal.md) | Remote Stack은 열린 터미널의 프로필·CWD를 이어받아 바로 진입 가능한 터미널을 만든다 (0327 일부 정정) | Accepted |
+| [0340](0340-claude-transcript-turn-result.md) | Claude 턴의 종료 결과는 작업 시작 기준점 이후의 대화 기록으로 판정한다 (0250 보완, 0321 상태 판정 유지) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

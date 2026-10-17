@@ -1978,6 +1978,31 @@ export async function getAgentSessionStates(
   return invoke("get_agent_session_states", { claudeTerminalIds, grokTerminalIds });
 }
 
+export interface ClaudeTurnRequest {
+  terminalId: string;
+  key: string;
+}
+
+export type ClaudeTurnOutcome = "pending" | "success" | "failure" | "interrupted" | "unknown";
+
+export interface ClaudeTurnResult extends ClaudeTurnRequest {
+  outcome: ClaudeTurnOutcome;
+}
+
+/** ADR-0340: record each started task's transcript baseline; returns those recorded. */
+export async function beginClaudeTurns(
+  requests: ClaudeTurnRequest[],
+): Promise<ClaudeTurnRequest[]> {
+  return invoke("begin_claude_turns", { requests });
+}
+
+/** A request is missing when no baseline belongs to it. */
+export async function getClaudeTurnResults(
+  requests: ClaudeTurnRequest[],
+): Promise<ClaudeTurnResult[]> {
+  return invoke("get_claude_turn_results", { requests });
+}
+
 export async function getGrokSessionIds(
   sessionMaxAgeHours?: number,
 ): Promise<Record<string, string | null>> {

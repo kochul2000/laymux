@@ -66,6 +66,8 @@ export interface TerminalInstance {
   outputActive?: boolean;
   /** Current Codex turn, independent of terminal rendering activity. Runtime only. */
   codexTurn?: import("@/lib/tauri-api").CodexTurnSnapshot;
+  /** Claude transcript results per task source (ADR-0340). Runtime only. */
+  claudeTurns?: import("@/lib/claude-turn-result").ClaudeTurns;
   /**
    * Which backend detector armed the current `outputActive` (ADR-0147), or
    * `undefined` when it came from a path that does not report one (the title
@@ -113,6 +115,7 @@ interface TerminalStoreState {
         | "activitySequence"
         | "outputActive"
         | "codexTurn"
+        | "claudeTurns"
         | "outputActiveSource"
         | "syncGroup"
         | "activityMessage"
@@ -196,6 +199,7 @@ export const useTerminalStore = create<TerminalStoreState>()((set, get) => ({
                 taskObservation: undefined,
                 deferredTaskInput: undefined,
                 codexTurn: undefined,
+                claudeTurns: undefined,
                 taskEpoch: (inst.taskEpoch ?? 0) + 1,
                 livenessConfirmed: info.livenessConfirmed ?? false,
               }

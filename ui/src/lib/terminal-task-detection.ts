@@ -1,4 +1,5 @@
 import type { TerminalInstance } from "@/stores/terminal-store";
+import { withClaudeTurnResult } from "./claude-turn-result";
 
 export function heuristicTask(instance: TerminalInstance) {
   return (
@@ -23,7 +24,9 @@ export function selectDetectedTask(
     now - hook.verifiedAt < 6000 &&
     hook.snapshot.observedAtMs >= (instance.lastUserInputAt ?? 0) &&
     now - hook.snapshot.observedAtMs <= 60000;
-  const task = usable ? hook.task : heuristicTask(instance);
+  const task = usable
+    ? withClaudeTurnResult(hook.task, instance.claudeTurns?.hook)
+    : withClaudeTurnResult(heuristicTask(instance), instance.claudeTurns?.heuristic);
   const taskDetectionSource = usable ? "hooks" : "heuristic";
   return instance.task === task && instance.taskDetectionSource === taskDetectionSource
     ? instance
