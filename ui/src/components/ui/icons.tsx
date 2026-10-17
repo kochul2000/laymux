@@ -4,11 +4,13 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
+  Ban,
   Bell,
   Bot,
   BrushCleaning,
   Camera,
   Check,
+  Circle,
   CircleAlert,
   ChevronDown,
   ChevronRight,
@@ -17,6 +19,7 @@ import {
   Copy,
   CopyPlus,
   Download,
+  Dot,
   Ellipsis,
   EllipsisVertical,
   Eraser,
@@ -269,6 +272,18 @@ export function MaximizeIcon(props: IconProps) {
 
 export function MinusIcon(props: IconProps) {
   return renderIcon(Minus, props);
+}
+
+export function BanIcon(props: IconProps) {
+  return renderIcon(Ban, props);
+}
+
+export function CircleIcon(props: IconProps) {
+  return renderIcon(Circle, props);
+}
+
+export function DotIcon(props: IconProps) {
+  return renderIcon(Dot, props);
 }
 
 export function RestoreIcon(props: IconProps) {

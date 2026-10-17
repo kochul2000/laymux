@@ -281,15 +281,50 @@ pub fn extract_branch_from_command(command: &str) -> Option<String> {
     parts.last().map(|s| s.to_string())
 }
 
+/// The laymux option on OSC 133 D for a command the shell itself recorded as
+/// stopped by Ctrl+C (ADR-0341). The exit-code field stays empty beside it.
+pub const OSC_133_INTERRUPTED_OPTION: &str = "lx=interrupted";
+
+/// OSC 133 D data is `exit-code[;option...]`. The exit code is the first
+/// field and counts only when it is an integer.
+pub fn osc_133_exit_code(data: &str) -> Option<i32> {
+    data.split(';').next()?.parse().ok()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TaskLifecycle {
+    pub phase: &'static str,
+    pub exit_code: Option<i32>,
+    /// The shell recorded the command as stopped by Ctrl+C. This wins over
+    /// any exit code, which a stopped command does not meaningfully have.
+    pub interrupted: bool,
+}
+
 /// Task boundaries are independent of output and notification hooks (ADR-0250).
-pub fn task_lifecycle(event: &OscEvent) -> Option<(&'static str, Option<i32>)> {
+pub fn task_lifecycle(event: &OscEvent) -> Option<TaskLifecycle> {
     if event.code != 133 {
         return None;
     }
+    let boundary = |phase| TaskLifecycle {
+        phase,
+        exit_code: None,
+        interrupted: false,
+    };
     match event.param.as_deref() {
-        Some("A") => Some(("prompt", None)),
-        Some("C") => Some(("start", None)),
-        Some("D") => Some(("end", event.data.parse().ok())),
+        Some("A") => Some(boundary("prompt")),
+        Some("C") => Some(boundary("start")),
+        Some("D") => {
+            let interrupted = event
+                .data
+                .split(';')
+                .skip(1)
+                .any(|option| option == OSC_133_INTERRUPTED_OPTION);
+            Some(TaskLifecycle {
+                phase: "end",
+                exit_code: osc_133_exit_code(&event.data).filter(|_| !interrupted),
+                interrupted,
+            })
+        }
         _ => None,
     }
 }
@@ -298,33 +333,78 @@ pub fn task_lifecycle(event: &OscEvent) -> Option<(&'static str, Option<i32>)> {
 mod tests {
     use super::*;
 
+    fn lifecycle(phase: &'static str, exit_code: Option<i32>, interrupted: bool) -> TaskLifecycle {
+        TaskLifecycle {
+            phase,
+            exit_code,
+            interrupted,
+        }
+    }
+
     #[test]
     fn task_lifecycle_keeps_missing_result_distinct_from_success() {
         assert_eq!(
             task_lifecycle(&make_event(133, Some("A"), "")),
-            Some(("prompt", None))
+            Some(lifecycle("prompt", None, false))
         );
         assert_eq!(
             task_lifecycle(&make_event(133, Some("C"), "")),
-            Some(("start", None))
+            Some(lifecycle("start", None, false))
         );
         assert_eq!(
             task_lifecycle(&make_event(133, Some("D"), "")),
-            Some(("end", None))
+            Some(lifecycle("end", None, false))
         );
         assert_eq!(
             task_lifecycle(&make_event(133, Some("D"), "0")),
-            Some(("end", Some(0)))
+            Some(lifecycle("end", Some(0), false))
         );
         assert_eq!(
             task_lifecycle(&make_event(133, Some("D"), "7")),
-            Some(("end", Some(7)))
+            Some(lifecycle("end", Some(7), false))
         );
         assert_eq!(
             task_lifecycle(&make_event(133, Some("E"), "echo test")),
             None
         );
         assert_eq!(task_lifecycle(&make_event(2, None, "✳ Claude Code")), None);
+    }
+
+    #[test]
+    fn task_lifecycle_reads_the_laymux_interrupted_option() {
+        // The form the PowerShell integration sends for a Stopped command.
+        assert_eq!(
+            task_lifecycle(&make_event(133, Some("D"), ";lx=interrupted")),
+            Some(lifecycle("end", None, true))
+        );
+        // The option wins over an exit code that a stopped command does not have.
+        assert_eq!(
+            task_lifecycle(&make_event(133, Some("D"), "1;lx=interrupted")),
+            Some(lifecycle("end", None, true))
+        );
+        // Unknown options keep the exit code and are not an interruption.
+        assert_eq!(
+            task_lifecycle(&make_event(133, Some("D"), "0;aid=7")),
+            Some(lifecycle("end", Some(0), false))
+        );
+        // The option text as an exit code is not an option.
+        assert_eq!(
+            task_lifecycle(&make_event(133, Some("D"), "lx=interrupted")),
+            Some(lifecycle("end", None, false))
+        );
+        // 130 is an exit code like any other; only the shell's record is an interruption.
+        assert_eq!(
+            task_lifecycle(&make_event(133, Some("D"), "130")),
+            Some(lifecycle("end", Some(130), false))
+        );
+    }
+
+    #[test]
+    fn osc_133_exit_code_is_the_first_integer_field() {
+        assert_eq!(osc_133_exit_code("0"), Some(0));
+        assert_eq!(osc_133_exit_code("2;aid=1"), Some(2));
+        assert_eq!(osc_133_exit_code(";lx=interrupted"), None);
+        assert_eq!(osc_133_exit_code(""), None);
     }
     use crate::osc::OscEvent;
 

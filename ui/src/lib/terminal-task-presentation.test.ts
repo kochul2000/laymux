@@ -10,19 +10,19 @@ describe("터미널의 단일 상태 아이콘", () => {
       for (const output of [false, true, false]) {
         const status = computeCommandStatus(0, output, undefined, activity);
         expect(status).toMatchObject({
-          icon: output ? "⏳" : "—",
+          icon: output ? "⏳" : "·",
           observation: "unknown",
           outputActive: output,
         });
         expect(status.taskState).toBeUndefined();
         expect(status.taskResult).toBeUndefined();
-        expect(commandStatusIconName(status)).toBe(output ? "Hourglass" : "Minus");
+        expect(commandStatusIconName(status)).toBe(output ? "Hourglass" : "Dot");
       }
     },
   );
 
   it.each([
-    [undefined, undefined, false, "—", "Minus"],
+    [undefined, undefined, false, "·", "Dot"],
     [undefined, undefined, true, "⏳", "Hourglass"],
     ["idle", undefined, false, "—", "Minus"],
     ["idle", undefined, true, "—", "Minus"],
@@ -33,9 +33,10 @@ describe("터미널의 단일 상태 아이콘", () => {
     ["ended", "success", false, "✓", "Check"],
     ["ended", "success", true, "✓", "Check"],
     ["ended", "failure", true, "✗", "X"],
-    ["ended", "interrupted", false, "—", "Minus"],
-    ["ended", "interrupted", true, "—", "Minus"],
-    ["ended", undefined, true, "—", "Minus"],
+    ["ended", "interrupted", false, "⊘", "Ban"],
+    ["ended", "interrupted", true, "⊘", "Ban"],
+    ["ended", undefined, false, "○", "Circle"],
+    ["ended", undefined, true, "○", "Circle"],
   ] as const)(
     "%s/%s, 출력 %s: Desktop과 Remote는 %s 하나를 표시한다",
     (state, result, output, glyph, icon) => {
@@ -74,7 +75,7 @@ describe("터미널의 단일 상태 아이콘", () => {
     });
     const ended = observeTask(stale, { ...input, sequence: 3, state: "ended" }, 70_001);
     expect(ended.notification).toBe("ended");
-    expect(taskPresentation(ended).icon).toBe("—");
+    expect(taskPresentation(ended).icon).toBe("○");
     expect(
       observeTask(ended, { ...input, sequence: 4, state: "ended" }, 70_002).notificationId,
     ).toBe(ended.notificationId);

@@ -2393,7 +2393,7 @@ Direct Remote 페이지도 이 원칙을 따른다. 기본 조합과 매칭 규�
 
 정상 Codex 응답은 6초 지연 후에도 구독·pane·앱·제출 입력·generation 검사를 통과하면 반영한다([ADR-0255](../adr/0255-codex-delayed-observation-recovery.md)). 지연 기준은 결과 폐기 기한이 아니며, 실제 오류·unknown과 영구 미응답에는 기존 보호가 유지된다. 확인된 `idle`의 아이콘은 출력과 관계없이 대시다([ADR-0254](../adr/0254-confirmed-idle-before-output-activity.md)).
 
-**이벤트 계약**: 기존 `command-status`의 command/exitCode 메타데이터와 별도로 OSC 133 lifecycle 발행에는 `phase: start | end | prompt`와 `generation`이 있다. D 결과를 읽지 못하면 exitCode를 생략한다. title 이벤트에는 `generation`과 `appSession`(기존 process detection epoch)이 추가되며, 이전 generation/낡은 activity sequence의 작업 관측은 수락하지 않는다. 출력 활동 이벤트는 frame/volume만 발행하고 타이틀로 출력 활동 타이머를 갱신하지 않는다.
+**이벤트 계약**: 기존 `command-status`의 command/exitCode 메타데이터와 별도로 OSC 133 lifecycle 발행에는 `phase: start | end | prompt`와 `generation`이 있다. D 결과를 읽지 못하면 exitCode를 생략한다. D의 데이터는 `종료 코드[;옵션...]`이며 첫 칸이 정수일 때만 종료 코드다. 옵션 `lx=interrupted`(laymux PowerShell 통합이 Ctrl+C로 멈춘 명령에 보냄)가 있으면 exitCode 없이 `result: "interrupted"`를 싣는다([ADR-0341](../adr/0341-task-result-glyphs-and-powershell-interrupt.md)). title 이벤트에는 `generation`과 `appSession`(기존 process detection epoch)이 추가되며, 이전 generation/낡은 activity sequence의 작업 관측은 수락하지 않는다. 출력 활동 이벤트는 frame/volume만 발행하고 타이틀로 출력 활동 타이머를 갱신하지 않는다.
 
 PowerShell의 PSReadLine 통합은 [ADR-0262](../adr/0262-powershell-command-lifecycle.md)에 따라 이 기존 C/D/A 경로를 사용한다. `exitCode`는 PowerShell 파이프라인의 성공 여부(0/1)이며, 중단·결과 미관측은 생략한다. PSReadLine이 없거나 제한 언어 모드인 PowerShell은 OSC 7만 제공하고 작업 lifecycle은 미확인으로 남긴다. reader 래핑은 `FullLanguage`에서만 설치한다. 명령 본문 E나 새 endpoint/필드는 추가하지 않는다.
 

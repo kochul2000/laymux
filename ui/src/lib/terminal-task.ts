@@ -140,7 +140,7 @@ export function taskPresentation(
   const { observation } = taskPolicy(task, false, true, false, now);
   const icon = taskStatusGlyph(task?.state, task?.result, outputActive);
   const color =
-    icon === "⏳" || icon === "!"
+    icon === "⏳" || icon === "!" || icon === "⊘"
       ? "var(--yellow)"
       : icon === "✓"
         ? "var(--green)"

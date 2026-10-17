@@ -1,8 +1,11 @@
 import type { StatusIconGlyph } from "@/lib/activity-markers";
 import { getCommandStatusIconKind } from "@/lib/command-status-icon";
 import {
+  BanIcon,
   CircleAlertIcon,
+  CircleIcon,
   CheckIcon,
+  DotIcon,
   HourglassIcon,
   MinusIcon,
   XIcon,
@@ -40,9 +43,15 @@ export function CommandStatusIcon({
       return <CheckIcon {...sharedProps} />;
     case "failure":
       return <XIcon {...sharedProps} />;
+    case "interrupted":
+      return <BanIcon {...sharedProps} />;
+    case "ended":
+      return <CircleIcon {...sharedProps} />;
     case "waiting":
       return <CircleAlertIcon {...sharedProps} />;
     case "idle":
       return <MinusIcon {...sharedProps} />;
+    case "unknown":
+      return <DotIcon {...sharedProps} />;
   }
 }
