@@ -79,9 +79,10 @@ export function subscribeClaudeTurnResults(): () => void {
   let inFlight = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const beginning = new Map<string, Target>();
-  // Baselines this subscription asked for. A turn left without an answer by a
-  // previous subscription is asked again; the backend keeps the first baseline.
-  const requested = new Set<string>();
+  // The key this subscription last asked a baseline for, per terminal and
+  // source. A turn left without an answer by a previous subscription is asked
+  // again; the backend keeps the first baseline.
+  const requested = new Map<string, string>();
 
   function begin() {
     if (beginning.size === 0) return;
@@ -105,6 +106,7 @@ export function subscribeClaudeTurnResults(): () => void {
 
   function observe(instances: TerminalInstance[]) {
     const now = Date.now();
+    const live = new Set<string>();
     for (const instance of instances) {
       if (!isClaude(instance)) {
         if (instance.claudeTurns)
@@ -112,23 +114,24 @@ export function subscribeClaudeTurnResults(): () => void {
         continue;
       }
       for (const source of SOURCES) {
+        const slot = `${instance.id}\u0000${source}`;
+        live.add(slot);
         const task = sourceTask(instance, source);
         const turn = instance.claudeTurns?.[source];
         if (!task) continue;
         const key = claudeTurnKey(task);
         const target = { id: instance.id, source, key };
-        const request = `${instance.id}\u0000${key}`;
         if ((task.state === "running" || task.state === "waiting") && turn?.key !== key) {
           // Registered before the store write, which re-enters this observer.
-          beginning.set(`${instance.id}\u0000${source}`, target);
-          requested.add(request);
+          beginning.set(slot, target);
+          requested.set(slot, key);
           setTurn(instance.id, source, { key, settled: false });
           continue;
         }
         if (turn?.key !== key) continue;
-        if (turn.tracked === undefined && !turn.settled && !requested.has(request)) {
-          beginning.set(`${instance.id}\u0000${source}`, target);
-          requested.add(request);
+        if (turn.tracked === undefined && !turn.settled && requested.get(slot) !== key) {
+          beginning.set(slot, target);
+          requested.set(slot, key);
         }
         if (task.state === "ended" && turn.endedAt === undefined) {
           // A task that ended with its own result needs nothing more.
@@ -140,6 +143,7 @@ export function subscribeClaudeTurnResults(): () => void {
         }
       }
     }
+    for (const slot of requested.keys()) if (!live.has(slot)) requested.delete(slot);
     begin();
     if (instances.some(pendingLookup)) schedule();
   }

@@ -239,6 +239,27 @@ describe("Claude transcript turn results (ADR-0340)", () => {
     expect(instance().task?.result).toBe("success");
   });
 
+  it("반복 종료 관측으로 첫 응답을 버려도 다음 조회에서 결과를 채운다", async () => {
+    stop = subscribeClaudeTurnResults();
+    observeTaskTitle("pane", "✶ Working");
+    await tick(0);
+    observeTaskTitle("pane", "✳ Claude Code");
+    let answer: (value: Awaited<ReturnType<typeof getClaudeTurnResults>>) => void = () => {};
+    vi.mocked(getClaudeTurnResults).mockImplementationOnce(
+      () => new Promise((next) => (answer = next)),
+    );
+    await tick();
+    // The same task observed again: its sequence moves, so the read is stale.
+    observeTaskTitle("pane", "✳ Claude Code");
+    const key = instance().claudeTurns?.heuristic?.key ?? "";
+    answer([{ terminalId: "pane", key, outcome: "success" }]);
+    await tick(0);
+    expect(instance().task?.result).toBeUndefined();
+    outcome("success");
+    await tick();
+    expect(instance().task?.result).toBe("success");
+  });
+
   it("기준점 응답이 끝내 없으면 종료 후 10초에 포기한다", async () => {
     vi.mocked(beginClaudeTurns).mockImplementation(() => new Promise(() => {}));
     stop = subscribeClaudeTurnResults();

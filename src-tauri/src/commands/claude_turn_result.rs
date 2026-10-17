@@ -162,13 +162,14 @@ impl TurnScan {
 
 #[derive(Debug)]
 enum Location {
-    File(PathBuf),
+    /// The handle opened at the baseline. Reading only through it keeps a path
+    /// replaced by another file from mixing in: the original stops growing.
+    Open(File),
     /// The session had no transcript yet when the task started (Claude creates
     /// it with the first prompt), so the whole file appears after the baseline.
-    NotYet {
-        root: PathBuf,
-        session_id: String,
-    },
+    NotYet { root: PathBuf, session_id: String },
+    /// Settled; the handle and the scanned records are released.
+    Done,
 }
 
 #[derive(Debug)]
@@ -181,7 +182,7 @@ struct Tracked {
     /// The baseline fell inside a line still being written.
     partial: bool,
     /// The bytes just before `offset`. The transcript only grows, so if they
-    /// differ on a later read the file was replaced.
+    /// differ on a later read the same file was rewritten in place.
     anchor: Vec<u8>,
     scan: TurnScan,
     settled: Option<ClaudeTurnOutcome>,
@@ -214,7 +215,10 @@ impl Tracked {
     fn advance(&mut self) -> std::io::Result<bool> {
         if let Location::NotYet { root, session_id } = &self.location {
             match find_transcript(root, session_id) {
-                Transcript::Found(path) => self.location = Location::File(path),
+                Transcript::Found(path) => {
+                    let file = File::open(&path)?;
+                    self.location = Location::Open(file);
+                }
                 Transcript::Absent => return Ok(true),
                 Transcript::Unknown => {
                     self.scan.broken = Some("transcript lookup failed");
@@ -222,10 +226,9 @@ impl Tracked {
                 }
             }
         }
-        let Location::File(path) = &self.location else {
+        let Location::Open(file) = &mut self.location else {
             return Ok(true);
         };
-        let mut file = File::open(path)?;
         let len = file.metadata()?.len();
         if len < self.offset {
             self.scan.broken = Some("transcript shrank");
@@ -236,7 +239,7 @@ impl Tracked {
             file.seek(SeekFrom::Start(self.offset - self.anchor.len() as u64))?;
             file.read_exact(&mut current)?;
             if current != self.anchor {
-                self.scan.broken = Some("transcript replaced");
+                self.scan.broken = Some("transcript rewritten");
                 return Ok(true);
             }
         }
@@ -246,7 +249,8 @@ impl Tracked {
         file.seek(SeekFrom::Start(self.offset))?;
         let available = len - self.offset;
         let mut bytes = Vec::new();
-        file.take(available.min(READ_LIMIT))
+        file.by_ref()
+            .take(available.min(READ_LIMIT))
             .read_to_end(&mut bytes)?;
         self.consume(&bytes);
         Ok(available <= READ_LIMIT)
@@ -310,6 +314,8 @@ impl Tracked {
             // A filled result is final even if more boundaries follow.
             self.settled = Some(outcome);
             self.scan = TurnScan::default();
+            self.anchor = Vec::new();
+            self.location = Location::Done;
         }
         outcome
     }
@@ -378,7 +384,7 @@ pub(crate) fn begin_claude_turns_impl(
         };
         let (location, start) = match find_transcript(root, session_id) {
             Transcript::Found(path) => match baseline(&path) {
-                Ok(start) => (Location::File(path), start),
+                Ok((file, start)) => (Location::Open(file), start),
                 Err(error) => {
                     tracing::debug!(%error, path = %path.display(), "Claude transcript baseline failed");
                     continue;
@@ -446,11 +452,10 @@ pub(crate) fn get_claude_turn_results_impl(
         let Some(index) = entries.iter().position(|entry| entry.key == request.key) else {
             continue;
         };
+        // A settled answer stays askable: the frontend may discard a response
+        // whose task changed shape meanwhile and ask again. Only the small
+        // outcome remains; `prune` drops it once lookups stop.
         let outcome = entries[index].outcome();
-        if outcome != ClaudeTurnOutcome::Pending {
-            // The frontend settles on this answer and never asks again.
-            entries.remove(index);
-        }
         results.push(ClaudeTurnResult {
             terminal_id: request.terminal_id.clone(),
             key: request.key.clone(),
@@ -514,21 +519,24 @@ struct Baseline {
     anchor: Vec<u8>,
 }
 
-fn baseline(path: &Path) -> std::io::Result<Baseline> {
+fn baseline(path: &Path) -> std::io::Result<(File, Baseline)> {
+    // std opens with read/write/delete sharing on Windows, so holding this
+    // handle never blocks Claude from appending to or replacing the file.
     let mut file = File::open(path)?;
     let len = file.metadata()?.len();
     let start = len.saturating_sub(ANCHOR_LEN as u64);
     file.seek(SeekFrom::Start(start))?;
     let mut anchor = Vec::new();
-    file.take(len - start).read_to_end(&mut anchor)?;
+    file.by_ref().take(len - start).read_to_end(&mut anchor)?;
     if anchor.len() as u64 != len - start {
         return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof));
     }
-    Ok(Baseline {
+    let start = Baseline {
         offset: len,
         partial: anchor.last().is_some_and(|&byte| byte != b'\n'),
         anchor,
-    })
+    };
+    Ok((file, start))
 }
 
 fn terminal_generations(state: &AppState) -> Result<HashMap<String, u64>, String> {

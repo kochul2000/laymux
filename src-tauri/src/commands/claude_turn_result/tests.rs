@@ -183,8 +183,8 @@ fn an_unreadable_record_is_unknown() {
 }
 
 fn tracked(path: PathBuf) -> Tracked {
-    let start = baseline(&path).unwrap();
-    Tracked::new(1, "k".into(), Location::File(path), start)
+    let (file, start) = baseline(&path).unwrap();
+    Tracked::new(1, "k".into(), Location::Open(file), start)
 }
 
 fn append(path: &Path, text: &str) {
@@ -270,7 +270,7 @@ fn a_settled_result_does_not_change_with_later_boundaries() {
 }
 
 #[test]
-fn a_shrunk_or_missing_transcript_is_unknown() {
+fn a_shrunk_or_deleted_transcript_fills_no_result() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("s.jsonl");
     std::fs::write(&path, lines_text(&[user("u0", "x")])).unwrap();
@@ -278,10 +278,11 @@ fn a_shrunk_or_missing_transcript_is_unknown() {
     std::fs::write(&path, "").unwrap();
     assert_eq!(entry.outcome(), ClaudeTurnOutcome::Unknown);
 
+    // A deleted file stays readable through the held handle but never grows.
     std::fs::write(&path, lines_text(&[user("u0", "x")])).unwrap();
     let mut entry = tracked(path.clone());
     std::fs::remove_file(&path).unwrap();
-    assert_eq!(entry.outcome(), ClaudeTurnOutcome::Unknown);
+    assert_eq!(entry.outcome(), ClaudeTurnOutcome::Pending);
 }
 
 #[test]
@@ -328,12 +329,12 @@ fn a_transcript_created_after_the_baseline_is_read_from_its_start() {
 }
 
 #[test]
-fn a_replaced_transcript_is_unknown_even_when_it_grows() {
+fn a_transcript_rewritten_in_place_is_unknown() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("s.jsonl");
     std::fs::write(&path, lines_text(&[user("u0", "x"), assistant("a0", "u0")])).unwrap();
     let mut entry = tracked(path.clone());
-    // Same length and a longer file both count: the bytes before the baseline changed.
+    // The same file rewritten with other content: the bytes before the read position changed.
     let replaced = turn(vec![
         vec![user("v0", "x"), assistant("b0", "v0")],
         vec![api_error("b1", "b0"), duration("d1", "b1")],
@@ -386,12 +387,7 @@ fn a_result_waits_until_the_whole_file_was_read() {
 #[test]
 fn pruning_drops_closed_replaced_and_abandoned_baselines() {
     let entry = |generation: u64, key: &str| {
-        Tracked::new(
-            generation,
-            key.into(),
-            Location::File(PathBuf::from("unused")),
-            Baseline::default(),
-        )
+        Tracked::new(generation, key.into(), Location::Done, Baseline::default())
     };
     let mut tracked = HashMap::from([
         ("closed".to_string(), vec![entry(1, "a")]),
@@ -411,4 +407,59 @@ fn pruning_drops_closed_replaced_and_abandoned_baselines() {
         .map(|entry| entry.key.as_str())
         .collect();
     assert_eq!(keys, ["now"]);
+}
+
+/// Codex review shape: the path is replaced by a file whose tail matches the
+/// anchor but whose earlier records differ. The held handle keeps reading the
+/// original, which never gets the boundary, so no result is filled.
+#[test]
+fn a_path_replaced_by_another_file_fills_no_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("s.jsonl");
+    let meta = format!(r#"{{"type":"last-prompt","pad":"{}"}}"#, "p".repeat(512));
+    std::fs::write(&path, "").unwrap();
+    let mut entry = tracked(path.clone());
+    append(
+        &path,
+        &lines_text(&[user("u1", "x"), assistant("a", "u1"), meta.clone()]),
+    );
+    assert_eq!(entry.outcome(), ClaudeTurnOutcome::Pending);
+    let swapped = dir.path().join("swap.jsonl");
+    let mut other = lines_text(&[user("u1", "x"), api_error("a", "u1"), meta]);
+    other.push_str(&lines_text(&[duration("d", "a")]));
+    std::fs::write(&swapped, other).unwrap();
+    std::fs::rename(&swapped, &path).unwrap();
+    assert_eq!(entry.outcome(), ClaudeTurnOutcome::Pending);
+}
+
+#[test]
+fn an_empty_baseline_replaced_by_another_file_fills_no_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("s.jsonl");
+    std::fs::write(&path, "").unwrap();
+    let mut entry = tracked(path.clone());
+    let swapped = dir.path().join("swap.jsonl");
+    let other = turn(vec![
+        vec![user("u1", "x"), assistant("a1", "u1")],
+        ended("a1", "e1"),
+    ]);
+    std::fs::write(&swapped, lines_text(&other)).unwrap();
+    std::fs::rename(&swapped, &path).unwrap();
+    assert_eq!(entry.outcome(), ClaudeTurnOutcome::Pending);
+}
+
+#[test]
+fn a_settled_outcome_can_be_asked_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("s.jsonl");
+    std::fs::write(&path, "").unwrap();
+    let mut entry = tracked(path.clone());
+    let lines = turn(vec![
+        vec![user("u1", "x"), assistant("a1", "u1")],
+        ended("a1", "e1"),
+    ]);
+    append(&path, &lines_text(&lines));
+    assert_eq!(entry.outcome(), ClaudeTurnOutcome::Success);
+    assert!(matches!(entry.location, Location::Done));
+    assert_eq!(entry.outcome(), ClaudeTurnOutcome::Success);
 }
