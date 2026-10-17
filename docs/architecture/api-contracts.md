@@ -1748,6 +1748,8 @@ v1.9.0의 내장 localhost 프리뷰는 v1.9.1에서 철회했다([ADR-0318](../
 
 ### 13.4 Terminal Control
 
+Remote 터미널 host(`#terminal`)는 `-webkit-tap-highlight-color: #00000000`를 지정해 탭할 때 브라우저 기본 강조색이 출력 영역 전체를 덮지 않게 한다. 이 속성은 내부 xterm 요소에 상속되며, 기존 터치 스크롤·길게 눌러 선택·선택 핸들 동작은 유지한다.
+
 새 기기의 기본 구성은 [ADR-0265](../adr/0265-pc-remote-first-use-defaults.md)를 따른다. 설정 진입은 PC 상단 톱니바퀴 또는 `Ctrl+,`, Remote drawer → Settings이며 Remote의 표시·입력 선호는 PC `settings.json`이 아니라 기기별 `localStorage`가 소유한다. 호스트 `settings.remote`는 연결·보안과 폰트·위젯 공개 정책을 소유한다.
 
 | 항목 | PC 기본 | 새 Remote 기기 기본·설정 경로 |

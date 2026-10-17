@@ -167,6 +167,35 @@ async function selectSecondPane(page: Page, waitForOutput = true) {
 }
 
 for (const mode of ["direct", "composer"] as const) {
+  test(`${mode}: 터미널 탭은 영역 전체에 브라우저 강조색을 표시하지 않는다`, async ({
+    page,
+  }, info) => {
+    await openRemote(page, mode, false);
+    const screen = page.locator(".xterm-screen");
+    const bounds = await screen.boundingBox();
+    expect(bounds).not.toBeNull();
+    const session = await page.context().newCDPSession(page);
+    await session.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x: bounds!.x + 40, y: bounds!.y + 40 }],
+    });
+    try {
+      // Let the browser paint tap feedback, staying below the long-press threshold.
+      await page.waitForTimeout(150);
+      await page.screenshot({ path: info.outputPath(`${mode}-terminal-touch.png`) });
+      for (const selector of ["#terminal", ".xterm", ".xterm-screen", ".xterm-rows"]) {
+        await expect(page.locator(selector)).toHaveCSS(
+          "-webkit-tap-highlight-color",
+          "rgba(0, 0, 0, 0)",
+        );
+      }
+    } finally {
+      await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await session.detach();
+    }
+    await expect(page.locator(".xterm-rows")).toContainText("ready");
+  });
+
   test(`${mode}: 물리 키보드 연결 중 터치 pane 전환은 입력에 포커스를 돌린다`, async ({
     page,
   }, info) => {
