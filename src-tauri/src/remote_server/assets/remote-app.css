@@ -2487,6 +2487,9 @@
         user-select: none;
         -webkit-user-select: none;
         overscroll-behavior: contain;
+        /* The browser's tap overlay covers the entire terminal click target.
+           Keep xterm selection feedback without tinting the output on a tap. */
+        -webkit-tap-highlight-color: #00000000;
       }
       /* Match the desktop terminal's floating jump-to-bottom affordance while
          keeping the remote scroll position entirely surface-local. */
