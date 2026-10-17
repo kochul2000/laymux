@@ -41,9 +41,12 @@ function global:prompt {
         $global:__lmx_running = $false
         $last = Get-History -Count 1
         $r = $e + ']133;D'
-        # Ctrl+C/이력 미관측은 결과 없는 종료다. 이전 native 종료 코드를 재사용하지 않는다.
-        if ($last -and $last.Id -ne $global:__lmx_history -and $last.ExecutionStatus -ne 'Stopped') {
-            $r += if ($succeeded) { ';0' } else { ';1' }
+        # 이력 미관측은 결과 없는 종료다. 이전 native 종료 코드를 재사용하지 않는다.
+        # Ctrl+C로 멈춘 명령은 종료 코드 칸을 비우고 laymux 옵션으로 중단을 알린다(ADR-0341).
+        if ($last -and $last.Id -ne $global:__lmx_history) {
+            if ($last.ExecutionStatus -eq 'Stopped') { $r += ';;lx=interrupted' }
+            elseif ($succeeded) { $r += ';0' }
+            else { $r += ';1' }
         }
         $r += $b
     } elseif ($global:__lmx_first -and $global:__lmx_reader) {

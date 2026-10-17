@@ -941,7 +941,7 @@ describe("WorkspaceSelectorView", () => {
     });
   });
 
-  it("displays a neutral dash when no lifecycle observation exists", async () => {
+  it("displays a neutral dot when no lifecycle observation exists", async () => {
     useWorkspaceStore.setState({
       workspaces: [
         {
@@ -977,7 +977,7 @@ describe("WorkspaceSelectorView", () => {
 
     await waitFor(() => {
       const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
-      expect(badge.querySelector('[data-status-icon="idle"]')).toBeInTheDocument();
+      expect(badge.querySelector('[data-status-icon="unknown"]')).toBeInTheDocument();
       expect(badge).not.toHaveTextContent("—");
     });
   });
@@ -1021,7 +1021,7 @@ describe("WorkspaceSelectorView", () => {
     await waitFor(() => {
       // Universal 4-state: exitCode≠0 → ✗ regardless of activity
       const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
-      expect(badge.querySelector('[data-status-icon="idle"]')).toBeInTheDocument();
+      expect(badge.querySelector('[data-status-icon="unknown"]')).toBeInTheDocument();
       expect(badge).not.toHaveTextContent("✗");
     });
   });
@@ -1823,7 +1823,7 @@ describe("WorkspaceSelectorView", () => {
     await waitFor(() => {
       const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
       expect(badge).toBeInTheDocument();
-      expect(badge.querySelector('[data-status-icon="idle"]')).toBeInTheDocument();
+      expect(badge.querySelector('[data-status-icon="unknown"]')).toBeInTheDocument();
       expect(badge).not.toHaveTextContent("—");
       expect(badge.style.border).toContain("var(--accent)");
     });

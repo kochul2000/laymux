@@ -61,7 +61,7 @@ zeroize = { version = "1", features = ["derive"] }
 [target.'cfg(windows)'.dependencies]
 clipboard-win = "5"
 rfd = { version = "0.15", default-features = false }
-windows-sys = { version = "0.59", features = ["Win32_System_Diagnostics_ToolHelp", "Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Com", "Win32_System_IO", "Win32_System_Power", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.59", features = ["Win32_System_Diagnostics_ToolHelp", "Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Com", "Win32_System_Console", "Win32_System_IO", "Win32_System_Power", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 uds_windows = "1.2"
 # WebView2 `ProcessFailed` subscription (ADR-0336). The same versions wry links,
 # so `PlatformWebview::controller()` hands back these exact interface types.
@@ -87,3 +87,9 @@ path = "src/main.rs"
 [[bin]]
 name = "lx"
 path = "src/bin/lx.rs"
+
+# ADR-0341: process-global console state; runs alone without the libtest harness.
+[[test]]
+name = "ctrl_c_inheritance"
+path = "tests/ctrl_c_inheritance.rs"
+harness = false

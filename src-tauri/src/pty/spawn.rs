@@ -328,6 +328,31 @@ pub(crate) struct OpenedPty {
     child: Box<dyn Child + Send + Sync>,
 }
 
+/// A process created with `CREATE_NEW_PROCESS_GROUP` (the PTY daemon, and
+/// whatever launched laymux that way) ignores Ctrl+C, and children inherit
+/// that flag: a shell's foreground command could then not be stopped with
+/// Ctrl+C. Restoring normal Ctrl+C processing before the first spawn makes
+/// every shell start with it, as in a regular console. The calling process
+/// itself has no console of the PTY, so it receives none of these events.
+fn allow_child_ctrl_c() {
+    #[cfg(windows)]
+    {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            // SAFETY: a null handler with FALSE only clears the process's
+            // inherited "ignore Ctrl+C" flag; no callback is registered.
+            let restored =
+                unsafe { windows_sys::Win32::System::Console::SetConsoleCtrlHandler(None, 0) };
+            if restored == 0 {
+                tracing::warn!(
+                    error = %std::io::Error::last_os_error(),
+                    "could not restore Ctrl+C processing for terminal children"
+                );
+            }
+        });
+    }
+}
+
 /// First half of [`spawn_command_on`]: open the PTY and start the child.
 /// Nothing consumes the output callback yet, so a caller can still try
 /// another PTY system when this fails.
@@ -336,6 +361,7 @@ pub(crate) fn open_and_spawn(
     size: PtySize,
     cmd: CommandBuilder,
 ) -> Result<OpenedPty, String> {
+    allow_child_ctrl_c();
     let pair = pty_system
         .openpty(size)
         .map_err(|e| format!("Failed to open PTY: {e}"))?;

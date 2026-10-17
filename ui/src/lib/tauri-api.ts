@@ -1702,6 +1702,8 @@ export function onCommandStatus(
     command?: string;
     exitCode?: number;
     phase?: "start" | "end" | "prompt";
+    /** On `end`: the shell recorded the command as stopped by Ctrl+C (ADR-0341). */
+    result?: "interrupted";
     generation?: number;
   }) => void,
 ): Promise<UnlistenFn> {

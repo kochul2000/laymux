@@ -2357,14 +2357,17 @@ impl TerminalOscPass {
             if event.code == 133
                 && !super::ipc_dispatch::is_propagated(&state_for_pty, &terminal_id).unwrap_or(true)
             {
-                if let Some((phase, exit_code)) = osc_hooks::task_lifecycle(&event) {
+                if let Some(lifecycle) = osc_hooks::task_lifecycle(&event) {
                     let mut payload = serde_json::json!({
                         "terminalId": terminal_id,
                         "generation": terminal_generation,
-                        "phase": phase,
+                        "phase": lifecycle.phase,
                     });
-                    if let Some(code) = exit_code {
+                    if let Some(code) = lifecycle.exit_code {
                         payload["exitCode"] = serde_json::json!(code);
+                    }
+                    if lifecycle.interrupted {
+                        payload["result"] = serde_json::json!("interrupted");
                     }
                     let _ = app_clone.emit(EVENT_COMMAND_STATUS, payload);
                 }
@@ -2478,7 +2481,9 @@ fn dispatch_osc_action(
                     );
                 }
                 CommandStatusField::ExitCode => {
-                    let exit_code = event.data.parse::<i32>().ok();
+                    // One D reading for both paths: an interruption has no exit code.
+                    let exit_code =
+                        osc_hooks::task_lifecycle(event).and_then(|lifecycle| lifecycle.exit_code);
                     let _ = super::ipc_dispatch::do_set_command_status(
                         state,
                         app,
