@@ -4,6 +4,7 @@ mod android_pairing;
 mod app_update;
 mod archive_listing;
 mod claude_session;
+mod claude_turn_result;
 mod codex_session;
 mod codex_usage;
 mod file_ops;
@@ -39,6 +40,7 @@ pub use android_pairing::*;
 pub use app_update::*;
 pub use archive_listing::*;
 pub use claude_session::*;
+pub use claude_turn_result::*;
 pub use codex_session::turns::*;
 pub use codex_session::*;
 pub use codex_usage::*;
@@ -158,6 +160,10 @@ mod main_thread_io {
         (
             include_str!("agent_session_state.rs"),
             &["get_agent_session_states"],
+        ),
+        (
+            include_str!("claude_turn_result.rs"),
+            &["begin_claude_turns", "get_claude_turn_results"],
         ),
         (
             include_str!("codex_usage.rs"),

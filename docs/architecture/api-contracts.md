@@ -2372,6 +2372,8 @@ Direct Remote 페이지도 이 원칙을 따른다. 기본 조합과 매칭 규�
 
 `get_agent_session_states`는 `claudeTerminalIds`, `grokTerminalIds`를 받아 `Record<terminalId, { generation, sessionId, status, result? }>`를 반환한다([ADR-0321](../adr/0321-agent-session-record-fills-unconfirmed-task.md)). `status`는 `running | idle | waiting | ended`, `result`는 ended의 `success | interrupted`다. 세션 귀속이나 기록을 확인하지 못한 터미널은 결과에 없다. blocking I/O는 Tauri threadpool에서 실행하며 전후 generation을 검증한다.
 
+`begin_claude_turns`는 `requests: { terminalId, key }[]`를 받아 기준점을 기록한 요청만 같은 모양으로 돌려준다([ADR-0340](../adr/0340-claude-transcript-turn-result.md)). 기준점은 현재 generation과 Claude 세션 귀속으로 찾은 대화 기록의 길이다. 귀속 실패·파일 없음·중복 일치는 기록하지 않는다. `get_claude_turn_results`는 같은 요청을 받아 `{ terminalId, key, outcome }[]`를 반환한다. `outcome`은 `pending | success | failure | interrupted | unknown`이다. 기준점이 없거나 generation이 바뀐 요청은 결과에 없다. 레지스트리는 terminal당 최근 4개 키만 두는 leaf mutex이며 AppState 락을 잡은 채 취하지 않는다. 두 명령 모두 Tauri threadpool에서 실행한다.
+
 정상 Codex 응답은 6초 지연 후에도 구독·pane·앱·제출 입력·generation 검사를 통과하면 반영한다([ADR-0255](../adr/0255-codex-delayed-observation-recovery.md)). 지연 기준은 결과 폐기 기한이 아니며, 실제 오류·unknown과 영구 미응답에는 기존 보호가 유지된다. 확인된 `idle`의 아이콘은 출력과 관계없이 대시다([ADR-0254](../adr/0254-confirmed-idle-before-output-activity.md)).
 
 **이벤트 계약**: 기존 `command-status`의 command/exitCode 메타데이터와 별도로 OSC 133 lifecycle 발행에는 `phase: start | end | prompt`와 `generation`이 있다. D 결과를 읽지 못하면 exitCode를 생략한다. title 이벤트에는 `generation`과 `appSession`(기존 process detection epoch)이 추가되며, 이전 generation/낡은 activity sequence의 작업 관측은 수락하지 않는다. 출력 활동 이벤트는 frame/volume만 발행하고 타이틀로 출력 활동 타이머를 갱신하지 않는다.
