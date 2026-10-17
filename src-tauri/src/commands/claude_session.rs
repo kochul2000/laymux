@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::State;
 
@@ -45,6 +46,9 @@ pub(crate) struct ClaudeSessionRecords {
     pub lookup: ProviderSessionLookup,
     /// Keyed by session ID; only sessions whose file reports a known status.
     pub statuses: HashMap<String, ClaudeSessionStatus>,
+    /// Keyed by session ID: the config root (`sessions/`'s parent) whose
+    /// session file attributed it. Its `projects/` holds the transcript.
+    pub config_roots: HashMap<String, PathBuf>,
 }
 
 /// `observation` is the freshness the WSL guest scan must have (ADR-0335).
@@ -76,10 +80,10 @@ pub(crate) fn get_claude_session_records_impl(
         .iter()
         .flat_map(|(_, descendants)| descendants.iter().copied())
         .collect();
+    let sessions_dir = resolve_claude_sessions_dir();
     let session_files = if relevant_native_pids.is_empty() {
         Vec::new()
     } else {
-        let sessions_dir = resolve_claude_sessions_dir();
         let session_lookup = read_claude_session_files_for_pids_detailed(
             &sessions_dir,
             session_max_age_hours,
@@ -96,12 +100,16 @@ pub(crate) fn get_claude_session_records_impl(
         .map(|(id, _)| id.clone())
         .collect();
     let mut statuses = HashMap::new();
+    let mut config_roots = HashMap::new();
     let candidates = native_descendants
         .into_iter()
         .filter_map(|(terminal_id, descendants)| {
             let session = find_session_file_by_pids(&session_files, &descendants)?;
             if let Some(status) = session.status {
                 statuses.insert(session.session_id.clone(), status);
+            }
+            if let Some(root) = sessions_dir.parent() {
+                config_roots.insert(session.session_id.clone(), root.to_path_buf());
             }
             Some((terminal_id, session.session_id.clone()))
         })
@@ -120,6 +128,14 @@ pub(crate) fn get_claude_session_records_impl(
                             Ok(session) => session.map(|session| {
                                 if let Some(status) = session.status {
                                     statuses.insert(session.session_id.clone(), status);
+                                }
+                                if let Some(root) = process
+                                    .claude_sessions_dir()
+                                    .as_deref()
+                                    .and_then(Path::parent)
+                                {
+                                    config_roots
+                                        .insert(session.session_id.clone(), root.to_path_buf());
                                 }
                                 session.session_id
                             }),
@@ -150,6 +166,7 @@ pub(crate) fn get_claude_session_records_impl(
             fresh_sessions: HashMap::new(),
         },
         statuses,
+        config_roots,
     })
 }
 

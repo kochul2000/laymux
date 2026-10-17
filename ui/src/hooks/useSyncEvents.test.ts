@@ -52,6 +52,8 @@ vi.mock("@/lib/tauri-api", () => ({
   getTerminalStates: (...args: unknown[]) => mockGetTerminalStates(...args),
   getCodexTurnStates: (...args: unknown[]) => mockGetCodexTurnStates(...args),
   getAgentSessionStates: (...args: unknown[]) => mockGetAgentSessionStates(...args),
+  beginClaudeTurns: vi.fn().mockResolvedValue([]),
+  getClaudeTurnResults: vi.fn().mockResolvedValue([]),
   sendOsNotification: vi.fn().mockResolvedValue(undefined),
 }));
 
