@@ -1,6 +1,6 @@
 # 0340. Claude 턴의 종료 결과는 작업 시작 기준점 이후의 대화 기록으로 판정한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-17
 - Source: 사용자 요구("클로드 코덱스 다르단 점은", 대화 기록 판정안 선택), Codex PR #1227 리뷰(P2 4건), [ADR-0250](0250-terminal-task-state-and-notification-transitions.md), [ADR-0321](0321-agent-session-record-fills-unconfirmed-task.md), [ADR-0248](0248-codex-turn-lifecycle-activity.md), [ADR-0283](0283-opt-in-hook-task-state.md), [ADR-0118](0118-codex-session-pid-attribution.md), [ADR-0120](0120-wsl-agent-session-attribution.md), [ADR-0005](0005-display-state-raw-separation-compute.md), [hook 검증](../agent-hooks-validation.md)
 - 보완: ADR-0250 Decision "앱별 신호의 인정 범위"의 Claude 행(`✳`만으로 성공·중단을 구분하지 않음)에 결과 관측 경로를 추가한다. ADR-0250:60이 별도 설계를 요구한 "세션에 귀속된 structured lifecycle 관측"을 Claude 결과에 한해 정한다. ADR-0321의 작업 상태 판정과 기각 사유(상태 신호로서의 대화 기록)는 유지한다.
