@@ -95,7 +95,7 @@ pub(super) async fn remote_workspace_close(
     run_item_action(&server, id, headers, body, ItemAction::CloseWorkspace).await
 }
 
-/// Stack a new layer on the slot holding pane `id`, like the PC Stack button.
+/// Stack a terminal inheriting pane `id`'s profile and CWD (ADR-0339).
 pub(super) async fn remote_pane_stack(
     State(server): State<ServerState>,
     Path(id): Path<String>,

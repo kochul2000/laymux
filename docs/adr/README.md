@@ -350,7 +350,7 @@ ADR 이 필요한 대표 기준:
 | [0325](0325-agent-mcp-registration.md) | 에이전트 MCP 등록은 Settings에서 실행 환경별로 확인·설치한다 (0006·0282 확장, 0324 수명 적용) | Accepted |
 | [0326](0326-remote-return-through-dashboard.md) | 원격 연결 복귀는 대시보드의 기존 인스턴스 선택을 재사용한다 | Accepted |
 
-| [0327](0327-remote-pane-action-keys-mirror-pc-control-bar.md) | Remote pane action 키는 PC 컨트롤 바 동작을 아이콘으로 실행한다 (0277 label 대체, 0237 PC 모드 제외) | Accepted |
+| [0327](0327-remote-pane-action-keys-mirror-pc-control-bar.md) | Remote pane action 키는 PC 컨트롤 바 동작을 아이콘으로 실행한다 (0277 label 대체, 0237 PC 모드 제외) | Accepted (Stack superseded by [0339](0339-remote-stack-creates-enterable-terminal.md)) |
 | [0328](0328-automation-stack-keeps-visible-layer.md) | Automation 스택 생성은 기존 표시 레이어를 유지한다 | Accepted |
 | [0329](0329-daemon-retains-workspace-display-context.md) | 데몬 재결합은 워크스페이스 표시 문맥을 메모리로 인계한다 | Accepted |
 | [0330](0330-agent-integration-missing-notice.md) | 실제 사용한 에이전트 환경의 훅·MCP 미설치를 앱 알림으로 안내한다 (0289·0324·0325 확장, 0282 준수) | Accepted |
@@ -362,6 +362,7 @@ ADR 이 필요한 대표 기준:
 | [0336](0336-webview2-process-failure-gui-restart.md) | WebView2 프로세스가 실패하면 PTY 데몬 세션을 인계하고 GUI를 다시 시작하며, 재시작 예산으로 반복을 멈춘다 (0080 일부 대체) | Accepted |
 | [0337](0337-legacy-wsl-client-warning.md) | inbox(구형) WSL 클라이언트로 WSL을 쓰면 경고만 띄운다 (0334 후속) | Accepted |
 | [0338](0338-remote-text-keys-edit-composer-draft.md) | Remote 텍스트 사용자 키는 Composer 초안을 편집한다 (0234 일부 정정) | Accepted |
+| [0339](0339-remote-stack-creates-enterable-terminal.md) | Remote Stack은 열린 터미널의 프로필·CWD를 이어받아 바로 진입 가능한 터미널을 만든다 (0327 일부 정정) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

@@ -66,6 +66,7 @@ import {
 } from "@/lib/remote-file-viewer";
 import * as navigationActions from "@/lib/navigation-actions";
 import { stackPaneAt } from "@/lib/pane-stack-actions";
+import { resolvePaneCwd } from "@/lib/pane-cwd";
 import { allLiveTerminalOutputV3Diagnostics } from "@/lib/terminal-output-v3-diagnostics";
 import { clearWorkspace } from "@/lib/workspace-clear";
 import { clearPane, paneClearWaitBudgetMs, resolvePaneClear } from "@/lib/pane-clear";
@@ -900,19 +901,27 @@ const handlers: HandlerMap = {
       }
       return ok({ closed: paneId });
     },
-    // ADR-0327: the Remote Stack key is the PC Stack button on the slot holding
-    // `paneId` — an EmptyView layer, shown and focused.
+    // ADR-0339: Remote has no EmptyView picker. Start a usable terminal in the
+    // selected terminal's environment, including when that layer is inactive.
     stackById: (p) => {
       const paneId = p.paneId;
       if (typeof paneId !== "string" || !paneId.trim()) return err("paneId required");
       const workspace = useWorkspaceStore.getState().getActiveWorkspace();
-      const paneIndex =
-        workspace?.panes.findIndex((slot) => slot.layers.some((layer) => layer.id === paneId)) ??
-        -1;
-      if (paneIndex < 0) return err(`Pane '${paneId}' is not in the active workspace`);
-      const layerId = stackPaneAt(paneIndex);
+      const entry = workspace ? findLayerEntry(workspace.panes, paneId) : null;
+      if (!entry) return err(`Pane '${paneId}' is not in the active workspace`);
+      const source = entry.layer;
+      if (source.view.type !== "TerminalView") return err(`Pane '${paneId}' is not a terminal`);
+      const profile = findTerminalInstance(toTerminalId(paneId))?.profile ?? source.view.profile;
+      const cwd = resolvePaneCwd(source);
+      const layerId = stackPaneAt(entry.slotIndex, {
+        type: "TerminalView",
+        ...(profile ? { profile } : {}),
+      });
+      // The common store seeds from the slot's active layer. Remote may still
+      // be connected to another layer, whose CWD must win for this action.
+      if (layerId) useTerminalRestartStore.getState().requestRestart(layerId, cwd);
       return layerId
-        ? ok({ stacked: paneId, layerId })
+        ? ok({ stacked: paneId, layerId, terminalId: toTerminalId(layerId) })
         : err(`Pane '${paneId}' could not be stacked`);
     },
     // ADR-0297: stack a new layer on a slot. Mirrors `split`: MCP callers get a

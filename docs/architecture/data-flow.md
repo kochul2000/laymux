@@ -37,6 +37,7 @@
 | 방법 | 동작 |
 | --- | --- |
 | 컨트롤 바 Stack 버튼(split 버튼 옆, Lucide `Layers`) · `pane.stack`(`Ctrl+Alt+S`) · 전환 줄 `+` | 슬롯 활성 레이어 바로 뒤에 `EmptyView` 레이어를 추가하고 표시·포커스 |
+| Remote Stack 키 | 열린 터미널의 프로필·CWD를 이어받는 `TerminalView`를 쌓고 표시·포커스한 뒤 Remote 출력을 새 터미널에 연결. 대상이 비활성 레이어여도 그 레이어에서 상속 ([ADR-0339](../adr/0339-remote-stack-creates-enterable-terminal.md)) |
 | Automation `stack_pane` · REST `/api/v1/panes/stack` | 활성 레이어 뒤에 새 레이어(기본 `TerminalView`)를 추가하되 기존 표시·포커스를 유지. 생성 도중에도 새 레이어를 활성화하지 않음 ([ADR-0328](../adr/0328-automation-stack-keeps-visible-layer.md)) |
 | 전환 줄 탭 클릭 | 그 레이어 표시·포커스 |
 | 전환 줄 × · 탭 가운데 클릭 · 컨트롤 바 Delete · `pane.delete` | 그 레이어(컨트롤 바·단축키는 활성 레이어) 하나 닫기. 마지막 레이어면 슬롯이 사라지고 공간 재분배 |
