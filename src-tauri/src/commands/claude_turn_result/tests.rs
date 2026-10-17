@@ -183,16 +183,8 @@ fn an_unreadable_record_is_unknown() {
 }
 
 fn tracked(path: PathBuf) -> Tracked {
-    let (offset, partial) = baseline(&path).unwrap();
-    Tracked {
-        generation: 1,
-        key: "k".into(),
-        path,
-        offset,
-        partial,
-        scan: TurnScan::default(),
-        settled: None,
-    }
+    let start = baseline(&path).unwrap();
+    Tracked::new(1, "k".into(), Location::File(path), start)
 }
 
 fn append(path: &Path, text: &str) {
@@ -295,16 +287,128 @@ fn a_shrunk_or_missing_transcript_is_unknown() {
 #[test]
 fn the_transcript_is_found_only_by_an_exact_unique_name() {
     let dir = tempfile::tempdir().unwrap();
+    assert_eq!(find_transcript(dir.path(), "s1"), Transcript::Absent);
     let projects = dir.path().join("projects");
     std::fs::create_dir_all(projects.join("D--a")).unwrap();
     std::fs::create_dir_all(projects.join("D--b")).unwrap();
-    assert_eq!(find_transcript(dir.path(), "s1"), None);
+    assert_eq!(find_transcript(dir.path(), "s1"), Transcript::Absent);
     std::fs::write(projects.join("D--a").join("s1.jsonl"), "").unwrap();
     std::fs::write(projects.join("D--b").join("s10.jsonl"), "").unwrap();
     assert_eq!(
         find_transcript(dir.path(), "s1"),
-        Some(projects.join("D--a").join("s1.jsonl"))
+        Transcript::Found(projects.join("D--a").join("s1.jsonl"))
     );
     std::fs::write(projects.join("D--b").join("s1.jsonl"), "").unwrap();
-    assert_eq!(find_transcript(dir.path(), "s1"), None);
+    assert_eq!(find_transcript(dir.path(), "s1"), Transcript::Unknown);
+}
+
+/// Claude creates the transcript with the first prompt, which can land after
+/// the task's start was observed: the whole file then belongs to the task.
+#[test]
+fn a_transcript_created_after_the_baseline_is_read_from_its_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("projects").join("D--a");
+    std::fs::create_dir_all(&project).unwrap();
+    let mut entry = Tracked::new(
+        1,
+        "k".into(),
+        Location::NotYet {
+            root: dir.path().to_path_buf(),
+            session_id: "s1".into(),
+        },
+        Baseline::default(),
+    );
+    assert_eq!(entry.outcome(), ClaudeTurnOutcome::Pending);
+    let first = turn(vec![
+        vec![user("u1", "x"), assistant("a1", "u1")],
+        ended("a1", "e1"),
+    ]);
+    std::fs::write(project.join("s1.jsonl"), lines_text(&first)).unwrap();
+    assert_eq!(entry.outcome(), ClaudeTurnOutcome::Success);
+}
+
+#[test]
+fn a_replaced_transcript_is_unknown_even_when_it_grows() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("s.jsonl");
+    std::fs::write(&path, lines_text(&[user("u0", "x"), assistant("a0", "u0")])).unwrap();
+    let mut entry = tracked(path.clone());
+    // Same length and a longer file both count: the bytes before the baseline changed.
+    let replaced = turn(vec![
+        vec![user("v0", "x"), assistant("b0", "v0")],
+        vec![api_error("b1", "b0"), duration("d1", "b1")],
+    ]);
+    std::fs::write(&path, lines_text(&replaced)).unwrap();
+    assert_eq!(entry.outcome(), ClaudeTurnOutcome::Unknown);
+}
+
+#[test]
+fn appending_after_the_anchor_is_not_a_replacement() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("s.jsonl");
+    std::fs::write(&path, lines_text(&[user("u0", "x")])).unwrap();
+    let mut entry = tracked(path.clone());
+    for step in [
+        vec![user("u1", "u0")],
+        vec![assistant("a1", "u1")],
+        ended("a1", "e1"),
+    ] {
+        assert_eq!(entry.outcome(), ClaudeTurnOutcome::Pending);
+        append(&path, &lines_text(&step));
+    }
+    assert_eq!(entry.outcome(), ClaudeTurnOutcome::Success);
+}
+
+/// A capped read must not settle a result that later records already in the
+/// file would overturn.
+#[test]
+fn a_result_waits_until_the_whole_file_was_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("s.jsonl");
+    std::fs::write(&path, "").unwrap();
+    let mut entry = tracked(path.clone());
+    let filler = format!(
+        r#"{{"type":"api-request-blob","blob":"{}"}}"#,
+        "x".repeat(1024 * 1024)
+    );
+    let mut lines = turn(vec![
+        vec![user("u1", "x"), assistant("a1", "u1")],
+        ended("a1", "e1"),
+    ]);
+    lines.extend(std::iter::repeat_n(filler, 9));
+    lines.push(assistant("a2", "r9"));
+    append(&path, &lines_text(&lines));
+    assert!(std::fs::metadata(&path).unwrap().len() > READ_LIMIT);
+    assert_eq!(entry.outcome(), ClaudeTurnOutcome::Pending);
+    assert_eq!(entry.outcome(), ClaudeTurnOutcome::Unknown);
+}
+
+#[test]
+fn pruning_drops_closed_replaced_and_abandoned_baselines() {
+    let entry = |generation: u64, key: &str| {
+        Tracked::new(
+            generation,
+            key.into(),
+            Location::File(PathBuf::from("unused")),
+            Baseline::default(),
+        )
+    };
+    let mut tracked = HashMap::from([
+        ("closed".to_string(), vec![entry(1, "a")]),
+        (
+            "live".to_string(),
+            vec![entry(1, "old"), entry(2, "now"), {
+                let mut abandoned = entry(2, "gone");
+                abandoned.looked_up = Some(Instant::now() - ABANDONED_AFTER);
+                abandoned
+            }],
+        ),
+    ]);
+    prune(&mut tracked, &HashMap::from([("live".to_string(), 2)]));
+    let keys: Vec<_> = tracked
+        .values()
+        .flatten()
+        .map(|entry| entry.key.as_str())
+        .collect();
+    assert_eq!(keys, ["now"]);
 }

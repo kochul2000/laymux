@@ -9,6 +9,7 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -26,6 +27,11 @@ const READ_LIMIT: u64 = 8 * 1024 * 1024;
 const MAX_NODES: usize = 200_000;
 /// Ancestors walked from `turn_duration` before giving up.
 const MAX_CHAIN: usize = 10_000;
+/// Bytes compared before the read position to detect a replaced transcript.
+const ANCHOR_LEN: usize = 256;
+/// A baseline no lookup has asked for this long after its last lookup was
+/// abandoned by the frontend (its result window closed).
+const ABANDONED_AFTER: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -84,13 +90,13 @@ struct TurnScan {
     /// An assistant record followed a boundary: the work went on past it
     /// (e.g. Claude resuming after a background tool) under the same task.
     continued: bool,
-    broken: bool,
+    broken: Option<&'static str>,
 }
 
 impl TurnScan {
     fn push(&mut self, line: &[u8]) {
         let Ok(record) = serde_json::from_slice::<Record>(line) else {
-            self.broken = true;
+            self.broken = Some("unreadable record");
             return;
         };
         if record.is_sidechain {
@@ -102,7 +108,7 @@ impl TurnScan {
         }
         if let Some(uuid) = record.uuid {
             if self.nodes.len() >= MAX_NODES {
-                self.broken = true;
+                self.broken = Some("record limit");
                 return;
             }
             self.nodes.insert(
@@ -127,7 +133,7 @@ impl TurnScan {
     }
 
     fn outcome(&self) -> ClaudeTurnOutcome {
-        if self.broken || self.continued {
+        if self.broken.is_some() || self.continued {
             return ClaudeTurnOutcome::Unknown;
         }
         match self.boundaries.as_slice() {
@@ -155,42 +161,102 @@ impl TurnScan {
 }
 
 #[derive(Debug)]
+enum Location {
+    File(PathBuf),
+    /// The session had no transcript yet when the task started (Claude creates
+    /// it with the first prompt), so the whole file appears after the baseline.
+    NotYet {
+        root: PathBuf,
+        session_id: String,
+    },
+}
+
+#[derive(Debug)]
 struct Tracked {
     generation: u64,
     key: String,
-    path: PathBuf,
+    location: Location,
     /// Next unread byte; always at a line start once `partial` is cleared.
     offset: u64,
     /// The baseline fell inside a line still being written.
     partial: bool,
+    /// The bytes just before `offset`. The transcript only grows, so if they
+    /// differ on a later read the file was replaced.
+    anchor: Vec<u8>,
     scan: TurnScan,
     settled: Option<ClaudeTurnOutcome>,
+    /// Set by the first result lookup; a running task is never looked up.
+    looked_up: Option<Instant>,
 }
 
 impl Tracked {
-    fn advance(&mut self) -> std::io::Result<()> {
-        let mut file = File::open(&self.path)?;
+    fn new(generation: u64, key: String, location: Location, start: Baseline) -> Self {
+        Self {
+            generation,
+            key,
+            location,
+            offset: start.offset,
+            partial: start.partial,
+            anchor: start.anchor,
+            scan: TurnScan::default(),
+            settled: None,
+            looked_up: None,
+        }
+    }
+
+    fn abandoned(&self, now: Instant) -> bool {
+        self.looked_up
+            .is_some_and(|at| now.duration_since(at) >= ABANDONED_AFTER)
+    }
+
+    /// Read appended complete lines. Returns whether every byte the file had
+    /// at this read was examined; a capped read leaves the rest for next time.
+    fn advance(&mut self) -> std::io::Result<bool> {
+        if let Location::NotYet { root, session_id } = &self.location {
+            match find_transcript(root, session_id) {
+                Transcript::Found(path) => self.location = Location::File(path),
+                Transcript::Absent => return Ok(true),
+                Transcript::Unknown => {
+                    self.scan.broken = Some("transcript lookup failed");
+                    return Ok(true);
+                }
+            }
+        }
+        let Location::File(path) = &self.location else {
+            return Ok(true);
+        };
+        let mut file = File::open(path)?;
         let len = file.metadata()?.len();
         if len < self.offset {
-            self.scan.broken = true;
-            return Ok(());
+            self.scan.broken = Some("transcript shrank");
+            return Ok(true);
+        }
+        if !self.anchor.is_empty() {
+            let mut current = vec![0u8; self.anchor.len()];
+            file.seek(SeekFrom::Start(self.offset - self.anchor.len() as u64))?;
+            file.read_exact(&mut current)?;
+            if current != self.anchor {
+                self.scan.broken = Some("transcript replaced");
+                return Ok(true);
+            }
         }
         if len == self.offset {
-            return Ok(());
+            return Ok(true);
         }
         file.seek(SeekFrom::Start(self.offset))?;
+        let available = len - self.offset;
         let mut bytes = Vec::new();
-        file.take((len - self.offset).min(READ_LIMIT))
+        file.take(available.min(READ_LIMIT))
             .read_to_end(&mut bytes)?;
         self.consume(&bytes);
-        Ok(())
+        Ok(available <= READ_LIMIT)
     }
 
     fn consume(&mut self, bytes: &[u8]) {
         // The last line may still be being written; only complete lines count.
         let Some(end) = bytes.iter().rposition(|&byte| byte == b'\n') else {
             if bytes.len() as u64 >= READ_LIMIT {
-                self.scan.broken = true;
+                self.scan.broken = Some("line over read limit");
             }
             return;
         };
@@ -201,19 +267,46 @@ impl Tracked {
         for line in lines.filter(|line| !line.is_empty()) {
             self.scan.push(line);
         }
+        let consumed = &bytes[..=end];
+        let keep = ANCHOR_LEN
+            .saturating_sub(consumed.len())
+            .min(self.anchor.len());
+        self.anchor.drain(..self.anchor.len() - keep);
+        self.anchor
+            .extend_from_slice(&consumed[consumed.len().saturating_sub(ANCHOR_LEN)..]);
         self.offset += end as u64 + 1;
     }
 
     fn outcome(&mut self) -> ClaudeTurnOutcome {
+        self.looked_up = Some(Instant::now());
         if let Some(settled) = self.settled {
             return settled;
         }
-        if let Err(error) = self.advance() {
-            tracing::debug!(%error, path = %self.path.display(), "Claude transcript unavailable");
-            self.scan.broken = true;
+        let caught_up = match self.advance() {
+            Ok(caught_up) => caught_up,
+            Err(error) => {
+                tracing::debug!(%error, location = ?self.location, "Claude transcript unavailable");
+                self.scan.broken = Some("transcript unreadable");
+                true
+            }
+        };
+        let mut outcome = self.scan.outcome();
+        // Records past a capped read can still continue the work or add a
+        // boundary, so a result waits until the whole file has been read.
+        // `Unknown` cannot become a result with more records and settles now.
+        if !caught_up && outcome != ClaudeTurnOutcome::Unknown {
+            outcome = ClaudeTurnOutcome::Pending;
         }
-        let outcome = self.scan.outcome();
         if outcome != ClaudeTurnOutcome::Pending {
+            tracing::info!(
+                key = %self.key,
+                ?outcome,
+                boundaries = self.scan.boundaries.len(),
+                continued = self.scan.continued,
+                broken = self.scan.broken.unwrap_or("-"),
+                offset = self.offset,
+                "Claude turn result settled"
+            );
             // A filled result is final even if more boundaries follow.
             self.settled = Some(outcome);
             self.scan = TurnScan::default();
@@ -252,56 +345,73 @@ pub(crate) fn begin_claude_turns_impl(
     requests: &[ClaudeTurnRequest],
     state: &AppState,
 ) -> Result<Vec<ClaudeTurnRequest>, String> {
-    if requests.is_empty() {
-        return Ok(Vec::new());
-    }
     let generations = terminal_generations(state)?;
+    // A repeated request (a restarted subscription) keeps the first baseline;
+    // a later one would skip records the task already wrote.
+    let (known, fresh): (Vec<_>, Vec<_>) = {
+        let mut tracked = TRACKED.lock_or_err().map_err(|error| error.to_string())?;
+        prune(&mut tracked, &generations);
+        requests.iter().partition(|request| {
+            tracked.get(&request.terminal_id).is_some_and(|entries| {
+                entries.iter().any(|entry| {
+                    entry.key == request.key
+                        && generations.get(&request.terminal_id) == Some(&entry.generation)
+                })
+            })
+        })
+    };
+    let mut recorded: Vec<ClaudeTurnRequest> = known.into_iter().cloned().collect();
+    if fresh.is_empty() {
+        return Ok(recorded);
+    }
     let records = get_claude_session_records_impl(None, state, GuestObservation::Reusable)?;
     let mut started = Vec::new();
-    for request in requests {
+    for request in fresh {
         let Some(&generation) = generations.get(&request.terminal_id) else {
             continue;
         };
-        let Some(path) = attributed(&records.lookup, &request.terminal_id)
+        let Some((session_id, root)) = attributed(&records.lookup, &request.terminal_id)
             .filter(|session_id| is_valid_session_id(session_id))
-            .and_then(|session_id| {
-                find_transcript(records.config_roots.get(session_id)?, session_id)
-            })
+            .and_then(|session_id| Some((session_id, records.config_roots.get(session_id)?)))
         else {
             continue;
         };
-        match baseline(&path) {
-            Ok((offset, partial)) => started.push((
-                request.clone(),
-                Tracked {
-                    generation,
-                    key: request.key.clone(),
-                    path,
-                    offset,
-                    partial,
-                    scan: TurnScan::default(),
-                    settled: None,
+        let (location, start) = match find_transcript(root, session_id) {
+            Transcript::Found(path) => match baseline(&path) {
+                Ok(start) => (Location::File(path), start),
+                Err(error) => {
+                    tracing::debug!(%error, path = %path.display(), "Claude transcript baseline failed");
+                    continue;
+                }
+            },
+            Transcript::Absent => (
+                Location::NotYet {
+                    root: root.clone(),
+                    session_id: session_id.to_owned(),
                 },
-            )),
-            Err(error) => {
-                tracing::debug!(%error, path = %path.display(), "Claude transcript baseline failed")
-            }
-        }
+                Baseline::default(),
+            ),
+            Transcript::Unknown => continue,
+        };
+        started.push((
+            request.clone(),
+            Tracked::new(generation, request.key.clone(), location, start),
+        ));
     }
     // A PTY replaced during the lookup belongs to another process.
     let current = terminal_generations(state)?;
     let mut tracked = TRACKED.lock_or_err().map_err(|error| error.to_string())?;
-    tracked.retain(|id, entries| {
-        entries.retain(|entry| current.get(id) == Some(&entry.generation));
-        !entries.is_empty()
-    });
-    let mut recorded = Vec::new();
+    prune(&mut tracked, &current);
     for (request, entry) in started {
         if current.get(&request.terminal_id) != Some(&entry.generation) {
             continue;
         }
         let entries = tracked.entry(request.terminal_id.clone()).or_default();
-        entries.retain(|existing| existing.key != entry.key);
+        if entries.iter().any(|existing| existing.key == entry.key) {
+            // A concurrent request recorded it first; keep that baseline.
+            recorded.push(request);
+            continue;
+        }
         entries.push(entry);
         if entries.len() > MAX_PER_TERMINAL {
             entries.remove(0);
@@ -327,53 +437,98 @@ pub(crate) fn get_claude_turn_results_impl(
 ) -> Result<Vec<ClaudeTurnResult>, String> {
     let generations = terminal_generations(state)?;
     let mut tracked = TRACKED.lock_or_err().map_err(|error| error.to_string())?;
+    prune(&mut tracked, &generations);
     let mut results = Vec::new();
     for request in requests {
         let Some(entries) = tracked.get_mut(&request.terminal_id) else {
             continue;
         };
-        let generation = generations.get(&request.terminal_id);
-        entries.retain(|entry| generation == Some(&entry.generation));
-        let Some(entry) = entries.iter_mut().find(|entry| entry.key == request.key) else {
+        let Some(index) = entries.iter().position(|entry| entry.key == request.key) else {
             continue;
         };
+        let outcome = entries[index].outcome();
+        if outcome != ClaudeTurnOutcome::Pending {
+            // The frontend settles on this answer and never asks again.
+            entries.remove(index);
+        }
         results.push(ClaudeTurnResult {
             terminal_id: request.terminal_id.clone(),
             key: request.key.clone(),
-            outcome: entry.outcome(),
+            outcome,
         });
     }
     tracked.retain(|_, entries| !entries.is_empty());
     Ok(results)
 }
 
+/// Drop baselines of closed or replaced PTYs and of lookups the frontend
+/// stopped making, across every terminal.
+fn prune(tracked: &mut HashMap<String, Vec<Tracked>>, generations: &HashMap<String, u64>) {
+    let now = Instant::now();
+    tracked.retain(|id, entries| {
+        entries.retain(|entry| {
+            generations.get(id) == Some(&entry.generation) && !entry.abandoned(now)
+        });
+        !entries.is_empty()
+    });
+}
+
 /// The transcript is `projects/<any>/<sessionId>.jsonl` under the config root
 /// that attributed the session. Claude's directory naming is not derived.
-fn find_transcript(root: &Path, session_id: &str) -> Option<PathBuf> {
+fn find_transcript(root: &Path, session_id: &str) -> Transcript {
     let name = format!("{session_id}.jsonl");
+    let entries = match std::fs::read_dir(root.join("projects")) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Transcript::Absent,
+        Err(_) => return Transcript::Unknown,
+    };
     let mut found = None;
-    for entry in std::fs::read_dir(root.join("projects")).ok()?.flatten() {
+    for entry in entries {
+        let Ok(entry) = entry else {
+            return Transcript::Unknown;
+        };
         let candidate = entry.path().join(&name);
         if candidate.is_file() {
             if found.is_some() {
-                return None;
+                return Transcript::Unknown;
             }
             found = Some(candidate);
         }
     }
-    found
+    found.map_or(Transcript::Absent, Transcript::Found)
 }
 
-fn baseline(path: &Path) -> std::io::Result<(u64, bool)> {
+#[derive(Debug, PartialEq, Eq)]
+enum Transcript {
+    Found(PathBuf),
+    /// Every project directory was read and none holds the session yet.
+    Absent,
+    /// A directory could not be read or several files match.
+    Unknown,
+}
+
+#[derive(Debug, Default)]
+struct Baseline {
+    offset: u64,
+    partial: bool,
+    anchor: Vec<u8>,
+}
+
+fn baseline(path: &Path) -> std::io::Result<Baseline> {
     let mut file = File::open(path)?;
     let len = file.metadata()?.len();
-    if len == 0 {
-        return Ok((0, false));
+    let start = len.saturating_sub(ANCHOR_LEN as u64);
+    file.seek(SeekFrom::Start(start))?;
+    let mut anchor = Vec::new();
+    file.take(len - start).read_to_end(&mut anchor)?;
+    if anchor.len() as u64 != len - start {
+        return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof));
     }
-    file.seek(SeekFrom::Start(len - 1))?;
-    let mut last = [0u8; 1];
-    file.read_exact(&mut last)?;
-    Ok((len, last[0] != b'\n'))
+    Ok(Baseline {
+        offset: len,
+        partial: anchor.last().is_some_and(|&byte| byte != b'\n'),
+        anchor,
+    })
 }
 
 fn terminal_generations(state: &AppState) -> Result<HashMap<String, u64>, String> {

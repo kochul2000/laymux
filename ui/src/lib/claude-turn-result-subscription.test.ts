@@ -218,6 +218,38 @@ describe("Claude transcript turn results (ADR-0340)", () => {
     expect(reads()).toBe(0);
   });
 
+  it("기준점 응답 전에 구독이 다시 시작돼도 같은 키로 다시 물어 결과를 채운다", async () => {
+    let answer: (value: ClaudeTurnRequest[]) => void = () => {};
+    vi.mocked(beginClaudeTurns).mockImplementationOnce(
+      () => new Promise((next) => (answer = next)),
+    );
+    stop = subscribeClaudeTurnResults();
+    observeTaskTitle("pane", "✶ Working");
+    await tick(0);
+    const [first] = begun();
+    stop();
+    // The backend keeps the first baseline for a repeated key.
+    stop = subscribeClaudeTurnResults();
+    await tick(0);
+    expect(begun()).toEqual([first, first]);
+    answer([first]);
+    observeTaskTitle("pane", "✳ Claude Code");
+    outcome("success");
+    await tick();
+    expect(instance().task?.result).toBe("success");
+  });
+
+  it("기준점 응답이 끝내 없으면 종료 후 10초에 포기한다", async () => {
+    vi.mocked(beginClaudeTurns).mockImplementation(() => new Promise(() => {}));
+    stop = subscribeClaudeTurnResults();
+    observeTaskTitle("pane", "✶ Working");
+    await tick(0);
+    observeTaskTitle("pane", "✳ Claude Code");
+    await tick(12_000);
+    expect(instance().claudeTurns?.heuristic?.settled).toBe(true);
+    expect(reads()).toBe(0);
+  });
+
   it("Claude가 아닌 pane은 대상이 아니다", async () => {
     useTerminalStore.getState().updateInstanceInfo("pane", {
       activity: { type: "interactiveApp", name: "Codex" },

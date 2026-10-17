@@ -79,6 +79,9 @@ export function subscribeClaudeTurnResults(): () => void {
   let inFlight = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const beginning = new Map<string, Target>();
+  // Baselines this subscription asked for. A turn left without an answer by a
+  // previous subscription is asked again; the backend keeps the first baseline.
+  const requested = new Set<string>();
 
   function begin() {
     if (beginning.size === 0) return;
@@ -113,10 +116,21 @@ export function subscribeClaudeTurnResults(): () => void {
         const turn = instance.claudeTurns?.[source];
         if (!task) continue;
         const key = claudeTurnKey(task);
+        const target = { id: instance.id, source, key };
+        const request = `${instance.id}\u0000${key}`;
         if ((task.state === "running" || task.state === "waiting") && turn?.key !== key) {
+          // Registered before the store write, which re-enters this observer.
+          beginning.set(`${instance.id}\u0000${source}`, target);
+          requested.add(request);
           setTurn(instance.id, source, { key, settled: false });
-          beginning.set(`${instance.id}\u0000${source}`, { id: instance.id, source, key });
-        } else if (task.state === "ended" && turn?.key === key && turn.endedAt === undefined) {
+          continue;
+        }
+        if (turn?.key !== key) continue;
+        if (turn.tracked === undefined && !turn.settled && !requested.has(request)) {
+          beginning.set(`${instance.id}\u0000${source}`, target);
+          requested.add(request);
+        }
+        if (task.state === "ended" && turn.endedAt === undefined) {
           // A task that ended with its own result needs nothing more.
           setTurn(instance.id, source, {
             ...turn,
@@ -156,16 +170,20 @@ export function subscribeClaudeTurnResults(): () => void {
     for (const instance of useTerminalStore.getState().instances) {
       for (const source of SOURCES) {
         const turn = instance.claudeTurns?.[source];
-        if (!turn || turn.tracked !== true) continue;
-        if (!claudeTurnPending(sourceTask(instance, source), turn)) continue;
+        if (!turn || !claudeTurnPending(sourceTask(instance, source), turn)) continue;
+        // The window closes whether or not a baseline answer ever arrived.
         if (now - (turn.endedAt ?? now) > RESULT_WINDOW_MS) {
           setTurn(instance.id, source, { ...turn, settled: true });
           continue;
         }
+        if (turn.tracked !== true) continue;
         targets.push({ id: instance.id, source, key: turn.key, stamp: stamp(instance, source) });
       }
     }
-    if (targets.length === 0) return;
+    if (targets.length === 0) {
+      if (useTerminalStore.getState().instances.some(pendingLookup)) schedule();
+      return;
+    }
     inFlight = true;
     try {
       const results = await getClaudeTurnResults(
