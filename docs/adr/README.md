@@ -251,7 +251,7 @@ ADR 이 필요한 대표 기준:
 | [0231](0231-hidden-eviction-target-scoped-input-admission.md) | 숨김 자동 종료의 입력 차단은 대상 terminal에 한정한다 (0222 정정) | Accepted |
 | [0232](0232-unconsumed-resume-checkpoint.md) | 입력 전 복원 요청은 generation에 결부된 복원점으로 보존한다 | Accepted |
 | [0233](0233-remote-workspace-menu-pinning.md) | Remote 워크스페이스 메뉴는 기기 로컬 너비를 공유하고 viewport 컷오프보다 넓을 때만 고정한다 (0015·0209 확장) | Accepted |
-| [0234](0234-remote-user-key-explicit-submit.md) | Remote 사용자 키는 Enter 제출 의도를 별도로 저장한다 (0213 정정) | Accepted |
+| [0234](0234-remote-user-key-explicit-submit.md) | Remote 사용자 키는 Enter 제출 의도를 별도로 저장한다 (0213 정정) | Accepted (partially superseded by [0338](0338-remote-text-keys-edit-composer-draft.md)) |
 | [0235](0235-wrapped-path-link-logical-lines.md) | 줄바꿈 경로의 논리 줄 복원과 물리 셀 조각의 공동 수명 | Accepted |
 | [0236](0236-remote-composer-inline-attachments.md) | Remote Composer 인라인 첨부 칩 | Proposed |
 | [0237](0237-remote-floating-input-controls.md) | Remote 플로팅 입력은 기기 로컬 배치와 기존 액션을 공유한다 (0213·0228 확장) | Superseded by 0265 (패드 초기 기본값만) |
@@ -361,7 +361,7 @@ ADR 이 필요한 대표 기준:
 | [0335](0335-shared-wsl-guest-observations.md) | WSL 게스트 관측은 distribution별 공유 run으로 합치고, 신선도는 호출자가 계약한다 (0120 probe 실행 단위·0238 진단 실행 방식 확장) | Accepted |
 | [0336](0336-webview2-process-failure-gui-restart.md) | WebView2 프로세스가 실패하면 PTY 데몬 세션을 인계하고 GUI를 다시 시작하며, 재시작 예산으로 반복을 멈춘다 (0080 일부 대체) | Accepted |
 | [0337](0337-legacy-wsl-client-warning.md) | inbox(구형) WSL 클라이언트로 WSL을 쓰면 경고만 띄운다 (0334 후속) | Accepted |
-| [0338](0338-remote-text-keys-edit-composer-draft.md) | Remote 텍스트 사용자 키는 Composer 초안을 편집한다 (0234 일부 정정) | Proposed |
+| [0338](0338-remote-text-keys-edit-composer-draft.md) | Remote 텍스트 사용자 키는 Composer 초안을 편집한다 (0234 일부 정정) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

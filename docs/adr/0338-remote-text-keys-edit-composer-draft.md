@@ -1,8 +1,8 @@
 # 0338. Remote 텍스트 사용자 키는 Composer 초안을 편집한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-17
-- Source: 사용자 요구(명령 단축 입력 뒤 인자를 덧붙인 후 전송); [ADR-0234](0234-remote-user-key-explicit-submit.md); [api-contracts §13.4](../architecture/api-contracts.md)
+- Source: [PR #1222](https://github.com/kochul2000/laymux/pull/1222); 사용자 요구(명령 단축 입력 뒤 인자를 덧붙인 후 전송); [ADR-0234](0234-remote-user-key-explicit-submit.md); [api-contracts §13.4](../architecture/api-contracts.md)
 - Amends: ADR-0234의 `submit:false` 사용자 키가 항상 raw write라는 규칙을 Composer의 일반 텍스트에 한해 정정한다.
 
 ## Context
@@ -27,4 +27,4 @@ Remote 사용자 키는 Composer 모드에서도 즉시 PTY에 전달된다. 명
 
 ## Consequences
 
-명령 단축 입력 뒤 인자를 붙여 Send할 수 있다. Composer에서 일반 텍스트를 PTY로 즉시 보내던 동작은 바뀌며, 같은 목적은 Direct 또는 `Send Enter`로 명시한다. 브라우저 테스트로 선택 범위·커서·전송 전 요청 부재·초안 보존·Direct·제어키를 검증한다. 텍스트와 제어 시퀀스를 혼합한 매크로까지 편집해야 한다면 목적지 모델을 다시 검토한다.
+명령 단축 입력 뒤 인자를 붙여 Send할 수 있다. Composer에서 일반 텍스트를 PTY로 즉시 보내던 동작은 바뀌며, 같은 목적은 Direct 또는 `Send Enter`로 명시한다. 브라우저 테스트로 선택 범위·커서·blur 상태의 포커스 보존과 재포커스 후 삽입 위치·전송 전 요청 부재·초안 보존·Direct·제어키를 검증한다. 텍스트와 제어 시퀀스를 혼합한 매크로까지 편집해야 한다면 목적지 모델을 다시 검토한다.

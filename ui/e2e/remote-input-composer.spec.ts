@@ -804,8 +804,17 @@ test("컴포저의 텍스트 사용자 키는 선택 위치에 삽입하고 Send
   await connect(page);
   await enterComposerMode(page);
   const editor = page.locator("#composerInput");
+  await editor.evaluate((element) => (element as HTMLElement).blur());
   await page.locator('[data-key="u-merge"]').click();
   await expect(editor).toHaveText("/unless-p1-merge ");
+  await expect(editor).not.toBeFocused();
+  await page.locator('[data-key="u-merge"]').click();
+  await expect(editor).toHaveText("/unless-p1-merge /unless-p1-merge ");
+  await expect(editor).not.toBeFocused();
+  await editor.focus();
+  await editor.pressSequentially("#123");
+  await expect(editor).toHaveText("/unless-p1-merge /unless-p1-merge #123");
+  await editor.fill("/unless-p1-merge ");
   await editor.dispatchEvent("compositionstart");
   await page.locator('[data-key="u-merge"]').click();
   await expect(editor).toHaveText("/unless-p1-merge ");
