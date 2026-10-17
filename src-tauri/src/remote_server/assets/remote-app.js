@@ -9630,9 +9630,14 @@ import {
             await remoteFetch(`/remote/v1/panes/${encodeURIComponent(pane.id)}/stack`, {
               method: "POST", body: JSON.stringify({ leaseId: selectedLeaseId }),
             })
-              .then(async () => {
+              .then(async (data) => {
                 if (leaseId !== selectedLeaseId) return;
-                await loadNavigation(activeTerminalId, { openOutput: false });
+                if (data.terminalId) {
+                  await selectTerminal(data.terminalId, { focusHost: true, refreshNavigation: true });
+                } else {
+                  // Older hosts return only a layer id.
+                  await loadNavigation(activeTerminalId, { openOutput: false });
+                }
                 setStatus("Stacked a new layer.");
               })
               .catch((err) => setStatus(`Stack failed: ${err.message || err}`, true));

@@ -1,6 +1,6 @@
 # 0327. Remote pane action 키는 PC 컨트롤 바 동작을 아이콘으로 실행한다
 
-- Status: Accepted
+- Status: Accepted (Remote Stack behavior superseded by [0339](0339-remote-stack-creates-enterable-terminal.md))
 - Date: 2026-10-15
 - Source: 사용자 요구(Remote 키바의 `Alt+L` 표기를 빗자루 아이콘 Clear pane으로, 아이콘 동작은 아이콘 + 설명으로, Close pane·Stack 키 추가, PC 모드는 키바 액션에서 제외), [ADR-0277](0277-remote-pane-clear-soft-key.md), [ADR-0297](0297-pane-stack-slot-layer-model.md), [ADR-0322](0322-remote-item-management-menus.md), [ADR-0237](0237-remote-floating-input-controls.md), [api-contracts §13](../architecture/api-contracts.md#134-terminal-control)
 - Amends: ADR-0277의 label·설명(`Alt+L`, `Alt+L (clear pane)`). ADR-0237이 입력 행·플로팅 선택지에 넣은 PC 모드를 뺀다. 나머지는 유지한다.
