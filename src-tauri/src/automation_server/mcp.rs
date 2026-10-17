@@ -624,7 +624,7 @@ struct OpenFileViewerParam {
     /// Absolute file path accessible to the laymux host, e.g. C:/work/chart.png
     /// or /home/user/chart.png on Linux. On Windows, /mnt/c/... maps to C:/...;
     /// /home/... uses the default WSL distro. Use an explicit WSL UNC path
-    /// (//wsl.localhost/Ubuntu/home/user/chart.png) to select another distro.
+    /// (\\wsl.localhost\Ubuntu\home\user\chart.png) to select another distro.
     /// Text, images, PDFs, and other supported files are recognized automatically;
     /// configured extension viewers take precedence. A URL is not a file path.
     path: String,

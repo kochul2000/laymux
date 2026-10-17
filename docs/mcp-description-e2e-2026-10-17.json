@@ -47,7 +47,8 @@
       "validate_settings",
       "write_to_terminal"
     ],
-    "catalogSha256": "7ae30fa56d71d9b34249be2b162c718ccbf082e51b2acc9bff9dd460faf70cc8"
+    "catalogSha256": "7ae30fa56d71d9b34249be2b162c718ccbf082e51b2acc9bff9dd460faf70cc8",
+    "catalogNote": "마지막 repo-guidance-windows 실행에서 캡처한 카탈로그. 이후 독립 리뷰에서 UNC 경로 예시의 슬래시 표기만 아래와 같이 정정."
   },
   "environment": {
     "os": "Windows",
@@ -156,6 +157,12 @@
     "이 검증은 Windows 호스트의 /mnt/d 경로 변환을 포함한다. Linux 호스트 또는 별도 WSL 배포판의 실제 CLI 실행 검증은 아님.",
     "일회성 dev CLI harness 및 원본 JSONL·스크린샷은 .tmp/mcp-description-e2e/artifacts와 .screenshots의 로컬 산출물이며 저장소에 포함하지 않음."
   ],
+  "independentReview": {
+    "rounds": 1,
+    "P1": 0,
+    "P2": 1,
+    "fixed": "WSL UNC 예시의 //wsl.localhost/... 표기는 resolve_address_path가 기본 distro의 Linux 경로로 재해석하므로, 실제 지원하는 역슬래시 UNC 예시로 정정. 경로 변환 로직은 변경하지 않음. 정정 후 v1.18.1의 MCP 146개·path_utils 19개 기존 테스트와 rustfmt·diff 검사 통과."
+  },
   "reproduction": [
     "격리 APPDATA·LOCALAPPDATA·WebView profile로 dev(19281)를 띄우고 /api/v1/health의 buildKind·worktreeRoot·PID 확인. 다른 작업의 dev 점유가 끝난 뒤 실행.",
     "두 CLI에 laymux-dev HTTP MCP(127.0.0.1:19281/mcp)를 연결하고 tools/list 71개 확인. Claude는 strict-mcp-config, Codex는 ignore-user-config와 workspace-write 사용.",

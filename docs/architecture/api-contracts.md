@@ -1156,7 +1156,7 @@ MCP `initialize`의 `instructions`와 `tools/list`의 개별 description은 기�
 
 2026-10-17 설명 전수 점검과 Claude·Codex의 CLI·TUI·Remote E2E 결과, 대조군 및 검증 범위는 [검증 기록](../mcp-description-e2e-2026-10-17.json)에 남긴다. 71개 도구의 설명 점검과 대표 시나리오의 실제 기능 검증은 구분한다.
 
-`path`는 URL이 아닌 호스트 접근 가능한 절대 파일 경로다. Windows에서 `/mnt/c/...`는 `C:/...`로 변환되고 `/home/...`는 기본 WSL 배포판에서 해석되므로, 다른 배포판의 파일은 `//wsl.localhost/<distro>/...` 같은 명시적 UNC 경로로 지정한다. 확장자 외부 뷰어 설정은 기존 우선순위를 유지한다. 새 도구·입출력·권한·경로 해석 정책을 추가하지 않는다.
+`path`는 URL이 아닌 호스트 접근 가능한 절대 파일 경로다. Windows에서 `/mnt/c/...`는 `C:/...`로 변환되고 `/home/...`는 기본 WSL 배포판에서 해석되므로, 다른 배포판의 파일은 `\\wsl.localhost\<distro>\...` 같은 역슬래시 UNC 경로로 지정한다. 확장자 외부 뷰어 설정은 기존 우선순위를 유지한다. 새 도구·입출력·권한·경로 해석 정책을 추가하지 않는다.
 
 #### Tool 목록 (release 51개 + dev 전용 20개)
 
