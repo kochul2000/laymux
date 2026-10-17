@@ -1,6 +1,6 @@
 # 0339. Remote Stack은 바로 진입 가능한 터미널을 만든다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-17
 - Source: 사용자 요구(Remote Stack으로 만든 레이어에 진입할 수 없고 스킵 버튼도 없음), [ADR-0327](0327-remote-pane-action-keys-mirror-pc-control-bar.md), [data-flow.md 스택](../architecture/data-flow.md#스택)
 - Amends: ADR-0327의 Remote Stack이 EmptyView를 만들고 PC에서 뷰를 선택하도록 한 부분. 다른 pane action과 PC Stack 동작은 유지한다.

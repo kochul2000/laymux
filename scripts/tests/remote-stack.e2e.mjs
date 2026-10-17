@@ -2,6 +2,7 @@
 // 실행: node scripts/tests/remote-stack.e2e.mjs (dev CDP 기본 포트 9342)
 // PTY 수명 검증용 dev는 VITE_LAYMUX_STRICT_MODE=0으로 시작한다.
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,6 +36,14 @@ async function until(read, predicate, label) {
 
 const health = await api("/health");
 assert.equal(health.instance.buildKind, "dev");
+assert.equal(
+  health.instance.gitCommit,
+  execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: root,
+    encoding: "utf8",
+    windowsHide: true,
+  }).trim(),
+);
 assert.equal(
   path.resolve(health.instance.worktreeRoot).toLowerCase(),
   path.resolve(root).toLowerCase(),
@@ -215,8 +224,8 @@ try {
           leaseId: ownedLease,
           text:
             profile === "WSL"
-              ? `printf '${marker}\\n'`
-              : `Write-Host '${marker}'`,
+              ? "printf '%s%s\\n' 'REMOTE_' 'STACK_OK_WSL'"
+              : "Write-Host ('REMOTE_' + 'STACK_OK_PowerShell')",
           submit: true,
         },
       },
