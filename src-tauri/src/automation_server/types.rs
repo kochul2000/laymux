@@ -119,13 +119,12 @@ pub struct StackPaneBody {
 /// `POST /api/v1/panes/layers/activate` (ADR-0297): show one stacked layer.
 /// Exactly one of `layerId` / `terminalId` identifies the layer.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ActivateLayerBody {
     #[serde(rename = "layerId")]
     pub layer_id: Option<String>,
     #[serde(rename = "terminalId")]
     pub terminal_id: Option<String>,
-    /// Also move keyboard focus to the slot (default true).
-    pub focus: Option<bool>,
 }
 
 /// `POST /api/v1/panes/layers/move` (ADR-0298): move a layer onto slot
@@ -528,6 +527,23 @@ mod tests {
             "/api/v1/panes/{index}/move-to-workspace",
         ] {
             assert!(REGISTERED_ROUTES.contains(&("POST", path)), "{path}");
+        }
+    }
+
+    #[test]
+    fn activate_layer_body_rejects_removed_focus_argument() {
+        let body: ActivateLayerBody =
+            serde_json::from_value(serde_json::json!({"layerId": "layer-a"})).unwrap();
+        assert_eq!(body.layer_id.as_deref(), Some("layer-a"));
+        for focus in [
+            serde_json::json!(true),
+            serde_json::json!(false),
+            serde_json::Value::Null,
+        ] {
+            assert!(serde_json::from_value::<ActivateLayerBody>(
+                serde_json::json!({"layerId": "layer-a", "focus": focus})
+            )
+            .is_err());
         }
     }
 

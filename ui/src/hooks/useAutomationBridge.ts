@@ -859,7 +859,7 @@ const handlers: HandlerMap = {
         totalPanes: ws?.panes.length ?? 0,
         _hint:
           terminalId && !terminalReady
-            ? "Terminal ID is allocated but its PTY is still starting. write_to_terminal and focus_terminal wait for readiness automatically."
+            ? "Terminal ID is allocated but its PTY is still starting. write_to_terminal waits automatically without moving focus. Use focus_terminal only for an explicitly requested focus change."
             : undefined,
       });
     },
@@ -968,6 +968,11 @@ const handlers: HandlerMap = {
     },
     // ADR-0297: show one stacked layer (by layer id or terminal id).
     activateLayer: (p) => {
+      if ("focus" in p) {
+        return err(
+          "focus is not supported by layer display. Use the separate focus_terminal tool.",
+        );
+      }
       const rawId =
         typeof p.layerId === "string"
           ? p.layerId
@@ -977,14 +982,17 @@ const handlers: HandlerMap = {
       if (!rawId) return err("layerId or terminalId required");
       const found = findLayerInWorkspaces(useWorkspaceStore.getState().workspaces, rawId);
       if (!found) return err(`Layer '${rawId}' not found`);
-      const focus = p.focus !== false;
-      activatePaneLayer(found.workspace.id, rawId, { focus });
+      if (!activatePaneLayer(found.workspace.id, rawId, { focus: false })) {
+        return err(
+          "Cannot replace the focused input layer. Use the separate focus_terminal tool to navigate.",
+        );
+      }
       return ok({
         activated: rawId,
         workspaceId: found.workspace.id,
         paneIndex: found.entry.slotIndex,
         layerIndex: found.entry.layerIndex,
-        focused: focus,
+        focused: false,
       });
     },
     // ADR-0298: the rearrangements a user makes by dragging (ADR-0297 2nd scope)
