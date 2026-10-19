@@ -264,7 +264,10 @@ import {
           Hourglass: "Active",
           Check: "Command succeeded",
           X: "Command failed",
+          Ban: "Interrupted",
+          Circle: "Task ended · result unobserved",
           Minus: "Idle",
+          Dot: "Task unconfirmed",
           CircleAlert: "Response or approval needed",
         });
         const DEFAULT_REMOTE_DISPLAY_SETTINGS = Object.freeze({
@@ -9630,9 +9633,14 @@ import {
             await remoteFetch(`/remote/v1/panes/${encodeURIComponent(pane.id)}/stack`, {
               method: "POST", body: JSON.stringify({ leaseId: selectedLeaseId }),
             })
-              .then(async () => {
+              .then(async (data) => {
                 if (leaseId !== selectedLeaseId) return;
-                await loadNavigation(activeTerminalId, { openOutput: false });
+                if (data.terminalId) {
+                  await selectTerminal(data.terminalId, { focusHost: true, refreshNavigation: true });
+                } else {
+                  // Older hosts return only a layer id.
+                  await loadNavigation(activeTerminalId, { openOutput: false });
+                }
                 setStatus("Stacked a new layer.");
               })
               .catch((err) => setStatus(`Stack failed: ${err.message || err}`, true));
@@ -11926,7 +11934,7 @@ import {
           return def.seq || "";
         }
 
-        // Send only; do NOT focus the terminal — focusing raises the native soft
+        // Do NOT focus the terminal — focusing raises the native soft
         // keyboard, which defeats the purpose of these no-keyboard helper keys.
         // Nav keys dispatch a step-navigation action instead of writing bytes.
         function sendKey(id, button = null) {
@@ -11942,6 +11950,17 @@ import {
           }
           const seq = keySequence(def);
           if (!seq) return;
+          // Text shortcuts edit the Composer draft; explicit Send Enter and
+          // control sequences keep their existing terminal meaning (ADR-0338).
+          if (
+            currentInputMode() === "composer" && userKeyIndex.has(id) &&
+            def.submit !== true && !/[\x00-\x1f\x7f-\x9f]/.test(seq)
+          ) {
+            if (!leaseId || !activeTerminalId || !composerReady ||
+                navMovePending > 0 || composerIsComposing) return;
+            composerEditor.replaceSelection(seq);
+            return;
+          }
           if (def.submit === true) {
             if (!leaseId || !activeTerminalId || !composerReady) return;
             // Like a Composer send, a submitting key never lands on the pane a
@@ -13397,7 +13416,7 @@ import {
             form.append(hint);
             const enterHint = document.createElement("div");
             enterHint.className = "user-key-preview";
-            enterHint.textContent = "Send Enter sends the sequence as text, then presses Enter, like Send. Leave off for raw control bytes.";
+            enterHint.textContent = "Send Enter sends immediately, like Send. Leave off to insert plain text into Composer; Direct mode and control sequences send raw bytes.";
             form.append(enterHint);
           }
 

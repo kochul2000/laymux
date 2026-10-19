@@ -80,7 +80,10 @@ pub(crate) fn get_codex_turn_states_impl(
         .map(|(id, handle)| (id.clone(), handle.terminal_generation()))
         .collect();
     let mut sources = HashMap::new();
-    let lookup = super::lookup_with_observer(None, state, |id, store, session| {
+    // One-second display polling: the guest scan and Codex diagnostics may come
+    // from a shared run; the rollout read below stays per poll (ADR-0335).
+    let observation = crate::wsl_probe::snapshot::GuestObservation::Reusable;
+    let lookup = super::lookup_with_observer(None, state, observation, |id, store, session| {
         let (Some(generation), Some(selection_key)) = (generations.get(id), &session.selection_key)
         else {
             return;

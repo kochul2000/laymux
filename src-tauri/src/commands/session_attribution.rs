@@ -7,6 +7,7 @@ use tauri::State;
 use crate::lock_ext::MutexExt;
 use crate::process_tree::PtyAppLiveness;
 use crate::state::AppState;
+use crate::wsl_probe::snapshot::GuestObservation;
 
 mod liveness;
 
@@ -282,6 +283,11 @@ where
 }
 
 /// Return one generation-bound attribution verdict for every live PTY.
+///
+/// This is the session checkpoint's observation (persist-session, close,
+/// update, eviction), so the guest must be read after the command began: a
+/// shared scan from before it could save an agent that has since exited as
+/// live (ADR-0335).
 #[tauri::command(async)]
 pub fn get_terminal_session_attributions(
     claude_session_max_age_hours: Option<u64>,
@@ -294,16 +300,26 @@ pub fn get_terminal_session_attributions(
         codex_session_max_age_hours,
         grok_session_max_age_hours,
         &state,
+        GuestObservation::starting_now(),
     )
 }
 
+/// `observation` is taken once, before the provider lookups start, so all
+/// three read the same guest scan of each distribution.
 pub(crate) fn get_terminal_session_attributions_impl(
     claude_session_max_age_hours: Option<u64>,
     codex_session_max_age_hours: Option<u64>,
     grok_session_max_age_hours: Option<u64>,
     state: &AppState,
+    observation: GuestObservation,
 ) -> Result<HashMap<String, TerminalSessionAttribution>, String> {
-    let receipt_capture = crate::session_checkpoint::receipt::collection_token(state);
+    // A reused guest view may predate the capture; only the checkpoint's own
+    // observation may vouch for NoAgent in its receipt.
+    let receipt_capture = if observation.is_reusable() {
+        None
+    } else {
+        crate::session_checkpoint::receipt::collection_token(state)
+    };
     // Capture generations before provider I/O. A terminal can be closed and
     // recreated under the same id while those lookups run; the second catalog
     // snapshot below rejects any result that crossed that boundary.
@@ -313,23 +329,36 @@ pub(crate) fn get_terminal_session_attributions_impl(
         .iter()
         .map(|(terminal_id, handle)| (terminal_id.clone(), handle.terminal_generation()))
         .collect();
-    // Each provider owns a bounded WSL probe. Run the three independent
+    // Each provider owns a bounded WSL wait. Run the three independent
     // lookups together so the command consumes one probe budget rather than
     // serially multiplying it past the five-second window-close deadline.
+    // They share one guest scan per distribution (ADR-0335).
     let (claude, mut codex, grok) = collect_provider_session_lookups(
         || {
             super::claude_session::get_claude_session_lookup_impl(
                 claude_session_max_age_hours,
                 state,
+                observation,
             )
         },
         || {
-            super::codex_session::get_codex_session_lookup_impl(codex_session_max_age_hours, state)
-                .map_err(|error| error.to_string())
+            super::codex_session::get_codex_session_lookup_impl(
+                codex_session_max_age_hours,
+                state,
+                observation,
+            )
+            .map_err(|error| error.to_string())
         },
-        || super::grok_session::get_grok_session_lookup_impl(grok_session_max_age_hours, state),
+        || {
+            super::grok_session::get_grok_session_lookup_impl(
+                grok_session_max_age_hours,
+                state,
+                observation,
+            )
+        },
     )?;
-    let status_sessions = super::codex_session::verified_status_sessions(state, &codex)?;
+    let status_sessions =
+        super::codex_session::verified_status_sessions(state, &codex, observation)?;
     for (id, (generation, session_id, fresh)) in status_sessions {
         if terminals
             .iter()
@@ -433,6 +462,9 @@ mod tests;
 
 #[cfg(all(test, windows))]
 mod live_wsl_tests;
+
+#[cfg(all(test, windows))]
+mod live_wsl_load_tests;
 
 #[cfg(all(test, windows))]
 mod live_native_tests;

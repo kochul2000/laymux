@@ -1,6 +1,7 @@
 use super::*;
 use crate::agent_hooks::title::TitleBinding;
 use crate::terminal::{TerminalConfig, TerminalSession};
+use crate::wsl_probe::snapshot::GuestObservation;
 use laymux_agent_hook::runtime::HookEvent;
 
 const ID: &str = "01a0ec06-451a-7e61-ac51-bd98fab4ed82";
@@ -99,7 +100,8 @@ fn resumed_current_title_and_rollout_recover_without_new_hooks_even_after_input(
         if consumed {
             f.state.pty_handles.lock().unwrap()["pane"].consume_session_restore();
         }
-        let lookup = ConversationLookup::new(&f.state, true).unwrap();
+        let lookup =
+            ConversationLookup::new(&f.state, true, GuestObservation::starting_now()).unwrap();
         let resumed = lookup
             .resolve("pane", &f.store(), None, None)
             .unwrap()
@@ -158,7 +160,8 @@ fn resume_request_alone_cannot_prove_missing_title_rollout_or_a_different_conver
             }
             _ => {}
         }
-        let lookup = ConversationLookup::new(&f.state, true).unwrap();
+        let lookup =
+            ConversationLookup::new(&f.state, true, GuestObservation::starting_now()).unwrap();
         let result = lookup.resolve("pane", &f.store(), None, None);
         if ["no-title", "no-rollout"].contains(&change) {
             assert!(
@@ -184,7 +187,7 @@ fn ordinary_checkpoint_uses_retained_shared_server_hook_without_an_exit_token_or
         .is_none());
     // No managed installation files, no current task phase, and no trustworthy
     // emitting pane/token: only current title + domain + rollout prove the ID.
-    let lookup = ConversationLookup::new(&f.state, true).unwrap();
+    let lookup = ConversationLookup::new(&f.state, true, GuestObservation::starting_now()).unwrap();
     let session = lookup
         .resolve("pane", &f.store(), None, None)
         .unwrap()
@@ -196,7 +199,7 @@ fn ordinary_checkpoint_uses_retained_shared_server_hook_without_an_exit_token_or
 #[test]
 fn missing_hook_rollout_is_never_a_fresh_conversation() {
     let f = Fixture::new();
-    let lookup = ConversationLookup::new(&f.state, true).unwrap();
+    let lookup = ConversationLookup::new(&f.state, true, GuestObservation::starting_now()).unwrap();
     assert!(lookup.resolve("pane", &f.store(), None, None).is_err());
     let fresh = lookup
         .resolve("pane", &f.store(), None, selected(ID, true))
@@ -212,7 +215,8 @@ fn missing_hook_rollout_is_never_a_fresh_conversation() {
 fn heuristic_mode_and_missing_hook_do_not_synthesize_identity() {
     let f = Fixture::new();
     f.rollout(ID, "cli".into());
-    let lookup = ConversationLookup::new(&f.state, false).unwrap();
+    let lookup =
+        ConversationLookup::new(&f.state, false, GuestObservation::starting_now()).unwrap();
     assert!(lookup
         .resolve("pane", &f.store(), None, None)
         .unwrap()
@@ -226,7 +230,7 @@ fn heuristic_mode_and_missing_hook_do_not_synthesize_identity() {
         OTHER
     );
     *f.state.agent_hook_observations.lock().unwrap() = Default::default();
-    let lookup = ConversationLookup::new(&f.state, true).unwrap();
+    let lookup = ConversationLookup::new(&f.state, true, GuestObservation::starting_now()).unwrap();
     assert!(lookup
         .resolve("pane", &f.store(), None, None)
         .unwrap()
@@ -236,7 +240,7 @@ fn heuristic_mode_and_missing_hook_do_not_synthesize_identity() {
 #[test]
 fn current_title_conflict_rejects_even_an_exact_process_selection() {
     let f = Fixture::new();
-    let lookup = ConversationLookup::new(&f.state, true).unwrap();
+    let lookup = ConversationLookup::new(&f.state, true, GuestObservation::starting_now()).unwrap();
     assert!(lookup
         .resolve("pane", &f.store(), None, selected(OTHER, false))
         .is_err());
@@ -247,7 +251,8 @@ fn title_aba_pty_replacement_and_disappearance_invalidate_a_lookup() {
     for change in ["title", "aba", "generation", "disappear"] {
         let f = Fixture::new();
         f.rollout(ID, "cli".into());
-        let lookup = ConversationLookup::new(&f.state, true).unwrap();
+        let lookup =
+            ConversationLookup::new(&f.state, true, GuestObservation::starting_now()).unwrap();
         match change {
             "title" => {
                 f.state
@@ -312,7 +317,8 @@ fn ended_auxiliary_wrong_root_wrong_distro_and_prefix_collision_are_not_candidat
         }
         registry.observe(event);
         drop(registry);
-        let lookup = ConversationLookup::new(&f.state, true).unwrap();
+        let lookup =
+            ConversationLookup::new(&f.state, true, GuestObservation::starting_now()).unwrap();
         assert!(
             lookup
                 .resolve("pane", &f.store(), None, None)
@@ -344,10 +350,23 @@ fn corrupt_auxiliary_and_duplicate_rollouts_cannot_prove_a_hook_conversation() {
             )
             .unwrap();
         }
-        let lookup = ConversationLookup::new(&f.state, true).unwrap();
+        let lookup =
+            ConversationLookup::new(&f.state, true, GuestObservation::starting_now()).unwrap();
         assert!(
             lookup.resolve("pane", &f.store(), None, None).is_err(),
             "{change}"
         );
     }
+}
+
+/// Display polling may read a shared guest view older than the lookup, so it
+/// never records receipt proofs; checkpoint observations do (ADR-0335).
+#[test]
+fn only_boundary_bound_lookups_record_checkpoint_evidence() {
+    let f = Fixture::new();
+    let polling = ConversationLookup::new(&f.state, true, GuestObservation::Reusable).unwrap();
+    assert!(!polling.records_evidence);
+    let checkpoint =
+        ConversationLookup::new(&f.state, true, GuestObservation::starting_now()).unwrap();
+    assert!(checkpoint.records_evidence);
 }

@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::State;
 
 use crate::state::AppState;
+use crate::wsl_probe::snapshot::GuestObservation;
 
 use super::session_attribution::{provider_terminal_domains, ProviderSessionLookup};
 use super::wsl_agent_session::{resolve_wsl_agent_processes, WslAgentProcess, WslAgentProvider};
@@ -16,21 +18,27 @@ pub fn get_claude_session_ids(
     session_max_age_hours: Option<u64>,
     state: State<Arc<AppState>>,
 ) -> Result<HashMap<String, Option<String>>, String> {
-    get_claude_session_ids_impl(session_max_age_hours, &state)
+    get_claude_session_ids_impl(
+        session_max_age_hours,
+        &state,
+        GuestObservation::starting_now(),
+    )
 }
 
 pub(crate) fn get_claude_session_ids_impl(
     session_max_age_hours: Option<u64>,
     state: &AppState,
+    observation: GuestObservation,
 ) -> Result<HashMap<String, Option<String>>, String> {
-    Ok(get_claude_session_lookup_impl(session_max_age_hours, state)?.attributions)
+    Ok(get_claude_session_lookup_impl(session_max_age_hours, state, observation)?.attributions)
 }
 
 pub(crate) fn get_claude_session_lookup_impl(
     session_max_age_hours: Option<u64>,
     state: &AppState,
+    observation: GuestObservation,
 ) -> Result<ProviderSessionLookup, String> {
-    Ok(get_claude_session_records_impl(session_max_age_hours, state)?.lookup)
+    Ok(get_claude_session_records_impl(session_max_age_hours, state, observation)?.lookup)
 }
 
 /// Session attribution plus each attributed session's self-reported status.
@@ -38,11 +46,16 @@ pub(crate) struct ClaudeSessionRecords {
     pub lookup: ProviderSessionLookup,
     /// Keyed by session ID; only sessions whose file reports a known status.
     pub statuses: HashMap<String, ClaudeSessionStatus>,
+    /// Keyed by session ID: the config root (`sessions/`'s parent) whose
+    /// session file attributed it. Its `projects/` holds the transcript.
+    pub config_roots: HashMap<String, PathBuf>,
 }
 
+/// `observation` is the freshness the WSL guest scan must have (ADR-0335).
 pub(crate) fn get_claude_session_records_impl(
     session_max_age_hours: Option<u64>,
     state: &AppState,
+    observation: GuestObservation,
 ) -> Result<ClaudeSessionRecords, String> {
     let domains = provider_terminal_domains(state)?;
     let terminal_roots = domains.native_roots;
@@ -67,10 +80,10 @@ pub(crate) fn get_claude_session_records_impl(
         .iter()
         .flat_map(|(_, descendants)| descendants.iter().copied())
         .collect();
+    let sessions_dir = resolve_claude_sessions_dir();
     let session_files = if relevant_native_pids.is_empty() {
         Vec::new()
     } else {
-        let sessions_dir = resolve_claude_sessions_dir();
         let session_lookup = read_claude_session_files_for_pids_detailed(
             &sessions_dir,
             session_max_age_hours,
@@ -87,12 +100,16 @@ pub(crate) fn get_claude_session_records_impl(
         .map(|(id, _)| id.clone())
         .collect();
     let mut statuses = HashMap::new();
+    let mut config_roots = HashMap::new();
     let candidates = native_descendants
         .into_iter()
         .filter_map(|(terminal_id, descendants)| {
             let session = find_session_file_by_pids(&session_files, &descendants)?;
             if let Some(status) = session.status {
                 statuses.insert(session.session_id.clone(), status);
+            }
+            if let Some(root) = sessions_dir.parent() {
+                config_roots.insert(session.session_id.clone(), root.to_path_buf());
             }
             Some((terminal_id, session.session_id.clone()))
         })
@@ -101,7 +118,7 @@ pub(crate) fn get_claude_session_records_impl(
         &observed,
         remove_duplicate_attributions(candidates),
     );
-    match resolve_wsl_agent_processes(state, WslAgentProvider::Claude) {
+    match resolve_wsl_agent_processes(state, WslAgentProvider::Claude, observation) {
         Ok(lookup) => {
             failed_terminal_ids.extend(lookup.failed_terminal_ids);
             for (terminal_id, process) in lookup.attributions {
@@ -111,6 +128,14 @@ pub(crate) fn get_claude_session_records_impl(
                             Ok(session) => session.map(|session| {
                                 if let Some(status) = session.status {
                                     statuses.insert(session.session_id.clone(), status);
+                                }
+                                if let Some(root) = process
+                                    .claude_sessions_dir()
+                                    .as_deref()
+                                    .and_then(Path::parent)
+                                {
+                                    config_roots
+                                        .insert(session.session_id.clone(), root.to_path_buf());
                                 }
                                 session.session_id
                             }),
@@ -141,6 +166,7 @@ pub(crate) fn get_claude_session_records_impl(
             fresh_sessions: HashMap::new(),
         },
         statuses,
+        config_roots,
     })
 }
 

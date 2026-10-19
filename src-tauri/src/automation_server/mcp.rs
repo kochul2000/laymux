@@ -56,7 +56,7 @@ struct TerminalIdParam {
 /// Target a terminal by stable ID or by spatial pane number (issue #256).
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct TerminalTargetParam {
-    /// Stable terminal ID. Provide either this or `pane_number` (terminal_id wins).
+    /// Stable terminal ID. Provide this, `pane_ref`, or `pane_number` (terminal_id wins).
     terminal_id: Option<String>,
     /// Pane locator copied from a pane badge, e.g. `lx:pane:Default:1`.
     pane_ref: Option<String>,
@@ -86,8 +86,8 @@ struct DumpTerminalBufferParam {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct WriteTerminalParam {
     /// Stable terminal ID (e.g. "terminal-pane-abc12345"). Preferred — survives
-    /// layout changes. Provide either this or `pane_number`; `terminal_id` wins
-    /// if both are given.
+    /// layout changes. Provide this, `pane_ref`, or `pane_number`; `terminal_id` wins
+    /// if multiple selectors are given.
     terminal_id: Option<String>,
     /// Pane locator copied from a pane badge, e.g. `lx:pane:Default:1`.
     pane_ref: Option<String>,
@@ -307,7 +307,7 @@ impl std::fmt::Display for NeighborDirection {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct ReadOutputParam {
-    /// Stable terminal ID. Provide either this or `pane_number` (terminal_id wins).
+    /// Stable terminal ID. Provide this, `pane_ref`, or `pane_number` (terminal_id wins).
     terminal_id: Option<String>,
     /// Pane locator copied from a pane badge, e.g. `lx:pane:Default:1`.
     pane_ref: Option<String>,
@@ -338,7 +338,7 @@ struct SwitchWorkspaceParam {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct ListWorkspacesParam {
-    /// When true, returns only id, name, pane_count, and active status (no pane details)
+    /// When true, returns id, name, paneCount (stacked layers), and isActive per workspace.
     #[serde(default)]
     summary: Option<bool>,
 }
@@ -445,19 +445,19 @@ impl std::fmt::Display for SplitDirection {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct SplitPaneParam {
-    /// Pane index to split
+    /// Pane slot index in the active workspace (0-based, from get_active_workspace).
     pane_index: u64,
-    /// Split direction
+    /// horizontal splits top/bottom (new pane below); vertical splits left/right (new pane right).
     direction: SplitDirection,
     /// Terminal profile name for the new pane (e.g. "PowerShell", "WSL"). Use list_profiles to see available profiles.
     profile: Option<String>,
-    /// Initial working directory for the new terminal (optional)
+    /// Initial working directory; omitted inherits the split pane's active-layer CWD.
     cwd: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct StackPaneParam {
-    /// Pane (slot) index to stack a new layer on
+    /// Pane slot index in the active workspace (0-based, from get_active_workspace).
     pane_index: u64,
     /// View type of the new layer (default "TerminalView")
     view_type: Option<String>,
@@ -470,19 +470,19 @@ struct StackPaneParam {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ActivatePaneLayerParam {
-    /// Layer id (the `id` of a pane entry in get_active_workspace). Give this or terminal_id.
+    /// Layer id (the `id` of a pane entry in get_active_workspace). Provide exactly one of layer_id and terminal_id.
     layer_id: Option<String>,
-    /// Terminal id of the layer (e.g. "terminal-pane-1234abcd"). Give this or layer_id.
+    /// Terminal id of the layer (e.g. "terminal-pane-1234abcd"). Provide exactly one of layer_id and terminal_id.
     terminal_id: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct MovePaneLayerParam {
-    /// Layer id (the `id` of a pane entry in get_active_workspace). Give this or terminal_id.
+    /// Layer id (the `id` of a pane entry in get_active_workspace). Provide exactly one of layer_id and terminal_id.
     layer_id: Option<String>,
-    /// Terminal id of the layer (e.g. "terminal-pane-1234abcd"). Give this or layer_id.
+    /// Terminal id of the layer (e.g. "terminal-pane-1234abcd"). Provide exactly one of layer_id and terminal_id.
     terminal_id: Option<String>,
-    /// Pane (slot) index in the active workspace to move the layer onto. Its own slot reorders.
+    /// Pane slot index in the active workspace (0-based). Moving onto its own slot reorders.
     target_pane_index: u64,
     /// Position among the target slot's other layers (default: after its active layer)
     index: Option<u64>,
@@ -490,9 +490,9 @@ struct MovePaneLayerParam {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct ExtractPaneLayerParam {
-    /// Layer id (the `id` of a pane entry in get_active_workspace). Give this or terminal_id.
+    /// Layer id (the `id` of a pane entry in get_active_workspace). Provide exactly one of layer_id and terminal_id.
     layer_id: Option<String>,
-    /// Terminal id of the layer (e.g. "terminal-pane-1234abcd"). Give this or layer_id.
+    /// Terminal id of the layer (e.g. "terminal-pane-1234abcd"). Provide exactly one of layer_id and terminal_id.
     terminal_id: Option<String>,
     /// Split direction of the new slot, as in split_pane
     direction: SplitDirection,
@@ -500,15 +500,15 @@ struct ExtractPaneLayerParam {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct MergePanesParam {
-    /// Pane (slot) index whose layers are stacked onto the target; this slot is removed
+    /// Source slot index in the active workspace (0-based). All layers move and this slot is removed.
     source_index: u64,
-    /// Pane (slot) index that receives the layers
+    /// Target slot index in the active workspace (0-based) that receives the layers.
     target_index: u64,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct MovePaneToWorkspaceParam {
-    /// Pane (slot) index in the active workspace; every layer of the slot moves
+    /// Pane slot index in the active workspace (0-based); every layer of the slot moves.
     pane_index: u64,
     /// Target workspace id (from list_workspaces)
     workspace_id: String,
@@ -530,7 +530,7 @@ fn layer_target_json(
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct RemovePaneParam {
-    /// Pane (slot) index
+    /// Pane slot index in the active workspace (0-based, from get_active_workspace).
     pane_index: u64,
     /// Layer to close in a stacked slot (default: the active layer). Closing the
     /// last layer removes the slot.
@@ -562,10 +562,12 @@ impl std::fmt::Display for NotificationLevel {
 struct ResizePaneParam {
     /// Pane index to resize (0-based)
     pane_index: u64,
-    /// Width delta (-1.0 to 1.0, e.g. 0.1 to grow 10%)
+    /// Width delta in normalized workspace units, limited by the shared boundary.
+    /// 0.1 requests 10 percentage points of workspace width, subject to neighbor/minimum sizes.
     #[serde(default)]
     dw: Option<f64>,
-    /// Height delta (-1.0 to 1.0, e.g. -0.1 to shrink 10%)
+    /// Height delta in normalized workspace units, limited by the shared boundary.
+    /// -0.1 requests 10 percentage points less workspace height, subject to neighbor/minimum sizes.
     #[serde(default)]
     dh: Option<f64>,
 }
@@ -580,7 +582,7 @@ struct SwapPanesParam {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct ScreenshotParam {
-    /// Capture a specific pane by index (optional — omit to capture the full IDE)
+    /// Capture a pane by its 0-based slot index (optional — omit for the full IDE).
     pane_index: Option<u64>,
 }
 
@@ -618,11 +620,14 @@ struct SendNotificationParam {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct OpenFileViewerParam {
-    /// Absolute path of the file to open in the viewer. Text, images, and
-    /// binaries are recognized automatically; files whose extension matches a
-    /// configured external viewer open in a terminal running that command.
+    /// Absolute file path accessible to the laymux host, e.g. C:/work/chart.png
+    /// or /home/user/chart.png on Linux. On Windows, /mnt/c/... maps to C:/...;
+    /// /home/... uses the default WSL distro. Use an explicit WSL UNC path
+    /// (\\wsl.localhost\Ubuntu\home\user\chart.png) to select another distro.
+    /// Text, images, PDFs, and other supported files are recognized automatically;
+    /// configured extension viewers take precedence. A URL is not a file path.
     path: String,
-    /// When true, the viewer fills the whole app window (the "new window" feel).
+    /// When true, maximize the viewer within the existing laymux window.
     /// When false (default) it opens as a large centered floating overlay.
     #[serde(default)]
     new_window: bool,
@@ -632,8 +637,8 @@ struct OpenFileViewerParam {
 struct ShowImageParam {
     /// Base64-encoded image bytes. A `data:` URI prefix
     /// (e.g. `data:image/png;base64,...`) is accepted and stripped automatically.
-    /// Use this to show an image the MCP client holds in memory that does not
-    /// exist as a file on the laymux host filesystem.
+    /// Displays the image to the user in laymux. For an existing host file,
+    /// pass its path to open_file_viewer instead of base64-encoding it.
     data: String,
     /// MIME type of the image (e.g. "image/png", "image/jpeg", "image/gif",
     /// "image/webp", "image/bmp", "image/svg+xml"). Optional — defaults to
@@ -641,7 +646,7 @@ struct ShowImageParam {
     /// Ignored when `data` is a `data:` URI carrying its own MIME type.
     #[serde(default)]
     mime_type: Option<String>,
-    /// When true, the viewer fills the whole app window (the "new window" feel).
+    /// When true, maximize the viewer within the existing laymux window.
     /// When false (default) it opens as a large centered floating overlay.
     #[serde(default)]
     new_window: bool,
@@ -649,7 +654,7 @@ struct ShowImageParam {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct MemoKeyParam {
-    /// Memo key — typically a workspace pane ID (e.g. "pane-abc12345").
+    /// Exact memo storage key from list_memos (pane memos use "memo-<paneId>").
     /// Use `list_memos` to discover available keys.
     key: String,
 }
@@ -658,7 +663,7 @@ struct MemoKeyParam {
 struct ExecuteCommandParam {
     /// Terminal ID
     terminal_id: String,
-    /// Command to execute (Enter is appended automatically)
+    /// Single-line shell command to execute (Enter is appended automatically). CR/LF are rejected.
     command: String,
     /// Timeout in milliseconds (default: 10000, max: 60000)
     timeout_ms: Option<u64>,
@@ -2029,7 +2034,7 @@ impl McpHandler {
 
     /// List terminal instances with id, profile, syncGroup, workspaceId, cwd, paneIndex, and panePosition.
     /// Pass workspace_id to filter terminals by workspace (omit for all terminals).
-    /// The activity field reflects real-time backend detection (shell or interactiveApp).
+    /// The activity field reflects backend detection: shell, running, or interactiveApp (with name).
     #[tool]
     async fn list_terminals(
         &self,
@@ -2071,8 +2076,9 @@ impl McpHandler {
 
     /// Send input without moving the user's workspace or keyboard focus. A new
     /// or hidden terminal is prepared automatically; do not focus or activate it
-    /// just to write. Target it with `terminal_id` (stable, preferred)
-    /// or `pane_number` (1-based screen reading order, same as the control bar
+    /// just to write. Target it with `terminal_id` (stable, preferred),
+    /// `pane_ref` (a copied lx:pane:Workspace:1 badge), or `pane_number`
+    /// (1-based screen reading order, same as the control bar
     /// badge — convenient but changes with layout). By default the input is
     /// submitted (Enter key) after sending — suitable for running commands or
     /// replying to TUI prompts (Claude Code, Codex, REPLs). Pass `enter: false`
@@ -2217,7 +2223,8 @@ impl McpHandler {
         }
     }
 
-    /// Read recent terminal output from ring buffer. Contains raw ANSI escapes.
+    /// Read recent terminal output from the ring buffer. Defaults to 100 lines
+    /// with raw ANSI escapes; use format="text" for ANSI-stripped text.
     /// WARNING: TUI apps (Claude Code, vim) may return very large output (>100KB)
     /// even for few lines due to escape sequences. Use `take_screenshot` for TUI apps.
     #[tool]
@@ -2253,7 +2260,8 @@ impl McpHandler {
         })))
     }
 
-    /// Set focus to a terminal pane, by stable terminal_id or spatial pane_number.
+    /// Focus a terminal by terminal_id, pane_ref, or 1-based spatial pane_number.
+    /// Switches workspace and shows its stacked layer when needed; waits for PTY readiness.
     #[tool]
     async fn focus_terminal(
         &self,
@@ -2312,7 +2320,8 @@ impl McpHandler {
         .await
     }
 
-    /// Get activity state for all terminals. Returns "shell" or "interactiveApp" (with app name).
+    /// Get backend activity as {states: {terminalId: {activity: {type, name?}}}}.
+    /// type is shell, running, or interactiveApp (with app name).
     #[tool]
     async fn get_terminal_states(&self) -> Result<CallToolResult, ErrorData> {
         let states = match crate::activity::detect_all_terminal_states(&self.state.app_state) {
@@ -2328,8 +2337,11 @@ impl McpHandler {
 
     /// Execute a command in a terminal and return the output. Atomic operation:
     /// verifies the terminal is at a shell prompt, sends the command, waits for
-    /// completion (prompt returns), and returns only the command's output.
-    /// Only works on terminals at a shell prompt (not TUI apps).
+    /// completion (prompt returns), and captures output produced since the write
+    /// (shell echo/prompt may be included), with exit_code and duration_ms.
+    /// Only works on terminals at a shell prompt (not TUI apps or running commands).
+    /// A timeout does not stop the command. Errors with written=true indicate input
+    /// was already sent; inspect terminal state/output before retrying.
     /// Note: `exit_code` relies on OSC 133;D shell integration and may be `null`
     /// if the shell doesn't support it, or briefly stale during rapid successive calls.
     #[tool]
@@ -2519,7 +2531,8 @@ impl McpHandler {
 
     // ── Workspace (4) ──
 
-    /// List workspaces. Pass summary=true for compact output (id, name, pane_count, isActive).
+    /// List workspaces. Pass summary=true for compact output (id, name, paneCount, isActive).
+    /// paneCount counts stacked layers, not pane slots.
     #[tool]
     async fn list_workspaces(
         &self,
@@ -2557,6 +2570,8 @@ impl McpHandler {
 
     /// Get the currently active workspace with full pane details, terminal activity states,
     /// and focusedPaneIndex — a single call for complete workspace context.
+    /// panes has one entry per stacked layer; paneIndex is the 0-based slot index.
+    /// paneNumber is a 1-based spatial locator. Use layer id for stack operations.
     #[tool]
     async fn get_active_workspace(&self) -> Result<CallToolResult, ErrorData> {
         self.bridge_transform("query", "workspaces", "getActive", json!({}), |data| {
@@ -2732,7 +2747,8 @@ impl McpHandler {
         .await
     }
 
-    /// Focus a specific pane by index.
+    /// Focus a pane slot in the active workspace by its 0-based pane_index.
+    /// Get indices from get_active_workspace; terminal pane_number is a different locator.
     #[tool]
     async fn focus_pane(
         &self,
@@ -2929,8 +2945,9 @@ impl McpHandler {
     }
 
     /// Resize a pane by adjusting its width and/or height by a delta value.
-    /// Use dw for width change and dh for height change (e.g. dw=0.1 grows width by 10%).
-    /// At least one of dw or dh must be provided. Values are clamped to -1.0..1.0.
+    /// dw/dh use normalized workspace units (0.1 requests 10 percentage points).
+    /// Moves a shared boundary with neighbors; fails if the axis has no movable boundary.
+    /// Provide at least one of dw or dh; the actual movement preserves minimum pane sizes.
     #[tool]
     async fn resize_pane(
         &self,
@@ -3005,7 +3022,9 @@ impl McpHandler {
 
     // ── Utility (3) ──
 
-    /// Capture a screenshot. Pass pane_index to capture a single pane, or omit for the full IDE.
+    /// Capture the current laymux screen and return a PNG image to the agent for inspection.
+    /// Pass a 0-based pane_index for one pane; omit for the full IDE.
+    /// To display an existing image to the user, use open_file_viewer (path) or show_image (base64).
     #[tool]
     async fn take_screenshot(
         &self,
@@ -3123,8 +3142,8 @@ impl McpHandler {
         }
     }
 
-    /// Create a notification in the IDE. terminal_id and workspace_id are optional —
-    /// omit both for a global notification on the active workspace.
+    /// Create a notification in the IDE. Omit workspace_id to use the terminal's
+    /// workspace; omit both IDs for a workspace-level notification on the active workspace.
     #[tool]
     async fn send_notification(
         &self,
@@ -3200,7 +3219,8 @@ impl McpHandler {
         .await
     }
 
-    /// Search terminal output for a pattern. Returns matching lines with context.
+    /// Search recent ANSI-stripped terminal output for a case-sensitive plain-text
+    /// substring (not a regex). Returns matching lines with context and totalMatches.
     #[tool]
     async fn search_terminal_output(
         &self,
@@ -3283,8 +3303,8 @@ impl McpHandler {
     /// Numbers come from Claude Code's own `/usage` panel, so they match what it
     /// reports rather than an estimate, but they are up to ten minutes old
     /// (`capturedAtMs`) and are meaningful only when `status.type` is `ready`.
-    /// Reading never starts a probe: an empty list means no `UsageView` pane is
-    /// open, not that usage is zero.
+    /// Reading never starts a probe: an empty list means no `UsageView` pane or
+    /// `claudeUsage` widget is monitoring usage, not that usage is zero.
     #[tool]
     async fn get_claude_usage(&self) -> Result<CallToolResult, ErrorData> {
         let snapshots = match self.state.app_state.usage_probe.snapshots() {
@@ -3316,9 +3336,10 @@ impl McpHandler {
     }
 
     /// List all memos stored in `cache/memo.json` as `{ key, content }` entries.
-    /// Returns an empty list when the memo file is missing or unreadable.
-    /// Memo keys are typically workspace pane IDs (e.g. `pane-abc12345`) so
-    /// pair this with `list_terminals` to map memos back to specific panes.
+    /// Returns {memos: [{key, content}], count}, sorted by key. Missing/unreadable
+    /// files yield an empty list; a poisoned memo gate returns an error.
+    /// Pane memo keys use `memo-<paneId>` (e.g. `memo-pane-abc12345`). Use
+    /// list_workspaces to find MemoView layer IDs; pass the exact returned key to read_memo.
     #[tool]
     async fn list_memos(&self) -> Result<CallToolResult, ErrorData> {
         let all = match crate::settings::load_all_memos() {
@@ -3627,12 +3648,21 @@ impl McpHandler {
 
     // ── File viewer ──
 
-    /// Open a file in laymux's unified file viewer overlay. This is the same
-    /// viewer used by the File Explorer and the Ctrl+Shift+O shortcut, so text,
-    /// images, and binaries render the same way everywhere. Pass `new_window:
-    /// true` to fill the whole window; otherwise it opens as a large floating
-    /// overlay. The path should be absolute and is resolved on the host
-    /// filesystem (use a WSL/Unix path for files inside WSL).
+    /// 이미지·차트·파일을 "화면에 보여줘", "띄워줘" 요청 시 실제로 호출해 laymux 화면에 표시한다.
+    /// Display a local image or file to the user on the laymux screen.
+    /// Use when asked "show this image", "open the chart", "이미지를 화면에 보여줘",
+    /// or to preview a generated file. For an existing file, call this with its
+    /// absolute path (e.g. {"path":"C:/work/chart.png"}); no base64 conversion needed.
+    /// Opens the shared File Explorer viewer for images, text, PDF, HTML/Markdown,
+    /// and other supported files; configured extension viewers take precedence.
+    /// new_window=true maximizes inside the existing app window; default is a floating overlay.
+    /// Windows /home/... paths use the default WSL distro; an explicit WSL UNC path selects a distro.
+    /// This opens the desktop viewer. Remote users see an unread dot on Files and tap it to open.
+    /// Success acknowledges opening the viewer; file loading/rendering may still fail.
+    /// For image bytes without a host file, use show_image. Inspecting an image with
+    /// an agent-only image reader does not display it in laymux for the user.
+    /// A display request requires this tool call; a chat path, Markdown image, or
+    /// saying "displayed" is insufficient. Report opening only after a successful call.
     #[tool]
     async fn open_file_viewer(
         &self,
@@ -3652,15 +3682,18 @@ impl McpHandler {
         .await
     }
 
-    /// Show an image the MCP client holds in memory (e.g. a generated chart or a
-    /// pasted screenshot) without it existing as a file on the laymux host.
-    /// Pass base64-encoded image bytes in `data` (a `data:` URI prefix is
-    /// accepted and stripped). The bytes are written to a temp file under
-    /// laymux's cache dir and opened in the same unified viewer used by
-    /// `open_file_viewer` / the File Explorer. To show an image that already
-    /// exists as a file, use `open_file_viewer` with its path instead. Pass
-    /// `new_window: true` to fill the whole window; otherwise it opens as a
-    /// large floating overlay.
+    /// 이미지 데이터만 있고 사용자가 "화면에 보여줘", "띄워줘" 요청하면 이 도구를 실제로 호출한다.
+    /// Display image bytes to the user on the laymux screen ("이미지를 화면에 보여줘").
+    /// Use for an in-memory/generated image or pasted screenshot without a file
+    /// accessible to the laymux host. Pass base64 bytes or a data: URI in data;
+    /// set mime_type for bare base64 that is not PNG. Saves a cache file and opens
+    /// the desktop viewer; Remote users tap the Files unread dot to open it.
+    /// For an existing host file, prefer open_file_viewer with its absolute path.
+    /// new_window=true maximizes inside the existing app window; default is a floating overlay.
+    /// This displays the image for the user; it does not return image content to the agent.
+    /// A Markdown image or data: URI in chat does not open the laymux viewer.
+    /// Report opening only after a successful show_image or open_file_viewer call.
+    /// Success acknowledges opening the viewer; file loading/rendering may still fail.
     #[tool]
     async fn show_image(
         &self,
@@ -3689,7 +3722,8 @@ impl McpHandler {
     }
 
     /// Close the file viewer overlay opened by `open_file_viewer` / `show_image`.
-    /// No-op if the viewer is not open.
+    /// No-op if the viewer is not open. Leave a requested preview open for the user;
+    /// close it when asked or when finishing a temporary verification flow.
     #[tool]
     async fn close_file_viewer(&self) -> Result<CallToolResult, ErrorData> {
         self.bridge("action", "ui", "closeFileViewer", json!({}))
@@ -3719,7 +3753,22 @@ impl ServerHandler for McpHandler {
             ))
             .with_instructions(
                 "Laymux IDE automation via MCP. \
-                 Control terminals, workspaces, grid layout, and capture screenshots.\n\n\
+                 Display images/files to the user, control terminals, workspaces and grid layout, and inspect screenshots.\n\n\
+                 ## Show images and files to the user\n\
+                 이미지·차트·파일을 '화면에 보여줘', '띄워줘' 요청하면 아래 표시 도구를 실제로 호출한다.\n\
+                 When the user asks to show, display, open or preview an image/chart/file on screen \
+                 (e.g. '이미지를 화면에 보여줘', '띄워줘', 'show me the chart'), you must call a laymux viewer tool \
+                 before reporting that the image/file was opened or displayed:\n\
+                 - Existing file accessible to the laymux host: open_file_viewer with its absolute path \
+                 (e.g. {\"path\":\"C:/work/chart.png\"}). Prefer this for generated files too; no base64 conversion needed.\n\
+                 - Image bytes without a host file: show_image with base64 data or a data: URI, and mime_type if needed.\n\
+                 - new_window=true maximizes the viewer inside the current app window. Leave the preview open for the user.\n\
+                 These tools display in the desktop laymux viewer. Remote users see a Files unread dot and tap Files to open. \
+                 A path/link, Markdown image or data: URI in chat, an agent-only image inspection, \
+                 or a text claim that it was displayed does not open the laymux viewer. \
+                 Do not report a successful display without an actual successful viewer tool call. \
+                 take_screenshot captures the current UI for agent inspection; it is not an image-display tool. \
+                 Follow an explicitly requested destination or application.\n\n\
                  ## Self-identification\n\
                  Your terminal has the env var LX_TERMINAL_ID (e.g. \"terminal-pane-a1b2c3d4\"). \
                  Read it with `echo $LX_TERMINAL_ID` (bash/zsh) or `echo $env:LX_TERMINAL_ID` (PowerShell), \

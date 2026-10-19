@@ -1487,6 +1487,14 @@ export async function getTerminalHomeDirectory(terminalId: string): Promise<stri
   return invoke("get_terminal_home_directory", { terminalId });
 }
 
+/**
+ * Whether laymux's WSL runs fall back to the inbox (legacy) WSL client, which
+ * creates a console per run, while a WSL terminal is open (ADR-0337).
+ */
+export async function getLegacyWslNotice(): Promise<boolean> {
+  return invoke("get_legacy_wsl_notice");
+}
+
 /** Read a file and classify it for the file viewer. */
 export async function readFileForViewer(
   path: string,
@@ -1694,6 +1702,8 @@ export function onCommandStatus(
     command?: string;
     exitCode?: number;
     phase?: "start" | "end" | "prompt";
+    /** On `end`: the shell recorded the command as stopped by Ctrl+C (ADR-0341). */
+    result?: "interrupted";
     generation?: number;
   }) => void,
 ): Promise<UnlistenFn> {
@@ -1968,6 +1978,31 @@ export async function getAgentSessionStates(
   grokTerminalIds: string[],
 ): Promise<Record<string, AgentSessionState>> {
   return invoke("get_agent_session_states", { claudeTerminalIds, grokTerminalIds });
+}
+
+export interface ClaudeTurnRequest {
+  terminalId: string;
+  key: string;
+}
+
+export type ClaudeTurnOutcome = "pending" | "success" | "failure" | "interrupted" | "unknown";
+
+export interface ClaudeTurnResult extends ClaudeTurnRequest {
+  outcome: ClaudeTurnOutcome;
+}
+
+/** ADR-0340: record each started task's transcript baseline; returns those recorded. */
+export async function beginClaudeTurns(
+  requests: ClaudeTurnRequest[],
+): Promise<ClaudeTurnRequest[]> {
+  return invoke("begin_claude_turns", { requests });
+}
+
+/** A request is missing when no baseline belongs to it. */
+export async function getClaudeTurnResults(
+  requests: ClaudeTurnRequest[],
+): Promise<ClaudeTurnResult[]> {
+  return invoke("get_claude_turn_results", { requests });
 }
 
 export async function getGrokSessionIds(

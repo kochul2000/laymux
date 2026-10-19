@@ -779,6 +779,84 @@ async function terminalScrollDistance(page: Page) {
   });
 }
 
+test("컴포저의 텍스트 사용자 키는 선택 위치에 삽입하고 Send로 제출한다", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "laymux.remote.keybar",
+      JSON.stringify({
+        userKeys: [
+          { id: "u-merge", label: "Merge", seq: "/unless-p1-merge ", submit: false },
+          { id: "u-run", label: "Run", seq: "/go", submit: true },
+          { id: "u-esc", label: "Escape", seq: "\u001b" },
+        ],
+        zones: {
+          main: {
+            left: ["soft:u-merge", "soft:u-run", "soft:u-esc", "soft:enter", "send"],
+            center: [],
+            right: [],
+          },
+          expanded: { left: [], center: [], right: [] },
+        },
+      }),
+    );
+  });
+  const state = await installRemotePage(page, { coarse: true });
+  await connect(page);
+  await enterComposerMode(page);
+  const editor = page.locator("#composerInput");
+  await editor.evaluate((element) => (element as HTMLElement).blur());
+  await page.locator('[data-key="u-merge"]').click();
+  await expect(editor).toHaveText("/unless-p1-merge ");
+  await expect(editor).not.toBeFocused();
+  await page.locator('[data-key="u-merge"]').click();
+  await expect(editor).toHaveText("/unless-p1-merge /unless-p1-merge ");
+  await expect(editor).not.toBeFocused();
+  await editor.focus();
+  await editor.pressSequentially("#123");
+  await expect(editor).toHaveText("/unless-p1-merge /unless-p1-merge #123");
+  await editor.fill("/unless-p1-merge ");
+  await editor.dispatchEvent("compositionstart");
+  await page.locator('[data-key="u-merge"]').click();
+  await expect(editor).toHaveText("/unless-p1-merge ");
+  await editor.dispatchEvent("compositionend", { data: "" });
+  await editor.fill("prefix replace suffix");
+  await editor.evaluate((element) => {
+    const range = document.createRange();
+    range.setStart(element.firstChild!, 7);
+    range.setEnd(element.firstChild!, 14);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+  await page.locator('[data-key="u-merge"]').click();
+  await expect(editor).toHaveText("prefix /unless-p1-merge  suffix");
+  await expect(editor).toBeFocused();
+  await editor.pressSequentially("#123");
+  await expect(editor).toHaveText("prefix /unless-p1-merge #123 suffix");
+  expect(state.inputs).toHaveLength(0);
+  expect(state.writes).toHaveLength(0);
+  await page.screenshot({ path: "test-results/remote-composer-text-key.png" });
+  await page.locator("#composerSend").click();
+  await expect.poll(() => state.inputs.length).toBe(1);
+  expect(state.inputs[0].body).toMatchObject({
+    text: "prefix /unless-p1-merge #123 suffix",
+    submit: true,
+  });
+  await expect(editor).toHaveText("");
+  await editor.fill("keep draft");
+  await page.locator('[data-key="u-run"]').click();
+  await expect.poll(() => state.inputs.length).toBe(2);
+  expect(state.inputs[1].body).toMatchObject({ text: "/go", submit: true });
+  await expect(editor).toHaveText("keep draft");
+  await page.locator('[data-key="u-esc"]').click();
+  await expect.poll(() => state.writes.length).toBe(1);
+  expect(state.writes[0].data).toBe("\u001b");
+  await page.locator('[data-key="enter"]').click();
+  await expect.poll(() => state.writes.length).toBe(2);
+  expect(state.writes[1].data).toBe("\r");
+  await expect(editor).toHaveText("keep draft");
+});
+
 test("custom Send Enter uses structured submit while raw keys retain their bytes and order", async ({
   page,
 }) => {
@@ -798,7 +876,11 @@ test("custom Send Enter uses structured submit while raw keys retain their bytes
       }),
     );
   });
-  const state = await installRemotePage(page, { coarse: true, holdInputs: true });
+  const state = await installRemotePage(page, {
+    coarse: true,
+    holdInputs: true,
+    storedMode: "direct",
+  });
   await connect(page);
   const requests: string[] = [];
   page.on("request", (request) => {

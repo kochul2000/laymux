@@ -1,0 +1,641 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-17",
+  "purpose": "laymux MCP 설명 전수 점검 및 실제 Claude·Codex의 도구 선택·데스크톱·Remote 표시 검증",
+  "audit": {
+    "releaseTools": 51,
+    "devOnlyTools": 20,
+    "totalTools": 71,
+    "scope": [
+      "initialize.instructions",
+      "tools/list description과 parameter description",
+      "resources/list 및 resources/templates/list 설명"
+    ],
+    "exercisedTools": [
+      "activate_pane_layer",
+      "clear_notifications",
+      "close_file_viewer",
+      "close_settings",
+      "create_workspace",
+      "delete_workspace",
+      "describe_settings",
+      "execute_command",
+      "get_active_workspace",
+      "get_grid_state",
+      "get_settings",
+      "get_settings_context",
+      "get_terminal_states",
+      "identify_caller",
+      "list_memos",
+      "list_notifications",
+      "list_profiles",
+      "list_terminals",
+      "list_workspaces",
+      "navigate_settings",
+      "open_file_viewer",
+      "open_settings",
+      "read_memo",
+      "remove_pane",
+      "rename_workspace",
+      "search_terminal_output",
+      "send_notification",
+      "show_image",
+      "stack_pane",
+      "switch_workspace",
+      "take_screenshot",
+      "update_settings",
+      "validate_settings",
+      "write_to_terminal"
+    ],
+    "catalogSha256": "7ae30fa56d71d9b34249be2b162c718ccbf082e51b2acc9bff9dd460faf70cc8",
+    "catalogNote": "마지막 repo-guidance-windows 실행에서 캡처한 카탈로그. 이후 독립 리뷰에서 UNC 경로 예시의 슬래시 표기만 아래와 같이 정정."
+  },
+  "environment": {
+    "os": "Windows",
+    "automationPort": 19281,
+    "releasePortUsed": false,
+    "isolatedAppData": true,
+    "isolatedWebView": true,
+    "cli": {
+      "claude": "2.1.302",
+      "codex": "0.163.0"
+    },
+    "models": {
+      "claude": "opus (claude-opus-5-5; 초기 탐색 2건은 기본 모델)",
+      "codex": "gpt-6.1-sol (대조군 및 최종 검증 high)"
+    },
+    "execution": "실제 dev PTY 안에서 CLI를 실행. laymux-dev 71개 도구와 내장 읽기·이미지·파일 도구를 함께 제공. 별도 실제 대화형 TUI도 검증.",
+    "finalGuidance": "루트 AGENTS.md만 적용. 시나리오 cwd에 임시 AGENTS.md를 쓰지 않음.",
+    "builds": [
+      {
+        "commit": "b2ac4e34b470e054c8235f66dbee55648b9987b3",
+        "version": "1.17.0"
+      },
+      {
+        "commit": "f6e11b72ccc82d220e93f754fa216f8dc04f9b0e",
+        "version": "1.18.0"
+      }
+    ]
+  },
+  "verification": {
+    "codeChecks": [
+      "cargo test -p laymux automation_server::mcp --lib: 146 passed",
+      "cargo build -p laymux --bin laymux: 통과",
+      "cargo fmt --all -- --check: 통과",
+      "git diff --check: 통과",
+      "cargo metadata --locked --no-deps: 통과",
+      "npm run test:release-channels: 통과",
+      "release-version.mjs: v1.18.1 문법·v1.18.0 대비 전진성 통과"
+    ],
+    "display": "CLI의 실제 MCP 호출 기록과 FileViewer store, DOM image.complete/naturalWidth/naturalHeight, preview iframe 본문, 스크린샷을 교차 확인. 성공 응답만으로 렌더 성공 판정하지 않음.",
+    "imageFixtures": [
+      "공백이 든 경로의 480×240 PNG 막대 차트",
+      "64×32 PNG data URI",
+      "에이전트가 작성한 SVG",
+      "Markdown 및 HTML preview"
+    ],
+    "remote": "430×900 실제 Edge Remote 브라우저. 호스트 표시 후 Files unread dot 확인, 자동으로 열리지 않음 확인, 사용자 클릭 후 480×240 이미지 로드와 dot 해제 확인.",
+    "stateRestoration": [
+      "폰트 설정 원복 후 재조회",
+      "이번에 만든 알림만 삭제",
+      "임시 workspace 삭제 후 원래 workspace 복귀",
+      "새 스택 레이어만 삭제 및 포커스 유지 확인",
+      "격리 dev Remote runtime access 비활성화 및 뷰어 닫기"
+    ]
+  },
+  "findings": [
+    {
+      "scope": "MCP 설명",
+      "result": "이미지 표시와 에이전트 이미지 읽기 구분, 기존 경로와 바이트 선택, 현재 창 최대화, Remote Files 진입, WSL 경로, 메모 키, pane 슬롯·레이어·번호, 상태 값·응답 키, 검색 방식, 명령 timeout의 부작용 안내를 정정."
+    },
+    {
+      "scope": "Codex 도구 선택",
+      "result": "강화된 MCP 설명만으로 일반 표시 요청이 항상 MCP로 이어지지 않음. 실제 TUI rollout에서 tools.view_image 호출 후 표시 완료 응답, laymux viewer.closed 확인. 명시적 laymux MCP 요청은 같은 세션에서 실제 open_file_viewer 호출과 렌더 성공."
+    },
+    {
+      "scope": "지침 대조군",
+      "result": "동일한 일반 요청에서 임시 cwd AGENTS.md 표시 지침 적용 시 Codex 4/4 통과. 루트 AGENTS.md에 검증된 규칙을 추가한 후 별도 새 세션으로 재검증."
+    },
+    {
+      "scope": "Windows 파일 생성 실행 환경",
+      "result": "repo-guidance-rest의 Codex SVG는 셸 명령이 blocked by policy로 거부되고 show_image 캐시에만 생성됨. 화면 표시는 됐으나 요청 폴더 저장 조건 실패. ignore-user-config로 빠진 기존 windows.sandbox=elevated 설정을 명시한 재검증에서 요청 폴더의 SVG 생성, open_file_viewer 호출, 640×440 픽셀 렌더까지 통과. 제품 코드로 파일 권한을 우회하지 않는다.",
+      "reference": "https://learn.chatgpt.com/docs/windows/windows-sandbox"
+    }
+  ],
+  "accounting": {
+    "completedCases": 102,
+    "finalRepositoryGuidance": {
+      "total": 41,
+      "passed": 40
+    },
+    "distinctFinalCasesAfterRetest": {
+      "total": 36,
+      "passed": 36,
+      "rule": "provider+scenario별 가장 최근 실행. 이전 실패는 phases에 유지."
+    },
+    "exclusions": [
+      "초기 Claude 연결 탐색",
+      "긴 base64 입력의 초기 timeout",
+      "다른 dev 인스턴스 인수와 겹친 Codex SVG 생성 timeout은 미완료로 제외"
+    ],
+    "verifierCorrections": [
+      {
+        "phase": "verified",
+        "cases": [
+          "claude-generated-svg",
+          "claude-pane-stack-roundtrip",
+          "codex-pane-stack-roundtrip"
+        ],
+        "reason": "SVG DOM selector 누락, execute_command만 허용한 과도한 판정으로 인한 오탐. write_to_terminal(capture_ms>0)도 유효한 실행·검증 경로. post1에서 수정 후 세 건 모두 통과."
+      }
+    ],
+    "remoteCleanup": "두 provider의 Remote 검증은 통과. 초기 스크립트의 화면 밖 Exit 버튼 클릭이 정리 단계에서 실패하여 DOM click으로 수정하고 별도 cleanup 실행 성공. 제품 동작 실패로 계산하지 않음."
+  },
+  "limits": [
+    "71개 도구는 설명 전수 점검 범위이며 전부 실기능 E2E를 수행했다는 뜻은 아님.",
+    "MCP 메타데이터는 도구 선택을 강제하지 않으며 이 저장소의 AGENTS.md는 다른 저장소·클라이언트에 자동 적용되지 않음.",
+    "이 검증은 Windows 호스트의 /mnt/d 경로 변환을 포함한다. Linux 호스트 또는 별도 WSL 배포판의 실제 CLI 실행 검증은 아님.",
+    "일회성 dev CLI harness 및 원본 JSONL·스크린샷은 .tmp/mcp-description-e2e/artifacts와 .screenshots의 로컬 산출물이며 저장소에 포함하지 않음."
+  ],
+  "independentReview": {
+    "rounds": 1,
+    "P1": 0,
+    "P2": 1,
+    "fixed": "WSL UNC 예시의 //wsl.localhost/... 표기는 resolve_address_path가 기본 distro의 Linux 경로로 재해석하므로, 실제 지원하는 역슬래시 UNC 예시로 정정. 경로 변환 로직은 변경하지 않음. 정정 후 v1.18.1의 MCP 146개·path_utils 19개 기존 테스트와 rustfmt·diff 검사 통과."
+  },
+  "reproduction": [
+    "격리 APPDATA·LOCALAPPDATA·WebView profile로 dev(19281)를 띄우고 /api/v1/health의 buildKind·worktreeRoot·PID 확인. 다른 작업의 dev 점유가 끝난 뒤 실행.",
+    "두 CLI에 laymux-dev HTTP MCP(127.0.0.1:19281/mcp)를 연결하고 tools/list 71개 확인. Claude는 strict-mcp-config, Codex는 ignore-user-config와 workspace-write 사용.",
+    "기본 요청: <절대 PNG 경로> 이미지를 화면에 보여줘. / 데이터 요청: 아래 이미지 데이터를 화면에 띄워줘. + 짧은 PNG data URI / 분석 전용 대조: 이미지를 분석해서 막대가 몇 개인지만 답해줘. 파일 뷰어는 열지 마.",
+    "메타데이터만 제공한 단계와 루트 AGENTS.md 규칙 적용 단계를 구분하고 매번 새 CLI 세션에서 실행. 각 케이스 전 뷰어 닫기.",
+    "CLI 실제 tool call, 뷰어 상태와 이미지 픽셀 크기 또는 preview 본문을 확인. 개발용 스크린샷으로 결과 확인.",
+    "Remote는 격리 dev runtime access를 켜고 연결해 unread dot과 사용자 탭 후 렌더 확인. 검증 후 own runtime access·뷰어·CLI 종료, bash scripts/kill-dev.sh로 own dev GUI 종료."
+  ],
+  "phases": [
+    {
+      "phase": "verified",
+      "rawPassed": 29,
+      "total": 36,
+      "note": "첫 18개 시나리오 × 두 CLI. 표시 설명 보강 후, 루트 표시 규칙 추가 전.",
+      "failedCases": [
+        "claude:generated-svg",
+        "claude:pane-stack-roundtrip",
+        "codex:image-basic",
+        "codex:image-bytes",
+        "codex:generated-svg",
+        "codex:image-wsl-mounted-path",
+        "codex:pane-stack-roundtrip"
+      ]
+    },
+    {
+      "phase": "post1",
+      "rawPassed": 6,
+      "total": 10,
+      "note": "한국어·영어 호출 의무를 더 강화. 검증기의 SVG selector와 stack 판정 수정.",
+      "failedCases": [
+        "codex:image-basic",
+        "codex:image-bytes",
+        "codex:generated-svg",
+        "codex:image-wsl-mounted-path"
+      ]
+    },
+    {
+      "phase": "configured-codex",
+      "rawPassed": 0,
+      "total": 2,
+      "note": "설정 모델·high effort로 재검증. 루트 표시 규칙 추가 전.",
+      "failedCases": [
+        "codex:image-basic",
+        "codex:image-bytes"
+      ]
+    },
+    {
+      "phase": "clean-codex",
+      "rawPassed": 0,
+      "total": 3,
+      "note": "상위 내부 런타임 환경변수를 제거. 루트 표시 규칙 추가 전.",
+      "failedCases": [
+        "codex:image-basic",
+        "codex:image-bytes",
+        "codex:image-wsl-mounted-path"
+      ]
+    },
+    {
+      "phase": "tui",
+      "rawPassed": 2,
+      "total": 2,
+      "note": "Claude의 실제 대화형 TUI. 표시와 표시하지 않는 후속 요청.",
+      "failedCases": []
+    },
+    {
+      "phase": "tui-codex-control",
+      "rawPassed": 1,
+      "total": 2,
+      "note": "Codex의 실제 대화형 TUI. 같은 세션에서 일반 표시 요청과 명시적 MCP 요청 비교.",
+      "failedCases": [
+        "codex:generic-request"
+      ]
+    },
+    {
+      "phase": "remote",
+      "rawPassed": 2,
+      "total": 2,
+      "note": "두 CLI에 laymux와 휴대폰 표시를 명시. 실제 Remote 브라우저의 unread→tap→render 검증.",
+      "failedCases": []
+    },
+    {
+      "phase": "agents-policy-control",
+      "rawPassed": 4,
+      "total": 4,
+      "note": "Codex의 case cwd에 임시 AGENTS.md 표시 규칙을 추가한 대조군.",
+      "failedCases": []
+    },
+    {
+      "phase": "repo-guidance-final",
+      "rawPassed": 8,
+      "total": 8,
+      "note": "루트 AGENTS.md만 적용한 새 CLI 세션. 일반 표시 세 종류와 분석 전용.",
+      "failedCases": []
+    },
+    {
+      "phase": "repo-guidance-rest",
+      "rawPassed": 27,
+      "total": 28,
+      "note": "같은 루트 규칙에서 나머지 14개 시나리오 × 두 CLI. 최신 main을 합치고 dev 재빌드.",
+      "failedCases": [
+        "codex:generated-svg"
+      ]
+    },
+    {
+      "phase": "repo-guidance-windows",
+      "rawPassed": 5,
+      "total": 5,
+      "note": "기존 Windows 샌드박스 설정 elevated를 명시한 Codex 재검증. SVG 생성·터미널 환경·기본 표시 세 종류.",
+      "failedCases": []
+    }
+  ],
+  "finalMatrix": [
+    {
+      "scenario": "image-basic",
+      "provider": "claude",
+      "passed": true,
+      "tools": [
+        "ToolSearch",
+        "open_file_viewer"
+      ]
+    },
+    {
+      "scenario": "image-bytes",
+      "provider": "claude",
+      "passed": true,
+      "tools": [
+        "ToolSearch",
+        "show_image"
+      ]
+    },
+    {
+      "scenario": "image-inspection-only",
+      "provider": "claude",
+      "passed": true,
+      "tools": [
+        "Read"
+      ]
+    },
+    {
+      "scenario": "image-wsl-mounted-path",
+      "provider": "claude",
+      "passed": true,
+      "tools": [
+        "Grep",
+        "ToolSearch",
+        "open_file_viewer"
+      ]
+    },
+    {
+      "scenario": "image-basic",
+      "provider": "codex",
+      "passed": true,
+      "tools": [
+        "open_file_viewer"
+      ],
+      "windowsSandbox": "elevated"
+    },
+    {
+      "scenario": "image-bytes",
+      "provider": "codex",
+      "passed": true,
+      "tools": [
+        "show_image"
+      ],
+      "windowsSandbox": "elevated"
+    },
+    {
+      "scenario": "image-inspection-only",
+      "provider": "codex",
+      "passed": true,
+      "tools": []
+    },
+    {
+      "scenario": "image-wsl-mounted-path",
+      "provider": "codex",
+      "passed": true,
+      "tools": [
+        "open_file_viewer"
+      ],
+      "windowsSandbox": "elevated"
+    },
+    {
+      "scenario": "image-maximized",
+      "provider": "claude",
+      "passed": true,
+      "tools": [
+        "ToolSearch",
+        "open_file_viewer"
+      ]
+    },
+    {
+      "scenario": "generated-svg",
+      "provider": "claude",
+      "passed": true,
+      "tools": [
+        "Write",
+        "ToolSearch",
+        "open_file_viewer"
+      ]
+    },
+    {
+      "scenario": "markdown-preview",
+      "provider": "claude",
+      "passed": true,
+      "tools": [
+        "ToolSearch",
+        "open_file_viewer"
+      ]
+    },
+    {
+      "scenario": "html-preview",
+      "provider": "claude",
+      "passed": true,
+      "tools": [
+        "ToolSearch",
+        "open_file_viewer"
+      ]
+    },
+    {
+      "scenario": "close-viewer",
+      "provider": "claude",
+      "passed": true,
+      "tools": [
+        "ToolSearch",
+        "close_file_viewer"
+      ]
+    },
+    {
+      "scenario": "terminal-context",
+      "provider": "claude",
+      "passed": true,
+      "tools": [
+        "PowerShell",
+        "ToolSearch",
+        "identify_caller",
+        "get_terminal_states"
+      ]
+    },
+    {
+      "scenario": "terminal-execute-search",
+      "provider": "claude",
+      "passed": true,
+      "tools": [
+        "ToolSearch",
+        "execute_command",
+        "search_terminal_output"
+      ]
+    },
+    {
+      "scenario": "settings-read",
+      "provider": "claude",
+      "passed": true,
+      "tools": [
+        "ToolSearch",
+        "get_settings_context",
+        "describe_settings",
+        "get_settings"
+      ]
+    },
+    {
+      "scenario": "settings-roundtrip",
+      "provider": "claude",
+      "passed": true,
+      "tools": [
+        "ToolSearch",
+        "get_settings_context",
+        "describe_settings",
+        "get_settings",
+        "validate_settings",
+        "update_settings"
+      ]
+    },
+    {
+      "scenario": "memo-read",
+      "provider": "claude",
+      "passed": true,
+      "tools": [
+        "ToolSearch",
+        "list_memos",
+        "read_memo"
+      ]
+    },
+    {
+      "scenario": "notifications-roundtrip",
+      "provider": "claude",
+      "passed": true,
+      "tools": [
+        "ToolSearch",
+        "PowerShell",
+        "identify_caller",
+        "send_notification",
+        "list_notifications",
+        "clear_notifications"
+      ]
+    },
+    {
+      "scenario": "workspace-roundtrip",
+      "provider": "claude",
+      "passed": true,
+      "tools": [
+        "ToolSearch",
+        "create_workspace",
+        "switch_workspace",
+        "rename_workspace",
+        "list_workspaces",
+        "delete_workspace"
+      ]
+    },
+    {
+      "scenario": "pane-stack-roundtrip",
+      "provider": "claude",
+      "passed": true,
+      "tools": [
+        "ToolSearch",
+        "get_active_workspace",
+        "get_grid_state",
+        "stack_pane",
+        "write_to_terminal",
+        "activate_pane_layer",
+        "remove_pane"
+      ]
+    },
+    {
+      "scenario": "dev-settings-dialog",
+      "provider": "claude",
+      "passed": true,
+      "tools": [
+        "ToolSearch",
+        "open_settings",
+        "navigate_settings",
+        "take_screenshot",
+        "close_settings"
+      ]
+    },
+    {
+      "scenario": "image-maximized",
+      "provider": "codex",
+      "passed": true,
+      "tools": [
+        "open_file_viewer"
+      ]
+    },
+    {
+      "scenario": "generated-svg",
+      "provider": "codex",
+      "passed": true,
+      "tools": [
+        "open_file_viewer"
+      ],
+      "windowsSandbox": "elevated"
+    },
+    {
+      "scenario": "markdown-preview",
+      "provider": "codex",
+      "passed": true,
+      "tools": [
+        "open_file_viewer"
+      ]
+    },
+    {
+      "scenario": "html-preview",
+      "provider": "codex",
+      "passed": true,
+      "tools": [
+        "open_file_viewer"
+      ]
+    },
+    {
+      "scenario": "close-viewer",
+      "provider": "codex",
+      "passed": true,
+      "tools": [
+        "close_file_viewer"
+      ]
+    },
+    {
+      "scenario": "terminal-context",
+      "provider": "codex",
+      "passed": true,
+      "tools": [
+        "identify_caller",
+        "list_terminals"
+      ],
+      "windowsSandbox": "elevated"
+    },
+    {
+      "scenario": "terminal-execute-search",
+      "provider": "codex",
+      "passed": true,
+      "tools": [
+        "execute_command",
+        "search_terminal_output"
+      ]
+    },
+    {
+      "scenario": "settings-read",
+      "provider": "codex",
+      "passed": true,
+      "tools": [
+        "get_settings_context",
+        "describe_settings",
+        "get_settings"
+      ]
+    },
+    {
+      "scenario": "settings-roundtrip",
+      "provider": "codex",
+      "passed": true,
+      "tools": [
+        "describe_settings",
+        "get_settings",
+        "get_settings_context",
+        "validate_settings",
+        "update_settings"
+      ]
+    },
+    {
+      "scenario": "memo-read",
+      "provider": "codex",
+      "passed": true,
+      "tools": [
+        "list_memos",
+        "read_memo"
+      ]
+    },
+    {
+      "scenario": "notifications-roundtrip",
+      "provider": "codex",
+      "passed": true,
+      "tools": [
+        "get_active_workspace",
+        "send_notification",
+        "list_notifications",
+        "clear_notifications"
+      ]
+    },
+    {
+      "scenario": "workspace-roundtrip",
+      "provider": "codex",
+      "passed": true,
+      "tools": [
+        "list_workspaces",
+        "create_workspace",
+        "switch_workspace",
+        "rename_workspace",
+        "delete_workspace"
+      ]
+    },
+    {
+      "scenario": "pane-stack-roundtrip",
+      "provider": "codex",
+      "passed": true,
+      "tools": [
+        "get_active_workspace",
+        "get_grid_state",
+        "list_profiles",
+        "stack_pane",
+        "write_to_terminal",
+        "activate_pane_layer",
+        "remove_pane"
+      ]
+    },
+    {
+      "scenario": "dev-settings-dialog",
+      "provider": "codex",
+      "passed": true,
+      "tools": [
+        "get_settings_context",
+        "open_settings",
+        "navigate_settings",
+        "take_screenshot",
+        "close_settings"
+      ]
+    }
+  ]
+}

@@ -123,6 +123,18 @@ VITE_LAYMUX_STRICT_MODE=0 cargo tauri dev
 - `{"mode":"prepare"}`는 실제 업데이트 준비 함수의 fence/drain·native 요청·frontend 저장/출력 캐시·ACK를 실행한다(ADR-0323). 200 응답은 commit revision과 마지막 캐시 진행을 포함한다. 성공·실패 뒤 fence와 이전 업데이트 상태를 복구하고 앱은 계속 실행된다.
 - `installer`·`restart`는 설치 뒤의 경로만 실행한다. 저장 단계 검증은 `prepare`로 먼저 수행하고, 이어서 `installer` 인계와 새 GUI 재결합을 확인한다. 다운로드·서명 검증·실제 설치기 실행은 이 조합으로 검증되지 않는다.
 
+## 4.8. WebView2 실패 복구는 dev의 WebView2 자식만 죽여 잰다
+
+WebView2 실패 복구([ADR-0336](adr/0336-webview2-process-failure-gui-restart.md), [data-flow.md §13.9](architecture/data-flow.md#139-webview2-프로세스-실패-복구-windows))는 GUI를 다음 프로세스로 바꾼다. `cargo tauri dev`로 띄우면 이전 GUI가 끝날 때 CLI가 vite를 함께 끝내서, 다음 GUI가 화면을 불러오지 못한다. 그래서 vite와 GUI를 따로 띄운다.
+
+1. `cd ui && VITE_LAYMUX_STRICT_MODE=0 npx vite --port 1420 --strictPort`를 백그라운드로 띄운다. 1420이 차 있으면 빈 포트로 띄우고, `src-tauri`에서 `TAURI_CONFIG='{"build":{"devUrl":"http://localhost:<포트>"}}' cargo build`로 빌드한다. StrictMode를 끄는 이유는 §4.7과 같다.
+2. `src-tauri`에서 `cargo build`한 `target\debug\laymux.exe`를 `WEBVIEW2_USER_DATA_FOLDER=<임시 폴더>`로 띄운다. 데이터 폴더를 나누지 않으면 release와 WebView2 browser를 공유하려다 실패한다(`0x8007139F`). stdout을 파일로 돌리면 다음 GUI들도 같은 파일에 로그를 남긴다.
+3. 대상은 포트 19281을 LISTEN하고 `ExecutablePath`가 이 워크트리 빌드인 PID다. WebView2 browser는 그 PID의 직계 자식인 `msedgewebview2.exe`(명령줄에 `--type=` 없음)이고, renderer는 browser의 자식 중 `--type=renderer`다. **release와 이미지 이름이 같으므로 반드시 이 부모 관계로만 고른다.**
+4. renderer를 죽이면 `RenderProcessExited`, browser를 죽이면 `BrowserProcessExited`가 기록되고, 1초 남짓 뒤 19281에 새 PID(`--relaunch-after <이전 PID>`)가 뜬다. `GET /api/v1/pty-sessions`의 `attachEpoch`가 오르고 `childPid`가 그대로인지, 터미널에 미리 export한 변수와 `$$`가 그대로인지로 재결합을 확인한다.
+5. 10분 안에 세 번째로 실패시키면 MessageBoxW가 뜬다. 창 제목이 아니라 GUI PID 소유의 `#32770` 창을 찾아 읽고, `WM_COMMAND`(`IDYES`=6, `IDNO`=7)로 답한다.
+6. 무응답은 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9333`으로 띄운 뒤 CDP로 만든다. `Runtime.evaluate`로 bounded busy loop를 걸고, 원하는 시점에 `Input.dispatchMouseEvent` 하나를 보낸 뒤 CDP 연결을 끊는다. DevTools가 붙어 있는 동안에는 무응답 보고가 늦거나 오지 않았다. 보고는 입력 약 15초 뒤에 한 번 오고, `frontend_silent_ms`가 30초 이상이면 복구한다.
+7. 기록 파일 `%APPDATA%\laymux-dev\cache\webview-recovery.json`이 예산을 막으므로 시나리오 사이에 지우고, 끝나면 지운다. 종료는 `bash scripts/kill-dev.sh`(필요하면 `--with-daemon`)로 한다.
+
 ## 5. 사보타주 검증 — 테스트가 결함을 못박고 있지 않은지
 
 수정을 되돌려 **의도한 테스트가 실제로 실패하는지** 확인한다. 통과하면 그 테스트는 아무것도 지키지 않는다.

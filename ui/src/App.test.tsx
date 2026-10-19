@@ -66,6 +66,7 @@ vi.mock("@/lib/persist-session", () => ({
 vi.mock("@/lib/tauri-api", () => {
   const unlisten = vi.fn();
   return {
+    getLegacyWslNotice: vi.fn().mockResolvedValue(false),
     onSyncCwd: vi.fn().mockResolvedValue(unlisten),
     onSyncBranch: vi.fn().mockResolvedValue(unlisten),
     onLxNotify: vi.fn().mockResolvedValue(unlisten),

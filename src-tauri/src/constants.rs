@@ -128,9 +128,13 @@ pub const CODEX_SQLITE_STATE_PREFIX: &str = "state_";
 /// Do not wait through shutdown when Codex has an SQLite writer lock.
 pub const CODEX_SQLITE_BUSY_TIMEOUT: u64 = 100;
 /// Upper bound for each Windows→WSL metadata probe used during session save.
+/// A shared guest run (ADR-0335) gets exactly this as its own timeout.
 pub const WSL_AGENT_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
-/// Bound per-pane Codex helper launches within the shared WSL deadline.
-pub const WSL_CODEX_PROBE_CONCURRENCY: usize = 4;
+/// Panes one WSL Codex diagnostics run reads, one after another inside the
+/// guest: one `wsl.exe` per chunk instead of one per pane. Chunks of the same
+/// distribution run concurrently, so a large SQLite log cannot serialize many
+/// panes past the shared deadline (ADR-0335).
+pub const WSL_CODEX_PROBE_BATCH_PANES: usize = 4;
 
 pub const TERM_PROGRAM_LAYMUX: &str = "laymux";
 pub const COLORTERM_TRUECOLOR: &str = "truecolor";
@@ -749,6 +753,34 @@ pub const WSL_LIVENESS_POSITIVE_MAX_AGE: Duration = Duration::from_secs(20);
 /// second `wsl.exe` spawn, and it only changes on `wsl --set-default`.
 pub const WSL_DEFAULT_DISTRO_CACHE_TTL: Duration = Duration::from_secs(60);
 
+// ── Shared WSL guest observations (ADR-0335) ───────────────────────
+
+/// How long a completed WSL guest observation — the agent process scan or a
+/// Codex diagnostics batch — keeps serving display polling.
+///
+/// Persistence and exit verification never take it on age: they accept only an
+/// observation that started at or after their own boundary. Two bounds, both
+/// asserted in `wsl_probe::snapshot`:
+///
+/// - at least `WSL_AGENT_PROBE_TIMEOUT`, so a polling caller joins a run that is
+///   still in flight instead of starting a second one beside it;
+/// - at most `ACTIVITY_RECONCILE_INTERVAL`, so attribution polling is never
+///   staler than one pass of the liveness verdict it is combined with.
+pub const WSL_GUEST_SNAPSHOT_MAX_AGE: Duration = Duration::from_secs(3);
+
+// ── Console-less WSL runs (ADR-0334) ───────────────────────────────
+
+/// File name of the WSL client. Bare, it resolves to the inbox launcher in
+/// `System32`; joined to the lifted install location it is the real client.
+pub const WSL_EXE: &str = "wsl.exe";
+
+/// Registry key (under `HKEY_LOCAL_MACHINE`) where the lifted WSL package
+/// records where it is installed.
+pub const WSL_MSI_REGISTRY_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI";
+
+/// Value under [`WSL_MSI_REGISTRY_KEY`] holding the install directory.
+pub const WSL_MSI_INSTALL_LOCATION_VALUE: &str = "InstallLocation";
+
 // ── Sleep prevention (ADR-0114) ────────────────────────────────────
 
 /// How often a held inhibitor is checked for having died behind our back.
@@ -777,6 +809,46 @@ pub const SLEEP_INHIBIT_RELEASE_GRACE: Duration = Duration::from_millis(300);
 /// Cap on captured `systemd-inhibit` stderr. Enough for a diagnostic, bounded
 /// so a chatty child cannot grow it without limit.
 pub const SLEEP_INHIBIT_STDERR_CAPTURE_LIMIT: usize = 4096;
+
+pub const EVENT_AGENT_HOOK_INSPECTION_NEEDED: &str = "agent-hook-inspection-needed";
+pub const AGENT_HOOK_INSPECTION_MAX_TARGETS: usize = 512;
+/// Live (terminal, Claude|Codex) usage observations kept for missing-integration
+/// notices (ADR-0330); closed terminals are forgotten.
+pub const AGENT_USAGE_MAX_OBSERVATIONS: usize = 1024;
+/// Resolved (provider, environment) usage targets kept for the app run (ADR-0330).
+pub const AGENT_USAGE_MAX_TARGETS: usize = 64;
+
+// ── WebView2 process failure recovery (ADR-0336) ───────────────────
+
+/// Label of the one webview window `tauri.conf.json` declares.
+pub const MAIN_WINDOW_LABEL: &str = "main";
+
+/// Automatic GUI restarts allowed inside [`WEBVIEW_RECOVERY_WINDOW_MS`]. A
+/// session that keeps killing WebView2 — the USER handle exhaustion of
+/// ADR-0334 — fails again right after a restart, so the budget is small and
+/// the next failure asks the user instead.
+pub const WEBVIEW_RECOVERY_MAX_RESTARTS: usize = 2;
+
+/// Sliding window of the restart budget. Kept on disk with the restarts:
+/// each restart is a new process that remembers nothing of the last one.
+pub const WEBVIEW_RECOVERY_WINDOW_MS: u64 = 10 * 60 * 1000;
+
+/// An unresponsive-renderer report restarts the GUI only once the frontend
+/// has sent no health report (ADR-0080, every second while its main thread
+/// runs) for this long. An output flood can keep the main thread busy for
+/// seconds (#606) and still let the probe through.
+pub const WEBVIEW_HANG_SILENCE_MS: u64 = 30_000;
+
+/// The recent recovery restarts, in the cache directory.
+pub const WEBVIEW_RECOVERY_HISTORY_FILE: &str = "webview-recovery.json";
+
+/// First argument of a GUI started to replace one whose WebView failed; the
+/// second is the PID of that predecessor.
+pub const GUI_RELAUNCH_AFTER_CLI_FLAG: &str = "--relaunch-after";
+
+/// How long a relaunched GUI waits for its predecessor to exit before it
+/// starts anyway. Exiting normally takes well under a second.
+pub const GUI_RELAUNCH_PREDECESSOR_WAIT_MS: u32 = 10_000;
 
 #[cfg(test)]
 mod tests {
@@ -879,10 +951,3 @@ mod tests {
         }
     }
 }
-pub const EVENT_AGENT_HOOK_INSPECTION_NEEDED: &str = "agent-hook-inspection-needed";
-pub const AGENT_HOOK_INSPECTION_MAX_TARGETS: usize = 512;
-/// Live (terminal, Claude|Codex) usage observations kept for missing-integration
-/// notices (ADR-0330); closed terminals are forgotten.
-pub const AGENT_USAGE_MAX_OBSERVATIONS: usize = 1024;
-/// Resolved (provider, environment) usage targets kept for the app run (ADR-0330).
-pub const AGENT_USAGE_MAX_TARGETS: usize = 64;

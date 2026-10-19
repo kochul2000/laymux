@@ -128,6 +128,7 @@
         --remote-main-button-scale: var(--remote-button-baseline-scale);
         --remote-keys-button-scale: var(--remote-button-baseline-scale);
         --touch-selection-handle-size: 22px;
+        --hidden-workspace-control-size: 32px;
         /* Every Remote toolbar (app header, drawer header, file viewer,
            GitHub/memo) shares one row height, control size and icon size.
            Heights are border-box and include the toolbar's bottom border. */
@@ -1779,7 +1780,7 @@
       .hidden-workspace-primary {
         display: flex;
         min-width: 0;
-        min-height: 24px;
+        min-height: var(--hidden-workspace-control-size);
         flex: 1 1 auto;
         align-items: center;
         overflow: hidden;
@@ -1795,6 +1796,10 @@
       }
       .hidden-workspace-primary:hover {
         background: var(--hover-bg);
+      }
+      .hidden-workspace-row > .visibility-button {
+        width: var(--hidden-workspace-control-size);
+        height: var(--hidden-workspace-control-size);
       }
       .workspace-item {
         width: 100%;
@@ -2482,6 +2487,9 @@
         user-select: none;
         -webkit-user-select: none;
         overscroll-behavior: contain;
+        /* The browser's tap overlay covers the entire terminal click target.
+           Keep xterm selection feedback without tinting the output on a tap. */
+        -webkit-tap-highlight-color: #00000000;
       }
       /* Match the desktop terminal's floating jump-to-bottom affordance while
          keeping the remote scroll position entirely surface-local. */

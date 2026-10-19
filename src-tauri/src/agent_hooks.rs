@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
-use crate::process::{headless_command, output_with_timeout};
+use crate::process::{headless_wsl_command, output_with_timeout};
 use crate::state::AppState;
 
 const MANAGE_TIMEOUT: Duration = Duration::from_secs(8);
@@ -39,7 +39,7 @@ pub fn environments() -> Result<Vec<Value>, AppError> {
     ];
     #[cfg(windows)]
     {
-        let mut command = headless_command("wsl.exe");
+        let mut command = headless_wsl_command();
         command.args(["--list", "--quiet"]);
         if let Ok(output) = output_with_timeout(&mut command, Duration::from_secs(3)) {
             if output.status.success() {
@@ -185,7 +185,7 @@ pub(crate) fn run_wsl_helper(
             .to_str()
             .ok_or_else(|| AppError::Other("Invalid helper path".into()))?,
     );
-    let mut command = headless_command("wsl.exe");
+    let mut command = headless_wsl_command();
     command
         .args(["-d", distro, "--exec", &executable])
         .args(args);

@@ -97,7 +97,7 @@ ADR 이 필요한 대표 기준:
 | [0077](0077-remote-terminal-font-serving.md) | Remote 터미널 폰트는 데스크톱 시스템 폰트를 sfnt 그대로 서빙한다 (woff2 변환 없음, 기본 off) | Accepted |
 | [0078](0078-wsl-in-frame-cursor-park-metadata.md) | WSL 인프레임 커서 주차는 바이트 보류 없이 reset 메타데이터로 전달 | Accepted |
 | [0079](0079-dec2026-cursor-gate-lifecycle-bypass.md) | DEC 2026 커서는 renderer lifecycle 우회까지 raw gate로 막는다 | Accepted |
-| [0080](0080-output-backlog-coalescing-and-out-of-band-frontend-vitals.md) | 스트림 의미는 원래 경계에서 처리하고 xterm 물리 쓰기만 제한적으로 묶는다 | Accepted |
+| [0080](0080-output-backlog-coalescing-and-out-of-band-frontend-vitals.md) | 스트림 의미는 원래 경계에서 처리하고 xterm 물리 쓰기만 제한적으로 묶는다 | Accepted (partially superseded by [0336](0336-webview2-process-failure-gui-restart.md)) |
 | [0081](0081-pane-focus-transition-single-owner.md) | Pane 포커스 전환은 단일 도메인 액션이 소유한다 | Accepted |
 | [0082](0082-terminal-helper-ime-focus-refresh.md) | 앱 복귀 시 DOM-active xterm helper 는 blur/focus 로 IME 문맥을 재활성화 (0057 확장) | Superseded by [0108](0108-windows-ime-editable-focus-relay.md) |
 | [0083](0083-automation-health-instance-identity.md) | Automation health는 프로세스·빌드 신원을 함께 공개한다 | Accepted |
@@ -121,7 +121,7 @@ ADR 이 필요한 대표 기준:
 | [0101](0101-active-workspace-weighted-parser-admission.md) | parser admission 은 pane 가중치가 아니라 클래스 몫으로 나누고 그 몫은 설정값이다 (0098 가중치·aging·설정 노출 정정) | Accepted |
 | [0102](0102-claude-usage-probe-headless-pty.md) | Claude 사용량은 레지스트리 밖 headless probe PTY 가 소유한다 | Proposed |
 | [0103](0103-usage-view-visible-rows.md) | UsageView 표시 행은 전역 사용량 설정이 소유한다 | Accepted |
-| [0104](0104-codex-usage-app-server-probe.md) | Codex 사용량은 app-server rate-limit API로 수집한다 | Accepted |
+| [0104](0104-codex-usage-app-server-probe.md) | Codex 사용량은 app-server rate-limit API로 수집한다 | Accepted (WSL 실행 수단은 [0334](0334-console-less-wsl-runs.md)가 대체) |
 | [0105](0105-widget-slots-and-status-line.md) | 위젯 배치는 설정의 슬롯 배열이 소유하고 status line 은 슬롯 영역 하나일 뿐이다 | Accepted |
 | [0106](0106-github-list-view-repo-registry.md) | GitHub 이슈/PR 목록은 repo 단위 레지스트리가 소유한다 | Proposed |
 | [0107](0107-widget-typography-and-usage-bar-width.md) | 위젯 글꼴은 전역 표시 설정이, 사용량 막대 너비는 인스턴스 옵션이 소유한다 | Accepted |
@@ -137,7 +137,7 @@ ADR 이 필요한 대표 기준:
 | [0117](0117-codex-session-restore.md) | Codex CLI 세션은 최상위 rollout과 terminal CWD를 연결해 안전한 resume 명령으로 복원 | Superseded by 0118 |
 | [0118](0118-codex-session-pid-attribution.md) | Codex 세션은 PTY 자식 PID와 Codex 진단 DB가 함께 증명한 thread로만 복원 | Accepted |
 | [0119](0119-settings-type-error-partial-recovery.md) | settings.json 타입 오류는 경로 단위로 드롭해 부분 복구하고, 확인 전까지 파일에 쓰지 않는다 | Proposed |
-| [0120](0120-wsl-agent-session-attribution.md) | WSL agent 세션은 distro 내부 terminal 환경 marker와 Linux PID로만 정확히 귀속 | Accepted |
+| [0120](0120-wsl-agent-session-attribution.md) | WSL agent 세션은 distro 내부 terminal 환경 marker와 Linux PID로만 정확히 귀속 | Accepted (probe 실행 수단은 [0334](0334-console-less-wsl-runs.md)가 대체) |
 | [0121](0121-single-pane-clear-user-pointed-scope.md) | 단일 pane 클리어는 사용자가 가리킨 pane 하나를 범위로 삼고, dock 을 포함한다 | Superseded by 0137 |
 | [0122](0122-terminal-output-server-delivery-expiry.md) | backend receipt·continuation grant expiry는 최장 직렬 복구 경로를 덮는 30초다 | Superseded by ADR-0126 |
 | [0123](0123-top-bar-window-controls-outrank-everything.md) | 상단 바에서 창 버튼(최소화·최대화·닫기)은 다른 모든 점유자보다 우선한다 | Accepted |
@@ -251,7 +251,7 @@ ADR 이 필요한 대표 기준:
 | [0231](0231-hidden-eviction-target-scoped-input-admission.md) | 숨김 자동 종료의 입력 차단은 대상 terminal에 한정한다 (0222 정정) | Accepted |
 | [0232](0232-unconsumed-resume-checkpoint.md) | 입력 전 복원 요청은 generation에 결부된 복원점으로 보존한다 | Accepted |
 | [0233](0233-remote-workspace-menu-pinning.md) | Remote 워크스페이스 메뉴는 기기 로컬 너비를 공유하고 viewport 컷오프보다 넓을 때만 고정한다 (0015·0209 확장) | Accepted |
-| [0234](0234-remote-user-key-explicit-submit.md) | Remote 사용자 키는 Enter 제출 의도를 별도로 저장한다 (0213 정정) | Accepted |
+| [0234](0234-remote-user-key-explicit-submit.md) | Remote 사용자 키는 Enter 제출 의도를 별도로 저장한다 (0213 정정) | Accepted (partially superseded by [0338](0338-remote-text-keys-edit-composer-draft.md)) |
 | [0235](0235-wrapped-path-link-logical-lines.md) | 줄바꿈 경로의 논리 줄 복원과 물리 셀 조각의 공동 수명 | Accepted |
 | [0236](0236-remote-composer-inline-attachments.md) | Remote Composer 인라인 첨부 칩 | Proposed |
 | [0237](0237-remote-floating-input-controls.md) | Remote 플로팅 입력은 기기 로컬 배치와 기존 액션을 공유한다 (0213·0228 확장) | Superseded by 0265 (패드 초기 기본값만) |
@@ -268,7 +268,7 @@ ADR 이 필요한 대표 기준:
 | [0248](0248-codex-turn-lifecycle-activity.md) | Codex 작업 상태는 현재 세션의 턴 기록으로 판정한다 | Accepted |
 | [0249](0249-codex-review-parent-turn-boundaries.md) | Codex 리뷰 경계에서 부모 턴의 귀속을 복원한다 | Accepted |
 | [0250](0250-terminal-task-state-and-notification-transitions.md) | 터미널 작업 상태와 확인 알림은 공통 전이로 판정한다 | Accepted |
-| [0251](0251-single-terminal-status-icon.md) | 터미널 활동은 다섯 종류 중 아이콘 하나로 표시한다 | Accepted |
+| [0251](0251-single-terminal-status-icon.md) | 터미널 활동은 다섯 종류 중 아이콘 하나로 표시한다 | Accepted (partially superseded by [0254](0254-confirmed-idle-before-output-activity.md), [0341](0341-task-result-glyphs-and-powershell-interrupt.md)) |
 | [0252](0252-claude-idle-before-app-identification.md) | 앱 식별 전 Claude 유휴를 실행 범위에 묶어 보류한다 | Accepted |
 | [0253](0253-wsl-claude-chrome-helper-role.md) | WSL Claude의 Chrome 호스트는 대화 프로세스 후보에서 제외한다 | Accepted |
 | [0254](0254-confirmed-idle-before-output-activity.md) | 확인된 작업 없음은 출력 활동보다 우선한다 | Accepted |
@@ -350,13 +350,21 @@ ADR 이 필요한 대표 기준:
 | [0325](0325-agent-mcp-registration.md) | 에이전트 MCP 등록은 Settings에서 실행 환경별로 확인·설치한다 (0006·0282 확장, 0324 수명 적용) | Accepted |
 | [0326](0326-remote-return-through-dashboard.md) | 원격 연결 복귀는 대시보드의 기존 인스턴스 선택을 재사용한다 | Accepted |
 
-| [0327](0327-remote-pane-action-keys-mirror-pc-control-bar.md) | Remote pane action 키는 PC 컨트롤 바 동작을 아이콘으로 실행한다 (0277 label 대체, 0237 PC 모드 제외) | Accepted |
+| [0327](0327-remote-pane-action-keys-mirror-pc-control-bar.md) | Remote pane action 키는 PC 컨트롤 바 동작을 아이콘으로 실행한다 (0277 label 대체, 0237 PC 모드 제외) | Accepted (Stack superseded by [0339](0339-remote-stack-creates-enterable-terminal.md)) |
 | [0328](0328-automation-stack-keeps-visible-layer.md) | Automation 스택 생성은 기존 표시 레이어를 유지한다 | Accepted |
 | [0329](0329-daemon-retains-workspace-display-context.md) | 데몬 재결합은 워크스페이스 표시 문맥을 메모리로 인계한다 | Accepted |
 | [0330](0330-agent-integration-missing-notice.md) | 실제 사용한 에이전트 환경의 훅·MCP 미설치를 앱 알림으로 안내한다 (0289·0324·0325 확장, 0282 준수) | Accepted |
 | [0331](0331-remote-memo-body-tool-swipe.md) | Remote 메모 본문은 수평 도구 스와이프를 받는다 (0261 입력칸 제외 규칙 일부 대체) | Accepted |
 | [0332](0332-remote-tool-bottom-controls-and-github-back.md) | Remote 우측 도구는 하단 컨트롤바를 기본으로 하고 PRs에서 Issues로 돌아간 뒤 닫는다 (0261 close 동작 일부 대체) | Accepted |
 | [0333](0333-destructive-confirmation-global-and-pane-control-bar.md) | 파괴적 action 두 번 확인을 전역 설정으로 올리고 pane 컨트롤 바에도 적용한다 (0211 설정 키·적용 범위 대체) | Accepted |
+| [0334](0334-console-less-wsl-runs.md) | laymux가 띄우는 파이프 기반 WSL 실행은 콘솔 없이 lifted `wsl.exe`를 직접 띄운다 (0120·0104 실행 수단 일부 대체) | Accepted |
+| [0335](0335-shared-wsl-guest-observations.md) | WSL 게스트 관측은 distribution별 공유 run으로 합치고, 신선도는 호출자가 계약한다 (0120 probe 실행 단위·0238 진단 실행 방식 확장) | Accepted |
+| [0336](0336-webview2-process-failure-gui-restart.md) | WebView2 프로세스가 실패하면 PTY 데몬 세션을 인계하고 GUI를 다시 시작하며, 재시작 예산으로 반복을 멈춘다 (0080 일부 대체) | Accepted |
+| [0337](0337-legacy-wsl-client-warning.md) | inbox(구형) WSL 클라이언트로 WSL을 쓰면 경고만 띄운다 (0334 후속) | Accepted |
+| [0338](0338-remote-text-keys-edit-composer-draft.md) | Remote 텍스트 사용자 키는 Composer 초안을 편집한다 (0234 일부 정정) | Accepted |
+| [0339](0339-remote-stack-creates-enterable-terminal.md) | Remote Stack은 열린 터미널의 프로필·CWD를 이어받아 바로 진입 가능한 터미널을 만든다 (0327 일부 정정) | Accepted |
+| [0340](0340-claude-transcript-turn-result.md) | Claude 턴의 종료 결과는 작업 시작 기준점 이후의 대화 기록으로 판정한다 (0250 보완, 0321 상태 판정 유지) | Accepted |
+| [0341](0341-task-result-glyphs-and-powershell-interrupt.md) | 종료 결과와 관측 상태를 서로 다른 아이콘으로 표시하고, PowerShell 중단을 OSC 133 D로 전달한다 (0251 일부 정정, 0262 보완) | Accepted |
 | [0342](0342-automation-layer-activation-explicit-focus.md) | Automation 레이어 표시와 포커스는 별도 도구로 요청한다 (0297·0324 표시·포커스 결합 계약 대체) | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.

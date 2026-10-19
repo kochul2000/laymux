@@ -1,16 +1,18 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-#[cfg(windows)]
-use std::time::Duration;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+#[cfg(windows)]
 use crate::constants::WSL_AGENT_PROBE_TIMEOUT;
 use crate::error::AppError;
 use crate::state::AppState;
-use crate::wsl_probe::remaining_timeout;
+use crate::wsl_probe::snapshot::{GuestObservation, GuestProbeKey, TerminalCatalog};
+use crate::wsl_probe::WslTerminalTargets;
 #[cfg(windows)]
 use crate::wsl_probe::{run_probe_script, wsl_terminal_targets};
 
+/// `arg0` of the guest shell, and the probe's name in the shared run table.
+const PROBE_NAME: &str = "laymux-wsl-agent-probe";
 const PROBE_HEADER: &str = "LAYMUX_WSL_AGENT_PROBE_V3";
 const PROBE_END: &str = "LAYMUX_WSL_AGENT_PROBE_END";
 
@@ -89,6 +91,7 @@ pub(super) struct WslAgentProcess {
     pub rollout_paths: Vec<String>,
 }
 
+#[derive(Debug)]
 pub(super) struct WslAgentProcessLookup {
     pub attributions: HashMap<String, Option<WslAgentProcess>>,
     pub failed_terminal_ids: HashSet<String>,
@@ -149,13 +152,18 @@ impl WslAgentProcess {
 /// An absent key means that provider is not running in the terminal. A present
 /// `None` means the WSL boundary was unavailable or attribution was ambiguous,
 /// so the caller must clear stale session IDs.
+///
+/// The scan itself is provider-agnostic, so every provider reads the same
+/// shared per-distribution run; `observation` is the caller's freshness
+/// contract for it (ADR-0335).
 pub(super) fn resolve_wsl_agent_processes(
     state: &AppState,
     provider: WslAgentProvider,
+    observation: GuestObservation,
 ) -> Result<WslAgentProcessLookup, AppError> {
     #[cfg(not(windows))]
     {
-        let _ = (state, provider);
+        let _ = (state, provider, observation);
         return Ok(WslAgentProcessLookup {
             attributions: HashMap::new(),
             failed_terminal_ids: HashSet::new(),
@@ -169,77 +177,121 @@ pub(super) fn resolve_wsl_agent_processes(
         // adapter must not multiply its timeout by the number of distros.
         let deadline = Instant::now() + WSL_AGENT_PROBE_TIMEOUT;
         let targets = wsl_terminal_targets(state, deadline)?;
-        let mut result = HashMap::new();
-        let mut failed_terminal_ids = HashSet::new();
-        if targets.lookup_failed {
-            failed_terminal_ids.extend(
-                targets
-                    .targets
-                    .iter()
-                    .filter(|(_, distro)| distro.is_none())
-                    .map(|(terminal_id, _)| terminal_id.clone()),
-            );
-        }
-        let mut by_distro: HashMap<String, Vec<String>> = HashMap::new();
-        for (terminal_id, distro) in targets.targets {
-            match distro {
-                Some(distro) => by_distro.entry(distro).or_default().push(terminal_id),
-                None => {
-                    result.insert(terminal_id, None);
-                }
-            }
-        }
-
-        let mut distro_targets: Vec<_> = by_distro.into_iter().collect();
-        distro_targets.sort_by(|left, right| left.0.cmp(&right.0));
-        for (distro, terminal_ids) in distro_targets {
-            let entries = match remaining_timeout(deadline)
-                .ok_or_else(|| "WSL agent resolution deadline expired".to_string())
-                .and_then(|timeout| probe_distro(&distro, timeout))
-            {
-                Ok(entries) => entries,
-                Err(error) => {
-                    tracing::warn!(%distro, %error, "WSL agent process probe failed closed");
-                    failed_terminal_ids.extend(terminal_ids.iter().cloned());
-                    for terminal_id in terminal_ids {
-                        result.insert(terminal_id, None);
-                    }
-                    continue;
-                }
-            };
-            let grouped = group_by_terminal(entries);
-            for terminal_id in terminal_ids {
-                let Some(entries) = grouped.get(&terminal_id) else {
-                    continue;
-                };
-                let Some(selected) = select_top_level_agent(entries, provider) else {
-                    continue;
-                };
-                result.insert(
-                    terminal_id,
-                    selected.map(|entry| WslAgentProcess {
-                        pid: entry.pid,
-                        distro: distro.clone(),
-                        home: entry.home,
-                        codex_home: entry.codex_home,
-                        grok_home: entry.grok_home,
-                        rollout_paths: entry.rollout_paths,
-                    }),
-                );
-            }
-        }
-        Ok(WslAgentProcessLookup {
-            attributions: result,
-            failed_terminal_ids,
-        })
+        resolve_targets(state, targets, provider, observation, deadline, scan_distro)
     }
 }
 
+/// The platform-independent half of [`resolve_wsl_agent_processes`]: group the
+/// targets by distribution, read each distribution's scan, and select this
+/// provider's process per pane. `scan` runs one guest scan and returns its raw
+/// stdout.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn resolve_targets<S>(
+    state: &AppState,
+    targets: WslTerminalTargets,
+    provider: WslAgentProvider,
+    observation: GuestObservation,
+    deadline: Instant,
+    scan: S,
+) -> Result<WslAgentProcessLookup, AppError>
+where
+    S: Fn(&str, Duration) -> Result<Vec<u8>, String> + Clone + Send + 'static,
+{
+    let mut result = HashMap::new();
+    let mut failed_terminal_ids = HashSet::new();
+    if targets.lookup_failed {
+        failed_terminal_ids.extend(
+            targets
+                .targets
+                .iter()
+                .filter(|(_, distro)| distro.is_none())
+                .map(|(terminal_id, _)| terminal_id.clone()),
+        );
+    }
+    let mut by_distro: HashMap<String, Vec<String>> = HashMap::new();
+    for (terminal_id, distro) in targets.targets {
+        match distro {
+            Some(distro) => by_distro.entry(distro).or_default().push(terminal_id),
+            None => {
+                result.insert(terminal_id, None);
+            }
+        }
+    }
+
+    let mut distro_targets: Vec<_> = by_distro.into_iter().collect();
+    distro_targets.sort_by(|left, right| left.0.cmp(&right.0));
+    if distro_targets.is_empty() {
+        return Ok(WslAgentProcessLookup {
+            attributions: result,
+            failed_terminal_ids,
+        });
+    }
+    // Read after the targets: a pane created or respawned in between moves the
+    // catalog, so no scan from before it can be reused for it.
+    let catalog = TerminalCatalog::of(state)?;
+    // Every distribution's run starts before any is awaited, so they overlap
+    // inside the one deadline instead of queueing behind each other.
+    let pending: Vec<_> = distro_targets
+        .into_iter()
+        .map(|(distro, terminal_ids)| {
+            let (scan, scan_distro) = (scan.clone(), distro.clone());
+            let pending = state.wsl_guest_snapshots.request(
+                GuestProbeKey::new(PROBE_NAME, &distro, Vec::new()),
+                &catalog,
+                observation,
+                deadline,
+                move |timeout| scan(&scan_distro, timeout),
+            );
+            (distro, terminal_ids, pending)
+        })
+        .collect();
+    for (distro, terminal_ids, pending) in pending {
+        let entries = match pending
+            .wait(deadline)
+            .and_then(|output| parse_probe_output(&output))
+        {
+            Ok(entries) => entries,
+            Err(error) => {
+                tracing::warn!(%distro, %error, "WSL agent process probe failed closed");
+                failed_terminal_ids.extend(terminal_ids.iter().cloned());
+                for terminal_id in terminal_ids {
+                    result.insert(terminal_id, None);
+                }
+                continue;
+            }
+        };
+        let grouped = group_by_terminal(entries);
+        for terminal_id in terminal_ids {
+            let Some(entries) = grouped.get(&terminal_id) else {
+                continue;
+            };
+            let Some(selected) = select_top_level_agent(entries, provider) else {
+                continue;
+            };
+            result.insert(
+                terminal_id,
+                selected.map(|entry| WslAgentProcess {
+                    pid: entry.pid,
+                    distro: distro.clone(),
+                    home: entry.home,
+                    codex_home: entry.codex_home,
+                    grok_home: entry.grok_home,
+                    rollout_paths: entry.rollout_paths,
+                }),
+            );
+        }
+    }
+    Ok(WslAgentProcessLookup {
+        attributions: result,
+        failed_terminal_ids,
+    })
+}
+
+/// One guest `/proc` scan of `distro`, as raw stdout.
 #[cfg(windows)]
-fn probe_distro(distro: &str, timeout: Duration) -> Result<Vec<WslProcessEntry>, String> {
+fn scan_distro(distro: &str, timeout: Duration) -> Result<Vec<u8>, String> {
     let script = crate::wsl_probe::with_agent_role_probe(WSL_PROCESS_PROBE);
-    let stdout = run_probe_script(distro, &script, "laymux-wsl-agent-probe", timeout)?;
-    parse_probe_output(&stdout)
+    run_probe_script(distro, &script, PROBE_NAME, timeout)
 }
 
 fn parse_probe_output(output: &[u8]) -> Result<Vec<WslProcessEntry>, String> {
@@ -401,3 +453,6 @@ fn process_depth(pid: u32, by_pid: &HashMap<u32, u32>) -> Option<usize> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod shared_scan_tests;

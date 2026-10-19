@@ -1273,6 +1273,73 @@ test.describe("remote mobile layout", () => {
     await expect(page.locator("#paneManager")).not.toBeVisible();
   });
 
+  for (const [width, navigationWidth] of [
+    [320, 200],
+    [320, 300],
+    [390, 200],
+    [390, 300],
+  ]) {
+    test(`숨김 워크스페이스는 ${width}px 화면·${navigationWidth}px 메뉴에서 32px 터치 영역을 제공한다`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 844 });
+      await page.addInitScript((menuWidth) => {
+        localStorage.setItem(
+          "laymux.remote.displaySettings",
+          JSON.stringify({ navigationWidth: menuWidth }),
+        );
+      }, navigationWidth);
+      const controls = await routeRemoteWithWorkspaces(page, [], {
+        includeGamma: true,
+        initialHiddenWorkspaceIds: ["ws-b", "ws-c"],
+      });
+      await page.goto("http://remote.test/remote/#token=test-token");
+      await page.locator("#connect").click();
+      await page.locator("#navToggle").click();
+      await expect
+        .poll(() =>
+          page
+            .locator('[data-workspace-manage="ws-a"]')
+            .evaluateAll((buttons) =>
+              buttons.map((button) => button.getBoundingClientRect().height),
+            ),
+        )
+        .toEqual([18]);
+      await page.locator("#hiddenWorkspaceToggle").click();
+
+      await expect(page.locator(".hidden-workspace-row")).toHaveCount(2);
+      for (const row of await page.locator(".hidden-workspace-row").all()) {
+        const primary = (await row.locator(".hidden-workspace-primary").boundingBox())!;
+        const restore = (await row.locator(".visibility-button").boundingBox())!;
+        const bounds = (await row.boundingBox())!;
+        expect(primary.height).toBe(32);
+        expect(restore.width).toBe(32);
+        expect(restore.height).toBe(32);
+        expect(primary.x + primary.width).toBeLessThanOrEqual(restore.x);
+        expect(restore.x + restore.width).toBeLessThanOrEqual(bounds.x + bounds.width + 1);
+      }
+      await page.screenshot({
+        path: `../.screenshots/remote-hidden-workspace-${width}-${navigationWidth}-32px.png`,
+      });
+      await page
+        .locator('[data-hidden-workspace-restore="ws-b"]')
+        .tap({ position: { x: 16, y: 28 } });
+      await expect(page.locator('[data-hidden-workspace="ws-b"]')).toHaveCount(0);
+      await expect(page.locator('[data-hidden-workspace-restore="ws-c"]')).toBeFocused();
+      expect(controls.visibilityRequests).toEqual([
+        {
+          path: "/remote/v1/workspaces/ws-b/visibility",
+          body: { hidden: false, leaseId: "lease-1" },
+        },
+      ]);
+      await page
+        .locator('[data-hidden-workspace="ws-c"] .hidden-workspace-primary')
+        .tap({ position: { x: 10, y: 28 } });
+      await expect(page.locator("#hiddenWorkspaceToggle")).toBeHidden();
+      expect(controls.visibilityRequests).toHaveLength(2);
+    });
+  }
+
   test("keeps keyboard focus after partial and final hidden workspace restores", async ({
     page,
   }) => {

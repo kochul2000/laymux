@@ -4,6 +4,7 @@ mod android_pairing;
 mod app_update;
 mod archive_listing;
 mod claude_session;
+mod claude_turn_result;
 mod codex_session;
 mod codex_usage;
 mod file_ops;
@@ -30,6 +31,7 @@ mod terminal_teardown;
 mod usage;
 mod viewer_startup;
 mod wsl_agent_session;
+mod wsl_client;
 
 pub use crate::cloud::commands::*;
 pub use agent_hooks::*;
@@ -38,6 +40,7 @@ pub use android_pairing::*;
 pub use app_update::*;
 pub use archive_listing::*;
 pub use claude_session::*;
+pub use claude_turn_result::*;
 pub use codex_session::turns::*;
 pub use codex_session::*;
 pub use codex_usage::*;
@@ -62,6 +65,7 @@ pub use terminal_home::*;
 pub use terminal_output_surface::*;
 pub use usage::*;
 pub use viewer_startup::*;
+pub use wsl_client::*;
 
 /// Commands whose body reaches the filesystem, spawns a process or enumerates
 /// a system resource must not run on the main thread (ADR-0202).
@@ -158,6 +162,10 @@ mod main_thread_io {
             &["get_agent_session_states"],
         ),
         (
+            include_str!("claude_turn_result.rs"),
+            &["begin_claude_turns", "get_claude_turn_results"],
+        ),
+        (
             include_str!("codex_usage.rs"),
             &["get_codex_usage_snapshot"],
         ),
@@ -171,6 +179,7 @@ mod main_thread_io {
             include_str!("terminal_home.rs"),
             &["get_terminal_home_directory"],
         ),
+        (include_str!("wsl_client.rs"), &["get_legacy_wsl_notice"]),
     ];
 
     #[test]

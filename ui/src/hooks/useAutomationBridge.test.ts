@@ -3522,7 +3522,7 @@ describe("spatial pane numbers (issue #256)", () => {
     expect(byId[BL]).toBe(3);
     expect(summary.terminalCount).toBe(3);
     expect(lastCommand.command).toBe("cargo test");
-    expect(status).toMatchObject({ icon: "—", observation: "unknown", outputActive: false });
+    expect(status).toMatchObject({ icon: "·", observation: "unknown", outputActive: false });
   });
 
   it("projects never-mounted workspace terminals with the same selector placeholders as PC", () => {
@@ -3598,7 +3598,7 @@ describe("spatial pane numbers (issue #256)", () => {
     expect(instances.find((instance) => instance.id === "terminal-cold")).toMatchObject({
       profile: "WSL",
       workspaceId: "ws-cold",
-      selectorStatus: { icon: "—", observation: "unknown" },
+      selectorStatus: { icon: "·", observation: "unknown" },
       selectorDisplay: {
         environment: "WSL",
         activity: { label: "shell", color: "var(--text-secondary)" },
@@ -3637,7 +3637,7 @@ describe("spatial pane numbers (issue #256)", () => {
     const terminal = instances.find((instance) => instance.id === `terminal-${TL}`)!;
 
     expect(terminal.selectorStatus).toMatchObject({
-      icon: "—",
+      icon: "·",
       observation: "unknown",
       color: "var(--text-secondary)",
       text: "Implementing / Editing navigation.rs",
@@ -4592,9 +4592,20 @@ describe("panes.stack / activateLayer / remove(layerId) bridge (ADR-0297)", () =
     expect(act("closeById", { paneId: layerId }).success).toBe(false);
   });
 
-  it("stackById stacks an EmptyView layer on the slot holding the pane and focuses it (ADR-0327)", () => {
+  it("stackById creates an enterable terminal with the selected layer's profile and CWD", () => {
     const store = useWorkspaceStore.getState();
     const selectedId = store.getActiveWorkspace()!.panes[0].layers[0].id;
+    store.setPaneView(0, { type: "TerminalView", profile: "WSL", lastCwd: "/saved" });
+    useTerminalStore.getState().registerInstance({
+      id: `terminal-${selectedId}`,
+      profile: "WSL",
+      label: "WSL",
+      syncGroup: "none",
+    });
+    useTerminalStore.getState().updateInstanceInfo(`terminal-${selectedId}`, { cwd: "/live" });
+    // Remote may still show an inactive layer: inherit that terminal, not the
+    // host's currently visible layer or its different profile/CWD.
+    store.stackPane(0, { type: "TerminalView", profile: "PowerShell", lastCwd: "C:\\other" });
     store.swapPanes(0, 1);
     const result = act("stackById", { paneId: selectedId });
     expect(result.success).toBe(true);
@@ -4602,10 +4613,31 @@ describe("panes.stack / activateLayer / remove(layerId) bridge (ADR-0297)", () =
     const panes = useWorkspaceStore.getState().getActiveWorkspace()!.panes;
     const slotIndex = panes.findIndex((pane) => pane.layers.some((l) => l.id === selectedId));
     const slot = panes[slotIndex];
-    expect(slot.layers.map((layer) => layer.id)).toEqual([selectedId, layerId]);
-    expect(slot.layers[1].view).toEqual({ type: "EmptyView" });
+    const layer = slot.layers.find((item) => item.id === layerId)!;
+    expect(slot.layers).toHaveLength(3);
+    expect(layer.view).toEqual({ type: "TerminalView", profile: "WSL" });
+    expect(useTerminalRestartStore.getState().requests[layerId]?.cwd).toBe("/live");
+    expect(result.data).toMatchObject({ terminalId: `terminal-${layerId}` });
     expect(slot.activeLayerId).toBe(layerId);
     expect(useGridStore.getState().focusedPaneIndex).toBe(slotIndex);
+  });
+
+  it("stackById uses the saved CWD before a session starts and rejects non-terminal layers", () => {
+    const store = useWorkspaceStore.getState();
+    const paneId = store.getActiveWorkspace()!.panes[0].layers[0].id;
+    const before = store.getActiveWorkspace()!.panes[0].layers.length;
+    expect(act("stackById", { paneId }).success).toBe(false);
+    expect(store.getActiveWorkspace()!.panes[0].layers).toHaveLength(before);
+    store.setPaneView(0, { type: "TerminalView", lastCwd: "/saved" });
+    const result = act("stackById", { paneId });
+    expect(result.success).toBe(true);
+    const layerId = (result.data as { layerId: string }).layerId;
+    expect(store.getActiveWorkspace()!.panes[0].layers.find((l) => l.id === layerId)?.view).toEqual(
+      {
+        type: "TerminalView",
+      },
+    );
+    expect(useTerminalRestartStore.getState().requests[layerId]?.cwd).toBe("/saved");
   });
 
   it("stackById rejects a pane outside the active workspace", () => {
@@ -4615,6 +4647,32 @@ describe("panes.stack / activateLayer / remove(layerId) bridge (ADR-0297)", () =
     const paneId = copied.paneIdMap[source.panes[0].layers[0].id];
     expect(act("stackById", { paneId }).success).toBe(false);
     expect(act("stackById", {}).success).toBe(false);
+  });
+
+  it("stackById preserves the runtime default profile without inheriting another layer's CWD or agent session", () => {
+    const store = useWorkspaceStore.getState();
+    const paneId = store.getActiveWorkspace()!.panes[0].layers[0].id;
+    store.setPaneView(0, { type: "TerminalView", lastCodexSession: "old-session" });
+    useTerminalStore.getState().registerInstance({
+      id: `terminal-${paneId}`,
+      profile: "PowerShell",
+      label: "PS",
+      syncGroup: "none",
+    });
+    store.stackPane(0, { type: "TerminalView", profile: "WSL", lastCwd: "/unrelated" });
+    const result = act("stackById", { paneId });
+    expect(result.success).toBe(true);
+    const layerId = (result.data as { layerId: string }).layerId;
+    expect(store.getActiveWorkspace()!.panes[0].layers.find((l) => l.id === layerId)?.view).toEqual(
+      {
+        type: "TerminalView",
+        profile: "PowerShell",
+      },
+    );
+    expect(useTerminalRestartStore.getState().requests[layerId]).toMatchObject({
+      fresh: true,
+      cwd: undefined,
+    });
   });
 
   it("closeById resolves the current index after pane rearrangement", () => {

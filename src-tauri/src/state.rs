@@ -72,6 +72,10 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 /// only after the checkpoint registry lock is released (ADR-0222).
 /// `file_viewer_signal` likewise guards only the last desktop viewer signal; the
 /// heartbeat reads it after releasing `remote_control` (ADR-0291).
+/// `wsl_guest_snapshots` likewise owns only its run table and per-run outcome
+/// mutexes. Callers read `pty_handles` for the catalog and release it before
+/// entering; neither mutex is held across guest I/O, while waiting on the
+/// other, or with any ordered `AppState` lock (ADR-0335).
 /// The Android pairing lifecycle mutex is outside `AppState`, but unlike those
 /// isolated registries it may nest `remote_access`: acquire it before every
 /// `AppState` lock and never enter it while holding one (ADR-0144).
@@ -202,9 +206,10 @@ pub struct AppState {
     pub settings_update_lock: tokio::sync::Mutex<()>,
     /// Frontend responsiveness vitals plus bridge counters, served by
     /// `GET /api/v1/diagnostics/frontend` without a bridge round-trip so a stalled
-    /// WebView is still diagnosable (issue #606). Diagnostic only — its own
-    /// `Mutex`/atomics participate in no ordering with the locks above because
-    /// nothing reads it while holding another AppState lock.
+    /// WebView is still diagnosable (issue #606). Diagnostic, except that the
+    /// WebView hang recovery reads when the last report landed (ADR-0336). Its
+    /// own `Mutex`/atomics participate in no ordering with the locks above
+    /// because nothing reads it while holding another AppState lock.
     pub frontend_health: Arc<crate::frontend_health::FrontendHealthState>,
     /// Claude usage probes. Owns headless `claude` PTYs that are deliberately
     /// absent from `terminals`, keyed by `CLAUDE_CONFIG_DIR` (ADR-0102).
@@ -223,13 +228,18 @@ pub struct AppState {
     /// Terminal ids already created once in this GUI process. Only the first
     /// create of an id may adopt a PTY daemon session (ADR-0301).
     pub pty_daemon_adoption_seen: Mutex<std::collections::HashSet<String>>,
-    /// Set while an update replaces this GUI: its PTY daemon sessions are left
-    /// running for the updated GUI to adopt instead of being ended (ADR-0308).
+    /// Set while an update (ADR-0308) or a WebView recovery restart
+    /// (ADR-0336) replaces this GUI: its PTY daemon sessions are left running
+    /// for the next GUI to adopt instead of being ended.
     pub pty_daemon_update_handoff: std::sync::atomic::AtomicBool,
     /// Last path-less desktop FileViewer signal, served on Remote heartbeats
     /// without a bridge round trip (ADR-0291). Owns its own mutex and joins no
     /// ordering above: nothing acquires it while holding another AppState lock.
     pub file_viewer_signal: crate::remote_server::FileViewerSignalMirror,
+    /// Shared WSL guest probe runs — agent process scans and Codex diagnostics
+    /// — with single-flight and per-caller freshness (ADR-0335). Leaf: see the
+    /// lock-ordering notes above.
+    pub wsl_guest_snapshots: crate::wsl_probe::snapshot::GuestProbeCache,
 }
 
 /// Process-global per-terminal write/exec serialization table. See
@@ -420,6 +430,7 @@ impl AppState {
             pty_daemon_adoption_seen: Mutex::new(std::collections::HashSet::new()),
             pty_daemon_update_handoff: std::sync::atomic::AtomicBool::new(false),
             file_viewer_signal: crate::remote_server::FileViewerSignalMirror::default(),
+            wsl_guest_snapshots: crate::wsl_probe::snapshot::GuestProbeCache::default(),
         }
     }
 }
@@ -475,7 +486,8 @@ impl AppState {
 
     /// From now on this GUI detaches from its PTY daemon sessions instead of
     /// ending them: the installer teardown and the app exit path leave them
-    /// running for the updated GUI to adopt (ADR-0308).
+    /// running for the updated GUI to adopt (ADR-0308). A restart that
+    /// replaces a failed WebView hands them over the same way (ADR-0336).
     pub fn begin_update_handoff(&self) {
         self.pty_daemon_update_handoff
             .store(true, std::sync::atomic::Ordering::Release);
@@ -497,7 +509,8 @@ impl AppState {
     /// one its terminate request before the process goes away. This only
     /// enqueues the request; it does not wait for the children (ADR-0300).
     pub fn terminate_daemon_sessions_on_exit(&self) {
-        // Restarting into an update hands the sessions over instead (ADR-0308).
+        // Restarting into an update or out of a failed WebView hands the
+        // sessions over instead (ADR-0308, ADR-0336).
         if self.update_handoff_started() {
             return;
         }

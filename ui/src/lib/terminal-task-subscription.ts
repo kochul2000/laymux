@@ -7,6 +7,7 @@ import { resolveWorkspaceId } from "./workspace-utils";
 import { observeTerminalTask } from "./terminal-task-observers";
 import { useSettingsStore } from "@/stores/settings-store";
 import { heuristicTask } from "./terminal-task-detection";
+import { claudeTurnsPending } from "./claude-turn-result";
 
 /** Sole publisher of automatic task notifications (ADR-0250). */
 export function subscribeTerminalTasks(): () => void {
@@ -42,9 +43,18 @@ export function subscribeTerminalTasks(): () => void {
               ? "warning"
               : "info";
       const name = instance.activity?.name ?? instance.lastCommand ?? "작업";
-      const message = waiting
-        ? `${name}: 입력 대기`
-        : `${name}: 종료${task.result === "success" ? " (성공)" : task.result === "failure" ? " (실패)" : task.result === "interrupted" ? " (중단)" : " (결과 미관측)"}`;
+      // ADR-0340: a Claude result still being read is not "unobserved" yet.
+      const resultSuffix =
+        task.result === "success"
+          ? " (성공)"
+          : task.result === "failure"
+            ? " (실패)"
+            : task.result === "interrupted"
+              ? " (중단)"
+              : claudeTurnsPending(instance)
+                ? ""
+                : " (결과 미관측)";
+      const message = waiting ? `${name}: 입력 대기` : `${name}: 종료${resultSuffix}`;
       const workspaceId = resolveWorkspaceId(instance.id);
       useNotificationStore.getState().addNotification({
         terminalId: instance.id,

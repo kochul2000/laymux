@@ -72,6 +72,8 @@ ADR 은 구현 설명서가 아니라 결정과 근거의 불변 기록이다. �
 
 ## 자율 검증 루프
 
+사용자가 이미지·차트·파일을 화면에 보여 달라고 하면 연결된 laymux MCP의 표시 도구를 실제로 호출한다. 호스트가 읽을 수 있는 파일은 `open_file_viewer({path})`, 파일 없이 이미지 바이트만 있으면 `show_image({data,mime_type?})`를 사용한다. 내장 `view_image`·`Read`는 에이전트의 내용 확인이므로 사용자 화면 표시를 대신하지 않는다. 표시 도구의 성공 응답 전에는 띄웠다고 보고하지 말고, 열린 뷰어는 사용자가 볼 수 있도록 유지한다. 분석만 요청하거나 특정 앱·표시 위치를 지정하면 그 요청을 따른다. 개발 검증은 아래 dev 포트 규칙을 적용한다.
+
 UI/디자인 변경은 `/screenshot` 스킬로 최종 결과를 확인한다. 스크린샷으로 못 보는 상태(모달 등)는 **Automation API 엔드포인트를 확장**해 프로그래밍적으로 트리거 후 검증한다. 기능 추가 시 항상 API 확장 + 자율 루프(API 조작→스크린샷→평가→수정) 구성 가능 여부를 고려한다. ([api-contracts.md §12](docs/architecture/api-contracts.md), [ADR-0002](docs/adr/0002-automation-api-fixed-port-ip-allowlist.md))
 
 - **포트 규칙:** release=19280, dev=19281. 빌드 타입당 1 인스턴스. 개발 중 스크린샷/API 는 **반드시 dev(19281)**, release(19280)는 사용자 소유이므로 건드리지 않는다. 인증 불필요(IP allowlist).
@@ -82,7 +84,7 @@ UI/디자인 변경은 `/screenshot` 스킬로 최종 결과를 확인한다. �
 ## 작업 규칙 (코드 짜기 전 확인)
 
 - **Rust 설계 원칙** — [api-contracts.md §14](docs/architecture/api-contracts.md). 에러 `AppError`(프로덕션 `unwrap()` 금지), 락 `MutexExt::lock_or_err()` + `state.rs` 순서, 매직 스트링은 `constants.rs`, 파일 500줄↑ 분할, `#[tauri::command]` 는 얇은 진입점(핵심 로직은 `&AppState` 내부 함수), `eprintln!` 대신 `tracing`.
-- **외부 프로세스는 `crate::process::headless_command()`** — `std::process::Command::new()` 금지(Windows 콘솔 창 깜빡임 방지).
+- **외부 프로세스는 `crate::process::headless_command()`** — `std::process::Command::new()` 금지(Windows 콘솔 창 깜빡임 방지). laymux가 띄우는 파이프 기반 `wsl.exe` 실행(Windows 의 WSL gh prefix 포함)은 `crate::process::headless_wsl_command()` — lifted WSL 이면 클라이언트를 콘솔 없이 직접 띄워 실행마다 `conhost.exe` 를 만들지 않는다(inbox fallback 은 기존처럼 콘솔을 만든다). PTY 는 대상이 아니다([ADR-0334](docs/adr/0334-console-less-wsl-runs.md)). WSL 게스트 에이전트 스캔·Codex 진단은 직접 띄우지 말고 `wsl_probe::snapshot` 공유 run 으로 요청한다 — 세션 영속·종료 확인은 `GuestObservation::StartedAfter`, 표시 폴링만 `Reusable`([ADR-0335](docs/adr/0335-shared-wsl-guest-observations.md)).
 - **OSC 처리는 Rust 전용** — 파싱(`osc.rs`)·훅(`osc_hooks.rs`)·디스패치(`dispatch_osc_action`)는 Rust PTY 콜백 단일 패스. 프론트는 구조화 Tauri 이벤트만 구독. ([ADR-0001](docs/adr/0001-osc-rust-single-pass.md))
 - **CWD 는 SyncGroup 으로** — 백그라운드 셸을 만들지 말고 `terminalStore` 의 syncGroup CWD 를 구독. FS 접근은 Rust `std::fs`. ([ADR-0003](docs/adr/0003-cwd-single-source-syncgroup.md))
 - **원시 상태 분리 → 단일 계산 함수** — 여러 시스템이 한 표시에 관여할 때 각자 원시 상태만 저장하고, 표시는 계산 함수에서 도출. ([ADR-0005](docs/adr/0005-display-state-raw-separation-compute.md))

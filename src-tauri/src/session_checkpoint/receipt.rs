@@ -78,6 +78,13 @@ impl ReceiptRegistry {
     pub(crate) fn collecting(&self) -> bool {
         self.capture.is_some()
     }
+
+    #[cfg(test)]
+    pub(crate) fn has_current_codex_file_for_test(&self, terminal: &str, path: &Path) -> bool {
+        self.proofs
+            .get(terminal)
+            .is_some_and(|proof| FileStamp::read(path).is_ok_and(|file| proof.file == file))
+    }
 }
 
 pub(crate) fn collection_token(state: &AppState) -> Option<String> {

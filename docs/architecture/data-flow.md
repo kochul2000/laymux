@@ -39,6 +39,7 @@ Automation 레이어 표시는 포커스를 옮기지 않으며 `focus` 인자�
 | 방법 | 동작 |
 | --- | --- |
 | 컨트롤 바 Stack 버튼(split 버튼 옆, Lucide `Layers`) · `pane.stack`(`Ctrl+Alt+S`) · 전환 줄 `+` | 슬롯 활성 레이어 바로 뒤에 `EmptyView` 레이어를 추가하고 표시·포커스 |
+| Remote Stack 키 | 열린 터미널의 프로필·CWD를 이어받는 `TerminalView`를 쌓고 표시·포커스한 뒤 Remote 출력을 새 터미널에 연결. 대상이 비활성 레이어여도 그 레이어에서 상속 ([ADR-0339](../adr/0339-remote-stack-creates-enterable-terminal.md)) |
 | Automation `stack_pane` · REST `/api/v1/panes/stack` | 활성 레이어 뒤에 새 레이어(기본 `TerminalView`)를 추가하되 기존 표시·포커스를 유지. 생성 도중에도 새 레이어를 활성화하지 않음 ([ADR-0328](../adr/0328-automation-stack-keeps-visible-layer.md)) |
 | 전환 줄 탭 클릭 | 그 레이어 표시·포커스 |
 | 전환 줄 × · 탭 가운데 클릭 · 컨트롤 바 Delete · `pane.delete` | 그 레이어(컨트롤 바·단축키는 활성 레이어) 하나 닫기. 마지막 레이어면 슬롯이 사라지고 공간 재분배 |
@@ -522,6 +523,8 @@ PC의 명시적 기본 모드 선호만 `laymux.desktop.inputMode`에 저장하�
 
 [ADR-0226](../adr/0226-composer-stars-are-host-global-persistent-state.md)·[ADR-0229](../adr/0229-composer-starred-entries-have-label-and-send.md)의 별표는 이 비영속 history와 분리된 명시적 opt-in이다. `state.db` machine 영역의 backend-owned `terminal.composerStarredEntries` ordered set은 workspace·pane·history scope와 무관하게 호스트 전역이며 Desktop과 Remote가 공유한다. 원소는 `{ value, label, send }`이고 정체성은 `value`다. 레거시 `string[]`은 `{ value, label: "", send: false }`로 읽는다. 전용 IPC/lease-gated Remote API만 원자적으로 바꾸고, 일반 settings patch는 이 필드를 read-only로 본다. 자동완성은 value 또는 label prefix가 맞는 별표 항목을 최신 별표부터 먼저 내고 남은 자리를 현재 runtime history로 채운다. exact-query 제외는 `value` 완전 일치에만 적용하며 `send: true`인 별표는 초안이 이미 그 값이어도 남아 고르면 Send 한다. 수락(클릭·Tab·강조 후 Enter)은 초안을 `value`로 채운 뒤 `send`가 켜져 있고 비활성·전송 중이 아니면 이어서 Composer Send를 호출한다. 별표 버튼은 행 선택과 Composer editor focus를 건드리지 않는다. 최대 200개, `value` UTF-8 16 KiB, `label` 256바이트이고 한도 초과는 기존 별표를 지우지 않고 거절한다. Desktop Settings의 Terminal 섹션 행 클릭과 자동완성 롱클릭(500ms)은 같은 편집기를 열고 전용 mutation으로 즉시 저장한다. 롱클릭 문턱을 넘긴 pointer는 그 제스처의 pick/Send를 소비한다. 아직 별표가 아닌 행을 저장하면 별표가 된다. 별표 목록은 일반 Settings 초안에서 분리되어 다른 미저장 Terminal 설정과 서로 되돌리지 않는다.
 
+Remote 소프트키의 사용자 등록 일반 텍스트(`submit:false`, C0·DEL·C1 없음)는 Composer 모드에서 editor의 현재 선택 영역에 삽입한다. input 이벤트가 초안 revision·첨부·추천을 갱신하며 Send 전에는 네트워크 입력을 만들지 않는다. 명시적 `Send Enter` 키는 현재 초안과 별도로 제출하고, 제어 시퀀스·내장 키·Direct는 기존 PTY 입력 경로를 따른다([ADR-0338](../adr/0338-remote-text-keys-edit-composer-draft.md)).
+
 호스트는 전용 별표 mutation마다 runtime revision을 증가시킨다. Remote는 claim 응답 이후 heartbeat 성공 시 현재 revision으로 조건부 GET을 보내고, revision이 달라 전체 목록이 온 경우에만 메모리 목록을 교체한다. 더 낮은 revision 응답은 무시하므로 늦은 초기 GET이 이후 토글 결과를 되돌리지 않으며, lease 종료 시 목록과 revision을 함께 버린다.
 
 Remote의 editor 탭 recall에는 **탭 시작 전에 소프트 키보드가 이미 열려 있어야 한다**는 전제가 추가된다. 키보드를 올리는 첫 탭은 DOM focus가 남아 있더라도 목록을 열지 않는다. 판정은 `VirtualKeyboard.boundingRect`를 우선하고, 이를 지원하지 않는 브라우저에서는 현재 폭별 keyboard-closed `VisualViewport` 최대 높이와 현재 높이의 유의미한 차이를 사용한다. 열린 history/자동완성 목록 상태에서 editor의 빈 영역을 탭하면 초안은 유지한 채 목록만 닫는다([ADR-0207](../adr/0207-remote-composer-recall-observes-soft-keyboard-geometry.md)).
@@ -730,9 +733,9 @@ xterm 의 `CompositionHelper._finalizeComposition(true)` 는 확정 텍스트를
 
 - **상태 소유자는 CompositionHelper 하나다**: exact bundle patch가 xterm 6.0.0 ESM/CJS의 CompositionHelper에 generation FIFO를 둔다. 각 delayed finalizer는 캡처 범위·다음 composition 직전의 textarea 문자열 스냅샷·이미 전송된 길이·`compositionend.data` 확정 후보·순서 있는 input/keypress 관측 목록·취소/완료 상태와 즉시 송신 기록의 참조를 별도 record로 소유한다. 새 `compositionstart`와 새 delayed generation은 직전 generation의 candidate 문자열 자체를 먼저 고정하므로 이후 textarea 교체가 이전 timer에 섞이지 않는다.
 - **input·keypress·finalizer가 같은 generation에 합류한다**: CoreBrowserTerminal의 `_inputEvent`와 `_keyPress`는 계산한 텍스트를 helper에 먼저 제안한다. pending generation이 있으면 즉시 PTY로 보내지 않고 최신 미완료 record에 보류한다. 이때 소비한 legacy `keypress`는 `cancel(event, true)`로 기본 textarea 삽입까지 막는다 — 관측만 보류하고 DOM 기본 동작을 남기면 WebView2가 같은 확정 음절을 textarea candidate에 다시 넣어 finalizer가 `면 면`처럼 오염된 전체 문자열을 보낸다. pending generation과 native 종료를 기다리는 즉시 송신 기록이 모두 없으면 ordinary input/keypress를 기존처럼 즉시 보낸다. timer는 자기 record만 완료하고 FIFO 선두의 완료 세대부터 한 번씩 flush한다. 일반 keydown immediate finalize도 pending FIFO를 먼저 비운 뒤 자기 키를 보낸다. native 종료를 기다리는 즉시 송신 기록이 있을 때의 input·keypress 처리는 아래 ADR-0274 문단을 따른다.
-- **textarea candidate와 확정 이벤트를 먼저 합친 뒤 관측을 하나씩 조정한다**: finalizer는 취소되지 않은 generation의 textarea slice와 `compositionend.data`를 기존 양방향 포함 및 suffix-prefix 최장 overlap 함수로 합쳐 accumulator를 만든다. 시작점이 스냅샷 범위를 넘고 스냅샷이 확정값을 포함하면 전체 스냅샷을 교체 candidate로 사용한다. 따라서 전체 교체나 비어 있는 스냅샷으로 slice가 비거나 확정값의 suffix만 남아도 이벤트의 전체 확정값이 복구되고, propagation 중 붙은 비조합 suffix는 확정값 뒤에 보존된다. `compositionend.data`가 비었거나 없는 합성 호출은 기존 slice로 떨어진다. CoreBrowserTerminal의 blur handler는 textarea를 비우기 전에 현재 조합을 event-data 비허용 상태로 만들고 이미 끝난 pending generation을 모두 FIFO flush한다. 각 세대의 slice·event data·input/keypress 관측이 clear 전에 정확히 한 번 전송되므로 §8.16의 TerminalView fallback은 pending이 해소된 것을 보고 다시 보내지 않는다. 아직 `compositionend`가 없는 진행 중 조합만 fallback이 맡는다. blur 뒤 늦게 생성된 generation은 취소되고 새 input·keypress 관측을 받지 않으므로 refocus 뒤 일반 입력은 즉시 경로로 전달된다. candidate에 이미 포함된 첫 input/keypress 관측이 정렬 기준을 세울 때까지 unmatched 관측은 도착 순서대로 shortest-merge prefix로 모으고, 기준이 생기면 prefix를 candidate와 병합한 뒤 나머지 관측을 하나씩 같은 함수에 fold한다. 기준 뒤에는 양방향 overlap 길이가 같은 관측을 accumulator 뒤쪽에 둔다. 끝까지 기준이 없으면 prefix 전체를 기존처럼 candidate와 병합한다. 관측끼리 무조건 먼저 합치지 않으므로 separator `" "`와 propagated syllable `"면"`의 출처 경계가 사라져 `" 면"`이 된 뒤 candidate `"면 "`에 덧붙는 일을 막으면서, candidate `"한a"` 뒤의 비중첩 단문자 관측 `"a"`, `"b"`는 `"한ab"`, anchor 없는 `"a"`, `"b"` 뒤 candidate `"한"`은 기존처럼 `"ab한"`으로 유지한다. 다만 겹치는 다문자 관측이나 의도적 반복 occurrence의 엄격한 시간 순서는 ADR-0093과 마찬가지로 보장하지 않는다. queue가 빌 때까지 `_isSendingComposition`은 유지된다.
+- **textarea candidate와 확정 이벤트를 먼저 합친 뒤 관측을 하나씩 조정한다**: finalizer는 취소되지 않은 generation의 textarea slice와 `compositionend.data`를 기존 양방향 포함 및 suffix-prefix 최장 overlap 함수로 합쳐 accumulator를 만든다. 시작점이 스냅샷 범위를 넘고 스냅샷이 확정값을 포함하면 전체 스냅샷을 교체 candidate로 사용한다. 따라서 전체 교체나 비어 있는 스냅샷으로 slice가 비거나 확정값의 suffix만 남아도 이벤트의 전체 확정값이 복구되고, propagation 중 붙은 비조합 suffix는 확정값 뒤에 보존된다. `compositionend.data`가 비었거나 없는 합성 호출은 기존 slice로 떨어진다. CoreBrowserTerminal의 blur handler는 textarea를 비우기 전에 현재 조합을 event-data 비허용 상태로 만들고 이미 끝난 pending generation을 모두 FIFO flush한다. 각 세대의 slice·event data·input/keypress 관측은 clear 전에 정확히 한 번 전송된다. §8.16의 TerminalView fallback은 이미 끝난 세대를 보내지 않고, 아직 `compositionend`가 없는 진행 중 조합만 맡는다. blur 뒤 늦게 생성된 generation은 취소되고 새 input·keypress 관측을 받지 않으므로 refocus 뒤 일반 입력은 즉시 경로로 전달된다. candidate에 이미 포함된 첫 input/keypress 관측이 정렬 기준을 세울 때까지 unmatched 관측은 도착 순서대로 shortest-merge prefix로 모으고, 기준이 생기면 prefix를 candidate와 병합한 뒤 나머지 관측을 하나씩 같은 함수에 fold한다. 기준 뒤에는 양방향 overlap 길이가 같은 관측을 accumulator 뒤쪽에 둔다. 끝까지 기준이 없으면 prefix 전체를 기존처럼 candidate와 병합한다. 관측끼리 무조건 먼저 합치지 않으므로 separator `" "`와 propagated syllable `"면"`의 출처 경계가 사라져 `" 면"`이 된 뒤 candidate `"면 "`에 덧붙는 일을 막으면서, candidate `"한a"` 뒤의 비중첩 단문자 관측 `"a"`, `"b"`는 `"한ab"`, anchor 없는 `"a"`, `"b"` 뒤 candidate `"한"`은 기존처럼 `"ab한"`으로 유지한다. 다만 겹치는 다문자 관측이나 의도적 반복 occurrence의 엄격한 시간 순서는 ADR-0093과 마찬가지로 보장하지 않는다. queue가 빌 때까지 `_isSendingComposition`은 유지된다.
 - **229 textarea-diff는 스냅샷 이후 조합이 시작되면 침묵한다**: Windows IME는 `compositionstart`보다 먼저 `keydown` 229를 보내 `_handleAnyTextareaChanges`의 `setTimeout(0)`을 예약한다. 메인 스레드가 그 창을 수 초로 늘리면 `compositionend`가 먼저 끝나고, stock 타이머는 `!_isComposing`만 보고 같은 음절을 finalizer와 따로 보낸다. `_isSendingComposition`만 막으면 이후 일반 keydown의 immediate finalize가 플래그를 내린 뒤 타이머가 `가`를 다시 보낸다. 패치는 `compositionstart` epoch가 예약 시점과 다르거나 `_isComposing`/`_isSendingComposition`이면 보내지 않는다. 조합이 시작되지 않은 229 삽입은 그대로 보낸다([ADR-0164](../adr/0164-ime-textarea-diff-skip-while-sending.md)).
-- **외부 guard는 없다**: TerminalView는 `compositionend` 시작 위치를 캡처하거나 input/keypress를 억제하지 않는다. 조합 관측 보류와 consumed keypress의 기본 동작 취소는 같은 candidate를 소유한 patched CompositionHelper/CoreBrowserTerminal 경계에서 함께 결정한다. `xterm-pending-composition.ts`의 private 접근은 issue #555 blur fallback이 deferred send 중복을 피하는 `_isSendingComposition` 하나로 축소됐다.
+- **외부 guard는 없다**: TerminalView는 `compositionend` 시작 위치를 캡처하거나 input/keypress를 억제하지 않는다. 조합 관측 보류와 consumed keypress의 기본 동작 취소는 같은 candidate를 소유한 patched CompositionHelper/CoreBrowserTerminal 경계에서 함께 결정한다. blur fallback도 완료 세대의 pending 상태를 읽거나 확정 텍스트를 보관하지 않는다. 완료 세대 전송은 xterm, 진행 중 조합의 blur 확정은 controller가 맡는다(§8.16).
 - **설치가 계약 관문이다**: `ui/scripts/patch-xterm-reflow.mjs`는 pristine bundle을 선행 keypress patch 형태로 만든 뒤 generation correction과 229 textarea-diff skip을 적용한다. 이미 선행 patch 또는 최종 patch인 설치도 각각 upgrade/idempotent 성공한다. ESM·데스크톱 CJS·배포 Remote CJS의 helper state·`compositionend.data` handoff·input/keypress owner·consumed keypress 강제 취소·delayed/immediate flush·composition epoch·sending 중 textarea-diff skip이 모두 맞지 않으면 postinstall이 실패하고 조용한 부분 적용은 없다. 두 CJS 번들은 `commonJsCompositionPatches` 한 목록을 공유한다([ADR-0268](../adr/0268-remote-ime-shares-composition-reconciliation.md)). Remote의 이전 wheel·textarea-diff·epoch 부분 패치도 전체 조합 처리로 올린다. Remote `/write` 큐는 받은 바이트를 기존 순서로 보내며 문자열·시간창 중복 제거를 하지 않는다.
 - **결정적 테스트는 실제 xterm 대상이다**: 기존 6개 조합 이벤트열과 `compositionend → input → keypress`, separator 뒤 propagated keypress의 조건부 기본 삽입, input-only, timer 전 연속 두 generation, input/keyPress 뒤 일반 keydown 교차, 229가 compositionstart보다 먼저 온 뒤 compositionend가 timer보다 앞서는 stall, 잔여 textarea 전체가 새 확정값으로 교체되는 순서, 연속 두 확정 및 확정 뒤 일반 입력이 blur와 만나는 FIFO 결합을 `Terminal.onData`까지 검증한다. pending이 없는 ordinary input·keypress와 조합 없는 229 삽입도 즉시 전송을 고정한다. 순수 mock 판정으로 이 상태 전이를 대체하지 않는다.
 - **인간 입력 전달 실패**: local owner의 xterm `onData`, DEFAULT mouse `onBinary`와 IME blur fallback은 각 raw 입력을 정확히 한 번만 해당 human-input command로 제출한다. IPC 거절은 Rust 미수락의 증명이 아니므로 재전송하지 않으며, terminal별 `attempts`/`succeeded`/`failed` 및 byte 합계를 `frontend.inputDelivery`로 내보낸다. `onData`는 UTF-8 길이, `onBinary`는 code unit 수가 전송 byte 수다. completion은 제출 session token과 one-shot attempt token이 현 entry와 같을 때만 한 번 정산한다. close 요청은 backend close IPC를 기다리지 않고 즉시 entry를 fence해 close/replacement 뒤 late completion을 버리며, 반복 실패의 수치는 모두 누적하되 action-required 오류 알림은 session당 하나로 coalesce해 사용자가 새 입력을 명시적으로 만들게 한다. protocol reply와 owner permit에 의해 막힌 입력은 이 카운터에 포함하지 않는다([ADR-0096](../adr/0096-terminal-human-input-write-failure-observability.md), [ADR-0216](../adr/0216-xterm-legacy-mouse-binary-input-boundary.md)).
@@ -821,19 +824,19 @@ Core input이 전달한 `isComposing`과 native 종료 데이터의 유무로 `s
 | 조합 없는 잔여물 | — | blur에서 **무조건** 비움 |
 
 - **xterm은 끝난 세대와 진행 중 조합을 나눈다.** CoreBrowserTerminal의 blur listener는 먼저 완료된 generation FIFO를 flush한 뒤 textarea를 비운다. 아직 `compositionend`가 없는 조합은 generation이 없으므로 xterm이 보내지 않고, 뒤따르는 TerminalView listener가 프리뷰를 확정한다. blur 뒤 늦은 `compositionend`는 취소 세대로 소비하되 그 세대가 새 관측을 받지 않게 하므로 refocus 뒤 일반 입력은 즉시 전달된다.
-- **phase는 판별자가 아니다.** WebView2 + Windows IME가 blur 전에 `compositionend`를 보내면 controller phase는 `pending-finalize`지만, 그 사이 xterm의 앞선 blur listener가 전송을 끝낼 수 있다. controller는 listener 실행 뒤의 xterm pending 플래그가 거짓이면 `lastFinalizedText`를 다시 보내지 않는다. 참으로 남는 구형/호환 경로에서만 그 값을 fallback한다.
-- **carry-over도 소유권을 나눈다.** 같은 tick에 끝난 세대들은 xterm이 FIFO로 먼저 보내고, 아직 진행 중인 최신 조합은 controller가 `state.text || latestCompositionDisplayText`로 보낸다. xterm pending이 남는 호환 경로에서는 `lastFinalizedText`와 진행 중 조합을 이어 보내 기존 유실 방어를 유지한다.
-- **controller의 텍스트 출처는 textarea가 아니다.** xterm이 자기 blur handler에서 값을 비우므로 controller는 캡처한 확정값과 동기 프리뷰만 사용한다. 완료 세대의 textarea snapshot·event data·input/keypress 관측은 xterm generation record가 소유한다.
+- **controller는 진행 중 조합만 보낸다.** `phase === "composing"`일 때만 `state.text || latestCompositionDisplayText`를 보낸다. WebView2 + Windows IME가 blur 전에 `compositionend`를 보내 `pending-finalize`가 되면, xterm의 앞선 blur listener 또는 finalizer가 완료 세대의 전송을 맡는다. controller는 완료 문자열을 별도로 저장하거나 xterm의 private pending 플래그를 읽지 않고 reset만 한다.
+- **carry-over도 소유권을 나눈다.** 같은 tick에 끝난 세대들은 xterm이 FIFO로 먼저 보내고, 아직 진행 중인 최신 조합만 controller가 이어 보낸다. `가` 확정 뒤 `나` 조합 중 blur라면 결합 전송은 `가나`이고 각각 한 번만 보낸다.
+- **controller의 텍스트 출처는 textarea가 아니다.** xterm이 자기 blur handler에서 값을 비우므로 controller는 진행 중 프리뷰와 동기 표시 문자열만 사용한다. 완료 세대의 textarea snapshot·event data·input/keypress 관측은 xterm generation record가 소유한다.
 - **리셋은 유지한다.** 진행 중 blur는 xterm의 `_isComposing`을 true로 남기므로 프리뷰가 다음 포커스 사이클까지 살아 있는 것을 막아야 한다.
-- **리더가 `null`이면 "pending 아님"으로 떨어진다.** private shape가 바뀐 빌드에서 포커스 이동마다 중복하는 것보다 fail-closed 유실이 낫고, xterm 설치 계약 테스트가 같은 필드를 읽어 배포 전에 실패한다.
 - **결정적 테스트는 양쪽 소유자를 함께 구동한다.** 진행 중 blur, end 뒤 blur·refocus, 연속 generation, 확정 뒤 보류된 일반 입력을 실제 `Terminal.onData`와 controller `onCommit` 결합 결과로 고정한다.
-- **확정이냐 취소냐는 우리가 정하지 않는다 — IME 가 `compositionend` 의 `data` 로 말한다.** 실측(Windows 한글 IME): 조합 중 Esc 는 조합을 **확정하고** `data` 에 그 음절을 실어 보낸다. 그래서 그 경로는 커밋되고, 한글 사용자 기준으로 그것이 자연스러운 동작이다. `data` 가 빈 문자열인 경우에만 커밋하지 않는다 — 없는 텍스트를 만들어내지 않는다는 뜻이고, 어느 쪽이든 판단은 IME 가 한다.
+- **Esc 키만으로 취소를 단정하지 않는다.** 실측(Windows 한글 IME)에서는 조합 중 Esc가 조합을 **확정하고** `compositionend.data`에 그 음절을 실어 보냈다. 실제 종료 이벤트와 textarea 후보는 xterm이 §8.14의 계약으로 조정한다. controller는 키 이름이나 이전 프리뷰로 완료 문자열을 다시 만들지 않는다.
   - 관측 시 주의: PowerShell(PSReadLine)은 Esc 를 **줄 전체 삭제**로 해석하므로 확정이 일어났는지 화면으로 알 수 없다. WSL(readline)에서는 지우지 않으므로 그쪽이 정보가 있는 관측이다.
 - **확정되는 것은 "IME 가 들고 있던 것" 이 아니라 "화면에서 본 것" 이다.** `syncPreview` 의 previewText 분기가 `latestCompositionDisplayText` 를 승격하므로 `state.text` 는 textarea 변경 범위보다 긴 IME 표시 문자열일 수 있다. 한국어에서는 둘이 같고, 일본어 변환 중 blur 도 Windows IME 동작(확정)과 맞으므로 이 선택이 맞다. 반대 방향 보강도 필요하다 — `state.text` 는 deferred sync 대기값이라 마지막 `compositionupdate` 의 sync 전에 end/blur 가 오면 비어 있다. `latestCompositionDisplayText` 는 동기로 들어오고 위 의미론상 같은 소스라 `state.text || latestCompositionDisplayText` 로 받는다.
-- **취소는 `compositionend` 의 `data` 로 판정한다.** Esc 는 `data: ""` 로 조합을 끝낸다. 이벤트 인자를 읽지 않던 동안에는 낡은 `lastFinalizedText` 가 남아 있어 그 뒤 blur 가 오면 **취소한 음절이 주입됐다**. `compositionupdate` 의 `event.data` 는 이미 신뢰하므로 태도도 일관된다. 이벤트가 없는 경우(합성 dispatch 등)에만 프리뷰 텍스트로 떨어진다.
+- **빈 확정 데이터 뒤 blur도 controller가 재주입하지 않는다.** 과거 보조 분기는 `compositionend.data === ""`를 읽지 않으면 낡은 `lastFinalizedText`를 보내 취소한 음절을 되살렸다. 현재 controller에는 그 캡처와 보조 전송이 없으며, `compositionend` 뒤에는 데이터 유무와 관계없이 `pending-finalize`로 이동해 blur에서 재전송하지 않는다. 확정 이벤트와 textarea 후보의 조정은 §8.14의 xterm 계약을 따른다.
 - **연속 세대의 blur 경계도 FIFO다.** 한 태스크에 `compositionend`가 여러 번 와도 xterm은 generation별 스냅샷을 소유한다. blur가 타이머들보다 먼저 오면 xterm blur handler가 모든 완료 세대를 동기적으로 FIFO flush하고 pending을 내린다. 이어 실행되는 TerminalView fallback은 확정 세대를 다시 보내지 않으며, controller에 별도 다중 슬롯을 만들지 않는다.
-- **`pending` 이 안전을 만들고 캡처 수명은 load-bearing 이 아니다**: 정상 flush 후 blur 창은 실제로 존재한다(xterm 타이머가 먼저 전송하고 우리 deferred reset 전에 blur 가 끼어든다). 그때 캡처는 남아 있지만 `pending` 이 거짓이라 재전송되지 않는다. 그래서 테스트가 고정하는 것은 수명이 아니라 **조합**이다 — "pending 거짓 + 캡처 남아 있음 → 커밋 없음".
-- **미검증**: 실기 확인 필요
+- **finalizer와 controller reset 사이의 blur도 재전송하지 않는다.** xterm 타이머가 먼저 전송하고 controller의 deferred reset 전에 blur가 끼어들어도, `pending-finalize`에서는 controller가 보내지 않는다. 회귀 테스트는 타이머 전·후 두 순서에서 결합 전송이 정확히 한 번인지 고정한다.
+- **구형 보조 분기 제거 근거**: [ADR-0230](../adr/0230-xterm-compositionend-data-recovers-replaced-textarea.md)의 blur FIFO flush가 들어가기 전 `f141124c`에서 보조 분기를 끄면 확정 한 음절·확정 뒤 다음 조합·연속 확정의 세 사례가 유실로 RED였다. 적용 직후 `872829f6`와 Tauri 갱신 PR #1208의 `c38e657d`에서는 같은 분기를 꺼도 GREEN이었다. 이 차이는 Tauri 2.12의 IME 변경이 아니라 기존 laymux xterm 패치의 결과다. 그 패치의 설치 관문과 실제 번들 회귀 테스트가 완료 세대 전송 계약을 보호하므로, 구형 경로 전용 `lastFinalizedText`·`getXtermPendingSend`·private pending adapter를 유지하지 않는다.
+- **검증 범위**: 위 비교는 실제 xterm 번들에 합성 DOM 이벤트를 보내 controller와 결합한 결과다. OS IME 실기 이벤트 순서·후보창 위치나 Windows focus relay 제거 가능성을 입증하지 않는다.
 
 ### 8.17 조합 프리뷰는 alt 버퍼에서도 그린다 (issue #553)
 
@@ -871,7 +874,7 @@ composer 모드로 vim 을 쓰면 `가나다라` 를 친 뒤 **Enter 도 Backspa
 - **원인은 두 규칙의 교차**다. alt 화면에서 `passthroughComposerKey` 는 **모든 키**를 PTY 로 넘긴다(`if (!altScreen && !emptyPassthrough) return false;`) — 그래서 ASCII 가 타이핑하는 대로 앱에 들어간다. 반면 `TerminalInputComposer` 의 keydown 은 `isComposing || keyCode === 229` 인 동안 passthrough 를 **의도적으로 건너뛴다** — 조합은 textarea 소유라 키 단위로 중계할 수 없기 때문이다. 결과적으로 조합만 초안에 쌓이고, 그 다음부터 Enter·Backspace 는 초안이 아니라 앱으로 가서 초안에 손이 닿지 않는다.
 - **판정: 키가 아니라 결과를 보낸다.** `compositionend` 에서 확정 텍스트를 PTY 로 바로 쓰고 초안에서 그만큼 덜어낸다(`resolveComposerCompositionCommit`). 한글이 ASCII 와 같은 경로·같은 타이밍이 되므로, 조합을 키로 쪼개려는 시도(자모 단위 중계, 조합 중 초안 우회) 없이 대칭이 회복된다.
 - **판정 근거는 사용자가 이미 본 대비**다 — 같은 pane 에서 ASCII 는 즉시 들어가고 한글만 고아가 됐다. 즉 프록시 자체는 옳고 조합만 그 규칙 밖에 있었다.
-- **빈 `data` 는 취소이므로 아무것도 쓰지 않는다.** §8.16 의 blur 확정과 같은 규칙 — 확정/취소 판단은 IME 것이고, 우리는 IME 가 주지 않은 텍스트를 만들어내지 않는다. composer 는 `event.data` 를 그대로 host 로 넘길 뿐 판정하지 않는다.
+- **빈 `data` 는 취소이므로 아무것도 쓰지 않는다.** composer는 IME가 준 `event.data`를 그대로 host로 넘기며, 빈 값이면 이전 초안으로 확정 텍스트를 만들지 않는다.
 - **조합 전에 초안이 비어 있었을 때만 보낸다** (#560 에서 좁힘). 조합 구간은 캐럿 = 초안 끝이므로 확정 텍스트를 덜어내면 그 이전 초안이 나온다. 그것이 비어 있지 않으면 사용자가 작성 중이라는 뜻이고, 그때 키보드는 초안 것이므로(§8.19) 음절을 가로채면 한 문장이 두 목적지로 찢어진다. 그래서 그 경우는 초안에 남긴다 — 예전처럼 초안을 비우면 사용자 텍스트를 조용히 버리는 것이 된다.
 - **초안이 확정 텍스트의 앞부분이면 그것은 이벤트 순서 지연이다.** 일부 IME 는 마지막 `input` 을 `compositionend` **뒤**에 보내므로 초안이 한 키 뒤처진 상태로 보인다(초안 `가나`, `data` `가나다`). 사용자 텍스트가 아니므로 "이전 초안 비어 있음" 으로 취급한다 — 아니면 그 음절이 초안에 갇힌다.
 - **normal 버퍼는 건드리지 않는다.** 거기서 초안은 진짜 작성 표면이고 Enter 가 제출이므로(§8.8), 확정을 가로채면 "한 줄 다 쓰고 보내기" 가 깨진다. 판정을 `altScreen` 하나로 분기시켜 두 모드가 서로를 침범하지 않게 했다.
@@ -931,7 +934,7 @@ overlay caret 이 켜져 있는데도 codex 입력박스에 **어두운 1셀 블
 - **테마·모양·`cursorWidth` 는 숨김 여부와 무관하게 사용자 설정이다.** 숨김 구간에서 달라지는 유일한 옵션은 `cursorBlink = false` 다(안 보이는 커서의 깜빡임은 repaint 낭비).
 - **base 조건의 소유자는 하나다.** `applyNativeCursorVisibility`만 `baseHideNativeCursor`(composer 모드 · 조합 중 · `stabilizeInteractiveCursor` + overlay caret activity)를 계산한다. 조합 상태는 ref에만 있어 React가 볼 수 없으므로 React는 `nativeCursorVisibilityRef`를 **호출만** 하고 조건을 다시 계산하지 않는다. DEC 2026은 별도 `syncOutputCursorGateActive` reason을 소유하고, 최종 `applyNativeCursorGate`가 둘을 OR한다. 어느 reason의 전이도 다른 reason을 덮지 않는다.
 - **`isCursorHidden`은 옵션이 아니다.** base 전이만 사용자 cursor option을 동기화하고 `refresh(0, rows-1)`를 한 번 호출한다. sync set/reset은 option을 바꾸지 않으며 정상 reset에는 xterm의 기존 전체 flush만 사용한다. safety timeout에서만 monitor가 gate 해제 후 corrective refresh를 한 번 요청한다 — §8.4의 폭주 중 repaint 제한을 유지한다.
-- **실패하면 스스로 꺼진다.** private 필드 형태가 달라지면 `supported: false` 로 아무것도 하지 않고 네이티브 커서가 사용자 설정대로 보인다(overlay 와 겹친 이중 캐럿). #598 을 만든 배경색 위장으로 되돌아가지 않는다. `XTERM_NATIVE_CURSOR_FIELDS` 와 실제 `Terminal` 계약 테스트가 xterm 상향 시 읽을 수 있는 실패를 만든다 — §8.14 의 `xterm-pending-composition.ts` 와 같은 정책.
+- **실패하면 스스로 꺼진다.** private 필드 형태가 달라지면 `supported: false` 로 아무것도 하지 않고 네이티브 커서가 사용자 설정대로 보인다(overlay 와 겹친 이중 캐럿). #598 을 만든 배경색 위장으로 되돌아가지 않는다. `XTERM_NATIVE_CURSOR_FIELDS` 와 실제 `Terminal` 계약 테스트가 xterm 상향 시 읽을 수 있는 실패를 만든다.
 - **DOM renderer용 CSS는 base gate를 미러링할 때만 둔다.** `.terminal-native-cursor-hidden .xterm-cursor { opacity: 0 }`는 `onContextLoss` fallback의 방어선이고(§8.4) composer/IME selector도 같은 base reason의 입력을 미러링한다. synchronized-output은 raw gate reason은 있지만 CSS cursor rule은 두지 않는다. CSS는 WebGL의 마지막 paint에 닿지 않아 DOM만 즉시 숨기는 비대칭을 만들기 때문이다(issue #610).
 - **synchronized-output은 lifecycle 우회용 raw reason이다.** 표준 write/refresh는 xterm `RenderService`가 보류하지만 DOM focus·blur·selection은 renderer를 직접 호출한다. `setSyncOutputActive`는 frame boundary 공표와 sync raw reason을 함께 소유하고, 정상 reset 전에 해제한다(아래 §8.22, [ADR-0079](../adr/0079-dec2026-cursor-gate-lifecycle-bypass.md)).
 - **미검증**: 실기 확인은 하지 않았다(테스트만). codex pane 에서 열 39 블록이 실제로 사라지는지, 그리고 DECRQM 25 조회 응답이 숨김 구간에 "hidden" 으로 바뀌는 것(게이트가 필드 하나이므로 불가피)에 반응하는 앱이 있는지는 사람이 확인해야 한다.
@@ -989,6 +992,7 @@ GUI proxy(`pty_daemon/client.rs`)는 `PtySystem`·`MasterPty`·`Child`·`Interru
 | 자식 스스로 종료 | 데몬이 입력·master를 닫아 남은 출력과 EOF를 받는다(ConPTY는 master를 닫아야 EOF). EOF·exit를 모두 관측하면 세션을 제거하고, attach된 client에는 `Eof`·`Exit`를 보낸다 |
 | `Attach` | 기존 client를 닫고 대체한다. `replay`가 켜져 있으면 새 client는 `Attached` → backlog → live 순서로 받는다. 꺼져 있으면 backlog를 버리고 `droppedBytes`에 센 뒤 `Attached` → 화면 redraw와 모드 단언(ADR-0303·0307) → live 순서로 받는다. 선택 필드 `missedOutput`이면 backlog를 세지 않고 `Attached` 다음 표지 사이로 넘긴다(ADR-0309). 선택 필드 `size`가 있으면 그 전에 PTY를 그 크기로 바꾼다 |
 | 업데이트 설치 | 데몬 세션은 끝내지 않고 업데이트된 GUI에 넘긴다(ADR-0308). 설치 guard와 Linux 재시작 경로가 `AppState::begin_update_handoff()`를 표시하면, in-process PTY·probe만 끝내고 데몬 터미널의 handle은 terminate 없이 놓는다(master drop이 종료 요청을 보내지 않도록 leak). 앱 종료 경로도 데몬 세션 종료를 건너뛴다. 설치가 실패하면 표시를 지운다. 프로세스가 끝나면 연결이 닫혀 세션은 detach되고, 재시작한 GUI가 재결합한다. Windows 설치기는 `laymux.exe`를 이미지 이름으로 찾아 끝내므로 데몬은 다른 이름의 사본으로 실행한다(아래 기동) |
+| WebView2 실패 복구(Windows) | 업데이트와 같은 인계로 GUI만 바꾼다(ADR-0336, §13.9). 같은 순서(인계 표시 → title 선택 → `terminate_child_processes` → title 저장)로 정리하고, 다음 GUI를 handle 상속 없이 `--relaunch-after <pid>`로 띄운 뒤 정상 종료한다. 다음 GUI는 이전 GUI가 끝난 뒤 시작해 재결합한다. 사용자가 대화상자에서 종료를 고르면 인계만 하고 끝나며, 유예 시간 안에 다시 연 GUI가 재결합한다 |
 
 GUI는 데몬 자식의 PID를 직접 kill하지 않는다(`ChildKillOwner::Backend`). handle을 가진 데몬이 tree kill을 수행한다. 데몬 연결이 끊기면 GUI reader는 `Failure`로 끝나고 child는 종료로 처리된다. 데몬 안의 작업은 계속 실행되지만, 그 터미널을 teardown하거나 앱을 종료하면 `terminateSession`으로 정리된다.
 
@@ -1142,18 +1146,21 @@ WSL Claude 복원은 live `✳ <대화 제목>`이 프로세스 식별보다 먼
 
 | 의미 | Lucide 아이콘 | 색상·접근성 |
 | --- | --- | --- |
-| 대기·미확인·중단·결과 없는 종료 | Minus | 보조 텍스트색, 대기 |
+| 작업 없음 | Minus | 보조 텍스트색, 대기 |
+| 미확인(관측 없음, 출력 없음) | Dot | 보조 텍스트색, 작업 미확인 |
+| 종료 · 결과 미관측 | Circle | 보조 텍스트색, 종료 · 결과 미관측 |
+| 중단 | Ban | 노랑, 중단 |
 | 진행 중 또는 작업 미확인에서 출력 활동 | Hourglass | 노랑, 활동 중 |
 | 입력 대기 | CircleAlert | 노랑, 응답·승인 필요 |
 | 성공 / 실패 | Check / X | 초록 / 빨강, 성공 / 실패 |
 
-[ADR-0254](../adr/0254-confirmed-idle-before-output-activity.md)에 따라 확인된 작업 없음(`idle`)은 출력 활동이 있어도 대시로 표시한다. 빈 WSL Astra 입력창은 `idle/confirmed`와 `outputActive=true`가 동시에 가능하다. 작업 미확인에서의 출력 fallback은 유지한다.
+[ADR-0254](../adr/0254-confirmed-idle-before-output-activity.md)에 따라 확인된 작업 없음(`idle`)은 출력 활동이 있어도 대시로 표시한다. [ADR-0341](../adr/0341-task-result-glyphs-and-powershell-interrupt.md)에 따라 `taskStatusGlyph`는 종료 결과와 관측 상태를 서로 다른 glyph로 나눈다: 성공 `✓`(Check), 실패 `✗`(X), 중단 `⊘`(Ban, yellow), 결과 미관측 종료 `○`(Circle), 작업 없음 `—`(Minus), 미확인 `·`(Dot), 진행 중 `⏳`, 입력 대기 `!`. Desktop `CommandStatusIcon`과 Remote `commandStatusIconName`이 같은 함수를 쓴다. 빈 WSL Astra 입력창은 `idle/confirmed`와 `outputActive=true`가 동시에 가능하다. 작업 미확인에서의 출력 fallback은 유지한다.
 
-[ADR-0251](../adr/0251-single-terminal-status-icon.md)에 따라 터미널당 상태 아이콘은 하나다. `task-status-glyph.ts`의 순수 표시 함수를 Desktop과 Remote가 공유한다. 입력 대기·진행·종료 결과는 출력 활동보다 우선한다. 관측 지연은 마지막 상태의 표시를 유지하고 별도 시계나 문구를 붙이지 않는다. 출력 파형·미확인 물음표·상태 툴팁은 없다. 접근성 이름은 다섯 표시의 의미만 전달하며 ko/en 번역을 따른다. 미확인 알림의 기존 네모 테두리와 읽음 처리는 유지한다. 내부 `taskState/taskResult/observation/outputActive`는 그대로 보존하며 표시 모래시계로 작업 상태·알림·절전·clear를 재판정하지 않는다.
+[ADR-0251](../adr/0251-single-terminal-status-icon.md)에 따라 터미널당 상태 아이콘은 하나다. `task-status-glyph.ts`의 순수 표시 함수를 Desktop과 Remote가 공유한다. 입력 대기·진행·종료 결과는 출력 활동보다 우선한다. 관측 지연은 마지막 상태의 표시를 유지하고 별도 시계나 문구를 붙이지 않는다. 출력 파형·미확인 물음표·상태 툴팁은 없다. 접근성 이름은 여덟 표시의 의미만 전달하며([ADR-0341](../adr/0341-task-result-glyphs-and-powershell-interrupt.md)) ko/en 번역을 따른다. 미확인 알림의 기존 네모 테두리와 읽음 처리는 유지한다. 내부 `taskState/taskResult/observation/outputActive`는 그대로 보존하며 표시 모래시계로 작업 상태·알림·절전·clear를 재판정하지 않는다.
 
 앱 어댑터는 기존 파서와 관측 경로를 재사용한다. 셸은 Rust OSC 133 C/D/A를 `command-status.phase`로 수신하고, D에 종료 코드가 없으면 결과 없는 종료로 남긴다. 명령 없는 A만 작업 없음을 복원한다. Claude는 새 working 타이틀을 진행으로, 작업 뒤 새 ✳를 결과 없는 종료로, 최초 ✳를 작업 없음으로 해석한다. Grok의 Braille 또는 `- Running:`은 진행만 증명하며 접두사 소멸로 종료를 만들지 않는다. 두 타이틀 어댑터는 새 수신부터 6초 후 지연이 되며 저장된 문자열 재읽기는 기한을 늘리지 않는다. Codex의 내부 작업 판정은 타이틀이나 출력으로 fallback하지 않는다.
 
-PowerShell 통합([ADR-0262](../adr/0262-powershell-command-lifecycle.md), [#1058](https://github.com/kochul2000/laymux/issues/1058))은 `terminal/powershell-integration.ps1`을 Rust에서 내장한다. 로드된 PSReadLine의 `PSConsoleHostReadLine` 반환값에 실행문이 있을 때만 OSC 133 C를 보내고 원래 문자열을 호스트에 돌려준다. 최초 프롬프트는 A이며, C에 대응하는 다음 프롬프트만 D를 보낸다. 빈 Enter·주석·입력 취소·미완성 멀티라인은 새 작업·종료 알림을 만들지 않는다. 실행 성공/실패는 프롬프트 진입의 `$?`와 새 history 항목으로 D;0/D;1을 보내고, 중단/종료 결과 미관측은 코드 없는 D로 보낸다. `$LASTEXITCODE` 자체는 변경하지 않으며 과거 native 종료 코드를 다음 cmdlet의 결과로 사용하지 않는다. 기존 셸 프로세스는 재시작해야 새 통합을 받는다.
+PowerShell 통합([ADR-0262](../adr/0262-powershell-command-lifecycle.md), [#1058](https://github.com/kochul2000/laymux/issues/1058))은 `terminal/powershell-integration.ps1`을 Rust에서 내장한다. 로드된 PSReadLine의 `PSConsoleHostReadLine` 반환값에 실행문이 있을 때만 OSC 133 C를 보내고 원래 문자열을 호스트에 돌려준다. 최초 프롬프트는 A이며, C에 대응하는 다음 프롬프트만 D를 보낸다. 빈 Enter·주석·입력 취소·미완성 멀티라인은 새 작업·종료 알림을 만들지 않는다. 실행 성공/실패는 프롬프트 진입의 `$?`와 새 history 항목으로 D;0/D;1을 보낸다. history가 `Stopped`(Ctrl+C)로 기록한 명령은 종료 코드 칸을 비운 `D;;lx=interrupted`를 보내고, Rust가 lifecycle 이벤트에 `result: "interrupted"`를 실어 프론트가 중단으로 끝낸다([ADR-0341](../adr/0341-task-result-glyphs-and-powershell-interrupt.md)). history를 관측하지 못한 종료는 코드 없는 D로 보내 결과 미관측이다. `$LASTEXITCODE` 자체는 변경하지 않으며 과거 native 종료 코드를 다음 cmdlet의 결과로 사용하지 않는다. 기존 셸 프로세스는 재시작해야 새 통합을 받는다.
 
 reader 래핑은 `LanguageMode=FullLanguage`에서만 설치한다. PSReadLine이 없거나 `ConstrainedLanguage`이면 원래 reader를 보존하고 PowerShell은 OSC 7만 보내며 lifecycle을 합성하지 않는다. 이 경우와 CMD는 작업 미확인 상태에서 출력 활동만 표시하며 무출력 작업의 진행·완료를 판정하지 않는다. 출력 중 자동 절전 fallback과 clear의 기존 미확인 셸 best-effort 예외를 사용하므로 조용한 실행의 clear 보호를 보장하지 않는다. 사용자에 의한 통합 reader/prompt 재정의·제거도 지원 범위 밖이다. [2026-09-18 실측](../codex-task-status-repro-2026-09-17.md)은 D만 보내던 수정 전 동작의 기록이다.
 
@@ -1212,7 +1219,9 @@ Claude Code 가 세션 리미트에 걸리면 스크롤백에 `⎿  You've hit y
 
 #### Claude·Grok 세션 기록의 작업 상태
 
-[ADR-0321](../adr/0321-agent-session-record-fills-unconfirmed-task.md)에 따라 휴리스틱 작업이 확정되지 않은 Claude·Grok pane은 `get_agent_session_states`로 에이전트가 자기 세션 파일에 남긴 상태를 읽는다. 확정되지 않음은 관찰 없음, unknown, stale, 만료를 뜻하고, 세션 기록이 마지막으로 쓴 작업도 포함한다. 프론트 `agent-session-subscription`은 대상이 있을 때만 1초마다 한 요청을 보낸다. 응답은 요청 이후 generation·task epoch·입력·앱·작업 sequence가 그대로일 때만 반영한다.
+[ADR-0321](../adr/0321-agent-session-record-fills-unconfirmed-task.md)에 따라 휴리스틱 작업이 확정되지 않은 Claude·Grok pane은 `get_agent_session_states`로 에이전트가 자기 세션 파일에 남긴 상태를 읽는다. 확정되지 않음은 관찰 없음, unknown, stale, 만료를 뜻하고, 세션 기록이 마지막으로 쓴 작업도 포함한다. 프론트 `agent-session-subscription`은 대상이 있을 때만 1초마다 한 요청을 보낸다. 응답은 요청 이후 generation·task epoch·입력·앱·작업 sequence가 그대로일 때만 반영한다. WSL pane의 게스트 스캔은 표시 폴링 계약으로 3초 안의 공유 run을 재사용하며, Claude와 Grok 기록이 같은 run을 읽는다(§13.4 "WSL 게스트 관측 공유", [ADR-0335](../adr/0335-shared-wsl-guest-observations.md)).
+
+[ADR-0340](../adr/0340-claude-transcript-turn-result.md)에 따라 Claude 작업의 종료 결과는 대화 기록(`<설정 루트>/projects/*/<sessionId>.jsonl`)에서 채운다. 프론트 `claude-turn-result-subscription`은 휴리스틱 작업과 훅 작업이 각각 새 키(`source`·`taskId`)로 진행 중이 되면 `begin_claude_turns`로 그 시점의 파일 길이를 기준점으로 잡는다. 그 작업이 결과 없이 끝나면 종료 후 10초 동안 1초마다 `get_claude_turn_results`를 묻는다. Rust는 기준점 이후의 완결된 줄만 이어 읽고, 판정 필드(`type`·`subtype`·`uuid`·`parentUuid`·`isSidechain`·`isApiErrorMessage`·`interruptedMessageId`) 외의 대화 내용은 보관하지 않는다. 경계(`turn_duration`, `interruptedMessageId`가 있는 중단 표지)가 하나이고 그 뒤에 assistant 기록이 없을 때만 `success`(parentUuid 사슬의 첫 assistant가 API 오류면 `failure`)·`interrupted`를 낸다. 경계가 없으면 `pending`, 그 밖은 `unknown`이다. 결과는 `TerminalInstance.claudeTurns`(출처별 원시값)에 두고 `selectDetectedTask`만 같은 키의 결과 없는 종료에 합친다. 응답은 generation·task epoch·마지막 입력 시각·해당 출처 작업의 `source`·`taskId`·sequence가 그대로일 때만 반영한다. 종료 알림은 결과를 읽는 중이면 결과 문구 없이 `Claude: 종료`로 한 번 내고, 늦은 결과로 다시 알리지 않는다.
 
 - Claude: 기존 pid 귀속이 읽는 `~/.claude/sessions/<pid>.json`의 `status`(`busy`→running, `idle`, `waiting`). waiting은 프론트가 쓰지 않는다.
 - Grok: 귀속된 세션 디렉터리의 `updates.jsonl` 끝 1 MiB에서 마지막 턴 경계. 사용자 메시지(`user_message_chunk`)는 running, `turn_completed`는 ended(`end_turn` success, `cancelled` interrupted)다. 경계가 없는 전체 파일은 idle, 잘린 끝·읽을 수 없는 줄은 결과에서 뺀다.
@@ -1221,7 +1230,7 @@ Claude Code 가 세션 리미트에 걸리면 스크롤백에 `⎿  You've hit y
 
 Codex `/review`는 하위 턴의 시작과 부모 턴의 완료를 같은 rollout에 기록할 수 있다([ADR-0249](../adr/0249-codex-review-parent-turn-boundaries.md)). Legacy의 `entered_review_mode`/`exited_review_mode`, Paginated의 `item_completed` 내 `EnteredReviewMode`/`ExitedReviewMode`는 부모 turn_id로 running을 복원한다. 리뷰 종료 경계만으로 성공을 만들지 않고 뒤따르는 부모 완료·오류·중단을 기다린다. 초기 읽기에서 진입 경계가 빠졌어도 종료 경계로 복원하며, 이후 일반 턴의 다른 ID 종료 방어는 유지한다.
 
-`useSyncEvents`가 `subscribeCodexTurnStates`를 시작한다. 한 번에 한 요청을 보내고 응답 후 1초 뒤 다시 조회한다. 6초 지연·오류·불완전 기록은 마지막 유효 작업과 알림 이력을 보존한 지연 관측을 전달한다. pane generation·앱 epoch·제출 입력이 요청 시작 때와 다르면 늦은 응답을 버린다. 새 입력은 재조회를 유도하지만 /status 같은 로컬 명령을 새 턴으로 합성하지 않는다. source는 generation·selectionKey·sessionId, taskId는 turnId이며 새 source의 종료·입력 대기는 무알림 복원이다. /review 부모 턴 처리는 Rust reader의 ADR-0249 계약을 유지한다.
+`useSyncEvents`가 `subscribeCodexTurnStates`를 시작한다. 한 번에 한 요청을 보내고 응답 후 1초 뒤 다시 조회한다. 6초 지연·오류·불완전 기록은 마지막 유효 작업과 알림 이력을 보존한 지연 관측을 전달한다. pane generation·앱 epoch·제출 입력이 요청 시작 때와 다르면 늦은 응답을 버린다. 새 입력은 재조회를 유도하지만 /status 같은 로컬 명령을 새 턴으로 합성하지 않는다. source는 generation·selectionKey·sessionId, taskId는 turnId이며 새 source의 종료·입력 대기는 무알림 복원이다. /review 부모 턴 처리는 Rust reader의 ADR-0249 계약을 유지한다. 백엔드는 WSL 게스트 스캔과 Codex 진단을 표시 폴링 계약으로 3초 안의 공유 run에서 재사용하고, rollout 읽기는 조회마다 한다([ADR-0335](../adr/0335-shared-wsl-guest-observations.md)). 그래서 WSL에서 새로 시작한 Codex나 대화 전환은 최대 그 창만큼 늦게 turn 근거가 되고, 그동안은 휴리스틱이 표시한다.
 
 [ADR-0255](../adr/0255-codex-delayed-observation-recovery.md)에 따라 6초는 지연 관측의 기준이며 정상 응답의 폐기 기한이 아니다. 응답이 늦어도 기존 실행 범위 검사를 통과하면 반영한다. 6초보다 느린 조회가 연속되어도 이전 완료에 고정되지 않으며, 요청을 겹치지 않고 응답 후 다음 조회를 예약한다.
 
@@ -1281,6 +1290,7 @@ Claude Code·Codex 가 실행 중인지의 **권위는 PTY 자식 프로세스 �
 - **판정은 `(terminal_id, PTY generation)` 키**: Restart View 등으로 같은 id 에 새 PTY 가 붙으면 이전 세대 판정은 `Unknown`. 세션 종료 시 `wsl_liveness::forget()` 으로 항목을 지워 in-flight 패스가 되살리지 못하게 한다.
 - **패스 전체 예산 + distribution 별 독립 타임아웃 + 시작 순서 회전**: 패스는 `WSL_LIVENESS_PASS_BUDGET`(4초) 안에 끝난다 — 기본 distro 해석과 모든 distribution 프로브가 이 예산을 나눠 쓰고, 개별 프로브는 자기 타임아웃과 남은 예산 중 작은 쪽을 받는다. 예산이 바닥나면 남은 distribution 은 판정 없이 건너뛰고 그 수를 로그로 남긴다(늦게 발행하면 모든 pane 의 판정이 함께 늙는다). 개별 타임아웃이 있어야 앞 distribution 하나의 장애가 뒤를 굶기지 않고, 회전이 있어야 밀리는 distribution 이 고정되지 않는다([ADR-0136](../adr/0136-activity-derivation-stamp-and-scoped-exit.md) 3).
 - distribution 해석·검증(`is_safe_distro_name`)·실행 plumbing 은 `wsl_probe` 가 소유하고 세션 귀속 프로브(`commands/wsl_agent_session`)와 공유한다. 두 프로브는 `wsl_probe/agent-role.sh`의 역할 판정도 공유한다. Claude의 첫 실행 인자가 정확히 `--chrome-native-host`([ADR-0253](../adr/0253-wsl-claude-chrome-helper-role.md)) 또는 `daemon`([ADR-0287](../adr/0287-wsl-claude-daemon-process-role.md))이면 대화 후보에서 제외한다. Codex의 `app-server`도 같은 경로로 제외한다([ADR-0280](../adr/0280-codex-app-server-process-role.md)). argv를 읽지 못하거나 알려진 역할과 다르면 후보를 유지한다. helper의 PID·PPID와 실제 대화 자손은 보존하며 helper만 남으면 대화 실행 중 판정을 유지하지 않는다. 더 얕은 Claude daemon이 실제 Codex를 가려 훅 연결을 거부하게 해서는 안 된다.
+- 세션 귀속 스캔과 Codex 진단은 `wsl_probe::snapshot` 공유 run 으로 실행한다(§13.4 "WSL 게스트 관측 공유", [ADR-0335](../adr/0335-shared-wsl-guest-observations.md)). liveness 프로브는 이 테이블을 거치지 않고 위 주기·예산·회전을 그대로 쓴다 — 두 스크립트는 의미가 다르고(조상 체인 귀속·`U` 행), 패스 예산을 귀속 스캔에 묶지 않는다.
 
 #### 주기 재판정 — 변경분만 push ([ADR-0135](../adr/0135-activity-reconcile-backend-diff-push.md))
 
@@ -1566,6 +1576,7 @@ Rust `local_state`가 DB 연결과 짧은 트랜잭션을 소유한다. `setting
     │     │    → 유효 UUID가 정확히 하나일 때만 `sessions/.../<id>/summary.json` mtime age 게이트
     │     │    → 같은 PID에 유효 session_id가 둘 이상이면 전부 `null` (첫 JSON 항목을 고르지 않음)
     │     ├─ Windows/WSL: distro 별 /proc probe에서 LX_TERMINAL_ID → Linux provider PID
+    │     │    → 명령 시작 이후의 공유 run 1회를 세 provider가 함께 읽음 (ADR-0335)
     │     │    → Claude PID 세션 파일, Codex PID가 연 rollout FD, 또는 guest GROK_HOME의 active_sessions.json
     │     └─ state DB/rollout header로 top-level interactive thread 검증
     │        → PTY generation마다 Identified / NoAgent / ActiveButUnidentified / Unknown
@@ -1581,7 +1592,7 @@ Rust `local_state`가 DB 연결과 짧은 트랜잭션을 소유한다. `setting
 [appWindow.destroy()]
 ```
 
-Windows host의 WSL terminal은 host process tree에 `wsl.exe`만 보이므로 native PID 귀속을 적용하지 않는다. provider 조회 시작부터 `PtyHandle.is_wsl_backed()`로 native root와 WSL terminal ID를 분리하며, host process snapshot 실패는 native ID에만, WSL target/probe 실패는 해당 WSL ID에만 결부한다. `TerminalSession`이 소유한 distro를 결정한 뒤 bounded `wsl.exe --exec sh` probe가 해당 distro의 `/proc` 환경을 읽고, rcfile에서 상속된 `LX_TERMINAL_ID`로 pane과 top-level Claude/Codex/Grok Linux PID를 직접 연결한다. provider가 중첩됐으면 전체 Claude/Codex/Grok 후보 중 유일한 최상위 agent만 활성 provider이며, provider별로 각각 최상위를 고르지 않는다. Claude는 현재 live descendant PID에 해당하는 `<HOME>/.claude/sessions/<pid>.json`만 읽어 무관한 과거 파일의 손상을 전역 조회 실패로 확대하지 않는다. Codex는 동봉한 Linux 도구로 해당 PID의 SQLite lifecycle 기록을 읽고 §13.5의 대화 선택·rollout 검증을 적용한다. live WAL SQLite를 Windows에서 열지 않으며, open rollout FD는 미소비 복원 요청을 판정하는 보조 증거로만 사용한다. Grok는 guest 프로세스의 `GROK_HOME`(없으면 guest `HOME/.grok`)에서 `active_sessions.json`의 PID 일치를 읽고, 그 PID의 유효 UUID가 정확히 하나이며 `summary.json`이 존재하고 mtime이 age 게이트를 통과할 때만 귀속한다. Grok에는 rollout 필터가 없다. 명시 distro 파싱 실패는 default distro로 fallback하지 않고, default 조회와 모든 distro probe는 하나의 3초 deadline 안에서 끝난다. 이 명시/default distro 결정 자체가 실패하면 probe 대상 없음이 아니라 attribution 조회 실패(`Unknown`)로 전파한다. native·WSL 결과 병합 뒤 session ID 충돌도 전부 `null` 처리한다. live candidate에 결부된 distro·probe·provider 저장소 중 하나라도 증명할 수 없으면 CWD나 최신 파일로 추정하지 않고 `null`로 fail-closed한다([ADR-0120](../adr/0120-wsl-agent-session-attribution.md), [ADR-0156](../adr/0156-grok-first-class-agent.md)).
+Windows host의 WSL terminal은 host process tree에 `wsl.exe`만 보이므로 native PID 귀속을 적용하지 않는다. provider 조회 시작부터 `PtyHandle.is_wsl_backed()`로 native root와 WSL terminal ID를 분리하며, host process snapshot 실패는 native ID에만, WSL target/probe 실패는 해당 WSL ID에만 결부한다. `TerminalSession`이 소유한 distro를 결정한 뒤 bounded `wsl.exe --exec sh` probe가 해당 distro의 `/proc` 환경을 읽고, rcfile에서 상속된 `LX_TERMINAL_ID`로 pane과 top-level Claude/Codex/Grok Linux PID를 직접 연결한다. provider가 중첩됐으면 전체 Claude/Codex/Grok 후보 중 유일한 최상위 agent만 활성 provider이며, provider별로 각각 최상위를 고르지 않는다. Claude는 현재 live descendant PID에 해당하는 `<HOME>/.claude/sessions/<pid>.json`만 읽어 무관한 과거 파일의 손상을 전역 조회 실패로 확대하지 않는다. Codex는 동봉한 Linux 도구로 해당 PID의 SQLite lifecycle 기록을 읽고 §13.5의 대화 선택·rollout 검증을 적용한다. live WAL SQLite를 Windows에서 열지 않으며, open rollout FD는 미소비 복원 요청을 판정하는 보조 증거로만 사용한다. Grok는 guest 프로세스의 `GROK_HOME`(없으면 guest `HOME/.grok`)에서 `active_sessions.json`의 PID 일치를 읽고, 그 PID의 유효 UUID가 정확히 하나이며 `summary.json`이 존재하고 mtime이 age 게이트를 통과할 때만 귀속한다. Grok에는 rollout 필터가 없다. 명시 distro 파싱 실패는 default distro로 fallback하지 않고, default 조회와 모든 distro probe 대기는 하나의 3초 deadline 안에서 끝난다(probe 실행은 아래 "WSL 게스트 관측 공유"를 따른다). 이 명시/default distro 결정 자체가 실패하면 probe 대상 없음이 아니라 attribution 조회 실패(`Unknown`)로 전파한다. native·WSL 결과 병합 뒤 session ID 충돌도 전부 `null` 처리한다. live candidate에 결부된 distro·probe·provider 저장소 중 하나라도 증명할 수 없으면 CWD나 최신 파일로 추정하지 않고 `null`로 fail-closed한다([ADR-0120](../adr/0120-wsl-agent-session-attribution.md), [ADR-0156](../adr/0156-grok-first-class-agent.md)).
 
 WSL의 Claude Chrome 호스트(`argv[1] == --chrome-native-host`)는 공통 게스트 역할 검사로 대화 후보에서 제외한다. 세션 probe V3의 P 행은 helper 여부만 추가로 반환하며 argv 원문은 보내지 않는다. helper의 PID·PPID는 깊이 계산에 계속 포함하고, 실제 대화 두 개의 동률은 여전히 귀속 불가다. 명시적인 역할 증거를 못 읽으면 후보를 유지하며, 세션 파일이 있는 PID를 우선하는 우회는 하지 않는다([ADR-0253](../adr/0253-wsl-claude-chrome-helper-role.md)).
 
@@ -1595,11 +1606,22 @@ native provider 조회는 표시용 `known_claude_terminals`·`known_codex_termi
 
 native tree에서 가장 얕은 깊이에 agent가 둘 이상 있으면 같은 provider끼리도 모호하다. 정확한 PID 선택은 거절하되 liveness는 `Ambiguous`를 보존하고, 통합 판정은 provider 없는 `ActiveButUnidentified`가 된다. 이전 provider 조회에서 얻은 ID나 미소비 resume 요청으로 이 모호성을 덮지 않으므로 update·eviction barrier를 통과하지 않는다. 표시용 activity는 모호성을 확정 종료로 취급하지 않고 기존 title·buffer 보조 판정을 유지한다.
 
-통합 attribution command는 세 provider lookup을 동시에 시작한다. 각 adapter가 독립 3초 deadline을 갖더라도 wall-clock에서 하나의 probe budget만 소비하므로 정상 close의 5초 저장 예산과 critical 이중 관측의 20초 ACK 예산을 넘기지 않는다.
+통합 attribution command는 세 provider lookup을 동시에 시작한다. 명령 시작을 관측 경계 하나로 잡아 세 provider에 넘기므로 distribution마다 게스트 스캔 1회를 함께 읽는다. 각 adapter가 독립 3초 deadline을 갖더라도 wall-clock에서 하나의 probe budget만 소비하므로 정상 close의 5초 저장 예산과 critical 이중 관측의 20초 ACK 예산을 넘기지 않는다.
+
+**WSL 게스트 관측 공유**([ADR-0335](../adr/0335-shared-wsl-guest-observations.md)). 세션 귀속 스캔(`laymux-wsl-agent-probe`)과 Codex 진단(`laymux-wsl-codex-probe`)은 `AppState.wsl_guest_snapshots`(`wsl_probe::snapshot`)의 공유 run으로만 실행한다. run 키는 probe 이름·distribution·argv이고, run은 시작 때의 PTY catalog(모든 live PTY의 terminal id·generation)에만 유효하다. 생성·종료·재생성이 catalog를 바꾸면 이전 run을 쓰지 않는다. 같은 키·catalog의 동시 요청은 run 하나에 합류한다. run은 자기 스레드에서 `WSL_AGENT_PROBE_TIMEOUT`으로 돌고, 시작한 호출자를 포함한 모든 대기자는 자기 deadline까지만 기다린다. 대기자가 먼저 포기해도 run은 끝까지 가서 게시된다. 결과는 원시 stdout이고 해석은 probe 소유자가 한다. 호출자는 `GuestObservation`으로 신선도를 명시한다.
+
+| 호출자 | 계약 |
+|---|---|
+| `get_terminal_session_attributions`(persist-session·종료·업데이트·eviction·watchdog checkpoint) | 명령 시작 이후 시작된 run만. 세 provider가 같은 경계를 공유. critical 두 번째 관측은 새 경계 |
+| Codex 종료 `/status` 확인(`status_probe::targets`) | 대상 수집과 훅 선택은 한 경계를 공유. 끝의 재확인과 단계별 프로세스 확인은 매번 새 경계 |
+| `get_{claude,codex,grok}_session_ids` | 호출 시각 이후 시작된 run만 |
+| `get_codex_turn_states`·`get_agent_hook_states`·`get_agent_session_states`(표시 폴링) | `WSL_GUEST_SNAPSHOT_MAX_AGE`(3초) 안에 시작된 run 재사용(실행 중이면 합류) |
+
+재사용 창은 `WSL_AGENT_PROBE_TIMEOUT` 이상(폴링이 실행 중 run에 합류)이고 `ACTIVITY_RECONCILE_INTERVAL` 이하(liveness 판정보다 한 패스 넘게 늦지 않음)다. 실패도 창 안에서 공유하므로 고장 난 guest를 폴링은 창마다 한 번만 묻는다. 재사용된 표시용 조회는 receipt에 NoAgent를 기록하지 않고 Codex proof도 남기지 않는다. 종료 `/status` fallback 증거가 이미 있어도 표시 폴링은 receipt의 rollout 파일 stamp를 추가하거나 갱신하지 않는다. 훅 상태의 재검증은 제목·훅 연결·generation과 native 프로세스·세션 파일을 다시 읽고, WSL 게스트 스캔·Codex 진단은 같은 run일 수 있다. liveness 프로브는 이 테이블을 쓰지 않는다.
 
 background 저장 힌트가 critical checkpoint에 합류하면 같은 실패를 받을 수 있다. `persistSession`은 반환 promise에 오류 기록 handler를 즉시 연결하여 대기하지 않는 이벤트 호출의 unhandled rejection을 막고, 반환 promise 자체의 실패는 그대로 유지한다. 명시적으로 기다리는 설정 저장·update·eviction 호출자가 실패를 성공으로 오인하지 않는다.
 
-WSL 세션 프로세스 probe는 환경과 PPID를 POSIX 셸 내장 `read`로 나누어 읽는다. 프로세스마다 환경 변수별 `sed`·`head` 파이프라인을 반복하지 않는다. pane marker를 상속한 중간 셸도 부모 관계 계산에 포함하고, rollout FD 열거는 이를 소비하는 Codex 프로세스에만 수행한다. 첫 번째 환경 변수 값, 공백·등호를 포함한 경로와 기존 3초 예산을 보존한다. 현재 Codex 대화 선택은 §13.5의 SQLite lifecycle 기록이 우선이며, FD 부재는 미소비 복원 요청 판정의 보조 증거다. Codex 진단 도구는 최대 4개를 동시에 실행하며, 완료된 슬롯은 다른 슬롯의 느린 작업을 기다리지 않고 다음 pane을 즉시 시작한다. 모든 실행은 원래 조회의 공통 3초 deadline에서 남은 시간만 사용하며, 실패나 reader panic은 해당 pane에만 귀속한다. lifecycle 선택과 중복 ID 검증은 결과를 모은 뒤 기존 경로에서 수행한다.
+WSL 세션 프로세스 probe는 환경과 PPID를 POSIX 셸 내장 `read`로 나누어 읽는다. 프로세스마다 환경 변수별 `sed`·`head` 파이프라인을 반복하지 않는다. pane marker를 상속한 중간 셸도 부모 관계 계산에 포함하고, rollout FD 열거는 이를 소비하는 Codex 프로세스에만 수행한다. 첫 번째 환경 변수 값, 공백·등호를 포함한 경로와 기존 3초 예산을 보존한다. 현재 Codex 대화 선택은 §13.5의 SQLite lifecycle 기록이 우선이며, FD 부재는 미소비 복원 요청 판정의 보조 증거다. Codex 진단 도구는 distribution마다 terminal id로 정렬한 pane을 `WSL_CODEX_PROBE_BATCH_PANES`(4)개씩 묶어, 묶음당 게스트 셸 하나(`sh -c … laymux-wsl-codex-probe <도구> <pid> <id> …`)에서 순서대로 실행한다. 셸은 pane마다 `C<TAB>순번<TAB>종료 상태<TAB>JSON` 한 줄을 header/end sentinel 사이에 내고, 값은 argv로만 받는다. 같은 distribution의 묶음들은 동시에 돈다. 모든 대기는 원래 조회의 공통 3초 deadline까지이며, pane별 종료 상태·프로세스 식별 실패는 해당 pane에, 묶음 실행 실패·형식 오류·run panic은 그 묶음의 pane에 귀속한다. lifecycle 선택과 중복 ID 검증은 결과를 모은 뒤 기존 경로에서 수행한다.
 
 **agent를 종료한 pane은 shell로 복원한다**([ADR-0195](../adr/0195-agent-session-cleared-on-shell-return.md), [ADR-0222](../adr/0222-agent-session-checkpoint-coordinator.md)). 판정 SoT는 Rust `get_terminal_session_attributions`다. 이 command는 live PTY의 generation과 native/WSL process liveness, 세 provider의 정확 귀속 결과를 한 verdict로 묶는다. 프론트 activity는 체크포인트 요청 힌트일 뿐 세션 삭제·보존 판정에 쓰지 않는다.
 
@@ -1623,9 +1645,9 @@ Unknown pane은 DB의 이전 검증 복원점을 보존하고 `needsRetry`·`unr
 
 Codex 0.160.1 공유 서버는 앱 재시작의 resume 직후 새 훅과 TUI lifecycle 진단을 모두 생략할 수 있다. 이때 `PtyHandle.session_restore_request()`의 검증된 실행 요청 ID를 **현재** OSC 제목과 현재 프로세스 저장소의 최상위 rollout에 대조한다. 해당 generation에서 실제 실행한 요청만 후보이며 settings의 과거 ID를 직접 읽지 않는다. 일반 입력이 RestorePending 유예를 소비한 뒤에도 이 대조는 가능하다. 제목이 아직 없거나 파일 검증에 실패하면 Unknown으로 기존 복원점을 보존하고, 다른 대화 제목은 이전 요청 ID를 사용할 수 없다. 이 후보를 채택해도 최종 저장의 generation·충돌·이중 관측 검사는 유지한다.
 
-[ADR-0295](../adr/0295-codex-continuous-conversation-checkpoint.md): 훅 우선 Codex의 대화 귀속은 일반 자동 저장과 종료 확인이 공유한다. `codex_session/conversation`은 provider 조회 전 PTY generation과 live 제목 revision을 캡처하고, 현재 프로세스가 선택한 대화 또는 같은 저장소·배포판의 유일한 제목/훅 대화를 검증한다. 파일 I/O 뒤 세대·제목·훅 연결을 다시 확인한다. 훅만 있는 ID는 정확한 최상위 rollout을 요구하며 파일 부재를 Fresh로 합성하지 않는다. 설치 helper의 현재 상태는 이 복원 증거의 조건이 아니다. 훅 수신과 제목 변경은 합쳐지는 저장 힌트이며 대화 복원 상태의 영속 SoT는 로컬 state.db이며 훅은 저장 힌트다. native 조회 뒤 프로세스 생존은 한 번의 fresh snapshot으로 모든 pane에 판정한다. WSL은 방금 실행한 provider별 guest probe를 사용하고, 더 오래된 화면용 생존 캐시로 현재 ID를 지우지 않는다. guest 후보가 없을 때는 환경을 읽지 못한 프로세스가 있을 수 있으므로, 기존 WSL 생존 판정도 종료를 확인한 경우만 NoAgent이며 나머지는 Unknown이다. 조회 사이 provider 전환·종료·실패·generation 변경을 확인하면 이전 ID를 현재 대화로 확정하지 않는다. critical 저장은 기존 두 번의 안정 관측을 계속 요구한다.
+[ADR-0295](../adr/0295-codex-continuous-conversation-checkpoint.md): 훅 우선 Codex의 대화 귀속은 일반 자동 저장과 종료 확인이 공유한다. `codex_session/conversation`은 provider 조회 전 PTY generation과 live 제목 revision을 캡처하고, 현재 프로세스가 선택한 대화 또는 같은 저장소·배포판의 유일한 제목/훅 대화를 검증한다. 파일 I/O 뒤 세대·제목·훅 연결을 다시 확인한다. 훅만 있는 ID는 정확한 최상위 rollout을 요구하며 파일 부재를 Fresh로 합성하지 않는다. 설치 helper의 현재 상태는 이 복원 증거의 조건이 아니다. 훅 수신과 제목 변경은 합쳐지는 저장 힌트이며 대화 복원 상태의 영속 SoT는 로컬 state.db이며 훅은 저장 힌트다. native 조회 뒤 프로세스 생존은 한 번의 fresh snapshot으로 모든 pane에 판정한다. WSL은 이 checkpoint의 관측 경계 이후 시작된 guest 스캔(세 provider가 공유, [ADR-0335](../adr/0335-shared-wsl-guest-observations.md))을 사용하고, 더 오래된 화면용 생존 캐시나 표시 폴링이 재사용하는 run으로 현재 ID를 지우지 않는다. guest 후보가 없을 때는 환경을 읽지 못한 프로세스가 있을 수 있으므로, 기존 WSL 생존 판정도 종료를 확인한 경우만 NoAgent이며 나머지는 Unknown이다. 조회 사이 provider 전환·종료·실패·generation 변경을 확인하면 이전 ID를 현재 대화로 확정하지 않는다. critical 저장은 기존 두 번의 안정 관측을 계속 요구한다.
 
-Codex WSL 조회의 3초 deadline은 native 조회가 끝난 뒤 WSL process 탐색 직전에 시작한다. distro 탐색과 모든 WSL SQLite 조회가 이 예산을 공유하고, SQLite 도우미는 최대 4개씩 병렬 실행한다. native DB의 잠금·읽기 지연이 정상 WSL pane의 조회 시간을 소진하지 않는다. 각 조회 실패는 해당 terminal의 `Unknown`으로 남긴다.
+Codex WSL 조회의 3초 deadline은 native 조회가 끝난 뒤 WSL process 탐색 직전에 시작한다. distro 탐색과 모든 WSL SQLite 조회 대기가 이 예산을 공유하고, SQLite 도우미는 distribution마다 pane 4개씩 묶어 게스트 셸 하나에서 실행하며 묶음끼리는 병렬이다([ADR-0335](../adr/0335-shared-wsl-guest-observations.md)). native DB의 잠금·읽기 지연이 정상 WSL pane의 조회 시간을 소진하지 않는다. 각 조회 실패는 해당 terminal의 `Unknown`으로 남긴다.
 
 [ADR-0238](../adr/0238-codex-lifecycle-storage-checkpoint.md): Codex의 TUI thread/start·thread/resume 진단은 프로세스 incarnation에 결부된 현재 대화 선택 증거다. 새 대화 ID에 턴 입력·rollout이 없을 때만 `Fresh(provider, sessionId)`를 반환한다. 이중 관측에는 ID까지 포함하고 pane에는 `lastAgentFresh=codex`를 저장하여 다음 시작을 설정된 명령의 resume 없는 실행으로 만든다. WSL SQLite는 앱 옆에 동봉된 정적 Linux `laymux-wsl-codex-probe`가 해당 distro 안에서 읽기 전용 트랜잭션으로 조회한다. 도구는 PID·pane marker·프로세스 이름을 검증하고 기존 3초 예산 안에 JSON을 반환한다. Python·sqlite3 실행 파일·훅·사용자 패키지 설치는 필요 없다. 도구 누락·실행 실패·조회 오류는 Unknown이다. TUI 전환·loop 증거가 모두 없는 native 구버전은 아래 레거시 후보 검증을 유지하며 WSL은 미식별로 남는다.
 
@@ -1793,6 +1815,40 @@ Pane을 가리키는 식별자는 용도가 다른 3가지가 공존한다. 혼�
 - `paneNumber`는 spawn-time env var로 주입하지 않는다(레이아웃 변경 시 stale). 자기 번호가 필요하면 `identify_caller`의 `pane.number`를 라이브 조회한다.
 - **workspace name invariant**: 신규 생성/rename 적용 시 `workspace.name`의 모든 공백류는 `-`로 치환하고 앞뒤 공백은 제거한다. 예: `"My Workspace"` → `"My-Workspace"`. 마이그레이션은 하지 않으며, 기존 데이터는 다음 rename 이후 이 규칙이 적용된다. 콜론(`:`)은 정규화하지 않으므로 이름에 남을 수 있다 — locator 파싱은 이를 고려해 마지막 `:` 기준으로 분리한다(아래).
 - **식별자 복사 (issue #276)**: 컨트롤바 `PaneNumberBadge`를 클릭하거나 `pane.copyIdentifier` 키바인딩(기본 `Ctrl+Alt+C`)을 누르면 해당 pane의 식별자를 클립보드에 복사한다. 포맷은 `ui/src/lib/pane-numbers.ts`의 순수 함수 `formatPaneIdentifier()`가 생성하며, `lx:pane:<workspaceName>:<paneNumber>` 형태다. 예: `lx:pane:Default:1`. 이 문자열은 자동화/MCP `write_to_terminal`·`read_terminal_output`·`focus_terminal`에서 `terminal_id` 또는 `pane_ref`로 그대로 사용할 수 있다. MCP는 locator를 마지막 `:` 기준으로 분리해(`rsplit_once`) 마지막 세그먼트를 pane number, 그 앞 전체를 workspace name으로 본다(이름에 `:`가 있어도 안전). 그런 다음 workspace name을 현재 workspace 목록에서 id로 해석한 뒤 `terminals.resolveByNumber` 경로로 terminalId를 찾는다. `paneNumber`는 휘발성이므로 복사값도 시점 참조다. 배지는 `workspaceId`와 `workspaceName`이 주어진 컨트롤바 컨텍스트(PaneGrid)에서만 클릭-복사 가능하며, dock 등 번호 없는 위치에서는 비대화형 라벨로 렌더된다.
+
+### 13.9 WebView2 프로세스 실패 복구 (Windows)
+
+WebView가 UI 전체이므로, WebView2 browser나 main frame renderer가 죽으면 GUI는 살아 있어도 화면이 멈춘다. Windows GUI는 메인 WebView의 `ProcessFailed`를 구독하고, 업데이트와 같은 데몬 인계로 자신을 다음 GUI로 바꾼다([ADR-0336](../adr/0336-webview2-process-failure-gui-restart.md)). 코드는 `src-tauri/src/webview_recovery/`다. 정책(`policy.rs`)·재시작 기록(`history.rs`)·안내문(`notice.rs`)은 플랫폼 중립이고, 구독(`process_failed.rs`)과 재기동(`relaunch.rs`)은 Windows 전용이다. Linux에는 복구가 없다.
+
+```
+[setup 끝] with_webview → controller().CoreWebView2() → add_ProcessFailed (한 번)
+    ▼
+[ProcessFailed, UI 스레드] args(kind·Reason·ExitCode·ProcessDescription·FailureSourceModulePath) 읽기
+    │  frontend 침묵 = now − 마지막 health report 도착(없으면 구독 시작) (ADR-0080 report 시각)
+    │  assess(kind, 침묵) → Record | Wait | Recover | Ignore,  tracing 기록
+    ▼ Recover (세션 로그오프·종료 중이면 중단)
+[worker] claim_restart(cache/webview-recovery.json)
+    ├─ Granted(기록 완료) → 인계(인계 표시 → title 선택 → terminate_child_processes → title 저장)
+    │                     → CreateProcessW(상속 없음) "laymux.exe --relaunch-after <pid>" → exit(0)
+    │                       (기동 실패면 MessageBoxW: 예 → 기록·다시 기동)
+    └─ Exhausted | Unrecorded → MessageBoxW(예/아니요) → 인계
+          ├─ 예   → 기록 → 다음 GUI 기동 → exit(0)
+          └─ 아니요 → exit(0)   (유예 시간 안에 다시 연 GUI가 재결합)
+[다음 GUI main()] --relaunch-after: 그 PID가 끝날 때까지 최대 10초 대기 → run() → 레이아웃 복원·재결합
+```
+
+| `ProcessFailedKind` | 판단 |
+| --- | --- |
+| `BROWSER_PROCESS_EXITED`, `RENDER_PROCESS_EXITED` | Recover |
+| `RENDER_PROCESS_UNRESPONSIVE` | 프론트 침묵 ≥ 30초(`WEBVIEW_HANG_SILENCE_MS`)면 Recover, 아니면 Wait |
+| 그 밖의 종류·모르는 값 | Record(WebView2가 스스로 복구하거나 main frame이 남는다) |
+
+- 무응답 보고는 응답받지 못한 입력 약 15초 뒤에 오고, dev 실측에서는 새 입력 없이 반복되지 않았다. 그래서 정지 시간은 보고 횟수가 아니라 프론트의 1초 health report(api-contracts §12.1)가 끊긴 시간으로 잰다. 한 번 Recover로 판단하면 그 프로세스의 이후 보고는 Ignore다.
+- 재시작 예산: `webview-recovery.json`(`{"restartsMs": [...]}`, 설정 cache 디렉터리)에 자동 재시작 시각을 둔다. 지금 앞뒤 10분 안의 기록이 2개 이상이면 소진이다. 허가된 재시작은 다음 GUI를 띄우기 전에 기록한다. 기록을 읽거나 쓰지 못하면 재시작하지 않고 묻는다. 파일이 없거나 파싱되지 않으면 기록 0이다. 사용자가 대화상자에서 고른 재시작도 기록한다.
+- 다음 GUI는 이전 GUI가 끝난 뒤 시작한다. 그래서 고정 Automation 포트, lx endpoint, WebView2 프로필을 이전 GUI가 놓은 뒤에 잡는다. std `Command`(Tauri `restart`)로 띄우면 이전 GUI의 listen 소켓을 물려받아 포트를 잡지 못한다.
+- 새 GUI는 마지막으로 commit된 복원점으로 시작한다. 죽은 프론트는 checkpoint·출력 캐시를 남기지 못한다. 데몬 터미널은 재결합해 화면을 다시 그린다(§8.23). GUI 소유 PTY는 새로 시작한다.
+- 같은 프로세스에서 페이지를 reload하면 `TerminalView`가 같은 id로 `create_terminal_session`을 다시 불러 `Session '…' already exists`로 실패한다. 그래서 Reload는 복구 수단으로 쓰지 않는다.
+- dev 검증은 [dev-repro-methodology.md §4.8](../dev-repro-methodology.md)을 따른다.
 
 ---
 

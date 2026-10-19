@@ -415,10 +415,24 @@ fn stale_activity_caches_do_not_claim_an_absent_native_provider() {
     ] {
         cache.lock().unwrap().insert(terminal_id.into());
     }
-    let claude =
-        super::super::claude_session::get_claude_session_lookup_impl(None, &state).unwrap();
-    let codex = super::super::codex_session::get_codex_session_lookup_impl(None, &state).unwrap();
-    let grok = super::super::grok_session::get_grok_session_lookup_impl(None, &state).unwrap();
+    let claude = super::super::claude_session::get_claude_session_lookup_impl(
+        None,
+        &state,
+        GuestObservation::starting_now(),
+    )
+    .unwrap();
+    let codex = super::super::codex_session::get_codex_session_lookup_impl(
+        None,
+        &state,
+        GuestObservation::starting_now(),
+    )
+    .unwrap();
+    let grok = super::super::grok_session::get_grok_session_lookup_impl(
+        None,
+        &state,
+        GuestObservation::starting_now(),
+    )
+    .unwrap();
     for lookup in [claude, codex, grok] {
         assert!(lookup.attributions.is_empty());
         assert!(lookup.failed_terminal_ids.is_empty());

@@ -52,6 +52,8 @@ vi.mock("@/lib/tauri-api", () => ({
   getTerminalStates: (...args: unknown[]) => mockGetTerminalStates(...args),
   getCodexTurnStates: (...args: unknown[]) => mockGetCodexTurnStates(...args),
   getAgentSessionStates: (...args: unknown[]) => mockGetAgentSessionStates(...args),
+  beginClaudeTurns: vi.fn().mockResolvedValue([]),
+  getClaudeTurnResults: vi.fn().mockResolvedValue([]),
   sendOsNotification: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -438,6 +440,25 @@ describe("useSyncEvents", () => {
       result: "success",
     });
     expect(useNotificationStore.getState().notifications).toHaveLength(1);
+  });
+
+  it("ends a shell command the integration reports as stopped as interrupted (ADR-0341)", () => {
+    useTerminalStore
+      .getState()
+      .registerInstance({ id: "shell-task", profile: "PowerShell", syncGroup: "" });
+    useTerminalStore.getState().updateInstanceInfo("shell-task", { generation: 7 });
+    renderHook(() => useSyncEvents());
+    const emit = mockOnCommandStatus.mock.calls[0][0];
+    act(() => emit({ terminalId: "shell-task", generation: 7, phase: "prompt" }));
+    act(() => emit({ terminalId: "shell-task", generation: 7, phase: "start" }));
+    act(() =>
+      emit({ terminalId: "shell-task", generation: 7, phase: "end", result: "interrupted" }),
+    );
+    expect(useTerminalStore.getState().instances[0].task).toMatchObject({
+      state: "ended",
+      result: "interrupted",
+    });
+    expect(useNotificationStore.getState().notifications.at(-1)?.message).toContain("(중단)");
   });
 
   it("registers sync-branch listener on mount", () => {

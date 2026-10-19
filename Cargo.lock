@@ -2196,7 +2196,7 @@ dependencies = [
 
 [[package]]
 name = "laymux"
-version = "1.15.0"
+version = "1.19.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2250,6 +2250,8 @@ dependencies = [
  "url",
  "uuid",
  "vt100",
+ "webview2-com",
+ "windows-core",
  "windows-sys 0.59.0",
  "zeroize",
  "zip 8.6.0",

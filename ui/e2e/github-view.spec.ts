@@ -37,6 +37,69 @@ async function openGitHubViewInSecondPane(page: Page) {
 }
 
 test.describe("GitHubView", () => {
+  test("removes a merged PR after a contended refresh without waiting for the poll", async ({
+    appPage: page,
+  }, testInfo) => {
+    await page.evaluate(() => {
+      const internals = (
+        window as unknown as {
+          __TAURI_INTERNALS__: {
+            invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
+          };
+        }
+      ).__TAURI_INTERNALS__;
+      const invoke = internals.invoke;
+      let merged = false;
+      let contended = false;
+      internals.invoke = (cmd, args) => {
+        if (cmd === "run_github_item_action") {
+          merged = true;
+          contended = true;
+          return Promise.resolve();
+        }
+        if (cmd === "get_github_repo_snapshot") {
+          const pending = merged && contended && args?.force === true;
+          if (pending) contended = false;
+          return Promise.resolve({
+            status: { type: pending ? "pending" : "ready" },
+            repo: "owner/repo",
+            repoUrl: "https://github.com/owner/repo",
+            issues: [],
+            // Only a forced read bypasses the pre-merge cache.
+            pulls:
+              merged && args?.force === true
+                ? []
+                : [
+                    {
+                      number: 42,
+                      title: "Merge refresh regression",
+                      author: "alice",
+                      url: "https://github.com/owner/repo/pull/42",
+                      updatedAt: "2026-10-16T00:00:00Z",
+                      labels: [],
+                      isDraft: false,
+                      headRefName: "fix/refresh",
+                    },
+                  ],
+            fetchedAtMs: 1,
+          });
+        }
+        return invoke(cmd, args);
+      };
+    });
+    await openGitHubViewInSecondPane(page);
+    const pane = page.locator(PANE);
+    await pane.getByTestId("github-tab-pulls").click();
+    await expect(pane.getByTestId("github-item-42")).toBeVisible();
+    await pane.getByTestId("github-menu-42").click();
+    await pane.getByTestId("github-action-pr.merge-42").click();
+    await pane.getByTestId("github-confirm-42").click();
+    await expect(pane.getByTestId("github-item-42")).toHaveCount(0, { timeout: 3000 });
+    await expect(pane.getByTestId("github-tab-pulls")).toHaveText("PRs 0");
+    await expect(pane.getByTestId("github-empty")).toHaveText("No open pull requests");
+    await page.screenshot({ path: testInfo.outputPath("merged-pr-removed.png") });
+  });
+
   test("lists the repository of the CWD it receives", async ({ appPage: page }) => {
     await openGitHubViewInSecondPane(page);
 

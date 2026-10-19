@@ -10,6 +10,12 @@
 //! distribution, a safe distribution name, and a bounded `wsl.exe --exec` run.
 //! Those live here so the two probes cannot drift apart on the security-
 //! relevant parts (distro validation, single deadline for all distros).
+//!
+//! The session-attribution side reads the guest from several callers at once,
+//! so its runs go through [`snapshot`]: one shared run per distribution, with
+//! the freshness each caller needs (ADR-0335).
+
+pub mod snapshot;
 
 use std::time::{Duration, Instant};
 
@@ -18,7 +24,7 @@ use crate::error::AppError;
 #[cfg(windows)]
 use crate::lock_ext::MutexExt;
 #[cfg(windows)]
-use crate::process::{headless_command, output_with_timeout};
+use crate::process::{headless_wsl_command, output_with_timeout};
 #[cfg(windows)]
 use crate::state::AppState;
 #[cfg(windows)]
@@ -33,7 +39,7 @@ pub(crate) fn with_agent_role_probe(script: &str) -> String {
 /// Every WSL-backed terminal and the distribution its probe must run in.
 /// `None` means the pane uses the default distribution, which the caller
 /// resolves once per probe pass.
-#[cfg(windows)]
+#[cfg_attr(not(windows), allow(dead_code))]
 pub struct WslTerminalTargets {
     pub targets: Vec<(String, Option<String>)>,
     /// At least one WSL-backed pane could not be assigned a trustworthy distro.
@@ -178,7 +184,7 @@ pub fn run_probe_script(
     if !is_safe_distro_name(distro) {
         return Err("unsafe WSL distribution name".into());
     }
-    let mut command = headless_command("wsl.exe");
+    let mut command = headless_wsl_command();
     command.args(["-d", distro, "--exec", "sh", "-c", script, arg0]);
     let output = output_with_timeout(&mut command, timeout).map_err(|error| error.to_string())?;
     if !output.status.success() {

@@ -27,6 +27,7 @@ import { isStaleActivity } from "@/lib/activity-order";
 import { extractCodexTitleMessage } from "@/lib/codex-activity-handler";
 import { subscribeCodexTurnStates } from "@/lib/codex-turn-subscription";
 import { subscribeAgentSessionStates } from "@/lib/agent-session-subscription";
+import { subscribeClaudeTurnResults } from "@/lib/claude-turn-result-subscription";
 import { observeTaskTitle, observeTerminalTask } from "@/lib/terminal-task-observers";
 import { heuristicTask } from "@/lib/terminal-task-detection";
 import { subscribeTerminalTasks } from "@/lib/terminal-task-subscription";
@@ -87,6 +88,7 @@ export function useSyncEvents() {
     const unsubscribeTasks = subscribeTerminalTasks();
     const unsubscribeCodexTurns = subscribeCodexTurnStates();
     const unsubscribeAgentSessions = subscribeAgentSessionStates();
+    const unsubscribeClaudeTurns = subscribeClaudeTurnResults();
     const unsubscribeAgentHooks = subscribeAgentHookStates();
     let cancelled = false;
     const unlisteners: (() => void)[] = [];
@@ -423,11 +425,13 @@ export function useSyncEvents() {
             observeTerminalTask(data.terminalId, {
               state: "ended",
               result:
-                data.exitCode === undefined
-                  ? undefined
-                  : data.exitCode === 0
-                    ? "success"
-                    : "failure",
+                data.result === "interrupted"
+                  ? "interrupted"
+                  : data.exitCode === undefined
+                    ? undefined
+                    : data.exitCode === 0
+                      ? "success"
+                      : "failure",
             });
           } else if (data.phase === "prompt" && !heuristicTask(current)?.state) {
             observeTerminalTask(data.terminalId, { state: "idle" });
@@ -582,6 +586,7 @@ export function useSyncEvents() {
       pendingClaudeIdle.clear();
       unsubscribeCodexTurns();
       unsubscribeAgentSessions();
+      unsubscribeClaudeTurns();
       unsubscribeAgentHooks();
       unsubscribeTasks();
       unsubStore();
