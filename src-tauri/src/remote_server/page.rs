@@ -1166,7 +1166,7 @@ mod tests {
             "function openFileViewerOverlay(path, explorerReturnPath, returnToWorktrees = false)"
         ));
         assert!(html.contains("const openedFromExplorer = explorerReturnPath !== undefined;"));
-        assert!(html.contains("function closeFileViewer()"));
+        assert!(html.contains("function closeFileViewer(returnToCaller = false)"));
         assert!(html.contains("function fileViewerFetch("));
         assert!(html.contains("fileViewerAuthorization: {"));
         assert!(html.contains("leaseId: requestLeaseId"));

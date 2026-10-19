@@ -17,7 +17,7 @@
 독립 `WorktreeView`에서 Git 워크트리 목록과 laymux 사용 정보를 합성하고, 명시적으로 확인한 개별 워크트리만 실행 직전 재검증 후 제거한다.
 
 - 목록·HEAD·브랜치·파일 상태의 진실원은 해당 실행 환경의 Git이다. laymux는 별도의 워크트리 등록부를 소유하지 않는다. 공용 Git 디렉터리와 실행 환경으로 저장소를 구분하며 GitHub `owner/repo`로 합치지 않는다.
-- 뷰는 기존 pane의 CWD 수신 설정으로 SyncGroup CWD를 따른다. 수신을 끄면 마지막 대상을 유지한다. 명시적인 `view.repositoryPath`는 마운트 초기 경로로만 사용하며 이후 CWD 수신을 차단하지 않는다. 별도 저장소 핀이나 고정 경로 override는 두지 않는다. 행 선택은 상세 조회이며 CWD를 전파하지 않는다. 작업으로 이동하거나 새 터미널을 여는 동작은 명시적 UI 조작이다.
+- 뷰는 기존 pane의 CWD 수신 설정으로 SyncGroup CWD를 따른다. 수신을 끄면 마지막 대상을 유지한다. 명시적인 `view.repositoryPath`는 마운트 초기 경로로만 사용하며 이후 CWD 수신을 차단하지 않는다. 별도 저장소 핀이나 고정 경로 override는 두지 않는다. 상세 버튼은 상세 조회이며 CWD를 전파하지 않는다. 작업으로 이동하거나 새 터미널을 여는 동작은 명시적 UI 조작이다.
 - CWD를 따르는 조회는 전파 원본 터미널 ID로 실행 환경을 결합한다. backend는 원본의 현재 CWD를 확인하고 Windows의 WSL 경로를 해당 배포판의 UNC로 확정한다. 이후 검사·제거는 그 경로를 사용하며 기본 배포판을 추측하지 않는다. SSH 원격 CWD를 로컬 경로로 취급하지 않는다.
 - 사용 정보는 live terminal registry, 저장된 모든 workspace layer·dock, PTY daemon inventory를 결합한다. 동일 terminal의 live 상태가 저장된 CWD보다 우선하고 live CWD를 모르면 과거 저장 경로로 대체하지 않는다. 경로는 디렉터리 경계를 지켜 비교하고 Windows 드라이브 별칭과 WSL 배포판을 구별한다.
 - 사용 경로는 해당 실행 환경에서 심볼릭 링크를 해석한다. WSL은 동일 배포판에서 시간·출력 제한을 적용한 `readlink -f`를 사용하고 경로를 확인할 수 없으면 제거를 허용하지 않는다.

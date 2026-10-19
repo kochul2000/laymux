@@ -352,7 +352,7 @@ Git 실행에는 명령당 30초·출력 8 MiB 상한을 적용한다. 목록은
 | `inspect_worktree` | `workingDir,path` | `{worktree,trackedChanges,untrackedFiles,ignoredFiles,files:[{kind,path}],filesTruncated,upstream?,ahead?,behind?,blockers:[],canRemove,usage:[],usageWarnings:[]}` |
 | `remove_worktree` | `workingDir,path,expectedHead` | 성공 시 `null`, 상태 변경·차단 시 오류 |
 
-CWD를 따라갈 때는 실제 전파 원본 `sourceTerminalId`를 보낸다. backend가 그 세션의 현재 CWD와 실행 환경을 검증해 응답 `workingDir`를 확정한다. Windows의 WSL guest CWD는 배포판이 포함된 경로로 바꾸며 UI의 이후 검사·제거는 이 확정된 `workingDir`를 사용한다. 응답 `repositoryPath`는 기본 worktree의 경로이며 현재 저장소 표시에 사용한다. 원본의 CWD가 요청과 달라졌거나 Windows에서 원본 터미널 없이 `/home/...` 같은 경로를 보내면 조회를 거부한다. 명시적인 WSL 경로는 `//wsl.localhost/<배포판>/...`이며 SSH 원격 CWD는 로컬 저장소로 조회하지 않는다. 사용 CWD의 심볼릭 링크는 실제 실행 환경에서 해석하며 실패 시 제거를 차단한다.
+CWD를 따라갈 때는 실제 전파 원본 `sourceTerminalId`를 보낸다. backend가 그 세션의 현재 CWD와 실행 환경을 검증해 응답 `workingDir`를 확정한다. Windows의 WSL guest CWD는 배포판이 포함된 경로로 바꾸며 UI의 이후 검사·제거는 이 확정된 `workingDir`를 사용한다. CWD 수신을 끈 같은 대상의 재조회도 이 주소를 사용하며 원본 terminal의 이후 이동·종료와 분리한다. 응답 `repositoryPath`는 기본 worktree의 경로이며 현재 저장소 표시에 사용한다. 원본의 CWD가 요청과 달라졌거나 Windows에서 원본 터미널 없이 `/home/...` 같은 경로를 보내면 조회를 거부한다. 명시적인 WSL 경로는 `//wsl.localhost/<배포판>/...`이며 SSH 원격 CWD는 로컬 저장소로 조회하지 않는다. 사용 CWD의 심볼릭 링크는 실제 실행 환경에서 해석하며 실패 시 제거를 차단한다.
 
 `usage` 항목은 `{terminalId,paneId,workspaceId,workspaceName,cwd,kind,agentType}`이며 nullable 식별자·이름·에이전트 유형은 없는 경우 `null`이다. `kind`는 `live | saved | daemon`이다. live terminal은 같은 ID의 저장된 경로보다 우선하며 live CWD가 불명확해도 저장 경로로 되돌리지 않는다. 숨은 레이어와 dock도 포함한다. 저장된 터미널은 `lastCwd`, 이어서 해당 프로필(미지정이면 기본 프로필)의 시작 경로를 복원 참조로 사용한다. 관측되지 않은 local CWD·불명확한 daemon 상태·사용 경로 확인 실패는 `usageWarnings`와 `usage_unknown`이 되며, 불완전한 사용 정보로는 어느 워크트리도 제거하지 않는다. 사용 정보는 이 laymux build의 관측 범위이며 외부 프로세스가 미사용임을 보증하지 않는다.
 
