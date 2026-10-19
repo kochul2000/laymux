@@ -1,6 +1,6 @@
 # 0346. 출력 재연결은 데몬의 기존 작업을 보존한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-19
 - Source: 사용자 요구(출력이 멈춘 pane 복귀 시 자동 재연결, 실패 후 수동 재연결과 손실 경고가 있는 재시작) · [data-flow §8.8·§8.23](../architecture/data-flow.md) · ADR-0095·0126·0301·0307
 - Amends: ADR-0095·0126의 close/recreate만 허용하는 desktop fail-stop 복구 범위. 기존 세대 안에서의 reset/replay 금지는 유지한다.
