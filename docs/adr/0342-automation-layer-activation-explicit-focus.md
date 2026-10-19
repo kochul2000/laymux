@@ -1,6 +1,6 @@
 # 0342. Automation 레이어 표시와 포커스는 별도 도구로 요청한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-19
 - Source: 사용자 요구(MCP pane 제어가 다른 pane의 작업을 방해하지 않으며 포커스는 별도 MCP로 분리), [api-contracts.md §12.7](../architecture/api-contracts.md#127-내장-mcp-서버), [ADR-0081](0081-pane-focus-transition-single-owner.md), [ADR-0324](0324-automation-never-navigates-user.md), [ADR-0328](0328-automation-stack-keeps-visible-layer.md)
 - 관계: ADR-0297·0324의 Automation 레이어 활성화와 포커스 결합 계약을 대체한다. 사용자 UI·Remote 탐색의 포커스 정책은 유지한다.
