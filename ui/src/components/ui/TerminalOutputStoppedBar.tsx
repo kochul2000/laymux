@@ -6,6 +6,12 @@ interface TerminalOutputStoppedBarProps {
   title: string;
   description: string;
   restartLabel: string;
+  reconnectLabel: string;
+  reconnectingLabel: string;
+  restartWarning: string;
+  reconnecting: boolean;
+  error?: string;
+  onReconnect: () => void;
   onRestart?: () => void;
 }
 
@@ -16,6 +22,12 @@ export function TerminalOutputStoppedBar({
   title,
   description,
   restartLabel,
+  reconnectLabel,
+  reconnectingLabel,
+  restartWarning,
+  reconnecting,
+  error,
+  onReconnect,
   onRestart,
 }: TerminalOutputStoppedBarProps) {
   return (
@@ -36,16 +48,41 @@ export function TerminalOutputStoppedBar({
         <div className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
           {description} <span className="font-mono">({reason})</span>
         </div>
+        {error && (
+          <div className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+            {error}
+          </div>
+        )}
+        {onRestart && (
+          <div className="text-[11px]" style={{ color: "var(--red)" }}>
+            {restartWarning}
+          </div>
+        )}
       </div>
+      <button
+        type="button"
+        onClick={onReconnect}
+        disabled={reconnecting}
+        className="shrink-0 border px-3 py-1.5 font-medium disabled:opacity-50"
+        style={{
+          color: "var(--bg-base)",
+          background: "var(--yellow)",
+          borderColor: "var(--yellow)",
+        }}
+      >
+        {reconnecting ? reconnectingLabel : reconnectLabel}
+      </button>
       {onRestart && (
         <button
           type="button"
           onClick={onRestart}
-          className="shrink-0 rounded border px-3 py-1.5 font-medium"
+          disabled={reconnecting}
+          title={restartWarning}
+          className="shrink-0 border px-3 py-1.5 font-medium disabled:opacity-50"
           style={{
             color: "var(--bg-base)",
-            background: "var(--yellow)",
-            borderColor: "var(--yellow)",
+            background: "var(--red)",
+            borderColor: "var(--red)",
           }}
         >
           {restartLabel}

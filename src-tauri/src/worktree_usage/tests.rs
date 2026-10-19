@@ -3,21 +3,22 @@ use crate::pty_daemon::{PtySessionEntry, PtySessionState};
 use serde_json::json;
 
 fn settings() -> Settings {
-    let mut settings = Settings::default();
-    settings.workspaces = vec![serde_json::from_value(json!({
+    Settings {
+        workspaces: vec![serde_json::from_value(json!({
         "id": "hidden", "name": "숨은 작업", "panes": [{
             "id": "slot", "layers": [
                 {"id": "one", "view": {"type": "TerminalView", "profile": "PowerShell", "lastCwd": "D:/old"}},
                 {"id": "two", "view": {"type": "TerminalView", "profile": "PowerShell", "lastCwd": "D:/other"}}
             ], "activeLayerId": "two"
         }]
-    })).unwrap()];
-    settings.docks = vec![serde_json::from_value(json!({
+    })).unwrap()],
+        docks: vec![serde_json::from_value(json!({
         "position": "left", "visible": false, "panes": [{
             "id": "dock", "view": {"type": "TerminalView", "profile": "PowerShell", "lastCwd": "D:/dock"}
         }]
-    })).unwrap()];
-    settings
+    })).unwrap()],
+        ..Settings::default()
+    }
 }
 
 fn inventory(ids: &[&str]) -> PtySessionInventory {

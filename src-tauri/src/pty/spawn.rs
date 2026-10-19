@@ -68,6 +68,11 @@ where
 /// identical for both backends.
 #[derive(Debug, Clone)]
 pub enum PtyBackend {
+    /// Strict reconnect: never spawn or fall back, including on attach failure.
+    Reconnect {
+        owner: crate::pty_daemon::DisplayContextOwner,
+        missed_output: Arc<crate::pty_daemon::MissedOutput>,
+    },
     /// The GUI process owns the PTY (default).
     Local,
     /// The detached PTY daemon owns the PTY; the GUI holds a proxy. With
@@ -157,7 +162,36 @@ where
         kill_owner,
     };
     let mut display_context_owner = None;
+    let mut daemon_reconnect_control = None;
     let (mut handle, adopted) = match backend {
+        PtyBackend::Reconnect {
+            owner,
+            missed_output,
+        } => {
+            let system =
+                crate::pty_daemon::DaemonPtySystem::reconnect(owner, Arc::clone(missed_output));
+            let opened = open_and_spawn(&system, size, cmd)?;
+            display_context_owner = Some(system.display_context_owner());
+            daemon_reconnect_control = Some(system.reconnect_control());
+            let metadata = system.adopted_metadata();
+            let wsl_backed = metadata
+                .as_ref()
+                .and_then(|m| m.get(PTY_DAEMON_METADATA_WSL_BACKED))
+                .map_or(is_wsl, |v| v == "true");
+            (
+                start_spawned(
+                    opened,
+                    terminal_generation,
+                    SpawnOptions {
+                        wsl_backed,
+                        kill_owner: ChildKillOwner::Backend,
+                    },
+                    on_output,
+                    PtyLifecycleHooks::default(),
+                )?,
+                metadata,
+            )
+        }
         PtyBackend::Local => (
             spawn_command_on(
                 native_pty_system().as_ref(),
@@ -185,6 +219,7 @@ where
                 match open_and_spawn(&system, size, cmd.clone()) {
                     Ok(opened) => {
                         display_context_owner = Some(system.display_context_owner());
+                        daemon_reconnect_control = Some(system.reconnect_control());
                         system.adopted_metadata().map(|metadata| (opened, metadata))
                     },
                     Err(error) => {
@@ -205,6 +240,7 @@ where
                     match open_and_spawn(&system, size, cmd.clone()) {
                         Ok(opened) => {
                             display_context_owner = Some(system.display_context_owner());
+                            daemon_reconnect_control = Some(system.reconnect_control());
                             (opened, None, ChildKillOwner::Backend)
                         }
                         // The daemon refused (for example while shutting down
@@ -241,6 +277,7 @@ where
     };
 
     handle.display_context_owner = display_context_owner;
+    handle.daemon_reconnect_control = daemon_reconnect_control;
     Ok(SpawnedPty {
         handle,
         initial_execution_host,
@@ -439,6 +476,7 @@ where
     let master = Arc::new(Mutex::new(Some(pair.master)));
     let control = PtyControlWorker::spawn(writer, Arc::clone(&master))?;
     let handle = PtyHandle {
+        daemon_reconnect_control: None,
         display_context_owner: None,
         checkpoint_input_revision: Arc::new(AtomicU64::new(0)),
         session_restore: None,

@@ -42,6 +42,73 @@ fn wait_detached(endpoint: &DaemonEndpoint, session_id: &str) {
 }
 
 #[test]
+fn output_reconnect_preserves_child_and_failed_retry_never_spawns() {
+    let daemon = TestDaemon::start();
+    let (command, input) = interactive_shell();
+    let system = spawning(daemon.endpoint.clone(), "reconnect#1".into());
+    let (tx, rx) = mpsc::channel();
+    let original = spawn_command_on(
+        &system,
+        size(),
+        command.clone(),
+        1,
+        SpawnOptions {
+            wsl_backed: false,
+            kill_owner: ChildKillOwner::Backend,
+        },
+        move |bytes| {
+            let _ = tx.send(bytes);
+            PtyOutputControl::Continue
+        },
+        PtyLifecycleHooks::default(),
+    )
+    .unwrap();
+    let mut original = original;
+    original.daemon_reconnect_control = Some(system.reconnect_control());
+    original.display_context_owner = Some(system.display_context_owner());
+    original.write(input).unwrap();
+    collect_until(&rx, "MARK_42");
+    let pid = original.child_pid();
+    original.detach_for_reconnect().unwrap();
+    wait_detached(&daemon.endpoint, "reconnect#1");
+    let owner = system.display_context_owner();
+    let backend = crate::pty::PtyBackend::Reconnect {
+        owner: owner.clone(),
+        missed_output: Arc::default(),
+    };
+    let session = crate::terminal::TerminalSession::new(
+        "reconnect".into(),
+        crate::terminal::TerminalConfig {
+            command_line: "this-command-must-not-run".into(),
+            cols: 80,
+            rows: 24,
+            ..Default::default()
+        },
+    );
+    let (tx, rx) = mpsc::channel();
+    let recovered = crate::pty::spawn_pty_on(&backend, &session, 2, move |bytes| {
+        let _ = tx.send(bytes);
+        PtyOutputControl::Continue
+    })
+    .unwrap()
+    .handle;
+    assert_eq!(recovered.child_pid(), pid);
+    recovered.write(input).unwrap();
+    collect_until(&rx, "MARK_42");
+    assert!(
+        crate::pty::spawn_pty_on(&backend, &session, 3, |_| PtyOutputControl::Continue).is_err()
+    );
+    assert_eq!(list_sessions(&daemon.endpoint).unwrap().len(), 1);
+    // Roll back an attached retry without killing it, then explicit close via
+    // the retained original handle must use the latest shared attach epoch.
+    recovered.detach_for_reconnect().unwrap();
+    drop(recovered);
+    wait_detached(&daemon.endpoint, "reconnect#1");
+    original.terminate().unwrap();
+    daemon.wait_for_sessions(0);
+}
+
+#[test]
 fn display_context_follows_the_same_child_and_rejects_the_previous_owner() {
     use super::display_context::{update_context, DisplayContext, MAX_CONTEXT_BYTES, METADATA_KEY};
     let daemon = TestDaemon::start();

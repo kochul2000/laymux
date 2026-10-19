@@ -43,8 +43,10 @@ pub(super) async fn remote_worktrees(
     Json(body): Json<WorktreeListRequest>,
 ) -> Response {
     blocking_response(
-        tokio::task::spawn_blocking(move || snapshot_for_state(&server.app_state, &id, &body))
-            .await,
+        tokio::task::spawn_blocking(move || {
+            snapshot_for_state(&server.app_state, &id, &body).map_err(Box::new)
+        })
+        .await,
     )
 }
 
@@ -54,7 +56,10 @@ pub(super) async fn remote_worktree_inspect(
     Json(body): Json<WorktreeInspectRequest>,
 ) -> Response {
     blocking_response(
-        tokio::task::spawn_blocking(move || inspect_for_state(&server.app_state, &id, &body)).await,
+        tokio::task::spawn_blocking(move || {
+            inspect_for_state(&server.app_state, &id, &body).map_err(Box::new)
+        })
+        .await,
     )
 }
 
@@ -64,14 +69,19 @@ pub(super) async fn remote_worktree_remove(
     Json(body): Json<WorktreeRemoveRequest>,
 ) -> Response {
     blocking_response(
-        tokio::task::spawn_blocking(move || remove_for_state(&server.app_state, &id, &body)).await,
+        tokio::task::spawn_blocking(move || {
+            remove_for_state(&server.app_state, &id, &body).map_err(Box::new)
+        })
+        .await,
     )
 }
 
-fn blocking_response(result: Result<Result<Value, Response>, tokio::task::JoinError>) -> Response {
+fn blocking_response(
+    result: Result<Result<Value, Box<Response>>, tokio::task::JoinError>,
+) -> Response {
     match result {
         Ok(Ok(value)) => ([(header::CACHE_CONTROL, "no-store")], Json(value)).into_response(),
-        Ok(Err(response)) => response,
+        Ok(Err(response)) => *response,
         Err(error) => internal_error(error),
     }
 }

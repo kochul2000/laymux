@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { requestTerminalOutputReconnect } from "@/lib/terminal-output-reconnect";
 import html2canvas from "html2canvas";
 import { onAutomationRequest, automationResponse, type AutomationRequest } from "@/lib/tauri-api";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -1321,6 +1322,12 @@ const handlers: HandlerMap = {
         dockPaneId: dockCtx?.pane.id,
         switchedWorkspace: switchedWorkspace ? terminalWorkspaceId : undefined,
       });
+    },
+    reconnectOutput: (p) => {
+      const id = p.id as string;
+      return requestTerminalOutputReconnect(id)
+        ? ok({ started: true })
+        : err(`Terminal '${id}' is not mounted`);
     },
     // Dump xterm's reflowed buffer (text + isWrapped per line) for automated
     // reflow verification (issue #285). Reads the live xterm line model, not the
