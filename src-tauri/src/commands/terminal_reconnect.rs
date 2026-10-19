@@ -5,18 +5,6 @@ use tauri::{AppHandle, State};
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 
-struct ReconnectClaim<'a> {
-    state: &'a AppState,
-    id: String,
-}
-impl Drop for ReconnectClaim<'_> {
-    fn drop(&mut self) {
-        if let Ok(mut claims) = self.state.terminal_output_reconnects.lock_or_err() {
-            claims.remove(&self.id);
-        }
-    }
-}
-
 #[tauri::command]
 pub async fn reconnect_terminal_session(
     id: String,
@@ -40,16 +28,6 @@ pub(crate) async fn reconnect_terminal_session_inner(
     if cols == 0 || rows == 0 {
         return Err("terminal size must be positive".into());
     }
-    {
-        let mut claims = state.terminal_output_reconnects.lock_or_err()?;
-        if !claims.insert(id.clone()) {
-            return Err("Terminal reconnect already in progress".into());
-        }
-    }
-    let _claim = ReconnectClaim {
-        state,
-        id: id.clone(),
-    };
     let (config, cwd, cwd_send, cwd_receive) = {
         let terminals = state.terminals.lock_or_err()?;
         let session = terminals.get(&id).ok_or("Terminal no longer exists")?;

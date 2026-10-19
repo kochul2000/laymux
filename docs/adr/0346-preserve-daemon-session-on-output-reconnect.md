@@ -17,6 +17,8 @@ desktop 출력의 repair IPC가 timeout하면 해당 출력 세대는 fail-stop�
 - 동시에 하나의 재연결만 실행한다. 자동 시도가 실패하면 반복 타이머를 만들지 않고 상단 바에 수동 재연결을 제공한다. 진행 중에는 중복 조작을 막는다.
 - 대상은 현재 GUI가 가진 정확한 daemon endpoint와 session id다. 기존 연결을 terminate 없이 분리한 뒤 fail-stop 출력 세대를 retire하고 새 세대를 만든다. 데몬의 원자적 `takeOver:false` attach로 붙으며 다른 client를 빼앗지 않는다. 재연결은 spawn·in-process fallback·agent resume를 하지 않는다.
 - 실패한 attach의 정리도 세션을 종료하지 않는다. 수동 재시도에 필요한 기존 세션과 종료 소유권을 남긴다. 새 attach epoch는 이전 handle과 공유해 나중의 명시적 종료가 현재 세션을 정리할 수 있게 한다. 이전 세대의 completion·close는 새 출력 상태를 바꾸지 않는다.
+- 재연결 IPC의 미정산 Promise는 frontend의 create/close 직렬 큐를 막지 않는다. backend의 terminal별 lifecycle claim은 재연결과 명시적 close를 직렬화한다. close는 blocking worker의 테이블 락 밖에서 최대 20초 기다리고, timeout이면 catalog/handle을 보존해 늦은 재연결의 정리 전에 새 자식을 만들지 않는다.
+- attach 응답 유실로 기존 epoch의 종료가 superseded되면, 명시적 close에 한해 같은 세션을 `takeOver:false`로 재확보하고 확인된 epoch로 종료한다. 새 attach의 출력은 배출하며 종료 ACK까지 연결을 유지한다. 활성 다른 client의 거절·불확실한 응답·다시 superseded된 종료는 오류로 남기고 epoch를 추측하거나 강제 종료하지 않는다.
 - 현재 화면·터미널 모드는 기존 데몬 redraw 계약을 사용한다. 프로세스·대화는 유지하지만 기존 전체 scrollback의 완전 복원을 약속하지 않는다. GUI의 현재 표시·업무 문맥은 재연결 동안 보존한다.
 - 상단 바의 재연결과 별도로 빨간색 터미널 재시작 버튼을 둔다. 재시작은 기존 작업과 터미널 내용이 보존되지 않음을 바로 보이는 문구로 알리고 기존 fresh-terminal 동작을 따른다. local PTY는 보존 재연결을 거절하고 같은 실패 UI를 사용한다.
 - 이 IPC는 desktop 전용이다. 검증용 dev Automation API는 같은 출력 fail-stop과 재연결 경로를 조작할 수 있다. release 작업을 검증에 사용하지 않는다.

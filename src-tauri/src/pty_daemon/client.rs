@@ -221,7 +221,19 @@ impl Connection {
         if attach_epoch.is_none() && !self.owns_session_id {
             return Ok(());
         }
-        terminate_by_id(&self.endpoint, &self.session_id, attach_epoch)
+        if self
+            .reconnect_control
+            .preserve_on_drop
+            .load(Ordering::Acquire)
+        {
+            super::reconnect::terminate_preserved_session(
+                &self.endpoint,
+                &self.session_id,
+                &self.attach_epoch,
+            )
+        } else {
+            terminate_by_id(&self.endpoint, &self.session_id, attach_epoch)
+        }
     }
 
     /// `request_terminate` with a few retries, for paths that cannot report

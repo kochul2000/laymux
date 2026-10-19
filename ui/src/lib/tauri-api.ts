@@ -100,9 +100,10 @@ export function reconnectTerminalSession(
   cols: number,
   rows: number,
 ): Promise<number> {
-  return enqueueTerminalLifecycle(id, () =>
-    invoke("reconnect_terminal_session", { id, generation, cols, rows }),
-  );
+  // A lost reconnect reply must not pin explicit close/restart behind it.
+  // The backend claim and exact generation checks arbitrate close/replacement;
+  // the mount owner still joins one uncertain reconnect for manual retry.
+  return invoke("reconnect_terminal_session", { id, generation, cols, rows });
 }
 
 /**

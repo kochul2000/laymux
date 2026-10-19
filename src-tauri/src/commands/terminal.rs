@@ -263,6 +263,11 @@ pub(crate) async fn create_terminal_session_inner(
         .session_checkpoint
         .begin_mutation_after_finalization()
         .await;
+    // Do not claim while queued behind a finalized close checkpoint: that
+    // checkpoint's cleanup must be able to acquire this same lifecycle claim.
+    let _reconnect_claim = reconnect_generation
+        .map(|_| state.terminal_output_reconnects.reconnect(&id))
+        .transpose()?;
     // Admit lifecycle mutation before human-control ownership. Waiting on
     // finalization while already holding a human permit would prevent that
     // finalization from draining the very operation waiting for it.
@@ -1509,14 +1514,20 @@ pub async fn close_terminal_session(
 ) -> Result<(), String> {
     // A committed app-close checkpoint keeps input fenced through destruction.
     // Its own terminal teardown is the only mutation admitted in that phase.
-    if state.session_checkpoint.close_cleanup_allowed() {
-        return close_terminal_session_inner(&id, &state, &app);
-    }
-    let _checkpoint_permit = state
-        .session_checkpoint
-        .begin_mutation_after_finalization()
-        .await;
-    close_terminal_session_inner(&id, &state, &app)
+    let _checkpoint_permit = if state.session_checkpoint.close_cleanup_allowed() {
+        None
+    } else {
+        Some(
+            state
+                .session_checkpoint
+                .begin_mutation_after_finalization()
+                .await,
+        )
+    };
+    let close_state = Arc::clone(state.inner());
+    tokio::task::spawn_blocking(move || close_terminal_session_inner(&id, &close_state, &app))
+        .await
+        .map_err(|error| format!("Terminal close worker failed: {error}"))?
 }
 
 /// Close one terminal after the caller has established an equivalent or
@@ -1528,6 +1539,9 @@ pub(crate) fn close_terminal_session_inner(
     state: &AppState,
     app: &AppHandle,
 ) -> Result<(), String> {
+    // Serialize with the backend work itself, not its possibly lost IPC reply.
+    // On timeout preserve catalog/handle so replacement create cannot spawn.
+    let _lifecycle_claim = state.terminal_output_reconnects.close(id)?;
     // Hold the terminal catalog from generation selection through all
     // id-keyed cleanup. Create performs its duplicate check and generation
     // reservation under the same lock, so close cannot consume state from a
