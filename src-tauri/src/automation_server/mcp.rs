@@ -468,13 +468,12 @@ struct StackPaneParam {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct ActivatePaneLayerParam {
     /// Layer id (the `id` of a pane entry in get_active_workspace). Give this or terminal_id.
     layer_id: Option<String>,
     /// Terminal id of the layer (e.g. "terminal-pane-1234abcd"). Give this or layer_id.
     terminal_id: Option<String>,
-    /// Also switch to its workspace and focus the slot (default true). false only changes the shown layer.
-    focus: Option<bool>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -2070,7 +2069,9 @@ impl McpHandler {
         .await
     }
 
-    /// Send input to a terminal. Target it with `terminal_id` (stable, preferred)
+    /// Send input without moving the user's workspace or keyboard focus. A new
+    /// or hidden terminal is prepared automatically; do not focus or activate it
+    /// just to write. Target it with `terminal_id` (stable, preferred)
     /// or `pane_number` (1-based screen reading order, same as the control bar
     /// badge — convenient but changes with layout). By default the input is
     /// submitted (Enter key) after sending — suitable for running commands or
@@ -2765,8 +2766,8 @@ impl McpHandler {
     /// Split a pane horizontally or vertically. Returns info about the new pane created.
     /// Keyboard focus stays on the pane the user had focused (ADR-0324).
     /// The response includes a `ready` field: when false, the terminal is allocated but
-    /// its PTY is still starting. `write_to_terminal` and `focus_terminal` wait for that
-    /// session automatically before completing.
+    /// its PTY is still starting. `write_to_terminal` waits automatically without
+    /// navigation. Only use `focus_terminal` when the user requests a focus change.
     #[tool]
     async fn split_pane(
         &self,
@@ -2807,8 +2808,9 @@ impl McpHandler {
     }
 
     /// Show one stacked layer of its pane slot (ADR-0297), by layer_id or terminal_id.
-    /// By default (focus=true) switches workspace when needed and focuses the slot;
-    /// focus=false only changes the shown layer, without switching workspace or focus.
+    /// Always preserves workspace and keyboard focus. Replacing the focused input
+    /// layer is rejected. To navigate, call the separate focus_terminal tool,
+    /// which reveals the target layer and focuses it; background writes never need activation.
     #[tool]
     async fn activate_pane_layer(
         &self,
@@ -2819,15 +2821,25 @@ impl McpHandler {
                 "Provide exactly one of layer_id or terminal_id",
             )]));
         }
-        let mut params = json!({ "focus": p.focus.unwrap_or(true) });
+        let mut params = json!({});
         if let Some(layer_id) = p.layer_id {
             params["layerId"] = json!(layer_id);
         }
         if let Some(terminal_id) = p.terminal_id {
             params["terminalId"] = json!(terminal_id);
         }
-        self.bridge("action", "panes", "activateLayer", params)
-            .await
+        self.bridge_transform("action", "panes", "activateLayer", params, |data| {
+            if data.get("success").and_then(Value::as_bool) == Some(false) {
+                return Err(CallToolResult::error(vec![Content::text(
+                    data.get("error")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Layer activation failed")
+                        .to_string(),
+                )]));
+            }
+            Ok(())
+        })
+        .await
     }
 
     /// Move a stacked layer (ADR-0298), like dragging a stack tab: onto its own slot
@@ -4175,6 +4187,23 @@ mod tests {
     fn parse_pane_locator_rejects_zero_pane_number() {
         let err = parse_pane_locator("lx:pane:Default:0").unwrap_err();
         assert!(err.contains("greater than 0"));
+    }
+
+    #[test]
+    fn activate_layer_schema_and_arguments_exclude_focus() {
+        let schema = serde_json::to_value(schemars::schema_for!(ActivatePaneLayerParam)).unwrap();
+        assert!(schema["properties"].get("focus").is_none());
+        assert_eq!(schema["additionalProperties"], false);
+        for focus in [json!(true), json!(false), Value::Null] {
+            assert!(serde_json::from_value::<ActivatePaneLayerParam>(
+                json!({"layer_id": "layer-a", "focus": focus})
+            )
+            .is_err());
+        }
+        assert!(serde_json::from_value::<ActivatePaneLayerParam>(
+            json!({"terminal_id": "terminal-layer-a"})
+        )
+        .is_ok());
     }
 
     #[test]

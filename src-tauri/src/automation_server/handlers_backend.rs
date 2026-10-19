@@ -179,11 +179,10 @@ pub async fn api_docs() -> impl IntoResponse {
             },
             {
                 "method": "POST", "path": "/api/v1/panes/layers/activate",
-                "description": "Show one stacked layer of its slot (ADR-0297), by layer id or terminal id. By default (focus=true) switches workspace if needed and focuses the slot; focus=false only changes the shown layer, without switching workspace or focus.",
+                "description": "Show one stacked layer by layer id or terminal id without changing workspace or keyboard focus. Replacing the focused input layer is rejected. To navigate, use the separate terminal focus endpoint. The removed focus argument and unknown fields are rejected.",
                 "body": {
                     "layerId": "(one of) string",
-                    "terminalId": "(one of) string",
-                    "focus": "(optional) bool, default true"
+                    "terminalId": "(one of) string"
                 }
             },
             {

@@ -1,6 +1,6 @@
 # 0297. Pane 스택: 슬롯/레이어 모델
 
-- Status: Superseded by [0328](0328-automation-stack-keeps-visible-layer.md) (Automation 스택 생성의 표시 계약에 한함)
+- Status: Superseded by [0328](0328-automation-stack-keeps-visible-layer.md) (Automation 스택 생성의 표시 계약), [0342](0342-automation-layer-activation-explicit-focus.md) (Automation 레이어 활성화의 기본 포커스 계약)
 - Date: 2026-10-06
 - Source: 사용자 요구(2026-10-06, pane 에 split 외 stacked 모드 추가), [overview.md](../architecture/overview.md) §4, [data-flow.md](../architecture/data-flow.md) §5·§13.7
 - 확장: [ADR-0007](0007-pane-identifier-trio.md)(식별자 3종), [ADR-0081](0081-pane-focus-transition-single-owner.md)(포커스 전환 단일 소유), [ADR-0140](0140-split-pane-inherits-source-cwd.md)(분할 CWD 상속), [ADR-0039](0039-remote-spatial-notification-step-navigation.md)(Remote 공간순서)

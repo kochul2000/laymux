@@ -32,6 +32,8 @@
 
 ### 스택
 
+Automation 레이어 표시는 포커스를 옮기지 않으며 `focus` 인자를 받지 않는다([ADR-0342](../adr/0342-automation-layer-activation-explicit-focus.md)). MCP·REST의 요청 타입과 bridge는 제거된 인자를 오류로 거부한다. `workspace-transition.activatePaneLayer`는 내부 `focus: false` 요청이 현재 입력 중인 grid 슬롯의 활성 레이어를 숨기려 하면 어떤 store도 갱신하기 전에 거부한다. 같은 레이어의 재표시, 다른 슬롯·비활성 워크스페이스의 표시와 dock 포커스 중 grid 표시는 허용한다. 사용자 입력 콘텐츠를 전환하려면 별도 `focus_terminal` 등 탐색 도구를 호출한다. UI·Remote 직접 탐색의 기본 포커스 동작은 유지한다.
+
 **Pane 하나에 여러 view 를 겹쳐 두고 전환한다**([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)). 슬롯은 기하를, 레이어는 콘텐츠를 소유하며 활성 레이어 하나만 보인다. 터미널뿐 아니라 어떤 view 든 레이어가 된다. dock pane 은 스택 대상이 아니다.
 
 | 방법 | 동작 |

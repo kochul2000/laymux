@@ -42,7 +42,8 @@ export function focusWorkspacePane(workspaceId: string, paneIndex: number): bool
  * layer — stack tabs, keyboard cycling, notification and Remote navigation,
  * Automation terminal focus — commits through here instead of setting
  * `activeLayerId` and grid focus separately. The target is validated first;
- * an unknown workspace or layer touches no store.
+ * an unknown workspace or layer touches no store. With focus:false, replacing
+ * the focused input layer is also rejected before any mutation (ADR-0342).
  */
 export function activatePaneLayer(
   workspaceId: string,
@@ -57,6 +58,18 @@ export function activatePaneLayer(
     pane.layers.some((layer) => layer.id === layerId),
   );
   if (slotIndex < 0) return false;
+
+  // Keeping the slot index alone is insufficient: hiding its input layer also
+  // changes the DOM focus owner. Reject before publishing any state (ADR-0342).
+  if (
+    !focus &&
+    workspaceState.activeWorkspaceId === workspaceId &&
+    useDockStore.getState().focusedDock === null &&
+    useGridStore.getState().focusedPaneIndex === slotIndex &&
+    workspace.panes[slotIndex].activeLayerId !== layerId
+  ) {
+    return false;
+  }
 
   workspaceState.setActiveLayer(workspaceId, layerId);
   return focus ? focusWorkspacePane(workspaceId, slotIndex) : true;

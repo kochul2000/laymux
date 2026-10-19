@@ -314,7 +314,7 @@ ADR 이 필요한 대표 기준:
 | [0294](0294-codex-process-bound-lifecycle-proof.md) | 훅 우선 종료 확인은 정확한 프로세스 대화 귀속도 증거로 사용한다 | Accepted |
 | [0295](0295-codex-continuous-conversation-checkpoint.md) | Codex 대화 귀속을 평상시 저장과 종료 확인이 공유한다 | Accepted |
 | [0296](0296-committed-checkpoint-reuse-on-finalization.md) | 변경 없는 저장 완료 복원점을 종료·업데이트에서 재사용한다 | Accepted (partially superseded by [0323](0323-update-checkpoint-follows-pty-ownership.md)) |
-| [0297](0297-pane-stack-slot-layer-model.md) | 워크스페이스 pane 은 기하를 소유하는 슬롯, 콘텐츠는 순서 있는 레이어 목록(스택)이 소유한다 | Superseded by [0328](0328-automation-stack-keeps-visible-layer.md) (Automation 생성 표시 계약) |
+| [0297](0297-pane-stack-slot-layer-model.md) | 워크스페이스 pane 은 기하를 소유하는 슬롯, 콘텐츠는 순서 있는 레이어 목록(스택)이 소유한다 | Superseded by [0328](0328-automation-stack-keeps-visible-layer.md) (Automation 생성 표시), [0342](0342-automation-layer-activation-explicit-focus.md) (Automation 기본 포커스) |
 | [0298](0298-pane-rearrangement-automation-parity.md) | Pane 재배치(레이어 이동·꺼내기·스택 합치기·워크스페이스 간 이동)를 사용자 조작 수준까지 Automation/MCP 에 연다 | Accepted |
 | [0299](0299-portable-settings-and-local-sqlite-state.md) | 이식 가능한 설정과 로컬 SQLite 복원 상태를 분리한다 | Accepted |
 | [0300](0300-detached-pty-daemon-core.md) | 터미널 PTY와 자식 프로세스는 GUI와 분리된 PTY 데몬이 소유한다 (opt-in 코어) | Proposed |
@@ -343,7 +343,7 @@ ADR 이 필요한 대표 기준:
 | [0322](0322-remote-item-management-menus.md) | Remote 워크스페이스와 페인은 관리 메뉴·스킵 두 버튼을 제공한다 | Accepted |
 
 | [0323](0323-update-checkpoint-follows-pty-ownership.md) | 업데이트 복원점의 대화 확정은 종료되는 PTY에만 요구한다 (0222·0270 일부 대체, 0314 확장) | Accepted |
-| [0324](0324-automation-never-navigates-user.md) | Automation 은 사용자를 다른 워크스페이스·pane 으로 옮기지 않는다 (0298 확장) | Accepted |
+| [0324](0324-automation-never-navigates-user.md) | Automation 은 사용자를 다른 워크스페이스·pane 으로 옮기지 않는다 (0298 확장) | Superseded by [0342](0342-automation-layer-activation-explicit-focus.md) (Automation 레이어 활성화의 기본 포커스 계약) |
 
 | [0324](0324-agent-hook-inspection-on-discovery.md) | 훅 설치 검사는 대상 발견과 명시적 관리에만 수행한다 (0289 일부 대체, 0283 확장) | Accepted |
 
@@ -357,6 +357,7 @@ ADR 이 필요한 대표 기준:
 | [0331](0331-remote-memo-body-tool-swipe.md) | Remote 메모 본문은 수평 도구 스와이프를 받는다 (0261 입력칸 제외 규칙 일부 대체) | Accepted |
 | [0332](0332-remote-tool-bottom-controls-and-github-back.md) | Remote 우측 도구는 하단 컨트롤바를 기본으로 하고 PRs에서 Issues로 돌아간 뒤 닫는다 (0261 close 동작 일부 대체) | Accepted |
 | [0333](0333-destructive-confirmation-global-and-pane-control-bar.md) | 파괴적 action 두 번 확인을 전역 설정으로 올리고 pane 컨트롤 바에도 적용한다 (0211 설정 키·적용 범위 대체) | Accepted |
+| [0342](0342-automation-layer-activation-explicit-focus.md) | Automation 레이어 표시와 포커스는 별도 도구로 요청한다 (0297·0324 표시·포커스 결합 계약 대체) | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 
