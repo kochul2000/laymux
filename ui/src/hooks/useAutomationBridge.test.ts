@@ -3522,7 +3522,7 @@ describe("spatial pane numbers (issue #256)", () => {
     expect(byId[BL]).toBe(3);
     expect(summary.terminalCount).toBe(3);
     expect(lastCommand.command).toBe("cargo test");
-    expect(status).toMatchObject({ icon: "—", observation: "unknown", outputActive: false });
+    expect(status).toMatchObject({ icon: "·", observation: "unknown", outputActive: false });
   });
 
   it("projects never-mounted workspace terminals with the same selector placeholders as PC", () => {
@@ -3598,7 +3598,7 @@ describe("spatial pane numbers (issue #256)", () => {
     expect(instances.find((instance) => instance.id === "terminal-cold")).toMatchObject({
       profile: "WSL",
       workspaceId: "ws-cold",
-      selectorStatus: { icon: "—", observation: "unknown" },
+      selectorStatus: { icon: "·", observation: "unknown" },
       selectorDisplay: {
         environment: "WSL",
         activity: { label: "shell", color: "var(--text-secondary)" },
@@ -3637,7 +3637,7 @@ describe("spatial pane numbers (issue #256)", () => {
     const terminal = instances.find((instance) => instance.id === `terminal-${TL}`)!;
 
     expect(terminal.selectorStatus).toMatchObject({
-      icon: "—",
+      icon: "·",
       observation: "unknown",
       color: "var(--text-secondary)",
       text: "Implementing / Editing navigation.rs",
@@ -4803,13 +4803,13 @@ describe("panes.stack / activateLayer / remove(layerId) bridge (ADR-0297)", () =
     expect(act("stack", { paneIndex: 9 }).success).toBe(false);
   });
 
-  it("activates a layer by terminal id and can leave focus alone", () => {
+  it("activates a layer by terminal or layer id without moving focus", () => {
     const stacked = act("stack", { paneIndex: 0 });
     const layerId = (stacked.data as { newPane: { id: string } }).newPane.id;
     const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
     const firstLayer = ws.panes[0].layers[0].id;
 
-    const byTerminal = act("activateLayer", { terminalId: `terminal-${firstLayer}`, focus: false });
+    const byTerminal = act("activateLayer", { terminalId: `terminal-${firstLayer}` });
     expect(byTerminal.success).toBe(true);
     expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].activeLayerId).toBe(
       firstLayer,
@@ -4818,10 +4818,57 @@ describe("panes.stack / activateLayer / remove(layerId) bridge (ADR-0297)", () =
 
     const byLayer = act("activateLayer", { layerId });
     expect(byLayer.data).toMatchObject({ activated: layerId, paneIndex: 0, layerIndex: 1 });
-    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+    expect(useGridStore.getState().focusedPaneIndex).toBe(1);
 
     expect(act("activateLayer", { layerId: "nope" }).success).toBe(false);
     expect(act("activateLayer", {}).success).toBe(false);
+  });
+
+  it("defaults layer display to preserving focus on another slot", () => {
+    const stacked = act("stack", { paneIndex: 0 });
+    const layerId = (stacked.data as { newPane: { id: string } }).newPane.id;
+    const result = act("activateLayer", { layerId });
+    expect(result.data).toMatchObject({ activated: layerId, focused: false });
+    expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].activeLayerId).toBe(layerId);
+    expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+  });
+
+  it("rejects replacing the input layer and directs callers to the focus tool", () => {
+    useGridStore.getState().setFocusedPane(0);
+    const stacked = act("stack", { paneIndex: 0 });
+    const layerId = (stacked.data as { newPane: { id: string } }).newPane.id;
+    const before = useWorkspaceStore.getState();
+    const result = act("activateLayer", { layerId });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("focus_terminal");
+    expect(useWorkspaceStore.getState()).toBe(before);
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+  });
+
+  it.each([true, false, null, "false"])(
+    "rejects the removed focus argument (%s) before changing a layer",
+    (focus) => {
+      const before = useWorkspaceStore.getState();
+      const layerId = before.getActiveWorkspace()!.panes[0].activeLayerId;
+      expect(act("activateLayer", { layerId, focus }).success).toBe(false);
+      expect(useWorkspaceStore.getState()).toBe(before);
+    },
+  );
+
+  it("uses the separate terminal focus action to reveal a hidden input layer", () => {
+    useGridStore.getState().setFocusedPane(0);
+    const stacked = act("stack", { paneIndex: 0 });
+    const layerId = (stacked.data as { newPane: { id: string } }).newPane.id;
+    const result = handleAutomationRequest({
+      requestId: "focus-hidden-layer",
+      category: "action",
+      target: "terminals",
+      method: "setFocus",
+      params: { id: `terminal-${layerId}` },
+    });
+    expect(result.success).toBe(true);
+    expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].activeLayerId).toBe(layerId);
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
   });
 
   it("remove closes one named layer and reports whether the slot survived", () => {

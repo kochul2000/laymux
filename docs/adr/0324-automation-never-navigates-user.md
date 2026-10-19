@@ -1,6 +1,6 @@
 # 0324. Automation 은 사용자를 다른 워크스페이스·pane 으로 옮기지 않는다
 
-- Status: Accepted
+- Status: Superseded by [0342](0342-automation-layer-activation-explicit-focus.md) (Automation 레이어 활성화의 기본 포커스 계약에 한함)
 - Date: 2026-10-14
 - Source: 사용자 요구("laymux 가 mcp 로 pane, workspace 를 추가, 수정 하더라도 자동으로 이동하지 마", 2026-10-14), [api-contracts.md](../architecture/api-contracts.md) §12 Automation API·MCP, [overview.md](../architecture/overview.md) §3.2 Terminal startup coordinator, [ADR-0043](0043-global-terminal-ready-startup-slot.md), [ADR-0161](0161-rendererless-terminal-session-startup.md)
 - Relation: [ADR-0298](0298-pane-rearrangement-automation-parity.md)의 "Automation 재배치는 키보드 포커스를 옮기지 않는다"를 생성·분할·쓰기까지 확장한다. ADR-0043 의 시작 후보 범위를 Automation 요청에 한해 넓힌다. [ADR-0297](0297-pane-stack-slot-layer-model.md)의 `activate_pane_layer` 계약은 바꾸지 않는다.

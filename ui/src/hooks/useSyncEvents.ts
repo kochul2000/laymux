@@ -425,11 +425,13 @@ export function useSyncEvents() {
             observeTerminalTask(data.terminalId, {
               state: "ended",
               result:
-                data.exitCode === undefined
-                  ? undefined
-                  : data.exitCode === 0
-                    ? "success"
-                    : "failure",
+                data.result === "interrupted"
+                  ? "interrupted"
+                  : data.exitCode === undefined
+                    ? undefined
+                    : data.exitCode === 0
+                      ? "success"
+                      : "failure",
             });
           } else if (data.phase === "prompt" && !heuristicTask(current)?.state) {
             observeTerminalTask(data.terminalId, { state: "idle" });

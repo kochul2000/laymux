@@ -265,7 +265,10 @@ import {
           Hourglass: "Active",
           Check: "Command succeeded",
           X: "Command failed",
+          Ban: "Interrupted",
+          Circle: "Task ended · result unobserved",
           Minus: "Idle",
+          Dot: "Task unconfirmed",
           CircleAlert: "Response or approval needed",
         });
         const DEFAULT_REMOTE_DISPLAY_SETTINGS = Object.freeze({

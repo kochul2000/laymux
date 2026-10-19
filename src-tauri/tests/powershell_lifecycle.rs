@@ -138,13 +138,8 @@ fn powershell_reports_each_execution_before_silent_work_and_its_actual_result() 
 fn powershell_editing_does_not_create_tasks_and_interruption_has_no_success() {
     let mut shell = Shell::new();
     assert_eq!(shell.command("Write-Output READY"), execution("0"));
-    // Windows passes the parent's Ctrl+C ignore flag to child processes. Agent
-    // and CI hosts can set it; restore the fixture's console-signal prerequisite
-    // without changing the app's input path or the interrupted-result assertion.
-    assert_eq!(
-        shell.command("Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class CtrlCFixture { [DllImport(\"kernel32.dll\")] public static extern bool SetConsoleCtrlHandler(IntPtr handler, bool add); }'; if (-not [CtrlCFixture]::SetConsoleCtrlHandler([IntPtr]::Zero, $false)) { throw 'restore Ctrl+C processing failed' }"),
-        execution("0")
-    );
+    // No console-signal fixture: the spawn path itself clears an inherited
+    // Ctrl+C ignore flag (ADR-0341), so the interruption below must arrive.
     for input in ["", "   ", "; ;", "# comment only", "<# block comment #>"] {
         assert!(
             shell.command(input).is_empty(),
@@ -175,7 +170,7 @@ fn powershell_editing_does_not_create_tasks_and_interruption_has_no_success() {
     shell.collect(Duration::from_millis(300));
     shell.write("\x03");
     shell.until(|s| s.events().iter().any(|e| e.code == 7));
-    assert_eq!(shell.phases(), execution(""));
+    assert_eq!(shell.phases(), execution(";lx=interrupted"));
 }
 
 #[test]

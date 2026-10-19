@@ -124,6 +124,32 @@ describe("activatePaneLayer (ADR-0297)", () => {
     expect(useDockStore.getState().focusedDock).toBe("left");
   });
 
+  it("rejects hiding the focused input layer before any store changes", () => {
+    focusWorkspacePane("ws-a", 0);
+    const workspace = useWorkspaceStore.getState();
+    const grid = useGridStore.getState();
+    const dock = useDockStore.getState();
+    expect(activatePaneLayer("ws-a", "under", { focus: false })).toBe(false);
+    expect(useWorkspaceStore.getState()).toBe(workspace);
+    expect(useGridStore.getState()).toBe(grid);
+    expect(useDockStore.getState()).toBe(dock);
+  });
+
+  it("allows the already shown input layer without moving focus", () => {
+    focusWorkspacePane("ws-a", 0);
+    expect(activatePaneLayer("ws-a", "slot", { focus: false })).toBe(true);
+    expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].activeLayerId).toBe("slot");
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+  });
+
+  it("allows grid display changes while the dock owns focus", () => {
+    useWorkspaceStore.getState().setActiveWorkspace("ws-a");
+    // Even a stale grid index must not override the dock's focus ownership.
+    useGridStore.getState().setFocusedPane(0);
+    expect(activatePaneLayer("ws-a", "under", { focus: false })).toBe(true);
+    expect(useDockStore.getState().focusedDock).toBe("left");
+  });
+
   it("touches no store for an unknown layer or workspace", () => {
     expect(activatePaneLayer("ws-a", "nope")).toBe(false);
     expect(activatePaneLayer("ws-x", "under")).toBe(false);

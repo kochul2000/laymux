@@ -48,6 +48,8 @@ Remote는 활성 lease와 선택 terminal을 결합하여 같은 서비스를 �
 
 ### 스택
 
+Automation 레이어 표시는 포커스를 옮기지 않으며 `focus` 인자를 받지 않는다([ADR-0342](../adr/0342-automation-layer-activation-explicit-focus.md)). MCP·REST의 요청 타입과 bridge는 제거된 인자를 오류로 거부한다. `workspace-transition.activatePaneLayer`는 내부 `focus: false` 요청이 현재 입력 중인 grid 슬롯의 활성 레이어를 숨기려 하면 어떤 store도 갱신하기 전에 거부한다. 같은 레이어의 재표시, 다른 슬롯·비활성 워크스페이스의 표시와 dock 포커스 중 grid 표시는 허용한다. 사용자 입력 콘텐츠를 전환하려면 별도 `focus_terminal` 등 탐색 도구를 호출한다. UI·Remote 직접 탐색의 기본 포커스 동작은 유지한다.
+
 **Pane 하나에 여러 view 를 겹쳐 두고 전환한다**([ADR-0297](../adr/0297-pane-stack-slot-layer-model.md)). 슬롯은 기하를, 레이어는 콘텐츠를 소유하며 활성 레이어 하나만 보인다. 터미널뿐 아니라 어떤 view 든 레이어가 된다. dock pane 은 스택 대상이 아니다.
 
 | 방법 | 동작 |
@@ -1160,18 +1162,21 @@ WSL Claude 복원은 live `✳ <대화 제목>`이 프로세스 식별보다 먼
 
 | 의미 | Lucide 아이콘 | 색상·접근성 |
 | --- | --- | --- |
-| 대기·미확인·중단·결과 없는 종료 | Minus | 보조 텍스트색, 대기 |
+| 작업 없음 | Minus | 보조 텍스트색, 대기 |
+| 미확인(관측 없음, 출력 없음) | Dot | 보조 텍스트색, 작업 미확인 |
+| 종료 · 결과 미관측 | Circle | 보조 텍스트색, 종료 · 결과 미관측 |
+| 중단 | Ban | 노랑, 중단 |
 | 진행 중 또는 작업 미확인에서 출력 활동 | Hourglass | 노랑, 활동 중 |
 | 입력 대기 | CircleAlert | 노랑, 응답·승인 필요 |
 | 성공 / 실패 | Check / X | 초록 / 빨강, 성공 / 실패 |
 
-[ADR-0254](../adr/0254-confirmed-idle-before-output-activity.md)에 따라 확인된 작업 없음(`idle`)은 출력 활동이 있어도 대시로 표시한다. 빈 WSL Astra 입력창은 `idle/confirmed`와 `outputActive=true`가 동시에 가능하다. 작업 미확인에서의 출력 fallback은 유지한다.
+[ADR-0254](../adr/0254-confirmed-idle-before-output-activity.md)에 따라 확인된 작업 없음(`idle`)은 출력 활동이 있어도 대시로 표시한다. [ADR-0341](../adr/0341-task-result-glyphs-and-powershell-interrupt.md)에 따라 `taskStatusGlyph`는 종료 결과와 관측 상태를 서로 다른 glyph로 나눈다: 성공 `✓`(Check), 실패 `✗`(X), 중단 `⊘`(Ban, yellow), 결과 미관측 종료 `○`(Circle), 작업 없음 `—`(Minus), 미확인 `·`(Dot), 진행 중 `⏳`, 입력 대기 `!`. Desktop `CommandStatusIcon`과 Remote `commandStatusIconName`이 같은 함수를 쓴다. 빈 WSL Astra 입력창은 `idle/confirmed`와 `outputActive=true`가 동시에 가능하다. 작업 미확인에서의 출력 fallback은 유지한다.
 
-[ADR-0251](../adr/0251-single-terminal-status-icon.md)에 따라 터미널당 상태 아이콘은 하나다. `task-status-glyph.ts`의 순수 표시 함수를 Desktop과 Remote가 공유한다. 입력 대기·진행·종료 결과는 출력 활동보다 우선한다. 관측 지연은 마지막 상태의 표시를 유지하고 별도 시계나 문구를 붙이지 않는다. 출력 파형·미확인 물음표·상태 툴팁은 없다. 접근성 이름은 다섯 표시의 의미만 전달하며 ko/en 번역을 따른다. 미확인 알림의 기존 네모 테두리와 읽음 처리는 유지한다. 내부 `taskState/taskResult/observation/outputActive`는 그대로 보존하며 표시 모래시계로 작업 상태·알림·절전·clear를 재판정하지 않는다.
+[ADR-0251](../adr/0251-single-terminal-status-icon.md)에 따라 터미널당 상태 아이콘은 하나다. `task-status-glyph.ts`의 순수 표시 함수를 Desktop과 Remote가 공유한다. 입력 대기·진행·종료 결과는 출력 활동보다 우선한다. 관측 지연은 마지막 상태의 표시를 유지하고 별도 시계나 문구를 붙이지 않는다. 출력 파형·미확인 물음표·상태 툴팁은 없다. 접근성 이름은 여덟 표시의 의미만 전달하며([ADR-0341](../adr/0341-task-result-glyphs-and-powershell-interrupt.md)) ko/en 번역을 따른다. 미확인 알림의 기존 네모 테두리와 읽음 처리는 유지한다. 내부 `taskState/taskResult/observation/outputActive`는 그대로 보존하며 표시 모래시계로 작업 상태·알림·절전·clear를 재판정하지 않는다.
 
 앱 어댑터는 기존 파서와 관측 경로를 재사용한다. 셸은 Rust OSC 133 C/D/A를 `command-status.phase`로 수신하고, D에 종료 코드가 없으면 결과 없는 종료로 남긴다. 명령 없는 A만 작업 없음을 복원한다. Claude는 새 working 타이틀을 진행으로, 작업 뒤 새 ✳를 결과 없는 종료로, 최초 ✳를 작업 없음으로 해석한다. Grok의 Braille 또는 `- Running:`은 진행만 증명하며 접두사 소멸로 종료를 만들지 않는다. 두 타이틀 어댑터는 새 수신부터 6초 후 지연이 되며 저장된 문자열 재읽기는 기한을 늘리지 않는다. Codex의 내부 작업 판정은 타이틀이나 출력으로 fallback하지 않는다.
 
-PowerShell 통합([ADR-0262](../adr/0262-powershell-command-lifecycle.md), [#1058](https://github.com/kochul2000/laymux/issues/1058))은 `terminal/powershell-integration.ps1`을 Rust에서 내장한다. 로드된 PSReadLine의 `PSConsoleHostReadLine` 반환값에 실행문이 있을 때만 OSC 133 C를 보내고 원래 문자열을 호스트에 돌려준다. 최초 프롬프트는 A이며, C에 대응하는 다음 프롬프트만 D를 보낸다. 빈 Enter·주석·입력 취소·미완성 멀티라인은 새 작업·종료 알림을 만들지 않는다. 실행 성공/실패는 프롬프트 진입의 `$?`와 새 history 항목으로 D;0/D;1을 보내고, 중단/종료 결과 미관측은 코드 없는 D로 보낸다. `$LASTEXITCODE` 자체는 변경하지 않으며 과거 native 종료 코드를 다음 cmdlet의 결과로 사용하지 않는다. 기존 셸 프로세스는 재시작해야 새 통합을 받는다.
+PowerShell 통합([ADR-0262](../adr/0262-powershell-command-lifecycle.md), [#1058](https://github.com/kochul2000/laymux/issues/1058))은 `terminal/powershell-integration.ps1`을 Rust에서 내장한다. 로드된 PSReadLine의 `PSConsoleHostReadLine` 반환값에 실행문이 있을 때만 OSC 133 C를 보내고 원래 문자열을 호스트에 돌려준다. 최초 프롬프트는 A이며, C에 대응하는 다음 프롬프트만 D를 보낸다. 빈 Enter·주석·입력 취소·미완성 멀티라인은 새 작업·종료 알림을 만들지 않는다. 실행 성공/실패는 프롬프트 진입의 `$?`와 새 history 항목으로 D;0/D;1을 보낸다. history가 `Stopped`(Ctrl+C)로 기록한 명령은 종료 코드 칸을 비운 `D;;lx=interrupted`를 보내고, Rust가 lifecycle 이벤트에 `result: "interrupted"`를 실어 프론트가 중단으로 끝낸다([ADR-0341](../adr/0341-task-result-glyphs-and-powershell-interrupt.md)). history를 관측하지 못한 종료는 코드 없는 D로 보내 결과 미관측이다. `$LASTEXITCODE` 자체는 변경하지 않으며 과거 native 종료 코드를 다음 cmdlet의 결과로 사용하지 않는다. 기존 셸 프로세스는 재시작해야 새 통합을 받는다.
 
 reader 래핑은 `LanguageMode=FullLanguage`에서만 설치한다. PSReadLine이 없거나 `ConstrainedLanguage`이면 원래 reader를 보존하고 PowerShell은 OSC 7만 보내며 lifecycle을 합성하지 않는다. 이 경우와 CMD는 작업 미확인 상태에서 출력 활동만 표시하며 무출력 작업의 진행·완료를 판정하지 않는다. 출력 중 자동 절전 fallback과 clear의 기존 미확인 셸 best-effort 예외를 사용하므로 조용한 실행의 clear 보호를 보장하지 않는다. 사용자에 의한 통합 reader/prompt 재정의·제거도 지원 범위 밖이다. [2026-09-18 실측](../codex-task-status-repro-2026-09-17.md)은 D만 보내던 수정 전 동작의 기록이다.
 

@@ -268,7 +268,7 @@ ADR 이 필요한 대표 기준:
 | [0248](0248-codex-turn-lifecycle-activity.md) | Codex 작업 상태는 현재 세션의 턴 기록으로 판정한다 | Accepted |
 | [0249](0249-codex-review-parent-turn-boundaries.md) | Codex 리뷰 경계에서 부모 턴의 귀속을 복원한다 | Accepted |
 | [0250](0250-terminal-task-state-and-notification-transitions.md) | 터미널 작업 상태와 확인 알림은 공통 전이로 판정한다 | Accepted |
-| [0251](0251-single-terminal-status-icon.md) | 터미널 활동은 다섯 종류 중 아이콘 하나로 표시한다 | Accepted |
+| [0251](0251-single-terminal-status-icon.md) | 터미널 활동은 다섯 종류 중 아이콘 하나로 표시한다 | Accepted (partially superseded by [0254](0254-confirmed-idle-before-output-activity.md), [0341](0341-task-result-glyphs-and-powershell-interrupt.md)) |
 | [0252](0252-claude-idle-before-app-identification.md) | 앱 식별 전 Claude 유휴를 실행 범위에 묶어 보류한다 | Accepted |
 | [0253](0253-wsl-claude-chrome-helper-role.md) | WSL Claude의 Chrome 호스트는 대화 프로세스 후보에서 제외한다 | Accepted |
 | [0254](0254-confirmed-idle-before-output-activity.md) | 확인된 작업 없음은 출력 활동보다 우선한다 | Accepted |
@@ -314,7 +314,7 @@ ADR 이 필요한 대표 기준:
 | [0294](0294-codex-process-bound-lifecycle-proof.md) | 훅 우선 종료 확인은 정확한 프로세스 대화 귀속도 증거로 사용한다 | Accepted |
 | [0295](0295-codex-continuous-conversation-checkpoint.md) | Codex 대화 귀속을 평상시 저장과 종료 확인이 공유한다 | Accepted |
 | [0296](0296-committed-checkpoint-reuse-on-finalization.md) | 변경 없는 저장 완료 복원점을 종료·업데이트에서 재사용한다 | Accepted (partially superseded by [0323](0323-update-checkpoint-follows-pty-ownership.md)) |
-| [0297](0297-pane-stack-slot-layer-model.md) | 워크스페이스 pane 은 기하를 소유하는 슬롯, 콘텐츠는 순서 있는 레이어 목록(스택)이 소유한다 | Superseded by [0328](0328-automation-stack-keeps-visible-layer.md) (Automation 생성 표시 계약) |
+| [0297](0297-pane-stack-slot-layer-model.md) | 워크스페이스 pane 은 기하를 소유하는 슬롯, 콘텐츠는 순서 있는 레이어 목록(스택)이 소유한다 | Superseded by [0328](0328-automation-stack-keeps-visible-layer.md) (Automation 생성 표시), [0342](0342-automation-layer-activation-explicit-focus.md) (Automation 기본 포커스) |
 | [0298](0298-pane-rearrangement-automation-parity.md) | Pane 재배치(레이어 이동·꺼내기·스택 합치기·워크스페이스 간 이동)를 사용자 조작 수준까지 Automation/MCP 에 연다 | Accepted |
 | [0299](0299-portable-settings-and-local-sqlite-state.md) | 이식 가능한 설정과 로컬 SQLite 복원 상태를 분리한다 | Accepted |
 | [0300](0300-detached-pty-daemon-core.md) | 터미널 PTY와 자식 프로세스는 GUI와 분리된 PTY 데몬이 소유한다 (opt-in 코어) | Proposed |
@@ -343,7 +343,7 @@ ADR 이 필요한 대표 기준:
 | [0322](0322-remote-item-management-menus.md) | Remote 워크스페이스와 페인은 관리 메뉴·스킵 두 버튼을 제공한다 | Accepted |
 
 | [0323](0323-update-checkpoint-follows-pty-ownership.md) | 업데이트 복원점의 대화 확정은 종료되는 PTY에만 요구한다 (0222·0270 일부 대체, 0314 확장) | Accepted |
-| [0324](0324-automation-never-navigates-user.md) | Automation 은 사용자를 다른 워크스페이스·pane 으로 옮기지 않는다 (0298 확장) | Accepted |
+| [0324](0324-automation-never-navigates-user.md) | Automation 은 사용자를 다른 워크스페이스·pane 으로 옮기지 않는다 (0298 확장) | Superseded by [0342](0342-automation-layer-activation-explicit-focus.md) (Automation 레이어 활성화의 기본 포커스 계약) |
 
 | [0324](0324-agent-hook-inspection-on-discovery.md) | 훅 설치 검사는 대상 발견과 명시적 관리에만 수행한다 (0289 일부 대체, 0283 확장) | Accepted |
 
@@ -364,6 +364,8 @@ ADR 이 필요한 대표 기준:
 | [0338](0338-remote-text-keys-edit-composer-draft.md) | Remote 텍스트 사용자 키는 Composer 초안을 편집한다 (0234 일부 정정) | Accepted |
 | [0339](0339-remote-stack-creates-enterable-terminal.md) | Remote Stack은 열린 터미널의 프로필·CWD를 이어받아 바로 진입 가능한 터미널을 만든다 (0327 일부 정정) | Accepted |
 | [0340](0340-claude-transcript-turn-result.md) | Claude 턴의 종료 결과는 작업 시작 기준점 이후의 대화 기록으로 판정한다 (0250 보완, 0321 상태 판정 유지) | Accepted |
+| [0341](0341-task-result-glyphs-and-powershell-interrupt.md) | 종료 결과와 관측 상태를 서로 다른 아이콘으로 표시하고, PowerShell 중단을 OSC 133 D로 전달한다 (0251 일부 정정, 0262 보완) | Accepted |
+| [0342](0342-automation-layer-activation-explicit-focus.md) | Automation 레이어 표시와 포커스는 별도 도구로 요청한다 (0297·0324 표시·포커스 결합 계약 대체) | Accepted |
 | [0343](0343-worktree-view-and-guarded-removal.md) | 워크트리 뷰는 Git 상태와 laymux 사용 정보를 함께 보여주고 재검증 후 개별 제거한다 | Proposed |
 | [0344](0344-remote-worktrees-and-usage-mcp.md) | 워크트리 관리는 Remote 도구로 제공하고 MCP는 laymux 고유 사용 관측만 제공한다 | Proposed |
 | [0345](0345-worktree-dock-review-context.md) | 워크트리 검토 맥락은 조회 대상에 귀속하고 화면 크기에 맞춰 목록과 상세를 배치한다 | Proposed |
