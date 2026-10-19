@@ -995,7 +995,7 @@ overlay caret 이 켜져 있는데도 codex 입력박스에 **어두운 1셀 블
 
 **데몬은 PTY와 그 출력에서 도출한 터미널 모드만 소유한다.** 데몬 세션(`pty_daemon/server.rs`)은 받은 명령을 native PTY에 그대로 spawn하고, 자식 대기·출력 중계·입력·resize·terminate와 재결합용 모드 추적(`pty_daemon/modes.rs`, ADR-0303)만 수행한다. 출력 바이트는 변형하지 않는다. OSC, protocol reply, 출력 ring, 설정, DB는 계속 GUI의 PTY 콜백이 처리한다.
 
-GUI proxy(`pty_daemon/client.rs`)는 `PtySystem`·`MasterPty`·`Child`·`InterruptiblePtyReader`를 구현한다. 출력 frame은 4 KiB chunk로 나눈 뒤 약 64 KiB queue(검사 시점 기준 + chunk 하나)를 거쳐 기존 reader loop에 들어간다. queue가 차면 socket 읽기를 멈추므로 backpressure가 데몬의 PTY reader까지 전달된다.
+GUI proxy(`pty_daemon/client.rs`)는 `PtySystem`·`MasterPty`·`Child`·`InterruptiblePtyReader`를 구현한다. 출력 frame이 4 KiB 이하이면 받은 `Vec`의 소유권을 추가 복사 없이 queue에 넘기고, 더 큰 redraw frame만 4 KiB chunk로 나눈다. 약 64 KiB queue(검사 시점 기준 + chunk 하나)를 거쳐 기존 reader loop에 들어간다. queue가 차면 socket 읽기를 멈추므로 backpressure가 데몬의 PTY reader까지 전달된다.
 
 **수명 규칙:**
 
