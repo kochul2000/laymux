@@ -16,7 +16,7 @@
 - Rust delivery가 immutable envelope의 유일한 보관자다. 이벤트는 full identity·source 범위만 알린다. 내부 읽기는 같은 identity·범위가 아직 in-flight일 때만 envelope를 반환하며 receipt·parsed frontier·repair 횟수·deadline을 변경하지 않는다. stale 읽기는 빈 바이너리 응답이다.
 - 바이너리 표현은 little-endian u32 metadata byte 길이, UTF-8 JSON metadata(data 제외), 원본 바이트 순이다. 기존 크기·delta·geometry 검증을 유지한다. Remote와 attach/repair의 JSON 계약은 바꾸지 않는다.
 - frontend는 terminal당 읽기 하나와 최신 알림 힌트 하나만 보유한다. 알림 합치기는 원본 폐기가 아니다. 읽기 실패는 기존 watchdog의 exact repair로 복구하며, 잘못된 바이너리는 surface contract fault다. dispose 뒤 완료는 무시한다. Tauri Channel의 별도 payload 대기열·포트·네트워크 노출은 추가하지 않는다.
-- Worker는 checkpoint xterm 버퍼·serializer를 소유하고 같은 xterm 번들·Unicode provider를 쓴다. 메인 스레드는 generation·source sequence·geometry와 기존 weighted admission을 소유한다. 승인된 quantum만 보내고 실제 parse 완료 응답 뒤 lease와 ACK를 진행한다.
+- Worker는 기존 checkpoint 모델(generation·source sequence·geometry·xterm 버퍼·serializer)을 소유하고 같은 xterm 번들·Unicode provider를 쓴다. 메인 스레드는 FIFO와 기존 weighted admission을 소유한다. 승인된 quantum만 보내고 실제 parse 완료 응답 뒤 lease와 ACK를 진행한다. snapshot도 빈 prefix 설치 뒤 같은 admission으로 나누어 적용한다. capture는 이미 접수한 FIFO를 기다린 뒤 요청하지만, target에 도달하는 후속 write를 막지 않는다.
 - ingress backing은 visible parser와 공유하므로 승인 slice만 복사·transfer한다. 원본 backing은 detach하지 않는다. snapshot 직렬화도 FIFO에서 수행해 바이트와 metadata가 같은 상태를 가리킨다. Worker 실패·timeout·dispose는 pending 작업을 거절하고 기존 surface 실패 경로로 수렴한다.
 - Windows와 Linux에 같은 계약을 쓴다. Node 런타임이나 native VT 엔진 교체는 도입하지 않는다.
 

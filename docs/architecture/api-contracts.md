@@ -1816,6 +1816,8 @@ v1.9.0의 내장 localhost 프리뷰는 v1.9.1에서 철회했다([ADR-0318](../
 
 ### 13.4 Terminal Control
 
+데스크톱 내부 v3 live 전달은 도착 알림 뒤 `read_terminal_output_envelope_binary(id,generation,token,envelopeId,grantId,seqStart,seqEnd)`로 기존 frozen envelope를 읽는다([ADR-0346](../adr/0346-terminal-output-binary-delivery-and-checkpoint-worker.md)). 응답은 `u32-le metadata byte 길이 + UTF-8 JSON metadata(data 제외) + raw bytes`인 `ArrayBuffer`이며, stale identity/range·retired session은 빈 바이너리다. 읽기는 receipt·parsed ACK·repair budget·deadline을 바꾸지 않는다. terminal별 읽기 하나와 최신 알림 힌트 하나만 보유하고 읽기 손실은 기존 exact repair를 따른다. rendererless checkpoint provider는 같은 xterm/Unicode 모델을 Worker에서 실행하며 기존 weighted admission이 승인한 quantum의 parse 완료 뒤에만 진행을 보고한다. 이 내부 표현은 아래 Remote API의 JSON/binary pair 계약을 바꾸지 않는다.
+
 Remote 터미널 host(`#terminal`)는 `-webkit-tap-highlight-color: #00000000`를 지정해 탭할 때 브라우저 기본 강조색이 출력 영역 전체를 덮지 않게 한다. 이 속성은 내부 xterm 요소에 상속되며, 기존 터치 스크롤·길게 눌러 선택·선택 핸들 동작은 유지한다.
 
 새 기기의 기본 구성은 [ADR-0265](../adr/0265-pc-remote-first-use-defaults.md)를 따른다. 설정 진입은 PC 상단 톱니바퀴 또는 `Ctrl+,`, Remote drawer → Settings이며 Remote의 표시·입력 선호는 PC `settings.json`이 아니라 기기별 `localStorage`가 소유한다. 호스트 `settings.remote`는 연결·보안과 폰트·위젯 공개 정책을 소유한다.

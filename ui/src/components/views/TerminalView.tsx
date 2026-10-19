@@ -197,7 +197,7 @@ import {
   unregisterTerminalScroller,
   type TerminalBufferLine,
 } from "@/lib/terminal-serialize-registry";
-import { TerminalRenderCheckpointModel } from "@/lib/terminal-render-checkpoint";
+import { TerminalRenderCheckpointWorker } from "@/lib/terminal-render-checkpoint-worker";
 import {
   registerAtlasRebuilder,
   unregisterAtlasRebuilder,
@@ -4551,7 +4551,7 @@ export function TerminalView({
     let disposeOutputV3DiagnosticsProvider: (() => void) | undefined;
     let cacheRestorePromise: Promise<string | null> = Promise.resolve(null);
     const outputCoordinator = new TerminalOutputAttachCoordinator();
-    const renderCheckpointModel = new TerminalRenderCheckpointModel({
+    const renderCheckpointModel = new TerminalRenderCheckpointWorker({
       admission: terminalParserAdmission,
     });
     registerTerminalRenderCheckpointProvider(instanceId, (target, maxBytes) =>

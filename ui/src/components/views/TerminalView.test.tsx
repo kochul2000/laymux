@@ -561,6 +561,11 @@ vi.mock("@/lib/terminal-serialize-registry", () => ({
   unregisterTerminalScroller: (...args: unknown[]) => mockUnregisterTerminalScroller(...args),
 }));
 
+vi.mock("@/lib/terminal-render-checkpoint-worker", async () => {
+  const { TerminalRenderCheckpointModel } = await import("@/lib/terminal-render-checkpoint");
+  return { TerminalRenderCheckpointWorker: TerminalRenderCheckpointModel };
+});
+
 vi.mock("@/lib/terminal-render-checkpoint", () => ({
   TerminalRenderCheckpointModel: class MockTerminalRenderCheckpointModel {
     attach = vi.fn().mockResolvedValue(undefined);
