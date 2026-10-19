@@ -256,11 +256,11 @@
       "type": "boolean",
       "default": true,
       "applyMode": "live",
-      "description": "Remote 우측 도구(메모·GitHub·파일 뷰어/탐색기)의 컨트롤바를 하단에 배치합니다. false면 상단이며 이 기기에만 저장합니다."
+      "description": "Remote 우측 도구(메모·GitHub·Worktrees·파일 뷰어/탐색기)의 컨트롤바를 하단에 배치합니다. false면 상단이며 이 기기에만 저장합니다."
     },
     "rightSwipeView": {
       "type": "string",
-      "enum": ["files", "github", "memo"],
+      "enum": ["files", "github", "worktrees", "memo"],
       "description": "오른쪽 가장자리 스와이프로 열 Remote 패널입니다.",
       "default": "files",
       "applyMode": "live"
@@ -276,6 +276,12 @@
       "default": true,
       "applyMode": "live",
       "description": "우상단 GitHub 아이콘 표시 및 Issues/PRs 도구 순환 포함 여부. 숨겨도 선택한 가장자리 바로가기로 열 수 있습니다."
+    },
+    "headerWorktrees": {
+      "type": "boolean",
+      "default": true,
+      "applyMode": "live",
+      "description": "우상단 Worktrees 아이콘 표시 및 도구 순환 포함 여부. 숨겨도 선택한 가장자리 바로가기로 열 수 있습니다."
     },
     "headerMemo": {
       "type": "boolean",

@@ -365,6 +365,7 @@ function ViewSelect({
         </option>
       ))}
       <option value="GitHubView">GitHub</option>
+      <option value="WorktreeView">Worktrees</option>
       <option value="IssueReporterView">Issue Reporter</option>
     </select>
   );
@@ -626,6 +627,7 @@ const BAR_LABEL_VIEWS: ReadonlySet<ViewType> = new Set([
   "IssueReporterView",
   "FileExplorerView",
   "GitHubView",
+  "WorktreeView",
 ]);
 
 function BarLabel({ viewType }: { viewType: ViewType }) {

@@ -62,6 +62,9 @@ pub mod usage_probe;
 pub mod webview_recovery;
 #[cfg(windows)]
 pub mod win_acl;
+pub mod worktree;
+pub mod worktree_context;
+pub mod worktree_usage;
 pub mod wsl_liveness;
 pub mod wsl_probe;
 
@@ -356,6 +359,9 @@ pub fn run() {
             commands::open_in_os,
             commands::submit_github_issue,
             commands::get_github_repo_snapshot,
+            commands::get_worktree_snapshot,
+            commands::inspect_worktree,
+            commands::remove_worktree,
             commands::run_github_item_action,
             commands::get_listening_ports,
             commands::get_git_branch,

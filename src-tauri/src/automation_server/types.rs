@@ -264,6 +264,10 @@ pub struct HealthInstanceIdentity {
 /// All registered routes as (method, path) pairs.
 /// Used by both the router and the docs completeness test.
 pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
+    ("GET", "/api/v1/worktrees"),
+    ("POST", "/api/v1/worktrees/inspect"),
+    ("POST", "/api/v1/worktrees/remove"),
+    ("POST", "/api/v1/ui/worktrees"),
     ("GET", "/api/v1/docs"),
     ("GET", "/api/v1/health"),
     ("GET", "/api/v1/agent-hooks/environments"),

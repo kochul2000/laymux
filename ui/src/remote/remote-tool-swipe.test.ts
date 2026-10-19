@@ -7,12 +7,12 @@ import {
 } from "./remote-tool-swipe.js";
 
 describe("Remote 도구 순환", () => {
-  const all = { github: true, files: true, memo: true };
-  it("Issues → PRs → Files → Memo와 역순을 순환한다", () => {
-    const order = ["issues", "pulls", "files", "memo"];
+  const all = { github: true, files: true, worktrees: true, memo: true };
+  it("Issues → PRs → Files → Worktrees → Memo와 역순을 순환한다", () => {
+    const order = ["issues", "pulls", "files", "worktrees", "memo"];
     order.forEach((tool, index) => {
-      expect(nextRemoteTool(tool, 1, all)).toBe(order[(index + 1) % 4]);
-      expect(nextRemoteTool(tool, -1, all)).toBe(order[(index + 3) % 4]);
+      expect(nextRemoteTool(tool, 1, all)).toBe(order[(index + 1) % order.length]);
+      expect(nextRemoteTool(tool, -1, all)).toBe(order[(index + order.length - 1) % order.length]);
     });
   });
   it("숨김·사용 불가 도구를 건너뛰되 숨겨진 현재 위치를 기준으로 순회한다", () => {

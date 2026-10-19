@@ -37,6 +37,7 @@ use super::settings_bridge::{
     apply_profile_patch, apply_settings_patch, get_settings_snapshot, validate_settings_patch,
     SettingsBridgeError,
 };
+use super::worktree_usage::WorktreeUsageParam;
 use super::ServerState;
 
 // ── Parameter types ───────────────────────────────────────────────
@@ -2028,6 +2029,32 @@ impl McpHandler {
                 Err(error) => CallToolResult::error(vec![Content::text(error)]),
             },
         )
+    }
+
+    // ── Worktree usage (1) ──
+
+    /// Read laymux-only usage of an absolute worktree directory: live terminals,
+    /// hidden/saved restore targets, and daemon observation gaps. Git listing,
+    /// status, merge checks and removal belong to your own Git tools. Check
+    /// complete and warnings: an empty usage array is not evidence of safety
+    /// when complete=false. Scope is this laymux build; outside processes are not observed.
+    #[tool(annotations(read_only_hint = true, destructive_hint = false))]
+    async fn get_worktree_usage(
+        &self,
+        Parameters(p): Parameters<WorktreeUsageParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let state = self.state.app_state.clone();
+        match tokio::task::spawn_blocking(move || super::worktree_usage::query(&state, &p.path))
+            .await
+        {
+            Ok(Ok(value)) => Ok(json_result(&value)),
+            Ok(Err(error)) => Ok(CallToolResult::error(vec![Content::text(
+                error.to_string(),
+            )])),
+            Err(error) => Ok(CallToolResult::error(vec![Content::text(
+                error.to_string(),
+            )])),
+        }
     }
 
     // ── Terminal (7) ──
@@ -5390,6 +5417,28 @@ mod tests {
                 "settings tool must be release-visible: {name}",
             );
             assert!(!DEV_ONLY_TOOLS.contains(&name));
+        }
+    }
+
+    #[test]
+    fn worktree_usage_mcp_is_read_only_and_does_not_wrap_git_operations() {
+        let router = McpHandler::tool_router();
+        let tools = McpHandler::visible_tools_from_router(&router, false);
+        let tool = tools
+            .iter()
+            .find(|tool| tool.name == "get_worktree_usage")
+            .expect("laymux-only worktree usage must be release-visible");
+        let annotations = tool
+            .annotations
+            .as_ref()
+            .expect("read-only annotation required");
+        assert_eq!(annotations.read_only_hint, Some(true));
+        assert_eq!(annotations.destructive_hint, Some(false));
+        for name in ["list_worktrees", "inspect_worktree", "remove_worktree"] {
+            assert!(
+                !router.has_route(name),
+                "Git operation duplicated as MCP: {name}"
+            );
         }
     }
 

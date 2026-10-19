@@ -5,6 +5,7 @@ pub const WSL_CODEX_PROBE_FILE: &str = "laymux-wsl-codex-probe";
 
 /// Terminal ids are `terminal-{paneId}` for grid and dock panes alike.
 pub const TERMINAL_ID_PREFIX: &str = "terminal-";
+pub const FILE_VIEWER_TERMINAL_ID_PREFIX: &str = "terminal-global-file-viewer:";
 
 // ── OS credential-store names ────────────────────────────────────
 

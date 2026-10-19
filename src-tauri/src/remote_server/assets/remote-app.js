@@ -1,6 +1,7 @@
 import { createRemoteUpdateDialog } from "../../../../ui/src/remote/remote-update-dialog.js";
 import { createRemoteSettingsBridge } from "../../../../ui/src/remote/remote-settings-mcp.js";
 import { createRemoteMemo } from "../../../../ui/src/remote/remote-memo.js";
+import { createRemoteWorktrees } from "../../../../ui/src/remote/remote-worktrees.js";
 import { createWorkspaceManager } from "../../../../ui/src/remote/remote-workspace-manager.js";
 import { createPaneManager, installWorkspaceRenameGesture } from "../../../../ui/src/remote/remote-pane-controls.js";
 import {
@@ -418,7 +419,7 @@ import {
           return targets;
         }
         const headerIconFields = {
-          headerFiles: "Files", headerGithub: "GitHub", headerMemo: "Memo",
+          headerFiles: "Files", headerGithub: "GitHub", headerWorktrees: "Worktrees", headerMemo: "Memo",
           headerSpatialExclusion: "Pane navigation shortcut", headerDesktopMode: "PC mode",
         };
         const headerIconKeys = Object.fromEntries(Object.keys(headerIconFields).map(key => [key, `laymux.remote.${key}`]));
@@ -426,7 +427,17 @@ import {
         const memoView = createRemoteMemo({
           api: remoteFetch, getLease: () => leaseId, getNavigation: () => navigationState,
           copy: writeClipboardText,
-          beforeOpen: () => { closeFileViewer(); closeRemoteGithubView(); setNavigationOpen(false); },
+          beforeOpen: () => { closeFileViewer(); closeRemoteGithubView(); worktreeView.close(); setNavigationOpen(false); },
+          afterClose: () => focusCurrentInputSurface(),
+        });
+        const worktreeView = createRemoteWorktrees({
+          api: remoteFetch,
+          getContext: () => ({ leaseId, terminalId: activeTerminalId, cwd: terminalInfoById.get(activeTerminalId)?.cwd }),
+          copy: writeClipboardText,
+          canOpenFile: () => Boolean(leaseId && fileViewerToken),
+          openFile: (path) => openFileViewerOverlay(path, undefined, true),
+          focusUsage: (usage) => selectTerminal(usage.terminalId, { refreshNavigation: true, focusDockHost: true }),
+          beforeOpen: () => { closeFileViewer(); closeRemoteGithubView(); if (memoView.isOpen()) memoView.close(); setNavigationOpen(false); },
           afterClose: () => focusCurrentInputSurface(),
         });
         let remoteDisplaySettings = loadDeviceDisplaySettings();
@@ -1775,12 +1786,13 @@ import {
         });
 
         function remoteOverlayOpen() {
-          return !sharedFilesScrim.hidden || !fileViewerOverlayElement.hidden || !githubOverlayElement.hidden || memoView.isOpen();
+          return !sharedFilesScrim.hidden || !fileViewerOverlayElement.hidden || !githubOverlayElement.hidden || worktreeView.isOpen() || memoView.isOpen();
         }
 
         function currentRemoteTool() {
           if (!githubOverlayElement.hidden) return githubTab;
           if (!fileViewerOverlayElement.hidden) return "files";
+          if (worktreeView.isOpen()) return "worktrees";
           if (memoView.isOpen()) return "memo";
           return null;
         }
@@ -1789,6 +1801,7 @@ import {
           return resolveToolSwipe(currentRemoteTool(), direction, {
             github: Boolean(leaseId && activeTerminalId && headerIcons.headerGithub),
             files: Boolean(leaseId && fileViewerToken && headerIcons.headerFiles),
+            worktrees: Boolean(leaseId && activeTerminalId && headerIcons.headerWorktrees),
             memo: Boolean(leaseId && headerIcons.headerMemo),
           }, toolSwipeRightAction, swipeCloseDrawersEnabled);
         }
@@ -1797,6 +1810,7 @@ import {
           if (tool === "close") {
             if (!githubOverlayElement.hidden) closeRemoteGithubView();
             else if (!fileViewerOverlayElement.hidden) closeFileViewer();
+            else if (worktreeView.isOpen()) worktreeView.close();
             else if (memoView.isOpen()) memoView.close();
           } else if (tool === "issues" || tool === "pulls") {
             githubTab = tool;
@@ -1805,6 +1819,7 @@ import {
             if (githubOverlayElement.hidden) openRemoteGithubView();
             else renderGithubView();
           } else if (tool === "files") openCurrentFileExplorer();
+          else if (tool === "worktrees") worktreeView.open();
           else if (tool === "memo") void memoView.open();
         }
 
@@ -2072,6 +2087,7 @@ import {
 
         function openRemoteGithubView() {
           if (!leaseId || !activeTerminalId) return;
+          if (worktreeView.isOpen()) worktreeView.close();
           if (memoView.isOpen()) memoView.close();
           if (!fileViewerOverlayElement.hidden) closeFileViewer();
           setNavigationOpen(false);
@@ -2100,6 +2116,8 @@ import {
 
         function renderGithubEntryState() {
           githubHeaderButton.hidden = !(leaseId && activeTerminalId && headerIcons.headerGithub);
+          $("worktreesHeader").hidden = !(leaseId && activeTerminalId && headerIcons.headerWorktrees);
+          worktreeView.syncContext();
           $("memoHeader").hidden = !(leaseId && headerIcons.headerMemo);
         }
 
@@ -2381,7 +2399,7 @@ import {
           return true;
         }
 
-        function closeFileViewer() {
+        function closeFileViewer(returnToCaller = false) {
           fileViewerRequestRevision += 1;
           fileViewerOverlayElement.hidden = true;
           fileViewerSection.hidden = true;
@@ -2400,11 +2418,15 @@ import {
           fileViewerDownloadButton.hidden = false;
           fileViewerDownloadInFlight = false;
           applyFileViewerDownloadState();
+          if (returnToCaller && worktreeView.resume()) return;
+          if (worktreeView.isSuspended()) worktreeView.close();
           focusCurrentInputSurface();
         }
 
-        function openFileViewerOverlay(path, explorerReturnPath) {
+        function openFileViewerOverlay(path, explorerReturnPath, returnToWorktrees = false) {
           if (!leaseId || !fileViewerToken || !path) return;
+          if (returnToWorktrees) worktreeView.suspend();
+          else if (worktreeView.isOpen() || worktreeView.isSuspended()) worktreeView.close();
           if (memoView.isOpen()) memoView.close();
           if (!githubOverlayElement.hidden) closeRemoteGithubView();
           const openedFromExplorer = explorerReturnPath !== undefined;
@@ -2481,6 +2503,7 @@ import {
         // nothing to copy, download or go back to. Returns the request revision
         // that the answer must still match.
         function showBlankFileViewerOverlay(title, tooltip, message) {
+          if (worktreeView.isOpen()) worktreeView.close();
           if (memoView.isOpen()) memoView.close();
           if (!githubOverlayElement.hidden) closeRemoteGithubView();
           const requestRevision = ++fileViewerRequestRevision;
@@ -3783,7 +3806,7 @@ import {
         function loadRightSwipeView() {
           try {
             const value = localStorage.getItem(rightSwipeViewKey);
-            return ["github", "memo"].includes(value) ? value : "files";
+            return ["github", "worktrees", "memo"].includes(value) ? value : "files";
           } catch (_) {
             return "files";
           }
@@ -3795,7 +3818,7 @@ import {
         }
 
         function saveRightSwipeView(value) {
-          rightSwipeView = ["github", "memo"].includes(value) ? value : "files";
+          rightSwipeView = ["github", "worktrees", "memo"].includes(value) ? value : "files";
           try {
             localStorage.setItem(rightSwipeViewKey, rightSwipeView);
           } catch (_) {}
@@ -4674,6 +4697,7 @@ import {
             fileViewerPathInput.value = "";
             closeFileViewer();
             closeRemoteGithubView();
+            worktreeView.close();
           }
           renderFileViewerState();
           renderGithubEntryState();
@@ -6378,7 +6402,7 @@ import {
                 ? point.clientX <= rect.left + EDGE_SWIPE_HIT_PX
                   ? "left"
                   : leaseId &&
-                      ((rightSwipeView === "github" && activeTerminalId) || rightSwipeView === "memo" ||
+                      ((["github", "worktrees"].includes(rightSwipeView) && activeTerminalId) || rightSwipeView === "memo" ||
                         (rightSwipeView === "files" && fileViewerToken)) &&
                       point.clientX >= rect.right - EDGE_SWIPE_HIT_PX
                     ? "right"
@@ -6435,6 +6459,7 @@ import {
                 touchGesture.mode = "edgeOpened";
                 if (edge === "left") setNavigationOpen(true);
                 else if (rightSwipeView === "github") openRemoteGithubView();
+                else if (rightSwipeView === "worktrees") worktreeView.open();
                 else if (rightSwipeView === "memo") memoView.open();
                 else openCurrentFileExplorer();
               } else if (
@@ -7734,6 +7759,7 @@ import {
             return true;
           }
           if (memoView.isOpen()) { memoView.close(); return true; }
+          if (worktreeView.isOpen()) { worktreeView.close(); return true; }
           // Both modals have z-index 60; OAuth follows the viewer in DOM order
           // and is therefore the topmost layer if both are present.
           if (!oauthRelayScrim.hidden) {
@@ -7741,7 +7767,7 @@ import {
             return true;
           }
           if (!fileViewerOverlayElement.hidden) {
-            if (!returnToFileExplorer()) closeFileViewer();
+            if (!returnToFileExplorer()) closeFileViewer(true);
             return true;
           }
           if (!githubOverlayElement.hidden) {
@@ -14516,7 +14542,7 @@ import {
             openFileViewerOverlay(path, fileViewerDirectoryPath || fileViewerExplorerReturnPath);
           }
         });
-        fileViewerCloseButton.addEventListener("click", closeFileViewer);
+        fileViewerCloseButton.addEventListener("click", () => closeFileViewer(true));
         fileViewerCopyPathButton.addEventListener("click", () => {
           const path = fileViewerPath || fileViewerDirectoryPath;
           if (!path) return;
@@ -14536,6 +14562,7 @@ import {
           openCurrentFileExplorer();
         });
         githubHeaderButton.addEventListener("click", openRemoteGithubView);
+        $("worktreesHeader").addEventListener("click", () => worktreeView.open());
         githubIssuesTabButton.addEventListener("click", () => {
           githubTab = "issues";
           githubOpenMenu = null;
@@ -14567,14 +14594,14 @@ import {
             if (fileViewerOverlayElement.hidden || event.key !== "Escape") return;
             event.preventDefault();
             event.stopImmediatePropagation();
-            closeFileViewer();
+            closeFileViewer(true);
           },
           true,
         );
         fileViewerOverlayElement.addEventListener("click", (event) => {
           // Only the backdrop itself closes; a click inside the dialog is the
           // user reading, selecting or scrolling the file.
-          if (event.target === fileViewerOverlayElement) closeFileViewer();
+          if (event.target === fileViewerOverlayElement) closeFileViewer(true);
         });
         githubOverlayElement.addEventListener("click", (event) => {
           if (event.target === githubOverlayElement) closeRemoteGithubView();

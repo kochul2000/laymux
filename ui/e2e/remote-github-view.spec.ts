@@ -42,6 +42,15 @@ async function installMocks(context: BrowserContext) {
     const request = route.request();
     const url = new URL(request.url());
     if (await fulfillRemoteClientAsset(route, url.pathname)) return;
+    if (url.pathname.endsWith("/worktrees")) {
+      return route.fulfill({
+        json: {
+          success: true,
+          cwd: "/work/repo",
+          data: { repositoryPath: "/work/repo", worktrees: [], usageWarnings: [] },
+        },
+      });
+    }
     if (url.pathname === "/remote/v1/file-viewer/list") {
       return route.fulfill({
         json: {
@@ -495,8 +504,8 @@ test.describe("Remote GitHub view", () => {
     await connect(page);
     await page.locator("#memoHeader").click();
     await flickMemo(page, 120);
-    await expect(page.locator("#fileViewerDirectory")).toBeVisible();
-    await page.locator("#fileViewerClose").click();
+    await expect(page.locator("#worktreesOverlay")).toBeVisible();
+    await page.locator("#worktreesClose").click();
     await page.locator("#navToggle").click();
     await page.locator("#drawerSettingsButton").click();
     await page.locator("#settingsTabPanels").click();
@@ -539,7 +548,7 @@ test.describe("Remote GitHub view", () => {
     await page.screenshot({ path: "../.screenshots/remote-memo-fling.png" });
   });
 
-  test("cycles one step per fling through Issues, PRs, Files and Memo without losing drafts", async ({
+  test("cycles one step per fling through Issues, PRs, Files, Worktrees and Memo without losing drafts", async ({
     context,
     page,
   }) => {
@@ -551,6 +560,8 @@ test.describe("Remote GitHub view", () => {
     await flickTool(page, "#githubToolbar", -1);
     await expect(page.locator("#fileViewerDirectory")).toBeVisible();
     await flickTool(page, "#fileViewerDirectory", -1);
+    await expect(page.locator("#worktreesOverlay")).toBeVisible();
+    await flickTool(page, "#worktreesToolbar", -1);
     await expect(page.locator("#memoText")).toHaveValue("PC에서 쓴 메모\n공유 확인");
     await page.locator("#memoText").fill("순회 중 보존할 초안");
     await flickTool(page, "#memoText", -1);
@@ -558,6 +569,7 @@ test.describe("Remote GitHub view", () => {
     await flickTool(page, "#githubList", -1);
     await flickTool(page, "#githubList", -1);
     await flickTool(page, "#fileViewerDirectory", -1);
+    await flickTool(page, "#worktreesToolbar", -1);
     await expect(page.locator("#memoText")).toHaveValue("순회 중 보존할 초안");
     expect(mocks.memoRequests).toEqual([]);
   });
@@ -584,6 +596,8 @@ test.describe("Remote GitHub view", () => {
     await flickTool(page, "#githubList", 1);
     await expect(page.locator("#memoOverlay")).toBeVisible();
     await flickTool(page, "#memoToolbar", 1);
+    await expect(page.locator("#worktreesOverlay")).toBeVisible();
+    await flickTool(page, "#worktreesToolbar", 1);
     await expect(page.locator("#fileViewerDirectory")).toBeVisible();
     await flickTool(page, "#fileViewerDirectory", 1);
     await expect(page.locator("#githubPullsTab")).toHaveAttribute("aria-selected", "true");
@@ -603,6 +617,7 @@ test.describe("Remote GitHub view", () => {
     await installMocks(context);
     await context.addInitScript(() => {
       localStorage.setItem("laymux.remote.headerGithub", "0");
+      localStorage.setItem("laymux.remote.headerWorktrees", "0");
       localStorage.setItem("laymux.remote.toolSwipeRightAction", "previous");
     });
     await page.goto("http://remote.test/remote/");
@@ -670,6 +685,7 @@ test.describe("Remote GitHub view", () => {
     for (const key of [
       "headerFiles",
       "headerGithub",
+      "headerWorktrees",
       "headerMemo",
       "headerSpatialExclusion",
       "headerDesktopMode",
@@ -684,6 +700,7 @@ test.describe("Remote GitHub view", () => {
     for (const id of [
       "fileExplorerHeader",
       "githubHeader",
+      "worktreesHeader",
       "memoHeader",
       "spatialExclusion",
       "desktopModeHeader",

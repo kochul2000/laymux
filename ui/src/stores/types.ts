@@ -9,6 +9,7 @@ export type ViewType =
   | "GrokUsageView"
   | "FileExplorerView"
   | "GitHubView"
+  | "WorktreeView"
   | "EmptyView";
 
 export type DockPosition = "top" | "bottom" | "left" | "right";

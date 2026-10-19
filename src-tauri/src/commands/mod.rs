@@ -30,6 +30,7 @@ mod terminal_output_surface;
 mod terminal_teardown;
 mod usage;
 mod viewer_startup;
+mod worktrees;
 mod wsl_agent_session;
 mod wsl_client;
 
@@ -65,6 +66,7 @@ pub use terminal_home::*;
 pub use terminal_output_surface::*;
 pub use usage::*;
 pub use viewer_startup::*;
+pub use worktrees::*;
 pub use wsl_client::*;
 
 /// Commands whose body reaches the filesystem, spawns a process or enumerates
@@ -78,6 +80,14 @@ pub use wsl_client::*;
 mod main_thread_io {
     /// `(file source, commands that must carry `#[tauri::command(async)]`)`.
     const OFF_MAIN_THREAD: &[(&str, &[&str])] = &[
+        (
+            include_str!("worktrees.rs"),
+            &[
+                "get_worktree_snapshot",
+                "inspect_worktree",
+                "remove_worktree",
+            ],
+        ),
         (
             include_str!("local_state.rs"),
             &[
