@@ -10,6 +10,9 @@ const moduleTarget = fileURLToPath(
 const commonJsTarget = fileURLToPath(
   new URL("../node_modules/@xterm/xterm/lib/xterm.js", import.meta.url),
 );
+const headlessModuleTarget = fileURLToPath(
+  new URL("../node_modules/@xterm/headless/lib-headless/xterm-headless.mjs", import.meta.url),
+);
 const remoteCommonJsTarget = fileURLToPath(
   new URL("../../src-tauri/src/remote_server/assets/xterm.js", import.meta.url),
 );
@@ -657,4 +660,20 @@ await patchBundle(remoteCommonJsTarget, [
   ...commonJsWheelPatches,
   { name: "reflow", originalText: commonJsReflowOriginal, patchedText: commonJsReflowPatched },
   ...commonJsCompositionPatches,
+]);
+// The checkpoint Worker must share the browser engine's retained-row reflow
+// fix. The official headless build also assumes `window` in its common idle
+// scheduler; use the standard global object so the same build works in Workers.
+await patchBundle(headlessModuleTarget, [
+  {
+    name: "reflow",
+    originalText: "_>0&&(a.push(l+m.length-_),a.push(_)),l+=m.length-1",
+    patchedText:
+      "_>0&&(m[o].isWrapped=o>0,u&&(u.isWrapped=!1),a.push(l+m.length-_),a.push(_)),l+=m.length-1",
+  },
+  {
+    name: "Worker idle scheduler",
+    originalText: '!pt&&"requestIdleCallback"in window',
+    patchedText: '!pt&&"requestIdleCallback"in globalThis',
+  },
 ]);

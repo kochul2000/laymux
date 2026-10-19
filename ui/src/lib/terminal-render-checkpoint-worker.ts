@@ -8,6 +8,7 @@ import type {
 } from "./terminal-output-attach-coordinator";
 import type { TerminalParserAdmission } from "./terminal-parser-admission";
 import { TERMINAL_WRITE_BATCH_MAX_BYTES } from "./terminal-write-batch-queue";
+import { TERMINAL_CHECKPOINT_CAPTURE_WAIT_MS } from "./terminal-checkpoint-timeouts";
 
 export type CheckpointWorkerRequest = { id: number } & (
   | { op: "attach"; attachment: TerminalOutputAttachment }
@@ -104,8 +105,25 @@ export class TerminalRenderCheckpointWorker {
   ): Promise<TerminalRenderCheckpoint> {
     // Wait for writes already accepted here, without blocking later writes
     // needed to reach a target. The Worker's model owns atomic serialization.
-    await this.chain;
-    return this.request<TerminalRenderCheckpoint>({ op: "capture", target, maxBytes });
+    let expired = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        this.chain.then(() => {
+          if (expired)
+            throw new Error(`terminal render checkpoint did not reach seq ${target.seq}`);
+          return this.request<TerminalRenderCheckpoint>({ op: "capture", target, maxBytes });
+        }),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            expired = true;
+            reject(new Error(`terminal render checkpoint did not reach seq ${target.seq}`));
+          }, TERMINAL_CHECKPOINT_CAPTURE_WAIT_MS);
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   dispose(): void {

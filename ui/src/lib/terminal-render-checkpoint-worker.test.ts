@@ -40,6 +40,33 @@ async function attach(model: TerminalRenderCheckpointWorker, port: Port) {
   await result;
 }
 describe("checkpoint Worker admission and ownership", () => {
+  it("includes admission queue time in the capture deadline", async () => {
+    const port = new Port();
+    const admission = { request: vi.fn(), cancel: vi.fn() };
+    const model = new TerminalRenderCheckpointWorker({ admission, createWorker: () => port });
+    await attach(model, port);
+    const applying = model.apply({
+      generation: 1,
+      seqStart: 0,
+      seqEnd: 1,
+      data: new Uint8Array([65]),
+      geometry,
+    });
+    await vi.waitFor(() => expect(admission.request).toHaveBeenCalled());
+    vi.useFakeTimers();
+    try {
+      const capturing = model.capture({ generation: 1, seq: 1, geometry }, 1024);
+      const rejected = expect(capturing).rejects.toThrow("did not reach seq");
+      await vi.advanceTimersByTimeAsync(3_000);
+      await rejected;
+      expect(port.messages).toHaveLength(2);
+      model.dispose();
+      await expect(applying).rejects.toThrow("disposed");
+    } finally {
+      model.dispose();
+      vi.useRealTimers();
+    }
+  });
   it("allows later writes while capture waits for a future source target", async () => {
     const port = new Port();
     const model = new TerminalRenderCheckpointWorker({ createWorker: () => port });

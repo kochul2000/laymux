@@ -1,4 +1,5 @@
-import { TerminalRenderCheckpointModel } from "./terminal-render-checkpoint";
+import { TerminalRenderCheckpointModel } from "./terminal-render-checkpoint-core";
+import { Terminal } from "@xterm/headless";
 import type {
   CheckpointWorkerRequest,
   CheckpointWorkerResponse,
@@ -8,7 +9,15 @@ const scope = globalThis as unknown as {
   onmessage: ((event: MessageEvent<CheckpointWorkerRequest>) => void) | null;
   postMessage: (message: CheckpointWorkerResponse) => void;
 };
-const model = new TerminalRenderCheckpointModel();
+const model = new TerminalRenderCheckpointModel({
+  terminal: new Terminal({
+    allowProposedApi: true,
+    cols: 80,
+    rows: 24,
+    scrollback: 10_000,
+    windowsPty: { backend: "conpty", buildNumber: 21376 },
+  }),
+});
 scope.onmessage = ({ data }) => {
   // capture must be able to wait for a future source target while subsequent
   // apply messages advance it. The model serializes writes itself.

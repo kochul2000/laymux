@@ -50,6 +50,9 @@ function createWorker(): CheckpointWorkerPort {
     globalThis.addEventListener=events.addEventListener.bind(events);
     globalThis.removeEventListener=events.removeEventListener.bind(events);
     globalThis.postMessage=message=>parentPort.postMessage(message);
+    // Use browser Worker globals: Node's process flag can hide accidental DOM
+    // imports in xterm's browser bundle.
+    globalThis.process=undefined;
     const ready=import(workerData.url);
     parentPort.on('message',async data=>{await ready;globalThis.onmessage({data});});
   `,
@@ -73,6 +76,39 @@ function createWorker(): CheckpointWorkerPort {
 }
 
 describe("built checkpoint Worker screen parity", () => {
+  it("keeps retained wrapped rows identical through repeated widening", async () => {
+    const worker = new TerminalRenderCheckpointWorker({ createWorker });
+    const local = new TerminalRenderCheckpointModel();
+    const snapshot = encoder.encode(`${"0123456789".repeat(9)}ABCDE\r\nNEXT\r\n`);
+    let geometry = { revision: 1, cols: 10, rows: 20 };
+    const attachment = {
+      state: { generation: 11, snapshotStartSeq: 0, snapshotSeq: snapshot.length, geometry },
+      snapshot,
+    } as TerminalOutputAttachment;
+    try {
+      await Promise.all([worker.attach(attachment), local.attach(attachment)]);
+      for (const cols of [20, 100]) {
+        geometry = { ...geometry, revision: geometry.revision + 1, cols };
+        const segment = {
+          generation: 11,
+          seqStart: snapshot.length,
+          seqEnd: snapshot.length,
+          data: new Uint8Array(),
+          geometry,
+        };
+        await Promise.all([worker.apply(segment), local.apply(segment)]);
+        const target = { generation: 11, seq: snapshot.length, geometry };
+        const [actual, expected] = await Promise.all([
+          worker.capture(target, 4096),
+          local.capture(target, 4096),
+        ]);
+        expect(actual).toEqual(expected);
+      }
+    } finally {
+      worker.dispose();
+      local.dispose();
+    }
+  });
   it("preserves Unicode cells, alt/main buffers and ordered resize snapshots", async () => {
     const worker = new TerminalRenderCheckpointWorker({ createWorker });
     const local = new TerminalRenderCheckpointModel();

@@ -8,6 +8,11 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
+      // 6.0.0 publishes an invalid `module` field (xtermjs/xterm.js#6052).
+      "@xterm/headless": path.resolve(
+        __dirname,
+        "./node_modules/@xterm/headless/lib-headless/xterm-headless.mjs",
+      ),
       "@": path.resolve(__dirname, "./src"),
     },
   },
