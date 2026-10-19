@@ -95,10 +95,10 @@ pub(super) fn status(bytes: &[u8]) -> Result<FileStatus, AppError> {
             }
             code if code.iter().all(|byte| b" MADRCUT".contains(byte)) => {
                 result.tracked += 1;
-                if code.contains(&b'R') || code.contains(&b'C') {
-                    if fields.next().is_none_or(str::is_empty) {
-                        return Err(invalid());
-                    }
+                if (code.contains(&b'R') || code.contains(&b'C'))
+                    && fields.next().is_none_or(str::is_empty)
+                {
+                    return Err(invalid());
                 }
                 "tracked"
             }

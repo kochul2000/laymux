@@ -39,10 +39,10 @@ pub(super) fn canonicalize_native_path(path: &std::path::Path) -> Result<String,
         if let Some(tail) = canonical.strip_prefix("\\\\?\\UNC\\") {
             return Ok(format!("//{}", tail.replace('\\', "/")));
         }
-        return Ok(canonical
+        Ok(canonical
             .strip_prefix("\\\\?\\")
             .unwrap_or(canonical)
-            .replace('\\', "/"));
+            .replace('\\', "/"))
     }
     #[cfg(not(windows))]
     Ok(canonical.to_owned())
