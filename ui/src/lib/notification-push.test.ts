@@ -30,8 +30,11 @@ describe("기기 알림 발행", () => {
       body: "new",
     });
     useNotificationStore.getState().markTerminalAsRead("t");
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(send.mock.calls[1][0].revision).toBe(2);
+    useNotificationStore.getState().markTerminalAsRead("t");
     await Promise.resolve();
-    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(2);
     stop();
   });
 

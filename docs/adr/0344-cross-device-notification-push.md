@@ -15,7 +15,7 @@ PC 프론트엔드가 알림과 읽음의 정본이고 Remote는 목록을 조�
 
 **PC가 만든 알림의 식별자와 전이를 Cloud가 구독별로 중계하고, 브라우저의 푸시 전용 service worker와 Android native가 시스템 알림을 표시한다.**
 
-- **정본.** 본문·대상·읽음은 기존 PC notification store가 소유한다. 알림 ID는 UUID다. 새 생성은 PC 도착 시점 자동 읽음과 독립적으로 한 번 전달하며 이후 사용자 읽음·삭제를 별도 전달한다. 기존 목록은 구독 시작 때 재발행하지 않는다. 전송 실패는 PC 알림·PTY를 막지 않는다.
+- **정본.** 본문·대상·읽음은 기존 PC notification store가 소유한다. 알림 ID는 UUID다. 새 생성은 PC 도착 시점 자동 읽음과 독립적으로 한 번 전달한다. `readAt`은 기존 UI 읽음 정책이고 `confirmedAt`은 포커스 진입·명시적 읽음으로 확인한 시각이다. 도착 자동 읽음은 confirmedAt을 채우지 않으며 이후 첫 확인·삭제를 별도로 전달한다. 기존 목록은 구독 시작 때 재발행하지 않는다. 전송 실패는 PC 알림·PTY를 막지 않는다.
 - **발행.** PC는 기존 Cloud device credential로 고정 HTTPS endpoint에 발행한다. 서버가 credential로 instance·현재 소유자를 결정한다. 이벤트에는 UUID·종류·생성/읽음 전이와 revision을 넣고 늦은 생성이 읽음을 되돌리지 못하게 한다. 구독·중복 방지 상태는 DB에 저장한다. 수·크기·동시성·재시도·보존 기간은 유한하며 전달은 best effort다.
 - **권한.** 구독은 명시적 사용자 동작으로 만든다. 웹은 현재 relay credential의 PC·소유자에, Android는 Cloud 로그인과 현재 소유 PC에 결합한다. 변경에는 same-origin 검증과 body 제한을 적용한다. 구독 endpoint/token은 다른 기기·계정에 노출하지 않는다. PC 등록 해제·소유권 변경·구독 취소 뒤에는 발송하지 않고 폐기된 provider token은 지운다. Web Push 목적지는 알려진 provider의 HTTPS origin으로 제한해 SSRF를 막는다.
 - **웹.** relay origin의 고정 `/remote/push/sw.js`를 `/remote/push/` scope로 등록한다. worker에는 fetch listener·offline cache를 두지 않고 push·notificationclick만 처리한다. public 로그인 origin에는 worker를 설치하지 않는다. Cloud는 이 경로를 tunnel보다 먼저 제공하고 scope 확대를 허용하지 않는다. CSP·Caddy에 이 스크립트에 필요한 예외를 둔다. iOS는 지원 OS의 홈 화면 웹앱에서 사용자 gesture로 권한을 요청한다. Direct HTTP는 미지원 이유와 Cloud 경로를 안내한다.

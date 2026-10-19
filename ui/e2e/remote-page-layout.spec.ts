@@ -14,6 +14,25 @@ test("기기 알림은 연결 전에도 설정 위치와 Cloud 요구 조건을 
   await page.screenshot({ path: "../.screenshots/notification-push-mobile.png" });
 });
 
+test("복귀 중 새 알림 클릭은 최신 목록을 받은 뒤 원래 터미널로 이동한다", async ({ page }) => {
+  const controls = await routeRemoteWithWorkspaces(page, []);
+  const id = "33333333-3333-4333-8333-333333333333";
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.locator("#connect").click();
+  await expect(page.locator("#focusTerminal")).toBeEnabled();
+  controls.setNotifications(
+    [{ id, terminalId: "term-b1", workspaceId: "ws-b", message: "새 알림", readAt: null }],
+    1,
+  );
+  await page.evaluate(
+    (notificationId) => (window as any).laymuxRemoteUi.openPushNotification(notificationId),
+    id,
+  );
+  await expect
+    .poll(() => controls.focusRequests.some((r) => r.terminalId === "term-b1"))
+    .toBe(true);
+});
+
 test("푸시 대상 이동은 lease 획득 후 원래 알림의 터미널을 연다", async ({ page }) => {
   const controls = await routeRemoteWithWorkspaces(page, []);
   const id = "22222222-2222-4222-8222-222222222222";

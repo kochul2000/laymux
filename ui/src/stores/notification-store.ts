@@ -31,6 +31,8 @@ export interface Notification {
   level: NotificationLevel;
   createdAt: number;
   readAt: number | null;
+  /** Explicit focus/read confirmation; arrival-time UI auto-dismiss does not set this. */
+  confirmedAt?: number;
   /**
    * When true, this notification represents a state that needs explicit
    * user action (e.g. answering a TUI permission modal). Such alerts are
@@ -121,8 +123,9 @@ export const useNotificationStore = create<NotificationStoreState>()((set, get) 
 
   markWorkspaceAsRead: (workspaceId) => {
     const now = Date.now();
-    set((state) => ({
-      notifications: state.notifications.map((n) =>
+    set((state) => {
+      let changed = false;
+      const notifications = state.notifications.map((n) => {
         // Focus/entry dismissal is uniform across every alert kind, including
         // requiresAction (issue #365). Entering a workspace is the user's
         // explicit "I'm looking at this now" signal — exactly what the nav
@@ -130,9 +133,13 @@ export const useNotificationStore = create<NotificationStoreState>()((set, get) 
         // requiresAction exemption lives only in addNotification's
         // arrival-time auto-dismiss, so an alert that *arrives* while the
         // workspace is active still stays visible until the user enters it.
-        n.workspaceId === workspaceId && n.readAt === null ? { ...n, readAt: now } : n,
-      ),
-    }));
+        if (n.workspaceId !== workspaceId || (n.readAt !== null && n.confirmedAt !== undefined))
+          return n;
+        changed = true;
+        return { ...n, readAt: n.readAt ?? now, confirmedAt: n.confirmedAt ?? now };
+      });
+      return changed ? { notifications } : state;
+    });
   },
 
   markTerminalAsRead: (terminalId) => {
@@ -142,9 +149,9 @@ export const useNotificationStore = create<NotificationStoreState>()((set, get) 
       const notifications = state.notifications.map((n) => {
         // Focusing the pane clears all of its unread alerts, requiresAction
         // included — focus is the uniform dismissal condition (issue #365).
-        if (n.terminalId === terminalId && n.readAt === null) {
+        if (n.terminalId === terminalId && (n.readAt === null || n.confirmedAt === undefined)) {
           changed = true;
-          return { ...n, readAt: now };
+          return { ...n, readAt: n.readAt ?? now, confirmedAt: n.confirmedAt ?? now };
         }
         return n;
       });
@@ -157,7 +164,9 @@ export const useNotificationStore = create<NotificationStoreState>()((set, get) 
     const now = Date.now();
     set((state) => ({
       notifications: state.notifications.map((n) =>
-        idSet.has(n.id) && n.readAt === null ? { ...n, readAt: now } : n,
+        idSet.has(n.id) && (n.readAt === null || n.confirmedAt === undefined)
+          ? { ...n, readAt: n.readAt ?? now, confirmedAt: n.confirmedAt ?? now }
+          : n,
       ),
     }));
   },

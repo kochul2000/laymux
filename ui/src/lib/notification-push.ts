@@ -63,7 +63,11 @@ export function subscribeNotificationPush(
     for (const notification of state.notifications) {
       const prior = before.get(notification.id);
       if (!prior) enqueue(notification, 1);
-      else if (prior.readAt === null && notification.readAt !== null) enqueue(notification, 2);
+      else if (
+        (prior.confirmedAt === undefined && notification.confirmedAt !== undefined) ||
+        (prior.readAt === null && notification.readAt !== null)
+      )
+        enqueue(notification, 2);
     }
     for (const notification of previous.notifications) {
       if (!after.has(notification.id)) enqueue(notification, 2);

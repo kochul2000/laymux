@@ -1,5 +1,5 @@
 import { createRemoteUpdateDialog } from "../../../../ui/src/remote/remote-update-dialog.js";
-import { installRemotePushSettings } from "../../../../ui/src/remote/remote-notification-push.js";
+import { installRemotePushSettings, createPushTargetNavigation } from "../../../../ui/src/remote/remote-notification-push.js";
 import { createRemoteSettingsBridge } from "../../../../ui/src/remote/remote-settings-mcp.js";
 import { createRemoteMemo } from "../../../../ui/src/remote/remote-memo.js";
 import { createWorkspaceManager } from "../../../../ui/src/remote/remote-workspace-manager.js";
@@ -846,19 +846,21 @@ import {
         document.querySelector(".app").classList.toggle("android-e2e", Boolean(androidE2eMode));
         if (androidE2eMode) clientNameInput.value = "Laymux Android E2E";
         const pushSettings = installRemotePushSettings($("pushSettings"), { android: Boolean(androidE2eMode) });
-        let pendingPushNotificationId = hashParams.get("notification");
         const PUSH_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        if (!PUSH_ID.test(pendingPushNotificationId || "")) pendingPushNotificationId = null;
+        const pushTargets = createPushTargetNavigation({
+          canNavigate: () => Boolean(leaseId),
+          refresh: async () => {
+            const data = await remoteFetch("/remote/v1/navigation");
+            installNavigationSnapshot(data);
+          },
+          find: (id) => (navigationState?.notifications || []).find((n) => n.id === id),
+          open: openNotification,
+          missing: () => setStatus("알림 대상이 삭제됐거나 PC가 재시작되었습니다.", true),
+          onError: () => {}, // Foreground recovery retries a temporarily suspended transport.
+        });
+        if (PUSH_ID.test(hashParams.get("notification") || "")) pushTargets.offer(hashParams.get("notification"));
         function consumePushNotification() {
-          if (!pendingPushNotificationId || !leaseId || !navigationState) return;
-          const notification = (navigationState.notifications || []).find((n) => n.id === pendingPushNotificationId);
-          if (!notification) {
-            setStatus("알림 대상이 삭제됐거나 PC가 재시작되었습니다.", true);
-            pendingPushNotificationId = null;
-            return;
-          }
-          pendingPushNotificationId = null;
-          openNotification(notification).catch((error) => setStatus(error.message, true));
+          void pushTargets.consume();
         }
         // Android E2E exits Remote control through Release. Keep the PC-mode
         // switch only for the desktop app's embedded mobile view, where it
@@ -1302,6 +1304,9 @@ import {
               request.cleanup();
               request.reject(new Error("Secure Remote transport resumed after background."));
             }
+            // Let rejected pre-resume requests release the single-flight guard
+            // before resolving a system-notification target on live transport.
+            setTimeout(consumePushNotification, 0);
 
             // Native output sockets were closed onStop and no longer have a
             // callback entry. Finish their JS peers so the existing snapshot
@@ -7792,7 +7797,7 @@ import {
         window.laymuxRemoteUi = Object.freeze({
           openPushNotification(id) {
             if (!PUSH_ID.test(id || "")) return false;
-            pendingPushNotificationId = id;
+            pushTargets.offer(id);
             consumePushNotification();
             return true;
           },

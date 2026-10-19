@@ -1414,12 +1414,18 @@ const handlers: HandlerMap = {
       return ok({ marked: ids.length });
     },
     markAllRead: () => {
+      const confirmations = useNotificationStore
+        .getState()
+        .notifications.filter(
+          (notification) => notification.readAt === null || notification.confirmedAt === undefined,
+        )
+        .map((notification) => notification.id);
       const unreadIds = useNotificationStore
         .getState()
         .notifications.filter((notification) => notification.readAt === null)
         .map((notification) => notification.id);
-      if (unreadIds.length > 0) {
-        useNotificationStore.getState().markNotificationsAsRead(unreadIds);
+      if (confirmations.length > 0) {
+        useNotificationStore.getState().markNotificationsAsRead(confirmations);
       }
       return ok({ marked: unreadIds.length });
     },

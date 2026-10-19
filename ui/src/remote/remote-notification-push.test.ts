@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   installRemotePushSettings,
   closeReadPushNotifications,
+  createPushTargetNavigation,
 } from "./remote-notification-push.js";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -14,6 +15,30 @@ function panel() {
 }
 
 describe("웹 푸시 설정", () => {
+  it("복귀 클릭은 최신 목록을 받은 뒤 대상을 해석하고 일시 장애 때 ID를 보존한다", async () => {
+    let notifications: Array<{ id: string }> = [];
+    const open = vi.fn();
+    const missing = vi.fn();
+    const refresh = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("resuming"))
+      .mockImplementation(async () => {
+        notifications = [{ id: "new" }];
+      });
+    const controller = createPushTargetNavigation({
+      canNavigate: () => true,
+      refresh,
+      find: (id: string) => notifications.find((n) => n.id === id),
+      open,
+      missing,
+    });
+    controller.offer("new");
+    await controller.consume();
+    expect(missing).not.toHaveBeenCalled();
+    await controller.consume();
+    expect(open).toHaveBeenCalledWith({ id: "new" });
+    expect(missing).not.toHaveBeenCalled();
+  });
   it("허용 버튼의 사용자 동작에서만 권한을 요청하고 기본 상세 비공개로 구독한다", async () => {
     const permission = vi.fn().mockResolvedValue("granted");
     vi.stubGlobal("Notification", { permission: "default", requestPermission: permission });

@@ -3,6 +3,31 @@
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DEVICE_KEY = "laymux.push.deviceId";
 
+/** A retained document can have a pre-background snapshot. Resolve a pushed
+ * id only after a successful fresh query; a resuming transport keeps the id. */
+export function createPushTargetNavigation(options) {
+  let pending = null;
+  let inFlight = false;
+  async function consume() {
+    if (!pending || inFlight || !options.canNavigate()) return;
+    const id = pending;
+    inFlight = true;
+    try {
+      await options.refresh();
+      if (pending !== id || !options.canNavigate()) return;
+      const notification = options.find(id);
+      pending = null;
+      if (notification) await options.open(notification);
+      else options.missing();
+    } catch (error) { options.onError?.(error); }
+    finally {
+      inFlight = false;
+      if (pending && pending !== id) void consume();
+    }
+  }
+  return { offer(id) { pending = id; }, consume };
+}
+
 export async function closeReadPushNotifications(registration, instanceId, notifications) {
   if (!registration) return;
   const states = new Map(notifications.map((n) => [n.id, n]));

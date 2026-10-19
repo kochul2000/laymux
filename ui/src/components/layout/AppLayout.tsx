@@ -210,7 +210,7 @@ export function AppLayout() {
   // pane click/arrow-move re-runs it (issue #302) — activeWorkspaceId alone
   // wouldn't change.
   useEffect(() => {
-    if (notificationDismiss === "workspace" && activeWorkspaceId && unreadCount > 0) {
+    if (notificationDismiss === "workspace" && activeWorkspaceId) {
       markWorkspaceAsRead(activeWorkspaceId);
     }
   }, [

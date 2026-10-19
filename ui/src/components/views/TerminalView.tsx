@@ -443,8 +443,18 @@ function dismissTerminalResponseNotification(instanceId: string): void {
   const dismissMode = useSettingsStore.getState().notifications.dismiss;
   if (dismissMode === "workspace") {
     const wsId = resolveWorkspaceId(instanceId);
-    if (notifStore.getUnreadCount(wsId) > 0) notifStore.markWorkspaceAsRead(wsId);
-  } else if (dismissMode === "paneFocus" && notifStore.hasUnreadForTerminal(instanceId)) {
+    if (
+      notifStore.notifications.some(
+        (n) => n.workspaceId === wsId && (n.readAt === null || n.confirmedAt === undefined),
+      )
+    )
+      notifStore.markWorkspaceAsRead(wsId);
+  } else if (
+    dismissMode === "paneFocus" &&
+    notifStore.notifications.some(
+      (n) => n.terminalId === instanceId && (n.readAt === null || n.confirmedAt === undefined),
+    )
+  ) {
     notifStore.markTerminalAsRead(instanceId);
   }
 }
