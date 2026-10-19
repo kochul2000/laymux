@@ -1,6 +1,6 @@
 # 0345. 워크트리 검토 맥락은 조회 대상에 귀속하고 화면 크기에 맞춰 목록과 상세를 배치한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-19
 - Source: 사용자 요청(dock 실사용 평가의 정당한 불편 수정), ADR-0343, ADR-0344, architecture/api-contracts.md §15
 - 관계: ADR-0343의 CWD 수신·검사 정책을 유지하며 UI 생명주기와 갱신 표시를 구체화한다.

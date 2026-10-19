@@ -413,6 +413,31 @@ describe("WorktreeView", () => {
     await act(async () => pending.resolve(snapshot()));
   });
 
+  it("대상 유지의 새로고침은 확정한 WSL 경로를 사용해 원본 terminal 이동·종료에 영향받지 않는다", async () => {
+    const rawCwd = "/home/dev/repo";
+    const resolvedCwd = "//wsl.localhost/Debian/home/dev/repo";
+    api.useSyncGroupCwdContext.mockReturnValue({
+      cwd: rawCwd,
+      sourceTerminalId: "terminal-source",
+    });
+    const resolved = { ...snapshot(), workingDir: resolvedCwd };
+    api.getWorktreeSnapshot.mockResolvedValueOnce(resolved).mockImplementation((cwd, source) => {
+      if (source) return Promise.reject(new Error("원본 터미널이 이동하거나 종료되었습니다"));
+      return cwd === resolvedCwd
+        ? Promise.resolve(resolved)
+        : Promise.reject(new Error("배포판 누락"));
+    });
+    render(
+      <WorktreeView instanceId="worktree-pane" paneId="pane" syncGroup="ws" cwdReceive={false} />,
+    );
+    await screen.findByText("feature");
+    expect(api.getWorktreeSnapshot).toHaveBeenCalledWith(rawCwd, "terminal-source");
+    fireEvent.click(screen.getByRole("button", { name: "워크트리 새로고침" }));
+    await waitFor(() => expect(api.getWorktreeSnapshot).toHaveBeenLastCalledWith(resolvedCwd));
+    expect(screen.queryByText(/원본 터미널이/)).not.toBeInTheDocument();
+    await waitFor(() => expect(api.inspectWorktree).toHaveBeenCalledWith(resolvedCwd, clean.path));
+  });
+
   it("상세에서 목록으로 복귀하면 이전 탐색 위치를 유지한다", async () => {
     renderView();
     await screen.findByText("feature");

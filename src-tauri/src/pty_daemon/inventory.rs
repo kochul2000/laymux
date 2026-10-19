@@ -158,8 +158,6 @@ impl KnownTerminals {
     }
 }
 
-/// `terminal-` + the frontend's `FILE_VIEWER_OVERRIDE_ID_PREFIX`.
-
 /// List the sessions of every live daemon generation (ADR-0308). No daemon
 /// running is an empty inventory. A generation that does not answer, or
 /// speaks another protocol, is reported rather than taken as "no sessions".

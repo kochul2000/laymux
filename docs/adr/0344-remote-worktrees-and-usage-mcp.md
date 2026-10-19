@@ -1,6 +1,6 @@
 # 0344. 워크트리 관리는 Remote 도구로 제공하고 MCP는 laymux 고유 사용 관측만 제공한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-19
 - Source: 사용자 요청(Remote 워크트리 도구, Git으로 알 수 없는 laymux 정보만 MCP 제공, 독립 화면 사용 후 UX/UI 피드백 보고), ADR-0343, architecture/api-contracts.md §12·§15
 - 관계: ADR-0343의 Desktop/Automation 계약을 Remote로 확장하며 MCP 범위에 읽기 전용 사용 관측을 추가한다.

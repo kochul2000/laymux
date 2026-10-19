@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getWorktreeSnapshot,
   inspectWorktree,
@@ -21,19 +21,37 @@ export function useWorktreeSnapshot(
   workingDir: string,
   sourceTerminalId?: string,
   invalidation = "",
+  retainResolvedTarget = false,
 ) {
   const [revision, setRevision] = useState(0);
   const requestKey = `${revision}\0${invalidation}`;
   const [result, setResult] = useState<Result | null>(null);
+  const resolvedTarget = useRef<{
+    cwd: string;
+    sourceTerminalId?: string;
+    workingDir: string;
+  } | null>(null);
   useEffect(() => {
     if (!workingDir) return;
     let cancelled = false;
-    (sourceTerminalId
-      ? getWorktreeSnapshot(workingDir, sourceTerminalId)
-      : getWorktreeSnapshot(workingDir)
+    const resolved = resolvedTarget.current;
+    // 수신을 끄면 이미 검증된 실행 환경 주소(WSL 배포판 포함)를 유지한다.
+    // 원본 세션의 이후 cd/종료는 유지 대상의 주소를 무효화하지 않는다.
+    (retainResolvedTarget &&
+    resolved?.cwd === workingDir &&
+    resolved.sourceTerminalId === sourceTerminalId
+      ? getWorktreeSnapshot(resolved.workingDir)
+      : sourceTerminalId
+        ? getWorktreeSnapshot(workingDir, sourceTerminalId)
+        : getWorktreeSnapshot(workingDir)
     )
       .then(async (snapshot) => {
         if (cancelled) return;
+        resolvedTarget.current = {
+          cwd: workingDir,
+          sourceTerminalId,
+          workingDir: snapshot.workingDir,
+        };
         const base: Result = {
           cwd: workingDir,
           sourceTerminalId,
@@ -83,7 +101,7 @@ export function useWorktreeSnapshot(
     return () => {
       cancelled = true;
     };
-  }, [workingDir, sourceTerminalId, requestKey]);
+  }, [workingDir, sourceTerminalId, requestKey, retainResolvedTarget]);
   const refresh = useCallback(() => setRevision((value) => value + 1), []);
   const matching =
     result?.cwd === workingDir && result.sourceTerminalId === sourceTerminalId ? result : null;

@@ -80,6 +80,7 @@ function WorktreeContent({
     workingDir,
     sourceTerminalId,
     created ? `${created.id}:${creationSettled}` : "",
+    !cwdReceive,
   );
   const [filter, setFilter] = useState<"all" | "candidates">("all");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);

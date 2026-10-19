@@ -1,6 +1,6 @@
 # 0343. 워크트리 뷰는 Git 상태와 laymux 사용 정보를 함께 보여주고 재검증 후 개별 제거한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-18
 - Source: 사용자 요청(워크트리 목록·정리 및 dev 실기 검증), architecture/overview.md §6·§7, architecture/api-contracts.md §12·§14·§15, ADR-0003, ADR-0297, ADR-0306
 
