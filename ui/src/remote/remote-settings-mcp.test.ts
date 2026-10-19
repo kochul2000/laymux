@@ -57,6 +57,7 @@ describe("Remote 설정 MCP 기기 적용", () => {
       "remoteNavigationModifiers",
       "headerFiles",
       "headerGithub",
+      "headerWorktrees",
       "headerMemo",
       "headerSpatialExclusion",
       "headerDesktopMode",

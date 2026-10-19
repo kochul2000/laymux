@@ -16,7 +16,9 @@ use super::discovery::DaemonRoot;
 use super::launcher::{find_reachable, live_generations, GenerationState};
 use super::wire::SessionInfo;
 use super::DaemonEndpoint;
-use crate::constants::{PTY_DAEMON_METADATA_PROFILE, TERMINAL_ID_PREFIX};
+use crate::constants::{
+    FILE_VIEWER_TERMINAL_ID_PREFIX, PTY_DAEMON_METADATA_PROFILE, TERMINAL_ID_PREFIX,
+};
 use crate::local_state::{LocalSessionSnapshot, LocalStateStore};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -157,7 +159,6 @@ impl KnownTerminals {
 }
 
 /// `terminal-` + the frontend's `FILE_VIEWER_OVERRIDE_ID_PREFIX`.
-const FILE_VIEWER_TERMINAL_ID_PREFIX: &str = "terminal-global-file-viewer:";
 
 /// List the sessions of every live daemon generation (ADR-0308). No daemon
 /// running is an empty inventory. A generation that does not answer, or

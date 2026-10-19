@@ -12,6 +12,8 @@ pub mod settings_bridge;
 mod surface_router;
 mod terminal_output_diagnostics;
 pub mod types;
+mod worktree_usage;
+mod worktrees;
 
 // Re-export key types used by other modules
 pub use helpers::base64_decode;
@@ -157,6 +159,10 @@ pub fn build_router(
     let automation_routes = Router::new()
         .route("/api/v1/docs", get(api_docs))
         .route("/api/v1/health", get(health))
+        .route("/api/v1/worktrees", get(worktrees::list))
+        .route("/api/v1/worktrees/inspect", post(worktrees::inspect))
+        .route("/api/v1/worktrees/remove", post(worktrees::remove))
+        .route("/api/v1/ui/worktrees", post(worktrees::control))
         .route(
             "/api/v1/agent-hooks/environments",
             get(agent_hooks::hook_environments),

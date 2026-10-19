@@ -71,6 +71,7 @@ import { allLiveTerminalOutputV3Diagnostics } from "@/lib/terminal-output-v3-dia
 import { clearWorkspace } from "@/lib/workspace-clear";
 import { clearPane, paneClearWaitBudgetMs, resolvePaneClear } from "@/lib/pane-clear";
 import { selectTerminalLastInputEntry } from "@/lib/terminal-last-input";
+import { WORKTREE_ACTION_EVENT, type WorktreeViewAction } from "@/lib/worktree-view-control";
 
 export interface HandlerResult {
   success: boolean;
@@ -1482,6 +1483,36 @@ const handlers: HandlerMap = {
     },
   },
 
+  worktrees: {
+    control: (p) => {
+      if (typeof p.paneId !== "string" || !p.paneId) return err("paneId required");
+      const root = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-testid="view-worktree"]'),
+      ).find((element) => element.dataset.paneId === p.paneId);
+      if (!root) return err("WorktreeView pane is not mounted");
+      const action = p.action;
+      if (action !== "refresh" && action !== "select" && action !== "filter")
+        return err("action must be refresh, select or filter");
+      if (
+        action === "select" &&
+        (typeof p.path !== "string" ||
+          !Array.from(root.querySelectorAll<HTMLElement>("[data-worktree-path]")).some(
+            (row) => row.dataset.worktreePath === p.path,
+          ))
+      )
+        return err("worktree path is not in the current list");
+      if (action === "filter" && p.filter !== "all" && p.filter !== "candidates")
+        return err("filter must be all or candidates");
+      const detail: WorktreeViewAction = {
+        paneId: p.paneId,
+        action,
+        path: typeof p.path === "string" ? p.path : undefined,
+        filter: p.filter === "all" || p.filter === "candidates" ? p.filter : undefined,
+      };
+      window.dispatchEvent(new CustomEvent(WORKTREE_ACTION_EVENT, { detail }));
+      return ok({ accepted: true, paneId: p.paneId, action });
+    },
+  },
   ui: {
     // Dev-only keyboard injection (Rust gates it to debug builds). The keydown
     // starts at the focused element — an xterm helper textarea when a terminal

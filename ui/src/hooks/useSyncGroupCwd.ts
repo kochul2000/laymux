@@ -9,6 +9,8 @@ export interface SyncGroupCwdOptions {
   instanceId: string;
   /** Per-pane receive gate. */
   cwdReceive?: boolean;
+  /** Optional mount seed; subsequent paths still use the pane's receive gate. */
+  initialCwd?: string;
 }
 
 /**
@@ -23,25 +25,51 @@ export interface SyncGroupCwdOptions {
  *  2. `sync-cwd` with `force` — the control bar's one-shot propagation. `force`
  *     bypasses the *source* gate only; this pane's `cwdReceive` still wins.
  */
-export function useSyncGroupCwd({
+export interface SyncGroupCwdContext {
+  cwd: string;
+  /** The actual source, needed to distinguish identical paths in WSL guests. */
+  sourceTerminalId?: string;
+}
+
+export function useSyncGroupCwd(options: SyncGroupCwdOptions): string {
+  return useSyncGroupCwdContext(options).cwd;
+}
+
+export function useSyncGroupCwdContext({
   syncGroup,
   instanceId,
   cwdReceive = true,
-}: SyncGroupCwdOptions): string {
+  initialCwd,
+}: SyncGroupCwdOptions): SyncGroupCwdContext {
   // Seeded from the store so a freshly mounted pane shows its group's repo
   // immediately instead of waiting for the next propagation event.
-  const groupCwd = useTerminalStore((s) => {
-    if (!syncGroup) return "";
-    return s.instances.find((t) => t.syncGroup === syncGroup && t.cwd)?.cwd ?? "";
+  const groupTerminal = useTerminalStore((s) => {
+    if (!syncGroup) return undefined;
+    return s.instances.find((t) => t.syncGroup === syncGroup && t.cwd);
   });
-  const [cwd, setCwd] = useState(groupCwd);
+  const groupCwd = groupTerminal?.cwd ?? "";
+  const groupTerminalId = groupTerminal?.id;
+  const [context, setContext] = useState<SyncGroupCwdContext>({
+    cwd: initialCwd || groupCwd,
+    sourceTerminalId: initialCwd ? undefined : groupTerminalId,
+  });
+  const [eventScope, setEventScope] = useState<string | null>(null);
   // The seed keeps applying until an event supersedes it: `groupCwd` only
   // changes when the group's terminals do, and following it is the same
   // intent as following a propagation.
-  const [seed, setSeed] = useState(groupCwd);
-  if (seed !== groupCwd) {
-    setSeed(groupCwd);
-    if (cwdReceive && groupCwd) setCwd(groupCwd);
+  const seedKey = `${groupTerminalId ?? ""}\0${groupCwd}`;
+  const [seed, setSeed] = useState(seedKey);
+  const [scope, setScope] = useState({ group: syncGroup, receive: cwdReceive });
+  if (scope.group !== syncGroup || scope.receive !== cwdReceive) {
+    setScope({ group: syncGroup, receive: cwdReceive });
+    setSeed(seedKey);
+    if (scope.group !== syncGroup) setEventScope(null);
+    if (cwdReceive && (scope.group !== syncGroup || !scope.receive))
+      setContext({ cwd: groupCwd, sourceTerminalId: groupTerminalId });
+  } else if (seed !== seedKey) {
+    setSeed(seedKey);
+    if (eventScope !== syncGroup && cwdReceive && groupCwd)
+      setContext({ cwd: groupCwd, sourceTerminalId: groupTerminalId });
   }
 
   useEffect(() => {
@@ -52,13 +80,18 @@ export function useSyncGroupCwd({
       if (cancelled || !cwdReceive || data.cwdSend === false) return;
       const terminal = useTerminalStore.getState().instances.find((t) => t.id === data.terminalId);
       if (!terminal || terminal.syncGroup !== syncGroup) return;
-      setCwd(data.cwd);
+      setEventScope(syncGroup);
+      setContext({ cwd: data.cwd, sourceTerminalId: data.terminalId });
     });
 
     const forcePromise = onSyncCwd((data) => {
       if (cancelled || !data.force || !cwdReceive) return;
       if (data.groupId !== syncGroup || data.terminalId === instanceId) return;
-      setCwd(data.path);
+      const source = useTerminalStore
+        .getState()
+        .instances.find((terminal) => terminal.id === data.terminalId);
+      setEventScope(syncGroup);
+      setContext({ cwd: data.path, sourceTerminalId: source?.id });
     });
 
     return () => {
@@ -68,5 +101,5 @@ export function useSyncGroupCwd({
     };
   }, [cwdReceive, syncGroup, instanceId]);
 
-  return cwd;
+  return context;
 }

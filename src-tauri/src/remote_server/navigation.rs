@@ -635,6 +635,7 @@ fn view_label(view_type: &str) -> &str {
         "GrokUsageView" => "Grok Usage",
         "FileExplorerView" => "File Explorer",
         "GitHubView" => "GitHub",
+        "WorktreeView" => "Worktrees",
         "TerminalView" => "Terminal",
         _ => "Empty",
     }

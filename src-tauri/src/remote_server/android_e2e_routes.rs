@@ -640,6 +640,11 @@ fn terminal_control_path(path: &str) -> bool {
     if let Some(terminal_id) = rest.strip_suffix("/github/actions") {
         return valid_remote_identifier(terminal_id);
     }
+    for suffix in ["/worktrees", "/worktrees/inspect", "/worktrees/remove"] {
+        if let Some(terminal_id) = rest.strip_suffix(suffix) {
+            return valid_remote_identifier(terminal_id);
+        }
+    }
     let Some((terminal_id, action)) = rest.rsplit_once('/') else {
         return false;
     };
@@ -762,6 +767,34 @@ fn unix_time_now() -> Result<u64, AppError> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn worktree_http_allowlist_accepts_only_three_exact_posts() {
+        for action in ["", "/inspect", "/remove"] {
+            let path = format!("/remote/v1/terminals/term-1/worktrees{action}");
+            assert!(super::http_path_allowed(&axum::http::Method::POST, &path));
+            for method in [
+                axum::http::Method::GET,
+                axum::http::Method::PUT,
+                axum::http::Method::DELETE,
+            ] {
+                assert!(!super::http_path_allowed(&method, &path));
+            }
+            for suffix in ["/", "/extra", "?force=true"] {
+                assert!(!super::http_path_allowed(
+                    &axum::http::Method::POST,
+                    &format!("{path}{suffix}")
+                ));
+            }
+        }
+        for path in [
+            "/remote/v1/terminals//worktrees",
+            "/remote/v1/terminals/a/b/worktrees",
+            "/remote/v1/terminals/../worktrees",
+            "/remote/v1/terminals/t/worktrees/prune",
+        ] {
+            assert!(!super::http_path_allowed(&axum::http::Method::POST, path));
+        }
+    }
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use super::*;

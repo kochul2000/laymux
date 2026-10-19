@@ -16,6 +16,7 @@ export const VIEW_LABELS: Record<ViewType, string> = {
   GrokUsageView: "Grok Usage",
   FileExplorerView: "File Explorer",
   GitHubView: "GitHub",
+  WorktreeView: "Worktrees",
   EmptyView: "Empty",
 };
 

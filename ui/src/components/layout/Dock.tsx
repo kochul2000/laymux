@@ -41,6 +41,7 @@ const viewIcons: Record<ViewType, string> = {
   GrokUsageView: "\u25f4",
   FileExplorerView: "\ud83d\udcc2",
   GitHubView: "\u25c9",
+  WorktreeView: "WT",
   IssueReporterView: "!",
   EmptyView: "\u25cb",
 };

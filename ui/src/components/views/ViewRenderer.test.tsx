@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@/lib/tauri-api", () => ({
@@ -101,6 +102,12 @@ vi.mock("./GitHubView", () => ({
 }));
 
 import { ViewRenderer } from "./ViewRenderer";
+vi.mock("./WorktreeView", () => ({
+  WorktreeView: () => {
+    const [selected, select] = useState(false);
+    return <button onClick={() => select(true)}>{selected ? "선택 유지" : "항목 선택"}</button>;
+  },
+}));
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -108,6 +115,18 @@ import { makeSlot } from "@/lib/pane-layers";
 import type { ViewInstanceConfig } from "@/stores/types";
 
 describe("ViewRenderer", () => {
+  it("dock workspace 그룹 변경만으로 Worktree 검토 맥락을 재마운트하지 않는다", () => {
+    const props = {
+      viewType: "WorktreeView" as const,
+      viewConfig: { type: "WorktreeView" as const, cwdReceive: false },
+      paneId: "dock",
+      location: "dock" as const,
+    };
+    const view = render(<ViewRenderer {...props} workspaceId="first" />);
+    fireEvent.click(screen.getByRole("button", { name: "항목 선택" }));
+    view.rerender(<ViewRenderer {...props} workspaceId="second" />);
+    expect(screen.getByRole("button", { name: "선택 유지" })).toBeInTheDocument();
+  });
   beforeEach(() => {
     useTerminalStore.setState(useTerminalStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());

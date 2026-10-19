@@ -14,6 +14,7 @@ import { CodexUsageView } from "./CodexUsageView";
 import { GrokUsageView } from "./GrokUsageView";
 import { FileExplorerView } from "./FileExplorerView";
 import { GitHubView } from "./GitHubView";
+import { WorktreeView } from "./WorktreeView";
 
 export interface ViewRendererProps {
   viewType: ViewType | null;
@@ -172,22 +173,24 @@ function FileExplorerViewWithSyncCwd({
 }
 
 /**
- * Wrapper that resolves the sync-cwd receive gate for GitHubView instances.
+ * Wrapper that resolves the sync-cwd receive gate for repository views.
  * The view only follows a CWD (it never propagates one), so the send half of
  * the resolved defaults is not read here.
  */
-function GitHubViewWithSyncCwd({
+function RepositoryViewWithSyncCwd({
   viewConfig,
   workspaceId,
   paneId,
   isFocused,
   location,
+  worktree = false,
 }: {
   viewConfig?: ViewInstanceConfig;
   workspaceId?: string;
   paneId?: string;
   isFocused?: boolean;
   location: TerminalLocation;
+  worktree?: boolean;
 }) {
   const defaultProfile = useSettingsStore((s) => s.defaultProfile);
   const profileDefaultsSyncCwd = useSettingsStore((s) => s.profileDefaults.syncCwd);
@@ -197,7 +200,7 @@ function GitHubViewWithSyncCwd({
 
   const configSyncGroup = (viewConfig?.syncGroup as string) ?? "";
   const effectiveSyncGroup = configSyncGroup || workspaceId || "";
-  const instanceId = getInstanceId("GitHubView", paneId || fallbackId);
+  const instanceId = getInstanceId(worktree ? "WorktreeView" : "GitHubView", paneId || fallbackId);
   const profileName = defaultProfile || FALLBACK_PROFILE;
   const profileSyncCwd = useSettingsStore(
     (s) => s.profiles.find((p) => p.name === profileName)?.syncCwd,
@@ -211,6 +214,18 @@ function GitHubViewWithSyncCwd({
   });
   const cwdReceive = (viewConfig?.cwdReceive as boolean | undefined) ?? resolvedDefaults.receive;
 
+  if (worktree)
+    return (
+      <WorktreeView
+        instanceId={instanceId}
+        paneId={paneId}
+        syncGroup={effectiveSyncGroup}
+        cwdReceive={cwdReceive}
+        repositoryPath={
+          typeof viewConfig?.repositoryPath === "string" ? viewConfig.repositoryPath : undefined
+        }
+      />
+    );
   return (
     <GitHubView
       instanceId={instanceId}
@@ -359,10 +374,20 @@ export function ViewRenderer({
           />
         </div>
       );
+    case "WorktreeView":
+      return (
+        <RepositoryViewWithSyncCwd
+          worktree
+          viewConfig={viewConfig}
+          workspaceId={workspaceId}
+          paneId={paneId}
+          location={location}
+        />
+      );
     case "GitHubView":
       return (
         <div data-testid="view-github-wrapper" className="h-full">
-          <GitHubViewWithSyncCwd
+          <RepositoryViewWithSyncCwd
             viewConfig={viewConfig}
             workspaceId={workspaceId}
             paneId={paneId}

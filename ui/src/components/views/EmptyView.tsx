@@ -200,6 +200,14 @@ function buildOptions(visibleProfiles: { name: string }[]): ViewOption[] {
   });
 
   options.push({
+    key: "worktrees",
+    label: "Worktrees",
+    category: "tool",
+    config: { type: "WorktreeView" },
+    testId: "empty-view-worktrees",
+  });
+
+  options.push({
     key: "issue-reporter",
     label: "Report Issue",
     category: "tool",

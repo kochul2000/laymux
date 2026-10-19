@@ -9,6 +9,26 @@ const GITHUB_VIEW_SUFFIXES = [
   "/src/hooks/useSyncGroupCwd.ts",
   "/src/lib/github-list-format.ts",
 ];
+const WORKTREE_VIEW_SUFFIXES = [
+  "/src/components/views/WorktreeView.tsx",
+  "/src/components/views/WorktreeDetail.tsx",
+  "/src/components/views/WorktreeRow.tsx",
+  "/src/components/views/WorktreeTerminalTarget.tsx",
+  "/src/components/ui/ActionMenu.tsx",
+  "/src/hooks/useWorktreeSnapshot.ts",
+  "/src/hooks/useWorktreeTerminalTargets.ts",
+  "/src/lib/worktree-api.ts",
+  "/src/lib/worktree-navigation.ts",
+  "/src/lib/worktree-presentation.ts",
+  "/src/lib/worktree-display.ts",
+];
+// Selector와 Worktree가 함께 쓰는 표시 내용. 새 표시는 entry 대신 이 그룹에서 늘어난다.
+const WORKSPACE_PRESENTATION_SUFFIXES = [
+  "/src/components/views/workspace-selector/WorkspaceIdentity.tsx",
+  "/src/components/views/workspace-selector/WorkspaceTerminalSummary.tsx",
+  "/src/components/views/PaneMinimap.tsx",
+  "/src/components/ui/TerminalActivityChip.tsx",
+];
 /**
  * Status widgets: the widget components, their settings editor, the status line
  * surface and the placement transforms behind them (ADR-0105). Grouped so the
@@ -62,6 +82,10 @@ export function resolveChunkGroup(id: string): string | undefined {
   // The entry chunk sits just under the size warning limit, so a whole new
   // view goes in its own group rather than pushing the entry over it.
   if (GITHUB_VIEW_SUFFIXES.some((suffix) => normalizedId.endsWith(suffix))) return "github-view";
+  if (WORKTREE_VIEW_SUFFIXES.some((suffix) => normalizedId.endsWith(suffix)))
+    return "worktree-view";
+  if (WORKSPACE_PRESENTATION_SUFFIXES.some((suffix) => normalizedId.endsWith(suffix)))
+    return "workspace-presentation";
   if (
     WIDGETS_SEGMENTS.some((segment) => normalizedId.includes(segment)) ||
     WIDGETS_SUFFIXES.some((suffix) => normalizedId.endsWith(suffix))

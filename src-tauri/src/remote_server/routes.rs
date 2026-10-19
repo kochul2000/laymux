@@ -69,6 +69,7 @@ use super::viewer_routes::{
 };
 use super::widget_routes::remote_widgets;
 use super::workspace_management::{remote_workspace_rename, remote_workspace_template_save};
+use super::worktree_routes::{remote_worktree_inspect, remote_worktree_remove, remote_worktrees};
 use super::{internal_error, json_error};
 
 pub(super) const REMOTE_LEASE_HEADER: &str = "x-laymux-remote-lease";
@@ -259,6 +260,18 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
             post(remote_workspace_close),
         )
         .route("/remote/v1/terminals", get(remote_terminals_list))
+        .route(
+            "/remote/v1/terminals/{id}/worktrees",
+            post(remote_worktrees),
+        )
+        .route(
+            "/remote/v1/terminals/{id}/worktrees/inspect",
+            post(remote_worktree_inspect),
+        )
+        .route(
+            "/remote/v1/terminals/{id}/worktrees/remove",
+            post(remote_worktree_remove),
+        )
         .route(
             "/remote/v1/terminals/{id}/github-repo",
             get(remote_terminal_github_repo),

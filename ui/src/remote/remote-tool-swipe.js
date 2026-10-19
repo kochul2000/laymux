@@ -1,5 +1,5 @@
 /* global document, window */
-const TOOL_ORDER = ["issues", "pulls", "files", "memo"];
+const TOOL_ORDER = ["issues", "pulls", "files", "worktrees", "memo"];
 
 export function normalizeToolSwipeRightAction(value) {
   return value === "previous" ? "previous" : "close";

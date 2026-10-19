@@ -16,6 +16,7 @@ const VIEW_INSTANCE_PREFIX: Partial<Record<ViewType, string>> = {
   // Receive-only, but still needs an identity: sync-cwd force events carry the
   // sender's instanceId and the view has to recognise its own echo.
   GitHubView: "github",
+  WorktreeView: "worktree",
 };
 
 /**

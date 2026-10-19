@@ -8,6 +8,22 @@
 
 ---
 
+## 워크트리 조회·검사·제거
+
+`WorktreeView`는 SyncGroup CWD를 `get_worktree_snapshot`으로 조회한다. `useSyncGroupCwdContext`는 명시적인 `view.repositoryPath`가 있으면 마운트 초기 경로로 사용하고, 없으면 같은 그룹의 초기 terminal CWD와 ID를 함께 시딩한다. 이후에는 기존 pane의 CWD 수신 설정에 따라 경로와 실제 `sourceTerminalId`를 갱신한다. 수신을 끄면 마지막 대상을 유지한다. 별도의 저장소 고정 상태는 없다. backend는 원본 terminal의 현재 CWD와 실행 환경을 검증해 응답 `workingDir`를 확정한다. Windows의 bare POSIX CWD에는 해당 WSL 배포판을 결합하며, 이후 모든 검사·제거는 응답의 `workingDir`를 사용한다.
+
+Rust `worktree` 서비스가 해당 native/WSL 환경의 Git으로 목록을 읽고 `worktree_usage`가 live terminal, 저장된 모든 workspace layer와 dock, daemon inventory를 결합한다. 조회 시 AppState 락 아래에서는 필요한 필드만 복사하며 Git·파일·daemon IPC 작업 중 registry 락을 유지하지 않는다. 사용 CWD는 같은 실행 환경에서 실제 경로를 해석하고 하나라도 관측을 완료할 수 없으면 경고와 `usage_unknown`으로 제거를 차단한다.
+
+목록 이후 UI가 최대 3개씩 각 항목을 검사한다. 성공한 검사에서만 후보 여부를 도출하고 실패·미검사는 별도 상태로 표시한다. 조회는 초기 진입·CWD/원본 terminal 변경·초기 대상 설정 변경·수동 새로고침·제거 성공 때 실행한다. 상세 선택은 최신 검사를 요청하며 CWD나 원본 terminal이 바뀌면 이전 선택·확인 상태와 늦게 도착한 응답을 폐기한다. 같은 CWD 문자열이라도 다른 배포판의 terminal에서 전파했다면 새 조회다.
+
+PC dock의 검토 맥락은 workspace ID만으로 초기화하지 않는다. CWD 수신이 꺼져 있으면 마지막 경로·발신 환경과 선택·필터·스크롤을 유지한다. 수신 중 그룹이 바뀌면 해당 그룹의 현재 경로 또는 빈 대상으로 전환한다. 같은 대상의 갱신 중에는 목록과 선택을 남기되 과거 적격성을 폐기한다. 뷰가 생성한 terminal의 ID·준비 상태는 갱신 신호로만 사용하며, 실제 준비 관측 뒤 Git/사용 검사를 다시 수행한다([ADR-0345](../adr/0345-worktree-dock-review-context.md)).
+
+PC 바깥 목록의 액션 줄은 usage의 첫 터미널로 직접 이동하고, 여러 개일 때 별도 화살표로 전체 선택지를 연다. 첫 항목과 메뉴 항목은 `WorkspaceIdentity`·`WorkspaceTerminalSummary`로 selector의 번호·이름과 pane 한 줄을 공유한다. `useWorktreeTerminalTargets`는 selector와 같은 workspace 정렬·숨김, `projectWorkspaceTerminals`·`computeWorkspaceSummary`와 terminal display context를 구독한다. 저장된 pane도 같은 프로필·표시 맥락을 사용하고 에이전트 식별이 없을 때만 backend의 `agentType`으로 보완한다. 표시 모델을 사용 여부·제거 보호의 근거로 삼지 않으며 backend 관측을 계속 사용한다. 상세는 별도 버튼으로 열고 변경 파일을 기존 파일 뷰어에서 확인한다. 이동은 숨은 workspace와 해당 layer/dock을 드러낸 뒤 공통 포커스 전환을 사용한다. 새 터미널은 목록과 상세 모두 현재 workspace의 슬롯에 레이어로 추가하며 명시적 CWD 시드와 `syncGroup:"none"`, CWD 송수신 해제로 기존 터미널의 경로를 보존한다. WSL UNC 경로는 같은 배포판의 프로필을 확인한 뒤 guest POSIX 경로로 바꾸어 시작 CWD에 전달하고, 배포판을 확인할 수 없으면 오류를 표시한다. native Windows 경로의 프로필별 변환은 기존 터미널 시작 경로가 처리한다.
+
+제거는 상세 검사 이후 경로를 다시 보여 주는 2단계 확인을 거친다. 요청에는 저장소·경로·HEAD가 결합되고 backend의 직렬화된 제거 경로가 Git과 사용 정보를 재검증한 뒤 일반 `git worktree remove`를 실행한다. 성공 후 목록을 다시 읽고, 거부되면 기존 상세 검사와 확인 상태를 무효화한다. 이 검사는 파일 변경·terminal CWD 이동·새 PTY 생성과 원자적인 트랜잭션을 제공하지 않는다([ADR-0343](../adr/0343-worktree-view-and-guarded-removal.md)).
+
+Remote는 활성 lease와 선택 terminal을 결합하여 같은 서비스를 호출한다. 요청의 raw CWD와 현재 terminal CWD를 대조하고 실행 환경을 서버에서 확정한다. 제거는 Remote lease mutation permit을 공통 제거 완료까지 보유한다. Remote controller는 연결/terminal 세대가 바뀐 응답을 버리고 기존 도구 overlay·스와이프·컨트롤바 설정을 사용한다. Worktrees에서 파일을 열면 controller를 일시 숨김 상태로 유지하며 같은 대상의 진행 중 검사만 수용한다. 사용자 닫기는 기존 상세·파일 목록·스크롤로 돌아가고, 대상 변경이나 다른 도구 열기는 복귀 상태를 폐기한다([ADR-0345](../adr/0345-worktree-dock-review-context.md)). MCP `get_worktree_usage`는 이 흐름의 laymux 관측만 읽는다. Git 목록·파일·병합·제거는 에이전트의 기존 도구에 맡기며 `complete=false`를 미사용으로 해석하지 않는다([ADR-0344](../adr/0344-remote-worktrees-and-usage-mcp.md)).
+
 ## 5. Grid 편집 UX
 
 ### 편집 모드 토글

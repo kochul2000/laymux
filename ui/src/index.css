@@ -100,6 +100,15 @@
   --transition-fast: 0.1s;
   --transition-list-collapse: 0.18s;
   --pane-row-max-h: 28px;
+  --worktree-row-leading: 16px;
+  --worktree-content-padding: 8px;
+  --worktree-row-padding: 6px;
+  --worktree-action-height: 32px;
+  --worktree-terminal-height: 48px;
+  --worktree-action-gap: 4px;
+  --worktree-detail-width: 44px;
+  --worktree-picker-width: 24px;
+  --worktree-target-gap: 2px;
   --workspace-terminal-pane-row-max-h: 36px;
   --workspace-count-badge-size: 14px;
   --workspace-count-badge-px: 3px;
@@ -983,6 +992,23 @@
     border-color: var(--accent-50);
   }
 
+  .ui-btn.worktree-toolbar-button {
+    width: var(--btn-min-w);
+    min-width: var(--btn-min-w);
+    height: var(--btn-h);
+    min-height: var(--btn-h);
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+  }
+
+  .ui-btn.worktree-toolbar-button:not(:disabled):hover {
+    background: var(--hover-bg-strong);
+    color: var(--text-primary);
+  }
+
   /* Per-row eye buttons (workspace-eye, pane-eye). Needs its
      own hover affordance so the user can tell the tiny 11px icon is the
      click target. Padding + negative margin adds a hit area + hover
@@ -1837,4 +1863,269 @@
 .terminal-scroll-to-bottom:hover {
   opacity: 1;
   transform: translateY(-1px);
+}
+
+/* Worktrees: compact rows and independent navigation/action areas for PC docks. */
+.worktree-view {
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+}
+.worktree-toolbar {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--worktree-row-padding);
+  padding: var(--worktree-row-padding) var(--worktree-content-padding);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.worktree-view-wide .worktree-toolbar {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.worktree-view-wide .worktree-toolbar > :first-child {
+  flex: 1;
+}
+.worktree-cwd-status {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+.ui-btn.worktree-filter {
+  min-height: var(--btn-h);
+  padding: 0 var(--worktree-row-padding);
+  border-color: transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+.ui-btn.worktree-filter[aria-pressed="true"] {
+  border-color: var(--accent-50);
+  background: var(--accent-12);
+  color: var(--text-primary);
+}
+.worktree-panes {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.worktree-panes > [hidden] {
+  display: none;
+}
+.worktree-panes-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+}
+.worktree-list-row {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: var(--worktree-row-padding) var(--worktree-content-padding);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  text-align: left;
+  color: var(--text-secondary);
+}
+.worktree-row-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--worktree-action-gap);
+  line-height: var(--worktree-row-leading);
+}
+.worktree-list-row strong {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.worktree-main-badge {
+  flex-shrink: 0;
+  padding: 0 var(--worktree-target-gap);
+  background: var(--active-bg);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+}
+.worktree-branch {
+  max-width: 44%;
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+}
+.worktree-branch-empty {
+  color: var(--text-muted);
+}
+.worktree-list-row-selected {
+  background: var(--accent-06);
+  box-shadow: inset 2px 0 var(--accent);
+}
+.worktree-candidate {
+  color: var(--green);
+}
+.worktree-directory-status {
+  display: flex;
+  align-items: center;
+  min-height: var(--worktree-row-leading);
+  line-height: var(--worktree-row-leading);
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
+.worktree-directory-status.worktree-candidate {
+  color: var(--green);
+}
+.worktree-row-actions {
+  display: flex;
+  min-width: 0;
+  margin-top: var(--worktree-action-gap);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+}
+.worktree-row-actions > .ui-btn {
+  flex: 1;
+  min-width: 0;
+  height: auto;
+  min-height: var(--worktree-action-height);
+  justify-content: flex-start;
+  padding: 0 var(--worktree-content-padding);
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.worktree-row-actions > .worktree-terminal-button {
+  min-height: var(--worktree-terminal-height);
+}
+.worktree-row-actions > .worktree-terminal-picker {
+  flex: 0 0 var(--worktree-picker-width);
+  justify-content: center;
+  padding: 0;
+  border-left: 1px solid var(--border);
+}
+.worktree-row-actions > .worktree-detail-button {
+  flex: 0 0 var(--worktree-detail-width);
+  justify-content: center;
+  padding: 0;
+  border-left: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+}
+.worktree-row-actions > .worktree-detail-button:only-child {
+  flex: 1;
+  border-left: none;
+}
+.worktree-terminal-target {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--worktree-action-gap);
+  max-width: 100%;
+  width: 100%;
+  text-align: left;
+}
+.worktree-terminal-target > .workspace-terminal-summary {
+  width: 100%;
+}
+.workspace-identity {
+  line-height: 1.5;
+}
+.workspace-terminal-summary {
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  line-height: 1.5;
+}
+.worktree-row-actions > .ui-btn:not(:disabled):hover {
+  background: var(--hover-bg-strong);
+  color: var(--text-primary);
+}
+.worktree-row-actions > .ui-btn[aria-expanded="true"] {
+  background: var(--accent-12);
+}
+.worktree-row-actions > .ui-btn:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+.ui-action-menu {
+  position: fixed;
+  z-index: 100;
+  visibility: hidden;
+  width: 280px;
+  max-width: calc(100vw - 16px);
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-overlay);
+  color: var(--text-primary);
+  box-shadow: 0 4px 16px var(--backdrop-light);
+  font-size: var(--fs-sm);
+}
+.ui-action-menu > button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  height: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+  gap: 4px;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  font-weight: 400;
+}
+.worktree-detail-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-surface);
+}
+.worktree-panes-split .worktree-detail-panel {
+  border-left: 1px solid var(--border);
+}
+.worktree-detail-header,
+.worktree-detail-footer {
+  flex-shrink: 0;
+  padding: var(--worktree-content-padding);
+}
+.worktree-detail-header {
+  border-bottom: 1px solid var(--border);
+}
+.worktree-view-wide .worktree-detail-header {
+  display: flex;
+  align-items: center;
+  gap: var(--worktree-content-padding);
+}
+.worktree-view-wide .worktree-detail-header > :first-child {
+  flex: 1;
+}
+.worktree-view-wide .worktree-detail-header > :nth-child(2) {
+  flex-shrink: 0;
+  margin-top: 0;
+}
+.worktree-detail-footer {
+  border-top: 1px solid var(--border);
+}
+.worktree-detail-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: var(--worktree-content-padding);
+}
+.worktree-warning {
+  color: var(--yellow);
+  overflow-wrap: anywhere;
+}
+.worktree-error {
+  color: var(--red);
+  overflow-wrap: anywhere;
 }

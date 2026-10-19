@@ -3523,6 +3523,67 @@
         overscroll-behavior: contain;
         touch-action: pan-y;
       }
+      .worktree-repository {
+        padding: 8px 10px 0;
+        color: var(--text-secondary);
+        font-size: var(--fs-sm);
+        overflow-wrap: anywhere;
+      }
+      .worktree-row {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 4px;
+        width: 100%;
+        min-width: 0;
+        padding: 10px;
+        border: 0;
+        border-bottom: 1px solid var(--border);
+        border-radius: 0;
+        text-align: left;
+        background: transparent;
+        color: var(--text);
+        overflow-wrap: anywhere;
+      }
+      .worktree-row:hover,
+      .worktree-action:hover { background: var(--hover-bg); }
+      .worktree-row[aria-expanded="true"] { background: var(--accent-12); }
+      .worktree-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .worktree-path,
+      .worktree-meta { color: var(--text-secondary); font-size: var(--fs-sm); }
+      .worktree-detail {
+        padding: 12px;
+        border-top: 1px solid var(--border);
+        background: var(--bg-surface);
+        overflow-wrap: anywhere;
+      }
+      .worktree-detail p { margin: 8px 0; }
+      .worktree-detail-heading,
+      .worktree-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+      .worktree-detail-heading {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        justify-content: space-between;
+        padding: 6px 0;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-surface);
+      }
+      .worktree-action {
+        min-height: var(--toolbar-control-size);
+        max-width: 100%;
+        padding: 6px 8px;
+        border: 1px solid var(--border);
+        background: var(--bg-base);
+        color: var(--text);
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
+      .worktree-files { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 6px; }
+      .worktree-files .worktree-action { text-align: left; }
+      .worktree-warning { color: var(--yellow); }
+      .worktree-error { color: var(--danger); }
+      .worktree-confirmation { padding: 8px; border: 1px solid var(--yellow); }
       .github-row {
         position: relative;
         display: flex;

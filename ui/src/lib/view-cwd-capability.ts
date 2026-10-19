@@ -13,5 +13,5 @@ export function supportsCwdSend(type: ViewType | undefined): boolean {
 }
 
 export function supportsCwdReceive(type: ViewType | undefined): boolean {
-  return supportsCwdSend(type) || type === "GitHubView";
+  return supportsCwdSend(type) || type === "GitHubView" || type === "WorktreeView";
 }
