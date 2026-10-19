@@ -417,6 +417,7 @@ pub fn run() {
             commands::get_cloud_status,
             commands::cloud_connect_start,
             commands::cloud_disconnect,
+            commands::publish_notification_push,
             commands::set_sleep_inhibit,
             commands::list_pty_sessions,
             commands::terminate_pty_session,

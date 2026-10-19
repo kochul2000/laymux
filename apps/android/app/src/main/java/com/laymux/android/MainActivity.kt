@@ -1,6 +1,9 @@
 package com.laymux.android
 
 import android.annotation.SuppressLint
+import com.laymux.android.push.PushPayload
+import com.laymux.android.push.PushNotifications
+import com.laymux.android.push.PushSettingsController
 import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.ContentResolver
@@ -177,6 +180,8 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private lateinit var updateController: AppUpdateController
     private lateinit var updateBanner: UpdateBannerView
     private lateinit var cloudBridge: CloudBridge
+    private lateinit var pushSettings: PushSettingsController
+    private var pendingPushTarget: Pair<String, String>? = null
     private lateinit var cloudNavigation: CloudNavigationPolicy
     private lateinit var credentialManager: CredentialManager
     private val cloudAuthClient = CloudAuthClient()
@@ -258,6 +263,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         vault = PairingVault(this)
         biometricGate = BiometricGate(this)
         cloudBridge = CloudBridge(this)
+        pushSettings = PushSettingsController(this)
         cloudNavigation = CloudNavigationPolicy(getString(R.string.laymux_cloud_base_url))
         credentialManager = CredentialManager.create(this)
         scanner = GmsBarcodeScanning.getClient(
@@ -409,6 +415,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         if (savedInstanceState == null) {
             handleDebugPairingIntent(intent)
             handleSharedFilesIntent(intent)
+            handleNotificationIntent(intent)
             showDebugNativeSurfacePreviewIfRequested()
         }
     }
@@ -890,7 +897,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                     cookieManager.setCookie(url, cookie, onComplete)
                 }
                 withContext(Dispatchers.IO) { cookieManager.flush() }
-                loadCloudDocument(cloudNavigation.dashboardUrl, replaceWebView = true)
+                loadCloudDocument(cloudNavigation.reconnectDashboardUrl(pendingPushTarget?.first), replaceWebView = true)
             } catch (_: GetCredentialCancellationException) {
                 showCloudMessage("Google 로그인이 취소되었습니다.")
             } catch (_: GetCredentialException) {
@@ -905,6 +912,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     fun selectCloudInstance(instanceId: String, tailscaleUrl: String?) {
         if (!cloudBridgeActionsEnabled()) return
+        if (pendingPushTarget?.first != instanceId) pendingPushTarget = null
         if (selectedCloudInstanceId != instanceId || selectedTailscaleUrl != tailscaleUrl) {
             closeRemoteSession()
         }
@@ -954,6 +962,40 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         showConnectionSettings(instanceId)
     }
 
+    fun openNotificationSettings(instanceId: String) {
+        if (!cloudBridgeActionsEnabled()) return
+        pushSettings.show(instanceId)
+    }
+
+    fun pushDeviceId(): String = if (cloudBridgeActionsEnabled()) PushNotifications.deviceId(this) else ""
+
+    fun disableLocalNotifications() {
+        if (cloudBridgeActionsEnabled()) PushNotifications.disableAll(this)
+    }
+
+    private fun handleNotificationIntent(intent: Intent?) {
+        if (intent?.action != PushNotifications.OPEN_ACTION) return
+        val instanceId = intent.getStringExtra("instanceId")
+        val notificationId = intent.getStringExtra("notificationId")
+        if (!PushPayload.validId(instanceId) || !PushPayload.validId(notificationId)) return
+        pendingPushTarget = instanceId!! to notificationId!!
+        if (selectedCloudInstanceId == instanceId && visibleWebSurface == VisibleWebSurface.REMOTE) {
+            deliverNotificationTarget()
+        } else {
+            showCloudDashboard(instanceId)
+        }
+    }
+
+    private fun deliverNotificationTarget() {
+        val (instanceId, id) = pendingPushTarget ?: return
+        if (instanceId != selectedCloudInstanceId || !remoteBridgeActionsEnabled(secureWebViewGeneration)) return
+        val view = webView
+        val generation = secureWebViewGeneration
+        view.evaluateJavascript("window.laymuxRemoteUi?.openPushNotification?.(${JSONObject.quote(id)})===true") { result ->
+            if (result == "true" && webView === view && secureWebViewGeneration == generation && pendingPushTarget == (instanceId to id)) pendingPushTarget = null
+        }
+    }
+
     private fun showConnectionSettings(instanceId: String) {
         if (!::connectionSettingsDialog.isInitialized || isDestroyed) return
         if (::pairingSheet.isInitialized) pairingSheet.dismiss()
@@ -990,6 +1032,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     private fun onRemoteDocumentLoaded(documentGeneration: Long) {
         if (!remoteBridgeActionsEnabled(documentGeneration)) return
+        deliverNotificationTarget()
         notifyPhysicalKeyboardChanged(physicalKeyboardMonitor.connected)
         remoteLoadingOverlay.visibility = View.GONE
         attachmentPicker.setReady(true)
@@ -1666,6 +1709,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        handleNotificationIntent(intent)
         handleDebugPairingIntent(intent)
         handleSharedFilesIntent(intent)
     }
@@ -3319,6 +3363,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     override fun onStart() {
         super.onStart()
+        pushSettings.synchronize()
         remoteLifecycleActive = true
         // Activity Result can run before the asynchronous E2E foreground resume.
         attachmentPicker.setReady(remoteSession == null && visibleWebSurface != VisibleWebSurface.REMOTE)

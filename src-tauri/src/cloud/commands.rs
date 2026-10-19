@@ -6,6 +6,15 @@ use super::{keyring_store, pairing, tunnel, CloudStatus};
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
+#[tauri::command]
+pub async fn publish_notification_push(
+    state: State<'_, Arc<AppState>>,
+    event: super::notification_push::NotificationPushEvent,
+) -> Result<(), String> {
+    super::notification_push::publish_notification_push_inner(state.inner(), event)
+        .await
+        .map_err(Into::into)
+}
 
 #[tauri::command]
 pub fn get_cloud_status(state: State<Arc<AppState>>) -> Result<CloudStatus, String> {

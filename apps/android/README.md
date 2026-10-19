@@ -71,6 +71,14 @@ $env:LAYMUX_GOOGLE_WEB_CLIENT_ID='<server-web-client-id>.apps.googleusercontent.
 .\gradlew.bat :app:assembleDebug
 ```
 
+## 기기 알림 푸시
+
+Cloud 대시보드의 PC `…` → **휴대전화 알림**에서 이 앱·PC의 알림을 허용한다. Android 13 이상은 시스템 알림 권한이 필요하다. 입력/승인 요청·실패·완료·일반 종류와 상세 표시를 선택한다. 기본은 작업 본문을 보내지 않으며 상세 opt-in은 Cloud/provider에 본문을 공개한다. 웹브라우저 알림과 앱 알림은 별도 구독이므로 원하는 수신 경로를 선택한다.
+
+빌드 환경에 같은 Firebase 프로젝트의 `LAYMUX_FIREBASE_APP_ID`, `LAYMUX_FIREBASE_API_KEY`, `LAYMUX_FIREBASE_PROJECT_ID`, `LAYMUX_FIREBASE_SENDER_ID`를 설정한다. `google-services.json`이나 서비스 계정 비밀을 APK에 넣지 않는다. 네 값이 없으면 기존 앱 기능은 동작하고 알림 설정에서 미설정 이유를 안내한다. release CI도 같은 이름의 GitHub repository variables를 사용한다. 서버는 별도로 FCM HTTP v1 권한을 가진 ADC 자격 증명이 필요하다([서버 운영 설정](https://github.com/kochul2000/laymux-server/blob/feat/notification-push/docs/notification-push.md)).
+
+FCM 수신·중복/역순 처리·시스템 알림·PendingIntent는 native 소유다. token 갱신과 foreground 읽음 동기화는 WorkManager에서 수행하며 Remote transport나 생체 인증 키를 깨우지 않는다. 클릭은 기존 PC 연결·필요 인증을 거쳐 알림 대상으로 이동한다. OS 강제 중지·네트워크·절전 정책에 따른 배달 지연은 가능하다. 상세 결정은 [ADR-0344](../../docs/adr/0344-cross-device-notification-push.md)를 따른다.
+
 ## 배포 서명
 
 공개 APK는 debug key를 사용하지 않는다. GitHub Releases APK와 Google Play가 사용자에게 전달하는

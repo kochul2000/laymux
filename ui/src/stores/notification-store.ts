@@ -40,9 +40,8 @@ export interface Notification {
    * click) or by the originator when the underlying state resolves.
    */
   requiresAction?: boolean;
+  category?: "waiting" | "failure" | "complete" | "general";
 }
-
-let notifId = 0;
 
 interface NotificationStoreState {
   notifications: Notification[];
@@ -53,6 +52,7 @@ interface NotificationStoreState {
     message: string;
     level?: NotificationLevel;
     requiresAction?: boolean;
+    category?: Notification["category"];
   }) => Notification;
   markWorkspaceAsRead: (workspaceId: string) => void;
   /**
@@ -81,7 +81,7 @@ interface NotificationStoreState {
 export const useNotificationStore = create<NotificationStoreState>()((set, get) => ({
   notifications: [],
 
-  addNotification: ({ terminalId, workspaceId, message, level, requiresAction }) => {
+  addNotification: ({ terminalId, workspaceId, message, level, requiresAction, category }) => {
     const now = Date.now();
     const dismissMode = useSettingsStore.getState().notifications.dismiss;
     const activeWsId = useWorkspaceStore.getState().activeWorkspaceId;
@@ -103,7 +103,7 @@ export const useNotificationStore = create<NotificationStoreState>()((set, get) 
         (dismissMode === "paneFocus" && focusedPaneInstanceId() === terminalId));
 
     const notification: Notification = {
-      id: `notif-${++notifId}`,
+      id: crypto.randomUUID(),
       terminalId,
       workspaceId,
       message,
@@ -111,6 +111,7 @@ export const useNotificationStore = create<NotificationStoreState>()((set, get) 
       createdAt: now,
       readAt: shouldAutoDismiss ? now : null,
       ...(requiresAction ? { requiresAction: true } : {}),
+      ...(category ? { category } : {}),
     };
     set((state) => ({
       notifications: [...state.notifications, notification],

@@ -42,8 +42,11 @@ const packageInputHash = (lock: PackageLock, packageName: string): string => {
 
 describe("remote page bundle", () => {
   it("committed minified artifacts match the sources", () => {
-    const banner = readFileSync(path.join(ASSETS_DIR, "remote-app.min.js"), "utf8").split("\n", 8);
+    const banner = readFileSync(path.join(ASSETS_DIR, "remote-app.min.js"), "utf8").split("\n", 10);
     const stamp = banner.find((line) => line.startsWith("// Source-SHA256:"));
+    expect(banner).toContain(
+      `// Push-SHA256: ${fileHash(path.resolve(__dirname, "./remote-notification-push.js"))}`,
+    );
     expect(banner).toContain(
       `// Pane-controls-SHA256: ${fileHash(path.resolve(__dirname, "remote-pane-controls.js"))}`,
     );

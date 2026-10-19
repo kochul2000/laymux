@@ -14,6 +14,8 @@ Windows 및 Linux 데스크톱을 지원하며, 터미널 중심의 작업 환�
 데스크톱 backend를 이식하지 않고 원격 E2E 연결을 위한 독립 하이브리드 클라이언트를
 같은 리포의 `apps/android`에서 개발한다([ADR-0144](../adr/0144-android-signed-hybrid-client-e2e-foundation.md)).
 
+기기 시스템 알림은 PC notification store → Rust Cloud 발행 → Cloud의 영속 구독/전달 큐 → Web Push 또는 Android FCM으로 흐른다([ADR-0344](../adr/0344-cross-device-notification-push.md)). 기본 푸시에는 작업 본문을 넣지 않으며 원격 E2E 연결·키 수명과 독립적이다. 웹 수신은 relay origin의 푸시 전용 하위 scope worker가, 앱 수신·권한·알림 클릭은 Android native가 소유한다. Cloud 구현은 [laymux-server 대응 PR](https://github.com/kochul2000/laymux-server/pull/94)에 있다.
+
 ---
 
 ## 2. 플랫폼 및 기술 스택

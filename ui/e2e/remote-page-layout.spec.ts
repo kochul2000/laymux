@@ -1,6 +1,48 @@
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
 import { installRemoteClientRoutes, remoteClientMarkupWithoutXterm } from "./remote-client-assets";
 
+test("기기 알림은 연결 전에도 설정 위치와 Cloud 요구 조건을 안내한다", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await routeRemoteWithWorkspaces(page, []);
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.locator("#drawerSettingsButton").click();
+  await page.locator("#settingsTabNotifications").click();
+  await expect(page.locator("#pushSettings")).toBeVisible();
+  await expect(page.locator("#pushDetails")).not.toBeChecked();
+  await expect(page.locator("#pushStatus")).toContainText("Cloud");
+  await expect(page.locator("#pushEnable")).toBeDisabled();
+  await page.screenshot({ path: "../.screenshots/notification-push-mobile.png" });
+});
+
+test("푸시 대상 이동은 lease 획득 후 원래 알림의 터미널을 연다", async ({ page }) => {
+  const controls = await routeRemoteWithWorkspaces(page, []);
+  const id = "22222222-2222-4222-8222-222222222222";
+  controls.setNotifications(
+    [
+      {
+        id,
+        terminalId: "term-b1",
+        workspaceId: "ws-b",
+        message: "입력 대기",
+        level: "info",
+        requiresAction: true,
+        readAt: null,
+      },
+    ],
+    1,
+  );
+  await page.goto(`http://remote.test/remote/#token=test-token&notification=${id}`);
+  expect(controls.focusRequests).toEqual([]);
+  await page.locator("#connect").click();
+  await expect
+    .poll(() =>
+      controls.focusRequests.some(
+        (r) => r.terminalId === "term-b1" && r.body.leaseId === "lease-1",
+      ),
+    )
+    .toBe(true);
+});
+
 test("저장 완료 후 템플릿 목록 조회 실패는 저장 재시도를 유도하지 않는다", async ({ page }) => {
   await routeRemoteWithWorkspaces(page, []);
   let posts = 0;

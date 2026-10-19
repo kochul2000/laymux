@@ -62,6 +62,7 @@ export function subscribeTerminalTasks(): () => void {
         message,
         level,
         requiresAction: waiting,
+        category: waiting ? "waiting" : task.result === "failure" ? "failure" : "complete",
       });
       if (!waiting) void persistSession({ reason: "completion" });
       if (!document.hasFocus() || useWorkspaceStore.getState().activeWorkspaceId !== workspaceId)

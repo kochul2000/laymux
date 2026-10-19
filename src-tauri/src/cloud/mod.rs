@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod keyring_store;
+pub mod notification_push;
 pub mod pairing;
 pub mod tunnel;
 

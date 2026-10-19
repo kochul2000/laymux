@@ -1,4 +1,5 @@
 import { createRemoteUpdateDialog } from "../../../../ui/src/remote/remote-update-dialog.js";
+import { installRemotePushSettings } from "../../../../ui/src/remote/remote-notification-push.js";
 import { createRemoteSettingsBridge } from "../../../../ui/src/remote/remote-settings-mcp.js";
 import { createRemoteMemo } from "../../../../ui/src/remote/remote-memo.js";
 import { createWorkspaceManager } from "../../../../ui/src/remote/remote-workspace-manager.js";
@@ -844,6 +845,21 @@ import {
         document.querySelector(".app").classList.toggle("local-app", localAppMode);
         document.querySelector(".app").classList.toggle("android-e2e", Boolean(androidE2eMode));
         if (androidE2eMode) clientNameInput.value = "Laymux Android E2E";
+        const pushSettings = installRemotePushSettings($("pushSettings"), { android: Boolean(androidE2eMode) });
+        let pendingPushNotificationId = hashParams.get("notification");
+        const PUSH_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!PUSH_ID.test(pendingPushNotificationId || "")) pendingPushNotificationId = null;
+        function consumePushNotification() {
+          if (!pendingPushNotificationId || !leaseId || !navigationState) return;
+          const notification = (navigationState.notifications || []).find((n) => n.id === pendingPushNotificationId);
+          if (!notification) {
+            setStatus("알림 대상이 삭제됐거나 PC가 재시작되었습니다.", true);
+            pendingPushNotificationId = null;
+            return;
+          }
+          pendingPushNotificationId = null;
+          openNotification(notification).catch((error) => setStatus(error.message, true));
+        }
         // Android E2E exits Remote control through Release. Keep the PC-mode
         // switch only for the desktop app's embedded mobile view, where it
         // changes the surrounding desktop layout rather than releasing a lease.
@@ -7774,6 +7790,12 @@ import {
         }
 
         window.laymuxRemoteUi = Object.freeze({
+          openPushNotification(id) {
+            if (!PUSH_ID.test(id || "")) return false;
+            pendingPushNotificationId = id;
+            consumePushNotification();
+            return true;
+          },
           dismissTopLayer: dismissTopRemoteLayer,
           offerSharedFiles,
           takeSharedFileSelection,
@@ -9018,6 +9040,8 @@ import {
 
         function installNavigationSnapshot(data, { render = true } = {}) {
           navigationState = data;
+          void pushSettings.sync(data.notifications || []);
+          queueMicrotask(consumePushNotification);
           const terminals = data.terminals || [];
           terminalInfoById = new Map(terminals.map((terminalInfo) => [terminalInfo.id, terminalInfo]));
           terminals.forEach((terminalInfo) => ensureRemoteFont(terminalInfo.appearance));
@@ -13604,7 +13628,7 @@ import {
         // Settings is paginated: only the selected panel is in the layout, so a
         // long section no longer buries the others under a scroll. The choice is
         // surface-local like the rest of the Remote display preferences.
-        const SETTINGS_PANELS = ["inputBar", "floating", "composer", "display", "panels", "app"];
+        const SETTINGS_PANELS = ["inputBar", "floating", "composer", "display", "panels", "notifications", "app"];
 
         function loadSettingsPanel() {
           try {
@@ -13623,6 +13647,7 @@ import {
 
         function setSettingsPanel(panel, persist = true) {
           if (!SETTINGS_PANELS.includes(panel)) return;
+          $("settingsIntroText").textContent = panel === "notifications" ? "알림 종류와 상세 표시를 고른 뒤 저장해주세요." : "Customize this device. Changes are saved automatically.";
           activeSettingsPanel = panel;
           for (const tab of settingsTabButtons()) {
             const selected = tab.dataset.settingsPanel === panel;

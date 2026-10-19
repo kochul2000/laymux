@@ -21,7 +21,7 @@ PC 프론트엔드가 알림과 읽음의 정본이고 Remote는 목록을 조�
 - **웹.** relay origin의 고정 `/remote/push/sw.js`를 `/remote/push/` scope로 등록한다. worker에는 fetch listener·offline cache를 두지 않고 push·notificationclick만 처리한다. public 로그인 origin에는 worker를 설치하지 않는다. Cloud는 이 경로를 tunnel보다 먼저 제공하고 scope 확대를 허용하지 않는다. CSP·Caddy에 이 스크립트에 필요한 예외를 둔다. iOS는 지원 OS의 홈 화면 웹앱에서 사용자 gesture로 권한을 요청한다. Direct HTTP는 미지원 이유와 Cloud 경로를 안내한다.
 - **Android.** FCM·알림 권한·channel·PendingIntent는 native가 소유한다. Cloud bridge에는 수신 설정 action만 추가하고 secure Remote에는 FCM token·Cloud cookie·pairing seed를 노출하지 않는다. provider 미설정 빌드도 빌드되며 수신 불가 이유를 표시한다. 토큰 회전 때 등록을 갱신한다.
 - **내용.** 기본 푸시는 일반 안내와 비밀이 아닌 instance/notification 식별자만 가진다. 본문·경로·workspace 이름은 기본으로 Cloud/provider에 보내지 않는다. 상세 표시를 켠 구독에만 본문을 전달하고 Cloud/provider에 내용이 공개됨을 설명한다. E2E 키를 생체 인증 없이 꺼내지 않는다.
-- **소비.** 클릭은 고정 Cloud 연결 경로에서 현재 소유권·인증을 재확인하고 기존 lease 획득 뒤 PC의 알림 ID를 찾아 기존 대상 이동·읽음 동작을 실행한다. ID는 인증을 대체하지 않는다. 삭제·offline·인증 실패는 안내와 정상 재연결 경로를 유지한다. 읽음 전이는 같은 tag를 닫고 권한 요청이나 소리를 만들지 않는다. Android OS의 background 제한에 따른 지연은 foreground 재동기화로 보완한다.
+- **소비.** 클릭은 고정 Cloud 연결 경로에서 현재 소유권·인증을 재확인하고 기존 lease 획득 뒤 PC의 알림 ID를 찾아 기존 대상 이동·읽음 동작을 실행한다. ID는 인증을 대체하지 않는다. 삭제·offline·인증 실패는 안내와 정상 재연결 경로를 유지한다. 읽음·삭제는 Cloud에 반영하되 웹에는 읽음 전용 background push를 보내지 않는다. 웹은 userVisibleOnly를 지키며 foreground 복귀 때 같은 registration의 알림을 PC 상태와 대조해 닫는다. Android는 data message로 같은 tag를 닫고 OS 제한에 따른 지연은 foreground 재동기화로 보완한다.
 - **선택.** 입력/승인 요청·실패·완료·일반을 기기/PC 구독별로 선택한다. 앱·브라우저는 별도 구독이며 물리 기기를 추측하지 않고 수신 경로를 사용자가 선택한다.
 
 ## Alternatives Considered

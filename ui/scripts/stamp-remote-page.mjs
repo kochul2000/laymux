@@ -38,6 +38,7 @@ const packageInputHash = (packageName) => {
 
 const lines = [
   "GENERATED FILE - DO NOT EDIT.",
+  `Push-SHA256: ${fileHash(path.resolve(SCRIPT_DIR, "../src/remote/remote-notification-push.js"))}`,
   `Pane-controls-SHA256: ${fileHash(path.resolve(SCRIPT_DIR, "../src/remote/remote-pane-controls.js"))}`,
   "Sources: src-tauri/src/remote_server/assets/remote-app.{js,css} + ui/src/remote/{composer-editor,remote-icons}.js + ui/src/lib/{codex-transcript-wheel,keybinding-core}.ts + lucide package-lock identity",
   "Rebuild: cd ui && npm run build:remote-page",

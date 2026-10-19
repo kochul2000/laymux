@@ -1317,6 +1317,14 @@ Claude Code·Codex 가 실행 중인지의 **권위는 PTY 자식 프로세스 �
 
 ### 알림 시스템
 
+**기기 푸시 ([ADR-0344](../adr/0344-cross-device-notification-push.md)).** 알림 ID는 UUID이며 본문·대상·읽음의 정본은 기존 notification store다. `useSyncEvents`가 시작한 `subscribeNotificationPush`는 새 생성과 이후 읽음·삭제만 관측한다. 초기 목록과 반복 관측을 재발행하지 않고 도착 자동 읽음인 새 알림도 생성으로 전달한다. 종류는 `waiting|failure|complete|general`이며 자동 작업 종료는 결과 미관측도 `complete`다. 최대 256개의 비동기 큐에서 순서를 보존하며 실패가 원래 알림을 막지 않는다.
+
+`publish_notification_push`는 Cloud/Remote 활성 상태와 keyring credential을 확인한다. 생성의 본문은 먼저 Cloud preferences의 명시적 상세 수신 여부를 확인한 경우에만 HTTP에 넣는다. 생성 `revision=1`, 읽음·삭제 `revision=2`이고 읽음에는 본문이 없다. Cloud는 instance/notification별 큰 revision을 유지하며 늦은 생성·중복을 버린다. provider 배달은 5분 TTL·3회 시도·동시 4개, 구독은 계정당 최대 32개·90일 수명이다. PC backlog는 메모리이며 앱 종료 뒤 미전송 항목은 복구하지 않는다. Cloud가 수락한 전달 큐와 7일 중복 방지 기록은 DB에 남는다.
+
+Remote Settings의 **알림**에서 이 브라우저·PC의 종류와 상세 표시를 저장한다. 권한 요청은 허용 버튼의 gesture에서만 실행한다. HTTP Direct·미지원 환경·미설정 Cloud는 이유를 표시한다. 웹 worker는 fetch/cache가 없는 `/remote/push/` scope이며 background 읽음 push는 보내지 않는다. 탐색 snapshot 갱신 때 이 PC의 표시된 시스템 알림을 읽음/삭제 상태와 대조해 닫는다. 클릭 ID는 인증·lease를 대체하지 않고 lease 확보 뒤 기존 `openNotification`으로 이동한다.
+
+Android는 Cloud 대시보드 PC 메뉴의 **휴대전화 알림**에서 native 설정을 연다. FCM data message는 native가 revision 중복/역순을 확인해 같은 tag로 표시·취소한다. 알림의 PendingIntent는 검증한 PC/알림 UUID만 전달하며 필요 시 Cloud 로그인·PC 선택·생체 인증을 거쳐 Remote 문서에 ID만 전달한다. token 회전과 foreground 재동기화는 WorkManager의 네트워크 조건·유한 재시도로 수행한다. secure WebView와 pairing 키에는 푸시 token을 노출하지 않는다. 로그아웃은 native 표시·기기 구독을 해제한다. provider 자격 증명 없는 빌드는 계속 동작하며 설정 시 미설정 안내를 표시한다.
+
 ```
 발생 경로:
   OSC 9 / OSC 99 / OSC 777   ← 터미널 이스케이프 시퀀스

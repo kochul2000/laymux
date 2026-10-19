@@ -1985,6 +1985,15 @@ Remote UI는 이미 확인된 연결 상태가 바뀔 때 화면 상단에 3초�
 
 메모·GitHub·파일 뷰어/탐색기의 기존 컨트롤바 전체가 공통 배치 설정을 따른다. true에서는 flex 본문 뒤에 컨트롤바를 놓고 하단 안전 영역을 확보하며, false에서는 기존 상단 배치다. 하단 배치의 overlay 높이는 기존 `--remote-viewport-height`를 따라 키보드로 줄어든 표시 영역 안에 컨트롤바를 유지한다. 컨트롤바는 본문을 덮지 않고 기존 40/32/16px 툴바 토큰과 DOM/이벤트 처리기를 보존한다. 옵션 변경은 연결 전후 즉시 적용하고 메모 초안·목록 상태·파일 미리보기를 초기화하거나 저장하지 않는다([ADR-0332](../adr/0332-remote-tool-bottom-controls-and-github-back.md)).
 
+### 기기 알림 푸시 계약 (ADR-0344)
+
+- Tauri: `publish_notification_push({event:{notificationId:UUID,revision:1|2,category:waiting|failure|complete|general,body?:string}})`. Rust inner 함수는 기존 Remote/Cloud 활성화와 keyring을 사용한다. body는 최대 500문자이며 Cloud 상세 opt-in 확인 전에는 HTTP에 실리지 않는다. 다른 기능의 성공·실패에 전파하지 않는 best effort다.
+- Cloud public origin: device bearer로 `GET /api/push/preferences` → `{includeDetails}`, `POST /api/push/events` → `202 {accepted:true}`. instance/owner는 credential로 결정한다. 로그인 계정으로 `PUT|DELETE /api/push/subscription`, `GET /api/push/state?instanceId=UUID&notificationIds=UUID,UUID`를 사용한다. state는 표시 중인 최대 100개 ID 중 읽은 것만 응답한다. PUT은 `{deviceId,instanceId,kind:"android",token,categories,includeDetails}`다. 변경에는 정확한 Origin이 필요하다.
+- Cloud relay origin: relay cookie로 `GET /remote/push/config?deviceId=UUID` → `{instanceId,available,publicKey,enabled,categories,includeDetails}`, `PUT|DELETE /remote/push/subscription`. 웹 PUT은 token 대신 `kind:"web",subscription:{endpoint,keys:{p256dh,auth}}`를 보낸다. cookie가 선택한 PC와 body instanceId가 같아야 한다. 응답에는 subscription endpoint/token을 넣지 않는다.
+- Cloud 소유 script `GET /remote/push/sw.js`는 `Service-Worker-Allowed: /remote/push/`이며 public origin에 제공하지 않는다. CSP의 worker 예외는 relay의 이 exact script다. fetch listener/cache가 없으며 background 읽음-only push를 사용하지 않는다.
+- 클릭은 고정 public `/notifications/open?instanceId=UUID&notificationId=UUID`에서 로그인·소유권을 확인하고 기존 one-time grant/exchange에 notification 힌트를 더한다. Remote는 lease 뒤 PC 목록에서 ID를 해석한다. Android PendingIntent도 동일한 UUID만 사용한다.
+- Cloud bridge의 추가 surface: `openNotificationSettings(instanceId)`, `pushDeviceId()`(비밀이 아닌 설치 ID), `disableLocalNotifications()`. Cloud 문서 readiness gate를 따르며 FCM token이나 키를 반환하지 않는다. 로그아웃의 선택 헤더 `X-Laymux-Push-Device`는 현재 로그인 계정의 해당 설치 구독만 해제한다.
+
 ## 14. Rust 코드 설계 원칙
 
 > 추가: 2026.04.05

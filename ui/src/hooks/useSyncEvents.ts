@@ -31,6 +31,7 @@ import { subscribeClaudeTurnResults } from "@/lib/claude-turn-result-subscriptio
 import { observeTaskTitle, observeTerminalTask } from "@/lib/terminal-task-observers";
 import { heuristicTask } from "@/lib/terminal-task-detection";
 import { subscribeTerminalTasks } from "@/lib/terminal-task-subscription";
+import { subscribeNotificationPush } from "@/lib/notification-push";
 import { subscribeAgentHookStates } from "@/lib/agent-hook-state-subscription";
 import { useSettingsStore } from "@/stores/settings-store";
 
@@ -85,6 +86,7 @@ export function useSyncEvents() {
   );
 
   useEffect(() => {
+    const unsubscribePush = subscribeNotificationPush();
     const unsubscribeTasks = subscribeTerminalTasks();
     const unsubscribeCodexTurns = subscribeCodexTurnStates();
     const unsubscribeAgentSessions = subscribeAgentSessionStates();
@@ -589,6 +591,7 @@ export function useSyncEvents() {
       unsubscribeClaudeTurns();
       unsubscribeAgentHooks();
       unsubscribeTasks();
+      unsubscribePush();
       unsubStore();
       if (initialSyncUnsub) initialSyncUnsub();
       if (cwdPersistTimerRef.current) clearTimeout(cwdPersistTimerRef.current);

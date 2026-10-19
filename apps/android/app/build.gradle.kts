@@ -64,6 +64,15 @@ android {
         resValue("string", "laymux_cloud_base_url", laymuxCloudBaseUrl.get())
         resValue("string", "laymux_google_web_client_id", laymuxGoogleWebClientId.get())
         buildConfigField("boolean", "UPDATE_CHECK_ENABLED", "true")
+        for ((name, resource) in listOf(
+            "APP_ID" to "google_app_id", "API_KEY" to "google_api_key",
+            "PROJECT_ID" to "project_id", "SENDER_ID" to "gcm_defaultSenderId",
+        )) {
+            val value = providers.environmentVariable("LAYMUX_FIREBASE_$name").orElse("").get()
+            require(value.matches(Regex("[A-Za-z0-9_:.-]*"))) { "Invalid Firebase $name" }
+            buildConfigField("String", "PUSH_FIREBASE_$name", "\"$value\"")
+            if (value.isNotEmpty()) resValue("string", resource, value)
+        }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -129,6 +138,8 @@ kotlin {
 }
 
 dependencies {
+    implementation("com.google.firebase:firebase-messaging:25.0.1")
+    implementation("androidx.work:work-runtime-ktx:2.10.1")
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.credentials:credentials:1.6.0")

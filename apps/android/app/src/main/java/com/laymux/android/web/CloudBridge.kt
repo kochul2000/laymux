@@ -6,6 +6,19 @@ import com.laymux.android.MainActivity
 /** Login/dashboard bridge. It intentionally has no pairing-key or E2E transport methods. */
 class CloudBridge(private val activity: MainActivity) {
     @JavascriptInterface
+    fun openNotificationSettings(instanceId: String) {
+        if (!CloudBridgeInput.isValidInstanceId(instanceId)) return
+        activity.runOnUiThread { activity.openNotificationSettings(instanceId) }
+    }
+
+    @JavascriptInterface
+    fun pushDeviceId(): String = activity.pushDeviceId()
+
+    @JavascriptInterface
+    fun disableLocalNotifications() {
+        activity.runOnUiThread { activity.disableLocalNotifications() }
+    }
+    @JavascriptInterface
     fun signInWithGoogle(nonce: String) {
         if (!CloudBridgeInput.isValidNonce(nonce)) return
         activity.runOnUiThread { activity.signInWithGoogle(nonce) }

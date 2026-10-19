@@ -344,6 +344,11 @@ jobs:
 
       - name: Test and build signed Android APK
         working-directory: apps/android
+        env:
+          LAYMUX_FIREBASE_APP_ID: ${{ vars.LAYMUX_FIREBASE_APP_ID }}
+          LAYMUX_FIREBASE_API_KEY: ${{ vars.LAYMUX_FIREBASE_API_KEY }}
+          LAYMUX_FIREBASE_PROJECT_ID: ${{ vars.LAYMUX_FIREBASE_PROJECT_ID }}
+          LAYMUX_FIREBASE_SENDER_ID: ${{ vars.LAYMUX_FIREBASE_SENDER_ID }}
         run: ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleRelease
 
       - name: Verify and stage Android APK

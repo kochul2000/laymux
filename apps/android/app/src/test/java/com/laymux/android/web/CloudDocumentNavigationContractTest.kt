@@ -20,7 +20,7 @@ class CloudDocumentNavigationContractTest {
         assertTrue(activity.contains("loadCloudDocument(retryUrl, replaceWebView = true)"))
         assertTrue(
             activity.contains(
-                "loadCloudDocument(cloudNavigation.dashboardUrl, replaceWebView = true)",
+                "loadCloudDocument(cloudNavigation.reconnectDashboardUrl(pendingPushTarget?.first), replaceWebView = true)",
             ),
         )
     }

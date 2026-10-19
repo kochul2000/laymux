@@ -20,6 +20,9 @@ class CloudBridgeInputTest {
                 "selectInstance",
                 "selectInstanceRoute",
                 "openConnectionSettings",
+                "openNotificationSettings",
+                "pushDeviceId",
+                "disableLocalNotifications",
             ),
             exposed,
         )
