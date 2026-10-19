@@ -35,6 +35,54 @@ fn install(delivery: &DesktopOutputDelivery, snapshot_seq: u64) {
 }
 
 #[test]
+fn announced_binary_read_is_exact_and_does_not_consume_receipt_or_repair() {
+    let delivery = DesktopOutputDelivery::new("binary-read".into(), 1);
+    let (tx, rx) = std_mpsc::channel();
+    delivery
+        .start(
+            Arc::new(move |_, envelope| {
+                tx.send(envelope.clone()).unwrap();
+                Ok(())
+            }),
+            Arc::new(|_| {}),
+        )
+        .unwrap();
+    install(&delivery, 0);
+    delivery.enqueue(delta(0, 256)).unwrap();
+    let envelope = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    let id = identity(&envelope);
+    for _ in 0..20 {
+        assert_eq!(
+            delivery.read_announced_envelope(&id, 0, 256).unwrap(),
+            Some(envelope.clone())
+        );
+    }
+    assert!(delivery
+        .read_announced_envelope(&id, 0, 255)
+        .unwrap()
+        .is_none());
+    let mut stale = id.clone();
+    stale.generation += 1;
+    assert!(delivery
+        .read_announced_envelope(&stale, 0, 256)
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        delivery.repair_envelope(&id, 0).unwrap().status,
+        TerminalOutputEnvelopeRepairStatus::EventPending
+    );
+    assert_eq!(
+        delivery.acknowledge_receipt(&id, 256).unwrap(),
+        TerminalOutputControlCompletion::Accepted
+    );
+    assert!(delivery
+        .read_announced_envelope(&id, 0, 256)
+        .unwrap()
+        .is_none());
+    delivery.close(TerminalOutputDeliveryCloseReason::Retired);
+}
+
+#[test]
 fn bootstrap_stays_ring_only_until_an_attach_lease_is_installed() {
     let delivery = DesktopOutputDelivery::new("t1".into(), 1);
     let (tx, rx) = std_mpsc::channel();

@@ -27,6 +27,52 @@ beforeEach(() => {
 });
 
 describe("terminal output v3 Tauri API", () => {
+  it("reads announced bytes through a binary IPC and preserves the backing", async () => {
+    mockListen.mockResolvedValue(vi.fn());
+    const metadata = {
+      version: 3,
+      generation: 9,
+      leaseToken: "lease-9",
+      envelopeId: 12,
+      grantId: null,
+      seqStart: 100,
+      seqEnd: 102,
+      deltaEnds: [2],
+      geometryRuns: [{ deltaIndex: 0, geometry: { revision: 1, cols: 80, rows: 24 } }],
+    };
+    const header = new TextEncoder().encode(JSON.stringify(metadata));
+    const packet = new Uint8Array(4 + header.length + 2);
+    new DataView(packet.buffer).setUint32(0, header.length, true);
+    packet.set(header, 4);
+    packet.set([65, 255], 4 + header.length);
+    mockInvoke.mockResolvedValue(packet.buffer);
+    const callback = vi.fn();
+    await onTerminalOutputV3("term-7", callback);
+    const handler = mockListen.mock.calls[0][1] as (event: { payload: unknown }) => void;
+    handler({
+      payload: {
+        transport: "binary",
+        version: 3,
+        generation: 9,
+        leaseToken: "lease-9",
+        envelopeId: 12,
+        grantId: null,
+        seqStart: 100,
+        seqEnd: 102,
+      },
+    });
+    await vi.waitFor(() => expect(callback).toHaveBeenCalledTimes(1));
+    expect(mockInvoke).toHaveBeenCalledWith("read_terminal_output_envelope_binary", {
+      id: "term-7",
+      generation: 9,
+      token: "lease-9",
+      envelopeId: 12,
+      grantId: null,
+      seqStart: 100,
+      seqEnd: 102,
+    });
+    expect(callback.mock.calls[0][0].data.buffer).toBe(packet.buffer);
+  });
   it("requires the next envelope identity in attach flow control", () => {
     expectTypeOf<
       TerminalOutputAttachmentPayload["flowControl"]["nextEnvelopeId"]

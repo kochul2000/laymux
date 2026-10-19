@@ -5951,15 +5951,15 @@ export function TerminalView({
         unlistenOutput = unlisten;
       }
     });
-    const outputV3ListenerReady = onTerminalOutputV3(instanceId, receiveOutputV3).then(
-      (unlisten) => {
-        if (cancelled) {
-          unlisten();
-        } else {
-          unlistenOutputV3 = unlisten;
-        }
-      },
-    );
+    const outputV3ListenerReady = onTerminalOutputV3(instanceId, receiveOutputV3, () =>
+      failStopOutputV3("malformed_binary_envelope"),
+    ).then((unlisten) => {
+      if (cancelled) {
+        unlisten();
+      } else {
+        unlistenOutputV3 = unlisten;
+      }
+    });
     const outputFailStoppedListenerReady = onTerminalOutputFailStopped(
       receiveOutputV3FailStop,
     ).then((unlisten) => {

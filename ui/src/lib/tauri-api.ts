@@ -5,6 +5,10 @@ import { forgetTerminalOutputRecoveryCounters } from "./terminal-output-recovery
 import { forgetTerminalOutputPipelineCounters } from "./terminal-output-pipeline-metrics";
 import { forgetTerminalInputDeliveryCounters } from "./terminal-input-delivery-metrics";
 import type { TerminalOutputEnvelopePayload } from "./terminal-output-envelope";
+import {
+  TerminalOutputBinaryReceiver,
+  type TerminalOutputBinaryNotice,
+} from "./terminal-output-binary";
 import type { SyncCwdConfig, SyncCwdDefaults } from "./sync-cwd-config";
 import type { TerminalActivityInfo } from "@/stores/terminal-store";
 import type { InitialExecutionHost } from "./terminal-execution-host";
@@ -1615,13 +1619,38 @@ export function onTerminalOutputV2(
 }
 
 /** Listen for bounded v3 terminal output envelopes without copying their payload. */
-export function onTerminalOutputV3(
+export async function onTerminalOutputV3(
   terminalId: string,
   callback: (envelope: TerminalOutputEnvelopePayload) => void,
+  onInvalid: (error: Error) => void = (error) => console.error(error),
 ): Promise<UnlistenFn> {
-  return listen<TerminalOutputEnvelopePayload>(`terminal-output-v3-${terminalId}`, (event) => {
-    callback(event.payload);
-  });
+  const receiver = new TerminalOutputBinaryReceiver(
+    (notice) =>
+      invoke<ArrayBuffer>("read_terminal_output_envelope_binary", {
+        id: terminalId,
+        generation: notice.generation,
+        token: notice.leaseToken,
+        envelopeId: notice.envelopeId,
+        grantId: notice.grantId,
+        seqStart: notice.seqStart,
+        seqEnd: notice.seqEnd,
+      }),
+    callback,
+    onInvalid,
+  );
+  try {
+    const unlisten = await listen<TerminalOutputEnvelopePayload | TerminalOutputBinaryNotice>(
+      `terminal-output-v3-${terminalId}`,
+      (event) => receiver.accept(event.payload),
+    );
+    return () => {
+      receiver.dispose();
+      unlisten();
+    };
+  } catch (error) {
+    receiver.dispose();
+    throw error;
+  }
 }
 
 /** Listen for the backend delivery owner fail-stopping a v3 surface. */
