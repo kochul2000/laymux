@@ -83,6 +83,14 @@ pub async fn api_docs() -> impl IntoResponse {
                 "response": "{ nowMs, lastReportAgeMs: number|null, lastReportAtMs, bridge: { requestsEmitted, responsesMatched, responsesOrphaned, requestTimeouts, requestDisconnects }, frontend: { sentAtMs, probeLagMs, probeLagMaxMs, stalls, bridge: {...}, pipeline: { [terminalId]: {...} }, inputDelivery: { [terminalId]: { attempts, succeeded, failed, attemptedBytes, succeededBytes, failedBytes } } } | null, terminalOutput: [{ terminalId, generation, desktopOutputState, reason, ...bounded counters/identities }] }"
             },
             {
+                "method": "POST", "path": "/api/v1/dev/terminal-output/{id}/fail-stop",
+                "description": "Dev only: fail-stop the current desktop output lease without ending its daemon child."
+            },
+            {
+                "method": "POST", "path": "/api/v1/dev/terminal-output/{id}/reconnect",
+                "description": "Dev only: start the pane's bounded non-destructive output reconnect; inspect frontend diagnostics for completion."
+            },
+            {
                 "method": "GET", "path": "/api/v1/update",
                 "description": "Read the process-global desktop update status, including the release channel this install follows (`channel`: stable|beta). Artifacts come from the release the channel manifest names and are signature-verified before installation."
             },

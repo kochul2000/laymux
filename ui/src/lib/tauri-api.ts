@@ -93,6 +93,18 @@ export async function writeToTerminal(id: string, data: string): Promise<void> {
   return invoke("write_to_terminal", { id, data });
 }
 
+/** Rebuild output only; never starts or resumes a child process. */
+export function reconnectTerminalSession(
+  id: string,
+  generation: number,
+  cols: number,
+  rows: number,
+): Promise<number> {
+  return enqueueTerminalLifecycle(id, () =>
+    invoke("reconnect_terminal_session", { id, generation, cols, rows }),
+  );
+}
+
 /**
  * Preserve xterm's binary-string contract across JSON IPC. Each UTF-16 code
  * unit represents one raw byte; passing the string itself would UTF-8 encode

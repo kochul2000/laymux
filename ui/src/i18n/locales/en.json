@@ -50,7 +50,10 @@
       "composerStarredSave": "Save",
       "composerStarredCancel": "Cancel",
       "outputStoppedTitle": "Terminal output stopped",
-      "outputStoppedDescription": "Close and recreate this pane to continue.",
+      "outputStoppedDescription": "Reconnect to continue the running session.",
+      "reconnect": "Reconnect",
+      "reconnecting": "Reconnecting…",
+      "restartLosesContent": "Restart ends the running work and does not preserve terminal contents.",
       "restart": "Restart terminal"
     },
     "osHandoff": {

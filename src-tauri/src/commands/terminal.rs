@@ -223,10 +223,52 @@ pub async fn create_terminal_session(
     state: State<'_, Arc<AppState>>,
     app: AppHandle,
 ) -> Result<TerminalSession, String> {
+    create_terminal_session_inner(
+        id,
+        profile,
+        cols,
+        rows,
+        sync_group,
+        cwd_send,
+        cwd_receive,
+        cwd,
+        startup_command_override,
+        viewer,
+        &state,
+        app,
+        None,
+    )
+    .await
+}
+
+// Shared bring-up keeps OSC, credit, listener-first attach and adoption on the
+// existing pipeline. Reconnect only changes lifecycle ownership and fallback.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn create_terminal_session_inner(
+    id: String,
+    profile: String,
+    cols: u16,
+    rows: u16,
+    sync_group: String,
+    cwd_send: Option<bool>,
+    cwd_receive: Option<bool>,
+    cwd: Option<String>,
+    startup_command_override: Option<String>,
+    viewer: Option<super::ViewerStartupRequest>,
+    state: &Arc<AppState>,
+    app: AppHandle,
+    reconnect_generation: Option<u64>,
+) -> Result<TerminalSession, String> {
     let _checkpoint_permit = state
         .session_checkpoint
         .begin_mutation_after_finalization()
         .await;
+    // Admit lifecycle mutation before human-control ownership. Waiting on
+    // finalization while already holding a human permit would prevent that
+    // finalization from draining the very operation waiting for it.
+    let reconnect_control_permit = reconnect_generation
+        .map(|_| begin_human_control_operation(state, HumanControlOrigin::Local, &id))
+        .transpose()?;
     // Inject LX_ENDPOINT_FILE and LX_AUTOMATION_PORT env vars. Both stay
     // valid for a shell that outlives this GUI (ADR-0304).
     let mut env = Vec::new();
@@ -352,11 +394,31 @@ pub async fn create_terminal_session(
     // A daemon keeps sessions this long with no GUI (ADR-0312); its
     // presence connection reports a changed value.
     crate::pty_daemon::set_grace_minutes(settings.terminal.pty_daemon_grace_minutes);
-    let backend = tokio::task::spawn_blocking(move || {
-        crate::pty_daemon::terminal_backend(&backend_terminal_id, &backend_profile, allow_adopt)
-    })
-    .await
-    .map_err(|error| format!("PTY backend selection panicked: {error}"))?;
+    let backend = if let Some(generation) = reconnect_generation {
+        let handle = state
+            .pty_handles
+            .lock_or_err()?
+            .get(&id)
+            .cloned()
+            .ok_or("Terminal no longer exists")?;
+        if handle.terminal_generation() != generation {
+            return Err("Terminal generation changed before reconnect".into());
+        }
+        let owner = handle
+            .display_context_owner
+            .clone()
+            .ok_or("This terminal has no PTY daemon session to reconnect")?;
+        pty::PtyBackend::Reconnect {
+            owner,
+            missed_output: Arc::default(),
+        }
+    } else {
+        tokio::task::spawn_blocking(move || {
+            crate::pty_daemon::terminal_backend(&backend_terminal_id, &backend_profile, allow_adopt)
+        })
+        .await
+        .map_err(|error| format!("PTY backend selection panicked: {error}"))?
+    };
     let codex_startup_color_probe = startup_plan
         .arm_native_windows_codex_color_probe
         .then(|| Arc::new(crate::terminal::NativeWindowsCodexColorProbeGuard::armed()));
@@ -373,22 +435,56 @@ pub async fn create_terminal_session(
     // Check and reserve while holding the terminal catalog lock. Close takes
     // the same lock before selecting a generation, so it cannot observe an
     // empty output registry and then tear down this newly-created id.
-    let output_registration = {
+    let (output_registration, reconnect_retirement) = {
         let terminals = state.terminals.lock_or_err()?;
-        if terminals.contains_key(&id) {
+        let mut retirement = None;
+        if let Some(generation) = reconnect_generation {
+            let handles = state.pty_handles.lock_or_err()?;
+            if !terminals.contains_key(&id)
+                || handles
+                    .get(&id)
+                    .is_none_or(|handle| handle.terminal_generation() != generation)
+            {
+                return Err("Terminal changed during reconnect".into());
+            }
+            drop(handles);
+            retirement = terminal_output::begin_terminal_output_retirement_for_close(
+                &state.terminal_protocol_states,
+                &state.output_buffers,
+                &id,
+            )?;
+        } else if terminals.contains_key(&id) {
             return Err(format!("Session '{id}' already exists"));
         }
 
         // Install one generation-scoped protocol/ring session before PTY
         // output can arrive. Any error before `commit()` rolls this exact
         // generation back without touching a replacement session.
-        terminal_output::register_terminal_output_session_with_geometry(
+        let registration = terminal_output::register_terminal_output_session_with_geometry(
             &state.terminal_protocol_states,
             &state.output_buffers,
             &id,
             terminal_output::TerminalGeometry::new(session.config.cols, session.config.rows)?,
-        )?
+        )?;
+        (registration, retirement)
     };
+    if let Some(retirement) = reconnect_retirement {
+        retirement.finish();
+    }
+    if let Some(generation) = reconnect_generation {
+        let handle = state
+            .pty_handles
+            .lock_or_err()?
+            .get(&id)
+            .cloned()
+            .filter(|handle| handle.terminal_generation() == generation)
+            .ok_or("Terminal changed before detach")?;
+        // Retirement first wakes a callback blocked on output credit. Shutdown
+        // and reader completion happen outside every AppState lock.
+        tokio::task::spawn_blocking(move || handle.detach_for_reconnect())
+            .await
+            .map_err(|e| format!("PTY detach failed: {e}"))??;
+    }
     let output_session = output_registration.session();
     let delivery_app = app.clone();
     let fail_stop_app = app.clone();
@@ -419,7 +515,7 @@ pub async fn create_terminal_session(
     // Spawn PTY with unified OSC processing in the output callback.
     let terminal_id = id.clone();
     let app_clone = app.clone();
-    let state_for_pty = Arc::clone(&*state);
+    let state_for_pty = Arc::clone(state);
     let burst = settings.terminal.output_activity_burst.sanitized();
     let pty_cb_state = Arc::new(activity::PtyCallbackState::new(
         burst.window_ms,
@@ -438,13 +534,14 @@ pub async fn create_terminal_session(
             adopt: Some(adoption),
             ..
         } => Some(Arc::clone(&adoption.missed_output)),
+        pty::PtyBackend::Reconnect { missed_output, .. } => Some(Arc::clone(missed_output)),
         _ => None,
     };
     // An adopting terminal holds its OSC facts until it is registered below:
     // the missed backlog arrives at once, before the session is in the table
     // the facts update (ADR-0309).
     let osc_pass = Arc::new(TerminalOscPass {
-        state: Arc::clone(&*state),
+        state: Arc::clone(state),
         app: app.clone(),
         terminal_id: id.clone(),
         terminal_generation: output_session.generation(),
@@ -672,7 +769,7 @@ pub async fn create_terminal_session(
     // Start notify gate fallback timer: arms the gate after NOTIFY_GATE_FALLBACK_MS
     // for shells without preexec (e.g., PowerShell without PSReadLine).
     {
-        let state_for_timer = Arc::clone(&*state);
+        let state_for_timer = Arc::clone(state);
         let timer_terminal_id = id.clone();
         let timer_output_session = Arc::clone(&output_session);
         std::thread::spawn(move || {
@@ -750,21 +847,45 @@ pub async fn create_terminal_session(
             return Err(terminate_uninstalled_pty(&pty_handle, error.to_string()));
         }
     };
+    if let Some(generation) = reconnect_generation {
+        // Close/profile replacement may have won while attach was pending.
+        if !terminals.contains_key(&id)
+            || ptys
+                .get(&id)
+                .is_none_or(|handle| handle.terminal_generation() != generation)
+        {
+            drop(ptys);
+            drop(groups);
+            drop(terminals);
+            let _ = pty_handle.detach_for_reconnect();
+            return Err("Terminal changed during reconnect".into());
+        }
+        // Keep all existing hook/task/title state. The adopting OSC gate opens
+        // below only after this swap, so missed facts update the retained state.
+        if let Some(mut previous) = terminals.remove(&id) {
+            previous.config.cols = cols;
+            previous.config.rows = rows;
+            previous.display_context = session.display_context;
+            session = previous;
+        }
+    }
     terminals.insert(id.clone(), session);
     // Only a create that actually produced a terminal uses up this id's one
     // adoption chance; a failed attempt may still adopt on retry. Leaf lock.
     if let Ok(mut seen) = state.pty_daemon_adoption_seen.lock_or_err() {
         seen.insert(id.clone());
     }
-    ptys.insert(id.clone(), pty_handle);
+    let previous_pty = ptys.insert(id.clone(), pty_handle);
     // Published with the other id-keyed tables so an exit noticed outside the
     // PTY callback — the reconcile worker, for an app that never emitted an exit
     // title — can reach the same detection flags (ADR-0135 §4-2, ADR-0136 §6).
     // From here on close and fatal teardown own its removal; before here, no
     // cleanup path knows this id.
-    if let Ok(mut callback_states) = state.pty_callback_states.lock_or_err() {
-        callback_states.insert(id.clone(), registered_callback_state);
-    }
+    let previous_callback = state
+        .pty_callback_states
+        .lock_or_err()
+        .ok()
+        .and_then(|mut callbacks| callbacks.insert(id.clone(), registered_callback_state));
     if !sync_group.is_empty() {
         groups
             .entry(sync_group.clone())
@@ -782,7 +903,31 @@ pub async fn create_terminal_session(
             .lock_or_err()
             .ok()
             .and_then(|mut ptys| ptys.remove(&id));
-        terminals.remove(&id);
+        let installed_session = terminals.remove(&id);
+        if reconnect_generation.is_some() {
+            // A late output failure must not consume the only retry/close
+            // owner of the running daemon child. Keep the catalog and shared
+            // epoch even though this output registration rolled back.
+            if let Some(session) = installed_session {
+                terminals.insert(id.clone(), session);
+            }
+            if let Some(previous) = previous_pty {
+                state
+                    .pty_handles
+                    .lock_or_err()?
+                    .insert(id.clone(), previous);
+            }
+            if let Some(previous) = previous_callback {
+                if let Ok(mut callbacks) = state.pty_callback_states.lock_or_err() {
+                    callbacks.insert(id.clone(), previous);
+                }
+            }
+            drop(terminals);
+            return Err(match handle {
+                Some(handle) => terminate_uninstalled_pty(&handle, error),
+                None => error,
+            });
+        }
         if let Ok(mut callback_states) = state.pty_callback_states.lock_or_err() {
             callback_states.remove(&id);
         }
@@ -823,12 +968,24 @@ pub async fn create_terminal_session(
         tracing::warn!(error = %e, terminal_id = %id, "failed to emit terminals-list-changed on create");
     }
 
+    if let Some(permit) = reconnect_control_permit {
+        permit.finish()?;
+    }
     Ok(result)
 }
 
 fn terminate_uninstalled_pty(handle: &pty::PtyHandle, error: impl std::fmt::Display) -> String {
     let error = error.to_string();
-    match handle.terminate() {
+    let cleanup = if handle
+        .daemon_reconnect_control
+        .as_ref()
+        .is_some_and(|control| control.preserve_on_drop.load(Ordering::Acquire))
+    {
+        handle.detach_for_reconnect()
+    } else {
+        handle.terminate()
+    };
+    match cleanup {
         Ok(()) => error,
         Err(cleanup_error) => {
             format!("{error}; failed to terminate uninstalled PTY: {cleanup_error}")

@@ -24,6 +24,7 @@ mod inventory;
 mod launcher;
 mod modes;
 mod presence;
+mod reconnect;
 mod screen;
 mod server;
 mod session;
@@ -56,4 +57,5 @@ pub use inventory::{
 };
 pub use launcher::{ensure_running, find_running, spawn_daemon};
 pub use presence::{keep_presence_on_live_daemons, set_grace_minutes};
+pub(crate) use reconnect::ReconnectControl;
 pub use wire::SessionInfo;
