@@ -1,5 +1,6 @@
 // 현재 워크트리의 dev에서 실행: node scripts/tests/mcp-pane-focus.e2e.mjs
 // WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9339 필요.
+// WSL 검사 추가: LAYMUX_FOCUS_WSL_DISTRO, LAYMUX_FOCUS_WSL_URL=http://<Windows-host>:19281/mcp
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -30,6 +31,10 @@ const page = browser
   .flatMap((c) => c.pages())
   .find((p) => p.url() === devUrl);
 assert.ok(page, "현재 워크트리의 dev WebView가 필요합니다.");
+// HMR can leave manual dynamic imports pointing at a previous store module.
+// A fresh document makes the instrumentation observe the live application stores.
+await page.reload();
+await page.waitForSelector('[data-testid="workspace-area"]');
 const artifacts = path.join(repo, ".screenshots", "mcp-pane-focus");
 await mkdir(artifacts, { recursive: true });
 
@@ -128,7 +133,7 @@ async function snapshot() {
   });
 }
 const checkpoints = [];
-async function unchanged(label, expected) {
+async function unchanged(label, expected, allowGridReindex = false) {
   await page.evaluate(
     () =>
       new Promise((resolve) =>
@@ -142,6 +147,17 @@ async function unchanged(label, expected) {
     focusEvents,
     [],
     `${label}: 일시적 DOM 포커스 전환도 없어야 합니다.`,
+  );
+  if (!allowGridReindex)
+    assert.deepEqual(
+      await page.evaluate(() => window.__mcpGridEvents),
+      [],
+      `${label}: grid focus must not transition`,
+    );
+  assert.deepEqual(
+    await page.evaluate(() => window.__mcpWorkspaceEvents),
+    [],
+    `${label}: workspace must not transition`,
   );
   checkpoints.push({ label, ...actual });
 }
@@ -221,8 +237,31 @@ try {
         ?.getAttribute("data-layer-id") === id,
     ownerId.replace(/^terminal-/, ""),
   );
-  await page.evaluate(() => {
+  await page.evaluate(async () => {
     window.__mcpFocusEvents = [];
+    window.__mcpGridEvents = [];
+    window.__mcpWorkspaceEvents = [];
+    const { useGridStore } = await import("/src/stores/grid-store.ts");
+    const { useWorkspaceStore } =
+      await import("/src/stores/workspace-store.ts");
+    window.__mcpUnsubscribeWorkspace = useWorkspaceStore.subscribe(
+      (state, before) => {
+        if (state.activeWorkspaceId !== before.activeWorkspaceId)
+          window.__mcpWorkspaceEvents.push({
+            before: before.activeWorkspaceId,
+            after: state.activeWorkspaceId,
+            stack: new Error().stack,
+          });
+      },
+    );
+    window.__mcpUnsubscribeGrid = useGridStore.subscribe((state, before) => {
+      if (state.focusedPaneIndex !== before.focusedPaneIndex)
+        window.__mcpGridEvents.push({
+          before: before.focusedPaneIndex,
+          after: state.focusedPaneIndex,
+          stack: new Error().stack,
+        });
+    });
     window.__mcpFocusListener = (event) =>
       window.__mcpFocusEvents.push({
         type: event.type,
@@ -260,6 +299,240 @@ try {
   });
   await tool("activate_pane_layer", { terminal_id: backgroundId });
   await unchanged("unvisited workspace startup and display", owner);
+  // ADR-0350: operate on an unvisited workspace while the human keeps typing here.
+  const bgScope = { workspace_id: background.workspace.id };
+  const bgFirst = backgroundId.replace(/^terminal-/, "");
+  const { newPane: bgSplit } = await tool("split_pane", {
+    ...bgScope,
+    pane_index: 0,
+    direction: "vertical",
+    profile,
+  });
+  await unchanged("background split by workspace", owner);
+  await tool("resize_pane", { ...bgScope, pane_index: 0, dw: 0.05 });
+  await unchanged("background resize", owner);
+  await tool("write_to_terminal", {
+    terminal_id: bgSplit.terminalId,
+    data: "echo BACKGROUND_SPLIT_READY",
+  });
+  await unchanged("background split terminal startup", owner);
+  const bgGrid = await tool("get_grid_state", bgScope);
+  assert.equal(bgGrid.workspaceId, background.workspace.id);
+  assert.equal(bgGrid.activeWorkspaceId, owner.workspaceId);
+  assert.equal(bgGrid.focusedTerminalId, ownerId);
+  await unchanged(
+    "background grid query preserves human focus projection",
+    owner,
+  );
+
+  if (process.env.LAYMUX_FOCUS_WSL_DISTRO) {
+    // Real Linux HTTP client and WSL shell PTY; no desktop navigation or agent process.
+    const wslTool = (name, args) => {
+      const python = `import json,sys,urllib.request
+p=json.load(sys.stdin)
+r=urllib.request.urlopen(urllib.request.Request(p['url'],data=json.dumps(p['body']).encode(),headers={'Content-Type':'application/json','Accept':'application/json, text/event-stream','Mcp-Session-Id':p['session']}),timeout=30)
+s=r.read().decode()
+if 'text/event-stream' in r.headers.get('content-type',''): s=next(x[5:] for x in s.splitlines() if x.startswith('data:') and x[5:].strip().startswith('{'))
+print(s)`;
+      const raw = execFileSync(
+        "wsl.exe",
+        [
+          "-d",
+          process.env.LAYMUX_FOCUS_WSL_DISTRO,
+          "--exec",
+          "python3",
+          "-c",
+          python,
+        ],
+        {
+          input: JSON.stringify({
+            url: process.env.LAYMUX_FOCUS_WSL_URL,
+            session,
+            body: {
+              jsonrpc: "2.0",
+              id: ++requestId,
+              method: "tools/call",
+              params: { name, arguments: args },
+            },
+          }),
+          encoding: "utf8",
+          windowsHide: true,
+          timeout: 35_000,
+        },
+      );
+      const message = JSON.parse(raw);
+      assert.ok(!message.error, raw);
+      assert.ok(!message.result.isError, raw);
+      return JSON.parse(
+        message.result.content.find((c) => c.type === "text").text,
+      );
+    };
+    assert.ok(process.env.LAYMUX_FOCUS_WSL_URL?.endsWith(":19281/mcp"));
+    const wslProfile = await page.evaluate(
+      async () =>
+        (await import("/src/stores/settings-store.ts")).useSettingsStore
+          .getState()
+          .profiles.find((p) => /\bwsl(?:\.exe)?\b/i.test(p.commandLine))?.name,
+    );
+    assert.ok(
+      wslProfile,
+      "WSL shell profile is required for the WSL transport regression",
+    );
+    const { newPane: wslPane } = wslTool("split_pane", {
+      ...bgScope,
+      pane_index: 0,
+      direction: "horizontal",
+      profile: wslProfile,
+      cwd: "/tmp",
+    });
+    wslTool("write_to_terminal", {
+      terminal_id: wslPane.terminalId,
+      data: "printf WSL_BACKGROUND_FOCUS_OK",
+      capture_ms: 500,
+    });
+    let output;
+    const shellDeadline = Date.now() + 15_000;
+    do {
+      output = wslTool("read_terminal_output", {
+        terminal_id: wslPane.terminalId,
+        format: "text",
+        lines: 30,
+      });
+      if (/WSL_BACKGROUND_FOCUS_OK/.test(output.output)) break;
+      await page.waitForTimeout(200);
+    } while (Date.now() < shellDeadline);
+    assert.match(output.output, /WSL_BACKGROUND_FOCUS_OK/);
+    await unchanged(
+      "WSL MCP client creates and writes a background WSL pane",
+      owner,
+    );
+  }
+
+  const { newPane: bgStableSplit } = await tool("split_pane", {
+    pane_id: bgSplit.id,
+    direction: "horizontal",
+    profile,
+  });
+  await unchanged("background split by stable pane id", owner);
+  const { newPane: bgLayer } = await tool("stack_pane", {
+    pane_id: bgFirst,
+    view_type: "MemoView",
+  });
+  await unchanged("background stack by stable pane id", owner);
+  await tool("move_pane_layer", { layer_id: bgLayer.id, target_pane_index: 1 });
+  await unchanged("background move layer", owner);
+  await tool("extract_pane_layer", {
+    layer_id: bgLayer.id,
+    direction: "vertical",
+  });
+  await unchanged("background extract layer", owner);
+  await tool("swap_panes", { ...bgScope, source_index: 0, target_index: 1 });
+  await unchanged("background swap", owner);
+  await tool("merge_panes", { ...bgScope, source_index: 0, target_index: 1 });
+  await unchanged("background merge", owner);
+  const destination = await tool("create_workspace", {
+    name: "Background move destination",
+  });
+  createdIds.push(destination.workspace.id);
+  await tool("move_pane_to_workspace", {
+    pane_id: bgStableSplit.id,
+    source_workspace_id: background.workspace.id,
+    workspace_id: destination.workspace.id,
+  });
+  await tool("remove_pane", { pane_id: bgLayer.id, layer_id: bgLayer.id });
+  await unchanged(
+    "background stable-id creation, rearrangement, movement and cleanup",
+    owner,
+  );
+  for (const [name, args] of [
+    ["split_pane", { pane_index: 0, direction: "vertical" }],
+    ["stack_pane", { pane_index: 0 }],
+    ["remove_pane", { pane_index: 0 }],
+    ["resize_pane", { pane_index: 0, dw: 0.1 }],
+    ["swap_panes", { source_index: 0, target_index: 1 }],
+    ["merge_panes", { source_index: 0, target_index: 1 }],
+  ])
+    await tool(name, { ...args, workspace_id: "missing-workspace" }, true);
+  await unchanged(
+    "unknown workspace never falls back to human workspace",
+    owner,
+  );
+
+  const restSplitResponse = await fetch(`${base}/api/v1/panes/split`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paneId: bgFirst, direction: "vertical", profile }),
+  });
+  assert.ok(restSplitResponse.ok, await restSplitResponse.clone().text());
+  const restSplit = await restSplitResponse.json();
+  const restGrid = await (
+    await fetch(`${base}/api/v1/grid?workspaceId=${background.workspace.id}`)
+  ).json();
+  const restIndex = restGrid.panes.find(
+    (p) => p.paneId === restSplit.newPane.id,
+  ).paneIndex;
+  const removed = await fetch(
+    `${base}/api/v1/panes/${restIndex}?workspaceId=${background.workspace.id}&paneId=${restSplit.newPane.id}`,
+    { method: "DELETE" },
+  );
+  assert.ok(removed.ok, await removed.clone().text());
+  assert.equal((await removed.json()).removed, true);
+  await unchanged(
+    "REST background stable-id split, grid query and removal",
+    owner,
+  );
+
+  // Do not rely on instrumentation flushing React between each operation.
+  const burst = await tool("create_workspace", {
+    name: "Background mutation burst",
+  });
+  createdIds.push(burst.workspace.id);
+  const burstFirst = (await seedTerminal(burst.workspace.id, profile)).replace(
+    /^terminal-/,
+    "",
+  );
+  const burstScope = { workspace_id: burst.workspace.id };
+  const { newPane: burstRight } = await tool("split_pane", {
+    pane_id: burstFirst,
+    direction: "vertical",
+    profile,
+  });
+  const { newPane: burstBottom } = await tool("split_pane", {
+    pane_id: burstRight.id,
+    direction: "horizontal",
+    profile,
+  });
+  const { newPane: burstLayer } = await tool("stack_pane", {
+    pane_id: burstFirst,
+    view_type: "MemoView",
+  });
+  await tool("move_pane_layer", {
+    layer_id: burstLayer.id,
+    target_pane_index: 1,
+  });
+  await tool("extract_pane_layer", {
+    layer_id: burstLayer.id,
+    direction: "vertical",
+  });
+  await tool("swap_panes", { ...burstScope, source_index: 0, target_index: 1 });
+  await tool("merge_panes", {
+    ...burstScope,
+    source_index: 0,
+    target_index: 1,
+  });
+  await tool("move_pane_to_workspace", {
+    pane_id: burstBottom.id,
+    workspace_id: destination.workspace.id,
+  });
+  await tool("remove_pane", {
+    pane_id: burstLayer.id,
+    layer_id: burstLayer.id,
+  });
+  await unchanged(
+    "consecutive background mutations without instrumentation frame gaps",
+    owner,
+  );
+
   const { newPane: hidden } = await tool("stack_pane", {
     pane_index: 0,
     profile,
@@ -320,6 +593,14 @@ try {
   );
   await unchanged("human typing remains on the original terminal", owner);
   await page.screenshot({ path: path.join(artifacts, "preserved.png") });
+  const screenshot = await (
+    await fetch(`${base}/api/v1/screenshot`, { method: "POST" })
+  ).json();
+  assert.ok(screenshot.dataUrl?.startsWith("data:image/png;base64,"));
+  await writeFile(
+    path.join(artifacts, "api-preserved.png"),
+    Buffer.from(screenshot.dataUrl.split(",")[1], "base64"),
+  );
   await tool("focus_terminal", { terminal_id: hidden.terminalId });
   await page.waitForFunction(
     (id) =>
@@ -351,12 +632,15 @@ try {
   );
   await page.evaluate(() => {
     window.__mcpFocusEvents = [];
+    window.__mcpGridEvents = [];
+    window.__mcpWorkspaceEvents = [];
   });
   const shiftedOwner = await snapshot();
   await tool("split_pane", { pane_index: 0, direction: "horizontal", profile });
   await unchanged(
     "split before focused slot preserves input identity",
     shiftedOwner,
+    true,
   );
   await writeFile(
     path.join(artifacts, "result.json"),
@@ -378,6 +662,9 @@ try {
     const { useTerminalStore } = await import("/src/stores/terminal-store.ts");
     const state = useTerminalStartupStore.getState();
     return {
+      gridEvents: window.__mcpGridEvents,
+      workspaceEvents: window.__mcpWorkspaceEvents,
+      focusEvents: window.__mcpFocusEvents,
       activePaneId: state.activePaneId,
       eligible: state.eligiblePaneIds,
       revealed: [...state.revealedPaneIds],
@@ -399,6 +686,12 @@ try {
       document.removeEventListener("focusout", window.__mcpFocusListener, true);
       delete window.__mcpFocusListener;
       delete window.__mcpFocusEvents;
+      window.__mcpUnsubscribeGrid?.();
+      window.__mcpUnsubscribeWorkspace?.();
+      delete window.__mcpUnsubscribeGrid;
+      delete window.__mcpUnsubscribeWorkspace;
+      delete window.__mcpGridEvents;
+      delete window.__mcpWorkspaceEvents;
     });
   await tool("switch_workspace", { workspace_id: original.workspaceId });
   if (originalGrid.focusedTerminalId)

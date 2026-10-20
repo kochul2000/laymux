@@ -180,13 +180,17 @@ interface WorkspaceState {
   reorderWorkspaces: (fromId: string, toId: string, position?: "top" | "bottom") => void;
 
   // Pane manipulation (paneIndex = slot index, ADR-0297)
-  splitPane: (paneIndex: number, direction: "horizontal" | "vertical") => void;
+  splitPane: (
+    paneIndex: number,
+    direction: "horizontal" | "vertical",
+    workspaceId?: string,
+  ) => void;
   /**
    * Close one layer of the slot: `layerId`, or the active layer. Closing the
    * slot's last layer removes the slot and redistributes its space. The only
    * layer of the only slot cannot be closed.
    */
-  removePane: (paneIndex: number, layerId?: string) => void;
+  removePane: (paneIndex: number, layerId?: string, workspaceId?: string) => void;
   /** Close one content layer by stable id without switching its owning workspace. */
   removePaneById: (layerId: string) => boolean;
   /**
@@ -203,6 +207,7 @@ interface WorkspaceState {
     paneIndex: number,
     view?: ViewInstanceConfig,
     options?: { activate?: boolean },
+    workspaceId?: string,
   ) => string | null;
   /**
    * Make `layerId` the active layer of its slot in `workspaceId`. A pure state
@@ -212,8 +217,9 @@ interface WorkspaceState {
   resizePane: (
     paneIndex: number,
     delta: Partial<Pick<WorkspacePane, "x" | "y" | "w" | "h">>,
+    workspaceId?: string,
   ) => void;
-  swapPanes: (srcIndex: number, tgtIndex: number) => void;
+  swapPanes: (srcIndex: number, tgtIndex: number, workspaceId?: string) => void;
   /**
    * 드래그한 pane 을 다른 워크스페이스로 이동한다 (issue #380).
    * 소스 워크스페이스에서 제거(공간은 인접 pane 이 흡수, removePane 과 동일)하고
@@ -222,7 +228,7 @@ interface WorkspaceState {
    */
   movePaneToWorkspace: (paneId: string, targetWorkspaceId: string) => void;
   /**
-   * Move a layer to slot `targetSlotId` of the active workspace (ADR-0297).
+   * Move a layer to slot `targetSlotId` of its owning workspace (ADR-0297).
    * `index` is the position among the target's other layers (default: after
    * its active layer). Inside one slot this reorders; across slots the moved
    * layer becomes active in the target, and a source left empty is removed
@@ -242,7 +248,12 @@ interface WorkspaceState {
    */
   mergeSlotIntoStack: (srcSlotId: string, tgtSlotId: string) => boolean;
   /** Replace the view of `layerId` (default: the active layer) in the slot. */
-  setPaneView: (paneIndex: number, view: ViewInstanceConfig, layerId?: string) => void;
+  setPaneView: (
+    paneIndex: number,
+    view: ViewInstanceConfig,
+    layerId?: string,
+    workspaceId?: string,
+  ) => void;
 
   // Layout actions
   exportAsNewLayout: (name: string, workspaceId?: string) => boolean;
@@ -411,8 +422,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ workspaceDisplayOrder: order });
   },
 
-  splitPane: (paneIndex, direction) => {
-    const ws = get().getActiveWorkspace();
+  splitPane: (paneIndex, direction, workspaceId) => {
+    const ws = get().workspaces.find((w) => w.id === (workspaceId ?? get().activeWorkspaceId));
     if (!ws) return;
     if (paneIndex < 0 || paneIndex >= ws.panes.length) return;
 
@@ -457,8 +468,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     }
   },
 
-  stackPane: (paneIndex, view = { type: "EmptyView" }, options = {}) => {
-    const ws = get().getActiveWorkspace();
+  stackPane: (paneIndex, view = { type: "EmptyView" }, options = {}, workspaceId) => {
+    const ws = get().workspaces.find((w) => w.id === (workspaceId ?? get().activeWorkspaceId));
     if (!ws) return null;
     const pane = ws.panes[paneIndex];
     if (!pane) return null;
@@ -489,8 +500,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     return true;
   },
 
-  removePane: (paneIndex, layerId) => {
-    const ws = get().getActiveWorkspace();
+  removePane: (paneIndex, layerId, workspaceId) => {
+    const ws = get().workspaces.find((w) => w.id === (workspaceId ?? get().activeWorkspaceId));
     if (!ws) return;
     const slot = ws.panes[paneIndex];
     if (!slot) return;
@@ -543,8 +554,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     forgetSlotState(slot);
   },
 
-  resizePane: (paneIndex, delta) => {
-    const ws = get().getActiveWorkspace();
+  resizePane: (paneIndex, delta, workspaceId) => {
+    const ws = get().workspaces.find((w) => w.id === (workspaceId ?? get().activeWorkspaceId));
     if (!ws) return;
     if (paneIndex < 0 || paneIndex >= ws.panes.length) return;
 
@@ -555,8 +566,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     }));
   },
 
-  swapPanes: (srcIndex, tgtIndex) => {
-    const ws = get().getActiveWorkspace();
+  swapPanes: (srcIndex, tgtIndex, workspaceId) => {
+    const ws = get().workspaces.find((w) => w.id === (workspaceId ?? get().activeWorkspaceId));
     if (!ws) return;
     if (srcIndex < 0 || srcIndex >= ws.panes.length) return;
     if (tgtIndex < 0 || tgtIndex >= ws.panes.length) return;
@@ -636,7 +647,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
 
   moveLayer: (layerId, targetSlotId, index) => {
-    const ws = get().getActiveWorkspace();
+    const ws = get().workspaces.find((w) =>
+      w.panes.some((p) => p.layers.some((l) => l.id === layerId)),
+    );
     if (!ws) return false;
     const srcIndex = ws.panes.findIndex((p) => p.layers.some((layer) => layer.id === layerId));
     const tgtIndex = ws.panes.findIndex((p) => p.id === targetSlotId);
@@ -675,7 +688,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
 
   extractLayer: (layerId, direction) => {
-    const ws = get().getActiveWorkspace();
+    const ws = get().workspaces.find((w) =>
+      w.panes.some((p) => p.layers.some((l) => l.id === layerId)),
+    );
     if (!ws) return null;
     const srcIndex = ws.panes.findIndex((p) => p.layers.some((layer) => layer.id === layerId));
     if (srcIndex < 0) return null;
@@ -718,7 +733,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
 
   mergeSlotIntoStack: (srcSlotId, tgtSlotId) => {
-    const ws = get().getActiveWorkspace();
+    const ws = get().workspaces.find((w) => w.panes.some((p) => p.id === srcSlotId));
     if (!ws || srcSlotId === tgtSlotId) return false;
     const srcIndex = ws.panes.findIndex((p) => p.id === srcSlotId);
     const tgtIndex = ws.panes.findIndex((p) => p.id === tgtSlotId);
@@ -745,8 +760,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     return true;
   },
 
-  setPaneView: (paneIndex, view, layerId) => {
-    const ws = get().getActiveWorkspace();
+  setPaneView: (paneIndex, view, layerId, workspaceId) => {
+    const ws = get().workspaces.find((w) => w.id === (workspaceId ?? get().activeWorkspaceId));
     if (!ws) return;
     if (paneIndex < 0 || paneIndex >= ws.panes.length) return;
 

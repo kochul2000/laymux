@@ -40,6 +40,43 @@ use super::settings_bridge::{
 use super::worktree_usage::WorktreeUsageParam;
 use super::ServerState;
 
+mod pane_params;
+use pane_params::*;
+
+/// Exactly one of layer_id / terminal_id, as the bridge's layer params.
+fn layer_target_json(
+    layer_id: Option<String>,
+    terminal_id: Option<String>,
+) -> Result<serde_json::Value, CallToolResult> {
+    match (layer_id, terminal_id) {
+        (Some(layer_id), None) => Ok(json!({ "layerId": layer_id })),
+        (None, Some(terminal_id)) => Ok(json!({ "terminalId": terminal_id })),
+        _ => Err(CallToolResult::error(vec![Content::text(
+            "Provide exactly one of layer_id or terminal_id",
+        )])),
+    }
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+enum NotificationLevel {
+    Info,
+    Error,
+    Warning,
+    Success,
+}
+
+impl std::fmt::Display for NotificationLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NotificationLevel::Info => write!(f, "info"),
+            NotificationLevel::Error => write!(f, "error"),
+            NotificationLevel::Warning => write!(f, "warning"),
+            NotificationLevel::Success => write!(f, "success"),
+        }
+    }
+}
+
 // ── Parameter types ───────────────────────────────────────────────
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -423,165 +460,6 @@ struct CreateWorkspaceParam {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-struct PaneIndexParam {
-    /// Pane index (0-based)
-    pane_index: u64,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "lowercase")]
-enum SplitDirection {
-    Horizontal,
-    Vertical,
-}
-
-impl std::fmt::Display for SplitDirection {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SplitDirection::Horizontal => write!(f, "horizontal"),
-            SplitDirection::Vertical => write!(f, "vertical"),
-        }
-    }
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-struct SplitPaneParam {
-    /// Pane slot index in the active workspace (0-based, from get_active_workspace).
-    pane_index: u64,
-    /// horizontal splits top/bottom (new pane below); vertical splits left/right (new pane right).
-    direction: SplitDirection,
-    /// Terminal profile name for the new pane (e.g. "PowerShell", "WSL"). Use list_profiles to see available profiles.
-    profile: Option<String>,
-    /// Initial working directory; omitted inherits the split pane's active-layer CWD.
-    cwd: Option<String>,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-struct StackPaneParam {
-    /// Pane slot index in the active workspace (0-based, from get_active_workspace).
-    pane_index: u64,
-    /// View type of the new layer (default "TerminalView")
-    view_type: Option<String>,
-    /// Terminal profile name for the new layer (e.g. "PowerShell", "WSL")
-    profile: Option<String>,
-    /// Initial working directory; omitted → the slot's active layer CWD
-    cwd: Option<String>,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct ActivatePaneLayerParam {
-    /// Layer id (the `id` of a pane entry in get_active_workspace). Provide exactly one of layer_id and terminal_id.
-    layer_id: Option<String>,
-    /// Terminal id of the layer (e.g. "terminal-pane-1234abcd"). Provide exactly one of layer_id and terminal_id.
-    terminal_id: Option<String>,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-struct MovePaneLayerParam {
-    /// Layer id (the `id` of a pane entry in get_active_workspace). Provide exactly one of layer_id and terminal_id.
-    layer_id: Option<String>,
-    /// Terminal id of the layer (e.g. "terminal-pane-1234abcd"). Provide exactly one of layer_id and terminal_id.
-    terminal_id: Option<String>,
-    /// Pane slot index in the active workspace (0-based). Moving onto its own slot reorders.
-    target_pane_index: u64,
-    /// Position among the target slot's other layers (default: after its active layer)
-    index: Option<u64>,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-struct ExtractPaneLayerParam {
-    /// Layer id (the `id` of a pane entry in get_active_workspace). Provide exactly one of layer_id and terminal_id.
-    layer_id: Option<String>,
-    /// Terminal id of the layer (e.g. "terminal-pane-1234abcd"). Provide exactly one of layer_id and terminal_id.
-    terminal_id: Option<String>,
-    /// Split direction of the new slot, as in split_pane
-    direction: SplitDirection,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-struct MergePanesParam {
-    /// Source slot index in the active workspace (0-based). All layers move and this slot is removed.
-    source_index: u64,
-    /// Target slot index in the active workspace (0-based) that receives the layers.
-    target_index: u64,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-struct MovePaneToWorkspaceParam {
-    /// Pane slot index in the active workspace (0-based); every layer of the slot moves.
-    pane_index: u64,
-    /// Target workspace id (from list_workspaces)
-    workspace_id: String,
-}
-
-/// Exactly one of layer_id / terminal_id, as the bridge's layer params.
-fn layer_target_json(
-    layer_id: Option<String>,
-    terminal_id: Option<String>,
-) -> Result<serde_json::Value, CallToolResult> {
-    match (layer_id, terminal_id) {
-        (Some(layer_id), None) => Ok(json!({ "layerId": layer_id })),
-        (None, Some(terminal_id)) => Ok(json!({ "terminalId": terminal_id })),
-        _ => Err(CallToolResult::error(vec![Content::text(
-            "Provide exactly one of layer_id or terminal_id",
-        )])),
-    }
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-struct RemovePaneParam {
-    /// Pane slot index in the active workspace (0-based, from get_active_workspace).
-    pane_index: u64,
-    /// Layer to close in a stacked slot (default: the active layer). Closing the
-    /// last layer removes the slot.
-    layer_id: Option<String>,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "lowercase")]
-enum NotificationLevel {
-    Info,
-    Error,
-    Warning,
-    Success,
-}
-
-impl std::fmt::Display for NotificationLevel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            NotificationLevel::Info => write!(f, "info"),
-            NotificationLevel::Error => write!(f, "error"),
-            NotificationLevel::Warning => write!(f, "warning"),
-            NotificationLevel::Success => write!(f, "success"),
-        }
-    }
-}
-
-/// Resize a pane by adjusting its dimensions.
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-struct ResizePaneParam {
-    /// Pane index to resize (0-based)
-    pane_index: u64,
-    /// Width delta in normalized workspace units, limited by the shared boundary.
-    /// 0.1 requests 10 percentage points of workspace width, subject to neighbor/minimum sizes.
-    #[serde(default)]
-    dw: Option<f64>,
-    /// Height delta in normalized workspace units, limited by the shared boundary.
-    /// -0.1 requests 10 percentage points less workspace height, subject to neighbor/minimum sizes.
-    #[serde(default)]
-    dh: Option<f64>,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-struct SwapPanesParam {
-    /// First pane index (0-based)
-    source_index: u64,
-    /// Second pane index (0-based)
-    target_index: u64,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct ScreenshotParam {
     /// Capture a pane by its 0-based slot index (optional — omit for the full IDE).
     pane_index: Option<u64>,
@@ -597,14 +475,6 @@ struct SetEditModeParam {
 struct SimulateHoverParam {
     /// Pane index to mark as hovered. Omit or pass null to clear automation hover.
     pane_index: Option<u64>,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-struct SetPaneViewParam {
-    /// Pane index (0-based)
-    pane_index: u64,
-    /// View config object, e.g. {"type":"TerminalView","profile":"PowerShell"}.
-    view: Value,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -1351,7 +1221,7 @@ impl McpHandler {
         method: &str,
         params: Value,
     ) -> Result<Value, CallToolResult> {
-        bridge_request(&self.state, category, target, method, params)
+        let data = bridge_request(&self.state, category, target, method, params)
             .await
             .map_err(|(_status, axum::Json(body))| {
                 let msg = body
@@ -1359,7 +1229,20 @@ impl McpHandler {
                     .and_then(|v| v.as_str())
                     .unwrap_or("Bridge request failed");
                 CallToolResult::error(vec![Content::text(msg)])
-            })
+            })?;
+        Self::require_bridge_success(data)
+    }
+
+    fn require_bridge_success(data: Value) -> Result<Value, CallToolResult> {
+        if data.get("success").and_then(Value::as_bool) == Some(false) {
+            return Err(CallToolResult::error(vec![Content::text(
+                data.get("error")
+                    .and_then(Value::as_str)
+                    .filter(|message| !message.is_empty())
+                    .unwrap_or("Frontend rejected the request"),
+            )]));
+        }
+        Ok(data)
     }
 
     /// Bridge request, transform the JSON payload in-place, then return a normal JSON tool result.
@@ -2751,12 +2634,22 @@ impl McpHandler {
 
     // ── Grid/Pane ──
 
-    /// Get grid state: editMode, focusedPaneIndex, activeWorkspaceId, and the
+    /// Inspect the grid of workspace_id without navigating (omitted: current workspace).
+    /// Focus fields always describe the real human focus: editMode, focusedPaneIndex, activeWorkspaceId, and the
     /// focus pair focusedDock/focusedTerminalId (focus lives on the grid axis or
     /// the dock axis; focusedTerminalId is the resolved winner, null if neither).
     #[tool]
-    async fn get_grid_state(&self) -> Result<CallToolResult, ErrorData> {
-        self.bridge("query", "grid", "getState", json!({})).await
+    async fn get_grid_state(
+        &self,
+        Parameters(p): Parameters<WorkspaceScopeParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.bridge(
+            "query",
+            "grid",
+            "getState",
+            json!({"workspaceId": p.workspace_id}),
+        )
+        .await
     }
 
     /// Dev-only: enable or disable grid edit mode for automated layout tests.
@@ -2774,7 +2667,8 @@ impl McpHandler {
         .await
     }
 
-    /// Focus a pane slot in the active workspace by its 0-based pane_index.
+    /// Explicitly navigate to a pane by stable pane_id or workspace_id + pane_index.
+    /// Never use this or switch_workspace to prepare background work.
     /// Get indices from get_active_workspace; terminal pane_number is a different locator.
     #[tool]
     async fn focus_pane(
@@ -2785,7 +2679,7 @@ impl McpHandler {
             "action",
             "grid",
             "focusPane",
-            json!({ "index": p.pane_index }),
+            json!({ "index": p.pane_index, "paneId": p.pane_id, "workspaceId": p.workspace_id }),
         )
         .await
     }
@@ -2806,7 +2700,8 @@ impl McpHandler {
         .await
     }
 
-    /// Split a pane horizontally or vertically. Returns info about the new pane created.
+    /// Split a pane in any workspace by pane_id or workspace_id + pane_index.
+    /// Never switch_workspace before creating, inspecting, writing or removing panes.
     /// Keyboard focus stays on the pane the user had focused (ADR-0324).
     /// The response includes a `ready` field: when false, the terminal is allocated but
     /// its PTY is still starting. `write_to_terminal` waits automatically without
@@ -2816,7 +2711,7 @@ impl McpHandler {
         &self,
         Parameters(p): Parameters<SplitPaneParam>,
     ) -> Result<CallToolResult, ErrorData> {
-        let mut params = json!({ "paneIndex": p.pane_index, "direction": p.direction.to_string() });
+        let mut params = json!({ "paneIndex": p.pane_index, "paneId": p.pane_id, "workspaceId": p.workspace_id, "direction": p.direction.to_string() });
         if let Some(profile) = p.profile {
             params["profile"] = json!(profile);
         }
@@ -2826,7 +2721,8 @@ impl McpHandler {
         self.bridge("action", "panes", "split", params).await
     }
 
-    /// Stack a new background layer on a pane slot (ADR-0328), preserving its size,
+    /// Stack a background layer in any workspace (pane_id or workspace_id + pane_index).
+    /// Never switch_workspace first. Preserves its size,
     /// displayed layer and keyboard focus throughout creation. Defaults to a
     /// TerminalView starting in the slot's active-layer CWD, ready for input without
     /// being displayed. write_to_terminal waits for readiness without navigation. Response is like
@@ -2837,7 +2733,7 @@ impl McpHandler {
         &self,
         Parameters(p): Parameters<StackPaneParam>,
     ) -> Result<CallToolResult, ErrorData> {
-        let mut params = json!({ "paneIndex": p.pane_index });
+        let mut params = json!({ "paneIndex": p.pane_index, "paneId": p.pane_id, "workspaceId": p.workspace_id });
         if let Some(view_type) = p.view_type {
             params["viewType"] = json!(view_type);
         }
@@ -2886,7 +2782,7 @@ impl McpHandler {
     }
 
     /// Move a stacked layer (ADR-0298), like dragging a stack tab: onto its own slot
-    /// it reorders (`index`), onto another slot of the active workspace it joins that
+    /// it reorders (`index`), onto another slot of its owning workspace it joins that
     /// stack and is shown there. A slot left empty is removed and its space
     /// redistributed. Keyboard focus does not move. Single-layer panes are layers too,
     /// so this also stacks one pane onto another.
@@ -2903,6 +2799,7 @@ impl McpHandler {
         if let Some(index) = p.index {
             params["index"] = json!(index);
         }
+        params["workspaceId"] = json!(p.workspace_id);
         self.bridge("action", "panes", "moveLayer", params).await
     }
 
@@ -2918,6 +2815,7 @@ impl McpHandler {
             Err(result) => return Ok(result),
         };
         params["direction"] = json!(p.direction.to_string());
+        params["workspaceId"] = json!(p.workspace_id);
         self.bridge("action", "panes", "extractLayer", params).await
     }
 
@@ -2933,12 +2831,12 @@ impl McpHandler {
             "action",
             "panes",
             "merge",
-            json!({ "sourceIndex": p.source_index, "targetIndex": p.target_index }),
+            json!({ "workspaceId": p.workspace_id, "sourceIndex": p.source_index, "targetIndex": p.target_index }),
         )
         .await
     }
 
-    /// Move a whole pane slot (every stacked layer) from the active workspace to
+    /// Move a whole pane slot (every stacked layer) from the selected source workspace to
     /// another workspace (ADR-0298), like dropping a control bar on a workspace. The
     /// target's largest pane is split to host it. Refuses to empty the source
     /// workspace.
@@ -2951,12 +2849,13 @@ impl McpHandler {
             "action",
             "panes",
             "moveToWorkspace",
-            json!({ "paneIndex": p.pane_index, "workspaceId": p.workspace_id }),
+            json!({ "paneIndex": p.pane_index, "paneId": p.pane_id, "sourceWorkspaceId": p.source_workspace_id, "workspaceId": p.workspace_id }),
         )
         .await
     }
 
-    /// Remove a pane from the active workspace grid. In a stacked slot (ADR-0297)
+    /// Remove a pane directly in any workspace by pane_id or workspace_id + pane_index.
+    /// Never switch_workspace for cleanup. In a stacked slot (ADR-0297)
     /// this closes one layer — `layer_id`, or the active layer — and the slot stays;
     /// closing the last layer removes the slot and remaining panes redistribute space.
     #[tool]
@@ -2964,7 +2863,7 @@ impl McpHandler {
         &self,
         Parameters(p): Parameters<RemovePaneParam>,
     ) -> Result<CallToolResult, ErrorData> {
-        let mut params = json!({ "paneIndex": p.pane_index });
+        let mut params = json!({ "paneIndex": p.pane_index, "paneId": p.pane_id, "workspaceId": p.workspace_id });
         if let Some(layer_id) = p.layer_id {
             params["layerId"] = json!(layer_id);
         }
@@ -2998,12 +2897,12 @@ impl McpHandler {
             "action",
             "panes",
             "resize",
-            json!({ "paneIndex": p.pane_index, "delta": delta }),
+            json!({ "paneIndex": p.pane_index, "paneId": p.pane_id, "workspaceId": p.workspace_id, "delta": delta }),
         )
         .await
     }
 
-    /// Swap two panes' positions in the grid.
+    /// Swap two pane positions in workspace_id (omitted: current workspace), without navigation.
     #[tool]
     async fn swap_panes(
         &self,
@@ -3013,7 +2912,7 @@ impl McpHandler {
             "action",
             "panes",
             "swap",
-            json!({ "sourceIndex": p.source_index, "targetIndex": p.target_index }),
+            json!({ "workspaceId": p.workspace_id, "sourceIndex": p.source_index, "targetIndex": p.target_index }),
         )
         .await
     }
@@ -3042,7 +2941,7 @@ impl McpHandler {
             "action",
             "panes",
             "setView",
-            json!({ "paneIndex": p.pane_index, "view": view }),
+            json!({ "paneIndex": p.pane_index, "paneId": p.pane_id, "workspaceId": p.workspace_id, "view": view }),
         )
         .await
     }
@@ -3781,6 +3680,10 @@ impl ServerHandler for McpHandler {
             .with_instructions(
                 "Laymux IDE automation via MCP. \
                  Display images/files to the user, control terminals, workspaces and grid layout, and inspect screenshots.\n\n\
+                 Background work must preserve the user's workspace and keyboard focus. \
+                 Target panes with pane_id or workspace_id + pane_index; never switch_workspace \
+                 to create, split, stack, inspect, write, rearrange or remove them. \
+                 Use switch_workspace, focus_pane and focus_terminal only for user-requested navigation.\n\n\
                  ## Show images and files to the user\n\
                  이미지·차트·파일을 '화면에 보여줘', '띄워줘' 요청하면 아래 표시 도구를 실제로 호출한다.\n\
                  When the user asks to show, display, open or preview an image/chart/file on screen \
@@ -4136,6 +4039,28 @@ pub(crate) fn workspace_list_summary(data: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frontend_rejection_is_an_mcp_tool_error_instead_of_a_successful_text_result() {
+        let result = McpHandler::require_bridge_success(
+            json!({"success":false,"error":"Workspace 'missing' not found"}),
+        )
+        .unwrap_err();
+        assert_eq!(result.is_error, Some(true));
+        assert!(serde_json::to_string(&result)
+            .unwrap()
+            .contains("Workspace 'missing' not found"));
+        let result =
+            McpHandler::require_bridge_success(json!({"success":false,"error":""})).unwrap_err();
+        assert!(serde_json::to_string(&result)
+            .unwrap()
+            .contains("Frontend rejected the request"));
+        let partial = json!({"items":[{"success":false}],"complete":false});
+        assert_eq!(
+            McpHandler::require_bridge_success(partial.clone()).unwrap(),
+            partial
+        );
+    }
 
     #[test]
     fn param_types_deserialize() {
@@ -5544,7 +5469,7 @@ mod tests {
 
         let view: SetPaneViewParam =
             serde_json::from_str(r#"{"pane_index":0,"view":{"type":"MemoView"}}"#).unwrap();
-        assert_eq!(view.pane_index, 0);
+        assert_eq!(view.pane_index, Some(0));
         assert_eq!(view.view["type"], "MemoView");
     }
 

@@ -230,6 +230,7 @@ Workspace (Independent)
 
 - **헬퍼 단일 소유**: 활성 레이어 조회, 평탄화(`layerEntries`), 레이어 삽입·제거·활성화·순서 변경, 영속 형태 변환은 `ui/src/lib/pane-layers.ts` 순수 함수가 소유한다. 컴포넌트는 `layers`/`activeLayerId` 를 직접 쓰지 않고 `workspace-store` 액션(`stackPane`·`setActiveLayer`·`removePane(index, layerId?)`·`removeSlot`·`setPaneView(index, view, layerId?)`)을 부른다.
 - **id 역할**: 슬롯 id 는 swap·워크스페이스 간 이동·pane 오버라이드(`controlBarMode`) 키다. 레이어 id 는 콘텐츠 키다 — `terminal-<layerId>`, view 오버라이드, 메모, 재시작/CWD 시드 버스, 알림, hidden flag, 시작 코디네이터, 출력 캐시. 새 슬롯은 첫 레이어 id 를 슬롯 id 와 같게 만들지만 이는 생성 규칙이지 불변식이 아니다.
+- **Automation 대상 지정**([ADR-0350](../adr/0350-automation-targets-background-workspaces.md)): `lib/automation-pane-target.ts`가 명시한 workspace·안정적인 pane ID·인덱스의 일치를 검증한다. 대상 선택은 화면 탐색과 독립적이다. `workspace-store`의 split·stack·remove·resize·swap·setPaneView는 workspace를 직접 받을 수 있고, 레이어 재배치는 ID의 소유 workspace 안에서 동작한다. UI는 기존 활성 workspace 기본값과 명시적 포커스 액션을 유지한다.
 - **번호**: `paneNumber` 는 레이어 단위다. 슬롯 읽기 순서 안에서 레이어 순서로 연번을 매기므로 `computePaneNumbers()` 결과는 레이어 id 로 조회한다. 슬롯의 보이는 번호는 활성 레이어 id 로 찾는다.
 - **영속**: 메모리는 항상 `layers` 형태다. `settings.json` 은 레이어 하나이고 그 id 가 슬롯 id 와 같으면 기존 축약형 `{ id, x, y, w, h, view }` 로, 그 밖에는 `{ id, x, y, w, h, layers, activeLayerId }` 로 쓴다(`toPersistedPane`). 읽기는 두 형태 모두 받는다(`normalizeWorkspacePane`, Rust `WorkspacePane::content_views`). 레이아웃 템플릿도 레이어가 둘 이상일 때만 `layers`·`activeLayerIndex` 를 쓰고, `viewType` 은 활성 레이어 값으로 남긴다.
 - **dock 은 대상이 아니다**: dock pane 은 `{ id, view }` 그대로이며 `PaneGrid` 에는 단일 레이어 슬롯으로 어댑트(`toGridSlot`)되어 들어간다.

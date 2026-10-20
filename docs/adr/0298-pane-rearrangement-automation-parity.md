@@ -1,6 +1,6 @@
 # 0298. Pane 재배치를 사용자 조작 수준까지 Automation/MCP 에 연다
 
-- Status: Accepted
+- Status: Superseded by [0350](0350-automation-targets-background-workspaces.md) (활성 workspace 한정 대상 범위에 한함)
 - Date: 2026-10-07
 - Source: 사용자 요구("유저가 할 수 있는 정도까지는 넣어줘야지", 2026-10-07), [ADR-0297](0297-pane-stack-slot-layer-model.md) 2차 범위(레이어 재배치), issue #380(워크스페이스 간 이동), [api-contracts.md](../architecture/api-contracts.md) §12 Automation API·MCP
 - Relation: [ADR-0297](0297-pane-stack-slot-layer-model.md)의 Automation 계약(`stack_pane`·`activate_pane_layer`·`remove_pane(layer_id)`)을 재배치까지 확장한다. ADR-0297 의 결정은 바꾸지 않는다.

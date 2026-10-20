@@ -81,7 +81,11 @@ pub struct EditModeBody {
 #[derive(Deserialize)]
 pub struct FocusPaneBody {
     #[serde(rename = "paneIndex")]
-    pub pane_index: usize,
+    pub pane_index: Option<usize>,
+    #[serde(rename = "paneId")]
+    pub pane_id: Option<String>,
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -92,7 +96,11 @@ pub struct SimulateHoverBody {
 #[derive(Deserialize)]
 pub struct SplitPaneBody {
     #[serde(rename = "paneIndex")]
-    pub pane_index: usize,
+    pub pane_index: Option<usize>,
+    #[serde(rename = "paneId")]
+    pub pane_id: Option<String>,
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: Option<String>,
     pub direction: String,
     /// 새 pane 의 터미널 프로파일. 생략하면 기본 프로파일.
     pub profile: Option<String>,
@@ -105,7 +113,11 @@ pub struct SplitPaneBody {
 #[derive(Deserialize)]
 pub struct StackPaneBody {
     #[serde(rename = "paneIndex")]
-    pub pane_index: usize,
+    pub pane_index: Option<usize>,
+    #[serde(rename = "paneId")]
+    pub pane_id: Option<String>,
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: Option<String>,
     /// View type of the new layer. Default `TerminalView`, like `split_pane`.
     #[serde(rename = "viewType")]
     pub view_type: Option<String>,
@@ -132,6 +144,8 @@ pub struct ActivateLayerBody {
 /// Exactly one of `layerId` / `terminalId` identifies the layer.
 #[derive(Deserialize)]
 pub struct MoveLayerBody {
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: Option<String>,
     #[serde(rename = "layerId")]
     pub layer_id: Option<String>,
     #[serde(rename = "terminalId")]
@@ -146,6 +160,8 @@ pub struct MoveLayerBody {
 /// into its own slot, splitting its current slot like `panes/split`.
 #[derive(Deserialize)]
 pub struct ExtractLayerBody {
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: Option<String>,
     #[serde(rename = "layerId")]
     pub layer_id: Option<String>,
     #[serde(rename = "terminalId")]
@@ -158,6 +174,8 @@ pub struct ExtractLayerBody {
 /// `sourceIndex` onto slot `targetIndex` and remove the source slot.
 #[derive(Deserialize)]
 pub struct MergePanesBody {
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: Option<String>,
     #[serde(rename = "sourceIndex")]
     pub source_index: usize,
     #[serde(rename = "targetIndex")]
@@ -168,6 +186,10 @@ pub struct MergePanesBody {
 /// slot (every layer) to another workspace.
 #[derive(Deserialize)]
 pub struct MovePaneToWorkspaceBody {
+    #[serde(rename = "sourceWorkspaceId")]
+    pub source_workspace_id: Option<String>,
+    #[serde(rename = "paneId")]
+    pub pane_id: Option<String>,
     #[serde(rename = "workspaceId")]
     pub workspace_id: String,
 }
@@ -175,12 +197,20 @@ pub struct MovePaneToWorkspaceBody {
 /// `DELETE /api/v1/panes/{index}?layerId=` (ADR-0297): close one layer.
 #[derive(Deserialize)]
 pub struct RemovePaneQuery {
+    #[serde(rename = "paneId")]
+    pub pane_id: Option<String>,
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: Option<String>,
     #[serde(rename = "layerId")]
     pub layer_id: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub struct SetViewBody {
+    #[serde(rename = "paneId")]
+    pub pane_id: Option<String>,
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: Option<String>,
     #[serde(rename = "type")]
     pub view_type: String,
     #[serde(flatten)]
@@ -363,6 +393,36 @@ mod tests {
     use tower::ServiceExt;
 
     #[test]
+    fn background_targets_deserialize_without_requiring_an_active_workspace_switch() {
+        let split: SplitPaneBody =
+            serde_json::from_value(serde_json::json!({"paneId":"layer", "direction":"vertical"}))
+                .unwrap();
+        assert_eq!(split.pane_id.as_deref(), Some("layer"));
+        assert!(split.pane_index.is_none());
+        let stack: StackPaneBody =
+            serde_json::from_value(serde_json::json!({"workspaceId":"background", "paneIndex":1}))
+                .unwrap();
+        assert_eq!(stack.workspace_id.as_deref(), Some("background"));
+        let focus: FocusPaneBody =
+            serde_json::from_value(serde_json::json!({"paneId":"layer"})).unwrap();
+        assert_eq!(focus.pane_id.as_deref(), Some("layer"));
+        let remove: RemovePaneQuery = serde_json::from_value(
+            serde_json::json!({"workspaceId":"background", "paneId":"layer", "layerId":"layer"}),
+        )
+        .unwrap();
+        assert_eq!(remove.workspace_id.as_deref(), Some("background"));
+        assert_eq!(remove.pane_id.as_deref(), remove.layer_id.as_deref());
+        let moved: MovePaneToWorkspaceBody = serde_json::from_value(serde_json::json!({"sourceWorkspaceId":"background", "paneId":"layer", "workspaceId":"destination"})).unwrap();
+        assert_eq!(moved.source_workspace_id.as_deref(), Some("background"));
+        assert_eq!(moved.workspace_id, "destination");
+        let view: SetViewBody = serde_json::from_value(serde_json::json!({"workspaceId":"background", "paneId":"layer", "type":"MemoView", "profile":"example"})).unwrap();
+        assert_eq!(view.workspace_id.as_deref(), Some("background"));
+        assert!(!view.extra.contains_key("workspaceId"));
+        assert!(!view.extra.contains_key("paneId"));
+        assert_eq!(view.extra["profile"], "example");
+    }
+
+    #[test]
     fn automation_request_serializes() {
         let req = AutomationRequest {
             request_id: "abc-123".into(),
@@ -436,7 +496,7 @@ mod tests {
     fn split_pane_body_deserializes() {
         let json = r#"{"paneIndex":0,"direction":"vertical"}"#;
         let body: SplitPaneBody = serde_json::from_str(json).unwrap();
-        assert_eq!(body.pane_index, 0);
+        assert_eq!(body.pane_index, Some(0));
         assert_eq!(body.direction, "vertical");
         // 생략하면 프론트가 CWD 를 상속한다(ADR-0140).
         assert_eq!(body.profile, None);
@@ -604,4 +664,11 @@ mod tests {
     fn single_pane_clear_route_is_registered_by_pane_id() {
         assert!(REGISTERED_ROUTES.contains(&("POST", "/api/v1/panes/{paneId}/clear")));
     }
+}
+
+/// Workspace selection for inspecting a grid without navigation.
+#[derive(Deserialize)]
+pub struct WorkspaceScopeQuery {
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: Option<String>,
 }
