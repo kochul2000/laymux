@@ -1,8 +1,8 @@
 # 0347. 보관된 출력 envelope를 바이너리로 읽고 checkpoint는 Worker에서 계산한다
 
-- Status: Proposed
-- Date: 2026-10-19
-- Source: 사용자 요청(현재 상태와 세 가지 최적화의 누적 벤치 비교), issue #1233, architecture/data-flow.md §8.8·§8.23, ADR-0069·0095·0098
+- Status: Accepted
+- Date: 2026-10-20
+- Source: 사용자 요청(단계별 벤치와 기본 true인 고급 설정 승인), issue #1233, PR #1236의 데몬 보존 재연결, architecture/data-flow.md §8.8·§8.23, ADR-0069·0095·0098·0346
 - Extends: ADR-0095의 desktop 전달 표현과 ADR-0069의 checkpoint 실행 위치. sequence·receipt·parsed ACK·geometry·복구·가중 admission 계약은 유지한다.
 
 ## Context
