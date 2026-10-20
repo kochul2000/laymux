@@ -1269,8 +1269,8 @@ lease 갱신에 성공한 heartbeat 응답은 항상 경로 없는 PC 뷰어 신
 
 | Tool | 구현 방식 | 설명 |
 |------|-----------|------|
-| `get_grid_state` | bridge_request | 그리드 상태 조회 (`editMode`, `focusedPane`, `activeWorkspaceId`) |
-| `focus_pane` | bridge_request | 인덱스 기반 팬 포커스 |
+| `get_grid_state` | bridge_request | `workspace_id`로 비활성 workspace의 pane 매핑도 조회. `workspaceId`는 조회 대상, `activeWorkspaceId`·`focused*`는 실제 사용자 포커스의 전역 값 |
+| `focus_pane` | bridge_request | `pane_id` 또는 `workspace_id` + `pane_index`로 명시적 탐색·포커스 |
 | `split_pane` | bridge_request | 팬 분할 (`ready` 필드로 렌더 완료 여부 표시). `cwd` 생략 시 분할 대상 팬의 CWD 를 상속하고, 주면 그 값이 이긴다 ([ADR-0140](../adr/0140-split-pane-inherits-source-cwd.md)). 키보드 포커스는 사용자가 보던 슬롯에 남는다 ([ADR-0324](../adr/0324-automation-never-navigates-user.md)) |
 | `stack_pane` | bridge_request | 슬롯에 레이어 쌓기(`view_type` 기본 `TerminalView`, `profile`, `cwd`, `ready`). 기존 표시 레이어·포커스를 유지하며 `write_to_terminal`은 표시 전환 없이 준비를 기다린다. 표시하려면 `activate_pane_layer`를 명시적으로 호출한다 ([ADR-0328](../adr/0328-automation-stack-keeps-visible-layer.md)) |
 | `activate_pane_layer` | bridge_request | `layer_id` 또는 `terminal_id`로 스택 레이어를 표시하며 워크스페이스·포커스를 유지한다. `focus` 인자는 제거됐으며 알 수 없는 인자는 거부한다. 입력 중인 슬롯의 다른 레이어 교체는 사전 거부한다. 이동은 별도 `focus_terminal`로 요청한다 ([ADR-0342](../adr/0342-automation-layer-activation-explicit-focus.md)) |
@@ -1282,6 +1282,33 @@ lease 갱신에 성공한 heartbeat 응답은 항상 경로 없는 PC 뷰어 신
 | `merge_panes` | bridge_request | 컨트롤 바 → 스택 띠 — `source_index` 슬롯의 모든 레이어를 `target_index` 스택에 쌓고 소스 슬롯 제거 ([ADR-0298](../adr/0298-pane-rearrangement-automation-parity.md)) |
 | `move_pane_to_workspace` | bridge_request | 컨트롤 바 → 워크스페이스 — 슬롯 통째를 다른 워크스페이스로 이동 ([ADR-0298](../adr/0298-pane-rearrangement-automation-parity.md)) |
 | `list_layouts` | bridge_request | 저장된 레이아웃 목록 |
+
+**화면과 독립적인 대상 지정 ([ADR-0350](../adr/0350-automation-targets-background-workspaces.md))**
+
+`split_pane`·`stack_pane`·`remove_pane`·`resize_pane`·dev의 `set_pane_view`는 `pane_id` 또는 `workspace_id` + `pane_index`를 받는다. `pane_id`는 슬롯 ID 또는 해당 슬롯의 레이어 ID이며 슬롯을 지정한다. 삭제할 특정 레이어는 기존 `layer_id`로 지정한다. 인덱스는 0부터 시작하며 공간 번호(`pane_number`)와 다르다. ID가 있으면 전역에서 소유 workspace를 찾고, 함께 준 workspace·인덱스는 반드시 같은 대상을 가리켜야 한다. 명시한 알 수 없는 workspace·ID·음수·소수·범위 밖 인덱스는 활성 workspace로 fallback하지 않는다. 지속 작업은 ID나 workspace를 명시한다.
+
+`swap_panes`·`merge_panes`의 두 인덱스는 `workspace_id` 범위다. `move_pane_layer`·`extract_pane_layer`는 레이어 ID로 소유 workspace를 찾으며 선택적 `workspace_id`는 그 소유권을 검증한다. 레이어 이동의 목적 인덱스는 그 workspace 안에서 해석한다. `move_pane_to_workspace`는 안정적인 `pane_id` 또는 `source_workspace_id` + `pane_index`로 출발 슬롯을 지정하고, 기존 `workspace_id`는 목적지 의미를 유지한다. workspace를 지정하지 않은 인덱스 호출만 활성 workspace를 기본값으로 쓴다. 같은 동작의 REST 요청은 `workspaceId`·`paneId`·`sourceWorkspaceId`를 사용한다. 경로 인덱스와 ID를 함께 주면 일치 여부를 검사한다.
+
+생성·읽기·쓰기·정리를 위해 `switch_workspace`·`focus_pane`·`focus_terminal`을 선행 호출하지 않는다. 비활성 대상에 직접 적용하고 현재 사용자 workspace·살아남은 grid 슬롯·dock 포커스를 유지한다. 마지막 pane 삭제 등 실제 적용 불가 요청은 성공으로 위장하지 않고 오류다. 명시적 탐색 도구는 여전히 사용자 요청에 따른 화면 이동을 수행한다.
+
+MCP 공통 `bridge_raw`는 frontend 거부 본문(`success:false`)을 `CallToolResult::error`로 변환한다. 거부 사유를 유지하며 빈 오류 문구만 일반 거부 메시지로 대체한다. REST의 기존 실패 본문 형식은 유지한다.
+
+**MCP 72종 대상 범위 전수 조사 (2026-10-20, release 52 + dev 20)**
+
+| 범위 | 도구 | 판정 |
+| --- | --- | --- |
+| 단일 pane 대상 6 | `split_pane`, `stack_pane`, `remove_pane`, `resize_pane`, `focus_pane`, dev `set_pane_view` | 안정 ID·workspace 범위 추가. 앞의 비탐색 연산은 전환 없음, focus만 명시적 탐색 |
+| 재배치·격자 조회 6 | `swap_panes`, `merge_panes`, `move_pane_layer`, `extract_pane_layer`, `move_pane_to_workspace`, `get_grid_state` | 대상 workspace 직접 지정 또는 레이어 소유권 해석으로 활성 한정 제거 |
+| 레이어 표시 1 | `activate_pane_layer` | 이미 안정적인 레이어 ID로 전역 해석. 현재 입력 중인 콘텐츠를 숨기지 않는 ADR-0342 불변식 유지 |
+| 터미널·입출력·실행 10 | `list_terminals`, `identify_caller`, `write_to_terminal`, `write_to_neighbor`, `read_terminal_output`, `get_terminal_states`, `execute_command`, `search_terminal_output`, `broadcast_write`, `focus_terminal` | 이미 ID·workspace·caller 기반. focus만 명시적 탐색, 입출력에 탐색 불필요. 실행은 살아 있는 shell 검증 유지 |
+| workspace·layout 7 | `list_workspaces`, `get_active_workspace`, `create_workspace`, `rename_workspace`, `delete_workspace`, `switch_workspace`, `list_layouts` | 목록은 전체 구조 제공, CRUD는 ID 기반, active 조회·switch만 현재 화면을 명시적으로 다룸. 활성 workspace 자체 삭제 시 대체 선택은 필요 |
+| 설정 10 | `get_settings_context`, `describe_settings`, `get_settings`, `export_settings`, `validate_settings`, `update_settings`, `describe_remote_settings`, `get_remote_settings`, `validate_remote_settings`, `update_remote_settings` | PC·Remote 대상 및 revision·권한 경계를 유지. workspace 활성화 불필요 |
+| 관측·알림·메모 10 | `list_profiles`, `list_memos`, `read_memo`, `get_claude_usage`, `get_grok_usage`, `get_worktree_usage`, `list_notifications`, `send_notification`, `clear_notifications`, `take_screenshot` | 전역·안정 ID·명시 경로 기반. screenshot은 현재 표시 화면 캡처라는 본래 범위 유지 |
+| 파일 표시 3 | `open_file_viewer`, `show_image`, `close_file_viewer` | 사용자가 요청한 공유 뷰어 표시·닫기. 백그라운드 pane 접근과 별개 |
+| dev 설정·기기·표시 제어 15 | `create_android_pairing_payload`, `set_app_theme`, `update_profile`, `set_profile_defaults`, `open_settings`, `close_settings`, `toggle_settings`, `navigate_settings`, `toggle_remote_access`, `open_remote_access`, `close_remote_access`, `toggle_notification_panel`, `set_hidden_items_open`, `toggle_pane_hidden`, `toggle_workspace_hidden` | 전역 UI 또는 안정 ID 대상. UI를 조작하려는 명시적 도구의 표시 동작 유지 |
+| dev 화면·터미널 계측 4 | `simulate_hover`, `set_edit_mode`, `scroll_terminal`, `dump_terminal_buffer` | 앞의 두 도구는 실제 표시 중인 UI 계측, 뒤의 터미널 둘은 안정 ID. `set_pane_view`는 첫 행에 포함 |
+
+고유 72종을 대조했다. 대상 범위 외의 인증·shell 실행 허용·Remote 제어권·포커스 중인 콘텐츠 교체 거부 같은 의미 있는 불변식은 유지한다.
 
 **유틸리티 (10)**:
 
