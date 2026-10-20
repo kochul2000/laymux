@@ -40,6 +40,40 @@ async function attach(model: TerminalRenderCheckpointWorker, port: Port) {
   await result;
 }
 describe("checkpoint Worker admission and ownership", () => {
+  it("ignores late errors from a disposed Worker without cancelling its replacement", async () => {
+    const admission = { request: vi.fn(), cancel: vi.fn() };
+    const oldPort = new Port();
+    const oldModel = new TerminalRenderCheckpointWorker({ admission, createWorker: () => oldPort });
+    await attach(oldModel, oldPort);
+    const lateError = oldPort.onerror;
+    const lateMessageError = oldPort.onmessageerror;
+    oldModel.dispose();
+    const newPort = new Port();
+    const newModel = new TerminalRenderCheckpointWorker({ admission, createWorker: () => newPort });
+    await attach(newModel, newPort);
+    const applying = newModel.apply({
+      generation: 1,
+      seqStart: 0,
+      seqEnd: 1,
+      data: new Uint8Array([65]),
+      geometry,
+    });
+    await vi.waitFor(() => expect(admission.request).toHaveBeenCalledTimes(1));
+    admission.cancel.mockClear();
+    lateError?.(new ErrorEvent("error", { message: "late old worker error" }));
+    lateMessageError?.(new MessageEvent("messageerror"));
+    expect(admission.cancel).not.toHaveBeenCalled();
+    expect(oldPort.onerror).toBeNull();
+    expect(oldPort.onmessageerror).toBeNull();
+    const grant = admission.request.mock.calls[0][1] as (
+      release: () => void,
+      context: { maxBytes: number },
+    ) => void;
+    grant(() => {}, { maxBytes: 4096 });
+    newPort.reply(newPort.messages.at(-1)!.id);
+    await applying;
+    newModel.dispose();
+  });
   it("includes admission queue time in the capture deadline", async () => {
     const port = new Port();
     const admission = { request: vi.fn(), cancel: vi.fn() };

@@ -235,7 +235,13 @@ export class TerminalRenderCheckpointWorker {
   }
 
   private fail(error: Error): void {
-    this.failure ??= error;
+    // A replacement model may already use this pane's admission owner. Events
+    // queued by the old Worker must never cancel the replacement's lane.
+    if (this.failure) return;
+    this.failure = error;
+    this.worker.onmessage = null;
+    this.worker.onerror = null;
+    this.worker.onmessageerror = null;
     this.admission?.cancel("checkpoint");
     this.rejectScheduled?.(error);
     this.rejectScheduled = undefined;
