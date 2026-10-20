@@ -107,8 +107,12 @@ Google Play가 사용자에게 전달하는 최종 APK는 같은 인증서를 �
 
 Windows·Linux 데스크톱 release는 `stable`·`beta` 두 채널을 가지며, 각 채널의 최신 릴리스는
 `release-channels` 브랜치에 커밋된 `desktop-<channel>.json` 매니페스트가 SoT다 — GitHub에는 최신
-prerelease를 가리키는 고정 alias가 없다. release workflow는 main 계보와 tag/app version(`tauri.conf.json`
-+ `Cargo.toml`)을 검증한 뒤 draft Release에 두 플랫폼 bundle과 updater artifact를 만들고 GitHub Actions
+prerelease를 가리키는 고정 alias가 없다. 정기 release workflow의 desktop 배포는 Windows x86_64이며
+Linux 배포는 중단 상태다([ADR-0240](../adr/0240-windows-android-release-targets.md)). v2.1.0은 공개 태그에
+Linux 타입 명시 패치를 적용해 빌드한 Ubuntu deb와 checksum·패치·출처 파일을 직접 설치용으로 추가한다
+([ADR-0349](../adr/0349-v210-supplemental-ubuntu-deb.md)). 이 추가는 기존 updater 메타데이터와 채널 파일을
+바꾸지 않는다. release workflow는 main 계보와 tag/app version(`tauri.conf.json`
++ `Cargo.toml`)을 검증한 뒤 draft Release에 Windows bundle과 updater artifact를 만들고 GitHub Actions
 secret의 private key로 서명한다. prerelease는 tag가 `v?x.y.z-beta.N`이어야 하고 데스크톱 번들을
 NSIS·AppImage로 제한한다(RPM `Version`은 `-`를 담을 수 없다). 필요한 artifact job이 모두 성공한
 뒤에만 publish로 승격하고, 그 뒤 `channels` job이 발행된 릴리스의 `latest.json`을 검증해 채널 파일을
