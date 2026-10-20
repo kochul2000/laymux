@@ -77,6 +77,7 @@ impl MissedOutput {
 }
 
 pub struct DaemonPtySystem {
+    reconnect_control: Arc<super::ReconnectControl>,
     display_owner: super::DisplayContextOwner,
     endpoint: DaemonEndpoint,
     session_id: String,
@@ -111,6 +112,7 @@ impl DaemonPtySystem {
 
     fn with_target(endpoint: DaemonEndpoint, session_id: String, target: DaemonTarget) -> Self {
         Self {
+            reconnect_control: Arc::default(),
             display_owner: super::DisplayContextOwner {
                 endpoint: endpoint.clone(),
                 session_id: session_id.clone(),
@@ -133,13 +135,28 @@ impl DaemonPtySystem {
     pub fn display_context_owner(&self) -> super::DisplayContextOwner {
         self.display_owner.clone()
     }
+
+    pub(crate) fn reconnect(owner: &super::DisplayContextOwner, missed: Arc<MissedOutput>) -> Self {
+        let mut system = Self::adopt(owner.endpoint.clone(), owner.session_id.clone(), missed);
+        // Even an attach that fails later may have claimed a new epoch. The
+        // original handle retains explicit-close ownership across every retry.
+        system.display_owner.epoch = Arc::clone(&owner.epoch);
+        system.reconnect_control.preserve();
+        system
+    }
+
+    pub(crate) fn reconnect_control(&self) -> Arc<super::ReconnectControl> {
+        Arc::clone(&self.reconnect_control)
+    }
 }
 
 impl PtySystem for DaemonPtySystem {
     fn openpty(&self, size: PtySize) -> anyhow::Result<PtyPair> {
         let (writer, reader) = connect_authenticated(&self.endpoint)
             .map_err(|error| anyhow!("PTY daemon unavailable: {error}"))?;
+        self.reconnect_control.bind(&writer)?;
         let connection = Arc::new(Connection {
+            reconnect_control: Arc::clone(&self.reconnect_control),
             writer: Mutex::new(writer),
             reader: Mutex::new(Some(reader)),
             shared: Arc::new(Shared::default()),
@@ -163,6 +180,7 @@ impl PtySystem for DaemonPtySystem {
 }
 
 struct Connection {
+    reconnect_control: Arc<super::ReconnectControl>,
     /// Whole-frame writes: input, resize, terminate.
     writer: Mutex<Stream>,
     /// Consumed by `spawn_command` for the reply, then by the pump thread.
@@ -202,7 +220,19 @@ impl Connection {
         if attach_epoch.is_none() && !self.owns_session_id {
             return Ok(());
         }
-        terminate_by_id(&self.endpoint, &self.session_id, attach_epoch)
+        if self
+            .reconnect_control
+            .preserve_on_drop
+            .load(Ordering::Acquire)
+        {
+            super::reconnect::terminate_preserved_session(
+                &self.endpoint,
+                &self.session_id,
+                &self.attach_epoch,
+            )
+        } else {
+            terminate_by_id(&self.endpoint, &self.session_id, attach_epoch)
+        }
     }
 
     /// `request_terminate` with a few retries, for paths that cannot report
@@ -445,6 +475,15 @@ impl Drop for DaemonMaster {
     /// intent explicitly. A GUI that dies without dropping sends nothing and
     /// the daemon keeps the session (detach).
     fn drop(&mut self) {
+        if self
+            .connection
+            .reconnect_control
+            .preserve_on_drop
+            .load(Ordering::Acquire)
+        {
+            self.connection.reconnect_control.disconnect();
+            return;
+        }
         // `PtyHandle` drops the master while holding its master lock; the
         // acknowledged request must not stall resize behind a network wait.
         let connection = Arc::clone(&self.connection);

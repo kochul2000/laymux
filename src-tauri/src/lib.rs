@@ -295,6 +295,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             commands::create_terminal_session,
+            commands::reconnect_terminal_session,
             commands::save_terminal_display_context,
             commands::get_terminal_display_context,
             commands::load_terminal_display_contexts,

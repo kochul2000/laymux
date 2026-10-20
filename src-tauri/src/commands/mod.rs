@@ -27,6 +27,8 @@ mod terminal_display_context;
 mod terminal_home;
 mod terminal_output_delivery;
 mod terminal_output_surface;
+mod terminal_reconnect;
+mod terminal_reconnect_claim;
 mod terminal_teardown;
 mod usage;
 mod viewer_startup;
@@ -64,6 +66,8 @@ pub use terminal::*;
 pub use terminal_display_context::*;
 pub use terminal_home::*;
 pub use terminal_output_surface::*;
+pub use terminal_reconnect::*;
+pub(crate) use terminal_reconnect_claim::TerminalOutputReconnectClaims;
 pub use usage::*;
 pub use viewer_startup::*;
 pub use worktrees::*;
@@ -78,7 +82,7 @@ pub use wsl_client::*;
 /// the event loop.
 #[cfg(test)]
 mod main_thread_io {
-    /// `(file source, commands that must carry `#[tauri::command(async)]`)`.
+    /// Commands that must use the async runtime or the sync threadpool.
     const OFF_MAIN_THREAD: &[(&str, &[&str])] = &[
         (
             include_str!("worktrees.rs"),
@@ -87,6 +91,10 @@ mod main_thread_io {
                 "inspect_worktree",
                 "remove_worktree",
             ],
+        ),
+        (
+            include_str!("terminal_reconnect.rs"),
+            &["reconnect_terminal_session"],
         ),
         (
             include_str!("local_state.rs"),
@@ -198,13 +206,14 @@ mod main_thread_io {
             for command in *commands {
                 let blocking = format!("#[tauri::command]\npub fn {command}(");
                 let threadpool = format!("#[tauri::command(async)]\npub fn {command}(");
+                let asynchronous = format!("#[tauri::command]\npub async fn {command}(");
                 assert!(
                     !source.contains(&blocking),
                     "`{command}` must stay `#[tauri::command(async)]`: a plain command runs its \
                      filesystem/process work inline on the app's main thread and stalls the window"
                 );
                 assert!(
-                    source.contains(&threadpool),
+                    source.contains(&threadpool) || source.contains(&asynchronous),
                     "`{command}` no longer matches the `#[tauri::command(async)]\npub fn` shape \
                      this contract is checked against — update the table with it"
                 );

@@ -280,6 +280,8 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("GET", "/api/v1/agent-hooks/connections"),
     ("GET", "/api/v1/agent-hooks/states"),
     ("GET", "/api/v1/diagnostics/frontend"),
+    ("POST", "/api/v1/dev/terminal-output/{id}/fail-stop"),
+    ("POST", "/api/v1/dev/terminal-output/{id}/reconnect"),
     ("GET", "/api/v1/update"),
     ("POST", "/api/v1/update/check"),
     ("POST", "/api/v1/update/install"),

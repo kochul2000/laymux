@@ -44,6 +44,9 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 /// 21. `agent_usage` (leaf, ADR-0330: the detection path records into it while
 ///     holding any lock above; resolution copies it out and releases it before
 ///     taking `terminals`, and it is never held across a gate or I/O)
+/// 22. `terminal_output_reconnects` (leaf mutex+condvar; the mutex is released
+///     before all I/O and before any other AppState lock; close waits only in
+///     a blocking worker before touching the terminal catalog)
 ///
 /// Never acquire a lower-numbered lock while holding a higher-numbered one.
 /// Inside one terminal-output session, nested locks have their own fixed order:
@@ -228,6 +231,8 @@ pub struct AppState {
     /// Terminal ids already created once in this GUI process. Only the first
     /// create of an id may adopt a PTY daemon session (ADR-0301).
     pub pty_daemon_adoption_seen: Mutex<std::collections::HashSet<String>>,
+    /// Leaf lifecycle claims: serialize output reconnect with explicit close.
+    pub(crate) terminal_output_reconnects: crate::commands::TerminalOutputReconnectClaims,
     /// Set while an update (ADR-0308) or a WebView recovery restart
     /// (ADR-0336) replaces this GUI: its PTY daemon sessions are left running
     /// for the next GUI to adopt instead of being ended.
@@ -428,6 +433,7 @@ impl AppState {
             )),
             session_checkpoint: crate::session_checkpoint::SessionCheckpointRuntime::default(),
             pty_daemon_adoption_seen: Mutex::new(std::collections::HashSet::new()),
+            terminal_output_reconnects: crate::commands::TerminalOutputReconnectClaims::default(),
             pty_daemon_update_handoff: std::sync::atomic::AtomicBool::new(false),
             file_viewer_signal: crate::remote_server::FileViewerSignalMirror::default(),
             wsl_guest_snapshots: crate::wsl_probe::snapshot::GuestProbeCache::default(),

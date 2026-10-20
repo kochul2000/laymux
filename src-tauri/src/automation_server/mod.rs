@@ -1,4 +1,5 @@
 mod agent_hooks;
+mod dev_terminal_output;
 mod dev_update;
 pub mod handlers_backend;
 pub mod handlers_bridge;
@@ -188,6 +189,14 @@ pub fn build_router(
             get(agent_hooks::hook_connections),
         )
         .route("/api/v1/diagnostics/frontend", get(diagnostics_frontend))
+        .route(
+            "/api/v1/dev/terminal-output/{id}/fail-stop",
+            post(dev_terminal_output::fail_stop),
+        )
+        .route(
+            "/api/v1/dev/terminal-output/{id}/reconnect",
+            post(dev_terminal_output::reconnect),
+        )
         .route("/api/v1/update", get(update_status))
         .route("/api/v1/update/check", post(update_check))
         .route("/api/v1/update/install", post(update_install))

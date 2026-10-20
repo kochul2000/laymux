@@ -15,6 +15,7 @@ import { listen } from "@tauri-apps/api/event";
 import {
   type TerminalSessionResult,
   createTerminalSession,
+  reconnectTerminalSession,
   attachTerminalOutput,
   acknowledgeTerminalOutput,
   writeTerminalInput,
@@ -433,6 +434,43 @@ describe("tauri-api", () => {
         "close_terminal_session",
         "create_terminal_session",
       ]);
+    });
+  });
+
+  describe("reconnectTerminalSession", () => {
+    it("lets close and replacement create proceed while reconnect never settles", async () => {
+      const id = "reconnect-unresolved-close";
+      const calls: string[] = [];
+      let resolveReconnect!: (generation: number) => void;
+      mockInvoke.mockImplementation((command) => {
+        calls.push(command);
+        if (command === "reconnect_terminal_session") {
+          return new Promise<number>((resolve) => {
+            resolveReconnect = resolve;
+          });
+        }
+        return Promise.resolve(undefined);
+      });
+      const reconnect = reconnectTerminalSession(id, 7, 80, 24);
+      await vi.waitFor(() => expect(calls).toEqual(["reconnect_terminal_session"]));
+      const close = closeTerminalSession(id);
+      const replacement = createTerminalSession(id, "PowerShell", 80, 24, "");
+      try {
+        await vi.waitFor(() =>
+          expect(calls).toEqual([
+            "reconnect_terminal_session",
+            "close_terminal_session",
+            "create_terminal_session",
+          ]),
+        );
+        await close;
+        await replacement;
+      } finally {
+        resolveReconnect(8);
+        await reconnect;
+        await close;
+        await replacement;
+      }
     });
   });
 

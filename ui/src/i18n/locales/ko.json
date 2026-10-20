@@ -50,7 +50,10 @@
       "composerStarredSave": "저장",
       "composerStarredCancel": "취소",
       "outputStoppedTitle": "터미널 출력이 중지되었습니다",
-      "outputStoppedDescription": "계속하려면 이 pane을 닫고 다시 생성하세요.",
+      "outputStoppedDescription": "재연결하여 실행 중인 작업을 계속할 수 있습니다.",
+      "reconnect": "재연결",
+      "reconnecting": "재연결 중…",
+      "restartLosesContent": "터미널 재시작 시 실행 중인 작업이 종료되며 기존 내용은 보존되지 않습니다.",
       "restart": "터미널 재시작"
     },
     "osHandoff": {

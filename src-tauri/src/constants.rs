@@ -343,6 +343,8 @@ pub const PTY_DAEMON_MAX_CONNECTIONS: usize = 256;
 /// It bounds the whole handshake, not each read, so a client trickling bytes
 /// cannot hold a connection slot past it.
 pub const PTY_DAEMON_HANDSHAKE_TIMEOUT_MS: u64 = 5_000;
+/// A blocking close waits outside AppState locks for a reconnect to settle.
+pub const TERMINAL_OUTPUT_RECONNECT_CLOSE_TIMEOUT_MS: u64 = 20_000;
 /// Largest input pause a client frame can ask the daemon to replay. Pauses
 /// exist to keep deliberate gaps (the submit CR gap) intact; longer idle
 /// stretches carry no meaning at the PTY.

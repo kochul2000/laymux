@@ -1,4 +1,4 @@
-//! Binary view of the immutable in-flight desktop envelope (ADR-0346).
+//! Binary view of the immutable in-flight desktop envelope (ADR-0347).
 use super::{TerminalOutputDeltaEnvelopeV3, TerminalOutputEnvelopeGeometryRun};
 use crate::constants::TERMINAL_OUTPUT_ENVELOPE_MAX_WIRE_BYTES;
 use serde::Serialize;

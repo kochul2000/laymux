@@ -1,4 +1,4 @@
-# 0346. 보관된 출력 envelope를 바이너리로 읽고 checkpoint는 Worker에서 계산한다
+# 0347. 보관된 출력 envelope를 바이너리로 읽고 checkpoint는 Worker에서 계산한다
 
 - Status: Proposed
 - Date: 2026-10-19

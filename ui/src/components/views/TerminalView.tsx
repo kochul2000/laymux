@@ -12,6 +12,11 @@ import { useTranslation } from "react-i18next";
 import { ChevronDownIcon } from "@/components/ui/icons";
 import i18n from "@/i18n";
 import { Terminal, type IMarker } from "@xterm/xterm";
+import {
+  TerminalOutputReconnect,
+  registerTerminalOutputReconnect,
+  type TerminalOutputReconnectState,
+} from "@/lib/terminal-output-reconnect";
 import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -76,6 +81,7 @@ import { useOverridesStore, FONT_ZOOM_MIN, FONT_ZOOM_MAX } from "@/stores/overri
 import { toSupportedCursorShape, toXtermCursorOptions } from "@/lib/cursor-settings";
 import {
   createTerminalSession,
+  reconnectTerminalSession,
   type ViewerStartupRequest,
   writeToTerminal,
   writeTerminalBinaryInput,
@@ -372,6 +378,7 @@ const TERMINAL_WRITE_RETRY_MS = 16;
  * pane that never prints again (issue #607).
  */
 const TERMINAL_OUTPUT_REPAIR_TIMEOUT_MS = 15_000;
+const TERMINAL_OUTPUT_RECONNECT_TIMEOUT_MS = 20_000;
 
 /** Local attach/ACK bridge calls should settle far below this on a live WebView. */
 const TERMINAL_OUTPUT_CONTROL_TIMEOUT_MS = 5000;
@@ -1143,6 +1150,10 @@ export function TerminalView({
   } | null>(null);
   const outputFailStopReason =
     outputFailStop?.generation === terminalGeneration ? outputFailStop.reason : null;
+  const [outputReconnectState, setOutputReconnectState] =
+    useState<TerminalOutputReconnectState>("idle");
+  const [outputReconnectError, setOutputReconnectError] = useState<string>();
+  const outputReconnectRef = useRef<TerminalOutputReconnect | null>(null);
   // Issue #349: floating "jump to bottom" button. Shown while the user has
   // scrolled up into the scrollback; hidden once pinned to the live bottom.
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -4529,7 +4540,7 @@ export function TerminalView({
     let outputRepairInFlight = false;
     let outputAttachTimeoutStreak = 0;
     let outputAckTimeoutStreak = 0;
-    const outputControlOperations = terminalOutputControlOperationRegistry.mount(instanceId);
+    let outputControlOperations = terminalOutputControlOperationRegistry.mount(instanceId);
     /** Parsed-credit sender owned by exactly one backend attach lease. */
     let outputFlowAcknowledger: TerminalOutputFlowAcknowledger | undefined;
     type OutputTransportMode = "pending" | "v2" | "v3" | "fail-stop";
@@ -4540,10 +4551,12 @@ export function TerminalView({
     let outputV3FailStoppedReason: string | null = null;
     let outputV3Runtime: TerminalOutputV3Runtime | undefined;
     const outputPullWatchdogCadence = new TerminalOutputPullWatchdogCadence(monotonicNow());
-    const outputV3FailureCoordinator = new TerminalOutputV3FailureCoordinator(
+    let outputV3FailureCoordinator = new TerminalOutputV3FailureCoordinator(
       instanceId,
       failStopTerminalOutputSurface,
     );
+    let retiredOutputGeneration = 0;
+    let backendReconnectPromise: Promise<number> | undefined;
     let outputV3ContinuationTimer: ReturnType<typeof setTimeout> | undefined;
     let outputV3ParsersReady = false;
     let outputV3DiagnosticEntry: TerminalOutputV3DiagnosticEntry | undefined;
@@ -5021,9 +5034,16 @@ export function TerminalView({
         terminalId: instanceId,
         reason,
       });
+      // A hidden pane waits for its return. An active visit gets one attempt
+      // even when the watchdog confirms its failure just after returning.
+      if (isFocusedRef.current && !isContainerHiddenRef.current) {
+        queueMicrotask(() => {
+          if (!cancelled) void outputReconnect?.failed();
+        });
+      }
     };
     const receiveOutputV3FailStop = (failure: TerminalOutputSurfaceFailStoppedPayload) => {
-      if (cancelled) return;
+      if (cancelled || failure.generation <= retiredOutputGeneration) return;
       const reason = outputV3FailureCoordinator.receiveBackend(failure);
       if (reason) failStopOutputV3(reason, false);
     };
@@ -5127,6 +5147,14 @@ export function TerminalView({
       if (result.kind === "fail-stop") failStopOutputV3(result.reason);
     };
     const receiveOutputV3 = (payload: unknown) => {
+      if (
+        payload &&
+        typeof payload === "object" &&
+        "generation" in payload &&
+        typeof payload.generation === "number" &&
+        payload.generation <= retiredOutputGeneration
+      )
+        return;
       if (cancelled || outputTransportMode === "v2" || outputTransportMode === "fail-stop") return;
       const runtime = outputV3Runtime;
       if (!runtime) {
@@ -5521,7 +5549,7 @@ export function TerminalView({
         flushDeferredTerminalFit();
       }
     };
-    const startOutputAttach = async () => {
+    const startOutputAttach = async (reconnecting = false) => {
       if (cancelled || outputIsFailStopped() || !terminalSessionReady || outputAttachInFlight) {
         return;
       }
@@ -5541,6 +5569,7 @@ export function TerminalView({
       try {
         const attachOperation = outputControlOperations.tryStart("attach");
         if (!attachOperation) {
+          if (reconnecting) throw new Error("Output attach control capacity is unavailable");
           const retryDelayMs = boundedTerminalOutputControlBackoff(
             Math.max(1, outputAttachTimeoutStreak),
           );
@@ -5567,6 +5596,7 @@ export function TerminalView({
         );
         if (!isCurrentAttach()) return;
         if (attachOutcome.kind === "timeout") {
+          if (reconnecting) throw new Error("Output reconnect attach timed out");
           outputAttachTimeoutStreak += 1;
           const retryDelayMs = boundedTerminalOutputControlBackoff(outputAttachTimeoutStreak);
           const hasCapacity = outputControlOperations.canStart("attach");
@@ -5603,6 +5633,9 @@ export function TerminalView({
           return;
         }
         if ("kind" in rawAttachment) {
+          if ("generation" in rawAttachment && typeof rawAttachment.generation === "number") {
+            outputGeneration = rawAttachment.generation;
+          }
           const backendFailureReason = outputV3FailureCoordinator.bindFailedAttach(rawAttachment);
           failStopOutputV3(backendFailureReason ?? "malformed_attach_fail_stop", false);
           return;
@@ -5623,6 +5656,9 @@ export function TerminalView({
         if (supportsV3 && (!Number.isSafeInteger(nextEnvelopeId) || nextEnvelopeId <= 0)) {
           throw new Error("malformed terminal output v3 envelope identity");
         }
+        // A snapshot/initial ACK failure can precede ready. Its validated
+        // generation is still the exact daemon transport recovery must retire.
+        outputGeneration = attachment.state.generation;
         if (outputTransportMode !== "fail-stop") {
           outputTransportMode = supportsV3 ? "v3" : "v2";
         }
@@ -5857,6 +5893,10 @@ export function TerminalView({
           );
         await terminalOutputWriteChain;
       } catch (error) {
+        if (reconnecting) {
+          failStopOutputV3("reconnect:attach", false);
+          throw error;
+        }
         if (!cancelled && outputTransportMode !== "fail-stop" && epoch === outputAttachEpoch) {
           recoverTerminalOutputControl(
             () => scheduleOutputReattach(epoch),
@@ -5883,6 +5923,72 @@ export function TerminalView({
         }
       }
     };
+
+    const outputReconnect = new TerminalOutputReconnect(
+      async () => {
+        if (cancelled || !outputIsFailStopped()) return;
+        if (outputGeneration === undefined) throw new Error("Terminal generation is unavailable");
+        // Retire the old byte pipeline before requesting a new generation. Do
+        // not clear the visible screen until a validated attachment is ready.
+        invalidateOutputAttachEpoch(outputAttachEpoch, false);
+        outputV3Runtime?.dispose();
+        outputV3Runtime = undefined;
+        hasBufferedOutputV3 = false;
+        bufferedOutputV3 = undefined;
+        if (!backendReconnectPromise) {
+          retiredOutputGeneration = Math.max(retiredOutputGeneration, outputGeneration);
+          backendReconnectPromise = reconnectTerminalSession(
+            instanceId,
+            outputGeneration,
+            terminal.cols,
+            terminal.rows,
+          ).then((generation) => {
+            // Keep the actual generation even if the UI watchdog won. A manual
+            // retry joins this command and never duplicates an uncertain attach.
+            if (!cancelled) outputGeneration = generation;
+            return generation;
+          });
+        }
+        const outcome = await settleTerminalOutputControl(
+          backendReconnectPromise,
+          TERMINAL_OUTPUT_RECONNECT_TIMEOUT_MS,
+        );
+        if (outcome.kind === "timeout") throw new Error("Terminal reconnect timed out");
+        backendReconnectPromise = undefined;
+        if (outcome.kind === "rejected") throw outcome.error;
+        const generation = outcome.value;
+        if (cancelled) return;
+        outputGeneration = generation;
+        // Disposing the old v3 sender also disposes its mount scope. A new
+        // generation needs a new owner; unresolved orphans stay charged in
+        // the same window registry instead of being reset or bypassed.
+        outputControlOperations.dispose();
+        outputControlOperations = terminalOutputControlOperationRegistry.mount(instanceId);
+        outputV3FailureCoordinator = new TerminalOutputV3FailureCoordinator(
+          instanceId,
+          failStopTerminalOutputSurface,
+        );
+        outputV3FailStoppedReason = null;
+        outputTransportMode = "pending";
+        cacheRestorePromise = Promise.resolve(null);
+        await outputListenerReady;
+        await startOutputAttach(true);
+        if (cancelled) return;
+        if (!outputProtocolReadyRef.current) {
+          failStopOutputV3("reconnect:output_unavailable", false);
+          throw new Error("Terminal output could not be reconnected");
+        }
+        setOutputFailStop(null);
+      },
+      (state, error) => {
+        if (cancelled) return;
+        setOutputReconnectState(state);
+        setOutputReconnectError(error);
+      },
+    );
+    outputReconnectRef.current = outputReconnect;
+    const unregisterOutputReconnect = registerTerminalOutputReconnect(instanceId, outputReconnect);
+    if (isFocusedRef.current && !isContainerHiddenRef.current) outputReconnect.enter();
 
     const outputV2ListenerReady = onTerminalOutputV2(instanceId, (payload) => {
       if (cancelled || outputTransportMode === "v3" || outputTransportMode === "fail-stop") {
@@ -5986,6 +6092,7 @@ export function TerminalView({
         const runtime = outputV3Runtime;
         if (!runtime || outputV3FailStoppedReason !== null) return;
         void runtime.pollExactRepair(now).then((result) => {
+          if (!isCurrentOutputV3Runtime(runtime)) return;
           publishOutputV3Diagnostics?.();
           if (result?.kind === "fail-stop") failStopOutputV3(result.reason);
         });
@@ -6184,6 +6291,11 @@ export function TerminalView({
       linkChip.dismiss("resize");
       const isNowHidden = width === 0 || height === 0;
       isContainerHiddenRef.current = isNowHidden;
+      if (isNowHidden) outputReconnect?.leave();
+      else if (prevWasHidden) {
+        outputReconnect?.enter();
+        if (outputIsFailStopped()) void outputReconnect?.failed();
+      }
       // A pending debounced fit must never run against a hidden container.
       // WorkspaceArea/PaneGrid hide inactive panes via display:none, firing a
       // 0×0 entry; if a drag just scheduled a fit, fitting on the 0×0 box would
@@ -6311,6 +6423,9 @@ export function TerminalView({
     }
 
     return () => {
+      outputReconnect?.dispose();
+      unregisterOutputReconnect();
+      if (outputReconnectRef.current === outputReconnect) outputReconnectRef.current = null;
       if (outputTransportMode === "v3") {
         // There is no earlier lifecycle signal that distinguishes a terminal
         // close from a disappearing WebView surface. Publish before `cancelled`
@@ -6500,6 +6615,10 @@ export function TerminalView({
     // 동안 automation 이 바꾼 경우 포함) 기억해 둔 helper 소유권은 stale 이다.
     // 복귀 시 이 pane 이 focus 를 되찾아오지 않도록 즉시 버린다.
     if (!isFocused) focusOwnershipRef.current?.clear("pane-unfocused");
+    if (isFocused) {
+      outputReconnectRef.current?.enter();
+      if (outputFailStopReason) void outputReconnectRef.current?.failed();
+    } else outputReconnectRef.current?.leave();
     if (openedRef.current) {
       if (isFocused) {
         terminalRef.current?.focus();
@@ -6508,7 +6627,7 @@ export function TerminalView({
       }
       overlayCaretUpdaterRef.current?.();
     }
-  }, [isFocused]);
+  }, [isFocused, outputFailStopReason]);
 
   // Reactively update terminal theme when profile colorScheme or font changes
   const currentSchemeName = useSettingsStore((s) => {
@@ -6963,6 +7082,14 @@ export function TerminalView({
             title={t("terminal.outputStoppedTitle")}
             description={t("terminal.outputStoppedDescription")}
             restartLabel={t("terminal.restart")}
+            reconnectLabel={t("terminal.reconnect")}
+            reconnectingLabel={t("terminal.reconnecting")}
+            restartWarning={t("terminal.restartLosesContent")}
+            reconnecting={outputReconnectState === "reconnecting"}
+            error={outputReconnectError}
+            onReconnect={() => {
+              void outputReconnectRef.current?.retry();
+            }}
             onRestart={onRestart}
           />
         )}

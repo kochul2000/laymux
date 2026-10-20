@@ -174,6 +174,7 @@ pub(crate) fn chunked_write_to_guarded(
 /// Handle to a running PTY process, providing write and resize capabilities.
 #[derive(Clone)]
 pub struct PtyHandle {
+    pub(crate) daemon_reconnect_control: Option<Arc<crate::pty_daemon::ReconnectControl>>,
     pub(crate) display_context_owner: Option<crate::pty_daemon::DisplayContextOwner>,
     checkpoint_input_revision: Arc<AtomicU64>,
     session_restore: Option<Arc<PendingSessionRestore>>,
@@ -291,6 +292,7 @@ impl PtyHandle {
     ) -> Self {
         let master = Arc::new(Mutex::new(None));
         Self {
+            daemon_reconnect_control: None,
             display_context_owner: None,
             checkpoint_input_revision: Arc::new(AtomicU64::new(0)),
             session_restore: None,
@@ -342,6 +344,20 @@ impl PtyHandle {
         self.reader_lifecycle.terminal_generation()
     }
 
+    /// Retire this GUI's transport without ending the daemon-owned child.
+    pub(crate) fn detach_for_reconnect(&self) -> Result<(), String> {
+        let control = self
+            .daemon_reconnect_control
+            .as_ref()
+            .ok_or("This terminal has no PTY daemon session to reconnect")?;
+        control.disconnect();
+        self.control.close();
+        self.reader_lifecycle
+            .request_stop(Duration::from_millis(PTY_READER_WAKE_TIMEOUT_MS))?;
+        self.reader_lifecycle
+            .wait_for_exit(Duration::from_millis(PTY_READER_EXIT_TIMEOUT_MS))
+    }
+
     pub(crate) fn codex_startup_color_probe(&self) -> Option<&NativeWindowsCodexColorProbeGuard> {
         self.codex_startup_color_probe.as_deref()
     }
@@ -367,6 +383,15 @@ impl PtyHandle {
     ///    handle (keeping the PID reserved) until `child_exited` flips, and
     ///    we re-check that flag immediately before killing.
     pub fn terminate(&self) -> Result<(), String> {
+        // A disconnected proxy reports transport exit even while the daemon's
+        // child is alive. Explicit close must still end that exact session.
+        if self
+            .daemon_reconnect_control
+            .as_ref()
+            .is_some_and(|control| control.preserve_on_drop.load(Ordering::Acquire))
+        {
+            self.request_backend_termination()?;
+        }
         // Stop the exact reader generation before closing writer/master state.
         // A wake failure is not success: cleanup continues and the lifecycle
         // completion below is the authoritative fallback acknowledgement.
