@@ -7,6 +7,42 @@ use laymux_lib::settings::{PaneClearBusyPolicy, Settings};
 use serde_json::json;
 
 #[test]
+fn checkpoint_worker_defaults_on_roundtrips_false_and_applies_next_use() {
+    let current = Settings::default();
+    assert!(current.terminal.checkpoint_worker);
+    let mut legacy = serde_json::to_value(&current).unwrap();
+    legacy["terminal"]
+        .as_object_mut()
+        .unwrap()
+        .remove("checkpointWorker");
+    assert!(
+        serde_json::from_value::<Settings>(legacy)
+            .unwrap()
+            .terminal
+            .checkpoint_worker
+    );
+    let prepared =
+        prepare_settings_update(&current, &json!({"terminal":{"checkpointWorker":false}}));
+    assert!(prepared.valid, "{:?}", prepared.errors);
+    assert!(prepared.next_use_required);
+    let candidate = prepared.candidate.unwrap();
+    assert!(!candidate.terminal.checkpoint_worker);
+    assert!(
+        !serde_json::from_str::<Settings>(&serde_json::to_string(&candidate).unwrap())
+            .unwrap()
+            .terminal
+            .checkpoint_worker
+    );
+    assert_eq!(
+        metadata_for_path("/terminal/checkpointWorker").apply_mode,
+        ApplyMode::NextUse
+    );
+    assert!(
+        !prepare_settings_update(&current, &json!({"terminal":{"checkpointWorker":"false"}})).valid
+    );
+}
+
+#[test]
 fn hook_detection_is_opt_in_independent_and_live_applied() {
     use laymux_lib::settings::AgentStateDetection;
     let current = Settings::default();

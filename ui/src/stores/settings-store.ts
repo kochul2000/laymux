@@ -142,6 +142,8 @@ export interface PasteSettings {
 
 /** Terminal behavior & rendering. */
 export interface TerminalSettings {
+  /** Checkpoint Worker mode is fixed for each TerminalView lifetime. */
+  checkpointWorker: boolean;
   /** Rust-side DEC 2026 burst detection tuning. Omitted by older frontend snapshots. */
   /** ADR-0147: DEC 2026 frame burst + raw output volume thresholds. */
   outputActivityBurst?: {
@@ -823,6 +825,7 @@ export const DEFAULT_PASTE: PasteSettings = {
 };
 
 export const DEFAULT_TERMINAL: TerminalSettings = {
+  checkpointWorker: true,
   outputActivityBurst: {
     windowMs: 2000,
     threshold: 6,

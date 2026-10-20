@@ -34,6 +34,12 @@ pub const READ_ONLY_SETTINGS_PATHS: &[&str] = &[
 ];
 
 const ENTRIES: &[MetadataEntry] = &[
+    MetadataEntry {
+        path: "/terminal/checkpointWorker",
+        description: "터미널 복원 상태를 별도 Worker에서 처리합니다(기본 true). 끄면 메인 스레드에서 처리해 Worker 메모리를 절약합니다. 새 터미널 또는 앱 재실행부터 적용하며, 출력 재연결은 기존 모드를 유지합니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
     MetadataEntry {path:"/localUiState",description:"현재 PC의 SQLite 복원 상태. 일반 설정 patch와 portable export의 대상이 아닙니다.",sensitive:true,apply_mode:ApplyMode::Restart},
     MetadataEntry {
         path: "/claude/stateDetection",

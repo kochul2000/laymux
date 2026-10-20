@@ -39,6 +39,21 @@ pub(super) struct Queue {
 }
 
 impl Shared {
+    /// Move ordinary read-sized frames into the queue without reallocation.
+    /// Larger redraw frames still obey the existing reader/credit chunk bound.
+    pub(super) fn push_frame(&self, data: Vec<u8>) {
+        if data.is_empty() {
+            return;
+        }
+        if data.len() <= crate::pty::PTY_READ_BUFFER_BYTES {
+            self.push_data(data);
+        } else {
+            for chunk in data.chunks(crate::pty::PTY_READ_BUFFER_BYTES) {
+                self.push_data(chunk.to_vec());
+            }
+        }
+    }
+
     /// Block while the consumer is behind; this is what turns a slow GUI
     /// callback into socket — and therefore PTY — backpressure. A poisoned
     /// queue discards the data; the reader fails closed in `next_event`.
@@ -192,5 +207,44 @@ impl InterruptiblePtyReaderControl for DaemonReaderControl {
             ));
         }
         Ok(self.shared.push_wake(wake_generation))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pty::PTY_READ_BUFFER_BYTES;
+
+    #[test]
+    fn small_output_frame_keeps_its_allocation() {
+        let shared = Shared::default();
+        let bytes = vec![b'x'; PTY_READ_BUFFER_BYTES];
+        let allocation = bytes.as_ptr();
+        shared.push_frame(bytes);
+        let PtyReadEvent::Data(received) = shared.next_event() else {
+            panic!("expected output data");
+        };
+        assert_eq!(received.as_ptr(), allocation);
+        assert_eq!(received, vec![b'x'; PTY_READ_BUFFER_BYTES]);
+    }
+
+    #[test]
+    fn large_output_frame_preserves_reader_bound_and_wake_order() {
+        let shared = Shared::default();
+        let bytes: Vec<u8> = (0..PTY_READ_BUFFER_BYTES * 2 + 7)
+            .map(|index| (index % 251) as u8)
+            .collect();
+        shared.push_frame(bytes.clone());
+        shared.push_wake(42);
+        let mut received = Vec::new();
+        for expected_len in [PTY_READ_BUFFER_BYTES, PTY_READ_BUFFER_BYTES, 7] {
+            let PtyReadEvent::Data(chunk) = shared.next_event() else {
+                panic!("expected bounded output data");
+            };
+            assert_eq!(chunk.len(), expected_len);
+            received.extend(chunk);
+        }
+        assert_eq!(received, bytes);
+        assert!(matches!(shared.next_event(), PtyReadEvent::Wake(42)));
     }
 }

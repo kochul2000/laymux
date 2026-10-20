@@ -313,6 +313,7 @@ pub fn run() {
             commands::acknowledge_terminal_output,
             commands::acknowledge_terminal_output_envelope,
             commands::repair_terminal_output_envelope,
+            commands::read_terminal_output_envelope_binary,
             commands::fail_stop_terminal_output_surface,
             commands::hold_terminal_output_continuation,
             commands::close_terminal_output_continuation,

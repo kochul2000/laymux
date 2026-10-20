@@ -19,7 +19,9 @@ use crate::terminal_protocol::{TerminalProtocolSnapshot, TerminalProtocolState};
 mod desktop_flow;
 use desktop_flow::DesktopOutputFlow;
 pub use desktop_flow::TerminalOutputFlowControl;
+mod binary;
 mod delivery_contract;
+pub use binary::{encode_terminal_output_binary, TerminalOutputBinaryNotice};
 pub use delivery_contract::{
     TerminalOutputContinuationCompletion, TerminalOutputControlCompletion,
     TerminalOutputDeliveryAdmission, TerminalOutputDeliveryCloseHook,

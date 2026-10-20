@@ -33,7 +33,6 @@ use crate::constants::{
     PTY_WRITE_CHUNK_SIZE,
 };
 use crate::lock_ext::MutexExt;
-use crate::pty::PTY_READ_BUFFER_BYTES;
 
 /// What the daemon PTY of one terminal is bound to.
 #[derive(Debug, Clone)]
@@ -371,9 +370,7 @@ fn pump(
                         missed_output.add(bytes.len());
                     }
                 }
-                for chunk in bytes.chunks(PTY_READ_BUFFER_BYTES) {
-                    shared.push_data(chunk.to_vec());
-                }
+                shared.push_frame(bytes);
             }
             Ok(Some(Frame::Control(DaemonMessage::MissedOutputBegin))) => in_missed = true,
             Ok(Some(Frame::Control(DaemonMessage::MissedOutputEnd))) => in_missed = false,

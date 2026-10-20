@@ -497,7 +497,10 @@ pub(crate) async fn create_terminal_session_inner(
         &output_session,
         Arc::new(move |event, envelope| {
             delivery_app
-                .emit(event, envelope)
+                .emit(
+                    event,
+                    terminal_output::TerminalOutputBinaryNotice::from(envelope),
+                )
                 .map_err(|error| format!("failed to emit terminal output v3 envelope: {error}"))
         }),
         Arc::new(move |notice| {

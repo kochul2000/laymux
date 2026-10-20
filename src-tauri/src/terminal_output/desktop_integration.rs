@@ -323,6 +323,17 @@ impl TerminalOutputSession {
         }
     }
 
+    pub fn read_announced_desktop_envelope(
+        &self,
+        identity: &TerminalOutputEnvelopeIdentity,
+        seq_start: u64,
+        seq_end: u64,
+    ) -> Result<Option<TerminalOutputDeltaEnvelopeV3>, String> {
+        let _control = self.desktop_control_gate.lock_or_err()?;
+        self.desktop_delivery
+            .read_announced_envelope(identity, seq_start, seq_end)
+    }
+
     pub fn repair_desktop_envelope(
         &self,
         identity: &TerminalOutputEnvelopeIdentity,

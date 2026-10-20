@@ -106,6 +106,41 @@ pub fn repair_terminal_output_envelope(
     )
 }
 
+// Encoding is read-only and may copy a full quantum; keep it off the GUI loop.
+#[tauri::command(async)]
+#[allow(clippy::too_many_arguments)]
+pub fn read_terminal_output_envelope_binary(
+    id: String,
+    generation: u64,
+    token: String,
+    envelope_id: u64,
+    grant_id: Option<String>,
+    seq_start: u64,
+    seq_end: u64,
+    state: State<Arc<AppState>>,
+) -> Result<tauri::ipc::Response, String> {
+    let Some(session) =
+        terminal_output::terminal_output_session_for(&state.terminal_protocol_states, &id)?
+    else {
+        return Ok(tauri::ipc::Response::new(Vec::<u8>::new()));
+    };
+    let envelope = session.read_announced_desktop_envelope(
+        &terminal_output::TerminalOutputEnvelopeIdentity {
+            generation,
+            lease_token: token,
+            envelope_id,
+            grant_id,
+        },
+        seq_start,
+        seq_end,
+    )?;
+    let data = match envelope {
+        Some(envelope) => terminal_output::encode_terminal_output_binary(&envelope)?,
+        None => Vec::new(),
+    };
+    Ok(tauri::ipc::Response::new(data))
+}
+
 #[tauri::command]
 pub fn hold_terminal_output_continuation(
     id: String,

@@ -48,8 +48,14 @@ const UI_ROOT = process.cwd();
  * 533 kB restores 2,655 B of headroom instead of banking room for more work.
  * Composer starred-entry labels, send metadata and the shared editor take the
  * combined entry to 536,758 B. 540 kB keeps the same small margin.
+ *
+ * Main at 73cb20bb (including daemon-preserving output reconnect) is already
+ * 540,304 B. Binary delivery and the optional checkpoint Worker add 3,907 B
+ * of startup routing, inline fallback and Worker lifecycle handling, taking
+ * this PR to 544,211 B. 548 kB restores 3,789 B of headroom; it does not change
+ * which modules are eagerly loaded or grant a separate grammar-sized budget.
  */
-const STARTUP_CHUNK_BUDGET_BYTES = 540_000;
+const STARTUP_CHUNK_BUDGET_BYTES = 548_000;
 
 /**
  * Ceiling for a lazily-imported **syntax grammar**. Generous because a

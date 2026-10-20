@@ -9,6 +9,8 @@
 ---
 ## 10. Settings
 
+`terminal.checkpointWorker`(기본 `true`)는 Settings → 터미널 → 고급의 checkpoint 백그라운드 처리 옵션이다([ADR-0347](../adr/0347-terminal-output-binary-delivery-and-checkpoint-worker.md)). 끄면 동일한 checkpoint 모델을 메인 스레드에서 실행한다. 새 터미널 또는 앱 재실행부터 적용(`nextUse`)하고 기존 TerminalView의 모드는 출력 재연결에서도 유지한다. 설정 저장은 실행 중인 셸·파서를 교체하지 않는다.
+
 `settings.json`은 **사용자가 의도적으로 편집·공유하는 구성**만 담는다. 재시작 간 유지돼야 하지만 구성이 아닌 pane별 컨트롤 바 모드·폰트 줌 등은 localStorage에 저장되는 인스턴스 오버라이드 레이어([overview.md](./overview.md) §4.2)에 들어간다. 전체 pane의 기본 컨트롤 바 모드인 `controlBar.defaultMode`는 `settings.json` 구성이다.
 
 새 PC 설정의 `controlBar.defaultMode`는 `pinned`이고, 기본 Dock은 왼쪽 WorkspaceSelectorView와 오른쪽 MemoView / FileExplorerView / GitHubView(위부터 높이 1/3씩)다. 위·아래 Dock은 숨긴다. 이 기본 구성은 Rust `Settings::default()`와 프론트 store에 일치시키며, 기존에 저장된 컨트롤 바 모드·pane 오버라이드·Dock 배치는 그대로 적용한다. 새 값은 신규 또는 생략된 설정에만 적용한다([ADR-0265](../adr/0265-pc-remote-first-use-defaults.md)).
@@ -1815,6 +1817,8 @@ Android 저장·열기 호출은 주입된 `LaymuxNative` 객체의 메서드로
 v1.9.0의 내장 localhost 프리뷰는 v1.9.1에서 철회했다([ADR-0318](../adr/0318-revert-remote-localhost-preview.md)). 프리뷰 API·bootstrap·Android bridge와 Cloud의 프리뷰 CSP 예외는 제공하지 않는다. 일반 URL 열기와 OAuth 전용 loopback 중계는 기존 계약을 따른다. PC의 로컬 웹서비스는 사용자가 구성한 Tailscale 등 별도 네트워크 경로로 접근한다.
 
 ### 13.4 Terminal Control
+
+데스크톱 내부 v3 live 전달은 도착 알림 뒤 `read_terminal_output_envelope_binary(id,generation,token,envelopeId,grantId,seqStart,seqEnd)`로 기존 frozen envelope를 읽는다([ADR-0347](../adr/0347-terminal-output-binary-delivery-and-checkpoint-worker.md)). 응답은 `u32-le metadata byte 길이 + UTF-8 JSON metadata(data 제외) + raw bytes`인 `ArrayBuffer`이며, stale identity/range·retired session은 빈 바이너리다. 읽기는 receipt·parsed ACK·repair budget·deadline을 바꾸지 않는다. terminal별 읽기 하나와 최신 알림 힌트 하나만 보유하고 읽기 손실은 기존 exact repair를 따른다. rendererless checkpoint provider는 같은 xterm/Unicode 모델을 Worker에서 실행하며 기존 weighted admission이 승인한 quantum의 parse 완료 뒤에만 진행을 보고한다. 이 내부 표현은 아래 Remote API의 JSON/binary pair 계약을 바꾸지 않는다.
 
 Remote 터미널 host(`#terminal`)는 `-webkit-tap-highlight-color: #00000000`를 지정해 탭할 때 브라우저 기본 강조색이 출력 영역 전체를 덮지 않게 한다. 이 속성은 내부 xterm 요소에 상속되며, 기존 터치 스크롤·길게 눌러 선택·선택 핸들 동작은 유지한다.
 
