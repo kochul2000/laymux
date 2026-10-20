@@ -58,6 +58,22 @@ describe("terminal-restart-store", () => {
     });
   });
 
+  it("keeps restore permission through consumption but resets it for a later clear", () => {
+    const store = useTerminalRestartStore.getState();
+    store.requestRestart("pane-a", "/current", true);
+    store.consumeRestart("pane-a");
+    expect(useTerminalRestartStore.getState().requests["pane-a"]).toMatchObject({
+      fresh: false,
+      restoreSession: true,
+    });
+    store.requestRestart("pane-a");
+    expect(useTerminalRestartStore.getState().requests["pane-a"]).toEqual({
+      epoch: 2,
+      cwd: undefined,
+      fresh: true,
+    });
+  });
+
   it("ignores consume and forget for an unknown pane", () => {
     const before = useTerminalRestartStore.getState().requests;
     useTerminalRestartStore.getState().consumeRestart("pane-missing");

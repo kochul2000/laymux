@@ -731,11 +731,13 @@ interface TerminalViewProps {
   lastCwd?: string;
   /** Explicit CWD for a user-requested restart. This overrides restoreCwd settings. */
   restartCwd?: string;
-  /** User-requested restart starts a fresh shell instead of restoring session output or Claude. */
+  /** A restart skips cached output and uses the explicit restart CWD. */
   isUserRestart?: boolean;
+  /** Restart View allows the existing app-startup agent restore policy. */
+  restoreSessionOnRestart?: boolean;
   /** Called after the first restart session creation settles, so future remounts are normal starts. */
   onUserRestartConsumed?: () => void;
-  /** Recreate this pane as a fresh terminal after a typed output fail-stop. */
+  /** Restart this pane through its owner's action after a typed output fail-stop. */
   onRestart?: () => void;
   /** Claude Code session ID from previous session, used for --resume on startup. */
   lastClaudeSession?: string;
@@ -768,6 +770,7 @@ export function TerminalView({
   lastCwd,
   restartCwd,
   isUserRestart = false,
+  restoreSessionOnRestart = false,
   onUserRestartConsumed,
   onRestart,
   lastClaudeSession,
@@ -787,7 +790,7 @@ export function TerminalView({
   const terminalRef = useRef<Terminal | null>(null);
   // A restart remount may subsequently recreate its session (for example, after
   // a profile change). Only the first session of this component instance is the
-  // user-requested fresh start; later recreations retain normal restore policy.
+  // user-requested restart; later recreations retain normal restore policy.
   const firstSessionStartRef = useRef(true);
   const terminalReflowFrameRef = useRef<number | null>(null);
   const pendingRendererFitRequestRef = useRef<TerminalFitRequest | null>(null);
@@ -6143,7 +6146,8 @@ export function TerminalView({
     // RDP/window layout currently leaves the xterm host at 0×N or N×0. The DOM
     // renderer remains size-gated below; xterm's parser/buffer and the Remote
     // checkpoint model both work before terminal.open() (ADR-0161).
-    const isFreshRestart = isUserRestart && firstSessionStartRef.current;
+    const isRestartStart = isUserRestart && firstSessionStartRef.current;
+    const allowSessionRestore = !isRestartStart || restoreSessionOnRestart;
     firstSessionStartRef.current = false;
     const shouldRestoreCwd = profileConfig?.restoreCwd ?? settingsState.profileDefaults.restoreCwd;
     const shouldRestoreOutput =
@@ -6153,17 +6157,17 @@ export function TerminalView({
     // Validate session ID format to prevent command injection.
     const SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
     const shouldRestoreClaudeSession =
-      !isFreshRestart && settingsState.claude?.restoreSession !== false;
+      allowSessionRestore && settingsState.claude?.restoreSession !== false;
     const safeSessionId =
       lastClaudeSession && SESSION_ID_PATTERN.test(lastClaudeSession)
         ? lastClaudeSession
         : undefined;
     const shouldRestoreCodexSession =
-      !isFreshRestart && settingsState.codex?.restoreSession !== false;
+      allowSessionRestore && settingsState.codex?.restoreSession !== false;
     const safeCodexSessionId =
       lastCodexSession && SESSION_ID_PATTERN.test(lastCodexSession) ? lastCodexSession : undefined;
     const shouldRestoreGrokSession =
-      !isFreshRestart && settingsState.grok?.restoreSession !== false;
+      allowSessionRestore && settingsState.grok?.restoreSession !== false;
     const GROK_SESSION_ID_PATTERN =
       /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
     const safeGrokSessionId =
@@ -6207,7 +6211,7 @@ export function TerminalView({
     }
 
     cacheRestorePromise =
-      !isFreshRestart && shouldRestoreOutput && paneId
+      !isRestartStart && shouldRestoreOutput && paneId
         ? loadTerminalOutputCache(paneId)
             .then((cached) =>
               cancelled || !cached || cached.length === 0 ? null : normalBufferOnly(cached),
@@ -6232,7 +6236,7 @@ export function TerminalView({
         syncGroup,
         cwdSendRef.current,
         cwdReceiveRef.current,
-        isFreshRestart ? restartCwd : shouldRestoreCwd ? lastCwd : undefined,
+        isRestartStart ? restartCwd : shouldRestoreCwd ? lastCwd : undefined,
         viewerStartup ?? startupOverride,
       )
         .then((createdSession) => {
@@ -6264,7 +6268,7 @@ export function TerminalView({
           settleFailedStartup();
         })
         .finally(() => {
-          if (isFreshRestart) onUserRestartConsumed?.();
+          if (isRestartStart) onUserRestartConsumed?.();
         });
     }
 

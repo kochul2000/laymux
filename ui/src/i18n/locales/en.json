@@ -1,5 +1,6 @@
 {
   "common": {
+    "paneRestartFailed": "Restart stopped because the current session could not be verified or saved. Please try again shortly.",
     "codexCheckpoint": {
       "failed": "Close/update preparation stopped because the Codex conversation could not be verified.",
       "retry": "Please manually end the work in the indicated pane(s), then try again. If the error persists, close the indicated pane(s) and try again.",

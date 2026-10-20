@@ -2,6 +2,70 @@ use super::*;
 use crate::remote_server::HumanControlOrigin;
 
 #[tokio::test]
+async fn restart_checkpoint_fence_blocks_target_input_through_teardown() {
+    let state = AppState::new();
+    for id in ["restarting", "unrelated"] {
+        state.pty_handles.lock_or_err().unwrap().insert(
+            id.into(),
+            crate::pty::PtyHandle::from_test_writer(Box::new(Vec::<u8>::new())),
+        );
+        state
+            .terminal_protocol_states
+            .lock_or_err()
+            .unwrap()
+            .insert(id.into(), crate::terminal_output::new_protocol_gate());
+    }
+    // This is the same admission guard held by the shared native close
+    // transaction while it waits for the checkpoint and the close worker.
+    let fence = state
+        .session_checkpoint
+        .begin_eviction_and_drain(&state, &["restarting".into()])
+        .await
+        .unwrap();
+    for phase in ["checkpoint pending", "teardown pending"] {
+        for origin in [
+            HumanControlOrigin::Local,
+            HumanControlOrigin::Remote {
+                lease_id: "remote-test".into(),
+            },
+        ] {
+            let raw = crate::commands::write_to_terminal_inner(
+                &state,
+                "restarting",
+                b"change conversation",
+                origin.clone(),
+            )
+            .unwrap_err();
+            assert!(raw.contains("eviction"), "{phase}: {raw}");
+            let structured = crate::commands::write_terminal_input_inner(
+                &state,
+                "restarting",
+                "change conversation",
+                true,
+                origin,
+            )
+            .unwrap_err();
+            assert!(structured.contains("eviction"), "{phase}: {structured}");
+        }
+        crate::commands::write_to_terminal_inner(
+            &state,
+            "unrelated",
+            b"continue work",
+            HumanControlOrigin::Local,
+        )
+        .unwrap();
+    }
+    drop(fence);
+    crate::commands::write_to_terminal_inner(
+        &state,
+        "restarting",
+        b"retry after failure",
+        HumanControlOrigin::Local,
+    )
+    .unwrap();
+}
+
+#[tokio::test]
 async fn hidden_eviction_preserves_unrelated_raw_input_and_whole_paste() {
     let state = AppState::new();
     state.pty_handles.lock_or_err().unwrap().insert(

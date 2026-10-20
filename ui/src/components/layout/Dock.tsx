@@ -13,7 +13,7 @@ import { PaneGrid } from "./PaneGrid";
 import { singleLayerSlot } from "@/lib/pane-layers";
 import { useHoverTimer } from "@/hooks/useHoverTimer";
 import { useCwdDefaultsResolver } from "./useCwdDefaultsResolver";
-import { resolvePaneCwd } from "@/lib/pane-cwd";
+import { restartPaneView } from "@/lib/pane-restart";
 import { supportsCwdReceive, supportsCwdSend } from "@/lib/view-cwd-capability";
 import { runPaneClearFromUi } from "@/lib/pane-clear-action";
 
@@ -185,13 +185,9 @@ export function Dock({
                 : undefined,
             onRestart:
               singleView?.type === "TerminalView" && singlePaneId
-                ? () =>
-                    useTerminalRestartStore
-                      .getState()
-                      .requestRestart(
-                        singlePaneId,
-                        resolvePaneCwd({ id: singlePaneId, view: singleView }),
-                      )
+                ? () => {
+                    void restartPaneView(singlePaneId);
+                  }
                 : undefined,
             onToggleCwdSend:
               singlePaneId && onSetPaneView && singleCanSendCwd && singleCwdDefaults
@@ -232,18 +228,15 @@ export function Dock({
               terminalRestartEpoch={terminalRestart?.epoch}
               terminalRestartCwd={terminalRestart?.cwd}
               terminalRestartFresh={terminalRestart?.fresh}
+              terminalRestartRestoreSession={terminalRestart?.restoreSession}
               onTerminalRestartConsumed={() => {
                 if (singlePaneId) consumeTerminalRestart(singlePaneId);
               }}
               onTerminalRestart={
                 singleView?.type === "TerminalView" && singlePaneId
-                  ? () =>
-                      useTerminalRestartStore
-                        .getState()
-                        .requestRestart(
-                          singlePaneId,
-                          resolvePaneCwd({ id: singlePaneId, view: singleView }),
-                        )
+                  ? () => {
+                      void restartPaneView(singlePaneId);
+                    }
                   : undefined
               }
             />

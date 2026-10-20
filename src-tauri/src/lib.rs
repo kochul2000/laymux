@@ -321,6 +321,7 @@ pub fn run() {
             commands::log_terminal_trace_batch,
             commands::close_terminal_session,
             session_checkpoint::checkpoint_and_close_hidden_terminals,
+            session_checkpoint::checkpoint_and_close_terminal_for_restart,
             commands::mark_claude_terminal,
             commands::mark_codex_terminal,
             commands::mark_grok_terminal,
