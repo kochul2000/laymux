@@ -38,6 +38,16 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 vi.mock("@/lib/tauri-api", () => ({
+  checkpointAndCloseTerminalForRestart: vi.fn(async (id: string) => {
+    const { flushSessionCheckpoint } = await import("./persist-session");
+    const commit = await flushSessionCheckpoint({
+      reason: "restart",
+      requireConclusive: true,
+      terminalIds: [id],
+    });
+    if (commit.unresolvedTerminalIds?.includes(id))
+      throw new Error("Session checkpoint is not conclusive");
+  }),
   saveSettings: vi.fn().mockResolvedValue(undefined),
   loadSettings: vi.fn().mockResolvedValue({}),
   createTerminalSession: vi.fn().mockResolvedValue({}),
@@ -90,6 +100,7 @@ import {
   getCodexSessionIds,
   getGrokSessionIds,
   getTerminalSessionAttributions,
+  checkpointAndCloseTerminalForRestart,
 } from "@/lib/tauri-api";
 import { interruptTerminalsOnExit } from "@/lib/interrupt-terminals-on-exit";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
@@ -184,6 +195,7 @@ describe("persistSession", () => {
         restoreSession: true,
       });
       expect(saveLocalSession).toHaveBeenCalledOnce();
+      expect(checkpointAndCloseTerminalForRestart).toHaveBeenCalledExactlyOnceWith(terminalId, 1);
     },
   );
 

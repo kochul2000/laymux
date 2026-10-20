@@ -853,6 +853,9 @@ pub const GUI_RELAUNCH_AFTER_CLI_FLAG: &str = "--relaunch-after";
 /// starts anyway. Exiting normally takes well under a second.
 pub const GUI_RELAUNCH_PREDECESSOR_WAIT_MS: u32 = 10_000;
 
+/// Explicit pane restart checkpoint reason (ADR-0348).
+pub const SESSION_CHECKPOINT_REASON_RESTART: &str = "restart";
+
 #[cfg(test)]
 mod tests {
     use super::*;

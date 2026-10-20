@@ -27,6 +27,7 @@ import {
   resizeTerminal,
   closeTerminalSession,
   checkpointAndCloseHiddenTerminals,
+  checkpointAndCloseTerminalForRestart,
   getSyncGroupTerminals,
   handleLxMessage,
   loadSettings,
@@ -475,6 +476,15 @@ describe("tauri-api", () => {
   });
 
   describe("checkpointAndCloseHiddenTerminals", () => {
+    it("binds explicit restart to the displayed terminal generation", async () => {
+      mockInvoke.mockResolvedValue(undefined);
+      await checkpointAndCloseTerminalForRestart("terminal-p1", 9);
+      expect(mockInvoke).toHaveBeenCalledWith("checkpoint_and_close_terminal_for_restart", {
+        id: "terminal-p1",
+        generation: 9,
+      });
+    });
+
     it("passes the complete eviction set to the backend transaction", async () => {
       mockInvoke.mockResolvedValue({
         closedTerminalIds: ["terminal-p1"],

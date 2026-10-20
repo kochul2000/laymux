@@ -27,6 +27,7 @@ JSON이 없어도 일반 설정 변경은 기본 portable 구성과 기존 DB를
 
 - `save_session_checkpoint(snapshot)` → `{revision, needsRetry, unresolvedTerminalIds, snapshot}`. snapshot에는 workspaces/docks/workspaceDisplayOrder/coverage/lookup 실패 플래그/uiState만 허용한다. DB가 실제 저장한 snapshot을 반환하며 Unknown과 쓰기 성공을 분리한다. 성공한 부분 commit은 호출 주체와 무관하게 native 재시도 worker를 깨운다.
 - `load_session_checkpoint()` → 로컬 snapshot 또는 null. 환경 설정과 사용자 구성은 포함하지 않는다.
+- `checkpoint_and_close_terminal_for_restart(id,generation?)` → 종료 완료 또는 오류. 기존 hidden eviction의 대상별 입력 차단·drain·critical checkpoint·close transaction을 재사용한다. `session-checkpoint-requested`의 `reason: restart`는 보이는 pane에도 허용하고 frontend는 대상의 확정된 DB commit 후에만 ACK한다. generation 불일치·확인·저장 실패는 대상 PTY를 유지한다([ADR-0348](../adr/0348-restart-view-reuses-agent-session-restore.md)).
 - `export_portable_settings()`, `GET /api/v1/settings/export`, MCP `export_settings` → portable 구성. REST/MCP envelope는 `{settings}`다. 기존 Settings 조회/patch는 로컬 유효 모델이며 이식용 export와 다르다.
 - DB 로드 실패는 `SettingsLoadResult{status:"parse_error",storageKind:"localState",settingsPath,error,...}`다. 원본 DB를 유지하고 startup/background/close 쓰기를 차단한다. DB 오류 모달에는 설정 초기화 버튼을 노출하지 않는다. `localUiState`는 유효 모델의 read-only 복원 필드이고 JSON에는 없다.
 

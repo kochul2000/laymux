@@ -5,7 +5,7 @@ import { useTerminalStore } from "@/stores/terminal-store";
 import { findTerminalPane } from "./pane-clear";
 import { resolvePaneCwd } from "./pane-cwd";
 import { toTerminalId } from "./pane-ids";
-import { flushSessionCheckpoint } from "./persist-session";
+import { checkpointAndCloseTerminalForRestart } from "./tauri-api";
 
 const pendingRestarts = new Map<string, Promise<boolean>>();
 
@@ -23,17 +23,10 @@ export function restartPaneView(paneId: string): Promise<boolean> {
   const result = (async () => {
     const live = before && before.sessionReady !== false;
     if (live) {
-      // This publishes the DB's committed last*Session fields into the view
-      // before the epoch can unmount the old PTY. Unknown must keep it alive.
-      const commit = await flushSessionCheckpoint({
-        requireConclusive: true,
-        terminalIds: [terminalId],
-      });
-      const target = commit.coverage.find((entry) => entry.terminalId === terminalId);
-      if (!target || commit.unresolvedTerminalIds?.includes(terminalId)) {
-        throw new Error("Session checkpoint is not conclusive");
-      }
-      if (before.generation !== undefined && target.generation !== before.generation) return false;
+      // Rust holds the existing target input fence through checkpoint and
+      // close. The checkpoint publishes committed last*Session fields before
+      // the old PTY ends; Unknown keeps it alive.
+      await checkpointAndCloseTerminalForRestart(terminalId, before.generation);
     }
     const currentPane = findTerminalPane(paneId);
     const current = instance();

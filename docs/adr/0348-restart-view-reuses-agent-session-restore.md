@@ -1,6 +1,6 @@
 # 0348. Restart View는 기존 checkpoint와 에이전트 세션 복원을 재사용한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-20
 - Source: 사용자 요구(Restart View에서 Claude·Codex·Grok을 종료 후 같은 세션으로 resume), [data-flow.md §13.5](../architecture/data-flow.md#135-체크포인트-조정과-파괴-전-barrier), [ADR-0222](0222-agent-session-checkpoint-coordinator.md), [ADR-0113](0113-workspace-clear-activity-owned.md), [ADR-0140](0140-split-pane-inherits-source-cwd.md)
 - 관계: ADR-0113·0140의 요청 버스를 확장한다. Clear와 분할의 새 세션 정책은 유지한다.
@@ -13,7 +13,8 @@ Restart View는 터미널을 재마운트하면서 에이전트 세션 복원을
 
 **Restart View는 현재 터미널의 기존 critical checkpoint를 완료한 뒤 PTY를 교체하고, 앱 기동과 같은 에이전트 복원 분기로 실행한다.**
 
-- 대화 ID의 정본은 기존 backend 귀속과 commit된 pane view다. `flushSessionCheckpoint`의 대상별 안정 관측·저장·메모리 게시를 재사용한다. 별도 세션 검색이나 resume 명령 조립은 만들지 않는다.
+- 대화 ID의 정본은 기존 backend 귀속과 commit된 pane view다. hidden eviction의 대상 입력 차단·진행 중 mutation drain·critical checkpoint·close transaction을 공통으로 사용한다. 입력 차단은 저장을 기다리는 동안과 close 완료까지 유지하고, 무관한 pane 입력은 허용한다. `flushSessionCheckpoint`의 대상별 안정 관측·저장·메모리 게시를 그대로 재사용하며 별도 세션 검색이나 resume 명령 조립은 만들지 않는다.
+- 내부 IPC `checkpoint_and_close_terminal_for_restart(id,generation?)`는 이 공통 transaction을 `restart` 이유로 호출한다. 지정한 generation이 바뀌면 종료하지 않는다. frontend는 이 이유에 숨김 만료 조건을 적용하지 않고 대상 checkpoint의 확정 완료를 확인해 ACK한다. 기존 `eviction`의 숨김 자격 검증은 유지한다.
 - 세션을 확인할 수 없거나 저장에 실패하면 실행 중인 PTY를 종료하지 않고 실패를 알린다. 준비되지 않은 터미널은 기존 새 시작으로 복구할 수 있다.
 - checkpoint 도중 pane이 삭제·교체되거나 터미널 generation이 바뀌면 이전 요청을 적용하지 않는다. 같은 pane의 중복 요청은 진행 중 작업에 합류한다.
 - 요청 버스는 세션 복원 허용 여부만 전달한다. TerminalView의 기존 provider별 `restoreSession` 설정, 명령·ID 검증, Fresh 처리와 startup override 우선순위를 그대로 사용한다. 현재 CWD와 새 출력 화면 정책은 기존 Restart View를 따른다.

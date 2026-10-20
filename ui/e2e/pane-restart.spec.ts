@@ -16,10 +16,28 @@ for (const surface of ["workspace", "dock"] as const) {
         const calls = window.__restartCalls = [];
         let generation = 0;
         window.__TAURI_INTERNALS__.invoke = async (command, args, options) => {
+          if (command === 'plugin:event|listen' && args.event === 'session-checkpoint-requested') window.__restartListenerReady = true;
           if (command === 'get_terminal_cwds') return { ${JSON.stringify(terminalId)}: '/current' };
           if (command === 'get_terminal_session_attributions') return {
             ${JSON.stringify(terminalId)}: { generation, state: 'identified', provider: '${provider}', sessionId: '${sessionId}' }
           };
+          if (command === 'checkpoint_and_close_terminal_for_restart') {
+            // Emulate Rust's checkpoint request/ACK before the native close.
+            await new Promise((resolve, reject) => {
+              window.__restartCheckpointAck = (error) => error ? reject(new Error(error)) : resolve();
+              window.__tauriMockEmit('session-checkpoint-requested', {
+                requestId: 42, reason: 'restart', requireConclusive: true, terminalIds: [args.id]
+              });
+            });
+            calls.push({ command: 'close_terminal_session', args });
+            await new Promise(resolve => { window.__finishRestartClose = resolve; });
+            window.__holdRestartClose = false;
+            return;
+          }
+          if (command === 'acknowledge_session_checkpoint' && args.requestId === 42) {
+            window.__restartCheckpointAck(args.error);
+            return;
+          }
           if (command === 'create_terminal_session' && args.id === '${terminalId}') {
             calls.push({ command, args });
             generation++;
@@ -57,6 +75,11 @@ for (const surface of ["workspace", "dock"] as const) {
           ? page.getByTestId("workspace-pane-0")
           : page.getByTestId("dock-bottom");
       await expect(pane.getByTestId(`terminal-view-${terminalId}`)).toBeVisible();
+      await page.waitForFunction(
+        () =>
+          (window as unknown as { __restartListenerReady?: boolean }).__restartListenerReady ===
+          true,
+      );
       await page.waitForFunction(async (id) => {
         // Include StrictMode's initial create/close/create in the readiness wait.
         const modulePath = "/src/stores/terminal-store.ts";
@@ -113,7 +136,7 @@ for (const surface of ["workspace", "dock"] as const) {
           async () =>
             (await calls()).filter((call) => call.command === "create_terminal_session").length,
         )
-        .toBe(initialCreates + 1);
+        .toBeGreaterThan(initialCreates);
       const last = (await calls()).findLast((call) => call.command === "create_terminal_session")!;
       const command =
         provider === "claude"

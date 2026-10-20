@@ -409,6 +409,17 @@ export async function checkpointAndCloseHiddenTerminals(
   return invoke("checkpoint_and_close_hidden_terminals", { terminalIds });
 }
 
+/** Reuse the target-scoped checkpoint/close transaction for an explicit restart. */
+export function checkpointAndCloseTerminalForRestart(
+  id: string,
+  generation?: number,
+): Promise<void> {
+  return invoke("checkpoint_and_close_terminal_for_restart", {
+    id,
+    generation: generation ?? null,
+  });
+}
+
 export async function getSyncGroupTerminals(groupName: string): Promise<string[]> {
   return invoke("get_sync_group_terminals", { groupName });
 }
@@ -667,7 +678,7 @@ export async function getTerminalSessionAttributions(
 
 export interface SessionCheckpointRequest {
   requestId: number;
-  reason: "watchdog" | "update" | "eviction";
+  reason: "watchdog" | "update" | "eviction" | "restart";
   requireConclusive: boolean;
   terminalIds?: string[];
 }
