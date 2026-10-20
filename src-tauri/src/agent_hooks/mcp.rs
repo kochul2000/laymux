@@ -260,7 +260,7 @@ pub fn warm_up(state: &AppState, app: &tauri::AppHandle) -> Result<(), AppError>
     }
     let (name, port) = endpoint();
     #[allow(unused_mut)] // WSL enumeration extends the list only on Windows.
-    let mut distros = vec![None];
+    let mut distros: Vec<Option<String>> = vec![None];
     // Enumeration failure only skips WSL; Settings can still check it explicitly.
     #[cfg(windows)]
     distros.extend(
