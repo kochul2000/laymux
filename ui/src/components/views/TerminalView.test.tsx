@@ -10662,6 +10662,69 @@ describe("TerminalView", () => {
       });
     });
 
+    it.each([
+      ["lastClaudeSession", "claude --resume"],
+      ["lastCodexSession", "codex resume"],
+      ["lastGrokSession", "grok --resume"],
+    ])("Restart View reuses startup restore for %s", async (field, command) => {
+      const sessionId = "019ffa7f-b8c1-7511-872f-911e8dc8d179";
+      const consumed = vi.fn();
+      render(
+        <TerminalView
+          instanceId="t-agent-restart"
+          paneId="pane-agent-restart"
+          profile="PowerShell"
+          syncGroup="default"
+          isUserRestart
+          restoreSessionOnRestart
+          restartCwd="/current"
+          lastCwd="/old"
+          {...{ [field]: sessionId }}
+          onUserRestartConsumed={consumed}
+        />,
+      );
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "t-agent-restart",
+          "PowerShell",
+          80,
+          24,
+          "default",
+          true,
+          true,
+          "/current",
+          `${command} ${sessionId}`,
+        );
+        expect(consumed).toHaveBeenCalledOnce();
+      });
+      expect(mockLoadTerminalOutputCache).not.toHaveBeenCalled();
+    });
+
+    it("clear restart still skips agent resume", async () => {
+      render(
+        <TerminalView
+          instanceId="t-clear-restart"
+          profile="PowerShell"
+          syncGroup="default"
+          isUserRestart
+          lastClaudeSession="old-session"
+        />,
+      );
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "t-clear-restart",
+          "PowerShell",
+          80,
+          24,
+          "default",
+          true,
+          true,
+          undefined,
+          undefined,
+        );
+      });
+    });
+
     it("passes claude --resume as startupCommandOverride when lastClaudeSession is set", async () => {
       render(
         <TerminalView

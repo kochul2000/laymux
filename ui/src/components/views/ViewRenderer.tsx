@@ -34,6 +34,7 @@ export interface ViewRendererProps {
   terminalRestartCwd?: string;
   /** 재시작 요청이 아직 첫 세션 생성에 소비되지 않았는지 나타낸다. */
   terminalRestartFresh?: boolean;
+  terminalRestartRestoreSession?: boolean;
   /** 재시작 요청을 첫 세션 생성 뒤 소비한다. */
   onTerminalRestartConsumed?: () => void;
   /** Route the fail-stop alert action through the pane owner's restart flow. */
@@ -51,6 +52,7 @@ function TerminalViewWithSyncCwd({
   terminalRestartEpoch,
   terminalRestartCwd,
   terminalRestartFresh,
+  terminalRestartRestoreSession,
   onTerminalRestartConsumed,
   onTerminalRestart,
 }: {
@@ -63,6 +65,7 @@ function TerminalViewWithSyncCwd({
   terminalRestartEpoch?: number;
   terminalRestartCwd?: string;
   terminalRestartFresh?: boolean;
+  terminalRestartRestoreSession?: boolean;
   onTerminalRestartConsumed?: () => void;
   onTerminalRestart?: () => void;
 }) {
@@ -111,6 +114,7 @@ function TerminalViewWithSyncCwd({
       lastGrokSession={lastGrokSession}
       restartCwd={terminalRestartCwd}
       isUserRestart={terminalRestartFresh ?? false}
+      restoreSessionOnRestart={terminalRestartRestoreSession ?? false}
       onUserRestartConsumed={onTerminalRestartConsumed}
       onRestart={onTerminalRestart}
     />
@@ -289,6 +293,7 @@ export function ViewRenderer({
   terminalRestartEpoch,
   terminalRestartCwd,
   terminalRestartFresh,
+  terminalRestartRestoreSession,
   onTerminalRestartConsumed,
   onTerminalRestart,
 }: ViewRendererProps) {
@@ -319,6 +324,7 @@ export function ViewRenderer({
             terminalRestartEpoch={terminalRestartEpoch}
             terminalRestartCwd={terminalRestartCwd}
             terminalRestartFresh={terminalRestartFresh}
+            terminalRestartRestoreSession={terminalRestartRestoreSession}
             onTerminalRestartConsumed={onTerminalRestartConsumed}
             onTerminalRestart={onTerminalRestart}
           />

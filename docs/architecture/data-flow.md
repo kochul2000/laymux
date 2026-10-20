@@ -1659,6 +1659,8 @@ WSL 세션 프로세스 probe는 환경과 PPID를 POSIX 셸 내장 `read`로 �
 
 ### 13.5 체크포인트 조정과 파괴 전 barrier
 
+**Restart View ([ADR-0348](../adr/0348-restart-view-reuses-agent-session-restore.md)).** grid·stack layer·dock의 버튼과 터미널 장애 화면의 Restart View는 `lib/pane-restart.ts`에서 같은 pane의 중복 요청을 합친다. 살아 있는 대상 PTY는 기존 `flushSessionCheckpoint({requireConclusive:true, terminalIds:[id]})`로 안정 귀속을 확인하고 DB commit된 `last*Session`을 pane view에 게시한 뒤에만 restart epoch를 올린다. 미확인·저장 실패는 PTY를 유지하고 알림으로 표시하며, 대상 삭제·profile/generation 교체는 늦은 요청을 폐기한다. 새 mount는 기존 `TerminalView` startup restore 분기(설정된 provider 명령·복원 스위치·ID 검증·Fresh 정책)를 그대로 사용한다. close→create는 기존 terminal ID별 lifecycle 큐가 직렬화한다. 현재 CWD 전달과 출력 캐시 생략은 기존 Restart View 정책이다. 요청 store의 `restoreSession`은 이 경로에서만 켜며, Clear의 restart와 분할 CWD 시드는 기존 새 세션 시작을 유지한다.
+
 GUI 초기 세션 로드는 저장된 workspace/pane/layer ID와 활성 layer를 레이아웃 템플릿 목록의 유무와 무관하게 복원한다. 템플릿이 비어 있다는 이유로 초기 `EmptyView` 구조를 남기지 않는다. 초기화 effect가 폐기되면 해당 로드의 늦은 성공·실패 응답은 store, 구성 저장 기준, 캐시 정리와 저장 차단 상태에 반영하지 않는다. 새 GUI의 유효한 복원을 이전 로드가 덮어쓰지 않도록 한다.
 
 Unknown pane은 DB의 이전 검증 복원점을 보존하고 `needsRetry`·`unresolvedTerminalIds`로 확인 미완료를 알린다. 정상 pane은 독립적으로 저장한다. frontend에는 입력 snapshot 대신 DB가 실제 commit한 snapshot을 게시한다. DB 오류는 checkpoint 실패이며 종료/업데이트의 기존 barrier를 통과하지 않는다. 별도 구성 저장 성공을 세션 확인 완료로 취급하지 않는다.

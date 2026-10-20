@@ -28,6 +28,10 @@ vi.mock("@/components/views/TerminalView", () => ({
 // jsdom 에서 throw 하므로 no-op 으로 stub 한다.
 const propagateCwdOnceMock = vi.fn().mockResolvedValue(undefined);
 const clearPaneFromUiMock = vi.fn().mockResolvedValue(null);
+const restartPaneViewMock = vi.fn().mockResolvedValue(true);
+vi.mock("@/lib/pane-restart", () => ({
+  restartPaneView: (paneId: string) => restartPaneViewMock(paneId),
+}));
 vi.mock("@/lib/pane-clear-action", () => ({
   runPaneClearFromUi: (paneId: string) => clearPaneFromUiMock(paneId),
 }));
@@ -673,16 +677,14 @@ describe("PaneGrid restart wiring (ADR-0113)", () => {
 
   const terminal = (paneId: string) => screen.getByTestId(`mock-terminal-terminal-${paneId}`);
 
-  it("routes the control bar's Restart View through the store", () => {
+  it("routes the control bar's Restart View through the checkpoint action", () => {
+    restartPaneViewMock.mockClear();
     render(<PaneGrid {...props} />);
     // Arm, then confirm (ADR-0333).
     fireEvent.click(within(screen.getByTestId("test-pane-0")).getByTestId("pane-control-restart"));
     fireEvent.click(within(screen.getByTestId("test-pane-0")).getByTestId("pane-control-restart"));
 
-    expect(useTerminalRestartStore.getState().requests["pane-0"]).toMatchObject({
-      epoch: 1,
-      fresh: true,
-    });
+    expect(restartPaneViewMock).toHaveBeenCalledExactlyOnceWith("pane-0");
   });
 
   // A workspace clear requests the restart from outside the component; the

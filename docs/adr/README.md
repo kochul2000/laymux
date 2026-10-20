@@ -371,6 +371,7 @@ ADR 이 필요한 대표 기준:
 | [0345](0345-worktree-dock-review-context.md) | 워크트리 검토 맥락은 조회 대상에 귀속하고 화면 크기에 맞춰 목록과 상세를 배치한다 | Accepted |
 | [0346](0346-preserve-daemon-session-on-output-reconnect.md) | 출력 장애 후 pane 복귀·수동 재연결은 데몬의 기존 작업을 보존한다 | Accepted |
 | [0347](0347-terminal-output-binary-delivery-and-checkpoint-worker.md) | 보관된 출력 envelope를 바이너리로 읽고 checkpoint는 Worker에서 계산한다 | Accepted |
+| [0348](0348-restart-view-reuses-agent-session-restore.md) | Restart View는 기존 checkpoint와 에이전트 세션 복원을 재사용한다 | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

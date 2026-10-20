@@ -21,7 +21,7 @@ import {
   useTerminalRestartStore,
   type TerminalRestartRequest,
 } from "@/stores/terminal-restart-store";
-import { resolvePaneCwd } from "@/lib/pane-cwd";
+import { restartPaneView } from "@/lib/pane-restart";
 import { runPaneClearFromUi } from "@/lib/pane-clear-action";
 
 /**
@@ -202,7 +202,7 @@ export function PaneGrid({
   const consumeTerminalRestart = useTerminalRestartStore((s) => s.consumeRestart);
 
   const restartTerminalView = useCallback((pane: PaneLayer) => {
-    useTerminalRestartStore.getState().requestRestart(pane.id, resolvePaneCwd(pane));
+    void restartPaneView(pane.id);
   }, []);
 
   // Pane stack DnD (ADR-0297). A slot dragged by its control bar swaps with the
@@ -488,6 +488,7 @@ export function PaneGrid({
                       terminalRestartEpoch={terminalRestarts[layer.id]?.epoch}
                       terminalRestartCwd={terminalRestarts[layer.id]?.cwd}
                       terminalRestartFresh={terminalRestarts[layer.id]?.fresh}
+                      terminalRestartRestoreSession={terminalRestarts[layer.id]?.restoreSession}
                       onTerminalRestartConsumed={() => consumeTerminalRestart(layer.id)}
                       onTerminalRestart={
                         layer.view.type === "TerminalView"
