@@ -1,6 +1,6 @@
 # 0350. Automation은 화면 전환 없이 대상 workspace와 pane을 직접 조작한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-20
 - Source: 사용자 요구(MCP 전수 조사 및 활성 workspace 제약 제거), [api-contracts.md §12](../architecture/api-contracts.md#12-automation-api), [ADR-0298](0298-pane-rearrangement-automation-parity.md), [ADR-0324](0324-automation-never-navigates-user.md), [ADR-0342](0342-automation-layer-activation-explicit-focus.md)
 - 관계: ADR-0298의 활성 workspace 한정 대상 범위를 대체하며, ADR-0324의 비탐색 작업 중 포커스 보존 원칙을 직접 대상 지정에 적용한다.
