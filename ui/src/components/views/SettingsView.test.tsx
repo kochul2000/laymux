@@ -1274,6 +1274,17 @@ describe("SettingsView", () => {
   });
 
   // -- Terminal section: copy on select --
+  it("offers checkpoint Worker as an advanced option enabled by default and saves false", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-terminal"));
+    const toggle = screen.getByTestId("checkpoint-worker-toggle") as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    await user.click(toggle);
+    expect(useSettingsStore.getState().terminal.checkpointWorker).toBe(true);
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().terminal.checkpointWorker).toBe(false);
+  });
 
   it("shows truecolor advertising enabled by default and saves an opt-out", async () => {
     const user = userEvent.setup();

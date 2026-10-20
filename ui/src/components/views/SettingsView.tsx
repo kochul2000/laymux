@@ -1417,6 +1417,15 @@ function TerminalSection() {
   return (
     <div className="settings-page">
       <SettingsPageTitle>{t("terminal.title")}</SettingsPageTitle>
+      <SettingsGroup title={t("terminal.groupAdvanced")}>
+        <SettingsToggleField
+          label={t("terminal.checkpointWorker")}
+          desc={t("terminal.checkpointWorkerDesc")}
+          testId="checkpoint-worker-toggle"
+          checked={terminal.checkpointWorker}
+          onChange={(checkpointWorker) => update({ checkpointWorker })}
+        />
+      </SettingsGroup>
       <SettingsGroup title={t("terminal.groupGeneral")}>
         <SettingsField
           label={t("terminal.defaultInputMode")}

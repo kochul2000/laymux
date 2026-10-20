@@ -9,6 +9,8 @@
 ---
 ## 10. Settings
 
+`terminal.checkpointWorker`(기본 `true`)는 Settings → 터미널 → 고급의 checkpoint 백그라운드 처리 옵션이다([ADR-0347](../adr/0347-terminal-output-binary-delivery-and-checkpoint-worker.md)). 끄면 동일한 checkpoint 모델을 메인 스레드에서 실행한다. 새 터미널 또는 앱 재실행부터 적용(`nextUse`)하고 기존 TerminalView의 모드는 출력 재연결에서도 유지한다. 설정 저장은 실행 중인 셸·파서를 교체하지 않는다.
+
 `settings.json`은 **사용자가 의도적으로 편집·공유하는 구성**만 담는다. 재시작 간 유지돼야 하지만 구성이 아닌 pane별 컨트롤 바 모드·폰트 줌 등은 localStorage에 저장되는 인스턴스 오버라이드 레이어([overview.md](./overview.md) §4.2)에 들어간다. 전체 pane의 기본 컨트롤 바 모드인 `controlBar.defaultMode`는 `settings.json` 구성이다.
 
 새 PC 설정의 `controlBar.defaultMode`는 `pinned`이고, 기본 Dock은 왼쪽 WorkspaceSelectorView와 오른쪽 MemoView / FileExplorerView / GitHubView(위부터 높이 1/3씩)다. 위·아래 Dock은 숨긴다. 이 기본 구성은 Rust `Settings::default()`와 프론트 store에 일치시키며, 기존에 저장된 컨트롤 바 모드·pane 오버라이드·Dock 배치는 그대로 적용한다. 새 값은 신규 또는 생략된 설정에만 적용한다([ADR-0265](../adr/0265-pc-remote-first-use-defaults.md)).

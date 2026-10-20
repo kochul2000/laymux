@@ -563,11 +563,25 @@ vi.mock("@/lib/terminal-serialize-registry", () => ({
 
 vi.mock("@/lib/terminal-render-checkpoint-worker", async () => {
   const { TerminalRenderCheckpointModel } = await import("@/lib/terminal-render-checkpoint");
-  return { TerminalRenderCheckpointWorker: TerminalRenderCheckpointModel };
+  return {
+    TerminalRenderCheckpointWorker: class extends TerminalRenderCheckpointModel {
+      constructor(options: never) {
+        super(options);
+        mockCheckpointWorkerCreated();
+      }
+    },
+  };
 });
+
+const mockCheckpointWorkerCreated = vi.fn();
+const mockCheckpointModelCreated = vi.fn();
+const mockCheckpointModelDisposed = vi.fn();
 
 vi.mock("@/lib/terminal-render-checkpoint", () => ({
   TerminalRenderCheckpointModel: class MockTerminalRenderCheckpointModel {
+    constructor() {
+      mockCheckpointModelCreated();
+    }
     attach = vi.fn().mockResolvedValue(undefined);
     apply = (...args: unknown[]) => mockTerminalRenderCheckpointApply(...args);
     capture = vi.fn().mockResolvedValue({
@@ -576,7 +590,7 @@ vi.mock("@/lib/terminal-render-checkpoint", () => ({
       geometry: { revision: 0, cols: 80, rows: 24 },
       data: "",
     });
-    dispose = vi.fn();
+    dispose = mockCheckpointModelDisposed;
   },
 }));
 
@@ -12523,66 +12537,82 @@ describe("TerminalView desktop input composer", () => {
     expect(mockFailStopTerminalOutputSurface).not.toHaveBeenCalled();
   });
 
-  it("automatically reconnects a failed pane once on focus return and permits manual retry", async () => {
-    const terminalId = "t-output-reconnect";
-    const restart = vi.fn();
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    mockAttachTerminalOutput.mockResolvedValueOnce(v3Attachment(1));
-    const view = render(
-      <TerminalView
-        instanceId={terminalId}
-        profile="PowerShell"
-        syncGroup=""
-        onRestart={restart}
-      />,
-    );
-    await waitForTerminalInputReady();
-    act(() =>
-      capturedTerminalOutputFailStopped?.({
-        terminalId,
-        generation: 7,
-        leaseToken: "lease-v3",
-        reason: "surface_unavailable",
-      }),
-    );
-    expect(mockReconnectTerminalSession).not.toHaveBeenCalled();
-    view.rerender(
-      <TerminalView
-        instanceId={terminalId}
-        profile="PowerShell"
-        syncGroup=""
-        isFocused
-        onRestart={restart}
-      />,
-    );
-    await vi.waitFor(() => expect(mockReconnectTerminalSession).toHaveBeenCalledTimes(1));
-    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Reconnect" })).toBeEnabled());
-    expect(screen.getByTestId(`terminal-output-stopped-${terminalId}`)).toHaveTextContent(
-      "does not preserve terminal contents",
-    );
-    const recovered = v3Attachment(1);
-    recovered.state.generation = 8;
-    mockReconnectTerminalSession.mockResolvedValueOnce(8);
-    mockAttachTerminalOutput.mockResolvedValueOnce(recovered);
-    fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
-    await vi.waitFor(() =>
-      expect(screen.queryByTestId(`terminal-output-stopped-${terminalId}`)).toBeNull(),
-    );
-    expect(mockReconnectTerminalSession).toHaveBeenCalledTimes(2);
-    expect(mockCreateTerminalSession).toHaveBeenCalledTimes(1);
-    expect(mockCloseTerminalSession).not.toHaveBeenCalled();
-    act(() =>
-      capturedTerminalOutputFailStopped?.({
-        terminalId,
-        generation: 7,
-        leaseToken: "lease-v3",
-        reason: "surface_unavailable",
-      }),
-    );
-    expect(screen.queryByTestId(`terminal-output-stopped-${terminalId}`)).toBeNull();
-    view.unmount();
-    warn.mockRestore();
-  });
+  it.each([true, false])(
+    "automatically reconnects a failed pane once on focus return and permits manual retry (Worker=%s)",
+    async (workerEnabled) => {
+      useSettingsStore.getState().setTerminal({ checkpointWorker: workerEnabled });
+      const terminalId = "t-output-reconnect";
+      const restart = vi.fn();
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      mockAttachTerminalOutput.mockResolvedValueOnce(v3Attachment(1));
+      const view = render(
+        <TerminalView
+          instanceId={terminalId}
+          profile="PowerShell"
+          syncGroup=""
+          onRestart={restart}
+        />,
+      );
+      await waitForTerminalInputReady();
+      const initialModels = mockCheckpointModelCreated.mock.calls.length;
+      const initialWorkers = mockCheckpointWorkerCreated.mock.calls.length;
+      const initialDisposals = mockCheckpointModelDisposed.mock.calls.length;
+      // Saving a different mode does not replace a live parser, even on recovery.
+      act(() => useSettingsStore.getState().setTerminal({ checkpointWorker: !workerEnabled }));
+      act(() =>
+        capturedTerminalOutputFailStopped?.({
+          terminalId,
+          generation: 7,
+          leaseToken: "lease-v3",
+          reason: "surface_unavailable",
+        }),
+      );
+      expect(mockReconnectTerminalSession).not.toHaveBeenCalled();
+      view.rerender(
+        <TerminalView
+          instanceId={terminalId}
+          profile="PowerShell"
+          syncGroup=""
+          isFocused
+          onRestart={restart}
+        />,
+      );
+      await vi.waitFor(() => expect(mockReconnectTerminalSession).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() =>
+        expect(screen.getByRole("button", { name: "Reconnect" })).toBeEnabled(),
+      );
+      expect(screen.getByTestId(`terminal-output-stopped-${terminalId}`)).toHaveTextContent(
+        "does not preserve terminal contents",
+      );
+      const recovered = v3Attachment(1);
+      recovered.state.generation = 8;
+      mockReconnectTerminalSession.mockResolvedValueOnce(8);
+      mockAttachTerminalOutput.mockResolvedValueOnce(recovered);
+      fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+      await vi.waitFor(() =>
+        expect(screen.queryByTestId(`terminal-output-stopped-${terminalId}`)).toBeNull(),
+      );
+      expect(mockReconnectTerminalSession).toHaveBeenCalledTimes(2);
+      expect(mockCheckpointModelCreated).toHaveBeenCalledTimes(initialModels + 1);
+      expect(mockCheckpointModelDisposed).toHaveBeenCalledTimes(initialDisposals + 1);
+      expect(mockCheckpointWorkerCreated).toHaveBeenCalledTimes(
+        initialWorkers + (workerEnabled ? 1 : 0),
+      );
+      expect(mockCreateTerminalSession).toHaveBeenCalledTimes(1);
+      expect(mockCloseTerminalSession).not.toHaveBeenCalled();
+      act(() =>
+        capturedTerminalOutputFailStopped?.({
+          terminalId,
+          generation: 7,
+          leaseToken: "lease-v3",
+          reason: "surface_unavailable",
+        }),
+      );
+      expect(screen.queryByTestId(`terminal-output-stopped-${terminalId}`)).toBeNull();
+      view.unmount();
+      warn.mockRestore();
+    },
+  );
 
   it("keeps one reconnect in flight and exposes another visit after automatic failure", async () => {
     const terminalId = "t-output-reconnect-pending";

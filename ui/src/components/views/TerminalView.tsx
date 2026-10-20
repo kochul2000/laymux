@@ -203,7 +203,7 @@ import {
   unregisterTerminalScroller,
   type TerminalBufferLine,
 } from "@/lib/terminal-serialize-registry";
-import { TerminalRenderCheckpointWorker } from "@/lib/terminal-render-checkpoint-worker";
+import { createTerminalRenderCheckpoint } from "@/lib/terminal-render-checkpoint-factory";
 import {
   registerAtlasRebuilder,
   unregisterAtlasRebuilder,
@@ -4564,9 +4564,11 @@ export function TerminalView({
     let disposeOutputV3DiagnosticsProvider: (() => void) | undefined;
     let cacheRestorePromise: Promise<string | null> = Promise.resolve(null);
     const outputCoordinator = new TerminalOutputAttachCoordinator();
-    const renderCheckpointModel = new TerminalRenderCheckpointWorker({
-      admission: terminalParserAdmission,
-    });
+    // Next-use setting: saving it must not interrupt a live byte stream or PTY.
+    const checkpointWorkerEnabled = useSettingsStore.getState().terminal.checkpointWorker;
+    const createCheckpoint = () =>
+      createTerminalRenderCheckpoint(checkpointWorkerEnabled, terminalParserAdmission);
+    let renderCheckpointModel = createCheckpoint();
     registerTerminalRenderCheckpointProvider(instanceId, (target, maxBytes) =>
       renderCheckpointModel.capture(target, maxBytes),
     );
@@ -5959,6 +5961,11 @@ export function TerminalView({
         const generation = outcome.value;
         if (cancelled) return;
         outputGeneration = generation;
+        // #1236 preserves the PTY but replaces the failed output generation.
+        // A terminated Worker cannot adopt it; install a fresh checkpoint model
+        // in the same captured mode. The capture provider follows this binding.
+        renderCheckpointModel.dispose();
+        renderCheckpointModel = createCheckpoint();
         // Disposing the old v3 sender also disposes its mount scope. A new
         // generation needs a new owner; unresolved orphans stay charged in
         // the same window registry instead of being reset or bypassed.

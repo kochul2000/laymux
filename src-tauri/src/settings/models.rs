@@ -986,6 +986,9 @@ impl<'de> Deserialize<'de> for ComposerStarredEntry {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalSettings {
+    /// Run checkpoint parsing in a Worker. Applies to newly created surfaces.
+    #[serde(default = "default_true")]
+    pub checkpoint_worker: bool,
     #[serde(default)]
     pub output_activity_burst: OutputActivityBurstSettings,
     /// Class shares for xterm parser admission (ADR-0101). No settings UI: this
@@ -1061,6 +1064,7 @@ fn default_pty_daemon_grace_minutes() -> u32 {
 impl Default for TerminalSettings {
     fn default() -> Self {
         Self {
+            checkpoint_worker: true,
             output_activity_burst: OutputActivityBurstSettings::default(),
             parser_admission: ParserAdmissionSettings::default(),
             advertise_true_color: true,

@@ -18,6 +18,8 @@
 - frontend는 terminal당 읽기 하나와 최신 알림 힌트 하나만 보유한다. 알림 합치기는 원본 폐기가 아니다. 읽기 실패는 기존 watchdog의 exact repair로 복구하며, 잘못된 바이너리는 surface contract fault다. dispose 뒤 완료는 무시한다. Tauri Channel의 별도 payload 대기열·포트·네트워크 노출은 추가하지 않는다.
 - Worker는 기존 checkpoint 모델(generation·source sequence·geometry·xterm 버퍼·serializer)을 소유한다. 화면용 xterm과 같은 6.0.0의 공식 headless 빌드에 동일한 retained-row reflow 패치와 Unicode provider를 적용한다. 공통 모델 core에 터미널 인스턴스를 주입해 브라우저 DOM 초기화를 반입하지 않는다. 메인 스레드는 FIFO와 기존 weighted admission을 소유한다. 승인된 quantum만 보내고 실제 parse 완료 응답 뒤 lease와 ACK를 진행한다. snapshot도 빈 prefix 설치 뒤 같은 admission으로 나누어 적용한다. capture는 이미 접수한 FIFO를 기다린 뒤 요청하지만, target에 도달하는 후속 write를 막지 않는다. 기존 3초 capture deadline은 admission 대기부터 응답까지 포함한다.
 - ingress backing은 visible parser와 공유하므로 승인 slice만 복사·transfer한다. 원본 backing은 detach하지 않는다. snapshot 직렬화도 FIFO에서 수행해 바이트와 metadata가 같은 상태를 가리킨다. Worker 실패·timeout·dispose는 pending 작업을 거절하고 기존 surface 실패 경로로 수렴한다.
+- `terminal.checkpointWorker`는 기본 `true`인 고급 설정이다. `false`는 동일한 모델과 admission을 메인 스레드에서 실행한다. 값은 TerminalView 수명 시작 때 고정하고 저장만으로 실행 중인 파서를 교체하거나 셸을 재시작하지 않는다. 새 터미널 또는 앱 재실행부터 적용한다(`nextUse`). 두 방식 모두 checkpoint·sequence·geometry·ACK·Remote 계약을 유지한다.
+- ADR-0346의 데몬 보존 재연결이 새 출력 generation을 반환하면 이전 checkpoint 객체를 폐기하고 같은 모드의 새 객체를 설치한다. 종료된 Worker도 복구할 수 있어야 하며, 등록된 capture provider는 현재 객체만 사용한다. 재연결에서 설정을 다시 읽거나 기존 PTY 작업을 재시작하지 않는다.
 - Windows와 Linux에 같은 계약을 쓴다. Node 런타임이나 native VT 엔진 교체는 도입하지 않는다.
 
 ## Alternatives Considered

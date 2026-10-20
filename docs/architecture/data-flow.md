@@ -505,6 +505,8 @@ Codex overlay caret의 DEC 2026 프레임 안/밖 판정은 xterm.js 렌더 모�
 
 ### 8.8 분리 입력 컴포저와 sequenced output attach
 
+`terminal.checkpointWorker`는 기본 true이며 TerminalView 생성 시 고정한다. false이면 같은 공통 모델을 메인 스레드에서 실행한다. 설정 저장은 기존 파서를 바꾸지 않고 새 터미널 또는 앱 재실행부터 적용한다. ADR-0346의 데몬 보존 재연결이 새 출력 generation을 받으면 이전 checkpoint 객체를 폐기하고 고정된 같은 모드로 새 객체를 만든다. capture provider는 현재 객체를 참조하므로 종료된 Worker의 실패 상태가 새 세대에 남지 않는다.
+
 Checkpoint는 pane별 `TerminalRenderCheckpointWorker`가 요청하고 Worker 안의 기존 `TerminalRenderCheckpointModel`이 실제 xterm·sequence·geometry·serializer를 유지한다([ADR-0347](../adr/0347-terminal-output-binary-delivery-and-checkpoint-worker.md)). 메인 스레드의 기존 weighted parser admission이 승인한 slice만 복사·transfer하고 Worker parse 완료 응답 뒤 release한다. snapshot도 같은 quantum으로 나누며, capture는 접수된 write FIFO를 기다리되 target 도달에 필요한 후속 write를 막지 않는다. Worker error·messageerror·4초 response timeout·dispose는 pending 요청을 거절하고 기존 surface 실패 처리로 이어진다. Worker는 화면용 xterm과 동일한 6.0.0의 공식 headless 빌드와 공통 모델 core를 쓴다. capture 호출부터 admission 대기와 Worker 응답까지 포함한 기존 3초 deadline·snapshot budget·Unicode provider·Remote 계약은 유지한다.
 
 데스크톱 live v3 전달은 [ADR-0347](../adr/0347-terminal-output-binary-delivery-and-checkpoint-worker.md)에 따라 작은 binary 도착 알림과 `read_terminal_output_envelope_binary`로 나뉜다. 알림은 full identity·source 범위만 담고, 읽기는 기존 delivery의 동일 immutable in-flight envelope만 반환한다. `u32-le metadata 길이 + UTF-8 JSON metadata(data 제외) + raw bytes`를 `ArrayBuffer`로 받아 payload를 복사 없이 view한다. terminal별 physical read 하나와 최신 알림 힌트 하나만 유지하며 읽기는 receipt·parsed ACK·repair budget·deadline을 바꾸지 않는다. stale은 빈 바이너리이고 알림/읽기 실패는 기존 exact watchdog이 복구한다. 잘못된 packet은 surface fail-stop이다. attach·repair·Remote 표현과 parser 공정성은 유지한다.

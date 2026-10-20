@@ -1,8 +1,21 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { useSettingsStore, makeDefaultColorScheme } from "./settings-store";
+import { useSettingsStore, makeDefaultColorScheme, type TerminalSettings } from "./settings-store";
 import { DEFAULT_PANE_CLEAR } from "@/lib/pane-clear";
 
 describe("settings-store", () => {
+  it("defaults checkpoint Worker on, preserves false, and fills omitted snapshots", () => {
+    expect(useSettingsStore.getState().terminal.checkpointWorker).toBe(true);
+    useSettingsStore.getState().setTerminal({ checkpointWorker: false });
+    expect(useSettingsStore.getState().terminal.checkpointWorker).toBe(false);
+    const legacy: Partial<TerminalSettings> = { ...useSettingsStore.getState().terminal };
+    delete legacy.checkpointWorker;
+    useSettingsStore.getState().loadFromSettings({ terminal: legacy as TerminalSettings });
+    expect(useSettingsStore.getState().terminal.checkpointWorker).toBe(true);
+    useSettingsStore.getState().loadFromSettings({
+      terminal: { ...useSettingsStore.getState().terminal, checkpointWorker: false },
+    });
+    expect(useSettingsStore.getState().terminal.checkpointWorker).toBe(false);
+  });
   beforeEach(() => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
   });
