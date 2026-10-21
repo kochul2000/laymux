@@ -956,6 +956,46 @@ mod tests {
     }
 
     #[test]
+    fn remote_attachment_max_defaults_to_16_mib_and_is_kept_in_range() {
+        // ADR-0353: range 1..=16, default 16 even when the file omits it.
+        let mut settings = Settings::default();
+        assert_eq!(settings.remote.attachment_max_mib, 16);
+        let omitted: Settings =
+            serde_json::from_value(serde_json::json!({ "remote": {} })).unwrap();
+        assert_eq!(omitted.remote.attachment_max_mib, 16);
+        let path = "/remote/attachmentMaxMib";
+        for in_range in [1, 10, 16] {
+            settings.remote.attachment_max_mib = in_range;
+            assert!(
+                !validate_settings(&settings)
+                    .iter()
+                    .any(|issue| issue.path == path),
+                "{in_range} MiB"
+            );
+        }
+        for out_of_range in [0, 17] {
+            settings.remote.attachment_max_mib = out_of_range;
+            let issues = validate_settings(&settings);
+            let issue = issues
+                .iter()
+                .find(|issue| issue.path == path)
+                .unwrap_or_else(|| panic!("{out_of_range} MiB"));
+            assert_eq!(issue.code, "out_of_range");
+            assert!(
+                issue.message.contains("between 1 and 16"),
+                "{}",
+                issue.message
+            );
+        }
+        let schema = super::super::description::settings_schema();
+        let field = schema
+            .pointer("/$defs/RemoteSettings/properties/attachmentMaxMib")
+            .unwrap();
+        assert_eq!(field["minimum"], serde_json::json!(1.0));
+        assert_eq!(field["maximum"], serde_json::json!(16.0));
+    }
+
+    #[test]
     fn a_settings_file_without_the_pty_daemon_grace_gets_the_default() {
         let settings: Settings =
             serde_json::from_value(serde_json::json!({ "terminal": {} })).unwrap();

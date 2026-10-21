@@ -103,7 +103,12 @@ pub(super) fn settings_schema() -> Value {
         ("ViewerSettings", "fontSize", 8.0, 32.0),
         ("MemoSettings", "indentSize", 1.0, 8.0),
         ("MemoParagraphCopySettings", "minBlankLines", 1.0, 10.0),
-        ("RemoteSettings", "attachmentMaxMib", 1.0, 10.0),
+        (
+            "RemoteSettings",
+            "attachmentMaxMib",
+            1.0,
+            crate::constants::REMOTE_TERMINAL_ATTACHMENT_MAX_MIB as f64,
+        ),
         ("PaddingSettings", "top", 0.0, 100.0),
         ("PaddingSettings", "right", 0.0, 100.0),
         ("PaddingSettings", "bottom", 0.0, 100.0),

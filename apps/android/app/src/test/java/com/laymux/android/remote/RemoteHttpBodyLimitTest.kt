@@ -1,11 +1,20 @@
 package com.laymux.android.remote
 
 import java.util.Base64
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RemoteHttpBodyLimitTest {
+    @Test
+    fun bridgeLimitMirrorsTheDesktop16MibAttachmentRequestBound() {
+        // ADR-0353: desktop `remote_attachment_request_limit(16 MiB)` =
+        // 22,369,624 base64 chars + 16 KiB slack.
+        assertEquals(16 * 1024 * 1024, MAX_REMOTE_ATTACHMENT_BYTES)
+        assertEquals(22_386_008, MAX_REMOTE_HTTP_BODY_CHARS)
+    }
+
     @Test
     fun largestConfigurableAttachmentJsonFitsTheNativeBridgeLimit() {
         val encoded = Base64.getEncoder().encodeToString(ByteArray(MAX_REMOTE_ATTACHMENT_BYTES))

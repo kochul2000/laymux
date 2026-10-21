@@ -76,18 +76,20 @@ const ENCODING_BASE64: &str = "base64";
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
 const OUTBOUND_QUEUE_SIZE: usize = 256;
-// The relay forwards each ASGI body chunk as one frame, so a 16 MiB request
+// The relay forwards each ASGI body chunk as one frame, so a 24 MiB request
 // body can arrive as thousands of small frames; bound the count from the byte
 // bound with a 1 KiB floor instead of guessing a frame size (ADR-0227).
 const STREAM_QUEUE_MAX_SIZE: usize = HTTP_REQUEST_BYTES_LIMIT / 1024;
-const STREAM_PENDING_BYTES_LIMIT: usize = 16 * 1024 * 1024;
+// One stream holds at most one relay request body (ADR-0353).
+const STREAM_PENDING_BYTES_LIMIT: usize = HTTP_REQUEST_BYTES_LIMIT;
 const MAX_ACTIVE_STREAMS: usize = 128;
 /// Request and response bytes held across every stream of one tunnel socket.
 /// The relay admits `CLOUD_RELAY_ANDROID_E2E_RPC_INSTANCE_MAX_REQUESTS` binary
 /// Android E2E RPC uploads per instance, each held whole here until AEAD; all of
 /// them at the largest envelope any host allows must fit, plus one full browser
-/// request so a concurrent browser upload is not starved (ADR-0351). The old
-/// 32 MiB fitted only two maximum-size E2E uploads.
+/// request so a concurrent browser upload is not starved (ADR-0351, ADR-0352).
+/// At the 16 MiB attachment maximum and 24 MiB relay bound this is about
+/// 109.5 MiB (ADR-0353).
 const SOCKET_PENDING_BYTES_LIMIT: usize = CLOUD_RELAY_ANDROID_E2E_RPC_INSTANCE_MAX_REQUESTS
     * ANDROID_E2E_RPC_MAX_BODY_BYTES
     + HTTP_REQUEST_BYTES_LIMIT;

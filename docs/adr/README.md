@@ -376,6 +376,7 @@ ADR 이 필요한 대표 기준:
 | [0350](0350-automation-targets-background-workspaces.md) | Automation은 화면 전환 없이 대상 workspace와 pane을 직접 조작한다 (0298 대상 범위 대체) | Accepted |
 | [0351](0351-android-e2e-binary-rpc-streamed-through-relay.md) | Android E2E RPC 요청은 binary envelope로 보내고 Cloud relay는 body를 버퍼하지 않고 흘려보낸다 (0146·0227 확장) | Accepted (조기 거부 응답은 0352가 정정) |
 | [0352](0352-android-e2e-early-rejection-drains-body.md) | Android E2E RPC 조기 거부는 남은 body를 버리며 다 읽은 뒤에 응답을 끝낸다 (0351 정정) | Accepted |
+| [0353](0353-remote-attachment-16mib-default.md) | Remote 첨부 상한은 기본값과 최대값 모두 16 MiB이고, Cloud relay 요청 상한은 24 MiB다 (0227·0351 정정) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 
