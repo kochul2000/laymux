@@ -1,6 +1,6 @@
 # 0351. Android E2E RPC 요청은 binary envelope로 보내고 Cloud relay는 body를 버퍼하지 않고 흘려보낸다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-21
 - Source: 사용자 요구("Cloud를 거치면 첨부가 10 MiB가 아니라 1 MiB다", "스트리밍 하면 안돼?", "B로 가자") · [ADR-0146](0146-android-e2e-session-and-encrypted-remote-rpc.md) · [ADR-0172](0172-android-e2e-compat-version-gate.md) · [ADR-0227](0227-remote-document-attachments.md) · laymux-server `app/routers/proxy.py`
 - Extends: ADR-0146(요청 envelope wire 형식), ADR-0227(Cloud relay 경로의 Android 첨부 상한)
