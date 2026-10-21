@@ -30,7 +30,9 @@ use super::{keyring_store, CloudStatus};
 use crate::automation_server::{automation_port, ServerState};
 use crate::commands::{get_remote_host_candidates, HostCandidate};
 use crate::constants::{
-    DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS, MIN_REMOTE_HEARTBEAT_TIMEOUT_SECONDS,
+    ANDROID_E2E_RPC_MAX_BODY_BYTES, ANDROID_E2E_RPC_PATH,
+    CLOUD_RELAY_ANDROID_E2E_RPC_INSTANCE_MAX_REQUESTS, DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS,
+    MIN_REMOTE_HEARTBEAT_TIMEOUT_SECONDS,
 };
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
@@ -80,7 +82,15 @@ const OUTBOUND_QUEUE_SIZE: usize = 256;
 const STREAM_QUEUE_MAX_SIZE: usize = HTTP_REQUEST_BYTES_LIMIT / 1024;
 const STREAM_PENDING_BYTES_LIMIT: usize = 16 * 1024 * 1024;
 const MAX_ACTIVE_STREAMS: usize = 128;
-const SOCKET_PENDING_BYTES_LIMIT: usize = 32 * 1024 * 1024;
+/// Request and response bytes held across every stream of one tunnel socket.
+/// The relay admits `CLOUD_RELAY_ANDROID_E2E_RPC_INSTANCE_MAX_REQUESTS` binary
+/// Android E2E RPC uploads per instance, each held whole here until AEAD; all of
+/// them at the largest envelope any host allows must fit, plus one full browser
+/// request so a concurrent browser upload is not starved (ADR-0351). The old
+/// 32 MiB fitted only two maximum-size E2E uploads.
+const SOCKET_PENDING_BYTES_LIMIT: usize = CLOUD_RELAY_ANDROID_E2E_RPC_INSTANCE_MAX_REQUESTS
+    * ANDROID_E2E_RPC_MAX_BODY_BYTES
+    + HTTP_REQUEST_BYTES_LIMIT;
 const HTTP_REQUEST_BYTES_LIMIT: usize = crate::constants::CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT;
 const HTTP_RESPONSE_BYTES_LIMIT: usize = 16 * 1024 * 1024;
 const BACKPRESSURE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -1130,7 +1140,7 @@ fn cloud_stream_allowed(mode: CloudAccessMode, payload: &StreamOpenPayload) -> b
             "/remote/v1/e2e/pair/ack"
                 | "/remote/v1/e2e/session/challenge"
                 | "/remote/v1/e2e/session/establish"
-                | "/remote/v1/e2e/rpc"
+                | ANDROID_E2E_RPC_PATH
         )
     )
 }
@@ -4159,10 +4169,20 @@ mod tests {
         let mut active_streams = HashMap::new();
         let mut socket_pending_bytes = 0;
         let mut next_response_id = 1;
-        let chunk = vec![b'x'; SOCKET_PENDING_BYTES_LIMIT / 8];
+        // Eight streams fill the socket budget exactly; the first one also
+        // carries the remainder of the division.
+        let chunk_len = SOCKET_PENDING_BYTES_LIMIT / 8;
 
         for index in 0..8 {
             let stream_id = format!("srv-{index}");
+            let chunk = vec![
+                b'x';
+                if index == 0 {
+                    chunk_len + SOCKET_PENDING_BYTES_LIMIT % 8
+                } else {
+                    chunk_len
+                }
+            ];
             handle_test_frame(
                 http_open_frame(&stream_id),
                 &mut active_streams,

@@ -53,7 +53,7 @@ pub(crate) use android_e2e_output::{
 };
 pub(crate) use android_e2e_rpc_body::{
     android_e2e_rpc_request_limit, android_e2e_rpc_too_large_response,
-    check_android_e2e_rpc_prefix, AndroidE2eRpcPrefixVerdict, ANDROID_E2E_RPC_PATH,
+    check_android_e2e_rpc_prefix, AndroidE2eRpcPrefixVerdict,
 };
 pub(crate) use attachments::cleanup_stale_attachments;
 pub(crate) use auth::{RemoteTransport, TunnelAuthorized};

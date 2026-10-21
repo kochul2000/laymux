@@ -10,11 +10,21 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use super::{ActiveStream, StreamOpenPayload, KIND_HTTP_REQUEST};
-use crate::remote_server::ANDROID_E2E_RPC_PATH;
+use crate::constants::{
+    ANDROID_E2E_RPC_PATH, ANDROID_E2E_RPC_TUNNEL_BODY_IDLE_TIMEOUT_SECS,
+    CLOUD_RELAY_ANDROID_E2E_RPC_BODY_IDLE_TIMEOUT_SECS,
+};
 
 /// Longest gap between two body frames of an E2E RPC request stream. A
-/// healthy relay forwards chunks back to back; this only cuts a stalled one.
-pub(super) const E2E_RPC_BODY_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+/// healthy relay forwards chunks back to back and enforces its own, shorter
+/// idle deadline; this backstop only cuts a stream the relay failed to end,
+/// so the client sees the relay's 408 rather than this stream error.
+pub(super) const E2E_RPC_BODY_IDLE_TIMEOUT: Duration =
+    Duration::from_secs(ANDROID_E2E_RPC_TUNNEL_BODY_IDLE_TIMEOUT_SECS);
+const _: () = assert!(
+    ANDROID_E2E_RPC_TUNNEL_BODY_IDLE_TIMEOUT_SECS
+        > CLOUD_RELAY_ANDROID_E2E_RPC_BODY_IDLE_TIMEOUT_SECS
+);
 /// How often the connection loop looks for idle E2E RPC streams.
 pub(super) const E2E_RPC_IDLE_SWEEP_INTERVAL: Duration = Duration::from_secs(5);
 /// Streams answered early whose late body frames are still being dropped.
@@ -430,5 +440,49 @@ mod tests {
         assert_eq!(active_streams.len(), MAX_ANSWERED_E2E_RPC_STREAMS - 1);
         assert!(!active_streams.contains_key("answered-000"));
         assert!(active_streams.contains_key("answered-001"));
+    }
+
+    #[test]
+    fn desktop_idle_backstop_outlasts_the_relay_idle_deadline() {
+        let relay = Duration::from_secs(CLOUD_RELAY_ANDROID_E2E_RPC_BODY_IDLE_TIMEOUT_SECS);
+        assert_eq!(E2E_RPC_BODY_IDLE_TIMEOUT, Duration::from_secs(40));
+        // At least one sweep interval of margin: the relay's 408 has gone out
+        // before the desktop's sweep can possibly see the stream as idle.
+        assert!(E2E_RPC_BODY_IDLE_TIMEOUT >= relay + E2E_RPC_IDLE_SWEEP_INTERVAL);
+
+        let start = Instant::now();
+        let mut active_streams = HashMap::new();
+        active_streams.insert(
+            "answered".to_string(),
+            ActiveStream::Answered {
+                last_activity: start,
+            },
+        );
+        let at_relay_deadline = start + relay + Duration::from_secs(1);
+        assert_eq!(
+            idle_e2e_rpc_streams(&active_streams, at_relay_deadline),
+            IdleE2eRpcStreams::default()
+        );
+    }
+
+    #[test]
+    fn socket_pending_budget_fits_every_concurrent_max_size_e2e_upload() {
+        use crate::constants::{
+            android_e2e_rpc_body_limit, ANDROID_E2E_RPC_MAX_BODY_BYTES,
+            CLOUD_RELAY_ANDROID_E2E_RPC_INSTANCE_MAX_REQUESTS, REMOTE_TERMINAL_ATTACHMENT_MAX_MIB,
+        };
+        const MIB: usize = 1024 * 1024;
+        let largest = android_e2e_rpc_body_limit(REMOTE_TERMINAL_ATTACHMENT_MAX_MIB as usize * MIB);
+        assert_eq!(largest, ANDROID_E2E_RPC_MAX_BODY_BYTES);
+        let e2e = CLOUD_RELAY_ANDROID_E2E_RPC_INSTANCE_MAX_REQUESTS * largest;
+        let socket_limit = super::super::SOCKET_PENDING_BYTES_LIMIT;
+        // Every upload the relay lets through at once, plus a full browser request.
+        assert!(e2e + HTTP_REQUEST_BYTES_LIMIT <= socket_limit);
+        // The browser path keeps at least the two full requests it had before.
+        assert!(2 * HTTP_REQUEST_BYTES_LIMIT <= socket_limit);
+        // The previous 32 MiB fitted only two maximum-size E2E uploads.
+        assert!(3 * largest > 32 * MIB);
+        // Bounded: under 70 MiB per tunnel socket.
+        assert!(socket_limit < 70 * MIB);
     }
 }

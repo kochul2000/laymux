@@ -16,7 +16,9 @@ use uuid::Uuid;
 use crate::android_e2e::AndroidE2eRequestContext;
 use crate::automation_server::ServerState;
 use crate::commands::{resize_terminal_inner, write_terminal_input_inner, write_to_terminal_inner};
-use crate::constants::{REMOTE_CLAIM_RESERVATION_TTL_MS, REMOTE_CLAIM_RETRY_AFTER_MS};
+use crate::constants::{
+    ANDROID_E2E_RPC_PATH, REMOTE_CLAIM_RESERVATION_TTL_MS, REMOTE_CLAIM_RETRY_AFTER_MS,
+};
 use crate::lock_ext::MutexExt;
 use crate::terminal_output::{TerminalOutputFrameHeaderV1, TerminalOutputSubscriptionEvent};
 
@@ -180,7 +182,7 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
             post(remote_android_e2e_establish).layer(DefaultBodyLimit::max(4 * 1024)),
         )
         .route(
-            "/remote/v1/e2e/rpc",
+            ANDROID_E2E_RPC_PATH,
             // The handler bounds the envelope itself from the host's attachment
             // maximum (ADR-0227) instead of a static limit.
             post(remote_android_e2e_rpc).layer(DefaultBodyLimit::disable()),

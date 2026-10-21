@@ -764,7 +764,7 @@ fn prefix_only(session_id: &str, sequence: u64) -> Vec<u8> {
 async fn process_ok(session: &Arc<AndroidE2eSession>, body: &[u8], now: u64) {
     session
         .process(
-            RpcRequestEnvelope::parse(body).unwrap(),
+            RpcRequestEnvelope::parse(body.to_vec()).unwrap(),
             || Ok(now),
             |_, _| async {
                 Ok(AndroidE2eDispatchResult::unguarded(
@@ -816,7 +816,7 @@ async fn aad_binds_the_session_instance_not_a_caller_supplied_one() {
     assert!(matches!(
         session
             .process(
-                RpcRequestEnvelope::parse(&foreign).unwrap(),
+                RpcRequestEnvelope::parse(foreign).unwrap(),
                 || Ok(1_000),
                 |_, _| async { panic!("a foreign-instance request must not dispatch") },
                 |_, _, _| Ok(()),

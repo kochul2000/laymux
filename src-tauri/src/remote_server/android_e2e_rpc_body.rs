@@ -4,14 +4,25 @@
 //! Before AEAD the desktop holds at most the host-derived body limit per
 //! request, and rejects the request as soon as its 31-byte prefix names no
 //! live session or an unusable sequence. Neither check is authentication.
+//!
+//! On Tailscale Direct an early answer is only sent once the rest of the body
+//! has been read and discarded (ADR-0352): the Android client reads the status
+//! only after writing its whole body, so closing on an unread body would reset
+//! the upload and hide the 401/410 behind a retryable write failure.
 
-use axum::body::Body;
-use axum::http::StatusCode;
+use std::time::Duration;
+
+use axum::body::{Body, BodyDataStream};
+use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::Response;
 use futures_util::StreamExt;
+use tokio::time::{timeout, Instant};
 
 use crate::android_e2e::{EnvelopeRejection, RpcRequestEnvelope};
-use crate::constants::android_e2e_rpc_body_limit;
+use crate::constants::{
+    android_e2e_rpc_body_limit, ANDROID_E2E_RPC_DISCARD_IDLE_TIMEOUT_SECS,
+    ANDROID_E2E_RPC_DISCARD_TOTAL_TIMEOUT_SECS, ANDROID_E2E_RPC_MAX_BODY_BYTES,
+};
 use crate::state::AppState;
 
 use super::access::effective_remote_settings;
@@ -19,8 +30,6 @@ use super::android_e2e_output::unix_time_seconds;
 use super::android_e2e_routes::{e2e_error_response, no_store};
 use super::attachments::AttachmentPolicy;
 use super::{internal_error, json_error};
-
-pub(crate) const ANDROID_E2E_RPC_PATH: &str = "/remote/v1/e2e/rpc";
 
 /// Request body bound for `/remote/v1/e2e/rpc` from the host's effective
 /// attachment maximum (ADR-0227 Decision 5(a), ADR-0351), whatever transport
@@ -78,12 +87,100 @@ pub(super) fn envelope_rejection_response(rejection: EnvelopeRejection) -> Respo
     }
 }
 
-/// Reads a Direct-route body under `limit`, answering early when the prefix
-/// is rejected or the limit is exceeded.
+/// How much of an early-answered Direct body is read and discarded before
+/// the answer is sent (ADR-0352).
+#[derive(Debug, Clone, Copy)]
+pub(super) struct DiscardBounds {
+    /// Cumulative body bytes, counting what was already received. The
+    /// largest body any host setting admits, so a client whose envelope was
+    /// sized for a higher attachment maximum still learns its 413.
+    pub(super) byte_cap: usize,
+    /// Longest gap between two chunks.
+    pub(super) idle: Duration,
+    /// Total time spent discarding.
+    pub(super) total: Duration,
+}
+
+impl DiscardBounds {
+    pub(super) const DIRECT: Self = Self {
+        byte_cap: ANDROID_E2E_RPC_MAX_BODY_BYTES,
+        idle: Duration::from_secs(ANDROID_E2E_RPC_DISCARD_IDLE_TIMEOUT_SECS),
+        total: Duration::from_secs(ANDROID_E2E_RPC_DISCARD_TOTAL_TIMEOUT_SECS),
+    };
+}
+
+/// How the discard of an early-answered body ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DiscardOutcome {
+    /// The body ended: the connection can carry the answer and stay usable.
+    Drained,
+    /// The body stopped with a read error; nobody is left to answer.
+    Disconnected,
+    /// The byte cap or a deadline ran out first: answer and close.
+    Abandoned,
+}
+
+/// Reads and drops the rest of a body without holding it. `received` counts
+/// the bytes the caller already took from the stream.
+pub(super) async fn discard_remaining_body(
+    stream: &mut BodyDataStream,
+    mut received: usize,
+    bounds: DiscardBounds,
+) -> DiscardOutcome {
+    let deadline = Instant::now() + bounds.total;
+    loop {
+        if received > bounds.byte_cap {
+            return DiscardOutcome::Abandoned;
+        }
+        let wait = bounds
+            .idle
+            .min(deadline.saturating_duration_since(Instant::now()));
+        match timeout(wait, stream.next()).await {
+            Err(_) => return DiscardOutcome::Abandoned,
+            Ok(None) => return DiscardOutcome::Drained,
+            Ok(Some(Err(_))) => return DiscardOutcome::Disconnected,
+            Ok(Some(Ok(chunk))) => received = received.saturating_add(chunk.len()),
+        }
+    }
+}
+
+/// Holds an early answer until the rest of the body is discarded. When the
+/// discard gives up, the answer still goes out but closes the connection.
+async fn answer_after_discard(
+    stream: &mut BodyDataStream,
+    received: usize,
+    mut response: Response,
+    bounds: DiscardBounds,
+) -> Response {
+    let outcome = discard_remaining_body(stream, received, bounds).await;
+    if outcome == DiscardOutcome::Abandoned {
+        tracing::debug!(
+            status = response.status().as_u16(),
+            "Android E2E early answer closes the connection after an unfinished discard"
+        );
+        response
+            .headers_mut()
+            .insert(header::CONNECTION, HeaderValue::from_static("close"));
+    }
+    response
+}
+
+/// Reads a Direct-route body under `limit`. A rejected prefix or an exceeded
+/// limit is decided as soon as it is known, but answered only after the rest
+/// of the body is discarded (ADR-0352).
 pub(super) async fn read_android_e2e_rpc_body(
     state: &AppState,
     body: Body,
     limit: usize,
+) -> Result<RpcRequestEnvelope, Response> {
+    read_android_e2e_rpc_body_with(state, body, limit, DiscardBounds::DIRECT).await
+}
+
+pub(super) async fn read_android_e2e_rpc_body_with(
+    state: &AppState,
+    body: Body,
+    limit: usize,
+    discard: DiscardBounds,
 ) -> Result<RpcRequestEnvelope, Response> {
     let mut received = Vec::new();
     let mut prefix_accepted = false;
@@ -95,123 +192,34 @@ pub(super) async fn read_android_e2e_rpc_body(
                 "Android E2E request body could not be read",
             ))
         })?;
-        if received.len().saturating_add(chunk.len()) > limit {
-            return Err(android_e2e_rpc_too_large_response());
+        let total = received.len().saturating_add(chunk.len());
+        if total > limit {
+            drop(received);
+            return Err(answer_after_discard(
+                &mut stream,
+                total,
+                android_e2e_rpc_too_large_response(),
+                discard,
+            )
+            .await);
         }
         received.extend_from_slice(&chunk);
         if !prefix_accepted {
             match check_android_e2e_rpc_prefix(state, &received) {
                 AndroidE2eRpcPrefixVerdict::Pending => {}
                 AndroidE2eRpcPrefixVerdict::Accepted => prefix_accepted = true,
-                AndroidE2eRpcPrefixVerdict::Rejected(response) => return Err(response),
+                AndroidE2eRpcPrefixVerdict::Rejected(response) => {
+                    let total = received.len();
+                    drop(received);
+                    return Err(answer_after_discard(&mut stream, total, response, discard).await);
+                }
             }
         }
     }
-    RpcRequestEnvelope::parse(&received)
+    RpcRequestEnvelope::parse(received)
         .map_err(|rejection| no_store(envelope_rejection_response(rejection)))
 }
 
 #[cfg(test)]
-mod tests {
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-    use base64::Engine;
-    use futures_util::stream;
-
-    use super::*;
-
-    fn live_state() -> (AppState, String) {
-        let state = AppState::new();
-        let session_id = URL_SAFE_NO_PAD.encode([3_u8; 16]);
-        state
-            .android_e2e
-            .install_test_request_context("desktop-7", &session_id, u64::MAX);
-        (state, session_id)
-    }
-
-    fn chunked(chunks: Vec<Vec<u8>>) -> Body {
-        Body::from_stream(stream::iter(
-            chunks.into_iter().map(Ok::<_, std::convert::Infallible>),
-        ))
-    }
-
-    #[tokio::test]
-    async fn direct_body_is_parsed_across_chunk_boundaries() {
-        let (state, session_id) = live_state();
-        let body = crate::android_e2e::encode_rpc_request(&session_id, 0, &[7_u8; 40]);
-        let chunks = body.chunks(5).map(<[u8]>::to_vec).collect();
-        let envelope = read_android_e2e_rpc_body(&state, chunked(chunks), 1024)
-            .await
-            .unwrap_or_else(|response| panic!("rejected: {}", response.status()));
-        assert_eq!(envelope.session_id, session_id);
-        assert_eq!(envelope.ciphertext, vec![7_u8; 40]);
-    }
-
-    #[tokio::test]
-    async fn direct_body_is_rejected_at_the_prefix_without_reading_the_rest() {
-        let (state, _) = live_state();
-        let unknown = URL_SAFE_NO_PAD.encode([4_u8; 16]);
-        let prefix = crate::android_e2e::encode_rpc_request(&unknown, 0, &[]);
-        // The rest of the body never arrives: a stream that would hang after
-        // the prefix proves the route answers from the prefix alone.
-        let body = Body::from_stream(
-            stream::iter(vec![Ok::<_, std::convert::Infallible>(prefix)]).chain(stream::pending()),
-        );
-        let response = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            read_android_e2e_rpc_body(&state, body, 1024),
-        )
-        .await
-        .expect("prefix rejection must not wait for the body")
-        .unwrap_err();
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn direct_body_rejects_wrong_format_and_short_bodies() {
-        let (state, session_id) = live_state();
-        let mut wrong = crate::android_e2e::encode_rpc_request(&session_id, 0, &[0; 16]);
-        wrong[0] = 1;
-        let response = read_android_e2e_rpc_body(&state, Body::from(wrong), 1024)
-            .await
-            .unwrap_err();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-        let short = crate::android_e2e::encode_rpc_request(&session_id, 0, &[0; 15]);
-        let response = read_android_e2e_rpc_body(&state, Body::from(short), 1024)
-            .await
-            .unwrap_err();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-        let response = read_android_e2e_rpc_body(&state, Body::from(vec![2_u8; 10]), 1024)
-            .await
-            .unwrap_err();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    }
-
-    #[tokio::test]
-    async fn direct_body_enforces_the_host_derived_limit() {
-        let (state, session_id) = live_state();
-        let body = crate::android_e2e::encode_rpc_request(&session_id, 0, &[0; 100]);
-        let exact = body.len();
-        assert!(
-            read_android_e2e_rpc_body(&state, Body::from(body.clone()), exact)
-                .await
-                .is_ok()
-        );
-        let response = read_android_e2e_rpc_body(&state, Body::from(body), exact - 1)
-            .await
-            .unwrap_err();
-        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
-    }
-
-    #[test]
-    fn request_limit_follows_the_host_attachment_setting() {
-        let state = AppState::new();
-        let settings = effective_remote_settings(&state).unwrap();
-        let host = AttachmentPolicy::from_settings(&settings, None).host_max_bytes;
-        assert_eq!(
-            android_e2e_rpc_request_limit(&state).unwrap(),
-            android_e2e_rpc_body_limit(host)
-        );
-    }
-}
+#[path = "android_e2e_rpc_body_tests.rs"]
+mod tests;

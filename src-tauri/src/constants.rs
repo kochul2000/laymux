@@ -485,6 +485,35 @@ pub const fn android_e2e_rpc_body_limit(max_bytes: usize) -> usize {
         ANDROID_E2E_RPC_BODY_LIMIT_FLOOR
     }
 }
+/// Largest binary Android E2E RPC request body any host setting admits: the
+/// envelope of an attachment at `REMOTE_TERMINAL_ATTACHMENT_MAX_MIB`.
+pub const ANDROID_E2E_RPC_MAX_BODY_BYTES: usize =
+    android_e2e_rpc_body_limit(REMOTE_TERMINAL_ATTACHMENT_MAX_MIB as usize * 1024 * 1024);
+/// Desktop route of the binary Android E2E RPC request (ADR-0351), shared by
+/// the router, the Tailscale Direct guard and the Cloud tunnel allowlist.
+pub const ANDROID_E2E_RPC_PATH: &str = "/remote/v1/e2e/rpc";
+/// Cloud relay mirror: concurrent binary Android E2E RPC requests the relay
+/// admits per instance (laymux-server
+/// `android_e2e_rpc_binary_instance_max_requests`, ADR-0351). The desktop
+/// tunnel sizes its socket-wide pending budget so this many maximum-size
+/// bodies fit at once.
+pub const CLOUD_RELAY_ANDROID_E2E_RPC_INSTANCE_MAX_REQUESTS: usize = 4;
+/// Cloud relay mirror: idle deadline of a binary Android E2E RPC request body
+/// (laymux-server `android_e2e_rpc_binary_body_idle_timeout_seconds`). The
+/// desktop tunnel's own backstop must be longer so the relay's 408 reaches the
+/// client first.
+pub const CLOUD_RELAY_ANDROID_E2E_RPC_BODY_IDLE_TIMEOUT_SECS: u64 = 30;
+/// Desktop tunnel backstop for a stalled binary Android E2E RPC body: longer
+/// than the relay idle deadline, so it only fires when the relay misbehaves.
+pub const ANDROID_E2E_RPC_TUNNEL_BODY_IDLE_TIMEOUT_SECS: u64 = 40;
+/// Tailscale Direct: longest gap between two body chunks while the rest of an
+/// early-rejected request body is read and discarded (ADR-0352). Matches the
+/// relay idle deadline so both transports tolerate the same client stall.
+pub const ANDROID_E2E_RPC_DISCARD_IDLE_TIMEOUT_SECS: u64 = 30;
+/// Tailscale Direct: total time spent discarding the rest of an
+/// early-rejected request body (ADR-0352), mirroring the relay's total body
+/// deadline so a trickling caller cannot hold the connection indefinitely.
+pub const ANDROID_E2E_RPC_DISCARD_TOTAL_TIMEOUT_SECS: u64 = 300;
 /// Startup cleanup age for Remote attachment cache files.
 pub const REMOTE_TERMINAL_ATTACHMENT_MAX_AGE_DAYS: u64 = 7;
 

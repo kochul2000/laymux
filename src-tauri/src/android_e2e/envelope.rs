@@ -92,16 +92,18 @@ pub(crate) struct RpcRequestEnvelope {
 }
 
 impl RpcRequestEnvelope {
-    pub(crate) fn parse(body: &[u8]) -> Result<Self, EnvelopeRejection> {
-        let prefix = RpcEnvelopePrefix::parse(body).ok_or(EnvelopeRejection::Malformed)??;
-        let ciphertext = &body[RPC_ENVELOPE_PREFIX_BYTES..];
-        if ciphertext.len() < ANDROID_E2E_AEAD_TAG_BYTES {
+    /// Takes ownership of the received body: the prefix is removed in place,
+    /// so the ciphertext is never copied into a second allocation.
+    pub(crate) fn parse(mut body: Vec<u8>) -> Result<Self, EnvelopeRejection> {
+        let prefix = RpcEnvelopePrefix::parse(&body).ok_or(EnvelopeRejection::Malformed)??;
+        if body.len() - RPC_ENVELOPE_PREFIX_BYTES < ANDROID_E2E_AEAD_TAG_BYTES {
             return Err(EnvelopeRejection::Malformed);
         }
+        body.drain(..RPC_ENVELOPE_PREFIX_BYTES);
         Ok(Self {
             session_id: prefix.session_id,
             sequence: prefix.sequence,
-            ciphertext: ciphertext.to_vec(),
+            ciphertext: body,
         })
     }
 }
@@ -135,7 +137,7 @@ mod tests {
         assert_eq!(&body[23..31], &[0, 1, 2, 3, 4, 5, 6, 7]);
         assert_eq!(&body[31..], &[0xAA; 16]);
         assert_eq!(
-            RpcRequestEnvelope::parse(&body).unwrap(),
+            RpcRequestEnvelope::parse(body).unwrap(),
             RpcRequestEnvelope {
                 session_id: session_id(),
                 sequence: 0x0001_0203_0405_0607,
@@ -170,7 +172,7 @@ mod tests {
                 "{format}"
             );
             assert_eq!(
-                RpcRequestEnvelope::parse(&body),
+                RpcRequestEnvelope::parse(body),
                 Err(EnvelopeRejection::Malformed)
             );
         }
@@ -218,22 +220,22 @@ mod tests {
     fn complete_envelope_requires_at_least_a_tag() {
         let short = encode_rpc_request(&session_id(), 0, &[0; 15]);
         assert_eq!(
-            RpcRequestEnvelope::parse(&short),
+            RpcRequestEnvelope::parse(short.clone()),
             Err(EnvelopeRejection::Malformed)
         );
         assert_eq!(
-            RpcRequestEnvelope::parse(&short[..10]),
+            RpcRequestEnvelope::parse(short[..10].to_vec()),
             Err(EnvelopeRejection::Malformed)
         );
         let tag_only = encode_rpc_request(&session_id(), 0, &[0; 16]);
-        assert!(RpcRequestEnvelope::parse(&tag_only).is_ok());
+        assert!(RpcRequestEnvelope::parse(tag_only).is_ok());
     }
 
     #[test]
     fn legacy_json_envelope_is_refused() {
         let json = br#"{"version":1,"instanceId":"desktop-7","sessionId":"CQkJCQkJCQkJCQkJCQkJCQ","sequence":0,"ciphertext":"AAAA"}"#;
         assert_eq!(
-            RpcRequestEnvelope::parse(json),
+            RpcRequestEnvelope::parse(json.to_vec()),
             Err(EnvelopeRejection::Malformed)
         );
     }
