@@ -794,7 +794,7 @@ const DEFAULT_REMOTE: RemoteSettings = {
   cloudAccessMode: "browserAndE2e",
   serveTerminalFont: false,
   widgets: true,
-  attachmentMaxMib: 1,
+  attachmentMaxMib: 16,
   attachmentAllowAllExtensions: false,
   attachmentExtraExtensions: [],
 };

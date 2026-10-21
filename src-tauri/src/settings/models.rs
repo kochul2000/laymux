@@ -2055,7 +2055,8 @@ pub struct RemoteSettings {
     /// on a device where a screen row matters more, and never touches placement.
     #[serde(default = "default_remote_widgets")]
     pub widgets: bool,
-    /// Largest decoded Remote attachment in MiB (1..=10, ADR-0227). The
+    /// Largest decoded Remote attachment in MiB (1..=16, default 16; ADR-0227,
+    /// ADR-0353). The
     /// attachment JSON body bound, the Android E2E RPC envelope bound and the
     /// attachment cache quota all derive from this value.
     #[serde(default = "default_remote_attachment_max_mib")]
@@ -2079,7 +2080,7 @@ pub fn is_valid_attachment_extension(extension: &str) -> bool {
 }
 
 fn default_remote_attachment_max_mib() -> u32 {
-    1
+    crate::constants::REMOTE_TERMINAL_ATTACHMENT_MAX_MIB
 }
 
 fn default_remote_bind_address() -> String {

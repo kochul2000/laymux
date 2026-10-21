@@ -2082,7 +2082,7 @@ function normalizeAttachmentExtensions(list: string[]): string[] {
 }
 
 /** Mirrors `REMOTE_TERMINAL_ATTACHMENT_MAX_MIB` in src-tauri/src/constants.rs. */
-const MAX_REMOTE_ATTACHMENT_MIB = 10;
+const MAX_REMOTE_ATTACHMENT_MIB = 16;
 
 function clampAttachmentMaxMib(value: unknown): number {
   return Math.min(MAX_REMOTE_ATTACHMENT_MIB, Math.max(1, Math.trunc(Number(value) || 1)));

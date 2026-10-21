@@ -258,8 +258,13 @@ mod tests {
         let (mut harness, session_id) = Harness::new();
         harness.open(ANDROID_E2E_RPC_PATH).await;
         let limit = crate::remote_server::android_e2e_rpc_request_limit(&harness.state).unwrap();
-        // The default 1 MiB host keeps the 2 MiB floor, far under the relay's 16 MiB.
-        assert_eq!(limit, 2 * 1024 * 1024);
+        // The default 16 MiB host derives its envelope bound from the
+        // attachment JSON, under the relay's 24 MiB (ADR-0353).
+        assert_eq!(
+            limit,
+            crate::constants::android_e2e_rpc_body_limit(16 * 1024 * 1024)
+        );
+        assert!(limit < HTTP_REQUEST_BYTES_LIMIT);
         match harness.active_streams.get(STREAM) {
             Some(ActiveStream::Http(request)) => assert_eq!(request.body_limit, limit),
             other => panic!("unexpected stream {other:?}"),
@@ -476,13 +481,17 @@ mod tests {
         assert_eq!(largest, ANDROID_E2E_RPC_MAX_BODY_BYTES);
         let e2e = CLOUD_RELAY_ANDROID_E2E_RPC_INSTANCE_MAX_REQUESTS * largest;
         let socket_limit = super::super::SOCKET_PENDING_BYTES_LIMIT;
-        // Every upload the relay lets through at once, plus a full browser request.
-        assert!(e2e + HTTP_REQUEST_BYTES_LIMIT <= socket_limit);
-        // The browser path keeps at least the two full requests it had before.
+        // Every upload the relay lets through at once, plus a full browser
+        // request: exactly the ADR-0352 formula.
+        assert_eq!(socket_limit, e2e + HTTP_REQUEST_BYTES_LIMIT);
+        // The browser path keeps at least two full requests.
         assert!(2 * HTTP_REQUEST_BYTES_LIMIT <= socket_limit);
-        // The previous 32 MiB fitted only two maximum-size E2E uploads.
-        assert!(3 * largest > 32 * MIB);
-        // Bounded: under 70 MiB per tunnel socket.
-        assert!(socket_limit < 70 * MIB);
+        // 16 MiB attachment maximum, 24 MiB relay bound (ADR-0353):
+        // 4 x 22,402,439 B + 25,165,824 B = 114,775,580 B, about 109.5 MiB.
+        assert_eq!(HTTP_REQUEST_BYTES_LIMIT, 24 * MIB);
+        assert_eq!(largest, 22_402_439);
+        assert_eq!(socket_limit, 114_775_580);
+        // Bounded: under 110 MiB per tunnel socket.
+        assert!(socket_limit < 110 * MIB);
     }
 }

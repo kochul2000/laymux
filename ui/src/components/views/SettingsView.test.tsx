@@ -2572,11 +2572,14 @@ describe("SettingsView", () => {
       expect(input.value).toBe("");
 
       const maxMib = screen.getByTestId("remote-settings-attachment-max-mib") as HTMLInputElement;
+      // ADR-0353: default and maximum are both 16 MiB.
+      expect(maxMib.value).toBe("16");
+      expect(maxMib.max).toBe("16");
       fireEvent.change(maxMib, { target: { value: "25" } });
       await user.click(screen.getByTestId("save-settings-btn"));
 
       expect(useSettingsStore.getState().remote.attachmentExtraExtensions).toEqual(["pdf"]);
-      expect(useSettingsStore.getState().remote.attachmentMaxMib).toBe(10);
+      expect(useSettingsStore.getState().remote.attachmentMaxMib).toBe(16);
     });
 
     it("reconciles backend access status after disabling startup remote access", async () => {

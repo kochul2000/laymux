@@ -144,7 +144,7 @@ pub(super) async fn remote_android_e2e_rpc(
         Some(axum::Extension(RemoteTransport::CloudRelayBrowser))
     );
     // The body bound follows the host's attachment maximum (ADR-0227) so a
-    // 1 MiB host never buffers the 10 MiB-sized envelope; the route disables
+    // 1 MiB host never buffers the 16 MiB-sized envelope; the route disables
     // axum's static default limit for this. The binary prefix is checked as
     // soon as it arrives, before the rest of the body is held (ADR-0351).
     let envelope_limit = match android_e2e_rpc_request_limit(&server.app_state) {

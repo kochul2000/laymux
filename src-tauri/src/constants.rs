@@ -429,8 +429,10 @@ pub const REMOTE_OWNER_TRANSITION_TIMEOUT_MS: u64 = 750;
 pub const TERMINAL_STRUCTURED_INPUT_MAX_BYTES: usize = 1024 * 1024;
 
 /// Remote attachment cache quota expressed in attachments of the configured
-/// maximum size (`remote.attachmentMaxMib`, ADR-0227): 64 MiB at the 1 MiB default.
-pub const REMOTE_TERMINAL_ATTACHMENT_CACHE_FILES_OF_MAX_SIZE: usize = 64;
+/// maximum size (`remote.attachmentMaxMib`, ADR-0227): 256 MiB at the 16 MiB
+/// default (ADR-0353). Attachments are short-lived files a CLI reads soon and
+/// the 7-day startup cleanup removes, so 16 of the largest is enough.
+pub const REMOTE_TERMINAL_ATTACHMENT_CACHE_FILES_OF_MAX_SIZE: usize = 16;
 /// Maximum regular-file count retained in the Remote attachment cache. This
 /// also bounds zero-byte attachments and the cost of cache scans.
 pub const REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_FILES: usize = 1024;
@@ -439,16 +441,26 @@ pub const REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_FILES: usize = 1024;
 pub const REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES: usize = 16 * 1024;
 /// Cloud relay bound for one browser HTTP request body forwarded over the
 /// tunnel (laymux-server `TUNNEL_HTTP_REQUEST_BYTES_LIMIT`). Attachments that
-/// arrive through the relay are capped to what fits under it (ADR-0227).
-pub const CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT: usize = 16 * 1024 * 1024;
+/// arrive through the relay are capped to what fits under it (ADR-0227). 24 MiB
+/// leaves room for a 16 MiB attachment's base64 JSON (about 21.4 MiB, ADR-0353).
+pub const CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT: usize = 24 * 1024 * 1024;
 /// Cloud relay bound for one binary Android E2E RPC request body (laymux-server
 /// `TUNNEL_HTTP_REQUEST_BYTES_LIMIT` on `POST /api/android/e2e/rpc/binary`). The
 /// relay streams that body without buffering it, under the same cumulative byte
 /// cap as the browser tunnel path (ADR-0351).
 pub const CLOUD_RELAY_ANDROID_E2E_RPC_BODY_LIMIT: usize = CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT;
-/// Upper bound of `remote.attachmentMaxMib` (ADR-0227). The Cloud relay forwards
-/// at most 16 MiB of request body, which fits this many decoded MiB after base64.
-pub const REMOTE_TERMINAL_ATTACHMENT_MAX_MIB: u32 = 10;
+/// Upper bound and default of `remote.attachmentMaxMib` (ADR-0227, ADR-0353).
+/// Its base64 JSON body and its Android binary envelope (both about 21.4 MiB)
+/// fit under the Cloud relay's 24 MiB request bound.
+pub const REMOTE_TERMINAL_ATTACHMENT_MAX_MIB: u32 = 16;
+const _: () = assert!(
+    android_e2e_rpc_body_limit(REMOTE_TERMINAL_ATTACHMENT_MAX_MIB as usize * 1024 * 1024)
+        <= CLOUD_RELAY_ANDROID_E2E_RPC_BODY_LIMIT
+);
+const _: () = assert!(
+    remote_attachment_request_limit(REMOTE_TERMINAL_ATTACHMENT_MAX_MIB as usize * 1024 * 1024)
+        <= CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT
+);
 /// Base64 length of the largest decoded attachment a policy allows.
 pub const fn remote_attachment_encoded_limit(max_bytes: usize) -> usize {
     max_bytes.div_ceil(3) * 4
