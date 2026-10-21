@@ -25,10 +25,11 @@ use super::validation::{valid_base64url, valid_instance_id};
 use super::{
     field_refs, key_fields, proof_fields_challenge, proof_fields_establish, proof_fields_response,
     AndroidE2eDispatchResult, AndroidE2eReplayGuard, ChallengeRequest, ChallengeResponse,
-    CipherEnvelope, E2eError, EstablishRequest, EstablishResponse, CHALLENGE_ID_BYTES,
-    CHALLENGE_RESPONSE_DOMAIN, CHALLENGE_TTL_SECONDS, CLIENT_SESSION_NONCE_BYTES,
-    ESTABLISH_REQUEST_DOMAIN, ESTABLISH_RESPONSE_DOMAIN, OUTPUT_STREAM_NONCE_BYTES,
-    PROTOCOL_VERSION, SERVER_NONCE_BYTES, SESSION_ID_BYTES, SESSION_INACTIVITY_TIMEOUT_SECONDS,
+    CipherEnvelope, E2eError, EnvelopeRejection, EstablishRequest, EstablishResponse,
+    RpcEnvelopePrefix, RpcRequestEnvelope, CHALLENGE_ID_BYTES, CHALLENGE_RESPONSE_DOMAIN,
+    CHALLENGE_TTL_SECONDS, CLIENT_SESSION_NONCE_BYTES, ESTABLISH_REQUEST_DOMAIN,
+    ESTABLISH_RESPONSE_DOMAIN, OUTPUT_STREAM_NONCE_BYTES, PROTOCOL_VERSION, SERVER_NONCE_BYTES,
+    SESSION_ID_BYTES, SESSION_INACTIVITY_TIMEOUT_SECONDS,
 };
 
 const MAX_CHALLENGES: usize = 16;
@@ -77,6 +78,10 @@ pub(crate) struct AndroidE2eSession {
     pairing_revision: u64,
     expires_at: AtomicU64,
     revoked: AtomicBool,
+    /// Lock-free mirror of `SessionState::next_sequence` for the RPC prefix
+    /// pre-check (ADR-0351). Written only where `next_sequence` advances,
+    /// so the pre-check never needs the session lock an in-flight request holds.
+    next_sequence_floor: AtomicU64,
     state: AsyncMutex<SessionState>,
 }
 
@@ -142,6 +147,7 @@ impl AndroidE2eState {
             pairing_revision: crate::android_pairing::pairing_revision(),
             expires_at: AtomicU64::new(expires_at),
             revoked: AtomicBool::new(false),
+            next_sequence_floor: AtomicU64::new(0),
             state: AsyncMutex::new(SessionState {
                 keys,
                 used_output_nonces: HashSet::new(),
@@ -350,6 +356,7 @@ impl AndroidE2eState {
             pairing_revision: material.revision,
             expires_at: AtomicU64::new(expires_at),
             revoked: AtomicBool::new(false),
+            next_sequence_floor: AtomicU64::new(0),
             state: AsyncMutex::new(SessionState {
                 keys,
                 used_output_nonces: HashSet::new(),
@@ -393,6 +400,73 @@ impl AndroidE2eState {
             return Err(E2eError::Invalid);
         }
         Ok(session)
+    }
+
+    /// Session named by a binary RPC request (ADR-0351). The request carries no
+    /// `instanceId`; the AAD binds the instance this session was established for.
+    pub(crate) fn session_for_request(
+        &self,
+        session_id: &str,
+        now: u64,
+    ) -> Result<Arc<AndroidE2eSession>, E2eError> {
+        let mut registry = self.registry.lock_or_err().map_err(E2eError::Internal)?;
+        registry.prune(now);
+        let session = registry
+            .sessions
+            .get(session_id)
+            .cloned()
+            .ok_or(E2eError::Invalid)?;
+        if session.pairing_revision != crate::android_pairing::pairing_revision() {
+            session.revoked.store(true, Ordering::Release);
+            registry.sessions.remove(session_id);
+            return Err(E2eError::Invalid);
+        }
+        Ok(session)
+    }
+
+    /// Early, read-only verdict on a binary RPC prefix before the body arrives
+    /// (ADR-0351). This is **not** authentication — the relay sees the same
+    /// `sessionId` — and AEAD stays the final check. It neither consumes the
+    /// sequence nor renews the session lifetime nor prunes the registry, so a
+    /// caller that only knows a live `sessionId` cannot affect the session.
+    pub(crate) fn check_rpc_prefix(
+        &self,
+        prefix_bytes: &[u8],
+        now: u64,
+    ) -> Option<Result<(), EnvelopeRejection>> {
+        let prefix = match RpcEnvelopePrefix::parse(prefix_bytes)? {
+            Ok(prefix) => prefix,
+            Err(rejection) => return Some(Err(rejection)),
+        };
+        Some(self.check_parsed_rpc_prefix(&prefix, now))
+    }
+
+    fn check_parsed_rpc_prefix(
+        &self,
+        prefix: &RpcEnvelopePrefix,
+        now: u64,
+    ) -> Result<(), EnvelopeRejection> {
+        let registry = self
+            .registry
+            .lock_or_err()
+            .map_err(|error| EnvelopeRejection::Session(E2eError::Internal(error)))?;
+        let session = registry
+            .sessions
+            .get(&prefix.session_id)
+            .ok_or(EnvelopeRejection::Session(E2eError::Invalid))?;
+        session
+            .ensure_active(now)
+            .map_err(EnvelopeRejection::Session)?;
+        // Only the exact next sequence or a retry of the previous one can
+        // succeed; anything older is a guaranteed `409` after the full body.
+        let floor = session
+            .next_sequence_floor
+            .load(Ordering::Acquire)
+            .saturating_sub(1);
+        if prefix.sequence < floor {
+            return Err(EnvelopeRejection::Session(E2eError::Sequence));
+        }
+        Ok(())
     }
 
     /// Whether the session that claimed a controller lease is still alive.
@@ -521,7 +595,7 @@ impl AndroidE2eSession {
 
     pub(crate) async fn process<C, F, Fut, V>(
         self: &Arc<Self>,
-        envelope: CipherEnvelope,
+        envelope: RpcRequestEnvelope,
         clock: C,
         dispatch: F,
         validate_replay_guard: V,
@@ -532,11 +606,7 @@ impl AndroidE2eSession {
         Fut: Future<Output = Result<AndroidE2eDispatchResult, AppError>>,
         V: FnOnce(AndroidE2eRequestContext, Value, AndroidE2eReplayGuard) -> Result<(), E2eError>,
     {
-        if envelope.version != PROTOCOL_VERSION
-            || envelope.instance_id != self.instance_id
-            || envelope.session_id != self.session_id
-            || envelope.sequence > MAX_SEQUENCE
-        {
+        if envelope.session_id != self.session_id || envelope.sequence > MAX_SEQUENCE {
             return Err(E2eError::Invalid);
         }
         let mut state = self.state.lock().await;
@@ -548,14 +618,14 @@ impl AndroidE2eSession {
             return Err(E2eError::Expired);
         }
 
-        let digest: [u8; 32] = Sha256::digest(envelope.ciphertext.as_bytes()).into();
+        let digest: [u8; 32] = Sha256::digest(&envelope.ciphertext).into();
         if envelope.sequence < state.next_sequence {
             if envelope.sequence.checked_add(1) == Some(state.next_sequence)
                 && state.last_request_digest == Some(digest)
             {
                 let cached = state.last_response.clone().ok_or(E2eError::Sequence)?;
                 if let Some(replay_guard) = cached.replay_guard {
-                    let request = decrypt_plain_request(&state.keys, &envelope)?;
+                    let request = self.decrypt_plain_request(&state.keys, &envelope)?;
                     let context = AndroidE2eRequestContext {
                         session: Arc::clone(self),
                     };
@@ -572,7 +642,7 @@ impl AndroidE2eSession {
             return Err(E2eError::Sequence);
         }
 
-        let request = decrypt_plain_request(&state.keys, &envelope)?;
+        let request = self.decrypt_plain_request(&state.keys, &envelope)?;
         let candidate_expires_at = now
             .checked_add(SESSION_INACTIVITY_TIMEOUT_SECONDS)
             .ok_or_else(|| E2eError::Internal(AppError::Other("E2E expiry overflowed".into())))?;
@@ -587,7 +657,7 @@ impl AndroidE2eSession {
             return Err(E2eError::Invalid);
         }
         if let Some(replay_guard) = dispatch_result.replay_guard.clone() {
-            let request = decrypt_plain_request(&state.keys, &envelope)?;
+            let request = self.decrypt_plain_request(&state.keys, &envelope)?;
             if validate_replay_guard(context, request, replay_guard).is_err() {
                 self.revoked.store(true, Ordering::Release);
                 return Err(E2eError::Invalid);
@@ -625,6 +695,8 @@ impl AndroidE2eSession {
             .next_sequence
             .checked_add(1)
             .ok_or(E2eError::Sequence)?;
+        self.next_sequence_floor
+            .store(state.next_sequence, Ordering::Release);
         state.last_request_digest = Some(digest);
         state.last_response = Some(CachedResponse {
             envelope: response_envelope.clone(),
@@ -637,21 +709,28 @@ impl AndroidE2eSession {
         self.revoked.load(Ordering::Acquire)
             || self.pairing_revision != crate::android_pairing::pairing_revision()
     }
-}
 
-fn decrypt_plain_request(keys: &SessionKeys, envelope: &CipherEnvelope) -> Result<Value, E2eError> {
-    let plaintext = decrypt_request(
-        &keys.a2d,
-        &envelope.instance_id,
-        &envelope.session_id,
-        envelope.sequence,
-        &envelope.ciphertext,
-    )
-    .map_err(|_| E2eError::Invalid)?;
-    if plaintext.len() > MAX_REQUEST_PLAINTEXT_BYTES {
-        return Err(E2eError::Invalid);
+    /// The AAD instance comes from this session, never from the request
+    /// (ADR-0351): a request routed to the wrong desktop fails the session
+    /// lookup, and one sealed for another instance fails here.
+    fn decrypt_plain_request(
+        &self,
+        keys: &SessionKeys,
+        envelope: &RpcRequestEnvelope,
+    ) -> Result<Value, E2eError> {
+        let plaintext = decrypt_request(
+            &keys.a2d,
+            &self.instance_id,
+            &self.session_id,
+            envelope.sequence,
+            &envelope.ciphertext,
+        )
+        .map_err(|_| E2eError::Invalid)?;
+        if plaintext.len() > MAX_REQUEST_PLAINTEXT_BYTES {
+            return Err(E2eError::Invalid);
+        }
+        serde_json::from_slice(&plaintext).map_err(|_| E2eError::Invalid)
     }
-    serde_json::from_slice(&plaintext).map_err(|_| E2eError::Invalid)
 }
 
 pub(crate) struct AndroidE2eOutputCipher {
@@ -778,6 +857,7 @@ pub(crate) async fn test_output_cipher_pair(
         pairing_revision: crate::android_pairing::pairing_revision(),
         expires_at: AtomicU64::new(expires_at),
         revoked: AtomicBool::new(false),
+        next_sequence_floor: AtomicU64::new(0),
         state: AsyncMutex::new(SessionState {
             keys: server_session_keys,
             used_output_nonces: HashSet::new(),

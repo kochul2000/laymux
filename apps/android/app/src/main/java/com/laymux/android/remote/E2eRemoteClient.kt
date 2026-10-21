@@ -8,6 +8,30 @@ import java.nio.charset.StandardCharsets
 import java.util.Arrays
 import org.json.JSONObject
 
+/** One E2E POST body with its fixed content type and extra headers. */
+internal class E2eHttpBody private constructor(
+    val bytes: ByteArray,
+    val contentType: String,
+    val headers: Map<String, String>,
+) {
+    companion object {
+        /** Handshake bodies stay JSON (ADR-0351 changes only the RPC request). */
+        fun json(body: String): E2eHttpBody =
+            E2eHttpBody(body.toByteArray(StandardCharsets.UTF_8), "application/json", emptyMap())
+
+        /**
+         * Binary RPC request (ADR-0351). The instance id travels as a header on
+         * both Cloud and Tailscale Direct; only the relay reads it.
+         */
+        fun rpc(envelope: ByteArray, instanceId: String): E2eHttpBody =
+            E2eHttpBody(
+                envelope,
+                E2eProtocol.RPC_CONTENT_TYPE,
+                mapOf(E2eProtocol.INSTANCE_HEADER to instanceId),
+            )
+    }
+}
+
 internal class E2eRemoteClient(
     private val connectionFactory: (URI) -> HttpURLConnection = { uri ->
         uri.toURL().openConnection() as HttpURLConnection
@@ -42,7 +66,7 @@ internal class E2eRemoteClient(
             val challengeRaw = postWithRetry(
                 transport.httpUrl(E2eHttpOperation.CHALLENGE),
                 "",
-                E2eProtocol.challengeRequest(metadata, clientSessionNonce),
+                E2eHttpBody.json(E2eProtocol.challengeRequest(metadata, clientSessionNonce)),
                 HANDSHAKE_RESPONSE_LIMIT,
                 if (direct) DIRECT_PROBE_ATTEMPTS else HANDSHAKE_ATTEMPTS,
                 invalidatesSession = false,
@@ -59,7 +83,7 @@ internal class E2eRemoteClient(
             val establishRaw = postWithRetry(
                 transport.httpUrl(E2eHttpOperation.ESTABLISH),
                 "",
-                E2eProtocol.establishRequest(challenge, seed),
+                E2eHttpBody.json(E2eProtocol.establishRequest(challenge, seed)),
                 HANDSHAKE_RESPONSE_LIMIT,
                 HANDSHAKE_ATTEMPTS,
                 invalidatesSession = false,
@@ -99,13 +123,15 @@ internal class E2eRemoteClient(
         )
 
     private fun executePending(session: RemoteSession, pending: PendingRpc): JSONObject {
+        // Every retry resends the exact same envelope bytes (same sequence).
+        val body = E2eHttpBody.rpc(pending.envelope, session.instanceId)
         while (true) {
             session.requireTransportAllowed()
             val response = try {
                 postWithRetry(
                     session.transport.httpUrl(E2eHttpOperation.RPC),
                     "",
-                    pending.envelopeJson,
+                    body,
                     RPC_RESPONSE_LIMIT,
                     RPC_ATTEMPTS,
                     invalidatesSession = true,
@@ -135,7 +161,7 @@ internal class E2eRemoteClient(
     internal fun postWithRetry(
         endpoint: String,
         path: String,
-        body: String,
+        body: E2eHttpBody,
         responseLimit: Int,
         attempts: Int,
         invalidatesSession: Boolean,
@@ -164,7 +190,7 @@ internal class E2eRemoteClient(
     private fun post(
         endpoint: String,
         path: String,
-        body: String,
+        body: E2eHttpBody,
         responseLimit: Int,
         connectTimeoutMs: Int = CONNECT_TIMEOUT_MS,
     ): String {
@@ -178,11 +204,13 @@ internal class E2eRemoteClient(
             connection.connectTimeout = connectTimeoutMs
             connection.readTimeout = READ_TIMEOUT_MS
             connection.doOutput = true
-            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Content-Type", body.contentType)
             connection.setRequestProperty("Accept", "application/json")
-            connection.outputStream.use { output ->
-                output.write(body.toByteArray(StandardCharsets.UTF_8))
-            }
+            body.headers.forEach { (name, value) -> connection.setRequestProperty(name, value) }
+            // The length is known up front: stream it instead of letting
+            // HttpURLConnection buffer a second copy of a large attachment body.
+            connection.setFixedLengthStreamingMode(body.bytes.size.toLong())
+            connection.outputStream.use { output -> output.write(body.bytes) }
             val status = connection.responseCode
             if (status !in 200..299) {
                 connection.errorStream?.close()

@@ -14,15 +14,16 @@ use tower::ServiceExt;
 
 use crate::android_e2e::{
     AndroidE2eDispatchResult, AndroidE2eReplayGuard, AndroidE2eRequestContext, ChallengeRequest,
-    CipherEnvelope, E2eError, EstablishRequest,
+    E2eError, EstablishRequest,
 };
 use crate::automation_server::ServerState;
-use crate::constants::{android_e2e_rpc_body_limit, MAX_ANDROID_E2E_FILE_VIEWER_RESPONSE_BYTES};
+use crate::constants::MAX_ANDROID_E2E_FILE_VIEWER_RESPONSE_BYTES;
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 use crate::remote_server::{RemoteTransport, TunnelAuthorized};
 
 use super::access::effective_remote_settings;
+use super::android_e2e_rpc_body::{android_e2e_rpc_request_limit, read_android_e2e_rpc_body};
 use super::lease::{
     effective_heartbeat_timeout_seconds, emit_remote_control_status,
     require_android_e2e_file_viewer_capability, status_from_state,
@@ -142,36 +143,24 @@ pub(super) async fn remote_android_e2e_rpc(
         transport,
         Some(axum::Extension(RemoteTransport::CloudRelayBrowser))
     );
-    // The envelope bound follows the host's attachment maximum (ADR-0227) so a
+    // The body bound follows the host's attachment maximum (ADR-0227) so a
     // 1 MiB host never buffers the 10 MiB-sized envelope; the route disables
-    // axum's static default limit for this.
-    let envelope_limit = match effective_remote_settings(&server.app_state) {
-        Ok(settings) => android_e2e_rpc_body_limit(
-            super::attachments::AttachmentPolicy::from_settings(&settings, None).host_max_bytes,
-        ),
+    // axum's static default limit for this. The binary prefix is checked as
+    // soon as it arrives, before the rest of the body is held (ADR-0351).
+    let envelope_limit = match android_e2e_rpc_request_limit(&server.app_state) {
+        Ok(limit) => limit,
         Err(error) => return no_store(internal_error(error)),
     };
-    let raw = match to_bytes(request.into_body(), envelope_limit).await {
-        Ok(raw) => raw,
-        Err(_) => {
-            return no_store(json_error(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "Android E2E envelope exceeds the request limit",
-            ))
-        }
-    };
-    let envelope: CipherEnvelope = match serde_json::from_slice(&raw) {
-        Ok(envelope) => envelope,
-        Err(_) => {
-            return no_store(json_error(
-                StatusCode::BAD_REQUEST,
-                "Android E2E envelope is not valid JSON",
-            ))
-        }
-    };
-    drop(raw);
-    let session = match server.app_state.android_e2e.session(
-        &envelope.instance_id,
+    let envelope =
+        match read_android_e2e_rpc_body(&server.app_state, request.into_body(), envelope_limit)
+            .await
+        {
+            Ok(envelope) => envelope,
+            Err(response) => return response,
+        };
+    // The request carries no instanceId: the session found by its id supplies
+    // the AAD instance (ADR-0351).
+    let session = match server.app_state.android_e2e.session_for_request(
         &envelope.session_id,
         match unix_time_now() {
             Ok(now) => now,
@@ -736,14 +725,14 @@ fn rpc_error(status: StatusCode, message: &str) -> Value {
     })
 }
 
-fn no_store(mut response: Response) -> Response {
+pub(super) fn no_store(mut response: Response) -> Response {
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
 }
 
-fn e2e_error_response(error: E2eError) -> Response {
+pub(super) fn e2e_error_response(error: E2eError) -> Response {
     match error {
         E2eError::Invalid => json_error(StatusCode::UNAUTHORIZED, "Android E2E request is invalid"),
         E2eError::Expired => json_error(StatusCode::GONE, "Android E2E session expired"),

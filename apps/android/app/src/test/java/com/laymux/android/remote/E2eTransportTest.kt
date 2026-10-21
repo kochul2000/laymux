@@ -19,8 +19,9 @@ class E2eTransportTest {
             "http://100.100.10.20:19281/remote/v1/e2e/session/challenge",
             direct.httpUrl(E2eHttpOperation.CHALLENGE),
         )
+        // ADR-0351: the relay streams the binary RPC body on its own route.
         assertEquals(
-            "https://app.laymux.com/api/android/e2e/rpc",
+            "https://app.laymux.com/api/android/e2e/rpc/binary",
             cloud.httpUrl(E2eHttpOperation.RPC),
         )
         assertEquals(

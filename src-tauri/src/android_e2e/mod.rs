@@ -1,4 +1,5 @@
 mod crypto;
+mod envelope;
 mod state;
 mod validation;
 
@@ -6,15 +7,23 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[cfg(test)]
+pub(crate) use envelope::encode_rpc_request;
+pub(crate) use envelope::{EnvelopeRejection, RpcEnvelopePrefix, RpcRequestEnvelope};
+#[cfg(test)]
 pub(crate) use state::test_output_cipher_pair;
 pub use state::AndroidE2eState;
 pub(crate) use state::{AndroidE2eOutputCipher, AndroidE2eRequestContext, AndroidE2eSession};
 
 pub(crate) const PROTOCOL_VERSION: u8 = 1;
+/// Format byte of the binary RPC request envelope (ADR-0351). Separate from
+/// `PROTOCOL_VERSION`, which handshake, response envelope and AAD keep using,
+/// and from `COMPAT_VERSION`. The desktop accepts only this value.
+pub(crate) const RPC_REQUEST_ENVELOPE_FORMAT: u8 = 2;
 /// desktop↔Android 같은-릴리즈 계약의 호환 번호 (ADR-0172). 비호환 변경이
 /// 실릴 때만 1씩 올린다 — 릴리즈마다 올리지 않는다. challenge 응답으로
 /// 광고하고 앱이 자기 값과 비교해 불일치면 연결을 거부한다.
-pub(crate) const COMPAT_VERSION: u32 = 1;
+/// 2: RPC 요청이 binary envelope로 바뀌었다 (ADR-0351).
+pub(crate) const COMPAT_VERSION: u32 = 2;
 pub(crate) const CHALLENGE_ID_BYTES: usize = 16;
 pub(crate) const CLIENT_SESSION_NONCE_BYTES: usize = 16;
 pub(crate) const SERVER_NONCE_BYTES: usize = 32;
@@ -136,8 +145,10 @@ pub(crate) struct EstablishResponse {
     pub server_proof: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+/// JSON response envelope (desktop → Android). Requests use the binary
+/// `RpcRequestEnvelope` instead (ADR-0351).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct CipherEnvelope {
     pub version: u8,
     pub instance_id: String,
