@@ -16,10 +16,11 @@ use uuid::Uuid;
 
 use crate::automation_server::ServerState;
 use crate::constants::{
-    remote_attachment_encoded_limit, remote_attachment_request_limit,
-    CLOUD_RELAY_ANDROID_E2E_RPC_BODY_LIMIT, CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT,
-    REMOTE_TERMINAL_ATTACHMENT_CACHE_FILES_OF_MAX_SIZE, REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_FILES,
-    REMOTE_TERMINAL_ATTACHMENT_MAX_MIB, REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES,
+    remote_attachment_encoded_limit, remote_attachment_request_limit, ANDROID_E2E_AEAD_TAG_BYTES,
+    ANDROID_E2E_RPC_ENVELOPE_PREFIX_BYTES, CLOUD_RELAY_ANDROID_E2E_RPC_BODY_LIMIT,
+    CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT, REMOTE_TERMINAL_ATTACHMENT_CACHE_FILES_OF_MAX_SIZE,
+    REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_FILES, REMOTE_TERMINAL_ATTACHMENT_MAX_MIB,
+    REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES,
 };
 use crate::lock_ext::MutexExt;
 use crate::settings::models::{is_valid_attachment_extension, RemoteSettings};
@@ -332,12 +333,13 @@ fn relay_attachment_cap(transport: RemoteTransport) -> Option<usize> {
         RemoteTransport::AndroidE2e {
             via_cloud_relay: true,
         } => {
-            // Invert `android_e2e_rpc_body_limit`: strip the envelope slack and
-            // the outer base64url layer to get the inner attachment JSON bound.
-            (CLOUD_RELAY_ANDROID_E2E_RPC_BODY_LIMIT
-                - REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES)
-                / 4
-                * 3
+            // Invert `android_e2e_rpc_body_limit`: strip the binary prefix, the
+            // AEAD tag and the `PlainRequest` wrapper slack to get the inner
+            // attachment JSON bound. The binary envelope has no base64 layer
+            // (ADR-0351).
+            CLOUD_RELAY_ANDROID_E2E_RPC_BODY_LIMIT
+                - ANDROID_E2E_RPC_ENVELOPE_PREFIX_BYTES
+                - ANDROID_E2E_AEAD_TAG_BYTES
                 - REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES
         }
         RemoteTransport::AndroidE2e {

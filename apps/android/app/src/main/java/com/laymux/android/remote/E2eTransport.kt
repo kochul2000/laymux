@@ -48,7 +48,13 @@ internal class E2eTransport private constructor(
             E2eHttpOperation.RPC -> "rpc"
         }
         return when (kind) {
-            E2eTransportKind.CLOUD_RELAY -> "/api/android/e2e/$suffix"
+            // The relay streams the binary RPC body on its own route; the
+            // legacy JSON route stays only for old app + old desktop (ADR-0351).
+            E2eTransportKind.CLOUD_RELAY -> if (operation == E2eHttpOperation.RPC) {
+                "/api/android/e2e/rpc/binary"
+            } else {
+                "/api/android/e2e/$suffix"
+            }
             E2eTransportKind.TAILSCALE_DIRECT -> "/remote/v1/e2e/$suffix"
         }
     }

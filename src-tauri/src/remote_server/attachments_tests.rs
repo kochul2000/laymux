@@ -311,15 +311,45 @@ fn transport_bounds_cover_the_largest_configurable_attachment() {
     let max_bytes = REMOTE_TERMINAL_ATTACHMENT_MAX_MIB as usize * 1024 * 1024;
     let request_limit = remote_attachment_request_limit(max_bytes);
     assert!(request_limit > remote_attachment_encoded_limit(max_bytes));
-    // The attachment JSON is sealed and base64url-encoded once more inside
-    // the Android E2E RPC envelope.
-    assert!(
-        crate::constants::android_e2e_rpc_body_limit(max_bytes) >= request_limit.div_ceil(3) * 4
-    );
     // The decrypted inner request must hold that JSON plus the PlainRequest wrapper.
-    assert!(crate::constants::ANDROID_E2E_MAX_REQUEST_PLAINTEXT_BYTES > request_limit);
+    let plaintext = crate::constants::ANDROID_E2E_MAX_REQUEST_PLAINTEXT_BYTES;
+    assert!(plaintext > request_limit);
+    // The binary envelope (ADR-0351) seals that plaintext raw: 31 B prefix +
+    // ciphertext + 16 B tag, with no base64 layer.
+    let largest_envelope = ANDROID_E2E_RPC_ENVELOPE_PREFIX_BYTES + plaintext + 16;
+    let desktop_limit = crate::constants::android_e2e_rpc_body_limit(max_bytes);
+    assert_eq!(desktop_limit, largest_envelope);
+    // ...which fits under the relay's 16 MiB streamed cap and the desktop
+    // tunnel's own per-stream bound.
+    assert!(largest_envelope <= CLOUD_RELAY_ANDROID_E2E_RPC_BODY_LIMIT);
+    assert_eq!(CLOUD_RELAY_ANDROID_E2E_RPC_BODY_LIMIT, 16 * MIB);
+    assert!(desktop_limit < CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT);
     // A 1 MiB host keeps the envelope at the 2 MiB the route always allowed.
     assert_eq!(crate::constants::android_e2e_rpc_body_limit(MIB), 2 * MIB);
+    // Every host setting yields a bound between the floor and the max-host bound.
+    for mib in 1..=REMOTE_TERMINAL_ATTACHMENT_MAX_MIB as usize {
+        let limit = crate::constants::android_e2e_rpc_body_limit(mib * MIB);
+        assert!((2 * MIB..=desktop_limit).contains(&limit), "{mib} MiB");
+    }
+}
+
+#[test]
+fn android_cloud_relay_cap_is_the_floored_binary_inverse_of_16_mib() {
+    // 16 MiB - 31 B prefix - 16 B tag - 16 KiB wrapper - 16 KiB attachment
+    // slack, then one base64 layer stripped: about 11.98 MiB, floored to 11.
+    let cap = relay_attachment_cap(RemoteTransport::AndroidE2e {
+        via_cloud_relay: true,
+    });
+    assert_eq!(cap, Some(11 * MIB));
+    // The floored cap's attachment must really fit the relay bound once sealed.
+    assert!(
+        crate::constants::android_e2e_rpc_body_limit(11 * MIB)
+            <= CLOUD_RELAY_ANDROID_E2E_RPC_BODY_LIMIT
+    );
+    assert!(
+        crate::constants::android_e2e_rpc_body_limit(12 * MIB)
+            > CLOUD_RELAY_ANDROID_E2E_RPC_BODY_LIMIT
+    );
 }
 
 #[cfg(target_os = "windows")]
@@ -366,8 +396,9 @@ fn cloud_relay_paths_cap_the_policy_and_name_tailscale_in_the_message() {
     assert!(browser.relay_max_bytes.is_some_and(|relay| relay >= host));
     assert!(!browser.relay_limited());
 
-    // The relay caps the Android E2E RPC envelope at 2 MiB, which leaves room
-    // for a 1 MiB attachment after both base64 layers.
+    // The relay streams the binary Android E2E RPC body up to 16 MiB
+    // (ADR-0351), which carries 11 MiB of attachment: the 10 MiB host maximum
+    // still binds, so no Tailscale hint is shown.
     let android = AttachmentPolicy::from_settings(
         &settings,
         Some(RemoteTransport::AndroidE2e {
@@ -376,17 +407,31 @@ fn cloud_relay_paths_cap_the_policy_and_name_tailscale_in_the_message() {
     );
     assert_eq!(
         (android.max_bytes, android.relay_max_bytes),
-        (MIB, Some(MIB))
+        (host, Some(11 * MIB))
     );
     assert_eq!(android.host_max_bytes, host);
-    assert!(android.relay_limited());
+    assert!(!android.relay_limited());
     let message = android.too_large_message();
+    assert_eq!(message, "attachment exceeds the 10 MiB limit");
+    assert!(!message.contains("Tailscale"), "{message}");
+    // Quota follows the host maximum, not the path the request took.
+    assert_eq!(android.cache_quota_bytes(), direct.cache_quota_bytes());
+}
+
+#[test]
+fn relay_limited_message_still_names_tailscale_when_the_relay_binds() {
+    let policy = AttachmentPolicy {
+        max_bytes: MIB,
+        host_max_bytes: 10 * MIB,
+        relay_max_bytes: Some(MIB),
+        ..default_policy()
+    };
+    assert!(policy.relay_limited());
+    let message = policy.too_large_message();
     assert!(
         message.contains("Cloud relay payload limit of 1 MiB"),
         "{message}"
     );
     assert!(message.contains("Tailscale"), "{message}");
     assert!(message.contains("10 MiB"), "{message}");
-    // Quota follows the host maximum, not the path the request took.
-    assert_eq!(android.cache_quota_bytes(), direct.cache_quota_bytes());
 }

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::body::{to_bytes, Body};
 use axum::extract::ConnectInfo;
@@ -30,13 +30,17 @@ use super::{keyring_store, CloudStatus};
 use crate::automation_server::{automation_port, ServerState};
 use crate::commands::{get_remote_host_candidates, HostCandidate};
 use crate::constants::{
-    DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS, MIN_REMOTE_HEARTBEAT_TIMEOUT_SECONDS,
+    ANDROID_E2E_RPC_MAX_BODY_BYTES, ANDROID_E2E_RPC_PATH,
+    CLOUD_RELAY_ANDROID_E2E_RPC_INSTANCE_MAX_REQUESTS, DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS,
+    MIN_REMOTE_HEARTBEAT_TIMEOUT_SECONDS,
 };
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 use crate::remote_server::{
-    self, parse_android_e2e_output_route, unix_time_seconds, TunnelAuthorized,
-    ANDROID_E2E_OUTPUT_PATH, E2E_OUTPUT_MAX_ENCRYPTED_RECORD_BYTES, E2E_OUTPUT_OPEN_RECORD_LIMIT,
+    self, android_e2e_rpc_request_limit, android_e2e_rpc_too_large_response,
+    check_android_e2e_rpc_prefix, parse_android_e2e_output_route, unix_time_seconds,
+    AndroidE2eRpcPrefixVerdict, TunnelAuthorized, ANDROID_E2E_OUTPUT_PATH,
+    E2E_OUTPUT_MAX_ENCRYPTED_RECORD_BYTES, E2E_OUTPUT_OPEN_RECORD_LIMIT,
 };
 use crate::settings::models::{CloudAccessMode, RemoteSettings};
 use crate::state::AppState;
@@ -44,6 +48,13 @@ use crate::terminal_output::{
     TerminalOutputAttachment, TerminalOutputDelta, TerminalOutputPhase,
     TerminalOutputSubscribedAttachment, TerminalOutputSubscriptionEvent,
     TERMINAL_OUTPUT_PROTOCOL_NAME, TERMINAL_OUTPUT_PROTOCOL_VERSION,
+};
+
+#[path = "tunnel_e2e_rpc.rs"]
+mod e2e_rpc;
+use e2e_rpc::{
+    counted_streams, evict_answered_streams, idle_e2e_rpc_streams, is_android_e2e_rpc_request,
+    E2eRpcBodyGate, E2E_RPC_IDLE_SWEEP_INTERVAL,
 };
 
 const CONTROL_STREAM_ID: &str = "0";
@@ -71,7 +82,15 @@ const OUTBOUND_QUEUE_SIZE: usize = 256;
 const STREAM_QUEUE_MAX_SIZE: usize = HTTP_REQUEST_BYTES_LIMIT / 1024;
 const STREAM_PENDING_BYTES_LIMIT: usize = 16 * 1024 * 1024;
 const MAX_ACTIVE_STREAMS: usize = 128;
-const SOCKET_PENDING_BYTES_LIMIT: usize = 32 * 1024 * 1024;
+/// Request and response bytes held across every stream of one tunnel socket.
+/// The relay admits `CLOUD_RELAY_ANDROID_E2E_RPC_INSTANCE_MAX_REQUESTS` binary
+/// Android E2E RPC uploads per instance, each held whole here until AEAD; all of
+/// them at the largest envelope any host allows must fit, plus one full browser
+/// request so a concurrent browser upload is not starved (ADR-0351). The old
+/// 32 MiB fitted only two maximum-size E2E uploads.
+const SOCKET_PENDING_BYTES_LIMIT: usize = CLOUD_RELAY_ANDROID_E2E_RPC_INSTANCE_MAX_REQUESTS
+    * ANDROID_E2E_RPC_MAX_BODY_BYTES
+    + HTTP_REQUEST_BYTES_LIMIT;
 const HTTP_REQUEST_BYTES_LIMIT: usize = crate::constants::CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT;
 const HTTP_RESPONSE_BYTES_LIMIT: usize = 16 * 1024 * 1024;
 const BACKPRESSURE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -168,6 +187,12 @@ enum ActiveStream {
         input: Option<mpsc::Sender<Vec<u8>>>,
         join: TokioJoinHandle<()>,
     },
+    /// An Android E2E RPC request already answered before its body ended
+    /// (ADR-0351). Holds no body; late frames from the relay are dropped
+    /// until it closes the stream or the idle sweep forgets it.
+    Answered {
+        last_activity: Instant,
+    },
 }
 
 struct ConnectionResources {
@@ -224,6 +249,11 @@ struct IncomingHttpRequest {
     headers: Vec<(String, String)>,
     body: Vec<u8>,
     queued_frames: usize,
+    /// Cumulative body cap: the relay bound, or the host-derived Android E2E
+    /// RPC bound for that route (ADR-0351).
+    body_limit: usize,
+    /// Present only for `/remote/v1/e2e/rpc` streams.
+    e2e_rpc: Option<E2eRpcBodyGate>,
 }
 
 impl IncomingHttpRequest {
@@ -244,7 +274,13 @@ impl IncomingHttpRequest {
             headers: payload.headers,
             body: Vec::new(),
             queued_frames: 0,
+            body_limit: HTTP_REQUEST_BYTES_LIMIT,
+            e2e_rpc: None,
         })
+    }
+
+    fn exceeds_body_limit(&self, additional: usize) -> bool {
+        self.body.len().saturating_add(additional) > self.body_limit
     }
 
     fn push_data(&mut self, data: &[u8]) -> Result<(), StreamErrorPayload> {
@@ -256,7 +292,7 @@ impl IncomingHttpRequest {
             ));
         }
         if self.body.len().saturating_add(data.len()) > STREAM_PENDING_BYTES_LIMIT
-            || self.body.len().saturating_add(data.len()) > HTTP_REQUEST_BYTES_LIMIT
+            || self.exceeds_body_limit(data.len())
         {
             return Err(StreamErrorPayload::new(
                 "backpressure_limit_exceeded",
@@ -749,6 +785,7 @@ async fn connect_once(
     let mut socket_pending_bytes = 0_usize;
     let mut next_task_id = 1_u64;
     let mut terminal_error: Option<TunnelConnectionError> = None;
+    let mut e2e_rpc_idle_sweep = interval(E2E_RPC_IDLE_SWEEP_INTERVAL);
     loop {
         tokio::select! {
             biased;
@@ -756,6 +793,15 @@ async fn connect_once(
                 if changed.is_err() || *shutdown.borrow() {
                     break;
                 }
+            }
+            _ = e2e_rpc_idle_sweep.tick() => {
+                sweep_idle_e2e_rpc_streams(
+                    &mut resources.active_streams,
+                    &mut socket_pending_bytes,
+                    &outbound_tx,
+                    Instant::now(),
+                )
+                .await;
             }
             completed = completion_rx.recv() => {
                 if let Some(completion) = completed {
@@ -990,7 +1036,14 @@ async fn handle_frame_with_dispatch(
             .await;
         }
         FRAME_STREAM_DATA => {
-            handle_stream_data(frame, active_streams, socket_pending_bytes, outbound_tx).await;
+            handle_stream_data(
+                frame,
+                active_streams,
+                socket_pending_bytes,
+                outbound_tx,
+                &dispatch_state.app_state,
+            )
+            .await;
         }
         FRAME_STREAM_CLOSE => {
             handle_stream_close(
@@ -1087,7 +1140,7 @@ fn cloud_stream_allowed(mode: CloudAccessMode, payload: &StreamOpenPayload) -> b
             "/remote/v1/e2e/pair/ack"
                 | "/remote/v1/e2e/session/challenge"
                 | "/remote/v1/e2e/session/establish"
-                | "/remote/v1/e2e/rpc"
+                | ANDROID_E2E_RPC_PATH
         )
     )
 }
@@ -1126,7 +1179,7 @@ async fn handle_stream_open(
         .await;
         return;
     }
-    if active_streams.len() >= MAX_ACTIVE_STREAMS {
+    if counted_streams(active_streams) >= MAX_ACTIVE_STREAMS {
         let _ = send_stream_error(
             outbound_tx,
             &frame.stream_id,
@@ -1167,7 +1220,7 @@ async fn handle_stream_open(
     }
 
     match payload.kind.as_str() {
-        KIND_HTTP_REQUEST => match IncomingHttpRequest::new(payload) {
+        KIND_HTTP_REQUEST => match open_http_request(state, payload) {
             Ok(request) => {
                 active_streams.insert(frame.stream_id, ActiveStream::Http(request));
             }
@@ -1365,6 +1418,7 @@ async fn handle_stream_data(
     active_streams: &mut HashMap<String, ActiveStream>,
     socket_pending_bytes: &mut usize,
     outbound_tx: &OutboundSender,
+    state: &AppState,
 ) {
     let stream_id = frame.stream_id.clone();
     let websocket_input = active_streams
@@ -1430,9 +1484,14 @@ async fn handle_stream_data(
         }
         return;
     }
+    if let Some(ActiveStream::Answered { last_activity }) = active_streams.get_mut(&stream_id) {
+        // Late body of an early-answered E2E RPC request: drop it unread.
+        *last_activity = Instant::now();
+        return;
+    }
     let Some(ActiveStream::Http(request)) = active_streams.get_mut(&stream_id) else {
         match active_streams.get(&stream_id) {
-            Some(ActiveStream::WebSocket { .. }) => {}
+            Some(ActiveStream::WebSocket { .. } | ActiveStream::Answered { .. }) => {}
             Some(ActiveStream::Responding { .. }) => {
                 let _ = send_stream_error(
                     outbound_tx,
@@ -1482,12 +1541,130 @@ async fn handle_stream_data(
         return;
     }
 
+    if request.e2e_rpc.is_some() && request.exceeds_body_limit(decoded.len()) {
+        answer_e2e_rpc_early(
+            active_streams,
+            &stream_id,
+            socket_pending_bytes,
+            outbound_tx,
+            android_e2e_rpc_too_large_response(),
+        )
+        .await;
+        return;
+    }
     if let Err(error) = request.push_data(&decoded) {
         let _ = send_stream_error(outbound_tx, &stream_id, error).await;
         remove_active_stream(active_streams, &stream_id, socket_pending_bytes);
         return;
     }
     *socket_pending_bytes = socket_pending_bytes.saturating_add(decoded.len());
+    let early_answer = match request.e2e_rpc.as_mut() {
+        Some(gate) => {
+            gate.last_activity = Instant::now();
+            if gate.prefix_accepted {
+                None
+            } else {
+                match check_android_e2e_rpc_prefix(state, &request.body) {
+                    AndroidE2eRpcPrefixVerdict::Pending => None,
+                    AndroidE2eRpcPrefixVerdict::Accepted => {
+                        gate.prefix_accepted = true;
+                        None
+                    }
+                    AndroidE2eRpcPrefixVerdict::Rejected(response) => Some(response),
+                }
+            }
+        }
+        None => None,
+    };
+    if let Some(response) = early_answer {
+        answer_e2e_rpc_early(
+            active_streams,
+            &stream_id,
+            socket_pending_bytes,
+            outbound_tx,
+            response,
+        )
+        .await;
+    }
+}
+
+/// Opens an HTTP request stream. A `/remote/v1/e2e/rpc` stream gets the
+/// host-derived Android E2E body cap instead of the static relay bound, so the
+/// pre-authentication buffer follows the host attachment setting whichever
+/// transport carries it (ADR-0227 Decision 5(a), ADR-0351).
+fn open_http_request(
+    state: &AppState,
+    payload: StreamOpenPayload,
+) -> Result<IncomingHttpRequest, AppError> {
+    let e2e_rpc = is_android_e2e_rpc_request(&payload);
+    let mut request = IncomingHttpRequest::new(payload)?;
+    if e2e_rpc {
+        request.body_limit = android_e2e_rpc_request_limit(state)
+            .map_err(AppError::Other)?
+            .min(HTTP_REQUEST_BYTES_LIMIT);
+        request.e2e_rpc = Some(E2eRpcBodyGate::new(Instant::now()));
+    }
+    Ok(request)
+}
+
+/// Answers an Android E2E RPC request before its body is complete (prefix
+/// rejection or byte cap) and keeps a body-less marker so the relay's late
+/// frames are dropped instead of drawing `unknown_stream` errors.
+async fn answer_e2e_rpc_early(
+    active_streams: &mut HashMap<String, ActiveStream>,
+    stream_id: &str,
+    socket_pending_bytes: &mut usize,
+    outbound_tx: &OutboundSender,
+    response: axum::response::Response,
+) {
+    if let Some(stream) = remove_active_stream(active_streams, stream_id, socket_pending_bytes) {
+        close_active_stream(stream);
+    }
+    evict_answered_streams(active_streams);
+    active_streams.insert(
+        stream_id.to_string(),
+        ActiveStream::Answered {
+            last_activity: Instant::now(),
+        },
+    );
+    if let Err(error) = send_http_response(stream_id.to_string(), response, outbound_tx).await {
+        let _ = send_stream_error(
+            outbound_tx,
+            stream_id,
+            StreamErrorPayload::new("http_dispatch_failed", error.to_string(), false),
+        )
+        .await;
+    }
+}
+
+/// Ends E2E RPC request streams whose body stalled (`stream.error`) and
+/// forgets answered markers the relay never closed.
+async fn sweep_idle_e2e_rpc_streams(
+    active_streams: &mut HashMap<String, ActiveStream>,
+    socket_pending_bytes: &mut usize,
+    outbound_tx: &OutboundSender,
+    now: Instant,
+) {
+    let idle = idle_e2e_rpc_streams(active_streams, now);
+    for stream_id in idle.forgotten {
+        active_streams.remove(&stream_id);
+    }
+    for stream_id in idle.timed_out {
+        if let Some(stream) = remove_active_stream(active_streams, &stream_id, socket_pending_bytes)
+        {
+            close_active_stream(stream);
+        }
+        let _ = send_stream_error(
+            outbound_tx,
+            &stream_id,
+            StreamErrorPayload::new(
+                "stream_idle_timeout",
+                "Android E2E request body stalled",
+                false,
+            ),
+        )
+        .await;
+    }
 }
 
 async fn handle_stream_close(
@@ -1524,6 +1701,7 @@ async fn handle_stream_close(
         Some(stream @ ActiveStream::Http(_)) => {
             active_streams.insert(frame.stream_id, stream);
         }
+        Some(ActiveStream::Answered { .. }) => {}
         None => {
             let _ = send_unknown_stream(outbound_tx, &frame.stream_id).await;
         }
@@ -2348,7 +2526,7 @@ fn subtract_stream_pending_bytes(stream: &ActiveStream, socket_pending_bytes: &m
     let pending_bytes = match stream {
         ActiveStream::Http(request) => request.body.len(),
         ActiveStream::Responding { pending_bytes, .. } => *pending_bytes,
-        ActiveStream::WebSocket { .. } => 0,
+        ActiveStream::WebSocket { .. } | ActiveStream::Answered { .. } => 0,
     };
     *socket_pending_bytes = socket_pending_bytes.saturating_sub(pending_bytes);
 }
@@ -2362,7 +2540,7 @@ fn close_active_stream(stream: ActiveStream) {
         ActiveStream::Responding { join, .. } => {
             join.abort();
         }
-        ActiveStream::Http(_) => {}
+        ActiveStream::Http(_) | ActiveStream::Answered { .. } => {}
     }
 }
 
@@ -3299,6 +3477,8 @@ mod tests {
             ],
             body: Vec::new(),
             queued_frames: 0,
+            body_limit: HTTP_REQUEST_BYTES_LIMIT,
+            e2e_rpc: None,
         };
 
         let request = build_internal_remote_request(request).unwrap();
@@ -3335,6 +3515,8 @@ mod tests {
             headers: Vec::new(),
             body: Vec::new(),
             queued_frames: 0,
+            body_limit: HTTP_REQUEST_BYTES_LIMIT,
+            e2e_rpc: None,
         };
 
         let request = build_internal_remote_request(request).unwrap();
@@ -3851,6 +4033,7 @@ mod tests {
             &mut active_streams,
             &mut socket_pending_bytes,
             &outbound_tx,
+            &AppState::new(),
         )
         .await;
 
@@ -3986,10 +4169,20 @@ mod tests {
         let mut active_streams = HashMap::new();
         let mut socket_pending_bytes = 0;
         let mut next_response_id = 1;
-        let chunk = vec![b'x'; SOCKET_PENDING_BYTES_LIMIT / 8];
+        // Eight streams fill the socket budget exactly; the first one also
+        // carries the remainder of the division.
+        let chunk_len = SOCKET_PENDING_BYTES_LIMIT / 8;
 
         for index in 0..8 {
             let stream_id = format!("srv-{index}");
+            let chunk = vec![
+                b'x';
+                if index == 0 {
+                    chunk_len + SOCKET_PENDING_BYTES_LIMIT % 8
+                } else {
+                    chunk_len
+                }
+            ];
             handle_test_frame(
                 http_open_frame(&stream_id),
                 &mut active_streams,

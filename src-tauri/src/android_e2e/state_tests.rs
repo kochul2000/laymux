@@ -71,6 +71,7 @@ async fn output_stream_nonce_can_only_be_used_once_per_session() {
         pairing_revision: crate::android_pairing::pairing_revision(),
         expires_at: AtomicU64::new(1_060),
         revoked: AtomicBool::new(false),
+        next_sequence_floor: AtomicU64::new(0),
         state: AsyncMutex::new(SessionState {
             keys,
             used_output_nonces: HashSet::new(),
@@ -98,6 +99,7 @@ async fn output_stream_nonce_limit_revokes_session_for_rollover() {
         pairing_revision: crate::android_pairing::pairing_revision(),
         expires_at: AtomicU64::new(1_060),
         revoked: AtomicBool::new(false),
+        next_sequence_floor: AtomicU64::new(0),
         state: AsyncMutex::new(SessionState {
             keys,
             used_output_nonces: (0..MAX_OUTPUT_STREAM_NONCES)
@@ -165,9 +167,7 @@ async fn exact_request_replay_returns_cached_encrypted_response() {
     let session = e2e
         .session(&established.instance_id, &established.session_id, 1_001)
         .unwrap();
-    let envelope = CipherEnvelope {
-        version: 1,
-        instance_id: established.instance_id.clone(),
+    let envelope = RpcRequestEnvelope {
         session_id: established.session_id.clone(),
         sequence: 0,
         ciphertext: encrypt_request(
@@ -232,6 +232,7 @@ async fn guarded_exact_retry_revalidates_authority_and_revokes_on_change() {
         pairing_revision: crate::android_pairing::pairing_revision(),
         expires_at: AtomicU64::new(2_000),
         revoked: AtomicBool::new(false),
+        next_sequence_floor: AtomicU64::new(0),
         state: AsyncMutex::new(SessionState {
             keys: server_keys,
             used_output_nonces: HashSet::new(),
@@ -240,9 +241,7 @@ async fn guarded_exact_retry_revalidates_authority_and_revokes_on_change() {
             last_response: None,
         }),
     });
-    let envelope = CipherEnvelope {
-        version: 1,
-        instance_id: "desktop-7".into(),
+    let envelope = RpcRequestEnvelope {
         session_id,
         sequence: 0,
         ciphertext: encrypt_request(
@@ -340,6 +339,7 @@ async fn guarded_fresh_response_is_not_encrypted_when_authority_changed_during_d
         pairing_revision: crate::android_pairing::pairing_revision(),
         expires_at: AtomicU64::new(2_000),
         revoked: AtomicBool::new(false),
+        next_sequence_floor: AtomicU64::new(0),
         state: AsyncMutex::new(SessionState {
             keys: server_keys,
             used_output_nonces: HashSet::new(),
@@ -348,9 +348,7 @@ async fn guarded_fresh_response_is_not_encrypted_when_authority_changed_during_d
             last_response: None,
         }),
     });
-    let envelope = CipherEnvelope {
-        version: 1,
-        instance_id: "desktop-7".into(),
+    let envelope = RpcRequestEnvelope {
         session_id,
         sequence: 0,
         ciphertext: encrypt_request(
@@ -403,6 +401,7 @@ async fn authenticated_requests_slide_the_inactivity_deadline() {
         pairing_revision: crate::android_pairing::pairing_revision(),
         expires_at: AtomicU64::new(1_060),
         revoked: AtomicBool::new(false),
+        next_sequence_floor: AtomicU64::new(0),
         state: AsyncMutex::new(SessionState {
             keys: session_keys,
             used_output_nonces: HashSet::new(),
@@ -414,9 +413,7 @@ async fn authenticated_requests_slide_the_inactivity_deadline() {
 
     let first = session
         .process(
-            CipherEnvelope {
-                version: 1,
-                instance_id: "desktop-7".into(),
+            RpcRequestEnvelope {
                 session_id: session_id.clone(),
                 sequence: 0,
                 ciphertext: encrypt_request(
@@ -457,9 +454,7 @@ async fn authenticated_requests_slide_the_inactivity_deadline() {
 
     session
         .process(
-            CipherEnvelope {
-                version: 1,
-                instance_id: "desktop-7".into(),
+            RpcRequestEnvelope {
                 session_id,
                 sequence: 1,
                 ciphertext: encrypt_request(
@@ -501,6 +496,7 @@ async fn failed_dispatch_does_not_slide_the_inactivity_deadline() {
         pairing_revision: crate::android_pairing::pairing_revision(),
         expires_at: AtomicU64::new(1_060),
         revoked: AtomicBool::new(false),
+        next_sequence_floor: AtomicU64::new(0),
         state: AsyncMutex::new(SessionState {
             keys,
             used_output_nonces: HashSet::new(),
@@ -513,9 +509,7 @@ async fn failed_dispatch_does_not_slide_the_inactivity_deadline() {
     assert!(matches!(
         session
             .process(
-                CipherEnvelope {
-                    version: 1,
-                    instance_id: "desktop-7".into(),
+                RpcRequestEnvelope {
                     session_id,
                     sequence: 0,
                     ciphertext,
@@ -561,6 +555,7 @@ async fn session_expires_at_the_exact_boundary_after_waiting_for_its_lock() {
         pairing_revision: crate::android_pairing::pairing_revision(),
         expires_at: AtomicU64::new(1_060),
         revoked: AtomicBool::new(false),
+        next_sequence_floor: AtomicU64::new(0),
         state: AsyncMutex::new(SessionState {
             keys,
             used_output_nonces: HashSet::new(),
@@ -569,12 +564,10 @@ async fn session_expires_at_the_exact_boundary_after_waiting_for_its_lock() {
             last_response: None,
         }),
     });
-    let envelope = CipherEnvelope {
-        version: 1,
-        instance_id: session.instance_id.clone(),
+    let envelope = RpcRequestEnvelope {
         session_id: session.session_id.clone(),
         sequence: 0,
-        ciphertext: "invalid".into(),
+        ciphertext: b"invalid".to_vec(),
     };
 
     assert!(matches!(
@@ -609,6 +602,7 @@ async fn clear_revokes_a_session_arc_that_was_already_looked_up() {
         pairing_revision: crate::android_pairing::pairing_revision(),
         expires_at: AtomicU64::new(2_000),
         revoked: AtomicBool::new(false),
+        next_sequence_floor: AtomicU64::new(0),
         state: AsyncMutex::new(SessionState {
             keys,
             used_output_nonces: HashSet::new(),
@@ -627,9 +621,7 @@ async fn clear_revokes_a_session_arc_that_was_already_looked_up() {
     assert!(matches!(
         session
             .process(
-                CipherEnvelope {
-                    version: 1,
-                    instance_id: "desktop-7".into(),
+                RpcRequestEnvelope {
                     session_id,
                     sequence: 0,
                     ciphertext,
@@ -706,8 +698,9 @@ async fn a_new_establish_replaces_the_previous_session_for_the_pairing() {
     // 앱의 E2eProtocol.COMPAT_VERSION과 항상 같은 값이어야 한다 (ADR-0172).
     // 언어가 달라 공유 상수를 둘 수 없으므로 양쪽에 리터럴로 핀한다 —
     // Kotlin 쪽 동일 핀은 E2eProtocolTest에 있다.
-    assert_eq!(crate::android_e2e::COMPAT_VERSION, 1);
-    assert_eq!(second_challenge.compat_version, 1);
+    // 2: RPC 요청 binary envelope (ADR-0351).
+    assert_eq!(crate::android_e2e::COMPAT_VERSION, 2);
+    assert_eq!(second_challenge.compat_version, 2);
 
     // The claim path frees a lease bound to the replaced session (ADR-0170):
     // the revoked session must read as dead, the replacement as alive, and an
@@ -728,4 +721,245 @@ async fn a_new_establish_replaces_the_previous_session_for_the_pairing() {
         &second_established.session_id,
         1_003 + 15 * 60,
     ));
+}
+
+fn established_state(now: u64) -> (AndroidE2eState, EstablishResponse, SessionKeys) {
+    let e2e = AndroidE2eState::default();
+    let material = material();
+    let challenge_request = request();
+    let challenge = e2e
+        .issue_challenge_with_material(
+            challenge_request.clone(),
+            &material,
+            now,
+            [4_u8; 16],
+            [5_u8; 32],
+            &mut e2e.registry.lock().unwrap(),
+        )
+        .unwrap();
+    let establish = establish_request(&challenge_request, &challenge, &material.seed);
+    let established = e2e.establish(establish, &material, now).unwrap();
+    let keys = derive_session_keys(&material.seed, &key_fields(&established)).unwrap();
+    (e2e, established, keys)
+}
+
+fn binary_request(
+    keys: &SessionKeys,
+    instance_id: &str,
+    session_id: &str,
+    sequence: u64,
+    plaintext: &[u8],
+) -> Vec<u8> {
+    crate::android_e2e::encode_rpc_request(
+        session_id,
+        sequence,
+        &encrypt_request(&keys.a2d, instance_id, session_id, sequence, plaintext).unwrap(),
+    )
+}
+
+fn prefix_only(session_id: &str, sequence: u64) -> Vec<u8> {
+    crate::android_e2e::encode_rpc_request(session_id, sequence, &[])
+}
+
+async fn process_ok(session: &Arc<AndroidE2eSession>, body: &[u8], now: u64) {
+    session
+        .process(
+            RpcRequestEnvelope::parse(body.to_vec()).unwrap(),
+            || Ok(now),
+            |_, _| async {
+                Ok(AndroidE2eDispatchResult::unguarded(
+                    serde_json::json!({"ok": true}),
+                ))
+            },
+            |_, _, _| Ok(()),
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn binary_request_resolves_its_session_without_an_instance_on_the_wire() {
+    let (e2e, established, keys) = established_state(1_000);
+    let body = binary_request(
+        &keys,
+        &established.instance_id,
+        &established.session_id,
+        0,
+        br#"{"kind":"test"}"#,
+    );
+    let session = e2e
+        .session_for_request(&established.session_id, 1_000)
+        .unwrap();
+    assert_eq!(session.instance_id, established.instance_id);
+    process_ok(&session, &body, 1_000).await;
+    assert!(matches!(
+        e2e.session_for_request(&URL_SAFE_NO_PAD.encode([0_u8; 16]), 1_000),
+        Err(E2eError::Invalid)
+    ));
+}
+
+#[tokio::test]
+async fn aad_binds_the_session_instance_not_a_caller_supplied_one() {
+    let (e2e, established, keys) = established_state(1_000);
+    let session = e2e
+        .session_for_request(&established.session_id, 1_000)
+        .unwrap();
+    // Same session keys and id, but sealed for another instance: a relay that
+    // misroutes or rewrites the instance header cannot make this authenticate.
+    let foreign = binary_request(
+        &keys,
+        "desktop-8",
+        &established.session_id,
+        0,
+        br#"{"kind":"test"}"#,
+    );
+    assert!(matches!(
+        session
+            .process(
+                RpcRequestEnvelope::parse(foreign).unwrap(),
+                || Ok(1_000),
+                |_, _| async { panic!("a foreign-instance request must not dispatch") },
+                |_, _, _| Ok(()),
+            )
+            .await,
+        Err(E2eError::Invalid)
+    ));
+    // The failed attempt did not consume the sequence.
+    let genuine = binary_request(
+        &keys,
+        &established.instance_id,
+        &established.session_id,
+        0,
+        br#"{"kind":"test"}"#,
+    );
+    process_ok(&session, &genuine, 1_000).await;
+}
+
+#[tokio::test]
+async fn prefix_check_rejects_unknown_expired_revoked_and_stale_sequences() {
+    let (e2e, established, keys) = established_state(1_000);
+    let sid = established.session_id.clone();
+
+    // Fewer than 31 bytes: undecided.
+    assert!(e2e
+        .check_rpc_prefix(&prefix_only(&sid, 0)[..30], 1_000)
+        .is_none());
+    assert!(e2e.check_rpc_prefix(&[], 1_000).is_none());
+    // Wrong format byte (e.g. the old JSON envelope's `{`).
+    let mut legacy = prefix_only(&sid, 0);
+    legacy[0] = b'{';
+    assert_eq!(
+        e2e.check_rpc_prefix(&legacy, 1_000),
+        Some(Err(EnvelopeRejection::Malformed))
+    );
+    // Unknown session.
+    assert!(matches!(
+        e2e.check_rpc_prefix(&prefix_only(&URL_SAFE_NO_PAD.encode([0_u8; 16]), 0), 1_000),
+        Some(Err(EnvelopeRejection::Session(E2eError::Invalid)))
+    ));
+    // Live session: the first sequence and later ones pass.
+    assert_eq!(
+        e2e.check_rpc_prefix(&prefix_only(&sid, 0), 1_000),
+        Some(Ok(()))
+    );
+    assert_eq!(
+        e2e.check_rpc_prefix(&prefix_only(&sid, 5), 1_000),
+        Some(Ok(()))
+    );
+
+    // Advance to next_sequence = 2.
+    let session = e2e.session_for_request(&sid, 1_000).unwrap();
+    for sequence in 0..2 {
+        let body = binary_request(&keys, &established.instance_id, &sid, sequence, b"{}");
+        process_ok(&session, &body, 1_000).await;
+    }
+    // The previous sequence stays allowed (exact retry); older ones fail early.
+    assert_eq!(
+        e2e.check_rpc_prefix(&prefix_only(&sid, 1), 1_000),
+        Some(Ok(()))
+    );
+    assert_eq!(
+        e2e.check_rpc_prefix(&prefix_only(&sid, 2), 1_000),
+        Some(Ok(()))
+    );
+    assert!(matches!(
+        e2e.check_rpc_prefix(&prefix_only(&sid, 0), 1_000),
+        Some(Err(EnvelopeRejection::Session(E2eError::Sequence)))
+    ));
+
+    // Expired at the exact boundary.
+    let expires_at = session.expires_at.load(Ordering::Acquire);
+    assert_eq!(
+        e2e.check_rpc_prefix(&prefix_only(&sid, 2), expires_at - 1),
+        Some(Ok(()))
+    );
+    assert!(matches!(
+        e2e.check_rpc_prefix(&prefix_only(&sid, 2), expires_at),
+        Some(Err(EnvelopeRejection::Session(E2eError::Expired)))
+    ));
+    // Revoked.
+    session.revoked.store(true, Ordering::Release);
+    assert!(matches!(
+        e2e.check_rpc_prefix(&prefix_only(&sid, 2), 1_000),
+        Some(Err(EnvelopeRejection::Session(E2eError::Invalid)))
+    ));
+}
+
+#[tokio::test]
+async fn prefix_check_consumes_no_sequence_and_renews_no_lifetime() {
+    let (e2e, established, keys) = established_state(1_000);
+    let sid = established.session_id.clone();
+    let session = e2e.session_for_request(&sid, 1_000).unwrap();
+    let expires_before = session.expires_at.load(Ordering::Acquire);
+    let body = binary_request(&keys, &established.instance_id, &sid, 0, b"{}");
+
+    // Many accepted and rejected prefix checks, late in the session's life.
+    for _ in 0..8 {
+        assert_eq!(
+            e2e.check_rpc_prefix(&body, expires_before - 1),
+            Some(Ok(()))
+        );
+        let mut bad = body.clone();
+        bad[0] = 1;
+        assert!(matches!(
+            e2e.check_rpc_prefix(&bad, expires_before - 1),
+            Some(Err(_))
+        ));
+    }
+    assert_eq!(session.expires_at.load(Ordering::Acquire), expires_before);
+    assert_eq!(session.next_sequence_floor.load(Ordering::Acquire), 0);
+    assert_eq!(session.state.lock().await.next_sequence, 0);
+    assert_eq!(e2e.registry.lock().unwrap().sessions.len(), 1);
+
+    // An expired-session prefix check must not prune the registry either.
+    drop(session);
+    assert!(matches!(
+        e2e.check_rpc_prefix(&body, expires_before),
+        Some(Err(EnvelopeRejection::Session(E2eError::Expired)))
+    ));
+    assert_eq!(e2e.registry.lock().unwrap().sessions.len(), 1);
+
+    // The full request with the same sequence still succeeds afterwards and
+    // only then moves the sequence floor and the lifetime.
+    let session = e2e.session_for_request(&sid, 1_010).unwrap();
+    process_ok(&session, &body, 1_010).await;
+    assert_eq!(session.next_sequence_floor.load(Ordering::Acquire), 1);
+    assert_eq!(
+        session.expires_at.load(Ordering::Acquire),
+        1_010 + SESSION_INACTIVITY_TIMEOUT_SECONDS
+    );
+}
+
+#[tokio::test]
+async fn prefix_check_does_not_wait_for_an_in_flight_request() {
+    let (e2e, established, _keys) = established_state(1_000);
+    let session = e2e
+        .session_for_request(&established.session_id, 1_000)
+        .unwrap();
+    // A request mid-dispatch holds the session lock; the pre-check must not block.
+    let _held = session.state.lock().await;
+    assert_eq!(
+        e2e.check_rpc_prefix(&prefix_only(&established.session_id, 1), 1_000),
+        Some(Ok(()))
+    );
 }

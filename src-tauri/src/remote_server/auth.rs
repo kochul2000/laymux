@@ -6,6 +6,7 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 
+use crate::constants::ANDROID_E2E_RPC_PATH;
 use crate::settings::models::RemoteSettings;
 
 use crate::automation_server::ServerState;
@@ -150,7 +151,7 @@ fn android_tailscale_e2e_authorized_decision(
             req.uri().path(),
             "/remote/v1/e2e/session/challenge"
                 | "/remote/v1/e2e/session/establish"
-                | "/remote/v1/e2e/rpc"
+                | ANDROID_E2E_RPC_PATH
         );
     let is_fixed_output_route = req.method() == Method::GET
         && req.uri().path() == ANDROID_E2E_OUTPUT_PATH
