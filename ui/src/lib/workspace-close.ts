@@ -2,8 +2,9 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useDockStore } from "@/stores/dock-store";
 import { switchActiveWorkspace } from "./workspace-transition";
+import { WORKSPACE_CLOSE_GRACE_MS } from "./workspace-close-timing";
 
-export const WORKSPACE_CLOSE_GRACE_MS = 5000;
+export { WORKSPACE_CLOSE_GRACE_MS } from "./workspace-close-timing";
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /** The host owns deadlines, even when a selector unmounts or Remote disconnects. */

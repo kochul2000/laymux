@@ -17,6 +17,14 @@ test("모바일 workspace 닫기 토스트로 복원하고 토스트 만료 후�
   await close();
   await expect(page.locator('[data-workspace-item="ws-b"]')).toHaveCount(0);
   await expect(page.locator(".workspace-close-toast")).toContainText("Beta");
+  const fill = page.locator(".workspace-close-toast .toast-countdown-fill");
+  const initialWidth = await fill.evaluate((element) => element.getBoundingClientRect().width);
+  expect(initialWidth).toBeGreaterThan(0);
+  await expect
+    .poll(() => fill.evaluate((element) => element.getBoundingClientRect().width), {
+      timeout: 2500,
+    })
+    .toBeLessThan(initialWidth * 0.8);
   await page.screenshot({ path: "../.screenshots/workspace-close-mobile.png" });
   await page.locator('[data-workspace-restore="ws-b"]').click();
   await expect(page.locator(".workspace-close-toast")).toHaveCount(0);

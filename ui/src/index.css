@@ -115,6 +115,7 @@
   --hidden-shelf-max-height: 44%;
   --hidden-action-size: 24px;
   --undo-snackbar-offset: 8px;
+  --toast-countdown-height: 2px;
   --terminal-composition-underline-color: currentColor;
 }
 
@@ -1163,7 +1164,33 @@
     gap: var(--undo-snackbar-offset);
   }
   .undo-snackbar-stack > .undo-snackbar {
-    position: static;
+    position: relative;
+    inset: auto;
+  }
+  .toast-countdown {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: var(--toast-countdown-height);
+    overflow: hidden;
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    background: var(--accent-20);
+    pointer-events: none;
+  }
+  .toast-countdown-fill {
+    height: 100%;
+    background: var(--accent);
+    transform-origin: left;
+    animation: toast-countdown-drain linear forwards;
+  }
+  @keyframes toast-countdown-drain {
+    from {
+      transform: scaleX(1);
+    }
+    to {
+      transform: scaleX(0);
+    }
   }
   .undo-snackbar-action {
     flex: 0 0 auto;

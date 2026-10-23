@@ -39,6 +39,9 @@ it("토스트를 다시 마운트해도 만료가 연장되지 않고 사라질 
   first.unmount();
   render(<WorkspaceCloseToasts />);
   expect(screen.getByRole("status")).toBeInTheDocument();
+  const fill = screen.getByTestId("toast-countdown").firstElementChild as HTMLElement;
+  expect(fill.style.animationDuration).toBe("5000ms");
+  expect(fill.style.animationDelay).toBe("-4000ms");
   act(() => vi.advanceTimersByTime(1000));
   expect(screen.queryByRole("status")).not.toBeInTheDocument();
   expect(useWorkspaceStore.getState().workspaces).toHaveLength(1);

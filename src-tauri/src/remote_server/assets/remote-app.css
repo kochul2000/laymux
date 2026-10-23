@@ -10,6 +10,7 @@
         pointer-events: none;
       }
       .workspace-close-toast {
+        position: relative;
         display: flex;
         align-items: center;
         gap: 8px;
@@ -22,6 +23,26 @@
       }
       .workspace-close-toast span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
       .workspace-close-toast button { flex: 0 0 auto; color: var(--accent); min-height: 44px; }
+      .toast-countdown {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: var(--toast-countdown-height);
+        overflow: hidden;
+        background: var(--accent-20);
+        pointer-events: none;
+      }
+      .toast-countdown-fill {
+        height: 100%;
+        background: var(--accent);
+        transform-origin: left;
+        animation: toast-countdown-drain linear forwards;
+      }
+      @keyframes toast-countdown-drain {
+        from { transform: scaleX(1); }
+        to { transform: scaleX(0); }
+      }
       #physicalKeyboardToast {
         position: fixed;
         top: calc(env(safe-area-inset-top, 0px) + 56px);
@@ -101,6 +122,7 @@
       #floatingSettingsEditor > select { width: 100%; margin-bottom: 8px; }
       .action-proxy { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
       :root {
+        --toast-countdown-height: 2px;
         color-scheme: dark;
         --bg-base: #1e1e2e;
         --bg-surface: #181825;
