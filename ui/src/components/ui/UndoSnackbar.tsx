@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { ToastCountdown, type ToastCountdownProps } from "./ToastCountdown";
 
 interface UndoSnackbarProps {
   message: string;
@@ -6,6 +7,7 @@ interface UndoSnackbarProps {
   onAction: () => void;
   onDismiss: () => void;
   durationMs?: number | null;
+  countdown?: ToastCountdownProps;
 }
 
 /** Transient, keyboard-accessible feedback for a single reversible UI action. */
@@ -15,7 +17,11 @@ export function UndoSnackbar({
   onAction,
   onDismiss,
   durationMs = 5000,
+  countdown,
 }: UndoSnackbarProps) {
+  const [openedAt] = useState(() => Date.now());
+  const progress =
+    countdown ?? (durationMs === null ? null : { durationMs, expiresAt: openedAt + durationMs });
   useEffect(() => {
     if (durationMs === null) return;
     const timer = window.setTimeout(onDismiss, durationMs);
@@ -36,6 +42,9 @@ export function UndoSnackbar({
       >
         {actionLabel}
       </button>
+      {progress && progress.durationMs > 0 && (
+        <ToastCountdown key={`${progress.expiresAt}:${progress.durationMs}`} {...progress} />
+      )}
     </div>
   );
 }

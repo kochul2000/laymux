@@ -1063,6 +1063,8 @@ dev 빌드의 StrictMode는 TerminalView를 한 번 닫았다 다시 열어서, 
 
 ### 워크스페이스 닫기 유예
 
+PC 숨김·닫기 토스트와 Remote 닫기 토스트는 하단의 얇은 진행 막대로 남은 유예 시간을 표시한다. 표시만 CSS 선형 애니메이션으로 갱신하며, 실제 만료와 복원 처리는 기존 소유자가 유지한다. 닫기 막대는 호스트 만료 시각과 공통 `WORKSPACE_CLOSE_GRACE_MS`를 사용해 늦은 표시·재마운트도 실제 남은 비율부터 시작하고, Remote는 시계 차이를 보정한 남은 기간을 사용한다. 같은 요청의 재조회는 막대를 다시 시작하지 않는다.
+
 Selector와 `workspace.close` 단축키는 `requestWorkspaceClose`를 호출한다. 호스트의 `pendingWorkspaceCloses`에 `{id,name,expiresAt}`를 추가하고 활성 대상이면 공통 전환으로 남은 표시 workspace에 착지한다. 대기 대상은 목록·숨김 shelf·이동 후보에서 제외되지만 실제 `workspaces`와 마운트된 pane은 유지한다. 숨긴 live pane의 자동 종료도 유예한다. PC 닫기 토스트는 `WorkspaceSelectorView` 하단에서 숨김 복원 토스트와 같은 `UndoSnackbar` 모양과 `undo-snackbar-stack`을 공유한다. Remote는 화면 하단 가로 토스트로 같은 대기 목록을 표시한다. 복원은 대기만 취소한다. 각 호스트 타이머는 5초 후 기존 `removeWorkspace`를 호출해 workspace 및 부속 상태를 정리하고 pane unmount로 PTY를 닫는다. 화면 이동·토스트 컴포넌트 unmount·모바일 연결 해제는 이 타이머를 취소하거나 연장하지 않는다. 대기 목록은 영속 스냅샷에 포함하지 않는다([ADR-0354](../adr/0354-workspace-close-undo-grace-period.md)).
 
 ### UI 구조

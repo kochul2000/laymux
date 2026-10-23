@@ -46,6 +46,25 @@ it("호스트 만료 시각을 사용하고 재조회로 유예를 연장하지 
   expect(document.querySelector("[role=status]")).toBeNull();
 });
 
+it("늦게 발견한 닫기는 남은 기간부터 진행 막대를 표시하고 재조회로 되감지 않는다", () => {
+  const toasts = createWorkspaceCloseToasts({
+    getLease: () => "lease",
+    restore: vi.fn(),
+    onError: vi.fn(),
+  });
+  const pending = [{ id: "a", name: "A", expiresAt: 5000 }];
+  toasts.sync(pending, 4000);
+  const fill = document.querySelector<HTMLElement>(".toast-countdown-fill")!;
+  expect(fill).not.toBeNull();
+  expect(fill.style.animationDuration).toBe("5000ms");
+  expect(fill.style.animationDelay).toBe("-4000ms");
+  vi.advanceTimersByTime(500);
+  toasts.sync(pending, 4500);
+  expect(document.querySelector(".toast-countdown-fill")).toBe(fill);
+  vi.advanceTimersByTime(500);
+  expect(document.querySelector("[role=status]")).toBeNull();
+});
+
 it("복원은 열었던 lease로 요청하고 완료 후 토스트를 지운다", async () => {
   const restore = vi.fn().mockResolvedValue(undefined);
   const toasts = createWorkspaceCloseToasts({ getLease: () => "lease", restore, onError: vi.fn() });

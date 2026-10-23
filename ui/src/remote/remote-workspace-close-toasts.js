@@ -1,3 +1,5 @@
+import { WORKSPACE_CLOSE_GRACE_MS } from "../lib/workspace-close-timing.ts";
+
 // The host owns actual close deadlines; this surface only renders undo affordances.
 export function createWorkspaceCloseToasts({ getLease, restore, onError }) {
   const { document, setTimeout, clearTimeout } = globalThis;
@@ -35,6 +37,14 @@ export function createWorkspaceCloseToasts({ getLease, restore, onError }) {
         button.type = "button";
         button.textContent = "Restore";
         button.dataset.workspaceRestore = item.id;
+        const countdown = document.createElement("div");
+        countdown.className = "toast-countdown";
+        countdown.setAttribute("aria-hidden", "true");
+        const fill = document.createElement("div");
+        fill.className = "toast-countdown-fill";
+        fill.style.animationDuration = `${WORKSPACE_CLOSE_GRACE_MS}ms`;
+        fill.style.animationDelay = `${-Math.max(0, WORKSPACE_CLOSE_GRACE_MS - remainingMs)}ms`;
+        countdown.append(fill);
         const entry = {
           element,
           lease,
@@ -54,7 +64,7 @@ export function createWorkspaceCloseToasts({ getLease, restore, onError }) {
             onError(error);
           }
         });
-        element.append(message, button);
+        element.append(message, button, countdown);
         container.append(element);
         entries.set(item.id, entry);
       }
