@@ -175,6 +175,7 @@ pub(super) fn build_remote_navigation_payload(
         "activeWorkspaceId": active_workspace_id,
         "workspaces": workspaces,
         "pendingWorkspaceCloses": workspaces_data.get("pendingWorkspaceCloses").cloned().unwrap_or_else(|| json!([])),
+        "workspaceCloseServerTime": workspaces_data.get("workspaceCloseServerTime").cloned().unwrap_or(Value::Null),
         "activeWorkspace": active_workspace,
         "docks": docks,
         "terminals": terminals,
@@ -1657,7 +1658,7 @@ mod tests {
     fn navigation_excludes_closing_workspaces_and_shares_undo_deadlines() {
         let pending = json!([{ "id": "ws-b", "name": "B", "expiresAt": 123456 }]);
         let payload = build_remote_navigation_payload(
-            &json!({ "activeWorkspaceId": "ws-a", "pendingWorkspaceCloses": pending,
+            &json!({ "activeWorkspaceId": "ws-a", "pendingWorkspaceCloses": pending, "workspaceCloseServerTime": 123000,
                 "workspaces": [
                     { "id": "ws-a", "name": "A", "panes": [] },
                     { "id": "ws-b", "name": "B", "panes": [] }
@@ -1672,5 +1673,6 @@ mod tests {
         assert_eq!(payload["workspaces"].as_array().unwrap().len(), 1);
         assert_eq!(payload["workspaces"][0]["id"], "ws-a");
         assert_eq!(payload["pendingWorkspaceCloses"], pending);
+        assert_eq!(payload["workspaceCloseServerTime"], 123000);
     }
 }

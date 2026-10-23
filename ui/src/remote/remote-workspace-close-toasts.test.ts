@@ -10,6 +10,27 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+it.each([-60000, 60000])("단말 시계가 호스트와 %dms 달라도 5초 복원을 제공한다", async (offset) => {
+  const serverTime = Date.now();
+  vi.setSystemTime(serverTime + offset);
+  const restore = vi.fn().mockResolvedValue(undefined);
+  const toasts = createWorkspaceCloseToasts({ getLease: () => "lease", restore, onError: vi.fn() });
+  const pending = [
+    { id: "a", name: "A", expiresAt: serverTime + 5000 },
+    { id: "b", name: "B", expiresAt: serverTime + 5000 },
+  ];
+  toasts.sync(pending, serverTime);
+  expect(document.querySelector("[role=status]")).not.toBeNull();
+  vi.advanceTimersByTime(4000);
+  toasts.sync(pending, serverTime + 4000);
+  document.querySelector<HTMLButtonElement>('[data-workspace-restore="a"]')!.click();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(restore).toHaveBeenCalledExactlyOnceWith("a", "lease");
+  expect(document.querySelector("[role=status]")).not.toBeNull();
+  vi.advanceTimersByTime(1000);
+  expect(document.querySelector("[role=status]")).toBeNull();
+});
+
 it("호스트 만료 시각을 사용하고 재조회로 유예를 연장하지 않는다", () => {
   const restore = vi.fn();
   const toasts = createWorkspaceCloseToasts({ getLease: () => "lease", restore, onError: vi.fn() });

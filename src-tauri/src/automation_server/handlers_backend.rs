@@ -143,7 +143,7 @@ pub async fn api_docs() -> impl IntoResponse {
             {
                 "method": "POST", "path": "/api/v1/workspaces/{id}/close",
                 "description": "워크스페이스를 목록에서 감추고 5초 동안 복원을 허용한 뒤 실제로 닫는다. 마지막 표시 워크스페이스는 보호한다.",
-                "response": "{ closing: string, pendingWorkspaceCloses: { id: string, name: string, expiresAt: number }[] }"
+                "response": "{ closing: string, pendingWorkspaceCloses: { id: string, name: string, expiresAt: number }[], workspaceCloseServerTime: number }"
             },
             {
                 "method": "POST", "path": "/api/v1/workspaces/{id}/restore-close",

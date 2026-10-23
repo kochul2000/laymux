@@ -575,6 +575,7 @@ const handlers: HandlerMap = {
         activeWorkspaceId,
         workspaceDisplayOrder,
         pendingWorkspaceCloses: useWorkspaceStore.getState().pendingWorkspaceCloses,
+        workspaceCloseServerTime: Date.now(),
       });
     },
     getActive: () => {
@@ -633,6 +634,7 @@ const handlers: HandlerMap = {
       return ok({
         closing: id,
         pendingWorkspaceCloses: useWorkspaceStore.getState().pendingWorkspaceCloses,
+        workspaceCloseServerTime: Date.now(),
       });
     },
     restoreClose: (p) => {
@@ -752,7 +754,8 @@ const handlers: HandlerMap = {
     focusPane: (p) => {
       const ctx = resolveAutomationPane({ ...p, paneIndex: p.index ?? p.paneIndex });
       if ("err" in ctx) return ctx.err;
-      focusWorkspacePane(ctx.ws.id, ctx.paneIndex);
+      if (!focusWorkspacePane(ctx.ws.id, ctx.paneIndex))
+        return err(`Workspace '${ctx.ws.id}' is closing or unavailable`);
       return ok({ focusedPaneIndex: ctx.paneIndex });
     },
     simulateHover: (p) => {
@@ -1331,10 +1334,12 @@ const handlers: HandlerMap = {
         workspaceCtx?.paneIndex ??
         (terminalWorkspaceId ? resolveTerminalPaneIndex(terminalId, terminalWorkspaceId) : -1);
       if (dockCtx) {
-        focusDockPane(dockCtx.dock.position, dockCtx.pane.id);
+        if (!focusDockPane(dockCtx.dock.position, dockCtx.pane.id))
+          return err(`Terminal '${terminalId}' is unavailable`);
       } else if (terminalWorkspaceId && paneIndex >= 0) {
         // The terminal may sit on an inactive stacked layer (ADR-0297).
-        activatePaneLayer(terminalWorkspaceId, toPaneId(terminalId));
+        if (!activatePaneLayer(terminalWorkspaceId, toPaneId(terminalId)))
+          return err(`Workspace '${terminalWorkspaceId}' is closing or unavailable`);
       }
 
       if (terminal) useTerminalStore.getState().setTerminalFocus(terminalId);

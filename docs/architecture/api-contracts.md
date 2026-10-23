@@ -1091,7 +1091,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | POST | `/api/v1/workspaces` | 워크스페이스 생성 (layoutId로 Layout 지정) |
 | PUT | `/api/v1/workspaces/:id` | 이름 변경 |
 | DELETE | `/api/v1/workspaces/:id` | 삭제 |
-| POST | `/api/v1/workspaces/:id/close` | 5초 복원 유예 시작. `{closing,pendingWorkspaceCloses}` 반환 (ADR-0354) |
+| POST | `/api/v1/workspaces/:id/close` | 5초 복원 유예 시작. `{closing,pendingWorkspaceCloses,workspaceCloseServerTime}` 반환 (ADR-0354) |
 | POST | `/api/v1/workspaces/:id/restore-close` | 유예 중 닫기 취소. `{restored}` 반환. 만료·없는 요청은 오류 (ADR-0354) |
 | POST | `/api/v1/workspaces/:id/clear` | 워크스페이스의 모든 TerminalView pane에 Ctrl+L 브로드캐스트. 응답은 pane별 결과(`cleared`/`skipped`/`failed`) |
 | POST | `/api/v1/panes/:paneId/clear` | 격자 또는 dock의 TerminalView pane 하나에 activity별 실제 클리어. busy 정책 결과와 Automation wait cap을 함께 반환 |
@@ -1793,7 +1793,7 @@ Remote 공간순회 제외 상태의 SoT는 PC가 아니라 각 Remote 페이지
 
 Remote page는 workspace navigation과 dock navigation을 별도 토글 패널로 렌더한다. Dock terminal 선택은 workspace 전환을 수행하지 않고 `/remote/v1/terminals/{id}/focus`만 호출한다. 이 endpoint의 frontend bridge `terminals.setFocus`는 dock terminal을 감지하면 desktop dock과 같은 전역 focus(`focusedDock`, `focusedDockPaneId`)를 설정하고 grid focus를 비운다. workspace terminal focus나 workspace 전환 경로는 dock focus를 비워 workspace pane focus가 dock focus에 의해 억제되지 않게 한다. 이어서 기존 remote terminal focus 경로와 동일하게 `notifications.markTerminalRead`로 해당 terminal unread를 읽음 처리한다.
 
-Workspace 닫기는 호스트가 5초 동안 유예하며 `{closing,pendingWorkspaceCloses}`를 반환한다([ADR-0354](../adr/0354-workspace-close-undo-grace-period.md)). 같은 lease gate의 `POST /remote/v1/workspaces/{id}/restore-close`는 `workspaces.restoreClose`로 유예를 취소하고 `{restored}`를 반환한다. 만료·없는 요청은 오류다. navigation의 `pendingWorkspaceCloses`는 `{id,name,expiresAt}` 배열이며 대기 workspace는 선택 목록에서 제외한다. PC·Remote 토스트는 같은 호스트 만료 시각을 사용하고 Remote 연결 종료는 실제 종료 타이머를 취소하지 않는다. Automation `workspaces.remove`/DELETE는 즉시 제거 계약을 유지한다.
+Workspace 닫기는 호스트가 5초 동안 유예하며 `{closing,pendingWorkspaceCloses,workspaceCloseServerTime}`를 반환한다([ADR-0354](../adr/0354-workspace-close-undo-grace-period.md)). 같은 lease gate의 `POST /remote/v1/workspaces/{id}/restore-close`는 `workspaces.restoreClose`로 유예를 취소하고 `{restored}`를 반환한다. 만료·없는 요청은 오류다. navigation의 `pendingWorkspaceCloses`는 `{id,name,expiresAt}` 배열이며 대기 workspace는 선택 목록에서 제외한다. navigation과 workspace 목록 조회는 호스트의 현재 시각 `workspaceCloseServerTime`도 제공한다. Remote는 `expiresAt - workspaceCloseServerTime`을 로컬 만료 시각으로 변환하므로 단말 벽시계 차이로 복원 기회가 사라지거나 늘어나지 않는다. 같은 요청의 재조회는 타이머를 다시 시작하지 않는다. PC·Remote 토스트는 같은 호스트 만료 시각을 사용하고 Remote 연결 종료는 실제 종료 타이머를 취소하지 않는다. 대기 workspace의 terminal/grid focus 요청은 무변경 오류로 반환해 성공 후 알림 읽음 처리로 이어지지 않는다. Automation `workspaces.remove`/DELETE는 즉시 제거 계약을 유지한다.
 
 ### 13.3.1 Remote File Viewer
 

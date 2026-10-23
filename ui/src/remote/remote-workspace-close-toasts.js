@@ -13,15 +13,18 @@ export function createWorkspaceCloseToasts({ getLease, restore, onError }) {
     entries.delete(id);
   }
   return {
-    sync(pending = []) {
+    sync(pending = [], serverTime) {
       const lease = getLease();
+      const localNow = Date.now();
+      const hostNow = Number.isFinite(serverTime) ? serverTime : localNow;
       const current = new Map(pending.map((item) => [item.id, item]));
       for (const [id, entry] of entries) {
         if (current.get(id)?.expiresAt !== entry.expiresAt || entry.lease !== lease) remove(id);
       }
       if (!lease) return;
       for (const item of pending) {
-        if (entries.has(item.id) || item.expiresAt <= Date.now()) continue;
+        const remainingMs = item.expiresAt - hostNow;
+        if (entries.has(item.id) || remainingMs <= 0) continue;
         const element = document.createElement("div");
         element.className = "workspace-close-toast";
         element.setAttribute("role", "status");
@@ -36,10 +39,11 @@ export function createWorkspaceCloseToasts({ getLease, restore, onError }) {
           element,
           lease,
           expiresAt: item.expiresAt,
-          timer: setTimeout(() => remove(item.id), Math.max(0, item.expiresAt - Date.now())),
+          localDeadline: localNow + remainingMs,
+          timer: setTimeout(() => remove(item.id), remainingMs),
         };
         button.addEventListener("click", async () => {
-          if (button.disabled || getLease() !== lease || item.expiresAt <= Date.now()) return;
+          if (button.disabled || getLease() !== lease || entry.localDeadline <= Date.now()) return;
           button.disabled = true;
           try {
             await restore(item.id, lease);

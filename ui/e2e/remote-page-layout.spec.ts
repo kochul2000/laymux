@@ -5,6 +5,7 @@ test("모바일 workspace 닫기 토스트로 복원하고 토스트 만료 후�
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.clock.setFixedTime(Date.now() + 60000);
   const controls = await routeRemoteWithWorkspaces(page, []);
   await page.goto("http://remote.test/remote/#token=test-token");
   await page.locator("#connect").click();
@@ -373,6 +374,7 @@ async function routeRemoteWithWorkspaces(
                 : [paneWithVisibility(paneB1)],
           },
           pendingWorkspaceCloses,
+          workspaceCloseServerTime: Date.now(),
           workspaces: [
             {
               id: "ws-a",
@@ -476,7 +478,9 @@ async function routeRemoteWithWorkspaces(
       } else {
         pendingWorkspaceCloses = pendingWorkspaceCloses.filter((item) => item.id !== id);
       }
-      await route.fulfill({ json: { pendingWorkspaceCloses } });
+      await route.fulfill({
+        json: { pendingWorkspaceCloses, workspaceCloseServerTime: Date.now() },
+      });
       return;
     }
     const closeMatch = url.pathname.match(/^\/remote\/v1\/panes\/([^/]+)\/close$/);

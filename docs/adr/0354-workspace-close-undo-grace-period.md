@@ -1,6 +1,6 @@
 # 0354. 워크스페이스 닫기는 호스트가 소유하는 복원 유예 후 확정한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-23
 - Source: 사용자 요구(PC·모바일 닫기 토스트와 즉시 복원), architecture/overview.md §3.2, architecture/api-contracts.md §13, ADR-0322
 - 관계: ADR-0322의 Remote workspace 닫기 시점과 ADR-0211·ADR-0333의 workspace 닫기 사전 확인을 정정한다. pane 닫기는 유지한다.
@@ -17,6 +17,7 @@
 - PC·Remote의 workspace 닫기는 한 번 누르면 즉시 유예를 시작한다. 사전 두 번 확인 대신 토스트의 복원으로 실수를 되돌린다. 다른 파괴적 작업의 확인 설정은 기존대로 따른다.
 - 대기 중 workspace·pane ID·터미널·오버라이드·작업은 유지한다. 선택 목록과 이동 후보에서는 제외하고 활성 workspace를 닫을 때는 남은 표시 workspace로 착지한다. 마지막 표시 workspace는 닫기 대기에 넣지 않는다.
 - PC는 WorkspaceSelectorView 하단에서 기존 숨김 복원 토스트와 같은 위치·모양으로 닫기 토스트를 표시한다. 숨김·닫기 토스트는 같은 스택에 쌓아 겹치지 않는다. Remote는 화면 하단 가로 토스트를 사용한다. 두 표면은 같은 만료 시각과 대기 목록을 표시한다. 복원은 대기만 취소하며 활성 workspace를 강제로 바꾸지 않는다. 여러 닫기 요청은 각각 토스트를 갖는다.
+- Remote 응답은 호스트 현재 시각도 제공한다. Remote는 호스트 만료까지 남은 기간을 로컬 타이머로 변환하며 단말과 호스트의 벽시계가 같다고 가정하지 않는다. 같은 요청의 재조회로 유예를 연장하지 않는다. 대기 workspace로의 포커스 요청은 상태 변경과 알림 읽음 처리 전에 오류로 거부한다.
 - Remote close는 기존 lease gate 아래 대기 요청을 수행하고, 동일 gate의 restore-close는 취소한다. navigation에는 pendingWorkspaceCloses를 추가하고 대기 workspace는 목록에서 제외한다. Automation의 명시적인 즉시 삭제 workspaces.remove는 유지한다.
 - 대기 상태는 디스크에 저장하지 않는다. 유예 중 호스트 재시작은 아직 제거하지 않은 workspace를 복원한다. 유예 만료 시 기존 제거와 언마운트 정리 경로를 사용한다.
 

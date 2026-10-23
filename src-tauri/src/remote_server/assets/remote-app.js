@@ -376,7 +376,7 @@ import {
               method: "POST", body: JSON.stringify({ leaseId: selectedLeaseId }),
             });
             if (leaseId !== selectedLeaseId) return;
-            workspaceCloseToasts.sync(result.pendingWorkspaceCloses);
+            workspaceCloseToasts.sync(result.pendingWorkspaceCloses, result.workspaceCloseServerTime);
             await loadNavigation(activeTerminalId, { openOutput: closingCurrent });
           },
           saveTemplate: async (workspaceId, name, selectedLeaseId) => {
@@ -9058,7 +9058,7 @@ import {
 
         function installNavigationSnapshot(data, { render = true } = {}) {
           navigationState = data;
-          workspaceCloseToasts.sync(data.pendingWorkspaceCloses);
+          workspaceCloseToasts.sync(data.pendingWorkspaceCloses, data.workspaceCloseServerTime);
           const terminals = data.terminals || [];
           terminalInfoById = new Map(terminals.map((terminalInfo) => [terminalInfo.id, terminalInfo]));
           terminals.forEach((terminalInfo) => ensureRemoteFont(terminalInfo.appearance));
