@@ -181,6 +181,79 @@ describe("bridge timing budget", () => {
 });
 
 describe("handleAutomationRequest", () => {
+  it.each(["terminals", "grid"])(
+    "%s focus는 닫기 대기 workspace를 무변경 오류로 거부한다",
+    (target) => {
+      vi.useFakeTimers();
+      try {
+        useWorkspaceStore.getState().addWorkspace("Closing", "default-layout");
+        const workspace = useWorkspaceStore.getState().workspaces[1];
+        const terminalId = `terminal-${workspace.panes[0].layers[0].id}`;
+        useTerminalStore.getState().registerInstance({
+          id: terminalId,
+          profile: "PowerShell",
+          syncGroup: workspace.id,
+          workspaceId: workspace.id,
+        });
+        const close = handleAutomationRequest({
+          requestId: "closing",
+          category: "action",
+          target: "workspaces",
+          method: "requestClose",
+          params: { id: workspace.id },
+        });
+        expect(close.success).toBe(true);
+        const instances = useTerminalStore.getState().instances;
+        const grid = useGridStore.getState();
+        const dock = useDockStore.getState();
+        const activeWorkspaceId = useWorkspaceStore.getState().activeWorkspaceId;
+        const response = handleAutomationRequest({
+          requestId: "focus-closing",
+          category: "action",
+          target,
+          method: target === "terminals" ? "setFocus" : "focusPane",
+          params:
+            target === "terminals" ? { id: terminalId } : { workspaceId: workspace.id, index: 0 },
+        });
+        expect(response.success).toBe(false);
+        expect(useTerminalStore.getState().instances).toBe(instances);
+        expect(useGridStore.getState()).toBe(grid);
+        expect(useDockStore.getState()).toBe(dock);
+        expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(activeWorkspaceId);
+      } finally {
+        vi.runOnlyPendingTimers();
+        vi.useRealTimers();
+      }
+    },
+  );
+  it("Remote 닫기·복원 bridge는 같은 workspace와 만료를 공유한다", () => {
+    vi.useFakeTimers();
+    try {
+      useWorkspaceStore.getState().addWorkspace("Second", "default-layout");
+      const workspace = useWorkspaceStore.getState().workspaces[1];
+      const call = (method: string) =>
+        handleAutomationRequest({
+          requestId: method,
+          category: "action",
+          target: "workspaces",
+          method,
+          params: { id: workspace.id },
+        });
+      expect(call("requestClose").success).toBe(true);
+      expect(useWorkspaceStore.getState().workspaces[1]).toBe(workspace);
+      expect(useWorkspaceStore.getState().pendingWorkspaceCloses[0].id).toBe(workspace.id);
+      expect(call("restoreClose").success).toBe(true);
+      vi.advanceTimersByTime(5000);
+      expect(useWorkspaceStore.getState().workspaces[1]).toBe(workspace);
+      expect(call("requestClose").success).toBe(true);
+      vi.advanceTimersByTime(5000);
+      expect(useWorkspaceStore.getState().workspaces).toHaveLength(1);
+      expect(call("restoreClose").success).toBe(false);
+    } finally {
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
+  });
   it("템플릿 저장의 source 소실을 오류로 반환하고 다른 workspace는 저장하지 않는다", () => {
     const before = useWorkspaceStore.getState().layouts;
     const result = handleAutomationRequest({

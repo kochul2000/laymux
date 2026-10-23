@@ -141,6 +141,16 @@ pub async fn api_docs() -> impl IntoResponse {
                 "description": "Delete a workspace. Cannot delete the last one."
             },
             {
+                "method": "POST", "path": "/api/v1/workspaces/{id}/close",
+                "description": "워크스페이스를 목록에서 감추고 5초 동안 복원을 허용한 뒤 실제로 닫는다. 마지막 표시 워크스페이스는 보호한다.",
+                "response": "{ closing: string, pendingWorkspaceCloses: { id: string, name: string, expiresAt: number }[], workspaceCloseServerTime: number }"
+            },
+            {
+                "method": "POST", "path": "/api/v1/workspaces/{id}/restore-close",
+                "description": "유예 중인 워크스페이스 닫기를 취소한다. 만료된 요청은 오류로 거부한다.",
+                "response": "{ restored: string }"
+            },
+            {
                 "method": "POST", "path": "/api/v1/workspaces/{id}/clear",
                 "description": "Broadcast a Ctrl+L keypress to every TerminalView pane of a workspace — the same as pressing Ctrl+L in each pane by hand. Panes with no PTY session yet are skipped.",
                 "response": "{ workspaceId: string, cleared: string[], skipped: { terminalId: string, reason: 'notReady' }[], failed: { terminalId: string, error: string }[] }"

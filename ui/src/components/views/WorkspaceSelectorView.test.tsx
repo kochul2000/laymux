@@ -1427,7 +1427,7 @@ describe("WorkspaceSelectorView", () => {
     expect(screen.queryByTestId(/^workspace-close-/)).not.toBeInTheDocument();
   });
 
-  it("removes workspace only after the close button is clicked twice", () => {
+  it("starts the undo grace period on the first close click even with confirmation enabled", () => {
     useWorkspaceStore.getState().addWorkspace("Second", "default-layout");
     render(<WorkspaceSelectorView />);
 
@@ -1438,16 +1438,17 @@ describe("WorkspaceSelectorView", () => {
     fireEvent.click(closeButton);
 
     expect(useWorkspaceStore.getState().workspaces).toHaveLength(2);
-    expect(closeButton).toHaveAttribute("data-confirming", "true");
-    expect(closeButton).toHaveAccessibleName(`Click again to close ${ws2.name}`);
-
-    fireEvent.click(closeButton);
-
-    expect(useWorkspaceStore.getState().workspaces).toHaveLength(1);
-    expect(useWorkspaceStore.getState().workspaces[0].id).toBe("ws-default");
+    expect(useWorkspaceStore.getState().pendingWorkspaceCloses.map((item) => item.id)).toEqual([
+      ws2.id,
+    ]);
+    expect(screen.queryByTestId(`workspace-close-${ws2.id}`)).not.toBeInTheDocument();
+    const toast = screen.getByRole("status");
+    expect(toast).toHaveTextContent("Second");
+    expect(toast.closest(".undo-snackbar-stack")).toBeInTheDocument();
+    expect(toast.closest("[data-testid=workspace-selector]")).toBeInTheDocument();
   });
 
-  it("removes a workspace on the first close click when confirmation is disabled", () => {
+  it("starts the undo grace period on the first close click when confirmation is disabled", () => {
     useSettingsStore.getState().setConfirmDestructiveActions(false);
     useWorkspaceStore.getState().addWorkspace("Second", "default-layout");
     render(<WorkspaceSelectorView />);
@@ -1456,7 +1457,10 @@ describe("WorkspaceSelectorView", () => {
     fireEvent.mouseEnter(screen.getByTestId(`workspace-item-${ws2.id}`));
     fireEvent.click(screen.getByTestId(`workspace-close-${ws2.id}`));
 
-    expect(useWorkspaceStore.getState().workspaces).toHaveLength(1);
+    expect(useWorkspaceStore.getState().workspaces).toHaveLength(2);
+    expect(useWorkspaceStore.getState().pendingWorkspaceCloses.map((item) => item.id)).toEqual([
+      ws2.id,
+    ]);
   });
 
   it("switches to another workspace when active workspace is closed", () => {
@@ -1468,8 +1472,6 @@ describe("WorkspaceSelectorView", () => {
     const item = screen.getByTestId(`workspace-item-${ws2.id}`);
     fireEvent.mouseEnter(item);
     const closeButton = screen.getByTestId(`workspace-close-${ws2.id}`);
-    fireEvent.click(closeButton);
-    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws2.id);
     fireEvent.click(closeButton);
 
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-default");
@@ -1485,7 +1487,6 @@ describe("WorkspaceSelectorView", () => {
     const closeButton = screen.getByTestId(`workspace-close-${ws2.id}`);
     fireEvent.click(closeButton);
     expect(useWorkspaceStore.getState().workspaces).toHaveLength(2);
-    fireEvent.click(closeButton);
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-default");
   });
 
@@ -2725,6 +2726,23 @@ describe("WorkspaceSelectorView", () => {
       expect(screen.getByRole("status")).toHaveTextContent("hidden from the list");
       fireEvent.click(screen.getByTestId("undo-snackbar-action"));
       expect(useUiStore.getState().hiddenWorkspaceIds.has("ws-2")).toBe(false);
+    });
+
+    it("숨김과 닫기 토스트는 selector 하단의 같은 스택과 모양을 사용한다", () => {
+      render(<WorkspaceSelectorView />);
+      fireEvent.mouseEnter(screen.getByTestId("workspace-item-ws-3"));
+      fireEvent.click(screen.getByTestId("workspace-close-ws-3"));
+      fireEvent.mouseEnter(screen.getByTestId("workspace-item-ws-2"));
+      const hideButton = screen.getByTestId("workspace-hide-ws-2");
+      fireEvent.click(hideButton);
+      fireEvent.click(hideButton);
+      const toasts = screen.getAllByRole("status");
+      expect(toasts).toHaveLength(2);
+      expect(toasts[0]).toHaveClass("undo-snackbar");
+      expect(toasts[1]).toHaveClass("undo-snackbar");
+      expect(toasts[0].parentElement).toBe(toasts[1].parentElement);
+      expect(toasts[0].parentElement).toHaveClass("undo-snackbar-stack");
+      expect(toasts[0].closest("[data-testid=workspace-selector]")).toBeInTheDocument();
     });
 
     it("restore all clears hidden workspaces and their evictions, leaving hidden panes alone", () => {

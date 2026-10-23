@@ -40,6 +40,8 @@ import { WorkspaceIdentity } from "./workspace-selector/WorkspaceIdentity";
 import { WorkspaceTerminalSummary } from "./workspace-selector/WorkspaceTerminalSummary";
 import { HiddenItemsShelf } from "./workspace-selector/HiddenItemsShelf";
 import { UndoSnackbar } from "@/components/ui/UndoSnackbar";
+import { WorkspaceCloseToasts } from "./WorkspaceCloseToasts";
+import { requestWorkspaceClose } from "@/lib/workspace-close";
 import { TwoClickConfirmButton } from "@/components/ui/TwoClickConfirmButton";
 import {
   BroomIcon,
@@ -323,14 +325,13 @@ function WorkspaceItem({
                   <PencilIcon size={11} />
                 </button>
                 {canClose && (
-                  <TwoClickConfirmButton
+                  <button
+                    type="button"
                     data-testid={`workspace-close-${ws.id}`}
-                    onConfirm={() => {
+                    onClick={(event) => {
+                      event.stopPropagation();
                       onClose();
                     }}
-                    confirmationEnabled={confirmDestructiveActions}
-                    stopPropagation
-                    confirmLabel={t("item.closeWorkspaceConfirm", { name: ws.name })}
                     className="shrink-0 cursor-pointer rounded p-0.5 leading-none text-[var(--text-secondary)] opacity-50 hover:opacity-100 hover:text-[var(--red)]"
                     style={{
                       background: "transparent",
@@ -339,7 +340,7 @@ function WorkspaceItem({
                     title={t("item.closeWorkspace")}
                   >
                     <XIcon size={11} />
-                  </TwoClickConfirmButton>
+                  </button>
                 )}
               </>
             )}
@@ -842,9 +843,13 @@ export function WorkspaceSelectorView() {
   const sortOrderToggleRef = useRef<HTMLButtonElement>(null);
   const dismissUndo = useCallback(() => setUndoItem(null), []);
 
-  const workspaces = useWorkspaceStore((s) => s.workspaces);
+  const allWorkspaces = useWorkspaceStore((s) => s.workspaces);
+  const pendingCloses = useWorkspaceStore((s) => s.pendingWorkspaceCloses);
+  const workspaces = useMemo(
+    () => allWorkspaces.filter((ws) => !pendingCloses.some((p) => p.id === ws.id)),
+    [allWorkspaces, pendingCloses],
+  );
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
-  const removeWorkspace = useWorkspaceStore((s) => s.removeWorkspace);
   const duplicateWorkspace = useWorkspaceStore((s) => s.duplicateWorkspace);
   const addWorkspace = useWorkspaceStore((s) => s.addWorkspace);
   const movePaneToWorkspace = useWorkspaceStore((s) => s.movePaneToWorkspace);
@@ -1213,7 +1218,7 @@ export function WorkspaceSelectorView() {
               isActive={isActive}
               summary={summary}
               panes={ws.panes}
-              canClose={workspaces.length > 1}
+              canClose={hiddenItems.visibleWorkspaces.length > 1}
               pathEllipsis={pathEllipsis}
               drag={dragContext}
               dropIndicator={dropIndicator}
@@ -1233,7 +1238,7 @@ export function WorkspaceSelectorView() {
               }
               onSelect={() => handleSelectWorkspace(ws.id)}
               onSelectPane={(paneIndex, pane) => handleSelectPane(ws.id, paneIndex, pane)}
-              onClose={() => removeWorkspace(ws.id)}
+              onClose={() => requestWorkspaceClose(ws.id)}
               onDuplicate={() => {
                 const result = duplicateWorkspace(ws.id);
                 if (result) {
@@ -1321,17 +1326,22 @@ export function WorkspaceSelectorView() {
           <NotificationPanel embedded />
         </div>
       )}
-      {undoItem && (
-        <UndoSnackbar
-          key={undoItem.nonce}
-          message={t("hiddenItems.hiddenMessage", { name: undoItem.name })}
-          actionLabel={t("hiddenItems.undo")}
-          onDismiss={dismissUndo}
-          onAction={() => {
-            setWorkspaceHidden(undoItem.id, false, undoItem.paneIds);
-            setUndoItem(null);
-          }}
-        />
+      {(undoItem || pendingCloses.length > 0) && (
+        <div className="undo-snackbar-stack">
+          {undoItem && (
+            <UndoSnackbar
+              key={undoItem.nonce}
+              message={t("hiddenItems.hiddenMessage", { name: undoItem.name })}
+              actionLabel={t("hiddenItems.undo")}
+              onDismiss={dismissUndo}
+              onAction={() => {
+                setWorkspaceHidden(undoItem.id, false, undoItem.paneIds);
+                setUndoItem(null);
+              }}
+            />
+          )}
+          <WorkspaceCloseToasts />
+        </div>
       )}
     </div>
   );

@@ -30,6 +30,42 @@ fn emit_workspace_state_changed(state: &ServerState, source: &str, detail: serde
 
 // -- Workspace endpoints --
 
+pub async fn workspaces_request_close(
+    AxumState(state): AxumState<ServerState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    workspace_close_action(&state, id, "requestClose").await
+}
+
+pub async fn workspaces_restore_close(
+    AxumState(state): AxumState<ServerState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    workspace_close_action(&state, id, "restoreClose").await
+}
+
+async fn workspace_close_action(
+    state: &ServerState,
+    id: String,
+    action: &str,
+) -> impl IntoResponse {
+    match bridge_request(
+        state,
+        "action",
+        "workspaces",
+        action,
+        serde_json::json!({ "id": id }),
+    )
+    .await
+    {
+        Ok(data) => {
+            emit_workspace_state_changed(state, action, serde_json::json!({ "id": id }));
+            (StatusCode::OK, Json(data))
+        }
+        Err(error) => error,
+    }
+}
+
 pub async fn workspaces_list(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
     match bridge_request(&state, "query", "workspaces", "list", serde_json::json!({})).await {
         Ok(data) => (StatusCode::OK, Json(data)),

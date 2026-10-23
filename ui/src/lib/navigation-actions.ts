@@ -53,11 +53,15 @@ export type NavigationStepResult =
 
 /** Sorted (display-order) workspaces + the visible subset, derived from current store state. */
 export function getSortedWorkspaces() {
-  const { workspaces: rawWorkspaces, workspaceDisplayOrder } = useWorkspaceStore.getState();
+  const {
+    workspaces: rawWorkspaces,
+    workspaceDisplayOrder,
+    pendingWorkspaceCloses,
+  } = useWorkspaceStore.getState();
   const workspaceSortOrder = useSettingsStore.getState().workspaceSelector.sortOrder;
   const { notifications } = useNotificationStore.getState();
   const workspaces = sortWorkspaces(
-    rawWorkspaces,
+    rawWorkspaces.filter((ws) => !pendingWorkspaceCloses.some((p) => p.id === ws.id)),
     workspaceSortOrder,
     workspaceDisplayOrder,
     notifications,

@@ -310,7 +310,10 @@ describe("useKeyboardShortcuts", () => {
 
     fireKey("W", { ctrlKey: true, altKey: true });
 
-    expect(useWorkspaceStore.getState().workspaces).toHaveLength(1);
+    expect(useWorkspaceStore.getState().workspaces).toHaveLength(2);
+    expect(useWorkspaceStore.getState().pendingWorkspaceCloses.map((item) => item.id)).toEqual([
+      ws2.id,
+    ]);
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-default");
   });
 
@@ -1660,7 +1663,10 @@ describe("useKeyboardShortcuts", () => {
 
     fireKey("w", { ctrlKey: true, altKey: true });
 
-    expect(useWorkspaceStore.getState().workspaces).toHaveLength(1);
+    expect(useWorkspaceStore.getState().workspaces).toHaveLength(2);
+    expect(useWorkspaceStore.getState().pendingWorkspaceCloses.map((item) => item.id)).toEqual([
+      ws2.id,
+    ]);
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-default");
   });
 
@@ -2105,7 +2111,10 @@ describe("useKeyboardShortcuts", () => {
       expect(useWorkspaceStore.getState().workspaces).toHaveLength(2);
 
       fireKey("W", { ctrlKey: true, shiftKey: true });
-      expect(useWorkspaceStore.getState().workspaces).toHaveLength(1);
+      expect(useWorkspaceStore.getState().workspaces).toHaveLength(2);
+      expect(useWorkspaceStore.getState().pendingWorkspaceCloses.map((item) => item.id)).toEqual([
+        ws2.id,
+      ]);
     });
 
     it("workspace.1 rebound: new combo switches, old default is inert", () => {

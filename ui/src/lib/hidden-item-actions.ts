@@ -16,7 +16,7 @@ export interface SetWorkspaceHiddenResult {
 function getOrderedWorkspaces() {
   const workspaceState = useWorkspaceStore.getState();
   return sortWorkspaces(
-    workspaceState.workspaces,
+    workspaceState.getOrderedWorkspaces(),
     useSettingsStore.getState().workspaceSelector.sortOrder,
     workspaceState.workspaceDisplayOrder,
     useNotificationStore.getState().notifications,

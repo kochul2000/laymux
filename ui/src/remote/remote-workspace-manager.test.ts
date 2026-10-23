@@ -60,7 +60,7 @@ it("롱클릭 진입은 메뉴 동작 목록 대신 이름 변경 입력에 바�
   manager.close();
 });
 
-it("워크스페이스 닫기는 두 번 활성화하고 마지막 workspace는 비활성화한다", async () => {
+it("워크스페이스 닫기는 한 번에 유예를 요청하고 마지막 workspace는 비활성화한다", async () => {
   const remove = vi.fn().mockResolvedValue(undefined);
   const manager = createWorkspaceManager({
     getLease: () => "lease-1",
@@ -74,9 +74,6 @@ it("워크스페이스 닫기는 두 번 활성화하고 마지막 workspace는 
   const button = document.querySelector<HTMLButtonElement>(
     '#workspaceManager [data-workspace-action="remove"]',
   )!;
-  button.click();
-  expect(remove).not.toHaveBeenCalled();
-  expect(button.dataset.confirming).toBe("true");
   button.click();
   await vi.waitFor(() => expect(remove).toHaveBeenCalledExactlyOnceWith("ws-2", "lease-1"));
   manager.open({ id: "ws-2", name: "Beta" }, false, document.createElement("button"), {

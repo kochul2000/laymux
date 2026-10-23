@@ -62,7 +62,13 @@ export function useHiddenTerminalAutoClose() {
         hiddenPaneIds: ui.hiddenPaneIds,
         hiddenWorkspaceIds: ui.hiddenWorkspaceIds,
         activeWorkspaceId: ws.activeWorkspaceId,
-        inUsePaneIds: new Set(Object.keys(usePaneRevealStore.getState().requestCounts)),
+        inUsePaneIds: new Set([
+          ...Object.keys(usePaneRevealStore.getState().requestCounts),
+          ...ws.workspaces
+            .filter((w) => ws.pendingWorkspaceCloses.some((p) => p.id === w.id))
+            .flatMap((w) => allLayerIds(w.panes))
+            .filter((paneId) => !ui.evictedPaneIds.has(paneId)),
+        ]),
       });
 
       const { hiddenSince, evictPaneIds } = advanceHiddenTimers({
@@ -143,7 +149,8 @@ export function useHiddenTerminalAutoClose() {
     const unsubscribeWorkspaces = useWorkspaceStore.subscribe((state, previous) => {
       if (
         state.activeWorkspaceId !== previous.activeWorkspaceId ||
-        state.workspaces !== previous.workspaces
+        state.workspaces !== previous.workspaces ||
+        state.pendingWorkspaceCloses !== previous.pendingWorkspaceCloses
       ) {
         evaluate();
       }

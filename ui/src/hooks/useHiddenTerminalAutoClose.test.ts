@@ -61,7 +61,11 @@ describe("useHiddenTerminalAutoClose", () => {
     });
     useTerminalStore.getState().updateInstanceInfo("terminal-p2", { sessionReady: true });
     // Active workspace is wsA; wsB is in the background and eligible for eviction.
-    useWorkspaceStore.setState({ workspaces: [wsA, wsB], activeWorkspaceId: "wsA" });
+    useWorkspaceStore.setState({
+      workspaces: [wsA, wsB],
+      activeWorkspaceId: "wsA",
+      pendingWorkspaceCloses: [],
+    });
     vi.mocked(checkpointAndCloseHiddenTerminals).mockImplementation(async (terminalIds) => ({
       closedTerminalIds: [...terminalIds],
       failedTerminalIds: [],
@@ -70,6 +74,20 @@ describe("useHiddenTerminalAutoClose", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("닫기 대기 중 숨긴 pane도 자동 종료하지 않는다", async () => {
+    useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 1 });
+    useUiStore.getState().togglePaneHidden("p2");
+    useWorkspaceStore.setState({
+      pendingWorkspaceCloses: [{ id: "wsB", name: "B", expiresAt: 5000 }],
+    });
+    renderHook(() => useHiddenTerminalAutoClose());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4999);
+    });
+    expect(checkpointAndCloseHiddenTerminals).not.toHaveBeenCalled();
+    expect(areHiddenPaneIdsEligible(["p2"])).toBe(false);
   });
 
   it("characterizes repeated failed eviction across two hours without revisiting the pane", async () => {

@@ -261,6 +261,10 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
             "/remote/v1/workspaces/{id}/close",
             post(remote_workspace_close),
         )
+        .route(
+            "/remote/v1/workspaces/{id}/restore-close",
+            post(super::pane_routes::remote_workspace_restore_close),
+        )
         .route("/remote/v1/terminals", get(remote_terminals_list))
         .route(
             "/remote/v1/terminals/{id}/worktrees",
