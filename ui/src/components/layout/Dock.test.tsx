@@ -20,6 +20,10 @@ vi.mock("@/lib/tauri-api", () => ({
 
 // Capture viewConfig passed to ViewRenderer
 const capturedViewConfigs: (Record<string, unknown> | undefined)[] = [];
+const restartPaneViewMock = vi.fn().mockResolvedValue(true);
+vi.mock("@/lib/pane-restart", () => ({
+  restartPaneView: (paneId: string) => restartPaneViewMock(paneId),
+}));
 vi.mock("@/components/views/ViewRenderer", () => ({
   ViewRenderer: (props: {
     viewType: string | null;
@@ -840,16 +844,14 @@ describe("Dock restart wiring (ADR-0113)", () => {
       />,
     );
 
-  it("routes Restart View through the store with the pane's id", () => {
+  it("routes Restart View through the checkpoint action with the pane's id", () => {
+    restartPaneViewMock.mockClear();
     renderDock();
     // Arm, then confirm (ADR-0333).
     fireEvent.click(screen.getByTestId("pane-control-restart"));
     fireEvent.click(screen.getByTestId("pane-control-restart"));
 
-    expect(useTerminalRestartStore.getState().requests["dp-term"]).toMatchObject({
-      epoch: 1,
-      fresh: true,
-    });
+    expect(restartPaneViewMock).toHaveBeenCalledExactlyOnceWith("dp-term");
   });
 
   it("passes a request made outside the component down to the view", () => {

@@ -289,8 +289,19 @@ pub async fn layouts_export(
 
 // -- Grid endpoints --
 
-pub async fn grid_get_state(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
-    match bridge_request(&state, "query", "grid", "getState", serde_json::json!({})).await {
+pub async fn grid_get_state(
+    AxumState(state): AxumState<ServerState>,
+    Query(query): Query<WorkspaceScopeQuery>,
+) -> impl IntoResponse {
+    match bridge_request(
+        &state,
+        "query",
+        "grid",
+        "getState",
+        serde_json::json!({"workspaceId": query.workspace_id}),
+    )
+    .await
+    {
         Ok(data) => (StatusCode::OK, Json(data)),
         Err(e) => e,
     }
@@ -323,7 +334,7 @@ pub async fn grid_focus_pane(
         "action",
         "grid",
         "focusPane",
-        serde_json::json!({ "index": body.pane_index }),
+        serde_json::json!({ "index": body.pane_index, "paneId": body.pane_id, "workspaceId": body.workspace_id }),
     )
     .await
     {
@@ -356,8 +367,7 @@ pub async fn panes_split(
     AxumState(state): AxumState<ServerState>,
     Json(body): Json<SplitPaneBody>,
 ) -> impl IntoResponse {
-    let mut params =
-        serde_json::json!({ "paneIndex": body.pane_index, "direction": body.direction });
+    let mut params = serde_json::json!({ "paneIndex": body.pane_index, "paneId": body.pane_id, "workspaceId": body.workspace_id, "direction": body.direction });
     if let Some(profile) = body.profile {
         params["profile"] = serde_json::Value::String(profile);
     }
@@ -376,7 +386,7 @@ pub async fn panes_stack(
     AxumState(state): AxumState<ServerState>,
     Json(body): Json<StackPaneBody>,
 ) -> impl IntoResponse {
-    let mut params = serde_json::json!({ "paneIndex": body.pane_index });
+    let mut params = serde_json::json!({ "paneIndex": body.pane_index, "paneId": body.pane_id, "workspaceId": body.workspace_id });
     if let Some(view_type) = body.view_type {
         params["viewType"] = serde_json::Value::String(view_type);
     }
@@ -437,7 +447,7 @@ fn layer_target_params(
     }
 }
 
-/// Move a layer onto a slot of the active workspace (ADR-0298).
+/// Move a layer onto a slot of its owning workspace (ADR-0298).
 pub async fn panes_move_layer(
     AxumState(state): AxumState<ServerState>,
     Json(body): Json<MoveLayerBody>,
@@ -450,6 +460,7 @@ pub async fn panes_move_layer(
     if let Some(index) = body.index {
         params["index"] = serde_json::json!(index);
     }
+    params["workspaceId"] = serde_json::json!(body.workspace_id);
     match bridge_request(&state, "action", "panes", "moveLayer", params).await {
         Ok(data) => (StatusCode::OK, Json(data)),
         Err(e) => e,
@@ -472,6 +483,7 @@ pub async fn panes_extract_layer(
         Err(e) => return e,
     };
     params["direction"] = serde_json::Value::String(body.direction);
+    params["workspaceId"] = serde_json::json!(body.workspace_id);
     match bridge_request(&state, "action", "panes", "extractLayer", params).await {
         Ok(data) => (StatusCode::OK, Json(data)),
         Err(e) => e,
@@ -484,6 +496,7 @@ pub async fn panes_merge(
     Json(body): Json<MergePanesBody>,
 ) -> impl IntoResponse {
     let params = serde_json::json!({
+        "workspaceId": body.workspace_id,
         "sourceIndex": body.source_index,
         "targetIndex": body.target_index,
     });
@@ -499,7 +512,7 @@ pub async fn panes_move_to_workspace(
     Path(index): Path<usize>,
     Json(body): Json<MovePaneToWorkspaceBody>,
 ) -> impl IntoResponse {
-    let params = serde_json::json!({ "paneIndex": index, "workspaceId": body.workspace_id });
+    let params = serde_json::json!({ "paneIndex": index, "paneId": body.pane_id, "sourceWorkspaceId": body.source_workspace_id, "workspaceId": body.workspace_id });
     match bridge_request(&state, "action", "panes", "moveToWorkspace", params).await {
         Ok(data) => (StatusCode::OK, Json(data)),
         Err(e) => e,
@@ -511,7 +524,7 @@ pub async fn panes_remove(
     Path(index): Path<usize>,
     Query(query): Query<RemovePaneQuery>,
 ) -> impl IntoResponse {
-    let mut params = serde_json::json!({ "paneIndex": index });
+    let mut params = serde_json::json!({ "paneIndex": index, "paneId": query.pane_id, "workspaceId": query.workspace_id });
     if let Some(layer_id) = query.layer_id {
         params["layerId"] = serde_json::Value::String(layer_id);
     }
@@ -549,7 +562,7 @@ pub async fn panes_resize(
         "action",
         "panes",
         "resize",
-        serde_json::json!({ "paneIndex": index, "delta": delta }),
+        serde_json::json!({ "paneIndex": index, "paneId": body.get("paneId"), "workspaceId": body.get("workspaceId"), "delta": delta }),
     )
     .await
     {
@@ -571,7 +584,7 @@ pub async fn panes_set_view(
         "action",
         "panes",
         "setView",
-        serde_json::json!({ "paneIndex": index, "view": view_config }),
+        serde_json::json!({ "paneIndex": index, "paneId": body.pane_id, "workspaceId": body.workspace_id, "view": view_config }),
     )
     .await
     {

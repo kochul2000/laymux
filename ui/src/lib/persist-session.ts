@@ -57,7 +57,14 @@ export function setPreparingUpdate(value: boolean): void {
 
 export interface SessionCheckpointOptions {
   reason?:
-    "mutation" | "completion" | "workspaceEntry" | "watchdog" | "eviction" | "close" | "update";
+    | "mutation"
+    | "completion"
+    | "workspaceEntry"
+    | "watchdog"
+    | "eviction"
+    | "close"
+    | "update"
+    | "restart";
   requireConclusive?: boolean;
   terminalIds?: readonly string[];
 }

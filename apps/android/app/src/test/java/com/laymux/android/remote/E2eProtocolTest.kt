@@ -5,6 +5,7 @@ import com.laymux.android.pairing.StoredPairing
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Arrays
@@ -467,7 +468,7 @@ class E2eProtocolTest {
         val response = client.postWithRetry(
             "https://relay.example/",
             "/api/android/e2e/session/challenge",
-            "{\"exact\":true}",
+            E2eHttpBody.json("{\"exact\":true}"),
             1024,
             attempts = 2,
             invalidatesSession = false,
@@ -701,7 +702,217 @@ class E2eProtocolTest {
      */
     @Test
     fun compatVersionIsPinnedToTheSharedContractNumber() {
-        assertEquals(1, E2eProtocol.COMPAT_VERSION)
+        // 2: RPC 요청 binary envelope (ADR-0351).
+        assertEquals(2, E2eProtocol.COMPAT_VERSION)
+    }
+
+    @Test
+    fun rpcRequestEnvelopeIsTheBinaryLayoutAroundAnUnchangedAead() {
+        val requestKey = ByteArray(32) { 1 }
+        val session = RemoteSession(
+            "https://relay.example/",
+            "desktop-7",
+            "YGFiY2RlZmdoaWprbG1ubw",
+            1_000,
+            requestKey.copyOf(),
+            ByteArray(32) { 2 },
+            nowEpochSeconds = { 100 },
+        )
+        val plaintext = "{\"kind\":\"test\"}"
+        val envelope = session.prepareRequest(plaintext).envelope
+
+        assertEquals(31, E2eProtocol.RPC_ENVELOPE_PREFIX_BYTES)
+        assertEquals(2.toByte(), envelope[0])
+        assertEquals(
+            "YGFiY2RlZmdoaWprbG1ubw",
+            String(envelope.copyOfRange(1, 23), Charsets.US_ASCII),
+        )
+        assertArrayEquals(ByteArray(8), envelope.copyOfRange(23, 31))
+        val ciphertext = envelope.copyOfRange(31, envelope.size)
+        assertEquals(plaintext.length + E2eProtocol.GCM_TAG_BYTES, ciphertext.size)
+        // The AEAD is exactly what the JSON envelope carried, minus base64.
+        assertArrayEquals(
+            plaintext.toByteArray(),
+            E2eProtocol.decrypt(
+                requestKey,
+                E2eProtocol.A2D_AAD_DOMAIN,
+                "desktop-7",
+                "YGFiY2RlZmdoaWprbG1ubw",
+                0,
+                E2eProtocol.encode(ciphertext),
+            ),
+        )
+        // The instance id is not on the wire but still bound by the AAD.
+        assertThrows(E2eProtocolException::class.java) {
+            E2eProtocol.decrypt(
+                requestKey,
+                E2eProtocol.A2D_AAD_DOMAIN,
+                "desktop-8",
+                "YGFiY2RlZmdoaWprbG1ubw",
+                0,
+                E2eProtocol.encode(ciphertext),
+            )
+        }
+        session.close()
+        Arrays.fill(requestKey, 0)
+    }
+
+    @Test
+    fun rpcRequestEnvelopeEncodesTheSequenceBigEndian() {
+        val envelope = E2eProtocol.rpcRequestEnvelope(
+            "YGFiY2RlZmdoaWprbG1ubw",
+            0x0001_0203_0405_0607L,
+            ByteArray(E2eProtocol.GCM_TAG_BYTES) { 9 },
+        )
+        assertArrayEquals(byteArrayOf(0, 1, 2, 3, 4, 5, 6, 7), envelope.copyOfRange(23, 31))
+        assertEquals(31 + E2eProtocol.GCM_TAG_BYTES, envelope.size)
+        assertThrows(IllegalArgumentException::class.java) {
+            E2eProtocol.rpcRequestEnvelope("short", 0, ByteArray(16))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            E2eProtocol.rpcRequestEnvelope(
+                "YGFiY2RlZmdoaWprbG1ubw",
+                E2eProtocol.MAX_SEQUENCE + 1,
+                ByteArray(16),
+            )
+        }
+    }
+
+    @Test
+    fun rpcPostsBinaryWithTheInstanceHeaderOnCloudAndDirect() {
+        for ((transport, expectedUrl) in listOf(
+            E2eTransport.cloud("https://relay.example/") to
+                "https://relay.example/api/android/e2e/rpc/binary",
+            E2eTransport.tailscale("http://100.64.0.1:19280/remote/") to
+                "http://100.64.0.1:19280/remote/v1/e2e/rpc",
+        )) {
+            val responseKey = ByteArray(32) { 2 }
+            val sent = mutableListOf<RecordingConnection>()
+            val client = E2eRemoteClient(
+                connectionFactory = { uri ->
+                    RecordingConnection(
+                        uri.toURL(),
+                        mutableListOf(),
+                        failResponse = false,
+                        responseBody = okResponseEnvelope(responseKey, 0),
+                    ).also(sent::add)
+                },
+                nowEpochSeconds = { 100 },
+                rpcRetryWait = {},
+            )
+            val session = RemoteSession(
+                transport.endpoint,
+                "desktop-7",
+                "YGFiY2RlZmdoaWprbG1ubw",
+                1_000,
+                ByteArray(32) { 1 },
+                responseKey.copyOf(),
+                nowEpochSeconds = { 100 },
+                transport = transport,
+            )
+            val pending = session.prepareRequest("{\"kind\":\"test\"}")
+
+            assertEquals("ok", client.resumePending(session)?.getString("kind"))
+            val connection = sent.single()
+            assertEquals(expectedUrl, connection.url.toString())
+            assertEquals("POST", connection.requestMethod)
+            assertEquals("application/octet-stream", connection.sentContentType)
+            assertEquals("application/json", connection.sentAccept)
+            assertEquals("desktop-7", connection.sentInstanceHeader)
+            assertEquals(pending.envelope.size.toLong(), connection.sentFixedLength)
+            assertArrayEquals(pending.envelope, connection.sentBody)
+            session.close()
+            Arrays.fill(responseKey, 0)
+        }
+    }
+
+    @Test
+    fun rpcRetryResendsTheExactBinaryEnvelope() {
+        val responseKey = ByteArray(32) { 2 }
+        val sent = mutableListOf<RecordingConnection>()
+        val client = E2eRemoteClient(
+            connectionFactory = { uri ->
+                RecordingConnection(
+                    uri.toURL(),
+                    mutableListOf(),
+                    failResponse = sent.size < 3,
+                    responseBody = okResponseEnvelope(responseKey, 0),
+                ).also(sent::add)
+            },
+            nowEpochSeconds = { 100 },
+            rpcRetryWait = {},
+        )
+        val session = RemoteSession(
+            "https://relay.example/",
+            "desktop-7",
+            "YGFiY2RlZmdoaWprbG1ubw",
+            1_000,
+            ByteArray(32) { 1 },
+            responseKey.copyOf(),
+            nowEpochSeconds = { 100 },
+        )
+
+        assertEquals("ok", client.rpc(session, JSONObject().put("kind", "test")).getString("kind"))
+        assertEquals(4, sent.size)
+        sent.forEach { connection ->
+            assertArrayEquals(sent.first().sentBody, connection.sentBody)
+            assertEquals("desktop-7", connection.sentInstanceHeader)
+        }
+        session.close()
+        Arrays.fill(responseKey, 0)
+    }
+
+    @Test
+    fun handshakePostsStayJsonWithoutTheInstanceHeader() {
+        val sent = mutableListOf<RecordingConnection>()
+        val client = E2eRemoteClient(
+            connectionFactory = { uri ->
+                RecordingConnection(uri.toURL(), mutableListOf(), failResponse = false)
+                    .also(sent::add)
+            },
+        )
+        client.postWithRetry(
+            "https://relay.example/",
+            "/api/android/e2e/session/challenge",
+            E2eHttpBody.json("{\"exact\":true}"),
+            1024,
+            attempts = 1,
+            invalidatesSession = false,
+        )
+        val connection = sent.single()
+        assertEquals("application/json", connection.sentContentType)
+        assertEquals(null, connection.sentInstanceHeader)
+        assertEquals("{\"exact\":true}", String(connection.sentBody, Charsets.UTF_8))
+    }
+
+    private fun okResponseEnvelope(responseKey: ByteArray, sequence: Long): String {
+        val responsePlaintext = JSONObject()
+            .put("version", E2eProtocol.VERSION)
+            .put("expiresAt", 1_000)
+            .put("response", JSONObject().put("kind", "ok"))
+            .toString()
+            .toByteArray()
+        return try {
+            JSONObject()
+                .put("version", E2eProtocol.VERSION)
+                .put("instanceId", "desktop-7")
+                .put("sessionId", "YGFiY2RlZmdoaWprbG1ubw")
+                .put("sequence", sequence)
+                .put(
+                    "ciphertext",
+                    E2eProtocol.encrypt(
+                        responseKey,
+                        E2eProtocol.D2A_AAD_DOMAIN,
+                        "desktop-7",
+                        "YGFiY2RlZmdoaWprbG1ubw",
+                        sequence,
+                        responsePlaintext,
+                    ),
+                )
+                .toString()
+        } finally {
+            Arrays.fill(responsePlaintext, 0)
+        }
     }
 
     @Test
@@ -793,6 +1004,147 @@ class E2eProtocolTest {
         assertEquals(2, requestBodies.size)
         assertEquals(100, now.get())
         session.close()
+    }
+
+    private fun scriptedRpcClient(
+        steps: List<RpcStep>,
+        sent: MutableList<RpcStep>,
+        responseBody: String = "{}",
+        onRetryWait: () -> Unit = {},
+    ): E2eRemoteClient = E2eRemoteClient(
+        connectionFactory = { uri ->
+            val step = steps[sent.size]
+            sent += step
+            ScriptedConnection(uri.toURL(), step, responseBody)
+        },
+        nowEpochSeconds = { 100 },
+        rpcRetryWait = onRetryWait,
+    )
+
+    private fun rpcSession(transport: E2eTransport, responseKey: ByteArray) = RemoteSession(
+        transport.endpoint,
+        "desktop-7",
+        "YGFiY2RlZmdoaWprbG1ubw",
+        1_000,
+        ByteArray(32) { 1 },
+        responseKey.copyOf(),
+        nowEpochSeconds = { 100 },
+        transport = transport,
+    )
+
+    @Test
+    fun repeatedBodyWriteFailuresStopTheRetryLoopAndInvalidateTheSession() {
+        val sent = mutableListOf<RpcStep>()
+        var waits = 0
+        // Without the cap this would loop until the session deadline.
+        val client = scriptedRpcClient(List(50) { RpcStep.WRITE_FAILS }, sent, onRetryWait = {
+            waits += 1
+        })
+        val session = rpcSession(E2eTransport.cloud("https://relay.example/"), ByteArray(32) { 2 })
+
+        val error = assertThrows(E2eTransportException::class.java) {
+            client.rpc(session, JSONObject().put("kind", "test"))
+        }
+
+        assertEquals(E2eRemoteClient.RPC_BODY_WRITE_FAILURE_LIMIT, sent.size)
+        assertEquals(0, waits)
+        assertEquals(false, error.retryable)
+        assertEquals(true, error.invalidatesSession)
+        assertEquals(E2eTransportFailureKind.OTHER, error.failureKind)
+        assertTrue((error.cause as E2eTransportException).bodyWriteFailed)
+        session.close()
+    }
+
+    @Test
+    fun bodyWriteFailuresAreCountedAcrossRetryBatches() {
+        val sent = mutableListOf<RpcStep>()
+        var waits = 0
+        val client = scriptedRpcClient(
+            listOf(
+                RpcStep.WRITE_FAILS,
+                RpcStep.RESPONSE_FAILS,
+                RpcStep.RESPONSE_FAILS,
+                RpcStep.WRITE_FAILS,
+                RpcStep.OK,
+            ),
+            sent,
+            onRetryWait = { waits += 1 },
+        )
+        val session = rpcSession(E2eTransport.cloud("https://relay.example/"), ByteArray(32) { 2 })
+
+        val error = assertThrows(E2eTransportException::class.java) {
+            client.rpc(session, JSONObject().put("kind", "test"))
+        }
+
+        // Response-phase losses keep the existing retry; the second body
+        // failure of the same request ends it.
+        assertEquals(4, sent.size)
+        assertEquals(1, waits)
+        assertEquals(true, error.invalidatesSession)
+        session.close()
+    }
+
+    @Test
+    fun directRetriesOneBodyWriteFailureWithoutFallingBack() {
+        val responseKey = ByteArray(32) { 2 }
+        val sent = mutableListOf<RpcStep>()
+        val client = scriptedRpcClient(
+            listOf(RpcStep.WRITE_FAILS, RpcStep.OK),
+            sent,
+            responseBody = okResponseEnvelope(responseKey, 0),
+        )
+        val session = rpcSession(
+            E2eTransport.tailscale("http://100.64.0.1:19280/remote/"),
+            responseKey,
+        )
+
+        assertEquals("ok", client.rpc(session, JSONObject().put("kind", "test")).getString("kind"))
+        assertEquals(listOf(RpcStep.WRITE_FAILS, RpcStep.OK), sent)
+        session.close()
+        Arrays.fill(responseKey, 0)
+    }
+
+    @Test
+    fun directRepeatedBodyWriteFailureReestablishesInsteadOfFallingBackToCloud() {
+        val sent = mutableListOf<RpcStep>()
+        val transport = E2eTransport.tailscale("http://100.64.0.1:19280/remote/")
+        val client = scriptedRpcClient(List(10) { RpcStep.WRITE_FAILS }, sent)
+        val session = rpcSession(transport, ByteArray(32) { 2 })
+
+        val error = assertThrows(E2eTransportException::class.java) {
+            client.rpc(session, JSONObject().put("kind", "test"))
+        }
+
+        assertEquals(E2eRemoteClient.RPC_BODY_WRITE_FAILURE_LIMIT, sent.size)
+        assertEquals(true, error.invalidatesSession)
+        // Re-establishing runs the Direct-first probe again, which still
+        // falls back to Cloud when the tailnet is really gone.
+        assertEquals(
+            false,
+            E2eTransportPolicy.shouldFallbackActiveSession(transport.kind, error.failureKind),
+        )
+        session.close()
+    }
+
+    @Test
+    fun handshakeBodyWriteFailureStaysANetworkFailure() {
+        val sent = mutableListOf<RpcStep>()
+        val client = scriptedRpcClient(List(4) { RpcStep.WRITE_FAILS }, sent)
+
+        val error = assertThrows(E2eTransportException::class.java) {
+            client.postWithRetry(
+                "http://100.64.0.1:19280/remote/",
+                "/remote/v1/e2e/session/challenge",
+                E2eHttpBody.json("{}"),
+                1024,
+                attempts = 2,
+                invalidatesSession = false,
+            )
+        }
+
+        assertEquals(2, sent.size)
+        assertEquals(E2eTransportFailureKind.NETWORK, error.failureKind)
+        assertTrue(E2eTransportPolicy.shouldFallbackToCloud(error))
     }
 
     @Test
@@ -965,6 +1317,40 @@ class E2eProtocolTest {
         override fun usingProxy(): Boolean = false
     }
 
+    private enum class RpcStep { OK, WRITE_FAILS, RESPONSE_FAILS }
+
+    /** Connects, then fails while the body is written, while the response is read, or not at all. */
+    private class ScriptedConnection(
+        url: URL,
+        private val step: RpcStep,
+        private val responseBody: String,
+    ) : HttpURLConnection(url) {
+        override fun getOutputStream(): OutputStream = object : OutputStream() {
+            override fun write(b: Int) {
+                if (step == RpcStep.WRITE_FAILS) throw IOException("simulated connection reset")
+            }
+
+            override fun write(b: ByteArray, off: Int, len: Int) {
+                if (step == RpcStep.WRITE_FAILS) throw IOException("simulated connection reset")
+            }
+        }
+
+        override fun getResponseCode(): Int {
+            check(step != RpcStep.WRITE_FAILS) { "status read after a failed body write" }
+            if (step == RpcStep.RESPONSE_FAILS) throw IOException("simulated response loss")
+            return HTTP_OK
+        }
+
+        override fun getInputStream(): ByteArrayInputStream =
+            ByteArrayInputStream(responseBody.toByteArray())
+
+        override fun connect() = Unit
+
+        override fun disconnect() = Unit
+
+        override fun usingProxy(): Boolean = false
+    }
+
     private class RecordingConnection(
         url: URL,
         private val requestBodies: MutableList<String>,
@@ -974,11 +1360,27 @@ class E2eProtocolTest {
         private val requestObserver: ((String) -> Unit)? = null,
     ) : HttpURLConnection(url) {
         private val request = ByteArrayOutputStream()
+        var sentBody = ByteArray(0)
+            private set
+        var sentContentType: String? = null
+            private set
+        var sentAccept: String? = null
+            private set
+        var sentInstanceHeader: String? = null
+            private set
+        var sentFixedLength = -1L
+            private set
 
         override fun getOutputStream(): ByteArrayOutputStream = request
 
         override fun getResponseCode(): Int {
-            val body = request.toString(Charsets.UTF_8.name())
+            sentBody = request.toByteArray()
+            sentContentType = getRequestProperty("Content-Type")
+            sentAccept = getRequestProperty("Accept")
+            sentInstanceHeader = getRequestProperty(E2eProtocol.INSTANCE_HEADER)
+            sentFixedLength = fixedContentLengthLong
+            // ISO-8859-1 keeps binary bodies byte-exact for equality checks.
+            val body = request.toString(Charsets.ISO_8859_1.name())
             requestBodies += body
             requestObserver?.invoke(body)
             onResponseCode()

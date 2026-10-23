@@ -23,9 +23,13 @@ internal data class VerifiedChallenge(
     val challengeExpiresAtEpochSeconds: Long,
 )
 
-internal data class PendingRpc(
+/**
+ * One prepared RPC request. [envelope] is the exact binary request body
+ * (ADR-0351); retries resend these same bytes, never a new sequence.
+ */
+internal class PendingRpc(
     val sequence: Long,
-    val envelopeJson: String,
+    val envelope: ByteArray,
 )
 
 internal class RemoteSession internal constructor(
@@ -63,22 +67,22 @@ internal class RemoteSession internal constructor(
             throw E2eProtocolException("보안 세션 sequence를 모두 사용했습니다.", invalidatesSession = true)
         }
         JSONObject(plaintextJson)
-        val ciphertext = E2eProtocol.encrypt(
-            requestKey,
-            E2eProtocol.A2D_AAD_DOMAIN,
-            instanceId,
-            sessionId,
-            nextSequence,
-            plaintextJson.toByteArray(StandardCharsets.UTF_8),
-        )
+        val plaintext = plaintextJson.toByteArray(StandardCharsets.UTF_8)
+        val ciphertext = try {
+            E2eProtocol.seal(
+                requestKey,
+                E2eProtocol.A2D_AAD_DOMAIN,
+                instanceId,
+                sessionId,
+                nextSequence,
+                plaintext,
+            )
+        } finally {
+            Arrays.fill(plaintext, 0)
+        }
         return PendingRpc(
             sequence = nextSequence,
-            envelopeJson =
-                "{\"version\":${E2eProtocol.VERSION}," +
-                    "\"instanceId\":\"$instanceId\"," +
-                    "\"sessionId\":\"$sessionId\"," +
-                    "\"sequence\":$nextSequence," +
-                    "\"ciphertext\":\"$ciphertext\"}",
+            envelope = E2eProtocol.rpcRequestEnvelope(sessionId, nextSequence, ciphertext),
         ).also { inFlight = it }
     }
 
@@ -221,7 +225,19 @@ internal object E2eProtocol {
     // desktop↔앱 같은-릴리즈 계약의 호환 번호 (ADR-0172). 비호환 변경이
     // 실릴 때만 1씩 올린다 — 릴리즈마다 올리지 않는다. desktop의
     // COMPAT_VERSION(android_e2e/mod.rs)과 항상 같은 값이어야 한다.
-    const val COMPAT_VERSION = 1
+    // 2: RPC 요청이 binary envelope로 바뀌었다 (ADR-0351).
+    const val COMPAT_VERSION = 2
+
+    // binary RPC 요청 envelope 형식 번호 (ADR-0351). handshake·응답·AAD가 쓰는
+    // VERSION, 그리고 COMPAT_VERSION과 별개다.
+    const val RPC_REQUEST_ENVELOPE_FORMAT = 2
+    const val RPC_SESSION_ID_CHARS = 22
+    const val RPC_ENVELOPE_PREFIX_BYTES = 1 + RPC_SESSION_ID_CHARS + Long.SIZE_BYTES
+
+    // relay가 라우팅·rate limit에 쓰는 instance id. desktop은 무시하고 세션의
+    // instance로 AAD를 채운다 (ADR-0351).
+    const val INSTANCE_HEADER = "X-Laymux-E2e-Instance"
+    const val RPC_CONTENT_TYPE = "application/octet-stream"
 
     const val MAX_SEQUENCE = 9_007_199_254_740_991L
     const val CLIENT_SESSION_NONCE_BYTES = 16
@@ -475,6 +491,27 @@ internal object E2eProtocol {
     internal fun proof(seed: ByteArray, domain: String, fields: Array<String>): String =
         encode(hmac(seed, framed(domain, fields)))
 
+    /**
+     * `[format=2][sessionId 22 ASCII][sequence u64 BE][ciphertext‖tag]` (ADR-0351).
+     * The AEAD itself is unchanged; only its transport encoding lost base64.
+     */
+    internal fun rpcRequestEnvelope(sessionId: String, sequence: Long, ciphertext: ByteArray): ByteArray {
+        require(sequence in 0..MAX_SEQUENCE)
+        require(ciphertext.size >= GCM_TAG_BYTES)
+        val sessionIdBytes = sessionId.toByteArray(StandardCharsets.US_ASCII)
+        require(
+            sessionIdBytes.size == RPC_SESSION_ID_CHARS &&
+                decodeExact(sessionId, SESSION_ID_BYTES)?.also { Arrays.fill(it, 0) } != null,
+        ) { "보안 세션 id가 올바르지 않습니다." }
+        return ByteBuffer.allocate(RPC_ENVELOPE_PREFIX_BYTES + ciphertext.size)
+            .order(ByteOrder.BIG_ENDIAN)
+            .put(RPC_REQUEST_ENVELOPE_FORMAT.toByte())
+            .put(sessionIdBytes)
+            .putLong(sequence)
+            .put(ciphertext)
+            .array()
+    }
+
     internal fun encrypt(
         key: ByteArray,
         aadDomain: String,
@@ -482,7 +519,16 @@ internal object E2eProtocol {
         sessionId: String,
         sequence: Long,
         plaintext: ByteArray,
-    ): String {
+    ): String = encode(seal(key, aadDomain, instanceId, sessionId, sequence, plaintext))
+
+    internal fun seal(
+        key: ByteArray,
+        aadDomain: String,
+        instanceId: String,
+        sessionId: String,
+        sequence: Long,
+        plaintext: ByteArray,
+    ): ByteArray {
         require(sequence in 0..MAX_SEQUENCE)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(
@@ -491,7 +537,7 @@ internal object E2eProtocol {
             GCMParameterSpec(GCM_TAG_BITS, sequenceNonce(sequence)),
         )
         cipher.updateAAD(envelopeAad(aadDomain, instanceId, sessionId, sequence))
-        return encode(cipher.doFinal(plaintext))
+        return cipher.doFinal(plaintext)
     }
 
     internal fun decrypt(

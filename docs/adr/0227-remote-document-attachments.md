@@ -1,6 +1,6 @@
 # 0227. Remote 첨부는 signature 확인된 문서를 받고, 크기 상한과 추가 허용 종류는 host settings가 정한다
 
-- Status: Accepted
+- Status: Accepted (첨부 상한 범위·기본값과 relay 16 MiB 근거는 [0353](0353-remote-attachment-16mib-default.md)이 정정)
 - Date: 2026-09-03
 - Source: 사용자 요구(Remote에서 PDF·DOCX·PPTX 첨부, 허용 확장자 추가·전체 허용 옵션, 최대 상한 10 MiB를 settings로 조정), [ADR-0181](0181-remote-terminal-file-attachments.md) 확장
 

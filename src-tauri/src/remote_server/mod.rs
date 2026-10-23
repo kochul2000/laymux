@@ -1,6 +1,7 @@
 mod access;
 mod android_e2e_output;
 mod android_e2e_routes;
+mod android_e2e_rpc_body;
 mod android_pairing_routes;
 mod appearance;
 mod assets;
@@ -49,6 +50,10 @@ pub(crate) use android_e2e_output::{
     parse_android_e2e_output_route, prepare_android_e2e_output, stream_android_e2e_output,
     unix_time_seconds, PreparedAndroidE2eOutput, ANDROID_E2E_OUTPUT_PATH,
     E2E_OUTPUT_MAX_ENCRYPTED_RECORD_BYTES, E2E_OUTPUT_OPEN_RECORD_LIMIT,
+};
+pub(crate) use android_e2e_rpc_body::{
+    android_e2e_rpc_request_limit, android_e2e_rpc_too_large_response,
+    check_android_e2e_rpc_prefix, AndroidE2eRpcPrefixVerdict,
 };
 pub(crate) use attachments::cleanup_stale_attachments;
 pub(crate) use auth::{RemoteTransport, TunnelAuthorized};

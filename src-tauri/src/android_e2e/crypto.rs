@@ -277,7 +277,7 @@ pub(super) fn encrypt_response(
     sequence: u64,
     plaintext: &[u8],
 ) -> Result<String, AppError> {
-    encrypt(
+    seal(
         key,
         D2A_AAD_DOMAIN,
         instance_id,
@@ -285,6 +285,7 @@ pub(super) fn encrypt_response(
         sequence,
         plaintext,
     )
+    .map(|sealed| URL_SAFE_NO_PAD.encode(sealed))
 }
 
 #[cfg(test)]
@@ -294,8 +295,8 @@ pub(super) fn encrypt_request(
     session_id: &str,
     sequence: u64,
     plaintext: &[u8],
-) -> Result<String, AppError> {
-    encrypt(
+) -> Result<Vec<u8>, AppError> {
+    seal(
         key,
         A2D_AAD_DOMAIN,
         instance_id,
@@ -305,14 +306,16 @@ pub(super) fn encrypt_request(
     )
 }
 
+/// Opens a raw binary-envelope request ciphertext‖tag (ADR-0351): there is no
+/// base64 layer on the request direction any more.
 pub(super) fn decrypt_request(
     key: &[u8; KEY_BYTES],
     instance_id: &str,
     session_id: &str,
     sequence: u64,
-    ciphertext: &str,
+    ciphertext: &[u8],
 ) -> Result<Zeroizing<Vec<u8>>, AppError> {
-    decrypt(
+    open(
         key,
         A2D_AAD_DOMAIN,
         instance_id,
@@ -330,30 +333,38 @@ pub(super) fn decrypt_response(
     sequence: u64,
     ciphertext: &str,
 ) -> Result<Zeroizing<Vec<u8>>, AppError> {
-    decrypt(
+    let encrypted = Zeroizing::new(
+        URL_SAFE_NO_PAD
+            .decode(ciphertext)
+            .map_err(|_| AppError::Other("Android E2E ciphertext is invalid".into()))?,
+    );
+    if URL_SAFE_NO_PAD.encode(encrypted.as_slice()) != ciphertext {
+        return Err(AppError::Other("Android E2E ciphertext is invalid".into()));
+    }
+    open(
         key,
         D2A_AAD_DOMAIN,
         instance_id,
         session_id,
         sequence,
-        ciphertext,
+        &encrypted,
     )
 }
 
-fn encrypt(
+fn seal(
     key: &[u8; KEY_BYTES],
     aad_domain: &[u8],
     instance_id: &str,
     session_id: &str,
     sequence: u64,
     plaintext: &[u8],
-) -> Result<String, AppError> {
+) -> Result<Vec<u8>, AppError> {
     validate_sequence(sequence)?;
     let cipher = Aes256Gcm::new_from_slice(key)
         .map_err(|_| AppError::Other("Android E2E AES key is invalid".into()))?;
     let nonce = sequence_nonce(sequence);
     let aad = envelope_aad(aad_domain, instance_id, session_id, sequence)?;
-    let encrypted = cipher
+    cipher
         .encrypt(
             Nonce::from_slice(&nonce),
             Payload {
@@ -361,25 +372,19 @@ fn encrypt(
                 aad: &aad,
             },
         )
-        .map_err(|_| AppError::Other("Android E2E encryption failed".into()))?;
-    Ok(URL_SAFE_NO_PAD.encode(encrypted))
+        .map_err(|_| AppError::Other("Android E2E encryption failed".into()))
 }
 
-fn decrypt(
+fn open(
     key: &[u8; KEY_BYTES],
     aad_domain: &[u8],
     instance_id: &str,
     session_id: &str,
     sequence: u64,
-    ciphertext: &str,
+    encrypted: &[u8],
 ) -> Result<Zeroizing<Vec<u8>>, AppError> {
     validate_sequence(sequence)?;
-    let encrypted = Zeroizing::new(
-        URL_SAFE_NO_PAD
-            .decode(ciphertext)
-            .map_err(|_| AppError::Other("Android E2E ciphertext is invalid".into()))?,
-    );
-    if encrypted.len() < TAG_BYTES || URL_SAFE_NO_PAD.encode(encrypted.as_slice()) != ciphertext {
+    if encrypted.len() < TAG_BYTES {
         return Err(AppError::Other("Android E2E ciphertext is invalid".into()));
     }
     let cipher = Aes256Gcm::new_from_slice(key)
@@ -390,7 +395,7 @@ fn decrypt(
         .decrypt(
             Nonce::from_slice(&nonce),
             Payload {
-                msg: encrypted.as_slice(),
+                msg: encrypted,
                 aad: &aad,
             },
         )
@@ -479,6 +484,9 @@ mod tests {
         );
         assert!(decrypt_request(&keys.a2d, "desktop-8", "session", 0, &request).is_err());
         assert!(decrypt_request(&keys.a2d, "desktop-7", "session", 1, &request).is_err());
+        // Raw requests keep the tag-length check that the base64 path had.
+        assert!(decrypt_request(&keys.a2d, "desktop-7", "session", 0, &request[..15]).is_err());
+        assert!(decrypt_request(&keys.a2d, "desktop-7", "session", 0, &[]).is_err());
     }
 
     #[test]
@@ -491,7 +499,8 @@ mod tests {
                 .as_slice(),
             b"ok"
         );
-        assert!(decrypt_request(&keys.d2a, "i", "s", 0, &response).is_err());
+        let raw = URL_SAFE_NO_PAD.decode(&response).unwrap();
+        assert!(decrypt_request(&keys.d2a, "i", "s", 0, &raw).is_err());
     }
 
     #[test]
@@ -651,15 +660,12 @@ mod tests {
         );
         let plaintext =
             br#"{"kind":"http","method":"GET","path":"/remote/v1/terminals","body":null}"#;
+        // The AEAD output is unchanged by ADR-0351; only its transport encoding
+        // dropped base64, so the vector is compared in its old encoding.
         assert_eq!(
-            encrypt_request(
-                &keys.a2d,
-                instance_id,
-                session_id,
-                0,
-                plaintext,
-            )
-            .unwrap(),
+            URL_SAFE_NO_PAD.encode(
+                encrypt_request(&keys.a2d, instance_id, session_id, 0, plaintext,).unwrap()
+            ),
             "6CTwoMBqwF3Hxw_Wl2PztwWSgH2AfeiT-NNpxoI1fjJz0wn0qLVsXbHwf98WpAjnFJOV9gQsr6pCaWMqCVlT7jGGLNwyAqv08KWyYuJVrAfzcd95fBkLOg"
         );
     }

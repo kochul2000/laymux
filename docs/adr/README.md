@@ -315,7 +315,7 @@ ADR 이 필요한 대표 기준:
 | [0295](0295-codex-continuous-conversation-checkpoint.md) | Codex 대화 귀속을 평상시 저장과 종료 확인이 공유한다 | Accepted |
 | [0296](0296-committed-checkpoint-reuse-on-finalization.md) | 변경 없는 저장 완료 복원점을 종료·업데이트에서 재사용한다 | Accepted (partially superseded by [0323](0323-update-checkpoint-follows-pty-ownership.md)) |
 | [0297](0297-pane-stack-slot-layer-model.md) | 워크스페이스 pane 은 기하를 소유하는 슬롯, 콘텐츠는 순서 있는 레이어 목록(스택)이 소유한다 | Superseded by [0328](0328-automation-stack-keeps-visible-layer.md) (Automation 생성 표시), [0342](0342-automation-layer-activation-explicit-focus.md) (Automation 기본 포커스) |
-| [0298](0298-pane-rearrangement-automation-parity.md) | Pane 재배치(레이어 이동·꺼내기·스택 합치기·워크스페이스 간 이동)를 사용자 조작 수준까지 Automation/MCP 에 연다 | Accepted |
+| [0298](0298-pane-rearrangement-automation-parity.md) | Pane 재배치(레이어 이동·꺼내기·스택 합치기·워크스페이스 간 이동)를 사용자 조작 수준까지 Automation/MCP 에 연다 | Superseded by [0350](0350-automation-targets-background-workspaces.md) (대상 범위) |
 | [0299](0299-portable-settings-and-local-sqlite-state.md) | 이식 가능한 설정과 로컬 SQLite 복원 상태를 분리한다 | Accepted |
 | [0300](0300-detached-pty-daemon-core.md) | 터미널 PTY와 자식 프로세스는 GUI와 분리된 PTY 데몬이 소유한다 (opt-in 코어) | Proposed |
 | [0301](0301-pty-daemon-default-adoption.md) | PTY 데몬을 기본으로 켜고, 새 GUI는 살아 있는 세션을 재결합한다 (0300의 opt-in 대체) | Proposed |
@@ -371,6 +371,12 @@ ADR 이 필요한 대표 기준:
 | [0345](0345-worktree-dock-review-context.md) | 워크트리 검토 맥락은 조회 대상에 귀속하고 화면 크기에 맞춰 목록과 상세를 배치한다 | Accepted |
 | [0346](0346-preserve-daemon-session-on-output-reconnect.md) | 출력 장애 후 pane 복귀·수동 재연결은 데몬의 기존 작업을 보존한다 | Accepted |
 | [0347](0347-terminal-output-binary-delivery-and-checkpoint-worker.md) | 보관된 출력 envelope를 바이너리로 읽고 checkpoint는 Worker에서 계산한다 | Accepted |
+| [0348](0348-restart-view-reuses-agent-session-restore.md) | Restart View는 기존 checkpoint와 에이전트 세션 복원을 재사용한다 | Accepted |
+| [0349](0349-v210-supplemental-ubuntu-deb.md) | v2.1.0에 Ubuntu deb 설치 패키지를 추가한다 | Accepted |
+| [0350](0350-automation-targets-background-workspaces.md) | Automation은 화면 전환 없이 대상 workspace와 pane을 직접 조작한다 (0298 대상 범위 대체) | Accepted |
+| [0351](0351-android-e2e-binary-rpc-streamed-through-relay.md) | Android E2E RPC 요청은 binary envelope로 보내고 Cloud relay는 body를 버퍼하지 않고 흘려보낸다 (0146·0227 확장) | Accepted (조기 거부 응답은 0352가 정정) |
+| [0352](0352-android-e2e-early-rejection-drains-body.md) | Android E2E RPC 조기 거부는 남은 body를 버리며 다 읽은 뒤에 응답을 끝낸다 (0351 정정) | Accepted |
+| [0353](0353-remote-attachment-16mib-default.md) | Remote 첨부 상한은 기본값과 최대값 모두 16 MiB이고, Cloud relay 요청 상한은 24 MiB다 (0227·0351 정정) | Accepted |
 | [0354](0354-workspace-close-undo-grace-period.md) | PC·모바일 workspace 닫기는 호스트의 5초 복원 유예 뒤 확정한다 | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.

@@ -15,7 +15,7 @@ let finishListenerRegistration: (() => void) | undefined;
 let nativeListener:
   | ((request: {
       requestId: number;
-      reason: "watchdog" | "update" | "eviction";
+      reason: "watchdog" | "update" | "eviction" | "restart";
       requireConclusive: boolean;
       terminalIds?: string[];
     }) => void)
@@ -224,6 +224,60 @@ describe("useSessionCheckpointLifecycle", () => {
       ),
     );
     expect(flushSessionCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it("acks an explicit restart for a visible terminal after its conclusive checkpoint", async () => {
+    vi.mocked(flushSessionCheckpoint).mockResolvedValueOnce({
+      checkpointCommitId: 18,
+      frontendMutationRevision: 4,
+      coverage: [
+        {
+          terminalId: "terminal-visible",
+          state: "identified",
+          provider: "claude",
+          sessionId: "current",
+        },
+      ],
+    });
+    renderHook(() => useSessionCheckpointLifecycle(true));
+    await vi.waitFor(() => expect(onSessionCheckpointRequested).toHaveBeenCalledTimes(1));
+    nativeListener?.({
+      requestId: 12,
+      reason: "restart",
+      requireConclusive: true,
+      terminalIds: ["terminal-visible"],
+    });
+    await vi.waitFor(() => expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(12, 18));
+    expect(flushSessionCheckpoint).toHaveBeenCalledWith({
+      reason: "restart",
+      requireConclusive: true,
+      terminalIds: ["terminal-visible"],
+    });
+  });
+
+  it("rejects an explicit restart when the DB did not confirm its target", async () => {
+    vi.mocked(flushSessionCheckpoint).mockResolvedValueOnce({
+      checkpointCommitId: 18,
+      frontendMutationRevision: 4,
+      coverage: [{ terminalId: "terminal-visible", state: "identified" }],
+      unresolvedTerminalIds: ["terminal-visible"],
+      needsRetry: true,
+    });
+    renderHook(() => useSessionCheckpointLifecycle(true));
+    await vi.waitFor(() => expect(onSessionCheckpointRequested).toHaveBeenCalledTimes(1));
+    nativeListener?.({
+      requestId: 13,
+      reason: "restart",
+      requireConclusive: true,
+      terminalIds: ["terminal-visible"],
+    });
+    await vi.waitFor(() =>
+      expect(acknowledgeSessionCheckpoint).toHaveBeenCalledWith(
+        13,
+        undefined,
+        "restart session checkpoint is not conclusive",
+      ),
+    );
   });
 
   it("rejects an eviction checkpoint when its target became visible before ACK", async () => {

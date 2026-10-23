@@ -97,6 +97,16 @@ export function useSessionCheckpointLifecycle(ready: boolean): void {
           ) {
             throw new Error("hidden terminal eviction target is no longer eligible");
           }
+          if (
+            request.reason === "restart" &&
+            request.terminalIds?.some(
+              (id) =>
+                !commit.coverage.some((entry) => entry.terminalId === id) ||
+                commit.unresolvedTerminalIds?.includes(id),
+            )
+          ) {
+            throw new Error("restart session checkpoint is not conclusive");
+          }
           return acknowledgeSessionCheckpoint(request.requestId, commit.checkpointCommitId);
         })
         .catch((cause: unknown) => {

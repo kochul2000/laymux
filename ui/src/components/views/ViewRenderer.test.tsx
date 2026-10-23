@@ -34,6 +34,7 @@ const terminalViewProps: {
   instanceId?: string;
   restartCwd?: string;
   isUserRestart?: boolean;
+  restoreSessionOnRestart?: boolean;
   onRestart?: () => void;
 }[] = [];
 vi.mock("./TerminalView", () => ({
@@ -43,6 +44,7 @@ vi.mock("./TerminalView", () => ({
     syncGroup: string;
     restartCwd?: string;
     isUserRestart?: boolean;
+    restoreSessionOnRestart?: boolean;
     onRestart?: () => void;
   }) => {
     terminalViewProps.push({
@@ -51,6 +53,7 @@ vi.mock("./TerminalView", () => ({
       instanceId: props.instanceId,
       restartCwd: props.restartCwd,
       isUserRestart: props.isUserRestart,
+      restoreSessionOnRestart: props.restoreSessionOnRestart,
       onRestart: props.onRestart,
     });
     return (
@@ -485,11 +488,13 @@ describe("ViewRenderer", () => {
         terminalRestartEpoch={1}
         terminalRestartCwd="C:\work"
         terminalRestartFresh
+        terminalRestartRestoreSession
       />,
     );
     expect(terminalViewProps.at(-1)).toMatchObject({
       restartCwd: "C:\\work",
       isUserRestart: true,
+      restoreSessionOnRestart: true,
     });
 
     rerender(

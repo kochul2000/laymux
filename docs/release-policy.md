@@ -26,3 +26,13 @@ PR 본문에 `버전 영향: major | minor | patch | 없음 — <구체적 이�
 5. 공개 태그·앱·채널 manifest 버전, 설치 파일·서명, workflow 완료를 확인한다. 이미 발행한 태그·버전은 다시 쓰지 않는다.
 
 현재 CI는 버전 문법, 앱과 태그의 일치, 채널 전진성을 검사한다. 기능인지 수정인지 의미적으로 자동 판정하지 않으므로 해당 판단은 PR 리뷰와 발행 전 검토에서 수행한다. Remote 호환성 버전은 별도 계약이며 앱 minor 증가와 기계적으로 연결하지 않는다. Android 미발행 시 Android 채널은 기존 버전을 유지한다.
+
+## v2.1.0 Ubuntu 설치 패키지 추가
+
+[ADR-0349](adr/0349-v210-supplemental-ubuntu-deb.md)에 따라 공개된 `v2.1.0` 태그에 MCP 초기화 목록의 Linux 타입 명시 패치만 적용해 Ubuntu 22.04 x86_64용 release deb를 추가한다. 정기 Release workflow의 Windows·Android 범위는 유지한다.
+
+1. 별도 Linux 파일시스템에 태그를 복제하고 기준 커밋·버전을 확인한다. 공개할 타입 명시 패치를 적용하고 해당 수정 외 추적 파일 변경이 없는지 확인한다.
+2. Windows에서 같은 태그의 frontend를 production 빌드한 뒤 Linux 복제본의 `ui/dist`에 복사한다. Windows `ui/node_modules`에 WSL npm 설치를 실행하지 않는다.
+3. Ubuntu에서 native agent hook helper를 release 빌드한다. 패키징 overlay에 `build.beforeBuildCommand: ""`, `bundle.createUpdaterArtifacts: false`를 지정하고 Tauri CLI 2.10.1의 `build --ci --bundles deb --config <overlay> -- --locked`를 실행한다. 버전·공개 태그는 수정하지 않는다.
+4. deb의 Version·Architecture·포함 파일·ELF 동적 라이브러리 의존성을 검사하고 SHA-256을 생성한다. deb·checksum·빌드 패치·출처 파일을 새 이름으로 업로드하며 기존 asset은 덮어쓰지 않는다. 출처 파일에 기준 태그 커밋, 도구 버전, 패치·패키지 SHA-256과 실제 검증 범위를 남긴다.
+5. 공개 파일의 크기·SHA-256 및 기존 Windows asset·`latest.json`·네 채널 파일의 무변경을 확인한다. 이 추가 패키지는 직접 설치용이며 Linux 자동 업데이트를 재개하지 않는다.

@@ -429,8 +429,10 @@ pub const REMOTE_OWNER_TRANSITION_TIMEOUT_MS: u64 = 750;
 pub const TERMINAL_STRUCTURED_INPUT_MAX_BYTES: usize = 1024 * 1024;
 
 /// Remote attachment cache quota expressed in attachments of the configured
-/// maximum size (`remote.attachmentMaxMib`, ADR-0227): 64 MiB at the 1 MiB default.
-pub const REMOTE_TERMINAL_ATTACHMENT_CACHE_FILES_OF_MAX_SIZE: usize = 64;
+/// maximum size (`remote.attachmentMaxMib`, ADR-0227): 256 MiB at the 16 MiB
+/// default (ADR-0353). Attachments are short-lived files a CLI reads soon and
+/// the 7-day startup cleanup removes, so 16 of the largest is enough.
+pub const REMOTE_TERMINAL_ATTACHMENT_CACHE_FILES_OF_MAX_SIZE: usize = 16;
 /// Maximum regular-file count retained in the Remote attachment cache. This
 /// also bounds zero-byte attachments and the cost of cache scans.
 pub const REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_FILES: usize = 1024;
@@ -439,14 +441,26 @@ pub const REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_FILES: usize = 1024;
 pub const REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES: usize = 16 * 1024;
 /// Cloud relay bound for one browser HTTP request body forwarded over the
 /// tunnel (laymux-server `TUNNEL_HTTP_REQUEST_BYTES_LIMIT`). Attachments that
-/// arrive through the relay are capped to what fits under it (ADR-0227).
-pub const CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT: usize = 16 * 1024 * 1024;
-/// Cloud relay bound for one Android E2E RPC envelope (laymux-server
-/// `ANDROID_E2E_RPC_BODY_LIMIT`, `POST /api/android/e2e/rpc`).
-pub const CLOUD_RELAY_ANDROID_E2E_RPC_BODY_LIMIT: usize = 2 * 1024 * 1024;
-/// Upper bound of `remote.attachmentMaxMib` (ADR-0227). The Cloud relay forwards
-/// at most 16 MiB of request body, which fits this many decoded MiB after base64.
-pub const REMOTE_TERMINAL_ATTACHMENT_MAX_MIB: u32 = 10;
+/// arrive through the relay are capped to what fits under it (ADR-0227). 24 MiB
+/// leaves room for a 16 MiB attachment's base64 JSON (about 21.4 MiB, ADR-0353).
+pub const CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT: usize = 24 * 1024 * 1024;
+/// Cloud relay bound for one binary Android E2E RPC request body (laymux-server
+/// `TUNNEL_HTTP_REQUEST_BYTES_LIMIT` on `POST /api/android/e2e/rpc/binary`). The
+/// relay streams that body without buffering it, under the same cumulative byte
+/// cap as the browser tunnel path (ADR-0351).
+pub const CLOUD_RELAY_ANDROID_E2E_RPC_BODY_LIMIT: usize = CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT;
+/// Upper bound and default of `remote.attachmentMaxMib` (ADR-0227, ADR-0353).
+/// Its base64 JSON body and its Android binary envelope (both about 21.4 MiB)
+/// fit under the Cloud relay's 24 MiB request bound.
+pub const REMOTE_TERMINAL_ATTACHMENT_MAX_MIB: u32 = 16;
+const _: () = assert!(
+    android_e2e_rpc_body_limit(REMOTE_TERMINAL_ATTACHMENT_MAX_MIB as usize * 1024 * 1024)
+        <= CLOUD_RELAY_ANDROID_E2E_RPC_BODY_LIMIT
+);
+const _: () = assert!(
+    remote_attachment_request_limit(REMOTE_TERMINAL_ATTACHMENT_MAX_MIB as usize * 1024 * 1024)
+        <= CLOUD_RELAY_HTTP_REQUEST_BYTES_LIMIT
+);
 /// Base64 length of the largest decoded attachment a policy allows.
 pub const fn remote_attachment_encoded_limit(max_bytes: usize) -> usize {
     max_bytes.div_ceil(3) * 4
@@ -460,21 +474,58 @@ pub const fn remote_attachment_request_limit(max_bytes: usize) -> usize {
 pub const ANDROID_E2E_MAX_REQUEST_PLAINTEXT_BYTES: usize =
     remote_attachment_request_limit(REMOTE_TERMINAL_ATTACHMENT_MAX_MIB as usize * 1024 * 1024)
         + REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES;
-/// Body bound for one Android E2E RPC envelope carrying an attachment of the
-/// given decoded maximum: the inner plaintext is AEAD-sealed and base64url-
-/// encoded once more. Never below the 2 MiB the envelope always allowed.
+/// Fixed prefix of the binary Android E2E RPC request envelope (ADR-0351):
+/// format byte, 22-char base64url `sessionId`, u64 big-endian `sequence`.
+pub const ANDROID_E2E_RPC_ENVELOPE_PREFIX_BYTES: usize = 1 + 22 + 8;
+/// AES-256-GCM tag appended to every Android E2E ciphertext.
+pub const ANDROID_E2E_AEAD_TAG_BYTES: usize = 16;
+/// Floor of the Android E2E RPC request bound: the 2 MiB the envelope always
+/// allowed, so a small host attachment maximum never shrinks ordinary RPCs.
+pub const ANDROID_E2E_RPC_BODY_LIMIT_FLOOR: usize = 2 * 1024 * 1024;
+/// Body bound for one binary Android E2E RPC request carrying an attachment of
+/// the given decoded maximum (ADR-0351): the attachment JSON plus the
+/// `PlainRequest` wrapper slack, sealed raw (tag only, no base64 layer) behind
+/// the fixed prefix. Never below `ANDROID_E2E_RPC_BODY_LIMIT_FLOOR`.
 pub const fn android_e2e_rpc_body_limit(max_bytes: usize) -> usize {
-    let derived = (remote_attachment_request_limit(max_bytes)
-        + REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES)
-        .div_ceil(3)
-        * 4
-        + REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES;
-    if derived > 2 * 1024 * 1024 {
+    let derived = remote_attachment_request_limit(max_bytes)
+        + REMOTE_TERMINAL_ATTACHMENT_REQUEST_SLACK_BYTES
+        + ANDROID_E2E_AEAD_TAG_BYTES
+        + ANDROID_E2E_RPC_ENVELOPE_PREFIX_BYTES;
+    if derived > ANDROID_E2E_RPC_BODY_LIMIT_FLOOR {
         derived
     } else {
-        2 * 1024 * 1024
+        ANDROID_E2E_RPC_BODY_LIMIT_FLOOR
     }
 }
+/// Largest binary Android E2E RPC request body any host setting admits: the
+/// envelope of an attachment at `REMOTE_TERMINAL_ATTACHMENT_MAX_MIB`.
+pub const ANDROID_E2E_RPC_MAX_BODY_BYTES: usize =
+    android_e2e_rpc_body_limit(REMOTE_TERMINAL_ATTACHMENT_MAX_MIB as usize * 1024 * 1024);
+/// Desktop route of the binary Android E2E RPC request (ADR-0351), shared by
+/// the router, the Tailscale Direct guard and the Cloud tunnel allowlist.
+pub const ANDROID_E2E_RPC_PATH: &str = "/remote/v1/e2e/rpc";
+/// Cloud relay mirror: concurrent binary Android E2E RPC requests the relay
+/// admits per instance (laymux-server
+/// `android_e2e_rpc_binary_instance_max_requests`, ADR-0351). The desktop
+/// tunnel sizes its socket-wide pending budget so this many maximum-size
+/// bodies fit at once.
+pub const CLOUD_RELAY_ANDROID_E2E_RPC_INSTANCE_MAX_REQUESTS: usize = 4;
+/// Cloud relay mirror: idle deadline of a binary Android E2E RPC request body
+/// (laymux-server `android_e2e_rpc_binary_body_idle_timeout_seconds`). The
+/// desktop tunnel's own backstop must be longer so the relay's 408 reaches the
+/// client first.
+pub const CLOUD_RELAY_ANDROID_E2E_RPC_BODY_IDLE_TIMEOUT_SECS: u64 = 30;
+/// Desktop tunnel backstop for a stalled binary Android E2E RPC body: longer
+/// than the relay idle deadline, so it only fires when the relay misbehaves.
+pub const ANDROID_E2E_RPC_TUNNEL_BODY_IDLE_TIMEOUT_SECS: u64 = 40;
+/// Tailscale Direct: longest gap between two body chunks while the rest of an
+/// early-rejected request body is read and discarded (ADR-0352). Matches the
+/// relay idle deadline so both transports tolerate the same client stall.
+pub const ANDROID_E2E_RPC_DISCARD_IDLE_TIMEOUT_SECS: u64 = 30;
+/// Tailscale Direct: total time spent discarding the rest of an
+/// early-rejected request body (ADR-0352), mirroring the relay's total body
+/// deadline so a trickling caller cannot hold the connection indefinitely.
+pub const ANDROID_E2E_RPC_DISCARD_TOTAL_TIMEOUT_SECS: u64 = 300;
 /// Startup cleanup age for Remote attachment cache files.
 pub const REMOTE_TERMINAL_ATTACHMENT_MAX_AGE_DAYS: u64 = 7;
 
@@ -852,6 +903,9 @@ pub const GUI_RELAUNCH_AFTER_CLI_FLAG: &str = "--relaunch-after";
 /// How long a relaunched GUI waits for its predecessor to exit before it
 /// starts anyway. Exiting normally takes well under a second.
 pub const GUI_RELAUNCH_PREDECESSOR_WAIT_MS: u32 = 10_000;
+
+/// Explicit pane restart checkpoint reason (ADR-0348).
+pub const SESSION_CHECKPOINT_REASON_RESTART: &str = "restart";
 
 #[cfg(test)]
 mod tests {

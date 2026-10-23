@@ -38,6 +38,16 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 vi.mock("@/lib/tauri-api", () => ({
+  checkpointAndCloseTerminalForRestart: vi.fn(async (id: string) => {
+    const { flushSessionCheckpoint } = await import("./persist-session");
+    const commit = await flushSessionCheckpoint({
+      reason: "restart",
+      requireConclusive: true,
+      terminalIds: [id],
+    });
+    if (commit.unresolvedTerminalIds?.includes(id))
+      throw new Error("Session checkpoint is not conclusive");
+  }),
   saveSettings: vi.fn().mockResolvedValue(undefined),
   loadSettings: vi.fn().mockResolvedValue({}),
   createTerminalSession: vi.fn().mockResolvedValue({}),
@@ -90,6 +100,7 @@ import {
   getCodexSessionIds,
   getGrokSessionIds,
   getTerminalSessionAttributions,
+  checkpointAndCloseTerminalForRestart,
 } from "@/lib/tauri-api";
 import { interruptTerminalsOnExit } from "@/lib/interrupt-terminals-on-exit";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
@@ -97,6 +108,9 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useTerminalStore, type TerminalActivityInfo } from "@/stores/terminal-store";
+import { useTerminalRestartStore } from "@/stores/terminal-restart-store";
+import { useNotificationStore } from "@/stores/notification-store";
+import { restartPaneView } from "./pane-restart";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -122,6 +136,142 @@ function registerLiveTerminal(
 }
 
 describe("persistSession", () => {
+  it.each([
+    ["workspace", "claude", "lastClaudeSession"],
+    ["workspace", "codex", "lastCodexSession"],
+    ["workspace", "grok", "lastGrokSession"],
+    ["dock", "claude", "lastClaudeSession"],
+    ["dock", "codex", "lastCodexSession"],
+    ["dock", "grok", "lastGrokSession"],
+  ] as const)(
+    "Restart View checkpoints the current %s %s session before remount",
+    async (surface, provider, field) => {
+      useTerminalRestartStore.setState({ requests: {} });
+      const view = { type: "TerminalView" as const, lastClaudeSession: "stale", lastCwd: "/old" };
+      useWorkspaceStore.getState().setPaneView(0, view);
+      const dockId = useDockStore.getState().getDock("left")!.panes[0].id;
+      useDockStore.getState().setDockPaneView("left", dockId, view);
+      const getPane = () =>
+        surface === "workspace"
+          ? useWorkspaceStore.getState().workspaces[0].panes[0].layers[0]
+          : useDockStore.getState().getDock("left")!.panes[0];
+      const paneId = getPane().id;
+      const terminalId = `terminal-${paneId}`;
+      registerLiveTerminal(terminalId, { type: "interactiveApp", name: provider });
+      useTerminalStore.getState().updateInstanceInfo(terminalId, { generation: 1 });
+      vi.mocked(getTerminalCwds).mockResolvedValue({ [terminalId]: "/current" });
+      vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+        [terminalId]: {
+          generation: 1,
+          state: "identified",
+          provider,
+          sessionId: "current-session",
+        },
+      });
+      let release!: () => void;
+      const saving = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      vi.mocked(saveLocalSession).mockImplementation(async (settings, coverage) => {
+        await saving;
+        return makeLocalCommit(settings, coverage);
+      });
+
+      const pending = restartPaneView(paneId);
+      const duplicate = restartPaneView(paneId);
+      expect(useTerminalRestartStore.getState().requests[paneId]).toBeUndefined();
+      release();
+      expect(await pending).toBe(true);
+      expect(await duplicate).toBe(true);
+      expect(getPane().view).toEqual({
+        type: "TerminalView",
+        [field]: "current-session",
+        lastCwd: "/current",
+      });
+      expect(useTerminalRestartStore.getState().requests[paneId]).toMatchObject({
+        epoch: 1,
+        fresh: true,
+        cwd: "/current",
+        restoreSession: true,
+      });
+      expect(saveLocalSession).toHaveBeenCalledOnce();
+      expect(checkpointAndCloseTerminalForRestart).toHaveBeenCalledExactlyOnceWith(terminalId, 1);
+    },
+  );
+
+  it.each([
+    "unknown",
+    "activeButUnidentified",
+    "saveFailed",
+    "replaced",
+    "viewChanged",
+    "unresolved",
+  ] as const)("Restart View keeps the live PTY when %s", async (failure) => {
+    useTerminalRestartStore.setState({ requests: {} });
+    useNotificationStore.setState({ notifications: [] });
+    useWorkspaceStore
+      .getState()
+      .setPaneView(0, { type: "TerminalView", lastClaudeSession: "stale" });
+    const paneId = useWorkspaceStore.getState().workspaces[0].panes[0].layers[0].id;
+    const terminalId = `terminal-${paneId}`;
+    registerLiveTerminal(terminalId, { type: "interactiveApp", name: "Claude" });
+    useTerminalStore.getState().updateInstanceInfo(terminalId, { generation: 1 });
+    vi.mocked(getTerminalSessionAttributions).mockResolvedValue({
+      [terminalId]: {
+        generation: 1,
+        state:
+          failure === "unknown" || failure === "activeButUnidentified" ? failure : "identified",
+        provider: "claude",
+        sessionId: "current",
+      },
+    });
+    if (failure === "saveFailed")
+      vi.mocked(saveLocalSession).mockRejectedValueOnce(new Error("disk full"));
+    if (failure === "replaced")
+      vi.mocked(saveLocalSession).mockImplementationOnce(async (settings, coverage) => {
+        useTerminalStore.getState().updateInstanceInfo(terminalId, { generation: 2 });
+        return makeLocalCommit(settings, coverage);
+      });
+    if (failure === "viewChanged")
+      vi.mocked(saveLocalSession).mockImplementationOnce(async (settings, coverage) => {
+        useWorkspaceStore.getState().setPaneView(0, { type: "MemoView" });
+        return makeLocalCommit(settings, coverage);
+      });
+    if (failure === "unresolved")
+      vi.mocked(saveLocalSession).mockImplementationOnce(async (settings, coverage) => ({
+        ...makeLocalCommit(settings, coverage),
+        needsRetry: true,
+        unresolvedTerminalIds: [terminalId],
+      }));
+    expect(await restartPaneView(paneId)).toBe(false);
+    expect(useTerminalRestartStore.getState().requests[paneId]).toBeUndefined();
+    if (failure !== "replaced" && failure !== "viewChanged")
+      expect(useNotificationStore.getState().notifications).toHaveLength(1);
+  });
+
+  it("Restart View clears stale agent IDs when the current terminal is a shell", async () => {
+    useTerminalRestartStore.setState({ requests: {} });
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView", lastClaudeSession: "old" });
+    const paneId = useWorkspaceStore.getState().workspaces[0].panes[0].layers[0].id;
+    registerLiveTerminal(`terminal-${paneId}`, { type: "shell" });
+    expect(await restartPaneView(paneId)).toBe(true);
+    expect(useWorkspaceStore.getState().workspaces[0].panes[0].layers[0].view).not.toHaveProperty(
+      "lastClaudeSession",
+    );
+  });
+
+  it("Restart View recovers an unready terminal with the existing fresh-start path", async () => {
+    useTerminalRestartStore.setState({ requests: {} });
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView", lastClaudeSession: "old" });
+    const paneId = useWorkspaceStore.getState().workspaces[0].panes[0].layers[0].id;
+    registerLiveTerminal(`terminal-${paneId}`, { type: "shell" }, { sessionReady: false });
+    expect(await restartPaneView(paneId)).toBe(true);
+    expect(saveLocalSession).not.toHaveBeenCalled();
+    expect(useTerminalRestartStore.getState().requests[paneId]).not.toHaveProperty(
+      "restoreSession",
+    );
+  });
+
   it("writes a session checkpoint without rewriting seeded user configuration", async () => {
     _resetClosingDown();
     const { collectSettingsSnapshot } = await import("./settings-snapshot");

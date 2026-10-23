@@ -5130,3 +5130,206 @@ describe("pane rearrangement keeps grid focus on the same slot (ADR-0298)", () =
     expect(focused()).toBeNull();
   });
 });
+
+describe("Automation targets background workspaces without navigation (ADR-0350)", () => {
+  const targetId = "ws-background-target";
+  function act(method: string, params: Record<string, unknown>, target = "panes") {
+    return handleAutomationRequest({
+      requestId: `background-${method}`,
+      category: "action",
+      target,
+      method,
+      params,
+    });
+  }
+  function seed() {
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useGridStore.setState(useGridStore.getInitialState());
+    useDockStore.setState(useDockStore.getInitialState());
+    useTerminalStore.setState(useTerminalStore.getInitialState());
+    const active = useWorkspaceStore.getState().getActiveWorkspace()!;
+    const panes = [0, 1].map((i) => ({
+      id: `background-${i}`,
+      x: i / 2,
+      y: 0,
+      w: 0.5,
+      h: 1,
+      layers: [
+        { id: `background-${i}`, view: { type: "TerminalView" as const, lastCwd: "/background" } },
+        ...(i === 0 ? [{ id: "background-layer", view: { type: "MemoView" as const } }] : []),
+      ],
+      activeLayerId: `background-${i}`,
+    }));
+    useWorkspaceStore.setState({
+      workspaces: [
+        active,
+        { id: targetId, name: "Background", panes },
+        {
+          id: "ws-destination",
+          name: "Destination",
+          panes: [
+            {
+              ...panes[1],
+              id: "destination",
+              layers: [{ id: "destination", view: { type: "EmptyView" } }],
+              activeLayerId: "destination",
+              x: 0,
+              w: 1,
+            },
+          ],
+        },
+      ],
+    });
+    return active;
+  }
+  beforeEach(seed);
+
+  it.each([
+    ["split", { paneIndex: 0, direction: "vertical" }],
+    ["stack", { paneIndex: 0 }],
+    ["remove", { paneIndex: 0, layerId: "background-layer" }],
+    ["resize", { paneIndex: 0, delta: { w: 0.1 } }],
+    ["swap", { sourceIndex: 0, targetIndex: 1 }],
+    ["moveLayer", { layerId: "background-layer", targetPaneIndex: 1 }],
+    ["extractLayer", { layerId: "background-layer", direction: "vertical" }],
+    ["merge", { sourceIndex: 0, targetIndex: 1 }],
+    ["setView", { paneIndex: 1, view: { type: "MemoView" } }],
+    [
+      "moveToWorkspace",
+      { paneIndex: 0, sourceWorkspaceId: targetId, workspaceId: "ws-destination" },
+    ],
+  ])("%s changes only the explicitly selected background workspace", (method, params) => {
+    const owner = useWorkspaceStore.getState().getActiveWorkspace()!;
+    const grid = useGridStore.getState();
+    const dock = useDockStore.getState();
+    const before = JSON.stringify(
+      useWorkspaceStore.getState().workspaces.find((w) => w.id === targetId),
+    );
+    const navigations: string[] = [];
+    const unsubscribe = useWorkspaceStore.subscribe((state, previous) => {
+      if (state.activeWorkspaceId !== previous.activeWorkspaceId)
+        navigations.push(state.activeWorkspaceId);
+    });
+    try {
+      const result = act(method as string, { workspaceId: targetId, ...(params as object) });
+      expect(result.success, JSON.stringify(result)).toBe(true);
+      expect(
+        JSON.stringify(useWorkspaceStore.getState().workspaces.find((w) => w.id === targetId)),
+      ).not.toBe(before);
+      expect(useWorkspaceStore.getState().getActiveWorkspace()).toEqual(owner);
+      expect(navigations).toEqual([]);
+      expect(useGridStore.getState()).toEqual(grid);
+      expect(useDockStore.getState()).toEqual(dock);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it.each(["split", "stack", "remove", "resize", "setView"])(
+    "%s can resolve a stable pane id without an index or workspace switch",
+    (method) => {
+      const result = act(method, {
+        paneId: "background-1",
+        direction: "vertical",
+        delta: { w: -0.1 },
+        view: { type: "MemoView" },
+      });
+      expect(result.success, JSON.stringify(result)).toBe(true);
+      expect(useWorkspaceStore.getState().activeWorkspaceId).not.toBe(targetId);
+    },
+  );
+
+  it.each(["split", "stack", "remove", "resize", "swap", "merge", "setView"])(
+    "%s rejects an unknown workspace before changing state",
+    (method) => {
+      const before = useWorkspaceStore.getState();
+      expect(
+        act(method, {
+          workspaceId: "missing",
+          paneIndex: 0,
+          sourceIndex: 0,
+          targetIndex: 1,
+          direction: "vertical",
+          delta: { w: 0.1 },
+          view: { type: "MemoView" },
+        }).success,
+      ).toBe(false);
+      expect(useWorkspaceStore.getState()).toBe(before);
+    },
+  );
+
+  it("rejects conflicting selectors and invalid numeric indices before mutation", () => {
+    const before = useWorkspaceStore.getState();
+    for (const params of [
+      { paneId: "background-0", workspaceId: before.activeWorkspaceId },
+      { paneId: "background-0", paneIndex: 1 },
+      { workspaceId: targetId, paneIndex: -1 },
+      { workspaceId: targetId, paneIndex: 0.5 },
+      { workspaceId: targetId, paneIndex: 99 },
+    ])
+      expect(act("split", { ...params, direction: "vertical" }).success).toBe(false);
+    expect(useWorkspaceStore.getState()).toBe(before);
+  });
+
+  it("resolves a layer's owning workspace for rearrangement without a workspace argument", () => {
+    expect(act("moveLayer", { layerId: "background-layer", targetPaneIndex: 1 }).success).toBe(
+      true,
+    );
+    const ws = useWorkspaceStore.getState().workspaces.find((w) => w.id === targetId)!;
+    expect(ws.panes[1].layers.some((l) => l.id === "background-layer")).toBe(true);
+    expect(useWorkspaceStore.getState().activeWorkspaceId).not.toBe(targetId);
+  });
+
+  it("the explicit focus tool can target a background pane directly", () => {
+    expect(act("focusPane", { paneId: "background-1" }, "grid").success).toBe(true);
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(targetId);
+    expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+  });
+
+  it("background grid inspection keeps the actual human focus projection", () => {
+    const owner = useWorkspaceStore.getState().getActiveWorkspace()!;
+    const foreground = act("getState", {}, "grid").data as Record<string, unknown>;
+    const result = act("getState", { workspaceId: targetId }, "grid");
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({
+      workspaceId: targetId,
+      activeWorkspaceId: owner.id,
+      focusedTerminalId: foreground.focusedTerminalId,
+      focusedPaneNumber: foreground.focusedPaneNumber,
+    });
+    expect((result.data as { panes: { paneId: string }[] }).panes.map((p) => p.paneId)).toContain(
+      "background-layer",
+    );
+    expect(act("getState", { workspaceId: "missing" }, "grid").success).toBe(false);
+    expect(useWorkspaceStore.getState().getActiveWorkspace()).toBe(owner);
+  });
+
+  it("background mutations leave dock focus untouched", () => {
+    useDockStore.getState().setFocusedDock("left", "human-dock");
+    useGridStore.getState().setFocusedPane(null);
+    const dock = useDockStore.getState();
+    for (const [method, params] of [
+      ["split", { direction: "vertical" }],
+      ["stack", {}],
+      ["remove", { layerId: "background-layer" }],
+      ["resize", { delta: { w: 0.1 } }],
+    ] as const) {
+      expect(act(method, { paneId: "background-0", ...params }).success).toBe(true);
+      expect(useDockStore.getState()).toBe(dock);
+      expect(useGridStore.getState().focusedPaneIndex).toBeNull();
+    }
+  });
+
+  it("refuses contradictory layer scope and reports a last-pane removal as a failure", () => {
+    const before = useWorkspaceStore.getState();
+    expect(
+      act("extractLayer", {
+        layerId: "background-layer",
+        workspaceId: before.activeWorkspaceId,
+        direction: "vertical",
+      }).success,
+    ).toBe(false);
+    expect(useWorkspaceStore.getState()).toBe(before);
+    expect(act("remove", { paneId: "destination" }).success).toBe(false);
+  });
+});

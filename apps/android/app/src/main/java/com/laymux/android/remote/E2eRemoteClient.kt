@@ -1,12 +1,37 @@
 package com.laymux.android.remote
 
 import com.laymux.android.pairing.StoredPairing
+import java.io.IOException
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.util.Arrays
 import org.json.JSONObject
+
+/** One E2E POST body with its fixed content type and extra headers. */
+internal class E2eHttpBody private constructor(
+    val bytes: ByteArray,
+    val contentType: String,
+    val headers: Map<String, String>,
+) {
+    companion object {
+        /** Handshake bodies stay JSON (ADR-0351 changes only the RPC request). */
+        fun json(body: String): E2eHttpBody =
+            E2eHttpBody(body.toByteArray(StandardCharsets.UTF_8), "application/json", emptyMap())
+
+        /**
+         * Binary RPC request (ADR-0351). The instance id travels as a header on
+         * both Cloud and Tailscale Direct; only the relay reads it.
+         */
+        fun rpc(envelope: ByteArray, instanceId: String): E2eHttpBody =
+            E2eHttpBody(
+                envelope,
+                E2eProtocol.RPC_CONTENT_TYPE,
+                mapOf(E2eProtocol.INSTANCE_HEADER to instanceId),
+            )
+    }
+}
 
 internal class E2eRemoteClient(
     private val connectionFactory: (URI) -> HttpURLConnection = { uri ->
@@ -42,7 +67,7 @@ internal class E2eRemoteClient(
             val challengeRaw = postWithRetry(
                 transport.httpUrl(E2eHttpOperation.CHALLENGE),
                 "",
-                E2eProtocol.challengeRequest(metadata, clientSessionNonce),
+                E2eHttpBody.json(E2eProtocol.challengeRequest(metadata, clientSessionNonce)),
                 HANDSHAKE_RESPONSE_LIMIT,
                 if (direct) DIRECT_PROBE_ATTEMPTS else HANDSHAKE_ATTEMPTS,
                 invalidatesSession = false,
@@ -59,7 +84,7 @@ internal class E2eRemoteClient(
             val establishRaw = postWithRetry(
                 transport.httpUrl(E2eHttpOperation.ESTABLISH),
                 "",
-                E2eProtocol.establishRequest(challenge, seed),
+                E2eHttpBody.json(E2eProtocol.establishRequest(challenge, seed)),
                 HANDSHAKE_RESPONSE_LIMIT,
                 HANDSHAKE_ATTEMPTS,
                 invalidatesSession = false,
@@ -99,17 +124,38 @@ internal class E2eRemoteClient(
         )
 
     private fun executePending(session: RemoteSession, pending: PendingRpc): JSONObject {
+        // Every retry resends the exact same envelope bytes (same sequence).
+        val body = E2eHttpBody.rpc(pending.envelope, session.instanceId)
+        // Body-write failures of this one request across every retry batch
+        // (ADR-0352). A body that fits the socket buffer never fails here, so
+        // only uploads larger than the buffer can reach the cap.
+        var bodyWriteFailures = 0
+        val capBodyWriteFailures: (E2eTransportException) -> Unit = { error ->
+            if (error.bodyWriteFailed) {
+                bodyWriteFailures += 1
+                if (bodyWriteFailures >= RPC_BODY_WRITE_FAILURE_LIMIT) {
+                    throw E2eTransportException(
+                        "요청 본문 전송이 반복해서 끊겼습니다. 보안 연결을 다시 수립합니다.",
+                        retryable = false,
+                        invalidatesSession = true,
+                        failureKind = E2eTransportFailureKind.OTHER,
+                        cause = error,
+                    )
+                }
+            }
+        }
         while (true) {
             session.requireTransportAllowed()
             val response = try {
                 postWithRetry(
                     session.transport.httpUrl(E2eHttpOperation.RPC),
                     "",
-                    pending.envelopeJson,
+                    body,
                     RPC_RESPONSE_LIMIT,
                     RPC_ATTEMPTS,
                     invalidatesSession = true,
                     beforeAttempt = session::requireTransportAllowed,
+                    onRetryableFailure = capBodyWriteFailures,
                 )
             } catch (error: E2eTransportException) {
                 if (!error.retryable || error.invalidatesSession) throw error
@@ -135,12 +181,13 @@ internal class E2eRemoteClient(
     internal fun postWithRetry(
         endpoint: String,
         path: String,
-        body: String,
+        body: E2eHttpBody,
         responseLimit: Int,
         attempts: Int,
         invalidatesSession: Boolean,
         beforeAttempt: (() -> Unit)? = null,
         connectTimeoutMs: Int = CONNECT_TIMEOUT_MS,
+        onRetryableFailure: (E2eTransportException) -> Unit = {},
     ): String {
         var lastError: E2eTransportException? = null
         repeat(attempts) {
@@ -150,6 +197,7 @@ internal class E2eRemoteClient(
             } catch (error: E2eTransportException) {
                 if (!error.retryable) throw error
                 lastError = error
+                onRetryableFailure(error)
             }
         }
         throw E2eTransportException(
@@ -164,7 +212,7 @@ internal class E2eRemoteClient(
     private fun post(
         endpoint: String,
         path: String,
-        body: String,
+        body: E2eHttpBody,
         responseLimit: Int,
         connectTimeoutMs: Int = CONNECT_TIMEOUT_MS,
     ): String {
@@ -178,10 +226,27 @@ internal class E2eRemoteClient(
             connection.connectTimeout = connectTimeoutMs
             connection.readTimeout = READ_TIMEOUT_MS
             connection.doOutput = true
-            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Content-Type", body.contentType)
             connection.setRequestProperty("Accept", "application/json")
-            connection.outputStream.use { output ->
-                output.write(body.toByteArray(StandardCharsets.UTF_8))
+            body.headers.forEach { (name, value) -> connection.setRequestProperty(name, value) }
+            // The length is known up front: stream it instead of letting
+            // HttpURLConnection buffer a second copy of a large attachment body.
+            connection.setFixedLengthStreamingMode(body.bytes.size.toLong())
+            // Opening the stream connects; a failure there is a reachability
+            // failure. A failure while the body is written is reported apart:
+            // HttpURLConnection reads the status only after the whole body, so
+            // a server that stops reading hides its answer behind this error.
+            val output = connection.outputStream
+            try {
+                output.use { it.write(body.bytes) }
+            } catch (error: IOException) {
+                throw E2eTransportException(
+                    "보안 요청 본문을 보내지 못했습니다.",
+                    retryable = true,
+                    failureKind = E2eTransportFailureKind.NETWORK,
+                    bodyWriteFailed = true,
+                    cause = error,
+                )
             }
             val status = connection.responseCode
             if (status !in 200..299) {
@@ -247,6 +312,15 @@ internal class E2eRemoteClient(
 
         private const val RPC_ATTEMPTS = 2
         private const val RPC_RETRY_DELAY_MS = 1_000L
+
+        // ADR-0352: one retry absorbs a stale pooled connection or a brief
+        // drop mid-upload; a second body-write failure of the same request
+        // means the server keeps refusing the body (or the path keeps
+        // dropping it), so re-uploading megabytes until the session deadline
+        // only burns data. The request then fails visibly and the session is
+        // re-established, where the Direct-first probe still decides the
+        // transport.
+        internal const val RPC_BODY_WRITE_FAILURE_LIMIT = 2
     }
 }
 
@@ -255,5 +329,7 @@ internal class E2eTransportException(
     val retryable: Boolean = false,
     val invalidatesSession: Boolean = false,
     val failureKind: E2eTransportFailureKind = E2eTransportFailureKind.OTHER,
+    /** The connection opened but the request body could not be written. */
+    val bodyWriteFailed: Boolean = false,
     cause: Throwable? = null,
 ) : Exception(message, cause)
