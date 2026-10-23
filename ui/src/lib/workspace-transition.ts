@@ -28,7 +28,13 @@ export interface WorkspaceSwitchOptions {
 export function focusWorkspacePane(workspaceId: string, paneIndex: number): boolean {
   const workspaceState = useWorkspaceStore.getState();
   const workspace = workspaceState.workspaces.find((candidate) => candidate.id === workspaceId);
-  if (!workspace || !Number.isInteger(paneIndex) || !workspace.panes[paneIndex]) return false;
+  if (
+    !workspace ||
+    workspaceState.pendingWorkspaceCloses.some((p) => p.id === workspaceId) ||
+    !Number.isInteger(paneIndex) ||
+    !workspace.panes[paneIndex]
+  )
+    return false;
 
   workspaceState.setActiveWorkspace(workspaceId);
   useDockStore.getState().setFocusedDock(null);
@@ -53,7 +59,8 @@ export function activatePaneLayer(
   const { focus = true } = options;
   const workspaceState = useWorkspaceStore.getState();
   const workspace = workspaceState.workspaces.find((candidate) => candidate.id === workspaceId);
-  if (!workspace) return false;
+  if (!workspace || workspaceState.pendingWorkspaceCloses.some((p) => p.id === workspaceId))
+    return false;
   const slotIndex = workspace.panes.findIndex((pane) =>
     pane.layers.some((layer) => layer.id === layerId),
   );
@@ -104,7 +111,8 @@ export function switchActiveWorkspace(
   const targetWorkspace = workspaceState.workspaces.find(
     (workspace) => workspace.id === workspaceId,
   );
-  if (!targetWorkspace) return { switched: false, reason: "workspace_not_found" };
+  if (!targetWorkspace || workspaceState.pendingWorkspaceCloses.some((p) => p.id === workspaceId))
+    return { switched: false, reason: "workspace_not_found" };
 
   const wasDockFocused = useDockStore.getState().focusedDock !== null;
   workspaceState.setActiveWorkspace(workspaceId);

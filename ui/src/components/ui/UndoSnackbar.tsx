@@ -5,7 +5,7 @@ interface UndoSnackbarProps {
   actionLabel: string;
   onAction: () => void;
   onDismiss: () => void;
-  durationMs?: number;
+  durationMs?: number | null;
 }
 
 /** Transient, keyboard-accessible feedback for a single reversible UI action. */
@@ -17,6 +17,7 @@ export function UndoSnackbar({
   durationMs = 5000,
 }: UndoSnackbarProps) {
   useEffect(() => {
+    if (durationMs === null) return;
     const timer = window.setTimeout(onDismiss, durationMs);
     return () => window.clearTimeout(timer);
   }, [durationMs, onDismiss]);

@@ -1,6 +1,33 @@
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
 import { installRemoteClientRoutes, remoteClientMarkupWithoutXterm } from "./remote-client-assets";
 
+test("모바일 workspace 닫기 토스트로 복원하고 토스트 만료 후에는 목록에서 제거한다", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const controls = await routeRemoteWithWorkspaces(page, []);
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.locator("#connect").click();
+  await page.locator("#navToggle").click();
+  const close = async () => {
+    await page.locator('[data-workspace-manage="ws-b"]').click();
+    await page.locator('[data-workspace-action="remove"]').click();
+  };
+  await close();
+  await expect(page.locator('[data-workspace-item="ws-b"]')).toHaveCount(0);
+  await expect(page.locator(".workspace-close-toast")).toContainText("Beta");
+  await page.screenshot({ path: "../.screenshots/workspace-close-mobile.png" });
+  await page.locator('[data-workspace-restore="ws-b"]').click();
+  await expect(page.locator(".workspace-close-toast")).toHaveCount(0);
+  await expect(page.locator('[data-workspace-item="ws-b"]')).toBeVisible();
+  expect(controls.outputAttachments).toEqual(["term-a1"]);
+  await close();
+  await expect(page.locator(".workspace-close-toast")).toBeVisible();
+  await expect(page.locator(".workspace-close-toast")).toHaveCount(0, { timeout: 7000 });
+  await expect(page.locator('[data-workspace-item="ws-b"]')).toHaveCount(0);
+  expect(controls.outputAttachments).toEqual(["term-a1"]);
+});
+
 test("저장 완료 후 템플릿 목록 조회 실패는 저장 재시도를 유도하지 않는다", async ({ page }) => {
   await routeRemoteWithWorkspaces(page, []);
   let posts = 0;
@@ -222,6 +249,8 @@ async function routeRemoteWithWorkspaces(
     result: true,
   };
   let lastInputMode: "perPane" | "workspaceLatest" = "perPane";
+  let pendingWorkspaceCloses: Array<{ id: string; name: string; expiresAt: number }> = [];
+  const closedWorkspaceIds = new Set<string>();
   const visibilityRequests: Array<{
     path: string;
     body: { hidden: boolean; leaseId: string };
@@ -315,6 +344,12 @@ async function routeRemoteWithWorkspaces(
       return;
     }
     if (url.pathname === "/remote/v1/navigation") {
+      for (const item of pendingWorkspaceCloses) {
+        if (item.expiresAt <= Date.now()) closedWorkspaceIds.add(item.id);
+      }
+      pendingWorkspaceCloses = pendingWorkspaceCloses.filter(
+        (item) => !closedWorkspaceIds.has(item.id),
+      );
       const paneWithVisibility = <T extends { id: string }>(pane: T) => ({
         ...pane,
         hidden: hiddenPaneIds.has(pane.id),
@@ -337,6 +372,7 @@ async function routeRemoteWithWorkspaces(
                   )
                 : [paneWithVisibility(paneB1)],
           },
+          pendingWorkspaceCloses,
           workspaces: [
             {
               id: "ws-a",
@@ -388,7 +424,11 @@ async function routeRemoteWithWorkspaces(
                   },
                 ]
               : []),
-          ],
+          ].filter(
+            (workspace) =>
+              !closedWorkspaceIds.has(workspace.id) &&
+              !pendingWorkspaceCloses.some((p) => p.id === workspace.id),
+          ),
           docks: [],
           notifications,
           unreadNotificationCount,
@@ -424,6 +464,19 @@ async function routeRemoteWithWorkspaces(
           data: { hidden: body.hidden, fallbackWorkspaceId: visibilityFallbackWorkspaceId },
         },
       });
+      return;
+    }
+    const workspaceCloseMatch = url.pathname.match(
+      /^\/remote\/v1\/workspaces\/([^/]+)\/(close|restore-close)$/,
+    );
+    if (workspaceCloseMatch) {
+      const id = decodeURIComponent(workspaceCloseMatch[1]);
+      if (workspaceCloseMatch[2] === "close") {
+        pendingWorkspaceCloses.push({ id, name: workspaceNames[id], expiresAt: Date.now() + 5000 });
+      } else {
+        pendingWorkspaceCloses = pendingWorkspaceCloses.filter((item) => item.id !== id);
+      }
+      await route.fulfill({ json: { pendingWorkspaceCloses } });
       return;
     }
     const closeMatch = url.pathname.match(/^\/remote\/v1\/panes\/([^/]+)\/close$/);

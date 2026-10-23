@@ -517,7 +517,7 @@
       "title": "Interface",
       "groupConfirmation": "Confirmation",
       "confirmDestructiveActions": "Confirm Destructive Actions",
-      "confirmDestructiveActionsDesc": "Require two clicks for workspace hide, terminal clear, layout delete, and workspace close, and for pane restart, clear, and delete",
+      "confirmDestructiveActionsDesc": "Require two clicks for workspace hide, terminal clear, layout delete, and for pane restart, clear, and delete",
       "groupControlBar": "Control Bar",
       "groupDock": "Dock",
       "groupNotifications": "Notifications",
@@ -1089,6 +1089,8 @@
       "duplicateWorkspace": "Duplicate workspace (Ctrl+Alt+D)",
       "renameWorkspace": "Rename workspace (Ctrl+Alt+R)",
       "closeWorkspace": "Close workspace (Ctrl+Alt+W)",
+      "closingWorkspace": "Closing {{name}}…",
+      "restoreWorkspace": "Restore",
       "openPane": "Open {{workspace}}, pane {{number}}, {{view}}",
       "closeWorkspaceConfirm": "Click again to close {{name}}"
     }

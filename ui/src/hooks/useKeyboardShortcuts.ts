@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { requestWorkspaceClose } from "@/lib/workspace-close";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useGridStore } from "@/stores/grid-store";
@@ -358,13 +359,10 @@ const SHORTCUT_HANDLERS: Record<string, (e: KeyboardEvent) => void> = {
     }
   },
 
-  // workspace.close: close current workspace (never the last one)
+  // workspace.close: start the shared undo grace period.
   "workspace.close": (e) => {
     e.preventDefault();
-    const { workspaces, activeWorkspaceId, removeWorkspace } = useWorkspaceStore.getState();
-    if (workspaces.length > 1) {
-      removeWorkspace(activeWorkspaceId);
-    }
+    requestWorkspaceClose(useWorkspaceStore.getState().activeWorkspaceId);
   },
 
   // workspace.rename: rename current workspace.

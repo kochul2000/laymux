@@ -1151,6 +1151,20 @@
   .undo-snackbar-separator {
     color: var(--text-secondary);
   }
+
+  .undo-snackbar-stack {
+    position: absolute;
+    right: var(--undo-snackbar-offset);
+    bottom: var(--undo-snackbar-offset);
+    left: var(--undo-snackbar-offset);
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    gap: var(--undo-snackbar-offset);
+  }
+  .undo-snackbar-stack > .undo-snackbar {
+    position: static;
+  }
   .undo-snackbar-action {
     flex: 0 0 auto;
     border: 0;

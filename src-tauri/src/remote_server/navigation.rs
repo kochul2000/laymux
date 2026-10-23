@@ -108,6 +108,16 @@ pub(super) fn build_remote_navigation_payload(
                 notifications,
             )
             .into_iter()
+            .filter(|workspace| {
+                !workspaces_data
+                    .get("pendingWorkspaceCloses")
+                    .and_then(Value::as_array)
+                    .is_some_and(|pending| {
+                        pending
+                            .iter()
+                            .any(|item| item.get("id") == workspace.get("id"))
+                    })
+            })
             .map(|workspace| {
                 let pane_source = if string_field(workspace, "id") == Some(active_workspace_id) {
                     active_workspace_source.unwrap_or(workspace)
@@ -164,6 +174,7 @@ pub(super) fn build_remote_navigation_payload(
     json!({
         "activeWorkspaceId": active_workspace_id,
         "workspaces": workspaces,
+        "pendingWorkspaceCloses": workspaces_data.get("pendingWorkspaceCloses").cloned().unwrap_or_else(|| json!([])),
         "activeWorkspace": active_workspace,
         "docks": docks,
         "terminals": terminals,
@@ -1640,5 +1651,26 @@ mod tests {
             .map(|workspace| workspace["id"].as_str().unwrap())
             .collect::<Vec<_>>();
         assert_eq!(notification_ids, vec!["ws-a", "ws-c", "ws-b"]);
+    }
+
+    #[test]
+    fn navigation_excludes_closing_workspaces_and_shares_undo_deadlines() {
+        let pending = json!([{ "id": "ws-b", "name": "B", "expiresAt": 123456 }]);
+        let payload = build_remote_navigation_payload(
+            &json!({ "activeWorkspaceId": "ws-a", "pendingWorkspaceCloses": pending,
+                "workspaces": [
+                    { "id": "ws-a", "name": "A", "panes": [] },
+                    { "id": "ws-b", "name": "B", "panes": [] }
+                ] }),
+            &json!({ "workspace": null }),
+            &json!({ "docks": [] }),
+            &json!({ "instances": [] }),
+            &json!({ "notifications": [] }),
+            &json!({}),
+            host_state(&[]),
+        );
+        assert_eq!(payload["workspaces"].as_array().unwrap().len(), 1);
+        assert_eq!(payload["workspaces"][0]["id"], "ws-a");
+        assert_eq!(payload["pendingWorkspaceCloses"], pending);
     }
 }

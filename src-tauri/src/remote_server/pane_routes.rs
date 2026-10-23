@@ -35,13 +35,14 @@ fn action_request_from_body(body: &[u8]) -> Result<ItemActionRequest, serde_json
 enum ItemAction {
     ClosePane,
     CloseWorkspace,
+    RestoreWorkspaceClose,
     StackPane,
 }
 
 impl ItemAction {
     fn bridge_category(self) -> &'static str {
         match self {
-            Self::CloseWorkspace => "workspaces",
+            Self::CloseWorkspace | Self::RestoreWorkspaceClose => "workspaces",
             Self::ClosePane | Self::StackPane => "panes",
         }
     }
@@ -49,14 +50,15 @@ impl ItemAction {
     fn bridge_action(self) -> &'static str {
         match self {
             Self::ClosePane => "closeById",
-            Self::CloseWorkspace => "remove",
+            Self::CloseWorkspace => "requestClose",
+            Self::RestoreWorkspaceClose => "restoreClose",
             Self::StackPane => "stackById",
         }
     }
 
     fn bridge_params(self, id: &str) -> serde_json::Value {
         match self {
-            Self::CloseWorkspace => serde_json::json!({ "id": id }),
+            Self::CloseWorkspace | Self::RestoreWorkspaceClose => serde_json::json!({ "id": id }),
             Self::ClosePane | Self::StackPane => serde_json::json!({ "paneId": id }),
         }
     }
@@ -65,13 +67,16 @@ impl ItemAction {
         match self {
             Self::ClosePane => "remote.panes.close",
             Self::CloseWorkspace => "remote.workspaces.close",
+            Self::RestoreWorkspaceClose => "remote.workspaces.restoreClose",
             Self::StackPane => "remote.panes.stack",
         }
     }
 
     fn invalid_body_message(self) -> &'static str {
         match self {
-            Self::ClosePane | Self::CloseWorkspace => "invalid close request",
+            Self::ClosePane | Self::CloseWorkspace | Self::RestoreWorkspaceClose => {
+                "invalid close request"
+            }
             Self::StackPane => "invalid stack request",
         }
     }
@@ -93,6 +98,22 @@ pub(super) async fn remote_workspace_close(
     body: axum::body::Bytes,
 ) -> Response {
     run_item_action(&server, id, headers, body, ItemAction::CloseWorkspace).await
+}
+
+pub(super) async fn remote_workspace_restore_close(
+    State(server): State<ServerState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    run_item_action(
+        &server,
+        id,
+        headers,
+        body,
+        ItemAction::RestoreWorkspaceClose,
+    )
+    .await
 }
 
 /// Stack a terminal inheriting pane `id`'s profile and CWD (ADR-0339).

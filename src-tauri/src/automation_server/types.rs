@@ -293,6 +293,8 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("POST", "/api/v1/workspaces/reorder"),
     ("DELETE", "/api/v1/workspaces/{id}"),
     ("POST", "/api/v1/workspaces/{id}/clear"),
+    ("POST", "/api/v1/workspaces/{id}/close"),
+    ("POST", "/api/v1/workspaces/{id}/restore-close"),
     ("POST", "/api/v1/layouts/export"),
     ("GET", "/api/v1/grid"),
     ("POST", "/api/v1/grid/edit-mode"),

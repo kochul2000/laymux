@@ -36,12 +36,7 @@ export function createWorkspaceManager({ getLease, rename, hide, saveTemplate, r
   const error = dialog.querySelector("[role=alert]");
   const hideButton = dialog.querySelector('[data-workspace-action="hide"]');
   const removeButton = dialog.querySelector('[data-workspace-action="remove"]');
-  let removeArmed = false;
   let canRemove = false;
-  function disarmRemove() {
-    removeArmed = false;
-    delete removeButton.dataset.confirming;
-  }
   let target = null;
   let trigger = null;
   let openingLease = null;
@@ -51,7 +46,6 @@ export function createWorkspaceManager({ getLease, rename, hide, saveTemplate, r
   let formMode = "rename";
 
   function close() {
-    disarmRemove();
     revision += 1;
     if (dialog.open) dialog.close();
   }
@@ -70,6 +64,9 @@ export function createWorkspaceManager({ getLease, rename, hide, saveTemplate, r
     });
     hideButton.disabled = value || !canHide;
     removeButton.disabled = value || !canRemove;
+    removeButton.title = canRemove
+      ? "Close workspace"
+      : "The last visible workspace cannot be closed";
     hideButton.title = canHide ? "Hide workspace" : "The last visible workspace cannot be hidden";
   }
 
@@ -115,20 +112,7 @@ export function createWorkspaceManager({ getLease, rename, hide, saveTemplate, r
   });
   removeButton.addEventListener("click", () => {
     if (busy || !canRemove || !authorized()) return;
-    if (!removeArmed) {
-      removeArmed = true;
-      removeButton.dataset.confirming = "true";
-      return;
-    }
-    disarmRemove();
     void perform((id, lease) => remove(id, lease));
-  });
-  removeButton.addEventListener("blur", disarmRemove);
-  removeButton.addEventListener("pointerleave", (event) => {
-    if (event.pointerType !== "touch") disarmRemove();
-  });
-  dialog.addEventListener("pointerdown", (event) => {
-    if (!removeButton.contains(event.target)) disarmRemove();
   });
   form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -191,7 +175,6 @@ export function createWorkspaceManager({ getLease, rename, hide, saveTemplate, r
       openingLease = getLease();
       trigger = button;
       canHide = canHideWorkspace;
-      disarmRemove();
       canRemove = Boolean(remove && options.canClose);
       removeButton.hidden = !remove;
       title.textContent = target.name;
@@ -212,7 +195,7 @@ export function createWorkspaceManager({ getLease, rename, hide, saveTemplate, r
         return;
       }
       canHide = !workspace.isActive || workspaces.filter((item) => !item.hidden).length > 1;
-      canRemove = Boolean(remove && workspaces.length > 1);
+      canRemove = Boolean(remove && workspaces.filter((item) => !item.hidden).length > 1);
       removeButton.disabled = busy || !canRemove;
       hideButton.disabled = busy || !canHide;
       hideButton.title = canHide ? "Hide workspace" : "The last visible workspace cannot be hidden";

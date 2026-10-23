@@ -181,6 +181,34 @@ describe("bridge timing budget", () => {
 });
 
 describe("handleAutomationRequest", () => {
+  it("Remote 닫기·복원 bridge는 같은 workspace와 만료를 공유한다", () => {
+    vi.useFakeTimers();
+    try {
+      useWorkspaceStore.getState().addWorkspace("Second", "default-layout");
+      const workspace = useWorkspaceStore.getState().workspaces[1];
+      const call = (method: string) =>
+        handleAutomationRequest({
+          requestId: method,
+          category: "action",
+          target: "workspaces",
+          method,
+          params: { id: workspace.id },
+        });
+      expect(call("requestClose").success).toBe(true);
+      expect(useWorkspaceStore.getState().workspaces[1]).toBe(workspace);
+      expect(useWorkspaceStore.getState().pendingWorkspaceCloses[0].id).toBe(workspace.id);
+      expect(call("restoreClose").success).toBe(true);
+      vi.advanceTimersByTime(5000);
+      expect(useWorkspaceStore.getState().workspaces[1]).toBe(workspace);
+      expect(call("requestClose").success).toBe(true);
+      vi.advanceTimersByTime(5000);
+      expect(useWorkspaceStore.getState().workspaces).toHaveLength(1);
+      expect(call("restoreClose").success).toBe(false);
+    } finally {
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
+  });
   it("템플릿 저장의 source 소실을 오류로 반환하고 다른 workspace는 저장하지 않는다", () => {
     const before = useWorkspaceStore.getState().layouts;
     const result = handleAutomationRequest({

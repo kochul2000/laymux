@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { requestWorkspaceClose, restoreWorkspaceClose } from "@/lib/workspace-close";
 import { requestTerminalOutputReconnect } from "@/lib/terminal-output-reconnect";
 import html2canvas from "html2canvas";
 import { onAutomationRequest, automationResponse, type AutomationRequest } from "@/lib/tauri-api";
@@ -590,6 +591,7 @@ const handlers: HandlerMap = {
         workspaces: enrichedWorkspaces,
         activeWorkspaceId,
         workspaceDisplayOrder,
+        pendingWorkspaceCloses: useWorkspaceStore.getState().pendingWorkspaceCloses,
       });
     },
     getActive: () => {
@@ -642,11 +644,31 @@ const handlers: HandlerMap = {
         workspace: { id: updatedWs.id, name: updatedWs.name, paneCount: updatedWs.panes.length },
       });
     },
+    requestClose: (p) => {
+      const id = p.id as string;
+      if (!requestWorkspaceClose(id)) return err("Cannot close missing or last visible workspace");
+      return ok({
+        closing: id,
+        pendingWorkspaceCloses: useWorkspaceStore.getState().pendingWorkspaceCloses,
+      });
+    },
+    restoreClose: (p) => {
+      const id = p.id as string;
+      if (!restoreWorkspaceClose(id))
+        return err("Workspace close has already expired or was cancelled");
+      return ok({ restored: id });
+    },
     remove: (p) => {
       const id = p.id as string;
       const wsErr = checkWorkspaceExists(id);
       if (wsErr) return wsErr;
       if (useWorkspaceStore.getState().workspaces.length <= 1)
+        return err("Cannot close the last workspace");
+      const state = useWorkspaceStore.getState();
+      if (
+        !state.pendingWorkspaceCloses.some((item) => item.id === id) &&
+        state.getOrderedWorkspaces().length <= 1
+      )
         return err("Cannot close the last workspace");
       const wasActive = useWorkspaceStore.getState().activeWorkspaceId === id;
       useWorkspaceStore.getState().removeWorkspace(id);

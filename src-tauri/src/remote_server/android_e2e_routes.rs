@@ -612,6 +612,7 @@ fn http_path_allowed(method: &Method, path: &str) -> bool {
                 || id_action_path(path, "/remote/v1/panes/", "close")
                 || id_action_path(path, "/remote/v1/panes/", "stack")
                 || id_action_path(path, "/remote/v1/workspaces/", "close")
+                || id_action_path(path, "/remote/v1/workspaces/", "restore-close")
         }
         _ => false,
     }

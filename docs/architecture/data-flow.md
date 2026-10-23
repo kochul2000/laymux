@@ -1060,6 +1060,10 @@ dev 빌드의 StrictMode는 TerminalView를 한 번 닫았다 다시 열어서, 
 
 ## 9. WorkspaceSelectorView (cmux 클론)
 
+### 워크스페이스 닫기 유예
+
+Selector와 `workspace.close` 단축키는 `requestWorkspaceClose`를 호출한다. 호스트의 `pendingWorkspaceCloses`에 `{id,name,expiresAt}`를 추가하고 활성 대상이면 공통 전환으로 남은 표시 workspace에 착지한다. 대기 대상은 목록·숨김 shelf·이동 후보에서 제외되지만 실제 `workspaces`와 마운트된 pane은 유지한다. 숨긴 live pane의 자동 종료도 유예한다. PC 닫기 토스트는 `WorkspaceSelectorView` 하단에서 숨김 복원 토스트와 같은 `UndoSnackbar` 모양과 `undo-snackbar-stack`을 공유한다. Remote는 화면 하단 가로 토스트로 같은 대기 목록을 표시한다. 복원은 대기만 취소한다. 각 호스트 타이머는 5초 후 기존 `removeWorkspace`를 호출해 workspace 및 부속 상태를 정리하고 pane unmount로 PTY를 닫는다. 화면 이동·토스트 컴포넌트 unmount·모바일 연결 해제는 이 타이머를 취소하거나 연장하지 않는다. 대기 목록은 영속 스냅샷에 포함하지 않는다([ADR-0354](../adr/0354-workspace-close-undo-grace-period.md)).
+
 ### UI 구조
 
 ```

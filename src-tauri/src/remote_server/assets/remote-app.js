@@ -3,6 +3,7 @@ import { createRemoteSettingsBridge } from "../../../../ui/src/remote/remote-set
 import { createRemoteMemo } from "../../../../ui/src/remote/remote-memo.js";
 import { createRemoteWorktrees } from "../../../../ui/src/remote/remote-worktrees.js";
 import { createWorkspaceManager } from "../../../../ui/src/remote/remote-workspace-manager.js";
+import { createWorkspaceCloseToasts } from "../../../../ui/src/remote/remote-workspace-close-toasts.js";
 import { createPaneManager, installWorkspaceRenameGesture } from "../../../../ui/src/remote/remote-pane-controls.js";
 import {
   DEFAULT_REMOTE_KEYBOARD_SETTINGS, REMOTE_NAV_MODIFIERS, REMOTE_NAV_TARGETS,
@@ -346,6 +347,17 @@ import {
         const REMOTE_LONG_TEXT_ATTACHMENT_THRESHOLD_BYTES = 5 * 1024;
         const attachmentTextEncoder = new TextEncoder();
         let leaseId = null;
+        const workspaceCloseToasts = createWorkspaceCloseToasts({
+          getLease: () => leaseId,
+          restore: async (id, selectedLeaseId) => {
+            await remoteFetch(`/remote/v1/workspaces/${encodeURIComponent(id)}/restore-close`, {
+              method: "POST", body: JSON.stringify({ leaseId: selectedLeaseId }),
+            });
+            if (leaseId !== selectedLeaseId) return;
+            await loadNavigation(activeTerminalId, { openOutput: false });
+          },
+          onError: (error) => setStatus(error.message || String(error), true),
+        });
         const workspaceManager = createWorkspaceManager({
           getLease: () => leaseId,
           rename: async (id, name, selectedLeaseId) => {
@@ -360,10 +372,11 @@ import {
           hide: (id) => setWorkspaceVisibility(id, true),
           remove: async (id, selectedLeaseId) => {
             const closingCurrent = navigationState?.activeWorkspace?.id === id;
-            await remoteFetch(`/remote/v1/workspaces/${encodeURIComponent(id)}/close`, {
+            const result = await remoteFetch(`/remote/v1/workspaces/${encodeURIComponent(id)}/close`, {
               method: "POST", body: JSON.stringify({ leaseId: selectedLeaseId }),
             });
             if (leaseId !== selectedLeaseId) return;
+            workspaceCloseToasts.sync(result.pendingWorkspaceCloses);
             await loadNavigation(activeTerminalId, { openOutput: closingCurrent });
           },
           saveTemplate: async (workspaceId, name, selectedLeaseId) => {
@@ -4666,6 +4679,7 @@ import {
         }
 
         function setConnected(connected) {
+          if (!connected) workspaceCloseToasts.sync([]);
           if (connectionPanel) connectionPanel.classList.toggle("connected", connected);
           if (connected) setConnectionHint("Connect first to load workspaces and control the active terminal.", false);
           workspaceSection.classList.toggle("locked", !connected);
@@ -8485,7 +8499,7 @@ import {
           manage.title = "Manage workspace";
           manage.addEventListener("click", (event) => {
             event.stopPropagation();
-            workspaceManager.open(workspace, canHideWorkspace, manage, { canClose: (navigationState.workspaces || []).length > 1 });
+            workspaceManager.open(workspace, canHideWorkspace, manage, { canClose: (navigationState.workspaces || []).filter((item) => !item.hidden).length > 1 });
           });
           right.append(manage);
           installWorkspaceRenameGesture(item, () => workspaceManager.open(
@@ -9044,6 +9058,7 @@ import {
 
         function installNavigationSnapshot(data, { render = true } = {}) {
           navigationState = data;
+          workspaceCloseToasts.sync(data.pendingWorkspaceCloses);
           const terminals = data.terminals || [];
           terminalInfoById = new Map(terminals.map((terminalInfo) => [terminalInfo.id, terminalInfo]));
           terminals.forEach((terminalInfo) => ensureRemoteFont(terminalInfo.appearance));

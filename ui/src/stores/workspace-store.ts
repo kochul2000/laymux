@@ -149,12 +149,20 @@ const defaultWorkspace: Workspace = {
   ],
 };
 
+export interface PendingWorkspaceClose {
+  id: string;
+  name: string;
+  expiresAt: number;
+}
+
 interface WorkspaceState {
   layouts: Layout[];
   workspaces: Workspace[];
   activeWorkspaceId: string;
   /** Display order for WorkspaceSelectorView. Empty = natural workspaces array order. */
   workspaceDisplayOrder: string[];
+  /** Host-owned undo grace period; never persisted. */
+  pendingWorkspaceCloses: PendingWorkspaceClose[];
 
   getActiveWorkspace: () => Workspace | undefined;
   /** Return workspaces sorted by display order (respects DnD reordering). */
@@ -260,6 +268,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   workspaces: [defaultWorkspace],
   activeWorkspaceId: defaultWorkspace.id,
   workspaceDisplayOrder: [] as string[],
+  pendingWorkspaceCloses: [],
 
   getActiveWorkspace: () => {
     const { workspaces, activeWorkspaceId } = get();
@@ -267,7 +276,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
 
   getOrderedWorkspaces: () => {
-    const { workspaces, workspaceDisplayOrder } = get();
+    const { workspaces: allWorkspaces, workspaceDisplayOrder, pendingWorkspaceCloses } = get();
+    const workspaces = allWorkspaces.filter(
+      (ws) => !pendingWorkspaceCloses.some((p) => p.id === ws.id),
+    );
     if (workspaceDisplayOrder.length === 0) return workspaces;
     const orderMap = new Map(workspaceDisplayOrder.map((id, i) => [id, i]));
     return [...workspaces].sort(
@@ -276,8 +288,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
 
   setActiveWorkspace: (id) => {
-    const { workspaces } = get();
-    if (workspaces.some((ws) => ws.id === id)) {
+    const { workspaces, pendingWorkspaceCloses } = get();
+    if (workspaces.some((ws) => ws.id === id) && !pendingWorkspaceCloses.some((p) => p.id === id)) {
       set({ activeWorkspaceId: id });
     }
   },
@@ -363,17 +375,29 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
 
   removeWorkspace: (id) => {
-    const { workspaces, activeWorkspaceId } = get();
+    const { workspaces, activeWorkspaceId, pendingWorkspaceCloses } = get();
     if (workspaces.length <= 1) return;
+    if (
+      !pendingWorkspaceCloses.some((p) => p.id === id) &&
+      get().getOrderedWorkspaces().length <= 1
+    )
+      return;
 
     const victim = workspaces.find((ws) => ws.id === id);
     const filtered = workspaces.filter((ws) => ws.id !== id);
-    const newActive = activeWorkspaceId === id ? filtered[0].id : activeWorkspaceId;
+    const newActive =
+      activeWorkspaceId === id
+        ? (
+            filtered.find((ws) => !pendingWorkspaceCloses.some((p) => p.id === ws.id)) ??
+            filtered[0]
+          ).id
+        : activeWorkspaceId;
 
     set((state) => ({
       workspaces: filtered,
       activeWorkspaceId: newActive,
       workspaceDisplayOrder: state.workspaceDisplayOrder.filter((wsId) => wsId !== id),
+      pendingWorkspaceCloses: state.pendingWorkspaceCloses.filter((item) => item.id !== id),
     }));
 
     if (victim) {
