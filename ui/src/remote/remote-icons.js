@@ -199,7 +199,11 @@ export function commandStatusIconName(status) {
   // Typed task semantics are authoritative; the glyph map is legacy presentation only.
   if (status && typeof status === "object") {
     return COMMAND_STATUS_ICONS[
-      taskStatusGlyph(status.taskState, status.taskResult, status.outputActive)
+      taskStatusGlyph(
+        status.taskState,
+        status.taskResult,
+        status.outputActivityFallback !== false && status.outputActive,
+      )
     ];
   }
   return COMMAND_STATUS_ICONS[status] || null;

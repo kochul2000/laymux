@@ -1,4 +1,5 @@
 import { getHandler, isRegisteredInteractiveApp } from "./activity-handler";
+import { prepareAgentClear } from "./agent-clear-composer";
 import { isTaskObservedAgent, terminalTaskPolicy } from "./terminal-task";
 import { resolvePaneCwd, type CwdBearingPane } from "./pane-cwd";
 import { toPaneId, toTerminalId } from "./pane-ids";
@@ -140,7 +141,9 @@ export function planTerminalClear(
   // An agent nothing has reported on yet, such as one adopted after an
   // update, is not known to be working (ADR-0319).
   const reason =
-    isTaskObservedAgent(instance) && policy.state === undefined && !policy.outputActive
+    isTaskObservedAgent(instance) &&
+    policy.state === undefined &&
+    (!policy.outputActive || activity?.name === "Claude" || activity?.name === "Codex")
       ? "stateUnknown"
       : "busy";
 
@@ -333,10 +336,46 @@ export async function clearPane(
   return runPaneClearAction({
     action,
     config,
-    submit: (id, text) =>
-      remoteLeaseId === undefined
-        ? writeTerminalInput(id, text, true)
-        : writeTerminalInputForRemote(id, text, true, remoteLeaseId),
+    submit: async (id, text) => {
+      const submit = async () => {
+        if (deadlineAt !== undefined && Date.now() >= deadlineAt)
+          throw new Error("Agent clear deadline elapsed before submission");
+        if (remoteLeaseId === undefined) await writeTerminalInput(id, text, true);
+        else await writeTerminalInputForRemote(id, text, true, remoteLeaseId);
+      };
+      const before = useTerminalStore.getState().instances.find((i) => i.id === id);
+      const provider = before?.activity?.name;
+      if (provider === "Codex" || provider === "Claude") {
+        const current = () => {
+          const now = useTerminalStore.getState().instances.find((i) => i.id === id);
+          return (
+            !!now &&
+            now.sessionReady !== false &&
+            now.generation === before?.generation &&
+            now.taskEpoch === before?.taskEpoch &&
+            now.lastUserInputAt === before?.lastUserInputAt &&
+            now.activity?.name === provider &&
+            terminalTaskPolicy(now).clearAllowed
+          );
+        };
+        await prepareAgentClear(
+          id,
+          provider,
+          (bytes) =>
+            remoteLeaseId === undefined
+              ? writeToTerminal(id, bytes)
+              : writeToTerminalForRemote(id, bytes, remoteLeaseId),
+          current,
+          Math.min(deadlineAt ?? Infinity, Date.now() + 3000),
+          async () => {
+            if (!current()) throw new Error("Agent clear scope changed before submission");
+            await submit();
+          },
+        );
+        return;
+      }
+      await submit();
+    },
     interrupt: (id) =>
       remoteLeaseId === undefined
         ? writeToTerminal(id, CTRL_C)

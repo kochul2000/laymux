@@ -2517,3 +2517,9 @@ Dev POST `/api/v1/ui/lifecycle`는 `{action:"open"}`으로 실제 업데이트 �
 Dev POST `/api/v1/dev/update-handoff`는 설치기 없이 업데이트 인계(ADR-0308)를 실행한다. `{mode:"installer"}`는 설치 직전 teardown(`release_installer_file_locks`)을 실행한 뒤 `process::exit(0)`으로 끝나고, `{mode:"restart"}`는 인계를 표시한 뒤 `app.restart()`를 부른다. `installer`·`restart`는 설치 뒤의 경로만 실행하고 응답(202) 직후 프로세스가 끝난다. `{mode:"prepare"}`는 실제 설치 준비 함수의 입력 fence/drain → native checkpoint 요청 → 전체 레이아웃·세션 저장 → 출력 캐시 → ACK를 실행한다(ADR-0323). 200 응답의 `result`는 `{checkpointCommitId,preparation}`이며 마지막 캐시 진행 상태를 포함한다. 검증이 소유한 fence와 직전 업데이트 snapshot은 성공·실패 뒤 복구하고 설치하거나 종료하지 않는다. 다른 종료·업데이트·입력 fence가 진행 중이면 409로 거절하며 HTTP 호출자가 끊겨도 시작한 준비는 끝낸 뒤 해제한다. release는 모든 모드에서 403이다.
 
 Dev POST `/api/v1/ui/key`는 `{key,ctrl?,alt?,shift?}`로 포커스된 요소에서 `keydown` 하나를 발생시켜, 실제 키 입력과 같은 터미널 패스스루 → 문서 단축키 경로를 자율 검증 루프에서 재현한다(OS 키 주입이 불가능한 비대화형 세션 대비). 응답은 `{dispatched,defaultPrevented,target}`이다. Rust debug gate와 frontend DEV gate를 모두 적용한다.
+
+### 에이전트 상태·clear 보완 (ADR-0355)
+
+검증된 `HookStateSnapshot`은 선택적인 CLI `turnId`를 포함한다. Codex 종료 결과는 같은 generation·session ID·turn ID의 확정된 rollout 결과만 합친다. 유휴·종료 훅은 현재 귀속의 6초 lease 안에서 유지하며, 진행·입력 대기는 기존 60초 기한을 유지한다. `CommandStatus.outputActivityFallback=false`는 Claude·Codex의 원시 출력 활동을 작업 표시 근거에서 제외한다. Desktop·Remote는 같은 값을 사용하고 원시 `outputActive`를 보존한다.
+
+`POST /api/v1/panes/{paneId}/clear` 및 Remote clear는 Claude·Codex에서 현재 화면의 지원하는 텍스트 입력창을 확인하고 초안을 제한된 Backspace/Delete 배치로 삭제한다. 180ms 동안 빈 입력창을 확인한 뒤 제출한다. 최대 32회·3초이며 bridge hard deadline을 우선한다. 지원하지 않는 화면·미확인 작업·세대 교체·삭제 실패는 기존 `failed` 배열로 반환하고 `/clear`를 제출하지 않는다. Grok은 이 변경 대상이 아니다.
