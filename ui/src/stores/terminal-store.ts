@@ -68,6 +68,8 @@ export interface TerminalInstance {
   codexTurn?: import("@/lib/tauri-api").CodexTurnSnapshot;
   /** Claude transcript results per task source (ADR-0340). Runtime only. */
   claudeTurns?: import("@/lib/claude-turn-result").ClaudeTurns;
+  /** Current Grok session/turn record; independent of hook and title observations. */
+  grokTurn?: import("@/lib/tauri-api").AgentSessionState;
   /**
    * Which backend detector armed the current `outputActive` (ADR-0147), or
    * `undefined` when it came from a path that does not report one (the title
@@ -116,6 +118,7 @@ interface TerminalStoreState {
         | "outputActive"
         | "codexTurn"
         | "claudeTurns"
+        | "grokTurn"
         | "outputActiveSource"
         | "syncGroup"
         | "activityMessage"
@@ -139,7 +142,9 @@ function selectTask(instance: TerminalInstance) {
       ? settings.claude.stateDetection
       : instance.activity?.name === "Codex"
         ? settings.codex.stateDetection
-        : undefined;
+        : instance.activity?.name === "Grok"
+          ? settings.grok.stateDetection
+          : undefined;
   return selectDetectedTask(instance, mode ?? "heuristic");
 }
 
@@ -200,6 +205,7 @@ export const useTerminalStore = create<TerminalStoreState>()((set, get) => ({
                 deferredTaskInput: undefined,
                 codexTurn: undefined,
                 claudeTurns: undefined,
+                grokTurn: undefined,
                 taskEpoch: (inst.taskEpoch ?? 0) + 1,
                 livenessConfirmed: info.livenessConfirmed ?? false,
               }

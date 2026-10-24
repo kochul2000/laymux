@@ -15,7 +15,8 @@ import {
 import { persistSession } from "@/lib/persist-session";
 import { useSettingsStore } from "@/stores/settings-store";
 
-const providerName = (provider: string) => (provider === "codex" ? "Codex" : "Claude");
+const providerName = (provider: string) =>
+  ({ claude: "Claude", codex: "Codex", grok: "Grok" })[provider] ?? provider;
 
 export function AgentHookUpdateNotice() {
   const { t } = useTranslation("settings");

@@ -503,7 +503,8 @@ export function computeCommandStatus(
   };
   const handler = getHandler(activity);
   const outputActivityFallback =
-    activity?.type !== "interactiveApp" || !["Claude", "Codex"].includes(activity.name ?? "");
+    activity?.type !== "interactiveApp" ||
+    !["Claude", "Codex", "Grok"].includes(activity.name ?? "");
   const status = taskPresentation(
     task,
     Date.now(),

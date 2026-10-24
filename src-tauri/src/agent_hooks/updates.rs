@@ -41,7 +41,7 @@ pub(super) fn running_distros() -> Result<Vec<String>, AppError> {
 fn requests(running: &[String], observations: &[Value]) -> Vec<ManageRequest> {
     let mut requests = Vec::new();
     for distro in std::iter::once(None).chain(running.iter().cloned().map(Some)) {
-        for provider in ["claude", "codex"] {
+        for provider in ["claude", "codex", "grok"] {
             requests.push(ManageRequest {
                 provider: provider.into(),
                 operation: "status".into(),
@@ -55,7 +55,7 @@ fn requests(running: &[String], observations: &[Value]) -> Vec<ManageRequest> {
         if distro.as_ref().is_some_and(|d| !running.contains(d)) {
             continue;
         }
-        let (Some(provider @ ("claude" | "codex")), Some(root)) =
+        let (Some(provider @ ("claude" | "codex" | "grok")), Some(root)) =
             (entry["provider"].as_str(), entry["configDir"].as_str())
         else {
             continue;
@@ -197,7 +197,8 @@ mod tests {
             json!({"provider":"claude","distro":null,"configDir":"/native-custom"}),
         ];
         let values = requests(&["Ubuntu".into()], &observations);
-        assert_eq!(values.len(), 6);
+        assert_eq!(values.len(), 8);
+        assert_eq!(values.iter().filter(|r| r.provider == "grok").count(), 2);
         assert!(values
             .iter()
             .all(|r| r.operation == "status" && r.distro.as_deref() != Some("Stopped")));
@@ -219,7 +220,7 @@ mod tests {
             },
         );
         assert_eq!(result["errors"].as_array().unwrap().len(), 1);
-        assert_eq!(result["targets"].as_array().unwrap().len(), 3);
+        assert_eq!(result["targets"].as_array().unwrap().len(), 5);
         assert!(result["targets"]
             .as_array()
             .unwrap()
@@ -250,7 +251,7 @@ mod tests {
         );
         assert_eq!(attempts, 2);
         assert!(result["errors"].as_array().unwrap().is_empty());
-        assert_eq!(result["targets"].as_array().unwrap().len(), 4);
+        assert_eq!(result["targets"].as_array().unwrap().len(), 6);
     }
 
     #[test]
@@ -269,8 +270,8 @@ mod tests {
                 }
             },
         );
-        assert_eq!(attempts.len(), 5);
-        assert_eq!(result["errors"].as_array().unwrap().len(), 4);
+        assert_eq!(attempts.len(), 7);
+        assert_eq!(result["errors"].as_array().unwrap().len(), 6);
     }
 
     #[test]
@@ -300,8 +301,8 @@ mod tests {
             ]
         );
         assert_eq!(remaining.get(), Duration::ZERO);
-        assert_eq!(result["targets"].as_array().unwrap().len(), 2);
-        assert_eq!(result["errors"].as_array().unwrap().len(), 2);
+        assert_eq!(result["targets"].as_array().unwrap().len(), 3);
+        assert_eq!(result["errors"].as_array().unwrap().len(), 3);
     }
 
     #[test]
@@ -325,7 +326,7 @@ mod tests {
         );
         assert_eq!(calls, 1);
         assert!(result["errors"].as_array().unwrap().is_empty());
-        assert_eq!(result["targets"].as_array().unwrap().len(), 4);
+        assert_eq!(result["targets"].as_array().unwrap().len(), 6);
     }
 
     #[test]
@@ -407,8 +408,8 @@ mod tests {
                 )
             },
         );
-        assert_eq!(attempts, 6);
-        assert_eq!(result["targets"].as_array().unwrap().len(), 6);
+        assert_eq!(attempts, 8);
+        assert_eq!(result["targets"].as_array().unwrap().len(), 8);
     }
 
     #[cfg(windows)]

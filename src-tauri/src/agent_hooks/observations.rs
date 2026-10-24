@@ -141,7 +141,7 @@ impl HookRegistry {
         }
         if next.is_some() || event.event == "SessionEnd" {
             entry.result = match event.event.as_str() {
-                "Interrupt" => Some(HookResult::Interrupted),
+                "Interrupt" | "StopCancelled" => Some(HookResult::Interrupted),
                 "StopFailure" => Some(HookResult::Failure),
                 _ => None,
             };
@@ -181,6 +181,17 @@ fn same_conversation(a: &HookEvent, b: &HookEvent) -> bool {
         && a.config_dir == b.config_dir
 }
 fn phase(event: &HookEvent) -> Option<HookPhase> {
+    // Grok Stop is a blocking gate which can continue the same prompt. Only
+    // its matching turn_completed record may establish normal completion.
+    if event.provider == "grok"
+        && (event.event == "Stop"
+            || (event.turn_id.is_none()
+                && (matches!(event.event.as_str(), "StopFailure" | "StopCancelled")
+                    || (event.event == "Notification"
+                        && event.notification_type.as_deref() == Some("idle_prompt")))))
+    {
+        return None;
+    }
     match event.event.as_str() {
         "SessionStart" if matches!(event.source.as_deref(), None | Some("startup" | "clear")) => {
             Some(HookPhase::Idle)
@@ -191,7 +202,7 @@ fn phase(event: &HookEvent) -> Option<HookPhase> {
         "PreToolUse" => Some(
             if matches!(
                 event.tool_name.as_deref(),
-                Some("AskUserQuestion" | "request_user_input")
+                Some("AskUserQuestion" | "request_user_input" | "ask_user_question")
             ) {
                 HookPhase::Waiting
             } else {
@@ -199,7 +210,7 @@ fn phase(event: &HookEvent) -> Option<HookPhase> {
             },
         ),
         "PermissionRequest" | "Elicitation" => Some(HookPhase::Waiting),
-        "Stop" | "StopFailure" | "Interrupt" => Some(HookPhase::Ended),
+        "Stop" | "StopFailure" | "Interrupt" | "StopCancelled" => Some(HookPhase::Ended),
         "Notification" => match event.notification_type.as_deref() {
             Some("permission_prompt" | "elicitation_dialog") => Some(HookPhase::Waiting),
             Some("idle_prompt") => Some(HookPhase::Idle),
@@ -213,6 +224,25 @@ fn phase(event: &HookEvent) -> Option<HookPhase> {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn grok_stop_is_not_completion_and_late_cancel_cannot_finish_next_prompt() {
+        let mut registry = HookRegistry::default();
+        registry.observe(event("grok", "UserPromptSubmit", 100, Some("turn-1")));
+        registry.observe(event("grok", "Stop", 200, Some("turn-1")));
+        assert_eq!(
+            registry
+                .exact("grok", "session-a", None, 200)
+                .unwrap()
+                .phase,
+            Some(HookPhase::Running)
+        );
+        registry.observe(event("grok", "UserPromptSubmit", 300, Some("turn-2")));
+        assert!(!registry.observe(event("grok", "StopCancelled", 400, Some("turn-1"))));
+        registry.observe(event("grok", "StopCancelled", 500, Some("turn-2")));
+        let observed = registry.exact("grok", "session-a", None, 500).unwrap();
+        assert_eq!(observed.phase, Some(HookPhase::Ended));
+        assert_eq!(observed.result, Some(HookResult::Interrupted));
+    }
     fn event(provider: &str, kind: &str, time: u64, turn: Option<&str>) -> HookEvent {
         let mut event = laymux_agent_hook::runtime::parse_event(
             provider,

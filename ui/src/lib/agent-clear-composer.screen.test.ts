@@ -20,6 +20,26 @@ function dump(term: Terminal): TerminalBufferDump {
 }
 
 describe("실제 xterm 입력창 clear 판독", () => {
+  it("Grok의 테두리 입력창은 초안·여러 줄·빈 입력과 메뉴를 구분한다", async () => {
+    const surface = createScreenTerminal({ cols: 96, rows: 12 });
+    const frame = (text: string) =>
+      "  ╭──────────────────────────────────────────────────╮\r\n" +
+      text
+        .split("\n")
+        .map((l, i) => `  │ ${i === 0 ? "❯" : " "} ${l} │`)
+        .join("\r\n") +
+      "\r\n  ╰─────────────────────── Grok 4.7 (xhigh) ─╯\r\n  Shift+Tab:mode │ Ctrl+x:shortcuts";
+    try {
+      await surface.write(frame("Vim: esc to cancel\nsecond line"));
+      expect(agentClearComposer(dump(surface.terminal), "Grok")).toBe("draft");
+      await surface.write("\x1b[H\x1b[2J" + frame(""));
+      expect(agentClearComposer(dump(surface.terminal), "Grok")).toBe("empty");
+      await surface.write("\r\n  esc to cancel · enter to confirm");
+      expect(agentClearComposer(dump(surface.terminal), "Grok")).toBe("unsupported");
+    } finally {
+      surface.dispose();
+    }
+  });
   it.each(["Claude", "Codex"] as const)(
     "%s의 과거 응답과 초안에 있는 UI 문구는 편집 모드로 오인하지 않는다",
     async (provider) => {

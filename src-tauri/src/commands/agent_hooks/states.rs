@@ -50,7 +50,7 @@ pub(crate) fn get_agent_hook_states_impl(
     }
     if providers
         .iter()
-        .any(|p| !matches!(p.as_str(), "claude" | "codex"))
+        .any(|p| !matches!(p.as_str(), "claude" | "codex" | "grok"))
     {
         return Err("Unsupported hook provider".into());
     }
@@ -130,10 +130,10 @@ pub(crate) fn get_agent_hook_states_impl(
     let mut title_proofs = HashMap::new();
     for (id, generation, observation, title) in observations {
         let event = &observation.event;
-        let expected = if event.provider == "claude" {
-            "Claude"
-        } else {
-            "Codex"
+        let expected = match event.provider.as_str() {
+            "claude" => "Claude",
+            "grok" => "Grok",
+            _ => "Codex",
         };
         // A server or stale attribution must never keep a shell marked as an agent.
         if crate::process_tree::interactive_app_in_pty_fresh(state, &id)
@@ -217,10 +217,10 @@ pub(crate) fn get_agent_hook_states_impl(
                     same_verified_session(entry, a)
                 }
             }) && crate::process_tree::interactive_app_in_pty_fresh(state, id)
-                == crate::process_tree::PtyAppLiveness::Running(if entry.provider == "claude" {
-                    "Claude"
-                } else {
-                    "Codex"
+                == crate::process_tree::PtyAppLiveness::Running(match entry.provider.as_str() {
+                    "claude" => "Claude",
+                    "grok" => "Grok",
+                    _ => "Codex",
                 })
         });
     }
@@ -312,7 +312,7 @@ mod tests {
     }
     #[test]
     fn binding_requires_current_generation_provider_and_exact_conversation() {
-        for provider in ["claude", "codex"] {
+        for provider in ["claude", "codex", "grok"] {
             let snapshot = HookStateSnapshot {
                 generation: 4,
                 provider: provider.into(),
@@ -358,7 +358,7 @@ mod tests {
             assert!(!same_verified_session(
                 &snapshot,
                 &TerminalSessionAttribution {
-                    provider: Some("grok"),
+                    provider: Some(if provider == "grok" { "claude" } else { "grok" }),
                     ..exact.clone()
                 }
             ));

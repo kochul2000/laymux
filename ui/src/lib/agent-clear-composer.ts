@@ -1,6 +1,6 @@
 import { getTerminalInspector, type TerminalBufferDump } from "./terminal-serialize-registry";
 
-type Provider = "Claude" | "Codex";
+type Provider = "Claude" | "Codex" | "Grok";
 const POLL_MS = 60;
 const MAX_ROUNDS = 32;
 const pending = new Set<string>();
@@ -14,10 +14,27 @@ export function agentClearComposer(
   const lines = screen.lines.filter((l) => l.index >= screen.baseY).map((l) => l.text.trimEnd());
   const unsupportedChrome = (chrome: string[]) =>
     chrome.some((l) =>
-      /esc to interrupt|Reconnecting|Task is still running|\[Image\s|Vim:|-- (?:NORMAL|INSERT|REPLACE) --|enter.*(?:confirm|select)|esc.*(?:cancel|back)/i.test(
+      /esc to interrupt|ctrl\+c\s*:\s*cancel|Reconnecting|Task is still running|\[Image\s|Vim:|-- (?:NORMAL|INSERT|REPLACE) --|enter.*(?:confirm|select)|esc.*(?:cancel|back)/i.test(
         l,
       ),
     );
+  if (provider === "Grok") {
+    const bottom = lines.reduce(
+      (last, line, index) => (/^\s*╰─.*╯\s*$/.test(line) ? index : last),
+      -1,
+    );
+    const top = lines.reduce(
+      (last, line, index) => (index < bottom && /^\s*╭─+╮\s*$/.test(line) ? index : last),
+      -1,
+    );
+    if (top < 0 || bottom <= top + 1 || unsupportedChrome(lines.slice(bottom + 1)))
+      return "unsupported";
+    const input = lines.slice(top + 1, bottom).map((l) => /^\s*│(.*)│\s*$/.exec(l)?.[1]);
+    if (input.some((l) => l === undefined) || !/^\s*[❯›>](?:\s|$)/.test(input[0] ?? ""))
+      return "unsupported";
+    const first = (input[0] ?? "").replace(/^\s*[❯›>]\s?/, "");
+    return !first.trim() && input.slice(1).every((l) => !l?.trim()) ? "empty" : "draft";
+  }
   if (provider === "Codex") {
     const prompt = lines.reduce(
       (last, line, index) => (/^›(?:\s|$)/.test(line) ? index : last),

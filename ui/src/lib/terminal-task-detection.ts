@@ -1,5 +1,6 @@
 import type { TerminalInstance } from "@/stores/terminal-store";
 import { withClaudeTurnResult } from "./claude-turn-result";
+import { withGrokTurnResult } from "./grok-turn-result";
 import type { TerminalTask } from "./terminal-task";
 
 const mergedCodex = new WeakMap<
@@ -67,7 +68,9 @@ export function selectDetectedTask(
   const task = usable
     ? hook.snapshot.provider === "codex"
       ? withCodexTurnResult(instance)
-      : withClaudeTurnResult(hook.task, instance.claudeTurns?.hook)
+      : hook.snapshot.provider === "grok"
+        ? withGrokTurnResult(instance)
+        : withClaudeTurnResult(hook.task, instance.claudeTurns?.hook)
     : withClaudeTurnResult(heuristicTask(instance), instance.claudeTurns?.heuristic);
   const taskDetectionSource = usable ? "hooks" : "heuristic";
   return instance.task === task && instance.taskDetectionSource === taskDetectionSource

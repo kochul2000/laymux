@@ -12,16 +12,16 @@ fn completed(stop_reason: &str) -> String {
 
 fn turn(lines: &[&str]) -> Option<GrokTurn> {
     let text: String = lines.iter().map(|line| format!("{line}\n")).collect();
-    last_grok_turn(text.as_bytes(), false)
+    last_grok_turn(text.as_bytes(), false, "s")
 }
 
 #[test]
 fn a_session_without_a_user_message_is_idle() {
     assert_eq!(
         turn(&[SESSION_START]),
-        Some((AgentSessionStatus::Idle, None))
+        Some((AgentSessionStatus::Idle, None, None))
     );
-    assert_eq!(turn(&[]), Some((AgentSessionStatus::Idle, None)));
+    assert_eq!(turn(&[]), Some((AgentSessionStatus::Idle, None, None)));
 }
 
 #[test]
@@ -29,7 +29,7 @@ fn a_user_message_after_the_last_completion_is_running() {
     let done = completed("end_turn");
     assert_eq!(
         turn(&[SESSION_START, USER_MESSAGE, &done, USER_MESSAGE, TOOL_CALL]),
-        Some((AgentSessionStatus::Running, None))
+        Some((AgentSessionStatus::Running, None, None))
     );
 }
 
@@ -43,7 +43,7 @@ fn turn_completed_reports_how_the_turn_ended() {
         let done = completed(stop_reason);
         assert_eq!(
             turn(&[SESSION_START, USER_MESSAGE, TOOL_CALL, &done]),
-            Some((AgentSessionStatus::Ended, result)),
+            Some((AgentSessionStatus::Ended, result, Some("p".into()))),
             "{stop_reason}"
         );
     }
@@ -54,8 +54,12 @@ fn a_line_still_being_written_is_ignored() {
     let done = completed("end_turn");
     let text = format!("{USER_MESSAGE}\n{done}\n{{\"timestamp\":5,\"params\":{{\"upd");
     assert_eq!(
-        last_grok_turn(text.as_bytes(), false),
-        Some((AgentSessionStatus::Ended, Some(AgentTurnResult::Success)))
+        last_grok_turn(text.as_bytes(), false, "s"),
+        Some((
+            AgentSessionStatus::Ended,
+            Some(AgentTurnResult::Success),
+            Some("p".into())
+        ))
     );
 }
 
@@ -70,14 +74,15 @@ fn a_truncated_tail_skips_its_partial_first_line_and_never_infers_idle() {
     let done = completed("cancelled");
     let text = format!("ate\":{{}}}}\n{TOOL_CALL}\n{done}\n");
     assert_eq!(
-        last_grok_turn(text.as_bytes(), true),
+        last_grok_turn(text.as_bytes(), true, "s"),
         Some((
             AgentSessionStatus::Ended,
-            Some(AgentTurnResult::Interrupted)
+            Some(AgentTurnResult::Interrupted),
+            Some("p".into())
         ))
     );
     let text = format!("ate\":{{}}}}\n{TOOL_CALL}\n");
-    assert_eq!(last_grok_turn(text.as_bytes(), true), None);
+    assert_eq!(last_grok_turn(text.as_bytes(), true, "s"), None);
 }
 
 #[test]
@@ -86,12 +91,23 @@ fn read_grok_turn_reads_only_the_bounded_tail() {
     let path = tmp.path().join("updates.jsonl");
     let filler = format!("{TOOL_CALL}\n").repeat(GROK_UPDATES_READ_LIMIT as usize / 100);
     std::fs::write(&path, format!("{USER_MESSAGE}\n{filler}")).unwrap();
-    assert_eq!(read_grok_turn(&path).unwrap(), None);
+    assert_eq!(read_grok_turn(&path, "s").unwrap(), None);
 
     let done = completed("end_turn");
     std::fs::write(&path, format!("{USER_MESSAGE}\n{filler}{done}\n")).unwrap();
     assert_eq!(
-        read_grok_turn(&path).unwrap(),
-        Some((AgentSessionStatus::Ended, Some(AgentTurnResult::Success)))
+        read_grok_turn(&path, "s").unwrap(),
+        Some((
+            AgentSessionStatus::Ended,
+            Some(AgentTurnResult::Success),
+            Some("p".into())
+        ))
     );
+}
+
+#[test]
+fn matching_prompt_id_from_another_recorded_session_is_not_completion() {
+    let done = completed("end_turn");
+    let text = format!("{done}\n");
+    assert!(last_grok_turn(text.as_bytes(), false, "other-session").is_none());
 }

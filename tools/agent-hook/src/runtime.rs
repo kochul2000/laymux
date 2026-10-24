@@ -50,6 +50,11 @@ fn string(input: &Value, key: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
+fn grok_payload(input: &Value) -> bool {
+    input.get("sessionId").and_then(Value::as_str).is_some()
+        && input.get("hookEventName").and_then(Value::as_str).is_some()
+}
+
 pub fn parse_event(
     provider: &str,
     input: &Value,
@@ -57,7 +62,14 @@ pub fn parse_event(
     token: String,
 ) -> Result<HookEvent, String> {
     crate::install::config_name(provider)?;
-    let session_id = string(input, "session_id")
+    if provider != "grok" && grok_payload(input) {
+        return Err("Grok compatibility payload is not a Claude/Codex event".into());
+    }
+    let field = |snake: &str, camel: &str| {
+        string(input, snake)
+            .or_else(|| (provider == "grok").then(|| string(input, camel)).flatten())
+    };
+    let session_id = field("session_id", "sessionId")
         .filter(|s| {
             !s.is_empty()
                 && s.len() <= 256
@@ -77,14 +89,20 @@ pub fn parse_event(
         source: string(input, "source"),
         transcript_path: string(input, "transcript_path"),
         cwd: string(input, "cwd"),
-        agent_id: string(input, "agent_id"),
-        turn_id: string(input, "turn_id"),
+        agent_id: field("agent_id", "agentId").or_else(|| {
+            if provider == "grok" {
+                string(input, "subagentType")
+            } else {
+                None
+            }
+        }),
+        turn_id: field("turn_id", "promptId"),
         emitted_at_ms: 0,
         ancestors: Vec::new(),
         distro: None,
         config_dir: None,
-        tool_name: string(input, "tool_name"),
-        notification_type: string(input, "notification_type"),
+        tool_name: field("tool_name", "toolName"),
+        notification_type: field("notification_type", "notificationType"),
     })
 }
 
@@ -138,6 +156,11 @@ pub fn emit(provider: &str) -> Result<(), String> {
         return Err("Hook input too large".into());
     }
     let input: Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    // Grok also discovers Claude-compatible hooks. They are not Claude events
+    // and must not be sent under the Claude installation root/provider.
+    if provider != "grok" && grok_payload(&input) {
+        return Ok(());
+    }
     let mut event = parse_event(provider, &input, terminal_id, token)?;
     event.emitted_at_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -180,6 +203,24 @@ pub fn emit(provider: &str) -> Result<(), String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn grok_payload_preserves_prompt_identity_and_drops_contents() {
+        let input = json!({"sessionId":"grok-session", "hook_event_name":"PreToolUse", "hookEventName":"pre_tool_use", "promptId":"turn-2", "toolName":"ask_user_question", "notificationType":"permission_prompt", "prompt":"SECRET", "toolInput":{"text":"SECRET"}});
+        let event = parse_event("grok", &input, "pane".into(), "token".into()).unwrap();
+        assert_eq!(event.session_id, "grok-session");
+        assert_eq!(event.turn_id.as_deref(), Some("turn-2"));
+        assert_eq!(event.tool_name.as_deref(), Some("ask_user_question"));
+        assert_eq!(
+            event.notification_type.as_deref(),
+            Some("permission_prompt")
+        );
+        assert!(!serde_json::to_string(&event).unwrap().contains("SECRET"));
+        assert!(parse_event("claude", &input, "pane".into(), "token".into()).is_err());
+        let mut compatible = input.clone();
+        compatible["session_id"] = json!("grok-session");
+        assert!(parse_event("claude", &compatible, "pane".into(), "token".into()).is_err());
+    }
 
     #[test]
     fn forwards_identity_without_prompt_or_tool_contents() {

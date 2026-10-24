@@ -1394,6 +1394,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   },
   grok: {
     command: DEFAULT_GROK_COMMAND,
+    stateDetection: "heuristic" as const,
     restoreSession: true,
     sessionMaxAgeHours: DEFAULT_AGENT_SESSION_MAX_AGE_HOURS,
     statusMessageMode: "bullet-title" as const,
@@ -1840,6 +1841,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     const grok = data.grok
       ? {
           command: DEFAULT_GROK_COMMAND,
+          stateDetection: "heuristic" as const,
           restoreSession: true,
           sessionMaxAgeHours: DEFAULT_AGENT_SESSION_MAX_AGE_HOURS,
           statusMessageMode: "bullet-title" as const,

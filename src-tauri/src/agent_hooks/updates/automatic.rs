@@ -17,7 +17,7 @@ pub(super) fn run(
     // Preserve new discovery even if its diagnostic observation expires while
     // another inspection holds the gate.
     for entry in observations {
-        let (Some(provider @ ("claude" | "codex")), Some(root)) =
+        let (Some(provider @ ("claude" | "codex" | "grok")), Some(root)) =
             (entry["provider"].as_str(), entry["configDir"].as_str())
         else {
             continue;
@@ -131,7 +131,7 @@ mod tests {
         let cache = InspectionCache::default();
         // Use each request's literal root as the returned status path so a
         // capacity reservation cannot disappear through a default-root alias.
-        for provider in ["claude", "codex"] {
+        for provider in ["claude", "codex", "grok"] {
             let r = ManageRequest {
                 provider: provider.into(),
                 operation: "status".into(),
@@ -146,7 +146,7 @@ mod tests {
                 )
                 .unwrap();
         }
-        for index in 0..crate::constants::AGENT_HOOK_INSPECTION_MAX_TARGETS - 2 {
+        for index in 0..crate::constants::AGENT_HOOK_INSPECTION_MAX_TARGETS - 3 {
             let r = ManageRequest {
                 provider: "codex".into(),
                 operation: "status".into(),
@@ -169,6 +169,7 @@ mod tests {
         );
         assert_eq!(result["errors"].as_array().unwrap().len(), 1);
         assert!(cache.enabled("claude", None, None, false).unwrap());
+        assert!(cache.enabled("grok", None, None, false).unwrap());
         assert!(cache
             .enabled("codex", None, Some("/cached/0"), false)
             .unwrap());
@@ -190,17 +191,17 @@ mod tests {
             Ok(healthy(r))
         };
         run(&cache, &[], &[], true, enumerate, inspect).unwrap();
-        assert_eq!(calls.get(), 2);
+        assert_eq!(calls.get(), 3);
         for _ in 0..20 {
             run(&cache, &[], &[], true, enumerate, inspect).unwrap();
         }
-        assert_eq!(calls.get(), 2);
+        assert_eq!(calls.get(), 3);
         assert_eq!(enumerations.get(), 1);
         let observed = vec![json!({"provider":"codex","configDir":"/new"})];
         run(&cache, &observed, &[], true, enumerate, inspect).unwrap();
-        assert_eq!(calls.get(), 3);
+        assert_eq!(calls.get(), 4);
         run(&cache, &observed, &[], false, enumerate, inspect).unwrap();
-        assert_eq!(calls.get(), 6);
+        assert_eq!(calls.get(), 8);
         assert_eq!(enumerations.get(), 2);
     }
     #[test]
@@ -221,8 +222,8 @@ mod tests {
             inspect,
         )
         .unwrap();
-        assert_eq!(calls.get(), 2);
-        assert_eq!(result["errors"].as_array().unwrap().len(), 2);
+        assert_eq!(calls.get(), 3);
+        assert_eq!(result["errors"].as_array().unwrap().len(), 3);
     }
     #[test]
     fn wsl_checks_only_new_targets_and_never_starts_a_stopped_distribution() {
@@ -239,21 +240,21 @@ mod tests {
             Ok(healthy(r))
         };
         run(&cache, &[], &[], true, enumerate, inspect).unwrap();
-        assert_eq!(calls.get(), 4);
+        assert_eq!(calls.get(), 6);
         let observed = vec![json!({"provider":"codex","distro":"Ubuntu","configDir":"/codex"})];
         for _ in 0..20 {
             run(&cache, &observed, &[], true, enumerate, inspect).unwrap();
         }
-        assert_eq!(calls.get(), 4);
+        assert_eq!(calls.get(), 6);
         assert_eq!(enumerations.get(), 1);
         let stopped = vec![json!({"provider":"codex","distro":"Stopped","configDir":"/custom"})];
         run(&cache, &stopped, &[], true, enumerate, inspect).unwrap();
         run(&cache, &stopped, &[], true, enumerate, inspect).unwrap();
-        assert_eq!(calls.get(), 4);
+        assert_eq!(calls.get(), 6);
         assert_eq!(enumerations.get(), 2);
         let new = vec![json!({"provider":"codex","distro":"Ubuntu","configDir":"/new"})];
         run(&cache, &new, &[], true, enumerate, inspect).unwrap();
-        assert_eq!(calls.get(), 5);
+        assert_eq!(calls.get(), 7);
         assert_eq!(enumerations.get(), 3);
     }
     #[test]

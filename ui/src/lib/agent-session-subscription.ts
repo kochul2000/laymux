@@ -3,6 +3,7 @@ import { useTerminalStore, type TerminalInstance } from "@/stores/terminal-store
 import { observeTerminalTask } from "./terminal-task-observers";
 import { heuristicTask } from "./terminal-task-detection";
 import type { TaskState } from "./terminal-task";
+import { useSettingsStore } from "@/stores/settings-store";
 
 const POLL_MS = 1000;
 
@@ -41,6 +42,11 @@ export function subscribeAgentSessionStates(): () => void {
 
   function needsRecord(instance: TerminalInstance, now: number): boolean {
     if (!recordedAgent(instance)) return false;
+    if (
+      recordedAgent(instance) === "Grok" &&
+      useSettingsStore.getState().grok.stateDetection === "hooks"
+    )
+      return true;
     const task = heuristicTask(instance);
     if (!task || task.observation !== "confirmed") return true;
     if (task.expiresAfter !== undefined && now - task.observedAt >= task.expiresAfter) return true;
@@ -48,6 +54,19 @@ export function subscribeAgentSessionStates(): () => void {
   }
 
   function apply(instance: TerminalInstance, record: AgentSessionState) {
+    if (recordedAgent(instance) === "Grok") {
+      const before = instance.grokTurn;
+      if (
+        !before ||
+        before.generation !== record.generation ||
+        before.sessionId !== record.sessionId ||
+        before.turnId !== record.turnId ||
+        before.status !== record.status ||
+        before.result !== record.result
+      ) {
+        useTerminalStore.getState().updateInstanceInfo(instance.id, { grokTurn: record });
+      }
+    }
     // A dialog's own detector owns waiting; the record cannot resolve it later.
     if (record.status === "waiting") return;
     const task = heuristicTask(instance);
@@ -121,9 +140,13 @@ export function subscribeAgentSessionStates(): () => void {
     if (state.instances.some((instance) => needsRecord(instance, now))) schedule(0);
   });
   schedule(0);
+  const unsubscribeSettings = useSettingsStore.subscribe((state, previous) => {
+    if (state.grok.stateDetection !== previous.grok.stateDetection) schedule(0);
+  });
   return () => {
     disposed = true;
     unsubscribe();
+    unsubscribeSettings();
     clearTimeout(timer);
   };
 }

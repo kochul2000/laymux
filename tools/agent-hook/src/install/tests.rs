@@ -1,6 +1,42 @@
 use super::*;
 use serde_json::json;
 
+#[test]
+fn grok_owns_one_native_hook_file_and_preserves_other_sources() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("grok");
+    fs::create_dir_all(root.join("hooks")).unwrap();
+    let user = root.join("hooks/user.json");
+    fs::write(&user, b"user hook contents").unwrap();
+    let source = dir.path().join("helper");
+    fs::write(&source, b"helper fixture").unwrap();
+    let owned_file = root.join("hooks/laymux.json");
+    let original =
+        json!({"hooks":{"Stop":[{"hooks":[{"type":"command","command":"user-command"}]}]}});
+    fs::write(&owned_file, serde_json::to_vec(&original).unwrap()).unwrap();
+    assert_eq!(
+        manage(&root, "grok", "install", &source).unwrap()["installed"],
+        true
+    );
+    assert_eq!(
+        manage(&root, "grok", "install", &source).unwrap()["installed"],
+        true
+    );
+    let installed: Value = serde_json::from_slice(&fs::read(&owned_file).unwrap()).unwrap();
+    for event in [
+        "UserPromptSubmit",
+        "StopFailure",
+        "StopCancelled",
+        "Notification",
+    ] {
+        assert!(installed["hooks"][event].is_array(), "{event}");
+    }
+    manage(&root, "grok", "remove", &source).unwrap();
+    assert_eq!(fs::read(&user).unwrap(), b"user hook contents");
+    let after: Value = serde_json::from_slice(&fs::read(&owned_file).unwrap()).unwrap();
+    assert_eq!(after["hooks"]["Stop"], original["hooks"]["Stop"]);
+}
+
 #[cfg(windows)]
 #[test]
 fn windows_hook_commands_are_readable_and_old_owned_commands_are_replaced() {

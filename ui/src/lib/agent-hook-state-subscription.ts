@@ -8,7 +8,7 @@ export function subscribeAgentHookStates(): () => void {
   let inFlight = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const providers = () =>
-    (["claude", "codex"] as HookProvider[]).filter(
+    (["claude", "codex", "grok"] as HookProvider[]).filter(
       (p) => useSettingsStore.getState()[p].stateDetection === "hooks",
     );
   function schedule(delay = 2000) {
@@ -53,7 +53,8 @@ export function subscribeAgentHookStates(): () => void {
   const settings = useSettingsStore.subscribe((state, previous) => {
     if (
       state.claude.stateDetection !== previous.claude.stateDetection ||
-      state.codex.stateDetection !== previous.codex.stateDetection
+      state.codex.stateDetection !== previous.codex.stateDetection ||
+      state.grok.stateDetection !== previous.grok.stateDetection
     ) {
       useTerminalStore.getState().refreshTaskDetection();
       schedule(0);

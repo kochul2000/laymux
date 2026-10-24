@@ -7,6 +7,34 @@ const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
 describe("AgentHooksSection", () => {
+  it("Grok도 전용 provider로 조회하고 훅 감지 모드를 선택한다", async () => {
+    invoke.mockImplementation(async (command) => {
+      if (command === "list_agent_hook_environments")
+        return [{ id: "native", label: "Windows", distro: null }];
+      if (command === "get_agent_hook_connections") return [];
+      return {
+        configDir: "C:/Users/u/.grok",
+        configPath: "C:/Users/u/.grok/hooks/laymux.json",
+        installed: false,
+        registered: 0,
+        expected: 12,
+        helperPresent: false,
+        disabled: false,
+      };
+    });
+    const changed = vi.fn();
+    render(<AgentHooksSection provider="grok" onStateDetectionChange={changed} />);
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(
+        "manage_agent_hooks",
+        expect.objectContaining({
+          request: expect.objectContaining({ provider: "grok", operation: "status" }),
+        }),
+      ),
+    );
+    fireEvent.change(screen.getByTestId("agent-hooks-detection"), { target: { value: "hooks" } });
+    expect(changed).toHaveBeenCalledWith("hooks");
+  });
   it("serializes a Settings update after a pending audit and publishes a new audit", async () => {
     const stale = {
       configDir: "/custom",
