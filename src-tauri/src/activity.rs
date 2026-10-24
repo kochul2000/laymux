@@ -4,6 +4,10 @@
 //! or running an interactive application (Claude Code, vim, etc.).
 //! Also contains `BurstDetector` for DEC 2026 sustained TUI activity detection.
 
+#[cfg(test)]
+#[path = "activity/grok_process_tests.rs"]
+mod grok_process_tests;
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::time::Instant;
@@ -908,6 +912,17 @@ pub fn detect_interactive_app_from_live_title(
         sync_known_caches(state, terminal_id, &name);
         record_interactive_app_detection(state, terminal_id, &name);
         return Some(name);
+    }
+
+    // A live agent outranks text naming a different agent. Grok's welcome
+    // screen contains "Coming from Claude Code?" after its own banner; picking
+    // only that latest literal used to hide a proven live Grok as Shell.
+    if let crate::process_tree::PtyAppLiveness::Running(name) =
+        crate::process_tree::interactive_app_in_pty(state, terminal_id)
+    {
+        sync_known_caches(state, terminal_id, name);
+        record_interactive_app_detection(state, terminal_id, name);
+        return Some(name.to_owned());
     }
 
     // An explicit empty OSC 0/2 title is a terminal title reset. Claude

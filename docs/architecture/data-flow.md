@@ -1829,6 +1829,8 @@ MCP/REST 쓰기
 
 **활동 상태 초기 동기화 (webview 리로드).** 백엔드 `AppState`는 webview 리로드에도 생존하므로 인터랙티브 앱 인식이 유지되지만, 프론트 활동 스토어는 리마운트로 비워진다. `useSyncEvents` 는 마운트 시 `get_terminal_states` 를 1회 호출해 살아있는 앱의 `interactiveApp` 활동을 재시드한다. 인스턴스가 늦게 등록되는 레이스는 스토어 구독으로 흡수하며, 모든 대상이 매칭되면 구독을 해제한다. 라이브 이벤트가 더 신선한 분류를 이미 적용했으면 덮어쓰지 않는다. ([ADR-0009](../adr/0009-process-tree-interactive-app-liveness.md))
 
+라이브 제목으로 앱을 직접 특정하지 못하면 확인된 PTY 자식 프로세스를 본문 배너보다 우선한다. Grok 시작 화면의 `Coming from Claude Code?` 같은 다른 에이전트 안내 문구가 현재 Grok을 셸이나 Claude로 바꾸지 않는다. Grok의 새 세션 훅 `SessionStart.source=new`는 턴 실행 전 유휴 상태로 처리한다([ADR-0356](../adr/0356-grok-hook-task-state-and-safe-clear.md)).
+
 ### 13.7 Workspace Pane ID
 
 - Pane ID는 `pane-{uuid8}` 형식으로 생성되며 로컬 state.db에 저장

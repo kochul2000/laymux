@@ -2,7 +2,7 @@
 
 - Status: Proposed
 - Date: 2026-10-24
-- Source: 사용자 요구(Grok까지 상태·Alt+L 대응), [#1252](https://github.com/kochul2000/laymux/issues/1252), Grok Build 1.0.50(c58f321264ba), [공식 훅 문서](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/10-hooks.md), ADR-0156, ADR-0282, ADR-0283, ADR-0321, ADR-0355
+- Source: 사용자 요구(Grok까지 상태·Alt+L 대응), [#1252](https://github.com/kochul2000/laymux/issues/1252), Windows Grok Build 1.0.50(c58f321264ba) 및 WSL 1.0.62·1.0.70 실측, [공식 훅 문서](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/10-hooks.md), ADR-0009, ADR-0156, ADR-0282, ADR-0283, ADR-0321, ADR-0355
 - 관계: ADR-0156의 출력 기반 작업 미확인 표시와 ADR-0355의 Grok 제외 범위를 확장한다. 세션 귀속과 훅 선택 설치·기본 휴리스틱 정책은 유지한다.
 
 ## Context
@@ -10,6 +10,8 @@
 Grok Build는 세션·프롬프트·도구·완료·실패·중단·알림 훅을 제공하지만 laymux는 Claude·Codex만 훅 provider로 인정한다. Grok은 Claude 호환 훅도 자동으로 읽으므로 같은 helper가 Grok 이벤트를 Claude로 전송해서는 안 된다. 기존 Grok 화면 갱신 fallback은 타이핑을 작업 중으로 표시할 수 있고, Alt+L은 기존 초안 뒤에 `/clear`를 붙인다.
 
 훅 pane ID와 상속 환경은 현재 대화 소유권을 증명하지 않는다. 기존 Grok 프로세스 PID와 active_sessions.json 기반 정확한 세션 귀속을 유지하고, Stop 훅 실행만으로 성공을 합성하지 않아야 한다. Windows·Linux·WSL의 선택 설치와 사용자 훅 보존도 필요하다.
+
+실제 WSL 시작 화면의 `Coming from Claude Code?` 안내가 Claude 배너로 오인되어, 실행 중인 Grok도 셸로 분류됐다. 앱 생존의 권위는 ADR-0009를 그대로 적용하며 이 안내 문구보다 확인된 프로세스를 우선한다. 새 세션의 `SessionStart.source=new`도 실제 입력 대기 상태로 반영해야 한다.
 
 ## Decision
 

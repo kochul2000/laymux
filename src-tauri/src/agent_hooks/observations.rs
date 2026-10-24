@@ -193,7 +193,10 @@ fn phase(event: &HookEvent) -> Option<HookPhase> {
         return None;
     }
     match event.event.as_str() {
-        "SessionStart" if matches!(event.source.as_deref(), None | Some("startup" | "clear")) => {
+        "SessionStart"
+            if matches!(event.source.as_deref(), None | Some("startup" | "clear"))
+                || (event.provider == "grok" && event.source.as_deref() == Some("new")) =>
+        {
             Some(HookPhase::Idle)
         }
         "SessionStart" if event.source.as_deref() == Some("compact") => Some(HookPhase::Running),
@@ -224,6 +227,20 @@ fn phase(event: &HookEvent) -> Option<HookPhase> {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn grok_new_session_source_is_idle_without_a_model_turn() {
+        let mut registry = HookRegistry::default();
+        let mut started = event("grok", "SessionStart", 100, None);
+        started.source = Some("new".into());
+        registry.observe(started);
+        assert_eq!(
+            registry
+                .exact("grok", "session-a", None, 100)
+                .unwrap()
+                .phase,
+            Some(HookPhase::Idle)
+        );
+    }
     #[test]
     fn grok_stop_is_not_completion_and_late_cancel_cannot_finish_next_prompt() {
         let mut registry = HookRegistry::default();
