@@ -34,3 +34,5 @@ Grok Build는 세션·프롬프트·도구·완료·실패·중단·알림 훅�
 ## Consequences
 
 세 provider가 같은 선택 설치·상태 선택·안전한 clear 흐름을 제공한다. Grok 설정 필드와 훅 관리 계약 추가이므로 minor 변경이다. CLI payload·입력창 형식에 의존하는 비용이 생기며, 확인할 수 없는 화면은 clear가 실패한다. helper·설치 보존·턴 및 세대 경합·Desktop/Remote·실제 xterm·dev CLI 검증과 living doc 갱신이 필요하다. Grok이 구조화된 새 대화 API를 제공하거나 현재 payload·세션 기록 계약을 바꾸면 재검토한다.
+
+WSL Grok 1.0.70은 `/clear` 후 같은 PID에 이전 대화와 새 대화를 모두 등록한다. 이 경우 ADR-0156의 유일한 PID/session 귀속을 충족하지 못하므로 훅 상태·완료 기록을 선택하지 않고 기존 감지로 복귀한다. 가장 최근 ID나 수신 pane ID로 임의 선택하지 않는다. 현재 foreground 대화를 검증하는 별도 계약은 후속 설계 대상이다. 또한 모델 응답 시작 전 취소가 종료 훅·`turn_completed` 없이 초안만 복구하는 CLI 경로에서는 중단 결과를 만들지 않는다. 실제 실행 후 `StopCancelled` 또는 같은 턴의 `cancelled` 기록이 도착한 경우만 중단을 확정한다. 이 두 제한은 #1252에서 계속 추적한다.

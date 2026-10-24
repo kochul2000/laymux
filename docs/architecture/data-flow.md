@@ -1250,6 +1250,8 @@ Claude Code 가 세션 리미트에 걸리면 스크롤백에 `⎿  You've hit y
 
 Grok도 별도의 `grok` 훅 provider와 `grok.stateDetection`을 사용한다. helper는 camelCase 세션·턴 식별자를 공통 모델로 변환하고, Claude 호환 경로로 들어온 Grok payload는 전송하지 않는다. `Stop`은 blocking gate라 phase를 종료로 바꾸지 않는다. 훅 모드에서는 `subscribeAgentSessionStates`가 title의 확정 여부와 무관하게 1초마다 정확히 귀속된 Grok 기록을 읽어 `terminalStore.grokTurn`에 저장한다. `AgentSessionState.turnId`는 `turn_completed.prompt_id`이며 파일 내부 session ID도 귀속 ID와 일치해야 한다. `withGrokTurnResult`는 현재 generation·session ID·훅 `promptId`가 모두 같은 완료 기록만 표시의 ended·결과·완료 알림으로 결합한다. 원시 훅과 기록은 변경하지 않으며 명시적 실패·중단은 성공으로 덮지 않는다. 세대·앱·세션 교체는 기록을 폐기하고, 다른 턴·식별자 없는 기록은 현재 작업을 끝내지 않는다.
 
+Grok 1.0.70의 `/clear`는 이전 대화를 같은 PID의 `active_sessions.json`에 남긴다. 이때는 현재 대화가 유일하지 않아 훅과 기록 조회가 보류되며 기존 감지를 사용한다. 모델 응답 시작 전 취소가 종료 훅·완료 기록을 남기지 않으면 중단을 확정할 근거가 없으므로 결과를 합성하지 않는다. 이 제한과 후속 foreground 귀속 설계는 [#1252](https://github.com/kochul2000/laymux/issues/1252)에서 추적한다.
+
 [ADR-0248](../adr/0248-codex-turn-lifecycle-activity.md)에 따라 `get_codex_turn_states`는 기존 pane→프로세스→TUI 대화 식별 경로를 재사용한다. PTY generation을 조회 전후 검사하고, 해당 프로세스의 현재 대화 선택 로그 ID·session ID에 귀속된 rollout만 읽는다. 복원 전용 fallback과 중복 귀속은 작업 상태 근거로 사용하지 않는다. 새 빈 세션은 idle, 파일 경로·읽기·형식을 확인하지 못하면 unknown이다.
 
 `commands/codex_session/turns`가 소유하는 reader는 최초 마지막 1 MiB와 이후 추가된 바이트를 회당 최대 1 MiB 읽는다. 마지막 64바이트 anchor로 축소·경계 내용 변경을 감지해 다시 시드하며, 불완전한 줄·미처리 backlog·잘못된 lifecycle은 이전 성공 상태를 유지하지 않는다. 현재 턴 ID에 맞는 `task_started`/`task_complete`/`turn_aborted`를 running/completed/failed/interrupted로 해석한다. 종료의 error가 있으면 failed이며 다른 턴의 종료는 무시한다. 같은 세션에서도 새로운 시작이 이후 상태를 결정한다. Windows native/Linux는 일반 파일 I/O, WSL은 기존 guest 경로 변환을 쓰며 SQLite는 bundled Linux probe가 계속 소유한다. reader 캐시의 leaf mutex는 AppState 락과 겹치지 않는다.
