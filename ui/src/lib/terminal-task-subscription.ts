@@ -28,8 +28,9 @@ export function subscribeTerminalTasks(): () => void {
       }
       if (
         !task?.notification ||
+        task.state !== task.notification ||
         task.source !== before?.source ||
-        task.notificationId === before.notificationId
+        (task.taskId === before.taskId && task.notificationId === before.notificationId)
       )
         continue;
       const waiting = task.notification === "waiting";
@@ -84,7 +85,8 @@ export function subscribeTerminalTasks(): () => void {
   const settingsUnsubscribe = useSettingsStore.subscribe((state, previous) => {
     if (
       state.claude.stateDetection !== previous.claude.stateDetection ||
-      state.codex.stateDetection !== previous.codex.stateDetection
+      state.codex.stateDetection !== previous.codex.stateDetection ||
+      state.grok.stateDetection !== previous.grok.stateDetection
     )
       useTerminalStore.getState().refreshTaskDetection();
   });

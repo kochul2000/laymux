@@ -229,7 +229,7 @@ pub fn accept(state: &AppState, event: HookEvent) -> Result<bool, AppError> {
         .duration_since(UNIX_EPOCH)
         .map_err(|e| AppError::Other(e.to_string()))?
         .as_millis() as u64;
-    if !matches!(event.provider.as_str(), "claude" | "codex")
+    if !matches!(event.provider.as_str(), "claude" | "codex" | "grok")
         || serde_json::to_vec(&event)
             .map_err(|e| AppError::Other(e.to_string()))?
             .len()

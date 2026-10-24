@@ -4,7 +4,7 @@ import { observeTask, taskPolicy, taskPresentation, type TaskObservation } from 
 import { computeCommandStatus } from "./workspace-summary";
 
 describe("터미널의 단일 상태 아이콘", () => {
-  it.each(["Claude", "Codex"])(
+  it.each(["Claude", "Codex", "Grok"])(
     "%s 타이핑의 출력 활동으로 미확인 작업을 진행 중으로 표시하지 않는다",
     (name) => {
       const status = computeCommandStatus(undefined, true, undefined, {

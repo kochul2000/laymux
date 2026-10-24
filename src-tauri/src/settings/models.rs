@@ -661,6 +661,8 @@ pub enum GrokStatusMessageMode {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GrokSettings {
+    #[serde(default)]
+    pub state_detection: AgentStateDetection,
     #[serde(default = "default_grok_command")]
     pub command: String,
     #[serde(default = "default_restore_session")]
@@ -676,6 +678,7 @@ pub struct GrokSettings {
 impl Default for GrokSettings {
     fn default() -> Self {
         Self {
+            state_detection: AgentStateDetection::default(),
             command: default_grok_command(),
             restore_session: true,
             session_max_age_hours: 24,

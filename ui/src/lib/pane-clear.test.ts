@@ -151,7 +151,7 @@ describe("planTerminalClear", () => {
         });
         expect(planTerminalClear({ ...unobserved, outputActive: true }, config)).toMatchObject({
           kind: "skip",
-          reason: name === "Grok" ? "busy" : "stateUnknown",
+          reason: "stateUnknown",
         });
       }
     });

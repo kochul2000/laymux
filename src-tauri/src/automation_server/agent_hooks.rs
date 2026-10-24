@@ -12,6 +12,9 @@ pub async fn hook_states(State(state): State<ServerState>) -> impl IntoResponse 
         if settings.codex.state_detection == crate::settings::AgentStateDetection::Hooks {
             providers.push("codex".into());
         }
+        if settings.grok.state_detection == crate::settings::AgentStateDetection::Hooks {
+            providers.push("grok".into());
+        }
         crate::commands::get_agent_hook_states_impl(&providers, &state.app_state, &state.app_handle)
     })
     .await

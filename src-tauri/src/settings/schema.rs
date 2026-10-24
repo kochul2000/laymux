@@ -54,6 +54,12 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::Live,
     },
     MetadataEntry {
+        path: "/grok/stateDetection",
+        description: "Grok 작업 상태 감지: heuristic 또는 hooks. 실제 프로세스·현재 대화와 턴을 검증한 훅을 사용하며 성공은 같은 턴의 완료 기록으로 확인합니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
         path: "/language",
         description: "앱 UI 언어. system은 OS 언어를 따르며 ko/en을 직접 선택할 수 있습니다.",
         sensitive: false,

@@ -45,6 +45,8 @@ pub struct AgentSessionState {
     status: AgentSessionStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     result: Option<AgentTurnResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    turn_id: Option<String>,
 }
 
 #[tauri::command(async)]
@@ -89,6 +91,7 @@ pub(crate) fn get_agent_session_states_impl(
                     session_id: session_id.to_owned(),
                     status,
                     result: None,
+                    turn_id: None,
                 },
             );
         }
@@ -104,8 +107,8 @@ pub(crate) fn get_agent_session_states_impl(
             let Some(directory) = records.directories.get(session_id) else {
                 continue;
             };
-            match read_grok_turn(&directory.join("updates.jsonl")) {
-                Ok(Some((status, result))) => {
+            match read_grok_turn(&directory.join("updates.jsonl"), session_id) {
+                Ok(Some((status, result, turn_id))) => {
                     states.insert(
                         id.clone(),
                         AgentSessionState {
@@ -113,6 +116,7 @@ pub(crate) fn get_agent_session_states_impl(
                             session_id: session_id.to_owned(),
                             status,
                             result,
+                            turn_id,
                         },
                     );
                 }
@@ -146,22 +150,22 @@ fn attributed<'a>(lookup: &'a ProviderSessionLookup, terminal_id: &str) -> Optio
     lookup.attributions.get(terminal_id)?.as_deref()
 }
 
-type GrokTurn = (AgentSessionStatus, Option<AgentTurnResult>);
+type GrokTurn = (AgentSessionStatus, Option<AgentTurnResult>, Option<String>);
 
-fn read_grok_turn(path: &Path) -> std::io::Result<Option<GrokTurn>> {
+fn read_grok_turn(path: &Path, session_id: &str) -> std::io::Result<Option<GrokTurn>> {
     let mut file = File::open(path)?;
     let len = file.metadata()?.len();
     let start = len.saturating_sub(GROK_UPDATES_READ_LIMIT);
     file.seek(SeekFrom::Start(start))?;
     let mut bytes = Vec::new();
     file.take(len - start).read_to_end(&mut bytes)?;
-    Ok(last_grok_turn(&bytes, start > 0))
+    Ok(last_grok_turn(&bytes, start > 0, session_id))
 }
 
 /// The last turn boundary: a user message starts a turn and `turn_completed`
 /// ends it. Without a boundary a whole file means no turn yet (idle); a
 /// truncated tail or an unreadable record is unknown (`None`).
-fn last_grok_turn(bytes: &[u8], truncated: bool) -> Option<GrokTurn> {
+fn last_grok_turn(bytes: &[u8], truncated: bool, session_id: &str) -> Option<GrokTurn> {
     // Grok may still be writing the last line; only newline-terminated lines count.
     let complete = &bytes[..bytes.iter().rposition(|&byte| byte == b'\n').unwrap_or(0)];
     let mut lines: Vec<&[u8]> = complete.split(|&byte| byte == b'\n').collect();
@@ -174,21 +178,28 @@ fn last_grok_turn(bytes: &[u8], truncated: bool) -> Option<GrokTurn> {
             continue;
         }
         let record: serde_json::Value = serde_json::from_slice(line).ok()?;
+        if record["params"]["sessionId"].as_str() != Some(session_id) {
+            return None;
+        }
         let update = &record["params"]["update"];
         match update["sessionUpdate"].as_str() {
-            Some("user_message_chunk") => return Some((AgentSessionStatus::Running, None)),
+            Some("user_message_chunk") => return Some((AgentSessionStatus::Running, None, None)),
             Some("turn_completed") => {
                 let result = match update["stop_reason"].as_str() {
                     Some("end_turn") => Some(AgentTurnResult::Success),
                     Some("cancelled") => Some(AgentTurnResult::Interrupted),
                     _ => None,
                 };
-                return Some((AgentSessionStatus::Ended, result));
+                let turn_id = update["prompt_id"]
+                    .as_str()
+                    .filter(|id| !id.is_empty() && id.len() <= 256)
+                    .map(str::to_owned);
+                return Some((AgentSessionStatus::Ended, result, turn_id));
             }
             _ => {}
         }
     }
-    (!truncated).then_some((AgentSessionStatus::Idle, None))
+    (!truncated).then_some((AgentSessionStatus::Idle, None, None))
 }
 
 #[cfg(test)]

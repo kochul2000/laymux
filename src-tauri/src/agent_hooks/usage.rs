@@ -1,4 +1,4 @@
-//! Heuristic evidence that Claude/Codex actually ran in a local environment
+//! Heuristic evidence that Claude/Codex/Grok actually ran in a local environment
 //! (ADR-0330). Missing-integration notices are limited to these targets so
 //! unused CLIs and idle WSL distributions never raise one.
 use std::collections::{BTreeSet, HashSet};
@@ -59,6 +59,7 @@ fn provider(app_name: &str) -> Option<&'static str> {
     match app_name {
         "Claude" => Some("claude"),
         "Codex" => Some("codex"),
+        "Grok" => Some("grok"),
         _ => None,
     }
 }
@@ -307,9 +308,16 @@ mod tests {
         usage.observe("a", "Grok");
         usage.observe("a", "vim");
         let pending = usage.pending_snapshot().unwrap();
-        assert_eq!(pending, vec![("a".into(), "claude"), ("a".into(), "codex")]);
+        assert_eq!(
+            pending,
+            vec![
+                ("a".into(), "claude"),
+                ("a".into(), "codex"),
+                ("a".into(), "grok")
+            ]
+        );
         usage.observe("a", "Claude");
-        assert_eq!(usage.pending_snapshot().unwrap().len(), 2);
+        assert_eq!(usage.pending_snapshot().unwrap().len(), 3);
     }
 
     #[test]

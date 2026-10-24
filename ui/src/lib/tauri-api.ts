@@ -1032,6 +1032,7 @@ export async function cancelAppClose(): Promise<void> {
 export type GrokStatusMessageMode = CodexStatusMessageMode;
 
 export interface GrokSettings {
+  stateDetection?: "heuristic" | "hooks";
   command: string;
   restoreSession: boolean;
   sessionMaxAgeHours: number;
@@ -2023,6 +2024,7 @@ export interface AgentSessionState {
   sessionId: string;
   status: "running" | "idle" | "waiting" | "ended";
   result?: "success" | "interrupted";
+  turnId?: string;
 }
 
 /** A terminal is missing when its session or recorded state is not known. */

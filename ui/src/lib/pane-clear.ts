@@ -144,7 +144,7 @@ export function planTerminalClear(
   const reason =
     isTaskObservedAgent(instance) &&
     policy.state === undefined &&
-    (!policy.outputActive || activity?.name === "Claude" || activity?.name === "Codex")
+    (!policy.outputActive || ["Claude", "Codex", "Grok"].includes(activity?.name ?? ""))
       ? "stateUnknown"
       : "busy";
 
@@ -346,7 +346,7 @@ export async function clearPane(
       };
       const before = instance;
       const provider = before?.activity?.name;
-      if (provider === "Codex" || provider === "Claude") {
+      if (provider === "Codex" || provider === "Claude" || provider === "Grok") {
         const scopeCurrent = () => {
           const now = useTerminalStore.getState().instances.find((i) => i.id === id);
           return (

@@ -258,7 +258,7 @@ Remote 템플릿 저장은 내보내기 함수에 source workspace id를 명시�
 
 단일 pane 실제 클리어는 activity handler가 shell의 설정된 `clear`/`cls` 또는 Claude·Codex·Grok의 `/clear`를 고르고, `settings.paneClear.busyPolicy`에 따라 busy pane을 skip/interrupt/restart한다. `Ctrl+L`이 화면만 지우고 agent 대화 context를 유지한다는 차이가 확인되어 ADR-0137의 단일-pane 폐지 부분을 [ADR-0158](../adr/0158-activity-aware-single-pane-clear.md)이 대체했다. 계획과 실행, 격자·dock pane 조회는 `ui/src/lib/pane-clear.ts` 한 곳이 소유한다.
 
-Claude·Codex는 [ADR-0355](../adr/0355-agent-hook-results-and-clear-drafts.md)에 따라 interrupt 후 남은 기한 안에서 idle 관찰을 기다리고 현재 xterm viewport에서 지원하는 입력창을 확인한다. 과거 응답·초안과 footer를 구분하고 모든 연속 행을 판독한다. Backspace/Delete 배치로 초안을 삭제한 뒤 빈 입력창이 안정된 경우에만 `/clear`를 제출한다. 각 삭제·제출은 Rust human-control enqueue 게이트에서 generation·입력 revision을 비교하므로 Local·Remote·Automation 입력이 끼어들면 화면 갱신 전이라도 실패한다. 미확인 작업, 모달, 미지원 편집 모드, 40열 미만 화면, 삭제 한도·deadline·세대 교체도 실패로 반환한다. 숨김 pane에서 화면 inspector를 사용할 수 없으면 입력하지 않는다. Grok의 기존 clear는 별도 후속 범위다.
+Claude·Codex·Grok은 [ADR-0355](../adr/0355-agent-hook-results-and-clear-drafts.md)·[ADR-0356](../adr/0356-grok-hook-task-state-and-safe-clear.md)에 따라 interrupt 후 남은 기한 안에서 idle 관찰을 기다리고 현재 xterm viewport에서 지원하는 입력창을 확인한다. 과거 응답·초안과 footer를 구분하고 모든 연속 행을 판독한다. Grok은 둥근 테두리 안의 입력 행과 아래 footer를 검사한다. Backspace/Delete 배치로 초안을 삭제한 뒤 빈 입력창이 안정된 경우에만 `/clear`를 제출한다. 각 삭제·제출은 기존 human-control 소유권과 공통 PTY enqueue 게이트에서 generation·입력 revision을 검사하므로 Local·Remote·Automation·MCP 입력이 끼어들면 화면 갱신 전이라도 실패한다. 미확인 작업, 모달, 미지원 편집 모드, 40열 미만 화면, 삭제 한도·deadline·세대 교체도 실패로 반환한다. 숨김 pane에서 화면 inspector를 사용할 수 없으면 입력하지 않는다.
 
 ### 4.2 인스턴스 오버라이드 레이어 (Pane / View)
 

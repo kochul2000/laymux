@@ -232,26 +232,26 @@ describe("clearPane against live stores", () => {
       rows: 6,
       length: 6,
       baseY: 0,
-      lines: ["› ", "", "  GPT-6.1-Sol · Context 100% left"].map((text, index) => ({
+      lines: (name === "Grok"
+        ? ["╭──────────╮", "│ ❯  │", "╰── Grok 4.7 ──╯"]
+        : ["› ", "", "  GPT-6.1-Sol · Context 100% left"]
+      ).map((text, index) => ({
         index,
         text,
         isWrapped: false,
       })),
     }));
-    await clearPane("pane-a");
-    if (name === "Grok") {
-      expect(writeTerminalInput).toHaveBeenCalledWith("terminal-pane-a", "/clear", true);
-    } else {
-      expect(beginAgentClear).toHaveBeenCalledWith("terminal-pane-a", 1, undefined);
-      expect(agentClearInput).toHaveBeenLastCalledWith(
-        "terminal-pane-a",
-        { generation: 1, inputRevision: 1 },
-        "submitClear",
-        expect.any(Number),
-        undefined,
-      );
-      expect(writeTerminalInput).not.toHaveBeenCalled();
-    }
+    const result = await clearPane("pane-a");
+    expect(result.cleared).toEqual(["terminal-pane-a"]);
+    expect(beginAgentClear).toHaveBeenCalledWith("terminal-pane-a", 1, undefined);
+    expect(agentClearInput).toHaveBeenLastCalledWith(
+      "terminal-pane-a",
+      { generation: 1, inputRevision: 1 },
+      "submitClear",
+      expect.any(Number),
+      undefined,
+    );
+    expect(writeTerminalInput).not.toHaveBeenCalled();
   });
 
   it("clears a dock pane that workspace clear does not own", async () => {
@@ -265,49 +265,55 @@ describe("clearPane against live stores", () => {
     expect(result.cleared).toEqual(["terminal-dock-pane-1"]);
   });
 
-  it("deletes the agent draft and submits as the Remote lease holder", async () => {
-    seedWorkspace();
-    useTerminalStore.getState().updateInstanceInfo("terminal-pane-a", {
-      activity: { type: "interactiveApp", name: "Claude" },
-    });
-    observeTerminalTask("terminal-pane-a", { state: "idle" });
-    let text = "unsent draft";
-    registerTerminalInspector("terminal-pane-a", () => ({
-      cols: 96,
-      rows: 6,
-      length: 6,
-      baseY: 0,
-      lines: ["──────────", "> " + text, "──────────", "  auto mode on"].map((text, index) => ({
-        index,
-        text,
-        isWrapped: false,
-      })),
-    }));
-    vi.mocked(agentClearInput).mockImplementationOnce(async (_id, stamp) => {
-      text = "";
-      return { ...stamp, inputRevision: stamp.inputRevision + 1 };
-    });
-    const result = await clearPane("pane-a", undefined, { remoteLeaseId: "lease-clear" });
-    expect(result.cleared).toEqual(["terminal-pane-a"]);
-    expect(beginAgentClear).toHaveBeenCalledWith("terminal-pane-a", 1, "lease-clear");
-    expect(agentClearInput).toHaveBeenNthCalledWith(
-      1,
-      "terminal-pane-a",
-      { generation: 1, inputRevision: 0 },
-      "deleteDraft",
-      expect.any(Number),
-      "lease-clear",
-    );
-    expect(agentClearInput).toHaveBeenLastCalledWith(
-      "terminal-pane-a",
-      { generation: 1, inputRevision: 1 },
-      "submitClear",
-      expect.any(Number),
-      "lease-clear",
-    );
-    expect(writeToTerminal).not.toHaveBeenCalled();
-    expect(writeTerminalInput).not.toHaveBeenCalled();
-  });
+  it.each(["Claude", "Grok"])(
+    "deletes the %s draft and submits as the Remote lease holder",
+    async (provider) => {
+      seedWorkspace();
+      useTerminalStore.getState().updateInstanceInfo("terminal-pane-a", {
+        activity: { type: "interactiveApp", name: provider },
+      });
+      observeTerminalTask("terminal-pane-a", { state: "idle" });
+      let text = "unsent draft";
+      registerTerminalInspector("terminal-pane-a", () => ({
+        cols: 96,
+        rows: 6,
+        length: 6,
+        baseY: 0,
+        lines: (provider === "Grok"
+          ? ["╭──────────╮", "│ ❯ " + text + " │", "╰── Grok 4.7 ──╯"]
+          : ["──────────", "> " + text, "──────────", "  auto mode on"]
+        ).map((text, index) => ({
+          index,
+          text,
+          isWrapped: false,
+        })),
+      }));
+      vi.mocked(agentClearInput).mockImplementationOnce(async (_id, stamp) => {
+        text = "";
+        return { ...stamp, inputRevision: stamp.inputRevision + 1 };
+      });
+      const result = await clearPane("pane-a", undefined, { remoteLeaseId: "lease-clear" });
+      expect(result.cleared).toEqual(["terminal-pane-a"]);
+      expect(beginAgentClear).toHaveBeenCalledWith("terminal-pane-a", 1, "lease-clear");
+      expect(agentClearInput).toHaveBeenNthCalledWith(
+        1,
+        "terminal-pane-a",
+        { generation: 1, inputRevision: 0 },
+        "deleteDraft",
+        expect.any(Number),
+        "lease-clear",
+      );
+      expect(agentClearInput).toHaveBeenLastCalledWith(
+        "terminal-pane-a",
+        { generation: 1, inputRevision: 1 },
+        "submitClear",
+        expect.any(Number),
+        "lease-clear",
+      );
+      expect(writeToTerminal).not.toHaveBeenCalled();
+      expect(writeTerminalInput).not.toHaveBeenCalled();
+    },
+  );
 
   it("waits for a delayed idle observation after Ctrl+C, then submits /clear", async () => {
     vi.useFakeTimers();

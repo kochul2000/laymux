@@ -1,6 +1,7 @@
 # 0355. 검증된 에이전트 종료 훅을 유지하고 실제 클리어 전에 입력창을 비운다
 
-- Status: Accepted
+- Status: Accepted (partially superseded by 0356)
+- Superseded by: [0356](0356-grok-hook-task-state-and-safe-clear.md) (Grok의 출력 fallback 유지·clear 제외 범위)
 - Date: 2026-10-24
 - Source: 사용자 요구(Codex 성공·타이핑 활동 오인과 Alt+L 실패 수정), dev Codex 0.163.0·Claude 2.1.309 실측, ADR-0284, ADR-0250, ADR-0158, ADR-0340
 - 관계: ADR-0284의 유휴·종료 phase 만료와 ADR-0158의 초안 미관측 위험을 일부 대체한다.

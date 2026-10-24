@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-export type HookProvider = "claude" | "codex";
+export type HookProvider = "claude" | "codex" | "grok";
 export interface HookStateSnapshot {
   generation: number;
   provider: HookProvider;

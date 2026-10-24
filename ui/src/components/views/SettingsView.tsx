@@ -3363,6 +3363,11 @@ function GrokSection() {
   return (
     <div className="settings-page">
       <SettingsPageTitle>{t("grok.title")}</SettingsPageTitle>
+      <AgentHooksSection
+        provider="grok"
+        stateDetection={grok.stateDetection}
+        onStateDetectionChange={(stateDetection) => updateGrok({ stateDetection })}
+      />
       <AgentMcpSection provider="grok" />
       <SettingsGroup title={t("grok.groupSessionRestore")}>
         <SettingsField label={t("grok.command")} layout="stack">

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 mod command;
+mod grok;
 mod title;
 #[cfg(test)]
 mod update_tests;
@@ -27,8 +28,16 @@ pub fn events(provider: &str) -> Vec<&'static str> {
     EVENTS
         .iter()
         .copied()
+        .filter(|event| provider != "grok" || *event != "PermissionRequest")
         .chain(if provider == "codex" {
             vec!["Interrupt"]
+        } else if provider == "grok" {
+            vec![
+                "PostToolUseFailure",
+                "StopFailure",
+                "StopCancelled",
+                "Notification",
+            ]
         } else {
             vec![
                 "PostToolUseFailure",
@@ -46,27 +55,24 @@ pub fn config_name(provider: &str) -> Result<&'static str, String> {
     match provider {
         "claude" => Ok("settings.json"),
         "codex" => Ok("hooks.json"),
+        "grok" => Ok("hooks/laymux.json"),
         _ => Err("Unsupported agent hook provider".into()),
     }
 }
 
 pub fn default_root(provider: &str) -> Result<PathBuf, String> {
     config_name(provider)?;
-    let key = if provider == "codex" {
-        "CODEX_HOME"
-    } else {
-        "CLAUDE_CONFIG_DIR"
+    let key = match provider {
+        "codex" => "CODEX_HOME",
+        "grok" => "GROK_HOME",
+        _ => "CLAUDE_CONFIG_DIR",
     };
     if let Some(root) = std::env::var_os(key).filter(|v| !v.is_empty()) {
         return Ok(PathBuf::from(root));
     }
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .ok_or("User home unavailable")?;
-    Ok(PathBuf::from(home).join(if provider == "codex" {
-        ".codex"
-    } else {
-        ".claude"
-    }))
+    Ok(PathBuf::from(home).join(format!(".{provider}")))
 }
 
 fn read_config(path: &Path) -> Result<Option<Vec<u8>>, String> {
@@ -170,6 +176,8 @@ fn status(
             .get("disableAllHooks")
             .and_then(Value::as_bool)
             .unwrap_or(false))
+    } else if provider == "grok" {
+        grok::disabled(root)
     } else {
         (|| match read_config(&root.join("config.toml"))? {
             None => Ok(false),
@@ -191,7 +199,7 @@ fn status(
         .map(|e| format!("Could not inspect config.toml: {e}"));
     let mut result = json!({"configDir":root, "configPath":root.join(config_name(provider)?), "installed":count==events(provider).len() && present,
         "registered":count, "expected":events(provider).len(), "helperPresent":present,
-        "disabled":disabled.unwrap_or(false), "warning":warning,
+        "disabled":disabled.unwrap_or(provider == "grok"), "warning":warning,
         "titleBinding":if provider == "codex" { Some(title::status(root)) } else { None }});
     let current_count = registered(value, owned, provider, true);
     let owned_count = value
@@ -300,6 +308,11 @@ pub fn manage(
         return Err("Absolute config directory and valid operation required".into());
     }
     let path = root.join(name);
+    if provider == "grok"
+        && fs::symlink_metadata(root.join("hooks")).is_ok_and(|m| m.file_type().is_symlink())
+    {
+        return Err("Grok hooks directory must not be a symlink".into());
+    }
     let owned = OwnedHandlers::new(root, provider)?;
     if operation == "status" || (matches!(operation, "remove" | "update") && !root.exists()) {
         return status(
@@ -357,7 +370,12 @@ pub fn manage(
         }
         if let Some(original) = &original {
             let mut backup = tempfile::Builder::new()
-                .prefix(&format!("{name}.laymux-backup-"))
+                .prefix(&format!(
+                    "{}.laymux-backup-",
+                    path.file_name()
+                        .and_then(|n| n.to_str())
+                        .ok_or("Invalid hooks filename")?
+                ))
                 .tempfile_in(root)
                 .map_err(|e| e.to_string())?;
             backup.write_all(original).map_err(|e| e.to_string())?;
@@ -366,6 +384,8 @@ pub fn manage(
         }
         let mut bytes = serde_json::to_vec_pretty(&value).map_err(|e| e.to_string())?;
         bytes.push(b'\n');
+        fs::create_dir_all(path.parent().ok_or("Missing hooks parent")?)
+            .map_err(|e| e.to_string())?;
         atomic_write(&path, &bytes)?;
     }
     if let Some(change) = title_change {
