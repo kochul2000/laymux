@@ -1,5 +1,6 @@
 import { getHandler, isRegisteredInteractiveApp } from "./activity-handler";
 import { prepareAgentClear } from "./agent-clear-composer";
+import { agentClearInput, beginAgentClear } from "./agent-clear-input-api";
 import { isTaskObservedAgent, terminalTaskPolicy } from "./terminal-task";
 import { resolvePaneCwd, type CwdBearingPane } from "./pane-cwd";
 import { toPaneId, toTerminalId } from "./pane-ids";
@@ -343,10 +344,10 @@ export async function clearPane(
         if (remoteLeaseId === undefined) await writeTerminalInput(id, text, true);
         else await writeTerminalInputForRemote(id, text, true, remoteLeaseId);
       };
-      const before = useTerminalStore.getState().instances.find((i) => i.id === id);
+      const before = instance;
       const provider = before?.activity?.name;
       if (provider === "Codex" || provider === "Claude") {
-        const current = () => {
+        const scopeCurrent = () => {
           const now = useTerminalStore.getState().instances.find((i) => i.id === id);
           return (
             !!now &&
@@ -354,23 +355,40 @@ export async function clearPane(
             now.generation === before?.generation &&
             now.taskEpoch === before?.taskEpoch &&
             now.lastUserInputAt === before?.lastUserInputAt &&
-            now.activity?.name === provider &&
-            terminalTaskPolicy(now).clearAllowed
+            now.activity?.name === provider
+          );
+        };
+        const ready = () => {
+          const now = useTerminalStore.getState().instances.find((i) => i.id === id);
+          return !!now && terminalTaskPolicy(now).clearAllowed;
+        };
+        const clearDeadline = Math.min(deadlineAt ?? Infinity, Date.now() + 3000);
+        while (!ready()) {
+          if (!scopeCurrent() || Date.now() >= clearDeadline)
+            throw new Error("Agent clear did not observe an idle task before the deadline");
+          await new Promise((resolve) => setTimeout(resolve, 60));
+        }
+        if (!scopeCurrent() || before?.generation === undefined)
+          throw new Error("Agent clear scope changed before draft deletion");
+        let stamp = await beginAgentClear(id, before.generation, remoteLeaseId);
+        const current = () => scopeCurrent() && ready();
+        const step = async (kind: "deleteDraft" | "submitClear") => {
+          if (!current()) throw new Error("Agent clear scope changed before input");
+          stamp = await agentClearInput(
+            id,
+            stamp,
+            kind,
+            Math.max(0, clearDeadline - Date.now()),
+            remoteLeaseId,
           );
         };
         await prepareAgentClear(
           id,
           provider,
-          (bytes) =>
-            remoteLeaseId === undefined
-              ? writeToTerminal(id, bytes)
-              : writeToTerminalForRemote(id, bytes, remoteLeaseId),
+          () => step("deleteDraft"),
           current,
-          Math.min(deadlineAt ?? Infinity, Date.now() + 3000),
-          async () => {
-            if (!current()) throw new Error("Agent clear scope changed before submission");
-            await submit();
-          },
+          clearDeadline,
+          () => step("submitClear"),
         );
         return;
       }

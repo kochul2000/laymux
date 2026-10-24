@@ -1,7 +1,6 @@
 import { getTerminalInspector, type TerminalBufferDump } from "./terminal-serialize-registry";
 
 type Provider = "Claude" | "Codex";
-const DELETE_BATCH = "\x7f\x1b[3~".repeat(128);
 const POLL_MS = 60;
 const MAX_ROUNDS = 32;
 const pending = new Set<string>();
@@ -13,32 +12,38 @@ export function agentClearComposer(
 ): "empty" | "draft" | "unsupported" {
   if (screen.cols < 40) return "unsupported";
   const lines = screen.lines.filter((l) => l.index >= screen.baseY).map((l) => l.text.trimEnd());
-  if (
-    lines.some((l) =>
+  const unsupportedChrome = (chrome: string[]) =>
+    chrome.some((l) =>
       /esc to interrupt|Reconnecting|Task is still running|\[Image\s|Vim:|-- (?:NORMAL|INSERT|REPLACE) --|enter.*(?:confirm|select)|esc.*(?:cancel|back)/i.test(
         l,
       ),
-    )
-  )
-    return "unsupported";
+    );
   if (provider === "Codex") {
     const prompt = lines.reduce(
       (last, line, index) => (/^›(?:\s|$)/.test(line) ? index : last),
       -1,
     );
-    if (
-      prompt < 0 ||
-      !lines.slice(prompt + 1).some((l) => /^\s{2,}.*(?:Context|% left|shortcuts)/i.test(l))
-    )
-      return "unsupported";
-    return /^(?:›\s*|› Ask Codex to do anything)$/.test(lines[prompt]) && !lines[prompt + 1]?.trim()
+    const footer = lines.reduce(
+      (last, line, index) =>
+        index > prompt && /^\s{2,}.*(?:Context|% left|shortcuts)/i.test(line) ? index : last,
+      -1,
+    );
+    if (prompt < 0 || footer < 0 || unsupportedChrome(lines.slice(footer))) return "unsupported";
+    return /^(?:›\s*|› Ask Codex to do anything)$/.test(lines[prompt]) &&
+      lines.slice(prompt + 1, footer).every((l) => !l.trim())
       ? "empty"
       : "draft";
   }
   const borders = lines.flatMap((l, i) => (/^\s*─{3,}\s*$/.test(l) ? [i] : []));
   const bottom = borders.at(-1);
   const top = borders.at(-2);
-  if (top === undefined || bottom === undefined || bottom <= top + 1) return "unsupported";
+  if (
+    top === undefined ||
+    bottom === undefined ||
+    bottom <= top + 1 ||
+    unsupportedChrome(lines.slice(bottom + 1))
+  )
+    return "unsupported";
   const input = lines.slice(top + 1, bottom);
   if (
     !/^[>❯](?:[ \u00a0]|$)/.test(input[0]) ||
@@ -54,7 +59,7 @@ export function agentClearComposer(
 export async function prepareAgentClear(
   id: string,
   provider: Provider,
-  write: (text: string) => Promise<void>,
+  erase: () => Promise<void>,
   current: () => boolean,
   deadline: number,
   submit: () => Promise<void> = async () => {},
@@ -83,7 +88,7 @@ export async function prepareAgentClear(
         }
       } else {
         emptySince = undefined;
-        await write(DELETE_BATCH);
+        await erase();
       }
       await new Promise((resolve) => setTimeout(resolve, POLL_MS));
     }

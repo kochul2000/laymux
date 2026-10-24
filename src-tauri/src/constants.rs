@@ -428,6 +428,12 @@ pub const REMOTE_OWNER_TRANSITION_TIMEOUT_MS: u64 = 750;
 /// API, including bracketed-paste markers and an optional submit CR.
 pub const TERMINAL_STRUCTURED_INPUT_MAX_BYTES: usize = 1024 * 1024;
 
+/// Bounded, owner-checked agent composer clearing (ADR-0355).
+pub const AGENT_CLEAR_DELETE_PAIR: &[u8] = b"\x7f\x1b[3~";
+pub const AGENT_CLEAR_DELETE_BATCH: usize = 128;
+pub const AGENT_CLEAR_COMMAND: &str = "/clear";
+pub const AGENT_CLEAR_MAX_WAIT_MS: u64 = 3_000;
+
 /// Remote attachment cache quota expressed in attachments of the configured
 /// maximum size (`remote.attachmentMaxMib`, ADR-0227): 256 MiB at the 16 MiB
 /// default (ADR-0353). Attachments are short-lived files a CLI reads soon and

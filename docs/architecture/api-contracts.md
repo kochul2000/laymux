@@ -2522,4 +2522,7 @@ Dev POST `/api/v1/ui/key`는 `{key,ctrl?,alt?,shift?}`로 포커스된 요소에
 
 검증된 `HookStateSnapshot`은 선택적인 CLI `turnId`를 포함한다. Codex 종료 결과는 같은 generation·session ID·turn ID의 확정된 rollout 결과만 합친다. 유휴·종료 훅은 현재 귀속의 6초 lease 안에서 유지하며, 진행·입력 대기는 기존 60초 기한을 유지한다. `CommandStatus.outputActivityFallback=false`는 Claude·Codex의 원시 출력 활동을 작업 표시 근거에서 제외한다. Desktop·Remote는 같은 값을 사용하고 원시 `outputActive`를 보존한다.
 
-`POST /api/v1/panes/{paneId}/clear` 및 Remote clear는 Claude·Codex에서 현재 화면의 지원하는 텍스트 입력창을 확인하고 초안을 제한된 Backspace/Delete 배치로 삭제한다. 180ms 동안 빈 입력창을 확인한 뒤 제출한다. 최대 32회·3초이며 bridge hard deadline을 우선한다. 지원하지 않는 화면·미확인 작업·세대 교체·삭제 실패는 기존 `failed` 배열로 반환하고 `/clear`를 제출하지 않는다. Grok은 이 변경 대상이 아니다.
+`POST /api/v1/panes/{paneId}/clear` 및 Remote clear는 Claude·Codex에서 interrupt 후 남은 기한 안에서 idle 관찰을 기다리고 현재 화면의 지원하는 텍스트 입력창을 확인한다. 과거 응답·초안 문구는 모드 판정에서 제외하고 footer 앞의 모든 연속 행을 검사한다. 초안을 제한된 Backspace/Delete 배치로 삭제하고 180ms 동안 빈 입력창을 확인한 뒤 제출한다. 최대 32회·3초이며 bridge hard deadline을 우선한다. 지원하지 않는 화면·미확인 작업·세대 교체·삭제 실패는 기존 `failed` 배열로 반환하고 `/clear`를 제출하지 않는다. Grok은 이 변경 대상이 아니다.
+
+- `begin_agent_clear({id,generation,remoteLeaseId?})`는 현재 입력 소유권과 PTY 세대를 검증하고 `{generation,inputRevision}`을 반환한다.
+- `agent_clear_input({id,expected,step,remainingMs,remoteLeaseId?})`는 고정된 `deleteDraft`(Backspace/Delete 128쌍) 또는 `submitClear`(`/clear`의 bracketed-paste 인코딩과 별도 CR)만 허용한다. 기존 human-control enqueue 게이트 안에서 `expected.inputRevision`을 현재 PTY revision과 비교한 뒤 같은 FIFO에 enqueue하며 자신의 쓰기로 증가한 revision을 반환한다. 완료를 기다린 뒤 revision을 다시 읽어 다른 입력을 흡수하지 않는다. Local·Remote·Automation의 중간 입력·Remote lease 변경·기한 초과는 후속 쓰기를 거부한다. 물리 I/O 실패는 기존 quarantine·소유권 barrier 처리를 공유한다.

@@ -25,8 +25,7 @@ it("deletes from both sides, then waits for a stable empty composer", async () =
   vi.useFakeTimers();
   let frame = screen("unsent draft");
   registerTerminalInspector("t", () => frame);
-  const write = vi.fn(async (text) => {
-    expect(text).toContain("\x7f\x1b[3~");
+  const write = vi.fn(async () => {
     frame = screen("");
   });
   const run = prepareAgentClear("t", "Codex", write, () => true, Date.now() + 3000);
