@@ -177,6 +177,9 @@ pub struct PtyHandle {
     pub(crate) daemon_reconnect_control: Option<Arc<crate::pty_daemon::ReconnectControl>>,
     pub(crate) display_context_owner: Option<crate::pty_daemon::DisplayContextOwner>,
     checkpoint_input_revision: Arc<AtomicU64>,
+    /// Leaf gate: revision comparison and FIFO enqueue are one operation for
+    /// human input as well as direct Automation/MCP writers (ADR-0355).
+    input_enqueue_gate: Arc<Mutex<()>>,
     session_restore: Option<Arc<PendingSessionRestore>>,
     /// Owns the writer on one terminal-specific FIFO thread.
     control: Arc<PtyControlWorker>,
@@ -295,6 +298,7 @@ impl PtyHandle {
             daemon_reconnect_control: None,
             display_context_owner: None,
             checkpoint_input_revision: Arc::new(AtomicU64::new(0)),
+            input_enqueue_gate: Arc::new(Mutex::new(())),
             session_restore: None,
             control: PtyControlWorker::spawn(writer, Arc::clone(&master))
                 .expect("test PTY control worker"),
@@ -505,6 +509,34 @@ impl PtyHandle {
     /// gapped so a TUI/shell registers a distinct Enter, all inside this one
     /// FIFO job so the body and CR stay atomic against other writes (#490).
     pub(crate) fn enqueue_write(
+        &self,
+        data: &[u8],
+        submit: bool,
+        deadline: Instant,
+    ) -> Result<PendingControlJob, String> {
+        let _gate = self.input_enqueue_gate.lock_or_err()?;
+        self.enqueue_write_locked(data, submit, deadline)
+    }
+
+    pub(crate) fn enqueue_write_if_revision(
+        &self,
+        expected_revision: u64,
+        data: &[u8],
+        submit: bool,
+        deadline: Instant,
+    ) -> Result<(PendingControlJob, u64), String> {
+        let _gate = self.input_enqueue_gate.lock_or_err()?;
+        if Instant::now() >= deadline {
+            return Err("Agent clear deadline elapsed before PTY enqueue".into());
+        }
+        if self.checkpoint_input_revision() != expected_revision {
+            return Err("Agent clear input changed during draft preparation".into());
+        }
+        let pending = self.enqueue_write_locked(data, submit, deadline)?;
+        Ok((pending, self.checkpoint_input_revision()))
+    }
+
+    fn enqueue_write_locked(
         &self,
         data: &[u8],
         submit: bool,

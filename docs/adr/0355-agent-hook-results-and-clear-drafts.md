@@ -20,6 +20,7 @@ Codex 작업 기록의 성공이 결과 없는 Stop 훅에 가려진다. 또한 
 - Codex·Claude의 작업 표시는 출력량·프레임 신호로 작업 미확인을 진행 중으로 승격하지 않는다. 원시 출력 활동은 진단에 보존하고 일반 셸·Grok의 기존 fallback은 유지한다.
 - 단일 pane clear는 Codex·Claude의 현재 viewport에서 지원하는 텍스트 입력창을 확인한다. 초안은 제한된 Backspace/Delete 배치로 지우고 빈 입력창을 확인한 뒤 `/clear`를 제출한다. 확인할 수 없는 화면·모달·지원하지 않는 편집 모드·삭제 한도·시간 초과·PTY 교체는 실패로 반환하며 slash 명령을 제출하지 않는다. 기존 busy 정책과 Remote 입력 소유권을 유지한다.
 - interrupt 정책은 남은 clear 기한 안에서 확인된 idle/ended 관찰을 기다린 뒤 입력창을 검사한다. 화면의 과거 응답이나 초안 문구를 편집 모드로 해석하지 않고 현재 입력창과 footer를 구분하며, 모든 연속·줄바꿈 행이 비었는지 확인한다.
+- 입력 revision 비교·증가와 FIFO enqueue는 `PtyHandle`의 공유 leaf 게이트 안에서 한 연산으로 실행한다. human-control 게이트 밖에서 직접 쓰는 Automation·MCP도 같은 PTY 게이트를 거친다. 게이트 안에서는 AppState 락이나 물리 I/O 완료를 기다리지 않는다.
 - 삭제와 제출 사이에는 generation·앱 epoch와 작업 상태를 재검사하며 terminal별 clear 중복 실행을 막는다. Rust가 발급한 generation·입력 revision을 각 삭제·제출 시 기존 human-control enqueue 게이트 안에서 비교한다. 자신의 삭제로 증가한 revision만 다음 요청에 전달하고, Local·Remote·Automation 입력이 끼어들면 화면 갱신 전이라도 후속 clear를 거부한다. 새 IPC는 고정된 삭제 배치와 `/clear` 제출만 허용하며 Remote lease와 PTY FIFO의 기존 소유권·실패 처리를 공유한다. Automation의 기존 hard deadline 뒤에 새 입력을 보내지 않는다. 결과는 기존 failed 배열로 설명한다.
 
 ## Alternatives Considered

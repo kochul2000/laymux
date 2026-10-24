@@ -128,17 +128,15 @@ fn agent_clear_input_inner(
         if Instant::now() >= deadline {
             return Err("Agent clear deadline elapsed before input".into());
         }
-        // Every human input path holds this same enqueue gate while advancing
-        // the PTY revision. Comparing here closes the screen-to-input race.
-        if handle.checkpoint_input_revision() != expected.input_revision {
-            return Err("Agent clear input changed during draft preparation".into());
-        }
-        let pending = handle.enqueue_write(&body, submit, deadline)?;
+        // The PTY gate also serializes direct Automation/MCP writes which do
+        // not enter the human-owner gate. Compare and enqueue atomically there.
+        let (pending, input_revision) =
+            handle.enqueue_write_if_revision(expected.input_revision, &body, submit, deadline)?;
         // Capture our revision under the enqueue gate, never after awaiting I/O:
         // a later user's input must invalidate the next clear step.
         let next = AgentClearInputStamp {
             generation: expected.generation,
-            input_revision: handle.checkpoint_input_revision(),
+            input_revision,
         };
         Ok((pending, next))
     })?;
@@ -231,6 +229,45 @@ mod tests {
                 "intervening raw input must reject the clear step"
             );
             assert_eq!(*written.lock().unwrap(), b"new draft");
+        }
+    }
+
+    #[test]
+    fn direct_automation_writer_and_guarded_enqueue_have_one_order() {
+        for _ in 0..16 {
+            let written = Arc::new(Mutex::new(Vec::new()));
+            let handle = PtyHandle::from_test_writer_for_generation(
+                Box::new(Writer(Arc::clone(&written))),
+                7,
+            );
+            let start = std::sync::Barrier::new(2);
+            std::thread::scope(|scope| {
+                let direct = scope.spawn(|| {
+                    start.wait();
+                    handle.write(b"user").unwrap();
+                });
+                start.wait();
+                let deadline = Instant::now() + Duration::from_secs(3);
+                let guarded = handle.enqueue_write_if_revision(0, b"/clear", false, deadline);
+                match guarded {
+                    Ok((pending, revision)) => {
+                        assert_eq!(
+                            revision, 1,
+                            "receipt must not absorb a concurrent direct write"
+                        );
+                        handle
+                            .await_enqueued_control_job(pending, deadline, || true)
+                            .unwrap();
+                        direct.join().unwrap();
+                        assert_eq!(*written.lock().unwrap(), b"/clearuser");
+                    }
+                    Err(error) => {
+                        assert!(error.contains("input changed"));
+                        direct.join().unwrap();
+                        assert_eq!(*written.lock().unwrap(), b"user");
+                    }
+                }
+            });
         }
     }
 
