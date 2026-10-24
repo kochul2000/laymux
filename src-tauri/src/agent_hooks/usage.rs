@@ -1,4 +1,4 @@
-//! Heuristic evidence that Claude/Codex actually ran in a local environment
+//! Heuristic evidence that Claude/Codex/Grok actually ran in a local environment
 //! (ADR-0330). Missing-integration notices are limited to these targets so
 //! unused CLIs and idle WSL distributions never raise one.
 use std::collections::{BTreeSet, HashSet};

@@ -1250,6 +1250,10 @@ Claude Code 가 세션 리미트에 걸리면 스크롤백에 `⎿  You've hit y
 
 Grok도 별도의 `grok` 훅 provider와 `grok.stateDetection`을 사용한다. helper는 camelCase 세션·턴 식별자를 공통 모델로 변환하고, Claude 호환 경로로 들어온 Grok payload는 전송하지 않는다. `Stop`은 blocking gate라 phase를 종료로 바꾸지 않는다. 훅 모드에서는 `subscribeAgentSessionStates`가 title의 확정 여부와 무관하게 1초마다 정확히 귀속된 Grok 기록을 읽어 `terminalStore.grokTurn`에 저장한다. `AgentSessionState.turnId`는 `turn_completed.prompt_id`이며 파일 내부 session ID도 귀속 ID와 일치해야 한다. `withGrokTurnResult`는 현재 generation·session ID·훅 `promptId`가 모두 같은 완료 기록만 표시의 ended·결과·완료 알림으로 결합한다. 원시 훅과 기록은 변경하지 않으며 명시적 실패·중단은 성공으로 덮지 않는다. 세대·앱·세션 교체는 기록을 폐기하고, 다른 턴·식별자 없는 기록은 현재 작업을 끝내지 않는다.
 
+기록이 보완한 종료는 원시 훅보다 표시 알림 번호를 앞서게 할 수 있다. 공통 알림 발행자는 source·task ID·알림 번호로 중복을 판정하고 현재 state와 일치하는 waiting·ended 알림만 발행한다. 다음 턴을 처음 관측한 상태가 waiting·ended여도 이전 턴과 번호가 같다는 이유로 생략하지 않으며, idle·running에 상속된 과거 알림은 다시 발행하지 않는다.
+
+Grok의 세션 범위 `PreCompact`·`PostCompact`에 `promptId`가 없으면 레지스트리의 이전 turn ID를 해제한다. 압축 중에 예전 턴의 완료 기록을 결합하지 않으며, 이후 식별자가 있는 턴 이벤트가 도착하면 다시 결합한다.
+
 Grok 1.0.70의 `/clear`는 이전 대화를 같은 PID의 `active_sessions.json`에 남긴다. 이때는 현재 대화가 유일하지 않아 훅과 기록 조회가 보류되며 기존 감지를 사용한다. 모델 응답 시작 전 취소가 종료 훅·완료 기록을 남기지 않으면 중단을 확정할 근거가 없으므로 결과를 합성하지 않는다. 이 제한과 후속 foreground 귀속 설계는 [#1252](https://github.com/kochul2000/laymux/issues/1252)에서 추적한다.
 
 [ADR-0248](../adr/0248-codex-turn-lifecycle-activity.md)에 따라 `get_codex_turn_states`는 기존 pane→프로세스→TUI 대화 식별 경로를 재사용한다. PTY generation을 조회 전후 검사하고, 해당 프로세스의 현재 대화 선택 로그 ID·session ID에 귀속된 rollout만 읽는다. 복원 전용 fallback과 중복 귀속은 작업 상태 근거로 사용하지 않는다. 새 빈 세션은 idle, 파일 경로·읽기·형식을 확인하지 못하면 unknown이다.

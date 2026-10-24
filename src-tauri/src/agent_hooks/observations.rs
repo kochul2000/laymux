@@ -1,6 +1,10 @@
 use laymux_agent_hook::runtime::HookEvent;
 use serde::Serialize;
 
+#[cfg(test)]
+#[path = "observations/grok_tests.rs"]
+mod grok_tests;
+
 /// Active phases need fresh events; stable phases still require live binding.
 pub const MAX_OBSERVATION_AGE_MS: u64 = 60_000;
 const MAX_CONVERSATIONS: usize = 256;
@@ -148,6 +152,11 @@ impl HookRegistry {
         }
         if event.turn_id.is_some() {
             entry.turn = event.turn_id.clone();
+        } else if event.provider == "grok"
+            && matches!(event.event.as_str(), "PreCompact" | "PostCompact")
+        {
+            // Session-scoped compaction cannot reuse a finished model turn.
+            entry.turn = None;
         }
         entry.sequence = self.sequence;
         entry.event = event;
@@ -260,7 +269,7 @@ mod tests {
         assert_eq!(observed.phase, Some(HookPhase::Ended));
         assert_eq!(observed.result, Some(HookResult::Interrupted));
     }
-    fn event(provider: &str, kind: &str, time: u64, turn: Option<&str>) -> HookEvent {
+    pub(super) fn event(provider: &str, kind: &str, time: u64, turn: Option<&str>) -> HookEvent {
         let mut event = laymux_agent_hook::runtime::parse_event(
             provider,
             &json!({"session_id":"session-a", "hook_event_name":kind,"turn_id":turn}),

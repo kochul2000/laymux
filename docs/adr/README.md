@@ -173,7 +173,7 @@ ADR 이 필요한 대표 기준:
 | [0153](0153-remote-hidden-item-visibility-controls.md) | Remote 숨김 항목 편집은 PC 상태 소유자를 재사용한다 (0033·0035·0151 확장) | Accepted |
 | [0154](0154-android-multi-instance-pairing-vault.md) | Android pairing vault는 instance별 레코드와 정책별 공유 wrapping key를 사용한다 (0149 정정, 0145·0146 확장) | Accepted |
 | [0155](0155-android-background-remote-lease-grace.md) | Android E2E Remote의 설정 가능한 백그라운드 controller lease 유예 | Proposed |
-| [0156](0156-grok-first-class-agent.md) | Grok Build는 Claude·Codex와 같은 1급 에이전트다 (0009·0102·0104·0118·0120·0125·0134·0147 확장) | Accepted |
+| [0156](0156-grok-first-class-agent.md) | Grok Build는 Claude·Codex와 같은 1급 에이전트다 (0009·0102·0104·0118·0120·0125·0134·0147 확장) | Accepted (partially superseded by 0356) |
 | [0157](0157-android-pairing-sheet-over-live-cloud-webview.md) | Android pairing sheet는 비활성 Cloud WebView 위의 secure overlay다 (0149 확장) | Superseded by 0178 |
 | [0158](0158-activity-aware-single-pane-clear.md) | 단일 pane 실제 클리어는 activity handler가 소유하고 Alt+L로 실행한다 (0137 일부 대체, 0113·0121 재적용) | Accepted (partially superseded by 0355) |
 | [0159](0159-android-e2e-websocket-output-transport.md) | Android E2E 터미널 출력은 스트림별 AEAD WebSocket으로 전송한다 (0146·0150 일부 대체, 0149 확장) | Accepted |
@@ -378,8 +378,8 @@ ADR 이 필요한 대표 기준:
 | [0352](0352-android-e2e-early-rejection-drains-body.md) | Android E2E RPC 조기 거부는 남은 body를 버리며 다 읽은 뒤에 응답을 끝낸다 (0351 정정) | Accepted |
 | [0353](0353-remote-attachment-16mib-default.md) | Remote 첨부 상한은 기본값과 최대값 모두 16 MiB이고, Cloud relay 요청 상한은 24 MiB다 (0227·0351 정정) | Accepted |
 | [0354](0354-workspace-close-undo-grace-period.md) | PC·모바일 workspace 닫기는 호스트의 5초 복원 유예 뒤 확정한다 | Accepted |
-| [0355](0355-agent-hook-results-and-clear-drafts.md) | 검증된 유휴·종료 훅과 동일 턴 결과를 사용하고 실제 clear 전에 초안을 삭제한다 | Accepted |
-| [0356](0356-grok-hook-task-state-and-safe-clear.md) | Grok을 독립 훅 provider로 검증하고 입력창·입력 revision을 확인한 뒤 clear한다 | Proposed |
+| [0355](0355-agent-hook-results-and-clear-drafts.md) | 검증된 유휴·종료 훅과 동일 턴 결과를 사용하고 실제 clear 전에 초안을 삭제한다 | Accepted (partially superseded by 0356) |
+| [0356](0356-grok-hook-task-state-and-safe-clear.md) | Grok을 독립 훅 provider로 검증하고 입력창·입력 revision을 확인한 뒤 clear한다 | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

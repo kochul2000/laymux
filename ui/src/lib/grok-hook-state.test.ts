@@ -128,3 +128,64 @@ it("완료 후 다음 턴의 시작은 지난 완료 알림을 다시 발행하�
   await vi.advanceTimersByTimeAsync(1000);
   expect(useNotificationStore.getState().notifications).toHaveLength(2);
 });
+it.each(["waiting", "ended"] as const)(
+  "완료 기록 뒤 다음 턴의 첫 훅이 %s여도 새 알림을 잃지 않는다",
+  async (state) => {
+    vi.mocked(getAgentSessionStates).mockResolvedValue({
+      g: {
+        generation: 7,
+        sessionId: "grok-session",
+        turnId: "turn-1",
+        status: "ended",
+        result: "success",
+      },
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    useTerminalStore.getState().observeAgentHook("g", {
+      ...hook("turn-2", 2),
+      state,
+      result: state === "ended" ? "failure" : null,
+    });
+    expect(instance().task?.state).toBe(state);
+    expect(useNotificationStore.getState().notifications.map((n) => n.message)).toEqual([
+      "Grok: 종료 (성공)",
+      state === "waiting" ? "Grok: 입력 대기" : "Grok: 종료 (실패)",
+    ]);
+  },
+);
+it("새 턴의 유휴 관측에 상속된 이전 종료 알림은 재발행하지 않는다", () => {
+  useTerminalStore.getState().observeAgentHook("g", {
+    ...hook("turn-1", 2),
+    state: "ended",
+    result: "interrupted",
+  });
+  expect(useNotificationStore.getState().notifications).toHaveLength(1);
+  useTerminalStore.getState().observeAgentHook("g", {
+    ...hook("turn-2", 3),
+    state: "idle",
+  });
+  expect(instance().task?.state).toBe("idle");
+  expect(useNotificationStore.getState().notifications).toHaveLength(1);
+});
+it("턴 식별자 없는 세션 압축은 이전 턴의 완료 기록을 재사용하지 않는다", async () => {
+  vi.mocked(getAgentSessionStates).mockResolvedValue({
+    g: {
+      generation: 7,
+      sessionId: "grok-session",
+      turnId: "turn-1",
+      status: "ended",
+      result: "success",
+    },
+  });
+  await vi.advanceTimersByTimeAsync(1000);
+  useTerminalStore.getState().observeAgentHook("g", {
+    ...hook("turn-1", 2),
+    taskId: "1",
+    turnId: null,
+  });
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(instance().task).toMatchObject({ state: "running" });
+  expect(instance().task?.result).toBeUndefined();
+  expect(terminalTaskPolicy(instance()).clearAllowed).toBe(false);
+  expect(useNotificationStore.getState().notifications).toHaveLength(1);
+});

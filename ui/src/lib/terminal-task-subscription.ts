@@ -28,8 +28,9 @@ export function subscribeTerminalTasks(): () => void {
       }
       if (
         !task?.notification ||
+        task.state !== task.notification ||
         task.source !== before?.source ||
-        task.notificationId === before.notificationId
+        (task.taskId === before.taskId && task.notificationId === before.notificationId)
       )
         continue;
       const waiting = task.notification === "waiting";
