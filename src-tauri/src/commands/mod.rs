@@ -1,3 +1,4 @@
+mod agent_clear;
 mod agent_hooks;
 mod agent_session_state;
 mod android_pairing;
@@ -37,6 +38,7 @@ mod wsl_agent_session;
 mod wsl_client;
 
 pub use crate::cloud::commands::*;
+pub use agent_clear::*;
 pub use agent_hooks::*;
 pub use agent_session_state::*;
 pub use android_pairing::*;
@@ -84,6 +86,10 @@ pub use wsl_client::*;
 mod main_thread_io {
     /// Commands that must use the async runtime or the sync threadpool.
     const OFF_MAIN_THREAD: &[(&str, &[&str])] = &[
+        (
+            include_str!("agent_clear.rs"),
+            &["begin_agent_clear", "agent_clear_input"],
+        ),
         (
             include_str!("worktrees.rs"),
             &[

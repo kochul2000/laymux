@@ -1,4 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  registerTerminalInspector,
+  unregisterTerminalInspector,
+} from "./terminal-serialize-registry";
+
+vi.mock("./agent-clear-input-api", () => ({
+  beginAgentClear: vi.fn(),
+  agentClearInput: vi.fn(),
+}));
+import { agentClearInput, beginAgentClear } from "./agent-clear-input-api";
 
 vi.mock("@/lib/tauri-api", () => ({
   getTerminalStates: vi
@@ -46,9 +56,11 @@ function registerTerminal(paneId: string, workspaceId = "ws-clear") {
     syncGroup: workspaceId,
     workspaceId,
   });
-  useTerminalStore
-    .getState()
-    .updateInstanceInfo(`terminal-${paneId}`, { sessionReady: true, activity: { type: "shell" } });
+  useTerminalStore.getState().updateInstanceInfo(`terminal-${paneId}`, {
+    generation: 1,
+    sessionReady: true,
+    activity: { type: "shell" },
+  });
 }
 
 function seedWorkspace() {
@@ -119,6 +131,10 @@ function makeBusy(paneId: string) {
 }
 
 describe("clearPane against live stores", () => {
+  afterEach(() => {
+    unregisterTerminalInspector("terminal-pane-a");
+    vi.useRealTimers();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getTerminalStates)
@@ -135,6 +151,13 @@ describe("clearPane against live stores", () => {
       );
     vi.mocked(writeTerminalInput).mockResolvedValue(undefined);
     vi.mocked(writeToTerminal).mockResolvedValue(undefined);
+    vi.mocked(beginAgentClear).mockReset().mockResolvedValue({ generation: 1, inputRevision: 0 });
+    vi.mocked(agentClearInput)
+      .mockReset()
+      .mockImplementation(async (_id, stamp) => ({
+        ...stamp,
+        inputRevision: stamp.inputRevision + 1,
+      }));
     resetStores();
   });
 
@@ -204,8 +227,31 @@ describe("clearPane against live stores", () => {
       activity: { type: "interactiveApp", name },
     });
     observeTerminalTask("terminal-pane-a", { state: "idle" });
+    registerTerminalInspector("terminal-pane-a", () => ({
+      cols: 96,
+      rows: 6,
+      length: 6,
+      baseY: 0,
+      lines: ["› ", "", "  GPT-6.1-Sol · Context 100% left"].map((text, index) => ({
+        index,
+        text,
+        isWrapped: false,
+      })),
+    }));
     await clearPane("pane-a");
-    expect(vi.mocked(writeTerminalInput)).toHaveBeenCalledWith("terminal-pane-a", "/clear", true);
+    if (name === "Grok") {
+      expect(writeTerminalInput).toHaveBeenCalledWith("terminal-pane-a", "/clear", true);
+    } else {
+      expect(beginAgentClear).toHaveBeenCalledWith("terminal-pane-a", 1, undefined);
+      expect(agentClearInput).toHaveBeenLastCalledWith(
+        "terminal-pane-a",
+        { generation: 1, inputRevision: 1 },
+        "submitClear",
+        expect.any(Number),
+        undefined,
+      );
+      expect(writeTerminalInput).not.toHaveBeenCalled();
+    }
   });
 
   it("clears a dock pane that workspace clear does not own", async () => {
@@ -219,38 +265,138 @@ describe("clearPane against live stores", () => {
     expect(result.cleared).toEqual(["terminal-dock-pane-1"]);
   });
 
-  it("sends Ctrl+C as raw bytes before submitting /clear", async () => {
+  it("deletes the agent draft and submits as the Remote lease holder", async () => {
+    seedWorkspace();
+    useTerminalStore.getState().updateInstanceInfo("terminal-pane-a", {
+      activity: { type: "interactiveApp", name: "Claude" },
+    });
+    observeTerminalTask("terminal-pane-a", { state: "idle" });
+    let text = "unsent draft";
+    registerTerminalInspector("terminal-pane-a", () => ({
+      cols: 96,
+      rows: 6,
+      length: 6,
+      baseY: 0,
+      lines: ["──────────", "> " + text, "──────────", "  auto mode on"].map((text, index) => ({
+        index,
+        text,
+        isWrapped: false,
+      })),
+    }));
+    vi.mocked(agentClearInput).mockImplementationOnce(async (_id, stamp) => {
+      text = "";
+      return { ...stamp, inputRevision: stamp.inputRevision + 1 };
+    });
+    const result = await clearPane("pane-a", undefined, { remoteLeaseId: "lease-clear" });
+    expect(result.cleared).toEqual(["terminal-pane-a"]);
+    expect(beginAgentClear).toHaveBeenCalledWith("terminal-pane-a", 1, "lease-clear");
+    expect(agentClearInput).toHaveBeenNthCalledWith(
+      1,
+      "terminal-pane-a",
+      { generation: 1, inputRevision: 0 },
+      "deleteDraft",
+      expect.any(Number),
+      "lease-clear",
+    );
+    expect(agentClearInput).toHaveBeenLastCalledWith(
+      "terminal-pane-a",
+      { generation: 1, inputRevision: 1 },
+      "submitClear",
+      expect.any(Number),
+      "lease-clear",
+    );
+    expect(writeToTerminal).not.toHaveBeenCalled();
+    expect(writeTerminalInput).not.toHaveBeenCalled();
+  });
+
+  it("waits for a delayed idle observation after Ctrl+C, then submits /clear", async () => {
+    vi.useFakeTimers();
     seedWorkspace();
     makeBusy("pane-a");
-    await clearPane("pane-a", { busyPolicy: "interrupt", interruptRounds: 2, settleMs: 0 });
+    registerTerminalInspector("terminal-pane-a", () => ({
+      cols: 96,
+      rows: 6,
+      length: 6,
+      baseY: 0,
+      lines: ["──────────", "> ", "──────────", "  auto mode on"].map((text, index) => ({
+        index,
+        text,
+        isWrapped: false,
+      })),
+    }));
+    setTimeout(() => observeTerminalTask("terminal-pane-a", { state: "idle" }), 2000);
+    const run = clearPane("pane-a", { busyPolicy: "interrupt", interruptRounds: 2, settleMs: 0 });
+    await vi.advanceTimersByTimeAsync(1900);
+    expect(beginAgentClear).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(700);
+    const result = await run;
     expect(vi.mocked(writeToTerminal).mock.calls).toEqual([
       ["terminal-pane-a", CTRL_C],
       ["terminal-pane-a", CTRL_C],
     ]);
-    expect(vi.mocked(writeTerminalInput)).toHaveBeenCalledWith("terminal-pane-a", "/clear", true);
+    expect(result.cleared).toEqual(["terminal-pane-a"]);
+    expect(agentClearInput).toHaveBeenLastCalledWith(
+      "terminal-pane-a",
+      { generation: 1, inputRevision: 1 },
+      "submitClear",
+      expect.any(Number),
+      undefined,
+    );
+  });
+
+  it("reports intervening raw input as failed even when the screen still looks empty", async () => {
+    vi.useFakeTimers();
+    seedWorkspace();
+    useTerminalStore.getState().updateInstanceInfo("terminal-pane-a", {
+      activity: { type: "interactiveApp", name: "Codex" },
+    });
+    observeTerminalTask("terminal-pane-a", { state: "idle" });
+    registerTerminalInspector("terminal-pane-a", () => ({
+      cols: 96,
+      rows: 6,
+      length: 6,
+      baseY: 0,
+      lines: ["› ", "", "  GPT-6.1-Sol · Context 100% left"].map((text, index) => ({
+        index,
+        text,
+        isWrapped: false,
+      })),
+    }));
+    vi.mocked(agentClearInput).mockImplementation(async (_id, stamp, step) => {
+      if (step === "submitClear")
+        throw new Error("Agent clear input changed during draft preparation");
+      return { ...stamp, inputRevision: stamp.inputRevision + 1 };
+    });
+    const run = clearPane("pane-a");
+    await vi.advanceTimersByTimeAsync(400);
+    const result = await run;
+    expect(result.cleared).toEqual([]);
+    expect(result.failed[0]?.error).toContain("input changed");
+    expect(writeTerminalInput).not.toHaveBeenCalled();
   });
 
   // ADR-0271: a clear the Remote lease holder asked for writes as that holder,
   // so the lease that locks out Local input does not reject it.
   it("writes as the Remote lease holder when one requested the clear", async () => {
+    vi.useFakeTimers();
     seedWorkspace();
     makeBusy("pane-a");
-    await clearPane(
+    const run = clearPane(
       "pane-a",
       { busyPolicy: "interrupt", interruptRounds: 1, settleMs: 0 },
       { remoteLeaseId: "lease-1" },
     );
+    await vi.advanceTimersByTimeAsync(3100);
+    const result = await run;
+    expect(result.failed[0]?.error).toContain("idle task");
     expect(vi.mocked(writeToTerminalForRemote).mock.calls).toEqual([
       ["terminal-pane-a", CTRL_C, "lease-1"],
     ]);
-    expect(vi.mocked(writeTerminalInputForRemote)).toHaveBeenCalledWith(
-      "terminal-pane-a",
-      "/clear",
-      true,
-      "lease-1",
-    );
+    expect(vi.mocked(writeTerminalInputForRemote)).not.toHaveBeenCalled();
     expect(vi.mocked(writeToTerminal)).not.toHaveBeenCalled();
     expect(vi.mocked(writeTerminalInput)).not.toHaveBeenCalled();
+    expect(beginAgentClear).not.toHaveBeenCalled();
+    expect(agentClearInput).not.toHaveBeenCalled();
   });
 
   it("restarts a busy dock pane with its live cwd", async () => {

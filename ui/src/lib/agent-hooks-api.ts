@@ -9,6 +9,8 @@ export interface HookStateSnapshot {
   state: "idle" | "running" | "waiting" | "ended";
   result: "failure" | "interrupted" | null;
   taskId: string;
+  /** CLI turn identity, independent of the hook registry's task counter. */
+  turnId?: string | null;
   sequence: number;
   observedAtMs: number;
   configDir: string | null;

@@ -307,6 +307,8 @@ pub fn run() {
             commands::write_terminal_bootstrap_protocol_reply,
             commands::interrupt_terminal_on_exit,
             commands::write_terminal_input,
+            commands::begin_agent_clear,
+            commands::agent_clear_input,
             commands::write_to_terminal_for_remote,
             commands::write_terminal_input_for_remote,
             commands::attach_terminal_output,

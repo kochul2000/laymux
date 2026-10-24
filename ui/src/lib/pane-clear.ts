@@ -1,4 +1,6 @@
 import { getHandler, isRegisteredInteractiveApp } from "./activity-handler";
+import { prepareAgentClear } from "./agent-clear-composer";
+import { agentClearInput, beginAgentClear } from "./agent-clear-input-api";
 import { isTaskObservedAgent, terminalTaskPolicy } from "./terminal-task";
 import { resolvePaneCwd, type CwdBearingPane } from "./pane-cwd";
 import { toPaneId, toTerminalId } from "./pane-ids";
@@ -140,7 +142,9 @@ export function planTerminalClear(
   // An agent nothing has reported on yet, such as one adopted after an
   // update, is not known to be working (ADR-0319).
   const reason =
-    isTaskObservedAgent(instance) && policy.state === undefined && !policy.outputActive
+    isTaskObservedAgent(instance) &&
+    policy.state === undefined &&
+    (!policy.outputActive || activity?.name === "Claude" || activity?.name === "Codex")
       ? "stateUnknown"
       : "busy";
 
@@ -333,10 +337,63 @@ export async function clearPane(
   return runPaneClearAction({
     action,
     config,
-    submit: (id, text) =>
-      remoteLeaseId === undefined
-        ? writeTerminalInput(id, text, true)
-        : writeTerminalInputForRemote(id, text, true, remoteLeaseId),
+    submit: async (id, text) => {
+      const submit = async () => {
+        if (deadlineAt !== undefined && Date.now() >= deadlineAt)
+          throw new Error("Agent clear deadline elapsed before submission");
+        if (remoteLeaseId === undefined) await writeTerminalInput(id, text, true);
+        else await writeTerminalInputForRemote(id, text, true, remoteLeaseId);
+      };
+      const before = instance;
+      const provider = before?.activity?.name;
+      if (provider === "Codex" || provider === "Claude") {
+        const scopeCurrent = () => {
+          const now = useTerminalStore.getState().instances.find((i) => i.id === id);
+          return (
+            !!now &&
+            now.sessionReady !== false &&
+            now.generation === before?.generation &&
+            now.taskEpoch === before?.taskEpoch &&
+            now.lastUserInputAt === before?.lastUserInputAt &&
+            now.activity?.name === provider
+          );
+        };
+        const ready = () => {
+          const now = useTerminalStore.getState().instances.find((i) => i.id === id);
+          return !!now && terminalTaskPolicy(now).clearAllowed;
+        };
+        const clearDeadline = Math.min(deadlineAt ?? Infinity, Date.now() + 3000);
+        while (!ready()) {
+          if (!scopeCurrent() || Date.now() >= clearDeadline)
+            throw new Error("Agent clear did not observe an idle task before the deadline");
+          await new Promise((resolve) => setTimeout(resolve, 60));
+        }
+        if (!scopeCurrent() || before?.generation === undefined)
+          throw new Error("Agent clear scope changed before draft deletion");
+        let stamp = await beginAgentClear(id, before.generation, remoteLeaseId);
+        const current = () => scopeCurrent() && ready();
+        const step = async (kind: "deleteDraft" | "submitClear") => {
+          if (!current()) throw new Error("Agent clear scope changed before input");
+          stamp = await agentClearInput(
+            id,
+            stamp,
+            kind,
+            Math.max(0, clearDeadline - Date.now()),
+            remoteLeaseId,
+          );
+        };
+        await prepareAgentClear(
+          id,
+          provider,
+          () => step("deleteDraft"),
+          current,
+          clearDeadline,
+          () => step("submitClear"),
+        );
+        return;
+      }
+      await submit();
+    },
     interrupt: (id) =>
       remoteLeaseId === undefined
         ? writeToTerminal(id, CTRL_C)

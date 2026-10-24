@@ -432,6 +432,8 @@ export interface CommandStatus {
   taskState?: import("./terminal-task").TaskState;
   taskResult?: import("./terminal-task").TaskResult;
   outputActive: boolean;
+  /** Raw output stays diagnostic; integrated agents require task evidence. */
+  outputActivityFallback?: boolean;
   icon: StatusIconGlyph;
   color: string; // CSS color value
   text?: string; // display text override (e.g., Claude activity message)
@@ -500,7 +502,13 @@ export function computeCommandStatus(
     statusMessageDelimiter,
   };
   const handler = getHandler(activity);
-  const status = taskPresentation(task, Date.now(), outputActive ?? false);
+  const outputActivityFallback =
+    activity?.type !== "interactiveApp" || !["Claude", "Codex"].includes(activity.name ?? "");
+  const status = taskPresentation(
+    task,
+    Date.now(),
+    outputActivityFallback && (outputActive ?? false),
+  );
   const text = handler.computeStatusMessage(raw);
   return {
     ...status,
@@ -508,6 +516,7 @@ export function computeCommandStatus(
     taskState: task?.state,
     taskResult: task?.result,
     outputActive: outputActive ?? false,
+    outputActivityFallback,
   };
 }
 

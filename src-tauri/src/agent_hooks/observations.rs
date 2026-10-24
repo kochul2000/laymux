@@ -1,7 +1,7 @@
 use laymux_agent_hook::runtime::HookEvent;
 use serde::Serialize;
 
-/// No phase event is an indefinite heartbeat. Missing transitions fall back.
+/// Active phases need fresh events; stable phases still require live binding.
 pub const MAX_OBSERVATION_AGE_MS: u64 = 60_000;
 const MAX_CONVERSATIONS: usize = 256;
 
@@ -28,7 +28,7 @@ pub struct Observation {
     pub task: u64,
     pub sequence: u64,
     pub phase_at_ms: u64,
-    turn: Option<String>,
+    pub turn: Option<String>,
 }
 
 #[derive(Default)]
@@ -131,6 +131,7 @@ impl HookRegistry {
             || (next == Some(HookPhase::Running) && entry.phase == Some(HookPhase::Ended))
         {
             entry.task = entry.task.saturating_add(1);
+            entry.turn = event.turn_id.clone();
         }
         if event.event == "SessionEnd" {
             entry.phase = None;
@@ -164,7 +165,8 @@ impl HookRegistry {
             e.event.provider == provider
                 && e.event.session_id == session_id
                 && e.event.distro.as_deref() == distro
-                && now.saturating_sub(e.phase_at_ms) <= MAX_OBSERVATION_AGE_MS
+                && (matches!(e.phase, Some(HookPhase::Idle | HookPhase::Ended))
+                    || now.saturating_sub(e.phase_at_ms) <= MAX_OBSERVATION_AGE_MS)
                 && e.phase.is_some()
         });
         let first = matches.next()?;
@@ -383,9 +385,36 @@ mod tests {
         let observation = registry.exact("claude", "session-a", None, 60_000).unwrap();
         assert_eq!(observation.phase_at_ms, 100);
         assert_eq!(observation.result, Some(HookResult::Failure));
-        assert!(registry
-            .exact("claude", "session-a", None, 60_101)
-            .is_none());
+        assert_eq!(
+            registry
+                .exact("claude", "session-a", None, 60_101)
+                .unwrap()
+                .result,
+            Some(HookResult::Failure)
+        );
         assert_eq!(registry.diagnostic_events(400_001).count(), 0);
+    }
+
+    #[test]
+    fn stable_phases_survive_age_but_next_running_phase_still_expires() {
+        for provider in ["claude", "codex"] {
+            for kind in ["SessionStart", "Stop"] {
+                let mut registry = HookRegistry::default();
+                registry.observe(event(provider, kind, 100, Some("turn-1")));
+                let entry = registry
+                    .exact(provider, "session-a", None, 1_000_000)
+                    .unwrap();
+                assert_eq!(entry.turn.as_deref(), Some("turn-1"));
+                registry.observe(event(
+                    provider,
+                    "UserPromptSubmit",
+                    1_000_001,
+                    Some("turn-2"),
+                ));
+                assert!(registry
+                    .exact(provider, "session-a", None, 1_060_002)
+                    .is_none());
+            }
+        }
     }
 }

@@ -100,3 +100,63 @@ it("keeps title detection independent when the first task came from a hook", () 
   store.observeAgentHook("pane", undefined);
   expect(useTerminalStore.getState().instances[0].task?.state).toBe("idle");
 });
+
+it.each(["claude", "codex"] as const)(
+  "%s keeps a reverified ended hook after 60 seconds",
+  (provider) => {
+    const store = useTerminalStore.getState();
+    store.updateInstanceInfo("pane", {
+      activity: { type: "interactiveApp", name: provider === "claude" ? "Claude" : "Codex" },
+    });
+    useSettingsStore.setState({
+      [provider]: { ...useSettingsStore.getState()[provider], stateDetection: "hooks" },
+    });
+    const ended = { ...snapshot(provider), state: "ended" as const };
+    store.observeAgentHook("pane", ended);
+    vi.advanceTimersByTime(60001);
+    store.observeAgentHook("pane", ended);
+    expect(useTerminalStore.getState().instances[0].taskDetectionSource).toBe("hooks");
+    expect(useTerminalStore.getState().instances[0].task?.state).toBe("ended");
+  },
+);
+
+it("fills Codex hook success only from the same confirmed conversation and turn", () => {
+  const store = useTerminalStore.getState();
+  store.updateInstanceInfo("pane", { activity: { type: "interactiveApp", name: "Codex" } });
+  useSettingsStore.getState().setCodex({ stateDetection: "hooks" });
+  store.observeAgentHook("pane", { ...snapshot("codex"), state: "ended", turnId: "turn-1" });
+  store.updateInstanceInfo("pane", {
+    codexTurn: {
+      generation: 7,
+      sessionId: "same-conversation",
+      turnId: "old-turn",
+      state: "completed",
+    },
+  });
+  expect(useTerminalStore.getState().instances[0].task?.result).toBeUndefined();
+  store.updateInstanceInfo("pane", {
+    codexTurn: {
+      generation: 7,
+      sessionId: "same-conversation",
+      turnId: "turn-1",
+      state: "completed",
+    },
+  });
+  store.observeTask("pane", {
+    source: "rollout",
+    taskId: "turn-1",
+    sequence: 2,
+    state: "ended",
+    result: "success",
+  });
+  expect(useTerminalStore.getState().instances[0].task?.result).toBe("success");
+  store.updateInstanceInfo("pane", {
+    codexTurn: {
+      generation: 7,
+      sessionId: "other-conversation",
+      turnId: "turn-1",
+      state: "completed",
+    },
+  });
+  expect(useTerminalStore.getState().instances[0].task?.result).toBeUndefined();
+});

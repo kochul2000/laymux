@@ -479,6 +479,7 @@ where
         daemon_reconnect_control: None,
         display_context_owner: None,
         checkpoint_input_revision: Arc::new(AtomicU64::new(0)),
+        input_enqueue_gate: Arc::new(Mutex::new(())),
         session_restore: None,
         control,
         master,

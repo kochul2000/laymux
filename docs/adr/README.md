@@ -175,7 +175,7 @@ ADR 이 필요한 대표 기준:
 | [0155](0155-android-background-remote-lease-grace.md) | Android E2E Remote의 설정 가능한 백그라운드 controller lease 유예 | Proposed |
 | [0156](0156-grok-first-class-agent.md) | Grok Build는 Claude·Codex와 같은 1급 에이전트다 (0009·0102·0104·0118·0120·0125·0134·0147 확장) | Accepted |
 | [0157](0157-android-pairing-sheet-over-live-cloud-webview.md) | Android pairing sheet는 비활성 Cloud WebView 위의 secure overlay다 (0149 확장) | Superseded by 0178 |
-| [0158](0158-activity-aware-single-pane-clear.md) | 단일 pane 실제 클리어는 activity handler가 소유하고 Alt+L로 실행한다 (0137 일부 대체, 0113·0121 재적용) | Accepted |
+| [0158](0158-activity-aware-single-pane-clear.md) | 단일 pane 실제 클리어는 activity handler가 소유하고 Alt+L로 실행한다 (0137 일부 대체, 0113·0121 재적용) | Accepted (partially superseded by 0355) |
 | [0159](0159-android-e2e-websocket-output-transport.md) | Android E2E 터미널 출력은 스트림별 AEAD WebSocket으로 전송한다 (0146·0150 일부 대체, 0149 확장) | Accepted |
 | [0160](0160-android-e2e-tailscale-direct-transport.md) | Android E2E는 Tailscale Direct를 우선 전송 경로로 사용한다 (0139·0146·0149·0159 확장) | Proposed |
 | [0161](0161-rendererless-terminal-session-startup.md) | terminal host가 0폭이어도 PTY·rendererless output surface를 시작하고 DOM renderer만 양의 크기를 기다린다 (0043·0127·0138 확장) | Accepted |
@@ -301,7 +301,7 @@ ADR 이 필요한 대표 기준:
 | [0281](0281-release-version-change-level.md) | 릴리스 버전은 변경의 호환성과 기능 추가 여부로 결정한다 | Proposed |
 | [0282](0282-optional-agent-hook-installation.md) | 에이전트 훅은 실행 환경별 선택 설치로 관리한다 | Accepted |
 | [0283](0283-opt-in-hook-task-state.md) | 훅 상태는 현재 대화 귀속을 검증한 뒤 선택적으로 사용한다 | Superseded by 0284 |
-| [0284](0284-codex-title-hook-binding.md) | Codex 공유 서버의 훅은 현재 TUI 제목의 대화 식별자로 연결한다 | Accepted |
+| [0284](0284-codex-title-hook-binding.md) | Codex 공유 서버의 훅은 현재 TUI 제목의 대화 식별자로 연결한다 | Accepted (partially superseded by 0355) |
 | [0285](0285-readable-agent-hook-commands.md) | 훅 명령은 읽을 수 있는 형태로 설치하고 변경 개수를 먼저 안내한다 | Accepted |
 | [0286](0286-clickable-agent-resume-hints.md) | 종료 안내의 복원 링크는 설정 명령으로 같은 셸에서 수동 실행한다 | Accepted (partially superseded by [0315](0315-remote-resume-shell-state-from-host.md)) |
 | [0287](0287-wsl-claude-daemon-process-role.md) | WSL Claude daemon은 대화 프로세스 후보에서 제외한다 | Accepted |
@@ -378,6 +378,7 @@ ADR 이 필요한 대표 기준:
 | [0352](0352-android-e2e-early-rejection-drains-body.md) | Android E2E RPC 조기 거부는 남은 body를 버리며 다 읽은 뒤에 응답을 끝낸다 (0351 정정) | Accepted |
 | [0353](0353-remote-attachment-16mib-default.md) | Remote 첨부 상한은 기본값과 최대값 모두 16 MiB이고, Cloud relay 요청 상한은 24 MiB다 (0227·0351 정정) | Accepted |
 | [0354](0354-workspace-close-undo-grace-period.md) | PC·모바일 workspace 닫기는 호스트의 5초 복원 유예 뒤 확정한다 | Accepted |
+| [0355](0355-agent-hook-results-and-clear-drafts.md) | 검증된 유휴·종료 훅과 동일 턴 결과를 사용하고 실제 clear 전에 초안을 삭제한다 | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

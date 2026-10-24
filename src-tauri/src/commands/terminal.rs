@@ -1087,7 +1087,7 @@ pub fn resize_terminal_inner(
 /// Finish one owner-checked physical operation without publishing a false
 /// cancellation acknowledgement. A platform call that outlives bounded PTY
 /// teardown transfers its worker completion token into the owner barrier.
-fn finish_human_control_io(
+pub(super) fn finish_human_control_io(
     permit: HumanControlPermit<'_>,
     handle: &pty::PtyHandle,
     result: Result<(), String>,
