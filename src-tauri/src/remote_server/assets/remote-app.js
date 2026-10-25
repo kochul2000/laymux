@@ -14,6 +14,7 @@ import { installRemoteToolSwipes, resolveToolSwipe, normalizeToolSwipeRightActio
 import { createComposerEditor } from "../../../../ui/src/remote/composer-editor.js";
 import { createRemoteAgentResumeLinkProvider, installAgentResumeUnderlines } from "../../../../ui/src/remote/remote-agent-resume.ts";
 import { isShellOwnedCombo, keybindingMatchesEvent, resolveKeybindingFrom } from "../../../../ui/src/lib/keybinding-core.ts";
+import { getPaneInstanceId } from "../../../../ui/src/lib/view-instance-id.ts";
 import { readPathLinkSelection, readPathLinkLines, mapPathLinkParts, pathLinkPartsCurrent, PATH_LINK_CONTEXT_ROWS } from "../../../../ui/src/lib/path-link-lines.ts";
 import {
   commandStatusIconName,
@@ -8480,10 +8481,32 @@ import {
           const right = document.createElement("span");
           right.className = "workspace-primary-right";
           row.append(right);
-          if ((workspace.unreadCount || 0) > 0) {
+          // Non-terminal panes have no terminal unread count in the payload.
+          // Its complete notification list preserves their shared instance IDs.
+          const unreadInstanceIds = new Set(
+            (navigationState?.notifications || [])
+              .filter((notification) =>
+                notification.workspaceId === workspace.id && notification.readAt === null,
+              )
+              .map((notification) => notification.terminalId),
+          );
+          const unreadPaneCount = new Set(
+            (workspace.panes || [])
+              .filter((pane) => {
+                if (!pane.id) return false;
+                if ((pane.unreadCount || 0) > 0) return true;
+                const instanceId = getPaneInstanceId({
+                  id: pane.id,
+                  view: { type: pane.viewType },
+                });
+                return instanceId !== null && unreadInstanceIds.has(instanceId);
+              })
+              .map((pane) => pane.id),
+          ).size;
+          if (unreadPaneCount > 0) {
             const badge = document.createElement("span");
             badge.className = "workspace-count-badge";
-            fillCountBadge(badge, workspace.unreadCount);
+            fillCountBadge(badge, unreadPaneCount);
             right.append(badge);
           }
           const manage = document.createElement("button");

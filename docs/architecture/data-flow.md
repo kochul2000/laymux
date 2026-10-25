@@ -1088,6 +1088,7 @@ Selector와 `workspace.close` 단축키는 `requestWorkspaceClose`를 호출한�
 ```
 
 - 워크스페이스 이름·여백을 클릭하면 `switchActiveWorkspace`가 기존 포커스 위치를 기준으로 유효한 착지 pane을 계산한다. 반대로 pane 요약 행을 클릭하면 행이 상위 workspace 클릭을 중단하고 `focusWorkspacePane(workspaceId, paneIndex)`로 **그 pane을 정확히 활성화**한다. TerminalView 행은 OS-native 알림 읽음 동기화도 해당 terminal 하나에만 적용한다([ADR-0081](../adr/0081-pane-focus-transition-single-owner.md)).
+- PC·Remote의 workspace 이름 옆 알림 배지는 **읽지 않은 알림이 있는 현재 pane 수**다. 같은 pane에 여러 알림이 있어도 1로 세며, 숨긴 pane과 비활성 stack layer도 각각 포함한다. 해당 pane의 마지막 미읽음 알림을 읽으면 집계에서 빠진다. 다른 workspace·삭제된 pane·pane에 귀속되지 않은 알림은 제외한다. PC는 현재 layer의 instance ID와 알림을 대조한다. Remote는 navigation의 pane별 미읽음 여부에 더해, payload의 전체 알림 목록을 PC와 같은 `getPaneInstanceId` 매핑으로 대조하여 FileExplorer 등 비터미널 pane도 포함한다([ADR-0151](../adr/0151-remote-workspace-selector-information-parity.md)). 알림 이력, 알림 목록의 건수 및 Automation·Remote API의 원시 `unreadCount`/`unreadNotificationCount` 의미는 그대로다.
 - Remote drawer도 visible workspace의 숨기지 않은 TerminalView pane 행을 active 여부와 무관하게 선택 가능하게 렌더한다. 비활성 workspace의 행을 누르면 기존 `/remote/v1/terminals/:id/focus` 경로가 host workspace와 exact pane을 함께 활성화하고, Remote 출력 표면은 그 terminal에 attach한다. workspace 상위 행을 누르는 일반 전환은 workspace별 마지막 선택 terminal 착지 규칙을 계속 사용한다.
 
 ### 레이아웃 저장(Export New)

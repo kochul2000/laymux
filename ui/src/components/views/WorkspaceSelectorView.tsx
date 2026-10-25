@@ -29,6 +29,7 @@ import { useRenameWorkspaceStore } from "@/stores/rename-workspace-store";
 import { getPaneDragData, isPaneDrag } from "@/lib/pane-dnd";
 import { markNotificationsRead } from "@/lib/tauri-api";
 import { toTerminalId } from "@/lib/pane-ids";
+import { getPaneInstanceId } from "@/lib/view-instance-id";
 import { computePaneNumbers } from "@/lib/pane-numbers";
 import { allLayerIds, layerEntries } from "@/lib/pane-layers";
 import { selectLatestTerminalInput } from "@/lib/terminal-last-input";
@@ -119,6 +120,7 @@ function WorkspaceItem({
   index,
   isActive,
   summary,
+  unreadPaneCount,
   panes,
   canClose,
   pathEllipsis,
@@ -143,6 +145,7 @@ function WorkspaceItem({
   index: number;
   isActive: boolean;
   summary: ReturnType<typeof computeWorkspaceSummary>;
+  unreadPaneCount: number;
   panes: WorkspacePane[];
   canClose: boolean;
   pathEllipsis: "start" | "end";
@@ -243,8 +246,8 @@ function WorkspaceItem({
             </span>
           </span>
           <span className="flex items-center gap-1">
-            <ExitFade show={summary.unreadCount > 0} className="workspace-count-badge-frame">
-              <CountBadge count={summary.unreadCount} testId={`unread-badge-${ws.id}`} />
+            <ExitFade show={unreadPaneCount > 0} className="workspace-count-badge-frame">
+              <CountBadge count={unreadPaneCount} testId={`unread-badge-${ws.id}`} />
             </ExitFade>
             <TwoClickConfirmButton
               type="button"
@@ -1199,6 +1202,17 @@ export function WorkspaceSelectorView() {
             isActive ? terminalPorts : new Map(),
             notifications,
           );
+          // Count current pane identities once, including hidden/stacked layers.
+          // Notification history and the API's raw unread count remain separate.
+          const unreadInstanceIds = new Set(
+            notifications
+              .filter((n) => n.workspaceId === ws.id && n.readAt === null)
+              .map((n) => n.terminalId),
+          );
+          const unreadPaneCount = layerEntries(ws.panes).filter(({ layer }) => {
+            const instanceId = getPaneInstanceId(layer);
+            return instanceId !== null && unreadInstanceIds.has(instanceId);
+          }).length;
           // Override ports for active workspace
           if (isActive && portNumbers.length > 0) {
             summary.ports = portNumbers;
@@ -1217,6 +1231,7 @@ export function WorkspaceSelectorView() {
               index={idx}
               isActive={isActive}
               summary={summary}
+              unreadPaneCount={unreadPaneCount}
               panes={ws.panes}
               canClose={hiddenItems.visibleWorkspaces.length > 1}
               pathEllipsis={pathEllipsis}
