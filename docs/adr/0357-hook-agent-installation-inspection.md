@@ -1,6 +1,6 @@
 # 0357. 훅 설정에서 에이전트 설치 검사와 훅 설치 상태를 분리한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-25
 - Source: [issue #1113](https://github.com/kochul2000/laymux/issues/1113), architecture/api-contracts.md의 선택적 에이전트 훅 계약, ADR-0282, ADR-0324
 
