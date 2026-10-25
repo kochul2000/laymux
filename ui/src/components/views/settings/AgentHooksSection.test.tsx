@@ -4,7 +4,12 @@ import { AgentHooksSection } from "./AgentHooksSection";
 import { refreshAgentHookUpdates, useAgentHookUpdateStore } from "@/lib/agent-hook-updates";
 
 const invoke = vi.hoisted(() => vi.fn());
+const checkInstallation = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+vi.mock("@/lib/agent-hooks-api", async (original) => ({
+  ...(await original<typeof import("@/lib/agent-hooks-api")>()),
+  checkAgentHookInstallation: checkInstallation,
+}));
 
 describe("AgentHooksSection", () => {
   it("Grok도 전용 provider로 조회하고 훅 감지 모드를 선택한다", async () => {
@@ -84,6 +89,7 @@ describe("AgentHooksSection", () => {
     );
   });
   beforeEach(() => {
+    checkInstallation.mockReset().mockResolvedValue({ status: "installed" });
     invoke.mockReset();
     invoke.mockImplementation(async (command, args) => {
       if (command === "list_agent_hook_environments")
@@ -103,6 +109,87 @@ describe("AgentHooksSection", () => {
         disabled: false,
       };
     });
+  });
+
+  it.each(["claude", "codex"] as const)(
+    "%s 미설치를 훅 미설치와 구분하고 설치 후 재확인한다",
+    async (provider) => {
+      checkInstallation.mockResolvedValue({ status: "missing" });
+      render(<AgentHooksSection provider={provider} />);
+      const name = provider === "claude" ? "Claude Code" : "Codex";
+      expect(
+        await screen.findByText(`${name} is not installed in this environment`),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("Install the agent in the selected environment, then check again."),
+      ).toBeInTheDocument();
+      expect(screen.queryByTestId("agent-hooks-install-summary")).not.toBeInTheDocument();
+      expect(screen.getByTestId("agent-hooks-install")).toBeDisabled();
+      expect(invoke.mock.calls.some(([command]) => command === "manage_agent_hooks")).toBe(false);
+      checkInstallation.mockResolvedValue({ status: "installed" });
+      fireEvent.click(screen.getByTestId("agent-hooks-refresh"));
+      await waitFor(() => expect(screen.getByTestId("agent-hooks-install")).toBeEnabled());
+    },
+  );
+
+  it("docker-desktop에서 조회 실패를 에이전트 미설치로 추측하지 않는다", async () => {
+    checkInstallation.mockImplementation(async (_provider, distro) =>
+      distro ? { status: "unknown", detail: "WSL failed (exit code: 1)" } : { status: "installed" },
+    );
+    invoke.mockImplementation(async (command) =>
+      command === "list_agent_hook_environments"
+        ? [
+            { id: "native", label: "Windows", distro: null },
+            { id: "wsl:docker-desktop", label: "WSL · docker-desktop", distro: "docker-desktop" },
+          ]
+        : [],
+    );
+    render(<AgentHooksSection provider="codex" />);
+    await screen.findByRole("option", { name: "WSL · docker-desktop" });
+    fireEvent.change(screen.getByTestId("agent-hooks-environment"), {
+      target: { value: "wsl:docker-desktop" },
+    });
+    expect(
+      await screen.findByText("Could not determine whether Codex is installed"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("WSL failed (exit code: 1)");
+    expect(
+      screen.queryByText("Codex is not installed in this environment"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("agent-hooks-install")).toBeDisabled();
+  });
+
+  it("설치 조회 요청이 거부되면 확인 불가를 표시한다", async () => {
+    checkInstallation.mockRejectedValue(new Error("permission denied"));
+    render(<AgentHooksSection provider="claude" />);
+    expect(
+      await screen.findByText("Could not determine whether Claude Code is installed"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("permission denied");
+    expect(screen.getByTestId("agent-hooks-install")).toBeDisabled();
+  });
+
+  it("이전 환경에서 늦게 도착한 미설치 응답을 폐기한다", async () => {
+    let resolve!: (value: { status: string }) => void;
+    checkInstallation.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    render(<AgentHooksSection provider="codex" />);
+    await waitFor(() => expect(checkInstallation).toHaveBeenCalledWith("codex", null));
+    fireEvent.change(screen.getByTestId("agent-hooks-environment"), {
+      target: { value: "wsl:Ubuntu" },
+    });
+    await waitFor(() => expect(screen.getByTestId("agent-hooks-install")).toBeEnabled());
+    await act(async () => {
+      resolve({ status: "missing" });
+    });
+    expect(screen.getByTestId("agent-hooks-install")).toBeEnabled();
+    expect(
+      screen.queryByText("Codex is not installed in this environment"),
+    ).not.toBeInTheDocument();
   });
 
   it("warns when installed hooks need an update instead of claiming they are current", async () => {

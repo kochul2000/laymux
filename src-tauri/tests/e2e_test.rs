@@ -2,13 +2,13 @@ use laymux_lib::cli::{LxMessage, LxResponse};
 use laymux_lib::commands::get_remote_host_candidates;
 use laymux_lib::settings::validation::validate_and_repair;
 use laymux_lib::settings::{
-    AppearanceSettings, ClaudeSettings, ColorScheme, DockSetting, FileExplorerSettings,
-    FontSettings, GithubSettings, GrokSettings, GrokStatusMessageMode, IssueReporterSettings,
-    Keybinding, Layout, LayoutPane, MemoSettings, OutputActivityBurstSettings, PaneClearBusyPolicy,
-    PaneClearSettings, PowerSettings, Profile, ProfileDefaults, RemoteSettings, Settings,
-    SettingsLoadResult, StatusLineWidgets, TerminalSettings, UpdateSettings, ValidationWarning,
-    ViewerSettings, WidgetInstance, WidgetSlots, WidgetsSettings, Workspace, WorkspacePane,
-    WorkspacePaneView,
+    AgentStateDetection, AppearanceSettings, ClaudeSettings, ColorScheme, DockSetting,
+    FileExplorerSettings, FontSettings, GithubSettings, GrokSettings, GrokStatusMessageMode,
+    IssueReporterSettings, Keybinding, Layout, LayoutPane, MemoSettings,
+    OutputActivityBurstSettings, PaneClearBusyPolicy, PaneClearSettings, PowerSettings, Profile,
+    ProfileDefaults, RemoteSettings, Settings, SettingsLoadResult, StatusLineWidgets,
+    TerminalSettings, UpdateSettings, ValidationWarning, ViewerSettings, WidgetInstance,
+    WidgetSlots, WidgetsSettings, Workspace, WorkspacePane, WorkspacePaneView,
 };
 use laymux_lib::state::AppState;
 use laymux_lib::terminal::{SyncGroup, TerminalConfig, TerminalSession};
@@ -232,6 +232,7 @@ fn settings_round_trip_with_full_config() {
         claude: ClaudeSettings::default(),
         codex: Default::default(),
         grok: GrokSettings {
+            state_detection: AgentStateDetection::Hooks,
             command: "grok --yolo".into(),
             restore_session: false,
             session_max_age_hours: 6,
@@ -306,6 +307,7 @@ fn settings_round_trip_with_full_config() {
     assert!(!loaded.confirm_destructive_actions);
     assert_eq!(loaded.update.channel, "beta");
     assert_eq!(loaded.grok.command, "grok --yolo");
+    assert_eq!(loaded.grok.state_detection, AgentStateDetection::Hooks);
     assert!(!loaded.grok.restore_session);
     assert_eq!(loaded.grok.session_max_age_hours, 6);
     assert_eq!(

@@ -295,6 +295,10 @@ pub fn build_router(
             post(dev_update::update_handoff),
         )
         .route("/api/v1/ui/key", post(ui_dispatch_key))
+        .route(
+            "/api/v1/ui/agent-hooks/environment",
+            post(ui_hook_environment),
+        )
         .route("/api/v1/ui/file-viewer", post(ui_open_file_viewer))
         .route("/api/v1/settings/app-theme", put(settings_set_app_theme))
         .route(

@@ -1629,6 +1629,21 @@ const handlers: HandlerMap = {
       useUiStore.getState().setSettingsNavTarget(target);
       return ok({ navigated: true, section: target });
     },
+    selectHookEnvironment: (p) => {
+      if (!import.meta.env.DEV) return err("Hook environment selection is dev-only");
+      const select = document.querySelector<HTMLSelectElement>(
+        '[data-testid="agent-hooks-environment"]',
+      );
+      if (!select || select.disabled) return err("Hook environment selector is unavailable");
+      if (
+        typeof p.environment !== "string" ||
+        !Array.from(select.options).some((option) => option.value === p.environment)
+      )
+        return err("Unknown hook environment");
+      select.value = p.environment;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      return ok({ environment: select.value });
+    },
     setHiddenItemsOpen: (p) => {
       if (typeof p.open !== "boolean") return err("'open' must be a boolean");
       useUiStore.getState().setHiddenShelfOpen(p.open);
