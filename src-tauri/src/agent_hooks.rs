@@ -1,6 +1,7 @@
 //! Optional CLI integration. Installation and observations are independent of
 //! heuristic activity; consuming hook state is an explicit settings decision.
 pub mod inspections;
+mod installation;
 pub mod mcp;
 pub mod observations;
 pub mod title;
@@ -70,13 +71,16 @@ pub fn manage(
     laymux_agent_hook::install::config_name(&request.provider).map_err(AppError::Other)?;
     if !matches!(
         request.operation.as_str(),
-        "status" | "install" | "remove" | "update"
+        "status" | "install" | "remove" | "update" | "agent-status"
     ) || request
         .distro
         .as_ref()
         .is_some_and(|d| !cfg!(windows) || !crate::wsl_probe::is_safe_distro_name(d))
     {
         return Err(AppError::Other("Invalid hook management request".into()));
+    }
+    if request.operation == "agent-status" {
+        return installation::inspect(&request.provider, request.distro.as_deref());
     }
     let _gate = state.agent_hook_inspections.gate()?;
     if !state.agent_hook_inspections.begin(request)? {

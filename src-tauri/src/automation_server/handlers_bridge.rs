@@ -1021,6 +1021,23 @@ pub async fn ui_dispatch_key(
     }
 }
 
+/// Select an existing hook environment in the mounted Settings panel.
+pub async fn ui_hook_environment(
+    AxumState(state): AxumState<ServerState>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    if !cfg!(debug_assertions) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(err_json("dev-only hook environment selection")),
+        );
+    }
+    match bridge_request(&state, "action", "ui", "selectHookEnvironment", body).await {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
 /// Dev-only visual lifecycle preview. No terminal or installer work is performed.
 pub async fn ui_lifecycle(
     AxumState(state): AxumState<ServerState>,

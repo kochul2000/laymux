@@ -39,7 +39,7 @@ pub async fn api_docs() -> impl IntoResponse {
             {
                 "method": "POST", "path": "/api/v1/agent-hooks/manage",
                 "description": "Inspect, install or remove only Laymux-owned CLI hook handlers in the selected environment.",
-                "body": {"provider":"claude | codex", "operation":"status | install | remove | update", "distro":"string or null for native", "configDir":"absolute directory or null for environment default"}
+                "body": {"provider":"claude | codex | grok", "operation":"agent-status | status | install | remove | update", "distro":"string or null for native", "configDir":"absolute directory or null for environment default (unused by agent-status)"}
             },
             {
                 "method": "GET", "path": "/api/v1/pty-sessions",
@@ -376,6 +376,11 @@ pub async fn api_docs() -> impl IntoResponse {
                 "method": "POST", "path": "/api/v1/ui/settings/navigate",
                 "description": "Navigate within SettingsView to a section.",
                 "body": { "section": "\"startup\" | \"profile-0\" | \"profile-1\" | \"colorSchemes\" | \"keybindings\"" }
+            },
+            {
+                "method": "POST", "path": "/api/v1/ui/agent-hooks/environment",
+                "description": "Dev-only: select an existing environment in the open agent hooks Settings panel. Does not install hooks.",
+                "body": { "environment": "native | wsl:<distribution>" }
             },
             {
                 "method": "POST", "path": "/api/v1/ui/lifecycle",

@@ -380,6 +380,7 @@ ADR 이 필요한 대표 기준:
 | [0354](0354-workspace-close-undo-grace-period.md) | PC·모바일 workspace 닫기는 호스트의 5초 복원 유예 뒤 확정한다 | Accepted |
 | [0355](0355-agent-hook-results-and-clear-drafts.md) | 검증된 유휴·종료 훅과 동일 턴 결과를 사용하고 실제 clear 전에 초안을 삭제한다 | Accepted (partially superseded by 0356) |
 | [0356](0356-grok-hook-task-state-and-safe-clear.md) | Grok을 독립 훅 provider로 검증하고 입력창·입력 revision을 확인한 뒤 clear한다 | Accepted |
+| [0357](0357-hook-agent-installation-inspection.md) | 훅 설정에서 에이전트 설치 검사와 훅 설치 상태를 분리한다 | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

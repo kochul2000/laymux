@@ -6,6 +6,8 @@ import {
   getAgentHookConnections,
   listAgentHookEnvironments,
   manageAgentHooks,
+  checkAgentHookInstallation,
+  type HookAgentInstallation,
   type HookConnection,
   type HookEnvironment,
   type HookProvider,
@@ -36,7 +38,12 @@ export function AgentHooksSection({
   const [environments, setEnvironments] = useState<HookEnvironment[]>([]);
   const [environment, setEnvironment] = useState("native");
   const [configDir, setConfigDir] = useState("");
-  const [result, setResult] = useState<{ key: string; status?: HookStatus; error?: string }>();
+  const [result, setResult] = useState<{
+    key: string;
+    status?: HookStatus;
+    installation?: HookAgentInstallation;
+    error?: string;
+  }>();
   const [connections, setConnections] = useState<HookConnection[]>([]);
   const [busy, setBusy] = useState(false);
   const [revision, setRevision] = useState(0);
@@ -45,6 +52,8 @@ export function AgentHooksSection({
   const key = JSON.stringify([provider, distro, configDir, revision]);
   const status = result?.key === key ? result.status : undefined;
   const error = result?.key === key ? result.error : undefined;
+  const installation = result?.key === key ? result.installation : undefined;
+  const agentName = provider === "claude" ? "Claude Code" : provider === "codex" ? "Codex" : "Grok";
   const detected = useTerminalStore(
     (s) =>
       s.instances.filter(
@@ -86,14 +95,26 @@ export function AgentHooksSection({
     const request = ++sequence.current;
     let active = true;
     const timer = setTimeout(() => {
-      void manageAgentHooks(provider, "status", distro, configDir || null).then(
-        (value) => {
-          if (active && sequence.current === request) setResult({ key, status: value });
-        },
-        (error: unknown) => {
-          if (active && sequence.current === request) setResult({ key, error: String(error) });
-        },
-      );
+      void (async () => {
+        let installation: HookAgentInstallation;
+        try {
+          installation = await checkAgentHookInstallation(provider, distro);
+        } catch (error) {
+          installation = { status: "unknown", detail: String(error) };
+        }
+        if (!active || sequence.current !== request) return;
+        if (installation.status !== "installed") {
+          setResult({ key, installation });
+          return;
+        }
+        try {
+          const status = await manageAgentHooks(provider, "status", distro, configDir || null);
+          if (active && sequence.current === request) setResult({ key, installation, status });
+        } catch (error) {
+          if (active && sequence.current === request)
+            setResult({ key, installation, error: String(error) });
+        }
+      })();
     }, 200);
     return () => {
       active = false;
@@ -185,15 +206,22 @@ export function AgentHooksSection({
             <span
               className={`agent-hooks-status${installed ? " agent-hooks-status--installed" : ""}`}
             >
-              {status
+              {installation && installation.status !== "installed"
                 ? t(
-                    installed
-                      ? "agentHooks.installed"
-                      : status.registered > 0
-                        ? "agentHooks.partial"
-                        : "agentHooks.notInstalled",
+                    installation.status === "missing"
+                      ? "agentHooks.agentMissing"
+                      : "agentHooks.agentUnknown",
+                    { agent: agentName },
                   )
-                : t(error ? "agentHooks.checkFailed" : "agentHooks.checking")}
+                : status
+                  ? t(
+                      installed
+                        ? "agentHooks.installed"
+                        : status.registered > 0
+                          ? "agentHooks.partial"
+                          : "agentHooks.notInstalled",
+                    )
+                  : t(error ? "agentHooks.checkFailed" : "agentHooks.checking")}
             </span>
             {status && (
               <span className="agent-hooks-muted">
@@ -201,6 +229,19 @@ export function AgentHooksSection({
               </span>
             )}
           </div>
+          {installation && installation.status !== "installed" && (
+            <p
+              className="agent-hooks-notice"
+              role={installation.status === "unknown" ? "alert" : undefined}
+            >
+              {t(
+                installation.status === "missing"
+                  ? "agentHooks.agentInstallFirst"
+                  : "agentHooks.agentCheckRetry",
+              )}
+              {installation.detail && <span> {installation.detail}</span>}
+            </p>
+          )}
           {status && (
             <p className="agent-hooks-plan" data-testid="agent-hooks-install-summary">
               {t(
@@ -252,6 +293,15 @@ export function AgentHooksSection({
               data-testid="agent-hooks-install"
               variant="primary"
               disabled={busy || !status}
+              title={
+                !status
+                  ? t(
+                      installation?.status === "missing"
+                        ? "agentHooks.agentInstallFirst"
+                        : "agentHooks.agentCheckRetry",
+                    )
+                  : undefined
+              }
               onClick={() => void change(status?.updateRequired ? "update" : "install")}
             >
               {t(

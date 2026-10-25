@@ -53,6 +53,14 @@ export interface HookConnection {
 export const listAgentHookEnvironments = () =>
   invoke<HookEnvironment[]>("list_agent_hook_environments");
 export const getAgentHookConnections = () => invoke<HookConnection[]>("get_agent_hook_connections");
+export interface HookAgentInstallation {
+  status: "installed" | "missing" | "unknown";
+  detail?: string;
+}
+export const checkAgentHookInstallation = (provider: HookProvider, distro: string | null) =>
+  invoke<HookAgentInstallation>("manage_agent_hooks", {
+    request: { provider, operation: "agent-status", distro, configDir: null },
+  });
 export function manageAgentHooks(
   provider: HookProvider,
   operation: "status" | "install" | "remove" | "update",

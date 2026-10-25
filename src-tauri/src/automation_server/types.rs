@@ -373,6 +373,7 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("POST", "/api/v1/ui/lifecycle"),
     ("POST", "/api/v1/dev/update-handoff"),
     ("POST", "/api/v1/ui/key"),
+    ("POST", "/api/v1/ui/agent-hooks/environment"),
     ("POST", "/api/v1/ui/file-viewer"),
     ("PUT", "/api/v1/settings/app-theme"),
     ("GET", "/api/v1/settings/export"),
