@@ -443,7 +443,7 @@ describe("WorkspaceSelectorView", () => {
     });
   });
 
-  it("keeps unread badge height independent from UI font metrics (#373)", async () => {
+  it("같은 pane의 알림 128건을 배지 1개로 표시하고 고정 높이를 유지한다", async () => {
     useWorkspaceStore.setState({
       workspaces: [
         {
@@ -487,10 +487,87 @@ describe("WorkspaceSelectorView", () => {
     await waitFor(() => {
       const badge = screen.getByTestId("unread-badge-ws-default");
       expect(badge).toHaveClass("workspace-count-badge");
-      expect(badge).toHaveTextContent("128");
-      expect(badge.style.fontSize).toBe("8.5px");
+      expect(badge).toHaveTextContent(/^1$/);
+      expect(badge.style.fontSize).toBe("10px");
       expect(badge.closest(".workspace-count-badge-frame")).not.toBeNull();
     });
+  });
+
+  it("미읽음이 있는 현재 pane만 세고 마지막 알림을 읽었을 때 집계에서 뺀다", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              layers: [
+                { id: "p1", view: { type: "TerminalView" } },
+                { id: "p2", view: { type: "TerminalView" } },
+              ],
+              activeLayerId: "p1",
+            },
+            {
+              id: "p3",
+              x: 1,
+              y: 0,
+              w: 1,
+              h: 1,
+              layers: [{ id: "p3", view: { type: "FileExplorerView" } }],
+              activeLayerId: "p3",
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    useUiStore.setState({ hiddenPaneIds: new Set(["p2"]) });
+    const notification = (id: string, terminalId: string) => ({
+      id,
+      terminalId,
+      workspaceId: "ws-default",
+      message: "작업 종료",
+      level: "info" as const,
+      createdAt: 1000,
+      readAt: null,
+    });
+    useNotificationStore.setState({
+      notifications: [
+        notification("n1", "terminal-p1"),
+        notification("n2", "terminal-p1"),
+        notification("n3", "terminal-p2"),
+        notification("n4", "terminal-p2"),
+        notification("n5", "file-explorer-p3"),
+        notification("orphan", "terminal-removed"),
+        notification("unbound", ""),
+        { ...notification("other", "terminal-p1"), workspaceId: "other-workspace" },
+        { ...notification("read", "terminal-p1"), readAt: 2000 },
+      ],
+    });
+    render(<WorkspaceSelectorView />);
+
+    const badge = () => screen.getByTestId("unread-badge-ws-default");
+    expect(badge()).toHaveTextContent(/^3$/);
+
+    act(() => useNotificationStore.getState().markNotificationsAsRead(["n1"]));
+    expect(badge()).toHaveTextContent(/^3$/);
+
+    act(() => useNotificationStore.getState().markNotificationsAsRead(["n2"]));
+    expect(badge()).toHaveTextContent(/^2$/);
+
+    act(() => useNotificationStore.getState().markTerminalAsRead("terminal-p2"));
+    expect(badge()).toHaveTextContent(/^1$/);
+
+    act(() => useNotificationStore.getState().markTerminalAsRead("file-explorer-p3"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("unread-badge-ws-default")).not.toBeInTheDocument();
+    });
+    expect(useNotificationStore.getState().notifications).toHaveLength(9);
   });
 
   it("keeps the notification badge without restoring the removed aggregate text", async () => {

@@ -45,6 +45,7 @@ const lines = [
   `Keyboard-SHA256: ${fileHash(path.resolve(SCRIPT_DIR, "../src/remote/remote-keyboard.js"))}`,
   `Resume-SHA256: ${["remote/remote-agent-resume.ts", "lib/agent-resume-link.ts", "lib/agent-command.ts"].map((file) => `${file}=${fileHash(path.resolve(SCRIPT_DIR, "../src", file))}`).join(" ")}`,
   `Worktrees-SHA256: ${["remote/remote-worktrees.js", "lib/worktree-presentation.ts", "lib/worktree-display.ts"].map((file) => `${file}=${fileHash(path.resolve(SCRIPT_DIR, "../src", file))}`).join(" ")}`,
+  `View-instance-SHA256: ${fileHash(path.resolve(SCRIPT_DIR, "../src/lib/view-instance-id.ts"))}`,
   "Drift from the sources is caught by ui/src/remote/remote-page-bundle.test.ts",
 ];
 

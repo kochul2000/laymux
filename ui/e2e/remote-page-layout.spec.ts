@@ -227,6 +227,7 @@ async function routeRemoteWithWorkspaces(
   options: {
     includeGamma?: boolean;
     includeMemoPane?: boolean;
+    includeFileExplorerPane?: boolean;
     initialHiddenPaneIds?: string[];
     initialHiddenWorkspaceIds?: string[];
     selectorStatus?: Record<string, unknown>;
@@ -249,6 +250,7 @@ async function routeRemoteWithWorkspaces(
   outputAttachments: string[];
   setVisibilityFallbackWorkspaceId: (workspaceId: string | null) => void;
   setNotifications: (notifications: Array<Record<string, unknown>>, unreadCount: number) => void;
+  setPaneUnreadCounts: (counts: Record<string, number>) => void;
 }> {
   let workspaceDisplay = {
     minimap: false,
@@ -275,6 +277,7 @@ async function routeRemoteWithWorkspaces(
   const workspaceNames: Record<string, string> = { "ws-a": "Alpha", "ws-b": "Beta" };
   let notifications: Array<Record<string, unknown>> = [];
   let unreadNotificationCount = 0;
+  let paneUnreadCounts: Record<string, number> = { "p-b1": options.paneUnreadCount ?? 0 };
   let visibilityFallbackWorkspaceId: string | null = null;
   const paneA1 = {
     id: "p-a1",
@@ -361,6 +364,7 @@ async function routeRemoteWithWorkspaces(
       );
       const paneWithVisibility = <T extends { id: string }>(pane: T) => ({
         ...pane,
+        unreadCount: paneUnreadCounts[pane.id] ?? 0,
         hidden: hiddenPaneIds.has(pane.id),
         collapsed: hiddenPaneIds.has(pane.id),
       });
@@ -388,6 +392,7 @@ async function routeRemoteWithWorkspaces(
               id: "ws-a",
               name: workspaceNames["ws-a"],
               isActive: activeWorkspaceId === "ws-a",
+              unreadCount: (paneUnreadCounts["p-a1"] ?? 0) + (paneUnreadCounts["p-a2"] ?? 0),
               terminalPaneCount: 2,
               selectorSummary: { terminalCount: 2, lastCommand: null, latestNotification: null },
               hidden: hiddenWorkspaceIds.has("ws-a"),
@@ -400,6 +405,7 @@ async function routeRemoteWithWorkspaces(
               id: "ws-b",
               name: workspaceNames["ws-b"],
               isActive: activeWorkspaceId === "ws-b",
+              unreadCount: paneUnreadCounts["p-b1"] ?? 0,
               terminalPaneCount: 1,
               selectorSummary: {
                 terminalCount: 1,
@@ -428,9 +434,20 @@ async function routeRemoteWithWorkspaces(
                     },
                     hidden: hiddenWorkspaceIds.has("ws-c"),
                     collapsed: hiddenWorkspaceIds.has("ws-c"),
-                    panes: options.includeMemoPane
-                      ? [paneWithVisibility({ id: "p-c1", viewType: "MemoView" })]
-                      : [],
+                    panes: [
+                      ...(options.includeMemoPane
+                        ? [paneWithVisibility({ id: "p-c1", viewType: "MemoView" })]
+                        : []),
+                      ...(options.includeFileExplorerPane
+                        ? [
+                            paneWithVisibility({
+                              id: "p-c2",
+                              viewType: "FileExplorerView",
+                              terminalId: null,
+                            }),
+                          ]
+                        : []),
+                    ],
                   },
                 ]
               : []),
@@ -532,6 +549,9 @@ async function routeRemoteWithWorkspaces(
     setNotifications(nextNotifications, unreadCount) {
       notifications = nextNotifications;
       unreadNotificationCount = unreadCount;
+    },
+    setPaneUnreadCounts(counts) {
+      paneUnreadCounts = counts;
     },
     setWorkspaceDisplay(display) {
       workspaceDisplay = { ...workspaceDisplay, ...display };
@@ -1138,6 +1158,94 @@ test.describe("remote mobile layout", () => {
       )
       .toEqual(["p-b1"]);
     await expect(page.locator('[data-pane-skip="p-a1"]')).toHaveAttribute("aria-pressed", "false");
+  });
+
+  test("워크스페이스 알림 배지는 미읽음 알림이 있는 pane 수만 표시하고 읽음 갱신을 반영한다", async ({
+    page,
+  }) => {
+    const controls = await routeRemoteWithWorkspaces(page, []);
+    controls.setPaneUnreadCounts({ "p-a1": 128, "p-b1": 64 });
+    controls.setNotifications([], 192);
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await page.locator("#navToggle").click();
+
+    const alphaBadge = page.locator(
+      '[data-workspace-item="ws-a"] .workspace-primary-right > .workspace-count-badge',
+    );
+    const betaBadge = page.locator(
+      '[data-workspace-item="ws-b"] .workspace-primary-right > .workspace-count-badge',
+    );
+    await expect(alphaBadge).toHaveText("1");
+    await expect(betaBadge).toHaveText("1");
+    await expect(page.locator("#drawerNotificationsButton")).toHaveAttribute(
+      "aria-label",
+      "Open notifications (192 unread)",
+    );
+
+    controls.setPaneUnreadCounts({ "p-a1": 128, "p-a2": 200, "p-b1": 64 });
+    await expect(alphaBadge).toHaveText("2");
+    await page.screenshot({ path: "../.screenshots/workspace-unread-panes-remote.png" });
+
+    controls.setPaneUnreadCounts({ "p-a1": 0, "p-a2": 200, "p-b1": 64 });
+    await expect(alphaBadge).toHaveText("1");
+
+    controls.setPaneUnreadCounts({ "p-a1": 0, "p-a2": 0, "p-b1": 64 });
+    await expect(alphaBadge).toHaveCount(0);
+    await expect(betaBadge).toHaveText("1");
+  });
+
+  test("워크스페이스 알림 배지는 숨긴 비터미널 pane도 한 번만 세고 미귀속 알림을 제외한다", async ({
+    page,
+  }) => {
+    const controls = await routeRemoteWithWorkspaces(page, [], {
+      includeGamma: true,
+      includeMemoPane: true,
+      includeFileExplorerPane: true,
+      initialHiddenPaneIds: ["p-c2"],
+    });
+    const notification = (id: string, terminalId: string) => ({
+      id,
+      terminalId,
+      workspaceId: "ws-c",
+      message: "확인 필요",
+      level: "info",
+      createdAt: 1000,
+      readAt: null as number | null,
+    });
+    const notifications = [
+      notification("file-1", "file-explorer-p-c2"),
+      notification("file-2", "file-explorer-p-c2"),
+      notification("removed", "file-explorer-removed"),
+      notification("unbound", ""),
+      notification("memo", "memo-p-c1"),
+      { ...notification("other", "file-explorer-p-c2"), workspaceId: "ws-b" },
+      { ...notification("read", "file-explorer-p-c2"), readAt: 2000 },
+    ];
+    controls.setNotifications(notifications, 6);
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await page.locator("#navToggle").click();
+
+    const badge = page.locator(
+      '[data-workspace-item="ws-c"] .workspace-primary-right > .workspace-count-badge',
+    );
+    await expect(badge).toHaveText("1");
+    await expect(page.locator('[data-workspace-item="ws-b"] .workspace-count-badge')).toHaveCount(
+      0,
+    );
+
+    notifications[0].readAt = 2000;
+    controls.setNotifications(notifications, 5);
+    await expect(page.locator("#drawerNotificationsButton")).toHaveAttribute(
+      "aria-label",
+      "Open notifications (5 unread)",
+    );
+    await expect(badge).toHaveText("1");
+
+    notifications[1].readAt = 2000;
+    controls.setNotifications(notifications, 4);
+    await expect(badge).toHaveCount(0);
   });
 
   test("shows one status icon without output or stale badges", async ({ page }) => {
