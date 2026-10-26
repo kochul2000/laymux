@@ -2538,3 +2538,11 @@ Dev POST `/api/v1/ui/key`는 `{key,ctrl?,alt?,shift?}`로 포커스된 요소에
 Grok 관리 훅 제한은 루트의 `config.toml`·`managed_config.toml`·`requirements.toml`, Unix의 `/etc/grok` 관리 파일과 Linux `/etc/claude-code/managed-settings.json` 또는 macOS `/Library/Application Support/ClaudeCode/managed-settings.json`을 읽어 합산한다. `allow_managed_hooks_only`·`allowManagedHooksOnly` 중 어느 pin이든 false 이외 값이면 비활성으로 보고하며 정책 파일을 수정하지 않는다.
 
 helper는 Grok `sessionId`, `promptId`, `toolName`, `notificationType`을 공통 식별자에 사상하며 본문·인자·응답은 전송하지 않는다. `StopFailure`·`StopCancelled`는 명시적 실패·중단이고 `Stop`만으로는 종료를 확정하지 않는다. `get_agent_session_states`의 선택적 `turnId`는 Grok `turn_completed.prompt_id`다. 현재 generation·정확한 session ID·턴이 훅과 같을 때만 완료 표시와 결과를 결합한다. Grok 기록은 훅 모드에서 1초마다 확인하며 제목·출력량은 완료 증거가 아니다. CLI 세션 귀속·환경·설치 검증과 기존 lease는 유지한다.
+
+### 훅 설정의 에이전트 설치 확인 (ADR-0357)
+
+Settings의 명시적 환경별 조회는 `manage_agent_hooks({request:{provider,operation:"agent-status",distro,configDir:null}})`로 CLI 설치 여부를 먼저 확인한다. 기존 Automation hook 관리 경로도 같은 연산을 제공한다. 응답은 `{status:installed|missing|unknown,detail?}`다. Windows는 프로세스 PATH 및 사용자 `.local/bin`·`.bun/bin`·AppData npm·WinGet Links를, Linux·WSL은 해당 환경의 로그인 `sh` PATH 및 `.local/bin`·`.npm-global/bin`·`.bun/bin`을 확인한다. CLI를 실행하거나 설정 폴더로 설치 여부를 추정하지 않는다. WSL은 headless launcher와 8초 제한을 사용하며 성공한 명시적 부재 응답만 missing이다. 권한·실행·timeout·응답 형식 오류는 unknown이다.
+
+installed일 때 기존 훅 status를 조회한다. missing은 에이전트 이름·설치 후 재확인을 표시하고, unknown은 확인 불가·진단을 표시한다. 두 경우 훅 설치 버튼을 비활성화한다. 환경 전환·재확인은 재검사하며 이전 응답은 폐기한다. 이 연산은 훅 설치 캐시·자동 검사·작업 상태·설정 파일을 변경하지 않는다.
+
+dev 전용 `POST /api/v1/ui/agent-hooks/environment`의 `{environment:"native"|"wsl:<distribution>"}`는 열린 Settings 훅 패널에서 기존 선택지로 전환하고 같은 change 이벤트 경로로 재검사한다. 미마운트·비활성·없는 선택지는 거부한다. Rust debug와 frontend DEV gate로 release에서는 차단하며 설치·설정 저장을 실행하지 않는다. 이 경로와 기존 Settings 열기·navigate·screenshot을 조합해 환경별 안내를 자율 검증한다.

@@ -1,5 +1,35 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
+
+it("훅 환경 검증 API는 표시된 선택지만 선택하고 change 이벤트를 보낸다", () => {
+  const call = (environment: string) =>
+    handleAutomationRequest({
+      requestId: "hook-environment",
+      category: "action",
+      target: "ui",
+      method: "selectHookEnvironment",
+      params: { environment },
+    });
+  expect(call("native").success).toBe(false);
+  const select = document.createElement("select");
+  select.dataset.testid = "agent-hooks-environment";
+  select.add(new Option("Windows", "native"));
+  select.add(new Option("WSL · docker-desktop", "wsl:docker-desktop"));
+  const changed = vi.fn();
+  select.addEventListener("change", changed);
+  document.body.appendChild(select);
+  try {
+    expect(call("wsl:unknown").success).toBe(false);
+    expect(changed).not.toHaveBeenCalled();
+    expect(call("wsl:docker-desktop").success).toBe(true);
+    expect(changed).toHaveBeenCalledOnce();
+    expect(select.value).toBe("wsl:docker-desktop");
+    select.disabled = true;
+    expect(call("native").success).toBe(false);
+  } finally {
+    select.remove();
+  }
+});
 import {
   useAutomationBridge,
   captureScreenshot,

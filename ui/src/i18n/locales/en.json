@@ -122,6 +122,10 @@
       "dismiss": "Dismiss"
     },
     "agentHooks": {
+      "agentMissing": "{{agent}} is not installed in this environment",
+      "agentUnknown": "Could not determine whether {{agent}} is installed",
+      "agentInstallFirst": "Install the agent in the selected environment, then check again.",
+      "agentCheckRetry": "Check the environment, executable paths and permissions, then try again.",
       "codexDaemon": "Installation adds a conversation identifier to the Codex terminal title to connect shared-server conversations. Existing title items are preserved, and removal restores settings you have not edited. Restart running Codex clients after installation. Unverified connections use existing detection.",
       "titleConfigured": "Shared-server title binding configured · restart Codex after changes",
       "titleMissing": "Title binding not configured · installation adds the conversation ID.",
