@@ -148,15 +148,57 @@ export function manageAgentHooksAndRefresh(
     JSON.stringify([provider, distro, configDir]),
     { provider, distro, configDir },
     () => manageAgentHooks(provider, operation, distro, configDir),
-    (status) => {
-      const resolvedKey = JSON.stringify([provider, distro, status.configDir]);
-      useAgentHookUpdateStore.setState((state) => ({
-        targets: state.targets.map((value) =>
-          hookUpdateKey(value) === resolvedKey ? { ...value, status } : value,
-        ),
-      }));
-    },
+    (status) => applyHookStatus(provider, distro, status),
   );
+}
+
+function applyHookStatus(provider: HookProvider, distro: string | null, status: HookStatus) {
+  const resolvedKey = JSON.stringify([provider, distro, status.configDir]);
+  useAgentHookUpdateStore.setState((state) => ({
+    targets: state.targets.map((value) =>
+      hookUpdateKey(value) === resolvedKey ? { ...value, status } : value,
+    ),
+  }));
+}
+
+export const hookUpdateAllKey = "update-all";
+
+/** One user action, held in the shared queue until every selected update finishes. */
+export function updateAllAgentHooks(targets: HookUpdateTarget[]): Promise<void> {
+  const selected = [
+    ...new Map(
+      targets.filter((t) => t.status.updateRequired).map((t) => [hookUpdateKey(t), t]),
+    ).values(),
+  ];
+  if (!selected.length) return Promise.resolve();
+  return manageAndRefresh(hookUpdateAllKey, null, async () => {
+    const failures: HookUpdateError[] = [];
+    for (const target of selected) {
+      const {
+        provider,
+        distro,
+        status: { configDir },
+      } = target;
+      try {
+        const status = await manageAgentHooks(provider, "update", distro, configDir);
+        applyHookStatus(provider, distro, status);
+      } catch (error) {
+        failures.push({ provider, distro, configDir, message: String(error) });
+      }
+    }
+    return failures;
+  }).then((failures) => {
+    // The final audit must not erase a write failure just because status is readable.
+    useAgentHookUpdateStore.setState((state) => ({
+      errors: [
+        ...state.errors.filter(
+          (error) =>
+            !failures.some((failure) => hookUpdateErrorKey(failure) === hookUpdateErrorKey(error)),
+        ),
+        ...failures,
+      ],
+    }));
+  });
 }
 
 /** Settings shows its own MCP errors; the notice passes the target to report. */

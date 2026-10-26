@@ -20,6 +20,8 @@ async function api(route, body) {
   const result = await response.json();
   if (!response.ok || result.success === false)
     throw new Error(JSON.stringify(result));
+  // Screenshot bytes belong in the artifact, not the test log.
+  if (route === "/screenshot") delete result.dataUrl;
   return result;
 }
 const health = await api("/health");
@@ -40,6 +42,11 @@ const page = browser
   .flatMap((context) => context.pages())
   .find((page) => page.url().startsWith(devUrl));
 assert.ok(page, "Expected dev WebView");
+const originalDismissed = await page.evaluate(async () => {
+  const { useAgentHookUpdateStore } =
+    await import("/src/lib/agent-hook-updates.ts");
+  return useAgentHookUpdateStore.getState().dismissed;
+});
 const root = await fs.mkdtemp(path.join(os.tmpdir(), "laymux-hook-updates-"));
 const linuxBase = "/tmp/laymux-hook-updates-" + randomUUID();
 const foreign = { type: "command", command: "printf keep", timeout: 17 };
@@ -142,6 +149,22 @@ try {
       ),
     );
   await refresh();
+  // Bulk action is limited to these temporary fixtures; preserve user installations.
+  await page.evaluate(async (fixtures) => {
+    const { useAgentHookUpdateStore, hookUpdateKey } =
+      await import("/src/lib/agent-hook-updates.ts");
+    const fixturePaths = new Set(
+      fixtures.map((target) => target.configDir.replaceAll("\\", "/")),
+    );
+    useAgentHookUpdateStore.setState((state) => ({
+      dismissed: state.targets
+        .filter(
+          (target) =>
+            !fixturePaths.has(target.status.configDir.replaceAll("\\", "/")),
+        )
+        .map(hookUpdateKey),
+    }));
+  }, targets);
   await page.getByTestId("agent-hook-update-notice").waitFor();
   await page.evaluate(async () => {
     const { default: i18n } = await import("/src/i18n/index.ts");
@@ -159,11 +182,15 @@ try {
     captures.push({ stage: "before", error: String(error) });
   }
   console.log(JSON.stringify({ stage: "before", captures }));
+  assert.equal(await page.getByTestId("agent-hook-update-action").count(), 1);
+  await page.getByTestId("agent-hook-update-action").click();
+  await page
+    .getByTestId("agent-hook-update-action")
+    .waitFor({ state: "detached", timeout: 60000 });
   for (const target of targets) {
     const row = page
       .locator(".agent-hook-update-notice__target")
       .filter({ has: page.getByText(target.configDir, { exact: true }) });
-    await row.getByTestId("agent-hook-update-action").click();
     for (let tries = 0; tries < 30; tries++) {
       if (!(await manage(target, "status")).updateRequired) break;
       await pause(200);
@@ -233,5 +260,10 @@ try {
     linuxBase,
   );
   await refresh();
+  await page.evaluate(async (dismissed) => {
+    const { useAgentHookUpdateStore } =
+      await import("/src/lib/agent-hook-updates.ts");
+    useAgentHookUpdateStore.setState({ dismissed });
+  }, originalDismissed);
   await browser.close();
 }

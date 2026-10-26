@@ -1,7 +1,11 @@
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentHookUpdateNotice } from "./AgentHookUpdateNotice";
-import { useAgentHookUpdateStore, refreshAgentHookUpdates } from "@/lib/agent-hook-updates";
+import {
+  useAgentHookUpdateStore,
+  refreshAgentHookUpdates,
+  hookUpdateKey,
+} from "@/lib/agent-hook-updates";
 import { useSettingsStore } from "@/stores/settings-store";
 
 const invoke = vi.hoisted(() => vi.fn());
@@ -10,7 +14,7 @@ const persistSession = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock("@/lib/persist-session", () => ({ persistSession }));
 const missing = { provider: "codex", distro: "Ubuntu", hook: true, mcp: false };
 const target = {
-  provider: "codex",
+  provider: "codex" as const,
   distro: "Ubuntu",
   status: {
     configDir: "/custom/.codex",
@@ -82,6 +86,53 @@ describe("AgentHookUpdateNotice", () => {
     fireEvent.click(screen.getByTestId("agent-hook-update-action"));
     expect(await screen.findByText(/helper is locked/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId("agent-hook-update-action")).toBeEnabled());
+  });
+  it("버튼 한 번으로 표시된 갱신 대상만 처리하고 실패한 환경은 재시도한다", async () => {
+    const native = { ...target, provider: "claude", distro: null };
+    const current = {
+      ...target,
+      distro: "Debian",
+      status: { ...target.status, updateRequired: false, updateWarning: "inspection warning" },
+    };
+    const hidden = { ...target, distro: "Hidden" };
+    let remaining = [target, native, current, hidden];
+    let fail = true;
+    invoke.mockImplementation(async (command, args) => {
+      if (command === "get_agent_hook_updates")
+        return { targets: remaining, errors: [], missing: [missing] };
+      const { provider } = args.request;
+      if (provider === "codex" && fail) throw new Error("Ubuntu helper is locked");
+      remaining = remaining.filter((value) => value.provider !== provider);
+      return { ...target.status, updateRequired: false };
+    });
+    render(<AgentHookUpdateNotice />);
+    await act(() => refreshAgentHookUpdates());
+    act(() => useAgentHookUpdateStore.setState({ dismissed: [hookUpdateKey(hidden)] }));
+    expect(screen.getAllByTestId("agent-hook-update-action")).toHaveLength(1);
+    fireEvent.click(screen.getByTestId("agent-hook-update-action"));
+    await waitFor(() =>
+      expect(invoke.mock.calls.filter(([c]) => c === "manage_agent_hooks")).toHaveLength(2),
+    );
+    expect(await screen.findByText(/Ubuntu helper is locked/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("agent-hook-update-action")).toBeEnabled());
+    expect(
+      invoke.mock.calls.filter(([c]) => c === "manage_agent_hooks").map(([, args]) => args.request),
+    ).toEqual([
+      {
+        provider: "codex",
+        operation: "update",
+        distro: "Ubuntu",
+        configDir: target.status.configDir,
+      },
+      { provider: "claude", operation: "update", distro: null, configDir: target.status.configDir },
+    ]);
+    fail = false;
+    fireEvent.click(screen.getByTestId("agent-hook-update-action"));
+    await waitFor(() =>
+      expect(screen.queryByTestId("agent-hook-update-action")).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/Ubuntu helper is locked/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("agent-integration-install-hook")).toBeInTheDocument();
   });
   it("lets users dismiss the notice without installing or hiding Settings state", async () => {
     invoke.mockResolvedValue({ targets: [target], errors: [] });

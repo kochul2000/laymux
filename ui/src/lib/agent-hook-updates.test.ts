@@ -6,6 +6,8 @@ import {
   refreshAgentHookUpdates,
   subscribeAgentHookUpdates,
   updateAgentHooks,
+  updateAllAgentHooks,
+  hookUpdateAllKey,
   useAgentHookUpdateStore,
 } from "./agent-hook-updates";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -48,6 +50,44 @@ afterEach(() => {
 });
 
 describe("agent hook update coordinator", () => {
+  it("일괄 갱신이 끝날 때까지 설정의 MCP 설치도 같은 큐에서 기다린다", async () => {
+    const native = { ...target, provider: "claude" as const, distro: null };
+    let finishFirst!: (value: unknown) => void;
+    invoke.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishFirst = resolve;
+      }),
+    );
+    invoke.mockImplementation(async (command) =>
+      command === "get_agent_hook_updates"
+        ? { targets: [], errors: [] }
+        : { ...target.status, updateRequired: false },
+    );
+    useAgentHookUpdateStore.setState({ targets: [target, native] });
+    const update = updateAllAgentHooks([target, native]);
+    const install = installMissingIntegration(missing, "mcp");
+    expect(useAgentHookUpdateStore.getState().busyKey).toBe(hookUpdateAllKey);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    finishFirst({ ...target.status, updateRequired: false });
+    await update;
+    await install;
+    expect(invoke.mock.calls.map(([command]) => command)).toEqual([
+      "manage_agent_hooks",
+      "manage_agent_hooks",
+      "get_agent_hook_updates",
+      "manage_agent_mcp",
+      "get_agent_hook_updates",
+    ]);
+    expect(useAgentHookUpdateStore.getState().busyKey).toBeNull();
+  });
+  it("일괄 갱신 성공 뒤 검사 실패 시에도 성공한 훅 상태를 보존한다", async () => {
+    useAgentHookUpdateStore.setState({ targets: [target] });
+    invoke.mockResolvedValueOnce({ ...target.status, updateRequired: false });
+    invoke.mockRejectedValueOnce(new Error("audit timed out"));
+    await updateAllAgentHooks([target]);
+    expect(useAgentHookUpdateStore.getState().targets[0].status.updateRequired).toBe(false);
+    expect(useAgentHookUpdateStore.getState().errors[0].message).toContain("audit timed out");
+  });
   it("does not lose discovery while an unrelated manual inspection is in flight", async () => {
     let resolve!: (value: unknown) => void;
     invoke.mockReturnValueOnce(
