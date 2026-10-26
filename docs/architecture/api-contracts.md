@@ -607,6 +607,8 @@ root `settings.confirmDestructiveActions`(boolean, 기본 `true`)는 desktop 클
 
 ### Claude Code 설정
 
+갱신 알림의 **설치된 훅 모두 갱신** 버튼은 현재 알림에 표시된 `updateRequired` 대상들을 한 번의 사용자 동작으로 갱신한다. 경고만 있는 대상·닫은 대상·미설치 훅·MCP는 포함하지 않는다. 전체 작업을 기존 프런트엔드 관리 큐에 넣어 Settings의 설치·제거와도 직렬화하며, 각 대상에 원본 provider·distro·configDir로 기존 `update` API를 호출한다. 한 대상의 실패가 나머지 갱신을 중단하지 않는다. 성공 status는 즉시 반영하고 마지막 캐시 검사 뒤에도 대상별 갱신 실패를 보존한다. 성공한 대상은 알림에서 빠지고 남은 대상은 같은 버튼으로 다시 시도한다. 별도 확인 대화상자는 추가하지 않는다([ADR-0289](../adr/0289-agent-hook-update-notification.md), [ADR-0330](../adr/0330-agent-integration-missing-notice.md)의 기존 갱신·큐 정책 적용).
+
 훅 갱신 검사의 20초 예산은 WSL 배포판 열거부터 공유한다. 각 WSL helper 호출의 제한은 8초와 남은 검사 예산 중 작은 값이며, 읽기 전용 `status`의 I/O 시간 초과만 남은 예산 안에서 한 번 재시도한다. 예산이 소진되면 추가 호출을 시작하지 않고 미확인 오류를 유지한다. 설치·갱신·제거, 설정 오류와 native 조회는 자동 재시도하지 않는다. 기본 폴더 검사에서 실제 `configDir`를 확인했다면 같은 provider·환경의 관찰 폴더가 그 경로와 일치할 때 추가 검사하지 않는다. Windows native 경로는 대소문자와 구분자를 정규화하고 WSL 경로의 대소문자는 구분한다.
 
 설치 훅 갱신 검사는 [ADR-0289](../adr/0289-agent-hook-update-notification.md)를 따른다. 관리 status는 기존 설치 완료 여부와 별도로 `helperCurrent: boolean|null`, `currentRegistered`, `ownedCommands`, `updateRequired`, `updateReasons: [helper_missing|helper_outdated|registrations]`, `updateWarning`을 반환한다. 파일 존재만으로 최신 helper라고 판단하지 않으며 동봉된 바이너리와 바이트를 비교한다. 구버전 훅도 정상 수신할 수 있으므로 갱신 필요만으로 상태 감지를 차단하지 않는다.

@@ -8,7 +8,8 @@ import {
   hookMissingKey,
   missingInstallKey,
   installMissingIntegration,
-  updateAgentHooks,
+  updateAllAgentHooks,
+  hookUpdateAllKey,
   dismissHookUpdateNotice,
   refreshAgentHookUpdates,
 } from "@/lib/agent-hook-updates";
@@ -30,6 +31,7 @@ export function AgentHookUpdateNotice() {
       !dismissed.includes(hookUpdateKey(target)),
   );
   const visibleErrors = errors.filter((error) => !dismissed.includes(hookUpdateErrorKey(error)));
+  const updatable = visible.filter((target) => target.status.updateRequired);
   // The setting hides only missing-integration rows (ADR-0330).
   const visibleMissing =
     missingEnabled === false
@@ -67,14 +69,6 @@ export function AgentHookUpdateNotice() {
               <p className="agent-hooks-path">{target.status.configDir}</p>
               {target.status.updateWarning && <p role="alert">{target.status.updateWarning}</p>}
             </div>
-            <Button
-              variant="primary"
-              data-testid="agent-hook-update-action"
-              disabled={busyKey !== null || !target.status.updateRequired}
-              onClick={() => void updateAgentHooks(target)}
-            >
-              {t(busyKey === hookUpdateKey(target) ? "agentHooks.updating" : "agentHooks.update")}
-            </Button>
           </div>
         ))}
         {visibleMissing.map((target) => (
@@ -137,6 +131,17 @@ export function AgentHookUpdateNotice() {
         </label>
       )}
       <div className="agent-hook-update-notice__actions">
+        {(updatable.length > 0 || busyKey === hookUpdateAllKey) && (
+          <Button
+            variant="primary"
+            data-testid="agent-hook-update-action"
+            disabled={busyKey !== null}
+            title={busyKey !== null ? t("agentHooks.updating") : undefined}
+            onClick={() => void updateAllAgentHooks(updatable)}
+          >
+            {t(busyKey === hookUpdateAllKey ? "agentHooks.updating" : "agentHooks.updateAll")}
+          </Button>
+        )}
         <Button disabled={busyKey !== null} onClick={() => void refreshAgentHookUpdates()}>
           {t("agentHooks.refresh")}
         </Button>

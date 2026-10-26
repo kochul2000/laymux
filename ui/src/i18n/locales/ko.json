@@ -155,6 +155,7 @@
       "install": "훅 설치",
       "reinstall": "다시 설치",
       "update": "훅 갱신",
+      "updateAll": "설치된 훅 모두 갱신",
       "updating": "갱신 중…",
       "updateNeeded": "설치된 훅을 갱신해야 합니다. helper 또는 등록 명령이 최신 상태와 다릅니다.",
       "updateNotice": "에이전트 훅 확인",
