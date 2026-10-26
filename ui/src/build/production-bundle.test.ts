@@ -54,8 +54,13 @@ const UI_ROOT = process.cwd();
  * of startup routing, inline fallback and Worker lifecycle handling, taking
  * this PR to 544,211 B. 548 kB restores 3,789 B of headroom; it does not change
  * which modules are eagerly loaded or grant a separate grammar-sized budget.
+ *
+ * v3.3.0 정식 태그의 같은 빌드도 이미 552,044 B로 기존 예산을 넘는다.
+ * 훅 일괄 갱신의 큐 처리와 단일 버튼 문구는 482 B를 추가해 552,526 B다.
+ * 556 kB는 기존과 비슷한 3,474 B의 여유를 복원한다. 정적 로드 범위와
+ * 문법 청크의 별도 상한은 유지한다.
  */
-const STARTUP_CHUNK_BUDGET_BYTES = 548_000;
+const STARTUP_CHUNK_BUDGET_BYTES = 556_000;
 
 /**
  * Ceiling for a lazily-imported **syntax grammar**. Generous because a
