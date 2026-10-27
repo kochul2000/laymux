@@ -49,12 +49,14 @@ pub(super) fn detect_terminal_state_with_liveness(
         return TerminalStateInfo { activity };
     }
 
-    // A readable process snapshot disproves resident agent titles and grace.
-    // It does not prove that the shell is ready for input.
+    // Absence skips grace/banner fallback. A direct title still supports SSH
+    // and JS shims whose remote/interpreted process has no local agent name.
+    // Only a prompt observed AFTER that title makes the direct title stale.
     if liveness == PtyAppLiveness::NoneAlive {
         let activity = match activity {
             TerminalActivity::InteractiveApp { ref name }
-                if matches!(name.as_str(), "Claude" | "Codex" | "Grok") =>
+                if matches!(name.as_str(), "Claude" | "Codex" | "Grok")
+                    && prompt_after_last_title(&recent) =>
             {
                 detect_shell_activity(&recent)
             }
@@ -72,6 +74,32 @@ pub(super) fn detect_terminal_state_with_liveness(
         };
     }
     TerminalStateInfo { activity }
+}
+
+fn prompt_after_last_title(recent: &[u8]) -> bool {
+    let mut prompt = false;
+    let mut child_commands: u32 = 0;
+    for event in osc::iter_osc_events(recent) {
+        match event.code {
+            0 | 2 => {
+                prompt = false;
+                child_commands = 0;
+            }
+            133 if matches!(event.param.as_deref(), Some("A" | "B")) => prompt = true,
+            133 if event.param.as_deref() == Some("C") => {
+                child_commands = child_commands.saturating_add(1)
+            }
+            133 if event.param.as_deref() == Some("D") => {
+                if child_commands == 0 {
+                    prompt = true;
+                } else {
+                    child_commands -= 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    prompt
 }
 
 /// Only positive OSC lifecycle evidence can classify a shell/command.

@@ -59,12 +59,12 @@ fn absence_of_observation_is_not_a_shell_or_a_running_command() {
 }
 
 #[test]
-fn a_confirmed_exit_outranks_resident_agent_title_and_grace() {
+fn a_confirmed_exit_with_a_non_agent_title_outranks_grace() {
     let state = AppState::new();
     let mut buffer = TerminalOutputBuffer::new(4096);
     for app in ["Claude", "Codex", "Grok"] {
         record_interactive_app_detection(&state, "pane", app);
-        buffer.push(format!("\x1b]0;{app}\x07\x1b]133;C\x07").as_bytes());
+        buffer.push(format!("\x1b]0;{app}\x07\x1b]133;C\x07\x1b]0;fixture cwd\x07").as_bytes());
         // Agent absence confirms exit, but does not prove the shell is idle.
         assert_eq!(
             detect_terminal_state_with_liveness(
@@ -86,6 +86,63 @@ fn a_confirmed_exit_outranks_resident_agent_title_and_grace() {
             )
             .activity,
             TerminalActivity::Shell,
+        );
+    }
+}
+
+#[test]
+fn direct_titles_support_unobservable_ssh_and_js_apps_until_a_new_prompt() {
+    for app in ["Claude Code", "OpenAI Codex", "Grok Build"] {
+        let state = AppState::new();
+        let mut buffer = TerminalOutputBuffer::new(4096);
+        buffer.push(format!("\x1b]133;A\x07\x1b]133;C\x07\x1b]0;{app}\x07").as_bytes());
+        let detected = detect_terminal_state_with_liveness(
+            &state,
+            "opaque",
+            Some(&buffer),
+            PtyAppLiveness::NoneAlive,
+        )
+        .activity;
+        assert!(
+            matches!(detected, TerminalActivity::InteractiveApp { .. }),
+            "a local name scan cannot disprove {app}"
+        );
+        // Even a child shell's command boundaries do not prove its TUI exited.
+        buffer.push(b"\x1b]133;C\x07\x1b]133;D;0\x07");
+        assert!(matches!(
+            detect_terminal_state_with_liveness(
+                &state,
+                "opaque",
+                Some(&buffer),
+                PtyAppLiveness::NoneAlive
+            )
+            .activity,
+            TerminalActivity::InteractiveApp { .. }
+        ));
+        // The outer command's D (without another post-title C) is also a
+        // return boundary for shells that do not emit OSC 133 A/B.
+        buffer.push(b"\x1b]133;D;0\x07");
+        assert_eq!(
+            detect_terminal_state_with_liveness(
+                &state,
+                "opaque",
+                Some(&buffer),
+                PtyAppLiveness::NoneAlive
+            )
+            .activity,
+            TerminalActivity::Shell
+        );
+        // A newly observed prompt after the title makes that title stale.
+        buffer.push(b"\x1b]133;A\x07");
+        assert_eq!(
+            detect_terminal_state_with_liveness(
+                &state,
+                "opaque",
+                Some(&buffer),
+                PtyAppLiveness::NoneAlive
+            )
+            .activity,
+            TerminalActivity::Shell
         );
     }
 }

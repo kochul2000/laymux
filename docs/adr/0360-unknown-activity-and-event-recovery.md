@@ -1,6 +1,6 @@
 # 0360. 미관측 activity는 셸이 아니며 전체 복구 sweep을 하지 않는다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-27
 - Source: 사용자 요청(60초 일괄 검사 제거, 감지 실패의 shell 판정 금지, 에이전트 종료 지연), [data-flow.md §9](../architecture/data-flow.md), [ADR-0005](0005-display-state-raw-separation-compute.md), ADR-0009, ADR-0135, ADR-0358, ADR-0359
 - Amends: ADR-0009의 미관측 시 제목 종료 fallback, ADR-0135의 전체 재발행, ADR-0358의 주기적 전체 작업 재조회, ADR-0359의 미관측 기본 판정.
@@ -16,7 +16,7 @@
 **관측 근거가 없으면 activity는 unknown이며, 복구는 진입 이벤트와 기존 변경분 감지로 수행하고 60초 전체 sweep을 제거한다.**
 
 - Rust activity와 기존 API·IPC의 tagged union에 `unknown`을 추가한다. 누락·빈 버퍼·읽기 실패·일반 텍스트만으로 shell이나 running을 만들지 않는다. 셸 prompt/종료는 OSC 133 A/B/D, 명령 실행은 C의 순서로 판정한다. 지원하지 않는 셸 통합은 미확인으로 남는다.
-- 프로세스로 확인된 지원 앱은 출력보다 우선한다. 신선한 `NoneAlive`는 지원 에이전트의 과거 제목·배너·grace보다 우선하되, 그 자체를 셸 유휴 근거로 사용하지 않는다. 다른 TUI 식별은 유지한다.
+- 프로세스로 확인된 지원 앱은 출력보다 우선한다. 신선한 `NoneAlive`는 과거 배너·grace를 우회하되, 그 자체를 셸 유휴 근거로 사용하지 않는다. 현재의 명시적 앱 제목은 SSH·node shim처럼 로컬 이름 열거가 앱을 볼 수 없는 실행 형태의 기존 fallback으로 유지한다. 그 제목 뒤 OSC 133 A/B의 새 프롬프트나 바깥 명령의 D가 확인되면 제목은 stale로 처리한다. 제목 뒤 시작된 자식 C는 대응하는 D와 상쇄하며 그 자식 C/D만으로 직접 제목을 무효화하지 않는다. 다른 TUI 식별은 유지한다.
 - unknown은 에이전트 종료·자동 입력 허가의 근거가 아니다. 기존 ADR-0359의 마지막 앱 기준 보존과 세대·epoch 보호를 유지한다. 이미 확인한 앱의 일시적 미관측은 라벨만 유지할 수 있으며, 초기 미관측과 API의 실제 판정은 unknown이다. task의 unknown/stale 보호와 clear의 독립 관측 조건을 완화하지 않는다.
 - PTY 제목 상태머신도 같은 종료 증거 조건을 사용한다. `Unknown`·`Ambiguous`에서는 제목 reset에 따른 앱 종료·작업 완료·종료 정리로 인한 live 제목 삭제를 보류한다. 실제 OSC의 식별자 변경/소실은 기존 live 제목 계약대로 반영한다. frontend의 자식 명령 종료 코드도 에이전트를 shell로 바꾸지 않는다. 실제 앱 종료는 확인된 프로세스 부재/handover와 이후 셸 lifecycle로 수렴한다. 전체 재발행에 의존하던 frontend의 독자적인 shell 강등을 제거한다.
 - 60초 전체 activity 재발행과 전체 task 재조회 타이머를 제거한다. 3초 프로세스 생존 감지와 변경된 pane만 발행하는 경로는 유지한다. 최초 task 복구·foreground 복귀는 현재 workspace만, pane focus·준비는 해당 pane만 조회한다. 기존 진행 중 작업의 provider 구독 주기는 유지한다.

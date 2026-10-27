@@ -10,7 +10,7 @@ import time
 provider, session_id, root_arg = sys.argv[1:]
 root = Path(root_arg)
 assert str(root).startswith('/tmp/laymux-activity-')
-ctypes.CDLL(None).prctl(15, provider.lower().encode(), 0, 0, 0)
+ctypes.CDLL(None).prctl(15, os.environ.get('LAYMUX_FIXTURE_PROCESS_NAME', provider.lower()).encode(), 0, 0, 0)
 directory = root / 'sessions/2026/10/27'
 directory.mkdir(parents=True, exist_ok=True)
 rollout = directory / f'rollout-dev-{session_id}.jsonl'
@@ -34,6 +34,7 @@ for line in sys.stdin:
     command = line.strip()
     if command == 'flood': print('x'*32768,flush=True)
     elif command == 'title-reset': print('\x1b]0;dev fixture cwd\x07',end='',flush=True)
+    elif command == 'stale-title': print('\x1b]0;Claude Code\x07',end='',flush=True)
     elif command == 'restore-title':
         print(f'\x1b]0;codex | {session_id} | dev fixture\x07' if provider == 'Codex' else '\x1b]0;Claude Code\x07\x1b]0;✳ dev fixture\x07',end='',flush=True)
     elif command in ('busy','done') and provider == 'Codex': append('task_started' if command=='busy' else 'task_complete')

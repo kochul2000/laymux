@@ -1326,7 +1326,7 @@ Claude Code·Codex 가 실행 중인지의 **권위는 PTY 자식 프로세스 �
 
 `detect_terminal_state`는 프로세스의 `Running(app)`을 출력 스캔보다 먼저 적용한다. 출력 버퍼가 없거나 빈 재부착도 이 판정을 건너뛰지 않으며, ring에 남은 다른 앱의 제목보다 현재 프로세스가 우선한다([ADR-0359](../adr/0359-agent-reconcile-requires-exit-evidence.md)). control 경로는 기존처럼 이 판정 전후에 authoritative ring·registry 건강성을 검사한다.
 
-[ADR-0360](../adr/0360-unknown-activity-and-event-recovery.md)에 따라 버퍼 누락·빈 출력·읽기 실패·OSC lifecycle 부재는 `Unknown`이다. OSC 133 A/B/D가 마지막 C보다 뒤일 때만 `Shell`, C가 마지막이면 `Running`이다. 신선한 `NoneAlive`는 지원 에이전트의 과거 제목·배너·grace를 우회하며 프로세스 부재 자체는 셸 판정 근거가 아니다. UI의 미설정도 `unknown`으로 표시하고 자동 CWD·MCP shell 실행·clear는 미확인 입력을 거절한다.
+[ADR-0360](../adr/0360-unknown-activity-and-event-recovery.md)에 따라 버퍼 누락·빈 출력·읽기 실패·OSC lifecycle 부재는 `Unknown`이다. OSC 133 A/B/D가 마지막 C보다 뒤일 때만 `Shell`, C가 마지막이면 `Running`이다. 신선한 `NoneAlive`는 과거 배너·grace를 우회하며 프로세스 부재 자체는 셸 판정 근거가 아니다. 현재 직접 앱 제목은 SSH·node shim처럼 로컬 이름으로 보이지 않는 앱의 기존 fallback으로 유지하되, 그 제목 뒤 OSC 133 A/B의 새 프롬프트나 바깥 명령의 D가 있으면 stale로 처리한다. 제목 뒤 시작된 자식 C와 대응 D는 상쇄해 직접 제목을 무효화하지 않는다. UI의 미설정도 `unknown`으로 표시하고 자동 CWD·MCP shell 실행·clear는 미확인 입력을 거절한다.
 
 - **오라클(3-state `PtyAppLiveness`)**: `process_tree::interactive_app_in_pty(state, terminal_id)` 가 PTY `child_pid` 의 자손 트리를 BFS 로 훑어 `claude.exe`/`codex.exe`(Linux: `claude`/`codex`)를 찾는다. `Running(app)`(가장 얕은 매치 = 포그라운드 앱) / `NoneAlive`(PID·스냅샷 성공 + 앱 없음 = 권위 있는 부재) / `Unknown`(PID 없음·serial·스냅샷 실패 = 신호 없음). 전역 스냅샷은 1초 TTL 로 캐시해 스피너 틱마다의 재열거를 막는다(종료 판정만 fresh 우회).
 - **양성 권위**: `is_{claude,codex}_terminal_from_buffer` 는 오라클이 `Running(해당 앱)` 이면 타이틀/버퍼와 무관하게 `true` + 캐시 갱신. 긴 세션에서 시작 배너가 16KB 창 밖으로 밀려나고 타이틀이 스피너뿐이어도 인식이 유지된다.

@@ -327,6 +327,36 @@ try {
         at: new Date().toISOString(),
         samples: timeline.length,
       });
+    } else if (phase === "drift") {
+      assertApps(await own());
+      await sleep(8000);
+      const target = context.targets.find((t) => t.environment === "Windows" && t.provider === "Codex");
+      const before = await own();
+      await page.evaluate(async (id) => {
+        const { useTerminalStore } = await import("/src/stores/terminal-store.ts");
+        window.__activityDrift = [];
+        window.__stopActivityDrift = useTerminalStore.subscribe((state) => {
+          window.__activityDrift.push(state.instances.find((i) => i.id === id)?.activity);
+        });
+      }, target.id);
+      const started = Date.now();
+      await api(`/terminals/${target.id}/write`, { data: "stale-title\r" });
+      const after = await until(own, (values) => {
+        const current = values.find((v) => v.id === target.id);
+        return current?.activity?.name === "Codex" && current.activitySequence > before.find((v) => v.id === target.id).activitySequence;
+      }, "backend Codex 판정이 같아도 늦은 Claude 제목을 해당 pane만 보정", 8000);
+      const correctionMs = Date.now() - started;
+      const observations = await page.evaluate(() => {
+        window.__stopActivityDrift();
+        return window.__activityDrift;
+      });
+      assert.ok(observations.some((activity) => activity?.name === "Claude"));
+      for (const current of after)
+        if (current.id !== target.id) assert.equal(current.activitySequence, before.find((v) => v.id === current.id).activitySequence);
+      await api(`/terminals/${target.id}/write`, { data: "restore-title\r" });
+      await api(`/terminals/${target.id}/write`, { data: "flood\r" });
+      await writeFile(path.join(artifacts, "drift.json"), JSON.stringify({ before, after, observations, correctionMs }, null, 2));
+      context.checks.push({ phase, at: new Date().toISOString(), correctionMs });
     } else if (phase === "quiet-exit") {
       assertApps(await own());
       // Let corrections requested by the preceding fault/entry events settle
@@ -518,6 +548,37 @@ try {
         at: new Date().toISOString(),
         beforeExit: after,
       });
+    } else if (phase === "opaque") {
+      const observations = [];
+      for (const environment of ["Windows", "WSL"]) {
+        const target = context.targets.find((t) => t.environment === environment);
+        for (const name of ["ssh", "node"]) {
+          const id = randomUUID();
+          let command;
+          if (environment === "Windows") {
+            const binary = path.join(artifacts, name + ".exe");
+            await copyFile(path.join(artifacts, "codex.exe"), binary);
+            command = `& ${quote(binary)} Claude ${id} ${quote(path.join(artifacts, id))}\r`;
+          } else {
+            const script = path.join(root, "scripts/tests/fixtures/activity-agent.py").replaceAll("\\", "/").replace(/^([A-Za-z]):/, (_, drive) => "/mnt/" + drive.toLowerCase());
+            const directory = `/tmp/laymux-activity-${id}`;
+            command = `HOME='${directory}' LAYMUX_FIXTURE_PROCESS_NAME=${name} python3 '${script}' Claude ${id} '${directory}'\r`;
+          }
+          await api(`/terminals/${target.id}/write`, { data: command });
+          await until(own, (values) => values.find((v) => v.id === target.id)?.activity?.name === "Claude", `${environment} ${name} 직접 제목`);
+          // The ordinary fixture ends with an app-name-free idle title. This
+          // case specifically tests the documented explicit title fallback.
+          await api(`/terminals/${target.id}/write`, { data: "stale-title\r" });
+          await sleep(5000);
+          assert.equal((await own()).find((v) => v.id === target.id).activity?.name, "Claude");
+          assert.equal((await api("/terminals/states")).states[target.id].activity.name, "Claude");
+          await api(`/terminals/${target.id}/write`, { data: "exit\r" });
+          await until(own, (values) => values.find((v) => v.id === target.id)?.activity?.type === "shell", `${environment} ${name} 새 프롬프트`, 8000);
+          observations.push({ environment, name, directTitle: "Claude", returned: "shell" });
+        }
+      }
+      await writeFile(path.join(artifacts, "opaque.json"), JSON.stringify(observations, null, 2));
+      context.checks.push({ phase, at: new Date().toISOString(), observations });
     } else if (phase === "unknown") {
       const target = context.targets.find((t) => t.environment === "Windows");
       const binary = path.join(artifacts, "unknown.exe");
@@ -532,31 +593,6 @@ try {
       const clear = await api(`/panes/${pane.id}/clear`, {});
       assert.ok(clear.skipped.some((s) => s.terminalId === target.id && s.reason === "stateUnknown"), JSON.stringify(clear));
       assert.deepEqual(clear.cleared, []);
-      const beforeDrift = await own();
-      await page.evaluate(async (id) => {
-        const { useTerminalStore } = await import("/src/stores/terminal-store.ts");
-        window.__activityDrift = [];
-        window.__stopActivityDrift = useTerminalStore.subscribe((state) => {
-          const instance = state.instances.find((i) => i.id === id);
-          window.__activityDrift.push(instance?.activity);
-        });
-      }, target.id);
-      const driftStarted = Date.now();
-      await api(`/terminals/${target.id}/write`, { data: "stale-title\r" });
-      await until(own, (values) => {
-        const current = values.find((v) => v.id === target.id);
-        return current?.activity?.type === "unknown" && current.activitySequence > beforeDrift.find((v) => v.id === target.id).activitySequence;
-      }, "backend 판정이 같아도 늦은 live 제목을 해당 pane만 보정", 8000);
-      const correctionMs = Date.now() - driftStarted;
-      const drift = await page.evaluate(() => {
-        window.__stopActivityDrift();
-        return window.__activityDrift;
-      });
-      assert.ok(drift.some((activity) => activity?.name === "Claude"), "실제 live 제목이 UI를 잘못 바꾼 뒤 보정돼야 합니다.");
-      for (const current of await own()) {
-        if (current.id !== target.id)
-          assert.equal(current.activitySequence, beforeDrift.find((v) => v.id === current.id).activitySequence, "다른 pane 전체 재발행 금지");
-      }
       await page.evaluate(() => {
         for (const button of document.querySelectorAll("button"))
           if (button.textContent.trim() === "나중에") button.click();
@@ -565,7 +601,7 @@ try {
       assert.equal(values.find((v) => v.id === target.id).selectorDisplay.activity.label, "unknown");
       const screenshot = await api("/screenshot", {});
       await writeFile(path.join(artifacts, "unknown.png"), Buffer.from(screenshot.dataUrl.split(",")[1], "base64"));
-      await writeFile(path.join(artifacts, "unknown.json"), JSON.stringify({ values, clear, drift, correctionMs }, null, 2));
+      await writeFile(path.join(artifacts, "unknown.json"), JSON.stringify({ values, clear }, null, 2));
       await api(`/terminals/${target.id}/write`, { data: "exit\r" });
       await until(own, (values) => values.find((v) => v.id === target.id)?.activity?.type === "shell", "미관측 프로세스 종료 후 셸 확인");
       context.checks.push({ phase, at: new Date().toISOString() });
