@@ -14,6 +14,8 @@ mod liveness_tests;
 
 mod state_detection;
 pub use state_detection::detect_terminal_state;
+mod observations;
+pub use observations::{observation_sequences, record_observation};
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64};
@@ -1390,6 +1392,8 @@ pub struct PtyCallbackState {
     /// that discriminator: read it with the verdict, and refuse the cleanup if
     /// it moved (ADR-0136 §5).
     pub detection_epoch: AtomicU64,
+    /// Last emitted title/command observation, scoped to this PTY callback.
+    pub activity_observation_sequence: AtomicU64,
     pub burst_detector: BurstDetector,
     /// Volume-based activity detector — the app-agnostic signal that keeps the
     /// working verdict alive when the frame and title paths both miss
@@ -1414,6 +1418,7 @@ impl PtyCallbackState {
             codex_detected: AtomicBool::new(false),
             grok_detected: AtomicBool::new(false),
             detection_epoch: AtomicU64::new(0),
+            activity_observation_sequence: AtomicU64::new(0),
             burst_detector: BurstDetector::new(burst_window_ms, burst_threshold, throttle_ms),
             volume_detector: OutputVolumeDetector::new(
                 volume_window_ms,
@@ -1424,6 +1429,11 @@ impl PtyCallbackState {
                 crate::constants::DEC_SYNC_OUTPUT_SET,
             )),
         }
+    }
+
+    pub fn record_observation(&self, sequence: u64) {
+        self.activity_observation_sequence
+            .fetch_max(sequence, std::sync::atomic::Ordering::Release);
     }
 
     /// Scan `data` for DEC 2026 Synchronized Output set markers, correctly

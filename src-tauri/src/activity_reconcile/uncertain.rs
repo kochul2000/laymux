@@ -15,6 +15,20 @@ pub(super) fn discard_replaced_baselines(
     });
 }
 
+pub(super) fn retain_deferred_observations(
+    previous: &HashMap<String, u64>,
+    current: &mut HashMap<String, u64>,
+    deferred: &HashSet<String>,
+) {
+    for id in deferred {
+        if let Some(revision) = previous.get(id) {
+            current.insert(id.clone(), *revision);
+        } else {
+            current.remove(id);
+        }
+    }
+}
+
 /// Keep the diff baseline, without publishing it as a new observation.
 pub(super) fn defer_uncertain_agent_exits(
     published: &HashMap<String, TerminalActivity>,

@@ -2447,6 +2447,7 @@ impl TerminalOscPass {
                         "activitySequence": activity_sequence,
                     }),
                 );
+                pty_cb_state.record_observation(activity_sequence);
             }
 
             // Proactive CWD update (single source of truth in session.cwd).
@@ -2532,10 +2533,12 @@ impl TerminalOscPass {
                 && !super::ipc_dispatch::is_propagated(&state_for_pty, &terminal_id).unwrap_or(true)
             {
                 if let Some(lifecycle) = osc_hooks::task_lifecycle(&event) {
+                    let activity_sequence = crate::activity_order::next_activity_sequence();
                     let mut payload = serde_json::json!({
                         "terminalId": terminal_id,
                         "generation": terminal_generation,
                         "phase": lifecycle.phase,
+                        "activitySequence": activity_sequence,
                     });
                     if let Some(code) = lifecycle.exit_code {
                         payload["exitCode"] = serde_json::json!(code);
@@ -2544,6 +2547,7 @@ impl TerminalOscPass {
                         payload["result"] = serde_json::json!("interrupted");
                     }
                     let _ = app_clone.emit(EVENT_COMMAND_STATUS, payload);
+                    pty_cb_state.record_observation(activity_sequence);
                 }
             }
 

@@ -356,13 +356,15 @@ export function useSyncEvents() {
           pendingClaudeIdle.delete(data.terminalId);
         if (deferGeneration(data.terminalId, data.generation, () => applyCommand(data, true)))
           return;
+        const owner = useTerminalStore.getState().instances.find((i) => i.id === data.terminalId);
+        const staleActivity = isStaleActivity(owner?.activitySequence, data.activitySequence);
         const update: Record<string, unknown> = {};
 
         if (data.command !== undefined && data.command !== "__preexec__") {
           update.lastCommand = data.command;
           update.lastCommandAt = Date.now();
           const appActivity = detectActivityFromCommand(data.command);
-          if (appActivity) {
+          if (appActivity && owner?.activity?.type !== "interactiveApp" && !staleActivity) {
             update.activity = appActivity;
             if (appActivity.name === "Claude") {
               markClaudeTerminal(data.terminalId).catch(() => {});
@@ -404,6 +406,9 @@ export function useSyncEvents() {
             .instances.find((i) => i.id === data.terminalId);
           if (instance?.activity?.type !== "interactiveApp") update.activity = { type: "shell" };
         }
+        if (staleActivity) delete update.activity;
+        else if (data.activitySequence !== undefined)
+          update.activitySequence = data.activitySequence;
         useTerminalStore.getState().updateInstanceInfo(data.terminalId, update);
         const current = useTerminalStore
           .getState()

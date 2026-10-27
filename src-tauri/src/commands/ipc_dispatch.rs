@@ -368,6 +368,7 @@ pub fn do_set_command_status(
     command: Option<&str>,
     exit_code: Option<i32>,
 ) -> Result<LxResponse, String> {
+    let activity_sequence = crate::activity_order::next_activity_sequence();
     {
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -391,6 +392,7 @@ pub fn do_set_command_status(
 
     let mut payload = serde_json::json!({
         "terminalId": terminal_id,
+        "activitySequence": activity_sequence,
     });
     if let Some(cmd) = command {
         payload["command"] = serde_json::json!(cmd);
@@ -399,6 +401,7 @@ pub fn do_set_command_status(
         payload["exitCode"] = serde_json::json!(code);
     }
     let _ = app.emit(EVENT_COMMAND_STATUS, payload);
+    activity::record_observation(state, terminal_id, activity_sequence);
 
     let desc = match (command, exit_code) {
         (Some(cmd), Some(code)) => format!("command '{}' exit {}", cmd, code),

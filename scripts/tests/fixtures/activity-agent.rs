@@ -26,6 +26,7 @@ fn main() {
         match command.trim() {
             "flood" => println!("{}", "x".repeat(32768)),
             "title-reset" => print!("\x1b]0;dev fixture cwd\x07"),
+            "stale-title" => print!("\x1b]0;Claude Code\x07"),
             "restore-title" => {
                 if provider == "Codex" {
                     print!("\x1b]0;codex | {id} | dev fixture\x07");

@@ -58,15 +58,38 @@ pub struct ReconciledActivity {
 /// Disappeared terminals produce nothing: the frontend removes an instance when
 /// its session closes, and emitting about a pane that no longer exists would
 /// only invite a store entry to be recreated.
+#[cfg(test)]
 pub fn diff(
     published: &HashMap<String, TerminalActivity>,
     current: &HashMap<String, TerminalActivity>,
     activity_sequence: u64,
 ) -> Vec<ReconciledActivity> {
+    diff_observed(
+        published,
+        current,
+        &HashMap::new(),
+        &HashMap::new(),
+        activity_sequence,
+    )
+}
+
+fn diff_observed(
+    published: &HashMap<String, TerminalActivity>,
+    current: &HashMap<String, TerminalActivity>,
+    previous_observations: &HashMap<String, u64>,
+    observations: &HashMap<String, u64>,
+    activity_sequence: u64,
+) -> Vec<ReconciledActivity> {
     let mut changed: Vec<ReconciledActivity> = current
         .iter()
         .filter(|(terminal_id, activity)| {
-            published
+            observations.get(*terminal_id).is_some_and(|revision| {
+                *revision
+                    > previous_observations
+                        .get(*terminal_id)
+                        .copied()
+                        .unwrap_or(0)
+            }) || published
                 .get(*terminal_id)
                 .is_none_or(|previous| previous != *activity)
         })
@@ -98,11 +121,18 @@ pub fn start(state: Arc<AppState>, app: AppHandle) {
     std::thread::spawn(move || {
         let mut published: HashMap<String, TerminalActivity> = HashMap::new();
         let mut published_generations = HashMap::new();
+        let mut published_observations = HashMap::new();
         let mut delay = ACTIVITY_RECONCILE_INTERVAL;
         loop {
             std::thread::sleep(delay);
             let pass_start = Instant::now();
-            run_pass(&state, &app, &mut published, &mut published_generations);
+            run_pass(
+                &state,
+                &app,
+                &mut published,
+                &mut published_generations,
+                &mut published_observations,
+            );
             delay = next_pass_delay(pass_start.elapsed());
         }
     });
@@ -118,6 +148,7 @@ fn run_pass(
     app: &AppHandle,
     published: &mut HashMap<String, TerminalActivity>,
     published_generations: &mut HashMap<String, u64>,
+    published_observations: &mut HashMap<String, u64>,
 ) {
     // The guest probe is refreshed from here so the sweep below reads a snapshot
     // taken for this pass rather than whatever a previous pass left behind.
@@ -129,6 +160,9 @@ fn run_pass(
     // started a *new session of the same app* before the cleanup runs — the one
     // successor `(terminal, app)` scoping cannot see (ADR-0136 §5).
     let epochs_at_snapshot = crate::activity::detection_epochs(state);
+    // Read before taking the pass stamp. An observation published after this
+    // read stays pending for the next pass; one read here has an older stamp.
+    let mut observations_at_snapshot = crate::activity::observation_sequences(state);
     // Stamped before deriving, so a title resolved while this pass runs is
     // ordered after it — see the module docs of `activity_order`.
     let activity_sequence = crate::activity_order::next_activity_sequence();
@@ -193,12 +227,26 @@ fn run_pass(
         apply_exit_transition(&mut terminals, state, app, &terminal_id, &app_name, epoch);
     }
 
-    let changed = diff(published, &current, activity_sequence);
+    let changed = diff_observed(
+        published,
+        &current,
+        published_observations,
+        &observations_at_snapshot,
+        activity_sequence,
+    );
+    // An uncertain pass must not consume a correction request. Recovery may
+    // agree with the old backend value while the live event changed the UI.
+    uncertain::retain_deferred_observations(
+        published_observations,
+        &mut observations_at_snapshot,
+        &deferred,
+    );
     // Track the full current view, including panes that vanished, so a pane that
     // closes and reopens with the same id is re-published rather than compared
     // against a verdict about the previous session.
     *published = current;
     *published_generations = generations_at_snapshot;
+    *published_observations = observations_at_snapshot;
 
     // Every replaced pane loses its baseline, not just the ones that happened to
     // differ this pass. A restart into the *same* app produces an identical
@@ -208,6 +256,7 @@ fn run_pass(
     for terminal_id in &superseded {
         published.remove(terminal_id);
         published_generations.remove(terminal_id);
+        published_observations.remove(terminal_id);
     }
     if !superseded.is_empty() {
         tracing::debug!(
@@ -231,6 +280,7 @@ fn run_pass(
         for entry in &fresh {
             published.remove(&entry.terminal_id);
             published_generations.remove(&entry.terminal_id);
+            published_observations.remove(&entry.terminal_id);
         }
     }
     drop(terminals);
@@ -406,6 +456,37 @@ mod tests {
                 activity: claude(),
                 activity_sequence: SEQ,
             }]
+        );
+    }
+
+    #[test]
+    fn a_live_title_can_be_corrected_without_backend_activity_changing() {
+        let published = map(&[("late-title", shell()), ("quiet", shell())]);
+        let previous = generations(&[("late-title", 10), ("quiet", 10)]);
+        let observed = generations(&[("late-title", 20), ("quiet", 10)]);
+        let correction = diff_observed(&published, &published, &previous, &observed, 21);
+        assert_eq!(correction.len(), 1);
+        assert_eq!(correction[0].terminal_id, "late-title");
+        assert_eq!(correction[0].activity, TerminalActivity::Shell);
+        assert_eq!(correction[0].activity_sequence, 21);
+        assert!(diff_observed(&published, &published, &observed, &observed, 30).is_empty());
+    }
+
+    #[test]
+    fn an_uncertain_pass_keeps_the_correction_pending_until_recovery() {
+        let published = map(&[("pane", claude())]);
+        let previous = generations(&[("pane", 10)]);
+        let mut observed = generations(&[("pane", 20)]);
+        uncertain::retain_deferred_observations(
+            &previous,
+            &mut observed,
+            &HashSet::from(["pane".into()]),
+        );
+        assert_eq!(observed["pane"], 10);
+        let recovered = generations(&[("pane", 20)]);
+        assert_eq!(
+            diff_observed(&published, &published, &observed, &recovered, 30).len(),
+            1
         );
     }
 

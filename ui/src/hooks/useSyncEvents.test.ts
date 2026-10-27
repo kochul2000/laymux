@@ -1422,6 +1422,35 @@ describe("useSyncEvents", () => {
     expect(instance?.lastExitCode).toBe(0);
   });
 
+  it("an agent's child command naming another agent cannot change its owner", () => {
+    useTerminalStore.getState().registerInstance({ id: "parent", profile: "WSL", syncGroup: "" });
+    useTerminalStore.getState().updateInstanceInfo("parent", {
+      activity: { type: "interactiveApp", name: "Claude" },
+      activitySequence: 10,
+    });
+    renderHook(() => useSyncEvents());
+    const command = mockOnCommandStatus.mock.calls[0][0];
+    act(() => command({ terminalId: "parent", command: "codex", activitySequence: 11 }));
+    expect(useTerminalStore.getState().instances[0].activity).toEqual({
+      type: "interactiveApp",
+      name: "Claude",
+    });
+    expect(useTerminalStore.getState().instances[0].lastCommand).toBe("codex");
+  });
+
+  it("a command derived before a reconcile cannot overwrite the newer activity", () => {
+    useTerminalStore.getState().registerInstance({ id: "ordered", profile: "WSL", syncGroup: "" });
+    useTerminalStore.getState().updateInstanceInfo("ordered", {
+      activity: { type: "shell" },
+      activitySequence: 20,
+    });
+    renderHook(() => useSyncEvents());
+    const command = mockOnCommandStatus.mock.calls[0][0];
+    act(() => command({ terminalId: "ordered", command: "codex", activitySequence: 10 }));
+    expect(useTerminalStore.getState().instances[0].activity).toEqual({ type: "shell" });
+    expect(useTerminalStore.getState().instances[0].activitySequence).toBe(20);
+  });
+
   it("clears outputActive immediately on active:false event (app-agnostic)", () => {
     useTerminalStore.getState().registerInstance({
       id: "t1",

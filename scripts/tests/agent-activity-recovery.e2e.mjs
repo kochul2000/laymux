@@ -329,6 +329,9 @@ try {
       });
     } else if (phase === "quiet-exit") {
       assertApps(await own());
+      // Let corrections requested by the preceding fault/entry events settle
+      // before measuring a window with no further observations.
+      await sleep(8000);
       await page.evaluate(async () => {
         const { onTaskStateRefresh } = await import("/src/lib/task-state-refresh.ts");
         window.__activityRefreshes = [];
@@ -529,6 +532,31 @@ try {
       const clear = await api(`/panes/${pane.id}/clear`, {});
       assert.ok(clear.skipped.some((s) => s.terminalId === target.id && s.reason === "stateUnknown"), JSON.stringify(clear));
       assert.deepEqual(clear.cleared, []);
+      const beforeDrift = await own();
+      await page.evaluate(async (id) => {
+        const { useTerminalStore } = await import("/src/stores/terminal-store.ts");
+        window.__activityDrift = [];
+        window.__stopActivityDrift = useTerminalStore.subscribe((state) => {
+          const instance = state.instances.find((i) => i.id === id);
+          window.__activityDrift.push(instance?.activity);
+        });
+      }, target.id);
+      const driftStarted = Date.now();
+      await api(`/terminals/${target.id}/write`, { data: "stale-title\r" });
+      await until(own, (values) => {
+        const current = values.find((v) => v.id === target.id);
+        return current?.activity?.type === "unknown" && current.activitySequence > beforeDrift.find((v) => v.id === target.id).activitySequence;
+      }, "backend 판정이 같아도 늦은 live 제목을 해당 pane만 보정", 8000);
+      const correctionMs = Date.now() - driftStarted;
+      const drift = await page.evaluate(() => {
+        window.__stopActivityDrift();
+        return window.__activityDrift;
+      });
+      assert.ok(drift.some((activity) => activity?.name === "Claude"), "실제 live 제목이 UI를 잘못 바꾼 뒤 보정돼야 합니다.");
+      for (const current of await own()) {
+        if (current.id !== target.id)
+          assert.equal(current.activitySequence, beforeDrift.find((v) => v.id === current.id).activitySequence, "다른 pane 전체 재발행 금지");
+      }
       await page.evaluate(() => {
         for (const button of document.querySelectorAll("button"))
           if (button.textContent.trim() === "나중에") button.click();
@@ -537,7 +565,7 @@ try {
       assert.equal(values.find((v) => v.id === target.id).selectorDisplay.activity.label, "unknown");
       const screenshot = await api("/screenshot", {});
       await writeFile(path.join(artifacts, "unknown.png"), Buffer.from(screenshot.dataUrl.split(",")[1], "base64"));
-      await writeFile(path.join(artifacts, "unknown.json"), JSON.stringify({ values, clear }, null, 2));
+      await writeFile(path.join(artifacts, "unknown.json"), JSON.stringify({ values, clear, drift, correctionMs }, null, 2));
       await api(`/terminals/${target.id}/write`, { data: "exit\r" });
       await until(own, (values) => values.find((v) => v.id === target.id)?.activity?.type === "shell", "미관측 프로세스 종료 후 셸 확인");
       context.checks.push({ phase, at: new Date().toISOString() });

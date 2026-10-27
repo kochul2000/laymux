@@ -20,6 +20,7 @@
 - unknown은 에이전트 종료·자동 입력 허가의 근거가 아니다. 기존 ADR-0359의 마지막 앱 기준 보존과 세대·epoch 보호를 유지한다. 이미 확인한 앱의 일시적 미관측은 라벨만 유지할 수 있으며, 초기 미관측과 API의 실제 판정은 unknown이다. task의 unknown/stale 보호와 clear의 독립 관측 조건을 완화하지 않는다.
 - PTY 제목 상태머신도 같은 종료 증거 조건을 사용한다. `Unknown`·`Ambiguous`에서는 제목 reset에 따른 앱 종료·작업 완료·종료 정리로 인한 live 제목 삭제를 보류한다. 실제 OSC의 식별자 변경/소실은 기존 live 제목 계약대로 반영한다. frontend의 자식 명령 종료 코드도 에이전트를 shell로 바꾸지 않는다. 실제 앱 종료는 확인된 프로세스 부재/handover와 이후 셸 lifecycle로 수렴한다. 전체 재발행에 의존하던 frontend의 독자적인 shell 강등을 제거한다.
 - 60초 전체 activity 재발행과 전체 task 재조회 타이머를 제거한다. 3초 프로세스 생존 감지와 변경된 pane만 발행하는 경로는 유지한다. 최초 task 복구·foreground 복귀는 현재 workspace만, pane focus·준비는 해당 pane만 조회한다. 기존 진행 중 작업의 provider 구독 주기는 유지한다.
+- 실제 제목·command/lifecycle 이벤트 발행 뒤 PTY callback 세대에 관측 sequence를 기록한다. 재판정은 그 sequence를 읽은 뒤 자기 stamp를 발급하고, activity 값이 같아도 새 관측이 있는 pane만 한 번 보정한다. 불확실해서 발행을 보류한 pane의 관측은 소비하지 않는다. 세대 교체·발행 실패도 보정 근거를 폐기/재시도한다. command-status에는 선택적인 `activitySequence`를 추가하고 frontend는 낡은 activity 변경만 거부한다. 명령 메타데이터와 lifecycle 작업 관측은 별도로 처리하며, 앱 내부의 다른 앱 명령은 현재 앱 소유권을 바꾸지 않는다.
 - UI는 미설정/unknown을 `unknown`으로 표시한다. unknown 대상 clear는 busy 정책과 관계없이 `stateUnknown`으로 거절한다. backend 자동 CWD 전파·MCP shell 실행도 unknown을 거절한다.
 
 ## Alternatives Considered
