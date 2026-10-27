@@ -3,6 +3,10 @@ import { useDockStore } from "@/stores/dock-store";
 import { useGridStore } from "@/stores/grid-store";
 import type { DockPosition } from "@/stores/types";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { requestTaskStateRefresh } from "./task-state-refresh";
+import { refreshWorkspaceTaskStates } from "./task-state-recovery";
+import { getPaneInstanceId } from "./view-instance-id";
+import { activeLayer } from "./pane-layers";
 
 /**
  * Outcome of a workspace transition. `switched: false` means the id does not
@@ -39,6 +43,8 @@ export function focusWorkspacePane(workspaceId: string, paneIndex: number): bool
   workspaceState.setActiveWorkspace(workspaceId);
   useDockStore.getState().setFocusedDock(null);
   useGridStore.getState().setFocusedPane(paneIndex);
+  const terminalId = getPaneInstanceId(activeLayer(workspace.panes[paneIndex]));
+  if (terminalId) requestTaskStateRefresh([terminalId]);
   return true;
 }
 
@@ -93,6 +99,8 @@ export function focusDockPane(position: DockPosition, paneId?: string): boolean 
 
   dockState.setFocusedDock(position, resolvedPaneId);
   useGridStore.getState().setFocusedPane(null);
+  const terminalId = getPaneInstanceId(dock!.panes.find((p) => p.id === resolvedPaneId)!);
+  if (terminalId) requestTaskStateRefresh([terminalId]);
   return true;
 }
 
@@ -116,6 +124,8 @@ export function switchActiveWorkspace(
 
   const wasDockFocused = useDockStore.getState().focusedDock !== null;
   workspaceState.setActiveWorkspace(workspaceId);
+
+  refreshWorkspaceTaskStates(workspaceId);
 
   if (options.preserveDockFocus && wasDockFocused) {
     return { switched: true, landing: null };

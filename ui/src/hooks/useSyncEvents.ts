@@ -33,6 +33,7 @@ import { heuristicTask } from "@/lib/terminal-task-detection";
 import { subscribeTerminalTasks } from "@/lib/terminal-task-subscription";
 import { subscribeAgentHookStates } from "@/lib/agent-hook-state-subscription";
 import { useSettingsStore } from "@/stores/settings-store";
+import { subscribeTaskStateRecovery } from "@/lib/task-state-recovery";
 
 const CWD_PERSIST_DEBOUNCE_MS = 2000;
 const OUTPUT_ACTIVE_RESET_MS = 2000;
@@ -90,6 +91,7 @@ export function useSyncEvents() {
     const unsubscribeAgentSessions = subscribeAgentSessionStates();
     const unsubscribeClaudeTurns = subscribeClaudeTurnResults();
     const unsubscribeAgentHooks = subscribeAgentHookStates();
+    const unsubscribeRecovery = subscribeTaskStateRecovery();
     let cancelled = false;
     const unlisteners: (() => void)[] = [];
     const pendingGenerationEvents = new Map<string, (() => void)[]>();
@@ -589,6 +591,7 @@ export function useSyncEvents() {
       unsubscribeClaudeTurns();
       unsubscribeAgentHooks();
       unsubscribeTasks();
+      unsubscribeRecovery();
       unsubStore();
       if (initialSyncUnsub) initialSyncUnsub();
       if (cwdPersistTimerRef.current) clearTimeout(cwdPersistTimerRef.current);

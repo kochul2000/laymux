@@ -3,6 +3,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { getAgentHookStates, type HookStateSnapshot } from "./agent-hooks-api";
 import { subscribeAgentHookStates } from "./agent-hook-state-subscription";
+import { requestTaskStateRefresh } from "./task-state-refresh";
 vi.mock("./agent-hooks-api", () => ({ getAgentHookStates: vi.fn() }));
 const event: HookStateSnapshot = {
   generation: 3,
@@ -17,6 +18,17 @@ const event: HookStateSnapshot = {
   distro: "Ubuntu",
 };
 let stop: (() => void) | undefined;
+it("진입 재확인은 훅 조회 타이머를 앞당긴다", async () => {
+  useSettingsStore.getState().setCodex({ stateDetection: "hooks" });
+  vi.mocked(getAgentHookStates).mockResolvedValue({});
+  stop = subscribeAgentHookStates();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(getAgentHookStates).toHaveBeenCalledTimes(1);
+  requestTaskStateRefresh(["pane"]);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(getAgentHookStates).toHaveBeenCalledTimes(2);
+});
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(10000);

@@ -7,6 +7,8 @@ import { useTerminalStore } from "@/stores/terminal-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { isTerminalWorking } from "./terminal-working";
 import { computeCommandStatus } from "./workspace-summary";
+import { requestTaskStateRefresh } from "./task-state-refresh";
+import { terminalTaskPolicy } from "./terminal-task";
 
 vi.mock("./tauri-api", () => ({ getCodexTurnStates: vi.fn() }));
 vi.mock("./persist-session", () => ({ persistSession: vi.fn().mockResolvedValue(undefined) }));
@@ -57,6 +59,23 @@ afterEach(() => {
 });
 
 describe("Codex turn observation", () => {
+  it("pane 재진입은 다음 폴을 기다리지 않고 미확인 상태와 clear 보호를 복구한다", async () => {
+    result(snapshot("unknown"));
+    stop = subscribeCodexTurnStates();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(terminalTaskPolicy(instance()).clearAllowed).toBe(false);
+    result(snapshot("completed"));
+    requestTaskStateRefresh(["pane"]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(instance().task).toMatchObject({
+      state: "ended",
+      result: "success",
+      observation: "confirmed",
+    });
+    expect(terminalTaskPolicy(instance()).clearAllowed).toBe(true);
+    expect(notifications()).toHaveLength(0);
+  });
+
   it("확인된 빈 Codex 세션은 Astra 입력창 출력 중에도 대기로 표시한다", async () => {
     result({ generation: 1, sessionId: "session", selectionKey: "1", state: "idle" });
     useTerminalStore.getState().updateInstanceInfo("pane", { outputActive: true });

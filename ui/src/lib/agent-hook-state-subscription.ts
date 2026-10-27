@@ -1,11 +1,13 @@
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { getAgentHookStates, type HookProvider } from "./agent-hooks-api";
+import { onTaskStateRefresh } from "./task-state-refresh";
 
 /** Bounded verification lease; a stalled backend never pins hook state. */
 export function subscribeAgentHookStates(): () => void {
   let disposed = false;
   let inFlight = false;
+  let refreshPending = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const providers = () =>
     (["claude", "codex", "grok"] as HookProvider[]).filter(
@@ -23,6 +25,7 @@ export function subscribeAgentHookStates(): () => void {
     const selected = providers();
     if (!selected.length) return;
     inFlight = true;
+    refreshPending = false;
     const stamps = new Map(
       useTerminalStore
         .getState()
@@ -47,7 +50,7 @@ export function subscribeAgentHookStates(): () => void {
           useTerminalStore.getState().observeAgentHook(instance.id, undefined);
     } finally {
       inFlight = false;
-      schedule();
+      schedule(refreshPending ? 0 : 2000);
     }
   }
   const settings = useSettingsStore.subscribe((state, previous) => {
@@ -61,9 +64,25 @@ export function subscribeAgentHookStates(): () => void {
     }
   });
   schedule(0);
+  const stopRefresh = onTaskStateRefresh((ids) => {
+    const selected = providers();
+    if (
+      !useTerminalStore
+        .getState()
+        .instances.some(
+          (i) => ids.includes(i.id) && selected.some((p) => p === i.activity?.name?.toLowerCase()),
+        )
+    )
+      return;
+    refreshPending = true;
+    clearTimeout(timer);
+    timer = undefined;
+    schedule(0);
+  });
   return () => {
     disposed = true;
     settings();
+    stopRefresh();
     clearTimeout(timer);
   };
 }
