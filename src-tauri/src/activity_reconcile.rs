@@ -41,6 +41,8 @@ use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 use crate::terminal::TerminalActivity;
 
+mod uncertain;
+
 /// One pane whose authoritative activity no longer matches what was published.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -101,6 +103,7 @@ fn next_pass_delay(pass_duration: Duration) -> Duration {
 pub fn start(state: Arc<AppState>, app: AppHandle) {
     std::thread::spawn(move || {
         let mut published: HashMap<String, TerminalActivity> = HashMap::new();
+        let mut published_generations = HashMap::new();
         let mut last_full_publish = Instant::now();
         let mut delay = ACTIVITY_RECONCILE_INTERVAL;
         loop {
@@ -118,7 +121,13 @@ pub fn start(state: Arc<AppState>, app: AppHandle) {
             if publish_all {
                 last_full_publish = pass_start;
             }
-            run_pass(&state, &app, &mut published, publish_all);
+            run_pass(
+                &state,
+                &app,
+                &mut published,
+                &mut published_generations,
+                publish_all,
+            );
             delay = next_pass_delay(pass_start.elapsed());
         }
     });
@@ -137,6 +146,7 @@ fn run_pass(
     state: &AppState,
     app: &AppHandle,
     published: &mut HashMap<String, TerminalActivity>,
+    published_generations: &mut HashMap<String, u64>,
     publish_all: bool,
 ) {
     // The guest probe is refreshed from here so the sweep below reads a snapshot
@@ -152,7 +162,7 @@ fn run_pass(
     // Stamped before deriving, so a title resolved while this pass runs is
     // ordered after it — see the module docs of `activity_order`.
     let activity_sequence = crate::activity_order::next_activity_sequence();
-    let current = match crate::activity::detect_all_terminal_states(state) {
+    let mut current = match crate::activity::detect_all_terminal_states(state) {
         Ok(states) => states
             .into_iter()
             .map(|(terminal_id, info)| (terminal_id, info.activity))
@@ -164,6 +174,20 @@ fn run_pass(
             return;
         }
     };
+
+    // A restart can also land BETWEEN passes, not only during this pass's
+    // generation reads. An old PTY's baseline cannot be deferred for its successor.
+    uncertain::discard_replaced_baselines(
+        published,
+        published_generations,
+        &generations_at_snapshot,
+    );
+
+    // A failed probe is not an exit (ADR-0359). In particular, do not clear
+    // Codex's live title and destroy the evidence its task recovery still needs.
+    let deferred = uncertain::defer_uncertain_agent_exits(published, &mut current, |id| {
+        crate::process_tree::interactive_app_in_pty(state, id)
+    });
 
     // Everything from the final generation read to the emit runs under the
     // terminal catalog lock. Create takes it for its duplicate check and
@@ -204,6 +228,7 @@ fn run_pass(
     // closes and reopens with the same id is re-published rather than compared
     // against a verdict about the previous session.
     *published = current;
+    *published_generations = generations_at_snapshot;
 
     // Every replaced pane loses its baseline, not just the ones that happened to
     // differ this pass. A restart into the *same* app produces an identical
@@ -212,6 +237,7 @@ fn run_pass(
     // interval for a value the backend already knows.
     for terminal_id in &superseded {
         published.remove(terminal_id);
+        published_generations.remove(terminal_id);
     }
     if !superseded.is_empty() {
         tracing::debug!(
@@ -221,7 +247,9 @@ fn run_pass(
     }
     let fresh: Vec<ReconciledActivity> = changed
         .into_iter()
-        .filter(|entry| !superseded.contains(&entry.terminal_id))
+        .filter(|entry| {
+            !superseded.contains(&entry.terminal_id) && !deferred.contains(&entry.terminal_id)
+        })
         .collect();
     if fresh.is_empty() {
         return;
@@ -232,6 +260,7 @@ fn run_pass(
         // publish again instead of silently holding a divergent view.
         for entry in &fresh {
             published.remove(&entry.terminal_id);
+            published_generations.remove(&entry.terminal_id);
         }
     }
     drop(terminals);
