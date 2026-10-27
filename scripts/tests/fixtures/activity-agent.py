@@ -33,5 +33,8 @@ print(f'ACTIVITY_FIXTURE_READY:{os.getpid()}',flush=True)
 for line in sys.stdin:
     command = line.strip()
     if command == 'flood': print('x'*32768,flush=True)
+    elif command == 'title-reset': print('\x1b]0;dev fixture cwd\x07',end='',flush=True)
+    elif command == 'restore-title':
+        print(f'\x1b]0;codex | {session_id} | dev fixture\x07' if provider == 'Codex' else '\x1b]0;Claude Code\x07\x1b]0;✳ dev fixture\x07',end='',flush=True)
     elif command in ('busy','done') and provider == 'Codex': append('task_started' if command=='busy' else 'task_complete')
     elif command == 'exit': break

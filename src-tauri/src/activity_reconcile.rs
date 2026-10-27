@@ -33,10 +33,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use crate::constants::{
-    ACTIVITY_RECONCILE_FULL_RESYNC_INTERVAL, ACTIVITY_RECONCILE_INTERVAL,
-    EVENT_TERMINAL_ACTIVITY_RECONCILED,
-};
+use crate::constants::{ACTIVITY_RECONCILE_INTERVAL, EVENT_TERMINAL_ACTIVITY_RECONCILED};
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 use crate::terminal::TerminalActivity;
@@ -56,8 +53,7 @@ pub struct ReconciledActivity {
     pub activity_sequence: u64,
 }
 
-/// Terminals whose activity differs from the last published value, or every
-/// terminal when `publish_all` is set.
+/// Terminals whose activity differs from the last published value.
 ///
 /// Disappeared terminals produce nothing: the frontend removes an instance when
 /// its session closes, and emitting about a pane that no longer exists would
@@ -65,16 +61,14 @@ pub struct ReconciledActivity {
 pub fn diff(
     published: &HashMap<String, TerminalActivity>,
     current: &HashMap<String, TerminalActivity>,
-    publish_all: bool,
     activity_sequence: u64,
 ) -> Vec<ReconciledActivity> {
     let mut changed: Vec<ReconciledActivity> = current
         .iter()
         .filter(|(terminal_id, activity)| {
-            publish_all
-                || published
-                    .get(*terminal_id)
-                    .is_none_or(|previous| previous != *activity)
+            published
+                .get(*terminal_id)
+                .is_none_or(|previous| previous != *activity)
         })
         .map(|(terminal_id, activity)| ReconciledActivity {
             terminal_id: terminal_id.clone(),
@@ -104,30 +98,11 @@ pub fn start(state: Arc<AppState>, app: AppHandle) {
     std::thread::spawn(move || {
         let mut published: HashMap<String, TerminalActivity> = HashMap::new();
         let mut published_generations = HashMap::new();
-        let mut last_full_publish = Instant::now();
         let mut delay = ACTIVITY_RECONCILE_INTERVAL;
         loop {
             std::thread::sleep(delay);
             let pass_start = Instant::now();
-            // The diff only sees changes on the *backend* side. The frontend can
-            // drift on its own — the title state machine's exit signal hard-
-            // overrides an interactive app to shell, for instance — and then no
-            // backend change follows, so the diff stays silent forever. Re-publish
-            // everything periodically so any drift converges regardless of what
-            // caused it. Costs one event; the frontend skips entries that already
-            // match, so a matching resync writes nothing.
-            let publish_all =
-                last_full_publish.elapsed() >= ACTIVITY_RECONCILE_FULL_RESYNC_INTERVAL;
-            if publish_all {
-                last_full_publish = pass_start;
-            }
-            run_pass(
-                &state,
-                &app,
-                &mut published,
-                &mut published_generations,
-                publish_all,
-            );
+            run_pass(&state, &app, &mut published, &mut published_generations);
             delay = next_pass_delay(pass_start.elapsed());
         }
     });
@@ -137,17 +112,12 @@ pub fn start(state: Arc<AppState>, app: AppHandle) {
 ///
 /// `published` is two things at once: the diff baseline, and the only record of
 /// what each pane was running last pass — which is what turns "was an app, is
-/// not now" into an exit. A full resync therefore changes how much is *emitted*
-/// and nothing else; wiping the map instead would hide any exit that first
-/// became visible on a resync pass, and the pane would keep its message, grace
-/// entry and missing exit marker forever, because the next pass compares against
-/// the already-stored `shell`.
+/// not now" into an exit. Keep it across passes until replacement/teardown.
 fn run_pass(
     state: &AppState,
     app: &AppHandle,
     published: &mut HashMap<String, TerminalActivity>,
     published_generations: &mut HashMap<String, u64>,
-    publish_all: bool,
 ) {
     // The guest probe is refreshed from here so the sweep below reads a snapshot
     // taken for this pass rather than whatever a previous pass left behind.
@@ -223,7 +193,7 @@ fn run_pass(
         apply_exit_transition(&mut terminals, state, app, &terminal_id, &app_name, epoch);
     }
 
-    let changed = diff(published, &current, publish_all, activity_sequence);
+    let changed = diff(published, &current, activity_sequence);
     // Track the full current view, including panes that vanished, so a pane that
     // closes and reopens with the same id is re-published rather than compared
     // against a verdict about the previous session.
@@ -233,8 +203,8 @@ fn run_pass(
     // Every replaced pane loses its baseline, not just the ones that happened to
     // differ this pass. A restart into the *same* app produces an identical
     // verdict, so it would never enter the diff — and the fresh frontend
-    // instance, whose activity starts empty, would then wait out the full resync
-    // interval for a value the backend already knows.
+    // instance, whose activity starts empty, would then wait for another
+    // activity change for a value the backend already knows.
     for terminal_id in &superseded {
         published.remove(terminal_id);
         published_generations.remove(terminal_id);
@@ -430,7 +400,7 @@ mod tests {
         let published = map(&[("t-a", shell()), ("t-b", claude())]);
         let current = map(&[("t-a", claude()), ("t-b", claude())]);
         assert_eq!(
-            diff(&published, &current, false, SEQ),
+            diff(&published, &current, SEQ),
             vec![ReconciledActivity {
                 terminal_id: "t-a".into(),
                 activity: claude(),
@@ -442,7 +412,7 @@ mod tests {
     #[test]
     fn a_pane_with_no_published_value_yet_is_published() {
         let current = map(&[("t-new", claude())]);
-        assert_eq!(diff(&HashMap::new(), &current, false, SEQ).len(), 1);
+        assert_eq!(diff(&HashMap::new(), &current, SEQ).len(), 1);
     }
 
     #[test]
@@ -454,45 +424,39 @@ mod tests {
                 name: "Codex".into(),
             },
         )]);
-        assert_eq!(diff(&published, &current, false, SEQ).len(), 1);
+        assert_eq!(diff(&published, &current, SEQ).len(), 1);
     }
 
     #[test]
     fn a_closed_pane_publishes_nothing() {
         let published = map(&[("t-gone", claude())]);
-        assert!(diff(&published, &HashMap::new(), false, SEQ).is_empty());
+        assert!(diff(&published, &HashMap::new(), SEQ).is_empty());
     }
 
-    /// The frontend can drift with no backend change behind it, and the diff
-    /// cannot see that. The periodic resync republishes matching panes too.
+    /// Elapsed time never forces an unchanged pane to be published again.
     #[test]
-    fn a_full_resync_publishes_panes_the_diff_would_skip() {
+    fn unchanged_panes_are_not_republished() {
         let published = map(&[("t-a", claude()), ("t-b", shell())]);
         let current = published.clone();
-        assert!(diff(&published, &current, false, SEQ).is_empty());
-        assert_eq!(diff(&published, &current, true, SEQ).len(), 2);
+        assert!(diff(&published, &current, SEQ).is_empty());
+        assert!(diff(&published, &current, SEQ + 1000).is_empty());
     }
 
-    /// The resync must not double as "forget the previous state". `published` is
-    /// also the only record of what each pane was running, so an exit that first
-    /// becomes visible on a resync pass has to still be detectable — otherwise
-    /// its message, grace entry and exit marker are never cleaned up, and the
-    /// next pass sees `shell` on both sides and finds nothing to do.
     #[test]
-    fn a_full_resync_still_detects_an_exit_that_happened_this_pass() {
+    fn a_change_still_detects_an_exit_that_happened_this_pass() {
         let published = map(&[("t", claude())]);
         let current = map(&[("t", shell())]);
         assert_eq!(
             exited_apps(&published, &current),
             vec![("t".to_string(), "Claude".to_string())]
         );
-        assert_eq!(diff(&published, &current, true, SEQ).len(), 1);
+        assert_eq!(diff(&published, &current, SEQ).len(), 1);
     }
 
     #[test]
     fn every_entry_carries_the_pass_stamp() {
         let current = map(&[("t", claude())]);
-        let published = diff(&HashMap::new(), &current, false, SEQ);
+        let published = diff(&HashMap::new(), &current, SEQ);
         assert_eq!(published[0].activity_sequence, SEQ);
     }
 
@@ -525,12 +489,12 @@ mod tests {
     /// Restarting into the *same* app produces the same verdict, so the diff
     /// never sees it — but the new frontend instance starts with no activity at
     /// all. Computing this from the pass's findings would leave that pane blank
-    /// until the next full resync; computing it from the generations does not.
+    /// until another activity change; computing it from the generations does not.
     #[test]
     fn a_restart_into_the_same_app_is_superseded_even_though_the_diff_is_silent() {
         let published = map(&[("t", claude())]);
         let current = map(&[("t", claude())]);
-        assert!(diff(&published, &current, false, SEQ).is_empty());
+        assert!(diff(&published, &current, SEQ).is_empty());
         assert!(
             superseded_terminals(&generations(&[("t", 1)]), &generations(&[("t", 2)]))
                 .contains("t")

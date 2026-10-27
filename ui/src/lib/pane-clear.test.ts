@@ -23,6 +23,7 @@ function instance(partial: Partial<TerminalInstance> & { id: string }): Terminal
     label: "PS",
     lastActivityAt: 0,
     isFocused: false,
+    activity: { type: "shell" },
     ...partial,
   };
 }
@@ -62,6 +63,19 @@ describe("resolvePaneClear", () => {
 });
 
 describe("planTerminalClear", () => {
+  it.each(["skip", "interrupt", "restart"] as const)(
+    "never writes or restarts an unobserved pane with busy policy %s",
+    (busyPolicy) => {
+      for (const activity of [undefined, { type: "unknown" } as const]) {
+        expect(
+          planTerminalClear(
+            instance({ id: "terminal-pane-a", activity, task: task("idle") }),
+            resolvePaneClear({ busyPolicy }),
+          ),
+        ).toMatchObject({ kind: "skip", reason: "stateUnknown" });
+      }
+    },
+  );
   it("submits the configured command to an idle shell", () => {
     expect(
       planTerminalClear(instance({ id: "terminal-pane-a", task: task("idle") }), config),

@@ -527,9 +527,12 @@ describe("formatPorts", () => {
 });
 
 describe("formatActivity", () => {
-  it("returns 'shell' with secondary color for undefined activity", () => {
+  it("labels an explicitly unknown activity without inferring shell", () => {
+    expect(formatActivity({ type: "unknown" }).label).toBe("unknown");
+  });
+  it("does not claim an unobserved terminal is a shell", () => {
     const result = formatActivity(undefined);
-    expect(result.label).toBe("shell");
+    expect(result.label).toBe("unknown");
     expect(result.color).toBe("var(--text-secondary)");
   });
 

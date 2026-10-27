@@ -129,6 +129,9 @@ export function planTerminalClear(
   }
 
   const activity = instance.activity;
+  if (!activity || activity.type === "unknown") {
+    return { ...base, kind: "skip", reason: "stateUnknown" };
+  }
   if (activity?.type === "interactiveApp" && !isRegisteredInteractiveApp(activity)) {
     return { ...base, kind: "skip", reason: "unsupportedApp" };
   }
@@ -315,7 +318,7 @@ export async function clearPane(
       if (instance.activity?.type === "shell" && !instance.task?.state)
         useTerminalStore.getState().updateInstanceInfo(terminalId, {
           ...(activity ? { activity } : {}),
-          livenessConfirmed: !!activity,
+          livenessConfirmed: !!activity && activity.type !== "unknown",
         });
       instance = useTerminalStore
         .getState()

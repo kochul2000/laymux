@@ -339,14 +339,14 @@ fn no_suppress_when_different_app_alive() {
 }
 
 #[test]
-fn no_suppress_on_genuine_exit_or_unknown() {
+fn only_confirmed_absence_allows_exit_and_unavailable_observation_preserves_identity() {
     // NoneAlive = process genuinely gone → real exit flows through.
-    // Unknown = no PID / snapshot miss → honor the title signal rather
-    // than wrongly pinning a possibly-dead pane (#297 fallback path).
+    // Unknown/ambiguous observations cannot authorize title-based cleanup.
     assert!(!suppresses_false_exit("Codex", PtyAppLiveness::NoneAlive));
     assert!(!suppresses_false_exit("Claude", PtyAppLiveness::NoneAlive));
-    assert!(!suppresses_false_exit("Codex", PtyAppLiveness::Unknown));
-    assert!(!suppresses_false_exit("Claude", PtyAppLiveness::Unknown));
+    assert!(suppresses_false_exit("Codex", PtyAppLiveness::Unknown));
+    assert!(suppresses_false_exit("Claude", PtyAppLiveness::Unknown));
+    assert!(suppresses_false_exit("Grok", PtyAppLiveness::Ambiguous));
 }
 
 #[test]

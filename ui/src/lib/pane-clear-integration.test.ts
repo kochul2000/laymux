@@ -180,7 +180,7 @@ describe("clearPane against live stores", () => {
     seedWorkspace();
     useTerminalStore.getState().updateInstanceInfo("terminal-pane-a", { activity: undefined });
     const result = await clearPane("pane-a");
-    expect(result.skipped).toEqual([{ terminalId: "terminal-pane-a", reason: "busy" }]);
+    expect(result.skipped).toEqual([{ terminalId: "terminal-pane-a", reason: "stateUnknown" }]);
     expect(getTerminalStates).not.toHaveBeenCalled();
     expect(writeTerminalInput).not.toHaveBeenCalled();
   });

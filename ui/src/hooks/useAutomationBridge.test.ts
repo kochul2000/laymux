@@ -3704,7 +3704,7 @@ describe("spatial pane numbers (issue #256)", () => {
       selectorStatus: { icon: "·", observation: "unknown" },
       selectorDisplay: {
         environment: "WSL",
-        activity: { label: "shell", color: "var(--text-secondary)" },
+        activity: { label: "unknown", color: "var(--text-secondary)" },
         cwd: "~/projects/laymux",
       },
     });
@@ -4493,7 +4493,10 @@ describe("panes.clear over the async bridge (ADR-0158)", () => {
         syncGroup: "ws-clear",
         workspaceId: "ws-clear",
       });
-      useTerminalStore.getState().updateInstanceInfo(`terminal-${paneId}`, { sessionReady: true });
+      useTerminalStore.getState().updateInstanceInfo(`terminal-${paneId}`, {
+        sessionReady: true,
+        activity: { type: "shell" },
+      });
       observeTerminalTask(`terminal-${paneId}`, { state: "idle" });
     }
   }

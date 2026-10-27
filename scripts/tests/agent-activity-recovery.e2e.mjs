@@ -229,7 +229,22 @@ try {
         ))
           setDistro(target, "LaymuxActivityUnavailableE2E");
         const deadline = Date.now() + 80000;
+        let resetTitle = false;
         while (Date.now() < deadline) {
+          if (!resetTitle && Date.now() > deadline - 50000) {
+            for (const target of context.targets)
+              await api(`/terminals/${target.id}/write`, { data: "title-reset\r" });
+            await sleep(1000);
+            assertApps(await own());
+            // A real title reset legitimately invalidates the managed UUID.
+            // Re-establish it, then evict its bytes again: after probe recovery
+            // there will be no fresh title to rescue an erroneous exit cleanup.
+            for (const target of context.targets) {
+              await api(`/terminals/${target.id}/write`, { data: "restore-title\r" });
+              await api(`/terminals/${target.id}/write`, { data: "flood\r" });
+            }
+            resetTitle = true;
+          }
           const values = await own();
           assertApps(values);
           timeline.push({
@@ -250,7 +265,7 @@ try {
         ))
           assert.equal(
             backend[target.id].activity.type,
-            "shell",
+            "unknown",
             "실제 guest 관측 실패가 주입돼야 합니다.",
           );
         assertApps(await own());
@@ -312,6 +327,50 @@ try {
         at: new Date().toISOString(),
         samples: timeline.length,
       });
+    } else if (phase === "quiet-exit") {
+      assertApps(await own());
+      await page.evaluate(async () => {
+        const { onTaskStateRefresh } = await import("/src/lib/task-state-refresh.ts");
+        window.__activityRefreshes = [];
+        window.__stopActivityRefresh = onTaskStateRefresh((ids) =>
+          window.__activityRefreshes.push({ at: Date.now(), ids }),
+        );
+      });
+      const quiet = [];
+      const deadline = Date.now() + 65000;
+      while (Date.now() < deadline) {
+        const values = await own();
+        assertApps(values);
+        quiet.push({ at: Date.now(), values });
+        await sleep(2000);
+      }
+      const refreshes = await page.evaluate(() => {
+        window.__stopActivityRefresh();
+        return window.__activityRefreshes;
+      });
+      assert.deepEqual(refreshes, [], "60초 경계에도 전체 task 복구 요청이 없어야 합니다.");
+      const first = quiet[0].values;
+      for (const values of quiet.slice(1).map((sample) => sample.values)) {
+        for (const target of context.targets) {
+          assert.equal(values.find((v) => v.id === target.id).activitySequence,
+            first.find((v) => v.id === target.id).activitySequence,
+            "변경 없는 activity를 시간 경과만으로 재발행하지 않아야 합니다.");
+        }
+      }
+      const exits = [];
+      for (const target of context.targets) {
+        const started = Date.now();
+        await api(`/terminals/${target.id}/write`, { data: "exit\r" });
+        await until(own, (values) => values.find((v) => v.id === target.id)?.activity?.type === "shell",
+          `${target.environment} ${target.provider} shell 복귀`, 8000);
+        const elapsedMs = Date.now() - started;
+        assert.ok(elapsedMs < 8000, "종료는 grace 만료를 기다리지 않아야 합니다.");
+        exits.push({ ...target, elapsedMs });
+      }
+      await writeFile(path.join(artifacts, "quiet-exit.json"), JSON.stringify({ quiet, refreshes, exits }, null, 2));
+      const screenshot = await api("/screenshot", {});
+      await writeFile(path.join(artifacts, "shell-return.png"), Buffer.from(screenshot.dataUrl.split(",")[1], "base64"));
+      context.checks.push({ phase, at: new Date().toISOString(), exits });
     } else if (phase === "prepare") {
       assertApps(await own());
       for (const target of context.targets.filter(
@@ -456,6 +515,32 @@ try {
         at: new Date().toISOString(),
         beforeExit: after,
       });
+    } else if (phase === "unknown") {
+      const target = context.targets.find((t) => t.environment === "Windows");
+      const binary = path.join(artifacts, "unknown.exe");
+      execFileSync("rustc", [path.join(root, "scripts/tests/fixtures/activity-agent.rs"), "-o", binary], { windowsHide: true });
+      const started = `$env:CODEX_HOME=${quote(target.directory)}; & ${quote(binary)} Unknown ${randomUUID()} ${quote(target.directory)}\r`;
+      await api(`/terminals/${target.id}/write`, { data: started });
+      await sleep(1000);
+      await api(`/terminals/${target.id}/write`, { data: "flood\r" });
+      await until(own, (values) => values.find((v) => v.id === target.id)?.activity?.type === "unknown", "lifecycle 근거 없는 프로세스는 unknown");
+      assert.equal((await api("/terminals/states")).states[target.id].activity.type, "unknown");
+      const pane = (await api("/workspaces/active")).workspace.panes.find((p) => p.terminalId === target.id);
+      const clear = await api(`/panes/${pane.id}/clear`, {});
+      assert.ok(clear.skipped.some((s) => s.terminalId === target.id && s.reason === "stateUnknown"), JSON.stringify(clear));
+      assert.deepEqual(clear.cleared, []);
+      await page.evaluate(() => {
+        for (const button of document.querySelectorAll("button"))
+          if (button.textContent.trim() === "나중에") button.click();
+      });
+      const values = await own();
+      assert.equal(values.find((v) => v.id === target.id).selectorDisplay.activity.label, "unknown");
+      const screenshot = await api("/screenshot", {});
+      await writeFile(path.join(artifacts, "unknown.png"), Buffer.from(screenshot.dataUrl.split(",")[1], "base64"));
+      await writeFile(path.join(artifacts, "unknown.json"), JSON.stringify({ values, clear }, null, 2));
+      await api(`/terminals/${target.id}/write`, { data: "exit\r" });
+      await until(own, (values) => values.find((v) => v.id === target.id)?.activity?.type === "shell", "미관측 프로세스 종료 후 셸 확인");
+      context.checks.push({ phase, at: new Date().toISOString() });
     } else if (phase === "remote") {
       assertApps(await own());
       const rows = await verifyActivityRemote(

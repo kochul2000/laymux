@@ -286,16 +286,20 @@ pub(crate) fn classify(child_pid: Option<u32>, snapshot: &[ProcessEntry]) -> Pty
 /// title that no longer looks like the app — but a transient non-app title
 /// (a subprocess's OSC title, a path-like prompt, Codex's bare cwd-basename
 /// idle title — #297) is not an exit while the process is alive. The process
-/// tree is ground truth, so this returns `true` only on `Running(app)`.
+/// tree is ground truth; unavailable/ambiguous observations also defer exit.
 ///
 /// Pure so the load-bearing decision is unit-testable without a live PTY: the
 /// PTY callback feeds it the state machine's `exited` flag and a fresh
-/// `interactive_app_in_pty_fresh` verdict. CRUCIAL for #297: a `NoneAlive`
-/// (process genuinely gone) or `Unknown` (no PID / snapshot miss) verdict does
-/// NOT suppress — a real exit flows through, and when the tree cannot see the
-/// process the title signal is honored rather than wrongly pinning a dead pane.
+/// `interactive_app_in_pty_fresh` verdict. Confirmed absence/handover allows
+/// exit; a probe failure cannot authorize lifecycle cleanup (ADR-0360).
 pub fn suppresses_false_exit(app: &str, liveness: PtyAppLiveness) -> bool {
-    matches!(liveness, PtyAppLiveness::Running(alive) if alive == app)
+    match liveness {
+        PtyAppLiveness::Running(alive) => alive == app,
+        PtyAppLiveness::NoneAlive => false,
+        // A title reset plus an unavailable process observation cannot prove
+        // exit. Keep session evidence until the oracle confirms absence/handover.
+        PtyAppLiveness::Unknown | PtyAppLiveness::Ambiguous => true,
+    }
 }
 
 /// The liveness oracle: whether `claude`/`codex` is alive under the PTY backing

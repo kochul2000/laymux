@@ -49,6 +49,20 @@ pub(super) fn detect_terminal_state_with_liveness(
         return TerminalStateInfo { activity };
     }
 
+    // A readable process snapshot disproves resident agent titles and grace.
+    // It does not prove that the shell is ready for input.
+    if liveness == PtyAppLiveness::NoneAlive {
+        let activity = match activity {
+            TerminalActivity::InteractiveApp { ref name }
+                if matches!(name.as_str(), "Claude" | "Codex" | "Grok") =>
+            {
+                detect_shell_activity(&recent)
+            }
+            other => other,
+        };
+        return TerminalStateInfo { activity };
+    }
+
     // An empty title still lets process/cache/banner recovery run when the
     // latest OSC 0/2 has scrolled out of the recent window (#239).
     let title = osc::extract_last_terminal_title(&recent).unwrap_or_default();
@@ -58,4 +72,19 @@ pub(super) fn detect_terminal_state_with_liveness(
         };
     }
     TerminalStateInfo { activity }
+}
+
+/// Only positive OSC lifecycle evidence can classify a shell/command.
+pub(super) fn detect_shell_activity(recent: &[u8]) -> TerminalActivity {
+    let start = osc::find_last_osc_133(recent, b"C");
+    let prompt = [b"A", b"B", b"D"]
+        .into_iter()
+        .filter_map(|marker| osc::find_last_osc_133(recent, marker))
+        .max();
+    match (start, prompt) {
+        (Some(c), Some(p)) if c > p => TerminalActivity::Running,
+        (_, Some(_)) => TerminalActivity::Shell,
+        (Some(_), None) => TerminalActivity::Running,
+        (None, None) => TerminalActivity::Unknown,
+    }
 }

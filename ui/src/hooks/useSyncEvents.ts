@@ -230,18 +230,14 @@ export function useSyncEvents() {
           if (detectedActivity) {
             updates.activity = detectedActivity;
           } else if (data.interactiveAppExited && currentActivity?.type === "interactiveApp") {
-            // Backend's title-state machine just confirmed Claude/Codex
-            // exit. Override the per-handler preservation guard (issue
-            // #234) so the user-visible activity reflects the exit
-            // immediately — otherwise the pane stays pinned as
-            // InteractiveApp{Claude} after `/exit` because the following
-            // shell-prompt title still passes the preservation heuristic.
-            updates.activity = { type: "shell" };
+            // An agent exit does not by itself prove a shell prompt.
+            // OSC lifecycle or the next reconcile supplies that evidence.
+            updates.activity = { type: "unknown" };
           } else if (
             currentActivity?.type === "interactiveApp" &&
             !handler.shouldPreserveActivityOnTitleReset?.(raw)
           ) {
-            updates.activity = { type: "shell" };
+            updates.activity = { type: "unknown" };
           }
           // The watermark advances on every accepted verdict, not only on the
           // ones that changed something. A newer verdict that agrees with the
@@ -397,22 +393,17 @@ export function useSyncEvents() {
             .instances.find((i) => i.id === data.terminalId);
           if (!instance?.activity || instance.activity.type !== "interactiveApp") {
             update.activity = { type: "shell" };
-          } else {
-            const handler = getHandler(instance.activity);
-            const raw: RawTerminalState = {
-              exitCode: data.exitCode,
-              outputActive: instance.outputActive ?? false,
-              lastCommand: instance.lastCommand,
-              activityMessage: instance.activityMessage,
-              activity: instance.activity,
-              title: instance.title,
-            };
-            if (!handler.shouldPreserveActivityOnExitCode?.(raw)) {
-              update.activity = { type: "shell" };
-            }
           }
+          // A subprocess exit code is not evidence that its containing TUI
+          // exited. Only the backend's process/title verdict can unpin it.
         }
 
+        if (data.phase === "end" || data.phase === "prompt") {
+          const instance = useTerminalStore
+            .getState()
+            .instances.find((i) => i.id === data.terminalId);
+          if (instance?.activity?.type !== "interactiveApp") update.activity = { type: "shell" };
+        }
         useTerminalStore.getState().updateInstanceInfo(data.terminalId, update);
         const current = useTerminalStore
           .getState()
@@ -471,11 +462,18 @@ export function useSyncEvents() {
             // or an older verdict delivered after this one would be accepted
             // and change the pane.
             if (instance.activitySequence !== activitySequence) {
-              updateInstanceInfo(terminalId, { activitySequence, livenessConfirmed: true });
+              updateInstanceInfo(terminalId, {
+                activitySequence,
+                livenessConfirmed: activity.type !== "unknown",
+              });
             }
             continue;
           }
-          updateInstanceInfo(terminalId, { activity, activitySequence, livenessConfirmed: true });
+          updateInstanceInfo(terminalId, {
+            activity,
+            activitySequence,
+            livenessConfirmed: activity.type !== "unknown",
+          });
           attributionChanged = true;
         }
         if (attributionChanged) void persistSession({ reason: "mutation" });
@@ -515,7 +513,10 @@ export function useSyncEvents() {
             // fresher than the mount snapshot, so we must not override it. This
             // closes the narrow reload race in both directions.
             if (activity && !inst.activity) {
-              updateInstanceInfo(inst.id, { activity, livenessConfirmed: true });
+              updateInstanceInfo(inst.id, {
+                activity,
+                livenessConfirmed: activity.type !== "unknown",
+              });
             }
             pending.delete(inst.id);
           }
