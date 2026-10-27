@@ -1324,6 +1324,8 @@ Codex `/review`는 하위 턴의 시작과 부모 턴의 완료를 같은 rollou
 
 Claude Code·Codex 가 실행 중인지의 **권위는 PTY 자식 프로세스 트리**다. 타이틀(`Claude Code`/`OpenAI Codex` 배너·스피너)과 인메모리 캐시(`known_{claude,codex}_terminals`)는 앱 식별·작업/유휴·메시지 추출의 보조 신호일 뿐, "살아있는가/종료됐는가"의 최종 판정은 프로세스 트리가 한다.
 
+`detect_terminal_state`는 프로세스의 `Running(app)`을 출력 스캔보다 먼저 적용한다. 출력 버퍼가 없거나 빈 재부착도 이 판정을 건너뛰지 않으며, ring에 남은 다른 앱의 제목보다 현재 프로세스가 우선한다([ADR-0359](../adr/0359-agent-reconcile-requires-exit-evidence.md)). control 경로는 기존처럼 이 판정 전후에 authoritative ring·registry 건강성을 검사한다.
+
 - **오라클(3-state `PtyAppLiveness`)**: `process_tree::interactive_app_in_pty(state, terminal_id)` 가 PTY `child_pid` 의 자손 트리를 BFS 로 훑어 `claude.exe`/`codex.exe`(Linux: `claude`/`codex`)를 찾는다. `Running(app)`(가장 얕은 매치 = 포그라운드 앱) / `NoneAlive`(PID·스냅샷 성공 + 앱 없음 = 권위 있는 부재) / `Unknown`(PID 없음·serial·스냅샷 실패 = 신호 없음). 전역 스냅샷은 1초 TTL 로 캐시해 스피너 틱마다의 재열거를 막는다(종료 판정만 fresh 우회).
 - **양성 권위**: `is_{claude,codex}_terminal_from_buffer` 는 오라클이 `Running(해당 앱)` 이면 타이틀/버퍼와 무관하게 `true` + 캐시 갱신. 긴 세션에서 시작 배너가 16KB 창 밖으로 밀려나고 타이틀이 스피너뿐이어도 인식이 유지된다.
 - **음성 권위**: `NoneAlive`(또는 다른 앱 `Running`)는 stale 휴리스틱을 이긴다 — 캐시를 비우고 즉시 `false`, 버퍼-스캔의 배너 재고정을 건너뛴다. 이게 없으면 OSC exit title 없이 죽은 경우(SIGKILL·콜백 드롭) 16KB 의 stale 배너가 스크롤아웃까지 앱을 재고정한다. `Unknown` 만 타이틀/버퍼 휴리스틱으로 폴백한다.
@@ -1356,6 +1358,7 @@ Claude Code·Codex 가 실행 중인지의 **권위는 PTY 자식 프로세스 �
 - **종료 전이 전체를 소유하되 `(terminal, app)` + 감지 epoch 단위**: `InteractiveApp{app}` → 그 앱 아님 으로 바뀐 pane 마다 exit marker 기록 + 그 앱을 가리키는 grace window 제거 + 그 앱의 known 캐시·PTY 콜백 감지 플래그 해제, Claude 가 종료했을 때만 `claude_was_working`/`claude_last_working_title`/`claude_message` 정리 + 메시지 소거 이벤트 발행. 앱 간 handover 도 첫 앱의 종료로 취급하지만 후임 세션의 상태는 건드리지 않는다. 같은 앱 재실행(Claude→Claude)은 이름으로 구분되지 않으므로 `PtyCallbackState.detection_epoch`(entry 마다 증가)를 판정과 함께 읽고, 정리 시점에 달라졌으면 정리 전체를 포기한다. 사라진 pane 은 제외(teardown 이 처리). 두 종료 경로(PTY 콜백 / 워커)는 `activity::apply_interactive_app_exit` 하나를 공유하며, 콜백은 epoch 가드 없이(`None`) 호출한다.
 - **프론트(`useSyncEvents`)는 양방향으로 적용**한다. `interactiveApp → shell` 강등도 반영하고, 스토어에 없는 terminal_id 는 무시한다(제거된 pane 복원 금지).
 - **`ACTIVITY_RECONCILE_FULL_RESYNC_INTERVAL`(60초)마다 전량 재발행**: diff 는 백엔드 변화만 보므로, 프론트가 자기 경로로 되돌린 drift 는 이 재발행으로만 수렴한다. 재발행은 발행량만 바꾸고 발행 기록은 유지한다 — 그 기록이 종료 판정의 유일한 직전 상태다.
+- **관측 실패는 에이전트 종료가 아니다**([ADR-0359](../adr/0359-agent-reconcile-requires-exit-evidence.md)): 직전 Claude·Codex·Grok이 후보에서 사라졌어도 프로세스가 `Unknown`·`Ambiguous`이거나 같은 앱의 `Running`이면 해당 pane의 발행·종료 정리를 보류한다. 직전 diff 기준만 보존하고 60초 전체 재발행에서도 이를 새 관측으로 보내지 않는다. Codex live 제목과 Claude 작업 문맥을 지우지 않으므로 다음 정상 조회가 기존 증거로 복구할 수 있다. 확인된 `NoneAlive`·다른 프로세스로의 handover는 기존 종료 정리를 수행한다. 삭제·PTY 세대 교체는 보존 대상이 아니며 작업 상태의 stale/unknown·훅 lease·clear 보호는 기존 관측 정책을 따른다. 장기 관측 실패 동안 마지막 앱 라벨이 남을 수 있다.
 - **실패한 패스는 발행하지 않는다**: 감지 에러는 "전부 shell" 이 아니라 패스 폐기. emit 실패는 발행 기록에서 되돌려 다음 패스가 재시도한다.
 
 ### 알림 레벨별 색상

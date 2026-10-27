@@ -41,6 +41,8 @@ use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 use crate::terminal::TerminalActivity;
 
+mod uncertain;
+
 /// One pane whose authoritative activity no longer matches what was published.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -152,7 +154,7 @@ fn run_pass(
     // Stamped before deriving, so a title resolved while this pass runs is
     // ordered after it — see the module docs of `activity_order`.
     let activity_sequence = crate::activity_order::next_activity_sequence();
-    let current = match crate::activity::detect_all_terminal_states(state) {
+    let mut current = match crate::activity::detect_all_terminal_states(state) {
         Ok(states) => states
             .into_iter()
             .map(|(terminal_id, info)| (terminal_id, info.activity))
@@ -164,6 +166,12 @@ fn run_pass(
             return;
         }
     };
+
+    // A failed probe is not an exit (ADR-0359). In particular, do not clear
+    // Codex's live title and destroy the evidence its task recovery still needs.
+    let deferred = uncertain::defer_uncertain_agent_exits(published, &mut current, |id| {
+        crate::process_tree::interactive_app_in_pty(state, id)
+    });
 
     // Everything from the final generation read to the emit runs under the
     // terminal catalog lock. Create takes it for its duplicate check and
@@ -221,7 +229,9 @@ fn run_pass(
     }
     let fresh: Vec<ReconciledActivity> = changed
         .into_iter()
-        .filter(|entry| !superseded.contains(&entry.terminal_id))
+        .filter(|entry| {
+            !superseded.contains(&entry.terminal_id) && !deferred.contains(&entry.terminal_id)
+        })
         .collect();
     if fresh.is_empty() {
         return;

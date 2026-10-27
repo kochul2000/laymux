@@ -10,6 +10,9 @@ use std::time::{Duration, Instant};
 #[test]
 #[ignore = "requires LAYMUX_TEST_WSL_DISTRO and LAYMUX_TEST_LOAD_PANES; replays polling against a live guest"]
 fn replay_frontend_wsl_polling_load() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
     let distro = std::env::var("LAYMUX_TEST_WSL_DISTRO").unwrap();
     let panes: Vec<String> = std::env::var("LAYMUX_TEST_LOAD_PANES")
         .unwrap()
@@ -77,7 +80,26 @@ fn replay_frontend_wsl_polling_load() {
         });
         let liveness = scope.spawn(|| {
             every(crate::constants::ACTIVITY_RECONCILE_INTERVAL, &|| {
+                let started = Instant::now();
                 crate::wsl_liveness::refresh(&state);
+                let verdicts: Vec<_> = panes
+                    .iter()
+                    .map(|id| {
+                        let live = crate::wsl_liveness::liveness(id, 7);
+                        let activity =
+                            crate::activity::detect_terminal_state(&state, id, None).activity;
+                        if let crate::process_tree::PtyAppLiveness::Running(name) = live {
+                            assert_eq!(
+                                activity,
+                                crate::terminal::TerminalActivity::InteractiveApp {
+                                    name: name.into()
+                                }
+                            );
+                        }
+                        (id, live, activity)
+                    })
+                    .collect();
+                println!("liveness {:?}: {verdicts:?}", started.elapsed());
             })
         });
         // A critical checkpoint: two observations 150 ms apart, every 20 s.

@@ -8,6 +8,13 @@
 #[path = "activity/grok_process_tests.rs"]
 mod grok_process_tests;
 
+#[cfg(test)]
+#[path = "activity/liveness_tests.rs"]
+mod liveness_tests;
+
+mod state_detection;
+pub use state_detection::detect_terminal_state;
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::time::Instant;
@@ -1011,40 +1018,6 @@ pub fn detect_terminal_activity(buffer: Option<&TerminalOutputBuffer>) -> Termin
     }
 
     TerminalActivity::Running
-}
-
-/// Detect full terminal state (activity) for a single terminal.
-pub fn detect_terminal_state(
-    state: &AppState,
-    terminal_id: &str,
-    buffer: Option<&TerminalOutputBuffer>,
-) -> TerminalStateInfo {
-    let activity = detect_terminal_activity(buffer);
-
-    let Some(buf) = buffer else {
-        return TerminalStateInfo { activity };
-    };
-    let Ok(recent) = buf.recent_bytes(ACTIVITY_SCAN_BYTES) else {
-        return TerminalStateInfo { activity };
-    };
-    if recent.is_empty() {
-        return TerminalStateInfo { activity };
-    }
-
-    // Run the same persistent-signal pipeline regardless of whether the
-    // recent window currently carries an OSC 0/2 title. Passing an empty
-    // string when no title is available lets the symmetric Codex/Claude
-    // recovery in `detect_interactive_app_from_live_title` cover both #239
-    // (Claude title scrolled out) and its Codex mirror — without it Codex
-    // panes were misclassified as Shell, leaking cd-sync into them.
-    let title = osc::extract_last_terminal_title(&recent).unwrap_or_default();
-    if let Some(name) = detect_interactive_app_from_live_title(state, terminal_id, &title, buffer) {
-        return TerminalStateInfo {
-            activity: TerminalActivity::InteractiveApp { name },
-        };
-    }
-
-    TerminalStateInfo { activity }
 }
 
 /// Detect one terminal state for a control/admission decision.
