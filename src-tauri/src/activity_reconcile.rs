@@ -103,6 +103,7 @@ fn next_pass_delay(pass_duration: Duration) -> Duration {
 pub fn start(state: Arc<AppState>, app: AppHandle) {
     std::thread::spawn(move || {
         let mut published: HashMap<String, TerminalActivity> = HashMap::new();
+        let mut published_generations = HashMap::new();
         let mut last_full_publish = Instant::now();
         let mut delay = ACTIVITY_RECONCILE_INTERVAL;
         loop {
@@ -120,7 +121,13 @@ pub fn start(state: Arc<AppState>, app: AppHandle) {
             if publish_all {
                 last_full_publish = pass_start;
             }
-            run_pass(&state, &app, &mut published, publish_all);
+            run_pass(
+                &state,
+                &app,
+                &mut published,
+                &mut published_generations,
+                publish_all,
+            );
             delay = next_pass_delay(pass_start.elapsed());
         }
     });
@@ -139,6 +146,7 @@ fn run_pass(
     state: &AppState,
     app: &AppHandle,
     published: &mut HashMap<String, TerminalActivity>,
+    published_generations: &mut HashMap<String, u64>,
     publish_all: bool,
 ) {
     // The guest probe is refreshed from here so the sweep below reads a snapshot
@@ -166,6 +174,14 @@ fn run_pass(
             return;
         }
     };
+
+    // A restart can also land BETWEEN passes, not only during this pass's
+    // generation reads. An old PTY's baseline cannot be deferred for its successor.
+    uncertain::discard_replaced_baselines(
+        published,
+        published_generations,
+        &generations_at_snapshot,
+    );
 
     // A failed probe is not an exit (ADR-0359). In particular, do not clear
     // Codex's live title and destroy the evidence its task recovery still needs.
@@ -212,6 +228,7 @@ fn run_pass(
     // closes and reopens with the same id is re-published rather than compared
     // against a verdict about the previous session.
     *published = current;
+    *published_generations = generations_at_snapshot;
 
     // Every replaced pane loses its baseline, not just the ones that happened to
     // differ this pass. A restart into the *same* app produces an identical
@@ -220,6 +237,7 @@ fn run_pass(
     // interval for a value the backend already knows.
     for terminal_id in &superseded {
         published.remove(terminal_id);
+        published_generations.remove(terminal_id);
     }
     if !superseded.is_empty() {
         tracing::debug!(
@@ -242,6 +260,7 @@ fn run_pass(
         // publish again instead of silently holding a divergent view.
         for entry in &fresh {
             published.remove(&entry.terminal_id);
+            published_generations.remove(&entry.terminal_id);
         }
     }
     drop(terminals);

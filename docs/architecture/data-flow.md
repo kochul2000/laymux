@@ -1359,6 +1359,7 @@ Claude Code·Codex 가 실행 중인지의 **권위는 PTY 자식 프로세스 �
 - **프론트(`useSyncEvents`)는 양방향으로 적용**한다. `interactiveApp → shell` 강등도 반영하고, 스토어에 없는 terminal_id 는 무시한다(제거된 pane 복원 금지).
 - **`ACTIVITY_RECONCILE_FULL_RESYNC_INTERVAL`(60초)마다 전량 재발행**: diff 는 백엔드 변화만 보므로, 프론트가 자기 경로로 되돌린 drift 는 이 재발행으로만 수렴한다. 재발행은 발행량만 바꾸고 발행 기록은 유지한다 — 그 기록이 종료 판정의 유일한 직전 상태다.
 - **관측 실패는 에이전트 종료가 아니다**([ADR-0359](../adr/0359-agent-reconcile-requires-exit-evidence.md)): 직전 Claude·Codex·Grok이 후보에서 사라졌어도 프로세스가 `Unknown`·`Ambiguous`이거나 같은 앱의 `Running`이면 해당 pane의 발행·종료 정리를 보류한다. 직전 diff 기준만 보존하고 60초 전체 재발행에서도 이를 새 관측으로 보내지 않는다. Codex live 제목과 Claude 작업 문맥을 지우지 않으므로 다음 정상 조회가 기존 증거로 복구할 수 있다. 확인된 `NoneAlive`·다른 프로세스로의 handover는 기존 종료 정리를 수행한다. 삭제·PTY 세대 교체는 보존 대상이 아니며 작업 상태의 stale/unknown·훅 lease·clear 보호는 기존 관측 정책을 따른다. 장기 관측 실패 동안 마지막 앱 라벨이 남을 수 있다.
+- 발행 기준에는 PTY generation을 함께 보관한다. 성공한 감지 뒤 보류·diff·종료 정리 전에 현재 generation과 다른 기준을 버리므로, 두 패스 사이의 Restart View도 이전 앱 기준을 새 pane에 넘기지 않는다. 한 패스 안의 교체는 기존 시작·끝 세대 대조로 차단한다.
 - **실패한 패스는 발행하지 않는다**: 감지 에러는 "전부 shell" 이 아니라 패스 폐기. emit 실패는 발행 기록에서 되돌려 다음 패스가 재시도한다.
 
 ### 알림 레벨별 색상

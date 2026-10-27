@@ -1,6 +1,6 @@
 # 0359. 에이전트 재판정은 관측 실패를 종료로 발행하지 않는다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-27
 - Source: v3.4.1에서 Windows·WSL Codex/Claude activity와 작업 상태가 다시 미확인으로 내려간다는 사용자 제보, `v3-ai-0` 두 pane의 정상→shell 스냅샷, [data-flow.md §9](../architecture/data-flow.md), [ADR-0009](0009-process-tree-interactive-app-liveness.md), [ADR-0135](0135-activity-reconcile-backend-diff-push.md), [ADR-0358](0358-agent-task-state-entry-and-periodic-recovery.md)
 - Amends: ADR-0135의 양방향 재판정에서 에이전트 종료를 발행할 수 있는 증거 조건.

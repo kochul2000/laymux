@@ -3,6 +3,18 @@ use std::collections::{HashMap, HashSet};
 use crate::process_tree::PtyAppLiveness;
 use crate::terminal::TerminalActivity;
 
+pub(super) fn discard_replaced_baselines(
+    published: &mut HashMap<String, TerminalActivity>,
+    published_generations: &HashMap<String, u64>,
+    current_generations: &HashMap<String, u64>,
+) {
+    published.retain(|id, _| {
+        current_generations
+            .get(id)
+            .is_some_and(|generation| published_generations.get(id) == Some(generation))
+    });
+}
+
 /// Keep the diff baseline, without publishing it as a new observation.
 pub(super) fn defer_uncertain_agent_exits(
     published: &HashMap<String, TerminalActivity>,
@@ -126,5 +138,45 @@ mod tests {
         );
         assert!(!current.contains_key("gone"));
         assert_eq!(current["vim"], TerminalActivity::Shell);
+    }
+
+    #[test]
+    fn a_replacement_between_passes_cannot_inherit_an_uncertain_agent_baseline() {
+        let mut published = HashMap::from([("pane".into(), agent("Codex"))]);
+        let published_generations = HashMap::from([("pane".into(), 7)]);
+        let current_generations = HashMap::from([("pane".into(), 8)]);
+        assert!(crate::activity_reconcile::superseded_terminals(
+            &current_generations,
+            &current_generations
+        )
+        .is_empty());
+        discard_replaced_baselines(&mut published, &published_generations, &current_generations);
+        let mut current = HashMap::from([("pane".into(), TerminalActivity::Shell)]);
+        assert!(
+            defer_uncertain_agent_exits(&published, &mut current, |_| PtyAppLiveness::Unknown)
+                .is_empty()
+        );
+        assert_eq!(
+            diff(&published, &current, false, 123).len(),
+            1,
+            "the fresh pane needs its own observation"
+        );
+        assert!(
+            exited_apps(&published, &current).is_empty(),
+            "the old PTY was already torn down"
+        );
+        let mut same_generation = HashMap::from([("pane".into(), agent("Codex"))]);
+        discard_replaced_baselines(
+            &mut same_generation,
+            &current_generations,
+            &current_generations,
+        );
+        assert!(
+            defer_uncertain_agent_exits(&same_generation, &mut current, |_| {
+                PtyAppLiveness::Unknown
+            })
+            .contains("pane"),
+            "a current PTY still keeps its uncertain baseline"
+        );
     }
 }

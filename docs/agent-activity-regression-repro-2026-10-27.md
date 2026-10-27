@@ -47,3 +47,9 @@ cargo test --lib replay_frontend_wsl_polling_load -- --ignored --nocapture
 재현 하네스는 `scripts/tests/agent-activity-recovery.e2e.mjs`다. `setup` → `fault` → `remote` → GUI 종료·동일 환경 재기동 → `reattach` → `cleanup` 순서로 실행한다. 장애 없이 재부착만 재검증하려면 `setup` → `prepare` → 재기동 → `reattach` → `cleanup`을 쓴다. CDP는 9342, dev URL은 1420이며 Windows에서 실행한다. 프로필이 기본 배포판과 다른 WSL을 지정하면 `LAYMUX_TEST_WSL_DISTRO`를 맞춘다. `fault`는 실패하더라도 배포판 정보를 finally에서 원복한다.
 
 dev 원본 자료는 `.screenshots/agent-state-20261027/dev-e2e/`의 `fault-and-reattach-result.json`, `quiet-reattach-result.json`, 두 timeline과 screenshot에 남겼다. 제보 당시 release에서 관측 실패가 처음 발생한 정확한 원인은 여전히 미확정이다. 이 검증은 실패의 재전파와 복구 증거 소실을 막는 변경을 확인하며, CLI 자체의 모든 기록 형식이나 장기 guest 장애까지 검증했다는 뜻은 아니다.
+
+## 독립 리뷰와 최종 확인
+
+PR #1262의 독립 리뷰는 P1 없이 P2 한 건을 지적했다. 두 패스 사이 같은 terminal ID의 PTY가 교체되는 경우를 기존 한 패스 시작·끝 검사만으로는 잡지 못했다. 발행 기준과 generation을 함께 보관하고 보류 판정 전에 불일치 기준을 폐기하도록 수정했다. 수정 전 해당 회귀 테스트의 실패를 확인했고 같은 세대의 보존과 새 세대의 별도 발행을 함께 검증했다.
+
+수정 후 Rust library 전체 2704개 통과·명시적 live 테스트 12개 제외, clippy `--lib --tests -- -D warnings` 통과를 확인했다. 같은 dev에서 80초·40회 관측 실패, 새 제목 없는 Codex 복구, Remote 네 provider 표시와 확인된 실제 종료를 다시 검증했다. 최종 dev 원본은 `review-fix-dev-result.json`과 `fault-after-review.log`, `rust-all-after-review.log`에 보존했다. 프론트 구독·복구·동기화 이벤트 테스트는 Windows에서 133개 통과했다.
