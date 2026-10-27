@@ -6,6 +6,7 @@ import type { Workspace } from "@/stores/types";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
 import { activatePaneLayer, focusDockPane, focusWorkspacePane } from "./workspace-transition";
+import { onTaskStateRefresh } from "./task-state-refresh";
 
 const workspaces: Workspace[] = [
   {
@@ -41,6 +42,18 @@ const workspaces: Workspace[] = [
 ];
 
 describe("workspace-transition", () => {
+  it("Remote와 같은 pane을 다시 선택해도 정확한 layer의 상태 재확인을 요청한다", () => {
+    const ids: string[][] = [];
+    const stop = onTaskStateRefresh((targets) => ids.push([...targets]));
+    try {
+      focusWorkspacePane("ws-a", 0);
+      focusWorkspacePane("ws-a", 0);
+      expect(ids).toEqual([["terminal-pane-a"], ["terminal-pane-a"]]);
+    } finally {
+      stop();
+    }
+  });
+
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useDockStore.setState(useDockStore.getInitialState());

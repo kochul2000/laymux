@@ -123,6 +123,8 @@ pub const ENV_CODEX_SQLITE_HOME: &str = "CODEX_SQLITE_HOME";
 pub const CODEX_SESSION_META_MAX_BYTES: usize = 256 * 1024;
 /// Codex stores rollout files below `sessions/YYYY/MM/DD`.
 pub const CODEX_SESSION_DIRECTORY_DEPTH: u8 = 3;
+/// Backend-issued task scope for an exact live OSC title and unique rollout.
+pub const CODEX_TITLE_SELECTION_PREFIX: &str = "title:";
 /// Codex diagnostic DB filename prefixes. Versions are independent.
 pub const CODEX_SQLITE_LOG_PREFIX: &str = "logs_";
 pub const CODEX_SQLITE_STATE_PREFIX: &str = "state_";

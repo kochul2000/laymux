@@ -93,6 +93,106 @@ fn resume_fixture() -> Fixture {
 }
 
 #[test]
+fn live_title_recovers_turn_scope_after_gui_restart_without_hook_memory() {
+    for hooks in [false, true] {
+        let f = Fixture::new();
+        *f.state.agent_hook_observations.lock().unwrap() = Default::default();
+        f.rollout(ID, "cli".into());
+        let lookup = ConversationLookup::new(&f.state, hooks, GuestObservation::Reusable).unwrap();
+        let recovered = lookup
+            .resolve_task("pane", &f.store(), None, None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(recovered.id, ID);
+        assert_eq!(recovered.selection_key.as_deref(), Some("title:7:1"));
+    }
+}
+
+#[test]
+fn task_recovery_requires_current_live_identity_even_with_a_saved_resume_id() {
+    for mode in ["no-title", "old-generation", "aba", "conflicting-session"] {
+        let f = resume_fixture();
+        f.rollout(ID, "cli".into());
+        if mode != "aba" {
+            let mut terminals = f.state.terminals.lock().unwrap();
+            let title = &mut terminals.get_mut("pane").unwrap().codex_hook_title;
+            if mode == "no-title" {
+                title.clear();
+            }
+            if mode == "old-generation" {
+                title.generation = 6;
+            }
+        }
+        let lookup = ConversationLookup::new(&f.state, false, GuestObservation::Reusable).unwrap();
+        if mode == "aba" {
+            f.state
+                .terminals
+                .lock()
+                .unwrap()
+                .get_mut("pane")
+                .unwrap()
+                .codex_hook_title
+                .revision += 2;
+        }
+        let candidate = if mode == "conflicting-session" {
+            Some(ResolvedSession {
+                id: OTHER.into(),
+                fresh: false,
+                selection_key: None,
+            })
+        } else {
+            None
+        };
+        assert!(
+            lookup
+                .resolve_task("pane", &f.store(), None, candidate)
+                .ok()
+                .flatten()
+                .is_none(),
+            "{mode}"
+        );
+    }
+}
+
+#[test]
+fn live_title_does_not_recover_ambiguous_or_auxiliary_rollouts() {
+    for mode in ["duplicate", "prefix-collision", "auxiliary", "invalid"] {
+        let f = Fixture::new();
+        *f.state.agent_hook_observations.lock().unwrap() = Default::default();
+        let path = f.rollout(
+            ID,
+            if mode == "auxiliary" {
+                serde_json::json!({"subagent": {}})
+            } else {
+                "cli".into()
+            },
+        );
+        if mode == "duplicate" {
+            std::fs::copy(
+                &path,
+                path.with_file_name(format!("rollout-copy-{ID}.jsonl")),
+            )
+            .unwrap();
+        }
+        if mode == "prefix-collision" {
+            f.rollout("01a0ec06-451a-7e61-ac51-bd98fab4ed83", "cli".into());
+        }
+        if mode == "invalid" {
+            std::fs::write(path, "invalid\n").unwrap();
+        }
+        let lookup = ConversationLookup::new(&f.state, true, GuestObservation::Reusable).unwrap();
+        assert!(
+            lookup
+                .resolve_task("pane", &f.store(), None, None)
+                .ok()
+                .flatten()
+                .is_none(),
+            "{mode}"
+        );
+    }
+}
+
+#[test]
 fn resumed_current_title_and_rollout_recover_without_new_hooks_even_after_input() {
     for consumed in [false, true] {
         let f = resume_fixture();

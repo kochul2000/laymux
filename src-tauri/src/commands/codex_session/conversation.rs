@@ -1,6 +1,7 @@
 //! Current conversation evidence shared by ordinary and final checkpoints.
 use super::store::{CodexSessionStore, ResolvedSession};
 use crate::agent_hooks::title::TitleBinding;
+use crate::constants::CODEX_TITLE_SELECTION_PREFIX;
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 use std::collections::HashMap;
@@ -39,6 +40,47 @@ pub(super) struct ConversationLookup<'a> {
 }
 
 impl<'a> ConversationLookup<'a> {
+    /// Task recovery needs live identity, not just a saved resume request. A GUI
+    /// restart loses hook memory, but the current OSC title and unique top-level
+    /// rollout still identify the live TUI within its already proven process domain.
+    pub(super) fn resolve_task(
+        &self,
+        terminal: &str,
+        store: &CodexSessionStore,
+        distro: Option<&str>,
+        selected: Option<ResolvedSession>,
+    ) -> Result<Option<ResolvedSession>, String> {
+        let selected = self.resolve(terminal, store, distro, selected)?;
+        if selected.as_ref().is_some_and(|s| s.selection_key.is_some()) {
+            return Ok(selected);
+        }
+        self.require_unchanged(terminal)?;
+        let Some(title) = self
+            .before
+            .get(terminal)
+            .and_then(|o| o.title.as_ref().filter(|t| t.generation == o.generation))
+        else {
+            return Ok(selected);
+        };
+        let Some(identity) = title.identity.as_deref() else {
+            return Ok(selected);
+        };
+        let recovered = store.session_for_live_title(identity)?;
+        let Some(id) = recovered else { return Ok(None) };
+        if selected.as_ref().is_some_and(|s| s.id != id) {
+            return Err("Codex live title conflicts with attributed conversation".into());
+        }
+        self.require_unchanged(terminal)?;
+        Ok(Some(ResolvedSession {
+            id,
+            fresh: false,
+            selection_key: Some(format!(
+                "{CODEX_TITLE_SELECTION_PREFIX}{}:{}",
+                title.generation, title.revision
+            )),
+        }))
+    }
+
     pub(super) fn remember_checkpoint(
         &self,
         terminal: &str,

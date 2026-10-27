@@ -8,6 +8,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension};
 
 mod diagnostics;
 mod retained;
+mod title;
 use diagnostics::{
     find_process_thread_ids_checked, find_process_uuid_checked, is_temporary_thread_checked,
 };

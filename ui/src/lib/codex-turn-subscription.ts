@@ -3,6 +3,7 @@ import { useTerminalStore, type TerminalInstance } from "@/stores/terminal-store
 import { observeTaskInput, observeTerminalTask } from "./terminal-task-observers";
 import { taskSource } from "./terminal-task";
 import { heuristicTask } from "./terminal-task-detection";
+import { onTaskStateRefresh } from "./task-state-refresh";
 
 const POLL_MS = 1000;
 const STALE_MS = 6000;
@@ -23,6 +24,7 @@ function sourceKey(turn: CodexTurnSnapshot): string {
 export function subscribeCodexTurnStates(): () => void {
   let disposed = false;
   let inFlight = false;
+  let refreshPending = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let expiry: ReturnType<typeof setTimeout> | undefined;
   let epoch = 0;
@@ -52,6 +54,7 @@ export function subscribeCodexTurnStates(): () => void {
     const targets = useTerminalStore.getState().instances.filter(isCodex);
     if (targets.length === 0) return;
     inFlight = true;
+    refreshPending = false;
     const stamps = new Map(
       targets.map((instance) => [
         instance.id,
@@ -147,7 +150,7 @@ export function subscribeCodexTurnStates(): () => void {
       clearTimeout(expiry);
       expiry = undefined;
       inFlight = false;
-      schedule();
+      schedule(refreshPending ? 0 : POLL_MS);
     }
   }
 
@@ -179,9 +182,18 @@ export function subscribeCodexTurnStates(): () => void {
     if (state.instances.some(isCodex)) schedule(0);
   });
   schedule(0);
+  const stopRefresh = onTaskStateRefresh((ids) => {
+    if (!useTerminalStore.getState().instances.some((i) => ids.includes(i.id) && isCodex(i)))
+      return;
+    refreshPending = true;
+    clearTimeout(timer);
+    timer = undefined;
+    schedule(0);
+  });
   return () => {
     disposed = true;
     unsubscribe();
+    stopRefresh();
     clearTimeout(timer);
     clearTimeout(expiry);
   };

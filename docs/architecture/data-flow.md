@@ -1261,6 +1261,12 @@ Grok 1.0.70의 `/clear`는 이전 대화를 같은 PID의 `active_sessions.json`
 
 `commands/codex_session/turns`가 소유하는 reader는 최초 마지막 1 MiB와 이후 추가된 바이트를 회당 최대 1 MiB 읽는다. 마지막 64바이트 anchor로 축소·경계 내용 변경을 감지해 다시 시드하며, 불완전한 줄·미처리 backlog·잘못된 lifecycle은 이전 성공 상태를 유지하지 않는다. 현재 턴 ID에 맞는 `task_started`/`task_complete`/`turn_aborted`를 running/completed/failed/interrupted로 해석한다. 종료의 error가 있으면 failed이며 다른 턴의 종료는 무시한다. 같은 세션에서도 새로운 시작이 이후 상태를 결정한다. Windows native/Linux는 일반 파일 I/O, WSL은 기존 guest 경로 변환을 쓰며 SQLite는 bundled Linux probe가 계속 소유한다. reader 캐시의 leaf mutex는 AppState 락과 겹치지 않는다.
 
+#### 진입과 긴 주기의 상태 복구
+
+[ADR-0358](../adr/0358-agent-task-state-entry-and-periodic-recovery.md)에 따라 `task-state-recovery`가 workspace 전환·pane 포커스·PTY 준비·문서 foreground 복귀와 60초 전체 sweep에서 `task-state-refresh`에 재조회 수요를 보낸다. workspace/pane 전환 소유자는 같은 대상 재선택도 요청하므로 Remote focus도 같은 경로를 쓴다. 60초 sweep은 숨김·비활성 pane을 포함한다. 기존 Codex 턴·Claude/Grok 기록·선택된 훅 구독자는 대기 타이머를 앞당기며, 이미 진행 중이면 완료 직후 한 번 더 조회한다. Claude/Grok은 요청된 대상의 title 확정 상태도 기록으로 다시 확인하되 모달 대기와 조회 중 새 title·입력·세대 전이는 보존한다. 상태나 근거를 영속하지 않고 입력·resize를 보내지 않는다.
+
+Codex 턴 조회에 한해 프로세스 선택 키가 없으면 현재 세대의 관리된 live OSC 제목 식별자와 실제 프로세스의 Codex 홈 안의 유일한 최상위 rollout 헤더를 대조한다. 훅 메모리가 없는 GUI 재부착에서도 동일하게 적용하며 heuristic 모드도 포함한다. backend는 `title:<generation>:<revision>` 선택 키를 발급하고 session ID와 함께 source를 구성한다. 제목 revision·세대를 파일 I/O 전후 대조하며 중복 파일·축약 충돌·보조 스레드·손상·다른 대화는 거부한다. 제목의 Ready·출력 정지로 작업 상태를 만들지 않고 기존 reader로 실제 턴 기록만 읽는다. 이 경로는 앞 절의 프로세스 선택 전용 규칙을 보완하며, 일반/종료 checkpoint의 복원점 귀속에는 적용하지 않는다.
+
 #### Claude·Grok 세션 기록의 작업 상태
 
 [ADR-0321](../adr/0321-agent-session-record-fills-unconfirmed-task.md)에 따라 휴리스틱 작업이 확정되지 않은 Claude·Grok pane은 `get_agent_session_states`로 에이전트가 자기 세션 파일에 남긴 상태를 읽는다. 확정되지 않음은 관찰 없음, unknown, stale, 만료를 뜻하고, 세션 기록이 마지막으로 쓴 작업도 포함한다. 프론트 `agent-session-subscription`은 대상이 있을 때만 1초마다 한 요청을 보낸다. 응답은 요청 이후 generation·task epoch·입력·앱·작업 sequence가 그대로일 때만 반영한다. WSL pane의 게스트 스캔은 표시 폴링 계약으로 3초 안의 공유 run을 재사용하며, Claude와 Grok 기록이 같은 run을 읽는다(§13.4 "WSL 게스트 관측 공유", [ADR-0335](../adr/0335-shared-wsl-guest-observations.md)).

@@ -4,6 +4,7 @@ import { observeTerminalTask } from "./terminal-task-observers";
 import { heuristicTask } from "./terminal-task-detection";
 import type { TaskState } from "./terminal-task";
 import { useSettingsStore } from "@/stores/settings-store";
+import { onTaskStateRefresh } from "./task-state-refresh";
 
 const POLL_MS = 1000;
 
@@ -39,6 +40,7 @@ export function subscribeAgentSessionStates(): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined;
   // Heuristic task sequence this subscription last wrote, per terminal.
   const owned = new Map<string, number>();
+  const requested = new Set<string>();
 
   function needsRecord(instance: TerminalInstance, now: number): boolean {
     if (!recordedAgent(instance)) return false;
@@ -70,6 +72,7 @@ export function subscribeAgentSessionStates(): () => void {
     // A dialog's own detector owns waiting; the record cannot resolve it later.
     if (record.status === "waiting") return;
     const task = heuristicTask(instance);
+    if (task?.state === "waiting") return;
     const state: TaskState =
       record.status === "running"
         ? "running"
@@ -108,8 +111,12 @@ export function subscribeAgentSessionStates(): () => void {
     const now = Date.now();
     const targets = useTerminalStore
       .getState()
-      .instances.filter((instance) => needsRecord(instance, now));
+      .instances.filter(
+        (instance) =>
+          needsRecord(instance, now) || (recordedAgent(instance) && requested.has(instance.id)),
+      );
     if (targets.length === 0) return;
+    for (const target of targets) requested.delete(target.id);
     inFlight = true;
     const stamps = new Map(targets.map((instance) => [instance.id, stamp(instance)]));
     try {
@@ -129,7 +136,7 @@ export function subscribeAgentSessionStates(): () => void {
       // A failed read keeps the current state; the title still observes.
     } finally {
       inFlight = false;
-      schedule();
+      schedule(requested.size ? 0 : POLL_MS);
     }
   }
 
@@ -143,10 +150,19 @@ export function subscribeAgentSessionStates(): () => void {
   const unsubscribeSettings = useSettingsStore.subscribe((state, previous) => {
     if (state.grok.stateDetection !== previous.grok.stateDetection) schedule(0);
   });
+  const stopRefresh = onTaskStateRefresh((ids) => {
+    for (const i of useTerminalStore.getState().instances)
+      if (ids.includes(i.id) && recordedAgent(i)) requested.add(i.id);
+    if (!requested.size) return;
+    clearTimeout(timer);
+    timer = undefined;
+    schedule(0);
+  });
   return () => {
     disposed = true;
     unsubscribe();
     unsubscribeSettings();
+    stopRefresh();
     clearTimeout(timer);
   };
 }

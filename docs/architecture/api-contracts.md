@@ -2521,6 +2521,12 @@ Dev POST `/api/v1/dev/update-handoff`는 설치기 없이 업데이트 인계(AD
 
 Dev POST `/api/v1/ui/key`는 `{key,ctrl?,alt?,shift?}`로 포커스된 요소에서 `keydown` 하나를 발생시켜, 실제 키 입력과 같은 터미널 패스스루 → 문서 단축키 경로를 자율 검증 루프에서 재현한다(OS 키 주입이 불가능한 비대화형 세션 대비). 응답은 `{dispatched,defaultPrevented,target}`이다. Rust debug gate와 frontend DEV gate를 모두 적용한다.
 
+### 에이전트 상태 재확인 (ADR-0358)
+
+기존 `get_codex_turn_states`·`get_agent_session_states`·`get_agent_hook_states` 응답 스키마를 유지한다. 호스트는 workspace/pane 진입·재선택, PTY 준비, foreground 복귀와 60초 전체 sweep에서 기존 조회를 앞당긴다. 진행 중 요청은 겹치지 않고 완료 뒤 재확인한다. Remote는 호스트의 동일한 상태·clear 정책을 사용한다.
+
+Codex 턴 조회는 프로세스 선택 키가 없는 경우에 한해 현재 PTY 세대의 live 관리 제목 UUID/축약 UUID와 실제 프로세스의 Codex 홈 안의 유일한 최상위 rollout을 대조할 수 있다. backend가 `title:<generation>:<revision>` 선택 키를 발급하고 파일 I/O 전후 제목·세대를 검증한다. 훅 메모리·resume 요청이 없어도 사용할 수 있으나 저장된 복원 ID만으로는 사용할 수 없다. 중복·보조 스레드·손상·충돌은 미확인으로 유지한다. 일반/종료 checkpoint에는 적용하지 않는다([ADR-0358](../adr/0358-agent-task-state-entry-and-periodic-recovery.md)).
+
 ### 에이전트 상태·clear 보완 (ADR-0355)
 
 검증된 `HookStateSnapshot`은 선택적인 CLI `turnId`를 포함한다. Codex 종료 결과는 같은 generation·session ID·turn ID의 확정된 rollout 결과만 합친다. 유휴·종료 훅은 현재 귀속의 6초 lease 안에서 유지하며, 진행·입력 대기는 기존 60초 기한을 유지한다. `CommandStatus.outputActivityFallback=false`는 Claude·Codex 및 ADR-0356이 추가한 Grok의 원시 출력 활동을 작업 표시 근거에서 제외한다. Desktop·Remote는 같은 값을 사용하고 원시 `outputActive`를 보존한다.

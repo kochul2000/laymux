@@ -7,6 +7,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use serde::Serialize;
 use tauri::State;
 
+use crate::constants::CODEX_TITLE_SELECTION_PREFIX;
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
@@ -83,32 +84,42 @@ pub(crate) fn get_codex_turn_states_impl(
     // One-second display polling: the guest scan and Codex diagnostics may come
     // from a shared run; the rollout read below stays per poll (ADR-0335).
     let observation = crate::wsl_probe::snapshot::GuestObservation::Reusable;
-    let lookup = super::lookup_with_observer(None, state, observation, |id, store, session| {
-        let (Some(generation), Some(selection_key)) = (generations.get(id), &session.selection_key)
-        else {
-            return;
-        };
-        let path = if session.fresh {
-            Ok(None)
-        } else {
-            store.rollout_path_checked(&session.id)
-        };
-        match path {
-            Ok(path) if session.fresh || path.is_some() => {
-                sources.insert(
-                    id.to_owned(),
-                    Source {
-                        generation: *generation,
-                        session_id: session.id.clone(),
-                        selection_key: selection_key.clone(),
-                        path,
-                    },
-                );
+    let titles: HashMap<_, _> = state
+        .terminals
+        .lock_or_err()?
+        .iter()
+        .map(|(id, terminal)| (id.clone(), terminal.codex_hook_title.clone()))
+        .collect();
+    let lookup =
+        super::lookup_with_observer(None, state, observation, true, |id, store, session| {
+            let (Some(generation), Some(selection_key)) =
+                (generations.get(id), &session.selection_key)
+            else {
+                return;
+            };
+            let path = if session.fresh {
+                Ok(None)
+            } else {
+                store.rollout_path_checked(&session.id)
+            };
+            match path {
+                Ok(path) if session.fresh || path.is_some() => {
+                    sources.insert(
+                        id.to_owned(),
+                        Source {
+                            generation: *generation,
+                            session_id: session.id.clone(),
+                            selection_key: selection_key.clone(),
+                            path,
+                        },
+                    );
+                }
+                Err(error) => {
+                    tracing::debug!(terminal_id = id, %error, "Codex turn path unavailable")
+                }
+                _ => {}
             }
-            Err(error) => tracing::debug!(terminal_id = id, %error, "Codex turn path unavailable"),
-            _ => {}
-        }
-    })?;
+        })?;
     sources.retain(|id, source| {
         !lookup.failed_terminal_ids.contains(id)
             && lookup.attributions.get(id).and_then(Option::as_ref) == Some(&source.session_id)
@@ -156,6 +167,7 @@ pub(crate) fn get_codex_turn_states_impl(
             );
         }
     }
+    let terminals = state.terminals.lock_or_err()?;
     let handles = state.pty_handles.lock_or_err()?;
     for (id, generation) in generations {
         if !lookup.attributions.contains_key(&id) {
@@ -164,6 +176,13 @@ pub(crate) fn get_codex_turn_states_impl(
         if handles
             .get(&id)
             .is_none_or(|handle| handle.terminal_generation() != generation)
+            || snapshots.get(&id).is_some_and(|snapshot| {
+                snapshot
+                    .selection_key
+                    .as_deref()
+                    .is_some_and(|key| key.starts_with(CODEX_TITLE_SELECTION_PREFIX))
+                    && terminals.get(&id).map(|t| &t.codex_hook_title) != titles.get(&id)
+            })
         {
             snapshots.remove(&id);
             continue;

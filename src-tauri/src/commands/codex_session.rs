@@ -60,7 +60,13 @@ pub(crate) fn get_codex_session_lookup_impl(
     state: &AppState,
     observation: GuestObservation,
 ) -> Result<ProviderSessionLookup, crate::error::AppError> {
-    lookup_with_observer(session_max_age_hours, state, observation, |_, _, _| {})
+    lookup_with_observer(
+        session_max_age_hours,
+        state,
+        observation,
+        false,
+        |_, _, _| {},
+    )
 }
 
 /// `observation` is the freshness the WSL process scan and the Codex
@@ -69,6 +75,7 @@ fn lookup_with_observer(
     session_max_age_hours: Option<u64>,
     state: &AppState,
     observation: GuestObservation,
+    task_state: bool,
     mut observe: impl FnMut(&str, &CodexSessionStore, &store::ResolvedSession),
 ) -> Result<ProviderSessionLookup, crate::error::AppError> {
     let conversations = conversation::ConversationLookup::new(
@@ -78,6 +85,13 @@ fn lookup_with_observer(
         observation,
     )
     .map_err(crate::error::AppError::Other)?;
+    let resolve = |terminal: &str, store: &CodexSessionStore, distro: Option<&str>, selected| {
+        if task_state {
+            conversations.resolve_task(terminal, store, distro, selected)
+        } else {
+            conversations.resolve(terminal, store, distro, selected)
+        }
+    };
     let domains = provider_terminal_domains(state)?;
     let terminal_roots = domains.native_roots;
     let native_terminal_ids: HashSet<String> = terminal_roots
@@ -122,7 +136,7 @@ fn lookup_with_observer(
         rollout_absence.insert(terminal_id.clone(), false);
         match store
             .find_selection_for_pid_checked(*pid, session_max_age_hours)
-            .and_then(|selected| conversations.resolve(terminal_id, &store, None, selected))
+            .and_then(|selected| resolve(terminal_id, &store, None, selected))
         {
             Ok(Some(session)) => {
                 conversations.remember_checkpoint(terminal_id, &store, &session);
@@ -173,12 +187,8 @@ fn lookup_with_observer(
                                     .ok_or_else(|| "invalid WSL Codex home".to_owned())?;
                                 let store = CodexSessionStore::for_guest(home);
                                 let session = store.resolve_process_rows(&rows)?;
-                                let session = conversations.resolve(
-                                    &terminal_id,
-                                    &store,
-                                    Some(&process.distro),
-                                    session,
-                                )?;
+                                let session =
+                                    resolve(&terminal_id, &store, Some(&process.distro), session)?;
                                 if let Some(session) = &session {
                                     conversations.remember_checkpoint(
                                         &terminal_id,

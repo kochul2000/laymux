@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getAgentSessionStates, type AgentSessionState } from "./tauri-api";
 import { subscribeTerminalTasks } from "./terminal-task-subscription";
-import { observeTaskTitle } from "./terminal-task-observers";
+import { observeTaskInput, observeTaskTitle } from "./terminal-task-observers";
 import { subscribeAgentSessionStates } from "./agent-session-subscription";
 import { terminalTaskPolicy } from "./terminal-task";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useNotificationStore } from "@/stores/notification-store";
+import { requestTaskStateRefresh } from "./task-state-refresh";
 
 vi.mock("./tauri-api", () => ({ getAgentSessionStates: vi.fn() }));
 vi.mock("./persist-session", () => ({ persistSession: vi.fn().mockResolvedValue(undefined) }));
@@ -54,6 +55,51 @@ afterEach(() => {
 });
 
 describe("agent session record observation", () => {
+  it("진입 폴백도 입력 대화상자의 대기를 해제하지 않는다", async () => {
+    agent("Claude");
+    observeTaskInput("pane", true);
+    recorded(record("idle"));
+    stop = subscribeAgentSessionStates();
+    await tick();
+    requestTaskStateRefresh(["pane"]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(instance().task?.state).toBe("waiting");
+    expect(terminalTaskPolicy(instance()).clearAllowed).toBe(false);
+  });
+
+  it("진입 폴백은 title 확정 뒤 멈췄던 조회를 즉시 깨워 기록으로 정상화한다", async () => {
+    agent("Claude");
+    observeTaskTitle("pane", "✳ Claude Code");
+    recorded(record("running"));
+    stop = subscribeAgentSessionStates();
+    await tick();
+    expect(reads()).toBe(0);
+    requestTaskStateRefresh(["pane"]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reads()).toBe(1);
+    expect(instance().task).toMatchObject({ state: "running", observation: "confirmed" });
+  });
+
+  it("조회 중 들어온 진입 폴백은 겹치지 않고 끝난 직후 다시 읽는다", async () => {
+    agent("Claude");
+    let resolve!: (value: Record<string, AgentSessionState>) => void;
+    vi.mocked(getAgentSessionStates).mockImplementationOnce(
+      () =>
+        new Promise((r) => {
+          resolve = r;
+        }),
+    );
+    recorded(record("idle"));
+    stop = subscribeAgentSessionStates();
+    await vi.advanceTimersByTimeAsync(0);
+    requestTaskStateRefresh(["pane"]);
+    expect(reads()).toBe(1);
+    resolve({ pane: record("running") });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(reads()).toBe(2);
+    expect(instance().task?.state).toBe("ended");
+  });
+
   it("상태를 모르는 Claude는 세션 기록의 대기로 확정해 clear를 허용한다", async () => {
     agent("Claude");
     recorded(record("idle"));
